@@ -21,3 +21,25 @@ export function resolveExecutionState(
       (input.mode === "plan" ? true : mode.success ? false : current.planEnabled),
   };
 }
+
+/** Workspace runtime facts; an absent field preserves older TS runtime behavior. */
+export const runtimeExecutionCapabilitiesSchema = z
+  .object({
+    permissionModes: z.array(executionPermissionModeSchema).min(1).max(4),
+    independentPlanState: z.boolean(),
+  })
+  .strict();
+export type RuntimeExecutionCapabilities = z.infer<typeof runtimeExecutionCapabilitiesSchema>;
+
+/** Pure admission hint for App controls. Runtime remains the final authority. */
+export function supportsRuntimeExecution(
+  input: { mode?: string; planEnabled?: boolean },
+  capabilities?: RuntimeExecutionCapabilities,
+): boolean {
+  if (!capabilities) return true;
+  const state = resolveExecutionState(input);
+  return (
+    capabilities.permissionModes.includes(state.mode) &&
+    (!state.planEnabled || capabilities.independentPlanState)
+  );
+}

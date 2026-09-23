@@ -11,7 +11,10 @@ import {
   zcodeStoragePreparationFrameSchema,
   type DatabaseStartupState,
 } from "@zcode/shared";
-import { resolveDefaultZCodeAgentCommand } from "@zcode/services/storage-startup";
+import {
+  resolveDefaultZCodeAgentCommand,
+  createNativeAgentStorageProcess,
+} from "@zcode/services/storage-startup";
 
 type Phase = NonNullable<DatabaseStartupState["databasePhase"]>;
 const workerMessageSchema = z.discriminatedUnion("type", [
@@ -106,7 +109,7 @@ export function prepareHostStorage(
   });
 }
 
-/** 在 Host 所属 Worker 运行同一 CLI bundle 的存储入口；Host 退出不会留下持锁孤儿进程。 */
+/** Host 拥有存储准备的 Worker/原生子进程，两种入口共享协议和结束判定。 */
 export async function prepareSessionStorage(options: {
   cwd: string;
   env?: Record<string, string>;
@@ -116,33 +119,46 @@ export async function prepareSessionStorage(options: {
     details?: { databaseId: string; migration?: DatabaseMigrationFacts },
   ) => void;
   preparedPaths?: Set<string>;
+  resolveCommand?: typeof resolveDefaultZCodeAgentCommand;
   observePath: (path: string) => Promise<void>;
 }): Promise<void> {
-  const command = resolveDefaultZCodeAgentCommand({
+  const command = (options.resolveCommand ?? resolveDefaultZCodeAgentCommand)({
     workspacePath: options.cwd,
     workspaceKey: options.cwd,
     presentationSurface: "desktop",
   });
-  if (!command?.supportsStorageStartup || !command.storagePreparationEntry)
+  if (
+    !command?.supportsStorageStartup ||
+    (command.storagePreparationMode !== "process" && !command.storagePreparationEntry)
+  )
     throw statusError("unsupported_runtime");
   const entry = command.storagePreparationEntry;
   await new Promise<void>((resolve, reject) => {
-    const child = new Worker(entry, {
-      argv: ["app-server", "--stdio", "--prepare-storage", "--cwd", command.cwd ?? options.cwd],
-      env: { ...process.env, ...options.env, ...command.env },
-      stdin: true,
-      stdout: true,
-      stderr: true,
-    });
-    const input = child.stdin!;
-    const lines = createInterface({ input: child.stdout });
+    // Rust binary 不能交给 Node Worker。仅显式声明 native 的 runtime 使用进程适配器，
+    // 两种入口继续共享下面同一个握手、观测、去重和终态判断。
+    const native =
+      command.storagePreparationMode === "process"
+        ? createNativeAgentStorageProcess(command, { ...process.env, ...options.env })
+        : undefined;
+    const child = native
+      ? undefined
+      : new Worker(entry!, {
+          argv: ["app-server", "--stdio", "--prepare-storage", "--cwd", command.cwd ?? options.cwd],
+          env: { ...process.env, ...options.env, ...command.env },
+          stdin: true,
+          stdout: true,
+          stderr: true,
+        });
+    const input = native?.input ?? child!.stdin!;
+    const lines = createInterface({ input: native?.output ?? child!.stdout });
     let settled = false;
     let prepared = false;
     let pathReceived = false;
     let preparedPath: string | undefined;
     let failure: unknown;
     const terminate = () => {
-      void child.terminate();
+      if (native) native.terminate();
+      else void child!.terminate();
     };
     const abort = () => {
       failure ??= statusError("transport_closed");
@@ -154,7 +170,7 @@ export async function prepareSessionStorage(options: {
     }, 30_000);
     options.signal.addEventListener("abort", abort, { once: true });
     // stdout 只有有界控制帧，stderr 排空但不把可能含本地路径的原始文本上报。
-    child.stderr.resume();
+    (native?.stderr ?? child!.stderr).resume();
     input.on("error", (error) => {
       failure ??= error;
       terminate();
@@ -203,10 +219,10 @@ export async function prepareSessionStorage(options: {
         terminate();
       }
     });
-    child.once("error", (error) => {
+    const onError = (error: Error) => {
       failure ??= error;
-    });
-    child.once("exit", (code) => {
+    };
+    const onExit = (code: number | null) => {
       settled = true;
       clearTimeout(firstStateTimer);
       options.signal.removeEventListener("abort", abort);
@@ -215,7 +231,14 @@ export async function prepareSessionStorage(options: {
         if (preparedPath) options.preparedPaths?.add(preparedPath);
         resolve();
       } else reject(failure ?? statusError("transport_closed"));
-    });
+    };
+    if (native) {
+      native.onError(onError);
+      native.onExit(onExit);
+    } else {
+      child!.once("error", onError);
+      child!.once("exit", onExit);
+    }
     if (options.signal.aborted) abort();
   });
 }

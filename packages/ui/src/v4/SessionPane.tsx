@@ -1238,6 +1238,10 @@ export function SessionPane({
   // Composer 保存下一次 Submission 的 renderer intent；prewarm session 仅承载草稿预热。
   const {
     composerDraft,
+    executionCapabilities,
+    executionReady,
+    executionError,
+    executionSupported,
     modelSelectionRead,
     draftConfig,
     draftConfigRef,
@@ -1256,6 +1260,8 @@ export function SessionPane({
     sessionId,
     sessionConfig: snapshot?.sessionId === sessionId ? snapshot.config : null,
     agentStartupAllowed: draftAgentStartupAllowed,
+    onRuntimeRestart,
+    onRuntimeLifecycle,
     modelSelectionService,
   });
   const modelSelectionView =
@@ -1285,12 +1291,22 @@ export function SessionPane({
   }, [draftConfigRef, modelSelectionView?.revision, sessionId, workspaceIdentity, workspacePath]);
   const recommendStartPlan = useStartPlanRecommendation(modelSelectionView);
   const createSubmissionFromComposer = useCallback(
-    () => createComposerSubmissionConfig(draftConfigRef.current, modelSelectionView),
-    [draftConfigRef, modelSelectionView],
+    () =>
+      executionReady
+        ? createComposerSubmissionConfig(
+            draftConfigRef.current,
+            modelSelectionView,
+            executionCapabilities,
+          )
+        : null,
+    [draftConfigRef, modelSelectionView, executionReady, executionCapabilities],
   );
   const composerSubmissionReady = useMemo(
-    () => createComposerSubmissionConfig(draftConfig, modelSelectionView) !== null,
-    [draftConfig, modelSelectionView],
+    () =>
+      executionReady &&
+      createComposerSubmissionConfig(draftConfig, modelSelectionView, executionCapabilities) !==
+        null,
+    [draftConfig, modelSelectionView, executionReady, executionCapabilities],
   );
   const codingPlanUpgradeDialog = useOptionalCodingPlanUpgradeDialog();
   const openSettingsTab = useOptionalTabStore((state) => state.openSettingsTab);
@@ -2279,7 +2295,7 @@ export function SessionPane({
   // pane 未绑定会话时后台建 phase=draft 会话作预热载体：配置写 CAS 直达、首发复用。
   // 对外绑定语义不变（shell activeTaskId 仍 null），预热会话只是 pane 内部 effective 订阅目标。
   const { binding: prewarmBinding } = useDraftSessionPrewarm({
-    enabled: sessionId === null && draftAgentStartupAllowed,
+    enabled: sessionId === null && draftAgentStartupAllowed && executionSupported,
     workspaceKey,
     paneId,
     invalidationVersion: draftRuntimeInvalidationVersion,
@@ -4374,6 +4390,9 @@ export function SessionPane({
       skillCatalogSessionId={effectiveSessionId}
       draftMode={isDraft}
       draftConfig={draftConfig}
+      executionCapabilities={executionCapabilities}
+      executionReady={executionReady}
+      executionError={executionError}
       composerDraft={composerDraft}
       replaceComposerDraft={replaceComposerDraft}
       submissionReady={composerSubmissionReady}

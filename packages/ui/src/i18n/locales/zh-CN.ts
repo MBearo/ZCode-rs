@@ -4232,6 +4232,11 @@ const zhCN: Record<string, string> = {
     "当前会话已使用的上下文超过目标模型预留最大输出后的可用上下文，需要先压缩当前会话后才能切换。但当前任务正在运行，无法执行上下文压缩。请等待任务结束后再切换模型。",
   "chat.modelSwitch.contextWindowGuard.stillTooLarge":
     "压缩完成后，当前会话已使用的上下文仍大于目标模型预留最大输出后的可用上下文，模型切换已取消。",
+  "chat.runtimeModes.loading": "正在读取工作区支持的执行模式…",
+  "chat.runtimeModes.failed": "无法读取工作区支持的执行模式，正在重试…",
+  "chat.runtimeModes.yoloOnly":
+    "此运行时仅支持完全访问，不支持计划。请在模式菜单中选择完全访问并关闭计划后继续。",
+  "chat.runtimeModes.unsupported": "当前运行时不支持所选权限或计划设置，请选择可用模式后继续。",
   "chat.toolbar.mode.label": "切换模式",
   // CUA 输入框常驻入口按钮
   "chat.toolbar.computerUse.label": "电脑操作",

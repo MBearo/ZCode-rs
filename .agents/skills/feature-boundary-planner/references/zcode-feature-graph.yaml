@@ -355,7 +355,73 @@ nodes:
     codeSeeds:
       - file: apps/zcode-cli/packages/core/src/runtime/methods/turn-model.ts
         symbol: applySubmissionExecutionState
+  - id: capability.rust-agent-core
+    kind: capability
+    label: Opt-in Rust Agent core over App stdio
+    aliases:
+      [
+        rust agent,
+        rust core,
+        native stdio,
+        Rust 重构,
+        Rust 请求重试,
+        Rust yolo,
+        Rust Coding 工具,
+        Rust compact,
+      ]
+    codeSeeds:
+      - file: apps/zcode-rust/src/contract.rs
+        symbol: RuntimePorts
+      - file: apps/zcode-rust/src/app/engine.rs
+        symbol: Engine
+      - file: apps/zcode-rust/src/adapters/provider.rs
+        symbol: HttpModel
+      - file: apps/zcode-rust/src/adapters/tools.rs
+        symbol: WorkspaceTools
+      - file: apps/zcode-rust/src/adapters/registry.rs
+        symbol: Registry
+      - file: apps/zcode-rust/src/adapters/legacy_storage.rs
+        symbol: import
+      - file: packages/services/src/zcode-agent/zcodeAgentProcessManager.ts
+        symbol: resolveDefaultZCodeAgentCommand
+    invariants:
+      - Explicit rust-core selection only; the default TypeScript runtime remains unchanged.
+      - Explicit apiType selects Chat Completions, Responses or Anthropic Messages; private reasoning metadata stays in canonical history.
+      - Native state uses separate SQLite and a single process owner per workspace identity.
+      - Registry reads existing App provider files and revision-paired account overlays; per-request Host credentials never enter durable state.
+      - Selection commits before execution; running switches apply at the next model step and queued inputs retain their admitted selection.
+      - TS migration reads a consistent backup into separate Rust storage; unknown outcomes never replay tools and the source remains available for rollback.
+      - Imported attachment reads require session and row authorization; attachment snapshots remain independent of TS caches.
+      - New native sessions use yolo; legacy build sessions require explicit mode selection before execution.
+      - Background process start waits for session-owned durable registration; task identity remains scoped to its session and original run.
+      - Provider retries cannot replay delivered text or reasoning; retry state projects through the existing V4 control.apiRetry.
+      - Tool execution and subsequent model requests wait for the session owner's durable commit receipt.
+      - Compaction preserves append-only canonical history and commits its context boundary before the next model request.
+      - Output-limit continuations wait for partial-output commits; temporary prompts never enter canonical history or context offsets.
+      - Queued-now promotion waits for the previous run to finish; held-queue discard ACKs share the new input transaction.
+  - id: service.agent-storage-preparation
+    kind: service
+    label: Host-owned JavaScript and native Agent storage preparation
+    codeSeeds:
+      - file: packages/desktop/src/host/storagePreparationProcesses.ts
+        symbol: prepareSessionStorage
+      - file: packages/services/src/zcode-agent/zcodeAgentStorageProcess.ts
+        symbol: createNativeAgentStorageProcess
+      - file: apps/zcode-rust/src/adapters/stdio.rs
+        symbol: storage_prepare
 edges:
+  - from: capability.rust-agent-core
+    to: service.agent-storage-preparation
+    type: initializes-through
+    rank: must-inspect
+  - from: capability.rust-agent-core
+    to: boundary.workspace-key
+    type: isolated-by
+    rank: must-inspect
+  - from: capability.rust-agent-core
+    to: state.conversation-projection
+    type: publishes-to
+    rank: must-inspect
   - from: capability.model-selection
     to: surface.conversation-model-control
     type: renders-in

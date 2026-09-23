@@ -6,7 +6,7 @@ import {
 } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
 import { randomUUID } from "node:crypto";
-import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
+import { ensureIndependentPlanSupport, readRuntimeCapabilities } from "./independentPlanSupport.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
@@ -1377,6 +1377,10 @@ export function createZCodeAgentService(
     reason: string;
   }): Promise<void> {
     if (!accountProviderConfigSource) return;
+    // 原生核心的账号能力必须由 runtime 明确声明，不能按可执行文件名猜测；
+    // 未声明的新字段维持原有同步，避免影响已部署的 TS runtime。
+    const capabilities = await readRuntimeCapabilities(params.client);
+    if (capabilities.accountProviderConfig === false) return;
     const previous = accountConfigSyncByClient.get(params.client) ?? Promise.resolve();
     const current = previous
       .catch(() => {
@@ -3741,9 +3745,15 @@ export function createZCodeAgentService(
               reason: "workspace_read_presentation",
               workspace: params,
             });
+            const capabilities = await readRuntimeCapabilities(client);
             presentation = await client.request(
               zcodeProtocolMethods.workspaceReadPresentation,
-              { workspace: buildWorkspaceRef(params) },
+              {
+                workspace: buildWorkspaceRef(params),
+                ...(capabilities.workspaceExecutionCapabilities === true
+                  ? { includeExecutionCapabilities: true }
+                  : {}),
+              },
               zcodeWorkspacePresentationSchema,
             );
             break;

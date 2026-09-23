@@ -151,7 +151,8 @@ export class AttachmentUploadRegistry {
     if (upload.commitPromise) throw new Error("fault.attachment.commitInProgress");
     const bytes = new Uint8Array(Buffer.from(params.dataBase64, "base64"));
     if (params.chunkIndex < upload.chunks.length) {
-      if (!sameBytes(upload.chunks[params.chunkIndex], bytes)) {
+      // chunks 只通过 push 增长；前置范围检查已证明元素存在，供严格索引类型检查使用。
+      if (!sameBytes(upload.chunks[params.chunkIndex]!, bytes)) {
         throw new Error("fault.attachment.chunkConflict");
       }
       return { uploadId: params.uploadId, nextChunkIndex: upload.chunks.length };

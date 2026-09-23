@@ -4504,6 +4504,12 @@ const enUS: Record<string, string> = {
     "This conversation has used more context than the target model's available context after reserving maximum output. The conversation must be compressed before switching models, but the current task is still running and context compression cannot run now. Wait for the task to finish, then switch models again.",
   "chat.modelSwitch.contextWindowGuard.stillTooLarge":
     "After compression, the context used by this conversation is still larger than the target model's available context after reserving maximum output. Model switching was canceled.",
+  "chat.runtimeModes.loading": "Reading workspace execution modes…",
+  "chat.runtimeModes.failed": "Unable to read workspace execution modes. Retrying…",
+  "chat.runtimeModes.yoloOnly":
+    "This runtime supports Full access only, without Plan. Select Full access in the mode menu and turn off Plan to continue.",
+  "chat.runtimeModes.unsupported":
+    "This runtime does not support the selected permission or Plan setting. Choose an available mode to continue.",
   "chat.toolbar.mode.label": "Switch mode",
   // CUA composer entry button
   "chat.toolbar.computerUse.label": "Computer Use",

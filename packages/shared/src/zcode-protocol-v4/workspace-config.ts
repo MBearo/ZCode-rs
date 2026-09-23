@@ -7,6 +7,7 @@
 // `config`（sessionConfigStateSchema）里；本 topic 的 currentValue 表示 workspace 缺省。
 // 纪律：additive 演进——新增 topic / 新增可选字段合法，改已有字段形状不合法。
 import { z } from "zod";
+import { runtimeExecutionCapabilitiesSchema } from "../execution-state.js";
 
 // 与 host 侧 ZCodeConfigSelectValue（zcode-task-types-core）结构对齐：
 // syncer 转发 workspace_config_options_update 时零映射直通，下游 useZCodeConfig 消费面不改。
@@ -48,6 +49,7 @@ export type WorkspaceSlashCommand = z.infer<typeof workspaceSlashCommandSchema>;
 
 // topic 载荷本体：整体替换语义（conflated 最新态，绝不深合并——同一纪律）。
 export const workspaceConfigStateSchema = z.object({
+  executionCapabilities: runtimeExecutionCapabilitiesSchema.optional(),
   configOptions: z.array(workspaceConfigOptionSchema),
   slashCommands: z.array(workspaceSlashCommandSchema),
 });

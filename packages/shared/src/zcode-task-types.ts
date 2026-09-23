@@ -1,3 +1,4 @@
+import type { RuntimeExecutionCapabilities } from "./execution-state.js";
 /* oxlint-disable eslint(max-lines) -- ZCode task 投影类型当前集中在单文件维护，新增 workspace 事件先保持就近声明。 */
 // ── 旧协议兼容面（过渡期）──────────────────────────────
 // 剩余 29 个导出：workspace 预热/workspace 事件、turn steer 结果、session binding/import、
@@ -74,6 +75,7 @@ export type ZCodeWorkspaceInitStatus = "idle" | "initializing" | "ready" | "fail
 
 /** 预热 workspace 时返回的结果 */
 export interface ZCodeWorkspacePrepareResult {
+  executionCapabilities?: RuntimeExecutionCapabilities;
   workspacePath: string;
   preparedSessionId: string;
   version?: string;

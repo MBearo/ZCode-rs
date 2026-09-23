@@ -188,6 +188,8 @@ function mergeInstructionSources(
   sources: ResolvedUserInstructionSource[],
 ): ResolvedUserInstructions {
   const primary = sources.find((source) => source.scope === "workspace") ?? sources[0];
+  // 调用方只合并非空来源；显式守卫使严格索引检查与该不变量保持一致。
+  if (!primary) throw new Error("Cannot merge empty instruction sources");
   const content = sources.map((source) => source.content).join("\n\n");
 
   return {

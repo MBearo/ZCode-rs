@@ -1,3 +1,4 @@
+import type { RuntimeExecutionCapabilities } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- V4ComposerToolbar 汇聚模型/思考深度/context usage 三件套；继续拆分会打散工具条热键与模型目录 memo 的共享状态。 */
 /**
  * V4 composer 工具条。
@@ -321,6 +322,8 @@ function resolveContextCodingPlanUsageSource(params: {
 }
 
 export interface V4ComposerToolbarProps {
+  executionCapabilities?: RuntimeExecutionCapabilities;
+  executionReady?: boolean;
   workspacePath: string;
   workspaceIdentity?: string;
   modelSelectionView?: ModelSelectionView | null;

@@ -42,6 +42,8 @@ function V4ComposerModeSwitchImpl({
   provider,
   draftConfig,
   disabled,
+  executionCapabilities,
+  executionReady = true,
   activeConfigPicker,
   onConfigPickerOpenChange,
   onSwitchMode,
@@ -50,6 +52,8 @@ function V4ComposerModeSwitchImpl({
   | "workspacePath"
   | "workspaceIdentity"
   | "provider"
+  | "executionCapabilities"
+  | "executionReady"
   | "draftConfig"
   | "disabled"
   | "activeConfigPicker"
@@ -61,7 +65,11 @@ function V4ComposerModeSwitchImpl({
   const modeShortcutLabel = useShortcutCommandLabel("cycleSessionMode");
   const modes = getZCodeAgentAvailableModes();
   const permissions = modes.filter((mode) => mode.id !== "plan");
-  const selected = permissions.find((mode) => mode.id === draftConfig?.mode);
+  // 历史内部权限（如 auto）也必须保留可切换入口，不能因不在菜单中而把按钮隐藏。
+  const selected = permissions.find((mode) => mode.id === draftConfig?.mode) ?? {
+    id: draftConfig?.mode ?? "build",
+    name: draftConfig?.mode ?? "Ask before changes",
+  };
   const label = (mode: (typeof modes)[number]) =>
     getModeOptionDisplayLabel(intl, displayProvider, { value: mode.id, name: mode.name });
   const plan = modes.find((mode) => mode.id === "plan")!;
@@ -76,10 +84,15 @@ function V4ComposerModeSwitchImpl({
       type: "select",
       currentValue: draftConfig?.mode ?? "build",
       options: getZCodeAgentAvailableModes()
-        .filter((mode) => mode.id !== "plan")
+        .filter(
+          (mode) =>
+            mode.id !== "plan" &&
+            (!executionCapabilities ||
+              executionCapabilities.permissionModes.some((value) => value === mode.id)),
+        )
         .map((mode) => ({ value: mode.id, name: mode.name })),
     }),
-    [draftConfig?.mode],
+    [draftConfig?.mode, executionCapabilities],
   );
   const cycle = useCallback(() => {
     const next = getNextConfigSelectValue(modeOption);
@@ -87,14 +100,13 @@ function V4ComposerModeSwitchImpl({
   }, [modeOption, onSwitchMode]);
   useToolbarShortcutBindings({
     hasAnyOption: Boolean(selected),
-    toolbarDisabled: disabled,
+    toolbarDisabled: disabled || !executionReady,
     modelMenuDisabled: true,
     modeOption,
     onCycleSessionMode: cycle,
     onOpenModelMenu: noop,
     onCycleThoughtLevel: noop,
   });
-  if (!selected) return null;
   const Icon = resolveModeOptionIcon(selected.id);
   return (
     <div className="flex min-w-0 items-center gap-1">
@@ -111,7 +123,7 @@ function V4ComposerModeSwitchImpl({
             <Button
               variant="ghost"
               size="sm"
-              disabled={disabled}
+              disabled={disabled || !executionReady}
               data-testid={TID_CHAT_MODE_SELECT_TRIGGER}
               data-composer-collapse-priority="0"
               aria-label={intl.formatMessage({ id: "chat.toolbar.mode.label" })}
@@ -141,6 +153,9 @@ function V4ComposerModeSwitchImpl({
           }}
         >
           <DropdownMenuCheckboxItem
+            disabled={
+              executionCapabilities?.independentPlanState === false && !draftConfig?.planEnabled
+            }
             checked={draftConfig?.planEnabled ?? false}
             onCheckedChange={(checked) => onSwitchMode(checked ? "plan" : "plan-off")}
             data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, "plan")}
@@ -166,6 +181,10 @@ function V4ComposerModeSwitchImpl({
               return (
                 <DropdownMenuRadioItem
                   key={mode.id}
+                  disabled={
+                    executionCapabilities !== undefined &&
+                    !executionCapabilities.permissionModes.some((value) => value === mode.id)
+                  }
                   value={mode.id}
                   data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, mode.id)}
                   className="min-h-13 items-start gap-3 py-2"

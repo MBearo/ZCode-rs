@@ -39,6 +39,8 @@ import { buildAgentWorkspaceIdentityEnv } from "../runtime-tools/agentProxyEnv.j
 export interface ZCodeAgentCommand {
   /** 本地配套 CLI bundle 的存储专用 Worker 入口；远端/自定义命令不推断能力。 */
   storagePreparationEntry?: string;
+  /** 原生 Agent 通过同一命令的 --prepare-storage 子进程完成存储握手。 */
+  storagePreparationMode?: "process";
   /** 本次部署的 Agent 支持迁移前的启动通知；旧自定义命令保持原协议。 */
   supportsStorageStartup?: boolean;
   command: string;
@@ -440,10 +442,29 @@ export function resolveDefaultZCodeAgentCommand(
 ): ZCodeAgentCommand | null {
   const command = process.env.ZCODE_AGENT_SERVER_COMMAND?.trim();
   if (command) {
+    const runtime = process.env.ZCODE_AGENT_SERVER_RUNTIME?.trim();
+    if (runtime && runtime !== "rust-core") {
+      throw new Error("Unsupported ZCODE_AGENT_SERVER_RUNTIME");
+    }
+    const args = parseArgsJson(process.env.ZCODE_AGENT_SERVER_ARGS_JSON) ?? [
+      "app-server",
+      "--stdio",
+    ];
+    if (runtime === "rust-core") {
+      if (args.some((arg) => arg === "--cwd" || arg.startsWith("--cwd=")))
+        throw new Error(
+          "Rust Agent --cwd is supplied by the Host; remove it from ZCODE_AGENT_SERVER_ARGS_JSON",
+        );
+      // OS cwd 会 realpath 化；显式传 Host 原始 workspacePath 才能保留本地 identity fallback。
+      args.push("--cwd", context.workspacePath);
+    }
     return applyPresentationSurfaceToCommand(
       {
         command,
-        args: parseArgsJson(process.env.ZCODE_AGENT_SERVER_ARGS_JSON) ?? ["app-server", "--stdio"],
+        ...(runtime === "rust-core"
+          ? { storagePreparationMode: "process" as const, supportsStorageStartup: true }
+          : {}),
+        args,
         cwd: process.env.ZCODE_AGENT_SERVER_CWD?.trim() || context.workspacePath,
       },
       context.presentationSurface,

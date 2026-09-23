@@ -187,7 +187,9 @@ function shouldPreserveNewerTerminalStatus(
   return existingMeta.updatedAt > incomingMeta.updatedAt;
 }
 
-function resolveTaskIndexRowWorkspaceIdentity(row: TaskIndexRow): string | undefined {
+function resolveTaskIndexRowWorkspaceIdentity(row: Pick<TaskIndexRow, "workspace_key" | "workspace_path" | "workspace_identity">): string | undefined {
+  // 旧 Rust snapshot 曾把本地 fallback 路径填成 identity；三者相等没有独立身份，不能误走远端 UI/路由。
+  if (row.workspace_key === row.workspace_path && row.workspace_identity?.trim() === row.workspace_path) return undefined;
   const columnIdentity = row.workspace_identity?.trim();
   if (columnIdentity === row.workspace_key) {
     return columnIdentity;
@@ -594,7 +596,7 @@ export class TaskIndexRepo {
       }
       this.ensureOffPeakGroupMembership({
         workspacePath: row.workspace_path,
-        workspaceIdentity: row.workspace_identity ?? undefined,
+        workspaceIdentity: resolveTaskIndexRowWorkspaceIdentity(row),
         taskId: row.task_id,
       });
     }
@@ -1122,7 +1124,7 @@ export class TaskIndexRepo {
           deleteTopTaskOrder.run(
             taskOrderNodeKey({
               workspacePath: row.workspace_path,
-              workspaceIdentity: row.workspace_identity ?? undefined,
+              workspaceIdentity: resolveTaskIndexRowWorkspaceIdentity(row),
               taskId: row.task_id,
             }),
           );
@@ -2128,7 +2130,7 @@ export class TaskIndexRepo {
       ? normalizeWorkspaceBootstrapScopes(
           activeTasks.map((row) => ({
             workspacePath: row.workspace_path,
-            workspaceIdentity: row.workspace_identity ?? undefined,
+            workspaceIdentity: resolveTaskIndexRowWorkspaceIdentity(row),
           })),
         )
       : requestedWorkspaceScopes;
@@ -2314,7 +2316,7 @@ export class TaskIndexRepo {
       groupId: row.group_id,
       workspaceKey: row.workspace_key,
       workspacePath: row.workspace_path,
-      ...(row.workspace_identity ? { workspaceIdentity: row.workspace_identity } : {}),
+      workspaceIdentity: resolveTaskIndexRowWorkspaceIdentity(row),
       taskId: row.task_id,
       sortOrder: row.sort_order,
       addedAt: row.added_at,

@@ -55,6 +55,12 @@ modules:
   - id: zcode-cli
     roots: [apps/zcode-cli]
     managed: false
+  # 当前 JS/TS checker 不解析 Rust；Rust 层边界由 native check + Cargo 检查负责。
+  - id: zcode-rust
+    roots: [apps/zcode-rust/src]
+    managed: false
+    owner: agent-runtime
+    publicEntrypoints: [apps/zcode-rust/src/contract.rs]
 
 global:
   maxFileLines: 400

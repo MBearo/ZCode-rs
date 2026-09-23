@@ -1,3 +1,4 @@
+import { supportsRuntimeExecution, type RuntimeExecutionCapabilities } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- composer 集中收口输入区 wiring（附件/草稿/历史/mention），拆分会打散收口粒度。 */
 import { getLocalTtftObserver } from "@/v4/telemetry/localTtftObserver.js";
 /**
@@ -362,6 +363,9 @@ interface ConversationComposerProps {
   draftMode?: boolean;
   /** renderer 当前草稿配置意图；只在 draftMode 下覆盖迟到的 prewarm projection。 */
   draftConfig?: Partial<SessionConfigState>;
+  executionCapabilities?: RuntimeExecutionCapabilities;
+  executionReady?: boolean;
+  executionError?: boolean;
   /** SessionPane 注入的完整 Draft owner；生产路径不再由编辑器直接覆盖持久记录。 */
   composerDraft: V4ComposerDraft;
   updateComposerContent: (
@@ -487,6 +491,9 @@ function ConversationComposerImpl({
   skillCatalogSessionId = sessionId,
   draftMode = false,
   draftConfig,
+  executionCapabilities,
+  executionReady = true,
+  executionError = false,
   composerDraft,
   updateComposerContent,
   replaceComposerDraft,
@@ -2144,6 +2151,8 @@ function ConversationComposerImpl({
           workspaceIdentity={workspaceIdentity}
           provider={provider}
           draftConfig={draftConfig}
+          executionCapabilities={executionCapabilities}
+          executionReady={executionReady}
           disabled={disabled}
           activeConfigPicker={activeConfigPicker}
           onConfigPickerOpenChange={handleConfigPickerOpenChange}
@@ -2170,6 +2179,8 @@ function ConversationComposerImpl({
       canStop,
       disabled,
       draftConfig,
+      executionCapabilities,
+      executionReady,
       handleConfigPickerOpenChange,
       backgroundWorkOpenTarget,
       onOpenRunningBackgroundWorks,
@@ -2213,6 +2224,25 @@ function ConversationComposerImpl({
         className="hidden"
         onChange={attachmentsApi.handleAttachmentInputChange}
       />
+      {(!executionReady || !supportsRuntimeExecution(draftConfig ?? {}, executionCapabilities)) && (
+        <div
+          role="status"
+          data-testid="runtime-execution-notice"
+          className="mb-2 px-2 text-ui-caption text-foreground-subtle"
+        >
+          {intl.formatMessage({
+            id: !executionReady
+              ? executionError
+                ? "chat.runtimeModes.failed"
+                : "chat.runtimeModes.loading"
+              : executionCapabilities?.permissionModes.length === 1 &&
+                  executionCapabilities.permissionModes[0] === "yolo" &&
+                  !executionCapabilities.independentPlanState
+                ? "chat.runtimeModes.yoloOnly"
+                : "chat.runtimeModes.unsupported",
+          })}
+        </div>
+      )}
       {visibleError ? (
         // 仅展示附件错误会漏掉会话级 lastError，任务失败后也应在输入框上方显示原因。
         // 这里复用旧 ChatErrorBanner 壳，只接收 SessionPane 已归一化后的当前错误。

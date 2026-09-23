@@ -1,0 +1,426 @@
+{
+  "Agent": {
+    "type": "object",
+    "properties": {
+      "description": {
+        "type": "string",
+        "description": "A short (3-5 word) description of the task"
+      },
+      "prompt": {
+        "type": "string",
+        "description": "The task for the agent to perform"
+      },
+      "subagent_type": {
+        "type": "string",
+        "description": "The type of specialized agent to use for this task"
+      },
+      "run_in_background": {
+        "type": "boolean",
+        "description": "Set to true to run this agent in the background. You will be notified when it completes."
+      }
+    },
+    "required": ["description", "prompt"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "SendMessage": {
+    "type": "object",
+    "properties": {
+      "to": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "description": "Recipient: local agent ID returned by Agent (format agent_<uuid>)."
+      },
+      "summary": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "description": "A 5-10 word summary shown as a preview in the UI."
+      },
+      "message": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 20000,
+        "description": "Plain text message content"
+      }
+    },
+    "required": ["to", "summary", "message"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "Skill": {
+    "type": "object",
+    "properties": {
+      "skill": {
+        "type": "string",
+        "description": "The name of a skill from the available-skills list. Do not guess names."
+      },
+      "args": {
+        "type": "string",
+        "description": "Optional arguments for the skill"
+      }
+    },
+    "required": ["skill"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "TodoRead": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "TodoWrite": {
+    "type": "object",
+    "properties": {
+      "todos": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Brief description of the task"
+            },
+            "status": {
+              "type": "string",
+              "enum": ["pending", "in_progress", "completed"],
+              "description": "Current status of the task"
+            },
+            "priority": {
+              "type": "string",
+              "enum": ["high", "medium", "low"],
+              "description": "Priority level of the task"
+            }
+          },
+          "required": ["content", "status", "priority"],
+          "additionalProperties": false
+        },
+        "description": "The complete updated todo list. At most one item may be in_progress at a time."
+      }
+    },
+    "required": ["todos"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "Read": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "The absolute path to the file to read"
+      },
+      "offset": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991,
+        "description": "The line number to start reading from. Only provide if the file is too large to read at once"
+      },
+      "limit": {
+        "type": "integer",
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991,
+        "description": "The number of lines to read. Only provide if the file is too large to read at once."
+      }
+    },
+    "required": ["file_path"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "Write": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "The absolute path to the file to write (must be absolute, not relative)"
+      },
+      "content": {
+        "type": "string",
+        "description": "The content to write to the file"
+      }
+    },
+    "required": ["file_path", "content"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "Edit": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "The absolute path to the file to modify"
+      },
+      "old_string": {
+        "type": "string",
+        "description": "The text to replace"
+      },
+      "new_string": {
+        "type": "string",
+        "description": "The text to replace it with (must be different from old_string)"
+      },
+      "replace_all": {
+        "type": "boolean",
+        "default": false,
+        "description": "Replace all occurrences of old_string (default false)"
+      }
+    },
+    "required": ["file_path", "old_string", "new_string"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "Glob": {
+    "type": "object",
+    "properties": {
+      "pattern": {
+        "type": "string",
+        "description": "The glob pattern to match files against"
+      },
+      "path": {
+        "type": "string",
+        "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided."
+      }
+    },
+    "required": ["pattern"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "Grep": {
+    "type": "object",
+    "properties": {
+      "pattern": {
+        "type": "string",
+        "description": "The regular expression pattern to search for in file contents"
+      },
+      "path": {
+        "type": "string",
+        "description": "File or directory to search in (rg PATH). Defaults to current working directory."
+      },
+      "glob": {
+        "type": "string",
+        "description": "Glob pattern to filter files (e.g. \"*.js\", \"*.{ts,tsx}\") - maps to rg --glob"
+      },
+      "output_mode": {
+        "type": "string",
+        "enum": ["content", "files_with_matches", "count"],
+        "description": "Output mode: \"content\" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), \"files_with_matches\" shows file paths (supports head_limit), \"count\" shows match counts (supports head_limit). Defaults to \"files_with_matches\"."
+      },
+      "-B": {
+        "type": "number",
+        "description": "Number of lines to show before each match (rg -B). Requires output_mode: \"content\", ignored otherwise."
+      },
+      "-A": {
+        "type": "number",
+        "description": "Number of lines to show after each match (rg -A). Requires output_mode: \"content\", ignored otherwise."
+      },
+      "-C": {
+        "type": "number",
+        "description": "Alias for context."
+      },
+      "context": {
+        "type": "number",
+        "description": "Number of lines to show before and after each match (rg -C). Requires output_mode: \"content\", ignored otherwise."
+      },
+      "-n": {
+        "type": "boolean",
+        "description": "Show line numbers in output (rg -n). Requires output_mode: \"content\", ignored otherwise. Defaults to true."
+      },
+      "-i": {
+        "type": "boolean",
+        "description": "Case insensitive search (rg -i)"
+      },
+      "-o": {
+        "type": "boolean",
+        "description": "Print only the matched (non-empty) parts of each matching line, one match per output line (rg -o / --only-matching). Requires output_mode: \"content\", ignored otherwise. Defaults to false."
+      },
+      "type": {
+        "type": "string",
+        "description": "File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types."
+      },
+      "head_limit": {
+        "type": "number",
+        "description": "Limit output to first N lines/entries, equivalent to \"| head -N\". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). Defaults to 250 when unspecified. Pass 0 for unlimited (use sparingly — large result sets waste context)."
+      },
+      "offset": {
+        "type": "number",
+        "description": "Skip first N lines/entries before applying head_limit, equivalent to \"| tail -n +N | head -N\". Works across all output modes. Defaults to 0."
+      },
+      "multiline": {
+        "type": "boolean",
+        "description": "Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false."
+      }
+    },
+    "required": ["pattern"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "Bash": {
+    "type": "object",
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": "The command to execute"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Optional timeout in milliseconds (max 600000)"
+      },
+      "description": {
+        "type": "string",
+        "description": "Clear, concise description of what this command does in active voice. Never use words like \"complex\" or \"risk\" in the description - just describe what it does.\n\nFor simple commands (git, npm, standard CLI tools), keep it brief (5-10 words):\n- ls → \"List files in current directory\"\n- git status → \"Show working tree status\"\n- npm install → \"Install package dependencies\"\n\nFor commands that are harder to parse at a glance (piped commands, obscure flags, etc.), add enough context to clarify what it does:\n- find . -name \"*.tmp\" -exec rm {} \\; → \"Find and delete all .tmp files recursively\"\n- git reset --hard origin/main → \"Discard all local changes and match remote main\"\n- curl -s url | jq '.data[]' → \"Fetch JSON from URL and extract data array elements\""
+      },
+      "run_in_background": {
+        "type": "boolean",
+        "description": "Set to true to run this command in the background."
+      },
+      "dangerouslyDisableSandbox": {
+        "type": "boolean",
+        "description": "Set this to true to dangerously override sandbox mode and run commands without sandboxing."
+      }
+    },
+    "required": ["command"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "TaskOutput": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "The task ID to get output from"
+      },
+      "block": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to wait for completion"
+      },
+      "timeout": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 600000,
+        "default": 30000,
+        "description": "Max wait time in ms"
+      }
+    },
+    "required": ["task_id", "block", "timeout"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "TaskStop": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "The ID of the background task to stop"
+      },
+      "shell_id": {
+        "type": "string",
+        "description": "Deprecated: use task_id instead"
+      }
+    },
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "AskUserQuestion": {
+    "type": "object",
+    "properties": {
+      "questions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "The complete question to ask the user. Should be clear, specific, and end with a question mark. Example: \"Which library should we use for date formatting?\" If multiSelect is true, phrase it accordingly, e.g. \"Which features do you want to enable?\""
+            },
+            "header": {
+              "type": "string",
+              "description": "Very short label displayed as a chip/tag (max 12 chars). Examples: \"Auth method\", \"Library\", \"Approach\"."
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "description": "The display text for this option that the user will see and select. Should be concise (1-5 words) and clearly describe the choice."
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs or implications."
+                  },
+                  "preview": {
+                    "type": "string",
+                    "description": "Optional preview content rendered when this option is focused. Use for mockups, code snippets, or visual comparisons that help users compare options. See the tool description for the expected content format."
+                  }
+                },
+                "required": ["label", "description"],
+                "additionalProperties": false
+              },
+              "minItems": 2,
+              "maxItems": 4,
+              "description": "The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). There should be no 'Other' option, that will be provided automatically."
+            },
+            "multiSelect": {
+              "type": "boolean",
+              "default": false,
+              "description": "Set to true to allow the user to select multiple options instead of just one. Use when choices are not mutually exclusive."
+            }
+          },
+          "required": ["question", "header", "options", "multiSelect"],
+          "additionalProperties": false
+        },
+        "minItems": 1,
+        "maxItems": 4,
+        "description": "Questions to ask the user (1-4 questions)"
+      },
+      "answers": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "User answers collected by the permission component",
+        "propertyNames": {
+          "type": "string"
+        }
+      },
+      "annotations": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "preview": {
+              "type": "string",
+              "description": "The preview content of the selected option, if the question used previews."
+            },
+            "notes": {
+              "type": "string",
+              "description": "Free-text notes the user added to their selection."
+            }
+          },
+          "additionalProperties": false
+        },
+        "description": "Optional per-question annotations from the user (e.g., notes on preview selections). Keyed by question text.",
+        "propertyNames": {
+          "type": "string"
+        }
+      },
+      "metadata": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Optional identifier for the source of this question (e.g., \"remember\" for /remember command). Used for analytics tracking."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Optional metadata for tracking and analytics purposes. Not displayed to user."
+      }
+    },
+    "required": ["questions"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  }
+}

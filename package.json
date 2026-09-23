@@ -44,7 +44,11 @@
     "architecture:check": "node scripts/architecture/architecture-check.mjs check",
     "architecture:report": "node scripts/architecture/architecture-check.mjs report",
     "architecture:baseline:update": "node scripts/architecture/architecture-check.mjs baseline:update",
-    "architecture:context": "node scripts/architecture/architecture-check.mjs context"
+    "architecture:context": "node scripts/architecture/architecture-check.mjs context",
+    "build:rust-agent": "cargo build --locked --manifest-path apps/zcode-rust/Cargo.toml",
+    "check:rust-agent": "node scripts/check-rust-agent-boundaries.mjs && cargo fmt --manifest-path apps/zcode-rust/Cargo.toml --check && cargo clippy --locked --manifest-path apps/zcode-rust/Cargo.toml --all-targets -- -D warnings",
+    "test:rust-agent": "node scripts/test-rust-agent.mjs",
+    "dev:desktop:rust": "node scripts/dev-desktop-rust.mjs"
   },
   "dependencies": {
     "border-beam": "^1.0.1",

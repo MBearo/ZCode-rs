@@ -1,3 +1,4 @@
+import { runtimeExecutionCapabilitiesSchema } from "../execution-state.js";
 import {
   databaseStartupErrorCodeSchema,
   databaseStartupErrorDetailsSchema,
@@ -74,7 +75,10 @@ export const ZCODE_PROTOCOL_VERSION = 1 as const;
 // V4 wire 与 legacy 主协议并存；禁止为了 V4 physical framing 改写 legacy 版本。
 export const ZCODE_PROTOCOL_V4_WIRE_VERSION = 3 as const;
 export const zcodeRuntimeCapabilitiesSchema = z.object({
+  workspaceExecutionCapabilities: z.boolean().optional(),
   independentPlanState: z.boolean().optional(),
+  /** 原生核心可显式关闭账号 Overlay；缺省保持现有 Registry 同步行为。 */
+  accountProviderConfig: z.boolean().optional(),
 });
 export const zcodeProtocolErrorCodes = {
   sessionUnavailable: -32004,
@@ -1994,12 +1998,16 @@ export const zcodeSessionCloseResultSchema = z
   .strict();
 export type ZCodeSessionCloseResult = z.infer<typeof zcodeSessionCloseResultSchema>;
 export const zcodeWorkspaceReadPresentationParamsSchema = z
-  .object({ workspace: zcodeWorkspaceRefSchema })
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    includeExecutionCapabilities: z.boolean().optional(),
+  })
   .strict();
 export const zcodeWorkspacePresentationSchema = z
   .object({
     workspace: zcodeWorkspaceRefSchema,
     mode: zcodeSessionModeSchema,
+    executionCapabilities: runtimeExecutionCapabilitiesSchema.optional(),
     slashCommands: z.array(zcodeSlashCommandSchema),
   })
   .strict();

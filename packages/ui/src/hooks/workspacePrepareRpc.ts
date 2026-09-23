@@ -54,6 +54,7 @@ export async function prepareWorkspaceWithZCodeSessionService(params: {
   });
 
   return {
+    executionCapabilities: presentation.executionCapabilities,
     workspacePath: params.workspacePath,
     preparedSessionId: "",
     version: "ZCode Protocol/1",
