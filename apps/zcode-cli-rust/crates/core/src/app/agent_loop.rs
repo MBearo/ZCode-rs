@@ -30,6 +30,8 @@ pub(super) async fn run(
     if !skills.enabled {
         definitions.retain(|d| d["function"]["name"] != "Skill");
     }
+    let tool_filter = history.tool_filter.clone();
+    definitions.retain(|d| tool_filter.allows(d["function"]["name"].as_str().unwrap_or("")));
     // 与 Node 一致：禁用集合只从提供给模型的定义中移除；执行边界不据此拦截（D1）。
     hide(&mut definitions, &history.tool_disallowlist);
     let profiles = if definitions.iter().any(|d| d["function"]["name"] == "Agent") {
@@ -205,6 +207,7 @@ pub(super) async fn run(
                             profiles: &profiles,
                             selection: identity.clone(),
                             permissions: permissions.as_ref(),
+                            tool_filter: &tool_filter,
                         },
                         call,
                         sink,
@@ -278,6 +281,7 @@ struct ExecutionContext<'a> {
     profiles: &'a [crate::domain::subagent::Profile],
     selection: Option<crate::contract::ModelIdentity>,
     permissions: Option<&'a super::tool_permission::Permissions>,
+    tool_filter: &'a crate::domain::session_runtime::ToolFilter,
 }
 async fn execute(
     tools: &dyn ToolPort,
@@ -292,6 +296,7 @@ async fn execute(
         profiles,
         selection,
         permissions,
+        tool_filter,
     } = context;
     if cancel.is_cancelled() {
         bail!("Cancelled");
@@ -312,7 +317,10 @@ async fn execute(
             true,
         ));
     }
-    let result = if profile.is_some_and(|p| !p.allows(name)) {
+    // 与 Node 一致：会话未注册的工具按不存在处理。
+    let result = if !tool_filter.allows(name) {
+        Err(anyhow::anyhow!("Tool not found: {name}"))
+    } else if profile.is_some_and(|p| !p.allows(name)) {
         Err(anyhow::anyhow!(
             "Tool is not allowed by this subagent profile"
         ))

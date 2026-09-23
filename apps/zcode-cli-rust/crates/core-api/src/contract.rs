@@ -193,6 +193,10 @@ pub trait ModelRegistry: Send + Sync {
     fn model_options(&self) -> Vec<Value> {
         self.catalog()
     }
+    /// Visible models as Node `toModelOption` (legacy session snapshots).
+    fn legacy_models(&self) -> Vec<Value> {
+        vec![]
+    }
     fn default_selection(&self) -> Option<ModelIdentity>;
     fn resolve(&self, selection: &ModelIdentity) -> Result<Arc<dyn ModelPort>>;
     async fn refresh(&self, account: Option<Value>) -> Result<bool>;

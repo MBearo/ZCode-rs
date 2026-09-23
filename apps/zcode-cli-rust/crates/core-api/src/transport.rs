@@ -55,6 +55,7 @@ methods! {
     McpList => "mcp/list",
     SkillsReferenceCatalog => "skills/referenceCatalog",
     SessionCreate => "session/create",
+    SessionResume => "session/resume",
     SessionRead => "session/read",
     SessionList => "session/list",
     SessionSubagents => "session/subagents",
@@ -158,6 +159,17 @@ pub enum RuntimeError {
         code: i64,
         message: String,
     },
+    /// Node `parseParams` failure: full message and the serialized ZodError (-32602).
+    Params {
+        message: String,
+        data: Value,
+    },
+    /// A typed Node error (`data.name`, e.g. `ModelProtocolError`) with its `data.code` (-32603).
+    Named {
+        name: &'static str,
+        message: String,
+        code: Option<String>,
+    },
 }
 
 impl RuntimeError {
@@ -179,8 +191,8 @@ impl RuntimeError {
     pub fn code(&self) -> i64 {
         match self {
             Self::MethodNotFound(_) => -32601,
-            Self::InvalidParams(_) => -32602,
-            Self::Fault { .. } => -32603,
+            Self::InvalidParams(_) | Self::Params { .. } => -32602,
+            Self::Fault { .. } | Self::Named { .. } => -32603,
             Self::Coded { code, .. } => *code,
         }
     }
@@ -202,6 +214,20 @@ impl RuntimeError {
                 json!({"code":self.code(),"message":message,"data":data})
             }
             Self::Coded { code, message } => json!({"code":code,"message":message}),
+            Self::Params { message, data } => {
+                json!({"code":self.code(),"message":message,"data":data})
+            }
+            Self::Named {
+                name,
+                message,
+                code,
+            } => {
+                let mut data = json!({"name":name});
+                if let Some(code) = code {
+                    data["code"] = code.clone().into();
+                }
+                json!({"code":self.code(),"message":message,"data":data})
+            }
         }
     }
 }
@@ -211,7 +237,10 @@ impl std::fmt::Display for RuntimeError {
         match self {
             Self::MethodNotFound(method) => write!(f, "Method not found: {method}"),
             Self::InvalidParams(detail) => write!(f, "Invalid params — {detail}"),
-            Self::Fault { message, .. } | Self::Coded { message, .. } => f.write_str(message),
+            Self::Fault { message, .. }
+            | Self::Coded { message, .. }
+            | Self::Params { message, .. }
+            | Self::Named { message, .. } => f.write_str(message),
         }
     }
 }

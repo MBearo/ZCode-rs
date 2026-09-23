@@ -318,7 +318,8 @@ impl Engine {
             Method::SessionSubagents => self.subagents_query(p).await,
             Method::SessionClose => self.close_runtime_session(p).await,
             Method::SkillsReferenceCatalog => self.skill_catalog(p).await,
-            Method::SessionCreate => self.import_shared_context(p).await,
+            Method::SessionCreate => self.legacy_create(p).await,
+            Method::SessionResume => self.legacy_resume(p).await,
             Method::ProviderUpdateAccountConfig => self.update_account(p).await,
             method => self.query(method, p),
         };

@@ -143,3 +143,10 @@ pub(super) fn items(conn: &Connection, sql: &str, id: &str) -> Result<Vec<(Strin
     })
     .collect()
 }
+
+/// legacy resume 取最后一条 assistant 消息记录的模式（Node `derivePersistedSessionMode`）。
+pub(super) fn assistant_mode(session: &mut Session, message: &Value) {
+    if let Some(mode) = message["mode"].as_str() {
+        session.last_assistant_mode = Some(mode.into());
+    }
+}

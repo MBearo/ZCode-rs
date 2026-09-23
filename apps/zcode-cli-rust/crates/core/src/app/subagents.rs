@@ -123,6 +123,8 @@ impl Engine {
         session.skills = self.sessions[parent].skills.clone();
         session.prompt_snapshot = self.sessions[parent].prompt_snapshot.clone();
         session.agent_profile = Some(profile.clone());
+        // Node 把会话级工具 allow/deny 传给子代理 runtime。
+        session.runtime.tools = self.sessions[parent].runtime.tools.clone();
         self.sessions.insert(child.clone(), session);
         let c = child_command(&child, &self.clock.id(), args["prompt"].as_str().unwrap());
         let (turn, _) = self.admit_input(&child, &c, None)?;

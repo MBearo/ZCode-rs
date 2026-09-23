@@ -14,10 +14,17 @@ pub(super) struct LiveModel {
 #[async_trait::async_trait]
 impl ModelPort for LiveModel {
     fn bind(&self) -> Option<Arc<dyn ModelPort>> {
+        let selection = self.selection.borrow();
+        // 与 Node 模型工厂一致：缺少推理档位的选择在构建模型时失败（invalid_model_request）。
+        let reason = if selection.reasoning_level.is_empty() {
+            "invalid_request"
+        } else {
+            "model_not_found"
+        };
         Some(
             self.registry
-                .resolve(&self.selection.borrow())
-                .unwrap_or_else(|_| Arc::new(Unavailable)),
+                .resolve(&selection)
+                .unwrap_or_else(|_| Arc::new(Unavailable(reason))),
         )
     }
     fn context_policy(&self) -> crate::domain::context::ContextPolicy {
@@ -36,7 +43,7 @@ impl ModelPort for LiveModel {
             .await
     }
 }
-struct Unavailable;
+struct Unavailable(&'static str);
 #[async_trait::async_trait]
 impl ModelPort for Unavailable {
     async fn complete(
@@ -46,7 +53,7 @@ impl ModelPort for Unavailable {
         _: &EventSink,
         _: &CancellationToken,
     ) -> std::result::Result<ModelOutput, ModelFailure> {
-        Err(ModelFailure::new("model_not_found", false))
+        Err(ModelFailure::new(self.0, false))
     }
 }
 impl Engine {
@@ -142,9 +149,9 @@ impl Engine {
         s.rows.push(row.clone());
         Some(row)
     }
-    pub(super) fn apply_selection(&mut self, id: &str, selection: ModelIdentity) -> Result<()> {
-        let levels = self
-            .registry
+    /// Reasoning levels the selected model offers.
+    pub(super) fn model_levels(&self, selection: &ModelIdentity) -> Vec<String> {
+        self.registry
             .as_ref()
             .map(|r| r.model_options())
             .unwrap_or_else(|| self.catalog())
@@ -161,7 +168,10 @@ impl Engine {
                     .map(str::to_owned)
                     .collect()
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+    pub(super) fn apply_selection(&mut self, id: &str, selection: ModelIdentity) -> Result<()> {
+        let levels = self.model_levels(&selection);
         let s = self.sessions.get_mut(id).context("Session unavailable")?;
         s.provider = selection.provider_id;
         s.model = selection.model_id;

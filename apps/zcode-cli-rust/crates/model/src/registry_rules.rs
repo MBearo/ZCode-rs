@@ -239,6 +239,16 @@ pub(super) fn resolve(
             result.options.push(option.clone());
             if config["visibility"] != "hidden" {
                 result.catalog.push(option);
+                // Node `toModelOption`：label 为 modelId，默认档位取最后一个。
+                result.legacy.push(json!({
+                    "ref":{"providerId":id,"modelId":model},
+                    "label":model,
+                    "providerLabel":rule["providerName"].as_str().unwrap_or(&id),
+                    "contextWindow":mc["properties"]["contextWindow"],
+                    "maxOutputTokens":mc["optionSpecs"]["maxOutputTokens"]["max"],
+                    "reasoning":{"levels":levels.iter().map(|l| json!({"value":l,"label":l})).collect::<Vec<_>>(),"defaultLevel":levels.last()},
+                    "properties":{"inputFormat":mc["properties"]["inputFormat"],"outputFormat":mc["properties"]["outputFormat"]},
+                }));
             }
         }
     }

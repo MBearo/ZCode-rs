@@ -1,0 +1,2149 @@
+{
+  "create": [
+    {
+      "input": null,
+      "missing": true,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": null,
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received null",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received null\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": [],
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received array",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": 1,
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": "x",
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received string",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received string\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {},
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace: Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"workspace\"\n    ],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "  /w  ",
+          "workspaceKey": "/w",
+          "workspaceIdentity": " id ",
+          "remoteSessionId": "r"
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceIdentity": "id",
+          "remoteSessionId": "r",
+          "workspaceKey": "/w"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "bogus": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized key: \"bogus\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"bogus\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"bogus\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "a": 1,
+        "b": 2
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized keys: \"a\", \"b\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"a\",\n      \"b\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized keys: \\\"a\\\", \\\"b\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w",
+          "extra": 1
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace: Unrecognized key: \"extra\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"extra\"\n    ],\n    \"path\": [\n      \"workspace\"\n    ],\n    \"message\": \"Unrecognized key: \\\"extra\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace.workspaceKey: Invalid input: expected string, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"workspace\",\n      \"workspaceKey\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "  ",
+          "workspaceKey": "/w"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace.workspacePath: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"workspace\",\n      \"workspacePath\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": 1,
+          "workspaceKey": "/w"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace.workspacePath: Invalid input: expected string, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"workspace\",\n      \"workspacePath\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": null
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace.workspaceKey: Invalid input: expected string, received null",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"workspace\",\n      \"workspaceKey\"\n    ],\n    \"message\": \"Invalid input: expected string, received null\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "sessionId": ""
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — sessionId: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"sessionId\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "sessionId": " s1 "
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s1",
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "parentSessionId": 3
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — parentSessionId: Invalid input: expected string, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"parentSessionId\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "plan"
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "plan"
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "build"
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "build"
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "edit"
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "edit"
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "yolo"
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "yolo"
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "auto"
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "auto"
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": "turbo"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mode: Invalid option: expected one of \"plan\"|\"build\"|\"edit\"|\"yolo\"|\"auto\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"plan\",\n      \"build\",\n      \"edit\",\n      \"yolo\",\n      \"auto\"\n    ],\n    \"path\": [\n      \"mode\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"plan\\\"|\\\"build\\\"|\\\"edit\\\"|\\\"yolo\\\"|\\\"auto\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mode": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mode: Invalid option: expected one of \"plan\"|\"build\"|\"edit\"|\"yolo\"|\"auto\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"plan\",\n      \"build\",\n      \"edit\",\n      \"yolo\",\n      \"auto\"\n    ],\n    \"path\": [\n      \"mode\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"plan\\\"|\\\"build\\\"|\\\"edit\\\"|\\\"yolo\\\"|\\\"auto\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "persistence": "immediate"
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "persistence": "immediate"
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "persistence": "deferred"
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "persistence": "deferred"
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "persistence": "later"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — persistence: Invalid option: expected one of \"immediate\"|\"deferred\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"immediate\",\n      \"deferred\"\n    ],\n    \"path\": [\n      \"persistence\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"immediate\\\"|\\\"deferred\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": " p ",
+          "modelId": " m ",
+          "options": {
+            "reasoningLevel": " low "
+          }
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "low"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model.modelId: Invalid input: expected string, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\",\n      \"modelId\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p",
+          "modelId": "m",
+          "x": 1
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model: Unrecognized key: \"x\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"x\"\n    ],\n    \"path\": [\n      \"model\"\n    ],\n    \"message\": \"Unrecognized key: \\\"x\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "low",
+            "y": 1
+          }
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model.options: Unrecognized key: \"y\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"y\"\n    ],\n    \"path\": [\n      \"model\",\n      \"options\"\n    ],\n    \"message\": \"Unrecognized key: \\\"y\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {}
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {}
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": ""
+          }
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model.options.reasoningLevel: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"model\",\n      \"options\",\n      \"reasoningLevel\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": "p/m"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model: Invalid input: expected object, received string",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\"\n    ],\n    \"message\": \"Invalid input: expected object, received string\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "thoughtLevel": " "
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — thoughtLevel: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"thoughtLevel\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "thoughtLevel": " high "
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "thoughtLevel": "high"
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "titleGenerationEnabled": "no"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — titleGenerationEnabled: Invalid input: expected boolean, received string",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"titleGenerationEnabled\"\n    ],\n    \"message\": \"Invalid input: expected boolean, received string\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "titleGenerationEnabled": false
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "titleGenerationEnabled": false
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "toolAllowlist": ["Read", ""]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — toolAllowlist.1: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"toolAllowlist\",\n      1\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "toolAllowlist": [" Read "],
+        "toolDenylist": ["Bash"]
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "toolAllowlist": ["Read"],
+        "toolDenylist": ["Bash"]
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "toolDenylist": "Bash"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — toolDenylist: Invalid input: expected array, received string",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"toolDenylist\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": []
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": []
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "x"],
+            "env": [
+              {
+                "name": "A",
+                "value": "1"
+              }
+            ]
+          },
+          {
+            "name": "web",
+            "type": "http",
+            "url": "https://x",
+            "headers": []
+          }
+        ]
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "x"],
+            "env": [
+              {
+                "name": "A",
+                "value": "1"
+              }
+            ]
+          },
+          {
+            "name": "web",
+            "type": "http",
+            "url": "https://x",
+            "headers": []
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "x"
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0: Invalid input",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"command\"\n          ],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"args\"\n          ],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"env\"\n          ],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        }\n      ],\n      [\n        {\n          \"code\": \"invalid_value\",\n          \"values\": [\n            \"http\",\n            \"sse\"\n          ],\n          \"path\": [\n            \"type\"\n          ],\n          \"message\": \"Invalid option: expected one of \\\"http\\\"|\\\"sse\\\"\"\n        },\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"url\"\n          ],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"headers\"\n          ],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"mcpServers\",\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "x"],
+            "env": [
+              {
+                "name": "",
+                "value": "1"
+              }
+            ]
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0.env.0.name: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"mcpServers\",\n      0,\n      \"env\",\n      0,\n      \"name\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "web",
+            "type": "ws",
+            "url": "https://x",
+            "headers": []
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0: Invalid input",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"command\"\n          ],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"args\"\n          ],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"env\"\n          ],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        },\n        {\n          \"code\": \"unrecognized_keys\",\n          \"keys\": [\n            \"type\",\n            \"url\",\n            \"headers\"\n          ],\n          \"path\": [],\n          \"message\": \"Unrecognized keys: \\\"type\\\", \\\"url\\\", \\\"headers\\\"\"\n        }\n      ],\n      [\n        {\n          \"code\": \"invalid_value\",\n          \"values\": [\n            \"http\",\n            \"sse\"\n          ],\n          \"path\": [\n            \"type\"\n          ],\n          \"message\": \"Invalid option: expected one of \\\"http\\\"|\\\"sse\\\"\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"mcpServers\",\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "x"],
+            "env": [
+              {
+                "name": "A",
+                "value": "1"
+              }
+            ],
+            "timeoutMs": 0
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0.timeoutMs: Too small: expected number to be >0",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 0,\n    \"inclusive\": false,\n    \"path\": [\n      \"mcpServers\",\n      0,\n      \"timeoutMs\"\n    ],\n    \"message\": \"Too small: expected number to be >0\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "web",
+            "type": "http",
+            "url": "https://x",
+            "headers": [],
+            "oauth": {
+              "type": "client_credentials",
+              "clientId": "c",
+              "clientSecret": "s"
+            }
+          }
+        ]
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "web",
+            "type": "http",
+            "url": "https://x",
+            "headers": [],
+            "oauth": {
+              "type": "client_credentials",
+              "clientId": "c",
+              "clientSecret": "s"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": "x"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers: Invalid input: expected array, received string",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"mcpServers\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "offPeakToolEnabled": true,
+        "dynamicWorkflowEnabled": false
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "offPeakToolEnabled": true,
+        "dynamicWorkflowEnabled": false
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "offPeakToolEnabled": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — offPeakToolEnabled: Invalid input: expected boolean, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"offPeakToolEnabled\"\n    ],\n    \"message\": \"Invalid input: expected boolean, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "hi"
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "hi"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "sessionId": "s",
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "hi"
+            }
+          ],
+          "title": " T ",
+          "createdAt": 1,
+          "updatedAt": 2
+        }
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "title": " T ",
+          "createdAt": 1,
+          "updatedAt": 2,
+          "messages": [
+            {
+              "role": "user",
+              "content": "hi"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "cursor",
+          "messages": []
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.source: Invalid discriminator value. Expected 'claudeCode' | 'sharedContext'",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [],\n    \"note\": \"No matching discriminator\",\n    \"discriminator\": \"source\",\n    \"options\": [\n      \"claudeCode\",\n      \"sharedContext\"\n    ],\n    \"path\": [\n      \"importedHistory\",\n      \"source\"\n    ],\n    \"message\": \"Invalid discriminator value. Expected 'claudeCode' | 'sharedContext'\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "messages": []
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.source: Invalid discriminator value. Expected 'claudeCode' | 'sharedContext'",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [],\n    \"note\": \"No matching discriminator\",\n    \"discriminator\": \"source\",\n    \"options\": [\n      \"claudeCode\",\n      \"sharedContext\"\n    ],\n    \"path\": [\n      \"importedHistory\",\n      \"source\"\n    ],\n    \"message\": \"Invalid discriminator value. Expected 'claudeCode' | 'sharedContext'\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": []
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.messages: Too small: expected array to have >=1 items",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"importedHistory\",\n      \"messages\"\n    ],\n    \"message\": \"Too small: expected array to have >=1 items\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.messages: Invalid input: expected array, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"importedHistory\",\n      \"messages\"\n    ],\n    \"message\": \"Invalid input: expected array, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "system",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.messages.0.role: Invalid option: expected one of \"user\"|\"assistant\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"user\",\n      \"assistant\"\n    ],\n    \"path\": [\n      \"importedHistory\",\n      \"messages\",\n      0,\n      \"role\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"user\\\"|\\\"assistant\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": ""
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "x",
+              "timestamp": -1
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.messages.0.timestamp: Too small: expected number to be >=0",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 0,\n    \"inclusive\": true,\n    \"path\": [\n      \"importedHistory\",\n      \"messages\",\n      0,\n      \"timestamp\"\n    ],\n    \"message\": \"Too small: expected number to be >=0\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "x",
+              "timestamp": 1.5
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.messages.0.timestamp: Invalid input: expected int, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"int\",\n    \"format\": \"safeint\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"importedHistory\",\n      \"messages\",\n      0,\n      \"timestamp\"\n    ],\n    \"message\": \"Invalid input: expected int, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "x",
+              "id": "m1"
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.messages.0: Unrecognized key: \"id\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"id\"\n    ],\n    \"path\": [\n      \"importedHistory\",\n      \"messages\",\n      0\n    ],\n    \"message\": \"Unrecognized key: \\\"id\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "hi"
+            }
+          ],
+          "createdAt": "1"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.createdAt: Invalid input: expected number, received string",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"importedHistory\",\n      \"createdAt\"\n    ],\n    \"message\": \"Invalid input: expected number, received string\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "sharedContext",
+          "title": "t",
+          "markdown": "m",
+          "provenance": {
+            "shareId": "s",
+            "projectionSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifactSetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formatterVersion": 1,
+            "markdownSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installedArtifacts": []
+          }
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "sharedContext",
+          "title": "t",
+          "markdown": "m",
+          "provenance": {
+            "shareId": "s",
+            "projectionSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifactSetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formatterVersion": 1,
+            "markdownSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installedArtifacts": []
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "sharedContext",
+          "title": " ",
+          "markdown": "m",
+          "provenance": {
+            "shareId": "s",
+            "projectionSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifactSetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formatterVersion": 1,
+            "markdownSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installedArtifacts": []
+          }
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.title: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"importedHistory\",\n      \"title\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "sharedContext",
+          "title": "t",
+          "markdown": "m",
+          "provenance": {
+            "shareId": "s",
+            "projectionSha256": "x",
+            "artifactSetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formatterVersion": 1,
+            "markdownSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installedArtifacts": []
+          }
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.provenance.projectionSha256: Invalid string: must match pattern /^[0-9a-f]{64}$/u",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"invalid_format\",\n    \"format\": \"regex\",\n    \"pattern\": \"/^[0-9a-f]{64}$/u\",\n    \"path\": [\n      \"importedHistory\",\n      \"provenance\",\n      \"projectionSha256\"\n    ],\n    \"message\": \"Invalid string: must match pattern /^[0-9a-f]{64}$/u\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "sharedContext",
+          "title": "t",
+          "markdown": "m",
+          "provenance": {
+            "shareId": "s",
+            "projectionSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifactSetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formatterVersion": 1,
+            "markdownSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installedArtifacts": [],
+            "shareUrl": "not a url"
+          }
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.provenance.shareUrl: Invalid URL",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_format\",\n    \"format\": \"url\",\n    \"path\": [\n      \"importedHistory\",\n      \"provenance\",\n      \"shareUrl\"\n    ],\n    \"message\": \"Invalid URL\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "sharedContext",
+          "title": "t",
+          "markdown": "m",
+          "provenance": {
+            "shareId": "s",
+            "projectionSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifactSetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formatterVersion": 1,
+            "markdownSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installedArtifacts": [],
+            "shareUrl": "https://x/s"
+          }
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "sharedContext",
+          "title": "t",
+          "markdown": "m",
+          "provenance": {
+            "shareId": "s",
+            "shareUrl": "https://x/s",
+            "projectionSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifactSetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formatterVersion": 1,
+            "markdownSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installedArtifacts": []
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "sharedContext",
+          "title": "t",
+          "markdown": "m",
+          "provenance": {
+            "shareId": "s",
+            "projectionSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifactSetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formatterVersion": 2,
+            "markdownSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installedArtifacts": []
+          }
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.provenance.formatterVersion: Invalid input: expected 1",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      1\n    ],\n    \"path\": [\n      \"importedHistory\",\n      \"provenance\",\n      \"formatterVersion\"\n    ],\n    \"message\": \"Invalid input: expected 1\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "x",
+              "timestamp": -1.5
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.messages.0.timestamp: Invalid input: expected int, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"int\",\n    \"format\": \"safeint\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"importedHistory\",\n      \"messages\",\n      0,\n      \"timestamp\"\n    ],\n    \"message\": \"Invalid input: expected int, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "x",
+              "timestamp": 100000000000000000000
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory.messages.0.timestamp: Too big: expected int to be <=9007199254740991",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"too_big\",\n    \"maximum\": 9007199254740991,\n    \"note\": \"Integers must be within the safe integer range.\",\n    \"origin\": \"int\",\n    \"inclusive\": true,\n    \"path\": [\n      \"importedHistory\",\n      \"messages\",\n      0,\n      \"timestamp\"\n    ],\n    \"message\": \"Too big: expected int to be <=9007199254740991\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "x",
+              "timestamp": 1
+            }
+          ]
+        }
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": {
+          "source": "claudeCode",
+          "messages": [
+            {
+              "role": "user",
+              "content": "x",
+              "timestamp": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": "x"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory: Invalid input: expected object, received string",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"object\",\n    \"path\": [\n      \"importedHistory\"\n    ],\n    \"message\": \"Invalid input: expected object, received string\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "importedHistory": null
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — importedHistory: Invalid input: expected object, received null",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"object\",\n    \"path\": [\n      \"importedHistory\"\n    ],\n    \"message\": \"Invalid input: expected object, received null\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": " ",
+            "command": " ",
+            "args": [],
+            "env": []
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0.name: Too small: expected string to have >=1 characters; mcpServers.0.command: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"mcpServers\",\n      0,\n      \"name\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"mcpServers\",\n      0,\n      \"command\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "x"],
+            "env": [
+              {
+                "name": "A",
+                "value": "1"
+              }
+            ],
+            "timeoutMs": 1.5
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0: Invalid input",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"int\",\n          \"format\": \"safeint\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"timeoutMs\"\n          ],\n          \"message\": \"Invalid input: expected int, received number\"\n        }\n      ],\n      [\n        {\n          \"code\": \"invalid_value\",\n          \"values\": [\n            \"http\",\n            \"sse\"\n          ],\n          \"path\": [\n            \"type\"\n          ],\n          \"message\": \"Invalid option: expected one of \\\"http\\\"|\\\"sse\\\"\"\n        },\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"url\"\n          ],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"headers\"\n          ],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        },\n        {\n          \"expected\": \"int\",\n          \"format\": \"safeint\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"timeoutMs\"\n          ],\n          \"message\": \"Invalid input: expected int, received number\"\n        },\n        {\n          \"code\": \"unrecognized_keys\",\n          \"keys\": [\n            \"command\",\n            \"args\",\n            \"env\"\n          ],\n          \"path\": [],\n          \"message\": \"Unrecognized keys: \\\"command\\\", \\\"args\\\", \\\"env\\\"\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"mcpServers\",\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [1]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0: Invalid input",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected object, received number\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected object, received number\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"mcpServers\",\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "web",
+            "type": "http",
+            "url": "https://x",
+            "headers": [],
+            "oauth": {
+              "type": "x"
+            }
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0: Invalid input",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"command\"\n          ],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"args\"\n          ],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"env\"\n          ],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        },\n        {\n          \"code\": \"unrecognized_keys\",\n          \"keys\": [\n            \"type\",\n            \"url\",\n            \"headers\",\n            \"oauth\"\n          ],\n          \"path\": [],\n          \"message\": \"Unrecognized keys: \\\"type\\\", \\\"url\\\", \\\"headers\\\", \\\"oauth\\\"\"\n        }\n      ],\n      [\n        {\n          \"code\": \"invalid_union\",\n          \"errors\": [\n            [\n              {\n                \"code\": \"invalid_value\",\n                \"values\": [\n                  \"client_credentials\"\n                ],\n                \"path\": [\n                  \"type\"\n                ],\n                \"message\": \"Invalid input: expected \\\"client_credentials\\\"\"\n              },\n              {\n                \"expected\": \"string\",\n                \"code\": \"invalid_type\",\n                \"path\": [\n                  \"clientId\"\n                ],\n                \"message\": \"Invalid input: expected string, received undefined\"\n              },\n              {\n                \"expected\": \"string\",\n                \"code\": \"invalid_type\",\n                \"path\": [\n                  \"clientSecret\"\n                ],\n                \"message\": \"Invalid input: expected string, received undefined\"\n              }\n            ],\n            [\n              {\n                \"code\": \"invalid_value\",\n                \"values\": [\n                  \"authorization_code\"\n                ],\n                \"path\": [\n                  \"type\"\n                ],\n                \"message\": \"Invalid input: expected \\\"authorization_code\\\"\"\n              }\n            ]\n          ],\n          \"path\": [\n            \"oauth\"\n          ],\n          \"message\": \"Invalid input\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"mcpServers\",\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "web",
+            "type": "http",
+            "url": "https://x",
+            "headers": [],
+            "oauth": {
+              "type": "authorization_code",
+              "redirectPath": " "
+            }
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0.oauth.redirectPath: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"mcpServers\",\n      0,\n      \"oauth\",\n      \"redirectPath\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "toolAllowlist": [1, "", 2]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — toolAllowlist.0: Invalid input: expected string, received number; toolAllowlist.1: Too small: expected string to have >=1 characters; toolAllowlist.2: Invalid input: expected string, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"toolAllowlist\",\n      0\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"toolAllowlist\",\n      1\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"toolAllowlist\",\n      2\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "",
+          "workspaceKey": "",
+          "extra": 1
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace.workspacePath: Too small: expected string to have >=1 characters; workspace.workspaceKey: Too small: expected string to have >=1 characters; workspace: Unrecognized key: \"extra\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"workspace\",\n      \"workspacePath\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"workspace\",\n      \"workspaceKey\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"extra\"\n    ],\n    \"path\": [\n      \"workspace\"\n    ],\n    \"message\": \"Unrecognized key: \\\"extra\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "model": {
+          "providerId": "",
+          "modelId": "",
+          "options": null
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model.providerId: Too small: expected string to have >=1 characters; model.modelId: Too small: expected string to have >=1 characters; model.options: Invalid input: expected object, received null",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"model\",\n      \"providerId\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"model\",\n      \"modelId\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\",\n      \"options\"\n    ],\n    \"message\": \"Invalid input: expected object, received null\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "thoughtLevel": "﻿ high "
+      },
+      "missing": false,
+      "ok": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "thoughtLevel": "high"
+      }
+    },
+    {
+      "input": {
+        "workspace": 1,
+        "mode": 1,
+        "model": 1,
+        "persistence": 1,
+        "thoughtLevel": 1,
+        "titleGenerationEnabled": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace: Invalid input: expected object, received number; mode: Invalid option: expected one of \"plan\"|\"build\"|\"edit\"|\"yolo\"|\"auto\"; model: Invalid input: expected object, received number; persistence: Invalid option: expected one of \"immediate\"|\"deferred\"; thoughtLevel: Invalid input: expected string, received number (+1 more)",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"workspace\"\n    ],\n    \"message\": \"Invalid input: expected object, received number\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"plan\",\n      \"build\",\n      \"edit\",\n      \"yolo\",\n      \"auto\"\n    ],\n    \"path\": [\n      \"mode\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"plan\\\"|\\\"build\\\"|\\\"edit\\\"|\\\"yolo\\\"|\\\"auto\\\"\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\"\n    ],\n    \"message\": \"Invalid input: expected object, received number\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"immediate\",\n      \"deferred\"\n    ],\n    \"path\": [\n      \"persistence\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"immediate\\\"|\\\"deferred\\\"\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"thoughtLevel\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"titleGenerationEnabled\"\n    ],\n    \"message\": \"Invalid input: expected boolean, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": 1,
+        "mode": 1,
+        "model": 1,
+        "persistence": 1,
+        "thoughtLevel": 1,
+        "titleGenerationEnabled": 1,
+        "extra": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace: Invalid input: expected object, received number; mode: Invalid option: expected one of \"plan\"|\"build\"|\"edit\"|\"yolo\"|\"auto\"; model: Invalid input: expected object, received number; persistence: Invalid option: expected one of \"immediate\"|\"deferred\"; thoughtLevel: Invalid input: expected string, received number (+2 more)",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"workspace\"\n    ],\n    \"message\": \"Invalid input: expected object, received number\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"plan\",\n      \"build\",\n      \"edit\",\n      \"yolo\",\n      \"auto\"\n    ],\n    \"path\": [\n      \"mode\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"plan\\\"|\\\"build\\\"|\\\"edit\\\"|\\\"yolo\\\"|\\\"auto\\\"\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\"\n    ],\n    \"message\": \"Invalid input: expected object, received number\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"immediate\",\n      \"deferred\"\n    ],\n    \"path\": [\n      \"persistence\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"immediate\\\"|\\\"deferred\\\"\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"thoughtLevel\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"titleGenerationEnabled\"\n    ],\n    \"message\": \"Invalid input: expected boolean, received number\"\n  },\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"extra\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"extra\\\"\"\n  }\n]"
+        }
+      }
+    }
+  ],
+  "resume": [
+    {
+      "input": null,
+      "missing": true,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": null,
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received null",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received null\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {},
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — sessionId: Invalid input: expected string, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sessionId\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s"
+      }
+    },
+    {
+      "input": {
+        "sessionId": " s ",
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "thoughtLevel": "high",
+        "mcpServers": [
+          {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "x"],
+            "env": [
+              {
+                "name": "A",
+                "value": "1"
+              }
+            ]
+          }
+        ],
+        "toolAllowlist": ["Read"],
+        "toolDenylist": [],
+        "offPeakToolEnabled": false,
+        "dynamicWorkflowEnabled": true
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "thoughtLevel": "high",
+        "mcpServers": [
+          {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "x"],
+            "env": [
+              {
+                "name": "A",
+                "value": "1"
+              }
+            ]
+          }
+        ],
+        "toolAllowlist": ["Read"],
+        "toolDenylist": [],
+        "offPeakToolEnabled": false,
+        "dynamicWorkflowEnabled": true
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "plan"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized key: \"mode\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"mode\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"mode\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "persistence": "deferred"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized key: \"persistence\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"persistence\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"persistence\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized key: \"model\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"model\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"model\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "titleGenerationEnabled": false
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized key: \"titleGenerationEnabled\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"titleGenerationEnabled\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"titleGenerationEnabled\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "   "
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — sessionId: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"sessionId\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — sessionId: Invalid input: expected string, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sessionId\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "workspace": {
+          "workspacePath": "/w"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — workspace.workspaceKey: Invalid input: expected string, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"workspace\",\n      \"workspaceKey\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+        }
+      }
+    }
+  ]
+}

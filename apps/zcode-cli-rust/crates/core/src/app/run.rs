@@ -18,7 +18,10 @@ impl Engine {
         };
         let (selection, updates) = tokio::sync::watch::channel(identity.clone());
         let model: Arc<dyn ModelPort> = if let Some(registry) = &self.registry {
-            registry.resolve(&identity)?;
+            // 缺少推理档位时本轮照常开始，由模型构建失败收口（与 Node 一致）。
+            if !identity.reasoning_level.is_empty() {
+                registry.resolve(&identity)?;
+            }
             Arc::new(super::model_config::LiveModel {
                 registry: registry.clone(),
                 selection: updates,
@@ -73,6 +76,7 @@ impl Engine {
         history.goal = session.goal.clone();
         history.agent_profile = session.agent_profile.clone();
         history.tool_disallowlist = submission.tool_disallowlist;
+        history.tool_filter = session.runtime.tools.clone();
         history.permissions = Some(permission_updates);
         let context = self.context.clone();
         let tools = self.tools.clone();

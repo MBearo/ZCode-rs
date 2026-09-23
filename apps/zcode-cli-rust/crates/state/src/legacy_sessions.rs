@@ -276,6 +276,7 @@ pub(super) fn project(
                 }
                 let unfinished = message["time"]["completed"].is_null();
                 interrupted |= unfinished;
+                super::legacy_projection::assistant_mode(&mut session, &message);
                 let reasoning = parts
                     .iter()
                     .filter(|(_, p)| p["type"] == "reasoning")

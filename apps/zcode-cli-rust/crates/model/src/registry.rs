@@ -17,6 +17,8 @@ pub(super) struct Snapshot {
     pub(super) models: BTreeMap<ModelKey, Arc<dyn ModelPort>>,
     pub(super) catalog: Vec<Value>,
     pub(super) options: Vec<Value>,
+    /// Visible models in Node `toModelOption` shape (legacy session snapshots).
+    pub(super) legacy: Vec<Value>,
     pub(super) default: Option<ModelIdentity>,
 }
 pub struct Registry {
@@ -58,6 +60,9 @@ impl ModelRegistry for Registry {
     }
     fn model_options(&self) -> Vec<Value> {
         self.snapshot.read().unwrap().options.clone()
+    }
+    fn legacy_models(&self) -> Vec<Value> {
+        self.snapshot.read().unwrap().legacy.clone()
     }
     fn catalog(&self) -> Vec<Value> {
         self.snapshot.read().unwrap().catalog.clone()

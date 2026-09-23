@@ -13,6 +13,7 @@ import { DefaultRuntimeConfig } from "../apps/zcode-cli/packages/contracts/src/c
 import { egressFixtures } from "./zcode-cli-rust-egress-fixtures.mjs";
 import { permissionData, permissionFixtures } from "./zcode-cli-rust-permission-fixtures.mjs";
 import { bashFixtures, bashPolicyData, bashRegistry } from "./zcode-cli-rust-bash-fixtures.mjs";
+import { legacyParamsFixtures } from "./zcode-cli-rust-legacy-params-fixtures.mjs";
 import {
   bashAnalysisFixtures,
   bashAnalysisFuzzFixtures,
@@ -201,6 +202,10 @@ await emit("../apps/zcode-cli-rust/crates/domain/fixtures/config.json", {
 await emit("../apps/zcode-cli-rust/crates/net/fixtures/egress.json", egressFixtures());
 await emit("../apps/zcode-cli-rust/crates/domain/fixtures/permission.json", permissionFixtures());
 await emit("../apps/zcode-cli-rust/crates/domain/schema/tool-permissions.json", permissionData());
+await emit(
+  "../apps/zcode-cli-rust/crates/domain/fixtures/legacy-params.json",
+  legacyParamsFixtures(),
+);
 await emit(
   "../apps/zcode-cli-rust/crates/bash-parse/fixtures/analysis.json",
   bashAnalysisFixtures(),

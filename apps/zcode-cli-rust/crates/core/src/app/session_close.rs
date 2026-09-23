@@ -46,7 +46,10 @@ impl Engine {
             }
             .into());
         };
-        let current = if session.phase == crate::domain::execution::Phase::Draft {
+        // V4 草稿与 legacy deferred 首次输入前都是 deferred；legacy immediate 从创建起即 immediate。
+        let immediate = session.runtime.persistence
+            == Some(crate::domain::session_runtime::Persistence::Immediate);
+        let current = if session.phase == crate::domain::execution::Phase::Draft && !immediate {
             "deferred"
         } else {
             "immediate"
