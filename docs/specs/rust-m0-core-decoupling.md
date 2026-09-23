@@ -26,17 +26,17 @@
 ```mermaid
 sequenceDiagram
     participant In as stdin 线程
-    participant AS as app-server 循环
+    participant Srv as app-server 循环
     participant E as Engine actor
     participant W as stdout 线程
-    In->>AS: 行（JSON）
-    AS->>AS: 解码与路由（未知方法、参数错误在此返回）
-    AS->>E: ClientMsg::Request{id, RuntimeRequest}
+    In->>Srv: 行（JSON）
+    Srv->>Srv: 解码与路由（未知方法、参数错误在此返回）
+    Srv->>E: ClientMsg::Request{id, RuntimeRequest}
     E->>E: 处理并提交
-    E-->>AS: ServerMsg::Reply{id, result}
-    E-->>AS: ServerMsg::Event(...)（该请求产生的事件，在 Reply 之后）
-    AS->>AS: 事件扇出到订阅，按 seq 去重，编码帧
-    AS->>W: 批量写（每批一次 flush）
+    E-->>Srv: ServerMsg::Reply{id, result}
+    E-->>Srv: ServerMsg::Event(...)（该请求产生的事件，在 Reply 之后）
+    Srv->>Srv: 事件扇出到订阅，按 seq 去重，编码帧
+    Srv->>W: 批量写（每批一次 flush）
 ```
 
 - **顺序**：同一连接上，actor 先入队 `Reply`，再入队该请求产生的事件（与 Node 先写响应行、再写 initial frame 一致）。所有 `ServerMsg` 走同一条有序通道。
