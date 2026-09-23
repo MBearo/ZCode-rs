@@ -2,6 +2,32 @@
 
 这是将 ZCode CLI 从 TypeScript 迁移到 Rust 的工作仓库。Rust 实现位于 [`apps/zcode-cli-rust/`](apps/zcode-cli-rust/)，以 Cargo workspace 组织协议、Session 核心、模型适配、工具执行、App Server 和 TUI。当前 Rust runtime 通过显式命令启动，现有 TypeScript runtime 仍是默认实现。
 
+## 核心目标
+
+本仓库的核心任务是把现有 Node.js/TypeScript zcode CLI runtime 迁移到 Rust，在保持 App stdio/V4 协议、Session 状态、模型请求、工具执行、持久化和桌面接入语义的前提下，逐步用 Rust runtime 替换 Node.js runtime。只有功能对齐、性能、数据迁移、跨平台和发布回退完成验收后，才切换默认 runtime。
+
+当前迁移已经覆盖 Rust App Server 的主要使用链路：
+
+- [x] Session、SQLite、队列、冷恢复、compact 和 workspace identity 隔离
+- [x] OpenAI Chat Completions、OpenAI Responses、Anthropic Messages
+- [x] Provider Registry、模型选择、账号 overlay、yolo 能力协商
+- [x] Read/Write/Edit/Glob/Grep/Bash、后台任务、AskUserQuestion、Todo
+- [x] MCP、Skill、子代理、Goal、retry/edit、fork 和文件回退核心链路
+- [x] 文本、图片、PDF 基础附件链路
+- [ ] 权限模式、MCP OAuth、完整记忆和目录规则、高级媒体与工具能力
+- [ ] 工作流、自动任务、浏览器/CUA、远端/手机恢复和跨平台发行
+
+同一台 Apple M2 Pro 上使用本地 SSE fixture、8 回合单 Session、5 次交错测量的结果如下。Node.js 使用当前 CLI bundle，Rust 使用 release 二进制：
+
+| 指标             |   Node.js |     Rust |
+| ---------------- | --------: | -------: |
+| 空闲 RSS         | 408.8 MiB | 11.2 MiB |
+| 负载采样峰值 RSS | 522.2 MiB | 23.4 MiB |
+| 累计 CPU time    |    0.78 s |   0.10 s |
+| 8 回合耗时       |   1.289 s |  0.147 s |
+
+这组数据只代表当前本地 fixture 和构建形态；真实供应商、Electron/Host 总进程、大历史、MCP、Windows/Linux 和移动远控仍需单独验收。完整测量方法、功能差异和 TODO 见 [`docs/reports/rust-node-resource-parity-2026-09-23.md`](docs/reports/rust-node-resource-parity-2026-09-23.md)。
+
 ## 环境要求
 
 - Rust `1.89` 或更高版本
