@@ -170,7 +170,8 @@ impl Engine {
         Ok(())
     }
     pub(super) fn notify_selection(&self, id: &str) -> Result<()> {
-        if let Some(active) = self.active.get(id) {
+        // 执行级选型固定在本轮，会话选择的变化不影响它。
+        if let Some(active) = self.active.get(id).filter(|a| a.execution.is_none()) {
             active.selection.send_replace(self.session_selection(id)?);
         }
         Ok(())

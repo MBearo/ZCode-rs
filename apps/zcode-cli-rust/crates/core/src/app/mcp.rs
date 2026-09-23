@@ -22,6 +22,7 @@ impl Engine {
             run_id: id,
             tx: self.events.clone(),
             origin: crate::contract::RequestOrigin::detached(self.clock.id()),
+            request_auth: None,
         };
         let tools = self.tools.clone();
         let params = request.params.clone();

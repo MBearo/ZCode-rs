@@ -55,6 +55,13 @@ pub(super) fn body(
             .is_some_and(|o| o["provider"] != config.provider_id || o["model"] != config.model_id)
     };
     for message in &mut messages {
+        // 浏览器环境上下文等只面向模型的改写在请求边界替换正文（压缩同样经过此处）。
+        if let Some(request) = message
+            .as_object_mut()
+            .and_then(|m| m.remove("_zcode_request_content"))
+        {
+            message["content"] = request;
+        }
         if foreign(message) {
             for key in [
                 "reasoning_content",

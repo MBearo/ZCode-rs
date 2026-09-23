@@ -30,13 +30,14 @@ impl Engine {
             item["kind"] = "compact".into();
             item["text"] = instructions.into();
             ack["result"] =
-                json!({"type":"inputAccepted","delivery":"queue","inputId":item["queueItemId"]});
+                json!({"type":"inputAccepted","delivery":"queue","inputId":c.command_id});
             session.queue.push(item);
             session.revision += 1;
         } else {
-            let (t, input) = self.admit_compact(id, c)?;
+            let (t, _) = self.admit_compact(id, c)?;
             turn = Some(t);
-            ack["result"] = json!({"type":"inputAccepted","delivery":"startNow","inputId":input});
+            ack["result"] =
+                json!({"type":"inputAccepted","delivery":"startNow","inputId":c.command_id});
         }
         ack["revisionAtDecision"] = self.sessions[id].revision.into();
         let deltas = if turn.is_some() {

@@ -5,10 +5,7 @@ use std::path::Path;
 /// ICU default locale as BCP 47: the first *present* of `LC_ALL`, `LC_MESSAGES`,
 /// `LANG`; `C`/`POSIX` and absence map to `en-US`, an empty value to `und`.
 pub fn language<'a>(env: impl Fn(&str) -> Option<&'a str>) -> String {
-    let Some(raw) = ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .into_iter()
-        .find_map(&env)
-    else {
+    let Some(raw) = ["LC_ALL", "LC_MESSAGES", "LANG"].into_iter().find_map(&env) else {
         return "en-US".into();
     };
     let (locale, modifier) = match raw.split_once('@') {

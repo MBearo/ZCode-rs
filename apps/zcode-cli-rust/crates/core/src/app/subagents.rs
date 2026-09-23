@@ -62,6 +62,19 @@ impl Engine {
                 < 32,
             "Workspace subagent concurrency limit reached"
         );
+        // 与 Node 一致：本轮 modelExecution 声明 subagents 时，前台子代理沿用本轮选型与
+        // 冻结鉴权；单次执行的凭据不能脱离父 loop 生命周期进入后台。
+        let execution = self
+            .active
+            .get(parent)
+            .and_then(|a| a.execution.clone())
+            .filter(|e| e.subagents);
+        let background = args["run_in_background"] == true || profile.background;
+        ensure!(
+            !(background && execution.as_ref().is_some_and(|e| e.background_deny)),
+            super::submission::BACKGROUND_DENIED
+        );
+        let execution = execution.filter(|_| !background);
         let mut depth = 0;
         let mut ancestor = Some(parent);
         while let Some(id) = ancestor {
@@ -69,14 +82,17 @@ impl Engine {
             ensure!(depth <= 4, "Subagent depth limit reached");
             ancestor = self.sessions.get(id).and_then(|s| s.parent_id.as_deref());
         }
-        let selection = self.select(
-            &profile
-                .model_selection
-                .as_ref()
-                .map(|s| json!({"modelSelection":s}))
-                .unwrap_or(json!({})),
-            selection.or(Some(self.session_selection(parent)?)),
-        )?;
+        let selection = match &execution {
+            Some(execution) => execution.selection.clone(),
+            None => self.select(
+                &profile
+                    .model_selection
+                    .as_ref()
+                    .map(|s| json!({"modelSelection":s}))
+                    .unwrap_or(json!({})),
+                selection.or(Some(self.session_selection(parent)?)),
+            )?,
+        };
         let now = self.clock.now();
         let agent = format!("agent_{}", self.clock.id());
         let child = format!("subagent_{agent}");
@@ -103,6 +119,12 @@ impl Engine {
         self.sessions.insert(child.clone(), session);
         let c = child_command(&child, &self.clock.id(), args["prompt"].as_str().unwrap());
         let (turn, _) = self.admit_input(&child, &c, None)?;
+        if let Some(execution) = execution {
+            self.submissions
+                .entry((child.clone(), turn.clone()))
+                .or_default()
+                .execution = Some(execution);
+        }
         self.persist(&child, None).await?;
         let task = Task {
             id: agent.clone(),
@@ -113,7 +135,7 @@ impl Engine {
             description: args["description"].as_str().unwrap().into(),
             prompt: args["prompt"].as_str().unwrap().into(),
             status: "running".into(),
-            background: args["run_in_background"] == true || profile.background,
+            background,
             notified: false,
             started_at: now,
             ended_at: None,

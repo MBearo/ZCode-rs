@@ -126,6 +126,16 @@ pub struct Guide {
     pub messages: Vec<Value>,
     /// The run's new request origin when a guided user input changed it.
     pub origin: Option<std::sync::Arc<RequestOrigin>>,
+    /// Tools the guided input hides from the rest of the turn (merged into the run).
+    pub tool_disallowlist: Vec<String>,
+}
+/// `modelExecution.requestAuth` (`{apiKey?, headers?}`) frozen for one execution.
+/// It replaces the Host credential request and is never persisted or logged.
+pub struct RequestAuth(pub Value);
+impl std::fmt::Debug for RequestAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RequestAuth(<redacted>)")
+    }
 }
 /// Model request source, sent as `x-zcode-session-type`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -175,6 +185,8 @@ pub struct EventSink {
     pub run_id: String,
     pub tx: mpsc::Sender<RunEvent>,
     pub origin: std::sync::Arc<RequestOrigin>,
+    /// Credentials frozen for this execution; `None` asks the Host when required.
+    pub request_auth: Option<std::sync::Arc<RequestAuth>>,
 }
 impl EventSink {
     pub async fn send(&self, event: Event) -> Result<()> {

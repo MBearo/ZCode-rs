@@ -366,3 +366,57 @@ test("closing a partial stream preserves displayed content and isolates late pro
     await f.close();
   }
 });
+
+test("legacy session/close closes conditionally on persistence like Node and keeps history", async () => {
+  const f = await fixture();
+  try {
+    const h = f.start();
+    const close = (params: Record<string, unknown>) =>
+      h.client.request("session/close", params, z.object({ closed: z.boolean().optional() }));
+    const draft = await h.create();
+    await h.subscribe(`sessions-index/${f.cwd}`);
+    // 草稿的 persistence 为 deferred；期望不一致时不做任何改动。
+    assert.deepEqual(await close({ sessionId: draft, expectedPersistence: "immediate" }), {
+      closed: false,
+    });
+    await h.subscribe(`conversation/${draft}`);
+    const after = h.messages.length;
+    assert.deepEqual(await close({ sessionId: draft, expectedPersistence: "deferred" }), {
+      closed: true,
+    });
+    await h.wait(
+      (m) =>
+        m.params?.frame?.payload?.deltas?.some(
+          (d: any) => d.op === "session.removed" && d.sessionId === draft,
+        ),
+      after,
+    );
+    await assert.rejects(close({ sessionId: draft }), (error: any) => {
+      assert.equal(error.code, -32004);
+      assert.equal(error.message, `Session is not active: ${draft}`);
+      return true;
+    });
+    await assert.rejects(close({ sessionId: draft, extra: 1 }), (error: any) => {
+      assert.equal(error.code, -32602);
+      return true;
+    });
+
+    const kept = await h.create();
+    await h.subscribe(`conversation/${kept}`);
+    const turn = h.messages.length;
+    await h.command(h.envelope("sendText", kept, { text: "keep me" }));
+    await h.completed(kept, turn);
+    assert.deepEqual(await close({ sessionId: kept, expectedPersistence: "deferred" }), {
+      closed: false,
+    });
+    assert.deepEqual(await close({ sessionId: kept }), { closed: true });
+    const rows = (await h.rows(kept)).rows.filter((r: any) => r.kind === "userInput");
+    assert.deepEqual(
+      rows.map((r: any) => r.text),
+      ["keep me"],
+    );
+    assert.deepEqual(h.schemaErrors, []);
+  } finally {
+    await f.close();
+  }
+});

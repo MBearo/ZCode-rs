@@ -73,6 +73,7 @@ impl Engine {
             run_id: id,
             tx: self.events.clone(),
             origin: crate::contract::RequestOrigin::detached(self.clock.id()),
+            request_auth: None,
         };
         tokio::spawn(async move {
             let result=model.complete(messages,&tools,&sink,&cancel).await.map(|out|{

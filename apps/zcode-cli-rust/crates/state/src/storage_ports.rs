@@ -41,7 +41,12 @@ impl crate::contract::SessionStore for Store {
             .await?;
         rx.await?
     }
-    async fn discard_draft(&self, workspace: &str, id: &str, ack: (String, Value)) -> Result<()> {
+    async fn discard_draft(
+        &self,
+        workspace: &str,
+        id: &str,
+        ack: Option<(String, Value)>,
+    ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(Operation::DiscardDraft(

@@ -254,6 +254,59 @@ origin 各字段的取值：
   - `memoryExtraction=skip` 只记录（Rust 尚无记忆提取）。
 - **`automationId`、`offPeakTaskId`、`offPeakRunType`**：记录为本轮归属，参与上面的禁用集合计算。
 
+### 4.1 输入标识（与 Node 对齐的修正）
+
+- Node V4 中 `inputId = queryId = commandId`：
+  - 各入口 ACK 的 `inputId` 都是提交该输入的 `commandId`；
+  - 队列项 id 为 `queue_<commandId>`。
+- Rust 原先 ACK 返回 `userInput` 行 id 或队列项 id，已改为 `commandId`。
+- 模型请求的 query id 取本轮 `userInput` 行的 `sourceCommandId`；引导输入取队列项的 `sourceCommandId`。
+
+### 4.2 Rust 结构
+
+```mermaid
+sequenceDiagram
+    participant C as sendText
+    participant E as Engine
+    participant S as submissions（Engine 内存）
+    participant A as Active（run）
+    participant L as agent_loop
+    participant M as HttpModel
+    C->>E: payload（modelExecution / toolDisallowlist / automation / ambient）
+    E->>E: 忙时且带 modelExecution → failed ACK（activePrompt）
+    E->>S: admit_input 写入本轮 Submission（选型、冻结鉴权、禁用集合、归属）
+    E->>A: start_run 取出 Submission：选型固定为执行选型
+    E->>L: RunContext.tool_disallowlist；EventSink.request_auth
+    L->>M: 定义过滤后的工具；complete(sink)
+    M->>M: 有冻结鉴权时直接使用，不向 Host 请求
+    L->>E: StepBoundary
+    E-->>L: Guide{messages, origin, tool_disallowlist}（引导输入合并禁用集合）
+```
+
+- **Submission 的唯一所有者是 Engine**：
+  - `admit_input` 写入，`start_run` 取出后挂到 `Active`，run 结束随 `Active` 释放；
+  - 会话结构（domain `Session`）不持有凭据。
+- **冻结鉴权**：
+  - `{apiKey?, headers?}` 只存在于 `Active` 和 `EventSink.request_auth`，`Debug` 输出为 `<redacted>`；
+  - 历史边界 payload 在落盘前剔除 `modelExecution`、`browserAmbientContext`、`toolDisallowlist`、`automationId`、`offPeakTaskId`、`offPeakRunType`；这些字段属于 Node 的 `SendInputOptions`，不属于可持久化的 intent。
+- **执行选型**：
+  - 带 `modelExecution` 时不调用 `apply_selection`；
+  - `notify_selection` 不把会话选型推给该 run。
+- **模型鉴权**：
+  - `requestAuth.apiKey` 覆盖任意 provider 的 key；
+  - `requestAuth.headers` 按 3.3 的顺序合并；
+  - 账号型 provider 带冻结鉴权时不发 `RequestAuth` 事件。
+- **队列项**：
+  - 保存计算后的禁用集合，提升时重新套用（Node `queueItem.toolDisallowlist`）；
+  - `modelExecution` 不会进入队列，因为忙时直接拒绝。
+- **子代理**（`subagents` 存在时）：
+  - 前台子代理的选型与冻结鉴权取本轮 Submission，优先于 profile 选型；
+  - `background=deny` 时，后台请求返回工具错误 `Idle-time tasks do not support background agents. Run this agent in the foreground.`
+- **浏览器环境上下文**：
+  - 用户消息在内存中带私有字段 `_zcode_request_content`；
+  - `model_protocol::body` 在所有协议的请求边界用它替换 `content`，压缩也经过同一边界；
+  - 消息落盘时剔除该字段。
+
 ## 5. `session/close`
 
 依据 `bootstrap/src/zcode-protocol/server-operations.ts:2708-2733`。

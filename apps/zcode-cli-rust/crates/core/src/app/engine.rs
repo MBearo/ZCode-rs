@@ -27,6 +27,8 @@ pub(super) struct Active {
     pub turn_id: String,
     /// Attribution of this run's model requests; the loop holds a copy.
     pub origin: std::sync::Arc<crate::contract::RequestOrigin>,
+    /// Execution-scoped model and credentials (`sendText.modelExecution`).
+    pub execution: Option<std::sync::Arc<super::submission::Execution>>,
 }
 pub struct Engine {
     pub(super) child_updates:
@@ -50,6 +52,8 @@ pub struct Engine {
     pub(super) durable_acks: std::collections::BTreeSet<String>,
     pub(super) acks: BTreeMap<String, Value>,
     pub(super) active: BTreeMap<String, Active>,
+    /// Input options handed from admission to run start, keyed by (session, turn).
+    pub(super) submissions: BTreeMap<(String, String), super::submission::Submission>,
     /// Everything waiting on an external answer; released per owner on every terminal path.
     pub(super) waiters: super::waiters::Waiters,
     /// Open delivery topics and their subscriber count; a conversation topic pins its session.
@@ -108,6 +112,7 @@ impl Engine {
             durable_acks: Default::default(),
             acks: BTreeMap::new(),
             active: BTreeMap::new(),
+            submissions: BTreeMap::new(),
             waiters: Default::default(),
             interest: BTreeMap::new(),
             epoch: clock.id(),
@@ -296,6 +301,7 @@ impl Engine {
             Method::CommandsQuery => self.query_acks(p).await,
             Method::SessionList => self.list_sessions(p).await,
             Method::SessionSubagents => self.subagents_query(p).await,
+            Method::SessionClose => self.close_runtime_session(p).await,
             Method::SkillsReferenceCatalog => self.skill_catalog(p).await,
             Method::SessionCreate => self.import_shared_context(p).await,
             Method::ProviderUpdateAccountConfig => self.update_account(p).await,

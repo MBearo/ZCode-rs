@@ -118,6 +118,9 @@ impl Engine {
         if let Some(refs) = item.get("sharedContextRefs") {
             c.payload["context_refs"] = refs.clone();
         }
+        if let Some(tools) = item.get("toolDisallowlist") {
+            c.payload["toolDisallowlist"] = tools.clone();
+        }
         if self
             .select(&c.payload, Some(self.session_selection(id)?))
             .is_err()
@@ -153,7 +156,6 @@ impl Engine {
         };
         self.publish(id, deltas)?;
         self.persist(id, None).await?;
-        // 与 Node 一致：排队输入的 inputId（queueItemId）即模型请求的 query id。
-        self.start_run_for(id, turn, item["queueItemId"].as_str().map(str::to_owned))
+        self.start_run(id, turn)
     }
 }

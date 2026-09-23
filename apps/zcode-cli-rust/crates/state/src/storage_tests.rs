@@ -57,7 +57,11 @@ async fn close_draft_storage_is_atomic_and_refuses_promoted_history() {
     conn.execute_batch("CREATE TRIGGER reject_close BEFORE INSERT ON rust_command BEGIN SELECT RAISE(FAIL,'injected close ACK failure'); END;").unwrap();
     assert!(
         store
-            .discard_draft("w", "s", ("close".into(), json!({"status":"accepted"})))
+            .discard_draft(
+                "w",
+                "s",
+                Some(("close".into(), json!({"status":"accepted"})))
+            )
             .await
             .is_err()
     );
@@ -69,7 +73,7 @@ async fn close_draft_storage_is_atomic_and_refuses_promoted_history() {
     // 原子首发与延迟清理冲突时，不能把已有 canonical 消息的记录当成空草稿删除。
     assert!(
         store
-            .discard_draft("w", "s", ("close".into(), json!({})))
+            .discard_draft("w", "s", Some(("close".into(), json!({}))))
             .await
             .is_err()
     );
@@ -116,7 +120,11 @@ async fn single_session_load_does_not_parse_unrelated_histories() {
     .unwrap();
     assert!(store.load_session("w", "s").await.unwrap().is_some());
     store
-        .discard_draft("w", "s", ("close".into(), json!({"status":"accepted"})))
+        .discard_draft(
+            "w",
+            "s",
+            Some(("close".into(), json!({"status":"accepted"}))),
+        )
         .await
         .unwrap();
     assert!(store.load_session("w", "s").await.unwrap().is_none());

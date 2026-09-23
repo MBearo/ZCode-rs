@@ -57,7 +57,7 @@ pub enum Input {
 }
 
 pub use crate::contract_events::{
-    Event, EventSink, Guide, ModelOutput, RequestKind, RequestOrigin, RunEvent,
+    Event, EventSink, Guide, ModelOutput, RequestAuth, RequestKind, RequestOrigin, RunEvent,
 };
 #[async_trait]
 pub trait SessionStore: Send + Sync {
@@ -82,7 +82,7 @@ pub trait SessionStore: Send + Sync {
         &self,
         _workspace: &str,
         _id: &str,
-        _ack: (String, Value),
+        _ack: Option<(String, Value)>,
     ) -> Result<()> {
         anyhow::bail!("Draft reclamation unavailable")
     }

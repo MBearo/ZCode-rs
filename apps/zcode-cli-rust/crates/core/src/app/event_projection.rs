@@ -86,6 +86,7 @@ impl Engine {
                 let _ = committed.send(Some(crate::contract::Guide {
                     messages,
                     origin: None,
+                    tool_disallowlist: vec![],
                 }));
                 return Ok(());
             }

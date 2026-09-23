@@ -52,24 +52,6 @@ impl Engine {
                 );
             }
         }
-        for key in ["toolDisallowlist"] {
-            if p.get(key)
-                .is_some_and(|v| v.as_array().is_none_or(|a| !a.is_empty()))
-            {
-                bail!("Unsupported input field: {key}");
-            }
-        }
-        for key in [
-            "modelExecution",
-            "automationId",
-            "offPeakTaskId",
-            "offPeakRunType",
-            "browserAmbientContext",
-        ] {
-            if p.get(key).is_some() {
-                bail!("Unsupported input field: {key}");
-            }
-        }
         if p.get("heldQueueDisposition")
             .is_some_and(|v| !matches!(v.as_str(), Some("clearQueueAndSend" | "keepQueueAndSend")))
         {

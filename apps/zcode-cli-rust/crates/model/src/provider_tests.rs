@@ -47,9 +47,13 @@ fn provider_and_request_auth_headers_override_identity_but_not_attribution() {
     let model = model(
         "openai-chat-completions",
         "https://openrouter.ai/api/v1",
-        &[("x-title", "Provider Title"), ("X-ZCode-Trace-Id", "forged")],
+        &[
+            ("x-title", "Provider Title"),
+            ("X-ZCode-Trace-Id", "forged"),
+        ],
     );
-    let auth = json!({"requestAuth":{"headers":{"X-TITLE":"Auth Title","authorization":"Token t"}}});
+    let auth =
+        json!({"requestAuth":{"headers":{"X-TITLE":"Auth Title","authorization":"Token t"}}});
     let headers = model.headers(Some("key"), &auth, &origin()).unwrap();
     assert_eq!(header(&headers, "x-title"), Some("Auth Title"));
     assert_eq!(header(&headers, "authorization"), Some("Token t"));
@@ -64,7 +68,10 @@ fn provider_and_request_auth_headers_override_identity_but_not_attribution() {
     assert_eq!(names.len(), unique.len(), "{names:?}");
     // 每次尝试都有新的 x-request-id。
     let again = model.headers(Some("key"), &auth, &origin()).unwrap();
-    assert_ne!(header(&headers, "x-request-id"), header(&again, "x-request-id"));
+    assert_ne!(
+        header(&headers, "x-request-id"),
+        header(&again, "x-request-id")
+    );
 }
 
 #[test]
@@ -79,7 +86,9 @@ fn anthropic_adds_bearer_only_without_explicit_authorization() {
         "https://example.invalid",
         &[("Authorization", "Custom c")],
     );
-    let headers = explicit.headers(Some("k"), &Value::Null, &origin()).unwrap();
+    let headers = explicit
+        .headers(Some("k"), &Value::Null, &origin())
+        .unwrap();
     assert_eq!(header(&headers, "authorization"), Some("Custom c"));
 }
 

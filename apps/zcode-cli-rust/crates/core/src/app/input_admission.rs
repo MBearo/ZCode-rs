@@ -22,12 +22,21 @@ impl Engine {
         }
         let selected = self.select(&c.payload, Some(self.session_selection(id)?))?;
         let mut content = self.input_content(id, &c.payload)?;
+        let request_content = super::submission::ambient_content(
+            &content,
+            c.payload["text"].as_str().unwrap_or(""),
+            &c.payload,
+        );
         if c.payload["_userSteer"] == true
             && let Some(text) = content.as_str()
         {
             content = crate::domain::prompt::user_steer(text).into();
         }
-        self.apply_selection(id, selected)?;
+        // 与 Node 一致：执行级选型只用于本轮，不写入会话选择。
+        let execution = super::submission::execution(&c.payload, selected.clone());
+        if execution.is_none() {
+            self.apply_selection(id, selected)?;
+        }
         let s = self.sessions.get_mut(id).context("Session unavailable")?;
         if c.payload["planEnabled"] == false {
             s.plan_enabled = false;
@@ -117,9 +126,16 @@ impl Engine {
                 .collect::<Vec<_>>();
             s.append_message(json!({"role":"user","content":format!("<task-notification>{}</task-notification>", serde_json::to_string(&statuses)?)}));
         }
-        s.append_message(json!({"role":"user","content":content}));
+        let mut message = json!({"role":"user","content":content});
+        if let Some(request) = request_content {
+            // 浏览器环境上下文只进入模型请求；落盘与 rows 保留用户原文（重启后消失，同 Node）。
+            message["_zcode_request_content"] = request;
+        }
+        s.append_message(message);
         let mut payload = c.payload.clone();
         payload.as_object_mut().unwrap().remove("context_refs");
+        // 凭据与单次执行选项不属于可持久化的 intent。
+        super::submission::strip_transient(&mut payload);
         s.history
             .inputs
             .push(crate::domain::history::InputBoundary {
@@ -132,6 +148,12 @@ impl Engine {
                 kind: c.kind.clone(),
                 payload,
             });
+        // 每个会话同一时刻至多一个待启动的输入；失败路径遗留的旧条目在此清除。
+        self.submissions.retain(|(session, _), _| session != id);
+        self.submissions.insert(
+            (id.to_owned(), turn.clone()),
+            super::submission::Submission::new(&c.payload, &c.command_id, execution),
+        );
         Ok((turn, input))
     }
     pub(super) fn new_turn_rows(&self, id: &str) -> Vec<Value> {

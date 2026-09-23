@@ -120,12 +120,14 @@ impl HttpModel {
                 .stream_idle_timeout_ms
                 .saturating_add(u64::from(attempt - 1) * 30_000)
         };
-        let key = if self.config.account_access.is_some() {
-            auth["requestAuth"]["apiKey"].as_str().map(str::to_owned)
-        } else {
-            self.config
+        // Node applyModelRequestAuth：请求级鉴权的 apiKey 覆盖任意 provider 的配置 key。
+        let key = match auth["requestAuth"]["apiKey"].as_str() {
+            Some(key) => Some(key.to_owned()),
+            None if self.config.account_access.is_some() => None,
+            None => self
+                .config
                 .api_key()
-                .map_err(|_| ModelFailure::new("auth_failed", false))?
+                .map_err(|_| ModelFailure::new("auth_failed", false))?,
         };
         let headers = self.headers(key.as_deref(), auth, &output.origin())?;
         let mut request = self.client().await?.post(&self.url).body(body);
@@ -228,7 +230,10 @@ impl HttpModel {
                     .map_err(|_| ModelFailure::cancelled())?;
             }
             let mut output = TextBuffer::new(sink);
-            let auth = if let Some(access) = &self.config.account_access {
+            // 本轮冻结鉴权（modelExecution.requestAuth）直接生效，不向 Host 请求。
+            let auth = if let Some(frozen) = &sink.request_auth {
+                serde_json::json!({"headersApplied":true,"requestAuth":frozen.0})
+            } else if let Some(access) = &self.config.account_access {
                 let (reply, received) = tokio::sync::oneshot::channel();
                 sink.send(Event::RequestAuth {
                     provider: self.config.provider_id.clone(),

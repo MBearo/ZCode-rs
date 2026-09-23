@@ -58,6 +58,7 @@ methods! {
     SessionRead => "session/read",
     SessionList => "session/list",
     SessionSubagents => "session/subagents",
+    SessionClose => "session/close",
     RuntimeCapabilities => "runtime/capabilities",
     ProcessChildProcesses => "process/childProcesses",
     WorkspaceReadPresentation => "workspace/readPresentation",

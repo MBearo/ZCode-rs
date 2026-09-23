@@ -30,6 +30,8 @@ pub(super) async fn run(
     if !skills.enabled {
         definitions.retain(|d| d["function"]["name"] != "Skill");
     }
+    // 与 Node 一致：禁用集合只从提供给模型的定义中移除；执行边界不据此拦截（D1）。
+    hide(&mut definitions, &history.tool_disallowlist);
     let profiles = if definitions.iter().any(|d| d["function"]["name"] == "Agent") {
         tools.agent_profiles(cancel).await?
     } else {
@@ -48,10 +50,7 @@ pub(super) async fn run(
         agent["function"]["description"] =
             format!("{base}\n\nCurrent profile catalog (authoritative):\n{descriptions}").into();
     }
-    let tool_tokens = definitions
-        .iter()
-        .map(|d| d.to_string().encode_utf16().count().div_ceil(3))
-        .sum();
+    let mut tool_tokens = definition_tokens(&definitions);
     let mut turns = 0;
     // 本 run 的请求归属副本；Engine 在引导输入提交时下发新 origin。
     let mut current = sink.clone();
@@ -237,6 +236,16 @@ pub(super) async fn run(
             if let Some(origin) = guide.origin {
                 current.origin = origin;
             }
+            if !guide.tool_disallowlist.is_empty() {
+                // automation 引导不会重新开轮，限制必须并入当前 loop（Node turn-guide-drain）。
+                for name in guide.tool_disallowlist {
+                    if !history.tool_disallowlist.contains(&name) {
+                        history.tool_disallowlist.push(name);
+                    }
+                }
+                hide(&mut definitions, &history.tool_disallowlist);
+                tool_tokens = definition_tokens(&definitions);
+            }
             for message in guide.messages {
                 history.push(message);
             }
@@ -353,4 +362,19 @@ async fn execute(
         content,
         failed,
     ))
+}
+fn hide(definitions: &mut Vec<Value>, disallowed: &[String]) {
+    if !disallowed.is_empty() {
+        definitions.retain(|d| {
+            !disallowed
+                .iter()
+                .any(|name| d["function"]["name"] == name.as_str())
+        });
+    }
+}
+fn definition_tokens(definitions: &[Value]) -> usize {
+    definitions
+        .iter()
+        .map(|d| d.to_string().encode_utf16().count().div_ceil(3))
+        .sum()
 }

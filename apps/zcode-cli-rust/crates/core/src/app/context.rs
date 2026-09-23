@@ -12,6 +12,8 @@ pub(super) struct RunContext {
     pub goal: Option<crate::domain::goal::Goal>,
     pub skills: Option<crate::domain::skills::SkillCatalog>,
     pub prompt_snapshot: Option<crate::domain::prompt::PromptSnapshot>,
+    /// Tools hidden from the provider for this turn (Node turn `toolDisallowlist`).
+    pub tool_disallowlist: Vec<String>,
     pub state: ContextState,
     pub messages: Vec<Value>,
     pub manual: Option<String>,
@@ -35,6 +37,7 @@ impl RunContext {
             goal: None,
             skills: None,
             prompt_snapshot: None,
+            tool_disallowlist: vec![],
             state,
             messages,
             manual,
@@ -220,6 +223,7 @@ pub(super) async fn hidden_summary(
         tx,
         // 压缩不是 agent step，与 Node 一样按 other 归属。
         origin: sink.origin.auxiliary(),
+        request_auth: sink.request_auth.clone(),
     };
     let request = model.complete(messages, &[], &hidden, cancel);
     tokio::pin!(request);

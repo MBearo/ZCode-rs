@@ -14,6 +14,17 @@ impl Engine {
             return Ok(c.ack("rejected", s.revision, Some("guard.capabilityUnsupported")));
         }
         self.validate_input(&c.payload)?;
+        if c.payload.get("modelExecution").is_some() && (s.running() || !s.queue.is_empty()) {
+            // 与 Node Core admission 一致：执行级凭据不能进入队列或引导，忙时直接拒绝。
+            let reason = if s.running() {
+                "turn_not_steerable"
+            } else {
+                "no_active_turn"
+            };
+            let mut ack = c.ack("failed", s.revision, Some("activePrompt"));
+            ack["message"] = format!("Core prompt admission rejected: {reason}").into();
+            return Ok(ack);
+        }
         if let Some(reference) = crate::domain::shared_context::reference(&c.payload)? {
             s.shared_context
                 .as_ref()
@@ -50,6 +61,12 @@ impl Engine {
                 c.payload["requestedDelivery"] = s.followup_mode.clone().into();
             }
             let mut item = queue_item(&c, s, self.clock.now());
+            // 队列项保存计算后的禁用集合，提升或引导时原样套用（Node queueItem.toolDisallowlist）。
+            let disallowed = super::submission::Submission::new(&c.payload, &c.command_id, None)
+                .tool_disallowlist;
+            if !disallowed.is_empty() {
+                item["toolDisallowlist"] = disallowed.into();
+            }
             super::shared_context::reserve(s, &c.payload, item["queueItemId"].as_str().unwrap())?;
             if start_now {
                 item["delivery"]["admitted"] = "startNow".into();
@@ -66,15 +83,16 @@ impl Engine {
                     item["steer"] = json!({"state":"steering"});
                 }
             }
-            ack["result"] = json!({"type":"inputAccepted","delivery":if start_now{"startNow"}else{"queue"},"inputId":item["queueItemId"]});
+            // 与 Node 一致：ACK 的 inputId 是 commandId，队列项另有 queue_<commandId>。
+            ack["result"] = json!({"type":"inputAccepted","delivery":if start_now{"startNow"}else{"queue"},"inputId":c.command_id});
             s.queue.push(item);
             s.revision += 1;
             self.publish(&id, vec![])?;
             None
         } else {
-            let (turn, input_id) = self.admit_input(&id, &c, shared)?;
+            let (turn, _) = self.admit_input(&id, &c, shared)?;
             ack["result"] =
-                json!({"type":"inputAccepted","delivery":"startNow","inputId":input_id});
+                json!({"type":"inputAccepted","delivery":"startNow","inputId":c.command_id});
             self.publish(&id, self.new_turn_rows(&id))?;
             Some(turn)
         };
@@ -128,7 +146,10 @@ impl Engine {
                 return Ok(());
             }
         };
-        self.apply_selection(id, selection)?;
+        // 执行级 run 中的引导不改模型选择（Node modelSelectionScope === "execution"）。
+        if self.active.get(id).is_none_or(|a| a.execution.is_none()) {
+            self.apply_selection(id, selection)?;
+        }
         let s = self.sessions.get_mut(id).unwrap();
         s.queue.remove(pos);
         s.revision += 1;
@@ -166,14 +187,24 @@ impl Engine {
         // 与 Node turn-guide-drain 一致：引导输入续上当前轮，其后的模型请求归属到该输入。
         let origin = self.active.get_mut(id).map(|active| {
             let mut next = (*active.origin).clone();
-            next.query_id = item["queueItemId"]
+            next.query_id = item["sourceCommandId"]
                 .as_str()
                 .map(str::to_owned)
                 .or(next.query_id);
             active.origin = std::sync::Arc::new(next);
             active.origin.clone()
         });
-        let _ = committed.send(Some(crate::contract::Guide { messages, origin }));
+        let tool_disallowlist = item["toolDisallowlist"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|t| t.as_str().map(str::to_owned))
+            .collect();
+        let _ = committed.send(Some(crate::contract::Guide {
+            messages,
+            origin,
+            tool_disallowlist,
+        }));
         Ok(())
     }
 }

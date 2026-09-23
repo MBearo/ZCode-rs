@@ -1,15 +1,68 @@
 use super::Engine;
-use crate::{contract::StorageCommitFailure, domain::protocol::Command};
+use crate::{
+    contract::{RuntimeError, StorageCommitFailure},
+    domain::protocol::Command,
+};
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 
 impl Engine {
+    /// V4 `deleteSession`: closes the runtime session and records the command ACK.
     pub(super) async fn close_session(&mut self, c: &Command) -> Result<Value> {
         ensure!(
             c.payload.as_object().is_some_and(|p| p.is_empty()),
             "deleteSession requires an empty payload"
         );
         let id = c.session_id.as_deref().context("Session id required")?;
+        ensure!(self.sessions.contains_key(id), "Session unavailable");
+        let ack = self.shut_down(id, Some(c)).await?;
+        Ok(ack.expect("command close returns an ACK"))
+    }
+
+    /// Legacy `session/close` (Node `closeSession`): same shutdown without an ACK,
+    /// optionally conditional on the session's current persistence.
+    pub(super) async fn close_runtime_session(&mut self, p: &Value) -> Result<Value> {
+        let params = p
+            .as_object()
+            .filter(|o| {
+                o.keys()
+                    .all(|k| k == "sessionId" || k == "expectedPersistence")
+            })
+            .ok_or_else(|| RuntimeError::invalid_params("Unsupported session/close fields"))?;
+        let id = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| RuntimeError::invalid_params("sessionId: required"))?;
+        let expected = match params.get("expectedPersistence") {
+            None => None,
+            Some(Value::String(v)) if v == "deferred" || v == "immediate" => Some(v.as_str()),
+            Some(_) => return Err(RuntimeError::invalid_params("expectedPersistence: invalid")),
+        };
+        let Some(session) = self.sessions.get(id) else {
+            return Err(RuntimeError::Coded {
+                code: -32004,
+                message: format!("Session is not active: {id}"),
+            }
+            .into());
+        };
+        let current = if session.phase == crate::domain::execution::Phase::Draft {
+            "deferred"
+        } else {
+            "immediate"
+        };
+        // 连接切换与跨端首发可能并发；条件关闭在 owner 上原子判断，不依赖客户端旧快照。
+        if expected.is_some_and(|expected| expected != current) {
+            return Ok(json!({"closed": false}));
+        }
+        self.shut_down(id, None).await?;
+        Ok(json!({"closed": true}))
+    }
+
+    /// Shared close path: cancels foreground and background work, releases waiters,
+    /// uploads and subscriptions, reclaims history-less drafts and publishes the
+    /// index removal. Persisted history stays in the store.
+    async fn shut_down(&mut self, id: &str, command: Option<&Command>) -> Result<Option<Value>> {
         let s = self.sessions.get_mut(id).context("Session unavailable")?;
         s.auto_drain = false;
         if let Some(goal) = &mut s.goal {
@@ -21,6 +74,7 @@ impl Engine {
             active.cancel.cancel();
         }
         self.release_waiters(id);
+        self.submissions.retain(|(session, _), _| session != id);
         self.cancel_children(id).await?;
         self.tools.cancel_session(id, None).await?;
         // TS close 会释放执行资源；必须收齐真正的终态，不能提前 ACK 后让 Shell 继续写文件。
@@ -51,14 +105,14 @@ impl Engine {
             }
         }
         s.revision += 1;
-        let ack = c.ack("accepted", s.revision, None);
+        let ack = command.map(|c| (c.key(), c.ack("accepted", s.revision, None)));
         if s.rows.is_empty() && s.messages.is_empty() && s.shared_context.is_none() {
             self.store
-                .discard_draft(&self.workspace, id, (c.key(), ack.clone()))
+                .discard_draft(&self.workspace, id, ack.clone())
                 .await
                 .context(StorageCommitFailure)?;
         } else {
-            self.persist(id, Some((c.key(), ack.clone()))).await?;
+            self.persist(id, ack.clone()).await?;
         }
         // 删除命令只关闭 runtime。历史保留在 Store，重开从新 epoch 冷恢复；失败不得发移除事实。
         self.uploads.0.retain(|key, _| key.1 != id);
@@ -66,8 +120,10 @@ impl Engine {
         self.session_access.remove(id);
         self.closed.insert(id.into());
         self.publish_index(id, None)?;
-        self.acks.insert(c.key(), ack.clone());
-        Ok(ack)
+        Ok(ack.map(|(key, ack)| {
+            self.acks.insert(key, ack.clone());
+            ack
+        }))
     }
 
     pub(super) async fn ensure_session(&mut self, id: &str) -> Result<()> {

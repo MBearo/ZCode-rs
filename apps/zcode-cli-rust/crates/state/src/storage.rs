@@ -21,7 +21,12 @@ pub(super) enum Operation {
     ),
     Load(String, oneshot::Sender<Result<StoredWorkspace>>),
     LoadSession(String, String, oneshot::Sender<Result<Option<Session>>>),
-    DiscardDraft(String, String, (String, Value), oneshot::Sender<Result<()>>),
+    DiscardDraft(
+        String,
+        String,
+        Option<(String, Value)>,
+        oneshot::Sender<Result<()>>,
+    ),
     Commit(
         String,
         Option<Box<SessionWrite>>,
@@ -297,11 +302,25 @@ impl SessionWrite {
             message_start,
             messages: session.messages[message_start..]
                 .iter()
-                .map(serde_json::to_string)
+                .map(persisted_message)
                 .collect::<Result<_, _>>()?,
             creation_ack: session.creation_ack.clone(),
             pending_acks: session.pending_acks.clone(),
         })
+    }
+}
+/// Model-only rewrites (`_zcode_request_content`) live in memory only; the stored
+/// transcript keeps the user's own text, like Node after a restart.
+fn persisted_message(message: &Value) -> serde_json::Result<String> {
+    match message.get("_zcode_request_content") {
+        None => serde_json::to_string(message),
+        Some(_) => {
+            let mut message = message.clone();
+            message
+                .as_object_mut()
+                .map(|m| m.remove("_zcode_request_content"));
+            serde_json::to_string(&message)
+        }
     }
 }
 pub(super) fn load_items(
@@ -347,7 +366,7 @@ fn discard_draft(
     conn: &mut Connection,
     workspace: &str,
     id: &str,
-    ack: (String, Value),
+    ack: Option<(String, Value)>,
 ) -> Result<()> {
     let tx = conn.transaction()?;
     // 关闭草稿不是真删历史；存储边界再次核查，避免 future caller 用过期 draft 状态误删首发。
@@ -363,7 +382,10 @@ fn discard_draft(
         "DELETE FROM rust_session WHERE workspace=?1 AND id=?2",
         params![workspace, id],
     )?;
-    tx.execute("INSERT INTO rust_command VALUES(?1,?2,?3) ON CONFLICT(workspace,key) DO UPDATE SET ack=excluded.ack", params![workspace,ack.0,serde_json::to_string(&ack.1)?])?;
+    // session/close 没有命令 ACK；deleteSession 的 ACK 与删除同事务提交。
+    if let Some((key, ack)) = ack {
+        tx.execute("INSERT INTO rust_command VALUES(?1,?2,?3) ON CONFLICT(workspace,key) DO UPDATE SET ack=excluded.ack", params![workspace,key,serde_json::to_string(&ack)?])?;
+    }
     tx.commit()?;
     Ok(())
 }

@@ -91,8 +91,8 @@ test("Shared queue reservation survives edit/reorder, is released by deletion, a
   const { f, h, release } = await blocked();
   try {
     const queued = h.envelope("sendText", "shared-A", { text: "queued", context_refs: ref() });
-    const ack = await h.command(queued);
-    const queueId = (ack.result as any).inputId;
+    await h.command(queued);
+    const queueId = `queue_${queued.commandId}`;
     let s = await sharedSnapshot(h);
     assert.equal(s.sharedContextImport.status, "reserved");
     assert.deepEqual(s.queue.items[0].sharedContextRefs, ref());
@@ -117,12 +117,13 @@ test("Shared queue reservation survives edit/reorder, is released by deletion, a
     assert.equal((await sharedSnapshot(h)).sharedContextImport.status, "pending");
     assert.equal((await h.command(queued)).status, "failed");
     const next = h.envelope("sendText", "shared-A", { text: "again", context_refs: ref() });
-    const nextId = (await h.command(next)).result as any;
+    await h.command(next);
+    const nextQueueId = `queue_${next.commandId}`;
     await h.command(h.envelope("sendText", "shared-A", { text: "unrelated" }));
     s = await sharedSnapshot(h);
     await h.command({
       ...h.envelope("editQueueItem", "shared-A", {
-        queueItemId: nextId.inputId,
+        queueItemId: nextQueueId,
         newText: "edited",
       }),
       baseRevision: s.revision,
@@ -130,12 +131,12 @@ test("Shared queue reservation survives edit/reorder, is released by deletion, a
     s = await sharedSnapshot(h);
     await h.command({
       ...h.envelope("reorderQueueItem", "shared-A", {
-        queueItemId: nextId.inputId,
+        queueItemId: nextQueueId,
         beforeQueueItemId: null,
       }),
       baseRevision: s.revision,
     });
-    await h.command(h.envelope("sendQueuedNow", "shared-A", { queueItemId: nextId.inputId }));
+    await h.command(h.envelope("sendQueuedNow", "shared-A", { queueItemId: nextQueueId }));
     await finished(h, next.commandId);
     assert.equal((await sharedSnapshot(h)).sharedContextImport.status, "attached");
     const attached = f.requests.find((r) => r.messages.some((m: any) => m.content === markdown))!;

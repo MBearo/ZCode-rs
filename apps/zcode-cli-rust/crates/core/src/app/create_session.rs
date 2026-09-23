@@ -49,9 +49,10 @@ impl Engine {
             let mut input_command = c.clone();
             input_command.payload = input;
             input_command.session_id = Some(id.clone());
-            let (t, input_id) = self.admit_input(&id, &input_command, None)?;
+            let (t, _) = self.admit_input(&id, &input_command, None)?;
             turn = Some(t);
-            ack["result"]["input"] = json!({"delivery":"startNow","inputId":input_id});
+            // 与 Node 一致：inputId 即提交该输入的 commandId（也是模型请求的 query id）。
+            ack["result"]["input"] = json!({"delivery":"startNow","inputId":c.command_id});
         }
         self.publish(&id, vec![])?;
         ack["revisionAtDecision"] = self.sessions[&id].revision.into();

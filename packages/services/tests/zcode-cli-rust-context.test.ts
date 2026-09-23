@@ -255,7 +255,9 @@ test("Rust held queue validates the confirmed set, keeps or clears atomically an
     await h.command(h.envelope("sendText", id, { text: "hold" }));
     const queued = h.envelope("sendText", id, { text: "queued" });
     const queuedAck = await h.command(queued);
-    const queueId = (queuedAck.result as Message).inputId;
+    // 与 Node 一致：ACK inputId 是 commandId，队列项 id 为 queue_<commandId>。
+    assert.equal((queuedAck.result as Message).inputId, queued.commandId);
+    const queueId = `queue_${queued.commandId}`;
     await h.command(h.envelope("stop", id));
     await terminal(h, id, "completedInterrupted", after);
     const reject = await h.command(h.envelope("sendText", id, { text: "new" }));
@@ -316,9 +318,9 @@ test("Rust sendQueuedNow preempts the active request and retains original queue 
     const a = h.envelope("sendText", id, { text: "first queued" });
     const b = h.envelope("sendText", id, { text: "prioritized" });
     await h.command(a);
-    const queued = await h.command(b);
+    await h.command(b);
     const promote = h.envelope("sendQueuedNow", id, {
-      queueItemId: (queued.result as Message).inputId,
+      queueItemId: `queue_${b.commandId}`,
     });
     assert.equal((await h.command(promote)).status, "accepted");
     assert.equal((await h.command(promote)).status, "duplicate");
