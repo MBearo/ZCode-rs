@@ -1,0 +1,146 @@
+# Rust M0：核心与传输解耦
+
+总设计见 [P0/P1 架构设计](rust-p0-p1-architecture.md) 第 4、5.1 节。M0 是后续里程碑的地基，**不改变业务语义**；对外可观察的变化只有本文件明确列出的几项（错误码、分片阈值、sessions-index 去重、`tui` 子命令），均向 Node 现有行为对齐。
+
+## 1. 交付项与顺序
+
+每项单独提交，提交前 Rust 单测与 Node 驱动的集成测试全部通过。
+
+1. **命令行子命令**：`app-server`（参数与现有完全一致）与 `tui`（占位）。
+2. **错误模型**：类型化 `RuntimeError`，由 app-server 统一映射为 JSON-RPC 错误。
+3. **连接模型与投递迁移**：core 只产出类型化事件；JSON-RPC 编解码、订阅、帧编码与分片、stdout 写出迁到 app-server。
+4. **RunScope**：run 期等待者（权限、问答、Host 鉴权）统一归属，run 结束时一次性收口。
+5. **状态枚举**：`Mode`、`Phase`、`TaskType`，serde 格式不变。
+6. **类型化命令与 schema 漂移检查**。
+7. **日志**：`tracing` 非阻塞 JSONL 写出。
+
+## 2. 所有者与事件顺序
+
+| 状态                                                                                                     | 唯一所有者                          | 其他层的访问方式                         |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------- | ---------------------------------------- |
+| 会话事实、队列、rows、seq/epoch、驻留 pin 计数、上传会话                                                 | core `Engine` actor                 | 发送 `RuntimeRequest`，接收 `ServerMsg`  |
+| JSON-RPC id、订阅注册表（subscriptionId、connectionId、topic、ordinal、暂停/需恢复标记）、帧编码、写队列 | app-server 事件循环（单任务，无锁） | 无                                       |
+| Host 反向请求的 id 映射                                                                                  | app-server                          | core 通过 `HostRequest`/`HostReply` 交互 |
+| 进程句柄、MCP 连接、文件观察                                                                             | tools 适配器（不变）                | 端口调用                                 |
+
+```mermaid
+sequenceDiagram
+    participant In as stdin 线程
+    participant AS as app-server 循环
+    participant E as Engine actor
+    participant W as stdout 线程
+    In->>AS: 行（JSON）
+    AS->>AS: 解码与路由（未知方法、参数错误在此返回）
+    AS->>E: ClientMsg::Request{id, RuntimeRequest}
+    E->>E: 处理并提交
+    E-->>AS: ServerMsg::Reply{id, result}
+    E-->>AS: ServerMsg::Event(...)（该请求产生的事件，在 Reply 之后）
+    AS->>AS: 事件扇出到订阅，按 seq 去重，编码帧
+    AS->>W: 批量写（每批一次 flush）
+```
+
+- **顺序**：同一连接上，actor 先入队 `Reply`，再入队该请求产生的事件（与 Node 先写响应行、再写 initial frame 一致）。所有 `ServerMsg` 走同一条有序通道。
+- **订阅快照**：`subscribe`、`resync` 与 `drained` 补齐时，app-server 向 actor 请求 `TopicSnapshot { topic }`，actor 原子返回 `(epoch, seq, snapshot)`。订阅者的 `sent_seq` 设为该 seq，之后只接受 `from ≥ sent_seq` 的增量，更早的增量丢弃。这样快照与增量之间不依赖时序巧合。
+- **驻留 pin**：订阅建立或撤销时，app-server 向 actor 发 `TopicInterest { topic, delta: ±1 }`。actor 以计数替代现在对 `self.subscriptions` 的扫描，计数大于 0 的会话不被 LRU 淘汰。
+- **连接关闭**：`v4/connection/flow closed` 时，app-server 移除该连接的订阅（M0 保持 Rust 现有行为；与 Node 一致的保留语义在 M8 调整），并通知 actor 清理该连接的上传（`ConnectionClosed`）。
+- **不反压 actor**：actor 到 app-server 的通道有界，但 app-server 循环只做内存操作，从不阻塞在 IO 上。写队列按字节记账：超过高水位（64 MiB）时，该连接的会话订阅标记为需恢复并丢弃增量，写队列降到低水位（16 MiB）后以快照补齐；RPC 响应不丢弃。
+
+## 3. 接口
+
+`core-api` 删除未使用的 `SessionRuntime`、`AppServer`、`TuiFrontend`、`CoreRuntime`，新增：
+
+```rust
+pub enum ClientMsg {
+    Request { id: RequestId, body: RuntimeRequest },
+    HostReply { id: String, result: Value },
+    Eof,
+}
+pub enum ServerMsg {
+    Reply { id: Option<RequestId>, result: Result<Value, RuntimeError> },
+    Event(RuntimeEvent),
+    HostRequest { id: String, method: &'static str, params: Value },
+    HostNotification { method: &'static str, params: Value },
+}
+pub enum RuntimeEvent {
+    ConversationDeltas { session: String, from: u64, to: u64, deltas: Arc<Vec<Value>> },
+    ConversationReset { session: String },                 // 历史改写后要求订阅者重新取快照
+    IndexChanged { from: u64, to: u64, op: IndexOp },       // 仅在摘要实际变化时产生
+    ConfigChanged { from: u64, to: u64 },
+}
+```
+
+- `RuntimeRequest` 在第 1–5 项期间为 `{ method: Method, params: Value }`，`Method` 是现有方法名的枚举；第 6 项把 `v4/command` 的 payload 换成类型化 `Command`。
+- `TopicSnapshot`、`TopicInterest`、`ConnectionClosed` 是 app-server 专用的内部请求，不出现在 wire 上。
+- 响应值暂保持 `Value`，内容与现在逐字节一致；类型化响应随后续里程碑按需推进。
+
+## 4. 错误映射
+
+对齐 Node `server-types.ts` 的 `parseParams` 与 `toProtocolError`：
+
+| 情况                                                | code   | message                                                       | data                       |
+| --------------------------------------------------- | ------ | ------------------------------------------------------------- | -------------------------- |
+| 未知方法                                            | -32601 | 与 Node 一致                                                  | —                          |
+| 请求或参数结构不合法                                | -32602 | `Invalid params — <path>: <msg>; …`（最多 5 项，`(+N more)`） | issues 数组                |
+| 请求超过大小上限                                    | -32600 | 现有文本                                                      | —                          |
+| JSON 解析失败                                       | -32700 | 现有文本                                                      | —                          |
+| 其他业务故障（含 V4 的 `fault.*`/`proto.*` 原因码） | -32603 | 原因码或错误文本                                              | `{ name: "Error", code? }` |
+
+- 业务代码只构造 `RuntimeError`（`InvalidParams`、`SessionUnavailable`、`Fault { message, code }` 等），不直接拼 JSON-RPC 错误；未分类的 `anyhow` 错误一律视为 `Fault`（-32603），不再默认为 -32602。
+- `-32004`（`Session is not active: <id>` / `Session not found: <id>`）、`-32009`、`-32010`、`-32031` 只用于旧 `session/*` 方法，在 M3 启用，本里程碑只定义类型。V4 方法对未知会话按 Node 走业务故障（-32603）。
+- 现有明确属于参数结构检查的错误（字段缺失、类型不符、取值越界）改用 `InvalidParams`；其余保持文本不变、code 改为 -32603。集成测试中断言 -32602 的用例逐条对照 Node 行为更新。
+
+## 5. 帧编码与分片
+
+移植 Node `packages/shared/src/zcode-protocol-v4/wire-codec.ts`：
+
+- 物理尺寸取三者最大值：
+  - CLI NDJSON 行：`{"method":"v4/conversation/frame","params":wire}` 的 UTF-8 字节数 + 1；
+  - Channel socket 帧：Channel payload（header 按 `Number.MAX_SAFE_INTEGER` 事件 id 的最坏情况计算）+ 13 字节 socket 头；
+  - 手机 relay：固定信封（transport id 取 256 字符上限）加上 `4 * ceil(channelPayload / 3)` 字节的 base64。
+- 上限：物理帧 1 MiB，逻辑帧 16 MiB（超出报 `proto.frameAssemblyTooLarge`），分片数 1024（超出报 `proto.frameFragmentCountExceeded`）。
+- complete 帧的物理尺寸超限时才分片：用二分法求最大分片字节数（按最坏的索引位数测量），crc32 为 8 位小写十六进制；每个分片都复测，超限时报 `proto.frameEnvelopeTooLarge`（fail closed）。
+- payload 只序列化一次：deltas 先编码为 `Box<RawValue>`，所有订阅者的帧共享同一份；测量尺寸时直接复用编码结果，不再重复序列化。
+- 写出：stdout 线程用 `BufWriter`，每取到一批消息只 flush 一次。
+
+## 6. RunScope
+
+- `Active` 持有 `RunScope { run_id, turn_id, cancel, permissions, questions, host_requests }`；辅助任务（文本生成、连通性测试）持有同构的 `JobScope`。
+- 删除 `Engine.permissions`、`Engine.auth`，并把 run 期问答从 `Engine.questions` 移入 scope；冷恢复的问答语义不变。
+- scope 在 `Finished`、stop、close、EOF、存储失败任一路径被移除时，所有等待者以取消解决，并在同一次提交中关闭对应 pending interaction；Host 请求发出 `providerRuntimeHeadersCancelled`（与现在一致）。
+- 迟到事件继续按 `session + run_id` 丢弃。
+
+## 7. 状态枚举
+
+- `Mode { Build, Edit, Yolo, Auto }` 加 `plan_enabled`；`Phase`（`draft`、`running`、`completedSuccess`、`completedInterrupted`、`error` 等现有取值）；`TaskType`。均 `#[serde(rename_all = "camelCase")]` 或逐项 rename，保证 SQLite 与 wire 中的字符串不变。
+- 未知取值：反序列化失败时报错，不静默回退（`legacy_mode` 缺省 `build` 的现有规则保留）。
+
+## 8. 命令行
+
+```text
+zcode-cli-rust app-server --stdio [--cwd] [--data-dir] [--import-ts-db] [--config] [--surface desktop|terminal] [--prepare-storage]
+zcode-cli-rust tui        # 占位：stderr 输出“TUI 尚未实现”，退出码 2
+```
+
+`app-server` 的参数、默认值、互斥关系与现在完全一致；Host 与集成测试的启动命令不改。
+
+## 9. 日志
+
+- `host` 提供初始化：`tracing` + `tracing-appender` 非阻塞写入 `ZCODE_LOG_DIR` 或 `~/.zcode/cli/log/zcode-rust-YYYY-MM-DD.jsonl`（本地日期）。
+- 行字段对齐 Node `serialize.ts`：`timestamp`、`level`、`event`、`module`、`message`、`traceId`、`sessionId`、`turnId`、`toolCallId`、`durationMs`、`status`、`context`、`error`。
+- key 匹配 `(?i)api[-_]?key|authorization|cookie|credential|password|secret|token` 的字段替换为 `[Redacted]`。
+- 默认级别 info；`ZCODE_RUNTIME_ENV=development` 时为 debug。队列满时丢弃并计数，不阻塞调用方。`ZCODE_LOG_CONSOLE=1` 时同时写 stderr。
+- 7 天保留策略在 M9 实现。stdout 仍只输出协议帧。
+
+## 10. 验收
+
+- 现有 63 个 Rust 测试与 `pnpm test:zcode-cli-rust` 的 Node 集成测试全部通过（错误码断言按第 4 节对照 Node 调整）。
+- 新增测试：
+  - 响应先于该请求产生的帧（订阅、发送文本）；
+  - 分片：任意 payload 下每个物理帧在三种测量方式下都 ≤ 1 MiB，且与 Node `encodeTopicWireFrames` 对同一输入的分片数一致（夹具由脚本生成）；
+  - 文本增量不产生 sessions-index 帧，标题或状态变化才产生；
+  - 错误码：未知方法 -32601、参数错误 -32602 且带字段摘要、业务故障 -32603；
+  - `tui` 退出码 2；
+  - RunScope：stop、EOF、存储失败时所有等待者被解决，没有遗留 pending interaction；
+  - 日志：写入 JSONL，敏感字段被脱敏，stdout 无日志输出；
+  - 写队列超过高水位时 actor 不阻塞，订阅以快照恢复。
+- 性能：`scripts/bench-zcode-cli-rust-suite.mjs` 同机对比 M0 前后，流式期间控制 RPC p95 与首段延迟不退化；结果写入 `docs/reports/`。
