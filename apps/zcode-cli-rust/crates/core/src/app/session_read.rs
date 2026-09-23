@@ -92,7 +92,7 @@ impl Engine {
             error["type"] = "runtime".into();
             projection["lastError"] = error;
         }
-        let mut runtime = json!({"eventSeq":s.seq,"stateRevision":s.revision,"pendingRequestIds":self.auth.iter().filter(|(_, (session,_,_,_))|session==id).map(|(id,_)|id).collect::<Vec<_>>()});
+        let mut runtime = json!({"eventSeq":s.seq,"stateRevision":s.revision,"pendingRequestIds":self.waiters.host_ids(id).collect::<Vec<_>>()});
         if let Some(delivery) = delivery {
             runtime["deliveryKind"] = delivery.into();
         }

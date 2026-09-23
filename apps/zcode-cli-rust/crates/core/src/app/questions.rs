@@ -7,12 +7,6 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-pub(super) struct WaitingQuestion {
-    pub session: String,
-    pub run: String,
-    pub eligible: bool,
-    pub reply: oneshot::Sender<QuestionAnswer>,
-}
 impl Engine {
     pub(super) async fn register_question(
         &mut self,
@@ -40,9 +34,9 @@ impl Engine {
         s.pending.push(json!({"interactionId":interaction,"kind":"userInput","anchorRowId":row["rowId"],"createdAt":now,"payload":input.payload(call)}));
         s.revision += 1;
         s.updated_at = now;
-        self.questions.insert(
+        self.waiters.add_question(
             interaction,
-            WaitingQuestion {
+            super::waiters::WaitingQuestion {
                 session: id.into(),
                 run: run.into(),
                 eligible: self.auto_resolution_preference,
@@ -59,7 +53,7 @@ impl Engine {
             .as_str()
             .context("Interaction id required")?;
         let revision = self.sessions.get(id).map_or(0, |s| s.revision);
-        let owned = self.questions.get(interaction).is_some_and(|q| {
+        let owned = self.waiters.question(interaction).is_some_and(|q| {
             q.session == id
                 && self
                     .active
@@ -83,15 +77,11 @@ impl Engine {
             let deltas = self.settle_question(id, interaction, &answer)?;
             let ack = self.commit_interaction(c, deltas).await?;
             // 答案与 ACK 提交成功后才释放 waiter；事务失败不会产生下一个工具结果或模型请求。
-            let q = self.questions.remove(interaction).unwrap();
+            let q = self.waiters.take_question(interaction).unwrap();
             let _ = q.reply.send(answer);
             return Ok(ack);
         }
-        if self
-            .permissions
-            .get(interaction)
-            .is_some_and(|(owner, _)| owner == id)
-        {
+        if self.waiters.permission_owned_by(interaction, id) {
             let option = c.payload["answer"]["optionId"]
                 .as_str()
                 .context("Permission option required")?;
@@ -106,8 +96,9 @@ impl Engine {
                 .retain(|p| p["interactionId"] != interaction);
             self.activate_question_head(id);
             let ack = self.commit_interaction(c, vec![]).await?;
-            let (_, reply) = self.permissions.remove(interaction).unwrap();
-            let _ = reply.send(option == "allowOnce");
+            if let Some(reply) = self.waiters.take_permission(interaction) {
+                let _ = reply.send(option == "allowOnce");
+            }
             return Ok(ack);
         }
         Ok(c.ack("noop", revision, Some("proto.alreadyResolved")))

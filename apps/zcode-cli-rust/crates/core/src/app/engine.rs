@@ -9,7 +9,7 @@ use crate::{
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 /// Actor output: one ordered channel carrying replies, events and host requests.
@@ -33,7 +33,6 @@ pub struct Engine {
     pub(super) auxiliary: BTreeMap<String, super::auxiliary::Auxiliary>,
     pub(super) registry: Option<Arc<dyn crate::contract::ModelRegistry>>,
     pub(super) workspace_path: String,
-    pub(super) auth: BTreeMap<String, (String, String, Value, oneshot::Sender<Value>)>,
     pub(super) workspace: String,
     pub(super) config: Option<ModelIdentity>,
     pub(super) store: Arc<dyn SessionStore>,
@@ -49,7 +48,8 @@ pub struct Engine {
     pub(super) durable_acks: std::collections::BTreeSet<String>,
     pub(super) acks: BTreeMap<String, Value>,
     pub(super) active: BTreeMap<String, Active>,
-    pub(super) permissions: BTreeMap<String, (String, oneshot::Sender<bool>)>,
+    /// Everything waiting on an external answer; released per owner on every terminal path.
+    pub(super) waiters: super::waiters::Waiters,
     /// Open delivery topics and their subscriber count; a conversation topic pins its session.
     pub(super) interest: BTreeMap<String, usize>,
     pub(super) epoch: String,
@@ -57,7 +57,6 @@ pub struct Engine {
     pub(super) config_seq: u64,
     pub(super) outbox: Vec<ServerMsg>,
     pub(super) auto_resolution_preference: bool,
-    pub(super) questions: BTreeMap<String, super::questions::WaitingQuestion>,
     pub(super) question_timing: (u64, u64),
     pub(super) events: mpsc::Sender<RunEvent>,
     pub(super) event_rx: mpsc::Receiver<RunEvent>,
@@ -92,7 +91,6 @@ impl Engine {
             auxiliary: BTreeMap::new(),
             registry: None,
             workspace_path: workspace.clone(),
-            auth: BTreeMap::new(),
             workspace,
             config,
             store,
@@ -108,14 +106,13 @@ impl Engine {
             durable_acks: Default::default(),
             acks: BTreeMap::new(),
             active: BTreeMap::new(),
-            permissions: BTreeMap::new(),
+            waiters: Default::default(),
             interest: BTreeMap::new(),
             epoch: clock.id(),
             index_seq: 0,
             config_seq: 0,
             outbox: vec![],
             auto_resolution_preference: true,
-            questions: BTreeMap::new(),
             question_timing: (60_000, 300_000),
             events,
             event_rx,
@@ -149,7 +146,7 @@ impl Engine {
                     _=cancel.cancelled()=>break,
                     message=input.recv()=>match message {
                         Some(ClientMsg::Request{token,method,params})=>self.request(Call{token,method,params},&output).await?,
-                        Some(ClientMsg::HostReply{id,result})=> { if let Some((_,_,_,reply)) = self.auth.remove(&id) { let _ = reply.send(result); } },
+                        Some(ClientMsg::HostReply{id,result})=> { if let Some(wait) = self.waiters.take_host(&id) { let _ = wait.reply.send(result); } },
                         Some(ClientMsg::TopicReleased{topic})=>{self.release_topic(&topic);self.trim_resident().await?;},
                         Some(ClientMsg::ConnectionClosed{connection})=>{self.uploads.clear_connection(&connection);self.trim_resident().await?;},
                         Some(ClientMsg::Eof) | None=>break,
@@ -190,9 +187,7 @@ impl Engine {
             session.auto_drain = false;
             session.queued_now = None;
         }
-        self.permissions.clear();
-        self.questions.clear();
-        self.auth.clear();
+        self.waiters.clear();
         for id in self.sessions.keys() {
             self.tools.cancel_session(id, None).await?;
         }

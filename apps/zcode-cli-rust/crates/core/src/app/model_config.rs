@@ -195,21 +195,23 @@ impl Engine {
         self.publish_config();
         Ok(())
     }
+    /// Cancel `id`'s pending host credential requests and announce each cancellation.
     pub(super) fn cancel_auth(&mut self, id: &str) {
-        let keys = self
-            .auth
-            .iter()
-            .filter(|(_, (session, _, _, _))| session == id)
-            .map(|(k, _)| k.clone())
-            .collect::<Vec<_>>();
-        for key in keys {
-            if let Some((session, _, workspace, _)) = self.auth.remove(&key) {
-                self.outbox
-                    .push(crate::contract::ServerMsg::HostNotification {
-                        method: "interaction/providerRuntimeHeadersCancelled",
-                        params: json!({"requestId":key,"sessionId":session,"workspace":workspace}),
-                    });
-            }
+        let released = self.waiters.release_host(id);
+        self.announce_cancelled(released);
+    }
+    /// Release every waiter owned by `id` (terminal path of a run, job or session).
+    pub(super) fn release_waiters(&mut self, id: &str) {
+        let released = self.waiters.release(id);
+        debug_assert!(!self.waiters.holds(id), "waiters of {id} survived release");
+        self.announce_cancelled(released);
+    }
+    fn announce_cancelled(&mut self, released: Vec<(String, super::waiters::HostWait)>) {
+        for (key, wait) in released {
+            self.outbox.push(crate::contract::ServerMsg::HostNotification {
+                method: "interaction/providerRuntimeHeadersCancelled",
+                params: json!({"requestId":key,"sessionId":wait.owner,"workspace":wait.workspace}),
+            });
         }
     }
 }

@@ -99,9 +99,13 @@ impl Engine {
                 let request_id = format!("rust-auth-{}", self.clock.id());
                 let workspace = json!({"workspaceKey":self.workspace,"workspacePath":self.workspace_path,"workspaceIdentity":self.workspace});
                 let params = json!({"requestId":request_id,"sessionId":id,"turnId":turn,"workspace":workspace,"providerId":provider,"modelSelection":selection,"accountAccess":access,"reason":"model-request"});
-                self.auth.insert(
+                self.waiters.add_host(
                     request_id.clone(),
-                    (id.clone(), event.run_id, workspace, reply),
+                    super::waiters::HostWait {
+                        owner: id.clone(),
+                        workspace,
+                        reply,
+                    },
                 );
                 self.outbox.push(crate::contract::ServerMsg::HostRequest {
                     id: request_id,
@@ -112,7 +116,8 @@ impl Engine {
             return Ok(());
         }
         if matches!(event.event, Event::Finished { .. }) {
-            self.cancel_auth(&id);
+            // run 结束：权限、问答与 Host 请求统一在此收口，不再分散清理。
+            self.release_waiters(&id);
         }
         let now = self.clock.now();
         let s = self.sessions.get_mut(&id).unwrap();
@@ -225,7 +230,7 @@ impl Engine {
                 s.pending.push(json!({"interactionId":interaction,"kind":"permission","anchorRowId":row["rowId"],"createdAt":now,
                     "payload":{"kind":"permission","toolCallId":call["id"],"toolName":call["function"]["name"],"summary":format!("Allow {}?",call["function"]["name"].as_str().unwrap()),"detail":call["function"]["arguments"],"options":[{"optionId":"allowOnce","label":"Allow once","kind":"allowOnce"},{"optionId":"deny","label":"Deny","kind":"deny"}]}}));
                 deltas.push(json!({"op":"row.upserted","row":row}));
-                self.permissions.insert(interaction, (id.clone(), reply));
+                self.waiters.add_permission(interaction, &id, reply);
             }
             Event::ToolDone {
                 id: call_id,
@@ -322,8 +327,6 @@ impl Engine {
                         .filter(|r| r["turnId"] == turn)
                         .map(|r| json!({"op":"row.upserted","row":r})),
                 );
-                self.permissions.retain(|_, (session, _)| session != &id);
-                self.questions.retain(|_, q| q.session != id);
                 self.active.remove(&id);
             }
         }

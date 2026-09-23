@@ -5,6 +5,7 @@ mod event_projection;
 mod model_config;
 mod queries;
 mod topics;
+mod waiters;
 pub use crate::contract::{Event, RunEvent};
 pub use engine::Engine;
 mod input_validation;

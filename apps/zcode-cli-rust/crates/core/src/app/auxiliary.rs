@@ -98,8 +98,14 @@ impl Engine {
                 let request_id = format!("rust-auth-{}", self.clock.id());
                 let workspace = json!({"workspaceKey":self.workspace,"workspacePath":self.workspace_path,"workspaceIdentity":self.workspace});
                 let params = json!({"requestId":request_id,"sessionId":id,"workspace":workspace,"providerId":provider,"modelSelection":selection,"accountAccess":access,"reason":"model-request"});
-                self.auth
-                    .insert(request_id.clone(), (id.clone(), id, workspace, reply));
+                self.waiters.add_host(
+                    request_id.clone(),
+                    super::waiters::HostWait {
+                        owner: id,
+                        workspace,
+                        reply,
+                    },
+                );
                 self.outbox.push(ServerMsg::HostRequest {
                     id: request_id,
                     method: "interaction/requestProviderRuntimeHeaders",

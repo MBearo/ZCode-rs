@@ -20,7 +20,7 @@ impl Engine {
             return;
         }
         let key = p["interactionId"].as_str().unwrap();
-        if self.questions.get(key).is_none_or(|q| !q.eligible) {
+        if self.waiters.question(key).is_none_or(|q| !q.eligible) {
             return;
         }
         let now = self.clock.now();
@@ -102,7 +102,7 @@ impl Engine {
             self.publish(&id, deltas)?;
             self.persist(&id, None).await?;
             if let Some(answer) = answered
-                && let Some(q) = self.questions.remove(&key)
+                && let Some(q) = self.waiters.take_question(&key)
             {
                 let _ = q.reply.send(answer);
             }
@@ -118,14 +118,7 @@ impl Engine {
         let mut count = 0;
         if !enabled {
             let mut changed = std::collections::BTreeSet::new();
-            let targets = self
-                .questions
-                .iter_mut()
-                .map(|(key, q)| {
-                    q.eligible = false;
-                    (q.session.clone(), key.clone())
-                })
-                .collect::<Vec<_>>();
+            let targets = self.waiters.disable_auto_resolution();
             for (id, key) in targets {
                 if self.snooze_question(&id, &key) {
                     count += 1;

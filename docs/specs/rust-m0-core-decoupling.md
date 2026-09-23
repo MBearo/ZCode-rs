@@ -102,12 +102,15 @@ pub enum RuntimeEvent {
 - payload 只序列化一次：deltas 先编码为 `Box<RawValue>`，所有订阅者的帧共享同一份；测量尺寸时直接复用编码结果，不再重复序列化。
 - 写出：stdout 线程用 `BufWriter`，每取到一批消息只 flush 一次。
 
-## 6. RunScope
+## 6. 等待者收口（RunScope）
 
-- `Active` 持有 `RunScope { run_id, turn_id, cancel, permissions, questions, host_requests }`；辅助任务（文本生成、连通性测试）持有同构的 `JobScope`。
-- 删除 `Engine.permissions`、`Engine.auth`，并把 run 期问答从 `Engine.questions` 移入 scope；冷恢复的问答语义不变。
-- scope 在 `Finished`、stop、close、EOF、存储失败任一路径被移除时，所有等待者以取消解决，并在同一次提交中关闭对应 pending interaction；Host 请求发出 `providerRuntimeHeadersCancelled`（与现在一致）。
-- 迟到事件继续按 `session + run_id` 丢弃。
+实现时调整为单一登记表：放在每个 run 上靠 drop 自动收口，做不到发送 Host 取消通知，问答计时器也要跨 scope 扫描，反而更复杂。
+
+- `Waiters` 统一登记权限、问答与 Host 请求三类等待者，按所属者（会话 id 或辅助任务 id）索引；删除 `Engine.permissions`、`Engine.questions`、`Engine.auth` 三个分散的 map。
+- 唯一收口入口 `release_waiters(owner)`：run 结束（`Finished`）、会话关闭与 runtime 停止都只调用它。释放时丢弃应答发送端，等待中的工具以取消收口；Host 请求逐条发出 `providerRuntimeHeadersCancelled`（与原行为一致）。
+- stop、改写历史、暂停 Goal 等只需提前取消凭据等待的路径调用 `cancel_auth(owner)`，它同样经 `Waiters` 统一处理。
+- debug 构建断言释放后该所有者不再持有任何等待者；单测覆盖三类等待者只释放指定所有者。
+- 迟到事件继续按 `session + run_id` 丢弃。M2 的交互状态机在 `Waiters` 上扩展，不另建登记路径。
 
 ## 7. 状态枚举
 
