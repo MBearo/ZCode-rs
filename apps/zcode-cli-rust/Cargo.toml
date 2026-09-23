@@ -60,6 +60,8 @@ serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
+# 已是 hyper/reqwest 的传递依赖；runtime 只用门面宏，订阅者在 host 内实现。
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 url = "2"
 
@@ -112,6 +114,7 @@ zcode-cli-model.workspace = true
 zcode-cli-tools.workspace = true
 zcode-cli-app-server.workspace = true
 zcode-cli-tui.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

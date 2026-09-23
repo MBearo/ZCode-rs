@@ -129,11 +129,12 @@ zcode-cli-rust tui        # 占位：stderr 输出“TUI 尚未实现”，退�
 
 ## 9. 日志
 
-- `host` 提供初始化：`tracing` + `tracing-appender` 非阻塞写入 `ZCODE_LOG_DIR` 或 `~/.zcode/cli/log/zcode-rust-YYYY-MM-DD.jsonl`（本地日期）。
-- 行字段对齐 Node `serialize.ts`：`timestamp`、`level`、`event`、`module`、`message`、`traceId`、`sessionId`、`turnId`、`toolCallId`、`durationMs`、`status`、`context`、`error`。
-- key 匹配 `(?i)api[-_]?key|authorization|cookie|credential|password|secret|token` 的字段替换为 `[Redacted]`。
-- 默认级别 info；`ZCODE_RUNTIME_ENV=development` 时为 debug。队列满时丢弃并计数，不阻塞调用方。`ZCODE_LOG_CONSOLE=1` 时同时写 stderr。
-- 7 天保留策略在 M9 实现。stdout 仍只输出协议帧。
+- runtime 只用 `tracing` 门面宏（已是 hyper/reqwest 的传递依赖），目标前缀 `zcode`；`host::logging` 实现一个 JSONL `Subscriber`，未引入 tracing-subscriber/tracing-appender。
+- 写入 `ZCODE_LOG_DIR` 或 `~/.zcode/cli/log/zcode-rust-YYYY-MM-DD.jsonl`（本地日期，跨日切换文件）。与 Node 同目录便于收集，文件名前缀不同，避免两个进程追加同一文件。
+- 行字段对齐 Node `serialize.ts`：`timestamp`、`level`、`module`、`message`，以及 `event`、`traceId`、`sessionId`、`turnId`、`toolCallId`、`durationMs`、`status`、`error` 等保留字段，其余进入 `context`。key 含 `api-key/apikey/authorization/cookie/credential/password/secret/token`（不区分大小写）的字段替换为 `[Redacted]`。
+- 只接收 `zcode*` 目标的事件，依赖库的内部事件不进入产品日志。默认 info，`ZCODE_RUNTIME_ENV=development` 时为 debug；`ZCODE_LOG_CONSOLE=1` 时同时写 stderr。stdout 仍只输出协议帧。
+- 有界队列（4096 行）+ 单写线程；队列满时丢弃并计数，不阻塞调用方。全局订阅者在进程内一直持有发送端，所以退出时不 join 写线程，而是发送 flush 标记并最多等待 1 秒，保证退出不被日志卡住。
+- 当前记录：`runtime.started`、`run.started`、`run.finished`（含 outcome 与失败原因）、`rpc.request.failed`（只记方法与错误码，不记可能含用户内容的错误文本）、`storage.commit.failed`。7 天保留策略在 M9 实现。
 
 ## 10. 验收
 

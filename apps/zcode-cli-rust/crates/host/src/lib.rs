@@ -4,6 +4,7 @@ use zcode_cli_domain as domain;
 mod context_git;
 pub mod context_source;
 pub mod legacy_paths;
+pub mod logging;
 mod question_timing;
 pub use context_source::WorkspaceContext;
 pub use question_timing::question_timing;

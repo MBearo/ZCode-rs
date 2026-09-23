@@ -294,6 +294,14 @@ impl Engine {
                 } else {
                     "success"
                 };
+                tracing::info!(
+                    target: "zcode::runtime",
+                    event = "run.finished",
+                    session_id = id.as_str(),
+                    outcome,
+                    failure = model_failure.as_ref().map(|f| f.reason),
+                    "Run finished"
+                );
                 s.phase = match outcome {
                     "interrupted" => crate::domain::execution::Phase::CompletedInterrupted,
                     "failed" => crate::domain::execution::Phase::Error,

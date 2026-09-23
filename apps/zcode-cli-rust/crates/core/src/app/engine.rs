@@ -306,12 +306,27 @@ impl Engine {
         let result = result.map_err(|error| {
             // 失败请求不能发布半途产生的事件。
             self.outbox.clear();
-            RuntimeError::classify(&error)
+            let error = RuntimeError::classify(&error);
+            // 只记录方法与错误码：错误文本可能包含用户路径或内容，不写入日志。
+            tracing::warn!(
+                target: "zcode::runtime",
+                event = "rpc.request.failed",
+                method = call.method.as_str(),
+                code = error.code(),
+                "Request failed"
+            );
+            error
         });
         let mut batch = vec![ServerMsg::Reply { token, result }];
         batch.append(&mut self.outbox);
         output.send(batch).await?;
         if storage_failed {
+            tracing::error!(
+                target: "zcode::runtime",
+                event = "storage.commit.failed",
+                method = call.method.as_str(),
+                "Storage commit failed; stopping runtime"
+            );
             return Err(StorageCommitFailure.into());
         }
         self.trim_resident().await?;

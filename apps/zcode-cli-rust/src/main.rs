@@ -39,6 +39,20 @@ async fn run() -> Result<()> {
 }
 
 async fn app_server(args: AppServerArgs) -> Result<()> {
+    let home = std::env::var_os("HOME")
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let _logs = zcode_cli_host::logging::init(zcode_cli_host::logging::LogOptions::from_env(&home));
+    tracing::info!(
+        target: "zcode::runtime",
+        event = "runtime.started",
+        version = env!("CARGO_PKG_VERSION"),
+        surface = args.surface.as_str(),
+        prepare_storage = args.prepare_storage,
+        "App server starting"
+    );
     let question_timing = zcode_cli_host::question_timing()?;
     let requested_cwd = args.cwd.unwrap_or(std::env::current_dir()?);
     let cwd = tokio::fs::canonicalize(&requested_cwd)

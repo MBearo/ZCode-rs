@@ -18,6 +18,14 @@ impl Engine {
             self.model.clone().context("Model configuration required")?
         };
         let session = self.sessions.get_mut(id).context("Session unavailable")?;
+        tracing::info!(
+            target: "zcode::runtime",
+            event = "run.started",
+            session_id = id,
+            provider = identity.provider_id.as_str(),
+            model = identity.model_id.as_str(),
+            "Run started"
+        );
         let estimated = session.active_context_tokens();
         let run_id = session.run_id.clone().context("Run reservation required")?;
         let cancel = CancellationToken::new();
