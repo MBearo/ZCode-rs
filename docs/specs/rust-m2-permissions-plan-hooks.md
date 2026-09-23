@@ -282,7 +282,40 @@ sequenceDiagram
   - 任意参数命令表遮蔽同名命令的逐条策略；
   - `hostname` 的正则针对完整命令文本。
 - **原型链键**：JS 对象查找会命中原型链，例如 `constructor foo` 在 Node 中抛异常。Rust 使用自有键查找，不模拟这个异常，该命令按普通未知命令处理（非只读，使用精确规则）。这一处是唯一的有意差异，原因是异常属于实现崩溃，不是产品行为。
-- **夹具**：用 esbuild 打包 Node 的解析、判定与策略模块作为对照源，生成约 300 条命令的 `{analysis, readOnly, suggestions, ruleResults}`，并在临时目录中构造 git 场景。
+- **夹具**：生成脚本经 tsx 直接调用 Node 的解析、判定与策略模块作为对照源，生成约 300 条命令的 `{analysis, readOnly, suggestions, ruleResults}`，并在临时目录中构造 git 场景。
+
+### 4.1 模块与所有者
+
+- `crates/bash-parse`（`zcode-cli-bash-parse`）：unbash 4.0.1 词法与语法的移植，以及 `bash-command-parser.ts` 的遍历，对外只暴露 `analyze(command) -> Analysis` 与 `is_permission_safe`。纯函数，无 IO。
+  - 约束：Node 判为可判定（无解析错误、无不支持语法、无动态词）时，`Analysis` 全部字段逐一相同；Node 判为不可判定时，Rust 也必须判为不可判定，其余字段不参与任何决策。
+  - 长度上限与 `trim` 按 JS 语义：10 000 个 UTF-16 单元，`String.prototype.trim` 的空白集合。
+- `crates/bash`（`zcode-cli-bash`）：只读策略、策略表、危险参数回调、始终允许建议、fig 命令注册表与 Bash 规则求值。纯函数，无 IO；git 运行环境是否安全作为输入传入。
+  - 策略表与注册表由生成脚本从 Node 导出为 JSON（解析后的对象，保留顺序），以 `include_str!` 嵌入并在首次使用时解析；回调按名称绑定，启动测试断言每个名称都有实现。
+- `crates/tools`：Bash 工具的权限入口。按会话当前 Bash 工作目录做 git 运行环境检查（异步文件 IO，只在命令调用 git 时执行，同一次判定只查一次），然后调用 `zcode-cli-bash` 得到能力与规则策略。
+- `ToolPort::permission(session, name, args)`（异步）返回 `{capability, rules, suggestions}`。默认实现由同步的静态能力 `capability()` 与通用建议组成；工具端口只为 Bash 覆盖它。Core 的 `authorize` 把 `rules` 传给 `Snapshot::check`，替换临时的精确匹配。
+- Rust 的 Bash 始终在工作区目录执行（尚未实现 Node 的 `cd` 持久化），git 运行环境检查因此使用工作区目录。
+
+```mermaid
+sequenceDiagram
+    participant R as run task (authorize)
+    participant T as tools::ToolPort
+    participant G as git safety (async fs)
+    participant B as zcode-cli-bash
+    participant P as domain Policy
+    R->>T: permission(session, "Bash", args)
+    T->>B: analyze(command)
+    alt 某个调用是 git
+        T->>G: unsafe_context(cwd)
+        G-->>T: bool
+    end
+    T->>B: read_only(analysis, git_unsafe) / rule_policy(...)
+    B-->>T: capability, BashRules, suggestions
+    T-->>R: ToolPermission
+    R->>P: Snapshot::check(tool, input, capability, BashRules)
+    P-->>R: Decision
+```
+
+- 声明：M2.3 通过全部夹具与集成测试后，`permissionModes` 改为 `[build, edit, yolo, auto]`。
 
 ## 5. M2.4 Plan
 

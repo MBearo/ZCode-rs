@@ -261,3 +261,85 @@ test("Rust subagent permission prompts surface on the root session with their or
     await f.close();
   }
 });
+
+/** The model runs `bash:<command>` as one Bash call, then answers "done". */
+function bashFixture() {
+  return fixture({
+    permissionMode: "build",
+    respond(request, response) {
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      const last = request.messages.at(-1);
+      if (last.role === "user" && String(last.content).startsWith("bash:")) {
+        const command = String(last.content).slice("bash:".length);
+        event(response, {
+          tool_calls: [
+            {
+              index: 0,
+              id: "bash",
+              type: "function",
+              function: { name: "Bash", arguments: JSON.stringify({ command }) },
+            },
+          ],
+        });
+        end(response, "tool_calls");
+      } else {
+        event(response, { content: "done" });
+        end(response, "stop");
+      }
+    },
+  });
+}
+
+test("Rust build mode runs read-only Bash without asking", async () => {
+  const f = await bashFixture();
+  try {
+    const h = f.start();
+    const id = await session(h);
+    for (const command of ["ls -la", "git status --short", "cat missing.txt 2>/dev/null"]) {
+      const before = h.messages.length;
+      await h.command(h.envelope("sendText", id, { text: `bash:${command}` }));
+      await h.completed(id, before);
+      assert.equal(prompted(h, id, before), false, command);
+    }
+    const bash = (await rows(h, id)).filter((r) => r.kind === "toolCall");
+    assert.equal(bash.length, 3);
+    assert(bash.every((r) => r.status !== "cancelled"));
+  } finally {
+    await f.close();
+  }
+});
+
+test("Rust build mode asks before other Bash commands with a stable prefix rule", async () => {
+  const f = await bashFixture();
+  try {
+    const h = f.start();
+    const id = await session(h);
+    let before = h.messages.length;
+    await h.command(h.envelope("sendText", id, { text: "bash:git init -q" }));
+    let p = await prompt(h, id, before);
+    assert.equal(p.payload.toolName, "Bash");
+    const always = p.payload.options.find((o: Message) => o.optionId === "allowAlways");
+    assert.deepEqual(always.response.permissionUpdates, [
+      {
+        type: "addRules",
+        behavior: "allow",
+        rules: [{ toolName: "Bash", ruleContent: "git init:*" }],
+      },
+    ]);
+    await answer(h, id, p.interactionId, { optionId: "deny" });
+    await h.completed(id, before);
+    await assert.rejects(access(join(f.cwd, ".git")));
+
+    // 重定向到文件不可判定前缀，只能保存精确命令。
+    before = h.messages.length;
+    await h.command(h.envelope("sendText", id, { text: "bash:echo hi > out.txt" }));
+    p = await prompt(h, id, before);
+    const exact = p.payload.options.find((o: Message) => o.optionId === "allowAlways");
+    assert.equal(exact.response.permissionUpdates[0].rules[0].ruleContent, "echo hi > out.txt");
+    await answer(h, id, p.interactionId, { optionId: "allowOnce" });
+    await h.completed(id, before);
+    assert.equal((await readFile(join(f.cwd, "out.txt"), "utf8")).trim(), "hi");
+  } finally {
+    await f.close();
+  }
+});

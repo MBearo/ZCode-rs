@@ -9,7 +9,7 @@ use crate::{
     contract::{PermissionAnswer, PermissionRequest},
     domain::{
         execution::ExecutionState,
-        permission::{self as policy, Behavior, Rule, RulePolicy, Ruleset},
+        permission::{self as policy, RulePolicy, Ruleset},
     },
 };
 use anyhow::{Context, Result};
@@ -37,27 +37,14 @@ pub(crate) struct Snapshot {
     pub working_directory: String,
 }
 
-/// Bash rules before the command classifier exists: only content-less rules and
-/// exact commands match, every other command counts as unanalysable (Node
-/// `evaluateBashRules` for an unsafe command).
-struct ExactBashRules<'a>(&'a str);
-
-impl RulePolicy for ExactBashRules<'_> {
-    fn evaluate(&self, _behavior: Behavior, rules: &[&Rule]) -> bool {
-        let command = self.0;
-        rules.iter().any(|rule| match rule.rule_content.as_deref() {
-            None | Some("") => true,
-            Some(content) => content == command || content == command.trim(),
-        })
-    }
-}
-
 impl Snapshot {
+    /// `rules` is the tool's own rule matching (Bash), `None` for generic subjects.
     pub fn check(
         &self,
         tool: &str,
         input: &Value,
         capability: &policy::ToolCapability,
+        rules: Option<&dyn RulePolicy>,
     ) -> policy::Decision {
         let ctx = policy::Context {
             tool,
@@ -66,16 +53,11 @@ impl Snapshot {
             plan_enabled: self.state.plan_enabled,
             working_directory: Some(&self.working_directory),
         };
-        let bash = input["command"].as_str().map(ExactBashRules);
-        let rule_policy = bash
-            .as_ref()
-            .filter(|_| tool == "Bash")
-            .map(|p| p as &dyn RulePolicy);
         self.policy.check(
             &ctx,
             &policy::resolve(tool, capability),
             Some(&self.project_rules),
-            rule_policy,
+            rules,
         )
     }
 }

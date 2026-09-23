@@ -60,7 +60,7 @@ pub use crate::contract_events::{
     Event, EventSink, Guide, ModelOutput, PermissionAnswer, PermissionRequest, RequestAuth,
     RequestKind, RequestOrigin, RunEvent,
 };
-pub use crate::contract_tools::{ToolOutput, ToolPort};
+pub use crate::contract_tools::{ToolOutput, ToolPermission, ToolPort};
 #[async_trait]
 pub trait SessionStore: Send + Sync {
     /// Startup reads only the lightweight persisted index, never every transcript or ACK.

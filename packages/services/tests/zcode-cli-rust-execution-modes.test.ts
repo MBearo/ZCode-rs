@@ -7,17 +7,25 @@ import {
 } from "@zcode/shared";
 import { fixture } from "./zcode-cli-rust-fixture.js";
 
-const native = runtimeExecutionCapabilitiesSchema.parse({
+const yoloOnly = runtimeExecutionCapabilitiesSchema.parse({
   permissionModes: ["yolo"],
+  independentPlanState: false,
+});
+// Rust 在 Bash 只读判定完成后声明全部权限模式；独立 Plan 仍待 EnterPlanMode/ExitPlanMode。
+const native = runtimeExecutionCapabilitiesSchema.parse({
+  permissionModes: ["build", "edit", "yolo", "auto"],
   independentPlanState: false,
 });
 
 test("Execution capabilities gate permissions and Plan without changing the user's intent", () => {
   const build = { mode: "build", planEnabled: false };
-  assert.equal(supportsRuntimeExecution(build, native), false);
+  assert.equal(supportsRuntimeExecution(build, yoloOnly), false);
   assert.deepEqual(build, { mode: "build", planEnabled: false });
-  assert.equal(supportsRuntimeExecution({ mode: "yolo", planEnabled: false }, native), true);
-  assert.equal(supportsRuntimeExecution({ mode: "yolo", planEnabled: true }, native), false);
+  assert.equal(supportsRuntimeExecution({ mode: "yolo", planEnabled: false }, yoloOnly), true);
+  assert.equal(supportsRuntimeExecution({ mode: "yolo", planEnabled: true }, yoloOnly), false);
+  assert.equal(supportsRuntimeExecution({ mode: "plan" }, yoloOnly), false);
+  assert.equal(supportsRuntimeExecution(build, native), true);
+  assert.equal(supportsRuntimeExecution({ mode: "edit", planEnabled: false }, native), true);
   assert.equal(supportsRuntimeExecution({ mode: "plan" }, native), false);
   assert.equal(supportsRuntimeExecution(build), true);
   assert.equal(supportsRuntimeExecution({ mode: "plan" }), true);
@@ -31,7 +39,7 @@ test("Execution capabilities gate permissions and Plan without changing the user
   );
 });
 
-test("Native workspace presentation and both delivery subscriptions expose the same yolo-only capability", async () => {
+test("Native workspace presentation and both delivery subscriptions expose the same capability", async () => {
   const f = await fixture();
   try {
     const h = f.start();
@@ -62,7 +70,7 @@ test("Native workspace presentation and both delivery subscriptions expose the s
       assert.deepEqual(frame.params.frame.payload.snapshot.config.executionCapabilities, native);
     }
     assert.equal(f.requests.length, 0);
-    // 权限判定已在 Engine 中实现，build 不再于 admission 拒绝；能力声明在 Bash 分类器完成前仍只含 yolo。
+    // build 由 Engine 按权限策略执行，不在 admission 拒绝。
     const ack = await h.command(
       h.envelope("createSession", null, {
         workspaceId: f.cwd,

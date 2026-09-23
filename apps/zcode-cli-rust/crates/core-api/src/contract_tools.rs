@@ -104,18 +104,21 @@ pub trait ToolPort: Send + Sync {
             .cloned()
             .unwrap_or_default()
     }
-    /// "Always allow" rules suggested for one call (Node `suggestedPermissionUpdates`).
-    fn suggestions(
-        &self,
-        name: &str,
-        args: &Value,
-        capability: &zcode_cli_domain::permission::ToolCapability,
-    ) -> Vec<zcode_cli_domain::permission::Update> {
-        zcode_cli_domain::permission::default_updates(
+    /// Everything the policy needs for one call: the capability, the tool's own
+    /// rule matching (Node `resolvePermissionRulePolicy`, Bash only) and the
+    /// "always allow" suggestions (`suggestedPermissionUpdates`).
+    async fn permission(&self, session: &str, name: &str, args: &Value) -> ToolPermission {
+        let capability = self.capability(session, name, args);
+        let suggestions = zcode_cli_domain::permission::default_updates(
             name,
             args,
             capability.permission_capability_group.as_deref(),
-        )
+        );
+        ToolPermission {
+            capability,
+            rules: None,
+            suggestions,
+        }
     }
     fn concurrent_safe(&self, _name: &str) -> bool {
         false
@@ -148,6 +151,14 @@ pub trait ToolPort: Send + Sync {
         Ok(())
     }
 }
+/// Permission inputs of one tool call, resolved by the tool port.
+pub struct ToolPermission {
+    pub capability: zcode_cli_domain::permission::ToolCapability,
+    /// Tool-specific rule matching; `None` matches rules on the generic subjects.
+    pub rules: Option<Box<dyn zcode_cli_domain::permission::RulePolicy + Send + Sync>>,
+    pub suggestions: Vec<zcode_cli_domain::permission::Update>,
+}
+
 pub struct ToolOutput {
     pub failed: bool,
     /// Denied by the permission policy or the user; the tool never ran.

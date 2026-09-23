@@ -1,12 +1,14 @@
 use zcode_cli_core_api as contract;
 use zcode_cli_domain as domain;
 mod agent_profiles;
+mod bash_permission;
 mod checkpoint_blobs;
 mod extension_config;
 mod extension_plugins;
 mod file_changes;
 mod file_checkpoints;
 mod file_rewind;
+mod git_safety;
 mod mcp_config;
 mod mcp_connection;
 mod mcp_hub;

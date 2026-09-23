@@ -50,7 +50,7 @@ export async function fixture(
     registry?: boolean;
     legacy?: boolean;
     surface?: "desktop" | "terminal";
-    /** 用户配置的 `permission.mode`；默认 yolo，与 App 按 Rust 声明能力只提交 yolo 一致。 */
+    /** 用户配置的 `permission.mode`；默认 yolo，让既有用例不经审批直接执行工具。 */
     permissionMode?: string | null;
   } = {},
 ) {

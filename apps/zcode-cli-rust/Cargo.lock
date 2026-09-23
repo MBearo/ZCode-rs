@@ -1545,6 +1545,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
 name = "tokio"
 version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1700,6 +1706,15 @@ name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "untrusted"
@@ -2063,6 +2078,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcode-cli-bash"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "zcode-cli-bash-parse",
+ "zcode-cli-domain",
+]
+
+[[package]]
+name = "zcode-cli-bash-parse"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "zcode-cli-core"
 version = "0.1.0"
 dependencies = [
@@ -2250,7 +2284,9 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "unicode-normalization",
  "url",
+ "zcode-cli-bash",
  "zcode-cli-core-api",
  "zcode-cli-domain",
  "zcode-cli-host",

@@ -2,11 +2,11 @@
 
 ## 产品规则
 
-Rust 只声明 yolo，独立 Plan 不支持；TS/旧 runtime 未声明新增能力时沿用既有权限与 Plan 行为。Host transport hello 仍描述 Host 能力，不把它混成每个工作区的执行能力。默认 runtime 不变。
+Rust 声明 build、edit、yolo、auto 四种权限模式（权限由 Engine 按 Node 策略判定），独立 Plan 尚不支持；TS/旧 runtime 未声明新增能力时沿用既有权限与 Plan 行为。Host transport hello 仍描述 Host 能力，不把它混成每个工作区的执行能力。默认 runtime 不变。
 
 新草稿与历史草稿保留用户已有 mode / planEnabled，包括默认 build、历史 Plan 和 Recent。不得把不受支持的权限静默改成 yolo。Composer 显示明确说明，用户通过现有权限菜单选择 Full access 后才能预热和发送；若 Plan 仍开启，需显式关闭。菜单中不支持的项禁用，快捷键只循环受支持项。已开启但不支持的 Plan 仍允许关闭。
 
-能力未知或请求失败时禁止预热/发送，不假设完全访问。正常正文编辑、模型选择和取消运行不受影响。已有会话也遵循此门禁。UI 不是安全边界：Rust 接纳层按 Node `resolveExecutionState` 归一化 mode / Plan，每次工具调用由 Engine 的权限策略判定（见 `rust-m2-permissions-plan-hooks.md`）；Bash 只读判定完成并声明 build 能力之前，App 仍只提交 yolo。
+能力未知或请求失败时禁止预热/发送，不假设完全访问。正常正文编辑、模型选择和取消运行不受影响。已有会话也遵循此门禁。UI 不是安全边界：Rust 接纳层按 Node `resolveExecutionState` 归一化 mode / Plan，每次工具调用由 Engine 的权限策略判定（见 `rust-m2-permissions-plan-hooks.md`）。
 
 ## 唯一事实与接口
 
@@ -32,8 +32,8 @@ sequenceDiagram
 
 ## 验收
 
-- 当前 App schema 接受 Rust yolo-only；两种订阅 delivery 均保留能力字段，TS 缺字段兼容。
-- build/Plan 不自动变成 yolo，不发模型请求、不预热失败重试；用户选择后才可发送。
-- 菜单禁用其他权限与 Plan 开启，快捷键不进入不支持模式；Plan-off 不受限制。
+- App schema 接受 Rust 声明的 `[build, edit, yolo, auto]` 与 `independentPlanState: false`；两种订阅 delivery 均保留能力字段，TS 缺字段兼容。
+- Plan 开启不自动关闭，不发模型请求、不预热失败重试；用户关闭后才可发送。
+- 菜单禁用 Plan 开启，快捷键不进入不支持模式；Plan-off 与四种权限模式不受限制。
 - 同路径不同 workspace identity 分离；服务或进程换代等待新能力，迟到响应不能覆盖。
 - 真实 App 新任务、历史续聊、窄屏权限入口与键盘路径；Rust/App 回归和全部门禁。

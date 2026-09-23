@@ -21,8 +21,13 @@ pub(super) async fn authorize(
     use crate::domain::permission::Behavior;
     let name = call["function"]["name"].as_str().unwrap_or("");
     let snapshot = permissions.borrow().clone();
-    let capability = tools.capability(&sink.session_id, name, args);
-    let decision = snapshot.check(name, args, &capability);
+    let permission = tools.permission(&sink.session_id, name, args).await;
+    let capability = &permission.capability;
+    let rules = permission
+        .rules
+        .as_deref()
+        .map(|r| r as &dyn crate::domain::permission::RulePolicy);
+    let decision = snapshot.check(name, args, capability, rules);
     match decision.behavior {
         Behavior::Allow => Ok(None),
         Behavior::Deny => Ok(Some(refusal(super::permissions::summarize(
@@ -48,7 +53,7 @@ pub(super) async fn authorize(
                 request: crate::contract::PermissionRequest {
                     reason: decision.reason,
                     input: args.clone(),
-                    suggestions: tools.suggestions(name, args, &capability),
+                    suggestions: permission.suggestions.clone(),
                     options_policy,
                 },
                 reply,

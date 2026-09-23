@@ -1,0 +1,17 @@
+[package]
+name = "zcode-cli-bash-parse"
+description = "Byte-compatible port of the Node bash command analysis (unbash 4.0.1) used for tool permissions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

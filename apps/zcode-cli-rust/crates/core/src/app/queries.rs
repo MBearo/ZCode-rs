@@ -4,7 +4,8 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 impl Engine {
     fn execution_capabilities(&self) -> Value {
-        json!({"permissionModes":["yolo"],"independentPlanState":false})
+        // 权限模式按 Node 策略判定；独立 Plan 需要 EnterPlanMode/ExitPlanMode，尚未声明。
+        json!({"permissionModes":["build","edit","yolo","auto"],"independentPlanState":false})
     }
 
     pub(super) fn workspace_config(&self) -> Value {

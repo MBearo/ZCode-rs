@@ -259,6 +259,15 @@ impl ToolPort for WorkspaceTools {
             .cloned()
             .unwrap_or_default()
     }
+    async fn permission(
+        &self,
+        session: &str,
+        name: &str,
+        args: &Value,
+    ) -> crate::contract::ToolPermission {
+        let capability = self.capability(session, name, args);
+        super::bash_permission::resolve(&self.cwd, name, args, capability).await
+    }
     fn concurrent_safe(&self, name: &str) -> bool {
         matches!(
             name,

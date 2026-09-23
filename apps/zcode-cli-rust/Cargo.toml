@@ -10,6 +10,8 @@ members = [
   "crates/state",
   "crates/model",
   "crates/tools",
+  "crates/bash-parse",
+  "crates/bash",
   "crates/app-server",
   "crates/tui",
 ]
@@ -63,11 +65,14 @@ tokio-util = "0.7"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 url = "2"
+unicode-normalization = "0.1"
 
 libc = "0.2"
 tempfile = "3"
 zcode-cli-protocol = { path = "crates/protocol" }
 zcode-cli-domain = { path = "crates/domain" }
+zcode-cli-bash-parse = { path = "crates/bash-parse" }
+zcode-cli-bash = { path = "crates/bash" }
 zcode-cli-core-api = { path = "crates/core-api" }
 zcode-cli-core = { path = "crates/core" }
 zcode-cli-host = { path = "crates/host" }

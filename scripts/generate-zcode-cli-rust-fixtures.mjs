@@ -12,6 +12,11 @@ import { createConfigPort } from "../apps/zcode-cli/packages/adapters/src/config
 import { DefaultRuntimeConfig } from "../apps/zcode-cli/packages/contracts/src/config/index.ts";
 import { egressFixtures } from "./zcode-cli-rust-egress-fixtures.mjs";
 import { permissionData, permissionFixtures } from "./zcode-cli-rust-permission-fixtures.mjs";
+import { bashFixtures, bashPolicyData, bashRegistry } from "./zcode-cli-rust-bash-fixtures.mjs";
+import {
+  bashAnalysisFixtures,
+  bashAnalysisFuzzFixtures,
+} from "./zcode-cli-rust-bash-parse-fixtures.mjs";
 
 const files = {
   empty: {},
@@ -171,6 +176,15 @@ const env = envs.map((pairs) => ({
   expected: parseEnvConfig(Object.fromEntries(pairs)),
 }));
 
+async function emitCompact(relative, data) {
+  const path = new URL(relative, import.meta.url);
+  const text = `${JSON.stringify(data)}\n`;
+  if (process.argv.includes("--check")) {
+    if ((await readFile(path, "utf8")) !== text)
+      throw new Error(`${relative} differs from TS; regenerate it and fix Rust`);
+  } else await writeFile(path, text);
+}
+
 async function emit(relative, data) {
   const path = new URL(relative, import.meta.url);
   const formatted = await format(path.pathname, `${JSON.stringify(data, null, 2)}\n`);
@@ -187,3 +201,19 @@ await emit("../apps/zcode-cli-rust/crates/domain/fixtures/config.json", {
 await emit("../apps/zcode-cli-rust/crates/net/fixtures/egress.json", egressFixtures());
 await emit("../apps/zcode-cli-rust/crates/domain/fixtures/permission.json", permissionFixtures());
 await emit("../apps/zcode-cli-rust/crates/domain/schema/tool-permissions.json", permissionData());
+await emit(
+  "../apps/zcode-cli-rust/crates/bash-parse/fixtures/analysis.json",
+  bashAnalysisFixtures(),
+);
+// 模糊用例体积较大，保持紧凑 JSON。
+await emitCompact(
+  "../apps/zcode-cli-rust/crates/bash-parse/fixtures/analysis-fuzz.json",
+  bashAnalysisFuzzFixtures(),
+);
+await emit("../apps/zcode-cli-rust/crates/bash/schema/readonly-policy.json", bashPolicyData());
+await emit("../apps/zcode-cli-rust/crates/bash/fixtures/bash.json", bashFixtures());
+// 命令注册表约 2 MB，保持紧凑 JSON；格式化会让体积膨胀数倍。
+await emitCompact(
+  "../apps/zcode-cli-rust/crates/bash/schema/command-registry.json",
+  bashRegistry(),
+);
