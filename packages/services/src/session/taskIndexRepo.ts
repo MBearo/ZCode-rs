@@ -187,9 +187,15 @@ function shouldPreserveNewerTerminalStatus(
   return existingMeta.updatedAt > incomingMeta.updatedAt;
 }
 
-function resolveTaskIndexRowWorkspaceIdentity(row: Pick<TaskIndexRow, "workspace_key" | "workspace_path" | "workspace_identity">): string | undefined {
+function resolveTaskIndexRowWorkspaceIdentity(
+  row: Pick<TaskIndexRow, "workspace_key" | "workspace_path" | "workspace_identity">,
+): string | undefined {
   // 旧 Rust snapshot 曾把本地 fallback 路径填成 identity；三者相等没有独立身份，不能误走远端 UI/路由。
-  if (row.workspace_key === row.workspace_path && row.workspace_identity?.trim() === row.workspace_path) return undefined;
+  if (
+    row.workspace_key === row.workspace_path &&
+    row.workspace_identity?.trim() === row.workspace_path
+  )
+    return undefined;
   const columnIdentity = row.workspace_identity?.trim();
   if (columnIdentity === row.workspace_key) {
     return columnIdentity;

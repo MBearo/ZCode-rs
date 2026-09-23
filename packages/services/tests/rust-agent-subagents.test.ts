@@ -3,6 +3,7 @@ import test from "node:test";
 import { event, end, fixture, waitForFile, type Harness } from "./rust-agent-fixture.js";
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { zcodeSessionSubagentsResultSchema, zcodeSessionStateSnapshotSchema } from "@zcode/shared";
 
 function call(response: any, calls: { id: string; name: string; args: unknown }[]) {
@@ -68,14 +69,27 @@ test("Agent creates isolated real child sessions, runs foreground siblings concu
     assert.equal(agents.ended.total, 2);
     assert.equal(agents.running.length, 0);
     const rows = (await h.rows(sid)).rows;
-    const projected = rows.filter(r => r.kind === "subagent");
-    assert.equal(projected.length, 2, "Agent summary requires a paired child row for the App click target");
+    const projected = rows.filter((r) => r.kind === "subagent");
+    assert.equal(
+      projected.length,
+      2,
+      "Agent summary requires a paired child row for the App click target",
+    );
     for (const child of agents.ended.items) {
-      const row = projected.find(r => r.kind === "subagent" && r.childSessionId === child.childSessionId);
+      const row = projected.find(
+        (r) => r.kind === "subagent" && r.childSessionId === child.childSessionId,
+      );
       assert.ok(row?.kind === "subagent");
       assert.equal(row.parentToolCallId, child.toolCallId);
       assert.equal(row.status, "success");
-      assert.ok(rows.some(r => r.kind === "toolCall" && r.toolCallId === row.parentToolCallId && r.turnId === row.turnId));
+      assert.ok(
+        rows.some(
+          (r) =>
+            r.kind === "toolCall" &&
+            r.toolCallId === row.parentToolCallId &&
+            r.turnId === row.turnId,
+        ),
+      );
     }
     for (const child of agents.ended.items) {
       assert.equal(child.status, "success");
@@ -95,8 +109,64 @@ test("Agent creates isolated real child sessions, runs foreground siblings concu
     await h.close();
     const cold = f.start();
     assert.equal((await listing(cold, sid)).ended.total, 2);
-    assert.deepEqual((await cold.rows(sid)).rows.filter(r => r.kind === "subagent"), projected);
+    assert.deepEqual(
+      (await cold.rows(sid)).rows.filter((r) => r.kind === "subagent"),
+      projected,
+    );
     await cold.close();
+    // 模拟旧 Rust 只持久化 children 的历史；只改测试 fixture，保持 canonical 消息和边界含义。
+    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
+    const stored = db
+      .prepare("SELECT ordinal,body FROM rust_row WHERE session=? ORDER BY ordinal")
+      .all(sid) as { ordinal: number; body: string }[];
+    const removed = stored
+      .filter((r) => JSON.parse(r.body).kind === "subagent")
+      .map((r) => r.ordinal);
+    const canonical = () =>
+      db.prepare("SELECT body FROM rust_message WHERE session=? ORDER BY ordinal").all(sid);
+    const beforeMessages = canonical();
+    db.exec("BEGIN");
+    db.prepare("DELETE FROM rust_row WHERE session=?").run(sid);
+    stored
+      .filter((r) => !removed.includes(r.ordinal))
+      .forEach((r, ordinal) =>
+        db.prepare("INSERT INTO rust_row VALUES(?,?,?,?)").run(f.cwd, sid, ordinal, r.body),
+      );
+    const boundaries = db
+      .prepare("SELECT kind,ordinal,body FROM rust_history WHERE session=?")
+      .all(sid) as { kind: string; ordinal: number; body: string }[];
+    for (const boundary of boundaries) {
+      const body = JSON.parse(boundary.body);
+      for (const key of ["row", "userRow"])
+        if (typeof body[key] === "number") body[key] -= removed.filter((i) => i < body[key]).length;
+      db.prepare("UPDATE rust_history SET body=? WHERE session=? AND kind=? AND ordinal=?").run(
+        JSON.stringify(body),
+        sid,
+        boundary.kind,
+        boundary.ordinal,
+      );
+    }
+    db.exec("COMMIT");
+    const requestCount = f.requests.length;
+    const legacy = f.start();
+    const repaired = (await legacy.rows(sid)).rows.filter((r) => r.kind === "subagent");
+    assert.equal(repaired.length, 2);
+    assert.deepEqual(
+      repaired.map((r) => r.childSessionId).sort(),
+      projected.map((r) => r.childSessionId).sort(),
+    );
+    assert.ok(repaired.every((r) => r.status === "success"));
+    await legacy.close();
+    const recoveredAgain = f.start();
+    assert.deepEqual(
+      (await recoveredAgain.rows(sid)).rows.filter((r) => r.kind === "subagent"),
+      repaired,
+    );
+    assert.deepEqual(canonical(), beforeMessages);
+    assert.equal(f.requests.length, requestCount);
+    assert.deepEqual([...legacy.schemaErrors, ...recoveredAgain.schemaErrors], []);
+    await recoveredAgain.close();
+    db.close();
   } finally {
     for (const child of children) if (!child.response.writableEnded) child.response.end();
     await f.close();
@@ -224,7 +294,10 @@ test(
       );
       assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
       assert.equal((await listing(h, sid)).ended.items[0]?.status, "cancelled");
-      assert.equal((await h.rows(sid)).rows.find(r => r.kind === "subagent")?.status, "cancelled");
+      assert.equal(
+        (await h.rows(sid)).rows.find((r) => r.kind === "subagent")?.status,
+        "cancelled",
+      );
       assert.equal(f.requests.length, 2);
       await h.close();
       const cold = f.start();
@@ -291,7 +364,7 @@ test("Background Agent completion is delivered through the parent continuation a
     assert.match(agentId, /^agent_/);
     const before = await listing(h, sid);
     assert.equal(before.ended.total, 1);
-    const originalRow = (await h.rows(sid)).rows.find(r => r.kind === "subagent");
+    const originalRow = (await h.rows(sid)).rows.find((r) => r.kind === "subagent");
     assert.ok(originalRow?.kind === "subagent");
     await h.command(h.envelope("sendText", sid, { text: "continue child" }));
     const notification = await h.wait(
@@ -316,7 +389,7 @@ test("Background Agent completion is delivered through the parent continuation a
     );
     assert.ok(resumed);
     assert.deepEqual((await listing(h, sid)).childSessionIds, before.childSessionIds);
-    const resumedRows = (await h.rows(sid)).rows.filter(r => r.kind === "subagent");
+    const resumedRows = (await h.rows(sid)).rows.filter((r) => r.kind === "subagent");
     assert.equal(resumedRows.length, 1);
     assert.equal(resumedRows[0]?.rowId, originalRow.rowId);
     assert.equal(resumedRows[0]?.parentToolCallId, "launch");
