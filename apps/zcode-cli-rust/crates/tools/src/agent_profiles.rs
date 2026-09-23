@@ -9,8 +9,11 @@ use std::{
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
-pub(super) async fn discover(cwd: &Path, cancel: &CancellationToken) -> Result<Vec<Profile>> {
-    let config = config::load(cwd).await?;
+pub(super) async fn discover(
+    cwd: &Path,
+    config: &serde_json::Value,
+    cancel: &CancellationToken,
+) -> Result<Vec<Profile>> {
     let root = std::env::var("ZCODE_STORAGE_DIR")
         .ok()
         .or_else(|| config["storage"]["dir"].as_str().map(str::to_owned))
@@ -44,7 +47,7 @@ pub(super) async fn discover(cwd: &Path, cancel: &CancellationToken) -> Result<V
     }
     let mut imported = vec![];
     let mut counts = BTreeMap::<String, usize>::new();
-    for plugin in plugins::enabled(cwd, &config, cancel).await? {
+    for plugin in plugins::enabled(cwd, config, cancel).await? {
         for path in markdown(&plugin.root.join("agents"), cancel).await? {
             if !plugins::contained_file(&plugin.root, &path).await {
                 continue;
@@ -123,6 +126,7 @@ async fn read(path: &Path, source: &str, cancel: &CancellationToken) -> Result<O
 }
 pub(super) async fn memory(
     cwd: &Path,
+    config: &serde_json::Value,
     profile: &Profile,
     cancel: &CancellationToken,
 ) -> Result<Option<String>> {
@@ -133,7 +137,6 @@ pub(super) async fn memory(
         ["user", "project", "local"].contains(&scope.as_str()),
         "Invalid profile memory scope"
     );
-    let config = config::load(cwd).await?;
     if config["features"]["memory"] == false || config["memory"]["use"] == false {
         return Ok(None);
     }

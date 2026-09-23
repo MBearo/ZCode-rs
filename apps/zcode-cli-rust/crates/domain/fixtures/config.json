@@ -1,0 +1,958 @@
+{
+  "config": {
+    "parse": [
+      {
+        "name": "empty",
+        "input": {},
+        "loaded": true,
+        "patch": {},
+        "diagnostics": []
+      },
+      {
+        "name": "network",
+        "input": {
+          "network": {
+            "httpProxy": "proxy.local:8080",
+            "noProxy": "localhost",
+            "unknown": 1
+          }
+        },
+        "loaded": true,
+        "patch": {
+          "network": {
+            "httpProxy": "proxy.local:8080",
+            "noProxy": "localhost"
+          }
+        },
+        "diagnostics": []
+      },
+      {
+        "name": "invalidType",
+        "input": {
+          "network": {
+            "timeout": "slow"
+          }
+        },
+        "loaded": false,
+        "patch": {},
+        "diagnostics": []
+      },
+      {
+        "name": "notObject",
+        "input": [1, 2],
+        "loaded": false,
+        "patch": {},
+        "diagnostics": []
+      },
+      {
+        "name": "mcpLegacy",
+        "input": {
+          "mcp": {
+            "servers": {
+              "stdio": {
+                "command": "node",
+                "args": ["a.js"],
+                "environment": {
+                  "A": "1"
+                },
+                "enable": false
+              },
+              "remote": {
+                "type": "remote",
+                "url": "https://x.test/mcp",
+                "http_headers": {
+                  "K": "v"
+                }
+              },
+              "inferred": {
+                "url": "https://y.test"
+              },
+              "conflict": {
+                "command": "x",
+                "enable": true,
+                "enabled": false
+              },
+              "timeouts": {
+                "command": "x",
+                "timeout": 5,
+                "startup_timeout_sec": 3
+              },
+              "bad": {
+                "type": "stdio"
+              },
+              "badOauth": {
+                "type": "http",
+                "url": "https://z",
+                "oauth": {
+                  "type": "client_credentials"
+                }
+              }
+            }
+          }
+        },
+        "loaded": true,
+        "patch": {
+          "mcp": {
+            "servers": {
+              "stdio": {
+                "enabled": false,
+                "type": "stdio",
+                "command": "node",
+                "args": ["a.js"],
+                "env": {
+                  "A": "1"
+                }
+              },
+              "remote": {
+                "type": "http",
+                "url": "https://x.test/mcp",
+                "headers": {
+                  "K": "v"
+                }
+              },
+              "inferred": {
+                "type": "http",
+                "url": "https://y.test"
+              },
+              "conflict": {
+                "enabled": false,
+                "type": "stdio",
+                "command": "x"
+              },
+              "timeouts": {
+                "type": "stdio",
+                "command": "x"
+              }
+            }
+          }
+        },
+        "diagnostics": [
+          {
+            "code": "config_mcp_server_invalid",
+            "path": "mcp.servers.bad",
+            "severity": "warning"
+          },
+          {
+            "code": "config_mcp_server_invalid",
+            "path": "mcp.servers.badOauth",
+            "severity": "warning"
+          }
+        ]
+      },
+      {
+        "name": "mcpNotObject",
+        "input": {
+          "mcp": {
+            "servers": [1]
+          }
+        },
+        "loaded": true,
+        "patch": {
+          "mcp": {
+            "servers": {}
+          }
+        },
+        "diagnostics": [
+          {
+            "code": "config_mcp_server_invalid",
+            "path": "mcp.servers",
+            "severity": "warning"
+          }
+        ]
+      },
+      {
+        "name": "plugins",
+        "input": {
+          "plugins": {
+            "enabledPlugins": {
+              "zcode-cua@zcode-plugins-official": true,
+              "a@m": false
+            },
+            "options": {
+              "zcode-cua@zcode-plugins-official": {
+                "k": 1
+              }
+            },
+            "suppressedBuiltins": [
+              "zcode-cua@zcode-plugins-official",
+              "computer-use@zcode-plugins-official",
+              "x@m"
+            ],
+            "dirs": ["/p"]
+          }
+        },
+        "loaded": true,
+        "patch": {
+          "plugins": {
+            "dirs": ["/p"],
+            "enabledPlugins": {
+              "a@m": false,
+              "computer-use@zcode-plugins-official": true
+            },
+            "options": {
+              "computer-use@zcode-plugins-official": {
+                "k": 1
+              }
+            },
+            "suppressedBuiltins": ["computer-use@zcode-plugins-official", "x@m"]
+          }
+        },
+        "diagnostics": []
+      },
+      {
+        "name": "skills",
+        "input": {
+          "skills": {
+            "enabled": false,
+            "roots": ["/r"],
+            "/abs/SKILL.md": {
+              "enable": false
+            },
+            "rel": {
+              "enable": true
+            }
+          },
+          "skill": {
+            "/other/SKILL.md": {
+              "enable": true
+            }
+          },
+          "command": {
+            "/c.md": {
+              "enable": false
+            }
+          }
+        },
+        "loaded": true,
+        "patch": {
+          "skills": {
+            "enabled": false,
+            "roots": ["/r"]
+          },
+          "skillOverrides": {
+            "/other/SKILL.md": {
+              "enable": true
+            },
+            "/abs/SKILL.md": {
+              "enable": false
+            }
+          },
+          "commandOverrides": {
+            "/c.md": {
+              "enable": false
+            }
+          }
+        },
+        "diagnostics": []
+      },
+      {
+        "name": "hooks",
+        "input": {
+          "hooks": {
+            "enabled": true,
+            "events": {
+              "PreToolUse": [
+                {
+                  "matcher": "Bash",
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "echo"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "loaded": true,
+        "patch": {
+          "hooks": {
+            "enabled": true,
+            "events": {
+              "PreToolUse": [
+                {
+                  "matcher": "Bash",
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "echo"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "diagnostics": []
+      },
+      {
+        "name": "passthrough",
+        "input": {
+          "custom": {
+            "any": [1]
+          },
+          "ui": {
+            "locale": "zh-CN"
+          },
+          "toolConcurrency": {
+            "maxConcurrency": 4
+          }
+        },
+        "loaded": true,
+        "patch": {
+          "ui": {
+            "locale": "zh-CN"
+          },
+          "toolConcurrency": {
+            "maxConcurrency": 4
+          }
+        },
+        "diagnostics": []
+      }
+    ],
+    "merge": [
+      {
+        "name": "sections replace lower layers, plugins and hooks merge",
+        "layers": [
+          [
+            "system",
+            {
+              "modelStream": {
+                "idleTimeoutMs": 600000
+              },
+              "permission": {
+                "mode": "build",
+                "allowedTools": [],
+                "disallowedTools": [],
+                "autoApproveHighRisk": false,
+                "allowMediumRiskInAuto": false
+              },
+              "storage": {
+                "dir": "~/.zcode",
+                "sessionDbPath": "~/.zcode/cli/db/db.sqlite"
+              },
+              "network": {
+                "timeout": 180000
+              },
+              "features": {
+                "compact": true,
+                "rewind": true,
+                "subagent": true,
+                "memory": true,
+                "skill": true,
+                "mcp": true
+              },
+              "memory": {
+                "use": true
+              },
+              "mcp": {
+                "servers": {}
+              },
+              "plugins": {
+                "dirs": [],
+                "enabled": true,
+                "enabledPlugins": {},
+                "extraKnownMarketplaces": {},
+                "options": {},
+                "suppressedBuiltins": []
+              },
+              "skills": {
+                "enabled": true,
+                "includeInstructions": true,
+                "metadataBudget": 20000,
+                "roots": []
+              },
+              "skillOverrides": {},
+              "commandOverrides": {},
+              "logging": {
+                "level": "info",
+                "format": "text"
+              },
+              "toolConcurrency": {
+                "maxConcurrency": 10
+              },
+              "modelAnomalyGuard": {
+                "maxBudgetWarningsPerTurn": 3,
+                "repeatedToolCallWarningThreshold": 3
+              },
+              "hooks": {
+                "enabled": false,
+                "events": {},
+                "maxOutputBytes": 32768,
+                "timeoutMs": 60000
+              },
+              "ui": {
+                "locale": "en-US",
+                "theme": "auto"
+              }
+            }
+          ],
+          [
+            "user",
+            {
+              "network": {
+                "httpProxy": "http://user"
+              },
+              "plugins": {
+                "dirs": ["/u"],
+                "enabledPlugins": {
+                  "a@m": true
+                },
+                "options": {
+                  "a@m": {
+                    "x": 1
+                  }
+                },
+                "extraKnownMarketplaces": {
+                  "m": {
+                    "source": {
+                      "source": "github",
+                      "repo": "o/r"
+                    }
+                  }
+                }
+              },
+              "hooks": {
+                "enabled": true,
+                "events": {
+                  "Stop": [
+                    {
+                      "hooks": [
+                        {
+                          "type": "command",
+                          "command": "u"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "mcp": {
+                "servers": {
+                  "u": {
+                    "type": "stdio",
+                    "command": "u"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "project",
+            {
+              "network": {
+                "timeout": 5000
+              },
+              "plugins": {
+                "dirs": ["/p", "/u"],
+                "enabledPlugins": {
+                  "b@m": true
+                },
+                "options": {
+                  "a@m": {
+                    "y": 2
+                  }
+                },
+                "extraKnownMarketplaces": {
+                  "p": {
+                    "source": {
+                      "source": "github",
+                      "repo": "p/r"
+                    }
+                  }
+                }
+              },
+              "hooks": {
+                "enabled": false,
+                "events": {
+                  "Stop": [
+                    {
+                      "hooks": [
+                        {
+                          "type": "command",
+                          "command": "p"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          [
+            "env",
+            {
+              "network": {
+                "noProxy": "*"
+              },
+              "toolConcurrency": {
+                "maxConcurrency": 2
+              }
+            }
+          ]
+        ],
+        "merged": {
+          "modelStream": {
+            "idleTimeoutMs": 600000
+          },
+          "permission": {
+            "mode": "build",
+            "allowedTools": [],
+            "disallowedTools": [],
+            "autoApproveHighRisk": false,
+            "allowMediumRiskInAuto": false
+          },
+          "storage": {
+            "dir": "~/.zcode",
+            "sessionDbPath": "~/.zcode/cli/db/db.sqlite"
+          },
+          "network": {
+            "noProxy": "*"
+          },
+          "features": {
+            "compact": true,
+            "rewind": true,
+            "subagent": true,
+            "memory": true,
+            "skill": true,
+            "mcp": true
+          },
+          "memory": {
+            "use": true
+          },
+          "mcp": {
+            "servers": {
+              "u": {
+                "type": "stdio",
+                "command": "u"
+              }
+            }
+          },
+          "plugins": {
+            "dirs": ["/u", "/p"],
+            "enabled": true,
+            "enabledPlugins": {
+              "a@m": true,
+              "b@m": true
+            },
+            "extraKnownMarketplaces": {
+              "m": {
+                "source": {
+                  "source": "github",
+                  "repo": "o/r"
+                }
+              }
+            },
+            "options": {
+              "a@m": {
+                "x": 1,
+                "y": 2
+              }
+            },
+            "suppressedBuiltins": []
+          },
+          "skills": {
+            "enabled": true,
+            "includeInstructions": true,
+            "metadataBudget": 20000,
+            "roots": []
+          },
+          "skillOverrides": {},
+          "commandOverrides": {},
+          "logging": {
+            "level": "info",
+            "format": "text"
+          },
+          "toolConcurrency": {
+            "maxConcurrency": 2
+          },
+          "modelAnomalyGuard": {
+            "maxBudgetWarningsPerTurn": 3,
+            "repeatedToolCallWarningThreshold": 3
+          },
+          "hooks": {
+            "enabled": true,
+            "events": {
+              "Stop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "u"
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxOutputBytes": 32768,
+            "timeoutMs": 60000
+          },
+          "ui": {
+            "locale": "en-US",
+            "theme": "auto"
+          }
+        },
+        "effective": {
+          "modelStream": {
+            "idleTimeoutMs": 600000
+          },
+          "permission": {
+            "mode": "build",
+            "allowedTools": [],
+            "disallowedTools": [],
+            "autoApproveHighRisk": false,
+            "allowMediumRiskInAuto": false
+          },
+          "storage": {
+            "dir": "~/.zcode",
+            "sessionDbPath": "~/.zcode/cli/db/db.sqlite"
+          },
+          "network": {
+            "noProxy": "*",
+            "timeout": 180000
+          },
+          "features": {
+            "compact": true,
+            "rewind": true,
+            "subagent": true,
+            "memory": true,
+            "skill": true,
+            "mcp": true
+          },
+          "memory": {
+            "use": true
+          },
+          "mcp": {
+            "servers": {
+              "u": {
+                "type": "stdio",
+                "command": "u"
+              }
+            }
+          },
+          "plugins": {
+            "dirs": ["/u", "/p"],
+            "enabled": true,
+            "enabledPlugins": {
+              "a@m": true,
+              "b@m": true
+            },
+            "extraKnownMarketplaces": {
+              "m": {
+                "source": {
+                  "source": "github",
+                  "repo": "o/r"
+                }
+              }
+            },
+            "options": {
+              "a@m": {
+                "x": 1,
+                "y": 2
+              }
+            },
+            "suppressedBuiltins": []
+          },
+          "skills": {
+            "enabled": true,
+            "includeInstructions": true,
+            "metadataBudget": 20000,
+            "roots": []
+          },
+          "skillOverrides": {},
+          "commandOverrides": {},
+          "logging": {
+            "level": "info",
+            "format": "text"
+          },
+          "toolConcurrency": {
+            "maxConcurrency": 2
+          },
+          "modelAnomalyGuard": {
+            "maxBudgetWarningsPerTurn": 3,
+            "repeatedToolCallWarningThreshold": 3
+          },
+          "hooks": {
+            "enabled": true,
+            "events": {
+              "Stop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "u"
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxOutputBytes": 32768,
+            "timeoutMs": 60000
+          },
+          "ui": {
+            "locale": "en-US",
+            "theme": "auto"
+          }
+        }
+      },
+      {
+        "name": "later project file replaces earlier mcp section",
+        "layers": [
+          [
+            "project",
+            {
+              "mcp": {
+                "servers": {
+                  "a": {
+                    "type": "stdio",
+                    "command": "a"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "project",
+            {
+              "mcp": {
+                "servers": {
+                  "b": {
+                    "type": "stdio",
+                    "command": "b"
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "merged": {
+          "mcp": {
+            "servers": {
+              "b": {
+                "type": "stdio",
+                "command": "b"
+              }
+            }
+          }
+        },
+        "effective": {
+          "modelStream": {
+            "idleTimeoutMs": 600000
+          },
+          "permission": {
+            "mode": "build",
+            "allowedTools": [],
+            "disallowedTools": [],
+            "autoApproveHighRisk": false,
+            "allowMediumRiskInAuto": false
+          },
+          "storage": {
+            "dir": "~/.zcode",
+            "sessionDbPath": "~/.zcode/cli/db/db.sqlite"
+          },
+          "network": {
+            "timeout": 180000
+          },
+          "features": {
+            "compact": true,
+            "rewind": true,
+            "subagent": true,
+            "memory": true,
+            "skill": true,
+            "mcp": true
+          },
+          "memory": {
+            "use": true
+          },
+          "mcp": {
+            "servers": {
+              "b": {
+                "type": "stdio",
+                "command": "b"
+              }
+            }
+          },
+          "plugins": {
+            "dirs": [],
+            "enabled": true,
+            "enabledPlugins": {},
+            "extraKnownMarketplaces": {},
+            "options": {},
+            "suppressedBuiltins": []
+          },
+          "skills": {
+            "enabled": true,
+            "includeInstructions": true,
+            "metadataBudget": 20000,
+            "roots": []
+          },
+          "skillOverrides": {},
+          "commandOverrides": {},
+          "logging": {
+            "level": "info",
+            "format": "text"
+          },
+          "toolConcurrency": {
+            "maxConcurrency": 10
+          },
+          "modelAnomalyGuard": {
+            "maxBudgetWarningsPerTurn": 3,
+            "repeatedToolCallWarningThreshold": 3
+          },
+          "hooks": {
+            "enabled": false,
+            "events": {},
+            "maxOutputBytes": 32768,
+            "timeoutMs": 60000
+          },
+          "ui": {
+            "locale": "en-US",
+            "theme": "auto"
+          }
+        }
+      },
+      {
+        "name": "empty",
+        "layers": [],
+        "merged": {},
+        "effective": {
+          "modelStream": {
+            "idleTimeoutMs": 600000
+          },
+          "permission": {
+            "mode": "build",
+            "allowedTools": [],
+            "disallowedTools": [],
+            "autoApproveHighRisk": false,
+            "allowMediumRiskInAuto": false
+          },
+          "storage": {
+            "dir": "~/.zcode",
+            "sessionDbPath": "~/.zcode/cli/db/db.sqlite"
+          },
+          "network": {
+            "timeout": 180000
+          },
+          "features": {
+            "compact": true,
+            "rewind": true,
+            "subagent": true,
+            "memory": true,
+            "skill": true,
+            "mcp": true
+          },
+          "memory": {
+            "use": true
+          },
+          "mcp": {
+            "servers": {}
+          },
+          "plugins": {
+            "dirs": [],
+            "enabled": true,
+            "enabledPlugins": {},
+            "extraKnownMarketplaces": {},
+            "options": {},
+            "suppressedBuiltins": []
+          },
+          "skills": {
+            "enabled": true,
+            "includeInstructions": true,
+            "metadataBudget": 20000,
+            "roots": []
+          },
+          "skillOverrides": {},
+          "commandOverrides": {},
+          "logging": {
+            "level": "info",
+            "format": "text"
+          },
+          "toolConcurrency": {
+            "maxConcurrency": 10
+          },
+          "modelAnomalyGuard": {
+            "maxBudgetWarningsPerTurn": 3,
+            "repeatedToolCallWarningThreshold": 3
+          },
+          "hooks": {
+            "enabled": false,
+            "events": {},
+            "maxOutputBytes": 32768,
+            "timeoutMs": 60000
+          },
+          "ui": {
+            "locale": "en-US",
+            "theme": "auto"
+          }
+        }
+      }
+    ],
+    "env": [
+      {
+        "env": [
+          ["ZCODE_HTTP_PROXY", "http://p"],
+          ["ZCODE_NO_PROXY", "a,b"],
+          ["ZCODE_AGENT_CA_CERT", "/ca.pem"]
+        ],
+        "expected": {
+          "network": {
+            "httpProxy": "http://p",
+            "noProxy": "a,b",
+            "caCertFile": "/ca.pem"
+          }
+        }
+      },
+      {
+        "env": [
+          ["ZCODE_HTTP_TIMEOUT", "abc"],
+          ["ZCODE_MAX_TOOL_CONCURRENCY", " 0x10 "],
+          ["ZCODE_LOG_FORMAT", "JSON"]
+        ],
+        "expected": {
+          "network": {
+            "timeout": 0
+          },
+          "toolConcurrency": {
+            "maxConcurrency": 16
+          },
+          "logging": {
+            "format": "json"
+          }
+        }
+      },
+      {
+        "env": [
+          ["ZCODE_TIMEOUT", "1e3"],
+          ["ZCODE_HTTP_TIMEOUT", ""],
+          ["ZCODE_SESSION_DB", "/db"],
+          ["ZCODE_STORAGE_DIR", "/s"],
+          ["OTHER", "x"]
+        ],
+        "expected": {
+          "network": {
+            "timeout": 0
+          },
+          "storage": {
+            "sessionDbPath": "/db",
+            "dir": "/s"
+          }
+        }
+      },
+      {
+        "env": [
+          ["ZCODE_LOG_FORMAT", "yaml"],
+          ["ZCODE_MAX_TOOL_CONCURRENCY", "2.5"]
+        ],
+        "expected": {
+          "logging": {
+            "format": "text"
+          },
+          "toolConcurrency": {
+            "maxConcurrency": 2.5
+          }
+        }
+      }
+    ]
+  }
+}

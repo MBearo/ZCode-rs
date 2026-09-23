@@ -24,3 +24,19 @@ pub async fn serve_values(
     )
     .await
 }
+
+/// Workspace tools wired to the process environment's layered configuration,
+/// as the binary does. Used by tests, examples and embedders.
+pub fn workspace_tools(
+    cwd: std::path::PathBuf,
+    artifacts: std::path::PathBuf,
+) -> zcode_cli_tools::WorkspaceTools {
+    let home = std::env::var_os("HOME")
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let config =
+        zcode_cli_host::WorkspaceConfig::new(cwd.clone(), home, std::env::vars().collect());
+    zcode_cli_tools::WorkspaceTools::new(cwd, artifacts, std::sync::Arc::new(config))
+}

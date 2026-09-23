@@ -53,43 +53,6 @@ pub(super) async fn project_directories(cwd: &Path) -> Vec<PathBuf> {
     }
     vec![cwd.to_owned()]
 }
-pub(super) async fn load(cwd: &Path) -> Result<Value> {
-    let mut config = json_file(&home().join(".zcode/cli/config.json")).await?;
-    for dir in project_directories(cwd).await.into_iter().rev() {
-        for file in ["zcode.json", ".zcode/config.json"] {
-            let mut next = json_file(&dir.join(file)).await?;
-            if let Some(servers) = next["mcp"]["servers"].as_object_mut() {
-                for server in servers.values_mut() {
-                    if server["command"].is_string() {
-                        server["cwd"] = resolve(&dir, server["cwd"].as_str().unwrap_or("."))
-                            .to_string_lossy()
-                            .into_owned()
-                            .into();
-                    }
-                }
-            }
-            merge(&mut config, &next, 0);
-        }
-    }
-    Ok(config)
-}
-fn merge(base: &mut Value, next: &Value, depth: usize) {
-    let Some(object) = next.as_object() else {
-        *base = next.clone();
-        return;
-    };
-    if !base.is_object() {
-        *base = json!({});
-    }
-    for (key, value) in object {
-        // 顶层类别及服务器/插件字典按 key 合并；单个 server/override 是完整配置。
-        if depth < 2 && value.is_object() {
-            merge(&mut base[key], value, depth + 1);
-        } else {
-            base[key] = value.clone();
-        }
-    }
-}
 pub(super) fn storage(config: &Value) -> PathBuf {
     let base = std::env::var("ZCODE_STORAGE_DIR")
         .ok()

@@ -15,6 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 pub struct WorkspaceTools {
     cwd: PathBuf,
+    config: Arc<dyn crate::contract::ConfigSource>,
     artifacts: PathBuf,
     reads: Mutex<HashMap<String, Arc<Mutex<FileState>>>>,
     // File writes from different sessions share one commit gate; reads remain concurrent.
@@ -23,9 +24,14 @@ pub struct WorkspaceTools {
     mcp: super::mcp_hub::Hub,
 }
 impl WorkspaceTools {
-    pub fn new(cwd: PathBuf, artifacts: PathBuf) -> Self {
+    pub fn new(
+        cwd: PathBuf,
+        artifacts: PathBuf,
+        config: Arc<dyn crate::contract::ConfigSource>,
+    ) -> Self {
         Self {
-            mcp: super::mcp_hub::Hub::new(cwd.clone()),
+            mcp: super::mcp_hub::Hub::new(cwd.clone(), config.clone()),
+            config,
             cwd,
             artifacts,
             reads: Mutex::new(HashMap::new()),
@@ -144,13 +150,15 @@ impl ToolPort for WorkspaceTools {
         profile: &crate::domain::subagent::Profile,
         cancel: &CancellationToken,
     ) -> Result<Option<String>> {
-        super::agent_profiles::memory(&self.cwd, profile, cancel).await
+        let config = self.config.load().await?;
+        super::agent_profiles::memory(&self.cwd, &config.config, profile, cancel).await
     }
     async fn agent_profiles(
         &self,
         cancel: &CancellationToken,
     ) -> Result<Vec<crate::domain::subagent::Profile>> {
-        super::agent_profiles::discover(&self.cwd, cancel).await
+        let config = self.config.load().await?;
+        super::agent_profiles::discover(&self.cwd, &config.config, cancel).await
     }
     async fn inherit_session(&self, parent: &str, child: &str) -> Result<()> {
         self.mcp.inherit(parent, child);
@@ -195,7 +203,8 @@ impl ToolPort for WorkspaceTools {
         &self,
         cancel: &CancellationToken,
     ) -> Result<crate::domain::skills::SkillCatalog> {
-        super::tool_skills::discover(&self.cwd, cancel).await
+        let config = self.config.load().await?;
+        super::tool_skills::discover(&self.cwd, &config.config, cancel).await
     }
     async fn load_skill(
         &self,

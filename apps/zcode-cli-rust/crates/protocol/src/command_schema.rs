@@ -135,7 +135,8 @@ mod tests {
         assert!(validate_command(&envelope("sendText", json!({"text":1}))).is_err());
         assert!(validate_command(&envelope("setFollowupMode", json!({"mode":"x"}))).is_err());
         assert!(validate_command(&envelope("nope", json!({}))).is_err());
-        let missing_revision = validate_command(&envelope("setAutoDrain", json!({"autoDrain":true})));
+        let missing_revision =
+            validate_command(&envelope("setAutoDrain", json!({"autoDrain":true})));
         assert!(missing_revision.unwrap_err().starts_with("baseRevision:"));
     }
 

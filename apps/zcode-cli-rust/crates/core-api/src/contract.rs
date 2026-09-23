@@ -342,6 +342,15 @@ pub trait AuthPort: Send + Sync {
     ) -> Result<Value>;
 }
 
+pub use zcode_cli_domain::config::ConfigSnapshot;
+
+/// Layered zcode configuration for one workspace. Implementations reload files on
+/// every call (Node reloads at each entry point); consumers only read snapshots.
+#[async_trait]
+pub trait ConfigSource: Send + Sync {
+    async fn load(&self) -> Result<Arc<ConfigSnapshot>>;
+}
+
 #[async_trait]
 pub trait ContextPort: Send + Sync {
     fn desktop(&self) -> bool;

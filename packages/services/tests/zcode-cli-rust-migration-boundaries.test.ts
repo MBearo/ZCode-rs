@@ -152,7 +152,9 @@ test("Imported artifact bytes survive TS cache removal and read queries enforce 
   const f = await fixture({ legacy: true });
   try {
     const { store, sessionID, messageID } = await seed(f);
-    const storage = join(f.root, "storage");
+    // 与 Node 分层配置一致：ZCODE_SESSION_DB_PATH 形成的 env 层 storage 段会整段替换项目层
+    // storage，storage.dir 回到默认 ~/.zcode（夹具 HOME 即 root），产物根按此定位。
+    const storage = join(f.root, ".zcode");
     const uri = "zcode-artifact://legacy/tool-result-fixture";
     const data = Buffer.from("fixture-image-bytes");
     await mkdir(join(storage, "cli/artifacts/legacy"), { recursive: true });
@@ -160,7 +162,6 @@ test("Imported artifact bytes survive TS cache removal and read queries enforce 
       join(storage, "cli/artifacts/legacy/file-tool-result-fixture.txt"),
       `data:image/png;base64,${data.toString("base64")}`,
     );
-    await writeFile(join(f.cwd, "zcode.json"), JSON.stringify({ storage: { dir: storage } }));
     await store.savePart({
       id: "image" as PartId,
       sessionID,
@@ -177,7 +178,7 @@ test("Imported artifact bytes survive TS cache removal and read queries enforce 
     const rows = await h.rows(sessionID);
     const row = rows.rows.find((r: any) => r.kind === "userInput")!;
     const target = { rowId: row.rowId, entityId: row.entityId };
-    await rm(storage, { recursive: true });
+    await rm(join(storage, "cli/artifacts"), { recursive: true });
     const result = await h.client.request(
       "v4/attachment/read",
       { sessionId: sessionID, ref: uri, target, attachmentIndex: 0, offset: 0, limit: 4 },

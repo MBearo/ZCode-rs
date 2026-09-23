@@ -209,7 +209,9 @@ test("Invalid persisted MCP configuration reports config_invalid without blockin
         mcp: {
           servers: {
             broken: { type: "http", url: "${MISSING_URL}" },
-            disabled: { type: "stdio", enabled: false },
+            // 与 Node 配置 schema 一致：缺少 command 的 stdio server 在加载时即被丢弃，
+            // 这里用合法但停用的 server 验证 disabled 状态。
+            disabled: { type: "stdio", command: "never-started", enabled: false },
           },
         },
       }),

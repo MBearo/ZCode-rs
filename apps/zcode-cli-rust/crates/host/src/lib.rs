@@ -1,11 +1,13 @@
 use std::path::Path;
 use zcode_cli_core_api as contract;
 use zcode_cli_domain as domain;
+pub mod config;
 mod context_git;
 pub mod context_source;
 pub mod legacy_paths;
 pub mod logging;
 mod question_timing;
+pub use config::WorkspaceConfig;
 pub use context_source::WorkspaceContext;
 pub use question_timing::question_timing;
 pub fn now() -> u64 {

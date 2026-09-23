@@ -83,6 +83,12 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         std::env::var("ZCODE_WORKSPACE_IDENTITY").ok().as_deref(),
         &requested_cwd,
     );
+    // 配置按 Node 分层规则从 cwd 解析；各入口每次重新加载，与 Node 一致没有文件监听。
+    let workspace_config = Arc::new(zcode_cli_host::WorkspaceConfig::new(
+        std::path::absolute(&requested_cwd)?,
+        home.clone(),
+        std::env::vars().collect(),
+    ));
     let cancel = CancellationToken::new();
     let signal_cancel = cancel.clone();
     tokio::spawn(async move {
@@ -131,9 +137,13 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
     if !args.prepare_storage {
         let import_cancel = cancel.child_token();
         let imported = async {
-            if let Some(source) =
-                legacy_paths::resolve(args.import_ts_db, &requested_cwd, args.config.is_none())
-                    .await?
+            if let Some(source) = legacy_paths::resolve(
+                args.import_ts_db,
+                &requested_cwd,
+                args.config.is_none(),
+                &workspace_config.snapshot().await,
+            )
+            .await?
             {
                 if tokio::fs::try_exists(&source.database).await? {
                     let operation = store.import_ts(
@@ -222,7 +232,11 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
                 )),
                 store: Arc::new(store),
                 model,
-                tools: Arc::new(WorkspaceTools::new(cwd, data_dir.join("tool-results"))),
+                tools: Arc::new(WorkspaceTools::new(
+                    cwd,
+                    data_dir.join("tool-results"),
+                    workspace_config.clone(),
+                )),
                 clock: Arc::new(SystemClock),
             },
         )

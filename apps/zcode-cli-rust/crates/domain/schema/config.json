@@ -1,0 +1,1626 @@
+{
+  "file": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "$schema": {
+        "type": "string"
+      },
+      "modelStream": {
+        "type": "object",
+        "properties": {
+          "idleTimeoutMs": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      },
+      "permission": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["plan", "build", "edit", "yolo", "auto"]
+          },
+          "allowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disallowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "autoApproveHighRisk": {
+            "type": "boolean"
+          },
+          "allowMediumRiskInAuto": {
+            "type": "boolean"
+          }
+        }
+      },
+      "storage": {
+        "type": "object",
+        "properties": {
+          "dir": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionDbPath": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "network": {
+        "type": "object",
+        "properties": {
+          "httpProxy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "noProxy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "caCertFile": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeout": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      },
+      "features": {
+        "type": "object",
+        "properties": {
+          "compact": {
+            "type": "boolean"
+          },
+          "rewind": {
+            "type": "boolean"
+          },
+          "subagent": {
+            "type": "boolean"
+          },
+          "memory": {
+            "type": "boolean"
+          },
+          "skill": {
+            "type": "boolean"
+          },
+          "mcp": {
+            "type": "boolean"
+          }
+        }
+      },
+      "memory": {
+        "type": "object",
+        "properties": {
+          "use": {
+            "type": "boolean"
+          }
+        }
+      },
+      "mcp": {
+        "type": "object",
+        "properties": {
+          "servers": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "protocolVersion": {
+                      "type": "string",
+                      "enum": ["auto", "legacy", "2026-07-28"]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "timeoutMs": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "stdio"
+                    },
+                    "command": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "cwd": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "env": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["type", "command"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "protocolVersion": {
+                      "type": "string",
+                      "enum": ["auto", "legacy", "2026-07-28"]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "timeoutMs": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "http"
+                    },
+                    "url": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "headers": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "oauth": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "client_credentials"
+                            },
+                            "clientId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "clientSecret": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "clientName": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "scope": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type", "clientId", "clientSecret"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "authorization_code"
+                            },
+                            "clientId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "clientSecret": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "clientName": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "redirectPath": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "scope": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["type", "url"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "protocolVersion": {
+                      "type": "string",
+                      "enum": ["auto", "legacy", "2026-07-28"]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "timeoutMs": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "sse"
+                    },
+                    "url": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "headers": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "oauth": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "client_credentials"
+                            },
+                            "clientId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "clientSecret": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "clientName": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "scope": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type", "clientId", "clientSecret"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "authorization_code"
+                            },
+                            "clientId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "clientSecret": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "clientName": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "redirectPath": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "scope": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["type", "url"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "plugins": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "dirs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "enabledPlugins": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "extraKnownMarketplaces": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "const": "url"
+                        },
+                        "url": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "headers": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["source", "url"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "const": "github"
+                        },
+                        "repo": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "ref": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "sparsePaths": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": ["source", "repo"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "const": "git"
+                        },
+                        "url": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "ref": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "sparsePaths": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": ["source", "url"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "const": "npm"
+                        },
+                        "package": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["source", "package"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "const": "file"
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["source", "path"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "const": "directory"
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["source", "path"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": ["source"],
+              "additionalProperties": false
+            }
+          },
+          "options": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": ["string", "number", "boolean"]
+              }
+            }
+          },
+          "suppressedBuiltins": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "skills": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "includeInstructions": {
+            "type": "boolean"
+          },
+          "metadataBudget": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "roots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "enable": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "skill": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "enable": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "command": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "enable": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "logging": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": ["debug", "info", "warn", "error"]
+          },
+          "format": {
+            "type": "string",
+            "enum": ["text", "json"]
+          }
+        }
+      },
+      "ui": {
+        "type": "object",
+        "properties": {
+          "locale": {
+            "type": "string",
+            "enum": ["auto", "en-US", "zh-CN"]
+          },
+          "theme": {
+            "type": "string",
+            "enum": ["auto", "dark", "light"]
+          }
+        }
+      },
+      "toolConcurrency": {
+        "type": "object",
+        "properties": {
+          "maxConcurrency": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      },
+      "modelAnomalyGuard": {
+        "type": "object",
+        "properties": {
+          "toolCallWarningThreshold": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "repeatedToolCallWarningThreshold": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxBudgetWarningsPerTurn": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "hooks": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "maxOutputBytes": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "events": {
+            "type": "object",
+            "properties": {
+              "SessionStart": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "matcher": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "hooks": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "async": {
+                                "type": "boolean"
+                              },
+                              "shell": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["hooks"],
+                  "additionalProperties": false
+                }
+              },
+              "UserPromptSubmit": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "matcher": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "hooks": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "async": {
+                                "type": "boolean"
+                              },
+                              "shell": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["hooks"],
+                  "additionalProperties": false
+                }
+              },
+              "PreToolUse": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "matcher": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "hooks": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "async": {
+                                "type": "boolean"
+                              },
+                              "shell": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["hooks"],
+                  "additionalProperties": false
+                }
+              },
+              "PermissionRequest": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "matcher": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "hooks": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "async": {
+                                "type": "boolean"
+                              },
+                              "shell": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["hooks"],
+                  "additionalProperties": false
+                }
+              },
+              "PostToolUse": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "matcher": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "hooks": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "async": {
+                                "type": "boolean"
+                              },
+                              "shell": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["hooks"],
+                  "additionalProperties": false
+                }
+              },
+              "PostToolUseFailure": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "matcher": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "hooks": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "async": {
+                                "type": "boolean"
+                              },
+                              "shell": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["hooks"],
+                  "additionalProperties": false
+                }
+              },
+              "Stop": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "matcher": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "hooks": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "async": {
+                                "type": "boolean"
+                              },
+                              "shell": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "timeoutMs": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "statusMessage": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "command"],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["hooks"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": {}
+  },
+  "mcpServer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "protocolVersion": {
+            "type": "string",
+            "enum": ["auto", "legacy", "2026-07-28"]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "type": {
+            "type": "string",
+            "const": "stdio"
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1
+          },
+          "env": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["type", "command"],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "protocolVersion": {
+            "type": "string",
+            "enum": ["auto", "legacy", "2026-07-28"]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "type": {
+            "type": "string",
+            "const": "http"
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "headers": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "oauth": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "client_credentials"
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientSecret": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type", "clientId", "clientSecret"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "authorization_code"
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientSecret": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "redirectPath": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": ["type", "url"],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "protocolVersion": {
+            "type": "string",
+            "enum": ["auto", "legacy", "2026-07-28"]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "type": {
+            "type": "string",
+            "const": "sse"
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "headers": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "oauth": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "client_credentials"
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientSecret": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type", "clientId", "clientSecret"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "authorization_code"
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientSecret": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "redirectPath": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": ["type", "url"],
+        "additionalProperties": false
+      }
+    ]
+  }
+}

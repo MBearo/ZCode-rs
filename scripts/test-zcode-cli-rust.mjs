@@ -38,6 +38,12 @@ await run(process.execPath, [
   "scripts/generate-zcode-cli-rust-protocol-schema.mjs",
   "--check",
 ]);
+for (const generator of [
+  "scripts/generate-zcode-cli-rust-config-schema.mjs",
+  "scripts/generate-zcode-cli-rust-fixtures.mjs",
+]) {
+  await run(process.execPath, ["--import", "tsx", generator, "--check"]);
+}
 await run(process.execPath, [
   "node_modules/typescript/bin/tsc",
   "-p",

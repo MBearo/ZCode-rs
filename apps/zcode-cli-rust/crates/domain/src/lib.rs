@@ -3,6 +3,7 @@ pub use zcode_cli_protocol as protocol;
 pub mod agent_profile;
 pub mod attachment_upload;
 pub mod background;
+pub mod config;
 pub mod context;
 pub mod execution;
 pub mod file_checkpoint;

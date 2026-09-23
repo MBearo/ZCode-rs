@@ -32,6 +32,7 @@ struct State {
 }
 pub(super) struct Hub {
     cwd: PathBuf,
+    config: std::sync::Arc<dyn crate::contract::ConfigSource>,
     http: std::sync::OnceLock<reqwest_mcp::Client>,
     state: RwLock<State>,
     gate: tokio::sync::Mutex<()>,
@@ -44,11 +45,12 @@ impl Hub {
         state.bindings.insert(child.into(), bindings);
         state.borrowed.insert(child.into());
     }
-    pub fn new(cwd: PathBuf) -> Self {
+    pub fn new(cwd: PathBuf, config: std::sync::Arc<dyn crate::contract::ConfigSource>) -> Self {
         // MCP 的 rustls-no-provider 不自动选择算法；与现有模型 client 统一使用 ring。
         let _ = rustls::crypto::ring::default_provider().install_default();
         Self {
             cwd,
+            config,
             http: Default::default(),
             state: Default::default(),
             gate: Default::default(),
@@ -135,7 +137,8 @@ impl Hub {
         refresh: bool,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        let configs = tokio::select! {biased;_=cancel.cancelled()=>anyhow::bail!("Cancelled"),result=mcp_config::configured(&self.cwd,overrides,cancel)=>result?};
+        let config = self.config.load().await?;
+        let configs = tokio::select! {biased;_=cancel.cancelled()=>anyhow::bail!("Cancelled"),result=mcp_config::configured(&self.cwd,&config.config,overrides,cancel)=>result?};
         let mut bindings = vec![];
         let mut statuses = BTreeMap::new();
         let mut names = BTreeSet::new();

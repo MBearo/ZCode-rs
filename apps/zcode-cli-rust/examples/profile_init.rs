@@ -2,7 +2,7 @@
 use std::{path::PathBuf, time::Instant};
 use tokio_util::sync::CancellationToken;
 use zcode_cli_rust::{
-    adapters::{context_source::WorkspaceContext, tools::WorkspaceTools},
+    adapters::context_source::WorkspaceContext,
     contract::{ContextPort, ToolPort},
 };
 fn stage(name: &str, start: Instant) {
@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let cancel = CancellationToken::new();
     let start = Instant::now();
-    let tools = WorkspaceTools::new(root.clone(), root.join("artifacts"));
+    let tools = zcode_cli_rust::workspace_tools(root.clone(), root.join("artifacts"));
     stage("tools.new", start);
     let context = WorkspaceContext::new(root, PathBuf::from(std::env::var("HOME")?), false);
     let start = Instant::now();

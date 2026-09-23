@@ -42,6 +42,7 @@ pub struct Node {
     min_items: Option<usize>,
     max_items: Option<usize>,
     any_of: Vec<Node>,
+    one_of: Vec<Node>,
 }
 
 const SUPPORTED: &[&str] = &[
@@ -64,6 +65,7 @@ const SUPPORTED: &[&str] = &[
     "minItems",
     "maxItems",
     "anyOf",
+    "oneOf",
 ];
 
 fn ty(name: &str) -> Result<Ty, String> {
@@ -114,7 +116,12 @@ impl Node {
             Some(Value::Array(names)) => Some(
                 names
                     .iter()
-                    .map(|n| n.as_str().ok_or("type entries must be strings").map_err(String::from).and_then(ty))
+                    .map(|n| {
+                        n.as_str()
+                            .ok_or("type entries must be strings")
+                            .map_err(String::from)
+                            .and_then(ty)
+                    })
                     .collect::<Result<_, _>>()?,
             ),
             Some(_) => return Err("type must be a string or array".into()),
@@ -153,7 +160,11 @@ impl Node {
             required: schema
                 .get("required")
                 .and_then(Value::as_array)
-                .map(|keys| keys.iter().filter_map(|k| k.as_str().map(str::to_owned)).collect())
+                .map(|keys| {
+                    keys.iter()
+                        .filter_map(|k| k.as_str().map(str::to_owned))
+                        .collect()
+                })
                 .unwrap_or_default(),
             additional: match schema.get("additionalProperties") {
                 None | Some(Value::Bool(true)) => Additional::Allow,
@@ -164,18 +175,19 @@ impl Node {
             items: child("items")?,
             min_items: size(schema, "minItems")?,
             max_items: size(schema, "maxItems")?,
-            any_of: schema
-                .get("anyOf")
-                .and_then(Value::as_array)
-                .map(|nodes| nodes.iter().map(Node::compile).collect::<Result<_, _>>())
-                .transpose()?
-                .unwrap_or_default(),
+            any_of: variants(schema, "anyOf")?,
+            one_of: variants(schema, "oneOf")?,
         })
     }
 
     /// First violation as `path: message`, or `Ok` when `value` satisfies the schema.
     pub fn validate(&self, value: &Value, path: &str) -> Result<(), String> {
-        let fail = |message: String| Err(format!("{}: {message}", if path.is_empty() { "(root)" } else { path }));
+        let fail = |message: String| {
+            Err(format!(
+                "{}: {message}",
+                if path.is_empty() { "(root)" } else { path }
+            ))
+        };
         if let Some(types) = &self.types
             && !types.iter().any(|t| matches_type(*t, value))
         {
@@ -195,10 +207,16 @@ impl Node {
             Value::String(s) => {
                 let length = s.encode_utf16().count();
                 if self.min_length.is_some_and(|min| length < min) {
-                    return fail(format!("must contain at least {} character(s)", self.min_length.unwrap()));
+                    return fail(format!(
+                        "must contain at least {} character(s)",
+                        self.min_length.unwrap()
+                    ));
                 }
                 if self.max_length.is_some_and(|max| length > max) {
-                    return fail(format!("must contain at most {} character(s)", self.max_length.unwrap()));
+                    return fail(format!(
+                        "must contain at most {} character(s)",
+                        self.max_length.unwrap()
+                    ));
                 }
                 if self.pattern.as_ref().is_some_and(|p| !p.is_match(s)) {
                     return fail("does not match the required pattern".into());
@@ -253,8 +271,77 @@ impl Node {
         if !self.any_of.is_empty() && !self.any_of.iter().any(|n| n.validate(value, path).is_ok()) {
             return fail("does not match any allowed variant".into());
         }
+        if !self.one_of.is_empty()
+            && self
+                .one_of
+                .iter()
+                .filter(|n| n.validate(value, path).is_ok())
+                .count()
+                != 1
+        {
+            return fail("must match exactly one allowed variant".into());
+        }
         Ok(())
     }
+}
+
+impl Node {
+    /// zod parse output for a value that already validated: explicit object schemas drop
+    /// unknown keys (zod "strip"), passthrough objects (`additionalProperties: {}`) and
+    /// untyped schemas keep them, and unions project through the first matching variant.
+    pub fn strip(&self, value: &Value) -> Value {
+        if let Some(variant) = self
+            .one_of
+            .iter()
+            .chain(&self.any_of)
+            .find(|n| n.validate(value, "").is_ok())
+        {
+            return variant.strip(value);
+        }
+        match value {
+            Value::Object(map) => {
+                let explicit_object = self.types.as_ref().is_some_and(|t| t.contains(&Ty::Object));
+                let mut out = serde_json::Map::new();
+                for (key, item) in map {
+                    match self.properties.iter().find(|(name, _)| name == key) {
+                        Some((_, schema)) => {
+                            out.insert(key.clone(), schema.strip(item));
+                        }
+                        None => match &self.additional {
+                            Additional::Schema(schema) => {
+                                out.insert(key.clone(), schema.strip(item));
+                            }
+                            Additional::Allow if !explicit_object => {
+                                out.insert(key.clone(), item.clone());
+                            }
+                            Additional::Allow | Additional::Deny => {}
+                        },
+                    }
+                }
+                Value::Object(out)
+            }
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .map(|item| {
+                        self.items
+                            .as_ref()
+                            .map_or_else(|| item.clone(), |s| s.strip(item))
+                    })
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+}
+
+fn variants(schema: &Value, key: &str) -> Result<Vec<Node>, String> {
+    schema
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|nodes| nodes.iter().map(Node::compile).collect::<Result<_, _>>())
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 fn matches_type(ty: Ty, value: &Value) -> bool {
@@ -288,47 +375,5 @@ fn type_names(types: &[Ty]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn rejects_unsupported_keywords_at_compile_time() {
-        assert!(Node::compile(&json!({"type":"string","oneOf":[]})).is_err());
-        assert!(Node::compile(&json!({"type":"string","format":"email"})).is_err());
-    }
-
-    #[test]
-    fn validates_zod_subset_semantics() {
-        let node = Node::compile(&json!({
-            "type":"object",
-            "properties":{
-                "name":{"type":"string","minLength":1,"maxLength":2},
-                "count":{"type":"integer","exclusiveMinimum":0,"maximum":100},
-                "mode":{"type":"string","enum":["a","b"]},
-                "tags":{"type":"array","items":{"type":"string"},"maxItems":1},
-                "either":{"anyOf":[{"type":"string"},{"type":"null"}]},
-                "map":{"type":"object","propertyNames":{"type":"string","minLength":2},"additionalProperties":{"type":"number"}}
-            },
-            "required":["name"],
-            "additionalProperties":false
-        }))
-        .unwrap();
-        assert!(node.validate(&json!({"name":"ok","count":3,"mode":"a","tags":["x"],"either":null,"map":{"kk":1}}), "").is_ok());
-        for bad in [
-            json!({}),
-            json!({"name":""}),
-            json!({"name":"😀😀"}),
-            json!({"name":"a","count":0}),
-            json!({"name":"a","count":1.5}),
-            json!({"name":"a","mode":"c"}),
-            json!({"name":"a","tags":["x","y"]}),
-            json!({"name":"a","either":1}),
-            json!({"name":"a","map":{"k":1}}),
-            json!({"name":"a","map":{"kk":"x"}}),
-            json!({"name":"a","extra":true}),
-        ] {
-            assert!(node.validate(&bad, "").is_err(), "{bad}");
-        }
-    }
-}
+#[path = "json_schema_tests.rs"]
+mod tests;

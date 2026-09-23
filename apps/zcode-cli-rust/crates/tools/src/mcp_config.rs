@@ -146,15 +146,15 @@ pub(super) fn explicit(value: &Value, cwd: &Path) -> Result<Vec<Server>> {
 }
 pub(super) async fn configured(
     cwd: &Path,
+    config: &Value,
     overrides: Option<&Value>,
     cancel: &CancellationToken,
 ) -> Result<Vec<Server>> {
-    let config = config::load(cwd).await?;
     if config["features"]["mcp"] == false {
         return Ok(vec![]);
     }
     let mut merged = BTreeMap::new();
-    for plugin in plugins::enabled(cwd, &config, cancel).await? {
+    for plugin in plugins::enabled(cwd, config, cancel).await? {
         let file = config::json_file(&plugin.root.join(".mcp.json")).await?;
         let mut definitions = shape(&file).clone();
         for spec in plugin

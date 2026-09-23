@@ -1,6 +1,5 @@
 //! Read existing storage configuration without running TS migrations or writing config.
-use anyhow::{Context, Result, ensure};
-use serde_json::Value;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 pub struct LegacySource {
     pub database: PathBuf,
@@ -20,72 +19,33 @@ fn expand(path: &str, cwd: &Path, home: &Path) -> PathBuf {
         cwd.join(path)
     }
 }
+/// Locate the TS session database the Node runtime would use for `cwd`.
+/// Storage paths come from the same layered configuration as Node (`storage.dir`,
+/// `storage.sessionDbPath`, including `ZCODE_*` overrides); an explicit path wins.
 pub async fn resolve(
     explicit: Option<PathBuf>,
     cwd: &Path,
     automatic: bool,
+    config: &crate::domain::config::ConfigSnapshot,
 ) -> Result<Option<LegacySource>> {
-    let env = std::env::var_os("ZCODE_SESSION_DB_PATH")
-        .or_else(|| std::env::var_os("ZCODE_SESSION_DB"))
-        .map(PathBuf::from);
+    let env =
+        std::env::var_os("ZCODE_SESSION_DB_PATH").or_else(|| std::env::var_os("ZCODE_SESSION_DB"));
     if explicit.is_none() && env.is_none() && !automatic {
         return Ok(None);
     }
     let home = home()?;
-    let mut paths = vec![home.join(".zcode/cli/config.json")];
-    let mut dirs = vec![];
-    let mut found = false;
-    for dir in cwd.ancestors() {
-        dirs.push(dir);
-        if tokio::fs::try_exists(dir.join(".git")).await? {
-            found = true;
-            break;
-        }
-    }
-    if !found {
-        dirs = vec![cwd];
-    }
-    for dir in dirs.into_iter().rev() {
-        paths.extend([dir.join("zcode.json"), dir.join(".zcode/config.json")]);
-    }
-    let mut database = "~/.zcode/cli/db/db.sqlite".to_owned();
-    let mut root = "~/.zcode".to_owned();
-    for path in paths {
-        let bytes = match tokio::fs::read(path).await {
-            Ok(v) => v,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(e.into()),
-        };
-        ensure!(
-            bytes.len() <= 8 * 1024 * 1024,
-            "Legacy config exceeds size limit"
-        );
-        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
-            continue;
-        };
-        if let Some(value) = v["storage"]["sessionDbPath"]
-            .as_str()
-            .filter(|v| !v.trim().is_empty())
-        {
-            database = value.to_owned();
-        }
-        if let Some(value) = v["storage"]["dir"]
-            .as_str()
-            .filter(|v| !v.trim().is_empty())
-        {
-            root = value.to_owned();
-        }
-    }
     let required = explicit.is_some();
-    if let Some(value) = explicit.or(env) {
-        database = value.to_string_lossy().into_owned();
-    }
-    if let Ok(value) = std::env::var("ZCODE_STORAGE_DIR") {
-        root = value;
-    }
+    let database = match explicit {
+        Some(path) => path.to_string_lossy().into_owned(),
+        None => config
+            .str("storage", "sessionDbPath")
+            .unwrap_or("~/.zcode/cli/db/db.sqlite")
+            .to_owned(),
+    };
+    let root = config.str("storage", "dir").unwrap_or("~/.zcode");
     Ok(Some(LegacySource {
         database: expand(&database, cwd, &home),
-        artifacts: expand(&root, cwd, &home).join("cli/artifacts"),
+        artifacts: expand(root, cwd, &home).join("cli/artifacts"),
         required,
     }))
 }

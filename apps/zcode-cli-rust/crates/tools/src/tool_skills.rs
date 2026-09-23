@@ -17,11 +17,18 @@ struct Root {
     plugin_name: Option<String>,
     plugin_root: Option<PathBuf>,
 }
-pub(super) async fn discover(cwd: &Path, cancel: &CancellationToken) -> Result<SkillCatalog> {
-    tokio::select! {biased; _=cancel.cancelled()=>anyhow::bail!("Cancelled"), result=discover_inner(cwd,cancel)=>result}
+pub(super) async fn discover(
+    cwd: &Path,
+    config: &serde_json::Value,
+    cancel: &CancellationToken,
+) -> Result<SkillCatalog> {
+    tokio::select! {biased; _=cancel.cancelled()=>anyhow::bail!("Cancelled"), result=discover_inner(cwd,config,cancel)=>result}
 }
-async fn discover_inner(cwd: &Path, cancel: &CancellationToken) -> Result<SkillCatalog> {
-    let config = config::load(cwd).await?;
+async fn discover_inner(
+    cwd: &Path,
+    config: &serde_json::Value,
+    cancel: &CancellationToken,
+) -> Result<SkillCatalog> {
     let mut catalog = SkillCatalog {
         enabled: config["features"]["skill"] != false && config["skills"]["enabled"] != false,
         include_instructions: config["skills"]["includeInstructions"] != false,
@@ -59,7 +66,7 @@ async fn discover_inner(cwd: &Path, cancel: &CancellationToken) -> Result<SkillC
             });
         }
     }
-    for plugin in plugins::enabled(cwd, &config, cancel).await? {
+    for plugin in plugins::enabled(cwd, config, cancel).await? {
         let mut paths = vec!["skills"];
         paths.extend(config::strings(&plugin.manifest["skills"]));
         for path in paths {
@@ -75,7 +82,8 @@ async fn discover_inner(cwd: &Path, cancel: &CancellationToken) -> Result<SkillC
         }
     }
     let mut disabled = BTreeSet::new();
-    for group in ["skill", "skills"] {
+    // Node 把 skill 段与 skills[绝对路径] 统一规范化为 skillOverrides。
+    for group in ["skillOverrides"] {
         if let Some(entries) = config[group].as_object() {
             for (path, value) in entries {
                 if value["enable"] == false {

@@ -65,7 +65,11 @@ impl LogOptions {
         let development = std::env::var("ZCODE_RUNTIME_ENV").is_ok_and(|v| v == "development");
         Self {
             directory,
-            level: if development { Level::DEBUG } else { Level::INFO },
+            level: if development {
+                Level::DEBUG
+            } else {
+                Level::INFO
+            },
             console: std::env::var("ZCODE_LOG_CONSOLE").is_ok_and(|v| v == "1"),
         }
     }
@@ -175,7 +179,9 @@ impl Fields {
     fn put(&mut self, field: &Field, value: Value) {
         let name = field.name();
         if name == "message" {
-            self.message = value.as_str().map_or_else(|| value.to_string(), str::to_owned);
+            self.message = value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned);
         } else if let Some(key) = reserved(name) {
             self.top.insert(key.into(), value);
         } else if redacted(name) {
@@ -296,7 +302,10 @@ mod tests {
         assert_eq!(line["message"], "Session started");
         assert_eq!(line["context"]["api_key"], "[Redacted]");
         assert_eq!(line["context"]["count"], 3);
-        assert!(rx.try_recv().is_err(), "debug and dependency events are filtered");
+        assert!(
+            rx.try_recv().is_err(),
+            "debug and dependency events are filtered"
+        );
     }
 
     #[test]
