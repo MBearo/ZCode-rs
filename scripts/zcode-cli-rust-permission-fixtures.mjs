@@ -129,29 +129,103 @@ const write = { file_path: "/w/src/a.ts", content: "x" };
 const scenarios = [
   ["Write", write, build, { projectRules: { version: 1, deny: [{ toolName: "Write" }] } }],
   ["Write", write, yolo, { projectRules: { version: 1, deny: [{ toolName: "Write" }] } }],
-  ["Write", write, build, { projectRules: { allow: [{ toolName: "Edit", ruleContent: "/w/src/*" }] } }],
+  [
+    "Write",
+    write,
+    build,
+    { projectRules: { allow: [{ toolName: "Edit", ruleContent: "/w/src/*" }] } },
+  ],
   ["Write", write, plan, { projectRules: { allow: [{ toolName: "Write" }] } }],
-  ["Write", write, build, { projectRules: { ask: [{ toolName: "Write", ruleContent: "/w/src/a.ts" }] } }],
-  ["Read", { file_path: "/etc/passwd" }, build, { projectRules: { ask: [{ toolName: "Read", ruleContent: "/etc/*" }] } }],
-  ["Read", { file_path: "/etc/pass\nwd" }, build, { projectRules: { ask: [{ toolName: "Read", ruleContent: "/etc/*" }] } }],
-  ["Grep", { pattern: "foo", path: "/w" }, build, { projectRules: { deny: [{ toolName: "Grep", ruleContent: "foo:*" }] } }],
-  ["Grep", { pattern: "foo bar", path: "/w" }, build, { projectRules: { deny: [{ toolName: "Grep", ruleContent: "foo:*" }] } }],
-  ["Grep", { pattern: "foobar", path: "/w" }, build, { projectRules: { deny: [{ toolName: "Grep", ruleContent: "foo:*" }] } }],
-  ["Grep", { pattern: "a.b", path: "/w" }, build, { projectRules: { deny: [{ toolName: "Grep", ruleContent: "a.*" }] } }],
-  ["Grep", { pattern: "a(b", path: "/w" }, build, { projectRules: { deny: [{ toolName: "Grep", ruleContent: "a(*" }] } }],
-  ["WebFetch", { url: "https://Example.COM./x", prompt: "p" }, build, { projectRules: { allow: [{ toolName: "WebFetch", ruleContent: "domain:example.com" }] } }],
-  ["WebFetch", { url: "https://example.com/x", prompt: "p" }, build, { projectRules: { allow: [{ toolName: "WebFetch", ruleContent: "https://example.com/x" }] } }],
-  ["WebFetch", { url: "https://a.example.com/x", prompt: "p" }, build, { projectRules: { allow: [{ toolName: "WebFetch", ruleContent: "domain:*.example.com" }] } }],
+  [
+    "Write",
+    write,
+    build,
+    { projectRules: { ask: [{ toolName: "Write", ruleContent: "/w/src/a.ts" }] } },
+  ],
+  [
+    "Read",
+    { file_path: "/etc/passwd" },
+    build,
+    { projectRules: { ask: [{ toolName: "Read", ruleContent: "/etc/*" }] } },
+  ],
+  [
+    "Read",
+    { file_path: "/etc/pass\nwd" },
+    build,
+    { projectRules: { ask: [{ toolName: "Read", ruleContent: "/etc/*" }] } },
+  ],
+  [
+    "Grep",
+    { pattern: "foo", path: "/w" },
+    build,
+    { projectRules: { deny: [{ toolName: "Grep", ruleContent: "foo:*" }] } },
+  ],
+  [
+    "Grep",
+    { pattern: "foo bar", path: "/w" },
+    build,
+    { projectRules: { deny: [{ toolName: "Grep", ruleContent: "foo:*" }] } },
+  ],
+  [
+    "Grep",
+    { pattern: "foobar", path: "/w" },
+    build,
+    { projectRules: { deny: [{ toolName: "Grep", ruleContent: "foo:*" }] } },
+  ],
+  [
+    "Grep",
+    { pattern: "a.b", path: "/w" },
+    build,
+    { projectRules: { deny: [{ toolName: "Grep", ruleContent: "a.*" }] } },
+  ],
+  [
+    "Grep",
+    { pattern: "a(b", path: "/w" },
+    build,
+    { projectRules: { deny: [{ toolName: "Grep", ruleContent: "a(*" }] } },
+  ],
+  [
+    "WebFetch",
+    { url: "https://Example.COM./x", prompt: "p" },
+    build,
+    { projectRules: { allow: [{ toolName: "WebFetch", ruleContent: "domain:example.com" }] } },
+  ],
+  [
+    "WebFetch",
+    { url: "https://example.com/x", prompt: "p" },
+    build,
+    { projectRules: { allow: [{ toolName: "WebFetch", ruleContent: "https://example.com/x" }] } },
+  ],
+  [
+    "WebFetch",
+    { url: "https://a.example.com/x", prompt: "p" },
+    build,
+    { projectRules: { allow: [{ toolName: "WebFetch", ruleContent: "domain:*.example.com" }] } },
+  ],
   ["Write", write, build, { disallowedTools: ["Write"] }],
   ["Write", write, yolo, { disallowedTools: ["Write"] }],
   ["Write", write, build, { allowedTools: ["Write"] }],
   ["Write", write, plan, { allowedTools: ["Write"] }],
   ["AskUserQuestion", { questions: [] }, yolo, { disallowedTools: ["AskUserQuestion"] }],
-  ["CreateWorkflow", {}, build, { sessionRules: [{ behavior: "allow", type: "addRules", rules: [{ toolName: "CreateWorkflow" }] }] }],
+  [
+    "CreateWorkflow",
+    {},
+    build,
+    {
+      sessionRules: [
+        { behavior: "allow", type: "addRules", rules: [{ toolName: "CreateWorkflow" }] },
+      ],
+    },
+  ],
   ["CreateWorkflow", {}, yolo, { disallowedTools: ["CreateWorkflow"] }],
   ["CreateWorkflow", {}, yolo, { projectRules: { deny: [{ toolName: "CreateWorkflow" }] } }],
   ["js", { code: "1" }, build, { autoApproveHighRisk: true }],
-  ["Write", "raw string input", build, { projectRules: { allow: [{ toolName: "Write", ruleContent: "raw*" }] } }],
+  [
+    "Write",
+    "raw string input",
+    build,
+    { projectRules: { allow: [{ toolName: "Write", ruleContent: "raw*" }] } },
+  ],
 ];
 for (const [name, input, state, options] of scenarios) {
   decisions.push(decide(entry(name), input, state, options));
@@ -159,7 +233,17 @@ for (const [name, input, state, options] of scenarios) {
 
 const optionCases = [
   { toolName: "Write", input: { file_path: "/w/a.ts" } },
-  { toolName: "Bash", input: { command: "npm test" }, suggestedPermissionUpdates: [{ behavior: "allow", type: "addRules", rules: [{ toolName: "Bash", ruleContent: "npm test:*" }] }] },
+  {
+    toolName: "Bash",
+    input: { command: "npm test" },
+    suggestedPermissionUpdates: [
+      {
+        behavior: "allow",
+        type: "addRules",
+        rules: [{ toolName: "Bash", ruleContent: "npm test:*" }],
+      },
+    ],
+  },
   { toolName: "CreateWorkflow", input: {}, optionsPolicy: "session-always-allow" },
   { toolName: "SaveWorkflow", input: {}, optionsPolicy: "no-always-allow" },
   { toolName: "WebFetch", input: { url: " " } },
