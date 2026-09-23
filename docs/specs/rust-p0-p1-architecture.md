@@ -13,7 +13,7 @@
 | 3   | `sendText` 扩展字段（browserAmbientContext、toolDisallowlist、modelExecution、automation/offPeak 归属） | M1     |
 | 4   | Host 仍依赖的旧 `session/*` 方法与旧事件流（暂时对齐 Node，含手机 replayable 读路径）                   | M3     |
 | 5   | 网络出口：代理、CA、身份头、Coding Plan 网关、设备 ID、子进程网络环境                                   | M1     |
-| 6   | hooks 最低保护（在 M6 完整实现前，检测到 hooks 即显式拒绝）                                             | M1     |
+| 6   | hooks（随 M2 工具管线完整实现，不做临时拒绝）                                                           | M2     |
 
 **P1（切默认前应完成）**：Edit 宽松匹配（#7）、`-p` 无头模式（#8）、Bash 对齐（#9）、多内容工具结果与 Read 媒体/PDF（#10）、WebFetch/WebSearch（#11）、完整 hooks 与信任（#12）、流式恢复与异常防护（#13）、compact 质量（#14）、订阅回放与流控（#15）、插件管理与官方 MCP 鉴权（#16）、日志与用量（#17）、配置体系（#18）。
 
@@ -205,7 +205,7 @@ sequenceDiagram
   - `modelExecution`：要求 `modelSelection`；忙时拒绝；选型只用于本 run，不写会话；`requestAuth` 冻结在 RunScope，不持久化；`subagents` 策略限制子代理选型与后台子代理；`memoryExtraction:"skip"` 记录但当前无记忆提取。
   - `automationId`/`offPeakTaskId`/`offPeakRunType`：仅作为本轮归属记录。
 - **`session/close`**：`expectedPersistence` 不匹配返回 `{closed:false}`，否则按现有 `deleteSession` 收口语义关闭。
-- **hooks 最低保护**：配置层发现任一启用的 hook（user、plugin、已信任的 project）时，输入 admission 以 `guard.capabilityUnsupported` 拒绝，并给出可读原因。M6 完成后移除。
+- **hooks**：不做临时拒绝（带 hooks 的插件会让所有输入被拒，违背对齐 Node 的目标），改为随 M2 工具管线完整实现，见 5.12。
 
 ### 5.3 M1：配置体系（P1 #18，提前）
 
@@ -304,7 +304,7 @@ sequenceDiagram
   - `prompt` 用会话当前模型以辅助任务处理（无工具、最低推理档、输出上限 4096），预批准域名直接返回 markdown。
 - **WebSearch**：仅当 `supportsNativeWebSearch` 时暴露；只支持 Anthropic 类 provider 的原生 `web_search` 工具，发起独立流式请求，从摘要中的 markdown 链接提取来源（与 Node 一致，没有 OpenAI 路径）。
 
-### 5.12 M6：完整 hooks 与工作区信任（P1 #12）
+### 5.12 M2：完整 hooks 与工作区信任（P0 #6、P1 #12）
 
 - **事件**：7 种事件的触发时机与 Node 一致。
   - SessionStart 每个 runtime 实例一次；
@@ -322,7 +322,6 @@ sequenceDiagram
   - digest 用与 JS `JSON.stringify` 等价的规范化序列化，测试向量由 Node 生成；
   - 审批流程、toggle、revoke、`workspace/hooks/trustGrant` 与 4 个 V4 命令契约同 Node。
 - **投影**：生成 `hookInvocation` 行与 HookRun 事件。
-- 移除 5.2 的临时拒绝。
 
 ### 5.13 M7：流式恢复与异常防护（P1 #13）
 
@@ -389,9 +388,9 @@ app-server 的投递层完全替换现有 `subscriptions.rs`：
   - stdio：每条出站消息注入 `_meta["com.zcode/official-mcp-auth"]`。
   - 目标 origin 必须可信，否则 fail-closed。
 
-## 6. 刻意与 Node 不同的行为（逐条确认）
+## 6. 已知 Node 缺陷清单（全部保持 Node 行为）
 
-原则：保持对外契约兼容，修正已确认的缺陷，且只向更安全或更确定的方向偏离。2026-09-23 决定逐条确认：每个里程碑开工前确认涉及的条目，未确认的条目不实现差异。
+2026-09-23 逐条确认结果：**全部对齐 Node 现有行为**，D1–D7、D13 已明确选择保持 Node 语义；D8–D12 按同一原则默认保持 Node 语义。下表仅作为已知的 Node 缺陷清单留存，Rust 不实现这些修正；如需修正，需单独确认并先在 Node 修复。
 
 | #   | Node 现状                                                                                          | Rust 方案                                    |
 | --- | -------------------------------------------------------------------------------------------------- | -------------------------------------------- |
@@ -444,15 +443,15 @@ app-server 的投递层完全替换现有 `subscriptions.rs`：
 | 里程碑 | 内容                                                                                                               | 依赖                             |
 | ------ | ------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
 | M0     | 类型化协议与错误码、连接模型、app-server 路由与投递迁移、RunScope、状态枚举、子命令与 TUI 占位、基础日志、性能修正 | —                                |
-| M1     | 配置体系、网络出口与 reqwest 统一、sendText 扩展字段、`session/close`、hooks 临时拒绝                              | M0                               |
-| M2     | 工具管线、PolicyEngine、Bash 分类、交互状态机、plan 工具、能力声明                                                 | M1                               |
+| M1     | 配置体系、网络出口与 reqwest 统一、sendText 扩展字段、`session/close`                                              | M0                               |
+| M2     | 工具管线、PolicyEngine、Bash 分类、交互状态机、plan 工具、能力声明、完整 hooks 与工作区信任                        | M1                               |
 | M3     | 旧 `session/*` 外观、旧事件流投影、反向请求                                                                        | M0，建议在 M2 之后               |
 | M4     | `-p` 无头模式与 Node/Rust 差分脚本                                                                                 | M3（stream-json 复用旧事件投影） |
 | M5     | 多段结果与预算层、Edit、Bash、Read 媒体与 PDF、WebFetch/WebSearch、backgroundBashOutput                            | M2                               |
-| M6     | 完整 hooks 与信任                                                                                                  | M2                               |
+| M6     | （并入 M2）                                                                                                        | —                                |
 | M7     | 流式恢复、异常防护、compact 质量                                                                                   | M2                               |
 | M8     | 订阅回放与流控                                                                                                     | M0                               |
 | M9     | 用量与日志保留                                                                                                     | M0                               |
-| M10    | 插件管理与官方 MCP 鉴权                                                                                            | M1、M6                           |
+| M10    | 插件管理与官方 MCP 鉴权                                                                                            | M1、M2                           |
 
 每个里程碑开工前补对应分项 spec（精确契约与验收用例），以单独提交交付；未通过验收的能力不在 capabilities 中声明。
