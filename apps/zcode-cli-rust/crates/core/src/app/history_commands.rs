@@ -224,7 +224,7 @@ impl Engine {
         child.epoch = self.clock.id();
         child.seq = 0;
         child.revision = 1;
-        child.phase = "completedSuccess".into();
+        child.phase = crate::domain::execution::Phase::CompletedSuccess;
         child.auto_drain = true;
         child.queued_now = None;
         child.queue.clear();

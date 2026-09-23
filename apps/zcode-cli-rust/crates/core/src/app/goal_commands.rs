@@ -55,7 +55,7 @@ impl Engine {
         if !pause {
             self.select(&json!({}), Some(self.session_selection(id)?))?;
             ensure!(
-                s.mode == "yolo" && !s.plan_enabled,
+                s.mode == crate::domain::execution::Mode::Yolo && !s.plan_enabled,
                 "Unsupported goal execution mode"
             );
         }
@@ -77,7 +77,7 @@ impl Engine {
                 let turn = self.clock.id();
                 continuation(s, &goal, None, &turn, now);
                 s.run_id = Some(self.clock.id());
-                s.phase = "running".into();
+                s.phase = crate::domain::execution::Phase::Running;
                 s.last_error = None;
                 Some(turn)
             }

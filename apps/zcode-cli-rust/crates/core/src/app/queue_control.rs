@@ -6,7 +6,7 @@ impl Engine {
     pub(super) async fn send_queued_now(&mut self, c: &Command) -> Result<Value> {
         let id = c.session_id.as_deref().context("Session required")?;
         let session = self.sessions.get_mut(id).context("Session unavailable")?;
-        if (session.mode != "yolo" || session.plan_enabled)
+        if (session.mode != crate::domain::execution::Mode::Yolo || session.plan_enabled)
             || (self.model.is_none() && self.registry.is_none())
         {
             return Ok(c.ack("rejected", session.revision, Some("guard.modelUnavailable")));

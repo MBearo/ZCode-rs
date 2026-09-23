@@ -60,7 +60,7 @@ impl Engine {
         )?;
         let retained_messages = s.messages.len();
         s.run_id = Some(self.clock.id());
-        s.phase = "running".into();
+        s.phase = crate::domain::execution::Phase::Running;
         s.last_error = None;
         s.updated_at = now;
         s.revision += 1;

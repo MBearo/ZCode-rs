@@ -65,7 +65,7 @@ impl Engine {
                 .iter()
                 .filter(|(id, s)| {
                     self.active.contains_key(*id)
-                        || s.phase == "draft"
+                        || s.phase == crate::domain::execution::Phase::Draft
                         || !s.queue.is_empty()
                         || !s.pending.is_empty()
                         || !s.mailbox.is_empty()

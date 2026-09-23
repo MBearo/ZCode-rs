@@ -4,6 +4,7 @@ pub mod agent_profile;
 pub mod attachment_upload;
 pub mod background;
 pub mod context;
+pub mod execution;
 pub mod file_checkpoint;
 pub mod goal;
 pub mod history;

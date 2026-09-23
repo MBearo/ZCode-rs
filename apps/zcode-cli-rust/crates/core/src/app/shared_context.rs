@@ -72,13 +72,15 @@ impl Engine {
         session.trace_id = Some(self.clock.id());
         session.title = history.title.clone();
         session.title_source = "custom".into();
-        session.phase = "completedSuccess".into();
+        session.phase = crate::domain::execution::Phase::CompletedSuccess;
         if let Some(mode) = input.mode {
             session.plan_enabled = mode == "plan";
-            session.mode = if mode == "plan" || mode == "auto" {
-                "build".into()
-            } else {
-                mode
+            // 导入的 plan/auto 会话降为 build，不能静默提升为可执行模式。
+            session.mode = match crate::domain::execution::Mode::parse(&mode) {
+                Some(crate::domain::execution::Mode::Auto) | None => {
+                    crate::domain::execution::Mode::Build
+                }
+                Some(mode) => mode,
             };
         }
         let content = self

@@ -142,7 +142,7 @@ impl Engine {
                     return Ok(c.ack("rejected", s.revision, Some("guard.capabilityUnsupported")));
                 }
                 let session = self.sessions.get_mut(&id).unwrap();
-                session.mode = "yolo".into();
+                session.mode = crate::domain::execution::Mode::Yolo;
                 session.revision += 1;
             }
             "cancelBackgroundWork" => {

@@ -295,11 +295,10 @@ impl Engine {
                     "success"
                 };
                 s.phase = match outcome {
-                    "interrupted" => "completedInterrupted",
-                    "failed" => "error",
-                    _ => "completedSuccess",
-                }
-                .into();
+                    "interrupted" => crate::domain::execution::Phase::CompletedInterrupted,
+                    "failed" => crate::domain::execution::Phase::Error,
+                    _ => crate::domain::execution::Phase::CompletedSuccess,
+                };
                 if cancelled || error.is_some() {
                     if s.queued_now.is_none() {
                         s.auto_drain = false;

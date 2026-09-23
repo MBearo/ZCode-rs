@@ -8,7 +8,9 @@ impl Engine {
     pub(super) async fn send_input(&mut self, mut c: Command) -> Result<Value> {
         let id = c.session_id.clone().context("Session required")?;
         let s = &self.sessions[&id];
-        if s.mode != "yolo" || (s.plan_enabled && c.payload["planEnabled"] != false) {
+        if s.mode != crate::domain::execution::Mode::Yolo
+            || (s.plan_enabled && c.payload["planEnabled"] != false)
+        {
             return Ok(c.ack("rejected", s.revision, Some("guard.capabilityUnsupported")));
         }
         self.validate_input(&c.payload)?;

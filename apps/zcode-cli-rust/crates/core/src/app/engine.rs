@@ -324,7 +324,11 @@ impl Engine {
             session.resident_bytes = None;
         }
         // 导入候选还没有可见 row，但它已是 durable session；只有真正 draft 可以跳过提交。
-        if self.sessions.get(id).is_some_and(|s| s.phase == "draft") {
+        if self
+            .sessions
+            .get(id)
+            .is_some_and(|s| s.phase == crate::domain::execution::Phase::Draft)
+        {
             return Ok(());
         }
         let mut keys = self

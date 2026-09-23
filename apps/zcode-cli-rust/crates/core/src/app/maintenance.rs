@@ -6,7 +6,7 @@ impl Engine {
     pub(super) async fn compact_command(&mut self, c: &Command) -> Result<Value> {
         let id = c.session_id.as_deref().context("Session id required")?;
         let session = self.sessions.get(id).context("Session unavailable")?;
-        if (session.mode != "yolo" || session.plan_enabled)
+        if (session.mode != crate::domain::execution::Mode::Yolo || session.plan_enabled)
             || (self.model.is_none() && self.registry.is_none())
         {
             return Ok(c.ack(
@@ -58,7 +58,7 @@ impl Engine {
         let turn = self.clock.id();
         s.compact_instructions = Some(c.payload["text"].as_str().unwrap_or("").into());
         s.run_id = Some(self.clock.id());
-        s.phase = "running".into();
+        s.phase = crate::domain::execution::Phase::Running;
         s.last_error = None;
         s.updated_at = now;
         s.revision += 1;

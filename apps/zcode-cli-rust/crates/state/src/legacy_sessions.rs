@@ -113,8 +113,11 @@ pub(super) fn project(
             .rev()
             .find(|(k, _)| k == "runtime/execution_state")
             .and_then(|(_, v)| v["mode"].as_str())
-            .unwrap_or("build")
-            .into();
+            .map_or(
+                Some(crate::domain::execution::Mode::Build),
+                crate::domain::execution::Mode::parse,
+            )
+            .context("Unsupported imported execution mode")?;
         session.plan_enabled = entries
             .iter()
             .rev()
@@ -122,7 +125,7 @@ pub(super) fn project(
             .is_some_and(|(_, v)| v["planEnabled"] == true || v["mode"] == "plan");
         (session.todos, session.todos_updated_at) =
             super::legacy_todos::read(snapshot, &id, cancel)?;
-        session.phase = "completedSuccess".into();
+        session.phase = crate::domain::execution::Phase::CompletedSuccess;
         let messages = items(
             snapshot,
             "SELECT id,data FROM message WHERE session_id=?1 ORDER BY sequence,time_created,id",
@@ -379,7 +382,7 @@ pub(super) fn project(
         super::legacy_projection::ledger(snapshot, &id, &mut session)?;
         super::legacy_shared_context::validate(&session, &entries)?;
         if interrupted {
-            session.phase = "completedInterrupted".into();
+            session.phase = crate::domain::execution::Phase::CompletedInterrupted;
             session.auto_drain = false;
             for row in &mut session.rows {
                 if row["kind"] == "turnHeader" && row["turnId"] == turn {

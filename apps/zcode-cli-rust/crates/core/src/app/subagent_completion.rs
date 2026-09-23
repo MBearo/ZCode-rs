@@ -35,9 +35,9 @@ impl Engine {
             .and_then(|m| m["content"].as_str())
             .unwrap_or("")
             .to_owned();
-        let status = if s.phase == "completedSuccess" {
+        let status = if s.phase == crate::domain::execution::Phase::CompletedSuccess {
             "completed"
-        } else if s.phase == "completedInterrupted" {
+        } else if s.phase == crate::domain::execution::Phase::CompletedInterrupted {
             "cancelled"
         } else {
             "failed"

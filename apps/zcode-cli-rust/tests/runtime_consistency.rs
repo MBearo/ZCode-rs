@@ -75,7 +75,13 @@ impl SessionStore for Store {
             permission: session.as_ref().and_then(|s| s.pending.first()).cloned(),
             phase: session
                 .as_ref()
-                .map(|s| s.phase.clone())
+                .map(|s| {
+                    serde_json::to_value(s.phase)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                })
                 .unwrap_or_default(),
             last_role: session
                 .as_ref()
@@ -380,7 +386,10 @@ async fn question_registration_answer_timer_and_result_are_durable_barriers() {
                 let _ = runtime.running.await;
                 recovered.recover("new-epoch".into(), 2000);
                 assert!(recovered.pending.is_empty());
-                assert_eq!(recovered.phase, "completedInterrupted");
+                assert_eq!(
+                    recovered.phase,
+                    zcode_cli_rust::domain::execution::Phase::CompletedInterrupted
+                );
                 assert_eq!(
                     recovered.messages.last().unwrap()["tool_call_id"],
                     "question-call"

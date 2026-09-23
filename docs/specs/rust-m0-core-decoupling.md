@@ -114,8 +114,9 @@ pub enum RuntimeEvent {
 
 ## 7. 状态枚举
 
-- `Mode { Build, Edit, Yolo, Auto }` 加 `plan_enabled`；`Phase`（`draft`、`running`、`completedSuccess`、`completedInterrupted`、`error` 等现有取值）；`TaskType`。均 `#[serde(rename_all = "camelCase")]` 或逐项 rename，保证 SQLite 与 wire 中的字符串不变。
-- 未知取值：反序列化失败时报错，不静默回退（`legacy_mode` 缺省 `build` 的现有规则保留）。
+- `domain::execution::Mode { Build, Edit, Yolo, Auto }`（`plan_enabled` 仍为独立字段）与 `Phase { Draft, Prewarming, Running, CompletedSuccess, CompletedInterrupted, Error }`，serde 字符串与原 `String` 字段一致，SQLite 与 wire 不变。
+- 读取到 `plan` 时按 Node 语义解析为 `Build`，plan 标记由导入路径单独记录；其他未知取值反序列化失败，不静默回退。缺少 mode 的旧 native 会话仍按 `build` 处理。
+- `task_type` 保持字符串：它原样透传 TS 数据中的任务类型，取值集合由 TS 决定，枚举化会把新增类型变成导入失败。
 
 ## 8. 命令行
 

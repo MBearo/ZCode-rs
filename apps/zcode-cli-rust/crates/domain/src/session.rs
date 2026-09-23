@@ -59,8 +59,9 @@ pub struct Session {
     pub queued_now: Option<String>,
     #[serde(skip)]
     pub pending_acks: std::collections::BTreeMap<String, Value>,
-    #[serde(default = "legacy_mode")]
-    pub mode: String,
+    /// Missing in legacy native sessions: those deserialize as build.
+    #[serde(default)]
+    pub mode: super::execution::Mode,
     #[serde(default)]
     pub plan_enabled: bool,
     #[serde(default)]
@@ -91,7 +92,7 @@ pub struct Session {
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
-    pub phase: String,
+    pub phase: super::execution::Phase,
     #[serde(default, skip_serializing)]
     pub rows: Vec<Value>,
     #[serde(default, skip_serializing)]
@@ -127,9 +128,6 @@ pub struct Session {
 }
 fn queue_mode() -> String {
     "queue".into()
-}
-fn legacy_mode() -> String {
-    "build".into()
 }
 fn interactive() -> String {
     "interactive".into()
@@ -172,7 +170,7 @@ impl Session {
             compact_instructions: None,
             queued_now: None,
             pending_acks: Default::default(),
-            mode: "yolo".into(),
+            mode: super::execution::Mode::Yolo,
             plan_enabled: false,
             parent_id: None,
             task_type: interactive(),
@@ -194,7 +192,7 @@ impl Session {
             revision: 0,
             created_at: now,
             updated_at: now,
-            phase: "draft".into(),
+            phase: super::execution::Phase::Draft,
             rows: vec![],
             messages: vec![],
             saved_rows: 0,
@@ -231,7 +229,7 @@ impl Session {
         self.messages.push(message);
     }
     pub fn ended(&self) -> bool {
-        self.phase.starts_with("completed")
+        self.phase.ended()
     }
     fn projected_title_source(&self) -> &str {
         // TS stored 身份有 first_input，V4 只有三值；与 product-projection 统一映射，避免冷恢复帧被拒绝。
@@ -354,8 +352,11 @@ impl Session {
                 task.ended_at = Some(now);
             }
         }
-        if self.phase == "running" || self.phase == "prewarming" {
-            self.phase = "completedInterrupted".into();
+        if matches!(
+            self.phase,
+            super::execution::Phase::Running | super::execution::Phase::Prewarming
+        ) {
+            self.phase = super::execution::Phase::CompletedInterrupted;
             self.auto_drain = false;
             self.finish_rows("interrupted", now);
             // 崩溃可能发生于 assistant tool_calls 已保存但 tool result 尚未返回；
