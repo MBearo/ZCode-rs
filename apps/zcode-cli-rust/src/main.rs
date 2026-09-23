@@ -1,6 +1,6 @@
 mod args;
 use anyhow::{Context, Result};
-use args::Args;
+use args::{AppServerArgs, Cli, Command};
 use clap::Parser;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -23,8 +23,24 @@ async fn main() {
         std::process::exit(1);
     }
 }
+/// TUI 入口先占位：保留子命令与退出码契约，避免未实现的前端伪装成可用。
+const TUI_UNAVAILABLE_EXIT: i32 = 2;
+
 async fn run() -> Result<()> {
-    let args = Args::parse();
+    match Cli::parse().command {
+        Command::AppServer(args) => app_server(args).await,
+        Command::Tui => {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "zcode-cli-rust: TUI 尚未实现，请使用 app-server --stdio"
+            );
+            std::process::exit(TUI_UNAVAILABLE_EXIT);
+        }
+    }
+}
+
+async fn app_server(args: AppServerArgs) -> Result<()> {
     let question_timing = zcode_cli_host::question_timing()?;
     let requested_cwd = args.cwd.unwrap_or(std::env::current_dir()?);
     let cwd = tokio::fs::canonicalize(&requested_cwd)
