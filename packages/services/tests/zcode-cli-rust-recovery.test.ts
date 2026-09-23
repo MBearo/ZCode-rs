@@ -26,10 +26,15 @@ test("Rust queues execute FIFO, require CAS, and keep drained/create ACKs on res
       assert(result?.type === "inputAccepted");
       assert.equal(result.delivery, "queue");
     }
-    await assert.rejects(
-      h.command(h.envelope("setAutoDrain", id, { autoDrain: true })),
-      /baseRevision/,
+    // 与 Node parseCommandEnvelope 一致：CAS 命令缺 baseRevision 在 admission 被拒。
+    const unguarded = await h.client.request(
+      "v4/command",
+      h.envelope("setAutoDrain", id, { autoDrain: true }),
+      z.object({ status: z.string(), reasonCode: z.string(), message: z.string() }).passthrough(),
     );
+    assert.equal(unguarded.status, "rejected");
+    assert.equal(unguarded.reasonCode, "proto.invalidPayload");
+    assert.match(unguarded.message, /baseRevision/);
     await h.wait((m) =>
       m.params?.frame?.payload?.deltas?.some(
         (d: any) =>

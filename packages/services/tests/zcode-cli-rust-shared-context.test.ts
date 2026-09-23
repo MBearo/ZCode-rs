@@ -106,9 +106,12 @@ test("Shared references and provenance reject forged fields, cross-session IDs a
       ref("  "),
       [{ kind: "other", context_id: "context-A" }],
     ]) {
-      await assert.rejects(
-        h.command(h.envelope("sendText", "shared-A", { text: "invalid", context_refs: refs })),
-      );
+      // 结构不合法的引用在 admission 被拒（与 Node 一致回 rejected ACK）；
+      // 结构合法但语义无效的引用由 runtime 报错。两者都不能进入执行。
+      const outcome = await h
+        .command(h.envelope("sendText", "shared-A", { text: "invalid", context_refs: refs }))
+        .then((ack) => ack.status, () => "error");
+      assert(["rejected", "error"].includes(outcome), `${JSON.stringify(refs)} -> ${outcome}`);
     }
     const wrongWorkspace = {
       sessionId: "cross",

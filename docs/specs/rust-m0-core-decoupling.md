@@ -11,7 +11,7 @@
 3. **连接模型与投递迁移**：core 只产出类型化事件；JSON-RPC 编解码、订阅、帧编码与分片、stdout 写出迁到 app-server。
 4. **RunScope**：run 期等待者（权限、问答、Host 鉴权）统一归属，run 结束时一次性收口。
 5. **状态枚举**：`Mode`、`Phase`、`TaskType`，serde 格式不变。
-6. **类型化命令与 schema 漂移检查**。
+6. **命令 admission 校验与 schema 漂移检查**（见第 11 节）。
 7. **日志**：`tracing` 非阻塞 JSONL 写出。
 
 ## 2. 所有者与事件顺序
@@ -69,7 +69,7 @@ pub enum RuntimeEvent {
 }
 ```
 
-- `RuntimeRequest` 在第 1–5 项期间为 `{ method: Method, params: Value }`，`Method` 是现有方法名的枚举；第 6 项把 `v4/command` 的 payload 换成类型化 `Command`。
+- 请求为 `{ token, method: Method, params: Value }`，`Method` 是方法名枚举，未知方法在 app-server 边界以 -32601 拒绝；`v4/command` 在 admission 按第 11 节校验。
 - `TopicSnapshot`、`TopicInterest`、`ConnectionClosed` 是 app-server 专用的内部请求，不出现在 wire 上。
 - 响应值暂保持 `Value`，内容与现在逐字节一致；类型化响应随后续里程碑按需推进。
 
@@ -148,3 +148,15 @@ zcode-cli-rust tui        # 占位：stderr 输出“TUI 尚未实现”，退�
   - 日志：写入 JSONL，敏感字段被脱敏，stdout 无日志输出；
   - 写队列超过高水位时 actor 不阻塞，订阅以快照恢复。
 - 性能：`scripts/bench-zcode-cli-rust-suite.mjs` 同机对比 M0 前后，流式期间控制 RPC p95 与首段延迟不退化；结果写入 `docs/reports/`。
+
+## 11. 命令 admission 校验
+
+实现时调整：不手写 34 个 payload 结构体再用 schemars 比对，而是直接以 TS zod 契约为唯一来源。
+
+- `scripts/generate-zcode-cli-rust-protocol-schema.mjs` 用 zod 4 `toJSONSchema({ io: "input" })` 导出信封、34 个命令 payload、`COMMANDS_REQUIRING_BASE_REVISION` 与 `ROW_TARGETING_COMMANDS`，写入 `crates/protocol/schema/v4-command.json`；`pnpm test:zcode-cli-rust` 以 `--check` 检测漂移。
+- `crates/protocol` 内置一个只覆盖 zod 实际输出关键字子集的校验器（type、enum、const、长度、pattern、数值范围、properties/required/additionalProperties/propertyNames、items/数组长度、anyOf、format uuid）。编译时遇到子集外的关键字直接失败，TS 引入新构造会在测试中暴露；字符串长度按 UTF-16 计，与 zod 一致。未引入 jsonschema crate（会额外带入约 38 个依赖）。
+- `superRefine` 无法表达的 `sendText` 跨字段规则（automationId 与 offPeakTaskId 互斥、offPeakRunType 需要 offPeakTaskId、modelExecution 需要 modelSelection）在 Rust 手写镜像。
+- 校验失败按 Node `CommandInbox.handle` 回 `{commandId, status:"rejected", reasonCode:"proto.invalidPayload", message, revisionAtDecision:0}`，不再返回 -32602。CAS 命令缺 `baseRevision`（行定位命令缺 `baseLogEpoch`）同样在此拒绝。
+- 已知差异：zod `.trim().min(1)` 的 trim 不进 JSON Schema，全空白字符串在 admission 通过，由各命令的现有语义校验处理。
+- 命令处理仍读取 `Command { kind, payload: Value }`；后续里程碑改写具体命令时再迁移为类型化 payload。
+- 集成测试夹具按真实 Host 的 CAS 方式补齐 `baseRevision`（取当前修订号，stale 时重试），显式指定修订号的用例保持不变。

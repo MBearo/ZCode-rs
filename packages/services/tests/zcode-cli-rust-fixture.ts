@@ -6,11 +6,15 @@ import { resolve, join } from "node:path";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { setTimeout as delay } from "node:timers/promises";
 import { ZCodeProtocolClient } from "../src/zcode-agent/zcodeProtocolClient.js";
 import { ZCodeStdioTransport } from "../src/zcode-agent/zcodeStdioTransport.js";
 import { zcodeProtocolMessageSchema } from "@zcode/shared";
 import {
+  COMMANDS_REQUIRING_BASE_REVISION,
+  ROW_TARGETING_COMMANDS,
+  type CommandType,
   commandAckSchema,
   conversationTopicWireFrameSchema,
   sessionsIndexTopicWireFrameSchema,
@@ -283,8 +287,35 @@ export class Harness {
       issuedAt: Date.now(),
     };
   }
-  command(command: Message) {
-    return this.client.request("v4/command", command, commandAckSchema);
+  async command(command: Message) {
+    const type = command.type as CommandType;
+    const cas =
+      COMMANDS_REQUIRING_BASE_REVISION.has(type) || ROW_TARGETING_COMMANDS.has(type);
+    // 与真实 Host 一致：CAS 命令必带 baseRevision（行定位命令还需 baseLogEpoch）。
+    // 测试未显式指定时按服务端当前修订号补齐，stale 时沿用同一 commandId 重试；
+    // 显式指定的用例保持原样，用于验证 stale/拒绝路径。
+    if (!cas || command.sessionId == null || command.baseRevision !== undefined) {
+      return this.client.request("v4/command", command, commandAckSchema);
+    }
+    let ack!: z.infer<typeof commandAckSchema>;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const at = await this.client.request(
+        "v4/conversation/rowsRange",
+        { sessionId: command.sessionId, limit: 1 },
+        v4ConversationRowsRangeResultSchema,
+      );
+      ack = await this.client.request(
+        "v4/command",
+        {
+          ...command,
+          baseRevision: at.atRevision,
+          baseLogEpoch: command.baseLogEpoch ?? at.atLogEpoch,
+        },
+        commandAckSchema,
+      );
+      if (ack.status !== "stale") break;
+    }
+    return ack;
   }
   async create(text?: string) {
     const ack = await this.command(

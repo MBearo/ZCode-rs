@@ -267,9 +267,13 @@ impl Engine {
         }
         let p = &call.params;
         let result = match call.method {
-            Method::Command => match serde_json::from_value(call.params.clone()) {
-                Ok(command) => self.command(command).await,
-                Err(_) => Err(RuntimeError::invalid_params("Invalid command envelope")),
+            // 与 Node CommandInbox 一致：信封或 payload 不合法时回 rejected ACK，而非 RPC 错误。
+            Method::Command => match crate::domain::protocol::validate_command(p) {
+                Err(issue) => Ok(crate::domain::protocol::invalid_payload_ack(p, &issue)),
+                Ok(()) => match serde_json::from_value(call.params.clone()) {
+                    Ok(command) => self.command(command).await,
+                    Err(_) => Err(RuntimeError::invalid_params("Invalid command envelope")),
+                },
             },
             Method::TopicOpen => self.open_topic(p).await,
             Method::TopicSnapshot => self.topic_snapshot_value(p),
