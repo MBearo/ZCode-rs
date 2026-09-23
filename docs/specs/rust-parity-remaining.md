@@ -1,5 +1,7 @@
 # Rust stdio 剩余对齐清单
 
+2026-09-23 范围调整：目标扩大为用 Rust 完整替换 Node CLI。权限模式（build/edit/plan/yolo/auto）纳入 P0；TUI 只保留子命令入口；动态工作流不做。P0/P1 的架构、刻意差异与里程碑以 [P0/P1 架构设计](rust-p0-p1-architecture.md) 为准，下文 2026-09-22 的"只支持 yolo"限制随 M2 交付解除。
+
 2026-09-22，目标是替换 App 使用的 stdio runtime。权限只支持 yolo，不做 TUI；默认仍为 TS，Rust 显式选择。用户指定的关键工作包已实现并经过核心验收，不能再把 MCP、Skill、子代理、Goal 和历史操作笼统列为“未实现”。证据见 [核心交付报告](../reports/rust-critical-parity-2026-09-22.md)。
 
 ## 本次完成的核心能力
