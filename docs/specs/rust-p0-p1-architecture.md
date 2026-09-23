@@ -6,14 +6,14 @@
 
 **P0（切默认前必须完成）**
 
-| #   | 项                                                                                                      | 里程碑 |
-| --- | ------------------------------------------------------------------------------------------------------- | ------ |
-| 1   | Core 与传输解耦、类型化协议、错误码、TUI 入口                                                           | M0     |
-| 2   | 权限模式（build/edit/plan/yolo/auto）、审批、规则、Bash 只读分类、plan 工具                             | M2     |
-| 3   | `sendText` 扩展字段（browserAmbientContext、toolDisallowlist、modelExecution、automation/offPeak 归属） | M1     |
-| 4   | Host 仍依赖的旧 `session/*` 方法与旧事件流（手机 replayable 读路径）                                    | M3     |
-| 5   | 网络出口：代理、CA、身份头、Coding Plan 网关、设备 ID、子进程网络环境                                   | M1     |
-| 6   | hooks 最低保护（在 M6 完整实现前，检测到 hooks 即显式拒绝）                                             | M1     |
+| #   | 项                                                                                                            | 里程碑 |
+| --- | ------------------------------------------------------------------------------------------------------------- | ------ |
+| 1   | Core 与传输解耦、类型化协议、错误码、TUI 入口                                                                 | M0     |
+| 2   | 权限模式（build/edit/plan/yolo/auto）、审批、规则、Bash 只读分类、plan 工具                                   | M2     |
+| 3   | `sendText` 扩展字段（browserAmbientContext、toolDisallowlist、modelExecution、automation/offPeak 归属）       | M1     |
+| 4   | 只做 V4：Rust 不实现旧 `session/*` 生命周期方法与旧事件流；Host 仍走旧协议的调用迁移到 V4（范围待定，见 5.6） | M3     |
+| 5   | 网络出口：代理、CA、身份头、Coding Plan 网关、设备 ID、子进程网络环境                                         | M1     |
+| 6   | hooks 最低保护（在 M6 完整实现前，检测到 hooks 即显式拒绝）                                                   | M1     |
 
 **P1（切默认前应完成）**：Edit 宽松匹配（#7）、`-p` 无头模式（#8）、Bash 对齐（#9）、多内容工具结果与 Read 媒体/PDF（#10）、WebFetch/WebSearch（#11）、完整 hooks 与信任（#12）、流式恢复与异常防护（#13）、compact 质量（#14）、订阅回放与流控（#15）、插件管理与官方 MCP 鉴权（#16）、日志与用量（#17）、配置体系（#18）。
 
@@ -49,7 +49,7 @@
 flowchart TB
     bin["zcode-cli-rust（composition root：app-server | run -p | tui 占位）"]
     subgraph front["前端"]
-        appsrv["app-server：JSON-RPC 路由、旧 session/* 外观、V4 帧与分片、订阅投递与回放、HostPort-over-stdio"]
+        appsrv["app-server：JSON-RPC 路由、V4 帧与分片、订阅投递与回放、HostPort-over-stdio"]
         headless["headless：-p text/json/stream-json"]
         tui["tui：占位，仅依赖 core-api"]
     end
@@ -93,7 +93,7 @@ pub enum ServerMsg { Reply { id: RequestId, result: Result<RuntimeResponse, Runt
 ```
 
 - **顺序保证**：同一连接的回复与事件都来自 actor 的同一条 mpsc；处理请求时先入队 `Reply`，再入队该请求产生的事件（与 Node 先写响应行、再写 initial frame 一致）。
-- **RuntimeEvent** 是类型化事实，至少包含：`ConversationDeltas { session, epoch, from, to, deltas }`（V4 行操作）、`SessionFact { session, seq, fact }`（旧事件流与 `-p` 的来源）、`IndexChanged`、`ConfigChanged`、`Interaction*`、`Notification`（如 `providerRuntimeHeadersCancelled`）。
+- **RuntimeEvent** 是类型化事实，至少包含：`ConversationDeltas { session, epoch, from, to, deltas }`（V4 行操作）、`IndexChanged`、`ConfigChanged`、`Interaction*`、`Notification`（如 `providerRuntimeHeadersCancelled`）。
 - **HostRequest** 取代 Engine 内的 `auth` map：`ProviderRuntimeHeaders`、`OfficialMcpAuthHeaders`、`RuntimePreferences`。app-server 把它们映射为 stdio 反向请求；headless 在本地应答（静态配置或失败）。等待方持有 RAII guard，drop 时发送取消通知。
 - **不反压 actor**：前端消费任务只做内存操作（记日志、编码、入写队列），写队列按字节限额；超额时标记订阅需要恢复，由回放日志或快照补齐，从不阻塞 actor。
 
@@ -123,9 +123,9 @@ sequenceDiagram
 
 ### 4.2 类型化协议与错误码
 
-- `protocol` crate 手写 serde 类型：JSON-RPC 信封、V4 `Command` 为 adjacently tagged enum（`#[serde(tag = "type", content = "payload")]`），每个 payload 独立 struct；旧 `session/*` 参数与结果；V4 transport 参数；帧与分片。
+- `protocol` crate 手写 serde 类型：JSON-RPC 信封、V4 `Command` 为 adjacently tagged enum（`#[serde(tag = "type", content = "payload")]`），每个 payload 独立 struct；V4 transport 参数；保留的控制面方法（见 5.6）参数；帧与分片。
 - 未知字段策略与 TS 一致：TS strict 的对象用 `deny_unknown_fields`，passthrough 的保留 `#[serde(flatten)] extra`。
-- **漂移检查**：新增 `scripts/generate-zcode-cli-rust-protocol-schema.mjs`，用 zod 4.6.5 的 `z.toJSONSchema()` 导出 command payload、transport、legacy 参数的 JSON Schema，入库到 `crates/protocol/schema/`（`--check` 模式）。Rust 测试用 `schemars` 生成对应 schema，逐对象比较属性名、required、枚举值与 strict 属性；任何差异测试失败。
+- **漂移检查**：新增 `scripts/generate-zcode-cli-rust-protocol-schema.mjs`，用 zod 4.6.5 的 `z.toJSONSchema()` 导出 command payload、transport 与保留控制面方法参数的 JSON Schema，入库到 `crates/protocol/schema/`（`--check` 模式）。Rust 测试用 `schemars` 生成对应 schema，逐对象比较属性名、required、枚举值与 strict 属性；任何差异测试失败。
 - **错误码**：`RuntimeError` 为枚举：`SessionNotFound(-32004, "Session not found: <id>")`、`SessionNotActive(-32004)`、`RevisionConflict{actual, expected}(-32009)`、`Busy(-32010)`、`RestoreWarning(-32031)`、`MethodNotFound(-32601)`、`InvalidParams{issues}(-32602, "Invalid params — <path>: <msg>; …"，data 与 zod issue 结构一致)`、`Internal{name, code?}(-32603)`。app-server 统一映射，业务代码只返回枚举。
 
 ### 4.3 状态类型化
@@ -197,14 +197,13 @@ sequenceDiagram
 - 基础日志（`tracing` + 非阻塞文件写入，格式见 5.17）在 M0 接入，后续里程碑都依赖它排障。
 - 性能修正：sessions-index 仅在摘要变化时发布；帧 payload 只序列化一次（`Box<RawValue>` 复用）；stdout 用 `BufWriter`，每批 flush 一次；分片阈值按 Node `wire-codec.ts` 的物理尺寸（NDJSON 行、socket 帧头、relay base64 信封三者取最大，约 786 KB）计算。
 
-### 5.2 M1：接入兼容快修（P0 #3、#6，含 `session/close`）
+### 5.2 M1：接入兼容快修（P0 #3、#6）
 
 - **sendText 扩展字段**：全部接受并按 Node 语义生效。
   - `browserAmbientContext`：按 `conversation.ts:141-181` 的原文改写本轮请求中的用户文本块；只存在于 RunContext 请求投影，持久化与 rows 使用原始输入。
   - `toolDisallowlist`：并入本轮冻结 `ToolSet`，附加 automation（`CronCreate/Update/Delete`）与 offPeak（`OffPeakCreate/SendMessage/Workflow`）集合（`prompt-turn.ts:189-254`）。
   - `modelExecution`：要求 `modelSelection`；忙时拒绝；选型只用于本 run，不写会话；`requestAuth` 冻结在 RunScope，不持久化；`subagents` 策略限制子代理选型与后台子代理；`memoryExtraction:"skip"` 记录但当前无记忆提取。
   - `automationId`/`offPeakTaskId`/`offPeakRunType`：仅作为本轮归属记录。
-- **`session/close`**：`expectedPersistence` 不匹配返回 `{closed:false}`，否则按现有 `deleteSession` 收口语义关闭。
 - **hooks 最低保护**：配置层发现任一启用的 hook（user、plugin、已信任的 project）时，输入 admission 以 `guard.capabilityUnsupported` 拒绝，并给出可读原因。M6 完成后移除。
 
 ### 5.3 M1：配置体系（P1 #18，提前）
@@ -235,19 +234,39 @@ sequenceDiagram
 - **Plan 工具**：EnterPlanMode/ExitPlanMode 契约同 `plan-mode.ts`；plan 审批投影为 `userInput`；计划文件写入 `.zcode/plans/plan-<id>.md`；compact 后注入 plan 文件提醒；`v4/conversation/plans` 返回 ExitPlanMode 行。
 - **能力与导入**：`runtime/capabilities.independentPlanState=true`；`executionCapabilities.permissionModes=[build,edit,yolo,auto]`；导入的 TS 会话原样恢复模式。子代理 `permissionMode` 与 Explore 默认 yolo 同 Node。
 
-### 5.6 M3：旧 `session/*` 外观与旧事件流（P0 #4）
+### 5.6 M3：只做 V4 与 Host 旧路径迁移（P0 #4，范围待定）
 
-- **方法**：`session/create`（全部参数，包括 importedHistory、allow/deny 列表、persistence、titleGeneration、parent）、`resume`、`compact`、`goal`、`setModel`、`setThoughtLevel`、`setMode`、`close`、`send`（附件回退）、`subscribe`、`messages`。它们在 app-server 中转换为 core 请求，不另建状态路径。
-- **两套 revision**：Session 另持旧 `state_revision`，按 Node 规则递增并发送 `state.updated`；与 V4 revision 永不混用。
-- **旧事件流**：core 产出类型化 `SessionFact`，app-server 的 `LegacyEventProjection`（纯函数）映射为 Node `session-mapper.ts` 的约 20 种事件类型，并保留有界 ring 供 `afterSeq` 回放。`-p --output-format stream-json` 复用同一投影。
-- **反向请求**：`session/requestRuntimePreferences`，15 秒超时，`-32601`/`-32020` 时回退默认值。
-- 实施前先抽取 Host `mapServiceEvent` 与手机端实际消费的字段，作为本投影的精确契约。
+2026-09-23 决定：Rust runtime 的会话生命周期与事件流只实现 V4，不实现旧 `session/*` 生命周期方法（create、resume、compact、goal、setModel、setThoughtLevel、setMode、close、send、subscribe、messages）与旧 `session/event` 事件流。
+
+**旧路径仍存在的原因**（Host 源码注释已标注为过渡态）：V4 命令面尚未覆盖以下需求，Host 因此保留旧调用。
+
+| Host 调用                                                                                  | 用途                                                                            | V4 缺口                                            |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `session/subscribe` + `session/event`（`zcodeTaskServiceAdapter.ts` `onDynamicTaskEvent`） | 手机 replayable 读路径：Host 镜像 → relay → 手机 store                          | 迁到 V4 帧需要重做 relay 协议与手机 store          |
+| `session/create`（`createTask`、Claude 历史导入、分享导入、cron/off-peak 初始化）          | 带 sessionId、importedHistory、allow/deny 列表、persistence、parent，并返回快照 | V4 `createSession` 只有 ACK，缺这些字段            |
+| `session/resume`                                                                           | 冷恢复并返回快照，带 MCP 与工具列表                                             | 无快照返回，无 MCP/工具列表                        |
+| `session/compact`、`session/goal`                                                          | 远端任务门面                                                                    | V4 `compact` 无 instructions；无 goal clear/show   |
+| `session/setModel`、`setThoughtLevel`、`setMode(auto)`                                     | 草稿复用、门面                                                                  | V4 不返回快照；`switchCollaborationMode` 不含 auto |
+| `session/close`                                                                            | UI 关闭侧边对话、草稿失效                                                       | `deleteSession` 语义不同，缺 `expectedPersistence` |
+| `session/send`                                                                             | 附件回退                                                                        | 已有 `v4/attachment/*`，Host 可直接迁移            |
+
+**只做 V4 的后果与步骤**：
+
+1. 在 `packages/shared/src/zcode-protocol-v4` 为上表缺口补命令或查询。
+2. Node CLI 同步实现这些 V4 新增项（Node 在切换前仍是默认 runtime，Host 对两种 runtime 使用同一协议）。
+3. Host 迁移上表调用，手机 relay 与 store 改为消费 V4 帧。
+4. Rust 实现同样的 V4 新增项。
+
+第 1–3 步不在 `apps/zcode-cli-rust` 内，由谁、何时完成待定；完成前这些功能在 Rust runtime 下不可用，由能力协商显式声明，不返回空成功。
+
+**保留的非 V4 控制面方法**（本设计的理解，待确认）：`runtime/capabilities`、`session/list`、`session/read`（任务索引）、`workspace/*`、`provider/*`、`mcp/list`、`skills/referenceCatalog`、`plugins/*`、`process/childProcesses`、`startup/*` 目前没有 V4 对应物，属于控制面而非会话生命周期，继续按现有契约实现。
 
 ### 5.7 M4：`-p` 无头模式（P1 #8）
 
 - `zcode-cli-rust run -p <text> [--output-format text|json|stream-json] [--attach <path>] [--mode] [--cwd]`，默认 yolo，退出码同 Node（成功 0、错误 1、SIGHUP 129 / SIGINT 130 / SIGTERM 143）。
+- `text` 与 `json` 输出结构同 Node；`stream-json` 每行输出一个 V4 `ConversationDeltas`，最后一行为 `result` 对象（与 Node 的 result 字段一致）。Node 的 stream-json 使用旧事件词表，Rust 按只做 V4 的决定不复刻。
 - 通过 `Runtime::connect` 驱动，与 app-server 走同一核心；凭据来自 `--config` 静态模型或 Registry 环境（登录属 P2）。
-- **差分测试**：`scripts/diff-zcode-cli-node-rust.mjs` 用同一本地模型 fixture 分别运行 Node `zcode -p` 与 Rust，归一化 ID 与时间后比较 stream-json 与文件副作用。后续每个里程碑的行为对齐都用它验收。
+- **差分测试**：`scripts/diff-zcode-cli-node-rust.mjs` 用同一本地模型 fixture 分别运行 Node `zcode -p` 与 Rust，归一化 ID 与时间后比较 `json` 输出、最终会话内容与文件副作用。后续每个里程碑的行为对齐都用它验收。
 
 ### 5.8 M5：Edit（P1 #7）
 
@@ -355,7 +374,7 @@ app-server 的投递层完全替换现有 `subscriptions.rs`：
 ### 5.16 M9：用量（P1 #17）
 
 - 每次模型请求向 `rust_usage` 表追加一条记录，字段包括：session、query_source、provider、model、各类 token、耗时、错误，以及工具用量。
-- 提供 `v4/usage/stats`、`usage/stats`（包括时区分桶、热力图等级、连续天数、缓存命中率）和 `v4/conversation/usage`、`session/usage`（按 query_source 基线增量计算）。
+- 只提供 V4 方法：`v4/usage/stats`（包括时区分桶、热力图等级、连续天数、缓存命中率）与 `v4/conversation/usage`（按 query_source 基线增量计算）；旧 `usage/stats`、`session/usage` 不实现。
 - 聚合在 SQL 中完成，走请求级只读连接。
 - 导入 TS 数据时迁移 `model_usage`、`turn_usage`、`tool_usage`。
 
@@ -376,15 +395,17 @@ app-server 的投递层完全替换现有 `subscriptions.rs`：
   - ZIP 需 HTTPS 与 sha256，大小与条目数有上限，拒绝路径穿越和符号链接；
   - 本地目录与文件。
 - **模板插值**：`${user_config.*}`，以及敏感值只能出现在 env、header、clientSecret 等"敏感出口"的规则，同 `mcp.ts:384-446`；强制写入 `ZCODE_PLUGIN_ID`；server 名加命名空间 `plugin:<name>:<key>`。
-- **官方插件的 JS MCP server**：需要 JS 运行时。沿用 Host 提供的 Electron helper（`ELECTRON_RUN_AS_NODE=1`）加 `__zcode-plugin-host` 启动方式，Rust 按 seed 时写入的 manifest 启动；独立 CLI 没有 Node 时明确报告不可用。
+- **官方插件的 JS MCP server**（方案待确认，参照 Codex）：Rust runtime 不内嵌 JS 引擎，也不实现 `__zcode-plugin-host`；所有插件 MCP server 都按 `.mcp.json` 中的 `command/args/cwd/env` 作为普通外部进程启动。
+  - Codex 的做法（本机 `~/.codex/plugins/cache` 实测，codex-cli 0.135.0）：官方 JS 插件的 `command` 指向插件自带的启动脚本（如 `scripts/launch_codex_app_tools_mcp`），脚本按顺序寻找 Node：`CODEX_MCP_NODE_PATH`（桌面 App 注入）→ 桌面 App 资源内自带的 `cua_node/bin/node` → 缓存中下载的 `codex-runtimes/.../node` → 系统 `node` → 否则报错“could not find a Node runtime”。第三方插件直接写 `"command": "node"`，依赖用户系统 Node。部分官方插件已改为托管的 HTTP MCP（`/ps/mcp`），本地不运行 JS。`env_vars` 白名单决定哪些父进程环境变量传给 server。
+  - ZCode 对应方案：官方插件 seed 时写入插件自带的启动脚本，按 `ZCODE_MCP_NODE_PATH`（Host 注入 Electron helper 路径并设置 `ELECTRON_RUN_AS_NODE=1`，或 App 自带的独立 Node）→ 系统 `node` → 明确报错 的顺序寻找 Node。Rust 只负责按 manifest 启动进程、传递白名单环境变量与 `ZCODE_PLUGIN_ID`。computer-use 的 broker 安全门禁属于 P2，届时再迁移到启动脚本或独立 launcher。
 - **官方 MCP 鉴权**：`interaction/requestOfficialMcpAuthHeaders` 作为 HostRequest。
   - HTTP：每次请求取头，401 重试一次，403 或 3xx 按 Node 的错误码处理。
   - stdio：每条出站消息注入 `_meta["com.zcode/official-mcp-auth"]`。
   - 目标 origin 必须可信，否则 fail-closed。
 
-## 6. 刻意与 Node 不同的行为（需确认）
+## 6. 刻意与 Node 不同的行为（逐条确认）
 
-原则：保持对外契约兼容，修正已确认的缺陷，且只向更安全或更确定的方向偏离。
+原则：保持对外契约兼容，修正已确认的缺陷，且只向更安全或更确定的方向偏离。2026-09-23 决定逐条确认：每个里程碑开工前确认涉及的条目，未确认的条目不实现差异。
 
 | #   | Node 现状                                                                                          | Rust 方案                                    |
 | --- | -------------------------------------------------------------------------------------------------- | -------------------------------------------- |
@@ -402,7 +423,7 @@ app-server 的投递层完全替换现有 `subscriptions.rs`：
 | D12 | WebFetch 只做字面 IP 检查，DNS 解析后不校验                                                        | 解析器层过滤非公网地址                       |
 | D13 | `ZCODE_*` 数值环境变量解析失败变成 0，例如会关闭超时                                               | 忽略该值并给出诊断                           |
 
-保留 Node 语义、不修改的项（改动会影响用户已有预期）：yolo 跳过项目 deny 规则与 `disallowedTools`；plan 模式允许非破坏性 MCP 工具；自定义 CA 替换系统根证书；插件存在时强制启用用户 hooks；恢复时丢弃部分输出（不续写）。
+保留 Node 语义、不修改的项（改动会影响用户已有预期）：yolo 跳过项目 deny 规则与 `disallowedTools`（2026-09-23 已确认）；plan 模式允许非破坏性 MCP 工具；自定义 CA 替换系统根证书；插件存在时强制启用用户 hooks；恢复时丢弃部分输出（不续写）。
 
 ## 7. 性能预算与措施
 
@@ -427,25 +448,25 @@ app-server 的投递层完全替换现有 `subscriptions.rs`：
 ## 8. 测试与验收
 
 - **纯策略**：由 `scripts/generate-zcode-cli-rust-fixtures.mjs` 调用 TS 实现批量生成夹具，覆盖权限矩阵、Bash 分类语料（只允许 Rust 在更保守的方向上与 Node 不同）、Edit 匹配、hook 合并与 digest、no_proxy、网关改写、退出码解释、HTML 转 markdown、compact 选轮，Rust 用表驱动测试。
-- **协议**：JSON Schema 漂移检查，加上现有 Node 驱动的集成测试（`packages/services/tests/zcode-cli-rust-*.test.ts`），新增错误码、旧 `session/*` 方法、回放与流控用例。
-- **差分**：`-p` 模式下 Node 与 Rust 的 stream-json 与文件副作用比较。
+- **协议**：JSON Schema 漂移检查，加上现有 Node 驱动的集成测试（`packages/services/tests/zcode-cli-rust-*.test.ts`），新增错误码、V4 新增命令、回放与流控用例。
+- **差分**：`-p` 模式下 Node 与 Rust 的 `json` 输出、会话内容与文件副作用比较。
 - **E2E**：权限审批、plan 审批、hook 审批这类交互改动补真实 App 场景，并同时验证 desktop-continuous 与 web-remote-replayable。
 - 每个里程碑执行 `pnpm typecheck`、`pnpm lint`、`pnpm fmt:check`、`pnpm architecture:check --changed`、`pnpm check:zcode-cli-rust`、`pnpm test:zcode-cli-rust`，结果如实写入报告。
 
 ## 9. 里程碑
 
-| 里程碑 | 内容                                                                                                               | 依赖                             |
-| ------ | ------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
-| M0     | 类型化协议与错误码、连接模型、app-server 路由与投递迁移、RunScope、状态枚举、子命令与 TUI 占位、基础日志、性能修正 | —                                |
-| M1     | 配置体系、网络出口与 reqwest 统一、sendText 扩展字段、`session/close`、hooks 临时拒绝                              | M0                               |
-| M2     | 工具管线、PolicyEngine、Bash 分类、交互状态机、plan 工具、能力声明                                                 | M1                               |
-| M3     | 旧 `session/*` 外观、旧事件流投影、反向请求                                                                        | M0，建议在 M2 之后               |
-| M4     | `-p` 无头模式与 Node/Rust 差分脚本                                                                                 | M3（stream-json 复用旧事件投影） |
-| M5     | 多段结果与预算层、Edit、Bash、Read 媒体与 PDF、WebFetch/WebSearch、backgroundBashOutput                            | M2                               |
-| M6     | 完整 hooks 与信任                                                                                                  | M2                               |
-| M7     | 流式恢复、异常防护、compact 质量                                                                                   | M2                               |
-| M8     | 订阅回放与流控                                                                                                     | M0                               |
-| M9     | 用量与日志保留                                                                                                     | M0                               |
-| M10    | 插件管理与官方 MCP 鉴权                                                                                            | M1、M6                           |
+| 里程碑 | 内容                                                                                                               | 依赖   |
+| ------ | ------------------------------------------------------------------------------------------------------------------ | ------ |
+| M0     | 类型化协议与错误码、连接模型、app-server 路由与投递迁移、RunScope、状态枚举、子命令与 TUI 占位、基础日志、性能修正 | —      |
+| M1     | 配置体系、网络出口与 reqwest 统一、sendText 扩展字段、hooks 临时拒绝                                               | M0     |
+| M2     | 工具管线、PolicyEngine、Bash 分类、交互状态机、plan 工具、能力声明                                                 | M1     |
+| M3     | V4 缺口补齐（shared 协议、Node、Rust）与 Host/relay/手机迁移，范围待定                                             | M0     |
+| M4     | `-p` 无头模式与 Node/Rust 差分脚本                                                                                 | M0     |
+| M5     | 多段结果与预算层、Edit、Bash、Read 媒体与 PDF、WebFetch/WebSearch、backgroundBashOutput                            | M2     |
+| M6     | 完整 hooks 与信任                                                                                                  | M2     |
+| M7     | 流式恢复、异常防护、compact 质量                                                                                   | M2     |
+| M8     | 订阅回放与流控                                                                                                     | M0     |
+| M9     | 用量与日志保留                                                                                                     | M0     |
+| M10    | 插件管理与官方 MCP 鉴权                                                                                            | M1、M6 |
 
 每个里程碑开工前补对应分项 spec（精确契约与验收用例），以单独提交交付；未通过验收的能力不在 capabilities 中声明。
