@@ -24,11 +24,18 @@ struct Job {
     command: String,
     description: String,
 }
-#[derive(Default)]
 pub struct ShellTasks {
     jobs: Mutex<HashMap<String, HashMap<String, Arc<Job>>>>,
+    /// Complete child environment (Node `buildExecutionEnv`).
+    env: Arc<[(String, String)]>,
 }
 impl ShellTasks {
+    pub fn new(env: Arc<[(String, String)]>) -> Self {
+        Self {
+            jobs: Mutex::default(),
+            env,
+        }
+    }
     pub async fn call(
         &self,
         paths: (&Path, &Path),
@@ -189,7 +196,7 @@ impl ShellTasks {
         let path = artifacts.join(format!("{id}.output"));
         let combined = Arc::new(Mutex::new(tokio::fs::File::create(&path).await?));
         if !background {
-            let data = run(cwd, &command, &path, combined, timeout, cancel).await?;
+            let data = run(cwd, &self.env, &command, &path, combined, timeout, cancel).await?;
             return Ok(shell_output(data));
         }
         let sink = sink
@@ -269,8 +276,18 @@ impl ShellTasks {
         let cwd = cwd.to_owned();
         let command_copy = command.clone();
         let path_copy = path.clone();
+        let env = self.env.clone();
         tokio::spawn(async move {
-            let result = run(&cwd, &command_copy, &path_copy, combined, timeout, &token).await;
+            let result = run(
+                &cwd,
+                &env,
+                &command_copy,
+                &path_copy,
+                combined,
+                timeout,
+                &token,
+            )
+            .await;
             if let Err(error) = &result
                 && error.is::<crate::contract::ProcessCleanupFailure>()
             {

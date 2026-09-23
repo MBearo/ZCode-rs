@@ -19,7 +19,12 @@ async fn main() -> anyhow::Result<()> {
     let start = Instant::now();
     let tools = zcode_cli_rust::workspace_tools(root.clone(), root.join("artifacts"));
     stage("tools.new", start);
-    let context = WorkspaceContext::new(root, PathBuf::from(std::env::var("HOME")?), false);
+    let context = WorkspaceContext::new(
+        root,
+        PathBuf::from(std::env::var("HOME")?),
+        false,
+        std::env::vars().collect(),
+    );
     let start = Instant::now();
     let _ = tools.discover_skills(&cancel).await?;
     stage("skills", start);
@@ -36,7 +41,9 @@ async fn main() -> anyhow::Result<()> {
     let _ = context.instructions(&cancel).await?;
     stage("instructions", start);
     let start = Instant::now();
-    let _ = tokio::task::spawn_blocking(|| reqwest::Client::builder().build()).await??;
+    let _ = zcode_cli_rust::egress()
+        .client(zcode_cli_net::Purpose::Model)
+        .await?;
     stage("http.client", start);
     Ok(())
 }

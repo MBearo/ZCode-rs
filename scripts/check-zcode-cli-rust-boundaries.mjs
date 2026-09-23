@@ -36,8 +36,13 @@ async function walk(directory) {
       /\bzcode_cli_(?:core|state|model|tools|host)\s*::/.test(code)
     )
       failures.push(`${file}: frontend imports core or an adapter`);
+    // 网络出口是最底层基础设施：不依赖任何内部 crate，前端也不直接发起网络请求。
+    if (crate === "net" && /\bzcode_cli_\w+\s*::/.test(code))
+      failures.push(`${file}: net imports an internal crate`);
+    if (["tui", "app-server"].includes(crate) && /\bzcode_cli_net\s*::/.test(code))
+      failures.push(`${file}: frontend imports network egress`);
     if (
-      ["state", "model", "tools", "host"].includes(crate) &&
+      ["state", "model", "tools", "host", "net"].includes(crate) &&
       /\bzcode_cli_(?:core|app_server|tui)\s*::/.test(code)
     )
       failures.push(`${file}: adapter imports core or frontend`);

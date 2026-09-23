@@ -22,6 +22,11 @@ use tokio_util::{
 };
 
 type Service = RunningService<RoleClient, ClientConfig>;
+/// How to reach one server: a child process environment or an HTTP client.
+pub(super) enum Transport {
+    Stdio(std::sync::Arc<[(String, String)]>),
+    Http(reqwest::Client),
+}
 pub(super) struct Connection {
     pub peer: Peer<RoleClient>,
     pub tools: Vec<Value>,
@@ -33,9 +38,13 @@ pub(super) struct Connection {
 impl Connection {
     pub async fn open(
         config: &Server,
-        http: Option<reqwest_mcp::Client>,
+        transport: Transport,
         cancel: &CancellationToken,
     ) -> Result<Self> {
+        let (env, http) = match transport {
+            Transport::Stdio(env) => (Some(env), None),
+            Transport::Http(client) => (None, Some(client)),
+        };
         ensure!(
             config.raw.get("oauth").is_none() && config.raw.get("auth").is_none(),
             "not_authenticated"
@@ -58,6 +67,13 @@ impl Connection {
         let init = async {
             if config.transport == "stdio" {
                 let mut command = Command::new(config.raw["command"].as_str().unwrap());
+                // Node buildMcpStdioEnv：净化后的出口环境为底，服务器自身 env 覆盖其上。
+                command.env_clear().envs(
+                    env.as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|(k, v)| (k, v)),
+                );
                 command
                     .args(super::extension_config::strings(&config.raw["args"]))
                     .current_dir(&config.cwd)

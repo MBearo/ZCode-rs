@@ -17,7 +17,7 @@ futures-util.workspace = true
 globset.workspace = true
 ignore.workspace = true
 regex.workspace = true
-reqwest_mcp.workspace = true
+reqwest.workspace = true
 rmcp.workspace = true
 rustls.workspace = true
 serde.workspace = true
@@ -29,6 +29,7 @@ url.workspace = true
 zcode-cli-core-api.workspace = true
 zcode-cli-domain.workspace = true
 zcode-cli-host.workspace = true
+zcode-cli-net.workspace = true
 zcode-cli-protocol.workspace = true
 
 [target.'cfg(unix)'.dependencies]

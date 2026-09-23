@@ -96,7 +96,7 @@ impl Engine {
         &mut self,
         id: &str,
         turn: &str,
-        committed: oneshot::Sender<Option<Vec<Value>>>,
+        committed: oneshot::Sender<Option<crate::contract::Guide>>,
     ) -> Result<()> {
         let session = &self.sessions[id];
         let pos = session.queue.iter().position(|item| {
@@ -163,7 +163,17 @@ impl Engine {
         self.publish(id, vec![json!({"op":"row.appended","row":row})])?;
         self.persist(id, None).await?;
         self.notify_selection(id)?;
-        let _ = committed.send(Some(messages));
+        // 与 Node turn-guide-drain 一致：引导输入续上当前轮，其后的模型请求归属到该输入。
+        let origin = self.active.get_mut(id).map(|active| {
+            let mut next = (*active.origin).clone();
+            next.query_id = item["queueItemId"]
+                .as_str()
+                .map(str::to_owned)
+                .or(next.query_id);
+            active.origin = std::sync::Arc::new(next);
+            active.origin.clone()
+        });
+        let _ = committed.send(Some(crate::contract::Guide { messages, origin }));
         Ok(())
     }
 }

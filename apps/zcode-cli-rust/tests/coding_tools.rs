@@ -135,6 +135,7 @@ async fn background_registration_requires_commit_and_eof_reaps_processes() {
         session_id: "one".into(),
         run_id: "run".into(),
         tx,
+        origin: Default::default(),
     };
     let c = CancellationToken::new();
     let task = {
@@ -236,6 +237,7 @@ async fn cancelled_background_registration_has_terminal_event_without_spawning()
         session_id: "s".into(),
         run_id: "r".into(),
         tx,
+        origin: Default::default(),
     };
     let cancel = CancellationToken::new();
     let running = {

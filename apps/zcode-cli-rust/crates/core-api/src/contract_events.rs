@@ -107,7 +107,7 @@ pub enum Event {
         committed: oneshot::Sender<()>,
     },
     StepBoundary {
-        committed: oneshot::Sender<Option<Vec<Value>>>,
+        committed: oneshot::Sender<Option<Guide>>,
     },
     Finished {
         error: Option<String>,
@@ -121,11 +121,60 @@ pub struct ModelOutput {
     pub usage: Value,
     pub output_limit: bool,
 }
+/// Messages committed at a step boundary (guided input or subagent mailbox).
+pub struct Guide {
+    pub messages: Vec<Value>,
+    /// The run's new request origin when a guided user input changed it.
+    pub origin: Option<std::sync::Arc<RequestOrigin>>,
+}
+/// Model request source, sent as `x-zcode-session-type`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RequestKind {
+    Main,
+    Subagent,
+    #[default]
+    Other,
+}
+impl RequestKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::Subagent => "subagent",
+            Self::Other => "other",
+        }
+    }
+}
+/// Attribution of model requests (Node `ModelStatusContext`). Owned by the
+/// engine; a run only holds a copy that the engine replaces on guided input.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RequestOrigin {
+    pub kind: RequestKind,
+    pub session_id: Option<String>,
+    pub trace_id: String,
+    pub query_id: Option<String>,
+}
+impl RequestOrigin {
+    /// A request outside any session run, with a trace of its own.
+    pub fn detached(trace_id: String) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            trace_id,
+            ..Self::default()
+        })
+    }
+    /// The same run context for work that is not an agent step (compaction).
+    pub fn auxiliary(&self) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            kind: RequestKind::Other,
+            ..self.clone()
+        })
+    }
+}
 #[derive(Clone)]
 pub struct EventSink {
     pub session_id: String,
     pub run_id: String,
     pub tx: mpsc::Sender<RunEvent>,
+    pub origin: std::sync::Arc<RequestOrigin>,
 }
 impl EventSink {
     pub async fn send(&self, event: Event) -> Result<()> {

@@ -153,6 +153,7 @@ impl Engine {
         };
         self.publish(id, deltas)?;
         self.persist(id, None).await?;
-        self.start_run(id, turn)
+        // 与 Node 一致：排队输入的 inputId（queueItemId）即模型请求的 query id。
+        self.start_run_for(id, turn, item["queueItemId"].as_str().map(str::to_owned))
     }
 }

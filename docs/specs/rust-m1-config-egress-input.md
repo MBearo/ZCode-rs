@@ -112,7 +112,130 @@ host::config::load(cwd, env)            （IO：发现并读取文件）
 
 ### 3.4 reqwest 版本
 
-模型当前使用 reqwest 0.12，MCP（rmcp）使用 0.13。统一到 0.13，共用同一套代理、CA 与构建逻辑；实施时若 0.13 的 TLS 根证书 API 无法实现"替换系统根"，则保留两个版本，由同一个配置生成两种客户端，并在本节记录原因。
+模型原先使用 reqwest 0.12，MCP（rmcp）使用 0.13。现已统一到 0.13，共用同一套代理、CA 与构建逻辑。
+
+- 0.13 的 `tls_certs_only` 可以替换根证书，因此不再保留两个版本。
+- 依赖树因此移除了 reqwest 0.12 及其 quinn、rand 等传递依赖。
+
+### 3.5 Rust 实现结构
+
+新增 `crates/net`（`zcode-cli-net`），不依赖任何内部 crate，只做运行环境与网络出口：
+
+| 模块      | 内容                                                  | Node 对应                                                                 |
+| --------- | ----------------------------------------------------- | ------------------------------------------------------------------------- |
+| `env`     | `RuntimeEnv`：启动时捕获一次的进程环境视图            | `runtimeEnv.ts`、`cli/src/env.ts`                                         |
+| `proxy`   | 代理与 no_proxy 解析                                  | `http-config.ts`                                                          |
+| `child`   | 子进程环境                                            | `subprocess-env.ts`                                                       |
+| `headers` | 默认身份头、不区分大小写合并、OpenRouter 与请求归属头 | `model-config.ts`、`runtime-platform-headers.ts`、`runner-attribution.ts` |
+| `gateway` | Coding Plan 网关改写                                  | `official-coding-plan-gateway.ts`                                         |
+| `device`  | 设备 ID                                               | `cli-device-mid.ts`                                                       |
+| `Egress`  | 以上各项的唯一持有者，按用途惰性构建 reqwest 客户端   | `createNetworkProxyFetch`                                                 |
+
+**运行环境**
+
+- `RuntimeEnv::capture` 等价于 Node 的 `applyCliRuntimeEnvSanitization`：
+  - 先捕获 passthrough，再剔除敏感键，写回 `ZCODE_TOOL_ENV_PASSTHROUGH_JSON`；
+  - `ZCODE_RUNTIME_ENV` 缺省为 `production`；
+  - 按 beta 规则补 `ZCODE_STORAGE_DIR`。
+- 结果就是 Node 启动后的 `process.env`。Rust 不修改真实进程环境，所有读取方都从这份视图取值：配置 env 层、代理解析、子进程。
+- 子进程分两类：
+  - **普通子进程**（git 上下文）：使用 `RuntimeEnv` 视图本身，对应 Node 用默认 `process.env` 启动的 `execFile`；
+  - **工具子进程**（Bash、MCP stdio）：使用 `child_env`，即 `applyNetworkEgressEnv(sanitize(视图), 视图)`。
+
+  两者都以 `env_clear()` 加完整环境启动。
+
+- 网络策略取启动时的配置快照。Node 的 MCP、执行与模型适配器也都在 app 创建时读取一次 `network`，运行中改配置不影响已创建的出口。`child_env` 因此在启动时算好并共享。
+
+**HTTP 客户端**
+
+- `Egress::client(Purpose)` 为 `Model` 与 `Mcp` 各惰性构建一个客户端，构建放在 `spawn_blocking` 中执行，因为它要读 CA 文件并初始化平台校验器。
+- 每个客户端都：
+  - 先关闭系统代理（`no_proxy()`）；
+  - 再装入 `Proxy::custom`，按 Node 规则逐 URL 决定代理；
+  - 配置了 CA 时用 `tls_certs_only` 替换根证书。
+- ring crypto provider 在构建函数中幂等安装。
+- CA 文件读取失败时，客户端构建失败，本次请求以网络错误结束。Node 同样是在首次请求时读文件并抛错。
+- reqwest 统一到 0.13：
+  - features 为 `json`、`stream`、`rustls-no-provider`、`socks`；
+  - 去掉 `reqwest_mcp` 别名；
+  - state crate 只用 URL 解析，改为直接依赖 `url`。
+
+**请求归属上下文**
+
+`EventSink` 增加 `origin: Arc<RequestOrigin>`，内容为 `{ kind: Main | Subagent | Other, session_id, trace_id, query_id }`。
+
+- 唯一所有者是 Engine：run 的当前 origin 存在 `Active` 中。
+- agent loop 只持有副本；引导消息提交时，Engine 更新 `Active` 并在回执中带回新 origin，loop 替换副本。
+
+```mermaid
+sequenceDiagram
+    participant E as Engine
+    participant S as Session（内存）
+    participant L as agent_loop
+    participant M as HttpModel
+    participant N as Egress
+    E->>S: runtime_trace 缺失时生成 UUID（不持久化）
+    E->>E: 按下文规则确定 query_id，写入 Active.origin
+    E->>L: EventSink{origin}
+    L->>M: complete(messages, sink)
+    M->>N: identity < openrouter < api.headers < requestAuth.headers
+    M->>M: 每次尝试新 x-request-id，叠加归属头
+    M->>N: Anthropic 读取设备 ID，写入 metadata.user_id
+    L->>E: StepBoundary
+    E->>E: 引导输入提交，Active.origin.query_id = queueItemId
+    E-->>L: Guide{messages, origin}
+    L->>L: 替换 sink.origin 副本
+```
+
+origin 各字段的取值：
+
+- **trace_id**：对应 Node 每个会话运行时创建一次的 root trace（UUID，不落盘）。Rust 存于 `Session.runtime_trace`，该字段 `serde(skip)`。
+- **query_id**：对应 Node 的 inputId。
+  - 直接开始的输入：`userInput` 行 id，与 ACK 的 `inputId` 相同；
+  - 由队列提升的输入与引导输入：`queueItemId`；
+  - 没有用户输入的续跑（子代理完成回流、目标续跑）：本轮 `userInput` 行 id，找不到时用 turn id。
+- **kind**：
+  - 主会话为 `Main`；
+  - 有 `parent_id` 的子会话为 `Subagent`，它继承父 run 的 trace_id 与 query_id（Node 子任务沿用父 turn 的 trace 上下文）；
+  - 压缩摘要（hidden sink）、工作区生成文本、连通性测试、MCP 相关请求为 `Other`，与 Node 中 `AgentStep` 以外的操作一致。
+- **session_id**：辅助请求没有会话，因此不发送 `x-session-id`，trace 为本次请求新建。
+
+**其它取值**
+
+- `X-Client-Language`：
+  - 按 ICU 规则，依次取 `LC_ALL`、`LC_MESSAGES`、`LANG` 中第一个**存在**的变量；
+  - 去掉 `.charset`；`@modifier` 作为变体附加；`_` 换成 `-`；
+  - `C`、`POSIX` 为 `en-US`，空串为 `und`，都不存在为 `en-US`。
+- `X-Client-Timezone`：
+  - `TZ` 存在时去掉前导 `:`，空串为 `Etc/Unknown`；
+  - 名称在系统 zoneinfo 中不存在时为 `unknown`；
+  - 未设置 `TZ` 时取系统 IANA 时区。
+- `User-Agent` 为 `ZCode/<version>`。Node 的 AI SDK 会在其后追加 `ai-sdk/provider-utils/<v> runtime/node.js/<v>`，这两段描述的是 Node 运行时，Rust 不伪造。
+- `ZCODE_BASE_URL` 或 `ZCODE_ENDPOINT_ORIGIN` 不是 http(s) URL 时：
+  - Node 在创建 app 时抛错；
+  - Rust 在启动时报 `Invalid network configuration` 并退出，不会在每次请求时才失败。
+- Windows：
+  - `X-Os-Version` 用 `RtlGetVersion`，与 libuv 的 `os.release()` 相同；
+  - 设备锁持有进程的存活判定用 `OpenProcess` 加 `GetExitCodeProcess`，与 libuv 的 `kill(pid, 0)` 相同。
+
+  这两段代码只在 Windows 上编译，本机（macOS）无法验证。
+
+**验证**
+
+- Node 夹具：`scripts/zcode-cli-rust-egress-fixtures.mjs` 直接调用 Node 函数，生成 `crates/net/fixtures/egress.json`，覆盖：
+  - 代理与 no_proxy；
+  - WebFetch 回退；
+  - 子进程环境（含 Windows 大小写）；
+  - 运行环境捕获与 passthrough 排序；
+  - 网关改写；
+  - 请求头合并、归属头、OpenRouter、身份头。
+- `packages/services/tests/zcode-cli-rust-egress.test.ts` 用真实进程验证：
+  - 身份头与归属头，以及忽略 shell 代理；
+  - Anthropic `metadata.user_id`；
+  - 显式代理与 no_proxy；
+  - Bash 子进程环境；
+  - 自定义 CA 信任与 CA 文件缺失。
+- 子代理与引导输入的 trace/query 继承，在已有的子代理与忙时输入集成测试中断言。
 
 ## 4. `sendText` 扩展字段
 

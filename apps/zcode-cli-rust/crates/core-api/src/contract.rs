@@ -56,7 +56,9 @@ pub enum Input {
     Eof,
 }
 
-pub use crate::contract_events::{Event, EventSink, ModelOutput, RunEvent};
+pub use crate::contract_events::{
+    Event, EventSink, Guide, ModelOutput, RequestKind, RequestOrigin, RunEvent,
+};
 #[async_trait]
 pub trait SessionStore: Send + Sync {
     /// Startup reads only the lightweight persisted index, never every transcript or ACK.

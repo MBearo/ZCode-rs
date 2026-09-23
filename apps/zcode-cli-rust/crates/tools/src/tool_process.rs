@@ -66,6 +66,7 @@ async fn capture(
 }
 pub(super) async fn run(
     cwd: &Path,
+    env: &[(String, String)],
     text: &str,
     path: &Path,
     combined: Arc<Mutex<tokio::fs::File>>,
@@ -82,7 +83,10 @@ pub(super) async fn run(
         c.args(["-c", text]);
         c
     };
+    // 子进程只看到启动时计算好的完整环境（净化后加代理/CA），不继承运行时自身的网络变量。
     command
+        .env_clear()
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .current_dir(cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

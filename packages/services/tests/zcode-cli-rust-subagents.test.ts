@@ -66,6 +66,16 @@ test("Agent creates isolated real child sessions, runs foreground siblings concu
     await h.command(h.envelope("sendText", sid, { text: "parent secret" }));
     await h.completed(sid);
     const agents = await listing(h, sid);
+    // 与 Node 一致：子代理请求按 subagent 归属，沿用父 run 的 trace 与 query。
+    const [parent] = f.requestHeaders;
+    const childRequests = f.requestHeaders.filter((r) => r["x-zcode-session-type"] === "subagent");
+    assert(childRequests.length >= 2);
+    assert.equal(parent!["x-zcode-session-type"], "main");
+    for (const child of childRequests) {
+      assert.equal(child["x-zcode-trace-id"], parent!["x-zcode-trace-id"]);
+      assert.equal(child["x-query-id"], parent!["x-query-id"]);
+      assert.notEqual(child["x-session-id"], parent!["x-session-id"]);
+    }
     assert.equal(agents.ended.total, 2);
     assert.equal(agents.running.length, 0);
     const rows = (await h.rows(sid)).rows;

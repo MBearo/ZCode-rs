@@ -181,6 +181,10 @@ impl<'a> TextBuffer<'a> {
             committed: false,
         }
     }
+    /// Attribution of the run this output belongs to.
+    pub fn origin(&self) -> std::sync::Arc<crate::contract::RequestOrigin> {
+        self.sink.origin.clone()
+    }
     async fn push(&mut self, mut text: &str, reasoning: bool) -> Result<(), ModelFailure> {
         if self.reasoning != reasoning {
             self.flush().await?;

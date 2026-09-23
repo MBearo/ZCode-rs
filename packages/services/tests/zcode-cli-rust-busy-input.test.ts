@@ -53,10 +53,10 @@ test("Rust guide continues text-only steps in the same turn, bypasses future que
     await h.subscribe(`conversation/${id}`);
     await h.subscribe(`conversation/${id}`, "phone", "web-remote-replayable");
     const original = h.envelope("sendText", id, { text: "original" });
-    await h.command(original);
+    const inputs = [((await h.command(original)).result as Message).inputId];
     await started.promise;
     const queued = h.envelope("sendText", id, { text: "future", requestedDelivery: "queue" });
-    await h.command(queued);
+    const future = ((await h.command(queued)).result as Message).inputId;
     const guides = ["first guide", "second guide"].map((text) =>
       h.envelope("sendText", id, { text, requestedDelivery: "guide" }),
     );
@@ -64,7 +64,9 @@ test("Rust guide continues text-only steps in the same turn, bypasses future que
       const ack = await h.command(guide);
       assert.equal(ack.status, "accepted");
       assert.equal((ack.result as Message).delivery, "queue");
+      inputs.push((ack.result as Message).inputId);
     }
+    inputs.push(future);
     assert.equal((await h.command(guides[0]!)).status, "duplicate");
     gate.resolve();
     await finished(h, queued.commandId);
@@ -73,6 +75,12 @@ test("Rust guide continues text-only steps in the same turn, bypasses future que
     assert(!JSON.stringify(f.requests[1]).includes("second guide"));
     assert(!JSON.stringify(f.requests[1]).includes('"future"'));
     assert.match(f.requests[2]!.messages.at(-1).content, /second guide/);
+    // 与 Node 一致：模型请求的 query 跟随各输入的 inputId，同一会话运行时共用 trace。
+    assert.deepEqual(
+      f.requestHeaders.map((headers) => headers["x-query-id"]),
+      inputs,
+    );
+    assert.equal(new Set(f.requestHeaders.map((headers) => headers["x-zcode-trace-id"])).size, 1);
     const rows = (await h.rows(id)).rows;
     const users = rows.filter((r) => r.kind === "userInput");
     assert.deepEqual(

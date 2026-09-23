@@ -1,0 +1,964 @@
+{
+  "proxy": [
+    {
+      "url": "https://api.x.com/v1",
+      "options": {
+        "httpProxy": "proxy.local:8080"
+      },
+      "request": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://proxy.local:8080/"
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://proxy.local:8080/"
+      }
+    },
+    {
+      "url": "https://api.x.com",
+      "options": {
+        "httpProxy": " ",
+        "env": {
+          "ZCODE_HTTP_PROXY": "socks5://s:1080"
+        }
+      },
+      "request": {
+        "noProxyMatched": false,
+        "proxySource": "env:ZCODE_HTTP_PROXY",
+        "proxyUrl": "socks5://s:1080"
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "env:ZCODE_HTTP_PROXY",
+        "proxyUrl": "socks5://s:1080"
+      }
+    },
+    {
+      "url": "https://api.x.com",
+      "options": {
+        "httpProxy": "http://u:p@proxy:8080"
+      },
+      "request": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://u:p@proxy:8080/"
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://u:p@proxy:8080/"
+      }
+    },
+    {
+      "url": "https://api.x.com",
+      "options": {
+        "httpProxy": "HTTP://Proxy.Local:80"
+      },
+      "request": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://proxy.local/"
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://proxy.local/"
+      }
+    },
+    {
+      "url": "https://api.x.com",
+      "options": {
+        "httpProxy": "http://[bad"
+      },
+      "request": {
+        "noProxyMatched": false
+      },
+      "webFetch": {
+        "noProxyMatched": false
+      }
+    },
+    {
+      "url": "ftp://x.test/a",
+      "options": {
+        "httpProxy": "p:1"
+      },
+      "request": {
+        "noProxyMatched": false
+      },
+      "webFetch": {
+        "noProxyMatched": false
+      }
+    },
+    {
+      "url": "not a url",
+      "options": {
+        "httpProxy": "p:1"
+      },
+      "request": {
+        "noProxyMatched": false
+      },
+      "webFetch": {
+        "noProxyMatched": false
+      }
+    },
+    {
+      "url": "https://x.test",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "*"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://x.test",
+      "options": {
+        "httpProxy": "p:1",
+        "env": {
+          "ZCODE_NO_PROXY": " x.test "
+        }
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://x.test",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": " ",
+        "env": {
+          "ZCODE_NO_PROXY": "x.test"
+        }
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "http://[::]/",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "[::1"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "http://[fe80::1]/",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "fe80::1"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://intra.site",
+      "options": {
+        "env": {
+          "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"HTTPS_PROXY\":\"http://corp:3128\",\"NO_PROXY\":\"intra\"}"
+        }
+      },
+      "request": {
+        "noProxyMatched": false
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "env:ZCODE_TOOL_ENV_PASSTHROUGH_JSON.HTTPS_PROXY",
+        "proxyUrl": "http://corp:3128/"
+      }
+    },
+    {
+      "url": "http://localhost:3000",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://a.internal.com",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://internal.com",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://x.corp",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "http://[::1]:8080",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://10.0.0.1:8443",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://10.0.0.1",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://p:1/"
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://p:1/"
+      }
+    },
+    {
+      "url": "http://svc:9000/",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "http://svc",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://p:1/"
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://p:1/"
+      }
+    },
+    {
+      "url": "https://example.org",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://notexample.org",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://p:1/"
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://p:1/"
+      }
+    },
+    {
+      "url": "https://LOCALHOST./a",
+      "options": {
+        "httpProxy": "p:1",
+        "noProxy": "localhost,.internal.com,*.corp,[::1],10.0.0.1:8443,http://svc:9000,  , example.org:"
+      },
+      "request": {
+        "noProxyMatched": true
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://a.intra",
+      "options": {
+        "env": {
+          "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"HTTPS_PROXY\":\"http://corp:3128\",\"NO_PROXY\":\"intra\"}"
+        }
+      },
+      "request": {
+        "noProxyMatched": false
+      },
+      "webFetch": {
+        "noProxyMatched": true
+      }
+    },
+    {
+      "url": "https://example.com",
+      "options": {
+        "env": {
+          "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"HTTPS_PROXY\":\"http://corp:3128\",\"NO_PROXY\":\"intra\"}"
+        }
+      },
+      "request": {
+        "noProxyMatched": false
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "env:ZCODE_TOOL_ENV_PASSTHROUGH_JSON.HTTPS_PROXY",
+        "proxyUrl": "http://corp:3128/"
+      }
+    },
+    {
+      "url": "http://example.com",
+      "options": {
+        "env": {
+          "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"HTTPS_PROXY\":\"http://corp:3128\",\"NO_PROXY\":\"intra\"}"
+        }
+      },
+      "request": {
+        "noProxyMatched": false
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "env:ZCODE_TOOL_ENV_PASSTHROUGH_JSON.HTTPS_PROXY",
+        "proxyUrl": "http://corp:3128/"
+      }
+    },
+    {
+      "url": "https://example.com",
+      "options": {
+        "httpProxy": "explicit:1",
+        "env": {
+          "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"HTTPS_PROXY\":\"http://corp:3128\",\"NO_PROXY\":\"intra\"}"
+        }
+      },
+      "request": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://explicit:1/"
+      },
+      "webFetch": {
+        "noProxyMatched": false,
+        "proxySource": "network.httpProxy",
+        "proxyUrl": "http://explicit:1/"
+      }
+    }
+  ],
+  "childEnv": [
+    {
+      "platform": "linux",
+      "sourceEnv": {
+        "PATH": "/bin",
+        "HTTP_PROXY": "http://inherited",
+        "NODE_ENV": "dev",
+        "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"HTTP_PROXY\":\"http://shell\",\"npm_config_proxy\":\"x\",\"OTEL_X\":\"y\",\"bad-key\":\"z\",\"NODE_ENV\":\"q\",\"SSL_CERT_FILE\":3}",
+        "ZCODE_HTTP_PROXY": "",
+        "ZCODE_NO_PROXY": " corp ",
+        "ZCODE_AGENT_CA_CERT": "/ca.pem",
+        "npm_config_https_proxy": "p",
+        "ZCODE_CUA_PERMISSION_BROKER_SOCKET": "/s",
+        "OTEL_SERVICE_NAME": "svc"
+      },
+      "network": {},
+      "expected": {
+        "PATH": "/bin",
+        "ZCODE_HTTP_PROXY": "",
+        "ZCODE_NO_PROXY": " corp ",
+        "ZCODE_AGENT_CA_CERT": "/ca.pem",
+        "HTTP_PROXY": "http://shell",
+        "npm_config_proxy": "x",
+        "NO_PROXY": " corp ",
+        "no_proxy": " corp ",
+        "NODE_EXTRA_CA_CERTS": "/ca.pem",
+        "SSL_CERT_FILE": "/ca.pem",
+        "REQUESTS_CA_BUNDLE": "/ca.pem",
+        "CURL_CA_BUNDLE": "/ca.pem",
+        "GIT_SSL_CAINFO": "/ca.pem"
+      }
+    },
+    {
+      "platform": "linux",
+      "sourceEnv": {
+        "PATH": "/bin",
+        "ZCODE_HTTP_PROXY": "env-proxy:1"
+      },
+      "network": {
+        "httpProxy": "cfg:1",
+        "noProxy": "a",
+        "caCertFile": " /c.pem "
+      },
+      "expected": {
+        "PATH": "/bin",
+        "ZCODE_HTTP_PROXY": "env-proxy:1",
+        "HTTP_PROXY": "http://cfg:1",
+        "HTTPS_PROXY": "http://cfg:1",
+        "ALL_PROXY": "http://cfg:1",
+        "http_proxy": "http://cfg:1",
+        "https_proxy": "http://cfg:1",
+        "all_proxy": "http://cfg:1",
+        "NO_PROXY": "a",
+        "no_proxy": "a",
+        "NODE_EXTRA_CA_CERTS": "/c.pem",
+        "SSL_CERT_FILE": "/c.pem",
+        "REQUESTS_CA_BUNDLE": "/c.pem",
+        "CURL_CA_BUNDLE": "/c.pem",
+        "GIT_SSL_CAINFO": "/c.pem"
+      }
+    },
+    {
+      "platform": "linux",
+      "sourceEnv": {
+        "PATH": "/bin",
+        "ZCODE_HTTP_PROXY": " socks5://e:1 "
+      },
+      "network": {
+        "httpProxy": "  "
+      },
+      "expected": {
+        "PATH": "/bin",
+        "ZCODE_HTTP_PROXY": " socks5://e:1 ",
+        "HTTP_PROXY": "socks5://e:1",
+        "HTTPS_PROXY": "socks5://e:1",
+        "ALL_PROXY": "socks5://e:1",
+        "http_proxy": "socks5://e:1",
+        "https_proxy": "socks5://e:1",
+        "all_proxy": "socks5://e:1"
+      }
+    },
+    {
+      "platform": "win32",
+      "sourceEnv": {
+        "Path": "C:\\bin",
+        "http_proxy": "x",
+        "No_Proxy": "old",
+        "zcode_http_proxy": "win-env:8",
+        "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"HTTP_PROXY\":\"http://shell\",\"npm_config_proxy\":\"x\",\"OTEL_X\":\"y\",\"bad-key\":\"z\",\"NODE_ENV\":\"q\",\"SSL_CERT_FILE\":3}"
+      },
+      "network": {
+        "noProxy": "n"
+      },
+      "expected": {
+        "Path": "C:\\bin",
+        "zcode_http_proxy": "win-env:8",
+        "npm_config_proxy": "x",
+        "http_proxy": "http://win-env:8",
+        "https_proxy": "http://win-env:8",
+        "all_proxy": "http://win-env:8",
+        "no_proxy": "n"
+      }
+    }
+  ],
+  "runtimeEnv": [
+    {
+      "env": {
+        "PATH": "/bin",
+        "HTTP_PROXY": "http://a",
+        "https_proxy": "http://b",
+        "SSL_CERT_FILE": "/c",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "x",
+        "ZCODE_TELEMETRY_DEVICE_MID": "d",
+        "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"NO_PROXY\":\"n\",\"NODE_ENV\":\"x\",\"_a\":\"u\"}",
+        "NODE_ENV": "production",
+        "ZCODE_RUNTIME_ENV": " TEST ",
+        "yarn_https_proxy": "y",
+        "ZCODE_CUA_PERMISSION_BROKER_TOKEN": "t",
+        "GIT_SSL_CAINFO": "/g",
+        "NODE_EXTRA_CA_CERTS": "/n",
+        "all_proxy": "socks5://z"
+      },
+      "expected": {
+        "PATH": "/bin",
+        "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"all_proxy\":\"socks5://z\",\"GIT_SSL_CAINFO\":\"/g\",\"HTTP_PROXY\":\"http://a\",\"https_proxy\":\"http://b\",\"NO_PROXY\":\"n\",\"NODE_EXTRA_CA_CERTS\":\"/n\",\"SSL_CERT_FILE\":\"/c\",\"yarn_https_proxy\":\"y\",\"ZCODE_CUA_PERMISSION_BROKER_TOKEN\":\"t\"}",
+        "ZCODE_RUNTIME_ENV": "test"
+      }
+    },
+    {
+      "env": {},
+      "expected": {
+        "ZCODE_RUNTIME_ENV": "production"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{bad",
+        "ZCODE_RUNTIME_ENV": "staging"
+      },
+      "expected": {
+        "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{bad",
+        "ZCODE_RUNTIME_ENV": "production"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "[1]",
+        "NO_PROXY": "",
+        "ZCODE_STORAGE_DIR": "/s"
+      },
+      "expected": {
+        "ZCODE_TOOL_ENV_PASSTHROUGH_JSON": "{\"NO_PROXY\":\"\"}",
+        "ZCODE_STORAGE_DIR": "/s",
+        "ZCODE_RUNTIME_ENV": "production"
+      }
+    }
+  ],
+  "gateway": [
+    {
+      "env": {},
+      "url": "https://open.bigmodel.cn/api/anthropic/v1/messages",
+      "expected": {
+        "viaGateway": true,
+        "url": "https://zcode.z.ai/api/v1/ultra/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {},
+      "url": "https://OPEN.BIGMODEL.CN:443/api/anthropic/v1/messages/?beta=true",
+      "expected": {
+        "viaGateway": true,
+        "url": "https://zcode.z.ai/api/v1/ultra/anthropic/v1/messages?beta=true"
+      }
+    },
+    {
+      "env": {},
+      "url": "https://api.z.ai/api/anthropic/v1/messages?x=1#frag",
+      "expected": {
+        "viaGateway": true,
+        "url": "https://zcode.z.ai/api/v1/ultra-zai/anthropic/v1/messages?x=1"
+      }
+    },
+    {
+      "env": {},
+      "url": "http://api.z.ai/api/anthropic/v1/messages",
+      "expected": {
+        "viaGateway": false,
+        "url": "http://api.z.ai/api/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {},
+      "url": "https://api.z.ai:8443/api/anthropic/v1/messages",
+      "expected": {
+        "viaGateway": false,
+        "url": "https://api.z.ai:8443/api/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {},
+      "url": "https://api.z.ai/api/anthropic/v1/messages//",
+      "expected": {
+        "viaGateway": true,
+        "url": "https://zcode.z.ai/api/v1/ultra-zai/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {},
+      "url": "https://open.bigmodel.cn/api/anthropic/v1/messages?",
+      "expected": {
+        "viaGateway": true,
+        "url": "https://zcode.z.ai/api/v1/ultra/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {},
+      "url": "https://user:pw@api.z.ai/api/anthropic/v1/messages",
+      "expected": {
+        "viaGateway": true,
+        "url": "https://zcode.z.ai/api/v1/ultra-zai/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {},
+      "url": "https://api.z.ai/api/anthropic/v1",
+      "expected": {
+        "viaGateway": false,
+        "url": "https://api.z.ai/api/anthropic/v1"
+      }
+    },
+    {
+      "env": {},
+      "url": "not a url",
+      "expected": {
+        "viaGateway": false,
+        "url": "not a url"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "https://open.bigmodel.cn/api/anthropic/v1/messages",
+      "expected": {
+        "viaGateway": true,
+        "url": "http://localhost:8080/api/v1/ultra/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "https://OPEN.BIGMODEL.CN:443/api/anthropic/v1/messages/?beta=true",
+      "expected": {
+        "viaGateway": true,
+        "url": "http://localhost:8080/api/v1/ultra/anthropic/v1/messages?beta=true"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "https://api.z.ai/api/anthropic/v1/messages?x=1#frag",
+      "expected": {
+        "viaGateway": true,
+        "url": "http://localhost:8080/api/v1/ultra-zai/anthropic/v1/messages?x=1"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "http://api.z.ai/api/anthropic/v1/messages",
+      "expected": {
+        "viaGateway": false,
+        "url": "http://api.z.ai/api/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "https://api.z.ai:8443/api/anthropic/v1/messages",
+      "expected": {
+        "viaGateway": false,
+        "url": "https://api.z.ai:8443/api/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "https://api.z.ai/api/anthropic/v1/messages//",
+      "expected": {
+        "viaGateway": true,
+        "url": "http://localhost:8080/api/v1/ultra-zai/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "https://open.bigmodel.cn/api/anthropic/v1/messages?",
+      "expected": {
+        "viaGateway": true,
+        "url": "http://localhost:8080/api/v1/ultra/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "https://user:pw@api.z.ai/api/anthropic/v1/messages",
+      "expected": {
+        "viaGateway": true,
+        "url": "http://localhost:8080/api/v1/ultra-zai/anthropic/v1/messages"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "https://api.z.ai/api/anthropic/v1",
+      "expected": {
+        "viaGateway": false,
+        "url": "https://api.z.ai/api/anthropic/v1"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://localhost:8080/x?y"
+      },
+      "url": "not a url",
+      "expected": {
+        "viaGateway": false,
+        "url": "not a url"
+      }
+    }
+  ],
+  "mergeHeaders": [
+    {
+      "sources": [
+        {
+          "A": "1",
+          "content-type": "x"
+        },
+        {
+          "a": "2"
+        },
+        null,
+        {
+          "Content-Type": "y"
+        }
+      ],
+      "expected": {
+        "a": "2",
+        "Content-Type": "y"
+      }
+    },
+    {
+      "sources": [
+        {
+          "Authorization": "Bearer k"
+        },
+        {
+          "authorization": "Bearer other",
+          "X-Extra": "e"
+        }
+      ],
+      "expected": {
+        "authorization": "Bearer other",
+        "X-Extra": "e"
+      }
+    }
+  ],
+  "attribution": [
+    {
+      "context": {
+        "requestId": "r",
+        "traceId": "t",
+        "queryId": "query_abc",
+        "sessionId": "sess_xyz",
+        "modelRequestSessionType": "main"
+      },
+      "expected": {
+        "x-request-id": "r",
+        "x-zcode-session-type": "main",
+        "x-zcode-trace-id": "t",
+        "x-query-id": "abc",
+        "x-session-id": "xyz"
+      }
+    },
+    {
+      "context": {
+        "requestId": "r2",
+        "traceId": "t2",
+        "queryId": "query_",
+        "sessionId": "subagent_agent_123",
+        "modelRequestSessionType": "bogus",
+        "baseURL": "https://opencode.ai/zen/go/v1/"
+      },
+      "expected": {
+        "x-request-id": "r2",
+        "x-zcode-session-type": "other",
+        "x-zcode-trace-id": "t2",
+        "x-query-id": "query_",
+        "x-session-id": "123",
+        "x-opencode-session": "123"
+      }
+    },
+    {
+      "context": {
+        "requestId": "r3",
+        "traceId": "t3",
+        "sessionId": "sess_subagent_agent_q",
+        "modelRequestSessionType": "subagent",
+        "baseURL": "https://api.opencode.ai/zen/go/v2"
+      },
+      "expected": {
+        "x-request-id": "r3",
+        "x-zcode-session-type": "subagent",
+        "x-zcode-trace-id": "t3",
+        "x-session-id": "q"
+      }
+    },
+    {
+      "context": {
+        "requestId": "r4",
+        "traceId": "t4",
+        "modelRequestSessionType": "other"
+      },
+      "expected": {
+        "x-request-id": "r4",
+        "x-zcode-session-type": "other",
+        "x-zcode-trace-id": "t4"
+      }
+    }
+  ],
+  "openRouter": [
+    {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "expected": {
+        "X-Title": "Z Code@electron",
+        "X-OpenRouter-Title": "ZCode",
+        "X-OpenRouter-Categories": "programming-app"
+      }
+    },
+    {
+      "baseUrl": "http://openrouter.ai",
+      "expected": {
+        "X-Title": "Z Code@electron"
+      }
+    },
+    {
+      "baseUrl": "https://EU.OpenRouter.ai/v1",
+      "expected": {
+        "X-Title": "Z Code@electron",
+        "X-OpenRouter-Title": "ZCode",
+        "X-OpenRouter-Categories": "programming-app"
+      }
+    },
+    {
+      "baseUrl": "https://evilopenrouter.ai",
+      "expected": {
+        "X-Title": "Z Code@electron"
+      }
+    },
+    {
+      "baseUrl": null,
+      "expected": {
+        "X-Title": "Z Code@electron"
+      }
+    }
+  ],
+  "identity": [
+    {
+      "env": {},
+      "expected": {
+        "HTTP-Referer": "https://zcode.z.ai",
+        "User-Agent": "ZCode/1.2.3",
+        "X-ZCode-App-Version": "1.2.3",
+        "X-Title": "Z Code@electron",
+        "X-Release-Channel": "production",
+        "X-ZCode-Agent": "glm"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_APP_VERSION": "",
+        "ZCODE_ENV": " Test ",
+        "ZCODE_BASE_URL": " ",
+        "ZCODE_ENDPOINT_ORIGIN": "http://127.0.0.1:9/p?q"
+      },
+      "expected": {
+        "HTTP-Referer": "http://127.0.0.1:9",
+        "User-Agent": "ZCode/unknown",
+        "X-Title": "Z Code@electron",
+        "X-Release-Channel": "test",
+        "X-ZCode-Agent": "glm"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_APP_VERSION": " 9.9 ",
+        "ZCODE_BASE_URL": "https://a.example.com/x"
+      },
+      "expected": {
+        "HTTP-Referer": "https://a.example.com",
+        "User-Agent": "ZCode/9.9",
+        "X-ZCode-App-Version": "9.9",
+        "X-Title": "Z Code@electron",
+        "X-Release-Channel": "production",
+        "X-ZCode-Agent": "glm"
+      }
+    },
+    {
+      "env": {
+        "ZCODE_APP_VERSION": "版本"
+      },
+      "expected": {
+        "HTTP-Referer": "https://zcode.z.ai",
+        "User-Agent": "ZCode/unknown",
+        "X-Title": "Z Code@electron",
+        "X-Release-Channel": "production",
+        "X-ZCode-Agent": "glm"
+      }
+    }
+  ]
+}

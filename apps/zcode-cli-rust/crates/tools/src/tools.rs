@@ -28,15 +28,16 @@ impl WorkspaceTools {
         cwd: PathBuf,
         artifacts: PathBuf,
         config: Arc<dyn crate::contract::ConfigSource>,
+        egress: Arc<zcode_cli_net::Egress>,
     ) -> Self {
         Self {
-            mcp: super::mcp_hub::Hub::new(cwd.clone(), config.clone()),
+            shell: ShellTasks::new(egress.tool_env()),
+            mcp: super::mcp_hub::Hub::new(cwd.clone(), config.clone(), egress),
             config,
             cwd,
             artifacts,
             reads: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
-            shell: ShellTasks::default(),
         }
     }
     pub async fn call(

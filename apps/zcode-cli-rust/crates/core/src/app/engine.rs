@@ -25,6 +25,8 @@ pub(super) struct Active {
     pub cancel: CancellationToken,
     pub run_id: String,
     pub turn_id: String,
+    /// Attribution of this run's model requests; the loop holds a copy.
+    pub origin: std::sync::Arc<crate::contract::RequestOrigin>,
 }
 pub struct Engine {
     pub(super) child_updates:

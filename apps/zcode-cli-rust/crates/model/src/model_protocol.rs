@@ -41,10 +41,13 @@ impl ApiType {
         }
     }
 }
+/// `metadata_user_id` is Anthropic's `metadata.user_id` (Node
+/// `anthropic-request-metadata.ts`); option patches still apply after it.
 pub(super) fn body(
     config: &ModelConfig,
     mut messages: Vec<Value>,
     tools: &[Value],
+    metadata_user_id: Option<&str>,
 ) -> Result<Value, ModelFailure> {
     // 签名/加密推理绑定请求模型；跨模型续聊保留正文与工具，不能回放另一个模型的私有块。
     let foreign = |m: &Value| {
@@ -102,7 +105,13 @@ pub(super) fn body(
             body["tools"] = tools.into();
             body
         }
-        ApiType::Anthropic => anthropic_body(config, &messages, tools)?,
+        ApiType::Anthropic => {
+            let mut body = anthropic_body(config, &messages, tools)?;
+            if let Some(user) = metadata_user_id {
+                body["metadata"] = json!({"user_id": user});
+            }
+            body
+        }
     };
     if tools.is_empty() {
         body.as_object_mut().unwrap().remove("tools");
@@ -273,7 +282,7 @@ mod tests {
         ];
         for api in [ApiType::Chat, ApiType::Responses, ApiType::Anthropic] {
             config.api_type = api;
-            let body = body(&config, history.clone(), &[]).unwrap();
+            let body = body(&config, history.clone(), &[], None).unwrap();
             assert!(!body.to_string().contains("private"));
             assert!(body.to_string().contains("preserved"));
             assert!(body.to_string().contains("call"));
@@ -296,7 +305,7 @@ mod tests {
             json!({"role":"assistant","content":"", "reasoning_content":"thought", "_zcode_anthropic_thinking":[{"type":"thinking","thinking":"thought","signature":"signature"}]}),
             json!({"role":"user","content":"continue"}),
         ];
-        let body = body(&config, messages.clone(), &[]).unwrap();
+        let body = body(&config, messages.clone(), &[], None).unwrap();
         assert_eq!(body["messages"].as_array().unwrap().len(), 1);
         assert_eq!(body["messages"][0]["content"].as_array().unwrap().len(), 2);
         assert_eq!(
@@ -340,18 +349,18 @@ mod tests {
             json!({"role":"tool","tool_call_id":"call","content":"failed","_zcode_tool_failed":true}),
             json!({"role":"user","content":"follow up"}),
         ];
-        let chat = body(&config, messages.clone(), &[]).unwrap();
+        let chat = body(&config, messages.clone(), &[], None).unwrap();
         assert_eq!(chat["messages"][1]["reasoning_content"], "thought");
         assert!(!chat.to_string().contains("_zcode_"));
         assert!(!chat.to_string().contains("opaque"));
         config.api_type = ApiType::Responses;
-        let response = body(&config, messages.clone(), &[]).unwrap();
+        let response = body(&config, messages.clone(), &[], None).unwrap();
         assert_eq!(response["input"][1]["encrypted_content"], "opaque");
         assert_eq!(response["input"][3]["call_id"], "call");
         assert_eq!(response["input"][4]["call_id"], "call");
         assert!(!response.to_string().contains("signature"));
         config.api_type = ApiType::Anthropic;
-        let anthropic = body(&config, messages.clone(), &[]).unwrap();
+        let anthropic = body(&config, messages.clone(), &[], None).unwrap();
         assert_eq!(anthropic["messages"].as_array().unwrap().len(), 2);
         assert_eq!(
             anthropic["messages"][0]["content"][0]["signature"],

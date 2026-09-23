@@ -14,8 +14,13 @@ impl Drop for Group {
         }
     }
 }
+/// Where a probe runs: the workspace and the sanitized runtime environment.
+pub(super) struct Probe<'a> {
+    pub cwd: &'a Path,
+    pub env: &'a [(String, String)],
+}
 async fn command(
-    cwd: &Path,
+    at: &Probe<'_>,
     program: &str,
     args: &[&str],
     cancel: &CancellationToken,
@@ -26,7 +31,10 @@ async fn command(
     let mut command = Command::new(program);
     command
         .args(args)
-        .current_dir(cwd)
+        .current_dir(at.cwd)
+        // 与 Node execFile 默认继承的已净化 process.env 一致，不泄漏代理、CUA 凭据等。
+        .env_clear()
+        .envs(at.env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -68,8 +76,8 @@ async fn command(
     }
     result
 }
-async fn git(cwd: &Path, args: &[&str], cancel: &CancellationToken) -> String {
-    command(cwd, "git", args, cancel)
+async fn git(at: &Probe<'_>, args: &[&str], cancel: &CancellationToken) -> String {
+    command(at, "git", args, cancel)
         .await
         .unwrap_or_default()
         .trim()
@@ -95,21 +103,21 @@ async fn may_have_git(cwd: &Path, cancel: &CancellationToken) -> bool {
     }
     false
 }
-pub(super) async fn snapshot(cwd: &Path, cancel: &CancellationToken) -> Option<GitSnapshot> {
+pub(super) async fn snapshot(at: &Probe<'_>, cancel: &CancellationToken) -> Option<GitSnapshot> {
     // macOS 的系统 git 启动成本显著；不存在仓库标记时无需启动探测进程。显式 Git 环境仍交给 Git。
-    if !may_have_git(cwd, cancel).await {
+    if !may_have_git(at.cwd, cancel).await {
         return None;
     }
-    if git(cwd, &["rev-parse", "--is-inside-work-tree"], cancel).await != "true" {
+    if git(at, &["rev-parse", "--is-inside-work-tree"], cancel).await != "true" {
         return None;
     }
     let (branch, main_branch, user, status, recent) = tokio::join!(
-        git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"], cancel),
-        main_branch(cwd, cancel),
-        git(cwd, &["config", "user.name"], cancel),
-        git(cwd, &["--no-optional-locks", "status", "--short"], cancel),
+        git(at, &["rev-parse", "--abbrev-ref", "HEAD"], cancel),
+        main_branch(at, cancel),
+        git(at, &["config", "user.name"], cancel),
+        git(at, &["--no-optional-locks", "status", "--short"], cancel),
         git(
-            cwd,
+            at,
             &["--no-optional-locks", "log", "--oneline", "-n", "5"],
             cancel
         ),
@@ -142,9 +150,9 @@ pub(super) async fn snapshot(cwd: &Path, cancel: &CancellationToken) -> Option<G
             .join("\n"),
     })
 }
-async fn main_branch(cwd: &Path, cancel: &CancellationToken) -> String {
+async fn main_branch(at: &Probe<'_>, cancel: &CancellationToken) -> String {
     let remote = git(
-        cwd,
+        at,
         &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
         cancel,
     )
@@ -156,7 +164,7 @@ async fn main_branch(cwd: &Path, cancel: &CancellationToken) -> String {
     ] {
         if !name.is_empty()
             && command(
-                cwd,
+                at,
                 "git",
                 &[
                     "show-ref",
@@ -174,12 +182,12 @@ async fn main_branch(cwd: &Path, cancel: &CancellationToken) -> String {
     }
     "main".into()
 }
-pub(super) async fn os_release(cwd: &Path, cancel: &CancellationToken) -> String {
+pub(super) async fn os_release(at: &Probe<'_>, cancel: &CancellationToken) -> String {
     #[cfg(not(windows))]
-    let result = command(cwd, "uname", &["-r"], cancel).await;
+    let result = command(at, "uname", &["-r"], cancel).await;
     #[cfg(windows)]
     let result = command(
-        cwd,
+        at,
         "powershell.exe",
         &[
             "-NoProfile",

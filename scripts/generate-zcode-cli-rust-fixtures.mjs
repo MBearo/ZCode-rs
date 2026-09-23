@@ -10,6 +10,7 @@ import {
 import { parseEnvConfig } from "../apps/zcode-cli/packages/adapters/src/config/env-config.adapter.ts";
 import { createConfigPort } from "../apps/zcode-cli/packages/adapters/src/config/index.ts";
 import { DefaultRuntimeConfig } from "../apps/zcode-cli/packages/contracts/src/config/index.ts";
+import { egressFixtures } from "./zcode-cli-rust-egress-fixtures.mjs";
 
 const files = {
   empty: {},
@@ -169,11 +170,17 @@ const env = envs.map((pairs) => ({
   expected: parseEnvConfig(Object.fromEntries(pairs)),
 }));
 
-const data = { config: { parse, merge, env } };
-const path = new URL("../apps/zcode-cli-rust/crates/domain/fixtures/config.json", import.meta.url);
-const formatted = await format(path.pathname, `${JSON.stringify(data, null, 2)}\n`);
-if (formatted.errors.length) throw new Error("Cannot format Rust fixtures");
-if (process.argv.includes("--check")) {
-  if ((await readFile(path, "utf8")) !== formatted.code)
-    throw new Error("Rust parity fixtures differ from TS; regenerate them and fix Rust");
-} else await writeFile(path, formatted.code);
+async function emit(relative, data) {
+  const path = new URL(relative, import.meta.url);
+  const formatted = await format(path.pathname, `${JSON.stringify(data, null, 2)}\n`);
+  if (formatted.errors.length) throw new Error(`Cannot format ${relative}`);
+  if (process.argv.includes("--check")) {
+    if ((await readFile(path, "utf8")) !== formatted.code)
+      throw new Error(`${relative} differs from TS; regenerate it and fix Rust`);
+  } else await writeFile(path, formatted.code);
+}
+
+await emit("../apps/zcode-cli-rust/crates/domain/fixtures/config.json", {
+  config: { parse, merge, env },
+});
+await emit("../apps/zcode-cli-rust/crates/net/fixtures/egress.json", egressFixtures());

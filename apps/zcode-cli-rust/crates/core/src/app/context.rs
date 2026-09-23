@@ -218,6 +218,8 @@ pub(super) async fn hidden_summary(
         session_id: sink.session_id.clone(),
         run_id: sink.run_id.clone(),
         tx,
+        // 压缩不是 agent step，与 Node 一样按 other 归属。
+        origin: sink.origin.auxiliary(),
     };
     let request = model.complete(messages, &[], &hidden, cancel);
     tokio::pin!(request);

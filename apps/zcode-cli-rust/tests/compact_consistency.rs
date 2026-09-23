@@ -155,6 +155,7 @@ async fn check_commit_barrier(continuation: bool) {
                     std::env::temp_dir(),
                     std::env::temp_dir().join("fixture-empty-home"),
                     false,
+                    std::env::vars().collect(),
                 )),
                 store: Arc::new(Store {
                     gate,

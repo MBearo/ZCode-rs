@@ -53,7 +53,10 @@ pub(super) async fn run(
         .map(|d| d.to_string().encode_utf16().count().div_ceil(3))
         .sum();
     let mut turns = 0;
+    // 本 run 的请求归属副本；Engine 在引导输入提交时下发新 origin。
+    let mut current = sink.clone();
     loop {
+        let sink = &current;
         if profile
             .as_ref()
             .and_then(|p| p.max_turns)
@@ -230,8 +233,11 @@ pub(super) async fn run(
             _=cancel.cancelled()=>bail!("Cancelled"),
             result=receipt=>result.context("Session owner stopped before guide commit")?,
         };
-        if let Some(messages) = guide {
-            for message in messages {
+        if let Some(guide) = guide {
+            if let Some(origin) = guide.origin {
+                current.origin = origin;
+            }
+            for message in guide.messages {
                 history.push(message);
             }
         } else if !has_tools

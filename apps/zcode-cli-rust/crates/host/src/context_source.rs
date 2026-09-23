@@ -11,10 +11,22 @@ pub struct WorkspaceContext {
     cwd: PathBuf,
     home: PathBuf,
     desktop: bool,
+    env: std::sync::Arc<[(String, String)]>,
 }
 impl WorkspaceContext {
-    pub fn new(cwd: PathBuf, home: PathBuf, desktop: bool) -> Self {
-        Self { cwd, home, desktop }
+    /// `env` is the sanitized runtime environment used by git and OS probes.
+    pub fn new(
+        cwd: PathBuf,
+        home: PathBuf,
+        desktop: bool,
+        env: std::sync::Arc<[(String, String)]>,
+    ) -> Self {
+        Self {
+            cwd,
+            home,
+            desktop,
+            env,
+        }
     }
 }
 #[async_trait::async_trait]
@@ -33,9 +45,13 @@ impl ContextPort for WorkspaceContext {
             "x86_64" => "x64",
             other => other,
         };
+        let probe = super::context_git::Probe {
+            cwd: &self.cwd,
+            env: &self.env,
+        };
         let (git, release) = tokio::join!(
-            super::context_git::snapshot(&self.cwd, cancel),
-            super::context_git::os_release(&self.cwd, cancel),
+            super::context_git::snapshot(&probe, cancel),
+            super::context_git::os_release(&probe, cancel),
         );
         anyhow::ensure!(!cancel.is_cancelled(), "Cancelled");
         Ok(PromptSnapshot {
@@ -122,7 +138,12 @@ mod tests {
     #[tokio::test]
     async fn cancelled_context_initialization_does_not_return_a_snapshot_or_sources() {
         let root = tempfile::tempdir().unwrap();
-        let source = WorkspaceContext::new(root.path().into(), root.path().into(), false);
+        let source = WorkspaceContext::new(
+            root.path().into(),
+            root.path().into(),
+            false,
+            std::env::vars().collect(),
+        );
         let cancel = CancellationToken::new();
         cancel.cancel();
         assert!(source.snapshot(&cancel).await.is_err());

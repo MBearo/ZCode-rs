@@ -1,11 +1,22 @@
 use super::{Engine, engine::Active};
-use crate::contract::{Event, EventSink as Sink, ModelPort};
+use crate::contract::{Event, EventSink as Sink, ModelPort, RequestKind, RequestOrigin};
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 impl Engine {
     pub(super) fn start_run(&mut self, id: &str, turn_id: String) -> Result<()> {
+        self.start_run_for(id, turn_id, None)
+    }
+    /// `input` is the inputId acknowledged to the client when it differs from the
+    /// turn's userInput row (inputs promoted from the queue use their queue item id).
+    pub(super) fn start_run_for(
+        &mut self,
+        id: &str,
+        turn_id: String,
+        input: Option<String>,
+    ) -> Result<()> {
+        let origin = self.run_origin(id, &turn_id, input)?;
         let identity = self.session_selection(id)?;
         let (selection, updates) = tokio::sync::watch::channel(identity.clone());
         let model: Arc<dyn ModelPort> = if let Some(registry) = &self.registry {
@@ -36,6 +47,7 @@ impl Engine {
                 cancel: cancel.clone(),
                 run_id: run_id.clone(),
                 turn_id,
+                origin: origin.clone(),
             },
         );
         let manual = session
@@ -59,6 +71,7 @@ impl Engine {
             session_id: id.into(),
             run_id,
             tx: self.events.clone(),
+            origin,
         };
         tokio::spawn(async move {
             let result = super::agent_loop::run(
@@ -85,5 +98,55 @@ impl Engine {
                 .await;
         });
         Ok(())
+    }
+
+    /// Node model attribution: the session runtime's root trace (created once per
+    /// process, never persisted) and the query of the input that started the turn.
+    /// Subagents inherit the parent run's trace and query.
+    fn run_origin(
+        &mut self,
+        id: &str,
+        turn: &str,
+        input: Option<String>,
+    ) -> Result<Arc<RequestOrigin>> {
+        let session = self.sessions.get_mut(id).context("Session unavailable")?;
+        let parent = session
+            .parent_id
+            .as_deref()
+            .and_then(|parent| self.active.get(parent))
+            .map(|active| active.origin.clone());
+        let origin = match parent {
+            Some(parent) => RequestOrigin {
+                kind: RequestKind::Subagent,
+                session_id: Some(id.into()),
+                trace_id: parent.trace_id.clone(),
+                query_id: parent.query_id.clone(),
+            },
+            None => {
+                let query = input.or_else(|| {
+                    session
+                        .rows
+                        .iter()
+                        .rev()
+                        .find(|r| r["kind"] == "userInput" && r["turnId"] == turn)
+                        .and_then(|r| r["entityId"].as_str())
+                        .map(str::to_owned)
+                });
+                RequestOrigin {
+                    kind: if session.parent_id.is_some() {
+                        RequestKind::Subagent
+                    } else {
+                        RequestKind::Main
+                    },
+                    session_id: Some(id.into()),
+                    trace_id: session
+                        .runtime_trace
+                        .get_or_insert_with(|| self.clock.id())
+                        .clone(),
+                    query_id: Some(query.unwrap_or_else(|| turn.into())),
+                }
+            }
+        };
+        Ok(Arc::new(origin))
     }
 }

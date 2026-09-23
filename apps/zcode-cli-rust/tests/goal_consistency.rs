@@ -139,6 +139,7 @@ async fn goal_start_and_verdict_are_durable_barriers_and_failure_stops_the_next_
                         std::env::temp_dir(),
                         std::env::temp_dir().join("fixture-empty-home"),
                         false,
+                        std::env::vars().collect(),
                     )),
                     store: Arc::new(Store {
                         gate,

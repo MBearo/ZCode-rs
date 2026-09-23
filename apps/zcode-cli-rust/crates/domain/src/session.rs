@@ -43,6 +43,10 @@ pub struct Session {
     pub workspace_directory: Option<String>,
     #[serde(default)]
     pub trace_id: Option<String>,
+    /// Root trace of this process's runtime for the session (Node creates one
+    /// per app instance and never persists it); used for model attribution.
+    #[serde(skip)]
+    pub runtime_trace: Option<String>,
     #[serde(default)]
     pub todos: Vec<super::todo::TodoItem>,
     #[serde(default)]
@@ -162,6 +166,7 @@ impl Session {
             workspace_path: None,
             workspace_directory: None,
             trace_id: None,
+            runtime_trace: None,
             todos: vec![],
             todos_updated_at: now,
             prompt_snapshot: None,

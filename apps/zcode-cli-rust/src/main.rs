@@ -11,6 +11,7 @@ use zcode_cli_core::Engine;
 use zcode_cli_core_api::{ModelIdentity, ModelPort, ModelRegistry, RuntimePorts};
 use zcode_cli_host::{SystemClock, WorkspaceContext, legacy_paths};
 use zcode_cli_model::{config::ModelConfig, provider::HttpModel, registry::Registry};
+use zcode_cli_net::{Egress, NetworkPolicy};
 use zcode_cli_state::Store;
 use zcode_cli_tools::WorkspaceTools;
 
@@ -83,12 +84,25 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         std::env::var("ZCODE_WORKSPACE_IDENTITY").ok().as_deref(),
         &requested_cwd,
     );
+    // 与 Node 启动时净化 process.env 等价：只捕获一次，所有读取方共用这份视图，不改真实进程环境。
+    let runtime_env = Arc::new(zcode_cli_rust::runtime_env(&home));
     // 配置按 Node 分层规则从 cwd 解析；各入口每次重新加载，与 Node 一致没有文件监听。
     let workspace_config = Arc::new(zcode_cli_host::WorkspaceConfig::new(
         std::path::absolute(&requested_cwd)?,
         home.clone(),
-        std::env::vars().collect(),
+        runtime_env.vars().to_vec(),
     ));
+    // 网络出口与 Node 一样取启动时的 network 配置，运行中修改不影响已建立的出口。
+    let egress = Arc::new(
+        Egress::new(
+            runtime_env.clone(),
+            &NetworkPolicy::from_config(&workspace_config.snapshot().await.config["network"]),
+            &home,
+            "electron",
+        )
+        .map_err(anyhow::Error::msg)
+        .context("Invalid network configuration")?,
+    );
     let cancel = CancellationToken::new();
     let signal_cancel = cancel.clone();
     tokio::spawn(async move {
@@ -203,7 +217,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
     } else {
         let config = ModelConfig::load(args.config.as_ref()).await?;
         let registry = if config.is_none() {
-            Registry::from_env()
+            Registry::from_env(egress.clone())
                 .await?
                 .map(|r| r as Arc<dyn ModelRegistry>)
         } else {
@@ -215,7 +229,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
             reasoning_level: c.reasoning_level.clone(),
         });
         let model = config
-            .map(HttpModel::new)
+            .map(|c| HttpModel::new(c, egress.clone()))
             .map(|m| Arc::new(m) as Arc<dyn ModelPort>);
         let engine = Engine::new(
             workspace,
@@ -229,6 +243,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
                         .map(std::path::PathBuf::from)
                         .unwrap_or_default(),
                     args.surface == "desktop",
+                    runtime_env.vars().into(),
                 )),
                 store: Arc::new(store),
                 model,
@@ -236,6 +251,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
                     cwd,
                     data_dir.join("tool-results"),
                     workspace_config.clone(),
+                    egress.clone(),
                 )),
                 clock: Arc::new(SystemClock),
             },

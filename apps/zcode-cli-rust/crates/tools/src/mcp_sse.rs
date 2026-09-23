@@ -10,9 +10,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 pub(super) struct Transport {
-    client: reqwest_mcp::Client,
+    client: reqwest::Client,
     endpoint: Arc<str>,
-    headers: reqwest_mcp::header::HeaderMap,
+    headers: reqwest::header::HeaderMap,
     rx: mpsc::Receiver<ServerJsonRpcMessage>,
     worker: Option<tokio::task::JoinHandle<()>>,
     cancel: CancellationToken,
@@ -21,15 +21,15 @@ pub(super) struct Transport {
 impl Transport {
     pub async fn open(
         config: &Server,
-        client: reqwest_mcp::Client,
+        client: reqwest::Client,
         stop: &CancellationToken,
     ) -> Result<Self> {
         let url = url::Url::parse(config.raw["url"].as_str().unwrap())?;
-        let mut headers = reqwest_mcp::header::HeaderMap::new();
+        let mut headers = reqwest::header::HeaderMap::new();
         if let Some(values) = config.raw["headers"].as_object() {
             for (k, v) in values {
                 headers.insert(
-                    k.parse::<reqwest_mcp::header::HeaderName>()?,
+                    k.parse::<reqwest::header::HeaderName>()?,
                     v.as_str().unwrap().parse()?,
                 );
             }
@@ -90,7 +90,7 @@ impl rmcp::transport::Transport<RoleClient> for Transport {
         let cancel = self.cancel.clone();
         async move {
             tokio::select! {biased;_=cancel.cancelled()=>Err(std::io::Error::other("MCP SSE closed")),result=client.post(endpoint.as_ref()).headers(headers).json(&item).send()=>{
-                result.and_then(reqwest_mcp::Response::error_for_status).map(|_|()).map_err(|_|std::io::Error::other("MCP SSE post failed"))
+                result.and_then(reqwest::Response::error_for_status).map(|_|()).map_err(|_|std::io::Error::other("MCP SSE post failed"))
             }}
         }
     }

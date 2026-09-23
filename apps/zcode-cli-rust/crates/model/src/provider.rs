@@ -6,57 +6,105 @@ use super::{
     model_stream::TextBuffer,
     sse::SseDecoder,
 };
-use crate::contract::{Event, EventSink, ModelFailure, ModelOutput, ModelPort, RetryState};
+use crate::contract::{
+    Event, EventSink, ModelFailure, ModelOutput, ModelPort, RequestOrigin, RetryState,
+};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+use zcode_cli_net::{Egress, EgressError, Headers, Purpose, headers};
 
 type Result<T> = std::result::Result<T, ModelFailure>;
 pub struct HttpModel {
     config: ModelConfig,
-    client: std::sync::Arc<tokio::sync::OnceCell<reqwest::Client>>,
+    egress: Arc<Egress>,
     retry: RetryPolicy,
+    /// Actual request URL; official Coding Plan endpoints already point at the gateway.
     url: String,
+    via_gateway: bool,
 }
 impl HttpModel {
-    pub fn new(config: ModelConfig) -> Self {
+    pub fn new(config: ModelConfig, egress: Arc<Egress>) -> Self {
         let retry = RetryPolicy::resolve(&config.retry);
-        let url = config.api_type.url(&config.base_url);
+        let endpoint = config.api_type.url(&config.base_url);
+        // 与 Node 一致：先改写官方端点，再按实际发送地址判定代理与 no_proxy。
+        let (url, via_gateway) = match egress.gateway(&endpoint) {
+            Some(gateway) => (gateway, true),
+            None => (endpoint, false),
+        };
         Self {
             config,
-            url,
-            client: Default::default(),
+            egress,
             retry,
+            url,
+            via_gateway,
         }
     }
-    pub(super) fn with_pool(
-        config: ModelConfig,
-        client: std::sync::Arc<tokio::sync::OnceCell<reqwest::Client>>,
-    ) -> Self {
-        Self {
-            client,
-            ..Self::new(config)
-        }
-    }
-    async fn client(&self) -> Result<&reqwest::Client> {
-        self.client
-            .get_or_try_init(|| async {
-                // 系统证书读取含阻塞 IO；首次请求按需初始化，不能阻塞 stdio actor 的启动与取消。
-                tokio::task::spawn_blocking(|| {
-                    reqwest::Client::builder()
-                        .redirect(reqwest::redirect::Policy::none())
-                        .pool_idle_timeout(Duration::from_secs(90))
-                        .tcp_nodelay(true)
-                        .build()
-                })
-                .await
-                .map_err(|_| ModelFailure::new("invalid_request", false))?
-                .map_err(|e| model_failure::network(&e))
-            })
+    async fn client(&self) -> Result<reqwest::Client> {
+        self.egress
+            .client(Purpose::Model)
             .await
+            .map_err(|e| match e {
+                EgressError::Client(e) => model_failure::network(&e),
+                EgressError::CaCertificate(_) => ModelFailure::new("tls_error", false),
+            })
+    }
+    /// Node header order: SDK auth < identity < OpenRouter < `api.headers` <
+    /// `requestAuth.headers` < per-request attribution, merged case-insensitively.
+    fn headers(&self, key: Option<&str>, auth: &Value, origin: &RequestOrigin) -> Result<Headers> {
+        let mut resolved = self.egress.identity().clone();
+        headers::with_openrouter(&mut resolved, &self.config.base_url);
+        resolved.extend(
+            self.config
+                .headers
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str())),
+        );
+        if let Some(extra) = auth["requestAuth"]["headers"].as_object() {
+            for (name, value) in extra {
+                let value = value
+                    .as_str()
+                    .ok_or_else(|| ModelFailure::new("auth_failed", false))?;
+                resolved.set(name.as_str(), value);
+            }
+        }
+        let mut headers = Headers::default();
+        headers.set("content-type", "application/json");
+        headers.set("accept", "text/event-stream");
+        if self.config.api_type == ApiType::Anthropic {
+            headers.set("anthropic-version", "2023-06-01");
+            if let Some(key) = key {
+                headers.set("x-api-key", key);
+                // Anthropic 兼容网关同时读取 Bearer；显式配置的 Authorization 优先。
+                if !resolved.contains("authorization") {
+                    headers.set("Authorization", format!("Bearer {key}"));
+                }
+            }
+        } else if let Some(key) = key {
+            headers.set("Authorization", format!("Bearer {key}"));
+        }
+        headers.extend(resolved.iter());
+        let request_id = uuid::Uuid::new_v4().to_string();
+        headers.extend(
+            headers::attribution(&headers::Attribution {
+                request_id: &request_id,
+                session_type: origin.kind.as_str(),
+                trace_id: &origin.trace_id,
+                query_id: origin.query_id.as_deref(),
+                session_id: origin.session_id.as_deref(),
+                base_url: &self.config.base_url,
+            })
+            .iter(),
+        );
+        if self.via_gateway {
+            // 显式 Host 指向官方端点主机；改走网关后由客户端按实际 URL 计算。
+            headers.remove("host");
+        }
+        Ok(headers)
     }
     async fn request(
         &self,
@@ -72,22 +120,6 @@ impl HttpModel {
                 .stream_idle_timeout_ms
                 .saturating_add(u64::from(attempt - 1) * 30_000)
         };
-        let mut request = self
-            .client()
-            .await?
-            .post(&self.url)
-            .header("content-type", "application/json")
-            .header("accept", "text/event-stream")
-            .body(body);
-        if self.config.api_type == ApiType::Anthropic {
-            request = request.header("anthropic-version", "2023-06-01");
-        }
-        if let Some(seconds) = self.config.request_timeout_seconds {
-            request = request.timeout(Duration::from_secs(seconds));
-        }
-        for (key, value) in &self.config.headers {
-            request = request.header(key, value);
-        }
         let key = if self.config.account_access.is_some() {
             auth["requestAuth"]["apiKey"].as_str().map(str::to_owned)
         } else {
@@ -95,22 +127,13 @@ impl HttpModel {
                 .api_key()
                 .map_err(|_| ModelFailure::new("auth_failed", false))?
         };
-        if let Some(key) = key {
-            request = if self.config.api_type == ApiType::Anthropic {
-                request.header("x-api-key", &key).bearer_auth(key)
-            } else {
-                request.bearer_auth(key)
-            };
+        let headers = self.headers(key.as_deref(), auth, &output.origin())?;
+        let mut request = self.client().await?.post(&self.url).body(body);
+        for (name, value) in headers.iter() {
+            request = request.header(name, value);
         }
-        if let Some(headers) = auth["requestAuth"]["headers"].as_object() {
-            for (key, value) in headers {
-                request = request.header(
-                    key,
-                    value
-                        .as_str()
-                        .ok_or_else(|| ModelFailure::new("auth_failed", false))?,
-                );
-            }
+        if let Some(seconds) = self.config.request_timeout_seconds {
+            request = request.timeout(Duration::from_secs(seconds));
         }
         let response = tokio::select! {
             result=request.send()=>result.map_err(|e| model_failure::network(&e))?,
@@ -177,7 +200,11 @@ impl HttpModel {
         let has_attachments =
             super::request_attachments::materialize(&mut messages, &self.format_properties())
                 .await?;
-        let body = model_protocol::body(&self.config, messages, tools)?;
+        let user = match self.config.api_type {
+            ApiType::Anthropic => Some(self.anthropic_user(&sink.origin).await),
+            _ => None,
+        };
+        let body = model_protocol::body(&self.config, messages, tools, user.as_deref())?;
         // Bytes 克隆只增加引用计数；同一模型步骤的网络重试不再编码整段历史。
         let encoded = Bytes::from(
             serde_json::to_vec(&body).map_err(|_| ModelFailure::new("invalid_request", false))?,
@@ -264,6 +291,17 @@ impl HttpModel {
         unreachable!("positive retry budget")
     }
 }
+impl HttpModel {
+    /// Node `resolveAnthropicRequestMetadataUserId`; key order is part of the value.
+    async fn anthropic_user(&self, origin: &RequestOrigin) -> String {
+        let session = headers::session_for_attribution(origin.session_id.as_deref());
+        format!(
+            r#"{{"device_id":{},"account_uuid":"","session_id":{}}}"#,
+            Value::from(self.egress.device_id().await),
+            Value::from(session.unwrap_or_default())
+        )
+    }
+}
 fn after(ms: u64) -> Option<Instant> {
     if ms == 0 {
         None
@@ -305,10 +343,7 @@ impl ModelPort for HttpModel {
             config.option_patches[1] = patch;
             crate::domain::option_map::validate_patches(&config.option_patches)?;
         }
-        Ok(Some(std::sync::Arc::new(Self::with_pool(
-            config,
-            self.client.clone(),
-        ))))
+        Ok(Some(Arc::new(Self::new(config, self.egress.clone()))))
     }
     fn context_policy(&self) -> crate::domain::context::ContextPolicy {
         crate::domain::context::ContextPolicy {
@@ -331,3 +366,6 @@ impl ModelPort for HttpModel {
         }
     }
 }
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod tests;

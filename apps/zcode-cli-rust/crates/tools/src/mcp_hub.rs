@@ -33,7 +33,7 @@ struct State {
 pub(super) struct Hub {
     cwd: PathBuf,
     config: std::sync::Arc<dyn crate::contract::ConfigSource>,
-    http: std::sync::OnceLock<reqwest_mcp::Client>,
+    egress: Arc<zcode_cli_net::Egress>,
     state: RwLock<State>,
     gate: tokio::sync::Mutex<()>,
     stop: CancellationToken,
@@ -45,13 +45,15 @@ impl Hub {
         state.bindings.insert(child.into(), bindings);
         state.borrowed.insert(child.into());
     }
-    pub fn new(cwd: PathBuf, config: std::sync::Arc<dyn crate::contract::ConfigSource>) -> Self {
-        // MCP 的 rustls-no-provider 不自动选择算法；与现有模型 client 统一使用 ring。
-        let _ = rustls::crypto::ring::default_provider().install_default();
+    pub fn new(
+        cwd: PathBuf,
+        config: std::sync::Arc<dyn crate::contract::ConfigSource>,
+        egress: Arc<zcode_cli_net::Egress>,
+    ) -> Self {
         Self {
             cwd,
             config,
-            http: Default::default(),
+            egress,
             state: Default::default(),
             gate: Default::default(),
             stop: CancellationToken::new(),
@@ -155,24 +157,24 @@ impl Hub {
                 {
                     Ok(Some(previous))
                 } else {
-                    let http = if server.transport == "stdio" {
-                        None
+                    // 与 Node 一致：MCP HTTP 与模型共用出口规则，stdio 子进程使用同一份工具环境。
+                    let transport = if server.transport == "stdio" {
+                        Ok(super::mcp_connection::Transport::Stdio(
+                            self.egress.tool_env(),
+                        ))
                     } else {
-                        Some(
-                            self.http
-                                .get_or_init(|| {
-                                    reqwest_mcp::Client::builder()
-                                        .redirect(reqwest_mcp::redirect::Policy::none())
-                                        .connect_timeout(std::time::Duration::from_secs(15))
-                                        .build()
-                                        .expect("MCP HTTP client")
-                                })
-                                .clone(),
-                        )
+                        self.egress
+                            .client(zcode_cli_net::Purpose::Mcp)
+                            .await
+                            .map(super::mcp_connection::Transport::Http)
+                            .map_err(anyhow::Error::new)
                     };
-                    Connection::open(&server, http, cancel)
-                        .await
-                        .map(|c| Some(Arc::new(c)))
+                    match transport {
+                        Ok(transport) => Connection::open(&server, transport, cancel)
+                            .await
+                            .map(|c| Some(Arc::new(c))),
+                        Err(error) => Err(error),
+                    }
                 };
                 (server, key, result)
             })

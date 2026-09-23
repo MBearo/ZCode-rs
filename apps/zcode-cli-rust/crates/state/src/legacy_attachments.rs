@@ -6,9 +6,9 @@ fn resolved(p: &Value, cwd: &str, artifacts: &Path) -> Result<String> {
     let mime = p["mime"].as_str().unwrap_or("application/octet-stream");
     let original = p["url"].as_str().context("Missing legacy attachment URL")?;
     let artifact = if original.starts_with("zcode-artifact:") {
-        let parsed = reqwest::Url::parse(original)?;
+        let parsed = url::Url::parse(original)?;
         let decode = |s: &str| -> Result<String> {
-            let bytes = reqwest::Url::parse(&format!("file:///{s}"))?
+            let bytes = url::Url::parse(&format!("file:///{s}"))?
                 .to_file_path()
                 .map_err(|_| anyhow::anyhow!("Invalid artifact identity"))?;
             Ok(bytes.to_string_lossy().trim_start_matches('/').to_owned())
@@ -56,7 +56,7 @@ fn resolved(p: &Value, cwd: &str, artifacts: &Path) -> Result<String> {
     let mut resolved = url.to_owned();
     if url.starts_with("file:") || (!url.contains("://") && !url.starts_with("data:")) {
         let path = if url.starts_with("file:") {
-            reqwest::Url::parse(url)?
+            url::Url::parse(url)?
                 .to_file_path()
                 .map_err(|_| anyhow::anyhow!("Invalid attachment path"))?
         } else {

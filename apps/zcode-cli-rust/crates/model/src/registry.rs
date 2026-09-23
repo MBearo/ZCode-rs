@@ -24,10 +24,10 @@ pub struct Registry {
     personal: PathBuf,
     account: tokio::sync::Mutex<Option<Value>>,
     snapshot: RwLock<Snapshot>,
-    pool: Arc<tokio::sync::OnceCell<reqwest::Client>>,
+    egress: Arc<zcode_cli_net::Egress>,
 }
 impl Registry {
-    pub async fn from_env() -> Result<Option<Arc<Self>>> {
+    pub async fn from_env(egress: Arc<zcode_cli_net::Egress>) -> Result<Option<Arc<Self>>> {
         let builtin = std::env::var_os("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE");
         let personal = std::env::var_os("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE");
         if builtin.is_none() && personal.is_none() {
@@ -36,17 +36,18 @@ impl Registry {
         let registry = Arc::new(Self::new(
             builtin.context("Builtin config required")?.into(),
             personal.context("Personal config required")?.into(),
+            egress,
         ));
         registry.refresh(None).await?;
         Ok(Some(registry))
     }
-    pub fn new(builtin: PathBuf, personal: PathBuf) -> Self {
+    pub fn new(builtin: PathBuf, personal: PathBuf, egress: Arc<zcode_cli_net::Egress>) -> Self {
         Self {
             builtin,
             personal,
             account: Default::default(),
             snapshot: Default::default(),
-            pool: Default::default(),
+            egress,
         }
     }
 }
@@ -127,14 +128,14 @@ impl ModelRegistry for Registry {
         {
             return Ok(false);
         }
-        let pool = self.pool.clone();
+        let egress = self.egress.clone();
         let account_value = account.clone().unwrap_or_else(|| json!({}));
         let mut next = tokio::task::spawn_blocking(move || {
             resolve(
                 &builtin["config"],
                 &personal["config"],
                 &account_value,
-                pool,
+                egress,
             )
         })
         .await??;

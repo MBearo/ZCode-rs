@@ -51,7 +51,7 @@ pub(super) fn resolve(
     builtin: &Value,
     personal: &Value,
     account: &Value,
-    pool: Arc<tokio::sync::OnceCell<reqwest::Client>>,
+    egress: Arc<zcode_cli_net::Egress>,
 ) -> Result<Snapshot> {
     let mut providers: BTreeMap<String, Value> = BTreeMap::new();
     let templates = array(&builtin["providerConfigRules"]["templateRules"]);
@@ -225,7 +225,7 @@ pub(super) fn resolve(
                     }
                     prepared.push((
                         (id.clone(), model.clone(), level.clone()),
-                        Arc::new(HttpModel::with_pool(c, pool.clone())) as Arc<dyn ModelPort>,
+                        Arc::new(HttpModel::new(c, egress.clone())) as Arc<dyn ModelPort>,
                     ));
                 }
                 Ok(prepared)

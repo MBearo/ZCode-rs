@@ -83,7 +83,10 @@ impl Engine {
         }
         if let Event::StepBoundary { committed } = event.event {
             if let Some(messages) = self.drain_mailbox(&id, &turn).await? {
-                let _ = committed.send(Some(messages));
+                let _ = committed.send(Some(crate::contract::Guide {
+                    messages,
+                    origin: None,
+                }));
                 return Ok(());
             }
             return self.drain_guide(&id, &turn, committed).await;

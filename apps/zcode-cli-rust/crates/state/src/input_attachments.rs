@@ -7,7 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 impl Store {
     pub(super) async fn snapshot_file(&self, path: &str, mime: &str) -> Result<StoredAttachment> {
         let path = if path.starts_with("file://") {
-            reqwest::Url::parse(path)?
+            url::Url::parse(path)?
                 .to_file_path()
                 .map_err(|_| anyhow::anyhow!("Invalid attachment file URL"))?
         } else {

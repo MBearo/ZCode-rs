@@ -139,6 +139,7 @@ async fn child_start_and_result_require_both_owners_to_commit_and_failure_releas
                         std::env::temp_dir(),
                         std::env::temp_dir().join("fixture-empty-home"),
                         false,
+                        std::env::vars().collect(),
                     )),
                     store: Arc::new(Store {
                         stage,
