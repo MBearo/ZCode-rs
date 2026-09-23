@@ -25,8 +25,8 @@
 
 | 门禁                                | 结果                                 |
 | ----------------------------------- | ------------------------------------ |
-| `pnpm test:rust-agent`              | 36 Rust / 101 App，通过，0 跳过      |
-| `pnpm check:rust-agent`             | 边界、fmt、Clippy `-D warnings` 通过 |
+| `pnpm test:zcode-cli-rust`          | 36 Rust / 101 App，通过，0 跳过      |
+| `pnpm check:zcode-cli-rust`         | 边界、fmt、Clippy `-D warnings` 通过 |
 | `pnpm typecheck`                    | 通过                                 |
 | `pnpm lint`                         | 0 错误，原有 70 条警告               |
 | `pnpm fmt:check`                    | 通过                                 |
@@ -36,7 +36,7 @@
 
 ## 真实 Desktop
 
-重启隔离的 `ZCode Rust E2E`，App PID 83927，测试 workspace native PID 84600；显式 `rust-core` 和 `app-server --stdio`，使用原有隔离 profile / 数据库。GLM-5.3 Max / yolo。
+重启隔离的 `ZCode Rust E2E`，App PID 83927，测试 workspace native PID 84600；显式 `zcode-cli-rust` 和 `app-server --stdio`，使用原有隔离 profile / 数据库。GLM-5.3 Max / yolo。
 
 新二进制 SHA256：`4968f5336b60a6f13c89c1d8b6152f81d045c8f446f7c0a25795c53fc406dcea`。
 

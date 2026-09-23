@@ -18,20 +18,20 @@ TS 新导入从一致性备份读取 todo 表。旧版本已导入却缺少 todo
 
 新增 7 项真实 Rust 子进程 / App client/schema 测试，覆盖 TS handler 差分、顺序屏障、双订阅、严格输入、空列表、会话隔离、提醒跨重启、中文大结果预算、压缩/关闭/恢复，以及 TS 首次导入与已提交备份补齐。新增 1 项 Rust 受控存储测试覆盖状态提交、canonical 提交失败和两者之间的崩溃恢复；已有 stale run fixture 加入 Todo 事件，验证其不能修改当前状态。另新增 1 项提醒阈值单测。
 
-| 检查                                        | 结果                                   |
-| ------------------------------------------- | -------------------------------------- |
-| `CARGO_INCREMENTAL=0 pnpm test:rust-agent`  | 49 Rust / 134 App，通过；0 跳过        |
-| `CARGO_INCREMENTAL=0 pnpm check:rust-agent` | 原生边界、fmt、Clippy -D warnings 通过 |
-| `pnpm typecheck`                            | 通过                                   |
-| `pnpm lint`                                 | 0 错误，既有 70 条警告                 |
-| `pnpm fmt:check`                            | 通过                                   |
-| `pnpm architecture:check --changed`         | 0 违反，0 新增                         |
+| 检查                                            | 结果                                   |
+| ----------------------------------------------- | -------------------------------------- |
+| `CARGO_INCREMENTAL=0 pnpm test:zcode-cli-rust`  | 49 Rust / 134 App，通过；0 跳过        |
+| `CARGO_INCREMENTAL=0 pnpm check:zcode-cli-rust` | 原生边界、fmt、Clippy -D warnings 通过 |
+| `pnpm typecheck`                                | 通过                                   |
+| `pnpm lint`                                     | 0 错误，既有 70 条警告                 |
+| `pnpm fmt:check`                                | 通过                                   |
+| `pnpm architecture:check --changed`             | 0 违反，0 新增                         |
 
 日志位于 `.zcode-runtime/rust-e2e/20260922/checks/todos/`。最终 App 集成测试耗时 23231.8ms，仅作本次运行记录，不作为 release 性能对比。
 
 过程中修正了三个测试问题，未放宽产品断言：HTTP fixture 分块 Buffer 隐式转字符串损坏跨块中文，改为流式 UTF-8 解码；Coding fixture 将新的隐藏 Todo 提醒错当测试指令，改为跳过已知系统通知；直接静态导入整个 TS runtime reminder 模块会把无关 CLI 浏览器/子代理源码纳入测试专用 tsconfig，现以运行期路径导入真实 formatter，保持差分执行和测试编译边界。上述修正后全量重跑通过，Node SQLite 实验性提示保留。
 
-新增 Rust 源文件 3 个，共 313 行，均在 zcode-rust 的既有 domain/app/adapters 层内；没有增加状态 owner、跨模块运行时依赖或协议版本。原生目录此前已是未跟踪工作，因此该数字不是相对 HEAD 的整包净增统计。
+新增 Rust 源文件 3 个，共 313 行，均在 zcode-cli-rust 的既有 domain/app/adapters 层内；没有增加状态 owner、跨模块运行时依赖或协议版本。原生目录此前已是未跟踪工作，因此该数字不是相对 HEAD 的整包净增统计。
 
 ## 真实 App 验收
 

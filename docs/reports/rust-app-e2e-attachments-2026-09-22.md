@@ -2,7 +2,7 @@
 
 2026-09-22 16:12–16:20，ZCode-Pro `main` / `872ad96` 的未提交工作区，macOS arm64、Electron 41.0.3、Rust debug。本次重新构建并两次正常启动真实 App，使用现有账号 GLM-5.3 / Max，权限为 yolo。没有模拟模型、直接注入 Renderer store 或绕过 Host 发消息。
 
-本次二进制 SHA256：`b5e33b695f25eb448e178eee686df0c0ca87609a6401945a60e7002c85b184ac`。实际链路为 Electron → window Local Host → 开发 stdio tap → `zcode-rust app-server --stdio --cwd <测试工作区> --surface desktop`。普通启动入口仍默认 TS。
+本次二进制 SHA256：`b5e33b695f25eb448e178eee686df0c0ca87609a6401945a60e7002c85b184ac`。实际链路为 Electron → window Local Host → 开发 stdio tap → `zcode-cli-rust app-server --stdio --cwd <测试工作区> --surface desktop`。普通启动入口仍默认 TS。
 
 ## 用户路径与断言
 
@@ -20,15 +20,15 @@
 
 ## 自动化复验
 
-| 检查                                                              | 本次结果                                              |
-| ----------------------------------------------------------------- | ----------------------------------------------------- |
-| `cargo build --locked --manifest-path apps/zcode-rust/Cargo.toml` | 通过，真实 App 使用该产物                             |
-| `pnpm test:rust-agent`                                            | 28 Rust / 84 App 集成测试通过，无失败或跳过           |
-| `pnpm check:rust-agent`                                           | native 边界、fmt、Clippy 全 target `-D warnings` 通过 |
-| `pnpm typecheck`                                                  | 通过                                                  |
-| `pnpm lint`                                                       | 0 errors，70 条既有 warnings                          |
-| `pnpm architecture:check --changed`                               | violations / baseline / new 均为 0                    |
-| Renderer 未捕获异常                                               | 自动化连接记录为空；业务警告另列如下                  |
+| 检查                                                                  | 本次结果                                              |
+| --------------------------------------------------------------------- | ----------------------------------------------------- |
+| `cargo build --locked --manifest-path apps/zcode-cli-rust/Cargo.toml` | 通过，真实 App 使用该产物                             |
+| `pnpm test:zcode-cli-rust`                                            | 28 Rust / 84 App 集成测试通过，无失败或跳过           |
+| `pnpm check:zcode-cli-rust`                                           | native 边界、fmt、Clippy 全 target `-D warnings` 通过 |
+| `pnpm typecheck`                                                      | 通过                                                  |
+| `pnpm lint`                                                           | 0 errors，70 条既有 warnings                          |
+| `pnpm architecture:check --changed`                                   | violations / baseline / new 均为 0                    |
+| Renderer 未捕获异常                                                   | 自动化连接记录为空；业务警告另列如下                  |
 
 证据目录：`.zcode-runtime/rust-e2e/20260922/`。`latest-evidence.json` 保存二进制指纹、测试任务、文件与持久化断言；`screenshots/08` 至 `14` 对应附件草稿、工具完成、停止、排队、新任务和冷恢复；`checks/` 保存本次命令输出。开发日志含本机环境和账号上下文，仅留本地，不作为公开日志包。
 

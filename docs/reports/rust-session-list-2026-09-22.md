@@ -28,14 +28,14 @@
 
 ## 验证
 
-| 检查                                        | 结果                                                                                             |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `CARGO_INCREMENTAL=0 pnpm test:rust-agent`  | Rust 50 / App 139 全通过，0 跳过；包括测试 TypeScript 编译、生成的 prompt/tool schema 一致性检查 |
-| `CARGO_INCREMENTAL=0 pnpm check:rust-agent` | boundary / fmt / Clippy `-D warnings` 通过                                                       |
-| `pnpm typecheck`                            | 通过                                                                                             |
-| `pnpm lint`                                 | 0 errors，70 个既有 warnings                                                                     |
-| `pnpm fmt:check`                            | 通过                                                                                             |
-| `pnpm architecture:check --changed`         | 0 violations / 0 new                                                                             |
+| 检查                                            | 结果                                                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `CARGO_INCREMENTAL=0 pnpm test:zcode-cli-rust`  | Rust 50 / App 139 全通过，0 跳过；包括测试 TypeScript 编译、生成的 prompt/tool schema 一致性检查 |
+| `CARGO_INCREMENTAL=0 pnpm check:zcode-cli-rust` | boundary / fmt / Clippy `-D warnings` 通过                                                       |
+| `pnpm typecheck`                                | 通过                                                                                             |
+| `pnpm lint`                                     | 0 errors，70 个既有 warnings                                                                     |
+| `pnpm fmt:check`                                | 通过                                                                                             |
+| `pnpm architecture:check --changed`             | 0 violations / 0 new                                                                             |
 
 新增 1 个 Rust 索引检查、5 个 App 子进程测试。构建始终关闭 incremental，完成时 incremental 目录为 0 B，磁盘约 11.8 GiB 可用。23 ms 只是本次空 ID 查询的单次观测，不代表吞吐量或 TS/Rust release 性能对比。
 

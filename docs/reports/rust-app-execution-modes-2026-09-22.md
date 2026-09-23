@@ -22,14 +22,14 @@
 
 修复前测试记录了字段缺失；兼容复核另复现了旧 strict schema 因新增字段失败，协商后通过。
 
-| 门禁                                        | 本轮结果                       |
-| ------------------------------------------- | ------------------------------ |
-| `CARGO_INCREMENTAL=0 pnpm test:rust-agent`  | 36 Rust / 103 App 通过，0 跳过 |
-| `CARGO_INCREMENTAL=0 pnpm check:rust-agent` | Rust 边界、fmt、Clippy 通过    |
-| `pnpm typecheck`                            | 通过                           |
-| `pnpm lint`                                 | 0 错误、原有 70 条警告         |
-| `pnpm fmt:check`                            | 通过                           |
-| `pnpm architecture:check --changed`         | 0 新增、0 基线违反             |
+| 门禁                                            | 本轮结果                       |
+| ----------------------------------------------- | ------------------------------ |
+| `CARGO_INCREMENTAL=0 pnpm test:zcode-cli-rust`  | 36 Rust / 103 App 通过，0 跳过 |
+| `CARGO_INCREMENTAL=0 pnpm check:zcode-cli-rust` | Rust 边界、fmt、Clippy 通过    |
+| `pnpm typecheck`                                | 通过                           |
+| `pnpm lint`                                     | 0 错误、原有 70 条警告         |
+| `pnpm fmt:check`                                | 通过                           |
+| `pnpm architecture:check --changed`             | 0 新增、0 基线违反             |
 
 日志：`.zcode-runtime/rust-e2e/20260922/checks/execution-modes/`。
 

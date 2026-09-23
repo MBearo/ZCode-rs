@@ -20,14 +20,14 @@
 
 SQLite trigger fixture 分别令导入和输入提交失败，验证没有成功发布、没有 provider 请求，进程停止；重启状态保留 missing/pending。TS fixture 使用真实 commitSharedContextImportBundle。首次测试错误地向 Store 传入两层 modelSelection；按其逻辑接口改为平铺 selection 后，迁移回归通过，没有修改生产 importer 来适配错误 fixture。
 
-| 检查                                        | 结果                                                                                       |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `CARGO_INCREMENTAL=0 pnpm test:rust-agent`  | Rust 50 / App 154 全通过，0 跳过；包含测试 TypeScript 编译及生成 prompt/tool schema 一致性 |
-| `CARGO_INCREMENTAL=0 pnpm check:rust-agent` | Rust boundary / fmt / Clippy `-D warnings` 通过                                            |
-| `pnpm typecheck`                            | 通过                                                                                       |
-| `pnpm lint`                                 | 0 errors，70 个既有 warnings                                                               |
-| `pnpm fmt:check`                            | 通过                                                                                       |
-| `pnpm architecture:check --changed`         | 0 violations / 0 new                                                                       |
+| 检查                                            | 结果                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `CARGO_INCREMENTAL=0 pnpm test:zcode-cli-rust`  | Rust 50 / App 154 全通过，0 跳过；包含测试 TypeScript 编译及生成 prompt/tool schema 一致性 |
+| `CARGO_INCREMENTAL=0 pnpm check:zcode-cli-rust` | Rust boundary / fmt / Clippy `-D warnings` 通过                                            |
+| `pnpm typecheck`                                | 通过                                                                                       |
+| `pnpm lint`                                     | 0 errors，70 个既有 warnings                                                               |
+| `pnpm fmt:check`                                | 通过                                                                                       |
+| `pnpm architecture:check --changed`             | 0 violations / 0 new                                                                       |
 
 ## 真实 App 与真实模型
 

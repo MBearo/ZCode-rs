@@ -18,7 +18,7 @@
 
 ## 自动化验收
 
-最终 `CARGO_INCREMENTAL=0 pnpm test:rust-agent`：**57 个 Rust 测试、185 个 App client/schema 集成用例全部通过**，无跳过。使用真实 Rust 子进程，包含已有模型/工具/存储/协议回归。
+最终 `CARGO_INCREMENTAL=0 pnpm test:zcode-cli-rust`：**57 个 Rust 测试、185 个 App client/schema 集成用例全部通过**，无跳过。使用真实 Rust 子进程，包含已有模型/工具/存储/协议回归。
 
 本工作包重点新增/扩展：
 

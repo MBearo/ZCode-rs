@@ -12,7 +12,7 @@ ZCode-Pro main / 872ad96，2026-09-22。继续使用默认 TS、显式 Rust、yo
 
 23 个 Rust 测试、57 个真实 Rust 子进程 App/Host 测试通过；本包新增 11 个 App 场景和 2 个 Rust 场景。覆盖三协议续写后成功、空截断预算耗尽、截断工具无副作用、自动压缩后的继续及冷恢复、截断摘要回滚。可控存储 gate 验证 partial 未提交时不发下一请求，以及提交失败时停止。未更改 App schema/version。
 
-pnpm test:rust-agent、check:rust-agent、typecheck、lint、fmt:check、architecture:check --changed 均通过。lint 0 errors / 70 条既有 warnings；架构 baseline/new 均为 0；Node SQLite ExperimentalWarning 为现有测试环境提示。全仓格式检查发现并修正了本任务 Cargo.toml 的数组格式。Rust src/tests 相对第四包 +199/-34，净 +165 行。
+pnpm test:zcode-cli-rust、check:zcode-cli-rust、typecheck、lint、fmt:check、architecture:check --changed 均通过。lint 0 errors / 70 条既有 warnings；架构 baseline/new 均为 0；Node SQLite ExperimentalWarning 为现有测试环境提示。全仓格式检查发现并修正了本任务 Cargo.toml 的数组格式。Rust src/tests 相对第四包 +199/-34，净 +165 行。
 
 ## 性能
 

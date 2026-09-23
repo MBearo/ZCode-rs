@@ -443,17 +443,17 @@ export function resolveDefaultZCodeAgentCommand(
   const command = process.env.ZCODE_AGENT_SERVER_COMMAND?.trim();
   if (command) {
     const runtime = process.env.ZCODE_AGENT_SERVER_RUNTIME?.trim();
-    if (runtime && runtime !== "rust-core") {
+    if (runtime && runtime !== "zcode-cli-rust") {
       throw new Error("Unsupported ZCODE_AGENT_SERVER_RUNTIME");
     }
     const args = parseArgsJson(process.env.ZCODE_AGENT_SERVER_ARGS_JSON) ?? [
       "app-server",
       "--stdio",
     ];
-    if (runtime === "rust-core") {
+    if (runtime === "zcode-cli-rust") {
       if (args.some((arg) => arg === "--cwd" || arg.startsWith("--cwd=")))
         throw new Error(
-          "Rust Agent --cwd is supplied by the Host; remove it from ZCODE_AGENT_SERVER_ARGS_JSON",
+          "zcode-cli-rust --cwd is supplied by the Host; remove it from ZCODE_AGENT_SERVER_ARGS_JSON",
         );
       // OS cwd 会 realpath 化；显式传 Host 原始 workspacePath 才能保留本地 identity fallback。
       args.push("--cwd", context.workspacePath);
@@ -461,7 +461,7 @@ export function resolveDefaultZCodeAgentCommand(
     return applyPresentationSurfaceToCommand(
       {
         command,
-        ...(runtime === "rust-core"
+        ...(runtime === "zcode-cli-rust"
           ? { storagePreparationMode: "process" as const, supportsStorageStartup: true }
           : {}),
         args,

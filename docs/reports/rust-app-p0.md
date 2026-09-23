@@ -20,15 +20,15 @@ Session actor 继续是选型、队列、历史和 ACK 的唯一所有者。选�
 
 ## 验证结果
 
-- `pnpm test:rust-agent`：25 个 Rust 测试、73 个 App 集成测试通过。新增配置差分、Host 鉴权及迁移场景；既有模型请求、工具、上下文、提交屏障和传输回归继续执行。
-- `pnpm check:rust-agent`：Rust 边界检查、fmt、所有 target 的 Clippy `-D warnings` 通过。
+- `pnpm test:zcode-cli-rust`：25 个 Rust 测试、73 个 App 集成测试通过。新增配置差分、Host 鉴权及迁移场景；既有模型请求、工具、上下文、提交屏障和传输回归继续执行。
+- `pnpm check:zcode-cli-rust`：Rust 边界检查、fmt、所有 target 的 Clippy `-D warnings` 通过。
 - `pnpm typecheck`、`pnpm lint`、`pnpm fmt:check`、`pnpm architecture:check --changed` 通过；架构 baseline/new 均为 0。
 - lint 为 0 errors / 70 条既有 warnings；Node SQLite ExperimentalWarning 为测试环境既有提示。
 - release 构建及 `dev-desktop:rust --help` 验证通过。未启动完整 Electron Renderer，也未访问真实模型供应商。
 
-本包未更改 App 协议版本。主要验收代码位于 `packages/services/tests/rust-agent-{registry,registry-parity,options,account-host,migration,migration-boundaries}.test.ts`；底层端口和状态约束见 `apps/zcode-rust/CONTRACT.md` 及 `docs/specs/rust-app-p0.md`。
+本包未更改 App 协议版本。主要验收代码位于 `packages/services/tests/zcode-cli-rust-{registry,registry-parity,options,account-host,migration,migration-boundaries}.test.ts`；底层端口和状态约束见 `apps/zcode-cli-rust/CONTRACT.md` 及 `docs/specs/rust-app-p0.md`。
 
-改动归属为 zcode-rust，以及既有 Host/Agent 服务启动和 capability 边界；状态所有者未迁移到 Host。相对 HEAD，整个尚未提交的 Rust `src/tests/examples` 共新增 59 个文件、10467 个物理行（含注释/空行）；这包含前五包，不能当成本次 P0 的净增行数。
+改动归属为 zcode-cli-rust，以及既有 Host/Agent 服务启动和 capability 边界；状态所有者未迁移到 Host。相对 HEAD，整个尚未提交的 Rust `src/tests/examples` 共新增 59 个文件、10467 个物理行（含注释/空行）；这包含前五包，不能当成本次 P0 的净增行数。
 
 ## 性能对比
 
@@ -44,14 +44,14 @@ Apple M1 Max / macOS arm64，release；P0 前第五包二进制与本包候选�
 
 总耗时变化分别为 -0.9%、+1.3%、+2.2%。未观察到数量级退化，不将小幅差异解释为确定加速。RSS 为采样峰值；存储是 SQLite/WAL/SHM 文件占用，不是累计物理写入。该负载使用静态模型配置，只验证 P0 改动对已有请求/流式/存储主循环的影响，不证明 Registry 刷新、账号服务或大旧库迁移的性能，也不是 TS/Rust 性能比较。
 
-原始样本位于 `.zcode-runtime/rust-bench/p0-20260922/`；可用 `scripts/bench-rust-agent-suite.mjs <baseline> <candidate> <output> 256000 256000` 重现。
+原始样本位于 `.zcode-runtime/rust-bench/p0-20260922/`；可用 `scripts/bench-zcode-cli-rust-suite.mjs <baseline> <candidate> <output> 256000 256000` 重现。
 
 - 基线 SHA256：`1023d6d32c0f6ba38a46ce91fcacf62548f9de2ac110042d9cdeed2c09de2040`，本次构建前保留的第五包 release 产物。
 - 本包 SHA256：`bf587951abfec3b619d05560042703d737efef8e1a24997adfaabc3bf2843754`。
 
 ## 启用、迁移与剩余边界
 
-运行 `pnpm dev:desktop:rust` 使用现有 App 配置和账号。`--data-dir <directory>` 隔离实验数据；`--config <model.json>` 保留静态 fixture 模式。普通 `pnpm dev:desktop` 仍为 TS。
+运行 `pnpm dev:desktop:zcode-cli-rust` 使用现有 App 配置和账号。`--data-dir <directory>` 隔离实验数据；`--config <model.json>` 保留静态 fixture 模式。普通 `pnpm dev:desktop` 仍为 TS。
 
 Rust 默认使用独立 `~/.zcode/rust/rust-sessions.sqlite`。首次打开 workspace 时从既有 TS 路径只读导入，保留 `ts-backup-*.sqlite` 和附件字节快照。非 yolo 历史不能静默提升权限；旧 planEnabled 必须通过显式关闭计划后才可继续。回退 TS 时退出 Rust、取消 runtime override，TS 继续读取原库；Rust 新增历史不反向同步，已导入 workspace 不自动合并之后的 TS 修改。
 

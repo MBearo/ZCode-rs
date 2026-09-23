@@ -10,7 +10,7 @@
 - 清理当前会话全部连接的上传事务及 conversation 订阅，再更新 sessions-index。暂停连接恢复不会把已关闭 runtime 重新放回索引；旧 subscriptionId 不能 resync 复活会话。
 - 历史和附件字节保留。重新订阅通过单会话 Store 查询加载，以新 epoch 发 snapshot，不触发模型和工具；legacy session/read 仍为 existing-only。未落盘草稿不会因关闭而新增永久 ACK/WAL 写入，旧无历史记录的回收另有事务保护，不能误删已提升会话。
 
-改动仍在 zcode-rust 的 app/domain/adapters 端口边界内；共享协议版本、默认 TS runtime 未变。受控架构上下文和改动前后的检查均为 0 violations / 0 baseline / 0 new。规格见 [会话关闭 spec](../specs/rust-session-close.md)。
+改动仍在 zcode-cli-rust 的 app/domain/adapters 端口边界内；共享协议版本、默认 TS runtime 未变。受控架构上下文和改动前后的检查均为 0 violations / 0 baseline / 0 new。规格见 [会话关闭 spec](../specs/rust-session-close.md)。
 
 ## 验证
 
@@ -20,14 +20,14 @@
 
 | 检查                                | 结果                                                  |
 | ----------------------------------- | ----------------------------------------------------- |
-| `pnpm test:rust-agent`              | 32 Rust / 91 App 集成测试通过                         |
-| `pnpm check:rust-agent`             | native 边界、fmt、Clippy 全 target `-D warnings` 通过 |
+| `pnpm test:zcode-cli-rust`          | 32 Rust / 91 App 集成测试通过                         |
+| `pnpm check:zcode-cli-rust`         | native 边界、fmt、Clippy 全 target `-D warnings` 通过 |
 | `pnpm typecheck`                    | 通过                                                  |
 | `pnpm lint`                         | 0 errors，70 条既有 warnings                          |
 | `pnpm fmt:check`                    | 通过                                                  |
 | `pnpm architecture:check --changed` | violations / baseline / new 均为 0                    |
 
-真实 App 以隔离测试 profile 重启，在已有任务与 New task 草稿之间切换。首次关闭实现的三个真实 `deleteSession` 请求均 accepted；加入纯内存草稿不写永久 ACK 的优化后，再用最终 debug 产物复验两次，均 accepted，SQLite 中对应草稿历史及永久关闭 ACK 均为零，Renderer 未捕获异常。最终进程为 `zcode-rust app-server --stdio --cwd <测试工作区> --surface desktop`，PID 29575，二进制 SHA-256 为 `b388400cdebbbaaabaa7dbd340af03b7c8960da271f77497247971b66de90055`。
+真实 App 以隔离测试 profile 重启，在已有任务与 New task 草稿之间切换。首次关闭实现的三个真实 `deleteSession` 请求均 accepted；加入纯内存草稿不写永久 ACK 的优化后，再用最终 debug 产物复验两次，均 accepted，SQLite 中对应草稿历史及永久关闭 ACK 均为零，Renderer 未捕获异常。最终进程为 `zcode-cli-rust app-server --stdio --cwd <测试工作区> --surface desktop`，PID 29575，二进制 SHA-256 为 `b388400cdebbbaaabaa7dbd340af03b7c8960da271f77497247971b66de90055`。
 
 最终证据在 `.zcode-runtime/rust-e2e/20260922/close-final-evidence.json`、`close-final-renderer-errors.txt` 与 `screenshots/16-final-draft-close.png`；首次复验保留在 `close-evidence.json` 和 `screenshots/15-draft-close.png`。完整检查日志位于 `checks/session-close/`。日志只抽取命令 ID、会话 ID、ACK、PID 和产物指纹，完整账号上下文不放入报告。
 

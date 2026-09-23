@@ -4,13 +4,13 @@
 
 ## 实现与证据
 
-- 三段 system 的静态文案直接从当前 TS 构造器生成；`generate-rust-prompt.mjs --check` 已接入 `pnpm test:rust-agent`，漂移会失败。运行时只读编译进产物的模板，不启动 Node。
+- 三段 system 的静态文案直接从当前 TS 构造器生成；`generate-zcode-cli-rust-prompt.mjs --check` 已接入 `pnpm test:zcode-cli-rust`，漂移会失败。运行时只读编译进产物的模板，不启动 Node。
 - ContextPort 负责有界异步 IO，Session actor 唯一持有 durable 环境/Git/日期快照。首次普通请求先提交快照，再发模型请求；每模型步骤重新读取 AGENTS 并使用已绑定模型的真实名称。当前 surface 来自进程参数，跨 desktop/terminal 冷恢复不沿用旧文案。
 - AGENTS 按 TS 当前实际规则加载用户默认和最近工作区文件，Git 根截断查找，不拼接所有父子目录。每份最多读取 100 KiB；超限、跨 UTF-8 边界、缺失/目录、去重及嵌套 reminder 标签均处理。
 - AGENTS/日期是 user reminder 请求投影，压缩和用户历史不增加假输入。三协议传递相同正文语义；Anthropic 保留三段 system 及 ephemeral cache hints。
 - Git 状态/最近提交只在首次初始化探测，后续步骤、回合及冷恢复不反复扫描仓库。探测有输出/时间上界，取消收回探测进程，控制 RPC 不被阻塞。
 
-详细行为及所有者时序图见 [spec](../specs/rust-request-context.md)。改动位于 `zcode-rust` 的 domain/app/adapters，未新增 App 协议或服务层实现依赖。TS source adapter 仅新增非空来源守卫：差分测试的严格索引类型检查暴露了原有隐含不变量，没有更改有效来源的装配规则。
+详细行为及所有者时序图见 [spec](../specs/rust-request-context.md)。改动位于 `zcode-cli-rust` 的 domain/app/adapters，未新增 App 协议或服务层实现依赖。TS source adapter 仅新增非空来源守卫：差分测试的严格索引类型检查暴露了原有隐含不变量，没有更改有效来源的装配规则。
 
 ## 测试
 
@@ -20,8 +20,8 @@
 
 | 检查                                | 结果                                           |
 | ----------------------------------- | ---------------------------------------------- |
-| `pnpm test:rust-agent`              | 34 Rust / 97 App 集成测试通过，0 失败、0 跳过  |
-| `pnpm check:rust-agent`             | 边界、fmt、全 target Clippy `-D warnings` 通过 |
+| `pnpm test:zcode-cli-rust`          | 34 Rust / 97 App 集成测试通过，0 失败、0 跳过  |
+| `pnpm check:zcode-cli-rust`         | 边界、fmt、全 target Clippy `-D warnings` 通过 |
 | `pnpm typecheck`                    | 通过                                           |
 | `pnpm lint`                         | 0 errors / 70 条既有 warnings                  |
 | `pnpm fmt:check`                    | 通过                                           |

@@ -1,0 +1,32 @@
+pub use zcode_cli_protocol as protocol;
+
+pub mod agent_profile;
+pub mod attachment_upload;
+pub mod background;
+pub mod context;
+pub mod file_checkpoint;
+pub mod goal;
+pub mod history;
+pub mod legacy_snapshot;
+pub mod model;
+pub mod option_map;
+pub mod prompt;
+pub mod question;
+mod question_answer;
+pub mod row_page;
+pub mod session;
+pub mod session_listing;
+pub mod shared_context;
+pub mod shared_import;
+pub mod skills;
+pub mod subagent;
+pub mod todo;
+mod json_size;
+mod session_memory;
+mod session_recovery;
+mod subagent_row;
+
+pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+pub const MAX_TEXT_BYTES: usize = 256 * 1024;
+pub const MAX_TOOL_BYTES: usize = 64 * 1024;
+pub const MAX_QUEUE: usize = 32;

@@ -18,14 +18,14 @@ Session actor 是问题、定时器和工具行的唯一所有者。问题提交
 
 新增 1 项受控存储测试包含六个场景：问题登记、回答、snooze、自动回答和 canonical 工具结果各自的提交失败，以及实际回答已提交但 canonical 尚未提交时的恢复。验证未越过失败提交发起下一模型请求，也未误执行 ToolPort。
 
-| 验证                                        | 结果                               |
-| ------------------------------------------- | ---------------------------------- |
-| `CARGO_INCREMENTAL=0 pnpm test:rust-agent`  | 47 Rust / 127 App，通过，0 跳过    |
-| `CARGO_INCREMENTAL=0 pnpm check:rust-agent` | 边界、fmt、Clippy -D warnings 通过 |
-| `pnpm typecheck`                            | 通过                               |
-| `pnpm lint`                                 | 0 错误，既有 70 条警告             |
-| `pnpm fmt:check`                            | 通过                               |
-| `pnpm architecture:check --changed`         | 0 违反、0 新增                     |
+| 验证                                            | 结果                               |
+| ----------------------------------------------- | ---------------------------------- |
+| `CARGO_INCREMENTAL=0 pnpm test:zcode-cli-rust`  | 47 Rust / 127 App，通过，0 跳过    |
+| `CARGO_INCREMENTAL=0 pnpm check:zcode-cli-rust` | 边界、fmt、Clippy -D warnings 通过 |
+| `pnpm typecheck`                                | 通过                               |
+| `pnpm lint`                                     | 0 错误，既有 70 条警告             |
+| `pnpm fmt:check`                                | 通过                               |
+| `pnpm architecture:check --changed`             | 0 违反、0 新增                     |
 
 最终日志位于 `.zcode-runtime/rust-e2e/20260922/checks/user-questions/`。实现前问答用例因收不到 interaction 超时；开发中的 fixture 缺少 workspaceKey、工具 registry 期望未包含新工具、Clippy 和 JSON 格式问题均已修正，最终全量重跑通过。生成器现使用仓库 oxfmt API，生成后立即得到规范格式；Node SQLite 实验性提示保留。
 

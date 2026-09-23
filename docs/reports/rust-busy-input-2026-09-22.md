@@ -18,14 +18,14 @@
 
 4 项可控 Store/工具 fixture 测试覆盖 admission、guide 消费、旧轮终态、新输入提升各事务失败；竞争抢占拒绝、预留期间 stop、EOF 不提升。失败事务后没有下一模型调用，也不会在清理路径恢复未提交事实。此前直接拒绝的 guide/startNow/setFollowupMode 已由失败测试复现。
 
-| 验证                                        | 结果                               |
-| ------------------------------------------- | ---------------------------------- |
-| `CARGO_INCREMENTAL=0 pnpm test:rust-agent`  | 40 Rust / 110 App，全通过，0 跳过  |
-| `CARGO_INCREMENTAL=0 pnpm check:rust-agent` | 边界、fmt、Clippy -D warnings 通过 |
-| `pnpm typecheck`                            | 通过                               |
-| `pnpm lint`                                 | 0 错误；既有 70 条警告             |
-| `pnpm fmt:check`                            | 通过                               |
-| `pnpm architecture:check --changed`         | 0 违反、0 新增                     |
+| 验证                                            | 结果                               |
+| ----------------------------------------------- | ---------------------------------- |
+| `CARGO_INCREMENTAL=0 pnpm test:zcode-cli-rust`  | 40 Rust / 110 App，全通过，0 跳过  |
+| `CARGO_INCREMENTAL=0 pnpm check:zcode-cli-rust` | 边界、fmt、Clippy -D warnings 通过 |
+| `pnpm typecheck`                                | 通过                               |
+| `pnpm lint`                                     | 0 错误；既有 70 条警告             |
+| `pnpm fmt:check`                                | 通过                               |
+| `pnpm architecture:check --changed`             | 0 违反、0 新增                     |
 
 完整日志保存在 `.zcode-runtime/rust-e2e/20260922/checks/busy-input/`。本轮一次新增测试的 trait 返回类型编译失败已修正，之后全量重新执行通过；未把中途失败列为通过。
 

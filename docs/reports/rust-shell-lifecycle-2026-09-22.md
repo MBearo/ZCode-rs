@@ -16,14 +16,14 @@
 
 新增 1 项可控 actor 失败屏障测试，另在现有测试覆盖迟到旧 run 的清理错误隔离。新增 5 项真实 Rust 子进程 / App client/schema 测试覆盖 stop、startNow、EOF、EPIPE、TaskStop；验证父子进程已退出，才允许新请求或观察终态。
 
-| 验证                                        | 结果                               |
-| ------------------------------------------- | ---------------------------------- |
-| `CARGO_INCREMENTAL=0 pnpm test:rust-agent`  | 46 Rust / 115 App，通过；0 跳过    |
-| `CARGO_INCREMENTAL=0 pnpm check:rust-agent` | 边界、fmt、Clippy -D warnings 通过 |
-| `pnpm typecheck`                            | 通过                               |
-| `pnpm lint`                                 | 0 错误；既有 70 条警告             |
-| `pnpm fmt:check`                            | 通过                               |
-| `pnpm architecture:check --changed`         | 0 违反、0 新增                     |
+| 验证                                            | 结果                               |
+| ----------------------------------------------- | ---------------------------------- |
+| `CARGO_INCREMENTAL=0 pnpm test:zcode-cli-rust`  | 46 Rust / 115 App，通过；0 跳过    |
+| `CARGO_INCREMENTAL=0 pnpm check:zcode-cli-rust` | 边界、fmt、Clippy -D warnings 通过 |
+| `pnpm typecheck`                                | 通过                               |
+| `pnpm lint`                                     | 0 错误；既有 70 条警告             |
+| `pnpm fmt:check`                                | 通过                               |
+| `pnpm architecture:check --changed`             | 0 违反、0 新增                     |
 
 失败前后及最终日志保存在 `.zcode-runtime/rust-e2e/20260922/checks/shell-lifecycle/`。初版测试使用 macOS Bash 不提供的 BASHPID，已改为子 Bash 的 `$$` 并清理该失败 fixture；最终验证全部重新执行。Node SQLite 实验性提示单列保留。
 

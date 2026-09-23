@@ -355,12 +355,12 @@ nodes:
     codeSeeds:
       - file: apps/zcode-cli/packages/core/src/runtime/methods/turn-model.ts
         symbol: applySubmissionExecutionState
-  - id: capability.rust-agent-core
+  - id: capability.zcode-cli-rust
     kind: capability
-    label: Opt-in Rust Agent core over App stdio
+    label: Opt-in zcode-cli-rust core over App stdio
     aliases:
       [
-        rust agent,
+        zcode-cli-rust,
         rust core,
         native stdio,
         Rust 重构,
@@ -370,22 +370,22 @@ nodes:
         Rust compact,
       ]
     codeSeeds:
-      - file: apps/zcode-rust/src/contract.rs
+      - file: apps/zcode-cli-rust/crates/core-api/src/contract.rs
         symbol: RuntimePorts
-      - file: apps/zcode-rust/src/app/engine.rs
+      - file: apps/zcode-cli-rust/crates/core/src/app/engine.rs
         symbol: Engine
-      - file: apps/zcode-rust/src/adapters/provider.rs
+      - file: apps/zcode-cli-rust/crates/model/src/provider.rs
         symbol: HttpModel
-      - file: apps/zcode-rust/src/adapters/tools.rs
+      - file: apps/zcode-cli-rust/crates/tools/src/tools.rs
         symbol: WorkspaceTools
-      - file: apps/zcode-rust/src/adapters/registry.rs
+      - file: apps/zcode-cli-rust/crates/model/src/registry.rs
         symbol: Registry
-      - file: apps/zcode-rust/src/adapters/legacy_storage.rs
+      - file: apps/zcode-cli-rust/crates/state/src/legacy_storage.rs
         symbol: import
       - file: packages/services/src/zcode-agent/zcodeAgentProcessManager.ts
         symbol: resolveDefaultZCodeAgentCommand
     invariants:
-      - Explicit rust-core selection only; the default TypeScript runtime remains unchanged.
+      - Explicit zcode-cli-rust selection only; the default TypeScript runtime remains unchanged.
       - Explicit apiType selects Chat Completions, Responses or Anthropic Messages; private reasoning metadata stays in canonical history.
       - Native state uses separate SQLite and a single process owner per workspace identity.
       - Registry reads existing App provider files and revision-paired account overlays; per-request Host credentials never enter durable state.
@@ -407,18 +407,18 @@ nodes:
         symbol: prepareSessionStorage
       - file: packages/services/src/zcode-agent/zcodeAgentStorageProcess.ts
         symbol: createNativeAgentStorageProcess
-      - file: apps/zcode-rust/src/adapters/stdio.rs
+      - file: apps/zcode-cli-rust/crates/app-server/src/stdio.rs
         symbol: storage_prepare
 edges:
-  - from: capability.rust-agent-core
+  - from: capability.zcode-cli-rust
     to: service.agent-storage-preparation
     type: initializes-through
     rank: must-inspect
-  - from: capability.rust-agent-core
+  - from: capability.zcode-cli-rust
     to: boundary.workspace-key
     type: isolated-by
     rank: must-inspect
-  - from: capability.rust-agent-core
+  - from: capability.zcode-cli-rust
     to: state.conversation-projection
     type: publishes-to
     rank: must-inspect

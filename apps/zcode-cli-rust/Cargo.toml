@@ -1,0 +1,122 @@
+[workspace]
+members = [
+  ".",
+  "crates/protocol",
+  "crates/domain",
+  "crates/core-api",
+  "crates/core",
+  "crates/host",
+  "crates/state",
+  "crates/model",
+  "crates/tools",
+  "crates/app-server",
+  "crates/tui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+httpdate = "1"
+ignore = "0.4"
+globset = "0.4"
+regex = "1"
+rmcp = { version = "3.4", default-features = false, features = [
+  "client",
+  "transport-async-rw",
+  "transport-streamable-http-client-reqwest",
+  "reqwest-tls-no-provider",
+] }
+reqwest_mcp = { package = "reqwest", version = "0.13", default-features = false, features = [
+  "json",
+  "stream",
+  "rustls-no-provider",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+clap = { version = "4", features = ["derive"] }
+crc32fast = "1"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "stream",
+  "rustls-tls-native-roots",
+] }
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+uuid = { version = "1", features = ["v4", "serde"] }
+url = "2"
+
+libc = "0.2"
+tempfile = "3"
+zcode-cli-protocol = { path = "crates/protocol" }
+zcode-cli-domain = { path = "crates/domain" }
+zcode-cli-core-api = { path = "crates/core-api" }
+zcode-cli-core = { path = "crates/core" }
+zcode-cli-host = { path = "crates/host" }
+zcode-cli-state = { path = "crates/state" }
+zcode-cli-model = { path = "crates/model" }
+zcode-cli-tools = { path = "crates/tools" }
+zcode-cli-app-server = { path = "crates/app-server" }
+zcode-cli-tui = { path = "crates/tui" }
+
+[package]
+name = "zcode-cli-rust"
+description = "ZCode CLI runtime with shared core, App Server and TUI frontends"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+clap.workspace = true
+futures-util.workspace = true
+libc.workspace = true
+reqwest.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+zcode-cli-protocol.workspace = true
+zcode-cli-domain.workspace = true
+zcode-cli-core-api.workspace = true
+zcode-cli-core.workspace = true
+zcode-cli-host.workspace = true
+zcode-cli-state.workspace = true
+zcode-cli-model.workspace = true
+zcode-cli-tools.workspace = true
+zcode-cli-app-server.workspace = true
+zcode-cli-tui.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[profile.release]
+lto = "thin"
+strip = true

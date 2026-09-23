@@ -27,7 +27,7 @@ sequenceDiagram
 - rowsRange 从请求游标向前取有界尾页，逐行计数字节，不反复编码缩小的整页；保持 200 行、900 KiB、顺序与 hasMore 语义。
 - 非 Git 工作区通过祖先 `.git` 文件/目录快速否定探测；显式 `GIT_DIR` / `GIT_WORK_TREE`、权限不确定性继续交给 Git。每次重新检查，避免缓存不存在状态导致新仓库漏检。
 
-- App 的显式 Rust 启动入口 `pnpm dev:desktop:rust` 默认构建并运行 release，避免实际接入仍使用未优化的 debug 二进制；`--debug` 显式选择调试构建。入口固定 `CARGO_INCREMENTAL=0`，TS 默认选择不变。
+- App 的显式 Rust 启动入口 `pnpm dev:desktop:zcode-cli-rust` 默认构建并运行 release，避免实际接入仍使用未优化的 debug 二进制；`--debug` 显式选择调试构建。入口固定 `CARGO_INCREMENTAL=0`，TS 默认选择不变。
 
 ## 验收
 

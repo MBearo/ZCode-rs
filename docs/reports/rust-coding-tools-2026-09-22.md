@@ -36,9 +36,9 @@ Apple M1 Max / darwin arm64；Rust 1.95.0、Node 24.14.0、pnpm 10.33.2。第一
 本测量验证新增工具定义和状态字段没有带来数量级的流式回归；小幅涨跌不作显著性结论。负载仍是本地确定性 SSE，不执行搜索/后台任务，不是新工具吞吐量或真实供应商生成速度测试。RSS 是采样峰值；存储字段为 SQLite/WAL/SHM 占用，不是物理写入量。
 
 - baseline SHA-256：`518fca0037b6467f0429cae984b0fe859ada4b610c2a5893369d38f460a6aadf`，文件 `.zcode-runtime/rust-bench/coding-baseline`。
-- candidate SHA-256：`2a5b6118099074423577d6174765ea69f328adb2ed8531ba0648d5f2c3cded78`，文件 `apps/zcode-rust/target/release/zcode-rust`。
+- candidate SHA-256：`2a5b6118099074423577d6174765ea69f328adb2ed8531ba0648d5f2c3cded78`，文件 `apps/zcode-cli-rust/target/release/zcode-cli-rust`。
 
-复现：`node scripts/bench-rust-agent-suite.mjs .zcode-runtime/rust-bench/coding-baseline apps/zcode-rust/target/release/zcode-rust`。
+复现：`node scripts/bench-zcode-cli-rust-suite.mjs .zcode-runtime/rust-bench/coding-baseline apps/zcode-cli-rust/target/release/zcode-cli-rust`。
 
 ## 明确保留的差异
 
