@@ -1,4 +1,5 @@
 use super::storage::{Operation, Store};
+use super::storage_settings::Request;
 use crate::domain::session::Session;
 use anyhow::Result;
 use serde_json::Value;
@@ -88,6 +89,32 @@ impl crate::contract::SessionStore for Store {
         let mut bytes = vec![];
         file.take(limit as u64).read_to_end(&mut bytes).await?;
         Ok(bytes)
+    }
+    async fn project_settings(&self, workspace: &str) -> Result<BTreeMap<(String, String), Value>> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(Operation::Settings(Request::Load(workspace.into(), tx)))
+            .await?;
+        rx.await?
+    }
+    async fn save_project_setting(
+        &self,
+        workspace: &str,
+        namespace: &str,
+        key: &str,
+        value: &Value,
+    ) -> Result<()> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Operation::Settings(Request::Save {
+                workspace: workspace.into(),
+                namespace: namespace.into(),
+                key: key.into(),
+                value: serde_json::to_string(value)?,
+                reply,
+            }))
+            .await?;
+        rx.await?
     }
     async fn load(&self, workspace: &str) -> Result<(Vec<Session>, BTreeMap<String, Value>)> {
         Store::load(self, workspace).await

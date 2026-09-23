@@ -1,6 +1,6 @@
 use crate::domain::session::Session;
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use serde_json::Value;
 use std::{collections::BTreeMap, path::PathBuf};
 use tokio::sync::{mpsc, oneshot};
@@ -33,6 +33,7 @@ pub(super) enum Operation {
         Option<(String, Value)>,
         oneshot::Sender<Result<()>>,
     ),
+    Settings(super::storage_settings::Request),
 }
 
 #[derive(Clone)]
@@ -81,6 +82,7 @@ impl Store {
                     CREATE TABLE IF NOT EXISTS rust_row(workspace TEXT NOT NULL,session TEXT NOT NULL,ordinal INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(workspace,session,ordinal));
                     CREATE TABLE IF NOT EXISTS rust_message(workspace TEXT NOT NULL,session TEXT NOT NULL,ordinal INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(workspace,session,ordinal));")?;
                 super::storage_listing::prepare(&conn)?;
+                super::storage_settings::prepare(&conn)?;
                 conn.execute_batch("CREATE INDEX IF NOT EXISTS rust_row_command ON rust_row(workspace,session,CASE WHEN json_valid(body) THEN json_extract(body,'$.sourceCommandId') END);")?;
                 Ok(conn)
             })();
@@ -116,11 +118,15 @@ impl Store {
                         let _ = reply.send(super::storage_read::load(&conn, &workspace));
                     }
                     Operation::LoadSession(workspace, id, reply) => {
-                        let _ = reply.send(load_session(&conn, &workspace, &id));
+                        let _ =
+                            reply.send(super::storage_read::load_session(&conn, &workspace, &id));
                     }
                     Operation::DiscardDraft(workspace, id, ack, reply) => {
-                        let _ = reply.send(discard_draft(&mut conn, &workspace, &id, ack));
+                        let _ = reply.send(super::storage_read::discard_draft(
+                            &mut conn, &workspace, &id, ack,
+                        ));
                     }
+                    Operation::Settings(request) => super::storage_settings::handle(&conn, request),
                     Operation::Commit(workspace, session, ack, reply) => {
                         let _ = reply.send(commit(&mut conn, &workspace, session.map(|s| *s), ack));
                     }
@@ -336,58 +342,6 @@ pub(super) fn load_items(
         .query_map(params![workspace, id], |row| row.get::<_, String>(0))?
         .map(|row| Ok(serde_json::from_str(&row?)?))
         .collect()
-}
-
-fn load_session(conn: &Connection, workspace: &str, id: &str) -> Result<Option<Session>> {
-    let body: Option<String> = conn
-        .query_row(
-            "SELECT body FROM rust_session WHERE workspace=?1 AND id=?2",
-            params![workspace, id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(body) = body else { return Ok(None) };
-    let mut session: Session = serde_json::from_str(&body)?;
-    if session.rows.is_empty() {
-        session.rows = load_items(conn, "rust_row", workspace, id)?;
-        session.messages = load_items(conn, "rust_message", workspace, id)?;
-        session.saved_rows = session.rows.len();
-        session.saved_messages = session.messages.len();
-    }
-    if session.history.inputs.is_empty() && session.history.responses.is_empty() {
-        session.history = super::storage_history::load(conn, workspace, id)?;
-        session.saved_inputs = session.history.inputs.len();
-        session.saved_responses = session.history.responses.len();
-    }
-    Ok(Some(session))
-}
-
-fn discard_draft(
-    conn: &mut Connection,
-    workspace: &str,
-    id: &str,
-    ack: Option<(String, Value)>,
-) -> Result<()> {
-    let tx = conn.transaction()?;
-    // 关闭草稿不是真删历史；存储边界再次核查，避免 future caller 用过期 draft 状态误删首发。
-    let Some(session) = load_session(&tx, workspace, id)? else {
-        // 预热草稿只活在内存；关闭不应为每次界面切换增加永久 ACK 或 WAL 写入。
-        return Ok(());
-    };
-    anyhow::ensure!(
-        session.rows.is_empty() && session.messages.is_empty(),
-        "Cannot discard a persisted conversation as draft"
-    );
-    tx.execute(
-        "DELETE FROM rust_session WHERE workspace=?1 AND id=?2",
-        params![workspace, id],
-    )?;
-    // session/close 没有命令 ACK；deleteSession 的 ACK 与删除同事务提交。
-    if let Some((key, ack)) = ack {
-        tx.execute("INSERT INTO rust_command VALUES(?1,?2,?3) ON CONFLICT(workspace,key) DO UPDATE SET ack=excluded.ack", params![workspace,key,serde_json::to_string(&ack)?])?;
-    }
-    tx.commit()?;
-    Ok(())
 }
 
 #[cfg(test)]

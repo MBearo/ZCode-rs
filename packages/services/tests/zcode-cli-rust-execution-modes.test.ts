@@ -62,17 +62,27 @@ test("Native workspace presentation and both delivery subscriptions expose the s
       assert.deepEqual(frame.params.frame.payload.snapshot.config.executionCapabilities, native);
     }
     assert.equal(f.requests.length, 0);
-    await assert.rejects(
-      h.command(
-        h.envelope("createSession", null, {
-          workspaceId: f.cwd,
-          config: { mode: "build" },
-          firstInput: { text: "never execute" },
-        }),
-      ),
-      /Unsupported core execution mode/,
+    // 权限判定已在 Engine 中实现，build 不再于 admission 拒绝；能力声明在 Bash 分类器完成前仍只含 yolo。
+    const ack = await h.command(
+      h.envelope("createSession", null, {
+        workspaceId: f.cwd,
+        config: { mode: "build" },
+        firstInput: { text: "hello" },
+      }),
     );
-    assert.equal(f.requests.length, 0);
+    assert.equal(ack.status, "accepted");
+    const id = (ack.result as { sessionId: string }).sessionId;
+    const after = h.messages.length;
+    const sub = await h.subscribe(`conversation/${id}`);
+    await h.completed(id);
+    const frame = await h.wait(
+      (m) =>
+        m.params?.subscriptionId === sub.ack.subscriptionId &&
+        m.params?.frame?.payload?.kind === "snapshot",
+      after,
+    );
+    assert.equal(frame.params.frame.payload.snapshot.config.mode, "build");
+    assert.equal(f.requests.length, 1);
   } finally {
     await f.close();
   }

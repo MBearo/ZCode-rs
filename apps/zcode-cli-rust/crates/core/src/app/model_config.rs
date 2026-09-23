@@ -203,6 +203,15 @@ impl Engine {
     }
     /// Release every waiter owned by `id` (terminal path of a run, job or session).
     pub(super) fn release_waiters(&mut self, id: &str) {
+        // 子代理的权限提示挂在根会话上；释放时一并撤下，避免留下无法应答的交互。
+        for (interaction, host) in self.waiters.hosted_elsewhere(id) {
+            if let Some(s) = self.sessions.get_mut(&host) {
+                s.pending
+                    .retain(|p| p["interactionId"] != interaction.as_str());
+                s.revision += 1;
+                let _ = self.publish(&host, vec![]);
+            }
+        }
         let released = self.waiters.release(id);
         debug_assert!(!self.waiters.holds(id), "waiters of {id} survived release");
         self.announce_cancelled(released);

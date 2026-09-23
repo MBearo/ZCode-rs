@@ -92,11 +92,12 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         home.clone(),
         runtime_env.vars().to_vec(),
     ));
-    // 网络出口与 Node 一样取启动时的 network 配置，运行中修改不影响已建立的出口。
+    // 网络出口与权限配置与 Node 一样取启动时的配置快照，运行中修改不影响已建立的出口。
+    let startup_config = workspace_config.snapshot().await;
     let egress = Arc::new(
         Egress::new(
             runtime_env.clone(),
-            &NetworkPolicy::from_config(&workspace_config.snapshot().await.config["network"]),
+            &NetworkPolicy::from_config(&startup_config.config["network"]),
             &home,
             "electron",
         )
@@ -258,6 +259,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         )
         .await?
         .with_question_timing(question_timing.0, question_timing.1)
+        .with_permission_config(&startup_config.config["permission"])
         .with_registry(registry, requested_cwd.to_string_lossy().into_owned());
         // App Server 独占 stdout；返回时已排空 runtime 输出并释放 sink。
         let served =

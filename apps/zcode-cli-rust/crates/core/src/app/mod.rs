@@ -27,8 +27,11 @@ mod session_residency;
 
 mod busy_input;
 mod input_admission;
+mod permission_answers;
+mod permissions;
 mod run;
 mod submission;
+mod tool_permission;
 
 mod question_timers;
 mod question_tool;

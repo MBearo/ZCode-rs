@@ -19,6 +19,9 @@ struct Binding {
     original: String,
     key: String,
     safe: bool,
+    /// Node MCP permission metadata: `readOnlyHint === true` / `destructiveHint === true`.
+    read_only: bool,
+    destructive: bool,
     definition: Value,
     connection: Arc<Connection>,
 }
@@ -67,6 +70,16 @@ impl Hub {
             .overrides
             .insert(session.into(), servers.clone());
         Ok(())
+    }
+    /// `(read_only, destructive)` of a bound MCP tool.
+    pub fn annotations(&self, session: &str, name: &str) -> Option<(bool, bool)> {
+        self.state
+            .read()
+            .unwrap()
+            .bindings
+            .get(session)
+            .and_then(|b| b.iter().find(|b| b.name == name))
+            .map(|b| (b.read_only, b.destructive))
     }
     pub fn safe(&self, session: &str, name: &str) -> bool {
         self.state
@@ -352,6 +365,8 @@ fn bind(
             key: key.into(),
             safe: tool["annotations"]["readOnlyHint"] == true
                 && tool["annotations"]["destructiveHint"] == false,
+            read_only: tool["annotations"]["readOnlyHint"] == true,
+            destructive: tool["annotations"]["destructiveHint"] == true,
             definition,
             connection: connection.clone(),
         });

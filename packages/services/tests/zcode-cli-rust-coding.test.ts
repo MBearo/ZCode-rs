@@ -183,7 +183,7 @@ test(
   },
 );
 
-test("Rust old native build sessions require explicit yolo selection after cold recovery", async () => {
+test("Rust old native sessions without a stored mode recover as build and ask before writing", async () => {
   const f = await fixture();
   try {
     const h = f.start();
@@ -199,10 +199,20 @@ test("Rust old native build sessions require explicit yolo selection after cold 
     }
     const restored = f.start();
     await restored.subscribe(`conversation/${id}`);
+    const before = restored.messages.length;
     assert.equal(
-      (await restored.command(restored.envelope("sendText", id, { text: "write" }))).status,
-      "rejected",
+      (await restored.command(restored.envelope("sendText", id, { text: "deny" }))).status,
+      "accepted",
     );
+    // 与 Node 一致：缺省模式按 build 恢复，写文件先询问；拒绝后文件不落盘。
+    const prompt = await restored.permission(id);
+    assert.equal(prompt.payload.toolName, "Write");
+    const answer = { interactionId: prompt.interactionId, answer: { optionId: "deny" } };
+    assert.equal(
+      (await restored.command(restored.envelope("resolveInteraction", id, answer))).status,
+      "accepted",
+    );
+    await restored.completed(id, before);
     await assert.rejects(access(join(f.cwd, "result.txt")));
     assert.equal(
       (await restored.command(restored.envelope("switchCollaborationMode", id, { mode: "yolo" })))

@@ -85,6 +85,20 @@ impl Engine {
                 .trim()
                 .to_owned();
             super::goal_commands::validate_objective(&text)?;
+            // Node goal-compact.ts：本次提交仍开启 plan 时拒绝设定目标。
+            if self
+                .submitted_execution_state(&id, &c.payload)?
+                .plan_enabled
+            {
+                let revision = self.sessions[&id].revision;
+                let mut ack = c.ack(
+                    "rejected",
+                    revision,
+                    Some("guard.planGoalMutuallyExclusive"),
+                );
+                ack["message"] = "Plan and Goal cannot be active at the same time.".into();
+                return Ok(ack);
+            }
             c.payload["text"] = text.into();
             c.payload["requestedDelivery"] = "queue".into();
             return self.send_input(c).await;
@@ -138,12 +152,17 @@ impl Engine {
                 self.sessions.get_mut(&id).unwrap().revision += 1;
             }
             "switchCollaborationMode" => {
-                if c.payload["mode"] != "yolo" || s.running() {
-                    return Ok(c.ack("rejected", s.revision, Some("guard.capabilityUnsupported")));
+                // Node model-config.ts：同一权限模式且 plan 关闭时 noop；plan 永远不是存储的 mode。
+                let mode = c.payload["mode"].as_str().context("mode required")?;
+                if s.mode.as_str() == mode && !s.plan_enabled {
+                    return Ok(c.ack("noop", s.revision, Some("config.unchanged")));
                 }
-                let session = self.sessions.get_mut(&id).unwrap();
-                session.mode = crate::domain::execution::Mode::Yolo;
-                session.revision += 1;
+                if let Err(error) = self.set_mode(&id, mode).await {
+                    let revision = self.sessions[&id].revision;
+                    let mut ack = c.ack("failed", revision, Some("fault.command.executionFailed"));
+                    ack["message"] = error.to_string().into();
+                    return Ok(ack);
+                }
             }
             "cancelBackgroundWork" => {
                 let task = c.payload["workId"].as_str().context("workId required")?;
@@ -301,8 +320,21 @@ impl Engine {
 }
 
 pub(super) fn queue_item(c: &Command, s: &Session, now: u64) -> Value {
+    use crate::domain::execution::{ExecutionState, Mode};
+    // 与 Node intent 一致：排队时冻结本次输入的模式与 plan（auto 提交为 build），提升时再应用。
+    let mut submitted = ExecutionState::resolve(
+        c.payload["mode"].as_str(),
+        c.payload["planEnabled"].as_bool(),
+        ExecutionState {
+            mode: s.mode,
+            plan_enabled: s.plan_enabled,
+        },
+    );
+    if submitted.mode == Mode::Auto {
+        submitted.mode = Mode::Build;
+    }
     let mut item = json!({"sourceCommandId":c.command_id,"queueItemId":format!("queue_{}",c.command_id),"clientId":c.client_id,"kind":c.kind,"text":c.payload["text"],"attachments":c.payload.get("attachments").cloned().unwrap_or_else(||json!([])),
-        "modelSelection":c.payload.get("modelSelection").cloned().unwrap_or_else(||json!({"providerId":s.provider,"modelId":s.model,"options":{"reasoningLevel":s.reasoning_level}})),"mode":s.mode,"planEnabled":false,
+        "modelSelection":c.payload.get("modelSelection").cloned().unwrap_or_else(||json!({"providerId":s.provider,"modelId":s.model,"options":{"reasoningLevel":s.reasoning_level}})),"mode":submitted.mode,"planEnabled":submitted.plan_enabled,
         "delivery":{"requested":c.payload["requestedDelivery"].as_str().unwrap_or("auto"),"admitted":"queue"},"order":{"admissionSeq":s.revision+1,"queuePosition":s.queue.len()},
         "steer":{"state":"notRequested"},"dispatch":{"state":"queued"},"admittedAt":now});
     if let Some(refs) = c.payload.get("context_refs") {

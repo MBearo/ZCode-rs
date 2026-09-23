@@ -11,6 +11,7 @@ import { parseEnvConfig } from "../apps/zcode-cli/packages/adapters/src/config/e
 import { createConfigPort } from "../apps/zcode-cli/packages/adapters/src/config/index.ts";
 import { DefaultRuntimeConfig } from "../apps/zcode-cli/packages/contracts/src/config/index.ts";
 import { egressFixtures } from "./zcode-cli-rust-egress-fixtures.mjs";
+import { permissionData, permissionFixtures } from "./zcode-cli-rust-permission-fixtures.mjs";
 
 const files = {
   empty: {},
@@ -184,3 +185,5 @@ await emit("../apps/zcode-cli-rust/crates/domain/fixtures/config.json", {
   config: { parse, merge, env },
 });
 await emit("../apps/zcode-cli-rust/crates/net/fixtures/egress.json", egressFixtures());
+await emit("../apps/zcode-cli-rust/crates/domain/fixtures/permission.json", permissionFixtures());
+await emit("../apps/zcode-cli-rust/crates/domain/schema/tool-permissions.json", permissionData());

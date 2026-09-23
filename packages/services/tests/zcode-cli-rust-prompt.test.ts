@@ -66,7 +66,7 @@ test("native desktop and terminal request prefixes match the current TS ContextB
       try {
         env.HOME = f.root;
         env.USERPROFILE = f.root;
-        await mkdir(join(f.root, ".zcode"));
+        await mkdir(join(f.root, ".zcode"), { recursive: true });
         await mkdir(join(f.cwd, ".git"));
         await writeFile(join(f.root, ".zcode/AGENTS.md"), "USER_RULE 中文\n");
         await writeFile(
@@ -195,7 +195,7 @@ test("instruction sources match TS nearest-file, Git boundary and bounded UTF-8 
   try {
     env.HOME = f.root;
     env.USERPROFILE = f.root;
-    await mkdir(join(f.root, ".zcode"));
+    await mkdir(join(f.root, ".zcode"), { recursive: true });
     await mkdir(join(f.root, ".git"));
     await writeFile(join(f.root, ".zcode/AGENTS.md"), "default instructions");
     await writeFile(

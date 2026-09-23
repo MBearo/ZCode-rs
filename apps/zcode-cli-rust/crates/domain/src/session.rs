@@ -68,6 +68,15 @@ pub struct Session {
     pub mode: super::execution::Mode,
     #[serde(default)]
     pub plan_enabled: bool,
+    /// Last tool-driven plan transition `{toolCallId, planEnabled}` (V4 `config.planTransition`).
+    #[serde(default)]
+    pub plan_transition: Option<Value>,
+    /// Interaction whose full-access approval switched this session to yolo.
+    #[serde(default)]
+    pub permission_grant: Option<String>,
+    /// Plan was just turned off; the next model request says so once (memory only).
+    #[serde(skip)]
+    pub needs_plan_exit_reminder: bool,
     #[serde(default)]
     pub parent_id: Option<String>,
     #[serde(default = "interactive")]
@@ -175,8 +184,11 @@ impl Session {
             compact_instructions: None,
             queued_now: None,
             pending_acks: Default::default(),
-            mode: super::execution::Mode::Yolo,
+            mode: super::execution::Mode::Build,
             plan_enabled: false,
+            plan_transition: None,
+            permission_grant: None,
+            needs_plan_exit_reminder: false,
             parent_id: None,
             task_type: interactive(),
             archived_at: None,
@@ -279,6 +291,12 @@ impl Session {
                 "modelSelection":{"providerId":self.provider,"modelId":self.model,"options":{"reasoningLevel":self.reasoning_level}},"followupMode":self.followup_mode,"mode":self.mode,"planEnabled":self.plan_enabled},
             "usage":self.usage,"queue":{"items":self.queue.iter().filter(|q|q["delivery"]["admitted"]!="startNow").collect::<Vec<_>>(),"autoDrain":self.auto_drain},
             "pendingInteractions":self.pending,"pendingCommands":[],"backgroundWorks":self.background.values().filter(|t|t.status=="running").map(|t|t.projection()).collect::<Vec<_>>(),"goal":self.goal.as_ref().map(|g|g.projection()),"plan":super::todo::plan(&self.todos,self.todos_updated_at)});
+        if let Some(transition) = &self.plan_transition {
+            patch["config"]["planTransition"] = transition.clone();
+        }
+        if let Some(interaction) = &self.permission_grant {
+            patch["config"]["permissionGrant"] = json!({ "interactionId": interaction });
+        }
         if self.provider.is_empty() || self.model.is_empty() {
             patch["config"]
                 .as_object_mut()

@@ -61,6 +61,7 @@ pub(super) fn import(dest: &mut Connection, request: ImportRequest) -> Result<()
         &artifacts,
         &cancel,
     )?;
+    super::storage_settings::import(&tx, &snapshot, &workspace, &cwd)?;
     drop(snapshot);
     check(&cancel)?;
     attempt.publish()?;

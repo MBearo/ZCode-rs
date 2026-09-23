@@ -26,6 +26,8 @@ impl Engine {
         } else {
             self.model.clone().context("Model configuration required")?
         };
+        let (permissions, permission_updates) =
+            tokio::sync::watch::channel(self.permission_snapshot(id));
         let session = self.sessions.get_mut(id).context("Session unavailable")?;
         tracing::info!(
             target: "zcode::runtime",
@@ -52,6 +54,7 @@ impl Engine {
                 turn_id,
                 origin: origin.clone(),
                 execution: submission.execution.clone(),
+                permissions,
             },
         );
         let manual = session
@@ -70,6 +73,7 @@ impl Engine {
         history.goal = session.goal.clone();
         history.agent_profile = session.agent_profile.clone();
         history.tool_disallowlist = submission.tool_disallowlist;
+        history.permissions = Some(permission_updates);
         let context = self.context.clone();
         let tools = self.tools.clone();
         let sink = Sink {

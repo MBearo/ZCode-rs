@@ -1,0 +1,635 @@
+{
+  "tools": {
+    "Read": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "read",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "Write": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "workspace",
+      "riskLevel": "medium",
+      "needsApproval": true,
+      "permission": {
+        "permission": "edit",
+        "riskLevel": "medium",
+        "sideEffectScope": "workspace",
+        "needsApproval": true
+      }
+    },
+    "Edit": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "workspace",
+      "riskLevel": "medium",
+      "needsApproval": true,
+      "permission": {
+        "permission": "edit",
+        "riskLevel": "medium",
+        "sideEffectScope": "workspace",
+        "needsApproval": true
+      }
+    },
+    "Bash": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "system",
+      "riskLevel": "high",
+      "needsApproval": true,
+      "permission": {
+        "permission": "bash",
+        "riskLevel": "high",
+        "sideEffectScope": "system",
+        "needsApproval": true
+      }
+    },
+    "Glob": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "read",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "Grep": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "read",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "WebFetch": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "network",
+      "riskLevel": "medium",
+      "needsApproval": true,
+      "permission": {
+        "permission": "webfetch",
+        "riskLevel": "medium",
+        "sideEffectScope": "network",
+        "needsApproval": true
+      }
+    },
+    "WebSearch": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "network",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "websearch",
+        "riskLevel": "low",
+        "sideEffectScope": "network",
+        "needsApproval": false
+      }
+    },
+    "TodoRead": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "todo.read",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "TodoWrite": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "todo.write",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "CronCreate": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "workspace",
+      "riskLevel": "medium",
+      "needsApproval": true,
+      "permission": {
+        "permission": "automation.create",
+        "riskLevel": "medium",
+        "sideEffectScope": "workspace",
+        "needsApproval": true
+      }
+    },
+    "CronList": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "automation.read",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "CronUpdate": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "workspace",
+      "riskLevel": "medium",
+      "needsApproval": true,
+      "permission": {
+        "permission": "automation.update",
+        "riskLevel": "medium",
+        "sideEffectScope": "workspace",
+        "needsApproval": true
+      }
+    },
+    "CronDelete": {
+      "readOnly": false,
+      "destructive": true,
+      "sideEffectScope": "workspace",
+      "riskLevel": "medium",
+      "needsApproval": true,
+      "permission": {
+        "permission": "automation.delete",
+        "riskLevel": "medium",
+        "sideEffectScope": "workspace",
+        "needsApproval": true
+      }
+    },
+    "OffPeakCreate": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "workspace",
+      "riskLevel": "medium",
+      "needsApproval": true,
+      "permission": {
+        "permission": "offpeak.create",
+        "riskLevel": "medium",
+        "sideEffectScope": "workspace",
+        "needsApproval": true
+      }
+    },
+    "OffPeakList": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "offpeak.read",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "EnterPlanMode": {
+      "readOnly": false,
+      "destructive": false,
+      "requiresUserInteraction": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "plan.enter",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "ExitPlanMode": {
+      "readOnly": false,
+      "destructive": false,
+      "requiresUserInteraction": true,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": true,
+      "permission": {
+        "permission": "plan.exit",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": true
+      }
+    },
+    "AskUserQuestion": {
+      "readOnly": true,
+      "destructive": false,
+      "requiresUserInteraction": true,
+      "sideEffectScope": "userInteraction",
+      "riskLevel": "low",
+      "needsApproval": true,
+      "permission": {
+        "permission": "userInteraction.askQuestion",
+        "riskLevel": "low",
+        "sideEffectScope": "userInteraction",
+        "needsApproval": true
+      }
+    },
+    "SendMessage": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "agent.message.send",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "RespondToCoordinator": {
+      "allowedInPlanMode": true,
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "agent.message.respond",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "submit_result": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "workflow.submitResult",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "escalate": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "workflow.escalate",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "TaskOutput": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "taskOutput",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "TaskStop": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "backgroundTask.stop",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "ReadSessionContext": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "session.context.read",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "Agent": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "subagent",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "Task": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "subagent",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "Skill": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "session",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "skill",
+        "riskLevel": "low",
+        "sideEffectScope": "session",
+        "needsApproval": false
+      }
+    },
+    "js": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "system",
+      "riskLevel": "high",
+      "needsApproval": true,
+      "permission": {
+        "permission": "node_repl",
+        "riskLevel": "high",
+        "sideEffectScope": "system",
+        "needsApproval": true
+      }
+    },
+    "CreateWorkflow": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": true,
+      "permission": {
+        "permission": "createWorkflow",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": true,
+        "alwaysAsk": true,
+        "askOptions": {
+          "allowAlways": "session"
+        }
+      }
+    },
+    "AmendWorkflow": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": true,
+      "permission": {
+        "permission": "createWorkflow",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": true,
+        "alwaysAsk": true,
+        "askOptions": {
+          "allowAlways": "session"
+        }
+      }
+    },
+    "SaveWorkflow": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "workspace",
+      "riskLevel": "medium",
+      "needsApproval": true,
+      "permission": {
+        "permission": "saveWorkflow",
+        "riskLevel": "medium",
+        "sideEffectScope": "workspace",
+        "needsApproval": true,
+        "alwaysAsk": true,
+        "askOptions": {
+          "allowAlways": false
+        }
+      }
+    },
+    "EvalWorkflowSnippet": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "workspace",
+      "riskLevel": "low",
+      "needsApproval": true,
+      "permission": {
+        "permission": "evalWorkflowSnippet",
+        "riskLevel": "low",
+        "sideEffectScope": "workspace",
+        "needsApproval": true
+      }
+    },
+    "ListWorkflowRuns": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "listWorkflowRuns",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "GetWorkflowRun": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "getWorkflowRun",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "ResumeWorkflowRun": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "resumeWorkflowRun",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "ResolveWorkflowQuestion": {
+      "readOnly": false,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "resolveWorkflowQuestion",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "ListSavedWorkflows": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "listSavedWorkflows",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    },
+    "ListModels": {
+      "readOnly": true,
+      "destructive": false,
+      "sideEffectScope": "none",
+      "riskLevel": "low",
+      "needsApproval": false,
+      "permission": {
+        "permission": "listModels",
+        "riskLevel": "low",
+        "sideEffectScope": "none",
+        "needsApproval": false
+      }
+    }
+  },
+  "webfetch": {
+    "hosts": [
+      "modelcontextprotocol.io",
+      "agentskills.io",
+      "docs.python.org",
+      "en.cppreference.com",
+      "docs.oracle.com",
+      "learn.microsoft.com",
+      "developer.mozilla.org",
+      "go.dev",
+      "pkg.go.dev",
+      "www.php.net",
+      "docs.swift.org",
+      "kotlinlang.org",
+      "ruby-doc.org",
+      "doc.rust-lang.org",
+      "www.typescriptlang.org",
+      "react.dev",
+      "angular.io",
+      "vuejs.org",
+      "nextjs.org",
+      "expressjs.com",
+      "nodejs.org",
+      "bun.sh",
+      "jquery.com",
+      "getbootstrap.com",
+      "tailwindcss.com",
+      "d3js.org",
+      "threejs.org",
+      "redux.js.org",
+      "webpack.js.org",
+      "jestjs.io",
+      "reactrouter.com",
+      "docs.djangoproject.com",
+      "flask.palletsprojects.com",
+      "fastapi.tiangolo.com",
+      "pandas.pydata.org",
+      "numpy.org",
+      "www.tensorflow.org",
+      "pytorch.org",
+      "scikit-learn.org",
+      "matplotlib.org",
+      "requests.readthedocs.io",
+      "jupyter.org",
+      "laravel.com",
+      "symfony.com",
+      "docs.spring.io",
+      "hibernate.org",
+      "tomcat.apache.org",
+      "gradle.org",
+      "maven.apache.org",
+      "asp.net",
+      "dotnet.microsoft.com",
+      "blazor.net",
+      "reactnative.dev",
+      "docs.flutter.dev",
+      "developer.apple.com",
+      "developer.android.com",
+      "keras.io",
+      "spark.apache.org",
+      "www.mongodb.com",
+      "redis.io",
+      "www.postgresql.org",
+      "dev.mysql.com",
+      "www.sqlite.org",
+      "graphql.org",
+      "prisma.io",
+      "docs.getdbt.com",
+      "docs.aws.amazon.com",
+      "cloud.google.com",
+      "kubernetes.io",
+      "www.docker.com",
+      "www.terraform.io",
+      "www.ansible.com",
+      "docs.stripe.com",
+      "docs.netlify.com",
+      "devcenter.heroku.com",
+      "cypress.io",
+      "selenium.dev",
+      "docs.unity.com",
+      "docs.unrealengine.com",
+      "git-scm.com",
+      "nginx.org",
+      "httpd.apache.org"
+    ],
+    "pathPrefixes": {
+      "wordpress.org": ["/documentation"],
+      "huggingface.co": ["/docs"],
+      "www.kaggle.com": ["/docs"],
+      "vercel.com": ["/docs"]
+    }
+  },
+  "texts": {
+    "deniedByUser": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+  }
+}

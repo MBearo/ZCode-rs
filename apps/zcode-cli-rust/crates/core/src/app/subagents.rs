@@ -108,6 +108,13 @@ impl Engine {
             now,
         );
         session.parent_id = Some(parent.into());
+        // Node resolveSubagentPermissionMode：内置 Explore 为 yolo，其余子代理继承父会话的模式与 plan。
+        if profile.name == "Explore" && profile.source == "built-in" {
+            session.mode = crate::domain::execution::Mode::Yolo;
+        } else {
+            session.mode = self.sessions[parent].mode;
+            session.plan_enabled = self.sessions[parent].plan_enabled;
+        }
         session.task_type = "subagent_child".into();
         session.listed = false;
         session.title = args["description"].as_str().unwrap().into();

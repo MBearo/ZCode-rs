@@ -24,9 +24,15 @@ pub(super) struct HostWait {
     pub reply: oneshot::Sender<Value>,
 }
 
-struct PermissionWait {
-    owner: String,
-    reply: oneshot::Sender<bool>,
+/// A permission prompt: `owner` runs the tool, `host` shows the prompt (the root
+/// session for subagents).
+pub(super) struct PermissionWait {
+    pub owner: String,
+    pub host: String,
+    pub tool: String,
+    pub call: String,
+    pub suggestions: Vec<crate::domain::permission::Update>,
+    pub reply: oneshot::Sender<crate::contract::PermissionAnswer>,
 }
 
 #[derive(Default)]
@@ -37,29 +43,31 @@ pub(super) struct Waiters {
 }
 
 impl Waiters {
-    pub fn add_permission(
-        &mut self,
-        interaction: String,
-        owner: &str,
-        reply: oneshot::Sender<bool>,
-    ) {
-        self.permissions.insert(
-            interaction,
-            PermissionWait {
-                owner: owner.into(),
-                reply,
-            },
-        );
+    pub fn add_permission(&mut self, interaction: String, wait: PermissionWait) {
+        self.permissions.insert(interaction, wait);
     }
 
-    pub fn permission_owned_by(&self, interaction: &str, owner: &str) -> bool {
+    pub fn permission(&self, interaction: &str) -> Option<&PermissionWait> {
+        self.permissions.get(interaction)
+    }
+
+    pub fn permission_hosted_by(&self, interaction: &str, host: &str) -> bool {
         self.permissions
             .get(interaction)
-            .is_some_and(|p| p.owner == owner)
+            .is_some_and(|p| p.host == host)
     }
 
-    pub fn take_permission(&mut self, interaction: &str) -> Option<oneshot::Sender<bool>> {
-        self.permissions.remove(interaction).map(|p| p.reply)
+    pub fn take_permission(&mut self, interaction: &str) -> Option<PermissionWait> {
+        self.permissions.remove(interaction)
+    }
+
+    /// Prompts of `owner` shown on another session, which must drop them on release.
+    pub fn hosted_elsewhere(&self, owner: &str) -> Vec<(String, String)> {
+        self.permissions
+            .iter()
+            .filter(|(_, p)| p.owner == owner && p.host != owner)
+            .map(|(id, p)| (id.clone(), p.host.clone()))
+            .collect()
     }
 
     pub fn add_question(&mut self, interaction: String, question: WaitingQuestion) {
@@ -136,8 +144,16 @@ mod tests {
     #[test]
     fn release_resolves_every_waiter_kind_of_one_owner_only() {
         let mut waiters = Waiters::default();
+        let wait = |owner: &str, reply| PermissionWait {
+            owner: owner.into(),
+            host: owner.into(),
+            tool: "Write".into(),
+            call: "c".into(),
+            suggestions: vec![],
+            reply,
+        };
         let (permission, permission_rx) = oneshot::channel();
-        waiters.add_permission("p".into(), "s1", permission);
+        waiters.add_permission("p".into(), wait("s1", permission));
         let (question, mut question_rx) = oneshot::channel();
         waiters.add_question(
             "q".into(),
@@ -158,7 +174,7 @@ mod tests {
             },
         );
         let (other, _other_rx) = oneshot::channel();
-        waiters.add_permission("o".into(), "s2", other);
+        waiters.add_permission("o".into(), wait("s2", other));
 
         let announced = waiters.release("s1");
         assert_eq!(

@@ -46,6 +46,7 @@ impl SessionStore for Store {
             "old".into(),
             1,
         );
+        s.mode = zcode_cli_rust::domain::execution::Mode::Yolo;
         s.messages = vec![
             json!({"role":"user","content":"old".repeat(1000)}),
             json!({"role":"assistant","content":"previous"}),
@@ -114,9 +115,6 @@ struct Tools;
 impl ToolPort for Tools {
     fn definitions(&self) -> Vec<Value> {
         vec![]
-    }
-    fn requires_permission(&self, _: &str) -> bool {
-        false
     }
     async fn execute(&self, _: &str, _: &Value, _: &CancellationToken) -> Result<String> {
         panic!("no tools during compact")

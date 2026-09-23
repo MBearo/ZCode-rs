@@ -54,10 +54,16 @@ impl Engine {
         }
         if !pause {
             self.select(&json!({}), Some(self.session_selection(id)?))?;
-            ensure!(
-                s.mode == crate::domain::execution::Mode::Yolo && !s.plan_enabled,
-                "Unsupported goal execution mode"
-            );
+            // Node goal-compact.ts：plan 开启时不能恢复目标。
+            if s.plan_enabled {
+                let mut ack = c.ack(
+                    "rejected",
+                    s.revision,
+                    Some("guard.planGoalMutuallyExclusive"),
+                );
+                ack["message"] = "Plan and Goal cannot be active at the same time.".into();
+                return Ok(ack);
+            }
         }
         let now = self.clock.now();
         let s = self.sessions.get_mut(id).unwrap();
@@ -104,6 +110,7 @@ impl Engine {
     pub(super) async fn resume_background_goal(&mut self, id: &str) -> Result<()> {
         let s = &self.sessions[id];
         if s.running()
+            || s.plan_enabled
             || s.children.values().any(|t| t.running() || !t.notified)
             || !s.queue.is_empty()
             || s.background.values().any(|t| t.status == "running")

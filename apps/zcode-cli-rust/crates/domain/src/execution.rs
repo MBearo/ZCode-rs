@@ -46,6 +46,29 @@ impl<'de> Deserialize<'de> for Mode {
     }
 }
 
+/// Node `ExecutionState`: the permission mode and the independent plan switch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExecutionState {
+    pub mode: Mode,
+    pub plan_enabled: bool,
+}
+
+impl ExecutionState {
+    /// Node `resolveExecutionState`. `plan` keeps the current base mode and turns
+    /// plan on; a valid mode without an explicit plan flag turns plan off.
+    pub fn resolve(input_mode: Option<&str>, input_plan: Option<bool>, current: Self) -> Self {
+        let valid = input_mode.and_then(|m| (m != "plan").then(|| Mode::parse(m)).flatten());
+        Self {
+            mode: valid.unwrap_or(current.mode),
+            plan_enabled: input_plan.unwrap_or(match input_mode {
+                Some("plan") => true,
+                _ if valid.is_some() => false,
+                _ => current.plan_enabled,
+            }),
+        }
+    }
+}
+
 /// Session lifecycle phase as projected to the App.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +90,51 @@ impl Phase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn execution_state_resolves_like_node() {
+        let current = ExecutionState {
+            mode: Mode::Edit,
+            plan_enabled: true,
+        };
+        let resolve = |mode, plan| ExecutionState::resolve(mode, plan, current);
+        assert_eq!(
+            resolve(Some("yolo"), None),
+            ExecutionState {
+                mode: Mode::Yolo,
+                plan_enabled: false
+            }
+        );
+        assert_eq!(
+            resolve(Some("plan"), None),
+            ExecutionState {
+                mode: Mode::Edit,
+                plan_enabled: true
+            }
+        );
+        assert_eq!(resolve(Some("bogus"), None), current);
+        assert_eq!(
+            resolve(None, Some(false)),
+            ExecutionState {
+                mode: Mode::Edit,
+                plan_enabled: false
+            }
+        );
+        assert_eq!(
+            resolve(Some("build"), Some(true)),
+            ExecutionState {
+                mode: Mode::Build,
+                plan_enabled: true
+            }
+        );
+        assert_eq!(
+            ExecutionState::resolve(Some("plan"), None, ExecutionState::default()),
+            ExecutionState {
+                mode: Mode::Build,
+                plan_enabled: true
+            }
+        );
+    }
 
     #[test]
     fn serialized_strings_match_previous_fields() {

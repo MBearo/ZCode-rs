@@ -37,10 +37,15 @@ impl Engine {
         if execution.is_none() {
             self.apply_selection(id, selected)?;
         }
+        // Node resolveSubmittedExecutionState：本次输入的模式在开轮时生效，auto 按 build 提交。
+        let submitted = self.submitted_execution_state(id, &c.payload)?;
+        self.apply_execution_state(
+            id,
+            Some(submitted.mode.as_str()),
+            Some(submitted.plan_enabled),
+            None,
+        )?;
         let s = self.sessions.get_mut(id).context("Session unavailable")?;
-        if c.payload["planEnabled"] == false {
-            s.plan_enabled = false;
-        }
         let boundary = (
             s.rows.len(),
             s.messages.len(),

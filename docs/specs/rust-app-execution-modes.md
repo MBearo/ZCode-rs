@@ -6,7 +6,7 @@ Rust 只声明 yolo，独立 Plan 不支持；TS/旧 runtime 未声明新增能�
 
 新草稿与历史草稿保留用户已有 mode / planEnabled，包括默认 build、历史 Plan 和 Recent。不得把不受支持的权限静默改成 yolo。Composer 显示明确说明，用户通过现有权限菜单选择 Full access 后才能预热和发送；若 Plan 仍开启，需显式关闭。菜单中不支持的项禁用，快捷键只循环受支持项。已开启但不支持的 Plan 仍允许关闭。
 
-能力未知或请求失败时禁止预热/发送，不假设完全访问。正常正文编辑、模型选择和取消运行不受影响。已有会话也遵循此门禁；Rust 仍在接纳层拒绝非法 mode / Plan，UI 不是安全边界。
+能力未知或请求失败时禁止预热/发送，不假设完全访问。正常正文编辑、模型选择和取消运行不受影响。已有会话也遵循此门禁。UI 不是安全边界：Rust 接纳层按 Node `resolveExecutionState` 归一化 mode / Plan，每次工具调用由 Engine 的权限策略判定（见 `rust-m2-permissions-plan-hooks.md`）；Bash 只读判定完成并声明 build 能力之前，App 仍只提交 yolo。
 
 ## 唯一事实与接口
 

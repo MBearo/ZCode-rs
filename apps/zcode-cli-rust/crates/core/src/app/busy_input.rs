@@ -8,11 +8,6 @@ impl Engine {
     pub(super) async fn send_input(&mut self, mut c: Command) -> Result<Value> {
         let id = c.session_id.clone().context("Session required")?;
         let s = &self.sessions[&id];
-        if s.mode != crate::domain::execution::Mode::Yolo
-            || (s.plan_enabled && c.payload["planEnabled"] != false)
-        {
-            return Ok(c.ack("rejected", s.revision, Some("guard.capabilityUnsupported")));
-        }
         self.validate_input(&c.payload)?;
         if c.payload.get("modelExecution").is_some() && (s.running() || !s.queue.is_empty()) {
             // 与 Node Core admission 一致：执行级凭据不能进入队列或引导，忙时直接拒绝。

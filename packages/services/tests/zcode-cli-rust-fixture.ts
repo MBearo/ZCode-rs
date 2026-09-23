@@ -50,6 +50,8 @@ export async function fixture(
     registry?: boolean;
     legacy?: boolean;
     surface?: "desktop" | "terminal";
+    /** 用户配置的 `permission.mode`；默认 yolo，与 App 按 Rust 声明能力只提交 yolo 一致。 */
+    permissionMode?: string | null;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "zcode-cli-rust-test-"));
@@ -57,6 +59,11 @@ export async function fixture(
   const dataDir = join(root, "data");
   const config = join(root, "model.json");
   await mkdir(cwd);
+  if (options.permissionMode !== null) {
+    await mkdir(join(root, ".zcode", "cli"), { recursive: true });
+    const permission = { mode: options.permissionMode ?? "yolo" };
+    await writeFile(join(root, ".zcode", "cli", "config.json"), JSON.stringify({ permission }));
+  }
   const requests: Message[] = [];
   const requestBodies: string[] = [];
   const connectionPorts: number[] = [];
@@ -289,8 +296,7 @@ export class Harness {
   }
   async command(command: Message) {
     const type = command.type as CommandType;
-    const cas =
-      COMMANDS_REQUIRING_BASE_REVISION.has(type) || ROW_TARGETING_COMMANDS.has(type);
+    const cas = COMMANDS_REQUIRING_BASE_REVISION.has(type) || ROW_TARGETING_COMMANDS.has(type);
     // 与真实 Host 一致：CAS 命令必带 baseRevision（行定位命令还需 baseLogEpoch）。
     // 测试未显式指定时按服务端当前修订号补齐，stale 时沿用同一 commandId 重试；
     // 显式指定的用例保持原样，用于验证 stale/拒绝路径。

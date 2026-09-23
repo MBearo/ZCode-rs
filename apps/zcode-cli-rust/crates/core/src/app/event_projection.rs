@@ -81,6 +81,21 @@ impl Engine {
                 .register_question(&id, &event.run_id, &call_id, *input, reply)
                 .await;
         }
+        if let Event::Permission {
+            call,
+            request,
+            reply,
+        } = event.event
+        {
+            if reply.is_closed() {
+                return Ok(());
+            }
+            let host = self.register_permission(&id, &call, request, reply)?;
+            if host != id {
+                self.persist(&host, None).await?;
+            }
+            return self.persist(&id, None).await;
+        }
         if let Event::StepBoundary { committed } = event.event {
             if let Some(messages) = self.drain_mailbox(&id, &turn).await? {
                 let _ = committed.send(Some(crate::contract::Guide {
@@ -140,6 +155,7 @@ impl Engine {
             | Event::Question { .. }
             | Event::ToolCleanupFailed(_)
             | Event::StepBoundary { .. }
+            | Event::Permission { .. }
             | Event::Background { .. }
             | Event::PromptInitialized { .. }
             | Event::AuxiliaryDone { .. }
@@ -222,25 +238,12 @@ impl Engine {
                 s.rows.push(row.clone());
                 deltas.push(json!({"op":"row.appended","row":row}));
             }
-            Event::Permission { call, reply } => {
-                let interaction = self.clock.id();
-                let row = s
-                    .rows
-                    .iter_mut()
-                    .find(|r| r["turnId"] == turn && r["toolCallId"] == call["id"])
-                    .unwrap();
-                row["status"] = "pendingApproval".into();
-                row["approvalInteractionId"] = interaction.clone().into();
-                s.pending.push(json!({"interactionId":interaction,"kind":"permission","anchorRowId":row["rowId"],"createdAt":now,
-                    "payload":{"kind":"permission","toolCallId":call["id"],"toolName":call["function"]["name"],"summary":format!("Allow {}?",call["function"]["name"].as_str().unwrap()),"detail":call["function"]["arguments"],"options":[{"optionId":"allowOnce","label":"Allow once","kind":"allowOnce"},{"optionId":"deny","label":"Deny","kind":"deny"}]}}));
-                deltas.push(json!({"op":"row.upserted","row":row}));
-                self.waiters.add_permission(interaction, &id, reply);
-            }
             Event::ToolDone {
                 id: call_id,
                 result,
                 display,
                 failed,
+                denied,
                 committed,
             } => {
                 receipt = Some(committed);
@@ -250,14 +253,22 @@ impl Engine {
                     .iter_mut()
                     .find(|r| r["turnId"] == turn && r["toolCallId"] == call_id)
                 {
-                    row["status"] = if failed { "error" } else { "success" }.into();
+                    // 与 Node permission_denied 一致：被拒绝的调用不产生工具错误，行收口为 cancelled。
+                    row["status"] = if denied {
+                        "cancelled"
+                    } else if failed {
+                        "error"
+                    } else {
+                        "success"
+                    }
+                    .into();
                     row["endedAt"] = now.into();
                     row["output"] = json!({"text":result});
                     if let Some(display) = display {
                         row["output"]["display"] = display;
                     }
                     row.as_object_mut().unwrap().remove("approvalInteractionId");
-                    if failed {
+                    if failed && !denied {
                         row["error"] =
                             json!({"code":"fault.tool.failed","message":"Tool execution failed"});
                     }
@@ -289,7 +300,15 @@ impl Engine {
                 finished = true;
                 s.api_retry = None;
                 s.run_id = None;
-                s.pending.clear();
+                // 修复：后台子代理的权限请求挂在根会话上、由子会话持有，根 run 结束不能把它们一起清掉，
+                // 否则子会话仍在等待却再也无法应答。
+                let waiters = &self.waiters;
+                s.pending.retain(|p| {
+                    p["interactionId"]
+                        .as_str()
+                        .and_then(|i| waiters.permission(i))
+                        .is_some_and(|w| w.owner != id)
+                });
                 s.revision += 1;
                 let outcome = if cancelled {
                     "interrupted"

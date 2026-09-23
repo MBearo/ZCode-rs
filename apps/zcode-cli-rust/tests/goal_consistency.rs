@@ -33,7 +33,7 @@ impl SessionStore for Store {
         Ok((vec![], BTreeMap::new()))
     }
     async fn load_session(&self, _: &str, _: &str) -> Result<Option<Session>> {
-        Ok(Some(Session::new(
+        let mut session = Session::new(
             "session".into(),
             "workspace".into(),
             "p".into(),
@@ -41,7 +41,10 @@ impl SessionStore for Store {
             "none".into(),
             "old".into(),
             1,
-        )))
+        );
+        // App 按 Rust 声明的能力只提交 yolo。
+        session.mode = zcode_cli_rust::domain::execution::Mode::Yolo;
+        Ok(Some(session))
     }
     async fn commit(
         &self,
@@ -104,9 +107,6 @@ struct Tools;
 impl ToolPort for Tools {
     fn definitions(&self) -> Vec<Value> {
         vec![]
-    }
-    fn requires_permission(&self, _: &str) -> bool {
-        false
     }
     async fn execute(&self, _: &str, _: &Value, _: &CancellationToken) -> Result<String> {
         panic!("no tool expected")

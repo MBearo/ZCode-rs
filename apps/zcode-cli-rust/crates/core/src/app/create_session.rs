@@ -29,6 +29,10 @@ impl Engine {
         );
         session.workspace_path = Some(self.workspace_path.clone());
         session.workspace_directory = Some(self.workspace_path.clone());
+        // Node 初始模式：创建参数 → 项目偏好 → 配置文件 permission.mode → build。
+        let state = self.initial_execution_state(&c.payload["config"]);
+        session.mode = state.mode;
+        session.plan_enabled = state.plan_enabled;
         if let Some(mode) = c.payload["config"]["followupMode"].as_str() {
             session.followup_mode = mode.into();
         }

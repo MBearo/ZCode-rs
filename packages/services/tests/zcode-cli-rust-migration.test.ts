@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { access, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
@@ -183,7 +183,7 @@ test("Real TS storage imports identity, attachments, tools and interrupted outco
   }
 });
 
-test("TS migration preserves workspace identity, blocks non-yolo execution and retains discarded input ACKs", async () => {
+test("TS migration preserves workspace identity, keeps build approvals and retains discarded input ACKs", async () => {
   const f = await fixture({ legacy: true });
   try {
     const store = createSqliteSessionStore({ dbPath: join(f.root, "ts.sqlite") });
@@ -245,11 +245,30 @@ test("TS migration preserves workspace identity, blocks non-yolo execution and r
     const local = f.start();
     await local.subscribe("conversation/local");
     await assert.rejects(local.rows("remote"), /Session unavailable/);
-    const blocked = await local.command(
-      local.envelope("sendText", "local", { text: "no elevation" }),
+    // 导入的 build 会话按 build 执行：写文件先询问，不会被静默提升为 yolo。
+    let after = local.messages.length;
+    assert.equal(
+      (await local.command(local.envelope("sendText", "local", { text: "write" }))).status,
+      "accepted",
     );
-    assert.equal(blocked.status, "rejected");
-    assert.equal(f.requests.length, 0);
+    const asked = await local.wait(
+      (m) =>
+        m.params?.topic === "conversation/local" &&
+        m.params.frame?.payload?.deltas?.some((d: any) => d.patch?.pendingInteractions?.length),
+      after,
+    );
+    const prompt = asked.params.frame.payload.deltas.find(
+      (d: any) => d.patch?.pendingInteractions?.length,
+    ).patch.pendingInteractions[0];
+    assert.equal(prompt.payload.toolName, "Write");
+    await local.command(
+      local.envelope("resolveInteraction", "local", {
+        interactionId: prompt.interactionId,
+        answer: { optionId: "deny" },
+      }),
+    );
+    await local.completed("local", after);
+    await assert.rejects(access(join(f.cwd, "result.txt")));
     const duplicate = await local.command({
       ...local.envelope("sendText", "local", { text: "must not execute" }),
       commandId: "local-command",
@@ -257,8 +276,9 @@ test("TS migration preserves workspace identity, blocks non-yolo execution and r
     assert.equal(duplicate.status, "failed");
     assert.equal(duplicate.reasonCode, "fault.input.discardedOnRestart");
     await local.command(local.envelope("switchCollaborationMode", "local", { mode: "yolo" }));
+    after = local.messages.length;
     await local.command(local.envelope("sendText", "local", { text: "explicit yolo" }));
-    await local.completed("local");
+    await local.completed("local", after);
     const remote = f.start("ssh://fixture/workspace");
     await remote.subscribe("conversation/remote");
     await assert.rejects(remote.rows("local"), /Session unavailable/);

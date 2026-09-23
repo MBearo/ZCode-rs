@@ -28,6 +28,7 @@ pub(super) async fn execute(
         answer=receipt=>answer.context("Question owner stopped before answer commit")?,
     };
     Ok(ToolOutput {
+        denied: false,
         content: answer.content,
         data: answer.data,
         failed: answer.failed,

@@ -29,6 +29,8 @@ pub(super) struct Active {
     pub origin: std::sync::Arc<crate::contract::RequestOrigin>,
     /// Execution-scoped model and credentials (`sendText.modelExecution`).
     pub execution: Option<std::sync::Arc<super::submission::Execution>>,
+    /// Permission inputs for this run's tool calls; the engine publishes updates.
+    pub permissions: tokio::sync::watch::Sender<std::sync::Arc<super::permissions::Snapshot>>,
 }
 pub struct Engine {
     pub(super) child_updates:
@@ -52,6 +54,8 @@ pub struct Engine {
     pub(super) durable_acks: std::collections::BTreeSet<String>,
     pub(super) acks: BTreeMap<String, Value>,
     pub(super) active: BTreeMap<String, Active>,
+    /// Mode fallbacks, project and session rules, config lists.
+    pub(super) permissions: super::permissions::Permissions,
     /// Input options handed from admission to run start, keyed by (session, turn).
     pub(super) submissions: BTreeMap<(String, String), super::submission::Submission>,
     /// Everything waiting on an external answer; released per owner on every terminal path.
@@ -90,6 +94,9 @@ impl Engine {
             }
         }
         let index = store.load_index(&workspace).await?;
+        let permissions = super::permissions::Permissions::from_settings(
+            &store.project_settings(&workspace).await?,
+        );
         let (events, event_rx) = mpsc::channel(128);
         Ok(Self {
             child_updates: BTreeMap::new(),
@@ -113,6 +120,7 @@ impl Engine {
             acks: BTreeMap::new(),
             active: BTreeMap::new(),
             submissions: BTreeMap::new(),
+            permissions,
             waiters: Default::default(),
             interest: BTreeMap::new(),
             epoch: clock.id(),
@@ -124,6 +132,13 @@ impl Engine {
             events,
             event_rx,
         })
+    }
+    /// Config file `permission` section (mode fallback, allowed/disallowed tools),
+    /// read once at startup like Node's app creation.
+    pub fn with_permission_config(mut self, permission: &Value) -> Self {
+        self.permissions.config = crate::domain::permission::Config::from_config(permission);
+        self.permissions.config_mode = permission["mode"].as_str().map(str::to_owned);
+        self
     }
     pub fn with_registry(
         mut self,

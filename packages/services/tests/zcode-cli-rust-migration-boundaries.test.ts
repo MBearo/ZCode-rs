@@ -234,7 +234,7 @@ test("Imported artifact bytes survive TS cache removal and read queries enforce 
     await f.close();
   }
 });
-test("Imported plan state requires an explicit false input before yolo execution", async () => {
+test("Imported plan state is kept and an input can turn it off", async () => {
   const f = await fixture({ legacy: true });
   try {
     const { store, sessionID } = await seed(f, true);
@@ -245,18 +245,31 @@ test("Imported plan state requires an explicit false input before yolo execution
       (m) => m.params?.frame?.payload?.snapshot?.sessionId === sessionID,
     );
     assert.equal(snapshot.params.frame.payload.snapshot.config.planEnabled, true);
+    // 与 Node 一致：Plan 开启时照常执行，工具按 Plan 的只读策略判定；输入可显式关闭 Plan。
+    let after = h.messages.length;
     assert.equal(
-      (await h.command(h.envelope("sendText", sessionID, { text: "blocked" }))).status,
-      "rejected",
+      (await h.command(h.envelope("sendText", sessionID, { text: "planning" }))).status,
+      "accepted",
     );
-    assert.equal(f.requests.length, 0);
+    await h.completed(sessionID, after);
+    assert.equal(f.requests.length, 1);
+    after = h.messages.length;
     assert.equal(
       (await h.command(h.envelope("sendText", sessionID, { text: "execute", planEnabled: false })))
         .status,
       "accepted",
     );
-    await h.completed(sessionID);
-    assert.equal(f.requests.length, 1);
+    await h.completed(sessionID, after);
+    assert.equal(f.requests.length, 2);
+    assert(
+      h.messages
+        .slice(after)
+        .some((m) =>
+          m.params?.frame?.payload?.deltas?.some(
+            (d: any) => d.patch?.config?.planEnabled === false,
+          ),
+        ),
+    );
     assert.deepEqual(h.schemaErrors, []);
   } finally {
     await f.close();

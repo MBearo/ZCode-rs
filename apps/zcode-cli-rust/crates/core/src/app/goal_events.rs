@@ -86,7 +86,8 @@ impl Engine {
                 } else if goal.exhausted() && verdict.outcome != "pass" {
                     goal.status = "paused".into();
                 }
-                let keep_running = can_continue && s.queue.is_empty();
+                // Node：plan 开启期间不自动续跑目标。
+                let keep_running = can_continue && s.queue.is_empty() && !s.plan_enabled;
                 let next = if keep_running {
                     goal.status = "active".into();
                     let frozen = goal.clone();

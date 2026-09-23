@@ -14,6 +14,9 @@ pub(super) struct RunContext {
     pub prompt_snapshot: Option<crate::domain::prompt::PromptSnapshot>,
     /// Tools hidden from the provider for this turn (Node turn `toolDisallowlist`).
     pub tool_disallowlist: Vec<String>,
+    /// Engine-published permission inputs; `None` in tests that bypass the engine.
+    pub permissions:
+        Option<tokio::sync::watch::Receiver<std::sync::Arc<super::permissions::Snapshot>>>,
     pub state: ContextState,
     pub messages: Vec<Value>,
     pub manual: Option<String>,
@@ -38,6 +41,7 @@ impl RunContext {
             skills: None,
             prompt_snapshot: None,
             tool_disallowlist: vec![],
+            permissions: None,
             state,
             messages,
             manual,

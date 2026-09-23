@@ -5,11 +5,10 @@ use serde_json::Value;
 
 impl Engine {
     pub(super) fn validate_selection(&self, p: &Value) -> Result<()> {
-        if p["planEnabled"] == true
-            || p["mode"].as_str().is_some_and(|mode| mode != "yolo")
-            || p["followupMode"]
-                .as_str()
-                .is_some_and(|mode| !matches!(mode, "queue" | "guide"))
+        // mode / planEnabled 的取值由协议 schema 校验；取值组合按 Node resolveExecutionState 归一化。
+        if p["followupMode"]
+            .as_str()
+            .is_some_and(|mode| !matches!(mode, "queue" | "guide"))
         {
             bail!("Unsupported core execution mode");
         }

@@ -6,9 +6,7 @@ impl Engine {
     pub(super) async fn compact_command(&mut self, c: &Command) -> Result<Value> {
         let id = c.session_id.as_deref().context("Session id required")?;
         let session = self.sessions.get(id).context("Session unavailable")?;
-        if (session.mode != crate::domain::execution::Mode::Yolo || session.plan_enabled)
-            || (self.model.is_none() && self.registry.is_none())
-        {
+        if self.model.is_none() && self.registry.is_none() {
             return Ok(c.ack(
                 "rejected",
                 session.revision,

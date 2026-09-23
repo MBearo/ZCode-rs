@@ -246,8 +246,18 @@ impl ToolPort for WorkspaceTools {
         }
         definitions
     }
-    fn requires_permission(&self, _name: &str) -> bool {
-        false
+    fn capability(
+        &self,
+        session: &str,
+        name: &str,
+        _args: &Value,
+    ) -> crate::domain::permission::ToolCapability {
+        if let Some((read_only, destructive)) = self.mcp.annotations(session, name) {
+            return crate::domain::permission::ToolCapability::mcp(read_only, destructive);
+        }
+        crate::domain::permission::tool_capability(name)
+            .cloned()
+            .unwrap_or_default()
     }
     fn concurrent_safe(&self, name: &str) -> bool {
         matches!(

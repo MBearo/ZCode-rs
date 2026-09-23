@@ -258,7 +258,11 @@ test("Rust defaults multiSelect, rejects fabricated answers and retains question
       interactionId: p.interactionId,
       answer: { action: "accept", content: { answers: { "Which layout?": "HUMAN" } } },
     };
-    assert.equal((await h.command(h.envelope("resolveInteraction", other, reply))).status, "noop");
+    // Node 对未命中的交互按幂等成功收口；Rust 仍不允许跨会话应答，因此只是没有效果。
+    assert.equal(
+      (await h.command(h.envelope("resolveInteraction", other, reply))).status,
+      "accepted",
+    );
     assert.equal(f.requests.length, 1);
     await h.command(h.envelope("resolveInteraction", id, reply));
     await h.completed(id);
@@ -348,7 +352,7 @@ test("Rust concurrent questions keep call-order history and only the head timer 
     });
     assert.equal((await h.command(cmd)).status, "accepted");
     const later = { ...cmd, commandId: "late-second", clientId: "phone" };
-    assert.equal((await h.command(later)).status, "noop");
+    assert.equal((await h.command(later)).status, "accepted");
     assert.equal(f.requests.length, 1);
     await h.command(
       h.envelope("resolveInteraction", id, {
@@ -373,7 +377,7 @@ test("Rust concurrent questions keep call-order history and only the head timer 
         .length,
       2,
     );
-    assert.equal((await cold.command(later)).status, "noop");
+    assert.equal((await cold.command(later)).status, "accepted");
     assert.deepEqual(h.schemaErrors, []);
     assert.deepEqual(cold.schemaErrors, []);
   } finally {
@@ -417,7 +421,7 @@ for (const action of ["stop", "startNow", "EOF", "deleteSession"] as const)
           answer: { action: "accept", content: { answers: { "Which layout?": "LATE" } } },
         }),
       );
-      assert.equal(late.status, "noop");
+      assert.equal(late.status, "accepted");
       const restored = await snapshot(active, id);
       assert.deepEqual(restored.pendingInteractions, []);
       assert.equal(f.requests.length, action === "startNow" ? 2 : 1);
@@ -472,7 +476,7 @@ test("Rust snooze and preference disable are permanent for registered questions,
       interactionId: first.interactionId,
     });
     assert.equal((await h.command(snooze)).status, "accepted");
-    assert.equal((await h.command({ ...snooze, commandId: "again" })).status, "noop");
+    assert.equal((await h.command({ ...snooze, commandId: "again" })).status, "accepted");
     await preference(h, false);
     await preference(h, true);
     await delay(3200);

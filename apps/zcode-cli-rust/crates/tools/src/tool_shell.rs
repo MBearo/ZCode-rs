@@ -74,6 +74,7 @@ impl ShellTasks {
                     let message = format!("Task {id} stopped");
                     let data = json!({"message":message,"task_id":id,"task_type":"bash","command":job.command});
                     return Ok(ToolOutput {
+                        denied: false,
                         failed: false,
                         content: message.clone(),
                         display: Some(
@@ -131,6 +132,7 @@ impl ShellTasks {
                     display["truncated"] = true.into();
                 }
                 Ok(ToolOutput {
+                    denied: false,
                     failed: false,
                     content: serde_json::to_string(&data)?,
                     data,

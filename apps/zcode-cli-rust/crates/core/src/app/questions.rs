@@ -3,7 +3,7 @@ use crate::domain::{
     protocol::Command,
     question::{QuestionAnswer, QuestionInput},
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
@@ -60,9 +60,11 @@ impl Engine {
                     .get(id)
                     .is_some_and(|a| a.run_id == q.run && !a.cancel.is_cancelled())
         });
+        // 与 Node interaction-background.ts 一致：未知、已应答或已注销的交互按幂等成功收口，
+        // 多端先到先得，晚到的应答不能被报成失败或 noop。
         if c.kind == "snoozeInteractionAutoResolution" {
             if !owned || !self.snooze_question(id, interaction) {
-                return Ok(c.ack("noop", revision, Some("proto.alreadyResolved")));
+                return Ok(c.ack("accepted", revision, None));
             }
             return self.commit_interaction(c, vec![]).await;
         }
@@ -81,41 +83,25 @@ impl Engine {
             let _ = q.reply.send(answer);
             return Ok(ack);
         }
-        if self.waiters.permission_owned_by(interaction, id) {
-            let option = c.payload["answer"]["optionId"]
-                .as_str()
-                .context("Permission option required")?;
-            ensure!(
-                matches!(option, "allowOnce" | "deny"),
-                "Unsupported permission option"
-            );
-            self.sessions
-                .get_mut(id)
-                .unwrap()
-                .pending
-                .retain(|p| p["interactionId"] != interaction);
+        if self.waiters.permission_hosted_by(interaction, id) {
+            let interaction = interaction.to_owned();
+            let ack = self.resolve_permission(c, id, &interaction).await?;
             self.activate_question_head(id);
-            let ack = self.commit_interaction(c, vec![]).await?;
-            if let Some(reply) = self.waiters.take_permission(interaction) {
-                let _ = reply.send(option == "allowOnce");
-            }
             return Ok(ack);
         }
-        Ok(c.ack("noop", revision, Some("proto.alreadyResolved")))
+        Ok(c.ack("accepted", revision, None))
     }
-    async fn commit_interaction(&mut self, c: &Command, deltas: Vec<Value>) -> Result<Value> {
+    pub(super) async fn commit_interaction(
+        &mut self,
+        c: &Command,
+        deltas: Vec<Value>,
+    ) -> Result<Value> {
         let id = c.session_id.as_deref().unwrap();
         let s = self.sessions.get_mut(id).unwrap();
         s.revision += 1;
         s.updated_at = self.clock.now();
-        let mut ack = c.ack("accepted", s.revision, None);
-        if c.kind == "resolveInteraction" {
-            ack["result"] =
-                json!({"type":"resolveInteraction","resolvedBy":{"clientId":c.client_id}});
-            if let Some(option) = c.payload["answer"]["optionId"].as_str() {
-                ack["result"]["resolvedBy"]["optionId"] = option.into();
-            }
-        }
+        // Node 的交互命令 ACK 不带 result。
+        let ack = c.ack("accepted", s.revision, None);
         self.publish(id, deltas)?;
         self.persist(id, Some((c.key(), ack.clone()))).await?;
         self.acks.insert(c.key(), ack.clone());

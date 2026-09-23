@@ -203,8 +203,21 @@ impl ToolPort for Tools {
     fn definitions(&self) -> Vec<Value> {
         vec![]
     }
-    fn requires_permission(&self, name: &str) -> bool {
-        name == "GuardedWrite"
+    fn capability(
+        &self,
+        _: &str,
+        name: &str,
+        _: &Value,
+    ) -> zcode_cli_rust::domain::permission::ToolCapability {
+        // GuardedWrite 声明 alwaysAsk：任何模式下都询问，用于验证审批提交顺序。
+        zcode_cli_rust::domain::permission::ToolCapability {
+            always_ask: Some(name == "GuardedWrite"),
+            read_only: Some(name == "Read"),
+            destructive: Some(false),
+            needs_approval: Some(false),
+            side_effect_scope: Some("none".into()),
+            ..Default::default()
+        }
     }
     fn concurrent_safe(&self, name: &str) -> bool {
         name == "Read"
@@ -318,7 +331,7 @@ async fn start_timed(
         out,
         CancellationToken::new(),
     ));
-    let request:Request=serde_json::from_value(json!({"id":1,"method":"v4/command","params":{"commandId":"first","clientId":"test","sessionId":null,"type":"createSession","issuedAt":1000,"payload":{"workspaceId":"workspace","firstInput":first}}})).unwrap();
+    let request:Request=serde_json::from_value(json!({"id":1,"method":"v4/command","params":{"commandId":"first","clientId":"test","sessionId":null,"type":"createSession","issuedAt":1000,"payload":{"workspaceId":"workspace","config":{"mode":"yolo"},"firstInput":first}}})).unwrap();
     input.send(Input::Request(request)).await.unwrap();
     Runtime {
         input,
@@ -600,6 +613,53 @@ async fn permission_resolution_is_one_durable_commit_before_effects() {
             assert_eq!(runtime.tools.calls.load(Ordering::SeqCst), 0);
         }
     }
+}
+
+#[tokio::test]
+async fn unsaved_always_allow_rule_fails_the_call_like_node() {
+    // 测试 Store 没有项目设置存储：写规则失败时，交互仍按允许解决，但工具不执行，
+    // 模型收到 Node permission-flow 的存储错误。
+    let mut runtime = start(vec![call(0, "GuardedWrite")], None).await;
+    for _ in 0..4 {
+        receive(&mut runtime.commits)
+            .await
+            .permit
+            .send(true)
+            .unwrap();
+    }
+    let pending = receive(&mut runtime.commits).await;
+    let interaction = pending.permission.as_ref().unwrap()["interactionId"].clone();
+    pending.permit.send(true).unwrap();
+    let request=serde_json::from_value(json!({"id":2,"method":"v4/command","params":{
+        "commandId":"approve","clientId":"test","sessionId":pending.session_id,"type":"resolveInteraction","issuedAt":1000,
+        "payload":{"interactionId":interaction,"answer":{"optionId":"allowAlways"}}
+    }})).unwrap();
+    runtime.input.send(Input::Request(request)).await.unwrap();
+    receive(&mut runtime.commits)
+        .await
+        .permit
+        .send(true)
+        .unwrap();
+    let result = receive(&mut runtime.commits).await;
+    let message = result.messages.last().unwrap();
+    assert_eq!(message["role"], "tool");
+    assert_eq!(
+        message["content"],
+        "Failed to persist project permission update"
+    );
+    assert_eq!(message["_zcode_tool_failed"], true);
+    assert_eq!(runtime.tools.calls.load(Ordering::SeqCst), 0);
+    result.permit.send(true).unwrap();
+    loop {
+        let commit = receive(&mut runtime.commits).await;
+        let done = commit.phase == "completedSuccess";
+        commit.permit.send(true).unwrap();
+        if done {
+            break;
+        }
+    }
+    runtime.input.send(Input::Eof).await.unwrap();
+    runtime.running.await.unwrap().unwrap();
 }
 
 async fn busy_fixture() -> (Runtime, String, ToolStart) {

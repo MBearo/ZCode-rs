@@ -92,7 +92,8 @@ pub enum Event {
     },
     Permission {
         call: Value,
-        reply: oneshot::Sender<bool>,
+        request: PermissionRequest,
+        reply: oneshot::Sender<PermissionAnswer>,
     },
     Question {
         call_id: String,
@@ -104,6 +105,8 @@ pub enum Event {
         result: String,
         display: Option<Value>,
         failed: bool,
+        /// Permission denied: the row is cancelled instead of failed (Node `permission_denied`).
+        denied: bool,
         committed: oneshot::Sender<()>,
     },
     StepBoundary {
@@ -120,6 +123,28 @@ pub struct ModelOutput {
     pub calls: Vec<Value>,
     pub usage: Value,
     pub output_limit: bool,
+}
+/// A tool call the policy asked the user about.
+pub struct PermissionRequest {
+    /// Decision reason, shown as the prompt summary.
+    pub reason: String,
+    /// Arguments as the policy saw them.
+    pub input: Value,
+    pub suggestions: Vec<zcode_cli_domain::permission::Update>,
+    /// Tool `askOptions.allowAlways`: `no-always-allow` / `session-always-allow`.
+    pub options_policy: Option<String>,
+}
+/// The resolved prompt (Node broker result).
+#[derive(Debug, PartialEq)]
+pub enum PermissionAnswer {
+    Allow,
+    /// `preserve`: user feedback is kept verbatim instead of summarized.
+    Deny {
+        message: String,
+        preserve: bool,
+    },
+    /// Allowed, but the tool fails before running (Node: project rule write failed).
+    Fail(String),
 }
 /// Messages committed at a step boundary (guided input or subagent mailbox).
 pub struct Guide {

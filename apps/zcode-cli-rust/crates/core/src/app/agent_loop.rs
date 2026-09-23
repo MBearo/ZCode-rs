@@ -52,6 +52,7 @@ pub(super) async fn run(
     }
     let mut tool_tokens = definition_tokens(&definitions);
     let mut turns = 0;
+    let permissions = history.permissions.clone();
     // 本 run 的请求归属副本；Engine 在引导输入提交时下发新 origin。
     let mut current = sink.clone();
     loop {
@@ -203,6 +204,7 @@ pub(super) async fn run(
                             profile: profile.as_ref(),
                             profiles: &profiles,
                             selection: identity.clone(),
+                            permissions: permissions.as_ref(),
                         },
                         call,
                         sink,
@@ -220,6 +222,7 @@ pub(super) async fn run(
                     result: content,
                     display: output.display,
                     failed,
+                    denied: output.denied,
                     committed,
                 })
                 .await?;
@@ -258,7 +261,7 @@ pub(super) async fn run(
 }
 fn safe(tools: &dyn ToolPort, session: &str, call: &Value) -> bool {
     let name = call["function"]["name"].as_str().unwrap_or("");
-    tools.concurrent_safe_scoped(session, name) && !tools.requires_permission(name)
+    tools.concurrent_safe_scoped(session, name)
 }
 pub(super) async fn durable(
     receipt: oneshot::Receiver<()>,
@@ -274,6 +277,7 @@ struct ExecutionContext<'a> {
     profile: Option<&'a crate::domain::subagent::Profile>,
     profiles: &'a [crate::domain::subagent::Profile],
     selection: Option<crate::contract::ModelIdentity>,
+    permissions: Option<&'a super::tool_permission::Permissions>,
 }
 async fn execute(
     tools: &dyn ToolPort,
@@ -287,6 +291,7 @@ async fn execute(
         profile,
         profiles,
         selection,
+        permissions,
     } = context;
     if cancel.is_cancelled() {
         bail!("Cancelled");
@@ -295,23 +300,22 @@ async fn execute(
     let name = call["function"]["name"]
         .as_str()
         .context("Tool name missing")?;
-    let allowed = if tools.requires_permission(name) {
-        let (reply, receipt) = oneshot::channel();
-        sink.send(Event::Permission {
-            call: call.clone(),
-            reply,
-        })
-        .await?;
-        tokio::select! {biased; _=cancel.cancelled()=>bail!("Cancelled"), result=receipt=>result.unwrap_or(false)}
-    } else {
-        true
-    };
+    if let (Some(permissions), Ok(args)) = (
+        permissions,
+        serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap_or("")),
+    ) && let Some(output) =
+        super::tool_permission::authorize(tools, permissions, &call, &args, sink, cancel).await?
+    {
+        return Ok((
+            call["id"].as_str().context("Tool id missing")?.into(),
+            output,
+            true,
+        ));
+    }
     let result = if profile.is_some_and(|p| !p.allows(name)) {
         Err(anyhow::anyhow!(
             "Tool is not allowed by this subagent profile"
         ))
-    } else if !allowed {
-        Err(anyhow::anyhow!("Permission denied"))
     } else {
         match serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap_or("")) {
             Ok(args)

@@ -90,18 +90,13 @@ test("Rust stdio: current App schemas, streaming, idempotency, resume and worksp
   }
 });
 
-test("Rust yolo executes writes without approvals and rejects other modes", async () => {
+test("Rust yolo executes writes without approvals", async () => {
   const f = await fixture();
   try {
     const h = f.start();
     const id = await h.create();
     await h.subscribe(`conversation/${id}`);
-    for (const mode of ["build", "edit", "plan"]) {
-      await assert.rejects(
-        h.command(h.envelope("sendText", id, { text: "write", mode })),
-        /Unsupported/,
-      );
-    }
+    // 其余模式的询问、允许与拒绝见 zcode-cli-rust-permissions.test.ts。
     const command = h.envelope("sendText", id, { text: "write", mode: "yolo" });
     assert.equal((await h.command(command)).status, "accepted");
     assert.equal((await h.command(command)).status, "duplicate");

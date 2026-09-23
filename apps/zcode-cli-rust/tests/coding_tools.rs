@@ -191,19 +191,19 @@ async fn background_registration_requires_commit_and_eof_reaps_processes() {
     }
     let started = task.await.unwrap().unwrap();
     assert_eq!(started.data["status"], "backgrounded");
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        while tokio::fs::metadata(root.path().join("pid")).await.is_err() {
+    // 修复偶发失败：shell 的 `>` 先创建空文件再写入 pid，只等文件出现会读到空串。
+    let pid: i32 = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if let Ok(text) = tokio::fs::read_to_string(root.path().join("pid")).await
+                && let Ok(pid) = text.trim().parse()
+            {
+                break pid;
+            }
             tokio::task::yield_now().await;
         }
     })
     .await
     .unwrap();
-    let pid: i32 = tokio::fs::read_to_string(root.path().join("pid"))
-        .await
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
     let shutdown = tokio::time::timeout(std::time::Duration::from_secs(3), tools.shutdown()).await;
     if shutdown.is_err() {
         #[cfg(unix)]
