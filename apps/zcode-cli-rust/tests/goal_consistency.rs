@@ -157,7 +157,12 @@ async fn goal_start_and_verdict_are_durable_barriers_and_failure_stops_the_next_
             .unwrap();
             let (tx, rx) = mpsc::channel(8);
             let (out, mut output) = mpsc::channel(32);
-            let running = tokio::spawn(engine.serve(rx, out, CancellationToken::new()));
+            let running = tokio::spawn(zcode_cli_rust::serve_values(
+                engine,
+                rx,
+                out,
+                CancellationToken::new(),
+            ));
             let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
             tx.send(Input::Request(serde_json::from_value(json!({"id":1,"method":"v4/command","params":{"commandId":"goal","clientId":"test","sessionId":"session","type":"sendGoalCommand","issuedAt":1,"payload":{"text":"deliver"}}})).unwrap())).await.unwrap();
             let gate = tokio::time::timeout(std::time::Duration::from_secs(3), gates.recv())

@@ -20,4 +20,3 @@ pub fn question_timing() -> Result<(u64, u64)> {
         (300_000.0 / scale).round().max(1.0) as u64,
     ))
 }
-

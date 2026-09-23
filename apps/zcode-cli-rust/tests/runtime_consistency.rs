@@ -305,7 +305,12 @@ async fn start_timed(
     .with_question_timing(timing.0, timing.1);
     let (input, rx) = mpsc::channel(32);
     let (out, output) = mpsc::channel(64);
-    let running = tokio::spawn(engine.serve(rx, out, CancellationToken::new()));
+    let running = tokio::spawn(zcode_cli_rust::serve_values(
+        engine,
+        rx,
+        out,
+        CancellationToken::new(),
+    ));
     let request:Request=serde_json::from_value(json!({"id":1,"method":"v4/command","params":{"commandId":"first","clientId":"test","sessionId":null,"type":"createSession","issuedAt":1000,"payload":{"workspaceId":"workspace","firstInput":first}}})).unwrap();
     input.send(Input::Request(request)).await.unwrap();
     Runtime {

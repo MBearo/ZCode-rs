@@ -1,12 +1,12 @@
 //! Public runtime ports. The application owns state; adapters own external IO.
-pub use zcode_cli_domain::model::{ModelFailure, RetryState};
-use zcode_cli_domain::session::Session;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+pub use zcode_cli_domain::model::{ModelFailure, RetryState};
+use zcode_cli_domain::session::Session;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelIdentity {

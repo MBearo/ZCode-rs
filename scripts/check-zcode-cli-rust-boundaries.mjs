@@ -30,8 +30,12 @@ async function walk(directory) {
       failures.push(`${file}: protocol imports core or adapters`);
     if (crate === "core" && /\bzcode_cli_(?:state|model|tools|host|app_server|tui)\s*::/.test(code))
       failures.push(`${file}: core imports an adapter or frontend`);
-    if (crate === "tui" && /\bzcode_cli_(?:state|model|tools|host)\s*::/.test(code))
-      failures.push(`${file}: tui imports an adapter`);
+    // 前端只经传输契约（core-api/protocol/domain）与 runtime 交互，不能持有 core 内部状态。
+    if (
+      ["tui", "app-server"].includes(crate) &&
+      /\bzcode_cli_(?:core|state|model|tools|host)\s*::/.test(code)
+    )
+      failures.push(`${file}: frontend imports core or an adapter`);
     if (
       ["state", "model", "tools", "host"].includes(crate) &&
       /\bzcode_cli_(?:core|app_server|tui)\s*::/.test(code)

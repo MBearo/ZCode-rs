@@ -1,33 +1,9 @@
-//! TUI frontend contract. Rendering stays outside the core runtime so the
-//! terminal UI cannot create a second session owner.
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use zcode_cli_core_api::{RuntimeEvent, SessionRuntime};
+//! Terminal UI frontend (reserved).
+//!
+//! The TUI will connect to the runtime through the same transport contract as
+//! the App Server (`zcode_cli_core_api::{ClientMsg, ServerMsg}`) and must never
+//! own session, queue, model or tool facts. Until it is implemented, the
+//! `tui` subcommand exits with [`UNAVAILABLE_EXIT_CODE`].
 
-pub struct TuiFrontend<R> {
-    runtime: Arc<R>,
-}
-
-impl<R> TuiFrontend<R>
-where
-    R: SessionRuntime + 'static,
-{
-    pub fn new(runtime: Arc<R>) -> Self {
-        Self { runtime }
-    }
-
-    pub async fn send(
-        &self,
-        command: zcode_cli_protocol::Command,
-    ) -> anyhow::Result<zcode_cli_protocol::CommandAck> {
-        self.runtime.dispatch(command).await
-    }
-
-    pub async fn query(&self, method: &str, params: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
-        self.runtime.query(method, params).await
-    }
-
-    pub async fn subscribe(&self, session_id: &str) -> anyhow::Result<mpsc::Receiver<RuntimeEvent>> {
-        self.runtime.subscribe(session_id).await
-    }
-}
+/// Exit code of the reserved `tui` entry point.
+pub const UNAVAILABLE_EXIT_CODE: i32 = 2;

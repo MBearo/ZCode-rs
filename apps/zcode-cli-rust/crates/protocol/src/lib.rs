@@ -48,7 +48,8 @@ impl Command {
     }
 
     pub fn ack(&self, status: &str, revision: u64, reason: Option<&str>) -> Value {
-        let mut ack = json!({"commandId": self.command_id, "status": status, "revisionAtDecision": revision});
+        let mut ack =
+            json!({"commandId": self.command_id, "status": status, "revisionAtDecision": revision});
         if let Some(reason) = reason {
             ack["reasonCode"] = reason.into();
         }
@@ -153,6 +154,9 @@ mod tests {
             kind: "assistantText".into(),
             payload: serde_json::json!({"text":"hello"}),
         };
-        assert_eq!(serde_json::from_str::<EventEnvelope>(&serde_json::to_string(&event).unwrap()).unwrap(), event);
+        assert_eq!(
+            serde_json::from_str::<EventEnvelope>(&serde_json::to_string(&event).unwrap()).unwrap(),
+            event
+        );
     }
 }

@@ -58,11 +58,7 @@ impl Engine {
         self.read_session_snapshot(&session, p)
     }
     pub(super) async fn trim_resident(&mut self) -> Result<()> {
-        let mut pinned: BTreeSet<String> = self
-            .subscriptions
-            .values()
-            .filter_map(|s| s.topic.strip_prefix("conversation/").map(str::to_owned))
-            .collect();
+        let mut pinned: BTreeSet<String> = self.pinned_topics().map(str::to_owned).collect();
         pinned.extend(self.uploads.0.keys().map(|key| key.1.clone()));
         pinned.extend(
             self.sessions

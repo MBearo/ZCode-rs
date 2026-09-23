@@ -1,12 +1,8 @@
 use super::Engine;
+use crate::contract::{Method, RuntimeError};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 impl Engine {
-    /// Execute a read-only query against the actor-owned projection.
-    pub fn query_method(&mut self, method: &str, params: &Value) -> Result<Value> {
-        self.query(method, params)
-    }
-
     fn execution_capabilities(&self) -> Value {
         json!({"permissionModes":["yolo"],"independentPlanState":false})
     }
@@ -30,11 +26,10 @@ impl Engine {
         }
         Ok(())
     }
-    pub(super) fn query(&mut self, method: &str, p: &Value) -> Result<Value> {
+    pub(super) fn query(&mut self, method: Method, p: &Value) -> Result<Value> {
         self.validate_workspace(p)?;
         match method {
-            "session/read" => self.read_session(p),
-            "workspace/cancelGenerateText" => {
+            Method::WorkspaceCancelGenerateText => {
                 let operation = p["operationId"].as_str().context("Operation id required")?;
                 let ids = self
                     .auxiliary
@@ -48,11 +43,11 @@ impl Engine {
                 }
                 Ok(json!({"operationId":operation,"cancelled":!ids.is_empty()}))
             }
-            "runtime/capabilities" => Ok(
+            Method::RuntimeCapabilities => Ok(
                 json!({"workspaceExecutionCapabilities":true,"independentPlanState":false,"accountProviderConfig":self.registry.is_some()}),
             ),
-            "process/childProcesses" => Ok(json!({"processes":[]})),
-            "workspace/readPresentation" => {
+            Method::ProcessChildProcesses => Ok(json!({"processes":[]})),
+            Method::WorkspaceReadPresentation => {
                 // 旧 App 使用 strict schema；未协商的客户端不能收到新增字段。
                 let mut presentation = json!({"workspace":p["workspace"],"mode":"yolo","slashCommands":[{"name":"compact","description":"Compact conversation context","source":"builtin"}]});
                 if p["includeExecutionCapabilities"] == true {
@@ -60,12 +55,12 @@ impl Engine {
                 }
                 Ok(presentation)
             }
-            "v4/conversation/rowsRange" | "v4/conversation/plans" => {
+            Method::ConversationRowsRange | Method::ConversationPlans => {
                 let session = self
                     .sessions
                     .get(p["sessionId"].as_str().context("Session id required")?)
                     .context("Session unavailable")?;
-                if method.ends_with("/plans") {
+                if method == Method::ConversationPlans {
                     let plans = session
                         .rows
                         .iter()
@@ -93,7 +88,8 @@ impl Engine {
                 let limit = p["limit"]
                     .as_u64()
                     .filter(|n| *n > 0 && *n <= 200)
-                    .context("Invalid row limit")? as usize;
+                    .ok_or_else(|| RuntimeError::invalid_params("limit: expected 1..=200"))?
+                    as usize;
                 let before = p["beforeRowId"].as_u64().unwrap_or(u64::MAX);
                 let (rows, has_more) =
                     crate::domain::row_page::page(&session.rows, before, limit, 900 * 1024)?;
@@ -101,7 +97,8 @@ impl Engine {
                     json!({"rows":rows,"atSeq":session.seq,"atRevision":session.revision,"atLogEpoch":session.epoch,"hasMore":has_more}),
                 )
             }
-            _ => bail!("Unsupported method: {method}"),
+            // 路由保证只把查询类方法交到这里；其余方法到达此处说明分派表缺项。
+            method => Err(RuntimeError::MethodNotFound(method.as_str().into()).into()),
         }
     }
 }

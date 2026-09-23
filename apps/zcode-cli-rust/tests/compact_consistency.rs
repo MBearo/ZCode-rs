@@ -174,7 +174,12 @@ async fn check_commit_barrier(continuation: bool) {
         .unwrap();
         let (tx, rx) = mpsc::channel(10);
         let (out, mut output) = mpsc::channel(20);
-        let running = tokio::spawn(engine.serve(rx, out, CancellationToken::new()));
+        let running = tokio::spawn(zcode_cli_rust::serve_values(
+            engine,
+            rx,
+            out,
+            CancellationToken::new(),
+        ));
         tx.send(Input::Request(serde_json::from_value(json!({"id":1,"method":"v4/command","params":{"commandId":"next","clientId":"test","sessionId":"session","type":"sendText","issuedAt":1,"payload":{"text":"continue"}}})).unwrap())).await.unwrap();
         let summary = tokio::time::timeout(std::time::Duration::from_secs(2), requests.recv())
             .await

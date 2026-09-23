@@ -4,7 +4,7 @@ mod engine;
 mod event_projection;
 mod model_config;
 mod queries;
-mod subscriptions;
+mod topics;
 pub use crate::contract::{Event, RunEvent};
 pub use engine::Engine;
 mod input_validation;

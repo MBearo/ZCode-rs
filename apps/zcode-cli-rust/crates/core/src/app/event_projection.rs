@@ -103,7 +103,11 @@ impl Engine {
                     request_id.clone(),
                     (id.clone(), event.run_id, workspace, reply),
                 );
-                self.outbox.push(json!({"id":request_id,"method":"interaction/requestProviderRuntimeHeaders","params":params}));
+                self.outbox.push(crate::contract::ServerMsg::HostRequest {
+                    id: request_id,
+                    method: "interaction/requestProviderRuntimeHeaders",
+                    params,
+                });
             }
             return Ok(());
         }

@@ -1,19 +1,17 @@
-use super::Engine;
-use crate::{
-    contract::{Event, EventSink, ModelFailure, RunEvent},
-    domain::protocol::{Request, RequestId, rpc_error},
-};
+use super::{Engine, engine::Call};
+use crate::contract::{Event, EventSink, ModelFailure, RunEvent, RuntimeError, ServerMsg};
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 pub(super) struct Auxiliary {
-    pub request: Option<RequestId>,
+    /// Reply token of the originating request; the result is delivered when the job ends.
+    pub token: u64,
     pub cancel: CancellationToken,
     pub operation: Option<String>,
 }
 impl Engine {
-    pub(super) fn start_auxiliary(&mut self, request: &Request) -> Result<()> {
-        self.query("runtime/capabilities", &request.params)?; // 复用 workspace identity 验证。
+    pub(super) fn start_auxiliary(&mut self, request: &Call) -> Result<()> {
+        self.validate_workspace(&request.params)?;
         ensure!(self.auxiliary.len() < 16, "Too many workspace requests");
         let p = &request.params;
         let selected = self.select(&json!({"modelSelection":p["selection"]}), None)?;
@@ -27,7 +25,7 @@ impl Engine {
         {
             model = bound;
         }
-        let connectivity = request.method == "provider/testModelConnectivity";
+        let connectivity = request.method == crate::contract::Method::ProviderTestModelConnectivity;
         let mut messages = p["messages"].as_array().cloned().unwrap_or_default();
         if let Some(prompt) = p["prompt"].as_str() {
             messages.push(json!({"role":"user","content":prompt}));
@@ -65,7 +63,7 @@ impl Engine {
         self.auxiliary.insert(
             id.clone(),
             Auxiliary {
-                request: request.id.clone(),
+                token: request.token,
                 cancel: cancel.clone(),
                 operation,
             },
@@ -102,7 +100,11 @@ impl Engine {
                 let params = json!({"requestId":request_id,"sessionId":id,"workspace":workspace,"providerId":provider,"modelSelection":selection,"accountAccess":access,"reason":"model-request"});
                 self.auth
                     .insert(request_id.clone(), (id.clone(), id, workspace, reply));
-                self.outbox.push(json!({"id":request_id,"method":"interaction/requestProviderRuntimeHeaders","params":params}));
+                self.outbox.push(ServerMsg::HostRequest {
+                    id: request_id,
+                    method: "interaction/requestProviderRuntimeHeaders",
+                    params,
+                });
             }
             Event::AuxiliaryDone { result } => {
                 self.cancel_auth(&id);
@@ -112,12 +114,13 @@ impl Engine {
                 } else {
                     result
                 };
-                if job.request.is_some() {
-                    self.outbox.push(match result {
-                        Ok(value) => json!({"id":job.request,"result":value}),
-                        Err(error) => rpc_error(&job.request, -32000, &error.to_string()),
-                    });
-                }
+                self.outbox.push(ServerMsg::Reply {
+                    token: job.token,
+                    result: result.map_err(|error| RuntimeError::Coded {
+                        code: -32000,
+                        message: error.to_string(),
+                    }),
+                });
             }
             _ => {}
         }

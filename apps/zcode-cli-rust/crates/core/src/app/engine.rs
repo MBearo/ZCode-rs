@@ -1,20 +1,25 @@
-use super::{Event, RunEvent, subscriptions::Subscription};
+use super::{Event, RunEvent};
 use crate::{
     contract::{
-        Input, ModelIdentity, ModelPort, Output, RuntimeClock, RuntimePorts, SessionStore,
-        StorageCommitFailure, ToolPort,
+        ClientMsg, Method, ModelIdentity, ModelPort, RuntimeClock, RuntimeError, RuntimePorts,
+        ServerMsg, SessionStore, StorageCommitFailure, ToolPort,
     },
-    domain::{
-        protocol::{Request, rpc_error},
-        session::Session,
-    },
+    domain::session::Session,
 };
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+/// Actor output: one ordered channel carrying replies, events and host requests.
+pub type RuntimeOutput = mpsc::Sender<Vec<ServerMsg>>;
+/// A request as the actor sees it; `token` echoes back in the reply.
+pub(super) struct Call {
+    pub token: u64,
+    pub method: Method,
+    pub params: Value,
+}
 pub(super) struct Active {
     pub selection: tokio::sync::watch::Sender<ModelIdentity>,
     pub cancel: CancellationToken,
@@ -45,11 +50,12 @@ pub struct Engine {
     pub(super) acks: BTreeMap<String, Value>,
     pub(super) active: BTreeMap<String, Active>,
     pub(super) permissions: BTreeMap<String, (String, oneshot::Sender<bool>)>,
-    pub(super) subscriptions: BTreeMap<String, Subscription>,
+    /// Open delivery topics and their subscriber count; a conversation topic pins its session.
+    pub(super) interest: BTreeMap<String, usize>,
     pub(super) epoch: String,
     pub(super) index_seq: u64,
     pub(super) config_seq: u64,
-    pub(super) outbox: Vec<Value>,
+    pub(super) outbox: Vec<ServerMsg>,
     pub(super) auto_resolution_preference: bool,
     pub(super) questions: BTreeMap<String, super::questions::WaitingQuestion>,
     pub(super) question_timing: (u64, u64),
@@ -103,7 +109,7 @@ impl Engine {
             acks: BTreeMap::new(),
             active: BTreeMap::new(),
             permissions: BTreeMap::new(),
-            subscriptions: BTreeMap::new(),
+            interest: BTreeMap::new(),
             epoch: clock.id(),
             index_seq: 0,
             config_seq: 0,
@@ -129,8 +135,8 @@ impl Engine {
     }
     pub async fn serve(
         mut self,
-        mut input: mpsc::Receiver<Input>,
-        output: Output,
+        mut input: mpsc::Receiver<ClientMsg>,
+        output: RuntimeOutput,
         cancel: CancellationToken,
     ) -> Result<()> {
         let mut refresh = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -142,11 +148,11 @@ impl Engine {
                     _=async {if let Some(delay)=question_delay {tokio::time::sleep(delay).await} else {std::future::pending::<()>().await}}=>{self.advance_questions().await?;self.flush(&output).await?;},
                     _=cancel.cancelled()=>break,
                     message=input.recv()=>match message {
-                        Some(Input::Request(request))=>self.request(request,&output).await?,
-                        Some(Input::Response{id,result})=> { if let Some((_,_,_,reply)) = self.auth.remove(&id) { let _ = reply.send(result); } },
-                        Some(Input::Invalid)=>output.send(vec![rpc_error(&None,-32700,"Invalid protocol request")]).await?,
-                        Some(Input::TooLarge)=>{output.send(vec![rpc_error(&None,-32600,"Request exceeds size limit")]).await?;break;},
-                        _=>break,
+                        Some(ClientMsg::Request{token,method,params})=>self.request(Call{token,method,params},&output).await?,
+                        Some(ClientMsg::HostReply{id,result})=> { if let Some((_,_,_,reply)) = self.auth.remove(&id) { let _ = reply.send(result); } },
+                        Some(ClientMsg::TopicReleased{topic})=>{self.release_topic(&topic);self.trim_resident().await?;},
+                        Some(ClientMsg::ConnectionClosed{connection})=>{self.uploads.clear_connection(&connection);self.trim_resident().await?;},
+                        Some(ClientMsg::Eof) | None=>break,
                     },
                     Some(event)=self.event_rx.recv()=>{
                         let terminal=matches!(&event.event,Event::Finished {..}) || matches!(&event.event,Event::Background {task,..} if task.status!="running");
@@ -237,110 +243,82 @@ impl Engine {
         }
         result
     }
-    async fn request(&mut self, request: Request, output: &Output) -> Result<()> {
+    async fn request(&mut self, call: Call, output: &RuntimeOutput) -> Result<()> {
         self.outbox.clear();
-        if request.method == "mcp/list" {
-            if let Err(error) = self.start_mcp_query(&request) {
+        let token = call.token;
+        // 这些请求在后台完成，稍后以同一 token 回复；这里只回复启动失败。
+        let deferred = match call.method {
+            Method::McpList => Some(self.start_mcp_query(&call)),
+            Method::WorkspaceGenerateText | Method::ProviderTestModelConnectivity => {
+                Some(self.start_auxiliary(&call))
+            }
+            _ => None,
+        };
+        if let Some(started) = deferred {
+            if let Err(error) = started {
+                // 保持既有 -32602 响应，启动失败均为请求校验问题。
+                let error = RuntimeError::Coded {
+                    code: -32602,
+                    message: error.to_string(),
+                };
                 output
-                    .send(vec![rpc_error(&request.id, -32602, &error.to_string())])
+                    .send(vec![ServerMsg::Reply {
+                        token,
+                        result: Err(error),
+                    }])
                     .await?;
             }
             return Ok(());
         }
-        if matches!(
-            request.method.as_str(),
-            "workspace/generateText" | "provider/testModelConnectivity"
-        ) {
-            if let Err(error) = self.start_auxiliary(&request) {
-                output
-                    .send(vec![rpc_error(&request.id, -32602, &error.to_string())])
-                    .await?;
-            }
-            return Ok(());
-        }
-        let result = match request.method.as_str() {
-            "v4/command" => match serde_json::from_value(request.params.clone()) {
+        let p = &call.params;
+        let result = match call.method {
+            Method::Command => match serde_json::from_value(call.params.clone()) {
                 Ok(command) => self.command(command).await,
-                Err(_) => {
-                    output
-                        .send(vec![rpc_error(
-                            &request.id,
-                            -32602,
-                            "Invalid command envelope",
-                        )])
-                        .await?;
-                    return Ok(());
-                }
+                Err(_) => Err(RuntimeError::invalid_params("Invalid command envelope")),
             },
-            "v4/conversation/subscribe" => self.subscribe(&request.params).await,
-            "v4/conversation/resync" => self.resync(&request.params),
-            "v4/conversation/unsubscribe" => self.unsubscribe(&request.params),
-            "v4/connection/flow" => self.connection_flow(&request.params),
-            "v4/attachment/begin"
-            | "v4/attachment/chunk"
-            | "v4/attachment/commit"
-            | "v4/attachment/abort" => {
-                self.attachment_upload(&request.method, &request.params)
-                    .await
-            }
-            "v4/attachment/read"
-            | "v4/attachment/previewSource"
-            | "v4/conversation/attachmentRead"
-            | "v4/conversation/attachmentStat"
-            | "v4/conversation/rowsRange"
-            | "v4/conversation/plans" => {
-                self.conversation_query(&request.method, &request.params)
-                    .await
-            }
-            "workspace/updateInteractionPreferences" => {
-                self.interaction_preferences(&request.params).await
-            }
-            "v4/conversation/fileChanges" => self.file_changes(&request.params).await,
-            "v4/conversation/fileRewindPreview" => self.rewind_preview(&request.params).await,
-            "session/read" => self.read_cold_session(&request.params).await,
-            "v4/commands/query" => self.query_acks(&request.params).await,
-            "session/list" => self.list_sessions(&request.params).await,
-            "session/subagents" => self.subagents_query(&request.params).await,
-            "skills/referenceCatalog" => self.skill_catalog(&request.params).await,
-            "session/create" => self.import_shared_context(&request.params).await,
-            "provider/updateAccountConfig" => self.update_account(&request.params).await,
-            _ => self.query(&request.method, &request.params),
+            Method::TopicOpen => self.open_topic(p).await,
+            Method::TopicSnapshot => self.topic_snapshot_value(p),
+            Method::AttachmentBegin
+            | Method::AttachmentChunk
+            | Method::AttachmentCommit
+            | Method::AttachmentAbort => self.attachment_upload(call.method.as_str(), p).await,
+            Method::AttachmentRead
+            | Method::AttachmentPreviewSource
+            | Method::ConversationAttachmentRead
+            | Method::ConversationAttachmentStat
+            | Method::ConversationRowsRange
+            | Method::ConversationPlans => self.conversation_query(call.method, p).await,
+            Method::WorkspaceUpdateInteractionPreferences => self.interaction_preferences(p).await,
+            Method::ConversationFileChanges => self.file_changes(p).await,
+            Method::ConversationFileRewindPreview => self.rewind_preview(p).await,
+            Method::SessionRead => self.read_cold_session(p).await,
+            Method::CommandsQuery => self.query_acks(p).await,
+            Method::SessionList => self.list_sessions(p).await,
+            Method::SessionSubagents => self.subagents_query(p).await,
+            Method::SkillsReferenceCatalog => self.skill_catalog(p).await,
+            Method::SessionCreate => self.import_shared_context(p).await,
+            Method::ProviderUpdateAccountConfig => self.update_account(p).await,
+            method => self.query(method, p),
         };
         let storage_failed = result
             .as_ref()
             .err()
             .is_some_and(|e| e.is::<StorageCommitFailure>());
-        let response = match result {
-            Ok(value) => json!({"id":request.id,"result":value}),
-            Err(error) => {
-                self.outbox.clear();
-                let message = error.to_string();
-                rpc_error(
-                    &request.id,
-                    if message.starts_with("Unsupported method:") {
-                        -32601
-                    } else {
-                        -32602
-                    },
-                    &message,
-                )
-            }
-        };
-        let mut batch = vec![];
-        if request.id.is_some() {
-            batch.push(response);
-        }
+        let result = result.map_err(|error| {
+            // 失败请求不能发布半途产生的事件。
+            self.outbox.clear();
+            RuntimeError::classify(&error)
+        });
+        let mut batch = vec![ServerMsg::Reply { token, result }];
         batch.append(&mut self.outbox);
-        if !batch.is_empty() {
-            output.send(batch).await?;
-        }
+        output.send(batch).await?;
         if storage_failed {
             return Err(StorageCommitFailure.into());
         }
         self.trim_resident().await?;
         Ok(())
     }
-    async fn flush(&mut self, output: &Output) -> Result<()> {
+    async fn flush(&mut self, output: &RuntimeOutput) -> Result<()> {
         if !self.outbox.is_empty() {
             output.send(std::mem::take(&mut self.outbox)).await?;
         }

@@ -2266,9 +2266,12 @@ name = "zcode-cli-app-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
+ "crc32fast",
  "serde_json",
  "tokio",
  "tokio-util",
+ "uuid",
  "zcode-cli-core-api",
  "zcode-cli-domain",
  "zcode-cli-protocol",
@@ -2281,7 +2284,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
- "crc32fast",
  "futures-util",
  "serde_json",
  "tokio",
@@ -2451,13 +2453,6 @@ dependencies = [
 [[package]]
 name = "zcode-cli-tui"
 version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "tokio",
- "zcode-cli-core-api",
- "zcode-cli-protocol",
-]
 
 [[package]]
 name = "zerofrom"

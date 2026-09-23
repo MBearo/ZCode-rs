@@ -6,7 +6,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use zcode_cli_app_server as stdio;
+use zcode_cli_app_server::{self as app_server, Sink, stdio};
 use zcode_cli_core::Engine;
 use zcode_cli_core_api::{ModelIdentity, ModelPort, ModelRegistry, RuntimePorts};
 use zcode_cli_host::{SystemClock, WorkspaceContext, legacy_paths};
@@ -23,19 +23,17 @@ async fn main() {
         std::process::exit(1);
     }
 }
-/// TUI 入口先占位：保留子命令与退出码契约，避免未实现的前端伪装成可用。
-const TUI_UNAVAILABLE_EXIT: i32 = 2;
-
 async fn run() -> Result<()> {
     match Cli::parse().command {
         Command::AppServer(args) => app_server(args).await,
+        // TUI 入口先占位：保留子命令与退出码契约，避免未实现的前端伪装成可用。
         Command::Tui => {
             use std::io::Write;
             let _ = writeln!(
                 std::io::stderr().lock(),
                 "zcode-cli-rust: TUI 尚未实现，请使用 app-server --stdio"
             );
-            std::process::exit(TUI_UNAVAILABLE_EXIT);
+            std::process::exit(zcode_cli_tui::UNAVAILABLE_EXIT_CODE);
         }
     }
 }
@@ -91,25 +89,26 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         signal_cancel.cancel();
     });
     let input_closed = CancellationToken::new();
-    let (mut input, output, writer) = stdio::start(cancel.clone(), input_closed.clone());
+    let mut input = stdio::start(input_closed.clone());
+    let (mut output, writer) = Sink::stdout(cancel.clone());
     let attempt = zcode_cli_host::id();
     let database_id = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
     let progress = |phase: &str, sequence: u64| json!({"method":"startup/storageState","params":{"schemaVersion":1,"attemptId":attempt,"sequence":sequence,"databaseId":database_id,"databaseKind":"session","phase":phase,"elapsedMs":0}});
     if args.prepare_storage {
-        stdio::storage_prepare(&path, &mut input, &output).await?;
+        stdio::storage_prepare(&path, &mut input, &mut output).await?;
     }
     let _owner = if args.prepare_storage {
         None
     } else {
         Some(Store::lock_workspace(data_dir.clone(), workspace.clone()).await?)
     };
-    output.send(vec![progress("checking", 1)]).await?;
+    output.send_values(vec![progress("checking", 1)]).await?;
     let store = match Store::open(path).await {
         Ok(store) => store,
         Err(_) => {
             let mut frame = progress("failed", 2);
             frame["params"]["errorCode"] = "sql_failed".into();
-            output.send(vec![frame]).await?;
+            output.send_values(vec![frame]).await?;
             drop(output);
             let _ = stdio::finish(writer).await;
             anyhow::bail!("Session storage failed");
@@ -163,17 +162,17 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         if let Err(error) = imported {
             let mut frame = progress("failed", 2);
             frame["params"]["errorCode"] = "sql_failed".into();
-            output.send(vec![frame]).await?;
+            output.send_values(vec![frame]).await?;
             drop(output);
             let _ = stdio::finish(writer).await;
             anyhow::bail!("TS history import failed; source remains unchanged: {error:#}");
         }
     }
-    output.send(vec![progress("ready", 2)]).await?;
+    output.send_values(vec![progress("ready", 2)]).await?;
     if args.prepare_storage {
         drop(store);
         output
-            .send(vec![
+            .send_values(vec![
                 json!({"method":"startup/storagePrepared","params":{}}),
             ])
             .await?;
@@ -194,7 +193,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         let model = config
             .map(HttpModel::new)
             .map(|m| Arc::new(m) as Arc<dyn ModelPort>);
-        Engine::new(
+        let engine = Engine::new(
             workspace,
             identity,
             RuntimePorts {
@@ -215,9 +214,13 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         )
         .await?
         .with_question_timing(question_timing.0, question_timing.1)
-        .with_registry(registry, requested_cwd.to_string_lossy().into_owned())
-        .serve(input, output.clone(), cancel)
-        .await?;
+        .with_registry(registry, requested_cwd.to_string_lossy().into_owned());
+        // App Server 独占 stdout；返回时已排空 runtime 输出并释放 sink。
+        let served =
+            app_server::serve(move |rx, tx| engine.serve(rx, tx, cancel), input, output).await;
+        // 失败路径同样先等写线程落盘：存储失败的错误响应必须送达 Host 后进程才能退出。
+        stdio::finish(writer).await?;
+        return served;
     }
     drop(output);
     stdio::finish(writer).await?;

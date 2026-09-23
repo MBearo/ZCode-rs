@@ -41,7 +41,8 @@ test("closing drafts clears both delivery subscriptions and is idempotent withou
           },
           z.unknown(),
         ),
-        /Subscription unavailable/,
+        // 与 Node v4-gateway 一致：订阅已不存在或不属于该连接时统一报 notOwned。
+        /fault\.subscription\.notOwned/,
       );
     }
     await assert.rejects(h.subscribe(`conversation/${sid}`), /Session unavailable/);

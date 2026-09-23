@@ -192,16 +192,7 @@ impl Engine {
     pub(super) fn refresh_catalog(&mut self) -> Result<()> {
         self.config_seq += 1;
         self.config = self.registry.as_ref().and_then(|r| r.default_selection());
-        let topic = format!("workspace-config/{}", self.workspace);
-        let ids = self
-            .subscriptions
-            .values()
-            .filter(|s| s.topic == topic && !s.paused)
-            .map(|s| s.id.clone())
-            .collect::<Vec<_>>();
-        for id in ids {
-            self.snapshot_frame(&id, "online")?;
-        }
+        self.publish_config();
         Ok(())
     }
     pub(super) fn cancel_auth(&mut self, id: &str) {
@@ -213,7 +204,11 @@ impl Engine {
             .collect::<Vec<_>>();
         for key in keys {
             if let Some((session, _, workspace, _)) = self.auth.remove(&key) {
-                self.outbox.push(json!({"method":"interaction/providerRuntimeHeadersCancelled","params":{"requestId":key,"sessionId":session,"workspace":workspace}}));
+                self.outbox
+                    .push(crate::contract::ServerMsg::HostNotification {
+                        method: "interaction/providerRuntimeHeadersCancelled",
+                        params: json!({"requestId":key,"sessionId":session,"workspace":workspace}),
+                    });
             }
         }
     }

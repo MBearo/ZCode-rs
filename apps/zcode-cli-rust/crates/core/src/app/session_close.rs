@@ -16,8 +16,7 @@ impl Engine {
             goal.pause(self.clock.now());
         }
         s.queued_now = None;
-        self.subscriptions
-            .retain(|_, sub| sub.topic != format!("conversation/{id}"));
+        self.close_topic(id);
         if let Some(active) = self.active.get(id) {
             active.cancel.cancel();
         }
@@ -101,11 +100,16 @@ impl Engine {
         self.publish_index(id, summary)
     }
 
-    pub(super) async fn conversation_query(&mut self, method: &str, p: &Value) -> Result<Value> {
+    pub(super) async fn conversation_query(
+        &mut self,
+        method: crate::contract::Method,
+        p: &Value,
+    ) -> Result<Value> {
         let id = p["sessionId"].as_str().context("Session id required")?;
         self.ensure_session(id).await?;
-        if method.contains("attachment") || method.starts_with("v4/attachment/") {
-            self.attachment_query(method, p).await
+        let name = method.as_str();
+        if name.contains("attachment") || name.starts_with("v4/attachment/") {
+            self.attachment_query(name, p).await
         } else {
             self.query(method, p)
         }

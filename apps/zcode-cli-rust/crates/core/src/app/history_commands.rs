@@ -261,17 +261,6 @@ impl Engine {
         Ok(ack)
     }
     pub(super) fn history_snapshot(&mut self, id: &str) -> Result<()> {
-        let topic = format!("conversation/{id}");
-        let subs = self
-            .subscriptions
-            .values()
-            .filter(|s| s.topic == topic && !s.paused)
-            .map(|s| s.id.clone())
-            .collect::<Vec<_>>();
-        for sub in subs {
-            self.snapshot_frame(&sub, "recovery")?;
-            self.subscriptions.get_mut(&sub).unwrap().needs_resync = false;
-        }
-        self.publish_index(id, Some(self.sessions[id].summary()))
+        self.reset_topic(id)
     }
 }

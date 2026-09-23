@@ -1,13 +1,10 @@
-use super::{Engine, auxiliary::Auxiliary};
-use crate::{
-    contract::{Event, EventSink, ModelFailure, ProcessCleanupFailure},
-    domain::protocol::Request,
-};
+use super::{Engine, auxiliary::Auxiliary, engine::Call};
+use crate::contract::{Event, EventSink, ModelFailure, ProcessCleanupFailure};
 use anyhow::{Result, ensure};
 use tokio_util::sync::CancellationToken;
 
 impl Engine {
-    pub(super) fn start_mcp_query(&mut self, request: &Request) -> Result<()> {
+    pub(super) fn start_mcp_query(&mut self, request: &Call) -> Result<()> {
         self.validate_workspace(&request.params)?;
         ensure!(self.auxiliary.len() < 16, "Too many auxiliary requests");
         let id = format!("mcp-query:{}", self.clock.id());
@@ -15,7 +12,7 @@ impl Engine {
         self.auxiliary.insert(
             id.clone(),
             Auxiliary {
-                request: request.id.clone(),
+                token: request.token,
                 cancel: cancel.clone(),
                 operation: None,
             },

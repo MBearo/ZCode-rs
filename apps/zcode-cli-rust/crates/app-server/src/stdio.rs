@@ -1,18 +1,16 @@
+use super::Sink;
 use crate::domain::{MAX_REQUEST_BYTES, protocol::Request};
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub use crate::contract::{Input, Output};
+pub use crate::contract::Input;
 
-pub fn start(
-    cancel: CancellationToken,
-    input_closed: CancellationToken,
-) -> (mpsc::Receiver<Input>, Output, std::thread::JoinHandle<()>) {
+/// Start stdin framing: one NDJSON message per line, bounded by `MAX_REQUEST_BYTES`.
+pub fn start(input_closed: CancellationToken) -> mpsc::Receiver<Input> {
     let (in_tx, in_rx) = mpsc::channel(64);
-    let (out_tx, mut out_rx) = mpsc::channel::<Vec<Value>>(64);
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
         let mut reader = stdin.lock();
@@ -44,29 +42,7 @@ pub fn start(
         input_closed.cancel();
         let _ = in_tx.blocking_send(Input::Eof);
     });
-    let writer = std::thread::spawn(move || {
-        let stdout = std::io::stdout();
-        let mut writer = stdout.lock();
-        while let Some(batch) = out_rx.blocking_recv() {
-            for message in batch {
-                let result = (|| -> Result<()> {
-                    let bytes = serde_json::to_vec(&message)?;
-                    if bytes.len() + 1 > MAX_REQUEST_BYTES {
-                        bail!("Protocol output exceeds frame limit");
-                    }
-                    writer.write_all(&bytes)?;
-                    writer.write_all(b"\n")?;
-                    writer.flush()?;
-                    Ok(())
-                })();
-                if result.is_err() {
-                    cancel.cancel();
-                    return;
-                }
-            }
-        }
-    });
-    (in_rx, out_tx, writer)
+    in_rx
 }
 fn dispatch(tx: &mpsc::Sender<Input>, line: &[u8]) -> bool {
     if line.iter().all(u8::is_ascii_whitespace) {
@@ -118,10 +94,10 @@ pub async fn finish(writer: std::thread::JoinHandle<()>) -> Result<()> {
 pub async fn storage_prepare(
     path: &std::path::Path,
     input: &mut mpsc::Receiver<Input>,
-    output: &Output,
+    output: &mut Sink,
 ) -> Result<()> {
     output
-        .send(vec![
+        .send_values(vec![
             json!({"method":"startup/storagePath","params":{"path":path}}),
         ])
         .await?;
