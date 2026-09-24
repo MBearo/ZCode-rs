@@ -41,6 +41,7 @@ pub mod session_runtime;
 pub mod shared_context;
 pub mod shared_import;
 pub mod skills;
+pub mod stream_recovery;
 pub mod subagent;
 mod subagent_row;
 pub mod todo;

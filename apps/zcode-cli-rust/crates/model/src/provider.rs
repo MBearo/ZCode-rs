@@ -7,9 +7,7 @@ use super::{
     network_status::{self, Attempt, Reporter},
     sse::SseDecoder,
 };
-use crate::contract::{
-    Event, EventSink, ModelFailure, ModelOutput, ModelPort, RequestOrigin, RetryState,
-};
+use crate::contract::{Event, EventSink, ModelFailure, ModelOutput, ModelPort, RequestOrigin};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -62,7 +60,7 @@ impl HttpModel {
         auth: &Value,
         reporter: &Reporter<'_>,
     ) -> Result<(ModelOutput, serde_json::Map<String, Value>)> {
-        let idle_ms = self.idle_ms(attempt.number);
+        let idle_ms = self.idle_ms(attempt.budget());
         // Node applyModelRequestAuth：请求级鉴权的 apiKey 覆盖任意 provider 的配置 key。
         let key = match auth["requestAuth"]["apiKey"].as_str() {
             Some(key) => Some(key.to_owned()),
@@ -193,13 +191,16 @@ impl HttpModel {
             max_attempts: self.retry.max_attempts,
         };
         let mut empty_retries = 0;
+        // 断流恢复的新请求在适配层是 attempt 1；空闲超时按恢复次数继续递增（Node streamIdleTimeoutRetryNumber）。
+        let recovery = sink
+            .origin
+            .stream_recovery
+            .as_ref()
+            .and_then(|r| r["retryNumber"].as_u64())
+            .unwrap_or(0) as u32;
         for number in 1..=self.retry.max_attempts {
-            if number > 1 {
-                sink.send(Event::Retry(None))
-                    .await
-                    .map_err(|_| ModelFailure::cancelled())?;
-            }
             let mut attempt = Attempt::new(number);
+            attempt.recovery = recovery;
             *current.lock().unwrap() = Some(attempt.clone());
             let mut output = TextBuffer::new(sink);
             let result = match self.request_auth(sink).await {
@@ -236,7 +237,7 @@ impl HttpModel {
                 }
                 Err(mut failure) => {
                     failure.output_committed = output.committed;
-                    let idle_ms = self.idle_ms(number);
+                    let idle_ms = self.idle_ms(attempt.budget());
                     let retry = failure.retryable
                         && !failure.output_committed
                         && number < self.retry.max_attempts
@@ -265,19 +266,6 @@ impl HttpModel {
                     output
                         .status(reporter.retry(&attempt, &failure, delay_ms, idle_ms))
                         .await?;
-                    let reason = if failure.empty_completion {
-                        "server_error"
-                    } else {
-                        failure.reason
-                    };
-                    sink.send(Event::Retry(Some(RetryState {
-                        attempt: number,
-                        max_attempts: self.retry.max_attempts,
-                        next_retry_at: super::now().saturating_add(delay_ms),
-                        reason_code: reason,
-                    })))
-                    .await
-                    .map_err(|_| ModelFailure::cancelled())?;
                     // 退避期间取消：Node 以同一次尝试报 connect 阶段的 cancelled。
                     attempt.phase = "connect";
                     *current.lock().unwrap() = Some(attempt);
@@ -376,7 +364,7 @@ impl ModelPort for HttpModel {
                 max_attempts: self.retry.max_attempts,
             };
             let failure = ModelFailure::cancelled();
-            let status = reporter.failed(&attempt, &failure, false, self.idle_ms(attempt.number));
+            let status = reporter.failed(&attempt, &failure, false, self.idle_ms(attempt.budget()));
             let _ = sink.send(Event::ModelStatus(status)).await;
         }
         result

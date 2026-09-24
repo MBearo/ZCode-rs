@@ -113,6 +113,8 @@ pub(crate) struct Attempt {
     /// `prepare` before the request is sent, `stream` after, `connect` in backoff.
     pub phase: &'static str,
     pub first_event: Option<Instant>,
+    /// Stream recoveries before this request (Node `streamIdleTimeoutRetryNumber`).
+    pub recovery: u32,
 }
 
 impl Attempt {
@@ -125,7 +127,13 @@ impl Attempt {
             request_headers: Map::new(),
             phase: "prepare",
             first_event: None,
+            recovery: 0,
         }
+    }
+
+    /// The position in the idle timeout ladder.
+    pub fn budget(&self) -> u32 {
+        self.number + self.recovery
     }
 
     fn since(&self, at: Option<Instant>) -> Option<u64> {
@@ -160,6 +168,9 @@ impl Reporter<'_> {
         }
         if !self.origin.query_source.is_empty() {
             status["querySource"] = self.origin.query_source.into();
+        }
+        if let Some(recovery) = &self.origin.stream_recovery {
+            status["streamRecovery"] = (**recovery).clone();
         }
         if attempt.phase != "prepare" {
             status["requestHeaderCount"] = attempt.request_headers.len().into();

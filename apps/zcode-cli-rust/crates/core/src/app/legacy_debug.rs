@@ -53,6 +53,12 @@ fn api_retry(status: &Value) -> Option<Value> {
     match status["type"].as_str() {
         Some("model_retry_scheduled") => Some(retry_status(status)),
         Some("model_request_started") => {
+            // 恢复请求在适配层是 attempt 1，重试次数取 streamRecovery（Node 同样处理）。
+            if let Some(retry) =
+                crate::domain::stream_recovery::legacy_retry(&status["streamRecovery"])
+            {
+                return Some(retry);
+            }
             (status["attempt"].as_u64().unwrap_or(1) <= 1).then_some(Value::Null)
         }
         Some("model_request_completed") => Some(Value::Null),

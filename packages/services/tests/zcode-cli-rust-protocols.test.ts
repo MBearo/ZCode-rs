@@ -155,7 +155,7 @@ for (const protocol of ["openai-responses", "anthropic-messages"] as const) {
     reasoningParameters: {},
     retry: { maxRetries: 1, baseDelayMs: 1, maxDelayMs: 1, jitter: false },
   };
-  test(`Rust ${protocol} retries only before visible output with identical encoded bytes`, async () => {
+  test(`Rust ${protocol} retries before visible output with identical bytes and recovers after it`, async () => {
     for (const visible of [false, true]) {
       const f = await fixture({
         config,
@@ -170,9 +170,16 @@ for (const protocol of ["openai-responses", "anthropic-messages"] as const) {
         await h.subscribe(`conversation/${id}`);
         await h.command(h.envelope("sendText", id, { text: "stream interruption" }));
         if (visible) {
-          await failure(h, id);
-          assert.equal(f.requests.length, 1);
-          assert(JSON.stringify((await h.rows(id)).rows).includes("visible partial"));
+          // 适配层不重放可见输出；Node core 断流恢复用同一历史重发，旧行收口为 interrupted。
+          await h.completed(id);
+          assert.equal(f.requests.length, 2);
+          assert.deepEqual(
+            f.requests[1]!.input ?? f.requests[1]!.messages,
+            f.requests[0]!.input ?? f.requests[0]!.messages,
+          );
+          const partial = (await h.rows(id)).rows.find((r) => r.kind === "assistantText");
+          assert.equal(partial?.kind === "assistantText" && partial.text, "visible partial");
+          assert.equal(partial?.state, "interrupted");
         } else {
           await h.completed(id);
           assert.equal(f.requests.length, 2);

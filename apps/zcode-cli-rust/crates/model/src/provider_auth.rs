@@ -93,6 +93,7 @@ impl HttpModel {
     }
 
     /// Stream idle timeout of an attempt: 30 s longer per retry; 0 disables it.
+    /// `attempt`: the retry position including stream recoveries (1 = first request).
     pub(super) fn idle_ms(&self, attempt: u32) -> u64 {
         if self.config.stream_idle_timeout_ms == 0 {
             return 0;
@@ -109,7 +110,7 @@ impl HttpModel {
         reporter: &Reporter<'_>,
         attempt: &Attempt,
     ) -> ModelFailure {
-        let status = reporter.stalled(attempt, self.idle_ms(attempt.number));
+        let status = reporter.stalled(attempt, self.idle_ms(attempt.budget()));
         match output.status(status).await {
             Ok(()) => ModelFailure::new("stream_idle_timeout", true),
             Err(cancelled) => cancelled,

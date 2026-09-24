@@ -318,9 +318,9 @@ pub(super) async fn hidden_request(
         tokio::select! {biased;
             _=cancel.cancelled()=>bail!("Cancelled"),
             Some(event)=rx.recv()=> {
-                if matches!(event.event, Event::Retry(_) | Event::RequestAuth{..} | Event::ModelStatus(_)) { sink.send(event.event).await?; }
+                if matches!(event.event, Event::RequestAuth{..} | Event::ModelStatus(_)) { sink.send(event.event).await?; }
             },
-            result=&mut request=> { sink.send(Event::Retry(None)).await?; return Ok(result?); }
+            result=&mut request=> return Ok(result?),
         }
     }
 }

@@ -50,7 +50,8 @@ test("Rust retries rate limits with identical bytes, reuses HTTP connections and
       .map((p: any) => p.control?.apiRetry)
       .filter(Boolean);
     assert.equal(states[0].maxAttempts, 3);
-    assert.equal(states[0].reasonCode, "rate_limited");
+    // Node V4 投影的 reasonCode 是 fault.* 分类（modelRetryReasonCode）。
+    assert.equal(states[0].reasonCode, "fault.provider.rateLimited");
     assert.equal(patches(h).at(-1).control.apiRetry, null);
     assert(!JSON.stringify(h.messages).includes("fixture secret"));
     assert.deepEqual(h.schemaErrors, []);
@@ -92,7 +93,7 @@ test("Rust classifies terminal business errors ahead of generic HTTP retries", a
   }
 });
 
-test("Rust retries incomplete tool prelude, but never replays committed text or reasoning", async () => {
+test("Rust retries an incomplete tool prelude in the adapter and recovers committed output in core", async () => {
   for (const kind of ["prelude", "content", "reasoning_content"] as const) {
     const f = await fixture({
       config: { retry },
@@ -124,14 +125,19 @@ test("Rust retries incomplete tool prelude, but never replays committed text or 
         assert.equal(f.requests.length, 2);
         assert(!(await h.rows(id)).rows.some((r) => r.kind === "toolCall"));
       } else {
-        await failed(h);
-        assert.equal(f.requests.length, 1);
-        const row = (await h.rows(id)).rows.find(
+        // 适配层不重放已流出的输出；Node core 断流恢复用同一历史重发，旧行收口为 interrupted。
+        await h.completed(id);
+        assert.equal(f.requests.length, 2);
+        assert.deepEqual(f.requests[1]!.messages, f.requests[0]!.messages);
+        const rows = (await h.rows(id)).rows;
+        const row = rows.find(
           (r) => r.kind === (kind === "content" ? "assistantText" : "reasoning"),
         );
         assert(row?.kind === "assistantText" || row?.kind === "reasoning");
         assert.equal(row?.text, "visible partial");
         assert.equal(row?.state, "interrupted");
+        const answer = rows.filter((r) => r.kind === "assistantText").at(-1);
+        assert.equal(answer?.kind === "assistantText" && answer.text, "retry success");
       }
       assert.deepEqual(h.schemaErrors, []);
     } finally {
@@ -281,7 +287,9 @@ test("Rust idle timeout and explicit total timeout recover before output", async
         patches(h).some(
           (p: any) =>
             p.control?.apiRetry?.reasonCode ===
-            ("streamIdleTimeoutMs" in config ? "stream_idle_timeout" : "timeout"),
+            ("streamIdleTimeoutMs" in config
+              ? "fault.network.sseStalled"
+              : "fault.network.timeout"),
         ),
       );
     } finally {

@@ -36,6 +36,8 @@ pub(super) struct Active {
     /// Node `record.activeAbortController`: legacy send / compact / goal refuse
     /// to start while it is held (spec 9.12).
     pub legacy_lock: bool,
+    /// The agent step request as the recovery sees it (spec rust-m7-stream-recovery §2).
+    pub step: crate::domain::stream_recovery::StepProbe,
     /// Usage facts in progress (spec rust-m9-usage-logs §2.3).
     pub usage: crate::domain::usage::RunUsage,
 }

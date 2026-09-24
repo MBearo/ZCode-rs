@@ -71,6 +71,7 @@ impl Engine {
                 permissions,
                 kind,
                 legacy_lock: kind != crate::domain::legacy_stream::RunKind::Prompt,
+                step: Default::default(),
                 usage: crate::domain::usage::RunUsage::new(who, self.clock.now()),
             },
         );
@@ -213,6 +214,7 @@ impl Engine {
                 trace_id: parent.trace_id.clone(),
                 query_id: parent.query_id.clone(),
                 query_source: "subagent",
+                stream_recovery: None,
             },
             None => {
                 let query = session
@@ -239,6 +241,7 @@ impl Engine {
                     } else {
                         "main_turn"
                     },
+                    stream_recovery: None,
                 }
             }
         };

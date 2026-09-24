@@ -41,6 +41,7 @@ fn origin() -> RequestOrigin {
         trace_id: "trace-1".into(),
         query_id: Some("query_q1".into()),
         query_source: "main_turn",
+        stream_recovery: None,
     }
 }
 

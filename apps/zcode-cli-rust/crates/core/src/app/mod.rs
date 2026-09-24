@@ -47,6 +47,7 @@ mod question_timers;
 mod question_tool;
 mod questions;
 
+mod stream_recovery;
 mod todos;
 mod usage;
 mod web_tools;

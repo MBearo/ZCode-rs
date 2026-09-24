@@ -44,9 +44,10 @@ test("Rust retries socket failures, server errors and SSE network errors within 
       .flatMap((m) => m.params?.frame?.payload?.deltas ?? [])
       .map((d: any) => d.patch?.control?.apiRetry)
       .filter(Boolean);
+    // Node V4 投影把重试原因映射为 fault.* reasonCode（modelRetryReasonCode）。
     assert.deepEqual(
       retries.map((r: any) => r.reasonCode),
-      ["network_error", "server_error", "network_error"],
+      ["fault.network.unreachable", "fault.provider.serverError", "fault.network.unreachable"],
     );
     assert(!JSON.stringify(h.messages).includes("private diagnostic"));
     assert.deepEqual(h.schemaErrors, []);

@@ -25,12 +25,17 @@ impl Engine {
             return Ok(());
         }
         self.observe_usage(&id, &event.event).await;
+        self.observe_retry(&id, &event.event)?;
         let active = &self.active[&id];
         // 取消后的 failed(cancelled) 状态也要记入 session/debug（Node 同样发出）。
         if let Event::ModelStatus(status) = event.event {
             let turn = active.turn_id.clone();
             self.model_status(&id, &turn, status);
             return Ok(());
+        }
+        if let Event::StreamRecovery { retry, reply } = event.event {
+            let turn = active.turn_id.clone();
+            return self.stream_recovery(&id, &turn, retry, reply).await;
         }
         let cancelled = active.cancel.is_cancelled();
         if cancelled && !matches!(event.event, Event::Finished { .. }) {
@@ -162,14 +167,12 @@ impl Engine {
             | Event::Background { .. }
             | Event::PromptInitialized { .. }
             | Event::AuxiliaryDone { .. }
+            | Event::StreamRecovery { .. }
             | Event::UsageDone { .. }
             | Event::RequestAuth { .. }
             | Event::ContextUsage(_)
             | Event::CompactStarted { .. }
             | Event::CompactDone { .. } => unreachable!(),
-            Event::Retry(state) => {
-                s.api_retry = state;
-            }
             Event::Text {
                 response_id,
                 text,
@@ -347,13 +350,8 @@ impl Engine {
                         json!({"code":"fault.runtime.execution","message":message,"recoverable":true,"at":now,"source":"runtime"}),
                     );
                     if let Some(failure) = model_failure {
-                        s.last_error = Some(json!({"code":failure.code,"message":failure.message,
-                            "recoverable":failure.retryable,"at":now,"source":"provider",
-                            "attribution":{"source":"provider","reason":failure.reason,"providerId":s.provider,"modelId":s.model,"retryable":failure.retryable}}));
-                        if let Some(status) = failure.status_code {
-                            s.last_error.as_mut().unwrap()["attribution"]["statusCode"] =
-                                status.into();
-                        }
+                        let error = failure.last_error((&s.provider, &s.model), now);
+                        s.last_error = Some(error);
                     }
                 }
                 s.finish_rows(outcome, now);

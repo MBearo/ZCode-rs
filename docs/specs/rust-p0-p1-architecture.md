@@ -328,6 +328,7 @@ sequenceDiagram
 - **已有可见输出后断流**：每个用户轮最多恢复 10 次，与 Start Plan busy 重试共用计数。
   - 尚无工具调用：丢弃部分输出，提交丢弃标记（不进入 provider 历史），发出恢复事件，行以 interrupted 关闭，用新的 response id 重试。
   - 已有完整工具调用：提交只含这些调用的 assistant 消息，未执行的调用给出 `not_executed` 合成结果（Rust 在流结束前不启动工具）。
+  - 实现状态：见 [M7 spec](rust-m7-stream-recovery.md)。工具调用锚点恢复暂不实现（§2.5），断流前已完整的工具调用与文本一起丢弃后重试。
 - **用户 stop**：把已流出的文本与推理（含签名）作为 assistant 消息提交，标记为 cancelled，保证历史与用户看到的一致。
 - **异常防护**：
   - 连续 3 次相同的工具调用（按工具名加稳定 JSON 签名比较）时注入提醒，每轮最多 3 次；

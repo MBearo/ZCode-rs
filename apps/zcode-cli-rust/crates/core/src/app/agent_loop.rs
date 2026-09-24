@@ -1,6 +1,7 @@
 use crate::contract::{ContextPort, Event, EventSink, ModelPort, ToolPort};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
@@ -73,6 +74,9 @@ pub(super) async fn run(
     let permissions = history.permissions.clone();
     // 本 run 的请求归属副本；Engine 在引导输入提交时下发新 origin。
     let mut current = sink.clone();
+    // 断流恢复：本 run 已恢复次数，以及下一次请求要带的 streamRecovery。
+    let mut recoveries = 0;
+    let mut recovery: Option<Arc<Value>> = None;
     loop {
         let sink = &current;
         if profile
@@ -148,7 +152,23 @@ pub(super) async fn run(
             }
         }
         sink.send(Event::ContextUsage(json!({"usedTokens":tokens,"maxTokens":policy.window,"autoCompactThresholdTokens":if policy.automatic {Some(policy.threshold())} else {None}}))).await?;
-        let output = match model.complete(messages, &definitions, sink, cancel).await {
+        let recovering;
+        let request = match recovery.take() {
+            Some(status) => {
+                let mut origin = (*sink.origin).clone();
+                origin.stream_recovery = Some(status);
+                recovering = EventSink {
+                    origin: Arc::new(origin),
+                    ..sink.clone()
+                };
+                &recovering
+            }
+            None => sink,
+        };
+        let output = match model
+            .complete(messages, &definitions, request, cancel)
+            .await
+        {
             Err(failure)
                 if policy.automatic
                     && failure.reason == "context_exceeded"
@@ -162,6 +182,25 @@ pub(super) async fn run(
                 history
                     .compact(model, sink, cancel, None, reference)
                     .await?;
+                continue;
+            }
+            Err(failure)
+                if !cancel.is_cancelled()
+                    && crate::domain::stream_recovery::recoverable(&failure, recoveries) =>
+            {
+                // 已流出可见输出后断流：丢弃这段输出，用同一份历史重发（Node core recovery）。
+                recoveries += 1;
+                let (reply, receipt) = oneshot::channel();
+                sink.send(Event::StreamRecovery {
+                    retry: recoveries,
+                    reply,
+                })
+                .await?;
+                let status = tokio::select! {biased;
+                    _=cancel.cancelled()=>bail!("Cancelled"),
+                    status=receipt=>status.context("Stream recovery commit failed")?,
+                };
+                recovery = Some(Arc::new(status));
                 continue;
             }
             result => result?,

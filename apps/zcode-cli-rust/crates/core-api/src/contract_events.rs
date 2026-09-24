@@ -1,4 +1,4 @@
-use crate::{ModelFailure, RetryState, ToolOutput};
+use crate::{ModelFailure, ToolOutput};
 use anyhow::Result;
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
@@ -116,7 +116,12 @@ pub enum Event {
         task: zcode_cli_domain::background::BackgroundTask,
         committed: Option<oneshot::Sender<()>>,
     },
-    Retry(Option<RetryState>),
+    /// An agent step failed after visible output and is retried (spec
+    /// rust-m7-stream-recovery §2); the reply is the next request's `streamRecovery`.
+    StreamRecovery {
+        retry: u32,
+        reply: oneshot::Sender<Value>,
+    },
     /// One Node `ModelNetworkStatusEvent` payload of the run's model request.
     ModelStatus(Value),
     Text {
@@ -253,6 +258,9 @@ pub struct RequestOrigin {
     pub query_id: Option<String>,
     /// Node `querySource` (`main_turn`, `subagent`, `compact`); empty when none.
     pub query_source: &'static str,
+    /// Node `streamRecovery` of a request that recovers a broken stream: added
+    /// to its network statuses and raising its idle timeout.
+    pub stream_recovery: Option<std::sync::Arc<Value>>,
 }
 impl RequestOrigin {
     /// A request outside any session run, with a trace of its own.

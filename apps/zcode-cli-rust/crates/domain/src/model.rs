@@ -99,6 +99,8 @@ impl ModelFailure {
     pub fn empty() -> Self {
         Self {
             empty_completion: true,
+            // 修复：Node 的空响应文本让 UI 识别为 empty_model_response，旧文本会被归为无效响应。
+            message: "Model returned no text, no tool calls, and no usage before completing the turn.",
             ..Self::new("invalid_response", true)
         }
     }
@@ -110,7 +112,27 @@ impl fmt::Display for ModelFailure {
 }
 impl std::error::Error for ModelFailure {}
 
-#[derive(Clone, Debug, Serialize)]
+impl ModelFailure {
+    /// The V4 `lastError` of a run that failed on this request.
+    pub fn last_error(&self, (provider, model): (&str, &str), now: u64) -> serde_json::Value {
+        // Node 把终止的空完成归因为 empty_model_response，UI 据此展示空响应文案。
+        let reason = if self.empty_completion {
+            "empty_model_response"
+        } else {
+            self.reason
+        };
+        let mut error = serde_json::json!({"code": self.code, "message": self.message,
+            "recoverable": self.retryable, "at": now, "source": "provider",
+            "attribution": {"source": "provider", "reason": reason, "providerId": provider,
+                "modelId": model, "retryable": self.retryable}});
+        if let Some(status) = self.status_code {
+            error["attribution"]["statusCode"] = status.into();
+        }
+        error
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetryState {
     pub attempt: u32,
