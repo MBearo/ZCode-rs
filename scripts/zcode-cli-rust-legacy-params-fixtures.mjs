@@ -2,8 +2,11 @@
 // shared zod schemas and the Node `parseParams` formatter (server-types.ts).
 // Imported by generate-zcode-cli-rust-fixtures.mjs.
 import {
+  zcodeSessionCompactParamsSchema,
   zcodeSessionCreateParamsSchema,
+  zcodeSessionGoalParamsSchema,
   zcodeSessionResumeParamsSchema,
+  zcodeSessionSendParamsSchema,
   zcodeSessionSetModeParamsSchema,
   zcodeSessionSetModelParamsSchema,
   zcodeSessionSetThoughtLevelParamsSchema,
@@ -173,6 +176,8 @@ const CREATE = [
   { workspace: ws, importedHistory: null },
   { workspace: ws, mcpServers: [{ name: " ", command: " ", args: [], env: [] }] },
   { workspace: ws, mcpServers: [{ ...stdio, timeoutMs: 1.5 }] },
+  { workspace: ws, mcpServers: [{ ...stdio, extra: 1 }] },
+  { workspace: ws, mcpServers: [{ ...http, extra: 1 }] },
   { workspace: ws, mcpServers: [1] },
   { workspace: ws, mcpServers: [{ ...http, oauth: { type: "x" } }] },
   {
@@ -258,6 +263,115 @@ const SET_MODE = [
   { sessionId: "s", mode: "auto", persistAsWorkspaceLastUsed: true },
 ];
 
+const sel = { providerId: "p", modelId: "m" };
+const exec = { selectionScope: "execution" };
+const SEND = [
+  undefined,
+  null,
+  {},
+  { sessionId: "s" },
+  { sessionId: " s ", content: "" },
+  { sessionId: "s", content: "  hi  ", inputId: " i ", queryId: "q" },
+  { sessionId: "s", content: "x", extra: 1, automationId: "a", offPeakTaskId: "b" },
+  { sessionId: "s", content: "x", automationId: "a", offPeakTaskId: "b" },
+  { sessionId: "s", content: "x", automationId: " ", offPeakTaskId: "b" },
+  { sessionId: "s", content: "x", offPeakRunType: "init" },
+  { sessionId: "s", content: "x", offPeakRunType: "init", offPeakTaskId: "b" },
+  { sessionId: "s", content: "x", offPeakRunType: "later" },
+  { sessionId: "s", content: "x", modelExecution: exec },
+  { sessionId: "s", content: "x", modelSelection: sel, modelExecution: exec },
+  {
+    sessionId: "s",
+    content: "x",
+    modelSelection: sel,
+    modelExecution: { selectionScope: "session" },
+  },
+  {
+    sessionId: "s",
+    content: "x",
+    modelSelection: sel,
+    modelExecution: {
+      ...exec,
+      memoryExtraction: "skip",
+      requestAuth: { apiKey: "k", headers: { a: "1" } },
+      subagents: { foregroundModel: "submission", background: "deny" },
+    },
+  },
+  {
+    sessionId: "s",
+    content: "x",
+    modelSelection: sel,
+    modelExecution: { ...exec, requestAuth: { headers: { "": "1", b: "" } } },
+  },
+  {
+    sessionId: "s",
+    content: "x",
+    modelSelection: sel,
+    modelExecution: { ...exec, requestAuth: { headers: [] } },
+  },
+  { sessionId: "s", content: "x", modelExecution: { ...exec, x: 1 } },
+  { sessionId: "s", content: "x", attachments: [] },
+  { sessionId: "s", content: "x", attachments: [{ kind: "image", filename: "a.png" }, {}] },
+  { sessionId: "s", content: "x", attachments: [1] },
+  { sessionId: "s", content: "x", attachments: [[]] },
+  { sessionId: "s", content: "x", attachments: {} },
+  { sessionId: "s", content: "x", browserAmbientContext: { tabCount: 1 } },
+  { sessionId: "s", content: "x", browserAmbientContext: { tabCount: 0 } },
+  { sessionId: "s", content: "x", browserAmbientContext: { tabCount: 101 } },
+  {
+    sessionId: "s",
+    content: "x",
+    browserAmbientContext: { tabCount: 1.5 },
+    automationId: "a",
+    offPeakTaskId: "b",
+  },
+  {
+    sessionId: "s",
+    content: "x",
+    browserAmbientContext: { tabCount: 3, currentUrl: " https://x " },
+  },
+  {
+    sessionId: "s",
+    content: "x",
+    browserAmbientContext: { tabCount: 3, currentUrl: "u".repeat(4097) },
+  },
+  { sessionId: "s", content: "x", browserAmbientContext: { tabCount: 3, currentUrl: " " } },
+  { sessionId: "s", content: "x", browserAmbientContext: { tabCount: 3, tabs: [] } },
+  { sessionId: "s", content: "x", expectedRevision: 2, expectedProviderRevision: " r " },
+  { sessionId: "s", content: "x", expectedRevision: -1, automationId: "a", offPeakTaskId: "b" },
+  { sessionId: "s", content: "x", toolDenylist: ["CronCreate", " "] },
+  { sessionId: "s", content: 1, automationId: "a", offPeakTaskId: "b" },
+  {
+    sessionId: "s",
+    content: "x",
+    automationId: "a",
+    offPeakRunType: "resume",
+    modelExecution: exec,
+  },
+];
+
+const COMPACT = [
+  undefined,
+  {},
+  { sessionId: "s" },
+  { sessionId: " s ", inputId: " i ", instructions: "  keep  ", expectedRevision: 0 },
+  { sessionId: "s", instructions: 1 },
+  { sessionId: "s", inputId: "" },
+  { sessionId: "s", operationId: "o" },
+];
+
+const GOAL = [
+  undefined,
+  { sessionId: "s" },
+  ...["show", "set", "replace", "pause", "resume", "clear", "stop"].map((action) => ({
+    sessionId: "s",
+    action,
+  })),
+  { sessionId: "s", action: "set", objective: "  do it  ", inputId: "i", expectedRevision: 1 },
+  { sessionId: "s", action: "set", objective: 1 },
+  { sessionId: "s", action: 1, extra: 1 },
+];
+
 function run(schema, inputs) {
   return inputs.map((input) => {
     const result = schema.safeParse(input);
@@ -278,5 +392,8 @@ export function legacyParamsFixtures() {
     setModel: run(zcodeSessionSetModelParamsSchema, SET_MODEL),
     setThoughtLevel: run(zcodeSessionSetThoughtLevelParamsSchema, SET_THOUGHT_LEVEL),
     setMode: run(zcodeSessionSetModeParamsSchema, SET_MODE),
+    send: run(zcodeSessionSendParamsSchema, SEND),
+    compact: run(zcodeSessionCompactParamsSchema, COMPACT),
+    goal: run(zcodeSessionGoalParamsSchema, GOAL),
   };
 }

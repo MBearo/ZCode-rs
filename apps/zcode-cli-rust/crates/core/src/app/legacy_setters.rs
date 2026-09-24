@@ -27,25 +27,8 @@ impl Engine {
             }
             .into());
         }
-        let id = p["sessionId"].as_str().unwrap_or_default().to_owned();
-        let Some(session) = self.sessions.get(&id) else {
-            return Err(RuntimeError::Coded {
-                code: -32004,
-                message: format!("Session is not active: {id}"),
-            }
-            .into());
-        };
-        let actual = session.runtime.state_revision;
-        if let Some(expected) = p["expectedRevision"].as_u64()
-            && expected != actual
-        {
-            return Err(RuntimeError::Rejected {
-                code: -32009,
-                message: "Session state revision mismatch".into(),
-                data: json!({"actualRevision": actual, "expectedRevision": expected}),
-            }
-            .into());
-        }
+        let id = self.legacy_resident(&p)?;
+        self.legacy_expect(&id, &p)?;
         self.touch_session(&id);
         let before = self.session_selection(&id)?;
         let changed = match method {

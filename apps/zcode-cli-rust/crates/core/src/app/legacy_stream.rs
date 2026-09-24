@@ -8,7 +8,7 @@ use crate::{
     domain::{
         execution::Phase,
         legacy_params,
-        legacy_stream::{TurnTally, model_usage, usage_json},
+        legacy_stream::{RunKind, TurnTally, model_usage, usage_json},
     },
 };
 use anyhow::Result;
@@ -151,7 +151,7 @@ impl Engine {
     }
 
     /// Node `turn_started` of a root session's run; the turn totals start here.
-    pub(super) fn legacy_turn_started(&mut self, id: &str, turn: &str) {
+    pub(super) fn legacy_turn_started(&mut self, id: &str, turn: &str, kind: RunKind) {
         let now = self.clock.now();
         let Some(s) = self.sessions.get_mut(id).filter(|s| s.parent_id.is_none()) else {
             return;
@@ -166,13 +166,28 @@ impl Engine {
             .iter()
             .rev()
             .find(|r| r["kind"] == "userInput" && r["turnId"] == turn);
-        let mut payload = json!({"turnNumber": s.runtime.legacy.turns_completed,
-            "input": input.map_or("", |r| r["text"].as_str().unwrap_or("")),
-            // D16：Node 带出 executionStartedAt（不在 strict schema 中，Host 因此丢弃整条事件）。
-            "executionStartedAt": now});
-        let command = input.and_then(|r| r["sourceCommandId"].as_str());
+        let submitted = input.and_then(|r| r["sourceCommandId"].as_str());
+        // 压缩与目标命令的运行没有 userInput 行：inputId 取 header 的提交命令（Node 同样带出）。
+        let command = submitted.or_else(|| header.and_then(|h| h["sourceCommandId"].as_str()));
+        let mut payload = if kind == RunKind::Compact {
+            // Node compact.ts：维护命令只有这四个字段（没有 executionStartedAt）。
+            let instructions = s.compact_instructions.as_deref().unwrap_or("").trim();
+            let input = match instructions {
+                "" => "/compact".to_owned(),
+                text => format!("/compact {text}"),
+            };
+            json!({"turnNumber": s.runtime.legacy.turns_completed, "input": input,
+                "inputVisibility": "model-only"})
+        } else {
+            json!({"turnNumber": s.runtime.legacy.turns_completed,
+                "input": input.map_or("", |r| r["text"].as_str().unwrap_or("")),
+                // D16：Node 带出 executionStartedAt（不在 strict schema 中，Host 因此丢弃整条事件）。
+                "executionStartedAt": now})
+        };
         if let Some(command) = command {
             payload["inputId"] = command.into();
+        }
+        if let Some(command) = submitted {
             payload["queryId"] = command.into();
         }
         if let Some(entity) = input.and_then(|r| r["entityId"].as_str()) {
@@ -190,8 +205,12 @@ impl Engine {
             }
         }
         let mut events = vec![];
-        // Node 首轮在 turn.started 之前发出 first_input 标题。
-        if s.history.inputs.len() == 1 && s.title_source == "generated" {
+        // Node 首轮在 turn.started 之前发出 first_input 标题。只看首个输入所在的轮：
+        // 之后的压缩或目标续跑不新增输入，原先的条件会让它们重复发出标题事件。
+        if s.history.inputs.len() == 1
+            && s.history.inputs[0].turn == turn
+            && s.title_source == "generated"
+        {
             events.push((
                 "session.titleUpdated",
                 json!({"previousTitle": "", "source": "first_input", "title": s.title}),
@@ -199,6 +218,7 @@ impl Engine {
         }
         events.push(("turn.started", payload));
         s.runtime.legacy.turn = Some(TurnTally {
+            kind,
             started_at: now,
             input_id: command.map(str::to_owned),
             ..Default::default()
@@ -267,13 +287,16 @@ impl Engine {
         let tally = s.runtime.legacy.turn.take().unwrap_or_default();
         s.runtime.legacy.turns_completed += 1;
         let duration = now.saturating_sub(tally.started_at);
-        let (kind, mut payload, reason) = match s.phase {
+        let success = s.phase == Phase::CompletedSuccess;
+        let reason = tally
+            .kind
+            .end_reason(success, !success && s.phase != Phase::Error);
+        let (kind, mut payload) = match s.phase {
             Phase::CompletedSuccess => (
                 "turn.completed",
                 json!({"response": tally.response, "tokenCount": tally.token_count,
                     "usage": tally.summary(), "toolCallCount": tally.tool_calls,
                     "historyRoundCount": tally.rounds, "duration": duration, "resultType": "success"}),
-                "prompt_completed",
             ),
             Phase::Error => {
                 let error = s.last_error.clone().unwrap_or_default();
@@ -287,14 +310,12 @@ impl Engine {
                 (
                     "turn.failed",
                     json!({"error": detail, "turnPhase": "execution"}),
-                    "prompt_failed",
                 )
             }
             _ => (
                 "turn.completed",
                 json!({"response": "", "tokenCount": 0, "usage": tally.summary(), "toolCallCount": 0,
                     "historyRoundCount": tally.rounds, "duration": duration, "resultType": "cancelled"}),
-                "prompt_failed",
             ),
         };
         if let Some(input) = &tally.input_id {
@@ -308,6 +329,17 @@ impl Engine {
     /// revision advances and the Host gets the current settings. Sent whether
     /// or not a legacy stream is subscribed.
     pub(super) fn legacy_state_updated(&mut self, id: &str, reason: &str) -> Result<()> {
+        self.legacy_state_patch(id, reason, None)
+    }
+
+    /// `legacy_state_updated` with Node `afterPromptAccepted`'s `patch`
+    /// (`{status: "running"}`) in place of the settings.
+    pub(super) fn legacy_state_patch(
+        &mut self,
+        id: &str,
+        reason: &str,
+        patch: Option<Value>,
+    ) -> Result<()> {
         let s = self.sessions.get_mut(id).unwrap();
         s.runtime.state_revision += 1;
         let revision = s.runtime.state_revision;
@@ -317,7 +349,7 @@ impl Engine {
             .workspace
             .clone()
             .unwrap_or_else(|| self.rebuilt_workspace(id));
-        let patch = self.legacy_settings(s, false);
+        let patch = patch.unwrap_or_else(|| self.legacy_settings(s, false));
         self.outbox.push(ServerMsg::HostNotification {
             method: "state.updated",
             params: json!({"patch": patch, "reason": reason, "revision": revision,

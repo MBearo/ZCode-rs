@@ -100,7 +100,13 @@ impl Engine {
                     );
                     let turn = self.clock.id();
                     let message =
-                        super::goal_commands::continuation(s, &frozen, Some(&verdict), &turn, now);
+                        super::goal_commands::continuation(
+                        s,
+                        &frozen,
+                        Some(&verdict),
+                        (&turn, None),
+                        now,
+                    );
                     self.active.get_mut(id).unwrap().turn_id = turn;
                     deltas.push(json!({"op":"row.appended","row":s.rows.last().unwrap()}));
                     Some((frozen, message))

@@ -1,5 +1,5 @@
 use super::Engine;
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 
 impl Engine {
@@ -42,17 +42,29 @@ impl Engine {
                     .store
                     .put_attachment(&upload.chunks, &upload.meta.mime.to_ascii_lowercase())
                     .await?;
-                let reference = format!("zcode-artifact://{}/{}", key.1, self.clock.id());
-                self.sessions
-                    .get_mut(&key.1)
-                    .unwrap()
-                    .attachments
-                    .insert(reference.clone(), asset);
+                let reference = self.register_attachment(&key.1, asset)?;
                 // artifact 字节和 Session 归属都提交成功后才交付 ref；失败不能留下可用的成功回执。
                 self.persist(&key.1, None).await?;
                 self.uploads.committed(&key, reference.clone(), now);
                 Ok(json!({"ref":reference}))
             }
         }
+    }
+
+    /// Registers stored artifact bytes on the session under a new reference:
+    /// the one registration path of uploads and legacy inline attachments.
+    /// The caller persists.
+    pub(super) fn register_attachment(
+        &mut self,
+        id: &str,
+        asset: crate::domain::session::StoredAttachment,
+    ) -> Result<String> {
+        let reference = format!("zcode-artifact://{id}/{}", self.clock.id());
+        self.sessions
+            .get_mut(id)
+            .context("Session unavailable")?
+            .attachments
+            .insert(reference.clone(), asset);
+        Ok(reference)
     }
 }

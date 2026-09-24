@@ -3,7 +3,9 @@ use crate::domain::{MAX_QUEUE, MAX_TOOL_BYTES, protocol::Command};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 impl Engine {
-    pub(super) async fn compact_command(&mut self, c: &Command) -> Result<Value> {
+    /// `start_over_held`: legacy `session/compact` starts at once when idle even
+    /// with a held queue (Node runs it directly); V4 compacts wait behind it.
+    pub(super) async fn compact_command(&mut self, c: &Command, start_over_held: bool) -> Result<Value> {
         let id = c.session_id.as_deref().context("Session id required")?;
         let session = self.sessions.get(id).context("Session unavailable")?;
         if self.model.is_none() && self.registry.is_none() {
@@ -19,7 +21,7 @@ impl Engine {
         }
         let mut ack = c.ack("accepted", session.revision, None);
         let mut turn = None;
-        if session.running() || !session.queue.is_empty() {
+        if session.running() || (!session.queue.is_empty() && !start_over_held) {
             if session.queue.len() >= MAX_QUEUE {
                 return Ok(c.ack("rejected", session.revision, Some("guard.queueFull")));
             }

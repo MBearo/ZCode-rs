@@ -1754,6 +1754,63 @@
           "workspacePath": "/w",
           "workspaceKey": "/w"
         },
+        "mcpServers": [
+          {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "x"],
+            "env": [
+              {
+                "name": "A",
+                "value": "1"
+              }
+            ],
+            "extra": 1
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0: Unrecognized key: \"extra\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"extra\"\n    ],\n    \"path\": [\n      \"mcpServers\",\n      0\n    ],\n    \"message\": \"Unrecognized key: \\\"extra\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "mcpServers": [
+          {
+            "name": "web",
+            "type": "http",
+            "url": "https://x",
+            "headers": [],
+            "extra": 1
+          }
+        ]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mcpServers.0: Unrecognized key: \"extra\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"extra\"\n    ],\n    \"path\": [\n      \"mcpServers\",\n      0\n    ],\n    \"message\": \"Unrecognized key: \\\"extra\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
         "mcpServers": [1]
       },
       "missing": false,
@@ -2565,6 +2622,941 @@
         "data": {
           "name": "ZodError",
           "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"persistAsWorkspaceLastUsed\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"persistAsWorkspaceLastUsed\\\"\"\n  }\n]"
+        }
+      }
+    }
+  ],
+  "send": [
+    {
+      "input": null,
+      "missing": true,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": null,
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received null",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received null\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {},
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — sessionId: Invalid input: expected string, received undefined; content: Invalid input: expected string, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sessionId\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"content\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — content: Invalid input: expected string, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"content\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": " s ",
+        "content": ""
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "content": ""
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "  hi  ",
+        "inputId": " i ",
+        "queryId": "q"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "inputId": "i",
+        "queryId": "q",
+        "content": "  hi  "
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "extra": 1,
+        "automationId": "a",
+        "offPeakTaskId": "b"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized key: \"extra\"; (root): automationId and offPeakTaskId are mutually exclusive",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"extra\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"extra\\\"\"\n  },\n  {\n    \"code\": \"custom\",\n    \"message\": \"automationId and offPeakTaskId are mutually exclusive\",\n    \"path\": []\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "automationId": "a",
+        "offPeakTaskId": "b"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): automationId and offPeakTaskId are mutually exclusive",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"custom\",\n    \"message\": \"automationId and offPeakTaskId are mutually exclusive\",\n    \"path\": []\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "automationId": " ",
+        "offPeakTaskId": "b"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — automationId: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"automationId\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "offPeakRunType": "init"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — offPeakRunType: offPeakRunType requires offPeakTaskId",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"custom\",\n    \"message\": \"offPeakRunType requires offPeakTaskId\",\n    \"path\": [\n      \"offPeakRunType\"\n    ]\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "offPeakRunType": "init",
+        "offPeakTaskId": "b"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "content": "x",
+        "offPeakTaskId": "b",
+        "offPeakRunType": "init"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "offPeakRunType": "later"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — offPeakRunType: Invalid option: expected one of \"init\"|\"resume\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"init\",\n      \"resume\"\n    ],\n    \"path\": [\n      \"offPeakRunType\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"init\\\"|\\\"resume\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "modelExecution": {
+          "selectionScope": "execution"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — modelExecution: modelExecution requires modelSelection",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"custom\",\n    \"message\": \"modelExecution requires modelSelection\",\n    \"path\": [\n      \"modelExecution\"\n    ]\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "modelExecution": {
+          "selectionScope": "execution"
+        }
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "modelExecution": {
+          "selectionScope": "execution"
+        },
+        "content": "x"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "modelExecution": {
+          "selectionScope": "session"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — modelExecution.selectionScope: Invalid input: expected \"execution\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"execution\"\n    ],\n    \"path\": [\n      \"modelExecution\",\n      \"selectionScope\"\n    ],\n    \"message\": \"Invalid input: expected \\\"execution\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "modelExecution": {
+          "selectionScope": "execution",
+          "memoryExtraction": "skip",
+          "requestAuth": {
+            "apiKey": "k",
+            "headers": {
+              "a": "1"
+            }
+          },
+          "subagents": {
+            "foregroundModel": "submission",
+            "background": "deny"
+          }
+        }
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "modelExecution": {
+          "memoryExtraction": "skip",
+          "selectionScope": "execution",
+          "requestAuth": {
+            "apiKey": "k",
+            "headers": {
+              "a": "1"
+            }
+          },
+          "subagents": {
+            "foregroundModel": "submission",
+            "background": "deny"
+          }
+        },
+        "content": "x"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "modelExecution": {
+          "selectionScope": "execution",
+          "requestAuth": {
+            "headers": {
+              "": "1",
+              "b": ""
+            }
+          }
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — modelExecution.requestAuth.headers.: Invalid key in record; modelExecution.requestAuth.headers.b: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_key\",\n    \"origin\": \"record\",\n    \"issues\": [\n      {\n        \"origin\": \"string\",\n        \"code\": \"too_small\",\n        \"minimum\": 1,\n        \"inclusive\": true,\n        \"path\": [],\n        \"message\": \"Too small: expected string to have >=1 characters\"\n      }\n    ],\n    \"path\": [\n      \"modelExecution\",\n      \"requestAuth\",\n      \"headers\",\n      \"\"\n    ],\n    \"message\": \"Invalid key in record\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"modelExecution\",\n      \"requestAuth\",\n      \"headers\",\n      \"b\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "modelExecution": {
+          "selectionScope": "execution",
+          "requestAuth": {
+            "headers": []
+          }
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — modelExecution.requestAuth.headers: Invalid input: expected record, received array",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"modelExecution\",\n      \"requestAuth\",\n      \"headers\"\n    ],\n    \"message\": \"Invalid input: expected record, received array\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "modelExecution": {
+          "selectionScope": "execution",
+          "x": 1
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — modelExecution: Unrecognized key: \"x\"; modelExecution: modelExecution requires modelSelection",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"x\"\n    ],\n    \"path\": [\n      \"modelExecution\"\n    ],\n    \"message\": \"Unrecognized key: \\\"x\\\"\"\n  },\n  {\n    \"code\": \"custom\",\n    \"message\": \"modelExecution requires modelSelection\",\n    \"path\": [\n      \"modelExecution\"\n    ]\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "attachments": []
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "content": "x",
+        "attachments": []
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "attachments": [
+          {
+            "kind": "image",
+            "filename": "a.png"
+          },
+          {}
+        ]
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "content": "x",
+        "attachments": [
+          {
+            "kind": "image",
+            "filename": "a.png"
+          },
+          {}
+        ]
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "attachments": [1]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — attachments.0: Invalid input: expected record, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"attachments\",\n      0\n    ],\n    \"message\": \"Invalid input: expected record, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "attachments": [[]]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — attachments.0: Invalid input: expected record, received array",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"attachments\",\n      0\n    ],\n    \"message\": \"Invalid input: expected record, received array\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "attachments": {}
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — attachments: Invalid input: expected array, received object",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"attachments\"\n    ],\n    \"message\": \"Invalid input: expected array, received object\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 1
+        }
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 1
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 0
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — browserAmbientContext.tabCount: Too small: expected number to be >0",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 0,\n    \"inclusive\": false,\n    \"path\": [\n      \"browserAmbientContext\",\n      \"tabCount\"\n    ],\n    \"message\": \"Too small: expected number to be >0\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 101
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — browserAmbientContext.tabCount: Too big: expected number to be <=100",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_big\",\n    \"maximum\": 100,\n    \"inclusive\": true,\n    \"path\": [\n      \"browserAmbientContext\",\n      \"tabCount\"\n    ],\n    \"message\": \"Too big: expected number to be <=100\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 1.5
+        },
+        "automationId": "a",
+        "offPeakTaskId": "b"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — browserAmbientContext.tabCount: Invalid input: expected int, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"int\",\n    \"format\": \"safeint\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"browserAmbientContext\",\n      \"tabCount\"\n    ],\n    \"message\": \"Invalid input: expected int, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 3,
+          "currentUrl": " https://x "
+        }
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 3,
+          "currentUrl": "https://x"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 3,
+          "currentUrl": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — browserAmbientContext.currentUrl: Too big: expected string to have <=4096 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_big\",\n    \"maximum\": 4096,\n    \"inclusive\": true,\n    \"path\": [\n      \"browserAmbientContext\",\n      \"currentUrl\"\n    ],\n    \"message\": \"Too big: expected string to have <=4096 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 3,
+          "currentUrl": " "
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — browserAmbientContext.currentUrl: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"browserAmbientContext\",\n      \"currentUrl\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "browserAmbientContext": {
+          "tabCount": 3,
+          "tabs": []
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — browserAmbientContext: Unrecognized key: \"tabs\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"tabs\"\n    ],\n    \"path\": [\n      \"browserAmbientContext\"\n    ],\n    \"message\": \"Unrecognized key: \\\"tabs\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "expectedRevision": 2,
+        "expectedProviderRevision": " r "
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "content": "x",
+        "expectedRevision": 2,
+        "expectedProviderRevision": "r"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "expectedRevision": -1,
+        "automationId": "a",
+        "offPeakTaskId": "b"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — expectedRevision: Too small: expected number to be >=0; (root): automationId and offPeakTaskId are mutually exclusive",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 0,\n    \"inclusive\": true,\n    \"path\": [\n      \"expectedRevision\"\n    ],\n    \"message\": \"Too small: expected number to be >=0\"\n  },\n  {\n    \"code\": \"custom\",\n    \"message\": \"automationId and offPeakTaskId are mutually exclusive\",\n    \"path\": []\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "toolDenylist": ["CronCreate", " "]
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — toolDenylist.1: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"toolDenylist\",\n      1\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": 1,
+        "automationId": "a",
+        "offPeakTaskId": "b"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — content: Invalid input: expected string, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"content\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "content": "x",
+        "automationId": "a",
+        "offPeakRunType": "resume",
+        "modelExecution": {
+          "selectionScope": "execution"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — offPeakRunType: offPeakRunType requires offPeakTaskId; modelExecution: modelExecution requires modelSelection",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"custom\",\n    \"message\": \"offPeakRunType requires offPeakTaskId\",\n    \"path\": [\n      \"offPeakRunType\"\n    ]\n  },\n  {\n    \"code\": \"custom\",\n    \"message\": \"modelExecution requires modelSelection\",\n    \"path\": [\n      \"modelExecution\"\n    ]\n  }\n]"
+        }
+      }
+    }
+  ],
+  "compact": [
+    {
+      "input": null,
+      "missing": true,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {},
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — sessionId: Invalid input: expected string, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sessionId\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s"
+      }
+    },
+    {
+      "input": {
+        "sessionId": " s ",
+        "inputId": " i ",
+        "instructions": "  keep  ",
+        "expectedRevision": 0
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "inputId": "i",
+        "instructions": "  keep  ",
+        "expectedRevision": 0
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "instructions": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — instructions: Invalid input: expected string, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"instructions\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "inputId": ""
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — inputId: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"inputId\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "operationId": "o"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized key: \"operationId\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"operationId\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"operationId\\\"\"\n  }\n]"
+        }
+      }
+    }
+  ],
+  "goal": [
+    {
+      "input": null,
+      "missing": true,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — action: Invalid option: expected one of \"show\"|\"set\"|\"replace\"|\"pause\"|\"resume\"|\"clear\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"show\",\n      \"set\",\n      \"replace\",\n      \"pause\",\n      \"resume\",\n      \"clear\"\n    ],\n    \"path\": [\n      \"action\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"show\\\"|\\\"set\\\"|\\\"replace\\\"|\\\"pause\\\"|\\\"resume\\\"|\\\"clear\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "show"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "action": "show"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "set"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "action": "set"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "replace"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "action": "replace"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "pause"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "action": "pause"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "resume"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "action": "resume"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "clear"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "action": "clear"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "stop"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — action: Invalid option: expected one of \"show\"|\"set\"|\"replace\"|\"pause\"|\"resume\"|\"clear\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"show\",\n      \"set\",\n      \"replace\",\n      \"pause\",\n      \"resume\",\n      \"clear\"\n    ],\n    \"path\": [\n      \"action\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"show\\\"|\\\"set\\\"|\\\"replace\\\"|\\\"pause\\\"|\\\"resume\\\"|\\\"clear\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "set",
+        "objective": "  do it  ",
+        "inputId": "i",
+        "expectedRevision": 1
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "inputId": "i",
+        "action": "set",
+        "objective": "  do it  ",
+        "expectedRevision": 1
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": "set",
+        "objective": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — objective: Invalid input: expected string, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"objective\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "action": 1,
+        "extra": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — action: Invalid option: expected one of \"show\"|\"set\"|\"replace\"|\"pause\"|\"resume\"|\"clear\"; (root): Unrecognized key: \"extra\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"show\",\n      \"set\",\n      \"replace\",\n      \"pause\",\n      \"resume\",\n      \"clear\"\n    ],\n    \"path\": [\n      \"action\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"show\\\"|\\\"set\\\"|\\\"replace\\\"|\\\"pause\\\"|\\\"resume\\\"|\\\"clear\\\"\"\n  },\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"extra\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"extra\\\"\"\n  }\n]"
         }
       }
     }

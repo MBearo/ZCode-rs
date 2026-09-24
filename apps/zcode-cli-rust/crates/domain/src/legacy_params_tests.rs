@@ -90,3 +90,11 @@ fn setter_params_match_zod() {
     check(set_thought_level, &fixtures["setThoughtLevel"]);
     check(set_mode, &fixtures["setMode"]);
 }
+
+#[test]
+fn input_params_match_zod() {
+    let fixtures = fixtures();
+    check(crate::legacy_input_params::send, &fixtures["send"]);
+    check(crate::legacy_input_params::compact, &fixtures["compact"]);
+    check(crate::legacy_input_params::goal, &fixtures["goal"]);
+}

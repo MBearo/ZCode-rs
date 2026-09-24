@@ -64,6 +64,8 @@ pub struct Issue {
     message: String,
     /// zod `continue !== true`: type errors abort, checks (lengths, formats) do not.
     aborts: bool,
+    /// `ctx.addIssue` issues keep the caller's key order: `code, message, path`.
+    custom: bool,
 }
 
 impl Issue {
@@ -73,6 +75,18 @@ impl Issue {
             path: vec![],
             message,
             aborts,
+            custom: false,
+        }
+    }
+
+    /// A `superRefine` issue (`code: "custom"`, never aborting).
+    pub fn custom(path: &[&'static str], message: &str) -> Self {
+        Self {
+            head: vec![("code", J::S("custom".into()))],
+            path: path.iter().map(|p| J::S((*p).into())).collect(),
+            message: message.into(),
+            aborts: false,
+            custom: true,
         }
     }
 
@@ -83,8 +97,13 @@ impl Issue {
 
     pub fn json(&self) -> J {
         let mut fields = self.head.clone();
-        fields.push(("path", J::A(self.path.clone())));
-        fields.push(("message", J::S(self.message.clone())));
+        let path = ("path", J::A(self.path.clone()));
+        let message = ("message", J::S(self.message.clone()));
+        if self.custom {
+            fields.extend([message, path]);
+        } else {
+            fields.extend([path, message]);
+        }
         J::O(fields)
     }
 
@@ -141,11 +160,13 @@ pub enum Schema {
     String {
         trim: bool,
         min: Option<usize>,
+        max: Option<usize>,
         format: Option<Format>,
     },
     Bool,
-    /// `z.number().int()` with an optional lower bound `(minimum, inclusive)`.
-    Int(Option<(i64, bool)>),
+    /// `z.number().int()` with an optional lower bound `(minimum, inclusive)`
+    /// and an optional inclusive upper bound, checked in that order.
+    Int(Option<(i64, bool)>, Option<i64>),
     Enum(&'static [&'static str]),
     Literal(Value),
     Array(Box<Schema>, Option<usize>),
@@ -153,6 +174,11 @@ pub enum Schema {
     Object(Vec<(&'static str, Schema, bool)>),
     Union(Vec<Schema>),
     Discriminated(&'static str, Vec<(&'static str, Schema)>),
+    /// `z.record(key, value)`; no value schema is `z.unknown()`.
+    Record(Box<Schema>, Option<Box<Schema>>),
+    /// `.superRefine(check)`: `check` sees the parsed value and runs only when
+    /// no aborting issue was raised.
+    Refined(Box<Schema>, fn(&Value) -> Vec<Issue>),
 }
 
 /// `z.string().trim().min(1)`.
@@ -160,6 +186,7 @@ pub fn non_empty() -> Schema {
     Schema::String {
         trim: true,
         min: Some(1),
+        max: None,
         format: None,
     }
 }
@@ -168,6 +195,17 @@ pub fn string() -> Schema {
     Schema::String {
         trim: false,
         min: None,
+        max: None,
+        format: None,
+    }
+}
+
+/// `z.string().min(min)` (not trimmed).
+pub fn string_min(min: usize) -> Schema {
+    Schema::String {
+        trim: false,
+        min: Some(min),
+        max: None,
         format: None,
     }
 }
@@ -221,6 +259,20 @@ fn too_small(origin: &'static str, minimum: i64, inclusive: bool, message: Strin
             ("code", J::S("too_small".into())),
             ("minimum", J::N(minimum)),
             ("inclusive", J::V(Value::Bool(inclusive))),
+        ],
+        message,
+        false,
+    )
+}
+
+/// `.max()` of numbers and strings (always inclusive).
+fn too_big(origin: &'static str, maximum: i64, message: String) -> Issue {
+    Issue::new(
+        vec![
+            ("origin", J::S(origin.into())),
+            ("code", J::S("too_big".into())),
+            ("maximum", J::N(maximum)),
+            ("inclusive", J::V(Value::Bool(true))),
         ],
         message,
         false,

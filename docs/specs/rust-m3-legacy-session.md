@@ -481,3 +481,174 @@ sequenceDiagram
 - `exceptionType` 为近似值；`durationMs` 不含准入排队。
 - 空闲超时计时会扣除 stdout 背压时间（Rust 既有行为）。
 - serde_json 的对象按键排序，头部截取的"前 32 项"按名称排序而非插入顺序（Host 的请求头通常少于 32 项）。
+
+### 9.12 M3.3d：`session/send`、`session/compact`、`session/goal`
+
+依据：`scratchpad/research/legacy-send-compact-goal.md`（下称 SCG）；Node `SO:1917-2118`、`SO:2120-2582`、`SO:2788-2838`、`SO:3995-4049`，schema `SH:1726-1886`、`model-execution.ts`、`model-selection.ts`，Host `TA:375-488`、`TA:2060-2168`。
+
+#### 用途
+
+- Host 只在手机发送**带附件**的输入时用 `session/send`，无附件走 V4 `sendText`；手机的 `/compact` 与 `/goal` 走 `session/compact` / `session/goal`。
+- 三个方法都在工作开始后立即返回；之后的进展由 legacy 事件流、`state.updated` 与 V4 帧报告。
+- 三者只是 V4 单一写入路径（`Engine::command` → `send_input` / `compact_command` / `goal_command`）的 legacy 适配层，不另建 admission。
+
+#### 所有者：legacy 锁
+
+Node 的 `record.activeAbortController` 比"有运行在进行"窄：V4 `sendText` 轮、队列提升的文本轮、后台通知轮与 Core 自动目标续跑都不持有它。Rust 用活跃运行的属性 `Active.legacy_lock` 表达：
+
+- 持有者：
+  - 手动压缩运行：turn header `executionKind: "controlOnly"`，无论来自 legacy、V4 还是队列提升；
+  - 客户端目标命令启动的运行：legacy `set` / `replace` / `resume`，V4 `sendGoalCommand` / `resumeGoal`；后台自动续跑（`goal-background`）不算；
+  - `session/send` 直接开始（startNow）的运行。
+- 生命周期：随运行开始设置，运行结束时随 `active` 条目一起移除。移除发生在 `turn.completed` 与 `state.updated` 之前，与 Node "先释放再广播"一致。
+- 运行类型（`Prompt` / `Compact` / `Goal`）在开轮时判定一次，同时决定锁、`turn.started` 的补充字段和结束时的 `state.updated` 原因。
+
+```mermaid
+sequenceDiagram
+    participant H as Host
+    participant E as Engine
+    participant V as V4 写入路径
+    participant R as Run
+    H->>E: session/send | compact | goal
+    E->>E: 参数（-32602）→ 常驻（-32004）→ expectedRevision（-32009）→ legacy 锁（-32010）
+    E->>V: Command（legacy clientId）
+    V->>R: start_run（空闲）或入队 / 引导（忙且未持锁）
+    V-->>E: ACK
+    E->>E: stateRevision+1
+    E-->>H: 回包 {…, stateRevision}
+    E-->>H: V4 帧、state.updated（prompt_started / compact_started / goal_*）
+    R->>E: Finished
+    E->>E: 移除 active（释放锁）
+    E-->>H: turn.completed / turn.failed，state.updated（按运行类型的结束原因）
+```
+
+Rust 的回包总在同一批通知之前发出（Node 先发 `state.updated`）；Host 不依赖两者的先后顺序。
+
+#### 参数（strict，错误格式同 2.1）
+
+- **`session/send`**：
+  - 字段：`sessionId`；`modelSelection?`（同 `session/create` 的 `model`）；`modelExecution?`：
+    - `memoryExtraction?: "skip"`；
+    - `selectionScope: "execution"`；
+    - `requestAuth?: {apiKey?: string min 1, headers?: record<string min 1, string min 1>}`；
+    - `subagents?: {foregroundModel: "submission", background: "deny"}`。
+  - 另有 `inputId?`、`queryId?`，以及 `content: string`（不裁剪，可为空）。
+  - `attachments?: record[]`：只要求每项是 JSON 对象。
+  - `browserAmbientContext?: {tabCount: int, >0, <=100; currentUrl?: 裁剪后 1..4096}`。
+  - 最后是 `expectedRevision?`、`expectedProviderRevision?`（忽略）、`automationId?`、`offPeakTaskId?`、`offPeakRunType?: init | resume` 与 `toolDenylist?`。
+  - 对象级校验只在没有中断性问题时运行，因此 `unrecognized_keys`、`too_small`、`too_big` 不阻止它。它依次检查以下条件，并按 `code, message, path` 的键序追加 `custom` 问题：
+    1. `automationId and offPeakTaskId are mutually exclusive`（根路径）；
+    2. `offPeakRunType requires offPeakTaskId`；
+    3. `modelExecution requires modelSelection`。
+- **`session/compact`**：`{sessionId, inputId?, instructions?: string, expectedRevision?}`。
+- **`session/goal`**：`{sessionId, inputId?, action: show | set | replace | pause | resume | clear, objective?: string, expectedRevision?}`。
+
+zod 模拟随之补充 record、数值与字符串上限及对象级校验；`unrecognized_keys` 改为不中断，与 zod 4.6.5 的 `continue: true` 一致，同时修正联合类型的分支选择。
+
+#### `session/send`
+
+1. 校验参数（`-32602`）、会话常驻（`-32004`）。
+2. 子代理会话：`-32010 Subagent sessions are read-only`，data `{reasonCode: "guard.subagentReadOnly"}`。
+3. `expectedRevision` 与 legacy `stateRevision` 不等：`-32009`。
+4. 持锁运行在进行：`-32010 A prompt is already running for this session`。
+5. 映射附件（见下表）。
+6. 组装 V4 `sendText`：
+   - `clientId: "legacy-session-send"`，`commandId = inputId ?? 新 UUID`；
+   - `text = content`；
+   - 原样带上 `modelSelection`、`modelExecution`、`browserAmbientContext`、`automationId` / `offPeakTaskId` / `offPeakRunType`；
+   - `toolDisallowlist = toolDenylist`，`heldQueueDisposition: "keepQueueAndSend"`；
+   - 未持锁的运行在进行时，`requestedDelivery` 有附件为 `queue`，否则为 `guide`（Node 的引导或排队）。
+7. ACK 处理：
+   - `accepted` 且 startNow：新运行持锁。
+   - `accepted` 且入队或引导，或 `duplicate`：视为成功。随后立即发 `prompt_completed`，因为 Node 的后台在此时返回。
+   - `failed` 且原因为 `activePrompt`（忙且带 `modelExecution`）：与 Node 一致，照常返回 accepted，之后发 `prompt_failed`，输入被丢弃。
+   - 其他 `rejected` / `failed`：`-32010`，message 取 ACK 的 message 或原因码，data `{reasonCode}`。
+   - 同步校验错误（文本或附件不合法、模型不可用等）：直接作为 RPC 错误返回（fail-fast，差异见下）。
+8. `stateRevision += 1`，发 `state.updated {reason: "prompt_started", patch: {status: "running"}}`，返回 `{sessionId, accepted: true, stateRevision}`。
+
+**附件映射**（Node `mapProtocolPromptAttachment`，无法映射的项丢弃）：
+
+| 条件                                                                                                                         | V4 `AttachmentRef`                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 类别：`kind` 为 `pdf` 或 MIME 基础类型为 `application/pdf` 时为 PDF；否则按 `kind` 取 image / video / file / audio；其余丢弃 | —                                                                                                                                                                                                                                                                                              |
+| `fileName`                                                                                                                   | `filename`，去掉 `\0` `\r` `\n`，截到 255 字符，空为 `attachment`                                                                                                                                                                                                                              |
+| `mime`                                                                                                                       | PDF：`application/pdf`；image / video / file：合法的基础 MIME（image 须为 `image/*`），否则 image 按文件头识别（无法识别则丢弃），video 为 `video/mp4`，file 有 `textContent` 时为 `text/plain`、否则为 `application/octet-stream`；audio：`application/octet-stream`（Node 把音频当文件发送） |
+| 有 `localPath`                                                                                                               | `ref = localPath`（由 admission 读取快照）                                                                                                                                                                                                                                                     |
+| PDF / image / video 带 `dataBase64`                                                                                          | 解码后暂存为会话附件（`zcode-artifact://`）                                                                                                                                                                                                                                                    |
+| file / audio 带 `textContent`                                                                                                | UTF-8 字节暂存                                                                                                                                                                                                                                                                                 |
+| file / audio 带 `dataBase64`，且 `sizeBytes` 缺省或不超过 65 536                                                             | 解码后暂存                                                                                                                                                                                                                                                                                     |
+| 其他                                                                                                                         | 丢弃                                                                                                                                                                                                                                                                                           |
+
+- 暂存与 `v4/attachment/commit` 共用一个"写入附件并登记到会话"的函数。
+- 命令失败时撤销本次登记，已写入的内容寻址字节保留为孤儿。
+- 非法 base64 丢弃该项（Node 宽松解码）。
+
+#### `session/compact`
+
+1. 校验参数、常驻、`expectedRevision`（`-32602` / `-32004` / `-32009`），没有子代理限制。
+2. 当前运行是手动压缩：返回 `{response: "", snapshot（当前模型）, compact: {state: "already_running", inputId?}}`，不推进 revision。
+3. 持锁运行在进行：`-32010 Cannot compact while a prompt is running`。
+4. 以 V4 `compact` 命令执行：`clientId: "legacy-session"`，`commandId = inputId ?? 新 UUID`，`text = instructions` 裁剪后的值。
+   - 空闲时即使有暂停的队列也立即开始（Node 直接运行）；V4 自身的 compact 仍排在暂停队列之后。
+   - 未持锁的运行在进行时，排到队尾。
+   - 非 accepted 的 ACK：`guard.capabilityUnsupported` 为 `-32603`，其余为 `-32010`。
+5. `stateRevision += 1`，发 `state.updated {reason: "compact_started", patch: {status: "running"}}`。
+6. 返回 `{response: "", snapshot（当前模型）, compact: {state: "accepted", inputId?}}`；`inputId` 只回显参数中给出的值，`operationId` 从不出现。
+
+#### `session/goal`
+
+公共前缀：校验参数、常驻、`expectedRevision`；除 `pause` 外，持锁运行在进行时返回 `-32010 Cannot manage goals while a prompt is running`（`show` 也受限）。
+
+| action            | 行为                                                                                                                                                                                                                                                                     | `response`                                                                                            | 快照                 | `state.updated`              | `startedTurn`        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | -------------------- | ---------------------------- | -------------------- |
+| `show`            | 只读                                                                                                                                                                                                                                                                     | 无目标：`No goal is set. Use /goal <objective> to set one.`；否则 `Goal <legacy 状态>` 加三行（见下） | 全部模型             | 无                           | `false`              |
+| `pause`           | 有目标：V4 `pauseGoal`（只暂停活跃目标）；只中止持锁的运行                                                                                                                                                                                                               | 有目标为 `""`，否则 `No goal to pause.`                                                               | 当前模型             | `goal_paused`（总是）        | `false`              |
+| `resume`          | 无目标：只返回文本。否则 V4 `resumeGoal`（`commandId = inputId ?? 新 UUID`）：plan 开启、有队列或后台任务时只把目标置为 active 不开轮；未持锁运行在进行时 `-32010`（同上文本）                                                                                           | 无目标：`No goal to resume.`；否则 `Goal resumed` 加三行                                              | 无目标全部，否则当前 | 有目标时 `goal_resumed`      | 有目标且 plan 未开启 |
+| `clear`           | 删除目标（新的 `clear_goal` 变更：`goal = None`、V4 revision+1、发布、落盘）                                                                                                                                                                                             | `Goal cleared.` / `No goal to clear.`                                                                 | 当前模型             | `goal_cleared`（总是）       | `false`              |
+| `set` / `replace` | `objective` 裁剪后为空：只返回用法文本。否则 V4 `sendGoalCommand`（`displayText = objective`、`keepQueueAndSend`）：空闲时开轮，未持锁运行在进行时排队；plan 开启时只记录 active 目标不开轮（Node 行为）。已有目标或 `replace` 时原因为 `goal_replaced`，否则 `goal_set` | 空：`Usage: /goal replace <objective>` / `Usage: /goal <objective>`；否则 `Goal active` 加三行        | 空时全部，否则当前   | `goal_set` / `goal_replaced` | 非空且 plan 未开启   |
+
+- 三行：`Objective: <objective>`、`Usage: <tokensUsed> tokens / <tokenBudget 或 none>`、`Time: <秒> seconds`。
+- plan 开启且未开轮时，`response` 追加 `\n\nPlan mode 下已记录 goal，但不会自动继续。`。
+- legacy 状态映射（同时用于快照 `target`）：`active` / `verifying` / `notSatisfied` / `failed` → `active`；`paused` → 预算耗尽时为 `budget_limited`，否则 `paused`；`verified` → `complete`。
+- `startedTurn` 为 Node 的 `canContinue`（plan 未开启）：排在未持锁运行之后，或因队列、后台任务暂缓的续跑也算。
+- 目标命令启动的续跑 header 带 `sourceCommandId`（后台自动续跑除外），`turn.started` / `turn.completed` 因此带 `inputId`。
+
+#### 快照 `target`
+
+`session.target` 与 `projection.target` 由 `session.goal` 生成，符合 strict `zcodeSessionGoalSchema`：
+
+- 标识与内容：`sessionId`、`targetId`、`objective`、`summaryTitle: null`、`status`（上表的映射）；
+- 用量：`tokenBudget`（无或 0 为 `null`）、`tokensUsed`、`timeUsedSeconds`；
+- 运行时刻：`activeRunStartedAtMs`、`activeRunLastSeenAtMs`；
+- 时间戳：`createdAt`、`updatedAt`。
+
+`Goal` 新增 `createdAt` / `updatedAt`（serde 缺省为 0，旧数据回退为会话的 `createdAt`），状态与用量变化时刷新 `updatedAt`。
+
+#### 运行类型与事件补充
+
+| 运行类型  | 判定（开轮时）                                                                  | `turn.started` 补充                                                                                             | 结束原因（成功 / 取消 / 失败）                                                          |
+| --------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `Compact` | header `executionKind: "controlOnly"`                                           | `input: "/compact[ <instructions>]"`、`inputId`（header 的 `sourceCommandId`）、`inputVisibility: "model-only"` | `session_compacted` / `session_compact_cancelled` / `session_compact_failed`            |
+| `Goal`    | 输入边界为 `sendGoalCommand`，或 `goalContinuation` header 带 `sourceCommandId` | 续跑 header 的 `inputId`                                                                                        | `goal_continuation_completed` / `goal_continuation_failed` / `goal_continuation_failed` |
+| `Prompt`  | 其他                                                                            | —                                                                                                               | `prompt_completed` / `prompt_failed` / `prompt_failed`                                  |
+
+`session.titleUpdated`（`first_input`）只在首个输入所在的轮发出；此前的条件"会话恰有一个输入"会让随后的压缩或目标续跑重复发出。
+
+#### 与 Node 的差异
+
+1. 附件、文本、模型选择的问题在 admission 时同步失败并返回 RPC 错误；Node 先 ACK，再在运行中降级为占位文本或让该轮失败。附件与文本还受 V4 上限约束（16 个附件、文本 64 KiB、压缩说明 64 KiB、目标 4000 字符）。
+2. 重复的 `inputId` 按 V4 命令去重（成功但不再开轮）；Node 会再开一轮。不同于 `inputId` 的 `queryId` 不保留。
+3. legacy 发送沿用 V4 提交语义：`auto` 模式按 `build` 提交（Node 保持不变）。
+4. 目标状态模型不同：`pause` 只作用于活跃目标（Node 会把 `complete` 改成 `paused`）；`resume` 在有队列或后台任务时不开轮；未持锁运行在进行时 `resume` 返回 `-32010`（Node 排在该轮之后）。
+5. plan 开启时 `set` 只记录目标，不写入 Node 的可见用户消息。
+6. 目标的模型提醒（暂停、恢复、清除）与 legacy `TargetChanged` / 压缩事件属于 M3.3b-2。
+7. 快照 `session.status` 在开轮后恒为 `running`（Node 有竞态，可能仍为 `idle`）。
+8. `restoreWarning`（`-32031`）与 "Goal management is not available in this client." 在 Node 中不可达，不实现。
+
+#### 验收（M3.3d）
+
+- 参数夹具：生成脚本对 send / compact / goal 调用共享 zod schema 与 Node `parseParams`，覆盖对象级校验的顺序与跳过条件、record、上限与裁剪；Rust 逐条比较（含 `data.message`）。
+- 集成测试（`zcode-cli-rust-legacy-input.test.ts`）：
+  - send：回包 strict、`prompt_started` 早于运行结束，`turn.started.inputId` 为 `inputId`；带内联图片、文本文件、超限 base64（丢弃）与音频（作为文件）；持锁时 `-32010`；子代理 `-32010` 带 data；`-32009`。
+  - compact：accepted 回包与 `compact_started`，结束时 `session_compacted`，`turn.started` 带 `/compact` 与 `inputId`；压缩中再次调用得到 `already_running`。
+  - goal：set → show → pause（`""`，`goal_paused`）→ resume（`startedTurn`）→ clear 的文本、原因与快照 `target`（strict schema，set 后 `session.status` 为 `running`）；plan 开启时的 set 附加说明且不开轮。

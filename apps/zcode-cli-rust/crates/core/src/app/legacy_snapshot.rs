@@ -20,10 +20,14 @@ impl Engine {
         let mut snapshot = self.read_session_snapshot(s, &json!({}))?;
         let bound = !s.provider.is_empty() && !s.model.is_empty();
         snapshot["settings"] = self.legacy_settings(s, all_models);
+        // Host 把快照的 target 写入任务索引：必须反映当前目标，否则手机任务列表会丢失它。
+        let target = s.goal.as_ref().map_or(Value::Null, |goal| {
+            crate::domain::legacy_goal::target(goal, id, s.created_at)
+        });
 
         let info = &mut snapshot["session"];
         info["mode"] = "build".into();
-        info["target"] = Value::Null;
+        info["target"] = target.clone();
         if let Some(trace) = &s.trace_id {
             info["traceId"] = trace.clone().into();
         }
@@ -42,7 +46,7 @@ impl Engine {
 
         let projection = &mut snapshot["projection"];
         projection["mode"] = "build".into();
-        projection["target"] = Value::Null;
+        projection["target"] = target;
         let runtime = &mut snapshot["runtime"];
         runtime["stateRevision"] = s.runtime.state_revision.into();
         runtime["eventSeq"] = s.runtime.legacy.seq().into();

@@ -1,5 +1,7 @@
 //! zod 4 run semantics for [`Schema`](super::Schema).
-use super::{Format, Issue, J, Parsed, Schema, aborted, invalid_type, js_trim, too_small};
+use super::{
+    Format, Issue, J, Parsed, Schema, aborted, invalid_type, js_trim, too_big, too_small,
+};
 use serde_json::{Map, Value};
 
 const MAX_SAFE: i64 = 9_007_199_254_740_991;
@@ -17,12 +19,17 @@ fn fail(issue: Issue) -> Parsed {
 
 pub(super) fn run(schema: &Schema, value: Option<&Value>) -> Parsed {
     match schema {
-        Schema::String { trim, min, format } => string(value, *trim, *min, format.as_ref()),
+        Schema::String {
+            trim,
+            min,
+            max,
+            format,
+        } => string(value, *trim, (*min, *max), format.as_ref()),
         Schema::Bool => match value {
             Some(Value::Bool(b)) => (Value::Bool(*b), vec![]),
             _ => fail(invalid_type("boolean", value)),
         },
-        Schema::Int(minimum) => int(value, *minimum),
+        Schema::Int(minimum, maximum) => int(value, *minimum, *maximum),
         Schema::Enum(values) => match value {
             Some(Value::String(s)) if values.contains(&s.as_str()) => {
                 (Value::String(s.clone()), vec![])
@@ -60,13 +67,21 @@ pub(super) fn run(schema: &Schema, value: Option<&Value>) -> Parsed {
         Schema::Object(fields) => object(value, fields),
         Schema::Union(options) => union(value, options),
         Schema::Discriminated(key, options) => discriminated(value, key, options),
+        Schema::Record(key, item) => record(value, key, item.as_deref()),
+        Schema::Refined(inner, check) => {
+            let (parsed, mut issues) = run(inner, value);
+            if !aborted(&issues) {
+                issues.extend(check(&parsed));
+            }
+            (parsed, issues)
+        }
     }
 }
 
 fn string(
     value: Option<&Value>,
     trim: bool,
-    min: Option<usize>,
+    (min, max): (Option<usize>, Option<usize>),
     format: Option<&Format>,
 ) -> Parsed {
     let Some(Value::String(raw)) = value else {
@@ -82,6 +97,15 @@ fn string(
             min as i64,
             true,
             format!("Too small: expected string to have >={min} characters"),
+        ));
+    }
+    if let Some(max) = max
+        && text.encode_utf16().count() > max
+    {
+        issues.push(too_big(
+            "string",
+            max as i64,
+            format!("Too big: expected string to have <={max} characters"),
         ));
     }
     match format {
@@ -114,8 +138,8 @@ fn string(
     (Value::String(text.to_owned()), issues)
 }
 
-/// `z.number().int()` plus an optional `nonnegative` / `positive` bound.
-fn int(value: Option<&Value>, minimum: Option<(i64, bool)>) -> Parsed {
+/// `z.number().int()` plus an optional `nonnegative` / `positive` bound and `max`.
+fn int(value: Option<&Value>, minimum: Option<(i64, bool)>, maximum: Option<i64>) -> Parsed {
     let Some(Value::Number(number)) = value else {
         return fail(invalid_type("number", value));
     };
@@ -171,6 +195,13 @@ fn int(value: Option<&Value>, minimum: Option<(i64, bool)>) -> Parsed {
             min,
             inclusive,
             format!("Too small: expected number to be {op}{min}"),
+        ));
+    }
+    if let Some(max) = maximum.filter(|max| n > *max as f64) {
+        issues.push(too_big(
+            "number",
+            max,
+            format!("Too big: expected number to be <={max}"),
         ));
     }
     (Value::Number(number.clone()), issues)
@@ -237,7 +268,9 @@ fn object(value: Option<&Value>, fields: &[(&'static str, Schema, bool)]) -> Par
                 ),
             ],
             format!("Unrecognized {noun}: {}", quoted.join(", ")),
-            true,
+            // zod 4.6.5 的 unrecognized_keys 带 `continue: true`：不中断对象级校验，
+            // 联合类型中只多出未知键的分支仍算未中断（原先按中断处理，分支选择与 zod 不同）。
+            false,
         ));
     }
     (Value::Object(out), issues)
@@ -304,4 +337,42 @@ fn discriminated(
         true,
     );
     fail(issue.prefixed(J::S(key.into())))
+}
+
+/// zod `$ZodRecord` with a non-enumerable key schema: every key is checked
+/// (a failing key is an aborting `invalid_key`), then its value.
+fn record(value: Option<&Value>, key: &Schema, item: Option<&Schema>) -> Parsed {
+    let Some(Value::Object(input)) = value else {
+        return fail(invalid_type("record", value));
+    };
+    let mut out = Map::new();
+    let mut issues = vec![];
+    // serde_json 的对象按键排序；多个键的检查顺序可能与 JS 插入顺序不同（已知差异）。
+    for (name, field) in input {
+        let (_, found) = run(key, Some(&Value::String(name.clone())));
+        if !found.is_empty() {
+            let nested = found.iter().map(Issue::json).collect();
+            let issue = Issue::new(
+                vec![
+                    ("code", J::S("invalid_key".into())),
+                    ("origin", J::S("record".into())),
+                    ("issues", J::A(nested)),
+                ],
+                "Invalid key in record".into(),
+                true,
+            );
+            issues.push(issue.prefixed(J::S(name.clone())));
+            continue;
+        }
+        let parsed = match item {
+            Some(schema) => {
+                let (parsed, found) = run(schema, Some(field));
+                issues.extend(prefix(found, J::S(name.clone())));
+                parsed
+            }
+            None => field.clone(),
+        };
+        out.insert(name.clone(), parsed);
+    }
+    (Value::Object(out), issues)
 }

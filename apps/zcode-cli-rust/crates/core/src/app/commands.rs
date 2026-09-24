@@ -76,10 +76,10 @@ impl Engine {
             return self.apply_file_rewind(&c).await;
         }
         if c.kind == "compact" {
-            return self.compact_command(&c).await;
+            return self.compact_command(&c, false).await;
         }
         if matches!(c.kind.as_str(), "pauseGoal" | "resumeGoal") {
-            return self.goal_command(&c).await;
+            return self.goal_command(&c, false).await;
         }
         if c.kind == "sendGoalCommand" {
             let text = c.payload["text"]

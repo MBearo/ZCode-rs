@@ -176,9 +176,38 @@ pub fn usage_json(usage: [u64; 6]) -> Value {
         "cacheReadTokens": usage[3], "cacheWriteTokens": usage[4], "reasoningTokens": usage[5]})
 }
 
+/// What started a run, decided once at run start: whether it holds the legacy
+/// lock and which `state.updated` reason its end reports (spec 9.12).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum RunKind {
+    /// A user or queued input, or a background continuation.
+    #[default]
+    Prompt,
+    /// A manual compaction (`executionKind: "controlOnly"`).
+    Compact,
+    /// A goal set or continued by a client goal command.
+    Goal,
+}
+
+impl RunKind {
+    /// Node `afterStateMutation` reason at the run's end.
+    pub fn end_reason(self, success: bool, cancelled: bool) -> &'static str {
+        match (self, success, cancelled) {
+            (Self::Prompt, true, _) => "prompt_completed",
+            (Self::Prompt, false, _) => "prompt_failed",
+            (Self::Compact, true, _) => "session_compacted",
+            (Self::Compact, false, true) => "session_compact_cancelled",
+            (Self::Compact, false, false) => "session_compact_failed",
+            (Self::Goal, true, _) => "goal_continuation_completed",
+            (Self::Goal, false, _) => "goal_continuation_failed",
+        }
+    }
+}
+
 /// Totals of the running turn (Node `turn_complete` payload inputs).
 #[derive(Clone, Debug, Default)]
 pub struct TurnTally {
+    pub kind: RunKind,
     pub started_at: u64,
     pub input_id: Option<String>,
     /// The last model step's text (Node `loopState.modelResponse`).

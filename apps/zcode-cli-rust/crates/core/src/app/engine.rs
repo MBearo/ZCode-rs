@@ -31,6 +31,11 @@ pub(super) struct Active {
     pub execution: Option<std::sync::Arc<super::submission::Execution>>,
     /// Permission inputs for this run's tool calls; the engine publishes updates.
     pub permissions: tokio::sync::watch::Sender<std::sync::Arc<super::permissions::Snapshot>>,
+    /// What started the run (spec 9.12).
+    pub kind: crate::domain::legacy_stream::RunKind,
+    /// Node `record.activeAbortController`: legacy send / compact / goal refuse
+    /// to start while it is held (spec 9.12).
+    pub legacy_lock: bool,
 }
 pub struct Engine {
     pub(super) child_updates:
@@ -329,6 +334,9 @@ impl Engine {
             Method::SessionSetModel | Method::SessionSetThoughtLevel | Method::SessionSetMode => {
                 self.legacy_setter(call.method, p).await
             }
+            Method::SessionSend => self.legacy_send(p).await,
+            Method::SessionCompact => self.legacy_compact(p).await,
+            Method::SessionGoal => self.legacy_goal(p).await,
             Method::ProviderUpdateAccountConfig => self.update_account(p).await,
             method => self.query(method, p),
         };

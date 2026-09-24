@@ -1,6 +1,6 @@
 //! Params of the legacy `session/*` methods (`zcodeSessionCreateParamsSchema`,
 //! `zcodeSessionResumeParamsSchema` and the setter schemas).
-use super::zod::{Format, Schema, non_empty, protocol_error, string};
+use super::zod::{Format, Schema, non_empty, protocol_error, string, string_min};
 use serde_json::{Value, json};
 use std::sync::OnceLock;
 
@@ -11,21 +11,21 @@ pub struct ParamsError {
     pub data: Value,
 }
 
-fn optional(key: &'static str, schema: Schema) -> (&'static str, Schema, bool) {
+pub(crate) fn optional(key: &'static str, schema: Schema) -> (&'static str, Schema, bool) {
     (key, schema, true)
 }
 
-fn required(key: &'static str, schema: Schema) -> (&'static str, Schema, bool) {
+pub(crate) fn required(key: &'static str, schema: Schema) -> (&'static str, Schema, bool) {
     (key, schema, false)
 }
 
-fn strings() -> Schema {
+pub(crate) fn strings() -> Schema {
     Schema::Array(Box::new(non_empty()), None)
 }
 
 /// `z.number().int().nonnegative()`.
-fn non_negative() -> Schema {
-    Schema::Int(Some((0, true)))
+pub(crate) fn non_negative() -> Schema {
+    Schema::Int(Some((0, true)), None)
 }
 
 fn workspace() -> Schema {
@@ -37,7 +37,7 @@ fn workspace() -> Schema {
     ])
 }
 
-fn model() -> Schema {
+pub(crate) fn model() -> Schema {
     Schema::Object(vec![
         required("providerId", non_empty()),
         required("modelId", non_empty()),
@@ -65,7 +65,7 @@ fn mcp_server() -> Schema {
                 "protocolVersion",
                 Schema::Enum(&["legacy", "auto", "2026-07-28"]),
             ),
-            optional("timeoutMs", Schema::Int(Some((0, false)))),
+            optional("timeoutMs", Schema::Int(Some((0, false)), None)),
         ]
     };
     let oauth = Schema::Union(vec![
@@ -108,6 +108,7 @@ fn imported_history() -> Schema {
     let hex = || Schema::String {
         trim: false,
         min: None,
+        max: None,
         format: Some(Format::Hex64),
     };
     let message = Schema::Object(vec![
@@ -134,6 +135,7 @@ fn imported_history() -> Schema {
             Schema::String {
                 trim: false,
                 min: None,
+                max: None,
                 format: Some(Format::Url),
             },
         ),
@@ -156,11 +158,7 @@ fn imported_history() -> Schema {
         optional("createdAt", non_negative()),
         required(
             "markdown",
-            Schema::String {
-                trim: false,
-                min: Some(1),
-                format: None,
-            },
+            string_min(1),
         ),
         required("provenance", provenance),
     ]);
@@ -254,7 +252,7 @@ fn setter_schemas() -> &'static [Schema; 4] {
 
 /// Node `parseParams`. The transport cannot tell absent params from `null`;
 /// both are treated as absent (`received undefined`).
-fn parse(schema: &Schema, params: &Value) -> Result<Value, ParamsError> {
+pub(crate) fn parse(schema: &Schema, params: &Value) -> Result<Value, ParamsError> {
     let value = (!params.is_null()).then_some(params);
     let (parsed, issues) = schema.run(value);
     if issues.is_empty() {
@@ -293,12 +291,7 @@ pub fn subscribe(params: &Value) -> Result<Value, ParamsError> {
 pub fn debug(params: &Value) -> Result<Value, ParamsError> {
     static SCHEMA: OnceLock<Schema> = OnceLock::new();
     let schema = SCHEMA.get_or_init(|| {
-        let id = Schema::String {
-            trim: false,
-            min: Some(1),
-            format: None,
-        };
-        Schema::Object(vec![required("sessionId", id)])
+        Schema::Object(vec![required("sessionId", string_min(1))])
     });
     parse(schema, params)
 }

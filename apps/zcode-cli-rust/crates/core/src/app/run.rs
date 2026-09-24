@@ -45,6 +45,7 @@ impl Engine {
             off_peak_run_type = submission.off_peak_run_type.as_deref(),
             "Run started"
         );
+        let kind = super::legacy_input::run_kind(session, &turn_id);
         let estimated = session.active_context_tokens();
         let run_id = session.run_id.clone().context("Run reservation required")?;
         let cancel = CancellationToken::new();
@@ -58,6 +59,8 @@ impl Engine {
                 origin: origin.clone(),
                 execution: submission.execution.clone(),
                 permissions,
+                kind,
+                legacy_lock: kind != crate::domain::legacy_stream::RunKind::Prompt,
             },
         );
         let manual = session
@@ -89,7 +92,7 @@ impl Engine {
             },
         ));
         history.permissions = Some(permission_updates);
-        self.legacy_turn_started(id, &turn_id);
+        self.legacy_turn_started(id, &turn_id, kind);
         let turn_hooks = self.turn_hooks(id, &turn_id, submission.prompt, &identity);
         let context = self.context.clone();
         let tools = self.tools.clone();

@@ -16,6 +16,11 @@ pub struct Goal {
     pub time_used_ms: u64,
     pub active_run_started_at_ms: Option<u64>,
     pub last_seen: Option<u64>,
+    /// Legacy `target.createdAt` / `updatedAt`; 0 for goals persisted before them.
+    #[serde(default)]
+    pub created_at: u64,
+    #[serde(default)]
+    pub updated_at: u64,
 }
 #[derive(Clone)]
 pub struct Verdict {
@@ -70,6 +75,8 @@ impl Goal {
             time_used_ms: 0,
             active_run_started_at_ms: Some(now),
             last_seen: Some(now),
+            created_at: now,
+            updated_at: now,
         }
     }
     pub fn active(&self) -> bool {
@@ -79,11 +86,13 @@ impl Goal {
         )
     }
     pub fn start(&mut self, now: u64) {
+        self.updated_at = now;
         self.status = "active".into();
         self.active_run_started_at_ms = Some(now);
         self.last_seen = Some(now);
     }
     pub fn account(&mut self, usage: &Value, now: u64) {
+        self.updated_at = now;
         self.tokens_used = self
             .tokens_used
             .saturating_add(usage["prompt_tokens"].as_u64().unwrap_or(0))
