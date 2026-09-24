@@ -123,6 +123,7 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
                 &list.iter().map(todo).collect::<Vec<_>>(),
                 now,
             )?,
+            Op::Target(goal) => super::target_row::put(conn, session, goal.as_ref(), now)?,
             Op::FullAccess {
                 queue,
                 execution,

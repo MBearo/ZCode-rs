@@ -236,11 +236,6 @@ impl Engine {
                     s.record_response(&turn);
                 }
                 super::goal_events::account_usage(s, &usage, now);
-                if s.goal.as_ref().is_some_and(|g| g.active() && g.exhausted()) {
-                    s.goal.as_mut().unwrap().pause(now);
-                    // 预算耗尽的 assistant 事实先提交；取消后绝不能再执行它声明的工具。
-                    self.active[&id].cancel.cancel();
-                }
             }
             Event::ToolStart { call } => {
                 let call_id = call["id"].as_str().unwrap();
@@ -299,13 +294,6 @@ impl Engine {
             } => {
                 // cancel 可在 loop 正常返回与 Finished 入队之间到达，以 owner 的取消事实为准。
                 let cancelled = cancelled || self.active[&id].cancel.is_cancelled();
-                if let Some(goal) = &mut s.goal {
-                    if cancelled || error.is_some() {
-                        goal.pause(now);
-                    } else {
-                        goal.settle(now);
-                    }
-                }
                 super::busy_input::fallback_guides(
                     (s, now),
                     if cancelled || error.is_some() {

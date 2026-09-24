@@ -13,6 +13,7 @@ pub mod edit_match;
 pub mod execution;
 pub mod file_checkpoint;
 pub mod goal;
+pub mod goal_verdict;
 pub mod history;
 pub mod history_cold;
 pub mod hooks;

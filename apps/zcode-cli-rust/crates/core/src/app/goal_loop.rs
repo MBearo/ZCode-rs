@@ -35,16 +35,14 @@ pub(super) async fn advance(
         "target_completion_verification",
         cancel,
     );
+    // Node fail-open：工具调用、无效 JSON、请求失败都按通过记录（verifier 故障不能卡住目标）。
     let (verdict, usage) = match request.await {
-        Ok(output) if !output.output_limit && output.calls.is_empty() => (
+        Ok(output) if output.calls.is_empty() => (
             Verdict::parse(output.message["content"].as_str().unwrap_or("")),
             output.usage,
         ),
-        Ok(output) => (
-            Verdict::failed("The completion verifier returned tools or truncated output."),
-            output.usage,
-        ),
-        Err(error) => (Verdict::failed(error.to_string()), Value::Null),
+        Ok(output) => (Verdict::tool_calls(), output.usage),
+        Err(error) => (Verdict::request_failed(&error.to_string()), Value::Null),
     };
     if cancel.is_cancelled() {
         bail!("Cancelled");

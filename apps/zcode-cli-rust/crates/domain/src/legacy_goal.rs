@@ -7,13 +7,8 @@ use serde_json::{Value, json};
 pub const PLAN_NOTE: &str = "Plan mode 下已记录 goal，但不会自动继续。";
 
 /// Node target status: `active | paused | budget_limited | complete`.
-pub fn status(goal: &Goal) -> &'static str {
-    match goal.status.as_str() {
-        "verified" => "complete",
-        "paused" if goal.exhausted() => "budget_limited",
-        "paused" => "paused",
-        _ => "active",
-    }
+pub fn status(goal: &Goal) -> &str {
+    &goal.target_status
 }
 
 /// `formatGoalChanged(title, target)`.
@@ -23,9 +18,7 @@ pub fn changed(title: &str, goal: &Goal) -> String {
         .map_or_else(|| "none".to_owned(), |b| b.to_string());
     format!(
         "{title}\nObjective: {}\nUsage: {} tokens / {budget}\nTime: {} seconds",
-        goal.objective,
-        goal.tokens_used,
-        goal.time_used_ms / 1000
+        goal.objective, goal.tokens_used, goal.time_used_seconds
     )
 }
 
@@ -46,10 +39,10 @@ pub fn target(goal: &Goal, session_id: &str, created: u64) -> Value {
         goal.created_at
     };
     json!({"sessionId": session_id, "targetId": goal.target_id, "objective": goal.objective,
-        "summaryTitle": null, "status": status(goal),
+        "summaryTitle": goal.summary_title, "status": status(goal),
         // schema 要求正整数或 null：0 预算按未设置处理。
         "tokenBudget": goal.token_budget.filter(|b| *b > 0),
-        "tokensUsed": goal.tokens_used, "timeUsedSeconds": goal.time_used_ms / 1000,
+        "tokensUsed": goal.tokens_used, "timeUsedSeconds": goal.time_used_seconds,
         "activeRunStartedAtMs": goal.active_run_started_at_ms,
         "activeRunLastSeenAtMs": goal.last_seen,
         "createdAt": created_at, "updatedAt": goal.updated_at.max(created_at)})
@@ -68,16 +61,17 @@ mod tests {
         );
         goal.token_budget = Some(10);
         goal.tokens_used = 12;
-        goal.time_used_ms = 61_999;
-        goal.status = "paused".into();
+        goal.time_used_seconds = 61;
+        goal.target_status = "budget_limited".into();
         assert_eq!(
             summary(Some(&goal)),
             "Goal budget_limited\nObjective: ship it\nUsage: 12 tokens / 10\nTime: 61 seconds"
         );
-        goal.status = "verified".into();
-        assert_eq!(status(&goal), "complete");
-        goal.status = "notSatisfied".into();
-        assert_eq!(status(&goal), "active");
+        goal.set_status("complete", 9);
+        assert_eq!(
+            (status(&goal), goal.status.as_str()),
+            ("complete", "verified")
+        );
         assert_eq!(
             summary(None),
             "No goal is set. Use /goal <objective> to set one."

@@ -224,7 +224,7 @@ impl Engine {
         self.auxiliary.clear();
         for session in self.sessions.values_mut() {
             if let Some(goal) = &mut session.goal {
-                goal.pause(self.clock.now());
+                goal.finish_run(self.clock.now(), false, Some("paused"));
             }
             session.auto_drain = false;
             session.queued_now = None;

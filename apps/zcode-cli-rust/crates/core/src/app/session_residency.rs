@@ -138,6 +138,9 @@ impl Engine {
         if let Some(session) = self.sessions.get_mut(id) {
             session.resident_bytes = None;
         }
+        // 目标行（session_target）随每次提交与内存中的目标对齐（spec §5.4）。
+        let now = self.clock.now();
+        self.node(id, |s, _| s.node_sync_goal(now));
         // 导入候选还没有可见 row，但它已是 durable session；只有真正 draft 可以跳过提交。
         if self
             .sessions

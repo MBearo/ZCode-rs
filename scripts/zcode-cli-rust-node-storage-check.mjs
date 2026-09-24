@@ -94,7 +94,8 @@ async function check(name, root, file) {
       messages: selectActiveConversationBranch(stored, branchOptions),
       sessionId: sessionID,
       goalVerificationEntries: goalVerificationEntriesFromSessionEntries(entries),
-      target: null,
+      // 与 v4-bridge 冷恢复一致：目标状态取 session_target 原始行。
+      target: await store.readTarget({ sessionID }),
     });
     const projection = new ProductProjection(sessionID, "epoch");
     projection.beginHydrationReplay();

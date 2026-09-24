@@ -139,12 +139,11 @@ impl Engine {
         self.rerun_history(c, replay, boundary).await
     }
     pub(super) async fn quiesce_history(&mut self, id: &str) -> Result<()> {
+        // Node：重跑抢占当前工作，与 stop/立即发送一样暂停进行中的目标。
+        self.pause_active_goal(id);
         let s = self.sessions.get_mut(id).unwrap();
         s.auto_drain = false;
         s.queued_now = None;
-        if let Some(goal) = &mut s.goal {
-            goal.pause(self.clock.now());
-        }
         if let Some(active) = self.active.get(id) {
             active.cancel.cancel();
         }
@@ -254,7 +253,11 @@ impl Engine {
         child.archived = false;
         child.archived_at = None;
         if let Some(goal) = &mut child.goal {
-            goal.pause(self.clock.now());
+            let now = self.clock.now();
+            goal.finish_run(now, false, None);
+            if goal.target_status == "active" {
+                goal.set_status("paused", now);
+            }
         }
         child.finish_rows("success", self.clock.now());
         child.history_actions();

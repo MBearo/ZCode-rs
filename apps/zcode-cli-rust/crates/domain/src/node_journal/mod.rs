@@ -6,6 +6,7 @@ mod assistant;
 mod compact;
 pub mod files;
 mod finish;
+pub mod goal;
 pub mod intent;
 mod model_change;
 mod notice;
@@ -44,6 +45,13 @@ pub struct NodeJournal {
     /// Node `pendingModelChangeTimeline`, stored when the next turn starts.
     #[serde(default)]
     pub model_change: Option<model_change::ModelChange>,
+    /// The `session_target` row last written (Node `SessionGoal`).
+    #[serde(default)]
+    pub target: Option<Value>,
+    /// A `/goal` replaced a paused goal: its prompt is followed by the
+    /// `resumed` notice.
+    #[serde(skip)]
+    pub goal_resumed: bool,
     #[serde(skip)]
     pub pending: Vec<Write>,
 }
@@ -156,6 +164,9 @@ pub enum Op {
         execution: Value,
         receipt: Value,
     },
+    /// The session's `session_target` row as a Node `SessionGoal`; `None`
+    /// deletes it (Node `clearSessionTarget`).
+    Target(Option<Value>),
     /// Node `persistStableForkCompletionBoundary` (reads the stored transcript).
     StableBoundary {
         boundary: String,

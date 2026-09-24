@@ -200,10 +200,19 @@ async fn goal_start_and_verdict_are_durable_barriers_and_failure_stops_the_next_
 }
 #[test]
 fn goal_clock_budget_and_restart_preserve_confirmed_work_only() {
+    // Node session_target 记账：token 在一轮结束时计入，时间按秒向上取整。
     let mut goal = Goal::new("goal".into(), "work".into(), 1000);
     goal.token_budget = Some(10);
+    goal.start_run("c1", 1000);
     goal.account(&json!({"prompt_tokens":7,"completion_tokens":3}), 2500);
-    assert!(goal.exhausted());
+    assert!(!goal.exhausted(), "tokens count when the run finishes");
+    let mut finished = goal.clone();
+    finished.finish_run(3001, true, None);
+    assert_eq!((finished.tokens_used, finished.time_used_seconds), (10, 3));
+    assert_eq!(
+        (finished.target_status.as_str(), finished.status.as_str()),
+        ("budget_limited", "paused")
+    );
     let mut session = Session::new(
         "s".into(),
         "w".into(),
@@ -216,7 +225,9 @@ fn goal_clock_budget_and_restart_preserve_confirmed_work_only() {
     session.goal = Some(goal);
     session.recover("new".into(), 100000);
     let goal = session.goal.unwrap();
+    // 重启只结算到最后心跳：未结束的轮次不计 token。
     assert_eq!(goal.status, "paused");
-    assert_eq!(goal.time_used_ms, 1500);
+    assert_eq!(goal.target_status, "paused");
+    assert_eq!((goal.time_used_seconds, goal.tokens_used), (2, 0));
     assert_eq!(goal.active_run_started_at_ms, None);
 }

@@ -50,6 +50,7 @@ mod questions;
 
 mod node_compact;
 mod node_fork;
+mod node_goal;
 mod node_hooks;
 mod node_media;
 mod stream_recovery;
@@ -60,6 +61,7 @@ mod web_tools;
 mod goal_commands;
 mod goal_events;
 mod goal_loop;
+mod goal_state;
 mod headless;
 mod legacy_debug;
 mod legacy_goal;

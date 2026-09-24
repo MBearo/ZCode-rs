@@ -39,15 +39,13 @@ impl Session {
     }
     pub fn finish_rows(&mut self, outcome: &str, now: u64) {
         for row in &mut self.rows {
+            // Node：中断的验证按 cancelled 收口（标记 failed/cancelled，不计入验证列表）。
             if row["kind"] == "timelineMarker"
                 && row["marker"]["type"] == "goalVerify"
                 && row["marker"]["outcome"] == "running"
             {
                 row["marker"]["outcome"] = "failed".into();
-                row["marker"]["detail"] = "Goal verification interrupted".into();
-                if let Some(goal) = &mut self.goal {
-                    goal.verifications.push(json!({"iteration":row["marker"]["iteration"],"outcome":"failed","at":now,"anchorRowId":row["rowId"],"reason":"Goal verification interrupted"}));
-                }
+                row["marker"]["detail"] = "cancelled".into();
             }
             if row["kind"] == "timelineMarker"
                 && row["marker"]["type"] == "compact"

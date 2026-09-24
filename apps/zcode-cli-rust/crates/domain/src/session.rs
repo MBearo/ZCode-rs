@@ -306,8 +306,8 @@ impl Session {
             }
         }
         if let Some(goal) = &mut self.goal {
-            // 重启只结算最后确认的活跃时间，不把进程离线期间算作模型工作。
-            goal.pause(goal.last_seen.unwrap_or(now));
+            // 重启只结算最后确认的活跃时间，不把进程离线期间算作模型工作（Node recoverInterruptedSessionTargetRun）。
+            goal.recover(now);
         }
         if let Some(context) = &mut self.shared_context {
             context.release(None);

@@ -69,7 +69,7 @@ impl Engine {
         let s = self.sessions.get_mut(id).context("Session unavailable")?;
         s.auto_drain = false;
         if let Some(goal) = &mut s.goal {
-            goal.pause(self.clock.now());
+            goal.finish_run(self.clock.now(), false, Some("paused"));
         }
         s.queued_now = None;
         self.close_topic(id);

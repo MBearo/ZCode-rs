@@ -174,50 +174,6 @@ flowchart LR
 - 用量写入 Node 的 `model_usage`、`turn_usage`、`tool_usage`（与 `rust_*` 同列，无前缀）。
 - 附件（M11.4h）：提示附件只存 Node 产物，不再有 Rust 自己的内容寻址目录，见 §5.3。
 
-### 5.3 提示附件
-
-与 Node `writePromptAttachment`、`mapAttachmentRefsToTurnAttachments`、`resolveTurnAttachments` 与 `persistUserPrompt` 一致：
-
-- 上传提交（`v4/attachment/commit`）：字节以 data URL（`data:<mime>;base64,…`）写入 Node 产物 `<artifacts>/<会话目录>/prompt-attachment-upload-<毫秒 36 进制>-<8 位随机>-tool-result-<uuid>.txt`，回执的 `ref` 就是该产物的 `zcode-artifact://` URI。本地路径的图片、视频、PDF 在准入时读成快照并以 `attachment-<序号>` 写入同一目录（Node 在开轮时写，Rust 仍在准入时写，排队期间文件被改不影响已接受的输入），`ref` 改为产物 URI；其余本地文件不写产物，保留路径引用。
-- 字节所有者：`StoredAttachment.data_url = true` 表示 `path` 是 data URL 产物、`total_bytes` 为解码后的字节数。读取（预览分块、PDF 头校验、模型请求）都从产物解码；冷会话与 Node 上传的附件不在 `Session.attachments` 中时按 URI 从产物根定位（`SessionStore::attachment_of`）。
-- 准入时按 Node 规则解析每个附件，结果（`file` part 主体与 Node 模型块）挂在 `StoredAttachment.node`，提升时写入 user 消息（text part 之后，每个附件一个 `file` part），模型请求按同一结果组装：
-
-| 附件                          | `file` part                                                                                                                                                                               | 模型输入（Node `buildRuntimeUserEntriesFromTurn`）             |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| 上传图片                      | `url` = 产物 URI；`metadata{recoverability: provider_ready, sizeBytes: data URL 长度（Node 行为）, storageKind: artifact, artifactUri}`                                                   | 图片放在正文与其他块之后（粘贴图片）                           |
-| 上传视频、PDF                 | 同上，`sizeBytes` 为解码字节数；PDF 带 `filename`                                                                                                                                         | 紧随正文                                                       |
-| 上传其他文件 ≤ 64 KiB         | `mime: text/plain`、`filename`、`url` = 文件名、`metadata{originalUrl, preview{text, truncated: false, originalBytes}, recoverability, sizeBytes, storageKind: inline}`（UTF-8 有损解码） | user 消息之后的 `prompt_attachment` 提醒（inline text）        |
-| 上传其他文件 > 64 KiB、空文件 | 占位：`mime: text/plain`、`url: ""`、`metadata{errorCode: attachment_read_failed, recoverability: metadata_only, storageKind: metadata_only}`                                             | `prompt_attachment` 提醒 `[Attached text/plain: attachment-N]` |
-| 本地图片、视频、PDF           | `filename`、`url` = 产物 URI、`source{type: file, path, text}`、`metadata{originalUrl, recoverability, sha256, sizeBytes, storageKind: artifact, artifactUri}`                            | 紧随正文                                                       |
-| 本地文本（Node 文本扩展名）   | `filename`、`url` = 原路径、`source`、`metadata{originalUrl, preview{text, truncated, originalBytes, startLine, totalLines}, …, storageKind: inline}`；超过 256 KiB 取前 2000 行          | `prompt_attachment` 提醒（Read 工具格式）                      |
-| 本地其他文件                  | 路径引用：`storageKind: local_ref`、`recoverability: metadata_only`                                                                                                                       | 文本块 `Attached <mime>: <path>` 与原因说明                    |
-| 本地文件不可读                | 占位（`errorCode`、`storageKind: local_ref`）                                                                                                                                             | 不进入模型                                                     |
-
-- 冷读取：Node hydrator 规则（§6）把 `file` part 还原为 Node 形态的块（`image`/`video`/`file` 带 `dataUrl`，文本附件为提醒）；模型请求把 Node 块与 `_zcode_attachment` 一样转换为 provider 格式，并套用同样的能力与大小检查。
-- 与 Node 的差异：Rust 不按 Node 的 Jimp 规则缩放提示图片，`metadata.image` 不写；本地图片的 `mime` 取引用声明的类型（Node 按扩展名推断）；本地文本不做 Node Read 的 token 上限截断（`truncatedByTokenCap`、`partialViewNotice`）；本地视频上限与图片、PDF 同为 20 MiB（Node 30 MiB）；空的非媒体上传按占位处理（Node 会按文件名去工作区找本地文件）；音频附件仍在准入时拒绝。
-- 工具结果媒体（M11.4i，Node `persistToolResultMediaAttachments`）：成功的工具结果带图片、视频或 PDF 块时，引擎在记录工具 part 之前把每个媒体块写成 data URL 产物（`<callId>-media-<序号>`），`completed` 状态带 `attachments`（`file` part，键序 `id, messageID, sessionID, type, mime, filename, url, metadata{artifactUri, recoverability, storageKind, sizeBytes}`，`filename` 为 PDF 的文件名或占位名）与 `metadata.modelContentLayout`（文本块与附件序号）；`output` 为模型内容的文本形态（媒体为 `[Attached <mime>: <名称>]`，块之间空一行）。含其他块的内容不写媒体，只留 `output`。写入失败时本轮失败（与 Node 一致）。冷读取按 layout 还原为 Node 媒体块。Rust 工具自身的媒体缓存（`tool-results`）仍保留，供当前进程的请求使用。
-
-```mermaid
-sequenceDiagram
-  participant C as 客户端
-  participant E as Engine
-  participant S as NodeStore
-  participant A as 产物目录
-  participant DB as db.sqlite
-  C->>E: v4/attachment/begin/chunk/commit
-  E->>S: put_attachment(session, call, bytes, mime)
-  S->>A: 写 data URL 产物（.txt）
-  S-->>E: (zcode-artifact URI, StoredAttachment)
-  E-->>C: {ref: URI}
-  C->>E: sendText{attachments:[{ref,…}]}
-  E->>S: attachment_of(session, ref)（不在内存时）
-  E->>E: 按 Node 规则解析 → StoredAttachment.node
-  E->>DB: 账本行（conversationInputIntent.attachments = refs）
-  Note over E: 提升/开轮
-  E->>DB: user 消息 + text part + file part…
-  E->>E: 模型请求：_zcode_attachment 从产物解码
-```
-
 ### 5.2 事件到 Node 写入的对应
 
 | Rust 时机                     | Node 写入（模板）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -301,6 +257,88 @@ sequenceDiagram
   A->>J: promoteSessionInput(queue_c2)：user 消息 + text part，账本 promoted
   A->>W: persist
   A->>A: 开始新轮
+```
+
+### 5.3 提示附件
+
+与 Node `writePromptAttachment`、`mapAttachmentRefsToTurnAttachments`、`resolveTurnAttachments` 与 `persistUserPrompt` 一致：
+
+- 上传提交（`v4/attachment/commit`）：字节以 data URL（`data:<mime>;base64,…`）写入 Node 产物 `<artifacts>/<会话目录>/prompt-attachment-upload-<毫秒 36 进制>-<8 位随机>-tool-result-<uuid>.txt`，回执的 `ref` 就是该产物的 `zcode-artifact://` URI。本地路径的图片、视频、PDF 在准入时读成快照并以 `attachment-<序号>` 写入同一目录（Node 在开轮时写，Rust 仍在准入时写，排队期间文件被改不影响已接受的输入），`ref` 改为产物 URI；其余本地文件不写产物，保留路径引用。
+- 字节所有者：`StoredAttachment.data_url = true` 表示 `path` 是 data URL 产物、`total_bytes` 为解码后的字节数。读取（预览分块、PDF 头校验、模型请求）都从产物解码；冷会话与 Node 上传的附件不在 `Session.attachments` 中时按 URI 从产物根定位（`SessionStore::attachment_of`）。
+- 准入时按 Node 规则解析每个附件，结果（`file` part 主体与 Node 模型块）挂在 `StoredAttachment.node`，提升时写入 user 消息（text part 之后，每个附件一个 `file` part），模型请求按同一结果组装：
+
+| 附件                          | `file` part                                                                                                                                                                               | 模型输入（Node `buildRuntimeUserEntriesFromTurn`）             |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 上传图片                      | `url` = 产物 URI；`metadata{recoverability: provider_ready, sizeBytes: data URL 长度（Node 行为）, storageKind: artifact, artifactUri}`                                                   | 图片放在正文与其他块之后（粘贴图片）                           |
+| 上传视频、PDF                 | 同上，`sizeBytes` 为解码字节数；PDF 带 `filename`                                                                                                                                         | 紧随正文                                                       |
+| 上传其他文件 ≤ 64 KiB         | `mime: text/plain`、`filename`、`url` = 文件名、`metadata{originalUrl, preview{text, truncated: false, originalBytes}, recoverability, sizeBytes, storageKind: inline}`（UTF-8 有损解码） | user 消息之后的 `prompt_attachment` 提醒（inline text）        |
+| 上传其他文件 > 64 KiB、空文件 | 占位：`mime: text/plain`、`url: ""`、`metadata{errorCode: attachment_read_failed, recoverability: metadata_only, storageKind: metadata_only}`                                             | `prompt_attachment` 提醒 `[Attached text/plain: attachment-N]` |
+| 本地图片、视频、PDF           | `filename`、`url` = 产物 URI、`source{type: file, path, text}`、`metadata{originalUrl, recoverability, sha256, sizeBytes, storageKind: artifact, artifactUri}`                            | 紧随正文                                                       |
+| 本地文本（Node 文本扩展名）   | `filename`、`url` = 原路径、`source`、`metadata{originalUrl, preview{text, truncated, originalBytes, startLine, totalLines}, …, storageKind: inline}`；超过 256 KiB 取前 2000 行          | `prompt_attachment` 提醒（Read 工具格式）                      |
+| 本地其他文件                  | 路径引用：`storageKind: local_ref`、`recoverability: metadata_only`                                                                                                                       | 文本块 `Attached <mime>: <path>` 与原因说明                    |
+| 本地文件不可读                | 占位（`errorCode`、`storageKind: local_ref`）                                                                                                                                             | 不进入模型                                                     |
+
+- 冷读取：Node hydrator 规则（§6）把 `file` part 还原为 Node 形态的块（`image`/`video`/`file` 带 `dataUrl`，文本附件为提醒）；模型请求把 Node 块与 `_zcode_attachment` 一样转换为 provider 格式，并套用同样的能力与大小检查。
+- 与 Node 的差异：Rust 不按 Node 的 Jimp 规则缩放提示图片，`metadata.image` 不写；本地图片的 `mime` 取引用声明的类型（Node 按扩展名推断）；本地文本不做 Node Read 的 token 上限截断（`truncatedByTokenCap`、`partialViewNotice`）；本地视频上限与图片、PDF 同为 20 MiB（Node 30 MiB）；空的非媒体上传按占位处理（Node 会按文件名去工作区找本地文件）；音频附件仍在准入时拒绝。
+- 工具结果媒体（M11.4i，Node `persistToolResultMediaAttachments`）：成功的工具结果带图片、视频或 PDF 块时，引擎在记录工具 part 之前把每个媒体块写成 data URL 产物（`<callId>-media-<序号>`），`completed` 状态带 `attachments`（`file` part，键序 `id, messageID, sessionID, type, mime, filename, url, metadata{artifactUri, recoverability, storageKind, sizeBytes}`，`filename` 为 PDF 的文件名或占位名）与 `metadata.modelContentLayout`（文本块与附件序号）；`output` 为模型内容的文本形态（媒体为 `[Attached <mime>: <名称>]`，块之间空一行）。含其他块的内容不写媒体，只留 `output`。写入失败时本轮失败（与 Node 一致）。冷读取按 layout 还原为 Node 媒体块。Rust 工具自身的媒体缓存（`tool-results`）仍保留，供当前进程的请求使用。
+
+```mermaid
+sequenceDiagram
+  participant C as 客户端
+  participant E as Engine
+  participant S as NodeStore
+  participant A as 产物目录
+  participant DB as db.sqlite
+  C->>E: v4/attachment/begin/chunk/commit
+  E->>S: put_attachment(session, call, bytes, mime)
+  S->>A: 写 data URL 产物（.txt）
+  S-->>E: (zcode-artifact URI, StoredAttachment)
+  E-->>C: {ref: URI}
+  C->>E: sendText{attachments:[{ref,…}]}
+  E->>S: attachment_of(session, ref)（不在内存时）
+  E->>E: 按 Node 规则解析 → StoredAttachment.node
+  E->>DB: 账本行（conversationInputIntent.attachments = refs）
+  Note over E: 提升/开轮
+  E->>DB: user 消息 + text part + file part…
+  E->>E: 模型请求：_zcode_attachment 从产物解码
+```
+
+### 5.4 目标（goal）
+
+与 Node `session-facade.ts`（`applyGoalCommand`、`updateTargetStatus`）、`target.ts`（续跑循环）、`target-completion-verification.ts`、`turn.ts` 的目标记账一致。
+
+- 状态所有者：`session_target` 行是目标的持久事实（`status` 为 `active`/`paused`/`budget_limited`/`complete`，`tokens_used`、`time_used_seconds`、`active_input_id`、`active_run_started_at`、`active_run_last_seen_at`）。引擎内存中的 `Goal` 同时持有这组持久字段与 V4 `GoalState` 投影（`status` 为 `active`/`verifying`/`notSatisfied`/`verified`/`paused`/`failed`、`iteration`、`verifications`、`iterations`）。`Goal::node_target` 是持久行的唯一映射；每次提交前（以及稳定边界写入前）比较上次写入的行，变化时整行写入（Node 各个 `session_target` 写函数的最终结果），目标被清除时删除该行。
+- 记账（Node 语义）：一轮开始时开启运行（仅 `active`），`active_input_id` 为发起续跑的命令 id；模型用量累计到本轮；本轮成功结束时 `tokens_used` 加本轮 `totalTokens`，时间按 `ceil((结束 - 开始)/1000)` 秒累加并关闭运行；失败只记时间，取消记时间并置 `paused`；进程中断后首次操作目标时按最后心跳结算并置 `paused`（`recoverInterruptedSessionTargetRun`）。Rust 在每次提交时更新心跳时间（Node 每 15 秒）。
+- `/goal X`（`sendGoalCommand`）：先是一轮 control-only 轮次——user 消息为展示文本（`/goal X`），进入模型上下文，`metadata.executionKind = controlOnly`，`anchor` 无 `turnId`；行是已完成的 turnHeader 与 userInput，没有 `goalSet` 标记行（Node 的 goal 设置只更新状态）。随后是续跑轮：turnHeader `origin = goalContinuation`，首条消息是 `goal-continuation` 通知（model-only，`metadata{targetId, visibility, source}`，正文为 `target_continuation` 系统提醒包裹的续跑提示，模型上下文中同样带包裹）。
+- 验证：续跑轮结束（无工具调用的步骤）后先结束运行并写本轮稳定边界，再验证。每个生命周期事件（`started` 与一个终态）写一条 `target_completion_verification` entry（`id = eventId`，`data{eventId, payload, sequenceNumber, traceId}`，`payload` 键序为 `anchorAssistantMessageId?, anchorTurnId?, goalIteration, status, targetId, verification?, verificationId`），并写或更新 timeline 消息 `msg_goal_verify_<targetId>_<iteration>` 与 part `part_goal_verify_<targetId>_<iteration>_timeline`（`timelineType = goal_verification`，创建时间取首次写入）。
+- 验证结论（Node fail-open）：返回无效 JSON 或调用工具记为 `completed`、`passed = true`；请求失败记为 `failed_closed`、`passed = true`；取消记为 `cancelled`、`passed = false` 并暂停目标。通过时目标置 `complete`；未通过且有 `nextAction` 时开下一轮续跑（提示带验证理由），没有 `nextAction` 时停止、目标保持 `active`。
+- 暂停/恢复/清除：`paused`、`active` 与删除目标行，并写 `goal_state_change` 通知（原状态不是暂停时写 “paused”，原状态为暂停时写 “resumed”，确实删除时写 “cleared”，文本与 Node 相同）。
+- 与 Node 的差异：Rust 不生成目标摘要标题（`summary_title` 为空）；`goal_state_change` 通知不延迟到当前轮结束；验证序号只在进程内递增（Node 相同）。
+
+```mermaid
+sequenceDiagram
+  participant C as 客户端
+  participant E as Engine
+  participant G as Goal（内存）
+  participant DB as db.sqlite
+  C->>E: sendGoalCommand /goal X
+  E->>G: set（active，无运行）
+  E->>DB: 账本提升为 user 消息 "/goal X"（controlOnly）
+  E->>DB: session_target 行
+  E->>G: 开启运行（active_input_id = 命令 id）
+  E->>DB: goal-continuation 通知（续跑轮）+ session_target
+  Note over E: 模型步骤（assistant 记录同普通轮）
+  E->>G: 结束运行（tokens、时间）
+  E->>DB: session_target + 稳定边界（goalBoundary 快照）
+  E->>DB: verification entry(started) + timeline
+  E->>E: verifier 请求（target_completion_verification）
+  E->>DB: verification entry(终态) + timeline
+  alt 通过
+    E->>DB: session_target status = complete
+  else 未通过且有 nextAction
+    E->>G: 开启运行
+    E->>DB: goal-continuation 通知（下一轮）
+  end
 ```
 
 ## 6. 冷加载
@@ -408,7 +446,7 @@ M11.3 已完成的范围与验证：
 - 集成测试 `apps/zcode-cli-rust/tests/node_storage.rs`：引擎跑带工具的轮次、忙时排队与提升、重启后由新 runtime 续聊；按 §6 冷读取，模型上下文与运行时请求一致，行与账本正确。
 - 交叉读取 `node --import tsx scripts/zcode-cli-rust-node-storage-check.mjs`：Node 的 `SqliteSessionStore`、history hydrator 与冷投影读取 Rust 写出的库，history、行与快照状态与 Rust 冷读取逐项相等。
 
-M11.4 的写入：引导输入与队列编辑/删除/重排/回退（M11.4a，已完成：集成测试覆盖运行中引导与删除排队项）；`sendQueuedNow` 与 `deleteSession` 与 Node 一样不改账本（提升时写入，关闭时保留 `admitted`，冷查询结算为 `discarded/session_resumed`）；编辑与重试的分支切点、重跑输入与冷加载边界（M11.4b，已完成：集成测试覆盖编辑、重试与重启后编辑，Node 交叉读取一致）；稳定分叉（M11.4c，已完成：分叉后子会话继续对话，Node 交叉读取一致）；压缩与 todo 提醒（M11.4d，已完成：手动压缩后继续对话，Node 交叉读取一致；自动压缩保留段与中断恢复有单元测试。`autoCompactThreshold`/`willRetriggerNextTurn` 暂不写，Node 读取时视为缺省）；模型切换时间线（M11.4e，已完成）；子代理子会话（M11.4f，已完成：父子会话均被 Node 交叉读取一致）；后台子代理完成通知与运行中子会话插话（M11.4g，已完成：Node 交叉读取一致。Rust 的后台 bash 状态以本地 `<task-notification>` 随下次输入进入上下文，Node 没有对应记录，不落库，重启后与 Node 一样不再出现）；提示附件（M11.4h，已完成：上传图片与文本附件、重启后继续对话，Node 交叉读取一致，§5.3）；工具结果媒体（M11.4i，已完成：Read 图片的结果重启后仍以图片发送，Node 交叉读取一致）；完全访问授权（M11.4j，已完成：回执通过 Node schema 校验，重启后恢复授权标记）；提问自动结束阶段（M11.4k，已完成）；会话 shell 快照（M11.4l，已完成：Node 能恢复快照，分叉子会话与 Node 一样不写）；goal 命令与验证、选区侧聊、legacy `session/create` 与导入路径、冷投影的上下文窗口、自动标题更新。
+M11.4 的写入：引导输入与队列编辑/删除/重排/回退（M11.4a，已完成：集成测试覆盖运行中引导与删除排队项）；`sendQueuedNow` 与 `deleteSession` 与 Node 一样不改账本（提升时写入，关闭时保留 `admitted`，冷查询结算为 `discarded/session_resumed`）；编辑与重试的分支切点、重跑输入与冷加载边界（M11.4b，已完成：集成测试覆盖编辑、重试与重启后编辑，Node 交叉读取一致）；稳定分叉（M11.4c，已完成：分叉后子会话继续对话，Node 交叉读取一致）；压缩与 todo 提醒（M11.4d，已完成：手动压缩后继续对话，Node 交叉读取一致；自动压缩保留段与中断恢复有单元测试。`autoCompactThreshold`/`willRetriggerNextTurn` 暂不写，Node 读取时视为缺省）；模型切换时间线（M11.4e，已完成）；子代理子会话（M11.4f，已完成：父子会话均被 Node 交叉读取一致）；后台子代理完成通知与运行中子会话插话（M11.4g，已完成：Node 交叉读取一致。Rust 的后台 bash 状态以本地 `<task-notification>` 随下次输入进入上下文，Node 没有对应记录，不落库，重启后与 Node 一样不再出现）；提示附件（M11.4h，已完成：上传图片与文本附件、重启后继续对话，Node 交叉读取一致，§5.3）；工具结果媒体（M11.4i，已完成：Read 图片的结果重启后仍以图片发送，Node 交叉读取一致）；完全访问授权（M11.4j，已完成：回执通过 Node schema 校验，重启后恢复授权标记）；提问自动结束阶段（M11.4k，已完成）；会话 shell 快照（M11.4l，已完成：Node 能恢复快照，分叉子会话与 Node 一样不写）；目标（M11.4m，已完成：两轮续跑与验证、暂停后恢复，Node 交叉读取的行、模型上下文与目标状态一致，§5.4）；选区侧聊、legacy `session/create` 与导入路径、冷投影的上下文窗口、自动标题更新。
 
 ## 11. 验收场景
 

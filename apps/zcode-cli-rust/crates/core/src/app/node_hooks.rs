@@ -126,11 +126,23 @@ impl Engine {
             .unwrap_or_default();
         let file_ids: Vec<String> = refs.iter().map(|_| self.clock.id()).collect();
         let tools = self.tool_names();
-        let Some(s) = self.sessions.get_mut(id) else {
+        if !self.sessions.contains_key(id) {
             return;
-        };
+        }
         let text = c.payload["text"].as_str().unwrap_or("");
         let metadata = intent::prompt_metadata(text, &intent, (None, presentation));
+        if c.kind == "sendGoalCommand" {
+            let ids = (
+                message,
+                part,
+                self.clock.id(),
+                self.clock.id(),
+                self.clock.id(),
+            );
+            self.node_goal_prompt(id, turn, c, metadata, ids, &tools);
+            return;
+        }
+        let s = self.sessions.get_mut(id).unwrap();
         let message = nj::message_id(now, &message);
         // Node persistUserPrompt：每个附件一个 file part，跟在 text part 之后。
         let files = refs
@@ -257,6 +269,7 @@ impl Engine {
     /// `runModelBackedTurnStep`).
     pub(super) async fn observe_event(&mut self, id: &str, event: &Event) -> Result<()> {
         self.observe_usage(id, event).await;
+        self.goal_turn_end(id, event);
         let media = self.node_tool_media(id, event).await?;
         let flush = self.node_event(id, event, media.as_ref());
         self.observe_step(id, event)?;

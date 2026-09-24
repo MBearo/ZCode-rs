@@ -88,7 +88,11 @@ impl Engine {
         );
         history.prompt_snapshot = session.prompt_snapshot.clone();
         history.skills = session.skills.clone();
-        history.goal = session.goal.clone();
+        // Node：只有目标续跑轮会验证并继续；普通输入只记目标运行时间与 token。
+        history.goal = session
+            .goal
+            .clone()
+            .filter(|_| kind == crate::domain::legacy_stream::RunKind::Goal);
         history.agent_profile = session.agent_profile.clone();
         history.tool_disallowlist = submission.tool_disallowlist;
         history.tool_filter = session.runtime.tools.clone();

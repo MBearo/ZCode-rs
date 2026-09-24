@@ -23,24 +23,28 @@ fn goal(r: &Resume) -> Option<Goal> {
     let target = r.target.as_ref()?;
     let replayed = &r.conversation.state["goal"];
     let array = |key: &str| replayed[key].as_array().cloned().unwrap_or_default();
-    Some(Goal {
-        target_id: target.target_id.clone(),
-        objective: target.objective.clone(),
-        status: replayed["status"]
-            .as_str()
-            .unwrap_or_else(|| goal_status(&target.status))
-            .into(),
-        iteration: replayed["iteration"].as_u64().unwrap_or(0),
-        verifications: array("verifications"),
-        iterations: array("iterations"),
-        tokens_used: target.tokens_used.max(0) as u64,
-        token_budget: target.token_budget.map(|b| b.max(0) as u64),
-        time_used_ms: target.time_used_seconds.max(0) as u64 * 1000,
-        active_run_started_at_ms: target.active_run_started_at.map(|t| t as u64),
-        last_seen: target.active_run_last_seen_at.map(|t| t as u64),
-        created_at: target.time_created as u64,
-        updated_at: target.time_updated as u64,
-    })
+    let mut goal = Goal::new(
+        target.target_id.clone(),
+        target.objective.clone(),
+        target.time_created as u64,
+    );
+    goal.summary_title = target.summary_title.clone();
+    goal.status = replayed["status"]
+        .as_str()
+        .unwrap_or_else(|| goal_status(&target.status))
+        .into();
+    goal.target_status = target.status.clone();
+    goal.iteration = replayed["iteration"].as_u64().unwrap_or(0);
+    goal.verifications = array("verifications");
+    goal.iterations = array("iterations");
+    goal.tokens_used = target.tokens_used.max(0) as u64;
+    goal.token_budget = target.token_budget.map(|b| b.max(0) as u64);
+    goal.time_used_seconds = target.time_used_seconds.max(0) as u64;
+    goal.active_input_id = target.active_input_id.clone();
+    goal.active_run_started_at_ms = target.active_run_started_at.map(|t| t as u64);
+    goal.last_seen = target.active_run_last_seen_at.map(|t| t as u64);
+    goal.updated_at = target.time_updated as u64;
+    Some(goal)
 }
 
 /// The runtime session of `r` in `workspace` (the identity the engine owns).
@@ -93,6 +97,8 @@ pub fn session(workspace: &str, r: Resume, epoch: String) -> Session {
         })
         .collect();
     s.goal = goal(&r);
+    // 冷加载时已有的 session_target 行即上次写入的行；未变化时不重写。
+    s.node.target = r.target.as_ref().map(|t| t.to_node());
     let state = &r.conversation.state;
     s.phase = serde_json::from_value(state["control"]["phase"].clone())
         .unwrap_or(crate::domain::execution::Phase::CompletedSuccess);

@@ -3,6 +3,8 @@
 //! readers give back the live model context and rows, across a restart.
 #[path = "node_storage/attach.rs"]
 mod attach;
+#[path = "node_storage/goal.rs"]
+mod goal;
 #[path = "node_storage/grants.rs"]
 mod grants;
 #[path = "node_storage/harness.rs"]

@@ -72,6 +72,8 @@ impl Session {
         let Some(turn) = self.node.turn.clone() else {
             return;
         };
+        // Node：目标运行先结算，稳定边界的 goalBoundary 快照读到的是结算后的行。
+        self.node_sync_goal(now);
         match outcome {
             Outcome::Success => {
                 if let Some(boundary) = turn.boundary {

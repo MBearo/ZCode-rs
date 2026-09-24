@@ -29,6 +29,7 @@ impl RuntimeClock for Clock {
 
 struct Model {
     calls: AtomicUsize,
+    verifications: AtomicUsize,
     requests: mpsc::UnboundedSender<Vec<Value>>,
 }
 #[async_trait]
@@ -44,6 +45,31 @@ impl ModelPort for Model {
         sink: &EventSink,
         _: &CancellationToken,
     ) -> std::result::Result<ModelOutput, ModelFailure> {
+        // 目标完成验证：第一次未通过（带下一步），之后通过。
+        let verify = messages.last().is_some_and(|m| {
+            m["content"].as_str().is_some_and(|c| {
+                c.starts_with("Verify whether the active session goal is actually complete.")
+            })
+        });
+        if verify {
+            let n = self.verifications.fetch_add(1, Ordering::SeqCst);
+            let stall = messages
+                .last()
+                .is_some_and(|m| m["content"].as_str().is_some_and(|c| c.contains("stall")));
+            let verdict = if n == 0 && stall {
+                json!({"passed": false, "reason": "Blocked."})
+            } else if n == 0 {
+                json!({"passed": false, "reason": "No tests yet.", "nextAction": "Write the tests."})
+            } else {
+                json!({"passed": true, "reason": "Tests pass.", "nextAction": ""})
+            };
+            return Ok(ModelOutput {
+                output_limit: false,
+                message: json!({"role": "assistant", "content": verdict.to_string()}),
+                calls: vec![],
+                usage: json!({"prompt_tokens": 20, "completion_tokens": 5}),
+            });
+        }
         let compaction = messages.last().is_some_and(|m| {
             m["content"]
                 .as_str()
@@ -286,6 +312,7 @@ async fn run(
         store: Arc::new(store),
         model: Some(Arc::new(Model {
             calls: AtomicUsize::new(0),
+            verifications: AtomicUsize::new(0),
             requests: requests_tx,
         })),
         tools: Arc::new(Tools {

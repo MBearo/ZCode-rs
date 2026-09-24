@@ -215,10 +215,9 @@ impl Engine {
                 self.cancel_auth(&id);
                 self.cancel_children(&id).await?;
                 self.tools.cancel_session(&id, None).await?;
+                // Node stop → pauseActiveGoal：目标暂停并写通知，运行在取消的轮次结束时结算。
+                self.pause_active_goal(&id);
                 let s = self.sessions.get_mut(&id).unwrap();
-                if let Some(goal) = &mut s.goal {
-                    goal.pause(self.clock.now());
-                }
                 s.auto_drain = false;
                 s.queued_now = None;
                 for item in &mut s.queue {
