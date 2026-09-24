@@ -123,19 +123,37 @@ pub trait SessionStore: Send + Sync {
     ) -> Result<()> {
         anyhow::bail!("Draft reclamation unavailable")
     }
+    /// Stores prompt attachment bytes of `session` in an artifact named after
+    /// `call` (spec rust-m11-node-storage §5.3); returns its
+    /// `zcode-artifact://` reference and the stored bytes.
     async fn put_attachment(
         &self,
+        _session: &str,
+        _call: &str,
         _chunks: &[Vec<u8>],
         _mime: &str,
-    ) -> Result<zcode_cli_domain::session::StoredAttachment> {
+    ) -> Result<(String, zcode_cli_domain::session::StoredAttachment)> {
         anyhow::bail!("Attachment storage unavailable")
     }
-    async fn snapshot_attachment(
+    /// Resolves the local path attachment at `index` the way Node does:
+    /// `(original, path)` is the submitted reference and its resolved file.
+    /// Returns the reference the input keeps and the stored resolution.
+    async fn local_attachment(
         &self,
-        _path: &str,
+        _session: &str,
+        _index: usize,
+        _file: (&str, &str),
         _mime: &str,
-    ) -> Result<zcode_cli_domain::session::StoredAttachment> {
+    ) -> Result<(String, zcode_cli_domain::session::StoredAttachment)> {
         anyhow::bail!("Attachment snapshot unavailable")
+    }
+    /// The stored bytes behind a reference the session does not hold in
+    /// memory (a resumed or Node-written session).
+    async fn attachment_of(
+        &self,
+        _reference: &str,
+    ) -> Result<Option<zcode_cli_domain::session::StoredAttachment>> {
+        Ok(None)
     }
     async fn read_attachment(
         &self,

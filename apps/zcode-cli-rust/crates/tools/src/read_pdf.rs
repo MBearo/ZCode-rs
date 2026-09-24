@@ -97,6 +97,7 @@ async fn save(
         source_path: Some(source.to_string_lossy().into_owned()),
         media_type: mime.into(),
         total_bytes: data.len() as u64,
+        ..Default::default()
     })
 }
 

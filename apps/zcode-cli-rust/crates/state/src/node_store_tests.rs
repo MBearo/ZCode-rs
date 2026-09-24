@@ -9,13 +9,9 @@ use serde_json::json;
 
 async fn store(dir: &tempfile::TempDir) -> NodeStore {
     let root = dir.path();
-    NodeStore::open(
-        root.join("db/db.sqlite"),
-        root.join("artifacts"),
-        root.join("attachments"),
-    )
-    .await
-    .unwrap()
+    NodeStore::open(root.join("db/db.sqlite"), root.join("artifacts"))
+        .await
+        .unwrap()
 }
 
 fn session(workspace: &str) -> Session {

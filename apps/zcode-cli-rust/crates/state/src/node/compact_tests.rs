@@ -63,6 +63,7 @@ fn two_turns(conn: &rusqlite::Connection) -> Session {
                 queue_id: None,
                 metadata: None,
                 tools: &[],
+                files: vec![],
             },
         );
         s.node_step_started(

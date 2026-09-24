@@ -38,17 +38,29 @@ impl SessionStore for Store {
     async fn lookup_ack(&self, _: &str, _: &str) -> Result<Option<Value>> {
         Ok(None)
     }
-    async fn snapshot_attachment(
+    async fn local_attachment(
         &self,
         _: &str,
+        _: usize,
+        (original, _): (&str, &str),
         mime: &str,
-    ) -> Result<zcode_cli_domain::session::StoredAttachment> {
-        Ok(zcode_cli_domain::session::StoredAttachment {
+    ) -> Result<(String, zcode_cli_domain::session::StoredAttachment)> {
+        use zcode_cli_domain::node_journal::files::{TextRead, local_text};
+        let read = TextRead {
+            content: "text",
+            truncated: false,
+            size: 4,
+            total_lines: 1,
+        };
+        let stored = zcode_cli_domain::session::StoredAttachment {
             path: "/fixture-snapshot".into(),
             source_path: Some("local.txt".into()),
             media_type: mime.into(),
             total_bytes: 4,
-        })
+            node: Some(local_text((original, "/fixture/local.txt"), read)),
+            ..Default::default()
+        };
+        Ok((original.into(), stored))
     }
     async fn load(&self, _: &str) -> Result<(Vec<Session>, BTreeMap<String, Value>)> {
         Ok((vec![], BTreeMap::new()))

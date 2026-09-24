@@ -61,6 +61,13 @@ fn chars(value: &Value) -> usize {
                             .unwrap_or(0)
                             .min(64 * 1024) as usize
                     }
+                } else if let Some(data) = part["dataUrl"].as_str() {
+                    // 冷读取的 Node 媒体块与 _zcode_attachment 同样估算，不按 base64 长度计。
+                    if part["type"] == "image" {
+                        3072
+                    } else {
+                        (data.len() / 4 * 3).min(64 * 1024)
+                    }
                 } else {
                     chars(part)
                 }

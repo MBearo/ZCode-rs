@@ -90,6 +90,7 @@ fn a_tool_turn_reads_back_as_the_live_context() {
             queue_id: Some("queue_cmd_1"),
             metadata: None,
             tools: &["Read".into()],
+            files: vec![],
         },
     );
     s.node_step_started(20, ("msg_a1".into(), "part_s1".into()), "p", "m");
@@ -169,6 +170,7 @@ fn cancellation_keeps_the_streamed_output_and_marks_the_turn_cancelled() {
             queue_id: None,
             metadata: None,
             tools: &[],
+            files: vec![],
         },
     );
     s.node_step_started(20, ("msg_a1".into(), "part_s1".into()), "p", "m");
@@ -212,6 +214,7 @@ fn a_run_ending_during_tools_stores_their_results_and_closes_the_step() {
             queue_id: None,
             metadata: None,
             tools: &[],
+            files: vec![],
         },
     );
     s.node_step_started(20, ("msg_a1".into(), "part_s1".into()), "p", "m");
@@ -263,6 +266,7 @@ fn a_model_switch_is_stored_as_a_separator_when_the_next_turn_starts() {
         queue_id: None,
         metadata: None,
         tools: &[],
+        files: vec![],
     };
     s.node_user_prompt(10, prompt("msg_u1"));
     s.node_finished(11, Outcome::Success, &mut next);

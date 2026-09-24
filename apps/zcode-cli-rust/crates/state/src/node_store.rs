@@ -36,8 +36,8 @@ pub(super) enum Request {
 #[derive(Clone)]
 pub struct NodeStore {
     pub(super) tx: mpsc::Sender<Request>,
-    /// Content-addressed prompt attachments (Node artifacts arrive in M11.4).
-    pub(super) attachments: PathBuf,
+    /// Prompt attachments: Node data URL artifacts (spec §5.3).
+    pub(super) attachments: super::input_attachments::Backing,
     /// The database file, for request-scoped read-only usage queries.
     pub(super) path: PathBuf,
 }
@@ -81,7 +81,8 @@ fn directory(workspace: &str) -> &str {
 
 impl NodeStore {
     /// Opens and migrates the Node database; `artifacts` is Node's artifact root.
-    pub async fn open(path: PathBuf, artifacts: PathBuf, attachments: PathBuf) -> Result<Self> {
+    pub async fn open(path: PathBuf, artifacts: PathBuf) -> Result<Self> {
+        let attachments = super::input_attachments::Backing::Artifacts(artifacts.clone());
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }

@@ -52,6 +52,19 @@ pub fn input_history_id(now_ms: u64, uuid: &str) -> String {
     format!("input_{}", sortable(now_ms, uuid))
 }
 
+/// Node `writePromptAttachment`'s artifact `toolCallId`:
+/// `prompt-attachment-upload-<ms base36>-<8 random base36>`.
+pub fn upload_call(now_ms: u64, uuid: &str) -> String {
+    let hex: String = uuid
+        .chars()
+        .filter(char::is_ascii_hexdigit)
+        .take(12)
+        .collect();
+    let random = base36(u64::from_str_radix(&hex, 16).unwrap_or(0));
+    let random = &random[..random.len().min(8)];
+    format!("prompt-attachment-upload-{}-{random}", base36(now_ms))
+}
+
 /// The `[^a-z0-9._-]+` → `-` replacement with the edge dashes trimmed.
 fn dashed(value: &str) -> String {
     let mut out = String::with_capacity(value.len());

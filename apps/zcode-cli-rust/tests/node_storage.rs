@@ -1,6 +1,8 @@
 //! The engine over the Node session database (spec rust-m11-node-storage
 //! §5.2 acceptance): turns are written as Node records, and Node's cold
 //! readers give back the live model context and rows, across a restart.
+#[path = "node_storage/attach.rs"]
+mod attach;
 #[path = "node_storage/harness.rs"]
 mod harness;
 

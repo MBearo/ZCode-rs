@@ -120,6 +120,11 @@ impl Engine {
         };
         let now = self.clock.now();
         let (message, part) = (self.clock.id(), self.clock.id());
+        let refs = c.payload["attachments"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let file_ids: Vec<String> = refs.iter().map(|_| self.clock.id()).collect();
         let tools = self.tool_names();
         let Some(s) = self.sessions.get_mut(id) else {
             return;
@@ -127,6 +132,15 @@ impl Engine {
         let text = c.payload["text"].as_str().unwrap_or("");
         let metadata = intent::prompt_metadata(text, &intent, (None, presentation));
         let message = nj::message_id(now, &message);
+        // Node persistUserPrompt：每个附件一个 file part，跟在 text part 之后。
+        let files = refs
+            .iter()
+            .zip(&file_ids)
+            .filter_map(|(item, part)| {
+                let file = s.attachments.get(item["ref"].as_str()?)?.node.as_ref()?;
+                Some(file.record(&nj::part_id(now, part), &s.id, &message))
+            })
+            .collect();
         if let Some(boundary) = s.history.inputs.last_mut() {
             boundary.node_message = Some(message.clone());
         }
@@ -141,6 +155,7 @@ impl Engine {
                 queue_id: intent["queueItemId"].as_str(),
                 metadata: Some(metadata),
                 tools: &tools,
+                files,
             },
         );
     }
@@ -181,6 +196,7 @@ impl Engine {
                 queue_id: None,
                 metadata: Some(json!({"inputPresentation": "coordinator_input"})),
                 tools: &tools,
+                files: vec![],
             },
         );
     }
@@ -231,6 +247,7 @@ impl Engine {
                 queue_id: item["queueItemId"].as_str(),
                 metadata: Some(metadata),
                 tools: &tools,
+                files: vec![],
             },
         );
     }

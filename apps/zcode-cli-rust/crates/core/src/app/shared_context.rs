@@ -83,9 +83,14 @@ impl Engine {
                 Some(mode) => mode,
             };
         }
-        let content = self
+        let (_, content) = self
             .store
-            .put_attachment(&[history.markdown.as_bytes().to_vec()], "text/markdown")
+            .put_attachment(
+                &id,
+                "shared-context-import",
+                &[history.markdown.as_bytes().to_vec()],
+                "text/markdown",
+            )
             .await?;
         if history.provenance.status == Status::Attached {
             session.append_message(json!({"role":"user","content":history.markdown.trim()}));

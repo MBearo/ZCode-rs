@@ -31,10 +31,16 @@ impl Engine {
             })
         });
         ensure!(authorized, "fault.attachment.readNotAuthorized");
-        let asset = session
-            .attachments
-            .get(reference)
-            .context("fault.attachment.sourceUnavailable")?;
+        // 冷会话与 Node 写入的附件不在内存中：按 URI 从产物根读取（Node readPromptAttachment）。
+        let asset = match session.attachments.get(reference) {
+            Some(asset) => asset.clone(),
+            None => self
+                .store
+                .attachment_of(reference)
+                .await?
+                .context("fault.attachment.sourceUnavailable")?,
+        };
+        let asset = &asset;
         if method == "v4/attachment/previewSource" {
             return Ok(json!({"kind":"chunked"}));
         }

@@ -79,11 +79,26 @@ impl crate::contract::SessionStore for NodeStore {
     ) -> Result<()> {
         Ok(())
     }
-    async fn put_attachment(&self, chunks: &[Vec<u8>], mime: &str) -> Result<StoredAttachment> {
-        super::input_attachments::save_attachment(&self.attachments, chunks, mime).await
+    async fn put_attachment(
+        &self,
+        session: &str,
+        call: &str,
+        chunks: &[Vec<u8>],
+        mime: &str,
+    ) -> Result<(String, StoredAttachment)> {
+        self.attachments.put(session, call, chunks, mime).await
     }
-    async fn snapshot_attachment(&self, path: &str, mime: &str) -> Result<StoredAttachment> {
-        super::input_attachments::snapshot_file(&self.attachments, path, mime).await
+    async fn local_attachment(
+        &self,
+        session: &str,
+        index: usize,
+        file: (&str, &str),
+        mime: &str,
+    ) -> Result<(String, StoredAttachment)> {
+        self.attachments.local(session, index, file, mime).await
+    }
+    async fn attachment_of(&self, reference: &str) -> Result<Option<StoredAttachment>> {
+        self.attachments.attachment_of(reference).await
     }
     async fn read_attachment(
         &self,

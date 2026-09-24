@@ -31,6 +31,10 @@ struct Model {
 }
 #[async_trait]
 impl ModelPort for Model {
+    fn format_properties(&self) -> Value {
+        json!({"inputFormat": {"supportsText": true, "supportsImage": true, "supportsVideo": true,
+            "supportsAudio": false, "supportsPdf": true}, "outputFormat": {"supportsText": true}})
+    }
     async fn complete(
         &self,
         messages: Vec<Value>,
@@ -208,13 +212,9 @@ async fn run(
 ) -> Harness {
     let db = root.join("cli/db/db.sqlite");
     let workspace = root.join("w").to_string_lossy().into_owned();
-    let store = NodeStore::open(
-        db.clone(),
-        root.join("cli/artifacts"),
-        root.join("attachments"),
-    )
-    .await
-    .unwrap();
+    let store = NodeStore::open(db.clone(), root.join("cli/artifacts"))
+        .await
+        .unwrap();
     let (requests_tx, requests) = mpsc::unbounded_channel();
     let ports = RuntimePorts {
         context: Arc::new(zcode_cli_host::context_source::WorkspaceContext::new(
@@ -355,12 +355,14 @@ pub fn dump_as(h: &Harness, conn: &rusqlite::Connection, session: &str, file: &s
         return;
     }
     let active = zcode_cli_state::node::cold::active(conn, session).unwrap();
-    let history: Vec<Value> = zcode_cli_rust::domain::node_history::hydrate(&active, &|_| None)
+    let artifacts = h.root.join("cli/artifacts");
+    let read = |uri: &str| zcode_cli_state::node::artifacts::read(&artifacts, uri);
+    let history: Vec<Value> = zcode_cli_rust::domain::node_history::hydrate(&active, &read)
         .entries
         .iter()
         .map(|e| e.to_node())
         .collect();
-    let resumed = zcode_cli_state::node::resume::resume(conn, session, &|_| None, None)
+    let resumed = zcode_cli_state::node::resume::resume(conn, session, &read, None)
         .unwrap()
         .unwrap();
     let read = json!({"sessionId": session, "history": history,

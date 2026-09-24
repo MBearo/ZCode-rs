@@ -1,14 +1,21 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredAttachment {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
     pub media_type: String,
+    /// The content bytes (decoded when `data_url`).
     pub total_bytes: u64,
+    /// `path` is a Node data URL artifact (`data:<mime>;base64,...`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub data_url: bool,
+    /// The Node resolution of a prompt attachment (spec rust-m11-node-storage §5.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<super::node_journal::files::NodeFile>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

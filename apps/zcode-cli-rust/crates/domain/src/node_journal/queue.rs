@@ -142,6 +142,7 @@ impl Session {
                 queue_id: Some(&ledger),
                 metadata: Some(metadata),
                 tools,
+                files: vec![],
             },
         );
     }

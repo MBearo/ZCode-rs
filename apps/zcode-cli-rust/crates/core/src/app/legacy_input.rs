@@ -221,14 +221,19 @@ impl Engine {
                 Source::Path(path) => (path, 0),
                 Source::Bytes(bytes) => {
                     let len = bytes.len() as u64;
-                    let asset = match self.store.put_attachment(&[bytes], &mapped.mime).await {
-                        Ok(asset) => asset,
+                    let call = format!("attachment-{}", refs.len() + 1);
+                    let stored = self
+                        .store
+                        .put_attachment(id, &call, &[bytes], &mapped.mime)
+                        .await;
+                    let (reference, asset) = match stored {
+                        Ok(stored) => stored,
                         Err(error) => {
                             self.unstage(id, &staged);
                             return Err(error);
                         }
                     };
-                    let reference = self.register_attachment(id, asset)?;
+                    self.register_attachment(id, reference.clone(), asset)?;
                     staged.push(reference.clone());
                     (reference, len)
                 }

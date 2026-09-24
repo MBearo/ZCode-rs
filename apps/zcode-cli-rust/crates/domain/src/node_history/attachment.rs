@@ -183,7 +183,7 @@ fn read_output(content: &str, preview: &Value) -> String {
 
 /// Node `promptAttachmentReminderInputForFilePart` + `buildPromptAttachmentReminderBodies`,
 /// joined: the prompt attachment reminder of a text file part, if any.
-pub(super) fn prompt_attachment(part: &Value, block: &Value) -> Option<String> {
+pub(crate) fn prompt_attachment(part: &Value, block: &Value) -> Option<String> {
     let mime = part["mime"].as_str().unwrap_or("");
     let content = block["text"].as_str().filter(|_| block["type"] == "text")?;
     if !mime.starts_with("text/") {

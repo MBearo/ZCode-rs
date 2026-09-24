@@ -98,17 +98,21 @@ impl crate::contract::SessionStore for Store {
     }
     async fn put_attachment(
         &self,
+        session: &str,
+        call: &str,
         chunks: &[Vec<u8>],
         mime: &str,
-    ) -> Result<crate::domain::session::StoredAttachment> {
-        self.save_attachment(chunks, mime).await
+    ) -> Result<(String, crate::domain::session::StoredAttachment)> {
+        self.attachments().put(session, call, chunks, mime).await
     }
-    async fn snapshot_attachment(
+    async fn local_attachment(
         &self,
-        path: &str,
+        session: &str,
+        index: usize,
+        file: (&str, &str),
         mime: &str,
-    ) -> Result<crate::domain::session::StoredAttachment> {
-        self.snapshot_file(path, mime).await
+    ) -> Result<(String, crate::domain::session::StoredAttachment)> {
+        self.attachments().local(session, index, file, mime).await
     }
     async fn read_attachment(
         &self,

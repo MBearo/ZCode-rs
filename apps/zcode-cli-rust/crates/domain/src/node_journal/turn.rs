@@ -28,6 +28,8 @@ pub struct Prompt<'a> {
     /// Node `metadata`: `{inputIntent, conversationInputIntent, inputClientId, ...}`.
     pub metadata: Option<Value>,
     pub tools: &'a [String],
+    /// The attachments' `file` parts (with ids), after the text part.
+    pub files: Vec<Value>,
 }
 
 impl Session {
@@ -63,7 +65,8 @@ impl Session {
             tools: p.tools,
             metadata: p.metadata,
         });
-        let parts = vec![r::text_part(p.part, &self.id, &p.message, p.text, now, now)];
+        let mut parts = vec![r::text_part(p.part, &self.id, &p.message, p.text, now, now)];
+        parts.extend(p.files);
         match p.queue_id {
             Some(id) => self.node.push(
                 now,

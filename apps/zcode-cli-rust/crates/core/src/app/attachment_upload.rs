@@ -38,11 +38,18 @@ impl Engine {
                 if let Some(reference) = &upload.committed {
                     return Ok(json!({"ref":reference}));
                 }
-                let asset = self
+                // Node writePromptAttachment：上传内容即 data URL 产物，ref 为其 URI。
+                let call = crate::domain::node_ids::upload_call(now, &self.clock.id());
+                let (reference, asset) = self
                     .store
-                    .put_attachment(&upload.chunks, &upload.meta.mime.to_ascii_lowercase())
+                    .put_attachment(
+                        &key.1,
+                        &call,
+                        &upload.chunks,
+                        &upload.meta.mime.to_ascii_lowercase(),
+                    )
                     .await?;
-                let reference = self.register_attachment(&key.1, asset)?;
+                self.register_attachment(&key.1, reference.clone(), asset)?;
                 // artifact 字节和 Session 归属都提交成功后才交付 ref；失败不能留下可用的成功回执。
                 self.persist(&key.1, None).await?;
                 self.uploads.committed(&key, reference.clone(), now);
@@ -51,20 +58,20 @@ impl Engine {
         }
     }
 
-    /// Registers stored artifact bytes on the session under a new reference:
+    /// Registers stored artifact bytes on the session under their reference:
     /// the one registration path of uploads and legacy inline attachments.
     /// The caller persists.
     pub(super) fn register_attachment(
         &mut self,
         id: &str,
+        reference: String,
         asset: crate::domain::session::StoredAttachment,
-    ) -> Result<String> {
-        let reference = format!("zcode-artifact://{id}/{}", self.clock.id());
+    ) -> Result<()> {
         self.sessions
             .get_mut(id)
             .context("Session unavailable")?
             .attachments
-            .insert(reference.clone(), asset);
-        Ok(reference)
+            .insert(reference, asset);
+        Ok(())
     }
 }

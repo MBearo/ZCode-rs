@@ -1,6 +1,7 @@
 //! Node's tool artifact files (`NodeToolArtifactStore`):
 //! `zcode-artifact://<session>/<artifact>` names the file in
 //! `<root>/<sanitized session>` whose name contains the artifact id.
+use crate::domain::session::StoredAttachment;
 use base64::Engine as _;
 use std::path::Path;
 
@@ -57,6 +58,127 @@ fn text_file(name: &str) -> bool {
     [".txt", ".md", ".html", ".htm", ".csv", ".json"]
         .iter()
         .any(|ext| lower.ends_with(ext))
+}
+
+/// JS `encodeURIComponent`.
+fn encode(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Node `writeToolResultArtifact` of a prompt attachment (`writePromptAttachment`,
+/// `persistAttachmentDataUrl`): the bytes as a `data:` URL text artifact named
+/// after `call`. Returns its URI and the stored attachment.
+pub async fn write_data_url(
+    root: &Path,
+    session: &str,
+    call: &str,
+    chunks: &[Vec<u8>],
+    mime: &str,
+) -> anyhow::Result<(String, StoredAttachment)> {
+    let total: usize = chunks.iter().map(Vec::len).sum();
+    anyhow::ensure!(total <= 20 * 1024 * 1024, "Attachment exceeds size limit");
+    let mut bytes = Vec::with_capacity(total);
+    for chunk in chunks {
+        bytes.extend_from_slice(chunk);
+    }
+    let content = format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&bytes)
+    );
+    let artifact = format!("tool-result-{}", crate::id());
+    let dir = root.join(segment(session));
+    tokio::fs::create_dir_all(&dir).await?;
+    let path = dir.join(format!("{}-{artifact}.txt", segment(call)));
+    // 临时名不含 artifact id：Node 按 id 子串定位文件，写到一半的文件不能被读到。
+    let temp = dir.join(format!(".{}.tmp", crate::id()));
+    let write = async {
+        tokio::fs::write(&temp, content.as_bytes()).await?;
+        tokio::fs::rename(&temp, &path).await
+    };
+    if let Err(error) = write.await {
+        let _ = tokio::fs::remove_file(&temp).await;
+        return Err(error.into());
+    }
+    let uri = format!("zcode-artifact://{}/{}", encode(session), encode(&artifact));
+    let stored = StoredAttachment {
+        path: path.to_string_lossy().into_owned(),
+        media_type: mime.into(),
+        total_bytes: total as u64,
+        data_url: true,
+        ..Default::default()
+    };
+    Ok((uri, stored))
+}
+
+/// The prompt attachment behind `uri`: a base64 `data:` URL artifact.
+pub async fn stored(root: &Path, uri: &str) -> anyhow::Result<Option<StoredAttachment>> {
+    let Some((session, artifact)) = parse(uri) else {
+        return Ok(None);
+    };
+    let dir = root.join(segment(&session));
+    let mut entries = match tokio::fs::read_dir(&dir).await {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    while let Some(entry) = entries.next_entry().await? {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.contains(&artifact) || !text_file(&name) {
+            continue;
+        }
+        let path = entry.path();
+        let Some((mime, header)) = data_url_header(&path).await? else {
+            return Ok(None);
+        };
+        let payload = tokio::fs::metadata(&path).await?.len() - header;
+        let mut tail = [0u8; 2];
+        if payload >= 2 {
+            use tokio::io::{AsyncReadExt, AsyncSeekExt};
+            let mut file = tokio::fs::File::open(&path).await?;
+            file.seek(std::io::SeekFrom::End(-2)).await?;
+            file.read_exact(&mut tail).await?;
+        }
+        let padding = tail.iter().filter(|b| **b == b'=').count() as u64;
+        return Ok(Some(StoredAttachment {
+            path: path.to_string_lossy().into_owned(),
+            media_type: mime,
+            total_bytes: (payload / 4 * 3).saturating_sub(padding),
+            data_url: true,
+            ..Default::default()
+        }));
+    }
+    Ok(None)
+}
+
+/// The media type and header length (through the comma) of a base64 `data:`
+/// URL file.
+pub async fn data_url_header(path: &Path) -> anyhow::Result<Option<(String, u64)>> {
+    use tokio::io::AsyncReadExt;
+    let mut head = Vec::with_capacity(256);
+    tokio::fs::File::open(path)
+        .await?
+        .take(256)
+        .read_to_end(&mut head)
+        .await?;
+    let Some(comma) = head.iter().position(|b| *b == b',') else {
+        return Ok(None);
+    };
+    let header = String::from_utf8_lossy(&head[..comma]).to_lowercase();
+    let Some(mime) = header
+        .strip_prefix("data:")
+        .and_then(|h| h.strip_suffix(";base64"))
+    else {
+        return Ok(None);
+    };
+    Ok(Some((mime.to_owned(), comma as u64 + 1)))
 }
 
 /// Node `readToolResultArtifact`: text artifacts as UTF-8, others as base64.

@@ -21,7 +21,7 @@ impl Engine {
             }
         }
         let selected = self.select(&c.payload, Some(self.session_selection(id)?))?;
-        let mut content = self.input_content(id, &c.payload)?;
+        let (mut content, reminders) = self.input_content(id, &c.payload)?;
         let request_content = super::submission::ambient_content(
             &content,
             c.payload["text"].as_str().unwrap_or(""),
@@ -137,6 +137,12 @@ impl Engine {
             message["_zcode_request_content"] = request;
         }
         s.append_message(message);
+        // Node：文本附件以 prompt_attachment 提醒跟在 user 消息之后。
+        for body in reminders {
+            let source = "prompt_attachment";
+            s.append_message(json!({"role":"user","_zcode_source":source,
+                "content":crate::domain::node_history::reminders::wrap(source, &body)}));
+        }
         let mut payload = c.payload.clone();
         payload.as_object_mut().unwrap().remove("context_refs");
         // 凭据与单次执行选项不属于可持久化的 intent。

@@ -8,6 +8,7 @@ mod hydrate;
 pub mod incoming;
 pub mod reminders;
 
+pub(crate) use attachment::prompt_attachment;
 pub use branch::{Branch, active_messages, select_branch};
 pub use entries::Entry;
 pub use hydrate::{Hydrated, hydrate};

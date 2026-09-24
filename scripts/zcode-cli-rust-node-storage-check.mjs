@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { SqliteSessionStore } from "../apps/zcode-cli/packages/adapters/src/storage/session-store/sqlite-session-store.ts";
+import { createNodeToolArtifactStore } from "../apps/zcode-cli/packages/adapters/src/storage/index.ts";
 import { readSessionModelSelection } from "../apps/zcode-cli/packages/bootstrap/src/app/session-store.ts";
 import { hydrateMessageHistoryFromSession } from "../apps/zcode-cli/packages/core/src/agent/session-history-hydrator.ts";
 import { createMessageHistory } from "../apps/zcode-cli/packages/core/src/agent/message-history.ts";
@@ -56,7 +57,19 @@ async function check(name, root, file) {
       rewindTargetMessageId: revert?.targetMessageID,
     };
     const history = createMessageHistory();
-    await hydrateMessageHistoryFromSession({ history, messages: stored, ...branchOptions });
+    // 附件与媒体按 Node 产物目录读回（spec §5.3）。
+    const artifactStore = createNodeToolArtifactStore({
+      imageCacheRootDir: join(root, "cli/image-cache"),
+      pdfCacheRootDir: join(root, "cli/pdf-cache"),
+      rootDir: join(root, "cli/artifacts"),
+      videoCacheRootDir: join(root, "cli/video-cache"),
+    });
+    await hydrateMessageHistoryFromSession({
+      artifactStore,
+      history,
+      messages: stored,
+      ...branchOptions,
+    });
     expectEqual(`${name} history`, history.toRuntimeEntries(), rust.history);
     const merged = mergeColdConversationEvents({
       memoryEvents: [],
