@@ -152,6 +152,43 @@ sequenceDiagram
   A->>W: persist
 ```
 
+### 5.1 NodeJournal 与 NodeStore
+
+```mermaid
+flowchart LR
+  E[Engine<br/>会话 actor] -- 事件钩子 --> J[Session.node<br/>NodeJournal]
+  J -- 待写记录 --> E
+  E -- persist/commit --> S[NodeStore<br/>SessionStore 实现]
+  S -- begin immediate --> DB[(Node db.sqlite)]
+  S -- load_session/index/list/ack --> R[冷读取<br/>§6]
+```
+
+- **NodeJournal**（domain，纯函数、无 IO）挂在 `Session.node`：记住当前轮与当前模型步骤的 Node id（用户消息、assistant 消息、各 part、工具 part 的声明序号与开始时间），在与 Node 相同的时机按 Node 写入模板生成记录，排入待写队列。
+- **NodeStore**（state）实现 core 的 `SessionStore`：一次 `commit` 把会话的待写队列在一个 `begin immediate` 事务里交给 M11.1 的仓储函数；`load_index`、`list_sessions`、`load_session`、`lookup_ack` 走 §6、§7 的冷读取；用量写入 Node 的 `model_usage`/`turn_usage`/`tool_usage`；项目设置写 `local_setting`。
+- 过渡：M11.3、M11.4 期间 NodeStore 由启动参数显式选择，旧存储仍为默认；M11.5 改为唯一实现并删除旧存储。
+- id：新会话 `sess_<uuid>`；消息与 part 用 Node 格式（毫秒 36 进制 + uuid）；`anchor.turnId` 为 `turn_<轮 uuid>`。
+
+### 5.2 事件到 Node 写入的对应
+
+| Rust 时机                    | Node 写入（模板）                                                                                                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 会话首次落库（首个输入准入） | `createSession`（`title = titleFromInput`、`titleSource = first_input`、`permission = {mode}`）、`runtime/model_selection`、`runtime/execution_state`（`events.ts`） |
+| 输入准入（startNow）         | user 消息 + text part（`persistUserPrompt`：`semantics` real_user、`anchor`、`modelSelection`、`metadata.conversationInputIntent` 等）                               |
+| 模型步骤开始                 | assistant 消息（无 `completed`）+ `step-start` part（`turn-model-step.ts`）                                                                                          |
+| ModelDone                    | reasoning part（按 provider 推理块拆分，`metadata` 为 providerOptions）、text part；无工具调用时 `step-finish` + assistant 完成（`finish`、`tokens`）                |
+| ModelDone 带工具调用         | 每个调用一个 `pending` 工具 part（`declarationIndex`、`input`、`raw`）                                                                                               |
+| ToolStart                    | 工具 part `running`（`time.start`）                                                                                                                                  |
+| ToolDone                     | 工具 part `completed`（`output`、`metadata.schemaVersion`）或 `error`（`error`、`metadata.modelContent`）                                                            |
+| 一个步骤的工具全部完成       | `step-finish` + assistant 完成（`finish = tool-calls`）                                                                                                              |
+| 轮次成功结束                 | 最终 assistant 重写 `anchor`（`historyRoundCount`、`orderedMessageIds`、`boundaryMessageId`、`goalBoundary`）                                                        |
+| 轮次失败                     | 当前步骤 assistant 完成并带 `error{name, data{message, code?, attribution?}}`                                                                                        |
+| 取消                         | 已流式到达的 reasoning/text part，assistant 完成并带取消 error（`data.turnResult = cancelled`）                                                                      |
+| 流恢复重试                   | 旧步骤 assistant 带 `StreamRecoveryDiscarded` error、`finish = stream_recovery_discarded`，新步骤另起消息                                                            |
+| 标题、模型、模式、todo       | `updateSession`、`runtime/model_selection`、`runtime/execution_state`、`todo`                                                                                        |
+
+- Rust canonical assistant 到 Node part 的映射是 §6 冷读取映射的逆：Anthropic thinking 块 → 每块一个 reasoning part（`metadata.anthropic.signature` / `redactedData`），Responses 推理项 → `metadata.openai.{itemId, reasoningEncryptedContent}`，其余 `reasoning_content` → 一个无 metadata 的 reasoning part；工具参数解析为对象作为 `input`；失败工具的模型可见内容写 `metadata.modelContent`。
+- 验收：用 NodeStore 跑脚本化会话，把 Node 库按 §6 冷读取，模型上下文与运行时一致，界面行的种类、文本、工具状态一致；Node 侧用真实 `SqliteSessionStore` 读取同一库无解码错误。
+
 - **取消**：写入已收到的 reasoning 与 text（`time.start` 为 assistant 创建时间），assistant 带 `completed` 与取消错误，不写 step-finish，与 Node `persistCancelledStreamSnapshot` 相同。
 - **崩溃**：已落库的 `pending`/`running` 工具与未完成的 assistant 保持原样，读取端按"中断"投影，不改库。
 - 工具执行前与下一次模型请求前的两个耐久屏障沿用 `rust-cli-core.md` 的规则。

@@ -13,6 +13,10 @@ pub struct StoredAttachment {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
+    /// The Node records of this session still to be written, and the Node ids
+    /// of its current turn (spec rust-m11-node-storage §5.1).
+    #[serde(default)]
+    pub node: super::node_journal::NodeJournal,
     #[serde(default)]
     pub file_checkpoints: Vec<super::file_checkpoint::FileCheckpoint>,
     #[serde(default)]
@@ -169,6 +173,7 @@ impl Session {
         now: u64,
     ) -> Self {
         Self {
+            node: Default::default(),
             file_checkpoints: vec![],
             rewind_committed: None,
             history: Default::default(),
