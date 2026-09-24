@@ -25,6 +25,7 @@ impl Session {
         };
         Host {
             session: self.id.clone(),
+            agent: self.node_agent(),
             provider,
             model,
             mode: self.mode.as_str().into(),

@@ -95,7 +95,11 @@ impl Engine {
         };
         let now = self.clock.now();
         let agent = format!("agent_{}", self.clock.id());
-        let child = format!("subagent_{agent}");
+        // Node createSessionId(`subagent_${agentId}`)；旧存储沿用无前缀的 id。
+        let child = match self.journaling() {
+            true => format!("sess_subagent_{agent}"),
+            false => format!("subagent_{agent}"),
+        };
         let output_file = self.tools.agent_output(&child, "").await?;
         self.tools.inherit_session(parent, &child).await?;
         let mut session = Session::new(
@@ -126,8 +130,11 @@ impl Engine {
         // Node 把会话级工具 allow/deny 传给子代理 runtime。
         session.runtime.tools = self.sessions[parent].runtime.tools.clone();
         self.sessions.insert(child.clone(), session);
-        let c = child_command(&child, &self.clock.id(), args["prompt"].as_str().unwrap());
+        let prompt = args["prompt"].as_str().unwrap();
+        self.node_child_created(&child, prompt);
+        let c = child_command(&child, &self.clock.id(), prompt);
         let (turn, _) = self.admit_input(&child, &c, None)?;
+        self.node_child_prompt(&child, &turn, prompt);
         if let Some(execution) = execution {
             self.submissions
                 .entry((child.clone(), turn.clone()))
@@ -243,6 +250,7 @@ impl Engine {
                 self.tools.inherit_session(parent, &task.child_id).await?;
                 let c = child_command(&task.child_id, &id, &content);
                 let (turn, _) = self.admit_input(&task.child_id, &c, None)?;
+                self.node_child_prompt(&task.child_id, &turn, &content);
                 let child = self.sessions.get_mut(&task.child_id).unwrap();
                 if let Some(row) = child.rows.last_mut() {
                     row["origin"] = "mailbox".into();

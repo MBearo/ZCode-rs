@@ -51,8 +51,10 @@ impl Session {
     /// The user message and its text part of `p` in the turn `runtime`.
     pub(super) fn push_prompt(&mut self, now: u64, p: Prompt, runtime: &str) {
         self.node.latest = Some(p.message.clone());
+        let agent = self.node_agent();
         let message = r::user_message(&UserPrompt {
             id: &p.message,
+            agent: &agent,
             session: &self.id,
             created: now,
             selection: self.node_selection(),
@@ -104,6 +106,7 @@ impl Session {
         };
         r::assistant_message(&Assistant {
             id: &step.assistant,
+            agent: &self.node_agent(),
             session: &self.id,
             parent: &turn.user,
             created: step.created,

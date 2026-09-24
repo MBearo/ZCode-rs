@@ -43,7 +43,32 @@ impl ModelPort for Model {
                 .as_str()
                 .is_some_and(|c| c.starts_with("CRITICAL: Respond with TEXT ONLY"))
         });
+        // 父会话首轮派生子代理：最后一条是“spawn a child”的用户输入时调用 Agent 工具。
+        let spawn = messages
+            .last()
+            .is_some_and(|m| m["role"] == "user" && m["content"] == "spawn a child");
         self.requests.send(messages).unwrap();
+        if spawn {
+            let call = json!({"id": "call_agent", "type": "function", "function": {"name": "Agent",
+                "arguments": "{\"description\":\"Look around\",\"prompt\":\"Inspect a.ts\",\"subagent_type\":\"general-purpose\"}"}});
+            sink.send(Event::ModelStatus(
+                json!({"type": "model_request_started", "querySource": "main_turn",
+                "attempt": 1, "requestId": "spawn", "providerId": "p", "modelId": "m"}),
+            ))
+            .await
+            .unwrap();
+            sink.send(Event::ModelStatus(json!({"type": "model_request_completed", "querySource": "main_turn",
+                "attempt": 1, "requestId": "spawn", "providerId": "p", "modelId": "m", "finishReason": "tool-calls"})))
+                .await
+                .unwrap();
+            return Ok(ModelOutput {
+                output_limit: false,
+                message: json!({"role": "assistant", "content": "", "tool_calls": [call.clone()],
+                    "_zcode_origin": {"provider": "p", "model": "m"}}),
+                calls: vec![call],
+                usage: json!({}),
+            });
+        }
         if compaction {
             // 压缩摘要请求：只返回摘要，不计入对话步骤。
             return Ok(ModelOutput {
@@ -117,10 +142,14 @@ impl ToolPort for Tools {
     fn definitions(&self) -> Vec<Value> {
         vec![
             json!({"type": "function", "function": {"name": "Read", "parameters": {"type": "object"}}}),
+            json!({"type": "function", "function": {"name": "Agent", "parameters": {"type": "object"}}}),
         ]
     }
     fn concurrent_safe(&self, _: &str) -> bool {
         true
+    }
+    async fn agent_output(&self, session: &str, _: &str) -> Result<String> {
+        Ok(format!("agent-output/{session}.md"))
     }
     async fn execute(&self, _: &str, _: &Value, _: &CancellationToken) -> Result<String> {
         let gate = self.gate.lock().unwrap().take();
@@ -311,6 +340,11 @@ impl Harness {
 /// Writes what Rust reads back of `session` (history entries, rows and
 /// state) next to the kept database, for Node's reading check.
 pub fn dump(h: &Harness, conn: &rusqlite::Connection, session: &str) {
+    dump_as(h, conn, session, "rust.json");
+}
+
+/// [`dump`] under another file name (several sessions of one database).
+pub fn dump_as(h: &Harness, conn: &rusqlite::Connection, session: &str, file: &str) {
     if h._dir.is_some() {
         return;
     }
@@ -325,5 +359,5 @@ pub fn dump(h: &Harness, conn: &rusqlite::Connection, session: &str) {
         .unwrap();
     let read = json!({"sessionId": session, "history": history,
         "rows": resumed.conversation.rows, "state": resumed.conversation.state});
-    std::fs::write(h.root.join("rust.json"), read.to_string()).unwrap();
+    std::fs::write(h.root.join(file), read.to_string()).unwrap();
 }

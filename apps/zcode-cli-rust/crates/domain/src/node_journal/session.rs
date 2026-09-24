@@ -19,6 +19,16 @@ impl Session {
         Some(selection)
     }
 
+    /// Node `config.agentName`: `zcode-<type>` for a subagent child.
+    pub fn node_agent(&self) -> String {
+        match &self.agent_profile {
+            Some(profile) if self.task_type == "subagent_child" => {
+                format!("zcode-{}", profile.name)
+            }
+            _ => super::records::AGENT.into(),
+        }
+    }
+
     /// The directory Node stores (the protocol workspace path).
     pub fn node_directory(&self) -> &str {
         self.workspace_path

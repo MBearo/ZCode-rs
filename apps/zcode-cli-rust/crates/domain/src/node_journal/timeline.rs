@@ -10,11 +10,18 @@ use serde_json::{Map, Value, json};
 #[serde(rename_all = "camelCase")]
 pub struct Host {
     pub session: String,
+    /// Node `config.agentName`.
+    #[serde(default = "default_agent")]
+    pub agent: String,
     pub provider: String,
     pub model: String,
     pub mode: String,
     pub plan: bool,
     pub cwd: String,
+}
+
+fn default_agent() -> String {
+    AGENT.into()
 }
 
 /// Node `persistAssistantTimelinePartForSession`: the timeline host
@@ -38,7 +45,7 @@ pub fn timeline_records(
     }
     info["mode"] = host.mode.clone().into();
     info["planEnabled"] = host.plan.into();
-    info["agent"] = AGENT.into();
+    info["agent"] = host.agent.clone().into();
     info["path"] = json!({"cwd": host.cwd, "root": host.cwd});
     info["cost"] = 0.into();
     info["tokens"] = r::tokens(None);
@@ -205,7 +212,7 @@ pub fn summary_records(
 ) -> (Value, Vec<Value>) {
     let (message, text, compaction) = ids;
     let mut info = json!({"id": message, "sessionID": host.session, "role": "user", "time": {"created": now},
-        "summary": {"title": "Compact summary", "body": body, "diffs": []}, "agent": AGENT});
+        "summary": {"title": "Compact summary", "body": body, "diffs": []}, "agent": host.agent});
     if selection.is_object() {
         info["modelSelection"] = selection.clone();
     }
@@ -240,7 +247,7 @@ pub fn reminder_records(
     let metadata =
         json!({"runtimeMessage": {"source": source}, "source": source, "visibility": "model-only"});
     let mut info = json!({"id": message, "sessionID": host.session, "role": "user", "time": {"created": now},
-        "agent": AGENT, "metadata": metadata});
+        "agent": host.agent, "metadata": metadata});
     if selection.is_object() {
         info["modelSelection"] = selection.clone();
     }

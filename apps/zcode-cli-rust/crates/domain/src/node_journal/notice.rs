@@ -79,7 +79,7 @@ impl Session {
         part_metadata.insert("visibility".into(), visibility.into());
         let turn = self.node.turn.as_ref().map(|t| t.runtime.clone());
         let mut info = json!({"id": n.message, "sessionID": self.id, "role": "user",
-            "time": {"created": now}, "agent": r::AGENT, "metadata": message_metadata});
+            "time": {"created": now}, "agent": self.node_agent(), "metadata": message_metadata});
         if let Some(selection) = self.node_selection() {
             info["modelSelection"] = selection;
         }

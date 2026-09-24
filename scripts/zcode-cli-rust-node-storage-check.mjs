@@ -33,8 +33,8 @@ function expectEqual(name, node, rust) {
   process.exitCode = 1;
 }
 
-async function check(name, root) {
-  const rust = JSON.parse(await readFile(join(root, "rust.json"), "utf8"));
+async function check(name, root, file) {
+  const rust = JSON.parse(await readFile(join(root, file), "utf8"));
   if (!rust.history.length || !rust.rows.length) throw new Error(`${name}: Rust read nothing back`);
   const sessionID = rust.sessionId;
   const store = await SqliteSessionStore.openStartup({ dbPath: join(root, "cli/db/db.sqlite") });
@@ -99,11 +99,17 @@ try {
   );
   const scenarios = await readdir(dir);
   if (scenarios.length === 0) throw new Error("Rust wrote no sessions");
+  const checked = [];
   for (const scenario of scenarios) {
-    await check(scenario, join(dir, scenario));
+    const root = join(dir, scenario);
+    for (const file of await readdir(root)) {
+      if (!/^rust.*\.json$/.test(file)) continue;
+      await check(`${scenario}/${file}`, root, file);
+      checked.push(file === "rust.json" ? scenario : `${scenario} (${file})`);
+    }
   }
   if (!process.exitCode) {
-    console.log(`Node reads the Rust-written sessions identically: ${scenarios.join(", ")}.`);
+    console.log(`Node reads the Rust-written sessions identically: ${checked.join(", ")}.`);
   }
 } finally {
   await rm(dir, { recursive: true, force: true });

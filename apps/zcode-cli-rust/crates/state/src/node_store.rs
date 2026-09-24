@@ -55,6 +55,7 @@ fn host(r: &resume::Resume) -> zcode_cli_domain::node_journal::timeline::Host {
     let text = |v: &Value| v.as_str().unwrap_or("").to_owned();
     zcode_cli_domain::node_journal::timeline::Host {
         session: r.session.id.clone(),
+        agent: zcode_cli_domain::node_journal::records::AGENT.into(),
         provider: text(&selection["providerId"]),
         model: text(&selection["modelId"]),
         mode: r

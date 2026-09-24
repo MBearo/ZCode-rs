@@ -444,3 +444,52 @@ async fn manual_compaction_is_stored_as_a_node_summary_and_timeline() {
     assert_eq!(user_texts(&conn, &session), [json!("Next")]);
     harness::dump(&h, &conn, &session);
 }
+
+#[tokio::test]
+async fn a_subagent_child_is_stored_as_a_node_child_session() {
+    let mut h = harness::start(Some("subagent"), None).await;
+    let session = h.create("c1", "spawn a child").await;
+    let conn = h.settled(&session, 1).await;
+    let child: String = conn
+        .query_row(
+            "select id from session where parent_id = ?",
+            [&session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(child.starts_with("sess_subagent_agent_"), "{child}");
+    let row = sessions::get(&conn, &child).unwrap().unwrap();
+    assert_eq!(row.task_type, "subagent_child");
+    assert_eq!(row.title, "Inspect a.ts");
+    assert_eq!(row.title_source, "first_input");
+    let messages = zcode_cli_state::node::messages::messages(&conn, &child).unwrap();
+    // 子会话首轮前落模型切换分隔线，任务提示以 coordinator_input 呈现。
+    assert_eq!(messages[0].parts[0]["timelineType"], "model_change");
+    assert!(messages[0].parts[0].get("fromModel").is_none());
+    let prompt = &messages[1].info;
+    assert_eq!(prompt["metadata"]["inputPresentation"], "coordinator_input");
+    assert_eq!(prompt["agent"], "zcode-general-purpose");
+    let resumed = resume::resume(&conn, &child, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    let history = &resumed.history.messages;
+    assert_eq!(history[0]["content"], "Inspect a.ts");
+    assert_eq!(history.last().unwrap()["content"], "Done.");
+    // 父会话的 Agent 工具结果带 agentId，冷投影据此还原子代理行。
+    let parent = resume::resume(&conn, &session, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    assert!(
+        parent
+            .conversation
+            .rows
+            .iter()
+            .any(|r| r["kind"] == "subagent"
+                || r["subagent"].is_object()
+                || r["toolName"] == "Agent"),
+        "{:#?}",
+        parent.conversation.rows
+    );
+    harness::dump(&h, &conn, &session);
+    harness::dump_as(&h, &conn, &child, "rust-child.json");
+}

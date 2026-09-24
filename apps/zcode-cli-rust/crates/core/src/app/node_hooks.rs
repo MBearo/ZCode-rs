@@ -145,6 +145,46 @@ impl Engine {
         );
     }
 
+    /// Node subagent child start (`ensureSessionPersistedForExternalActivity`
+    /// with the task prompt, then the child's model as a pending model change).
+    pub(super) fn node_child_created(&mut self, child: &str, prompt: &str) {
+        if !self.journaling() {
+            return;
+        }
+        let now = self.clock.now();
+        let request = nj::part_id(now, &self.clock.id());
+        let Some(s) = self.sessions.get_mut(child) else {
+            return;
+        };
+        s.node_ensure_created(now, prompt, VERSION);
+        let to = s.node_selection().unwrap_or_default();
+        s.node_record_model_change(request, None, to);
+    }
+
+    /// The child's task prompt (Node `executeTurn` with `coordinator_input`).
+    pub(super) fn node_child_prompt(&mut self, child: &str, turn: &str, prompt: &str) {
+        if !self.journaled(child) {
+            return;
+        }
+        let now = self.clock.now();
+        let (message, part) = (self.clock.id(), self.clock.id());
+        let tools = self.tool_names();
+        let s = self.sessions.get_mut(child).unwrap();
+        s.node_user_prompt(
+            now,
+            Prompt {
+                message: nj::message_id(now, &message),
+                part: nj::part_id(now, &part),
+                turn,
+                text: prompt,
+                command: None,
+                queue_id: None,
+                metadata: Some(json!({"inputPresentation": "coordinator_input"})),
+                tools: &tools,
+            },
+        );
+    }
+
     /// Node `persistUserPrompt`'s `tools`: the tools offered to the model.
     pub(super) fn tool_names(&self) -> Vec<String> {
         self.tools

@@ -127,6 +127,8 @@ fn semantics(fields: [(&str, &str); 5]) -> Value {
 /// The user prompt facts `persistUserPrompt` records.
 pub struct UserPrompt<'a> {
     pub id: &'a str,
+    /// Node `config.agentName` (`zcode-<type>` for a subagent child).
+    pub agent: &'a str,
     pub session: &'a str,
     pub created: u64,
     pub selection: Option<Value>,
@@ -139,7 +141,7 @@ pub struct UserPrompt<'a> {
 /// Node `persistUserPrompt`'s message.
 pub fn user_message(p: &UserPrompt) -> Value {
     let mut out = json!({"id": p.id, "sessionID": p.session, "role": "user",
-        "time": {"created": p.created}, "agent": AGENT});
+        "time": {"created": p.created}, "agent": p.agent});
     if let Some(selection) = &p.selection {
         out["modelSelection"] = selection.clone();
     }
@@ -210,6 +212,7 @@ pub fn step_finish_part(
 /// The assistant facts `persistAssistantMessage` records.
 pub struct Assistant<'a> {
     pub id: &'a str,
+    pub agent: &'a str,
     pub session: &'a str,
     pub parent: &'a str,
     pub created: u64,
@@ -244,7 +247,7 @@ pub fn assistant_message(a: &Assistant) -> Value {
     }
     out["mode"] = a.mode.into();
     out["planEnabled"] = a.plan.into();
-    out["agent"] = AGENT.into();
+    out["agent"] = a.agent.into();
     out["path"] = json!({"cwd": a.cwd, "root": a.root});
     out["cost"] = 0.into();
     out["tokens"] = a.tokens.clone().unwrap_or_else(|| tokens(None));

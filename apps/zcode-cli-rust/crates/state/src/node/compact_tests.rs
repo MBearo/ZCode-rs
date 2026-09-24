@@ -152,6 +152,7 @@ fn a_compaction_left_running_closes_on_resume() {
     commit(&conn, &mut s);
     let host = crate::domain::node_journal::timeline::Host {
         session: "sess_c".into(),
+        agent: "zcode-agent".into(),
         provider: "p".into(),
         model: "m".into(),
         mode: "build".into(),
