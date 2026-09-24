@@ -42,6 +42,12 @@ pub(super) async fn handle(
         _ = cancel.cancelled() => bail!("Plugin operation cancelled"),
         outcome = plugins::discover(&request) => outcome?,
     };
+    let project_paths = snapshot.project_paths.clone();
+    let paths = plugins::mutations::Paths {
+        user: Path::new(&snapshot.user_path),
+        cwd: &tools.cwd,
+        project: &project_paths,
+    };
     let input = plugins::overview::Input {
         config: view,
         storage: &storage,
@@ -82,6 +88,25 @@ pub(super) async fn handle(
                 .map(|entry| plugins::catalog::project(entry, &display, category))
                 .collect();
             Ok(json!({"authority":authority,"plugins":entries}))
+        }
+        "plugins/setEnabled" => {
+            let id = params["pluginId"].as_str().unwrap_or_default();
+            let enabled = params["enabled"].as_bool().unwrap_or_default();
+            let scope = params["scope"].as_str();
+            plugins::mutations::set_enabled(&outcome, &paths, (id, enabled, scope)).await
+        }
+        "plugins/configure" => plugins::mutations::configure(&outcome, &paths, params).await,
+        "plugins/resetConfig" => plugins::mutations::reset(&paths, params).await,
+        "plugins/restoreBuiltin" => {
+            let _guard = plugins::atomic_write::lock(&storage).await;
+            let id = params["pluginId"].as_str().unwrap_or_default();
+            let cua = plugins::overview::cua_enabled(&lookup);
+            plugins::mutations::restore_builtin(&paths, id, cua).await
+        }
+        "plugins/uninstall" => {
+            // 与 Node 一致：卸载在同一 storage root 的进程内锁里串行化。
+            let _guard = plugins::atomic_write::lock(&storage).await;
+            plugins::mutations::uninstall(&outcome, (&storage, &paths), params).await
         }
         other => bail!("Unsupported plugin method: {other}"),
     }

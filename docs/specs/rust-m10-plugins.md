@@ -200,6 +200,65 @@ sequenceDiagram
   - 作为 canonical 消息提交给 owner 并持久化，与 Node 的"model-only notice 落库"一致：冷恢复后前缀不变，UI 不产生用户气泡。
   - 生成失败时本轮照常执行（fail open），但不注入任何内容。
 
+### 3.10 M10.3：写配置与卸载
+
+依据 Node `bootstrap/src/plugins.ts`（`setZCodePluginEnabled`、`configureZCodePlugin`、`resetZCodePluginConfig`、`restoreBuiltinPlugin`、`uninstallZCodeMarketplacePlugin`）、`adapters/src/config/file-config.adapter.ts`、`bootstrap/src/lib/plugin-storage-lock.ts`。
+
+- **写入位置**（`resolvePluginConfigPath`）：
+  - `scope` 缺省或为 `user` 时写用户配置文件；
+  - `scope: "workspace"` 时写当前 workspace 的 `.zcode/config.json`，若它已在项目配置链中则复用该路径（Windows 忽略大小写与分隔符），不写外层项目的配置。
+- **配置文件写入**：
+  - 读取失败（不存在）视为空对象；非对象或无法解析时报错，文案与 Node 一致。
+  - 保持原有键序，`plugins` 或其下的分节不是对象时替换为空对象。
+  - 同目录临时文件 `.{name}.{pid}.{ms}.{uuid}.tmp`（0600）写入并 `fsync` 后 rename 覆盖，结尾带换行；失败时删除临时文件。
+  - CUA 旧 id `zcode-cua@zcode-plugins-official` 与 `computer-use@zcode-plugins-official` 互为别名：写入时先删别名再写 canonical id。
+- **`plugins/setEnabled`**：
+  - 选择器：先精确匹配 id，再按 manifest 名称唯一匹配；找不到或名称歧义时报错（`Plugin not found: …`、`Plugin name is ambiguous, use full plugin id: …`）。
+  - 返回写入前发现的插件信息，覆盖 `enabled` 与 `enabledSource`（`scope ?? "user"`）。
+- **`plugins/configure`**：
+  - `options` 只保留字符串、数字、布尔值；`clearOptionKeys` 去空白、去空、去重。
+  - 合并：已存值（canonical 优先，其次旧别名）先删除 clear 键，再合入新值。
+  - `dryRun` 只校验选择器，不写文件。返回 `{pluginId, diagnostics: []}`。
+- **`plugins/resetConfig`**：
+  - `workspace` 只删除启用覆盖；`user` 删除启用与 options。
+  - 没有删除任何内容时不写文件；删除时把缺失的 `enabledPlugins`/`options` 写成空对象（Node 行为）。
+- **`plugins/restoreBuiltin`**：
+  - `computer-use` 在 `ZCODE_CUA_PRODUCT_HELPER` 未启用时报错；
+  - 从用户配置的 `suppressedBuiltins` 移除该 id。Rust 不做 seed（§1），重新发现依赖已存在的官方缓存。
+- **`plugins/uninstall`**：
+  - id 取 `pluginId`，或 `pluginName@marketplace`。
+  - 命中安装记录：删除记录并写回 `installed_plugins.json`（`{version: 1, plugins}`，记录保持原始形状；map 形状的旧记录按 Node 归一化）；`removeCache` 不为 `false` 时删除 `installPath`（相对存储根解析）与插件数据目录；再从用户配置删除该插件的启用与 options，并移除可能遗留的抑制标记。
+  - 命中官方内置插件：写入抑制标记，删除用户配置中的启用与 options，删除数据目录，保留不可变的官方缓存；摘要的 `installPath` 为插件根，`installedAt` 为当前时间。
+  - 两者都不命中时返回 `{diagnostics: []}`。
+  - `installed_plugins.json` 通过 Node 兼容的原子替换写入：rename 被拒绝时改走 standalone 事务，边车格式与 §4 的恢复规则互通。
+- **存储锁**：`restoreBuiltin` 与 `uninstall` 在同一存储根的进程内互斥锁下执行（Node 为 promise 链，同样不跨进程）。M10.4 的安装、更新与市场写入复用该锁。
+- **`operationId`**：M10.4 之前忽略（无进度事件、不可取消）。
+
+```mermaid
+sequenceDiagram
+  participant H as Host
+  participant E as Engine（actor）
+  participant T as 后台任务
+  participant L as 存储锁（storageRoot）
+  participant F as 文件
+  H->>E: plugins/uninstall {pluginId}
+  E->>T: 派生（token、取消令牌）
+  T->>T: 发现插件（Outcome）
+  T->>L: 获取
+  T->>F: 读 installed_plugins.json（含原子恢复）
+  alt 安装记录
+    T->>F: 写回记录，删除 installPath 与数据目录
+    T->>F: 用户配置：删除启用、options 与抑制标记
+  else 官方内置
+    T->>F: 用户配置：加抑制标记，删除启用与 options；删除数据目录
+  end
+  T->>L: 释放
+  T-->>E: 结果（按 token 回复）
+  E-->>H: {removedPlugin?, diagnostics}
+```
+
+已有会话的运行时不因这些写入而变化（§2），新会话读取新配置。
+
 ## 4. 与 Node 的差异（M10.1）
 
 - 目录项按名称排序后遍历（Node 为平台 `readdir` 顺序），保证跨平台结果确定。
@@ -211,6 +270,7 @@ sequenceDiagram
 - MCP 的 `auth` 与 `oauth` 暂时禁用（见 §3.4），M10.5 接入。
 - 官方插件 seed 不做（见 §1）。
 - 插件的 agents（子代理 profile）继续使用 `agent_profiles.rs` 的现有来源，本期不改。
+- M10.3：`restoreBuiltin` 不重新 seed 官方缓存；`uninstall` 查找官方内置插件使用加锁前的发现结果（官方缓存不可变，结果等价）。
 
 ## 5. 验收（M10.1）
 

@@ -7,6 +7,10 @@ import {
   zcodePluginsListResultSchema,
   zcodePluginsOverviewResultSchema,
   zcodePluginsReferenceCatalogResultSchema,
+  zcodePluginsConfigureResultSchema,
+  zcodePluginsRestoreBuiltinResultSchema,
+  zcodePluginsSetEnabledResultSchema,
+  zcodePluginsUninstallResultSchema,
 } from "@zcode/shared";
 import { fixture, waitForFile, type Harness } from "./zcode-cli-rust-fixture.js";
 
@@ -319,6 +323,109 @@ test("Rust freezes the session plugin catalog and commits @plugin reference remi
     const replayed = f.requests.at(-1)!.messages as Message[];
     const at = replayed.findIndex((m) => m.role === "user" && m.content === text);
     assert.equal(replayed[at + 1]?.content, reminder);
+    assert.deepEqual(h.schemaErrors, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Rust plugin configuration writes, uninstall and built-in restore follow Node", async () => {
+  const f = await fixture();
+  try {
+    const { plugin } = await demoPlugin(f.root);
+    const store = await storage(f.root);
+    const project = join(f.cwd, ".zcode/config.json");
+    const userConfig = join(f.root, ".zcode/cli/config.json");
+    await put(project, { plugins: { dirs: [plugin] } });
+    const h = f.start();
+    const request = <T>(
+      method: `plugins/${"setEnabled" | "configure" | "resetConfig" | "uninstall" | "restoreBuiltin" | "overview"}`,
+      params: Message,
+      schema: any,
+    ) => h.client.request(method, { ...workspace(h, f.cwd), ...params }, schema) as Promise<T>;
+    const list = async () =>
+      new Map(
+        (
+          await h.client.request("plugins/list", workspace(h, f.cwd), zcodePluginsListResultSchema)
+        ).plugins.map((p) => [p.id, p]),
+      );
+    const readJson = async (path: string) => JSON.parse(await readFile(path, "utf8"));
+
+    const disabled = await request<Message>(
+      "plugins/setEnabled",
+      { pluginId: "demo", enabled: false, scope: "workspace" },
+      zcodePluginsSetEnabledResultSchema,
+    );
+    assert.deepEqual(
+      [disabled.enabled, disabled.plugin.enabled, disabled.plugin.enabledSource],
+      [false, false, "workspace"],
+    );
+    assert.equal((await readJson(project)).plugins.enabledPlugins["demo@inline"], false);
+    assert.equal((await list()).get("demo@inline")?.enabledSource, "workspace");
+    await assert.rejects(
+      request(
+        "plugins/setEnabled",
+        { pluginId: "nope", enabled: true },
+        zcodePluginsSetEnabledResultSchema,
+      ),
+      /Plugin not found: nope/,
+    );
+
+    await request(
+      "plugins/configure",
+      { pluginId: "demo@inline", options: { region: "ap", token: "t", bad: { x: 1 } } },
+      zcodePluginsConfigureResultSchema,
+    );
+    await request(
+      "plugins/configure",
+      { pluginId: "demo@inline", options: {}, clearOptionKeys: ["region", " "] },
+      zcodePluginsConfigureResultSchema,
+    );
+    assert.deepEqual((await readJson(userConfig)).plugins.options["demo@inline"], { token: "t" });
+    const configured = (await list()).get("demo@inline")!;
+    assert.equal(configured.configuredOptions, undefined, "only the sensitive token is stored");
+    assert.deepEqual(configured.optionSources, { token: "user" });
+
+    await request(
+      "plugins/resetConfig",
+      { pluginId: "demo@inline", scope: "workspace" },
+      zcodePluginsConfigureResultSchema,
+    );
+    assert.equal((await readJson(project)).plugins.enabledPlugins["demo@inline"], undefined);
+    assert.equal((await list()).get("demo@inline")?.enabled, true);
+
+    const removed = await request<Message>(
+      "plugins/uninstall",
+      { pluginId: "tool@market" },
+      zcodePluginsUninstallResultSchema,
+    );
+    assert.deepEqual(
+      [removed.removedPlugin.id, removed.removedPlugin.enabled, removed.removedPlugin.version],
+      ["tool@market", false, "2.0.0"],
+    );
+    assert.deepEqual((await readJson(join(store, "installed_plugins.json"))).plugins, []);
+    await assert.rejects(
+      readFile(join(store, "cache/market/tool/2.0.0/.zcode-plugin/plugin.json")),
+    );
+    assert.equal((await list()).has("tool@market"), false);
+
+    const builtin = "skill-creator@zcode-plugins-official";
+    await request("plugins/uninstall", { pluginId: builtin }, zcodePluginsUninstallResultSchema);
+    assert.deepEqual((await readJson(userConfig)).plugins.suppressedBuiltins, [builtin]);
+    assert.equal((await list()).has(builtin), false);
+    const overview = await request<Message>(
+      "plugins/overview",
+      {},
+      zcodePluginsOverviewResultSchema,
+    );
+    assert(overview.restorableBuiltins.some((p: Message) => p.id === builtin));
+    await request(
+      "plugins/restoreBuiltin",
+      { pluginId: builtin },
+      zcodePluginsRestoreBuiltinResultSchema,
+    );
+    assert.deepEqual((await readJson(userConfig)).plugins.suppressedBuiltins, []);
+    assert.equal((await list()).has(builtin), true);
     assert.deepEqual(h.schemaErrors, []);
   } finally {
     await f.close();

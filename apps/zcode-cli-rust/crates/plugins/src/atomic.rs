@@ -8,12 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 /// This process's writer identity in transaction records.
-pub static OWNER_ID: LazyLock<String> = LazyLock::new(|| {
-    use std::hash::{BuildHasher, Hasher};
-    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-    hasher.write_u32(std::process::id());
-    format!("rust-{:016x}-{}", hasher.finish(), std::process::id())
-});
+pub static OWNER_ID: LazyLock<String> = LazyLock::new(|| uuid::Uuid::new_v4().to_string());
 
 /// In-process writers keyed by target path (M10.4 registers them).
 pub static ACTIVE: LazyLock<Mutex<std::collections::HashMap<PathBuf, Live>>> =

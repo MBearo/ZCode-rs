@@ -13,7 +13,7 @@ pub struct Input<'a> {
 }
 
 /// Node `isZCodeCuaInternalFeatureEnabled`.
-fn cua_enabled(env: &(dyn Fn(&str) -> Option<String> + Sync)) -> bool {
+pub fn cua_enabled(env: &(dyn Fn(&str) -> Option<String> + Sync)) -> bool {
     let flag = |key: &str| env(key).map(|v| crate::js::trim(&v).to_lowercase());
     if flag("ZCODE_CUA_DEV_MODE").is_some_and(|v| matches!(v.as_str(), "1" | "true" | "on")) {
         return true;

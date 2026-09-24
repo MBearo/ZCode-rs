@@ -85,6 +85,32 @@ impl Ordered {
             }
         }
     }
+    /// Deletes a key (JS `delete`); `true` when it existed.
+    pub fn remove(&mut self, key: &str) -> bool {
+        match self {
+            Self::Object(entries) => {
+                let before = entries.len();
+                entries.retain(|(k, _)| k != key);
+                entries.len() != before
+            }
+            _ => false,
+        }
+    }
+    /// A value inserted by code (object keys in `Value` order).
+    pub fn from_value(value: &Value) -> Self {
+        match value {
+            Value::Null => Self::Null,
+            Value::Bool(b) => Self::Bool(*b),
+            Value::Number(n) => Self::Number(n.clone()),
+            Value::String(s) => Self::String(s.clone()),
+            Value::Array(items) => Self::Array(items.iter().map(Self::from_value).collect()),
+            Value::Object(map) => Self::Object(
+                map.iter()
+                    .map(|(k, v)| (k.clone(), Self::from_value(v)))
+                    .collect(),
+            ),
+        }
+    }
     pub fn to_value(&self) -> Value {
         match self {
             Self::Null => Value::Null,

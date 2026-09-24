@@ -3,9 +3,11 @@
 pub(crate) use zcode_cli_domain::js_string as js;
 
 pub mod atomic;
+pub mod atomic_write;
 pub mod catalog;
 pub mod commands;
 pub mod components;
+pub mod config_file;
 pub mod discovery;
 pub mod frontmatter;
 pub mod fsx;
@@ -16,6 +18,7 @@ pub mod loaded;
 pub mod manifest;
 pub mod market;
 pub mod mcp;
+pub mod mutations;
 pub mod official;
 pub mod overview;
 pub mod records;

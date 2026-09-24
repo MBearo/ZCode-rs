@@ -37,6 +37,8 @@ pub struct Installed {
     pub updated_at: Option<String>,
     pub workspace_scope: bool,
     pub source: Option<Value>,
+    /// The stored record (normalized for the map form), written back on save.
+    pub raw: Value,
 }
 
 impl Installed {
@@ -71,6 +73,7 @@ fn from_array(value: &Value) -> Option<Installed> {
         updated_at: text("updatedAt"),
         workspace_scope: scope == "workspace",
         source: value.get("source").cloned(),
+        raw: value.clone(),
     })
 }
 
@@ -86,22 +89,29 @@ fn from_map(id: &str, entry: &Value) -> Vec<Installed> {
         .iter()
         .filter_map(|item| {
             let install_path = item["installPath"].as_str().filter(|p| !p.is_empty())?;
+            let workspace_scope = matches!(item["scope"].as_str(), Some("project" | "local"));
+            let version = item["version"].as_str().unwrap_or(DEFAULT_VERSION);
+            let installed_at = item["installedAt"]
+                .as_str()
+                .unwrap_or("1970-01-01T00:00:00.000Z");
+            let updated_at = item["lastUpdated"].as_str().map(str::to_owned);
+            let mut raw = serde_json::json!({"id":id,"name":name,"marketplace":marketplace,
+                "version":version,"installPath":install_path,"installedAt":installed_at,
+                "scope":if workspace_scope {"workspace"} else {"user"}});
+            if let Some(updated) = &updated_at {
+                raw["updatedAt"] = updated.clone().into();
+            }
             Some(Installed {
                 id: id.to_owned(),
                 name: name.to_owned(),
                 marketplace: marketplace.to_owned(),
-                version: item["version"]
-                    .as_str()
-                    .unwrap_or(DEFAULT_VERSION)
-                    .to_owned(),
+                version: version.to_owned(),
                 install_path: install_path.to_owned(),
-                installed_at: item["installedAt"]
-                    .as_str()
-                    .unwrap_or("1970-01-01T00:00:00.000Z")
-                    .to_owned(),
-                updated_at: item["lastUpdated"].as_str().map(str::to_owned),
-                workspace_scope: matches!(item["scope"].as_str(), Some("project" | "local")),
+                installed_at: installed_at.to_owned(),
+                updated_at,
+                workspace_scope,
                 source: None,
+                raw,
             })
         })
         .collect()
@@ -125,6 +135,18 @@ pub async fn read_storage_json(path: &Path) -> std::io::Result<Option<Value>> {
 pub async fn installed(storage: &Path) -> std::io::Result<Vec<Installed>> {
     let value = read_storage_json(&storage.join("installed_plugins.json")).await?;
     Ok(value.as_ref().map(parse_installed).unwrap_or_default())
+}
+
+/// Node `saveInstalledPlugins`: `{version: 1, plugins: [...]}`, atomically.
+pub async fn save_installed(storage: &Path, records: &[Installed]) -> std::io::Result<()> {
+    let plugins: Vec<&Value> = records.iter().map(|r| &r.raw).collect();
+    let text = serde_json::to_string_pretty(&serde_json::json!({"version":1,"plugins":plugins}))
+        .expect("JSON serializes");
+    crate::atomic_write::write_file(
+        &storage.join("installed_plugins.json"),
+        format!("{text}\n").as_bytes(),
+    )
+    .await
 }
 
 /// Node `resolveInstalledPluginRoot`.
