@@ -63,6 +63,13 @@ impl ModelPort for Model {
             .and_then(|m| m["content"].as_str())
             .is_some_and(|c| c.contains("read the image"));
         let file = if image { "shot.png" } else { "a.ts" };
+        // 用户要求写入时调用 Write（build 模式下弹出权限询问）。
+        let write = messages
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "user" && m.get("_zcode_source").is_none())
+            .and_then(|m| m["content"].as_str())
+            .is_some_and(|c| c.contains("write it"));
         self.requests.send(messages).unwrap();
         if let Some(background) = spawn {
             let args = json!({"description": "Look around", "prompt": "Inspect a.ts",
@@ -139,7 +146,11 @@ impl ModelPort for Model {
         if tool_step {
             message["reasoning_content"] = "Look".into();
             calls = vec![json!({"id": format!("call_{n}"), "type": "function",
-                "function": {"name": "Read", "arguments": json!({"file_path": file}).to_string()}})];
+            "function": if write {
+                json!({"name": "Write", "arguments": json!({"file_path": "b.ts", "content": "x"}).to_string()})
+            } else {
+                json!({"name": "Read", "arguments": json!({"file_path": file}).to_string()})
+            }})];
             message["tool_calls"] = json!(calls);
         }
         Ok(ModelOutput {
@@ -165,6 +176,7 @@ impl ToolPort for Tools {
         vec![
             json!({"type": "function", "function": {"name": "Read", "parameters": {"type": "object"}}}),
             json!({"type": "function", "function": {"name": "Agent", "parameters": {"type": "object"}}}),
+            json!({"type": "function", "function": {"name": "Write", "parameters": {"type": "object"}}}),
         ]
     }
     fn concurrent_safe(&self, _: &str) -> bool {
@@ -334,13 +346,18 @@ impl Harness {
 
     /// Starts a session with `text` as its first input.
     pub async fn create(&mut self, command: &str, text: &str) -> String {
+        self.create_in("yolo", command, text).await
+    }
+
+    /// [`Harness::create`] in execution `mode`.
+    pub async fn create_in(&mut self, mode: &str, command: &str, text: &str) -> String {
         let workspace = self.workspace.clone();
         let ack = self
             .command(
                 1,
                 json!({"commandId": command, "clientId": "cli", "sessionId": null,
                 "type": "createSession", "issuedAt": 1, "payload": {"workspaceId": workspace,
-                    "config": {"mode": "yolo"}, "firstInput": {"text": text}}}),
+                    "config": {"mode": mode}, "firstInput": {"text": text}}}),
             )
             .await;
         ack["result"]["sessionId"]

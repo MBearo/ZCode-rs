@@ -264,12 +264,20 @@ impl Engine {
                 .context("Permission missing")?;
             (wait.owner.clone(), wait.call.clone())
         };
+        let receipt = (self.clock.id(), self.clock.id());
         let s = self.sessions.get_mut(id).unwrap();
+        let previous = s.mode.as_str().to_owned();
         s.mode = Mode::Yolo;
         s.permission_grant = Some(interaction.into());
+        let mut queued = vec![];
         for item in &mut s.queue {
             item["mode"] = "yolo".into();
+            queued.extend(item["queueItemId"].as_str().map(str::to_owned));
         }
+        // Node commitPermissionFullAccess：排队输入、执行状态与授权回执同一次提交。
+        self.node(id, |s, now| {
+            s.node_full_access(now, (interaction, queued), &previous, receipt);
+        });
         self.refresh_permissions();
         let decision = PermissionAnswer::Allow;
         let deltas = self.settle_permission(id, &owner, &call, interaction, &decision)?;

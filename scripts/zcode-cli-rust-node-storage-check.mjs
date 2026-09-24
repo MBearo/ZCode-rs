@@ -16,6 +16,10 @@ import { createMessageHistory } from "../apps/zcode-cli/packages/core/src/agent/
 import { selectActiveConversationBranch } from "../apps/zcode-cli/packages/contracts/src/rewind/index.ts";
 import { ProductProjection } from "../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts";
 import { mergeColdConversationEvents } from "../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/cold-event-merge.ts";
+import {
+  PERMISSION_FULL_ACCESS_ENTRY,
+  permissionFullAccessReceiptSchema,
+} from "../apps/zcode-cli/packages/contracts/src/interfaces/permission-full-access.ts";
 import { goalVerificationEntriesFromSessionEntries } from "../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/transcript-hydration.ts";
 
 // 与夹具一致：发布层计数不属于冷投影契约。
@@ -49,6 +53,10 @@ async function check(name, root, file) {
     await store.listSessionInputs({ sessionID });
     const stored = await store.messages({ sessionID });
     const entries = await store.sessionEntries({ sessionID });
+    // 授权回执是 Node 恢复与重试的事实源，必须通过 Node 的严格 schema。
+    for (const entry of entries.filter((e) => e.type === PERMISSION_FULL_ACCESS_ENTRY)) {
+      permissionFullAccessReceiptSchema.parse(entry.data);
+    }
     const revert = session.revert;
     const branchOptions = {
       branchCutAfterMessageId: revert?.branchCutAfterMessageID,

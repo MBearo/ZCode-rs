@@ -123,6 +123,14 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
                 &list.iter().map(todo).collect::<Vec<_>>(),
                 now,
             )?,
+            Op::FullAccess {
+                queue,
+                execution,
+                receipt,
+            } => {
+                let pair = (&entry(execution), &entry(receipt));
+                super::full_access::commit(conn, session, queue, pair, now)?
+            }
             Op::StableBoundary {
                 boundary,
                 start,

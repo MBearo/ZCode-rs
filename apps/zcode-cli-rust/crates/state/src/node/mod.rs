@@ -10,6 +10,7 @@ pub mod entries;
 mod fork;
 mod fork_bundle;
 mod fork_clone;
+pub mod full_access;
 pub mod input_history;
 pub mod inputs;
 pub mod listing;

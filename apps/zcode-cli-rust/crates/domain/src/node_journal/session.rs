@@ -102,6 +102,39 @@ impl Session {
         self.node.push(now, Op::UpdateSession(update));
     }
 
+    /// Node `grantPermissionFullAccess` after the session switched to yolo:
+    /// `previous` is the mode before, `ids` the receipt event's id and trace.
+    pub fn node_full_access(
+        &mut self,
+        now: u64,
+        (interaction, queue): (&str, Vec<String>),
+        previous: &str,
+        (event, trace): (String, String),
+    ) {
+        if !self.node.created {
+            return;
+        }
+        let payload = json!({"mode": "yolo", "planEnabled": self.plan_enabled,
+            "previousMode": previous, "previousPlanEnabled": self.plan_enabled, "source": "command",
+            "permissionGrant": {"interactionId": interaction, "queueItemIds": queue}});
+        let event = json!({"id": event, "sessionId": self.id, "type": "session_mode_changed",
+            "timestamp": crate::hooks::input::iso_timestamp(now), "traceId": trace,
+            "sequenceNumber": 0, "payload": payload});
+        let receipt = json!({"id": format!("{}:permission-full-access:{interaction}", self.id),
+            "sessionID": self.id, "type": "runtime/permission_full_access", "touchSession": false,
+            "time": {"created": now, "updated": now},
+            "data": {"interactionId": interaction, "event": event}});
+        let execution = execution_state_entry(&self.id, now, "yolo", self.plan_enabled);
+        self.node.push(
+            now,
+            Op::FullAccess {
+                queue,
+                execution,
+                receipt,
+            },
+        );
+    }
+
     /// Node `updateTodos` (a replace-all list).
     pub fn node_todos(&mut self, now: u64) {
         if !self.node.created {

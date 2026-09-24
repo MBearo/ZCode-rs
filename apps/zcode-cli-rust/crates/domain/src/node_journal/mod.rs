@@ -148,6 +148,14 @@ pub enum Op {
     CompactSummary(Value),
     /// Node `updateTodos`: `[{content, status, priority}]`.
     Todos(Vec<Value>),
+    /// Node `commitPermissionFullAccess`: the admitted `queue` inputs switch
+    /// to yolo, then the execution state and the receipt entry are saved; an
+    /// existing receipt makes it a no-op.
+    FullAccess {
+        queue: Vec<String>,
+        execution: Value,
+        receipt: Value,
+    },
     /// Node `persistStableForkCompletionBoundary` (reads the stored transcript).
     StableBoundary {
         boundary: String,
