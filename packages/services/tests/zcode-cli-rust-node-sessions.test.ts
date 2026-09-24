@@ -10,7 +10,7 @@ import { zcodeSessionStateSnapshotSchema } from "@zcode/shared";
 
 // Node 与 Rust 共用同一个会话库（spec rust-m11-node-storage §11 场景 2、3）：
 // Node 写入的会话由 Rust 直接打开并继续，Rust 写入的内容 Node 仍能读取。
-test("Rust opens a Node session with its identity, attachments, tools and interrupted outcomes, and Node reads the continuation", async () => {
+test("Rust opens a Node session with its identity, attachments, tools and interrupted outcomes; Node and Rust then continue it in turn", async () => {
   const f = await fixture();
   try {
     const store = createSqliteSessionStore({ dbPath: f.db });
@@ -174,10 +174,64 @@ test("Rust opens a Node session with its identity, attachments, tools and interr
     const texts = (await reader.messages({ sessionID: id }))
       .flatMap((m) => m.parts)
       .flatMap((p) => (p.type === "text" ? [p.text] : []));
-    reader.close();
     assert.deepEqual(texts, ["old question", "old answer", "continue old task", "你好 Rust"]);
-    assert.deepEqual(h.schemaErrors, []);
-    assert.deepEqual(h2.schemaErrors, []);
+    // Node 再续一轮（与 Node 运行时一样按序追加 user 与 assistant），Rust 重启后接着继续。
+    const nodeUser = "node-user-2" as MessageId;
+    await reader.saveMessage({
+      id: nodeUser,
+      sessionID: id,
+      role: "user",
+      time: { created: Date.now() },
+      agent: "main",
+    });
+    await reader.savePart({
+      id: "node-user-2-text" as PartId,
+      sessionID: id,
+      messageID: nodeUser,
+      type: "text",
+      text: "node follow up",
+    });
+    await reader.saveMessage({
+      id: "node-assistant-2" as MessageId,
+      sessionID: id,
+      role: "assistant",
+      parentID: nodeUser,
+      time: { created: Date.now(), completed: Date.now() },
+      agent: "main",
+      mode: "yolo",
+      path: { cwd: f.cwd, root: f.cwd },
+      cost: 0,
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+    });
+    await reader.savePart({
+      id: "node-assistant-2-text" as PartId,
+      sessionID: id,
+      messageID: "node-assistant-2" as MessageId,
+      type: "text",
+      text: "node answer",
+    });
+    reader.close();
+    const h3 = f.start();
+    await h3.subscribe(`conversation/${id}`);
+    await h3.command(h3.envelope("sendText", id, { text: "rust again" }));
+    await h3.completed(id);
+    const conversation = f.requests
+      .at(-1)!
+      .messages.filter((m: any) => m.role !== "system" && typeof m.content === "string")
+      .map((m: any) => m.content)
+      .filter((c: string) => !c.startsWith("<system-reminder>"));
+    assert.deepEqual(conversation.slice(-5), [
+      "continue old task",
+      "你好 Rust",
+      "node follow up",
+      "node answer",
+      "rust again",
+    ]);
+    const after = createSqliteSessionStore({ dbPath: f.db });
+    const sequence = (await after.messages({ sessionID: id })).map((m) => m.info.role);
+    after.close();
+    assert.deepEqual(sequence.slice(-2), ["user", "assistant"]);
+    assert.deepEqual([...h.schemaErrors, ...h2.schemaErrors, ...h3.schemaErrors], []);
   } finally {
     await f.close();
   }

@@ -500,7 +500,7 @@ M11.5（已完成）：NodeStore 成为唯一存储，删除 `rust_*` 表、TS �
 - 模型请求：任何消息中模型不支持的媒体按 Node `projectMessagesForInputFormat` 换成说明文本（此前 user 消息会报 `attachment_unsupported`）。
 - 目标：后台结果唤醒的续跑轮（task-notification）结束后同样验证。
 - `session/subagents` 从存储推导（§6.3）。
-- 集成测试全部改用 Node 库（`packages/services/tests/zcode-cli-rust-*.test.ts`，291 项）：界面行跨冷热按内容比对（§2.4），回执与重放按 Node 规则（§7）；原导入测试改为“Node 写入、Rust 读取并继续、Node 再读取”的交叉用例（`zcode-cli-rust-node-sessions`、`-node-boundaries`、`-shared-node`、`-todo-node`、`-session-list-node`）。
+- 集成测试全部改用 Node 库（`packages/services/tests/zcode-cli-rust-*.test.ts`，291 项）：界面行跨冷热按内容比对（§2.4），回执与重放按 Node 规则（§7）；原导入测试改为“Node 写入、Rust 读取并继续、Node 再读取并续写、Rust 重启后再继续”的交叉用例（§11 场景 2–4）（`zcode-cli-rust-node-sessions`、`-node-boundaries`、`-shared-node`、`-todo-node`、`-session-list-node`）。
 
 ## 11. 验收场景
 
