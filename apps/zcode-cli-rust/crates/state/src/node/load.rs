@@ -98,6 +98,7 @@ pub fn session(workspace: &str, r: Resume, epoch: String) -> Session {
         .collect();
     s.goal = goal(&r);
     s.imported_checkpoints = r.checkpoints.clone();
+    s.shared_context = r.shared.clone();
     // 冷加载时已有的 session_target 行即上次写入的行；未变化时不重写。
     s.node.target = r.target.as_ref().map(|t| t.to_node());
     let state = &r.conversation.state;

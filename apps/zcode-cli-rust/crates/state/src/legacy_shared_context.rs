@@ -68,6 +68,7 @@ pub(super) fn project(
         session.shared_context = Some(SharedContext {
             provenance,
             content,
+            markdown: None,
             source_id,
             attached_message_id,
         });

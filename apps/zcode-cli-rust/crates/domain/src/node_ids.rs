@@ -81,6 +81,17 @@ fn dashed(value: &str) -> String {
     out.trim_matches('-').to_owned()
 }
 
+/// Node `slugifyImportedSession`: the first 120 slug chars, else `imported-session`.
+pub fn import_slug(value: &str) -> String {
+    let slug = dashed(value);
+    let slug = &slug[..slug.len().min(120)];
+    if slug.is_empty() {
+        "imported-session".into()
+    } else {
+        slug.into()
+    }
+}
+
 /// Node core `slugify`: empty results become `session`.
 pub fn slugify(value: &str) -> String {
     let slug = dashed(value);

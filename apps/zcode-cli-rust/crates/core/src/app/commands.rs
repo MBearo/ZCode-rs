@@ -142,7 +142,10 @@ impl Engine {
                     ));
                 };
                 context.provenance.status = crate::domain::shared_context::Status::Discarded;
-                self.sessions.get_mut(&id).unwrap().revision += 1;
+                let s = self.sessions.get_mut(&id).unwrap();
+                let now = self.clock.now();
+                s.node_shared_transition(now, context_id, (&["pending"], "discarded"), None);
+                s.revision += 1;
             }
             "switchModelConfig" => {
                 let selected = self.select(&c.payload, Some(self.session_selection(&id)?))?;

@@ -14,6 +14,7 @@ mod notice;
 mod queue;
 pub mod records;
 mod session;
+pub mod shared;
 pub mod timeline;
 pub mod tool_media;
 mod turn;
@@ -164,6 +165,14 @@ pub enum Op {
         queue: Vec<String>,
         execution: Value,
         receipt: Value,
+    },
+    /// Node `transitionSharedContextImport`: the import entry of `context`
+    /// in one of `from` moves to `to` (with `source`), and so does its message.
+    SharedTransition {
+        context: String,
+        from: Vec<String>,
+        to: String,
+        source: Option<String>,
     },
     /// The session's `session_target` row as a Node `SessionGoal`; `None`
     /// deletes it (Node `clearSessionTarget`).

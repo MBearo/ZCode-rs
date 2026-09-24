@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 pub const MAX_BYTES: usize = 20 * 1024 * 1024;
-#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     #[default]
@@ -14,13 +14,13 @@ pub enum Status {
     Attached,
     Discarded,
 }
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstalledArtifact {
     pub artifact_id: String,
     pub workspace_relative_path: String,
 }
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Provenance {
     pub share_id: String,
@@ -93,11 +93,15 @@ impl Provenance {
         Ok(())
     }
 }
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedContext {
     pub provenance: Provenance,
     pub content: StoredAttachment,
+    /// The Markdown itself when stored as Node's context message (spec
+    /// rust-m11-node-storage §5.6); `content` is then unused.
+    #[serde(default)]
+    pub markdown: Option<String>,
     pub source_id: Option<String>,
     pub attached_message_id: Option<String>,
 }

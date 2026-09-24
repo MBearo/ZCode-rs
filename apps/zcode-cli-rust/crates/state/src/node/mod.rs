@@ -24,6 +24,7 @@ mod open_error;
 pub mod resume;
 pub mod sessions;
 pub mod settings;
+pub mod shared;
 pub mod target_row;
 pub mod targets;
 pub mod todos;

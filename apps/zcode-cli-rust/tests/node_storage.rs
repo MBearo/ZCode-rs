@@ -11,6 +11,8 @@ mod goal;
 mod grants;
 #[path = "node_storage/harness.rs"]
 mod harness;
+#[path = "node_storage/shared.rs"]
+mod shared;
 
 use serde_json::{Value, json};
 use tokio::sync::oneshot;

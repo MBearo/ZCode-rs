@@ -55,7 +55,13 @@ async function check(name, root, file) {
     const listed = await store.listSessions({ directory: session.directory });
     if (!listed.some((s) => s.id === sessionID)) throw new Error(`${name}: session not listed`);
     const selection = await readSessionModelSelection(store, sessionID);
-    if (selection?.modelId !== "m") throw new Error(`${name}: model selection unreadable`);
+    // 分享导入的会话与 Node 一样只有导入包（没有模型选择 entry）。
+    const imported = (await store.sessionEntries({ sessionID })).some(
+      (entry) => entry.type === "v4/shared_context_import",
+    );
+    if (!imported && selection?.modelId !== "m") {
+      throw new Error(`${name}: model selection unreadable`);
+    }
     await store.listSessionInputs({ sessionID });
     const stored = await store.messages({ sessionID });
     // 附件与媒体按 Node 产物目录读回（spec §5.3）。
@@ -72,8 +78,8 @@ async function check(name, root, file) {
       sessionStore: store,
       traceContext: { traceId: "check" },
     });
-    // Node 的稳定分叉不复制 shell 快照（恢复时按当前设置），其余会话在创建时写入。
-    const expected = session.taskType === "fork" ? "missing" : "restored";
+    // Node 的稳定分叉与分享导入没有 shell 快照（恢复时按当前设置），其余会话在创建时写入。
+    const expected = session.taskType === "fork" || imported ? "missing" : "restored";
     if (shell.status !== expected) throw new Error(`${name}: shell snapshot ${shell.status}`);
     // 工作区 checkpoint 与文件撤销：Node 恢复预览/撤销时按严格 schema 解析 entry 与产物。
     for (const entry of entries.filter((e) => e.type === "runtime/workspace_checkpoint")) {

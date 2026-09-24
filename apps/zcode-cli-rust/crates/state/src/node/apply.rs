@@ -34,6 +34,8 @@ fn create(v: &Value) -> Create {
         title_source: text(v, "titleSource"),
         version: text(v, "version").unwrap_or_default(),
         permission: v.get("permission").cloned(),
+        time_created: v["time"]["created"].as_i64(),
+        time_updated: v["time"]["updated"].as_i64(),
         ..Create::default()
     }
 }
@@ -124,6 +126,15 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
                 now,
             )?,
             Op::Target(goal) => super::target_row::put(conn, session, goal.as_ref(), now)?,
+            Op::SharedTransition {
+                context,
+                from,
+                to,
+                source,
+            } => {
+                let states = (from.as_slice(), to.as_str());
+                super::shared::transition(conn, session, context, states, source.as_deref(), now)?;
+            }
             Op::FullAccess {
                 queue,
                 execution,

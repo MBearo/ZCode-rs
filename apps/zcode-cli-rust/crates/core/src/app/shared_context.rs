@@ -83,15 +83,22 @@ impl Engine {
                 Some(mode) => mode,
             };
         }
-        let (_, content) = self
-            .store
-            .put_attachment(
-                &id,
-                "shared-context-import",
-                &[history.markdown.as_bytes().to_vec()],
-                "text/markdown",
-            )
-            .await?;
+        // Node：分享上下文作为 model-only 的上下文消息存进会话，不另存产物。
+        let journaling = self.journaling();
+        let (content, markdown) = if journaling {
+            (Default::default(), Some(history.markdown.clone()))
+        } else {
+            let (_, content) = self
+                .store
+                .put_attachment(
+                    &id,
+                    "shared-context-import",
+                    &[history.markdown.as_bytes().to_vec()],
+                    "text/markdown",
+                )
+                .await?;
+            (content, None)
+        };
         if history.provenance.status == Status::Attached {
             session.append_message(json!({"role":"user","content":history.markdown.trim()}));
         }
@@ -102,9 +109,24 @@ impl Engine {
         session.shared_context = Some(SharedContext {
             provenance: history.provenance.clone(),
             content,
+            markdown,
             source_id: None,
             attached_message_id: None,
         });
+        if journaling {
+            let mut provenance = serde_json::to_value(&history.provenance)?;
+            if provenance["shareUrl"].is_null() {
+                provenance.as_object_mut().unwrap().remove("shareUrl");
+            }
+            session.node_shared_import(
+                self.clock.now(),
+                crate::domain::node_journal::shared::Import {
+                    markdown: &history.markdown,
+                    provenance,
+                    version: env!("CARGO_PKG_VERSION"),
+                },
+            );
+        }
         if let Some(servers) = &input.mcp_servers {
             self.tools.configure_mcp(&id, &json!(servers)).await?;
         }
@@ -131,15 +153,20 @@ impl Engine {
             .as_ref()
             .context("fault.command.sharedContextNotAttachable")?;
         context.check(&reference, source)?;
-        ensure!(
-            context.content.total_bytes <= shared_context::MAX_BYTES as u64,
-            "Shared context exceeds limit"
-        );
-        let bytes = self
-            .store
-            .read_attachment(&context.content, 0, shared_context::MAX_BYTES)
-            .await?;
-        let text = String::from_utf8(bytes)?;
+        let text = match &context.markdown {
+            Some(markdown) => markdown.clone(),
+            None => {
+                ensure!(
+                    context.content.total_bytes <= shared_context::MAX_BYTES as u64,
+                    "Shared context exceeds limit"
+                );
+                let bytes = self
+                    .store
+                    .read_attachment(&context.content, 0, shared_context::MAX_BYTES)
+                    .await?;
+                String::from_utf8(bytes)?
+            }
+        };
         context.provenance.check_content(&text)?;
         Ok(Some(text.trim().into()))
     }
@@ -179,10 +206,22 @@ pub(super) fn reserve(session: &mut Session, p: &Value, source: &str) -> Result<
     context.check(&reference, None)?;
     context.provenance.status = Status::Reserved;
     context.source_id = Some(source.into());
+    // Node：排队准入即把分享上下文预留给该输入（pending → reserved）。
+    let now = session.updated_at;
+    session.node_shared_transition(now, &reference, (&["pending"], "reserved"), Some(source));
     Ok(())
 }
 pub(super) fn release(session: &mut Session, item: &Value) {
-    if let Some(context) = &mut session.shared_context {
-        context.release(item["queueItemId"].as_str());
+    let Some(context) = &mut session.shared_context else {
+        return;
+    };
+    let reserved = context.provenance.status == Status::Reserved;
+    context.release(item["queueItemId"].as_str());
+    if reserved && context.provenance.status == Status::Pending {
+        // Node cancelInputCommand：取消的输入把预留还回 pending。
+        let reference = context.provenance.context_id.clone().unwrap_or_default();
+        let now = session.updated_at;
+        let source = item["queueItemId"].as_str();
+        session.node_shared_transition(now, &reference, (&["reserved"], "pending"), source);
     }
 }

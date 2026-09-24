@@ -34,6 +34,8 @@ pub struct Resume {
     pub last_assistant_completed: Option<Value>,
     pub history: History,
     pub conversation: Cold,
+    /// The shared context import (spec §5.6).
+    pub shared: Option<crate::domain::shared_context::SharedContext>,
     /// The workspace checkpoints (spec §5.5).
     pub checkpoints: Vec<crate::domain::file_checkpoint::ImportedCheckpoint>,
 }
@@ -245,6 +247,7 @@ pub fn resume(
         last_assistant_completed: assistant.and_then(|m| m.info["time"].get("completed").cloned()),
         history,
         checkpoints: super::checkpoints::read(conn, id, artifacts)?,
+        shared: super::shared::read(conn, id)?,
         conversation: node_rows::replay(id, &events),
         session,
     }))

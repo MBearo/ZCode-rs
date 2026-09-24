@@ -14,7 +14,7 @@ pub const READ_MAX_BYTES: u64 = 256 * 1024;
 pub const READ_MAX_LINES: usize = 2_000;
 
 /// One resolved attachment.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NodeFile {
     /// The `file` part without `id`, `sessionID` and `messageID`.
     pub part: Value,
