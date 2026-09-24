@@ -268,7 +268,9 @@
           "{\"time\":{\"start\":1150,\"end\":1150},\"type\":\"text\",\"text\":\"shared\"}",
           0
         ]
-      ]
+      ],
+      "session_entry": [],
+      "session_target": []
     },
     "history": [
       {
@@ -467,7 +469,848 @@
           }
         }
       }
-    ]
+    ],
+    "events": [
+      {
+        "seq": 1,
+        "at": 1011,
+        "type": "session_created",
+        "turnId": null,
+        "payload": {
+          "mode": "default"
+        }
+      },
+      {
+        "seq": 2,
+        "at": 1012,
+        "type": "model_selected",
+        "turnId": null,
+        "payload": {
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "at": 1010,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "turnNumber": 1,
+          "input": "Fix the bug",
+          "messageId": "u1",
+          "inputId": "cmd_u1",
+          "attachments": [
+            {
+              "fileName": "notes.txt",
+              "mime": "text/plain",
+              "bytes": 0,
+              "ref": "file:///w/notes.txt"
+            },
+            {
+              "fileName": "spec.pdf",
+              "mime": "application/pdf",
+              "bytes": 0,
+              "ref": "file:///w/spec.pdf"
+            }
+          ]
+        }
+      },
+      {
+        "seq": 4,
+        "at": 1014,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "reasoning_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_1"
+        }
+      },
+      {
+        "seq": 5,
+        "at": 1015,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "reasoning_delta",
+          "delta": "Look first",
+          "done": false,
+          "partId": "part_a1_1"
+        }
+      },
+      {
+        "seq": 6,
+        "at": 1016,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "reasoning_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a1_1"
+        }
+      },
+      {
+        "seq": 7,
+        "at": 1020,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_2"
+        }
+      },
+      {
+        "seq": 8,
+        "at": 1018,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "Let me read.",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_2"
+        }
+      },
+      {
+        "seq": 9,
+        "at": 1019,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a1_2"
+        }
+      },
+      {
+        "seq": 10,
+        "at": 1020,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_b",
+          "assistantMessageId": "a1",
+          "toolName": "Bash",
+          "input": {
+            "command": "false"
+          },
+          "schedule": {
+            "executionOrder": ["call_b"],
+            "parallelGroups": [["call_b"]]
+          }
+        }
+      },
+      {
+        "seq": 11,
+        "at": 1021,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_b",
+          "toolName": "Bash",
+          "startedAt": "1970-01-01T00:00:00.003Z"
+        }
+      },
+      {
+        "seq": 12,
+        "at": 1022,
+        "type": "tool_call_result",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_b",
+          "duration": 1,
+          "result": {
+            "success": false,
+            "content": "exit 1",
+            "error": {
+              "type": "fault.runtime.toolFailed",
+              "message": "exit 1"
+            }
+          }
+        }
+      },
+      {
+        "seq": 13,
+        "at": 1023,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_a",
+          "assistantMessageId": "a1",
+          "toolName": "Read",
+          "input": {
+            "file_path": "a.ts"
+          },
+          "schedule": {
+            "executionOrder": ["call_a"],
+            "parallelGroups": [["call_a"]]
+          }
+        }
+      },
+      {
+        "seq": 14,
+        "at": 1024,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_a",
+          "toolName": "Read",
+          "startedAt": "1970-01-01T00:00:01.010Z"
+        }
+      },
+      {
+        "seq": 15,
+        "at": 1025,
+        "type": "tool_call_result",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_a",
+          "duration": 1,
+          "result": {
+            "success": true,
+            "content": "1\tconst a = 1;"
+          }
+        }
+      },
+      {
+        "seq": 16,
+        "at": 1040,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a2",
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 17,
+        "at": 1027,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "Done.",
+          "done": false,
+          "assistantMessageId": "a2",
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 18,
+        "at": 1028,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 19,
+        "at": 1050,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 20,
+        "at": 1050,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 2,
+          "historyRoundCount": 2,
+          "duration": 40,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 21,
+        "at": 1070,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "turnNumber": 2,
+          "input": "<task-notification>done</task-notification>",
+          "inputVisibility": "model-only",
+          "inputSource": "background_task",
+          "messageId": "n2"
+        }
+      },
+      {
+        "seq": 22,
+        "at": 1070,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 23,
+        "at": 1070,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 0,
+          "duration": 0,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 24,
+        "at": 1080,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "turnNumber": 3,
+          "input": "",
+          "inputVisibility": "model-only",
+          "inputSource": "subagent",
+          "messageId": "n3"
+        }
+      },
+      {
+        "seq": 25,
+        "at": 1080,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 26,
+        "at": 1080,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 0,
+          "duration": 0,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 27,
+        "at": 1090,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "turnNumber": 4,
+          "input": "Continue",
+          "messageId": "u2",
+          "inputId": "cmd_u2"
+        }
+      },
+      {
+        "seq": 28,
+        "at": 1038,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "toolCallId": "call_c",
+          "assistantMessageId": "a3",
+          "toolName": "Read",
+          "input": {
+            "file_path": "b"
+          },
+          "schedule": {
+            "executionOrder": ["call_c"],
+            "parallelGroups": [["call_c"]]
+          }
+        }
+      },
+      {
+        "seq": 29,
+        "at": 1039,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "toolCallId": "call_c",
+          "toolName": "Read",
+          "startedAt": "1970-01-01T00:00:00.005Z"
+        }
+      },
+      {
+        "seq": 30,
+        "at": 1140,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 31,
+        "at": 1140,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 1,
+          "historyRoundCount": 3,
+          "duration": 50,
+          "resultType": "cancelled"
+        }
+      },
+      {
+        "seq": 32,
+        "at": 1150,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-5",
+        "payload": {
+          "turnNumber": 5,
+          "input": "shared",
+          "messageId": "u3",
+          "inputId": "cmd_u3"
+        }
+      },
+      {
+        "seq": 33,
+        "at": 1150,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-5",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 34,
+        "at": 1150,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-5",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 0,
+          "duration": 0,
+          "resultType": "success"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "rowId": 1,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 3,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u1",
+        "state": "completedSuccess",
+        "startedAt": 1010,
+        "endedAt": 1050,
+        "activeMs": 40,
+        "historyRoundCount": 2
+      },
+      {
+        "rowId": 2,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 3,
+        "kind": "userInput",
+        "text": "Fix the bug",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u1",
+        "rootSourceCommandId": "cmd_u1",
+        "attachments": [
+          {
+            "ref": "file:///w/notes.txt",
+            "fileName": "notes.txt",
+            "mime": "text/plain",
+            "bytes": 0
+          },
+          {
+            "ref": "file:///w/spec.pdf",
+            "fileName": "spec.pdf",
+            "mime": "application/pdf",
+            "bytes": 0
+          }
+        ]
+      },
+      {
+        "rowId": 3,
+        "turnId": "u1",
+        "entityId": "a1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1014,
+        "createdAtSeq": 4,
+        "kind": "reasoning",
+        "assistantResponseId": "a1",
+        "text": "Look first",
+        "state": "complete"
+      },
+      {
+        "rowId": 4,
+        "turnId": "u1",
+        "entityId": "a1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1020,
+        "createdAtSeq": 7,
+        "kind": "assistantText",
+        "assistantResponseId": "a1",
+        "text": "Let me read.",
+        "state": "complete"
+      },
+      {
+        "rowId": 5,
+        "turnId": "u1",
+        "entityId": "call_b",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1020,
+        "createdAtSeq": 10,
+        "kind": "toolCall",
+        "assistantResponseId": "a1",
+        "toolCallId": "call_b",
+        "toolName": "Bash",
+        "status": "error",
+        "inputText": "{\"command\":\"false\"}",
+        "input": {
+          "command": "false"
+        },
+        "startedAt": 1021,
+        "output": {
+          "text": "exit 1"
+        },
+        "endedAt": 1022,
+        "error": {
+          "code": "fault.runtime.toolFailed",
+          "message": "exit 1"
+        }
+      },
+      {
+        "rowId": 6,
+        "turnId": "u1",
+        "entityId": "call_a",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1023,
+        "createdAtSeq": 13,
+        "kind": "toolCall",
+        "assistantResponseId": "a1",
+        "toolCallId": "call_a",
+        "toolName": "Read",
+        "status": "success",
+        "inputText": "{\"file_path\":\"a.ts\"}",
+        "input": {
+          "file_path": "a.ts"
+        },
+        "startedAt": 1024,
+        "output": {
+          "text": "1\tconst a = 1;"
+        },
+        "endedAt": 1025
+      },
+      {
+        "rowId": 7,
+        "turnId": "u1",
+        "entityId": "a2",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1040,
+        "createdAtSeq": 16,
+        "kind": "assistantText",
+        "assistantResponseId": "a2",
+        "text": "Done.",
+        "state": "complete",
+        "actions": {
+          "canFork": true,
+          "canRetry": true
+        }
+      },
+      {
+        "rowId": 8,
+        "turnId": "n2",
+        "entityId": "n2",
+        "productTurnId": "n2",
+        "visibility": "visible",
+        "createdAt": 1070,
+        "createdAtSeq": 21,
+        "kind": "turnHeader",
+        "origin": "backgroundResult",
+        "executionKind": "agent",
+        "state": "completedSuccess",
+        "startedAt": 1070,
+        "endedAt": 1070,
+        "activeMs": 0,
+        "historyRoundCount": 0
+      },
+      {
+        "rowId": 9,
+        "turnId": "n3",
+        "entityId": "n3",
+        "productTurnId": "n3",
+        "visibility": "visible",
+        "createdAt": 1080,
+        "createdAtSeq": 24,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "state": "completedSuccess",
+        "startedAt": 1080,
+        "endedAt": 1080,
+        "activeMs": 0,
+        "historyRoundCount": 0
+      },
+      {
+        "rowId": 10,
+        "turnId": "u2",
+        "entityId": "u2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1090,
+        "createdAtSeq": 27,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u2",
+        "state": "completedInterrupted",
+        "startedAt": 1090,
+        "endedAt": 1140,
+        "activeMs": 50,
+        "historyRoundCount": 3
+      },
+      {
+        "rowId": 11,
+        "turnId": "u2",
+        "entityId": "u2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1090,
+        "createdAtSeq": 27,
+        "kind": "userInput",
+        "text": "Continue",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u2",
+        "rootSourceCommandId": "cmd_u2"
+      },
+      {
+        "rowId": 12,
+        "turnId": "u2",
+        "entityId": "call_c",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1038,
+        "createdAtSeq": 28,
+        "kind": "toolCall",
+        "assistantResponseId": "a3",
+        "toolCallId": "call_c",
+        "toolName": "Read",
+        "status": "cancelled",
+        "inputText": "{\"file_path\":\"b\"}",
+        "input": {
+          "file_path": "b"
+        },
+        "startedAt": 1039,
+        "endedAt": 1140
+      },
+      {
+        "rowId": 13,
+        "turnId": "u3",
+        "entityId": "u3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1150,
+        "createdAtSeq": 32,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u3",
+        "state": "completedSuccess",
+        "startedAt": 1150,
+        "endedAt": 1150,
+        "activeMs": 0,
+        "historyRoundCount": 0
+      },
+      {
+        "rowId": 14,
+        "turnId": "u3",
+        "entityId": "u3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1150,
+        "createdAtSeq": 32,
+        "kind": "userInput",
+        "text": "shared",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u3",
+        "rootSourceCommandId": "cmd_u3",
+        "actions": {
+          "canEdit": true,
+          "editDisposition": "rewind"
+        }
+      }
+    ],
+    "state": {
+      "control": {
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "canStop": false,
+        "stopState": "idle",
+        "stopTargetKind": "unknown",
+        "activeWorks": [],
+        "lastError": null,
+        "apiRetry": null
+      },
+      "availability": {
+        "fork": {
+          "allowed": true
+        },
+        "compact": {
+          "allowed": true
+        },
+        "switchModelConfig": {
+          "allowed": true
+        },
+        "setFollowupMode": {
+          "allowed": true
+        },
+        "queueEdit": {
+          "allowed": true
+        },
+        "sendQueuedNow": {
+          "allowed": false,
+          "reasonCode": "sendQueuedNowRequiresRunning"
+        },
+        "pauseGoal": {
+          "allowed": false,
+          "reasonCode": "noGoalToPause"
+        },
+        "resumeGoal": {
+          "allowed": false,
+          "reasonCode": "noGoalToResume"
+        }
+      },
+      "inputRouting": {
+        "mode": "startNow"
+      },
+      "meta": {
+        "title": "",
+        "titleSource": "default"
+      },
+      "config": {
+        "provider": "p",
+        "model": "m",
+        "thought": "high",
+        "thoughtLevels": [],
+        "followupMode": "queue",
+        "mode": "build",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        }
+      },
+      "modelTransition": null,
+      "usage": {
+        "contextWindow": null,
+        "cumulative": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        }
+      },
+      "queue": {
+        "items": [],
+        "autoDrain": true
+      },
+      "pendingInteractions": [],
+      "pendingCommands": [],
+      "backgroundWorks": [],
+      "subagents": {
+        "revision": 0,
+        "childSessionIds": [],
+        "running": [],
+        "endedTotal": 0
+      },
+      "goal": null,
+      "plan": null,
+      "workspaceHookAdmission": null
+    }
   },
   "compacted": {
     "sessionID": "sess_compacted",
@@ -610,7 +1453,7 @@
           "sess_compacted",
           9000,
           9000,
-          "{\"timelineType\":\"context_compaction\",\"display\":\"separator\",\"status\":\"completed\",\"operationId\":\"cmp_1\",\"trigger\":\"auto\",\"type\":\"timeline\"}",
+          "{\"timelineType\":\"context_compaction\",\"display\":\"separator\",\"status\":\"completed\",\"operationId\":\"cmp_1\",\"trigger\":\"auto\",\"preCompactTokenCount\":900,\"postCompactTokenCount\":120,\"type\":\"timeline\"}",
           0
         ],
         [
@@ -658,7 +1501,9 @@
           "{\"type\":\"text\",\"text\":\"third\"}",
           0
         ]
-      ]
+      ],
+      "session_entry": [],
+      "session_target": []
     },
     "history": [
       {
@@ -725,7 +1570,551 @@
           }
         }
       }
-    ]
+    ],
+    "events": [
+      {
+        "seq": 1,
+        "at": 1011,
+        "type": "session_created",
+        "turnId": null,
+        "payload": {
+          "mode": "default"
+        }
+      },
+      {
+        "seq": 2,
+        "at": 1012,
+        "type": "model_selected",
+        "turnId": null,
+        "payload": {
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "at": 1010,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "turnNumber": 1,
+          "input": "one",
+          "messageId": "u1",
+          "inputId": "cmd_u1"
+        }
+      },
+      {
+        "seq": 4,
+        "at": 1020,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 5,
+        "at": 1015,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "first",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 6,
+        "at": 1016,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 7,
+        "at": 1030,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 8,
+        "at": 1030,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 1,
+          "duration": 20,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 9,
+        "at": 1040,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "turnNumber": 2,
+          "input": "two",
+          "messageId": "u2",
+          "inputId": "cmd_u2"
+        }
+      },
+      {
+        "seq": 10,
+        "at": 1050,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a2",
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 11,
+        "at": 1021,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "second",
+          "done": false,
+          "assistantMessageId": "a2",
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 12,
+        "at": 1022,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 13,
+        "at": 1023,
+        "type": "compact_completed",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "operationId": "cmp_1",
+          "messageId": "tl",
+          "partId": "part_tl_0",
+          "status": "completed",
+          "trigger": "auto",
+          "display": "separator",
+          "preCompactTokenCount": 900,
+          "postCompactTokenCount": 120,
+          "tailStartMessageId": "u2"
+        }
+      },
+      {
+        "seq": 14,
+        "at": 1080,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 15,
+        "at": 1080,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 2,
+          "duration": 40,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 16,
+        "at": 1100,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "turnNumber": 3,
+          "input": "three",
+          "messageId": "u3",
+          "inputId": "cmd_u3"
+        }
+      },
+      {
+        "seq": 17,
+        "at": 1110,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a3",
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 18,
+        "at": 1028,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "third",
+          "done": false,
+          "assistantMessageId": "a3",
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 19,
+        "at": 1029,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 20,
+        "at": 1120,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 21,
+        "at": 1120,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 1,
+          "duration": 20,
+          "resultType": "success"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "rowId": 1,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 3,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u1",
+        "state": "completedSuccess",
+        "startedAt": 1010,
+        "endedAt": 1030,
+        "activeMs": 20,
+        "historyRoundCount": 1
+      },
+      {
+        "rowId": 2,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 3,
+        "kind": "userInput",
+        "text": "one",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u1",
+        "rootSourceCommandId": "cmd_u1"
+      },
+      {
+        "rowId": 3,
+        "turnId": "u1",
+        "entityId": "a1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1020,
+        "createdAtSeq": 4,
+        "kind": "assistantText",
+        "assistantResponseId": "a1",
+        "text": "first",
+        "state": "complete",
+        "actions": {
+          "canFork": true
+        }
+      },
+      {
+        "rowId": 4,
+        "turnId": "u2",
+        "entityId": "u2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1040,
+        "createdAtSeq": 9,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u2",
+        "state": "completedSuccess",
+        "startedAt": 1040,
+        "endedAt": 1080,
+        "activeMs": 40,
+        "historyRoundCount": 2
+      },
+      {
+        "rowId": 5,
+        "turnId": "u2",
+        "entityId": "u2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1040,
+        "createdAtSeq": 9,
+        "kind": "userInput",
+        "text": "two",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u2",
+        "rootSourceCommandId": "cmd_u2"
+      },
+      {
+        "rowId": 6,
+        "turnId": "u2",
+        "entityId": "a2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1050,
+        "createdAtSeq": 10,
+        "kind": "assistantText",
+        "assistantResponseId": "a2",
+        "text": "second",
+        "state": "complete",
+        "actions": {
+          "canFork": true
+        }
+      },
+      {
+        "rowId": 7,
+        "turnId": "u2",
+        "entityId": "cmp_1",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1023,
+        "createdAtSeq": 13,
+        "kind": "timelineMarker",
+        "lane": "assistantWork",
+        "marker": {
+          "type": "compact",
+          "origin": "auto",
+          "status": "success",
+          "tokensBefore": 900,
+          "tokensAfter": 120
+        }
+      },
+      {
+        "rowId": 8,
+        "turnId": "u3",
+        "entityId": "u3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1100,
+        "createdAtSeq": 16,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u3",
+        "state": "completedSuccess",
+        "startedAt": 1100,
+        "endedAt": 1120,
+        "activeMs": 20,
+        "historyRoundCount": 1
+      },
+      {
+        "rowId": 9,
+        "turnId": "u3",
+        "entityId": "u3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1100,
+        "createdAtSeq": 16,
+        "kind": "userInput",
+        "text": "three",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u3",
+        "rootSourceCommandId": "cmd_u3",
+        "actions": {
+          "canEdit": true,
+          "editDisposition": "rewind"
+        }
+      },
+      {
+        "rowId": 10,
+        "turnId": "u3",
+        "entityId": "a3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1110,
+        "createdAtSeq": 17,
+        "kind": "assistantText",
+        "assistantResponseId": "a3",
+        "text": "third",
+        "state": "complete",
+        "actions": {
+          "canFork": true,
+          "canRetry": true
+        }
+      }
+    ],
+    "state": {
+      "control": {
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "canStop": false,
+        "stopState": "idle",
+        "stopTargetKind": "unknown",
+        "activeWorks": [],
+        "lastError": null,
+        "apiRetry": null
+      },
+      "availability": {
+        "fork": {
+          "allowed": true
+        },
+        "compact": {
+          "allowed": true
+        },
+        "switchModelConfig": {
+          "allowed": true
+        },
+        "setFollowupMode": {
+          "allowed": true
+        },
+        "queueEdit": {
+          "allowed": true
+        },
+        "sendQueuedNow": {
+          "allowed": false,
+          "reasonCode": "sendQueuedNowRequiresRunning"
+        },
+        "pauseGoal": {
+          "allowed": false,
+          "reasonCode": "noGoalToPause"
+        },
+        "resumeGoal": {
+          "allowed": false,
+          "reasonCode": "noGoalToResume"
+        }
+      },
+      "inputRouting": {
+        "mode": "startNow"
+      },
+      "meta": {
+        "title": "",
+        "titleSource": "default"
+      },
+      "config": {
+        "provider": "p",
+        "model": "m",
+        "thought": "high",
+        "thoughtLevels": [],
+        "followupMode": "queue",
+        "mode": "build",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        }
+      },
+      "modelTransition": null,
+      "usage": {
+        "contextWindow": null,
+        "cumulative": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        }
+      },
+      "queue": {
+        "items": [],
+        "autoDrain": true
+      },
+      "pendingInteractions": [],
+      "pendingCommands": [],
+      "backgroundWorks": [],
+      "subagents": {
+        "revision": 0,
+        "childSessionIds": [],
+        "running": [],
+        "endedTotal": 0
+      },
+      "goal": null,
+      "plan": null,
+      "workspaceHookAdmission": null
+    }
   },
   "rewound": {
     "sessionID": "sess_rewound",
@@ -864,7 +2253,9 @@
           "{\"type\":\"text\",\"text\":\"second again\"}",
           0
         ]
-      ]
+      ],
+      "session_entry": [],
+      "session_target": []
     },
     "history": [
       {
@@ -921,6 +2312,3436 @@
           }
         }
       }
-    ]
+    ],
+    "events": [
+      {
+        "seq": 1,
+        "at": 1011,
+        "type": "session_created",
+        "turnId": null,
+        "payload": {
+          "mode": "default"
+        }
+      },
+      {
+        "seq": 2,
+        "at": 1012,
+        "type": "model_selected",
+        "turnId": null,
+        "payload": {
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "at": 1010,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "turnNumber": 1,
+          "input": "one",
+          "messageId": "u1",
+          "inputId": "cmd_u1"
+        }
+      },
+      {
+        "seq": 4,
+        "at": 1020,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 5,
+        "at": 1015,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "first",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 6,
+        "at": 1016,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 7,
+        "at": 1030,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 8,
+        "at": 1030,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 1,
+          "duration": 20,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 9,
+        "at": 1070,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "turnNumber": 2,
+          "input": "retry two",
+          "messageId": "u3",
+          "inputId": "cmd_u3"
+        }
+      },
+      {
+        "seq": 10,
+        "at": 1080,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a3",
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 11,
+        "at": 1021,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "second again",
+          "done": false,
+          "assistantMessageId": "a3",
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 12,
+        "at": 1022,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 13,
+        "at": 1090,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 14,
+        "at": 1090,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 1,
+          "duration": 20,
+          "resultType": "success"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "rowId": 1,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 3,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u1",
+        "state": "completedSuccess",
+        "startedAt": 1010,
+        "endedAt": 1030,
+        "activeMs": 20,
+        "historyRoundCount": 1
+      },
+      {
+        "rowId": 2,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 3,
+        "kind": "userInput",
+        "text": "one",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u1",
+        "rootSourceCommandId": "cmd_u1"
+      },
+      {
+        "rowId": 3,
+        "turnId": "u1",
+        "entityId": "a1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1020,
+        "createdAtSeq": 4,
+        "kind": "assistantText",
+        "assistantResponseId": "a1",
+        "text": "first",
+        "state": "complete",
+        "actions": {
+          "canFork": true
+        }
+      },
+      {
+        "rowId": 4,
+        "turnId": "u3",
+        "entityId": "u3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1070,
+        "createdAtSeq": 9,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u3",
+        "state": "completedSuccess",
+        "startedAt": 1070,
+        "endedAt": 1090,
+        "activeMs": 20,
+        "historyRoundCount": 1
+      },
+      {
+        "rowId": 5,
+        "turnId": "u3",
+        "entityId": "u3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1070,
+        "createdAtSeq": 9,
+        "kind": "userInput",
+        "text": "retry two",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u3",
+        "rootSourceCommandId": "cmd_u3",
+        "actions": {
+          "canEdit": true,
+          "editDisposition": "rewind"
+        }
+      },
+      {
+        "rowId": 6,
+        "turnId": "u3",
+        "entityId": "a3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1080,
+        "createdAtSeq": 10,
+        "kind": "assistantText",
+        "assistantResponseId": "a3",
+        "text": "second again",
+        "state": "complete",
+        "actions": {
+          "canFork": true,
+          "canRetry": true
+        }
+      }
+    ],
+    "state": {
+      "control": {
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "canStop": false,
+        "stopState": "idle",
+        "stopTargetKind": "unknown",
+        "activeWorks": [],
+        "lastError": null,
+        "apiRetry": null
+      },
+      "availability": {
+        "fork": {
+          "allowed": true
+        },
+        "compact": {
+          "allowed": true
+        },
+        "switchModelConfig": {
+          "allowed": true
+        },
+        "setFollowupMode": {
+          "allowed": true
+        },
+        "queueEdit": {
+          "allowed": true
+        },
+        "sendQueuedNow": {
+          "allowed": false,
+          "reasonCode": "sendQueuedNowRequiresRunning"
+        },
+        "pauseGoal": {
+          "allowed": false,
+          "reasonCode": "noGoalToPause"
+        },
+        "resumeGoal": {
+          "allowed": false,
+          "reasonCode": "noGoalToResume"
+        }
+      },
+      "inputRouting": {
+        "mode": "startNow"
+      },
+      "meta": {
+        "title": "",
+        "titleSource": "default"
+      },
+      "config": {
+        "provider": "p",
+        "model": "m",
+        "thought": "high",
+        "thoughtLevels": [],
+        "followupMode": "queue",
+        "mode": "build",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        }
+      },
+      "modelTransition": null,
+      "usage": {
+        "contextWindow": null,
+        "cumulative": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        }
+      },
+      "queue": {
+        "items": [],
+        "autoDrain": true
+      },
+      "pendingInteractions": [],
+      "pendingCommands": [],
+      "backgroundWorks": [],
+      "subagents": {
+        "revision": 0,
+        "childSessionIds": [],
+        "running": [],
+        "endedTotal": 0
+      },
+      "goal": null,
+      "plan": null,
+      "workspaceHookAdmission": null
+    }
+  },
+  "rich": {
+    "sessionID": "sess_rich",
+    "tables": {
+      "session": [
+        [
+          "sess_rich",
+          "proj_w",
+          null,
+          null,
+          "sess_rich",
+          "/w",
+          "/w",
+          "rich",
+          "0.0.0",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "{\"mode\":\"build\"}",
+          1000,
+          9000,
+          null,
+          null,
+          "interactive",
+          "first_input",
+          null,
+          1000,
+          null
+        ]
+      ],
+      "message": [
+        [
+          "u1",
+          "sess_rich",
+          1010,
+          1010,
+          "{\"role\":\"user\",\"time\":{\"created\":1010},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u1\"},\"tools\":{\"Read\":true},\"metadata\":{\"conversationInputIntent\":{\"sourceCommandId\":\"cmd_u1\",\"queueItemId\":\"queue_u1\",\"clientId\":\"client-1\",\"kind\":\"sendText\",\"text\":\"Plan it\",\"attachments\":[{\"ref\":\"zcode-artifact://s/a1\",\"fileName\":\"a.png\",\"mime\":\"image/png\",\"bytes\":5}],\"delivery\":{\"requested\":\"startNow\",\"admitted\":\"startNow\"},\"order\":{\"admissionSeq\":1},\"steer\":{\"state\":\"notRequested\"},\"dispatch\":{\"state\":\"drained\"},\"admittedAt\":1,\"provenance\":{\"sourceCommandId\":\"root_cmd\"}},\"epilogueStart\":4},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          0
+        ],
+        [
+          "a1",
+          "sess_rich",
+          1020,
+          1030,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1020,\"completed\":1030},\"parentID\":\"u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\"}}",
+          1
+        ],
+        [
+          "g1",
+          "sess_rich",
+          1040,
+          1040,
+          "{\"role\":\"user\",\"time\":{\"created\":1040},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_g1\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_g1\"},\"tools\":{\"Read\":true},\"metadata\":{\"turnSteerDelivery\":\"guide\",\"conversationInputIntent\":{\"sourceCommandId\":\"cmd_g1\",\"queueItemId\":\"queue_g1\",\"clientId\":\"client-1\",\"kind\":\"sendText\",\"text\":\"also check tests\",\"attachments\":[],\"delivery\":{\"requested\":\"startNow\",\"admitted\":\"startNow\"},\"order\":{\"admissionSeq\":1},\"steer\":{\"state\":\"notRequested\"},\"dispatch\":{\"state\":\"drained\"},\"admittedAt\":1}},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          2
+        ],
+        [
+          "a2",
+          "sess_rich",
+          1050,
+          1060,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1050,\"completed\":1060},\"parentID\":\"u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\",\"historyRoundCount\":3},\"metadata\":{\"assistantFeedback\":\"like\"}}",
+          3
+        ],
+        [
+          "tl",
+          "sess_rich",
+          1070,
+          1080,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1070,\"completed\":1080},\"parentID\":\"a2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"system\",\"kind\":\"timeline_event\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"hidden\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_a2\"}}",
+          4
+        ],
+        [
+          "mc",
+          "sess_rich",
+          1090,
+          1100,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1090,\"completed\":1100},\"parentID\":\"a2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"system\",\"kind\":\"timeline_event\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"hidden\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_a2\"}}",
+          5
+        ],
+        [
+          "u2",
+          "sess_rich",
+          1110,
+          1110,
+          "{\"role\":\"user\",\"time\":{\"created\":1110},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"q\",\"modelId\":\"n\"},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u2\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"q\",\"modelID\":\"n\"}}",
+          6
+        ],
+        [
+          "a3",
+          "sess_rich",
+          1120,
+          1130,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1120,\"completed\":1130},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"finish\":\"length\",\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          7
+        ],
+        [
+          "a4",
+          "sess_rich",
+          1140,
+          1150,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1140,\"completed\":1150},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"finish\":\"stop\",\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          8
+        ],
+        [
+          "bg",
+          "sess_rich",
+          1160,
+          1160,
+          "{\"role\":\"user\",\"time\":{\"created\":1160},\"agent\":\"zcode-agent\",\"metadata\":{\"originMeta\":{\"backgroundSource\":\"subagent\",\"workId\":\"agent_1\",\"title\":\"Look around\"}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"system_reminder\",\"source\":\"background_task\",\"uiVisibility\":\"hidden\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"hidden\"},\"source\":\"background_task\",\"synthetic\":true,\"visibility\":\"model-only\",\"model\":{}}",
+          9
+        ],
+        [
+          "a5",
+          "sess_rich",
+          1170,
+          1180,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1170,\"completed\":1180},\"parentID\":\"bg\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_bg\"}}",
+          10
+        ]
+      ],
+      "part": [
+        [
+          "part_u1_0",
+          "u1",
+          "sess_rich",
+          1010,
+          9000,
+          "{\"time\":{\"start\":1010,\"end\":1010},\"type\":\"text\",\"text\":\"Plan it\"}",
+          0
+        ],
+        [
+          "part_a1_0",
+          "a1",
+          "sess_rich",
+          1,
+          9000,
+          "{\"type\":\"reasoning\",\"text\":\"\",\"time\":{\"start\":1}}",
+          0
+        ],
+        [
+          "part_a1_1",
+          "a1",
+          "sess_rich",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"Spawning\"}",
+          1
+        ],
+        [
+          "part_a1_2",
+          "a1",
+          "sess_rich",
+          1010,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_agent\",\"declarationIndex\":0,\"tool\":\"Agent\",\"state\":{\"status\":\"completed\",\"input\":{\"description\":\"Look around\",\"prompt\":\"Inspect\",\"agent\":\"explore\"},\"output\":\"Found it.\\nagentId: agent_1 (internal)\",\"title\":\"Agent\",\"metadata\":{\"schemaVersion\":1},\"time\":{\"start\":1010,\"end\":1011}}}",
+          2
+        ],
+        [
+          "part_a1_3",
+          "a1",
+          "sess_rich",
+          1010,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_mcp\",\"declarationIndex\":1,\"tool\":\"mcp__x__y\",\"state\":{\"status\":\"completed\",\"input\":{},\"output\":\"ok\",\"title\":\"Read\",\"metadata\":{\"schemaVersion\":1,\"display\":{\"kind\":\"mcp_tool\",\"serverName\":\"x\",\"toolName\":\"y\"}},\"time\":{\"start\":1010,\"end\":1011}}}",
+          3
+        ],
+        [
+          "part_a1_4",
+          "a1",
+          "sess_rich",
+          1010,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_bad\",\"declarationIndex\":2,\"tool\":\"mcp__x__z\",\"state\":{\"status\":\"completed\",\"input\":{},\"output\":\"ok\",\"title\":\"Read\",\"metadata\":{\"schemaVersion\":1,\"display\":{\"kind\":\"mcp_tool\",\"server\":\"x\",\"tool\":\"z\"}},\"time\":{\"start\":1010,\"end\":1011}}}",
+          4
+        ],
+        [
+          "part_a1_5",
+          "a1",
+          "sess_rich",
+          9000,
+          9000,
+          "{\"type\":\"subtask\",\"prompt\":\"p\",\"description\":\"legacy subtask\",\"agent\":\"general\"}",
+          5
+        ],
+        [
+          "part_a1_6",
+          "a1",
+          "sess_rich",
+          1010,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_todo\",\"declarationIndex\":3,\"tool\":\"TodoWrite\",\"state\":{\"status\":\"completed\",\"input\":{\"todos\":[{\"content\":\"Write tests\",\"status\":\"in_progress\",\"activeForm\":\"Writing tests\"},{\"content\":\"Ship\",\"status\":\"pending\",\"activeForm\":\"Shipping\"}]},\"output\":\"Todos updated\",\"title\":\"Read\",\"metadata\":{\"schemaVersion\":1},\"time\":{\"start\":1010,\"end\":1011}}}",
+          6
+        ],
+        [
+          "part_a1_7",
+          "a1",
+          "sess_rich",
+          1010,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_apps\",\"declarationIndex\":4,\"tool\":\"mcp__computer-use__list_apps\",\"state\":{\"status\":\"completed\",\"input\":{},\"output\":\"{\\\"apps\\\":[{\\\"pid\\\":42,\\\"name\\\":\\\"Finder\\\",\\\"bundle_id\\\":\\\"com.apple.finder\\\"}]}\",\"title\":\"Read\",\"metadata\":{\"schemaVersion\":1},\"time\":{\"start\":1010,\"end\":1011}}}",
+          7
+        ],
+        [
+          "part_a1_8",
+          "a1",
+          "sess_rich",
+          1010,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_click\",\"declarationIndex\":5,\"tool\":\"mcp__computer-use__click\",\"state\":{\"status\":\"completed\",\"input\":{\"app_ref\":{\"pid\":42},\"x\":1,\"y\":2},\"output\":\"clicked\",\"title\":\"Read\",\"metadata\":{\"schemaVersion\":1},\"time\":{\"start\":1010,\"end\":1011}}}",
+          8
+        ],
+        [
+          "part_g1_0",
+          "g1",
+          "sess_rich",
+          1040,
+          9000,
+          "{\"time\":{\"start\":1040,\"end\":1040},\"type\":\"text\",\"text\":\"also check tests\"}",
+          0
+        ],
+        [
+          "part_a2_0",
+          "a2",
+          "sess_rich",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"Checked.\"}",
+          0
+        ],
+        [
+          "part_tl_0",
+          "tl",
+          "sess_rich",
+          9000,
+          9000,
+          "{\"timelineType\":\"goal_verification\",\"display\":\"worklog\",\"status\":\"completed\",\"targetId\":\"target_1\",\"verificationId\":\"verify_1\",\"goalIteration\":1,\"verification\":{\"passed\":false,\"reason\":\"tests missing\"},\"anchorMessageId\":\"a2\",\"type\":\"timeline\"}",
+          0
+        ],
+        [
+          "part_mc_0",
+          "mc",
+          "sess_rich",
+          9000,
+          9000,
+          "{\"timelineType\":\"model_change\",\"display\":\"separator\",\"status\":\"completed\",\"type\":\"timeline\",\"toModel\":{\"providerID\":\"q\",\"modelID\":\"n\",\"label\":\"N\"},\"fromModelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"label\":\"M\"},\"toModelSelection\":{\"providerId\":\"q\",\"modelId\":\"n\",\"label\":\"N\"}}",
+          0
+        ],
+        [
+          "part_u2_0",
+          "u2",
+          "sess_rich",
+          1110,
+          9000,
+          "{\"time\":{\"start\":1110,\"end\":1110},\"type\":\"text\",\"text\":\"Now write\"}",
+          0
+        ],
+        [
+          "part_a3_0",
+          "a3",
+          "sess_rich",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"Partial output\"}",
+          0
+        ],
+        [
+          "part_a4_0",
+          "a4",
+          "sess_rich",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\" continues\"}",
+          0
+        ],
+        [
+          "part_bg",
+          "bg",
+          "sess_rich",
+          1160,
+          9000,
+          "{\"type\":\"text\",\"text\":\"<task-notification>\\n<task-id>t1</task-id>\\n<tool-use-id>call_agent</tool-use-id>\\n<status>failed</status>\\n<error>boom &amp; bust</error>\\n</task-notification>\",\"synthetic\":true,\"time\":{\"start\":1160,\"end\":1160},\"metadata\":{\"runtimeMessage\":{\"source\":\"background_task\"},\"source\":\"background_task\",\"visibility\":\"model-only\"}}",
+          0
+        ],
+        [
+          "part_a5_0",
+          "a5",
+          "sess_rich",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"Noted the failure.\"}",
+          0
+        ]
+      ],
+      "session_entry": [],
+      "session_target": [
+        [
+          "sess_rich",
+          "target_6y0_00000000-0000-4000-8000-000000000001",
+          "Ship it",
+          "active",
+          1000,
+          0,
+          0,
+          9000,
+          9000,
+          null,
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    "history": [
+      {
+        "message": {
+          "role": "user",
+          "content": "Plan it"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "reasoning",
+              "text": ""
+            },
+            {
+              "type": "text",
+              "text": "Spawning"
+            }
+          ],
+          "toolCalls": [
+            {
+              "id": "call_agent",
+              "name": "Agent",
+              "input": {
+                "description": "Look around",
+                "prompt": "Inspect",
+                "agent": "explore"
+              }
+            },
+            {
+              "id": "call_mcp",
+              "name": "mcp__x__y",
+              "input": {}
+            },
+            {
+              "id": "call_bad",
+              "name": "mcp__x__z",
+              "input": {}
+            },
+            {
+              "id": "call_todo",
+              "name": "TodoWrite",
+              "input": {
+                "todos": [
+                  {
+                    "content": "Write tests",
+                    "status": "in_progress",
+                    "activeForm": "Writing tests"
+                  },
+                  {
+                    "content": "Ship",
+                    "status": "pending",
+                    "activeForm": "Shipping"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "call_apps",
+              "name": "mcp__computer-use__list_apps",
+              "input": {}
+            },
+            {
+              "id": "call_click",
+              "name": "mcp__computer-use__click",
+              "input": {
+                "app_ref": {
+                  "pid": 42
+                },
+                "x": 1,
+                "y": 2
+              }
+            }
+          ],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "Found it.\nagentId: agent_1 (internal)",
+          "toolCallId": "call_agent",
+          "toolName": "Agent",
+          "isError": false
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "ok",
+          "toolCallId": "call_mcp",
+          "toolName": "mcp__x__y",
+          "isError": false
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "ok",
+          "toolCallId": "call_bad",
+          "toolName": "mcp__x__z",
+          "isError": false
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "Todos updated",
+          "toolCallId": "call_todo",
+          "toolName": "TodoWrite",
+          "isError": false
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "{\"apps\":[{\"pid\":42,\"name\":\"Finder\",\"bundle_id\":\"com.apple.finder\"}]}",
+          "toolCallId": "call_apps",
+          "toolName": "mcp__computer-use__list_apps",
+          "isError": false
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "clicked",
+          "toolCallId": "call_click",
+          "toolName": "mcp__computer-use__click",
+          "isError": false
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "also check tests"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "Checked.",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "Now write"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "Partial output",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": " continues",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>call_agent</tool-use-id>\n<status>failed</status>\n<error>boom &amp; bust</error>\n</task-notification>"
+        },
+        "metadata": {
+          "source": "legacy_synthetic"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "Noted the failure.",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ],
+    "events": [
+      {
+        "seq": 1,
+        "at": 1011,
+        "type": "session_created",
+        "turnId": null,
+        "payload": {
+          "mode": "default"
+        }
+      },
+      {
+        "seq": 2,
+        "at": 9000,
+        "type": "target_changed",
+        "turnId": null,
+        "payload": {
+          "action": "set",
+          "source": "runtime",
+          "target": {
+            "sessionID": "sess_rich",
+            "targetID": "target_6y0_00000000-0000-4000-8000-000000000001",
+            "objective": "Ship it",
+            "summaryTitle": null,
+            "status": "active",
+            "tokenBudget": 1000,
+            "tokensUsed": 0,
+            "timeUsedSeconds": 0,
+            "activeInputId": null,
+            "activeRunStartedAtMs": null,
+            "activeRunLastSeenAtMs": null,
+            "time": {
+              "created": 9000,
+              "updated": 9000
+            }
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "at": 1012,
+        "type": "model_selected",
+        "turnId": null,
+        "payload": {
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          }
+        }
+      },
+      {
+        "seq": 4,
+        "at": 1010,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "turnNumber": 1,
+          "input": "Plan it",
+          "epilogueStart": 4,
+          "messageId": "u1",
+          "inputId": "cmd_u1",
+          "intent": {
+            "sourceCommandId": "cmd_u1",
+            "queueItemId": "queue_u1",
+            "clientId": "client-1",
+            "kind": "sendText",
+            "text": "Plan it",
+            "admissionSeq": 1,
+            "admittedAt": 1,
+            "requestedDelivery": "startNow",
+            "admittedDelivery": "startNow",
+            "attachmentRefs": [
+              {
+                "ref": "zcode-artifact://s/a1",
+                "fileName": "a.png",
+                "mime": "image/png",
+                "bytes": 5
+              }
+            ],
+            "provenance": {
+              "sourceCommandId": "root_cmd"
+            }
+          }
+        }
+      },
+      {
+        "seq": 5,
+        "at": 1020,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_1"
+        }
+      },
+      {
+        "seq": 6,
+        "at": 1015,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "Spawning",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_1"
+        }
+      },
+      {
+        "seq": 7,
+        "at": 1016,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a1_1"
+        }
+      },
+      {
+        "seq": 8,
+        "at": 1017,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_agent",
+          "assistantMessageId": "a1",
+          "toolName": "Agent",
+          "input": {
+            "description": "Look around",
+            "prompt": "Inspect",
+            "agent": "explore"
+          },
+          "schedule": {
+            "executionOrder": ["call_agent"],
+            "parallelGroups": [["call_agent"]]
+          }
+        }
+      },
+      {
+        "seq": 9,
+        "at": 1018,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_agent",
+          "toolName": "Agent",
+          "startedAt": "1970-01-01T00:00:01.010Z"
+        }
+      },
+      {
+        "seq": 10,
+        "at": 1019,
+        "type": "subagent_spawned",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "agentId": "agent_1",
+          "agentType": "explore",
+          "childSessionId": "sess_subagent_agent_1",
+          "description": "Look around",
+          "parentToolCallId": "call_agent",
+          "prompt": "Inspect",
+          "status": "running"
+        }
+      },
+      {
+        "seq": 11,
+        "at": 1020,
+        "type": "subagent_stopped",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "agentId": "agent_1",
+          "agentType": "explore",
+          "childSessionId": "sess_subagent_agent_1",
+          "description": "Look around",
+          "parentToolCallId": "call_agent",
+          "prompt": "Inspect",
+          "summaryText": "Look around",
+          "status": "completed"
+        }
+      },
+      {
+        "seq": 12,
+        "at": 1021,
+        "type": "tool_call_result",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_agent",
+          "duration": 1,
+          "result": {
+            "success": true,
+            "content": "Found it.\nagentId: agent_1 (internal)"
+          }
+        }
+      },
+      {
+        "seq": 13,
+        "at": 1022,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_mcp",
+          "assistantMessageId": "a1",
+          "toolName": "mcp__x__y",
+          "input": {},
+          "display": {
+            "kind": "mcp_tool",
+            "serverName": "x",
+            "toolName": "y"
+          },
+          "schedule": {
+            "executionOrder": ["call_mcp"],
+            "parallelGroups": [["call_mcp"]]
+          }
+        }
+      },
+      {
+        "seq": 14,
+        "at": 1023,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_mcp",
+          "toolName": "mcp__x__y",
+          "display": {
+            "kind": "mcp_tool",
+            "serverName": "x",
+            "toolName": "y"
+          },
+          "startedAt": "1970-01-01T00:00:01.010Z"
+        }
+      },
+      {
+        "seq": 15,
+        "at": 1024,
+        "type": "tool_call_result",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_mcp",
+          "duration": 1,
+          "result": {
+            "success": true,
+            "content": "ok",
+            "display": {
+              "kind": "mcp_tool",
+              "serverName": "x",
+              "toolName": "y"
+            }
+          }
+        }
+      },
+      {
+        "seq": 16,
+        "at": 1025,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_bad",
+          "assistantMessageId": "a1",
+          "toolName": "mcp__x__z",
+          "input": {},
+          "schedule": {
+            "executionOrder": ["call_bad"],
+            "parallelGroups": [["call_bad"]]
+          }
+        }
+      },
+      {
+        "seq": 17,
+        "at": 1026,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_bad",
+          "toolName": "mcp__x__z",
+          "startedAt": "1970-01-01T00:00:01.010Z"
+        }
+      },
+      {
+        "seq": 18,
+        "at": 1027,
+        "type": "tool_call_result",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_bad",
+          "duration": 1,
+          "result": {
+            "success": true,
+            "content": "ok"
+          }
+        }
+      },
+      {
+        "seq": 19,
+        "at": 1028,
+        "type": "subagent_spawned",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "agentId": "part_a1_5",
+          "agentType": "general",
+          "description": "legacy subtask",
+          "prompt": "p",
+          "status": "running"
+        }
+      },
+      {
+        "seq": 20,
+        "at": 1029,
+        "type": "subagent_stopped",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "agentId": "part_a1_5",
+          "agentType": "general",
+          "description": "legacy subtask",
+          "prompt": "p",
+          "summaryText": "legacy subtask",
+          "status": "completed"
+        }
+      },
+      {
+        "seq": 21,
+        "at": 1030,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_todo",
+          "assistantMessageId": "a1",
+          "toolName": "TodoWrite",
+          "input": {
+            "todos": [
+              {
+                "content": "Write tests",
+                "status": "in_progress",
+                "activeForm": "Writing tests"
+              },
+              {
+                "content": "Ship",
+                "status": "pending",
+                "activeForm": "Shipping"
+              }
+            ]
+          },
+          "schedule": {
+            "executionOrder": ["call_todo"],
+            "parallelGroups": [["call_todo"]]
+          }
+        }
+      },
+      {
+        "seq": 22,
+        "at": 1031,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_todo",
+          "toolName": "TodoWrite",
+          "startedAt": "1970-01-01T00:00:01.010Z"
+        }
+      },
+      {
+        "seq": 23,
+        "at": 1032,
+        "type": "tool_call_result",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_todo",
+          "duration": 1,
+          "result": {
+            "success": true,
+            "content": "Todos updated"
+          }
+        }
+      },
+      {
+        "seq": 24,
+        "at": 1033,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_apps",
+          "assistantMessageId": "a1",
+          "toolName": "mcp__computer-use__list_apps",
+          "input": {},
+          "schedule": {
+            "executionOrder": ["call_apps"],
+            "parallelGroups": [["call_apps"]]
+          }
+        }
+      },
+      {
+        "seq": 25,
+        "at": 1034,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_apps",
+          "toolName": "mcp__computer-use__list_apps",
+          "startedAt": "1970-01-01T00:00:01.010Z"
+        }
+      },
+      {
+        "seq": 26,
+        "at": 1035,
+        "type": "tool_call_result",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_apps",
+          "duration": 1,
+          "result": {
+            "success": true,
+            "content": "{\"apps\":[{\"pid\":42,\"name\":\"Finder\",\"bundle_id\":\"com.apple.finder\"}]}"
+          }
+        }
+      },
+      {
+        "seq": 27,
+        "at": 1036,
+        "type": "tool_call_scheduled",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_click",
+          "assistantMessageId": "a1",
+          "toolName": "mcp__computer-use__click",
+          "input": {
+            "app_ref": {
+              "pid": 42
+            },
+            "x": 1,
+            "y": 2
+          },
+          "schedule": {
+            "executionOrder": ["call_click"],
+            "parallelGroups": [["call_click"]]
+          }
+        }
+      },
+      {
+        "seq": 28,
+        "at": 1037,
+        "type": "tool_call_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_click",
+          "toolName": "mcp__computer-use__click",
+          "startedAt": "1970-01-01T00:00:01.010Z"
+        }
+      },
+      {
+        "seq": 29,
+        "at": 1038,
+        "type": "tool_call_result",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "toolCallId": "call_click",
+          "duration": 1,
+          "result": {
+            "success": true,
+            "content": "clicked"
+          }
+        }
+      },
+      {
+        "seq": 30,
+        "at": 1040,
+        "type": "turn_steer_drained",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "pendingInputIds": ["queue_g1"],
+          "injectedMessageIds": ["g1"],
+          "drainedInputs": [
+            {
+              "pendingInputId": "queue_g1",
+              "messageId": "g1",
+              "text": "also check tests",
+              "delivery": "guide",
+              "intent": {
+                "sourceCommandId": "cmd_g1",
+                "queueItemId": "queue_g1",
+                "clientId": "client-1",
+                "kind": "sendText",
+                "text": "also check tests",
+                "admissionSeq": 1,
+                "admittedAt": 1,
+                "requestedDelivery": "startNow",
+                "admittedDelivery": "startNow"
+              }
+            }
+          ],
+          "targetTurnId": "hydrate-turn-1"
+        }
+      },
+      {
+        "seq": 31,
+        "at": 1050,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a2",
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 32,
+        "at": 1041,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "Checked.",
+          "done": false,
+          "assistantMessageId": "a2",
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 33,
+        "at": 1042,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 34,
+        "at": 1043,
+        "type": "assistant_feedback_updated",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "entityId": "a2",
+          "feedback": "like"
+        }
+      },
+      {
+        "seq": 35,
+        "at": 1044,
+        "type": "target_completion_verification",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "targetId": "target_1",
+          "verificationId": "verify_1",
+          "goalIteration": 1,
+          "anchorAssistantMessageId": "a2",
+          "status": "started"
+        }
+      },
+      {
+        "seq": 36,
+        "at": 1045,
+        "type": "target_completion_verification",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "targetId": "target_1",
+          "verificationId": "verify_1",
+          "goalIteration": 1,
+          "anchorAssistantMessageId": "a2",
+          "status": "completed",
+          "verification": {
+            "passed": false,
+            "reason": "tests missing"
+          }
+        }
+      },
+      {
+        "seq": 37,
+        "at": 1046,
+        "type": "model_selected",
+        "turnId": null,
+        "payload": {
+          "modelSelection": {
+            "providerId": "q",
+            "modelId": "n"
+          },
+          "previousModelSelection": {
+            "providerId": "p",
+            "modelId": "m"
+          }
+        }
+      },
+      {
+        "seq": 38,
+        "at": 1080,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 39,
+        "at": 1080,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 6,
+          "historyRoundCount": 4,
+          "duration": 70,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 40,
+        "at": 1110,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "turnNumber": 2,
+          "input": "Now write",
+          "messageId": "u2",
+          "inputId": "cmd_u2"
+        }
+      },
+      {
+        "seq": 41,
+        "at": 1120,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a3",
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 42,
+        "at": 1051,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "Partial output",
+          "done": false,
+          "assistantMessageId": "a3",
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 43,
+        "at": 1052,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 44,
+        "at": 1130,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "content": "",
+          "stopReason": "length",
+          "querySource": "main_turn",
+          "toolCallCount": 0,
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 45,
+        "at": 1140,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a4",
+          "partId": "part_a4_0"
+        }
+      },
+      {
+        "seq": 46,
+        "at": 1055,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_delta",
+          "delta": " continues",
+          "done": false,
+          "assistantMessageId": "a4",
+          "partId": "part_a4_0"
+        }
+      },
+      {
+        "seq": 47,
+        "at": 1056,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a4_0"
+        }
+      },
+      {
+        "seq": 48,
+        "at": 1150,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 49,
+        "at": 1150,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 2,
+          "duration": 40,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 50,
+        "at": 1160,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "turnNumber": 3,
+          "input": "<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>call_agent</tool-use-id>\n<status>failed</status>\n<error>boom &amp; bust</error>\n</task-notification>",
+          "inputVisibility": "model-only",
+          "inputSource": "background_task",
+          "originMeta": {
+            "backgroundSource": "subagent",
+            "title": "Look around",
+            "workId": "agent_1"
+          },
+          "messageId": "bg"
+        }
+      },
+      {
+        "seq": 51,
+        "at": 1170,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a5",
+          "partId": "part_a5_0"
+        }
+      },
+      {
+        "seq": 52,
+        "at": 1061,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "Noted the failure.",
+          "done": false,
+          "assistantMessageId": "a5",
+          "partId": "part_a5_0"
+        }
+      },
+      {
+        "seq": 53,
+        "at": 1062,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a5_0"
+        }
+      },
+      {
+        "seq": 54,
+        "at": 1180,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 55,
+        "at": 1180,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 1,
+          "duration": 20,
+          "resultType": "success"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "rowId": 1,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 4,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u1",
+        "state": "completedSuccess",
+        "startedAt": 1010,
+        "workSegments": [
+          {
+            "segmentId": "u1:initial",
+            "startedAt": 1010,
+            "endedAt": 1040,
+            "activeMs": 30
+          },
+          {
+            "segmentId": "g1",
+            "triggerEntityId": "g1",
+            "startedAt": 1040,
+            "endedAt": 1080,
+            "activeMs": 40
+          }
+        ],
+        "endedAt": 1080,
+        "activeMs": 70,
+        "historyRoundCount": 4
+      },
+      {
+        "rowId": 2,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 4,
+        "kind": "userInput",
+        "text": "Plan it",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u1",
+        "rootSourceCommandId": "root_cmd",
+        "clientId": "client-1",
+        "epilogueStart": 4,
+        "attachments": [
+          {
+            "ref": "zcode-artifact://s/a1",
+            "fileName": "a.png",
+            "mime": "image/png",
+            "bytes": 5
+          }
+        ]
+      },
+      {
+        "rowId": 3,
+        "turnId": "u1",
+        "entityId": "a1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1020,
+        "createdAtSeq": 5,
+        "kind": "assistantText",
+        "assistantResponseId": "a1",
+        "text": "Spawning",
+        "state": "complete"
+      },
+      {
+        "rowId": 4,
+        "turnId": "u1",
+        "entityId": "call_agent",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1017,
+        "createdAtSeq": 8,
+        "kind": "toolCall",
+        "assistantResponseId": "a1",
+        "toolCallId": "call_agent",
+        "toolName": "Agent",
+        "status": "error",
+        "inputText": "{\"description\":\"Look around\",\"prompt\":\"Inspect\",\"agent\":\"explore\"}",
+        "input": {
+          "description": "Look around",
+          "prompt": "Inspect",
+          "agent": "explore"
+        },
+        "startedAt": 1018,
+        "output": {
+          "text": "boom & bust"
+        },
+        "endedAt": 1160,
+        "error": {
+          "code": "fault.runtime.backgroundTaskFailed",
+          "message": "boom & bust"
+        }
+      },
+      {
+        "rowId": 5,
+        "turnId": "u1",
+        "entityId": "agent_1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1019,
+        "createdAtSeq": 10,
+        "kind": "subagent",
+        "parentToolCallId": "call_agent",
+        "subagentType": "explore",
+        "status": "success",
+        "summaryText": "Look around",
+        "childSessionId": "sess_subagent_agent_1",
+        "startedAt": 1019,
+        "endedAt": 1020
+      },
+      {
+        "rowId": 6,
+        "turnId": "u1",
+        "entityId": "call_mcp",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1022,
+        "createdAtSeq": 13,
+        "kind": "toolCall",
+        "assistantResponseId": "a1",
+        "toolCallId": "call_mcp",
+        "toolName": "mcp__x__y",
+        "status": "success",
+        "inputText": "{}",
+        "input": {},
+        "display": {
+          "kind": "mcp_tool",
+          "serverName": "x",
+          "toolName": "y"
+        },
+        "startedAt": 1023,
+        "output": {
+          "text": "ok",
+          "display": {
+            "kind": "mcp_tool",
+            "serverName": "x",
+            "toolName": "y"
+          }
+        },
+        "endedAt": 1024
+      },
+      {
+        "rowId": 7,
+        "turnId": "u1",
+        "entityId": "call_bad",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1025,
+        "createdAtSeq": 16,
+        "kind": "toolCall",
+        "assistantResponseId": "a1",
+        "toolCallId": "call_bad",
+        "toolName": "mcp__x__z",
+        "status": "success",
+        "inputText": "{}",
+        "input": {},
+        "startedAt": 1026,
+        "output": {
+          "text": "ok"
+        },
+        "endedAt": 1027
+      },
+      {
+        "rowId": 8,
+        "turnId": "u1",
+        "entityId": "part_a1_5",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1028,
+        "createdAtSeq": 19,
+        "kind": "subagent",
+        "subagentType": "general",
+        "status": "success",
+        "summaryText": "legacy subtask",
+        "startedAt": 1028,
+        "endedAt": 1029
+      },
+      {
+        "rowId": 9,
+        "turnId": "u1",
+        "entityId": "call_todo",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1030,
+        "createdAtSeq": 21,
+        "kind": "toolCall",
+        "assistantResponseId": "a1",
+        "toolCallId": "call_todo",
+        "toolName": "TodoWrite",
+        "status": "success",
+        "inputText": "{\"todos\":[{\"content\":\"Write tests\",\"status\":\"in_progress\",\"activeForm\":\"Writing tests\"},{\"content\":\"Ship\",\"status\":\"pending\",\"activeForm\":\"Shipping\"}]}",
+        "input": {
+          "todos": [
+            {
+              "content": "Write tests",
+              "status": "in_progress",
+              "activeForm": "Writing tests"
+            },
+            {
+              "content": "Ship",
+              "status": "pending",
+              "activeForm": "Shipping"
+            }
+          ]
+        },
+        "startedAt": 1031,
+        "output": {
+          "text": "Todos updated"
+        },
+        "endedAt": 1032
+      },
+      {
+        "rowId": 10,
+        "turnId": "u1",
+        "entityId": "call_apps",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1033,
+        "createdAtSeq": 24,
+        "kind": "toolCall",
+        "assistantResponseId": "a1",
+        "toolCallId": "call_apps",
+        "toolName": "mcp__computer-use__list_apps",
+        "status": "success",
+        "inputText": "{}",
+        "input": {},
+        "startedAt": 1034,
+        "output": {
+          "text": "{\"apps\":[{\"pid\":42,\"name\":\"Finder\",\"bundle_id\":\"com.apple.finder\"}]}"
+        },
+        "endedAt": 1035
+      },
+      {
+        "rowId": 11,
+        "turnId": "u1",
+        "entityId": "call_click",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1036,
+        "createdAtSeq": 27,
+        "kind": "toolCall",
+        "assistantResponseId": "a1",
+        "toolCallId": "call_click",
+        "toolName": "mcp__computer-use__click",
+        "status": "success",
+        "inputText": "{\"app_ref\":{\"pid\":42},\"x\":1,\"y\":2}",
+        "input": {
+          "app_ref": {
+            "pid": 42
+          },
+          "x": 1,
+          "y": 2
+        },
+        "cuaApp": {
+          "pid": 42,
+          "name": "Finder",
+          "bundleId": "com.apple.finder"
+        },
+        "startedAt": 1037,
+        "output": {
+          "text": "clicked"
+        },
+        "endedAt": 1038
+      },
+      {
+        "rowId": 12,
+        "turnId": "u1",
+        "entityId": "g1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1040,
+        "createdAtSeq": 30,
+        "kind": "userInput",
+        "text": "also check tests",
+        "origin": "realUser",
+        "guided": true,
+        "sourceCommandId": "cmd_g1",
+        "rootSourceCommandId": "cmd_g1",
+        "clientId": "client-1"
+      },
+      {
+        "rowId": 13,
+        "turnId": "u1",
+        "entityId": "a2",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1050,
+        "createdAtSeq": 31,
+        "kind": "assistantText",
+        "assistantResponseId": "a2",
+        "text": "Checked.",
+        "state": "complete",
+        "feedback": "like",
+        "actions": {
+          "canFork": true
+        }
+      },
+      {
+        "rowId": 14,
+        "turnId": "u1",
+        "entityId": "target_1_1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1044,
+        "createdAtSeq": 35,
+        "kind": "timelineMarker",
+        "lane": "turnTailBoundary",
+        "marker": {
+          "type": "goalVerify",
+          "iteration": 1,
+          "outcome": "notSatisfied",
+          "detail": "tests missing"
+        }
+      },
+      {
+        "rowId": 15,
+        "turnId": "u2",
+        "entityId": "model-change:u2:p/m->q/n",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1110,
+        "createdAtSeq": 40,
+        "kind": "timelineMarker",
+        "lane": "lightBoundary",
+        "marker": {
+          "type": "modelChange",
+          "fromProvider": "p",
+          "fromModel": "m",
+          "toProvider": "q",
+          "toModel": "n",
+          "toThought": ""
+        }
+      },
+      {
+        "rowId": 16,
+        "turnId": "u2",
+        "entityId": "u2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1110,
+        "createdAtSeq": 40,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u2",
+        "state": "completedSuccess",
+        "startedAt": 1110,
+        "endedAt": 1150,
+        "activeMs": 40,
+        "historyRoundCount": 2
+      },
+      {
+        "rowId": 17,
+        "turnId": "u2",
+        "entityId": "u2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1110,
+        "createdAtSeq": 40,
+        "kind": "userInput",
+        "text": "Now write",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u2",
+        "rootSourceCommandId": "cmd_u2",
+        "actions": {
+          "canEdit": true,
+          "editDisposition": "rewind"
+        }
+      },
+      {
+        "rowId": 18,
+        "turnId": "u2",
+        "entityId": "a4",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1120,
+        "createdAtSeq": 41,
+        "kind": "assistantText",
+        "text": "Partial output continues",
+        "state": "complete",
+        "assistantResponseId": "a4",
+        "actions": {
+          "canFork": true
+        }
+      },
+      {
+        "rowId": 19,
+        "turnId": "bg",
+        "entityId": "bg",
+        "productTurnId": "bg",
+        "visibility": "visible",
+        "createdAt": 1160,
+        "createdAtSeq": 50,
+        "kind": "turnHeader",
+        "origin": "backgroundResult",
+        "executionKind": "agent",
+        "originMeta": {
+          "backgroundSource": "subagent",
+          "title": "Look around",
+          "workId": "agent_1"
+        },
+        "state": "completedSuccess",
+        "startedAt": 1160,
+        "endedAt": 1180,
+        "activeMs": 20,
+        "historyRoundCount": 1
+      },
+      {
+        "rowId": 20,
+        "turnId": "bg",
+        "entityId": "a5",
+        "productTurnId": "bg",
+        "visibility": "visible",
+        "createdAt": 1170,
+        "createdAtSeq": 51,
+        "kind": "assistantText",
+        "assistantResponseId": "a5",
+        "text": "Noted the failure.",
+        "state": "complete",
+        "actions": {
+          "canFork": true
+        }
+      }
+    ],
+    "state": {
+      "control": {
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "canStop": false,
+        "stopState": "idle",
+        "stopTargetKind": "unknown",
+        "activeWorks": [],
+        "lastError": null,
+        "apiRetry": null
+      },
+      "availability": {
+        "fork": {
+          "allowed": true
+        },
+        "compact": {
+          "allowed": true
+        },
+        "switchModelConfig": {
+          "allowed": true
+        },
+        "setFollowupMode": {
+          "allowed": true
+        },
+        "queueEdit": {
+          "allowed": true
+        },
+        "sendQueuedNow": {
+          "allowed": false,
+          "reasonCode": "sendQueuedNowRequiresRunning"
+        },
+        "pauseGoal": {
+          "allowed": true
+        },
+        "resumeGoal": {
+          "allowed": false,
+          "reasonCode": "goalNotPaused"
+        }
+      },
+      "inputRouting": {
+        "mode": "startNow"
+      },
+      "meta": {
+        "title": "",
+        "titleSource": "default"
+      },
+      "config": {
+        "provider": "q",
+        "model": "n",
+        "thought": "",
+        "thoughtLevels": [],
+        "followupMode": "queue",
+        "mode": "build",
+        "modelSelection": {
+          "providerId": "q",
+          "modelId": "n"
+        }
+      },
+      "modelTransition": null,
+      "usage": {
+        "contextWindow": null,
+        "cumulative": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        }
+      },
+      "queue": {
+        "items": [],
+        "autoDrain": true
+      },
+      "pendingInteractions": [],
+      "pendingCommands": [],
+      "backgroundWorks": [],
+      "subagents": {
+        "revision": 2,
+        "childSessionIds": ["sess_subagent_agent_1"],
+        "running": [],
+        "endedTotal": 1
+      },
+      "goal": {
+        "targetId": "target_6y0_00000000-0000-4000-8000-000000000001",
+        "objective": "Ship it",
+        "summaryTitle": null,
+        "timeUsedSeconds": 0,
+        "activeRunStartedAtMs": null,
+        "status": "notSatisfied",
+        "iteration": 1,
+        "verifications": [
+          {
+            "iteration": 1,
+            "outcome": "notSatisfied",
+            "at": 1045,
+            "anchorRowId": 14,
+            "reason": "tests missing"
+          }
+        ],
+        "iterations": [
+          {
+            "iteration": 1,
+            "items": [
+              {
+                "id": "Write tests",
+                "content": "Write tests",
+                "status": "inProgress"
+              },
+              {
+                "id": "Ship",
+                "content": "Ship",
+                "status": "pending"
+              }
+            ],
+            "updatedAt": 1030
+          }
+        ]
+      },
+      "plan": {
+        "items": [
+          {
+            "id": "Write tests",
+            "content": "Write tests",
+            "status": "inProgress"
+          },
+          {
+            "id": "Ship",
+            "content": "Ship",
+            "status": "pending"
+          }
+        ],
+        "updatedAt": 1030
+      },
+      "workspaceHookAdmission": null
+    }
+  },
+  "failures": {
+    "sessionID": "sess_failures",
+    "tables": {
+      "session": [
+        [
+          "sess_failures",
+          "proj_w",
+          null,
+          null,
+          "sess_failures",
+          "/w",
+          "/w",
+          "failures",
+          "0.0.0",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "{\"mode\":\"build\"}",
+          1000,
+          9000,
+          null,
+          null,
+          "interactive",
+          "first_input",
+          null,
+          1000,
+          null
+        ]
+      ],
+      "message": [
+        [
+          "u1",
+          "sess_failures",
+          1010,
+          1010,
+          "{\"role\":\"user\",\"time\":{\"created\":1010},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u1\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          0
+        ],
+        [
+          "a1",
+          "sess_failures",
+          1020,
+          1030,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1020,\"completed\":1030},\"error\":{\"name\":\"ProviderError\",\"data\":{\"message\":\"rate limited\",\"retryable\":true,\"attribution\":{\"source\":\"provider\"}}},\"parentID\":\"u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\"}}",
+          1
+        ],
+        [
+          "u2",
+          "sess_failures",
+          1040,
+          1040,
+          "{\"role\":\"user\",\"time\":{\"created\":1040},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u2\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          2
+        ],
+        [
+          "a2",
+          "sess_failures",
+          1050,
+          1060,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1050,\"completed\":1060},\"error\":{\"name\":\"AbortError\",\"data\":{\"message\":\"stopped\"}},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          3
+        ],
+        [
+          "u3",
+          "sess_failures",
+          1070,
+          1070,
+          "{\"role\":\"user\",\"time\":{\"created\":1070},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u3\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          4
+        ],
+        [
+          "a3",
+          "sess_failures",
+          1080,
+          1090,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1080,\"completed\":1090},\"error\":{\"name\":\"StreamRecoveryDiscarded\",\"data\":{\"message\":\"Partial assistant output was discarded before a streaming retry.\",\"retryNumber\":1}},\"parentID\":\"u3\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"finish\":\"stream_recovery_discarded\",\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\"}}",
+          5
+        ],
+        [
+          "a4",
+          "sess_failures",
+          1100,
+          1110,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1100,\"completed\":1110},\"parentID\":\"u3\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\"}}",
+          6
+        ],
+        [
+          "u4",
+          "sess_failures",
+          1120,
+          1120,
+          "{\"role\":\"user\",\"time\":{\"created\":1120},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u4\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u4\"},\"tools\":{\"Read\":true},\"metadata\":{\"executionKind\":\"controlOnly\"},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          7
+        ],
+        [
+          "f1",
+          "sess_failures",
+          1130,
+          1130,
+          "{\"role\":\"user\",\"time\":{\"created\":1130},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"fork_notice\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"tools\":{\"Read\":true},\"source\":\"fork\",\"synthetic\":true,\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          8
+        ]
+      ],
+      "part": [
+        [
+          "part_u1_0",
+          "u1",
+          "sess_failures",
+          1010,
+          9000,
+          "{\"time\":{\"start\":1010,\"end\":1010},\"type\":\"text\",\"text\":\"go\"}",
+          0
+        ],
+        [
+          "part_a1_0",
+          "a1",
+          "sess_failures",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"trying\"}",
+          0
+        ],
+        [
+          "part_u2_0",
+          "u2",
+          "sess_failures",
+          1040,
+          9000,
+          "{\"time\":{\"start\":1040,\"end\":1040},\"type\":\"text\",\"text\":\"again\"}",
+          0
+        ],
+        [
+          "part_a2_0",
+          "a2",
+          "sess_failures",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"partial\"}",
+          0
+        ],
+        [
+          "part_u3_0",
+          "u3",
+          "sess_failures",
+          1070,
+          9000,
+          "{\"time\":{\"start\":1070,\"end\":1070},\"type\":\"text\",\"text\":\"retry\"}",
+          0
+        ],
+        [
+          "part_a3_0",
+          "a3",
+          "sess_failures",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"discarded\"}",
+          0
+        ],
+        [
+          "part_a4_0",
+          "a4",
+          "sess_failures",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"recovered\"}",
+          0
+        ],
+        [
+          "part_u4_0",
+          "u4",
+          "sess_failures",
+          1120,
+          9000,
+          "{\"time\":{\"start\":1120,\"end\":1120},\"type\":\"text\",\"text\":\"/goal ship\"}",
+          0
+        ],
+        [
+          "part_f1_0",
+          "f1",
+          "sess_failures",
+          1130,
+          9000,
+          "{\"time\":{\"start\":1130,\"end\":1130},\"type\":\"text\",\"text\":\"Forked from parent\",\"synthetic\":true,\"metadata\":{\"forkContext\":{\"kind\":\"session_fork\",\"parentSessionId\":\"sess_parent\",\"targetMessageId\":\"pm1\"}}}",
+          0
+        ]
+      ],
+      "session_entry": [
+        [
+          "verify-entry-0",
+          "sess_failures",
+          "target_completion_verification",
+          5,
+          5,
+          "{\"eventId\":\"e1\",\"payload\":{\"targetId\":\"target_2\",\"verificationId\":\"v2\",\"status\":\"started\",\"goalIteration\":1,\"anchorAssistantMessageId\":\"a4\"},\"sequenceNumber\":5}"
+        ],
+        [
+          "verify-entry-1",
+          "sess_failures",
+          "target_completion_verification",
+          6,
+          6,
+          "{\"eventId\":\"e2\",\"payload\":{\"targetId\":\"target_2\",\"verificationId\":\"v2\",\"status\":\"completed\",\"goalIteration\":1,\"verification\":{\"passed\":true,\"reason\":\"done\"}},\"sequenceNumber\":6}"
+        ],
+        [
+          "verify-entry-2",
+          "sess_failures",
+          "target_completion_verification",
+          7,
+          7,
+          "{\"eventId\":\"e3\",\"payload\":{\"targetId\":\"target_3\",\"verificationId\":\"v3\",\"status\":\"failed_closed\"},\"sequenceNumber\":7}"
+        ]
+      ],
+      "session_target": []
+    },
+    "history": [
+      {
+        "message": {
+          "role": "user",
+          "content": "go"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "trying",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "again"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "partial",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "retry"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "discarded",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "recovered",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "/goal ship"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "Forked from parent"
+        },
+        "metadata": {
+          "source": "legacy_synthetic"
+        }
+      }
+    ],
+    "events": [
+      {
+        "seq": 1,
+        "at": 1011,
+        "type": "session_created",
+        "turnId": null,
+        "payload": {
+          "mode": "default"
+        }
+      },
+      {
+        "seq": 2,
+        "at": 1012,
+        "type": "model_selected",
+        "turnId": null,
+        "payload": {
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "at": 1010,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "turnNumber": 1,
+          "input": "go",
+          "messageId": "u1",
+          "inputId": "cmd_u1"
+        }
+      },
+      {
+        "seq": 4,
+        "at": 1020,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 5,
+        "at": 1015,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "trying",
+          "done": false,
+          "assistantMessageId": "a1",
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 6,
+        "at": 1016,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a1_0"
+        }
+      },
+      {
+        "seq": 7,
+        "at": 1030,
+        "type": "turn_error",
+        "turnId": "hydrate-turn-1",
+        "payload": {
+          "error": {
+            "type": "ProviderError",
+            "message": "rate limited",
+            "attribution": {
+              "source": "provider"
+            },
+            "retryable": true,
+            "data": {
+              "message": "rate limited",
+              "retryable": true,
+              "attribution": {
+                "source": "provider"
+              }
+            }
+          },
+          "turnPhase": "model"
+        }
+      },
+      {
+        "seq": 8,
+        "at": 1040,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "turnNumber": 2,
+          "input": "again",
+          "messageId": "u2",
+          "inputId": "cmd_u2"
+        }
+      },
+      {
+        "seq": 9,
+        "at": 1050,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a2",
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 10,
+        "at": 1020,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "partial",
+          "done": false,
+          "assistantMessageId": "a2",
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 11,
+        "at": 1021,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a2_0"
+        }
+      },
+      {
+        "seq": 12,
+        "at": 1060,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 13,
+        "at": 1060,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-2",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 1,
+          "duration": 20,
+          "resultType": "cancelled"
+        }
+      },
+      {
+        "seq": 14,
+        "at": 1070,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "turnNumber": 3,
+          "input": "retry",
+          "messageId": "u3",
+          "inputId": "cmd_u3"
+        }
+      },
+      {
+        "seq": 15,
+        "at": 1080,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a3",
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 16,
+        "at": 1026,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "discarded",
+          "done": false,
+          "assistantMessageId": "a3",
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 17,
+        "at": 1027,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a3_0"
+        }
+      },
+      {
+        "seq": 18,
+        "at": 1100,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_start",
+          "delta": "",
+          "done": false,
+          "assistantMessageId": "a4",
+          "partId": "part_a4_0"
+        }
+      },
+      {
+        "seq": 19,
+        "at": 1029,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_delta",
+          "delta": "recovered",
+          "done": false,
+          "assistantMessageId": "a4",
+          "partId": "part_a4_0"
+        }
+      },
+      {
+        "seq": 20,
+        "at": 1030,
+        "type": "model_streaming",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "kind": "text_end",
+          "delta": "",
+          "done": false,
+          "partId": "part_a4_0"
+        }
+      },
+      {
+        "seq": 21,
+        "at": 1031,
+        "type": "target_completion_verification",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "targetId": "target_2",
+          "verificationId": "v2",
+          "goalIteration": 1,
+          "anchorAssistantMessageId": "a4",
+          "status": "started"
+        }
+      },
+      {
+        "seq": 22,
+        "at": 1032,
+        "type": "target_completion_verification",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "targetId": "target_2",
+          "verificationId": "v2",
+          "goalIteration": 1,
+          "anchorAssistantMessageId": "a4",
+          "status": "completed",
+          "verification": {
+            "passed": true,
+            "reason": "done"
+          }
+        }
+      },
+      {
+        "seq": 23,
+        "at": 1110,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 24,
+        "at": 1110,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-3",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 2,
+          "duration": 40,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 25,
+        "at": 1120,
+        "type": "turn_started",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "turnNumber": 4,
+          "input": "/goal ship",
+          "messageId": "u4",
+          "executionKind": "controlOnly",
+          "inputId": "cmd_u4"
+        }
+      },
+      {
+        "seq": 26,
+        "at": 1120,
+        "type": "model_complete",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "content": "",
+          "stopReason": "end_turn",
+          "querySource": "main_turn",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      {
+        "seq": 27,
+        "at": 1120,
+        "type": "turn_complete",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "response": "",
+          "tokenCount": 0,
+          "toolCallCount": 0,
+          "historyRoundCount": 0,
+          "duration": 0,
+          "resultType": "success"
+        }
+      },
+      {
+        "seq": 28,
+        "at": 1038,
+        "type": "target_completion_verification",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "targetId": "target_3",
+          "verificationId": "v3",
+          "status": "started"
+        }
+      },
+      {
+        "seq": 29,
+        "at": 1039,
+        "type": "target_completion_verification",
+        "turnId": "hydrate-turn-4",
+        "payload": {
+          "targetId": "target_3",
+          "verificationId": "v3",
+          "status": "failed_closed"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "rowId": 1,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 3,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u1",
+        "state": "failed",
+        "startedAt": 1010,
+        "endedAt": 1030
+      },
+      {
+        "rowId": 2,
+        "turnId": "u1",
+        "entityId": "u1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1010,
+        "createdAtSeq": 3,
+        "kind": "userInput",
+        "text": "go",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u1",
+        "rootSourceCommandId": "cmd_u1"
+      },
+      {
+        "rowId": 3,
+        "turnId": "u1",
+        "entityId": "a1",
+        "productTurnId": "u1",
+        "visibility": "visible",
+        "createdAt": 1020,
+        "createdAtSeq": 4,
+        "kind": "assistantText",
+        "assistantResponseId": "a1",
+        "text": "trying",
+        "state": "complete"
+      },
+      {
+        "rowId": 4,
+        "turnId": "u2",
+        "entityId": "u2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1040,
+        "createdAtSeq": 8,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u2",
+        "state": "completedInterrupted",
+        "startedAt": 1040,
+        "endedAt": 1060,
+        "activeMs": 20,
+        "historyRoundCount": 1
+      },
+      {
+        "rowId": 5,
+        "turnId": "u2",
+        "entityId": "u2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1040,
+        "createdAtSeq": 8,
+        "kind": "userInput",
+        "text": "again",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u2",
+        "rootSourceCommandId": "cmd_u2"
+      },
+      {
+        "rowId": 6,
+        "turnId": "u2",
+        "entityId": "a2",
+        "productTurnId": "u2",
+        "visibility": "visible",
+        "createdAt": 1050,
+        "createdAtSeq": 9,
+        "kind": "assistantText",
+        "assistantResponseId": "a2",
+        "text": "partial",
+        "state": "complete"
+      },
+      {
+        "rowId": 7,
+        "turnId": "u3",
+        "entityId": "u3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1070,
+        "createdAtSeq": 14,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "agent",
+        "sourceCommandId": "cmd_u3",
+        "state": "completedSuccess",
+        "startedAt": 1070,
+        "endedAt": 1110,
+        "activeMs": 40,
+        "historyRoundCount": 2
+      },
+      {
+        "rowId": 8,
+        "turnId": "u3",
+        "entityId": "u3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1070,
+        "createdAtSeq": 14,
+        "kind": "userInput",
+        "text": "retry",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u3",
+        "rootSourceCommandId": "cmd_u3"
+      },
+      {
+        "rowId": 9,
+        "turnId": "u3",
+        "entityId": "a3",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1080,
+        "createdAtSeq": 15,
+        "kind": "assistantText",
+        "assistantResponseId": "a3",
+        "text": "discarded",
+        "state": "complete"
+      },
+      {
+        "rowId": 10,
+        "turnId": "u3",
+        "entityId": "a4",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1100,
+        "createdAtSeq": 18,
+        "kind": "assistantText",
+        "assistantResponseId": "a4",
+        "text": "recovered",
+        "state": "complete",
+        "actions": {
+          "canFork": true,
+          "canRetry": true
+        }
+      },
+      {
+        "rowId": 11,
+        "turnId": "u3",
+        "entityId": "target_2_1",
+        "productTurnId": "u3",
+        "visibility": "visible",
+        "createdAt": 1031,
+        "createdAtSeq": 21,
+        "kind": "timelineMarker",
+        "lane": "turnTailBoundary",
+        "marker": {
+          "type": "goalVerify",
+          "iteration": 1,
+          "outcome": "pass",
+          "detail": "done"
+        }
+      },
+      {
+        "rowId": 12,
+        "turnId": "u4",
+        "entityId": "u4",
+        "productTurnId": "u4",
+        "visibility": "visible",
+        "createdAt": 1120,
+        "createdAtSeq": 25,
+        "kind": "turnHeader",
+        "origin": "userInput",
+        "executionKind": "controlOnly",
+        "sourceCommandId": "cmd_u4",
+        "state": "completedSuccess",
+        "startedAt": 1120,
+        "endedAt": 1120,
+        "historyRoundCount": 0
+      },
+      {
+        "rowId": 13,
+        "turnId": "u4",
+        "entityId": "u4",
+        "productTurnId": "u4",
+        "visibility": "visible",
+        "createdAt": 1120,
+        "createdAtSeq": 25,
+        "kind": "userInput",
+        "text": "/goal ship",
+        "origin": "realUser",
+        "sourceCommandId": "cmd_u4",
+        "rootSourceCommandId": "cmd_u4",
+        "actions": {
+          "canEdit": true,
+          "editDisposition": "rewind"
+        }
+      },
+      {
+        "rowId": 14,
+        "turnId": "u4",
+        "entityId": "target_3_1",
+        "productTurnId": "u4",
+        "visibility": "visible",
+        "createdAt": 1038,
+        "createdAtSeq": 28,
+        "kind": "timelineMarker",
+        "lane": "turnTailBoundary",
+        "marker": {
+          "type": "goalVerify",
+          "iteration": 1,
+          "outcome": "failed"
+        }
+      }
+    ],
+    "state": {
+      "control": {
+        "phase": "error",
+        "sessionEnded": false,
+        "canStop": false,
+        "stopState": "idle",
+        "stopTargetKind": "unknown",
+        "activeWorks": [],
+        "lastError": null,
+        "apiRetry": null
+      },
+      "availability": {
+        "fork": {
+          "allowed": true
+        },
+        "compact": {
+          "allowed": true
+        },
+        "switchModelConfig": {
+          "allowed": true
+        },
+        "setFollowupMode": {
+          "allowed": true
+        },
+        "queueEdit": {
+          "allowed": true
+        },
+        "sendQueuedNow": {
+          "allowed": false,
+          "reasonCode": "sendQueuedNowRequiresRunning"
+        },
+        "pauseGoal": {
+          "allowed": false,
+          "reasonCode": "noGoalToPause"
+        },
+        "resumeGoal": {
+          "allowed": false,
+          "reasonCode": "noGoalToResume"
+        }
+      },
+      "inputRouting": {
+        "mode": "startNow"
+      },
+      "meta": {
+        "title": "",
+        "titleSource": "default"
+      },
+      "config": {
+        "provider": "p",
+        "model": "m",
+        "thought": "high",
+        "thoughtLevels": [],
+        "followupMode": "queue",
+        "mode": "build",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        }
+      },
+      "modelTransition": null,
+      "usage": {
+        "contextWindow": null,
+        "cumulative": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        }
+      },
+      "queue": {
+        "items": [],
+        "autoDrain": true
+      },
+      "pendingInteractions": [],
+      "pendingCommands": [],
+      "backgroundWorks": [],
+      "subagents": {
+        "revision": 0,
+        "childSessionIds": [],
+        "running": [],
+        "endedTotal": 0
+      },
+      "goal": null,
+      "plan": null,
+      "workspaceHookAdmission": null
+    }
   }
 }

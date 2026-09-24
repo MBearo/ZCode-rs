@@ -22,6 +22,7 @@ import { workspaceHookFixtures } from "./zcode-cli-rust-workspace-hook-fixtures.
 import { pluginOfficialData } from "./zcode-cli-rust-plugin-fixtures.mjs";
 import { nodeDbFixtures, syncNodeMigrations } from "./zcode-cli-rust-node-db-fixtures.mjs";
 import { nodeColdFixtures, systemReminderData } from "./zcode-cli-rust-node-cold-fixtures.mjs";
+import { coldProjectionSchemas } from "./zcode-cli-rust-node-projection-schemas.mjs";
 import {
   bashAnalysisFixtures,
   bashAnalysisFuzzFixtures,
@@ -247,3 +248,7 @@ await emit(
   systemReminderData(),
 );
 await emit("../apps/zcode-cli-rust/crates/state/fixtures/node-cold.json", await nodeColdFixtures());
+await emit(
+  "../apps/zcode-cli-rust/crates/domain/schema/node-projection.json",
+  coldProjectionSchemas(),
+);

@@ -68,3 +68,18 @@ fn validates_zod_subset_semantics() {
         assert!(node.validate(&bad, "").is_err(), "{bad}");
     }
 }
+
+#[test]
+fn strip_orders_keys_like_zod_and_fills_defaults() {
+    let node = Node::compile(&json!({
+        "type":"object",
+        "properties":{"a":{"type":"number"},"list":{"default":[],"type":"array"},"b":{"type":"number"}},
+        "additionalProperties":{}
+    }))
+    .unwrap();
+    let out = node.strip(&json!({"extra":1,"b":2,"a":1}));
+    assert_eq!(
+        serde_json::to_string(&out).unwrap(),
+        r#"{"a":1,"list":[],"b":2,"extra":1}"#
+    );
+}

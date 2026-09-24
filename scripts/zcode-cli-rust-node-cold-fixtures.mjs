@@ -3,6 +3,8 @@
 // them after a restart (the provider history entries of
 // `hydrateMessageHistoryFromSession`); the Rust cold load must match.
 // Spec rust-m11-node-storage §6.
+import crypto from "node:crypto";
+import { syncBuiltinESMExports } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { runSqliteSessionMigrations } from "../apps/zcode-cli/packages/adapters/src/storage/session-store/migration-runner.ts";
 import * as sessions from "../apps/zcode-cli/packages/adapters/src/storage/session-store/repositories/sessions.ts";
@@ -15,9 +17,24 @@ import {
   isMidConversationSystemSource,
   wrapSystemReminderForSource,
 } from "../apps/zcode-cli/packages/core/src/system-reminder/source.ts";
+import { selectActiveConversationBranch } from "../apps/zcode-cli/packages/contracts/src/rewind/index.ts";
+import { ProductProjection } from "../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts";
+import { mergeColdConversationEvents } from "../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/cold-event-merge.ts";
+import * as entries from "../apps/zcode-cli/packages/adapters/src/storage/session-store/repositories/session-entries.ts";
+import * as targets from "../apps/zcode-cli/packages/adapters/src/storage/session-target.ts";
+import { goalVerificationEntriesFromSessionEntries } from "../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/transcript-hydration.ts";
 import { transcript } from "./zcode-cli-rust-node-cold-scenarios.mjs";
+import { FAILURE_GOAL_ENTRIES, failures, rich } from "./zcode-cli-rust-node-cold-rich.mjs";
 
-const TABLES = ["session", "message", "part"];
+const TABLES = ["session", "message", "part", "session_entry", "session_target"];
+const EPHEMERAL_SNAPSHOT_KEYS = new Set([
+  "protocolVersion",
+  "sessionId",
+  "logEpoch",
+  "seq",
+  "revision",
+  "rows",
+]);
 const SUMMARY =
   "This session is being continued from a previous conversation.\n\nSummary: fixed the parser.";
 
@@ -129,6 +146,8 @@ function compacted(t) {
         status: "completed",
         operationId: "cmp_1",
         trigger: "auto",
+        preCompactTokenCount: 900,
+        postCompactTokenCount: 120,
         type: "timeline",
       },
       {
@@ -207,12 +226,25 @@ function rewound(t) {
   };
 }
 
-const SCENARIOS = { basic, compacted, rewound };
+const SCENARIOS = {
+  basic,
+  compacted,
+  rewound: (t) => ({ revert: rewound(t) }),
+  rich: (t) => {
+    rich(t);
+    return { target: { objective: "Ship it", tokenBudget: 1000 } };
+  },
+  failures: (t) => {
+    failures(t);
+    return { goalEntries: FAILURE_GOAL_ENTRIES };
+  },
+};
 
 async function scenario(name, build) {
   const sessionID = `sess_${name}`;
   const t = transcript(sessionID);
-  const revert = build(t);
+  const extra = build(t) ?? {};
+  const revert = extra.revert;
   const db = new DatabaseSync(":memory:");
   runSqliteSessionMigrations(db, ":memory:");
   sessions.createSession(db, {
@@ -232,6 +264,20 @@ async function scenario(name, build) {
     for (const part of message.parts) await messages.savePart(db, part);
   }
   if (revert) await sessions.setRevert(db, { sessionID, revert });
+  for (const [index, entry] of (extra.goalEntries ?? []).entries()) {
+    entries.saveSessionEntry(db, {
+      id: `verify-entry-${index}`,
+      sessionID,
+      type: "target_completion_verification",
+      time: { created: entry.time.created, updated: entry.time.created },
+      data: entry.data,
+    });
+  }
+  if (extra.target) {
+    targets.setSessionTarget(db, { sessionID, status: "active", ...extra.target });
+  }
+  const storedEntries = entries.sessionEntries(db, { sessionID });
+  const target = targets.readSessionTarget(db, { sessionID });
   const stored = await messages.messages(db, { sessionID });
   const history = createMessageHistory();
   await hydrateMessageHistoryFromSession({
@@ -242,6 +288,25 @@ async function scenario(name, build) {
     rewindKeptMessageIds: revert?.keptMessageIDs,
     rewindTargetMessageId: revert?.targetMessageID,
   });
+  // Node 冷订阅：活动分支 → 三源合并（无内存事件）→ ProductProjection 批量回放。
+  const branch = selectActiveConversationBranch(stored, {
+    branchCutAfterMessageId: revert?.branchCutAfterMessageID,
+    rewindCreatedMessageId: revert?.createdMessageID,
+    rewindKeptMessageIds: revert?.keptMessageIDs,
+    rewindTargetMessageId: revert?.targetMessageID,
+  });
+  const merged = mergeColdConversationEvents({
+    memoryEvents: [],
+    messages: branch,
+    sessionId: sessionID,
+    goalVerificationEntries: goalVerificationEntriesFromSessionEntries(storedEntries),
+    target,
+  });
+  const projection = new ProductProjection(sessionID, "epoch");
+  projection.beginHydrationReplay();
+  for (const event of merged.events) projection.applyHydrationEvent(event);
+  projection.completeHydrationReplay();
+  const snapshot = projection.getSnapshot();
   const tables = Object.fromEntries(
     TABLES.map((table) => [
       table,
@@ -251,19 +316,40 @@ async function scenario(name, build) {
         .map((row) => Object.values(row)),
     ]),
   );
-  return { sessionID, tables, history: history.toRuntimeEntries() };
+  return {
+    sessionID,
+    tables,
+    history: history.toRuntimeEntries(),
+    events: merged.events.map((event) => ({
+      seq: event.sequenceNumber,
+      at: event.timestamp.getTime(),
+      type: event.type,
+      turnId: event.turnId ?? null,
+      payload: event.payload,
+    })),
+    rows: snapshot.rows.window,
+    // revision/seq 属于发布层计数，Rust 会话自行维护；其余快照状态逐项比对。
+    state: Object.fromEntries(
+      Object.entries(snapshot).filter(([key]) => !EPHEMERAL_SNAPSHOT_KEYS.has(key)),
+    ),
+  };
 }
 
 export async function nodeColdFixtures() {
   // 仓储层在写入时读取 Date.now()；固定时钟让夹具可重复生成。
   const realNow = Date.now;
+  const realUuid = crypto.randomUUID;
   Date.now = () => 9_000;
+  crypto.randomUUID = () => "00000000-0000-4000-8000-000000000001";
+  syncBuiltinESMExports();
   try {
     const out = {};
     for (const [name, build] of Object.entries(SCENARIOS)) out[name] = await scenario(name, build);
     return out;
   } finally {
     Date.now = realNow;
+    crypto.randomUUID = realUuid;
+    syncBuiltinESMExports();
   }
 }
 

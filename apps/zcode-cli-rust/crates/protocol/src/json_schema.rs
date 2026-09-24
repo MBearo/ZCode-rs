@@ -43,6 +43,7 @@ pub struct Node {
     max_items: Option<usize>,
     any_of: Vec<Node>,
     one_of: Vec<Node>,
+    default: Option<Value>,
 }
 
 const SUPPORTED: &[&str] = &[
@@ -66,6 +67,7 @@ const SUPPORTED: &[&str] = &[
     "maxItems",
     "anyOf",
     "oneOf",
+    "default",
 ];
 
 fn ty(name: &str) -> Result<Ty, String> {
@@ -177,6 +179,7 @@ impl Node {
             max_items: size(schema, "maxItems")?,
             any_of: variants(schema, "anyOf")?,
             one_of: variants(schema, "oneOf")?,
+            default: schema.get("default").cloned(),
         })
     }
 
@@ -289,6 +292,8 @@ impl Node {
     /// zod parse output for a value that already validated: explicit object schemas drop
     /// unknown keys (zod "strip"), passthrough objects (`additionalProperties: {}`) and
     /// untyped schemas keep them, and unions project through the first matching variant.
+    /// Like zod, declared keys come first in schema order (absent ones take their
+    /// `default`), then the kept unknown keys in input order.
     pub fn strip(&self, value: &Value) -> Value {
         if let Some(variant) = self
             .one_of
@@ -302,20 +307,30 @@ impl Node {
             Value::Object(map) => {
                 let explicit_object = self.types.as_ref().is_some_and(|t| t.contains(&Ty::Object));
                 let mut out = serde_json::Map::new();
-                for (key, item) in map {
-                    match self.properties.iter().find(|(name, _)| name == key) {
-                        Some((_, schema)) => {
+                for (key, schema) in &self.properties {
+                    match map.get(key) {
+                        Some(item) => {
                             out.insert(key.clone(), schema.strip(item));
                         }
-                        None => match &self.additional {
-                            Additional::Schema(schema) => {
-                                out.insert(key.clone(), schema.strip(item));
+                        None => {
+                            if let Some(default) = &schema.default {
+                                out.insert(key.clone(), default.clone());
                             }
-                            Additional::Allow if !explicit_object => {
-                                out.insert(key.clone(), item.clone());
-                            }
-                            Additional::Allow | Additional::Deny => {}
-                        },
+                        }
+                    }
+                }
+                for (key, item) in map {
+                    if self.properties.iter().any(|(name, _)| name == key) {
+                        continue;
+                    }
+                    match &self.additional {
+                        Additional::Schema(schema) => {
+                            out.insert(key.clone(), schema.strip(item));
+                        }
+                        Additional::Allow if !explicit_object => {
+                            out.insert(key.clone(), item.clone());
+                        }
+                        Additional::Allow | Additional::Deny => {}
                     }
                 }
                 Value::Object(out)

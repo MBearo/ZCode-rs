@@ -29,6 +29,7 @@ pub mod model;
 pub mod model_anomaly;
 pub mod node_history;
 pub mod node_ids;
+pub mod node_rows;
 pub mod option_map;
 pub mod permission;
 pub mod persisted_output;

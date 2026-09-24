@@ -22,6 +22,26 @@ pub struct Target {
     pub time_updated: i64,
 }
 
+impl Target {
+    /// The Node `SessionGoal` object (`decodeTargetRow`).
+    pub fn to_node(&self) -> serde_json::Value {
+        serde_json::json!({
+            "sessionID": self.session_id,
+            "targetID": self.target_id,
+            "objective": self.objective,
+            "summaryTitle": self.summary_title,
+            "status": self.status,
+            "tokenBudget": self.token_budget,
+            "tokensUsed": self.tokens_used,
+            "timeUsedSeconds": self.time_used_seconds,
+            "activeInputId": self.active_input_id,
+            "activeRunStartedAtMs": self.active_run_started_at,
+            "activeRunLastSeenAtMs": self.active_run_last_seen_at,
+            "time": {"created": self.time_created, "updated": self.time_updated},
+        })
+    }
+}
+
 fn decode(row: &Row) -> rusqlite::Result<Target> {
     Ok(Target {
         session_id: row.get("session_id")?,

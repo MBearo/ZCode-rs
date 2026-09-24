@@ -163,16 +163,26 @@ flowchart TD
   S[session 行] --> B{已归档?}
   B -- 是 --> NF[SessionNotFound]
   B -- 否 --> M[message/part<br/>按 sequence 排序]
-  M --> AB[活动分支：revert 切点，再取最后一个压缩边界]
+  M --> BR[活动分支：revert 切点]
+  BR --> AB[再取最后一个压缩边界]
   AB --> H[history hydrator：模型上下文]
-  AB --> P[冷投影：turnHeader/userInput/assistantText/reasoning/toolCall/subagent/timelineMarker]
-  E[session_entry] --> ST[模式、模型选择、shell、checkpoint、全权限、goal 验证]
+  BR --> SY[合成事件：synthesizeEventsFromMessages]
+  E[session_entry] --> GE[goal 验证事实]
+  GE --> SY
+  TG[session_target] --> MG[冷合并：session_created 之后插入 target_changed，重排 seq]
+  SY --> MG
+  MG --> P[ProductProjection 批量回放：rows 与快照状态]
+  E --> ST[模式、模型选择、shell、checkpoint、全权限]
   T[todo / session_target] --> ST
   I[session_input admitted] --> D[改为 discarded/session_resumed（写库）]
   CP[started/retrying 的压缩 part] --> CR[改为 completed/interrupted（写库）]
 ```
 
 - 行投影按 Node `synthesizeEventsFromMessages` 的规则：turn 以真实用户输入（`guide` 引导消息除外）、workflow 启动、模型专用触发消息为边界；可见性按 `getConversationMessageProjectionPolicy`；`pending`/`running` 工具与无 `completed` 的 assistant 投影为中断。
+- 行投影只裁掉 rewind 分支（`selectActiveConversationBranch`），不按压缩边界截断：压缩前的历史仍在时间线上，只有模型上下文从最后一个边界开始。
+- 冷投影在 `zcode_cli_domain::node_rows`：合成事件（Node 的事件类型、`hydrate-N` id、`seq`、展示时间戳与 payload）→ 冷合并（重启后没有内存事件，只插入持久 goal）→ 投影回放。投影只实现合成事件会触达的处理器，delta 语义与 Node 相同：处理器读取事件前的快照，delta 按序应用，回放结束后物化命令行动作。
+- 元数据解析使用 Node 的严格 schema（`crates/domain/schema/node-projection.json`，由 TS 的 zod schema 生成）：`conversationInputIntent`、`errorAttribution`、`workflowLaunch`/`workflowNotification`、已完成工具 part 的 `display`。解析输出同 zod：未知键按 strip/strict/passthrough 处理，缺省值补齐，声明键按 schema 顺序。
+- V4 行与状态是解析后使用的 JSON，成员顺序不属于兼容契约；夹具按值比对（数组有序、对象成员无序）。持久化记录的字节兼容由 M11.1 保证。
 - 模型上下文按 Node `hydrateMessageHistoryFromSession`：`pending`/`running` 工具结果为 `[Tool execution was interrupted before resume]`；工具 part 每个 `callID` 取最后一条，全部带 `declarationIndex` 时按其排序；assistant 无正文、无推理、无工具且无有效用量时跳过。
 - 会话列表（sessions-index 与 `session/list`）直接查询 `session` 表：task_type 为 `interactive`、`fork`、`workflow_parent`，未归档，按 `time_updated desc, id desc`，上限 200。本地工作区要求 `workspace_id IS NULL` 且 `directory` 精确相等，远程按 identity。冷会话摘要的阶段为 `completedSuccess`，`sessionEnded = true`。
 
@@ -210,7 +220,7 @@ createSession 的全局查找按 `queue_<commandId>` 读取输入行（Node `loo
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | M11.1  | 存储基础（不接入运行时）：打开与迁移、JS 兼容 JSON、`serde_json` 保留插入顺序、Node id 格式、仓储层（会话、消息、part、entry、输入账本、todo、target、设置、输入历史）全部使用 Node SQL 原文                   | 迁移 SQL 由生成脚本从 Node 源码同步并校验字节一致；`scripts/zcode-cli-rust-node-db-fixtures.mjs` 用 Node 仓储按固定时钟与 uuid 执行一组操作，Rust 回放同一组操作后各表逐字节一致、解码结果一致；迁移账本、未知迁移、校验和不一致、锁等待测试 |
 | M11.2a | 冷读取模型上下文：活动分支（`session.revert` 分支切点、压缩边界与保留段）、Node history hydrator 的全部规则（提醒来源、附件提醒、工具顺序与中断结果、空 assistant、共享上下文）、Rust canonical 消息与压缩摘要 | `scripts/zcode-cli-rust-node-cold-fixtures.mjs` 用 Node 仓储写入多组 transcript，并记录 Node `hydrateMessageHistoryFromSession` 的结果；Rust 读同一份库后条目逐一相等                                                                        |
-| M11.2b | 冷读取界面行：Node `synthesizeEventsFromMessages` 与 `ProductProjection` 冷路径用到的事件处理                                                                                                                  | 同一夹具记录 Node 回放流水线（`replay.ts`）产出的行，Rust 冷投影逐行比对                                                                                                                                                                     |
+| M11.2b | 冷读取界面行：Node `synthesizeEventsFromMessages` 与 `ProductProjection` 冷路径用到的事件处理                                                                                                                  | 同一夹具记录 Node 回放流水线（`replay.ts`）产出的合成事件、行与快照状态（除 `seq`/`revision` 等发布计数），Rust 逐项比对                                                                                                                     |
 | M11.2c | 冷读取会话状态与列表：会话行、模型选择、执行状态、todo、goal、编辑/fork 边界；sessions-index 与 `session/list`                                                                                                 | Node 写入的会话在 Rust 中完整恢复                                                                                                                                                                                                            |
 | M11.3  | 写入核心对话：会话创建、输入账本、user 消息、assistant 步骤、工具、取消、标题、模型与执行状态、todo、用量、设置、命令幂等                                                                                      | Node 读取 Rust 写入的会话：Node 仓储解码、Node 冷投影与 history hydrator 无错误且内容一致                                                                                                                                                    |
 | M11.4  | 写入扩展：压缩、回退/编辑/重试（`session.revert`）、fork 与侧聊、goal、子代理、checkpoint 与文件回退、共享上下文、全权限授权、提问自动结算、后台通知、附件与产物                                               | 各功能的 Node 读取验证                                                                                                                                                                                                                       |
