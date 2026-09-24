@@ -14,6 +14,17 @@ import {
   truncateContentForModel,
 } from "../apps/zcode-cli/packages/core/src/tool/handlers/webfetch-content.ts";
 import { processFetchedContent } from "../apps/zcode-cli/packages/core/src/tool/handlers/webfetch-processing.ts";
+import { webFetchToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/webfetch.ts";
+import { webSearchToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/websearch.ts";
+import {
+  buildWebSearchOutput,
+  formatWebSearchModelContent,
+} from "../apps/zcode-cli/packages/core/src/tool/handlers/websearch-results.ts";
+import { prepareInitialToolExecutionInput } from "../apps/zcode-cli/packages/core/src/tool/input-normalization.ts";
+import {
+  getInitialInputValidationModelContent,
+  validateInitialModelToolInput,
+} from "../apps/zcode-cli/packages/core/src/tool/executor/validation.ts";
 
 function failure(error) {
   return { code: error.context?.webFetchCode ?? null, message: error.message };
@@ -206,6 +217,65 @@ async function prompts() {
   return out;
 }
 
+const VALIDATION = [
+  ["WebSearch", {}],
+  ["WebSearch", { query: "a" }],
+  ["WebSearch", { query: 1 }],
+  ["WebSearch", { query: "rust", maxUses: 3 }],
+  ["WebSearch", { query: "rust", extra: 1, other: 2 }],
+  ["WebSearch", { query: "rust", allowed_domains: "x" }],
+  ["WebSearch", { query: "rust", allowed_domains: [1] }],
+  ["WebSearch", { query: "rust", allowed_domains: ["a"], blocked_domains: ["b"] }],
+  ["WebSearch", { query: "rust" }],
+  ["WebSearch", { query: "r", extra: 1 }],
+  ["WebSearch", { query: null }],
+  ["WebFetch", {}],
+  ["WebFetch", { url: 1 }],
+  ["WebFetch", { url: "https://x.test/" }],
+  ["WebFetch", { url: "https://x.test/", prompt: "p", extra: 1 }],
+  ["WebFetch", { url: "not a url", prompt: "p" }],
+  ["WebFetch", { url: 1, prompt: ["p"] }],
+];
+
+function validation() {
+  const entries = { WebSearch: webSearchToolEntry, WebFetch: webFetchToolEntry };
+  return VALIDATION.map(([tool, input]) => {
+    const entry = entries[tool];
+    const prepared = prepareInitialToolExecutionInput({ entry, input });
+    const error = validateInitialModelToolInput(
+      prepared.input,
+      entry,
+      prepared.runtimeValidationIssues,
+    );
+    return {
+      tool,
+      input,
+      content: error ? (getInitialInputValidationModelContent(error) ?? error.message) : null,
+    };
+  });
+}
+
+const SEARCHES = [
+  "Answer with [Tokio](https://tokio.rs) and ![img](https://img.example/x.png) and [Docs](https://docs.rs/tokio).",
+  "  ",
+  "No links here.",
+  "[A](https://A.test/x) [a again](https://a.test/X) [ ](https://blank.test) [bad](ftp://x) [spaced](https://s.test/a b)",
+  Array.from({ length: 25 }, (_, i) => `[L${i}](https://l${i}.test)`).join(" "),
+  `${"x".repeat(12_000)} [end](https://end.test)`,
+];
+
+function searches() {
+  return SEARCHES.map((text) => {
+    const output = buildWebSearchOutput(
+      { query: "rust async" },
+      { text, usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 } },
+      Date.now(),
+    );
+    const { durationMs: _duration, ...stable } = output;
+    return { text, output: stable, content: formatWebSearchModelContent(output) };
+  });
+}
+
 /** Node `http.STATUS_CODES`: WebFetch's reason phrase fallback. */
 export function httpStatusCodes() {
   return STATUS_CODES;
@@ -255,5 +325,8 @@ export async function webFixtures() {
       return { length, truncated, resultLength: content.length, tail: content.slice(-60) };
     }),
     prompts: await prompts(),
+    validation: validation(),
+    searches: searches(),
+    searchDescription: webSearchToolEntry.metadata.description,
   };
 }

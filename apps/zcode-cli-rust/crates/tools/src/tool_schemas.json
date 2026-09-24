@@ -439,5 +439,32 @@
     "required": ["url", "prompt"],
     "additionalProperties": false,
     "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "WebSearch": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 2,
+        "description": "The search query to use"
+      },
+      "allowed_domains": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Only include search results from these domains"
+      },
+      "blocked_domains": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Never include search results from these domains"
+      }
+    },
+    "required": ["query"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
   }
 }

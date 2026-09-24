@@ -151,3 +151,40 @@ sequenceDiagram
 
 - 夹具（`scripts/zcode-cli-rust-web-fixtures.mjs` → `fixtures/web.json`）：URL 规范化、重定向判定与脱敏、出网检查、内容抽取（含实体、BOM、非法 UTF-8、MIME）、截断、处理提示与直接返回。
 - 集成测试（`zcode-cli-rust-webfetch.test.ts`）：TLS 站点经 CONNECT 代理（通过 `ZCODE_TOOL_ENV_PASSTHROUGH_JSON` 的 `https_proxy` 注入，CA 由 `ZCODE_AGENT_CA_CERT` 提供）；http 升级、处理提示、缓存命中不出网、同主机与跨主机重定向、404 与 `Retry-After`、不支持的内容类型、字面 IP、`Invalid URL`、zod url 与 InputValidationError 文本。
+
+## 4. WebSearch（M5.4b）
+
+依据：WW §1.2、§3；Node `core/src/tool/handlers/websearch*.ts`、`adapters/src/model/tool-transform.ts`、`anthropic-stream-compat.ts`。
+
+### 4.1 暴露与所有者
+
+- 只有模型属性 `supportsNativeWebSearch` 为真时提供给模型（静态配置 `supportsNativeWebSearch`，或 Registry 的 `properties.supportsNativeWebSearch`）；未提供时模型若仍调用，结果为 `Current model does not support native WebSearch`。
+- 描述由生成的模板在每次构建工具定义时填入本地时间的当前月份（英文月份名与年份）。
+- 执行在 `core::web_tools`：用本轮模型的辅助版本（最低推理档位、输出上限 4096）发起一次内部请求，归属 `other`，`querySource: "web_search_tool"`，与 WebFetch 共用 `context::hidden_request`（重试、鉴权与网络状态转给本轮）。
+
+### 4.2 内部请求与模型层
+
+- 消息：system `You are an assistant for performing a web search tool use.`，user `Perform a web search for the query: <query>`。
+- 工具：provider 原生工具 `{"type":"web_search_20260209","name":"web_search","max_uses":8,"allowed_domains"?,"blocked_domains"?}`，空的域名列表省略；两个列表同时给出时都发送（Node 行为）。
+- 模型层：非 `function` 的工具原样编码进 Anthropic 请求，并加 `anthropic-beta: code-execution-web-tools-2026-02-09`（已有 beta 时逗号追加）；Chat / Responses 协议遇到原生工具时失败，文本为 `Provider API kind openai-compatible|openai does not encode provider-native WebSearch`。
+- Anthropic 流在请求带原生工具时接受并跳过 `server_tool_use`、`web_search_tool_result`、`web_fetch_tool_result`、各类 `*_code_execution_tool_result`、BigModel 的裸 `tool_result` 块及其增量、`citations_delta`；`pause_turn` / `refusal` 按正常结束收取文本。普通请求的严格校验不变。
+
+### 4.3 结果
+
+- 来源只取回答文本中的 markdown 链接（http/https，跳过 `![…](…)` 图片，URL 大小写不敏感去重）；`results` 恒为空（Node 流式路径丢弃搜索结果与引用事件）；不读取 `server_tool_use` 用量。
+- 模型可见文本（Node `formatWebSearchModelContent`）：`Web search results for query: "<query>"`、可选的 `Summary:` 段、`Links:`（至多 20 条，无链接时 `- No links found.`）与 REMINDER 行；超过 10 000 字节时按结果预算截断并追加 `[Tool output truncated by resultBudget: originalBytes=<n>, maxModelBytes=10000, strategy=truncate]`。
+- 结构化数据：`query, results, sources, summary?, durationMs, modelUsage?`。
+- 输入校验与 Node 相同（`domain::tool_input`，与 WebFetch 共用）：`query` 至少 2 个字符、两个域名列表为字符串数组、不接受其他参数（包括 `maxUses`）；参数问题（缺失、多余、类型）成句，其余为 zod issue JSON。
+- 限时 60 秒；取消为 `WebSearch was cancelled`。
+
+### 4.4 与 Node 的差异
+
+1. 内部请求的用量不计入会话用量（Node 以 `ModelComplete{stopReason:"tool_internal"}` 计入；属 M9 用量）。
+2. system 以字符串发送（AI SDK 为块数组）；不发送 `tool_choice: auto`（等价）。
+3. 描述中的月份按每次运行计算（Node 在工具缓存建立时计算一次）。
+4. 不按字母序排列 provider 可见的工具顺序。
+
+### 4.5 验收
+
+- 夹具：`buildWebSearchOutput` / `formatWebSearchModelContent`（链接、图片、去重、无链接、超过 20 条、长文本）与两个工具的 InputValidationError 文本（Node `prepareInitialToolExecutionInput` + `validateInitialModelToolInput`）。
+- 集成测试（`zcode-cli-rust-websearch.test.ts`）：Anthropic 协议 fixture；工具定义中的月份、内部请求的 beta 头与原生工具、`max_tokens ≤ 4096`、服务器工具块与引用增量被跳过、模型可见文本；不支持原生搜索的模型不提供 WebSearch，调用时返回不支持的文本。

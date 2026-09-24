@@ -34,6 +34,11 @@ pub(super) fn definitions() -> Vec<Value> {
     let descriptions: Value =
         serde_json::from_str(include_str!("web_descriptions.json")).expect("web tool descriptions");
     definitions.push(json!({"type":"function","function":{"name":"WebFetch","description":descriptions["WebFetch"],"parameters":schemas["WebFetch"]}}));
+    // Node 的描述 getter 每次按本地时间给出当前月份（英文月份名）。
+    let month = chrono::Local::now().format("%B %Y").to_string();
+    let template = descriptions["WebSearch"].as_str().unwrap_or_default();
+    let description = crate::domain::web::search::description(template, &month);
+    definitions.push(json!({"type":"function","function":{"name":"WebSearch","description":description,"parameters":schemas["WebSearch"]}}));
     definitions.extend(crate::domain::plan_mode::definitions());
     definitions
 }

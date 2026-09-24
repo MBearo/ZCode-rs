@@ -5,9 +5,24 @@ use super::{
 use crate::contract::{ModelFailure, ModelOutput};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+/// Blocks of provider-native tools (and BigModel's bare `tool_result`) that
+/// the stream carries when the request included one: accepted and skipped,
+/// as Node's SSE compat and stream normalization drop them.
+const SERVER_BLOCKS: [&str; 7] = [
+    "server_tool_use",
+    "web_search_tool_result",
+    "web_fetch_tool_result",
+    "code_execution_tool_result",
+    "bash_code_execution_tool_result",
+    "text_editor_code_execution_tool_result",
+    "tool_result",
+];
+
 #[derive(Default)]
 pub(super) struct Anthropic {
     pub inner: Assembly,
+    /// The request carried provider-native tools (WebSearch's internal call).
+    server_tools: bool,
     blocks: BTreeMap<u64, Block>,
     started: bool,
     stopped: bool,
@@ -20,6 +35,12 @@ struct Block {
     signature_delta: bool,
 }
 impl Anthropic {
+    pub fn new(server_tools: bool) -> Self {
+        Self {
+            server_tools,
+            ..Default::default()
+        }
+    }
     pub async fn consume(
         &mut self,
         data: &str,
@@ -77,6 +98,7 @@ impl Anthropic {
                         .await?
                     }
                     "redacted_thinking" => self.inner.count(required(&block["data"])?.len())?,
+                    kind if self.server_tools && SERVER_BLOCKS.contains(&kind) => {}
                     _ => return Err(ModelFailure::invalid()),
                 }
                 self.blocks.insert(
@@ -140,6 +162,11 @@ impl Anthropic {
                         block.signature_delta = true;
                         current.push_str(signature);
                     }
+                    // 原生工具块的增量与文本引用增量不进入模型输出。
+                    _ if self.server_tools
+                        && (SERVER_BLOCKS
+                            .contains(&block.value["type"].as_str().unwrap_or(""))
+                            || d["type"] == "citations_delta") => {}
                     _ => return Err(ModelFailure::invalid()),
                 }
             }
@@ -181,6 +208,8 @@ impl Anthropic {
                         "end_turn" | "stop_sequence" => "stop",
                         "tool_use" => "tool_calls",
                         "max_tokens" | "model_context_window_exceeded" => "length",
+                        // 原生搜索可暂停或拒答：按正常结束收取已有文本。
+                        "pause_turn" | "refusal" if self.server_tools => "stop",
                         _ => return Err(ModelFailure::invalid()),
                     };
                     let has_calls = self.blocks.values().any(|b| b.value["type"] == "tool_use");

@@ -7,6 +7,10 @@ use std::path::PathBuf;
 pub struct ModelConfig {
     #[serde(default)]
     pub format_properties: Option<serde_json::Value>,
+    /// Model property `supportsNativeWebSearch`: WebSearch is offered and its
+    /// internal request carries the provider's web search tool.
+    #[serde(default)]
+    pub supports_native_web_search: bool,
     #[serde(skip)]
     pub max_output_map: Option<String>,
     #[serde(skip)]

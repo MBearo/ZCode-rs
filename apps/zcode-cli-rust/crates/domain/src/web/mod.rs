@@ -3,6 +3,7 @@
 //! Spec rust-m5-tools §3.
 pub mod egress;
 pub mod html;
+pub mod search;
 pub mod text;
 pub mod url;
 
@@ -41,6 +42,24 @@ impl std::fmt::Display for WebError {
 }
 
 impl std::error::Error for WebError {}
+
+/// WebFetch's schema check (not strict: unknown keys are dropped first).
+pub fn fetch_validation(args: &serde_json::Value) -> Result<(), String> {
+    use crate::zod::{Schema, string};
+    let schema = Schema::Object(vec![("url", string(), false), ("prompt", string(), false)]);
+    let known: serde_json::Map<String, serde_json::Value> = args
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| matches!(k.as_str(), "url" | "prompt"))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let (_, issues) = schema.run(Some(&serde_json::Value::Object(known)));
+    if issues.is_empty() {
+        return Ok(());
+    }
+    Err(crate::tool_input::render("WebFetch", &issues))
+}
 
 #[cfg(test)]
 mod tests;

@@ -56,6 +56,15 @@ impl ModelFailure {
                 "invalid_model_request",
                 "Provider rejected the model request.",
             ),
+            // Node tool-transform：只有 Anthropic 协议能编码 provider 原生搜索。
+            "native_search_chat" => (
+                "invalid_model_request",
+                "Provider API kind openai-compatible does not encode provider-native WebSearch",
+            ),
+            "native_search_responses" => (
+                "invalid_model_request",
+                "Provider API kind openai does not encode provider-native WebSearch",
+            ),
             "invalid_response" => (
                 "invalid_model_response",
                 "Provider response was invalid or incomplete.",

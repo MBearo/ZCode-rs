@@ -44,6 +44,23 @@ fn preview_first_chars(content: &str, max: usize) -> (&str, bool) {
     (newline.map_or(head, |at| &head[..at]), true)
 }
 
+/// Node result budget `strategy: "truncate"`: the head of `text` and a note,
+/// together at most `max` bytes.
+pub fn truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let suffix = format!(
+        "\n\n[Tool output truncated by resultBudget: originalBytes={}, maxModelBytes={max}, strategy=truncate]",
+        text.len()
+    );
+    let mut end = max.saturating_sub(suffix.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{suffix}", &text[..end])
+}
+
 /// JS `(numerator / denominator).toFixed(1)` without a trailing `.0`, for
 /// non-negative integers (ties round up, like the exact JS algorithm).
 fn tenths(numerator: u64, denominator: u64) -> String {

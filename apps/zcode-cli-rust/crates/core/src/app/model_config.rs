@@ -30,6 +30,9 @@ impl ModelPort for LiveModel {
     fn context_policy(&self) -> crate::domain::context::ContextPolicy {
         self.bind().unwrap().context_policy()
     }
+    fn supports_native_web_search(&self) -> bool {
+        self.bind().is_some_and(|m| m.supports_native_web_search())
+    }
     fn auxiliary(&self) -> Option<Arc<dyn ModelPort>> {
         let mut selection = self.selection.borrow().clone();
         let lowest = self

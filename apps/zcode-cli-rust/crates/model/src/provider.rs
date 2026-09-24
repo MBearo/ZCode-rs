@@ -56,7 +56,7 @@ impl HttpModel {
     }
     async fn request(
         &self,
-        body: Bytes,
+        (body, server_tools): (Bytes, bool),
         attempt: &mut Attempt,
         output: &mut TextBuffer<'_>,
         auth: &Value,
@@ -72,7 +72,19 @@ impl HttpModel {
                 .api_key()
                 .map_err(|_| ModelFailure::new("auth_failed", false))?,
         };
-        let headers = self.headers(key.as_deref(), auth, &output.origin(), attempt)?;
+        let mut headers = self.headers(key.as_deref(), auth, &output.origin(), attempt)?;
+        if server_tools {
+            // AI SDK webSearch_20260209 的 beta；已有 beta 时逗号追加。
+            const BETA: &str = "code-execution-web-tools-2026-02-09";
+            let merged = match headers.get("anthropic-beta") {
+                Some(existing) if existing.split(',').any(|b| b.trim() == BETA) => {
+                    existing.to_owned()
+                }
+                Some(existing) => format!("{existing},{BETA}"),
+                None => BETA.to_owned(),
+            };
+            headers.set("anthropic-beta", merged);
+        }
         attempt.phase = "stream";
         output.status(reporter.started(attempt)).await?;
         let mut request = self.client().await?.post(&self.url).body(body);
@@ -114,7 +126,7 @@ impl HttpModel {
         let response_headers = network_status::response_headers(response.headers());
         let mut stream = response.bytes_stream();
         let mut decoder = SseDecoder::default();
-        let mut assembly = ProtocolStream::new(self.config.api_type);
+        let mut assembly = ProtocolStream::new(self.config.api_type, server_tools);
         let mut idle_at = after(idle_ms);
         loop {
             tokio::select! {biased;
@@ -158,6 +170,7 @@ impl HttpModel {
             ApiType::Anthropic => Some(self.anthropic_user(&sink.origin).await),
             _ => None,
         };
+        let server_tools = tools.iter().any(|t| t["type"] != "function");
         let body = model_protocol::body(&self.config, messages, tools, user.as_deref())?;
         // Bytes 克隆只增加引用计数；同一模型步骤的网络重试不再编码整段历史。
         let encoded = Bytes::from(
@@ -192,7 +205,13 @@ impl HttpModel {
             let result = match self.request_auth(sink).await {
                 Ok(auth) => {
                     let result = self
-                        .request(encoded.clone(), &mut attempt, &mut output, &auth, &reporter)
+                        .request(
+                            (encoded.clone(), server_tools),
+                            &mut attempt,
+                            &mut output,
+                            &auth,
+                            &reporter,
+                        )
                         .await;
                     *current.lock().unwrap() = Some(attempt.clone());
                     result
@@ -307,6 +326,9 @@ impl ModelPort for HttpModel {
     }
     fn auxiliary(&self) -> Option<Arc<dyn ModelPort>> {
         self.with_max_output_tokens(4096).ok().flatten()
+    }
+    fn supports_native_web_search(&self) -> bool {
+        self.config.supports_native_web_search
     }
     fn with_max_output_tokens(
         &self,

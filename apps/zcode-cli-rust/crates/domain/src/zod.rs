@@ -95,6 +95,36 @@ impl Issue {
         self
     }
 
+    pub fn code(&self) -> &str {
+        match self.field("code") {
+            Some(J::S(code)) => code,
+            _ => "",
+        }
+    }
+
+    /// A head field (`expected`, `keys`, …).
+    pub fn field(&self, key: &str) -> Option<&J> {
+        self.head.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Node tool-input path text: `a.b[0].c` (root is empty).
+    pub fn path_text(&self) -> String {
+        let mut text = String::new();
+        for segment in &self.path {
+            match segment {
+                J::N(n) => text.push_str(&format!("[{n}]")),
+                J::S(s) if text.is_empty() => text.push_str(s),
+                J::S(s) => text.push_str(&format!(".{s}")),
+                _ => {}
+            }
+        }
+        text
+    }
+
     pub fn json(&self) -> J {
         let mut fields = self.head.clone();
         let path = ("path", J::A(self.path.clone()));

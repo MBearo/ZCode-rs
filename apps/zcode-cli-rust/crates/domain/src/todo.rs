@@ -71,20 +71,7 @@ pub fn plan(todos: &[TodoItem], updated_at: u64) -> Value {
     }
 }
 pub fn model_content(value: &Value) -> String {
-    let mut text = value.to_string();
-    if text.len() > 100_000 {
-        let suffix = format!(
-            "\n\n[Tool output truncated by resultBudget: originalBytes={}, maxModelBytes=100000, strategy=truncate]",
-            text.len()
-        );
-        let mut end = 100_000 - suffix.len();
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        text.truncate(end);
-        text.push_str(&suffix);
-    }
-    text
+    crate::persisted_output::truncate(&value.to_string(), 100_000)
 }
 pub fn should_remind(messages: &[Value]) -> bool {
     let mut turns = 0;

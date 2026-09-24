@@ -116,3 +116,49 @@ fn prompts_and_texts_match_node() {
         "The server returned HTTP 503 Service Unavailable.\nRetry-After: 30\n\nThe response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. `gh` for GitHub, or an MCP-provided fetch tool) instead of WebFetch."
     );
 }
+
+#[test]
+fn input_validation_matches_node() {
+    for case in fixtures()["validation"].as_array().unwrap() {
+        let result = match case["tool"].as_str().unwrap() {
+            "WebSearch" => search::validate(&case["input"]).err(),
+            _ => fetch_validation(&case["input"]).err(),
+        };
+        assert_eq!(result.as_deref(), case["content"].as_str(), "{case}");
+    }
+}
+
+#[test]
+fn search_output_matches_node() {
+    for case in fixtures()["searches"].as_array().unwrap() {
+        let usage = serde_json::json!({"inputTokens": 5, "outputTokens": 2, "totalTokens": 7});
+        let mut output = search::output("rust async", case["text"].as_str().unwrap(), usage, 0);
+        assert_eq!(
+            search::model_content(&output),
+            case["content"],
+            "{}",
+            case["text"]
+        );
+        output.as_object_mut().unwrap().remove("durationMs");
+        assert_eq!(output, case["output"], "{}", case["text"]);
+    }
+    let template = fixtures()["searchDescription"]
+        .as_str()
+        .unwrap()
+        .replace("September 2026", "{currentMonth}");
+    assert_eq!(
+        search::description(&template, "September 2026"),
+        fixtures()["searchDescription"]
+    );
+    let tool = search::provider_tool(
+        &serde_json::json!({"query": "q", "allowed_domains": [], "blocked_domains": ["x.com"]}),
+    );
+    assert_eq!(
+        tool,
+        serde_json::json!({"type": "web_search_20260209", "name": "web_search", "max_uses": 8, "blocked_domains": ["x.com"]})
+    );
+    let long = "é".repeat(6_000);
+    let cut = crate::persisted_output::truncate(&long, search::MODEL_BYTES);
+    assert!(cut.len() <= search::MODEL_BYTES);
+    assert!(cut.ends_with("[Tool output truncated by resultBudget: originalBytes=12000, maxModelBytes=10000, strategy=truncate]"));
+}

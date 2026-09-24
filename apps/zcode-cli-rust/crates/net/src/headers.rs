@@ -29,6 +29,13 @@ impl Headers {
         self.0.iter().any(|(n, _)| n.eq_ignore_ascii_case(name))
     }
 
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+
     pub fn remove(&mut self, name: &str) {
         self.0.retain(|(n, _)| !n.eq_ignore_ascii_case(name));
     }

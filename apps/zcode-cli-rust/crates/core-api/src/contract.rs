@@ -180,6 +180,10 @@ pub trait ModelPort: Send + Sync {
     fn auxiliary(&self) -> Option<Arc<dyn ModelPort>> {
         None
     }
+    /// Model property `supportsNativeWebSearch` (WebSearch is offered).
+    fn supports_native_web_search(&self) -> bool {
+        false
+    }
     fn context_policy(&self) -> zcode_cli_domain::context::ContextPolicy {
         Default::default()
     }

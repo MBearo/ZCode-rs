@@ -41,6 +41,10 @@ pub(super) async fn run(
     if !skills.enabled {
         definitions.retain(|d| d["function"]["name"] != "Skill");
     }
+    // Node getTools(model)：只有声明 supportsNativeWebSearch 的模型提供 WebSearch。
+    if !model.supports_native_web_search() {
+        definitions.retain(|d| d["function"]["name"] != "WebSearch");
+    }
     let tool_filter = history.tool_filter.clone();
     definitions.retain(|d| tool_filter.allows(d["function"]["name"].as_str().unwrap_or("")));
     // 与 Node 一致：禁用集合只从提供给模型的定义中移除；执行边界不据此拦截（D1）。

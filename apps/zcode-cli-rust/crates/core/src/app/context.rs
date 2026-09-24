@@ -291,14 +291,14 @@ pub(super) async fn hidden_summary(
     sink: &EventSink,
     cancel: &CancellationToken,
 ) -> Result<ModelOutput> {
-    hidden_request(model, messages, sink, "compact", cancel).await
+    hidden_request(model, (messages, &[]), sink, "compact", cancel).await
 }
 
 /// A request of the run outside the agent step: retries, auth and network
 /// status go to the run, the output does not.
 pub(super) async fn hidden_request(
     model: &dyn ModelPort,
-    messages: Vec<Value>,
+    (messages, tools): (Vec<Value>, &[Value]),
     sink: &EventSink,
     query_source: &'static str,
     cancel: &CancellationToken,
@@ -312,7 +312,7 @@ pub(super) async fn hidden_request(
         origin: sink.origin.other(query_source),
         request_auth: sink.request_auth.clone(),
     };
-    let request = model.complete(messages, &[], &hidden, cancel);
+    let request = model.complete(messages, tools, &hidden, cancel);
     tokio::pin!(request);
     loop {
         tokio::select! {biased;

@@ -6,6 +6,7 @@ import { skillToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handler
 import { createAgentToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/agent.ts";
 import { sendMessageToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/send-message.ts";
 import { webFetchToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/webfetch.ts";
+import { webSearchToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/websearch.ts";
 import { normalizeAgentProfiles } from "../apps/zcode-cli/packages/core/src/subagent/profile.ts";
 import { buildExploreAgentPrompt } from "../apps/zcode-cli/packages/core/src/subagent/explore.ts";
 import { buildSubagentCommonNotes } from "../apps/zcode-cli/packages/core/src/subagent/system-prompt.ts";
@@ -31,6 +32,7 @@ const tools = [
   ["TaskStop", "task-stop", "TaskStopInputJsonSchema"],
   ["AskUserQuestion", "ask-user-question", "AskUserQuestionInputJsonSchema"],
   ["WebFetch", "webfetch", "WebFetchInputJsonSchema"],
+  ["WebSearch", "websearch", "WebSearchInputJsonSchema"],
 ];
 const schemas = {};
 for (const [name, file, key] of tools) {
@@ -78,7 +80,17 @@ for (const [file, data] of [
     },
   ],
   ["question_description.json", askUserQuestionToolEntry.metadata.description],
-  ["web_descriptions.json", { WebFetch: webFetchToolEntry.metadata.description }],
+  [
+    "web_descriptions.json",
+    {
+      WebFetch: webFetchToolEntry.metadata.description,
+      // 月份在每次构建工具定义时按本地时间填入（Node 描述 getter 每次重算）。
+      WebSearch: webSearchToolEntry.metadata.description.replace(
+        /The current month is .+? —/u,
+        "The current month is {currentMonth} —",
+      ),
+    },
+  ],
 ]) {
   const directory = file === "../domain/agent_profiles.json" ? "domain" : "tools";
   const name = file.replace("../domain/", "");

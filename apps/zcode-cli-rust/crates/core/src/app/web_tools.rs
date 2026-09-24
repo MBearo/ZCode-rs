@@ -10,42 +10,9 @@ use tokio_util::sync::CancellationToken;
 
 const INVALID_URL: &str = r#"[ { "validation": "url", "code": "invalid_string", "message": "Invalid url", "path": [ "url" ] } ]"#;
 
-/// zod's `received` word for a JSON value.
-fn received(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
-/// Node `InputValidationError` for WebFetch's string keys (unknown keys are
-/// dropped: the schema is not strict), then zod `.url()`.
+/// Schema check (Node InputValidationError), then zod `.url()` in the handler.
 fn input(args: &Value) -> Result<(&str, &str)> {
-    let mut missing = vec![];
-    let mut wrong = vec![];
-    for key in ["url", "prompt"] {
-        match args.get(key) {
-            None => missing.push(format!("The required parameter `{key}` is missing")),
-            Some(Value::String(_)) => {}
-            Some(other) => wrong.push(format!(
-                "The parameter `{key}` type is expected as `string` but provided as `{}`",
-                received(other)
-            )),
-        }
-    }
-    let lines: Vec<String> = missing.into_iter().chain(wrong).collect();
-    if !lines.is_empty() {
-        let noun = if lines.len() > 1 { "issues" } else { "issue" };
-        let body = lines.join("\n");
-        return Err(ToolError::Rendered(format!(
-            "<tool_use_error>InputValidationError: WebFetch failed due to the following {noun}:\n{body}</tool_use_error>"
-        ))
-        .into());
-    }
+    web::fetch_validation(args).map_err(ToolError::Rendered)?;
     let (url, prompt) = (
         args["url"].as_str().unwrap(),
         args["prompt"].as_str().unwrap(),
@@ -74,18 +41,23 @@ async fn process(
     let auxiliary = model.auxiliary();
     let model = auxiliary.as_deref().unwrap_or(model);
     let messages = vec![json!({"role": "user", "content": message})];
-    let output =
-        super::context::hidden_request(model, messages, sink, "web_fetch_processing", cancel)
-            .await
-            .map_err(|error| {
-                let message = error.to_string();
-                let message = if message.trim().is_empty() {
-                    web::text::PROCESSING_FAILED.to_owned()
-                } else {
-                    message
-                };
-                anyhow::Error::from(web::WebError::new("webfetch_processing_failed", message))
-            })?;
+    let output = super::context::hidden_request(
+        model,
+        (messages, &[]),
+        sink,
+        "web_fetch_processing",
+        cancel,
+    )
+    .await
+    .map_err(|error| {
+        let message = error.to_string();
+        let message = if message.trim().is_empty() {
+            web::text::PROCESSING_FAILED.to_owned()
+        } else {
+            message
+        };
+        anyhow::Error::from(web::WebError::new("webfetch_processing_failed", message))
+    })?;
     let text = js_string::trim(output.message["content"].as_str().unwrap_or(""));
     let result = if text.is_empty() {
         web::text::EMPTY_RESULT
@@ -173,5 +145,66 @@ pub(super) async fn web_fetch(
         _ = cancel.cancelled() => bail!(web::text::CANCELLED),
         _ = tokio::time::sleep(deadline) => bail!("Tool execution timed out after {}ms", web::TIMEOUT_MS),
         result = fetch(tools, model, input, sink, cancel) => result,
+    }
+}
+
+/// Node `ModelUsage` of an internal request (token counts only).
+fn model_usage(usage: &Value) -> Value {
+    let input = usage["prompt_tokens"].as_u64();
+    let output = usage["completion_tokens"].as_u64();
+    if input.is_none() && output.is_none() {
+        return Value::Null;
+    }
+    let (input, output) = (input.unwrap_or(0), output.unwrap_or(0));
+    json!({"inputTokens": input, "outputTokens": output, "totalTokens": input + output})
+}
+
+async fn search(
+    model: &dyn ModelPort,
+    args: &Value,
+    sink: &EventSink,
+    cancel: &CancellationToken,
+) -> Result<ToolOutput> {
+    let started = Instant::now();
+    let query = args["query"].as_str().unwrap_or_default();
+    let messages = vec![
+        json!({"role": "system", "content": web::search::SYSTEM}),
+        json!({"role": "user", "content": web::search::user_message(query)}),
+    ];
+    let tools = [web::search::provider_tool(args)];
+    let auxiliary = model.auxiliary();
+    let model = auxiliary.as_deref().unwrap_or(model);
+    let output =
+        super::context::hidden_request(model, (messages, &tools), sink, "web_search_tool", cancel)
+            .await?;
+    let text = output.message["content"].as_str().unwrap_or("");
+    let elapsed = started.elapsed().as_millis() as u64;
+    let data = web::search::output(query, text, model_usage(&output.usage), elapsed);
+    let content = crate::domain::persisted_output::truncate(
+        &web::search::model_content(&data),
+        web::search::MODEL_BYTES,
+    );
+    let mut result = ToolOutput::text(content);
+    result.data = data;
+    Ok(result)
+}
+
+/// Node `webSearchToolEntry`: a provider-native search through the run's
+/// model (lowest reasoning level), 60 s, fixed cancel text.
+pub(super) async fn web_search(
+    model: &dyn ModelPort,
+    args: &Value,
+    sink: &EventSink,
+    cancel: &CancellationToken,
+) -> Result<ToolOutput> {
+    web::search::validate(args).map_err(ToolError::Rendered)?;
+    if !model.supports_native_web_search() {
+        bail!(web::search::UNSUPPORTED);
+    }
+    let deadline = Duration::from_millis(web::TIMEOUT_MS);
+    tokio::select! {
+        _ = cancel.cancelled() => bail!(web::search::CANCELLED),
+        _ = tokio::time::sleep(deadline) => bail!("Tool execution timed out after {}ms", web::TIMEOUT_MS),
+        result = search(model, args, sink, cancel) => result,
     }
 }

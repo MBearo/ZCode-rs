@@ -43,6 +43,7 @@ pub mod skills;
 pub mod subagent;
 mod subagent_row;
 pub mod todo;
+pub mod tool_input;
 pub mod web;
 pub mod zod;
 

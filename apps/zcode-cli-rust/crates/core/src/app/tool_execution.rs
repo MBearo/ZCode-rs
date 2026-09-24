@@ -151,6 +151,9 @@ async fn execute(
             Some(args) if name == "WebFetch" => {
                 super::web_tools::web_fetch(tools, *model, &args, sink, cancel).await
             }
+            Some(args) if name == "WebSearch" => {
+                super::web_tools::web_search(*model, &args, sink, cancel).await
+            }
             Some(args) => tools.execute_scoped(name, &args, sink, cancel).await,
             None => Err(anyhow::anyhow!("Invalid tool JSON arguments")),
         }
