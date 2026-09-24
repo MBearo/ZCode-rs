@@ -3,15 +3,15 @@ use super::{
     tool_shell::ShellTasks,
 };
 use crate::contract::{EventSink, ToolOutput, ToolPort};
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+
+pub(super) use super::tool_args::{
+    boolean, check_cancel, keys, resolve, string, truncate_utf8, uint,
+};
 use zcode_cli_domain::hooks::HookEvent;
 
 pub struct WorkspaceTools {
@@ -198,6 +198,12 @@ impl ToolPort for WorkspaceTools {
     async fn plugin_hooks(&self, cancel: &CancellationToken) -> Result<Vec<(HookEvent, Value)>> {
         super::plugin_requests::hooks(self, cancel).await
     }
+    async fn plugin_catalog(&self, cancel: &CancellationToken) -> Result<Vec<Value>> {
+        super::plugin_requests::catalog(self, cancel).await
+    }
+    fn mcp_inventory(&self, session: &str) -> Vec<(String, Vec<String>)> {
+        self.mcp.inventory(session)
+    }
     async fn plugins(&self, method: &str, p: &Value, cancel: &CancellationToken) -> Result<Value> {
         super::plugin_requests::handle(self, method, p, cancel).await
     }
@@ -335,65 +341,5 @@ impl ToolPort for WorkspaceTools {
     async fn shutdown(&self) -> Result<()> {
         self.shell.shutdown().await?;
         self.mcp.shutdown().await
-    }
-}
-pub(super) fn string<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
-    args[key]
-        .as_str()
-        .with_context(|| format!("{key} must be a string"))
-}
-pub(super) fn uint(args: &Value, key: &str, default: u64) -> Result<u64> {
-    match args.get(key) {
-        None => Ok(default),
-        Some(v) => v
-            .as_u64()
-            .filter(|n| *n <= 9_007_199_254_740_991)
-            .with_context(|| format!("{key} must be a nonnegative integer")),
-    }
-}
-pub(super) fn boolean(args: &Value, key: &str, default: bool) -> Result<bool> {
-    match args.get(key) {
-        None => Ok(default),
-        Some(Value::Bool(v)) => Ok(*v),
-        Some(v) => match v.as_str().map(|s| s.trim().to_lowercase()).as_deref() {
-            Some("true" | "1" | "yes" | "y" | "on") => Ok(true),
-            Some("false" | "0" | "no" | "n" | "off") => Ok(false),
-            _ if v == 1 => Ok(true),
-            _ if v == 0 => Ok(false),
-            _ => bail!("{key} must be boolean"),
-        },
-    }
-}
-pub(super) fn keys(args: &Value, allowed: &[&str]) -> Result<()> {
-    let object = args.as_object().context("Tool arguments must be object")?;
-    if let Some(key) = object.keys().find(|k| !allowed.contains(&k.as_str())) {
-        bail!("Unsupported argument: {key}");
-    }
-    Ok(())
-}
-pub(super) fn resolve(cwd: &Path, input: &str) -> Result<PathBuf> {
-    if input.trim().is_empty() || input.contains('\0') {
-        bail!("Tool path must not be empty or contain NUL");
-    }
-    let p = Path::new(input);
-    Ok(if p.is_absolute() {
-        p.to_owned()
-    } else {
-        cwd.join(p)
-    })
-}
-pub(super) fn check_cancel(cancel: &CancellationToken) -> Result<()> {
-    if cancel.is_cancelled() {
-        bail!("Cancelled")
-    }
-    Ok(())
-}
-pub fn truncate_utf8(text: &mut String, limit: usize) {
-    if text.len() > limit {
-        let mut end = limit;
-        while !text.is_char_boundary(end) {
-            end -= 1
-        }
-        text.truncate(end);
     }
 }

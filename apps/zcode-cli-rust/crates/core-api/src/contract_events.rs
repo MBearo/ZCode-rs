@@ -56,6 +56,16 @@ pub enum Event {
         kind: zcode_cli_domain::session_runtime::ReminderKind,
         message: Value,
     },
+    /// The session's frozen plugin reference catalog (spec rust-m10-plugins §3.9).
+    PluginCatalog {
+        reply: oneshot::Sender<std::sync::Arc<[Value]>>,
+    },
+    /// A model-only user message (a `<system-reminder>`) the owner appends to
+    /// the canonical history and persists before `committed`.
+    ModelOnlyNotice {
+        message: Value,
+        committed: oneshot::Sender<()>,
+    },
     /// First step of a root session's run: its configured (user and plugin)
     /// hooks and its project hooks with their admission view.
     WorkspaceHooks {

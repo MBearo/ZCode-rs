@@ -24,6 +24,10 @@ pub struct Profile {
     pub background: bool,
     #[serde(default)]
     pub inject_agents_md: Option<bool>,
+    /// The Markdown file of a file-based profile (plugin provenance of
+    /// `@plugin` references; Node `profile.path`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 impl Profile {
     pub fn allows(&self, name: &str) -> bool {

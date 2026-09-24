@@ -14,6 +14,8 @@ pub(super) struct RunContext {
     pub prompt_snapshot: Option<crate::domain::prompt::PromptSnapshot>,
     /// Tools hidden from the provider for this turn (Node turn `toolDisallowlist`).
     pub tool_disallowlist: Vec<String>,
+    /// `@plugin` references of the turn's user input (spec rust-m10-plugins §3.9).
+    pub plugin_references: Vec<String>,
     /// Tools registered for the session (legacy `toolAllowlist` / `toolDenylist`).
     pub tool_filter: crate::domain::session_runtime::ToolFilter,
     /// Engine-published permission inputs; `None` in tests that bypass the engine.
@@ -68,6 +70,7 @@ impl RunContext {
             skills: None,
             prompt_snapshot: None,
             tool_disallowlist: vec![],
+            plugin_references: vec![],
             tool_filter: Default::default(),
             permissions: None,
             state,

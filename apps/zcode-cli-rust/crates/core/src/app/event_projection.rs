@@ -12,6 +12,9 @@ impl Engine {
         let Some(event) = self.hook_side(event).await? else {
             return Ok(());
         };
+        let Some(event) = self.plugin_side(event).await? else {
+            return Ok(());
+        };
         if let Event::Background { task, committed } = event.event {
             return self
                 .background_event(&event.session_id, &event.run_id, task, committed)
@@ -169,6 +172,8 @@ impl Engine {
             | Event::PromptInitialized { .. }
             | Event::AuxiliaryDone { .. }
             | Event::AuxiliaryReply { .. }
+            | Event::PluginCatalog { .. }
+            | Event::ModelOnlyNotice { .. }
             | Event::StreamRecovery { .. }
             | Event::UsageDone { .. }
             | Event::RequestAuth { .. }

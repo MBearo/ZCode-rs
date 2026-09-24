@@ -285,7 +285,7 @@ impl Engine {
         // 这些请求在后台完成，稍后以同一 token 回复；这里只回复启动失败。
         let deferred = match call.method {
             Method::McpList => Some(self.start_mcp_query(&call)),
-            method if method.is_plugin() => Some(self.start_plugin_request(&call)),
+            method if method.is_plugin() => Some(self.start_plugin_request(&call).await),
             Method::UsageStats
             | Method::LegacyUsageStats
             | Method::ConversationUsage

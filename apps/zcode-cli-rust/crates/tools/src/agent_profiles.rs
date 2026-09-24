@@ -124,7 +124,11 @@ async fn read(path: &Path, source: &str, cancel: &CancellationToken) -> Result<O
     let Ok(text) = String::from_utf8(bytes) else {
         return Ok(None);
     };
-    Ok(crate::domain::agent_profile::parse(&text, source))
+    let mut profile = crate::domain::agent_profile::parse(&text, source);
+    if let Some(profile) = &mut profile {
+        profile.path = Some(path.to_string_lossy().into_owned());
+    }
+    Ok(profile)
 }
 pub(super) async fn memory(
     cwd: &Path,

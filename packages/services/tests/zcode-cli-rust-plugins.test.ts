@@ -228,10 +228,11 @@ test("Rust plugins/list, overview and referenceCatalog project every plugin sour
     await assert.rejects(
       h.client.request(
         "plugins/referenceCatalog",
-        { ...workspace(h, f.cwd), sessionId: "s" },
+        { ...workspace(h, f.cwd), sessionId: "missing-session" },
         zcodePluginsReferenceCatalogResultSchema,
       ),
-      /Session plugin catalog unavailable/,
+      /Session unavailable/,
+      "an unknown session never falls back to the workspace catalog",
     );
     assert.deepEqual(h.schemaErrors, []);
   } finally {
@@ -268,3 +269,58 @@ test(
     }
   },
 );
+
+test("Rust freezes the session plugin catalog and commits @plugin reference reminders like Node", async () => {
+  const f = await fixture();
+  try {
+    const { plugin } = await demoPlugin(f.root);
+    await put(join(f.cwd, ".zcode/config.json"), { plugins: { dirs: [plugin] } });
+    const h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    const catalog = (sessionId?: string) =>
+      h.client.request(
+        "plugins/referenceCatalog",
+        { ...workspace(h, f.cwd), ...(sessionId ? { sessionId } : {}) },
+        zcodePluginsReferenceCatalogResultSchema,
+      );
+    const frozen = await catalog(id);
+    assert.equal(frozen.authority, "session");
+    assert.deepEqual(
+      frozen.plugins.map((p) => p.pluginId),
+      ["demo@inline"],
+    );
+    const text = "Use [Demo](plugin://demo@inline) and [ghost](plugin://ghost@m) please";
+    const after = h.messages.length;
+    await h.command(h.envelope("sendText", id, { text }));
+    await h.completed(id, after);
+    const messages = f.requests.at(-1)!.messages as Message[];
+    const index = messages.findIndex((m) => m.role === "user" && m.content === text);
+    const reminder = String(messages[index + 1]?.content);
+    assert(reminder.startsWith("<system-reminder>\n<plugin_reference>"), reminder);
+    assert(reminder.includes('- id: "demo@inline"'));
+    assert(reminder.includes('skills: ["demo:review"]'));
+    assert(!reminder.includes("ghost@m"), "unknown references are skipped");
+    // 配置变化后 workspace 目录随之变化，会话目录保持冻结。
+    await put(join(f.cwd, ".zcode/config.json"), { plugins: { dirs: [] } });
+    assert.deepEqual((await catalog()).plugins, []);
+    assert.deepEqual(
+      (await catalog(id)).plugins.map((p) => p.pluginId),
+      ["demo@inline"],
+    );
+
+    // 提醒作为 canonical 消息持久化：重启后下一轮请求的前缀不变。
+    await h.close();
+    const restarted = f.start();
+    await restarted.subscribe(`conversation/${id}`);
+    const next = restarted.messages.length;
+    await restarted.command(restarted.envelope("sendText", id, { text: "again" }));
+    await restarted.completed(id, next);
+    const replayed = f.requests.at(-1)!.messages as Message[];
+    const at = replayed.findIndex((m) => m.role === "user" && m.content === text);
+    assert.equal(replayed[at + 1]?.content, reminder);
+    assert.deepEqual(h.schemaErrors, []);
+  } finally {
+    await f.close();
+  }
+});

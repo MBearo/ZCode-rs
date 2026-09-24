@@ -170,6 +170,36 @@ sequenceDiagram
   - `restorableBuiltins`：被抑制的官方定义。`computer-use` 受 CUA 内部特性开关控制。
 - `node-repl-host` 不计入官方市场的插件数。
 
+### 3.9 M10.2：会话冻结目录与 `@plugin` 引用提醒
+
+依据 Node `core/src/plugin-reference/{references,reminder,catalog}.ts`、`runtime/methods/plugin-reference.ts`、`turn.ts`。
+
+- **会话目录**：
+  - 每个根会话在本进程内首次需要时冻结一次插件引用目录（§3.7 的条目，包含 `rootPath`），之后不随配置变化；冷恢复后重新冻结。
+  - Node 在 App 创建时冻结；Rust 延迟到首次使用，避免给会话激活增加一次插件发现。
+  - 会话被 LRU 淘汰时，目录随之释放。
+  - 子代理会话不注入引用提醒，与 Node 一致。
+- **带 `sessionId` 的 `referenceCatalog`**：
+  - 会话不存在时报错；
+  - 返回冻结目录（`authority: "session"`），展示字段仍来自当前 overview。
+- **解析**：
+  - 只解析根会话、用户可见输入的原文，与 UserPromptSubmit hooks 的同一门控；模型专用的续跑不解析。
+  - 只接受 Markdown 链接目标 `plugin://<name>@<marketplace>`：两段都匹配 `[A-Za-z0-9][A-Za-z0-9._-]*`，总长不超过 256，协议名须为小写。
+  - 按首次出现去重，每轮最多 8 个。
+- **提醒正文**（`buildPluginReferenceReminderBody`）：
+  - 跳过：未知、同名冲突、会话内已禁用、没有活能力的条目。
+  - 活能力取与冻结声明的交集：
+    - skills：会话 skill 目录中根目录属于该插件的限定名；
+    - MCP：冻结声明过的 server，已连接，且本轮对模型可见的工具数大于 0；
+    - 子代理：声明过的名称，且 profile 路径位于插件根下。
+  - 标识符须匹配 `^[A-Za-z0-9._:@/-]{1,128}$`。
+  - 合计上限：skills 32、MCP 16、子代理 16。正文超过 8 KiB 时，从尾部逐个移除插件。
+  - 固定模板为 `<plugin_reference>…</plugin_reference>`。
+- **注入**：
+  - 位置：本轮用户消息之后、首个模型请求之前，以 `<system-reminder>` 用户消息的形式出现。
+  - 作为 canonical 消息提交给 owner 并持久化，与 Node 的"model-only notice 落库"一致：冷恢复后前缀不变，UI 不产生用户气泡。
+  - 生成失败时本轮照常执行（fail open），但不注入任何内容。
+
 ## 4. 与 Node 的差异（M10.1）
 
 - 目录项按名称排序后遍历（Node 为平台 `readdir` 顺序），保证跨平台结果确定。

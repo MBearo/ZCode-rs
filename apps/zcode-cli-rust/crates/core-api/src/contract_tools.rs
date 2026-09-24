@@ -71,6 +71,15 @@ pub trait ToolPort: Send + Sync {
     ) -> Result<Vec<(zcode_cli_domain::hooks::HookEvent, Value)>> {
         Ok(vec![])
     }
+    /// The workspace plugin reference catalog with provenance roots, frozen by
+    /// the engine per session (spec rust-m10-plugins §3.9).
+    async fn plugin_catalog(&self, _cancel: &CancellationToken) -> Result<Vec<Value>> {
+        Ok(vec![])
+    }
+    /// `(server, bound tool names)` of the session's connected MCP servers.
+    fn mcp_inventory(&self, _session: &str) -> Vec<(String, Vec<String>)> {
+        vec![]
+    }
     /// A `plugins/*` management request of the workspace (spec rust-m10-plugins).
     async fn plugins(
         &self,

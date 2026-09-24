@@ -64,18 +64,24 @@ pub(super) async fn handle(
         }
         "plugins/overview" => Ok(plugins::overview::overview(&input, &outcome).await?),
         "plugins/referenceCatalog" | "plugins/referenceCatalogWithCategory" => {
-            // 会话冻结目录在 M10.2 接入；协议禁止静默回退到 workspace 权威。
-            if params.get("sessionId").is_some_and(|id| !id.is_null()) {
-                bail!("Session plugin catalog unavailable");
-            }
+            // 带 sessionId 的请求由 engine 附上该会话冻结的目录；权威不回退到 workspace。
+            let frozen = params["frozenCatalog"].as_array();
             let overview = plugins::overview::overview(&input, &outcome).await?;
             let display = plugins::catalog::display(&overview);
             let category = method == "plugins/referenceCatalogWithCategory";
-            let entries: Vec<Value> = plugins::catalog::build(&outcome.plugins)
+            let current;
+            let (authority, catalog) = match frozen {
+                Some(entries) => ("session", entries),
+                None => {
+                    current = plugins::catalog::build(&outcome.plugins);
+                    ("workspace", &current)
+                }
+            };
+            let entries: Vec<Value> = catalog
                 .iter()
                 .map(|entry| plugins::catalog::project(entry, &display, category))
                 .collect();
-            Ok(json!({"authority":"workspace","plugins":entries}))
+            Ok(json!({"authority":authority,"plugins":entries}))
         }
         other => bail!("Unsupported plugin method: {other}"),
     }
@@ -90,4 +96,14 @@ pub(super) async fn hooks(
     Ok(config::plugins(&tools.cwd, &snapshot.config, cancel)
         .await?
         .hooks)
+}
+
+/// The workspace reference catalog with provenance roots (frozen per session by the engine).
+pub(super) async fn catalog(
+    tools: &WorkspaceTools,
+    cancel: &CancellationToken,
+) -> Result<Vec<Value>> {
+    let snapshot = tools.config.load().await?;
+    let outcome = config::plugins(&tools.cwd, &snapshot.config, cancel).await?;
+    Ok(plugins::catalog::build(&outcome.plugins))
 }

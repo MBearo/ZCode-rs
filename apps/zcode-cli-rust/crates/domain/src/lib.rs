@@ -30,6 +30,7 @@ pub mod option_map;
 pub mod permission;
 pub mod persisted_output;
 pub mod plan_mode;
+pub mod plugin_reference;
 pub mod prompt;
 pub mod question;
 mod question_answer;

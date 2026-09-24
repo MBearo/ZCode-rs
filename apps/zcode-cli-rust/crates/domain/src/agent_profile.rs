@@ -58,6 +58,7 @@ pub fn parse(text: &str, source: &str) -> Option<Profile> {
             .map(|s| parse_list(s))
             .unwrap_or_default(),
         memory: fields.get("memory").cloned(),
+        path: None,
     })
 }
 fn parse_tools(s: &str) -> Vec<String> {

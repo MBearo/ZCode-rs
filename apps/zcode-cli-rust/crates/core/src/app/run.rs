@@ -119,6 +119,12 @@ impl Engine {
         ));
         history.permissions = Some(permission_updates);
         self.legacy_turn_started(id, &turn_id, kind);
+        // Node 只解析用户可见输入的原文；子代理与模型专用续跑不产生引用提醒。
+        if self.sessions[id].parent_id.is_none()
+            && let Some((text, _)) = &submission.prompt
+        {
+            history.plugin_references = crate::domain::plugin_reference::extract(text);
+        }
         let turn_hooks = self.turn_hooks(id, &turn_id, submission.prompt, &identity);
         let context = self.context.clone();
         let tools = self.tools.clone();

@@ -39,6 +39,8 @@ pub struct RuntimeOptions {
     pub debug: crate::session_debug::DebugLog,
     /// Node `autoCompactConsecutiveFailures` of this process (spec rust-m7-compact §4).
     pub compact_failures: u32,
+    /// Plugin reference catalog frozen for this activation (spec rust-m10-plugins §3.9).
+    pub plugin_catalog: Option<std::sync::Arc<[serde_json::Value]>>,
 }
 
 /// A transient reminder kept in the process history (never persisted).

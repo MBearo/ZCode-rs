@@ -69,6 +69,7 @@ pub(super) async fn run(
         agent["function"]["description"] =
             format!("{base}\n\nCurrent profile catalog (authoritative):\n{descriptions}").into();
     }
+    super::plugin_reference::inject(tools, history, (&skills, &definitions), sink, cancel).await?;
     if let Some(instructions) = manual {
         // 手动压缩的摘要请求带与 agent step 相同的前缀与工具（Node compactActiveConversation）。
         let bound = model.bind();

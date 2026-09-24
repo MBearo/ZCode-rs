@@ -16,6 +16,8 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 struct Binding {
     name: String,
+    /// The configured server name (`plugin:<plugin>:<key>` for plugin servers).
+    server: String,
     original: String,
     key: String,
     safe: bool,
@@ -80,6 +82,18 @@ impl Hub {
             .get(session)
             .and_then(|b| b.iter().find(|b| b.name == name))
             .map(|b| (b.read_only, b.destructive))
+    }
+    /// `(server, tool names)` bound for `session`; only connected servers have tools.
+    pub fn inventory(&self, session: &str) -> Vec<(String, Vec<String>)> {
+        let state = self.state.read().unwrap();
+        let mut servers: Vec<(String, Vec<String>)> = vec![];
+        for binding in state.bindings.get(session).into_iter().flatten() {
+            match servers.iter_mut().find(|(s, _)| *s == binding.server) {
+                Some((_, tools)) => tools.push(binding.name.clone()),
+                None => servers.push((binding.server.clone(), vec![binding.name.clone()])),
+            }
+        }
+        servers
     }
     pub fn safe(&self, session: &str, name: &str) -> bool {
         self.state
@@ -361,6 +375,7 @@ fn bind(
         );
         bindings.push(Binding {
             name,
+            server: server.name.clone(),
             original: original.into(),
             key: key.into(),
             safe: tool["annotations"]["readOnlyHint"] == true

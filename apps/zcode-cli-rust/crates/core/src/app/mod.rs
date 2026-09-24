@@ -67,6 +67,8 @@ mod legacy_snapshot;
 mod legacy_stream;
 mod legacy_tools;
 mod mcp;
+mod plugin_events;
+mod plugin_reference;
 mod plugins;
 mod session_list;
 mod shared_context;
