@@ -100,6 +100,7 @@ impl Session {
         if let Some(turn) = self.node.turn.as_mut() {
             turn.messages.push(n.message.clone());
         }
+        self.node.latest = Some(n.message.clone());
         self.node.push(now, Op::Message(info));
         self.node.push(now, Op::Part(part));
     }

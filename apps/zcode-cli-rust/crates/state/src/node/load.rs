@@ -58,6 +58,7 @@ pub fn session(workspace: &str, r: Resume, epoch: String) -> Session {
         row.time_created as u64,
     );
     s.node.created = true;
+    s.node.latest = r.latest_message.clone();
     let directory = row.directory.clone();
     s.workspace_path = Some(
         row.path

@@ -6,6 +6,7 @@ mod assistant;
 mod compact;
 mod finish;
 pub mod intent;
+mod model_change;
 mod notice;
 mod queue;
 pub mod records;
@@ -34,6 +35,12 @@ pub struct NodeJournal {
     /// The running compaction's timeline.
     #[serde(default)]
     pub compaction: Option<timeline::Compaction>,
+    /// Node `latestConversationMessageId`: the last stored conversation message.
+    #[serde(default)]
+    pub latest: Option<String>,
+    /// Node `pendingModelChangeTimeline`, stored when the next turn starts.
+    #[serde(default)]
+    pub model_change: Option<model_change::ModelChange>,
     #[serde(skip)]
     pub pending: Vec<Write>,
 }

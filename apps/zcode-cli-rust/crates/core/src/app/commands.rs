@@ -152,7 +152,13 @@ impl Engine {
                 if let Some(row) = self.selection_marker(&id, &selected, &c.command_id) {
                     deltas.push(json!({"op":"row.appended","row":row}));
                 }
+                let from = self.sessions[&id].node_selection();
+                let request = crate::domain::node_ids::part_id(self.clock.now(), &self.clock.id());
                 self.apply_selection(&id, selected)?;
+                self.node(&id, |s, _| {
+                    let to = s.node_selection().unwrap_or_default();
+                    s.node_record_model_change(request, from, to);
+                });
                 self.sessions.get_mut(&id).unwrap().revision += 1;
             }
             "switchCollaborationMode" => {

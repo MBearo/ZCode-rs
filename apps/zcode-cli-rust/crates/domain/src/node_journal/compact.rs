@@ -51,12 +51,7 @@ impl Session {
         }
         let (phase, reason) = defaults(c.trigger);
         let (operation, message, part) = c.ids;
-        let parent = self
-            .node
-            .turn
-            .as_ref()
-            .and_then(|t| t.messages.last().cloned())
-            .unwrap_or_else(|| message.clone());
+        let parent = self.node.latest.clone().unwrap_or_else(|| message.clone());
         let max_attempts = if c.trigger == "auto" {
             crate::compact::AUTO_ATTEMPTS
         } else {
@@ -113,6 +108,7 @@ impl Session {
             return;
         };
         done["customInstructions"] = c.custom_instructions.into();
+        self.node.latest = done["summaryMessageId"].as_str().map(str::to_owned);
         done["compaction"] = serde_json::to_value(&c).unwrap_or(Value::Null);
         done["host"] = serde_json::to_value(self.node_host()).unwrap_or(Value::Null);
         self.node.push(now, Op::CompactSummary(done));

@@ -248,3 +248,55 @@ fn a_run_ending_during_tools_stores_their_results_and_closes_the_step() {
         .collect();
     assert_eq!(canonical[2]["content"], results[0].1);
 }
+
+#[test]
+fn a_model_switch_is_stored_as_a_separator_when_the_next_turn_starts() {
+    let mut s = session();
+    let mut next = ids();
+    s.node_ensure_created(10, "go", "0.0.0");
+    let prompt = |message: &str| Prompt {
+        message: message.into(),
+        part: format!("{message}_part"),
+        turn: "t",
+        text: "go",
+        command: None,
+        queue_id: None,
+        metadata: None,
+        tools: &[],
+    };
+    s.node_user_prompt(10, prompt("msg_u1"));
+    s.node_finished(11, Outcome::Success, &mut next);
+    let high = json!({"providerId": "p", "modelId": "m", "options": {"reasoningLevel": "high"}});
+    let low = json!({"providerId": "p", "modelId": "m", "options": {"reasoningLevel": "low"}});
+    let other = json!({"providerId": "q", "modelId": "n"});
+    // 切回原模型即清除；连续切换保留第一次的来源。
+    s.node_record_model_change("part_r1".into(), Some(high.clone()), low.clone());
+    s.node_record_model_change("part_r2".into(), Some(low.clone()), high.clone());
+    assert!(s.node.model_change.is_none());
+    s.node_record_model_change("part_r3".into(), Some(high.clone()), low.clone());
+    s.node_record_model_change("part_r4".into(), Some(low), other.clone());
+    s.node.take();
+    s.node_user_prompt(20, prompt("msg_u2"));
+    let writes = s.node.take();
+    let Op::Message(host) = &writes[0].op else {
+        panic!("timeline host first: {writes:?}");
+    };
+    assert_eq!(host["id"], "msg_part_r3_message");
+    assert_eq!(host["parentID"], "msg_u1");
+    let Op::Part(part) = &writes[1].op else {
+        panic!("timeline part");
+    };
+    assert_eq!(part["timelineType"], "model_change");
+    assert_eq!(part["anchorMessageId"], "msg_u1");
+    assert_eq!(part["fromModel"]["label"], "p/m");
+    assert_eq!(
+        part["fromModel"]["options"],
+        json!({"reasoningLevel": "high"})
+    );
+    assert_eq!(
+        part["toModel"],
+        json!({"providerId": "q", "modelId": "n", "label": "q/n"})
+    );
+    assert!(matches!(&writes[2].op, Op::Message(m) if m["id"] == "msg_u2"));
+    assert!(s.node.model_change.is_none());
+}

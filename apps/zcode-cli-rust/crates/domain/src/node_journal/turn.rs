@@ -41,6 +41,7 @@ impl Session {
     /// Node `persistUserPrompt`: the user message with its text part, promoted
     /// from the ledger when the input was admitted there. Opens the turn.
     pub fn node_user_prompt(&mut self, now: u64, p: Prompt) {
+        self.node_flush_model_change(now);
         let runtime = crate::node_ids::turn_id(p.turn);
         let user = p.message.clone();
         self.push_prompt(now, p, &runtime);
@@ -49,6 +50,7 @@ impl Session {
 
     /// The user message and its text part of `p` in the turn `runtime`.
     pub(super) fn push_prompt(&mut self, now: u64, p: Prompt, runtime: &str) {
+        self.node.latest = Some(p.message.clone());
         let message = r::user_message(&UserPrompt {
             id: &p.message,
             session: &self.id,
@@ -138,6 +140,7 @@ impl Session {
             ..Step::default()
         };
         turn.messages.push(step.assistant.clone());
+        self.node.latest = Some(step.assistant.clone());
         let message = self.assistant_record(&step, None);
         let part = r::step_start_part(ids.1, &self.id, &step.assistant);
         self.node.push(now, Op::Message(message));

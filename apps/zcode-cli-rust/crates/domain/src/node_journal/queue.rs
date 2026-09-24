@@ -29,6 +29,7 @@ impl Session {
             let (target, anchor) = (target.into(), anchor.into());
             self.node.push(now, Op::Rewind { target, anchor });
             self.node.turn = None;
+            self.node.latest = None;
         }
     }
 
