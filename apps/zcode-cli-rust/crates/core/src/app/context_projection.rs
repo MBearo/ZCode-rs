@@ -4,6 +4,7 @@ use anyhow::{Result, ensure};
 use serde_json::json;
 impl Engine {
     pub(super) async fn context_event(&mut self, id: &str, event: Event) -> Result<()> {
+        self.node_compact(id, &event);
         let turn = self.active[id].turn_id.clone();
         let session = self.sessions.get_mut(id).unwrap();
         let mut deltas = vec![];
@@ -42,6 +43,7 @@ impl Engine {
                 manual,
                 tokens,
                 committed,
+                ..
             } => {
                 let mut row = session.row("timelineMarker", &turn, &id, self.clock.now());
                 row["lane"] = "assistantWork".into();
@@ -57,6 +59,7 @@ impl Engine {
                 usage,
                 reminders,
                 committed,
+                ..
             } => {
                 ensure!(
                     context.offset >= session.context.offset

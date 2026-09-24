@@ -123,6 +123,12 @@ impl RunContext {
         sink.send(Event::CompactStarted {
             id: id.clone(),
             manual,
+            trigger: match trigger {
+                Trigger::Manual(_) => "manual",
+                Trigger::Auto => "auto",
+                Trigger::Reactive(_) => "reactive",
+            },
+            instructions: instructions.is_some_and(|text| !text.trim().is_empty()),
             tokens: before,
             committed: done,
         })
@@ -136,6 +142,8 @@ impl RunContext {
                 context: self.state.clone(),
                 tokens: before,
                 usage: Value::Null,
+                body: String::new(),
+                groups: 0,
                 reminders: vec![],
                 committed: done,
             })
@@ -182,11 +190,21 @@ impl RunContext {
         let split = plan.split;
         let preserved = compact_ptl::read_paths(&self.messages[split..]);
         let views = request.port.take_reads(&sink.session_id).await;
-        let mut reminders: Vec<Value> = request.reminder.into_iter().collect();
+        // 与 Node 一致：压缩后的提醒带来源（计划文件引用、已读文件上下文），落库与冷读取据此还原。
+        let tagged = |mut message: Value, source: &str| {
+            message["_zcode_source"] = source.into();
+            message
+        };
+        let mut reminders: Vec<Value> = request
+            .reminder
+            .into_iter()
+            .map(|m| tagged(m, "plan_file_reference"))
+            .collect();
         reminders.extend(
             compact_ptl::read_reminders(&views, &preserved)
                 .iter()
-                .map(|body| crate::domain::plan_mode::reminder_message(body)),
+                .map(|body| crate::domain::plan_mode::reminder_message(body))
+                .map(|m| tagged(m, "resume_referenced_session_context")),
         );
         let next = ContextState {
             offset: self.state.offset + split,
@@ -204,6 +222,8 @@ impl RunContext {
             context: next.clone(),
             tokens: after,
             usage,
+            body: compact::format_summary(&summary),
+            groups: plan.preserved,
             reminders: reminders.clone(),
             committed: done,
         })

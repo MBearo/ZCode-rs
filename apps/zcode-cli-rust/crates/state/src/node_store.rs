@@ -48,6 +48,31 @@ fn now_ms() -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
+/// The timeline host facts of a resumed session (its model selection,
+/// execution state and directory).
+fn host(r: &resume::Resume) -> zcode_cli_domain::node_journal::timeline::Host {
+    let selection = r.model_selection.clone().unwrap_or(Value::Null);
+    let text = |v: &Value| v.as_str().unwrap_or("").to_owned();
+    zcode_cli_domain::node_journal::timeline::Host {
+        session: r.session.id.clone(),
+        provider: text(&selection["providerId"]),
+        model: text(&selection["modelId"]),
+        mode: r
+            .execution
+            .as_ref()
+            .map_or("build".into(), |e| text(&e["mode"])),
+        plan: r
+            .execution
+            .as_ref()
+            .is_some_and(|e| e["planEnabled"] == true),
+        cwd: r
+            .session
+            .path
+            .clone()
+            .unwrap_or_else(|| r.session.directory.clone()),
+    }
+}
+
 /// The directory a workspace's project settings are keyed by.
 fn directory(workspace: &str) -> &str {
     parse_remote(workspace).map_or(workspace, |r| r.path)
@@ -206,10 +231,14 @@ impl Worker {
         }
         let root: &Path = &self.artifacts;
         let reader = |uri: &str| artifacts::read(root, uri);
-        let Some(resumed) = resume::resume(&self.conn, id, &reader, None)? else {
+        let Some(mut resumed) = resume::resume(&self.conn, id, &reader, None)? else {
             return Ok(None);
         };
         let now = now_ms();
+        // Node resume：停在进行中的压缩时间线收口为 completed / interrupted，再按新记录投影。
+        if crate::node::compact::recover(&self.conn, &host(&resumed), now)? > 0 {
+            resumed = resume::resume(&self.conn, id, &reader, None)?.context("Session vanished")?;
+        }
         for input in crate::node::inputs::list(&self.conn, id, Some("admitted"))? {
             crate::node::inputs::settle(
                 &self.conn,

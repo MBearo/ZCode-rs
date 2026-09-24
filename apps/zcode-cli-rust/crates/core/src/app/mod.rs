@@ -48,6 +48,7 @@ mod question_timers;
 mod question_tool;
 mod questions;
 
+mod node_compact;
 mod node_fork;
 mod node_hooks;
 mod stream_recovery;

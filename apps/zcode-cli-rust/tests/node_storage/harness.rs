@@ -38,7 +38,22 @@ impl ModelPort for Model {
         sink: &EventSink,
         _: &CancellationToken,
     ) -> std::result::Result<ModelOutput, ModelFailure> {
+        let compaction = messages.last().is_some_and(|m| {
+            m["content"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("CRITICAL: Respond with TEXT ONLY"))
+        });
         self.requests.send(messages).unwrap();
+        if compaction {
+            // 压缩摘要请求：只返回摘要，不计入对话步骤。
+            return Ok(ModelOutput {
+                output_limit: false,
+                message: json!({"role": "assistant",
+                    "content": "<analysis>ok</analysis><summary>Fixed the parser.</summary>"}),
+                calls: vec![],
+                usage: json!({"prompt_tokens": 50, "completion_tokens": 10}),
+            });
+        }
         let n = self.calls.fetch_add(1, Ordering::SeqCst);
         let tool_step = n.is_multiple_of(2);
         let status = |kind: &str, extra: Value| {

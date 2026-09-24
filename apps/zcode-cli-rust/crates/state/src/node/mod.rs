@@ -5,6 +5,7 @@ pub mod apply;
 pub mod artifacts;
 pub mod codecs;
 pub mod cold;
+pub mod compact;
 pub mod entries;
 mod fork;
 mod fork_bundle;
@@ -24,6 +25,8 @@ pub mod settings;
 pub mod targets;
 pub mod todos;
 
+#[cfg(test)]
+mod compact_tests;
 #[cfg(test)]
 mod fixture_tests;
 #[cfg(test)]

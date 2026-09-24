@@ -72,8 +72,10 @@ impl Engine {
         reply: oneshot::Sender<Value>,
     ) -> Result<()> {
         let s = self.sessions.get_mut(id).unwrap();
-        let message = json!({"role":"user","content":format!("<system-reminder>\n{}\n</system-reminder>",todo::reminder(&s.todos)),"_zcode_source":"todo_reminder"});
+        let body = todo::reminder(&s.todos);
+        let message = json!({"role":"user","content":format!("<system-reminder>\n{body}\n</system-reminder>"),"_zcode_source":"todo_reminder"});
         s.append_message(message.clone());
+        self.node_todo_reminder(id, &body);
         self.persist(id, None).await?;
         let _ = reply.send(message);
         Ok(())

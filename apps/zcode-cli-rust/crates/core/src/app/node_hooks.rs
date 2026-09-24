@@ -146,7 +146,7 @@ impl Engine {
     }
 
     /// Node `persistUserPrompt`'s `tools`: the tools offered to the model.
-    fn tool_names(&self) -> Vec<String> {
+    pub(super) fn tool_names(&self) -> Vec<String> {
         self.tools
             .definitions()
             .iter()
@@ -262,6 +262,13 @@ impl Engine {
                 if *stopped || cancelled || error.is_some() {
                     let results = s.unfinished_tool_results();
                     s.node_close_tools(now, &results);
+                    // Node finishCompactTimelineFailure：运行结束时未完成的压缩收口。
+                    let status = if *stopped || cancelled {
+                        "interrupted"
+                    } else {
+                        "failed"
+                    };
+                    s.node_compact_ended(now, status, None);
                 }
                 let (text, reasoning) = super::stream_recovery::streamed_output(s, &active.step);
                 let outcome = if *stopped || cancelled {

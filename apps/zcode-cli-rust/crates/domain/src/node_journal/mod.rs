@@ -3,15 +3,20 @@
 //! the moments Node persists, and the store applies the queued writes with
 //! Node's repository SQL in one transaction per commit. Pure: no IO.
 mod assistant;
+mod compact;
 mod finish;
 pub mod intent;
+mod notice;
 mod queue;
 pub mod records;
 mod session;
+pub mod timeline;
 mod turn;
 
 pub use assistant::{reasoning_parts, tool_input};
+pub use compact::CompactStart;
 pub use finish::Outcome;
+pub use notice::Notice;
 pub use turn::{Admission, Prompt};
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +31,9 @@ pub struct NodeJournal {
     pub created: bool,
     #[serde(default)]
     pub turn: Option<Turn>,
+    /// The running compaction's timeline.
+    #[serde(default)]
+    pub compaction: Option<timeline::Compaction>,
     #[serde(skip)]
     pub pending: Vec<Write>,
 }
@@ -120,6 +128,9 @@ pub enum Op {
     /// `{parent, boundary, command, revision, selection, execution}` (the
     /// parent runtime's selection and execution state Node reads live).
     Fork(Value),
+    /// Node `persistCompactSummary` and the completed compaction timeline;
+    /// the store selects the preserved tail in the stored transcript.
+    CompactSummary(Value),
     /// Node `updateTodos`: `[{content, status, priority}]`.
     Todos(Vec<Value>),
     /// Node `persistStableForkCompletionBoundary` (reads the stored transcript).

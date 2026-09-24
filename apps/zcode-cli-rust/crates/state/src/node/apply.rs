@@ -113,6 +113,7 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
             }
             Op::Rewind { target, anchor } => rewind(conn, session, (target, anchor), now)?,
             Op::Fork(request) => super::fork::fork(conn, session, request, now)?,
+            Op::CompactSummary(done) => super::compact::summary(conn, session, done, now)?,
             Op::Todos(list) => todos::update(
                 conn,
                 session,

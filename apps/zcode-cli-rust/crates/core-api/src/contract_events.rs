@@ -123,6 +123,10 @@ pub enum Event {
     CompactStarted {
         id: String,
         manual: bool,
+        /// Node `CompactTrigger`: `manual`, `auto` or `reactive`.
+        trigger: &'static str,
+        /// The manual compaction carries custom instructions.
+        instructions: bool,
         tokens: usize,
         committed: oneshot::Sender<()>,
     },
@@ -131,6 +135,10 @@ pub enum Event {
         context: zcode_cli_domain::context::ContextState,
         tokens: usize,
         usage: Value,
+        /// The summary text before it is wrapped into the summary message.
+        body: String,
+        /// Node `groupsPreserved`: the recent assistant rounds kept verbatim.
+        groups: usize,
         /// Plan file and read file reminders appended after the preserved messages.
         reminders: Vec<Value>,
         committed: oneshot::Sender<()>,

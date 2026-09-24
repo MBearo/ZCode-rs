@@ -97,7 +97,7 @@ fn has_boundary(record: &Record) -> bool {
 }
 
 /// Node `isCompactPreservableSessionMessage`.
-fn preservable(record: &Record) -> bool {
+pub fn preservable(record: &Record) -> bool {
     let info = &record.info;
     if info["semantics"]["providerVisibility"] == "hidden" {
         return false;
