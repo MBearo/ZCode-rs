@@ -1,0 +1,926 @@
+{
+  "basic": {
+    "sessionID": "sess_basic",
+    "tables": {
+      "session": [
+        [
+          "sess_basic",
+          "proj_w",
+          null,
+          null,
+          "sess_basic",
+          "/w",
+          "/w",
+          "basic",
+          "0.0.0",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "{\"mode\":\"build\"}",
+          1000,
+          9000,
+          null,
+          null,
+          "interactive",
+          "first_input",
+          null,
+          1000,
+          null
+        ]
+      ],
+      "message": [
+        [
+          "u1",
+          "sess_basic",
+          1010,
+          1010,
+          "{\"role\":\"user\",\"time\":{\"created\":1010},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u1\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          0
+        ],
+        [
+          "a1",
+          "sess_basic",
+          1020,
+          1030,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1020,\"completed\":1030},\"parentID\":\"u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\"}}",
+          1
+        ],
+        [
+          "a2",
+          "sess_basic",
+          1040,
+          1050,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1040,\"completed\":1050},\"parentID\":\"u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"finish\":\"stop\",\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\",\"historyRoundCount\":2,\"orderedMessageIds\":[\"u1\",\"a1\",\"a2\"],\"boundaryMessageId\":\"a2\"}}",
+          2
+        ],
+        [
+          "n1",
+          "sess_basic",
+          1060,
+          1060,
+          "{\"role\":\"user\",\"time\":{\"created\":1060},\"agent\":\"zcode-agent\",\"metadata\":{\"runtimeMessage\":{\"source\":\"todo_reminder\"},\"source\":\"todo_reminder\",\"visibility\":\"model-only\"},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"system_reminder\",\"source\":\"todo_reminder\",\"uiVisibility\":\"hidden\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"hidden\"},\"source\":\"todo_reminder\",\"synthetic\":true,\"visibility\":\"model-only\",\"model\":{}}",
+          3
+        ],
+        [
+          "n2",
+          "sess_basic",
+          1070,
+          1070,
+          "{\"role\":\"user\",\"time\":{\"created\":1070},\"agent\":\"zcode-agent\",\"metadata\":{\"runtimeMessage\":{\"source\":\"legacy_synthetic\"},\"source\":\"background_task\",\"visibility\":\"model-only\"},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"system_reminder\",\"source\":\"background_task\",\"uiVisibility\":\"hidden\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"hidden\"},\"source\":\"background_task\",\"synthetic\":true,\"visibility\":\"model-only\",\"model\":{}}",
+          4
+        ],
+        [
+          "n3",
+          "sess_basic",
+          1080,
+          1080,
+          "{\"role\":\"user\",\"time\":{\"created\":1080},\"agent\":\"zcode-agent\",\"metadata\":{\"runtimeMessage\":{\"source\":\"subagent\"},\"source\":\"subagent\",\"visibility\":\"model-only\"},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"system_reminder\",\"source\":\"subagent\",\"uiVisibility\":\"hidden\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"hidden\"},\"source\":\"subagent\",\"synthetic\":true,\"visibility\":\"model-only\",\"model\":{}}",
+          5
+        ],
+        [
+          "u2",
+          "sess_basic",
+          1090,
+          1090,
+          "{\"role\":\"user\",\"time\":{\"created\":1090},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u2\"},\"tools\":{\"Read\":true},\"metadata\":{\"inputPresentation\":\"user_steer\"},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          6
+        ],
+        [
+          "a3",
+          "sess_basic",
+          1100,
+          9000,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1100},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          7
+        ],
+        [
+          "a4",
+          "sess_basic",
+          1110,
+          1120,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1110,\"completed\":1120},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          8
+        ],
+        [
+          "a5",
+          "sess_basic",
+          1130,
+          1140,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1130,\"completed\":1140},\"parentID\":\"u2\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":250,\"output\":0,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          9
+        ],
+        [
+          "u3",
+          "sess_basic",
+          1150,
+          1150,
+          "{\"role\":\"user\",\"time\":{\"created\":1150},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u3\"},\"tools\":{\"Read\":true},\"source\":\"shared_context\",\"metadata\":{\"sharedContextStatus\":\"pending\",\"contextId\":\"ctx\"},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          10
+        ]
+      ],
+      "part": [
+        [
+          "part_u1_0",
+          "u1",
+          "sess_basic",
+          1010,
+          9000,
+          "{\"time\":{\"start\":1010,\"end\":1010},\"type\":\"text\",\"text\":\"Fix the bug\"}",
+          0
+        ],
+        [
+          "part_u1_1",
+          "u1",
+          "sess_basic",
+          9000,
+          9000,
+          "{\"type\":\"file\",\"mime\":\"text/plain\",\"filename\":\"notes.txt\",\"url\":\"file:///w/notes.txt\",\"source\":{\"type\":\"file\",\"path\":\"/w/notes.txt\",\"text\":{\"value\":\"@notes.txt\",\"start\":0,\"end\":10}},\"metadata\":{\"storageKind\":\"inline\",\"recoverability\":\"provider_ready\",\"preview\":{\"text\":\"line one\\nline two\"}}}",
+          1
+        ],
+        [
+          "part_u1_2",
+          "u1",
+          "sess_basic",
+          9000,
+          9000,
+          "{\"type\":\"file\",\"mime\":\"application/pdf\",\"filename\":\"spec.pdf\",\"url\":\"file:///w/spec.pdf\"}",
+          2
+        ],
+        [
+          "part_u1_3",
+          "u1",
+          "sess_basic",
+          9000,
+          9000,
+          "{\"type\":\"agent\",\"name\":\"reviewer\"}",
+          3
+        ],
+        ["part_a1_0", "a1", "sess_basic", 9000, 9000, "{\"type\":\"step-start\"}", 0],
+        [
+          "part_a1_1",
+          "a1",
+          "sess_basic",
+          1,
+          9000,
+          "{\"type\":\"reasoning\",\"text\":\"Look first\",\"metadata\":{\"anthropic\":{\"signature\":\"sig-1\"}},\"time\":{\"start\":1,\"end\":2}}",
+          1
+        ],
+        [
+          "part_a1_2",
+          "a1",
+          "sess_basic",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"Let me read.\"}",
+          2
+        ],
+        [
+          "part_a1_3",
+          "a1",
+          "sess_basic",
+          3,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_b\",\"declarationIndex\":1,\"tool\":\"Bash\",\"state\":{\"status\":\"error\",\"input\":{\"command\":\"false\"},\"error\":\"exit 1\",\"metadata\":{\"modelContent\":\"Command failed: exit 1\"},\"time\":{\"start\":3,\"end\":4}}}",
+          3
+        ],
+        [
+          "part_a1_4",
+          "a1",
+          "sess_basic",
+          1010,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_a\",\"declarationIndex\":0,\"tool\":\"Read\",\"state\":{\"status\":\"completed\",\"input\":{\"file_path\":\"a.ts\"},\"output\":\"1\\tconst a = 1;\",\"title\":\"Read\",\"metadata\":{\"schemaVersion\":1},\"time\":{\"start\":1010,\"end\":1011}}}",
+          4
+        ],
+        [
+          "part_a1_5",
+          "a1",
+          "sess_basic",
+          9000,
+          9000,
+          "{\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}",
+          5
+        ],
+        ["part_a2_0", "a2", "sess_basic", 9000, 9000, "{\"type\":\"text\",\"text\":\"Done.\"}", 0],
+        [
+          "part_a2_1",
+          "a2",
+          "sess_basic",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"Second\",\"ignored\":true}",
+          1
+        ],
+        [
+          "part_n1",
+          "n1",
+          "sess_basic",
+          1060,
+          9000,
+          "{\"type\":\"text\",\"text\":\"Todos:\\n- a\",\"synthetic\":true,\"time\":{\"start\":1060,\"end\":1060},\"metadata\":{\"runtimeMessage\":{\"source\":\"todo_reminder\"},\"source\":\"todo_reminder\",\"visibility\":\"model-only\"}}",
+          0
+        ],
+        [
+          "part_n2",
+          "n2",
+          "sess_basic",
+          1070,
+          9000,
+          "{\"type\":\"text\",\"text\":\"<task-notification>done</task-notification>\",\"synthetic\":true,\"time\":{\"start\":1070,\"end\":1070},\"metadata\":{\"runtimeMessage\":{\"source\":\"legacy_synthetic\"},\"source\":\"background_task\",\"visibility\":\"model-only\"}}",
+          0
+        ],
+        [
+          "part_n3",
+          "n3",
+          "sess_basic",
+          1080,
+          9000,
+          "{\"type\":\"text\",\"text\":\"child finished\",\"synthetic\":true,\"time\":{\"start\":1080,\"end\":1080},\"metadata\":{\"runtimeMessage\":{\"source\":\"subagent\"},\"source\":\"subagent\",\"visibility\":\"model-only\"}}",
+          0
+        ],
+        [
+          "part_u2_0",
+          "u2",
+          "sess_basic",
+          1090,
+          9000,
+          "{\"time\":{\"start\":1090,\"end\":1090},\"type\":\"text\",\"text\":\"Continue\"}",
+          0
+        ],
+        [
+          "part_a3_0",
+          "a3",
+          "sess_basic",
+          5,
+          9000,
+          "{\"type\":\"tool\",\"callID\":\"call_c\",\"declarationIndex\":0,\"tool\":\"Read\",\"state\":{\"status\":\"running\",\"input\":{\"file_path\":\"b\"},\"title\":\"Read\",\"metadata\":{},\"time\":{\"start\":5}}}",
+          0
+        ],
+        [
+          "part_u3_0",
+          "u3",
+          "sess_basic",
+          1150,
+          9000,
+          "{\"time\":{\"start\":1150,\"end\":1150},\"type\":\"text\",\"text\":\"shared\"}",
+          0
+        ]
+      ]
+    },
+    "history": [
+      {
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "[Attached application/pdf: spec.pdf]"
+            },
+            {
+              "type": "text",
+              "text": "Fix the bug"
+            },
+            {
+              "type": "text",
+              "text": "[Selected agent: reviewer]"
+            }
+          ]
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "kind": "attachment",
+        "content": "Called the Read tool with the following input: {\"file_path\":\"@notes.txt\"}\nResult of calling the Read tool:\n1\tline one\n2\tline two",
+        "metadata": {
+          "source": "prompt_attachment"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "reasoning",
+              "text": "Look first",
+              "providerOptions": {
+                "anthropic": {
+                  "signature": "sig-1"
+                }
+              }
+            },
+            {
+              "type": "text",
+              "text": "Let me read."
+            }
+          ],
+          "toolCalls": [
+            {
+              "id": "call_a",
+              "name": "Read",
+              "input": {
+                "file_path": "a.ts"
+              }
+            },
+            {
+              "id": "call_b",
+              "name": "Bash",
+              "input": {
+                "command": "false"
+              }
+            }
+          ],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "1\tconst a = 1;",
+          "toolCallId": "call_a",
+          "toolName": "Read",
+          "isError": false
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "Command failed: exit 1",
+          "toolCallId": "call_b",
+          "toolName": "Bash",
+          "isError": true
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "Done.",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "kind": "attachment",
+        "content": "Todos:\n- a",
+        "metadata": {
+          "source": "todo_reminder"
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "<task-notification>done</task-notification>"
+        },
+        "metadata": {
+          "source": "legacy_synthetic"
+        }
+      },
+      {
+        "kind": "attachment",
+        "content": "child finished",
+        "metadata": {
+          "source": "queued_system_notification"
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "Continue"
+        },
+        "metadata": {
+          "source": "real_user",
+          "inputPresentation": "user_steer"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "toolCalls": [
+            {
+              "id": "call_c",
+              "name": "Read",
+              "input": {
+                "file_path": "b"
+              }
+            }
+          ],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "tool",
+          "content": "[Tool execution was interrupted before resume]",
+          "toolCallId": "call_c",
+          "toolName": "Read",
+          "isError": true
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "toolCalls": []
+        },
+        "tokens": {
+          "input": 250,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ]
+  },
+  "compacted": {
+    "sessionID": "sess_compacted",
+    "tables": {
+      "session": [
+        [
+          "sess_compacted",
+          "proj_w",
+          null,
+          null,
+          "sess_compacted",
+          "/w",
+          "/w",
+          "compacted",
+          "0.0.0",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "{\"mode\":\"build\"}",
+          1000,
+          9000,
+          null,
+          null,
+          "interactive",
+          "first_input",
+          null,
+          1000,
+          null
+        ]
+      ],
+      "message": [
+        [
+          "u1",
+          "sess_compacted",
+          1010,
+          1010,
+          "{\"role\":\"user\",\"time\":{\"created\":1010},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u1\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          0
+        ],
+        [
+          "a1",
+          "sess_compacted",
+          1020,
+          1030,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1020,\"completed\":1030},\"parentID\":\"u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\"}}",
+          1
+        ],
+        [
+          "u2",
+          "sess_compacted",
+          1040,
+          1040,
+          "{\"role\":\"user\",\"time\":{\"created\":1040},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u2\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          2
+        ],
+        [
+          "a2",
+          "sess_compacted",
+          1050,
+          1060,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1050,\"completed\":1060},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":900,\"output\":9,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          3
+        ],
+        [
+          "tl",
+          "sess_compacted",
+          1070,
+          1080,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1070,\"completed\":1080},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"finish\":\"completed\",\"semantics\":{\"origin\":\"system\",\"kind\":\"timeline_event\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"hidden\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          4
+        ],
+        [
+          "s1",
+          "sess_compacted",
+          1090,
+          1090,
+          "{\"role\":\"user\",\"time\":{\"created\":1090},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"compact_summary\",\"uiVisibility\":\"hidden\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"hidden\"},\"tools\":{\"Read\":true},\"summary\":{\"title\":\"Compact summary\",\"body\":\"This session is being continued from a previous conversation.\\n\\nSummary: fixed the parser.\",\"diffs\":[]},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          5
+        ],
+        [
+          "u3",
+          "sess_compacted",
+          1100,
+          1100,
+          "{\"role\":\"user\",\"time\":{\"created\":1100},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u3\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          6
+        ],
+        [
+          "a3",
+          "sess_compacted",
+          1110,
+          1120,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1110,\"completed\":1120},\"parentID\":\"u3\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\"}}",
+          7
+        ]
+      ],
+      "part": [
+        [
+          "part_u1_0",
+          "u1",
+          "sess_compacted",
+          1010,
+          9000,
+          "{\"time\":{\"start\":1010,\"end\":1010},\"type\":\"text\",\"text\":\"one\"}",
+          0
+        ],
+        [
+          "part_a1_0",
+          "a1",
+          "sess_compacted",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"first\"}",
+          0
+        ],
+        [
+          "part_u2_0",
+          "u2",
+          "sess_compacted",
+          1040,
+          9000,
+          "{\"time\":{\"start\":1040,\"end\":1040},\"type\":\"text\",\"text\":\"two\"}",
+          0
+        ],
+        [
+          "part_a2_0",
+          "a2",
+          "sess_compacted",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"second\"}",
+          0
+        ],
+        [
+          "part_tl_0",
+          "tl",
+          "sess_compacted",
+          9000,
+          9000,
+          "{\"timelineType\":\"context_compaction\",\"display\":\"separator\",\"status\":\"completed\",\"operationId\":\"cmp_1\",\"trigger\":\"auto\",\"type\":\"timeline\"}",
+          0
+        ],
+        [
+          "part_tl_1",
+          "tl",
+          "sess_compacted",
+          9000,
+          9000,
+          "{\"type\":\"compaction\",\"auto\":true,\"trigger\":\"auto\",\"operationId\":\"cmp_1\",\"timelineStatus\":\"completed\",\"timelineDisplay\":\"separator\"}",
+          1
+        ],
+        [
+          "part_s1_0",
+          "s1",
+          "sess_compacted",
+          1090,
+          9000,
+          "{\"time\":{\"start\":1090,\"end\":1090},\"type\":\"text\",\"text\":\"This session is being continued from a previous conversation.\\n\\nSummary: fixed the parser.\",\"synthetic\":true}",
+          0
+        ],
+        [
+          "part_s1_1",
+          "s1",
+          "sess_compacted",
+          9000,
+          9000,
+          "{\"type\":\"compaction\",\"auto\":true,\"trigger\":\"auto\",\"tail_start_id\":\"u2\",\"compactBoundary\":{\"boundaryId\":\"b1\",\"trigger\":\"auto\",\"preCompactTokenCount\":900,\"summarizedMessageCount\":2,\"summaryMessageIds\":[\"s1\"],\"preservedSegment\":{\"headMessageId\":\"u2\",\"anchorMessageId\":\"s1\",\"tailMessageId\":\"a2\"},\"traceId\":\"trace\"},\"operationId\":\"cmp_1\"}",
+          1
+        ],
+        [
+          "part_u3_0",
+          "u3",
+          "sess_compacted",
+          1100,
+          9000,
+          "{\"time\":{\"start\":1100,\"end\":1100},\"type\":\"text\",\"text\":\"three\"}",
+          0
+        ],
+        [
+          "part_a3_0",
+          "a3",
+          "sess_compacted",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"third\"}",
+          0
+        ]
+      ]
+    },
+    "history": [
+      {
+        "message": {
+          "role": "user",
+          "content": "This session is being continued from a previous conversation.\n\nSummary: fixed the parser."
+        },
+        "metadata": {
+          "source": "legacy_synthetic"
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "two"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "second",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "total": 0
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "three"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "third",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ]
+  },
+  "rewound": {
+    "sessionID": "sess_rewound",
+    "tables": {
+      "session": [
+        [
+          "sess_rewound",
+          "proj_w",
+          null,
+          null,
+          "sess_rewound",
+          "/w",
+          "/w",
+          "rewound",
+          "0.0.0",
+          null,
+          null,
+          null,
+          null,
+          null,
+          "{\"keptMessageIDs\":[\"u1\",\"a1\"],\"branchCutAfterMessageID\":\"a2\",\"branchGeneration\":1,\"messageID\":\"a1\",\"kind\":\"conversation_rewind\",\"scope\":\"conversation\",\"targetMessageID\":\"u2\"}",
+          "{\"mode\":\"build\"}",
+          1000,
+          9000,
+          null,
+          null,
+          "interactive",
+          "first_input",
+          null,
+          1000,
+          null
+        ]
+      ],
+      "message": [
+        [
+          "u1",
+          "sess_rewound",
+          1010,
+          1010,
+          "{\"role\":\"user\",\"time\":{\"created\":1010},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u1\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          0
+        ],
+        [
+          "a1",
+          "sess_rewound",
+          1020,
+          1030,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1020,\"completed\":1030},\"parentID\":\"u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\"}}",
+          1
+        ],
+        [
+          "u2",
+          "sess_rewound",
+          1040,
+          1040,
+          "{\"role\":\"user\",\"time\":{\"created\":1040},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u2\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          2
+        ],
+        [
+          "a2",
+          "sess_rewound",
+          1050,
+          1060,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1050,\"completed\":1060},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+          3
+        ],
+        [
+          "u3",
+          "sess_rewound",
+          1070,
+          1070,
+          "{\"role\":\"user\",\"time\":{\"created\":1070},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u3\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+          4
+        ],
+        [
+          "a3",
+          "sess_rewound",
+          1080,
+          1090,
+          "{\"role\":\"assistant\",\"time\":{\"created\":1080,\"completed\":1090},\"parentID\":\"u3\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\"}}",
+          5
+        ]
+      ],
+      "part": [
+        [
+          "part_u1_0",
+          "u1",
+          "sess_rewound",
+          1010,
+          9000,
+          "{\"time\":{\"start\":1010,\"end\":1010},\"type\":\"text\",\"text\":\"one\"}",
+          0
+        ],
+        [
+          "part_a1_0",
+          "a1",
+          "sess_rewound",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"first\"}",
+          0
+        ],
+        [
+          "part_u2_0",
+          "u2",
+          "sess_rewound",
+          1040,
+          9000,
+          "{\"time\":{\"start\":1040,\"end\":1040},\"type\":\"text\",\"text\":\"two\"}",
+          0
+        ],
+        [
+          "part_a2_0",
+          "a2",
+          "sess_rewound",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"second\"}",
+          0
+        ],
+        [
+          "part_u3_0",
+          "u3",
+          "sess_rewound",
+          1070,
+          9000,
+          "{\"time\":{\"start\":1070,\"end\":1070},\"type\":\"text\",\"text\":\"retry two\"}",
+          0
+        ],
+        [
+          "part_a3_0",
+          "a3",
+          "sess_rewound",
+          9000,
+          9000,
+          "{\"type\":\"text\",\"text\":\"second again\"}",
+          0
+        ]
+      ]
+    },
+    "history": [
+      {
+        "message": {
+          "role": "user",
+          "content": "one"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "first",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "message": {
+          "role": "user",
+          "content": "retry two"
+        },
+        "metadata": {
+          "source": "real_user"
+        }
+      },
+      {
+        "message": {
+          "role": "assistant",
+          "content": "second again",
+          "toolCalls": [],
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "tokens": {
+          "input": 100,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ]
+  }
+}

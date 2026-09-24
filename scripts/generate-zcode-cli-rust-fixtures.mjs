@@ -21,6 +21,7 @@ import { hookFixtures } from "./zcode-cli-rust-hooks-fixtures.mjs";
 import { workspaceHookFixtures } from "./zcode-cli-rust-workspace-hook-fixtures.mjs";
 import { pluginOfficialData } from "./zcode-cli-rust-plugin-fixtures.mjs";
 import { nodeDbFixtures, syncNodeMigrations } from "./zcode-cli-rust-node-db-fixtures.mjs";
+import { nodeColdFixtures, systemReminderData } from "./zcode-cli-rust-node-cold-fixtures.mjs";
 import {
   bashAnalysisFixtures,
   bashAnalysisFuzzFixtures,
@@ -241,3 +242,8 @@ await emitCompact(
 );
 await syncNodeMigrations(process.argv.includes("--check"));
 await emit("../apps/zcode-cli-rust/crates/state/fixtures/node-db.json", await nodeDbFixtures());
+await emit(
+  "../apps/zcode-cli-rust/crates/domain/schema/system-reminders.json",
+  systemReminderData(),
+);
+await emit("../apps/zcode-cli-rust/crates/state/fixtures/node-cold.json", await nodeColdFixtures());

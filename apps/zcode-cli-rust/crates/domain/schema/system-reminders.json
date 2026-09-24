@@ -1,0 +1,220 @@
+{
+  "sources": {
+    "context_prefix": {
+      "channel": "request_prefix",
+      "lifecycle": "request_prefix",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": false,
+      "trailingNewline": true
+    },
+    "skills_listing": {
+      "channel": "request_prefix",
+      "lifecycle": "request_prefix",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "todo_reminder": {
+      "channel": "current_turn",
+      "lifecycle": "per_current_turn",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "task_status": {
+      "channel": "mid_turn_event",
+      "lifecycle": "mid_turn_event",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "tool_result_warning": {
+      "channel": "tool_result",
+      "lifecycle": "tool_result",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": false,
+      "trailingNewline": false
+    },
+    "resume_referenced_session_context": {
+      "channel": "history_continuity",
+      "lifecycle": "resume_history",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": false,
+      "trailingNewline": false
+    },
+    "plan_file_reference": {
+      "channel": "history_continuity",
+      "lifecycle": "resume_history",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": false,
+      "trailingNewline": false
+    },
+    "resume_goal_state": {
+      "channel": "history_continuity",
+      "lifecycle": "resume_history",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "goal_state_change": {
+      "channel": "mid_turn_event",
+      "lifecycle": "mid_turn_event",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "plugin_reference": {
+      "channel": "current_turn",
+      "lifecycle": "per_current_turn",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "target_continuation": {
+      "channel": "real_user",
+      "lifecycle": "real_user",
+      "isMeta": false,
+      "providerVisibility": "provider_visible",
+      "midConversation": false,
+      "trailingNewline": false
+    },
+    "goal_completion_verification": {
+      "channel": "tool_result",
+      "lifecycle": "tool_result",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": false,
+      "trailingNewline": false
+    },
+    "rewind_notice": {
+      "channel": "history_continuity",
+      "lifecycle": "resume_history",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "conversation_fork": {
+      "channel": "history_continuity",
+      "lifecycle": "resume_history",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": false,
+      "trailingNewline": false
+    },
+    "selection_side_chat": {
+      "channel": "history_continuity",
+      "lifecycle": "resume_history",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": false,
+      "trailingNewline": false
+    },
+    "queued_system_notification": {
+      "channel": "mid_turn_event",
+      "lifecycle": "mid_turn_event",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "shell_environment_change": {
+      "channel": "mid_turn_event",
+      "lifecycle": "mid_turn_event",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "incoming_message": {
+      "channel": "mid_turn_event",
+      "lifecycle": "mid_turn_event",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "hook_context": {
+      "channel": "current_turn",
+      "lifecycle": "per_current_turn",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "runtime_mode": {
+      "channel": "current_turn",
+      "lifecycle": "per_current_turn",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "plan_mode_exit": {
+      "channel": "current_turn",
+      "lifecycle": "runtime_local",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "output_style": {
+      "channel": "current_turn",
+      "lifecycle": "per_current_turn",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "date_change": {
+      "channel": "current_turn",
+      "lifecycle": "runtime_local",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "referenced_session_context": {
+      "channel": "current_turn",
+      "lifecycle": "per_current_turn",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "model_anomaly": {
+      "channel": "mid_turn_event",
+      "lifecycle": "mid_turn_event",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "prompt_attachment": {
+      "channel": "current_turn",
+      "lifecycle": "per_current_turn",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    },
+    "diagnostics": {
+      "channel": "mid_turn_event",
+      "lifecycle": "mid_turn_event",
+      "isMeta": true,
+      "providerVisibility": "provider_visible",
+      "midConversation": true,
+      "trailingNewline": false
+    }
+  }
+}
