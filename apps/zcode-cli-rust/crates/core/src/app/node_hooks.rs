@@ -111,18 +111,12 @@ impl Engine {
         };
         let now = self.clock.now();
         let (message, part) = (self.clock.id(), self.clock.id());
-        let tools: Vec<String> = self
-            .tools
-            .definitions()
-            .iter()
-            .filter_map(|d| d["function"]["name"].as_str().or(d["name"].as_str()))
-            .map(str::to_owned)
-            .collect();
+        let tools = self.tool_names();
         let Some(s) = self.sessions.get_mut(id) else {
             return;
         };
         let text = c.payload["text"].as_str().unwrap_or("");
-        let metadata = intent::prompt_metadata(text, &intent, presentation);
+        let metadata = intent::prompt_metadata(text, &intent, (None, presentation));
         s.node_user_prompt(
             now,
             Prompt {
@@ -132,6 +126,52 @@ impl Engine {
                 text,
                 command: Some(&c.command_id),
                 queue_id: intent["queueItemId"].as_str(),
+                metadata: Some(metadata),
+                tools: &tools,
+            },
+        );
+    }
+
+    /// Node `persistUserPrompt`'s `tools`: the tools offered to the model.
+    fn tool_names(&self) -> Vec<String> {
+        self.tools
+            .definitions()
+            .iter()
+            .filter_map(|d| d["function"]["name"].as_str().or(d["name"].as_str()))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// Node guide drain: the guided queue item's user message joins the
+    /// running turn (`turnSteerDelivery = guide`), promoted from its ledger row.
+    pub(super) fn node_guide(&mut self, id: &str, item: &Value) {
+        if !self.journaled(id) {
+            return;
+        }
+        let now = self.clock.now();
+        let (message, part) = (self.clock.id(), self.clock.id());
+        let tools = self.tool_names();
+        let Some(s) = self.sessions.get_mut(id) else {
+            return;
+        };
+        let intent = intent::turn_intent(item, true);
+        let text = item["text"].as_str().unwrap_or("");
+        // Rust 运行时以 user_steer 呈现引导输入（busy_input::drain_guide）；落库同样标注，
+        // 冷读取才能还原同一条模型消息，Node 读取时也按插话呈现。
+        let attachments = item["attachments"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty());
+        let presentation = (!attachments).then_some("user_steer");
+        let metadata = intent::prompt_metadata(text, &intent, (Some("guide"), presentation));
+        s.node_guided_prompt(
+            now,
+            Prompt {
+                message: nj::message_id(now, &message),
+                part: nj::part_id(now, &part),
+                turn: "",
+                text,
+                command: item["sourceCommandId"].as_str(),
+                queue_id: item["queueItemId"].as_str(),
                 metadata: Some(metadata),
                 tools: &tools,
             },

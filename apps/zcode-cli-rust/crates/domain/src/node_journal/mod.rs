@@ -5,6 +5,7 @@
 mod assistant;
 mod finish;
 pub mod intent;
+mod queue;
 pub mod records;
 mod session;
 mod turn;
@@ -100,6 +101,14 @@ pub enum Op {
     RemoveMessage(String),
     /// Node `saveSessionEntry` (`SessionEntryInfo`).
     Entry(Value),
+    /// Node `updateSessionInputs`: `[{id, text?, queuePosition?, delivery?, intent?}]`.
+    UpdateInputs(Vec<Value>),
+    /// Node `settleSessionInput` (only an `admitted` row changes).
+    SettleInput {
+        id: String,
+        status: String,
+        reason: Option<String>,
+    },
     /// Node `updateTodos`: `[{content, status, priority}]`.
     Todos(Vec<Value>),
     /// Node `persistStableForkCompletionBoundary` (reads the stored transcript).

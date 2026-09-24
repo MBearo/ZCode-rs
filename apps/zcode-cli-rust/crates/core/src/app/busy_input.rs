@@ -137,10 +137,11 @@ impl Engine {
             Ok(selection) => selection,
             Err(_) => {
                 // 排队后配置可能被删除；保留输入，交由已有 queue 配置失效处理，不丢失 guide。
-                fallback(
-                    &mut self.sessions.get_mut(id).unwrap().queue[pos],
-                    "guide.noToolBoundary",
-                );
+                let now = self.clock.now();
+                let s = self.sessions.get_mut(id).unwrap();
+                fallback(&mut s.queue[pos], "guide.noToolBoundary");
+                let update = delivery_update(&s.queue[pos]);
+                s.node_update_inputs(now, vec![update]);
                 self.publish(id, vec![])?;
                 self.persist(id, None).await?;
                 let _ = committed.send(None);
@@ -182,6 +183,7 @@ impl Engine {
         s.append_message(message.clone());
         messages.push(message);
         s.history.inputs.push(crate::domain::history::InputBoundary {entity:row["entityId"].as_str().unwrap().into(),turn:turn.into(),row:boundary.0,user_row:boundary.0,message:retained_messages,state:boundary.2,kind:"sendText".into(),payload:json!({"text":item["text"],"modelSelection":item["modelSelection"],"_userSteer":true})});
+        self.node_guide(id, &item);
         self.publish(id, vec![json!({"op":"row.appended","row":row})])?;
         self.persist(id, None).await?;
         self.notify_selection(id)?;
@@ -210,12 +212,20 @@ impl Engine {
     }
 }
 
-pub(super) fn fallback_guides(session: &mut Session, reason: &str) {
+pub(super) fn fallback_guides((session, now): (&mut Session, u64), reason: &str) {
+    let mut updates = vec![];
     for item in &mut session.queue {
         if item["delivery"]["admitted"] == "guide" {
             fallback(item, reason);
+            updates.push(delivery_update(item));
         }
     }
+    session.node_update_inputs(now, updates);
+}
+/// Node `TurnSteerDeliveryChanged` ledger update: the item now waits in the queue.
+fn delivery_update(item: &Value) -> Value {
+    let intent = crate::domain::node_journal::intent::turn_intent(item, true);
+    json!({"id": item["queueItemId"], "delivery": "queue", "intent": intent})
 }
 fn fallback(item: &mut Value, reason: &str) {
     item["delivery"]["admitted"] = "queue".into();

@@ -127,15 +127,16 @@ pub struct Harness {
     _dir: Option<Arc<tempfile::TempDir>>,
 }
 
-/// A runtime in a fresh root: `ZCODE_CLI_RUST_NODE_DUMP` when set (kept for
-/// `scripts/zcode-cli-rust-node-storage-check.mjs`), else a temporary one.
+/// A runtime in a fresh root: `ZCODE_CLI_RUST_NODE_DUMP/<dump>` when set
+/// (kept for `scripts/zcode-cli-rust-node-storage-check.mjs`), else a
+/// temporary one.
 pub async fn start(
-    dump: bool,
+    dump: Option<&str>,
     gate: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
 ) -> Harness {
-    let target = std::env::var_os("ZCODE_CLI_RUST_NODE_DUMP").filter(|_| dump);
+    let target = std::env::var_os("ZCODE_CLI_RUST_NODE_DUMP").zip(dump);
     let (root, dir) = match target {
-        Some(root) => (PathBuf::from(root), None),
+        Some((root, name)) => (PathBuf::from(root).join(name), None),
         None => {
             let dir = tempfile::tempdir().unwrap();
             (dir.path().to_path_buf(), Some(Arc::new(dir)))
@@ -273,4 +274,24 @@ impl Harness {
         }
         panic!("turns not persisted");
     }
+}
+
+/// Writes what Rust reads back of `session` (history entries, rows and
+/// state) next to the kept database, for Node's reading check.
+pub fn dump(h: &Harness, conn: &rusqlite::Connection, session: &str) {
+    if h._dir.is_some() {
+        return;
+    }
+    let active = zcode_cli_state::node::cold::active(conn, session).unwrap();
+    let history: Vec<Value> = zcode_cli_rust::domain::node_history::hydrate(&active, &|_| None)
+        .entries
+        .iter()
+        .map(|e| e.to_node())
+        .collect();
+    let resumed = zcode_cli_state::node::resume::resume(conn, session, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    let read = json!({"sessionId": session, "history": history,
+        "rows": resumed.conversation.rows, "state": resumed.conversation.state});
+    std::fs::write(h.root.join("rust.json"), read.to_string()).unwrap();
 }

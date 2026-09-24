@@ -58,7 +58,17 @@ impl Entry {
                     "_zcode_tool_failed": message["isError"] == true,
                 }),
                 _ => {
-                    let mut out = json!({"role": "user", "content": content(&message["content"])});
+                    // 呈现过的输入（插话等）在 Rust 运行时中保存格式化后的正文。
+                    let presented = metadata
+                        .as_ref()
+                        .and_then(|m| m["inputPresentation"].as_str())
+                        .zip(message["content"].as_str())
+                        .and_then(|(presentation, body)| {
+                            super::incoming::format(body, presentation)
+                        });
+                    let content =
+                        presented.map_or_else(|| content(&message["content"]), Value::from);
+                    let mut out = json!({"role": "user", "content": content});
                     let source = metadata.as_ref().and_then(|m| m["source"].as_str());
                     if let Some(source) = source.filter(|s| *s != "real_user") {
                         out["_zcode_source"] = source.into();

@@ -194,6 +194,10 @@ flowchart LR
 | 忙时输入（排队/引导）        | 账本行 `queue_<commandId>`（`TurnSteerQueued` 形态：`intent` 带 `queuePosition`，`conversationInputIntent.dispatch = queued`，`delivery = queue/guide`）                   |
 | 忙时立即发送（抢占）         | 账本行为 admission 形态（`delivery = startNow`）；提升时 user 消息 `metadata.inputPresentation = user_steer`                                                               |
 | 排队输入提升为新轮           | `promoteSessionInput`：user 消息 `metadata.inputIntent`（排队时的 intent）与 `conversationInputIntent.dispatch = drained`                                                  |
+| 引导输入并入当前轮           | `promoteSessionInput`：user 消息 `metadata.turnSteerDelivery = guide`，无附件时 `inputPresentation = user_steer`；`anchor.turnId` 为当前轮，不开新轮                       |
+| 队列编辑、重排               | `updateSessionInputs`：编辑写 `text`；重排按新顺序给每项写 `queuePosition`（运行时队列项的 `order.queuePosition` 同步更新）                                                |
+| 删除排队项、清空队列         | `settleSessionInput`：`cancelled/user_removed`                                                                                                                             |
+| 引导回退为排队               | `updateSessionInputs`：`delivery = queue`，`intent` 为回退后的完整 intent（`fallbackReasonCode`）                                                                          |
 | 工具阶段结束（取消或失败）   | 未完成的工具写 `error` part（内容与 `metadata.modelContent` 为运行时历史中该调用的结果）；取消时步骤按工具步骤收口（`step-finish`、`finish = tool-calls`），失败时带 error |
 
 - Rust canonical assistant 到 Node part 的映射是 §6 冷读取映射的逆：Anthropic thinking 块 → 每块一个 reasoning part（`metadata.anthropic.signature` / `redactedData`），Responses 推理项 → `metadata.openai.{itemId, reasoningEncryptedContent}`，其余 `reasoning_content` → 一个无 metadata 的 reasoning part；工具参数解析为对象作为 `input`；失败工具的模型可见内容写 `metadata.modelContent`。
@@ -201,6 +205,7 @@ flowchart LR
 
 - **步骤开始即落库**：`model_request_started`（`querySource` 为 `main_turn`/`subagent`，且没有未完成的步骤）时写 assistant 与 `step-start`，并立即提交；同一步骤的重试（attempt ≥ 2）不另起消息。
 - **取消**：写入已收到的 reasoning 与 text（`time.start` 为 assistant 创建时间），assistant 带 `completed` 与取消错误，不写 step-finish，与 Node `persistCancelledStreamSnapshot` 相同。
+- **呈现**：Node 在请求时按 `inputPresentation` 格式化 user 消息（`formatIncomingMessage`），Rust 运行时把格式化后的正文存进消息；冷读取转回 Rust 形态时按同一规则格式化。Node 的引导输入不带 `inputPresentation`（以普通 user 消息出现），Rust 运行时以 `user_steer` 呈现引导输入，落库同样标注 `user_steer`，使重启后的模型上下文与运行时一致，Node 读取时按插话呈现。
 - **已知差异**：运行时在工具阶段被取消时，Rust 内存历史给未完成调用补的结果文本与 `_zcode_tool_failed = false` 来自 Rust 实现，Node 为 `Tool execution cancelled` 且记为失败。落库沿用 Node 语义（`error` part），因此重启后该调用在模型上下文中记为失败；运行时文本与 Node 对齐另行处理。
 - **崩溃**：已落库的 `pending`/`running` 工具与未完成的 assistant 保持原样，读取端按"中断"投影，不改库。
 - 工具执行前与下一次模型请求前的两个耐久屏障沿用 `rust-cli-core.md` 的规则。
@@ -326,7 +331,7 @@ M11.3 已完成的范围与验证：
 - 集成测试 `apps/zcode-cli-rust/tests/node_storage.rs`：引擎跑带工具的轮次、忙时排队与提升、重启后由新 runtime 续聊；按 §6 冷读取，模型上下文与运行时请求一致，行与账本正确。
 - 交叉读取 `node --import tsx scripts/zcode-cli-rust-node-storage-check.mjs`：Node 的 `SqliteSessionStore`、history hydrator 与冷投影读取 Rust 写出的库，history、行与快照状态与 Rust 冷读取逐项相等。
 
-移入 M11.4 的写入：引导输入（`turnSteerDelivery = guide` 的 user 消息与轮内切分）、队列编辑/删除/重排与 `sendQueuedNow`（`updateSessionInputs`、`cancelled` 结算）、goal 命令与验证、压缩、编辑/重试/fork 的历史重跑、`deleteSession` 归档、legacy `session/create` 与导入路径、子代理子会话、附件 `file` part 与 Node 产物、冷投影的上下文窗口、自动标题更新。
+M11.4 的写入：引导输入与队列编辑/删除/重排/回退（M11.4a，已完成：集成测试覆盖运行中引导与删除排队项）；`sendQueuedNow` 与 `deleteSession` 与 Node 一样不改账本（提升时写入，关闭时保留 `admitted`，冷查询结算为 `discarded/session_resumed`）；goal 命令与验证、压缩、编辑/重试/fork 的历史重跑、legacy `session/create` 与导入路径、子代理子会话、附件 `file` part 与 Node 产物、冷投影的上下文窗口、自动标题更新。
 
 ## 11. 验收场景
 

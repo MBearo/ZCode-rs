@@ -78,7 +78,12 @@ impl Engine {
         Ok(None)
     }
     pub(super) fn discard_queue_ack(&mut self, id: &str, item: &Value) -> Result<()> {
-        super::shared_context::release(self.sessions.get_mut(id).unwrap(), item);
+        let now = self.clock.now();
+        let session = self.sessions.get_mut(id).unwrap();
+        super::shared_context::release(session, item);
+        // Node settleRemovedSessionInput：用户移除的排队输入先写 cancelled 终态。
+        let queue_id = item["queueItemId"].as_str().unwrap_or("");
+        session.node_settle_input(now, queue_id, "cancelled", "user_removed");
         let key = serde_json::to_string(&(Some(id), item["sourceCommandId"].as_str().unwrap()))?;
         if let Some(ack) = self.acks.get_mut(&key) {
             ack["status"] = "failed".into();

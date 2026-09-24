@@ -158,9 +158,17 @@ pub fn queued_payload(item: &Value) -> Value {
     json!({"text": text, "intent": intent, "conversationInputIntent": conversation})
 }
 
-/// Node `persistUserPrompt` metadata for an input with its intent.
-pub fn prompt_metadata(text: &str, intent: &Value, presentation: Option<&str>) -> Value {
+/// Node `persistUserPrompt` metadata for an input with its intent; `steer`
+/// is a drained input's `turnSteerDelivery`.
+pub fn prompt_metadata(
+    text: &str,
+    intent: &Value,
+    (steer, presentation): (Option<&str>, Option<&str>),
+) -> Value {
     let mut metadata = Map::new();
+    if let Some(steer) = steer {
+        metadata.insert("turnSteerDelivery".into(), steer.into());
+    }
     if let Some(presentation) = presentation {
         metadata.insert("inputPresentation".into(), presentation.into());
     }
@@ -244,7 +252,7 @@ mod tests {
         assert_eq!(conversation["steer"]["state"], "steering");
         let intent = turn_intent(&item(), false);
         assert!(intent.get("queuePosition").is_none());
-        let metadata = prompt_metadata("hi", &intent, Some("user_steer"));
+        let metadata = prompt_metadata("hi", &intent, (None, Some("user_steer")));
         assert_eq!(
             keys(&metadata),
             [

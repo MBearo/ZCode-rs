@@ -1,10 +1,10 @@
-// Run with node --import tsx. Rust writes scripted tool turns (a queued input,
-// then a restarted runtime continuing the session) into a fresh Node session
-// database (apps/zcode-cli-rust/tests/node_storage.rs); Node's
+// Run with node --import tsx. Rust writes scripted sessions (queued input and a
+// restarted runtime continuing it; guided and removed busy inputs) into fresh
+// Node session databases (apps/zcode-cli-rust/tests/node_storage.rs); Node's
 // SqliteSessionStore, history hydrator and cold projection read it back and
 // must agree with what Rust reads. Spec rust-m11-node-storage §5.2, §11.
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -33,6 +33,54 @@ function expectEqual(name, node, rust) {
   process.exitCode = 1;
 }
 
+async function check(name, root) {
+  const rust = JSON.parse(await readFile(join(root, "rust.json"), "utf8"));
+  if (!rust.history.length || !rust.rows.length) throw new Error(`${name}: Rust read nothing back`);
+  const sessionID = rust.sessionId;
+  const store = await SqliteSessionStore.openStartup({ dbPath: join(root, "cli/db/db.sqlite") });
+  try {
+    const session = await store.getSession(sessionID);
+    if (!session) throw new Error(`${name}: Node cannot read session ${sessionID}`);
+    const listed = await store.listSessions({ directory: session.directory });
+    if (!listed.some((s) => s.id === sessionID)) throw new Error(`${name}: session not listed`);
+    const selection = await readSessionModelSelection(store, sessionID);
+    if (selection?.modelId !== "m") throw new Error(`${name}: model selection unreadable`);
+    await store.listSessionInputs({ sessionID });
+    const stored = await store.messages({ sessionID });
+    const entries = await store.sessionEntries({ sessionID });
+    const revert = session.revert;
+    const branchOptions = {
+      branchCutAfterMessageId: revert?.branchCutAfterMessageID,
+      rewindCreatedMessageId: revert?.createdMessageID,
+      rewindKeptMessageIds: revert?.keptMessageIDs,
+      rewindTargetMessageId: revert?.targetMessageID,
+    };
+    const history = createMessageHistory();
+    await hydrateMessageHistoryFromSession({ history, messages: stored, ...branchOptions });
+    expectEqual(`${name} history`, history.toRuntimeEntries(), rust.history);
+    const merged = mergeColdConversationEvents({
+      memoryEvents: [],
+      messages: selectActiveConversationBranch(stored, branchOptions),
+      sessionId: sessionID,
+      goalVerificationEntries: goalVerificationEntriesFromSessionEntries(entries),
+      target: null,
+    });
+    const projection = new ProductProjection(sessionID, "epoch");
+    projection.beginHydrationReplay();
+    for (const event of merged.events) projection.applyHydrationEvent(event);
+    projection.completeHydrationReplay();
+    const snapshot = projection.getSnapshot();
+    expectEqual(`${name} rows`, snapshot.rows.window, rust.rows);
+    const withoutEphemeral = (state) =>
+      Object.fromEntries(
+        Object.entries(state).filter(([key]) => !EPHEMERAL_SNAPSHOT_KEYS.has(key)),
+      );
+    expectEqual(`${name} state`, withoutEphemeral(snapshot), withoutEphemeral(rust.state));
+  } finally {
+    store.close();
+  }
+}
+
 const dir = await mkdtemp(join(tmpdir(), "zcode-node-storage-"));
 try {
   execFileSync(
@@ -49,57 +97,14 @@ try {
       },
     },
   );
-  const rust = JSON.parse(await readFile(join(dir, "rust.json"), "utf8"));
-  if (!rust.history.length || !rust.rows.length) throw new Error("Rust read nothing back");
-  const sessionID = rust.sessionId;
-  const store = await SqliteSessionStore.openStartup({ dbPath: join(dir, "cli/db/db.sqlite") });
-  try {
-    const session = await store.getSession(sessionID);
-    if (!session) throw new Error(`Node cannot read session ${sessionID}`);
-    const listed = await store.listSessions({ directory: session.directory });
-    if (!listed.some((s) => s.id === sessionID)) throw new Error("Session missing from list");
-    const selection = await readSessionModelSelection(store, sessionID);
-    if (selection?.modelId !== "m") throw new Error("Model selection unreadable");
-    const inputs = await store.listSessionInputs({ sessionID });
-    if (inputs.length !== 3 || inputs.some((input) => input.status !== "promoted")) {
-      throw new Error(`Unexpected input ledger: ${JSON.stringify(inputs)}`);
-    }
-    const stored = await store.messages({ sessionID });
-    const entries = await store.sessionEntries({ sessionID });
-    const revert = session.revert;
-    const branchOptions = {
-      branchCutAfterMessageId: revert?.branchCutAfterMessageID,
-      rewindCreatedMessageId: revert?.createdMessageID,
-      rewindKeptMessageIds: revert?.keptMessageIDs,
-      rewindTargetMessageId: revert?.targetMessageID,
-    };
-    const history = createMessageHistory();
-    await hydrateMessageHistoryFromSession({ history, messages: stored, ...branchOptions });
-    expectEqual("history", history.toRuntimeEntries(), rust.history);
-    const merged = mergeColdConversationEvents({
-      memoryEvents: [],
-      messages: selectActiveConversationBranch(stored, branchOptions),
-      sessionId: sessionID,
-      goalVerificationEntries: goalVerificationEntriesFromSessionEntries(entries),
-      target: null,
-    });
-    const projection = new ProductProjection(sessionID, "epoch");
-    projection.beginHydrationReplay();
-    for (const event of merged.events) projection.applyHydrationEvent(event);
-    projection.completeHydrationReplay();
-    const snapshot = projection.getSnapshot();
-    expectEqual("rows", snapshot.rows.window, rust.rows);
-    const state = Object.fromEntries(
-      Object.entries(snapshot).filter(([key]) => !EPHEMERAL_SNAPSHOT_KEYS.has(key)),
-    );
-    const rustState = Object.fromEntries(
-      Object.entries(rust.state).filter(([key]) => !EPHEMERAL_SNAPSHOT_KEYS.has(key)),
-    );
-    expectEqual("state", state, rustState);
-  } finally {
-    store.close();
+  const scenarios = await readdir(dir);
+  if (scenarios.length === 0) throw new Error("Rust wrote no sessions");
+  for (const scenario of scenarios) {
+    await check(scenario, join(dir, scenario));
   }
-  if (!process.exitCode) console.log(`Node reads the Rust session ${sessionID} identically.`);
+  if (!process.exitCode) {
+    console.log(`Node reads the Rust-written sessions identically: ${scenarios.join(", ")}.`);
+  }
 } finally {
   await rm(dir, { recursive: true, force: true });
 }

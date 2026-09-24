@@ -307,7 +307,7 @@ impl Engine {
                     }
                 }
                 super::busy_input::fallback_guides(
-                    s,
+                    (s, now),
                     if cancelled || error.is_some() {
                         "guide.turnInterrupted"
                     } else {

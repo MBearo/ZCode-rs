@@ -57,6 +57,16 @@ fn entry(v: &Value) -> Entry {
     }
 }
 
+fn patch(v: &Value) -> inputs::Patch {
+    inputs::Patch {
+        id: text(v, "id").unwrap_or_default(),
+        delivery: text(v, "delivery"),
+        intent: v.get("intent").filter(|i| !i.is_null()).cloned(),
+        text: text(v, "text"),
+        queue_position: v["queuePosition"].as_i64(),
+    }
+}
+
 fn todo(v: &Value) -> Todo {
     Todo {
         content: text(v, "content").unwrap_or_default(),
@@ -92,6 +102,13 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
             Op::Part(part) => save_part(conn, part, None, now)?,
             Op::RemoveMessage(id) => remove_message(conn, session, id)?,
             Op::Entry(v) => entries::save(conn, &entry(v))?,
+            Op::UpdateInputs(updates) => {
+                let patches: Vec<inputs::Patch> = updates.iter().map(patch).collect();
+                inputs::update(conn, session, &patches, now)?
+            }
+            Op::SettleInput { id, status, reason } => {
+                inputs::settle(conn, id, session, status, reason.as_deref(), now)?
+            }
             Op::Todos(list) => todos::update(
                 conn,
                 session,

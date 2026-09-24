@@ -258,6 +258,7 @@ impl Engine {
                 let item = c.payload["queueItemId"]
                     .as_str()
                     .context("Queue id required")?;
+                let now = self.clock.now();
                 let s = self.sessions.get_mut(&id).unwrap();
                 let pos = s
                     .queue
@@ -279,9 +280,12 @@ impl Engine {
                         super::goal_commands::validate_objective(text)?;
                     }
                     s.queue[pos]["text"] = text.into();
+                    s.node_update_inputs(now, vec![json!({"id": item, "text": text})]);
                 } else if c.kind == "deleteQueueItem" {
                     let removed = s.queue.remove(pos);
                     super::shared_context::release(s, &removed);
+                    // Node settleRemovedSessionInput：用户删除的排队输入写 cancelled 终态。
+                    s.node_settle_input(now, item, "cancelled", "user_removed");
                     let removed_key = serde_json::to_string(&(
                         Some(&id),
                         removed["sourceCommandId"].as_str().unwrap(),
@@ -302,11 +306,18 @@ impl Engine {
                     {
                         bail!("Queue target unavailable");
                     }
-                    let item = s.queue.remove(pos);
+                    let moved = s.queue.remove(pos);
                     let to = before
                         .and_then(|target| s.queue.iter().position(|q| q["queueItemId"] == target))
                         .unwrap_or(s.queue.len());
-                    s.queue.insert(to, item);
+                    s.queue.insert(to, moved);
+                    // 与 Node 一致：重排同时更新每项的 queuePosition，提升后的 intent 与冷投影一致。
+                    let mut positions = vec![];
+                    for (index, q) in s.queue.iter_mut().enumerate() {
+                        q["order"]["queuePosition"] = index.into();
+                        positions.push(json!({"id": q["queueItemId"], "queuePosition": index}));
+                    }
+                    s.node_update_inputs(now, positions);
                 }
                 s.revision += 1;
             }

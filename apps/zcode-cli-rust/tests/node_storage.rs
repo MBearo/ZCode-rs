@@ -6,11 +6,11 @@ mod harness;
 
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
-use zcode_cli_state::node::{acks, cold, inputs, resume, sessions};
+use zcode_cli_state::node::{acks, inputs, resume, sessions};
 
 #[tokio::test]
 async fn a_tool_turn_is_stored_as_node_records_and_reads_back_as_the_live_context() {
-    let mut h = harness::start(false, None).await;
+    let mut h = harness::start(None, None).await;
     let session = h.create("c1", "Fix it").await;
     assert!(session.starts_with("sess_"), "{session}");
     let conn = h.settled(&session, 1).await;
@@ -85,7 +85,7 @@ async fn a_tool_turn_is_stored_as_node_records_and_reads_back_as_the_live_contex
 async fn queued_input_and_a_restarted_runtime_continue_the_node_session() {
     let (started_tx, started) = oneshot::channel();
     let (release, release_rx) = oneshot::channel();
-    let mut h = harness::start(true, Some((started_tx, release_rx))).await;
+    let mut h = harness::start(Some("restart"), Some((started_tx, release_rx))).await;
     let session = h.create("c1", "Fix it").await;
     started.await.unwrap();
     // 运行中的输入先进入账本（admitted/queue），轮次结束后提升为下一轮。
@@ -143,16 +143,68 @@ async fn queued_input_and_a_restarted_runtime_continue_the_node_session() {
         .map(|r| &r["sourceCommandId"])
         .collect();
     assert_eq!(sources, [&json!("c1"), &json!("c2"), &json!("c3")]);
+    harness::dump(&next, &conn, &session);
+}
 
-    if std::env::var_os("ZCODE_CLI_RUST_NODE_DUMP").is_some() {
-        let active = cold::active(&conn, &session).unwrap();
-        let history: Vec<Value> = zcode_cli_rust::domain::node_history::hydrate(&active, &|_| None)
-            .entries
-            .iter()
-            .map(|e| e.to_node())
-            .collect();
-        let read = json!({"sessionId": session, "history": history,
-            "rows": resumed.conversation.rows, "state": resumed.conversation.state});
-        std::fs::write(next.root.join("rust.json"), read.to_string()).unwrap();
-    }
+#[tokio::test]
+async fn guided_and_removed_busy_inputs_are_recorded_like_node() {
+    let (started_tx, started) = oneshot::channel();
+    let (release, release_rx) = oneshot::channel();
+    let mut h = harness::start(Some("guide"), Some((started_tx, release_rx))).await;
+    let session = h.create("c1", "Fix it").await;
+    started.await.unwrap();
+    let guide = json!({"commandId": "c2", "clientId": "cli", "sessionId": session,
+        "type": "sendText", "issuedAt": 1, "payload": {"text": "Also this", "requestedDelivery": "guide"}});
+    assert_eq!(h.command(2, guide).await["status"], "accepted");
+    let queued = h.send_text(3, &session, "c3", "Drop me").await;
+    let delete = json!({"commandId": "d1", "clientId": "cli", "sessionId": session,
+        "type": "deleteQueueItem", "issuedAt": 1, "baseRevision": queued["revisionAtDecision"],
+        "payload": {"queueItemId": "queue_c3"}});
+    assert_eq!(h.command(4, delete).await["status"], "accepted");
+    release.send(()).unwrap();
+    let conn = h.settled(&session, 1).await;
+    let _first = h.requests.recv().await.unwrap();
+    let second = h.requests.recv().await.unwrap();
+
+    let guided = inputs::get(&conn, "queue_c2").unwrap().unwrap();
+    assert_eq!(guided.status, "promoted");
+    let removed = inputs::get(&conn, "queue_c3").unwrap().unwrap();
+    assert_eq!(
+        (removed.status.as_str(), removed.status_reason.as_deref()),
+        ("cancelled", Some("user_removed"))
+    );
+    let ack = acks::lookup(&conn, (&session, false), "c3", 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(ack["reasonCode"], "fault.command.inputCancelled");
+
+    // 引导输入在同一轮内、以插话形态进入模型上下文，冷读取与运行时一致。
+    let resumed = resume::resume(&conn, &session, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    let live: Vec<Value> = second
+        .into_iter()
+        .filter(|m| m["role"] != "system")
+        .filter(|m| {
+            !m["content"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("<system-reminder>"))
+        })
+        .collect();
+    let cold = &resumed.history.messages;
+    assert_eq!(cold[..live.len()], live[..], "{cold:#?}");
+    assert!(
+        live.last().unwrap()["content"]
+            .as_str()
+            .unwrap()
+            .contains("Also this")
+    );
+    let headers = resumed
+        .conversation
+        .rows
+        .iter()
+        .filter(|r| r["kind"] == "turnHeader")
+        .count();
+    assert_eq!(headers, 1, "a guided input stays in its turn");
+    harness::dump(&h, &conn, &session);
 }

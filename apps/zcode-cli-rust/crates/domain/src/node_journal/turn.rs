@@ -42,34 +42,40 @@ impl Session {
     /// from the ledger when the input was admitted there. Opens the turn.
     pub fn node_user_prompt(&mut self, now: u64, p: Prompt) {
         let runtime = crate::node_ids::turn_id(p.turn);
+        let user = p.message.clone();
+        self.push_prompt(now, p, &runtime);
+        self.open_turn(runtime, user);
+    }
+
+    /// The user message and its text part of `p` in the turn `runtime`.
+    pub(super) fn push_prompt(&mut self, now: u64, p: Prompt, runtime: &str) {
         let message = r::user_message(&UserPrompt {
             id: &p.message,
             session: &self.id,
             created: now,
             selection: self.node_selection(),
-            turn: &runtime,
+            turn: runtime,
             command: p.command,
             tools: p.tools,
             metadata: p.metadata,
         });
         let parts = vec![r::text_part(p.part, &self.id, &p.message, p.text, now, now)];
-        let op = match p.queue_id {
-            Some(id) => Op::PromoteInput {
-                id: id.into(),
-                message,
-                parts,
-            },
+        match p.queue_id {
+            Some(id) => self.node.push(
+                now,
+                Op::PromoteInput {
+                    id: id.into(),
+                    message,
+                    parts,
+                },
+            ),
             None => {
                 self.node.push(now, Op::Message(message));
                 for part in parts {
                     self.node.push(now, Op::Part(part));
                 }
-                self.open_turn(runtime, p.message);
-                return;
             }
-        };
-        self.node.push(now, op);
-        self.open_turn(runtime, p.message);
+        }
     }
 
     fn open_turn(&mut self, runtime: String, user: String) {
