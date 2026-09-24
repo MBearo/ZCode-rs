@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { backgroundTask, taskOutputBlocks } from "./zcode-cli-rust-tool-text.js";
 import { readFile, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { fixture, event, end, waitForFile } from "./zcode-cli-rust-fixture.js";
@@ -63,15 +64,14 @@ test(
             });
             break;
           case 5:
-            taskId = JSON.parse(last.content).backgroundTaskId;
-            assert(taskId);
+            taskId = backgroundTask(last.content).taskId;
             call(res, "TaskOutput", { task_id: taskId, block: true, timeout: 5000 });
             break;
           default: {
-            const result = JSON.parse(last.content);
+            const result = taskOutputBlocks(last.content);
             assert.equal(result.retrieval_status, "success");
-            assert.equal(result.task.exitCode, 0);
-            assert.match(result.task.output, /passed/);
+            assert.equal(result.exit_code, "0");
+            assert.match(result.output!, /passed/);
             done(res);
           }
         }
@@ -118,9 +118,7 @@ test(
           else call(res, "TaskOutput", { task_id: taskId, block: action === "wait", timeout: 25 });
         } else {
           if (action === "start") {
-            const result = JSON.parse(last.content);
-            taskId = result.backgroundTaskId;
-            outputFile = result.persistedOutputPath;
+            ({ taskId, outputFile } = backgroundTask(last.content));
           } else output = last.content;
           done(res);
         }
@@ -141,13 +139,14 @@ test(
       const pid = Number(await readFile(join(f.cwd, "background.pid"), "utf8"));
       process.kill(pid, 0);
       await send(id, "wait");
-      assert.equal(JSON.parse(output).retrieval_status, "timeout");
+      assert.equal(taskOutputBlocks(output).retrieval_status, "timeout");
       const other = await h.create();
       await h.subscribe(`conversation/${other}`);
       await send(other, "foreign");
-      assert.match(output, /Task unavailable in this session/);
+      // Node：TaskOutput 在输入校验阶段以处理器失败拒绝其他会话的任务。
+      assert.equal(output, `<tool_use_error>No task found with ID: ${taskId}</tool_use_error>`);
       await send(id, "stop");
-      assert.match(output, /stopped/);
+      assert.match(output, /^\{"message":"Successfully stopped task: /);
       assert(
         h.messages.some((m) =>
           m.params?.frame?.payload?.deltas?.some(
@@ -157,9 +156,10 @@ test(
       );
       assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
       await send(id, "stop");
-      assert.match(output, /stopped/);
+      // Node TaskStop 是 strict：已结束的任务报错。
+      assert.equal(output, `Task ${taskId} is not running (status: killed)`);
       await send(id, "poll");
-      assert.equal(JSON.parse(output).task.status, "killed");
+      assert.equal(taskOutputBlocks(output).status, "killed");
       await send(id, "start");
       const nextPid = Number(await readFile(join(f.cwd, "background.pid"), "utf8"));
       const afterCancel = h.messages.length;

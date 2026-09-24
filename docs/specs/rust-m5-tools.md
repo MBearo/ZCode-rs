@@ -67,4 +67,21 @@
 - 成功但内容在 JS `trim` 后为空：`({ToolName} completed with no output)`，在追加 hook 上下文之前替换。
 - 失败标志只来自结果本身（历史中的 `_zcode_tool_failed`）；microcompact 不再按文本前缀判断失败。Anthropic 请求只在失败时写 `is_error: true`（与 AI SDK 一致）。
 
-后续子项（TR §6.5）：Bash、TaskOutput、TaskStop 文本（M5.2b）；Grep、Write、Read 文本与输入校验信封、预算与持久化信封（M5.2c 起）。
+### 2.2 Bash、TaskOutput、TaskStop 文本（M5.2b）
+
+依据：Node `bash-model-content.ts`、`bash-semantics.ts`、`task-output.ts`、`task-output-bash.ts`、`task-output-projection.ts`、`task-stop.ts`、`result-persistence-format.ts`。
+
+- **Bash 结果对象**用 Node `BashOutput` 字段：`stdout` 为按到达顺序合并的两路输出的前 30 000 字节（Node posix-bash 把两路写入同一文件），`stderr` 只放执行器消息（超时 `Command timed out after {时长}`、取消 `Execution cancelled`、输出超限 `Execution output exceeded the persisted output limit`），`persistedOutputSize` 为合并输出总字节数。时长按 Node `formatTimeoutDuration`（`500ms`、`30s`、`1.5m`、`2m`、`2h`）。
+- **模型文本**（`formatBashModelContent`）：以下部分去掉空项后用 `\n` 连接：
+  1. 仅当"提供方错误"时为 `Exit code {n}`；
+  2. stdout：去掉开头的空白行并去尾部空白；总字节超过 30 000 且不是后台任务时换成 Bash 版 `<persisted-output>` 信封（1024 进制、无空格的大小，预览 2000 个字符，超过一半处有换行时在该换行截断）；
+  3. stderr 去首尾空白，被中断（超时或取消）时追加 `<error>Command was aborted before completion</error>`；
+  4. 后台任务：`Command running in background with ID: {id}. Output is being written to: {path}. You will be notified when it completes. To check interim output, use Read on that file path.`
+- **提供方错误与 `is_error`**：状态为 failed、退出码为非 0 数字，且不是"语义上的非错误"；最后一条命令（`git grep` / `git diff` 按子命令）为 `grep`、`egrep`、`fgrep`、`rg`、`find`、`diff`、`test`、`[` 且退出码为 1 时不算错误。解析失败或含不支持的语法时不做语义判断。`is_error` = 提供方错误或被中断。
+- 空命令返回空结果（通用占位 `(Bash completed with no output)`）。
+- **TaskOutput**：块之间用空行连接：`<retrieval_status>`、`<task_id>`、`<task_type>local_bash</task_type>`、`<status>`（running / completed / failed / killed）、有退出码时 `<exit_code>`、输出非空时 `<output>\n{内容}\n</output>`。运行中的任务读输出文件前 30 000 字节，已结束的读最后 8 MiB（有省略时前缀 `[{KB}KB of earlier output omitted]`）；内容超过 32 000 个 UTF-16 码元时保留尾部并前缀 `[Truncated. Full output: {path}]`。缺 `task_id` 与不存在的任务为处理器失败：`Task ID is required`（1）、`No task found with ID: {id}`（2）。
+- **TaskStop**：成功为紧凑 JSON `{"message":"Successfully stopped task: {id} ({command})","task_id":…,"task_type":"local_bash","command":…}`；失败为抛出错误：`Missing required parameter: task_id`、`No task found with ID: {id}`、已结束的任务 `Task {id} is not running (status: {status})`（Node strict）。
+
+与 Node 的差异：超时仍终止进程（Node 把多数前台命令转入后台，属 Bash 项）；未实现 cwd 重置提示、读后修改提示、gh 限流提示、图片输出与 `TASK_MAX_OUTPUT_LENGTH`；启动失败按抛出错误处理。
+
+后续子项（TR §6.5）：Grep、Write、Read 文本与输入校验信封、预算与持久化信封（M5.2c 起）。

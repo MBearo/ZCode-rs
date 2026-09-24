@@ -191,9 +191,9 @@ test(
         id = await h.create();
       await h.subscribe(`conversation/${id}`);
       await send(h, id, "env");
-      const output = JSON.parse(
-        f.requests[1]!.messages.findLast((m: Message) => m.role === "tool").content,
-      ).stdout as string;
+      // Node Bash 结果是纯文本（合并输出）。
+      const output = f.requests[1]!.messages.findLast((m: Message) => m.role === "tool")
+        .content as string;
       const env = new Map(
         output
           .split("\n")

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { backgroundTask } from "./zcode-cli-rust-tool-text.js";
 import { join } from "node:path";
 import { fixture, event, end, waitForFile } from "./zcode-cli-rust-fixture.js";
 
@@ -139,8 +140,7 @@ test(
           });
           end(res, "tool_calls");
         } else {
-          if (last.tool_call_id === "background-tree")
-            taskId = JSON.parse(last.content).backgroundTaskId;
+          if (last.tool_call_id === "background-tree") taskId = backgroundTask(last.content).taskId;
           else for (const pid of pids) gone(pid);
           event(res, { content: "complete" });
           end(res, "stop");

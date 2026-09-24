@@ -28,6 +28,7 @@ tokio-util.workspace = true
 unicode-normalization.workspace = true
 url.workspace = true
 zcode-cli-bash.workspace = true
+zcode-cli-bash-parse.workspace = true
 zcode-cli-core-api.workspace = true
 zcode-cli-domain.workspace = true
 zcode-cli-host.workspace = true

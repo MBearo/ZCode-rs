@@ -21,6 +21,7 @@ pub mod legacy_stream;
 pub mod model;
 pub mod option_map;
 pub mod permission;
+pub mod persisted_output;
 pub mod plan_mode;
 pub mod prompt;
 pub mod question;

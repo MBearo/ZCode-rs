@@ -1,7 +1,7 @@
-use super::tool_process::{INLINE, run};
-use super::tools::{boolean, keys, string, truncate_utf8, uint};
+use super::tool_process::run;
+use super::tools::{boolean, keys, string};
 use crate::{
-    contract::{Event, EventSink, ToolOutput},
+    contract::{Event, EventSink, ToolError, ToolOutput},
     domain::background::BackgroundTask,
 };
 use anyhow::{Context, Result, bail};
@@ -12,11 +12,11 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::{
-    io::AsyncReadExt,
-    sync::{Mutex, oneshot, watch},
-};
+use tokio::sync::{Mutex, oneshot, watch};
 use tokio_util::sync::CancellationToken;
+#[path = "task_tools.rs"]
+mod task;
+
 struct Job {
     cancel: CancellationToken,
     state: watch::Receiver<Option<Value>>,
@@ -63,83 +63,33 @@ impl ShellTasks {
                 let id = args["task_id"]
                     .as_str()
                     .or_else(|| args["shell_id"].as_str())
-                    .context("task_id required")?;
-                let job=self.jobs.lock().await.get(session).and_then(|jobs|jobs.get(id)).cloned().context("Task unavailable in this session (tasks are not restarted after process recovery)")?;
-                let mut state = job.state.clone();
-                if name == "TaskStop" {
-                    job.cancel.cancel();
-                    if state.borrow().is_none() {
-                        tokio::select! {_=cancel.cancelled()=>bail!("Cancelled"),r=state.wait_for(|v|v.is_some())=>{r?;}}
+                    .filter(|id| !id.is_empty());
+                let stop = name == "TaskStop";
+                let Some(id) = id else {
+                    if stop {
+                        bail!("Missing required parameter: task_id");
                     }
-                    let message = format!("Task {id} stopped");
-                    let data = json!({"message":message,"task_id":id,"task_type":"bash","command":job.command});
-                    return Ok(ToolOutput {
-                        denied: false,
-                        stop_turn: false,
-                        failed: false,
-                        content: message.clone(),
-                        display: Some(
-                            json!({"kind":"task_stop","taskId":id,"taskType":"bash","command":job.command,"message":message}),
-                        ),
-                        data,
-                    });
-                }
-                let timeout = uint(args, "timeout", 30000)?;
-                if timeout > 600000 {
-                    bail!("TaskOutput timeout exceeds 600000 ms");
-                }
-                let mut retrieval = "success";
-                if state.borrow().is_none() {
-                    if boolean(args, "block", true)? {
-                        tokio::select! {
-                            _=cancel.cancelled()=>bail!("Cancelled"),
-                            result=tokio::time::timeout(Duration::from_millis(timeout),state.wait_for(|s|s.is_some()))=>{match result{Ok(r)=>{r?;},Err(_)=>retrieval="timeout"}},
-                        }
-                    } else {
-                        retrieval = "not_ready";
+                    return Err(ToolError::handler(1, "Task ID is required"));
+                };
+                let job = self
+                    .jobs
+                    .lock()
+                    .await
+                    .get(session)
+                    .and_then(|jobs| jobs.get(id))
+                    .cloned();
+                let Some(job) = job else {
+                    // Node：TaskOutput 在 validateInput 返回处理器失败，TaskStop 抛出错误。
+                    let message = format!("No task found with ID: {id}");
+                    if stop {
+                        bail!("{message}");
                     }
+                    return Err(ToolError::handler(2, message));
+                };
+                if stop {
+                    return self.stop(id, &job, cancel).await;
                 }
-                let final_result = state.borrow().clone();
-                let mut file = tokio::fs::File::open(&job.path).await?;
-                let mut bytes = vec![];
-                (&mut file)
-                    .take(INLINE as u64)
-                    .read_to_end(&mut bytes)
-                    .await?;
-                let mut output = String::from_utf8_lossy(&bytes).into_owned();
-                if file.metadata().await?.len() > INLINE as u64 {
-                    output.push_str(&format!(
-                        "\n[output truncated; Read {} with offset/limit]",
-                        job.path.display()
-                    ));
-                }
-                let status = final_result
-                    .as_ref()
-                    .map(|v| match v["status"].as_str() {
-                        Some("completed") => "completed",
-                        Some("cancelled") => "killed",
-                        _ => "failed",
-                    })
-                    .unwrap_or("running");
-                let data = json!({"retrieval_status":retrieval,"task":{"task_id":id,"task_type":"bash","status":status,"description":job.description,"output":output,"exitCode":final_result.as_ref().and_then(|v|v["exitCode"].as_i64()),"outputFile":job.path}});
-                let mut preview = output.clone();
-                truncate_utf8(&mut preview, 1800);
-                let mut display =
-                    json!({"kind":"task_output","retrievalStatus":retrieval,"taskStatus":status});
-                if !preview.is_empty() {
-                    display["output"] = preview.into();
-                }
-                if output.len() > 1800 {
-                    display["truncated"] = true.into();
-                }
-                Ok(ToolOutput {
-                    denied: false,
-                    stop_turn: false,
-                    failed: false,
-                    content: serde_json::to_string(&data)?,
-                    data,
-                    display: Some(display),
-                })
+                self.task_output(id, &job, args, cancel).await
             }
             _ => bail!("Unsupported shell tool"),
         }
@@ -164,8 +114,9 @@ impl ShellTasks {
             ],
         )?;
         let command = string(args, "command")?.to_owned();
-        if command.trim().is_empty() {
-            bail!("command must not be empty");
+        if crate::domain::js_string::trim(&command).is_empty() {
+            // Node：空命令返回空结果（由通用占位显示 "(Bash completed with no output)"）。
+            return Ok(ToolOutput::text(String::new()));
         }
         let background = boolean(args, "run_in_background", false)?;
         boolean(args, "dangerouslyDisableSandbox", false)?;
@@ -201,7 +152,7 @@ impl ShellTasks {
         let combined = Arc::new(Mutex::new(tokio::fs::File::create(&path).await?));
         if !background {
             let data = run(cwd, &self.env, &command, &path, combined, timeout, cancel).await?;
-            return Ok(shell_output(data));
+            return Ok(shell_output(&command, data));
         }
         let sink = sink
             .context("Background execution requires a session owner")?
@@ -318,6 +269,7 @@ impl ShellTasks {
             let _ = tx.send(Some(result));
         });
         Ok(shell_output(
+            &command,
             json!({"stdout":"","stderr":"","status":"backgrounded","interrupted":false,"backgroundTaskId":id,"persistedOutputPath":path,"backgroundedByUser":false}),
         ))
     }
@@ -369,12 +321,10 @@ impl ShellTasks {
         Ok(())
     }
 }
-fn shell_output(data: Value) -> ToolOutput {
-    let failed = matches!(
-        data["status"].as_str(),
-        Some("failed" | "timed_out" | "cancelled" | "spawn_error")
-    );
-    let mut output = ToolOutput::new(serde_json::to_string(&data).unwrap(), data);
+/// Node `formatBashModelContent`; `failed` is Node's provider `is_error`.
+fn shell_output(command: &str, data: Value) -> ToolOutput {
+    let (content, failed) = super::bash_output::bash_content(command, &data);
+    let mut output = ToolOutput::new(content, data);
     output.failed = failed;
     output
 }

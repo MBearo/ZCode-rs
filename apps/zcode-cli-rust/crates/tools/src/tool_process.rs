@@ -12,12 +12,9 @@ use tokio::{
     sync::Mutex,
 };
 use tokio_util::sync::CancellationToken;
-pub(super) const INLINE: usize = 24 * 1024;
 const MAX_STREAM: u64 = 16 * 1024 * 1024;
 struct Captured {
-    text: String,
     bytes: u64,
-    truncated: bool,
     path: PathBuf,
 }
 async fn capture(
@@ -28,7 +25,6 @@ async fn capture(
 ) -> Result<Captured> {
     let result = async {
         let mut file = tokio::fs::File::create(&path).await?;
-        let mut preview = vec![];
         let mut bytes = 0u64;
         let mut buf = [0u8; 8192];
         loop {
@@ -41,8 +37,6 @@ async fn capture(
                 file.write_all(&buf[..write]).await?;
                 combined.lock().await.write_all(&buf[..write]).await?;
             }
-            let take = n.min(INLINE.saturating_sub(preview.len()));
-            preview.extend_from_slice(&buf[..take]);
             bytes += n as u64;
             if bytes > MAX_STREAM {
                 cancel.cancel();
@@ -50,12 +44,7 @@ async fn capture(
             }
         }
         file.flush().await?;
-        Ok(Captured {
-            text: String::from_utf8_lossy(&preview).into_owned(),
-            bytes,
-            truncated: bytes > preview.len() as u64,
-            path,
-        })
+        Ok(Captured { bytes, path })
     }
     .await;
     // 输出落盘失败必须停止进程树，不能让已丢失输出的后台任务继续运行。
@@ -165,18 +154,43 @@ pub(super) async fn run(
     } else {
         reason
     };
-    let mut data = json!({"stdout":out.text,"stderr":err.text,"status":reason,"interrupted":reason=="cancelled"||reason=="timed_out","timedOut":reason=="timed_out","cancelled":reason=="cancelled","stdoutTruncated":out.truncated,"stderrTruncated":err.truncated,"stdoutBytes":out.bytes,"stderrBytes":err.bytes,"persistedOutputPath":path,"stdoutPersistedOutputPath":out.path,"stderrPersistedOutputPath":err.path,"persistedOutputSize":out.bytes.min(MAX_STREAM)+err.bytes.min(MAX_STREAM)});
+    // Node posix-bash 把两路输出写入同一文件：模型看合并输出的头部，stderr 字段只放执行器消息。
+    let message = match reason {
+        "timed_out" => format!(
+            "Command timed out after {}",
+            super::bash_output::duration(timeout.map_or(0, |t| t.as_millis() as u64))
+        ),
+        "cancelled" => "Execution cancelled".to_owned(),
+        _ if overflow.is_cancelled() => {
+            "Execution output exceeded the persisted output limit".to_owned()
+        }
+        _ => String::new(),
+    };
+    let output = read_head(path, super::bash_output::INLINE_BYTES).await?;
+    let total = out.bytes.min(MAX_STREAM) + err.bytes.min(MAX_STREAM);
+    let mut data = json!({"stdout":output,"stderr":message,"status":reason,"interrupted":reason=="cancelled"||reason=="timed_out","timedOut":reason=="timed_out","cancelled":reason=="cancelled","stdoutTruncated":total > super::bash_output::INLINE_BYTES as u64,"stdoutBytes":out.bytes,"stderrBytes":err.bytes,"persistedOutputPath":path,"stdoutPersistedOutputPath":out.path,"stderrPersistedOutputPath":err.path,"persistedOutputSize":total});
     if let Some(code) = status.and_then(|s| s.code()) {
         data["exitCode"] = code.into();
     }
-    if overflow.is_cancelled() {
-        data["stderr"] = format!(
-            "{}\nOutput limit exceeded (16 MiB per stream); process stopped",
-            data["stderr"].as_str().unwrap()
-        )
-        .into();
-    }
     Ok(data)
+}
+
+/// The first `limit` bytes of `path` as text, without a split trailing character.
+pub(super) async fn read_head(path: &Path, limit: usize) -> Result<String> {
+    let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
+    tokio::fs::File::open(path)
+        .await?
+        .take(limit as u64)
+        .read_to_end(&mut bytes)
+        .await?;
+    Ok(match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(error) if error.utf8_error().error_len().is_none() => {
+            let valid = error.utf8_error().valid_up_to();
+            String::from_utf8_lossy(&error.as_bytes()[..valid]).into_owned()
+        }
+        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+    })
 }
 
 pub(super) async fn terminate(

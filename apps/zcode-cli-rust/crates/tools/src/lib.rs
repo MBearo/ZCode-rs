@@ -1,6 +1,7 @@
 use zcode_cli_core_api as contract;
 use zcode_cli_domain as domain;
 mod agent_profiles;
+mod bash_output;
 mod bash_permission;
 mod checkpoint_blobs;
 mod extension_config;
