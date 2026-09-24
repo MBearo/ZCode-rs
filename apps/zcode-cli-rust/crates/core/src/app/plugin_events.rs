@@ -8,6 +8,30 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 impl Engine {
+    /// An adapter's Host interaction: a notification, or a request keyed by
+    /// its `requestId` whose reply is released only at shutdown otherwise.
+    pub(super) fn host_call(
+        &mut self,
+        method: &'static str,
+        params: serde_json::Value,
+        reply: Option<tokio::sync::oneshot::Sender<serde_json::Value>>,
+    ) {
+        let Some(reply) = reply else {
+            self.outbox
+                .push(crate::contract::ServerMsg::HostNotification { method, params });
+            return;
+        };
+        let id = params["requestId"].as_str().unwrap_or_default().to_owned();
+        let wait = super::waiters::HostWait {
+            owner: method.into(),
+            workspace: params["workspace"].clone(),
+            reply,
+        };
+        self.waiters.add_host(id.clone(), wait);
+        self.outbox
+            .push(crate::contract::ServerMsg::HostRequest { id, method, params });
+    }
+
     /// The session's plugin reference catalog, frozen on first use in this
     /// process (Node freezes it when the App is created).
     pub(super) async fn session_plugin_catalog(&mut self, id: &str) -> Result<Arc<[Value]>> {
@@ -36,6 +60,14 @@ impl Engine {
             event,
         } = event;
         match event {
+            Event::HostCall {
+                method,
+                params,
+                reply,
+            } => {
+                self.host_call(method, params, reply);
+                Ok(None)
+            }
             Event::PluginCatalog { reply } => {
                 match self.session_plugin_catalog(&id).await {
                     Ok(catalog) => {

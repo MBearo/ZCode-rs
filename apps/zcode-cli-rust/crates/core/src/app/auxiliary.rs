@@ -119,12 +119,11 @@ impl Engine {
                 });
             }
             Event::UsageDone { result } => self.usage_done(&id, result),
-            Event::PluginProgress { params } => {
-                self.outbox.push(ServerMsg::HostNotification {
-                    method: "plugins/operationProgress",
-                    params,
-                });
-            }
+            Event::HostCall {
+                method,
+                params,
+                reply,
+            } => self.host_call(method, params, reply),
             Event::AuxiliaryReply { result } => {
                 // 插件作业自行按 Node 语义处理取消（安装返回诊断、市场操作报错）。
                 let job = self.auxiliary.remove(&id).unwrap();

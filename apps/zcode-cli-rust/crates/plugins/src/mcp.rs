@@ -227,12 +227,23 @@ fn server(key: &str, raw: &Value, context: &Context<'_>) -> Result<Value, Failur
     if !["stdio", "http", "sse"].contains(&kind) {
         return Err(Failure::Other(format!("Unsupported MCP transport: {kind}")));
     }
-    // 官方鉴权与 OAuth 在 M10.5 接入；没有鉴权通道时不能以无凭据方式连接。
-    if raw.get("auth").is_some() || raw.get("oauth").is_some() {
+    // zcode_official 只允许 http 与 stdio；sse 出现即禁用，不静默忽略。
+    let auth = crate::mcp_auth::parse(raw.get("auth"), key).map_err(Failure::Other)?;
+    if auth.is_some() && kind != "http" && kind != "stdio" {
         return Err(Failure::Other(format!(
-            "MCP server {key}: auth is not supported by this runtime yet"
+            "MCP server {key}: zcode_official auth requires type \"http\" or \"stdio\", got \"{kind}\""
         )));
     }
+    let oauth_conflict = || {
+        let message = match auth {
+            Some(_) => {
+                format!("MCP server {key}: zcode_official auth cannot be combined with oauth")
+            }
+            // Rust MCP 没有 OAuth 通道；没有鉴权通道时不能以无凭据方式连接。
+            None => format!("MCP server {key}: auth is not supported by this runtime yet"),
+        };
+        raw.get("oauth").map(|_| Failure::Other(message))
+    };
     let official = context.loaded.marketplace == crate::official::MARKETPLACE;
     let mut config = json!({"type":kind,"source":{"kind":if official {"builtin"} else {"plugin"}}});
     if let Some(enabled) = raw["enabled"].as_bool() {
@@ -243,6 +254,9 @@ fn server(key: &str, raw: &Value, context: &Context<'_>) -> Result<Value, Failur
     }
     if kind == "stdio" {
         let command = required(&raw["command"], "stdio MCP server requires command")?;
+        if let Some(conflict) = oauth_conflict() {
+            return Err(conflict);
+        }
         let root = context.loaded.root.to_string_lossy();
         let data = context.data_path.to_string_lossy();
         let cwd = context.cwd.to_string_lossy();
@@ -269,15 +283,35 @@ fn server(key: &str, raw: &Value, context: &Context<'_>) -> Result<Value, Failur
             config["cwd"] = template(cwd, context, false)?.into();
         }
         config["env"] = Value::Object(env);
-        return Ok(config);
+        return Ok(with_auth(config, auth, key, context));
     }
     let url = required(&raw["url"], &format!("{kind} MCP server requires url"))?;
     // 与 Node 相同：headers 先于 url 模板解析，决定两处都出错时报告哪一个。
     if raw["headers"].is_object() {
         config["headers"] = Value::Object(string_record(&raw["headers"], context)?);
     }
+    if let Some(conflict) = oauth_conflict() {
+        return Err(conflict);
+    }
+    // 保留头只在官方鉴权路径下拦截；普通 MCP 静态携带 authorization 是既有合法用法。
+    let hits = crate::mcp_auth::reserved_hits(&config["headers"]);
+    if auth.is_some() && !hits.is_empty() {
+        return Err(Failure::Other(format!(
+            "MCP server {key}: static headers must not contain reserved header(s): {}",
+            hits.join(", ")
+        )));
+    }
     config["url"] = template(url, context, false)?.into();
-    Ok(config)
+    Ok(with_auth(config, auth, key, context))
+}
+
+/// The official auth declaration with its host-generated provenance.
+fn with_auth(mut config: Value, auth: Option<Value>, key: &str, context: &Context<'_>) -> Value {
+    if let Some(auth) = auth {
+        config["auth"] = auth;
+        config["official"] = crate::mcp_auth::provenance(key, &context.loaded.id);
+    }
+    config
 }
 
 /// Node `resolvePluginMcpServers`: `(plugin:<name>:<key>, config)` of every

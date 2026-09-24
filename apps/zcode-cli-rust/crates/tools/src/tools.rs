@@ -207,6 +207,13 @@ impl ToolPort for WorkspaceTools {
     fn mcp_inventory(&self, session: &str) -> Vec<(String, Vec<String>)> {
         self.mcp.inventory(session)
     }
+    fn attach_events(
+        &self,
+        events: tokio::sync::mpsc::Sender<crate::contract::RunEvent>,
+        workspace_path: &str,
+    ) {
+        self.mcp.official.attach(events, workspace_path);
+    }
     async fn plugins(
         &self,
         method: &str,

@@ -72,6 +72,8 @@ tokio-util = "0.7"
 # 已是 hyper/reqwest 的传递依赖；runtime 只用门面宏，订阅者在 host 内实现。
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+# 官方 MCP 的 streamable HTTP 客户端产出与 rmcp 相同的 SSE 事件类型，版本须与 rmcp 一致。
+sse-stream = "0.2.6"
 # 插件 ZIP 来源解压（Node yauzl）：只启用 deflate，其余压缩方法按 Node 报不支持。
 zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 url = "2"

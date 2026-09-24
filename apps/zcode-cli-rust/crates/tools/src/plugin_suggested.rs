@@ -136,7 +136,12 @@ pub(super) async fn resolve(
     }
     // 本地缺失时先通知同一 operation 进入 loading，网络等待期间 UI 才有反馈。
     let progress = json!({"operationId":params["operationId"],"state":"refreshing"});
-    let _ = sink.send(Event::PluginProgress { params: progress }).await;
+    let progress = Event::HostCall {
+        method: "plugins/operationProgress",
+        params: progress,
+        reply: None,
+    };
+    let _ = sink.send(progress).await;
     if let Err(result) = refresh(tools, id, cancel).await {
         return Ok(result);
     }

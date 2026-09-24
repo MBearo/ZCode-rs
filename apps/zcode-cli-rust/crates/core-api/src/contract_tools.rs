@@ -80,6 +80,14 @@ pub trait ToolPort: Send + Sync {
     fn mcp_inventory(&self, _session: &str) -> Vec<(String, Vec<String>)> {
         vec![]
     }
+    /// The engine's event channel, for adapters that ask the Host (official
+    /// MCP identity headers, spec rust-m10-plugins §3.11).
+    fn attach_events(
+        &self,
+        _events: tokio::sync::mpsc::Sender<crate::contract::RunEvent>,
+        _workspace_path: &str,
+    ) {
+    }
     /// A `plugins/*` management request of the workspace (spec rust-m10-plugins);
     /// progress notifications travel through `sink`.
     async fn plugins(

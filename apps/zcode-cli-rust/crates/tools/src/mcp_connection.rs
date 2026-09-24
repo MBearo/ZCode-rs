@@ -39,16 +39,24 @@ impl Connection {
     pub async fn open(
         config: &Server,
         transport: Transport,
+        auth: &std::sync::Arc<super::official_auth::OfficialAuth>,
         cancel: &CancellationToken,
     ) -> Result<Self> {
         let (env, http) = match transport {
             Transport::Stdio(env) => (Some(env), None),
             Transport::Http(client) => (None, Some(client)),
         };
+        // 官方鉴权只接受插件解析器生成的 provenance；OAuth 仍无通道。
+        let official = super::official_auth::Official::from_config(&config.raw);
+        let auth = auth.clone();
         ensure!(
-            config.raw.get("oauth").is_none() && config.raw.get("auth").is_none(),
+            config.raw.get("oauth").is_none()
+                && (config.raw.get("auth").is_none() || official.is_some()),
             "not_authenticated"
         );
+        let diagnostic = std::sync::Arc::new(std::sync::Mutex::new(
+            super::mcp_official_http::Diagnostic::default(),
+        ));
         let mode = match config.raw["protocolVersion"].as_str() {
             Some("2026-07-28") => ClientLifecycleMode::Discover {
                 preferred_versions: vec![ProtocolVersion::V_2026_07_28],
@@ -100,6 +108,19 @@ impl Connection {
                 )
                 .take_while(|r| std::future::ready(r.is_ok()))
                 .filter_map(|r| std::future::ready(r.ok()));
+                if let Some(official) = &official {
+                    // 官方 stdio server：每条出站请求与通知的 _meta 携带本次身份头。
+                    let writer =
+                        super::mcp_official::stdio_writer(input, auth.clone(), official.clone());
+                    return serve_client_with_lifecycle_and_ct(
+                        client,
+                        (writer, reader),
+                        mode,
+                        lifecycle.clone(),
+                    )
+                    .await
+                    .context("protocol_negotiation_failed");
+                }
                 let writer = FramedWrite::new(
                     input,
                     rmcp::transport::async_rw::JsonRpcMessageCodec::<
@@ -148,10 +169,29 @@ impl Connection {
                         );
                     }
                 }
-                let transport = StreamableHttpClientTransport::with_client(
-                    http.context("HTTP client missing")?,
-                    options,
-                );
+                let http = http.context("HTTP client missing")?;
+                if let Some(official) = &official {
+                    let url = config.raw["url"].as_str().unwrap_or_default();
+                    let mut client_http = super::mcp_official_http::OfficialHttp::new(
+                        http,
+                        url,
+                        official.clone(),
+                        &config.name,
+                        auth.clone(),
+                    );
+                    client_http.diagnostic = diagnostic.clone();
+                    let transport =
+                        StreamableHttpClientTransport::with_client(client_http, options);
+                    return serve_client_with_lifecycle_and_ct(
+                        client,
+                        transport,
+                        mode,
+                        lifecycle.clone(),
+                    )
+                    .await
+                    .context("protocol_negotiation_failed");
+                }
+                let transport = StreamableHttpClientTransport::with_client(http, options);
                 Ok(
                     serve_client_with_lifecycle_and_ct(client, transport, mode, lifecycle.clone())
                         .await
@@ -165,7 +205,8 @@ impl Connection {
             Err(error) => {
                 lifecycle.cancel();
                 cleanup_child(&mut owned).await?;
-                return Err(error);
+                let recorded = diagnostic.lock().expect("diagnostic").clone();
+                return Err(super::mcp_official::connect_failure(&recorded, error));
             }
         };
         let modern = service

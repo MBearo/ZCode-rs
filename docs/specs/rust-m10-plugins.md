@@ -123,7 +123,8 @@ sequenceDiagram
   - 其余模板保留原文。
 - **stdio 的环境变量**：先放入 `CLAUDE_PROJECT_DIR`、`ZCODE_PLUGIN_DATA`、`ZCODE_PLUGIN_ROOT`、`ZCODE_PROJECT_DIR`、`CLAUDE_PLUGIN_DATA`、`CLAUDE_PLUGIN_ROOT`，再合并 manifest 的 `env`，最后强制写入 `ZCODE_PLUGIN_ID = id`。
 - **失败处理**：变量错误发 `plugin_variable_missing`，其他错误发 `plugin_mcp_server_disabled`（均为 error），该 server 不注入。
-- **本期暂不支持**：`auth`（官方鉴权）与 `oauth` 字段。声明了这两个字段的 server 发 `plugin_mcp_server_disabled` 后跳过，M10.5 接入。这是有意的临时差异，没有鉴权通道时不能以无凭据方式连接。
+- **官方鉴权 `auth`**：M10.5 接入，见 §3.11。
+- **`oauth`**：Rust MCP 尚无 OAuth 通道（`rust-mcp.md`），声明了 `oauth`、且未声明官方鉴权的 server 发 `plugin_mcp_server_disabled` 后跳过。没有鉴权通道时不能以无凭据方式连接。
 
 ### 3.5 运行时接入
 
@@ -259,6 +260,110 @@ sequenceDiagram
 
 已有会话的运行时不因这些写入而变化（§2），新会话读取新配置。
 
+### 3.11 M10.5：官方 MCP 鉴权
+
+依据 Node：
+
+- `adapters/src/plugins/{mcp,mcp-official-auth}.ts`
+- `adapters/src/mcp/{index,official-auth,stdio-transport}.ts`
+- `bootstrap/src/zcode-protocol/official-mcp-auth-port.ts`
+- `bootstrap/src/zcode-protocol-entrypoint.ts`
+- `packages/shared/src/official-mcp-auth.ts`
+
+插件 `.mcp.json` 可声明 `auth: {type: "zcode_official", provider: "jwt_token"}`，用当前 ZCode 登录身份调用官方 MCP。Agent 不是身份权威：每次需要身份头时向 Host 反向请求，凭证不落配置、不持久化、不进日志。
+
+- **解析**（plugins crate，错误均发 `plugin_mcp_server_disabled`）：
+  - `auth` 缺省：普通 MCP。
+  - 不是对象：`MCP server <key>: auth must be an object`。
+  - `type` 或 `provider` 不是精确值：`unsupported auth type: <String(type)>` 或 `unsupported auth provider: …`。
+  - 只允许 http 与 stdio：`… zcode_official auth requires type "http" or "stdio", got "<type>"`。
+  - 与 `oauth` 同时声明：`… zcode_official auth cannot be combined with oauth`。
+  - http 的静态 headers 不得含保留头：
+    - 保留头为 `authorization`、`x-bigmodel-authorization`、`bigmodel-target-type`、`bigmodel-organization`、`bigmodel-project`、`x-coding-plan-api-key`、`mcp-session-id`、`mcp-protocol-version`；
+    - 比较不区分大小写，报错时去重、排序后列出。
+  - 解析结果带 `auth` 与宿主生成的 `official: {mcpKey, pluginId, source: "plugin"}`；`.mcp.json` 自带的 `official` 被覆盖。
+- **可信目标**（`isOfficialMcpOriginTrusted`）：
+  - 目标 origin 必须是 https、URL 不带用户名密码，且等于当前 ZCode API origin，即 `ZCODE_ENDPOINT_ORIGIN` 规则（`net::headers::endpoint_origin`）。
+  - `ZCODE_OFFICIAL_MCP_DEV_TRUSTED_ORIGINS`（逗号分隔）只放开列出的 http 回环 origin。
+  - `pluginId` 不参与判定。
+- **Host 反向请求** `interaction/requestOfficialMcpAuthHeaders`：
+  - 参数：`{requestId: "official-mcp-auth:<n>", workspace, pluginId, mcpKey, targetOrigin}`。
+  - `workspace`：
+    - `workspaceIdentity` 取 `ZCODE_WORKSPACE_IDENTITY`（去空白后非空时）；
+    - `workspaceKey` 为 `identity || path`；
+    - `workspacePath` 为工作区路径。
+  - 回复：`{ok: true, headers}`，或 `{ok: false, reason}`，reason 取 `official_auth_unavailable`、`official_auth_plan_required`、`official_mcp_origin_untrusted` 之一。其他形状、错误回复或通道不可用一律按 `official_auth_unavailable` 处理。
+  - 请求没有超时；调用方取消（连接或工具调用结束）时放弃等待。
+- **http 传输**（每个 POST、GET、DELETE 都走同一流程）：
+  1. **目标校验**：
+     - 请求 URL 的 origin 必须等于配置的 endpoint origin（不带凭证），否则报 `official_mcp_origin_untrusted`；
+     - 再过可信目标判定。
+     - 两种不通过都不发出任何网络请求。
+  2. **取身份头**：
+     - 每次请求重新向 Host 取身份头；
+     - 失败时匿名发送，由服务端给出权威结果，并记录 warn 日志（只含原因，不含值）。
+  3. **合并请求头**：
+     - 身份头以覆盖语义写入；
+     - 其他保留头丢弃，`mcp-session-id` 与 `mcp-protocol-version` 除外；
+     - 删除 `x-request-id` 与 `x-trace-id`。
+  4. **重定向与重试**：不跟随重定向。401 且本次注入过身份头时，重新取身份头重试一次。
+  5. **失败分类**：
+     - 最终 401：`official_auth_rejected`（`official MCP rejected the current credential`）；
+     - 403：`official_auth_forbidden`（`official MCP denied access for the current plan`）；
+     - 3xx：`official_auth_redirect_blocked`（`official MCP responded with a blocked redirect (<status>)`）；
+     - `tools/call` 的错误文案追加 ` - <x-request-id>`。
+  6. **连接期诊断**（非 `tools/call`）：
+     - 429 为 `rate_limited`，5xx 为 `server_internal_error`；
+     - JSON 响应体中 `code` 为 3001 时是 `server_not_found`，为 1000 时是 `server_unavailable`；
+     - JSON-RPC error 的 code 为 1006 时是 `not_authenticated`，为 3101 时是 `coding_plan_required`，其余为 `protocol_error`；
+     - 其他非 2xx 为 `connection_failed`。
+     - 连接失败时，状态的 `failureKind` 依次取：
+       1. 来源不可信时的 `official_origin_untrusted`；
+       2. 上述诊断；
+       3. 既有分类。
+     - 服务端 `x-request-id` 写入状态的 `serverRequestId`，并追加到 `error`。
+- **stdio 传输**：
+  - 发往插件进程的每条请求与通知（不含响应），都在 `params._meta["com.zcode/official-mcp-auth"]` 覆盖写入 `{ok: true, headers}` 或 `{ok: false, reason}`。
+  - 目标 origin 由宿主给出（当前 ZCode API origin），仍过可信目标判定：
+    - 不可信时为 `official_mcp_origin_untrusted`；
+    - origin 解析失败时为 `official_auth_unavailable`。
+  - 非官方 server 的消息绝不出现该键。
+- **与 OAuth 互斥**：官方鉴权的 server 不走任何 OAuth 流程，401/403 不会转成授权。
+- **验收**：
+  - 单测：
+    - `auth` 声明解析与保留头；
+    - 可信目标判定：https 等值、凭证 URL、dev 回环开关不放行远端；
+    - Host 回复的严格校验；
+    - `_meta` 只并入请求与通知，并覆盖旧值。
+  - 集成（`zcode-cli-rust-official-mcp.test.ts`，Host 自动应答反向请求）：
+    - http：每个请求逐次取身份头，剥离 `x-request-id`，保留其他静态头；反向请求参数形状正确；
+    - 401 后重新取身份头重试一次；
+    - 403 时连接失败，`failureKind` 取响应体的 JSON-RPC 码，`serverRequestId` 取响应头；
+    - 不可信目标零网络请求、零反向请求；
+    - stdio 每条请求与通知携带失败载荷，连接不受影响，目标 origin 为当前 ZCode API origin；
+    - 静态保留头在解析阶段禁用该 server。
+
+```mermaid
+sequenceDiagram
+  participant M as MCP 连接（tools）
+  participant E as Engine（actor）
+  participant H as Host
+  participant S as 官方 MCP
+  M->>M: 目标 origin 校验（不可信则失败，零请求）
+  M->>E: HostCall {interaction/requestOfficialMcpAuthHeaders, params, reply}
+  E->>H: interaction/requestOfficialMcpAuthHeaders
+  H-->>E: {ok, headers | reason}
+  E-->>M: reply（形状不符按 official_auth_unavailable）
+  alt http
+    M->>S: 请求 + 身份头（不跟随重定向）
+    S-->>M: 401（本次注入过身份头）
+    M->>E: 重新取身份头（仅一次）
+    M->>S: 重试
+  else stdio
+    M->>S: 消息 params._meta["com.zcode/official-mcp-auth"]
+  end
+```
+
 ## 4. 与 Node 的差异（M10.1）
 
 - 目录项按名称排序后遍历（Node 为平台 `readdir` 顺序），保证跨平台结果确定。
@@ -267,7 +372,11 @@ sequenceDiagram
 - 读取 `installed_plugins.json`、`known_marketplaces.json` 与缓存根时，按 Node 规则做原子目录恢复（边车格式互通）。Windows 上用 `OpenProcess` 判断写入方进程是否存活。
 
 - 发现层使用异步文件 IO（Node 为同步）。结果与诊断顺序保持一致。
-- MCP 的 `auth` 与 `oauth` 暂时禁用（见 §3.4），M10.5 接入。
+- MCP 的 `oauth` 仍禁用（见 §3.4）；官方鉴权 `auth` 已在 M10.5 接入。
+- M10.5：
+  - 官方 MCP 的 http 请求由 Rust 自己的 streamable HTTP 客户端发出（rmcp 的 reqwest 实现把 401、403 转成文本错误，无法按类型分类）。SSE 事件同样限 8 MiB。只支持 `Initialize` 生命周期：官方插件不声明 `protocolVersion`。
+  - `tools/call` 的官方鉴权错误经 rmcp 包装后交给模型，外层措辞与 Node SDK 不同，分类文案与 request id 相同。
+  - 日志沿用 Node 的事件名（`mcp.official_auth.*`），只记录 header 名、`Bigmodel-Target-Type`、耗时与状态，不记录任何 header 值与请求体。
 - 官方插件 seed 不做（见 §1）。
 - 插件的 agents（子代理 profile）继续使用 `agent_profiles.rs` 的现有来源，本期不改。
 - M10.3：`restoreBuiltin` 不重新 seed 官方缓存；`uninstall` 查找官方内置插件使用加锁前的发现结果（官方缓存不可变，结果等价）。

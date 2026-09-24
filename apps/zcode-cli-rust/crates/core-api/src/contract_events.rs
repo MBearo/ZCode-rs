@@ -96,10 +96,14 @@ pub enum Event {
     AuxiliaryDone {
         result: std::result::Result<Value, ModelFailure>,
     },
-    /// `plugins/operationProgress` of a running plugin request (spec
-    /// rust-m10-4-plugin-sources §9); delivered before the request's reply.
-    PluginProgress {
+    /// A Host interaction of an adapter: a notification when `reply` is
+    /// `None` (`plugins/operationProgress`, spec rust-m10-4-plugin-sources
+    /// §9.1), else a request whose raw result goes to `reply` (official MCP
+    /// identity headers, spec rust-m10-plugins §3.11).
+    HostCall {
+        method: &'static str,
         params: Value,
+        reply: Option<oneshot::Sender<Value>>,
     },
     /// A detached workspace request's reply with a protocol error (plugin management).
     AuxiliaryReply {

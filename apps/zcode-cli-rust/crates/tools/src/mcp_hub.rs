@@ -39,6 +39,7 @@ pub(super) struct Hub {
     cwd: PathBuf,
     config: std::sync::Arc<dyn crate::contract::ConfigSource>,
     egress: Arc<zcode_cli_net::Egress>,
+    pub official: Arc<super::official_auth::OfficialAuth>,
     state: RwLock<State>,
     gate: tokio::sync::Mutex<()>,
     stop: CancellationToken,
@@ -56,6 +57,7 @@ impl Hub {
         egress: Arc<zcode_cli_net::Egress>,
     ) -> Self {
         Self {
+            official: super::official_auth::OfficialAuth::for_workspace(&egress, &cwd),
             cwd,
             config,
             egress,
@@ -197,9 +199,11 @@ impl Hub {
                             .map_err(anyhow::Error::new)
                     };
                     match transport {
-                        Ok(transport) => Connection::open(&server, transport, cancel)
-                            .await
-                            .map(|c| Some(Arc::new(c))),
+                        Ok(transport) => {
+                            Connection::open(&server, transport, &self.official, cancel)
+                                .await
+                                .map(|c| Some(Arc::new(c)))
+                        }
                         Err(error) => Err(error),
                     }
                 };
@@ -256,6 +260,10 @@ impl Hub {
                 Err(error) => {
                     if error.is::<ProcessCleanupFailure>() {
                         cleanup_failure = Some(error);
+                        continue;
+                    }
+                    if let Some(status) = super::mcp_official::failed_status(&server, &error) {
+                        statuses.insert(server.name, status);
                         continue;
                     }
                     let reason = error.to_string();

@@ -328,7 +328,7 @@ manifest 按 `parseMarketplaceManifest` 解析：名称须匹配 `^[a-z0-9][a-z0
 
 ### 9.1 进度通知的传递
 
-- 后台插件任务经 `EventSink` 发出 `PluginProgress` 事件，Engine 转成 Host 通知 `plugins/operationProgress`。
+- 后台插件任务经 `EventSink` 发出 `HostCall` 事件（不带 `reply`），Engine 转成 Host 通知 `plugins/operationProgress`。
 - 通知与请求的最终回复走同一有序事件通道，所以通知一定先于回复送达。
 - 与 Node 相同，建议引用解析不持有存储锁。
 

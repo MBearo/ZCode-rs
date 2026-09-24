@@ -33,6 +33,7 @@ pub mod market_admin;
 pub mod marketplace_ops;
 pub mod marketplace_source;
 pub mod mcp;
+pub mod mcp_auth;
 pub mod mutations;
 pub mod official;
 pub mod official_partition;

@@ -172,7 +172,7 @@ impl Engine {
             | Event::PromptInitialized { .. }
             | Event::AuxiliaryDone { .. }
             | Event::AuxiliaryReply { .. }
-            | Event::PluginProgress { .. }
+            | Event::HostCall { .. }
             | Event::PluginCatalog { .. }
             | Event::ModelOnlyNotice { .. }
             | Event::StreamRecovery { .. }

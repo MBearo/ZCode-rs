@@ -113,6 +113,7 @@ impl Engine {
             &store.project_settings(&workspace).await?,
         );
         let (events, event_rx) = mpsc::channel(128);
+        tools.attach_events(events.clone(), &workspace);
         Ok(Self {
             child_updates: BTreeMap::new(),
             uploads: Default::default(),
