@@ -8,6 +8,7 @@ mod compact;
 pub mod files;
 mod finish;
 pub mod goal;
+mod import;
 pub mod intent;
 mod model_change;
 mod notice;
@@ -166,6 +167,8 @@ pub enum Op {
         execution: Value,
         receipt: Value,
     },
+    /// Node `removePreviousImportedSessionHistory` of an import `source`.
+    RemoveImported(String),
     /// Node `transitionSharedContextImport`: the import entry of `context`
     /// in one of `from` moves to `to` (with `source`), and so does its message.
     SharedTransition {

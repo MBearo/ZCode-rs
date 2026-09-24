@@ -102,3 +102,59 @@ async fn a_shared_context_import_is_nodes_bundle_and_attaches_on_first_input() {
     assert_eq!(cold[..live.len()], live[..], "{cold:#?}");
     harness::dump(&h, &conn, &session);
 }
+
+#[tokio::test]
+async fn a_claude_code_import_is_nodes_migrated_transcript() {
+    let mut h = harness::start(Some("claude-import"), None).await;
+    let workspace = h.workspace.clone();
+    let session = "sess_imported".to_owned();
+    let created = h
+        .request(
+            1,
+            "session/create",
+            json!({"sessionId": session, "workspace": {"workspacePath": workspace,
+                "workspaceKey": workspace},
+            "importedHistory": {"source": "claudeCode", "title": "Old chat",
+                "messages": [
+                    {"role": "user", "content": "fix the parser", "timestamp": 1_700_000_000_000u64},
+                    {"role": "assistant", "content": "Fixed it.", "timestamp": 1_700_000_000_000u64}]}}),
+        )
+        .await;
+    assert_eq!(
+        created["session"]["sessionId"],
+        session.as_str(),
+        "{created}"
+    );
+    let conn = rusqlite::Connection::open(&h.db).unwrap();
+    let row = sessions::get(&conn, &session).unwrap().unwrap();
+    assert_eq!(
+        (row.title.as_str(), row.title_source.as_str()),
+        ("Old chat", "custom")
+    );
+    let assistant: Value = conn
+        .query_row(
+            "select data from message where id = ?",
+            [format!("msg_{session}_import_1")],
+            |r| r.get::<_, String>(0),
+        )
+        .map(|d| serde_json::from_str(&d).unwrap())
+        .unwrap();
+    // 时间严格递增：同时间戳的第二条向后推 1ms。
+    assert_eq!(assistant["time"]["created"], 1_700_000_000_001u64);
+    assert_eq!(assistant["parentID"], format!("msg_{session}_import_0"));
+    let ack = h
+        .command(
+            2,
+            json!({"commandId": "c1", "clientId": "cli", "sessionId": session,
+            "type": "sendText", "issuedAt": 1, "payload": {"text": "and now?",
+                "modelSelection": {"providerId": "p", "modelId": "m"}}}),
+        )
+        .await;
+    assert_eq!(ack["status"], "accepted", "{ack}");
+    let conn = h.settled(&session, 1).await;
+    let resumed = resume::resume(&conn, &session, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(resumed.history.messages[0]["content"], "fix the parser");
+    harness::dump(&h, &conn, &session);
+}

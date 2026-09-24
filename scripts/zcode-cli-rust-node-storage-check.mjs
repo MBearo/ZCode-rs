@@ -55,10 +55,14 @@ async function check(name, root, file) {
     const listed = await store.listSessions({ directory: session.directory });
     if (!listed.some((s) => s.id === sessionID)) throw new Error(`${name}: session not listed`);
     const selection = await readSessionModelSelection(store, sessionID);
-    // 分享导入的会话与 Node 一样只有导入包（没有模型选择 entry）。
-    const imported = (await store.sessionEntries({ sessionID })).some(
-      (entry) => entry.type === "v4/shared_context_import",
-    );
+    // 导入的会话（分享上下文、Claude Code 迁移）与 Node 一样没有模型选择与 shell 快照 entry。
+    const imported =
+      (await store.sessionEntries({ sessionID })).some(
+        (entry) => entry.type === "v4/shared_context_import",
+      ) ||
+      (await store.messages({ sessionID })).some(
+        (message) => message.info.metadata?.migrationSource !== undefined,
+      );
     if (!imported && selection?.modelId !== "m") {
       throw new Error(`${name}: model selection unreadable`);
     }

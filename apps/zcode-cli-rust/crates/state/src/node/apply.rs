@@ -126,6 +126,7 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
                 now,
             )?,
             Op::Target(goal) => super::target_row::put(conn, session, goal.as_ref(), now)?,
+            Op::RemoveImported(source) => super::shared::remove_imported(conn, session, source)?,
             Op::SharedTransition {
                 context,
                 from,

@@ -87,3 +87,30 @@ pub fn read(conn: &Connection, session: &str) -> Result<Option<SharedContext>> {
         attached_message_id: attached.and_then(|s| s.as_str().map(str::to_owned)),
     }))
 }
+
+/// Node `isImportedHistoryMessage`.
+fn imported(message: &super::messages::WithParts, source: &str) -> bool {
+    let id = message.info["id"].as_str().unwrap_or("");
+    let legacy = id
+        .strip_prefix("msg_import_")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    legacy
+        || id.starts_with("msg_claude-import-")
+        || message.info["metadata"]["migrationSource"] == source
+        || message
+            .parts
+            .iter()
+            .any(|p| p["metadata"]["migrationSource"] == source)
+}
+
+/// Node `removePreviousImportedSessionHistory`: earlier imports of `source`
+/// leave; messages chatted after them stay.
+pub fn remove_imported(conn: &Connection, session: &str, source: &str) -> Result<()> {
+    for message in messages(conn, session)? {
+        if imported(&message, source) {
+            let id = message.info["id"].as_str().unwrap_or("").to_owned();
+            super::messages::remove_message(conn, session, &id)?;
+        }
+    }
+    Ok(())
+}

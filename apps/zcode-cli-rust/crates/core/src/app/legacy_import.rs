@@ -61,6 +61,12 @@ impl Engine {
             .as_str()
             .is_some_and(|level| self.model_levels(&selection).iter().any(|l| l == level));
         claude_import::apply(&mut session, history, now);
+        // Node persistImportedSessionHistory：导入即写会话行与迁移消息。
+        if self.journaling() {
+            let model = model_given
+                .then_some((selection.provider_id.as_str(), selection.model_id.as_str()));
+            session.node_claude_import(now, history, model, env!("CARGO_PKG_VERSION"));
+        }
         session.updated_at = now;
         session.runtime = RuntimeOptions {
             persistence: Some(Persistence::Immediate),
