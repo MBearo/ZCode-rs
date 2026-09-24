@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { delimiter, join } from "node:path";
+import { tmpdir } from "node:os";
 import { crc32, deflateSync } from "node:zlib";
 import type { ServerResponse } from "node:http";
 import { end, event, fixture } from "./zcode-cli-rust-fixture.js";
@@ -32,9 +33,9 @@ function pngImage(): Buffer {
   ]);
 }
 const png = pngImage();
-const read = (file: string) => JSON.stringify({ file_path: file });
+const read = (file: string, extra: Message = {}) => JSON.stringify({ file_path: file, ...extra });
 
-function chatCall(res: ServerResponse, file: string) {
+function chatCall(res: ServerResponse, args: string) {
   res.writeHead(200, { "content-type": "text/event-stream" });
   event(res, {
     tool_calls: [
@@ -42,7 +43,7 @@ function chatCall(res: ServerResponse, file: string) {
         index: 0,
         id: "call-read",
         type: "function",
-        function: { name: "Read", arguments: read(file) },
+        function: { name: "Read", arguments: args },
       },
     ],
   });
@@ -77,8 +78,12 @@ async function run(options: {
   inputFormat: Message;
   file: string;
   bytes: Buffer;
+  args?: Message;
+  env?: Record<string, string>;
 }) {
+  const args = read(options.file, options.args);
   const f = await fixture({
+    env: options.env,
     config: {
       ...(options.anthropic ? { apiType: "anthropic-messages", reasoningParameters: {} } : {}),
       formatProperties: { inputFormat: options.inputFormat, outputFormat: { supportsText: true } },
@@ -90,7 +95,7 @@ async function run(options: {
           anthropicMessage(
             res,
             { type: "tool_use", id: "call-read", name: "Read", input: {} },
-            [{ type: "input_json_delta", partial_json: read(options.file) }],
+            [{ type: "input_json_delta", partial_json: args }],
             "tool_use",
           );
         } else {
@@ -103,7 +108,7 @@ async function run(options: {
         }
         return;
       }
-      if (first) chatCall(res, options.file);
+      if (first) chatCall(res, args);
       else chatText(res);
       void req;
     },
@@ -117,7 +122,16 @@ async function run(options: {
   await h.completed(id, after);
   const rows: Message[] = (await h.rows(id)).rows;
   const row = rows.find((r) => r.kind === "toolCall")!;
-  return { f, h, final: f.requests.at(-1)!, row };
+  return { f, h, first: f.requests[0]!, final: f.requests.at(-1)!, row };
+}
+
+/** The final request's Read result: Anthropic blocks, or the Chat tool message text. */
+function toolResult(final: Message): any {
+  const last = final.messages.at(-1);
+  if (Array.isArray(last.content)) {
+    return last.content.find((b: Message) => b.type === "tool_result").content;
+  }
+  return final.messages.find((m: Message) => m.role === "tool").content;
 }
 
 test("Rust Read returns images as tool-result blocks on Anthropic", async () => {
@@ -205,6 +219,161 @@ test("Rust Read defers video after the tool result on every protocol", async () 
         source: { type: "base64", media_type: "video/mp4", data: video.toString("base64") },
       },
     ]);
+  } finally {
+    await f.close();
+  }
+});
+
+const pdf = Buffer.from("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
+const pdfFormat = { supportsText: true, supportsImage: true, supportsPdf: true };
+
+/** Fake Poppler tools: pdfinfo reports 12 pages for big.pdf; pdftoppm copies a PNG per page. */
+async function poppler(page: Buffer) {
+  const bin = join(await mkdtemp(join(tmpdir(), "zcode-poppler-")), "bin");
+  await mkdir(bin);
+  await writeFile(join(bin, "page.jpg"), page);
+  const scripts: Record<string, string> = {
+    pdfinfo: `#!/bin/sh
+case "$1" in *big.pdf) echo "Pages:          12" ;; *) echo "Pages:          1" ;; esac
+`,
+    pdftoppm: `#!/bin/sh
+if [ "$1" = "-v" ]; then echo "pdftoppm version 24.0.0" >&2; exit 0; fi
+case "$8" in *locked.pdf) echo "Command Line Error: Incorrect password" >&2; exit 1 ;; esac
+i=$5
+while [ "$i" -le "$7" ]; do cp "${bin}/page.jpg" "$9-$i.jpg"; i=$((i + 1)); done
+`,
+  };
+  for (const [name, body] of Object.entries(scripts)) {
+    await writeFile(join(bin, name), body);
+    await chmod(join(bin, name), 0o755);
+  }
+  return { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` };
+}
+const posixOnly = { skip: process.platform === "win32" && "fake Poppler tools are shell scripts" };
+
+test("Rust Read sends a whole PDF as a document block to PDF models", posixOnly, async () => {
+  const env = await poppler(png);
+  const { f, first, final, row } = await run({
+    anthropic: true,
+    inputFormat: pdfFormat,
+    file: "doc.pdf",
+    bytes: pdf,
+    env,
+  });
+  try {
+    const definition = first.tools.find((t: Message) => t.name === "Read");
+    assert.equal(definition.input_schema.properties.pages.type, "string");
+    assert.ok(
+      definition.description.endsWith(
+        '\n- Reads PDFs via the `pages` parameter (e.g. "1-5", max 20 pages/request; required for PDFs over 10 pages).',
+      ),
+    );
+    const shown = join(await realpath(f.cwd), "doc.pdf");
+    const heading = `PDF file read: ${shown} (${pdf.length} bytes)`;
+    assert.deepEqual(toolResult(final), [
+      { type: "text", text: heading },
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") },
+      },
+    ]);
+    assert.equal(row.output.text, `${heading}\n\n[Attached application/pdf: doc.pdf]`);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Rust Read reports Node's PDF handler failures", posixOnly, async () => {
+  const env = await poppler(png);
+  const cases: [string, Buffer, Message, (path: string) => string][] = [
+    [
+      "bad.pdf",
+      Buffer.from("plain"),
+      {},
+      (p) => `File is not a valid PDF (missing %PDF- header): ${p}`,
+    ],
+    [
+      "big.pdf",
+      pdf,
+      {},
+      () =>
+        'This PDF has 12 pages, which is too many to read at once. Use the pages parameter to read specific page ranges (e.g., pages: "1-5"). Maximum 20 pages per request.',
+    ],
+    [
+      "doc.pdf",
+      pdf,
+      { pages: "0-2" },
+      () =>
+        'Invalid pages parameter: "0-2". Use formats like "1-5", "3", or "10-20". Pages are 1-indexed.',
+    ],
+    [
+      "locked.pdf",
+      pdf,
+      { pages: "1" },
+      () => "PDF is password-protected. Please provide an unprotected version.",
+    ],
+  ];
+  for (const [file, bytes, args, message] of cases) {
+    const { f, final } = await run({
+      anthropic: false,
+      inputFormat: pdfFormat,
+      file,
+      bytes,
+      args,
+      env,
+    });
+    try {
+      assert.equal(
+        toolResult(final),
+        `<tool_use_error>${message(join(await realpath(f.cwd), file))}</tool_use_error>`,
+        file,
+      );
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("Rust Read renders requested PDF pages as images", posixOnly, async () => {
+  const env = await poppler(png);
+  const { f, final, row } = await run({
+    anthropic: true,
+    inputFormat: pdfFormat,
+    file: "doc.pdf",
+    bytes: pdf,
+    args: { pages: "2-3" },
+    env,
+  });
+  try {
+    const image = {
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: png.toString("base64") },
+    };
+    const heading = `PDF pages extracted: 2 page(s) from ${join(await realpath(f.cwd), "doc.pdf")} (${pdf.length} bytes)`;
+    assert.deepEqual(toolResult(final), [{ type: "text", text: heading }, image, image]);
+    assert.equal(
+      row.output.text,
+      [heading, "[Attached image/png: PDF page 2]", "[Attached image/png: PDF page 3]"].join(
+        "\n\n",
+      ),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("Rust Read treats PDFs as files for models without PDF input", async () => {
+  const { f, first, final } = await run({
+    anthropic: false,
+    inputFormat: { supportsText: true, supportsImage: true },
+    file: "notes.pdf",
+    bytes: Buffer.from("hello\n"),
+    args: { pages: "1" },
+  });
+  try {
+    const definition = first.tools.find((t: Message) => t.function.name === "Read");
+    assert.equal(definition.function.parameters.properties.pages, undefined);
+    assert.match(toolResult(final), /1\thello/);
   } finally {
     await f.close();
   }

@@ -23,6 +23,7 @@ const tools = [
   ["TodoRead", "todo", "TodoReadInputJsonSchema"],
   ["TodoWrite", "todo", "TodoWriteInputJsonSchema"],
   ["Read", "read", "ReadInputJsonSchema"],
+  ["ReadPdf", "read", "ReadPdfInputJsonSchema"],
   ["Write", "write", "WriteInputJsonSchema"],
   ["Edit", "edit", "EditInputJsonSchema"],
   ["Glob", "glob", "GlobInputJsonSchema"],

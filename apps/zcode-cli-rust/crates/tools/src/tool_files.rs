@@ -28,6 +28,8 @@ pub struct FileTools<'a> {
     pub checkpoint_root: &'a Path,
     pub cwd: &'a Path,
     pub artifacts: &'a Path,
+    /// The tool children's environment (Poppler for PDF pages).
+    pub env: &'a [(String, String)],
     pub state: &'a Mutex<FileState>,
     pub writes: &'a Mutex<()>,
 }
@@ -55,7 +57,7 @@ impl FileTools<'_> {
         }
         let path = resolve(self.cwd, string(args, "file_path")?)?;
         if name == "Read" {
-            keys(args, &["file_path", "offset", "limit"])?;
+            // Node Read 的 schema 非 strict：未知参数（包括非 PDF 文件上的 pages）被忽略。
             return self.read(&path, args, cancel).await;
         }
         keys(
@@ -90,6 +92,7 @@ impl FileTools<'_> {
         args: &Value,
         cancel: &CancellationToken,
     ) -> Result<ToolOutput> {
+        let shown = path.to_string_lossy().into_owned();
         let path = match tokio::fs::canonicalize(path).await {
             Ok(path) => path,
             // Node Read：不存在的文件给出工作目录与相似文件名建议（抛出错误，纯文本）。
@@ -98,6 +101,20 @@ impl FileTools<'_> {
             }
             Err(e) => return Err(e.into()),
         };
+        // Node：模型支持 PDF 时 .pdf 走 PDF 分支（在普通文件检查之前，文本为 Node 的处理器失败）。
+        let model = super::read_pdf::Model::from_input(&args["_zcode_model_input"]["inputFormat"]);
+        if model.pdf && shown.to_lowercase().ends_with(".pdf") {
+            let pages = args["pages"].as_str();
+            return super::read_pdf::read(
+                (&path, &shown),
+                pages,
+                model,
+                self.env,
+                self.artifacts,
+                cancel,
+            )
+            .await;
+        }
         if !tokio::fs::metadata(&path).await?.is_file() {
             bail!("Read requires a regular file");
         }

@@ -33,6 +33,9 @@ impl ModelPort for LiveModel {
     fn supports_native_web_search(&self) -> bool {
         self.bind().is_some_and(|m| m.supports_native_web_search())
     }
+    fn format_properties(&self) -> Value {
+        self.bind().map_or(Value::Null, |m| m.format_properties())
+    }
     fn auxiliary(&self) -> Option<Arc<dyn ModelPort>> {
         let mut selection = self.selection.borrow().clone();
         let lowest = self

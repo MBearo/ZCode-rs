@@ -154,7 +154,14 @@ async fn execute(
             Some(args) if name == "WebSearch" => {
                 super::web_tools::web_search(*model, &args, sink, cancel).await
             }
-            Some(args) => tools.execute_scoped(name, &args, sink, cancel).await,
+            Some(mut args) => {
+                if name == "Read" && args.is_object() {
+                    // Read 的 PDF 分支取决于本轮模型的输入能力（hook 与权限看不到这个内部键）。
+                    args["_zcode_model_input"] =
+                        json!({"inputFormat": model.format_properties()["inputFormat"]});
+                }
+                tools.execute_scoped(name, &args, sink, cancel).await
+            }
             None => Err(anyhow::anyhow!("Invalid tool JSON arguments")),
         }
     };

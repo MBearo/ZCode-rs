@@ -147,6 +147,9 @@ pub trait ToolPort: Send + Sync {
     ) -> Result<zcode_cli_domain::web::Fetched> {
         anyhow::bail!("HttpClientPort is not configured for WebFetch tool")
     }
+    /// Adjusts the run's definitions to the model's input formats (Node:
+    /// Read's PDF variant).
+    fn model_definitions(&self, _definitions: &mut [Value], _input_format: &Value) {}
     fn concurrent_safe(&self, _name: &str) -> bool {
         false
     }

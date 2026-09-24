@@ -89,6 +89,7 @@ impl WorkspaceTools {
                     checkpoint_root: &self.artifacts,
                     cwd: &self.cwd,
                     artifacts: &artifacts,
+                    env: &self.env,
                     state: &state,
                     writes: &self.writes,
                 };
@@ -296,6 +297,9 @@ impl ToolPort for WorkspaceTools {
     ) -> Result<ToolOutput> {
         self.call_inner(&sink.session_id, name, args, Some(sink), cancel)
             .await
+    }
+    fn model_definitions(&self, definitions: &mut [Value], input_format: &Value) {
+        super::tool_definitions::for_model(definitions, input_format);
     }
     async fn web_fetch(
         &self,

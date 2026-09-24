@@ -42,3 +42,25 @@ pub(super) fn definitions() -> Vec<Value> {
     definitions.extend(crate::domain::plan_mode::definitions());
     definitions
 }
+
+/// Node `getTools(model)`: a model with PDF input gets Read's `pages` variant
+/// (schema and description follow the model).
+pub(super) fn for_model(definitions: &mut [Value], input_format: &Value) {
+    if input_format["supportsPdf"] != true {
+        return;
+    }
+    let schemas: Value =
+        serde_json::from_str(include_str!("tool_schemas.json")).expect("validated tool schemas");
+    if let Some(read) = definitions
+        .iter_mut()
+        .find(|d| d["function"]["name"] == "Read")
+    {
+        read["function"]["parameters"] = schemas["ReadPdf"].clone();
+        let description = read["function"]["description"].as_str().unwrap_or("");
+        read["function"]["description"] = format!(
+            "{description}\n{}",
+            crate::domain::read_pdf::PAGES_DESCRIPTION
+        )
+        .into();
+    }
+}

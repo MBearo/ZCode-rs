@@ -41,6 +41,7 @@ pub(super) async fn run(
     if !skills.enabled {
         definitions.retain(|d| d["function"]["name"] != "Skill");
     }
+    tools.model_definitions(&mut definitions, &model.format_properties()["inputFormat"]);
     // Node getTools(model)：只有声明 supportsNativeWebSearch 的模型提供 WebSearch。
     if !model.supports_native_web_search() {
         definitions.retain(|d| d["function"]["name"] != "WebSearch");

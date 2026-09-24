@@ -240,3 +240,34 @@ sequenceDiagram
 
 - 单元测试：图片预算判断、候选顺序（大 PNG 转 JPEG、超尺寸缩放、小图原样）、WebP 超限、字节格式。
 - 集成测试（`zcode-cli-rust-read-media.test.ts`）：Anthropic 的 `tool_result` 带 `image` 块；Chat 的工具文本占位与随后的 `Tool result media from Read:` user 消息；不支持图片的模型得到省略说明；视频在 Anthropic 下也走随后的 user 消息；行输出为文本形态。
+
+## 6. Read PDF（M5.3b）
+
+依据：Node `core/src/tool/handlers/read-pdf.ts`、`contracts/src/tools/read-pdf.ts`、`adapters/src/pdf/index.ts`（Poppler）。
+
+### 6.1 暴露与分支
+
+- 只有模型的 `inputFormat.supportsPdf` 为真时，Read 的定义换成 Node 的 PDF 版本（schema 增加 `pages`，描述追加 PDF 一行），`.pdf` 文件走 PDF 分支；否则 `.pdf` 按普通文件读取（与 Node 相同）。
+- 模型能力由 core 在执行 Read 时附在参数里（内部键 `_zcode_model_input`，不经过 hook 与权限），工具读取后丢弃；`pages` 在非 PDF 文件上忽略（Node 非 strict）。
+- 失败均为处理器失败（`<tool_use_error>…</tool_use_error>`），代码为 Node `ReadErrorCode`：不是普通文件 `Path is not a regular file: <path>`（12），空文件 `PDF file is empty: <path>`（12）。
+
+### 6.2 整份 PDF（无 `pages`）
+
+- 超过 20 MiB：`PDF file exceeds maximum allowed size of 20MB.`（13）。
+- `pdfinfo` 可用且页数超过 10：`This PDF has <n> pages, which is too many to read at once. Use the pages parameter to read specific page ranges (e.g., pages: "1-5"). Maximum 20 pages per request.`（14）；`pdfinfo` 缺失或失败时不检查页数。
+- 缺少 `%PDF-` 头：`File is not a valid PDF (missing %PDF- header): <path>`（12）。
+- 模型内容：`PDF file read: <path> (<size>)` 文本块，加 PDF 文件块（名称与占位为文件名）。大小格式为 Node `formatFileSize`（`N bytes`、`1.5KB`、`2MB`、`…GB`）。
+
+### 6.3 按页（`pages`）
+
+- 超过 100 MiB：`PDF file exceeds maximum allowed size for text extraction (100MB).`（13）。
+- 页码格式 `N`、`N-M`、`N-`（1 起）；非法为 `Invalid pages parameter: "<p>". Use formats like "1-5", "3", or "10-20". Pages are 1-indexed.`（12）；超过 20 页或开放区间为 `Page range "<p>" exceeds maximum of 20 pages per request. Please use a smaller range.`（12）。
+- 模型支持 PDF 但不支持图片：`The current model supports PDF input but does not support image input; remove the pages parameter.`（10）。
+- `pdftoppm -v` 探测（5 秒，成功后进程内缓存）；缺失为 `pdftoppm is not installed. Install poppler-utils (e.g. \`brew install poppler\` or \`apt-get install poppler-utils\`) to enable PDF page rendering.`（11）。
+- 渲染 `pdftoppm -jpeg -r 100 -f <first> -l <last> <file> <临时目录>/page`（120 秒）；失败按 Node 的 stderr 分类：密码（16）、页码越界（17，含 Node 的范围提示）、0 页（12）、I/O（19）/ 权限（18）、损坏（12）、超时（15）、其他 `pdftoppm failed: <detail>`（20）；没有输出页为 `pdftoppm produced no output pages. The PDF may be invalid.`（12）。临时目录总是删除。
+- 每页按 5.3 的图片预算处理；模型内容：`PDF pages extracted: <n> page(s) from <path> (<size>)` 文本块，加各页图片块（占位 `PDF page <k>`）。
+
+### 6.4 验收
+
+- 单元测试：页码解析、大小格式、Poppler stderr 分类、输出页名排序。
+- 集成测试（`zcode-cli-rust-read-media.test.ts`）：支持 PDF 的模型拿到带 `pages` 的 Read 定义与 PDF 文件块；缺头、页数过多、页码参数错误、加密的处理器失败文本；按页渲染为图片块；不支持 PDF 的模型把 `.pdf` 当普通文件读取（忽略 `pages`）。Poppler 由 PATH 上的假 `pdfinfo` / `pdftoppm` 脚本代替，结果与本机是否安装 Poppler 无关（Windows 跳过）。
