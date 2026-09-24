@@ -8,6 +8,12 @@ use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 impl Engine {
+    /// Node `modelAnomalyGuard` of the effective config (spec §5).
+    pub fn with_anomaly_guard(mut self, guard: &Value) -> Self {
+        self.anomaly_guard = crate::domain::model_anomaly::Guard::from_config(guard);
+        self
+    }
+
     /// Tracks the agent step request and derives `apiRetry` from one event of
     /// the session's active run (before the projection, which skips events
     /// after cancellation).

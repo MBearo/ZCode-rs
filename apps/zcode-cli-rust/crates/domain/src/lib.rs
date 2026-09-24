@@ -22,6 +22,7 @@ pub mod legacy_params;
 pub mod legacy_snapshot;
 pub mod legacy_stream;
 pub mod model;
+pub mod model_anomaly;
 pub mod option_map;
 pub mod permission;
 pub mod persisted_output;

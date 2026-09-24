@@ -120,7 +120,23 @@ sequenceDiagram
 - Anthropic 只从带签名的 thinking 块重放推理，部分推理没有签名，因此只重放文本；Chat 协议按原有规则回传 `reasoning_content`。
 - v4 行保持 `interrupted`，与 Node 相同。
 
-## 5. 验收
+## 5. 异常调用提醒
+
+- 依据：Node `helpers/model-anomaly.ts`、`turn-tool-warnings.ts`。
+- 配置 `modelAnomalyGuard`（生效配置，按层合并）：
+  - `repeatedToolCallWarningThreshold`，默认 3，0 表示关闭。
+  - `toolCallWarningThreshold`，默认关闭。
+  - `maxBudgetWarningsPerTurn`，默认 3。
+- 计数按轮，run 开始时清零。每个步骤的工具执行完、且没有要求停轮时检查，顺序为：
+  1. 调用预算：本轮工具调用数从阈值以下跨到阈值及以上时提醒一次，正文为 `This turn has already made <n> tool calls.` 加 Node 的第二行。
+  2. 重复调用：同名且输入相同（键顺序无关）的调用连续达到阈值时提醒一次，正文为 Node 的三行 `You have called <Tool> with the same input <n> times in a row.` 等。
+- 两类提醒合计每轮最多 `maxBudgetWarningsPerTurn` 条，超过后只计数不提醒。
+- 提醒以 `<system-reminder>` 用户消息放在本步工具结果之后，属于 Node 的每请求提醒（`model_anomaly`）：
+  - 与 hook 上下文提醒一样只留在本进程的历史中，不写入会话消息。
+  - 后续请求按原位置继续发送，进程重启后清空。
+- Node 的 `model_anomaly_warning` 事件不投影到 v4 或旧事件流，Rust 不产生对应事件。
+
+## 6. 验收
 
 - 单元测试：
   - reasonCode 映射。
@@ -135,3 +151,4 @@ sequenceDiagram
   - 适配层重试的 reasonCode 为 `fault.*`。
   - 空响应的 lastError。
   - 流式输出中停止：下一轮请求的历史包含停止前的部分回复。
+  - 连续 3 次相同工具调用后，下一次请求在工具结果之后带重复调用提醒。

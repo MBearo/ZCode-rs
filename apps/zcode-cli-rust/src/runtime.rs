@@ -160,6 +160,7 @@ impl Context {
         .await?
         .with_question_timing(question_timing.0, question_timing.1)
         .with_permission_config(&self.startup_config.config["permission"])
+        .with_anomaly_guard(&self.startup_config.config["modelAnomalyGuard"])
         .with_hooks(
             &self.startup_config.config["hooks"],
             &self.startup_config.user_path,

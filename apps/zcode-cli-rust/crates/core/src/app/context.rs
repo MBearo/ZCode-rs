@@ -25,6 +25,8 @@ pub(super) struct RunContext {
     pub usage_anchor: Option<(usize, usize, usize)>,
     /// The pending plan exit reminder was already added in this run.
     pub plan_exit_sent: bool,
+    /// Node `modelAnomalyGuard` for this run's tool call reminders.
+    pub anomaly_guard: crate::domain::model_anomaly::Guard,
     estimated: usize,
     /// Messages shown to the model but never persisted, before `messages[position]`.
     transient: Vec<Transient>,
@@ -69,6 +71,7 @@ impl RunContext {
             manual,
             usage_anchor: None,
             plan_exit_sent: false,
+            anomaly_guard: Default::default(),
             estimated,
             transient: vec![],
         }

@@ -47,6 +47,8 @@ pub enum ReminderKind {
     PlanExit,
     /// SessionStart / UserPromptSubmit / Stop hook context.
     HookContext,
+    /// Repeated tool call or tool call budget reminder (Node `model_anomaly`).
+    ModelAnomaly,
 }
 
 /// Legacy `toolAllowlist` / `toolDenylist`: tools registered for the session's

@@ -83,6 +83,7 @@ pub struct Engine {
     pub(super) event_rx: mpsc::Receiver<RunEvent>,
     /// User config hooks and workspace hook trust.
     pub(super) hooks: super::workspace_trust::HookState,
+    pub(super) anomaly_guard: crate::domain::model_anomaly::Guard,
 }
 impl Engine {
     pub async fn new(
@@ -146,6 +147,7 @@ impl Engine {
             events,
             event_rx,
             hooks: Default::default(),
+            anomaly_guard: Default::default(),
         })
     }
     /// Config file `permission` section (mode fallback, allowed/disallowed tools),

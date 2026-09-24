@@ -77,6 +77,8 @@ pub(super) async fn run(
     // 断流恢复：本 run 已恢复次数，以及下一次请求要带的 streamRecovery。
     let mut recoveries = 0;
     let mut recovery: Option<Arc<Value>> = None;
+    // 本轮的重复调用与调用预算提醒（Node model_anomaly，按轮计数）。
+    let mut anomalies = crate::domain::model_anomaly::TurnAnomalies::default();
     loop {
         let sink = &current;
         if profile
@@ -261,11 +263,17 @@ pub(super) async fn run(
             hooks: turn.as_ref().map(|t| &t.hooks),
             model,
         };
+        let called = output.calls.clone();
         // 与 Node turnControl 一致：结果要求停轮时，其后的工具取消且本轮不再请求模型。
         if super::tool_execution::run_calls(tools, &scope, output.calls, history, sink, cancel)
             .await?
         {
             return Ok(());
+        }
+        for body in anomalies.observe(&called, &history.anomaly_guard) {
+            let message = crate::domain::plan_mode::reminder_message(&body);
+            let kind = crate::domain::session_runtime::ReminderKind::ModelAnomaly;
+            super::plan_tools::add(history, sink, kind, message).await?;
         }
         let (committed, receipt) = oneshot::channel();
         sink.send(Event::StepBoundary { committed }).await?;

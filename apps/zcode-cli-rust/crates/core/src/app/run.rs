@@ -92,6 +92,7 @@ impl Engine {
         history.agent_profile = session.agent_profile.clone();
         history.tool_disallowlist = submission.tool_disallowlist;
         history.tool_filter = session.runtime.tools.clone();
+        history.anomaly_guard = self.anomaly_guard;
         // Node 的提醒（plan、hook 上下文）留在进程内历史中；新一轮按原位置继续发送（重启后清空）。
         let offset = session.context.offset;
         history.restore_transient(session.runtime.reminders.iter().filter_map(

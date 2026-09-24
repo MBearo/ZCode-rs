@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ServerResponse } from "node:http";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { zcodeSessionEventSchema, zcodeSessionSubscribeResultSchema } from "@zcode/shared";
 import { end, event, fixture, type Harness } from "./zcode-cli-rust-fixture.js";
 
@@ -257,5 +259,63 @@ test("Rust keeps output streamed before a stop in the next turn's history like N
     assert.equal(messages.at(-2).reasoning_content, "thinking ");
   } finally {
     await f.close();
+  }
+});
+
+function readCall(res: ServerResponse, id: string) {
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  event(res, {
+    tool_calls: [
+      {
+        index: 0,
+        id,
+        type: "function",
+        function: { name: "Read", arguments: JSON.stringify({ file_path: "a.txt" }) },
+      },
+    ],
+  });
+  end(res, "tool_calls");
+}
+
+test("Rust reminds the model after repeated identical tool calls like Node", async () => {
+  for (const threshold of [undefined, 2]) {
+    const calls = threshold ?? 3;
+    const f = await fixture({
+      ...(threshold
+        ? { userConfig: { modelAnomalyGuard: { repeatedToolCallWarningThreshold: threshold } } }
+        : {}),
+      respond(_req, res) {
+        const n = f.requests.length;
+        if (n <= calls) readCall(res, `call-${n}`);
+        else answer(res, "done");
+      },
+    });
+    try {
+      await writeFile(join(f.cwd, "a.txt"), "hello\n");
+      const h = f.start();
+      const id = await h.create();
+      await h.subscribe(`conversation/${id}`);
+      const after = h.messages.length;
+      await h.command(h.envelope("sendText", id, { text: "read" }));
+      await h.completed(id, after);
+      const reminder = `You have called Read with the same input ${calls} times in a row.`;
+      assert(!JSON.stringify(f.requests[calls - 1]!.messages).includes(reminder));
+      const messages = f.requests[calls]!.messages;
+      const last = messages.at(-1);
+      assert.equal(messages.at(-2).role, "tool");
+      assert.equal(last.role, "user");
+      assert.equal(
+        last.content,
+        [
+          "<system-reminder>",
+          reminder,
+          "Do not repeat the exact same tool call again unless the user explicitly asked you to retry it unchanged.",
+          "Use the existing result to take a different next step, explain the blocker, or ask the user for guidance.",
+          "</system-reminder>",
+        ].join("\n"),
+      );
+    } finally {
+      await f.close();
+    }
   }
 });
