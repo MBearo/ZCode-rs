@@ -205,3 +205,57 @@ test("Rust reports a terminal empty completion like Node", async () => {
     await f.close();
   }
 });
+
+test("Rust keeps output streamed before a stop in the next turn's history like Node", async () => {
+  let streaming: () => void;
+  const started = new Promise<void>((resolve) => (streaming = resolve));
+  const f = await fixture({
+    async respond(_req, res) {
+      if (f.requests.length === 1) {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        event(res, { reasoning_content: "thinking " });
+        event(res, { content: "partial answer" });
+        streaming();
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        if (!res.destroyed) end(res, "stop");
+      } else answer(res, "next");
+    },
+  });
+  try {
+    const h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    const after = h.messages.length;
+    await h.command(h.envelope("sendText", id, { text: "first" }));
+    await started;
+    await h.wait(
+      (m) =>
+        m.params?.topic === `conversation/${id}` &&
+        JSON.stringify(m.params.frame?.payload ?? {}).includes("partial answer"),
+      after,
+    );
+    await h.command(h.envelope("stop", id));
+    await h.wait(
+      (m) =>
+        m.params?.topic === `conversation/${id}` &&
+        m.params.frame?.payload?.deltas?.some(
+          (d: Message) => d.patch?.control?.phase === "completedInterrupted",
+        ),
+      after,
+    );
+    const next = h.messages.length;
+    await h.command(h.envelope("sendText", id, { text: "second" }));
+    await h.completed(id, next);
+    const messages = f.requests.at(-1)!.messages.filter((m: Message) => m.role !== "system");
+    const turns = messages.map((m: Message) => [m.role, m.content]);
+    assert.deepEqual(turns.slice(-3), [
+      ["user", turns.at(-3)![1]],
+      ["assistant", "partial answer"],
+      ["user", turns.at(-1)![1]],
+    ]);
+    assert.match(JSON.stringify(turns.at(-3)![1]), /first/);
+    assert.equal(messages.at(-2).reasoning_content, "thinking ");
+  } finally {
+    await f.close();
+  }
+});

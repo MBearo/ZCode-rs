@@ -11,11 +11,17 @@ impl Engine {
     /// Tracks the agent step request and derives `apiRetry` from one event of
     /// the session's active run (before the projection, which skips events
     /// after cancellation).
-    pub(super) fn observe_retry(&mut self, id: &str, event: &Event) -> Result<()> {
+    pub(super) fn observe_step(&mut self, id: &str, event: &Event) -> Result<()> {
         let now = self.clock.now();
         let (Some(active), Some(s)) = (self.active.get_mut(id), self.sessions.get_mut(id)) else {
             return Ok(());
         };
+        if let Event::Finished { cancelled, .. } = event
+            && (*cancelled || active.cancel.is_cancelled())
+        {
+            commit_stopped_output(s, &std::mem::take(&mut active.step));
+            return Ok(());
+        }
         let next = match event {
             Event::ModelStatus(status) => {
                 active.step.observe_status(status);
@@ -29,7 +35,11 @@ impl Engine {
                 active.step.observe_text(response_id, text, *reasoning);
                 Some(None)
             }
-            Event::ModelDone { .. } => Some(None),
+            Event::ModelDone { .. } => {
+                // 已提交的响应不再是“停止时的部分输出”。
+                active.step.response = None;
+                Some(None)
+            }
             _ => None,
         };
         let Some(next) = next.filter(|next| *next != s.api_retry) else {
@@ -124,4 +134,35 @@ impl Engine {
         let _ = reply.send(status);
         Ok(())
     }
+}
+
+/// Node's cancel branch: text and reasoning already streamed by the step in
+/// flight join the history as an assistant message, so the next turn sees what
+/// the user saw.
+fn commit_stopped_output(
+    s: &mut crate::domain::session::Session,
+    probe: &crate::domain::stream_recovery::StepProbe,
+) {
+    let Some(response) = &probe.response else {
+        return;
+    };
+    let text_of = |kind: &str| {
+        s.rows
+            .iter()
+            .filter(|r| r["assistantResponseId"] == response.as_str() && r["kind"] == kind)
+            .filter_map(|r| r["text"].as_str())
+            .collect::<String>()
+    };
+    let (text, reasoning) = (text_of("assistantText"), text_of("reasoning"));
+    if text.is_empty() && reasoning.is_empty() {
+        return;
+    }
+    let mut message = json!({"role": "assistant", "content": text});
+    if !reasoning.is_empty() {
+        message["reasoning_content"] = reasoning.into();
+    }
+    if let Some((provider, model)) = &probe.model {
+        message["_zcode_origin"] = json!({"provider": provider, "model": model});
+    }
+    s.append_message(message);
 }

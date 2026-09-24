@@ -109,7 +109,18 @@ sequenceDiagram
 - `lastError.attribution.reason` 为 `empty_model_response`，UI 据此展示空响应文案与恢复动作。网络状态中的 reason 仍按 Node 为 `unknown`。
 - 修复：旧实现的文本是 `Provider response was invalid or incomplete.`，UI 会把它归为无效响应。
 
-## 4. 验收
+## 4. 用户停止时的部分输出
+
+- 依据：Node `turn-model-step.ts` 取消分支与 `cancelled-stream-persistence.ts`。
+- run 被取消时，如果 agent step 的请求已经流出文本或推理、但还没有提交 assistant 消息，Engine 把已流出的内容作为一条 assistant 消息写入会话历史：
+  - content 为文本；推理非空时附 `reasoning_content`。
+  - 附带请求模型的 `_zcode_origin`，换模型后推理按既有规则剥离。
+  - 下一轮请求的历史与用户看到的一致：用户消息之后是这段部分回复，再是新的用户消息。
+- 已经提交（`ModelDone`）的步骤不再重复写入；压缩等隐藏请求没有流式输出，不受影响。
+- Anthropic 只从带签名的 thinking 块重放推理，部分推理没有签名，因此只重放文本；Chat 协议按原有规则回传 `reasoning_content`。
+- v4 行保持 `interrupted`，与 Node 相同。
+
+## 5. 验收
 
 - 单元测试：
   - reasonCode 映射。
@@ -123,3 +134,4 @@ sequenceDiagram
   - 超过 10 次后失败。
   - 适配层重试的 reasonCode 为 `fault.*`。
   - 空响应的 lastError。
+  - 流式输出中停止：下一轮请求的历史包含停止前的部分回复。

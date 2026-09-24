@@ -133,7 +133,9 @@ pub struct StepProbe {
     pub started: Option<String>,
     /// The latest failed or stalled request: `(requestId, reason, message)`.
     pub failed: Option<(String, String, String)>,
-    /// The streamed response and its text / reasoning UTF-8 bytes.
+    /// The request's model `(providerId, modelId)`.
+    pub model: Option<(String, String)>,
+    /// The streamed response not yet committed, and its text / reasoning UTF-8 bytes.
     pub response: Option<String>,
     pub text_bytes: u64,
     pub reasoning_bytes: u64,
@@ -155,6 +157,8 @@ impl StepProbe {
                     *self = Self::default();
                 }
                 self.started = Some(request);
+                let text = |key: &str| status[key].as_str().unwrap_or("").to_owned();
+                self.model = Some((text("providerId"), text("modelId")));
             }
             "model_request_failed" | "model_stream_stalled" => {
                 let text = |key: &str| status[key].as_str().unwrap_or("").to_owned();
