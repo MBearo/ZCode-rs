@@ -20,6 +20,7 @@ import { planModeData } from "./zcode-cli-rust-plan-mode-fixtures.mjs";
 import { hookFixtures } from "./zcode-cli-rust-hooks-fixtures.mjs";
 import { workspaceHookFixtures } from "./zcode-cli-rust-workspace-hook-fixtures.mjs";
 import { pluginOfficialData } from "./zcode-cli-rust-plugin-fixtures.mjs";
+import { nodeDbFixtures, syncNodeMigrations } from "./zcode-cli-rust-node-db-fixtures.mjs";
 import {
   bashAnalysisFixtures,
   bashAnalysisFuzzFixtures,
@@ -238,3 +239,5 @@ await emitCompact(
   "../apps/zcode-cli-rust/crates/bash/schema/command-registry.json",
   bashRegistry(),
 );
+await syncNodeMigrations(process.argv.includes("--check"));
+await emit("../apps/zcode-cli-rust/crates/state/fixtures/node-db.json", await nodeDbFixtures());

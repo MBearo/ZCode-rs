@@ -246,7 +246,7 @@ fn object(value: Option<&Value>, fields: &[(&'static str, Schema, bool)]) -> Par
         }
         issues.extend(prefix(found, J::S((*key).into())));
     }
-    // serde_json 的对象按键排序，多个未知键的顺序可能与 JS 插入顺序不同（已知差异）。
+    // serde_json 开启 preserve_order，未知键按输入的插入顺序报告，与 JS 相同。
     let unknown: Vec<&String> = input
         .keys()
         .filter(|k| !fields.iter().any(|(f, _, _)| f == k))
@@ -345,7 +345,7 @@ fn record(value: Option<&Value>, key: &Schema, item: Option<&Schema>) -> Parsed 
     };
     let mut out = Map::new();
     let mut issues = vec![];
-    // serde_json 的对象按键排序；多个键的检查顺序可能与 JS 插入顺序不同（已知差异）。
+    // serde_json 开启 preserve_order，键按输入的插入顺序检查，与 JS 相同。
     for (name, field) in input {
         let (_, found) = run(key, Some(&Value::String(name.clone())));
         if !found.is_empty() {

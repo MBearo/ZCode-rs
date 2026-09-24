@@ -8,6 +8,7 @@ mod legacy_sessions;
 mod legacy_shared_context;
 mod legacy_storage;
 mod legacy_todos;
+pub mod node;
 pub mod storage;
 mod storage_history;
 mod storage_index;

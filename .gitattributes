@@ -9,3 +9,6 @@ third-party/upstream/** -text -whitespace
 third-party/native-search/licenses/** -text -whitespace
 third-party/runtime/*.txt -text -whitespace
 third-party/inventory.json linguist-generated=true
+
+# Rust 内嵌的 Node 迁移 SQL：校验和是原文的 sha256，必须按字节保存。
+apps/zcode-cli-rust/crates/state/src/node/migrations/*.sql -text -whitespace

@@ -167,12 +167,14 @@ fn attribution_headers_match_node() {
             base_url: context["baseURL"].as_str().unwrap_or(""),
         });
         let headers: Vec<Value> = headers.iter().map(|(k, v)| json!([k, v])).collect();
-        let expected: Vec<Value> = case["expected"]
+        let mut expected: Vec<Value> = case["expected"]
             .as_object()
             .unwrap()
             .iter()
             .map(|(k, v)| json!([k, v]))
             .collect();
+        // 头部是无序集合：两边按名称排序后比较（serde_json 保留插入顺序）。
+        expected.sort_by_key(|h| h[0].as_str().unwrap().to_owned());
         let mut sorted = headers.clone();
         sorted.sort_by_key(|h| h[0].as_str().unwrap().to_owned());
         assert_eq!(sorted, expected, "{context}");

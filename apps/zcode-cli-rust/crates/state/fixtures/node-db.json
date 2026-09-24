@@ -1,0 +1,1683 @@
+{
+  "operations": [
+    {
+      "op": "createSession",
+      "now": 1000,
+      "input": {
+        "id": "sess_a",
+        "projectID": "proj_w",
+        "directory": "/w",
+        "path": "/w",
+        "slug": "sess_a",
+        "title": "First",
+        "titleSource": "first_input",
+        "version": "0.0.0",
+        "traceID": "trace-1",
+        "permission": {
+          "mode": "build"
+        }
+      }
+    },
+    {
+      "op": "createSession",
+      "now": 1001,
+      "input": {
+        "id": "sess_b",
+        "projectID": "proj_w",
+        "workspaceID": "remote:x",
+        "parentID": "sess_a",
+        "taskType": "subagent_child",
+        "directory": "/w",
+        "slug": "sess_b",
+        "title": "Child",
+        "version": "0.0.0"
+      }
+    },
+    {
+      "op": "createSession",
+      "now": 1002,
+      "input": {
+        "id": "sess_a",
+        "projectID": "proj_w",
+        "directory": "/w",
+        "path": "/w",
+        "slug": "sess_a",
+        "title": "First",
+        "titleSource": "first_input",
+        "version": "0.0.1",
+        "traceID": "trace-2"
+      }
+    },
+    {
+      "op": "saveMessage",
+      "now": 1100,
+      "info": {
+        "id": "msg_u1",
+        "sessionID": "sess_a",
+        "role": "user",
+        "time": {
+          "created": 1100
+        },
+        "agent": "zcode-agent",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "max"
+          }
+        },
+        "semantics": {
+          "origin": "real_user",
+          "kind": "user_prompt",
+          "uiVisibility": "visible",
+          "providerVisibility": "visible",
+          "transcriptVisibility": "visible"
+        },
+        "anchor": {
+          "turnId": "turn_1",
+          "origin": "realUser",
+          "sourceCommandId": "cmd-0"
+        },
+        "tools": {
+          "Read": true
+        },
+        "metadata": {
+          "inputClientId": "client"
+        }
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1100,
+      "part": {
+        "id": "part_t1",
+        "sessionID": "sess_a",
+        "messageID": "msg_u1",
+        "type": "text",
+        "text": "hi \"there\"\n",
+        "time": {
+          "start": 1100,
+          "end": 1100
+        }
+      }
+    },
+    {
+      "op": "saveMessage",
+      "now": 1200,
+      "info": {
+        "id": "msg_a1",
+        "sessionID": "sess_a",
+        "role": "assistant",
+        "time": {
+          "created": 1200
+        },
+        "parentID": "msg_u1",
+        "modelId": "m",
+        "providerId": "p",
+        "mode": "build",
+        "planEnabled": false,
+        "agent": "zcode-agent",
+        "path": {
+          "cwd": "/w",
+          "root": "/w"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "semantics": {
+          "origin": "agent_runtime",
+          "kind": "assistant_response",
+          "uiVisibility": "visible",
+          "providerVisibility": "visible",
+          "transcriptVisibility": "visible"
+        },
+        "anchor": {
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1201,
+      "part": {
+        "id": "part_ss",
+        "sessionID": "sess_a",
+        "messageID": "msg_a1",
+        "type": "step-start"
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1210,
+      "part": {
+        "id": "part_tool",
+        "sessionID": "sess_a",
+        "messageID": "msg_a1",
+        "type": "tool",
+        "callID": "call_1",
+        "declarationIndex": 0,
+        "tool": "Read",
+        "metadata": {},
+        "state": {
+          "status": "pending",
+          "input": {
+            "2": 2,
+            "10": 1,
+            "file_path": "a",
+            "n": 1,
+            "big": 1e21,
+            "s": "\u0001é"
+          },
+          "raw": "{\"tool\":\"Read\",\"input\":{\"2\":2,\"10\":1,\"file_path\":\"a\",\"n\":1,\"big\":1e+21,\"s\":\"\\u0001é\"}}"
+        }
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1220,
+      "part": {
+        "id": "part_tool",
+        "sessionID": "sess_a",
+        "messageID": "msg_a1",
+        "type": "tool",
+        "callID": "call_1",
+        "declarationIndex": 0,
+        "tool": "Read",
+        "state": {
+          "status": "running",
+          "input": {
+            "2": 2,
+            "10": 1,
+            "file_path": "a",
+            "n": 1,
+            "big": 1e21,
+            "s": "\u0001é"
+          },
+          "title": "Read",
+          "metadata": {},
+          "time": {
+            "start": 1220
+          }
+        }
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1250,
+      "part": {
+        "id": "part_r",
+        "sessionID": "sess_a",
+        "messageID": "msg_a1",
+        "type": "reasoning",
+        "text": "think",
+        "metadata": {
+          "anthropic": {
+            "signature": "sig"
+          }
+        },
+        "time": {
+          "start": 1200,
+          "end": 1250
+        }
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1250,
+      "part": {
+        "id": "part_x",
+        "sessionID": "sess_a",
+        "messageID": "msg_a1",
+        "type": "text",
+        "text": "done",
+        "time": {
+          "start": 1200,
+          "end": 1250
+        }
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1260,
+      "part": {
+        "id": "part_tool",
+        "sessionID": "sess_a",
+        "messageID": "msg_a1",
+        "type": "tool",
+        "callID": "call_1",
+        "declarationIndex": 0,
+        "tool": "Read",
+        "state": {
+          "status": "completed",
+          "input": {
+            "2": 2,
+            "10": 1,
+            "file_path": "a",
+            "n": 1,
+            "big": 1e21,
+            "s": "\u0001é"
+          },
+          "output": "x",
+          "title": "Read",
+          "metadata": {
+            "schemaVersion": 1
+          },
+          "time": {
+            "start": 1220,
+            "end": 1260
+          }
+        }
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1270,
+      "part": {
+        "id": "part_sf",
+        "sessionID": "sess_a",
+        "messageID": "msg_a1",
+        "type": "step-finish",
+        "reason": "tool-calls",
+        "cost": 0,
+        "tokens": {
+          "total": 7,
+          "input": 5,
+          "output": 2,
+          "reasoning": 0,
+          "cache": {
+            "read": 1,
+            "write": 0
+          }
+        }
+      }
+    },
+    {
+      "op": "saveMessage",
+      "now": 1270,
+      "info": {
+        "id": "msg_a1",
+        "sessionID": "sess_a",
+        "role": "assistant",
+        "time": {
+          "created": 1200,
+          "completed": 1270
+        },
+        "parentID": "msg_u1",
+        "modelId": "m",
+        "providerId": "p",
+        "mode": "build",
+        "planEnabled": false,
+        "agent": "zcode-agent",
+        "path": {
+          "cwd": "/w",
+          "root": "/w"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "finish": "tool-calls",
+        "semantics": {
+          "origin": "agent_runtime",
+          "kind": "assistant_response",
+          "uiVisibility": "visible",
+          "providerVisibility": "visible",
+          "transcriptVisibility": "visible"
+        },
+        "anchor": {
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "op": "exec",
+      "sql": "insert into message (id, session_id, time_created, time_updated, data, sequence) values ('msg_old', 'sess_a', 1280, 1280, '{\"role\":\"assistant\",\"providerID\":\"old\",\"variant\":\"v\",\"time\":{\"created\":1280}}', null)"
+    },
+    {
+      "op": "saveMessage",
+      "now": 1300,
+      "info": {
+        "id": "msg_old",
+        "sessionID": "sess_a",
+        "role": "assistant",
+        "time": {
+          "created": 1280,
+          "completed": 1300
+        },
+        "parentID": "msg_u1",
+        "modelId": "m",
+        "providerId": "p",
+        "mode": "build",
+        "planEnabled": false,
+        "agent": "zcode-agent",
+        "path": {
+          "cwd": "/w",
+          "root": "/w"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "semantics": {
+          "origin": "agent_runtime",
+          "kind": "assistant_response",
+          "uiVisibility": "visible",
+          "providerVisibility": "visible",
+          "transcriptVisibility": "visible"
+        },
+        "anchor": {
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "op": "saveMessage",
+      "now": 1310,
+      "info": {
+        "id": "msg_u1",
+        "sessionID": "sess_a",
+        "role": "user",
+        "time": {
+          "created": 1100
+        },
+        "agent": "zcode-agent",
+        "modelSelection": {
+          "providerId": "q",
+          "modelId": "n"
+        },
+        "semantics": {
+          "origin": "real_user",
+          "kind": "user_prompt",
+          "uiVisibility": "visible",
+          "providerVisibility": "visible",
+          "transcriptVisibility": "visible"
+        }
+      }
+    },
+    {
+      "op": "saveMessage",
+      "now": 1320,
+      "info": {
+        "id": "msg_tl",
+        "sessionID": "sess_a",
+        "role": "assistant",
+        "time": {
+          "created": 1320,
+          "completed": 1320
+        },
+        "parentID": "msg_tl",
+        "mode": "build",
+        "planEnabled": false,
+        "agent": "zcode-agent",
+        "path": {
+          "cwd": "/w",
+          "root": "/w"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "finish": "completed",
+        "semantics": {
+          "origin": "system",
+          "kind": "timeline_event",
+          "uiVisibility": "visible",
+          "providerVisibility": "hidden",
+          "transcriptVisibility": "visible"
+        }
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1320,
+      "part": {
+        "id": "part_mc",
+        "sessionID": "sess_a",
+        "messageID": "msg_tl",
+        "timelineType": "model_change",
+        "display": "separator",
+        "status": "completed",
+        "fromModel": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "max"
+          },
+          "label": "M"
+        },
+        "toModel": {
+          "providerId": "q",
+          "modelId": "n",
+          "label": "N"
+        },
+        "time": {
+          "start": 1320,
+          "end": 1320
+        },
+        "type": "timeline"
+      }
+    },
+    {
+      "op": "savePart",
+      "now": 1321,
+      "part": {
+        "id": "part_sub",
+        "sessionID": "sess_a",
+        "messageID": "msg_tl",
+        "type": "subtask",
+        "prompt": "p",
+        "description": "d",
+        "agent": "general",
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        }
+      }
+    },
+    {
+      "op": "saveMessage",
+      "now": 1330,
+      "info": {
+        "id": "msg_copy",
+        "sessionID": "sess_b",
+        "role": "user",
+        "time": {
+          "created": 1330
+        },
+        "agent": "zcode-agent",
+        "semantics": {
+          "origin": "real_user",
+          "kind": "user_prompt",
+          "uiVisibility": "visible",
+          "providerVisibility": "visible",
+          "transcriptVisibility": "visible"
+        }
+      },
+      "copyFrom": {
+        "sessionID": "sess_a",
+        "id": "msg_u1"
+      }
+    },
+    {
+      "op": "removeMessage",
+      "sessionID": "sess_a",
+      "messageID": "msg_old"
+    },
+    {
+      "op": "saveEntry",
+      "now": 1400,
+      "entry": {
+        "id": "sess_a:runtime-model-selection",
+        "sessionID": "sess_a",
+        "type": "runtime/model_selection",
+        "time": {
+          "created": 1400,
+          "updated": 1400
+        },
+        "data": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "max"
+          }
+        },
+        "touchSession": false
+      }
+    },
+    {
+      "op": "exec",
+      "sql": "update session_entry set data = json_set(data, '$.providerId', 'legacy') where id = 'sess_a:runtime-model-selection'"
+    },
+    {
+      "op": "saveEntry",
+      "now": 1410,
+      "entry": {
+        "id": "sess_a:runtime-model-selection",
+        "sessionID": "sess_a",
+        "type": "runtime/model_selection",
+        "time": {
+          "created": 1410,
+          "updated": 1410
+        },
+        "data": {
+          "providerId": "q",
+          "modelId": "n"
+        },
+        "touchSession": false
+      }
+    },
+    {
+      "op": "saveEntry",
+      "now": 1420,
+      "entry": {
+        "id": "sess_a:runtime-execution-state",
+        "sessionID": "sess_a",
+        "type": "runtime/execution_state",
+        "time": {
+          "created": 1420,
+          "updated": 1420
+        },
+        "data": {
+          "mode": "yolo",
+          "planEnabled": false
+        }
+      }
+    },
+    {
+      "op": "saveInput",
+      "now": 1500,
+      "input": {
+        "id": "queue_c1",
+        "sessionID": "sess_a",
+        "kind": "sendText",
+        "delivery": "startNow",
+        "payload": {
+          "text": "hello",
+          "intent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "admissionSeq": 1,
+            "admittedAt": 1500,
+            "requestedDelivery": "startNow",
+            "admittedDelivery": "startNow",
+            "attachmentRefs": []
+          },
+          "conversationInputIntent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "text": "hello",
+            "attachments": [],
+            "delivery": {
+              "requested": "startNow",
+              "admitted": "startNow"
+            },
+            "order": {
+              "admissionSeq": 1
+            },
+            "steer": {
+              "state": "notRequested"
+            },
+            "dispatch": {
+              "state": "admitted"
+            },
+            "admittedAt": 1500
+          },
+          "attachments": []
+        }
+      }
+    },
+    {
+      "op": "saveInput",
+      "now": 1510,
+      "input": {
+        "id": "queue_c1",
+        "sessionID": "sess_a",
+        "kind": "sendText",
+        "delivery": "queue",
+        "payload": {
+          "conversationInputIntent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "text": "hello",
+            "attachments": [],
+            "delivery": {
+              "requested": "startNow",
+              "admitted": "startNow"
+            },
+            "order": {
+              "admissionSeq": 1
+            },
+            "steer": {
+              "state": "notRequested"
+            },
+            "dispatch": {
+              "state": "admitted"
+            },
+            "admittedAt": 1500
+          },
+          "text": "hello",
+          "intent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "admissionSeq": 1,
+            "admittedAt": 1500,
+            "requestedDelivery": "startNow",
+            "admittedDelivery": "startNow",
+            "attachmentRefs": []
+          }
+        }
+      }
+    },
+    {
+      "op": "saveInput",
+      "now": 1520,
+      "input": {
+        "id": "queue_c2",
+        "sessionID": "sess_a",
+        "kind": "sendText",
+        "delivery": "guide",
+        "payload": {
+          "text": "second",
+          "intent": {
+            "sourceCommandId": "cmd-2",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "admissionSeq": 1,
+            "admittedAt": 1500,
+            "requestedDelivery": "startNow",
+            "admittedDelivery": "startNow",
+            "attachmentRefs": []
+          }
+        }
+      }
+    },
+    {
+      "op": "updateInputs",
+      "now": 1530,
+      "sessionID": "sess_a",
+      "updates": [
+        {
+          "id": "queue_c1",
+          "text": "hello2",
+          "queuePosition": 0
+        },
+        {
+          "id": "queue_c2",
+          "delivery": "queue",
+          "intent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "admissionSeq": 1,
+            "admittedAt": 1500,
+            "requestedDelivery": "guide",
+            "admittedDelivery": "queue",
+            "attachmentRefs": [],
+            "fallbackReasonCode": "guide.noToolBoundary",
+            "queuePosition": 1
+          }
+        }
+      ]
+    },
+    {
+      "op": "promoteInput",
+      "now": 1540,
+      "id": "queue_c1",
+      "sessionID": "sess_a",
+      "message": {
+        "id": "msg_u2",
+        "sessionID": "sess_a",
+        "role": "user",
+        "time": {
+          "created": 1540
+        },
+        "agent": "zcode-agent",
+        "semantics": {
+          "origin": "real_user",
+          "kind": "user_prompt",
+          "uiVisibility": "visible",
+          "providerVisibility": "visible",
+          "transcriptVisibility": "visible"
+        },
+        "anchor": {
+          "origin": "realUser",
+          "sourceCommandId": "cmd-1"
+        },
+        "metadata": {
+          "inputIntent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "admissionSeq": 1,
+            "admittedAt": 1500,
+            "requestedDelivery": "startNow",
+            "admittedDelivery": "startNow",
+            "attachmentRefs": []
+          }
+        }
+      },
+      "parts": [
+        {
+          "id": "part_t2",
+          "sessionID": "sess_a",
+          "messageID": "msg_u2",
+          "type": "text",
+          "text": "hello2",
+          "time": {
+            "start": 1540,
+            "end": 1540
+          }
+        }
+      ]
+    },
+    {
+      "op": "settleInput",
+      "now": 1550,
+      "id": "queue_c2",
+      "sessionID": "sess_a",
+      "status": "cancelled",
+      "reason": "user_removed"
+    },
+    {
+      "op": "settleInput",
+      "now": 1560,
+      "id": "queue_c2",
+      "sessionID": "sess_a",
+      "status": "discarded",
+      "reason": "session_resumed"
+    },
+    {
+      "op": "markPromoted",
+      "now": 1570,
+      "id": "queue_c1",
+      "sessionID": "sess_a",
+      "messageID": "msg_u9"
+    },
+    {
+      "op": "updateTodos",
+      "now": 1600,
+      "sessionID": "sess_a",
+      "todos": [
+        {
+          "content": "a",
+          "status": "pending",
+          "priority": "high"
+        },
+        {
+          "content": "b",
+          "status": "completed",
+          "priority": "low"
+        }
+      ]
+    },
+    {
+      "op": "updateTodos",
+      "now": 1610,
+      "sessionID": "sess_a",
+      "todos": [
+        {
+          "content": "c",
+          "status": "in_progress",
+          "priority": "medium"
+        }
+      ]
+    },
+    {
+      "op": "setTarget",
+      "now": 1700,
+      "uuid": "00000000-0000-4000-8000-000000000001",
+      "sessionID": "sess_a",
+      "objective": "Ship",
+      "status": "active",
+      "tokenBudget": 1000
+    },
+    {
+      "op": "startTargetRun",
+      "sessionID": "sess_a",
+      "inputID": "queue_c1",
+      "startedAtMs": 1710
+    },
+    {
+      "op": "heartbeatTargetRun",
+      "sessionID": "sess_a",
+      "inputID": "queue_c1",
+      "seenAtMs": 1725
+    },
+    {
+      "op": "finishTargetRun",
+      "sessionID": "sess_a",
+      "inputID": "queue_c1",
+      "endedAtMs": 3800,
+      "tokensUsedDelta": 1200
+    },
+    {
+      "op": "updateTargetStatus",
+      "now": 3810,
+      "sessionID": "sess_a",
+      "status": "active"
+    },
+    {
+      "op": "startTargetRun",
+      "sessionID": "sess_a",
+      "inputID": "turn_2",
+      "startedAtMs": 3900
+    },
+    {
+      "op": "heartbeatTargetRun",
+      "sessionID": "sess_a",
+      "inputID": "turn_2",
+      "seenAtMs": 4000
+    },
+    {
+      "op": "recoverTargetRun",
+      "sessionID": "sess_a"
+    },
+    {
+      "op": "updateTargetSummaryTitle",
+      "now": 4100,
+      "sessionID": "sess_a",
+      "summaryTitle": "Ship it"
+    },
+    {
+      "op": "accountTargetUsage",
+      "now": 4200,
+      "sessionID": "sess_a",
+      "tokensUsedDelta": 5,
+      "timeUsedSecondsDelta": 2
+    },
+    {
+      "op": "savePermissionMode",
+      "now": 4300,
+      "projectID": "proj_w",
+      "mode": "yolo"
+    },
+    {
+      "op": "savePermission",
+      "now": 4310,
+      "projectID": "proj_w",
+      "permission": {
+        "version": 1,
+        "allow": ["Read"]
+      }
+    },
+    {
+      "op": "recordInputHistory",
+      "now": 4400,
+      "uuid": "00000000-0000-4000-8000-000000000002",
+      "input": {
+        "projectID": "proj_w",
+        "sessionID": "sess_a",
+        "text": "  hello  ",
+        "kind": "prompt",
+        "attachments": [
+          {
+            "type": "file",
+            "path": " /a "
+          },
+          {
+            "type": "image",
+            "content": "data:x"
+          }
+        ]
+      }
+    },
+    {
+      "op": "recordInputHistory",
+      "now": 4410,
+      "uuid": "00000000-0000-4000-8000-000000000003",
+      "input": {
+        "projectID": "proj_w",
+        "text": "hello",
+        "kind": "prompt",
+        "attachments": [
+          {
+            "type": "file",
+            "path": "/a"
+          }
+        ]
+      }
+    },
+    {
+      "op": "recordInputHistory",
+      "now": 4420,
+      "uuid": "00000000-0000-4000-8000-000000000004",
+      "input": {
+        "projectID": "proj_w",
+        "text": "next",
+        "kind": "slash_command"
+      }
+    },
+    {
+      "op": "updateSession",
+      "now": 4500,
+      "input": {
+        "id": "sess_a",
+        "title": "Renamed",
+        "titleSource": "custom"
+      }
+    },
+    {
+      "op": "updateSession",
+      "now": 4510,
+      "input": {
+        "id": "sess_a",
+        "title": "Generated",
+        "titleSource": "generated",
+        "expectedTitleSources": ["default", "first_input", "generated"]
+      }
+    },
+    {
+      "op": "setRevert",
+      "now": 4520,
+      "sessionID": "sess_a",
+      "revert": {
+        "keptMessageIDs": ["msg_u1"],
+        "branchCutAfterMessageID": "msg_u1",
+        "branchGeneration": 1,
+        "messageID": "msg_u1",
+        "kind": "conversation_rewind",
+        "scope": "conversation",
+        "targetMessageID": "msg_a1"
+      }
+    },
+    {
+      "op": "updateSession",
+      "now": 4530,
+      "input": {
+        "id": "sess_b",
+        "timeArchived": 4530
+      }
+    }
+  ],
+  "tables": {
+    "session": [
+      [
+        "sess_a",
+        "proj_w",
+        null,
+        null,
+        "sess_a",
+        "/w",
+        "/w",
+        "Renamed",
+        "0.0.1",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "{\"keptMessageIDs\":[\"msg_u1\"],\"branchCutAfterMessageID\":\"msg_u1\",\"branchGeneration\":1,\"messageID\":\"msg_u1\",\"kind\":\"conversation_rewind\",\"scope\":\"conversation\",\"targetMessageID\":\"msg_a1\"}",
+        "{\"mode\":\"build\"}",
+        1000,
+        4520,
+        null,
+        null,
+        "interactive",
+        "custom",
+        null,
+        4500,
+        "trace-1"
+      ],
+      [
+        "sess_b",
+        "proj_w",
+        "remote:x",
+        "sess_a",
+        "sess_b",
+        "/w",
+        null,
+        "Child",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        1001,
+        4530,
+        null,
+        4530,
+        "subagent_child",
+        "first_input",
+        null,
+        null,
+        null
+      ]
+    ],
+    "message": [
+      [
+        "msg_u1",
+        "sess_a",
+        1100,
+        1100,
+        "{\"role\":\"user\",\"time\":{\"created\":1100},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"q\",\"modelId\":\"n\"},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"max\"}}",
+        0
+      ],
+      [
+        "msg_a1",
+        "sess_a",
+        1200,
+        1270,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1200,\"completed\":1270},\"parentID\":\"msg_u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"finish\":\"tool-calls\",\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_1\"}}",
+        1
+      ],
+      [
+        "msg_tl",
+        "sess_a",
+        1320,
+        1320,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1320,\"completed\":1320},\"parentID\":\"msg_tl\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"finish\":\"completed\",\"semantics\":{\"origin\":\"system\",\"kind\":\"timeline_event\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"hidden\",\"transcriptVisibility\":\"visible\"}}",
+        3
+      ],
+      [
+        "msg_copy",
+        "sess_b",
+        1330,
+        1330,
+        "{\"role\":\"user\",\"time\":{\"created\":1330},\"agent\":\"zcode-agent\",\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"max\"}}",
+        0
+      ],
+      [
+        "msg_u2",
+        "sess_a",
+        1540,
+        1540,
+        "{\"role\":\"user\",\"time\":{\"created\":1540},\"agent\":\"zcode-agent\",\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"origin\":\"realUser\",\"sourceCommandId\":\"cmd-1\"},\"metadata\":{\"inputIntent\":{\"sourceCommandId\":\"cmd-1\",\"queueItemId\":\"queue_c1\",\"clientId\":\"client\",\"kind\":\"sendText\",\"admissionSeq\":1,\"admittedAt\":1500,\"requestedDelivery\":\"startNow\",\"admittedDelivery\":\"startNow\",\"attachmentRefs\":[]}},\"model\":{}}",
+        4
+      ]
+    ],
+    "part": [
+      [
+        "part_t1",
+        "msg_u1",
+        "sess_a",
+        1100,
+        1100,
+        "{\"type\":\"text\",\"text\":\"hi \\\"there\\\"\\n\",\"time\":{\"start\":1100,\"end\":1100}}",
+        0
+      ],
+      ["part_ss", "msg_a1", "sess_a", 1201, 1201, "{\"type\":\"step-start\"}", 0],
+      [
+        "part_tool",
+        "msg_a1",
+        "sess_a",
+        1210,
+        1260,
+        "{\"type\":\"tool\",\"callID\":\"call_1\",\"declarationIndex\":0,\"tool\":\"Read\",\"state\":{\"status\":\"completed\",\"input\":{\"2\":2,\"10\":1,\"file_path\":\"a\",\"n\":1,\"big\":1e+21,\"s\":\"\\u0001é\"},\"output\":\"x\",\"title\":\"Read\",\"metadata\":{\"schemaVersion\":1},\"time\":{\"start\":1220,\"end\":1260}}}",
+        1
+      ],
+      [
+        "part_r",
+        "msg_a1",
+        "sess_a",
+        1200,
+        1250,
+        "{\"type\":\"reasoning\",\"text\":\"think\",\"metadata\":{\"anthropic\":{\"signature\":\"sig\"}},\"time\":{\"start\":1200,\"end\":1250}}",
+        2
+      ],
+      [
+        "part_x",
+        "msg_a1",
+        "sess_a",
+        1200,
+        1250,
+        "{\"type\":\"text\",\"text\":\"done\",\"time\":{\"start\":1200,\"end\":1250}}",
+        3
+      ],
+      [
+        "part_sf",
+        "msg_a1",
+        "sess_a",
+        1270,
+        1270,
+        "{\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"total\":7,\"input\":5,\"output\":2,\"reasoning\":0,\"cache\":{\"read\":1,\"write\":0}}}",
+        4
+      ],
+      [
+        "part_mc",
+        "msg_tl",
+        "sess_a",
+        1320,
+        1320,
+        "{\"timelineType\":\"model_change\",\"display\":\"separator\",\"status\":\"completed\",\"time\":{\"start\":1320,\"end\":1320},\"type\":\"timeline\",\"toModel\":{\"providerID\":\"q\",\"modelID\":\"n\",\"label\":\"N\"},\"fromModelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"max\"},\"label\":\"M\"},\"toModelSelection\":{\"providerId\":\"q\",\"modelId\":\"n\",\"label\":\"N\"}}",
+        0
+      ],
+      [
+        "part_sub",
+        "msg_tl",
+        "sess_a",
+        1321,
+        1321,
+        "{\"type\":\"subtask\",\"prompt\":\"p\",\"description\":\"d\",\"agent\":\"general\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\"}}",
+        1
+      ],
+      [
+        "part_t2",
+        "msg_u2",
+        "sess_a",
+        1540,
+        1540,
+        "{\"type\":\"text\",\"text\":\"hello2\",\"time\":{\"start\":1540,\"end\":1540}}",
+        0
+      ]
+    ],
+    "session_entry": [
+      [
+        "sess_a:runtime-model-selection",
+        "sess_a",
+        "runtime/model_selection",
+        1400,
+        1410,
+        "{\"modelSelection\":{\"providerId\":\"q\",\"modelId\":\"n\"},\"providerId\":\"legacy\"}"
+      ],
+      [
+        "sess_a:runtime-execution-state",
+        "sess_a",
+        "runtime/execution_state",
+        1420,
+        1420,
+        "{\"mode\":\"yolo\",\"planEnabled\":false}"
+      ]
+    ],
+    "session_input": [
+      [
+        "queue_c1",
+        "sess_a",
+        "sendText",
+        "queue",
+        "{\"text\":\"hello2\",\"conversationInputIntent\":{\"sourceCommandId\":\"cmd-1\",\"queueItemId\":\"queue_c1\",\"clientId\":\"client\",\"kind\":\"sendText\",\"text\":\"hello2\",\"attachments\":[],\"delivery\":{\"requested\":\"startNow\",\"admitted\":\"startNow\"},\"order\":{\"admissionSeq\":1,\"queuePosition\":0},\"steer\":{\"state\":\"notRequested\"},\"dispatch\":{\"state\":\"admitted\"},\"admittedAt\":1500},\"intent\":{\"sourceCommandId\":\"cmd-1\",\"queueItemId\":\"queue_c1\",\"clientId\":\"client\",\"kind\":\"sendText\",\"admissionSeq\":1,\"admittedAt\":1500,\"requestedDelivery\":\"startNow\",\"admittedDelivery\":\"startNow\",\"attachmentRefs\":[],\"queuePosition\":0}}",
+        0,
+        0,
+        "msg_u2",
+        "promoted",
+        null,
+        1500,
+        1540
+      ],
+      [
+        "queue_c2",
+        "sess_a",
+        "sendText",
+        "queue",
+        "{\"text\":\"second\",\"intent\":{\"sourceCommandId\":\"cmd-1\",\"queueItemId\":\"queue_c1\",\"clientId\":\"client\",\"kind\":\"sendText\",\"admissionSeq\":1,\"admittedAt\":1500,\"requestedDelivery\":\"guide\",\"admittedDelivery\":\"queue\",\"attachmentRefs\":[],\"fallbackReasonCode\":\"guide.noToolBoundary\",\"queuePosition\":1}}",
+        1,
+        null,
+        null,
+        "cancelled",
+        "user_removed",
+        1520,
+        1550
+      ]
+    ],
+    "todo": [["sess_a", "c", "in_progress", "medium", 0, 1610, 1610]],
+    "session_target": [
+      [
+        "sess_a",
+        "target_1b8_00000000-0000-4000-8000-000000000001",
+        "Ship",
+        "paused",
+        1000,
+        1205,
+        6,
+        1700,
+        4200,
+        "Ship it",
+        null,
+        null,
+        null
+      ]
+    ],
+    "local_setting": [
+      ["project", "proj_w", "permission", "mode", "{\"mode\":\"yolo\"}", 1, 4300, 4300],
+      [
+        "project",
+        "proj_w",
+        "permission",
+        "ruleset",
+        "{\"version\":1,\"allow\":[\"Read\"]}",
+        1,
+        4310,
+        4310
+      ]
+    ],
+    "input_history": [
+      [
+        "input_3e8_00000000-0000-4000-8000-000000000002",
+        "proj_w",
+        "sess_a",
+        "hello",
+        "prompt",
+        4400,
+        "[{\"type\":\"file\",\"path\":\"/a\"}]"
+      ],
+      [
+        "input_3es_00000000-0000-4000-8000-000000000004",
+        "proj_w",
+        null,
+        "next",
+        "slash_command",
+        4420,
+        null
+      ]
+    ]
+  },
+  "read": {
+    "messages": [
+      {
+        "info": {
+          "role": "user",
+          "time": {
+            "created": 1100
+          },
+          "agent": "zcode-agent",
+          "semantics": {
+            "origin": "real_user",
+            "kind": "user_prompt",
+            "uiVisibility": "visible",
+            "providerVisibility": "visible",
+            "transcriptVisibility": "visible"
+          },
+          "modelSelection": {
+            "providerId": "q",
+            "modelId": "n"
+          },
+          "id": "msg_u1",
+          "sessionID": "sess_a"
+        },
+        "parts": [
+          {
+            "type": "text",
+            "text": "hi \"there\"\n",
+            "time": {
+              "start": 1100,
+              "end": 1100
+            },
+            "id": "part_t1",
+            "sessionID": "sess_a",
+            "messageID": "msg_u1"
+          }
+        ]
+      },
+      {
+        "info": {
+          "role": "assistant",
+          "time": {
+            "created": 1200,
+            "completed": 1270
+          },
+          "parentID": "msg_u1",
+          "modelId": "m",
+          "providerId": "p",
+          "mode": "build",
+          "planEnabled": false,
+          "agent": "zcode-agent",
+          "path": {
+            "cwd": "/w",
+            "root": "/w"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "tool-calls",
+          "semantics": {
+            "origin": "agent_runtime",
+            "kind": "assistant_response",
+            "uiVisibility": "visible",
+            "providerVisibility": "visible",
+            "transcriptVisibility": "visible"
+          },
+          "anchor": {
+            "turnId": "turn_1"
+          },
+          "id": "msg_a1",
+          "sessionID": "sess_a"
+        },
+        "parts": [
+          {
+            "type": "step-start",
+            "id": "part_ss",
+            "sessionID": "sess_a",
+            "messageID": "msg_a1"
+          },
+          {
+            "type": "tool",
+            "callID": "call_1",
+            "declarationIndex": 0,
+            "tool": "Read",
+            "state": {
+              "status": "completed",
+              "input": {
+                "2": 2,
+                "10": 1,
+                "file_path": "a",
+                "n": 1,
+                "big": 1e21,
+                "s": "\u0001é"
+              },
+              "output": "x",
+              "title": "Read",
+              "metadata": {
+                "schemaVersion": 1
+              },
+              "time": {
+                "start": 1220,
+                "end": 1260
+              }
+            },
+            "id": "part_tool",
+            "sessionID": "sess_a",
+            "messageID": "msg_a1"
+          },
+          {
+            "type": "reasoning",
+            "text": "think",
+            "metadata": {
+              "anthropic": {
+                "signature": "sig"
+              }
+            },
+            "time": {
+              "start": 1200,
+              "end": 1250
+            },
+            "id": "part_r",
+            "sessionID": "sess_a",
+            "messageID": "msg_a1"
+          },
+          {
+            "type": "text",
+            "text": "done",
+            "time": {
+              "start": 1200,
+              "end": 1250
+            },
+            "id": "part_x",
+            "sessionID": "sess_a",
+            "messageID": "msg_a1"
+          },
+          {
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0,
+            "tokens": {
+              "total": 7,
+              "input": 5,
+              "output": 2,
+              "reasoning": 0,
+              "cache": {
+                "read": 1,
+                "write": 0
+              }
+            },
+            "id": "part_sf",
+            "sessionID": "sess_a",
+            "messageID": "msg_a1"
+          }
+        ]
+      },
+      {
+        "info": {
+          "role": "assistant",
+          "time": {
+            "created": 1320,
+            "completed": 1320
+          },
+          "parentID": "msg_tl",
+          "mode": "build",
+          "planEnabled": false,
+          "agent": "zcode-agent",
+          "path": {
+            "cwd": "/w",
+            "root": "/w"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "completed",
+          "semantics": {
+            "origin": "system",
+            "kind": "timeline_event",
+            "uiVisibility": "visible",
+            "providerVisibility": "hidden",
+            "transcriptVisibility": "visible"
+          },
+          "id": "msg_tl",
+          "sessionID": "sess_a"
+        },
+        "parts": [
+          {
+            "timelineType": "model_change",
+            "display": "separator",
+            "status": "completed",
+            "time": {
+              "start": 1320,
+              "end": 1320
+            },
+            "type": "timeline",
+            "fromModel": {
+              "providerId": "p",
+              "modelId": "m",
+              "options": {
+                "reasoningLevel": "max"
+              },
+              "label": "M"
+            },
+            "toModel": {
+              "providerId": "q",
+              "modelId": "n",
+              "label": "N"
+            },
+            "id": "part_mc",
+            "sessionID": "sess_a",
+            "messageID": "msg_tl"
+          },
+          {
+            "type": "subtask",
+            "prompt": "p",
+            "description": "d",
+            "agent": "general",
+            "model": {
+              "providerId": "p",
+              "modelId": "m"
+            },
+            "id": "part_sub",
+            "sessionID": "sess_a",
+            "messageID": "msg_tl"
+          }
+        ]
+      },
+      {
+        "info": {
+          "role": "user",
+          "time": {
+            "created": 1540
+          },
+          "agent": "zcode-agent",
+          "semantics": {
+            "origin": "real_user",
+            "kind": "user_prompt",
+            "uiVisibility": "visible",
+            "providerVisibility": "visible",
+            "transcriptVisibility": "visible"
+          },
+          "anchor": {
+            "origin": "realUser",
+            "sourceCommandId": "cmd-1"
+          },
+          "metadata": {
+            "inputIntent": {
+              "sourceCommandId": "cmd-1",
+              "queueItemId": "queue_c1",
+              "clientId": "client",
+              "kind": "sendText",
+              "admissionSeq": 1,
+              "admittedAt": 1500,
+              "requestedDelivery": "startNow",
+              "admittedDelivery": "startNow",
+              "attachmentRefs": []
+            }
+          },
+          "id": "msg_u2",
+          "sessionID": "sess_a"
+        },
+        "parts": [
+          {
+            "type": "text",
+            "text": "hello2",
+            "time": {
+              "start": 1540,
+              "end": 1540
+            },
+            "id": "part_t2",
+            "sessionID": "sess_a",
+            "messageID": "msg_u2"
+          }
+        ]
+      }
+    ],
+    "entries": [
+      {
+        "id": "sess_a:runtime-model-selection",
+        "sessionID": "sess_a",
+        "type": "runtime/model_selection",
+        "time": {
+          "created": 1400,
+          "updated": 1410
+        },
+        "data": {
+          "providerId": "q",
+          "modelId": "n"
+        }
+      },
+      {
+        "id": "sess_a:runtime-execution-state",
+        "sessionID": "sess_a",
+        "type": "runtime/execution_state",
+        "time": {
+          "created": 1420,
+          "updated": 1420
+        },
+        "data": {
+          "mode": "yolo",
+          "planEnabled": false
+        }
+      }
+    ],
+    "inputs": [
+      {
+        "id": "queue_c1",
+        "sessionID": "sess_a",
+        "kind": "sendText",
+        "delivery": "queue",
+        "payload": {
+          "text": "hello2",
+          "conversationInputIntent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "text": "hello2",
+            "attachments": [],
+            "delivery": {
+              "requested": "startNow",
+              "admitted": "startNow"
+            },
+            "order": {
+              "admissionSeq": 1,
+              "queuePosition": 0
+            },
+            "steer": {
+              "state": "notRequested"
+            },
+            "dispatch": {
+              "state": "admitted"
+            },
+            "admittedAt": 1500
+          },
+          "intent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "admissionSeq": 1,
+            "admittedAt": 1500,
+            "requestedDelivery": "startNow",
+            "admittedDelivery": "startNow",
+            "attachmentRefs": [],
+            "queuePosition": 0
+          }
+        },
+        "admittedSequence": 0,
+        "promotedSequence": 0,
+        "promotedMessageID": "msg_u2",
+        "status": "promoted",
+        "time": {
+          "created": 1500,
+          "updated": 1540
+        }
+      },
+      {
+        "id": "queue_c2",
+        "sessionID": "sess_a",
+        "kind": "sendText",
+        "delivery": "queue",
+        "payload": {
+          "text": "second",
+          "intent": {
+            "sourceCommandId": "cmd-1",
+            "queueItemId": "queue_c1",
+            "clientId": "client",
+            "kind": "sendText",
+            "admissionSeq": 1,
+            "admittedAt": 1500,
+            "requestedDelivery": "guide",
+            "admittedDelivery": "queue",
+            "attachmentRefs": [],
+            "fallbackReasonCode": "guide.noToolBoundary",
+            "queuePosition": 1
+          }
+        },
+        "admittedSequence": 1,
+        "status": "cancelled",
+        "statusReason": "user_removed",
+        "time": {
+          "created": 1520,
+          "updated": 1550
+        }
+      }
+    ],
+    "list": ["sess_a"]
+  }
+}

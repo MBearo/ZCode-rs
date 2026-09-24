@@ -50,9 +50,29 @@ pub struct TurnAnomalies {
 fn signature(call: &Value) -> String {
     let name = call["function"]["name"].as_str().unwrap_or("");
     let arguments = call["function"]["arguments"].as_str().unwrap_or("");
-    // serde_json 的对象按键排序，与 Node stableJson 同样与键顺序无关。
     let input = serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| arguments.into());
-    format!("{}:{input}", Value::from(name))
+    format!("{}:{}", Value::from(name), stable_json(&input))
+}
+
+/// Node `stableJson`: compact JSON with every object's keys sorted, so the
+/// signature ignores key order (`serde_json` keeps insertion order).
+fn stable_json(value: &Value) -> String {
+    match value {
+        Value::Array(items) => {
+            let items: Vec<String> = items.iter().map(stable_json).collect();
+            format!("[{}]", items.join(","))
+        }
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let fields: Vec<String> = keys
+                .into_iter()
+                .map(|key| format!("{}:{}", Value::from(key.as_str()), stable_json(&map[key])))
+                .collect();
+            format!("{{{}}}", fields.join(","))
+        }
+        other => other.to_string(),
+    }
 }
 
 impl TurnAnomalies {
