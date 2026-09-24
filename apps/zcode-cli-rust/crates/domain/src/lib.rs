@@ -15,6 +15,7 @@ pub mod json_order;
 mod json_size;
 pub mod legacy_params;
 pub mod legacy_snapshot;
+pub mod legacy_stream;
 pub mod model;
 pub mod option_map;
 pub mod permission;

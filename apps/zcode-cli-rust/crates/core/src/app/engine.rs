@@ -324,6 +324,7 @@ impl Engine {
             Method::SkillsReferenceCatalog => self.skill_catalog(p).await,
             Method::SessionCreate => self.legacy_create(p).await,
             Method::SessionResume => self.legacy_resume(p).await,
+            Method::SessionSubscribe => self.legacy_subscribe(p),
             Method::SessionSetModel | Method::SessionSetThoughtLevel | Method::SessionSetMode => {
                 self.legacy_setter(call.method, p).await
             }

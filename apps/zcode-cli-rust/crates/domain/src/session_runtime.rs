@@ -33,6 +33,8 @@ pub struct RuntimeOptions {
     pub session_start_ran: bool,
     /// Snapshot `workspaceHookAdmission`: the pending project hooks banner.
     pub workspace_hook_admission: Option<serde_json::Value>,
+    /// Legacy `session/event` subscription of this activation.
+    pub legacy: crate::legacy_stream::LegacyStream,
 }
 
 /// A transient reminder kept in the process history (never persisted).

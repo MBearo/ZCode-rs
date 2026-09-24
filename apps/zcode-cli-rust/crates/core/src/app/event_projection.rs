@@ -129,6 +129,7 @@ impl Engine {
         }
         let now = self.clock.now();
         let s = self.sessions.get_mut(&id).unwrap();
+        let legacy = super::legacy_stream::fact(&event.event, s.runtime.legacy.kind().is_some());
         let mut deltas = vec![];
         let mut finished = false;
         let text_only = matches!(event.event, Event::Text { .. });
@@ -371,6 +372,7 @@ impl Engine {
             );
         }
         self.publish(&id, deltas)?;
+        self.legacy_fact(&id, &turn, legacy)?;
         if checkpoint {
             self.persist(&id, None).await?;
         }

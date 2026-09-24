@@ -217,9 +217,9 @@ fn resume_schema() -> &'static Schema {
 const MODES: &[&str] = &["plan", "build", "edit", "yolo", "auto"];
 
 /// `zcodeSessionSetModelParamsSchema` / `zcodeSessionSetThoughtLevelParamsSchema` /
-/// `zcodeSessionSetModeParamsSchema`, in that order.
-fn setter_schemas() -> &'static [Schema; 3] {
-    static SCHEMAS: OnceLock<[Schema; 3]> = OnceLock::new();
+/// `zcodeSessionSetModeParamsSchema` / `zcodeSessionSubscribeParamsSchema`, in that order.
+fn setter_schemas() -> &'static [Schema; 4] {
+    static SCHEMAS: OnceLock<[Schema; 4]> = OnceLock::new();
     SCHEMAS.get_or_init(|| {
         [
             Schema::Object(vec![
@@ -238,6 +238,15 @@ fn setter_schemas() -> &'static [Schema; 3] {
                 required("sessionId", non_empty()),
                 required("mode", Schema::Enum(MODES)),
                 optional("expectedRevision", non_negative()),
+            ]),
+            Schema::Object(vec![
+                required("sessionId", non_empty()),
+                required(
+                    "deliveryKind",
+                    Schema::Enum(&crate::legacy_stream::DELIVERY_KINDS),
+                ),
+                optional("afterSeq", non_negative()),
+                optional("includeSnapshot", Schema::Bool),
             ]),
         ]
     })
@@ -274,6 +283,10 @@ pub fn set_thought_level(params: &Value) -> Result<Value, ParamsError> {
 
 pub fn set_mode(params: &Value) -> Result<Value, ParamsError> {
     parse(&setter_schemas()[2], params)
+}
+
+pub fn subscribe(params: &Value) -> Result<Value, ParamsError> {
+    parse(&setter_schemas()[3], params)
 }
 
 #[cfg(test)]

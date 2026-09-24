@@ -72,6 +72,8 @@ impl Engine {
                         || !s.mailbox.is_empty()
                         || s.children.values().any(|t| t.running() || !t.notified)
                         || s.background.values().any(|t| t.status == "running")
+                        // Node hasLegacySubscriber：legacy 流订阅的会话不被淘汰。
+                        || s.runtime.legacy.kind().is_some()
                 })
                 .map(|(id, _)| id.clone()),
         );

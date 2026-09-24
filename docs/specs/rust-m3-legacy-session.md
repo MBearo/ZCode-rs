@@ -292,3 +292,114 @@ Node `app.setThoughtLevel(level)`：
   - setMode：`auto` 生效且写入项目偏好，`plan` 在设置中显示为当前权限模式；
   - `session/list`：immediate 草稿出现、deferred 不出现、workspace 过滤、`sessionIds` 查询不含常驻会话；
   - V4 `desktop-continuous` 与 `web-remote-replayable` 订阅都收到新的模型选择。
+
+## 9. M3.3：legacy 事件流（`session/subscribe`、`session/event`、`state.updated`）
+
+依据：`scratchpad/research/legacy-events.md`（下称 LE），`SO:1889-1915`（subscribe）、`SO:3000-3117`（实时投影与合批）、`SM:320-533`（事件映射）、`SH:1040-1517`（strict schema）、`TA:3045-3075`、`TA:3832-4713`（Host 消费）。
+
+### 9.1 用途与范围
+
+- Host 的 `onDynamicTaskEvent`（`TA:3045-3075`）是手机远控 `replayable` 读路径的最后一个消费者：Host 镜像把 legacy 事件映射成 `ZCodeStreamEvent` 转给手机。Desktop 的对话界面走 V4，不依赖本流。
+- Host 从不传 `afterSeq`，也不读 `eventSeq`；只依赖 strict 合法的订阅回包、唯一的 `eventId`、文本增量与 `turn.completed` 的 `turnId` 一致、正确的 `sessionId`（LE §0.3）。
+- 分步实现：
+  - M3.3a：订阅、envelope 与 seq、增量合批、`turn.started` / `turn.completed` / `turn.failed`、`model.streaming` 文本与推理、`session.titleUpdated`、`model_complete`、`state.updated`（`prompt_completed` / `prompt_failed`）；
+  - M3.3b：`tool.updated`、`permission.*`、后台任务、hook、压缩、目标、steer；
+  - M3.3c：模型网络状态（`session.updated` 与 `session/debug`）；
+  - M3.3d：legacy `session/send`、`session/compact`、`session/goal`。
+
+### 9.2 所有者与时序
+
+Engine 是唯一所有者：每个会话的 legacy 流状态放在 `RuntimeOptions.legacy`（只在本次激活内存在，不持久化，冷恢复重置）。投影与 V4 投影在同一个 `apply_event` 步骤中进行，输出进入同一个有序 outbox。
+
+```mermaid
+sequenceDiagram
+    participant H as Host
+    participant E as Engine
+    participant L as LegacyStream（会话内）
+    participant R as Run
+    H->>E: session/subscribe {sessionId, deliveryKind, includeSnapshot}
+    E->>L: kind = deliveryKind（最后一次订阅生效）；会话固定常驻
+    E-->>H: {sessionId, eventSeq, events: [], snapshot?}
+    R->>E: 运行事实（Text / ModelDone / Finished …）
+    E->>E: V4 投影（rows、patch）
+    E->>L: 事实 → 0..n 个 legacy 事件（合批、seq、envelope）
+    E-->>H: V4 帧 + session/event 通知（同一批，按事实顺序）
+    Note over E,L: Finished：先 turn.completed / turn.failed，再 stateRevision+1 与 state.updated
+```
+
+- 未订阅（`kind` 为空）时不产生任何 legacy 事件，也不累积（Node `SO:3045`）。
+- 只投影会话自身的事实；子代理会话只走 V4。
+- 已订阅的会话不被常驻淘汰（Node `hasLegacySubscriber`）。
+
+### 9.3 `session/subscribe`
+
+- 参数（strict）：`{sessionId: nonEmpty, deliveryKind: desktop-continuous | web-remote-replayable, afterSeq?: int ≥ 0, includeSnapshot?: bool}`，错误格式同 2.1。
+- 会话必须常驻，否则 `-32004 Session is not active: <id>`。
+- 结果：`{sessionId, eventSeq, events, snapshot?}`：
+  - `eventSeq` 为该 deliveryKind 域当前的最后 seq；
+  - `events` 恒为 `[]`（差异，见 9.8）；
+  - `includeSnapshot` 为真时附快照：3.3 的构建器、模型列表为当前模型，`runtime.deliveryKind` 为本次 kind，`runtime.eventSeq` 为域 seq，`runtime.stateRevision` 为 legacy 计数。
+
+### 9.4 Envelope、seq 与合批
+
+- Envelope：`{eventId, sessionId, turnId?, seq, traceId?, timestamp, deliveryKind, type, payload?}`。
+  - `eventId`：每个事件一个新 UUID；合批事件用最后一个并入增量的 id。
+  - `turnId`：当前运行的 turn id，运行外省略（从不写 `""`）。
+  - `traceId`：会话 runtime trace（Node 的 root trace）。
+  - `timestamp`：事实时刻（毫秒整数）。
+- Seq：每个（会话，deliveryKind）一个计数器，每次激活从 0 开始，每发出一个事件加一。切换 deliveryKind 后原域的计数保留。
+- 合批（LE §5.3，`SO:3046-3104`）：
+  - 可合批：`text_delta`、`reasoning_delta`（非空 delta）；键为 `kind:assistantMessageId`；
+  - 同键的第一个增量立即发出；之后在 `delta` 累计达到 2048 个 UTF-16 码元，或距该键上次发出 ≥ 250 ms（按事实时间，不用定时器）时发出；
+  - 键变化时先发出待发批次；
+  - 任何其他事实（包括不产生 legacy 事件的事实，如 V4 专用事实、运行结束）先发出待发批次，并清空"已首发"与"上次发出时间"记录。Rust 没有 `text_end` / `finish` 标记，因此每个非 `Text` 运行事实都按此处理。
+
+### 9.5 M3.3a 事件映射
+
+| Rust 事实                 | legacy 事件                         | payload                                                                                                                                                                                       |
+| ------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 首条输入给会话定标题      | `session.titleUpdated`              | `{previousTitle: "", source: "first_input", title}`，在该轮 `turn.started` 之前                                                                                                               |
+| V4 `renameSession`        | `session.titleUpdated`              | `{previousTitle, source: "custom", title}`                                                                                                                                                    |
+| 根会话开始运行            | `turn.started`                      | `{turnNumber, input, inputId?, queryId?, messageId?, executionStartedAt}`；目标续跑另有 `inputSource: "goal-continuation"`、`inputVisibility: "model-only"`、`targetId`（D16）                |
+| `Event::Text`             | `model.streaming`                   | `{assistantMessageId, delta, done: false, kind: text_delta \| reasoning_delta}`，合批                                                                                                         |
+| `Event::ModelDone`        | `session.updated`（model_complete） | `{content, contextWindow, querySource: "main_turn", stopReason, usage, toolCallCount}`                                                                                                        |
+| `Event::Finished`（成功） | `turn.completed`                    | `{response, tokenCount, usage, toolCallCount, historyRoundCount, duration, resultType: "success", inputId?}`                                                                                  |
+| `Event::Finished`（取消） | `turn.completed`                    | `{response: "", tokenCount: 0, usage, toolCallCount: 0, historyRoundCount, duration, resultType: "cancelled", inputId?}`                                                                      |
+| `Event::Finished`（失败） | `turn.failed`                       | `{error: {type, message, code?, attribution?, retryable?}, turnPhase: "execution", inputId?}`                                                                                                 |
+| 运行结束（上两行之后）    | `state.updated`                     | `stateRevision += 1`，`updatedAt` 刷新；`reason` 为 `prompt_completed`（成功）或 `prompt_failed`（失败与取消：Node 的 completion 在两种情况下都 reject）；`patch` 为当前模型快照的 `settings` |
+
+- `turnNumber`：本次激活中已完成的轮数（从 0 开始）。
+- `input`：用户原文（显示文本）；`inputId` 与 `queryId` 为提交该输入的 command id；`messageId` 为该轮用户消息 id。
+- `usage`（turn 汇总）：`{source: "provider", modelRequestCount, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens, webSearchRequests: 0, webFetchRequests: 0}`，由本轮每个 `ModelDone.usage` 累加；`tokenCount` 为各步 `totalTokens` 之和。
+- `response`：本轮全部 assistant 文本（不含推理）的拼接。
+- `stopReason`：有工具调用时为 `tool-calls`，否则为 `stop`（输出上限截断为 `length`）。
+- 失败 `error`：`type` 与 `code` 取与 V4 `lastError` 相同的错误码，`message` 为同一文本，模型失败带 `attribution` 与 `retryable`。
+- `state.updated` 的 `workspace` 为会话的 legacy workspace ref；没有时省略（V4 创建的会话）。
+
+### 9.6 D16：Host 会丢弃的 Node 字段
+
+Node 的 `turn.started` 带 `executionStartedAt`、`tool.updated started` 带 `readOnly` / `sideEffectScope`，均不在 strict schema 中，Host 因此丢弃整条事件（LE §0.1）。按"对齐 Node"的既定原则，Rust 默认同样发送这些字段（Host 行为一致：手机收不到 `task_run_started` 与工具 started 更新）。若改为按 schema 过滤，只需去掉这些字段；这是待用户确认的决定（D16）。
+
+### 9.7 快照修正
+
+legacy 快照（create、resume、设置方法、subscribe）与 `state.updated` 的 `settings` 由同一个构建器生成，不输出空的 `options.reasoningLevel`（strict schema 要求非空）；`runtime.stateRevision` 为 legacy 计数，`runtime.eventSeq` 为当前 deliveryKind 域的 seq（未订阅为 0）。`session/read` 保持现状。
+
+### 9.8 与 Node 的差异
+
+- `afterSeq` 回放恒为空：Host 从不使用；Node 从内存事件库重放。
+- Seq 只计订阅后发出的事件；Node 还计入订阅前已产生的可见事件（Host 不读 seq）。
+- Rust 模型层不流式输出工具参数：没有 `model.streaming tool_input_*` / `tool_call`，M3.3b 的 `tool.updated scheduled` 带完整 `input`（Host 由此创建工具卡片）。
+- 只读工具在 Node 中边流式边执行，事件夹在 `model_complete` 之前；Rust 在模型步骤结束后执行。
+- `model_complete` 暂无 `cacheHit` 与 `contextUsageBreakdown`；`turn.completed` 暂无 `cacheStats`。
+- `session.updated` 的 `model_request`（请求开始的精简载荷）与网络状态在 M3.3c 补齐。
+
+### 9.9 验收（M3.3a）
+
+- 集成测试（`zcode-cli-rust-legacy-events.test.ts`）：所有 `session/event` 与 `state.updated` 通过 `zcodeSessionEventSchema` / `zcodeStateUpdatedNotificationSchema`，`turn.started` 除外（D16：断言它恰好因 `executionStartedAt` 不合法）；
+  - 一轮文本对话的事件顺序：`session.titleUpdated` → `turn.started` → `model.streaming`（首个增量立即发出）→ `session.updated`（model_complete）→ `turn.completed` → `state.updated prompt_completed`；
+  - 合批：多个同键增量合并，合并事件的 `delta` 为拼接结果；
+  - 未订阅时不发出；`desktop-continuous` 与 `web-remote-replayable` 各自计数；
+  - `includeSnapshot` 快照通过 strict schema，`eventSeq` 与回包一致；
+  - 失败轮：`turn.failed` 与 `state.updated prompt_failed`；取消轮：`turn.completed resultType: "cancelled"`；
+  - 已订阅会话不参与常驻淘汰（`trim_resident` 的固定条件，与 V4 订阅同一处）。
+- 域单元测试：合批规则（首发、阈值、键切换、非增量事实清空）按 LE §5.3 的例子逐条验证。

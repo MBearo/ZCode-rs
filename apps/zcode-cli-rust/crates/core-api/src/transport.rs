@@ -56,6 +56,7 @@ methods! {
     SkillsReferenceCatalog => "skills/referenceCatalog",
     SessionCreate => "session/create",
     SessionResume => "session/resume",
+    SessionSubscribe => "session/subscribe",
     SessionSetModel => "session/setModel",
     SessionSetThoughtLevel => "session/setThoughtLevel",
     SessionSetMode => "session/setMode",

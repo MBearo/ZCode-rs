@@ -1,0 +1,218 @@
+//! Legacy `session/event` stream of one session activation (Node
+//! `server-operations.ts` live projection): per-delivery-kind seq domains and
+//! the deterministic batching of `model.streaming` text deltas.
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
+
+pub const DELIVERY_KINDS: [&str; 2] = ["desktop-continuous", "web-remote-replayable"];
+const TEXT_MAX_CHARS: usize = 2 * 1024;
+const TEXT_MAX_INTERVAL_MS: u64 = 250;
+
+/// Pending merged deltas: the last delta event and the concatenated text.
+#[derive(Clone, Debug)]
+struct Batch {
+    key: String,
+    delta: String,
+    /// UTF-16 code units of `delta` (JS `string.length`).
+    units: usize,
+    last: Value,
+    updated_at: u64,
+}
+
+/// One delivery kind's numbering and batching state (Node keeps one per kind).
+#[derive(Clone, Debug, Default)]
+struct Domain {
+    last_seq: u64,
+    batch: Option<Batch>,
+    flushed_first: BTreeSet<String>,
+    last_flush: BTreeMap<String, u64>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LegacyStream {
+    kind: Option<&'static str>,
+    domains: BTreeMap<&'static str, Domain>,
+    /// The running turn's totals for `turn.completed`.
+    pub turn: Option<TurnTally>,
+    /// Turns finished in this activation (`turn.started.turnNumber`).
+    pub turns_completed: u64,
+}
+
+impl LegacyStream {
+    /// `session/subscribe`: the last subscription's kind wins; returns its seq.
+    pub fn subscribe(&mut self, kind: &str) -> Option<u64> {
+        let kind = DELIVERY_KINDS.into_iter().find(|k| *k == kind)?;
+        self.kind = Some(kind);
+        Some(self.domains.entry(kind).or_default().last_seq)
+    }
+
+    pub fn kind(&self) -> Option<&'static str> {
+        self.kind
+    }
+
+    /// Queues `event` (an envelope without `seq` and `deliveryKind`) and
+    /// appends every event now due to `out`. Text and reasoning deltas are
+    /// merged; any other event first flushes and resets the batching.
+    pub fn push(&mut self, mut event: Value, out: &mut Vec<Value>) {
+        let Some(kind) = self.kind else { return };
+        event["deliveryKind"] = kind.into();
+        let domain = self.domains.entry(kind).or_default();
+        let Some(key) = batch_key(&event) else {
+            domain.reset(out);
+            domain.send(event, out);
+            return;
+        };
+        if domain.batch.as_ref().is_some_and(|b| b.key != key) {
+            domain.flush(out);
+        }
+        let delta = event["payload"]["delta"].as_str().unwrap_or("").to_owned();
+        let at = event["timestamp"].as_u64().unwrap_or(0);
+        let units = delta.encode_utf16().count();
+        match &mut domain.batch {
+            Some(batch) => {
+                batch.delta.push_str(&delta);
+                batch.units += units;
+                batch.last = event;
+                batch.updated_at = at;
+            }
+            None => {
+                domain.batch = Some(Batch {
+                    key: key.clone(),
+                    delta,
+                    units,
+                    last: event,
+                    updated_at: at,
+                })
+            }
+        }
+        if domain.flushed_first.insert(key.clone()) {
+            domain.flush(out);
+            return;
+        }
+        let batch = domain.batch.as_ref().unwrap();
+        let interval = domain
+            .last_flush
+            .get(&key)
+            .is_some_and(|last| batch.updated_at.saturating_sub(*last) >= TEXT_MAX_INTERVAL_MS);
+        if batch.units >= TEXT_MAX_CHARS || interval {
+            domain.flush(out);
+        }
+    }
+
+    /// A runtime fact without a legacy event still ends the batching window.
+    pub fn barrier(&mut self, out: &mut Vec<Value>) {
+        if let Some(kind) = self.kind {
+            self.domains.entry(kind).or_default().reset(out);
+        }
+    }
+
+    /// The current domain's last seq (`eventSeq`).
+    pub fn seq(&self) -> u64 {
+        self.kind
+            .and_then(|k| self.domains.get(k))
+            .map_or(0, |d| d.last_seq)
+    }
+}
+
+impl Domain {
+    fn send(&mut self, mut event: Value, out: &mut Vec<Value>) {
+        self.last_seq += 1;
+        event["seq"] = self.last_seq.into();
+        out.push(event);
+    }
+
+    fn flush(&mut self, out: &mut Vec<Value>) {
+        let Some(batch) = self.batch.take() else {
+            return;
+        };
+        self.last_flush.insert(batch.key, batch.updated_at);
+        let mut event = batch.last;
+        event["payload"]["delta"] = batch.delta.into();
+        self.send(event, out);
+    }
+
+    fn reset(&mut self, out: &mut Vec<Value>) {
+        self.flush(out);
+        self.flushed_first.clear();
+        self.last_flush.clear();
+    }
+}
+
+/// Node batch key `kind:assistantMessageId:inputId:partId:parentToolUseId:toolCallId`
+/// for non-empty text and reasoning deltas.
+fn batch_key(event: &Value) -> Option<String> {
+    let payload = &event["payload"];
+    let kind = payload["kind"].as_str()?;
+    let batchable = event["type"] == "model.streaming"
+        && matches!(kind, "text_delta" | "reasoning_delta")
+        && payload["delta"].as_str().is_some_and(|d| !d.is_empty());
+    batchable.then(|| {
+        let message = payload["assistantMessageId"].as_str().unwrap_or("");
+        format!("{kind}:{message}::::")
+    })
+}
+
+/// Node `ModelUsage` from a provider usage object (OpenAI-style fields).
+pub fn model_usage(usage: &Value) -> [u64; 6] {
+    let n = |v: &Value| v.as_u64().unwrap_or(0);
+    let input = n(&usage["prompt_tokens"]);
+    let output = n(&usage["completion_tokens"]);
+    let total = usage["total_tokens"]
+        .as_u64()
+        .unwrap_or(input.saturating_add(output));
+    [
+        input,
+        output,
+        total,
+        n(&usage["prompt_tokens_details"]["cached_tokens"]),
+        n(&usage["prompt_tokens_details"]["cache_write_tokens"]),
+        n(&usage["completion_tokens_details"]["reasoning_tokens"]),
+    ]
+}
+
+/// `{inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens}`.
+pub fn usage_json(usage: [u64; 6]) -> Value {
+    json!({"inputTokens": usage[0], "outputTokens": usage[1], "totalTokens": usage[2],
+        "cacheReadTokens": usage[3], "cacheWriteTokens": usage[4], "reasoningTokens": usage[5]})
+}
+
+/// Totals of the running turn (Node `turn_complete` payload inputs).
+#[derive(Clone, Debug, Default)]
+pub struct TurnTally {
+    pub started_at: u64,
+    pub input_id: Option<String>,
+    pub response: String,
+    pub requests: u64,
+    pub usage: [u64; 6],
+    pub token_count: u64,
+    pub tool_calls: u64,
+    pub rounds: u64,
+}
+
+impl TurnTally {
+    /// One committed model step.
+    pub fn model_done(&mut self, usage: [u64; 6], text: &str, calls: usize) {
+        self.requests += 1;
+        self.rounds += 1;
+        for (sum, value) in self.usage.iter_mut().zip(usage) {
+            *sum = sum.saturating_add(value);
+        }
+        self.token_count = self.token_count.saturating_add(usage[2]);
+        self.tool_calls += calls as u64;
+        self.response.push_str(text);
+    }
+
+    /// Node `ModelUsageSummary`.
+    pub fn summary(&self) -> Value {
+        let mut usage = usage_json(self.usage);
+        usage["source"] = "provider".into();
+        usage["modelRequestCount"] = self.requests.into();
+        usage["webSearchRequests"] = 0.into();
+        usage["webFetchRequests"] = 0.into();
+        usage
+    }
+}
+
+#[cfg(test)]
+#[path = "legacy_stream_tests.rs"]
+mod tests;

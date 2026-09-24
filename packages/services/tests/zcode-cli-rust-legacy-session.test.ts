@@ -292,7 +292,8 @@ test("Rust legacy resume returns an active session untouched and restores a cold
     await h.command(h.envelope("sendText", id, { text: "hello" }));
     await h.completed(id);
     const active = await resume(h, { sessionId: id, thoughtLevel: "high", toolDenylist: ["Read"] });
-    assert.equal(active.runtime.stateRevision, 0);
+    // 轮次结束的 prompt_completed 推进 legacy revision；resume 本身不推进。
+    assert.equal(active.runtime.stateRevision, 1);
     assert.equal(active.settings.mode.current, "edit");
     // 回复之后切换模式：Node 冷恢复时取最后一条回复记录的模式。
     await h.command(h.envelope("switchCollaborationMode", id, { mode: "yolo" }));

@@ -89,6 +89,7 @@ impl Engine {
             },
         ));
         history.permissions = Some(permission_updates);
+        self.legacy_turn_started(id, &turn_id);
         let turn_hooks = self.turn_hooks(id, &turn_id, submission.prompt, &identity);
         let context = self.context.clone();
         let tools = self.tools.clone();

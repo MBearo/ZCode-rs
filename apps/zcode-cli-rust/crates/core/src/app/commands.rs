@@ -118,6 +118,7 @@ impl Engine {
         let s = self.sessions.get(&id).unwrap();
         let mut ack = c.ack("accepted", s.revision, None);
         let mut deltas = vec![];
+        let mut renamed = None;
         match c.kind.as_str() {
             "discardSharedContext" => {
                 anyhow::ensure!(
@@ -229,7 +230,9 @@ impl Engine {
                     .filter(|s| !s.trim().is_empty() && s.len() <= 1024)
                     .context("Invalid title")?;
                 let s = self.sessions.get_mut(&id).unwrap();
-                s.title = title.into();
+                let previous = std::mem::replace(&mut s.title, title.into());
+                renamed =
+                    Some(json!({"previousTitle": previous, "source": "custom", "title": title}));
                 s.title_source = "custom".into();
                 s.revision += 1;
             }
@@ -310,6 +313,9 @@ impl Engine {
         }
         ack["revisionAtDecision"] = self.sessions[&id].revision.into();
         self.publish(&id, deltas)?;
+        if let Some(payload) = renamed {
+            self.legacy_emit(&id, None, vec![("session.titleUpdated", payload)]);
+        }
         self.persist(&id, Some((key.clone(), ack.clone()))).await?;
         self.acks.insert(key, ack.clone());
         if c.kind == "switchModelConfig" {
