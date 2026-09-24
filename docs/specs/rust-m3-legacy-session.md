@@ -403,3 +403,20 @@ legacy 快照（create、resume、设置方法、subscribe）与 `state.updated`
   - 失败轮：`turn.failed` 与 `state.updated prompt_failed`；取消轮：`turn.completed resultType: "cancelled"`；
   - 已订阅会话不参与常驻淘汰（`trim_resident` 的固定条件，与 V4 订阅同一处）。
 - 域单元测试：合批规则（首发、阈值、键切换、非增量事实清空）按 LE §5.3 的例子逐条验证。
+
+### 9.10 M3.3b：工具与权限
+
+新增两个运行事实（只供 legacy 流使用，V4 投影忽略）：`ToolExecuting { id }`（钩子与权限之后、处理器开始前，对应 Node `tool_call_started`）与 `ToolBatch { ids }`（`run_calls` 的一个并发组提交完毕，对应 `tool_batch_complete`）。`PermissionRequest` 增加 `risk_level`。
+
+| Rust 事实                                        | legacy 事件                          | payload                                                                                                                                                                                                                     |
+| ------------------------------------------------ | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ModelDone` 带工具调用（在 model_complete 之后） | `tool.updated scheduled`（每个调用） | `{toolCallId, toolName, input, parallelGroupIndex, canRunParallel, schedule: {parallelGroups, executionOrder}, assistantMessageId?}`；分组与 `run_calls` 相同（连续的并发安全调用一组）                                     |
+| `Event::Permission`                              | `permission.requested`               | `{requestId, toolCallId, toolName, riskLevel, reason, input, suggestedPermissionUpdates, options}`；options 为 legacy 版本（两种 always-allow 策略都只去掉项目选项）；提供全权限入口时带 `fullAccessSupported: true`（D16） |
+| 权限应答（用户、hook、全权限）                   | `permission.resolved`                | `{requestId, toolCallId, decision: allow \| deny, reason?}`                                                                                                                                                                 |
+| `ToolExecuting`                                  | `tool.updated started`               | `{toolCallId, toolName, startedAt, readOnly}`（D16：`readOnly` 取工具的并发安全属性，不发 `sideEffectScope`）                                                                                                               |
+| `ToolDone` 成功                                  | `tool.updated result`                | `{toolCallId, result: {success: true, content}, duration}`，`duration` 从 started 起算                                                                                                                                      |
+| `ToolDone` 失败                                  | `tool.updated error`                 | `{toolCallId, error: {type: "tool_execution_failed", message}}`                                                                                                                                                             |
+| `ToolDone` 被策略或 hook 拒绝（无提示）          | `permission.resolved`                | `{toolCallId, toolName, reason, inputSummary, decision: "deny"}`（Node `permission_denied`）；有提示的拒绝已在应答时发出，不再有工具事件                                                                                    |
+| `ToolBatch`                                      | `tool.updated batch`                 | `{toolCallIds, successCount, errorCount}`                                                                                                                                                                                   |
+
+与 Node 的差异：结果不带 `display`（Rust 的展示载荷不是 legacy 允许的三种之一，带上会被 strict schema 拒绝）；没有 `dependencies`；只读工具不在流式阶段提前执行（见 9.8）。

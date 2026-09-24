@@ -57,6 +57,7 @@ mod legacy_session;
 mod legacy_setters;
 mod legacy_snapshot;
 mod legacy_stream;
+mod legacy_tools;
 mod mcp;
 mod session_list;
 mod shared_context;

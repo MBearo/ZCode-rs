@@ -107,6 +107,7 @@ async fn execute(
             Gate::Run(None) => {}
         }
     }
+    sink.send(Event::ToolExecuting { id: id.clone() }).await?;
     let result = if profile.is_some_and(|p| !p.allows(name)) {
         Err(anyhow::anyhow!(
             "Tool is not allowed by this subagent profile"
@@ -231,6 +232,10 @@ pub(super) async fn run_calls(
             }
             continue;
         }
+        let ids: Vec<String> = group
+            .iter()
+            .map(|call| call["id"].as_str().unwrap_or("").to_owned())
+            .collect();
         // 只读工具并发执行，但按原始 call 顺序持久化结果；写/Shell 不跨越该屏障。
         let mut results = stream::iter(group)
             .map(|call| execute(tools, scope, call, sink, cancel))
@@ -240,6 +245,7 @@ pub(super) async fn run_calls(
             stop |= output.stop_turn;
             commit(history, &id, output, failed, sink, cancel).await?;
         }
+        sink.send(Event::ToolBatch { ids }).await?;
     }
     Ok(stop)
 }

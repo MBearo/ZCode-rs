@@ -206,6 +206,7 @@ impl Engine {
         interaction: &str,
         decision: &PermissionAnswer,
     ) -> Result<Vec<Value>> {
+        self.legacy_permission_resolved(owner, call, interaction, decision);
         self.sessions
             .get_mut(host)
             .context("Session unavailable")?

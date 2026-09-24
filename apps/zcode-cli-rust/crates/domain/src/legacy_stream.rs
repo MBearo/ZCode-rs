@@ -187,6 +187,36 @@ pub struct TurnTally {
     pub token_count: u64,
     pub tool_calls: u64,
     pub rounds: u64,
+    /// Assistant response id of the latest text (`assistantMessageId`).
+    pub message_id: Option<String>,
+    /// This turn's tool calls by id.
+    pub tools: BTreeMap<String, ToolTrack>,
+}
+
+/// One tool call's legacy lifecycle facts.
+#[derive(Clone, Debug, Default)]
+pub struct ToolTrack {
+    pub name: String,
+    /// Node `summarizeInput` of the model's input.
+    pub input_summary: Value,
+    pub started_at: Option<u64>,
+    /// A permission prompt was shown; its answer already went out.
+    pub prompted: bool,
+    pub succeeded: Option<bool>,
+}
+
+/// Node `summarizeInput`.
+pub fn input_summary(input: &Value) -> Value {
+    match input {
+        Value::Null => json!({"type": "null"}),
+        Value::Array(items) => json!({"type": "array", "length": items.len()}),
+        Value::Object(map) => {
+            json!({"type": "object", "keys": map.keys().take(20).collect::<Vec<_>>()})
+        }
+        Value::String(s) => json!({"type": "string", "length": s.encode_utf16().count()}),
+        Value::Bool(_) => json!({"type": "boolean"}),
+        Value::Number(_) => json!({"type": "number"}),
+    }
 }
 
 impl TurnTally {

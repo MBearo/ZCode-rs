@@ -16,17 +16,27 @@ function subscribe(h: Harness, sessionId: string, deliveryKind: string, includeS
     zcodeSessionSubscribeResultSchema,
   );
 }
-/** `session/event` params after `after`, schema-checked (D16: turn.started only without Node's extra key). */
+/** D16: Node's keys outside the strict schema, which make the Host drop the event. */
+function nodeExtraKey(event: Message) {
+  if (event.type === "turn.started") return "executionStartedAt";
+  if (event.type === "tool.updated" && event.payload.kind === "started") return "readOnly";
+  if (event.type === "permission.requested" && event.payload.fullAccessSupported) {
+    return "fullAccessSupported";
+  }
+  return undefined;
+}
+/** `session/event` params after `after`, schema-checked. */
 function events(h: Harness, after: number) {
   return h.messages
     .slice(after)
     .filter((m) => m.method === "session/event")
     .map((m) => {
       const event = m.params as Message;
-      if (event.type === "turn.started") {
+      const extra = nodeExtraKey(event);
+      if (extra) {
         assert.equal(zcodeSessionEventSchema.safeParse(event).success, false);
-        const { executionStartedAt, ...payload } = event.payload;
-        assert.equal(typeof executionStartedAt, "number");
+        const { [extra]: value, ...payload } = event.payload;
+        assert.notEqual(value, undefined);
         zcodeSessionEventSchema.parse({ ...event, payload });
       } else {
         zcodeSessionEventSchema.parse(event);
@@ -34,6 +44,8 @@ function events(h: Harness, after: number) {
       return event;
     });
 }
+const tool = (sent: Message[], kind: string) =>
+  sent.filter((e) => e.type === "tool.updated" && e.payload.kind === kind);
 async function stateUpdated(h: Harness, after: number) {
   const m = await h.wait((m) => m.method === "state.updated", after);
   return {
@@ -68,7 +80,11 @@ test("Rust legacy stream sends a text turn like Node and state.updated after it"
     assert.equal(types[1], "turn.started");
     assert.deepEqual(types.slice(-2), ["session.updated", "turn.completed"]);
     assert.ok(types.slice(2, -2).every((t) => t === "model.streaming"));
-    assert.deepEqual(sent[0]!.payload, { previousTitle: "", source: "first_input", title: "hello" });
+    assert.deepEqual(sent[0]!.payload, {
+      previousTitle: "",
+      source: "first_input",
+      title: "hello",
+    });
     const started = sent[1]!;
     assert.equal(started.payload.input, "hello");
     assert.equal(started.payload.inputId, command.commandId);
@@ -176,6 +192,83 @@ test("Rust legacy stream reports failed and cancelled turns like Node", async ()
     assert.equal(cancelled.payload.resultType, "cancelled");
     assert.equal(cancelled.payload.response, "");
     assert.equal(stopped.params.reason, "prompt_failed");
+  } finally {
+    await f.close();
+  }
+});
+
+test("Rust legacy stream reports a tool call's schedule, start, result and batch", async () => {
+  const f = await fixture();
+  try {
+    const h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    await subscribe(h, id, "web-remote-replayable");
+    const { before } = await turn(h, id, "shell");
+    const sent = events(h, before);
+    const [scheduled] = tool(sent, "scheduled");
+    assert.equal(scheduled?.payload.toolCallId, "call-shell");
+    assert.equal(scheduled?.payload.toolName, "Bash");
+    assert.equal(typeof scheduled?.payload.input.command, "string");
+    assert.deepEqual(scheduled?.payload.schedule.executionOrder, ["call-shell"]);
+    const order = sent.map((e) => (e.type === "tool.updated" ? e.payload.kind : e.type));
+    const at = (kind: string) => order.indexOf(kind);
+    assert.ok(at("session.updated") < at("scheduled"));
+    assert.ok(at("scheduled") < at("started") && at("started") < at("result"));
+    assert.ok(at("result") < at("batch"));
+    assert.equal(tool(sent, "result")[0]?.payload.result.content.includes("core-shell"), true);
+    assert.deepEqual(tool(sent, "batch")[0]?.payload, {
+      toolCallIds: ["call-shell"],
+      successCount: 1,
+      errorCount: 0,
+      kind: "batch",
+    });
+    const completed = sent.at(-1)!;
+    assert.equal(completed.payload.toolCallCount, 1);
+    assert.equal(completed.payload.historyRoundCount, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Rust legacy stream sends permission prompts and their answers like Node", async () => {
+  const f = await fixture({ permissionMode: "build" });
+  try {
+    const h = f.start();
+    for (const [text, option, decision] of [
+      ["write", "allowOnce", "allow"],
+      ["deny", "deny", "deny"],
+    ] as const) {
+      const id = await h.create();
+      await h.subscribe(`conversation/${id}`);
+      await subscribe(h, id, "web-remote-replayable");
+      const before = h.messages.length;
+      await h.command(h.envelope("sendText", id, { text }));
+      const prompt = await h.permission(id);
+      await h.command(
+        h.envelope("resolveInteraction", id, {
+          interactionId: prompt.interactionId,
+          answer: { optionId: option },
+        }),
+      );
+      await stateUpdated(h, before);
+      const sent = events(h, before);
+      const requested = sent.find((e) => e.type === "permission.requested")!;
+      assert.equal(requested.payload.requestId, prompt.interactionId);
+      assert.equal(requested.payload.toolName, "Write");
+      assert.deepEqual(
+        requested.payload.options.map((o: Message) => o.optionId),
+        ["allow_once", "allow_project", "deny"],
+      );
+      const resolved = sent.filter((e) => e.type === "permission.resolved");
+      assert.equal(resolved.length, 1);
+      assert.equal(resolved[0]!.payload.decision, decision);
+      assert.equal(resolved[0]!.payload.requestId, prompt.interactionId);
+      const kinds = tool(sent, "result").length + tool(sent, "error").length;
+      // 拒绝不再产生工具结果或错误（Node permission_denied 路径）。
+      assert.equal(kinds, decision === "allow" ? 1 : 0);
+      assert.equal(tool(sent, "started").length, decision === "allow" ? 1 : 0);
+    }
   } finally {
     await f.close();
   }

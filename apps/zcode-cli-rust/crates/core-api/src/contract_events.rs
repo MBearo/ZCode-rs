@@ -127,6 +127,15 @@ pub enum Event {
     ToolStart {
         call: Value,
     },
+    /// The call passed hooks and permission and its handler starts now (Node
+    /// `tool_call_started`); only the legacy stream shows it.
+    ToolExecuting {
+        id: String,
+    },
+    /// One group of a step's calls committed (Node `tool_batch_complete`).
+    ToolBatch {
+        ids: Vec<String>,
+    },
     Permission {
         call: Value,
         request: PermissionRequest,
@@ -171,6 +180,8 @@ pub struct ModelOutput {
 pub struct PermissionRequest {
     /// Decision reason, shown as the prompt summary.
     pub reason: String,
+    /// Policy risk level (`low` / `medium` / `high` / `critical`).
+    pub risk_level: String,
     /// Arguments as the policy saw them.
     pub input: Value,
     pub suggestions: Vec<zcode_cli_domain::permission::Update>,

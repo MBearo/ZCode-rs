@@ -24,8 +24,15 @@ pub(super) enum Fact {
     },
     ModelDone {
         content: String,
-        calls: usize,
+        /// The step's tool calls; arguments only when subscribed.
+        calls: Vec<Value>,
         usage: Value,
+    },
+    ToolDone {
+        call: String,
+        failed: bool,
+        denied: bool,
+        result: Option<String>,
     },
     Finished,
     /// Any other fact: ends the delta batching window.
@@ -48,12 +55,35 @@ pub(super) fn fact(event: &Event, subscribed: bool) -> Fact {
             let Some(message) = message else {
                 return Fact::Barrier;
             };
+            let calls = message["tool_calls"].as_array().map_or(vec![], |calls| {
+                calls
+                    .iter()
+                    .map(|c| match subscribed {
+                        true => c.clone(),
+                        false => {
+                            json!({"id": c["id"], "function": {"name": c["function"]["name"]}})
+                        }
+                    })
+                    .collect()
+            });
             Fact::ModelDone {
                 content: message["content"].as_str().unwrap_or("").into(),
-                calls: message["tool_calls"].as_array().map_or(0, Vec::len),
+                calls,
                 usage: usage.clone(),
             }
         }
+        Event::ToolDone {
+            id,
+            result,
+            failed,
+            denied,
+            ..
+        } => Fact::ToolDone {
+            call: id.clone(),
+            failed: *failed,
+            denied: *denied,
+            result: subscribed.then(|| result.clone()),
+        },
         Event::Finished { .. } => Fact::Finished,
         _ => Fact::Barrier,
     }
@@ -187,6 +217,9 @@ impl Engine {
                 text,
                 reasoning,
             } => {
+                if let Some(tally) = &mut s.runtime.legacy.turn {
+                    tally.message_id = Some(message_id.clone());
+                }
                 let kind = if reasoning {
                     "reasoning_delta"
                 } else {
@@ -203,16 +236,23 @@ impl Engine {
             } => {
                 let usage = model_usage(&usage);
                 if let Some(tally) = &mut s.runtime.legacy.turn {
-                    tally.model_done(usage, &content, calls);
+                    tally.model_done(usage, &content, calls.len());
                 }
                 let mut payload = json!({"content": content, "querySource": "main_turn",
-                    "stopReason": if calls > 0 { "tool-calls" } else { "stop" },
-                    "usage": usage_json(usage), "toolCallCount": calls});
+                    "stopReason": if calls.is_empty() { "stop" } else { "tool-calls" },
+                    "usage": usage_json(usage), "toolCallCount": calls.len()});
                 if let Some(window) = s.usage["contextWindow"]["maxTokens"].as_u64() {
                     payload["contextWindow"] = window.into();
                 }
                 self.legacy_emit(id, Some(turn), vec![("session.updated", payload)]);
+                self.legacy_scheduled(id, turn, &calls);
             }
+            Fact::ToolDone {
+                call,
+                failed,
+                denied,
+                result,
+            } => self.legacy_tool_done(id, turn, &call, (failed, denied), result),
             Fact::Barrier => self.legacy_emit(id, Some(turn), vec![]),
             Fact::Finished => return self.legacy_turn_finished(id, turn),
         }

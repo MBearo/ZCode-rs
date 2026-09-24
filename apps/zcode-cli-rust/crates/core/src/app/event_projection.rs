@@ -7,19 +7,7 @@ impl Engine {
             return self.auxiliary_event(event);
         }
         if let Event::ToolCleanupFailed(message) = event.event {
-            let owned = self
-                .active
-                .get(&event.session_id)
-                .is_some_and(|a| a.run_id == event.run_id)
-                || self.sessions.get(&event.session_id).is_some_and(|s| {
-                    s.background
-                        .values()
-                        .any(|task| task.run_id == event.run_id && task.status == "running")
-                });
-            if owned {
-                bail!("{message}");
-            }
-            return Ok(());
+            return self.cleanup_failed(&event.session_id, &event.run_id, message);
         }
         let Some(event) = self.hook_side(event).await? else {
             return Ok(());
@@ -51,6 +39,14 @@ impl Engine {
             return self.context_event(&id, event.event).await;
         }
         let turn = active.turn_id.clone();
+        if let Event::ToolExecuting { id: call } = &event.event {
+            self.legacy_tool_executing(&id, &turn, call);
+            return Ok(());
+        }
+        if let Event::ToolBatch { ids } = event.event {
+            self.legacy_tool_batch(&id, &turn, ids);
+            return Ok(());
+        }
         if matches!(event.event, Event::FilePrepared { .. }) {
             return self.file_checkpoint_event(&id, event.event).await;
         }
@@ -150,6 +146,8 @@ impl Engine {
             | Event::WorkspaceHooks { .. }
             | Event::Question { .. }
             | Event::ToolCleanupFailed(_)
+            | Event::ToolExecuting { .. }
+            | Event::ToolBatch { .. }
             | Event::StepBoundary { .. }
             | Event::Permission { .. }
             | Event::Background { .. }

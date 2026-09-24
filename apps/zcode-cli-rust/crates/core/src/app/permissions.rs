@@ -314,7 +314,8 @@ impl Engine {
         let mut payload = json!({"kind":"permission","toolCallId":call["id"],"toolName":tool,
             "summary":request.reason,"detail":request.input,"freeText":true,
             "options":policy::v4_options(tool, &request.input, &request.suggestions, policy)});
-        if origin.is_none() && policy.is_none() {
+        let origin_free = origin.is_none();
+        if origin_free && policy.is_none() {
             payload["fullAccessOption"] = json!({"optionId":"fullAccess","label":"Full access","kind":"custom",
                 "response":{"decision":"deny","reason":"Full access requires V4 approval"}});
         }
@@ -345,6 +346,8 @@ impl Engine {
             self.publish(&host, vec![])?;
         }
         self.publish(id, vec![json!({"op":"row.upserted","row":row})])?;
+        let full_access = origin_free && policy.is_none();
+        self.legacy_permission_requested(id, &interaction, call, &request, full_access);
         self.waiters.add_permission(
             interaction,
             super::waiters::PermissionWait {

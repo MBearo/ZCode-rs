@@ -76,6 +76,7 @@ pub(super) async fn authorize(
                 call: call.clone(),
                 request: crate::contract::PermissionRequest {
                     reason: decision.reason.clone(),
+                    risk_level: decision.risk_level.clone(),
                     input: args.clone(),
                     suggestions: permission.suggestions.clone(),
                     options_policy,

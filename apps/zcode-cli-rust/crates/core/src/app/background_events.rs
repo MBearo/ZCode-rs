@@ -1,6 +1,19 @@
 use super::Engine;
-use anyhow::Result;
+use anyhow::{Result, bail};
 impl Engine {
+    /// A tool's cleanup failed: fatal only while its run or background task still owns it.
+    pub(super) fn cleanup_failed(&self, id: &str, run: &str, message: String) -> Result<()> {
+        let owned = self.active.get(id).is_some_and(|a| a.run_id == run)
+            || self.sessions.get(id).is_some_and(|s| {
+                s.background
+                    .values()
+                    .any(|task| task.run_id == run && task.status == "running")
+            });
+        if owned {
+            bail!("{message}");
+        }
+        Ok(())
+    }
     pub(super) async fn background_event(
         &mut self,
         id: &str,
