@@ -6,7 +6,8 @@ use anyhow::{Result, ensure};
 use tokio_util::sync::CancellationToken;
 
 /// Methods cancellable through `plugins/cancelOperation` (Node `withPluginOperationSignal`).
-const CANCELLABLE: [Method; 4] = [
+const CANCELLABLE: [Method; 5] = [
+    Method::PluginsResolveSuggestedReference,
     Method::PluginsSetEnabled,
     Method::PluginsMarketplaceAdd,
     Method::PluginsMarketplaceUpdate,
@@ -65,7 +66,7 @@ impl Engine {
         let method = request.method;
         tokio::spawn(async move {
             let result = tools
-                .plugins(method.as_str(), &params, &cancel)
+                .plugins(method.as_str(), &params, &cancel, &sink)
                 .await
                 .map_err(|error| RuntimeError::Fault {
                     message: format!("{error:#}"),

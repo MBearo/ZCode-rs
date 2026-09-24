@@ -207,7 +207,16 @@ impl ToolPort for WorkspaceTools {
     fn mcp_inventory(&self, session: &str) -> Vec<(String, Vec<String>)> {
         self.mcp.inventory(session)
     }
-    async fn plugins(&self, method: &str, p: &Value, cancel: &CancellationToken) -> Result<Value> {
+    async fn plugins(
+        &self,
+        method: &str,
+        p: &Value,
+        cancel: &CancellationToken,
+        sink: &EventSink,
+    ) -> Result<Value> {
+        if method == "plugins/resolveSuggestedReference" {
+            return super::plugin_suggested::resolve(self, p, cancel, sink).await;
+        }
         super::plugin_requests::handle(self, method, p, cancel).await
     }
     async fn scoped_definitions(

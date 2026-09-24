@@ -6,6 +6,7 @@ use anyhow::{Result, bail};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug)]
 pub struct Resolved {
     pub path: PathBuf,
     /// A temporary checkout removed after use.
@@ -61,7 +62,9 @@ async fn base_dir(market_dir: &Path, manifest: Option<&Manifest>) -> PathBuf {
     market_dir.to_owned()
 }
 
-/// Node `resolveGitPluginSource` (M10.4b tries the GitHub archive first).
+/// Node `resolveRepositoryPluginSource`: a public GitHub repository is
+/// fetched as an archive first; only Git-only semantics or 401/403/404 fall
+/// back to system Git (`resolveGitPluginSource`).
 async fn repository(
     url: &str,
     path: Option<&str>,
@@ -69,6 +72,14 @@ async fn repository(
     pin: Option<String>,
     ports: &Ports<'_>,
 ) -> Result<Resolved> {
+    let archive_pin = pin.as_deref().or(reference);
+    match crate::github_archive::resolve(ports, url, archive_pin, path).await {
+        Ok(resolved) => return Ok(resolved),
+        Err(error) if !crate::github_archive::should_fallback(&error) => {
+            return Err(crate::github_archive::fetch_error(url, &error));
+        }
+        Err(_) => {}
+    }
     let dir =
         crate::git::clone_plugin(ports.git, url, reference, pin.as_deref(), ports.cancel).await?;
     let Some(path) = path else {
@@ -182,10 +193,7 @@ async fn object(source: &Map<String, Value>, id: &str, ports: &Ports<'_>) -> Res
         "url" => {
             let url = required(source, "url", "URL")?;
             match text("type").unwrap_or_default() {
-                "zip" => Err(crate::failure::Failure::Unsupported(
-                    "Plugin zip sources are not supported yet".into(),
-                )
-                .into()),
+                "zip" => crate::zip_source::resolve_plugin(ports, source, url).await,
                 "" | "git" => repository(url, text("path"), text("ref"), pin, ports).await,
                 other => Err(crate::failure::unsupported_plugin(&format!("url:{other}"))),
             }

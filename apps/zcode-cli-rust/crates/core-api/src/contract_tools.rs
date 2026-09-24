@@ -80,12 +80,14 @@ pub trait ToolPort: Send + Sync {
     fn mcp_inventory(&self, _session: &str) -> Vec<(String, Vec<String>)> {
         vec![]
     }
-    /// A `plugins/*` management request of the workspace (spec rust-m10-plugins).
+    /// A `plugins/*` management request of the workspace (spec rust-m10-plugins);
+    /// progress notifications travel through `sink`.
     async fn plugins(
         &self,
         _method: &str,
         _params: &Value,
         _cancel: &CancellationToken,
+        _sink: &crate::contract::EventSink,
     ) -> Result<Value> {
         anyhow::bail!("Plugins unavailable")
     }

@@ -80,6 +80,7 @@ methods! {
     PluginsValidate => "plugins/validate",
     PluginsDescribe => "plugins/describe",
     PluginsCancelOperation => "plugins/cancelOperation",
+    PluginsResolveSuggestedReference => "plugins/resolveSuggestedReference",
     SessionCreate => "session/create",
     SessionResume => "session/resume",
     SessionSubscribe => "session/subscribe",

@@ -14,6 +14,24 @@ pub struct Outcome {
     pub records: Vec<Installed>,
 }
 
+/// Node `assertZipPluginInstallRoot`.
+async fn assert_zip_root(root: &std::path::Path, entry: &Entry, marketplace: &str) -> Result<()> {
+    let loaded = crate::entry_manifest::read(root, entry)
+        .await
+        .map_err(|message| anyhow!(message))?;
+    let Some(loaded) = loaded else {
+        bail!("Plugin manifest not found: {}@{marketplace}", entry.name);
+    };
+    let name = loaded.manifest["name"].as_str().unwrap_or_default();
+    if name != entry.name {
+        bail!(
+            "Plugin manifest name '{name}' does not match marketplace entry '{}'",
+            entry.name
+        );
+    }
+    Ok(())
+}
+
 /// Node `cacheMarketplacePlugin`: the resolved root is staged into
 /// `cache/<market>/<name>/<version>`, committed with `installed_plugins.json`.
 async fn cache(
@@ -31,6 +49,10 @@ async fn cache(
     };
     let resolved = plugin_source::resolve(&input, ports).await?;
     let staged = async {
+        // 多顶层 ZIP 未显式 path 时会回退到解压根；删除旧缓存前必须确认它能形成合法插件。
+        if crate::zip_source::is_zip(entry.source.as_ref()) {
+            assert_zip_root(&resolved.path, entry, marketplace).await?;
+        }
         // 缓存目录的版本段取插件自带 manifest 的真实版本，与安装记录、UI 展示一致。
         let version = crate::entry_manifest::version(&resolved.path, entry).await;
         let target = crate::store::cache_dir(ports.storage, marketplace, &entry.name, &version);

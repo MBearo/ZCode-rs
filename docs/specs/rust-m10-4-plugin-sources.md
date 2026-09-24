@@ -17,11 +17,7 @@ M10 的第四期（总览见 `rust-m10-plugins.md` §1）。依据 Node 源码�
 | M10.4a | 原子目录事务；市场来源 `directory`、`file`、`settings`、`url`（JSON）、`git`、`github`（系统 Git）；插件来源 `directory`、相对路径、`git`、`github`、`git-subdir`、内置 `filesystem`/`sea`；市场 `add`、`remove`、`update`；`install`、`update`、`validate`、`describe`；`cancelOperation` |
 | M10.4b | 插件来源 `url`+`zip`（https、sha256）；公开 GitHub 仓库先走 archive，再按规则回退系统 Git；`resolveSuggestedReference` 与 `plugins/operationProgress`                                                                                                                                      |
 
-M10.4a 期间：
-
-- `url`+`zip` 插件来源报 `Plugin zip sources are not supported yet`，诊断码为 `plugin_marketplace_source_unsupported`。
-- GitHub 来源直接用系统 Git。
-- `resolveSuggestedReference` 不注册。
+两期分别提交。M10.4a 提交时 zip 来源报 `plugin_marketplace_source_unsupported`、GitHub 来源直接用系统 Git；M10.4b 补齐后与 Node 一致。
 
 ## 2. 所有者与时序
 
@@ -330,6 +326,12 @@ manifest 按 `parseMarketplaceManifest` 解析：名称须匹配 `^[a-z0-9][a-z0
   - 否则发出 `plugins/operationProgress {operationId, state:"refreshing"}`，在 10 s 超时内刷新官方市场，再查一次。
   - 结果：取消时返回 `plugin_operation_cancelled`；刷新失败返回 `marketplace_refresh_failed`；其余情况按 overview 的可用条目返回 `missing` 或 `unavailable`。
 
+### 9.1 进度通知的传递
+
+- 后台插件任务经 `EventSink` 发出 `PluginProgress` 事件，Engine 转成 Host 通知 `plugins/operationProgress`。
+- 通知与请求的最终回复走同一有序事件通道，所以通知一定先于回复送达。
+- 与 Node 相同，建议引用解析不持有存储锁。
+
 ## 10. 与 Node 的差异
 
 - 存储 JSON（`installed_plugins.json`、`known_marketplaces.json`、市场快照、合成 manifest）的对象键按字母序写出，因为 serde_json 未开启 `preserve_order`。数组顺序与内容一致。用户配置文件仍保持原键序（§3.10）。
@@ -337,6 +339,11 @@ manifest 按 `parseMarketplaceManifest` 解析：名称须匹配 `^[a-z0-9][a-z0
 - HTTP 状态文案取标准原因短语，Node 为服务器返回的原文。
 - Git 输出按字节读取后有损转为 UTF-8。Node 的 `maxBuffer` 为 10 MiB，超过时终止进程；Rust 同样只保留前 10 MiB，但不终止进程。
 
+- 建议引用的刷新超时后，Rust 取消刷新并等待它在取消点停下再回复（通常在毫秒级）；Node 立即回复，被中止的刷新在后台收尾。这样避免超时后仍有写入与下一次操作交错。
+- ZIP 解压使用 `zip` crate，只支持存储与 deflate，与 yauzl 相同。以下几处与 yauzl 不同：
+  - 损坏条目的报错文案不同（例如 CRC 校验失败，yauzl 为字节数不符）；
+  - 不检查存储条目的压缩与原始大小是否一致；
+  - 外部属性高 16 位为 0 的 DOS 条目，若带目录属性但名称不以 `/` 结尾，Rust 按目录处理，yauzl 按空文件处理。
 - `plugins/update` 在存储锁内读取待重装的安装记录；Node 在加锁前读取，并发卸载时可能重装刚删除的记录。
 
 ## 11. 验收
@@ -348,7 +355,10 @@ manifest 按 `parseMarketplaceManifest` 解析：名称须匹配 `^[a-z0-9][a-z0
   - 版本解析与合成 manifest；
   - 官方分片合并；
   - 诊断映射；
-  - Git 重试判定；缺少可执行文件时的来源脱敏。
+  - Git 重试判定；缺少可执行文件时的来源脱敏；
+  - ZIP：yauzl 文件名规则、符号链接拒绝、摘要校验、重定向与 404 状态、根目录选择；
+  - GitHub archive：公开仓库解析、`encodeURIComponent`、诊断脱敏与回退判定；
+  - 建议引用的结果投影。
 - **集成**（`zcode-cli-rust-plugin-install.test.ts`，App schema 严格校验）：
   1. 本地目录市场：
      - `add`，含 dry-run；
@@ -365,3 +375,6 @@ manifest 按 `parseMarketplaceManifest` 解析：名称须匹配 `^[a-z0-9][a-z0
      - 取消未登记（或已取消）的 id 返回 `false`；
      - 同一 `operationId` 重复登记时只有后登记的作业可取消。
   5. 缓存与记录在安装失败时回滚，旧版本缓存保持不变。
+- **集成**（`zcode-cli-rust-plugin-archive.test.ts`，M10.4b）：
+  1. zip 来源（本地回环 HTTP）：重定向、大写 sha256、错误摘要、manifest 名称不符、符号链接条目、非 HTTPS；市场级 `validate` 只给出推迟诊断。
+  2. `resolveSuggestedReference`：不受信来源；本地命中直接返回 `ready` 且不刷新；缺失时先发 `plugins/operationProgress` 再回复 `missing`（带图标与 listing，官方分片合并落盘）；未列出；刷新失败；取消。

@@ -13,12 +13,15 @@ workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+regex.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
 uuid.workspace = true
 zcode-cli-domain.workspace = true
+zip.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

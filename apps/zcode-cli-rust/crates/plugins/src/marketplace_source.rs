@@ -64,17 +64,37 @@ fn js_string(value: &Value) -> String {
     }
 }
 
-/// A repository checkout of a marketplace (M10.4b adds the GitHub archive).
+/// Node `resolveRepositoryMarketplaceSource`: `(checkout root, directory to
+/// remove)`. Sparse checkouts keep system Git; otherwise a public GitHub
+/// archive is tried first.
 async fn repository(
     url: &str,
     reference: Option<&str>,
     sparse: &[String],
     ports: &Ports<'_>,
-) -> Result<PathBuf> {
-    crate::git::clone_marketplace(ports.git, url, reference, sparse, ports.cancel).await
+) -> Result<(PathBuf, PathBuf)> {
+    if sparse.is_empty() {
+        match crate::github_archive::resolve(ports, url, reference, None).await {
+            Ok(resolved) => {
+                let cleanup = resolved.cleanup.unwrap_or_else(|| resolved.path.clone());
+                return Ok((resolved.path, cleanup));
+            }
+            Err(error) if !crate::github_archive::should_fallback(&error) => {
+                return Err(crate::github_archive::fetch_error(url, &error));
+            }
+            Err(_) => {}
+        }
+    }
+    let dir =
+        crate::git::clone_marketplace(ports.git, url, reference, sparse, ports.cancel).await?;
+    Ok((dir.clone(), dir))
 }
 
-async fn from_checkout(root: PathBuf, explicit: Option<&str>, label: String) -> Result<Loaded> {
+async fn from_checkout(
+    (root, cleanup): (PathBuf, PathBuf),
+    explicit: Option<&str>,
+    label: String,
+) -> Result<Loaded> {
     let result = async {
         let Some(file) = find_manifest(&root, explicit).await else {
             bail!("{label}");
@@ -85,12 +105,12 @@ async fn from_checkout(root: PathBuf, explicit: Option<&str>, label: String) -> 
     match result {
         Ok(manifest) => Ok(Loaded {
             manifest,
-            source_root: Some(root.clone()),
-            cleanup: Some(root),
+            source_root: Some(root),
+            cleanup: Some(cleanup),
         }),
         Err(error) => {
-            let cleanup = crate::store::cleanup(Some(&root)).await;
-            Err(crate::failure::append_cleanup(error, cleanup))
+            let failure = crate::store::cleanup(Some(&cleanup)).await;
+            Err(crate::failure::append_cleanup(error, failure))
         }
     }
 }

@@ -96,6 +96,11 @@ pub enum Event {
     AuxiliaryDone {
         result: std::result::Result<Value, ModelFailure>,
     },
+    /// `plugins/operationProgress` of a running plugin request (spec
+    /// rust-m10-4-plugin-sources §9); delivered before the request's reply.
+    PluginProgress {
+        params: Value,
+    },
     /// A detached workspace request's reply with a protocol error (plugin management).
     AuxiliaryReply {
         result: std::result::Result<Value, crate::RuntimeError>,
