@@ -5,6 +5,8 @@
     "third-party/inventory.json",
     "third-party/upstream/**",
     "third-party/native-search/licenses/**",
-    "third-party/runtime/*.txt"
+    "third-party/runtime/*.txt",
+    "apps/zcode-cli-rust/crates/bash-parse/fixtures/analysis-fuzz.json",
+    "apps/zcode-cli-rust/crates/bash/schema/command-registry.json"
   ]
 }
