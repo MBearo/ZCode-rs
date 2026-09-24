@@ -28,4 +28,5 @@ zcode-cli-host.workspace = true
 zcode-cli-protocol.workspace = true
 
 [dev-dependencies]
+image.workspace = true
 tempfile.workspace = true

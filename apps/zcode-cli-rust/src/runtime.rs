@@ -103,7 +103,8 @@ impl Context {
     /// The Node database as the session store.
     pub async fn node_store(&self) -> Result<NodeStore> {
         let source = self.node_database().await?;
-        NodeStore::open(source.database, source.artifacts).await
+        let media_cache = self.data_dir.join("tool-results");
+        NodeStore::open(source.database, source.artifacts, media_cache).await
     }
 
     /// The engine over `store`: a static `--config` model or the provider

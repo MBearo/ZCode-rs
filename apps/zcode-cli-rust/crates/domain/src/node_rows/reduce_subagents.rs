@@ -6,7 +6,8 @@ use super::facts::{text, truthy};
 use super::projection::{Delta, Projection, row_id};
 use crate::js_json::stringify;
 use serde_json::{Map, Value, json};
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 /// Node `mapSubagentStatus`.
 fn row_status(status: Option<&str>) -> &'static str {
@@ -19,6 +20,30 @@ fn row_status(status: Option<&str>) -> &'static str {
 
 fn member(payload: &Value, key: &str) -> Option<Value> {
     text(&payload[key]).map(Value::from)
+}
+
+/// Node `latestRowByChildId`: `Map.set` replaces a known child in place and
+/// appends a new one.
+#[derive(Default)]
+struct LatestByChild<'a> {
+    rows: Vec<(String, Cow<'a, Value>)>,
+    positions: HashMap<String, usize>,
+}
+
+impl<'a> LatestByChild<'a> {
+    fn collect(&mut self, row: Option<Cow<'a, Value>>) {
+        let Some(row) = row else { return };
+        let Some(child) = text(&row["childSessionId"]).map(str::to_owned) else {
+            return;
+        };
+        match self.positions.get(&child) {
+            Some(&index) => self.rows[index].1 = row,
+            None => {
+                self.positions.insert(child.clone(), self.rows.len());
+                self.rows.push((child, row));
+            }
+        }
+    }
 }
 
 impl Projection {
@@ -43,8 +68,9 @@ impl Projection {
         }
         let parent = text(&payload["parentToolCallId"])?;
         let turn = self.turn_of(event);
-        self.rows
-            .iter()
+        // Node 扫描整个 rows 窗口；这里只按行序扫描 subagent 行（结果相同），长会话冷回放
+        // 每个 lifecycle 事件不再遍历数万行。
+        self.subagent_rows_in_order()
             .find(|row| {
                 row["kind"] == "subagent"
                     && row["turnId"] == turn.as_str()
@@ -194,11 +220,18 @@ impl Projection {
     }
 
     /// Node `prospectiveSubagentRow`: `row` after the deltas from `start`.
-    fn prospective(row: &Value, deltas: &[Delta], start: usize) -> Option<Value> {
-        let mut current = row.clone();
+    /// 只在文本增量改写摘要时复制行；否则借用快照或增量里的行，避免每次物化复制全部子代理行。
+    fn prospective<'a>(
+        row: &'a Value,
+        deltas: &'a [Delta],
+        start: usize,
+    ) -> Option<Cow<'a, Value>> {
+        let mut current = Cow::Borrowed(row);
         for delta in &deltas[start.min(deltas.len())..] {
             match delta {
-                Delta::Upsert(next) if row_id(next) == row_id(&current) => current = next.clone(),
+                Delta::Upsert(next) if row_id(next) == row_id(&current) => {
+                    current = Cow::Borrowed(next)
+                }
                 Delta::Text { row, path, append }
                     if *row == row_id(&current)
                         && *path == "summaryText"
@@ -206,7 +239,7 @@ impl Projection {
                 {
                     let joined =
                         format!("{}{append}", current["summaryText"].as_str().unwrap_or(""));
-                    current["summaryText"] = joined.into();
+                    current.to_mut()["summaryText"] = joined.into();
                 }
                 _ => {}
             }
@@ -242,25 +275,16 @@ impl Projection {
             .filter_map(|id| Some((self.row_index(*id)?, self.find_row(*id)?)))
             .collect();
         current.sort_by_key(|(index, _)| *index);
-        let mut latest: Vec<(String, Value)> = Vec::new();
-        let mut collect = |row: Option<Value>| {
-            let Some(row) = row else { return };
-            let Some(child) = text(&row["childSessionId"]).map(str::to_owned) else {
-                return;
-            };
-            match latest.iter_mut().find(|(id, _)| *id == child) {
-                Some(entry) => entry.1 = row,
-                None => latest.push((child, row)),
-            }
-        };
+        let mut latest = LatestByChild::default();
         for (_, row) in &current {
-            collect(Self::prospective(row, deltas, 0));
+            latest.collect(Self::prospective(row, deltas, 0));
         }
         for (index, delta) in deltas.iter().enumerate() {
             if let Delta::Append(row) = delta {
-                collect(Self::prospective(row, deltas, index + 1));
+                latest.collect(Self::prospective(row, deltas, index + 1));
             }
         }
+        let latest = latest.rows;
         let running = self.running_subagents(&latest, &previous);
         let children: Vec<Value> = latest.iter().map(|(id, _)| id.clone().into()).collect();
         let ended = children.len() - running.len();
@@ -281,7 +305,7 @@ impl Projection {
         vec![Delta::State(patch)]
     }
 
-    fn running_subagents(&self, latest: &[(String, Value)], previous: &Value) -> Vec<Value> {
+    fn running_subagents(&self, latest: &[(String, Cow<Value>)], previous: &Value) -> Vec<Value> {
         let waiting: HashSet<String> = self.state["pendingInteractions"]
             .as_array()
             .into_iter()

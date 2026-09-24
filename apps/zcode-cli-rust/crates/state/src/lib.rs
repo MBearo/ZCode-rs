@@ -1,6 +1,7 @@
 use zcode_cli_core_api as contract;
 use zcode_cli_domain as domain;
 mod input_attachments;
+mod input_images;
 pub mod node;
 mod node_store;
 mod node_store_ports;

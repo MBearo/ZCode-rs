@@ -5,6 +5,7 @@ pub mod config;
 mod context_git;
 pub mod context_source;
 mod hook_toggle;
+pub mod image;
 pub mod log_retention;
 pub mod logging;
 mod process_clock;

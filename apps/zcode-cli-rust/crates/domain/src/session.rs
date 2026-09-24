@@ -16,6 +16,10 @@ pub struct StoredAttachment {
     /// The Node resolution of a prompt attachment (spec rust-m11-node-storage §5.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<super::node_journal::files::NodeFile>,
+    /// What this run's requests send instead (Node sends a prepared uploaded
+    /// image live while its artifact keeps the original).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared: Option<Box<StoredAttachment>>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

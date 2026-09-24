@@ -4,21 +4,13 @@
 use crate::contract::ToolOutput;
 use crate::domain::session::StoredAttachment;
 use anyhow::{Result, bail};
-use image::{DynamicImage, ImageFormat, imageops::FilterType};
 use serde_json::{Value, json};
 use std::path::Path;
 use tokio_util::sync::CancellationToken;
+use zcode_cli_host::image::{self as processor, Budget};
 
 const IMAGE_MAX_INPUT: u64 = 20 * 1024 * 1024;
 const VIDEO_MAX_INPUT: u64 = 30 * 1024 * 1024;
-const MAX_DIMENSION: u32 = 2000;
-/// Node `READ_IMAGE_MAX_BASE64_BYTES`, `READ_IMAGE_TARGET_BYTES`, `READ_MAX_OUTPUT_TOKENS`.
-const MAX_BASE64: usize = 5 * 1024 * 1024;
-const MAX_RAW: usize = MAX_BASE64 * 3 / 4;
-const MAX_TOKENS: usize = 25_000;
-const JPEG_QUALITIES: [u8; 4] = [80, 60, 40, 20];
-const SCALES: [f64; 3] = [0.75, 0.5, 0.25];
-const AGGRESSIVE_EDGES: [u32; 6] = [1000, 800, 600, 400, 300, 200];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Media {
@@ -70,180 +62,31 @@ fn byte_count(bytes: u64) -> String {
     }
 }
 
-/// Node `fitsImageBudget`.
-fn fits(len: usize) -> bool {
-    let base64 = len.div_ceil(3) * 4;
-    len <= MAX_RAW && base64 <= MAX_BASE64 && base64.div_ceil(8) <= MAX_TOKENS
-}
-
-/// Node `detectImageMediaType`: the file's signature over its extension.
-fn sniff(data: &[u8]) -> Option<&'static str> {
-    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        Some("image/png")
-    } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        Some("image/jpeg")
-    } else if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
-        Some("image/gif")
-    } else if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
-        Some("image/webp")
-    } else {
-        None
-    }
-}
-
-struct Candidate {
-    data: Vec<u8>,
-    mime: &'static str,
-    width: u32,
-    height: u32,
-}
-
-fn encode(image: &DynamicImage, mime: &'static str, quality: u8) -> Option<Candidate> {
-    let mut data = std::io::Cursor::new(vec![]);
-    let written = match mime {
-        "image/jpeg" => {
-            let rgb = DynamicImage::ImageRgb8(image.to_rgb8());
-            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut data, quality);
-            rgb.write_with_encoder(encoder)
-        }
-        "image/gif" => image.write_to(&mut data, ImageFormat::Gif),
-        _ => {
-            let encoder = image::codecs::png::PngEncoder::new_with_quality(
-                &mut data,
-                image::codecs::png::CompressionType::Best,
-                image::codecs::png::FilterType::Adaptive,
-            );
-            image.write_with_encoder(encoder)
-        }
-    };
-    written.ok()?;
-    Some(Candidate {
-        data: data.into_inner(),
-        mime,
-        width: image.width(),
-        height: image.height(),
-    })
-}
-
-fn fitting(candidate: Option<Candidate>) -> Option<Candidate> {
-    candidate.filter(|c| fits(c.data.len()))
-}
-
-fn jpeg_steps(image: &DynamicImage) -> Option<Candidate> {
-    JPEG_QUALITIES
-        .iter()
-        .find_map(|q| fitting(encode(image, "image/jpeg", *q)))
-}
-
-fn preserving(image: &DynamicImage, mime: &'static str) -> Option<Candidate> {
-    match mime {
-        "image/png" => fitting(encode(image, "image/png", 0)),
-        "image/jpeg" => jpeg_steps(image),
-        "image/gif" => fitting(encode(image, "image/gif", 0)),
-        _ => None,
-    }
-}
-
-fn to_max_edge(image: &DynamicImage, edge: u32) -> DynamicImage {
-    if image.width().max(image.height()) <= edge {
-        return image.clone();
-    }
-    image.resize(edge, edge, FilterType::CatmullRom)
-}
-
-/// Node `findFirstFittingCandidate`, in its order.
-fn search(image: &DynamicImage, source: &'static str) -> Option<Candidate> {
-    let within = image.width() <= MAX_DIMENSION && image.height() <= MAX_DIMENSION;
-    // PNG 只做一次原尺寸无损尝试，之后单向转 JPEG（Node 同样的顺序）。
-    let keep_format = source != "image/png";
-    if within && let Some(c) = preserving(image, source) {
-        return Some(c);
-    }
-    let bounded = to_max_edge(image, MAX_DIMENSION);
-    let resized = (bounded.width(), bounded.height()) != (image.width(), image.height());
-    if keep_format
-        && resized
-        && let Some(c) = fitting(encode(&bounded, source, 100))
-    {
-        return Some(c);
-    }
-    if !within
-        && keep_format
-        && let Some(c) = preserving(&bounded, source)
-    {
-        return Some(c);
-    }
-    if let Some(c) = jpeg_steps(&bounded) {
-        return Some(c);
-    }
-    let longest = f64::from(bounded.width().max(bounded.height()));
-    for scale in SCALES {
-        let scaled = to_max_edge(&bounded, ((longest * scale).round() as u32).max(1));
-        if keep_format && let Some(c) = preserving(&scaled, source) {
-            return Some(c);
-        }
-        if let Some(c) = jpeg_steps(&scaled) {
-            return Some(c);
-        }
-    }
-    AGGRESSIVE_EDGES.iter().find_map(|edge| {
-        let scaled = to_max_edge(image, (*edge).min(MAX_DIMENSION));
-        fitting(encode(&scaled, "image/jpeg", 20))
-    })
-}
-
-/// A prepared image: bytes, MIME and Node's structured fields.
+/// A prepared image: bytes, MIME and Node's Read result fields.
 pub(super) struct Prepared {
     pub data: Vec<u8>,
     pub mime: &'static str,
     pub info: Value,
 }
 
-/// Node `prepareJimpImageForModel`.
+/// Node `read-image.ts` over the shared image processor (Read budget).
 pub(super) fn prepare(data: Vec<u8>, extension_mime: &'static str) -> Result<Prepared, String> {
-    if data.is_empty() {
-        return Err("Image file is empty (0 bytes)".into());
-    }
-    let source = sniff(&data).unwrap_or(extension_mime);
-    let size = data.len();
-    let original = |data: Vec<u8>, dims: Option<(u32, u32)>| {
-        let dims = dims.map_or(json!({}), |(w, h)| {
-            json!({"originalWidth": w, "originalHeight": h, "displayWidth": w, "displayHeight": h})
-        });
-        let info = json!({"originalSize": size, "transformedSize": size, "resized": false,
-            "compressed": false, "compressionStrategy": "original", "dimensions": dims});
-        Prepared {
-            data,
-            mime: source,
-            info,
-        }
+    let p = processor::prepare(data, extension_mime, Budget::READ)?;
+    let size = p.original_size;
+    let dims = p.dimensions.map_or(json!({}), |d| {
+        json!({"originalWidth": d.original_width, "originalHeight": d.original_height,
+            "displayWidth": d.width, "displayHeight": d.height})
+    });
+    let info = if p.original {
+        json!({"originalSize": size, "transformedSize": size, "resized": false,
+            "compressed": false, "compressionStrategy": "original", "dimensions": dims})
+    } else {
+        json!({"originalSize": size, "transformedSize": p.data.len(), "resized": p.resized,
+            "compressed": p.compressed, "dimensions": dims})
     };
-    if source == "image/webp" {
-        if !fits(size) {
-            return Err("WebP image exceeds the model image budget and the current image adapter cannot transcode WebP".into());
-        }
-        return Ok(original(data, None));
-    }
-    let image =
-        image::load_from_memory(&data).map_err(|_| "Unable to decode image data".to_owned())?;
-    let (width, height) = (image.width(), image.height());
-    if width <= MAX_DIMENSION && height <= MAX_DIMENSION && fits(size) {
-        return Ok(original(data, Some((width, height))));
-    }
-    let Some(candidate) = search(&image, source) else {
-        return Err(format!(
-            "Unable to compress image ({size} bytes) within the requested model image budget"
-        ));
-    };
-    let resized = (candidate.width, candidate.height) != (width, height);
-    let info = json!({"originalSize": size, "transformedSize": candidate.data.len(),
-        "resized": resized,
-        "compressed": candidate.data.len() < size || candidate.mime != source,
-        "dimensions": {"originalWidth": width, "originalHeight": height,
-            "displayWidth": candidate.width, "displayHeight": candidate.height}});
     Ok(Prepared {
-        data: candidate.data,
-        mime: candidate.mime,
+        data: p.data,
+        mime: p.mime,
         info,
     })
 }

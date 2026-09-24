@@ -8,6 +8,7 @@ fn upload(mime: &str, index: usize) -> NodeFile {
         file_name: "shot.png",
         index,
         local: None,
+        image: None,
     })
 }
 
@@ -32,6 +33,67 @@ fn uploaded_media_parts_follow_node() {
 }
 
 #[test]
+fn prepared_images_record_node_image_metadata() {
+    // Node 上传图片：part 与块用准备后的类型，sizeBytes 与块 source.mimeType 仍按上传内容。
+    let image = json!({"maxDimension": 2000, "resized": true});
+    let file = media(Media {
+        uri: "zcode-artifact://sess_1/tool-result-a",
+        mime: "image/jpeg",
+        bytes: 10,
+        file_name: "shot.png",
+        index: 0,
+        local: None,
+        image: Some(("image/png", image.clone())),
+    });
+    assert_eq!(file.part["mime"], "image/jpeg");
+    let meta: Vec<&String> = file.part["metadata"].as_object().unwrap().keys().collect();
+    assert_eq!(
+        meta,
+        [
+            "image",
+            "recoverability",
+            "sizeBytes",
+            "storageKind",
+            "artifactUri"
+        ]
+    );
+    assert_eq!(file.part["metadata"]["image"], image);
+    assert_eq!(file.part["metadata"]["sizeBytes"], 38);
+    assert_eq!(file.block["mediaType"], "image/jpeg");
+    assert_eq!(file.block["source"]["mimeType"], "image/png");
+    // 处理器拒绝的上传：Node 把整段 data URL 留在 url。
+    let failed = upload_image_failed(
+        "data:image/png;base64,AA==",
+        1,
+        "attachment_image_resize_failed",
+    );
+    assert_eq!(
+        failed.part,
+        json!({"type": "file", "mime": "image/*", "url": "data:image/png;base64,AA==",
+            "metadata": {"errorCode": "attachment_image_resize_failed", "originalUrl": "inline:data-url",
+                "recoverability": "metadata_only", "storageKind": "metadata_only"}})
+    );
+    assert_eq!(failed.block["text"], "[Attached image/*: attachment-2]");
+    let sized = local_failed(
+        ("a.png", "/w/a.png"),
+        "image/png",
+        "attachment_image_resize_failed",
+        Some(7),
+    );
+    let meta: Vec<&String> = sized.part["metadata"].as_object().unwrap().keys().collect();
+    assert_eq!(
+        meta,
+        [
+            "errorCode",
+            "originalUrl",
+            "recoverability",
+            "sizeBytes",
+            "storageKind"
+        ]
+    );
+}
+
+#[test]
 fn local_media_records_the_path_source() {
     let file = media(Media {
         uri: "zcode-artifact://sess_1/tool-result-b",
@@ -40,6 +102,7 @@ fn local_media_records_the_path_source() {
         file_name: "a.png",
         index: 0,
         local: Some((("img/a.png", "/w/img/a.png"), "sha256:ab")),
+        image: None,
     });
     let keys: Vec<&String> = file.part.as_object().unwrap().keys().collect();
     assert_eq!(
@@ -93,6 +156,7 @@ fn text_attachments_become_prompt_attachment_reminders() {
         ("a.txt", "/w/a.txt"),
         "text/plain",
         "attachment_read_failed",
+        None,
     );
     assert_eq!(failed.placement(), Placement::Skip);
     let reference = local_reference(

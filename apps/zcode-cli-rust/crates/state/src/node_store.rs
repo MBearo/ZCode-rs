@@ -80,9 +80,13 @@ fn directory(workspace: &str) -> &str {
 }
 
 impl NodeStore {
-    /// Opens and migrates the Node database; `artifacts` is Node's artifact root.
-    pub async fn open(path: PathBuf, artifacts: PathBuf) -> Result<Self> {
-        let attachments = super::input_attachments::Backing::Artifacts(artifacts.clone());
+    /// Opens and migrates the Node database; `artifacts` is Node's artifact
+    /// root, `media_cache` Rust's own cache of prepared request media.
+    pub async fn open(path: PathBuf, artifacts: PathBuf, media_cache: PathBuf) -> Result<Self> {
+        let attachments = super::input_attachments::Backing {
+            root: artifacts.clone(),
+            cache: media_cache,
+        };
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }

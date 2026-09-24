@@ -1,4 +1,9 @@
 use super::*;
+use image::{DynamicImage, ImageFormat};
+
+fn fits(len: usize) -> bool {
+    Budget::READ.fits(len)
+}
 
 fn png(width: u32, height: u32, noise: bool) -> Vec<u8> {
     let mut seed = 0x2545_f491_u32;

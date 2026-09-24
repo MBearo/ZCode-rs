@@ -1,5 +1,6 @@
 //! `SessionStore` over the Node database (spec rust-m11-node-storage §5.1).
 use super::node_store::{NodeStore, Request};
+use crate::domain::node_journal::files::NodeFile;
 use crate::domain::session::{Session, StoredAttachment};
 use crate::domain::session_listing::{ListParams, SessionListing};
 use anyhow::{Result, bail};
@@ -113,10 +114,21 @@ impl crate::contract::SessionStore for NodeStore {
         content: &str,
         content_type: &str,
     ) -> Result<String> {
-        let super::input_attachments::Backing::Artifacts(root) = &self.attachments;
+        let root = &self.attachments.root;
         let (uri, _) =
             super::node::artifacts::write_text(root, session, call, content, content_type).await?;
         Ok(uri)
+    }
+    async fn uploaded_image(
+        &self,
+        reference: &str,
+        asset: &StoredAttachment,
+        file_name: &str,
+        index: usize,
+    ) -> Result<(NodeFile, Option<StoredAttachment>)> {
+        self.attachments
+            .uploaded_image(reference, asset, file_name, index)
+            .await
     }
     async fn attachment_of(&self, reference: &str) -> Result<Option<StoredAttachment>> {
         self.attachments.attachment_of(reference).await

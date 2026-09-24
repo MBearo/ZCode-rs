@@ -6,6 +6,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+#[path = "files_local.rs"]
+mod local;
+pub use local::*;
+
 /// Node `INLINE_TEXT_ATTACHMENT_MAX_BYTES` of a non-media upload.
 pub const INLINE_TEXT_MAX_BYTES: u64 = 64 * 1024;
 /// Node `READ_MAX_FILE_SIZE_BYTES` of a local text attachment.
@@ -106,13 +110,20 @@ pub struct Media<'a> {
     pub index: usize,
     /// The local file and its `sha256:<hex>` for a path attachment.
     pub local: Option<(Local<'a>, &'a str)>,
+    /// A prepared image: the MIME its bytes were submitted as and Node's
+    /// `metadata.image` (`mime` is then the prepared type).
+    pub image: Option<(&'a str, Value)>,
 }
 
 /// Node `resolveInlineMediaAttachment` (uploads) and
 /// `resolveLocalMediaAttachment` (path attachments).
 pub fn media(m: Media) -> NodeFile {
     let kind = kind(m.mime);
+    let submitted = m.image.as_ref().map_or(m.mime, |(mime, _)| mime);
     let mut meta = Map::new();
+    if let Some((_, image)) = &m.image {
+        meta.insert("image".into(), image.clone());
+    }
     if let Some(((original, _), _)) = m.local {
         meta.insert("originalUrl".into(), original.into());
     }
@@ -122,7 +133,7 @@ pub fn media(m: Media) -> NodeFile {
     }
     // Node 对上传图片记录 data URL 的长度，视频与 PDF 记录解码后的字节数。
     let size = if kind == Kind::Image && m.local.is_none() {
-        data_url_len(m.mime, m.bytes)
+        data_url_len(submitted, m.bytes)
     } else {
         m.bytes
     };
@@ -142,7 +153,7 @@ pub fn media(m: Media) -> NodeFile {
         ),
     };
     let mut block_source = json!({"id": format!("turn-attachment-{}", m.index + 1),
-        "kind": if m.local.is_some() { "local_file" } else { "inline" }, "mimeType": m.mime});
+        "kind": if m.local.is_some() { "local_file" } else { "inline" }, "mimeType": submitted});
     if let Some(((_, path), _)) = m.local {
         block_source["path"] = path.into();
     }
@@ -189,104 +200,14 @@ pub fn unread_upload(index: usize) -> NodeFile {
     }
 }
 
-/// A local text file read for the model (Node `readTextFileForModel`).
-pub struct TextRead<'a> {
-    pub content: &'a str,
-    pub truncated: bool,
-    /// The file size.
-    pub size: u64,
-    pub total_lines: u64,
-}
-
-/// Node `resolveLocalFileAttachment` of a text file.
-pub fn local_text((original, path): Local, read: TextRead) -> NodeFile {
-    let meta = json!({"originalUrl": original,
-        "preview": {"text": read.content, "truncated": read.truncated, "originalBytes": read.size,
-            "startLine": 1, "totalLines": read.total_lines},
-        "recoverability": if read.truncated { "preview_only" } else { "provider_ready" },
-        "sizeBytes": read.size, "storageKind": "inline"});
+/// Node `resolvedPlaceholderAttachment` of an uploaded image the processor
+/// rejects: Node keeps the whole data URL as the part `url`.
+pub fn upload_image_failed(data_url: &str, index: usize, code: &str) -> NodeFile {
+    let meta = json!({"errorCode": code, "originalUrl": "inline:data-url",
+        "recoverability": "metadata_only", "storageKind": "metadata_only"});
     NodeFile {
-        part: part(
-            "text/plain",
-            Some(basename(path)),
-            original,
-            Some(local_source(original, path)),
-            meta,
-        ),
-        block: text_block(read.content),
-    }
-}
-
-/// Node `resolvedPathReferenceAttachment`: `reason` is its `PathReferenceReason`.
-pub fn local_reference((original, path): Local, mime: &str, size: u64, reason: &str) -> NodeFile {
-    let why = match reason {
-        "image_too_large" => "the image is larger than the inline media budget",
-        "pdf_too_large" => "the PDF is larger than the inline PDF input limit",
-        "video_too_large" => "the video is larger than the ZCode video input limit",
-        _ => "the file is not a known text attachment",
-    };
-    let text = format!(
-        "Attached {mime}: {original}\nThe file was sent by local path because {why}.\nUse the available file reading tools if you need to inspect the file contents."
-    );
-    let meta = json!({"originalUrl": original, "recoverability": "metadata_only",
-        "sizeBytes": size, "storageKind": "local_ref"});
-    NodeFile {
-        part: part(
-            mime,
-            Some(basename(path)),
-            original,
-            Some(local_source(original, path)),
-            meta,
-        ),
-        block: text_block(&text),
-    }
-}
-
-/// Node `resolvedPlaceholderAttachment` of an unreadable local file.
-pub fn local_failed((original, path): Local, mime: &str, code: &str) -> NodeFile {
-    let meta = json!({"errorCode": code, "originalUrl": original, "recoverability": "metadata_only",
-        "storageKind": "local_ref"});
-    NodeFile {
-        part: part(
-            mime,
-            Some(basename(path)),
-            original,
-            Some(local_source(original, path)),
-            meta,
-        ),
-        block: text_block(&format!("[Attached {mime}: {original}]")),
-    }
-}
-
-/// Node `isTextLikePath`.
-pub fn text_like(path: &str) -> bool {
-    const EXTENSIONS: &[&str] = &[
-        "cjs", "conf", "cpp", "cs", "css", "csv", "go", "h", "hpp", "html", "ini", "java", "js",
-        "json", "jsx", "log", "md", "mjs", "py", "rs", "sh", "sql", "toml", "ts", "tsx", "txt",
-        "xml", "yaml", "yml",
-    ];
-    let name = basename(path);
-    name.rsplit_once('.')
-        .is_some_and(|(_, ext)| EXTENSIONS.contains(&ext.to_lowercase().as_str()))
-}
-
-/// Node `inferAttachmentMimeFromPath` (with `inferVideoMimeFromPath`).
-pub fn infer_mime(path: &str) -> &'static str {
-    let lower = path.to_lowercase();
-    let ext = lower.rsplit_once('.').map_or("", |(_, ext)| ext);
-    match ext {
-        "pdf" => "application/pdf",
-        "json" => "application/json",
-        "csv" => "text/csv",
-        "md" => "text/markdown",
-        "mp4" => "video/mp4",
-        "m4v" => "video/x-m4v",
-        "mov" => "video/quicktime",
-        "webm" => "video/webm",
-        "mkv" => "video/x-matroska",
-        "avi" => "video/x-msvideo",
-        _ if text_like(path) => "text/plain",
-        _ => "application/octet-stream",
+        part: part("image/*", None, data_url, None, meta),
+        block: text_block(&format!("[Attached image/*: attachment-{}]", index + 1)),
     }
 }
 

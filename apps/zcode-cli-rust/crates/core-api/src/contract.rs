@@ -167,6 +167,31 @@ pub trait SessionStore: Send + Sync {
     ) -> Result<String> {
         anyhow::bail!("Artifact storage unavailable")
     }
+    /// Node `prepareImageDataUrl` of an uploaded image at `index` of the
+    /// input: its resolved file, and the prepared asset this run's requests
+    /// send when it differs from the upload (spec rust-m11-node-storage §5.3).
+    async fn uploaded_image(
+        &self,
+        reference: &str,
+        asset: &zcode_cli_domain::session::StoredAttachment,
+        file_name: &str,
+        index: usize,
+    ) -> Result<(
+        zcode_cli_domain::node_journal::files::NodeFile,
+        Option<zcode_cli_domain::session::StoredAttachment>,
+    )> {
+        use zcode_cli_domain::node_journal::files::{Media, media};
+        let file = media(Media {
+            uri: reference,
+            mime: &asset.media_type,
+            bytes: asset.total_bytes,
+            file_name,
+            index,
+            local: None,
+            image: None,
+        });
+        Ok((file, None))
+    }
     /// The stored bytes behind a reference the session does not hold in
     /// memory (a resumed or Node-written session).
     async fn attachment_of(

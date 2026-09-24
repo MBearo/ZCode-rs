@@ -202,7 +202,13 @@ impl ModelPort for Model {
 }
 
 /// The image `Read` returns for `shot.png`.
-pub const IMAGE: &[u8] = &[137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3];
+/// A valid 1x1 PNG: prompt images are decoded like Node's Jimp (a broken
+/// image becomes a placeholder).
+pub const IMAGE: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4, 0,
+    0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 156, 99, 248, 95, 15, 0, 2, 128, 1,
+    127, 12, 105, 242, 97, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
 
 /// `Read`; the first execution waits for the gate when one is set.
 pub struct Tools {
@@ -313,7 +319,7 @@ async fn run(
 ) -> Harness {
     let db = root.join("cli/db/db.sqlite");
     let workspace = root.join("w").to_string_lossy().into_owned();
-    let store = NodeStore::open(db.clone(), root.join("cli/artifacts"))
+    let store = NodeStore::open(db.clone(), root.join("cli/artifacts"), root.join("cache"))
         .await
         .unwrap();
     let (requests_tx, requests) = mpsc::unbounded_channel();

@@ -189,26 +189,29 @@ fn stable_boundary(
     turn: &str,
     now: i64,
 ) -> Result<()> {
-    let stored = messages::messages(conn, session)?;
-    let completed_assistant = |m: &messages::WithParts| {
-        m.info["role"] == "assistant"
-            && m.info.get("error").is_none_or(Value::is_null)
-            && m.info["time"].get("completed").is_some()
-    };
-    let Some(end) = stored
-        .iter()
-        .rposition(|m| m.info["id"] == boundary && completed_assistant(m))
-    else {
+    // Node 读取整段会话再定位；结果只取决于消息 id 顺序与边界消息本身，
+    // 这里只查 id 与边界一条（不读 part），长会话每轮不再全量加载。
+    let ids = messages::message_ids(conn, session)?;
+    let Some(end) = ids.iter().rposition(|id| id == boundary) else {
         return Ok(());
     };
-    let Some(begin) = stored[..=end].iter().rposition(|m| m.info["id"] == start) else {
+    let Some(mut info) = messages::message_info(conn, session, boundary)? else {
         return Ok(());
     };
-    let ordered: Vec<Value> = stored[begin..=end]
+    let completed_assistant = info["role"] == "assistant"
+        && info.get("error").is_none_or(Value::is_null)
+        && info["time"].get("completed").is_some();
+    if !completed_assistant {
+        return Ok(());
+    }
+    let Some(begin) = ids[..=end].iter().rposition(|id| id == start) else {
+        return Ok(());
+    };
+    let ordered: Vec<Value> = ids[begin..=end]
         .iter()
-        .map(|m| m.info["id"].clone())
+        .map(|id| id.as_str().into())
         .collect();
-    let prefix: Vec<&Value> = stored[..=end].iter().map(|m| &m.info["id"]).collect();
+    let prefix: std::collections::HashSet<&str> = ids[..=end].iter().map(String::as_str).collect();
     let goal = match targets::read(conn, session)? {
         None => json!({"kind": "none"}),
         Some(target) => {
@@ -216,15 +219,14 @@ fn stable_boundary(
                 .into_iter()
                 .filter(|e| e.data["payload"]["targetId"] == target.target_id.as_str())
                 .filter(|e| {
-                    let anchor = &e.data["payload"]["anchorAssistantMessageId"];
-                    anchor.as_str().is_none_or(str::is_empty) || prefix.contains(&anchor)
+                    let anchor = e.data["payload"]["anchorAssistantMessageId"].as_str();
+                    anchor.is_none_or(|a| a.is_empty() || prefix.contains(a))
                 })
                 .map(|e| e.id.into())
                 .collect();
             json!({"kind": "snapshot", "target": stable_goal(&target), "verificationEntryIds": ids})
         }
     };
-    let mut info = stored[end].info.clone();
     let mut anchor = info["anchor"].as_object().cloned().unwrap_or_default();
     if !turn.is_empty() {
         anchor.insert("turnId".into(), turn.into());

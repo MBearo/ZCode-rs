@@ -44,6 +44,11 @@ impl ModelFailure {
                 "attachment_unavailable",
                 "An attachment snapshot is missing or invalid.",
             ),
+            // Node `MEDIA_BUDGET_CURRENT_ATTACHMENT_TOO_LARGE_ERROR_CODE`（UI 按该码本地化）。
+            "media_budget" => (
+                "MEDIA_BUDGET_CURRENT_ATTACHMENT_TOO_LARGE",
+                "Current attachments are too large to send. Remove or compress attachments and try again.",
+            ),
             "attachment_unsupported" => (
                 "attachment_unsupported",
                 "The selected model does not support an attachment format.",

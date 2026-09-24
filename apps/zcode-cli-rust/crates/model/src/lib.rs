@@ -2,6 +2,7 @@ use zcode_cli_core_api as contract;
 use zcode_cli_domain as domain;
 mod anthropic_stream;
 pub mod config;
+mod media_budget;
 mod model_failure;
 mod model_media;
 mod model_policy;

@@ -192,15 +192,17 @@ async function rssKiB() {
   }
 }
 const watchdog = setTimeout(() => child.kill("SIGKILL"), 120_000);
+// 会话库自 M11.5 起是 Node 的 `~/.zcode/cli/db/db.sqlite`（更早的版本写 data dir）；两处都计入。
 async function storageSize() {
-  const files = await readdir(join(root, "data"));
-  return (
-    await Promise.all(
-      files
-        .filter((f) => !f.endsWith(".lock"))
-        .map(async (f) => (await stat(join(root, "data", f))).size),
-    )
-  ).reduce((a, b) => a + b, 0);
+  let total = 0;
+  for (const directory of [join(root, "data"), join(fixtureHome, ".zcode", "cli", "db")]) {
+    const files = await readdir(directory).catch(() => []);
+    for (const f of files.filter((f) => !f.endsWith(".lock"))) {
+      const info = await stat(join(directory, f));
+      if (info.isFile()) total += info.size;
+    }
+  }
+  return total;
 }
 let measurement;
 let exitStatus,

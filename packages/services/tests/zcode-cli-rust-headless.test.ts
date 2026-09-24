@@ -7,8 +7,9 @@ import { binary, end, event, fixture } from "./zcode-cli-rust-fixture.js";
 
 type Message = Record<string, any>;
 type Fixture = Awaited<ReturnType<typeof fixture>>;
+// 有效的 1x1 PNG：提示图片按 Node 规则解码，CRC 错误的图片会降级为占位。
 const png = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII=",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGP4Xw8AAoABfwxp8mEAAAAASUVORK5CYII=",
   "base64",
 );
 

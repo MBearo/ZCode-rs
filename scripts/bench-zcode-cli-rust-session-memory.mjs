@@ -30,6 +30,15 @@ async function rss(h) {
       : await run("ps", ["-o", "rss=", "-p", String(h.child.pid)]);
   return Number(stdout.trim());
 }
+/** macOS phys_footprint (Activity Monitor memory): unlike `ps` RSS it leaves out freed
+ * pages the allocator keeps as reusable. `null` on other platforms. */
+async function footprint(h) {
+  if (process.platform !== "darwin") return null;
+  const { stdout } = await run("footprint", ["-p", String(h.child.pid)]);
+  const match = /Footprint:\s+([\d.]+)\s+([KMG])B/.exec(stdout);
+  if (!match) return null;
+  return Number(match[1]) * { K: 1, M: 1024, G: 1024 * 1024 }[match[2]];
+}
 async function idle(h) {
   // A subsequent owner RPC observes completion of the preceding request's eviction, without sleeps.
   await h.client.request("runtime/capabilities", {});
@@ -58,7 +67,7 @@ try {
         agent: "main",
         ...(role === "assistant"
           ? {
-              parentID: `msg_bench_${sessionID}_0`,
+              parentID: `msg_bench_${sessionID}_${sessionID === pageId ? 0 : 100}`,
               mode: "yolo",
               path: { cwd: f.cwd, root: f.cwd },
               cost: 0,
@@ -85,8 +94,13 @@ try {
     await add(pageId, "user", 0, "page");
     for (let i = 1; i <= 200; i++) await add(pageId, "assistant", i, "x".repeat(32 * 1024));
     // Canonical-only fixtures isolate session retention from App output size and model context limits.
+    // 大段正文放在 assistant 消息：冷加载会为每条 Node user 消息保留一份输入边界正文（编辑/重试用），
+    // 64 条 64 KiB 的 user 消息单个会话就超过 16 MiB 的空闲驻留预算。
     const body = "x".repeat(64 * 1024);
-    for (const id of ids) for (let i = 1; i <= 64; i++) await add(id, "user", 100 + i, body);
+    for (const id of ids) {
+      await add(id, "user", 100, "history");
+      for (let i = 1; i <= 64; i++) await add(id, "assistant", 100 + i, body);
+    }
   } finally {
     store.close();
   }
@@ -114,6 +128,7 @@ try {
           rssSamples.push(await rss(h));
         }
         const idleRssKiB = await rss(h);
+        const idleFootprintKiB = await footprint(h);
         const cached = await h.rows(ids.at(-1));
         assert.equal((await h.rows(ids.at(-1))).atLogEpoch, cached.atLogEpoch);
         await h.subscribe(`conversation/${ids[0]}`);
@@ -122,6 +137,7 @@ try {
         assert.equal((await h.rows(ids[0])).atLogEpoch, pinnedEpoch);
         await idle(h);
         const pinnedRssKiB = await rss(h);
+        const pinnedFootprintKiB = await footprint(h);
         await h.subscribe(`conversation/${pageId}`);
         const pageMs = [];
         for (let i = 0; i < 3; i++) {
@@ -145,7 +161,9 @@ try {
           startupMs,
           startupRssKiB,
           idleRssKiB,
+          idleFootprintKiB,
           pinnedRssKiB,
+          pinnedFootprintKiB,
           sampledPeakRssKiB: Math.max(...rssSamples, pinnedRssKiB),
           coldReadP95Ms: coldReadMs[Math.floor(coldReadMs.length * 0.95)],
           largePageMs: pageMs[1],
@@ -155,7 +173,9 @@ try {
           join(directory, `${version}-${repetition}.json`),
           JSON.stringify(result, null, 2) + "\n",
         );
-        console.log(`${version} ${repetition}/5: idle ${(idleRssKiB / 1024).toFixed(2)} MiB`);
+        console.log(
+          `${version} ${repetition}/5: idle RSS ${(idleRssKiB / 1024).toFixed(2)} MiB, footprint ${((idleFootprintKiB ?? 0) / 1024).toFixed(2)} MiB`,
+        );
       } finally {
         await h.close();
       }
@@ -173,7 +193,9 @@ try {
             "startupMs",
             "startupRssKiB",
             "idleRssKiB",
+            "idleFootprintKiB",
             "pinnedRssKiB",
+            "pinnedFootprintKiB",
             "sampledPeakRssKiB",
             "coldReadP95Ms",
             "largePageMs",

@@ -9,19 +9,21 @@ crate 边界见 [架构规格](../../docs/specs/rust-cli-architecture.md)：`pro
 - OpenAI Chat Completions、OpenAI Responses、Anthropic Messages；文本对话、SSE 正文/reasoning、分片 tool call、usage 与各协议推理元数据回传。
 - HTTP 连接复用、有界重试、Retry-After、空响应恢复、闲置/显式总超时；App 显示重试等待，stop 可取消请求与退避。
 - 首段即时交付，后续 16 ms/8 KiB 合并；reasoning 历史回传；可见输出后断流保留中断内容，不透明重放。
-- yolo 自动执行；Read/Write/Edit 使用 TS 标准参数，Glob/Grep 原生搜索；后台 Bash、TaskOutput/TaskStop、输出文件、文件 diff 投影。List 仅兼容旧 native 调用，不再对模型公开。
+- 权限模式 build/edit/plan/yolo/auto、Plan 模式与 hooks；Read/Write/Edit 使用 TS 标准参数（Edit 与 Node 相同的宽松匹配），Glob/Grep 原生搜索；后台 Bash、TaskOutput/TaskStop、输出文件、文件 diff 投影。List 仅兼容旧 native 调用，不再对模型公开。
+- MCP（stdio、Streamable HTTP、legacy SSE，插件 options 与官方鉴权）、Skill、插件市场与安装/更新/卸载/恢复内置、子代理（Agent/SendMessage/TaskOutput/TaskStop）、Goal（续跑与验证）、分叉与选区侧聊、编辑/重试/回退与文件恢复、分享上下文导入、自动标题、`-p` 无头模式。
 - AskUserQuestion 复用 App 问答界面；支持单选、多选、自定义/部分回答、跳过、拒绝、自动继续与暂停倒计时。问题和回答先提交再唤醒工具；冷恢复保留已提交回答，未回答的问题标记中断。
 - TodoRead/TodoWrite 保存会话任务清单，投影 App 工作计划摘要；支持全量替换/清空、冷恢复与压缩后读取（与 Node 共用 `todo` 表）。进度提示按当前 TS 的十轮间隔注入，TodoWrite 保持顺序提交屏障。
 - 会话创建、重命名、历史读取、FIFO 输入/compact 维护队列、队列编辑、held queue 保留/清空发送、sendQueuedNow、stop 和幂等 ACK 查询。
 - 手动 /compact、自动预算压缩、超限后的单次反应式压缩、旧工具结果 microcompact；摘要边界与时间线同事务保存，完整历史保留；每次请求刷新根 AGENTS.md。
-- 会话 SQLite 持久化、崩溃中断恢复、workspace identity 隔离、进程 owner 锁、旧 run 事件丢弃。
+- 会话只存 Node 的 `db.sqlite`（记录格式与 Node 逐字节一致）；崩溃中断恢复、workspace identity 隔离、进程 owner 锁、旧 run 事件丢弃。
 - V4 conversation/sessions-index/workspace-config 投影、desktop/mobile 独立订阅、分片校验和 snapshot 恢复。
 - App 原生存储准备、能力协商和显式 runtime 选择。
 - 直接读取 App Provider Registry、个人设置及账号 overlay；热更新、模型/档位切换、每请求 Host 鉴权、连通性测试和 workspace 文本生成/取消。
-- 与 Node 共用会话库：Node 写入的会话（身份、消息/工具、压缩边界、输入账本、附件产物）直接冷加载并可继续，Rust 写入的会话 Node 同样可读；附件分块预览读取 Node 产物。
+- 与 Node 共用会话库：Node 写入的会话直接冷加载并可继续，Rust 写入的会话 Node 同样可读，两个进程可交替续写同一会话、同时写不同会话；附件分块预览读取 Node 产物。
+- 提示附件按 Node 规则解析：图片按 Node Jimp 规则缩放（长边 2000、5 MiB），本地视频上限 30 MiB；每个模型请求的媒体按 Node 的 40 MiB 预算保留最新输入与较新的历史媒体。
 - 模型/工具结果及后台登记提交屏障；Read/List/Glob/Grep 最多四并发，写入/Shell 顺序执行；存储失败停止执行且禁止收口再次提交失败状态。
 
-尚未替换默认 TypeScript runtime。不支持 MCP/插件、子代理、Plan 执行、context refs、Node REPL 和工作流；未支持的命令明确拒绝。Todo 工作计划不启用 Plan 执行开关。Composer 附件已支持分片上传与文本/图片/PDF 基础链路，剩余媒体和容量边界见[对齐清单](../../docs/specs/rust-parity-remaining.md)。部分高级 UI 入口尚未隐藏。重连通过新 snapshot 恢复，不承诺增量日志 replay。Shell 使用 yolo 权限，不提供 OS sandbox。
+尚未替换默认 TypeScript runtime。不支持 MCP OAuth、工作流/自动任务/浏览器工具、Node REPL；TUI 只保留子命令入口；未支持的命令明确拒绝。与 Node 的刻意差异和照 Node 保留的缺陷见 [M11 spec](../../docs/specs/rust-m11-node-storage.md) §2.5、§5.3，其余未完成项见[对齐清单](../../docs/specs/rust-parity-remaining.md)。重连通过新 snapshot 恢复，不承诺增量日志 replay。Shell 不提供 OS sandbox。
 
 ## 构建与验证
 
@@ -37,6 +39,16 @@ pnpm lint
 
 集成测试启动真实 Rust 二进制、临时 SQLite、临时工作区和本地 HTTP 模型 fixture，使用 App 的实际协议客户端、Host 服务与 V4 schema/assembler。不会请求真实模型或读取个人账号。验证记录见 [spec](../../docs/specs/rust-cli-core.md)。
 
+与 Node 存储对齐的检查（均在仓库根目录，`TSX_TSCONFIG_PATH=packages/services/tests/tsconfig.zcode-cli-rust.json node --import tsx <脚本>`；先 `cargo build --locked --release --manifest-path apps/zcode-cli-rust/Cargo.toml --bin zcode-cli-rust --example node_read`，互操作脚本还需要已构建的 `apps/zcode-cli/packages/cli/dist/zcode.cjs`）：
+
+| 脚本                                            | 内容                                                                                                                 |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `scripts/zcode-cli-rust-node-storage-check.mjs` | Rust 写入的各类会话由 Node 仓储、history hydrator 与冷投影读回，与 Rust 冷读取逐项相等                               |
+| `scripts/zcode-cli-rust-real-db-check.mjs`      | 用户现有库的在线备份：Rust 启动不改迁移与表结构，逐会话比对两端冷读取，Rust 续写后 Node 读回；只打印计数，结束删副本 |
+| `scripts/zcode-cli-rust-node-interop.mjs`       | 真实 Node CLI（`zcode.cjs`）与 Rust：交替续写（含工具）、流式/工具执行中强杀后由对方恢复、两进程并发写               |
+
+2026-09-25 的结果：用户库 5,397 个会话全部一致；交替、崩溃恢复与并发场景全部通过（spec §10 M11.6）。
+
 macOS/Linux 的 TLS 证书失败测试使用本地 `openssl` 生成临时自签名证书，测试后删除；Windows 暂跳过这一用例。Rust 单测及受控存储测试不依赖外部服务。
 
 性能比较使用 release 产物：
@@ -44,9 +56,19 @@ macOS/Linux 的 TLS 证书失败测试使用本地 `openssl` 生成临时自签�
 ```sh
 cargo build --locked --release --manifest-path apps/zcode-cli-rust/Cargo.toml
 node scripts/bench-zcode-cli-rust-suite.mjs /absolute/baseline-binary apps/zcode-cli-rust/target/release/zcode-cli-rust .zcode-runtime/rust-bench/requests 256000 256000
+node scripts/bench-zcode-cli-node-rust.mjs apps/zcode-cli/packages/cli/dist/zcode.cjs apps/zcode-cli-rust/target/release/zcode-cli-rust .zcode-runtime/node-rust-bench 5
+TSX_TSCONFIG_PATH=packages/services/tests/tsconfig.zcode-cli-rust.json node --import tsx scripts/bench-zcode-cli-rust-session-memory.mjs /absolute/a /absolute/b .zcode-runtime/rust-bench/memory
 ```
 
-该脚本串行、交替比较两个版本，在固定流式、100 轮历史和四会话场景各重复五次；记录原始样本及 summary.json。RSS 是定时采样值；存储开销同时记录运行中 SQLite/SHM/WAL 占用和正常 EOF 后持久文件大小，不等于累计物理写入字节。结果目录默认 `.zcode-runtime/rust-bench/requests`。
+第一个脚本串行、交替比较两个版本，在固定流式、100 轮历史和四会话场景各重复五次；记录原始样本及 summary.json。RSS 是定时采样值；存储开销同时记录运行中 SQLite/SHM/WAL 占用和正常 EOF 后持久文件大小，不等于累计物理写入字节。第二个脚本用同一本地模型比较 Node CLI 与 Rust；第三个测大历史冷读取、空闲驻留（macOS 另记 `footprint`，`ps` RSS 含分配器可复用页）与分页。
+
+2026-09-25（M1 Max，机器高负载，中位数，详见[报告](../../docs/reports/rust-performance-2026-09-25.md)）：
+
+| 场景                         | 结果                                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 切换到 Node 库前后           | 对话路径变化在 4% 以内；流式场景存储 6.15 → 3.18 MiB；空目录首次启动多一次建库迁移（约 +9 ms、+4.3 MiB） |
+| 与 Node CLI（8 轮 × 256 块） | 启动 786 → 20.6 ms，空闲 RSS 416 → 17.8 MiB，峰值 520 → 28.7 MiB，CPU 0.92 → 0.05 s                      |
+| 大历史冷读取                 | 4 MiB 会话 p95 21.6 ms，footprint 18 MiB；20,000 条消息的压测会话约 4.4 s（Node 4.1 s）                  |
 
 `requestTimeoutSeconds` 仅在显式配置时限制单次 HTTP 尝试总时长；省略表示不设固定总上限。`streamIdleTimeoutMs` 默认 600000，重试每次增加 30000；设为 0 可禁用闲置超时。重试配置可通过可选 `retry` 对象设置 `maxRetries`、`baseDelayMs`、`backoffFactor`、`maxDelayMs`、`jitter`；未提供的字段沿用 `ZCODE_MODEL_RETRY_*` 环境变量及 CLI 默认值（10 次、2 秒、因子 2、60 秒、启用 jitter）。该预算仅允许在尚未交付可见输出时重试，空响应最多重试一次。
 
@@ -107,13 +129,13 @@ stdout 仅输出 NDJSON；stderr 为诊断。`--prepare-storage` 使用原 Host 
 
 ## Coding 工具与后台执行
 
-新会话 mode=yolo；原生旧数据缺少 mode 时仍视为 build，历史可读，通过现有 switchCollaborationMode(yolo) 显式切换后才能继续。后台任务绑定 session，正常前台结束后继续运行；TaskOutput 可查询或等待，TaskStop 和 App cancelBackgroundWork 可停止。stop 和 EOF 收回任务进程树。冷恢复保留任务记录/输出文件、标记中断，不重启未知副作用。
+权限模式与 Plan 规则见 [M2 spec](../../docs/specs/rust-m2-permissions-plan-hooks.md)。后台任务绑定 session，正常前台结束后继续运行；TaskOutput 可查询或等待，TaskStop 和 App cancelBackgroundWork 可停止。stop 和 EOF 收回任务进程树。后台 Shell 任务与 Node 一样不落库，重启后不再出现，不重启未知副作用。
 
-Read 使用 file_path/offset/limit；Write 使用 file_path/content；Edit 使用 file_path/old_string/new_string/replace_all。相对路径按 cwd 解析，也允许显式访问工作区外路径（与 TS yolo 一致）。已有文件必须先 Read，外部变化会要求重读；Write 要求完整读取，Edit 支持新鲜的部分读取。当前编辑匹配为精确匹配及 CRLF 归一化，TS 其它宽松匹配策略仍待补齐。读取观察缓存只在当前进程、当前 session 有效，冷恢复需重新读取。
+Read 使用 file_path/offset/limit；Write 使用 file_path/content；Edit 使用 file_path/old_string/new_string/replace_all。相对路径按 cwd 解析，也允许显式访问工作区外路径（与 TS yolo 一致）。已有文件必须先 Read，外部变化会要求重读；Write 要求完整读取，Edit 支持新鲜的部分读取。Edit 匹配与 Node 相同：精确匹配后依次尝试弯引号、Read 行号前缀、转义、Unicode 转义、首尾空白、缩进与首尾行锚点（中间行相似度 ≥ 0.8），CRLF 按多数行尾写回。读取观察缓存只在当前进程、当前 session 有效，冷恢复需重新读取。
 
 Read 展示最多 64 KiB；修改文件最多 8 MiB；Grep 单文件最多 16 MiB，输出最多 20 KB；Glob 最多 100 项。搜索支持 ignore、正则、glob/type、大小写、上下文、多行与分页，耗时最多 30 秒。大文件/复杂方言的全量 TS 对齐尚未宣称完成。
 
-Shell 每个流内联最多 24 KiB，完整输出落 tool-results；单流最多 16 MiB，超限停止进程。每会话最多 16 个运行后台任务、128 条进程内记录。前台默认 120 秒、显式 timeout 最多 600 秒；后台未指定 timeout 时运行至结束、显式停止或 Agent 退出。此包将任务状态附在下一次输入的模型上下文，不因任务完成自动发起新回合。输出产物保留在独立 Rust 数据目录。
+Shell 每个流内联最多 24 KiB，完整输出落 tool-results；单流最多 16 MiB，超限停止进程。每会话最多 16 个运行后台任务、128 条进程内记录。前台默认 120 秒、显式 timeout 最多 600 秒；后台未指定 timeout 时运行至结束、显式停止或 Agent 退出。此包将任务状态附在下一次输入的模型上下文，不因任务完成自动发起新回合。Shell 输出文件在 `--data-dir` 的 `tool-results`。
 
 工具 schema 从 TS 契约生成并有一致性测试；变更契约后运行 `node --import tsx scripts/generate-zcode-cli-rust-tool-schemas.mjs`。`examples/tool_fixture.rs` 仅供差分测试，不是发布入口。第二包 spec 为 `docs/specs/rust-coding-tools.md`。
 
@@ -125,7 +147,7 @@ App compact 与 `/compact [摘要侧重点]` 使用同一维护队列。普通�
 
 暂停队列时必须选择保留或清空再发；带 expectedHeldQueueItemIds 的旧确认会被拒绝。sendQueuedNow 保留原队列来源，提交预留后先取消并等旧 run 收口，再执行指定输入。显式 stop 释放预留。队列仍不跨进程恢复。
 
-第三包规则见 `docs/specs/rust-context-management.md`。目录级规则、新多媒体输入、摘要过长的分块压缩尚未对齐；P0 导入支持旧文本、图片和 PDF 附件。
+第三包规则见 `docs/specs/rust-context-management.md`，压缩与 Node 对齐的规则见 `docs/specs/rust-m7-compact.md`。目录级规则与摘要过长的分块压缩尚未对齐。
 
 ## 模型协议
 
@@ -133,6 +155,6 @@ App compact 与 `/compact [摘要侧重点]` 使用同一维护队列。普通�
 
 Responses 使用 store=false，回传加密 reasoning items；Anthropic 回传 thinking 签名及 redacted_thinking，工具失败映射 is_error。这些元数据只保存在 canonical 历史并由对应协议使用，不进入 App 正文。所有协议复用原有取消、重试和提交屏障；截断/缺失终态的工具不会执行。
 
-协议规则见 `docs/specs/rust-model-protocols.md`。动态 Registry、账号鉴权和模型切换已在 P0 补齐；provider hosted tools、新媒体输入和 WebSocket 尚未实现。
+协议规则见 `docs/specs/rust-model-protocols.md`。动态 Registry、账号鉴权和模型切换已在 P0 补齐；provider 原生工具与 Node 一样只编码 Anthropic 原生 WebSearch；WebSocket 尚未实现。
 
 输出达到模型上限时，三种协议均先提交已有 assistant 内容，再按 TS 规则最多续写三次；持续截断会返回 model_output_limit_exceeded。Continue 提示只用于当前执行，重启不自动续写，也不会作为用户输入保存。截断工具不执行，截断摘要不提交；续写继续经过上下文预算与压缩。规则见 `docs/specs/rust-output-continuation.md`。

@@ -13,8 +13,9 @@ import {
 import { end, event, fixture, type Harness } from "./zcode-cli-rust-fixture.js";
 
 type Message = Record<string, any>;
+// 有效的 1x1 PNG：提示图片按 Node 规则解码，CRC 错误的图片会降级为占位。
 const png =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII=";
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGP4Xw8AAoABfwxp8mEAAAAASUVORK5CYII=";
 const properties = {
   inputFormat: {
     supportsText: true,

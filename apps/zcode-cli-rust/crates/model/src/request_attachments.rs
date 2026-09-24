@@ -1,3 +1,5 @@
+use super::media_budget;
+use crate::domain::node_journal::files::data_url_len;
 use crate::{contract::ModelFailure, domain::session::StoredAttachment};
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -21,7 +23,8 @@ enum Content {
 /// rust-m11-node-storage §5.3).
 struct Block {
     mime: String,
-    bytes: u64,
+    /// Node `mediaRequestBytes`: the length of its data URL.
+    request_bytes: u64,
     placeholder: String,
     name: String,
     source: Result<Option<StoredAttachment>>,
@@ -37,8 +40,8 @@ fn block(part: &Value) -> Option<Block> {
                 (a.media_type.clone(), a.total_bytes)
             });
             Some(Block {
+                request_bytes: data_url_len(&mime, bytes),
                 mime,
-                bytes,
                 placeholder: text(&part["placeholder"]),
                 name: part["name"].as_str().unwrap_or("attachment").to_owned(),
                 source: asset.map(Some),
@@ -46,7 +49,6 @@ fn block(part: &Value) -> Option<Block> {
         }
         kind @ ("image" | "video" | "file") => {
             let data = part["dataUrl"].as_str()?;
-            let payload = data.split_once(',').map_or(0, |(_, p)| p.len() as u64);
             // Node `modelMessageContentBlockToText`：file 块优先用 name。
             let placeholder = match part["name"].as_str() {
                 Some(name) if kind == "file" && !name.is_empty() => name.to_owned(),
@@ -54,7 +56,7 @@ fn block(part: &Value) -> Option<Block> {
             };
             Some(Block {
                 mime: text(&part["mediaType"]),
-                bytes: payload / 4 * 3,
+                request_bytes: data.len() as u64,
                 placeholder,
                 name: part["name"].as_str().unwrap_or("attachment").to_owned(),
                 source: Ok(None),
@@ -107,50 +109,97 @@ fn decode(data: &str) -> Result<Vec<u8>> {
         .map_err(|_| unavailable())
 }
 
+/// Node `modelMessageContentBlockToText` of a media block.
+fn shown(mime: &str, placeholder: &str) -> String {
+    if placeholder.is_empty() {
+        format!("[Attached {mime}]")
+    } else {
+        format!("[Attached {mime}: {placeholder}]")
+    }
+}
+
+/// The input format capability a media type needs.
+fn capability(mime: &str) -> Option<&'static str> {
+    if mime.starts_with("image/") {
+        Some("supportsImage")
+    } else if mime == "application/pdf" {
+        Some("supportsPdf")
+    } else if mime.starts_with("video/") {
+        Some("supportsVideo")
+    } else {
+        None
+    }
+}
+
 pub(super) async fn materialize(messages: &mut [Value], properties: &Value) -> Result<bool> {
+    materialize_within(messages, properties, media_budget::BUDGET).await
+}
+
+/// Node `projectMessagesForModelMediaPolicy` then the provider encoding: the
+/// capability projection and the media budget decide before any bytes are read.
+async fn materialize_within(
+    messages: &mut [Value],
+    properties: &Value,
+    budget: u64,
+) -> Result<bool> {
     let mut expanded = false;
-    let mut total = 0u64;
-    for message in messages {
-        let tool = message["role"] == "tool";
+    let mut media = vec![];
+    for (index, message) in messages.iter_mut().enumerate() {
         let Some(parts) = message["content"].as_array_mut() else {
             continue;
         };
-        for part in parts {
+        for (position, part) in parts.iter_mut().enumerate() {
             let Some(block) = block(part) else {
                 continue;
             };
             expanded = true;
-            let asset = block.source?;
-            total = total.saturating_add(block.bytes);
-            if block.bytes > 20 * 1024 * 1024 || total > 64 * 1024 * 1024 {
-                return Err(ModelFailure::new("context_exceeded", false));
+            if let Err(failure) = &block.source {
+                return Err(failure.clone());
             }
             let mime = block.mime.as_str();
-            let capability = if mime.starts_with("image/") {
-                Some("supportsImage")
-            } else if mime == "application/pdf" {
-                Some("supportsPdf")
-            } else if mime.starts_with("video/") {
-                Some("supportsVideo")
-            } else {
-                None
+            let Some(capability) = capability(mime) else {
+                continue;
             };
-            let placeholder = block.placeholder;
-            if capability.is_some_and(|key| properties["inputFormat"][key] != true) {
+            if properties["inputFormat"][capability] != true {
                 // Node `projectMessagesForInputFormat`：请求前把任何消息中模型不支持的媒体换成
                 // `createUnsupportedModelInputMediaText`。原先 user 消息在此报 attachment_unsupported，
                 // 换模型后或恢复 Node 会话的历史图片会让整轮失败；新输入的附件已在准入时按能力拒绝。
                 let kind = match capability {
-                    Some("supportsImage") => "image input",
-                    Some("supportsPdf") => "PDF input",
+                    "supportsImage" => "image input",
+                    "supportsPdf" => "PDF input",
                     _ => "video input",
                 };
-                let shown = if placeholder.is_empty() {
-                    format!("[Attached {mime}]")
-                } else {
-                    format!("[Attached {mime}: {placeholder}]")
-                };
+                let shown = shown(mime, &block.placeholder);
                 *part = json!({"type":"text","text":format!("{shown}\n[Media omitted from provider request because the selected model does not support {kind}.]")});
+                continue;
+            }
+            media.push(media_budget::MediaRef {
+                message: index,
+                block: position,
+                bytes: block.request_bytes,
+            });
+        }
+    }
+    // 原先单块超过 20 MiB 或总量超过 64 MiB 即报 context_exceeded，历史媒体累积后每轮失败；
+    // Node 按 40 MiB 预算保留最新输入与较新的历史媒体，其余换成说明文本。
+    let latest = messages.iter().rposition(media_budget::real_user);
+    let omitted = media_budget::omitted(&media, latest, budget)?;
+    for (index, message) in messages.iter_mut().enumerate() {
+        let tool = message["role"] == "tool";
+        let Some(parts) = message["content"].as_array_mut() else {
+            continue;
+        };
+        for (position, part) in parts.iter_mut().enumerate() {
+            let Some(block) = block(part) else {
+                continue;
+            };
+            let asset = block.source?;
+            let mime = block.mime.as_str();
+            let capability = capability(mime);
+            let placeholder = block.placeholder;
+            if omitted.contains(&(index, position)) {
+                let shown = shown(mime, &placeholder);
+                *part = json!({"type":"text","text":format!("{shown}\n{}", media_budget::OMITTED)});
                 continue;
             }
             let content = match &asset {
@@ -223,3 +272,7 @@ fn text_preview(name: &str, mime: &str, bytes: &[u8]) -> String {
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "request_attachments_tests.rs"]
+mod tests;

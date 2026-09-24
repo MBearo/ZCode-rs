@@ -5,7 +5,7 @@
 use super::events::Event;
 use super::projection_state::{self as guards, Context};
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Node `ConversationDelta` (without `row.removed`: cold replay never rewinds).
 pub enum Delta {
@@ -43,6 +43,8 @@ pub struct Projection {
     pub session_id: String,
     pub rows: Vec<Value>,
     index: HashMap<u64, usize>,
+    /// The positions of `subagent` rows in `rows`, in row order.
+    subagent_indices: BTreeSet<usize>,
     pub state: Map<String, Value>,
     next_row: u64,
     pub streaming_text: Option<u64>,
@@ -79,6 +81,7 @@ impl Projection {
             session_id: session_id.into(),
             rows: Vec::new(),
             index: HashMap::new(),
+            subagent_indices: BTreeSet::new(),
             state: guards::initial(),
             next_row: 1,
             streaming_text: None,
@@ -156,11 +159,13 @@ impl Projection {
                     self.track_tool(&row);
                     let id = row_id(&row);
                     self.index.insert(id, self.rows.len());
+                    self.track_subagent(self.rows.len(), &row);
                     self.rows.push(row);
                 }
                 Delta::Upsert(row) => {
                     if let Some(&index) = self.index.get(&row_id(&row)) {
                         self.track_tool(&row);
+                        self.track_subagent(index, &row);
                         self.rows[index] = row;
                     }
                 }
@@ -185,6 +190,19 @@ impl Projection {
         } else {
             self.open_tools.remove(&id);
         }
+    }
+
+    fn track_subagent(&mut self, index: usize, row: &Value) {
+        if row["kind"] == "subagent" {
+            self.subagent_indices.insert(index);
+        } else {
+            self.subagent_indices.remove(&index);
+        }
+    }
+
+    /// The `subagent` rows in row order.
+    pub fn subagent_rows_in_order(&self) -> impl Iterator<Item = &Value> {
+        self.subagent_indices.iter().map(|&index| &self.rows[index])
     }
 
     pub fn find_row(&self, id: u64) -> Option<&Value> {

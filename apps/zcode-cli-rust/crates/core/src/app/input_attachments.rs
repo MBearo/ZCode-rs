@@ -84,7 +84,9 @@ impl Engine {
             };
             if asset.node.is_none() {
                 let name = item["fileName"].as_str().unwrap_or("");
-                asset.node = Some(self.resolve_upload(&reference, &asset, name, index).await);
+                let (node, prepared) = self.resolve_upload(&reference, &asset, name, index).await?;
+                asset.node = Some(node);
+                asset.prepared = prepared.map(Box::new);
             }
             item["ref"] = reference.clone().into();
             item["mime"] = mime.into();
@@ -116,34 +118,47 @@ impl Engine {
         bail!("Attachment does not belong to this session")
     }
 
-    /// Node `resolveTurnAttachment` of an uploaded (`zcode-artifact://`) ref.
+    /// Node `resolveTurnAttachment` of an uploaded (`zcode-artifact://`) ref,
+    /// and the prepared asset requests send instead (an uploaded image).
     async fn resolve_upload(
         &self,
         reference: &str,
         asset: &StoredAttachment,
         name: &str,
         index: usize,
-    ) -> NodeFile {
+    ) -> Result<(NodeFile, Option<StoredAttachment>)> {
         let mime = asset.media_type.as_str();
-        if files::kind(mime) != Kind::Other {
-            return files::media(Media {
-                uri: reference,
-                mime,
-                bytes: asset.total_bytes,
-                file_name: name,
-                index,
-                local: None,
-            });
+        match files::kind(mime) {
+            Kind::Image => {
+                return self
+                    .store
+                    .uploaded_image(reference, asset, name, index)
+                    .await;
+            }
+            Kind::Other => {}
+            _ => {
+                let file = files::media(Media {
+                    uri: reference,
+                    mime,
+                    bytes: asset.total_bytes,
+                    file_name: name,
+                    index,
+                    local: None,
+                    image: None,
+                });
+                return Ok((file, None));
+            }
         }
         // Node：非媒体上传按 UTF-8 解码进入 prompt；超过 64 KiB、空内容或读失败只留占位。
         let total = asset.total_bytes;
         if total == 0 || total > files::INLINE_TEXT_MAX_BYTES {
-            return files::unread_upload(index);
+            return Ok((files::unread_upload(index), None));
         }
-        match self.store.read_attachment(asset, 0, total as usize).await {
+        let file = match self.store.read_attachment(asset, 0, total as usize).await {
             Ok(bytes) => files::inline_text(name, &String::from_utf8_lossy(&bytes)),
             Err(_) => files::unread_upload(index),
-        }
+        };
+        Ok((file, None))
     }
 
     /// Node `buildRuntimeUserEntriesFromTurn`: the user content and the
@@ -161,8 +176,10 @@ impl Engine {
                 .get(item["ref"].as_str().unwrap())
                 .context("Attachment snapshot unavailable")?;
             let lazy = |asset: &StoredAttachment| {
-                let mut bare = asset.clone();
+                // 上传图片的请求发送准备后的字节（Node 用准备后的 data URL），产物仍是原图。
+                let mut bare = asset.prepared.as_deref().unwrap_or(asset).clone();
                 bare.node = None;
+                bare.prepared = None;
                 json!({"type":"_zcode_attachment","asset":bare,"name":item["fileName"]})
             };
             placed.push(match &asset.node {

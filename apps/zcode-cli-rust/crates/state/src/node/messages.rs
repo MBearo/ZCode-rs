@@ -269,6 +269,28 @@ pub fn messages(conn: &Connection, session: &str) -> Result<Vec<WithParts>> {
     Ok(out)
 }
 
+/// The session's message ids in Node `messages` order (no data or parts).
+pub fn message_ids(conn: &Connection, session: &str) -> Result<Vec<String>> {
+    let mut query = conn.prepare_cached(
+        "select id from message where session_id = ?
+      order by sequence is null, sequence, time_created, rowid",
+    )?;
+    let ids = query
+        .query_map([session], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(ids)
+}
+
+/// One message's info without its parts.
+pub fn message_info(conn: &Connection, session: &str, id: &str) -> Result<Option<Value>> {
+    let stored: Option<String> = conn
+        .prepare_cached("select data from message where id = ? and session_id = ?")?
+        .query_row(params![id, session], |r| r.get(0))
+        .optional()?;
+    let Some(data) = stored else { return Ok(None) };
+    Ok(Some(decode_message(&data, id, session)?))
+}
+
 /// Node `messageWithParts`.
 pub fn message_with_parts(conn: &Connection, session: &str, id: &str) -> Result<Option<WithParts>> {
     let stored: Option<String> = conn

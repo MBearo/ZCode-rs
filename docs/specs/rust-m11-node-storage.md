@@ -284,7 +284,26 @@ sequenceDiagram
 | 本地文件不可读                | 占位（`errorCode`、`storageKind: local_ref`）                                                                                                                                             | 不进入模型                                                     |
 
 - 冷读取：Node hydrator 规则（§6）把 `file` part 还原为 Node 形态的块（`image`/`video`/`file` 带 `dataUrl`，文本附件为提醒）；模型请求把 Node 块与 `_zcode_attachment` 一样转换为 provider 格式，并套用同样的能力与大小检查。
-- 与 Node 的差异：Rust 不按 Node 的 Jimp 规则缩放提示图片，`metadata.image` 不写；本地图片的 `mime` 取引用声明的类型（Node 按扩展名推断）；本地文本不做 Node Read 的 token 上限截断（`truncatedByTokenCap`、`partialViewNotice`）；本地视频上限与图片、PDF 同为 20 MiB（Node 30 MiB）；空的非媒体上传按占位处理（Node 会按文件名去工作区找本地文件）；音频附件仍在准入时拒绝。
+- 提示图片（M11.6，Node `prepareImageDataUrl`）：准入时按 Node Jimp 规则准备图片（长边 ≤ 2000、base64 ≤ 5 MiB、原始字节 ≤ 3.75 MiB，无 token 上限；与 Read 图片共用 `zcode_cli_host::image`）。`metadata.image` 为 `{height, maxDimension: 2000, originalHeight, originalWidth, resized, transformedSizeBytes, width}`（WebP 原样通过时无尺寸），排在 metadata 首位；无法缩放时为占位 `attachment_image_resize_failed`，解码失败为 `attachment_image_invalid`。
+  - 本地图片：`mime` 按扩展名推断（Node `inferImageMimeFromPath`，缺省 PNG），写入产物的是准备后的字节，part 与块的 `mime` 为准备后的类型；`sizeBytes` 与 `sha256` 为原文件的。冷读取得到的也是准备后的图片。
+  - 上传图片：产物保持上传的原始 data URL（Node 复用已有产物），part 与块的 `mime` 为准备后的类型，块的 `source.mimeType` 与 `sizeBytes` 仍按原始内容；本次运行的请求使用准备后的字节（Rust 写在 data dir 的 `tool-results/prompt-images`，`StoredAttachment.prepared`）。与 Node 一样，冷读取按产物发送原图。
+- 本地视频上限 30 MiB（Node `VIDEO_INPUT_MAX_BYTES`），图片与 PDF 仍为 20 MiB。
+- 与 Node 的差异：本地文本不做 Node Read 的 token 上限截断（`truncatedByTokenCap`、`partialViewNotice`）；空的非媒体上传按占位处理（Node 会按文件名去工作区找本地文件）；音频附件仍在准入时拒绝。
+- 模型请求媒体预算（M11.6，Node `projectMessagesForModelMediaPolicy`）：每个请求先做能力投影（不支持的媒体换成说明文本），再按编码后的 data URL 字节（`data:<mime>;base64,` 加 base64 长度）统计全部消息中的图片、视频与 PDF，总量上限 40 MiB：
+  - 未超限时全部发送；超限时最新真实用户消息（`role: user`、无 `_zcode_source`、非工具结果、正文不以 `<system-reminder>`/`<task-notification>` 开头）中的媒体受保护，其余历史媒体按消息从新到旧、块从后到前在剩余额度内保留，放不下的跳过（不中断），被省略的块换成 `<占位>\n[Media omitted from provider request to keep the request body under the configured media budget.]`（占位与能力投影相同：`[Attached <mime>: <名称>]`）。
+  - 受保护媒体本身超过 40 MiB 时本轮失败，错误码 `MEDIA_BUDGET_CURRENT_ATTACHMENT_TOO_LARGE`（UI 已本地化），不可重试。
+  - 预算在读取附件字节之前决定，被省略的附件不读盘。原先单块 20 MiB、总量 64 MiB 即报 `context_exceeded` 的检查删除；编码后请求 96 MiB 的安全阀保留。
+
+```mermaid
+flowchart LR
+  M[请求消息] --> C[能力投影：不支持的媒体换成说明文本]
+  C --> B{媒体总量 ≤ 40 MiB?}
+  B -- 是 --> E[读取字节并编码]
+  B -- 否 --> P{最新真实用户消息的媒体 ≤ 40 MiB?}
+  P -- 否 --> F[失败 MEDIA_BUDGET_CURRENT_ATTACHMENT_TOO_LARGE]
+  P -- 是 --> R[历史媒体从新到旧装入剩余额度，其余换成省略文本] --> E
+```
+
 - 工具结果媒体（M11.4i，Node `persistToolResultMediaAttachments`）：成功的工具结果带图片、视频或 PDF 块时，引擎在记录工具 part 之前把每个媒体块写成 data URL 产物（`<callId>-media-<序号>`），`completed` 状态带 `attachments`（`file` part，键序 `id, messageID, sessionID, type, mime, filename, url, metadata{artifactUri, recoverability, storageKind, sizeBytes}`，`filename` 为 PDF 的文件名或占位名）与 `metadata.modelContentLayout`（文本块与附件序号）；`output` 为模型内容的文本形态（媒体为 `[Attached <mime>: <名称>]`，块之间空一行）。含其他块的内容不写媒体，只留 `output`。写入失败时本轮失败（与 Node 一致）。冷读取按 layout 还原为 Node 媒体块。Rust 工具自身的媒体缓存（`tool-results`）仍保留，供当前进程的请求使用。
 
 ```mermaid
@@ -501,6 +520,16 @@ M11.5（已完成）：NodeStore 成为唯一存储，删除 `rust_*` 表、TS �
 - 目标：后台结果唤醒的续跑轮（task-notification）结束后同样验证。
 - `session/subagents` 从存储推导（§6.3）。
 - 集成测试全部改用 Node 库（`packages/services/tests/zcode-cli-rust-*.test.ts`，291 项）：界面行跨冷热按内容比对（§2.4），回执与重放按 Node 规则（§7）；原导入测试改为“Node 写入、Rust 读取并继续、Node 再读取并续写、Rust 重启后再继续”的交叉用例（§11 场景 2–4）（`zcode-cli-rust-node-sessions`、`-node-boundaries`、`-shared-node`、`-todo-node`、`-session-list-node`）。
+
+M11.6（剩余对齐与真实环境验收）：
+
+- 冷读取性能：子代理行回放（Node `findSubagentLifecycleRow`、`materializeSubagentProjection`）按行序维护子代理行位置索引，并借用快照行计算预期行（只在摘要追加时复制），结果与原扫描相同；20,000 条消息、66,688 个 part 的压测会话回放从 12.2 s 降到 1.7 s（Node 1.5 s）。
+- 模型请求媒体预算、提示图片准备与 30 MiB 本地视频上限（§5.3）。
+- 验收脚本（均用 SQLite 在线备份或临时目录，只打印计数、id 与 JSON 路径，结束后删除副本）：
+  - `node --import tsx scripts/zcode-cli-rust-real-db-check.mjs [db] [artifacts] [rust] [node_read]`：场景 1。用户库副本上 Rust 启动前后迁移账本与 `sqlite_master` 不变；`examples/node_read.rs` 按 Rust 冷读取导出每个会话的模型上下文、行与快照状态，`scripts/zcode-cli-rust-node-compare.mjs` 用 Node 仓储、history hydrator 与冷投影逐会话比对；Rust 续写本工作区一个会话后 Node 读回。
+  - `node --import tsx scripts/zcode-cli-rust-node-interop.mjs [zcode.cjs] [rust] [node_read]`：场景 4–6，真实 Node CLI（`zcode.cjs`）与 Rust 进程共用 HOME、会话库与 Provider Registry。交替续写（含工具轮）时每次请求带齐此前全部输入与对方的工具调用；流式中与工具执行中 `SIGKILL` 后由另一方恢复，快照没有运行中或流式中的行，重复排队命令回答 `fault.command.inputDiscardedOnRestart`；两个进程并发各写 12 轮无锁错误。每个场景后全库逐会话比对。
+- 性能（切换前后、与 Node 对照、大历史冷读取）见 [2026-09-25 报告](../reports/rust-performance-2026-09-25.md)。
+- 验收结果（2026-09-25）：用户库 5,397 个会话、76,625 条消息全部比对一致，迁移与表结构不变，续写后 Node 读回；场景 4–6 全部通过且比对一致。
 
 ## 11. 验收场景
 
