@@ -183,7 +183,7 @@ test(
   },
 );
 
-test("Rust old native sessions without a stored mode recover as build and ask before writing", async () => {
+test("Rust sessions without a stored mode recover as build and ask before writing", async () => {
   const f = await fixture();
   try {
     const h = f.start();
@@ -191,9 +191,11 @@ test("Rust old native sessions without a stored mode recover as build and ask be
     await h.subscribe(`conversation/${id}`);
     await h.completed(id);
     await h.close();
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
+    // Node `resumeFromStore`：会话行 permission 与 runtime/execution_state 都缺省时按 build 恢复。
+    const db = new DatabaseSync(f.db);
     try {
-      db.exec("UPDATE rust_session SET body = json_remove(body, '$.mode')");
+      db.exec("UPDATE session SET permission = NULL");
+      db.exec("DELETE FROM session_entry WHERE type = 'runtime/execution_state'");
     } finally {
       db.close();
     }
@@ -240,7 +242,7 @@ test("Rust old native sessions without a stored mode recover as build and ask be
 });
 
 test(
-  "Rust EOF reaps background tasks and persists terminal state for cold history",
+  "Rust EOF reaps background tasks and cold history has no running background work",
   { skip: process.platform === "win32" },
   async () => {
     const f = await fixture({
@@ -262,17 +264,13 @@ test(
       process.kill(pid, 0);
       await h.close();
       assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
-      const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-      try {
-        const body = JSON.parse(
-          db.prepare("SELECT body FROM rust_session WHERE id = ?").get(id)!.body as string,
-        );
-        assert(Object.values(body.background).every((t: any) => t.status !== "running"));
-      } finally {
-        db.close();
-      }
+      // 与 Node 一样后台任务不落库：冷加载的会话没有仍在运行的后台工作。
       const recovered = f.start();
       await recovered.subscribe(`conversation/${id}`);
+      const frame = await recovered.wait(
+        (m) => m.params?.frame?.payload?.snapshot?.sessionId === id,
+      );
+      assert.deepEqual(frame.params.frame.payload.snapshot.backgroundWorks, []);
       assert.deepEqual(recovered.schemaErrors, []);
     } finally {
       await f.close();

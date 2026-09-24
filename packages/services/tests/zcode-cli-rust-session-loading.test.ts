@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
 import { z } from "zod";
 import { fixture } from "./zcode-cli-rust-fixture.js";
 import { sharedSnapshot } from "./zcode-cli-rust-shared-fixture.js";
+import { seedColdSessions } from "./zcode-cli-rust-node-db.js";
 
 test("Startup and index read metadata only, isolate unopened corrupt history and do not rewrite sessions", async () => {
   const f = await fixture();
@@ -16,31 +16,19 @@ test("Startup and index read metadata only, isolate unopened corrupt history and
     await first.command(command);
     await first.completed(sid);
     await first.close();
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-    const original = db.prepare("SELECT body FROM rust_session WHERE id=?").get(sid)!
-      .body as string;
-    const row = JSON.parse(original);
-    for (let i = 0; i < 120; i++) {
-      const id = `cold-${i}`;
-      db.prepare("INSERT INTO rust_session VALUES(?,?,?)").run(
-        f.cwd,
-        id,
-        JSON.stringify({ ...row, id, title: id }),
-      );
-      db.prepare("INSERT INTO rust_message VALUES(?,?,0,?)").run(
-        f.cwd,
-        id,
-        "unopened invalid JSON",
-      );
-    }
-    db.prepare("INSERT INTO rust_command VALUES(?,?,?)").run(
-      f.cwd,
-      '["cold-0","unread-ack"]',
-      "unopened invalid ACK",
+    await seedColdSessions(f, 120);
+    const db = new DatabaseSync(f.db);
+    // 未打开会话的对话记录损坏：启动与索引只读会话行，不能因此失败。
+    const corrupt = db.prepare(
+      "INSERT INTO message(id,session_id,time_created,time_updated,data) VALUES (?,?,2,2,'unopened invalid JSON')",
     );
-    db.exec(
-      "CREATE TRIGGER forbid_eager_write BEFORE UPDATE ON rust_session BEGIN SELECT RAISE(ABORT,'eager session recovery'); END",
-    );
+    for (let i = 0; i < 120; i++) corrupt.run(`msg_corrupt_${i}`, `cold-${i}`);
+    const read = () => db.prepare("SELECT * FROM session WHERE id=?").get(sid);
+    const original = read();
+    for (const table of ["session", "message", "part"])
+      db.exec(
+        `CREATE TRIGGER forbid_eager_${table} BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'eager session recovery'); END`,
+      );
     const h = f.start();
     const sub = await h.subscribe(`sessions-index/${f.cwd}`);
     const frame = await h.wait(
@@ -49,17 +37,18 @@ test("Startup and index read metadata only, isolate unopened corrupt history and
         m.params?.frame?.payload?.kind === "snapshot",
     );
     assert.equal(frame.params.frame.payload.snapshot.sessions.length, 121);
-    assert.equal(db.prepare("SELECT body FROM rust_session WHERE id=?").get(sid)!.body, original);
+    assert.deepEqual(read(), original);
     const snapshot = await h.client.request(
       "session/read",
       { sessionId: sid, messageLimit: 1 },
       z.any(),
     );
     assert.equal(snapshot.messages.length, 1);
-    assert.equal(db.prepare("SELECT body FROM rust_session WHERE id=?").get(sid)!.body, original);
+    assert.deepEqual(read(), original);
     assert.equal((await h.command(command)).status, "duplicate");
     assert.equal(f.requests.length, 1);
-    db.exec("DROP TRIGGER forbid_eager_write");
+    for (const table of ["session", "message", "part"])
+      db.exec(`DROP TRIGGER forbid_eager_${table}`);
     await sharedSnapshot(h, sid);
     await assert.rejects(sharedSnapshot(h, "cold-0"));
     assert.equal((await sharedSnapshot(h, sid)).control.phase, "completedSuccess");

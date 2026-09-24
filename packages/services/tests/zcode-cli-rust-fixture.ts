@@ -37,7 +37,6 @@ export async function fixture(
     config?: Message;
     env?: Record<string, string>;
     registry?: boolean;
-    legacy?: boolean;
     surface?: "desktop" | "terminal";
     /** 用户配置的 `permission.mode`；默认 yolo，让既有用例不经审批直接执行工具。 */
     permissionMode?: string | null;
@@ -48,6 +47,8 @@ export async function fixture(
   const root = await mkdtemp(join(tmpdir(), "zcode-cli-rust-test-"));
   const cwd = join(root, "workspace");
   const dataDir = join(root, "data");
+  // Node 的会话库是唯一存储（spec rust-m11-node-storage §2.1）。
+  const db = join(root, "ts.sqlite");
   const config = join(root, "model.json");
   await mkdir(cwd);
   await writeUserConfig(root, options.permissionMode, options.userConfig);
@@ -166,7 +167,6 @@ export async function fixture(
         "--data-dir",
         dataDir,
         ...(options.registry ? [] : ["--config", config]),
-        ...(options.legacy ? ["--import-ts-db", join(root, "ts.sqlite")] : []),
       ],
       {
         stdio: ["pipe", "pipe", "pipe"],
@@ -174,7 +174,7 @@ export async function fixture(
           ...process.env,
           HOME: root,
           USERPROFILE: root,
-          ZCODE_SESSION_DB_PATH: join(root, "ts.sqlite"),
+          ZCODE_SESSION_DB_PATH: db,
           ...options.env,
           ...(options.registry
             ? {
@@ -194,6 +194,9 @@ export async function fixture(
     root,
     cwd,
     dataDir,
+    db,
+    /** Node 产物根（`<storage.dir>/cli/artifacts`，storage.dir 缺省为 `~/.zcode`）。 */
+    artifacts: join(root, ".zcode", "cli", "artifacts"),
     config,
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,

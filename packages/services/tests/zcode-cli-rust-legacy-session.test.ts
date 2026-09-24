@@ -301,7 +301,8 @@ test("Rust legacy resume returns an active session untouched and restores a cold
     const cold = f.start();
     const resumed = await resume(cold, { sessionId: id });
     assert.equal(resumed.settings.mode.current, "edit");
-    assert.equal(resumed.session.titleSource, "generated");
+    // titleSource 取会话行（Node `decodeSessionRow`）；Rust 尚未实现模型生成标题，仍是 first_input。
+    assert.equal(resumed.session.titleSource, "first_input");
     assert.deepEqual(resumed.session.workspace, { workspacePath: f.cwd, workspaceKey: f.cwd });
     assert.equal(resumed.projection.sessionId, id);
     assert.deepEqual(cold.schemaErrors, []);

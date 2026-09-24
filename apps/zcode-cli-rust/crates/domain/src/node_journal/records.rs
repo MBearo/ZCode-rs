@@ -152,6 +152,8 @@ pub struct UserPrompt<'a> {
     pub session: &'a str,
     pub created: u64,
     pub selection: Option<Value>,
+    /// Node `contextSnapshot` (`{envInfo}`).
+    pub context: Option<Value>,
     pub turn: &'a str,
     pub command: Option<&'a str>,
     pub tools: &'a [String],
@@ -164,6 +166,9 @@ pub fn user_message(p: &UserPrompt) -> Value {
         "time": {"created": p.created}, "agent": p.agent});
     if let Some(selection) = &p.selection {
         out["modelSelection"] = selection.clone();
+    }
+    if let Some(context) = &p.context {
+        out["contextSnapshot"] = context.clone();
     }
     out["semantics"] = semantics(USER_SEMANTICS);
     if let Some(anchor) = anchor(Some(p.turn), Some("realUser"), p.command) {

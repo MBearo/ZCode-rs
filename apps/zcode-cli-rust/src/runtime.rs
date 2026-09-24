@@ -12,12 +12,6 @@ use zcode_cli_net::{Egress, NetworkPolicy, RuntimeEnv};
 use zcode_cli_state::NodeStore;
 use zcode_cli_tools::WorkspaceTools;
 
-/// M11 transition: the Node session database is the store when selected
-/// (`--node-storage` or `ZCODE_CLI_RUST_NODE_STORAGE=1`).
-pub fn node_storage(flag: bool) -> bool {
-    flag || std::env::var_os("ZCODE_CLI_RUST_NODE_STORAGE").is_some_and(|v| v == "1")
-}
-
 pub fn home() -> PathBuf {
     std::env::var_os("HOME")
         .filter(|s| !s.is_empty())
@@ -29,7 +23,7 @@ pub fn home() -> PathBuf {
 /// What every entry resolves before touching storage.
 pub struct Context {
     pub home: PathBuf,
-    /// The path as given (workspace identity and TS import use it unresolved).
+    /// The path as given (the workspace identity uses it unresolved).
     pub requested_cwd: PathBuf,
     pub cwd: PathBuf,
     pub data_dir: PathBuf,
@@ -101,11 +95,9 @@ impl Context {
     }
 
     /// The Node session database and artifact root (spec rust-m11-node-storage §2.1).
-    pub async fn node_database(&self) -> Result<zcode_cli_host::legacy_paths::LegacySource> {
+    pub async fn node_database(&self) -> Result<zcode_cli_host::storage_paths::StoragePaths> {
         let config = self.workspace_config.snapshot().await;
-        zcode_cli_host::legacy_paths::resolve(None, &std::env::current_dir()?, true, &config)
-            .await?
-            .context("Session database unavailable")
+        zcode_cli_host::storage_paths::resolve(&std::env::current_dir()?, &config)
     }
 
     /// The Node database as the session store.

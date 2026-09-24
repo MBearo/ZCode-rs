@@ -59,9 +59,9 @@ test("Shared import is durable, idempotent and model-only; first reference attac
     assert(position > 0);
     assert.equal(messages[position + 1].content, "use shared");
     assert.equal(messages.filter((m: any) => m.content === markdown).length, 1);
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"), { readOnly: true });
-    const metadata = db.prepare("SELECT body FROM rust_session WHERE id='shared-A'").get()!
-      .body as string;
+    // 分享正文只在导入包（session_entry）里，会话行不含正文。
+    const db = new DatabaseSync(f.db, { readOnly: true });
+    const metadata = JSON.stringify(db.prepare("SELECT * FROM session WHERE id='shared-A'").get());
     db.close();
     assert(!metadata.includes("SHARED_CONTEXT_SECRET"));
     await assert.rejects(

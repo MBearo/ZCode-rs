@@ -17,7 +17,7 @@ function catalog(h: Harness, workspacePath: string, sessionId?: string) {
   );
 }
 
-test("Skill catalog freezes with session context, loads qualified plugin content and survives restart", async () => {
+test("Skill catalog freezes with session context, loads qualified plugin content and is rediscovered after restart like Node", async () => {
   const f = await fixture({
     respond(request, response) {
       response.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -80,7 +80,14 @@ test("Skill catalog freezes with session context, loads qualified plugin content
     await h.close();
     const cold = f.start();
     await cold.subscribe(`conversation/${sid}`);
-    assert.deepEqual((await catalog(cold, f.cwd, sid)).skills, initial.skills);
+    // Node 不保存会话的 Skill 目录：新 runtime 恢复会话时重新发现，并在此后冻结。
+    const restored = await catalog(cold, f.cwd, sid);
+    assert.equal(restored.authority, "session");
+    assert.deepEqual(
+      restored.skills.filter((s) => s.name !== "new"),
+      initial.skills,
+    );
+    assert.ok(restored.skills.some((s) => s.name === "new"));
     await assert.rejects(catalog(cold, f.cwd, "unknown-session"));
     assert.deepEqual(cold.schemaErrors, []);
     await cold.close();

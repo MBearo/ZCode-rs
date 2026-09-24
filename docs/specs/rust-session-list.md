@@ -29,9 +29,7 @@ sequenceDiagram
 
 SessionStore 增加有类型的只读 listing 端口，SQLite adapter 负责查询；Session actor 仍是运行事实唯一 owner。普通查询使用 workspace/更新时间表达式索引，ID 查询使用主键或 ID 索引；只选 identity 元数据，不反序列化正文、附件或 Todo。响应按既有 900 KiB RPC 预算有界，超限明确失败，不静默丢条目。查询失败不改会话事实或回执。
 
-新增 metadata workspacePath/workspaceDirectory/traceId，由原生创建和 TS 导入填写。directory 用于普通查询，path 用于返回真实操作路径，两者不能合并。已知 directory 且 traceId=null 的新记录不读旧备份；旧记录每次查询按 workspace 复用只读备份连接，补全不写回生产库、不产生新备份。本包不改变启动时 Engine 仍加载历史的现有行为；全量按需加载继续单列。
-
-与 TS 保留的边界差异：无 workspace 查询仍保留远端 identity；workspace identity 在 limit 前过滤，避免其他身份占用限额；不把启动时加载的所有历史误当 TS live runtime 追加到 limit 后。TS 的限额后追加 live runtime 语义需随按需加载、显式 runtime 生命周期一起对齐，不能据此宣称整个旧列表行为完全等价。
+会话行来自 Node 库（spec rust-m11-node-storage §6.2）：directory 用于普通查询，path 用于返回真实操作路径，两者不能合并。查询语义与 Node 相同，包括其缺陷：SQL 先按 directory、类型与归档取 limit 条再过滤 workspace identity，其他身份的会话会占用限额；无 workspace 查询按 `path ?? directory` 构造 workspace，不带 identity。
 
 ## 验收
 

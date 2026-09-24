@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { access, writeFile } from "node:fs/promises";
+import { access, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fixture, binary } from "./zcode-cli-rust-fixture.js";
 import type { ModelSelectionView } from "@zcode/provider";
@@ -14,6 +14,9 @@ import {
 
 test("Desktop storage preparation and Host service use the real native runtime", async () => {
   const f = await fixture();
+  // 库还不存在时 Desktop 按字面路径记录已准备的库，存在后按 realpath；macOS 临时目录经符号链接，
+  // 用真实路径作 HOME，两次准备才是同一个 Node 库。
+  const home = await realpath(f.root);
   const keys = [
     "ZCODE_AGENT_SERVER_COMMAND",
     "ZCODE_AGENT_SERVER_ARGS_JSON",
@@ -34,7 +37,7 @@ test("Desktop storage preparation and Host service use the real native runtime",
     ]),
     ZCODE_AGENT_SERVER_RUNTIME: "zcode-cli-rust",
     ZCODE_DATA_BASE_DIR: f.root,
-    HOME: f.root,
+    HOME: home,
   });
   const { setDataBaseDir } = await import("../src/paths.js");
   setDataBaseDir(f.root);
@@ -109,8 +112,9 @@ test("Desktop storage preparation and Host service use the real native runtime",
     await prepare();
     assert.deepEqual(phases, ["checking", "ready", "checking", "ready"]);
     assert.equal(observed.length, 1);
-    assert.match(observed[0]!, /rust-sessions\.sqlite$/);
-    await access(join(f.dataDir, "rust-sessions.sqlite"));
+    // 准备的是 Node 的会话库（spec rust-m11-node-storage §2.1），不在 data dir 另建库。
+    assert.equal(observed[0], join(home, ".zcode/cli/db/db.sqlite"));
+    await access(observed[0]!);
     const aborted = new AbortController();
     aborted.abort();
     await assert.rejects(prepare(aborted.signal), /transport_closed/);

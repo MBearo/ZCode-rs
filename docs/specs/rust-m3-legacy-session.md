@@ -164,7 +164,7 @@ create 丢弃 `model.options` 后，会话可能绑定有档位要求的模型�
   5. 模型取会话保存的选择，无效时解绑。
 - 结果快照按 3.3，另外：`createdAt` / `updatedAt` 为持久化的值，出现 `titleSource` 与 `parentSessionId`（如有），`projection.sessionId` 为真实 id。
 
-为实现第 3 步，Rust 在追加 assistant 消息时记录当时的模式（`last_assistant_mode`），随会话持久化；TS 导入时由最后一条 assistant 消息的 `mode` 回填。
+为实现第 3 步，Rust 在追加 assistant 消息时记录当时的模式（`last_assistant_mode`）；冷加载时取存储中最后一条带有效 `mode` 的 assistant 消息（Node `derivePersistedSessionMode`，不区分分支）。
 
 ## 6. 与 Node 的差异（需要用户确认）
 

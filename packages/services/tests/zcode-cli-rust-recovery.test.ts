@@ -9,7 +9,7 @@ import {
 } from "@zcode/shared/zcode-protocol-v4";
 import { z } from "zod";
 
-test("Rust queues execute FIFO, require CAS, and keep drained/create ACKs on restart", async () => {
+test("Rust queues execute FIFO, require CAS, and keep drained and first-input create ACKs on restart", async () => {
   const f = await fixture();
   try {
     const h = f.start();
@@ -45,10 +45,28 @@ test("Rust queues execute FIFO, require CAS, and keep drained/create ACKs on res
       f.requests.map((r) => r.messages.findLast((m: any) => m.role === "user").content),
       ["hello", "second", "third"],
     );
+    // 带 firstInput 的创建在新会话的 session_input 留下 queue_<commandId>，重启后可反查。
+    const seeded = h.envelope("createSession", null, {
+      workspaceId: f.cwd,
+      firstInput: { text: "seed" },
+    });
+    const seededResult = (await h.command(seeded)).result;
+    assert(seededResult?.type === "createSession");
+    await h.subscribe(`conversation/${seededResult.sessionId}`);
+    await h.completed(seededResult.sessionId);
     await h.close();
     const recovered = f.start();
     assert.equal((await recovered.command(second)).status, "duplicate");
-    assert.deepEqual((await recovered.command(creation)).result, created);
+    // Node 的全局反查只还原 {type, sessionId}，不含首条输入的 delivery。
+    assert.deepEqual((await recovered.command(seeded)).result, {
+      type: "createSession",
+      sessionId: seededResult.sessionId,
+    });
+    // Node `lookupGlobalCreateSessionCommand` 只按首条输入的账本行反查；没有首条输入的创建
+    // 不留耐久事实，重启后重放会新建会话（与 Node 相同）。
+    const replayed = (await recovered.command(creation)).result;
+    assert(replayed?.type === "createSession");
+    assert.notEqual(replayed.sessionId, created.sessionId);
     assert.deepEqual(h.schemaErrors, []);
   } finally {
     await f.close();
@@ -82,7 +100,8 @@ test("Rust owner lock prevents a second process recovering active work; EOF clos
     const recovered = f.start();
     await recovered.subscribe(`conversation/${id}`);
     const rows = await recovered.rows(id);
-    assert.equal(rows.rows.find((r) => r.kind === "toolCall")?.status, "cancelled");
+    // EOF 取消时与 Node 一样为运行中的调用写入 error 结果，冷投影的工具行为 error。
+    assert.equal(rows.rows.find((r) => r.kind === "toolCall")?.status, "error");
     await recovered.command(recovered.envelope("sendText", id, { text: "hello" }));
     await recovered.completed(id);
     const messages = f.requests.at(-1)!.messages;

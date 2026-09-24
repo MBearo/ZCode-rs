@@ -387,7 +387,8 @@ test("Rust held queue validates the confirmed set, keeps or clears atomically an
     assert(!(await h.rows(id)).rows.some((r) => r.kind === "userInput" && r.text === "queued"));
     await h.close();
     const resumed = f.start();
-    assert.equal((await resumed.command(queued)).reasonCode, "guard.queueDeleted");
+    // 重启后回执从 session_input 终态行反查（Node `lookupExact`）：清除的排队项为 cancelled。
+    assert.equal((await resumed.command(queued)).reasonCode, "fault.command.inputCancelled");
     assert.deepEqual([...h.schemaErrors, ...resumed.schemaErrors], []);
   } finally {
     await f.close();

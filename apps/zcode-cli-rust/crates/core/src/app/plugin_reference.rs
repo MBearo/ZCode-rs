@@ -82,6 +82,8 @@ pub(super) async fn inject(
     let message = crate::domain::plan_mode::reminder_message(&body);
     let (committed, receipt) = oneshot::channel();
     sink.send(Event::ModelOnlyNotice {
+        source: "plugin_reference",
+        body,
         message: message.clone(),
         committed,
     })

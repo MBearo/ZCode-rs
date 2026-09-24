@@ -54,17 +54,25 @@ impl Session {
     pub(super) fn push_prompt(&mut self, now: u64, p: Prompt, runtime: &str) {
         self.node.latest = Some(p.message.clone());
         let agent = self.node_agent();
+        let context = self
+            .prompt_snapshot
+            .as_ref()
+            .map(crate::prompt_env::context_snapshot);
         let message = r::user_message(&UserPrompt {
             id: &p.message,
             agent: &agent,
             session: &self.id,
             created: now,
             selection: self.node_selection(),
+            context,
             turn: runtime,
             command: p.command,
             tools: p.tools,
             metadata: p.metadata,
         });
+        if self.prompt_snapshot.is_none() {
+            self.node.unsnapshotted.push(message.clone());
+        }
         let mut parts = vec![r::text_part(p.part, &self.id, &p.message, p.text, now, now)];
         parts.extend(p.files);
         match p.queue_id {
@@ -82,6 +90,26 @@ impl Session {
                     self.node.push(now, Op::Part(part));
                 }
             }
+        }
+    }
+
+    /// Node persists `contextSnapshot` with every prompt because its context is
+    /// initialized before the prompt is written; Rust takes the first snapshot
+    /// inside the run, so the prompts written before it are saved again with it.
+    pub fn node_prompt_snapshot(&mut self, now: u64) {
+        let Some(snapshot) = &self.prompt_snapshot else {
+            return;
+        };
+        let context = crate::prompt_env::context_snapshot(snapshot);
+        for message in std::mem::take(&mut self.node.unsnapshotted) {
+            let mut out = serde_json::Map::new();
+            for (key, value) in message.as_object().into_iter().flatten() {
+                if key == "semantics" {
+                    out.insert("contextSnapshot".into(), context.clone());
+                }
+                out.insert(key.clone(), value.clone());
+            }
+            self.node.push(now, Op::Message(Value::Object(out)));
         }
     }
 

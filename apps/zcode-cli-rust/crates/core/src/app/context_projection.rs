@@ -30,9 +30,13 @@ impl Engine {
                     "Prompt snapshot already initialized"
                 );
                 session.prompt_snapshot = Some(*snapshot);
+                session.stored_env = None;
                 if session.skills.is_none() {
                     session.skills = Some(skills);
                 }
+                let now = self.clock.now();
+                let session = self.sessions.get_mut(id).unwrap();
+                session.node_prompt_snapshot(now);
                 self.persist(id, None).await?;
                 let _ = committed.send(self.sessions[id].skills.clone().unwrap());
                 return Ok(());

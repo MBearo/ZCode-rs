@@ -229,7 +229,7 @@ sequenceDiagram
 
 - **状态**：Session 持有 `ExecutionState { mode, plan_enabled }`，经 `watch` 通道下发给 run task；每次工具调用读取一次快照（Node 分两处读取 mode 与 plan，属于竞态，见第 6 节）。模式切换先提交 `runtime-execution-state` 与 `SessionModeChanged`，再更新内存；启用 plan 时有活跃 Goal 则拒绝。
 - **PolicyEngine**（domain，纯函数）：严格按 Node `service.ts` 的 15 步顺序、build 阶梯、edit 与 plan 规则、`ToolCapability` 元数据（readOnly、destructive、risk、sideEffectScope、needsApproval、permission 类别、allowedInPlanMode、requiresUserInteraction、alwaysAsk）实现。
-- **规则**：项目规则存 Rust 表 `rust_permission_rules(project_key, ruleset, revision)`；TS 导入时读取 Node `local_setting permission/ruleset`。会话规则仅在内存（与 Node 一致）。所有规则写入经 actor 串行化，并与交互解决同一事务提交，消除 Node 的丢失更新。
+- **规则**：项目规则存 Node `local_setting permission/ruleset`（spec rust-m11-node-storage）。会话规则仅在内存（与 Node 一致）。所有规则写入经 actor 串行化，并与交互解决同一事务提交，消除 Node 的丢失更新。
 - **Bash 只读分类**：自写保守解析器，只接受 Node `unbash` 支持的子集（语句、`&&`/`||`、管道、`;`、引号与转义、重定向、静态环境赋值），其余一律"非只读"。策略表（safeFlags、子命令映射、环境变量白名单）由脚本从 TS 模块导出为 JSON；危险回调手工移植。Fig 命令注册表只用于"始终允许"前缀建议，转成紧凑 JSON 嵌入，首次使用时惰性解析。git 安全检查放在管线的异步阶段。
 - **交互**：`InteractionRegistry` 状态机 `Pending → Resolved(by)`，首个解决者胜出，重复或未知 id 幂等成功。选项与 Node `permission-options.ts` 一致（allowOnce、allowAlways、allowSession、deny、fullAccess；workflowRefine 不做）。全权限：一个事务把会话与排队输入切到 yolo，并重新评估同会话其他待决权限。
 - **Plan 工具**：EnterPlanMode/ExitPlanMode 契约同 `plan-mode.ts`；plan 审批投影为 `userInput`；计划文件写入 `.zcode/plans/plan-<id>.md`；compact 后注入 plan 文件提醒；`v4/conversation/plans` 返回 ExitPlanMode 行。

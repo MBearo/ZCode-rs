@@ -68,12 +68,9 @@
 
 ### 2.3 持久化与恢复
 
-- 会话的 `mode` 与 `plan_enabled` 已随会话元数据持久化，TS 导入时原样恢复。
-- **项目模式偏好**：
-  - 新表 `rust_project_setting(workspace, namespace, key, value)`，行 `(permission, mode)`，值 `{"mode": ...}`；
-  - TS 导入时读取 Node 的 `local_setting(scope="project", scope_id=<projectID>, namespace="permission", key="mode")`；
-    `projectID` 按 Node `projectIdFromDirectory(workspacePath)` 计算（小写后把 `[^a-z0-9._-]+` 替换为 `-`，去掉首尾 `-`，空时为 `session`，截取 80 字符）；
-    Rust 已有的同名行优先，导入与会话导入在同一事务中提交。
+- 会话的 `mode` 与 `plan_enabled` 与 Node 一样存为会话行 `permission` 与 `runtime/execution_state` entry（spec rust-m11-node-storage §6.1）。
+- **项目模式偏好**：Node 的 `local_setting(scope="project", scope_id=<projectID>, namespace="permission", key="mode")`，值 `{"mode": ...}`；
+  `projectID` 按 Node `projectIdFromDirectory(workspacePath)` 计算（小写后把 `[^a-z0-9._-]+` 替换为 `-`，去掉首尾 `-`，空时为 `session`，截取 80 字符）。
 - 新会话的初始模式为：会话创建参数 → 项目偏好 → 配置 `permission.mode` → `build`，结果经 `resolve` 归一化。
 
 ### 2.4 子代理
@@ -145,7 +142,7 @@
 
 - **结构**：`{toolName, ruleContent?}`。项目规则集为 `{version: 1, allow?, deny?, ask?}`，按 `toolName + "\0" + ruleContent` 去重，保留首个。
 - **来源**：
-  - 项目规则：存于 `rust_project_setting(permission, ruleset)`，TS 导入时读取 Node 的 `local_setting ... key="ruleset"`；
+  - 项目规则：Node 的 `local_setting ... key="ruleset"`（旧 `permission` 表只读兼容）；
   - 会话规则：只在内存中，只参与 `alwaysAsk` 分支；
   - 配置的 `permission.allowedTools` / `disallowedTools`：按工具名精确匹配。
 - **匹配**（`service.ts:233-320`、`rule-matching.ts`）：

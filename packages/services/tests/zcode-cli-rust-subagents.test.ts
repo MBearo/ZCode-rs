@@ -3,7 +3,6 @@ import test from "node:test";
 import { event, end, fixture, waitForFile, type Harness } from "./zcode-cli-rust-fixture.js";
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { zcodeSessionSubagentsResultSchema, zcodeSessionStateSnapshotSchema } from "@zcode/shared";
 
 function call(response: any, calls: { id: string; name: string; args: unknown }[]) {
@@ -118,65 +117,24 @@ test("Agent creates isolated real child sessions, runs foreground siblings concu
     assert.deepEqual(h.schemaErrors, []);
     await h.close();
     const cold = f.start();
-    assert.equal((await listing(cold, sid)).ended.total, 2);
+    // 列表按 Node 从存储推导：Agent part 的 launch ACK（agentId）与子会话行。
+    const restored = await listing(cold, sid);
+    assert.equal(restored.ended.total, 2);
     assert.deepEqual(
-      (await cold.rows(sid)).rows.filter((r) => r.kind === "subagent"),
-      projected,
+      restored.ended.items.map((i) => [i.childSessionId, i.status]).sort(),
+      agents.ended.items.map((i) => [i.childSessionId, i.status]).sort(),
     );
+    // 冷投影按 Node 合成（不读 subagent_type，按 part 顺序），行 id 属于新 epoch：按内容比对。
+    const key = (r: any) => [r.childSessionId, r.parentToolCallId, r.status];
+    assert.deepEqual(
+      (await cold.rows(sid)).rows
+        .filter((r) => r.kind === "subagent")
+        .map(key)
+        .sort(),
+      projected.map(key).sort(),
+    );
+    assert.deepEqual(cold.schemaErrors, []);
     await cold.close();
-    // 模拟旧 Rust 只持久化 children 的历史；只改测试 fixture，保持 canonical 消息和边界含义。
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-    const stored = db
-      .prepare("SELECT ordinal,body FROM rust_row WHERE session=? ORDER BY ordinal")
-      .all(sid) as { ordinal: number; body: string }[];
-    const removed = stored
-      .filter((r) => JSON.parse(r.body).kind === "subagent")
-      .map((r) => r.ordinal);
-    const canonical = () =>
-      db.prepare("SELECT body FROM rust_message WHERE session=? ORDER BY ordinal").all(sid);
-    const beforeMessages = canonical();
-    db.exec("BEGIN");
-    db.prepare("DELETE FROM rust_row WHERE session=?").run(sid);
-    stored
-      .filter((r) => !removed.includes(r.ordinal))
-      .forEach((r, ordinal) =>
-        db.prepare("INSERT INTO rust_row VALUES(?,?,?,?)").run(f.cwd, sid, ordinal, r.body),
-      );
-    const boundaries = db
-      .prepare("SELECT kind,ordinal,body FROM rust_history WHERE session=?")
-      .all(sid) as { kind: string; ordinal: number; body: string }[];
-    for (const boundary of boundaries) {
-      const body = JSON.parse(boundary.body);
-      for (const key of ["row", "userRow"])
-        if (typeof body[key] === "number") body[key] -= removed.filter((i) => i < body[key]).length;
-      db.prepare("UPDATE rust_history SET body=? WHERE session=? AND kind=? AND ordinal=?").run(
-        JSON.stringify(body),
-        sid,
-        boundary.kind,
-        boundary.ordinal,
-      );
-    }
-    db.exec("COMMIT");
-    const requestCount = f.requests.length;
-    const legacy = f.start();
-    const repaired = (await legacy.rows(sid)).rows.filter((r) => r.kind === "subagent");
-    assert.equal(repaired.length, 2);
-    assert.deepEqual(
-      repaired.map((r) => r.childSessionId).sort(),
-      projected.map((r) => r.childSessionId).sort(),
-    );
-    assert.ok(repaired.every((r) => r.status === "success"));
-    await legacy.close();
-    const recoveredAgain = f.start();
-    assert.deepEqual(
-      (await recoveredAgain.rows(sid)).rows.filter((r) => r.kind === "subagent"),
-      repaired,
-    );
-    assert.deepEqual(canonical(), beforeMessages);
-    assert.equal(f.requests.length, requestCount);
-    assert.deepEqual([...legacy.schemaErrors, ...recoveredAgain.schemaErrors], []);
-    await recoveredAgain.close();
-    db.close();
   } finally {
     for (const child of children) if (!child.response.writableEnded) child.response.end();
     await f.close();
@@ -262,7 +220,7 @@ test("Subagent profile constrains dispatched tools and maxTurns, and foreign ses
 });
 
 test(
-  "Stopping the parent waits for its foreground child Shell to exit and cold history marks the child cancelled",
+  "Stopping the parent waits for its foreground child Shell to exit and cancels the child",
   { skip: process.platform === "win32" },
   async () => {
     const f = await fixture({
@@ -310,8 +268,14 @@ test(
       );
       assert.equal(f.requests.length, 2);
       await h.close();
+      // Node 的 Agent 工具结果不带 agentId/childSessionId：取消的前台调用只留 error part，
+      // 冷列表无法推导出子会话（Node 缺陷，保持一致）；冷投影的工具行为 error。
       const cold = f.start();
-      assert.equal((await listing(cold, sid)).ended.items[0]?.status, "cancelled");
+      assert.equal((await listing(cold, sid)).ended.total, 0);
+      const agent = (await cold.rows(sid)).rows.find(
+        (r) => r.kind === "toolCall" && r.toolCallId === "shell-agent",
+      );
+      assert.equal(agent?.kind === "toolCall" ? agent.status : undefined, "error");
       await cold.close();
     } finally {
       await f.close();

@@ -149,7 +149,11 @@ test("Rust cancellation remains responsive while awaiting provider and preserves
       commandsQueryResultSchema,
     );
     assert.notEqual(query.results[0]!.result, "unknown");
-    assert.equal((query.results[0]!.result as any).reasonCode, "fault.input.discardedOnRestart");
+    // Node `lookupExact`：冷查询把 admitted 输入结算为 discarded/session_resumed。
+    assert.equal(
+      (query.results[0]!.result as any).reasonCode,
+      "fault.command.inputDiscardedOnRestart",
+    );
     assert.deepEqual(h.schemaErrors, []);
   } finally {
     await f.close();

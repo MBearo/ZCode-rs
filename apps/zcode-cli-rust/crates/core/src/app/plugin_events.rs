@@ -82,13 +82,21 @@ impl Engine {
                 }
                 Ok(None)
             }
-            Event::ModelOnlyNotice { message, committed } => {
+            Event::ModelOnlyNotice {
+                source,
+                body,
+                message,
+                committed,
+            } => {
                 let live = self
                     .active
                     .get(&id)
                     .is_some_and(|a| a.run_id == run_id && !a.cancel.is_cancelled());
                 if live && let Some(session) = self.sessions.get_mut(&id) {
                     session.append_message(message);
+                    // 修复：提醒原先只进内存历史，冷恢复后丢失、请求前缀错位；Node 以 model-only
+                    // notice 原文落库，hydration 按同一 source 重建提醒。
+                    self.node_model_notice(&id, source, &body);
                     self.persist(&id, None).await?;
                     let _ = committed.send(());
                 }

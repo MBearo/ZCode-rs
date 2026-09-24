@@ -80,6 +80,7 @@ mod session_list;
 mod shared_context;
 mod skills;
 mod subagent_completion;
+mod subagent_listing;
 mod subagent_tools;
 mod subagents;
 

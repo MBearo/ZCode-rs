@@ -64,12 +64,7 @@ test("Rust file rewind restores tracked files, refuses external changes, survive
     assert.equal(await readFile(file, "utf8"), "external edit");
     await writeFile(file, "written by Rust");
     await h.close();
-    const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-    db.exec(
-      "UPDATE rust_row SET body=json_remove(body,'$.fileChanges','$.actions.canRewindFiles') WHERE json_extract(body,'$.kind')='turnHeader'",
-    );
-    db.close();
+    // 重启后由 Node 的 workspace checkpoint entry 与产物恢复可撤销的文件变更（spec §5.5）。
     h = f.start();
     await h.subscribe(`conversation/${id}`);
     assert.equal(
@@ -129,67 +124,40 @@ test("Rust edit with workspace rewind restores files and cuts conversation befor
   }
 });
 
-test("Rust checkpoint storage failure prevents file mutation; rewind commit failure compensates files and preserves original history", async () => {
+test("Rust rewind commit failure compensates files and preserves original history", async () => {
   const { DatabaseSync } = await import("node:sqlite");
-  for (const stage of ["prepare", "commit"]) {
-    const f = await fixture();
-    try {
-      let h = f.start();
-      const id = await h.create();
-      await h.subscribe(`conversation/${id}`);
-      if (stage === "commit") {
-        await h.command(h.envelope("sendText", id, { text: "write" }));
-        await h.completed(id);
-      }
-      const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-      db.exec(
-        stage === "prepare"
-          ? "CREATE TRIGGER fail_checkpoint BEFORE INSERT ON rust_session WHEN json_array_length(new.body,'$.fileCheckpoints')>0 BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END;"
-          : "CREATE TRIGGER fail_checkpoint BEFORE INSERT ON rust_command WHEN json_extract(new.ack,'$.result.type')='editUserQuery' BEGIN SELECT RAISE(ABORT,'injected history failure'); END;",
-      );
-      if (stage === "prepare") {
-        await h.command(h.envelope("sendText", id, { text: "write" }));
-      } else {
-        await assert.rejects(
-          h.command(
-            await command(h, id, "editUserQuery", {
-              newText: "replacement must not run",
-              workspaceMode: "rewind",
-            }),
-          ),
-        );
-      }
-      if (stage === "prepare") {
-        await Promise.race([
-          h.exited,
-          new Promise((_, reject) => {
-            const timer = setTimeout(
-              () => reject(new Error("Runtime did not stop after checkpoint failure")),
-              4000,
-            );
-            timer.unref();
-          }),
-        ]);
-      }
-      await h.close(1);
-      if (stage === "prepare") {
-        await assert.rejects(access(join(f.cwd, "result.txt")));
-      } else {
-        assert.equal(await readFile(join(f.cwd, "result.txt"), "utf8"), "written by Rust");
-      }
-      db.exec("DROP TRIGGER fail_checkpoint");
-      db.close();
-      h = f.start();
-      await h.subscribe(`conversation/${id}`);
-      if (stage === "commit") {
-        const rows = await h.rows(id);
-        assert(rows.rows.some((r) => r.kind === "userInput" && r.text === "write"));
-        assert(!JSON.stringify(rows).includes("replacement must not run"));
-      }
-      assert(!f.requests.some((req) => req.messages.at(-1).content === "replacement must not run"));
-      assert.deepEqual(h.schemaErrors, []);
-    } finally {
-      await f.close();
-    }
+  const f = await fixture();
+  try {
+    let h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    await h.command(h.envelope("sendText", id, { text: "write" }));
+    await h.completed(id);
+    // 回退的分支切点（session.revert）与重跑输入同一事务；写入失败时撤销已恢复的文件。
+    const db = new DatabaseSync(f.db);
+    db.exec(
+      "CREATE TRIGGER fail_rewind BEFORE UPDATE ON session WHEN new.revert IS NOT NULL BEGIN SELECT RAISE(ABORT,'injected history failure'); END;",
+    );
+    await assert.rejects(
+      h.command(
+        await command(h, id, "editUserQuery", {
+          newText: "replacement must not run",
+          workspaceMode: "rewind",
+        }),
+      ),
+    );
+    await h.close(1);
+    assert.equal(await readFile(join(f.cwd, "result.txt"), "utf8"), "written by Rust");
+    db.exec("DROP TRIGGER fail_rewind");
+    db.close();
+    h = f.start();
+    await h.subscribe(`conversation/${id}`);
+    const rows = await h.rows(id);
+    assert(rows.rows.some((r) => r.kind === "userInput" && r.text === "write"));
+    assert(!JSON.stringify(rows).includes("replacement must not run"));
+    assert(!f.requests.some((req) => req.messages.at(-1).content === "replacement must not run"));
+    assert.deepEqual(h.schemaErrors, []);
+  } finally {
+    await f.close();
   }
 });

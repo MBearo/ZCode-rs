@@ -10,7 +10,7 @@
 - 每次尝试独立拥有备份和附件目录。失败回收；重启只回收未被导入标记引用的严格 UUID 目录。成功备份继续保留。提交错误而数据库查询不可用时保留文件，待下次持锁恢复确定归属。
 - 备份发布前关闭连接、转为独立 DELETE journal 数据库并同步文件/目录；成功时不依赖 WAL sidecar。
 
-规则、所有者与事件顺序见 [spec](../specs/rust-import-lifecycle.md)。
+规则、所有者与事件顺序曾见 `docs/specs/rust-import-lifecycle.md`；M11.5 起 Rust 直接使用 Node 会话库，导入流程与该 spec 已删除（见 [rust-m11-node-storage](../specs/rust-m11-node-storage.md)）。
 
 ## 验证
 

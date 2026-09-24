@@ -112,10 +112,9 @@ sequenceDiagram
   - cache 读写只累加非基线来源，并返回 `inputBaselineBySource`。
 - 未知会话返回全 0。
 
-### 2.5 导入
+### 2.5 与 Node 共用的用量表
 
-- `--import-ts-db` 首次导入时，把 TS 库 `model_usage`、`turn_usage`、`tool_usage` 中属于本 workspace 已导入会话的行原样复制（`INSERT OR IGNORE`，缺表时跳过），与会话导入同一事务提交。
-- 此前已导入过的 workspace 在下次启动时从导入备份补一次，用标记表 `rust_usage_import` 记录完成；备份文件不存在时直接标记完成。
+- 用量写入 Node 库的 `model_usage`、`turn_usage`、`tool_usage`（spec rust-m11-node-storage §2.1），Node 与 Rust 写入的行在同一统计中；`queryAppUsage` 与 Node 一样不按工作区过滤。
 
 ### 2.6 与 Node 的差异
 
@@ -139,4 +138,4 @@ sequenceDiagram
   - 一轮带工具调用后，`v4/conversation/usage` 与 `session/usage` 的 token。
   - `v4/usage/stats` 的 summary、模型与工具排行、热力图。
   - 参数错误。
-  - TS 导入的用量行出现在统计中。
+  - Node 写入的用量行出现在统计中。

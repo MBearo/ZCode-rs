@@ -12,6 +12,8 @@ pub(super) struct RunContext {
     pub goal: Option<crate::domain::goal::Goal>,
     pub skills: Option<crate::domain::skills::SkillCatalog>,
     pub prompt_snapshot: Option<crate::domain::prompt::PromptSnapshot>,
+    /// A resumed session's stored `envInfo` (Node `extractPersistedEnvInfo`).
+    pub stored_env: Option<Value>,
     /// Tools hidden from the provider for this turn (Node turn `toolDisallowlist`).
     pub tool_disallowlist: Vec<String>,
     /// `@plugin` references of the turn's user input (spec rust-m10-plugins §3.9).
@@ -69,6 +71,7 @@ impl RunContext {
             goal: None,
             skills: None,
             prompt_snapshot: None,
+            stored_env: None,
             tool_disallowlist: vec![],
             plugin_references: vec![],
             tool_filter: Default::default(),

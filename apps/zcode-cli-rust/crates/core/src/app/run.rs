@@ -87,12 +87,22 @@ impl Engine {
             estimated,
         );
         history.prompt_snapshot = session.prompt_snapshot.clone();
+        history.stored_env = session.stored_env.clone();
         history.skills = session.skills.clone();
         // Node：只有目标续跑轮会验证并继续；普通输入只记目标运行时间与 token。
+        // 修复：后台结果唤醒的续跑轮没有来源命令，legacy 语义记为 Prompt，原先因此不验证、
+        // 目标停在 active；Node 的 task-notification 触发同样走 `runActiveTargetContinuationLoop`
+        // 并先验证，所以续跑表头（origin goalContinuation）也算目标轮。
+        let continuation = session
+            .rows
+            .iter()
+            .rev()
+            .find(|r| r["kind"] == "turnHeader" && r["turnId"] == turn_id.as_str())
+            .is_some_and(|h| h["origin"] == "goalContinuation");
         history.goal = session
             .goal
             .clone()
-            .filter(|_| kind == crate::domain::legacy_stream::RunKind::Goal);
+            .filter(|_| continuation || kind == crate::domain::legacy_stream::RunKind::Goal);
         history.agent_profile = session.agent_profile.clone();
         history.tool_disallowlist = submission.tool_disallowlist;
         history.tool_filter = session.runtime.tools.clone();

@@ -144,8 +144,9 @@ impl Engine {
         }
     }
 
-    /// Node's todo reminder notice (`persistSyntheticUserNoticeForSession`).
-    pub(super) fn node_todo_reminder(&mut self, id: &str, text: &str) {
+    /// A model-only reminder notice of `source` (todo reminder, plugin
+    /// reference; Node `persistSyntheticUserNoticeForSession`).
+    pub(super) fn node_model_notice(&mut self, id: &str, source: &str, text: &str) {
         if !self.journaled(id) {
             return;
         }
@@ -158,9 +159,9 @@ impl Engine {
             Notice {
                 message: nj::message_id(now, &message),
                 part: nj::part_id(now, &part),
-                source: "todo_reminder",
+                source,
                 text,
-                metadata: Some(json!({"runtimeMessage": {"source": "todo_reminder"}})),
+                metadata: None,
                 tools: &tools,
             },
         );

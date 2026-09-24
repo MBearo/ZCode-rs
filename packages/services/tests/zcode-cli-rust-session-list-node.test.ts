@@ -8,32 +8,30 @@ import { fixture } from "./zcode-cli-rust-fixture.js";
 import { seedList } from "./zcode-cli-rust-list-fixture.js";
 import { repairSubagentTaskIndex } from "../src/zcode-agent/repairSubagentTaskIndex.js";
 
-test("Rust stored session/list matches TS identity mapping, archive/type filters, order and ID batches", async () => {
-  const f = await fixture({ legacy: true });
+test("Rust session/list over the Node database matches Node identity mapping, archive/type filters, order and ID batches", async () => {
+  const f = await fixture();
   try {
     const seed = await seedList(f);
-    for (const identity of [seed.otherIdentity, f.cwd]) {
-      const imported = f.start(identity);
-      await imported.client.request("session/list", {}, zcodeSessionListResultSchema);
-      await imported.close();
-    }
     const h = f.start(seed.identity);
     const list = (p: unknown = {}) =>
       h.client.request("session/list", p, zcodeSessionListResultSchema);
-    const visible = seed.records
-      .filter(
-        (r) =>
-          r.workspaceID === seed.identity &&
-          r.directory === f.cwd &&
-          !r.time.archived &&
-          ["interactive", "fork", "workflow_parent"].includes(r.taskType),
-      )
-      .map((r) => seed.project(r));
-    assert.deepEqual((await list({ workspace: seed.workspace })).sessions, visible.slice(0, 50));
-    assert.deepEqual(
-      (await list({ workspace: seed.workspace, limit: 3 })).sessions,
-      visible.slice(0, 3),
-    );
+    // Node `listSessions`：SQL 先按 directory、类型与归档取 limit 条（time_updated desc, id desc），
+    // 再过滤工作区；其他工作区的会话会占用 limit（Node 缺陷，保持一致）。
+    const listed = (limit: number) =>
+      seed.records
+        .filter(
+          (r) =>
+            r.directory === f.cwd &&
+            !r.time.archived &&
+            ["interactive", "fork", "workflow_parent"].includes(r.taskType),
+        )
+        .slice(0, limit)
+        .filter((r) => r.workspaceID === seed.identity)
+        .map((r) => seed.project(r));
+    const visible = listed(1000);
+    assert.deepEqual((await list({ workspace: seed.workspace })).sessions, listed(50));
+    assert.equal(listed(50).length, 49);
+    assert.deepEqual((await list({ workspace: seed.workspace, limit: 3 })).sessions, listed(3));
     assert.deepEqual((await list({ workspace: seed.workspace, limit: 1000 })).sessions, visible);
     const ids = [
       "child",
@@ -74,12 +72,13 @@ test("Rust stored session/list matches TS identity mapping, archive/type filters
     );
     const global = (await list({ includeArchived: true, sessionIds: ["child", "other", "local"] }))
       .sessions;
+    // Node：请求不带 workspace 时按 `path ?? directory` 构造（buildWorkspaceRef），不带 identity。
     assert.deepEqual(
-      global.map((r) => [r.workspace.workspacePath, r.workspace.workspaceIdentity]),
+      global.map((r) => [r.sessionId, r.workspace.workspacePath, r.workspace.workspaceIdentity]),
       [
-        [f.cwd, seed.identity],
-        [f.cwd, seed.otherIdentity],
-        [f.cwd, undefined],
+        ["child", f.cwd, undefined],
+        ["other", f.cwd, undefined],
+        ["local", f.cwd, undefined],
       ],
     );
     assert.equal(global[0]!.traceId, "trace-child");
@@ -105,7 +104,7 @@ test("Rust stored session/list matches TS identity mapping, archive/type filters
 });
 
 test("Existing Host subagent index repair reads real Rust identities without deleting missing or stale-owner tasks", async () => {
-  const f = await fixture({ legacy: true });
+  const f = await fixture();
   try {
     const seed = await seedList(f);
     const h = f.start(seed.identity);
@@ -171,64 +170,39 @@ test("Existing Host subagent index repair reads real Rust identities without del
   }
 });
 
-test("session/list reads metadata only, never rewrites old identity, and bounds frames and storage errors", async () => {
-  const f = await fixture({ legacy: true });
+test("session/list reads metadata only without writing, and bounds frames and storage errors", async () => {
+  const f = await fixture();
   try {
     const seed = await seedList(f);
     const h = f.start(seed.identity);
     const list = (p: unknown = {}) =>
       h.client.request("session/list", p, zcodeSessionListResultSchema);
     await list();
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
+    const db = new DatabaseSync(f.db);
     try {
+      // 列表只读会话行：损坏的对话记录不影响列表，也不触发任何写入。
       db.prepare(
-        "UPDATE rust_session SET body=json_remove(body,'$.workspacePath','$.workspaceDirectory','$.traceId') WHERE id='child'",
+        "INSERT INTO message(id,session_id,time_created,time_updated,data) VALUES ('broken','child',1,1,'intentionally invalid')",
       ).run();
-      db.prepare("INSERT INTO rust_row(workspace,session,ordinal,body) VALUES (?,?,0,?)").run(
-        seed.identity,
-        "child",
-        "intentionally invalid transcript",
-      );
-      const before = db.prepare("SELECT body FROM rust_session WHERE id='child'").get();
       const version = db.prepare("PRAGMA data_version").get();
       assert.deepEqual(
         (await list({ workspace: seed.workspace, sessionIds: ["child"] })).sessions,
         [seed.project(seed.byId("child"))],
       );
-      assert.deepEqual(db.prepare("SELECT body FROM rust_session WHERE id='child'").get(), before);
       assert.deepEqual(db.prepare("PRAGMA data_version").get(), version);
-      db.prepare(
-        "UPDATE rust_session SET body=json_set(json_remove(body,'$.workspacePath','$.workspaceDirectory'),'$.promptSnapshot',json(?)) WHERE id='different-path'",
-      ).run(JSON.stringify({ cwd: f.cwd }));
       assert.equal(
         (await list({ sessionIds: ["different-path"] })).sessions[0]!.workspace.workspacePath,
         join(f.cwd, "actual"),
       );
-      const backup = db
-        .prepare("SELECT backup FROM rust_legacy_import WHERE workspace=?")
-        .get(seed.identity)!.backup;
-      assert.equal(typeof backup, "string");
-      db.prepare("UPDATE rust_legacy_import SET backup=? WHERE workspace=?").run(
-        join(f.root, "missing-backup"),
-        seed.identity,
-      );
-      // 已知空 trace 的新元数据不依赖 TS 备份可用性。
       assert.equal((await list({ sessionIds: ["main-01"] })).sessions[0]!.traceId, undefined);
-      await assert.rejects(list({ sessionIds: ["child"] }));
-      db.prepare("UPDATE rust_legacy_import SET backup=? WHERE workspace=?").run(
-        backup as string,
-        seed.identity,
-      );
-      db.prepare("UPDATE rust_session SET body=json_set(body,'$.title',?) WHERE id='main-01'").run(
-        "界".repeat(310_000),
-      );
+      db.prepare("UPDATE session SET title=? WHERE id='main-01'").run("界".repeat(310_000));
       await assert.rejects(list({ sessionIds: ["main-01"] }), /frame budget/);
       assert.equal((await list({ sessionIds: ["main-02"] })).sessions.length, 1);
-      db.exec("ALTER TABLE rust_session RENAME TO fixture_missing_sessions");
+      db.exec("ALTER TABLE session RENAME TO fixture_missing_sessions");
       try {
         await assert.rejects(list(), /no such table/);
       } finally {
-        db.exec("ALTER TABLE fixture_missing_sessions RENAME TO rust_session");
+        db.exec("ALTER TABLE fixture_missing_sessions RENAME TO session");
       }
     } finally {
       db.close();

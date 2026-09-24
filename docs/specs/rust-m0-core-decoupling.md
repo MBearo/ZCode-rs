@@ -121,7 +121,7 @@ pub enum RuntimeEvent {
 ## 8. 命令行
 
 ```text
-zcode-cli-rust app-server --stdio [--cwd] [--data-dir] [--import-ts-db] [--config] [--surface desktop|terminal] [--prepare-storage]
+zcode-cli-rust app-server --stdio [--cwd] [--data-dir] [--config] [--surface desktop|terminal] [--prepare-storage]
 zcode-cli-rust tui        # 占位：stderr 输出“TUI 尚未实现”，退出码 2
 ```
 

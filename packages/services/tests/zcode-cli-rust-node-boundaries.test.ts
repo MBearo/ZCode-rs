@@ -1,20 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { DatabaseSync } from "node:sqlite";
 import { zcodeSessionStateSnapshotSchema } from "@zcode/shared";
 import { fixture } from "./zcode-cli-rust-fixture.js";
 import { createSqliteSessionStore } from "../../../apps/zcode-cli/packages/adapters/src/storage/session-store.js";
-import type { SessionId, MessageId, PartId, ProjectId, WorkspaceId } from "@zcode/contracts";
+import type { SessionId, MessageId, PartId, ProjectId } from "@zcode/contracts";
 import {
   v4AttachmentReadResultSchema,
   v4ConversationAttachmentReadResultSchema,
 } from "@zcode/shared/zcode-protocol-v4";
 
-test("TS task membership preserves visible forks while archived and auxiliary tasks remain addressable", async () => {
-  const f = await fixture({ legacy: true });
+// Node 写入的会话由 Rust 直接读取（spec rust-m11-node-storage §6.1、§6.2）。本地会话与 Node 一样
+// 不写 workspaceID（列表按 directory 且 workspace_id IS NULL 查询）。
+test("Node task membership lists visible forks while auxiliary tasks remain addressable and archived ones are not found", async () => {
+  const f = await fixture();
   try {
     const { store, sessionID, messageID } = await seed(f);
     for (const [id, taskType] of [
@@ -28,7 +30,6 @@ test("TS task membership preserves visible forks while archived and auxiliary ta
         parentID: sessionID,
         taskType,
         projectID: "project" as ProjectId,
-        workspaceID: f.cwd as WorkspaceId,
         directory: f.cwd,
         slug: id,
         title: id,
@@ -74,11 +75,10 @@ test("TS task membership preserves visible forks while archived and auxiliary ta
         frame.params.frame.payload.snapshot.sessions.map((s: any) => s.sessionId).sort(),
         ["fork", "legacy", "workflow"],
       );
-      for (const id of ["fork", "child", "archived"]) await h.rows(id);
+      for (const id of ["fork", "child"]) await h.rows(id);
       for (const [id, kind] of [
         ["fork", "fork"],
         ["child", "subagent_child"],
-        ["archived", "interactive"],
       ]) {
         const snapshot = await h.client.request(
           "session/read",
@@ -87,8 +87,9 @@ test("TS task membership preserves visible forks while archived and auxiliary ta
         );
         assert.equal(snapshot.session.sessionKind, kind);
         assert.equal(snapshot.session.parentSessionId, sessionID);
-        assert.equal(snapshot.session.archivedAt, id === "archived" ? 10 : undefined);
       }
+      // Node `resumeFromStore`：已归档的会话不能恢复。
+      await assert.rejects(h.rows("archived"), /Session unavailable|not found/i);
       const plans = await h.client.request(
         "v4/conversation/plans",
         { sessionId: sessionID },
@@ -106,13 +107,12 @@ test("TS task membership preserves visible forks while archived and auxiliary ta
 });
 
 async function seed(f: Awaited<ReturnType<typeof fixture>>, planEnabled = false) {
-  const store = createSqliteSessionStore({ dbPath: join(f.root, "ts.sqlite") });
+  const store = createSqliteSessionStore({ dbPath: f.db });
   const sessionID = "legacy" as SessionId;
   const messageID = "input" as MessageId;
   await store.createSession({
     id: sessionID,
     projectID: "project" as ProjectId,
-    workspaceID: f.cwd as WorkspaceId,
     directory: f.cwd,
     slug: "legacy",
     title: "legacy",
@@ -148,8 +148,21 @@ async function seed(f: Awaited<ReturnType<typeof fixture>>, planEnabled = false)
   });
   return { store, sessionID, messageID };
 }
-test("Imported artifact bytes survive TS cache removal and read queries enforce session and row authorization", async () => {
-  const f = await fixture({ legacy: true });
+test("Node artifact attachments are read in chunks with session and row authorization and survive restart", async () => {
+  const f = await fixture({
+    config: {
+      formatProperties: {
+        inputFormat: {
+          supportsText: true,
+          supportsImage: true,
+          supportsPdf: false,
+          supportsVideo: false,
+          supportsAudio: false,
+        },
+        outputFormat: { supportsText: true },
+      },
+    },
+  });
   try {
     const { store, sessionID, messageID } = await seed(f);
     // 与 Node 分层配置一致：ZCODE_SESSION_DB_PATH 形成的 env 层 storage 段会整段替换项目层
@@ -178,7 +191,6 @@ test("Imported artifact bytes survive TS cache removal and read queries enforce 
     const rows = await h.rows(sessionID);
     const row = rows.rows.find((r: any) => r.kind === "userInput")!;
     const target = { rowId: row.rowId, entityId: row.entityId };
-    await rm(join(storage, "cli/artifacts"), { recursive: true });
     const result = await h.client.request(
       "v4/attachment/read",
       { sessionId: sessionID, ref: uri, target, attachmentIndex: 0, offset: 0, limit: 4 },
@@ -234,8 +246,8 @@ test("Imported artifact bytes survive TS cache removal and read queries enforce 
     await f.close();
   }
 });
-test("Imported plan state is kept and an input can turn it off", async () => {
-  const f = await fixture({ legacy: true });
+test("Node plan state is kept and an input can turn it off", async () => {
+  const f = await fixture();
   try {
     const { store, sessionID } = await seed(f, true);
     store.close();
@@ -275,26 +287,20 @@ test("Imported plan state is kept and an input can turn it off", async () => {
     await f.close();
   }
 });
-test("Unknown TS history and a missing explicit source report storage failure before admitting any request", async () => {
-  const f = await fixture({ legacy: true });
+test("Unknown Node part types are skipped like Node instead of failing startup", async () => {
+  const f = await fixture();
   try {
-    const { store } = await seed(f);
+    const { store, sessionID } = await seed(f);
     store.close();
-    const db = new DatabaseSync(join(f.root, "ts.sqlite"));
+    const db = new DatabaseSync(f.db);
     db.exec("UPDATE part SET data=json_set(data,'$.type','future-part')");
     db.close();
     const h = f.start();
-    await h.wait((m) => m.method === "startup/storageState" && m.params.phase === "failed");
-    await h.exited;
-    await h.close(1);
-    assert.match(h.stderr, /Unsupported TS history part/);
-    assert.equal(f.requests.length, 0);
-    await rm(join(f.root, "ts.sqlite"));
-    const missing = f.start();
-    await missing.wait((m) => m.method === "startup/storageState" && m.params.phase === "failed");
-    await missing.exited;
-    await missing.close(1);
-    assert.match(missing.stderr, /Explicit TS import source does not exist/);
+    await h.subscribe(`conversation/${sessionID}`);
+    await h.command(h.envelope("sendText", sessionID, { text: "continue" }));
+    await h.completed(sessionID);
+    assert.doesNotMatch(JSON.stringify(f.requests[0]!.messages), /historical question/);
+    assert.deepEqual(h.schemaErrors, []);
   } finally {
     await f.close();
   }

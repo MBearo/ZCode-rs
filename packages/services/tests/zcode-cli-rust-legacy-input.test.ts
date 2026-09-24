@@ -108,7 +108,12 @@ test("Rust legacy session/send maps Host attachments and holds the legacy lock",
     assert.deepEqual(states(h, after)[0]!.patch, { status: "running" });
     assert.equal(legacy(h, "turn.started", after)[0]!.payload.inputId, "trace-1");
     assert.equal(legacy(h, "turn.completed", after)[0]!.payload.inputId, "trace-1");
-    const content = JSON.stringify(f.requests.at(-1)!.messages.at(-1).content);
+    // Node `buildRuntimeUserEntriesFromTurn`：图片随 user 消息，文本附件是其后的 prompt_attachment 提醒。
+    const messages = f.requests.at(-1)!.messages;
+    const start = messages.findLastIndex((m: Message) =>
+      JSON.stringify(m.content).includes("看附件"),
+    );
+    const content = JSON.stringify(messages.slice(start));
     for (const part of ["data:image/png;base64,", "notes.md", "# 笔记", "voice.m4a"]) {
       assert.ok(content.includes(part), part);
     }

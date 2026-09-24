@@ -25,14 +25,9 @@ pub struct AppServerArgs {
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
     #[arg(long)]
-    pub import_ts_db: Option<PathBuf>,
-    #[arg(long)]
     pub config: Option<PathBuf>,
     #[arg(long, value_parser=["desktop","terminal"], default_value="terminal")]
     pub surface: String,
     #[arg(long)]
     pub prepare_storage: bool,
-    /// Use the shared Node session database (M11 transition; default in M11.5).
-    #[arg(long)]
-    pub node_storage: bool,
 }

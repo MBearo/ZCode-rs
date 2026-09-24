@@ -171,17 +171,18 @@ test("native prompt keeps the first Git snapshot across turns and restart while 
     await send(resumed, id, "third");
     assert.equal(f.requests[2]!.messages[2].content, first[2].content);
     assert.match(f.requests[2]!.messages[3].content, /COLD_RULE/);
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-    const row = db.prepare("SELECT body FROM rust_session WHERE id=?").get(id)!;
-    assert.equal(JSON.parse(String(row.body)).promptSnapshot.git.branch, "main");
-    assert.equal(
-      db
-        .prepare(
-          "SELECT count(*) AS n FROM rust_message WHERE session=? AND json_extract(body, '$.role')='user'",
-        )
-        .get(id)!.n,
-      3,
-    );
+    // Node `persistUserPrompt`：每条 user 消息带首个环境快照（contextSnapshot.envInfo），
+    // 冷恢复取第一条（extractPersistedEnvInfo），所以重启后 Git 快照不变。
+    const db = new DatabaseSync(f.db);
+    const envs = db
+      .prepare(
+        "SELECT json_extract(data,'$.contextSnapshot.envInfo') AS env FROM message WHERE session_id=? AND json_extract(data,'$.role')='user' ORDER BY sequence",
+      )
+      .all(id)
+      .map((r) => JSON.parse(String(r.env)));
+    assert.equal(envs.length, 3);
+    assert(envs.every((env) => env.gitBranch === "main" && env.gitStatus === "clean"));
+    assert.deepEqual(envs[0].recentCommits.length, 1);
     db.close();
     assert.deepEqual([...h.schemaErrors, ...resumed.schemaErrors], []);
   } finally {
@@ -236,9 +237,10 @@ test("prompt snapshot transaction failure stops execution before the first model
     const h = f.start();
     const id = await h.create();
     await h.subscribe(`conversation/${id}`);
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
+    // 首个环境快照随 user 消息的 contextSnapshot 提交；提交失败时不得请求模型。
+    const db = new DatabaseSync(f.db);
     db.exec(
-      "CREATE TRIGGER reject_prompt BEFORE INSERT ON rust_session WHEN json_extract(new.body,'$.promptSnapshot') IS NOT NULL BEGIN SELECT RAISE(FAIL,'injected prompt commit failure'); END;",
+      "CREATE TRIGGER reject_prompt BEFORE INSERT ON message WHEN json_extract(new.data,'$.contextSnapshot') IS NOT NULL BEGIN SELECT RAISE(FAIL,'injected prompt commit failure'); END;",
     );
     assert.equal(
       (await h.command(h.envelope("sendText", id, { text: "must not reach model" }))).status,
@@ -252,10 +254,12 @@ test("prompt snapshot transaction failure stops execution before the first model
     ]);
     await h.close(1);
     assert.equal(f.requests.length, 0);
-    const saved = JSON.parse(
-      String(db.prepare("SELECT body FROM rust_session WHERE id=?").get(id)!.body),
-    );
-    assert.equal(saved.promptSnapshot, null);
+    const saved = db
+      .prepare(
+        "SELECT count(*) AS n FROM message WHERE session_id=? AND json_extract(data,'$.contextSnapshot') IS NOT NULL",
+      )
+      .get(id) as { n: number };
+    assert.equal(saved.n, 0);
     assert.match(h.stderr, /fault.storage.commit/);
     db.close();
   } finally {

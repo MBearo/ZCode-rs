@@ -69,6 +69,10 @@
 
 - Node 的 `runtime_command_<n>` 与 `pending_deferred_<n>` 在每个进程从 1 计数，而 `session_input.id` 是全库主键，两个 runtime 共用库时会互相覆盖行。Rust 对这两类 id 使用 `<前缀>_<uuid>`。Node 不解析这些 id，因此不影响兼容。
 - 其余已知 Node 缺陷（如不过滤 `time_deleted`、`v4_command_fact:timeline:*` 等不含会话 id 的全局 id）保持一致。
+- 一个会话的待写记录在同一事务提交，任何写入失败（含 workspace checkpoint entry）都会终止该会话 actor；Node 对 checkpoint 写入失败只记 warn 并继续。
+- `session/read`（旧协议）的消息由界面行投影，重启后 id 与时间随新 epoch 变化；Node 直接返回存储的消息。
+- Rust 尚未实现模型生成标题：会话行 `title_source` 保持 `first_input`（Node 生成后为 `generated`）。
+- 子会话与恢复会话的环境快照日期按本次运行重新取（Node 恢复时同样重建上下文），Git 等环境事实取第一条带 `contextSnapshot.envInfo` 的 user 消息（Node `extractPersistedEnvInfo`）；Rust 不写 `nodeVersion`。
 
 ## 3. 状态所有者与依赖方向
 
@@ -165,13 +169,13 @@ flowchart LR
 
 - **NodeJournal**（domain，纯函数、无 IO）挂在 `Session.node`：记住当前轮与当前模型步骤的 Node id（用户消息、assistant 消息、各 part、工具 part 的声明序号与开始时间），在与 Node 相同的时机按 Node 写入模板生成记录，排入待写队列。
 - **NodeStore**（state）实现 core 的 `SessionStore`：一次 `commit` 把会话的待写队列在一个 `begin immediate` 事务里交给 M11.1 的仓储函数；`load_index`、`list_sessions`、`load_session`、`lookup_ack` 走 §6、§7 的冷读取；用量写入 Node 的 `model_usage`/`turn_usage`/`tool_usage`；项目设置写 `local_setting`。
-- 过渡：M11.3、M11.4 期间 NodeStore 由 `app-server --node-storage` 或环境变量 `ZCODE_CLI_RUST_NODE_STORAGE=1`（`-p` 同样适用）显式选择，数据库与产物根按 §2.1 解析；旧存储仍为默认。M11.5 改为唯一实现并删除旧存储。
-- 开关：`SessionStore::node_journal()` 只有 NodeStore 为 true。为 false 时引擎不调用任何 NodeJournal 钩子，旧存储与测试替身的行为、提交次数不变。记录范围是根会话与已存在于库中的子会话（fork、子代理）。
+- 唯一实现：M11.5 起 `app-server` 与 `-p` 都只使用 NodeStore，数据库与产物根按 §2.1 解析（`zcode_cli_host::storage_paths`）；旧存储、导入与 `--node-storage` 开关已删除。data dir 只放工作区 owner 锁（`workspace-<sha256>.lock`）与 Rust 工具缓存。
+- 开关：`SessionStore::node_journal()` 只有 NodeStore 为 true。测试替身为 false 时引擎不调用任何 NodeJournal 钩子。记录范围是根会话与已存在于库中的子会话（fork、子代理）。
 - id：新会话 `sess_<uuid>`（NodeStore 时）；消息与 part 用 Node 格式（毫秒 36 进制 + uuid）；`anchor.turnId` 为 `turn_<轮 uuid>`。
 - 提交：`commit` 取出会话的待写队列，在 worker 上以一个 `begin immediate` 事务执行；失败时整批写操作放回 `Session.node`，下一次提交重试，不丢失也不重复。`ack` 参数不落库（Node 不持久化回执，§7）。
 - 读取：`load_index` 为 §6.2 的冷种子；`list_sessions` 按 §6.2 过滤后以 `path ?? directory` 构造工作区引用；`load_session` 只返回本工作区（`workspaceID.trim() || path || directory` 等于引擎的 workspace identity）的会话，按 §6.1 恢复，并把 `admitted` 输入结算为 `discarded/session_resumed`；`zcode-artifact://` 按 Node `NodeToolArtifactStore` 的目录规则读取（文本产物按 UTF-8，其余 base64）。冷读取另算活动分支的上下文用量（Node `contextUsageFromPersistedMessages`：最近压缩摘要的压缩后计数，否则最后一个 assistant 的 `tokens.total` 或 `input + output`），引擎载入后按会话模型的窗口写入 `usage.contextWindow{usedTokens, maxTokens, autoCompactThresholdTokens: null}`（Node 冷用量种子）；冷行投影本身不带窗口（store 不持有模型 registry）。
 - 项目设置：`permission/ruleset` 以 core 的 `projectIdFromDirectory`（空 slug 为 `session`）为 scope id，`permission/mode` 以 bootstrap 的同名函数（空 slug 为 `default`）为 scope id，两者都带 `proj_` 前缀，与 Node 两处写入方一致。
-- 用量写入 Node 的 `model_usage`、`turn_usage`、`tool_usage`（与 `rust_*` 同列，无前缀）。
+- 用量写入 Node 的 `model_usage`、`turn_usage`、`tool_usage`。
 - 附件（M11.4h）：提示附件只存 Node 产物，不再有 Rust 自己的内容寻址目录，见 §5.3。
 
 ### 5.2 事件到 Node 写入的对应
@@ -179,7 +183,7 @@ flowchart LR
 | Rust 时机                     | Node 写入（模板）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 会话首次落库（首个输入准入）  | `createSession`（`title = titleFromInput`、`titleSource = first_input`、`permission = {mode}`）、`runtime/model_selection`、`runtime/bash_shell_selection`（Rust 工具实际使用的 shell：`/bin/bash`，Windows 为 `cmd.exe`；Node 按 `$SHELL` 可能选 zsh，Rust 执行不跟随 Node 的选择）、`runtime/execution_state`（`events.ts`）                                                                                                                                                                                                    |
-| 输入准入（startNow）          | user 消息 + text part（`persistUserPrompt`：`semantics` real_user、`anchor`、`modelSelection`、`metadata.conversationInputIntent` 等）                                                                                                                                                                                                                                                                                                                                                                                            |
+| 输入准入（startNow）          | user 消息 + text part（`persistUserPrompt`：`semantics` real_user、`anchor`、`modelSelection`、`contextSnapshot{envInfo}`、`metadata.conversationInputIntent` 等）。Rust 在运行内才取首个环境快照：此前写入的 user 消息在快照提交时带上 `contextSnapshot` 重写一次（Node 先初始化上下文再写消息）                                                                                                                                                                                                                                 |
 | 模型步骤开始                  | assistant 消息（无 `completed`）+ `step-start` part（`turn-model-step.ts`）                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ModelDone                     | reasoning part（按 provider 推理块拆分，`metadata` 为 providerOptions）、text part；无工具调用时 `step-finish` + assistant 完成（`finish`、`tokens`）                                                                                                                                                                                                                                                                                                                                                                             |
 | ModelDone 带工具调用          | 每个调用一个 `pending` 工具 part（`declarationIndex`、`input`、`raw`）                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -206,7 +210,7 @@ flowchart LR
 | 压缩开始                      | 时间线宿主 assistant（`timeline_event`）+ `context_compaction` 时间线 part + `compaction` part（`timelineStatus = started`，`operationId = cmp_<uuid>`，自动压缩带 `attempt/maxAttempts`；手动压缩带轮头的 `sourceCommandId`）                                                                                                                                                                                                                                                                                                    |
 | 压缩完成                      | 摘要 user 消息（`summary`、`compact_summary` 语义、文本 part 为摘要消息正文、`compaction` part 带 `compactBoundary`）与压缩后提醒消息（`plan_file_reference`、`resume_referenced_session_context`），随后时间线置 `completed`；保留段在已存活动消息中按助手轮取最后 `groupsPreserved` 轮（Node `selectPersistedCompactTail`），`lastSummarizedMessageId` 为最近一条对话消息                                                                                                                                                       |
 | 压缩无内容、失败、中断        | 时间线置 `skipped`、`failed` 或 `interrupted`（运行被取消或失败时收口未完成的压缩）                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| todo 提醒                     | 合成 user 通知（`todo_reminder`，model-only，Node `persistSyntheticUserNoticeForSession`）                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| todo 提醒、`@plugin` 引用     | 合成 user 通知（`todo_reminder`、`plugin_reference`，model-only，Node `persistSyntheticUserNoticeForSession`）；引用提醒在本轮首个模型请求前提交，冷读取按同一 source 还原                                                                                                                                                                                                                                                                                                                                                        |
 | 切换模型（switchModelConfig） | 记为待写的模型切换（连续切换保留首次来源，切回原模型即清除），下一轮开始、写 user 消息之前落为 `model_change` 时间线（宿主 `msg_<requestId>_message`，part `part_<requestId>_timeline`，锚点为最近一条对话消息）                                                                                                                                                                                                                                                                                                                  |
 | 子代理启动                    | 子会话 `sess_subagent_agent_<uuid>`（`agentId = agent_<uuid>`）：会话行以任务提示为标题（`first_input`，`subagent_child`，`parentID`），选型与执行状态 entry，首轮前记子会话模型的模型切换（无来源）；任务提示为 user 消息（`metadata.inputPresentation = coordinator_input`，无账本）；子会话消息的 `agent` 为 `zcode-<代理类型>`。`SendMessage` 唤起空闲子会话时同样以 `coordinator_input` 写入                                                                                                                                 |
 | 后台子代理完成                | 父会话账本 `runtime_command_<uuid>`（`backgroundNotification`，`payload.originMeta = {backgroundSource: subagent, title, workId}`），`background_task` 合成通知（`inputPresentation = task_notification`，锚点 `backgroundResult`）开启新轮，账本行置 promoted；运行时模型消息按 Node 呈现（系统通知前缀并包装为 `incoming_message` 提醒）                                                                                                                                                                                        |
@@ -412,6 +416,28 @@ flowchart TD
 - `session/list`（Node `listSessions` 的持久部分）：给出 `sessionIds` 时逐个按 id 读取，否则按 `directory = workspace.workspacePath`、task_type 同上、`includeArchived`、上限默认 50 查询；再过滤归档与工作区（`workspaceID.trim() || path || directory` 等于 `workspaceIdentity.trim() || workspacePath`）。每项为 `mapSessionInfo` 的持久形态：`sessionId`、`workspace`（请求给出的，或由 `path ?? directory` 构造）、`sessionKind`、`title`、`titleSource`、`mode = build`、`status = idle`、`createdAt`、`updatedAt`，以及存在时的 `archivedAt`、`parentSessionId`、`traceId`。
 - 远程 identity 按 Node `parseRemoteWorkspaceIdentity` 解析（`remote:ssh:<host>:<port>:<user>:<path>`、`remote:wsl:<distro>[:<user>]:<path>`、`remote:docker:<container>:<path>`）。
 
+### 6.3 子代理列表
+
+`session/subagents` 按 Node `listSessionSubagents`（`subagent-session-query.ts`，`zcode_cli_domain::subagent_query`）从存储推导，常驻运行时只提供叠加事实：
+
+```mermaid
+sequenceDiagram
+  participant C as 客户端
+  participant E as Engine
+  participant S as NodeStore
+  C->>E: session/subagents
+  E->>E: 常驻父会话的 Live（子任务关系、后台任务、进行中的工具调用、常驻子会话状态）
+  E->>S: subagent_facts(parent, Live)
+  S->>S: 会话行、全部消息；活动分支的 Agent/Task 工具 part → 候选子会话 id
+  S-->>E: 父会话事实 + subagent_child 子会话的消息
+  E->>E: project（running/ended、状态、摘要、时间）→ 按 Node 游标分页
+  E-->>C: {revision, childSessionIds, running, ended}
+```
+
+- 候选：`agentId` 取输出 JSON、launch ACK 文本（`agentId: <id>`）、元数据或常驻关系，子会话 id 缺省为 `sess_subagent_<agentId>`；标题、类型、摘要与运行/结束状态规则同 Node。
+- `revision`：常驻父会话为当前 revision，否则为会话行 `time_updated`；游标为 Node 的 base64url `{childSessionId, endedAt}`。
+- Node 缺陷保持一致：Agent 工具结果不带 `agentId/childSessionId`，被取消的前台 Agent 只留 error part，冷加载后列不出其子会话；冷投影的 subagent 行不读 `subagent_type`，类型为 `subagent`。
+
 ## 7. 命令幂等
 
 与 Node `CommandInbox.lookupExact` 相同的优先级：
@@ -456,7 +482,7 @@ createSession 的全局查找按 `queue_<commandId>` 读取输入行（Node `loo
 | M11.4  | 写入扩展：压缩、回退/编辑/重试（`session.revert`）、fork 与侧聊、goal、子代理、共享上下文、全权限授权、提问自动结算、后台通知、附件与产物                                                                      | 各功能的 Node 读取验证                                                                                                                                                                                                                       |
 | M11.5  | 切换与清理：Node 库成为唯一存储；删除 `rust_*` 表、导入流程、备份、`--import-ts-db` 与 data dir 中的库；集成测试改用 Node 库                                                                                   | 交叉运行：Node 建会话 → Rust 恢复并继续 → Node 恢复并继续，反向同样；全量集成测试                                                                                                                                                            |
 
-M11.3 至 M11.4 期间两种存储二选一（§5.1 的开关），不双写；默认仍为原存储，M11.5 删除原存储。
+M11.3 至 M11.4 期间两种存储二选一，不双写；M11.5 删除原存储。
 
 M11.3 已完成的范围与验证：
 
@@ -464,7 +490,16 @@ M11.3 已完成的范围与验证：
 - 集成测试 `apps/zcode-cli-rust/tests/node_storage.rs`：引擎跑带工具的轮次、忙时排队与提升、重启后由新 runtime 续聊；按 §6 冷读取，模型上下文与运行时请求一致，行与账本正确。
 - 交叉读取 `node --import tsx scripts/zcode-cli-rust-node-storage-check.mjs`：Node 的 `SqliteSessionStore`、history hydrator 与冷投影读取 Rust 写出的库，history、行与快照状态与 Rust 冷读取逐项相等。
 
-M11.4 的写入：引导输入与队列编辑/删除/重排/回退（M11.4a，已完成：集成测试覆盖运行中引导与删除排队项）；`sendQueuedNow` 与 `deleteSession` 与 Node 一样不改账本（提升时写入，关闭时保留 `admitted`，冷查询结算为 `discarded/session_resumed`）；编辑与重试的分支切点、重跑输入与冷加载边界（M11.4b，已完成：集成测试覆盖编辑、重试与重启后编辑，Node 交叉读取一致）；稳定分叉（M11.4c，已完成：分叉后子会话继续对话，Node 交叉读取一致）；压缩与 todo 提醒（M11.4d，已完成：手动压缩后继续对话，Node 交叉读取一致；自动压缩保留段与中断恢复有单元测试。`autoCompactThreshold`/`willRetriggerNextTurn` 暂不写，Node 读取时视为缺省）；模型切换时间线（M11.4e，已完成）；子代理子会话（M11.4f，已完成：父子会话均被 Node 交叉读取一致）；后台子代理完成通知与运行中子会话插话（M11.4g，已完成：Node 交叉读取一致。Rust 的后台 bash 状态以本地 `<task-notification>` 随下次输入进入上下文，Node 没有对应记录，不落库，重启后与 Node 一样不再出现）；提示附件（M11.4h，已完成：上传图片与文本附件、重启后继续对话，Node 交叉读取一致，§5.3）；工具结果媒体（M11.4i，已完成：Read 图片的结果重启后仍以图片发送，Node 交叉读取一致）；完全访问授权（M11.4j，已完成：回执通过 Node schema 校验，重启后恢复授权标记）；提问自动结束阶段（M11.4k，已完成）；会话 shell 快照（M11.4l，已完成：Node 能恢复快照，分叉子会话与 Node 一样不写）；目标（M11.4m，已完成：两轮续跑与验证、暂停后恢复，Node 交叉读取的行、模型上下文与目标状态一致，§5.4）；工作区 checkpoint 与文件撤销（M11.4n，已完成：Node 按严格 schema 解析 entry 与产物，重启后可读回，§5.5）；分享上下文导入与 Claude Code 迁移（M11.4o，已完成：导入后继续对话，Node 交叉读取一致，§5.6）；冷读取的上下文用量种子（M11.4p，已完成）；选区侧聊、自动标题更新。
+M11.4 的写入：引导输入与队列编辑/删除/重排/回退（M11.4a，已完成：集成测试覆盖运行中引导与删除排队项）；`sendQueuedNow` 与 `deleteSession` 与 Node 一样不改账本（提升时写入，关闭时保留 `admitted`，冷查询结算为 `discarded/session_resumed`）；编辑与重试的分支切点、重跑输入与冷加载边界（M11.4b，已完成：集成测试覆盖编辑、重试与重启后编辑，Node 交叉读取一致）；稳定分叉（M11.4c，已完成：分叉后子会话继续对话，Node 交叉读取一致）；压缩与 todo 提醒（M11.4d，已完成：手动压缩后继续对话，Node 交叉读取一致；自动压缩保留段与中断恢复有单元测试。`autoCompactThreshold`/`willRetriggerNextTurn` 暂不写，Node 读取时视为缺省）；模型切换时间线（M11.4e，已完成）；子代理子会话（M11.4f，已完成：父子会话均被 Node 交叉读取一致）；后台子代理完成通知与运行中子会话插话（M11.4g，已完成：Node 交叉读取一致。Rust 的后台 bash 状态以本地 `<task-notification>` 随下次输入进入上下文，Node 没有对应记录，不落库，重启后与 Node 一样不再出现）；提示附件（M11.4h，已完成：上传图片与文本附件、重启后继续对话，Node 交叉读取一致，§5.3）；工具结果媒体（M11.4i，已完成：Read 图片的结果重启后仍以图片发送，Node 交叉读取一致）；完全访问授权（M11.4j，已完成：回执通过 Node schema 校验，重启后恢复授权标记）；提问自动结束阶段（M11.4k，已完成）；会话 shell 快照（M11.4l，已完成：Node 能恢复快照，分叉子会话与 Node 一样不写）；目标（M11.4m，已完成：两轮续跑与验证、暂停后恢复，Node 交叉读取的行、模型上下文与目标状态一致，§5.4）；工作区 checkpoint 与文件撤销（M11.4n，已完成：Node 按严格 schema 解析 entry 与产物，重启后可读回，§5.5）；分享上下文导入与 Claude Code 迁移（M11.4o，已完成：导入后继续对话，Node 交叉读取一致，§5.6）；冷读取的上下文用量种子（M11.4p，已完成）；选区侧聊、自动标题更新（未实现）。
+
+M11.5（已完成）：NodeStore 成为唯一存储，删除 `rust_*` 表、TS 导入与备份、`--import-ts-db`、`--node-storage`；启动与 `--prepare-storage` 握手使用 Node 库路径。随切换对齐的行为：
+
+- 冷加载：环境快照从 user 消息 `contextSnapshot.envInfo` 恢复；legacy `session/resume` 以最后一条 assistant 消息的模式覆盖执行状态（Node `modeOverride`）；没有存储模型选择的会话（分享导入、Claude 导入）回退默认模型；`followupMode` 与会话 Skill 目录不落库，恢复后分别为 `queue` 与重新发现（与 Node 相同）。
+- 写入：`@plugin` 引用提醒以 `plugin_reference` 通知落库；user 消息带 `contextSnapshot`。
+- 模型请求：任何消息中模型不支持的媒体按 Node `projectMessagesForInputFormat` 换成说明文本（此前 user 消息会报 `attachment_unsupported`）。
+- 目标：后台结果唤醒的续跑轮（task-notification）结束后同样验证。
+- `session/subagents` 从存储推导（§6.3）。
+- 集成测试全部改用 Node 库（`packages/services/tests/zcode-cli-rust-*.test.ts`，291 项）：界面行跨冷热按内容比对（§2.4），回执与重放按 Node 规则（§7）；原导入测试改为“Node 写入、Rust 读取并继续、Node 再读取”的交叉用例（`zcode-cli-rust-node-sessions`、`-node-boundaries`、`-shared-node`、`-todo-node`、`-session-list-node`）。
 
 ## 11. 验收场景
 

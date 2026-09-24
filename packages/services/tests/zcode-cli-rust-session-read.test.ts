@@ -32,7 +32,17 @@ test("Host session/read projects tools and visible content without changing deli
     );
     await h.close();
     const restarted = f.start();
-    assert.deepEqual((await read(restarted.client)).messages, desktop.messages);
+    // 消息由界面行投影：重启后按冷投影重建，id 与时间属于新 epoch，内容不变。
+    const shape = (messages: typeof desktop.messages) =>
+      messages.map((m) => ({
+        role: m.info.role,
+        parts: m.parts.map((p) =>
+          p.type === "tool"
+            ? { type: p.type, callId: p.callId, status: p.state.status }
+            : { type: p.type, text: "text" in p ? p.text : undefined },
+        ),
+      }));
+    assert.deepEqual(shape((await read(restarted.client)).messages), shape(desktop.messages));
     assert.equal(f.requests.length, requests);
     assert.deepEqual(restarted.schemaErrors, []);
   } finally {

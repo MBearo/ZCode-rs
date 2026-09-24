@@ -82,7 +82,7 @@ fn chars(value: &Value) -> usize {
 }
 pub fn with_summary(summary: Option<&str>, messages: &[Value]) -> Vec<Value> {
     let mut out = Vec::with_capacity(messages.len() + 1);
-    // Node 的摘要消息（新压缩与 TS 导入）原文发送；旧 Rust 摘要只有正文，保留原前缀。
+    // Node 的摘要消息（新压缩与 Node 写入的会话）原文发送；旧 Rust 摘要只有正文，保留原前缀。
     match summary {
         Some(summary) if summary.starts_with(super::compact::SUMMARY_HEADER) => {
             out.push(json!({"role":"user","content":summary}));

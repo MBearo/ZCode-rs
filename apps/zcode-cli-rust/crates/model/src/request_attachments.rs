@@ -44,13 +44,18 @@ fn block(part: &Value) -> Option<Block> {
                 source: asset.map(Some),
             })
         }
-        "image" | "video" | "file" => {
+        kind @ ("image" | "video" | "file") => {
             let data = part["dataUrl"].as_str()?;
             let payload = data.split_once(',').map_or(0, |(_, p)| p.len() as u64);
+            // Node `modelMessageContentBlockToText`：file 块优先用 name。
+            let placeholder = match part["name"].as_str() {
+                Some(name) if kind == "file" && !name.is_empty() => name.to_owned(),
+                _ => text(&part["source"]["placeholder"]),
+            };
             Some(Block {
                 mime: text(&part["mediaType"]),
                 bytes: payload / 4 * 3,
-                placeholder: text(&part["source"]["placeholder"]),
+                placeholder,
                 name: part["name"].as_str().unwrap_or("attachment").to_owned(),
                 source: Ok(None),
             })
@@ -132,10 +137,9 @@ pub(super) async fn materialize(messages: &mut [Value], properties: &Value) -> R
             };
             let placeholder = block.placeholder;
             if capability.is_some_and(|key| properties["inputFormat"][key] != true) {
-                if !tool {
-                    return Err(ModelFailure::new("attachment_unsupported", false));
-                }
-                // Node createUnsupportedModelInputMediaText：工具结果中的媒体换成说明文本。
+                // Node `projectMessagesForInputFormat`：请求前把任何消息中模型不支持的媒体换成
+                // `createUnsupportedModelInputMediaText`。原先 user 消息在此报 attachment_unsupported，
+                // 换模型后或恢复 Node 会话的历史图片会让整轮失败；新输入的附件已在准入时按能力拒绝。
                 let kind = match capability {
                     Some("supportsImage") => "image input",
                     Some("supportsPdf") => "PDF input",

@@ -45,7 +45,12 @@ test("Goal verifies hidden history without tools, continues the gap and persists
     assert.equal(f.requests.length, 4);
     assert.match(JSON.stringify(f.requests[2]!.messages), /Run the check/);
     const rows = (await h.rows(sid)).rows;
-    assert.equal(rows.filter((r: any) => r.kind === "turnHeader").length, 2);
+    // Node：`/goal` 是只记控制的 user 消息（controlOnly 轮），之后每次续跑各开一轮。
+    const headers = rows.filter((r: any) => r.kind === "turnHeader");
+    assert.deepEqual(
+      headers.map((r: any) => r.executionKind ?? "agent"),
+      ["controlOnly", "agent", "agent"],
+    );
     assert.ok(!rows.some((r: any) => r.kind === "assistantText" && r.text.includes('"passed"')));
     assert.equal(rows.filter((r: any) => r.marker?.type === "goalVerify").length, 2);
     await h.close();
@@ -55,6 +60,9 @@ test("Goal verifies hidden history without tools, continues the gap and persists
       .frame.payload;
     assert.equal(restored.snapshot.goal?.status, "verified");
     assert.equal(restored.snapshot.goal?.verifications.length, 2);
+    const coldRows = (await cold.rows(sid)).rows;
+    assert.equal(coldRows.filter((r: any) => r.kind === "turnHeader").length, 3);
+    assert.equal(coldRows.filter((r: any) => r.marker?.type === "goalVerify").length, 2);
     assert.deepEqual(cold.schemaErrors, []);
     await cold.close();
   } finally {
@@ -175,21 +183,14 @@ test(
   },
 );
 
-test("Goal invalid verifier output retains a resumable goal and does not claim success", async () => {
-  let malformed = true;
+test("Goal invalid verifier output fails open like Node and records why", async () => {
   const f = await fixture({
     respond(request, response) {
       response.writeHead(200, { "Content-Type": "text/event-stream" });
       const verify = request.messages
         .at(-1)
         .content.includes("Verify whether the active session goal");
-      event(response, {
-        content: verify
-          ? malformed
-            ? "not json"
-            : '{"passed":true,"reason":"verified","nextAction":""}'
-          : "work",
-      });
+      event(response, { content: verify ? "not json" : "work" });
       end(response, "stop");
     },
   });
@@ -201,13 +202,16 @@ test("Goal invalid verifier output retains a resumable goal and does not claim s
       (await h.command(h.envelope("sendGoalCommand", sid, { text: "do work" }))).status,
       "accepted",
     );
-    await goal(h, sid, "failed");
+    // Node `parseGoalCompletionVerificationText`：verifier 输出无法解析时按通过处理（fail-open），
+    // 不让 verifier 故障卡住目标；原因写入验证记录。
+    const verified = await goal(h, sid, "verified");
+    const patch = verified.params.frame.payload.deltas.find(
+      (d: any) => d.patch?.goal?.status === "verified",
+    ).patch;
+    assert.equal(patch.goal.verifications.at(-1).outcome, "pass");
+    assert.match(patch.goal.verifications.at(-1).reason, /did not return valid JSON/);
     await h.completed(sid);
     assert.equal(f.requests.length, 2);
-    malformed = false;
-    assert.equal((await h.command(h.envelope("resumeGoal", sid))).status, "accepted");
-    await goal(h, sid, "verified");
-    assert.equal(f.requests.length, 4);
     assert.deepEqual(h.schemaErrors, []);
     await h.close();
   } finally {

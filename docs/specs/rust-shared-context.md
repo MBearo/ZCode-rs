@@ -37,9 +37,9 @@ sequenceDiagram
 
 Session actor 是状态、reservation 和 canonical 历史唯一 owner；blob IO 在现有 Store adapter。Host/Renderer 只读投影，不维护第二份已接受的上下文状态。run ID 与旧 ACK 防重规则不变。
 
-## 旧 TS 导入
+## Node 写入的导入
 
-读取已提交备份内 shared_context message 与 v4/shared_context_import provenance，保留来源和生命周期。pending/reserved/discarded 不进入 canonical；reserved 在恢复时释放。attached 与无状态的 legacy shared_context 按 TS hydrator 保留在隐藏模型历史。正文和 provenance 必须关联同一 context ID；损坏、缺失、摘要不一致明确失败并回滚导入。已由旧 Rust 版本错误注入 pending/discarded 的历史需要单列修复，不能通过悄悄过滤当前用户输入来掩盖。
+与 Node 共用会话库（spec rust-m11-node-storage §5.6）：Rust 直接读取 Node 写入的 shared_context message 与 v4/shared_context_import provenance，保留来源和生命周期。pending/reserved/discarded 不进入模型历史；reserved 在恢复时按 pending 处理。attached 与无状态的 legacy shared_context 按 Node hydrator 保留在隐藏模型历史。摘要不一致的导入不能附加，正文不会发给模型。
 
 ## 验收
 

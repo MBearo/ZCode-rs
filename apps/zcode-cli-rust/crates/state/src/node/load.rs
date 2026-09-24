@@ -85,6 +85,8 @@ pub fn session(workspace: &str, r: Resume, epoch: String) -> Session {
             .unwrap_or(Mode::Build);
         s.plan_enabled = execution["planEnabled"] == true;
     }
+    s.last_assistant_mode = r.last_assistant_mode.clone();
+    s.stored_env = r.env_info.clone();
     s.permission_grant = r.permission_grant.clone();
     s.todos = r
         .todos

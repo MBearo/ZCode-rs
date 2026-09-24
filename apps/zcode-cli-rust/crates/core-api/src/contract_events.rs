@@ -63,6 +63,10 @@ pub enum Event {
     /// A model-only user message (a `<system-reminder>`) the owner appends to
     /// the canonical history and persists before `committed`.
     ModelOnlyNotice {
+        /// The Node notice source (`persistSyntheticUserNoticeForSession`).
+        source: &'static str,
+        /// The reminder body the Node notice stores.
+        body: String,
         message: Value,
         committed: oneshot::Sender<()>,
     },

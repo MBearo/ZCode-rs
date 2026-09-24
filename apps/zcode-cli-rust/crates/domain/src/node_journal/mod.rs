@@ -55,6 +55,11 @@ pub struct NodeJournal {
     /// `resumed` notice.
     #[serde(skip)]
     pub goal_resumed: bool,
+    /// User messages stored before the prompt snapshot existed (the first
+    /// run takes it after its prompt is written); they get their
+    /// `contextSnapshot` when the snapshot commits.
+    #[serde(skip)]
+    pub unsnapshotted: Vec<Value>,
     #[serde(skip)]
     pub pending: Vec<Write>,
 }

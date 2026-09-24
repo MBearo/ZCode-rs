@@ -133,7 +133,7 @@ test("Rust forks exact stable response while parent runs, rejects stale and nonl
   }
 });
 
-test("Rust history reruns frozen attachments after source deletion and explicit empty attachments clears them", async () => {
+test("Rust history reruns re-resolve local attachment refs like Node and explicit empty attachments clears them", async () => {
   const { writeFile, rm } = await import("node:fs/promises");
   const { join } = await import("node:path");
   const f = await fixture();
@@ -142,20 +142,23 @@ test("Rust history reruns frozen attachments after source deletion and explicit 
       id = await h.create();
     await h.subscribe(`conversation/${id}`);
     const path = join(f.cwd, "original.txt");
-    await writeFile(path, "FROZEN_HISTORY_ATTACHMENT");
+    await writeFile(path, "FIRST_HISTORY_ATTACHMENT");
     await h.command(
       h.envelope("sendText", id, {
         text: "read it",
-        attachments: [{ ref: path, fileName: "original.txt", mime: "text/plain", bytes: 25 }],
+        attachments: [{ ref: path, fileName: "original.txt", mime: "text/plain", bytes: 24 }],
       }),
     );
     await h.completed(id);
-    await rm(path);
-    for (const [type, extra] of [
-      ["retryTurn", {}],
-      ["editUserQuery", { newText: "changed" }],
-      ["editUserQuery", { newText: "cleared", attachments: [] }],
+    // Node 编辑/重试按编辑目标的附件引用重新提交（mapAttachmentRefsToTurnAttachments），
+    // 本地路径在新一轮重新读取；源文件不可读时只留占位，不进入模型。
+    await writeFile(path, "REREAD_HISTORY_ATTACHMENT");
+    for (const [type, extra, expected] of [
+      ["retryTurn", {}, "REREAD_HISTORY_ATTACHMENT"],
+      ["editUserQuery", { newText: "changed" }, null],
+      ["editUserQuery", { newText: "cleared", attachments: [] }, null],
     ] as const) {
+      if (type === "editUserQuery") await rm(path, { force: true });
       const rows = await h.rows(id);
       const row = rows.rows.findLast(
         (r) => r.kind === (type === "retryTurn" ? "assistantText" : "userInput"),
@@ -164,10 +167,9 @@ test("Rust history reruns frozen attachments after source deletion and explicit 
       const at = h.messages.length;
       await h.command(c);
       await done(h, id, c.commandId, at);
-      assert.equal(
-        JSON.stringify(f.requests.at(-1)).includes("FROZEN_HISTORY_ATTACHMENT"),
-        !("attachments" in extra),
-      );
+      const request = JSON.stringify(f.requests.at(-1)!.messages.at(-1));
+      assert(!request.includes("FIRST_HISTORY_ATTACHMENT"));
+      assert.equal(request.includes("REREAD_HISTORY_ATTACHMENT"), expected !== null);
     }
     assert.deepEqual(h.schemaErrors, []);
   } finally {
@@ -177,7 +179,6 @@ test("Rust history reruns frozen attachments after source deletion and explicit 
 
 test("Rust editing a Goal preserves canonical Goal intent and a failed fork transaction creates no child", async () => {
   const { DatabaseSync } = await import("node:sqlite");
-  const { join } = await import("node:path");
   const f = await fixture({
     respond(req, res) {
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -209,17 +210,20 @@ test("Rust editing a Goal preserves canonical Goal intent and a failed fork tran
     const rows = (await h.rows(id)).rows;
     assert(rows.some((r) => r.kind === "userInput" && r.text === "/goal changed goal"));
     const stable = rows.findLast((r) => r.kind === "assistantText")!;
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
+    // 分叉与 Node `commitForkBundle` 一样在一个事务里写子会话；插入子会话失败时整体回滚。
+    const db = new DatabaseSync(f.db);
     db.exec(
-      "CREATE TRIGGER fail_fork BEFORE INSERT ON rust_command WHEN json_extract(new.ack,'$.result.type')='forkAssistant' BEGIN SELECT RAISE(ABORT,'injected fork failure'); END;",
+      "CREATE TRIGGER fail_fork BEFORE INSERT ON session WHEN new.parent_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'injected fork failure'); END;",
     );
     await assert.rejects(
       h.command(await action(h, id, "forkAssistant", { target: target(stable) })),
     );
     await h.close(1);
+    assert.equal((db.prepare("SELECT count(*) AS n FROM session").get() as { n: number }).n, 1);
     assert.equal(
-      (db.prepare("SELECT count(*) AS n FROM rust_session").get() as { n: number }).n,
-      1,
+      (db.prepare("SELECT count(*) AS n FROM message WHERE session_id<>?").get(id) as { n: number })
+        .n,
+      0,
     );
     db.close();
   } finally {
@@ -227,9 +231,8 @@ test("Rust editing a Goal preserves canonical Goal intent and a failed fork tran
   }
 });
 
-test("Corrupt persisted history boundaries are rejected before activating or replaying a session", async () => {
+test("Corrupt stored Node messages are rejected before activating or replaying a session", async () => {
   const { DatabaseSync } = await import("node:sqlite");
-  const { join } = await import("node:path");
   const f = await fixture();
   try {
     let h = f.start();
@@ -237,11 +240,11 @@ test("Corrupt persisted history boundaries are rejected before activating or rep
     await h.subscribe(`conversation/${id}`);
     await send(h, id, "first");
     await h.close();
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-    db.exec("UPDATE rust_history SET body=json_set(body,'$.state.selection.provider',null)");
+    const db = new DatabaseSync(f.db);
+    db.prepare("UPDATE message SET data='{broken' WHERE session_id=?").run(id);
     db.close();
     h = f.start();
-    await assert.rejects(h.subscribe(`conversation/${id}`), /Invalid persisted history boundary/);
+    await assert.rejects(h.subscribe(`conversation/${id}`));
     const healthy = await h.create();
     assert.notEqual(healthy, id);
     assert.equal(f.requests.length, 1);

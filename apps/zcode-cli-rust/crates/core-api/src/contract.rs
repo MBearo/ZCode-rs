@@ -97,6 +97,15 @@ pub trait SessionStore: Send + Sync {
     async fn load_session(&self, _workspace: &str, _id: &str) -> Result<Option<Session>> {
         anyhow::bail!("Single session loading unavailable")
     }
+    /// Node `listSessionSubagents`' stored facts of `parent`; `None` without a
+    /// session row.
+    async fn subagent_facts(
+        &self,
+        _parent: &str,
+        _live: zcode_cli_domain::subagent_query::Live,
+    ) -> Result<Option<zcode_cli_domain::subagent_query::StoredFacts>> {
+        Ok(None)
+    }
     /// Workspace-scoped settings (Node `local_setting` scope `project`), e.g.
     /// `permission/ruleset` and `permission/mode`.
     async fn project_settings(

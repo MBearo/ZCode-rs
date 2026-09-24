@@ -124,7 +124,10 @@ impl Engine {
         p: &Value,
         fallback: Option<ModelIdentity>,
     ) -> Result<ModelIdentity> {
+        // 修复：没有存储模型选择的会话（Node 的分享导入、Claude 导入）冷加载后 provider/model
+        // 为空，原先把空选择当回退而报 "Selected model is unavailable"；Node 缺省选择时用默认模型。
         let fallback = fallback
+            .filter(|f| !f.provider_id.is_empty() && !f.model_id.is_empty())
             .or_else(|| self.registry.as_ref().and_then(|r| r.default_selection()))
             .or_else(|| self.config.clone())
             .unwrap_or(ModelIdentity {

@@ -107,11 +107,12 @@ test("Rust allowAlways stores the project rule and later runs skip the prompt af
     assert.equal(await readFile(join(f.cwd, "result.txt"), "utf8"), "written by Rust");
     await h.close();
 
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
+    // Node `saveProjectPermission`：local_setting 的 (project, projectIdFromDirectory) 作用域。
+    const db = new DatabaseSync(f.db);
     try {
       const row = db
         .prepare(
-          "SELECT value FROM rust_project_setting WHERE namespace='permission' AND key='ruleset'",
+          "SELECT value FROM local_setting WHERE scope='project' AND namespace='permission' AND key='ruleset'",
         )
         .get() as { value: string };
       assert.deepEqual(JSON.parse(row.value), {

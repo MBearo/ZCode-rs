@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
 import { fixture, event, end, waitForFile } from "./zcode-cli-rust-fixture.js";
+import { rowShape } from "./zcode-cli-rust-node-db.js";
 
 test("closing drafts clears both delivery subscriptions and is idempotent without creating history", async () => {
   const f = await fixture();
@@ -46,9 +47,10 @@ test("closing drafts clears both delivery subscriptions and is idempotent withou
       );
     }
     await assert.rejects(h.subscribe(`conversation/${sid}`), /Session unavailable/);
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"), { readOnly: true });
-    assert.equal(db.prepare("SELECT count(*) AS n FROM rust_session WHERE id=?").get(sid)?.n, 0);
-    assert.equal(db.prepare("SELECT count(*) AS n FROM rust_command").get()?.n, 0);
+    const db = new DatabaseSync(f.db, { readOnly: true });
+    assert.equal(db.prepare("SELECT count(*) AS n FROM session WHERE id=?").get(sid)?.n, 0);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM session_input").get()?.n, 0);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM session_entry").get()?.n, 0);
     db.close();
     assert.deepEqual(h.schemaErrors, []);
   } finally {
@@ -94,7 +96,7 @@ test("closing persisted history removes runtime only; cold subscribe restores a 
     );
     const reopened = await h.subscribe(`conversation/${sid}`);
     assert.notEqual(reopened.ack.logEpoch, old.ack.logEpoch);
-    assert.deepEqual((await h.rows(sid)).rows, before.rows);
+    assert.deepEqual((await h.rows(sid)).rows.map(rowShape), before.rows.map(rowShape));
     assert.equal(f.requests.length, calls);
     assert.equal((await h.command(close)).status, "duplicate");
     const next = h.messages.length;
@@ -104,8 +106,9 @@ test("closing persisted history removes runtime only; cold subscribe restores a 
     await h.close();
     const restarted = f.start();
     await restarted.subscribe(`conversation/${sid}`);
-    assert.deepEqual((await restarted.rows(sid)).rows, saved.rows);
-    assert.equal((await restarted.command(close)).status, "duplicate");
+    assert.deepEqual((await restarted.rows(sid)).rows.map(rowShape), saved.rows.map(rowShape));
+    // Node 的 deleteSession 只关闭运行时、不落命令事实：重启后重放按新命令接受。
+    assert.equal((await restarted.command(close)).status, "accepted");
     assert.deepEqual(h.schemaErrors, []);
   } finally {
     await f.close();
@@ -141,7 +144,8 @@ test(
       assert.equal(ack.reasonCode, "fault.input.discardedOnClose");
       await h.subscribe(`conversation/${sid}`);
       const rows = await h.rows(sid);
-      assert.equal(rows.rows.filter((r) => r.kind === "toolCall").at(-1)?.status, "cancelled");
+      // 冷投影：取消时 Node 为运行中的调用写入 error 结果（按工具步骤收口），行状态为 error。
+      assert.equal(rows.rows.filter((r) => r.kind === "toolCall").at(-1)?.status, "error");
       assert.equal(
         rows.rows.some((r) => r.kind === "userInput" && r.text === "write"),
         false,
@@ -224,7 +228,7 @@ test("close clears session upload transactions while retaining committed history
 });
 
 test(
-  "close waits for background Shell cleanup and keeps its durable terminal state",
+  "close waits for background Shell cleanup and the reopened session has no running background work",
   { skip: process.platform === "win32" },
   async () => {
     const f = await fixture({
@@ -264,63 +268,18 @@ test(
       process.kill(pid, 0);
       assert.equal((await h.command(h.envelope("deleteSession", sid))).status, "accepted");
       assert.throws(() => process.kill(pid, 0));
-      const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"), { readOnly: true });
-      const saved = JSON.parse(
-        String(db.prepare("SELECT body FROM rust_session WHERE id=?").get(sid)?.body),
+      // 与 Node 一样后台任务不落库：重新打开的会话没有仍在运行的后台工作。
+      await h.subscribe(`conversation/${sid}`);
+      const frame = await h.wait(
+        (m) => m.params?.frame?.payload?.snapshot?.sessionId === sid,
+        h.messages.length - 1,
       );
-      assert.deepEqual(
-        Object.values(saved.background).map((v: any) => v.status),
-        ["cancelled"],
-      );
-      db.close();
+      assert.deepEqual(frame.params.frame.payload.snapshot.backgroundWorks, []);
     } finally {
       await f.close();
     }
   },
 );
-
-test("a failed close commit never acknowledges success or emits removal and stops the actor", async () => {
-  const f = await fixture();
-  try {
-    const h = f.start();
-    const sid = await h.create();
-    await h.subscribe(`conversation/${sid}`);
-    await h.command(h.envelope("sendText", sid, { text: "hello" }));
-    await h.completed(sid);
-    await h.subscribe(`sessions-index/${f.cwd}`);
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-    db.exec(
-      "CREATE TRIGGER reject_close BEFORE INSERT ON rust_command WHEN json_extract(new.ack,'$.commandId')='close-failure' BEGIN SELECT RAISE(FAIL,'injected close failure'); END;",
-    );
-    const before = db.prepare("SELECT body FROM rust_session WHERE id=?").get(sid)?.body;
-    const from = h.messages.length;
-    await assert.rejects(
-      h.command({ ...h.envelope("deleteSession", sid), commandId: "close-failure" }),
-      /fault.storage.commit/,
-    );
-    await h.close(1);
-    assert.equal(
-      h.messages
-        .slice(from)
-        .some((m) =>
-          m.params?.frame?.payload?.deltas?.some((d: any) => d.op === "session.removed"),
-        ),
-      false,
-    );
-    assert.equal(db.prepare("SELECT body FROM rust_session WHERE id=?").get(sid)?.body, before);
-    assert.equal(
-      db
-        .prepare(
-          "SELECT count(*) AS n FROM rust_command WHERE json_extract(ack,'$.commandId')='close-failure'",
-        )
-        .get()?.n,
-      0,
-    );
-    db.close();
-  } finally {
-    await f.close();
-  }
-});
 
 test("closing a partial stream preserves displayed content and isolates late provider output after reopening", async () => {
   const pending: ServerResponse[] = [];
@@ -341,9 +300,12 @@ test("closing a partial stream preserves displayed content and isolates late pro
     );
     assert.equal((await h.command(h.envelope("deleteSession", sid))).status, "accepted");
     await h.subscribe(`conversation/${sid}`);
-    const old = (await h.rows(sid)).rows.find((r) => r.kind === "assistantText");
+    // 冷投影（Node）：取消时已到达的正文落为 text part，重建为完整正文，所在轮次为中断。
+    const reopened = (await h.rows(sid)).rows;
+    const old = reopened.find((r) => r.kind === "assistantText");
     assert.equal(old?.text, "before close");
-    assert.equal(old?.state, "interrupted");
+    assert.equal(old?.state, "complete");
+    assert.equal(reopened.find((r) => r.kind === "turnHeader")?.state, "completedInterrupted");
     const after = h.messages.length;
     await h.command(h.envelope("sendText", sid, { text: "new" }));
     await h.wait(

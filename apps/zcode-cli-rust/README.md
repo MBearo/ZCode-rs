@@ -11,14 +11,14 @@ crate 边界见 [架构规格](../../docs/specs/rust-cli-architecture.md)：`pro
 - 首段即时交付，后续 16 ms/8 KiB 合并；reasoning 历史回传；可见输出后断流保留中断内容，不透明重放。
 - yolo 自动执行；Read/Write/Edit 使用 TS 标准参数，Glob/Grep 原生搜索；后台 Bash、TaskOutput/TaskStop、输出文件、文件 diff 投影。List 仅兼容旧 native 调用，不再对模型公开。
 - AskUserQuestion 复用 App 问答界面；支持单选、多选、自定义/部分回答、跳过、拒绝、自动继续与暂停倒计时。问题和回答先提交再唤醒工具；冷恢复保留已提交回答，未回答的问题标记中断。
-- TodoRead/TodoWrite 保存会话任务清单，投影 App 工作计划摘要；支持全量替换/清空、旧 TS 清单导入、冷恢复与压缩后读取。进度提示按当前 TS 的十轮间隔注入，TodoWrite 保持顺序提交屏障。
+- TodoRead/TodoWrite 保存会话任务清单，投影 App 工作计划摘要；支持全量替换/清空、冷恢复与压缩后读取（与 Node 共用 `todo` 表）。进度提示按当前 TS 的十轮间隔注入，TodoWrite 保持顺序提交屏障。
 - 会话创建、重命名、历史读取、FIFO 输入/compact 维护队列、队列编辑、held queue 保留/清空发送、sendQueuedNow、stop 和幂等 ACK 查询。
 - 手动 /compact、自动预算压缩、超限后的单次反应式压缩、旧工具结果 microcompact；摘要边界与时间线同事务保存，完整历史保留；每次请求刷新根 AGENTS.md。
 - 会话 SQLite 持久化、崩溃中断恢复、workspace identity 隔离、进程 owner 锁、旧 run 事件丢弃。
 - V4 conversation/sessions-index/workspace-config 投影、desktop/mobile 独立订阅、分片校验和 snapshot 恢复。
 - App 原生存储准备、能力协商和显式 runtime 选择。
 - 直接读取 App Provider Registry、个人设置及账号 overlay；热更新、模型/档位切换、每请求 Host 鉴权、连通性测试和 workspace 文本生成/取消。
-- 当前 TS SQLite 的只读备份与幂等导入，保留身份、消息/工具、压缩边界和输入处置；附件独立快照及已有分块预览接口。
+- 与 Node 共用会话库：Node 写入的会话（身份、消息/工具、压缩边界、输入账本、附件产物）直接冷加载并可继续，Rust 写入的会话 Node 同样可读；附件分块预览读取 Node 产物。
 - 模型/工具结果及后台登记提交屏障；Read/List/Glob/Grep 最多四并发，写入/Shell 顺序执行；存储失败停止执行且禁止收口再次提交失败状态。
 
 尚未替换默认 TypeScript runtime。不支持 MCP/插件、子代理、Plan 执行、context refs、Node REPL 和工作流；未支持的命令明确拒绝。Todo 工作计划不启用 Plan 执行开关。Composer 附件已支持分片上传与文本/图片/PDF 基础链路，剩余媒体和容量边界见[对齐清单](../../docs/specs/rust-parity-remaining.md)。部分高级 UI 入口尚未隐藏。重连通过新 snapshot 恢复，不承诺增量日志 replay。Shell 使用 yolo 权限，不提供 OS sandbox。
@@ -99,9 +99,9 @@ apps/zcode-cli-rust/target/debug/zcode-cli-rust app-server --stdio \
 
 stdout 仅输出 NDJSON；stderr 为诊断。`--prepare-storage` 使用原 Host 握手，不调用模型。未提供 Registry 文件路径或显式 config 时，只读原生历史。运行队列不跨进程恢复，command query 明确标记未执行输入被丢弃。
 
-Rust 默认写入 `~/.zcode/rust/rust-sessions.sqlite`，可用 `ZCODE_CLI_RUST_DATA_DIR` 或 `--data-dir` 修改。首次打开 workspace 时只读导入当前 TS 库；源路径按 `--import-ts-db`、既有 SESSION_DB 环境、用户/项目 storage 配置、默认路径解析。显式不存在的源会失败；旧 schema 须先经 TS 自身迁移，Rust 不原地升级它。备份为 `ts-backup-*.sqlite`，新导入附件快照位于 `ts-import-<UUID>/imported-attachments`，旧 `imported-attachments` 继续可读。工作区导入与完成标记原子提交；失败/取消回收本次文件，重启回收无提交引用的中断目录，成功备份保留。启动导入支持 SIGTERM、Ctrl-C、EOF 和已检测到的 stdout 断管取消，详见 `docs/specs/rust-import-lifecycle.md`。未知语义、缺失本地附件和不支持的 MIME 明确报错；远端 URL 保留，本包不离线下载远端资源。
+会话存储与 Node 共用同一个库（默认 `~/.zcode/cli/db/db.sqlite`，按 Node 的分层配置 `storage.dir`、`storage.sessionDbPath` 与 `ZCODE_SESSION_DB_PATH` 解析），产物（附件快照、工具结果媒体、checkpoint）在 `<storage.dir>/cli/artifacts`。Node 与 Rust 可交替打开同一会话继续对话，不做导入、备份或反向同步；`--data-dir`（默认 `~/.zcode/rust`）只放工作区 owner 锁与 Rust 工具缓存。记录格式、冷加载规则与已知差异见 [rust-m11-node-storage](../../docs/specs/rust-m11-node-storage.md)。
 
-回退时退出 Rust 并取消 runtime override，TS 继续读原库。Rust 新增历史保留在独立库，不反向同步。P0 实现与验收见 [spec](../../docs/specs/rust-app-p0.md) 和 [报告](../../docs/reports/rust-app-p0.md)。
+切回 Node 时取消 runtime override 即可，Node 直接读取 Rust 写入的会话。P0 实现与验收见 [spec](../../docs/specs/rust-app-p0.md) 和 [报告](../../docs/reports/rust-app-p0.md)。
 
 当前集成验证在 macOS 完成；真实 GLM-5.3 与 Electron Renderer 的基础对话、工具、输入、附件和问答已有[实机证据](../../docs/specs/rust-parity-remaining.md)。完整供应商/交互矩阵、Windows/Linux 实机及发布打包仍待验证。
 

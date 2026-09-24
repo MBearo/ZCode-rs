@@ -51,7 +51,12 @@ pub(super) async fn initialize(
     };
     let (reply, receipt) = tokio::sync::oneshot::channel();
     if history.prompt_snapshot.is_none() {
-        let snapshot = context.snapshot(cancel).await?;
+        let mut snapshot = context.snapshot(cancel).await?;
+        // Node 恢复时以存储的 envInfo 作 config.envInfo（不重新探测 Git），日期按本次重建。
+        if let Some(env) = &history.stored_env {
+            snapshot =
+                crate::domain::prompt::PromptSnapshot::from_env_info(env, snapshot.current_date);
+        }
         sink.send(Event::PromptInitialized {
             snapshot: Box::new(snapshot.clone()),
             skills: catalog,

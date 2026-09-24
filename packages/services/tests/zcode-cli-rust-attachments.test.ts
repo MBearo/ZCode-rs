@@ -218,12 +218,16 @@ test("Rust accepts uploaded attachment-only input, authorizes row previews and r
     );
     await h.close();
     const restarted = f.start();
+    await restarted.subscribe(`conversation/${id}`);
+    // 界面行不落库：重启后是新 epoch，行按 Node 冷投影重建，预览目标取新行。
+    const cold = (await restarted.rows(id)).rows.find((r: any) => r.kind === "userInput")! as any;
+    assert.deepEqual(cold.attachments, [attachment]);
     assert.equal(
       Buffer.from(
         (
           await restarted.client.request(
             "v4/conversation/attachmentRead",
-            read,
+            { ...read, target: { rowId: cold.rowId, entityId: cold.entityId } },
             v4ConversationAttachmentReadResultSchema,
           )
         ).dataBase64,
@@ -231,7 +235,6 @@ test("Rust accepts uploaded attachment-only input, authorizes row previews and r
       ).toString(),
       bytes.toString(),
     );
-    await restarted.subscribe(`conversation/${id}`);
     await restarted.command(restarted.envelope("sendText", id, { text: "continue" }));
     await restarted.completed(id);
     assert.match(JSON.stringify(f.requests.at(-1)), /ATTACHED_你好/);
@@ -285,16 +288,24 @@ test("Rust snapshots local firstInput and queued attachments before admission; q
     assert.match(JSON.stringify(f.requests[1]), /FROZEN_QUEUED/);
     await h.completed(id, h.messages.length - 1);
     const rows = (await h.rows(id)).rows.filter((r: any) => r.kind === "userInput") as any[];
-    assert.notEqual(rows[0].attachments[0].ref, rows[1].attachments[0].ref);
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"), { readOnly: true });
-    const canonical = db
-      .prepare("SELECT body FROM rust_message WHERE session=?")
+    // Node：本地文本附件保留路径引用，内容在准入时读成 file part 的 inline 预览。
+    assert.deepEqual(
+      rows.map((r) => r.attachments[0].ref),
+      [path, path],
+    );
+    const db = new DatabaseSync(f.db, { readOnly: true });
+    const previews = db
+      .prepare("SELECT data FROM part WHERE session_id=? AND json_extract(data,'$.type')='file'")
       .all(id)
-      .map((r) => r.body)
-      .join("");
+      .map((r) => JSON.parse(r.data as string).metadata);
     db.close();
-    assert(canonical.includes("_zcode_attachment"));
-    assert(!canonical.includes("FROZEN_FIRST"));
+    assert.deepEqual(
+      previews.map((m) => [m.storageKind, m.preview.text]),
+      [
+        ["inline", "FROZEN_FIRST"],
+        ["inline", "FROZEN_QUEUED"],
+      ],
+    );
     assert.deepEqual(h.schemaErrors, []);
   } finally {
     release();

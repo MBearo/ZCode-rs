@@ -3,11 +3,11 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { DatabaseSync } from "node:sqlite";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { cpus } from "node:os";
 import { fixture } from "../packages/services/tests/zcode-cli-rust-fixture.ts";
+import { createSqliteSessionStore } from "../apps/zcode-cli/packages/adapters/src/storage/session-store.ts";
 
 const [baseline, candidate, output = ".zcode-runtime/rust-perf-20260922/memory"] =
   process.argv.slice(2);
@@ -45,49 +45,50 @@ try {
     await seed.completed(id);
   }
   await seed.close();
-  const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
+  // 会话库与 Node 共用（spec rust-m11-node-storage §2.1）：用 Node 仓储写入大段历史。
+  const store = createSqliteSessionStore({ dbPath: f.db });
   try {
-    const insert = db.prepare(
-      "INSERT INTO rust_message SELECT workspace,session,?,? FROM rust_message WHERE session=? LIMIT 1",
-    );
-    db.exec("BEGIN");
-    db.prepare(
-      "INSERT INTO rust_session SELECT workspace,?,json_set(body,'$.id',?) FROM rust_session WHERE id=?",
-    ).run(pageId, pageId, ids[0]);
-    for (const table of ["rust_message", "rust_row"]) {
-      db.prepare(
-        `INSERT INTO ${table} SELECT workspace,?,ordinal,body FROM ${table} WHERE session=?`,
-      ).run(pageId, ids[0]);
-    }
-    db.prepare(
-      "INSERT INTO rust_history SELECT workspace,?,kind,ordinal,body FROM rust_history WHERE session=?",
-    ).run(pageId, ids[0]);
-    const row = JSON.parse(
-      db
-        .prepare(
-          "SELECT body FROM rust_row WHERE session=? AND json_extract(body,'$.kind')='assistantText' LIMIT 1",
-        )
-        .get(ids[0]).body,
-    );
-    const insertRow = db.prepare("INSERT INTO rust_row VALUES(?,?,?,?)");
-    for (let i = 0; i < 200; i++)
-      insertRow.run(
-        f.cwd,
-        pageId,
-        1000 + i,
-        JSON.stringify({
-          ...row,
-          rowId: 1000 + i,
-          entityId: `page-${i}`,
-          text: "x".repeat(32 * 1024),
-        }),
-      );
-    const body = JSON.stringify({ role: "user", content: "x".repeat(64 * 1024) });
+    const add = async (sessionID, role, i, text) => {
+      const id = `msg_bench_${sessionID}_${i}`;
+      await store.saveMessage({
+        id,
+        sessionID,
+        role,
+        time: { created: 1000 + i, ...(role === "assistant" ? { completed: 1000 + i } : {}) },
+        agent: "main",
+        ...(role === "assistant"
+          ? {
+              parentID: `msg_bench_${sessionID}_0`,
+              mode: "yolo",
+              path: { cwd: f.cwd, root: f.cwd },
+              cost: 0,
+              tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+            }
+          : {}),
+      });
+      await store.savePart({
+        id: `prt_bench_${sessionID}_${i}`,
+        sessionID,
+        messageID: id,
+        type: "text",
+        text,
+      });
+    };
+    await store.createSession({
+      id: pageId,
+      projectID: "bench",
+      directory: f.cwd,
+      slug: pageId,
+      title: pageId,
+      version: "bench",
+    });
+    await add(pageId, "user", 0, "page");
+    for (let i = 1; i <= 200; i++) await add(pageId, "assistant", i, "x".repeat(32 * 1024));
     // Canonical-only fixtures isolate session retention from App output size and model context limits.
-    for (const id of ids) for (let i = 0; i < 64; i++) insert.run(1000 + i, body, id);
-    db.exec("COMMIT");
+    const body = "x".repeat(64 * 1024);
+    for (const id of ids) for (let i = 1; i <= 64; i++) await add(id, "user", 100 + i, body);
   } finally {
-    db.close();
+    store.close();
   }
   for (let repetition = 1; repetition <= 5; repetition++) {
     const versions = [
@@ -128,8 +129,6 @@ try {
             page = await h.rows(pageId);
           pageMs.push(performance.now() - at);
           assert.equal(page.hasMore, true);
-          assert.equal(page.rows.at(-1).rowId, 1199);
-          assert.equal(page.rows[0].rowId, 1173);
         }
         pageMs.sort((a, b) => a - b);
         assert.deepEqual(h.schemaErrors, []);

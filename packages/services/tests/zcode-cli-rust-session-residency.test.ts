@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
 import { fixture } from "./zcode-cli-rust-fixture.js";
+import { seedColdSessions } from "./zcode-cli-rust-node-db.js";
 
 test("Rust startup reads only the session index; idle histories are evicted while subscribed history stays resident", async () => {
   const f = await fixture();
@@ -13,26 +13,10 @@ test("Rust startup reads only the session index; idle histories are evicted whil
     await h.command(h.envelope("sendText", original, { text: "seed" }));
     await h.completed(original);
     await h.close();
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
-    const session = db.prepare(
-      "INSERT INTO rust_session SELECT workspace,?,json_set(body,'$.id',?) FROM rust_session WHERE id=?",
-    );
-    db.exec("BEGIN");
-    for (let i = 0; i < 300; i++) {
-      const id = `cold-${i}`;
-      session.run(id, id, original);
-      for (const table of ["rust_row", "rust_message"]) {
-        db.prepare(
-          `INSERT INTO ${table} SELECT workspace,?,ordinal,body FROM ${table} WHERE session=?`,
-        ).run(id, original);
-      }
-      db.prepare(
-        "INSERT INTO rust_history SELECT workspace,?,kind,ordinal,body FROM rust_history WHERE session=?",
-      ).run(id, original);
-    }
+    await seedColdSessions(f, 300);
     // 若启动读取全部 transcript，这个未打开会话会直接令初始化失败。
-    db.exec("UPDATE rust_message SET body='not-json' WHERE session='cold-299'");
-    db.exec("COMMIT");
+    const db = new DatabaseSync(f.db);
+    db.exec("UPDATE message SET data='not-json' WHERE session_id='cold-299'");
     db.close();
     h = f.start();
     await h.subscribe(`sessions-index/${f.cwd}`);

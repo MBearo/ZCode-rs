@@ -134,7 +134,10 @@ test("Rust Todo follows TS handlers, commits ordered replacement and projects du
     assert.deepEqual(JSON.parse(f.requests.at(-1)!.messages.at(-1).content), { todos: [] });
     await h.close();
     const cold = f.start();
-    assert.deepEqual((await snapshot(cold, id)).plan, snap.plan);
+    // 冷投影按 Node 从 TodoWrite 的工具 part 重建计划，updatedAt 取 part 时间，与热路径的提交时间可差数毫秒。
+    const coldPlan = (await snapshot(cold, id)).plan;
+    assert.deepEqual(coldPlan?.items, snap.plan?.items);
+    assert.equal(typeof coldPlan?.updatedAt, "number");
     await cold.command(cold.envelope("sendText", id, { text: "read" }));
     await cold.completed(id);
     assert.deepEqual(JSON.parse(f.requests.at(-1)!.messages.at(-1).content), { todos: second });

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { zcodeSessionListResultSchema } from "@zcode/shared";
 import { fixture, event, end } from "./zcode-cli-rust-fixture.js";
@@ -13,9 +12,13 @@ for (const stage of ["import", "attach"] as const)
       const h = f.start();
       await h.client.request("session/list", {}, zcodeSessionListResultSchema);
       if (stage === "attach") await importShared(h, f.cwd);
-      const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"));
+      // 导入与会话行同一事务（Node commitSharedContextImportBundle）；附加时导入包状态改为
+      // attached 与 user 消息同一事务。任一写入失败都整体回滚。
+      const db = new DatabaseSync(f.db);
       db.exec(
-        "CREATE TRIGGER fail_shared BEFORE INSERT ON rust_session BEGIN SELECT RAISE(ABORT,'injected shared commit failure'); END",
+        stage === "import"
+          ? "CREATE TRIGGER fail_shared BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT,'injected shared commit failure'); END"
+          : "CREATE TRIGGER fail_shared BEFORE INSERT ON session_entry WHEN new.type='v4/shared_context_import' AND json_extract(new.data,'$.status')='attached' BEGIN SELECT RAISE(ABORT,'injected shared commit failure'); END",
       );
       const before = h.messages.length;
       if (stage === "import") await assert.rejects(importShared(h, f.cwd), /fault.storage.commit/);
@@ -37,11 +40,21 @@ for (const stage of ["import", "attach"] as const)
             ),
           ),
       );
-      const stored = db.prepare("SELECT body FROM rust_session WHERE id='shared-A'").get();
+      const stored = db.prepare("SELECT id FROM session WHERE id='shared-A'").get();
       if (stage === "import") assert.equal(stored, undefined);
       else {
-        assert.equal(JSON.parse(stored!.body as string).sharedContext.provenance.status, "pending");
-        assert.equal(db.prepare("SELECT count(*) AS n FROM rust_message").get()!.n, 0);
+        const status = db
+          .prepare(
+            "SELECT json_extract(data,'$.status') AS status FROM session_entry WHERE session_id='shared-A' AND type='v4/shared_context_import'",
+          )
+          .get() as { status: string };
+        assert.equal(status.status, "pending");
+        assert.equal(
+          db
+            .prepare("SELECT count(*) AS n FROM part WHERE json_extract(data,'$.text')=?")
+            .get("should not execute")!.n,
+          0,
+        );
       }
       db.close();
     } finally {

@@ -10,8 +10,6 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use zcode_cli_app_server::{self as app_server, Sink, stdio};
 use zcode_cli_core_api::SessionStore;
-use zcode_cli_host::legacy_paths;
-use zcode_cli_state::Store;
 
 #[tokio::main]
 async fn main() {
@@ -62,12 +60,8 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         "App server starting"
     );
     let ctx = runtime::Context::prepare(args.cwd, args.data_dir).await?;
-    let node_storage = runtime::node_storage(args.node_storage);
-    let path = if node_storage {
-        ctx.node_database().await?.database
-    } else {
-        ctx.data_dir.join("rust-sessions.sqlite")
-    };
+    // 会话存储只有 Node 的库（spec rust-m11-node-storage §2.1）。
+    let path = ctx.node_database().await?.database;
     let cancel = CancellationToken::new();
     let signal_cancel = cancel.clone();
     tokio::spawn(async move {
@@ -99,23 +93,11 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
     let _owner = if args.prepare_storage {
         None
     } else {
-        Some(Store::lock_workspace(ctx.data_dir.clone(), ctx.workspace.clone()).await?)
+        Some(zcode_cli_state::lock_workspace(ctx.data_dir.clone(), ctx.workspace.clone()).await?)
     };
     output.send_values(vec![progress("checking", 1)]).await?;
-    let opened = if node_storage {
-        ctx.node_store()
-            .await
-            .map(|store| (Arc::new(store) as Arc<dyn SessionStore>, None))
-    } else {
-        Store::open(path).await.map(|store| {
-            (
-                Arc::new(store.clone()) as Arc<dyn SessionStore>,
-                Some(store),
-            )
-        })
-    };
-    let (store, rust_store) = match opened {
-        Ok(store) => store,
+    let store: Arc<dyn SessionStore> = match ctx.node_store().await {
+        Ok(store) => Arc::new(store),
         Err(error) => {
             let mut frame = progress("failed", 2);
             // Node `DatabaseStartupErrorCode`：迁移与打开失败按原因上报，其余为 sql_failed。
@@ -129,64 +111,6 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
             anyhow::bail!("Session storage failed");
         }
     };
-    if let (false, Some(rust_store)) = (args.prepare_storage, &rust_store) {
-        let import_cancel = cancel.child_token();
-        let imported = async {
-            if let Some(source) = legacy_paths::resolve(
-                args.import_ts_db,
-                &ctx.requested_cwd,
-                args.config.is_none(),
-                &ctx.workspace_config.snapshot().await,
-            )
-            .await?
-            {
-                if tokio::fs::try_exists(&source.database).await? {
-                    let operation = rust_store.import_ts(
-                        source.database,
-                        ctx.workspace.clone(),
-                        ctx.requested_cwd.to_string_lossy().into_owned(),
-                        ctx.data_dir.clone(),
-                        source.artifacts,
-                        import_cancel.clone(),
-                    );
-                    tokio::pin!(operation);
-                    // 只在实际导入期间处理 EOF；无导入时保留输入缓冲区交由 actor 排空。
-                    let result = tokio::select! {
-                        result = &mut operation => result,
-                        _ = input_closed.cancelled() => {
-                            import_cancel.cancel();
-                            operation.await
-                        }
-                        _ = cancel.cancelled() => {
-                            import_cancel.cancel();
-                            operation.await
-                        }
-                    };
-                    if import_cancel.is_cancelled() || input_closed.is_cancelled() {
-                        return Ok(true);
-                    }
-                    result?;
-                } else {
-                    anyhow::ensure!(!source.required, "Explicit TS import source does not exist");
-                }
-            }
-            Ok::<_, anyhow::Error>(false)
-        }
-        .await;
-        if matches!(imported, Ok(true)) {
-            drop(output);
-            stdio::finish(writer).await?;
-            return Ok(());
-        }
-        if let Err(error) = imported {
-            let mut frame = progress("failed", 2);
-            frame["params"]["errorCode"] = "sql_failed".into();
-            output.send_values(vec![frame]).await?;
-            drop(output);
-            let _ = stdio::finish(writer).await;
-            anyhow::bail!("TS history import failed; source remains unchanged: {error:#}");
-        }
-    }
     output.send_values(vec![progress("ready", 2)]).await?;
     if args.prepare_storage {
         drop(store);

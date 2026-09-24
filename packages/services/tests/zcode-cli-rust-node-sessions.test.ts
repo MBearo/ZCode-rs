@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { access, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DatabaseSync } from "node:sqlite";
 import { fixture } from "./zcode-cli-rust-fixture.js";
 import { createSqliteSessionStore } from "../../../apps/zcode-cli/packages/adapters/src/storage/session-store.js";
 import type { SessionId, MessageId, ProjectId, WorkspaceId, PartId } from "@zcode/contracts";
 import { zcodeSessionStateSnapshotSchema } from "@zcode/shared";
 
-test("Real TS storage imports identity, attachments, tools and interrupted outcomes once; source remains usable for rollback", async () => {
-  const f = await fixture({ legacy: true });
+// Node 与 Rust 共用同一个会话库（spec rust-m11-node-storage §11 场景 2、3）：
+// Node 写入的会话由 Rust 直接打开并继续，Rust 写入的内容 Node 仍能读取。
+test("Rust opens a Node session with its identity, attachments, tools and interrupted outcomes, and Node reads the continuation", async () => {
+  const f = await fixture();
   try {
-    const path = join(f.root, "ts.sqlite");
-    const store = createSqliteSessionStore({ dbPath: path });
+    const store = createSqliteSessionStore({ dbPath: f.db });
     const id = "ts-session" as SessionId;
     const user = "ts-user" as MessageId;
     const assistant = "ts-assistant" as MessageId;
@@ -23,7 +23,7 @@ test("Real TS storage imports identity, attachments, tools and interrupted outco
       workspaceID: f.cwd as WorkspaceId,
       directory: f.cwd,
       slug: "fixture",
-      title: "Old TS task",
+      title: "Old Node task",
       titleSource: "custom",
       version: "fixture",
     });
@@ -122,7 +122,6 @@ test("Real TS storage imports identity, attachments, tools and interrupted outco
       },
     });
     store.close();
-    const before = await readFile(path);
     const h = f.start();
     await h.subscribe(`conversation/${id}`);
     const snapshot = await h.client.request(
@@ -130,7 +129,7 @@ test("Real TS storage imports identity, attachments, tools and interrupted outco
       { sessionId: id },
       zcodeSessionStateSnapshotSchema,
     );
-    assert.equal(snapshot.session.title, "Old TS task");
+    assert.equal(snapshot.session.title, "Old Node task");
     assert.ok(
       snapshot.messages
         .flatMap((m) => m.parts)
@@ -155,8 +154,12 @@ test("Real TS storage imports identity, attachments, tools and interrupted outco
     );
     await h.command(h.envelope("sendText", id, { text: "continue old task" }));
     await h.completed(id);
-    assert.match(JSON.stringify(f.requests[0]!.messages), /old attachment content/);
-    assert.match(JSON.stringify(f.requests[0]!.messages), /execution outcome is unknown/);
+    // Node hydrator：没有预览的本地文本附件只留占位，未结束的工具结果为中断。
+    assert.match(JSON.stringify(f.requests[0]!.messages), /\[Attached text\/plain: old\.txt\]/);
+    assert.match(
+      JSON.stringify(f.requests[0]!.messages),
+      /Tool execution was interrupted before resume/,
+    );
     assert.deepEqual(
       f.requests[0]!.messages.filter((m: any) => m.role === "tool").map((m: any) => m.tool_call_id),
       ["old-read", "old-write"],
@@ -167,15 +170,12 @@ test("Real TS storage imports identity, attachments, tools and interrupted outco
     const restored = await h2.rows(id);
     assert.equal(restored.rows.filter((r: any) => r.entityId === "ts-user").length, 2);
     await h2.close();
-    assert.deepEqual(await readFile(path), before);
-    const files = await readdir(f.dataDir);
-    assert.equal(
-      files.filter((p) => p.startsWith("ts-backup-") && p.endsWith(".sqlite")).length,
-      1,
-    );
-    const source = new DatabaseSync(path, { readOnly: true });
-    assert.equal((source.prepare("SELECT count(*) AS n FROM message").get() as { n: number }).n, 2);
-    source.close();
+    const reader = createSqliteSessionStore({ dbPath: f.db });
+    const texts = (await reader.messages({ sessionID: id }))
+      .flatMap((m) => m.parts)
+      .flatMap((p) => (p.type === "text" ? [p.text] : []));
+    reader.close();
+    assert.deepEqual(texts, ["old question", "old answer", "continue old task", "你好 Rust"]);
     assert.deepEqual(h.schemaErrors, []);
     assert.deepEqual(h2.schemaErrors, []);
   } finally {
@@ -183,10 +183,10 @@ test("Real TS storage imports identity, attachments, tools and interrupted outco
   }
 });
 
-test("TS migration preserves workspace identity, keeps build approvals and retains discarded input ACKs", async () => {
-  const f = await fixture({ legacy: true });
+test("Node sessions keep workspace identity and build approvals; admitted inputs are discarded on resume", async () => {
+  const f = await fixture();
   try {
-    const store = createSqliteSessionStore({ dbPath: join(f.root, "ts.sqlite") });
+    const store = createSqliteSessionStore({ dbPath: f.db });
     for (const [id, workspace, mode] of [
       ["local", f.cwd, "build"],
       ["remote", "ssh://fixture/workspace", "yolo"],
@@ -245,7 +245,7 @@ test("TS migration preserves workspace identity, keeps build approvals and retai
     const local = f.start();
     await local.subscribe("conversation/local");
     await assert.rejects(local.rows("remote"), /Session unavailable/);
-    // 导入的 build 会话按 build 执行：写文件先询问，不会被静默提升为 yolo。
+    // Node 的 build 会话按 build 执行：写文件先询问，不会被静默提升为 yolo。
     let after = local.messages.length;
     assert.equal(
       (await local.command(local.envelope("sendText", "local", { text: "write" }))).status,
@@ -274,7 +274,8 @@ test("TS migration preserves workspace identity, keeps build approvals and retai
       commandId: "local-command",
     });
     assert.equal(duplicate.status, "failed");
-    assert.equal(duplicate.reasonCode, "fault.input.discardedOnRestart");
+    // Node `discardAdmittedOnLoad`：未开始的输入恢复时结算为 discarded/session_resumed。
+    assert.equal(duplicate.reasonCode, "fault.command.inputDiscardedOnRestart");
     await local.command(local.envelope("switchCollaborationMode", "local", { mode: "yolo" }));
     after = local.messages.length;
     await local.command(local.envelope("sendText", "local", { text: "explicit yolo" }));
@@ -289,10 +290,10 @@ test("TS migration preserves workspace identity, keeps build approvals and retai
   }
 });
 
-test("TS compact summary restores its preserved tail without resurrecting summarized history", async () => {
-  const f = await fixture({ legacy: true });
+test("Node compact summary restores its preserved tail without resurrecting summarized history", async () => {
+  const f = await fixture();
   try {
-    const store = createSqliteSessionStore({ dbPath: join(f.root, "ts.sqlite") });
+    const store = createSqliteSessionStore({ dbPath: f.db });
     const id = "compact-ts" as SessionId;
     await store.createSession({
       id,
@@ -355,7 +356,7 @@ test("TS compact summary restores its preserved tail without resurrecting summar
       sessionID: id,
       messageID: summary,
       type: "text",
-      text: "Summary from TS",
+      text: "Summary from Node",
     });
     await store.savePart({
       id: "boundary" as PartId,
@@ -363,15 +364,26 @@ test("TS compact summary restores its preserved tail without resurrecting summar
       messageID: summary,
       type: "compaction",
       auto: true,
-      tail_start_id: "tail" as MessageId,
-    });
+      compactBoundary: {
+        trigger: "auto",
+        preCompactTokenCount: 10,
+        summarizedMessageCount: 1,
+        summaryMessageIds: [summary],
+        traceId: "trace",
+        preservedSegment: {
+          headMessageId: "tail",
+          anchorMessageId: summary,
+          tailMessageId: "tail",
+        },
+      },
+    } as never);
     store.close();
     const h = f.start();
     await h.subscribe(`conversation/${id}`);
     await h.command(h.envelope("sendText", id, { text: "continue" }));
     await h.completed(id);
     const request = JSON.stringify(f.requests[0]!.messages);
-    assert.match(request, /Summary from TS/);
+    assert.match(request, /Summary from Node/);
     assert.match(request, /preserved tail/);
     assert.doesNotMatch(request, /summarized text/);
     assert.deepEqual(h.schemaErrors, []);

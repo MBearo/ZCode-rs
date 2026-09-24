@@ -6,7 +6,7 @@
 
 - 会话 Engine 拥有规范消息、摘要边界（`context.offset` / `context.summary`）、压缩时间线行，以及本进程内的“连续压缩失败次数”。
 - run 任务在自己的历史副本上选轮、请求摘要，结果经 `CompactDone` / `CompactFailed` 交给 Engine 提交；提交回执之前不切换边界、不发下一次请求（沿用既有提交屏障）。
-- 摘要文本存在 `context.summary`，请求时作为历史首条 user 消息发送。以 `This session is being continued from a previous conversation` 开头的摘要按原文发送（新摘要，以及从 TS 导入的摘要）；旧 Rust 摘要仍加原有前缀。
+- 摘要文本存在 `context.summary`，请求时作为历史首条 user 消息发送。以 `This session is being continued from a previous conversation` 开头的摘要按原文发送（新摘要，以及 Node 写入的摘要）；旧 Rust 摘要仍加原有前缀。
 
 ## 2. 摘要请求
 

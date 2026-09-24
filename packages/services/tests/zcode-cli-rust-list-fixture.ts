@@ -6,10 +6,12 @@ import type { CreateSessionInput, SessionId, SessionTaskType } from "@zcode/cont
 import type { fixture } from "./zcode-cli-rust-fixture.js";
 
 export async function seedList(f: Awaited<ReturnType<typeof fixture>>) {
-  const source = join(f.root, "ts.sqlite");
+  const source = f.db;
   const store = createSqliteSessionStore({ dbPath: source });
-  const identity = "remote-fixture-A";
-  const otherIdentity = "remote-fixture-B";
+  // Node `parseRemoteWorkspaceIdentity` 能解析出工作区路径的远程 identity：sessions-index 冷种子按
+  // 该路径与 identity 查询。
+  const identity = `remote:ssh:fixture-a:22:user:${f.cwd}`;
+  const otherIdentity = `remote:ssh:fixture-b:22:user:${f.cwd}`;
   const workspace = {
     workspacePath: f.cwd,
     workspaceIdentity: identity,

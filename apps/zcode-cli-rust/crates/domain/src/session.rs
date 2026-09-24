@@ -72,6 +72,10 @@ pub struct Session {
     pub todos_updated_at: u64,
     #[serde(default)]
     pub prompt_snapshot: Option<super::prompt::PromptSnapshot>,
+    /// The stored `envInfo` of a resumed session (Node `extractPersistedEnvInfo`),
+    /// the environment of its next prompt snapshot.
+    #[serde(skip)]
+    pub stored_env: Option<Value>,
     #[serde(default)]
     pub context: super::context::ContextState,
     #[serde(skip)]
@@ -210,6 +214,7 @@ impl Session {
             todos: vec![],
             todos_updated_at: now,
             prompt_snapshot: None,
+            stored_env: None,
             context: Default::default(),
             context_tokens: None,
             compact_instructions: None,

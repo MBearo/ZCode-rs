@@ -9,8 +9,8 @@ use tokio::sync::oneshot;
 
 impl NodeStore {
     /// Runs `query` on a request-scoped read-only connection after every
-    /// usage fact sent before the call was written.
-    async fn read_usage<T: Send + 'static>(
+    /// write sent before the call (usage facts, commits) was applied.
+    async fn read<T: Send + 'static>(
         &self,
         query: impl FnOnce(&rusqlite::Connection) -> Result<T> + Send + 'static,
     ) -> Result<T> {
@@ -53,6 +53,15 @@ impl crate::contract::SessionStore for NodeStore {
     }
     async fn load_session(&self, workspace: &str, id: &str) -> Result<Option<Session>> {
         self.request(|reply| Request::Load(workspace.into(), id.into(), reply))
+            .await
+    }
+    async fn subagent_facts(
+        &self,
+        parent: &str,
+        live: crate::domain::subagent_query::Live,
+    ) -> Result<Option<crate::domain::subagent_query::StoredFacts>> {
+        let parent = parent.to_owned();
+        self.read(move |conn| super::node::subagents::facts(conn, &parent, &live))
             .await
     }
     async fn project_settings(&self, workspace: &str) -> Result<BTreeMap<(String, String), Value>> {
@@ -104,9 +113,7 @@ impl crate::contract::SessionStore for NodeStore {
         content: &str,
         content_type: &str,
     ) -> Result<String> {
-        let super::input_attachments::Backing::Artifacts(root) = &self.attachments else {
-            bail!("Artifact storage unavailable");
-        };
+        let super::input_attachments::Backing::Artifacts(root) = &self.attachments;
         let (uri, _) =
             super::node::artifacts::write_text(root, session, call, content, content_type).await?;
         Ok(uri)
@@ -132,12 +139,12 @@ impl crate::contract::SessionStore for NodeStore {
         until: i64,
         offset: i64,
     ) -> Result<crate::domain::usage::AppRows> {
-        self.read_usage(move |conn| super::usage_query::app(conn, "", since, until, offset))
+        self.read(move |conn| super::usage_query::app(conn, "", since, until, offset))
             .await
     }
     async fn task_usage(&self, session_id: &str) -> Result<Vec<crate::domain::usage::TaskRow>> {
         let session = session_id.to_owned();
-        self.read_usage(move |conn| super::usage_query::task(conn, "", &session))
+        self.read(move |conn| super::usage_query::task(conn, "", &session))
             .await
     }
     async fn load(&self, _workspace: &str) -> Result<(Vec<Session>, BTreeMap<String, Value>)> {

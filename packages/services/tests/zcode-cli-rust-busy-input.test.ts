@@ -96,8 +96,12 @@ test("Rust guide continues text-only steps in the same turn, bypasses future que
     }
     await h.close();
     const resumed = f.start();
+    // 界面行不落库：重启后按 Node 冷投影重建（新 epoch 的 id），内容与引导归属不变。
     const cold = (await resumed.rows(id)).rows.filter((r) => r.kind === "userInput");
-    assert.deepEqual(cold, users);
+    const shape = (r: Message) => [r.text, r.guided ?? false, r.sourceCommandId, r.clientId];
+    assert.deepEqual(cold.map(shape), users.map(shape));
+    assert(cold.slice(1, 3).every((r) => r.turnId === cold[0]!.turnId));
+    assert.notEqual(cold[3]!.turnId, cold[0]!.turnId);
     assert.equal((await resumed.command(guides[0]!)).status, "duplicate");
     assert.deepEqual([...h.schemaErrors, ...resumed.schemaErrors], []);
   } finally {
@@ -276,7 +280,7 @@ test(
   },
 );
 
-test("Rust followup mode persists, guide attachments fall back and stopped guides are held", async () => {
+test("Rust followup mode resets on restart like Node, guide attachments fall back and stopped guides are held", async () => {
   const started = Promise.withResolvers<void>();
   const gate = Promise.withResolvers<void>();
   const f = await fixture({
@@ -327,10 +331,17 @@ test("Rust followup mode persists, guide attachments fall back and stopped guide
     await h.close();
     const resumed = f.start();
     const restored = await snapshot(resumed, id);
-    assert.equal(restored.config.followupMode, "guide");
+    // Node 的 FollowupModeChanged 只是内存事件，不落库：重启后回到缺省 queue。
+    assert.equal(restored.config.followupMode, "queue");
     assert.equal(restored.queue.items.length, 0);
-    assert.equal((await resumed.command(guide)).reasonCode, "fault.input.discardedOnRestart");
-    assert.equal((await resumed.command(attachment)).reasonCode, "fault.input.discardedOnRestart");
+    assert.equal(
+      (await resumed.command(guide)).reasonCode,
+      "fault.command.inputDiscardedOnRestart",
+    );
+    assert.equal(
+      (await resumed.command(attachment)).reasonCode,
+      "fault.command.inputDiscardedOnRestart",
+    );
     assert.deepEqual([...h.schemaErrors, ...resumed.schemaErrors], []);
   } finally {
     gate.resolve();

@@ -7,19 +7,16 @@ use anyhow::{Result, ensure};
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 /// Node's inline media budget (`INLINE_MEDIA_ATTACHMENT_MAX_BYTES`, the PDF
 /// limit; Rust applies it to video as well).
 const MEDIA_MAX_BYTES: u64 = 20 * 1024 * 1024;
 
-/// Where attachment bytes live.
+/// Where attachment bytes live: Node's artifact root (`data:` URL text artifacts).
 #[derive(Clone)]
 pub(crate) enum Backing {
-    /// Node's artifact root: `data:` URL text artifacts.
     Artifacts(PathBuf),
-    /// The legacy store's content-addressed directory.
-    Blobs(PathBuf),
 }
 
 impl Backing {
@@ -35,10 +32,6 @@ impl Backing {
             Self::Artifacts(root) => {
                 super::node::artifacts::write_data_url(root, session, call, chunks, mime).await
             }
-            Self::Blobs(root) => Ok((
-                format!("zcode-artifact://{session}/{}", super::id()),
-                save_attachment(root, chunks, mime).await?,
-            )),
         }
     }
 
@@ -46,7 +39,6 @@ impl Backing {
     pub(crate) async fn attachment_of(&self, reference: &str) -> Result<Option<StoredAttachment>> {
         match self {
             Self::Artifacts(root) => super::node::artifacts::stored(root, reference).await,
-            Self::Blobs(_) => Ok(None),
         }
     }
 
@@ -167,13 +159,6 @@ impl Backing {
     }
 }
 
-impl super::storage::Store {
-    /// The legacy store's content-addressed attachment directory.
-    pub(super) fn attachments(&self) -> Backing {
-        Backing::Blobs(self.attachment_root.clone())
-    }
-}
-
 fn file_path(path: &str) -> Result<PathBuf> {
     if path.starts_with("file://") {
         url::Url::parse(path)?
@@ -202,55 +187,6 @@ async fn read_stable(path: &Path, size: u64) -> Result<Vec<u8>> {
         "Attachment changed during snapshot"
     );
     Ok(bytes)
-}
-
-/// Stores `chunks` once under `root`, named by their sha256.
-pub(super) async fn save_attachment(
-    root: &Path,
-    chunks: &[Vec<u8>],
-    mime: &str,
-) -> Result<StoredAttachment> {
-    let total: usize = chunks.iter().map(Vec::len).sum();
-    ensure!(total <= 20 * 1024 * 1024, "Attachment exceeds size limit");
-    let mut hash = Sha256::new();
-    for chunk in chunks {
-        hash.update(chunk);
-    }
-    let path = root.join(format!("{:x}", hash.finalize()));
-    tokio::fs::create_dir_all(&root).await?;
-    let temp = root.join(super::id());
-    let write = async {
-        let mut options = tokio::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        options.mode(0o600);
-        let mut file = options.open(&temp).await?;
-        for chunk in chunks {
-            file.write_all(chunk).await?;
-        }
-        file.sync_all().await?;
-        drop(file);
-        // 内容寻址且不可变，已有同一内容可复用；不会覆盖正在被历史引用的不同字节。
-        if tokio::fs::try_exists(&path).await? {
-            tokio::fs::remove_file(&temp).await?;
-        } else {
-            tokio::fs::rename(&temp, &path).await?;
-        }
-        #[cfg(unix)]
-        tokio::fs::File::open(&root).await?.sync_all().await?;
-        Ok::<_, anyhow::Error>(())
-    }
-    .await;
-    if write.is_err() {
-        let _ = tokio::fs::remove_file(&temp).await;
-    }
-    write?;
-    Ok(StoredAttachment {
-        path: path.to_string_lossy().into_owned(),
-        media_type: mime.into(),
-        total_bytes: total as u64,
-        ..Default::default()
-    })
 }
 
 /// Reads `limit` bytes at `offset` of a stored attachment that is unchanged.

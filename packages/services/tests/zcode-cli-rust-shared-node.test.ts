@@ -1,16 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { join } from "node:path";
-import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { createSqliteSessionStore } from "../../../apps/zcode-cli/packages/adapters/src/storage/session-store.js";
 import type { SessionId, ProjectId, WorkspaceId, MessageId, PartId } from "@zcode/contracts";
 import { fixture } from "./zcode-cli-rust-fixture.js";
 import { sharedHistory, sharedSnapshot, markdown, ref } from "./zcode-cli-rust-shared-fixture.js";
 
+// Node 写入的分享导入由 Rust 直接读取（spec rust-m11-node-storage §5.6、§11 场景 2）。
 export async function seedSharedImports(f: Awaited<ReturnType<typeof fixture>>) {
-  const source = join(f.root, "ts.sqlite");
-  const store = createSqliteSessionStore({ dbPath: source });
+  const store = createSqliteSessionStore({ dbPath: f.db });
   for (const status of ["pending", "reserved", "attached", "discarded", "legacy"] as const) {
     const history = sharedHistory(`context-${status}`, status === "legacy" ? "attached" : status);
     const session = {
@@ -97,18 +95,17 @@ export async function seedSharedImports(f: Awaited<ReturnType<typeof fixture>>) 
     });
   }
   store.close();
-  return { source, original: await readFile(source) };
 }
 
-test("Real TS shared import lifecycle is preserved without injecting pending, reserved or discarded candidates", async () => {
-  const f = await fixture({ legacy: true });
+test("Node shared import lifecycle is preserved without injecting pending, reserved or discarded candidates", async () => {
+  const f = await fixture();
   try {
-    const { source, original } = await seedSharedImports(f);
+    await seedSharedImports(f);
     const h = f.start();
     for (const status of ["pending", "reserved", "attached", "discarded", "legacy"]) {
       const s = await sharedSnapshot(h, status);
       assert.equal(
-        s.sharedContextImport.status,
+        s.sharedContextImport?.status,
         status === "legacy" ? undefined : status === "reserved" ? "pending" : status,
       );
       assert.deepEqual(s.rows.window, []);
@@ -130,7 +127,6 @@ test("Real TS shared import lifecycle is preserved without injecting pending, re
     assert.equal(f.requests.at(-1)!.messages.filter((m: any) => m.content === markdown).length, 1);
     assert.deepEqual(h.schemaErrors, []);
     await h.close();
-    assert.deepEqual(await readFile(source), original);
     const cold = f.start();
     assert.equal((await sharedSnapshot(cold, "pending")).sharedContextImport.status, "attached");
     await cold.close();
@@ -139,27 +135,28 @@ test("Real TS shared import lifecycle is preserved without injecting pending, re
   }
 });
 
-test("Corrupt TS shared provenance rolls back the entire import rather than silently sending its text", async () => {
-  const f = await fixture({ legacy: true });
+test("Corrupt Node shared provenance is never attached or sent", async () => {
+  const f = await fixture();
   try {
-    const { source } = await seedSharedImports(f);
-    const sourceDb = new DatabaseSync(source);
-    sourceDb
-      .prepare(
-        "UPDATE session_entry SET data=json_set(data,'$.markdownSha256',?) WHERE id='shared:pending'",
-      )
-      .run("c".repeat(64));
-    sourceDb.close();
-    const original = await readFile(source);
-    const h = f.start();
-    await h.wait((m) => m.method === "startup/storageState" && m.params.phase === "failed");
-    await h.close(1);
-    assert.match(h.stderr, /Shared context digest mismatch/);
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"), { readOnly: true });
-    assert.equal(db.prepare("SELECT count(*) AS n FROM rust_session").get()!.n, 0);
+    await seedSharedImports(f);
+    const db = new DatabaseSync(f.db);
+    db.prepare(
+      "UPDATE session_entry SET data=json_set(data,'$.markdownSha256',?) WHERE id='shared:pending'",
+    ).run("c".repeat(64));
     db.close();
-    assert.deepEqual(await readFile(source), original);
-    assert.equal(f.requests.length, 0);
+    const h = f.start();
+    await sharedSnapshot(h, "pending").catch(() => undefined);
+    const attach = h.envelope("sendText", "pending", {
+      text: "attach corrupt candidate",
+      context_refs: ref("context-pending"),
+    });
+    const outcome = await h.command(attach).then(
+      (ack) => ack.status,
+      () => "error",
+    );
+    assert(["rejected", "error", "failed"].includes(outcome), outcome);
+    assert(!JSON.stringify(f.requests).includes("SHARED_CONTEXT_SECRET"));
+    await h.close();
   } finally {
     await f.close();
   }

@@ -70,7 +70,7 @@ for (const apiType of ["openai-chat-completions", "anthropic-messages"]) {
   });
 }
 
-test("Rust transports media above the text request budget and reports a missing cold snapshot without an HTTP request", async () => {
+test("Rust transports media above the text request budget and degrades a missing artifact to its placeholder after restart", async () => {
   const f = await fixture({ config: { formatProperties: properties } });
   try {
     const h = f.start();
@@ -90,23 +90,15 @@ test("Rust transports media above the text request budget and reports a missing 
     await h.completed(id);
     assert(f.requestBodies[0]!.length > 2 * 1024 * 1024);
     await h.close();
-    const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"), { readOnly: true });
-    const session = JSON.parse(
-      db.prepare("SELECT body FROM rust_session WHERE id=?").get(id)!.body as string,
-    );
-    db.close();
-    for (const asset of Object.values(session.attachments) as { path: string }[])
-      await rm(asset.path);
+    // 快照只在 Node 产物里；产物丢失后与 Node hydrator 一样退化为占位文本，仍然发请求。
+    await rm(f.artifacts, { recursive: true });
     const restarted = f.start();
     await restarted.subscribe(`conversation/${id}`);
     await restarted.command(restarted.envelope("sendText", id, { text: "continue" }));
-    const failed = await restarted.wait((m) =>
-      m.params?.frame?.payload?.deltas?.some(
-        (d: any) => d.patch?.control?.lastError?.code === "attachment_unavailable",
-      ),
-    );
-    assert(failed);
-    assert.equal(f.requests.length, 1);
+    await restarted.completed(id);
+    assert.equal(f.requests.length, 2);
+    assert(f.requestBodies[1]!.length < 1024 * 1024);
+    assert.match(f.requestBodies[1]!, /\[Attached application\/pdf: large\.pdf\]/);
     assert.deepEqual(restarted.schemaErrors, []);
   } finally {
     await f.close();
@@ -181,15 +173,16 @@ for (const apiType of ["openai-chat-completions", "openai-responses", "anthropic
       );
       assert(!f.requestBodies[0]!.includes(f.dataDir));
       assert(!f.requestBodies[0]!.includes("_zcode_attachment"));
-      const db = new DatabaseSync(join(f.dataDir, "rust-sessions.sqlite"), { readOnly: true });
+      // 与 Node 相同：字节只在 data URL 产物里，user 消息的 file part 引用 zcode-artifact URI。
+      const db = new DatabaseSync(f.db, { readOnly: true });
       const stored = db
-        .prepare("SELECT body FROM rust_message WHERE session=?")
+        .prepare("SELECT data FROM part WHERE session_id=?")
         .all(id)
-        .map((r) => r.body)
+        .map((r) => r.data)
         .join("");
       db.close();
       assert(!stored.includes(png.toString("base64")));
-      assert(stored.includes("_zcode_attachment"));
+      assert(stored.includes("zcode-artifact://"));
       assert.deepEqual(h.schemaErrors, []);
     } finally {
       await f.close();
@@ -197,7 +190,7 @@ for (const apiType of ["openai-chat-completions", "openai-responses", "anthropic
   });
 }
 
-test("Rust rejects unsupported media and invalid PDF before committing a user turn or requesting a model", async () => {
+test("Rust rejects unsupported media before committing a user turn and degrades an invalid local PDF to a placeholder like Node", async () => {
   for (const supportsPdf of [false, true]) {
     const f = await fixture({
       config: {
@@ -212,17 +205,28 @@ test("Rust rejects unsupported media and invalid PDF before committing a user tu
       const id = await h.create();
       const path = join(f.cwd, "bad.pdf");
       await writeFile(path, "not a PDF");
-      await assert.rejects(
-        h.command(
-          h.envelope("sendText", id, {
-            text: "read",
-            attachments: [{ ref: path, fileName: "bad.pdf", mime: "application/pdf", bytes: 9 }],
-          }),
-        ),
-        supportsPdf ? /PDF is invalid/ : /unsupported by selected model/,
+      const send = h.command(
+        h.envelope("sendText", id, {
+          text: "read",
+          attachments: [{ ref: path, fileName: "bad.pdf", mime: "application/pdf", bytes: 9 }],
+        }),
       );
-      assert.equal((await h.rows(id)).rows.length, 0);
-      assert.equal(f.requests.length, 0);
+      if (!supportsPdf) {
+        await assert.rejects(send, /unsupported by selected model/);
+        assert.equal((await h.rows(id)).rows.length, 0);
+        assert.equal(f.requests.length, 0);
+        continue;
+      }
+      // Node `attachment-media-resolver`：文件头不是 %PDF- 的本地 PDF 退化为占位
+      // （attachment_pdf_invalid），输入照常接受，模型只看到占位文本。
+      await h.subscribe(`conversation/${id}`);
+      assert.equal((await send).status, "accepted");
+      await h.completed(id);
+      const user = f.requests[0]!.messages.at(-1);
+      assert.deepEqual(user.content, [
+        { type: "text", text: "read" },
+        { type: "text", text: `[Attached application/pdf: ${path}]` },
+      ]);
     } finally {
       await f.close();
     }

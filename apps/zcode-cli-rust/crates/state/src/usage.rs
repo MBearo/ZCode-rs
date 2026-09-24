@@ -10,62 +10,6 @@ const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(super) const TABLES: [&str; 3] = ["model_usage", "turn_usage", "tool_usage"];
 
-pub(super) fn prepare(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS rust_model_usage(
-          id TEXT PRIMARY KEY, logical_request_id TEXT NOT NULL, attempt_index INTEGER NOT NULL DEFAULT 0,
-          session_id TEXT NOT NULL, turn_id TEXT, trace_id TEXT, span_id TEXT, assistant_message_id TEXT,
-          parent_user_message_id TEXT, query_source TEXT NOT NULL, provider_id TEXT NOT NULL,
-          model_id TEXT NOT NULL, variant TEXT, agent TEXT, mode TEXT, task_type TEXT,
-          status TEXT NOT NULL CHECK(status IN ('running','completed','error','cancelled')),
-          started_at INTEGER NOT NULL, first_token_at INTEGER, completed_at INTEGER, duration_ms INTEGER,
-          time_to_first_token_ms INTEGER, finish_reason TEXT, tool_call_count INTEGER NOT NULL DEFAULT 0,
-          input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
-          reasoning_tokens INTEGER NOT NULL DEFAULT 0, cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
-          cache_read_input_tokens INTEGER NOT NULL DEFAULT 0, provider_total_tokens INTEGER,
-          computed_total_tokens INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0,
-          retryable INTEGER NOT NULL DEFAULT 0 CHECK(retryable IN (0,1)),
-          cancelled_by_user INTEGER NOT NULL DEFAULT 0 CHECK(cancelled_by_user IN (0,1)),
-          context_exceeded INTEGER NOT NULL DEFAULT 0 CHECK(context_exceeded IN (0,1)),
-          error_type TEXT, error_code TEXT, error_message TEXT, raw_usage_json TEXT, provider_metadata_json TEXT);
-        CREATE INDEX IF NOT EXISTS rust_model_usage_started_model_idx ON rust_model_usage(started_at,provider_id,model_id);
-        CREATE INDEX IF NOT EXISTS rust_model_usage_session_turn_idx ON rust_model_usage(session_id,turn_id);
-        CREATE INDEX IF NOT EXISTS rust_model_usage_trace_idx ON rust_model_usage(trace_id);
-        CREATE INDEX IF NOT EXISTS rust_model_usage_query_source_idx ON rust_model_usage(query_source);
-        CREATE TABLE IF NOT EXISTS rust_turn_usage(
-          session_id TEXT NOT NULL, turn_id TEXT NOT NULL, trace_id TEXT, user_message_id TEXT,
-          status TEXT NOT NULL CHECK(status IN ('running','completed','error','cancelled')),
-          started_at INTEGER NOT NULL, first_model_start_at INTEGER, first_token_at INTEGER,
-          completed_at INTEGER, duration_ms INTEGER, time_to_first_token_ms INTEGER,
-          model_request_count INTEGER NOT NULL DEFAULT 0, model_retry_count INTEGER NOT NULL DEFAULT 0,
-          tool_call_count INTEGER NOT NULL DEFAULT 0, tool_error_count INTEGER NOT NULL DEFAULT 0,
-          input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
-          reasoning_tokens INTEGER NOT NULL DEFAULT 0, cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
-          cache_read_input_tokens INTEGER NOT NULL DEFAULT 0, computed_total_tokens INTEGER NOT NULL DEFAULT 0,
-          retryable INTEGER NOT NULL DEFAULT 0 CHECK(retryable IN (0,1)),
-          cancelled_by_user INTEGER NOT NULL DEFAULT 0 CHECK(cancelled_by_user IN (0,1)),
-          context_exceeded INTEGER NOT NULL DEFAULT 0 CHECK(context_exceeded IN (0,1)),
-          error_type TEXT, error_code TEXT, PRIMARY KEY(session_id,turn_id));
-        CREATE INDEX IF NOT EXISTS rust_turn_usage_started_idx ON rust_turn_usage(started_at);
-        CREATE TABLE IF NOT EXISTS rust_tool_usage(
-          id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT, trace_id TEXT,
-          tool_call_id TEXT NOT NULL, tool_name TEXT NOT NULL, side_effect_scope TEXT,
-          read_only INTEGER CHECK(read_only IN (0,1)), destructive INTEGER CHECK(destructive IN (0,1)),
-          approval_status TEXT, status TEXT NOT NULL CHECK(status IN ('running','completed','error','cancelled')),
-          started_at INTEGER NOT NULL, first_output_at INTEGER, completed_at INTEGER, duration_ms INTEGER,
-          time_to_first_output_ms INTEGER, exit_code INTEGER, output_bytes INTEGER NOT NULL DEFAULT 0,
-          stdout_bytes INTEGER NOT NULL DEFAULT 0, stderr_bytes INTEGER NOT NULL DEFAULT 0,
-          truncated INTEGER NOT NULL DEFAULT 0 CHECK(truncated IN (0,1)), retry_count INTEGER NOT NULL DEFAULT 0,
-          retryable INTEGER NOT NULL DEFAULT 0 CHECK(retryable IN (0,1)),
-          cancelled_by_user INTEGER NOT NULL DEFAULT 0 CHECK(cancelled_by_user IN (0,1)),
-          error_type TEXT, error_code TEXT, error_message TEXT);
-        CREATE UNIQUE INDEX IF NOT EXISTS rust_tool_usage_session_tool_call_idx ON rust_tool_usage(session_id,tool_call_id);
-        CREATE INDEX IF NOT EXISTS rust_tool_usage_started_tool_idx ON rust_tool_usage(started_at,tool_name);
-        CREATE INDEX IF NOT EXISTS rust_tool_usage_session_turn_idx ON rust_tool_usage(session_id,turn_id);",
-    )?;
-    Ok(())
-}
-
 fn model(conn: &Connection, prefix: &str, f: &ModelFact) -> Result<()> {
     let raw = f
         .raw_usage

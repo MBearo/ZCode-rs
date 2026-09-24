@@ -32,6 +32,12 @@ pub struct Resume {
     pub latest_assistant: Option<String>,
     pub latest_assistant_turn: Option<String>,
     pub last_assistant_completed: Option<Value>,
+    /// Node `derivePersistedSessionMode`: the mode of the last stored assistant
+    /// message (all branches); legacy `session/resume` restores it.
+    pub last_assistant_mode: Option<String>,
+    /// Node `extractPersistedEnvInfo`: the first user message's
+    /// `contextSnapshot.envInfo`.
+    pub env_info: Option<Value>,
     pub history: History,
     pub conversation: Cold,
     /// Node `contextUsageFromPersistedMessages` (`used`) of the active branch.
@@ -204,6 +210,21 @@ pub fn resume(
     });
     let branch = Branch::from_revert(session.revert.as_ref());
     let all = cold::records(conn, id)?;
+    let last_assistant_mode = all
+        .iter()
+        .rev()
+        .filter(|m| m.info["role"] == "assistant")
+        .find_map(|m| {
+            m.info["mode"]
+                .as_str()
+                .filter(|mode| matches!(*mode, "plan" | "build" | "edit" | "yolo" | "auto"))
+        })
+        .map(str::to_owned);
+    let env_info = all
+        .iter()
+        .filter(|m| m.info["role"] == "user")
+        .find_map(|m| m.info["contextSnapshot"]["envInfo"].as_object())
+        .map(|env| Value::Object(env.clone()));
     let active = node_history::active_messages(&all, &branch, true);
     let turn_number = active
         .iter()
@@ -248,6 +269,8 @@ pub fn resume(
             .and_then(|m| m.info["anchor"]["turnId"].as_str())
             .map(str::to_owned),
         last_assistant_completed: assistant.and_then(|m| m.info["time"].get("completed").cloned()),
+        last_assistant_mode,
+        env_info,
         history,
         checkpoints: super::checkpoints::read(conn, id, artifacts)?,
         shared: super::shared::read(conn, id)?,

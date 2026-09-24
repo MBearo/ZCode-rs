@@ -258,10 +258,9 @@ test("Account auth is bidirectional, cancelled by stop, ignores late replies and
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(f.requests.length, 1);
     await h.close();
+    // 临时凭据不能进入共享的 Node 会话库（主文件与 WAL）。
     for (const suffix of ["", "-wal"]) {
-      const bytes = await readFile(join(f.dataDir, `rust-sessions.sqlite${suffix}`)).catch(() =>
-        Buffer.alloc(0),
-      );
+      const bytes = await readFile(`${f.db}${suffix}`).catch(() => Buffer.alloc(0));
       assert.equal(bytes.includes(Buffer.from("transient-secret")), false);
       assert.equal(bytes.includes(Buffer.from("late-secret")), false);
     }

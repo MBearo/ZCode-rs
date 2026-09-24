@@ -153,10 +153,11 @@ test("Rust usage queries reject invalid params like Node parseParams", async () 
   }
 });
 
-test("Rust imports the TS usage rows of the workspace's sessions", async () => {
-  const f = await fixture({ legacy: true });
+// 用量表与 Node 共用：Node `queryAppUsage` 不按工作区过滤，按会话的查询只看该会话。
+test("Rust answers usage queries over the usage rows Node wrote", async () => {
+  const f = await fixture();
   try {
-    const store = createSqliteSessionStore({ dbPath: join(f.root, "ts.sqlite") });
+    const store = createSqliteSessionStore({ dbPath: f.db });
     const now = Date.now();
     for (const [id, directory] of [
       ["mine", f.cwd],
@@ -204,13 +205,13 @@ test("Rust imports the TS usage rows of the workspace's sessions", async () => {
     const all = await stats(h, { range: "all" });
     assert.deepEqual(
       [all.summary.totalTokens, all.summary.totalTurns, all.summary.toolCallCount],
-      [107, 1, 1],
+      [214, 2, 2],
     );
     assert.deepEqual(all.tools, [
-      { toolName: "Grep", callCount: 1, errorCount: 1, errorRate: 1, avgDurationMs: null },
+      { toolName: "Grep", callCount: 2, errorCount: 2, errorRate: 1, avgDurationMs: null },
     ]);
     assert.equal((await conversation(h, "v4/conversation/usage", "mine")).totalTokens, 107);
-    assert.equal((await conversation(h, "v4/conversation/usage", "other")).totalTokens, 0);
+    assert.equal((await conversation(h, "v4/conversation/usage", "other")).totalTokens, 107);
   } finally {
     await f.close();
   }

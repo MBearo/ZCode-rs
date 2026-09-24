@@ -16,9 +16,25 @@ fn tool(status: &'static str, started_at: u64, duration: Option<u64>) -> Fact {
 
 #[test]
 fn upserts_merge_like_node_and_pruning_drops_old_rows() {
-    let conn = Connection::open_in_memory().unwrap();
-    prepare(&conn).unwrap();
-    let mut writer = Writer::default();
+    // Node 迁移后的库（`0010_usage_observability`）。
+    let dir = tempfile::tempdir().unwrap();
+    let conn = crate::node::open::open(
+        &dir.path().join("db.sqlite"),
+        crate::node::open::BUSY_TIMEOUT,
+        &mut |_| {},
+    )
+    .unwrap();
+    let session = crate::node::sessions::Create {
+        id: "s".into(),
+        project_id: "proj_w".into(),
+        slug: "s".into(),
+        directory: "/w".into(),
+        title: "t".into(),
+        version: "0".into(),
+        ..Default::default()
+    };
+    crate::node::sessions::create(&conn, &session, 1).unwrap();
+    let mut writer = Writer::new("");
     let now = 40 * 86_400_000;
     writer
         .record(&conn, &tool("running", now - 10, None), now)
@@ -32,7 +48,7 @@ fn upserts_merge_like_node_and_pruning_drops_old_rows() {
         .unwrap();
     let row: (String, i64, Option<i64>) = conn
         .query_row(
-            "SELECT status,started_at,duration_ms FROM rust_tool_usage",
+            "SELECT status,started_at,duration_ms FROM tool_usage",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -58,7 +74,7 @@ fn upserts_merge_like_node_and_pruning_drops_old_rows() {
         .unwrap();
     let merged: (String, i64, i64) = conn
         .query_row(
-            "SELECT status,started_at,input_tokens FROM rust_turn_usage",
+            "SELECT status,started_at,input_tokens FROM turn_usage",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -69,9 +85,9 @@ fn upserts_merge_like_node_and_pruning_drops_old_rows() {
     };
     old.tool_call_id = "old".into();
     writer.record(&conn, &Fact::Tool(old), now).unwrap();
-    prune(&conn, "rust_", now - RETENTION_MS).unwrap();
+    prune(&conn, "", now - RETENTION_MS).unwrap();
     let left: i64 = conn
-        .query_row("SELECT count(*) FROM rust_tool_usage", [], |r| r.get(0))
+        .query_row("SELECT count(*) FROM tool_usage", [], |r| r.get(0))
         .unwrap();
     assert_eq!(left, 1, "the old row is gone, the recent one stays");
 }

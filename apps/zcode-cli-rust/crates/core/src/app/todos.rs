@@ -75,7 +75,7 @@ impl Engine {
         let body = todo::reminder(&s.todos);
         let message = json!({"role":"user","content":format!("<system-reminder>\n{body}\n</system-reminder>"),"_zcode_source":"todo_reminder"});
         s.append_message(message.clone());
-        self.node_todo_reminder(id, &body);
+        self.node_model_notice(id, "todo_reminder", &body);
         self.persist(id, None).await?;
         let _ = reply.send(message);
         Ok(())
