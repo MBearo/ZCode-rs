@@ -227,7 +227,7 @@ fn user_texts(conn: &rusqlite::Connection, session: &str) -> Vec<Value> {
         .history
         .messages
         .iter()
-        .filter(|m| m["role"] == "user")
+        .filter(|m| m["role"] == "user" && m.get("_zcode_source").is_none())
         .map(|m| m["content"].clone())
         .collect()
 }
@@ -316,4 +316,61 @@ async fn edit_and_retry_cut_the_node_branch_before_and_after_a_restart() {
         .count();
     assert_eq!(headers, 1, "only the active branch is projected");
     harness::dump(&next, &conn, &session);
+}
+
+#[tokio::test]
+async fn fork_copies_the_stable_segment_into_a_node_child_session() {
+    let mut h = harness::start(Some("fork"), None).await;
+    let session = h.create("c1", "Fix it").await;
+    h.settled(&session, 1).await;
+    let (rows, revision, epoch) = h.rows(2, &session).await;
+    let fork = json!({"commandId": "f1", "clientId": "cli", "sessionId": session,
+        "type": "forkAssistant", "issuedAt": 1, "baseRevision": revision, "baseLogEpoch": epoch,
+        "payload": {"target": target(&rows, "assistantText")}});
+    let ack = h.command(3, fork).await;
+    let child = ack["result"]["sessionId"]
+        .as_str()
+        .expect("child session")
+        .to_owned();
+    assert!(child.starts_with("sess_") && child != session, "{ack}");
+
+    let conn = rusqlite::Connection::open(&h.db).unwrap();
+    let row = sessions::get(&conn, &child).unwrap().unwrap();
+    assert_eq!(row.task_type, "fork");
+    assert_eq!(row.parent_id.as_deref(), Some(session.as_str()));
+    assert_eq!(row.title, "Fork of Fix it");
+    // 父会话记录 child 命令事实：重复的 forkAssistant 从耐久事实得到同一个子会话。
+    let fact = acks::lookup(&conn, (&session, false), "f1", 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(fact["result"]["sessionId"], child.as_str());
+    let resumed = resume::resume(&conn, &child, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    let history = &resumed.history.messages;
+    assert_eq!(history[0]["content"], "Fix it");
+    assert_eq!(
+        history.last().unwrap()["_zcode_source"],
+        "conversation_fork"
+    );
+    assert!(
+        resumed
+            .conversation
+            .rows
+            .iter()
+            .any(|r| r["kind"] == "timelineMarker" || r["kind"] == "sessionFork"),
+        "{:#?}",
+        resumed.conversation.rows
+    );
+
+    // 子会话按冷加载注册，可以继续对话。
+    let ack = h.send_text(4, &child, "c2", "Continue here").await;
+    assert_eq!(ack["status"], "accepted", "{ack}");
+    // 复制的边界、fork 提示的两条消息与新一轮各带一个稳定分段锚点。
+    let conn = h.settled(&child, 4).await;
+    assert_eq!(
+        user_texts(&conn, &child),
+        [json!("Fix it"), json!("Continue here")]
+    );
+    harness::dump(&h, &conn, &child);
 }

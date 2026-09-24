@@ -34,6 +34,7 @@ impl Engine {
                 .find(|b| b.row == index && s.rows[index]["state"] == "complete")
                 .cloned();
             return match boundary {
+                Some(b) if self.journaled(id) => self.node_fork(c, b).await,
                 Some(b) => self.fork_history(c, b).await,
                 None => Ok(c.ack("rejected", s.revision, Some("guard.forkTargetNotStable"))),
             };

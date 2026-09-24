@@ -116,6 +116,10 @@ pub enum Op {
         target: String,
         anchor: String,
     },
+    /// Node stable conversation fork, committed with the child session:
+    /// `{parent, boundary, command, revision, selection, execution}` (the
+    /// parent runtime's selection and execution state Node reads live).
+    Fork(Value),
     /// Node `updateTodos`: `[{content, status, priority}]`.
     Todos(Vec<Value>),
     /// Node `persistStableForkCompletionBoundary` (reads the stored transcript).

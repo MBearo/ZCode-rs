@@ -47,7 +47,7 @@ fn update(v: &Value) -> Update {
     }
 }
 
-fn entry(v: &Value) -> Entry {
+pub(super) fn entry(v: &Value) -> Entry {
     Entry {
         id: text(v, "id").unwrap_or_default(),
         session_id: text(v, "sessionID").unwrap_or_default(),
@@ -112,6 +112,7 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
                 inputs::settle(conn, id, session, status, reason.as_deref(), now)?
             }
             Op::Rewind { target, anchor } => rewind(conn, session, (target, anchor), now)?,
+            Op::Fork(request) => super::fork::fork(conn, session, request, now)?,
             Op::Todos(list) => todos::update(
                 conn,
                 session,

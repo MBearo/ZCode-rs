@@ -15,10 +15,15 @@ impl Engine {
         self.store.node_journal()
     }
 
-    /// The session's facts are written as Node records. 子代理与 fork 子会话的
-    /// Node 记录属于 M11.4，过渡期不写，避免产生缺少会话行的消息。
+    /// The session's facts are written as Node records: a root session, or a
+    /// child already stored (a fork). 子代理子会话尚未按 Node 规则落库，过渡期不写，
+    /// 避免产生缺少会话行的消息。
     pub(super) fn journaled(&self, id: &str) -> bool {
-        self.journaling() && self.sessions.get(id).is_some_and(|s| s.parent_id.is_none())
+        self.journaling()
+            && self
+                .sessions
+                .get(id)
+                .is_some_and(|s| s.parent_id.is_none() || s.node.created)
     }
 
     /// Runs `f` on the session's journal when the store keeps Node records.

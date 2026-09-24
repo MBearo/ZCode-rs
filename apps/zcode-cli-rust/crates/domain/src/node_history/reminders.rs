@@ -31,11 +31,18 @@ pub fn restorable(source: &str) -> bool {
 static NESTED_TAG: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?i)</?system-reminder\b").expect("valid pattern"));
 
+/// Node `sanitizeSystemReminderBody`: nested reminder tags are neutralised.
+pub fn sanitize(body: &str) -> String {
+    NESTED_TAG
+        .replace_all(body, |caps: &regex::Captures| {
+            format!("&lt;{}", &caps[0][1..])
+        })
+        .into_owned()
+}
+
 /// Node `wrapSystemReminderForSource`: nested tags are neutralised.
 pub fn wrap(source: &str, body: &str) -> String {
-    let escaped = NESTED_TAG.replace_all(body, |caps: &regex::Captures| {
-        format!("&lt;{}", &caps[0][1..])
-    });
+    let escaped = sanitize(body);
     let wrapped = format!("<system-reminder>\n{escaped}\n</system-reminder>");
     if descriptor(source).is_some_and(|d| d["trailingNewline"] == true) {
         format!("{wrapped}\n")
