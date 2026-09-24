@@ -29,9 +29,23 @@ pub(super) async fn prepare(
         mode: blobs::mode(path).await?,
         row: 0,
         restored: false,
+        node: None,
     };
     let (committed, receipt) = tokio::sync::oneshot::channel();
     sink.send(Event::FilePrepared { change, committed }).await?;
     tokio::select! {_=cancel.cancelled()=>anyhow::bail!("Cancelled"),r=receipt=>r.context("Checkpoint commit failed")?};
     Ok(())
+}
+
+/// A resumed session's checkpoint contents kept as blobs (their keys).
+pub(super) async fn import(
+    root: &Path,
+    before: Option<&[u8]>,
+    after: &[u8],
+) -> Result<(Option<String>, String)> {
+    let before = match before {
+        Some(bytes) => Some(blobs::save(root, bytes).await?),
+        None => None,
+    };
+    Ok((before, blobs::save(root, after).await?))
 }

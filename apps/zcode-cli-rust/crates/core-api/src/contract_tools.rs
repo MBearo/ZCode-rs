@@ -13,6 +13,15 @@ pub trait ToolPort: Send + Sync {
     ) -> Result<Value> {
         anyhow::bail!("File changes unavailable")
     }
+    /// Keeps a resumed checkpoint's contents for rewinds and summaries;
+    /// returns the keys of the before and after contents.
+    async fn import_checkpoint(
+        &self,
+        _before: Option<&[u8]>,
+        _after: &[u8],
+    ) -> Result<(Option<String>, String)> {
+        anyhow::bail!("File checkpoints unavailable")
+    }
     async fn pending_rewinds(&self) -> Result<Vec<String>> {
         Ok(vec![])
     }

@@ -224,7 +224,10 @@ fn goal_clock_budget_and_restart_preserve_confirmed_work_only() {
     );
     session.goal = Some(goal);
     session.recover("new".into(), 100000);
-    let goal = session.goal.unwrap();
+    // Node 惰性结算：恢复会话不改目标，下一次使用目标时按最后心跳结算。
+    let mut goal = session.goal.unwrap();
+    assert!(goal.running());
+    goal.recover(100000);
     // 重启只结算到最后心跳：未结束的轮次不计 token。
     assert_eq!(goal.status, "paused");
     assert_eq!(goal.target_status, "paused");

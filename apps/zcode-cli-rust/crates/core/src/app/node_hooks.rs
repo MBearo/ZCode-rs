@@ -271,7 +271,8 @@ impl Engine {
         self.observe_usage(id, event).await;
         self.goal_turn_end(id, event);
         let media = self.node_tool_media(id, event).await?;
-        let flush = self.node_event(id, event, media.as_ref());
+        let checkpoint = self.node_checkpoint_artifact(id, event).await?;
+        let flush = self.node_event(id, event, (media.as_ref(), checkpoint.as_deref()));
         self.observe_step(id, event)?;
         if flush {
             self.persist(id, None).await?;
@@ -283,7 +284,7 @@ impl Engine {
         &mut self,
         id: &str,
         event: &Event,
-        media: Option<&nj::tool_media::ToolMedia>,
+        (media, checkpoint): (Option<&nj::tool_media::ToolMedia>, Option<&str>),
     ) -> bool {
         if !self.journaled(id) {
             return false;
@@ -330,6 +331,10 @@ impl Engine {
                     Some(content) => nj::tool_media::output_text(content),
                     None => result.clone(),
                 };
+                if let Some(uri) = checkpoint {
+                    let trace = s.trace_id.clone().unwrap_or_else(&mut ids);
+                    s.node_tool_checkpoint(now, (ids(), trace, ids()), uri, call);
+                }
                 let result = (&content.into(), display.as_ref(), *failed);
                 s.node_tool_done(now, call, result, media, &mut ids);
             }

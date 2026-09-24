@@ -147,6 +147,7 @@ impl Engine {
         );
         session.validate_history()?;
         session.recover(self.clock.id(), self.clock.now());
+        super::file_changes::import(&mut session, self.tools.as_ref()).await;
         super::file_changes::hydrate(&mut session, self.tools.as_ref(), None).await?;
         self.store
             .commit_receipt(&self.workspace, Some(&mut session), None)

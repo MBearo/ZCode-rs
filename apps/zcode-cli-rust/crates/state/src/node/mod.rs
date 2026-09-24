@@ -3,6 +3,7 @@
 pub mod acks;
 pub mod apply;
 pub mod artifacts;
+pub mod checkpoints;
 pub mod codecs;
 pub mod cold;
 pub mod compact;

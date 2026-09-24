@@ -341,6 +341,15 @@ sequenceDiagram
   end
 ```
 
+### 5.5 工作区 checkpoint 与文件撤销
+
+与 Node `emitFileMutationCheckpoint`、`persistWorkspaceCheckpointEntry`、`persistWorkspaceFileRewindEntry`、`restoreWorkspaceCheckpointEntries` 一致：
+
+- 写入：成功的文件修改工具结果（结构化输出带 `filePath`、`structuredPatch`、`originalFile`，即 Node `getFileMutationCheckpointCandidate`）在工具 part 记录时写 checkpoint 产物（`<callId>-tool-result-<uuid>.json`，`application/vnd.zcode.workspace-checkpoint+json`，内容为 `JSON.stringify(_, null, 2)` 的 `{createdAt, files:[{afterContent?, afterContentLength?, beforeContent, existedBefore, path, structuredPatch}], kind: workspace_file_before_change, toolCallId, toolName, version: 1}`）与 `runtime/workspace_checkpoint` entry（`id = workspace-checkpoint:<eventId>`，`payload{checkpointId: checkpoint_<uuid>, messageId, targetMessageId（本轮 user 消息）, toolMessageId（本步 assistant）, scope: workspace, snapshotRef, diffRef, fileCount: 1}`）。产物写失败只记警告（Node 相同）。
+- 撤销：文件摘要撤销（`applyFileRewind`）写 `runtime/workspace_file_rewind`（`payload{rewindId, scope: workspace, strategy: active_chain, targetMessageId（第一个被撤销 checkpoint 的消息）, targetCheckpointId 与 restoredSnapshotRef（最后一个）, reason: file_summary_rewind}`）。
+- 冷读取：按 entry 顺序读回 checkpoint 产物（缺 `afterContent` 时由 `beforeContent` 套用 `structuredPatch` 得到修改后内容），按撤销 entry 标记“目标消息的第一个 checkpoint 到目标 checkpoint”为已撤销；引擎按工具调用 id 挂到对应的工具行，内容交给工具层保存，文件变更摘要与撤销预览照常可用。
+- 差异：Rust 的撤销以内容哈希判断文件是否被外部修改，冷读取的内容来自产物的逻辑文本，CRLF 或带 BOM 的文件在重启后撤销会被判为外部修改。
+
 ## 6. 冷加载
 
 ```mermaid
@@ -435,7 +444,7 @@ createSession 的全局查找按 `queue_<commandId>` 读取输入行（Node `loo
 | M11.2b | 冷读取界面行：Node `synthesizeEventsFromMessages` 与 `ProductProjection` 冷路径用到的事件处理                                                                                                                  | 同一夹具记录 Node 回放流水线（`replay.ts`）产出的合成事件、行与快照状态（除 `seq`/`revision` 等发布计数），Rust 逐项比对                                                                                                                     |
 | M11.2c | 冷读取会话事实与列表（§6.1、§6.2）：会话行、模型选择、执行状态、全权限标记、todo、goal、轮次号与最新消息锚点；sessions-index 冷种子与 `session/list`                                                           | `scripts/zcode-cli-rust-node-session-fixtures.mjs` 用 Node `SqliteSessionStore` 建多工作区、多类型会话，记录 Node 的列表与恢复读取结果；Rust 逐项相等。运行时接入（按需冷加载替换整库加载、编辑边界）随 M11.5 切换完成                       |
 | M11.3  | 写入核心对话：会话创建、输入账本、user 消息、assistant 步骤、工具、取消、标题、模型与执行状态、todo、用量、设置、命令幂等                                                                                      | Node 读取 Rust 写入的会话：Node 仓储解码、Node 冷投影与 history hydrator 无错误且内容一致                                                                                                                                                    |
-| M11.4  | 写入扩展：压缩、回退/编辑/重试（`session.revert`）、fork 与侧聊、goal、子代理、checkpoint 与文件回退、共享上下文、全权限授权、提问自动结算、后台通知、附件与产物                                               | 各功能的 Node 读取验证                                                                                                                                                                                                                       |
+| M11.4  | 写入扩展：压缩、回退/编辑/重试（`session.revert`）、fork 与侧聊、goal、子代理、共享上下文、全权限授权、提问自动结算、后台通知、附件与产物                                                                      | 各功能的 Node 读取验证                                                                                                                                                                                                                       |
 | M11.5  | 切换与清理：Node 库成为唯一存储；删除 `rust_*` 表、导入流程、备份、`--import-ts-db` 与 data dir 中的库；集成测试改用 Node 库                                                                                   | 交叉运行：Node 建会话 → Rust 恢复并继续 → Node 恢复并继续，反向同样；全量集成测试                                                                                                                                                            |
 
 M11.3 至 M11.4 期间两种存储二选一（§5.1 的开关），不双写；默认仍为原存储，M11.5 删除原存储。
@@ -446,7 +455,7 @@ M11.3 已完成的范围与验证：
 - 集成测试 `apps/zcode-cli-rust/tests/node_storage.rs`：引擎跑带工具的轮次、忙时排队与提升、重启后由新 runtime 续聊；按 §6 冷读取，模型上下文与运行时请求一致，行与账本正确。
 - 交叉读取 `node --import tsx scripts/zcode-cli-rust-node-storage-check.mjs`：Node 的 `SqliteSessionStore`、history hydrator 与冷投影读取 Rust 写出的库，history、行与快照状态与 Rust 冷读取逐项相等。
 
-M11.4 的写入：引导输入与队列编辑/删除/重排/回退（M11.4a，已完成：集成测试覆盖运行中引导与删除排队项）；`sendQueuedNow` 与 `deleteSession` 与 Node 一样不改账本（提升时写入，关闭时保留 `admitted`，冷查询结算为 `discarded/session_resumed`）；编辑与重试的分支切点、重跑输入与冷加载边界（M11.4b，已完成：集成测试覆盖编辑、重试与重启后编辑，Node 交叉读取一致）；稳定分叉（M11.4c，已完成：分叉后子会话继续对话，Node 交叉读取一致）；压缩与 todo 提醒（M11.4d，已完成：手动压缩后继续对话，Node 交叉读取一致；自动压缩保留段与中断恢复有单元测试。`autoCompactThreshold`/`willRetriggerNextTurn` 暂不写，Node 读取时视为缺省）；模型切换时间线（M11.4e，已完成）；子代理子会话（M11.4f，已完成：父子会话均被 Node 交叉读取一致）；后台子代理完成通知与运行中子会话插话（M11.4g，已完成：Node 交叉读取一致。Rust 的后台 bash 状态以本地 `<task-notification>` 随下次输入进入上下文，Node 没有对应记录，不落库，重启后与 Node 一样不再出现）；提示附件（M11.4h，已完成：上传图片与文本附件、重启后继续对话，Node 交叉读取一致，§5.3）；工具结果媒体（M11.4i，已完成：Read 图片的结果重启后仍以图片发送，Node 交叉读取一致）；完全访问授权（M11.4j，已完成：回执通过 Node schema 校验，重启后恢复授权标记）；提问自动结束阶段（M11.4k，已完成）；会话 shell 快照（M11.4l，已完成：Node 能恢复快照，分叉子会话与 Node 一样不写）；目标（M11.4m，已完成：两轮续跑与验证、暂停后恢复，Node 交叉读取的行、模型上下文与目标状态一致，§5.4）；选区侧聊、legacy `session/create` 与导入路径、冷投影的上下文窗口、自动标题更新。
+M11.4 的写入：引导输入与队列编辑/删除/重排/回退（M11.4a，已完成：集成测试覆盖运行中引导与删除排队项）；`sendQueuedNow` 与 `deleteSession` 与 Node 一样不改账本（提升时写入，关闭时保留 `admitted`，冷查询结算为 `discarded/session_resumed`）；编辑与重试的分支切点、重跑输入与冷加载边界（M11.4b，已完成：集成测试覆盖编辑、重试与重启后编辑，Node 交叉读取一致）；稳定分叉（M11.4c，已完成：分叉后子会话继续对话，Node 交叉读取一致）；压缩与 todo 提醒（M11.4d，已完成：手动压缩后继续对话，Node 交叉读取一致；自动压缩保留段与中断恢复有单元测试。`autoCompactThreshold`/`willRetriggerNextTurn` 暂不写，Node 读取时视为缺省）；模型切换时间线（M11.4e，已完成）；子代理子会话（M11.4f，已完成：父子会话均被 Node 交叉读取一致）；后台子代理完成通知与运行中子会话插话（M11.4g，已完成：Node 交叉读取一致。Rust 的后台 bash 状态以本地 `<task-notification>` 随下次输入进入上下文，Node 没有对应记录，不落库，重启后与 Node 一样不再出现）；提示附件（M11.4h，已完成：上传图片与文本附件、重启后继续对话，Node 交叉读取一致，§5.3）；工具结果媒体（M11.4i，已完成：Read 图片的结果重启后仍以图片发送，Node 交叉读取一致）；完全访问授权（M11.4j，已完成：回执通过 Node schema 校验，重启后恢复授权标记）；提问自动结束阶段（M11.4k，已完成）；会话 shell 快照（M11.4l，已完成：Node 能恢复快照，分叉子会话与 Node 一样不写）；目标（M11.4m，已完成：两轮续跑与验证、暂停后恢复，Node 交叉读取的行、模型上下文与目标状态一致，§5.4）；工作区 checkpoint 与文件撤销（M11.4n，已完成：Node 按严格 schema 解析 entry 与产物，重启后可读回，§5.5）；选区侧聊、legacy `session/create` 与导入路径、冷投影的上下文窗口、自动标题更新。
 
 ## 11. 验收场景
 

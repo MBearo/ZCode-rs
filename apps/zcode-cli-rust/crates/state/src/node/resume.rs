@@ -34,6 +34,8 @@ pub struct Resume {
     pub last_assistant_completed: Option<Value>,
     pub history: History,
     pub conversation: Cold,
+    /// The workspace checkpoints (spec §5.5).
+    pub checkpoints: Vec<crate::domain::file_checkpoint::ImportedCheckpoint>,
 }
 
 fn last_entry(conn: &Connection, session: &str, kind: &str) -> Result<Option<Value>> {
@@ -242,6 +244,7 @@ pub fn resume(
             .map(str::to_owned),
         last_assistant_completed: assistant.and_then(|m| m.info["time"].get("completed").cloned()),
         history,
+        checkpoints: super::checkpoints::read(conn, id, artifacts)?,
         conversation: node_rows::replay(id, &events),
         session,
     }))

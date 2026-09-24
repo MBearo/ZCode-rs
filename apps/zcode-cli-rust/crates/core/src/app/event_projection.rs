@@ -256,6 +256,7 @@ impl Engine {
                 failed,
                 denied,
                 committed,
+                ..
             } => {
                 receipt = Some(committed);
                 let content = model_content.unwrap_or_else(|| result.clone().into());

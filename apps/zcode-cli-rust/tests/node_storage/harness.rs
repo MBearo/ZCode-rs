@@ -231,6 +231,21 @@ impl ToolPort for Tools {
         _: &EventSink,
         cancel: &CancellationToken,
     ) -> Result<ToolOutput> {
+        if name == "Write" {
+            // Node Write 的结构化结果（workspace checkpoint 候选）。
+            let path = self
+                .root
+                .join("w")
+                .join(arguments["file_path"].as_str().unwrap_or(""));
+            let content = arguments["content"].as_str().unwrap_or("");
+            let data = json!({"type": "create", "filePath": path, "content": content,
+                "originalFile": null, "structuredPatch": [{"oldStart": 1, "oldLines": 0,
+                "newStart": 1, "newLines": 1, "lines": [format!("+{content}")]}]});
+            return Ok(ToolOutput::new(
+                format!("The file {} has been written successfully.", path.display()),
+                data,
+            ));
+        }
         if arguments["file_path"] != "shot.png" {
             return Ok(ToolOutput::text(
                 self.execute(name, arguments, cancel).await?,

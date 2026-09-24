@@ -57,4 +57,50 @@ impl Engine {
         }
         Ok(Some(ToolMedia { files, layout }))
     }
+
+    /// Node `emitFileMutationCheckpoint`: the before-change artifact of a
+    /// successful file-mutating result; its URI for the checkpoint entry.
+    pub(super) async fn node_checkpoint_artifact(
+        &self,
+        id: &str,
+        event: &Event,
+    ) -> Result<Option<String>> {
+        use crate::domain::node_journal::checkpoint;
+        let Event::ToolDone {
+            id: call,
+            checkpoint: Some(candidate),
+            ..
+        } = event
+        else {
+            return Ok(None);
+        };
+        let live = self
+            .active
+            .get(id)
+            .is_some_and(|a| !a.cancel.is_cancelled());
+        if !live || !self.journaled(id) {
+            return Ok(None);
+        }
+        let tool = self.sessions[id]
+            .node
+            .turn
+            .as_ref()
+            .and_then(|t| t.step.as_ref())
+            .and_then(|s| s.tools.iter().find(|t| &t.call == call))
+            .map(|t| t.name.clone())
+            .unwrap_or_default();
+        let content = checkpoint::artifact(candidate, (call, &tool), self.clock.now());
+        // Node：checkpoint 写入失败只记警告，不影响工具结果。
+        match self
+            .store
+            .write_artifact(id, call, &content, checkpoint::CONTENT_TYPE)
+            .await
+        {
+            Ok(uri) => Ok(Some(uri)),
+            Err(error) => {
+                tracing::warn!(error = %error, "workspace checkpoint write failed");
+                Ok(None)
+            }
+        }
+    }
 }

@@ -125,3 +125,33 @@ impl Engine {
         self.tools.file_changes(&changes(s, &row["turnId"])).await
     }
 }
+
+/// A resumed session's stored Node checkpoints as file checkpoints on their
+/// tool rows (spec rust-m11-node-storage §5.5); unreadable ones are skipped.
+pub(super) async fn import(s: &mut Session, tools: &dyn ToolPort) {
+    for c in std::mem::take(&mut s.imported_checkpoints) {
+        let row = s
+            .rows
+            .iter()
+            .find(|r| r["kind"] == "toolCall" && r["toolCallId"] == c.call.as_str())
+            .and_then(|r| r["rowId"].as_u64());
+        let Some(row) = row else {
+            continue;
+        };
+        let before = c.before.as_deref().map(str::as_bytes);
+        match tools.import_checkpoint(before, c.after.as_bytes()).await {
+            Ok((before, after)) => s.file_checkpoints.push(FileCheckpoint {
+                id: c.node.checkpoint.clone(),
+                path: c.path,
+                tool: c.tool,
+                before,
+                after,
+                mode: None,
+                row,
+                restored: c.restored,
+                node: Some(c.node),
+            }),
+            Err(error) => tracing::warn!(error = %error, "checkpoint import failed"),
+        }
+    }
+}

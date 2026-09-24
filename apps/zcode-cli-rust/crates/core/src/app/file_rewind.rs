@@ -110,13 +110,20 @@ impl Engine {
         transaction: &dyn RewindTransaction,
     ) {
         let ids = transaction.checkpoint_ids();
+        let journal = (self.clock.id(), self.clock.id(), self.clock.id());
+        let now = self.clock.now();
         let s = self.sessions.get_mut(id).unwrap();
+        let mut restored = vec![];
         for c in &mut s.file_checkpoints {
             if ids.contains(&c.id) {
                 c.restored = true;
+                restored.extend(c.node.clone());
             }
         }
         s.rewind_committed = Some(token.into());
+        // Node file summary rewind：撤销事实持久化，重启后仍显示已撤销。
+        let trace = s.trace_id.clone().unwrap_or(journal.2);
+        s.node_file_rewind(now, (journal.0, journal.1, trace), &restored);
     }
     pub(super) async fn apply_file_rewind(&mut self, c: &Command) -> Result<Value> {
         let id = c.session_id.as_deref().context("Session required")?;

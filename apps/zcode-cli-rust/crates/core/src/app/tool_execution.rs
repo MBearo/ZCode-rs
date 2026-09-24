@@ -316,6 +316,10 @@ async fn commit(
         json!({"role":"tool","tool_call_id":id,"content":message,"_zcode_tool_failed":failed}),
     );
     let (committed, receipt) = oneshot::channel();
+    let checkpoint = (!failed)
+        .then(|| crate::domain::node_journal::checkpoint::candidate(&output.data))
+        .flatten()
+        .map(Box::new);
     sink.send(Event::ToolDone {
         id: id.into(),
         result: content,
@@ -323,6 +327,7 @@ async fn commit(
         display: output.display,
         failed,
         denied: output.denied,
+        checkpoint,
         committed,
     })
     .await?;

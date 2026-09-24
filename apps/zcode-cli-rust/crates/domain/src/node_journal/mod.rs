@@ -3,6 +3,7 @@
 //! the moments Node persists, and the store applies the queued writes with
 //! Node's repository SQL in one transaction per commit. Pure: no IO.
 mod assistant;
+pub mod checkpoint;
 mod compact;
 pub mod files;
 mod finish;

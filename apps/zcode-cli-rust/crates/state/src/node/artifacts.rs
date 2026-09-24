@@ -93,10 +93,51 @@ pub async fn write_data_url(
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(&bytes)
     );
+    let (uri, path) = write_text(root, session, call, &content, "text/plain").await?;
+    let stored = StoredAttachment {
+        path: path.to_string_lossy().into_owned(),
+        media_type: mime.into(),
+        total_bytes: total as u64,
+        data_url: true,
+        ..Default::default()
+    };
+    Ok((uri, stored))
+}
+
+/// Node `extensionForContentType`.
+fn extension(content_type: &str) -> &'static str {
+    let mime = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    match mime.as_str() {
+        "text/plain" => ".txt",
+        "text/markdown" => ".md",
+        "image/png" => ".png",
+        "image/jpeg" | "image/jpg" => ".jpg",
+        "image/gif" => ".gif",
+        "image/webp" => ".webp",
+        "application/pdf" => ".pdf",
+        _ => ".json",
+    }
+}
+
+/// Node `writeToolResultArtifact`: `content` as
+/// `<root>/<session>/<call>-tool-result-<uuid><ext>`; returns its URI and path.
+pub async fn write_text(
+    root: &Path,
+    session: &str,
+    call: &str,
+    content: &str,
+    content_type: &str,
+) -> anyhow::Result<(String, std::path::PathBuf)> {
     let artifact = format!("tool-result-{}", crate::id());
     let dir = root.join(segment(session));
     tokio::fs::create_dir_all(&dir).await?;
-    let path = dir.join(format!("{}-{artifact}.txt", segment(call)));
+    let ext = extension(content_type);
+    let path = dir.join(format!("{}-{artifact}{ext}", segment(call)));
     // 临时名不含 artifact id：Node 按 id 子串定位文件，写到一半的文件不能被读到。
     let temp = dir.join(format!(".{}.tmp", crate::id()));
     let write = async {
@@ -108,14 +149,7 @@ pub async fn write_data_url(
         return Err(error.into());
     }
     let uri = format!("zcode-artifact://{}/{}", encode(session), encode(&artifact));
-    let stored = StoredAttachment {
-        path: path.to_string_lossy().into_owned(),
-        media_type: mime.into(),
-        total_bytes: total as u64,
-        data_url: true,
-        ..Default::default()
-    };
-    Ok((uri, stored))
+    Ok((uri, path))
 }
 
 /// The prompt attachment behind `uri`: a base64 `data:` URL artifact.

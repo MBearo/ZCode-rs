@@ -97,6 +97,20 @@ impl crate::contract::SessionStore for NodeStore {
     ) -> Result<(String, StoredAttachment)> {
         self.attachments.local(session, index, file, mime).await
     }
+    async fn write_artifact(
+        &self,
+        session: &str,
+        call: &str,
+        content: &str,
+        content_type: &str,
+    ) -> Result<String> {
+        let super::input_attachments::Backing::Artifacts(root) = &self.attachments else {
+            bail!("Artifact storage unavailable");
+        };
+        let (uri, _) =
+            super::node::artifacts::write_text(root, session, call, content, content_type).await?;
+        Ok(uri)
+    }
     async fn attachment_of(&self, reference: &str) -> Result<Option<StoredAttachment>> {
         self.attachments.attachment_of(reference).await
     }

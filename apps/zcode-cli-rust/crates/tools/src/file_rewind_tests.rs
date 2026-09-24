@@ -19,6 +19,7 @@ async fn fixture() -> (tempfile::TempDir, Vec<FileCheckpoint>, Arc<Mutex<()>>) {
             mode: Some(0o100640),
             row: 3,
             restored: false,
+            node: None,
         }],
         Arc::new(Mutex::new(())),
     )

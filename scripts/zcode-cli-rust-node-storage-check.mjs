@@ -20,6 +20,11 @@ import {
   PERMISSION_FULL_ACCESS_ENTRY,
   permissionFullAccessReceiptSchema,
 } from "../apps/zcode-cli/packages/contracts/src/interfaces/permission-full-access.ts";
+import {
+  parseCheckpointCreatedPayload,
+  parseRewindTriggeredPayload,
+  parseWorkspaceCheckpointArtifact,
+} from "../apps/zcode-cli/packages/contracts/src/rewind/index.ts";
 import { readPersistedBashShellSelectionSnapshot } from "../apps/zcode-cli/packages/core/src/runtime/methods/bash-shell-snapshot.ts";
 import { goalVerificationEntriesFromSessionEntries } from "../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/transcript-hydration.ts";
 
@@ -53,6 +58,13 @@ async function check(name, root, file) {
     if (selection?.modelId !== "m") throw new Error(`${name}: model selection unreadable`);
     await store.listSessionInputs({ sessionID });
     const stored = await store.messages({ sessionID });
+    // 附件与媒体按 Node 产物目录读回（spec §5.3）。
+    const artifactStore = createNodeToolArtifactStore({
+      imageCacheRootDir: join(root, "cli/image-cache"),
+      pdfCacheRootDir: join(root, "cli/pdf-cache"),
+      rootDir: join(root, "cli/artifacts"),
+      videoCacheRootDir: join(root, "cli/video-cache"),
+    });
     const entries = await store.sessionEntries({ sessionID });
     // 会话 shell 快照：Node 恢复时按快照继续使用同一个 shell。
     const shell = await readPersistedBashShellSelectionSnapshot({
@@ -63,6 +75,15 @@ async function check(name, root, file) {
     // Node 的稳定分叉不复制 shell 快照（恢复时按当前设置），其余会话在创建时写入。
     const expected = session.taskType === "fork" ? "missing" : "restored";
     if (shell.status !== expected) throw new Error(`${name}: shell snapshot ${shell.status}`);
+    // 工作区 checkpoint 与文件撤销：Node 恢复预览/撤销时按严格 schema 解析 entry 与产物。
+    for (const entry of entries.filter((e) => e.type === "runtime/workspace_checkpoint")) {
+      const checkpoint = parseCheckpointCreatedPayload(entry.data.payload);
+      const artifact = await artifactStore.readToolResultArtifact({ uri: checkpoint.snapshotRef });
+      parseWorkspaceCheckpointArtifact(JSON.parse(artifact.content));
+    }
+    for (const entry of entries.filter((e) => e.type === "runtime/workspace_file_rewind")) {
+      parseRewindTriggeredPayload(entry.data.payload);
+    }
     // 授权回执是 Node 恢复与重试的事实源，必须通过 Node 的严格 schema。
     for (const entry of entries.filter((e) => e.type === PERMISSION_FULL_ACCESS_ENTRY)) {
       permissionFullAccessReceiptSchema.parse(entry.data);
@@ -75,13 +96,6 @@ async function check(name, root, file) {
       rewindTargetMessageId: revert?.targetMessageID,
     };
     const history = createMessageHistory();
-    // 附件与媒体按 Node 产物目录读回（spec §5.3）。
-    const artifactStore = createNodeToolArtifactStore({
-      imageCacheRootDir: join(root, "cli/image-cache"),
-      pdfCacheRootDir: join(root, "cli/pdf-cache"),
-      rootDir: join(root, "cli/artifacts"),
-      videoCacheRootDir: join(root, "cli/video-cache"),
-    });
     await hydrateMessageHistoryFromSession({
       artifactStore,
       history,

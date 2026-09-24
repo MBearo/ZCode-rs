@@ -133,6 +133,13 @@ impl ToolPort for WorkspaceTools {
     ) -> Result<Value> {
         super::file_changes::details(&self.artifacts, changes).await
     }
+    async fn import_checkpoint(
+        &self,
+        before: Option<&[u8]>,
+        after: &[u8],
+    ) -> Result<(Option<String>, String)> {
+        super::file_checkpoints::import(&self.artifacts, before, after).await
+    }
     async fn pending_rewinds(&self) -> Result<Vec<String>> {
         super::file_rewind::pending(&self.artifacts).await
     }

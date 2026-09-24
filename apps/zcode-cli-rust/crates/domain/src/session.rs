@@ -26,6 +26,10 @@ pub struct Session {
     pub node: super::node_journal::NodeJournal,
     #[serde(default)]
     pub file_checkpoints: Vec<super::file_checkpoint::FileCheckpoint>,
+    /// Stored Node checkpoints of a resumed session, turned into
+    /// `file_checkpoints` once the tools hold their contents.
+    #[serde(skip)]
+    pub imported_checkpoints: Vec<super::file_checkpoint::ImportedCheckpoint>,
     #[serde(default)]
     pub rewind_committed: Option<String>,
     #[serde(default, skip_serializing)]
@@ -182,6 +186,7 @@ impl Session {
         Self {
             node: Default::default(),
             file_checkpoints: vec![],
+            imported_checkpoints: vec![],
             rewind_committed: None,
             history: Default::default(),
             row_highwater: 0,
@@ -304,10 +309,6 @@ impl Session {
                 task.output =
                     "Child execution was interrupted by runtime exit; it was not replayed.".into();
             }
-        }
-        if let Some(goal) = &mut self.goal {
-            // 重启只结算最后确认的活跃时间，不把进程离线期间算作模型工作（Node recoverInterruptedSessionTargetRun）。
-            goal.recover(now);
         }
         if let Some(context) = &mut self.shared_context {
             context.release(None);

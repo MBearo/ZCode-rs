@@ -204,6 +204,8 @@ pub enum Event {
         failed: bool,
         /// Permission denied: the row is cancelled instead of failed (Node `permission_denied`).
         denied: bool,
+        /// Node's workspace checkpoint candidate of a file-mutating result.
+        checkpoint: Option<Box<Value>>,
         committed: oneshot::Sender<()>,
     },
     StepBoundary {

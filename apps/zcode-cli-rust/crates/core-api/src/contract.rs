@@ -147,6 +147,17 @@ pub trait SessionStore: Send + Sync {
     ) -> Result<(String, zcode_cli_domain::session::StoredAttachment)> {
         anyhow::bail!("Attachment snapshot unavailable")
     }
+    /// Writes a text artifact of `session` named after `call` (Node
+    /// `writeToolResultArtifact`); returns its `zcode-artifact://` URI.
+    async fn write_artifact(
+        &self,
+        _session: &str,
+        _call: &str,
+        _content: &str,
+        _content_type: &str,
+    ) -> Result<String> {
+        anyhow::bail!("Artifact storage unavailable")
+    }
     /// The stored bytes behind a reference the session does not hold in
     /// memory (a resumed or Node-written session).
     async fn attachment_of(
