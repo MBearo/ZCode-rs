@@ -23,8 +23,28 @@ pub(super) struct RunContext {
     pub messages: Vec<Value>,
     pub manual: Option<String>,
     pub usage_anchor: Option<(usize, usize, usize)>,
+    /// The pending plan exit reminder was already added in this run.
+    pub plan_exit_sent: bool,
     estimated: usize,
-    continuations: Vec<usize>,
+    /// Messages shown to the model but never persisted, before `messages[position]`.
+    transient: Vec<Transient>,
+}
+
+/// A request-only message (Node in-memory history entry without persistence).
+#[derive(Clone)]
+pub(super) struct Transient {
+    pub position: usize,
+    pub kind: TransientKind,
+    pub message: Value,
+    tokens: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TransientKind {
+    Continue,
+    /// Plan-mode `runtime_mode` reminder (counts for the cadence).
+    PlanReminder,
+    PlanExit,
 }
 const CONTINUE_PROMPT: &str = "Output token limit hit. Resume directly — no apology, no recap of what you were doing. Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.";
 fn continuation_tokens() -> usize {
@@ -49,8 +69,9 @@ impl RunContext {
             messages,
             manual,
             usage_anchor: None,
+            plan_exit_sent: false,
             estimated,
-            continuations: vec![],
+            transient: vec![],
         }
     }
     pub fn push(&mut self, message: Value) {
@@ -58,14 +79,48 @@ impl RunContext {
         self.messages.push(message);
     }
     pub fn continue_output(&mut self) {
-        self.continuations.push(self.messages.len());
+        let message = json!({"role":"user","content":CONTINUE_PROMPT});
+        self.add_transient(TransientKind::Continue, message, continuation_tokens());
+    }
+    /// Adds a request-only message after the current history; returns its position.
+    pub fn add_transient(&mut self, kind: TransientKind, message: Value, tokens: usize) -> usize {
+        let position = self.messages.len();
+        self.transient.push(Transient {
+            position,
+            kind,
+            message,
+            tokens,
+        });
+        position
+    }
+    /// Restores reminders the engine kept for this session (positions in `messages`).
+    pub fn restore_transient(
+        &mut self,
+        kept: impl IntoIterator<Item = (usize, TransientKind, Value)>,
+    ) {
+        for (position, kind, message) in kept {
+            let tokens = estimate(std::slice::from_ref(&message));
+            self.transient.push(Transient {
+                position,
+                kind,
+                message,
+                tokens,
+            });
+        }
+        self.transient.sort_by_key(|t| t.position);
+    }
+    pub fn transient(&self) -> &[Transient] {
+        &self.transient
+    }
+    fn transient_tokens(&self) -> usize {
+        self.transient.iter().map(|t| t.tokens).sum()
     }
     pub fn anchor_usage(&mut self, usage: &Value) {
         self.usage_anchor = usage["prompt_tokens"].as_u64().map(|tokens| {
             (
                 tokens as usize,
                 self.messages.len(),
-                self.continuations.len(),
+                self.transient_tokens(),
             )
         });
     }
@@ -75,24 +130,17 @@ impl RunContext {
         tool_tokens: usize,
         micro_threshold: usize,
     ) -> (Vec<Value>, usize) {
-        let mut tokens = self.estimated
-            + estimate(prefix)
-            + tool_tokens
-            + self.continuations.len() * continuation_tokens();
-        // 常规请求保持批量 clone 路径；仅发生续写时才逐消息合并临时提示。
-        let mut messages = if self.continuations.is_empty() {
+        let mut tokens = self.estimated + estimate(prefix) + tool_tokens + self.transient_tokens();
+        // 常规请求保持批量 clone 路径；仅存在临时消息（续写提示、plan 提醒）时逐条合并。
+        let mut messages = if self.transient.is_empty() {
             with_summary(self.state.summary.as_deref(), &self.messages)
         } else {
             let mut messages = with_summary(self.state.summary.as_deref(), &[]);
-            messages.reserve(self.messages.len() + self.continuations.len() + 1);
-            let mut continuations = self.continuations.iter().peekable();
+            messages.reserve(self.messages.len() + self.transient.len() + 1);
+            let mut transient = self.transient.iter().peekable();
             for index in 0..=self.messages.len() {
-                while continuations
-                    .peek()
-                    .is_some_and(|position| **position == index)
-                {
-                    messages.push(json!({"role":"user","content":CONTINUE_PROMPT}));
-                    continuations.next();
+                while let Some(entry) = transient.next_if(|t| t.position == index) {
+                    messages.push(entry.message.clone());
                 }
                 if let Some(message) = self.messages.get(index) {
                     messages.push(message.clone());
@@ -112,14 +160,11 @@ impl RunContext {
                 return (messages, tokens);
             }
         }
-        if let Some((anchor, count, continuations)) = self.usage_anchor {
+        if let Some((anchor, count, transient)) = self.usage_anchor {
             tokens = tokens.max(
                 anchor
                     .saturating_add(estimate(&self.messages[count..]))
-                    .saturating_add(
-                        self.continuations.len().saturating_sub(continuations)
-                            * continuation_tokens(),
-                    ),
+                    .saturating_add(self.transient_tokens().saturating_sub(transient)),
             );
         }
         (messages, tokens)
@@ -130,6 +175,7 @@ impl RunContext {
         sink: &EventSink,
         cancel: &CancellationToken,
         instructions: Option<&str>,
+        reminder: Option<Value>,
     ) -> Result<()> {
         let manual = instructions.is_some();
         let before = self.estimated;
@@ -158,6 +204,7 @@ impl RunContext {
                 context: self.state.clone(),
                 tokens: before,
                 usage: Value::Null,
+                reminder: None,
                 committed,
             })
             .await?;
@@ -199,6 +246,7 @@ impl RunContext {
             context: next.clone(),
             tokens: after,
             usage: output.usage,
+            reminder: reminder.clone(),
             committed,
         })
         .await?;
@@ -206,12 +254,18 @@ impl RunContext {
         // 只有 owner 事务提交后，工作副本才能切换边界并发送下一次模型请求。
         self.state = next;
         self.messages.drain(..split);
-        // offset 只统计 canonical 消息；临时 Continue 不进入持久化摘要边界。
-        self.continuations = self
-            .continuations
-            .iter()
-            .filter_map(|position| position.checked_sub(split))
-            .collect();
+        // offset 只统计 canonical 消息；临时消息不进入持久化摘要边界，被摘要覆盖的随之丢弃。
+        self.transient
+            .retain_mut(|t| match t.position.checked_sub(split) {
+                Some(position) => {
+                    t.position = position;
+                    true
+                }
+                None => false,
+            });
+        if let Some(reminder) = reminder {
+            self.push(reminder);
+        }
         self.usage_anchor = None;
         self.estimated = after;
         Ok(())

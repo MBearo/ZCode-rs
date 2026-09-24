@@ -13,6 +13,7 @@ mod mcp_config;
 mod mcp_connection;
 mod mcp_hub;
 mod mcp_sse;
+mod plan_file;
 #[cfg(unix)]
 mod process_tree;
 mod tool_files;

@@ -32,6 +32,8 @@ pub(super) struct Permissions {
 /// What one tool call is checked against.
 pub(crate) struct Snapshot {
     pub state: ExecutionState,
+    /// Plan was turned off and the one-off exit reminder is still due.
+    pub plan_exit_pending: bool,
     pub policy: policy::Policy,
     pub project_rules: Arc<Ruleset>,
     pub working_directory: String,
@@ -152,6 +154,10 @@ impl Engine {
                 mode: s.mode,
                 plan_enabled: s.plan_enabled,
             });
+        let plan_exit_pending = self
+            .sessions
+            .get(id)
+            .is_some_and(|s| s.needs_plan_exit_reminder);
         // 与 Node 一致：内置 Explore 使用全新的默认策略；其余子代理共享根会话的授权与配置。
         let policy = if self.is_explore(id) {
             policy::Policy::default()
@@ -168,6 +174,7 @@ impl Engine {
         };
         Arc::new(Snapshot {
             state,
+            plan_exit_pending,
             policy,
             project_rules: self.permissions.project_rules.clone(),
             working_directory: self.workspace_path.clone(),
@@ -314,7 +321,18 @@ impl Engine {
         if let Some(origin) = origin {
             payload["origin"] = origin;
         }
-        let entry = json!({"interactionId":interaction,"kind":"permission","anchorRowId":anchor,"createdAt":now,"payload":payload});
+        // Node 把计划审批投影为 userInput 待决交互（无权限选项与全权限入口）。
+        let kind = if tool == crate::domain::plan_mode::EXIT {
+            payload = crate::domain::plan_mode::approval_payload(
+                &call["id"],
+                payload["summary"].as_str().unwrap_or(""),
+                &payload["detail"],
+            );
+            "userInput"
+        } else {
+            "permission"
+        };
+        let entry = json!({"interactionId":interaction,"kind":kind,"anchorRowId":anchor,"createdAt":now,"payload":payload});
         let host_session = self
             .sessions
             .get_mut(&host)

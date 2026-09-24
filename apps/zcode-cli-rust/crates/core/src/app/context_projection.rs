@@ -55,6 +55,7 @@ impl Engine {
                 context,
                 tokens,
                 usage,
+                reminder,
                 committed,
             } => {
                 ensure!(
@@ -64,6 +65,15 @@ impl Engine {
                 );
                 let changed = context.offset > session.context.offset;
                 session.context = context;
+                // 被摘要覆盖的 plan 提醒不再出现；计划文件提醒追加在保留消息之后并持久化。
+                let offset = session.context.offset;
+                session
+                    .runtime
+                    .plan_reminders
+                    .retain(|(anchor, _, _)| *anchor >= offset);
+                if let Some(reminder) = reminder {
+                    session.append_message(reminder);
+                }
                 session.context_tokens = Some(tokens);
                 if session.usage["contextWindow"].is_object() {
                     session.usage["contextWindow"]["usedTokens"] = tokens.into();

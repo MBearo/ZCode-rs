@@ -11,6 +11,9 @@ pub use engine::Engine;
 mod input_validation;
 
 mod agent_loop;
+mod plan_events;
+mod plan_tools;
+mod tool_execution;
 
 mod context;
 mod context_projection;

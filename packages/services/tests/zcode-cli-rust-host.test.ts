@@ -148,7 +148,7 @@ test("Desktop storage preparation and Host service use the real native runtime",
     assert.equal((await service.initialize(workspace)).available, true);
     assert.deepEqual((await service.readWorkspacePresentation(workspace)).executionCapabilities, {
       permissionModes: ["build", "edit", "yolo", "auto"],
-      independentPlanState: false,
+      independentPlanState: true,
     });
     const envelope = (
       type: CommandEnvelope["type"],

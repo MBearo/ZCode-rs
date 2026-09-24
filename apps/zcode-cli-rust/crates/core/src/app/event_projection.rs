@@ -68,8 +68,11 @@ impl Engine {
         {
             return self.todo_tool(&id, &call_id, write, reply).await;
         }
-        if let Event::TodoReminder { reply } = event.event {
-            return self.todo_reminder(&id, reply).await;
+        if matches!(
+            event.event,
+            Event::TodoReminder { .. } | Event::PlanMode { .. } | Event::PlanReminder { .. }
+        ) {
+            return self.plan_event(&id, event.event).await;
         }
         if let Event::Question {
             call_id,
@@ -152,6 +155,8 @@ impl Engine {
             | Event::GoalVerdict { .. }
             | Event::SkillsInitialized { .. }
             | Event::TodoReminder { .. }
+            | Event::PlanMode { .. }
+            | Event::PlanReminder { .. }
             | Event::Question { .. }
             | Event::ToolCleanupFailed(_)
             | Event::StepBoundary { .. }

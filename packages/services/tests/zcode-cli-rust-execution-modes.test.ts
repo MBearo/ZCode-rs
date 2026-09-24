@@ -11,10 +11,10 @@ const yoloOnly = runtimeExecutionCapabilitiesSchema.parse({
   permissionModes: ["yolo"],
   independentPlanState: false,
 });
-// Rust 在 Bash 只读判定完成后声明全部权限模式；独立 Plan 仍待 EnterPlanMode/ExitPlanMode。
+// Rust 声明全部权限模式与独立 Plan（EnterPlanMode / ExitPlanMode 与计划审批）。
 const native = runtimeExecutionCapabilitiesSchema.parse({
   permissionModes: ["build", "edit", "yolo", "auto"],
-  independentPlanState: false,
+  independentPlanState: true,
 });
 
 test("Execution capabilities gate permissions and Plan without changing the user's intent", () => {
@@ -26,7 +26,8 @@ test("Execution capabilities gate permissions and Plan without changing the user
   assert.equal(supportsRuntimeExecution({ mode: "plan" }, yoloOnly), false);
   assert.equal(supportsRuntimeExecution(build, native), true);
   assert.equal(supportsRuntimeExecution({ mode: "edit", planEnabled: false }, native), true);
-  assert.equal(supportsRuntimeExecution({ mode: "plan" }, native), false);
+  assert.equal(supportsRuntimeExecution({ mode: "plan" }, native), true);
+  assert.equal(supportsRuntimeExecution({ mode: "edit", planEnabled: true }, native), true);
   assert.equal(supportsRuntimeExecution(build), true);
   assert.equal(supportsRuntimeExecution({ mode: "plan" }), true);
   assert.equal(

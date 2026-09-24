@@ -111,6 +111,9 @@ impl Engine {
         turn: &str,
         committed: oneshot::Sender<Option<crate::contract::Guide>>,
     ) -> Result<()> {
+        if self.sessions[id].runtime.plan_feedback.is_some() {
+            return self.plan_feedback_guide(id, turn, committed).await;
+        }
         let session = &self.sessions[id];
         let pos = session.queue.iter().position(|item| {
             item["delivery"]["admitted"] == "guide" && item["dispatch"]["state"] == "queued"

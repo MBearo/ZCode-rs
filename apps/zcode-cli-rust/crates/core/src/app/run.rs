@@ -77,6 +77,18 @@ impl Engine {
         history.agent_profile = session.agent_profile.clone();
         history.tool_disallowlist = submission.tool_disallowlist;
         history.tool_filter = session.runtime.tools.clone();
+        // Node 的 plan 提醒留在进程内历史中；新一轮按原位置继续发送（重启后清空）。
+        let offset = session.context.offset;
+        history.restore_transient(session.runtime.plan_reminders.iter().filter_map(
+            |(anchor, runtime, message)| {
+                let kind = if *runtime {
+                    super::context::TransientKind::PlanReminder
+                } else {
+                    super::context::TransientKind::PlanExit
+                };
+                Some((anchor.checked_sub(offset)?, kind, message.clone()))
+            },
+        ));
         history.permissions = Some(permission_updates);
         let context = self.context.clone();
         let tools = self.tools.clone();

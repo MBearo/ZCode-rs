@@ -70,6 +70,17 @@ pub(super) async fn authorize(
                 } else {
                     super::permissions::summarize(&message)
                 })),
+                // 与 Node turn-control 一致：带反馈的拒绝由 Engine 引导进同一轮；无反馈则停轮。
+                PermissionAnswer::PlanRejected(feedback) => {
+                    let text = if feedback.is_some() {
+                        crate::domain::plan_mode::NOT_APPROVED
+                    } else {
+                        crate::domain::plan_mode::DENIED
+                    };
+                    let mut output = refusal(text.into());
+                    output.stop_turn = feedback.is_none();
+                    Some(output)
+                }
                 PermissionAnswer::Fail(message) => {
                     let mut output = ToolOutput::text(message);
                     output.failed = true;

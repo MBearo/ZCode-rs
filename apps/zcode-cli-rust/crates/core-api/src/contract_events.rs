@@ -42,6 +42,20 @@ pub enum Event {
     TodoReminder {
         reply: oneshot::Sender<Value>,
     },
+    /// EnterPlanMode / ExitPlanMode switching plan (Node `source: "tool"`); the
+    /// error text becomes the tool failure.
+    PlanMode {
+        call_id: String,
+        enable: bool,
+        reply: oneshot::Sender<std::result::Result<(), String>>,
+    },
+    /// A transient plan reminder added before a model request, after `anchor`
+    /// session messages; `exit` marks the one-off exit reminder.
+    PlanReminder {
+        anchor: usize,
+        exit: bool,
+        message: Value,
+    },
     ToolCleanupFailed(String),
     PromptInitialized {
         snapshot: Box<zcode_cli_domain::prompt::PromptSnapshot>,
@@ -69,6 +83,8 @@ pub enum Event {
         context: zcode_cli_domain::context::ContextState,
         tokens: usize,
         usage: Value,
+        /// Plan file reminder appended after the preserved messages.
+        reminder: Option<Value>,
         committed: oneshot::Sender<()>,
     },
     Background {
@@ -145,6 +161,8 @@ pub enum PermissionAnswer {
     },
     /// Allowed, but the tool fails before running (Node: project rule write failed).
     Fail(String),
+    /// ExitPlanMode not approved; `Some` carries the user's feedback.
+    PlanRejected(Option<String>),
 }
 /// Messages committed at a step boundary (guided input or subagent mailbox).
 pub struct Guide {

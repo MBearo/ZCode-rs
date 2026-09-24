@@ -120,6 +120,15 @@ pub trait ToolPort: Send + Sync {
             suggestions,
         }
     }
+    /// Writes the approved plan to `<workspace>/.zcode/plans/plan-<id>.md`
+    /// atomically; failures are swallowed by the caller, as in Node.
+    async fn write_plan_file(&self, _session: &str, _plan: &str) -> Result<()> {
+        Ok(())
+    }
+    /// The approved plan file `(path, content)` if present and not blank.
+    async fn read_plan_file(&self, _session: &str) -> Result<Option<(String, String)>> {
+        Ok(None)
+    }
     fn concurrent_safe(&self, _name: &str) -> bool {
         false
     }
@@ -163,6 +172,9 @@ pub struct ToolOutput {
     pub failed: bool,
     /// Denied by the permission policy or the user; the tool never ran.
     pub denied: bool,
+    /// Node `turnControl.stopTurnAfterResult`: later tools are cancelled and the
+    /// turn ends once this result is committed.
+    pub stop_turn: bool,
     pub content: String,
     pub data: Value,
     pub display: Option<Value>,
@@ -172,6 +184,7 @@ impl ToolOutput {
         Self {
             failed: false,
             denied: false,
+            stop_turn: false,
             content,
             data: Value::Null,
             display: None,
@@ -181,6 +194,7 @@ impl ToolOutput {
         Self {
             failed: false,
             denied: false,
+            stop_turn: false,
             content,
             data,
             display: None,

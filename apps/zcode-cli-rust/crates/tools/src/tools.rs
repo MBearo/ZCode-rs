@@ -244,6 +244,7 @@ impl ToolPort for WorkspaceTools {
         for name in ["Agent", "SendMessage"] {
             definitions.push(json!({"type":"function","function":{"name":name,"description":descriptions[name],"parameters":schemas[name]}}));
         }
+        definitions.extend(crate::domain::plan_mode::definitions());
         definitions
     }
     fn capability(
@@ -258,6 +259,12 @@ impl ToolPort for WorkspaceTools {
         crate::domain::permission::tool_capability(name)
             .cloned()
             .unwrap_or_default()
+    }
+    async fn write_plan_file(&self, session: &str, plan: &str) -> Result<()> {
+        super::plan_file::write(&self.cwd, session, plan).await
+    }
+    async fn read_plan_file(&self, session: &str) -> Result<Option<(String, String)>> {
+        super::plan_file::read(&self.cwd, session).await
     }
     async fn permission(
         &self,

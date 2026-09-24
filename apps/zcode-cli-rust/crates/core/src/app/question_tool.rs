@@ -29,6 +29,7 @@ pub(super) async fn execute(
     };
     Ok(ToolOutput {
         denied: false,
+        stop_turn: false,
         content: answer.content,
         data: answer.data,
         failed: answer.failed,

@@ -31,6 +31,10 @@ import { AskUserQuestionInputJsonSchema } from "../../../apps/zcode-cli/packages
 import { SkillInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/skill.js";
 import { AgentInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/agent.js";
 import { SendMessageInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/send-message.js";
+import {
+  EnterPlanModeInputJsonSchema,
+  ExitPlanModeInputJsonSchema,
+} from "../../../apps/zcode-cli/packages/contracts/src/tools/plan-mode.js";
 import { skillToolEntry } from "../../../apps/zcode-cli/packages/core/src/tool/handlers/skill.js";
 import {
   TodoReadInputJsonSchema,
@@ -107,6 +111,8 @@ test("Rust tool definitions use current TS schemas and real TS file/search handl
       TaskOutput: TaskOutputInputJsonSchema,
       TaskStop: TaskStopInputJsonSchema,
       AskUserQuestion: AskUserQuestionInputJsonSchema,
+      EnterPlanMode: EnterPlanModeInputJsonSchema,
+      ExitPlanMode: ExitPlanModeInputJsonSchema,
       ...Object.fromEntries(
         Object.entries(entries).map(([key, entry]) => [key, entry.inputSchema]),
       ),

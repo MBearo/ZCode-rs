@@ -4,8 +4,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 impl Engine {
     fn execution_capabilities(&self) -> Value {
-        // 权限模式按 Node 策略判定；独立 Plan 需要 EnterPlanMode/ExitPlanMode，尚未声明。
-        json!({"permissionModes":["build","edit","yolo","auto"],"independentPlanState":false})
+        json!({"permissionModes":["build","edit","yolo","auto"],"independentPlanState":true})
     }
 
     pub(super) fn workspace_config(&self) -> Value {
@@ -45,7 +44,7 @@ impl Engine {
                 Ok(json!({"operationId":operation,"cancelled":!ids.is_empty()}))
             }
             Method::RuntimeCapabilities => Ok(
-                json!({"workspaceExecutionCapabilities":true,"independentPlanState":false,"accountProviderConfig":self.registry.is_some()}),
+                json!({"workspaceExecutionCapabilities":true,"independentPlanState":true,"accountProviderConfig":self.registry.is_some()}),
             ),
             Method::ProcessChildProcesses => Ok(json!({"processes":[]})),
             Method::WorkspaceReadPresentation => {

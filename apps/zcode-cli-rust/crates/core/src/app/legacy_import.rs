@@ -69,6 +69,7 @@ impl Engine {
             state_revision: u64::from(model_given) + u64::from(thought_applied) + 1,
             workspace: Some(workspace),
             fresh: false,
+            ..Default::default()
         };
         if let Some(servers) = p.get("mcpServers") {
             self.tools.configure_mcp(&id, servers).await?;

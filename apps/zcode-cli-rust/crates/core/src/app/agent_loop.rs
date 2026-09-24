@@ -1,6 +1,5 @@
 use crate::contract::{ContextPort, Event, EventSink, ModelPort, ToolPort};
 use anyhow::{Context, Result, bail};
-use futures_util::{StreamExt, stream};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -14,8 +13,9 @@ pub(super) async fn run(
     cancel: &CancellationToken,
 ) -> Result<()> {
     if let Some(instructions) = history.manual.take() {
+        let reference = super::plan_tools::plan_reference(tools, sink).await?;
         return history
-            .compact(model, sink, cancel, Some(&instructions))
+            .compact(model, sink, cancel, Some(&instructions), reference)
             .await;
     }
     let mut reactive_compacted = false;
@@ -25,7 +25,11 @@ pub(super) async fn run(
     let profile = history.agent_profile.clone();
     let mut definitions = tools.scoped_definitions(&sink.session_id, cancel).await?;
     if let Some(profile) = &profile {
-        definitions.retain(|d| profile.allows(d["function"]["name"].as_str().unwrap_or("")));
+        // 子代理不注册 plan 工具（Node subagent tool-policy）。
+        definitions.retain(|d| {
+            let name = d["function"]["name"].as_str().unwrap_or("");
+            profile.allows(name) && !matches!(name, "EnterPlanMode" | "ExitPlanMode")
+        });
     }
     if !skills.enabled {
         definitions.retain(|d| d["function"]["name"] != "Skill");
@@ -119,9 +123,13 @@ pub(super) async fn run(
         } else {
             usize::MAX
         };
+        super::plan_tools::remind(history, sink).await?;
         let (mut messages, mut tokens) = history.projection(&prefix, tool_tokens, micro_threshold);
         if policy.automatic && tokens >= policy.threshold() {
-            history.compact(model, sink, cancel, None).await?;
+            let reference = super::plan_tools::plan_reference(tools, sink).await?;
+            history
+                .compact(model, sink, cancel, None, reference)
+                .await?;
             (messages, tokens) = history.projection(&prefix, tool_tokens, micro_threshold);
             if tokens >= policy.threshold() {
                 bail!("Context remains above budget after compaction; narrow the input");
@@ -138,7 +146,10 @@ pub(super) async fn run(
                         .is_some() =>
             {
                 reactive_compacted = true;
-                history.compact(model, sink, cancel, None).await?;
+                let reference = super::plan_tools::plan_reference(tools, sink).await?;
+                history
+                    .compact(model, sink, cancel, None, reference)
+                    .await?;
                 continue;
             }
             result => result?,
@@ -185,52 +196,19 @@ pub(super) async fn run(
         }
         continuations = 0;
         let has_tools = !output.calls.is_empty();
-        let mut calls = output.calls.into_iter().peekable();
-        while let Some(first) = calls.next() {
-            let mut group = vec![first];
-            if safe(tools, &sink.session_id, &group[0]) {
-                while calls
-                    .peek()
-                    .is_some_and(|call| safe(tools, &sink.session_id, call))
-                {
-                    group.push(calls.next().unwrap());
-                }
-            }
-            // 只读工具并发执行，但按原始 call 顺序持久化结果；写/Shell 不跨越该屏障。
-            let mut results = stream::iter(group)
-                .map(|call| {
-                    execute(
-                        tools,
-                        ExecutionContext {
-                            skills: &skills,
-                            profile: profile.as_ref(),
-                            profiles: &profiles,
-                            selection: identity.clone(),
-                            permissions: permissions.as_ref(),
-                            tool_filter: &tool_filter,
-                        },
-                        call,
-                        sink,
-                        cancel,
-                    )
-                })
-                .buffered(4);
-            while let Some(result) = results.next().await {
-                let (id, output, failed) = result?;
-                let content = output.content;
-                history.push(json!({"role":"tool","tool_call_id":id,"content":content,"_zcode_tool_failed":failed}));
-                let (committed, receipt) = oneshot::channel();
-                sink.send(Event::ToolDone {
-                    id,
-                    result: content,
-                    display: output.display,
-                    failed,
-                    denied: output.denied,
-                    committed,
-                })
-                .await?;
-                durable(receipt, cancel).await?;
-            }
+        let scope = super::tool_execution::Scope {
+            skills: &skills,
+            profile: profile.as_ref(),
+            profiles: &profiles,
+            selection: identity.clone(),
+            permissions: permissions.as_ref(),
+            tool_filter: &tool_filter,
+        };
+        // 与 Node turnControl 一致：结果要求停轮时，其后的工具取消且本轮不再请求模型。
+        if super::tool_execution::run_calls(tools, &scope, output.calls, history, sink, cancel)
+            .await?
+        {
+            return Ok(());
         }
         let (committed, receipt) = oneshot::channel();
         sink.send(Event::StepBoundary { committed }).await?;
@@ -262,10 +240,6 @@ pub(super) async fn run(
         }
     }
 }
-fn safe(tools: &dyn ToolPort, session: &str, call: &Value) -> bool {
-    let name = call["function"]["name"].as_str().unwrap_or("");
-    tools.concurrent_safe_scoped(session, name)
-}
 pub(super) async fn durable(
     receipt: oneshot::Receiver<()>,
     cancel: &CancellationToken,
@@ -274,106 +248,6 @@ pub(super) async fn durable(
         _=cancel.cancelled()=>bail!("Cancelled"),
         result=receipt=>result.context("Session owner stopped before durable commit"),
     }
-}
-struct ExecutionContext<'a> {
-    skills: &'a crate::domain::skills::SkillCatalog,
-    profile: Option<&'a crate::domain::subagent::Profile>,
-    profiles: &'a [crate::domain::subagent::Profile],
-    selection: Option<crate::contract::ModelIdentity>,
-    permissions: Option<&'a super::tool_permission::Permissions>,
-    tool_filter: &'a crate::domain::session_runtime::ToolFilter,
-}
-async fn execute(
-    tools: &dyn ToolPort,
-    context: ExecutionContext<'_>,
-    call: Value,
-    sink: &EventSink,
-    cancel: &CancellationToken,
-) -> Result<(String, crate::contract::ToolOutput, bool)> {
-    let ExecutionContext {
-        skills,
-        profile,
-        profiles,
-        selection,
-        permissions,
-        tool_filter,
-    } = context;
-    if cancel.is_cancelled() {
-        bail!("Cancelled");
-    }
-    sink.send(Event::ToolStart { call: call.clone() }).await?;
-    let name = call["function"]["name"]
-        .as_str()
-        .context("Tool name missing")?;
-    if let (Some(permissions), Ok(args)) = (
-        permissions,
-        serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap_or("")),
-    ) && let Some(output) =
-        super::tool_permission::authorize(tools, permissions, &call, &args, sink, cancel).await?
-    {
-        return Ok((
-            call["id"].as_str().context("Tool id missing")?.into(),
-            output,
-            true,
-        ));
-    }
-    // 与 Node 一致：会话未注册的工具按不存在处理。
-    let result = if !tool_filter.allows(name) {
-        Err(anyhow::anyhow!("Tool not found: {name}"))
-    } else if profile.is_some_and(|p| !p.allows(name)) {
-        Err(anyhow::anyhow!(
-            "Tool is not allowed by this subagent profile"
-        ))
-    } else {
-        match serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap_or("")) {
-            Ok(args)
-                if matches!(name, "Agent" | "Task" | "SendMessage")
-                    || matches!(name, "TaskOutput" | "TaskStop")
-                        && args["task_id"]
-                            .as_str()
-                            .is_some_and(|id| id.starts_with("agent_")) =>
-            {
-                super::subagent_tools::execute(
-                    (tools, profiles, skills),
-                    name,
-                    &args,
-                    call["id"].as_str().unwrap(),
-                    selection,
-                    sink,
-                    cancel,
-                )
-                .await
-            }
-            Ok(args) if name == "AskUserQuestion" => {
-                super::question_tool::execute(call["id"].as_str().unwrap(), args, sink, cancel)
-                    .await
-            }
-            Ok(args) if matches!(name, "TodoRead" | "TodoWrite") => {
-                super::todos::execute(name, call["id"].as_str().unwrap(), args, sink, cancel).await
-            }
-            Ok(args) if name == "Skill" => {
-                super::skills::execute(tools, skills, &args, cancel).await
-            }
-            Ok(args) => tools.execute_scoped(name, &args, sink, cancel).await,
-            Err(_) => Err(anyhow::anyhow!("Invalid tool JSON arguments")),
-        }
-    };
-    if let Err(error) = &result
-        && error.is::<crate::contract::ProcessCleanupFailure>()
-    {
-        // 进程未确认回收时不能包装成普通工具失败再发请求；由 owner 终止本 runtime。
-        sink.send(Event::ToolCleanupFailed(format!("{error:#}")))
-            .await?;
-        return Err(result.err().unwrap());
-    }
-    let failed = result.as_ref().map_or(true, |output| output.failed);
-    let content = result
-        .unwrap_or_else(|error| crate::contract::ToolOutput::text(format!("Tool failed: {error}")));
-    Ok((
-        call["id"].as_str().context("Tool id missing")?.into(),
-        content,
-        failed,
-    ))
 }
 fn hide(definitions: &mut Vec<Value>, disallowed: &[String]) {
     if !disallowed.is_empty() {

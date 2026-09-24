@@ -350,6 +350,56 @@ sequenceDiagram
   - 不分页。
 - **目标**：互斥规则见 2.2。
 
+### 5.1 Rust 结构与所有者
+
+- **文本**：工具描述、schema、结果文本、三类提醒正文与提醒节奏，由生成脚本从 Node 导出到 `crates/domain/schema/plan-mode.json`；`domain::plan_mode` 提供纯函数（提醒节奏、计划审批答案映射、计划文件名、结果文本）。
+- **工具定义**：tools crate 在主会话的工具列表中加入两个工具；子代理（带 profile 的会话）在 agent loop 中移除它们。
+- **执行**：两个工具由 core 在 run task 中处理，状态变更经事件交给 Engine：
+  - EnterPlanMode：`Event::PlanMode {enable: true}`，Engine 以 `tool` 来源调用 `apply_execution_state`，失败（目标进行中）时工具失败并返回错误文本；
+  - ExitPlanMode：先由权限层走审批；批准后 run 检查权限快照中的 plan 开关（已关闭则返回 Node 的 `You are not in plan mode…` 错误），调用 `ToolPort::write_plan_file`（原子写，失败静默），再发送 `Event::PlanMode {enable: false}`。
+- **审批**：Engine 登记权限请求时，ExitPlanMode 投影为 `kind: "userInput"` 的待决交互（不带 `options` 与 `fullAccessOption`）；`resolveInteraction` 按 Node 映射为批准、带反馈拒绝或无反馈拒绝（`PermissionAnswer::PlanRejected`）。
+  - 带反馈：工具结果为 `The plan was not approved by the user.`，行为 `cancelled`；反馈记在会话运行态，下一个步骤边界由 Engine 作为引导输入（userInput 行 + 用户消息）交给 run，与 Node `steerTurn(guide)` 等价。
+  - 无反馈：工具结果为 `Permission denied for ExitPlanMode`，`ToolOutput.stop_turn` 置位；同一步其余工具以 `Tool cancelled because a previous tool result requested a turn stop.` 取消，本轮在提交结果后结束。
+- **提醒**：run 在每次模型请求前按权限快照判断：
+  - plan 开启时按 Node 节奏插入 `runtime_mode` 提醒（完整 / 精简）；
+  - 快照中 `plan_exit_pending` 为真时插入一次退出提醒；
+  - 插入位置是当时历史末尾，作为运行期临时消息参与后续请求，不写入会话消息；run 通过 `Event::PlanReminder` 告知 Engine，Engine 在会话运行态记住锚点（跨轮次保留，进程重启后清空）并清除退出标记。
+- **压缩后计划文件提醒**：压缩前经 `ToolPort::read_plan_file` 读取（上限 81024 字节，不存在或空白则无；其他错误使压缩失败），压缩成功后作为持久化的提醒消息追加在保留消息之后。
+- **能力**：`runtime/capabilities` 与工作区执行能力的 `independentPlanState` 改为 `true`。
+
+```mermaid
+sequenceDiagram
+    participant M as Model
+    participant R as run task
+    participant E as Engine
+    participant T as ToolPort
+    participant U as Client
+    M->>R: ExitPlanMode {plan}
+    R->>E: Event::Permission (ask)
+    E-->>U: pendingInteractions += userInput(plan_approval)
+    U->>E: resolveInteraction {answer}
+    alt 批准
+        E-->>R: Allow
+        R->>T: write_plan_file(session, plan)
+        R->>E: Event::PlanMode {enable:false}
+        E-->>R: ok（planTransition, needs exit reminder）
+        R->>E: ToolDone(approved text)
+    else 带反馈拒绝
+        E->>E: runtime.plan_feedback = text
+        E-->>R: PlanRejected(feedback)
+        R->>E: ToolDone(not approved, denied)
+        R->>E: StepBoundary
+        E-->>R: Guide(feedback user message)
+    else 无反馈拒绝
+        E-->>R: PlanRejected(none)
+        R->>E: ToolDone(denied, stop_turn) 并取消同步其余工具
+        R->>E: Finished
+    end
+```
+
+- **与 Node 的差异（属于 M7 的请求构建）**：Node 把 `runtime_mode` 与 `plan_mode_exit` 提醒投影为对话中途的 system 消息（MCS）；Rust 目前与 todo 提醒一致，按 `<system-reminder>` 包装的 user 消息发送，正文逐字相同。
+- **真实用户消息的判定**：role 为 user，且不是 `_zcode_source` 标记的合成消息、不以 `<system-reminder>` 或 `<task-notification>` 开头。
+
 ## 6. M2.5 Hooks
 
 依据 `core/src/hooks/**`、`core/src/tool/executor/{hook-flow,call-runner}.ts`、`core/src/runtime/methods/{hooks,turn,turn-stop}.ts`、`adapters/src/exec/*`、`bootstrap/src/app/runtime-config.ts`。

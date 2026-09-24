@@ -98,6 +98,11 @@ impl Engine {
                 has_project,
             )
         };
+        if tool == crate::domain::plan_mode::EXIT {
+            return self
+                .resolve_plan_approval(c, id, interaction, &owner, &call)
+                .await;
+        }
         let (mut decision, grant) = map_answer(&tool, &suggestions, answer);
         let grant = match grant {
             Grant::Project(_) if !policy_opt => {
@@ -162,6 +167,36 @@ impl Engine {
         Ok(ack)
     }
 
+    /// Node plan approval: approve runs ExitPlanMode; feedback is steered into the
+    /// turn at the next step boundary; any other answer denies and stops the turn.
+    async fn resolve_plan_approval(
+        &mut self,
+        c: &Command,
+        id: &str,
+        interaction: &str,
+        owner: &str,
+        call: &str,
+    ) -> Result<Value> {
+        use crate::domain::plan_mode::{Approval, map_answer};
+        let decision = match map_answer(&c.payload["answer"]) {
+            Approval::Approve => PermissionAnswer::Allow,
+            Approval::Reject(feedback) => {
+                let session = self
+                    .sessions
+                    .get_mut(owner)
+                    .context("Session unavailable")?;
+                session.runtime.plan_feedback = feedback.clone();
+                PermissionAnswer::PlanRejected(feedback)
+            }
+        };
+        let deltas = self.settle_permission(id, owner, call, interaction, &decision)?;
+        let ack = self.commit_interaction(c, deltas).await?;
+        if let Some(wait) = self.waiters.take_permission(interaction) {
+            let _ = wait.reply.send(decision);
+        }
+        Ok(ack)
+    }
+
     /// Removes the prompt from its host and moves the owner's row on.
     fn settle_permission(
         &mut self,
@@ -186,7 +221,7 @@ impl Engine {
         row.as_object_mut().unwrap().remove("approvalInteractionId");
         row["status"] = match decision {
             PermissionAnswer::Allow | PermissionAnswer::Fail(_) => "running",
-            PermissionAnswer::Deny { .. } => "cancelled",
+            PermissionAnswer::Deny { .. } | PermissionAnswer::PlanRejected(_) => "cancelled",
         }
         .into();
         let delta = json!({"op":"row.upserted","row":row});

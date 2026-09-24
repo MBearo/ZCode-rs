@@ -24,6 +24,11 @@ pub struct RuntimeOptions {
     pub workspace: Option<serde_json::Value>,
     /// No runtime event yet (Node reducer defaults in the legacy snapshot).
     pub fresh: bool,
+    /// Plan reminders the model has seen in this process (Node in-memory
+    /// history): `(session messages before it, runtime_mode?, message)`.
+    pub plan_reminders: Vec<(usize, bool, serde_json::Value)>,
+    /// ExitPlanMode feedback steered into the turn at the next step boundary.
+    pub plan_feedback: Option<String>,
 }
 
 /// Legacy `toolAllowlist` / `toolDenylist`: tools registered for the session's
