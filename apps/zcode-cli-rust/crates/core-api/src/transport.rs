@@ -57,6 +57,7 @@ methods! {
     SessionCreate => "session/create",
     SessionResume => "session/resume",
     SessionSubscribe => "session/subscribe",
+    SessionDebug => "session/debug",
     SessionSetModel => "session/setModel",
     SessionSetThoughtLevel => "session/setThoughtLevel",
     SessionSetMode => "session/setMode",

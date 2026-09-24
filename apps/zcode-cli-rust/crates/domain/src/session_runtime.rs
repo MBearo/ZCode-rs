@@ -35,6 +35,8 @@ pub struct RuntimeOptions {
     pub workspace_hook_admission: Option<serde_json::Value>,
     /// Legacy `session/event` subscription of this activation.
     pub legacy: crate::legacy_stream::LegacyStream,
+    /// `session/debug` observation of this activation's model requests.
+    pub debug: crate::session_debug::DebugLog,
 }
 
 /// A transient reminder kept in the process history (never persisted).

@@ -198,6 +198,7 @@ impl Engine {
                 session_id: Some(id.into()),
                 trace_id: parent.trace_id.clone(),
                 query_id: parent.query_id.clone(),
+                query_source: "subagent",
             },
             None => {
                 let query = session
@@ -219,6 +220,11 @@ impl Engine {
                         .get_or_insert_with(|| self.clock.id())
                         .clone(),
                     query_id: Some(query.unwrap_or_else(|| turn.into())),
+                    query_source: if session.parent_id.is_some() {
+                        "subagent"
+                    } else {
+                        "main_turn"
+                    },
                 }
             }
         };

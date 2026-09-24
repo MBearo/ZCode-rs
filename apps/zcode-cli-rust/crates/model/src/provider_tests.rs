@@ -2,6 +2,7 @@
 //! `runner-options.ts`, `official-coding-plan-gateway.ts`).
 use super::*;
 use crate::contract::RequestKind;
+use crate::network_status::Attempt;
 use serde_json::json;
 use zcode_cli_net::{NetworkPolicy, RuntimeEnv};
 
@@ -39,6 +40,7 @@ fn origin() -> RequestOrigin {
         session_id: Some("sess_abc".into()),
         trace_id: "trace-1".into(),
         query_id: Some("query_q1".into()),
+        query_source: "main_turn",
     }
 }
 
@@ -54,7 +56,9 @@ fn provider_and_request_auth_headers_override_identity_but_not_attribution() {
     );
     let auth =
         json!({"requestAuth":{"headers":{"X-TITLE":"Auth Title","authorization":"Token t"}}});
-    let headers = model.headers(Some("key"), &auth, &origin()).unwrap();
+    let headers = model
+        .headers(Some("key"), &auth, &origin(), &mut Attempt::new(1))
+        .unwrap();
     assert_eq!(header(&headers, "x-title"), Some("Auth Title"));
     assert_eq!(header(&headers, "authorization"), Some("Token t"));
     assert_eq!(header(&headers, "user-agent"), Some("ZCode/2.0.0"));
@@ -67,7 +71,9 @@ fn provider_and_request_auth_headers_override_identity_but_not_attribution() {
     let unique: std::collections::BTreeSet<_> = names.iter().collect();
     assert_eq!(names.len(), unique.len(), "{names:?}");
     // 每次尝试都有新的 x-request-id。
-    let again = model.headers(Some("key"), &auth, &origin()).unwrap();
+    let again = model
+        .headers(Some("key"), &auth, &origin(), &mut Attempt::new(1))
+        .unwrap();
     assert_ne!(
         header(&headers, "x-request-id"),
         header(&again, "x-request-id")
@@ -77,7 +83,9 @@ fn provider_and_request_auth_headers_override_identity_but_not_attribution() {
 #[test]
 fn anthropic_adds_bearer_only_without_explicit_authorization() {
     let plain = model("anthropic-messages", "https://example.invalid", &[]);
-    let headers = plain.headers(Some("k"), &Value::Null, &origin()).unwrap();
+    let headers = plain
+        .headers(Some("k"), &Value::Null, &origin(), &mut Attempt::new(1))
+        .unwrap();
     assert_eq!(header(&headers, "x-api-key"), Some("k"));
     assert_eq!(header(&headers, "authorization"), Some("Bearer k"));
     assert_eq!(header(&headers, "anthropic-version"), Some("2023-06-01"));
@@ -87,7 +95,7 @@ fn anthropic_adds_bearer_only_without_explicit_authorization() {
         &[("Authorization", "Custom c")],
     );
     let headers = explicit
-        .headers(Some("k"), &Value::Null, &origin())
+        .headers(Some("k"), &Value::Null, &origin(), &mut Attempt::new(1))
         .unwrap();
     assert_eq!(header(&headers, "authorization"), Some("Custom c"));
 }
@@ -103,7 +111,9 @@ fn official_coding_plan_endpoints_go_through_the_gateway_without_host() {
         model.url,
         "https://zcode.z.ai/api/v1/ultra-zai/anthropic/v1/messages"
     );
-    let headers = model.headers(None, &Value::Null, &origin()).unwrap();
+    let headers = model
+        .headers(None, &Value::Null, &origin(), &mut Attempt::new(1))
+        .unwrap();
     assert_eq!(header(&headers, "host"), None);
     let direct = self::model("anthropic-messages", "https://example.invalid", &[]);
     assert_eq!(direct.url, "https://example.invalid/v1/messages");
@@ -113,6 +123,8 @@ fn official_coding_plan_endpoints_go_through_the_gateway_without_host() {
 fn non_string_request_auth_headers_fail_authentication() {
     let model = model("openai-responses", "https://example.invalid", &[]);
     let auth = json!({"requestAuth":{"headers":{"x":1}}});
-    let failure = model.headers(None, &auth, &origin()).unwrap_err();
+    let failure = model
+        .headers(None, &auth, &origin(), &mut Attempt::new(1))
+        .unwrap_err();
     assert_eq!(failure.reason, "auth_failed");
 }

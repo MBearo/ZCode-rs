@@ -24,6 +24,12 @@ impl Engine {
         if active.run_id != event.run_id {
             return Ok(());
         }
+        // 取消后的 failed(cancelled) 状态也要记入 session/debug（Node 同样发出）。
+        if let Event::ModelStatus(status) = event.event {
+            let turn = active.turn_id.clone();
+            self.model_status(&id, &turn, status);
+            return Ok(());
+        }
         let cancelled = active.cancel.is_cancelled();
         if cancelled && !matches!(event.event, Event::Finished { .. }) {
             return Ok(());
@@ -147,6 +153,7 @@ impl Engine {
             | Event::Question { .. }
             | Event::ToolCleanupFailed(_)
             | Event::ToolExecuting { .. }
+            | Event::ModelStatus(_)
             | Event::ToolBatch { .. }
             | Event::StepBoundary { .. }
             | Event::Permission { .. }

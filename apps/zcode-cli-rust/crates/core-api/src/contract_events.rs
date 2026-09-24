@@ -113,6 +113,8 @@ pub enum Event {
         committed: Option<oneshot::Sender<()>>,
     },
     Retry(Option<RetryState>),
+    /// One Node `ModelNetworkStatusEvent` payload of the run's model request.
+    ModelStatus(Value),
     Text {
         response_id: String,
         text: String,
@@ -243,6 +245,8 @@ pub struct RequestOrigin {
     pub session_id: Option<String>,
     pub trace_id: String,
     pub query_id: Option<String>,
+    /// Node `querySource` (`main_turn`, `subagent`, `compact`); empty when none.
+    pub query_source: &'static str,
 }
 impl RequestOrigin {
     /// A request outside any session run, with a trace of its own.
@@ -256,6 +260,7 @@ impl RequestOrigin {
     pub fn auxiliary(&self) -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
             kind: RequestKind::Other,
+            query_source: "compact",
             ..self.clone()
         })
     }

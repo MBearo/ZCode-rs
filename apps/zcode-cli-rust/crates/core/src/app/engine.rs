@@ -325,6 +325,7 @@ impl Engine {
             Method::SessionCreate => self.legacy_create(p).await,
             Method::SessionResume => self.legacy_resume(p).await,
             Method::SessionSubscribe => self.legacy_subscribe(p),
+            Method::SessionDebug => self.session_debug(p),
             Method::SessionSetModel | Method::SessionSetThoughtLevel | Method::SessionSetMode => {
                 self.legacy_setter(call.method, p).await
             }

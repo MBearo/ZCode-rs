@@ -14,6 +14,19 @@ pub struct ModelFailure {
     pub output_committed: bool,
     #[serde(skip)]
     pub empty_completion: bool,
+    /// Provider response facts for network status only (never logged or shown).
+    #[serde(skip)]
+    pub detail: Option<Box<FailureDetail>>,
+}
+
+/// What the failing provider response said (Node `inspectProviderFailure`).
+#[derive(Clone, Debug, Default)]
+pub struct FailureDetail {
+    /// Sanitized response headers (`name → value`).
+    pub response_headers: serde_json::Map<String, serde_json::Value>,
+    pub provider_error_code: Option<String>,
+    pub provider_error_message: Option<String>,
+    pub provider_request_id: Option<String>,
 }
 impl ModelFailure {
     pub fn new(reason: &'static str, retryable: bool) -> Self {
@@ -65,6 +78,7 @@ impl ModelFailure {
             retry_after_ms: None,
             output_committed: false,
             empty_completion: false,
+            detail: None,
         }
     }
     pub fn invalid() -> Self {

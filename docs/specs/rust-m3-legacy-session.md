@@ -420,3 +420,64 @@ legacy 快照（create、resume、设置方法、subscribe）与 `state.updated`
 | `ToolBatch`                                      | `tool.updated batch`                 | `{toolCallIds, successCount, errorCount}`                                                                                                                                                                                   |
 
 与 Node 的差异：结果不带 `display`（Rust 的展示载荷不是 legacy 允许的三种之一，带上会被 strict schema 拒绝）；没有 `dependencies`；只读工具不在流式阶段提前执行（见 9.8）。
+
+### 9.11 M3.3c：模型网络状态与 `session/debug`
+
+依据：`scratchpad/research/network-status.md`（下称 NS）；Node `adapters/src/model/runner-{stream,status,network-headers}.ts`、`bootstrap/src/zcode-protocol/session-debug.ts`、`packages/shared/src/{zcode-network-debug-status,zcode-api-retry-status,session-debug}.ts`。
+
+#### 所有者与时序
+
+模型层按物理尝试产生状态事实（`Event::ModelStatus(payload)`），引擎是唯一消费者：根会话的每个状态先进入 `session/debug` 观察（不依赖订阅），再按订阅发出 legacy `session.updated`。子代理与无会话请求（generateText、连接测试）的状态不进入任何会话。
+
+```mermaid
+sequenceDiagram
+    participant M as HttpModel（每次尝试）
+    participant E as Engine
+    participant D as DebugLog（会话内，不持久化）
+    participant H as Host
+    M->>E: model_request_started（请求头已构建，发送前）
+    alt 成功
+        M->>E: model_request_completed（输出 flush 之后，早于 ModelDone）
+    else 失败
+        opt 空闲超时
+            M->>E: model_stream_stalled
+        end
+        M->>E: model_request_failed（retryable = 实际是否重试）
+        opt 重试
+            M->>E: model_retry_scheduled → sleep → 下一次 started（新 requestId）
+        end
+    end
+    E->>D: observe（5 种类型；completed + main_turn 记入 rounds）
+    E-->>H: session/event session.updated（已订阅；session_title 除外；附 _meta.zcode.apiRetry）
+    H->>E: session/debug {sessionId}
+    E-->>H: {sessionId, rounds, networkEntries, cache}
+```
+
+#### 载荷（NS §2）
+
+- 公共字段：`type`、`timestamp`（ISO-8601 UTC 毫秒）、`traceId`（运行 trace）、`queryId`、`sessionId`、`turnId`（引擎补上）、`querySource`、`requestId`（每次尝试新的 UUID，与 `x-request-id` 头相同）、`providerId`、`modelId`、`baseURL`（配置原值）、`providerKind`（`anthropic` / `openai` / `openai-compatible`）、`transport: "sse"`、`attempt`（从 1 开始）、`maxAttempts`。
+- `RequestOrigin` 增加 `query_source`：主轮 `main_turn`、子代理 `subagent`、压缩 `compact`，其余为空（不输出）。
+- 请求头视图：身份头、OpenRouter 头、配置头、requestAuth 头与归因头（不含 content-type、accept、anthropic-version 与由 key 生成的鉴权头），名称转小写，命中固定名单或包含 `authorization` / `api-key` / `token` / `secret` / `cookie` 的值替换为 `"[redacted]"`；响应头同样处理，重复值以 `", "` 连接。
+- `started`：`timestamp` 为尝试开始（鉴权往返之前），带请求头与数量。
+- `completed`：`durationMs`、`finishReason`（`stop` / `length` / `tool-calls`）、`usage`（Node `ModelUsage`，提供方未给的字段省略）、`providerRequestId`（响应头 `x-request-id` › `request-id` › `x-amzn-requestid` › `x-amz-request-id` › `cf-ray`）、`timeToFirstProviderEventMs`、`timeToFirstContentMs`、`timeToFirstTextMs`、`streamStallCount: 0`、`streamOutputCommitted`、请求与响应头。
+- `failed`：`durationMs`、`reason`（Node `ModelFailureReason`）、`retryable`（实际重试决定）、`message`（Node 文本；提供方业务错误用提供方消息，空白折叠、超过 1000 字符截断并加 `...`）、`statusCode`、`errorCode`、`providerErrorCode` / `providerErrorMessage` / `providerRequestId`（来自错误响应体）、`retryAfterMs`、`errorPhase`（发送前 `prepare`，之后 `stream`，退避期间取消为 `connect`）、`exceptionType`（近似）、`streamOutputCommitted`、请求与响应头。空响应重试：`reason: "unknown"`、`errorCode: "invalid_model_response"`、Node 的固定文本。
+- `retry_scheduled`：`delayMs`、`nextAttempt`、`reason`（重试原因）、`message`、`statusCode`、`errorCode`、`retryAfterMs`、请求与响应头。
+- `stalled`：`idleMs`、`timeoutMs`、`message = "Model stream stalled: no event received for {timeoutMs}ms."`、请求头；随后同一尝试的 `failed`。
+- 取消：发送后取消为 `failed{reason: "cancelled", errorCode: "model_request_cancelled", message: "Model request was cancelled.", errorPhase: "stream", retryable: false}`。
+
+#### legacy 与 `_meta.zcode.apiRetry`（NS §6）
+
+`retry_scheduled` 附归一化的重试状态；`started` 在第 1 次尝试附 `null`、之后不附；`completed` 附 `null`；`failed` 不重试时附 `null`、重试时不附；`stalled` 不附。`querySource === "session_title"` 的状态不进入 legacy 流（Rust 没有标题生成请求，规则保留）。
+
+#### `session/debug`（NS §5）
+
+- 参数 `{sessionId: string (min 1)}`（strict，不裁剪）；Node 直接 `parse`，失败为 `-32603` ZodError；会话必须常驻（`-32004`）。
+- `networkEntries`：5 种类型，按 Node `zcodeTaskNetworkDebugStatusFromPayload` 取字段（`providerId` / `modelId` 由观察者补上），`recordedAt` 为 `timestamp` 解析值，`maxAttempts` 原值，头部最多 32 项、键值各截 512 字符，`message` 截 2048 字符；保留最近 100 条，事件 id 去重（最近 2000）。
+- `rounds` 与 `cache`：只统计 `completed` 且 `querySource === "main_turn"`、`requestId` 未出现过的请求；按 Node 规则计算命中率、生成耗时与输出速率；保留最近 200 轮。
+
+#### 与 Node 的差异
+
+- 没有 `model_request_queued` / `model_request_admitted`（无准入队列）、`model_first_*`（仅遥测）、`streamRecovery`、`spanId` / `parentSpanId`、`modelCall`。
+- `exceptionType` 为近似值；`durationMs` 不含准入排队。
+- 空闲超时计时会扣除 stdout 背压时间（Rust 既有行为）。
+- serde_json 的对象按键排序，头部截取的"前 32 项"按名称排序而非插入顺序（Host 的请求头通常少于 32 项）。

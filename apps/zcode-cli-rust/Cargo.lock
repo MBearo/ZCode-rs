@@ -2141,6 +2141,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "chrono",
  "regex",
  "regress",
  "serde",
@@ -2177,6 +2178,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bytes",
+ "chrono",
  "futures-util",
  "httpdate",
  "regex",

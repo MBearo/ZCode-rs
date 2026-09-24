@@ -25,6 +25,7 @@ pub mod question;
 mod question_answer;
 pub mod row_page;
 pub mod session;
+pub mod session_debug;
 pub mod session_listing;
 mod session_memory;
 pub mod session_projection;

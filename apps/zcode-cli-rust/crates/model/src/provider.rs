@@ -4,6 +4,7 @@ use super::{
     model_policy::RetryPolicy,
     model_protocol::{self, ApiType, ProtocolStream},
     model_stream::TextBuffer,
+    network_status::{self, Attempt, Reporter},
     sse::SseDecoder,
 };
 use crate::contract::{
@@ -53,73 +54,15 @@ impl HttpModel {
                 EgressError::CaCertificate(_) => ModelFailure::new("tls_error", false),
             })
     }
-    /// Node header order: SDK auth < identity < OpenRouter < `api.headers` <
-    /// `requestAuth.headers` < per-request attribution, merged case-insensitively.
-    fn headers(&self, key: Option<&str>, auth: &Value, origin: &RequestOrigin) -> Result<Headers> {
-        let mut resolved = self.egress.identity().clone();
-        headers::with_openrouter(&mut resolved, &self.config.base_url);
-        resolved.extend(
-            self.config
-                .headers
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str())),
-        );
-        if let Some(extra) = auth["requestAuth"]["headers"].as_object() {
-            for (name, value) in extra {
-                let value = value
-                    .as_str()
-                    .ok_or_else(|| ModelFailure::new("auth_failed", false))?;
-                resolved.set(name.as_str(), value);
-            }
-        }
-        let mut headers = Headers::default();
-        headers.set("content-type", "application/json");
-        headers.set("accept", "text/event-stream");
-        if self.config.api_type == ApiType::Anthropic {
-            headers.set("anthropic-version", "2023-06-01");
-            if let Some(key) = key {
-                headers.set("x-api-key", key);
-                // Anthropic 兼容网关同时读取 Bearer；显式配置的 Authorization 优先。
-                if !resolved.contains("authorization") {
-                    headers.set("Authorization", format!("Bearer {key}"));
-                }
-            }
-        } else if let Some(key) = key {
-            headers.set("Authorization", format!("Bearer {key}"));
-        }
-        headers.extend(resolved.iter());
-        let request_id = uuid::Uuid::new_v4().to_string();
-        headers.extend(
-            headers::attribution(&headers::Attribution {
-                request_id: &request_id,
-                session_type: origin.kind.as_str(),
-                trace_id: &origin.trace_id,
-                query_id: origin.query_id.as_deref(),
-                session_id: origin.session_id.as_deref(),
-                base_url: &self.config.base_url,
-            })
-            .iter(),
-        );
-        if self.via_gateway {
-            // 显式 Host 指向官方端点主机；改走网关后由客户端按实际 URL 计算。
-            headers.remove("host");
-        }
-        Ok(headers)
-    }
     async fn request(
         &self,
         body: Bytes,
-        attempt: u32,
+        attempt: &mut Attempt,
         output: &mut TextBuffer<'_>,
         auth: &Value,
-    ) -> Result<ModelOutput> {
-        let idle_ms = if self.config.stream_idle_timeout_ms == 0 {
-            0
-        } else {
-            self.config
-                .stream_idle_timeout_ms
-                .saturating_add(u64::from(attempt - 1) * 30_000)
-        };
+        reporter: &Reporter<'_>,
+    ) -> Result<(ModelOutput, serde_json::Map<String, Value>)> {
+        let idle_ms = self.idle_ms(attempt.number);
         // Node applyModelRequestAuth：请求级鉴权的 apiKey 覆盖任意 provider 的配置 key。
         let key = match auth["requestAuth"]["apiKey"].as_str() {
             Some(key) => Some(key.to_owned()),
@@ -129,7 +72,9 @@ impl HttpModel {
                 .api_key()
                 .map_err(|_| ModelFailure::new("auth_failed", false))?,
         };
-        let headers = self.headers(key.as_deref(), auth, &output.origin())?;
+        let headers = self.headers(key.as_deref(), auth, &output.origin(), attempt)?;
+        attempt.phase = "stream";
+        output.status(reporter.started(attempt)).await?;
         let mut request = self.client().await?.post(&self.url).body(body);
         for (name, value) in headers.iter() {
             request = request.header(name, value);
@@ -139,7 +84,7 @@ impl HttpModel {
         }
         let response = tokio::select! {
             result=request.send()=>result.map_err(|e| model_failure::network(&e))?,
-            _=deadline(after(idle_ms))=>return Err(ModelFailure::new("stream_idle_timeout",true)),
+            _=deadline(after(idle_ms))=>return Err(self.stall(output, reporter, attempt).await),
         };
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -149,7 +94,7 @@ impl HttpModel {
             loop {
                 let chunk = tokio::select! {
                     chunk=stream.next()=>chunk,
-                    _=deadline(after(idle_ms))=>return Err(ModelFailure::new("stream_idle_timeout",true)),
+                    _=deadline(after(idle_ms))=>return Err(self.stall(output, reporter, attempt).await),
                 };
                 let Some(chunk) = chunk else {
                     break;
@@ -161,8 +106,12 @@ impl HttpModel {
                 bytes.extend_from_slice(&chunk);
             }
             let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-            return Err(model_failure::response(Some(status), &body, &headers));
+            let mut failure = model_failure::response(Some(status), &body, &headers);
+            let headers = network_status::response_headers(&headers);
+            failure.detail = Some(Box::new(network_status::provider_detail(&body, headers)));
+            return Err(failure);
         }
+        let response_headers = network_status::response_headers(response.headers());
         let mut stream = response.bytes_stream();
         let mut decoder = SseDecoder::default();
         let mut assembly = ProtocolStream::new(self.config.api_type);
@@ -175,12 +124,13 @@ impl HttpModel {
                     // stdout 背压不算供应商闲置；不能因 UI 暂停读管道误报网络故障。
                     idle_at = idle_at.and_then(|at| at.checked_add(before.elapsed()));
                 },
-                _=deadline(idle_at)=>return Err(ModelFailure::new("stream_idle_timeout",true)),
+                _=deadline(idle_at)=>return Err(self.stall(output, reporter, attempt).await),
                 chunk=stream.next()=> {
                     let Some(chunk) = chunk else { break; };
                     let chunk = chunk.map_err(|e| model_failure::network(&e))?;
                     let events = decoder.push(&chunk)?;
                     let had_event = !events.is_empty();
+                    if had_event { attempt.first_event.get_or_insert_with(Instant::now); }
                     for data in events {
                         assembly.consume(&data,output).await?;
                         if assembly.done() { break; }
@@ -190,13 +140,15 @@ impl HttpModel {
                 },
             }
         }
-        assembly.finish()
+        Ok((assembly.finish()?, response_headers))
     }
+    /// `current`: the in-flight attempt, reported as cancelled if the caller stops.
     async fn complete_inner(
         &self,
         messages: Vec<Value>,
         tools: &[Value],
         sink: &EventSink,
+        current: &std::sync::Mutex<Option<Attempt>>,
     ) -> Result<ModelOutput> {
         let mut messages = messages;
         let has_attachments =
@@ -222,73 +174,94 @@ impl HttpModel {
         {
             return Err(ModelFailure::new("context_exceeded", false));
         }
+        let reporter = Reporter {
+            config: &self.config,
+            origin: &sink.origin,
+            max_attempts: self.retry.max_attempts,
+        };
         let mut empty_retries = 0;
-        for attempt in 1..=self.retry.max_attempts {
-            if attempt > 1 {
+        for number in 1..=self.retry.max_attempts {
+            if number > 1 {
                 sink.send(Event::Retry(None))
                     .await
                     .map_err(|_| ModelFailure::cancelled())?;
             }
+            let mut attempt = Attempt::new(number);
+            *current.lock().unwrap() = Some(attempt.clone());
             let mut output = TextBuffer::new(sink);
-            // 本轮冻结鉴权（modelExecution.requestAuth）直接生效，不向 Host 请求。
-            let auth = if let Some(frozen) = &sink.request_auth {
-                serde_json::json!({"headersApplied":true,"requestAuth":frozen.0})
-            } else if let Some(access) = &self.config.account_access {
-                let (reply, received) = tokio::sync::oneshot::channel();
-                sink.send(Event::RequestAuth {
-                    provider: self.config.provider_id.clone(),
-                    selection: serde_json::json!({"providerId":self.config.provider_id,"modelId":self.config.model_id,"options":{"reasoningLevel":self.config.reasoning_level}}),
-                    access: access.clone(), reply,
-                }).await.map_err(|_| ModelFailure::cancelled())?;
-                let auth = tokio::time::timeout(Duration::from_secs(180), received)
-                    .await
-                    .map_err(|_| ModelFailure::new("auth_failed", false))?
-                    .map_err(|_| ModelFailure::cancelled())?;
-                if auth["headersApplied"] != true || !auth["requestAuth"].is_object() {
-                    return Err(ModelFailure::new("auth_failed", false));
+            let result = match self.request_auth(sink).await {
+                Ok(auth) => {
+                    let result = self
+                        .request(encoded.clone(), &mut attempt, &mut output, &auth, &reporter)
+                        .await;
+                    *current.lock().unwrap() = Some(attempt.clone());
+                    result
                 }
-                auth
-            } else {
-                Value::Null
+                Err(failure) => Err(failure),
             };
-            let result = self
-                .request(encoded.clone(), attempt, &mut output, &auth)
-                .await;
             output.flush().await?;
+            let timings = (output.first_content, output.first_text);
             match result {
-                Ok(mut result) => {
+                Ok((mut result, response)) => {
+                    let status = reporter.completed(
+                        &attempt,
+                        Some(&result),
+                        &response,
+                        timings,
+                        output.committed,
+                    );
+                    *current.lock().unwrap() = None;
+                    output.status(status).await?;
                     result.message["_zcode_origin"] = serde_json::json!({"provider":self.config.provider_id,"model":self.config.model_id});
                     return Ok(result);
                 }
                 Err(mut failure) => {
                     failure.output_committed = output.committed;
-                    if !failure.retryable
-                        || failure.output_committed
-                        || attempt == self.retry.max_attempts
-                        || (failure.empty_completion && empty_retries > 0)
-                    {
+                    let idle_ms = self.idle_ms(number);
+                    let retry = failure.retryable
+                        && !failure.output_committed
+                        && number < self.retry.max_attempts
+                        && !(failure.empty_completion && empty_retries > 0);
+                    if !retry {
+                        *current.lock().unwrap() = None;
+                        // Node：终止的空响应在 adapter 层报 completed，由 core 抛出错误。
+                        let status = if failure.empty_completion {
+                            reporter.completed(&attempt, None, &Default::default(), timings, false)
+                        } else {
+                            reporter.failed(&attempt, &failure, false, idle_ms)
+                        };
+                        output.status(status).await?;
                         return Err(failure);
                     }
+                    output
+                        .status(reporter.failed(&attempt, &failure, true, idle_ms))
+                        .await?;
                     if failure.empty_completion {
                         empty_retries += 1;
                     }
                     let mask = (1u64 << 53) - 1;
                     let random =
                         (uuid::Uuid::new_v4().as_u128() as u64 & mask) as f64 / mask as f64;
-                    let delay_ms = self.retry.delay_ms(attempt, failure.retry_after_ms, random);
+                    let delay_ms = self.retry.delay_ms(number, failure.retry_after_ms, random);
+                    output
+                        .status(reporter.retry(&attempt, &failure, delay_ms, idle_ms))
+                        .await?;
                     let reason = if failure.empty_completion {
                         "server_error"
                     } else {
                         failure.reason
                     };
                     sink.send(Event::Retry(Some(RetryState {
-                        attempt,
+                        attempt: number,
                         max_attempts: self.retry.max_attempts,
                         next_retry_at: super::now().saturating_add(delay_ms),
                         reason_code: reason,
                     })))
                     .await
                     .map_err(|_| ModelFailure::cancelled())?;
+                    // 退避期间取消：Node 以同一次尝试报 connect 阶段的 cancelled。
+                    attempt.phase = "connect";
+                    *current.lock().unwrap() = Some(attempt);
                     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                 }
             }
@@ -365,12 +338,27 @@ impl ModelPort for HttpModel {
         sink: &EventSink,
         cancel: &CancellationToken,
     ) -> Result<ModelOutput> {
-        tokio::select! {biased;
+        let current = std::sync::Mutex::new(None);
+        let result = tokio::select! {biased;
             _=cancel.cancelled()=>Err(ModelFailure::cancelled()),
-            result=self.complete_inner(messages,tools,sink)=>result,
+            result=self.complete_inner(messages,tools,sink,&current)=>return result,
+        };
+        let attempt = current.lock().unwrap().take();
+        if let Some(attempt) = attempt {
+            let reporter = Reporter {
+                config: &self.config,
+                origin: &sink.origin,
+                max_attempts: self.retry.max_attempts,
+            };
+            let failure = ModelFailure::cancelled();
+            let status = reporter.failed(&attempt, &failure, false, self.idle_ms(attempt.number));
+            let _ = sink.send(Event::ModelStatus(status)).await;
         }
+        result
     }
 }
+#[path = "provider_auth.rs"]
+mod auth;
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;

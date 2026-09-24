@@ -44,11 +44,11 @@ impl Assembly {
         output: &mut TextBuffer<'_>,
     ) -> Result<(), ModelFailure> {
         if value.get("error").is_some_and(|e| !e.is_null()) {
-            return Err(super::model_failure::response(
-                None,
-                value,
-                &reqwest::header::HeaderMap::new(),
-            ));
+            let mut failure =
+                super::model_failure::response(None, value, &reqwest::header::HeaderMap::new());
+            let detail = super::network_status::provider_detail(value, Default::default());
+            failure.detail = Some(Box::new(detail));
+            return Err(failure);
         }
         if value["usage"].is_object() {
             self.usage = value["usage"].clone();
@@ -72,6 +72,7 @@ impl Assembly {
             }
         }
         if let Some(parts) = delta.get("tool_calls").filter(|v| !v.is_null()) {
+            output.first_content.get_or_insert_with(Instant::now);
             output.flush().await?;
             for part in parts.as_array().ok_or_else(ModelFailure::invalid)? {
                 let index = part["index"]
@@ -169,6 +170,10 @@ pub struct TextBuffer<'a> {
     reasoning: bool,
     pub deadline: Option<Instant>,
     pub committed: bool,
+    /// First text, reasoning or tool-call output (Node `timeToFirstContentMs`).
+    pub first_content: Option<Instant>,
+    /// First non-empty answer text (Node `timeToFirstTextMs`).
+    pub first_text: Option<Instant>,
 }
 impl<'a> TextBuffer<'a> {
     pub fn new(sink: &'a EventSink) -> Self {
@@ -179,13 +184,26 @@ impl<'a> TextBuffer<'a> {
             reasoning: false,
             deadline: None,
             committed: false,
+            first_content: None,
+            first_text: None,
         }
+    }
+    /// Reports one model network status to the run.
+    pub async fn status(&self, payload: serde_json::Value) -> Result<(), ModelFailure> {
+        self.sink
+            .send(Event::ModelStatus(payload))
+            .await
+            .map_err(|_| ModelFailure::cancelled())
     }
     /// Attribution of the run this output belongs to.
     pub fn origin(&self) -> std::sync::Arc<crate::contract::RequestOrigin> {
         self.sink.origin.clone()
     }
     async fn push(&mut self, mut text: &str, reasoning: bool) -> Result<(), ModelFailure> {
+        self.first_content.get_or_insert_with(Instant::now);
+        if !reasoning {
+            self.first_text.get_or_insert_with(Instant::now);
+        }
         if self.reasoning != reasoning {
             self.flush().await?;
         }

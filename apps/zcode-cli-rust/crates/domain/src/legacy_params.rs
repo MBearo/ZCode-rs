@@ -289,6 +289,20 @@ pub fn subscribe(params: &Value) -> Result<Value, ParamsError> {
     parse(&setter_schemas()[3], params)
 }
 
+/// `sessionDebugParamsSchema`: `{sessionId: z.string().min(1)}` (not trimmed).
+pub fn debug(params: &Value) -> Result<Value, ParamsError> {
+    static SCHEMA: OnceLock<Schema> = OnceLock::new();
+    let schema = SCHEMA.get_or_init(|| {
+        let id = Schema::String {
+            trim: false,
+            min: Some(1),
+            format: None,
+        };
+        Schema::Object(vec![required("sessionId", id)])
+    });
+    parse(schema, params)
+}
+
 #[cfg(test)]
 #[path = "legacy_params_tests.rs"]
 mod tests;

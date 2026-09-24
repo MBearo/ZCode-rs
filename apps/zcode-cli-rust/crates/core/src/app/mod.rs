@@ -52,6 +52,7 @@ mod todos;
 mod goal_commands;
 mod goal_events;
 mod goal_loop;
+mod legacy_debug;
 mod legacy_import;
 mod legacy_session;
 mod legacy_setters;

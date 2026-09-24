@@ -7,6 +7,7 @@ mod model_media;
 mod model_policy;
 pub mod model_protocol;
 mod model_stream;
+mod network_status;
 pub mod provider;
 pub mod registry;
 mod registry_config;

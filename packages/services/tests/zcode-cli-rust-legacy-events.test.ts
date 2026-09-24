@@ -75,11 +75,21 @@ test("Rust legacy stream sends a text turn like Node and state.updated after it"
     const { before, command } = await turn(h, id, "hello");
     const done = await stateUpdated(h, before);
     const sent = events(h, before);
-    const types = sent.map((e) => e.type);
-    assert.equal(types[0], "session.titleUpdated");
-    assert.equal(types[1], "turn.started");
-    assert.deepEqual(types.slice(-2), ["session.updated", "turn.completed"]);
-    assert.ok(types.slice(2, -2).every((t) => t === "model.streaming"));
+    // session.updated 以载荷区分：网络状态带 type，model_complete 不带。
+    const types = sent.map((e) =>
+      e.type === "session.updated" ? (e.payload.type ?? "model_complete") : e.type,
+    );
+    assert.deepEqual(types.slice(0, 3), [
+      "session.titleUpdated",
+      "turn.started",
+      "model_request_started",
+    ]);
+    assert.deepEqual(types.slice(-3), [
+      "model_request_completed",
+      "model_complete",
+      "turn.completed",
+    ]);
+    assert.ok(types.slice(3, -3).every((t) => t === "model.streaming"));
     assert.deepEqual(sent[0]!.payload, {
       previousTitle: "",
       source: "first_input",
@@ -107,6 +117,7 @@ test("Rust legacy stream sends a text turn like Node and state.updated after it"
     );
     assert.equal(new Set(sent.map((e) => e.eventId)).size, sent.length);
     const modelComplete = sent.at(-2)!.payload;
+    assert.equal(modelComplete.type, undefined);
     assert.equal(modelComplete.querySource, "main_turn");
     assert.equal(modelComplete.stopReason, "stop");
     // state.updated 在 turn.completed 之后，revision 为 legacy 计数。
