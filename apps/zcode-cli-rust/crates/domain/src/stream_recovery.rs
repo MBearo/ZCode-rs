@@ -15,6 +15,48 @@ const TRANSIENT_REASONS: [&str; 5] = [
     "timeout",
 ];
 
+const START_PLAN_PROVIDERS: [&str; 2] = ["account:bigmodel-start-plan", "account:zai-start-plan"];
+const BUSY_CODES: [&str; 3] = ["3008", "3009", "3010"];
+/// Node `START_PLAN_BUSY_MAIN_TURN_ADMISSION_RETRY_DELAYS_MS`.
+const BUSY_DELAYS_MS: [u64; 2] = [1_000, 2_000];
+pub const BUSY_MAX_RETRIES: u32 = BUSY_DELAYS_MS.len() as u32;
+const BUSY_EXHAUSTED: &str =
+    "Start Plan is busy and automatic model stream recovery reached the maximum retry count.";
+
+/// Node `isStartPlanBusyStreamRecoveryFailure`: provider code 3008–3010.
+pub fn start_plan_busy(failure: &ModelFailure) -> bool {
+    failure
+        .detail
+        .as_ref()
+        .and_then(|d| d.provider_error_code.as_deref())
+        .is_some_and(|code| BUSY_CODES.contains(&code))
+}
+
+/// Node `getStartPlanBusyAdmissionRetryDelayMs`: the wait before retrying a
+/// busy Start Plan request of a returning session (`used`: recoveries so far).
+pub fn busy_delay(
+    failure: &ModelFailure,
+    provider: &str,
+    returning: bool,
+    used: u32,
+) -> Option<u64> {
+    if !returning || !START_PLAN_PROVIDERS.contains(&provider) || !start_plan_busy(failure) {
+        return None;
+    }
+    BUSY_DELAYS_MS.get(used as usize).copied()
+}
+
+/// Node `createStartPlanBusyAutoRetryExhaustedError`.
+pub fn busy_exhausted(failure: &ModelFailure) -> ModelFailure {
+    ModelFailure {
+        code: "model_rate_limited",
+        reason: "rate_limited",
+        message: BUSY_EXHAUSTED,
+        retryable: false,
+        ..failure.clone()
+    }
+}
+
 /// Node `modelRetryReasonCode`: a retry reason as the V4 `apiRetry.reasonCode`.
 pub fn retry_reason_code(reason: &str) -> &'static str {
     match reason {

@@ -127,3 +127,29 @@ fn network_statuses_drive_the_retry_state_like_node() {
     let failed = json!({"type": "model_request_failed", "retryable": false});
     assert_eq!(status_retry(&failed, Some(&state), 0), Some(None));
 }
+
+#[test]
+fn start_plan_busy_retries_follow_node() {
+    let mut failure = ModelFailure::new("rate_limited", false);
+    failure.detail = Some(Box::new(crate::model::FailureDetail {
+        provider_error_code: Some("3009".into()),
+        ..Default::default()
+    }));
+    let plan = "account:zai-start-plan";
+    assert_eq!(busy_delay(&failure, plan, true, 0), Some(1_000));
+    assert_eq!(busy_delay(&failure, plan, true, 1), Some(2_000));
+    assert_eq!(busy_delay(&failure, plan, true, 2), None);
+    assert_eq!(
+        busy_delay(&failure, plan, false, 0),
+        None,
+        "not on the first turn"
+    );
+    assert_eq!(busy_delay(&failure, "fixture", true, 0), None);
+    let exhausted = busy_exhausted(&failure);
+    assert_eq!(
+        (exhausted.code, exhausted.reason, exhausted.retryable),
+        ("model_rate_limited", "rate_limited", false)
+    );
+    assert!(start_plan_busy(&exhausted), "the provider code stays");
+    assert!(!start_plan_busy(&ModelFailure::new("rate_limited", false)));
+}

@@ -125,6 +125,8 @@ pub enum Event {
     /// rust-m7-stream-recovery §2); the reply is the next request's `streamRecovery`.
     StreamRecovery {
         retry: u32,
+        /// Node `maxRetries`: 10 for broken streams, 2 for Start Plan busy.
+        max: u32,
         reply: oneshot::Sender<Value>,
     },
     /// One Node `ModelNetworkStatusEvent` payload of the run's model request.

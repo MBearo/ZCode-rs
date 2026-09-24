@@ -319,3 +319,74 @@ test("Rust reminds the model after repeated identical tool calls like Node", asy
     }
   }
 });
+
+function busy(res: ServerResponse) {
+  res.writeHead(429, { "content-type": "application/json" });
+  res.end(JSON.stringify({ error: { code: "3008", message: "Start Plan is busy" } }));
+}
+
+test("Rust retries a busy Start Plan request after the first turn like Node", async () => {
+  for (const always of [false, true]) {
+    let turns = 0;
+    const f = await fixture({
+      config: { providerId: "account:bigmodel-start-plan" },
+      respond(_req, res) {
+        turns += 1;
+        if (turns === 1) return answer(res, "first");
+        if (always || turns <= 3) return busy(res);
+        answer(res, "admitted");
+      },
+    });
+    try {
+      const h = f.start();
+      const id = await h.create();
+      await h.subscribe(`conversation/${id}`);
+      let after = h.messages.length;
+      await h.command(h.envelope("sendText", id, { text: "one" }));
+      await h.completed(id, after);
+      after = h.messages.length;
+      await h.command(h.envelope("sendText", id, { text: "two" }));
+      if (always) {
+        const frame = await failed(h, id, after);
+        const error = frame.params.frame.payload.deltas.find(
+          (d: Message) => d.patch?.control?.phase === "error",
+        ).patch.control.lastError;
+        assert.equal(
+          error.message,
+          "Start Plan is busy and automatic model stream recovery reached the maximum retry count.",
+        );
+        assert.equal(error.code, "model_rate_limited");
+      } else {
+        await h.completed(id, after);
+      }
+      assert.equal(f.requests.length, 4, "the first request and two retries");
+      const states = retries(h, id).filter((s) => s !== null);
+      assert.deepEqual(
+        [...new Set(states.map((s) => `${s!.attempt}/${s!.maxAttempts}`))],
+        ["1/3", "2/3"],
+      );
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("Rust does not retry a busy Start Plan request on the first turn like Node", async () => {
+  const f = await fixture({
+    config: { providerId: "account:bigmodel-start-plan" },
+    respond(_req, res) {
+      busy(res);
+    },
+  });
+  try {
+    const h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    const after = h.messages.length;
+    await h.command(h.envelope("sendText", id, { text: "one" }));
+    await failed(h, id, after);
+    assert.equal(f.requests.length, 1);
+  } finally {
+    await f.close();
+  }
+});

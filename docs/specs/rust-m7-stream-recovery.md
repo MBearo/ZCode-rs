@@ -136,7 +136,19 @@ sequenceDiagram
   - 后续请求按原位置继续发送，进程重启后清空。
 - Node 的 `model_anomaly_warning` 事件不投影到 v4 或旧事件流，Rust 不产生对应事件。
 
-## 6. 验收
+## 6. Start Plan busy 准入重试
+
+- 依据：Node `streaming-recovery.ts` 的 `getStartPlanBusyAdmissionRetryDelayMs` 与 `createStartPlanBusyAutoRetryExhaustedError`。
+- 条件：
+  - 当前模型的 provider 为 `account:bigmodel-start-plan` 或 `account:zai-start-plan`。
+  - 失败带 provider 业务码 3008、3009 或 3010（尚无可见输出，适配层不重试）。
+  - 不是会话的第一轮（Node `turnNumber > 0`）：会话在本轮输入之前已有用户消息。
+  - 本 run 已用的恢复次数（与断流恢复共用）为 0 或 1。
+- 过程：分别等待 1 秒、2 秒后重发。Engine 同样发出恢复事件与 apiRetry，maxRetries 为 2，丢弃字节为 0；下一次请求的网络状态带 `streamRecovery`。等待期间可以取消。
+- 耗尽：本 run 已经恢复过、又以 busy 失败时，改报 `Start Plan is busy and automatic model stream recovery reached the maximum retry count.`（code `model_rate_limited`，reason `rate_limited`，不可重试），保留 provider 业务码。
+- 差异：Rust 以会话消息中是否已有更早的用户消息判断第一轮；Node 在恢复会话时按活动历史中的非摘要用户消息计数，本进程内每完成一轮加一。两者只在压缩后没有保留任何用户消息等边缘情况下不同。
+
+## 7. 验收
 
 - 单元测试：
   - reasonCode 映射。
@@ -152,3 +164,4 @@ sequenceDiagram
   - 空响应的 lastError。
   - 流式输出中停止：下一轮请求的历史包含停止前的部分回复。
   - 连续 3 次相同工具调用后，下一次请求在工具结果之后带重复调用提醒。
+  - Start Plan busy：第二轮起重试两次后成功；持续 busy 时报耗尽文本；第一轮不重试。

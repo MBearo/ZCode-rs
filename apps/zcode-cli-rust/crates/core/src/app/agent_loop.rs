@@ -1,7 +1,9 @@
 use super::compaction::{self, Outcome, Request, Trigger, compaction_failed};
 use super::context::step_prefix;
+use super::stream_recovery::retry_request;
 use crate::contract::{ContextPort, Event, EventSink, ModelPort, ToolPort};
 use crate::domain::compact;
+use crate::domain::stream_recovery as recovering;
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -229,23 +231,29 @@ pub(super) async fn run(
                 }
             }
             Err(failure)
-                if !cancel.is_cancelled()
-                    && crate::domain::stream_recovery::recoverable(&failure, recoveries) =>
+                if !cancel.is_cancelled() && recovering::recoverable(&failure, recoveries) =>
             {
                 // 已流出可见输出后断流：丢弃这段输出，用同一份历史重发（Node core recovery）。
                 recoveries += 1;
-                let (reply, receipt) = oneshot::channel();
-                sink.send(Event::StreamRecovery {
-                    retry: recoveries,
-                    reply,
-                })
-                .await?;
-                let status = tokio::select! {biased;
-                    _=cancel.cancelled()=>bail!("Cancelled"),
-                    status=receipt=>status.context("Stream recovery commit failed")?,
-                };
-                recovery = Some(Arc::new(status));
+                let max = recovering::MAX_RETRIES;
+                recovery = Some(retry_request(sink, cancel, (recoveries, max), 0).await?);
                 continue;
+            }
+            Err(failure) if !cancel.is_cancelled() => {
+                let provider = identity.as_ref().map_or("", |id| id.provider_id.as_str());
+                let busy =
+                    recovering::busy_delay(&failure, provider, history.returning, recoveries);
+                if let Some(delay) = busy {
+                    // Node：非首轮的 Start Plan busy 在无输出时等待 1s / 2s 后重发。
+                    recoveries += 1;
+                    let max = recovering::BUSY_MAX_RETRIES;
+                    recovery = Some(retry_request(sink, cancel, (recoveries, max), delay).await?);
+                    continue;
+                }
+                if recoveries > 0 && recovering::start_plan_busy(&failure) {
+                    return Err(recovering::busy_exhausted(&failure).into());
+                }
+                return Err(failure.into());
             }
             result => result?,
         };

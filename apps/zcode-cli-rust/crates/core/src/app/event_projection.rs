@@ -33,9 +33,9 @@ impl Engine {
             self.model_status(&id, &turn, status);
             return Ok(());
         }
-        if let Event::StreamRecovery { retry, reply } = event.event {
+        if let Event::StreamRecovery { retry, max, reply } = event.event {
             let turn = active.turn_id.clone();
-            return self.stream_recovery(&id, &turn, retry, reply).await;
+            return self.stream_recovery(&id, &turn, (retry, max), reply).await;
         }
         let cancelled = active.cancel.is_cancelled();
         if cancelled && !matches!(event.event, Event::Finished { .. }) {

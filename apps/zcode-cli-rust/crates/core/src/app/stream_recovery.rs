@@ -2,7 +2,7 @@
 //! rust-m7-stream-recovery). The engine owns both; runs only report events.
 use super::Engine;
 use crate::contract::Event;
-use crate::domain::stream_recovery::{self as recovery, MAX_RETRIES};
+use crate::domain::stream_recovery as recovery;
 use anyhow::Result;
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -67,7 +67,7 @@ impl Engine {
         &mut self,
         id: &str,
         turn: &str,
-        retry: u32,
+        (retry, max): (u32, u32),
         reply: oneshot::Sender<Value>,
     ) -> Result<()> {
         let now = self.clock.now();
@@ -96,23 +96,23 @@ impl Engine {
         }
         s.api_retry = Some(recovery::recovery_state(
             retry,
-            MAX_RETRIES,
+            max,
             now,
             recovery::kind_reason_code(kind),
         ));
         s.updated_at = now;
         self.publish(id, deltas)?;
         let mut started = json!({"attemptId": attempt_id, "assistantMessageId": response,
-            "failureKind": kind, "message": message, "retryNumber": retry, "maxRetries": MAX_RETRIES});
+            "failureKind": kind, "message": message, "retryNumber": retry, "maxRetries": max});
         let anchor = json!({"attemptId": attempt_id, "anchorId": anchor_id,
             "reason": "no_tool_committed", "committedToolCallIds": []});
         let tail = json!({"attemptId": attempt_id, "anchorId": anchor_id,
             "assistantMessageId": response, "discardedReasoningBytes": probe.reasoning_bytes,
             "discardedTextBytes": probe.text_bytes, "discardedToolCallIds": []});
         let mut retried = json!({"attemptId": attempt_id, "anchorId": anchor_id,
-            "retryNumber": retry, "maxRetries": MAX_RETRIES, "streamMode": "sse"});
+            "retryNumber": retry, "maxRetries": max, "streamMode": "sse"});
         let mut status = json!({"attemptId": attempt_id, "anchorId": anchor_id,
-            "maxRetries": MAX_RETRIES, "retryNumber": retry});
+            "maxRetries": max, "retryNumber": retry});
         if let Some(request) = failed_request {
             started["failedRequestId"] = request.clone().into();
             retried["failedRequestId"] = request.clone().into();
@@ -171,4 +171,29 @@ fn commit_stopped_output(
         message["_zcode_origin"] = json!({"provider": provider, "model": model});
     }
     s.append_message(message);
+}
+
+/// Reports a recovery of the run's agent step to the engine and returns the next
+/// request's `streamRecovery` after the optional wait (`delay_ms`).
+pub(super) async fn retry_request(
+    sink: &crate::contract::EventSink,
+    cancel: &tokio_util::sync::CancellationToken,
+    (retry, max): (u32, u32),
+    delay_ms: u64,
+) -> Result<std::sync::Arc<Value>> {
+    use anyhow::Context;
+    let (reply, receipt) = oneshot::channel();
+    sink.send(Event::StreamRecovery { retry, max, reply })
+        .await?;
+    let status = tokio::select! {biased;
+        _ = cancel.cancelled() => anyhow::bail!("Cancelled"),
+        status = receipt => status.context("Stream recovery commit failed")?,
+    };
+    if delay_ms > 0 {
+        tokio::select! {biased;
+            _ = cancel.cancelled() => anyhow::bail!("Cancelled"),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {}
+        }
+    }
+    Ok(std::sync::Arc::new(status))
 }

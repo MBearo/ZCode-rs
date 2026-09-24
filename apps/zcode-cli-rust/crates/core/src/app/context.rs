@@ -29,6 +29,8 @@ pub(super) struct RunContext {
     pub anomaly_guard: crate::domain::model_anomaly::Guard,
     /// Node `autoCompactConsecutiveFailures` when the run started, kept current by the run.
     pub compact_failures: u32,
+    /// Not the session's first turn (Node `turnNumber > 0`).
+    pub returning: bool,
     pub(super) estimated: usize,
     /// Messages shown to the model but never persisted, before `messages[position]`.
     pub(super) transient: Vec<Transient>,
@@ -75,6 +77,7 @@ impl RunContext {
             plan_exit_sent: false,
             anomaly_guard: Default::default(),
             compact_failures: 0,
+            returning: false,
             estimated,
             transient: vec![],
         }
