@@ -150,6 +150,11 @@ impl Engine {
             )
         } else {
             let (turn, _) = self.admit_input(id, &c, shared)?;
+            // 与 Node 一致：抢占式立即发送的输入以 user_steer 呈现，排队输入带排队位置。
+            let start_now = item["delivery"]["admitted"] == "startNow";
+            let intent = crate::domain::node_journal::intent::turn_intent(&item, !start_now);
+            let presentation = start_now.then_some("user_steer");
+            self.node_prompt(id, &turn, &c, (Some(intent), presentation));
             (turn, self.new_turn_rows(id))
         };
         self.publish(id, deltas)?;

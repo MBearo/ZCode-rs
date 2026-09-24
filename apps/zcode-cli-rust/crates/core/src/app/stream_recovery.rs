@@ -149,17 +149,7 @@ fn commit_stopped_output(
     s: &mut crate::domain::session::Session,
     probe: &crate::domain::stream_recovery::StepProbe,
 ) {
-    let Some(response) = &probe.response else {
-        return;
-    };
-    let text_of = |kind: &str| {
-        s.rows
-            .iter()
-            .filter(|r| r["assistantResponseId"] == response.as_str() && r["kind"] == kind)
-            .filter_map(|r| r["text"].as_str())
-            .collect::<String>()
-    };
-    let (text, reasoning) = (text_of("assistantText"), text_of("reasoning"));
+    let (text, reasoning) = streamed_output(s, probe);
     if text.is_empty() && reasoning.is_empty() {
         return;
     }
@@ -171,6 +161,24 @@ fn commit_stopped_output(
         message["_zcode_origin"] = json!({"provider": provider, "model": model});
     }
     s.append_message(message);
+}
+
+/// The text and reasoning the step in flight streamed so far.
+pub(super) fn streamed_output(
+    s: &crate::domain::session::Session,
+    probe: &crate::domain::stream_recovery::StepProbe,
+) -> (String, String) {
+    let Some(response) = &probe.response else {
+        return Default::default();
+    };
+    let text_of = |kind: &str| {
+        s.rows
+            .iter()
+            .filter(|r| r["assistantResponseId"] == response.as_str() && r["kind"] == kind)
+            .filter_map(|r| r["text"].as_str())
+            .collect::<String>()
+    };
+    (text_of("assistantText"), text_of("reasoning"))
 }
 
 /// Reports a recovery of the run's agent step to the engine and returns the next

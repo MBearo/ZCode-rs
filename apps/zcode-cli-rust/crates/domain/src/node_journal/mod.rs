@@ -4,6 +4,7 @@
 //! Node's repository SQL in one transaction per commit. Pure: no IO.
 mod assistant;
 mod finish;
+pub mod intent;
 pub mod records;
 mod session;
 mod turn;

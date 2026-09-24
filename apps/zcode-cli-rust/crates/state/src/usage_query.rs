@@ -20,14 +20,21 @@ fn count(row: &Row, index: usize) -> rusqlite::Result<u64> {
 }
 
 /// Node `queryAppUsage` over `since..=until`, days bucketed with a fixed offset.
-pub(super) fn app(conn: &Connection, since: i64, until: i64, offset: i64) -> Result<AppRows> {
+pub(super) fn app(
+    conn: &Connection,
+    prefix: &str,
+    since: i64,
+    until: i64,
+    offset: i64,
+) -> Result<AppRows> {
+    let sql = |text: &str| text.replace("rust_", prefix);
     let range = params![since, until];
     let mut rows = conn.query_row(
-        "SELECT coalesce(sum(computed_total_tokens),0),coalesce(sum(input_tokens),0),
+        &sql("SELECT coalesce(sum(computed_total_tokens),0),coalesce(sum(input_tokens),0),
           coalesce(sum(output_tokens),0),coalesce(sum(reasoning_tokens),0),
           coalesce(sum(cache_creation_input_tokens),0),coalesce(sum(cache_read_input_tokens),0),count(*),
           coalesce(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0),avg(time_to_first_token_ms)
-        FROM rust_model_usage WHERE started_at>=?1 AND started_at<=?2",
+        FROM rust_model_usage WHERE started_at>=?1 AND started_at<=?2"),
         range,
         |r| {
             Ok(AppRows {
@@ -49,32 +56,34 @@ pub(super) fn app(conn: &Connection, since: i64, until: i64, offset: i64) -> Res
         rows.total_turns,
         rows.avg_turn_duration_ms,
     ) = conn.query_row(
-        "SELECT count(DISTINCT session_id),count(*),
+        &sql("SELECT count(DISTINCT session_id),count(*),
           avg(CASE WHEN status='completed' THEN duration_ms ELSE NULL END)
-        FROM rust_turn_usage WHERE started_at>=?1 AND started_at<=?2",
+        FROM rust_turn_usage WHERE started_at>=?1 AND started_at<=?2"),
         range,
         |r| Ok((count(r, 0)?, count(r, 1)?, r.get(2)?)),
     )?;
     rows.longest_session_ms = conn.query_row(
-        "SELECT coalesce(max(total),0) FROM (SELECT
+        &sql("SELECT coalesce(max(total),0) FROM (SELECT
           coalesce(sum(CASE WHEN status='completed' THEN duration_ms ELSE 0 END),0) AS total
-        FROM rust_turn_usage WHERE started_at>=?1 AND started_at<=?2 GROUP BY session_id)",
+        FROM rust_turn_usage WHERE started_at>=?1 AND started_at<=?2 GROUP BY session_id)"),
         range,
         |r| count(r, 0),
     )?;
     (rows.tool_call_count, rows.tool_error_count) = conn.query_row(
-        "SELECT count(*),coalesce(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)
+        &sql(
+            "SELECT count(*),coalesce(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)
         FROM rust_tool_usage WHERE started_at>=?1 AND started_at<=?2",
+        ),
         range,
         |r| Ok((count(r, 0)?, count(r, 1)?)),
     )?;
     rows.models = conn
-        .prepare_cached(
+        .prepare_cached(&sql(
             "SELECT model_id,coalesce(sum(computed_total_tokens),0) AS totalTokens,
               coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0),count(*)
             FROM rust_model_usage WHERE started_at>=?1 AND started_at<=?2
             GROUP BY model_id ORDER BY totalTokens DESC",
-        )?
+        ))?
         .query_map(range, |r| {
             Ok(ModelRow {
                 model_id: r.get(0)?,
@@ -86,12 +95,10 @@ pub(super) fn app(conn: &Connection, since: i64, until: i64, offset: i64) -> Res
         })?
         .collect::<rusqlite::Result<_>>()?;
     rows.tools = conn
-        .prepare_cached(
-            "SELECT tool_name,count(*) AS callCount,
+        .prepare_cached(&sql("SELECT tool_name,count(*) AS callCount,
               coalesce(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0),avg(duration_ms)
             FROM rust_tool_usage WHERE started_at>=?1 AND started_at<=?2
-            GROUP BY tool_name ORDER BY callCount DESC",
-        )?
+            GROUP BY tool_name ORDER BY callCount DESC"))?
         .query_map(range, |r| {
             Ok(ToolRow {
                 tool_name: r.get(0)?,
@@ -109,11 +116,11 @@ pub(super) fn app(conn: &Connection, since: i64, until: i64, offset: i64) -> Res
         ("rust_turn_usage", "count(*)"),
         ("rust_tool_usage", "count(*)"),
     ] {
-        let sql = format!(
+        let text = format!(
             "SELECT CAST((started_at+?1)/?2 AS INTEGER) AS dayIndex,{column} FROM {table}
             WHERE started_at>=?3 AND started_at<=?4 GROUP BY dayIndex"
         );
-        let mut query = conn.prepare_cached(&sql)?;
+        let mut query = conn.prepare_cached(&sql(&text))?;
         let found = query.query_map(bucketed, |r| Ok((r.get::<_, i64>(0)?, count(r, 1)?)))?;
         for row in found {
             let (day_index, value) = row?;
@@ -130,11 +137,11 @@ pub(super) fn app(conn: &Connection, since: i64, until: i64, offset: i64) -> Res
     }
     rows.days = days.into_values().collect();
     rows.day_models = conn
-        .prepare_cached(
+        .prepare_cached(&sql(
             "SELECT CAST((started_at+?1)/?2 AS INTEGER) AS dayIndex,model_id,
               coalesce(sum(computed_total_tokens),0)
             FROM rust_model_usage WHERE started_at>=?3 AND started_at<=?4 GROUP BY dayIndex,model_id",
-        )?
+        ))?
         .query_map(bucketed, |r| {
             Ok(DayModelRow {
                 day_index: r.get(0)?,
@@ -147,13 +154,14 @@ pub(super) fn app(conn: &Connection, since: i64, until: i64, offset: i64) -> Res
 }
 
 /// The session's model requests for Node `queryTaskUsage`.
-pub(super) fn task(conn: &Connection, session_id: &str) -> Result<Vec<TaskRow>> {
+pub(super) fn task(conn: &Connection, prefix: &str, session_id: &str) -> Result<Vec<TaskRow>> {
+    let sql = |text: &str| text.replace("rust_", prefix);
     let rows = conn
-        .prepare_cached(
+        .prepare_cached(&sql(
             "SELECT query_source,status,input_tokens,output_tokens,reasoning_tokens,
               cache_creation_input_tokens,cache_read_input_tokens,computed_total_tokens,provider_total_tokens
             FROM rust_model_usage WHERE session_id=?1 ORDER BY started_at ASC,id ASC",
-        )?
+        ))?
         .query_map([session_id], |r| {
             Ok(TaskRow {
                 query_source: r.get(0)?,

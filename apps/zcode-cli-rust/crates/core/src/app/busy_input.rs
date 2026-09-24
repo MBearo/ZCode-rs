@@ -80,12 +80,15 @@ impl Engine {
             }
             // 与 Node 一致：ACK 的 inputId 是 commandId，队列项另有 queue_<commandId>。
             ack["result"] = json!({"type":"inputAccepted","delivery":if start_now{"startNow"}else{"queue"},"inputId":c.command_id});
-            s.queue.push(item);
+            s.queue.push(item.clone());
             s.revision += 1;
+            self.node_queue(&id, &item);
             self.publish(&id, vec![])?;
             None
         } else {
+            let intent = self.node_admit_now(&id, &c, "sendText");
             let (turn, _) = self.admit_input(&id, &c, shared)?;
+            self.node_prompt(&id, &turn, &c, (intent, None));
             ack["result"] =
                 json!({"type":"inputAccepted","delivery":"startNow","inputId":c.command_id});
             self.publish(&id, self.new_turn_rows(&id))?;

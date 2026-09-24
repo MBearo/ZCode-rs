@@ -202,10 +202,19 @@ impl Engine {
     pub(super) fn apply_selection(&mut self, id: &str, selection: ModelIdentity) -> Result<()> {
         let levels = self.model_levels(&selection);
         let s = self.sessions.get_mut(id).context("Session unavailable")?;
+        let changed = (&s.provider, &s.model, &s.reasoning_level)
+            != (
+                &selection.provider_id,
+                &selection.model_id,
+                &selection.reasoning_level,
+            );
         s.provider = selection.provider_id;
         s.model = selection.model_id;
         s.reasoning_level = selection.reasoning_level;
         s.thought_levels = levels;
+        if changed {
+            self.node(id, |s, now| s.node_model_selection(now));
+        }
         Ok(())
     }
     pub(super) fn notify_selection(&self, id: &str) -> Result<()> {

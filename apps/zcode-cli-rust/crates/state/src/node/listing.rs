@@ -85,7 +85,7 @@ fn session_info(row: &SessionRow, workspace: Value) -> Value {
 
 /// The workspace key a stored session belongs to: its identity, else its path
 /// (a non-empty one), else its directory.
-fn stored_workspace_key(row: &SessionRow) -> &str {
+pub fn workspace_key(row: &SessionRow) -> &str {
     let identity = row.workspace_id.as_deref().map(str::trim).unwrap_or("");
     if !identity.is_empty() {
         return identity;
@@ -98,7 +98,25 @@ fn stored_workspace_key(row: &SessionRow) -> &str {
 
 /// The stored sessions `session/list` returns, in Node's order.
 pub fn list(conn: &Connection, params: &ListParams) -> Result<Vec<Value>> {
-    let stored = match &params.session_ids {
+    Ok(rows(conn, params)?
+        .iter()
+        .map(|row| {
+            let workspace = match &params.workspace {
+                Some(workspace) => json!(workspace),
+                None => {
+                    // Node `buildWorkspaceRef({ workspacePath: session.path ?? session.directory })`.
+                    let path = row.path.clone().unwrap_or_else(|| row.directory.clone());
+                    json!({"workspaceKey": path, "workspacePath": path})
+                }
+            };
+            session_info(row, workspace)
+        })
+        .collect())
+}
+
+/// The session rows `session/list` returns, in Node's order.
+pub fn rows(conn: &Connection, params: &ListParams) -> Result<Vec<SessionRow>> {
+    let stored: Vec<SessionRow> = match &params.session_ids {
         Some(ids) => ids
             .iter()
             .map(|id| sessions::get(conn, id))
@@ -118,24 +136,13 @@ pub fn list(conn: &Connection, params: &ListParams) -> Result<Vec<Value>> {
         )?,
     };
     Ok(stored
-        .iter()
+        .into_iter()
         .filter(|row| params.include_archived || row.time_archived.is_none())
         .filter(|row| {
             params
                 .workspace
                 .as_ref()
-                .is_none_or(|w| stored_workspace_key(row) == w.identity())
-        })
-        .map(|row| {
-            let workspace = match &params.workspace {
-                Some(workspace) => json!(workspace),
-                None => {
-                    // Node `buildWorkspaceRef({ workspacePath: session.path ?? session.directory })`.
-                    let path = row.path.clone().unwrap_or_else(|| row.directory.clone());
-                    json!({"workspaceKey": path, "workspacePath": path})
-                }
-            };
-            session_info(row, workspace)
+                .is_none_or(|w| workspace_key(row) == w.identity())
         })
         .collect())
 }

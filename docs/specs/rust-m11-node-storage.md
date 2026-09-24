@@ -165,33 +165,63 @@ flowchart LR
 
 - **NodeJournal**（domain，纯函数、无 IO）挂在 `Session.node`：记住当前轮与当前模型步骤的 Node id（用户消息、assistant 消息、各 part、工具 part 的声明序号与开始时间），在与 Node 相同的时机按 Node 写入模板生成记录，排入待写队列。
 - **NodeStore**（state）实现 core 的 `SessionStore`：一次 `commit` 把会话的待写队列在一个 `begin immediate` 事务里交给 M11.1 的仓储函数；`load_index`、`list_sessions`、`load_session`、`lookup_ack` 走 §6、§7 的冷读取；用量写入 Node 的 `model_usage`/`turn_usage`/`tool_usage`；项目设置写 `local_setting`。
-- 过渡：M11.3、M11.4 期间 NodeStore 由启动参数显式选择，旧存储仍为默认；M11.5 改为唯一实现并删除旧存储。
-- id：新会话 `sess_<uuid>`；消息与 part 用 Node 格式（毫秒 36 进制 + uuid）；`anchor.turnId` 为 `turn_<轮 uuid>`。
+- 过渡：M11.3、M11.4 期间 NodeStore 由 `app-server --node-storage` 或环境变量 `ZCODE_CLI_RUST_NODE_STORAGE=1`（`-p` 同样适用）显式选择，数据库与产物根按 §2.1 解析；旧存储仍为默认。M11.5 改为唯一实现并删除旧存储。
+- 开关：`SessionStore::node_journal()` 只有 NodeStore 为 true。为 false 时引擎不调用任何 NodeJournal 钩子，旧存储与测试替身的行为、提交次数不变。
+- id：新会话 `sess_<uuid>`（NodeStore 时）；消息与 part 用 Node 格式（毫秒 36 进制 + uuid）；`anchor.turnId` 为 `turn_<轮 uuid>`。
+- 提交：`commit` 取出会话的待写队列，在 worker 上以一个 `begin immediate` 事务执行；失败时整批写操作放回 `Session.node`，下一次提交重试，不丢失也不重复。`ack` 参数不落库（Node 不持久化回执，§7）。
+- 读取：`load_index` 为 §6.2 的冷种子；`list_sessions` 按 §6.2 过滤后以 `path ?? directory` 构造工作区引用；`load_session` 只返回本工作区（`workspaceID.trim() || path || directory` 等于引擎的 workspace identity）的会话，按 §6.1 恢复，并把 `admitted` 输入结算为 `discarded/session_resumed`；`zcode-artifact://` 按 Node `NodeToolArtifactStore` 的目录规则读取（文本产物按 UTF-8，其余 base64）。冷行投影的上下文窗口暂不传（`context_window = None`），随 M11.4 的模型 registry 接入补齐。
+- 项目设置：`permission/ruleset` 以 core 的 `projectIdFromDirectory`（空 slug 为 `session`）为 scope id，`permission/mode` 以 bootstrap 的同名函数（空 slug 为 `default`）为 scope id，两者都带 `proj_` 前缀，与 Node 两处写入方一致。
+- 用量写入 Node 的 `model_usage`、`turn_usage`、`tool_usage`（与 `rust_*` 同列，无前缀）。
+- 附件：M11.3 期间提示附件仍存内容寻址目录（Rust data dir 下 `attachments`），user 消息暂不写 `file` part；M11.4 改为 Node 产物与 `file` part。
 
 ### 5.2 事件到 Node 写入的对应
 
-| Rust 时机                    | Node 写入（模板）                                                                                                                                                    |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 会话首次落库（首个输入准入） | `createSession`（`title = titleFromInput`、`titleSource = first_input`、`permission = {mode}`）、`runtime/model_selection`、`runtime/execution_state`（`events.ts`） |
-| 输入准入（startNow）         | user 消息 + text part（`persistUserPrompt`：`semantics` real_user、`anchor`、`modelSelection`、`metadata.conversationInputIntent` 等）                               |
-| 模型步骤开始                 | assistant 消息（无 `completed`）+ `step-start` part（`turn-model-step.ts`）                                                                                          |
-| ModelDone                    | reasoning part（按 provider 推理块拆分，`metadata` 为 providerOptions）、text part；无工具调用时 `step-finish` + assistant 完成（`finish`、`tokens`）                |
-| ModelDone 带工具调用         | 每个调用一个 `pending` 工具 part（`declarationIndex`、`input`、`raw`）                                                                                               |
-| ToolStart                    | 工具 part `running`（`time.start`）                                                                                                                                  |
-| ToolDone                     | 工具 part `completed`（`output`、`metadata.schemaVersion`）或 `error`（`error`、`metadata.modelContent`）                                                            |
-| 一个步骤的工具全部完成       | `step-finish` + assistant 完成（`finish = tool-calls`）                                                                                                              |
-| 轮次成功结束                 | 最终 assistant 重写 `anchor`（`historyRoundCount`、`orderedMessageIds`、`boundaryMessageId`、`goalBoundary`）                                                        |
-| 轮次失败                     | 当前步骤 assistant 完成并带 `error{name, data{message, code?, attribution?}}`                                                                                        |
-| 取消                         | 已流式到达的 reasoning/text part，assistant 完成并带取消 error（`data.turnResult = cancelled`）                                                                      |
-| 流恢复重试                   | 旧步骤 assistant 带 `StreamRecoveryDiscarded` error、`finish = stream_recovery_discarded`，新步骤另起消息                                                            |
-| 标题、模型、模式、todo       | `updateSession`、`runtime/model_selection`、`runtime/execution_state`、`todo`                                                                                        |
+| Rust 时机                    | Node 写入（模板）                                                                                                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 会话首次落库（首个输入准入） | `createSession`（`title = titleFromInput`、`titleSource = first_input`、`permission = {mode}`）、`runtime/model_selection`、`runtime/execution_state`（`events.ts`）       |
+| 输入准入（startNow）         | user 消息 + text part（`persistUserPrompt`：`semantics` real_user、`anchor`、`modelSelection`、`metadata.conversationInputIntent` 等）                                     |
+| 模型步骤开始                 | assistant 消息（无 `completed`）+ `step-start` part（`turn-model-step.ts`）                                                                                                |
+| ModelDone                    | reasoning part（按 provider 推理块拆分，`metadata` 为 providerOptions）、text part；无工具调用时 `step-finish` + assistant 完成（`finish`、`tokens`）                      |
+| ModelDone 带工具调用         | 每个调用一个 `pending` 工具 part（`declarationIndex`、`input`、`raw`）                                                                                                     |
+| ToolStart                    | 工具 part `running`（`time.start`）                                                                                                                                        |
+| ToolDone                     | 工具 part `completed`（`output`、`metadata.schemaVersion`）或 `error`（`error`、`metadata.modelContent`）                                                                  |
+| 一个步骤的工具全部完成       | `step-finish` + assistant 完成（`finish = tool-calls`）                                                                                                                    |
+| 轮次成功结束                 | 最终 assistant 重写 `anchor`（`historyRoundCount`、`orderedMessageIds`、`boundaryMessageId`、`goalBoundary`）                                                              |
+| 轮次失败                     | 当前步骤 assistant 完成并带 `error{name, data{message, code?, attribution?}}`                                                                                              |
+| 取消                         | 已流式到达的 reasoning/text part，assistant 完成并带取消 error（`data.turnResult = cancelled`）                                                                            |
+| 流恢复重试                   | 旧步骤 assistant 带 `StreamRecoveryDiscarded` error、`finish = stream_recovery_discarded`，新步骤另起消息                                                                  |
+| 标题、模型、模式、todo       | `updateSession`、`runtime/model_selection`、`runtime/execution_state`、`todo`                                                                                              |
+| 忙时输入（排队/引导）        | 账本行 `queue_<commandId>`（`TurnSteerQueued` 形态：`intent` 带 `queuePosition`，`conversationInputIntent.dispatch = queued`，`delivery = queue/guide`）                   |
+| 忙时立即发送（抢占）         | 账本行为 admission 形态（`delivery = startNow`）；提升时 user 消息 `metadata.inputPresentation = user_steer`                                                               |
+| 排队输入提升为新轮           | `promoteSessionInput`：user 消息 `metadata.inputIntent`（排队时的 intent）与 `conversationInputIntent.dispatch = drained`                                                  |
+| 工具阶段结束（取消或失败）   | 未完成的工具写 `error` part（内容与 `metadata.modelContent` 为运行时历史中该调用的结果）；取消时步骤按工具步骤收口（`step-finish`、`finish = tool-calls`），失败时带 error |
 
 - Rust canonical assistant 到 Node part 的映射是 §6 冷读取映射的逆：Anthropic thinking 块 → 每块一个 reasoning part（`metadata.anthropic.signature` / `redactedData`），Responses 推理项 → `metadata.openai.{itemId, reasoningEncryptedContent}`，其余 `reasoning_content` → 一个无 metadata 的 reasoning part；工具参数解析为对象作为 `input`；失败工具的模型可见内容写 `metadata.modelContent`。
 - 验收：用 NodeStore 跑脚本化会话，把 Node 库按 §6 冷读取，模型上下文与运行时一致，界面行的种类、文本、工具状态一致；Node 侧用真实 `SqliteSessionStore` 读取同一库无解码错误。
 
+- **步骤开始即落库**：`model_request_started`（`querySource` 为 `main_turn`/`subagent`，且没有未完成的步骤）时写 assistant 与 `step-start`，并立即提交；同一步骤的重试（attempt ≥ 2）不另起消息。
 - **取消**：写入已收到的 reasoning 与 text（`time.start` 为 assistant 创建时间），assistant 带 `completed` 与取消错误，不写 step-finish，与 Node `persistCancelledStreamSnapshot` 相同。
+- **已知差异**：运行时在工具阶段被取消时，Rust 内存历史给未完成调用补的结果文本与 `_zcode_tool_failed = false` 来自 Rust 实现，Node 为 `Tool execution cancelled` 且记为失败。落库沿用 Node 语义（`error` part），因此重启后该调用在模型上下文中记为失败；运行时文本与 Node 对齐另行处理。
 - **崩溃**：已落库的 `pending`/`running` 工具与未完成的 assistant 保持原样，读取端按"中断"投影，不改库。
 - 工具执行前与下一次模型请求前的两个耐久屏障沿用 `rust-cli-core.md` 的规则。
+
+忙时输入的账本时序（排队后提升）：
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant A as Session actor
+  participant J as NodeJournal
+  participant W as 存储 worker
+  C->>A: sendText(c2)（当前轮运行中）
+  A->>J: session_input queue_c2（admitted, queue, dispatch=queued）
+  A->>W: persist（事务提交）
+  A-->>C: ACK delivery=queue
+  Note over A: 当前轮 Finished
+  A->>J: promoteSessionInput(queue_c2)：user 消息 + text part，账本 promoted
+  A->>W: persist
+  A->>A: 开始新轮
+```
 
 ## 6. 冷加载
 
@@ -258,6 +288,10 @@ flowchart TD
 
 createSession 的全局查找按 `queue_<commandId>` 读取输入行（Node `lookupGlobalCreateSessionCommand`）。Node 不持久化回执的命令，重启后 Rust 同样不能重放其 ACK。
 
+- 1–3 由引擎内存负责（进行中、队列中的回执常驻，已结算回执有上限）；未命中时引擎调用 `SessionStore::lookup_ack_live(workspace, key, live)`，`live` 表示 key 所属会话在本进程常驻。
+- 冷查询（`live = false`）先把该会话 `admitted` 的输入结算为 `discarded/session_resumed`，与 Node `discardAdmittedOnLoad: !live` 相同；常驻会话的排队输入不受影响。
+- transcript 与 timeline 查询只读匹配的一行（`json_extract` 过滤，非法 JSON 视为不匹配），不加载整段对话。
+
 ## 8. 启动与存储准备握手
 
 - `--prepare-storage`：输出 `startup/storagePath`（解析后的 Node 库路径），等待一行 `startup/storagePathReady`（30 s）。`reuse` 为 true 时跳过迁移；否则打开并迁移，输出 `startup/storageState` 进度，最后输出 `startup/storagePrepared` 并退出。
@@ -284,7 +318,15 @@ createSession 的全局查找按 `queue_<commandId>` 读取输入行（Node `loo
 | M11.4  | 写入扩展：压缩、回退/编辑/重试（`session.revert`）、fork 与侧聊、goal、子代理、checkpoint 与文件回退、共享上下文、全权限授权、提问自动结算、后台通知、附件与产物                                               | 各功能的 Node 读取验证                                                                                                                                                                                                                       |
 | M11.5  | 切换与清理：Node 库成为唯一存储；删除 `rust_*` 表、导入流程、备份、`--import-ts-db` 与 data dir 中的库；集成测试改用 Node 库                                                                                   | 交叉运行：Node 建会话 → Rust 恢复并继续 → Node 恢复并继续，反向同样；全量集成测试                                                                                                                                                            |
 
-M11.2 至 M11.4 期间，Rust 仍以原存储为运行时事实来源，Node 记录写入同一份库用于验证（过渡双写，只在本分支存在），M11.5 删除原存储。
+M11.3 至 M11.4 期间两种存储二选一（§5.1 的开关），不双写；默认仍为原存储，M11.5 删除原存储。
+
+M11.3 已完成的范围与验证：
+
+- 写入：会话创建（首个输入）、直接开始与忙时输入的账本、排队提升、user 消息、assistant 步骤、推理与正文、工具 pending/running/completed/error、取消与失败收口、流恢复丢弃、稳定 fork 边界、标题（重命名）、模型选择、执行状态、todo、用量、项目设置、命令回执反查。
+- 集成测试 `apps/zcode-cli-rust/tests/node_storage.rs`：引擎跑带工具的轮次、忙时排队与提升、重启后由新 runtime 续聊；按 §6 冷读取，模型上下文与运行时请求一致，行与账本正确。
+- 交叉读取 `node --import tsx scripts/zcode-cli-rust-node-storage-check.mjs`：Node 的 `SqliteSessionStore`、history hydrator 与冷投影读取 Rust 写出的库，history、行与快照状态与 Rust 冷读取逐项相等。
+
+移入 M11.4 的写入：引导输入（`turnSteerDelivery = guide` 的 user 消息与轮内切分）、队列编辑/删除/重排与 `sendQueuedNow`（`updateSessionInputs`、`cancelled` 结算）、goal 命令与验证、压缩、编辑/重试/fork 的历史重跑、`deleteSession` 归档、legacy `session/create` 与导入路径、子代理子会话、附件 `file` part 与 Node 产物、冷投影的上下文窗口、自动标题更新。
 
 ## 11. 验收场景
 

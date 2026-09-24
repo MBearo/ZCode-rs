@@ -36,6 +36,7 @@ impl Engine {
         write: Option<Vec<TodoItem>>,
         reply: oneshot::Sender<ToolOutput>,
     ) -> Result<()> {
+        let journaling = self.journaled(id);
         let s = self.sessions.get_mut(id).unwrap();
         let now = self.clock.now();
         let data = todo::result(&s.todos, write.as_deref());
@@ -44,6 +45,9 @@ impl Engine {
             s.todos = todos;
             s.todos_updated_at = now;
             s.revision += 1;
+            if journaling {
+                s.node_todos(now);
+            }
         }
         let turn = &self.active[id].turn_id;
         let row = s

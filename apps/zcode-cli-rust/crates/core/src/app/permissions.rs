@@ -226,6 +226,7 @@ impl Engine {
             s.plan_transition = Some(json!({"toolCallId": call, "planEnabled": next.plan_enabled}));
         }
         s.revision += 1;
+        self.node(id, |s, now| s.node_execution_state(now));
         self.refresh_permissions();
         Ok(true)
     }

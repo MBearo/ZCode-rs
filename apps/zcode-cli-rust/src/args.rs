@@ -32,4 +32,7 @@ pub struct AppServerArgs {
     pub surface: String,
     #[arg(long)]
     pub prepare_storage: bool,
+    /// Use the shared Node session database (M11 transition; default in M11.5).
+    #[arg(long)]
+    pub node_storage: bool,
 }

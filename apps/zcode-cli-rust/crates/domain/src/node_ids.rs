@@ -78,6 +78,14 @@ pub fn slugify(value: &str) -> String {
     }
 }
 
+/// Node bootstrap `projectIdFromDirectory` (the project mode preference's
+/// scope): an empty slug is `default`, not `session`.
+pub fn app_project_id(directory: &str) -> String {
+    let slug = dashed(directory);
+    let slug = &slug[..slug.len().min(80)];
+    format!("proj_{}", if slug.is_empty() { "default" } else { slug })
+}
+
 /// Node core `projectIdFromDirectory`: `proj_` plus the first 80 slug chars.
 /// The slug is ASCII, so byte slicing equals JS `slice`.
 pub fn project_id(directory: &str) -> String {
@@ -108,6 +116,8 @@ mod tests {
     fn slugs_and_project_ids_follow_node() {
         assert_eq!(project_id("/Users/a/My Repo/"), "proj_users-a-my-repo");
         assert_eq!(project_id(""), "proj_session");
+        assert_eq!(app_project_id("/"), "proj_default");
+        assert_eq!(app_project_id("/Users/a/My Repo/"), "proj_users-a-my-repo");
         assert_eq!(slugify("sess_ABC-1"), "sess_abc-1");
         assert_eq!(slugify("C:\\Work\\Ünï"), "c-work-n");
         let long = format!("/{}", "a".repeat(100));

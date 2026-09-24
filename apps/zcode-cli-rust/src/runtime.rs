@@ -4,13 +4,19 @@ use anyhow::{Context as _, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
 use zcode_cli_core::Engine;
-use zcode_cli_core_api::{ModelIdentity, ModelPort, ModelRegistry, RuntimePorts};
+use zcode_cli_core_api::{ModelIdentity, ModelPort, ModelRegistry, RuntimePorts, SessionStore};
 use zcode_cli_domain::config::ConfigSnapshot;
 use zcode_cli_host::{SystemClock, WorkspaceConfig, WorkspaceContext};
 use zcode_cli_model::{config::ModelConfig, provider::HttpModel, registry::Registry};
 use zcode_cli_net::{Egress, NetworkPolicy, RuntimeEnv};
-use zcode_cli_state::Store;
+use zcode_cli_state::NodeStore;
 use zcode_cli_tools::WorkspaceTools;
+
+/// M11 transition: the Node session database is the store when selected
+/// (`--node-storage` or `ZCODE_CLI_RUST_NODE_STORAGE=1`).
+pub fn node_storage(flag: bool) -> bool {
+    flag || std::env::var_os("ZCODE_CLI_RUST_NODE_STORAGE").is_some_and(|v| v == "1")
+}
 
 pub fn home() -> PathBuf {
     std::env::var_os("HOME")
@@ -94,11 +100,30 @@ impl Context {
         })
     }
 
+    /// The Node session database and artifact root (spec rust-m11-node-storage §2.1).
+    pub async fn node_database(&self) -> Result<zcode_cli_host::legacy_paths::LegacySource> {
+        let config = self.workspace_config.snapshot().await;
+        zcode_cli_host::legacy_paths::resolve(None, &std::env::current_dir()?, true, &config)
+            .await?
+            .context("Session database unavailable")
+    }
+
+    /// The Node database as the session store.
+    pub async fn node_store(&self) -> Result<NodeStore> {
+        let source = self.node_database().await?;
+        NodeStore::open(
+            source.database,
+            source.artifacts,
+            self.data_dir.join("attachments"),
+        )
+        .await
+    }
+
     /// The engine over `store`: a static `--config` model or the provider
     /// registry from the environment.
     pub async fn engine(
         &self,
-        store: Store,
+        store: Arc<dyn SessionStore>,
         config: Option<&PathBuf>,
         desktop: bool,
     ) -> Result<Engine> {
@@ -146,7 +171,7 @@ impl Context {
                     desktop,
                     self.runtime_env.vars().into(),
                 )),
-                store: Arc::new(store),
+                store,
                 model,
                 tools: Arc::new(WorkspaceTools::new(
                     self.cwd.clone(),

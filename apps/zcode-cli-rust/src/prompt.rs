@@ -192,7 +192,12 @@ async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
     let ctx = runtime::Context::prepare(Some(cwd.clone()), data_dir).await?;
     // 与 app-server 相同的工作区所有权：同一工作区只能有一个 Rust runtime 写入。
     let _owner = Store::lock_workspace(ctx.data_dir.clone(), ctx.workspace.clone()).await?;
-    let store = Store::open(ctx.data_dir.join("rust-sessions.sqlite")).await?;
+    let store: std::sync::Arc<dyn zcode_cli_core_api::SessionStore> =
+        if runtime::node_storage(false) {
+            std::sync::Arc::new(ctx.node_store().await?)
+        } else {
+            std::sync::Arc::new(Store::open(ctx.data_dir.join("rust-sessions.sqlite")).await?)
+        };
     let config = prompt.config.as_ref().map(PathBuf::from);
     let engine = ctx
         .engine(store, config.as_ref(), prompt.surface == "desktop")

@@ -195,3 +195,56 @@ fn cancellation_keeps_the_streamed_output_and_marks_the_turn_cancelled() {
         json!({"role": "assistant", "content": "partial", "_zcode_origin": {"provider": "p", "model": "m"}})
     );
 }
+
+#[test]
+fn a_run_ending_during_tools_stores_their_results_and_closes_the_step() {
+    let mut s = session();
+    let mut next = ids();
+    s.node_ensure_created(10, "go", "0.0.0");
+    s.node_user_prompt(
+        10,
+        Prompt {
+            message: "msg_user".into(),
+            part: "part_user".into(),
+            turn: "t1",
+            text: "go",
+            command: None,
+            queue_id: None,
+            metadata: None,
+            tools: &[],
+        },
+    );
+    s.node_step_started(20, ("msg_a1".into(), "part_s1".into()), "p", "m");
+    s.node_model_status(&json!({"type": "model_request_completed", "finishReason": "tool-calls"}));
+    let call = json!({"role": "assistant", "content": "",
+        "tool_calls": [{"id": "call_1", "type": "function",
+            "function": {"name": "Bash", "arguments": "{\"command\":\"sleep 9\"}"}}],
+        "_zcode_origin": {"provider": "p", "model": "m"}});
+    s.node_model_done(30, Some(&call), &mut next);
+    s.node_tool_started(31, "call_1");
+    s.messages = vec![call.clone()];
+    let results = s.unfinished_tool_results();
+    s.node_close_tools(40, &results);
+    s.node_finished(
+        40,
+        Outcome::Cancelled {
+            text: "",
+            reasoning: "",
+        },
+        &mut next,
+    );
+    let records = records(&s.node.take());
+    let assistant = &records[1];
+    assert_eq!(assistant.info["finish"], "tool-calls");
+    assert_eq!(assistant.info["time"]["completed"], 40);
+    let tool = &assistant.parts[1];
+    assert_eq!(tool["state"]["status"], "error");
+    assert_eq!(tool["state"]["time"], json!({"start": 31, "end": 40}));
+    assert_eq!(assistant.parts.last().unwrap()["type"], "step-finish");
+    let canonical: Vec<Value> = hydrate(&records, &|_| None)
+        .entries
+        .iter()
+        .map(|e| e.canonical())
+        .collect();
+    assert_eq!(canonical[2]["content"], results[0].1);
+}

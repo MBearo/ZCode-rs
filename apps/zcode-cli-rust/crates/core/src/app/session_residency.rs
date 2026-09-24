@@ -13,7 +13,14 @@ impl Engine {
         if let Some(ack) = self.acks.get(key) {
             return Ok(Some(ack.clone()));
         }
-        let ack = self.store.lookup_ack(&self.workspace, key).await?;
+        let live = serde_json::from_str::<(Option<String>, String)>(key)
+            .ok()
+            .and_then(|(session, _)| session)
+            .is_some_and(|session| self.sessions.contains_key(&session));
+        let ack = self
+            .store
+            .lookup_ack_live(&self.workspace, key, live)
+            .await?;
         if let Some(ack) = &ack {
             self.acks.insert(key.into(), ack.clone());
             self.durable_acks.insert(key.into());

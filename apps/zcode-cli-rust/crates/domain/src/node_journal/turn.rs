@@ -150,6 +150,11 @@ impl Session {
         }
     }
 
+    /// A model step is open (its assistant is not completed yet).
+    pub fn node_step_open(&self) -> bool {
+        self.open_step().is_some()
+    }
+
     pub(super) fn open_step(&self) -> Option<Step> {
         self.node
             .turn

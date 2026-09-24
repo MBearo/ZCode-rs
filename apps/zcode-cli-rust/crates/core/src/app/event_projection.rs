@@ -27,8 +27,7 @@ impl Engine {
         if active.run_id != event.run_id {
             return Ok(());
         }
-        self.observe_usage(&id, &event.event).await;
-        self.observe_step(&id, &event.event)?;
+        self.observe_event(&id, &event.event).await?;
         let active = &self.active[&id];
         // 取消后的 failed(cancelled) 状态也要记入 session/debug（Node 同样发出）。
         if let Event::ModelStatus(status) = event.event {

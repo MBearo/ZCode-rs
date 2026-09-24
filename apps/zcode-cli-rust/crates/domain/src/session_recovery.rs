@@ -1,7 +1,15 @@
 use super::session::Session;
-use serde_json::json;
+use serde_json::{Value, json};
 impl Session {
     pub fn close_unfinished_tools(&mut self) {
+        for (id, content, failed) in self.unfinished_tool_results() {
+            self.append_message(json!({"role":"tool","tool_call_id":id,"content":content,"_zcode_tool_failed":failed}));
+        }
+    }
+    /// The results the history gives the run's unanswered tool calls when it
+    /// ends: `(call id, content, failed)`.
+    pub fn unfinished_tool_results(&self) -> Vec<(String, Value, bool)> {
+        let mut results = vec![];
         let mut unresolved = std::collections::BTreeMap::new();
         for message in &self.messages {
             if let Some(calls) = message["tool_calls"].as_array() {
@@ -25,8 +33,9 @@ impl Session {
             });
             let content=answered.map(|r|r["output"]["text"].clone()).unwrap_or_else(||json!("Interrupted; execution outcome is unknown. Do not assume this action was not performed."));
             let failed = answered.is_some_and(|r| r["status"] == "error");
-            self.append_message(json!({"role":"tool","tool_call_id":id,"content":content,"_zcode_tool_failed":failed}));
+            results.push((id, content, failed));
         }
+        results
     }
     pub fn finish_rows(&mut self, outcome: &str, now: u64) {
         for row in &mut self.rows {

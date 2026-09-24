@@ -6,8 +6,10 @@ use args::{AppServerArgs, Cli, Command};
 use clap::Parser;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use zcode_cli_app_server::{self as app_server, Sink, stdio};
+use zcode_cli_core_api::SessionStore;
 use zcode_cli_host::legacy_paths;
 use zcode_cli_state::Store;
 
@@ -60,7 +62,12 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         "App server starting"
     );
     let ctx = runtime::Context::prepare(args.cwd, args.data_dir).await?;
-    let path = ctx.data_dir.join("rust-sessions.sqlite");
+    let node_storage = runtime::node_storage(args.node_storage);
+    let path = if node_storage {
+        ctx.node_database().await?.database
+    } else {
+        ctx.data_dir.join("rust-sessions.sqlite")
+    };
     let cancel = CancellationToken::new();
     let signal_cancel = cancel.clone();
     tokio::spawn(async move {
@@ -95,18 +102,34 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         Some(Store::lock_workspace(ctx.data_dir.clone(), ctx.workspace.clone()).await?)
     };
     output.send_values(vec![progress("checking", 1)]).await?;
-    let store = match Store::open(path).await {
+    let opened = if node_storage {
+        ctx.node_store()
+            .await
+            .map(|store| (Arc::new(store) as Arc<dyn SessionStore>, None))
+    } else {
+        Store::open(path).await.map(|store| {
+            (
+                Arc::new(store.clone()) as Arc<dyn SessionStore>,
+                Some(store),
+            )
+        })
+    };
+    let (store, rust_store) = match opened {
         Ok(store) => store,
-        Err(_) => {
+        Err(error) => {
             let mut frame = progress("failed", 2);
-            frame["params"]["errorCode"] = "sql_failed".into();
+            // Node `DatabaseStartupErrorCode`：迁移与打开失败按原因上报，其余为 sql_failed。
+            frame["params"]["errorCode"] = error
+                .downcast_ref::<zcode_cli_state::node::open::StartupError>()
+                .map_or("sql_failed", |e| e.code)
+                .into();
             output.send_values(vec![frame]).await?;
             drop(output);
             let _ = stdio::finish(writer).await;
             anyhow::bail!("Session storage failed");
         }
     };
-    if !args.prepare_storage {
+    if let (false, Some(rust_store)) = (args.prepare_storage, &rust_store) {
         let import_cancel = cancel.child_token();
         let imported = async {
             if let Some(source) = legacy_paths::resolve(
@@ -118,7 +141,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
             .await?
             {
                 if tokio::fs::try_exists(&source.database).await? {
-                    let operation = store.import_ts(
+                    let operation = rust_store.import_ts(
                         source.database,
                         ctx.workspace.clone(),
                         ctx.requested_cwd.to_string_lossy().into_owned(),

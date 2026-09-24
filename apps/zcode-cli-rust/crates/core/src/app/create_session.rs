@@ -19,7 +19,7 @@ impl Engine {
             self.select(input, Some(config.clone()))?;
         }
         let mut session = Session::new(
-            self.clock.id(),
+            self.new_session_id(),
             self.workspace.clone(),
             config.provider_id.clone(),
             config.model_id.clone(),
@@ -53,7 +53,9 @@ impl Engine {
             let mut input_command = c.clone();
             input_command.payload = input;
             input_command.session_id = Some(id.clone());
+            let intent = self.node_admit_now(&id, &input_command, "createSession");
             let (t, _) = self.admit_input(&id, &input_command, None)?;
+            self.node_prompt(&id, &t, &input_command, (intent, None));
             turn = Some(t);
             // 与 Node 一致：inputId 即提交该输入的 commandId（也是模型请求的 query id）。
             ack["result"]["input"] = json!({"delivery":"startNow","inputId":c.command_id});

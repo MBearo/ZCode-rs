@@ -235,6 +235,7 @@ impl Engine {
                     Some(json!({"previousTitle": previous, "source": "custom", "title": title}));
                 s.title_source = "custom".into();
                 s.revision += 1;
+                self.node(&id, |s, now| s.node_title(now));
             }
             "setFollowupMode" => {
                 let mode = c.payload["mode"]

@@ -69,7 +69,7 @@ fn upserts_merge_like_node_and_pruning_drops_old_rows() {
     };
     old.tool_call_id = "old".into();
     writer.record(&conn, &Fact::Tool(old), now).unwrap();
-    prune(&conn, now - RETENTION_MS).unwrap();
+    prune(&conn, "rust_", now - RETENTION_MS).unwrap();
     let left: i64 = conn
         .query_row("SELECT count(*) FROM rust_tool_usage", [], |r| r.get(0))
         .unwrap();

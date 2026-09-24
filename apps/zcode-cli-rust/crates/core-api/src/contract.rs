@@ -66,10 +66,25 @@ pub use crate::contract_tools::{
 };
 #[async_trait]
 pub trait SessionStore: Send + Sync {
+    /// The store keeps Node session records (spec rust-m11-node-storage §5.1):
+    /// the engine then queues them on `Session.node` for `commit`.
+    fn node_journal(&self) -> bool {
+        false
+    }
     /// Startup reads only the lightweight persisted index, never every transcript or ACK.
     async fn load_index(&self, workspace: &str) -> Result<BTreeMap<String, Value>>;
     /// Read one durable receipt, disposing a cold queued input without hydrating its session.
     async fn lookup_ack(&self, workspace: &str, key: &str) -> Result<Option<Value>>;
+    /// `lookup_ack` knowing whether the key's session has a live runtime here;
+    /// a cold lookup may settle its admitted inputs (Node `discardAdmittedOnLoad`).
+    async fn lookup_ack_live(
+        &self,
+        workspace: &str,
+        key: &str,
+        _live: bool,
+    ) -> Result<Option<Value>> {
+        self.lookup_ack(workspace, key).await
+    }
     /// Read persisted identities without loading history, resuming a runtime, or writing storage.
     async fn list_sessions(
         &self,

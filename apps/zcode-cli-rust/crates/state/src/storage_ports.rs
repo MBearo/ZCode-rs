@@ -37,12 +37,12 @@ impl crate::contract::SessionStore for Store {
         until: i64,
         offset: i64,
     ) -> Result<crate::domain::usage::AppRows> {
-        self.read_usage(move |conn| super::usage_query::app(conn, since, until, offset))
+        self.read_usage(move |conn| super::usage_query::app(conn, "rust_", since, until, offset))
             .await
     }
     async fn task_usage(&self, session_id: &str) -> Result<Vec<crate::domain::usage::TaskRow>> {
         let session = session_id.to_owned();
-        self.read_usage(move |conn| super::usage_query::task(conn, &session))
+        self.read_usage(move |conn| super::usage_query::task(conn, "rust_", &session))
             .await
     }
     async fn load_index(&self, workspace: &str) -> Result<BTreeMap<String, Value>> {
@@ -116,16 +116,7 @@ impl crate::contract::SessionStore for Store {
         offset: u64,
         limit: usize,
     ) -> Result<Vec<u8>> {
-        use tokio::io::{AsyncReadExt, AsyncSeekExt};
-        let mut file = tokio::fs::File::open(&asset.path).await?;
-        anyhow::ensure!(
-            file.metadata().await?.len() == asset.total_bytes,
-            "Attachment snapshot changed"
-        );
-        file.seek(std::io::SeekFrom::Start(offset)).await?;
-        let mut bytes = vec![];
-        file.take(limit as u64).read_to_end(&mut bytes).await?;
-        Ok(bytes)
+        super::input_attachments::read_attachment(asset, offset, limit).await
     }
     async fn project_settings(&self, workspace: &str) -> Result<BTreeMap<(String, String), Value>> {
         let (tx, rx) = oneshot::channel();

@@ -50,6 +50,8 @@ await run(process.execPath, [
   "packages/services/tests/tsconfig.zcode-cli-rust.json",
 ]);
 await run("cargo", ["test", "--locked", "--manifest-path", "apps/zcode-cli-rust/Cargo.toml"]);
+// Node 读取 Rust 写入的会话库（spec rust-m11-node-storage §5.2）。
+await run(process.execPath, ["--import", "tsx", "scripts/zcode-cli-rust-node-storage-check.mjs"]);
 await run("cargo", [
   "build",
   "--examples",
