@@ -51,6 +51,7 @@ mod questions;
 mod node_compact;
 mod node_fork;
 mod node_hooks;
+mod node_media;
 mod stream_recovery;
 mod todos;
 mod usage;

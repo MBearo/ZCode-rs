@@ -83,8 +83,8 @@ pub async fn write_data_url(
     chunks: &[Vec<u8>],
     mime: &str,
 ) -> anyhow::Result<(String, StoredAttachment)> {
+    // 大小上限由调用方把关（上传、本地快照、工具媒体各有 Node 的限制）。
     let total: usize = chunks.iter().map(Vec::len).sum();
-    anyhow::ensure!(total <= 20 * 1024 * 1024, "Attachment exceeds size limit");
     let mut bytes = Vec::with_capacity(total);
     for chunk in chunks {
         bytes.extend_from_slice(chunk);

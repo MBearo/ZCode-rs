@@ -55,6 +55,14 @@ impl ModelPort for Model {
                 .filter(|c| c.starts_with("spawn a"))
                 .map(|c| c.contains("background"))
         });
+        // 用户要求读图时 Read 读取图片，工具结果带媒体（Node tool result media）。
+        let image = messages
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "user" && m.get("_zcode_source").is_none())
+            .and_then(|m| m["content"].as_str())
+            .is_some_and(|c| c.contains("read the image"));
+        let file = if image { "shot.png" } else { "a.ts" };
         self.requests.send(messages).unwrap();
         if let Some(background) = spawn {
             let args = json!({"description": "Look around", "prompt": "Inspect a.ts",
@@ -131,7 +139,7 @@ impl ModelPort for Model {
         if tool_step {
             message["reasoning_content"] = "Look".into();
             calls = vec![json!({"id": format!("call_{n}"), "type": "function",
-                "function": {"name": "Read", "arguments": "{\"file_path\":\"a.ts\"}"}})];
+                "function": {"name": "Read", "arguments": json!({"file_path": file}).to_string()}})];
             message["tool_calls"] = json!(calls);
         }
         Ok(ModelOutput {
@@ -143,9 +151,13 @@ impl ModelPort for Model {
     }
 }
 
+/// The image `Read` returns for `shot.png`.
+pub const IMAGE: &[u8] = &[137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3];
+
 /// `Read`; the first execution waits for the gate when one is set.
 pub struct Tools {
     gate: Mutex<Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>>,
+    root: PathBuf,
 }
 #[async_trait]
 impl ToolPort for Tools {
@@ -160,6 +172,29 @@ impl ToolPort for Tools {
     }
     async fn agent_output(&self, session: &str, _: &str) -> Result<String> {
         Ok(format!("agent-output/{session}.md"))
+    }
+    async fn execute_scoped(
+        &self,
+        name: &str,
+        arguments: &Value,
+        _: &EventSink,
+        cancel: &CancellationToken,
+    ) -> Result<ToolOutput> {
+        if arguments["file_path"] != "shot.png" {
+            return Ok(ToolOutput::text(
+                self.execute(name, arguments, cancel).await?,
+            ));
+        }
+        let path = self.root.join("read-media.png");
+        std::fs::write(&path, IMAGE)?;
+        let asset = json!({"path": path, "mediaType": "image/png", "totalBytes": IMAGE.len()});
+        let mut output = ToolOutput::new(
+            "[Attached image/png: Read image]".into(),
+            json!({"type": "image"}),
+        );
+        output.model_content = Some(json!([{"type": "_zcode_attachment", "asset": asset,
+            "name": "shot.png", "placeholder": "Read image", "sizeBytes": IMAGE.len()}]));
+        Ok(output)
     }
     async fn execute(&self, _: &str, _: &Value, _: &CancellationToken) -> Result<String> {
         let gate = self.gate.lock().unwrap().take();
@@ -230,6 +265,7 @@ async fn run(
         })),
         tools: Arc::new(Tools {
             gate: Mutex::new(gate),
+            root: root.clone(),
         }),
         clock: Arc::new(Clock(AtomicUsize::new(offset))),
     };

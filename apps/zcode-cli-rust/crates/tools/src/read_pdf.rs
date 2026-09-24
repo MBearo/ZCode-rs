@@ -147,7 +147,8 @@ async fn native(
         json!({"type": "pdf", "filePath": shown, "originalSize": size}),
     );
     output.model_content = Some(json!([{"type": "text", "text": heading},
-        {"type": "_zcode_attachment", "asset": asset, "name": name, "placeholder": name}]));
+        {"type": "_zcode_attachment", "asset": asset, "name": name, "placeholder": name,
+            "sizeBytes": size}]));
     Ok(output)
 }
 
@@ -288,8 +289,16 @@ async fn pages(
         let asset = save(&prepared.data, prepared.mime, path, artifacts).await?;
         let placeholder = format!("PDF page {number}");
         texts.push(format!("[Attached {}: {placeholder}]", prepared.mime));
-        blocks.push(json!({"type": "_zcode_attachment", "asset": asset, "name": placeholder, "placeholder": placeholder}));
         let mut info = prepared.info;
+        // Node：页面的 sizeBytes 取 transformedSize，缺省为 originalSize。
+        let page_size = match &info["transformedSize"] {
+            Value::Null => info["originalSize"].clone(),
+            size => size.clone(),
+        };
+        blocks.push(
+            json!({"type": "_zcode_attachment", "asset": asset, "name": placeholder,
+            "placeholder": placeholder, "sizeBytes": page_size}),
+        );
         info["pageNumber"] = number.into();
         info["mimeType"] = prepared.mime.into();
         parts.push(info);

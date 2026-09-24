@@ -267,7 +267,7 @@ fn dedupe(parts: &[Value]) -> Vec<Value> {
     map.into_iter().map(|(_, part)| part).collect()
 }
 
-fn assistant(record: &Record, parts: &[Value], out: &mut Hydrated) {
+fn assistant(record: &Record, parts: &[Value], artifacts: ArtifactReader, out: &mut Hydrated) {
     let text: Vec<&str> = parts
         .iter()
         .filter(|p| visible_text(p))
@@ -318,8 +318,11 @@ fn assistant(record: &Record, parts: &[Value], out: &mut Hydrated) {
     for part in tools {
         let state = &part["state"];
         let (content, failed) = match state["status"].as_str() {
-            // 媒体附件（attachments + modelContentLayout）随 M11.4 的产物读取一起接入。
-            Some("completed") => (state["output"].clone(), false),
+            Some("completed") => (
+                super::attachment::tool_content(state, artifacts)
+                    .unwrap_or_else(|| state["output"].clone()),
+                false,
+            ),
             Some("error") => match state["metadata"]["modelContent"].as_str() {
                 Some(model) => (model.into(), true),
                 None => (state["error"].clone(), true),
@@ -355,7 +358,7 @@ fn hydrate_record(record: &Record, artifacts: ArtifactReader, out: &mut Hydrated
         let parts = dedupe(&record.parts);
         let info = &record.info;
         if info["role"] != "user" {
-            assistant(record, &parts, out);
+            assistant(record, &parts, artifacts, out);
             return;
         }
         let shared = &info["metadata"]["sharedContextStatus"];

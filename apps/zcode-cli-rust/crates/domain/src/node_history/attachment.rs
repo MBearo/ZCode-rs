@@ -136,6 +136,35 @@ pub(super) fn file_block(part: &Value, artifacts: ArtifactReader) -> Value {
     json!({"type": "text", "text": format!("[Attached {mime}: {label}]")})
 }
 
+/// Node `projectPersistedToolMediaContent` of a completed tool state: its
+/// `attachments` placed by `metadata.modelContentLayout`; `None` keeps the
+/// legacy `output` (no media, or a missing or damaged layout).
+pub(super) fn tool_content(state: &Value, artifacts: ArtifactReader) -> Option<Value> {
+    let attachments = state["attachments"].as_array().filter(|a| !a.is_empty())?;
+    let blocks: Vec<Value> = attachments
+        .iter()
+        .map(|a| file_block(a, artifacts))
+        .collect();
+    let layout = state["metadata"]["modelContentLayout"]
+        .as_array()
+        .filter(|l| !l.is_empty())?;
+    let mut content = vec![];
+    for entry in layout {
+        match entry["type"].as_str() {
+            Some("text") if entry["text"].is_string() => {
+                content.push(json!({"type": "text", "text": entry["text"]}));
+            }
+            Some("attachment") => content.push(
+                blocks
+                    .get(entry["attachmentIndex"].as_u64()? as usize)?
+                    .clone(),
+            ),
+            _ => return None,
+        }
+    }
+    Some(Value::Array(content))
+}
+
 /// Node `sanitizeAttachmentLabel`.
 fn label(value: Option<&str>) -> Option<String> {
     let collapsed = value?.split_whitespace().collect::<Vec<_>>().join(" ");

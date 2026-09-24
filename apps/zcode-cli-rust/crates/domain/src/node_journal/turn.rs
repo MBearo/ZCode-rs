@@ -312,11 +312,13 @@ impl Session {
     }
 
     /// Node tool result persistence; the step completes after its last tool.
+    /// `media`: the result's stored media (Node `persistToolResultMediaAttachments`).
     pub fn node_tool_done(
         &mut self,
         now: u64,
         call: &str,
         (content, display, failed): (&Value, Option<&Value>, bool),
+        media: Option<&super::tool_media::ToolMedia>,
         ids: &mut dyn FnMut() -> String,
     ) {
         let Some((mut step, index)) = self.step_tool(call) else {
@@ -327,7 +329,16 @@ impl Session {
         let state = if failed {
             r::error_tool(&tool.input, content, Some(content), window)
         } else {
-            r::completed_tool(&tool.name, &tool.input, content, display, window)
+            let mut state = r::completed_tool(&tool.name, &tool.input, content, display, window);
+            if let Some(media) = media {
+                state["metadata"]["modelContentLayout"] = Value::Array(media.layout.clone());
+                let parts = media
+                    .files
+                    .iter()
+                    .map(|file| file.part(&super::part_id(now, &ids()), &self.id, &step.assistant));
+                state["attachments"] = Value::Array(parts.collect());
+            }
+            state
         };
         tool.done = true;
         let part = r::tool_part(

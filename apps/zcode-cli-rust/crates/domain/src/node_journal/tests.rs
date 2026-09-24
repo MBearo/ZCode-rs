@@ -104,7 +104,7 @@ fn a_tool_turn_reads_back_as_the_live_context() {
         "_zcode_origin": {"provider": "p", "model": "m"}});
     s.node_model_done(30, Some(&first), &mut next);
     s.node_tool_started(31, "call_1");
-    s.node_tool_done(32, "call_1", (&json!("1\tx"), None, false), &mut next);
+    s.node_tool_done(32, "call_1", (&json!("1\tx"), None, false), None, &mut next);
     s.node_step_started(40, ("msg_a2".into(), "part_s2".into()), "p", "m");
     s.node_model_status(
         &json!({"type": "model_request_completed", "finishReason": "stop",

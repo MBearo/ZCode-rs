@@ -318,9 +318,11 @@ pub(super) async fn read(
     let name = path
         .file_name()
         .map_or(String::new(), |n| n.to_string_lossy().into_owned());
+    // Node source.sizeBytes：原始文件大小（Node 落库的 file part 用到）。
+    let size = info["originalSize"].clone();
     let mut output = ToolOutput::new(format!("[Attached {mime}: {placeholder}]"), info);
     output.model_content = Some(json!([{"type": "_zcode_attachment", "asset": asset,
-        "name": name, "placeholder": placeholder}]));
+        "name": name, "placeholder": placeholder, "sizeBytes": size}]));
     Ok(output)
 }
 

@@ -257,7 +257,8 @@ impl Engine {
     /// `runModelBackedTurnStep`).
     pub(super) async fn observe_event(&mut self, id: &str, event: &Event) -> Result<()> {
         self.observe_usage(id, event).await;
-        let flush = self.node_event(id, event);
+        let media = self.node_tool_media(id, event).await?;
+        let flush = self.node_event(id, event, media.as_ref());
         self.observe_step(id, event)?;
         if flush {
             self.persist(id, None).await?;
@@ -265,7 +266,12 @@ impl Engine {
         Ok(())
     }
 
-    fn node_event(&mut self, id: &str, event: &Event) -> bool {
+    fn node_event(
+        &mut self,
+        id: &str,
+        event: &Event,
+        media: Option<&nj::tool_media::ToolMedia>,
+    ) -> bool {
         if !self.journaled(id) {
             return false;
         }
@@ -306,10 +312,13 @@ impl Engine {
                 failed,
                 ..
             } if !cancelled => {
-                let content = model_content
-                    .clone()
-                    .unwrap_or_else(|| result.clone().into());
-                s.node_tool_done(now, call, (&content, display.as_ref(), *failed), &mut ids);
+                // Node 的 output 是模型内容的文本形态（媒体为 [Attached …] 占位）。
+                let content = match model_content {
+                    Some(content) => nj::tool_media::output_text(content),
+                    None => result.clone(),
+                };
+                let result = (&content.into(), display.as_ref(), *failed);
+                s.node_tool_done(now, call, result, media, &mut ids);
             }
             Event::Finished {
                 error,

@@ -7,7 +7,7 @@ use base64::Engine as _;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-const IMAGE: &[u8] = &[137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3];
+use harness::IMAGE;
 
 async fn upload(
     h: &mut harness::Harness,
@@ -141,6 +141,58 @@ async fn uploaded_attachments_are_node_artifacts_and_file_parts() {
     assert!(
         cold.iter()
             .any(|m| m["_zcode_source"] == "prompt_attachment")
+    );
+    harness::dump(&h, &conn, &session);
+}
+
+#[tokio::test]
+async fn tool_result_media_is_stored_as_node_file_parts() {
+    let mut h = harness::start(Some("tool-media"), None).await;
+    let session = h.create("c1", "read the image").await;
+    let conn = h.settled(&session, 1).await;
+    h.requests.recv().await.unwrap();
+    let live = h.requests.recv().await.unwrap();
+    let tool = live.iter().find(|m| m["role"] == "tool").unwrap();
+    assert_eq!(tool["content"][0]["type"], "_zcode_attachment");
+    let state: Value = conn
+        .query_row(
+            "select json_extract(data, '$.state') from part where session_id = ?
+             and json_extract(data, '$.type') = 'tool'",
+            [&session],
+            |r| r.get::<_, String>(0),
+        )
+        .map(|s| serde_json::from_str(&s).unwrap())
+        .unwrap();
+    // Node：output 为文本形态，媒体存为产物并由 layout 定位。
+    assert_eq!(state["output"], "[Attached image/png: Read image]");
+    assert_eq!(
+        state["metadata"]["modelContentLayout"],
+        json!([{"type": "attachment", "attachmentIndex": 0}])
+    );
+    let file = &state["attachments"][0];
+    assert_eq!(file["filename"], "Read image");
+    assert_eq!(file["metadata"]["sizeBytes"], IMAGE.len());
+    let uri = file["url"].as_str().unwrap();
+    let artifact = h.root.join("cli/artifacts");
+    let stored = zcode_cli_state::node::artifacts::read(&artifact, uri).unwrap();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(IMAGE);
+    assert_eq!(stored, format!("data:image/png;base64,{encoded}"));
+    let name = std::fs::read_dir(artifact.join(&session))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .find(|n| n.contains("-media-1-tool-result-"));
+    assert!(name.is_some_and(|n| n.starts_with("call_0-media-1-")));
+
+    drop(conn);
+    let mut h = harness::restart(&h).await;
+    h.send_text(10, &session, "c2", "again").await;
+    let conn = h.settled(&session, 2).await;
+    let cold = h.requests.recv().await.unwrap();
+    let tool = cold.iter().find(|m| m["role"] == "tool").unwrap();
+    assert_eq!(tool["content"][0]["type"], "image");
+    assert_eq!(
+        tool["content"][0]["dataUrl"],
+        format!("data:image/png;base64,{encoded}")
     );
     harness::dump(&h, &conn, &session);
 }

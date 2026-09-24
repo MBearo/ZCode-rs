@@ -13,6 +13,7 @@ mod queue;
 pub mod records;
 mod session;
 pub mod timeline;
+pub mod tool_media;
 mod turn;
 
 pub use assistant::{reasoning_parts, tool_input};
