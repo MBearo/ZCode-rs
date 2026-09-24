@@ -34,6 +34,8 @@ async-trait = "0.1"
 base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# 用量统计按 IANA 时区归日（Node 用 Intl）；数据编译进二进制，三平台一致。
+chrono-tz = "0.10"
 httpdate = "1"
 ignore = "0.4"
 globset = "0.4"

@@ -130,6 +130,23 @@ pub trait SessionStore: Send + Sync {
     ) -> Result<Vec<u8>> {
         anyhow::bail!("Attachment read unavailable")
     }
+    /// Appends one usage fact through the storage writer without waiting for
+    /// it; failures are logged by the store and never reach the caller.
+    async fn record_usage(&self, _fact: zcode_cli_domain::usage::Fact) {}
+    /// Node `queryAppUsage` over the whole database, after every usage fact
+    /// sent before the call was written.
+    async fn app_usage(
+        &self,
+        _since: i64,
+        _until: i64,
+        _tz_offset_ms: i64,
+    ) -> Result<zcode_cli_domain::usage::AppRows> {
+        Ok(Default::default())
+    }
+    /// One session's model requests in `started_at, id` order (same barrier).
+    async fn task_usage(&self, _session_id: &str) -> Result<Vec<zcode_cli_domain::usage::TaskRow>> {
+        Ok(vec![])
+    }
     async fn load(&self, workspace: &str) -> Result<(Vec<Session>, BTreeMap<String, Value>)>;
     async fn commit(
         &self,

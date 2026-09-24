@@ -19,6 +19,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 zcode-cli-core-api.workspace = true
 zcode-cli-domain.workspace = true

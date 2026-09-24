@@ -114,6 +114,7 @@ impl Engine {
                     params,
                 });
             }
+            Event::UsageDone { result } => self.usage_done(&id, result),
             Event::AuxiliaryDone { result } => {
                 self.cancel_auth(&id);
                 let job = self.auxiliary.remove(&id).unwrap();

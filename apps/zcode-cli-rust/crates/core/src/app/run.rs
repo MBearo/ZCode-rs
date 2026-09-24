@@ -48,6 +48,16 @@ impl Engine {
         let kind = super::legacy_input::run_kind(session, &turn_id);
         let estimated = session.active_context_tokens();
         let run_id = session.run_id.clone().context("Run reservation required")?;
+        let who = crate::domain::usage::Attribution {
+            session_id: id.into(),
+            run_id: run_id.clone(),
+            turn_id: turn_id.clone(),
+            trace_id: origin.trace_id.clone(),
+            variant: Some(identity.reasoning_level.clone()).filter(|level| !level.is_empty()),
+            mode: session.mode.as_str().into(),
+            subagent: session.parent_id.is_some(),
+            compact: kind == crate::domain::legacy_stream::RunKind::Compact,
+        };
         let cancel = CancellationToken::new();
         self.active.insert(
             id.into(),
@@ -61,6 +71,7 @@ impl Engine {
                 permissions,
                 kind,
                 legacy_lock: kind != crate::domain::legacy_stream::RunKind::Prompt,
+                usage: crate::domain::usage::RunUsage::new(who, self.clock.now()),
             },
         );
         let manual = session

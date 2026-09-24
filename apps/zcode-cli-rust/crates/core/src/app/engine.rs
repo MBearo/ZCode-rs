@@ -36,6 +36,8 @@ pub(super) struct Active {
     /// Node `record.activeAbortController`: legacy send / compact / goal refuse
     /// to start while it is held (spec 9.12).
     pub legacy_lock: bool,
+    /// Usage facts in progress (spec rust-m9-usage-logs §2.3).
+    pub usage: crate::domain::usage::RunUsage,
 }
 pub struct Engine {
     pub(super) child_updates:
@@ -277,6 +279,10 @@ impl Engine {
         // 这些请求在后台完成，稍后以同一 token 回复；这里只回复启动失败。
         let deferred = match call.method {
             Method::McpList => Some(self.start_mcp_query(&call)),
+            Method::UsageStats
+            | Method::LegacyUsageStats
+            | Method::ConversationUsage
+            | Method::SessionUsage => return self.usage_query(&call, output).await,
             Method::WorkspaceGenerateText | Method::ProviderTestModelConnectivity => {
                 Some(self.start_auxiliary(&call))
             }

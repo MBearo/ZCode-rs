@@ -24,6 +24,8 @@ impl Engine {
         if active.run_id != event.run_id {
             return Ok(());
         }
+        self.observe_usage(&id, &event.event).await;
+        let active = &self.active[&id];
         // 取消后的 failed(cancelled) 状态也要记入 session/debug（Node 同样发出）。
         if let Event::ModelStatus(status) = event.event {
             let turn = active.turn_id.clone();
@@ -160,6 +162,7 @@ impl Engine {
             | Event::Background { .. }
             | Event::PromptInitialized { .. }
             | Event::AuxiliaryDone { .. }
+            | Event::UsageDone { .. }
             | Event::RequestAuth { .. }
             | Event::ContextUsage(_)
             | Event::CompactStarted { .. }

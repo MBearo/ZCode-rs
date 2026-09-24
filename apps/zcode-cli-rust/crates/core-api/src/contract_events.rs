@@ -86,6 +86,10 @@ pub enum Event {
     AuxiliaryDone {
         result: std::result::Result<Value, ModelFailure>,
     },
+    /// A usage query's reply (spec rust-m9-usage-logs §2.4); the error is a storage failure.
+    UsageDone {
+        result: std::result::Result<Value, String>,
+    },
     RequestAuth {
         provider: String,
         selection: Value,

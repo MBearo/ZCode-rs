@@ -6,8 +6,45 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use tokio::sync::oneshot;
 
+impl Store {
+    /// Waits until the worker handled every earlier operation.
+    async fn barrier(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(Operation::Barrier(tx)).await?;
+        Ok(rx.await?)
+    }
+
+    /// Runs `query` on a request-scoped read-only connection off the worker.
+    async fn read_usage<T: Send + 'static>(
+        &self,
+        query: impl FnOnce(&rusqlite::Connection) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.barrier().await?;
+        let path = self.path.clone();
+        tokio::task::spawn_blocking(move || query(&super::usage_query::open(&path)?)).await?
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::contract::SessionStore for Store {
+    async fn record_usage(&self, fact: crate::domain::usage::Fact) {
+        // worker 已停止时会话提交同样会失败；这里只丢弃观测数据。
+        let _ = self.tx.send(Operation::Usage(Box::new(fact))).await;
+    }
+    async fn app_usage(
+        &self,
+        since: i64,
+        until: i64,
+        offset: i64,
+    ) -> Result<crate::domain::usage::AppRows> {
+        self.read_usage(move |conn| super::usage_query::app(conn, since, until, offset))
+            .await
+    }
+    async fn task_usage(&self, session_id: &str) -> Result<Vec<crate::domain::usage::TaskRow>> {
+        let session = session_id.to_owned();
+        self.read_usage(move |conn| super::usage_query::task(conn, &session))
+            .await
+    }
     async fn load_index(&self, workspace: &str) -> Result<BTreeMap<String, Value>> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(Operation::Index(workspace.into(), tx)).await?;

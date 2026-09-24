@@ -45,6 +45,7 @@ pub mod subagent;
 mod subagent_row;
 pub mod todo;
 pub mod tool_input;
+pub mod usage;
 pub mod web;
 pub mod zod;
 

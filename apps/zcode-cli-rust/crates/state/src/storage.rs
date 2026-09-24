@@ -34,12 +34,17 @@ pub(super) enum Operation {
         oneshot::Sender<Result<()>>,
     ),
     Settings(super::storage_settings::Request),
+    Usage(Box<crate::domain::usage::Fact>),
+    /// Replies once every earlier operation was handled (read-your-writes for usage queries).
+    Barrier(oneshot::Sender<()>),
 }
 
 #[derive(Clone)]
 pub struct Store {
     pub(super) tx: mpsc::Sender<Operation>,
     pub(super) attachment_root: PathBuf,
+    /// The database file, for request-scoped read-only connections.
+    pub(super) path: PathBuf,
 }
 
 impl Store {
@@ -70,6 +75,7 @@ impl Store {
         }
         let (tx, mut rx) = mpsc::channel(64);
         let (ready_tx, ready_rx) = oneshot::channel();
+        let database = path.clone();
         tokio::task::spawn_blocking(move || {
             let connection = (|| -> Result<Connection> {
                 let conn = Connection::open(path)?;
@@ -83,6 +89,7 @@ impl Store {
                     CREATE TABLE IF NOT EXISTS rust_message(workspace TEXT NOT NULL,session TEXT NOT NULL,ordinal INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(workspace,session,ordinal));")?;
                 super::storage_listing::prepare(&conn)?;
                 super::storage_settings::prepare(&conn)?;
+                super::usage::prepare(&conn)?;
                 conn.execute_batch("CREATE INDEX IF NOT EXISTS rust_row_command ON rust_row(workspace,session,CASE WHEN json_valid(body) THEN json_extract(body,'$.sourceCommandId') END);")?;
                 Ok(conn)
             })();
@@ -96,8 +103,26 @@ impl Store {
                     return;
                 }
             };
+            let mut usage = super::usage::Writer::default();
             while let Some(op) = rx.blocking_recv() {
                 match op {
+                    Operation::Usage(fact) => {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_millis() as u64);
+                        // 用量是观测数据：写入失败只记日志，不影响会话提交。
+                        if let Err(error) = usage.record(&conn, &fact, now) {
+                            tracing::warn!(
+                                target: "zcode::storage",
+                                event = "usage.write.failed",
+                                error = %error,
+                                "Usage fact write failed"
+                            );
+                        }
+                    }
+                    Operation::Barrier(reply) => {
+                        let _ = reply.send(());
+                    }
                     Operation::Index(workspace, reply) => {
                         let _ = reply.send(super::storage_index::index(&conn, &workspace));
                     }
@@ -137,6 +162,7 @@ impl Store {
         Ok(Self {
             tx,
             attachment_root,
+            path: database,
         })
     }
     pub async fn load(&self, workspace: &str) -> Result<(Vec<Session>, BTreeMap<String, Value>)> {

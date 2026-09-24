@@ -15,5 +15,8 @@ mod storage_listing;
 mod storage_ports;
 mod storage_read;
 mod storage_settings;
+mod usage;
+mod usage_import;
+mod usage_query;
 pub use storage::Store;
 use zcode_cli_host::id;

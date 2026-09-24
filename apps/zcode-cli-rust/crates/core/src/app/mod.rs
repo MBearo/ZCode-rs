@@ -48,6 +48,7 @@ mod question_tool;
 mod questions;
 
 mod todos;
+mod usage;
 mod web_tools;
 
 mod goal_commands;

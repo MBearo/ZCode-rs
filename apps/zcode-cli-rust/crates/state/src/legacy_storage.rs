@@ -32,7 +32,8 @@ pub(super) fn import(dest: &mut Connection, request: ImportRequest) -> Result<()
         |r| r.get(0),
     )?;
     if imported {
-        return super::legacy_todos::backfill(dest, &source_id, &workspace, &cancel);
+        super::legacy_todos::backfill(dest, &source_id, &workspace, &cancel)?;
+        return super::usage_import::backfill(dest, &source_id, &workspace, &cancel);
     }
     let conn = Connection::open_with_flags(&source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     conn.busy_timeout(std::time::Duration::from_millis(20))?;
@@ -62,6 +63,8 @@ pub(super) fn import(dest: &mut Connection, request: ImportRequest) -> Result<()
         &cancel,
     )?;
     super::storage_settings::import(&tx, &snapshot, &workspace, &cwd)?;
+    super::usage_import::copy(&tx, &snapshot, &workspace, &cancel)?;
+    super::usage_import::mark(&tx, &source_id, &workspace)?;
     drop(snapshot);
     check(&cancel)?;
     attempt.publish()?;

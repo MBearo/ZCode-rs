@@ -1,4 +1,4 @@
-use super::context::{RunContext, hidden_summary};
+use super::context::{RunContext, hidden_request};
 use crate::{
     contract::{Event, EventSink, ModelPort},
     domain::goal::Verdict,
@@ -26,7 +26,16 @@ pub(super) async fn advance(
     };
     let (mut messages, _) = history.projection(prefix, 0, usize::MAX);
     messages.push(json!({"role":"user","content":goal.prompt("goalVerify", None)}));
-    let (verdict, usage) = match hidden_summary(model, messages, sink, cancel).await {
+    // 修复：验证请求原先复用压缩的 hidden_summary，来源记为 compact；Node 的来源是
+    // target_completion_verification，网络状态、session/debug 与用量都按它归属。
+    let request = hidden_request(
+        model,
+        (messages, &[]),
+        sink,
+        "target_completion_verification",
+        cancel,
+    );
+    let (verdict, usage) = match request.await {
         Ok(output) if !output.output_limit && output.calls.is_empty() => (
             Verdict::parse(output.message["content"].as_str().unwrap_or("")),
             output.usage,

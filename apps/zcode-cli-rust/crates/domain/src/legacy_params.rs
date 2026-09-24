@@ -291,6 +291,34 @@ pub fn debug(params: &Value) -> Result<Value, ParamsError> {
     parse(schema, params)
 }
 
+/// Node parses the usage methods' `params ?? {}`.
+fn or_empty(params: &Value) -> Value {
+    if params.is_null() {
+        json!({})
+    } else {
+        params.clone()
+    }
+}
+
+/// `zcodeUsageStatsParamsSchema` (`usage/stats` and `v4/usage/stats`).
+pub fn usage_stats(params: &Value) -> Result<Value, ParamsError> {
+    static SCHEMA: OnceLock<Schema> = OnceLock::new();
+    let schema = SCHEMA.get_or_init(|| {
+        Schema::Object(vec![
+            required("range", Schema::Enum(&["all", "7d", "30d"])),
+            optional("timeZone", string()),
+        ])
+    });
+    parse(schema, &or_empty(params))
+}
+
+/// `zcodeTaskTokenUsageParamsSchema`, which Node also parses for `v4/conversation/usage`.
+pub fn task_usage(params: &Value) -> Result<Value, ParamsError> {
+    static SCHEMA: OnceLock<Schema> = OnceLock::new();
+    let schema = SCHEMA.get_or_init(|| Schema::Object(vec![required("sessionId", non_empty())]));
+    parse(schema, &or_empty(params))
+}
+
 #[cfg(test)]
 #[path = "legacy_params_tests.rs"]
 mod tests;
