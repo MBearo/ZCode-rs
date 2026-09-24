@@ -142,17 +142,24 @@ test("Rust backpressure and large history recover through the real App frame ass
     await h.wait(
       (m) =>
         m.params?.subscriptionId === sub.ack.subscriptionId &&
-        m.params.fragmentIndex === m.params.fragmentCount - 1,
+        (m.params.kind === "complete" || m.params.fragmentIndex === m.params.fragmentCount - 1),
       after,
     );
     const recovery = h.messages
       .slice(after)
       .filter((m) => m.params?.subscriptionId === sub.ack.subscriptionId)
       .flatMap((m) => assembler.accept(m.params));
-    assert.equal(recovery[0]?.kind, "complete");
-    if (recovery[0]?.kind === "complete" && recovery[0].frame.payload.kind === "snapshot")
-      assert.equal(recovery[0].frame.payload.snapshot.meta.title, "renamed during backpressure");
-    else assert.fail("Missing authoritative snapshot after flow drained");
+    const initial = assembled[0]!.kind === "complete" ? assembled[0]!.frame : null;
+    const resumed = recovery[0]?.kind === "complete" ? recovery[0].frame : null;
+    // Node 语义：暂停期间有界缓冲，drained 后从原水位续发增量，而不是整份快照。
+    if (!initial || resumed?.payload.kind !== "deltas")
+      assert.fail("Missing buffered deltas after flow drained");
+    assert.equal(resumed.fromSeq, initial.toSeq);
+    assert(
+      resumed.payload.deltas.some(
+        (d) => d.op === "state.updated" && d.patch.meta?.title === "renamed during backpressure",
+      ),
+    );
     assert.deepEqual(h.schemaErrors, []);
   } finally {
     await f.close();

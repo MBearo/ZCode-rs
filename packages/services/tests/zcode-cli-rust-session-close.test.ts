@@ -84,14 +84,13 @@ test("closing persisted history removes runtime only; cold subscribe restores a 
       { connectionId: "index", state: "drained" },
       z.unknown(),
     );
-    const frame = await h.wait(
-      (m) =>
-        m.params?.topic === `sessions-index/${f.cwd}` && m.params.frame.payload.kind === "snapshot",
-      from,
-    );
-    assert.equal(
-      frame.params.frame.payload.snapshot.sessions.some((s: any) => s.sessionId === sid),
-      false,
+    // Node 语义：暂停期间的索引增量在 drained 后续发，而不是整份快照。
+    const frame = await h.wait((m) => m.params?.topic === `sessions-index/${f.cwd}`, from);
+    assert.equal(frame.params.frame.payload.kind, "deltas");
+    assert(
+      frame.params.frame.payload.deltas.some(
+        (d: any) => d.op === "session.removed" && d.sessionId === sid,
+      ),
     );
     const reopened = await h.subscribe(`conversation/${sid}`);
     assert.notEqual(reopened.ack.logEpoch, old.ack.logEpoch);

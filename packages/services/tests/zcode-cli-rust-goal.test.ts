@@ -101,7 +101,8 @@ test("Goal queued in guide mode preserves its intent and replaces the target onl
       (d: any) => d.patch?.queue?.items?.length,
     ).patch;
     assert.equal(patch.queue.items[0].kind, "sendGoalCommand");
-    assert.equal(patch.goal, null);
+    // state.updated 只带变化的顶层键：goal 未设置时不下发。
+    assert.equal(patch.goal ?? null, null);
     while (!release) await delay(5);
     release();
     await goal(h, sid, "verified");

@@ -38,7 +38,9 @@ impl Session {
                 .sum::<usize>()
             + 2 * (serialized_size(self).expect("Session metadata is serializable")
                 + serialized_size(&self.history).expect("History is serializable"))
-            + self.history.action_rows.capacity() * size_of::<usize>();
+            + self.history.action_rows.capacity() * size_of::<usize>()
+            // 保留日志与会话同寿命，计入空闲 LRU 预算。
+            + self.topic.bytes();
         self.resident_bytes = Some(bytes);
         bytes
     }

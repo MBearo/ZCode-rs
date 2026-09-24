@@ -8,10 +8,11 @@ type Message = Record<string, any>;
 const AMBIENT_PREFIX = '<in-app-browser-context source="ambient-ui-state">';
 
 async function send(h: Harness, id: string, payload: Message, commandId?: string) {
-  const after = h.messages.length;
   const envelope = h.envelope("sendText", id, payload);
-  const ack = await h.command(commandId ? { ...envelope, commandId } : envelope);
-  if (ack.status === "accepted") await h.completed(id, after);
+  const command = commandId ? { ...envelope, commandId } : envelope;
+  const ack = await h.command(command);
+  // 多个订阅者的刷新窗口互不同步：按本命令的回合终态等待，避免被上一轮迟到的帧满足。
+  if (ack.status === "accepted") await finished(h, command.commandId);
   return ack;
 }
 

@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { createServer } from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { setTimeout as delay } from "node:timers/promises";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,11 +14,13 @@ test("Rust retries socket failures, server errors and SSE network errors within 
   const f = await fixture({
     env: { ZCODE_MODEL_RETRY_MAX_RETRIES: "0" },
     config: { retry: { maxRetries: 3, baseDelayMs: 1, maxDelayMs: 1, jitter: false } },
-    respond(_req, res, attempt) {
+    async respond(_req, res, attempt) {
       if (attempt === 1) {
         res.destroy();
         return;
       }
+      // 相邻 state.updated 在刷新窗口内合并（Node 规则 2）：每个重试状态停留超过窗口才能逐个观察到。
+      await delay(80);
       if (attempt === 2) {
         res.writeHead(503);
         res.end('{"error":{"code":"500"}}');

@@ -222,15 +222,18 @@ test("Rust PermissionRequest hooks answer a prompt before the user", async () =>
     const rows = (await h.rows(id)).rows as Message[];
     assert.equal(rows.find((r) => r.toolCallId === "call-1")?.status, "success");
     // 待决交互先出现再被 hook 收口；手机可重放流同样看到先出现、后清空。
-    const pending = (m: Message, open: boolean) =>
-      m.params?.subscriptionId === phone.ack.subscriptionId &&
-      m.params.frame?.payload?.deltas?.some(
-        (d: Message) =>
-          Array.isArray(d.patch?.pendingInteractions) &&
-          d.patch.pendingInteractions.length > 0 === open,
-      );
-    const shown = await h.wait((m) => pending(m, true), before);
-    await h.wait((m) => pending(m, false), h.messages.indexOf(shown) + 1);
+    // 刷新窗口可能把"出现"与"清空"合进同一帧，按增量顺序判定。
+    const pending = () =>
+      h.messages
+        .slice(before)
+        .filter((m) => m.params?.subscriptionId === phone.ack.subscriptionId)
+        .flatMap((m) => m.params.frame?.payload?.deltas ?? [])
+        .filter((d: Message) => Array.isArray(d.patch?.pendingInteractions))
+        .map((d: Message) => d.patch.pendingInteractions.length > 0);
+    await h.wait(() => {
+      const states = pending();
+      return states.includes(true) && states.slice(states.indexOf(true)).includes(false);
+    }, before);
     const row = (await hookRows(h, id))[0]!;
     assert.equal(row.hookEventName, "PermissionRequest");
     assert.equal(row.executions[0].outcome, "success");

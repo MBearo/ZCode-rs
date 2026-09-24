@@ -62,9 +62,13 @@ test("Rust stdio: current App schemas, streaming, idempotency, resume and worksp
     assert.equal(f.requests.length, 1);
     const rows = await h.rows(id);
     assert.equal(rows.rows.find((r) => r.kind === "assistantText")?.text, "你好 Rust");
+    // 同一刷新窗口内的整行 upsert 会吞掉同行 row.delta（Node 合并规则 3），两者都算流式送达。
     assert(
       h.messages.some((m) =>
-        m.params?.frame?.payload?.deltas?.some((d: any) => d.op === "row.delta"),
+        m.params?.frame?.payload?.deltas?.some(
+          (d: any) =>
+            d.op === "row.delta" || (d.op === "row.upserted" && d.row.text === "你好 Rust"),
+        ),
       ),
     );
     assert.equal(
@@ -107,9 +111,12 @@ test("Rust yolo executes writes without approvals", async () => {
         m.params?.frame?.payload?.deltas?.some((d: any) => d.patch?.pendingInteractions?.length),
       ),
     );
+    // state.updated 只带变化的顶层键：mode 未变时由快照承载。
     assert(
-      h.messages.some((m) =>
-        m.params?.frame?.payload?.deltas?.some((d: any) => d.patch?.config?.mode === "yolo"),
+      h.messages.some(
+        (m) =>
+          m.params?.frame?.payload?.snapshot?.config?.mode === "yolo" ||
+          m.params?.frame?.payload?.deltas?.some((d: any) => d.patch?.config?.mode === "yolo"),
       ),
     );
     assert.equal(f.requests.length, 2);

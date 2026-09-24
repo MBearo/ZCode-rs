@@ -120,6 +120,9 @@ pub struct Session {
     pub saved_rows: usize,
     #[serde(skip)]
     pub resident_bytes: Option<usize>,
+    /// Retained deltas and the last published patch of the conversation topic.
+    #[serde(skip)]
+    pub topic: super::topic_log::ConversationTopic,
     #[serde(skip)]
     pub saved_inputs: usize,
     #[serde(skip)]
@@ -222,6 +225,7 @@ impl Session {
             messages: vec![],
             saved_rows: 0,
             resident_bytes: None,
+            topic: Default::default(),
             saved_inputs: 0,
             saved_responses: 0,
             saved_messages: 0,

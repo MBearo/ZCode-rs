@@ -125,12 +125,13 @@ pub enum ServerMsg {
 /// Typed facts for delivery. Frontends decide framing, fan-out and flow control.
 #[derive(Debug)]
 pub enum RuntimeEvent {
-    /// Conversation deltas covering `(from, to]`; emitted only while the topic is open.
+    /// Conversation deltas covering `(from, to]`, with their JSON sizes;
+    /// emitted only while the topic is open (the actor's retained log shares them).
     ConversationDeltas {
         session: String,
         from: u64,
         to: u64,
-        deltas: Vec<Value>,
+        deltas: zcode_cli_domain::topic_log::Deltas,
     },
     /// History was rewritten; subscribers must replace their state with `snapshot`.
     ConversationReset {
@@ -145,7 +146,7 @@ pub enum RuntimeEvent {
         workspace: String,
         from: u64,
         to: u64,
-        delta: Value,
+        deltas: zcode_cli_domain::topic_log::Deltas,
     },
     /// Workspace configuration changed; `snapshot` replaces the previous one.
     ConfigChanged {

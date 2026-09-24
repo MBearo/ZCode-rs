@@ -113,14 +113,13 @@ test("Rust Todo follows TS handlers, commits ordered replacement and projects du
     assert.deepEqual(snap.plan?.items, [
       { id: "检查文件", content: "检查文件", status: "completed" },
     ]);
-    assert(
-      h.messages.some(
-        (m) =>
-          m.params?.subscriptionId === mobile.ack.subscriptionId &&
-          m.params?.frame?.payload?.deltas?.some(
-            (d: any) => d.patch?.plan?.items?.[0]?.status === "completed",
-          ),
-      ),
+    // 手机的刷新窗口（150 ms）晚于桌面，等待其帧到达。
+    await h.wait(
+      (m) =>
+        m.params?.subscriptionId === mobile.ack.subscriptionId &&
+        m.params?.frame?.payload?.deltas?.some(
+          (d: any) => d.patch?.plan?.items?.[0]?.status === "completed",
+        ),
     );
     const legacy = await h.client.request(
       "session/read",

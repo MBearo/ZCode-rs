@@ -1,30 +1,42 @@
-//! Topic subscriptions owned by the App Server.
+//! Topic subscriptions owned by the App Server (spec rust-m8-delivery §5–6).
 //!
-//! The runtime owns topic facts and sequence numbers; this registry only
-//! decides which subscriber receives which frame. A subscriber accepts a delta
-//! only when it continues exactly from the last seq it was sent; stale deltas
-//! are dropped and gaps trigger snapshot recovery, so correctness never
-//! depends on the relative timing of replies and events.
-use super::codec::{self, FrameHeader};
+//! The runtime owns topic facts, sequence numbers and the retained log; this
+//! registry decides which subscriber receives which frame and when. Each
+//! subscriber buffers its profile's deltas until its flush window ends. A
+//! delta is accepted only when it continues the subscriber's watermark; gaps,
+//! overflow and backlog turn into snapshot recovery, and deltas that arrive
+//! while a runtime reply is in flight are covered by that reply, so
+//! correctness never depends on the relative timing of replies and events.
+pub use super::subscription::Subscription;
+use super::subscription::snapshot_payload;
+use crate::domain::delivery::Profile;
 use anyhow::Result;
-use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
-pub struct Subscription {
-    pub topic: String,
-    pub connection: String,
-    ordinal: u64,
-    sent_seq: u64,
-    /// Host reported the connection saturated; nothing is sent until drained.
-    pub paused: bool,
-    /// Deltas were skipped; the next frame for this subscriber must be a snapshot.
-    pub needs_resync: bool,
-    /// A recovery snapshot has been requested and not yet applied.
-    pub recovering: bool,
+/// A registered subscription and its initial frame.
+pub struct Subscribed {
+    pub id: String,
+    pub mode: &'static str,
+    pub replaced: bool,
+    pub lines: Vec<String>,
+}
+
+/// Frames and runtime requests produced by one delivery step.
+#[derive(Default)]
+pub struct Output {
+    pub lines: Vec<String>,
+    /// `(subscription, topic)` needing a snapshot from the runtime.
+    pub recover: Vec<(String, String)>,
+    /// Topics whose subscription ended because its snapshot could not be encoded.
+    pub released: Vec<String>,
 }
 
 pub struct Delivery {
     subscriptions: BTreeMap<String, Subscription>,
+    /// Connections the Host reported saturated (Node `pausedConnections`).
+    paused: BTreeSet<String>,
     epoch: String,
     next_id: u64,
 }
@@ -33,16 +45,11 @@ impl Default for Delivery {
     fn default() -> Self {
         Self {
             subscriptions: BTreeMap::new(),
+            paused: BTreeSet::new(),
             epoch: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
             next_id: 0,
         }
     }
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
 }
 
 impl Delivery {
@@ -50,28 +57,36 @@ impl Delivery {
         self.subscriptions.get(id)
     }
 
-    /// Register a subscription after the runtime opened its topic. Returns the new id and,
-    /// when it replaces the connection's previous subscription on the same topic, that topic.
-    pub fn subscribe(&mut self, topic: &str, connection: &str) -> (String, bool) {
+    /// Registers the subscription answered by the runtime's `topicOpen` reply.
+    /// Only once its initial frame is encoded does it replace the connection's
+    /// previous subscription on the topic (Node rollback keeps the old one).
+    pub fn subscribe(
+        &mut self,
+        (topic, connection): (&str, &str),
+        profile: Profile,
+        state: &Value,
+    ) -> Result<Subscribed> {
+        self.next_id += 1;
+        let id = format!("sub-{}-{}", self.epoch, self.next_id);
+        let seq = state["seq"].as_u64().unwrap_or(0);
+        let mut sub = Subscription::new(topic, connection, profile, seq);
+        let lines = sub.apply(&id, "initial", state, false)?;
         let before = self.subscriptions.len();
         self.subscriptions
             .retain(|_, s| s.topic != topic || s.connection != connection);
         let replaced = self.subscriptions.len() != before;
-        self.next_id += 1;
-        let id = format!("sub-{}-{}", self.epoch, self.next_id);
-        self.subscriptions.insert(
-            id.clone(),
-            Subscription {
-                topic: topic.into(),
-                connection: connection.into(),
-                ordinal: 0,
-                sent_seq: 0,
-                paused: false,
-                needs_resync: false,
-                recovering: false,
-            },
-        );
-        (id, replaced)
+        self.subscriptions.insert(id.clone(), sub);
+        let mode = if state["mode"] == "resume" {
+            "resume"
+        } else {
+            "snapshot"
+        };
+        Ok(Subscribed {
+            id,
+            mode,
+            replaced,
+            lines,
+        })
     }
 
     pub fn unsubscribe(&mut self, id: &str) -> Option<Subscription> {
@@ -80,6 +95,7 @@ impl Delivery {
 
     /// Drop every subscription of a closed connection; returns their topics for pin release.
     pub fn close_connection(&mut self, connection: &str) -> Vec<String> {
+        self.paused.remove(connection);
         let ids = self.ids(|s| s.connection == connection);
         ids.iter()
             .filter_map(|id| self.subscriptions.remove(id).map(|s| s.topic))
@@ -91,53 +107,185 @@ impl Delivery {
         self.subscriptions.retain(|_, s| s.topic != topic);
     }
 
-    pub fn set_paused(&mut self, connection: &str, paused: bool) {
-        for sub in self
-            .subscriptions
-            .values_mut()
-            .filter(|s| s.connection == connection)
-        {
-            sub.paused = paused;
-            if paused {
-                sub.needs_resync = true;
+    /// `saturated`: timers stop, buffers keep accumulating until they overflow.
+    pub fn pause(&mut self, connection: &str) {
+        self.paused.insert(connection.into());
+        for sub in self.subscriptions.values_mut() {
+            if sub.connection == connection {
+                sub.due = None;
             }
         }
     }
 
-    /// Explicit resync of one subscription: it resumes and waits for its recovery snapshot.
-    pub fn resume(&mut self, id: &str) {
+    /// `drained`: every subscription of the connection flushes now.
+    pub fn drain(&mut self, connection: &str, now: Instant) {
+        if !self.paused.remove(connection) {
+            return;
+        }
+        for sub in self.subscriptions.values_mut() {
+            if sub.connection == connection {
+                sub.due = Some(now);
+            }
+        }
+    }
+
+    /// Client resync: the reply replaces whatever the subscription buffered.
+    pub fn resync_started(&mut self, id: &str) {
         if let Some(sub) = self.subscriptions.get_mut(id) {
-            sub.paused = false;
-            sub.recovering = true;
+            sub.buffer.clear();
+            sub.due = None;
+            sub.recovering += 1;
         }
     }
 
-    /// Mark every subscriber on `topic` (all topics when `None`) as needing a snapshot.
-    pub fn invalidate(&mut self, topic: Option<&str>) {
-        for sub in self
-            .subscriptions
-            .values_mut()
-            .filter(|s| topic.is_none_or(|t| s.topic == t))
-        {
-            sub.needs_resync = true;
+    /// Applies the runtime reply of a resync (`recovery`) or snapshot recovery (`online`).
+    pub fn recovered(&mut self, id: &str, kind: &str, state: &Value) -> Result<Vec<String>> {
+        let Some(sub) = self.subscriptions.get_mut(id) else {
+            return Ok(vec![]);
+        };
+        sub.recovering = sub.recovering.saturating_sub(1);
+        let applied = sub.apply(id, kind, state, true);
+        if applied.is_err() {
+            sub.resync = true;
+        }
+        applied
+    }
+
+    /// A recovery reply failed; the subscription recovers by snapshot on its next flush.
+    pub fn recovery_failed(&mut self, id: &str, now: Instant) {
+        if let Some(sub) = self.subscriptions.get_mut(id) {
+            sub.recovering = sub.recovering.saturating_sub(1);
+            sub.buffer.clear();
+            sub.resync = true;
+            if !self.paused.contains(&sub.connection) {
+                sub.due = Some(now);
+            }
         }
     }
 
-    /// Subscribers that need a snapshot and can receive one now; marks them recovering.
-    pub fn take_recoverable(&mut self, connection: Option<&str>) -> Vec<(String, String)> {
+    /// Buffers one runtime publication `(from, to]` for every subscriber of `topic`.
+    pub fn deltas(
+        &mut self,
+        topic: &str,
+        (from, to): (u64, u64),
+        deltas: &[(Value, usize)],
+        now: Instant,
+    ) {
+        for sub in self.subscriptions.values_mut() {
+            if sub.topic != topic || sub.resync || sub.recovering > 0 || from < sub.seq {
+                continue;
+            }
+            if from > sub.seq {
+                // 序号断档说明中间增量未送达：不能伪造连续水位，改由快照补齐。
+                sub.buffer.clear();
+                sub.resync = true;
+            } else {
+                let profile = sub.profile;
+                let batch = deltas.iter().filter(|(d, _)| profile.keeps(d)).cloned();
+                if !sub.buffer.append(batch) {
+                    // 慢订阅者只保留恢复意图，不继续积压（Node overflow）。
+                    sub.buffer.clear();
+                    sub.resync = true;
+                }
+                sub.seq = to;
+            }
+            if sub.due.is_none() && !self.paused.contains(&sub.connection) {
+                sub.due = Some(now + sub.window);
+            }
+        }
+    }
+
+    /// Snapshot to every subscriber of `topic` (history reset, config change),
+    /// serialized once; paused subscribers recover when drained.
+    pub fn snapshot_topic(
+        &mut self,
+        topic: &str,
+        kind: &str,
+        seq: u64,
+        snapshot: &Value,
+    ) -> Output {
+        let payload = snapshot_payload(snapshot);
+        let mut out = Output::default();
+        for id in self.ids(|s| s.topic == topic) {
+            let sub = self
+                .subscriptions
+                .get_mut(&id)
+                .expect("listed subscription");
+            if self.paused.contains(&sub.connection) {
+                sub.buffer.clear();
+                sub.resync = true;
+                continue;
+            }
+            match sub.snapshot_frame(&id, kind, seq, &payload) {
+                Ok(lines) => out.lines.extend(lines),
+                Err(_) => {
+                    self.subscriptions.remove(&id);
+                    out.released.push(topic.into());
+                }
+            }
+        }
+        out
+    }
+
+    /// Frames of every due subscription, and the snapshots they need.
+    pub fn flush_due(&mut self, now: Instant) -> Output {
+        let mut out = Output::default();
+        for (id, sub) in &mut self.subscriptions {
+            if sub.due.is_none_or(|due| due > now) || self.paused.contains(&sub.connection) {
+                continue;
+            }
+            sub.due = None;
+            if sub.recovering > 0 {
+                continue;
+            }
+            if !sub.resync && (!sub.buffer.is_empty() || sub.sent_seq != sub.seq) {
+                let deltas = sub.buffer.take();
+                // 被 profile 过滤掉的 seq 也在区间内，客户端连续性判定不受过滤影响。
+                match sub.deltas_frame(id, "online", (sub.sent_seq, sub.seq), &deltas) {
+                    Ok(lines) => out.lines.extend(lines),
+                    Err(_) => sub.resync = true,
+                }
+            }
+            if sub.resync {
+                sub.recovering += 1;
+                out.recover.push((id.clone(), sub.topic.clone()));
+            }
+        }
+        out
+    }
+
+    /// Output ended: every buffered delta is written; snapshots can no longer be served.
+    pub fn flush_all(&mut self, now: Instant) -> Vec<String> {
+        for sub in self.subscriptions.values_mut() {
+            sub.due = Some(now);
+        }
+        self.flush_due(now).lines
+    }
+
+    pub fn next_due(&self) -> Option<Instant> {
         self.subscriptions
-            .iter_mut()
-            .filter(|(_, s)| {
-                s.needs_resync
-                    && !s.paused
-                    && !s.recovering
-                    && connection.is_none_or(|c| s.connection == c)
-            })
-            .map(|(id, s)| {
-                s.recovering = true;
-                (id.clone(), s.topic.clone())
-            })
-            .collect()
+            .values()
+            .filter(|s| !self.paused.contains(&s.connection))
+            .filter_map(|s| s.due)
+            .min()
+    }
+
+    /// Writer backlog: every buffer is dropped and recovered by snapshot later.
+    pub fn invalidate_all(&mut self) {
+        for sub in self.subscriptions.values_mut() {
+            sub.buffer.clear();
+            sub.resync = true;
+            sub.due = None;
+        }
+    }
+
+    /// Backlog relieved: subscriptions waiting for a snapshot become due.
+    pub fn wake(&mut self, now: Instant) {
+        for sub in self.subscriptions.values_mut() {
+            if sub.resync && !self.paused.contains(&sub.connection) {
+                sub.due = Some(now);
+            }
+        }
     }
 
     fn ids(&self, filter: impl Fn(&Subscription) -> bool) -> Vec<String> {
@@ -147,177 +295,8 @@ impl Delivery {
             .map(|(id, _)| id.clone())
             .collect()
     }
-
-    /// Send a snapshot to one subscriber and restart its sequence at `seq`.
-    pub fn snapshot(
-        &mut self,
-        id: &str,
-        delivery: &str,
-        seq: u64,
-        snapshot: &Value,
-    ) -> Result<Vec<String>> {
-        self.snapshot_payload(id, delivery, seq, &snapshot_payload(snapshot))
-    }
-
-    fn snapshot_payload(
-        &mut self,
-        id: &str,
-        delivery: &str,
-        seq: u64,
-        payload: &str,
-    ) -> Result<Vec<String>> {
-        let Some(sub) = self.subscriptions.get_mut(id) else {
-            return Ok(vec![]);
-        };
-        sub.needs_resync = false;
-        sub.recovering = false;
-        sub.sent_seq = seq;
-        frame(id, sub, delivery, 0, seq, payload)
-    }
-
-    /// Snapshot to every live subscriber of `topic` (config replacement, history reset);
-    /// the snapshot is serialized once and shared.
-    pub fn snapshot_topic(
-        &mut self,
-        topic: &str,
-        delivery: &str,
-        seq: u64,
-        snapshot: &Value,
-    ) -> Result<Vec<String>> {
-        let ids = self.ids(|s| s.topic == topic && !s.paused);
-        if ids.is_empty() {
-            return Ok(vec![]);
-        }
-        let payload = snapshot_payload(snapshot);
-        let mut lines = vec![];
-        for id in ids {
-            lines.extend(self.snapshot_payload(&id, delivery, seq, &payload)?);
-        }
-        Ok(lines)
-    }
-
-    /// Fan out one delta range; `payload` is the serialized `{"kind":"deltas",...}` object.
-    pub fn deltas(
-        &mut self,
-        topic: &str,
-        from: u64,
-        to: u64,
-        payload: &str,
-    ) -> Result<Vec<String>> {
-        let mut lines = vec![];
-        for id in self.ids(|s| s.topic == topic) {
-            let sub = self.subscriptions.get_mut(&id).unwrap();
-            if sub.paused || sub.needs_resync || from < sub.sent_seq {
-                continue;
-            }
-            if from > sub.sent_seq {
-                // 序号断档说明中间增量未送达：不能伪造连续水位，改由快照补齐。
-                sub.needs_resync = true;
-                continue;
-            }
-            sub.sent_seq = to;
-            lines.extend(frame(&id, sub, "online", from, to, payload)?);
-        }
-        Ok(lines)
-    }
-}
-
-fn snapshot_payload(snapshot: &Value) -> String {
-    json!({"kind":"snapshot","snapshot":snapshot}).to_string()
-}
-
-fn frame(
-    id: &str,
-    sub: &mut Subscription,
-    delivery: &str,
-    from: u64,
-    to: u64,
-    payload: &str,
-) -> Result<Vec<String>> {
-    sub.ordinal += 1;
-    let frame_json = format!(
-        r#"{{"topic":{},"subscriptionId":{},"fromSeq":{from},"toSeq":{to},"sentAt":{},"payload":{payload}}}"#,
-        serde_json::to_string(&sub.topic)?,
-        serde_json::to_string(id)?,
-        now_ms(),
-    );
-    let logical_frame_id = format!("{id}-lf-{}", sub.ordinal);
-    codec::encode(
-        &FrameHeader {
-            delivery_kind: delivery,
-            logical_frame_id: &logical_frame_id,
-            logical_frame_ordinal: sub.ordinal,
-            topic: &sub.topic,
-            subscription_id: id,
-        },
-        &frame_json,
-    )
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn frames(lines: &[String]) -> Vec<Value> {
-        lines
-            .iter()
-            .map(|l| serde_json::from_str::<Value>(l).unwrap()["params"]["frame"].clone())
-            .collect()
-    }
-
-    #[test]
-    fn deltas_continue_only_from_the_last_sent_seq() {
-        let mut delivery = Delivery::default();
-        let (id, _) = delivery.subscribe("conversation/s", "c");
-        delivery.snapshot(&id, "initial", 5, &json!({})).unwrap();
-        // 快照之前产生的增量已包含在快照内。
-        assert!(
-            delivery
-                .deltas("conversation/s", 3, 5, "{}")
-                .unwrap()
-                .is_empty()
-        );
-        let sent = frames(&delivery.deltas("conversation/s", 5, 7, "{}").unwrap());
-        assert_eq!(
-            (sent[0]["fromSeq"].as_u64(), sent[0]["toSeq"].as_u64()),
-            (Some(5), Some(7))
-        );
-        // 断档：不发送，并要求快照恢复。
-        assert!(
-            delivery
-                .deltas("conversation/s", 9, 10, "{}")
-                .unwrap()
-                .is_empty()
-        );
-        assert_eq!(
-            delivery.take_recoverable(None),
-            vec![(id.clone(), "conversation/s".into())]
-        );
-        assert!(
-            delivery.take_recoverable(None).is_empty(),
-            "recovery is requested once"
-        );
-        delivery.snapshot(&id, "recovery", 10, &json!({})).unwrap();
-        assert_eq!(
-            delivery
-                .deltas("conversation/s", 10, 11, "{}")
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    #[test]
-    fn replacing_and_closing_connections_report_released_topics() {
-        let mut delivery = Delivery::default();
-        let (first, replaced) = delivery.subscribe("conversation/s", "c");
-        assert!(!replaced);
-        let (second, replaced) = delivery.subscribe("conversation/s", "c");
-        assert!(replaced && first != second);
-        assert!(delivery.get(&first).is_none());
-        assert_eq!(
-            delivery.close_connection("c"),
-            vec!["conversation/s".to_owned()]
-        );
-    }
-}
+#[path = "delivery_tests.rs"]
+mod tests;

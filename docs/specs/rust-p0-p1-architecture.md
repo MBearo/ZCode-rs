@@ -348,6 +348,8 @@ sequenceDiagram
 
 ### 5.15 M8：订阅回放与流控（P1 #15）
 
+精确契约、所有者与验收见 [rust-m8-delivery.md](rust-m8-delivery.md)。实现时调整：保留日志放在 Actor（seq 分配者）而不是 app-server，避免无人订阅期间日志断档；`state.updated` 只发变化的顶层键。以下为原稿。
+
 app-server 的投递层完全替换现有 `subscriptions.rs`：
 
 - **TopicLog**（每个 topic）：`{ epoch, floor_seq, entries: VecDeque<{seq, deltas: Arc<[Delta]>}> }`。与 Node 一样保留 2000 条，另加 8 MiB 字节上限作为安全阀。

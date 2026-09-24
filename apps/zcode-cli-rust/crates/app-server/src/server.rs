@@ -24,6 +24,7 @@ pub(super) enum Pending {
         id: Option<RequestId>,
         topic: String,
         connection: String,
+        profile: crate::domain::delivery::Profile,
     },
     Resync {
         id: Option<RequestId>,
@@ -66,12 +67,19 @@ where
     let mut drain = tokio::time::interval(std::time::Duration::from_millis(100));
     drain.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
+        // 订阅者缓冲的刷新窗口（spec rust-m8-delivery §5）；拥塞期间由 drain 恢复。
+        let due = server.delivery.next_due().filter(|_| !server.congested);
+        let flush_at = due.map_or_else(tokio::time::Instant::now, tokio::time::Instant::from_std);
         tokio::select! {
             biased;
             batch = server_rx.recv() => match batch {
                 Some(batch) => server.on_runtime(batch).await?,
-                None => break,
+                None => {
+                    server.flush_final().await?;
+                    break;
+                }
             },
+            _ = tokio::time::sleep_until(flush_at), if due.is_some() => server.flush().await?,
             permit = client_tx.reserve(), if !server.to_runtime.is_empty() => match permit {
                 Ok(permit) => permit.send(server.to_runtime.pop_front().expect("queue is not empty")),
                 // runtime 已停止接收；剩余请求没有 owner，等待其输出关闭后退出。

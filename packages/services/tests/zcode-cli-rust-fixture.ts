@@ -1,7 +1,8 @@
 import { writeUserConfig } from "./zcode-cli-rust-fixture-config.js";
+export { waitForFile } from "./zcode-cli-rust-fixture-config.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type ServerResponse } from "node:http";
-import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { once } from "node:events";
@@ -27,19 +28,6 @@ import {
 export const binary = resolve(
   `apps/zcode-cli-rust/target/debug/zcode-cli-rust${process.platform === "win32" ? ".exe" : ""}`,
 );
-export async function waitForFile(path: string): Promise<string> {
-  const started = Date.now();
-  while (true) {
-    try {
-      const content = await readFile(path, "utf8");
-      if (content.trim()) return content;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    assert.ok(Date.now() - started < 3000, `File was not produced: ${path}`);
-    await delay(10);
-  }
-}
 type Message = Record<string, any>;
 
 export async function fixture(
@@ -240,6 +228,7 @@ export class Harness {
   readonly schemaErrors: string[] = [];
   private buffer = "";
   private waiters = new Set<() => void>();
+  private readonly primary = new Map<string, string>(); // 默认桌面连接在各 topic 上的最新订阅
   private closed = false;
   stderr = "";
   readonly exited: Promise<unknown>;
@@ -333,11 +322,15 @@ export class Harness {
     return id;
   }
   subscribe(topic: string, connectionId = "fixture-desktop", clientMode = "desktop-continuous") {
-    return this.client.request(
+    const result = this.client.request(
       "v4/conversation/subscribe",
       { topic, connectionId, clientMode },
       v4ConversationSubscribeResultSchema,
     );
+    const primary = (r: { ack: { subscriptionId: string } }) =>
+      this.primary.set(topic, r.ack.subscriptionId);
+    if (connectionId === "fixture-desktop") void result.then(primary, () => {});
+    return result;
   }
   rows(sessionId: string) {
     return this.client.request(
@@ -371,9 +364,13 @@ export class Harness {
     });
   }
   async completed(sessionId: string, after = 0) {
+    const topic = `conversation/${sessionId}`;
+    // 各订阅者的刷新窗口互不同步：有默认桌面订阅时只看它，避免被另一订阅迟到的上一轮帧满足。
+    const primary = this.primary.get(topic);
     return this.wait(
       (m) =>
-        m.params?.topic === `conversation/${sessionId}` &&
+        m.params?.topic === topic &&
+        (!primary || m.params.subscriptionId === primary) &&
         m.params.frame?.payload?.deltas?.some(
           (d: Message) => d.patch?.control?.phase === "completedSuccess",
         ),
