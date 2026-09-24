@@ -135,6 +135,32 @@ impl Session {
         );
     }
 
+    /// Node `persistDurableSessionEvent` of `UserInputAutoResolutionUpdated`:
+    /// the pending question's phase, one entry per interaction overwritten in
+    /// place. `ids` are the event id and trace.
+    pub fn node_auto_resolution(
+        &mut self,
+        now: u64,
+        pending: &Value,
+        (event, trace): (String, String),
+    ) {
+        if !self.node.created {
+            return;
+        }
+        let interaction = pending["interactionId"].as_str().unwrap_or("");
+        let phase = &pending["autoResolution"];
+        let mut data = json!({"interactionId": interaction,
+            "toolCallId": pending["payload"]["toolCallId"], "autoResolution": phase,
+            "eventId": event, "sequenceNumber": self.revision, "traceId": trace});
+        if let Some(turn) = &self.node.turn {
+            data["turnId"] = turn.runtime.clone().into();
+        }
+        let entry = json!({"id": format!("user-input-auto-resolution:{interaction}"),
+            "sessionID": self.id, "type": "runtime/user_input_auto_resolution",
+            "time": {"created": phase["startedAt"], "updated": now}, "data": data});
+        self.node.push(now, Op::Entry(entry));
+    }
+
     /// Node `updateTodos` (a replace-all list).
     pub fn node_todos(&mut self, now: u64) {
         if !self.node.created {

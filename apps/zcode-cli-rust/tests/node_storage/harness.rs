@@ -13,15 +13,17 @@ use tokio_util::sync::CancellationToken;
 use zcode_cli_rust::{app::Engine, contract::*, domain::protocol::Request};
 use zcode_cli_state::NodeStore;
 
-/// Ids and times from `offset`, so a restarted runtime never reuses them.
-struct Clock(AtomicUsize);
+/// Ids and times from `offset`, so a restarted runtime never reuses them;
+/// time also advances with the wall clock (question deadlines are timers).
+struct Clock(AtomicUsize, std::time::Instant);
 impl RuntimeClock for Clock {
     fn id(&self) -> String {
         let n = self.0.fetch_add(1, Ordering::SeqCst);
         format!("00000000-0000-4000-8000-{n:012}")
     }
     fn now(&self) -> u64 {
-        1_790_000_000_000 + self.0.load(Ordering::SeqCst) as u64
+        let elapsed = self.1.elapsed().as_millis() as u64;
+        1_790_000_000_000 + self.0.load(Ordering::SeqCst) as u64 + elapsed
     }
 }
 
@@ -70,6 +72,12 @@ impl ModelPort for Model {
             .find(|m| m["role"] == "user" && m.get("_zcode_source").is_none())
             .and_then(|m| m["content"].as_str())
             .is_some_and(|c| c.contains("write it"));
+        let ask = messages
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "user" && m.get("_zcode_source").is_none())
+            .and_then(|m| m["content"].as_str())
+            .is_some_and(|c| c.contains("ask me"));
         self.requests.send(messages).unwrap();
         if let Some(background) = spawn {
             let args = json!({"description": "Look around", "prompt": "Inspect a.ts",
@@ -146,7 +154,12 @@ impl ModelPort for Model {
         if tool_step {
             message["reasoning_content"] = "Look".into();
             calls = vec![json!({"id": format!("call_{n}"), "type": "function",
-            "function": if write {
+            "function": if ask {
+                let questions = json!({"questions": [{"question": "Which one?", "header": "Pick",
+                    "multiSelect": false, "options": [{"label": "A", "description": "a"},
+                    {"label": "B", "description": "b"}]}]});
+                json!({"name": "AskUserQuestion", "arguments": questions.to_string()})
+            } else if write {
                 json!({"name": "Write", "arguments": json!({"file_path": "b.ts", "content": "x"}).to_string()})
             } else {
                 json!({"name": "Read", "arguments": json!({"file_path": file}).to_string()})
@@ -279,16 +292,18 @@ async fn run(
             gate: Mutex::new(gate),
             root: root.clone(),
         }),
-        clock: Arc::new(Clock(AtomicUsize::new(offset))),
+        clock: Arc::new(Clock(AtomicUsize::new(offset), std::time::Instant::now())),
     };
     let identity = ModelIdentity {
         provider_id: "p".into(),
         model_id: "m".into(),
         reasoning_level: "high".into(),
     };
+    // 提问自动结束：20ms 后可见，60ms 后按空答案继续（Node 自动结束语义）。
     let engine = Engine::new(workspace.clone(), Some(identity), ports)
         .await
-        .unwrap();
+        .unwrap()
+        .with_question_timing(20, 60);
     let (input, rx) = mpsc::channel(32);
     let (out, output) = mpsc::channel(256);
     tokio::spawn(zcode_cli_rust::serve_values(

@@ -57,3 +57,29 @@ async fn full_access_is_committed_with_nodes_receipt() {
     );
     harness::dump(&h, &conn, &session);
 }
+
+#[tokio::test]
+async fn question_auto_resolution_phases_are_node_entries() {
+    let mut h = harness::start(Some("question"), None).await;
+    let session = h.create("c1", "ask me").await;
+    let conn = h.settled(&session, 1).await;
+    let phases =
+        entries::list(&conn, &session, Some("runtime/user_input_auto_resolution")).unwrap();
+    assert_eq!(phases.len(), 1, "one entry per interaction");
+    let phase = &phases[0];
+    let interaction = phase.data["interactionId"].as_str().unwrap();
+    assert_eq!(
+        phase.id,
+        format!("user-input-auto-resolution:{interaction}")
+    );
+    let resolution = &phase.data["autoResolution"];
+    // 最后一次落库的阶段是倒计时可见；到期应答不再单独记录（与 Node 相同）。
+    assert_eq!(resolution["state"], "visibleCountdown");
+    assert_eq!(
+        phase.time_created,
+        resolution["startedAt"].as_i64().unwrap()
+    );
+    assert!(phase.data["toolCallId"].as_str().is_some());
+    assert!(phase.data["turnId"].as_str().unwrap().starts_with("turn_"));
+    harness::dump(&h, &conn, &session);
+}

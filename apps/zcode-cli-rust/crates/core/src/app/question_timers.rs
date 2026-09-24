@@ -19,12 +19,26 @@ impl Engine {
         if p.get("autoResolution").is_some() {
             return;
         }
-        let key = p["interactionId"].as_str().unwrap();
-        if self.waiters.question(key).is_none_or(|q| !q.eligible) {
+        let key = p["interactionId"].as_str().unwrap().to_owned();
+        if self.waiters.question(&key).is_none_or(|q| !q.eligible) {
             return;
         }
         let now = self.clock.now();
         p["autoResolution"] = json!({"state":"hiddenGrace","startedAt":now,"visibleAt":now+self.question_timing.0,"deadlineAt":now+self.question_timing.1});
+        self.node_question_phase(id, &key);
+    }
+
+    /// Node `UserInputAutoResolutionUpdated`: the question's latest
+    /// auto-resolution phase, so a restart keeps its absolute times.
+    fn node_question_phase(&mut self, id: &str, interaction: &str) {
+        let ids = (self.clock.id(), self.clock.id());
+        self.node(id, |s, now| {
+            let pending = s.pending.iter().find(|p| p["interactionId"] == interaction);
+            if let Some(pending) = pending.cloned() {
+                let trace = s.trace_id.clone().unwrap_or(ids.1);
+                s.node_auto_resolution(now, &pending, (ids.0, trace));
+            }
+        });
     }
     pub(super) fn snooze_question(&mut self, id: &str, interaction: &str) -> bool {
         let Some(p) = self.sessions.get_mut(id).and_then(|s| {
@@ -40,6 +54,7 @@ impl Engine {
         }
         p["autoResolution"] =
             json!({"state":"snoozed","startedAt":a["startedAt"],"snoozedAt":self.clock.now()});
+        self.node_question_phase(id, interaction);
         true
     }
     pub(super) fn question_delay(&self) -> Option<std::time::Duration> {
@@ -96,6 +111,7 @@ impl Engine {
                 deltas
             } else {
                 p["autoResolution"]["state"] = "visibleCountdown".into();
+                self.node_question_phase(&id, &key);
                 vec![]
             };
             let s = self.sessions.get_mut(&id).unwrap();
