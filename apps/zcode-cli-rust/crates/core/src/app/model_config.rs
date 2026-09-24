@@ -89,6 +89,28 @@ impl Engine {
     pub(super) fn catalog(&self) -> Vec<Value> {
         self.registry.as_ref().map(|r| r.catalog()).unwrap_or_else(|| self.config.as_ref().map(|c| vec![json!({"value":c.model_id,"name":c.model_id,"modelProviderId":c.provider_id,"modelProviderName":c.provider_id,"modelThoughtLevels":[c.reasoning_level]})]).unwrap_or_default())
     }
+    /// Node's cold usage seed (`sessionUsageSeedFromRuntimeContextUsage`): a
+    /// resumed session's stored context use against its model's window.
+    pub(super) fn seed_context_window(&self, s: &mut crate::domain::session::Session) {
+        let Some(used) = s.cold_context_used.take().filter(|used| *used > 0) else {
+            return;
+        };
+        if s.usage["contextWindow"].is_object() {
+            return;
+        }
+        let identity = ModelIdentity {
+            provider_id: s.provider.clone(),
+            model_id: s.model.clone(),
+            reasoning_level: s.reasoning_level.clone(),
+        };
+        let model = match &self.registry {
+            Some(registry) => registry.resolve(&identity).ok(),
+            None => self.model.clone(),
+        };
+        let window = model.map(|m| m.context_policy().window);
+        s.usage["contextWindow"] = json!({"usedTokens": used, "maxTokens": window,
+            "autoCompactThresholdTokens": null});
+    }
     pub(super) fn session_selection(&self, id: &str) -> Result<ModelIdentity> {
         let s = self.sessions.get(id).context("Session unavailable")?;
         Ok(ModelIdentity {

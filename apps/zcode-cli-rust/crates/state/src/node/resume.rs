@@ -34,6 +34,8 @@ pub struct Resume {
     pub last_assistant_completed: Option<Value>,
     pub history: History,
     pub conversation: Cold,
+    /// Node `contextUsageFromPersistedMessages` (`used`) of the active branch.
+    pub context_used: Option<u64>,
     /// The shared context import (spec §5.6).
     pub shared: Option<crate::domain::shared_context::SharedContext>,
     /// The workspace checkpoints (spec §5.5).
@@ -213,6 +215,7 @@ pub fn resume(
     drop(active);
     // 最新消息锚点不含压缩保留段：保留段不是压缩后时间线的最新位置。
     let timeline = node_history::active_messages(&all, &branch, false);
+    let context_used = node_history::context_used(&timeline);
     let latest = timeline
         .iter()
         .rev()
@@ -248,6 +251,7 @@ pub fn resume(
         history,
         checkpoints: super::checkpoints::read(conn, id, artifacts)?,
         shared: super::shared::read(conn, id)?,
+        context_used,
         conversation: node_rows::replay(id, &events),
         session,
     }))

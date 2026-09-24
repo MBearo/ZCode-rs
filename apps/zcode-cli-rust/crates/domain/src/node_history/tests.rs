@@ -90,3 +90,31 @@ fn entries_render_as_rust_canonical_messages() {
     };
     assert_eq!(steer.canonical()["_zcode_source"], "legacy_synthetic");
 }
+
+#[test]
+fn context_use_is_the_latest_post_compact_count_or_assistant_tokens() {
+    let record = |info: Value, parts: Vec<Value>| Record { info, parts };
+    let assistant = record(
+        json!({"id": "a", "role": "assistant", "tokens": {"input": 90, "output": 10}}),
+        vec![],
+    );
+    assert_eq!(
+        super::context_used(std::slice::from_ref(&assistant)),
+        Some(100)
+    );
+    let summary = record(
+        json!({"id": "s", "role": "user", "summary": {"title": "Compact summary"}}),
+        vec![
+            json!({"type": "compaction", "compactBoundary": {"postCompactTokenCount": 30,
+            "truePostCompactTokenCount": 40}}),
+        ],
+    );
+    assert_eq!(super::context_used(&[assistant.clone(), summary]), Some(40));
+    let total = record(
+        json!({"id": "b", "role": "assistant", "tokens": {"total": 7, "input": 1}}),
+        vec![],
+    );
+    assert_eq!(super::context_used(&[assistant, total]), Some(7));
+    let empty: [Record; 0] = [];
+    assert_eq!(super::context_used(&empty), None);
+}

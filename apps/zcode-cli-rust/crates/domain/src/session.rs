@@ -30,6 +30,10 @@ pub struct Session {
     /// `file_checkpoints` once the tools hold their contents.
     #[serde(skip)]
     pub imported_checkpoints: Vec<super::file_checkpoint::ImportedCheckpoint>,
+    /// A resumed Node session's context use (the model's window is added by
+    /// the engine, as Node's cold usage seed).
+    #[serde(skip)]
+    pub cold_context_used: Option<u64>,
     #[serde(default)]
     pub rewind_committed: Option<String>,
     #[serde(default, skip_serializing)]
@@ -187,6 +191,7 @@ impl Session {
             node: Default::default(),
             file_checkpoints: vec![],
             imported_checkpoints: vec![],
+            cold_context_used: None,
             rewind_committed: None,
             history: Default::default(),
             row_highwater: 0,

@@ -48,4 +48,23 @@ async fn file_writes_are_stored_as_nodes_workspace_checkpoints() {
     );
     assert!(imported[0].before.is_none() && !imported[0].restored);
     harness::dump(&h, &conn, &session);
+
+    // 重启后：Node 冷用量种子——上下文用量取最后一个 assistant 的 tokens，窗口取模型。
+    drop(conn);
+    let mut h = harness::restart(&h).await;
+    h.rows(10, &session).await;
+    let read = h
+        .request(
+            11,
+            "session/read",
+            serde_json::json!({"sessionId": session}),
+        )
+        .await;
+    let projection = &read["projection"];
+    assert_eq!(projection["contextUsed"], 105, "{read:#}");
+    assert!(
+        projection["contextWindow"]
+            .as_u64()
+            .is_some_and(|max| max > 0)
+    );
 }
