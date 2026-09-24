@@ -29,7 +29,9 @@ impl Engine {
         }
         if !matches!(
             event,
-            Event::PermissionHook { .. } | Event::PromptBlocked { .. }
+            Event::PermissionHook { .. }
+                | Event::PromptBlocked { .. }
+                | Event::WorkspaceHooks { .. }
         ) {
             return Ok(Some(RunEvent {
                 session_id: id,
@@ -58,6 +60,19 @@ impl Engine {
             Event::PromptBlocked { committed } => {
                 self.prompt_blocked(&id, &turn, committed).await?
             }
+            Event::WorkspaceHooks { reply } => {
+                let hooks = self.workspace_hooks(&id).await.unwrap_or_else(|error| {
+                    // 发现或读取失败时本轮不带项目 hooks（Node 的会话创建会失败，这里不中断会话）。
+                    tracing::warn!(
+                        target: "zcode::hooks",
+                        event = "workspace_hook.discovery_failed",
+                        error = %format!("{error:#}"),
+                        "Workspace hooks could not be discovered"
+                    );
+                    None
+                });
+                let _ = reply.send(hooks);
+            }
             _ => unreachable!("not a hook event"),
         }
         Ok(None)
@@ -66,7 +81,7 @@ impl Engine {
     /// Hooks from the config `hooks` section (Node `createConfiguredHookRunner`),
     /// read once at startup; `user_path` is the user config file declaring them.
     pub fn with_hooks(mut self, hooks: &Value, user_path: &str) -> Self {
-        self.hooks = crate::domain::hooks::registrations(hooks, Some(user_path)).into();
+        self.hooks.user = crate::domain::hooks::registrations(hooks, Some(user_path)).into();
         self
     }
 

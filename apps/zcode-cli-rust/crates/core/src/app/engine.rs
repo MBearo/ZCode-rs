@@ -70,8 +70,8 @@ pub struct Engine {
     pub(super) question_timing: (u64, u64),
     pub(super) events: mpsc::Sender<RunEvent>,
     pub(super) event_rx: mpsc::Receiver<RunEvent>,
-    /// User config hooks, read once at startup.
-    pub(super) hooks: Arc<[crate::domain::hooks::Registration]>,
+    /// User config hooks and workspace hook trust.
+    pub(super) hooks: super::workspace_trust::HookState,
 }
 impl Engine {
     pub async fn new(
@@ -133,7 +133,7 @@ impl Engine {
             question_timing: (60_000, 300_000),
             events,
             event_rx,
-            hooks: Arc::from([]),
+            hooks: Default::default(),
         })
     }
     /// Config file `permission` section (mode fallback, allowed/disallowed tools),
@@ -313,6 +313,7 @@ impl Engine {
             | Method::ConversationRowsRange
             | Method::ConversationPlans => self.conversation_query(call.method, p).await,
             Method::WorkspaceUpdateInteractionPreferences => self.interaction_preferences(p).await,
+            Method::WorkspaceHooksTrustGrant => self.trust_grant(p).await,
             Method::ConversationFileChanges => self.file_changes(p).await,
             Method::ConversationFileRewindPreview => self.rewind_preview(p).await,
             Method::SessionRead => self.read_cold_session(p).await,

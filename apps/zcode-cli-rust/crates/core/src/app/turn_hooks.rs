@@ -4,7 +4,7 @@
 use super::context::{RunContext, TransientKind};
 use super::hook_runner::Hooks;
 use crate::contract::{Event, EventSink};
-use crate::domain::hooks::{HookEvent, decision, display, input};
+use crate::domain::hooks::{HookEvent, decision, display, input, workspace};
 use crate::domain::{plan_mode, session_runtime::ReminderKind};
 use anyhow::Result;
 use serde_json::Value;
@@ -43,11 +43,12 @@ impl TurnHooks {
     /// Node turn start. `false`: UserPromptSubmit blocked the input; the
     /// engine already took it out of the history and the run ends.
     pub async fn start(
-        &self,
+        &mut self,
         history: &mut RunContext,
         sink: &EventSink,
         cancel: &CancellationToken,
     ) -> Result<bool> {
+        self.add_project_hooks(sink, cancel).await?;
         let mode = mode(history);
         let position = self
             .prompt
@@ -89,6 +90,35 @@ impl TurnHooks {
         )
         .await?;
         Ok(true)
+    }
+
+    /// Project hooks of the session (activated by the engine on first use)
+    /// go after the user hooks of each event, with the trust admission view.
+    async fn add_project_hooks(
+        &mut self,
+        sink: &EventSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let (reply, receipt) = oneshot::channel();
+        sink.send(Event::WorkspaceHooks { reply }).await?;
+        let project = tokio::select! {biased;
+            _=cancel.cancelled()=>anyhow::bail!("Cancelled"),
+            result=receipt=>result.ok().flatten(),
+        };
+        let Some(project) = project else {
+            return Ok(());
+        };
+        let current = &self.hooks;
+        let registrations = workspace::insert(&current.registrations, project.registrations);
+        self.hooks = Arc::new(Hooks {
+            registrations: registrations.into(),
+            tools: current.tools.clone(),
+            clock: current.clock.clone(),
+            cwd: current.cwd.clone(),
+            turn_id: current.turn_id.clone(),
+            admission: Some(project.view),
+        });
+        Ok(())
     }
 
     /// Node Stop hooks after a text-only step: `true` continues the turn with

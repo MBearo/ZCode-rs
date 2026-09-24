@@ -69,6 +69,9 @@ impl Engine {
         ) {
             return self.history_command(&c).await;
         }
+        if c.kind.contains("WorkspaceHook") {
+            return self.workspace_hook_command(&c).await;
+        }
         if c.kind == "applyFileRewind" {
             return self.apply_file_rewind(&c).await;
         }

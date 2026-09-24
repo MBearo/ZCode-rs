@@ -99,6 +99,8 @@ impl Engine {
             bytes = bytes.saturating_sub(size);
             self.tools.evict_session(&id).await?;
             self.sessions.remove(&id);
+            self.hooks.sessions.remove(&id);
+            self.hooks.without.remove(&id);
             self.session_access.remove(&id);
         }
         if self.acks.len() > 1024 {

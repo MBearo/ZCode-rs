@@ -130,6 +130,7 @@ fn runner_merges_and_reports_like_node() {
                 status_message: None,
                 timeout_ms: 1000,
                 max_output_bytes: 32768,
+                review: None,
             })
             .collect();
         let mut input = json!({"hookEventName":event.as_str(),"sessionId":"s","traceId":"t","turnId":"turn","cwd":"/w"});

@@ -56,6 +56,11 @@ pub enum Event {
         kind: zcode_cli_domain::session_runtime::ReminderKind,
         message: Value,
     },
+    /// First step of a root session's run: its project hooks and their
+    /// admission view (`None`: no project hooks, or trust is unavailable).
+    WorkspaceHooks {
+        reply: oneshot::Sender<Option<WorkspaceHooks>>,
+    },
     /// One hook lifecycle event (Node `hook_run_*` session events).
     Hook(zcode_cli_domain::hooks::runner::Lifecycle),
     /// PermissionRequest hooks answered the prompt for `call_id` first; the
@@ -149,6 +154,12 @@ pub enum Event {
         model_failure: Option<ModelFailure>,
         cancelled: bool,
     },
+}
+/// A session's project hooks as admitted for its runs.
+pub struct WorkspaceHooks {
+    pub registrations: Vec<zcode_cli_domain::hooks::Registration>,
+    pub view:
+        tokio::sync::watch::Receiver<std::sync::Arc<zcode_cli_domain::hooks::trust::AdmissionView>>,
 }
 pub struct ModelOutput {
     pub message: Value,

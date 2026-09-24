@@ -18,6 +18,9 @@ mod plan_tools;
 mod tool_execution;
 mod tool_hooks;
 mod turn_hooks;
+mod workspace_grant;
+mod workspace_review;
+mod workspace_trust;
 
 mod context;
 mod context_projection;

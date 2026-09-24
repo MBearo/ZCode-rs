@@ -16,6 +16,7 @@ import { bashFixtures, bashPolicyData, bashRegistry } from "./zcode-cli-rust-bas
 import { legacyParamsFixtures } from "./zcode-cli-rust-legacy-params-fixtures.mjs";
 import { planModeData } from "./zcode-cli-rust-plan-mode-fixtures.mjs";
 import { hookFixtures } from "./zcode-cli-rust-hooks-fixtures.mjs";
+import { workspaceHookFixtures } from "./zcode-cli-rust-workspace-hook-fixtures.mjs";
 import {
   bashAnalysisFixtures,
   bashAnalysisFuzzFixtures,
@@ -206,6 +207,10 @@ await emit("../apps/zcode-cli-rust/crates/domain/fixtures/permission.json", perm
 await emit("../apps/zcode-cli-rust/crates/domain/schema/tool-permissions.json", permissionData());
 await emit("../apps/zcode-cli-rust/crates/domain/schema/plan-mode.json", planModeData());
 await emit("../apps/zcode-cli-rust/crates/domain/fixtures/hooks.json", await hookFixtures());
+await emit(
+  "../apps/zcode-cli-rust/crates/domain/fixtures/workspace-hooks.json",
+  workspaceHookFixtures(),
+);
 await emit(
   "../apps/zcode-cli-rust/crates/domain/fixtures/legacy-params.json",
   legacyParamsFixtures(),

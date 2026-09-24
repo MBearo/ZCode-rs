@@ -66,6 +66,7 @@ methods! {
     WorkspaceGenerateText => "workspace/generateText",
     WorkspaceCancelGenerateText => "workspace/cancelGenerateText",
     WorkspaceUpdateInteractionPreferences => "workspace/updateInteractionPreferences",
+    WorkspaceHooksTrustGrant => "workspace/hooks/trustGrant",
     ProviderTestModelConnectivity => "provider/testModelConnectivity",
     ProviderUpdateAccountConfig => "provider/updateAccountConfig",
 }

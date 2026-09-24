@@ -58,9 +58,11 @@ pub enum Input {
 
 pub use crate::contract_events::{
     Event, EventSink, Guide, ModelOutput, PermissionAnswer, PermissionRequest, RequestAuth,
-    RequestKind, RequestOrigin, RunEvent,
+    RequestKind, RequestOrigin, RunEvent, WorkspaceHooks,
 };
-pub use crate::contract_tools::{HookProcess, ToolOutput, ToolPermission, ToolPort};
+pub use crate::contract_tools::{
+    HookProcess, ToolOutput, ToolPermission, ToolPort, TrustLoad, TrustStorePort,
+};
 #[async_trait]
 pub trait SessionStore: Send + Sync {
     /// Startup reads only the lightweight persisted index, never every transcript or ACK.
@@ -232,6 +234,29 @@ pub use zcode_cli_domain::config::ConfigSnapshot;
 #[async_trait]
 pub trait ConfigSource: Send + Sync {
     async fn load(&self) -> Result<Arc<ConfigSnapshot>>;
+    /// Switches one project hook in `<cwd>/.zcode/config.json` if its
+    /// declaration still has the reviewed digest. `Err` is a reason code.
+    async fn set_workspace_hook_enabled(
+        &self,
+        _toggle: HookToggle,
+    ) -> std::result::Result<(), &'static str> {
+        Err("workspace_hooks_config_write_failed")
+    }
+}
+
+/// A reviewed project hook declaration to switch (Node
+/// `writeWorkspaceHookConfiguredToggle`).
+pub struct HookToggle {
+    pub path: String,
+    pub event: zcode_cli_domain::hooks::HookEvent,
+    pub relative_path: String,
+    pub discovery_order: usize,
+    pub matcher_index: usize,
+    pub hook_index: usize,
+    pub digest: String,
+    pub resolved_timeout_ms: u64,
+    pub resolved_max_output_bytes: u64,
+    pub enabled: bool,
 }
 
 #[async_trait]

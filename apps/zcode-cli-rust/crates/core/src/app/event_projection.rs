@@ -146,6 +146,7 @@ impl Engine {
             | Event::Hook(_)
             | Event::PermissionHook { .. }
             | Event::PromptBlocked { .. }
+            | Event::WorkspaceHooks { .. }
             | Event::Question { .. }
             | Event::ToolCleanupFailed(_)
             | Event::StepBoundary { .. }

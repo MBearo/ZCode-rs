@@ -110,6 +110,15 @@ pub fn effective(merged: &Map<String, Value>) -> Value {
     })
 }
 
+/// A loaded project config file that declares hooks (Node `hookCandidate`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HookCandidate {
+    pub path: String,
+    /// Position among every discovered project config file, loaded or not.
+    pub discovery_order: usize,
+    pub hooks: Value,
+}
+
 /// Immutable result of loading every configuration layer for one workspace.
 #[derive(Clone, Debug, Default)]
 pub struct ConfigSnapshot {
@@ -118,7 +127,9 @@ pub struct ConfigSnapshot {
     /// MCP server name → source (`system|project|user|env|cli`).
     pub mcp_sources: Map<String, Value>,
     /// Project hook declarations kept outside the executable config (trust candidates).
-    pub project_hook_candidates: Vec<(String, Value)>,
+    pub project_hook_candidates: Vec<HookCandidate>,
+    /// The user config file's `hooks` root (for the workspace hook runtime root).
+    pub user_hooks: Value,
     pub user_path: String,
     pub project_paths: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,

@@ -14,7 +14,7 @@ pub(super) async fn run(
     cancel: &CancellationToken,
 ) -> Result<()> {
     // Node：SessionStart 在手动压缩前运行；UserPromptSubmit 阻止输入时本轮直接结束。
-    if let Some(turn) = &turn
+    if let Some(turn) = &mut turn
         && !turn.start(history, sink, cancel).await?
     {
         return Ok(());

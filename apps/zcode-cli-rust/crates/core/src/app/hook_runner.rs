@@ -6,6 +6,7 @@ use crate::domain::hooks::{
     HookEvent, Program, Registration, input,
     output::{self, Callback, Failure, RunResult},
     runner::{self, Admission, Dispatch, Driver, Kind, Lifecycle},
+    trust::AdmissionView,
 };
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
@@ -18,6 +19,8 @@ pub(super) struct Hooks {
     /// Runtime working directory (hook `cwd` and process directory).
     pub cwd: String,
     pub turn_id: String,
+    /// Workspace trust view for project hooks (absent: none registered).
+    pub admission: Option<tokio::sync::watch::Receiver<Arc<AdmissionView>>>,
 }
 
 impl Hooks {
@@ -70,8 +73,12 @@ struct RunDriver<'a> {
 }
 
 impl Driver for RunDriver<'_> {
-    fn admission(&mut self, _hook: &Registration) -> Admission {
-        Admission::ALLOWED
+    fn admission(&mut self, hook: &Registration) -> Admission {
+        let (Some((item, digest)), Some(view)) = (&hook.review, &self.hooks.admission) else {
+            return Admission::ALLOWED;
+        };
+        // 每次派发前读取最新视图：撤销、切换开关或存储重载对尚未开始的 hook 立即生效。
+        view.borrow().admit(item, digest)
     }
     fn now(&self) -> u64 {
         self.hooks.clock.now()

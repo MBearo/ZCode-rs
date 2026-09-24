@@ -103,11 +103,15 @@ impl WorkspaceConfig {
         let mut diagnostics: Vec<Diagnostic> = user.diagnostics.clone();
         let mut projects = vec![];
         let mut hook_candidates = vec![];
-        for path in project_paths(&self.cwd).await {
+        for (discovery_order, path) in project_paths(&self.cwd).await.into_iter().enumerate() {
             let (file, hooks) = project_file(load_file(&path).await);
             diagnostics.extend(file.diagnostics.clone());
             if let Some(hooks) = hooks {
-                hook_candidates.push((file.path.clone(), hooks));
+                hook_candidates.push(crate::domain::config::HookCandidate {
+                    path: file.path.clone(),
+                    discovery_order,
+                    hooks,
+                });
             }
             if file.loaded {
                 projects.push(file);
@@ -152,6 +156,11 @@ impl WorkspaceConfig {
             config: effective(&merged),
             mcp_sources: sources,
             project_hook_candidates: hook_candidates,
+            user_hooks: if user.loaded {
+                user.patch.get("hooks").cloned().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            },
             user_path: user.path,
             project_paths: projects.into_iter().map(|f| f.path).collect(),
             diagnostics,
@@ -163,6 +172,16 @@ impl WorkspaceConfig {
 impl ConfigSource for WorkspaceConfig {
     async fn load(&self) -> Result<Arc<ConfigSnapshot>> {
         Ok(Arc::new(self.snapshot().await))
+    }
+    async fn set_workspace_hook_enabled(
+        &self,
+        toggle: crate::contract::HookToggle,
+    ) -> std::result::Result<(), &'static str> {
+        // 只允许改写当前工作目录的 .zcode/config.json（Node editable 规则）。
+        if Path::new(&toggle.path) != self.cwd.join(".zcode").join("config.json") {
+            return Err("workspace_hooks_snapshot_mismatch");
+        }
+        crate::hook_toggle::set_enabled(&toggle).await
     }
 }
 

@@ -2,16 +2,23 @@
 //! stdin contract, output merging, lifecycle payloads and row projection.
 //! Processes are started by the tools crate; the run task drives the order.
 pub mod decision;
+pub mod digest;
 pub mod display;
 pub mod input;
 pub mod output;
 pub mod projection;
+mod review;
 pub mod runner;
 #[cfg(test)]
 mod runner_tests;
 mod schema;
 #[cfg(test)]
 mod tests;
+pub mod trust;
+mod trust_record;
+pub mod workspace;
+#[cfg(test)]
+mod workspace_tests;
 
 use serde_json::Value;
 
@@ -126,6 +133,9 @@ pub struct Registration {
     pub status_message: Option<String>,
     pub timeout_ms: u64,
     pub max_output_bytes: usize,
+    /// Project hooks: `(reviewItemId, declaration digest)` checked by the
+    /// workspace-trust admission before every dispatch.
+    pub review: Option<(String, String)>,
 }
 
 impl Registration {
@@ -221,6 +231,7 @@ pub fn registrations(hooks: &Value, user_path: Option<&str>) -> Vec<Registration
                     status_message: hook["statusMessage"].as_str().map(str::to_owned),
                     timeout_ms: timeout_ms(hook, default_ms),
                     max_output_bytes: max_output_bytes as usize,
+                    review: None,
                 });
             }
         }

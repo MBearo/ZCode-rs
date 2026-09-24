@@ -59,10 +59,12 @@ impl Engine {
                     _ => None,
                 }
             })
+            .chain(self.review_deadline())
             .min()
             .map(|at| std::time::Duration::from_millis(at.saturating_sub(self.clock.now())))
     }
     pub(super) async fn advance_questions(&mut self) -> Result<()> {
+        self.expire_reviews().await?;
         let now = self.clock.now();
         let due = self
             .sessions

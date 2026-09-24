@@ -169,6 +169,34 @@ pub trait ToolPort: Send + Sync {
         Ok(())
     }
 }
+/// What a trust store load found (Node `WorkspaceHookTrustStoreLoadResult`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum TrustLoad {
+    /// A missing file loads as no records.
+    Records(Vec<zcode_cli_domain::hooks::trust::Record>),
+    /// Invalid content, moved aside; every project hook stays blocked.
+    Corrupt,
+}
+
+/// The workspace hook trust store shared with the Desktop (Node
+/// `FileWorkspaceHookTrustStore`). Calls are serialized in process and locked
+/// across processes; mutations return the records now on disk.
+#[async_trait]
+pub trait TrustStorePort: Send + Sync {
+    async fn load(&self) -> Result<TrustLoad>;
+    /// Upsert by `(workspaceIdentity, digest)`, keeping existing positions.
+    async fn grant(
+        &self,
+        records: Vec<zcode_cli_domain::hooks::trust::Record>,
+    ) -> Result<Vec<zcode_cli_domain::hooks::trust::Record>>;
+    /// `None` removes every record of the workspace; `Some` must not be empty.
+    async fn revoke(
+        &self,
+        identity: &str,
+        digests: Option<Vec<String>>,
+    ) -> Result<Vec<zcode_cli_domain::hooks::trust::Record>>;
+}
+
 /// One hook process. Variables are already expanded.
 pub struct HookProcess {
     pub program: zcode_cli_domain::hooks::Program,

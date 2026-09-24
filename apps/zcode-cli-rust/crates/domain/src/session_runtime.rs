@@ -31,6 +31,8 @@ pub struct RuntimeOptions {
     pub plan_feedback: Option<String>,
     /// SessionStart hooks already ran in this process (Node `sessionStartHookRan`).
     pub session_start_ran: bool,
+    /// Snapshot `workspaceHookAdmission`: the pending project hooks banner.
+    pub workspace_hook_admission: Option<serde_json::Value>,
 }
 
 /// A transient reminder kept in the process history (never persisted).

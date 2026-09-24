@@ -343,6 +343,7 @@ fn texts_match_node() {
             status_message: hook["statusMessage"].as_str().map(str::to_owned),
             timeout_ms: case[1].as_u64().unwrap(),
             max_output_bytes: 32768,
+            review: None,
         };
         let got = display::descriptor(&registration, &json!({"sessionId":"s-1","cwd":"/w"}));
         assert_eq!(got.to_string(), case[2].to_string());

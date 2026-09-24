@@ -1,0 +1,777 @@
+{
+  "numbers": [
+    [0, "0"],
+    [1, "1"],
+    [-1, "-1"],
+    [1.5, "1.5"],
+    [60000, "60000"],
+    [1e21, "1e+21"],
+    [1e-7, "1e-7"],
+    [0.000001, "0.000001"],
+    [123.456, "123.456"],
+    [9007199254740992, "9007199254740992"],
+    [0.3333333333333333, "0.3333333333333333"],
+    [1e300, "1e+300"],
+    [5e-324, "5e-324"],
+    [100, "100"],
+    [100000000000000000000, "100000000000000000000"]
+  ],
+  "snapshots": [
+    {
+      "name": "research",
+      "roots": [
+        {
+          "enabled": true
+        }
+      ],
+      "sources": [
+        {
+          "path": "/w/.zcode/config.json",
+          "order": 0,
+          "hooks": {
+            "enabled": true,
+            "events": {
+              "PreToolUse": [
+                {
+                  "matcher": "Bash",
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "echo hi",
+                      "timeout": 5
+                    }
+                  ]
+                }
+              ],
+              "Stop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "process",
+                      "command": "node",
+                      "args": ["stop.js"],
+                      "enabled": false
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "runtimeRoot": {
+        "enabled": true,
+        "timeoutMs": 60000,
+        "maxOutputBytes": 32768
+      },
+      "snapshot": {
+        "schemaVersion": 1,
+        "workspaceIdentity": "id-1",
+        "discoveredAt": "2026-01-01T00:00:00.000Z",
+        "sourceFiles": [
+          {
+            "canonicalPath": "/w/.zcode/config.json",
+            "baseDir": "/w",
+            "discoveryOrder": 0,
+            "configFileKind": ".zcode/config.json",
+            "explicitProjectConfig": false,
+            "editable": true,
+            "hooksRoot": {
+              "enabled": true
+            }
+          }
+        ],
+        "hooks": [
+          {
+            "reviewItemId": "workspace-hook-0-PreToolUse-0-0",
+            "event": "PreToolUse",
+            "matcherIndex": 0,
+            "hookIndex": 0,
+            "sourceFileIndex": 0,
+            "sourceRelativePath": ".zcode/config.json",
+            "matcher": "Bash",
+            "command": "echo hi",
+            "resolvedTimeoutMs": 5000,
+            "resolvedMaxOutputBytes": 32768,
+            "sourceRootEnabled": true,
+            "declarationEnabled": true,
+            "runtimeHooksEnabled": true,
+            "configuredEnabled": true,
+            "editable": true,
+            "declarationDigestAlgorithm": "sha256",
+            "hookDeclarationDigest": "1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63",
+            "type": "command"
+          },
+          {
+            "reviewItemId": "workspace-hook-0-Stop-0-0",
+            "event": "Stop",
+            "matcherIndex": 0,
+            "hookIndex": 0,
+            "sourceFileIndex": 0,
+            "sourceRelativePath": ".zcode/config.json",
+            "matcher": null,
+            "command": "node",
+            "resolvedTimeoutMs": 60000,
+            "resolvedMaxOutputBytes": 32768,
+            "sourceRootEnabled": true,
+            "declarationEnabled": false,
+            "runtimeHooksEnabled": true,
+            "configuredEnabled": false,
+            "editable": true,
+            "declarationDigestAlgorithm": "sha256",
+            "hookDeclarationDigest": "d03b75d279c70d1433b894b5d7a9ad3b4ecb95247a0feb4fec778c6b9a297d70",
+            "type": "process",
+            "args": ["stop.js"]
+          }
+        ],
+        "digestAlgorithm": "sha256",
+        "bundleDigest": "0e015b2d19899c3820ce4ed17da213e1b4e073f9039581df662da184417acb2e"
+      }
+    },
+    {
+      "name": "shapes",
+      "roots": [
+        {
+          "enabled": false,
+          "timeoutMs": 1500.5
+        },
+        {
+          "enabled": true,
+          "maxOutputBytes": 4096.4
+        }
+      ],
+      "sources": [
+        {
+          "path": "/w/zcode.json",
+          "order": 1,
+          "hooks": {
+            "timeoutMs": 2.5,
+            "maxOutputBytes": 1e21,
+            "events": {
+              "UserPromptSubmit": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "  ./check.sh  ",
+                      "shell": "/bin/bash",
+                      "async": true,
+                      "statusMessage": " Checking "
+                    },
+                    {
+                      "type": "command",
+                      "command": "x",
+                      "shell": true,
+                      "timeoutMs": 1e-7
+                    }
+                  ]
+                }
+              ],
+              "PostToolUse": [
+                {
+                  "matcher": "Edit|Write",
+                  "hooks": [
+                    {
+                      "type": "process",
+                      "command": "fmt",
+                      "args": []
+                    }
+                  ]
+                },
+                {
+                  "hooks": [
+                    {
+                      "type": "process",
+                      "command": "lint",
+                      "args": ["--fix", "a b"],
+                      "timeoutMs": 123456.789
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "path": "/other/.zcode/config.json",
+          "order": 3,
+          "hooks": {
+            "enabled": false,
+            "events": {
+              "SessionStart": [
+                {
+                  "matcher": "startup",
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "boot"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "runtimeRoot": {
+        "enabled": true,
+        "timeoutMs": 1501,
+        "maxOutputBytes": 4096
+      },
+      "snapshot": {
+        "schemaVersion": 1,
+        "workspaceIdentity": "id-1",
+        "discoveredAt": "2026-01-01T00:00:00.000Z",
+        "sourceFiles": [
+          {
+            "canonicalPath": "/w/zcode.json",
+            "baseDir": "/w",
+            "discoveryOrder": 1,
+            "configFileKind": "zcode.json",
+            "explicitProjectConfig": false,
+            "editable": false,
+            "hooksRoot": {
+              "timeoutMs": 2.5,
+              "maxOutputBytes": 1e21
+            }
+          },
+          {
+            "canonicalPath": "/other/.zcode/config.json",
+            "baseDir": "/other",
+            "discoveryOrder": 3,
+            "configFileKind": ".zcode/config.json",
+            "explicitProjectConfig": false,
+            "editable": false,
+            "hooksRoot": {
+              "enabled": false
+            }
+          }
+        ],
+        "hooks": [
+          {
+            "reviewItemId": "workspace-hook-0-UserPromptSubmit-0-0",
+            "event": "UserPromptSubmit",
+            "matcherIndex": 0,
+            "hookIndex": 0,
+            "sourceFileIndex": 0,
+            "sourceRelativePath": "zcode.json",
+            "matcher": null,
+            "command": "./check.sh",
+            "resolvedTimeoutMs": 1501,
+            "resolvedMaxOutputBytes": 4096,
+            "statusMessage": "Checking",
+            "sourceRootEnabled": true,
+            "declarationEnabled": true,
+            "runtimeHooksEnabled": true,
+            "configuredEnabled": true,
+            "editable": false,
+            "declarationDigestAlgorithm": "sha256",
+            "hookDeclarationDigest": "62de85f31a335351dd741213e0753bcc97af0b764c3531d36c62b2397c0ed63c",
+            "type": "command",
+            "async": true,
+            "shell": "/bin/bash"
+          },
+          {
+            "reviewItemId": "workspace-hook-0-UserPromptSubmit-0-1",
+            "event": "UserPromptSubmit",
+            "matcherIndex": 0,
+            "hookIndex": 1,
+            "sourceFileIndex": 0,
+            "sourceRelativePath": "zcode.json",
+            "matcher": null,
+            "command": "x",
+            "resolvedTimeoutMs": 1,
+            "resolvedMaxOutputBytes": 4096,
+            "sourceRootEnabled": true,
+            "declarationEnabled": true,
+            "runtimeHooksEnabled": true,
+            "configuredEnabled": true,
+            "editable": false,
+            "declarationDigestAlgorithm": "sha256",
+            "hookDeclarationDigest": "48d2714b9a71470c0b5a86d4c0c392040f556df7b81b80b13da3456282c3ec71",
+            "type": "command",
+            "shell": true
+          },
+          {
+            "reviewItemId": "workspace-hook-0-PostToolUse-0-0",
+            "event": "PostToolUse",
+            "matcherIndex": 0,
+            "hookIndex": 0,
+            "sourceFileIndex": 0,
+            "sourceRelativePath": "zcode.json",
+            "matcher": "Edit|Write",
+            "command": "fmt",
+            "resolvedTimeoutMs": 1501,
+            "resolvedMaxOutputBytes": 4096,
+            "sourceRootEnabled": true,
+            "declarationEnabled": true,
+            "runtimeHooksEnabled": true,
+            "configuredEnabled": true,
+            "editable": false,
+            "declarationDigestAlgorithm": "sha256",
+            "hookDeclarationDigest": "7cf2ac33b1a79c13d64f85c7af945b940beb704fe8f4f4a4b0f00a8a0e15c8e5",
+            "type": "process"
+          },
+          {
+            "reviewItemId": "workspace-hook-0-PostToolUse-1-0",
+            "event": "PostToolUse",
+            "matcherIndex": 1,
+            "hookIndex": 0,
+            "sourceFileIndex": 0,
+            "sourceRelativePath": "zcode.json",
+            "matcher": null,
+            "command": "lint",
+            "resolvedTimeoutMs": 123457,
+            "resolvedMaxOutputBytes": 4096,
+            "sourceRootEnabled": true,
+            "declarationEnabled": true,
+            "runtimeHooksEnabled": true,
+            "configuredEnabled": true,
+            "editable": false,
+            "declarationDigestAlgorithm": "sha256",
+            "hookDeclarationDigest": "b62f6ce2dec7eb74456e326f85f7229906deffe91f5bcbcbddffaf2912038cdf",
+            "type": "process",
+            "args": ["--fix", "a b"]
+          },
+          {
+            "reviewItemId": "workspace-hook-1-SessionStart-0-0",
+            "event": "SessionStart",
+            "matcherIndex": 0,
+            "hookIndex": 0,
+            "sourceFileIndex": 1,
+            "sourceRelativePath": "../other/.zcode/config.json",
+            "matcher": "startup",
+            "command": "boot",
+            "resolvedTimeoutMs": 1501,
+            "resolvedMaxOutputBytes": 4096,
+            "sourceRootEnabled": false,
+            "declarationEnabled": true,
+            "runtimeHooksEnabled": true,
+            "configuredEnabled": false,
+            "editable": false,
+            "declarationDigestAlgorithm": "sha256",
+            "hookDeclarationDigest": "33a2fc2d2491f8ff079e9ac6e8d606a9962d066cffe58551ea0321a1d9a0ab93",
+            "type": "command"
+          }
+        ],
+        "digestAlgorithm": "sha256",
+        "bundleDigest": "751d3676c77dfd9ae1c4d104b13b92cead483270feca2a7b1682e08a88831079"
+      }
+    }
+  ],
+  "evaluations": [
+    {
+      "name": "pending",
+      "policy": "user_decides",
+      "records": [],
+      "revoked": [],
+      "corrupt": false,
+      "items": [
+        ["workspace-hook-0-PreToolUse-0-0", "pending_trust", false],
+        ["workspace-hook-0-Stop-0-0", "pending_trust", false]
+      ]
+    },
+    {
+      "name": "trusted",
+      "policy": "user_decides",
+      "records": [
+        {
+          "workspaceIdentity": "id-1",
+          "hookDeclarationDigest": "1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63",
+          "digestAlgorithm": "sha256",
+          "decision": "trusted",
+          "grantedAt": "2026-01-01T00:00:00.000Z",
+          "eventAtGrant": "PreToolUse",
+          "displayCommandAtGrant": "echo hi",
+          "sourcePathAtGrant": ".zcode/config.json",
+          "sourceDiscoveryOrderAtGrant": 0,
+          "matcherAtGrant": "Bash",
+          "matcherIndexAtGrant": 0,
+          "hookIndexAtGrant": 0
+        },
+        {
+          "workspaceIdentity": "id-1",
+          "hookDeclarationDigest": "d03b75d279c70d1433b894b5d7a9ad3b4ecb95247a0feb4fec778c6b9a297d70",
+          "digestAlgorithm": "sha256",
+          "decision": "trusted",
+          "grantedAt": "2026-01-01T00:00:00.000Z",
+          "eventAtGrant": "Stop",
+          "displayCommandAtGrant": "node",
+          "sourcePathAtGrant": ".zcode/config.json",
+          "sourceDiscoveryOrderAtGrant": 0,
+          "matcherAtGrant": null,
+          "matcherIndexAtGrant": 0,
+          "hookIndexAtGrant": 0
+        }
+      ],
+      "revoked": [],
+      "corrupt": false,
+      "items": [
+        ["workspace-hook-0-PreToolUse-0-0", "trusted_persistent", true],
+        ["workspace-hook-0-Stop-0-0", "trusted_persistent", false]
+      ]
+    },
+    {
+      "name": "revoked",
+      "policy": "user_decides",
+      "records": [],
+      "revoked": ["1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63"],
+      "corrupt": false,
+      "items": [
+        ["workspace-hook-0-PreToolUse-0-0", "revoked", false],
+        ["workspace-hook-0-Stop-0-0", "pending_trust", false]
+      ]
+    },
+    {
+      "name": "stale",
+      "policy": "user_decides",
+      "records": [
+        {
+          "workspaceIdentity": "id-1",
+          "hookDeclarationDigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "digestAlgorithm": "sha256",
+          "decision": "trusted",
+          "grantedAt": "2026-01-01T00:00:00.000Z",
+          "eventAtGrant": "PreToolUse",
+          "displayCommandAtGrant": "echo hi",
+          "sourcePathAtGrant": ".zcode/config.json",
+          "sourceDiscoveryOrderAtGrant": 0,
+          "matcherAtGrant": "Bash",
+          "matcherIndexAtGrant": 0,
+          "hookIndexAtGrant": 0
+        }
+      ],
+      "revoked": [],
+      "corrupt": false,
+      "items": [
+        ["workspace-hook-0-PreToolUse-0-0", "stale_digest", false],
+        ["workspace-hook-0-Stop-0-0", "pending_trust", false]
+      ]
+    },
+    {
+      "name": "corrupt",
+      "policy": "user_decides",
+      "records": [
+        {
+          "workspaceIdentity": "id-1",
+          "hookDeclarationDigest": "1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63",
+          "digestAlgorithm": "sha256",
+          "decision": "trusted",
+          "grantedAt": "2026-01-01T00:00:00.000Z",
+          "eventAtGrant": "PreToolUse",
+          "displayCommandAtGrant": "echo hi",
+          "sourcePathAtGrant": ".zcode/config.json",
+          "sourceDiscoveryOrderAtGrant": 0,
+          "matcherAtGrant": "Bash",
+          "matcherIndexAtGrant": 0,
+          "hookIndexAtGrant": 0
+        }
+      ],
+      "revoked": [],
+      "corrupt": true,
+      "items": [
+        ["workspace-hook-0-PreToolUse-0-0", "blocked_untrusted", false],
+        ["workspace-hook-0-Stop-0-0", "blocked_untrusted", false]
+      ]
+    },
+    {
+      "name": "deny",
+      "policy": "deny",
+      "records": [
+        {
+          "workspaceIdentity": "id-1",
+          "hookDeclarationDigest": "1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63",
+          "digestAlgorithm": "sha256",
+          "decision": "trusted",
+          "grantedAt": "2026-01-01T00:00:00.000Z",
+          "eventAtGrant": "PreToolUse",
+          "displayCommandAtGrant": "echo hi",
+          "sourcePathAtGrant": ".zcode/config.json",
+          "sourceDiscoveryOrderAtGrant": 0,
+          "matcherAtGrant": "Bash",
+          "matcherIndexAtGrant": 0,
+          "hookIndexAtGrant": 0
+        }
+      ],
+      "revoked": [],
+      "corrupt": false,
+      "items": [
+        ["workspace-hook-0-PreToolUse-0-0", "blocked_policy", false],
+        ["workspace-hook-0-Stop-0-0", "blocked_policy", false]
+      ]
+    },
+    {
+      "name": "trusted-only",
+      "policy": "allow_trusted_only",
+      "records": [
+        {
+          "workspaceIdentity": "id-1",
+          "hookDeclarationDigest": "1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63",
+          "digestAlgorithm": "sha256",
+          "decision": "trusted",
+          "grantedAt": "2026-01-01T00:00:00.000Z",
+          "eventAtGrant": "PreToolUse",
+          "displayCommandAtGrant": "echo hi",
+          "sourcePathAtGrant": ".zcode/config.json",
+          "sourceDiscoveryOrderAtGrant": 0,
+          "matcherAtGrant": "Bash",
+          "matcherIndexAtGrant": 0,
+          "hookIndexAtGrant": 0
+        }
+      ],
+      "revoked": [],
+      "corrupt": false,
+      "items": [
+        ["workspace-hook-0-PreToolUse-0-0", "trusted_persistent", true],
+        ["workspace-hook-0-Stop-0-0", "blocked_policy", false]
+      ]
+    }
+  ],
+  "records": [
+    {
+      "workspaceIdentity": "id-1",
+      "hookDeclarationDigest": "d03b75d279c70d1433b894b5d7a9ad3b4ecb95247a0feb4fec778c6b9a297d70",
+      "digestAlgorithm": "sha256",
+      "decision": "trusted",
+      "grantedAt": "2026-01-01T00:00:00.000Z",
+      "bundleDigestAtGrant": "0e015b2d19899c3820ce4ed17da213e1b4e073f9039581df662da184417acb2e",
+      "eventAtGrant": "Stop",
+      "displayCommandAtGrant": "node stop.js",
+      "sourcePathAtGrant": ".zcode/config.json",
+      "sourceDiscoveryOrderAtGrant": 0,
+      "matcherAtGrant": null,
+      "matcherIndexAtGrant": 0,
+      "hookIndexAtGrant": 0,
+      "appVersionAtGrant": "9.9.9"
+    },
+    {
+      "workspaceIdentity": "id-1",
+      "hookDeclarationDigest": "1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63",
+      "digestAlgorithm": "sha256",
+      "decision": "trusted",
+      "grantedAt": "2026-01-01T00:00:00.000Z",
+      "bundleDigestAtGrant": "0e015b2d19899c3820ce4ed17da213e1b4e073f9039581df662da184417acb2e",
+      "eventAtGrant": "PreToolUse",
+      "displayCommandAtGrant": "echo hi",
+      "sourcePathAtGrant": ".zcode/config.json",
+      "sourceDiscoveryOrderAtGrant": 0,
+      "matcherAtGrant": "Bash",
+      "matcherIndexAtGrant": 0,
+      "hookIndexAtGrant": 0,
+      "appVersionAtGrant": "9.9.9"
+    }
+  ],
+  "reviewRequest": {
+    "kind": "workspaceHookReview",
+    "reviewFlowId": "workspace-hook-review:flow",
+    "generation": 2,
+    "interactionId": "workspace-hook-interaction:i",
+    "sessionId": "s-1",
+    "taskId": "s-1",
+    "runId": "workspace-hook-run:s-1:r",
+    "workspaceIdentity": "id-1",
+    "workspaceLabel": "w",
+    "remoteSessionId": "remote-1",
+    "bundleDigest": "751d3676c77dfd9ae1c4d104b13b92cead483270feca2a7b1682e08a88831079",
+    "createdAt": 1000,
+    "deadlineAt": 601000,
+    "sourceFiles": [
+      {
+        "path": "/w/zcode.json",
+        "displayPath": "zcode.json",
+        "editable": false
+      },
+      {
+        "path": "/other/.zcode/config.json",
+        "displayPath": ".zcode/config.json",
+        "editable": false
+      }
+    ],
+    "summary": {
+      "eventCount": 3,
+      "hookCount": 5,
+      "pendingCount": 4
+    },
+    "items": [
+      {
+        "reviewItemId": "workspace-hook-0-UserPromptSubmit-0-0",
+        "event": "UserPromptSubmit",
+        "type": "command",
+        "displayName": "UserPromptSubmit",
+        "displayCommand": "./check.sh",
+        "sourcePath": "zcode.json",
+        "resolvedTimeoutMs": 1501,
+        "resolvedMaxOutputBytes": 4096,
+        "executionMode": "background",
+        "configuredEnabled": true,
+        "editable": false,
+        "trustState": "trusted_persistent"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-UserPromptSubmit-0-1",
+        "event": "UserPromptSubmit",
+        "type": "command",
+        "displayName": "UserPromptSubmit",
+        "displayCommand": "x",
+        "sourcePath": "zcode.json",
+        "resolvedTimeoutMs": 1,
+        "resolvedMaxOutputBytes": 4096,
+        "executionMode": "foreground",
+        "configuredEnabled": true,
+        "editable": false,
+        "trustState": "pending_trust"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-PostToolUse-0-0",
+        "event": "PostToolUse",
+        "matcher": "Edit|Write",
+        "type": "process",
+        "displayName": "PostToolUse · Edit|Write",
+        "displayCommand": "fmt",
+        "sourcePath": "zcode.json",
+        "resolvedTimeoutMs": 1501,
+        "resolvedMaxOutputBytes": 4096,
+        "executionMode": "foreground",
+        "configuredEnabled": true,
+        "editable": false,
+        "trustState": "pending_trust"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-PostToolUse-1-0",
+        "event": "PostToolUse",
+        "type": "process",
+        "displayName": "PostToolUse",
+        "displayCommand": "lint --fix a b",
+        "sourcePath": "zcode.json",
+        "resolvedTimeoutMs": 123457,
+        "resolvedMaxOutputBytes": 4096,
+        "executionMode": "foreground",
+        "configuredEnabled": true,
+        "editable": false,
+        "trustState": "pending_trust"
+      },
+      {
+        "reviewItemId": "workspace-hook-1-SessionStart-0-0",
+        "event": "SessionStart",
+        "matcher": "startup",
+        "type": "command",
+        "displayName": "SessionStart · startup",
+        "displayCommand": "boot",
+        "sourcePath": "../other/.zcode/config.json",
+        "resolvedTimeoutMs": 1501,
+        "resolvedMaxOutputBytes": 4096,
+        "executionMode": "foreground",
+        "configuredEnabled": false,
+        "editable": false,
+        "trustState": "pending_trust"
+      }
+    ],
+    "warningCode": "workspace_hooks_execute_code"
+  },
+  "reviewEvaluation": {
+    "items": [
+      {
+        "reviewItemId": "workspace-hook-0-PreToolUse-0-0",
+        "trustState": "pending_trust"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-Stop-0-0",
+        "trustState": "pending_trust"
+      }
+    ]
+  },
+  "stores": [
+    {
+      "content": "",
+      "records": null
+    },
+    {
+      "content": "not json",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[]}",
+      "records": []
+    },
+    {
+      "content": "{\"schemaVersion\":2,\"records\":[]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[],\"extra\":1}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null}]}",
+      "records": [
+        {
+          "workspaceIdentity": "id-1",
+          "hookDeclarationDigest": "1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63",
+          "digestAlgorithm": "sha256",
+          "decision": "trusted",
+          "grantedAt": "2026-02-28T23:59:59.5Z",
+          "eventAtGrant": "PreToolUse",
+          "displayCommandAtGrant": "echo hi",
+          "sourcePathAtGrant": ".zcode/config.json",
+          "matcherAtGrant": null
+        }
+      ]
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null,\"lastUsedAt\":\"2024-02-29T00:00:00Z\",\"matcherIndexAtGrant\":0,\"appVersionAtGrant\":\"1.0\"}]}",
+      "records": [
+        {
+          "workspaceIdentity": "id-1",
+          "hookDeclarationDigest": "1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63",
+          "digestAlgorithm": "sha256",
+          "decision": "trusted",
+          "grantedAt": "2026-02-28T23:59:59.5Z",
+          "lastUsedAt": "2024-02-29T00:00:00Z",
+          "eventAtGrant": "PreToolUse",
+          "displayCommandAtGrant": "echo hi",
+          "sourcePathAtGrant": ".zcode/config.json",
+          "matcherAtGrant": null,
+          "matcherIndexAtGrant": 0,
+          "appVersionAtGrant": "1.0"
+        }
+      ]
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-29T00:00:00Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null}]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-01-01T00:00:00+08:00\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null}]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null}]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null,\"unknown\":true}]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\"   \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null}]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null,\"matcherIndexAtGrant\":1.5}]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null,\"matcherIndexAtGrant\":2,\"sourceDiscoveryOrderAtGrant\":-1}]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"Nope\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null}]}",
+      "records": null
+    },
+    {
+      "content": "{\"schemaVersion\":1,\"records\":[{\"workspaceIdentity\":\"  id-1 \",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null},{\"workspaceIdentity\":\"id-1\",\"hookDeclarationDigest\":\"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\"digestAlgorithm\":\"sha256\",\"decision\":\"trusted\",\"grantedAt\":\"2026-02-28T23:59:59.5Z\",\"eventAtGrant\":\"PreToolUse\",\"displayCommandAtGrant\":\" echo hi \",\"sourcePathAtGrant\":\".zcode/config.json\",\"matcherAtGrant\":null}]}",
+      "records": null
+    }
+  ],
+  "storeContent": "{\n  \"schemaVersion\": 1,\n  \"records\": [\n    {\n      \"workspaceIdentity\": \"id-1\",\n      \"hookDeclarationDigest\": \"d03b75d279c70d1433b894b5d7a9ad3b4ecb95247a0feb4fec778c6b9a297d70\",\n      \"digestAlgorithm\": \"sha256\",\n      \"decision\": \"trusted\",\n      \"grantedAt\": \"2026-01-01T00:00:00.000Z\",\n      \"bundleDigestAtGrant\": \"0e015b2d19899c3820ce4ed17da213e1b4e073f9039581df662da184417acb2e\",\n      \"eventAtGrant\": \"Stop\",\n      \"displayCommandAtGrant\": \"node stop.js\",\n      \"sourcePathAtGrant\": \".zcode/config.json\",\n      \"sourceDiscoveryOrderAtGrant\": 0,\n      \"matcherAtGrant\": null,\n      \"matcherIndexAtGrant\": 0,\n      \"hookIndexAtGrant\": 0,\n      \"appVersionAtGrant\": \"9.9.9\"\n    },\n    {\n      \"workspaceIdentity\": \"id-1\",\n      \"hookDeclarationDigest\": \"1091704a06955fadb8fa1f6d8f559697eaecb1bc9cadb8b0cb24948785d28c63\",\n      \"digestAlgorithm\": \"sha256\",\n      \"decision\": \"trusted\",\n      \"grantedAt\": \"2026-01-01T00:00:00.000Z\",\n      \"bundleDigestAtGrant\": \"0e015b2d19899c3820ce4ed17da213e1b4e073f9039581df662da184417acb2e\",\n      \"eventAtGrant\": \"PreToolUse\",\n      \"displayCommandAtGrant\": \"echo hi\",\n      \"sourcePathAtGrant\": \".zcode/config.json\",\n      \"sourceDiscoveryOrderAtGrant\": 0,\n      \"matcherAtGrant\": \"Bash\",\n      \"matcherIndexAtGrant\": 0,\n      \"hookIndexAtGrant\": 0,\n      \"appVersionAtGrant\": \"9.9.9\"\n    }\n  ]\n}\n"
+}

@@ -141,7 +141,7 @@ impl Engine {
     ) -> Option<super::turn_hooks::TurnHooks> {
         let session = self.sessions.get_mut(id)?;
         let first = !std::mem::replace(&mut session.runtime.session_start_ran, true);
-        if session.parent_id.is_some() || self.hooks.is_empty() {
+        if session.parent_id.is_some() || self.hooks.user.is_empty() && self.hooks.ports.is_none() {
             return None;
         }
         let at = session
@@ -158,7 +158,8 @@ impl Engine {
             "startup"
         };
         let hooks = super::hook_runner::Hooks {
-            registrations: self.hooks.clone(),
+            registrations: self.hooks.user.clone(),
+            admission: None,
             tools: self.tools.clone(),
             clock: self.clock.clone(),
             cwd: self.workspace_path.clone(),

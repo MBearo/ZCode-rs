@@ -120,6 +120,8 @@ impl Engine {
         // 删除命令只关闭 runtime。历史保留在 Store，重开从新 epoch 冷恢复；失败不得发移除事实。
         self.uploads.0.retain(|key, _| key.1 != id);
         self.sessions.remove(id);
+        self.hooks.sessions.remove(id);
+        self.hooks.without.remove(id);
         self.session_access.remove(id);
         self.closed.insert(id.into());
         self.publish_index(id, None)?;

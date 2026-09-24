@@ -26,7 +26,7 @@ impl Session {
             "config":{"provider":self.provider,"model":self.model,"thought":self.reasoning_level,"thoughtLevels":if self.thought_levels.is_empty(){vec![self.reasoning_level.clone()]}else{self.thought_levels.clone()},
                 "modelSelection":{"providerId":self.provider,"modelId":self.model,"options":{"reasoningLevel":self.reasoning_level}},"followupMode":self.followup_mode,"mode":self.mode,"planEnabled":self.plan_enabled},
             "usage":self.usage,"queue":{"items":self.queue.iter().filter(|q|q["delivery"]["admitted"]!="startNow").collect::<Vec<_>>(),"autoDrain":self.auto_drain},
-            "pendingInteractions":self.pending,"pendingCommands":[],"backgroundWorks":self.background.values().filter(|t|t.status=="running").map(|t|t.projection()).collect::<Vec<_>>(),"goal":self.goal.as_ref().map(|g|g.projection()),"plan":super::todo::plan(&self.todos,self.todos_updated_at)});
+            "pendingInteractions":self.pending,"workspaceHookAdmission":self.runtime.workspace_hook_admission,"pendingCommands":[],"backgroundWorks":self.background.values().filter(|t|t.status=="running").map(|t|t.projection()).collect::<Vec<_>>(),"goal":self.goal.as_ref().map(|g|g.projection()),"plan":super::todo::plan(&self.todos,self.todos_updated_at)});
         if let Some(transition) = &self.plan_transition {
             patch["config"]["planTransition"] = transition.clone();
         }

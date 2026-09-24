@@ -232,6 +232,23 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         let model = config
             .map(|c| HttpModel::new(c, egress.clone()))
             .map(|m| Arc::new(m) as Arc<dyn ModelPort>);
+        // 与 Desktop 共用的项目 hook 信任存储：路径由用户配置文件的 storage.dir 决定。
+        // 用户配置不可读时不启用信任（项目 hooks 不运行，保持 fail-closed），不影响启动。
+        let user_config = std::path::Path::new(&startup_config.user_path);
+        let trust_store =
+            match zcode_cli_host::trust_store::trust_store_path(&home, user_config).await {
+                Ok(path) => Some(Arc::new(zcode_cli_host::trust_store::FileTrustStore::new(
+                    path,
+                ))),
+                Err(error) => {
+                    tracing::warn!(
+                        event = "workspace_hook.trust_store_unavailable",
+                        error = %format!("{error:#}"),
+                        "Workspace Hook Trust store is unavailable"
+                    );
+                    None
+                }
+            };
         let engine = Engine::new(
             workspace,
             identity,
@@ -262,6 +279,14 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         .with_permission_config(&startup_config.config["permission"])
         .with_hooks(&startup_config.config["hooks"], &startup_config.user_path)
         .with_registry(registry, requested_cwd.to_string_lossy().into_owned());
+        let engine = match trust_store {
+            Some(store) => engine.with_workspace_trust(
+                store,
+                workspace_config.clone(),
+                Some(env!("CARGO_PKG_VERSION").into()),
+            ),
+            None => engine,
+        };
         // App Server 独占 stdout；返回时已排空 runtime 输出并释放 sink。
         let served =
             app_server::serve(move |rx, tx| engine.serve(rx, tx, cancel), input, output).await;

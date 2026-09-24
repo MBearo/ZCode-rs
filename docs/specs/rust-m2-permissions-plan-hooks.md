@@ -588,6 +588,66 @@ sequenceDiagram
   - 快照字段 `workspaceHookAdmission`：`{pendingCount, bundleDigest, workspaceIdentity?}`，数量为 0 时为 `null`。
 - **范围**：信任只在 app-server 中启用；纯 CLI 下项目 hooks 以 `workspace_hooks_feature_disabled` 阻止，与 Node 相同。
 
+### 7.1 Rust 结构与所有者
+
+- **domain `hooks::workspace`（纯函数）**：
+  - 输入为 M1 发现的项目 hook 候选：已加载的配置文件，带发现序号，序号含未能加载的文件。
+  - 生成条目、声明 digest、bundle digest 与快照。数字按 JS `Number#toString` 格式写入 payload。
+  - 用项目条目生成注册，`source` 为 `project.<reviewItemId>`；每个事件的项目 hooks 插在该事件第一个非用户 hook 之前。
+- **domain `hooks::trust`（纯函数）**：
+  - 信任记录的字段顺序、去空白与严格校验；存储文件解析，任何不合规都判为损坏。
+  - 逐条评估信任状态、准入类别与 reasonCode；汇总 pendingCount。
+  - 生成授权记录与审查请求 payload。
+  - 策略固定为 `user_decides`；Rust 没有策略提供方，`deny` / `allow_trusted_only` 只在纯函数中实现。
+- **信任存储（host `trust_store`）**：
+  - 经 core-api 端口 `TrustStorePort` 提供 `load` / `grant` / `revoke`。
+  - 进程内串行执行；跨进程使用 Node 的锁文件协议。
+  - 路径取用户配置文件的 `storage.dir`。
+- **所有者（Engine）**：
+  - 每个根会话持有一份 `WorkspaceTrust`：快照、持久记录、存储状态、撤销集合、安全修订号、激活与失败标记，以及当前审查流程（generation、交互、截止时间）。
+  - Engine 把准入视图（逐条 `effectiveRunnable` / reasonCode / `configuredEnabled`，以及整体标记）经 `watch` 发布给该会话的 run。
+  - run 中 `Driver::admission` 读取最新视图，派发每个项目 hook 前都重新判定。
+  - 快照在会话第一次开轮时构建并激活：读取信任存储并评估，写 `workspaceHookAdmission`。之后授权、撤销、切换开关或 `trustGrant` 重载都会重新发布视图。
+- **审查流程**：
+  - 待决交互为 `{interactionId, kind: "workspaceHookReview", anchorRowId: null, createdAt, payload}`，同一流程只允许更高 generation 替换。
+  - 截止时间到达时，由 Engine 的计时器收口为 `timed_out`（reasonCode `workspace_hooks_interaction_timeout`），并移除交互。
+- **命令**：失败 ACK 为 `{status: "failed", reasonCode, message: "Workspace Hook review command rejected: <code>"}`。
+  - 没有项目 hooks 的会话返回 `workspace_hooks_require_trust_capable_host`；
+  - 信封 `sessionId` 与 payload 不一致时返回 `workspace_hooks_snapshot_mismatch`。
+- **切换开关**：改写 `<cwd>/.zcode/config.json` 中该声明的 `enabled`（原子写）。
+  - 写入后重新发现并替换快照，用新 generation 替换当前审查流程。
+  - 写入后重建失败时，流程以 `configuration_error` 收口。
+- **`workspace/hooks/trustGrant`**：
+  - 由 app-server 路由到 Engine；按当前配置重新发现快照，再核对 bundle 与声明，然后授权并复核。
+  - 成功后，同一工作区的所有会话重载信任并重发准入状态。
+
+```mermaid
+sequenceDiagram
+    participant R as run task
+    participant E as Engine
+    participant S as TrustStorePort
+    participant U as Client
+    R->>E: 首轮开始（构建快照、激活）
+    E->>S: load()
+    S-->>E: records / missing / corrupt
+    E->>E: 评估 → 发布准入视图
+    E-->>U: workspaceHookAdmission{pendingCount, bundleDigest}
+    R->>R: 项目 hook 派发前读视图（pending → blocked 事件）
+    U->>E: requestWorkspaceHookReview
+    E-->>U: pendingInteractions += workspaceHookReview(gen 1)
+    U->>E: respondWorkspaceHookReview(trust_selected)
+    E->>S: grant(records)
+    S-->>E: 文件内容
+    E->>E: 替换记录（修订号 +1）→ 重新发布视图
+    E-->>U: 交互移除；workspaceHookAdmission 更新
+    E-->>U: 仍有待审项 → gen 2 审查
+```
+
+- **缺陷 D15（保持 Node 行为）**：Node 锁文件的 `startTime` 取 `Date.now() - os.uptime()*1000`，即系统开机时间，而不是进程启动时间。因此，由存活进程持有且超过 30 s 的锁，在 macOS / Linux 上总会被判为过期并回收。锁通常只持有数毫秒，只有持有者卡死时才会出现这种情况。Rust 按相同方式写入与判定。
+- **与 Node 的差异**：
+  - 会话的快照与激活在本进程第一次开轮时进行。Node 在冷恢复会话时即激活，因此恢复的会话在第一轮之前不会显示横幅。
+  - `trustGrant` 与会话使用同一套发现结果。Node 的 `trustGrant` 会单独解析未通过完整配置校验的文件里的 hooks。
+
 ## 8. 保持的 Node 缺陷（本期涉及）
 
 - D1：被隐藏的工具被调用时照常执行。
@@ -598,6 +658,7 @@ sequenceDiagram
 - D6：全权限只放行当前这一条。
 - D7：重启后待决权限的收口。按 Node 当前行为：交互随进程丢失，冷恢复时工具行按中断收口。
 - D8、D9、D10：见第 6 节。
+- D15：信任存储锁的 `startTime` 取系统开机时间，见第 7.1 节。
 - yolo 跳过项目 deny 规则与 `disallowedTools`。
 - plan 允许非破坏性 MCP 工具。
 
