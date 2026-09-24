@@ -271,3 +271,21 @@ sequenceDiagram
 
 - 单元测试：页码解析、大小格式、Poppler stderr 分类、输出页名排序。
 - 集成测试（`zcode-cli-rust-read-media.test.ts`）：支持 PDF 的模型拿到带 `pages` 的 Read 定义与 PDF 文件块；缺头、页数过多、页码参数错误、加密的处理器失败文本；按页渲染为图片块；不支持 PDF 的模型把 `.pdf` 当普通文件读取（忽略 `pages`）。Poppler 由 PATH 上的假 `pdfinfo` / `pdftoppm` 脚本代替，结果与本机是否安装 Poppler 无关（Windows 跳过）。
+
+## 7. Bash 超时转后台（M5.5）
+
+依据：Node `tool/handlers/bash.ts`、`bash-background-policy.ts`、`adapters/src/exec/node-execution-adapter-lifecycle.ts`（`auto_on_timeout`）。
+
+- 条件（Node `isBashAutoBackgroundEligible`）：
+  - 不是 `run_in_background`。
+  - 命令去空白后非空，且第一个词不是 `sleep`。
+  - 有会话 owner（后台任务需要登记）；没有 owner 的调用照旧在超时时终止。
+- 过程：
+  - 命令照常在前台运行，输出写入同一个输出文件。
+  - 到达超时（默认 120 秒，最多 600 秒）仍未结束时，不终止进程，而是登记为后台任务。登记规则与显式后台相同，包括运行中最多 16 个。
+  - 工具随即返回 `status: "backgrounded"` 的结果，模型文本与显式后台相同（`Command running in background with ID: …`），完成后照常发出后台完成通知，TaskOutput / TaskStop 可用。
+  - 转入后台之前，本轮取消会结束进程树（结果为 cancelled）；转入之后，本轮结束或取消不再影响该进程。
+  - 调用在转入后台之前被丢弃时，同样结束进程树，不留下孤儿进程。
+  - 登记失败（达到上限、owner 已停止）时结束进程并返回错误。
+- 修复：旧实现在超时时一律终止前台命令，长时间运行的开发服务器等会被杀掉；Node 把它们转入后台。
+- 验收：集成测试（`zcode-cli-rust-shell-lifecycle.test.ts`）覆盖超时后转后台并继续写完输出，以及 `sleep` 开头的命令照旧超时终止。

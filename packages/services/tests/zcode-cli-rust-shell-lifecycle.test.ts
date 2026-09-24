@@ -170,3 +170,59 @@ test(
     }
   },
 );
+
+test(
+  "Rust moves a foreground Bash command past its timeout to the background like Node",
+  { skip: process.platform === "win32" },
+  async () => {
+    for (const script of ["echo started; sleep 2; echo finished > done.txt", "sleep 3"]) {
+      const f = await fixture({
+        respond(req, res) {
+          res.writeHead(200, { "content-type": "text/event-stream" });
+          if (f.requests.length === 1) {
+            event(res, {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "slow",
+                  type: "function",
+                  function: {
+                    name: "Bash",
+                    arguments: JSON.stringify({ command: script, timeout: 500 }),
+                  },
+                },
+              ],
+            });
+            end(res, "tool_calls");
+          } else {
+            event(res, { content: "noted" });
+            end(res, "stop");
+          }
+          void req;
+        },
+      });
+      try {
+        const h = f.start();
+        const id = await h.create();
+        await h.subscribe(`conversation/${id}`);
+        const began = performance.now();
+        const after = h.messages.length;
+        await h.command(h.envelope("sendText", id, { text: "run it" }));
+        await h.completed(id, after);
+        const result = f.requests[1]!.messages.find((m: Message) => m.role === "tool");
+        if (script.startsWith("sleep")) {
+          // Node：sleep 开头的命令不转后台，照常超时终止。
+          assert(!String(result.content).includes("running in background"), result.content);
+        } else {
+          assert(performance.now() - began < 1_800, "the turn does not wait for the command");
+          const { outputFile } = backgroundTask(String(result.content));
+          assert.equal((await waitForFile(join(f.cwd, "done.txt"))).trim(), "finished");
+          assert.match(await waitForFile(outputFile), /started/);
+        }
+        assert.deepEqual(h.schemaErrors, []);
+      } finally {
+        await f.close();
+      }
+    }
+  },
+);

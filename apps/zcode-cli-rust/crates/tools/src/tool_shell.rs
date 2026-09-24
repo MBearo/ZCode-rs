@@ -1,33 +1,31 @@
+use super::shell_background::{Launch, auto_eligible};
 use super::tool_process::run;
 use super::tools::{boolean, keys, string};
-use crate::{
-    contract::{Event, EventSink, ToolError, ToolOutput},
-    domain::background::BackgroundTask,
-};
+use crate::contract::{EventSink, ToolError, ToolOutput};
 use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
-use tokio::sync::{Mutex, oneshot, watch};
+use tokio::sync::{Mutex, watch};
 use tokio_util::sync::CancellationToken;
 #[path = "task_tools.rs"]
 mod task;
 
-struct Job {
-    cancel: CancellationToken,
-    state: watch::Receiver<Option<Value>>,
-    path: PathBuf,
-    command: String,
-    description: String,
+pub(super) struct Job {
+    pub(super) cancel: CancellationToken,
+    pub(super) state: watch::Receiver<Option<Value>>,
+    pub(super) path: PathBuf,
+    pub(super) command: String,
+    pub(super) description: String,
 }
 pub struct ShellTasks {
-    jobs: Mutex<HashMap<String, HashMap<String, Arc<Job>>>>,
+    pub(super) jobs: Mutex<HashMap<String, HashMap<String, Arc<Job>>>>,
     /// Complete child environment (Node `buildExecutionEnv`).
-    env: Arc<[(String, String)]>,
+    pub(super) env: Arc<[(String, String)]>,
 }
 impl ShellTasks {
     pub fn new(env: Arc<[(String, String)]>) -> Self {
@@ -150,128 +148,32 @@ impl ShellTasks {
         let id = super::id();
         let path = artifacts.join(format!("{id}.output"));
         let combined = Arc::new(Mutex::new(tokio::fs::File::create(&path).await?));
+        let launch = Launch {
+            id,
+            path,
+            combined,
+            command: command.clone(),
+            description,
+        };
         if !background {
+            // Node：超时的前台命令转入后台（sleep 开头的命令除外），没有会话 owner 时照旧超时终止。
+            if let (Some(sink), Some(deadline)) = (sink, timeout)
+                && auto_eligible(&command)
+            {
+                let data = self
+                    .auto((cwd, session), sink, launch, deadline, cancel)
+                    .await?;
+                return Ok(shell_output(&command, data));
+            }
+            let Launch { path, combined, .. } = launch;
             let data = run(cwd, &self.env, &command, &path, combined, timeout, cancel).await?;
             return Ok(shell_output(&command, data));
         }
-        let sink = sink
-            .context("Background execution requires a session owner")?
-            .clone();
-        let task = BackgroundTask {
-            id: id.clone(),
-            run_id: sink.run_id.clone(),
-            title: description.clone(),
-            status: "running".into(),
-            started_at: super::now(),
-            ended_at: None,
-            output_file: path.to_string_lossy().into_owned(),
-        };
-        let token = CancellationToken::new();
-        let (tx, state) = watch::channel(None);
-        let job = Arc::new(Job {
-            cancel: token.clone(),
-            state,
-            path: path.clone(),
-            command: command.clone(),
-            description,
-        });
-        {
-            let mut all = self.jobs.lock().await;
-            let jobs = all.entry(session.to_owned()).or_default();
-            if jobs.values().filter(|j| j.state.borrow().is_none()).count() >= 16 {
-                bail!("Background task limit (16) reached");
-            }
-            if jobs.len() >= 128
-                && let Some(old) = jobs
-                    .iter()
-                    .find(|(_, j)| j.state.borrow().is_some())
-                    .map(|(id, _)| id.clone())
-            {
-                jobs.remove(&old);
-            }
-            jobs.insert(id.clone(), job);
-        }
-        let (committed, receipt) = oneshot::channel();
-        let registered = async {
-            sink.send(Event::Background {
-                task: task.clone(),
-                committed: Some(committed),
-            })
+        let sink = sink.context("Background execution requires a session owner")?;
+        let data = self
+            .explicit((cwd, session), sink, launch, timeout, cancel)
             .await?;
-            receipt
-                .await
-                .context("Background registration was not committed")?;
-            Ok::<_, anyhow::Error>(())
-        };
-        let registered = tokio::select! {_=cancel.cancelled()=>Err(anyhow::anyhow!("Cancelled")),r=registered=>r};
-        if let Err(e) = registered {
-            // owner 可能已经提交 running、但工具尚未收到回执；取消时也要投递终态，
-            // 否则 close/EOF 会永远等待一个从未 spawn 的后台任务。
-            let mut terminal = task;
-            terminal.status = if cancel.is_cancelled() {
-                "cancelled"
-            } else {
-                "failed"
-            }
-            .into();
-            terminal.ended_at = Some(super::now());
-            let _ = sink
-                .send(Event::Background {
-                    task: terminal,
-                    committed: None,
-                })
-                .await;
-            let _ = tx.send(Some(json!({"status":"cancelled","interrupted":true})));
-            self.jobs.lock().await.get_mut(session).unwrap().remove(&id);
-            return Err(e);
-        }
-        if cancel.is_cancelled() {
-            token.cancel();
-        }
-        let cwd = cwd.to_owned();
-        let command_copy = command.clone();
-        let path_copy = path.clone();
-        let env = self.env.clone();
-        tokio::spawn(async move {
-            let result = run(
-                &cwd,
-                &env,
-                &command_copy,
-                &path_copy,
-                combined,
-                timeout,
-                &token,
-            )
-            .await;
-            if let Err(error) = &result
-                && error.is::<crate::contract::ProcessCleanupFailure>()
-            {
-                let _ = sink
-                    .send(Event::ToolCleanupFailed(format!("{error:#}")))
-                    .await;
-            }
-            let result = result.unwrap_or_else(|e|json!({"stdout":"","stderr":e.to_string(),"status":"spawn_error","interrupted":false}));
-            let mut task = task;
-            task.ended_at = Some(super::now());
-            task.status = match result["status"].as_str() {
-                Some("completed") => "completed",
-                Some("cancelled") => "cancelled",
-                _ => "failed",
-            }
-            .into();
-            // 先排入 owner 的终态事件，再允许 TaskOutput/TaskStop 返回；同一通道保持提交先于工具结果。
-            let _ = sink
-                .send(Event::Background {
-                    task,
-                    committed: None,
-                })
-                .await;
-            let _ = tx.send(Some(result));
-        });
-        Ok(shell_output(
-            &command,
-            json!({"stdout":"","stderr":"","status":"backgrounded","interrupted":false,"backgroundTaskId":id,"persistedOutputPath":path,"backgroundedByUser":false}),
-        ))
+        Ok(shell_output(&command, data))
     }
     pub async fn cancel(&self, session: &str, id: Option<&str>) -> Result<()> {
         let all = self.jobs.lock().await;
