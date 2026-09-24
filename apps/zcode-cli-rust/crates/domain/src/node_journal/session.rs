@@ -95,6 +95,21 @@ impl Session {
         self.node.push(now, Op::Entry(entry));
     }
 
+    /// Node `persistGeneratedSessionTitle`: `updateSession` guarded by the
+    /// title sources a generated title may replace.
+    pub fn node_generated_title(&mut self, now: u64, message: Option<&str>) {
+        if !self.node.created {
+            return;
+        }
+        let mut update = json!({"expectedTitleSources": ["default", "first_input", "generated"],
+            "id": self.id, "title": self.title});
+        if let Some(message) = message {
+            update["titleMessageID"] = message.into();
+        }
+        update["titleSource"] = "generated".into();
+        self.node.push(now, Op::UpdateSession(update));
+    }
+
     /// Node `updateSession({title, titleSource})`.
     pub fn node_title(&mut self, now: u64) {
         if !self.node.created {

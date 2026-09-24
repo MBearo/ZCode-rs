@@ -36,3 +36,27 @@ export async function waitForFile(path: string): Promise<string> {
     await delay(10);
   }
 }
+
+/**
+ * Node 的标题 sidecar 请求（首条输入后异步发出）：单独应答、单独记录，不计入用例的
+ * 对话请求序列。Chat Completions 返回 `{"title": ...}`，其他协议返回 500（标题失败不影响会话）。
+ */
+export function answerTitleRequest(
+  body: string,
+  path: string,
+  res: import("node:http").ServerResponse,
+  title: string,
+): boolean {
+  if (!body.includes("Generate a concise title for this coding session.")) return false;
+  if (!path.endsWith("/chat/completions")) {
+    res.writeHead(500);
+    res.end();
+    return true;
+  }
+  res.writeHead(200, { "Content-Type": "text/event-stream" });
+  const delta = { choices: [{ delta: { content: JSON.stringify({ title }) } }] };
+  res.write(`data: ${JSON.stringify(delta)}\n\n`);
+  res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`);
+  res.end("data: [DONE]\n\n");
+  return true;
+}

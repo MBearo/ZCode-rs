@@ -44,7 +44,18 @@ fn update(v: &Value) -> Update {
     Update {
         id: text(v, "id").unwrap_or_default(),
         title: text(v, "title"),
+        expected_title_sources: v["expectedTitleSources"]
+            .as_array()
+            .map(|s| {
+                s.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
         title_source: text(v, "titleSource"),
+        title_message_id: text(v, "titleMessageID")
+            .map(super::sessions::Patch::Set)
+            .unwrap_or_default(),
         ..Update::default()
     }
 }

@@ -120,9 +120,11 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
             ])
             .await?;
     } else {
+        // Node 的协议会话在首条输入后生成标题（`-p` 不生成）。
         let engine = ctx
             .engine(store, args.config.as_ref(), args.surface == "desktop")
-            .await?;
+            .await?
+            .with_title_generation(true);
         // App Server 独占 stdout；返回时已排空 runtime 输出并释放 sink。
         let served =
             app_server::serve(move |rx, tx| engine.serve(rx, tx, cancel), input, output).await;

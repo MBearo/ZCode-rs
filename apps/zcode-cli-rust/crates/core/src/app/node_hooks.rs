@@ -140,6 +140,7 @@ impl Engine {
                 self.clock.id(),
             );
             self.node_goal_prompt(id, turn, c, metadata, ids, &tools);
+            self.goal_title(id, text.trim());
             return;
         }
         let s = self.sessions.get_mut(id).unwrap();
@@ -270,6 +271,7 @@ impl Engine {
     pub(super) async fn observe_event(&mut self, id: &str, event: &Event) -> Result<()> {
         self.observe_usage(id, event).await;
         self.goal_turn_end(id, event);
+        self.title_turn_end(id, event);
         let media = self.node_tool_media(id, event).await?;
         let checkpoint = self.node_checkpoint_artifact(id, event).await?;
         let flush = self.node_event(id, event, (media.as_ref(), checkpoint.as_deref()));

@@ -1,6 +1,7 @@
 mod auxiliary;
 mod commands;
 mod engine;
+mod engine_builders;
 mod event_projection;
 mod model_config;
 mod queries;
@@ -77,6 +78,8 @@ mod plugin_events;
 mod plugin_reference;
 mod plugins;
 mod session_list;
+mod session_title;
+mod session_title_apply;
 mod shared_context;
 mod side_chat;
 mod skills;

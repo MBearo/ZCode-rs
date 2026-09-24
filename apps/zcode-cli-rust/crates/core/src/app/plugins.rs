@@ -53,6 +53,7 @@ impl Engine {
                 cancel: cancel.clone(),
                 operation: None,
                 plugin_operation,
+                title: None,
             },
         );
         let sink = EventSink {

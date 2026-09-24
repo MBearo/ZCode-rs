@@ -3,7 +3,12 @@ use anyhow::{Result, bail};
 use serde_json::json;
 impl Engine {
     pub(super) async fn apply_event(&mut self, event: RunEvent) -> Result<()> {
-        if self.auxiliary.contains_key(&event.session_id) {
+        if let Some(job) = self.auxiliary.get(&event.session_id) {
+            if job.title.is_some()
+                && let Event::AuxiliaryDone { result } = event.event
+            {
+                return self.title_done(&event.session_id, result).await;
+            }
             return self.auxiliary_event(event);
         }
         if let Event::ToolCleanupFailed(message) = event.event {

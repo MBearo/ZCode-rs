@@ -52,6 +52,7 @@ mod session_memory;
 pub mod session_projection;
 mod session_recovery;
 pub mod session_runtime;
+pub mod session_title;
 pub mod shared_context;
 pub mod shared_import;
 pub mod skills;

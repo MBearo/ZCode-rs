@@ -18,6 +18,11 @@ pub struct RuntimeOptions {
     pub tools: ToolFilter,
     /// `titleGenerationEnabled: false` disables generated titles.
     pub title_generation_disabled: bool,
+    /// Node `sessionTitleGenerationAttempted` of this activation.
+    pub title_attempted: bool,
+    /// A first prompt whose title waits for the turn to end (providers that
+    /// refresh runtime headers first run the turn): `(input, user message)`.
+    pub title_deferred: Option<(String, Option<String>)>,
     /// Legacy `runtime.stateRevision`: model and thought-level mutations of this activation.
     pub state_revision: u64,
     /// Workspace ref echoed by legacy snapshots (the create / resume params).

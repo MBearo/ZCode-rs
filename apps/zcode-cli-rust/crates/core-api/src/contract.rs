@@ -254,6 +254,11 @@ pub trait ModelPort: Send + Sync {
     fn supports_native_web_search(&self) -> bool {
         false
     }
+    /// Requests first refresh Host runtime headers (account providers; Node
+    /// `shouldRefreshBeforeModelRequest`).
+    fn account_auth(&self) -> bool {
+        false
+    }
     fn context_policy(&self) -> zcode_cli_domain::context::ContextPolicy {
         Default::default()
     }

@@ -177,6 +177,10 @@ impl Engine {
                 })
                 .await;
         });
+        // Node：首条真实输入落库后即异步生成会话标题（不随本轮取消）。
+        if kind == crate::domain::legacy_stream::RunKind::Prompt {
+            self.prompt_title(id, &turn_id);
+        }
         Ok(())
     }
 

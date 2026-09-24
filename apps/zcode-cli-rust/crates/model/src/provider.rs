@@ -318,6 +318,9 @@ impl ModelPort for HttpModel {
     fn supports_native_web_search(&self) -> bool {
         self.config.supports_native_web_search
     }
+    fn account_auth(&self) -> bool {
+        self.config.account_access.is_some()
+    }
     fn with_max_output_tokens(
         &self,
         max: usize,

@@ -1,4 +1,4 @@
-import { writeUserConfig } from "./zcode-cli-rust-fixture-config.js";
+import { answerTitleRequest, writeUserConfig } from "./zcode-cli-rust-fixture-config.js";
 export { waitForFile } from "./zcode-cli-rust-fixture-config.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type ServerResponse } from "node:http";
@@ -42,6 +42,8 @@ export async function fixture(
     permissionMode?: string | null;
     /** 用户配置文件的其他段（如 `hooks`）。 */
     userConfig?: Message;
+    /** 标题 sidecar 返回的标题。 */
+    title?: string;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "zcode-cli-rust-test-"));
@@ -53,6 +55,7 @@ export async function fixture(
   await mkdir(cwd);
   await writeUserConfig(root, options.permissionMode, options.userConfig);
   const requests: Message[] = [];
+  const titleRequests: Message[] = [];
   const requestBodies: string[] = [];
   const connectionPorts: number[] = [];
   const requestPaths: string[] = [];
@@ -63,6 +66,8 @@ export async function fixture(
     let body = "";
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body);
+    if (answerTitleRequest(body, req.url ?? "", res, options.title ?? "Fixture title"))
+      return void titleRequests.push(request);
     requests.push(request);
     requestPaths.push(req.url ?? "");
     requestHeaders.push(req.headers);
@@ -200,6 +205,7 @@ export async function fixture(
     config,
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,
+    titleRequests,
     requestBodies,
     connectionPorts,
     requestPaths,

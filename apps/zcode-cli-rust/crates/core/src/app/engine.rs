@@ -85,6 +85,8 @@ pub struct Engine {
     /// User config hooks and workspace hook trust.
     pub(super) hooks: super::workspace_trust::HookState,
     pub(super) anomaly_guard: crate::domain::model_anomaly::Guard,
+    /// Generated session titles (Node enables them for protocol sessions only).
+    pub(super) titles: bool,
 }
 impl Engine {
     pub async fn new(
@@ -151,26 +153,8 @@ impl Engine {
             event_rx,
             hooks: Default::default(),
             anomaly_guard: Default::default(),
+            titles: false,
         })
-    }
-    /// Config file `permission` section (mode fallback, allowed/disallowed tools),
-    /// read once at startup like Node's app creation.
-    pub fn with_permission_config(mut self, permission: &Value) -> Self {
-        self.permissions.config = crate::domain::permission::Config::from_config(permission);
-        self.permissions.config_mode = permission["mode"].as_str().map(str::to_owned);
-        self
-    }
-    pub fn with_registry(
-        mut self,
-        registry: Option<Arc<dyn crate::contract::ModelRegistry>>,
-        workspace_path: String,
-    ) -> Self {
-        self.registry = registry;
-        self.workspace_path = workspace_path;
-        if let Some(registry) = &self.registry {
-            self.config = registry.default_selection();
-        }
-        self
     }
     pub async fn serve(
         mut self,

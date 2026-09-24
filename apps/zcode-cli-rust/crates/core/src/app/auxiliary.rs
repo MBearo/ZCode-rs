@@ -11,6 +11,8 @@ pub(super) struct Auxiliary {
     /// The plugin `operationId` this job is registered under (the latest
     /// registration wins, Node `pluginOperationControllers`).
     pub plugin_operation: Option<String>,
+    /// A generated title job: its result goes to the session, not a reply.
+    pub title: Option<Box<super::session_title::TitleJob>>,
 }
 impl Engine {
     pub(super) fn start_auxiliary(&mut self, request: &Call) -> Result<()> {
@@ -70,6 +72,7 @@ impl Engine {
                 cancel: cancel.clone(),
                 operation,
                 plugin_operation: None,
+                title: None,
             },
         );
         let sink = EventSink {
