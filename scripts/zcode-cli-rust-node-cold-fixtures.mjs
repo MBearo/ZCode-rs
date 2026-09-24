@@ -38,7 +38,7 @@ const EPHEMERAL_SNAPSHOT_KEYS = new Set([
 const SUMMARY =
   "This session is being continued from a previous conversation.\n\nSummary: fixed the parser.";
 
-function basic(t) {
+export function basic(t) {
   t.user("u1", [
     { type: "text", text: "Fix the bug" },
     {
@@ -131,7 +131,7 @@ function basic(t) {
   });
 }
 
-function compacted(t) {
+export function compacted(t) {
   t.user("u1", [{ type: "text", text: "one" }]);
   t.assistant("a1", "u1", [{ type: "text", text: "first" }]);
   t.user("u2", [{ type: "text", text: "two" }]);
@@ -208,7 +208,7 @@ function compacted(t) {
   t.assistant("a3", "u3", [{ type: "text", text: "third" }]);
 }
 
-function rewound(t) {
+export function rewound(t) {
   t.user("u1", [{ type: "text", text: "one" }]);
   t.assistant("a1", "u1", [{ type: "text", text: "first" }]);
   t.user("u2", [{ type: "text", text: "two" }]);

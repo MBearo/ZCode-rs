@@ -131,7 +131,9 @@ fn another_writer_makes_startup_wait_or_time_out() {
     open_at(&path, MIGRATION_LOCK_WAIT).0.unwrap();
     let holder = Connection::open(&path).unwrap();
     holder.execute_batch("begin immediate").unwrap();
-    let (result, progress) = open_at(&path, Duration::from_millis(150));
+    // 与 Node 相同，先判截止再报告等待；150 ms 预算在全量并行测试下可能在首次 BUSY 前耗尽，
+    // 导致从未报告 WaitingForLock。放宽到 1 s 保证首次 BUSY 落在截止之前。
+    let (result, progress) = open_at(&path, Duration::from_secs(1));
     let error = result.unwrap_err();
     assert_eq!(error.code, "lock_timeout");
     assert!(progress.iter().any(|p| p.phase == Phase::WaitingForLock));

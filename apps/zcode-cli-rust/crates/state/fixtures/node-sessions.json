@@ -1,0 +1,1104 @@
+{
+  "tables": {
+    "session": [
+      [
+        "sess_main",
+        "proj_w",
+        null,
+        null,
+        "sess_main",
+        "/w",
+        "/w",
+        "Main",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "{\"mode\":\"plan\"}",
+        2000,
+        9000,
+        null,
+        null,
+        "interactive",
+        "custom",
+        null,
+        2000,
+        null
+      ],
+      [
+        "sess_partial",
+        "proj_w",
+        null,
+        null,
+        "sess_partial",
+        "/w",
+        "/w",
+        "Partial",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "{\"keptMessageIDs\":[\"p1\",\"pa1\"],\"branchCutAfterMessageID\":\"pa2\",\"branchGeneration\":1,\"messageID\":\"pa1\",\"kind\":\"conversation_rewind\",\"scope\":\"conversation\",\"targetMessageID\":\"p2\"}",
+        "{\"mode\":\"edit\"}",
+        2100,
+        9000,
+        null,
+        null,
+        "interactive",
+        "first_input",
+        null,
+        null,
+        null
+      ],
+      [
+        "sess_fork",
+        "proj_w",
+        null,
+        "sess_main",
+        "sess_fork",
+        "/w",
+        "/w",
+        "Fork",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2200,
+        2200,
+        null,
+        null,
+        "fork",
+        "generated",
+        null,
+        2200,
+        null
+      ],
+      [
+        "sess_child",
+        "proj_w",
+        null,
+        "sess_main",
+        "sess_child",
+        "/w",
+        "/w",
+        "Child",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2300,
+        2300,
+        null,
+        null,
+        "subagent_child",
+        "first_input",
+        null,
+        null,
+        null
+      ],
+      [
+        "sess_archived",
+        "proj_w",
+        null,
+        null,
+        "sess_archived",
+        "/w",
+        "/w",
+        "Archived",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2400,
+        9000,
+        null,
+        2500,
+        "interactive",
+        "first_input",
+        null,
+        null,
+        null
+      ],
+      [
+        "sess_other",
+        "proj_w",
+        null,
+        null,
+        "sess_other",
+        "/other",
+        "/other",
+        "Other",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2600,
+        2600,
+        null,
+        null,
+        "interactive",
+        "first_input",
+        null,
+        null,
+        null
+      ],
+      [
+        "sess_remote",
+        "proj_w",
+        "remote:ssh:host:22:me:/srv/app",
+        null,
+        "sess_remote",
+        "/srv/app",
+        "/srv/app",
+        "Remote",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2700,
+        2700,
+        null,
+        null,
+        "interactive",
+        "first_input",
+        null,
+        null,
+        null
+      ],
+      [
+        "sess_legacy_remote",
+        "proj_w",
+        null,
+        null,
+        "sess_legacy_remote",
+        "/srv/app",
+        "/srv/app",
+        "Legacy",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2800,
+        2800,
+        null,
+        null,
+        "interactive",
+        "first_input",
+        null,
+        null,
+        null
+      ],
+      [
+        "sess_default",
+        "proj_w",
+        null,
+        null,
+        "sess_default",
+        "/w",
+        "/w",
+        "",
+        "0.0.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2900,
+        2900,
+        null,
+        null,
+        "interactive",
+        "default",
+        null,
+        2900,
+        null
+      ]
+    ],
+    "message": [
+      [
+        "u1",
+        "sess_main",
+        1010,
+        1010,
+        "{\"role\":\"user\",\"time\":{\"created\":1010},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u1\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+        0
+      ],
+      [
+        "a1",
+        "sess_main",
+        1020,
+        1030,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1020,\"completed\":1030},\"parentID\":\"u1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u1\"}}",
+        1
+      ],
+      [
+        "u2",
+        "sess_main",
+        1040,
+        1040,
+        "{\"role\":\"user\",\"time\":{\"created\":1040},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u2\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+        2
+      ],
+      [
+        "a2",
+        "sess_main",
+        1050,
+        1060,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1050,\"completed\":1060},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":900,\"output\":9,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+        3
+      ],
+      [
+        "tl",
+        "sess_main",
+        1070,
+        1080,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1070,\"completed\":1080},\"parentID\":\"u2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"finish\":\"completed\",\"semantics\":{\"origin\":\"system\",\"kind\":\"timeline_event\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"hidden\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u2\"}}",
+        4
+      ],
+      [
+        "s1",
+        "sess_main",
+        1090,
+        1090,
+        "{\"role\":\"user\",\"time\":{\"created\":1090},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"compact_summary\",\"uiVisibility\":\"hidden\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"hidden\"},\"tools\":{\"Read\":true},\"summary\":{\"title\":\"Compact summary\",\"body\":\"This session is being continued from a previous conversation.\\n\\nSummary: fixed the parser.\",\"diffs\":[]},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+        5
+      ],
+      [
+        "u3",
+        "sess_main",
+        1100,
+        1100,
+        "{\"role\":\"user\",\"time\":{\"created\":1100},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_u3\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+        6
+      ],
+      [
+        "a3",
+        "sess_main",
+        1110,
+        1120,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1110,\"completed\":1120},\"parentID\":\"u3\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_u3\"}}",
+        7
+      ],
+      [
+        "p1",
+        "sess_partial",
+        1010,
+        1010,
+        "{\"role\":\"user\",\"time\":{\"created\":1010},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_p1\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_p1\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+        0
+      ],
+      [
+        "pa1",
+        "sess_partial",
+        1020,
+        1030,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1020,\"completed\":1030},\"parentID\":\"p1\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_p1\"}}",
+        1
+      ],
+      [
+        "p2",
+        "sess_partial",
+        1040,
+        1040,
+        "{\"role\":\"user\",\"time\":{\"created\":1040},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_p2\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_p2\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+        2
+      ],
+      [
+        "pa2",
+        "sess_partial",
+        1050,
+        1060,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1050,\"completed\":1060},\"parentID\":\"p2\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_p2\"}}",
+        3
+      ],
+      [
+        "p3",
+        "sess_partial",
+        1070,
+        1070,
+        "{\"role\":\"user\",\"time\":{\"created\":1070},\"agent\":\"zcode-agent\",\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}},\"semantics\":{\"origin\":\"real_user\",\"kind\":\"user_prompt\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_p3\",\"origin\":\"realUser\",\"sourceCommandId\":\"cmd_p3\"},\"tools\":{\"Read\":true},\"model\":{\"providerID\":\"p\",\"modelID\":\"m\",\"variant\":\"high\"}}",
+        4
+      ],
+      [
+        "pa3",
+        "sess_partial",
+        1080,
+        1090,
+        "{\"role\":\"assistant\",\"time\":{\"created\":1080,\"completed\":1090},\"parentID\":\"p3\",\"modelId\":\"m\",\"providerId\":\"p\",\"mode\":\"build\",\"planEnabled\":false,\"agent\":\"zcode-agent\",\"path\":{\"cwd\":\"/w\",\"root\":\"/w\"},\"cost\":0,\"tokens\":{\"input\":100,\"output\":5,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"semantics\":{\"origin\":\"agent_runtime\",\"kind\":\"assistant_response\",\"uiVisibility\":\"visible\",\"providerVisibility\":\"visible\",\"transcriptVisibility\":\"visible\"},\"anchor\":{\"turnId\":\"turn_p3\"}}",
+        5
+      ]
+    ],
+    "part": [
+      [
+        "part_u1_0",
+        "u1",
+        "sess_main",
+        1010,
+        9000,
+        "{\"time\":{\"start\":1010,\"end\":1010},\"type\":\"text\",\"text\":\"one\"}",
+        0
+      ],
+      ["part_a1_0", "a1", "sess_main", 9000, 9000, "{\"type\":\"text\",\"text\":\"first\"}", 0],
+      [
+        "part_u2_0",
+        "u2",
+        "sess_main",
+        1040,
+        9000,
+        "{\"time\":{\"start\":1040,\"end\":1040},\"type\":\"text\",\"text\":\"two\"}",
+        0
+      ],
+      ["part_a2_0", "a2", "sess_main", 9000, 9000, "{\"type\":\"text\",\"text\":\"second\"}", 0],
+      [
+        "part_tl_0",
+        "tl",
+        "sess_main",
+        9000,
+        9000,
+        "{\"timelineType\":\"context_compaction\",\"display\":\"separator\",\"status\":\"completed\",\"operationId\":\"cmp_1\",\"trigger\":\"auto\",\"preCompactTokenCount\":900,\"postCompactTokenCount\":120,\"type\":\"timeline\"}",
+        0
+      ],
+      [
+        "part_tl_1",
+        "tl",
+        "sess_main",
+        9000,
+        9000,
+        "{\"type\":\"compaction\",\"auto\":true,\"trigger\":\"auto\",\"operationId\":\"cmp_1\",\"timelineStatus\":\"completed\",\"timelineDisplay\":\"separator\"}",
+        1
+      ],
+      [
+        "part_s1_0",
+        "s1",
+        "sess_main",
+        1090,
+        9000,
+        "{\"time\":{\"start\":1090,\"end\":1090},\"type\":\"text\",\"text\":\"This session is being continued from a previous conversation.\\n\\nSummary: fixed the parser.\",\"synthetic\":true}",
+        0
+      ],
+      [
+        "part_s1_1",
+        "s1",
+        "sess_main",
+        9000,
+        9000,
+        "{\"type\":\"compaction\",\"auto\":true,\"trigger\":\"auto\",\"tail_start_id\":\"u2\",\"compactBoundary\":{\"boundaryId\":\"b1\",\"trigger\":\"auto\",\"preCompactTokenCount\":900,\"summarizedMessageCount\":2,\"summaryMessageIds\":[\"s1\"],\"preservedSegment\":{\"headMessageId\":\"u2\",\"anchorMessageId\":\"s1\",\"tailMessageId\":\"a2\"},\"traceId\":\"trace\"},\"operationId\":\"cmp_1\"}",
+        1
+      ],
+      [
+        "part_u3_0",
+        "u3",
+        "sess_main",
+        1100,
+        9000,
+        "{\"time\":{\"start\":1100,\"end\":1100},\"type\":\"text\",\"text\":\"three\"}",
+        0
+      ],
+      ["part_a3_0", "a3", "sess_main", 9000, 9000, "{\"type\":\"text\",\"text\":\"third\"}", 0],
+      [
+        "part_p1_0",
+        "p1",
+        "sess_partial",
+        1010,
+        9000,
+        "{\"time\":{\"start\":1010,\"end\":1010},\"type\":\"text\",\"text\":\"one\"}",
+        0
+      ],
+      [
+        "part_pa1_0",
+        "pa1",
+        "sess_partial",
+        9000,
+        9000,
+        "{\"type\":\"text\",\"text\":\"first\"}",
+        0
+      ],
+      [
+        "part_p2_0",
+        "p2",
+        "sess_partial",
+        1040,
+        9000,
+        "{\"time\":{\"start\":1040,\"end\":1040},\"type\":\"text\",\"text\":\"two\"}",
+        0
+      ],
+      [
+        "part_pa2_0",
+        "pa2",
+        "sess_partial",
+        9000,
+        9000,
+        "{\"type\":\"text\",\"text\":\"second\"}",
+        0
+      ],
+      [
+        "part_p3_0",
+        "p3",
+        "sess_partial",
+        1070,
+        9000,
+        "{\"time\":{\"start\":1070,\"end\":1070},\"type\":\"text\",\"text\":\"retry two\"}",
+        0
+      ],
+      [
+        "part_pa3_0",
+        "pa3",
+        "sess_partial",
+        9000,
+        9000,
+        "{\"type\":\"text\",\"text\":\"second again\"}",
+        0
+      ]
+    ],
+    "session_entry": [
+      [
+        "sess_main:runtime/model_selection",
+        "sess_main",
+        "runtime/model_selection",
+        2000,
+        2000,
+        "{\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}}"
+      ],
+      [
+        "sess_main:runtime/execution_state",
+        "sess_main",
+        "runtime/execution_state",
+        2000,
+        2000,
+        "{\"mode\":\"yolo\",\"planEnabled\":true}"
+      ],
+      [
+        "sess_main:runtime/permission_full_access",
+        "sess_main",
+        "runtime/permission_full_access",
+        2000,
+        2000,
+        "{\"interactionId\":\"perm_1\",\"event\":{\"id\":\"evt_1\",\"sessionId\":\"sess_main\",\"traceId\":\"trace_1\",\"type\":\"session_mode_changed\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"sequenceNumber\":3,\"payload\":{\"mode\":\"yolo\",\"planEnabled\":false,\"previousMode\":\"build\",\"previousPlanEnabled\":false,\"source\":\"command\",\"permissionGrant\":{\"interactionId\":\"perm_1\",\"queueItemIds\":[\"queue_1\"]}}}}"
+      ],
+      [
+        "sess_partial:runtime/model_selection",
+        "sess_partial",
+        "runtime/model_selection",
+        2100,
+        2100,
+        "{\"modelSelection\":{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":5}}}"
+      ],
+      [
+        "sess_partial:runtime/execution_state",
+        "sess_partial",
+        "runtime/execution_state",
+        2100,
+        2100,
+        "{\"mode\":\"weird\",\"planEnabled\":true}"
+      ],
+      [
+        "sess_partial:runtime/permission_full_access",
+        "sess_partial",
+        "runtime/permission_full_access",
+        2100,
+        2100,
+        "{\"interactionId\":\"perm_1\",\"event\":{\"id\":\"evt_1\",\"sessionId\":\"sess_other_owner\",\"traceId\":\"trace_1\",\"type\":\"session_mode_changed\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"sequenceNumber\":3,\"payload\":{\"mode\":\"yolo\",\"planEnabled\":false,\"previousMode\":\"build\",\"previousPlanEnabled\":false,\"source\":\"command\",\"permissionGrant\":{\"interactionId\":\"perm_1\",\"queueItemIds\":[\"queue_1\"]}}}}"
+      ]
+    ],
+    "session_target": [
+      [
+        "sess_main",
+        "target_6y0_00000000-0000-4000-8000-000000000002",
+        "Ship it",
+        "active",
+        500,
+        0,
+        0,
+        9000,
+        9000,
+        null,
+        null,
+        null,
+        null
+      ]
+    ],
+    "todo": [
+      ["sess_main", "Write tests", "in_progress", "high", 0, 9000, 9000],
+      ["sess_main", "Ship", "pending", "medium", 1, 9000, 9000]
+    ]
+  },
+  "lists": {
+    "all": {
+      "params": {},
+      "result": {
+        "sessions": [
+          {
+            "createdAt": 2100,
+            "mode": "build",
+            "sessionId": "sess_partial",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Partial",
+            "titleSource": "first_input",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspaceKey": "/w",
+              "workspacePath": "/w"
+            }
+          },
+          {
+            "createdAt": 2000,
+            "mode": "build",
+            "sessionId": "sess_main",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Main",
+            "titleSource": "custom",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspaceKey": "/w",
+              "workspacePath": "/w"
+            }
+          },
+          {
+            "createdAt": 2900,
+            "mode": "build",
+            "sessionId": "sess_default",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "",
+            "titleSource": "default",
+            "updatedAt": 2900,
+            "workspace": {
+              "workspaceKey": "/w",
+              "workspacePath": "/w"
+            }
+          },
+          {
+            "createdAt": 2800,
+            "mode": "build",
+            "sessionId": "sess_legacy_remote",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Legacy",
+            "titleSource": "first_input",
+            "updatedAt": 2800,
+            "workspace": {
+              "workspaceKey": "/srv/app",
+              "workspacePath": "/srv/app"
+            }
+          },
+          {
+            "createdAt": 2700,
+            "mode": "build",
+            "sessionId": "sess_remote",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Remote",
+            "titleSource": "first_input",
+            "updatedAt": 2700,
+            "workspace": {
+              "workspaceKey": "/srv/app",
+              "workspacePath": "/srv/app"
+            }
+          },
+          {
+            "createdAt": 2600,
+            "mode": "build",
+            "sessionId": "sess_other",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Other",
+            "titleSource": "first_input",
+            "updatedAt": 2600,
+            "workspace": {
+              "workspaceKey": "/other",
+              "workspacePath": "/other"
+            }
+          },
+          {
+            "createdAt": 2200,
+            "mode": "build",
+            "parentSessionId": "sess_main",
+            "sessionId": "sess_fork",
+            "sessionKind": "fork",
+            "status": "idle",
+            "title": "Fork",
+            "titleSource": "generated",
+            "updatedAt": 2200,
+            "workspace": {
+              "workspaceKey": "/w",
+              "workspacePath": "/w"
+            }
+          }
+        ]
+      }
+    },
+    "local": {
+      "params": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        }
+      },
+      "result": {
+        "sessions": [
+          {
+            "createdAt": 2100,
+            "mode": "build",
+            "sessionId": "sess_partial",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Partial",
+            "titleSource": "first_input",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          },
+          {
+            "createdAt": 2000,
+            "mode": "build",
+            "sessionId": "sess_main",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Main",
+            "titleSource": "custom",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          },
+          {
+            "createdAt": 2900,
+            "mode": "build",
+            "sessionId": "sess_default",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "",
+            "titleSource": "default",
+            "updatedAt": 2900,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          },
+          {
+            "createdAt": 2200,
+            "mode": "build",
+            "parentSessionId": "sess_main",
+            "sessionId": "sess_fork",
+            "sessionKind": "fork",
+            "status": "idle",
+            "title": "Fork",
+            "titleSource": "generated",
+            "updatedAt": 2200,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          }
+        ]
+      }
+    },
+    "archived": {
+      "params": {
+        "workspace": {
+          "workspacePath": "/w",
+          "workspaceKey": "/w"
+        },
+        "includeArchived": true
+      },
+      "result": {
+        "sessions": [
+          {
+            "createdAt": 2100,
+            "mode": "build",
+            "sessionId": "sess_partial",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Partial",
+            "titleSource": "first_input",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          },
+          {
+            "createdAt": 2000,
+            "mode": "build",
+            "sessionId": "sess_main",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Main",
+            "titleSource": "custom",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          },
+          {
+            "archivedAt": 2500,
+            "createdAt": 2400,
+            "mode": "build",
+            "sessionId": "sess_archived",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Archived",
+            "titleSource": "first_input",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          },
+          {
+            "createdAt": 2900,
+            "mode": "build",
+            "sessionId": "sess_default",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "",
+            "titleSource": "default",
+            "updatedAt": 2900,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          },
+          {
+            "createdAt": 2200,
+            "mode": "build",
+            "parentSessionId": "sess_main",
+            "sessionId": "sess_fork",
+            "sessionKind": "fork",
+            "status": "idle",
+            "title": "Fork",
+            "titleSource": "generated",
+            "updatedAt": 2200,
+            "workspace": {
+              "workspacePath": "/w",
+              "workspaceKey": "/w"
+            }
+          }
+        ]
+      }
+    },
+    "remote": {
+      "params": {
+        "workspace": {
+          "workspacePath": "/srv/app",
+          "workspaceKey": "remote:ssh:host:22:me:/srv/app",
+          "workspaceIdentity": "remote:ssh:host:22:me:/srv/app"
+        }
+      },
+      "result": {
+        "sessions": [
+          {
+            "createdAt": 2700,
+            "mode": "build",
+            "sessionId": "sess_remote",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Remote",
+            "titleSource": "first_input",
+            "updatedAt": 2700,
+            "workspace": {
+              "workspacePath": "/srv/app",
+              "workspaceIdentity": "remote:ssh:host:22:me:/srv/app",
+              "workspaceKey": "remote:ssh:host:22:me:/srv/app"
+            }
+          }
+        ]
+      }
+    },
+    "limited": {
+      "params": {
+        "limit": 2
+      },
+      "result": {
+        "sessions": [
+          {
+            "createdAt": 2100,
+            "mode": "build",
+            "sessionId": "sess_partial",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Partial",
+            "titleSource": "first_input",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspaceKey": "/w",
+              "workspacePath": "/w"
+            }
+          },
+          {
+            "createdAt": 2000,
+            "mode": "build",
+            "sessionId": "sess_main",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Main",
+            "titleSource": "custom",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspaceKey": "/w",
+              "workspacePath": "/w"
+            }
+          }
+        ]
+      }
+    },
+    "byId": {
+      "params": {
+        "sessionIds": ["sess_child", "sess_archived", "sess_remote", "missing"]
+      },
+      "result": {
+        "sessions": [
+          {
+            "createdAt": 2300,
+            "mode": "build",
+            "parentSessionId": "sess_main",
+            "sessionId": "sess_child",
+            "sessionKind": "subagent_child",
+            "status": "idle",
+            "title": "Child",
+            "titleSource": "first_input",
+            "updatedAt": 2300,
+            "workspace": {
+              "workspaceKey": "/w",
+              "workspacePath": "/w"
+            }
+          },
+          {
+            "createdAt": 2700,
+            "mode": "build",
+            "sessionId": "sess_remote",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Remote",
+            "titleSource": "first_input",
+            "updatedAt": 2700,
+            "workspace": {
+              "workspaceKey": "/srv/app",
+              "workspacePath": "/srv/app"
+            }
+          }
+        ]
+      }
+    },
+    "byIdArchived": {
+      "params": {
+        "sessionIds": ["sess_archived"],
+        "includeArchived": true
+      },
+      "result": {
+        "sessions": [
+          {
+            "archivedAt": 2500,
+            "createdAt": 2400,
+            "mode": "build",
+            "sessionId": "sess_archived",
+            "sessionKind": "interactive",
+            "status": "idle",
+            "title": "Archived",
+            "titleSource": "first_input",
+            "updatedAt": 9000,
+            "workspace": {
+              "workspaceKey": "/w",
+              "workspacePath": "/w"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "summaries": {
+    "/w": [
+      {
+        "sessionId": "sess_partial",
+        "workspaceId": "/w",
+        "title": "Partial",
+        "titleSource": "generated",
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "hasBackgroundWork": false,
+        "lastActivityAt": 9000,
+        "createdAt": 2100
+      },
+      {
+        "sessionId": "sess_main",
+        "workspaceId": "/w",
+        "title": "Main",
+        "titleSource": "custom",
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "hasBackgroundWork": false,
+        "lastActivityAt": 9000,
+        "createdAt": 2000
+      },
+      {
+        "sessionId": "sess_default",
+        "workspaceId": "/w",
+        "title": "",
+        "titleSource": "default",
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "hasBackgroundWork": false,
+        "lastActivityAt": 2900,
+        "createdAt": 2900
+      },
+      {
+        "sessionId": "sess_fork",
+        "workspaceId": "/w",
+        "parentSessionId": "sess_main",
+        "title": "Fork",
+        "titleSource": "generated",
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "hasBackgroundWork": false,
+        "lastActivityAt": 2200,
+        "createdAt": 2200
+      }
+    ],
+    "/srv/app": [
+      {
+        "sessionId": "sess_legacy_remote",
+        "workspaceId": "/srv/app",
+        "title": "Legacy",
+        "titleSource": "generated",
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "hasBackgroundWork": false,
+        "lastActivityAt": 2800,
+        "createdAt": 2800
+      }
+    ],
+    "remote:ssh:host:22:me:/srv/app": [
+      {
+        "sessionId": "sess_remote",
+        "workspaceId": "remote:ssh:host:22:me:/srv/app",
+        "title": "Remote",
+        "titleSource": "generated",
+        "phase": "completedSuccess",
+        "sessionEnded": true,
+        "hasBackgroundWork": false,
+        "lastActivityAt": 2700,
+        "createdAt": 2700
+      }
+    ],
+    "/nope": []
+  },
+  "resume": {
+    "sess_main": {
+      "modelSelection": {
+        "providerId": "p",
+        "modelId": "m",
+        "options": {
+          "reasoningLevel": "high"
+        }
+      },
+      "execution": {
+        "mode": "yolo",
+        "planEnabled": true
+      },
+      "permissionGrant": "perm_1",
+      "todos": [
+        {
+          "content": "Write tests",
+          "status": "in_progress",
+          "priority": "high"
+        },
+        {
+          "content": "Ship",
+          "status": "pending",
+          "priority": "medium"
+        }
+      ],
+      "target": {
+        "sessionID": "sess_main",
+        "targetID": "target_6y0_00000000-0000-4000-8000-000000000002",
+        "objective": "Ship it",
+        "summaryTitle": null,
+        "status": "active",
+        "tokenBudget": 500,
+        "tokensUsed": 0,
+        "timeUsedSeconds": 0,
+        "activeInputId": null,
+        "activeRunStartedAtMs": null,
+        "activeRunLastSeenAtMs": null,
+        "time": {
+          "created": 9000,
+          "updated": 9000
+        }
+      },
+      "turnNumber": 2,
+      "latestConversationMessageId": "a3",
+      "latestAssistantMessageId": "a3",
+      "latestAssistantTurnId": "turn_u3",
+      "lastAssistantCompletedAtMs": 1120
+    },
+    "sess_partial": {
+      "modelSelection": {
+        "providerId": "p",
+        "modelId": "m"
+      },
+      "execution": {
+        "mode": "edit",
+        "planEnabled": false
+      },
+      "permissionGrant": null,
+      "todos": [],
+      "target": null,
+      "turnNumber": 2,
+      "latestConversationMessageId": "pa3",
+      "latestAssistantMessageId": "pa3",
+      "latestAssistantTurnId": "turn_p3",
+      "lastAssistantCompletedAtMs": 1090
+    },
+    "sess_fork": {
+      "modelSelection": null,
+      "execution": null,
+      "permissionGrant": null,
+      "todos": [],
+      "target": null,
+      "turnNumber": 0,
+      "latestConversationMessageId": null,
+      "latestAssistantMessageId": null,
+      "latestAssistantTurnId": null,
+      "lastAssistantCompletedAtMs": null
+    },
+    "sess_archived": null,
+    "missing": null
+  }
+}

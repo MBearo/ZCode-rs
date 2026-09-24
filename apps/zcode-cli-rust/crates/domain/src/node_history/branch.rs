@@ -76,7 +76,7 @@ pub fn select_branch<'a>(messages: Vec<Cow<'a, Record>>, branch: &Branch) -> Vec
 }
 
 /// JavaScript truthiness of a JSON member (`undefined` when absent).
-pub(crate) fn truthy(value: Option<&Value>) -> bool {
+pub fn truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,
         Some(Value::Bool(b)) => *b,

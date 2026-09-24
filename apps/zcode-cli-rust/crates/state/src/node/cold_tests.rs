@@ -1,7 +1,7 @@
 //! Replays `fixtures/node-cold.json` (Node transcripts stored by Node's
 //! repositories, with Node's rebuilt history) and requires the same entries.
 use super::super::json::stringify;
-use super::super::open;
+use super::super::test_db::first_difference;
 use super::*;
 use serde_json::{Value, json};
 use zcode_cli_domain::node_history::hydrate;
@@ -10,37 +10,8 @@ fn fixture() -> Value {
     serde_json::from_str(include_str!("../../fixtures/node-cold.json")).unwrap()
 }
 
-/// A migrated database holding the scenario's raw rows.
 fn database(scenario: &Value) -> (tempfile::TempDir, Connection) {
-    let dir = tempfile::tempdir().unwrap();
-    let conn = open::open(
-        &dir.path().join("db.sqlite"),
-        open::MIGRATION_LOCK_WAIT,
-        &mut |_| {},
-    )
-    .unwrap();
-    for (table, rows) in scenario["tables"].as_object().unwrap() {
-        for row in rows.as_array().unwrap() {
-            let values: Vec<rusqlite::types::Value> = row
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| match v {
-                    Value::Null => rusqlite::types::Value::Null,
-                    Value::Number(n) => rusqlite::types::Value::Integer(n.as_i64().unwrap()),
-                    Value::String(s) => rusqlite::types::Value::Text(s.clone()),
-                    other => panic!("unexpected column {other}"),
-                })
-                .collect();
-            let slots = vec!["?"; values.len()].join(",");
-            conn.execute(
-                &format!("insert into {table} values ({slots})"),
-                rusqlite::params_from_iter(values),
-            )
-            .unwrap();
-        }
-    }
-    (dir, conn)
+    super::super::test_db::database(&scenario["tables"])
 }
 
 #[test]
@@ -94,36 +65,6 @@ fn a_leading_compaction_summary_becomes_the_context_summary() {
         .find(|m| m["tool_call_id"] == "call_c")
         .unwrap();
     assert_eq!(interrupted["_zcode_tool_failed"], true);
-}
-
-/// First difference between two JSON values (object member order ignored:
-/// V4 wire payloads are parsed, not compared as bytes).
-fn first_difference(path: &str, left: &Value, right: &Value) -> Option<String> {
-    match (left, right) {
-        (Value::Object(a), Value::Object(b)) => {
-            for key in a.keys().chain(b.keys()) {
-                let (x, y) = (a.get(key), b.get(key));
-                match (x, y) {
-                    (Some(x), Some(y)) => {
-                        if let Some(d) = first_difference(&format!("{path}.{key}"), x, y) {
-                            return Some(d);
-                        }
-                    }
-                    _ => return Some(format!("{path}.{key}: {x:?} vs {y:?}")),
-                }
-            }
-            None
-        }
-        (Value::Array(a), Value::Array(b)) => {
-            for (index, (x, y)) in a.iter().zip(b).enumerate() {
-                if let Some(d) = first_difference(&format!("{path}[{index}]"), x, y) {
-                    return Some(d);
-                }
-            }
-            (a.len() != b.len()).then(|| format!("{path}: length {} vs {}", a.len(), b.len()))
-        }
-        _ => (stringify(left) != stringify(right)).then(|| format!("{path}: {left} vs {right}")),
-    }
 }
 
 #[test]

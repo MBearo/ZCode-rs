@@ -59,6 +59,7 @@ pub mod tool_input;
 pub mod topic_log;
 pub mod usage;
 pub mod web;
+pub mod workspace_identity;
 pub mod zod;
 
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;

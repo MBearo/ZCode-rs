@@ -331,7 +331,10 @@ mod tests {
         // 3 字节字符跨越 32 KiB 边界：与 Node Buffer.toString 一样按最大非法子序列替换。
         let long = "€".repeat(30_000);
         let out = build_output(&long, &json!({"kind": "mcp_tool"}), "c1");
-        assert_eq!(out["truncated"], json!({"totalBytes": 90_000, "ref": "tool-output/c1"}));
+        assert_eq!(
+            out["truncated"],
+            json!({"totalBytes": 90_000, "ref": "tool-output/c1"})
+        );
         assert_eq!(out["display"], json!({"kind": "mcp_tool"}));
         let text = out["text"].as_str().unwrap();
         let (head, tail) = text.split_once("\n…\n").unwrap();

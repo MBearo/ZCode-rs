@@ -47,10 +47,20 @@ pub fn history(
     session: &str,
     artifacts: &dyn Fn(&str) -> Option<String>,
 ) -> Result<History> {
-    let active = active(conn, session)?;
-    let summary_record = active
-        .first()
-        .filter(|r| r.parts.iter().any(node_history::branch::is_boundary_part));
+    Ok(history_of(&active(conn, session)?, artifacts))
+}
+
+/// The model context of an active branch (with the preserved segment).
+pub fn history_of(
+    active: &[impl AsRef<Record>],
+    artifacts: &dyn Fn(&str) -> Option<String>,
+) -> History {
+    let summary_record = active.first().filter(|r| {
+        r.as_ref()
+            .parts
+            .iter()
+            .any(node_history::branch::is_boundary_part)
+    });
     let summary = summary_record.map(|record| {
         let hydrated = node_history::hydrate(std::slice::from_ref(record), artifacts);
         hydrated
@@ -63,14 +73,14 @@ pub fn history(
     let rest = if summary.is_some() {
         &active[1..]
     } else {
-        &active[..]
+        active
     };
     let hydrated = node_history::hydrate(rest, artifacts);
-    Ok(History {
+    History {
         summary,
         messages: hydrated.entries.iter().map(|e| e.canonical()).collect(),
         interrupted_tools: hydrated.interrupted_tools,
-    })
+    }
 }
 
 /// The persisted facts the cold V4 projection replays (Node
@@ -84,18 +94,27 @@ pub struct Materialization {
 }
 
 pub fn materialization(conn: &Connection, session: &str) -> Result<Materialization> {
+    let row =
+        sessions::get(conn, session)?.with_context(|| format!("Session not found: {session}"))?;
+    let branch = Branch::from_revert(row.revert.as_ref());
+    materialization_of(conn, session, records(conn, session)?, &branch)
+}
+
+/// [`materialization`] over already read records.
+pub fn materialization_of(
+    conn: &Connection,
+    session: &str,
+    all: Vec<Record>,
+    branch: &Branch,
+) -> Result<Materialization> {
     // Node 读取全部 session_entry 再按 payload 形状挑出 goal 校验事实，不按 type 过滤。
     let stored: Vec<(Value, f64)> = entries::list(conn, session, None)?
         .into_iter()
         .map(|entry| (entry.data, entry.time_created as f64))
         .collect();
-    let row =
-        sessions::get(conn, session)?.with_context(|| format!("Session not found: {session}"))?;
-    let branch = Branch::from_revert(row.revert.as_ref());
     // V4 冷投影只裁掉 rewind 分支（Node selectActiveConversationBranch），不像模型上下文那样
     // 从最后一个压缩边界截断：压缩前的历史仍是可见时间线。
-    let all = records(conn, session)?;
-    let messages = node_history::select_branch(all.iter().map(Cow::Borrowed).collect(), &branch)
+    let messages = node_history::select_branch(all.into_iter().map(Cow::Owned).collect(), branch)
         .into_iter()
         .map(Cow::into_owned)
         .collect();
