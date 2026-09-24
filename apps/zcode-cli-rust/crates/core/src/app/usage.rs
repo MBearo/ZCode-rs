@@ -97,6 +97,7 @@ impl Engine {
                 token: call.token,
                 cancel: CancellationToken::new(),
                 operation: None,
+                plugin_operation: None,
             },
         );
         let sink = EventSink {

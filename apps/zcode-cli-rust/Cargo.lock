@@ -2398,12 +2398,14 @@ name = "zcode-cli-plugins"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "libc",
  "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",
+ "url",
  "uuid",
  "windows-sys 0.61.2",
  "zcode-cli-domain",

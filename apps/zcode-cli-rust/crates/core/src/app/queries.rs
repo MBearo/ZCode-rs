@@ -43,6 +43,20 @@ impl Engine {
                 }
                 Ok(json!({"operationId":operation,"cancelled":!ids.is_empty()}))
             }
+            Method::PluginsCancelOperation => {
+                // Node 按原样的 operationId 查找（登记时已去空白），只中止当前登记的作业。
+                let operation = p["operationId"].as_str().context("Operation id required")?;
+                let job = self
+                    .auxiliary
+                    .values_mut()
+                    .find(|j| j.plugin_operation.as_deref() == Some(operation));
+                let cancelled = job.is_some_and(|job| {
+                    job.cancel.cancel();
+                    job.plugin_operation = None;
+                    true
+                });
+                Ok(json!({"operationId":operation,"cancelled":cancelled}))
+            }
             Method::RuntimeCapabilities => Ok(
                 json!({"workspaceExecutionCapabilities":true,"independentPlanState":true,"accountProviderConfig":self.registry.is_some()}),
             ),

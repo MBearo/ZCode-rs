@@ -26,6 +26,8 @@ pub struct WorkspaceTools {
     /// Complete child environment shared by shell tools and hooks.
     pub(super) env: Arc<[(String, String)]>,
     web: super::web_fetch::WebFetcher,
+    /// Network egress of plugin management (marketplace and archive downloads).
+    pub(super) egress: Arc<zcode_cli_net::Egress>,
 }
 impl WorkspaceTools {
     fn session_artifacts(&self, session: &str) -> PathBuf {
@@ -45,7 +47,8 @@ impl WorkspaceTools {
             shell: ShellTasks::new(env.clone()),
             env,
             web: super::web_fetch::WebFetcher::new(egress.clone()),
-            mcp: super::mcp_hub::Hub::new(cwd.clone(), config.clone(), egress),
+            mcp: super::mcp_hub::Hub::new(cwd.clone(), config.clone(), egress.clone()),
+            egress,
             config,
             cwd,
             artifacts,

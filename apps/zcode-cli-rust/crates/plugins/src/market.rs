@@ -149,18 +149,114 @@ pub fn listing(entry: &Value) -> Option<Value> {
 }
 
 /// A normalized catalog entry (Node `PluginMarketplaceEntry`).
+#[derive(Clone)]
 pub struct Entry {
     pub name: String,
     pub description: Option<String>,
     pub version: Option<String>,
     pub source: Option<Value>,
+    pub cache_path: Option<String>,
+    pub dependencies: Option<Vec<String>>,
+    pub strict: Option<bool>,
     pub listing: Option<Value>,
     pub raw: Value,
 }
 
+#[derive(Clone)]
 pub struct Manifest {
+    pub name: String,
+    pub description: Option<String>,
     pub plugins: Vec<Entry>,
+    pub allow_cross: Vec<String>,
+    pub plugin_root: Option<String>,
     pub featured: Vec<String>,
+    /// The normalized document (array-form plugins, trimmed name), as persisted.
+    pub raw: Value,
+}
+
+/// Node `normalizeDependencyRef`.
+fn dependency(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => {
+            // `name@^1.2`：去掉最后一段 `@^…` 版本约束（其后不能再有 `@`）。
+            Some(match text.rfind("@^") {
+                Some(at) if !text[at + 2..].contains('@') => text[..at].to_owned(),
+                _ => text.clone(),
+            })
+        }
+        Value::Object(_) => {
+            let name = crate::js::trim(value["name"].as_str().unwrap_or_default());
+            if name.is_empty() {
+                return None;
+            }
+            let market = crate::js::trim(value["marketplace"].as_str().unwrap_or_default());
+            Some(if market.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{name}@{market}")
+            })
+        }
+        _ => None,
+    }
+}
+
+fn entry(value: &Value) -> Option<Entry> {
+    if !value.is_object() {
+        return None;
+    }
+    let name = crate::js::trim(value["name"].as_str().unwrap_or_default());
+    if name.is_empty() {
+        return None;
+    }
+    let text = |key: &str| value[key].as_str().map(str::to_owned);
+    Some(Entry {
+        name: name.to_owned(),
+        description: text("description"),
+        version: text("version"),
+        source: value.get("source").cloned(),
+        cache_path: text("cachePath"),
+        dependencies: value["dependencies"]
+            .as_array()
+            .map(|items| items.iter().filter_map(dependency).collect()),
+        strict: value["strict"].as_bool(),
+        listing: listing(value),
+        raw: value.clone(),
+    })
+}
+
+/// Node `normalizeMarketplaceManifest` of `raw` named `name`.
+pub fn normalize(raw: Value, name: String) -> Manifest {
+    let strings = |value: &Value| -> Vec<String> {
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    };
+    let metadata = &raw["metadata"];
+    let description = raw["description"]
+        .as_str()
+        .or_else(|| metadata["description"].as_str())
+        .map(str::to_owned);
+    Manifest {
+        name,
+        description,
+        plugins: raw["plugins"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(entry)
+            .collect(),
+        allow_cross: strings(&raw["allowCrossMarketplaceDependenciesOn"]),
+        plugin_root: metadata["pluginRoot"].as_str().map(str::to_owned),
+        featured: strings(&raw["featured"])
+            .into_iter()
+            .filter(|s| !crate::js::trim(s).is_empty())
+            .collect(),
+        raw,
+    }
 }
 
 /// Node `parseMarketplaceManifest` + `normalizeMarketplaceManifest`.
@@ -185,39 +281,16 @@ pub fn parse_manifest(value: &Value) -> Option<Manifest> {
             .collect(),
         _ => vec![],
     };
-    let plugins = entries
-        .iter()
-        .filter(|entry| entry.is_object())
-        .filter_map(|entry| {
-            let name = crate::js::trim(entry["name"].as_str().unwrap_or_default());
-            (!name.is_empty()).then(|| Entry {
-                name: name.to_owned(),
-                description: entry["description"].as_str().map(str::to_owned),
-                version: entry["version"].as_str().map(str::to_owned),
-                source: entry.get("source").cloned(),
-                listing: listing(entry),
-                raw: entry.clone(),
-            })
-        })
-        .collect();
-    let featured = value["featured"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .filter(|s| !crate::js::trim(s).is_empty())
-        .map(str::to_owned)
-        .collect();
-    Some(Manifest { plugins, featured })
+    let mut raw = value.clone();
+    raw["name"] = name.into();
+    raw["plugins"] = Value::Array(entries);
+    Some(normalize(raw, name.to_owned()))
 }
 
 /// Node `loadMarketplaceManifestSync`: `marketplaces/<id>/marketplace.json`
 /// read through the directory's atomic recovery.
 pub async fn manifest(storage: &Path, id: &str) -> std::io::Result<Option<Manifest>> {
-    let directory = storage
-        .join("marketplaces")
-        .join(crate::fsx::sanitize_id(id));
-    let readable = crate::atomic::recover(&directory).await?;
+    let readable = crate::atomic::recover(&crate::store::market_dir(storage, id)).await?;
     let value = crate::fsx::read_json_lenient(&readable.join("marketplace.json")).await;
     Ok(value.as_ref().and_then(parse_manifest))
 }
@@ -238,7 +311,7 @@ pub fn identity_pin(source: Option<&Value>) -> Option<String> {
 
 /// Node `resolveDeclaredMarketplaceSources`: user-declared sources, with
 /// relative file and directory paths resolved against the user config file.
-fn declared(config: &Value, user_path: &Path) -> Vec<(String, Value)> {
+pub fn declared(config: &Value, user_path: &Path) -> Vec<(String, Value)> {
     let base = user_path.parent().unwrap_or(Path::new(""));
     config["plugins"]["extraKnownMarketplaces"]
         .as_object()

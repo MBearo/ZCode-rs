@@ -26,9 +26,10 @@ macro_rules! methods {
                     _ => None,
                 }
             }
-            /// A `plugins/*` management request (spec rust-m10-plugins).
+            /// A `plugins/*` management request answered in the background
+            /// (spec rust-m10-plugins); cancellation is answered by the actor.
             pub fn is_plugin(self) -> bool {
-                self.as_str().starts_with("plugins/")
+                self.as_str().starts_with("plugins/") && self.as_str() != "plugins/cancelOperation"
             }
             pub fn as_str(self) -> &'static str {
                 match self {
@@ -71,6 +72,14 @@ methods! {
     PluginsResetConfig => "plugins/resetConfig",
     PluginsRestoreBuiltin => "plugins/restoreBuiltin",
     PluginsUninstall => "plugins/uninstall",
+    PluginsMarketplaceAdd => "plugins/marketplace/add",
+    PluginsMarketplaceRemove => "plugins/marketplace/remove",
+    PluginsMarketplaceUpdate => "plugins/marketplace/update",
+    PluginsInstall => "plugins/install",
+    PluginsUpdate => "plugins/update",
+    PluginsValidate => "plugins/validate",
+    PluginsDescribe => "plugins/describe",
+    PluginsCancelOperation => "plugins/cancelOperation",
     SessionCreate => "session/create",
     SessionResume => "session/resume",
     SessionSubscribe => "session/subscribe",

@@ -15,6 +15,7 @@ impl Engine {
                 token: request.token,
                 cancel: cancel.clone(),
                 operation: None,
+                plugin_operation: None,
             },
         );
         let sink = EventSink {

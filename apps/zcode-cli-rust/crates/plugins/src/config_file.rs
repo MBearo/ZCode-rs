@@ -102,6 +102,29 @@ pub async fn set_enabled(path: &Path, id: &str, enabled: bool) -> Result<()> {
     write(path, &tree).await
 }
 
+/// Node `enablePluginsByDefaultInFileConfig`: ids without an explicit
+/// `enabledPlugins` entry become `true`; returns the ids written.
+pub async fn enable_by_default(path: &Path, ids: &[String]) -> Result<Vec<String>> {
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut tree = read(path).await?;
+    let enabled_plugins = section(plugins(&mut tree), "enabledPlugins");
+    let fresh: Vec<String> = ids
+        .iter()
+        .filter(|id| enabled_plugins.get_mut(id).is_none())
+        .cloned()
+        .collect();
+    if fresh.is_empty() {
+        return Ok(vec![]);
+    }
+    for id in &fresh {
+        enabled_plugins.set(id, Ordered::Bool(true));
+    }
+    write(path, &tree).await?;
+    Ok(fresh)
+}
+
 /// Node `patchPluginOptions`: stored keys kept unless cleared, then merged.
 pub async fn update_options(
     path: &Path,

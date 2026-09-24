@@ -193,6 +193,7 @@ pub async fn enumerate(
     root: &Path,
     manifest: Option<&Value>,
     loaded: Option<&Loaded>,
+    diagnostics: Option<&mut Vec<crate::manifest::Diagnostic>>,
 ) -> Vec<Group> {
     let null = Value::Null;
     let field = |key: &str| manifest.map_or(&null, |m| &m[key]);
@@ -208,12 +209,13 @@ pub async fn enumerate(
         markdown(root, field("commands"), "commands").await,
     );
     push("skill", skills(root, field("skills")).await);
-    // 枚举阶段的诊断在 Node 中丢弃（发现阶段另行报告）。
-    let mut ignored = vec![];
+    // 发现阶段不收集枚举诊断（另行报告）；describe 传入收集器（Node options.diagnostics）。
+    let mut discarded = vec![];
+    let sink = diagnostics.unwrap_or(&mut discarded);
     let hooks = match loaded {
         Some(loaded) => {
-            let sources = crate::hooks::sources(loaded, &mut ignored).await;
-            crate::hooks::event_names(&sources, loaded, &mut ignored)
+            let sources = crate::hooks::sources(loaded, sink).await;
+            crate::hooks::event_names(&sources, loaded, sink)
         }
         None => manifest
             .map(|m| inline_hook_events(&m["hooks"]))
@@ -221,7 +223,7 @@ pub async fn enumerate(
     };
     push("hook", hooks.into_iter().map(|n| (n, None)).collect());
     let mcp: Vec<String> = match loaded {
-        Some(loaded) => crate::mcp::definitions(loaded, &mut ignored)
+        Some(loaded) => crate::mcp::definitions(loaded, sink)
             .await
             .into_iter()
             .map(|(k, _)| k)

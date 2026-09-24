@@ -273,7 +273,8 @@ pub async fn discover(request: &Request<'_>) -> Result<Outcome> {
                 plugin_root: loaded.root.clone(),
             }));
         let components =
-            crate::components::enumerate(&loaded.root, Some(&loaded.manifest), Some(&loaded)).await;
+            crate::components::enumerate(&loaded.root, Some(&loaded.manifest), Some(&loaded), None)
+                .await;
         outcome.plugins.push(Plugin {
             components,
             declared_mcp: definitions.into_iter().map(|(k, _)| k).collect(),

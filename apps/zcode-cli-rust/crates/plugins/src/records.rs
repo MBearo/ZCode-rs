@@ -57,7 +57,8 @@ pub fn split_id(id: &str) -> Option<(&str, &str)> {
     (at > 0 && at < id.len() - 1).then(|| (&id[..at], &id[at + 1..]))
 }
 
-fn from_array(value: &Value) -> Option<Installed> {
+/// A record of the array form (Node `isInstalledPluginRecord`).
+pub fn from_record(value: &Value) -> Option<Installed> {
     let text = |key: &str| value[key].as_str().map(str::to_owned);
     let scope = value["scope"].as_str()?;
     if scope != "user" && scope != "workspace" {
@@ -121,7 +122,7 @@ fn from_map(id: &str, entry: &Value) -> Vec<Installed> {
 pub fn parse_installed(value: &Value) -> Vec<Installed> {
     match &value["plugins"] {
         Value::Object(map) => map.iter().flat_map(|(id, e)| from_map(id, e)).collect(),
-        Value::Array(items) => items.iter().filter_map(from_array).collect(),
+        Value::Array(items) => items.iter().filter_map(from_record).collect(),
         _ => vec![],
     }
 }

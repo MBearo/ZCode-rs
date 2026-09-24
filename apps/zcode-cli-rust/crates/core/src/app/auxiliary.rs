@@ -8,6 +8,9 @@ pub(super) struct Auxiliary {
     pub token: u64,
     pub cancel: CancellationToken,
     pub operation: Option<String>,
+    /// The plugin `operationId` this job is registered under (the latest
+    /// registration wins, Node `pluginOperationControllers`).
+    pub plugin_operation: Option<String>,
 }
 impl Engine {
     pub(super) fn start_auxiliary(&mut self, request: &Call) -> Result<()> {
@@ -66,6 +69,7 @@ impl Engine {
                 token: request.token,
                 cancel: cancel.clone(),
                 operation,
+                plugin_operation: None,
             },
         );
         let sink = EventSink {
@@ -116,15 +120,8 @@ impl Engine {
             }
             Event::UsageDone { result } => self.usage_done(&id, result),
             Event::AuxiliaryReply { result } => {
+                // 插件作业自行按 Node 语义处理取消（安装返回诊断、市场操作报错）。
                 let job = self.auxiliary.remove(&id).unwrap();
-                let result = if job.cancel.is_cancelled() {
-                    Err(RuntimeError::Fault {
-                        message: "Plugin operation cancelled".into(),
-                        code: None,
-                    })
-                } else {
-                    result
-                };
                 self.outbox.push(ServerMsg::Reply {
                     token: job.token,
                     result,

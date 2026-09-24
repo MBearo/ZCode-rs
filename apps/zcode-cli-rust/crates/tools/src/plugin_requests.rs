@@ -9,12 +9,32 @@ use std::path::Path;
 use tokio_util::sync::CancellationToken;
 use zcode_cli_plugins as plugins;
 
+/// Node `AbortSignal.throwIfAborted()` without a reason.
+const ABORTED: &str = "This operation was aborted";
+
+/// The environment plugin templating reads.
+pub(super) fn env_lookup(tools: &WorkspaceTools) -> HashMap<&str, &str> {
+    tools
+        .env
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect()
+}
+
 pub(super) async fn handle(
     tools: &WorkspaceTools,
     method: &str,
     params: &Value,
     cancel: &CancellationToken,
 ) -> Result<Value> {
+    if super::plugin_admin::METHODS.contains(&method) {
+        return super::plugin_admin::handle(tools, method, params, cancel).await;
+    }
+    // Node setEnabled 在写入前后各检查一次取消，发现过程本身不可中断（同步）。
+    let set_enabled = method == "plugins/setEnabled";
+    if set_enabled && cancel.is_cancelled() {
+        bail!(ABORTED);
+    }
     let snapshot = tools.config.load().await?;
     // Settings 的 User 视图不加载项目配置（Node createPluginConfigView）。
     let user_scope =
@@ -25,11 +45,7 @@ pub(super) async fn handle(
         &snapshot.config
     };
     let storage = plugins::records::storage_root(view, &config::home());
-    let env: HashMap<&str, &str> = tools
-        .env
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
+    let env = env_lookup(tools);
     let lookup = |name: &str| env.get(name).map(|v| (*v).to_owned());
     let request = plugins::Request {
         config: view,
@@ -38,9 +54,13 @@ pub(super) async fn handle(
         env: &lookup,
         cancel,
     };
-    let outcome = tokio::select! {biased;
-        _ = cancel.cancelled() => bail!("Plugin operation cancelled"),
-        outcome = plugins::discover(&request) => outcome?,
+    let outcome = if set_enabled {
+        plugins::discover(&request).await?
+    } else {
+        tokio::select! {biased;
+            _ = cancel.cancelled() => bail!(plugins::failure::CANCELLED),
+            outcome = plugins::discover(&request) => outcome?,
+        }
     };
     let project_paths = snapshot.project_paths.clone();
     let paths = plugins::mutations::Paths {
@@ -93,7 +113,13 @@ pub(super) async fn handle(
             let id = params["pluginId"].as_str().unwrap_or_default();
             let enabled = params["enabled"].as_bool().unwrap_or_default();
             let scope = params["scope"].as_str();
-            plugins::mutations::set_enabled(&outcome, &paths, (id, enabled, scope)).await
+            let result =
+                plugins::mutations::set_enabled(&outcome, &paths, (id, enabled, scope)).await?;
+            // 写入不可回滚；取消在 IO 期间到达时只阻断响应（Node 行为）。
+            if cancel.is_cancelled() {
+                bail!(ABORTED);
+            }
+            Ok(result)
         }
         "plugins/configure" => plugins::mutations::configure(&outcome, &paths, params).await,
         "plugins/resetConfig" => plugins::mutations::reset(&paths, params).await,

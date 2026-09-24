@@ -16,6 +16,8 @@ mod mcp_connection;
 mod mcp_hub;
 mod mcp_sse;
 mod plan_file;
+mod plugin_admin;
+mod plugin_io;
 mod plugin_requests;
 #[cfg(unix)]
 mod process_tree;

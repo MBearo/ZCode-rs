@@ -16,13 +16,13 @@
 
 Node 的插件子系统约 1 万行，按依赖关系分期交付。每期单独提交，只在该期验收通过后才注册对应的方法。
 
-| 分期  | 内容                                                                                                                                                                                                                              |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M10.1 | 统一的插件发现层（新 crate `plugins`）；运行时 skills、MCP、hooks、插件子代理改用它；`plugins/list`；`plugins/overview`（只读投影，引用目录的展示字段来自它）；workspace 的 `plugins/referenceCatalog`（含 `WithCategory` 变体）  |
-| M10.2 | 会话冻结的插件引用目录与 `@plugin` 引用提醒；带 `sessionId` 的 `referenceCatalog`                                                                                                                                                 |
-| M10.3 | 写配置类方法：`setEnabled`、`configure`、`resetConfig`、`restoreBuiltin`、`uninstall`；存储锁                                                                                                                                     |
-| M10.4 | 插件来源：本地目录与文件、git（含 sparse）、GitHub archive、zip；原子目录事务；市场 `add`、`remove`、`update`；`install`、`update`、`describe`、`validate`、`resolveSuggestedReference`；`cancelOperation` 与 `operationProgress` |
-| M10.5 | 官方 MCP 鉴权（`interaction/requestOfficialMcpAuthHeaders`）                                                                                                                                                                      |
+| 分期  | 内容                                                                                                                                                                                                                                                                                                     |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M10.1 | 统一的插件发现层（新 crate `plugins`）；运行时 skills、MCP、hooks、插件子代理改用它；`plugins/list`；`plugins/overview`（只读投影，引用目录的展示字段来自它）；workspace 的 `plugins/referenceCatalog`（含 `WithCategory` 变体）                                                                         |
+| M10.2 | 会话冻结的插件引用目录与 `@plugin` 引用提醒；带 `sessionId` 的 `referenceCatalog`                                                                                                                                                                                                                        |
+| M10.3 | 写配置类方法：`setEnabled`、`configure`、`resetConfig`、`restoreBuiltin`、`uninstall`；存储锁                                                                                                                                                                                                            |
+| M10.4 | 插件来源：本地目录与文件、git（含 sparse）、GitHub archive、zip；原子目录事务；市场 `add`、`remove`、`update`；`install`、`update`、`describe`、`validate`、`resolveSuggestedReference`；`cancelOperation` 与 `operationProgress`。细则见 `rust-m10-4-plugin-sources.md`（分 M10.4a 与 M10.4b 两次提交） |
+| M10.5 | 官方 MCP 鉴权（`interaction/requestOfficialMcpAuthHeaders`）                                                                                                                                                                                                                                             |
 
 不在本里程碑范围：官方插件的 seed，即从应用包资产写入 `cache/zcode-plugins-official/**` 与 `bundled-marketplace.json`。
 

@@ -1,9 +1,17 @@
 //! `plugins/*` management requests (spec rust-m10-plugins): the tools port
 //! answers them in the background like `mcp/list`, cancellable by the actor.
 use super::{Engine, auxiliary::Auxiliary, engine::Call};
-use crate::contract::{Event, EventSink, RuntimeError};
+use crate::contract::{Event, EventSink, Method, RuntimeError};
 use anyhow::{Result, ensure};
 use tokio_util::sync::CancellationToken;
+
+/// Methods cancellable through `plugins/cancelOperation` (Node `withPluginOperationSignal`).
+const CANCELLABLE: [Method; 4] = [
+    Method::PluginsSetEnabled,
+    Method::PluginsMarketplaceAdd,
+    Method::PluginsMarketplaceUpdate,
+    Method::PluginsInstall,
+];
 
 impl Engine {
     pub(super) async fn start_plugin_request(&mut self, request: &Call) -> Result<()> {
@@ -23,12 +31,27 @@ impl Engine {
         }
         let id = format!("plugins:{}", self.clock.id());
         let cancel = CancellationToken::new();
+        let plugin_operation = CANCELLABLE
+            .contains(&request.method)
+            .then(|| params["operationId"].as_str().map(str::trim))
+            .flatten()
+            .filter(|op| !op.is_empty())
+            .map(str::to_owned);
+        if let Some(operation) = &plugin_operation {
+            // 同一 operationId 重复登记时新作业覆盖旧作业（Node Map.set）：旧作业不再可取消。
+            for job in self.auxiliary.values_mut() {
+                if job.plugin_operation.as_ref() == Some(operation) {
+                    job.plugin_operation = None;
+                }
+            }
+        }
         self.auxiliary.insert(
             id.clone(),
             Auxiliary {
                 token: request.token,
                 cancel: cancel.clone(),
                 operation: None,
+                plugin_operation,
             },
         );
         let sink = EventSink {
