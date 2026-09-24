@@ -2,7 +2,8 @@
 //! §5.2): the compaction timeline and summary at Node's persistence points,
 //! and the todo reminder notice.
 use super::{Engine, Event};
-use crate::domain::node_journal::{self as nj, CompactStart, Notice};
+use crate::domain::node_history::incoming::presented;
+use crate::domain::node_journal::{self as nj, CompactStart, Notice, Notification};
 use serde_json::{Value, json};
 
 /// The reminder body of a `<system-reminder>` message (Node stores the body;
@@ -163,5 +164,90 @@ impl Engine {
                 tools: &tools,
             },
         );
+    }
+
+    /// A background subagent's result opens a parent turn (Node task
+    /// notification, `task_notification` presentation). The model reads the
+    /// presented text like Node's request, so the stored and live contexts match.
+    pub(super) fn node_background_result(
+        &mut self,
+        id: &str,
+        turn: &str,
+        text: &str,
+        task: &crate::domain::subagent::Task,
+    ) {
+        if !self.journaled(id) {
+            return;
+        }
+        let now = self.clock.now();
+        let ids = (
+            format!("runtime_command_{}", self.clock.id()),
+            nj::message_id(now, &self.clock.id()),
+            nj::part_id(now, &self.clock.id()),
+        );
+        let tools = self.tool_names();
+        let title = match task.description.trim() {
+            "" => task.id.as_str(),
+            title => title,
+        };
+        let origin = json!({"backgroundSource": "subagent", "title": title, "workId": task.id});
+        let s = self.sessions.get_mut(id).unwrap();
+        if let (Some(message), Some(content)) = (
+            s.messages.iter_mut().rev().find(|m| m["role"] == "user"),
+            presented(text, "task_notification"),
+        ) {
+            message["content"] = content.into();
+        }
+        s.node_task_notification(
+            now,
+            Notification {
+                ids,
+                text,
+                task: Some(&task.id),
+                origin: Some(origin),
+                turn: Some(turn),
+                tools: &tools,
+            },
+        );
+    }
+
+    /// Coordinator messages drained into a running child (Node `steerTurn`
+    /// with `coordinator_steer`), presented to the model as Node does.
+    pub(super) fn node_mailbox(
+        &mut self,
+        id: &str,
+        turn: &str,
+        items: &[Value],
+        messages: &mut [Value],
+    ) {
+        if !self.journaled(id) {
+            return;
+        }
+        let now = self.clock.now();
+        let tools = self.tool_names();
+        let ids: Vec<(String, String)> = items
+            .iter()
+            .map(|_| {
+                (
+                    nj::message_id(now, &self.clock.id()),
+                    nj::part_id(now, &self.clock.id()),
+                )
+            })
+            .collect();
+        let s = self.sessions.get_mut(id).unwrap();
+        let first = s.messages.len().saturating_sub(items.len());
+        for (index, (item, (message, part))) in items.iter().zip(ids).enumerate() {
+            let text = item["text"].as_str().unwrap_or("");
+            let command = item["id"].as_str().unwrap_or("");
+            if let Some(content) = presented(text, "coordinator_steer") {
+                messages[index]["content"] = content.clone().into();
+                s.messages[first + index]["content"] = content.into();
+            }
+            let ledger = format!(
+                "pending_{}_{command}",
+                crate::domain::node_ids::turn_id(turn)
+            );
+            s.node_coordinator_steer(now, (ledger, message, part), text, command, &tools);
+        }
     }
 }

@@ -5,7 +5,7 @@ mod attachment;
 pub mod branch;
 mod entries;
 mod hydrate;
-mod incoming;
+pub mod incoming;
 pub mod reminders;
 
 pub use branch::{Branch, active_messages, select_branch};

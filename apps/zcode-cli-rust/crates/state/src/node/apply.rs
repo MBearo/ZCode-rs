@@ -108,6 +108,9 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
                 let patches: Vec<inputs::Patch> = updates.iter().map(patch).collect();
                 inputs::update(conn, session, &patches, now)?
             }
+            Op::MarkInputPromoted { id, message } => {
+                inputs::mark_promoted(conn, id, session, message, now)?
+            }
             Op::SettleInput { id, status, reason } => {
                 inputs::settle(conn, id, session, status, reason.as_deref(), now)?
             }

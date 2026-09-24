@@ -18,6 +18,7 @@ pub use assistant::{reasoning_parts, tool_input};
 pub use compact::CompactStart;
 pub use finish::Outcome;
 pub use notice::Notice;
+pub use queue::Notification;
 pub use turn::{Admission, Prompt};
 
 use serde::{Deserialize, Serialize};
@@ -118,6 +119,11 @@ pub enum Op {
     Entry(Value),
     /// Node `updateSessionInputs`: `[{id, text?, queuePosition?, delivery?, intent?}]`.
     UpdateInputs(Vec<Value>),
+    /// Node `markSessionInputPromoted` (a notification batch's ledger rows).
+    MarkInputPromoted {
+        id: String,
+        message: String,
+    },
     /// Node `settleSessionInput` (only an `admitted` row changes).
     SettleInput {
         id: String,

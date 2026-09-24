@@ -493,3 +493,49 @@ async fn a_subagent_child_is_stored_as_a_node_child_session() {
     harness::dump(&h, &conn, &session);
     harness::dump_as(&h, &conn, &child, "rust-child.json");
 }
+
+#[tokio::test]
+async fn a_background_subagent_result_opens_a_node_notification_turn() {
+    let mut h = harness::start(Some("notify"), None).await;
+    let session = h.create("c1", "spawn a background child").await;
+    // 父会话首轮与后台结果轮各有一个稳定边界。
+    let conn = h.settled(&session, 2).await;
+    let ledger: (String, String, String) = conn
+        .query_row(
+            "select id, status, payload from session_input where session_id = ? and kind = 'backgroundNotification'",
+            [&session],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert!(ledger.0.starts_with("runtime_command_"), "{ledger:?}");
+    assert_eq!(ledger.1, "promoted");
+    let payload: Value = serde_json::from_str(&ledger.2).unwrap();
+    assert_eq!(payload["originMeta"]["backgroundSource"], "subagent");
+    assert_eq!(payload["originMeta"]["title"], "Look around");
+    let notice = zcode_cli_state::node::messages::messages(&conn, &session)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.info["source"] == "background_task")
+        .expect("notification notice");
+    assert_eq!(
+        notice.info["metadata"]["inputPresentation"],
+        "task_notification"
+    );
+    assert_eq!(notice.info["anchor"]["origin"], "backgroundResult");
+    // 模型上下文里的后台结果按 Node 呈现（系统通知前缀 + incoming_message 包装）。
+    let resumed = resume::resume(&conn, &session, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    let presented = resumed
+        .history
+        .messages
+        .iter()
+        .find(|m| m["_zcode_source"] == "legacy_synthetic")
+        .expect("presented notification");
+    let content = presented["content"].as_str().unwrap();
+    assert!(
+        content.starts_with("<system-reminder>\n[SYSTEM NOTIFICATION"),
+        "{content}"
+    );
+    harness::dump(&h, &conn, &session);
+}

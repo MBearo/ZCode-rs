@@ -44,13 +44,19 @@ impl ModelPort for Model {
                 .is_some_and(|c| c.starts_with("CRITICAL: Respond with TEXT ONLY"))
         });
         // 父会话首轮派生子代理：最后一条是“spawn a child”的用户输入时调用 Agent 工具。
-        let spawn = messages
-            .last()
-            .is_some_and(|m| m["role"] == "user" && m["content"] == "spawn a child");
+        let spawn = messages.last().and_then(|m| {
+            (m["role"] == "user")
+                .then(|| m["content"].as_str())
+                .flatten()
+                .filter(|c| c.starts_with("spawn a"))
+                .map(|c| c.contains("background"))
+        });
         self.requests.send(messages).unwrap();
-        if spawn {
+        if let Some(background) = spawn {
+            let args = json!({"description": "Look around", "prompt": "Inspect a.ts",
+                "subagent_type": "general-purpose", "run_in_background": background});
             let call = json!({"id": "call_agent", "type": "function", "function": {"name": "Agent",
-                "arguments": "{\"description\":\"Look around\",\"prompt\":\"Inspect a.ts\",\"subagent_type\":\"general-purpose\"}"}});
+                "arguments": args.to_string()}});
             sink.send(Event::ModelStatus(
                 json!({"type": "model_request_started", "querySource": "main_turn",
                 "attempt": 1, "requestId": "spawn", "providerId": "p", "modelId": "m"}),

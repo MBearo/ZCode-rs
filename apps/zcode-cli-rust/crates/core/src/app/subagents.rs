@@ -362,7 +362,8 @@ impl Engine {
         }
         let mut deltas = vec![];
         let mut messages = vec![];
-        for item in std::mem::take(&mut s.mailbox) {
+        let items = std::mem::take(&mut s.mailbox);
+        for item in &items {
             let mut row = s.row(
                 "userInput",
                 turn,
@@ -378,6 +379,7 @@ impl Engine {
             messages.push(message);
         }
         s.revision += 1;
+        self.node_mailbox(id, turn, &items, &mut messages);
         self.publish(id, deltas)?;
         self.persist(id, None).await?;
         Ok(Some(messages))

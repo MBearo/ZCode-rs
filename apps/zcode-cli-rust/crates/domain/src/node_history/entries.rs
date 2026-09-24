@@ -64,7 +64,7 @@ impl Entry {
                         .and_then(|m| m["inputPresentation"].as_str())
                         .zip(message["content"].as_str())
                         .and_then(|(presentation, body)| {
-                            super::incoming::format(body, presentation)
+                            super::incoming::presented(body, presentation)
                         });
                     let content =
                         presented.map_or_else(|| content(&message["content"]), Value::from);
