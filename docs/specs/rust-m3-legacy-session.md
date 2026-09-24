@@ -4,11 +4,11 @@
 
 ## 1. 范围与顺序
 
-| 子项 | 内容                                                                                                                                                     | 优先级 |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| M3.1 | 参数校验与错误文本；普通 `session/create`；`importedHistory.source = "claudeCode"`；`session/resume`                                                     | P0     |
-| M3.2 | `session/list` 列出未落盘的 immediate 会话；创建时的隐藏 `model_change` 消息；`session/debug`；`session/setMode`（auto）                                 | P1     |
-| M3.3 | 手机链路：`session/subscribe`、`session/event`、`state.updated`、legacy 事件日志与 seq；`session/send`、`compact`、`goal`、`setModel`、`setThoughtLevel` | P1     |
+| 子项 | 内容                                                                                                                                                        | 优先级 |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| M3.1 | 参数校验与错误文本；普通 `session/create`；`importedHistory.source = "claudeCode"`；`session/resume`                                                        | P0     |
+| M3.2 | `session/setModel`、`session/setThoughtLevel`、`session/setMode` 与 `state.updated`；`session/list` 列出未落盘的 immediate 会话（第 8 节）；`session/debug` | P1     |
+| M3.3 | 手机链路：`session/subscribe`、`session/event`、legacy 事件日志与 seq；其余 `state.updated` 原因；`session/send`、`compact`、`goal`                         | P1     |
 
 Desktop 的定时任务、Off-Peak 与 Claude 迁移都依赖 M3.1，本文件先定义 M3.1，M3.2 / M3.3 只列出与之相关的约束。
 
@@ -195,3 +195,100 @@ create 丢弃 `model.options` 后，会话可能绑定有档位要求的模型�
   - resume：活跃会话原样返回且忽略参数；冷恢复的模式推导与工作区重建；缺失时的错误文本；
   - `desktop-continuous` 与 `web-remote-replayable` 两种订阅看到的 V4 行一致。
 - **门禁**：`cargo clean` 与 `CARGO_INCREMENTAL=0`；`pnpm test:zcode-cli-rust`、`cargo test --workspace`、`pnpm check:zcode-cli-rust`、`pnpm typecheck`、`pnpm lint`。
+
+## 8. M3.2：legacy 设置方法与 `session/list` 草稿
+
+依据：`SO:2672-2706`（三个设置方法）、`SO:3995-4049`（`afterStateMutation` / `emitStateUpdated`）、`SO:1621-1670`（`listSessions`）、`app/session-facade.ts:423-548`（`setMode` / `setModel` / `setThoughtLevel`）、`app/provider-registry-selection.ts:100-182`。
+
+### 8.1 参数
+
+均由 `legacy_params` 按 zod 规则解析（2.1 的错误格式）：
+
+| 方法                      | 参数（strict）                                                                                                  |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `session/setModel`        | `{sessionId: nonEmpty, model: ModelSelection, expectedRevision?: int ≥ 0, persistAsWorkspaceLastUsed?: bool}`   |
+| `session/setThoughtLevel` | `{sessionId: nonEmpty, thoughtLevel?: nonEmpty, expectedRevision?: int ≥ 0, persistAsWorkspaceLastUsed?: bool}` |
+| `session/setMode`         | `{sessionId: nonEmpty, mode: plan \| build \| edit \| yolo \| auto, expectedRevision?: int ≥ 0}`                |
+
+- `ModelSelection` 与 create 的 `model` 相同。`persistAsWorkspaceLastUsed` 接受但不使用（Node 同样忽略）。
+- setThoughtLevel 解析成功但没有 `thoughtLevel` 时：`-32602 thoughtLevel is required`（无 `data`），先于会话检查。
+
+### 8.2 公共流程
+
+```mermaid
+sequenceDiagram
+    participant H as Host
+    participant E as Engine（会话唯一所有者）
+    participant S as Store
+    H->>E: session/setModel | setThoughtLevel | setMode
+    E->>E: 解析参数（失败 -32602，无副作用）
+    E->>E: 会话必须常驻（否则 -32004 Session is not active）
+    E->>E: expectedRevision ≠ runtime.stateRevision → -32009
+    E->>E: 校验并应用（失败即返回，状态不变）
+    E->>S: 已落盘会话提交新选择 / 执行状态（草稿跳过）
+    E->>E: runtime.stateRevision += 1；V4 revision += 1 并发布 patch
+    E->>E: 活跃运行（非执行级选型）收到新选择
+    E-->>H: 回包：legacy 快照（模型列表 = 当前模型）
+    E-->>H: 通知 state.updated {patch: 快照.settings, reason, revision, scope: "session", sessionId, type, workspace}
+```
+
+- `-32009`：`message = "Session state revision mismatch"`，`data = {actualRevision, expectedRevision}`；比较对象是 legacy `stateRevision`（与 V4 revision 无关）。
+- 三个方法的 `reason` 分别为 `model_changed`、`thought_level_changed`、`mode_changed`，都属于"仅配置"变更：不刷新 `updatedAt`。
+- 无论值是否变化都执行上述流程（Node 没有 noop 分支），`stateRevision` 每次加一。
+- 快照使用 3.3 的构建器，区别只在 `settings.model.available`：只列当前会话模型（Registry 中 `ref` 与会话选择的 provider/model 相同的一项；未绑定或不在 Registry 时为空）。
+- `state.updated` 的 `workspace` 为会话的 legacy workspace ref（create / resume 时记录）；缺省时按 5 的规则由会话身份重建。
+
+### 8.3 `session/setModel`
+
+Node `app.setModel(selection)`（对象形式）：先整体校验，再一次性替换会话选择。
+
+1. Registry 校验（与 create 的 2.2 表相同）：
+   - provider 不在 Registry：普通 `Error`，文本为 `Provider Registry 中不存在 Model: [object Object]`（Node 把对象插入模板字符串，保留原样），`data = {name: "Error"}`；
+   - 模型不存在：`model_not_found`；有推理档位的模型缺少 `options.reasoningLevel` 或档位不受支持：`invalid_model_request`，文本同 2.2。
+2. 会话选择替换为 `{providerId, modelId, options?}`，保留请求中的档位（与 create 丢弃档位不同）；`thoughtLevels` 随模型更新。
+3. 不追加 V4 `timelineMarker` 行（Node 只在 V4 `switchModelConfig` 中产生该行）。
+4. 无 Registry 的 Rust 开发配置：只接受配置文件模型本身，否则 `model_not_found`。
+
+### 8.4 `session/setThoughtLevel`
+
+Node `app.setThoughtLevel(level)`：
+
+- 会话未绑定模型，或其 provider 不在 Registry：`Error "当前 Session Model 不属于 Provider Registry"`；
+- 模型不在 Registry：`model_not_found`（文本同 2.2）；
+- 档位不在该模型的档位列表中：`Error "Unsupported reasoning effort: <level>"`；
+- 否则只替换会话选择的 `options.reasoningLevel`。
+- 无 Registry 的 Rust 开发配置：按配置文件模型的档位列表校验，模型不同时视为不属于 Registry。
+
+### 8.5 `session/setMode`
+
+与 V4 `switchCollaborationMode` 共用 `set_mode`（Node `app.setMode`）：`ExecutionState::resolve`（`plan` 保留当前权限模式并开启 plan，legacy 设置显示权限模式；Plan 与 Goal 互斥的错误文本不变），随后写项目权限模式偏好（失败只记 warn）。主要调用方是定时任务与 Off-Peak 的 `auto` 模式。
+
+### 8.6 `session/list` 中的常驻会话
+
+`sessionIds` 查询只返回存储中的会话。其他查询在存储结果之后追加不在存储结果中的常驻会话（Node 遍历 `context.sessions`），条件：
+
+- 不是 deferred（V4 草稿与 legacy deferred 草稿不列出；legacy immediate 草稿与已落盘会话列出）；
+- 会话类型属于任务列表：`interactive`、`fork`、`workflow_parent`；
+- 给出 `workspace` 时，其 `workspaceKey` 与会话的 legacy workspace ref（缺省时按 5 重建）的 `workspaceKey` 相同。
+
+每项按 Node `mapSessionInfo({app, workspace, taskType, parentSessionId})`：`createdAt = updatedAt = 本次查询时间`、`mode` 为运行模式、`model = {providerId, modelId}`（未绑定时省略）、`status: "idle"`、`title: ""`、`parentSessionId` 与 `traceId`（如有），无 `titleSource` 与 `archivedAt`。追加项不受 `limit` 限制，也计入帧大小上限。
+
+与 Node 一致，超出 `limit` 或已归档（未请求 `includeArchived`）的常驻已落盘会话也会以这种形式追加。
+
+### 8.7 与 Node 的差异
+
+- `state.updated` 在回包之后发出（Node 先通知再回包）；二者属于同一批输出，Host 的处理互不依赖。
+- 设置方法同时发布 V4 patch，V4 订阅者立即看到新的模型与模式；Node 要等下一次 V4 发布。
+- Node 在 setModel / create 指定模型后，于下一轮开始时写入一条隐藏的 `model_change` 时间线 assistant 消息，只出现在 legacy `messages` 中（Host 过滤为不可见）。Rust 不写这条消息。
+- `setMode` 实际改变模式时 Node 产生 `session_mode_changed` 事件，使 legacy 快照的 `eventSeq` / `projection.sessionId` 离开初始值；Rust 在 M3.3 引入 legacy 事件日志之前保持初始值。
+
+### 8.8 验收
+
+- 夹具：三个方法的参数错误（缺字段、多余键、类型、空字符串、非法 mode）与 Node 逐条一致。
+- 集成测试（`zcode-cli-rust-legacy-setters.test.ts`）：
+  - setModel：档位保留、`stateRevision` 递增、`settings.model.available` 只含当前模型、`state.updated` 的字段与 reason、`updatedAt` 不变；三类 Registry 错误的 code、message、data；
+  - `expectedRevision` 不符时 `-32009` 及 `data`；会话不常驻时 `-32004`；
+  - setThoughtLevel：缺 `thoughtLevel`、不支持的档位、成功后 `current`；
+  - setMode：`auto` 生效且写入项目偏好，`plan` 在设置中显示为当前权限模式；
+  - `session/list`：immediate 草稿出现、deferred 不出现、workspace 过滤、`sessionIds` 查询不含常驻会话；
+  - V4 `desktop-continuous` 与 `web-remote-replayable` 订阅都收到新的模型选择。

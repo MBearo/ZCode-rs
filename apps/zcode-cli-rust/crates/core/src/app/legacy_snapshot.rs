@@ -1,5 +1,6 @@
-//! `ZCodeSessionStateSnapshot` returned by legacy `session/create` and
-//! `session/resume` (Node `session-mapper.ts` with model availability "all").
+//! `ZCodeSessionStateSnapshot` returned by legacy `session/*` methods (Node
+//! `session-mapper.ts`): create and resume list every model, setters only the
+//! current one.
 use super::Engine;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -9,6 +10,11 @@ const REDUCER_CONTEXT_WINDOW: u64 = 200_000;
 
 impl Engine {
     pub(super) fn legacy_snapshot(&self, id: &str) -> Result<Value> {
+        self.legacy_snapshot_with(id, true)
+    }
+
+    /// `all_models: false` is Node `modelAvailability: "current"`.
+    pub(super) fn legacy_snapshot_with(&self, id: &str, all_models: bool) -> Result<Value> {
         let s = self.sessions.get(id).context("Session unavailable")?;
         let mut snapshot = self.read_session_snapshot(s, &json!({}))?;
         let bound = !s.provider.is_empty() && !s.model.is_empty();
@@ -22,7 +28,13 @@ impl Engine {
         settings["mode"] = json!({"current": s.mode});
         settings["permission"] = json!({"mode": s.mode});
         if let Some(registry) = &self.registry {
-            settings["model"]["available"] = registry.legacy_models().into();
+            let mut models = registry.legacy_models();
+            if !all_models {
+                models.retain(|m| {
+                    m["ref"]["providerId"] == s.provider && m["ref"]["modelId"] == s.model
+                });
+            }
+            settings["model"]["available"] = models.into();
         }
         if bound {
             settings["model"]["lastUsed"] = json!({"providerId": s.provider, "modelId": s.model});

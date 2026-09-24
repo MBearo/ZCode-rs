@@ -2145,5 +2145,428 @@
         }
       }
     }
+  ],
+  "setModel": [
+    {
+      "input": null,
+      "missing": true,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {},
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — sessionId: Invalid input: expected string, received undefined; model: Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sessionId\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\"\n    ],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        }
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "persistAsWorkspaceLastUsed": true
+      }
+    },
+    {
+      "input": {
+        "sessionId": " s ",
+        "model": {
+          "providerId": " p ",
+          "modelId": " m ",
+          "options": {
+            "reasoningLevel": " high "
+          }
+        },
+        "expectedRevision": 0,
+        "persistAsWorkspaceLastUsed": false
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "expectedRevision": 0,
+        "persistAsWorkspaceLastUsed": false
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model: Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\"\n    ],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model.modelId: Invalid input: expected string, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\",\n      \"modelId\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p",
+          "modelId": "m",
+          "x": 1
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model: Unrecognized key: \"x\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"x\"\n    ],\n    \"path\": [\n      \"model\"\n    ],\n    \"message\": \"Unrecognized key: \\\"x\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "expectedRevision": -1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — expectedRevision: Too small: expected number to be >=0",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 0,\n    \"inclusive\": true,\n    \"path\": [\n      \"expectedRevision\"\n    ],\n    \"message\": \"Too small: expected number to be >=0\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "expectedRevision": 1.5
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — expectedRevision: Invalid input: expected int, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"int\",\n    \"format\": \"safeint\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"expectedRevision\"\n    ],\n    \"message\": \"Invalid input: expected int, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "persistAsWorkspaceLastUsed": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — persistAsWorkspaceLastUsed: Invalid input: expected boolean, received number",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"persistAsWorkspaceLastUsed\"\n    ],\n    \"message\": \"Invalid input: expected boolean, received number\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "model": "p/m",
+        "thoughtLevel": "high"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — model: Invalid input: expected object, received string; (root): Unrecognized key: \"thoughtLevel\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"model\"\n    ],\n    \"message\": \"Invalid input: expected object, received string\"\n  },\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"thoughtLevel\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"thoughtLevel\\\"\"\n  }\n]"
+        }
+      }
+    }
+  ],
+  "setThoughtLevel": [
+    {
+      "input": null,
+      "missing": true,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "persistAsWorkspaceLastUsed": true
+      }
+    },
+    {
+      "input": {
+        "sessionId": " s ",
+        "thoughtLevel": " high ",
+        "expectedRevision": 3
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "thoughtLevel": "high",
+        "expectedRevision": 3,
+        "persistAsWorkspaceLastUsed": true
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "thoughtLevel": "  "
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — thoughtLevel: Too small: expected string to have >=1 characters",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"thoughtLevel\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "thoughtLevel": 1,
+        "expectedRevision": "1"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — thoughtLevel: Invalid input: expected string, received number; expectedRevision: Invalid input: expected number, received string",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"thoughtLevel\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"expectedRevision\"\n    ],\n    \"message\": \"Invalid input: expected number, received string\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "",
+        "model": {
+          "providerId": "p",
+          "modelId": "m"
+        }
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — sessionId: Too small: expected string to have >=1 characters; (root): Unrecognized key: \"model\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"sessionId\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"model\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"model\\\"\"\n  }\n]"
+        }
+      }
+    }
+  ],
+  "setMode": [
+    {
+      "input": null,
+      "missing": true,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Invalid input: expected object, received undefined",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "plan"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "mode": "plan"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "build"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "mode": "build"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "edit"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "mode": "edit"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "yolo"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "mode": "yolo"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "auto"
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "mode": "auto"
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "turbo"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mode: Invalid option: expected one of \"plan\"|\"build\"|\"edit\"|\"yolo\"|\"auto\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"plan\",\n      \"build\",\n      \"edit\",\n      \"yolo\",\n      \"auto\"\n    ],\n    \"path\": [\n      \"mode\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"plan\\\"|\\\"build\\\"|\\\"edit\\\"|\\\"yolo\\\"|\\\"auto\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": 1
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mode: Invalid option: expected one of \"plan\"|\"build\"|\"edit\"|\"yolo\"|\"auto\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"plan\",\n      \"build\",\n      \"edit\",\n      \"yolo\",\n      \"auto\"\n    ],\n    \"path\": [\n      \"mode\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"plan\\\"|\\\"build\\\"|\\\"edit\\\"|\\\"yolo\\\"|\\\"auto\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s"
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — mode: Invalid option: expected one of \"plan\"|\"build\"|\"edit\"|\"yolo\"|\"auto\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"plan\",\n      \"build\",\n      \"edit\",\n      \"yolo\",\n      \"auto\"\n    ],\n    \"path\": [\n      \"mode\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"plan\\\"|\\\"build\\\"|\\\"edit\\\"|\\\"yolo\\\"|\\\"auto\\\"\"\n  }\n]"
+        }
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "auto",
+        "expectedRevision": 2
+      },
+      "missing": false,
+      "ok": {
+        "sessionId": "s",
+        "mode": "auto",
+        "expectedRevision": 2
+      }
+    },
+    {
+      "input": {
+        "sessionId": "s",
+        "mode": "auto",
+        "persistAsWorkspaceLastUsed": true
+      },
+      "missing": false,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params — (root): Unrecognized key: \"persistAsWorkspaceLastUsed\"",
+        "data": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"persistAsWorkspaceLastUsed\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key: \\\"persistAsWorkspaceLastUsed\\\"\"\n  }\n]"
+        }
+      }
+    }
   ]
 }

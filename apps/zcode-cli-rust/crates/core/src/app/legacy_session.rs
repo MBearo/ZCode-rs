@@ -12,7 +12,7 @@ use crate::{
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 
-fn params_error(error: ParamsError) -> anyhow::Error {
+pub(super) fn params_error(error: ParamsError) -> anyhow::Error {
     RuntimeError::Params {
         message: error.message,
         data: error.data,
@@ -20,13 +20,54 @@ fn params_error(error: ParamsError) -> anyhow::Error {
     .into()
 }
 
-fn model_error(code: &str, message: String) -> anyhow::Error {
+pub(super) fn model_error(code: &str, message: String) -> anyhow::Error {
     RuntimeError::Named {
         name: "ModelProtocolError",
         message,
         code: Some(code.into()),
     }
     .into()
+}
+
+/// Node `registry.validateSelection` with its protocol errors, over the model
+/// options of the Registry (`registry`) or of the config file. `unknown` is how
+/// Node prints the requested model when the provider is not in the Registry.
+pub(super) fn validate_selection(
+    options: &[Value],
+    registry: bool,
+    model: &Value,
+    unknown: &str,
+) -> Result<()> {
+    let provider = model["providerId"].as_str().unwrap_or("");
+    let id = model["modelId"].as_str().unwrap_or("");
+    if registry && !options.iter().any(|o| o["modelProviderId"] == provider) {
+        bail!("Provider Registry 中不存在 Model: {unknown}");
+    }
+    let entry = options
+        .iter()
+        .find(|o| o["modelProviderId"] == provider && o["value"] == id)
+        .ok_or_else(|| {
+            model_error(
+                "model_not_found",
+                format!("Provider Registry 中不存在 Model: {provider}/{id}"),
+            )
+        })?;
+    let levels: Vec<&str> = entry["modelThoughtLevels"]
+        .as_array()
+        .map(|l| l.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    match model["options"]["reasoningLevel"].as_str() {
+        _ if levels.is_empty() => Ok(()),
+        None => Err(model_error(
+            "invalid_model_request",
+            format!("Reasoning level is required for {provider}/{id}"),
+        )),
+        Some(level) if !levels.contains(&level) => Err(model_error(
+            "invalid_model_request",
+            format!("Reasoning effort \"{level}\" is not supported by {provider}/{id}"),
+        )),
+        Some(_) => Ok(()),
+    }
 }
 
 pub(super) fn tool_filter(p: &Value) -> ToolFilter {
@@ -82,7 +123,6 @@ impl Engine {
         };
         let provider = model["providerId"].as_str().unwrap_or("");
         let id = model["modelId"].as_str().unwrap_or("");
-        let level = model["options"]["reasoningLevel"].as_str();
         let Some(registry) = &self.registry else {
             // 无 Registry 时只有配置文件中的模型（Rust 开发与测试配置，Node 无对应），保留其档位。
             let config = self
@@ -97,40 +137,12 @@ impl Engine {
             }
             return Ok((config, true));
         };
-        let options = registry.model_options();
-        if !options.iter().any(|o| o["modelProviderId"] == provider) {
-            bail!("Provider Registry 中不存在 Model: {provider}/{id}");
-        }
-        let entry = options
-            .iter()
-            .find(|o| o["modelProviderId"] == provider && o["value"] == id)
-            .ok_or_else(|| {
-                model_error(
-                    "model_not_found",
-                    format!("Provider Registry 中不存在 Model: {provider}/{id}"),
-                )
-            })?;
-        let levels: Vec<&str> = entry["modelThoughtLevels"]
-            .as_array()
-            .map(|l| l.iter().filter_map(Value::as_str).collect())
-            .unwrap_or_default();
-        if !levels.is_empty() {
-            match level {
-                None => {
-                    return Err(model_error(
-                        "invalid_model_request",
-                        format!("Reasoning level is required for {provider}/{id}"),
-                    ));
-                }
-                Some(level) if !levels.contains(&level) => {
-                    return Err(model_error(
-                        "invalid_model_request",
-                        format!("Reasoning effort \"{level}\" is not supported by {provider}/{id}"),
-                    ));
-                }
-                Some(_) => {}
-            }
-        }
+        validate_selection(
+            &registry.model_options(),
+            true,
+            model,
+            &format!("{provider}/{id}"),
+        )?;
         let selection = ModelIdentity {
             provider_id: provider.into(),
             model_id: id.into(),
@@ -251,7 +263,7 @@ impl Engine {
         self.legacy_snapshot(&id)
     }
 
-    fn rebuilt_workspace(&self, id: &str) -> Value {
+    pub(super) fn rebuilt_workspace(&self, id: &str) -> Value {
         let s = &self.sessions[id];
         let path = s
             .workspace_path

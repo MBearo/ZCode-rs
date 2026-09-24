@@ -1,4 +1,5 @@
 use super::Engine;
+use crate::contract::StorageCommitFailure;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -121,6 +122,36 @@ impl Engine {
         }
         self.child_updates
             .retain(|_, watch| watch.receiver_count() > 0 || watch.borrow().running());
+        Ok(())
+    }
+    pub(super) async fn persist(&mut self, id: &str, ack: Option<(String, Value)>) -> Result<()> {
+        if let Some(session) = self.sessions.get_mut(id) {
+            session.resident_bytes = None;
+        }
+        // 导入候选还没有可见 row，但它已是 durable session；只有真正 draft 可以跳过提交。
+        if self
+            .sessions
+            .get(id)
+            .is_some_and(|s| s.phase == crate::domain::execution::Phase::Draft)
+        {
+            return Ok(());
+        }
+        let mut keys = self
+            .sessions
+            .get(id)
+            .map(|s| s.pending_acks.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        if let Some((key, _)) = &ack {
+            keys.push(key.clone());
+        }
+        if let Some((key, _)) = self.sessions.get(id).and_then(|s| s.creation_ack.as_ref()) {
+            keys.push(key.clone());
+        }
+        self.store
+            .commit_receipt(&self.workspace, self.sessions.get_mut(id), ack)
+            .await
+            .context(StorageCommitFailure)?;
+        self.durable_acks.extend(keys);
         Ok(())
     }
 }

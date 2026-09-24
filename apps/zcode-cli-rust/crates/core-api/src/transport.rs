@@ -56,6 +56,9 @@ methods! {
     SkillsReferenceCatalog => "skills/referenceCatalog",
     SessionCreate => "session/create",
     SessionResume => "session/resume",
+    SessionSetModel => "session/setModel",
+    SessionSetThoughtLevel => "session/setThoughtLevel",
+    SessionSetMode => "session/setMode",
     SessionRead => "session/read",
     SessionList => "session/list",
     SessionSubagents => "session/subagents",
@@ -165,6 +168,12 @@ pub enum RuntimeError {
         message: String,
         data: Value,
     },
+    /// Node `ProtocolRequestError` carrying `data` (e.g. -32009 revision mismatch).
+    Rejected {
+        code: i64,
+        message: String,
+        data: Value,
+    },
     /// A typed Node error (`data.name`, e.g. `ModelProtocolError`) with its `data.code` (-32603).
     Named {
         name: &'static str,
@@ -194,7 +203,7 @@ impl RuntimeError {
             Self::MethodNotFound(_) => -32601,
             Self::InvalidParams(_) | Self::Params { .. } => -32602,
             Self::Fault { .. } | Self::Named { .. } => -32603,
-            Self::Coded { code, .. } => *code,
+            Self::Coded { code, .. } | Self::Rejected { code, .. } => *code,
         }
     }
 
@@ -215,7 +224,7 @@ impl RuntimeError {
                 json!({"code":self.code(),"message":message,"data":data})
             }
             Self::Coded { code, message } => json!({"code":code,"message":message}),
-            Self::Params { message, data } => {
+            Self::Params { message, data } | Self::Rejected { message, data, .. } => {
                 json!({"code":self.code(),"message":message,"data":data})
             }
             Self::Named {
@@ -241,6 +250,7 @@ impl std::fmt::Display for RuntimeError {
             Self::Fault { message, .. }
             | Self::Coded { message, .. }
             | Self::Params { message, .. }
+            | Self::Rejected { message, .. }
             | Self::Named { message, .. } => f.write_str(message),
         }
     }

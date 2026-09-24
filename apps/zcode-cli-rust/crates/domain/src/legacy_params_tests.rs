@@ -40,7 +40,16 @@ fn check(parse: fn(&Value) -> Result<Value, ParamsError>, cases: &Value) {
             continue;
         }
         match (parse(&case["input"]), case.get("ok")) {
-            (Ok(parsed), Some(ok)) => assert_eq!(&parsed, ok, "{}", case["input"]),
+            (Ok(parsed), Some(ok)) => {
+                // zod 的 `persistAsWorkspaceLastUsed.default(true)` 未建模：Node 与 Rust 都不读取该值。
+                let mut ok = ok.clone();
+                if case["input"].get("persistAsWorkspaceLastUsed").is_none() {
+                    ok.as_object_mut()
+                        .unwrap()
+                        .remove("persistAsWorkspaceLastUsed");
+                }
+                assert_eq!(parsed, ok, "{}", case["input"]);
+            }
             (Err(error), None) => {
                 let expected = &case["error"];
                 assert_eq!(error.data["name"], expected["data"]["name"]);
@@ -72,4 +81,12 @@ fn create_params_match_zod() {
 #[test]
 fn resume_params_match_zod() {
     check(resume, &fixtures()["resume"]);
+}
+
+#[test]
+fn setter_params_match_zod() {
+    let fixtures = fixtures();
+    check(set_model, &fixtures["setModel"]);
+    check(set_thought_level, &fixtures["setThoughtLevel"]);
+    check(set_mode, &fixtures["setMode"]);
 }

@@ -1,9 +1,12 @@
-// Legacy session/create and session/resume params parity cases, computed by the
+// Legacy session/create, session/resume and setter params parity cases, computed by the
 // shared zod schemas and the Node `parseParams` formatter (server-types.ts).
 // Imported by generate-zcode-cli-rust-fixtures.mjs.
 import {
   zcodeSessionCreateParamsSchema,
   zcodeSessionResumeParamsSchema,
+  zcodeSessionSetModeParamsSchema,
+  zcodeSessionSetModelParamsSchema,
+  zcodeSessionSetThoughtLevelParamsSchema,
 } from "../packages/shared/src/zcode-protocol/index.ts";
 
 /** Node `summarizeParamsError` + `parseParams`. */
@@ -216,6 +219,45 @@ const RESUME = [
   { sessionId: "s", workspace: { workspacePath: "/w" } },
 ];
 
+const SET_MODEL = [
+  undefined,
+  {},
+  { sessionId: "s", model: { providerId: "p", modelId: "m" } },
+  {
+    sessionId: " s ",
+    model: { providerId: " p ", modelId: " m ", options: { reasoningLevel: " high " } },
+    expectedRevision: 0,
+    persistAsWorkspaceLastUsed: false,
+  },
+  { sessionId: "s" },
+  { sessionId: "s", model: { providerId: "p" } },
+  { sessionId: "s", model: { providerId: "p", modelId: "m", x: 1 } },
+  { sessionId: "s", model: { providerId: "p", modelId: "m" }, expectedRevision: -1 },
+  { sessionId: "s", model: { providerId: "p", modelId: "m" }, expectedRevision: 1.5 },
+  { sessionId: "s", model: { providerId: "p", modelId: "m" }, persistAsWorkspaceLastUsed: 1 },
+  { sessionId: "s", model: "p/m", thoughtLevel: "high" },
+];
+
+const SET_THOUGHT_LEVEL = [
+  undefined,
+  { sessionId: "s" },
+  { sessionId: " s ", thoughtLevel: " high ", expectedRevision: 3 },
+  { sessionId: "s", thoughtLevel: "  " },
+  { sessionId: "s", thoughtLevel: 1, expectedRevision: "1" },
+  { sessionId: "", model: { providerId: "p", modelId: "m" } },
+];
+
+const SET_MODE = [
+  undefined,
+  ...["plan", "build", "edit", "yolo", "auto", "turbo", 1].map((mode) => ({
+    sessionId: "s",
+    mode,
+  })),
+  { sessionId: "s" },
+  { sessionId: "s", mode: "auto", expectedRevision: 2 },
+  { sessionId: "s", mode: "auto", persistAsWorkspaceLastUsed: true },
+];
+
 function run(schema, inputs) {
   return inputs.map((input) => {
     const result = schema.safeParse(input);
@@ -233,5 +275,8 @@ export function legacyParamsFixtures() {
   return {
     create: run(zcodeSessionCreateParamsSchema, CREATE),
     resume: run(zcodeSessionResumeParamsSchema, RESUME),
+    setModel: run(zcodeSessionSetModelParamsSchema, SET_MODEL),
+    setThoughtLevel: run(zcodeSessionSetThoughtLevelParamsSchema, SET_THOUGHT_LEVEL),
+    setMode: run(zcodeSessionSetModeParamsSchema, SET_MODE),
   };
 }

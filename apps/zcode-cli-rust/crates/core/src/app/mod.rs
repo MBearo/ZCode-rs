@@ -54,6 +54,7 @@ mod goal_events;
 mod goal_loop;
 mod legacy_import;
 mod legacy_session;
+mod legacy_setters;
 mod legacy_snapshot;
 mod mcp;
 mod session_list;

@@ -6,7 +6,7 @@ use crate::{
     },
     domain::session::Session,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::mpsc;
@@ -324,6 +324,9 @@ impl Engine {
             Method::SkillsReferenceCatalog => self.skill_catalog(p).await,
             Method::SessionCreate => self.legacy_create(p).await,
             Method::SessionResume => self.legacy_resume(p).await,
+            Method::SessionSetModel | Method::SessionSetThoughtLevel | Method::SessionSetMode => {
+                self.legacy_setter(call.method, p).await
+            }
             Method::ProviderUpdateAccountConfig => self.update_account(p).await,
             method => self.query(method, p),
         };
@@ -364,36 +367,6 @@ impl Engine {
         if !self.outbox.is_empty() {
             output.send(std::mem::take(&mut self.outbox)).await?;
         }
-        Ok(())
-    }
-    pub(super) async fn persist(&mut self, id: &str, ack: Option<(String, Value)>) -> Result<()> {
-        if let Some(session) = self.sessions.get_mut(id) {
-            session.resident_bytes = None;
-        }
-        // 导入候选还没有可见 row，但它已是 durable session；只有真正 draft 可以跳过提交。
-        if self
-            .sessions
-            .get(id)
-            .is_some_and(|s| s.phase == crate::domain::execution::Phase::Draft)
-        {
-            return Ok(());
-        }
-        let mut keys = self
-            .sessions
-            .get(id)
-            .map(|s| s.pending_acks.keys().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-        if let Some((key, _)) = &ack {
-            keys.push(key.clone());
-        }
-        if let Some((key, _)) = self.sessions.get(id).and_then(|s| s.creation_ack.as_ref()) {
-            keys.push(key.clone());
-        }
-        self.store
-            .commit_receipt(&self.workspace, self.sessions.get_mut(id), ack)
-            .await
-            .context(StorageCommitFailure)?;
-        self.durable_acks.extend(keys);
         Ok(())
     }
 }

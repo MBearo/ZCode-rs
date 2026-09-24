@@ -1,5 +1,5 @@
-//! Params of the legacy `session/create` and `session/resume` methods
-//! (`zcodeSessionCreateParamsSchema` / `zcodeSessionResumeParamsSchema`).
+//! Params of the legacy `session/*` methods (`zcodeSessionCreateParamsSchema`,
+//! `zcodeSessionResumeParamsSchema` and the setter schemas).
 use super::zod::{Format, Schema, non_empty, protocol_error, string};
 use serde_json::{Value, json};
 use std::sync::OnceLock;
@@ -23,7 +23,8 @@ fn strings() -> Schema {
     Schema::Array(Box::new(non_empty()), None)
 }
 
-fn timestamp() -> Schema {
+/// `z.number().int().nonnegative()`.
+fn non_negative() -> Schema {
     Schema::Int(Some((0, true)))
 }
 
@@ -112,13 +113,13 @@ fn imported_history() -> Schema {
     let message = Schema::Object(vec![
         required("role", Schema::Enum(&["user", "assistant"])),
         required("content", string()),
-        optional("timestamp", timestamp()),
+        optional("timestamp", non_negative()),
     ]);
     let claude = Schema::Object(vec![
         required("source", Schema::Literal(json!("claudeCode"))),
         optional("title", string()),
-        optional("createdAt", timestamp()),
-        optional("updatedAt", timestamp()),
+        optional("createdAt", non_negative()),
+        optional("updatedAt", non_negative()),
         required("messages", Schema::Array(Box::new(message), Some(1))),
     ]);
     let artifact = Schema::Object(vec![
@@ -152,7 +153,7 @@ fn imported_history() -> Schema {
     let shared = Schema::Object(vec![
         required("source", Schema::Literal(json!("sharedContext"))),
         required("title", trimmed()),
-        optional("createdAt", timestamp()),
+        optional("createdAt", non_negative()),
         required(
             "markdown",
             Schema::String {
@@ -184,10 +185,7 @@ fn create_schema() -> &'static Schema {
             optional("sessionId", non_empty()),
             required("workspace", workspace()),
             optional("parentSessionId", non_empty()),
-            optional(
-                "mode",
-                Schema::Enum(&["plan", "build", "edit", "yolo", "auto"]),
-            ),
+            optional("mode", Schema::Enum(MODES)),
             optional("model", model()),
             optional("persistence", Schema::Enum(&["immediate", "deferred"])),
             optional("thoughtLevel", non_empty()),
@@ -216,6 +214,35 @@ fn resume_schema() -> &'static Schema {
     })
 }
 
+const MODES: &[&str] = &["plan", "build", "edit", "yolo", "auto"];
+
+/// `zcodeSessionSetModelParamsSchema` / `zcodeSessionSetThoughtLevelParamsSchema` /
+/// `zcodeSessionSetModeParamsSchema`, in that order.
+fn setter_schemas() -> &'static [Schema; 3] {
+    static SCHEMAS: OnceLock<[Schema; 3]> = OnceLock::new();
+    SCHEMAS.get_or_init(|| {
+        [
+            Schema::Object(vec![
+                required("sessionId", non_empty()),
+                required("model", model()),
+                optional("expectedRevision", non_negative()),
+                optional("persistAsWorkspaceLastUsed", Schema::Bool),
+            ]),
+            Schema::Object(vec![
+                required("sessionId", non_empty()),
+                optional("thoughtLevel", non_empty()),
+                optional("expectedRevision", non_negative()),
+                optional("persistAsWorkspaceLastUsed", Schema::Bool),
+            ]),
+            Schema::Object(vec![
+                required("sessionId", non_empty()),
+                required("mode", Schema::Enum(MODES)),
+                optional("expectedRevision", non_negative()),
+            ]),
+        ]
+    })
+}
+
 /// Node `parseParams`. The transport cannot tell absent params from `null`;
 /// both are treated as absent (`received undefined`).
 fn parse(schema: &Schema, params: &Value) -> Result<Value, ParamsError> {
@@ -235,6 +262,18 @@ pub fn create(params: &Value) -> Result<Value, ParamsError> {
 
 pub fn resume(params: &Value) -> Result<Value, ParamsError> {
     parse(resume_schema(), params)
+}
+
+pub fn set_model(params: &Value) -> Result<Value, ParamsError> {
+    parse(&setter_schemas()[0], params)
+}
+
+pub fn set_thought_level(params: &Value) -> Result<Value, ParamsError> {
+    parse(&setter_schemas()[1], params)
+}
+
+pub fn set_mode(params: &Value) -> Result<Value, ParamsError> {
+    parse(&setter_schemas()[2], params)
 }
 
 #[cfg(test)]
