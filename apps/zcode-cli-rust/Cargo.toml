@@ -58,6 +58,8 @@ reqwest = { version = "0.13", default-features = false, features = [
   "socks",
 ] }
 iana-time-zone = "0.1"
+# Read 图片按 Node 的模型预算解码、缩放与重新编码（WebP 只校验不转码）。
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

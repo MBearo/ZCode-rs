@@ -15,4 +15,5 @@ mod registry_rules;
 mod request_attachments;
 mod responses_stream;
 mod sse;
+mod tool_media;
 use zcode_cli_host::{id, now};

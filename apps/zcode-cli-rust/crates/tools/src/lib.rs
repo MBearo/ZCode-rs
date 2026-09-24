@@ -19,6 +19,7 @@ mod mcp_sse;
 mod plan_file;
 #[cfg(unix)]
 mod process_tree;
+mod read_media;
 mod tool_definitions;
 mod tool_edit;
 mod tool_files;

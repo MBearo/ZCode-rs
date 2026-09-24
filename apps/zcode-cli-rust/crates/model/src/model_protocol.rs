@@ -82,6 +82,7 @@ pub(super) fn body(
     }
     let mut body = match config.api_type {
         ApiType::Chat => {
+            let mut messages = super::tool_media::chat(messages);
             for message in &mut messages {
                 if let Some(obj) = message.as_object_mut() {
                     obj.retain(|k, _| !k.starts_with("_zcode_"));
@@ -92,6 +93,7 @@ pub(super) fn body(
             body
         }
         ApiType::Responses => {
+            let names = super::tool_media::tool_names(&messages);
             let mut input = vec![];
             for message in &messages {
                 if let Some(items) = message["_zcode_responses_reasoning"].as_array() {
@@ -99,7 +101,12 @@ pub(super) fn body(
                 }
                 let role = message["role"].as_str().ok_or_else(ModelFailure::invalid)?;
                 if role == "tool" {
-                    input.push(json!({"type":"function_call_output","call_id":message["tool_call_id"],"output":message["content"]}));
+                    let (output, deferred) = responses_tool_output(message, &names)?;
+                    input.push(json!({"type":"function_call_output","call_id":message["tool_call_id"],"output":output}));
+                    if let Some(deferred) = deferred {
+                        let content = super::model_media::responses(&deferred["content"], "user")?;
+                        input.push(json!({"role":"user","content":content}));
+                    }
                 } else if message["content"].is_array() {
                     let content = super::model_media::responses(&message["content"], role)?;
                     if !content.is_empty() {
@@ -148,6 +155,7 @@ fn anthropic_body(
     messages: &[Value],
     tools: &[Value],
 ) -> Result<Value, ModelFailure> {
+    let names = super::tool_media::tool_names(messages);
     let mut system = vec![];
     let cache_system = messages
         .iter()
@@ -171,12 +179,16 @@ fn anthropic_body(
             content.extend_from_slice(blocks);
         }
         if role == "tool" {
-            let mut result = json!({"type":"tool_result","tool_use_id":message["tool_call_id"],"content":message["content"]});
+            let (blocks, deferred) = anthropic_tool_content(message, &names)?;
+            let mut result = json!({"type":"tool_result","tool_use_id":message["tool_call_id"],"content":blocks});
             // AI SDK 只在失败时写 is_error。
             if message["_zcode_tool_failed"] == true {
                 result["is_error"] = true.into();
             }
             content.push(result);
+            if let Some(deferred) = deferred {
+                content.extend(super::model_media::anthropic(&deferred["content"])?);
+            }
         } else if message["content"].is_array() {
             content.extend(super::model_media::anthropic(&message["content"])?);
         } else if message["content"].as_str().is_some_and(|s| !s.is_empty()) {
@@ -237,6 +249,50 @@ fn anthropic_body(
     body["messages"] = output.into();
     body["tools"] = tools.into();
     Ok(body)
+}
+/// A tool result's content split into what the protocol carries in the
+/// result and the media that follow it (video has no tool-result form).
+fn split_tool_media(
+    message: &Value,
+    names: &std::collections::HashMap<String, String>,
+) -> Option<(Vec<Value>, Option<Value>)> {
+    let parts = message["content"].as_array()?;
+    let (videos, kept): (Vec<Value>, Vec<Value>) =
+        parts.iter().cloned().partition(super::tool_media::is_video);
+    let name = names
+        .get(message["tool_call_id"].as_str().unwrap_or(""))
+        .map_or("", String::as_str);
+    let mut kept: Vec<Value> = kept.into_iter().map(super::tool_media::clean).collect();
+    if !videos.is_empty() {
+        // 视频以文本占位留在结果中，媒体随后作为 user 内容发送（Node 所有协议相同）。
+        let text = super::tool_media::text_form(&videos);
+        kept.push(json!({"type":"text","text":text}));
+    }
+    Some((kept, super::tool_media::deferred(name, videos)))
+}
+fn anthropic_tool_content(
+    message: &Value,
+    names: &std::collections::HashMap<String, String>,
+) -> Result<(Value, Option<Value>), ModelFailure> {
+    match split_tool_media(message, names) {
+        Some((kept, deferred)) => {
+            let blocks = super::model_media::anthropic(&Value::Array(kept))?;
+            Ok((blocks.into(), deferred))
+        }
+        None => Ok((message["content"].clone(), None)),
+    }
+}
+fn responses_tool_output(
+    message: &Value,
+    names: &std::collections::HashMap<String, String>,
+) -> Result<(Value, Option<Value>), ModelFailure> {
+    match split_tool_media(message, names) {
+        Some((kept, deferred)) => {
+            let output = super::model_media::responses(&Value::Array(kept), "user")?;
+            Ok((output.into(), deferred))
+        }
+        None => Ok((message["content"].clone(), None)),
+    }
 }
 pub(super) enum ProtocolStream {
     Chat(Assembly),

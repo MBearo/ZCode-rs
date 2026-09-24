@@ -151,6 +151,8 @@ pub enum Event {
     ToolDone {
         id: String,
         result: String,
+        /// The message content when it has blocks (see `ToolOutput::model_content`).
+        model_content: Option<Value>,
         display: Option<Value>,
         failed: bool,
         /// Permission denied: the row is cancelled instead of failed (Node `permission_denied`).

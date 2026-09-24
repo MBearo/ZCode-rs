@@ -8,6 +8,7 @@ pub(super) async fn materialize(messages: &mut [Value], properties: &Value) -> R
     let mut expanded = false;
     let mut total = 0u64;
     for message in messages {
+        let tool = message["role"] == "tool";
         let Some(parts) = message["content"].as_array_mut() else {
             continue;
         };
@@ -32,8 +33,24 @@ pub(super) async fn materialize(messages: &mut [Value], properties: &Value) -> R
             } else {
                 None
             };
+            let placeholder = part["placeholder"].as_str().unwrap_or("").to_owned();
             if capability.is_some_and(|key| properties["inputFormat"][key] != true) {
-                return Err(ModelFailure::new("attachment_unsupported", false));
+                if !tool {
+                    return Err(ModelFailure::new("attachment_unsupported", false));
+                }
+                // Node createUnsupportedModelInputMediaText：工具结果中的媒体换成说明文本。
+                let kind = match capability {
+                    Some("supportsImage") => "image input",
+                    Some("supportsPdf") => "PDF input",
+                    _ => "video input",
+                };
+                let shown = if placeholder.is_empty() {
+                    format!("[Attached {mime}]")
+                } else {
+                    format!("[Attached {mime}: {placeholder}]")
+                };
+                *part = json!({"type":"text","text":format!("{shown}\n[Media omitted from provider request because the selected model does not support {kind}.]")});
+                continue;
             }
             let mut file = tokio::fs::File::open(&asset.path)
                 .await
@@ -65,13 +82,18 @@ pub(super) async fn materialize(messages: &mut [Value], properties: &Value) -> R
                     "data:{mime};base64,{}",
                     base64::engine::general_purpose::STANDARD.encode(bytes)
                 );
-                if mime.starts_with("image/") {
+                let mut media = if mime.starts_with("image/") {
                     json!({"type":"image_url","image_url":{"url":data}})
                 } else if mime.starts_with("video/") {
                     json!({"type":"video_url","video_url":{"url":data}})
                 } else {
                     json!({"type":"file","file":{"filename":name,"file_data":data}})
+                };
+                if tool {
+                    // 工具结果的文本形态需要占位名（Chat 与视频延后发送时）。
+                    media["_zcode_placeholder"] = placeholder.clone().into();
                 }
+                media
             } else {
                 let name = asset.source_path.as_deref().unwrap_or(name);
                 let text = std::str::from_utf8(&bytes)

@@ -31,6 +31,7 @@ pub(super) async fn execute(
         denied: false,
         stop_turn: false,
         content: answer.content,
+        model_content: None,
         data: answer.data,
         failed: answer.failed,
         display: None,

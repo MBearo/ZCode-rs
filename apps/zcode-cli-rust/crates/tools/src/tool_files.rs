@@ -101,6 +101,10 @@ impl FileTools<'_> {
         if !tokio::fs::metadata(&path).await?.is_file() {
             bail!("Read requires a regular file");
         }
+        // Node：图片与视频按扩展名走媒体读取，结果为模型内容块。
+        if let Some(media) = super::read_media::kind(&path) {
+            return super::read_media::read(&path, media, self.artifacts, cancel).await;
+        }
         let mut file = tokio::fs::File::open(&path).await?;
         let metadata = file.metadata().await?;
         if !metadata.is_file() {

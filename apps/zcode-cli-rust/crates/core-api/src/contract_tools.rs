@@ -234,7 +234,11 @@ pub struct ToolOutput {
     /// Node `turnControl.stopTurnAfterResult`: later tools are cancelled and the
     /// turn ends once this result is committed.
     pub stop_turn: bool,
+    /// Text form: rows, hooks, legacy events and the empty-result check.
     pub content: String,
+    /// Content blocks for the model when they are not just `content` (media
+    /// as `_zcode_attachment` parts); `None` sends `content`.
+    pub model_content: Option<Value>,
     pub data: Value,
     pub display: Option<Value>,
 }
@@ -245,6 +249,7 @@ impl ToolOutput {
             denied: false,
             stop_turn: false,
             content,
+            model_content: None,
             data: Value::Null,
             display: None,
         }
@@ -255,6 +260,7 @@ impl ToolOutput {
             denied: false,
             stop_turn: false,
             content,
+            model_content: None,
             data,
             display: None,
         }

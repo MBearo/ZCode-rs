@@ -145,7 +145,8 @@ pub fn microcompact(mut messages: Vec<Value>, threshold: usize) -> Vec<Value> {
                         | "WebSearch")
                 )
             )
-            && m["content"].is_string()
+            // 媒体结果（内容块数组）同样可清理（Node 只看工具名与失败标志）。
+            && (m["content"].is_string() || m["content"].is_array())
         {
             candidates.push(i);
         }

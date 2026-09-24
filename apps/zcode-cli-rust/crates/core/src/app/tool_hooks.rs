@@ -110,7 +110,12 @@ pub(super) async fn post_tool_use_failure(
 /// Node `appendPreToolAdditionalContextsToErrorResult` / `appendHookAdditionalContexts`.
 pub(super) fn append_contexts(output: &mut ToolOutput, contexts: &[String]) {
     if !contexts.is_empty() {
-        output.content = format!("{}\n\n{}", output.content, display::tool_contexts(contexts));
+        let text = display::tool_contexts(contexts);
+        output.content = format!("{}\n\n{}", output.content, text);
+        // Node 结构化内容：hook 上下文作为结尾的文本块。
+        if let Some(serde_json::Value::Array(blocks)) = &mut output.model_content {
+            blocks.push(serde_json::json!({"type": "text", "text": text}));
+        }
     }
 }
 

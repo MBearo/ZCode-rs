@@ -188,3 +188,55 @@ sequenceDiagram
 
 - 夹具：`buildWebSearchOutput` / `formatWebSearchModelContent`（链接、图片、去重、无链接、超过 20 条、长文本）与两个工具的 InputValidationError 文本（Node `prepareInitialToolExecutionInput` + `validateInitialModelToolInput`）。
 - 集成测试（`zcode-cli-rust-websearch.test.ts`）：Anthropic 协议 fixture；工具定义中的月份、内部请求的 beta 头与原生工具、`max_tokens ≤ 4096`、服务器工具块与引用增量被跳过、模型可见文本；不支持原生搜索的模型不提供 WebSearch，调用时返回不支持的文本。
+
+## 5. 多媒体工具结果与 Read 图片、视频（M5.3a）
+
+依据：TR §2.7、§4.1；Node `core/src/tool/handlers/{read.ts,read-image.ts,read-video.ts}`、`adapters/src/image/*`、`adapters/src/model/{transform.ts,tool-result-media-projection.ts,media-transform-policy.ts}`、`contracts/src/model/{index.ts,media-policy.ts}`。
+
+### 5.1 所有者与数据
+
+- 工具返回 `ToolOutput`：`content` 是文本形态（行、hook、legacy 事件、空结果判断都用它），新增 `model_content`：给模型的内容块数组。媒体块沿用用户附件的表示 `{"type":"_zcode_attachment","asset":<StoredAttachment>,"name":…,"placeholder":…}`，字节已写入会话的工具结果目录（不内联进会话 JSON）。
+- `tool_execution::commit` 把 `model_content`（没有时用 `content`）写入本轮历史，并随 `Event::ToolDone` 交给 Engine 写入会话消息；hook 追加的上下文同时作为结尾的文本块追加（Node 结构化内容的规则）。
+- 请求时 `request_attachments::materialize` 把媒体块展开为 data URL；工具消息里模型不支持的媒体换成 Node 文本：`[Attached <mime>: <placeholder>]\n[Media omitted from provider request because the selected model does not support image input|PDF input|video input.]`（用户消息仍按原规则失败）。
+
+```mermaid
+sequenceDiagram
+    participant T as Read（tools）
+    participant L as agent loop
+    participant E as Engine
+    participant M as 模型请求
+    T->>T: 读取并压缩图片，写入会话工具结果目录
+    T-->>L: ToolOutput{content: "[Attached image/png: Read image]", model_content: [媒体块]}
+    L->>L: 历史追加 tool 消息（内容块数组）
+    L->>E: ToolDone{result 文本, model_content}
+    E->>E: 会话消息追加同一内容；行输出为文本形态
+    L->>M: materialize：媒体 → data URL；不支持的媒体 → 省略说明文本
+    M->>M: 按协议编码（Anthropic / Responses / Chat）
+```
+
+### 5.2 协议编码（Node `transform.ts`、`tool-result-media-projection.ts`）
+
+- **Anthropic**：`tool_result.content` 为块数组：文本、`image`（base64 source）、PDF `document`。
+- **Responses**：`function_call_output.output` 为数组：`input_text`、`input_image`（data URL）、`input_file`。
+- **Chat**：工具消息为文本形态（媒体为 `[Attached <mime>: <placeholder>]`，块之间空一行），媒体放到紧随这组工具消息之后的 user 消息：`[{"type":"text","text":"Tool result media from <工具名>:"}, …媒体]`，每个带媒体的工具结果一条。
+- **视频**：任何协议都按 Chat 的方式处理（工具结果为文本，媒体放在随后的 user 消息），因为工具结果没有视频块。
+- 失败的工具结果总是文本形态。
+
+### 5.3 Read 图片与视频
+
+- 按扩展名判断（不区分大小写）：`.jpg/.jpeg` → `image/jpeg`，`.png`，`.gif`，`.webp`；视频 `.mp4 .m4v .mov .webm .mkv .avi`（Node `VIDEO_INPUT_MIME_BY_EXTENSION`）。
+- 图片：输入上限 20 MiB，超过为 `File content (<size>) exceeds maximum allowed size (20MB). Use a smaller file.`（Node `formatByteCount`：`NB` / `N.NKB` / `N.NMB`）；空文件为 `Image file is empty (0 bytes)`；无法解码为 `Unable to decode image data`。
+- 图片预算（Node `image-budget.ts`）：原始字节 ≤ 3 932 160、base64 ≤ 5 MiB、估算 token（base64 字符 × 0.125，向上取整）≤ 25 000；最长边 ≤ 2000。在预算与尺寸内时原样使用；否则按 Node 的候选顺序搜索（原尺寸保持格式 → 缩到 2000 保持格式 → JPEG 质量 80/60/40/20 → 按 0.75/0.5/0.25 逐级缩小 → 激进 JPEG 最长边 1000…200），取第一个满足预算的结果；都不满足为 `Unable to compress image (<n> bytes) within the requested model image budget`。WebP 不转码：超出预算为 `WebP image exceeds the model image budget and the current image adapter cannot transcode WebP`。
+- 视频：输入上限 30 MiB（同样的超限文本），空文件为 `Cannot read an empty video file.`，原样作为视频块。
+- 模型内容：只有媒体块，占位名为 `Read image` / `Read video`；文本形态为 `[Attached <mime>: Read image]`。结构化数据：`{type:"image", mimeType, originalSize, transformedSize, resized, compressed, dimensions}` / `{type:"video", mimeType, originalSize}`。
+
+### 5.4 与 Node 的差异
+
+1. 压缩结果的字节与 Jimp 不同（编码器不同）；候选顺序、预算与尺寸规则相同。
+2. PDF（整份文件与 `pages`）属于 M5.3b。
+3. 媒体文件保存在会话的工具结果目录（Node 为 data URL 内联在会话事件中）。
+
+### 5.5 验收
+
+- 单元测试：图片预算判断、候选顺序（大 PNG 转 JPEG、超尺寸缩放、小图原样）、WebP 超限、字节格式。
+- 集成测试（`zcode-cli-rust-read-media.test.ts`）：Anthropic 的 `tool_result` 带 `image` 块；Chat 的工具文本占位与随后的 `Tool result media from Read:` user 消息；不支持图片的模型得到省略说明；视频在 Anthropic 下也走随后的 user 消息；行输出为文本形态。

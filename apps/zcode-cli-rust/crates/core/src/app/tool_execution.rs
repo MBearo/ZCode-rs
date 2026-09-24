@@ -276,13 +276,19 @@ async fn commit(
     cancel: &CancellationToken,
 ) -> Result<()> {
     let content = output.content;
+    // 失败结果总是文本形态（Node：is_error 结果展平为 error-text）。
+    let message = match output.model_content.clone().filter(|_| !failed) {
+        Some(blocks) => blocks,
+        None => Value::String(content.clone()),
+    };
     history.push(
-        json!({"role":"tool","tool_call_id":id,"content":content,"_zcode_tool_failed":failed}),
+        json!({"role":"tool","tool_call_id":id,"content":message,"_zcode_tool_failed":failed}),
     );
     let (committed, receipt) = oneshot::channel();
     sink.send(Event::ToolDone {
         id: id.into(),
         result: content,
+        model_content: output.model_content.filter(|_| !failed),
         display: output.display,
         failed,
         denied: output.denied,

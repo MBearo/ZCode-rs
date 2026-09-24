@@ -242,13 +242,15 @@ impl Engine {
             Event::ToolDone {
                 id: call_id,
                 result,
+                model_content,
                 display,
                 failed,
                 denied,
                 committed,
             } => {
                 receipt = Some(committed);
-                s.append_message(json!({"role":"tool","tool_call_id":call_id,"content":result,"_zcode_tool_failed":failed}));
+                let content = model_content.unwrap_or_else(|| result.clone().into());
+                s.append_message(json!({"role":"tool","tool_call_id":call_id,"content":content,"_zcode_tool_failed":failed}));
                 if let Some(row) = s
                     .rows
                     .iter_mut()
