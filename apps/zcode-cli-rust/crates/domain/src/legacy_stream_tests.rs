@@ -121,7 +121,7 @@ fn tallies_turn_usage_like_node() {
     let mut turn = TurnTally::default();
     turn.model_done(usage, "Hel", 1);
     turn.model_done(usage, "lo", 0);
-    assert_eq!(turn.response, "Hello");
+    assert_eq!(turn.response, "lo");
     assert_eq!((turn.token_count, turn.tool_calls, turn.rounds), (28, 1, 2));
     assert_eq!(
         turn.summary(),

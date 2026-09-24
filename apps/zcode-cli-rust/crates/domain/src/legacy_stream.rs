@@ -181,6 +181,7 @@ pub fn usage_json(usage: [u64; 6]) -> Value {
 pub struct TurnTally {
     pub started_at: u64,
     pub input_id: Option<String>,
+    /// The last model step's text (Node `loopState.modelResponse`).
     pub response: String,
     pub requests: u64,
     pub usage: [u64; 6],
@@ -229,7 +230,8 @@ impl TurnTally {
         }
         self.token_count = self.token_count.saturating_add(usage[2]);
         self.tool_calls += calls as u64;
-        self.response.push_str(text);
+        // 修复：Node turn-model-step 每步覆盖 modelResponse，turn.completed.response 只是最后一步的文本。
+        self.response = text.to_owned();
     }
 
     /// Node `ModelUsageSummary`.

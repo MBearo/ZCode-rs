@@ -371,7 +371,7 @@ sequenceDiagram
 - `turnNumber`：本次激活中已完成的轮数（从 0 开始）。
 - `input`：用户原文（显示文本）；`inputId` 与 `queryId` 为提交该输入的 command id；`messageId` 为该轮用户消息 id。
 - `usage`（turn 汇总）：`{source: "provider", modelRequestCount, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens, webSearchRequests: 0, webFetchRequests: 0}`，由本轮每个 `ModelDone.usage` 累加；`tokenCount` 为各步 `totalTokens` 之和。
-- `response`：本轮全部 assistant 文本（不含推理）的拼接。
+- `response`：本轮最后一个模型步骤的 assistant 文本（不含推理；Node 每步覆盖 `modelResponse`）。
 - `stopReason`：有工具调用时为 `tool-calls`，否则为 `stop`（输出上限截断为 `length`）。
 - 失败 `error`：`type` 与 `code` 取与 V4 `lastError` 相同的错误码，`message` 为同一文本，模型失败带 `attribution` 与 `retryable`。
 - `state.updated` 的 `workspace` 为会话的 legacy workspace ref；没有时省略（V4 创建的会话）。
