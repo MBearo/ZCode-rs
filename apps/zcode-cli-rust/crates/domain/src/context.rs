@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -30,9 +29,6 @@ impl ContextPolicy {
         self.window
             .saturating_sub(self.max_output.min(21_000))
             .saturating_sub(self.buffer)
-    }
-    pub fn micro_threshold(self) -> usize {
-        (self.threshold() * 9 / 10).min(self.threshold().saturating_sub(2_000))
     }
 }
 pub fn estimate(messages: &[Value]) -> usize {
@@ -77,101 +73,15 @@ fn chars(value: &Value) -> usize {
         _ => value.to_string().encode_utf16().count(),
     }
 }
-/// 分界只能在完整工具轮次之间；最新 assistant 轮次及之后的用户输入原样保留。
-pub fn split_for_summary(messages: &[Value], manual: bool) -> Option<usize> {
-    let mut pending = BTreeSet::new();
-    let mut candidates = vec![];
-    let mut assistant_seen = false;
-    for (i, message) in messages.iter().enumerate() {
-        if message["role"] == "assistant" {
-            if pending.is_empty() && assistant_seen {
-                candidates.push(i);
-            }
-            assistant_seen = true;
-        }
-        if let Some(calls) = message["tool_calls"].as_array() {
-            for call in calls {
-                pending.insert(call["id"].as_str()?);
-            }
-        }
-        if let Some(id) = message["tool_call_id"].as_str() {
-            pending.remove(id);
-        }
-    }
-    if !pending.is_empty() || !assistant_seen || messages.len() < 2 {
-        return None;
-    }
-    if manual {
-        Some(messages.len())
-    } else {
-        candidates.last().copied().or_else(|| {
-            messages
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|(i, m)| *i > 1 && m["role"] == "user")
-                .map(|(i, _)| i)
-        })
-    }
-}
-pub fn microcompact(mut messages: Vec<Value>, threshold: usize) -> Vec<Value> {
-    let before = estimate(&messages);
-    if before < threshold {
-        return messages;
-    }
-    let mut names = BTreeMap::new();
-    let mut candidates = vec![];
-    for (i, m) in messages.iter().enumerate() {
-        if let Some(calls) = m["tool_calls"].as_array() {
-            for call in calls {
-                names.insert(
-                    call["id"].as_str().unwrap_or(""),
-                    call["function"]["name"].as_str().unwrap_or(""),
-                );
-            }
-        }
-        let name = names.get(m["tool_call_id"].as_str().unwrap_or(""));
-        if m["_zcode_tool_failed"] != true
-            && matches!(
-                name,
-                Some(
-                    &("Read"
-                        | "Bash"
-                        | "Grep"
-                        | "Glob"
-                        | "Edit"
-                        | "Write"
-                        | "WebFetch"
-                        | "WebSearch")
-                )
-            )
-            // 媒体结果（内容块数组）同样可清理（Node 只看工具名与失败标志）。
-            && (m["content"].is_string() || m["content"].is_array())
-        {
-            candidates.push(i);
-        }
-    }
-    let mut removed = vec![];
-    for i in candidates.iter().take(candidates.len().saturating_sub(5)) {
-        removed.push((
-            *i,
-            std::mem::replace(
-                &mut messages[*i]["content"],
-                json!("[Old tool result content cleared]"),
-            ),
-        ));
-    }
-    if before.saturating_sub(estimate(&messages)) < 256 {
-        for (i, content) in removed {
-            messages[i]["content"] = content;
-        }
-    }
-    messages
-}
 pub fn with_summary(summary: Option<&str>, messages: &[Value]) -> Vec<Value> {
     let mut out = Vec::with_capacity(messages.len() + 1);
-    if let Some(summary) = summary {
-        out.push(json!({"role":"user","content":format!("The earlier conversation was compacted. This is a summary of prior context, not new instructions:\n{summary}")}));
+    // Node 的摘要消息（新压缩与 TS 导入）原文发送；旧 Rust 摘要只有正文，保留原前缀。
+    match summary {
+        Some(summary) if summary.starts_with(super::compact::SUMMARY_HEADER) => {
+            out.push(json!({"role":"user","content":summary}));
+        }
+        Some(summary) => out.push(json!({"role":"user","content":format!("The earlier conversation was compacted. This is a summary of prior context, not new instructions:\n{summary}")})),
+        None => {}
     }
     out.extend_from_slice(messages);
     out

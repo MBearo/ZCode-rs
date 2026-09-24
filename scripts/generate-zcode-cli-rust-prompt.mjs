@@ -10,6 +10,10 @@ import {
 
 import { formatIncomingMessage } from "../apps/zcode-cli/packages/core/src/system-reminder/incoming-message.ts";
 import {
+  buildCompactPrompt,
+  buildCompactSummaryMessage,
+} from "../apps/zcode-cli/packages/core/src/compact/prompt.ts";
+import {
   formatGoalContinuationPrompt,
   formatGoalCompletionVerificationPrompt,
   formatGoalStateForModel,
@@ -37,6 +41,11 @@ const content = `${JSON.stringify(
     desktop: buildDesktopContextSection().content,
     behavior: buildDynamicBehaviorSection().content,
     contextManagement: buildContextManagementSection().content,
+    compact: buildCompactPrompt(undefined),
+    compactInstructions: buildCompactPrompt("{zcode_compact_instructions}"),
+    compactSummary: buildCompactSummaryMessage("{zcode_compact_summary}", {
+      suppressFollowup: true,
+    }),
   },
   null,
   2,

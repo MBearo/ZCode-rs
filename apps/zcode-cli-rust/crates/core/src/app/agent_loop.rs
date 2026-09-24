@@ -1,4 +1,7 @@
+use super::compaction::{Outcome, Request, Trigger, compaction_failed};
+use super::context::step_prefix;
 use crate::contract::{ContextPort, Event, EventSink, ModelPort, ToolPort};
+use crate::domain::compact;
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -20,12 +23,7 @@ pub(super) async fn run(
     {
         return Ok(());
     }
-    if let Some(instructions) = history.manual.take() {
-        let reference = super::plan_tools::plan_reference(tools, sink).await?;
-        return history
-            .compact(model, sink, cancel, Some(&instructions), reference)
-            .await;
-    }
+    let manual = history.manual.take();
     let mut reactive_compacted = false;
     let mut continuations = 0;
     super::skills::initialize(tools, context, history, sink, cancel).await?;
@@ -69,6 +67,24 @@ pub(super) async fn run(
         agent["function"]["description"] =
             format!("{base}\n\nCurrent profile catalog (authoritative):\n{descriptions}").into();
     }
+    if let Some(instructions) = manual {
+        // 手动压缩的摘要请求带与 agent step 相同的前缀与工具（Node compactActiveConversation）。
+        let bound = model.bind();
+        let model = bound.as_deref().unwrap_or(model);
+        let prefix =
+            step_prefix(model, context, history, (&skills, profile.as_ref()), cancel).await?;
+        let reminder = super::plan_tools::plan_reference(tools, sink).await?;
+        let request = Request {
+            prefix: &prefix,
+            tools: &definitions,
+            reminder,
+        };
+        let trigger = Trigger::Manual(&instructions);
+        history
+            .compact(model, sink, cancel, trigger, request)
+            .await?;
+        return Ok(());
+    }
     let mut tool_tokens = definition_tokens(&definitions);
     let mut turns = 0;
     let permissions = history.permissions.clone();
@@ -79,6 +95,8 @@ pub(super) async fn run(
     let mut recovery: Option<Arc<Value>> = None;
     // 本轮的重复调用与调用预算提醒（Node model_anomaly，按轮计数）。
     let mut anomalies = crate::domain::model_anomaly::TurnAnomalies::default();
+    // 本轮的快速回填计数（Node compactTracking）。
+    let mut refill = compact::RapidRefill::default();
     loop {
         let sink = &current;
         if profile
@@ -110,47 +128,39 @@ pub(super) async fn run(
             };
             history.push(message);
         }
-        let instructions = if profile
-            .as_ref()
-            .is_some_and(|p| p.inject_agents_md == Some(false))
-        {
-            vec![]
-        } else {
-            context.instructions(cancel).await?
-        };
+        let prefix =
+            step_prefix(model, context, history, (&skills, profile.as_ref()), cancel).await?;
         let identity = model.identity();
-        let mut prefix = crate::domain::prompt::prefix(
-            history.prompt_snapshot.as_ref().unwrap(),
-            &instructions,
-            identity
-                .as_ref()
-                .map(|id| (id.provider_id.as_str(), id.model_id.as_str())),
-            context.desktop(),
-        );
-        if let Some(reminder) = skills.reminder() {
-            prefix.push(reminder);
-        }
-        if let Some(profile) = &profile {
-            prefix.push(json!({"role":"system","content":profile.system_prompt}));
-        }
-        if let Some(goal) = history.goal.as_ref().filter(|g| g.active()) {
-            prefix.push(json!({"role":"user","content":format!("<system-reminder>\n{}\n</system-reminder>",goal.prompt("goalState", None))}));
-        }
-        let micro_threshold = if policy.automatic {
-            policy.micro_threshold()
-        } else {
-            usize::MAX
-        };
         super::plan_tools::remind(history, sink).await?;
-        let (mut messages, mut tokens) = history.projection(&prefix, tool_tokens, micro_threshold);
-        if policy.automatic && tokens >= policy.threshold() {
-            let reference = super::plan_tools::plan_reference(tools, sink).await?;
-            history
-                .compact(model, sink, cancel, None, reference)
-                .await?;
-            (messages, tokens) = history.projection(&prefix, tool_tokens, micro_threshold);
-            if tokens >= policy.threshold() {
-                bail!("Context remains above budget after compaction; narrow the input");
+        let (mut messages, mut tokens) = history.projection(&prefix, tool_tokens);
+        if policy.automatic
+            && tokens >= policy.threshold()
+            && history.compact_failures < compact::MAX_CONSECUTIVE_FAILURES
+            && history.can_compact()
+        {
+            let (count, blocked) = refill.evaluate();
+            if blocked {
+                bail!(compact::rapid_refill_error());
+            }
+            let reminder = super::plan_tools::plan_reference(tools, sink).await?;
+            let request = Request {
+                prefix: &prefix,
+                tools: &definitions,
+                reminder,
+            };
+            match history
+                .compact(model, sink, cancel, Trigger::Auto, request)
+                .await
+            {
+                Ok(Outcome::Compacted) => {
+                    refill.compacted(count);
+                    history.compact_failures = 0;
+                    (messages, tokens) = history.projection(&prefix, tool_tokens);
+                }
+                Ok(Outcome::Skipped) => {}
+                // Node：自动压缩失败只计数，本次请求照常发送。
+                Err(error) if compaction_failed(&error) => history.compact_failures += 1,
+                Err(error) => return Err(error),
             }
         }
         sink.send(Event::ContextUsage(json!({"usedTokens":tokens,"maxTokens":policy.window,"autoCompactThresholdTokens":if policy.automatic {Some(policy.threshold())} else {None}}))).await?;
@@ -175,16 +185,39 @@ pub(super) async fn run(
                 if policy.automatic
                     && failure.reason == "context_exceeded"
                     && !failure.output_committed
-                    && !reactive_compacted
-                    && crate::domain::context::split_for_summary(&history.messages, false)
-                        .is_some() =>
+                    && !reactive_compacted =>
             {
+                // Node：每个模型步骤最多一次反应式压缩；不可压缩或失败时上报原失败。
                 reactive_compacted = true;
-                let reference = super::plan_tools::plan_reference(tools, sink).await?;
-                history
-                    .compact(model, sink, cancel, None, reference)
-                    .await?;
-                continue;
+                let (count, blocked) = refill.evaluate();
+                if blocked {
+                    bail!(compact::rapid_refill_error());
+                }
+                if !history.can_compact() {
+                    return Err(failure.into());
+                }
+                let reminder = super::plan_tools::plan_reference(tools, sink).await?;
+                let request = Request {
+                    prefix: &prefix,
+                    tools: &definitions,
+                    reminder,
+                };
+                match history
+                    .compact(model, sink, cancel, Trigger::Reactive, request)
+                    .await
+                {
+                    Ok(Outcome::Compacted) => {
+                        refill.compacted(count);
+                        history.compact_failures = 0;
+                        continue;
+                    }
+                    Ok(Outcome::Skipped) => return Err(failure.into()),
+                    Err(error) if compaction_failed(&error) => {
+                        history.compact_failures += 1;
+                        return Err(failure.into());
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             Err(failure)
                 if !cancel.is_cancelled()
@@ -270,6 +303,9 @@ pub(super) async fn run(
         {
             return Ok(());
         }
+        // Node recordCompletedToolBatch：工具批次完成后重新允许反应式压缩，并计一个工具轮。
+        reactive_compacted = false;
+        refill.tool_batch();
         for body in anomalies.observe(&called, &history.anomaly_guard) {
             let message = crate::domain::plan_mode::reminder_message(&body);
             let kind = crate::domain::session_runtime::ReminderKind::ModelAnomaly;

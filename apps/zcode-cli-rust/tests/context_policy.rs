@@ -1,11 +1,11 @@
 use serde_json::json;
-use zcode_cli_domain::context::{ContextPolicy, estimate, microcompact, split_for_summary};
+use zcode_cli_domain::compact::select;
+use zcode_cli_domain::context::{ContextPolicy, estimate};
 
 #[test]
 fn budget_matches_preflight_and_counts_reasoning_arguments_and_utf16() {
     let policy = ContextPolicy::default();
     assert_eq!(policy.threshold(), 166_000);
-    assert_eq!(policy.micro_threshold(), 149_400);
     assert_eq!(
         estimate(&[
             json!({"role":"assistant","content":"中文😀","reasoning_content":"想想","tool_calls":[{"function":{"name":"Edit","arguments":"{}"}}]})
@@ -15,7 +15,7 @@ fn budget_matches_preflight_and_counts_reasoning_arguments_and_utf16() {
 }
 
 #[test]
-fn summary_preserves_latest_complete_tool_round_and_rejects_open_calls() {
+fn summary_preserves_the_latest_assistant_round_like_node() {
     let messages = vec![
         json!({"role":"user","content":"one"}),
         json!({"role":"assistant","content":"reply"}),
@@ -23,31 +23,11 @@ fn summary_preserves_latest_complete_tool_round_and_rejects_open_calls() {
         json!({"role":"assistant","tool_calls":[{"id":"c","function":{"name":"Read","arguments":"{}"}}]}),
         json!({"role":"tool","tool_call_id":"c","content":"file"}),
     ];
-    assert_eq!(split_for_summary(&messages, false), Some(3));
-    assert_eq!(split_for_summary(&messages, true), Some(5));
-    assert_eq!(split_for_summary(&messages[..4], true), None);
-    assert_eq!(split_for_summary(&messages[..1], false), None);
-}
-
-#[test]
-fn microcompact_keeps_recent_five_errors_and_canonical_input() {
-    let mut messages = vec![];
-    for i in 0..8 {
-        messages.push(json!({"role":"assistant","tool_calls":[{"id":i.to_string(),"function":{"name":"Read"}}]}));
-        // 失败结果以 _zcode_tool_failed 标记（与 Node isError 一致），不再依赖文本前缀。
-        messages.push(json!({"role":"tool","tool_call_id":i.to_string(),"content":"x".repeat(2000),"_zcode_tool_failed":i == 0}));
-    }
-    let projected = microcompact(messages.clone(), 1);
-    assert_eq!(projected[1], messages[1]);
-    assert!(
-        projected[3]["content"]
-            .as_str()
-            .unwrap()
-            .contains("cleared")
-    );
-    assert_eq!(projected[15], messages[15]);
-    assert_eq!(messages[3]["content"].as_str().unwrap().len(), 2000);
-    assert_eq!(microcompact(messages.clone(), usize::MAX), messages);
+    assert_eq!(select(&messages, false, false), Some(3));
+    assert_eq!(select(&messages, false, true), Some(5));
+    // Node 按 assistant 分组，不检查未完成的调用（规范历史里调用总有结果）。
+    assert_eq!(select(&messages[..4], false, true), Some(4));
+    assert_eq!(select(&messages[..1], false, false), None);
 }
 
 #[test]

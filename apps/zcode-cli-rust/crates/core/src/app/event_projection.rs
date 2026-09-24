@@ -48,6 +48,7 @@ impl Engine {
                 | Event::ContextUsage(_)
                 | Event::CompactStarted { .. }
                 | Event::CompactDone { .. }
+                | Event::CompactFailed { .. }
         ) {
             return self.context_event(&id, event.event).await;
         }
@@ -172,7 +173,8 @@ impl Engine {
             | Event::RequestAuth { .. }
             | Event::ContextUsage(_)
             | Event::CompactStarted { .. }
-            | Event::CompactDone { .. } => unreachable!(),
+            | Event::CompactDone { .. }
+            | Event::CompactFailed { .. } => unreachable!(),
             Event::Text {
                 response_id,
                 text,

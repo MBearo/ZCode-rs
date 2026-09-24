@@ -47,9 +47,12 @@ impl SessionStore for Store {
             1,
         );
         s.mode = zcode_cli_rust::domain::execution::Mode::Yolo;
+        // Node 保留最后一组（最新 assistant 与当前输入），需要更早的两组才可压缩。
         s.messages = vec![
             json!({"role":"user","content":"old".repeat(1000)}),
             json!({"role":"assistant","content":"previous"}),
+            json!({"role":"user","content":"again"}),
+            json!({"role":"assistant","content":"latest"}),
         ];
         Ok((vec![s], BTreeMap::new()))
     }
@@ -184,11 +187,9 @@ async fn check_commit_barrier(continuation: bool) {
             .await
             .unwrap()
             .unwrap();
+        let prompt = summary.last().unwrap()["content"].as_str().unwrap_or("");
         assert_eq!(
-            summary[0]["content"]
-                .as_str()
-                .unwrap()
-                .contains("Summarize"),
+            prompt.starts_with("CRITICAL: Respond with TEXT ONLY"),
             !continuation
         );
         let gate = tokio::time::timeout(std::time::Duration::from_secs(2), gates.recv())

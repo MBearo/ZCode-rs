@@ -210,7 +210,8 @@ test("Rust continuation survives auto compact without including temporary prompt
     await send(h, id, "older input ".repeat(1000));
     await send(h, id, "continue current task");
     assert.equal(f.requests.length, 4);
-    assert.equal(f.requests[2]!.tools, undefined);
+    // Node：摘要请求带与 agent step 相同的工具定义。
+    assert.deepEqual(f.requests[2]!.tools, f.requests[1]!.tools);
     assert(JSON.stringify(f.requests[3]).includes("partial retained"));
     assert(JSON.stringify(f.requests[3]).includes(continuePrompt));
     assert(!JSON.stringify(f.requests[3]).includes("older input ".repeat(1000)));
@@ -227,7 +228,7 @@ test("Rust continuation survives auto compact without including temporary prompt
   }
 });
 
-test("Rust never commits a truncated compact summary or starts a continuation for it", async () => {
+test("Rust commits a length-truncated compact summary with text and never continues it like Node", async () => {
   const f = await fixture({
     respond(_req, res, attempt) {
       response(
@@ -243,13 +244,15 @@ test("Rust never commits a truncated compact summary or starts a continuation fo
     const id = await h.create();
     await h.subscribe(`conversation/${id}`);
     await send(h, id, "preserve original context");
+    const after = h.messages.length;
     await h.command(h.envelope("compact", id));
-    await failed(h, id);
+    await h.completed(id, after);
     assert.equal(f.requests.length, 2);
-    await send(h, id, "continue after failed compact");
+    await send(h, id, "continue after compact");
     assert.equal(f.requests.length, 3);
-    assert(JSON.stringify(f.requests[2]).includes("preserve original context"));
-    assert(!JSON.stringify(f.requests[2]).includes("cut summary"));
+    // Node 只把明确的上下文超限当作失败；截断但有文本的摘要照常提交，也不续写。
+    assert(JSON.stringify(f.requests[2]).includes("cut summary"));
+    assert(!JSON.stringify(f.requests[2]).includes("preserve original context"));
     assert(!JSON.stringify(f.requests[2]).includes(continuePrompt));
     assert.deepEqual(h.schemaErrors, []);
   } finally {

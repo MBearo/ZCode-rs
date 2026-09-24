@@ -112,6 +112,11 @@ pub enum Event {
         reminder: Option<Value>,
         committed: oneshot::Sender<()>,
     },
+    /// The compaction `id` failed; the run may go on (automatic compaction).
+    CompactFailed {
+        id: String,
+        committed: oneshot::Sender<()>,
+    },
     Background {
         task: zcode_cli_domain::background::BackgroundTask,
         committed: Option<oneshot::Sender<()>>,

@@ -64,6 +64,14 @@ impl Engine {
                     "Invalid context boundary"
                 );
                 let changed = context.offset > session.context.offset;
+                // Node：自动与反应式压缩成功后清零连续失败次数（手动压缩不影响）。
+                let automatic = session
+                    .rows
+                    .iter()
+                    .any(|r| r["entityId"] == id && r["marker"]["origin"] == "auto");
+                if changed && automatic {
+                    session.runtime.compact_failures = 0;
+                }
                 session.context = context;
                 // 被摘要覆盖的提醒不再出现；计划文件提醒追加在保留消息之后并持久化。
                 let offset = session.context.offset;
@@ -98,6 +106,19 @@ impl Engine {
                 deltas.push(json!({"op":"row.upserted","row":row}));
                 receipt = Some(committed);
                 session.revision += 1;
+            }
+            Event::CompactFailed { id, committed } => {
+                let row = session
+                    .rows
+                    .iter_mut()
+                    .find(|r| r["entityId"] == id)
+                    .ok_or_else(|| anyhow::anyhow!("Compaction marker missing"))?;
+                row["marker"]["status"] = "failed".into();
+                if row["marker"]["origin"] == "auto" {
+                    session.runtime.compact_failures += 1;
+                }
+                deltas.push(json!({"op":"row.upserted","row":row}));
+                receipt = Some(committed);
             }
             _ => unreachable!(),
         }

@@ -45,7 +45,8 @@ function todoFixture(values: [string, unknown][]) {
   return fixture({
     respond(req, res) {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      if (!req.tools?.length) {
+      // Node 的摘要请求带工具；以末条 compact 提示词识别。
+      if (String(req.messages.at(-1).content).startsWith("CRITICAL: Respond with TEXT ONLY")) {
         event(res, { content: "COMPACT_SUMMARY preserve todo progress" });
         end(res, "stop");
         return;
@@ -288,7 +289,7 @@ test("Rust Todo survives manual compaction, session close and cold history witho
     const after = h.messages.length;
     await h.command(h.envelope("compact", id));
     await h.completed(id, after);
-    assert.equal(f.requests.at(-1)!.tools, undefined);
+    assert(String(f.requests.at(-1)!.messages.at(-1).content).startsWith("CRITICAL:"));
     assert.equal((await snapshot(h, id)).plan.items[0].content, todos[0]!.content);
     assert.equal((await h.command(h.envelope("deleteSession", id))).status, "accepted");
     const closed = await snapshot(h, id);

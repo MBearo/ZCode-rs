@@ -37,6 +37,8 @@ pub struct RuntimeOptions {
     pub legacy: crate::legacy_stream::LegacyStream,
     /// `session/debug` observation of this activation's model requests.
     pub debug: crate::session_debug::DebugLog,
+    /// Node `autoCompactConsecutiveFailures` of this process (spec rust-m7-compact §4).
+    pub compact_failures: u32,
 }
 
 /// A transient reminder kept in the process history (never persisted).

@@ -6,8 +6,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fixture, event, end, type Harness } from "./zcode-cli-rust-fixture.js";
 
 type Message = Record<string, any>;
+/** Node 的摘要请求：末条 user 消息是 buildCompactPrompt 的全文。 */
 const summaryRequest = (req: Message) =>
-  req.messages[0].content.startsWith("Summarize the earlier coding conversation");
+  String(req.messages.at(-1).content).startsWith("CRITICAL: Respond with TEXT ONLY");
 function reply(res: Parameters<typeof event>[0], content: string) {
   res.writeHead(200, { "content-type": "text/event-stream" });
   event(res, { content });
@@ -48,7 +49,11 @@ test("Rust manual compact keeps full history, hides summary stream and restores 
     await h.completed(id, after);
     assert.equal((await h.command(command)).status, "duplicate");
     assert.equal(f.requests.length, 2);
-    assert.equal(f.requests[1]!.tools, undefined);
+    // Node：摘要请求带与 agent step 相同的 system 前缀和工具定义。
+    const summary = f.requests[1]!;
+    assert.equal(summary.messages[0].role, "system");
+    assert.deepEqual(summary.tools, f.requests[0]!.tools);
+    assert.equal(summary.max_tokens, 20000);
     const rows = (await h.rows(id)).rows;
     assert.equal(rows.filter((r) => r.kind === "userInput").length, 1);
     assert(
@@ -69,10 +74,17 @@ test("Rust manual compact keeps full history, hides summary stream and restores 
     assert(
       request.messages.some((m: Message) => m.role === "user" && m.content.includes("FRESH_RULE")),
     );
-    assert(
-      request.messages.some(
-        (m: Message) => m.role === "user" && m.content.includes("COMPACT_SUMMARY"),
-      ),
+    const compacted = request.messages.find(
+      (m: Message) => m.role === "user" && m.content.includes("COMPACT_SUMMARY"),
+    );
+    assert.equal(
+      compacted.content,
+      [
+        "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.",
+        "",
+        "COMPACT_SUMMARY preserve the original constraints",
+        'Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I\'ll continue" or similar. Pick up the last task as if the break never happened.',
+      ].join("\n"),
     );
     assert(!request.messages.some((m: Message) => m.content === "original question"));
     assert(
@@ -168,23 +180,24 @@ test("Rust cancelling an in-flight summary leaves the old context intact", async
   }
 });
 
-test("Rust automatic and reactive compaction preserve the current input and complete after commit", async () => {
+test("Rust automatic and reactive compaction preserve the last round and complete after commit", async () => {
   for (const reactive of [false, true]) {
-    let rejected = false;
+    let turns = 0;
     const f = await fixture({
       config: reactive
         ? {}
         : // Agent/SendMessage 定义也计入上下文；首轮需容纳完整工具，长回复仍须触发压缩。
           { contextWindow: 18000, maxOutputTokens: 1000, contextBufferTokens: 2000 },
-      respond(req, res, attempt) {
+      respond(req, res) {
         if (summaryRequest(req)) return reply(res, "small durable summary");
-        if (reactive && attempt === 2 && !rejected) {
-          rejected = true;
+        turns += 1;
+        // 反应式：第三轮首个请求报上下文超限，压缩后重发。
+        if (reactive && turns === 3) {
           res.writeHead(400, { "content-type": "application/json" });
           res.end('{"error":{"code":"context_length_exceeded"}}');
           return;
         }
-        reply(res, attempt === 1 ? "history".repeat(5000) : "continued");
+        reply(res, turns === 1 ? "history".repeat(5000) : "continued");
       },
     });
     try {
@@ -192,15 +205,59 @@ test("Rust automatic and reactive compaction preserve the current input and comp
       const id = await h.create();
       await h.subscribe(`conversation/${id}`);
       await send(h, id, "first");
+      await send(h, id, "second");
       await send(h, id, "current input");
+      const last = f.requests.at(-1)!;
       assert(f.requests.some(summaryRequest));
-      assert.equal(f.requests.at(-1)!.messages.at(-1).content, "current input");
-      assert(!JSON.stringify(f.requests.at(-1)).includes("historyhistory"));
-      assert.equal(f.requests.at(-1)!.max_tokens, reactive ? 32000 : 1000);
+      // Node 按 assistant 开始分组，保留最后一组（上一条回复与当前输入）。
+      assert.deepEqual(
+        last.messages.slice(-2).map((m: Message) => [m.role, m.content]),
+        [
+          ["assistant", "continued"],
+          ["user", "current input"],
+        ],
+      );
+      assert(!JSON.stringify(last).includes("historyhistory"));
+      assert.equal(last.max_tokens, reactive ? 32000 : 1000);
       assert.deepEqual(h.schemaErrors, []);
     } finally {
       await f.close();
     }
+  }
+});
+
+test("Rust keeps sending requests when automatic compaction fails and stops trying after 3 failures", async () => {
+  let summaries = 0;
+  const f = await fixture({
+    config: { contextWindow: 18000, maxOutputTokens: 1000, contextBufferTokens: 2000 },
+    respond(req, res) {
+      if (summaryRequest(req)) {
+        summaries += 1;
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end('{"error":{"code":"unauthorized"}}');
+        return;
+      }
+      reply(res, "history".repeat(3000));
+    },
+  });
+  try {
+    const h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    for (const text of ["one", "two", "three", "four", "five", "six"]) {
+      await send(h, id, text);
+    }
+    assert.equal(summaries, 3, "the circuit breaker skips automatic compaction after 3 failures");
+    const markers = (await h.rows(id)).rows.filter(
+      (r) => r.kind === "timelineMarker" && r.marker.type === "compact",
+    );
+    assert.deepEqual(
+      markers.map((r) => (r as Message).marker.status),
+      ["failed", "failed", "failed"],
+    );
+    assert.deepEqual(h.schemaErrors, []);
+  } finally {
+    await f.close();
   }
 });
 
@@ -235,6 +292,40 @@ test("Rust failed compaction keeps old context and failed marker across restart"
     await send(resumed, id, "continue");
     assert(f.requests.at(-1)!.messages.some((m: Message) => m.content === "keep this original"));
     assert.deepEqual(resumed.schemaErrors, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Rust fails a compaction whose summary calls a tool like Node", async () => {
+  const f = await fixture({
+    respond(req, res) {
+      if (!summaryRequest(req)) return reply(res, "answer");
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      event(res, {
+        tool_calls: [
+          { index: 0, id: "c", type: "function", function: { name: "Read", arguments: "{}" } },
+        ],
+      });
+      end(res, "tool_calls");
+    },
+  });
+  try {
+    const h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    await send(h, id, "keep this original");
+    const after = h.messages.length;
+    await h.command(h.envelope("compact", id));
+    const frame = await terminal(h, id, "error", after);
+    const error = frame.params.frame.payload.deltas.find(
+      (d: Message) => d.patch?.control?.phase === "error",
+    ).patch.control.lastError;
+    assert.equal(error.message, "Tool use is not allowed during compaction");
+    const markers = (await h.rows(id)).rows.filter(
+      (r) => r.kind === "timelineMarker" && r.marker.type === "compact",
+    );
+    assert.equal((markers.at(-1) as Message).marker.status, "failed");
   } finally {
     await f.close();
   }

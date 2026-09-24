@@ -56,6 +56,61 @@ pub fn sanitize_message(message: &str) -> Option<String> {
     Some(format!("{}...", utf16_prefix(&compact, MESSAGE_KEEP)))
 }
 
+/// ECMAScript `GetSubstitution`: `String.prototype.replace` with a string
+/// replacement expands `$$`, `$&`, `` $` ``, `$'` and `$n` / `$nn` (unnamed
+/// groups only). `captures[i]` is group `i + 1`.
+pub fn substitute(
+    replacement: &str,
+    (before, matched, after): (&str, &str, &str),
+    captures: &[Option<&str>],
+) -> String {
+    let mut out = String::with_capacity(replacement.len());
+    let bytes = replacement.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'$' || i + 1 >= bytes.len() {
+            let ch = replacement[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
+        let digit = |at: usize| {
+            bytes
+                .get(at)
+                .filter(|b| b.is_ascii_digit())
+                .map(|b| (b - b'0') as usize)
+        };
+        match bytes[i + 1] {
+            b'$' => out.push('$'),
+            b'&' => out.push_str(matched),
+            b'`' => out.push_str(before),
+            b'\'' => out.push_str(after),
+            _ => {
+                let group = match (digit(i + 1), digit(i + 2)) {
+                    (Some(a), Some(b)) if (1..=captures.len()).contains(&(a * 10 + b)) => {
+                        Some((a * 10 + b, 3))
+                    }
+                    (Some(a), _) if (1..=captures.len()).contains(&a) => Some((a, 2)),
+                    _ => None,
+                };
+                match group {
+                    Some((n, len)) => {
+                        out.push_str(captures[n - 1].unwrap_or(""));
+                        i += len;
+                    }
+                    None => {
+                        out.push('$');
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+        }
+        i += 2;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

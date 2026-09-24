@@ -24,7 +24,7 @@ pub(super) async fn advance(
     let Some(goal) = goal else {
         return Ok(false);
     };
-    let (mut messages, _) = history.projection(prefix, 0, usize::MAX);
+    let (mut messages, _) = history.projection(prefix, 0);
     messages.push(json!({"role":"user","content":goal.prompt("goalVerify", None)}));
     // 修复：验证请求原先复用压缩的 hidden_summary，来源记为 compact；Node 的来源是
     // target_completion_verification，网络状态、session/debug 与用量都按它归属。

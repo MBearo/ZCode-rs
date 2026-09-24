@@ -233,11 +233,16 @@ for (const protocol of ["openai-responses", "anthropic-messages"] as const) {
       const after = h.messages.length;
       await h.command(h.envelope("compact", id));
       await h.completed(id, after);
-      assert.equal(good.requests[1]!.tools, undefined);
+      // Node：摘要请求带与 agent step 相同的工具定义。
+      assert.deepEqual(good.requests[1]!.tools, good.requests[0]!.tools);
       await turn(h, id, "after compact");
       assert(!JSON.stringify(good.requests[2]).includes("opaque-fixture"));
       assert(!JSON.stringify(good.requests[2]).includes("signature-fixture"));
-      assert(JSON.stringify(good.requests[2]).includes("earlier conversation was compacted"));
+      assert(
+        JSON.stringify(good.requests[2]).includes(
+          "This session is being continued from a previous conversation",
+        ),
+      );
       assert.deepEqual(h.schemaErrors, []);
     } finally {
       await good.close();

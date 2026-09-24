@@ -22,6 +22,7 @@ mod workspace_grant;
 mod workspace_review;
 mod workspace_trust;
 
+mod compaction;
 mod context;
 mod context_projection;
 mod create_session;
