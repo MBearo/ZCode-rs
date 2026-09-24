@@ -201,7 +201,11 @@ test("Rust preserves reasoning and tool order across the next request and cold h
       messages.filter((m: any) => m.role === "tool").map((m: any) => m.tool_call_id),
       ["read", "list"],
     );
-    assert.match(messages.at(-2).content, /Tool failed/);
+    // Node Read：不存在的文件以纯文本失败（无前缀）。
+    assert.match(
+      messages.at(-2).content,
+      /^File does not exist\. Note: your current working directory is /,
+    );
     await h.close();
     const recovered = f.start();
     await recovered.subscribe(`conversation/${id}`);

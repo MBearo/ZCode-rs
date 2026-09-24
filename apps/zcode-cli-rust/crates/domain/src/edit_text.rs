@@ -81,24 +81,4 @@ pub(super) fn unescape_unicode(search: &str) -> Option<String> {
     String::from_utf16(&out).ok()
 }
 
-/// JS `String.prototype.trim` whitespace and line terminators.
-pub(super) fn js_space(c: char) -> bool {
-    matches!(
-        c,
-        '\u{9}'..='\u{d}'
-            | ' '
-            | '\u{a0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200a}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202f}'
-            | '\u{205f}'
-            | '\u{3000}'
-            | '\u{feff}'
-    )
-}
-
-pub fn js_trim(s: &str) -> &str {
-    s.trim_matches(js_space)
-}
+pub use crate::js_string::trim as js_trim;

@@ -136,9 +136,7 @@ pub fn microcompact(mut messages: Vec<Value>, threshold: usize) -> Vec<Value> {
                 name,
                 Some(&("Read" | "Bash" | "Grep" | "Glob" | "Edit" | "Write"))
             )
-            && m["content"].as_str().is_some_and(|s| {
-                !s.starts_with("Tool failed:") && !s.contains("\"status\":\"failed\"")
-            })
+            && m["content"].is_string()
         {
             candidates.push(i);
         }

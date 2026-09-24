@@ -61,7 +61,8 @@ pub use crate::contract_events::{
     RequestKind, RequestOrigin, RunEvent, WorkspaceHooks,
 };
 pub use crate::contract_tools::{
-    HookProcess, ToolOutput, ToolPermission, ToolPort, TrustLoad, TrustStorePort,
+    HookProcess, ToolError, ToolOutput, ToolPermission, ToolPort, TrustLoad, TrustStorePort,
+    render_failure,
 };
 #[async_trait]
 pub trait SessionStore: Send + Sync {

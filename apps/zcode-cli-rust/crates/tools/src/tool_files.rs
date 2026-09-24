@@ -90,7 +90,14 @@ impl FileTools<'_> {
         args: &Value,
         cancel: &CancellationToken,
     ) -> Result<ToolOutput> {
-        let path = tokio::fs::canonicalize(path).await?;
+        let path = match tokio::fs::canonicalize(path).await {
+            Ok(path) => path,
+            // Node Read：不存在的文件给出工作目录与相似文件名建议（抛出错误，纯文本）。
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                bail!("{}", edit::missing_message(path, self.cwd).await)
+            }
+            Err(e) => return Err(e.into()),
+        };
         if !tokio::fs::metadata(&path).await?.is_file() {
             bail!("Read requires a regular file");
         }
@@ -236,7 +243,7 @@ impl FileTools<'_> {
         } else {
             ""
         };
-        if edit && search.is_empty() && !crate::domain::edit_match::js_trim(&old).is_empty() {
+        if edit && search.is_empty() && !crate::domain::js_string::trim(&old).is_empty() {
             return Err(edit::failure(
                 edit::code::FILE_EXISTS_NO_OLD_STRING,
                 "Cannot create new file - file already exists.",

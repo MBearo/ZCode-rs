@@ -34,7 +34,8 @@ fn microcompact_keeps_recent_five_errors_and_canonical_input() {
     let mut messages = vec![];
     for i in 0..8 {
         messages.push(json!({"role":"assistant","tool_calls":[{"id":i.to_string(),"function":{"name":"Read"}}]}));
-        messages.push(json!({"role":"tool","tool_call_id":i.to_string(),"content":if i == 0 {"Tool failed: ".to_owned()+&"x".repeat(2000)}else{"x".repeat(2000)}}));
+        // 失败结果以 _zcode_tool_failed 标记（与 Node isError 一致），不再依赖文本前缀。
+        messages.push(json!({"role":"tool","tool_call_id":i.to_string(),"content":"x".repeat(2000),"_zcode_tool_failed":i == 0}));
     }
     let projected = microcompact(messages.clone(), 1);
     assert_eq!(projected[1], messages[1]);

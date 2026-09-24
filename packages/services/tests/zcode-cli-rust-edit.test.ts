@@ -71,9 +71,19 @@ test("Rust Edit reports Node's failures", async () => {
     await h.command(h.envelope("sendText", id, { text: "edit" }));
     await h.completed(id);
     const [same, unread, , missing, ambiguous, absent] = toolResults(f.requests);
-    assert.ok(same.includes("No changes to make: old_string and new_string are exactly the same."));
-    assert.ok(unread.includes("File has not been read yet. Read it first before writing to it."));
-    assert.ok(missing.includes("String to replace not found in file.\nString: zz"));
+    // 处理器失败按 Node createErrorResult 包在 <tool_use_error> 中。
+    assert.equal(
+      same,
+      "<tool_use_error>No changes to make: old_string and new_string are exactly the same.</tool_use_error>",
+    );
+    assert.equal(
+      unread,
+      "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>",
+    );
+    assert.equal(
+      missing,
+      "<tool_use_error>String to replace not found in file.\nString: zz</tool_use_error>",
+    );
     assert.ok(ambiguous.includes("Found 2 matches of the string to replace"));
     assert.ok(
       absent.includes(

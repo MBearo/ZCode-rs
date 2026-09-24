@@ -12,6 +12,7 @@ pub mod file_checkpoint;
 pub mod goal;
 pub mod history;
 pub mod hooks;
+pub mod js_string;
 pub mod json_order;
 mod json_size;
 pub mod legacy_params;

@@ -110,7 +110,8 @@ impl WorkspaceTools {
                     .call((&self.cwd, &artifacts), session, name, args, sink, cancel)
                     .await
             }
-            _ => bail!("Unsupported tool: {name}"),
+            // Node：未注册的工具以 `Tool not found: {name}` 失败。
+            _ => bail!("Tool not found: {name}"),
         }
     }
 }

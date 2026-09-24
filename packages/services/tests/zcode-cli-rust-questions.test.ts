@@ -225,7 +225,9 @@ test("Rust question validation agrees with TS and never announces invalid questi
       await h.subscribe(`conversation/${id}`);
       await h.command(h.envelope("sendText", id, { text: "ask" }));
       await h.completed(id);
-      assert.match(f.requests[1]!.messages.at(-1).content, /Tool failed/);
+      // 失败内容不带 "Tool failed:" 前缀（Node createErrorResult）；输入校验信封见 M5.2 后续项。
+      const failure = f.requests[1]!.messages.at(-1).content as string;
+      assert.ok(failure.length > 0 && !failure.startsWith("Tool failed"), failure);
       assert(
         !h.messages.some((m) =>
           m.params?.frame?.payload?.deltas?.some(

@@ -163,7 +163,12 @@ fn anthropic_body(
             content.extend_from_slice(blocks);
         }
         if role == "tool" {
-            content.push(json!({"type":"tool_result","tool_use_id":message["tool_call_id"],"content":message["content"],"is_error":message["_zcode_tool_failed"].as_bool().unwrap_or(false)}));
+            let mut result = json!({"type":"tool_result","tool_use_id":message["tool_call_id"],"content":message["content"]});
+            // AI SDK 只在失败时写 is_error。
+            if message["_zcode_tool_failed"] == true {
+                result["is_error"] = true.into();
+            }
+            content.push(result);
         } else if message["content"].is_array() {
             content.extend(super::model_media::anthropic(&message["content"])?);
         } else if message["content"].as_str().is_some_and(|s| !s.is_empty()) {

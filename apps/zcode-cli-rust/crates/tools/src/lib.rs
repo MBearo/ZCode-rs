@@ -25,6 +25,5 @@ mod tool_search;
 mod tool_shell;
 mod tool_skills;
 pub mod tools;
-pub use tool_edit::ToolFailure;
 pub use tools::WorkspaceTools;
 use zcode_cli_host::{id, now};

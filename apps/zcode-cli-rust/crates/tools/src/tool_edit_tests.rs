@@ -1,9 +1,11 @@
 //! Node `handlers/edit.ts` failure texts, replacement and result content.
 use super::*;
 
-fn code_of(error: anyhow::Error) -> (u8, String) {
-    let failure = error.downcast::<ToolFailure>().unwrap();
-    (failure.code, failure.message)
+fn code_of(error: anyhow::Error) -> (u32, String) {
+    match error.downcast::<crate::contract::ToolError>().unwrap() {
+        crate::contract::ToolError::Handler { code, message } => (code, message),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

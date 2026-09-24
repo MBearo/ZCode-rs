@@ -6,15 +6,15 @@ use std::path::Path;
 
 /// Node `EditErrorCode`.
 pub(super) mod code {
-    pub const NO_CHANGE: u8 = 1;
-    pub const FILE_EXISTS_NO_OLD_STRING: u8 = 3;
-    pub const FILE_NOT_EXIST: u8 = 4;
-    pub const NOTEBOOK_FILE: u8 = 5;
-    pub const FILE_NOT_READ: u8 = 6;
-    pub const STALE_FILE: u8 = 7;
-    pub const OLD_STRING_NOT_FOUND: u8 = 8;
-    pub const AMBIGUOUS_REPLACE: u8 = 9;
-    pub const INVALID_PATH: u8 = 13;
+    pub const NO_CHANGE: u32 = 1;
+    pub const FILE_EXISTS_NO_OLD_STRING: u32 = 3;
+    pub const FILE_NOT_EXIST: u32 = 4;
+    pub const NOTEBOOK_FILE: u32 = 5;
+    pub const FILE_NOT_READ: u32 = 6;
+    pub const STALE_FILE: u32 = 7;
+    pub const OLD_STRING_NOT_FOUND: u32 = 8;
+    pub const AMBIGUOUS_REPLACE: u32 = 9;
+    pub const INVALID_PATH: u32 = 13;
 }
 
 pub(super) const NOT_READ: &str = "File has not been read yet. Read it first before writing to it.";
@@ -22,27 +22,9 @@ pub(super) const STALE: &str = "File has been modified since read, either by the
 const FRESHNESS_SUFFIX: &str = " (file state is current in your context — no need to Read it back)";
 const NON_UNIQUE: &str = "old_string is not unique in the file. Provide more surrounding context or set replace_all to true.";
 
-/// Node `ToolHandlerFailure` of a tool: a stable code and the model-visible message.
-#[derive(Debug)]
-pub struct ToolFailure {
-    pub code: u8,
-    pub message: String,
-}
-
-impl std::fmt::Display for ToolFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ToolFailure {}
-
-pub(super) fn failure(code: u8, message: impl Into<String>) -> anyhow::Error {
-    ToolFailure {
-        code,
-        message: message.into(),
-    }
-    .into()
+/// Node `ToolHandlerFailure` with an `EditErrorCode`.
+pub(super) fn failure(code: u32, message: impl Into<String>) -> anyhow::Error {
+    crate::contract::ToolError::handler(code, message)
 }
 
 /// The resolved replacement of one Edit call.

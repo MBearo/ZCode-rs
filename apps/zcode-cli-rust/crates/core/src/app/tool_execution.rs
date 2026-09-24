@@ -66,7 +66,8 @@ async fn execute(
         None
     };
     if let Some(message) = rejected {
-        let mut output = ToolOutput::text(format!("Tool failed: {message}"));
+        // Node：未注册的工具与输入校验失败都不带前缀。
+        let mut output = ToolOutput::text(message);
         output.failed = true;
         return Ok((id, output, true));
     }
@@ -158,11 +159,18 @@ async fn execute(
     }
     let failed = result.as_ref().map_or(true, |output| output.failed);
     let message = match &result {
-        Err(error) => error.to_string(),
+        Err(error) => {
+            crate::domain::js_string::sanitize_message(&error.to_string()).unwrap_or_default()
+        }
         Ok(output) => output.content.clone(),
     };
-    let mut content = result
-        .unwrap_or_else(|error| crate::contract::ToolOutput::text(format!("Tool failed: {error}")));
+    // Node createErrorResult：处理器失败包 <tool_use_error>，其余错误为规整后的消息。
+    let mut content =
+        result.unwrap_or_else(|error| ToolOutput::text(crate::contract::render_failure(&error)));
+    if !failed && crate::domain::js_string::trim(&content.content).is_empty() {
+        // Node serializeOutput：空结果给出占位，避免模型误读为缺失结果。
+        content.content = format!("({name} completed with no output)");
+    }
     let mut contexts = pre.additional_contexts;
     if let (Some(h), Some(args)) = (hooks, &parsed) {
         let call = ToolCall {

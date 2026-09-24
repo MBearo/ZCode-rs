@@ -49,3 +49,22 @@
 
 - 集成测试（`zcode-cli-rust-edit.test.ts`）：弯引号回退写回、删除行连同换行、CRLF 保持、第 1.4 节的失败文本与成功文本。
 - 夹具：生成脚本调用 Node 的 `findEditMatch`、`normalizeReplacementForMatch`、`preserveQuoteStyle`，覆盖每种策略、歧义、`replace_all` 跳过、UTF-16 与代理项、弯引号上下文；Rust 逐条比较状态、策略、候选数、命中片段与替换文本。
+
+## 2. 工具结果管线（M5.2）
+
+依据：`scratchpad/research/tool-result-pipeline.md`（下称 TR）；Node `core/src/tool/executor/{errors.ts,call-runner.ts,result-serialization.ts}`、`core/src/errors/error-payload.ts`。
+
+### 2.1 失败渲染（M5.2a）
+
+所有工具失败在 `tool_execution.rs` 一处渲染（Node `createErrorResult`），不再加 `Tool failed:` 前缀：
+
+- 处理器失败（`ToolError::Handler { code, message }`，Node `ToolHandlerFailure`）：`<tool_use_error>{message}</tool_use_error>`，消息原样。Edit 的 `EditErrorCode` 失败走这一类。
+- 预先渲染的内容（`ToolError::Rendered`）：原样使用（留给输入校验信封）。
+- 其余错误（Node 的抛出错误）：消息按 `sanitizeText` 规整——空白序列（JS `\s`）折叠为一个空格并去首尾，超过 500 个 UTF-16 码元时保留前 497 个并加 `...`；为空时为 `Turn execution failed`。
+- 未注册的工具：`Tool not found: {name}`（纯文本）。
+- Read 不存在的文件：`File does not exist. Note: your current working directory is {cwd}.`，可加 ` Did you mean {name}?`（与 Edit 相同的建议规则）。
+- PostToolUseFailure hook 收到的 `error` 为规整后的消息。
+- 成功但内容在 JS `trim` 后为空：`({ToolName} completed with no output)`，在追加 hook 上下文之前替换。
+- 失败标志只来自结果本身（历史中的 `_zcode_tool_failed`）；microcompact 不再按文本前缀判断失败。Anthropic 请求只在失败时写 `is_error: true`（与 AI SDK 一致）。
+
+后续子项（TR §6.5）：Bash、TaskOutput、TaskStop 文本（M5.2b）；Grep、Write、Read 文本与输入校验信封、预算与持久化信封（M5.2c 起）。
