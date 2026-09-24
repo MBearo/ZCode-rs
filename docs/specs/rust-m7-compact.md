@@ -61,7 +61,30 @@
 - 与 Node 一致，默认关闭。Node 只能通过内部 runtime 配置开启，没有用户配置入口，因此 Rust 不再在阈值附近清理旧工具结果。
 - 修复：旧实现默认开启，请求中的旧工具结果会被替换为 `[Old tool result content cleared]`，Node 不会这样做。
 
-## 6. 验收
+## 6. 摘要请求超长与压缩后提醒
+
+### 6.1 摘要请求超长（Node `compact-selection.ts`）
+
+- 摘要请求以 `context_exceeded` 失败时，从 provider 错误文本中解析超出的 token 数（`N tokens > M` 取 `N − M`），并按触发方式处理：
+  - 自动与反应式压缩重新选轮：把更新的组移入保留区，直到被移出的组的估算 token 覆盖超出量；无法解析时移一组。移动的组数达到可总结组数减一时，改为移一半（至少一组）。移动后仍需满足可压缩条件。
+  - 手动压缩截断：从最旧的组开始丢弃，直到丢弃的估算 token 覆盖超出量；无法解析时丢弃 20%（至少一组），至少保留一组。剩余部分以 assistant 开头时，前面加一条 user 消息 `[earlier conversation truncated for compaction retry]`。截断最多 3 次（与重选合计）。
+- 都无法继续时失败，文本为 §2 的 `Conversation too long to compact automatically…`，不重试。
+- 反应式压缩的首次选轮使用原请求的超出量：组数大于 3 且能解析超出量时，在最后一组之外再保留足以覆盖“超出量减去最后一组估算”的更新组（Node `selectCompactEntriesForInitialPromptTooLong`）。
+- 同一次自动压缩的外层重试从初始选轮重新开始。
+
+### 6.2 压缩后重新附带读取过的文件（Node `compact-post-reminders.ts`）
+
+- 读取状态由工具按会话记录，Node 的 `readFileState` 每个 `(路径, offset, limit)` 一条：
+  - 文本 Read 记录读到的原始内容与请求的 offset / limit。
+  - Edit / Write 以 `(路径, 1, 无 limit)` 记录为非 Read 来源。
+- 压缩成功后，按读取时间从新到旧挑选 Read 来源的记录：
+  - 跳过路径含 `/.git/` 的记录，以及保留区里有 Read 调用读过同一 `file_path` 的记录。
+  - 最多 5 条。单条估算（UTF-16 长度 / 3，向上取整）超过 5000，或累计会超过 50000 时，改为引用说明：`Note: <path> was read before the last conversation was summarized, but the contents are too large to include. Use Read tool if you need to access it.`。
+  - 否则写入 `Called the Read tool with the following input: <{file_path, offset?, limit?}>\nResult of calling the Read tool:\n<带行号的内容>`。行号从 offset 开始（offset 为 0 时从 0，未给出或为 1 时从 1），格式为 `行号\t内容`。
+- 这些提醒以 `<system-reminder>` 用户消息追加在保留区与计划文件提醒之后，写入会话消息（Node 的持久提醒来源 `resume_referenced_session_context`）。
+- 之后清空该会话的读取状态（Node `readFileState.clear()`）：再次 Edit 前需要重新 Read。
+
+## 7. 验收
 
 - 单元测试：
   - 提示词全文与自定义指令。
@@ -77,3 +100,7 @@
   - 连续 3 次失败后不再尝试。
   - 摘要返回工具调用时失败。
   - microcompact 的代码已删除，由请求形状的断言覆盖（摘要请求与后续请求保留原始工具结果）。
+  - 反应式压缩的摘要请求超长时，保留更多近期组后成功。
+  - 手动压缩超长时截断最旧的组并加标记。
+  - 压缩后下一次请求带最近 Read 的文件内容提醒，之后 Edit 需要重新 Read。
+- 单元测试补充：超出量解析、重选与截断的组数、读取提醒的挑选与格式。

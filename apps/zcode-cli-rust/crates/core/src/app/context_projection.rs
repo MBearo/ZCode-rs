@@ -55,7 +55,7 @@ impl Engine {
                 context,
                 tokens,
                 usage,
-                reminder,
+                reminders,
                 committed,
             } => {
                 ensure!(
@@ -79,7 +79,7 @@ impl Engine {
                     .runtime
                     .reminders
                     .retain(|(anchor, _, _)| *anchor >= offset);
-                if let Some(reminder) = reminder {
+                for reminder in reminders {
                     session.append_message(reminder);
                 }
                 session.context_tokens = Some(tokens);

@@ -16,6 +16,7 @@ const EDIT_BYTES: u64 = 8 * 1024 * 1024;
 #[derive(Default)]
 pub struct FileState {
     entries: HashMap<PathBuf, Observation>,
+    pub(super) views: super::read_state::Views,
 }
 struct Observation {
     hash: Vec<u8>,
@@ -186,6 +187,19 @@ impl FileTools<'_> {
         let full = start == 1 && !truncated && count as u64 >= total;
         self.remember(path.clone(), hash.finalize().to_vec(), full, truncated)
             .await;
+        let (offset, limit) = (args["offset"].as_u64(), args["limit"].as_u64());
+        let view = crate::domain::compact_ptl::ReadView {
+            path: path.to_string_lossy().into_owned(),
+            content: content.clone(),
+            offset,
+            limit,
+        };
+        let key = (offset.unwrap_or(1), limit);
+        self.state
+            .lock()
+            .await
+            .views
+            .record(path.clone(), key, Some(view));
         let numbered = content
             .split('\n')
             .enumerate()
@@ -347,6 +361,12 @@ impl FileTools<'_> {
         let path = tokio::fs::canonicalize(path).await?;
         self.remember(path.clone(), Sha256::digest(&bytes).to_vec(), true, false)
             .await;
+        // Node：Edit / Write 以整文件视图覆盖，不再是压缩后的重新附带候选。
+        self.state
+            .lock()
+            .await
+            .views
+            .record(path.clone(), (1, None), None);
         let (patch, additions, deletions) = patch(&old, &new);
         let mut data = if name == "Write" {
             json!({"type":if original.is_some(){"update"}else{"create"},"filePath":path,"content":new,"originalFile":original.as_ref().map(|_|&old),"structuredPatch":patch,"userModified":false})

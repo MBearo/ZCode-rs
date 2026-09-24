@@ -298,6 +298,13 @@ impl ToolPort for WorkspaceTools {
         self.call_inner(&sink.session_id, name, args, Some(sink), cancel)
             .await
     }
+    async fn take_reads(&self, session: &str) -> Vec<crate::domain::compact_ptl::ReadView> {
+        let state = self.reads.lock().await.remove(session);
+        match state {
+            Some(state) => state.lock().await.views.take(),
+            None => vec![],
+        }
+    }
     fn model_definitions(&self, definitions: &mut [Value], input_format: &Value) {
         super::tool_definitions::for_model(definitions, input_format);
     }

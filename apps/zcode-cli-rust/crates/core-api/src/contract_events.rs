@@ -108,8 +108,8 @@ pub enum Event {
         context: zcode_cli_domain::context::ContextState,
         tokens: usize,
         usage: Value,
-        /// Plan file reminder appended after the preserved messages.
-        reminder: Option<Value>,
+        /// Plan file and read file reminders appended after the preserved messages.
+        reminders: Vec<Value>,
         committed: oneshot::Sender<()>,
     },
     /// The compaction `id` failed; the run may go on (automatic compaction).

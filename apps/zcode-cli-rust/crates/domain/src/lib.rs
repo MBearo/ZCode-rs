@@ -5,6 +5,7 @@ pub mod attachment_upload;
 pub mod background;
 pub mod claude_import;
 pub mod compact;
+pub mod compact_ptl;
 pub mod config;
 pub mod context;
 pub mod edit_match;

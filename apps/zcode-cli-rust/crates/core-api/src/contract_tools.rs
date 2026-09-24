@@ -147,6 +147,11 @@ pub trait ToolPort: Send + Sync {
     ) -> Result<zcode_cli_domain::web::Fetched> {
         anyhow::bail!("HttpClientPort is not configured for WebFetch tool")
     }
+    /// The session's text Read views, newest first, then its read state is
+    /// cleared (Node `readFileState` after compaction).
+    async fn take_reads(&self, _session: &str) -> Vec<zcode_cli_domain::compact_ptl::ReadView> {
+        vec![]
+    }
     /// Adjusts the run's definitions to the model's input formats (Node:
     /// Read's PDF variant).
     fn model_definitions(&self, _definitions: &mut [Value], _input_format: &Value) {}

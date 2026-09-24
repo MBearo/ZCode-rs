@@ -93,7 +93,7 @@ pub fn summary_message(summary: &str) -> String {
 }
 
 /// Whether each entry is an assistant message; the summary is a leading user entry.
-fn assistant_roles(messages: &[Value], summary: bool) -> Vec<bool> {
+pub(crate) fn assistant_roles(messages: &[Value], summary: bool) -> Vec<bool> {
     let mut roles = Vec::with_capacity(messages.len() + 1);
     if summary {
         roles.push(false);
@@ -104,28 +104,49 @@ fn assistant_roles(messages: &[Value], summary: bool) -> Vec<bool> {
 
 /// Node `groupByAssistantStartedRounds`: a group starts at the first entry
 /// and at every later assistant message.
-fn group_starts(assistant: &[bool]) -> Vec<usize> {
+pub(crate) fn group_starts(assistant: &[bool]) -> Vec<usize> {
     (0..assistant.len())
         .filter(|i| *i == 0 || assistant[*i])
         .collect()
 }
 
 /// Node `hasEnoughRuntimeEntriesToCompact`.
-fn enough(assistant: &[bool]) -> bool {
+pub(crate) fn enough(assistant: &[bool]) -> bool {
     group_starts(assistant).len() >= 2 && assistant.contains(&true)
 }
 
-/// Node `selectCompactEntries`: the end in `messages` of the summarized part
-/// (manual: everything; automatic: all but the last group), or `None` when
-/// that part cannot be compacted. `summary`: a summary precedes `messages`.
-pub fn select(messages: &[Value], summary: bool, manual: bool) -> Option<usize> {
+/// A selection: `messages[..split]` is summarized, the last `preserved` groups stay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Plan {
+    pub split: usize,
+    pub preserved: usize,
+}
+
+/// Node `selectCompactEntries` with `minimumGroupsToPreserve`, `None` when the
+/// summarized part cannot be compacted. `summary`: a summary precedes `messages`.
+pub fn plan(messages: &[Value], summary: bool, manual: bool, minimum: usize) -> Option<Plan> {
     let roles = assistant_roles(messages, summary);
     let starts = group_starts(&roles);
-    let end = match starts.last() {
-        Some(last) if !manual && starts.len() >= 2 => *last,
-        _ => roles.len(),
+    let total = starts.len();
+    let preserved = if manual || total < 2 {
+        0
+    } else {
+        minimum.max(1).min(total - 1)
     };
-    enough(&roles[..end]).then(|| end - usize::from(summary))
+    let end = if preserved > 0 {
+        starts[total - preserved]
+    } else {
+        roles.len()
+    };
+    enough(&roles[..end]).then(|| Plan {
+        split: end - usize::from(summary),
+        preserved,
+    })
+}
+
+/// The end in `messages` of the summarized part (see [`plan`]).
+pub fn select(messages: &[Value], summary: bool, manual: bool) -> Option<usize> {
+    plan(messages, summary, manual, 0).map(|p| p.split)
 }
 
 /// Node `CompactLoopTracking` of one turn.

@@ -1,4 +1,4 @@
-use super::compaction::{Outcome, Request, Trigger, compaction_failed};
+use super::compaction::{self, Outcome, Request, Trigger, compaction_failed};
 use super::context::step_prefix;
 use crate::contract::{ContextPort, Event, EventSink, ModelPort, ToolPort};
 use crate::domain::compact;
@@ -78,6 +78,7 @@ pub(super) async fn run(
             prefix: &prefix,
             tools: &definitions,
             reminder,
+            port: tools,
         };
         let trigger = Trigger::Manual(&instructions);
         history
@@ -147,6 +148,7 @@ pub(super) async fn run(
                 prefix: &prefix,
                 tools: &definitions,
                 reminder,
+                port: tools,
             };
             match history
                 .compact(model, sink, cancel, Trigger::Auto, request)
@@ -201,9 +203,16 @@ pub(super) async fn run(
                     prefix: &prefix,
                     tools: &definitions,
                     reminder,
+                    port: tools,
                 };
                 match history
-                    .compact(model, sink, cancel, Trigger::Reactive, request)
+                    .compact(
+                        model,
+                        sink,
+                        cancel,
+                        Trigger::Reactive(compaction::overflow(&failure)),
+                        request,
+                    )
                     .await
                 {
                     Ok(Outcome::Compacted) => {
