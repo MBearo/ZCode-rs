@@ -46,6 +46,13 @@ async fn full_access_is_committed_with_nodes_receipt() {
             "previousPlanEnabled": false, "source": "command",
             "permissionGrant": {"interactionId": interaction, "queueItemIds": []}})
     );
+    // 会话创建时固定 Rust 实际使用的 shell（Node 的 bash shell 快照）。
+    let shells = entries::list(&conn, &session, Some("runtime/bash_shell_selection")).unwrap();
+    assert_eq!(shells.len(), 1);
+    assert_eq!(
+        shells[0].id,
+        format!("{session}:runtime:bash_shell_selection")
+    );
     let states = entries::list(&conn, &session, Some("runtime/execution_state")).unwrap();
     assert_eq!(states.last().unwrap().data["mode"], "yolo");
     let resumed = resume::resume(&conn, &session, &|_| None, None)

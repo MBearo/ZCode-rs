@@ -70,6 +70,8 @@ impl Session {
         self.node.push(now, Op::CreateSession(create));
         self.node.created = true;
         self.node_model_selection(now);
+        let shell = super::records::shell_selection_entry(&self.id, now);
+        self.node.push(now, Op::Entry(shell));
         self.node_execution_state(now);
     }
 

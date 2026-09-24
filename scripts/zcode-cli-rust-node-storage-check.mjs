@@ -20,6 +20,7 @@ import {
   PERMISSION_FULL_ACCESS_ENTRY,
   permissionFullAccessReceiptSchema,
 } from "../apps/zcode-cli/packages/contracts/src/interfaces/permission-full-access.ts";
+import { readPersistedBashShellSelectionSnapshot } from "../apps/zcode-cli/packages/core/src/runtime/methods/bash-shell-snapshot.ts";
 import { goalVerificationEntriesFromSessionEntries } from "../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/transcript-hydration.ts";
 
 // 与夹具一致：发布层计数不属于冷投影契约。
@@ -53,6 +54,15 @@ async function check(name, root, file) {
     await store.listSessionInputs({ sessionID });
     const stored = await store.messages({ sessionID });
     const entries = await store.sessionEntries({ sessionID });
+    // 会话 shell 快照：Node 恢复时按快照继续使用同一个 shell。
+    const shell = await readPersistedBashShellSelectionSnapshot({
+      sessionId: sessionID,
+      sessionStore: store,
+      traceContext: { traceId: "check" },
+    });
+    // Node 的稳定分叉不复制 shell 快照（恢复时按当前设置），其余会话在创建时写入。
+    const expected = session.taskType === "fork" ? "missing" : "restored";
+    if (shell.status !== expected) throw new Error(`${name}: shell snapshot ${shell.status}`);
     // 授权回执是 Node 恢复与重试的事实源，必须通过 Node 的严格 schema。
     for (const entry of entries.filter((e) => e.type === PERMISSION_FULL_ACCESS_ENTRY)) {
       permissionFullAccessReceiptSchema.parse(entry.data);

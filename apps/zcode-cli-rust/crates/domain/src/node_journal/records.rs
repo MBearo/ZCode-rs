@@ -99,6 +99,26 @@ pub fn execution_state_entry(session: &str, now: u64, mode: &str, plan: bool) ->
     )
 }
 
+/// Node `persistBashShellSelectionSnapshot` of the shell Rust's tools run
+/// (`/bin/bash`, `cmd.exe` on Windows) in Node's `shellSelection` key order.
+pub fn shell_selection_entry(session: &str, now: u64) -> Value {
+    let selection = if cfg!(windows) {
+        json!({"dialect": "cmd", "display": {"name": "CMD"}, "id": "auto:cmd", "label": "CMD",
+            "path": "cmd.exe", "source": "auto-detected"})
+    } else {
+        json!({"dialect": "posix", "display": {"name": "bash"}, "id": "auto:bash", "label": "bash",
+            "path": "/bin/bash", "source": "auto-detected"})
+    };
+    entry(
+        format!("{session}:runtime:bash_shell_selection"),
+        session,
+        "runtime/bash_shell_selection",
+        now,
+        selection,
+        true,
+    )
+}
+
 const USER_SEMANTICS: [(&str, &str); 5] = [
     ("origin", "real_user"),
     ("kind", "user_prompt"),
