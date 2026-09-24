@@ -5,7 +5,6 @@ mod bash_output;
 mod bash_permission;
 mod checkpoint_blobs;
 mod extension_config;
-mod extension_plugins;
 mod file_changes;
 mod file_checkpoints;
 mod file_rewind;
@@ -17,6 +16,7 @@ mod mcp_connection;
 mod mcp_hub;
 mod mcp_sse;
 mod plan_file;
+mod plugin_requests;
 #[cfg(unix)]
 mod process_tree;
 mod read_media;

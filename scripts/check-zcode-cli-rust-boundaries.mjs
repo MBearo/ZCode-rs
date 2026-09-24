@@ -45,7 +45,7 @@ async function walk(directory) {
     if (["tui", "app-server", "headless"].includes(crate) && /\bzcode_cli_net\s*::/.test(code))
       failures.push(`${file}: frontend imports network egress`);
     if (
-      ["state", "model", "tools", "host", "net"].includes(crate) &&
+      ["state", "model", "tools", "host", "net", "plugins"].includes(crate) &&
       /\bzcode_cli_(?:core|app_server|headless|tui)\s*::/.test(code)
     )
       failures.push(`${file}: adapter imports core or frontend`);

@@ -61,7 +61,8 @@ impl Engine {
                 self.prompt_blocked(&id, &turn, committed).await?
             }
             Event::WorkspaceHooks { reply } => {
-                let hooks = self.workspace_hooks(&id).await.unwrap_or_else(|error| {
+                let configured = self.configured_hooks(&id).await;
+                let project = self.workspace_hooks(&id).await.unwrap_or_else(|error| {
                     // 发现或读取失败时本轮不带项目 hooks（Node 的会话创建会失败，这里不中断会话）。
                     tracing::warn!(
                         target: "zcode::hooks",
@@ -71,7 +72,10 @@ impl Engine {
                     );
                     None
                 });
-                let _ = reply.send(hooks);
+                let _ = reply.send(crate::contract::SessionHooks {
+                    configured,
+                    project,
+                });
             }
             _ => unreachable!("not a hook event"),
         }
@@ -82,7 +86,41 @@ impl Engine {
     /// read once at startup; `user_path` is the user config file declaring them.
     pub fn with_hooks(mut self, hooks: &Value, user_path: &str) -> Self {
         self.hooks.user = crate::domain::hooks::registrations(hooks, Some(user_path)).into();
+        self.hooks.user_config = hooks.clone();
+        self.hooks.user_path = user_path.into();
         self
+    }
+
+    /// The session's user and plugin hooks, resolved on its first run in this
+    /// process (spec rust-m10-plugins §3.5); `None` when no plugin declares hooks.
+    pub(super) async fn configured_hooks(
+        &mut self,
+        id: &str,
+    ) -> Option<std::sync::Arc<[crate::domain::hooks::Registration]>> {
+        if let Some(cached) = self.hooks.plugins.get(id) {
+            return cached.clone();
+        }
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let events = self
+            .tools
+            .plugin_hooks(&cancel)
+            .await
+            .unwrap_or_else(|error| {
+                // 插件发现失败时本会话只运行用户 hooks，不中断会话。
+                tracing::warn!(
+                    target: "zcode::hooks",
+                    event = "plugin_hook.discovery_failed",
+                    error = %format!("{error:#}"),
+                    "Plugin hooks could not be discovered"
+                );
+                vec![]
+            });
+        let configured = (!events.is_empty()).then(|| {
+            let merged = crate::domain::hooks::merge_plugin_hooks(&self.hooks.user_config, &events);
+            crate::domain::hooks::registrations(&merged, Some(&self.hooks.user_path)).into()
+        });
+        self.hooks.plugins.insert(id.into(), configured.clone());
+        configured
     }
 
     /// A lifecycle event of `run_id`. Background hooks may end after their

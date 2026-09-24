@@ -195,9 +195,42 @@ pub fn program(hook: &Value) -> Option<Program> {
     }
 }
 
-/// Node `createConfiguredHookRegistrations` over the merged `hooks` config.
-/// Only the user config file can declare executable hooks today, so every
-/// entry is a `user` hook from `user_path`. Nothing runs unless `enabled`.
+/// The plugin context attached to a plugin hook (Node `HookPluginContext`).
+fn plugin_context(value: &Value) -> Option<Plugin> {
+    let text = |key: &str| value[key].as_str().map(str::to_owned);
+    Some(Plugin {
+        id: text("id")?,
+        name: text("name")?,
+        root_path: text("rootPath")?,
+        data_path: text("dataPath")?,
+        source_path: text("sourcePath"),
+    })
+}
+
+/// Node `mergeRuntimeHooks`: enabled plugins' matchers are appended after the
+/// configured ones of each event. Any plugin hook force-enables the whole
+/// config, so disabled user hooks then run too (kept Node behavior).
+pub fn merge_plugin_hooks(base: &Value, plugins: &[(HookEvent, Value)]) -> Value {
+    if plugins.is_empty() {
+        return base.clone();
+    }
+    let mut events = base["events"].as_object().cloned().unwrap_or_default();
+    for (event, matcher) in plugins {
+        let list = events
+            .entry(event.as_str())
+            .or_insert_with(|| Value::Array(vec![]));
+        if let Value::Array(items) = list {
+            items.push(matcher.clone());
+        }
+    }
+    serde_json::json!({"enabled": true, "events": events,
+        "maxOutputBytes": base.get("maxOutputBytes").cloned().unwrap_or(32_768.into()),
+        "timeoutMs": base.get("timeoutMs").cloned().unwrap_or(60_000.into())})
+}
+
+/// Node `createConfiguredHookRegistrations` over the merged `hooks` config:
+/// user hooks come from `user_path`, plugin hooks carry their plugin context.
+/// Nothing runs unless `enabled`.
 pub fn registrations(hooks: &Value, user_path: Option<&str>) -> Vec<Registration> {
     if hooks["enabled"] != true {
         return vec![];
@@ -220,14 +253,27 @@ pub fn registrations(hooks: &Value, user_path: Option<&str>) -> Vec<Registration
                 let Some(program) = program(hook) else {
                     continue;
                 };
+                let plugin = plugin_context(&hook["plugin"]);
+                let (source, source_kind, source_path) = match &plugin {
+                    Some(p) => (
+                        format!("plugin.{}.{name}.{matcher_index}.{hook_index}", p.id),
+                        SourceKind::Plugin,
+                        None,
+                    ),
+                    None => (
+                        format!("config.{name}.{matcher_index}.{hook_index}"),
+                        SourceKind::User,
+                        user_path.map(str::to_owned),
+                    ),
+                };
                 out.push(Registration {
                     event,
                     matcher: group["matcher"].as_str().map(str::to_owned),
                     program,
-                    source: format!("config.{name}.{matcher_index}.{hook_index}"),
-                    source_kind: SourceKind::User,
-                    source_path: user_path.map(str::to_owned),
-                    plugin: None,
+                    source,
+                    source_kind,
+                    source_path,
+                    plugin,
                     status_message: hook["statusMessage"].as_str().map(str::to_owned),
                     timeout_ms: timeout_ms(hook, default_ms),
                     max_output_bytes: max_output_bytes as usize,

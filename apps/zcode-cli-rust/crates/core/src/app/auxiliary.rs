@@ -115,6 +115,21 @@ impl Engine {
                 });
             }
             Event::UsageDone { result } => self.usage_done(&id, result),
+            Event::AuxiliaryReply { result } => {
+                let job = self.auxiliary.remove(&id).unwrap();
+                let result = if job.cancel.is_cancelled() {
+                    Err(RuntimeError::Fault {
+                        message: "Plugin operation cancelled".into(),
+                        code: None,
+                    })
+                } else {
+                    result
+                };
+                self.outbox.push(ServerMsg::Reply {
+                    token: job.token,
+                    result,
+                });
+            }
             Event::AuxiliaryDone { result } => {
                 self.cancel_auth(&id);
                 let job = self.auxiliary.remove(&id).unwrap();

@@ -168,6 +168,7 @@ impl Engine {
             | Event::Background { .. }
             | Event::PromptInitialized { .. }
             | Event::AuxiliaryDone { .. }
+            | Event::AuxiliaryReply { .. }
             | Event::StreamRecovery { .. }
             | Event::UsageDone { .. }
             | Event::RequestAuth { .. }
@@ -372,14 +373,7 @@ impl Engine {
             s.checkpoint_at = now;
         }
         if finished {
-            deltas.extend(
-                super::file_changes::hydrate(
-                    self.sessions.get_mut(&id).unwrap(),
-                    self.tools.as_ref(),
-                    Some(&turn),
-                )
-                .await?,
-            );
+            deltas.extend(self.turn_file_changes(&id, &turn).await?);
         }
         self.publish(&id, deltas)?;
         self.legacy_fact(&id, &turn, legacy)?;

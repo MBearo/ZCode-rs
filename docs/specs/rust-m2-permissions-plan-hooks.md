@@ -405,7 +405,7 @@ sequenceDiagram
 依据 `core/src/hooks/**`、`core/src/tool/executor/{hook-flow,call-runner}.ts`、`core/src/runtime/methods/{hooks,turn,turn-stop}.ts`、`adapters/src/exec/*`、`bootstrap/src/app/runtime-config.ts`。
 
 - **配置与来源**：
-  - 用户配置的 `hooks` 已由 M1 合并；插件 hooks 待 M10 接入，本期留接口；
+  - 用户配置的 `hooks` 已由 M1 合并；插件 hooks 已由 M10.1 接入（见 rust-m10-plugins §3.5）；
   - 插件提供 hooks 时强制启用 hooks（保持 Node 行为）；
   - 注册顺序：用户 → 项目（需信任，M2.6）→ 插件 → 内部；
   - `enabled: false` 的 hook 跳过；

@@ -63,6 +63,23 @@ pub trait ToolPort: Send + Sync {
     async fn mcp_list(&self, _params: &Value, _cancel: &CancellationToken) -> Result<Value> {
         anyhow::bail!("MCP unavailable")
     }
+    /// Validated hook matchers of the enabled plugins, each hook carrying its
+    /// plugin context (spec rust-m10-plugins §3.5).
+    async fn plugin_hooks(
+        &self,
+        _cancel: &CancellationToken,
+    ) -> Result<Vec<(zcode_cli_domain::hooks::HookEvent, Value)>> {
+        Ok(vec![])
+    }
+    /// A `plugins/*` management request of the workspace (spec rust-m10-plugins).
+    async fn plugins(
+        &self,
+        _method: &str,
+        _params: &Value,
+        _cancel: &CancellationToken,
+    ) -> Result<Value> {
+        anyhow::bail!("Plugins unavailable")
+    }
     async fn scoped_definitions(
         &self,
         _session: &str,

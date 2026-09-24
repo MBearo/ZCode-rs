@@ -56,10 +56,10 @@ pub enum Event {
         kind: zcode_cli_domain::session_runtime::ReminderKind,
         message: Value,
     },
-    /// First step of a root session's run: its project hooks and their
-    /// admission view (`None`: no project hooks, or trust is unavailable).
+    /// First step of a root session's run: its configured (user and plugin)
+    /// hooks and its project hooks with their admission view.
     WorkspaceHooks {
-        reply: oneshot::Sender<Option<WorkspaceHooks>>,
+        reply: oneshot::Sender<SessionHooks>,
     },
     /// One hook lifecycle event (Node `hook_run_*` session events).
     Hook(zcode_cli_domain::hooks::runner::Lifecycle),
@@ -85,6 +85,10 @@ pub enum Event {
     },
     AuxiliaryDone {
         result: std::result::Result<Value, ModelFailure>,
+    },
+    /// A detached workspace request's reply with a protocol error (plugin management).
+    AuxiliaryReply {
+        result: std::result::Result<Value, crate::RuntimeError>,
     },
     /// A usage query's reply (spec rust-m9-usage-logs §2.4); the error is a storage failure.
     UsageDone {
@@ -183,6 +187,14 @@ pub enum Event {
         model_failure: Option<ModelFailure>,
         cancelled: bool,
     },
+}
+/// The hooks of a session's runs beyond the startup user hooks.
+pub struct SessionHooks {
+    /// User and enabled plugin hooks (Node configured hooks); `None`: no
+    /// plugin hooks, the startup user hooks stay.
+    pub configured: Option<std::sync::Arc<[zcode_cli_domain::hooks::Registration]>>,
+    /// `None`: no project hooks, or trust is unavailable.
+    pub project: Option<WorkspaceHooks>,
 }
 /// A session's project hooks as admitted for its runs.
 pub struct WorkspaceHooks {

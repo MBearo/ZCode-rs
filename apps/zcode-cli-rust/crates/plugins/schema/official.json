@@ -1,0 +1,274 @@
+{
+  "marketplace": "zcode-plugins-official",
+  "inlineMarketplace": "inline",
+  "nodeReplHost": "node-repl-host",
+  "defaultMarketplaces": [
+    {
+      "id": "zcode-plugins-official",
+      "source": "https://cdn-zcode.z.ai/zcode/official-plugin/marketplace.json",
+      "name": "zcode-plugins-official",
+      "description": "Official ZCode plugins marketplace: built-in and community plugins for ZCode.",
+      "pluginCount": 0
+    }
+  ],
+  "definitions": [
+    {
+      "name": "node-repl-host",
+      "version": "0.6.0",
+      "defaultEnabled": true,
+      "hostMcpServerNames": []
+    },
+    {
+      "name": "android-emulator",
+      "version": "0.1.0",
+      "defaultEnabled": false,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "Android Emulator",
+        "displayNameI18n": {
+          "zh-CN": "Android 模拟器"
+        },
+        "descriptionI18n": {
+          "zh-CN": "提供 Android 开发工作流与模拟器自动化能力。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/android-emulator/icon.png",
+        "category": "developer-tools",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "browser-use",
+      "version": "0.5.1",
+      "defaultEnabled": true,
+      "hostMcpServerNames": ["node_repl"],
+      "listing": {
+        "displayName": "Browser Use",
+        "displayNameI18n": {
+          "zh-CN": "浏览器操作"
+        },
+        "descriptionI18n": {
+          "zh-CN": "操作 ZCode 内置浏览器，检查网页并验证交互。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/browser-use/icon.png",
+        "category": "productivity",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "documents",
+      "version": "0.1.7",
+      "defaultEnabled": true,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "Documents",
+        "displayNameI18n": {
+          "zh-CN": "Word文档"
+        },
+        "descriptionI18n": {
+          "zh-CN": "创建、编辑与审阅Word文档（DOCX）。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/document-skills/icon.png",
+        "category": "productivity",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "pdf",
+      "version": "0.1.7",
+      "defaultEnabled": true,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "PDF",
+        "displayNameI18n": {
+          "zh-CN": "PDF"
+        },
+        "descriptionI18n": {
+          "zh-CN": "创建、编辑与审阅PDF（PDF）。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/document-skills/icon.png",
+        "category": "productivity",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "presentations",
+      "version": "0.1.7",
+      "defaultEnabled": true,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "Presentations",
+        "displayNameI18n": {
+          "zh-CN": "演示文档"
+        },
+        "descriptionI18n": {
+          "zh-CN": "创建、编辑与审阅演示文档（PPTX）。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/document-skills/icon.png",
+        "category": "productivity",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "spreadsheets",
+      "version": "0.1.7",
+      "defaultEnabled": true,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "Spreadsheets",
+        "displayNameI18n": {
+          "zh-CN": "电子表格"
+        },
+        "descriptionI18n": {
+          "zh-CN": "创建、编辑与审阅电子表格（XLSX）。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/document-skills/icon.png",
+        "category": "productivity",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "image-search",
+      "version": "0.1.1",
+      "defaultEnabled": true,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "Image Search",
+        "displayNameI18n": {
+          "zh-CN": "搜图"
+        },
+        "descriptionI18n": {
+          "zh-CN": "查找插图与参考配图。"
+        },
+        "category": "productivity",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "ios-simulator",
+      "version": "0.1.0",
+      "defaultEnabled": false,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "iOS Simulator",
+        "displayNameI18n": {
+          "zh-CN": "iOS 模拟器"
+        },
+        "descriptionI18n": {
+          "zh-CN": "提供 iOS 开发工作流与模拟器自动化能力。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/ios-simulator/icon.png",
+        "category": "developer-tools",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "restore-legacy-sessions",
+      "version": "0.1.0",
+      "defaultEnabled": false,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "Restore Legacy Sessions",
+        "displayNameI18n": {
+          "zh-CN": "恢复旧版会话"
+        },
+        "descriptionI18n": {
+          "zh-CN": "将旧版会话恢复为 ZCode 任务与会话记录。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/restore-legacy-sessions/icon.png",
+        "category": "utilities",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "plugin-creator",
+      "version": "0.1.1",
+      "defaultEnabled": true,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "Plugin Creator",
+        "displayNameI18n": {
+          "zh-CN": "插件创建器"
+        },
+        "descriptionI18n": {
+          "zh-CN": "开发、校验 ZCode 插件，完成本地 dev 市场安装、试用与更新。"
+        },
+        "category": "utilities",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "skill-creator",
+      "version": "0.1.0",
+      "defaultEnabled": true,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "Skill Creator",
+        "displayNameI18n": {
+          "zh-CN": "技能创建器"
+        },
+        "descriptionI18n": {
+          "zh-CN": "创建、编辑和验证可复用的 ZCode 技能。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/skill-creator/icon.png",
+        "category": "utilities",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    },
+    {
+      "name": "zcode-guide",
+      "version": "0.2.0",
+      "defaultEnabled": true,
+      "hostMcpServerNames": [],
+      "listing": {
+        "displayName": "ZCode Guide",
+        "displayNameI18n": {
+          "zh-CN": "ZCode 使用指南"
+        },
+        "descriptionI18n": {
+          "zh-CN": "提供 ZCode 配置指南与插件、技能、MCP、命令和钩子诊断。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/zcode-guide/icon.png",
+        "category": "utilities",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai",
+        "examplePrompts": [
+          "How do I configure MCP servers in ZCode?",
+          "Diagnose my current ZCode setup"
+        ],
+        "examplePromptsI18n": {
+          "zh-CN": ["ZCode 里怎么配置 MCP 服务器？", "帮我诊断当前的 ZCode 配置"]
+        }
+      }
+    },
+    {
+      "name": "computer-use",
+      "version": "0.6.3",
+      "defaultEnabled": false,
+      "hostMcpServerNames": ["node_repl"],
+      "listing": {
+        "displayName": "Computer Use",
+        "displayNameI18n": {
+          "zh-CN": "电脑控制"
+        },
+        "descriptionI18n": {
+          "zh-CN": "自动化桌面应用：智能体驱动鼠标、键盘与界面元素，代你完成实际任务。"
+        },
+        "icon": "https://cdn-zcode.z.ai/zcode/official-plugin/assets/zcode-cua/icon.png",
+        "category": "productivity",
+        "author": "Z.ai",
+        "authorUrl": "https://z.ai"
+      }
+    }
+  ]
+}

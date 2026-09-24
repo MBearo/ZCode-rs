@@ -1,4 +1,4 @@
-use super::{extension_config as config, extension_plugins as plugins};
+use super::extension_config as config;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::{
@@ -154,33 +154,9 @@ pub(super) async fn configured(
         return Ok(vec![]);
     }
     let mut merged = BTreeMap::new();
-    for plugin in plugins::enabled(cwd, config, cancel).await? {
-        let file = config::json_file(&plugin.root.join(".mcp.json")).await?;
-        let mut definitions = shape(&file).clone();
-        for spec in plugin
-            .manifest
-            .get("mcpServers")
-            .into_iter()
-            .flat_map(|v| v.as_array().cloned().unwrap_or_else(|| vec![v.clone()]))
-        {
-            let value = if let Some(path) = spec.as_str() {
-                let path = config::resolve(&plugin.root, path);
-                ensure!(
-                    path.starts_with(&plugin.root),
-                    "MCP manifest path escaped plugin"
-                );
-                config::json_file(&path).await?
-            } else {
-                spec
-            };
-            definitions.extend(shape(&value).clone());
-        }
-        for (name, mut raw) in definitions {
-            let name = format!("plugin:{}:{name}", plugin.name);
-            let root = plugin.root.to_string_lossy();
-            replace_root(&mut raw, &root);
-            merged.insert(name.clone(), Server::configured(&name, raw, cwd));
-        }
+    // 插件 server 由统一发现层按 Node 规则解析（模板变量、ZCODE_PLUGIN_ID）。
+    for (name, raw) in config::plugins(cwd, config, cancel).await?.mcp_servers {
+        merged.insert(name.clone(), Server::configured(&name, raw, cwd));
     }
     if overrides.is_none() {
         if let Some(servers) = config["mcp"]["servers"].as_object() {
@@ -207,26 +183,6 @@ pub(super) async fn configured(
     }
     ensure!(merged.len() <= 64, "Too many configured MCP servers");
     Ok(merged.into_values().collect())
-}
-fn replace_root(value: &mut Value, root: &str) {
-    match value {
-        Value::String(text) => {
-            *text = text
-                .replace("${CLAUDE_PLUGIN_ROOT}", root)
-                .replace("${ZCODE_PLUGIN_ROOT}", root)
-                .replace("${pluginRoot}", root)
-        }
-        Value::Array(array) => array.iter_mut().for_each(|v| replace_root(v, root)),
-        Value::Object(object) => object.values_mut().for_each(|v| replace_root(v, root)),
-        _ => (),
-    }
-}
-fn shape(value: &Value) -> &serde_json::Map<String, Value> {
-    static EMPTY: std::sync::OnceLock<serde_json::Map<String, Value>> = std::sync::OnceLock::new();
-    value["mcpServers"]
-        .as_object()
-        .or_else(|| value.as_object())
-        .unwrap_or_else(|| EMPTY.get_or_init(Default::default))
 }
 pub(super) fn tool_name(server: &str, tool: &str) -> String {
     fn clean(input: &str) -> String {

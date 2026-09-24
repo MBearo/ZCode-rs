@@ -161,6 +161,18 @@ impl WorkspaceConfig {
             } else {
                 Value::Null
             },
+            user_view: {
+                let mut layers: Vec<(Scope, &Map<String, Value>)> = vec![(Scope::System, &system)];
+                if user.loaded {
+                    layers.push((Scope::User, &user.patch));
+                }
+                if !env.is_empty() {
+                    layers.push((Scope::Env, &env));
+                }
+                effective(&merge_layers(&layers))
+            },
+            user_plugins: user.patch.get("plugins").cloned().unwrap_or(Value::Null),
+            project_plugins: project.get("plugins").cloned().unwrap_or(Value::Null),
             user_path: user.path,
             project_paths: projects.into_iter().map(|f| f.path).collect(),
             diagnostics,

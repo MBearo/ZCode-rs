@@ -1,4 +1,4 @@
-use super::{extension_config as config, extension_plugins as plugins};
+use super::extension_config as config;
 use crate::{
     contract::ToolOutput,
     domain::skills::{Skill, SkillCatalog, frontmatter},
@@ -66,20 +66,13 @@ async fn discover_inner(
             });
         }
     }
-    for plugin in plugins::enabled(cwd, config, cancel).await? {
-        let mut paths = vec!["skills"];
-        paths.extend(config::strings(&plugin.manifest["skills"]));
-        for path in paths {
-            let path = config::resolve(&plugin.root, path);
-            if path.starts_with(&plugin.root) {
-                roots.push(Root {
-                    path,
-                    scope: "plugin".into(),
-                    plugin_name: Some(plugin.name.clone()),
-                    plugin_root: Some(plugin.root.clone()),
-                });
-            }
-        }
+    for root in config::plugins(cwd, config, cancel).await?.skill_roots {
+        roots.push(Root {
+            path: root.path,
+            scope: "plugin".into(),
+            plugin_name: Some(root.plugin_name),
+            plugin_root: Some(root.plugin_root),
+        });
     }
     let mut disabled = BTreeSet::new();
     // Node 把 skill 段与 skills[绝对路径] 统一规范化为 skillOverrides。
@@ -131,7 +124,7 @@ async fn discover_inner(
                 continue;
             }
             if let Some(boundary) = &root.plugin_root
-                && !plugins::contained_file(boundary, &path).await
+                && !config::contained_file(boundary, &path).await
             {
                 continue;
             }
@@ -188,7 +181,7 @@ pub(super) async fn load(
 ) -> Result<ToolOutput> {
     tokio::select! {biased; _=cancel.cancelled()=>anyhow::bail!("Cancelled"), result=async {
         let path=Path::new(&skill.path);
-        if let Some(root)=&skill.plugin_root {ensure!(plugins::contained_file(Path::new(root),path).await,"Plugin Skill path escaped its root");}
+        if let Some(root)=&skill.plugin_root {ensure!(config::contained_file(Path::new(root),path).await,"Plugin Skill path escaped its root");}
         let (content,truncated)=read(path,100_000).await?;
         let (_,_,content)=frontmatter(&content);
         let directory=path.parent().ok_or_else(||anyhow::anyhow!("Skill directory missing"))?.to_string_lossy();

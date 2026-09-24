@@ -53,19 +53,6 @@ pub(super) async fn project_directories(cwd: &Path) -> Vec<PathBuf> {
     }
     vec![cwd.to_owned()]
 }
-pub(super) fn storage(config: &Value) -> PathBuf {
-    let base = std::env::var("ZCODE_STORAGE_DIR")
-        .ok()
-        .or_else(|| config["storage"]["dir"].as_str().map(str::to_owned));
-    let base = base
-        .map(|p| resolve(&home(), &p))
-        .unwrap_or_else(|| home().join(".zcode"));
-    if base.file_name().is_some_and(|p| p == "cli") {
-        base.join("plugins")
-    } else {
-        base.join("cli/plugins")
-    }
-}
 pub(super) fn strings(value: &Value) -> Vec<&str> {
     if let Some(s) = value.as_str() {
         vec![s]
@@ -75,4 +62,42 @@ pub(super) fn strings(value: &Value) -> Vec<&str> {
             .map(|a| a.iter().filter_map(Value::as_str).collect())
             .unwrap_or_default()
     }
+}
+
+/// Plugin discovery for the runtime (skills, MCP, agents; spec rust-m10-plugins §3.5).
+pub(super) async fn plugins(
+    cwd: &Path,
+    config: &Value,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<zcode_cli_plugins::Outcome> {
+    let storage = zcode_cli_plugins::records::storage_root(config, &home());
+    let lookup = |name: &str| std::env::var(name).ok();
+    zcode_cli_plugins::discover(&zcode_cli_plugins::Request {
+        config,
+        storage: &storage,
+        cwd,
+        env: &lookup,
+        cancel,
+    })
+    .await
+}
+
+/// `path` is inside `root` and no component on the way is a symlink.
+pub(super) async fn contained_file(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let mut current = root.to_owned();
+    for part in std::iter::once(None).chain(relative.components().map(Some)) {
+        if let Some(part) = part {
+            current.push(part);
+        }
+        if !tokio::fs::symlink_metadata(&current)
+            .await
+            .is_ok_and(|m| !m.file_type().is_symlink())
+        {
+            return false;
+        }
+    }
+    true
 }

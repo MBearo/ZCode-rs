@@ -1,4 +1,4 @@
-use super::{extension_config as config, extension_plugins as plugins};
+use super::extension_config as config;
 use crate::domain::subagent::{Profile, builtins};
 use anyhow::Result;
 use serde_json::json;
@@ -47,24 +47,26 @@ pub(super) async fn discover(
     }
     let mut imported = vec![];
     let mut counts = BTreeMap::<String, usize>::new();
-    for plugin in plugins::enabled(cwd, config, cancel).await? {
-        for path in markdown(&plugin.root.join("agents"), cancel).await? {
-            if !plugins::contained_file(&plugin.root, &path).await {
+    let outcome = super::extension_config::plugins(cwd, config, cancel).await?;
+    for plugin in outcome.plugins.iter().filter(|p| p.enabled) {
+        let (id, name, root) = (&plugin.loaded.id, plugin.loaded.name(), &plugin.loaded.root);
+        for path in markdown(&root.join("agents"), cancel).await? {
+            if !super::extension_config::contained_file(root, &path).await {
                 continue;
             }
             if let Some(mut p) = read(&path, "plugin", cancel).await? {
                 let bare = p.name.clone();
                 if let Some(selection) = state["pluginAgentModelSelectionOverrides"]
-                    .get(format!("plugin:{}:{}", plugin.id, bare).as_str())
+                    .get(format!("plugin:{id}:{bare}").as_str())
                 {
                     p.model_selection = Some(selection.clone());
                 }
                 *counts.entry(bare.clone()).or_default() += 1;
-                p.name = format!("{}:{}", plugin.name, p.name);
+                p.name = format!("{name}:{}", p.name);
                 p.system_prompt = p
                     .system_prompt
-                    .replace("${CLAUDE_PLUGIN_ROOT}", &plugin.root.to_string_lossy())
-                    .replace("${ZCODE_PLUGIN_ROOT}", &plugin.root.to_string_lossy());
+                    .replace("${CLAUDE_PLUGIN_ROOT}", &root.to_string_lossy())
+                    .replace("${ZCODE_PLUGIN_ROOT}", &root.to_string_lossy());
                 imported.push((bare, p));
             }
         }

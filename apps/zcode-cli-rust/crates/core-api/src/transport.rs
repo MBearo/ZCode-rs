@@ -26,6 +26,10 @@ macro_rules! methods {
                     _ => None,
                 }
             }
+            /// A `plugins/*` management request (spec rust-m10-plugins).
+            pub fn is_plugin(self) -> bool {
+                self.as_str().starts_with("plugins/")
+            }
             pub fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $name,)*
@@ -58,6 +62,10 @@ methods! {
     SessionUsage => "session/usage",
     McpList => "mcp/list",
     SkillsReferenceCatalog => "skills/referenceCatalog",
+    PluginsList => "plugins/list",
+    PluginsOverview => "plugins/overview",
+    PluginsReferenceCatalog => "plugins/referenceCatalog",
+    PluginsReferenceCatalogWithCategory => "plugins/referenceCatalogWithCategory",
     SessionCreate => "session/create",
     SessionResume => "session/resume",
     SessionSubscribe => "session/subscribe",

@@ -11,7 +11,6 @@ import { normalizeAgentProfiles } from "../apps/zcode-cli/packages/core/src/suba
 import { buildExploreAgentPrompt } from "../apps/zcode-cli/packages/core/src/subagent/explore.ts";
 import { buildSubagentCommonNotes } from "../apps/zcode-cli/packages/core/src/subagent/system-prompt.ts";
 import { buildPersistentAgentMemoryPrompt } from "../apps/zcode-cli/packages/core/src/subagent/persistent-memory-prompt.ts";
-import { DEFAULT_ENABLED_OFFICIAL_PLUGIN_IDS } from "../apps/zcode-cli/packages/bootstrap/src/app/official-plugin-definitions.ts";
 import {
   todoReadToolEntry,
   todoWriteToolEntry,
@@ -72,7 +71,6 @@ for (const [file, data] of [
   ],
   ["tool_schemas.json", schemas],
   ["skill_description.json", skillToolEntry.metadata.description],
-  ["plugin_defaults.json", [...DEFAULT_ENABLED_OFFICIAL_PLUGIN_IDS].sort()],
   [
     "todo_descriptions.json",
     {

@@ -171,7 +171,11 @@ impl Engine {
     ) -> Option<super::turn_hooks::TurnHooks> {
         let session = self.sessions.get_mut(id)?;
         let first = !std::mem::replace(&mut session.runtime.session_start_ran, true);
-        if session.parent_id.is_some() || self.hooks.user.is_empty() && self.hooks.ports.is_none() {
+        // 会话首轮尚未解析插件 hooks 时也要进入 TurnHooks，由运行向 engine 取回。
+        let without_plugins = self.hooks.plugins.get(id).is_some_and(Option::is_none);
+        if session.parent_id.is_some()
+            || self.hooks.user.is_empty() && self.hooks.ports.is_none() && without_plugins
+        {
             return None;
         }
         let at = session

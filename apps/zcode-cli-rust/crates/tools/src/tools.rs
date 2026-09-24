@@ -12,10 +12,11 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use zcode_cli_domain::hooks::HookEvent;
 
 pub struct WorkspaceTools {
-    cwd: PathBuf,
-    config: Arc<dyn crate::contract::ConfigSource>,
+    pub(super) cwd: PathBuf,
+    pub(super) config: Arc<dyn crate::contract::ConfigSource>,
     artifacts: PathBuf,
     reads: Mutex<HashMap<String, Arc<Mutex<FileState>>>>,
     // File writes from different sessions share one commit gate; reads remain concurrent.
@@ -23,7 +24,7 @@ pub struct WorkspaceTools {
     shell: ShellTasks,
     mcp: super::mcp_hub::Hub,
     /// Complete child environment shared by shell tools and hooks.
-    env: Arc<[(String, String)]>,
+    pub(super) env: Arc<[(String, String)]>,
     web: super::web_fetch::WebFetcher,
 }
 impl WorkspaceTools {
@@ -193,6 +194,12 @@ impl ToolPort for WorkspaceTools {
     }
     async fn mcp_list(&self, params: &Value, cancel: &CancellationToken) -> Result<Value> {
         self.mcp.list(params, cancel).await
+    }
+    async fn plugin_hooks(&self, cancel: &CancellationToken) -> Result<Vec<(HookEvent, Value)>> {
+        super::plugin_requests::hooks(self, cancel).await
+    }
+    async fn plugins(&self, method: &str, p: &Value, cancel: &CancellationToken) -> Result<Value> {
+        super::plugin_requests::handle(self, method, p, cancel).await
     }
     async fn scoped_definitions(
         &self,

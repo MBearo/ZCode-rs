@@ -376,6 +376,8 @@ app-server 的投递层完全替换现有 `subscriptions.rs`：
 
 ### 5.18 M10：插件管理与官方 MCP 鉴权（P1 #16）
 
+分期、精确契约与验收见 [rust-m10-plugins.md](rust-m10-plugins.md)。以下为原稿。
+
 - **18 个 `plugins/*` 方法**：契约同 `bootstrap/zcode-protocol/plugins.ts`。与 Node 共用 `~/.zcode/cli/plugins` 的布局：`known_marketplaces.json`、`installed_plugins.json`、`cache/`、`data/`，以及原子目录事务（`.backup` 与 `.transaction.json` 边车文件）。
 - **长操作**：操作 id 对应的 `CancellationToken` 注册表；重复 id 显式拒绝（刻意修正，见第 6 节）；`plugins/operationProgress` 通知。每个 storage root 一把进程内锁，协调方式同 Node。
 - **来源**：

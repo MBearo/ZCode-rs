@@ -101,22 +101,32 @@ impl TurnHooks {
     ) -> Result<()> {
         let (reply, receipt) = oneshot::channel();
         sink.send(Event::WorkspaceHooks { reply }).await?;
-        let project = tokio::select! {biased;
+        let hooks = tokio::select! {biased;
             _=cancel.cancelled()=>anyhow::bail!("Cancelled"),
-            result=receipt=>result.ok().flatten(),
+            result=receipt=>result.ok(),
         };
-        let Some(project) = project else {
+        let Some(hooks) = hooks else {
             return Ok(());
         };
         let current = &self.hooks;
-        let registrations = workspace::insert(&current.registrations, project.registrations);
+        // 插件 hooks 追加在用户 hooks 之后（Node mergeRuntimeHooks），项目 hooks 再插在两者之间。
+        let configured = hooks
+            .configured
+            .unwrap_or_else(|| current.registrations.clone());
+        let (registrations, admission) = match hooks.project {
+            Some(project) => (
+                workspace::insert(&configured, project.registrations).into(),
+                Some(project.view),
+            ),
+            None => (configured, None),
+        };
         self.hooks = Arc::new(Hooks {
-            registrations: registrations.into(),
+            registrations,
             tools: current.tools.clone(),
             clock: current.clock.clone(),
             cwd: current.cwd.clone(),
             turn_id: current.turn_id.clone(),
-            admission: Some(project.view),
+            admission,
         });
         Ok(())
     }

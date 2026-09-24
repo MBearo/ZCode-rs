@@ -19,6 +19,7 @@ import { editMatchFixtures } from "./zcode-cli-rust-edit-fixtures.mjs";
 import { planModeData } from "./zcode-cli-rust-plan-mode-fixtures.mjs";
 import { hookFixtures } from "./zcode-cli-rust-hooks-fixtures.mjs";
 import { workspaceHookFixtures } from "./zcode-cli-rust-workspace-hook-fixtures.mjs";
+import { pluginOfficialData } from "./zcode-cli-rust-plugin-fixtures.mjs";
 import {
   bashAnalysisFixtures,
   bashAnalysisFuzzFixtures,
@@ -230,6 +231,7 @@ await emitCompact(
   bashAnalysisFuzzFixtures(),
 );
 await emit("../apps/zcode-cli-rust/crates/bash/schema/readonly-policy.json", bashPolicyData());
+await emit("../apps/zcode-cli-rust/crates/plugins/schema/official.json", pluginOfficialData());
 await emit("../apps/zcode-cli-rust/crates/bash/fixtures/bash.json", bashFixtures());
 // 命令注册表约 2 MB，保持紧凑 JSON；格式化会让体积膨胀数倍。
 await emitCompact(

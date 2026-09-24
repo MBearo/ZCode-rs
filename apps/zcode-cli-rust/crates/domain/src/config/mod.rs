@@ -133,6 +133,13 @@ pub struct ConfigSnapshot {
     pub user_path: String,
     pub project_paths: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Defaults, user and env layers only (Node `createConfig` without a
+    /// working directory): the `configScope: "user"` plugin view.
+    pub user_view: Value,
+    /// The `plugins` section of the user file and of the merged project files
+    /// (Node `resolvePluginConfigSources`).
+    pub user_plugins: Value,
+    pub project_plugins: Value,
 }
 
 impl ConfigSnapshot {

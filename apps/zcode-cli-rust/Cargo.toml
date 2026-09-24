@@ -12,6 +12,7 @@ members = [
   "crates/tools",
   "crates/bash-parse",
   "crates/bash",
+  "crates/plugins",
   "crates/app-server",
   "crates/headless",
   "crates/tui",
@@ -80,6 +81,7 @@ zcode-cli-protocol = { path = "crates/protocol" }
 zcode-cli-domain = { path = "crates/domain" }
 zcode-cli-bash-parse = { path = "crates/bash-parse" }
 zcode-cli-bash = { path = "crates/bash" }
+zcode-cli-plugins = { path = "crates/plugins" }
 zcode-cli-core-api = { path = "crates/core-api" }
 zcode-cli-core = { path = "crates/core" }
 zcode-cli-host = { path = "crates/host" }

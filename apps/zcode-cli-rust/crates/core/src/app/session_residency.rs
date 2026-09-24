@@ -104,6 +104,7 @@ impl Engine {
             self.sessions.remove(&id);
             self.hooks.sessions.remove(&id);
             self.hooks.without.remove(&id);
+            self.hooks.plugins.remove(&id);
             self.session_access.remove(&id);
         }
         if self.acks.len() > 1024 {

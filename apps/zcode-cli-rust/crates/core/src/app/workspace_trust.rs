@@ -19,6 +19,12 @@ use tokio::sync::watch;
 pub(super) struct HookState {
     /// Hooks from the user config file.
     pub user: Arc<[Registration]>,
+    /// The startup `hooks` config and user config path (merged with plugin hooks).
+    pub user_config: serde_json::Value,
+    pub user_path: String,
+    /// Per session: user and plugin hooks when plugins declare any (Node
+    /// resolves them once per App; `None`: the session's plugins have none).
+    pub plugins: BTreeMap<String, Option<Arc<[Registration]>>>,
     /// App-server only: project hooks go through workspace trust.
     pub ports: Option<TrustPorts>,
     pub sessions: BTreeMap<String, WorkspaceTrust>,

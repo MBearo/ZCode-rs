@@ -98,6 +98,11 @@ pub(super) fn restored(s: &mut Session) -> Vec<Value> {
 }
 
 impl Engine {
+    /// File change summaries of a finished turn (row upserts to publish).
+    pub(super) async fn turn_file_changes(&mut self, id: &str, turn: &str) -> Result<Vec<Value>> {
+        let session = self.sessions.get_mut(id).context("Session unavailable")?;
+        hydrate(session, self.tools.as_ref(), Some(turn)).await
+    }
     pub(super) async fn file_changes(&mut self, p: &Value) -> Result<Value> {
         ensure!(
             p.as_object().is_some_and(|o| o.len() == 4),

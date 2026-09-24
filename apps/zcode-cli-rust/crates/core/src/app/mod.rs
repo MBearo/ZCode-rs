@@ -67,6 +67,7 @@ mod legacy_snapshot;
 mod legacy_stream;
 mod legacy_tools;
 mod mcp;
+mod plugins;
 mod session_list;
 mod shared_context;
 mod skills;
