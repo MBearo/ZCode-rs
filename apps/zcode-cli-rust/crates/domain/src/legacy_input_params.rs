@@ -1,9 +1,7 @@
 //! Params of legacy `session/send`, `session/compact` and `session/goal`
 //! (`zcodeSessionSendParamsSchema`, `zcodeSessionCompactParamsSchema`,
 //! `zcodeSessionGoalParamsSchema`).
-use super::legacy_params::{
-    ParamsError, model, non_negative, optional, parse, required, strings,
-};
+use super::legacy_params::{ParamsError, model, non_negative, optional, parse, required, strings};
 use super::zod::{Issue, Schema, non_empty, string, string_min};
 use serde_json::{Value, json};
 use std::sync::OnceLock;
@@ -92,10 +90,7 @@ fn schemas() -> &'static [Schema; 3] {
             optional("inputId", non_empty()),
             optional("queryId", non_empty()),
             required("content", string()),
-            optional(
-                "attachments",
-                Schema::Array(Box::new(json_object()), None),
-            ),
+            optional("attachments", Schema::Array(Box::new(json_object()), None)),
             optional("browserAmbientContext", browser_ambient_context()),
             optional("expectedRevision", non_negative()),
             optional("expectedProviderRevision", non_empty()),

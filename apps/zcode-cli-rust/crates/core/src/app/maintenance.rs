@@ -5,7 +5,11 @@ use serde_json::{Value, json};
 impl Engine {
     /// `start_over_held`: legacy `session/compact` starts at once when idle even
     /// with a held queue (Node runs it directly); V4 compacts wait behind it.
-    pub(super) async fn compact_command(&mut self, c: &Command, start_over_held: bool) -> Result<Value> {
+    pub(super) async fn compact_command(
+        &mut self,
+        c: &Command,
+        start_over_held: bool,
+    ) -> Result<Value> {
         let id = c.session_id.as_deref().context("Session id required")?;
         let session = self.sessions.get(id).context("Session unavailable")?;
         if self.model.is_none() && self.registry.is_none() {

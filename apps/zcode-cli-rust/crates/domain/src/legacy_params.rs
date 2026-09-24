@@ -156,10 +156,7 @@ fn imported_history() -> Schema {
         required("source", Schema::Literal(json!("sharedContext"))),
         required("title", trimmed()),
         optional("createdAt", non_negative()),
-        required(
-            "markdown",
-            string_min(1),
-        ),
+        required("markdown", string_min(1)),
         required("provenance", provenance),
     ]);
     Schema::Discriminated(
@@ -290,9 +287,7 @@ pub fn subscribe(params: &Value) -> Result<Value, ParamsError> {
 /// `sessionDebugParamsSchema`: `{sessionId: z.string().min(1)}` (not trimmed).
 pub fn debug(params: &Value) -> Result<Value, ParamsError> {
     static SCHEMA: OnceLock<Schema> = OnceLock::new();
-    let schema = SCHEMA.get_or_init(|| {
-        Schema::Object(vec![required("sessionId", string_min(1))])
-    });
+    let schema = SCHEMA.get_or_init(|| Schema::Object(vec![required("sessionId", string_min(1))]));
     parse(schema, params)
 }
 

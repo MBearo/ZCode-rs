@@ -18,7 +18,9 @@ fn maps_host_attachments_like_node() {
     );
     // PDF 由 MIME 判定，优先于 kind；本地路径优先于内联数据。
     assert_eq!(
-        mapped(json!({"kind":"file","filename":"r.pdf","mimeType":"Application/PDF; x=1","localPath":"/tmp/r.pdf","dataBase64":"eA=="})),
+        mapped(
+            json!({"kind":"file","filename":"r.pdf","mimeType":"Application/PDF; x=1","localPath":"/tmp/r.pdf","dataBase64":"eA=="})
+        ),
         Some(Mapped {
             file_name: "r.pdf".into(),
             mime: "application/pdf".into(),
@@ -26,7 +28,9 @@ fn maps_host_attachments_like_node() {
         })
     );
     assert_eq!(
-        mapped(json!({"kind":"file","filename":"n.txt","mimeType":"text/plain; charset=utf-8","textContent":"hi"})),
+        mapped(
+            json!({"kind":"file","filename":"n.txt","mimeType":"text/plain; charset=utf-8","textContent":"hi"})
+        ),
         Some(Mapped {
             file_name: "n.txt".into(),
             mime: "text/plain".into(),
@@ -34,7 +38,9 @@ fn maps_host_attachments_like_node() {
         })
     );
     assert_eq!(
-        mapped(json!({"kind":"audio","filename":"v.m4a","mimeType":"audio/mp4","dataBase64":"aGk"})),
+        mapped(
+            json!({"kind":"audio","filename":"v.m4a","mimeType":"audio/mp4","dataBase64":"aGk"})
+        ),
         Some(Mapped {
             file_name: "v.m4a".into(),
             mime: "application/octet-stream".into(),
@@ -42,8 +48,12 @@ fn maps_host_attachments_like_node() {
         })
     );
     let video = mapped(json!({"kind":"video","dataBase64":"aGk="})).unwrap();
-    assert_eq!((video.file_name.as_str(), video.mime.as_str()), ("attachment", "video/mp4"));
-    let binary = mapped(json!({"kind":"file","filename":"b","dataBase64":"aGk=","sizeBytes":2})).unwrap();
+    assert_eq!(
+        (video.file_name.as_str(), video.mime.as_str()),
+        ("attachment", "video/mp4")
+    );
+    let binary =
+        mapped(json!({"kind":"file","filename":"b","dataBase64":"aGk=","sizeBytes":2})).unwrap();
     assert_eq!(binary.mime, "application/octet-stream");
 }
 

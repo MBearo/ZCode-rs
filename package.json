@@ -46,7 +46,7 @@
     "architecture:baseline:update": "node scripts/architecture/architecture-check.mjs baseline:update",
     "architecture:context": "node scripts/architecture/architecture-check.mjs context",
     "build:zcode-cli-rust": "cargo build --locked --manifest-path apps/zcode-cli-rust/Cargo.toml",
-    "check:zcode-cli-rust": "node scripts/check-zcode-cli-rust-boundaries.mjs && cargo fmt --manifest-path apps/zcode-cli-rust/Cargo.toml --check && cargo clippy --locked --manifest-path apps/zcode-cli-rust/Cargo.toml --all-targets -- -D warnings",
+    "check:zcode-cli-rust": "node scripts/check-zcode-cli-rust-boundaries.mjs && cargo fmt --manifest-path apps/zcode-cli-rust/Cargo.toml --all --check && cargo clippy --locked --manifest-path apps/zcode-cli-rust/Cargo.toml --all-targets -- -D warnings",
     "test:zcode-cli-rust": "node scripts/test-zcode-cli-rust.mjs",
     "dev:desktop:zcode-cli-rust": "node scripts/dev-desktop-zcode-cli-rust.mjs"
   },

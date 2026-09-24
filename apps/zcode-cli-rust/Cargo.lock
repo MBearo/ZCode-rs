@@ -2152,6 +2152,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcode-cli-headless"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+ "zcode-cli-core-api",
+]
+
+[[package]]
 name = "zcode-cli-host"
 version = "0.1.0"
 dependencies = [
@@ -2245,6 +2257,7 @@ dependencies = [
  "zcode-cli-core",
  "zcode-cli-core-api",
  "zcode-cli-domain",
+ "zcode-cli-headless",
  "zcode-cli-host",
  "zcode-cli-model",
  "zcode-cli-net",

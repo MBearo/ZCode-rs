@@ -57,8 +57,9 @@ pub(super) async fn authorize(
         Behavior::Deny => Ok(stop(refusal(super::permissions::summarize(
             &decision.reason,
         )))),
-        // AskUserQuestion 的询问就是工具自身的问答交互（Node userInput 通道），不再单独弹权限。
-        Behavior::Ask if name == "AskUserQuestion" => Ok(Gate::Run(None)),
+        // AskUserQuestion 的询问就是工具自身的问答交互（Node userInput 通道），不再单独弹权限；
+        // 无头运行没有问答通道，与 Node 一样经权限询问被拒绝。
+        Behavior::Ask if name == "AskUserQuestion" && !snapshot.headless => Ok(Gate::Run(None)),
         Behavior::Ask => {
             let ask_options = capability
                 .permission

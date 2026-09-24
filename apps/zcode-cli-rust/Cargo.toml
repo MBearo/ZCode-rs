@@ -13,6 +13,7 @@ members = [
   "crates/bash-parse",
   "crates/bash",
   "crates/app-server",
+  "crates/headless",
   "crates/tui",
 ]
 resolver = "2"
@@ -83,6 +84,7 @@ zcode-cli-state = { path = "crates/state" }
 zcode-cli-model = { path = "crates/model" }
 zcode-cli-tools = { path = "crates/tools" }
 zcode-cli-app-server = { path = "crates/app-server" }
+zcode-cli-headless = { path = "crates/headless" }
 zcode-cli-tui = { path = "crates/tui" }
 
 [package]
@@ -120,6 +122,7 @@ zcode-cli-state.workspace = true
 zcode-cli-model.workspace = true
 zcode-cli-tools.workspace = true
 zcode-cli-app-server.workspace = true
+zcode-cli-headless.workspace = true
 zcode-cli-tui.workspace = true
 tracing.workspace = true
 

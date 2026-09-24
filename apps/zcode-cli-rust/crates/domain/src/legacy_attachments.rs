@@ -37,7 +37,12 @@ enum Category {
 /// `mimeType` without parameters, lowercased.
 fn base_mime(item: &Value) -> Option<String> {
     let raw = item["mimeType"].as_str()?;
-    let base = raw.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let base = raw
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     (!base.is_empty()).then_some(base)
 }
 
@@ -48,7 +53,8 @@ fn decode(encoded: &str) -> Option<Vec<u8>> {
         .chars()
         .filter(|c| !c.is_ascii_whitespace())
         .collect();
-    let config = GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
+    let config =
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
     GeneralPurpose::new(&base64::alphabet::STANDARD, config)
         .decode(&compact)
         .or_else(|_| GeneralPurpose::new(&base64::alphabet::URL_SAFE, config).decode(&compact))
@@ -120,7 +126,9 @@ pub fn map(item: &Value) -> Option<Mapped> {
     let text = item["textContent"].as_str();
     let source = match (category, path) {
         (_, Some(path)) => Source::Path(path),
-        (Category::Pdf | Category::Image | Category::Video, None) => Source::Bytes(decode(inline?)?),
+        (Category::Pdf | Category::Image | Category::Video, None) => {
+            Source::Bytes(decode(inline?)?)
+        }
         (Category::File | Category::Audio, None) => match text {
             Some(text) => Source::Bytes(text.as_bytes().to_vec()),
             None => {
@@ -147,13 +155,15 @@ pub fn map(item: &Value) -> Option<Mapped> {
         },
         Category::Video => valid.unwrap_or_else(|| "video/mp4".into()),
         // Node 把 file 当文本文件交给运行时：音频 MIME 同样按二进制文件处理。
-        Category::File => valid.filter(|b| !b.starts_with("audio/")).unwrap_or_else(|| {
-            if text.is_some() {
-                "text/plain".into()
-            } else {
-                "application/octet-stream".into()
-            }
-        }),
+        Category::File => valid
+            .filter(|b| !b.starts_with("audio/"))
+            .unwrap_or_else(|| {
+                if text.is_some() {
+                    "text/plain".into()
+                } else {
+                    "application/octet-stream".into()
+                }
+            }),
         // Node 把音频按普通文件交给运行时；V4 不接受 audio/*。
         Category::Audio => "application/octet-stream".into(),
     };

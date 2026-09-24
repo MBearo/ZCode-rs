@@ -73,6 +73,8 @@ pub struct Engine {
     pub(super) outbox: Vec<ServerMsg>,
     pub(super) auto_resolution_preference: bool,
     pub(super) question_timing: (u64, u64),
+    /// `-p`: no permission client, every ask is denied (spec rust-m4-headless 3.2).
+    pub(super) headless: bool,
     pub(super) events: mpsc::Sender<RunEvent>,
     pub(super) event_rx: mpsc::Receiver<RunEvent>,
     /// User config hooks and workspace hook trust.
@@ -135,6 +137,7 @@ impl Engine {
             config_seq: 0,
             outbox: vec![],
             auto_resolution_preference: true,
+            headless: false,
             question_timing: (60_000, 300_000),
             events,
             event_rx,

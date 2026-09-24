@@ -39,7 +39,9 @@ impl Engine {
         }
         self.touch_session(&id);
         let input = p["inputId"].as_str();
-        let plan = self.submitted_execution_state(&id, &json!({}))?.plan_enabled;
+        let plan = self
+            .submitted_execution_state(&id, &json!({}))?
+            .plan_enabled;
         match action {
             "show" => {
                 let text = summary(self.sessions[&id].goal.as_ref());
@@ -48,8 +50,12 @@ impl Engine {
             "pause" => {
                 let existed = self.sessions[&id].goal.is_some();
                 if existed {
-                    let c =
-                        self.legacy_envelope(&id, ("legacy-session", "pauseGoal"), input, json!({}));
+                    let c = self.legacy_envelope(
+                        &id,
+                        ("legacy-session", "pauseGoal"),
+                        input,
+                        json!({}),
+                    );
                     self.goal_command(&c, true).await?;
                 }
                 // Node 无论是否有目标都推进 revision。
@@ -115,7 +121,11 @@ impl Engine {
                         return Err(error);
                     }
                 }
-                let reason = if replaces { "goal_replaced" } else { "goal_set" };
+                let reason = if replaces {
+                    "goal_replaced"
+                } else {
+                    "goal_set"
+                };
                 self.legacy_state_updated(&id, reason)?;
                 // 新目标的用量与时长均为 0，与 Node setTarget 返回的目标同文。
                 let fresh = Goal::new(String::new(), objective.into(), 0);

@@ -99,8 +99,7 @@ impl Engine {
                             .map(|r| json!({"op":"row.upserted","row":r})),
                     );
                     let turn = self.clock.id();
-                    let message =
-                        super::goal_commands::continuation(
+                    let message = super::goal_commands::continuation(
                         s,
                         &frozen,
                         Some(&verdict),

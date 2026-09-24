@@ -1,7 +1,5 @@
 //! zod 4 run semantics for [`Schema`](super::Schema).
-use super::{
-    Format, Issue, J, Parsed, Schema, aborted, invalid_type, js_trim, too_big, too_small,
-};
+use super::{Format, Issue, J, Parsed, Schema, aborted, invalid_type, js_trim, too_big, too_small};
 use serde_json::{Map, Value};
 
 const MAX_SAFE: i64 = 9_007_199_254_740_991;

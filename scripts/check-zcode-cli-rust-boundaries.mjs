@@ -28,22 +28,25 @@ async function walk(directory) {
       /\bzcode_cli_(?:core|core_api|state|model|tools|host)\s*::/.test(code)
     )
       failures.push(`${file}: protocol imports core or adapters`);
-    if (crate === "core" && /\bzcode_cli_(?:state|model|tools|host|app_server|tui)\s*::/.test(code))
+    if (
+      crate === "core" &&
+      /\bzcode_cli_(?:state|model|tools|host|app_server|headless|tui)\s*::/.test(code)
+    )
       failures.push(`${file}: core imports an adapter or frontend`);
     // 前端只经传输契约（core-api/protocol/domain）与 runtime 交互，不能持有 core 内部状态。
     if (
-      ["tui", "app-server"].includes(crate) &&
+      ["tui", "app-server", "headless"].includes(crate) &&
       /\bzcode_cli_(?:core|state|model|tools|host)\s*::/.test(code)
     )
       failures.push(`${file}: frontend imports core or an adapter`);
     // 网络出口是最底层基础设施：不依赖任何内部 crate，前端也不直接发起网络请求。
     if (crate === "net" && /\bzcode_cli_\w+\s*::/.test(code))
       failures.push(`${file}: net imports an internal crate`);
-    if (["tui", "app-server"].includes(crate) && /\bzcode_cli_net\s*::/.test(code))
+    if (["tui", "app-server", "headless"].includes(crate) && /\bzcode_cli_net\s*::/.test(code))
       failures.push(`${file}: frontend imports network egress`);
     if (
       ["state", "model", "tools", "host", "net"].includes(crate) &&
-      /\bzcode_cli_(?:core|app_server|tui)\s*::/.test(code)
+      /\bzcode_cli_(?:core|app_server|headless|tui)\s*::/.test(code)
     )
       failures.push(`${file}: adapter imports core or frontend`);
   }

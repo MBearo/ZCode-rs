@@ -37,6 +37,8 @@ pub(crate) struct Snapshot {
     pub policy: policy::Policy,
     pub project_rules: Arc<Ruleset>,
     pub working_directory: String,
+    /// `-p` run: AskUserQuestion asks like any tool and is denied.
+    pub headless: bool,
 }
 
 impl Snapshot {
@@ -178,6 +180,7 @@ impl Engine {
             policy,
             project_rules: self.permissions.project_rules.clone(),
             working_directory: self.workspace_path.clone(),
+            headless: self.headless,
         })
     }
 
@@ -295,6 +298,10 @@ impl Engine {
         request: PermissionRequest,
         reply: tokio::sync::oneshot::Sender<PermissionAnswer>,
     ) -> Result<String> {
+        if self.headless {
+            self.headless_deny(id, call, &request, reply);
+            return Ok(id.into());
+        }
         let interaction = format!("perm_{}", self.clock.id());
         let now = self.clock.now();
         let tool = call["function"]["name"].as_str().unwrap_or("");
