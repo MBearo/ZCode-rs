@@ -14,7 +14,7 @@ use zcode_cli_domain::node_history::{Branch, Record, select_branch};
 use zcode_cli_domain::node_ids;
 
 const VERIFICATION_ENTRY: &str = "target_completion_verification";
-const COMMAND_FACT_ENTRY: &str = "v4/command_fact";
+pub(super) const COMMAND_FACT_ENTRY: &str = "v4/command_fact";
 
 fn uuid() -> String {
     crate::id()
@@ -117,7 +117,7 @@ fn history<'a>(active: &[Cow<'a, Record>], target: &Value) -> Result<Vec<Cow<'a,
 
 /// Node `resolveForkModelSelection` (`{modelId, providerId, options?}` order
 /// is normalised by `cloneModelSelection` where it is written).
-fn selection(messages: &[Cow<Record>], runtime: &Value) -> Option<Value> {
+pub(super) fn selection(messages: &[Cow<Record>], runtime: &Value) -> Option<Value> {
     let historical = messages.iter().rev().find_map(|m| {
         let info = &m.info;
         if info["role"] == "user" {
@@ -147,7 +147,7 @@ fn selection(messages: &[Cow<Record>], runtime: &Value) -> Option<Value> {
 }
 
 /// Node `createForkIdentityMap` over the copied transcript and verifier entries.
-fn identities(
+pub(super) fn identities(
     child: &str,
     messages: &[Cow<Record>],
     goals: &[&Value],
@@ -291,6 +291,9 @@ fn goal_target(goal: &Value) -> Option<targets::Target> {
 
 /// Commits the fork of `request.parent` at its stable boundary as `child`.
 pub fn fork(conn: &rusqlite::Connection, child: &str, request: &Value, now: i64) -> Result<()> {
+    if request["kind"] == "selection_side_chat" {
+        return super::side_chat::side_chat(conn, child, request, now);
+    }
     let parent_id = request["parent"].as_str().context("fork parent")?;
     let boundary = request["boundary"].as_str().context("fork boundary")?;
     let command = request["command"].as_str().context("fork command")?;
@@ -323,6 +326,7 @@ pub fn fork(conn: &rusqlite::Connection, child: &str, request: &Value, now: i64)
     let selection = selection(&messages, &request["selection"]);
     let execution = super::fork_bundle::execution(&messages, &request["execution"]);
     let bundle = super::fork_bundle::Bundle {
+        kind: "fork",
         parent: &parent,
         ids: &ids,
         selection: selection.as_ref(),

@@ -82,8 +82,10 @@ async function check(name, root, file) {
       sessionStore: store,
       traceContext: { traceId: "check" },
     });
-    // Node 的稳定分叉与分享导入没有 shell 快照（恢复时按当前设置），其余会话在创建时写入。
-    const expected = session.taskType === "fork" || imported ? "missing" : "restored";
+    // Node 的 fork 包（稳定分叉、选区侧聊）与分享导入没有 shell 快照（恢复时按当前设置），
+    // 其余会话在创建时写入。
+    const forked = session.taskType === "fork" || session.taskType === "selection_side_chat";
+    const expected = forked || imported ? "missing" : "restored";
     if (shell.status !== expected) throw new Error(`${name}: shell snapshot ${shell.status}`);
     // 工作区 checkpoint 与文件撤销：Node 恢复预览/撤销时按严格 schema 解析 entry 与产物。
     for (const entry of entries.filter((e) => e.type === "runtime/workspace_checkpoint")) {

@@ -25,6 +25,7 @@ pub mod resume;
 pub mod sessions;
 pub mod settings;
 pub mod shared;
+mod side_chat;
 pub mod subagents;
 pub mod target_row;
 pub mod targets;

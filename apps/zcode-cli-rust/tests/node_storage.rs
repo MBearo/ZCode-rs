@@ -13,6 +13,8 @@ mod grants;
 mod harness;
 #[path = "node_storage/shared.rs"]
 mod shared;
+#[path = "node_storage/side_chat.rs"]
+mod side_chat;
 
 use serde_json::{Value, json};
 use tokio::sync::oneshot;

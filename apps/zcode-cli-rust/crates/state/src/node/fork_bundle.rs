@@ -35,6 +35,8 @@ pub fn execution(messages: &[Cow<Record>], runtime: &Value) -> Value {
 }
 
 pub struct Bundle<'a> {
+    /// `fork` or `selection_side_chat` (Node `commitAtomicConversationFork` kind).
+    pub kind: &'a str,
     pub parent: &'a SessionRow,
     pub ids: &'a Identities,
     pub selection: Option<&'a Value>,
@@ -58,21 +60,27 @@ impl Bundle<'_> {
     pub fn create_child(&self, conn: &rusqlite::Connection) -> Result<()> {
         let p = self.parent;
         let slug = format!(
-            "{}-fork-{}",
+            "{}-{}-{}",
             node_ids::slugify(&p.slug),
+            self.kind,
             node_ids::base36(self.now as u64)
         );
+        let title = if self.kind == "selection_side_chat" {
+            "Selection side chat".to_owned()
+        } else {
+            format!("Fork of {}", p.title)
+        };
         let create = Create {
             id: self.ids.child.clone(),
             project_id: p.project_id.clone(),
             workspace_id: p.workspace_id.clone(),
             parent_id: Some(p.id.clone()),
             trace_id: p.trace_id.clone(),
-            task_type: Some("fork".into()),
+            task_type: Some(self.kind.into()),
             slug: slug.chars().take(120).collect(),
             directory: p.directory.clone(),
             path: p.path.clone(),
-            title: format!("Fork of {}", p.title),
+            title,
             title_source: Some("generated".into()),
             version: p.version.clone(),
             permission: p.permission.clone(),
@@ -216,13 +224,26 @@ impl Bundle<'_> {
         ]
     }
 
-    /// Node `commitForkBundle`'s parent command fact.
+    /// Node `commitForkBundle`'s parent command fact; a selection side chat
+    /// has no fork target (`target` is then the target message id).
     pub fn command_fact(&self, id: &str, revision: u64) -> Entry {
-        let target_message = self.target["boundaryMessageId"].clone();
+        let side = self.kind == "selection_side_chat";
+        let kind = if side {
+            "createSelectionSideSession"
+        } else {
+            "forkAssistant"
+        };
+        let target_message = if side {
+            self.target.clone()
+        } else {
+            self.target["boundaryMessageId"].clone()
+        };
         let ack = json!({"commandId": self.command, "status": "accepted", "revisionAtDecision": revision,
-            "result": {"type": "forkAssistant", "sessionId": self.ids.child}});
-        let metadata = json!({"forkOrigin": {"parentSessionId": self.parent.id, "targetMessageId": target_message},
-            "forkTarget": self.target});
+            "result": {"type": kind, "sessionId": self.ids.child}});
+        let mut metadata = json!({"forkOrigin": {"parentSessionId": self.parent.id, "targetMessageId": target_message}});
+        if !side {
+            metadata["forkTarget"] = self.target.clone();
+        }
         Entry {
             id: id.into(),
             session_id: self.parent.id.clone(),

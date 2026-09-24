@@ -106,6 +106,9 @@ impl Engine {
             c.payload["requestedDelivery"] = "queue".into();
             return self.send_input(c).await;
         }
+        if c.kind == "createSelectionSideSession" {
+            return self.selection_side_session(&c).await;
+        }
         if c.kind == "sendQueuedNow" {
             return self.send_queued_now(&c).await;
         }

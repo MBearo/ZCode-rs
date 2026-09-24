@@ -78,6 +78,7 @@ mod plugin_reference;
 mod plugins;
 mod session_list;
 mod shared_context;
+mod side_chat;
 mod skills;
 mod subagent_completion;
 mod subagent_listing;
