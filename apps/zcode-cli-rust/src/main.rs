@@ -45,7 +45,10 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
-    let _logs = zcode_cli_host::logging::init(zcode_cli_host::logging::LogOptions::from_env(&home));
+    let log_options = zcode_cli_host::logging::LogOptions::from_env(&home);
+    let log_dir = log_options.directory.clone();
+    let _logs = zcode_cli_host::logging::init(log_options);
+    zcode_cli_host::log_retention::schedule(log_dir);
     tracing::info!(
         target: "zcode::runtime",
         event = "runtime.started",

@@ -6,6 +6,7 @@ mod context_git;
 pub mod context_source;
 mod hook_toggle;
 pub mod legacy_paths;
+pub mod log_retention;
 pub mod logging;
 mod process_clock;
 mod question_timing;
