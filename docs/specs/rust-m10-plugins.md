@@ -377,6 +377,7 @@ sequenceDiagram
   - 官方 MCP 的 http 请求由 Rust 自己的 streamable HTTP 客户端发出（rmcp 的 reqwest 实现把 401、403 转成文本错误，无法按类型分类）。SSE 事件同样限 8 MiB。只支持 `Initialize` 生命周期：官方插件不声明 `protocolVersion`。
   - `tools/call` 的官方鉴权错误经 rmcp 包装后交给模型，外层措辞与 Node SDK 不同，分类文案与 request id 相同。
   - 日志沿用 Node 的事件名（`mcp.official_auth.*`），只记录 header 名、`Bigmodel-Target-Type`、耗时与状态，不记录任何 header 值与请求体。
+  - stdio 只在发出请求与通知时向 Host 取身份头。Node 的 `requestMetaProvider` 对发往插件进程的响应（回复 server 发起的请求）也会先取一次身份头再丢弃，Rust 省去这次多余的反向请求。
 - 官方插件 seed 不做（见 §1）。
 - 插件的 agents（子代理 profile）继续使用 `agent_profiles.rs` 的现有来源，本期不改。
 - M10.3：`restoreBuiltin` 不重新 seed 官方缓存；`uninstall` 查找官方内置插件使用加锁前的发现结果（官方缓存不可变，结果等价）。
