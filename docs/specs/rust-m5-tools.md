@@ -86,6 +86,76 @@
 
 后续子项（TR §6.5）：Grep、Write、Read 文本与输入校验信封、预算与持久化信封（M5.2c 起）。
 
+### 2.3 结果预算层（M5.2c）
+
+依据 Node：
+
+- `core/src/tool/executor/{result-serialization,result-content-projection}.ts`
+- `core/src/tool/result-persistence-format.ts`
+- 各工具的 `resultBudget`
+- `adapters/src/storage` 的 `writeToolResultArtifact`
+
+**所有者**：
+
+- `domain::result_budget` 是纯逻辑：预算表、按字节裁剪、hook 追加的预算投影。
+- `core::tool_execution` 在空结果占位之后、hook 之前应用预算，追加 hook 上下文时使用同一预算。
+- 落盘经 `ToolPort::persist_result` 写入会话产物目录。
+
+**预算表**：有效上限为 `min(maxModelBytes, maxInlineBytes)`，按 UTF-8 字节计。
+
+| 工具                                                                               | 有效上限 | 策略 |
+| ---------------------------------------------------------------------------------- | -------- | ---- |
+| Grep                                                                               | 20 000   | 落盘 |
+| Glob                                                                               | 100 000  | 落盘 |
+| Agent                                                                              | 120 000  | 落盘 |
+| WebFetch                                                                           | 100 000  | 落盘 |
+| Read                                                                               | 262 144  | 截断 |
+| Edit、Write                                                                        | 100 000  | 截断 |
+| Skill、TodoRead、TodoWrite、TaskStop、AskUserQuestion、EnterPlanMode、ExitPlanMode | 100 000  | 截断 |
+| SendMessage                                                                        | 4 096    | 截断 |
+| WebSearch                                                                          | 10 000   | 截断 |
+| MCP 工具（`mcp__…`）                                                               | 50 000   | 截断 |
+| 其他工具                                                                           | 100 000  | 截断 |
+
+- 预览方向都是 head。
+- Bash 与 TaskOutput 在工具内部完成自己的落盘与截断（§2.2），本层不再处理，避免二次落盘。
+
+**规则**：
+
+- 内容（结构化内容取其文本形式）不超过上限时原样返回，包括图片等结构化块。
+- **落盘策略**：
+  - 文件写入会话产物目录，文件名为 `<toolCallId>-tool-result-<uuid>.json`。Node 对非字符串输出使用 `application/json`，所以扩展名是 `.json`。
+  - 模型内容为通用 `<persisted-output>` 信封：
+    - 第一行为 `Output too large (<十进制大小>). Full output saved to: <path>`；
+    - 预览取前 2000 个字符，超过一半处有换行时在该换行截断，被截断时加 `...`。
+  - 写入失败时退回截断，工具结果仍然可见。
+- **截断策略**：
+  - 保留头部，尾部追加 `\n\n[Tool output truncated by resultBudget: originalBytes=<n>, maxModelBytes=<m>, strategy=<truncate|artifact>]`；
+  - 追加说明后总长仍不超过上限（`fitContentWithSuffix`）；
+  - 按 Unicode 码点二分，不切断字符；
+  - 截断后结构化块退化为这段文本。
+- **hook 上下文**（`appendHookAdditionalContexts`）：
+  - 追加后仍不超过上限：原样追加（结构化内容追加为结尾文本块）。
+  - 超过上限且为落盘信封：信封保持完整，只把 hook 后缀裁到上限以内。
+  - 超过上限的其他情况：用 `fitContentWithSuffix` 同时容纳内容与 hook 后缀；结构化内容保留非文本块，文本部分按同样规则裁剪。
+
+**与 Node 的差异**：
+
+- 产物目录沿用 M5.2b 的会话目录（会话 id 的 sha256），不同于 Node 的 `<sanitized sessionId>/`。
+- 官方 CUA 帧与 `maxModelChars` 只在 Node 的 workflow、CUA 工具上出现，Rust 不涉及。
+
+**验收**：
+
+- 单测：
+  - 按字节裁剪：head 与 tail、多字节字符；
+  - `fitContentWithSuffix` 的边界：后缀超过上限、上限为 0；
+  - 预算表；
+  - hook 追加的三种情形。
+- 集成（`zcode-cli-rust-result-budget.test.ts`）：
+  - MCP 工具返回超过 50 000 字节时截断到恰好 50 000 字节，并带说明；
+  - Grep 结果超过 20 000 字节时落盘：信封中的十进制大小正确，路径可读且内容完整。
+  - SendMessage 的 4 096 上限由预算表单测覆盖。
+
 ## 3. WebFetch（M5.4a）
 
 依据：`scratchpad/research/webfetch-websearch.md`（下称 WW）；Node `core/src/tool/handlers/webfetch*.ts`、`core/src/tool/webfetch-preapproved.ts`、`contracts/src/tools/webfetch.ts`。

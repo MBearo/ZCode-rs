@@ -207,6 +207,30 @@ impl ToolPort for WorkspaceTools {
     fn mcp_inventory(&self, session: &str) -> Vec<(String, Vec<String>)> {
         self.mcp.inventory(session)
     }
+    async fn persist_result(&self, session: &str, call_id: &str, content: &str) -> Result<String> {
+        // Node sanitizePathSegment + `<toolCallId>-tool-result-<uuid>.json`。
+        let call: String = call_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(120)
+            .collect();
+        let call = if call.is_empty() {
+            "unknown".into()
+        } else {
+            call
+        };
+        let dir = self.session_artifacts(session);
+        tokio::fs::create_dir_all(&dir).await?;
+        let path = dir.join(format!("{call}-tool-result-{}.json", uuid::Uuid::new_v4()));
+        tokio::fs::write(&path, content).await?;
+        Ok(path.to_string_lossy().into_owned())
+    }
     fn attach_events(
         &self,
         events: tokio::sync::mpsc::Sender<crate::contract::RunEvent>,

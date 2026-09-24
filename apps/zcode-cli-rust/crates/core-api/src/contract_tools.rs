@@ -80,6 +80,16 @@ pub trait ToolPort: Send + Sync {
     fn mcp_inventory(&self, _session: &str) -> Vec<(String, Vec<String>)> {
         vec![]
     }
+    /// Saves an oversized tool result in the session's artifacts and returns
+    /// its path (spec rust-m5-tools §2.3); an error falls back to truncation.
+    async fn persist_result(
+        &self,
+        _session: &str,
+        _call_id: &str,
+        _content: &str,
+    ) -> Result<String> {
+        anyhow::bail!("Tool result persistence unavailable")
+    }
     /// The engine's event channel, for adapters that ask the Host (official
     /// MCP identity headers, spec rust-m10-plugins §3.11).
     fn attach_events(

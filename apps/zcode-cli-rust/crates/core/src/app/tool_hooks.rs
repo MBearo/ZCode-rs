@@ -108,14 +108,18 @@ pub(super) async fn post_tool_use_failure(
 }
 
 /// Node `appendPreToolAdditionalContextsToErrorResult` / `appendHookAdditionalContexts`.
-pub(super) fn append_contexts(output: &mut ToolOutput, contexts: &[String]) {
+/// Node `appendHookAdditionalContexts`: within the tool's result budget; a
+/// structured result gets the context as a closing text block.
+pub(super) fn append_contexts(output: &mut ToolOutput, contexts: &[String], tool: &str) {
     if !contexts.is_empty() {
         let text = display::tool_contexts(contexts);
-        output.content = format!("{}\n\n{}", output.content, text);
-        // Node 结构化内容：hook 上下文作为结尾的文本块。
-        if let Some(serde_json::Value::Array(blocks)) = &mut output.model_content {
-            blocks.push(serde_json::json!({"type": "text", "text": text}));
-        }
+        let budget = crate::domain::result_budget::for_tool(tool);
+        crate::domain::result_budget::append_hook(
+            &mut output.content,
+            &mut output.model_content,
+            &text,
+            budget,
+        );
     }
 }
 

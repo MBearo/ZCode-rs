@@ -91,7 +91,7 @@ async fn execute(
             let mut output =
                 super::tool_permission::refusal(super::permissions::summarize(&reason));
             output.stop_turn = name == plan_mode::EXIT && plan_on;
-            tool_hooks::append_contexts(&mut output, &pre.additional_contexts);
+            tool_hooks::append_contexts(&mut output, &pre.additional_contexts, name);
             return Ok((id, output, true));
         }
         if let Some(updated) = pre.updated_input.take() {
@@ -104,7 +104,7 @@ async fn execute(
             .await?
         {
             Gate::Stop(mut output) => {
-                tool_hooks::append_contexts(&mut output, &pre.additional_contexts);
+                tool_hooks::append_contexts(&mut output, &pre.additional_contexts, name);
                 return Ok((id, output, true));
             }
             Gate::Run(Some(modified)) => parsed = Some(modified),
@@ -186,6 +186,8 @@ async fn execute(
     if !failed && crate::domain::js_string::trim(&content.content).is_empty() {
         // Node serializeOutput：空结果给出占位，避免模型误读为缺失结果。
         content.content = format!("({name} completed with no output)");
+    } else if !failed {
+        apply_budget(tools, name, (&sink.session_id, &id), &mut content).await;
     }
     let mut contexts = pre.additional_contexts;
     if let (Some(h), Some(args)) = (hooks, &parsed) {
@@ -209,13 +211,35 @@ async fn execute(
             contexts.extend(post.additional_contexts);
         }
     }
-    tool_hooks::append_contexts(&mut content, &contexts);
+    tool_hooks::append_contexts(&mut content, &contexts, name);
     Ok((id, content, failed))
 }
 
 /// Runs one model step's calls. Consecutive concurrency-safe calls run together
 /// and commit in call order; a result with `stop_turn` cancels every later call.
 /// Returns whether the turn must end.
+/// Node `serializeOutput`'s resultBudget (spec rust-m5-tools §2.3).
+async fn apply_budget(
+    tools: &dyn ToolPort,
+    name: &str,
+    (session, call): (&str, &str),
+    output: &mut ToolOutput,
+) {
+    use crate::domain::result_budget::{self, Plan};
+    let budget = result_budget::for_tool(name);
+    let text = match result_budget::plan(&output.content, budget) {
+        Plan::Inline => return,
+        Plan::Truncate(text) => text,
+        Plan::Persist => match tools.persist_result(session, call, &output.content).await {
+            Ok(path) => result_budget::persisted(&output.content, &path),
+            // 写入失败时退回截断：结果仍可见，原始大输出不进入模型上下文。
+            Err(_) => result_budget::truncated(&output.content, budget),
+        },
+    };
+    output.content = text;
+    output.model_content = None;
+}
+
 pub(super) async fn run_calls(
     tools: &dyn ToolPort,
     scope: &Scope<'_>,
