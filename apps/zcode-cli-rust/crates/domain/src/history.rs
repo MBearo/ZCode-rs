@@ -57,6 +57,9 @@ pub struct InputBoundary {
     pub state: State,
     pub kind: String,
     pub payload: Value,
+    /// The input's stored Node user message (Node storage only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_message: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +69,9 @@ pub struct ResponseBoundary {
     pub row: usize,
     pub message: usize,
     pub state: State,
+    /// The stored Node assistant message ending the response (Node storage only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_message: Option<String>,
 }
 impl Session {
     pub fn validate_history(&self) -> anyhow::Result<()> {
@@ -115,6 +121,7 @@ impl Session {
             row,
             message: self.messages.len(),
             state: State::capture(self),
+            node_message: self.node.turn.as_ref().and_then(|t| t.boundary.clone()),
         });
     }
     pub fn history_actions(&mut self) -> Vec<Value> {

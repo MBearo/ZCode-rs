@@ -213,9 +213,26 @@ async fn run(
 impl Harness {
     /// Sends one V4 command and returns its acknowledgement.
     pub async fn command(&mut self, id: u64, params: Value) -> Value {
+        self.request(id, "v4/command", params).await
+    }
+
+    /// The live rows of `session` with the revision and log epoch they belong to.
+    pub async fn rows(&mut self, id: u64, session: &str) -> (Vec<Value>, Value, Value) {
+        let page = self
+            .request(
+                id,
+                "v4/conversation/rowsRange",
+                json!({"sessionId": session, "limit": 200}),
+            )
+            .await;
+        let rows = page["rows"].as_array().cloned().expect("rows");
+        (rows, page["atRevision"].clone(), page["atLogEpoch"].clone())
+    }
+
+    /// Sends one request and returns its result.
+    pub async fn request(&mut self, id: u64, method: &str, params: Value) -> Value {
         let request: Request =
-            serde_json::from_value(json!({"id": id, "method": "v4/command", "params": params}))
-                .unwrap();
+            serde_json::from_value(json!({"id": id, "method": method, "params": params})).unwrap();
         self.input.send(Input::Request(request)).await.unwrap();
         loop {
             let frames =

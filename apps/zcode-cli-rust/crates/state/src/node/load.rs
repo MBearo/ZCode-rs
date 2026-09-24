@@ -4,6 +4,7 @@
 use super::resume::Resume;
 use crate::domain::execution::Mode;
 use crate::domain::goal::Goal;
+use crate::domain::history_cold::ColdAnchors;
 use crate::domain::session::Session;
 use serde_json::{Value, json};
 
@@ -107,6 +108,11 @@ pub fn session(workspace: &str, r: Resume, epoch: String) -> Session {
     s.rows = r.conversation.rows;
     s.context.summary = r.history.summary;
     s.messages = r.history.messages;
+    s.restore_boundaries(ColdAnchors {
+        row_messages: &r.conversation.messages,
+        edit_targets: &r.conversation.edit_targets,
+        sources: &r.history.sources,
+    });
     s.saved_rows = s.rows.len();
     s.saved_messages = s.messages.len();
     s

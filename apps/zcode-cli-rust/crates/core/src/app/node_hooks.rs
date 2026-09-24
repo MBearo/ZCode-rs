@@ -61,6 +61,10 @@ impl Engine {
         if c.payload.get("attachments").is_none() {
             item.as_object_mut()?.remove("attachments");
         }
+        // 编辑/重试重跑：Node inputIntentMetadataFromCanonical 保留原输入来源。
+        if let Some(provenance) = c.payload.get("_provenance") {
+            item["provenance"] = provenance.clone();
+        }
         s.node_ensure_created(now, c.payload["text"].as_str().unwrap_or(""), VERSION);
         let queue_id = item["queueItemId"].as_str()?.to_owned();
         s.node_admit_input(
@@ -117,10 +121,14 @@ impl Engine {
         };
         let text = c.payload["text"].as_str().unwrap_or("");
         let metadata = intent::prompt_metadata(text, &intent, (None, presentation));
+        let message = nj::message_id(now, &message);
+        if let Some(boundary) = s.history.inputs.last_mut() {
+            boundary.node_message = Some(message.clone());
+        }
         s.node_user_prompt(
             now,
             Prompt {
-                message: nj::message_id(now, &message),
+                message,
                 part: nj::part_id(now, &part),
                 turn,
                 text,
@@ -163,10 +171,14 @@ impl Engine {
             .is_some_and(|a| !a.is_empty());
         let presentation = (!attachments).then_some("user_steer");
         let metadata = intent::prompt_metadata(text, &intent, (Some("guide"), presentation));
+        let message = nj::message_id(now, &message);
+        if let Some(boundary) = s.history.inputs.last_mut() {
+            boundary.node_message = Some(message.clone());
+        }
         s.node_guided_prompt(
             now,
             Prompt {
-                message: nj::message_id(now, &message),
+                message,
                 part: nj::part_id(now, &part),
                 turn: "",
                 text,

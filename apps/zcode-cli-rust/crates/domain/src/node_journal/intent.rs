@@ -128,6 +128,7 @@ pub fn admission_payload(item: &Value, source_command_type: &str) -> Value {
     conversation.insert("steer".into(), steer);
     conversation.insert("dispatch".into(), json!({"state": "admitted"}));
     conversation.insert("admittedAt".into(), item["admittedAt"].clone());
+    copy(&mut conversation, item, "provenance", "provenance");
     let mut intent = Map::new();
     for key in ["sourceCommandId", "queueItemId", "clientId", "kind"] {
         intent.insert(key.into(), item[key].clone());

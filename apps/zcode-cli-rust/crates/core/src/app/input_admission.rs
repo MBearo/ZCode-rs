@@ -152,6 +152,7 @@ impl Engine {
                 state: boundary.2,
                 kind: c.kind.clone(),
                 payload,
+                node_message: None,
             });
         // 每个会话同一时刻至多一个待启动的输入；失败路径遗留的旧条目在此清除。
         self.submissions.retain(|(session, _), _| session != id);

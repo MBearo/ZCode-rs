@@ -21,6 +21,8 @@ const PRESENTATIONS: [&str; 7] = [
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Hydrated {
     pub entries: Vec<Entry>,
+    /// The stored message each entry came from (parallel to `entries`).
+    pub sources: Vec<String>,
     pub interrupted_tools: usize,
 }
 
@@ -341,16 +343,25 @@ pub fn hydrate(active: &[impl AsRef<Record>], artifacts: ArtifactReader) -> Hydr
     let mut out = Hydrated::default();
     for record in active {
         let record = record.as_ref();
+        hydrate_record(record, artifacts, &mut out);
+        let id = record.id().to_owned();
+        out.sources.resize(out.entries.len(), id);
+    }
+    out
+}
+
+fn hydrate_record(record: &Record, artifacts: ArtifactReader, out: &mut Hydrated) {
+    {
         let parts = dedupe(&record.parts);
         let info = &record.info;
         if info["role"] != "user" {
-            assistant(record, &parts, &mut out);
-            continue;
+            assistant(record, &parts, out);
+            return;
         }
         let shared = &info["metadata"]["sharedContextStatus"];
         if info["source"] == "shared_context" && !shared.is_null() && *shared != "attached" {
             // 共享上下文在首次发送前只是候选，不能提前进入模型上下文。
-            continue;
+            return;
         }
         let visible: Vec<&Value> = parts
             .iter()
@@ -361,7 +372,7 @@ pub fn hydrate(active: &[impl AsRef<Record>], artifacts: ArtifactReader) -> Hydr
             && let Some(entry) = synthetic_attachment(part)
         {
             out.entries.push(entry);
-            continue;
+            return;
         }
         let mut entries = user_entries(&parts, artifacts);
         if let Some(presented) = presentation_metadata(&info["metadata"]["inputPresentation"]) {
@@ -373,7 +384,6 @@ pub fn hydrate(active: &[impl AsRef<Record>], artifacts: ArtifactReader) -> Hydr
         }
         out.entries.extend(entries);
     }
-    out
 }
 
 impl AsRef<Record> for Record {

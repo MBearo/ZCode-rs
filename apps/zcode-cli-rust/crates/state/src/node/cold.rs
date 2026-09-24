@@ -25,6 +25,8 @@ pub fn records(conn: &Connection, session: &str) -> Result<Vec<Record>> {
 pub struct History {
     pub summary: Option<String>,
     pub messages: Vec<Value>,
+    /// The stored message id of each of `messages`.
+    pub sources: Vec<String>,
     pub interrupted_tools: usize,
 }
 
@@ -79,6 +81,7 @@ pub fn history_of(
     History {
         summary,
         messages: hydrated.entries.iter().map(|e| e.canonical()).collect(),
+        sources: hydrated.sources,
         interrupted_tools: hydrated.interrupted_tools,
     }
 }

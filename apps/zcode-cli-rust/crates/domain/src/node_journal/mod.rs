@@ -109,6 +109,13 @@ pub enum Op {
         status: String,
         reason: Option<String>,
     },
+    /// Node `rewindConversationToMessage`: `session.revert` cuts the active
+    /// branch before the user message `target`; `anchor` is the requested
+    /// message (the retried assistant, or `target` itself for an edit).
+    Rewind {
+        target: String,
+        anchor: String,
+    },
     /// Node `updateTodos`: `[{content, status, priority}]`.
     Todos(Vec<Value>),
     /// Node `persistStableForkCompletionBoundary` (reads the stored transcript).

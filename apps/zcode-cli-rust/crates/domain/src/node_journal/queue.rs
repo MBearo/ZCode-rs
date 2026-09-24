@@ -22,6 +22,16 @@ impl Session {
         }
     }
 
+    /// Node conversation rewind before an edited or retried input; the rerun
+    /// opens a new turn.
+    pub fn node_rewind(&mut self, now: u64, target: &str, anchor: &str) {
+        if self.node.created {
+            let (target, anchor) = (target.into(), anchor.into());
+            self.node.push(now, Op::Rewind { target, anchor });
+            self.node.turn = None;
+        }
+    }
+
     /// Node guide drain: the guided input's user message joins the running
     /// turn, promoted from its ledger row.
     pub fn node_guided_prompt(&mut self, now: u64, p: Prompt) {

@@ -33,6 +33,10 @@ pub enum TurnModel {
 pub struct Cold {
     pub rows: Vec<Value>,
     pub state: Map<String, Value>,
+    /// The stored message of each command-addressable row (Node
+    /// `messageIdByRowId`) and the edit targets by entity (`editTargetsByEntity`).
+    pub messages: BTreeMap<u64, String>,
+    pub edit_targets: HashMap<String, Value>,
 }
 
 pub struct Projection {
@@ -330,5 +334,7 @@ pub fn replay(session_id: &str, events: &[Event]) -> Cold {
     Cold {
         rows: projection.rows,
         state: projection.state,
+        messages: projection.message_by_row,
+        edit_targets: projection.edit_targets,
     }
 }

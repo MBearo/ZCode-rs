@@ -14,6 +14,7 @@ pub mod execution;
 pub mod file_checkpoint;
 pub mod goal;
 pub mod history;
+pub mod history_cold;
 pub mod hooks;
 pub mod js_json;
 pub mod js_string;

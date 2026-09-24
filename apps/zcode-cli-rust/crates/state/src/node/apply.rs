@@ -9,6 +9,8 @@ use super::todos::{self, Todo};
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde_json::{Value, json};
+use std::borrow::Cow;
+use zcode_cli_domain::node_history::{self, Branch};
 use zcode_cli_domain::node_journal::{Op, Write};
 
 const VERIFICATION_ENTRY: &str = "target_completion_verification";
@@ -109,6 +111,7 @@ pub fn apply(conn: &Connection, session: &str, writes: &[Write]) -> Result<()> {
             Op::SettleInput { id, status, reason } => {
                 inputs::settle(conn, id, session, status, reason.as_deref(), now)?
             }
+            Op::Rewind { target, anchor } => rewind(conn, session, (target, anchor), now)?,
             Op::Todos(list) => todos::update(
                 conn,
                 session,
@@ -195,4 +198,42 @@ fn stable_boundary(
     anchor.insert("goalBoundary".into(), goal);
     info["anchor"] = Value::Object(anchor);
     save_message(conn, &info, None, now)
+}
+
+/// Node `applyConversationRewindPlan`: the active branch before `target` is
+/// kept, everything stored so far is cut, the branch generation advances.
+fn rewind(
+    conn: &Connection,
+    session: &str,
+    (target, anchor): (&str, &str),
+    now: i64,
+) -> Result<()> {
+    let Some(row) = sessions::get(conn, session)? else {
+        return Ok(());
+    };
+    let all = super::cold::records(conn, session)?;
+    let branch = Branch::from_revert(row.revert.as_ref());
+    let active = node_history::select_branch(all.iter().map(Cow::Borrowed).collect(), &branch);
+    let index = active
+        .iter()
+        .position(|m| m.id() == target)
+        .context("Rewind target is not in the active branch")?;
+    let kept: Vec<Value> = active[..index].iter().map(|m| m.id().into()).collect();
+    let generation = row
+        .revert
+        .as_ref()
+        .and_then(|r| r["branchGeneration"].as_i64())
+        .unwrap_or(0)
+        + 1;
+    let revert = json!({
+        "keptMessageIDs": kept,
+        "branchCutAfterMessageID": all.last().map(|m| m.id()),
+        "branchGeneration": generation,
+        "messageID": kept.last().cloned().unwrap_or_else(|| anchor.into()),
+        "kind": "conversation_rewind",
+        "scope": "conversation",
+        "targetMessageID": anchor,
+    });
+    sessions::set_revert(conn, session, revert, None, now)?;
+    Ok(())
 }

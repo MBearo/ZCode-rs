@@ -182,7 +182,7 @@ impl Engine {
         let message = json!({"role":"user","content":crate::domain::prompt::user_steer(item["text"].as_str().context("Guide text missing")?)});
         s.append_message(message.clone());
         messages.push(message);
-        s.history.inputs.push(crate::domain::history::InputBoundary {entity:row["entityId"].as_str().unwrap().into(),turn:turn.into(),row:boundary.0,user_row:boundary.0,message:retained_messages,state:boundary.2,kind:"sendText".into(),payload:json!({"text":item["text"],"modelSelection":item["modelSelection"],"_userSteer":true})});
+        s.history.inputs.push(crate::domain::history::InputBoundary {entity:row["entityId"].as_str().unwrap().into(),turn:turn.into(),row:boundary.0,user_row:boundary.0,message:retained_messages,state:boundary.2,kind:"sendText".into(),payload:json!({"text":item["text"],"modelSelection":item["modelSelection"],"_userSteer":true}),node_message:None});
         self.node_guide(id, &item);
         self.publish(id, vec![json!({"op":"row.appended","row":row})])?;
         self.persist(id, None).await?;

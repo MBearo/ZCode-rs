@@ -208,3 +208,112 @@ async fn guided_and_removed_busy_inputs_are_recorded_like_node() {
     assert_eq!(headers, 1, "a guided input stays in its turn");
     harness::dump(&h, &conn, &session);
 }
+
+/// `{rowId, entityId}` of the last row of `kind` (real user for inputs).
+fn target(rows: &[Value], kind: &str) -> Value {
+    let row = rows
+        .iter()
+        .rev()
+        .find(|r| r["kind"] == kind && (kind != "userInput" || r["origin"] == "realUser"))
+        .expect("target row");
+    json!({"rowId": row["rowId"], "entityId": row["entityId"]})
+}
+
+fn user_texts(conn: &rusqlite::Connection, session: &str) -> Vec<Value> {
+    let resumed = resume::resume(conn, session, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    resumed
+        .history
+        .messages
+        .iter()
+        .filter(|m| m["role"] == "user")
+        .map(|m| m["content"].clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn edit_and_retry_cut_the_node_branch_before_and_after_a_restart() {
+    let mut h = harness::start(Some("rewind"), None).await;
+    let session = h.create("c1", "Fix it").await;
+    h.settled(&session, 1).await;
+    let (rows, revision, epoch) = h.rows(2, &session).await;
+    let edit = json!({"commandId": "e1", "clientId": "cli", "sessionId": session,
+        "type": "editUserQuery", "issuedAt": 1, "baseRevision": revision, "baseLogEpoch": epoch,
+        "payload": {"target": target(&rows, "userInput"), "newText": "Fix it better"}});
+    let ack = h.command(3, edit).await;
+    assert_eq!(ack["result"]["disposition"], "rewind", "{ack}");
+    let conn = h.settled(&session, 2).await;
+    let row = sessions::get(&conn, &session).unwrap().unwrap();
+    let revert = row.revert.unwrap();
+    assert_eq!(revert["kind"], "conversation_rewind");
+    assert_eq!(revert["branchGeneration"], 1);
+    assert_eq!(revert["keptMessageIDs"], json!([]));
+    assert_eq!(user_texts(&conn, &session), [json!("Fix it better")]);
+    let rerun = inputs::get(&conn, "queue_e1").unwrap().unwrap();
+    assert_eq!(rerun.status, "promoted");
+    assert_eq!(rerun.payload["sourceCommandType"], "editUserQuery");
+    assert_eq!(
+        rerun.payload["conversationInputIntent"]["provenance"]["sourceCommandId"],
+        "c1"
+    );
+
+    let (rows, revision, epoch) = h.rows(4, &session).await;
+    let retry = json!({"commandId": "r1", "clientId": "cli", "sessionId": session,
+        "type": "retryTurn", "issuedAt": 1, "baseRevision": revision, "baseLogEpoch": epoch,
+        "payload": {"target": target(&rows, "assistantText")}});
+    assert_eq!(h.command(5, retry).await["status"], "accepted");
+    let conn = h.settled(&session, 3).await;
+    let revert = sessions::get(&conn, &session)
+        .unwrap()
+        .unwrap()
+        .revert
+        .unwrap();
+    assert_eq!(revert["branchGeneration"], 2);
+    // Node 重试以被重试的 assistant 为请求锚点（保留前缀为空时 messageID 同为该锚点）。
+    let anchor_role: String = conn
+        .query_row(
+            "select json_extract(data, '$.role') from message where id = ?",
+            [revert["targetMessageID"].as_str().unwrap()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(anchor_role, "assistant");
+    assert_eq!(user_texts(&conn, &session), [json!("Fix it better")]);
+    let retried = inputs::get(&conn, "queue_r1").unwrap().unwrap();
+    // 重试沿用被重试输入的来源（该输入本身来自编辑，来源仍指向 c1）。
+    assert_eq!(
+        retried.payload["conversationInputIntent"]["provenance"]["sourceCommandId"],
+        "c1"
+    );
+
+    // 重启后从 Node 记录重建编辑边界，最新输入仍可编辑。
+    let mut next = harness::restart(&h).await;
+    drop(h);
+    let (rows, revision, epoch) = next.rows(6, &session).await;
+    let edit = json!({"commandId": "e2", "clientId": "cli", "sessionId": session,
+        "type": "editUserQuery", "issuedAt": 1, "baseRevision": revision, "baseLogEpoch": epoch,
+        "payload": {"target": target(&rows, "userInput"), "newText": "Third try"}});
+    let ack = next.command(7, edit).await;
+    assert_eq!(ack["result"]["disposition"], "rewind", "{ack}");
+    let conn = next.settled(&session, 4).await;
+    let revert = sessions::get(&conn, &session)
+        .unwrap()
+        .unwrap()
+        .revert
+        .unwrap();
+    assert_eq!(revert["branchGeneration"], 3);
+    assert_eq!(user_texts(&conn, &session), [json!("Third try")]);
+    let resumed = resume::resume(&conn, &session, &|_| None, None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(resumed.history.messages.len(), 4);
+    let headers = resumed
+        .conversation
+        .rows
+        .iter()
+        .filter(|r| r["kind"] == "turnHeader")
+        .count();
+    assert_eq!(headers, 1, "only the active branch is projected");
+    harness::dump(&next, &conn, &session);
+}

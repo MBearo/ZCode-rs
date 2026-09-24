@@ -62,6 +62,8 @@ impl Engine {
             })
         }
         .cloned();
+        // Node 存储下截断以存储的 user 消息为锚点；找不到锚点时不能只改内存历史。
+        let boundary = boundary.filter(|b| !self.journaled(id) || b.node_message.is_some());
         let Some(boundary) = boundary else {
             return Ok(c.ack(
                 "rejected",
@@ -175,14 +177,29 @@ impl Engine {
         if let Some(tx) = &transaction {
             self.mark_rewind(id, &c.command_id, tx.as_ref());
         }
+        let now = self.clock.now();
         let s = self.sessions.get_mut(id).unwrap();
+        if let Some(provenance) = rerun_provenance(s, &b) {
+            replay.payload["_provenance"] = provenance;
+        }
+        if let Some(target) = &b.node_message {
+            // Node 重试以被重试的 assistant 为请求锚点，编辑以 user 消息本身为锚点。
+            let retried = s.history.responses.iter().find(|r| r.turn == b.turn);
+            let anchor = retried
+                .and_then(|r| r.node_message.clone())
+                .filter(|_| c.kind == "retryTurn")
+                .unwrap_or_else(|| target.clone());
+            s.node_rewind(now, target, &anchor);
+        }
         s.cut_history(b.row, b.message, &b.state);
         s.epoch = self.clock.id();
         s.seq = 0;
         s.revision += 1;
         // 重跑不自动执行已有排队输入；保留队列由用户按原协议恢复。
         replay.payload["_historyRerun"] = true.into();
+        let intent = self.node_admit_now(id, &replay, &c.kind);
         let (turn, _) = self.admit_input(id, &replay, None)?;
+        self.node_prompt(id, &turn, &replay, (intent, None));
         self.sessions.get_mut(id).unwrap().history_actions();
         let mut ack = c.ack("accepted", self.sessions[id].revision, None);
         if c.kind == "editUserQuery" {
@@ -263,4 +280,20 @@ impl Engine {
     pub(super) fn history_snapshot(&mut self, id: &str) -> Result<()> {
         self.reset_topic(id)
     }
+}
+
+/// Node `inputIntentMetadataFromCanonical` provenance: the rerun keeps the
+/// original input's own provenance, else points at the original command.
+fn rerun_provenance(s: &crate::domain::session::Session, b: &InputBoundary) -> Option<Value> {
+    if let Some(provenance) = b.payload.get("_provenance").filter(|p| p.is_object()) {
+        return Some(provenance.clone());
+    }
+    let row = &s.rows[b.user_row];
+    let command = row["sourceCommandId"].as_str().filter(|c| !c.is_empty())?;
+    let mut provenance =
+        json!({"sourceCommandId": command, "queueItemId": format!("queue_{command}")});
+    if let Some(client) = row["clientId"].as_str().filter(|c| !c.is_empty()) {
+        provenance["clientId"] = client.into();
+    }
+    Some(provenance)
 }
