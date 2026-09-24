@@ -9,9 +9,16 @@ pub(super) async fn run(
     tools: &dyn ToolPort,
     context: &dyn ContextPort,
     history: &mut super::context::RunContext,
+    mut turn: Option<super::turn_hooks::TurnHooks>,
     sink: &EventSink,
     cancel: &CancellationToken,
 ) -> Result<()> {
+    // Node：SessionStart 在手动压缩前运行；UserPromptSubmit 阻止输入时本轮直接结束。
+    if let Some(turn) = &turn
+        && !turn.start(history, sink, cancel).await?
+    {
+        return Ok(());
+    }
     if let Some(instructions) = history.manual.take() {
         let reference = super::plan_tools::plan_reference(tools, sink).await?;
         return history
@@ -155,6 +162,7 @@ pub(super) async fn run(
             result => result?,
         };
         history.anchor_usage(&output.usage);
+        let response = output.message["content"].as_str().unwrap_or("").to_owned();
         let persist = !output.output_limit
             || output.message.as_object().is_some_and(|m| {
                 ["content", "reasoning_content"].iter().any(|k| {
@@ -196,6 +204,9 @@ pub(super) async fn run(
         }
         continuations = 0;
         let has_tools = !output.calls.is_empty();
+        if let Some(turn) = &mut turn {
+            turn.tool_calls += output.calls.len();
+        }
         let scope = super::tool_execution::Scope {
             skills: &skills,
             profile: profile.as_ref(),
@@ -203,6 +214,7 @@ pub(super) async fn run(
             selection: identity.clone(),
             permissions: permissions.as_ref(),
             tool_filter: &tool_filter,
+            hooks: turn.as_ref().map(|t| &t.hooks),
         };
         // 与 Node turnControl 一致：结果要求停轮时，其后的工具取消且本轮不再请求模型。
         if super::tool_execution::run_calls(tools, &scope, output.calls, history, sink, cancel)
@@ -233,10 +245,16 @@ pub(super) async fn run(
             for message in guide.messages {
                 history.push(message);
             }
-        } else if !has_tools
-            && !super::goal_loop::advance(model, history, &prefix, sink, cancel).await?
-        {
-            return Ok(());
+        } else if !has_tools {
+            // Node：纯文本步骤收口时先跑 Stop hooks，要求续跑则带上下文继续同一轮。
+            if let Some(turn) = &mut turn
+                && turn.stop(history, &response, sink, cancel).await?
+            {
+                continue;
+            }
+            if !super::goal_loop::advance(model, history, &prefix, sink, cancel).await? {
+                return Ok(());
+            }
         }
     }
 }

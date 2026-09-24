@@ -51,6 +51,14 @@ impl Waiters {
         self.permissions.get(interaction)
     }
 
+    /// The pending prompt of `owner`'s tool call, if any.
+    pub fn permission_for_call(&self, owner: &str, call: &str) -> Option<String> {
+        self.permissions
+            .iter()
+            .find(|(_, p)| p.owner == owner && p.call == call)
+            .map(|(id, _)| id.clone())
+    }
+
     pub fn permission_hosted_by(&self, interaction: &str, host: &str) -> bool {
         self.permissions
             .get(interaction)

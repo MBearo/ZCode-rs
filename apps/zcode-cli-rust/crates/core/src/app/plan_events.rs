@@ -35,13 +35,14 @@ impl Engine {
                     }
                 }
             }
-            Event::PlanReminder {
+            Event::Reminder {
                 anchor,
-                exit,
+                kind,
                 message,
             } => {
                 let s = self.sessions.get_mut(id).context("Session unavailable")?;
-                s.runtime.plan_reminders.push((anchor, !exit, message));
+                s.runtime.reminders.push((anchor, kind, message));
+                let exit = kind == crate::domain::session_runtime::ReminderKind::PlanExit;
                 if exit && s.needs_plan_exit_reminder {
                     s.needs_plan_exit_reminder = false;
                     self.refresh_permissions();

@@ -198,7 +198,7 @@ impl Engine {
     }
 
     /// Removes the prompt from its host and moves the owner's row on.
-    fn settle_permission(
+    pub(super) fn settle_permission(
         &mut self,
         host: &str,
         owner: &str,

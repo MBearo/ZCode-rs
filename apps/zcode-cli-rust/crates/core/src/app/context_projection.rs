@@ -65,11 +65,11 @@ impl Engine {
                 );
                 let changed = context.offset > session.context.offset;
                 session.context = context;
-                // 被摘要覆盖的 plan 提醒不再出现；计划文件提醒追加在保留消息之后并持久化。
+                // 被摘要覆盖的提醒不再出现；计划文件提醒追加在保留消息之后并持久化。
                 let offset = session.context.offset;
                 session
                     .runtime
-                    .plan_reminders
+                    .reminders
                     .retain(|(anchor, _, _)| *anchor >= offset);
                 if let Some(reminder) = reminder {
                     session.append_message(reminder);

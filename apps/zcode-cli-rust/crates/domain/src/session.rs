@@ -320,5 +320,9 @@ impl Session {
             self.close_unfinished_tools();
         }
         self.recover_subagent_rows();
+        // Node onSessionResumed：重启后不可能仍在运行的 hook 行收口为失败（执行项为 cancelled）。
+        for row in &mut self.rows {
+            crate::hooks::projection::close_running(row, now);
+        }
     }
 }

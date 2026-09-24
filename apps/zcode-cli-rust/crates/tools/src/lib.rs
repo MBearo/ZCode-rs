@@ -9,6 +9,7 @@ mod file_changes;
 mod file_checkpoints;
 mod file_rewind;
 mod git_safety;
+mod hook_process;
 mod mcp_config;
 mod mcp_connection;
 mod mcp_hub;

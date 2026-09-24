@@ -24,11 +24,23 @@ pub struct RuntimeOptions {
     pub workspace: Option<serde_json::Value>,
     /// No runtime event yet (Node reducer defaults in the legacy snapshot).
     pub fresh: bool,
-    /// Plan reminders the model has seen in this process (Node in-memory
-    /// history): `(session messages before it, runtime_mode?, message)`.
-    pub plan_reminders: Vec<(usize, bool, serde_json::Value)>,
+    /// Reminders the model has seen in this process (Node in-memory history
+    /// attachments): `(session messages before it, kind, message)`.
+    pub reminders: Vec<(usize, ReminderKind, serde_json::Value)>,
     /// ExitPlanMode feedback steered into the turn at the next step boundary.
     pub plan_feedback: Option<String>,
+    /// SessionStart hooks already ran in this process (Node `sessionStartHookRan`).
+    pub session_start_ran: bool,
+}
+
+/// A transient reminder kept in the process history (never persisted).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReminderKind {
+    /// Plan-mode `runtime_mode` reminder (counts for the cadence).
+    PlanRuntime,
+    PlanExit,
+    /// SessionStart / UserPromptSubmit / Stop hook context.
+    HookContext,
 }
 
 /// Legacy `toolAllowlist` / `toolDenylist`: tools registered for the session's

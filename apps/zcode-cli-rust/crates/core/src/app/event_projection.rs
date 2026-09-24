@@ -21,6 +21,9 @@ impl Engine {
             }
             return Ok(());
         }
+        let Some(event) = self.hook_side(event).await? else {
+            return Ok(());
+        };
         if let Event::Background { task, committed } = event.event {
             return self
                 .background_event(&event.session_id, &event.run_id, task, committed)
@@ -70,7 +73,7 @@ impl Engine {
         }
         if matches!(
             event.event,
-            Event::TodoReminder { .. } | Event::PlanMode { .. } | Event::PlanReminder { .. }
+            Event::TodoReminder { .. } | Event::PlanMode { .. } | Event::Reminder { .. }
         ) {
             return self.plan_event(&id, event.event).await;
         }
@@ -117,24 +120,7 @@ impl Engine {
             reply,
         } = event.event
         {
-            if !reply.is_closed() {
-                let request_id = format!("rust-auth-{}", self.clock.id());
-                let workspace = json!({"workspaceKey":self.workspace,"workspacePath":self.workspace_path,"workspaceIdentity":self.workspace});
-                let params = json!({"requestId":request_id,"sessionId":id,"turnId":turn,"workspace":workspace,"providerId":provider,"modelSelection":selection,"accountAccess":access,"reason":"model-request"});
-                self.waiters.add_host(
-                    request_id.clone(),
-                    super::waiters::HostWait {
-                        owner: id.clone(),
-                        workspace,
-                        reply,
-                    },
-                );
-                self.outbox.push(crate::contract::ServerMsg::HostRequest {
-                    id: request_id,
-                    method: "interaction/requestProviderRuntimeHeaders",
-                    params,
-                });
-            }
+            self.request_auth(&id, &turn, provider, selection, access, reply);
             return Ok(());
         }
         if matches!(event.event, Event::Finished { .. }) {
@@ -156,7 +142,10 @@ impl Engine {
             | Event::SkillsInitialized { .. }
             | Event::TodoReminder { .. }
             | Event::PlanMode { .. }
-            | Event::PlanReminder { .. }
+            | Event::Reminder { .. }
+            | Event::Hook(_)
+            | Event::PermissionHook { .. }
+            | Event::PromptBlocked { .. }
             | Event::Question { .. }
             | Event::ToolCleanupFailed(_)
             | Event::StepBoundary { .. }

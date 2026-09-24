@@ -37,6 +37,8 @@ httpdate = "1"
 ignore = "0.4"
 globset = "0.4"
 regex = "1"
+# ECMAScript 语义的正则：hook matcher 与展示脱敏必须与 Node 的 RegExp 一致。
+regress = "0.12"
 rmcp = { version = "3.4", default-features = false, features = [
   "client",
   "transport-async-rw",

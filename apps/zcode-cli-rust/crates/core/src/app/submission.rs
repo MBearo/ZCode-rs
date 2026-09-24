@@ -40,6 +40,8 @@ pub(super) struct Submission {
     pub automation_id: Option<String>,
     pub off_peak_task_id: Option<String>,
     pub off_peak_run_type: Option<String>,
+    /// UserPromptSubmit `(prompt, attachments summary)` of a user input turn.
+    pub prompt: Option<(String, Option<String>)>,
 }
 
 /// Node `resolveTurnAutomationId` / `resolveTurnOffPeakTaskId`: explicit id, or
@@ -95,6 +97,7 @@ impl Submission {
                 .map(str::to_owned),
             automation_id: automation,
             off_peak_task_id: off_peak,
+            prompt: None,
         }
     }
 }

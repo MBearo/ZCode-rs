@@ -49,12 +49,28 @@ pub enum Event {
         enable: bool,
         reply: oneshot::Sender<std::result::Result<(), String>>,
     },
-    /// A transient plan reminder added before a model request, after `anchor`
-    /// session messages; `exit` marks the one-off exit reminder.
-    PlanReminder {
+    /// A transient reminder (plan mode or hook context) placed before session
+    /// message `anchor`; kept by the engine for later runs of this process.
+    Reminder {
         anchor: usize,
-        exit: bool,
+        kind: zcode_cli_domain::session_runtime::ReminderKind,
         message: Value,
+    },
+    /// One hook lifecycle event (Node `hook_run_*` session events).
+    Hook(zcode_cli_domain::hooks::runner::Lifecycle),
+    /// PermissionRequest hooks answered the prompt for `call_id` first; the
+    /// engine resolves it only if it is still pending.
+    PermissionHook {
+        call_id: String,
+        answer: PermissionAnswer,
+        updates: Vec<zcode_cli_domain::permission::Update>,
+        /// `true` when the hooks' answer resolved the prompt.
+        accepted: oneshot::Sender<bool>,
+    },
+    /// UserPromptSubmit hooks blocked the turn's input: the engine takes the
+    /// input's messages out of the model history before the run ends.
+    PromptBlocked {
+        committed: oneshot::Sender<()>,
     },
     ToolCleanupFailed(String),
     PromptInitialized {

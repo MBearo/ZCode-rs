@@ -1,3 +1,4 @@
+import { writeUserConfig } from "./zcode-cli-rust-fixture-config.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type ServerResponse } from "node:http";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
@@ -52,6 +53,8 @@ export async function fixture(
     surface?: "desktop" | "terminal";
     /** 用户配置的 `permission.mode`；默认 yolo，让既有用例不经审批直接执行工具。 */
     permissionMode?: string | null;
+    /** 用户配置文件的其他段（如 `hooks`）。 */
+    userConfig?: Message;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "zcode-cli-rust-test-"));
@@ -59,11 +62,7 @@ export async function fixture(
   const dataDir = join(root, "data");
   const config = join(root, "model.json");
   await mkdir(cwd);
-  if (options.permissionMode !== null) {
-    await mkdir(join(root, ".zcode", "cli"), { recursive: true });
-    const permission = { mode: options.permissionMode ?? "yolo" };
-    await writeFile(join(root, ".zcode", "cli", "config.json"), JSON.stringify({ permission }));
-  }
+  await writeUserConfig(root, options.permissionMode, options.userConfig);
   const requests: Message[] = [];
   const requestBodies: string[] = [];
   const connectionPorts: number[] = [];

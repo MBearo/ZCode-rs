@@ -1,6 +1,7 @@
 //! Plan mode inside a run: the two tools, the request reminders and the plan
 //! file reference kept across compaction. State changes go to the engine.
 use super::context::{RunContext, TransientKind};
+use crate::domain::session_runtime::ReminderKind;
 use crate::{
     contract::{Event, EventSink, ToolOutput, ToolPort},
     domain::{context::estimate, plan_mode},
@@ -70,7 +71,7 @@ pub(super) async fn remind(history: &mut RunContext, sink: &EventSink) -> Result
     } else if !history.plan_exit_sent {
         history.plan_exit_sent = true;
         let message = plan_mode::reminder_message(plan_mode::exit_reminder());
-        add(history, sink, TransientKind::PlanExit, message).await?;
+        add(history, sink, ReminderKind::PlanExit, message).await?;
     }
     let continuing = history
         .transient()
@@ -83,7 +84,7 @@ pub(super) async fn remind(history: &mut RunContext, sink: &EventSink) -> Result
     let mut transient = history.transient().iter().peekable();
     for (index, message) in history.messages.iter().enumerate() {
         while let Some(t) = transient.next_if(|t| t.position <= index) {
-            if t.kind == TransientKind::PlanReminder {
+            if t.kind == TransientKind::Reminder(ReminderKind::PlanRuntime) {
                 entries.push(plan_mode::Entry::Reminder);
             }
         }
@@ -94,28 +95,30 @@ pub(super) async fn remind(history: &mut RunContext, sink: &EventSink) -> Result
         });
     }
     for t in transient {
-        if t.kind == TransientKind::PlanReminder {
+        if t.kind == TransientKind::Reminder(ReminderKind::PlanRuntime) {
             entries.push(plan_mode::Entry::Reminder);
         }
     }
     if let Some(body) = plan_mode::runtime_reminder(&entries) {
         let message = plan_mode::reminder_message(body);
-        add(history, sink, TransientKind::PlanReminder, message).await?;
+        add(history, sink, ReminderKind::PlanRuntime, message).await?;
     }
     Ok(())
 }
 
-async fn add(
+/// Adds a transient reminder at the end of the history and tells the engine
+/// where it sits so later runs of this process keep it.
+pub(super) async fn add(
     history: &mut RunContext,
     sink: &EventSink,
-    kind: TransientKind,
+    kind: ReminderKind,
     message: Value,
 ) -> Result<()> {
     let tokens = estimate(std::slice::from_ref(&message));
-    let position = history.add_transient(kind, message.clone(), tokens);
-    sink.send(Event::PlanReminder {
+    let position = history.add_transient(TransientKind::Reminder(kind), message.clone(), tokens);
+    sink.send(Event::Reminder {
         anchor: history.state.offset + position,
-        exit: kind == TransientKind::PlanExit,
+        kind,
         message,
     })
     .await

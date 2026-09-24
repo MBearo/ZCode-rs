@@ -260,6 +260,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         .await?
         .with_question_timing(question_timing.0, question_timing.1)
         .with_permission_config(&startup_config.config["permission"])
+        .with_hooks(&startup_config.config["hooks"], &startup_config.user_path)
         .with_registry(registry, requested_cwd.to_string_lossy().into_owned());
         // App Server 独占 stdout；返回时已排空 runtime 输出并释放 sink。
         let served =

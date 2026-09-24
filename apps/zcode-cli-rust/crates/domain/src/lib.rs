@@ -10,6 +10,7 @@ pub mod execution;
 pub mod file_checkpoint;
 pub mod goal;
 pub mod history;
+pub mod hooks;
 mod json_size;
 pub mod legacy_params;
 pub mod legacy_snapshot;

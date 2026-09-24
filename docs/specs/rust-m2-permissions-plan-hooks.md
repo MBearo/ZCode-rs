@@ -449,6 +449,102 @@ sequenceDiagram
   - HookRun 事件；
   - UserPromptSubmit 拦截时写 `lastError`，代码为 `fault.runtime.hookBlocked`。
 
+### 6.1 Rust 结构与所有者
+
+- **domain `hooks`（纯函数，Node 生成夹具比对）**：
+  - `registrations(hooks, user_path)`：把 M1 合并后的 `hooks` 转成有序注册表。Rust 目前只有用户配置文件会带 hooks，因此来源一律为 `user`，`sourcePath` 为用户配置路径；插件 hooks（M10）与项目 hooks（M2.6）按 Node 的插入规则追加。
+  - 匹配：`regress` 实现，规则同 §6；工具别名 `Agent↔Task`、`ApplyPatch→[Write, Edit]`。
+  - 输入：7 种事件的输入对象按 Node 构造顺序生成键；另提供 stdin 兼容字段、transcript 行、`${VAR}` 展开和环境变量覆盖。
+  - 输出：stdout 解析（按 zod3 规则校验并丢弃未知键）、退出码 2 的拦截输出、单个 hook 的处理、多个 hook 的合并（含 D9a/D9b）、拦截判定与 blockReason。
+  - 文本：工具结果追加的 `[Hook additional context]`，以及生命周期上下文正文（按 UTF-16 单元截断到 24000 并加 `...`）。
+  - 展示：`sanitize` 使用 Node 的正则与 flag（`regress`）；descriptor 与 `displayName` 同 Node。
+  - 投影：`hookInvocation` 行的合并规则同 Node `onHookRunLifecycle`，包括执行项按 `hookIndex` 排序、行状态、lane 与 UserPromptSubmit 的 `lastError`。
+- **进程执行**：新增 `ToolPort::run_hook(request, cancel)`，由 tools crate 实现：
+  - 在临时目录写 transcript，按 domain 规则生成 stdin；
+  - command hook 用 `/bin/sh -c`（或配置的 shell，Windows 为 `cmd.exe /d /s /c`），process hook 按 argv 执行；
+  - cwd 与环境变量同 M1 工具环境，再加 hook 覆盖变量；
+  - 进程单独成组；stdout 与 stderr 分别只保留前 `maxOutputBytes` 字节，超出部分读取后丢弃；
+  - 超时由此处的唯一截止时间负责，结果为 `timed_out`；取消结果为 `cancelled`；两种情况都复用 `process_tree::terminate` 回收整个进程树；
+  - 根进程退出后最多再等 1 s 管道关闭，超时则回收进程树；临时目录在任何结果下都会删除。
+- **运行器（core `hook_runner`）**：
+  - 每个 run 持有一个 `HookRunner`，其中有：注册表、`Arc<dyn ToolPort>`、事件 sink、工作目录，以及 M2.6 的准入回调。
+  - 执行顺序：按注册顺序逐个执行；
+    - 执行前先重新检查准入；
+    - 生命周期事件以 `Event::Hook(payload)` 交给 Engine，payload 键序同 Node；
+    - `async` hook 用 `tokio::spawn` 在后台执行，受本轮取消信号约束，输出不参与合并。
+  - 结果映射：
+    - `timed_out` → `Hook timed out after <n>ms`（`TOOL_TIMEOUT`）；
+    - `cancelled` → `Hook execution cancelled`（`TOOL_CANCELLED`）；
+    - 其他非零退出（退出码 2 除外） → `Hook process failed`，错误文本取原因（`TOOL_EXECUTION_FAILED`）。
+  - 子代理的 run 不创建运行器。
+- **调用点**：
+  - **工具**（`tool_execution`）：
+    1. 参数校验通过后执行 PreToolUse；
+    2. 拦截时返回拒绝结果并附带上下文；
+    3. `updatedInput` 替换参数；
+    4. 权限判定应用 allow/ask 覆盖（`alwaysAsk` 不可被 allow 覆盖）；
+    5. 执行成功后运行 PostToolUse，失败后运行 PostToolUseFailure；
+    6. 上下文按 Node 规则追加在结果末尾。
+  - **PermissionRequest**：
+    - run 先发 `Event::Permission` 登记交互，再并发运行 hook 链。
+    - hook 先给出决定时，发 `Event::PermissionHook {call_id, answer}`；Engine 只在交互仍待决时按同一收口（`settle_permission`、`permissionUpdates` 写项目规则）解决它，并把答案经原 `reply` 返回。
+    - 用户先答复时，run 取消 hook 链，但不等待它结束。
+    - `modify` 按 Node 复核改写后的输入：拒绝则拒绝；命中 `rule.project.ask` 时保持交互待决，等用户答复；否则以改写后的输入放行。
+  - **轮次**（`agent_loop` 开头）：
+    - 本进程内该会话第一次开轮时运行 SessionStart（`startup`），由 Engine 的运行态标记保证只运行一次；
+    - 用户输入开启的轮次运行 UserPromptSubmit。
+    - 被阻止时，run 发 `Event::PromptBlocked {reason}`：Engine 把本轮写入的模型消息截回输入边界并持久化，run 随即正常结束。模型不会看到该输入，也不会发出请求。
+  - **Stop**：纯文本步骤收口、且没有引导输入时运行。满足续跑条件时，上下文作为提醒注入并继续请求，每轮最多 3 次。
+  - **上下文注入**：SessionStart、UserPromptSubmit、Stop 的上下文作为运行期临时提醒插在当时的历史末尾。与 plan 提醒使用同一套 `Event::Reminder {anchor, kind, message}` 与会话运行态锚点：跨轮次保留，进程重启后清空。
+- **投影**：Engine 的 `hook_events` 把生命周期合并进 `hookInvocation` 行（`row.appended` / `row.upserted`），并在 UserPromptSubmit 实际执行后被拦截时设置 `lastError`。
+  - 没有 turn 的事件（`async` hook 在轮次结束后完成）只更新已存在的行。
+  - 行随会话持久化；冷恢复时仍为 `running` 的行按 Node `onSessionResumed` 收口为 `failed`，执行项的结果为 `cancelled`。
+
+```mermaid
+sequenceDiagram
+    participant M as Model
+    participant R as run task
+    participant H as HookRunner
+    participant T as ToolPort
+    participant E as Engine
+    participant U as Client
+    M->>R: tool call
+    R->>H: PreToolUse(input)
+    H->>E: Event::Hook(started)
+    H->>T: run_hook(stdin)
+    T-->>H: exit/stdout/stderr
+    H->>E: Event::Hook(completed|blocked|failed)
+    H-->>R: merged result
+    alt 需要审批
+        R->>E: Event::Permission
+        E-->>U: pendingInteractions += permission
+        par 用户
+            U->>E: resolveInteraction
+            E-->>R: answer（run 取消 hook 链）
+        and hook
+            R->>H: PermissionRequest
+            H-->>R: decision
+            R->>E: Event::PermissionHook
+            E->>E: 仍待决才 settle
+            E-->>R: answer
+        end
+    end
+    R->>T: execute tool
+    R->>H: PostToolUse / PostToolUseFailure
+    R->>E: ToolDone(result + hook context)
+```
+
+- **顺带修正（对齐 Node）**：plan 开启时，ExitPlanMode 的任何非反馈拒绝都停轮（Node `withPlanExitDeniedTurnStop`），包括规则拒绝、PreToolUse 拦截和 PermissionRequest 拒绝。此前 Rust 只覆盖了用户拒绝。
+- **与 Node 的差异**（不影响 hook 决策）：
+  - Rust 的 JSON 对象按键排序（serde_json 未开 `preserve_order`）：
+    - stdin 顶层键序与 Node 一致，嵌套对象（如 `tool_input`）按键排序；
+    - 不同事件的注册先后与配置文件书写顺序无关。每次只运行一个事件的 hooks，同一事件内保持数组顺序。
+  - `toolResponse` 为工具的结构化结果（`ToolOutput.data`），没有时为结果文本。
+  - PostToolUseFailure 的 `error.type` 为 `tool_execution_failed` 或 `tool_cancelled`。
+  - 工具结果追加 hook 上下文时不按各工具的 `maxModelBytes` 重新分配预算（属于 M5 的结果序列化）。
+  - SessionStart `resume` 在本进程第一次开轮时运行，Node 在恢复会话时立即运行。上下文位置相同（本轮输入之前）。
+  - hook 上下文与 plan 提醒一样，以 `<system-reminder>` 包装的 user 消息发送（M7 的 MCS 投影）。
+
 ## 7. M2.6 工作区信任
 
 依据 `shared/{workspace-hook-config,workspace-hook-digest,workspace-hook-trust-store-file,workspace-hook-mutation}.ts`、`adapters/src/storage/workspace-hook-trust-store.ts`、`core/src/hooks/workspace-hook-*.ts`、`bootstrap/src/app/workspace-hook-*.ts`、`bootstrap/src/zcode-protocol/workspace-hook-trust.ts`。

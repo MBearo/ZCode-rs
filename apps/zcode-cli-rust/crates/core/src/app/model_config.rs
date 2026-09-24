@@ -235,3 +235,37 @@ impl Engine {
         }
     }
 }
+
+impl Engine {
+    /// Node `interaction/requestProviderRuntimeHeaders`: the Host supplies the
+    /// credentials of one model request; the reply goes back to the run.
+    pub(super) fn request_auth(
+        &mut self,
+        id: &str,
+        turn: &str,
+        provider: String,
+        selection: Value,
+        access: Value,
+        reply: tokio::sync::oneshot::Sender<Value>,
+    ) {
+        if reply.is_closed() {
+            return;
+        }
+        let request_id = format!("rust-auth-{}", self.clock.id());
+        let workspace = json!({"workspaceKey":self.workspace,"workspacePath":self.workspace_path,"workspaceIdentity":self.workspace});
+        let params = json!({"requestId":request_id,"sessionId":id,"turnId":turn,"workspace":workspace,"providerId":provider,"modelSelection":selection,"accountAccess":access,"reason":"model-request"});
+        self.waiters.add_host(
+            request_id.clone(),
+            super::waiters::HostWait {
+                owner: id.into(),
+                workspace,
+                reply,
+            },
+        );
+        self.outbox.push(crate::contract::ServerMsg::HostRequest {
+            id: request_id,
+            method: "interaction/requestProviderRuntimeHeaders",
+            params,
+        });
+    }
+}

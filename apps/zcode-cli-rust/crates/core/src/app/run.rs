@@ -54,7 +54,7 @@ impl Engine {
                 selection,
                 cancel: cancel.clone(),
                 run_id: run_id.clone(),
-                turn_id,
+                turn_id: turn_id.clone(),
                 origin: origin.clone(),
                 execution: submission.execution.clone(),
                 permissions,
@@ -77,19 +77,19 @@ impl Engine {
         history.agent_profile = session.agent_profile.clone();
         history.tool_disallowlist = submission.tool_disallowlist;
         history.tool_filter = session.runtime.tools.clone();
-        // Node 的 plan 提醒留在进程内历史中；新一轮按原位置继续发送（重启后清空）。
+        // Node 的提醒（plan、hook 上下文）留在进程内历史中；新一轮按原位置继续发送（重启后清空）。
         let offset = session.context.offset;
-        history.restore_transient(session.runtime.plan_reminders.iter().filter_map(
-            |(anchor, runtime, message)| {
-                let kind = if *runtime {
-                    super::context::TransientKind::PlanReminder
-                } else {
-                    super::context::TransientKind::PlanExit
-                };
-                Some((anchor.checked_sub(offset)?, kind, message.clone()))
+        history.restore_transient(session.runtime.reminders.iter().filter_map(
+            |(anchor, kind, message)| {
+                Some((
+                    anchor.checked_sub(offset)?,
+                    super::context::TransientKind::Reminder(*kind),
+                    message.clone(),
+                ))
             },
         ));
         history.permissions = Some(permission_updates);
+        let turn_hooks = self.turn_hooks(id, &turn_id, submission.prompt, &identity);
         let context = self.context.clone();
         let tools = self.tools.clone();
         let sink = Sink {
@@ -108,6 +108,7 @@ impl Engine {
                 tools.as_ref(),
                 context.as_ref(),
                 &mut history,
+                turn_hooks,
                 &sink,
                 &cancel,
             )
@@ -127,6 +128,56 @@ impl Engine {
                 .await;
         });
         Ok(())
+    }
+
+    /// The run's hooks (none in subagents, Node builds subagent runtimes
+    /// without hooks). SessionStart runs once per session and process.
+    fn turn_hooks(
+        &mut self,
+        id: &str,
+        turn: &str,
+        prompt: Option<(String, Option<String>)>,
+        identity: &crate::contract::ModelIdentity,
+    ) -> Option<super::turn_hooks::TurnHooks> {
+        let session = self.sessions.get_mut(id)?;
+        let first = !std::mem::replace(&mut session.runtime.session_start_ran, true);
+        if session.parent_id.is_some() || self.hooks.is_empty() {
+            return None;
+        }
+        let at = session
+            .history
+            .inputs
+            .iter()
+            .rev()
+            .find(|input| input.turn == turn)
+            .map(|input| input.message);
+        // 本进程首次开轮：会话此前已有输入即视为恢复（Node resume 的 SessionStart）。
+        let source = if session.history.inputs.len() > 1 {
+            "resume"
+        } else {
+            "startup"
+        };
+        let hooks = super::hook_runner::Hooks {
+            registrations: self.hooks.clone(),
+            tools: self.tools.clone(),
+            clock: self.clock.clone(),
+            cwd: self.workspace_path.clone(),
+            turn_id: turn.into(),
+        };
+        Some(super::turn_hooks::TurnHooks {
+            hooks: Arc::new(hooks),
+            session_start: first.then_some(source),
+            prompt: prompt
+                .zip(at)
+                .map(|((text, attachments), at)| super::turn_hooks::Prompt {
+                    text,
+                    attachments,
+                    at,
+                }),
+            model: format!("{}/{}", identity.provider_id, identity.model_id),
+            stop_continuations: 0,
+            tool_calls: 0,
+        })
     }
 
     /// Node model attribution: the session runtime's root trace (created once per

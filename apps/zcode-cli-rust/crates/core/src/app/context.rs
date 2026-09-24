@@ -42,9 +42,8 @@ pub(super) struct Transient {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum TransientKind {
     Continue,
-    /// Plan-mode `runtime_mode` reminder (counts for the cadence).
-    PlanReminder,
-    PlanExit,
+    /// Kept by the engine across runs of this process.
+    Reminder(crate::domain::session_runtime::ReminderKind),
 }
 const CONTINUE_PROMPT: &str = "Output token limit hit. Resume directly — no apology, no recap of what you were doing. Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.";
 fn continuation_tokens() -> usize {
@@ -92,6 +91,21 @@ impl RunContext {
             tokens,
         });
         position
+    }
+    /// A reminder placed before `messages[position]` (hook context ahead of the
+    /// turn's input), keeping the list ordered by position.
+    pub fn insert_transient(&mut self, position: usize, kind: TransientKind, message: Value) {
+        let tokens = estimate(std::slice::from_ref(&message));
+        let at = self.transient.partition_point(|t| t.position <= position);
+        self.transient.insert(
+            at,
+            Transient {
+                position,
+                kind,
+                message,
+                tokens,
+            },
+        );
     }
     /// Restores reminders the engine kept for this session (positions in `messages`).
     pub fn restore_transient(

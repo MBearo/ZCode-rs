@@ -1,8 +1,10 @@
 //! One step's tool calls (Node batch runner): permission gate, dispatch, result
 //! commits in call order, and the turn stop a result may request.
+use super::tool_hooks::{self, ToolCall};
+use super::tool_permission::Gate;
 use crate::{
     contract::{Event, EventSink, ToolOutput, ToolPort},
-    domain::plan_mode,
+    domain::{hooks::output::RunResult, plan_mode},
 };
 use anyhow::{Context, Result, bail};
 use futures_util::{StreamExt, stream};
@@ -18,6 +20,8 @@ pub(super) struct Scope<'a> {
     pub selection: Option<crate::contract::ModelIdentity>,
     pub permissions: Option<&'a super::tool_permission::Permissions>,
     pub tool_filter: &'a crate::domain::session_runtime::ToolFilter,
+    /// The run's hooks; `None` in subagents.
+    pub hooks: Option<&'a std::sync::Arc<super::hook_runner::Hooks>>,
 }
 async fn execute(
     tools: &dyn ToolPort,
@@ -33,8 +37,10 @@ async fn execute(
         selection,
         permissions,
         tool_filter,
+        hooks,
     } = context;
-    let (skills, profile, profiles, permissions) = (*skills, *profile, *profiles, *permissions);
+    let (skills, profile, profiles, permissions, hooks) =
+        (*skills, *profile, *profiles, *permissions, *hooks);
     let selection = selection.clone();
     if cancel.is_cancelled() {
         bail!("Cancelled");
@@ -44,17 +50,16 @@ async fn execute(
         .as_str()
         .context("Tool name missing")?;
     let id: String = call["id"].as_str().context("Tool id missing")?.into();
-    let parsed =
-        serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap_or(""));
+    let mut parsed =
+        serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap_or("")).ok();
     let plan_tool = matches!(name, plan_mode::ENTER | plan_mode::EXIT);
     // 与 Node 一致：会话未注册的工具（allow/deny 过滤、子代理中的 plan 工具）按不存在处理，
-    // ExitPlanMode 的输入校验在权限询问之前；两者都不进入权限流程。
+    // ExitPlanMode 的输入校验在权限询问之前；两者都不进入 hook 与权限流程。
     let rejected = if !tool_filter.allows(name) || (plan_tool && profile.is_some()) {
         Some(format!("Tool not found: {name}"))
     } else if name == plan_mode::EXIT {
         parsed
             .as_ref()
-            .ok()
             .and_then(|args| plan_mode::exit_plan(args).err())
             .map(str::to_owned)
     } else {
@@ -65,19 +70,50 @@ async fn execute(
         output.failed = true;
         return Ok((id, output, true));
     }
-    if let (Some(permissions), Ok(args)) = (permissions, &parsed)
-        && let Some(output) =
-            super::tool_permission::authorize(tools, permissions, &call, args, sink, cancel).await?
-    {
-        return Ok((id, output, true));
+    let mode = permissions
+        .map(|p| p.borrow().state.mode.as_str())
+        .unwrap_or("build");
+    let mut pre = RunResult::default();
+    if let (Some(h), Some(args)) = (hooks, &parsed) {
+        let call = ToolCall {
+            id: &id,
+            name,
+            args,
+            mode,
+        };
+        pre = tool_hooks::pre_tool_use(h, tools, &call, sink, cancel).await;
+        if let Some(reason) = tool_hooks::pre_tool_refusal(&pre) {
+            let plan_on = permissions.is_some_and(|p| p.borrow().state.plan_enabled);
+            let mut output =
+                super::tool_permission::refusal(super::permissions::summarize(&reason));
+            output.stop_turn = name == plan_mode::EXIT && plan_on;
+            tool_hooks::append_contexts(&mut output, &pre.additional_contexts);
+            return Ok((id, output, true));
+        }
+        if let Some(updated) = pre.updated_input.take() {
+            parsed = Some(updated);
+        }
+    }
+    if let (Some(permissions), Some(args)) = (permissions, &parsed) {
+        let gate = hooks.map(|h| (h, &pre));
+        match super::tool_permission::authorize(tools, permissions, &call, args, gate, sink, cancel)
+            .await?
+        {
+            Gate::Stop(mut output) => {
+                tool_hooks::append_contexts(&mut output, &pre.additional_contexts);
+                return Ok((id, output, true));
+            }
+            Gate::Run(Some(modified)) => parsed = Some(modified),
+            Gate::Run(None) => {}
+        }
     }
     let result = if profile.is_some_and(|p| !p.allows(name)) {
         Err(anyhow::anyhow!(
             "Tool is not allowed by this subagent profile"
         ))
     } else {
-        match serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap_or("")) {
-            Ok(args)
+        match parsed.clone() {
+            Some(args)
                 if matches!(name, "Agent" | "Task" | "SendMessage")
                     || matches!(name, "TaskOutput" | "TaskStop")
                         && args["task_id"]
@@ -88,28 +124,27 @@ async fn execute(
                     (tools, profiles, skills),
                     name,
                     &args,
-                    call["id"].as_str().unwrap(),
+                    &id,
                     selection,
                     sink,
                     cancel,
                 )
                 .await
             }
-            Ok(args) if plan_tool => {
+            Some(args) if plan_tool => {
                 super::plan_tools::execute(tools, name, &args, &id, permissions, sink, cancel).await
             }
-            Ok(args) if name == "AskUserQuestion" => {
-                super::question_tool::execute(call["id"].as_str().unwrap(), args, sink, cancel)
-                    .await
+            Some(args) if name == "AskUserQuestion" => {
+                super::question_tool::execute(&id, args, sink, cancel).await
             }
-            Ok(args) if matches!(name, "TodoRead" | "TodoWrite") => {
-                super::todos::execute(name, call["id"].as_str().unwrap(), args, sink, cancel).await
+            Some(args) if matches!(name, "TodoRead" | "TodoWrite") => {
+                super::todos::execute(name, &id, args, sink, cancel).await
             }
-            Ok(args) if name == "Skill" => {
+            Some(args) if name == "Skill" => {
                 super::skills::execute(tools, skills, &args, cancel).await
             }
-            Ok(args) => tools.execute_scoped(name, &args, sink, cancel).await,
-            Err(_) => Err(anyhow::anyhow!("Invalid tool JSON arguments")),
+            Some(args) => tools.execute_scoped(name, &args, sink, cancel).await,
+            None => Err(anyhow::anyhow!("Invalid tool JSON arguments")),
         }
     };
     if let Err(error) = &result
@@ -121,13 +156,36 @@ async fn execute(
         return Err(result.err().unwrap());
     }
     let failed = result.as_ref().map_or(true, |output| output.failed);
-    let content = result
+    let message = match &result {
+        Err(error) => error.to_string(),
+        Ok(output) => output.content.clone(),
+    };
+    let mut content = result
         .unwrap_or_else(|error| crate::contract::ToolOutput::text(format!("Tool failed: {error}")));
-    Ok((
-        call["id"].as_str().context("Tool id missing")?.into(),
-        content,
-        failed,
-    ))
+    let mut contexts = pre.additional_contexts;
+    if let (Some(h), Some(args)) = (hooks, &parsed) {
+        let call = ToolCall {
+            id: &id,
+            name,
+            args,
+            mode,
+        };
+        if failed {
+            // Node：失败 hook 有上下文时连同 PreToolUse 上下文一起追加，否则只追加 PreToolUse 的。
+            let cancelled = cancel.is_cancelled();
+            let failure =
+                tool_hooks::post_tool_use_failure(h, &call, &message, cancelled, sink, cancel)
+                    .await;
+            if !failure.additional_contexts.is_empty() {
+                contexts.extend(failure.additional_contexts);
+            }
+        } else {
+            let post = tool_hooks::post_tool_use(h, &call, &content, sink, cancel).await;
+            contexts.extend(post.additional_contexts);
+        }
+    }
+    tool_hooks::append_contexts(&mut content, &contexts);
+    Ok((id, content, failed))
 }
 
 /// Runs one model step's calls. Consecutive concurrency-safe calls run together

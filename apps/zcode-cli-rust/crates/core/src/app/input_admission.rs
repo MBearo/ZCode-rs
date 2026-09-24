@@ -155,10 +155,17 @@ impl Engine {
             });
         // 每个会话同一时刻至多一个待启动的输入；失败路径遗留的旧条目在此清除。
         self.submissions.retain(|(session, _), _| session != id);
-        self.submissions.insert(
-            (id.to_owned(), turn.clone()),
-            super::submission::Submission::new(&c.payload, &c.command_id, execution),
-        );
+        let mut submission =
+            super::submission::Submission::new(&c.payload, &c.command_id, execution);
+        // Node runUserPromptSubmitHooks 的 prompt 是提交给模型的输入：/goal 为目标续跑提示。
+        let prompt = match (c.kind.as_str(), &content) {
+            ("sendGoalCommand", Value::String(goal)) => goal.clone(),
+            _ => text.to_owned(),
+        };
+        let attachments = super::turn_hooks::attachments_summary(&c.payload["attachments"]);
+        submission.prompt = Some((prompt, attachments));
+        self.submissions
+            .insert((id.to_owned(), turn.clone()), submission);
         Ok((turn, input))
     }
     pub(super) fn new_turn_rows(&self, id: &str) -> Vec<Value> {

@@ -22,6 +22,8 @@ pub struct WorkspaceTools {
     writes: Arc<Mutex<()>>,
     shell: ShellTasks,
     mcp: super::mcp_hub::Hub,
+    /// Complete child environment shared by shell tools and hooks.
+    env: Arc<[(String, String)]>,
 }
 impl WorkspaceTools {
     pub fn new(
@@ -30,8 +32,10 @@ impl WorkspaceTools {
         config: Arc<dyn crate::contract::ConfigSource>,
         egress: Arc<zcode_cli_net::Egress>,
     ) -> Self {
+        let env = egress.tool_env();
         Self {
-            shell: ShellTasks::new(egress.tool_env()),
+            shell: ShellTasks::new(env.clone()),
+            env,
             mcp: super::mcp_hub::Hub::new(cwd.clone(), config.clone(), egress),
             config,
             cwd,
@@ -265,6 +269,13 @@ impl ToolPort for WorkspaceTools {
     }
     async fn read_plan_file(&self, session: &str) -> Result<Option<(String, String)>> {
         super::plan_file::read(&self.cwd, session).await
+    }
+    async fn run_hook(
+        &self,
+        request: crate::contract::HookProcess,
+        cancel: &CancellationToken,
+    ) -> Result<crate::domain::hooks::output::Exec> {
+        super::hook_process::run(request, &self.env, cancel).await
     }
     async fn permission(
         &self,

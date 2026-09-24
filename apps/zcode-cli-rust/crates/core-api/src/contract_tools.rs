@@ -129,6 +129,15 @@ pub trait ToolPort: Send + Sync {
     async fn read_plan_file(&self, _session: &str) -> Result<Option<(String, String)>> {
         Ok(None)
     }
+    /// Runs one hook process to its end (Node `ExecutionPort.run` for hooks):
+    /// the timeout and `cancel` stop the whole process tree.
+    async fn run_hook(
+        &self,
+        _request: HookProcess,
+        _cancel: &CancellationToken,
+    ) -> Result<zcode_cli_domain::hooks::output::Exec> {
+        anyhow::bail!("Hooks unavailable")
+    }
     fn concurrent_safe(&self, _name: &str) -> bool {
         false
     }
@@ -160,6 +169,19 @@ pub trait ToolPort: Send + Sync {
         Ok(())
     }
 }
+/// One hook process. Variables are already expanded.
+pub struct HookProcess {
+    pub program: zcode_cli_domain::hooks::Program,
+    pub cwd: String,
+    /// Session and plugin variables added over the tool environment.
+    pub env: Vec<(String, String)>,
+    /// The hook input; the port writes the transcript and stdin from it.
+    pub input: Value,
+    pub timeout: std::time::Duration,
+    /// Kept per stream; the rest is read and dropped.
+    pub max_output_bytes: usize,
+}
+
 /// Permission inputs of one tool call, resolved by the tool port.
 pub struct ToolPermission {
     pub capability: zcode_cli_domain::permission::ToolCapability,

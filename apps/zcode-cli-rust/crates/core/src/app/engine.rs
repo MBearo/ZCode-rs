@@ -70,6 +70,8 @@ pub struct Engine {
     pub(super) question_timing: (u64, u64),
     pub(super) events: mpsc::Sender<RunEvent>,
     pub(super) event_rx: mpsc::Receiver<RunEvent>,
+    /// User config hooks, read once at startup.
+    pub(super) hooks: Arc<[crate::domain::hooks::Registration]>,
 }
 impl Engine {
     pub async fn new(
@@ -131,6 +133,7 @@ impl Engine {
             question_timing: (60_000, 300_000),
             events,
             event_rx,
+            hooks: Arc::from([]),
         })
     }
     /// Config file `permission` section (mode fallback, allowed/disallowed tools),

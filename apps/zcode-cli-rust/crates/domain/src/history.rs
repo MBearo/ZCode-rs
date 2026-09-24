@@ -202,6 +202,21 @@ impl Session {
         self.history.action_rows = wanted.iter().map(|(i, _)| *i).collect();
         deltas
     }
+    /// Takes the model messages from `message` on out of the history (an input
+    /// a UserPromptSubmit hook blocked); storage rewrites the transcript.
+    pub fn truncate_messages(&mut self, message: usize) {
+        if message >= self.messages.len() {
+            return;
+        }
+        self.messages.truncate(message);
+        self.history.responses.retain(|b| b.message <= message);
+        self.context_tokens = None;
+        self.history_rewrite = true;
+        self.saved_rows = 0;
+        self.saved_messages = 0;
+        self.saved_inputs = 0;
+        self.saved_responses = 0;
+    }
     pub fn cut_history(&mut self, row: usize, message: usize, state: &State) {
         self.rows.truncate(row);
         self.messages.truncate(message);
