@@ -6,6 +6,7 @@ pub mod background;
 pub mod claude_import;
 pub mod config;
 pub mod context;
+pub mod edit_match;
 pub mod execution;
 pub mod file_checkpoint;
 pub mod goal;

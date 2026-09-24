@@ -19,7 +19,7 @@ pub(super) async fn write(cwd: &Path, session: &str, plan: &str) -> Result<()> {
         Err(error) => return Err(error.into()),
     };
     let cancel = CancellationToken::new();
-    super::tool_files::atomic_write(&path, plan.as_bytes(), current.as_deref(), &cancel).await
+    super::file_write::atomic_write(&path, plan.as_bytes(), current.as_deref(), &cancel).await
 }
 
 /// `None` when the file is missing or blank; other read errors fail compaction.

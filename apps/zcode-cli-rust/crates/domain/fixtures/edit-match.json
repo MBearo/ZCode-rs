@@ -1,0 +1,5389 @@
+[
+  {
+    "content": "alpha beta alpha",
+    "search": "beta",
+    "replaceAll": false,
+    "newString": "gamma",
+    "result": {
+      "status": "matched",
+      "actualString": "beta",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "gamma"
+  },
+  {
+    "content": "a x a",
+    "search": "a",
+    "replaceAll": false,
+    "newString": "b",
+    "result": {
+      "status": "matched",
+      "actualString": "a",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "b"
+  },
+  {
+    "content": "it’s “quoted” text",
+    "search": "it's \"quoted\"",
+    "replaceAll": false,
+    "newString": "was \"new\" and 'x' don't",
+    "result": {
+      "status": "matched",
+      "actualString": "it’s “quoted”",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "was “new” and ‘x’ don’t"
+  },
+  {
+    "content": "say ‘hi’ now",
+    "search": "say 'hi'",
+    "replaceAll": false,
+    "newString": "say 'bye' (x) 'y' —'z'",
+    "result": {
+      "status": "matched",
+      "actualString": "say ‘hi’",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "say ‘bye’ (x) ‘y’ —‘z’"
+  },
+  {
+    "content": "“a” and ”a“",
+    "search": "\"a\"",
+    "replaceAll": false,
+    "newString": "b",
+    "result": {
+      "status": "ambiguous",
+      "strategy": "quote_normalized",
+      "candidateCount": 2
+    }
+  },
+  {
+    "content": "line one\nline two\n",
+    "search": "1: line one\n2: line two",
+    "replaceAll": false,
+    "newString": "x",
+    "result": {
+      "status": "matched",
+      "actualString": "line one\nline two",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "x"
+  },
+  {
+    "content": "line one\nline two",
+    "search": "1\tline one\n2\tline two",
+    "replaceAll": false,
+    "newString": "x",
+    "result": {
+      "status": "matched",
+      "actualString": "line one\nline two",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "x"
+  },
+  {
+    "content": "line one\r",
+    "search": "1: line one\r",
+    "replaceAll": false,
+    "newString": "x",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "12: literal",
+    "search": "12: literal",
+    "replaceAll": false,
+    "newString": "x",
+    "result": {
+      "status": "matched",
+      "actualString": "12: literal",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "x"
+  },
+  {
+    "content": "a\tb",
+    "search": "a\\tb",
+    "replaceAll": false,
+    "newString": "c\\td\\q",
+    "result": {
+      "status": "matched",
+      "actualString": "a\tb",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "c\td\\q"
+  },
+  {
+    "content": "say \"hi\"",
+    "search": "say \\\"hi\\\"",
+    "replaceAll": false,
+    "newString": "x",
+    "result": {
+      "status": "matched",
+      "actualString": "say \"hi\"",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "x"
+  },
+  {
+    "content": "price $5 and \\n",
+    "search": "price \\$5 and \\\\n",
+    "replaceAll": false,
+    "newString": "cost \\$6",
+    "result": {
+      "status": "matched",
+      "actualString": "price $5 and \\n",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "cost $6"
+  },
+  {
+    "content": "é and \\u0041",
+    "search": "\\u00e9 and \\\\u0041",
+    "replaceAll": false,
+    "newString": "e",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "😀 face",
+    "search": "\\ud83d\\ude00 face",
+    "replaceAll": false,
+    "newString": "x",
+    "result": {
+      "status": "matched",
+      "actualString": "😀 face",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "x"
+  },
+  {
+    "content": "x",
+    "search": "\\ud83d",
+    "replaceAll": false,
+    "newString": "y",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "x\\u00zz",
+    "search": "x\\u00zz",
+    "replaceAll": false,
+    "newString": "y",
+    "result": {
+      "status": "matched",
+      "actualString": "x\\u00zz",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "y"
+  },
+  {
+    "content": "  foo()\n    bar()\n  baz()",
+    "search": "foo()\nbar()\nbaz()",
+    "replaceAll": false,
+    "newString": "q",
+    "result": {
+      "status": "matched",
+      "actualString": "  foo()\n    bar()\n  baz()",
+      "strategy": "line_trimmed",
+      "candidateCount": 1
+    },
+    "replacement": "q"
+  },
+  {
+    "content": "  foo()\n    bar()\n  baz()",
+    "search": "foo()\nbar()\nbaz()",
+    "replaceAll": true,
+    "newString": "q",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "  x\n\tx",
+    "search": " x ",
+    "replaceAll": false,
+    "newString": "y",
+    "result": {
+      "status": "ambiguous",
+      "strategy": "line_trimmed",
+      "candidateCount": 2
+    }
+  },
+  {
+    "content": "  x\n\tx",
+    "search": " x ",
+    "replaceAll": true,
+    "newString": "y",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "﻿foo",
+    "search": "  foo  ",
+    "replaceAll": false,
+    "newString": "bar",
+    "result": {
+      "status": "matched",
+      "actualString": "﻿foo",
+      "strategy": "line_trimmed",
+      "candidateCount": 1
+    },
+    "replacement": "bar"
+  },
+  {
+    "content": "foo",
+    "search": " foo",
+    "replaceAll": false,
+    "newString": "bar",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "fn a() {\n  let x = 1;\n  return x;\n}",
+    "search": "fn a() {\n  let y = 1;\n  return x;\n}",
+    "replaceAll": false,
+    "newString": "z",
+    "result": {
+      "status": "matched",
+      "actualString": "fn a() {\n  let x = 1;\n  return x;\n}",
+      "strategy": "block_anchor",
+      "candidateCount": 1
+    },
+    "replacement": "z"
+  },
+  {
+    "content": "fn a() {\n  completely different;\n}",
+    "search": "fn a() {\n  let y = 1;\n}",
+    "replaceAll": false,
+    "newString": "z",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "start\n  😀😀 middle\nend",
+    "search": "start\n😀x middle\nend",
+    "replaceAll": false,
+    "newString": "q",
+    "result": {
+      "status": "matched",
+      "actualString": "start\n  😀😀 middle\nend",
+      "strategy": "block_anchor",
+      "candidateCount": 1
+    },
+    "replacement": "q"
+  },
+  {
+    "content": "first\nsecond\n",
+    "search": "first\nsecond\n\n",
+    "replaceAll": false,
+    "newString": "z",
+    "result": {
+      "status": "matched",
+      "actualString": "first\nsecond\n",
+      "strategy": "line_trimmed",
+      "candidateCount": 1
+    },
+    "replacement": "z"
+  },
+  {
+    "content": "one\n\ntwo",
+    "search": "one\n\ntwo\n",
+    "replaceAll": false,
+    "newString": "z",
+    "result": {
+      "status": "matched",
+      "actualString": "one\n\ntwo",
+      "strategy": "line_trimmed",
+      "candidateCount": 1
+    },
+    "replacement": "z"
+  },
+  {
+    "content": "don’t stop",
+    "search": "don't stop",
+    "replaceAll": false,
+    "newString": "can't 'go' \"now\"",
+    "result": {
+      "status": "matched",
+      "actualString": "don’t stop",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "can’t ‘go’ \"now\""
+  },
+  {
+    "content": "(“x”)",
+    "search": "(\"x\")",
+    "replaceAll": false,
+    "newString": "(\"y\") ['z'] {\"w\"}",
+    "result": {
+      "status": "matched",
+      "actualString": "(“x”)",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "(“y”) ['z'] {“w”}"
+  },
+  {
+    "content": "0😀\"\n'\t“\n😀—“n“—\t‘:\\'“1 ",
+    "search": "\\n'\\t“\\n😀—“n“",
+    "replaceAll": false,
+    "newString": "\\—\"b\n 1",
+    "result": {
+      "status": "matched",
+      "actualString": "\n'\t“\n😀—“n“",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\\—“b\n 1"
+  },
+  {
+    "content": "(”1\\'‘b(n\nu“n‘1’\\'",
+    "search": "\n  u“n‘",
+    "replaceAll": true,
+    "newString": "\\\t",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "b—\"“\\'\\:\\’—\"'\"\té—n \"(” ’1'😀a“”\n",
+    "search": "1\t—\"“\\'\\:\\’—\"'\"\té—n \"(” ’1",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "—\"“\\'\\:\\’—\"'\"\té—n \"(” ’1",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "0an”\t\\’\t :😀",
+    "search": "1\t:😀",
+    "replaceAll": false,
+    "newString": "é",
+    "result": {
+      "status": "matched",
+      "actualString": ":😀",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "é"
+  },
+  {
+    "content": "”(—“”“n”‘\"”“é u 0——\n'😀’",
+    "search": "0——\n'",
+    "replaceAll": false,
+    "newString": "b“(”😀😀",
+    "result": {
+      "status": "matched",
+      "actualString": "0——\n'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "b“(”😀😀"
+  },
+  {
+    "content": "\"\t0u(\n(’é😀‘",
+    "search": "1\t’",
+    "replaceAll": true,
+    "newString": "bé\nn1",
+    "result": {
+      "status": "matched",
+      "actualString": "’",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "bé\nn1"
+  },
+  {
+    "content": "\\0",
+    "search": "0",
+    "replaceAll": false,
+    "newString": "bnb—\\''",
+    "result": {
+      "status": "matched",
+      "actualString": "0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "bnb—\\''"
+  },
+  {
+    "content": "\t((0a\t\n0\n0“’'\n”'\\\nbn:éa",
+    "search": "0\n0\"''\n\"'\\\nbn:éa",
+    "replaceAll": false,
+    "newString": "b\"b",
+    "result": {
+      "status": "matched",
+      "actualString": "0\n0“’'\n”'\\\nbn:éa",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "b”b"
+  },
+  {
+    "content": "b‘'😀u—\"a\t😀‘\\ \\\"”1“a\"n‘u““:\"\n",
+    "search": "”1“a\"n‘u““:",
+    "replaceAll": true,
+    "newString": "nn\n”“",
+    "result": {
+      "status": "matched",
+      "actualString": "”1“a\"n‘u““:",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "nn\n”“"
+  },
+  {
+    "content": "”\\😀\n’\"n0‘\t0😀\n\nb😀u\\n’u\n—\té\"”“",
+    "search": "1\té\"”“",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "é\"”“",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "”0\\'”\"\t0\na‘\\’\n\n’1",
+    "search": "0\\'”\"\t0",
+    "replaceAll": false,
+    "newString": "u“b(1",
+    "result": {
+      "status": "matched",
+      "actualString": "0\\'”\"\t0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "u“b(1"
+  },
+  {
+    "content": "‘1n”\\(“na“é“u0\n(b’::a1““0”’\t0””nu—a\n",
+    "search": "“\\u00e9“u0\n(b’::a1““0”’",
+    "replaceAll": false,
+    "newString": "1é😀1 ",
+    "result": {
+      "status": "matched",
+      "actualString": "“é“u0\n(b’::a1““0”’",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "1é😀1 "
+  },
+  {
+    "content": "\n\\\t😀u'‘ba’é😀'\\1—\t\"",
+    "search": "é😀'\\1—\t",
+    "replaceAll": true,
+    "newString": "‘”“\n",
+    "result": {
+      "status": "matched",
+      "actualString": "é😀'\\1—\t",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "‘”“\n"
+  },
+  {
+    "content": "u'bb\"”\\”\nn”😀\"ué\\é“n😀\n“",
+    "search": "'bb\"\"\\\"\nn\"",
+    "replaceAll": false,
+    "newString": " ‘1 ",
+    "result": {
+      "status": "matched",
+      "actualString": "'bb\"”\\”\nn”",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": " ‘1 "
+  },
+  {
+    "content": "\\é“u é0’n“é\"0bb”‘énu1—😀😀’b  \\😀\n\n”\t’\"0‘",
+    "search": "'\"0'",
+    "replaceAll": false,
+    "newString": "u”\t 1",
+    "result": {
+      "status": "matched",
+      "actualString": "’\"0‘",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "u”\t 1"
+  },
+  {
+    "content": "\t1",
+    "search": "\t",
+    "replaceAll": false,
+    "newString": "(\\'“a’",
+    "result": {
+      "status": "matched",
+      "actualString": "\t",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "(\\'“a’"
+  },
+  {
+    "content": "a“—u\"é”\t\"\\éé“:a“un\\u",
+    "search": "u",
+    "replaceAll": false,
+    "newString": ":\tnb“\\:",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "exact",
+      "candidateCount": 3
+    },
+    "replacement": ":\tnb“\\:"
+  },
+  {
+    "content": "(b😀u”a\t0:’nb nb",
+    "search": "”a\t0:’",
+    "replaceAll": true,
+    "newString": "”:n1é1\t",
+    "result": {
+      "status": "matched",
+      "actualString": "”a\t0:’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "”:n1é1\t"
+  },
+  {
+    "content": "a\t’\tn’'",
+    "search": "a\\t’\\t",
+    "replaceAll": true,
+    "newString": "a(\tb—\"u",
+    "result": {
+      "status": "matched",
+      "actualString": "a\t’\t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "a(\tb—\"u"
+  },
+  {
+    "content": "u”\\u—”0\\‘\t(u😀a(”\n\t“'u(n😀b",
+    "search": "\"0\\'\t(u😀a(\"\n\t\"'u(n😀b",
+    "replaceAll": false,
+    "newString": "b",
+    "result": {
+      "status": "matched",
+      "actualString": "”0\\‘\t(u😀a(”\n\t“'u(n😀b",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "b"
+  },
+  {
+    "content": "’—\t0—b0”:\n:",
+    "search": "”:",
+    "replaceAll": false,
+    "newString": "—n",
+    "result": {
+      "status": "matched",
+      "actualString": "”:",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "—n"
+  },
+  {
+    "content": "a\t’:u\t\"a ba'—10é\ta‘n \tb’'”1'",
+    "search": "\t\"a ba'—10é\ta‘n \tb’'",
+    "replaceAll": true,
+    "newString": " é1\\a\t\n",
+    "result": {
+      "status": "matched",
+      "actualString": "\t\"a ba'—10é\ta‘n \tb’'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": " é1\\a\t\n"
+  },
+  {
+    "content": "”\n':é:a'😀(nuu( :",
+    "search": ":",
+    "replaceAll": false,
+    "newString": "a",
+    "result": {
+      "status": "matched",
+      "actualString": ":",
+      "strategy": "exact",
+      "candidateCount": 3
+    },
+    "replacement": "a"
+  },
+  {
+    "content": "0“u“”n\"”\\“b0 “é",
+    "search": "”n\"”\\“b0 “é",
+    "replaceAll": true,
+    "newString": "\n",
+    "result": {
+      "status": "matched",
+      "actualString": "”n\"”\\“b0 “é",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\n"
+  },
+  {
+    "content": "\n'\ta\"😀:u”\\\t u\"u’0éé:b\n“\t0u'(0:0n",
+    "search": "u'(",
+    "replaceAll": false,
+    "newString": "a'\"",
+    "result": {
+      "status": "matched",
+      "actualString": "u'(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a'\""
+  },
+  {
+    "content": "n0”\t0aé",
+    "search": "n",
+    "replaceAll": false,
+    "newString": ":😀a",
+    "result": {
+      "status": "matched",
+      "actualString": "n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ":😀a"
+  },
+  {
+    "content": "—0u ‘\"1(:'0é0—éé1\\u: ““’a0——",
+    "search": "1\\u: ““’a0—",
+    "replaceAll": true,
+    "newString": "ba b",
+    "result": {
+      "status": "matched",
+      "actualString": "1\\u: ““’a0—",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "ba b"
+  },
+  {
+    "content": "u‘\\1\\ n\\b’:\n1\t\"1”\\’\n u ‘nn“1é”‘\t(",
+    "search": "\\b’:\\n1\\t\"1”\\’",
+    "replaceAll": false,
+    "newString": "''😀\n",
+    "result": {
+      "status": "matched",
+      "actualString": "\\b’:\n1\t\"1”\\’",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "‘’😀\n"
+  },
+  {
+    "content": "(1 ‘01\té’é'1éb0a:\n‘\"b”\"\t'(u(“b’é\"u”\"",
+    "search": "\"b'é\"u",
+    "replaceAll": true,
+    "newString": "1n\n:\"’n",
+    "result": {
+      "status": "matched",
+      "actualString": "“b’é\"u",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "1n\n:”’n"
+  },
+  {
+    "content": "(b:é\"",
+    "search": "é\"",
+    "replaceAll": false,
+    "newString": "😀é“—b”",
+    "result": {
+      "status": "matched",
+      "actualString": "é\"",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀é“—b”"
+  },
+  {
+    "content": ":—a😀u”n”n“ \n0'1an''\t“—:nu” \t“”0é\nb—\t",
+    "search": "1\t“”0",
+    "replaceAll": false,
+    "newString": "'‘—1 \"é",
+    "result": {
+      "status": "matched",
+      "actualString": "“”0",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "'‘—1 “é"
+  },
+  {
+    "content": "“1n1😀1  é—\té",
+    "search": "—\\té",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "—\té",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "1:u‘b”u”(\"\t 😀:”(",
+    "search": "b”u”(\"",
+    "replaceAll": true,
+    "newString": "01‘",
+    "result": {
+      "status": "matched",
+      "actualString": "b”u”(\"",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "01‘"
+  },
+  {
+    "content": "“ :\"‘:n",
+    "search": "n",
+    "replaceAll": false,
+    "newString": "'é\\:",
+    "result": {
+      "status": "matched",
+      "actualString": "n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "'é\\:"
+  },
+  {
+    "content": " (0— a:",
+    "search": "  ",
+    "replaceAll": false,
+    "newString": "::",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "\n ”\\’",
+    "search": "1: \\’",
+    "replaceAll": true,
+    "newString": "”😀",
+    "result": {
+      "status": "matched",
+      "actualString": "\\’",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "”😀"
+  },
+  {
+    "content": "1”nu u:0😀😀’”’1“n a\n😀1n“ééu😀😀1‘a\\‘",
+    "search": "a\\n😀1n“éé",
+    "replaceAll": false,
+    "newString": "\"'n",
+    "result": {
+      "status": "matched",
+      "actualString": "a\n😀1n“éé",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "“'n"
+  },
+  {
+    "content": "\n—'b😀“bé\t1 n:(1n0'1:n1😀u\tb‘",
+    "search": "1:n",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "1:n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "\\\tn’”(”\"un\ta\":(😀”\"—\t””’—:—\té—",
+    "search": "”(”\"un\\ta\":(😀”\"—\\t””’—:—\\t",
+    "replaceAll": false,
+    "newString": "“0\"\"\"",
+    "result": {
+      "status": "matched",
+      "actualString": "”(”\"un\ta\":(😀”\"—\t””’—:—\t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "“0”””"
+  },
+  {
+    "content": "(\t\nb'\n\n ",
+    "search": "\t\nb'\n\n",
+    "replaceAll": false,
+    "newString": "\\10",
+    "result": {
+      "status": "matched",
+      "actualString": "\t\nb'\n\n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\10"
+  },
+  {
+    "content": "\\:(u(‘n1\"‘0”b:\\11a\t'\\:\"bb—",
+    "search": "1\t\\:(",
+    "replaceAll": false,
+    "newString": "”",
+    "result": {
+      "status": "matched",
+      "actualString": "\\:(",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "”"
+  },
+  {
+    "content": "\t—é—nb:\"\\😀",
+    "search": "\\u00e9—nb:",
+    "replaceAll": false,
+    "newString": "”(:—”“",
+    "result": {
+      "status": "matched",
+      "actualString": "é—nb:",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "”(:—”“"
+  },
+  {
+    "content": "—‘—",
+    "search": "1: —‘—",
+    "replaceAll": false,
+    "newString": "(é‘'",
+    "result": {
+      "status": "matched",
+      "actualString": "—‘—",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "(é‘’"
+  },
+  {
+    "content": "—u\\a\t\tau’\nbb é",
+    "search": "’\\n",
+    "replaceAll": false,
+    "newString": "\tab“",
+    "result": {
+      "status": "matched",
+      "actualString": "’\n",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\tab“"
+  },
+  {
+    "content": "\n\t‘‘😀\"’—u‘\"”:b”0b\"—“a\t0\\\\“”—u“éa0 u é  ",
+    "search": "  ”—u“éa0 u é",
+    "replaceAll": true,
+    "newString": "\n",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "é",
+    "search": "é",
+    "replaceAll": false,
+    "newString": "0(u😀\n",
+    "result": {
+      "status": "matched",
+      "actualString": "é",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0(u😀\n"
+  },
+  {
+    "content": "a0😀 “'\t0\t01(1u\nbaé'\n\t😀a😀:‘:“—((a😀—:”",
+    "search": "“'\t0\t01(1u\n  baé'\n😀",
+    "replaceAll": false,
+    "newString": "é(”\n",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "\\(\"’0😀😀 (😀”n‘u‘bbn”'\t“:1😀a”1(\ta",
+    "search": "  ‘u‘bbn”'\t“",
+    "replaceAll": false,
+    "newString": "’0”1“😀😀",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "“\"’::\t1'1😀",
+    "search": "😀",
+    "replaceAll": true,
+    "newString": "n0:é(’u",
+    "result": {
+      "status": "matched",
+      "actualString": "😀",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "n0:é(’u"
+  },
+  {
+    "content": "u",
+    "search": "u",
+    "replaceAll": false,
+    "newString": "\"’a",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"’a"
+  },
+  {
+    "content": "“a\n\n”0au”:1\t\t(”00(\\(00n——“(’b\n\na'",
+    "search": "\t(”00",
+    "replaceAll": true,
+    "newString": " é0\t\\n",
+    "result": {
+      "status": "matched",
+      "actualString": "\t(”00",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": " é0\t\\n"
+  },
+  {
+    "content": "\n0ana—(😀bu1😀’‘\t0‘‘‘é:‘bua0n’\\u😀b",
+    "search": "ana—(😀bu1😀’‘",
+    "replaceAll": false,
+    "newString": "“””\n'",
+    "result": {
+      "status": "matched",
+      "actualString": "ana—(😀bu1😀’‘",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "“””\n'"
+  },
+  {
+    "content": "( 0b😀 0\t\n‘'u(——éu\nu—11\"(é😀0’(",
+    "search": "\"(",
+    "replaceAll": false,
+    "newString": "u(—b'",
+    "result": {
+      "status": "matched",
+      "actualString": "\"(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "u(—b'"
+  },
+  {
+    "content": "\"\n\n:—\"’‘‘:\\u\n\"a””\ta:\t\"a\ta“:0 :",
+    "search": "””\ta:\t\"a\ta",
+    "replaceAll": false,
+    "newString": "😀b”😀",
+    "result": {
+      "status": "matched",
+      "actualString": "””\ta:\t\"a\ta",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀b”😀"
+  },
+  {
+    "content": "“——n\\‘\t😀b”—’“\":—( 0😀\n😀:\n😀“1’",
+    "search": "'\"\":—( 0😀\n",
+    "replaceAll": false,
+    "newString": " u00””‘",
+    "result": {
+      "status": "matched",
+      "actualString": "’“\":—( 0😀\n",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": " u00””‘"
+  },
+  {
+    "content": "é a‘é \\:\\:\n😀😀(“b\\n\t\\’😀1 ",
+    "search": "\\’",
+    "replaceAll": false,
+    "newString": "‘(",
+    "result": {
+      "status": "matched",
+      "actualString": "\\’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "‘("
+  },
+  {
+    "content": "‘’😀 “(b",
+    "search": "1:  ",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": " ",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "0a“\n'’a😀\"",
+    "search": "\n''a😀\"",
+    "replaceAll": true,
+    "newString": "’😀\\u—“:",
+    "result": {
+      "status": "matched",
+      "actualString": "\n'’a😀\"",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "’😀\\u—“:"
+  },
+  {
+    "content": "‘‘”b\": a\n\"(\\n”\"'1(nbé",
+    "search": "(n",
+    "replaceAll": false,
+    "newString": "b",
+    "result": {
+      "status": "matched",
+      "actualString": "(n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "b"
+  },
+  {
+    "content": ":\n(—“n0’0“'b‘'\\",
+    "search": "(",
+    "replaceAll": false,
+    "newString": "1un",
+    "result": {
+      "status": "matched",
+      "actualString": "(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "1un"
+  },
+  {
+    "content": "——",
+    "search": "—",
+    "replaceAll": false,
+    "newString": "0\n(—😀00",
+    "result": {
+      "status": "matched",
+      "actualString": "—",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "0\n(—😀00"
+  },
+  {
+    "content": "(''(0’‘\"1aau1“(‘\"”n😀😀’ ‘😀\" 1’'\\1‘",
+    "search": "\"”",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "\"”",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "'\n0‘én'1\"\"0:1\\\"a\n“aé\"(’:\n‘0n‘\n",
+    "search": "  \n“aé\"",
+    "replaceAll": false,
+    "newString": "\"\n\t",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "(\" ”",
+    "search": "”",
+    "replaceAll": true,
+    "newString": "'éub'‘\\",
+    "result": {
+      "status": "matched",
+      "actualString": "”",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "'éub'‘\\"
+  },
+  {
+    "content": "a:b\t'n\\nb😀””u(\n1b\n\\0(—(\n:\":é0\"‘an”1'’bn",
+    "search": "—(\n  :\":é0\"‘an”",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "\t'’0\t ‘(:’“b10 0”b0::u'“:':a",
+    "search": "''0\t '(:",
+    "replaceAll": true,
+    "newString": "‘'b”‘0\"",
+    "result": {
+      "status": "matched",
+      "actualString": "'’0\t ‘(:",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "‘’b”‘0\""
+  },
+  {
+    "content": "“0\"’1(b\\",
+    "search": "1: 0\"’1(b\\",
+    "replaceAll": false,
+    "newString": "\n—‘\t(\\”",
+    "result": {
+      "status": "matched",
+      "actualString": "0\"’1(b\\",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\n—‘\t(\\”"
+  },
+  {
+    "content": "’\"“a\t“‘1”’u\n",
+    "search": "1\t‘1”",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "‘1”",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "1(😀\" u'0(\tn😀‘a\\😀ua 'a‘\\(:'\\—",
+    "search": ":'",
+    "replaceAll": true,
+    "newString": "\né\\':",
+    "result": {
+      "status": "matched",
+      "actualString": ":'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\né\\':"
+  },
+  {
+    "content": ":n\tbu😀u’a",
+    "search": "a",
+    "replaceAll": false,
+    "newString": "né'\\“n1",
+    "result": {
+      "status": "matched",
+      "actualString": "a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "né'\\“n1"
+  },
+  {
+    "content": "‘\n:’n1é:\ta'n’\n(”u‘\\(0‘—é",
+    "search": "\\t",
+    "replaceAll": false,
+    "newString": "'",
+    "result": {
+      "status": "matched",
+      "actualString": "\t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "'"
+  },
+  {
+    "content": ":'én\n0”é(b‘—”'(",
+    "search": "0”é(b‘—”'(",
+    "replaceAll": true,
+    "newString": "é",
+    "result": {
+      "status": "matched",
+      "actualString": "0”é(b‘—”'(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "é"
+  },
+  {
+    "content": " n\\(\t\\1' é:—\"“b0'‘0—(a:(b“:a’\t(\"b\\””n ",
+    "search": "“b0'‘0—(a:(b“:a",
+    "replaceAll": false,
+    "newString": "\n’n",
+    "result": {
+      "status": "matched",
+      "actualString": "“b0'‘0—(a:(b“:a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\n’n"
+  },
+  {
+    "content": "'1",
+    "search": "1",
+    "replaceAll": false,
+    "newString": "\n",
+    "result": {
+      "status": "matched",
+      "actualString": "1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\n"
+  },
+  {
+    "content": "u”1ba'(a😀 —“ 1\nb\n\t\n0 \"",
+    "search": "—“ 1",
+    "replaceAll": false,
+    "newString": " é",
+    "result": {
+      "status": "matched",
+      "actualString": "—“ 1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": " é"
+  },
+  {
+    "content": "\"\"0'1ab'u’😀”n\\",
+    "search": "1ab'u'",
+    "replaceAll": false,
+    "newString": ":é\n\"“",
+    "result": {
+      "status": "matched",
+      "actualString": "1ab'u’",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ":é\n\"“"
+  },
+  {
+    "content": " ubaa“‘:😀b0 1‘ab\\'nu’1’\tn””‘0",
+    "search": "😀b0 1‘ab\\'nu’1’\\tn””",
+    "replaceAll": false,
+    "newString": "\n",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "b\n\"—0bnaa\t😀\t\\—‘(:11‘‘\t:a’\t”0n😀",
+    "search": "\n\"—0bnaa\t😀\t\\—'(:11''\t:a",
+    "replaceAll": false,
+    "newString": "n”’\n'0é",
+    "result": {
+      "status": "matched",
+      "actualString": "\n\"—0bnaa\t😀\t\\—‘(:11‘‘\t:a",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "n”’\n‘0é"
+  },
+  {
+    "content": "\t1 ",
+    "search": " ",
+    "replaceAll": false,
+    "newString": "( 0'",
+    "result": {
+      "status": "matched",
+      "actualString": " ",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "( 0'"
+  },
+  {
+    "content": "a  1\\\\‘u\\é ”b\\’😀\\’",
+    "search": "b\\’😀\\’",
+    "replaceAll": false,
+    "newString": "''n\\",
+    "result": {
+      "status": "matched",
+      "actualString": "b\\’😀\\’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "''n\\"
+  },
+  {
+    "content": ":",
+    "search": "1: :",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": ":",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "😀\tn1an”'''0—0\t—\"—n'\"“é“(\"\\",
+    "search": "“",
+    "replaceAll": false,
+    "newString": "a",
+    "result": {
+      "status": "matched",
+      "actualString": "“",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "a"
+  },
+  {
+    "content": "(:\\::\"(1’\"a(' \nba0\n\t😀\\“”1’’“—\\0",
+    "search": ":\"(1'\"a(' \nba0",
+    "replaceAll": false,
+    "newString": "0(:(:'0",
+    "result": {
+      "status": "matched",
+      "actualString": ":\"(1’\"a(' \nba0",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "0(:(:’0"
+  },
+  {
+    "content": "nu b(‘’—1n\"éé11",
+    "search": "‘’—1n\"",
+    "replaceAll": false,
+    "newString": "b:aa(😀0",
+    "result": {
+      "status": "matched",
+      "actualString": "‘’—1n\"",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "b:aa(😀0"
+  },
+  {
+    "content": "😀‘é\"a\nua”\\’1’  é’—n”\"1",
+    "search": "\"\\'1'  é",
+    "replaceAll": false,
+    "newString": "'",
+    "result": {
+      "status": "matched",
+      "actualString": "”\\’1’  é",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "‘"
+  },
+  {
+    "content": "—\\n:\n(é(\n  \tn",
+    "search": "  ",
+    "replaceAll": false,
+    "newString": "\"—1\"",
+    "result": {
+      "status": "matched",
+      "actualString": "  ",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"—1\""
+  },
+  {
+    "content": "\nb—n\"n11éé’—:“ ",
+    "search": "’",
+    "replaceAll": false,
+    "newString": "b ",
+    "result": {
+      "status": "matched",
+      "actualString": "’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "b "
+  },
+  {
+    "content": "an“a:n\"1é(‘(a\"0\n1n1 (  (é(",
+    "search": "1: (a\"0\n2\t1n1 ",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "(a\"0\n1n1 ",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "\t ’((0\n“\n‘—b\n\"un—a(a’—a\nn”\t(",
+    "search": "\nn",
+    "replaceAll": false,
+    "newString": "(bb’‘",
+    "result": {
+      "status": "matched",
+      "actualString": "\nn",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "(bb’‘"
+  },
+  {
+    "content": " ‘0a””n'éé1\"é\n",
+    "search": "”n'éé1\"é\\n",
+    "replaceAll": false,
+    "newString": "(n(\taé",
+    "result": {
+      "status": "matched",
+      "actualString": "”n'éé1\"é\n",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "(n(\taé"
+  },
+  {
+    "content": "\"”“\nu‘:””\\(——a'",
+    "search": "—",
+    "replaceAll": false,
+    "newString": "(”:('b",
+    "result": {
+      "status": "matched",
+      "actualString": "—",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "(”:('b"
+  },
+  {
+    "content": "😀\n‘bu“é‘\\ é\\",
+    "search": "  \n  ‘bu“é‘\\",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "b’ub‘\\:“’\"'u—1\tb\t1—u—😀0’1\n",
+    "search": "\\t1—u—😀",
+    "replaceAll": false,
+    "newString": "\"‘0\t\t",
+    "result": {
+      "status": "matched",
+      "actualString": "\t1—u—😀",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\"‘0\t\t"
+  },
+  {
+    "content": "é\t\\”n\n\tn\\\"‘'\n\" u\n0é—((b\\ “nn“nu1’é'—1\\ ",
+    "search": "—((b\\ \"nn\"nu1'é'",
+    "replaceAll": false,
+    "newString": "\\(a\t",
+    "result": {
+      "status": "matched",
+      "actualString": "—((b\\ “nn“nu1’é'",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\\(a\t"
+  },
+  {
+    "content": "\t(:n0a( ‘’n\nun\\'0\"é :",
+    "search": "n0a( ''",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "n0a( ‘’",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "😀\t“😀‘é\\””b—\t—éb",
+    "search": "😀\\t“😀‘é\\",
+    "replaceAll": true,
+    "newString": "b\n\"n",
+    "result": {
+      "status": "matched",
+      "actualString": "😀\t“😀‘é\\",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "b\n“n"
+  },
+  {
+    "content": "'",
+    "search": "'",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "b’1‘'1‘(\t\t’1u“n'0“\\\"(u\\\t’:\"\" 1😀:”(b:",
+    "search": "\\t\\t’1u“n'0“\\\"(u\\\\t’:\"\" 1",
+    "replaceAll": true,
+    "newString": "‘b",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "n\"‘\nu\\:(‘(😀:’ 'é😀",
+    "search": ":(‘(😀:’ 'é",
+    "replaceAll": false,
+    "newString": "\\‘“”\nn",
+    "result": {
+      "status": "matched",
+      "actualString": ":(‘(😀:’ 'é",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\‘“”\nn"
+  },
+  {
+    "content": "a\\\"’u”bb'b—\t😀(\té0 :\\—'bé::  \t😀é\na'\"”",
+    "search": "'",
+    "replaceAll": false,
+    "newString": "—",
+    "result": {
+      "status": "matched",
+      "actualString": "'",
+      "strategy": "exact",
+      "candidateCount": 3
+    },
+    "replacement": "—"
+  },
+  {
+    "content": "\t0‘b“’a1ua\"b\t😀é1 \"0",
+    "search": "é1 \"0",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "é1 \"0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": ":é0\\1😀’u‘0u \\\t",
+    "search": "‘0u \\",
+    "replaceAll": false,
+    "newString": "😀n0“",
+    "result": {
+      "status": "matched",
+      "actualString": "‘0u \\",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀n0“"
+  },
+  {
+    "content": "n\"\\😀'bu\\'b",
+    "search": "\\'",
+    "replaceAll": false,
+    "newString": "0 a",
+    "result": {
+      "status": "matched",
+      "actualString": "\\'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0 a"
+  },
+  {
+    "content": " \tu“'—1‘buué:'n —u—’ué",
+    "search": "u—'u",
+    "replaceAll": true,
+    "newString": "😀a\"”\"‘\n",
+    "result": {
+      "status": "matched",
+      "actualString": "u—’u",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "😀a\"”\"‘\n"
+  },
+  {
+    "content": "”😀’a\"b(u\\—\t’b(\" '””—‘ab—“’é(”(😀‘au\n 0",
+    "search": "\"b(u\\—\\t’b(\"",
+    "replaceAll": false,
+    "newString": "b",
+    "result": {
+      "status": "matched",
+      "actualString": "\"b(u\\—\t’b(\"",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "b"
+  },
+  {
+    "content": ":\t‘😀‘ \n:“1\\\naé(\n‘’0\"1a( — ",
+    "search": "  ‘",
+    "replaceAll": false,
+    "newString": "\\“\\(",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "\"—😀—: (u ”“\"\\”(\\",
+    "search": "—: (u ”“\"\\",
+    "replaceAll": false,
+    "newString": "a ",
+    "result": {
+      "status": "matched",
+      "actualString": "—: (u ”“\"\\",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a "
+  },
+  {
+    "content": "\"10(\\'u:\t\n’ 1“0n\n(an1‘bu'",
+    "search": "\"0",
+    "replaceAll": false,
+    "newString": "'😀u\t(\t\t",
+    "result": {
+      "status": "matched",
+      "actualString": "“0",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "'😀u\t(\t\t"
+  },
+  {
+    "content": "‘1(‘—\"\t\t”—::\"\t“né(",
+    "search": "—\"\t\t\"—:",
+    "replaceAll": true,
+    "newString": "”0“’0 ’",
+    "result": {
+      "status": "matched",
+      "actualString": "—\"\t\t”—:",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "”0“’0 ’"
+  },
+  {
+    "content": "ué0a’—:én\t(”’1u0",
+    "search": "1\t:én\t(”",
+    "replaceAll": false,
+    "newString": ":”1‘é",
+    "result": {
+      "status": "matched",
+      "actualString": ":én\t(”",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ":”1‘é"
+  },
+  {
+    "content": "\t\\u('(\":a“",
+    "search": ":a",
+    "replaceAll": false,
+    "newString": "\"",
+    "result": {
+      "status": "matched",
+      "actualString": ":a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\""
+  },
+  {
+    "content": "—u—b😀u’😀\t“\\1\n\\nb“\\11\t\t“un(bb😀😀ué: \ta:—b1",
+    "search": ":—b1",
+    "replaceAll": false,
+    "newString": "😀\n\t—b“—",
+    "result": {
+      "status": "matched",
+      "actualString": ":—b1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀\n\t—b“—"
+  },
+  {
+    "content": "(0a1",
+    "search": "0a1",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "0a1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "'01\\“(“0 '\n “é'1‘\t\t(’b ” ",
+    "search": "(“0 '\n ",
+    "replaceAll": true,
+    "newString": "😀”\t(””",
+    "result": {
+      "status": "matched",
+      "actualString": "(“0 '\n ",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀”\t(””"
+  },
+  {
+    "content": "—“a \taéu('",
+    "search": "\\t",
+    "replaceAll": true,
+    "newString": "u\tn“”'",
+    "result": {
+      "status": "matched",
+      "actualString": "\t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "u\tn“”'"
+  },
+  {
+    "content": "én1😀1‘u1é\n",
+    "search": "1\té\n2\t",
+    "replaceAll": false,
+    "newString": "0(",
+    "result": {
+      "status": "matched",
+      "actualString": "é\n",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "0("
+  },
+  {
+    "content": " “”\"é😀0\\ 😀é‘ 'béé 0bn''ubn‘u1é0’b\t“n\"",
+    "search": "1: ’b\t“n",
+    "replaceAll": false,
+    "newString": "n1\n\t”‘",
+    "result": {
+      "status": "matched",
+      "actualString": "’b\t“n",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "n1\n\t”‘"
+  },
+  {
+    "content": "‘:(\\‘ (\\0bu\\‘é1”“",
+    "search": "1\t‘",
+    "replaceAll": false,
+    "newString": "\t:—’",
+    "result": {
+      "status": "matched",
+      "actualString": "‘",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 3
+    },
+    "replacement": "\t:—’"
+  },
+  {
+    "content": "\\é‘😀““\\0“—n( n00\nb”'\\‘0\"—(b0😀bé’",
+    "search": "—(b0",
+    "replaceAll": false,
+    "newString": "—(”\\((0",
+    "result": {
+      "status": "matched",
+      "actualString": "—(b0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "—(”\\((0"
+  },
+  {
+    "content": "—\t\n 😀' ‘\t(b“a\tn\n😀n(—“ n”‘0”‘”0—é",
+    "search": "\t(b“a",
+    "replaceAll": false,
+    "newString": "“\\\t(:",
+    "result": {
+      "status": "matched",
+      "actualString": "\t(b“a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "“\\\t(:"
+  },
+  {
+    "content": "b“—ub—\n \t’\n",
+    "search": " \t’",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": " \t’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "'1n‘'a’‘b\nan“",
+    "search": "‘'a’",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "‘'a’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "1a0’\\“1bb\"— “",
+    "search": "a0’\\“1b",
+    "replaceAll": false,
+    "newString": "\"\n’’é",
+    "result": {
+      "status": "matched",
+      "actualString": "a0’\\“1b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"\n’’é"
+  },
+  {
+    "content": "'’\\’’—:(a😀”“\\“0a\\(\\(anu\n\ta‘n",
+    "search": "'—:(a😀\"",
+    "replaceAll": false,
+    "newString": "\"”",
+    "result": {
+      "status": "matched",
+      "actualString": "’—:(a😀”",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "“”"
+  },
+  {
+    "content": "u'",
+    "search": "u'",
+    "replaceAll": false,
+    "newString": "—u ",
+    "result": {
+      "status": "matched",
+      "actualString": "u'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "—u "
+  },
+  {
+    "content": "ua‘ a—'\n(b’”00\\ 😀u\\’n ”(1b'u\\‘0\té\\\" ",
+    "search": "1: \\ 😀u\\’n ”",
+    "replaceAll": false,
+    "newString": ":b0\\",
+    "result": {
+      "status": "matched",
+      "actualString": "\\ 😀u\\’n ”",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ":b0\\"
+  },
+  {
+    "content": "éa\n ’\n\t‘u",
+    "search": "a\\n",
+    "replaceAll": false,
+    "newString": "’\t‘ 😀",
+    "result": {
+      "status": "matched",
+      "actualString": "a\n",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "’\t‘ 😀"
+  },
+  {
+    "content": "“\\\n—’'ub1b1a’00‘—1”",
+    "search": "1a",
+    "replaceAll": false,
+    "newString": " ‘(éu",
+    "result": {
+      "status": "matched",
+      "actualString": "1a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": " ‘(éu"
+  },
+  {
+    "content": "——\t—u\"1:‘“((\"a0ubb\\b”:\\—\n \":‘",
+    "search": "1: —\t—u\"",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "—\t—u\"",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "b:\\(”— ((né:” b—n\n1\t",
+    "search": "\"—",
+    "replaceAll": false,
+    "newString": "u’u”",
+    "result": {
+      "status": "matched",
+      "actualString": "”—",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "u’u”"
+  },
+  {
+    "content": "’\taa”\"\\(10b n’\t0’”'u1é😀",
+    "search": "1\t”'u1",
+    "replaceAll": false,
+    "newString": "'",
+    "result": {
+      "status": "matched",
+      "actualString": "”'u1",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "'"
+  },
+  {
+    "content": "\"a\\(”0”’‘”a‘\t(u\\é(:\nu'(’“:b—1—nbb",
+    "search": "1\t0”’‘”a‘\t(u\\é(",
+    "replaceAll": false,
+    "newString": " ",
+    "result": {
+      "status": "matched",
+      "actualString": "0”’‘”a‘\t(u\\é(",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": " "
+  },
+  {
+    "content": "\t’(\t—u\n\naé“:0”10‘00u\t‘‘\n",
+    "search": "\\t—u\\n\\naé“:0",
+    "replaceAll": true,
+    "newString": "\t’\t—\n\n",
+    "result": {
+      "status": "matched",
+      "actualString": "\t—u\n\naé“:0",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\t’\t—\n\n"
+  },
+  {
+    "content": "— \n\t",
+    "search": "\\n\\t",
+    "replaceAll": false,
+    "newString": "\n‘\"\\",
+    "result": {
+      "status": "matched",
+      "actualString": "\n\t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\n‘\"\\"
+  },
+  {
+    "content": "1u:”'é\\b’1\"",
+    "search": "1: u:”'é",
+    "replaceAll": false,
+    "newString": "—“\t",
+    "result": {
+      "status": "matched",
+      "actualString": "u:”'é",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "—“\t"
+  },
+  {
+    "content": "\tu' a’0‘:\"é\"n0é—:“é😀n‘“a0— 0b\\ub\t”“\"1",
+    "search": "1: 0é—",
+    "replaceAll": true,
+    "newString": "b",
+    "result": {
+      "status": "matched",
+      "actualString": "0é—",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "b"
+  },
+  {
+    "content": " b\"”0'’😀\n\\n1“‘\"b\t” \t”01",
+    "search": "“‘\"b\t”",
+    "replaceAll": true,
+    "newString": "é\\n\t",
+    "result": {
+      "status": "matched",
+      "actualString": "“‘\"b\t”",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "é\\n\t"
+  },
+  {
+    "content": "1\nu”u0n0u0:0",
+    "search": "1\t:0",
+    "replaceAll": true,
+    "newString": "\t ",
+    "result": {
+      "status": "matched",
+      "actualString": ":0",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\t "
+  },
+  {
+    "content": "u\\a‘((:b\n”éa:u“é”\n’:é””\"\":",
+    "search": "1\t”éa:u",
+    "replaceAll": true,
+    "newString": "(é\"—b’—",
+    "result": {
+      "status": "matched",
+      "actualString": "”éa:u",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "(é”—b’—"
+  },
+  {
+    "content": "'”n’é\t0b\\\\\"bu\"😀é“bé😀:—😀 b‘n10\nu",
+    "search": "\"bu\"😀é",
+    "replaceAll": false,
+    "newString": "😀b",
+    "result": {
+      "status": "matched",
+      "actualString": "\"bu\"😀é",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀b"
+  },
+  {
+    "content": "‘a'\"\na😀1u\n:\n’01\t( ’’‘😀\\“’éa“\\111😀'—’\n",
+    "search": "'a'\"\na😀1u\n:\n'01\t( ''",
+    "replaceAll": true,
+    "newString": "\\a00😀an",
+    "result": {
+      "status": "matched",
+      "actualString": "‘a'\"\na😀1u\n:\n’01\t( ’’",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\\a00😀an"
+  },
+  {
+    "content": "u(1”\"u—0u\t(”'“’na😀”\\\nbé0b\n—n:n😀‘\"",
+    "search": "u\t(”'“’na😀”\\",
+    "replaceAll": true,
+    "newString": "\"\n\n:ab",
+    "result": {
+      "status": "matched",
+      "actualString": "u\t(”'“’na😀”\\",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"\n\n:ab"
+  },
+  {
+    "content": "aaa’‘",
+    "search": "’",
+    "replaceAll": false,
+    "newString": "\na",
+    "result": {
+      "status": "matched",
+      "actualString": "’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\na"
+  },
+  {
+    "content": "\n“é1‘—‘é:a‘u‘\"\n\\—\n😀’”———é”1\t0 ab‘b‘b‘\n\n",
+    "search": "—\n😀’”———é”1",
+    "replaceAll": false,
+    "newString": "’",
+    "result": {
+      "status": "matched",
+      "actualString": "—\n😀’”———é”1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "’"
+  },
+  {
+    "content": "u“😀\ta’é\"”1\t\\’\"’ ”😀b 00u'”:n ’’—nb ‘’:é\né",
+    "search": "é\"”1\t\\’\"",
+    "replaceAll": true,
+    "newString": "😀0aé ",
+    "result": {
+      "status": "matched",
+      "actualString": "é\"”1\t\\’\"",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀0aé "
+  },
+  {
+    "content": "’",
+    "search": "1: ’",
+    "replaceAll": false,
+    "newString": "\"a",
+    "result": {
+      "status": "matched",
+      "actualString": "’",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\"a"
+  },
+  {
+    "content": "\t😀n—‘uu😀",
+    "search": "uu",
+    "replaceAll": true,
+    "newString": "a1",
+    "result": {
+      "status": "matched",
+      "actualString": "uu",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a1"
+  },
+  {
+    "content": "‘a\\‘\\'\n😀\n‘bé",
+    "search": "b",
+    "replaceAll": false,
+    "newString": "0",
+    "result": {
+      "status": "matched",
+      "actualString": "b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0"
+  },
+  {
+    "content": "b0‘a‘\n\"\n",
+    "search": "1\t\"\n2: ",
+    "replaceAll": true,
+    "newString": "b\\”\n'",
+    "result": {
+      "status": "matched",
+      "actualString": "\"\n",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "b\\”\n'"
+  },
+  {
+    "content": "😀",
+    "search": "😀",
+    "replaceAll": false,
+    "newString": "”—u—ba",
+    "result": {
+      "status": "matched",
+      "actualString": "😀",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "”—u—ba"
+  },
+  {
+    "content": "— ’\nbb\"😀'a“a1——n:😀\tb ”—",
+    "search": " '\nbb",
+    "replaceAll": false,
+    "newString": "‘‘—",
+    "result": {
+      "status": "matched",
+      "actualString": " ’\nbb",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "‘‘—"
+  },
+  {
+    "content": "a’:\n'\"'”\\“ 0\\\t a1n n'”“::😀\\n\n\"",
+    "search": "’:\\n'\"'”",
+    "replaceAll": false,
+    "newString": ":‘'b",
+    "result": {
+      "status": "matched",
+      "actualString": "’:\n'\"'”",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ":‘’b"
+  },
+  {
+    "content": "“na\"\t:“1\t1n u”\\\\'—\\😀a0(‘“b‘0(",
+    "search": "na\"\\t:“1\\t1n u”\\\\'—\\",
+    "replaceAll": false,
+    "newString": "a😀",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "é—1é:”u'",
+    "search": "—1é",
+    "replaceAll": true,
+    "newString": "\\—n’b'",
+    "result": {
+      "status": "matched",
+      "actualString": "—1é",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\—n’b'"
+  },
+  {
+    "content": "é11“”\\n:’n‘'\"“a'—\nau😀aa\t\tb(\"\tn“nn0",
+    "search": "—\nau😀aa\t\tb(\"\tn\"nn0",
+    "replaceAll": false,
+    "newString": "😀:1\n—",
+    "result": {
+      "status": "matched",
+      "actualString": "—\nau😀aa\t\tb(\"\tn“nn0",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "😀:1\n—"
+  },
+  {
+    "content": "\\😀’\\ \ta 1——😀\tba'“\\\n((‘é”0\t\t\"'😀😀\t(",
+    "search": "(",
+    "replaceAll": false,
+    "newString": "\\1a😀",
+    "result": {
+      "status": "matched",
+      "actualString": "(",
+      "strategy": "exact",
+      "candidateCount": 3
+    },
+    "replacement": "\\1a😀"
+  },
+  {
+    "content": "n:\\'0\\\t😀\"(”:1'b—é",
+    "search": "\\'0\\\t😀\"(\":",
+    "replaceAll": false,
+    "newString": "a",
+    "result": {
+      "status": "matched",
+      "actualString": "\\'0\\\t😀\"(”:",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "a"
+  },
+  {
+    "content": " 1‘ua😀a\"b””“”b(0b\té—‘u\\1é”0’‘",
+    "search": "é”0’",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "é”0’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "\":n'ua",
+    "search": "\":n'",
+    "replaceAll": false,
+    "newString": "‘ —n0'",
+    "result": {
+      "status": "matched",
+      "actualString": "\":n'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "‘ —n0'"
+  },
+  {
+    "content": "‘ ’é \t0nn😀\n‘\n",
+    "search": "0nn😀\\n‘",
+    "replaceAll": true,
+    "newString": "\n\\1:\n0—",
+    "result": {
+      "status": "matched",
+      "actualString": "0nn😀\n‘",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\n\\1:\n0—"
+  },
+  {
+    "content": "1’‘“\\(\\0 ’\"\tn\t“é'0‘”\"(\t“’(\\:u\"01'😀",
+    "search": "1",
+    "replaceAll": true,
+    "newString": "1“\ta\"“é",
+    "result": {
+      "status": "matched",
+      "actualString": "1",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "1“\ta\"“é"
+  },
+  {
+    "content": "😀b(\"u”(“a“b0",
+    "search": "u”",
+    "replaceAll": true,
+    "newString": "0é(😀b:",
+    "result": {
+      "status": "matched",
+      "actualString": "u”",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0é(😀b:"
+  },
+  {
+    "content": " 1😀’",
+    "search": " 1😀’",
+    "replaceAll": false,
+    "newString": "a\nb00",
+    "result": {
+      "status": "matched",
+      "actualString": " 1😀’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a\nb00"
+  },
+  {
+    "content": "  a:(\"😀 é”(\né”\n'(\"01\nb\"",
+    "search": "1\t(\"01\n2: b\"",
+    "replaceAll": false,
+    "newString": "n",
+    "result": {
+      "status": "matched",
+      "actualString": "(\"01\nb\"",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "n"
+  },
+  {
+    "content": "😀é0\\”“(‘11:01(10😀 \n\nu(😀\\:n",
+    "search": "0😀\n  \nu(😀\\:",
+    "replaceAll": false,
+    "newString": "0",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "—'\tn\n",
+    "search": "n\n",
+    "replaceAll": true,
+    "newString": "’—(\t",
+    "result": {
+      "status": "matched",
+      "actualString": "n\n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "’—(\t"
+  },
+  {
+    "content": "“(\t\\0n(\n00'éu:",
+    "search": "0n(\\n00",
+    "replaceAll": false,
+    "newString": "\\\n‘n01“",
+    "result": {
+      "status": "matched",
+      "actualString": "0n(\n00",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\\\n‘n01“"
+  },
+  {
+    "content": "b(\nu’\tu\\n”‘\t::u\"(:b",
+    "search": "b(\\nu",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "b(\nu",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "u—::a😀'’01u\n’(”\t\téaéunn0 “",
+    "search": "\\u00e9unn0 ",
+    "replaceAll": false,
+    "newString": "é\"‘",
+    "result": {
+      "status": "matched",
+      "actualString": "éunn0 ",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "é\"‘"
+  },
+  {
+    "content": ":\n—”’—’'—0\\“1",
+    "search": "  1",
+    "replaceAll": true,
+    "newString": "0",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "\t'n\t“\t\n\t—\n\taab“",
+    "search": "1\t\n2: \t—\n3\t",
+    "replaceAll": false,
+    "newString": "::",
+    "result": {
+      "status": "matched",
+      "actualString": "\n\t—\n",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "::"
+  },
+  {
+    "content": "‘””b”‘b\t”1\t1\"0 0😀b1b”:”(\\a😀“—”1(\"\n“ua😀1",
+    "search": "0 0😀b",
+    "replaceAll": false,
+    "newString": "\"\n“u",
+    "result": {
+      "status": "matched",
+      "actualString": "0 0😀b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"\n“u"
+  },
+  {
+    "content": "bb—na ''n(‘\\a”\n\t0“:",
+    "search": "“:",
+    "replaceAll": true,
+    "newString": "\\u😀\n\ta(",
+    "result": {
+      "status": "matched",
+      "actualString": "“:",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\u😀\n\ta("
+  },
+  {
+    "content": "—\n’\n\"‘a“é\n\n\"’:”\\('\"é😀 ’: —",
+    "search": "—\n",
+    "replaceAll": true,
+    "newString": ":",
+    "result": {
+      "status": "matched",
+      "actualString": "—\n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ":"
+  },
+  {
+    "content": "\\( b—né\n1\t\né”a'“b““ é'—an1a(—u0(\n0‘(",
+    "search": "a(—u",
+    "replaceAll": false,
+    "newString": "”n😀nn",
+    "result": {
+      "status": "matched",
+      "actualString": "a(—u",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "”n😀nn"
+  },
+  {
+    "content": " ‘n1n:(”0\téé\\0\"1é’(\\0b“‘\t\n",
+    "search": "n:(",
+    "replaceAll": true,
+    "newString": "”“\"”1\\",
+    "result": {
+      "status": "matched",
+      "actualString": "n:(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "”“\"”1\\"
+  },
+  {
+    "content": "\"n \\n’0:‘\\\"(\\\" “0\t'\n0(é::\t”",
+    "search": "\t'\n",
+    "replaceAll": false,
+    "newString": "a(n\"u('",
+    "result": {
+      "status": "matched",
+      "actualString": "\t'\n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a(n\"u('"
+  },
+  {
+    "content": "’b ’\t(0 “n😀b::\n\\':\\:u b\t😀",
+    "search": "\\:u b",
+    "replaceAll": false,
+    "newString": "\t\t01 ",
+    "result": {
+      "status": "matched",
+      "actualString": "\\:u b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\t\t01 "
+  },
+  {
+    "content": "b—”a“—(bé'1 1“”“1'’'\\😀\né“‘\n:😀",
+    "search": "”",
+    "replaceAll": false,
+    "newString": ":😀a\n'b",
+    "result": {
+      "status": "matched",
+      "actualString": "”",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": ":😀a\n'b"
+  },
+  {
+    "content": " u”“’'’0a😀———é\ta'u(\t’‘(n😀n’”“‘b",
+    "search": "'u(\t’",
+    "replaceAll": false,
+    "newString": "””'ua—\n",
+    "result": {
+      "status": "matched",
+      "actualString": "'u(\t’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "””'ua—\n"
+  },
+  {
+    "content": " :—nan(‘n 1——\t0'b‘’('”’0b 0\\—😀”\t",
+    "search": "  0b 0",
+    "replaceAll": true,
+    "newString": "\t’",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "\"é”\n \t:b'(1\t(u'\"—a\\\"\\\n(u' ”—‘n”é(b1😀bé“n",
+    "search": "\"—'n\"é(b1😀bé\"",
+    "replaceAll": false,
+    "newString": "” 'n”",
+    "result": {
+      "status": "matched",
+      "actualString": "”—‘n”é(b1😀bé“",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "” ‘n”"
+  },
+  {
+    "content": "\\:’é—\\\\😀‘ ““ “:—\nu0\\—\\”0aé“(u:b\t",
+    "search": " ““ “:—\nu0\\—\\”0a\\u00e9“(u:",
+    "replaceAll": false,
+    "newString": "b—a",
+    "result": {
+      "status": "matched",
+      "actualString": " ““ “:—\nu0\\—\\”0aé“(u:",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "b—a"
+  },
+  {
+    "content": ":1\t“é1\t”\"'\n:'é😀—é",
+    "search": "1\t\t”\"'\n2: :'é",
+    "replaceAll": true,
+    "newString": "\n",
+    "result": {
+      "status": "matched",
+      "actualString": "\t”\"'\n:'é",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\n"
+  },
+  {
+    "content": "a‘😀1\\:b 0”😀 \t0😀1ué\"é\"“'n(é1‘\"‘0nb",
+    "search": "a‘😀1\\:b",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "a‘😀1\\:b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": ":10😀“bnn0“:\\😀(”’\t\t“(“\té\\”ub—n\n\"—”:: ’(😀\n",
+    "search": "“:\\😀(”’\\t\\t“",
+    "replaceAll": false,
+    "newString": "😀",
+    "result": {
+      "status": "matched",
+      "actualString": "“:\\😀(”’\t\t“",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "😀"
+  },
+  {
+    "content": "”:—‘“\\”'(u”a”’b“0\n😀a0",
+    "search": "\\”'(u”a”’b“0\n😀a",
+    "replaceAll": false,
+    "newString": "é😀\nb\n—",
+    "result": {
+      "status": "matched",
+      "actualString": "\\”'(u”a”’b“0\n😀a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "é😀\nb\n—"
+  },
+  {
+    "content": "😀😀''”\"0u\\”\"a\\u(\"01a’b“‘—“01’ ’",
+    "search": "‘—“01",
+    "replaceAll": true,
+    "newString": "’“ 1a ",
+    "result": {
+      "status": "matched",
+      "actualString": "‘—“01",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "’“ 1a "
+  },
+  {
+    "content": "\"\t\"a\"1\t\\1‘:'u’\n\n”‘é“a:😀én\"’bé",
+    "search": "én",
+    "replaceAll": false,
+    "newString": "\na",
+    "result": {
+      "status": "matched",
+      "actualString": "én",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\na"
+  },
+  {
+    "content": "\"‘ ’——”a",
+    "search": "1\t”a",
+    "replaceAll": false,
+    "newString": "a\"0\"",
+    "result": {
+      "status": "matched",
+      "actualString": "”a",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "a”0”"
+  },
+  {
+    "content": "a",
+    "search": "1: a",
+    "replaceAll": true,
+    "newString": "1u—”'n",
+    "result": {
+      "status": "matched",
+      "actualString": "a",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "1u—”'n"
+  },
+  {
+    "content": "\"😀’😀\n1é”a\n\nn—”\t\t",
+    "search": "1é\"a\n\nn—\"\t\t",
+    "replaceAll": false,
+    "newString": "1‘u",
+    "result": {
+      "status": "matched",
+      "actualString": "1é”a\n\nn—”\t\t",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "1‘u"
+  },
+  {
+    "content": "é\"\n\t”é“éb:bé\n”😀—",
+    "search": "1: ”😀—",
+    "replaceAll": true,
+    "newString": "” ",
+    "result": {
+      "status": "matched",
+      "actualString": "”😀—",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "” "
+  },
+  {
+    "content": "\\ 0n‘n 11—‘0( \\(\nuu”1",
+    "search": "uu",
+    "replaceAll": true,
+    "newString": "’",
+    "result": {
+      "status": "matched",
+      "actualString": "uu",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "’"
+  },
+  {
+    "content": "”(u\\😀:\\b\t\\”\\“\\é“\\—bu\tb(:\" b ’'‘'",
+    "search": "\\é“\\—bu\tb(:",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "\\é“\\—bu\tb(:",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "a\\“““",
+    "search": "\\\"\"\"",
+    "replaceAll": false,
+    "newString": "\n'é \t",
+    "result": {
+      "status": "matched",
+      "actualString": "\\“““",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\n'é \t"
+  },
+  {
+    "content": "(\"b  '😀(——0\t“'“1’b0 ‘0b11😀n“(\\’‘:\n‘",
+    "search": "—0\t“'“1",
+    "replaceAll": false,
+    "newString": "éu",
+    "result": {
+      "status": "matched",
+      "actualString": "—0\t“'“1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "éu"
+  },
+  {
+    "content": "a\"b'“'‘'1u0'b'éu\nu’'’né0\t",
+    "search": "’'’",
+    "replaceAll": false,
+    "newString": "‘\n’0",
+    "result": {
+      "status": "matched",
+      "actualString": "’'’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "‘\n’0"
+  },
+  {
+    "content": "an\t0\"n\\u(bné((’“éé \n",
+    "search": "an\t0\"n\\u(bné(",
+    "replaceAll": false,
+    "newString": "’”:”'0\"",
+    "result": {
+      "status": "matched",
+      "actualString": "an\t0\"n\\u(bné(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "’”:”'0\""
+  },
+  {
+    "content": "1“—\"é'00n\"’‘‘\t😀é\tu1“”n1\n0\n\t’\n“é”😀 1aa",
+    "search": "“—\"\\u00e9'00n\"’",
+    "replaceAll": false,
+    "newString": "ébé1é",
+    "result": {
+      "status": "matched",
+      "actualString": "“—\"é'00n\"’",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "ébé1é"
+  },
+  {
+    "content": "'u:\\u—:‘b'😀",
+    "search": "'b",
+    "replaceAll": false,
+    "newString": "0\nééu0",
+    "result": {
+      "status": "matched",
+      "actualString": "‘b",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "0\nééu0"
+  },
+  {
+    "content": "‘a1",
+    "search": "  a",
+    "replaceAll": true,
+    "newString": "\t",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "(”\\(’\"é ",
+    "search": "\"é ",
+    "replaceAll": true,
+    "newString": "\t",
+    "result": {
+      "status": "matched",
+      "actualString": "\"é ",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\t"
+  },
+  {
+    "content": "\tb\t\t\t0a—‘0n\"'\t’\\\ta( \t😀“ ua'n\nub'‘\na”",
+    "search": "’\\\\ta( \\t😀“ ",
+    "replaceAll": true,
+    "newString": ":na“u",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "( a\nb”‘b😀: \"n ’\\\nuau\\😀“bé' é:n",
+    "search": "\\😀“b",
+    "replaceAll": true,
+    "newString": "a “",
+    "result": {
+      "status": "matched",
+      "actualString": "\\😀“b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a “"
+  },
+  {
+    "content": "”:\t\n'’”\n",
+    "search": "1\t’",
+    "replaceAll": false,
+    "newString": "\"‘—1\"",
+    "result": {
+      "status": "matched",
+      "actualString": "’",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\"‘—1\""
+  },
+  {
+    "content": " u\t(",
+    "search": "\t",
+    "replaceAll": false,
+    "newString": "\"n1u1",
+    "result": {
+      "status": "matched",
+      "actualString": "\t",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"n1u1"
+  },
+  {
+    "content": "\"éé a1aa:0é”\\1au\\——‘",
+    "search": "\\——‘",
+    "replaceAll": false,
+    "newString": "\"😀nu a",
+    "result": {
+      "status": "matched",
+      "actualString": "\\——‘",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"😀nu a"
+  },
+  {
+    "content": "“(''0”0\n('0u'é\taa(u ’’’\"‘\né\t\t",
+    "search": "‘\né\t\t",
+    "replaceAll": false,
+    "newString": "‘1(0:é'",
+    "result": {
+      "status": "matched",
+      "actualString": "‘\né\t\t",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "‘1(0:é'"
+  },
+  {
+    "content": "nb(0",
+    "search": "  nb(",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "1\" b“",
+    "search": "1\" b",
+    "replaceAll": false,
+    "newString": "\t1",
+    "result": {
+      "status": "matched",
+      "actualString": "1\" b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\t1"
+  },
+  {
+    "content": "u\\(a\t\\a😀\\a1\t\n😀’\n\t00\"'\\\t\t'‘\t\\\"😀n0é(\\(b11",
+    "search": "1: a😀\\a1\t\n2: 😀’",
+    "replaceAll": true,
+    "newString": "‘—”((😀‘",
+    "result": {
+      "status": "matched",
+      "actualString": "a😀\\a1\t\n😀’",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "‘—”((😀‘"
+  },
+  {
+    "content": "a",
+    "search": "a",
+    "replaceAll": true,
+    "newString": "\tu😀1”\t”",
+    "result": {
+      "status": "matched",
+      "actualString": "a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\tu😀1”\t”"
+  },
+  {
+    "content": " ”1“(\t(",
+    "search": "(\t(",
+    "replaceAll": false,
+    "newString": "b b0",
+    "result": {
+      "status": "matched",
+      "actualString": "(\t(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "b b0"
+  },
+  {
+    "content": "“é’'0‘u😀(\n\\‘01(",
+    "search": "\n\\‘01",
+    "replaceAll": true,
+    "newString": "\n\t‘\n",
+    "result": {
+      "status": "matched",
+      "actualString": "\n\\‘01",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\n\t‘\n"
+  },
+  {
+    "content": "n(u\t'’\\'‘—(\t",
+    "search": "\\t'",
+    "replaceAll": false,
+    "newString": "“”'é“(",
+    "result": {
+      "status": "matched",
+      "actualString": "\t'",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "“”'é“("
+  },
+  {
+    "content": "'\t😀\\n \t \"—a“0 ‘\t\n'”😀b:‘é ’😀0b\t”b“a\nu1b1’",
+    "search": "😀0b\t\"b\"a\nu1b",
+    "replaceAll": false,
+    "newString": "”b‘“‘",
+    "result": {
+      "status": "matched",
+      "actualString": "😀0b\t”b“a\nu1b",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "”b‘“‘"
+  },
+  {
+    "content": "\t(😀1é‘( ’u\\—😀\" 1‘”é‘:\\“’a’\na\n:😀1é\ta1 \n",
+    "search": "a",
+    "replaceAll": true,
+    "newString": "u1'\n:\"😀",
+    "result": {
+      "status": "matched",
+      "actualString": "a",
+      "strategy": "exact",
+      "candidateCount": 3
+    },
+    "replacement": "u1'\n:\"😀"
+  },
+  {
+    "content": "é\n '\\\t😀b😀n é“(“\nééa\t\t0\n0’1—1—'1\t11😀:\t00",
+    "search": "\t0",
+    "replaceAll": false,
+    "newString": "😀:\n\\“\n",
+    "result": {
+      "status": "matched",
+      "actualString": "\t0",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "😀:\n\\“\n"
+  },
+  {
+    "content": "😀‘1",
+    "search": "'",
+    "replaceAll": false,
+    "newString": "😀 ‘",
+    "result": {
+      "status": "matched",
+      "actualString": "‘",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "😀 ‘"
+  },
+  {
+    "content": " :“an\t’\\‘a”u ’:a“é‘'ua‘((😀—’\nu‘“\t",
+    "search": "“\\t",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "“\t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "’a’'a“😀n\t1 ( ’😀\t\t\nu’",
+    "search": "\nu’",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "\nu’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "”—\"\\’a—‘nbu\\\n0\n‘10\n\\1\"”1\t”‘ “n’0“\\😀0\n",
+    "search": "0",
+    "replaceAll": false,
+    "newString": "“\\'“\\é",
+    "result": {
+      "status": "matched",
+      "actualString": "0",
+      "strategy": "exact",
+      "candidateCount": 4
+    },
+    "replacement": "“\\'“\\é"
+  },
+  {
+    "content": "(n—(”11😀 ub'é\n1 \\:b\"é\n 0😀",
+    "search": "😀 ub'é\\n1 ",
+    "replaceAll": false,
+    "newString": "u",
+    "result": {
+      "status": "matched",
+      "actualString": "😀 ub'é\n1 ",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "u"
+  },
+  {
+    "content": "u\"u— ’“",
+    "search": "1: — ’“",
+    "replaceAll": false,
+    "newString": "'\"\"",
+    "result": {
+      "status": "matched",
+      "actualString": "— ’“",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "‘””"
+  },
+  {
+    "content": "\t“\\\t😀\\\"\"\t0 u\t ’é—\\'0”(é”",
+    "search": "😀\\\"\"\t0 u\t ’é—\\'0”(",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "😀\\\"\"\t0 u\t ’é—\\'0”(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": " u:(u:‘u‘(10'‘a(‘10\"\t:b’a‘—",
+    "search": "‘u‘(1",
+    "replaceAll": false,
+    "newString": "\"”n\n0”(",
+    "result": {
+      "status": "matched",
+      "actualString": "‘u‘(1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"”n\n0”("
+  },
+  {
+    "content": "bbna😀é",
+    "search": "é",
+    "replaceAll": true,
+    "newString": "é",
+    "result": {
+      "status": "matched",
+      "actualString": "é",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "é"
+  },
+  {
+    "content": "u”'\"”0——“—éau“n“'éu ”0ab'a‘“”:’",
+    "search": "“'é",
+    "replaceAll": true,
+    "newString": "0",
+    "result": {
+      "status": "matched",
+      "actualString": "“'é",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0"
+  },
+  {
+    "content": "“” \t’\n\n”‘\"b’a1‘”b'1\\”0 ",
+    "search": "“” \\t’\\n\\n”‘\"b’a1‘”",
+    "replaceAll": false,
+    "newString": "\t\t ",
+    "result": {
+      "status": "matched",
+      "actualString": "“” \t’\n\n”‘\"b’a1‘”",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\t\t "
+  },
+  {
+    "content": "a0u0😀n\t1””\\:“1—1’\n—b😀'\\”“‘a:b“é\\",
+    "search": "1\t‘a:b“",
+    "replaceAll": false,
+    "newString": "é",
+    "result": {
+      "status": "matched",
+      "actualString": "‘a:b“",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "é"
+  },
+  {
+    "content": "‘‘bé—a“é“\\\na\\'0\né\t“(ab\\\\:é00😀’nua\\”“\\1é",
+    "search": "a\"é\"\\\na\\'0",
+    "replaceAll": true,
+    "newString": "”b\n ",
+    "result": {
+      "status": "matched",
+      "actualString": "a“é“\\\na\\'0",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "”b\n "
+  },
+  {
+    "content": "n\n—\"n\\”\t—n1””\"é“b'0é11n \\b0é1a",
+    "search": "'0é11n \\b0é1",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "'0é11n \\b0é1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "0''\t—“0",
+    "search": "\"0",
+    "replaceAll": false,
+    "newString": "b",
+    "result": {
+      "status": "matched",
+      "actualString": "“0",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "b"
+  },
+  {
+    "content": "aa\n—( \"”\"\\\\”'\t é0an\tu‘”’n“\"\\ ’b”(\"\" n\"",
+    "search": "b”(\"",
+    "replaceAll": false,
+    "newString": "—",
+    "result": {
+      "status": "matched",
+      "actualString": "b”(\"",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "—"
+  },
+  {
+    "content": "b”‘n1\\'un\né\\‘\n1—(''",
+    "search": "\\n1—",
+    "replaceAll": true,
+    "newString": ":\\1😀\t”",
+    "result": {
+      "status": "matched",
+      "actualString": "\n1—",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ":\\1😀\t”"
+  },
+  {
+    "content": "1n\"n1’”ub\t\nn’’u“\t😀\"—\n\tn",
+    "search": "  ub\n",
+    "replaceAll": false,
+    "newString": "uu",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "u’”u😀‘n’\\\n'”0:én\"😀(😀00‘ ‘“b’(\t\n’\tné0a",
+    "search": "u😀‘n’\\\n'”0:én\"😀(😀00‘ ‘“b",
+    "replaceAll": false,
+    "newString": "😀1",
+    "result": {
+      "status": "matched",
+      "actualString": "u😀‘n’\\\n'”0:én\"😀(😀00‘ ‘“b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀1"
+  },
+  {
+    "content": "u 0\\ 1😀:",
+    "search": "1\tu 0",
+    "replaceAll": false,
+    "newString": "1 ’\\\"",
+    "result": {
+      "status": "matched",
+      "actualString": "u 0",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "1 ’\\\""
+  },
+  {
+    "content": "“(1—0’’😀b\\:‘n—‘‘0'10\"\"é’u\\ 01\n‘\t\na“ 0😀😀:",
+    "search": "b\\:‘n—‘‘0'10\"\"é’u\\ 01\n‘",
+    "replaceAll": false,
+    "newString": ":””—0",
+    "result": {
+      "status": "matched",
+      "actualString": "b\\:‘n—‘‘0'10\"\"é’u\\ 01\n‘",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ":””—0"
+  },
+  {
+    "content": "\\ é‘\"bé—\\—n”é'é\\”’\\\né0é:😀—0(( \n'u\\(é'",
+    "search": "1: \\—n”é'é\\”’\\\n2\té0é:😀",
+    "replaceAll": false,
+    "newString": "(\"n’u",
+    "result": {
+      "status": "matched",
+      "actualString": "\\—n”é'é\\”’\\\né0é:😀",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "(“n’u"
+  },
+  {
+    "content": "“:’éé0  —",
+    "search": "  —",
+    "replaceAll": false,
+    "newString": "'😀'':",
+    "result": {
+      "status": "matched",
+      "actualString": "  —",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "'😀'':"
+  },
+  {
+    "content": "—é\t'‘(0( n’'a—'u1😀“:01é”'1\n':(bné’“😀‘:",
+    "search": "né’“",
+    "replaceAll": true,
+    "newString": "a—",
+    "result": {
+      "status": "matched",
+      "actualString": "né’“",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a—"
+  },
+  {
+    "content": "b—\"😀\\'”é ’nb:\\u”:0‘'\"‘n00:1\"—”",
+    "search": "n0",
+    "replaceAll": false,
+    "newString": "a",
+    "result": {
+      "status": "matched",
+      "actualString": "n0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a"
+  },
+  {
+    "content": "(b“u'un0n\tbbu\" ’n”b\té:’é\n“",
+    "search": "\\n“",
+    "replaceAll": true,
+    "newString": "😀“\"0",
+    "result": {
+      "status": "matched",
+      "actualString": "\n“",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "😀“”0"
+  },
+  {
+    "content": "“1😀b\\é(\\’😀\"(””‘'\"1'u",
+    "search": "\\'",
+    "replaceAll": false,
+    "newString": "—0ab",
+    "result": {
+      "status": "matched",
+      "actualString": "\\’",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "—0ab"
+  },
+  {
+    "content": "—((éb\\\t",
+    "search": "\\",
+    "replaceAll": false,
+    "newString": "b\nn",
+    "result": {
+      "status": "matched",
+      "actualString": "\\",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "b\nn"
+  },
+  {
+    "content": " \"\t01—::n\nn1‘b‘(b\"u😀‘",
+    "search": "n\nn",
+    "replaceAll": false,
+    "newString": "1'bé0",
+    "result": {
+      "status": "matched",
+      "actualString": "n\nn",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "1'bé0"
+  },
+  {
+    "content": "”00😀:1:na:‘—'n",
+    "search": ":‘—",
+    "replaceAll": false,
+    "newString": "\t",
+    "result": {
+      "status": "matched",
+      "actualString": ":‘—",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\t"
+  },
+  {
+    "content": "0“\n “‘bn—“é\\'—",
+    "search": "“\n “‘",
+    "replaceAll": false,
+    "newString": "\nb: ”\"",
+    "result": {
+      "status": "matched",
+      "actualString": "“\n “‘",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\nb: ”\""
+  },
+  {
+    "content": "n",
+    "search": "n",
+    "replaceAll": true,
+    "newString": "n",
+    "result": {
+      "status": "matched",
+      "actualString": "n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "n"
+  },
+  {
+    "content": "::‘😀nnb(0—a:\t(\\a\t01b😀(n\n1 ",
+    "search": "b😀",
+    "replaceAll": false,
+    "newString": "“bé\\é",
+    "result": {
+      "status": "matched",
+      "actualString": "b😀",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "“bé\\é"
+  },
+  {
+    "content": "\"\t‘”a: 😀:(”é'u😀anu(‘’(n“1'“'n1(”(0 \nub\n",
+    "search": "1\t1(",
+    "replaceAll": false,
+    "newString": "—",
+    "result": {
+      "status": "matched",
+      "actualString": "1(",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "—"
+  },
+  {
+    "content": ":u0’",
+    "search": "u",
+    "replaceAll": false,
+    "newString": "b1u",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "b1u"
+  },
+  {
+    "content": "‘b'\t\t\t'n\"\\—b\n\" ’“\n”n\\bu0(",
+    "search": "1\t ’“\n2: ",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": " ’“\n",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "—\"0",
+    "search": "—\"",
+    "replaceAll": false,
+    "newString": ":’’\\",
+    "result": {
+      "status": "matched",
+      "actualString": "—\"",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ":’’\\"
+  },
+  {
+    "content": "\\—””\t”a\t1”b’é\n1u0“““ éu':u\t“",
+    "search": "u",
+    "replaceAll": false,
+    "newString": "😀\"",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "exact",
+      "candidateCount": 3
+    },
+    "replacement": "😀\""
+  },
+  {
+    "content": "(:b‘1\n\"\"é‘'”😀bé'(——\\—",
+    "search": "1\t\"\"é‘'”😀bé'(——\\",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "\"\"é‘'”😀bé'(——\\",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "( ’““u\\‘’’”’\t\" \\1”'u01 0(‘a“b('b”\\",
+    "search": "  \" \\1”'u01 0(‘a“b('b”\\",
+    "replaceAll": false,
+    "newString": "—",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "😀é'b0“”—😀\\”\"—",
+    "search": "\\”",
+    "replaceAll": true,
+    "newString": "(😀'\"",
+    "result": {
+      "status": "matched",
+      "actualString": "\\”",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "(😀'\""
+  },
+  {
+    "content": ":‘1\nué“( ’“0b'‘1a\t”n\"n”0\t(’",
+    "search": "n\"n”0\t(",
+    "replaceAll": true,
+    "newString": "\"‘\t\n😀é\\",
+    "result": {
+      "status": "matched",
+      "actualString": "n\"n”0\t(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"‘\t\n😀é\\"
+  },
+  {
+    "content": "“—’0a",
+    "search": "a",
+    "replaceAll": true,
+    "newString": "é😀",
+    "result": {
+      "status": "matched",
+      "actualString": "a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "é😀"
+  },
+  {
+    "content": ":\n”1“(😀😀\nb\"😀\t",
+    "search": ":\\n”1“(😀😀\\n",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": ":\n”1“(😀😀\n",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "'\n“'\n:(1\n:\t\\😀:\n0‘a",
+    "search": "'",
+    "replaceAll": true,
+    "newString": "—😀",
+    "result": {
+      "status": "matched",
+      "actualString": "'",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "—😀"
+  },
+  {
+    "content": "uunn\"’‘—\":bb\t”0\nu—\\\"—n1ué’“\"\nn1😀n\\b\"a'",
+    "search": "n\\b\"a'",
+    "replaceAll": false,
+    "newString": "\"n—’‘é\"",
+    "result": {
+      "status": "matched",
+      "actualString": "n\\b\"a'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"n—’‘é\""
+  },
+  {
+    "content": "”😀0'n\né:a😀‘“😀\n\\:n'a“b😀:(\\00bu",
+    "search": "  :n'a",
+    "replaceAll": true,
+    "newString": "b ",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "'0''b“1'",
+    "search": "\"1",
+    "replaceAll": true,
+    "newString": "—é",
+    "result": {
+      "status": "matched",
+      "actualString": "“1",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "—é"
+  },
+  {
+    "content": "'b(0'”au’😀' 1\t\n:ua” n'1n\n\n\n00b ",
+    "search": " 1\\t\\n:ua” n'1n\\n\\n\\n00b ",
+    "replaceAll": false,
+    "newString": "😀\\’”😀b“",
+    "result": {
+      "status": "matched",
+      "actualString": " 1\t\n:ua” n'1n\n\n\n00b ",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "😀\\’”😀b“"
+  },
+  {
+    "content": "a‘\" 0\\b11\\11u(\na“ub”\\\t1 ua",
+    "search": " u",
+    "replaceAll": false,
+    "newString": "”",
+    "result": {
+      "status": "matched",
+      "actualString": " u",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "”"
+  },
+  {
+    "content": "(\n0\t’”ubu\t\tbu“\" n\n01:😀\n('b”” \t“",
+    "search": "  'b”” \t“",
+    "replaceAll": false,
+    "newString": "un",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "n\t \n’(bb\"\nb😀é1\n",
+    "search": "\\t \\n’(b",
+    "replaceAll": false,
+    "newString": "”'",
+    "result": {
+      "status": "matched",
+      "actualString": "\t \n’(b",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "”’"
+  },
+  {
+    "content": "\"“—:0'u“é”\nn—u\\",
+    "search": "—u\\",
+    "replaceAll": false,
+    "newString": "”\n‘",
+    "result": {
+      "status": "matched",
+      "actualString": "—u\\",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "”\n‘"
+  },
+  {
+    "content": "'’“n\"0a(\"‘é’\\aa\"\n\t'—bu0\\“😀é0(",
+    "search": "u",
+    "replaceAll": false,
+    "newString": "'\n1”\t",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "'\n1”\t"
+  },
+  {
+    "content": "\t\n”(:”n(n\\b\"—’\"“(b \t1b‘b1\nb“”0😀“'a’(b\n”",
+    "search": "\n",
+    "replaceAll": false,
+    "newString": "a1😀 é",
+    "result": {
+      "status": "matched",
+      "actualString": "\n",
+      "strategy": "exact",
+      "candidateCount": 3
+    },
+    "replacement": "a1😀 é"
+  },
+  {
+    "content": "u\t ”—0(\"\\”",
+    "search": "1\t\\",
+    "replaceAll": false,
+    "newString": "\"(‘\\",
+    "result": {
+      "status": "matched",
+      "actualString": "\\",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\"(‘\\"
+  },
+  {
+    "content": "\\:—\ta\"0\t1’b(b1”—\\\"—\"'“0b'\tnu😀a\"é'\n1",
+    "search": "—\\ta\"0\\t1’b(b1”—\\\"—\"'“0b",
+    "replaceAll": true,
+    "newString": "nb\"",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "b“éé\\\"😀\n’u1\"“—“:b",
+    "search": "b“éé\\\"😀\\n’u1\"",
+    "replaceAll": false,
+    "newString": "\né",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "\"’n\\éu😀\t😀",
+    "search": "😀",
+    "replaceAll": false,
+    "newString": "én",
+    "result": {
+      "status": "matched",
+      "actualString": "😀",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "én"
+  },
+  {
+    "content": "1😀u ",
+    "search": "1😀u ",
+    "replaceAll": false,
+    "newString": "0\\\t'’’'",
+    "result": {
+      "status": "matched",
+      "actualString": "1😀u ",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0\\\t'’’'"
+  },
+  {
+    "content": " \\0\t",
+    "search": "\\0",
+    "replaceAll": false,
+    "newString": "“",
+    "result": {
+      "status": "matched",
+      "actualString": "\\0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "“"
+  },
+  {
+    "content": "\\“é“u'",
+    "search": "1\t\\“",
+    "replaceAll": false,
+    "newString": "\"é",
+    "result": {
+      "status": "matched",
+      "actualString": "\\“",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "“é"
+  },
+  {
+    "content": "a:\\ \t“(:00b'\\ubbn'\\'a\nn::1aa\\:1‘’’",
+    "search": "0b'\\",
+    "replaceAll": false,
+    "newString": "(’b1n\tu",
+    "result": {
+      "status": "matched",
+      "actualString": "0b'\\",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "(’b1n\tu"
+  },
+  {
+    "content": " (—n ‘“—”“u“('\\:”—1é",
+    "search": "  ‘“—”“u“('\\:”",
+    "replaceAll": false,
+    "newString": "’😀—\"\"",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "😀a\"a\"n0ab\n",
+    "search": "ab\n  ",
+    "replaceAll": false,
+    "newString": "u",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "‘u'“\t\"\"b\t\nn” \"’“u“\t",
+    "search": "'“\t\"\"",
+    "replaceAll": false,
+    "newString": "😀”😀:é",
+    "result": {
+      "status": "matched",
+      "actualString": "'“\t\"\"",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀”😀:é"
+  },
+  {
+    "content": "u\t‘😀",
+    "search": "\t",
+    "replaceAll": true,
+    "newString": "\"\\(‘ \t",
+    "result": {
+      "status": "matched",
+      "actualString": "\t",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"\\(‘ \t"
+  },
+  {
+    "content": "1‘—\n\t'“(‘\n😀\"\"één0é'\"\\0é0nu’\"\\nb",
+    "search": "0é0nu'\"",
+    "replaceAll": false,
+    "newString": "\\\"a\":",
+    "result": {
+      "status": "matched",
+      "actualString": "0é0nu’\"",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\\\"a\":"
+  },
+  {
+    "content": "\\(n \t:\nb\t ’1\"(\n\\ é",
+    "search": "  \"",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "—\n(😀nb‘’”\"😀a\t(0(b‘u “ b\n'aaun”:a'",
+    "search": "‘u “ ",
+    "replaceAll": false,
+    "newString": "\"n “\\\"",
+    "result": {
+      "status": "matched",
+      "actualString": "‘u “ ",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\"n “\\\""
+  },
+  {
+    "content": "un\t“é1\n0—’\\",
+    "search": "un\t\"é",
+    "replaceAll": false,
+    "newString": "bb'é\\u",
+    "result": {
+      "status": "matched",
+      "actualString": "un\t“é",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "bb'é\\u"
+  },
+  {
+    "content": "\"\"(\"\\0n—’:”é😀:\nbbu(nnb1bb",
+    "search": "(nn",
+    "replaceAll": false,
+    "newString": "“\"\t(”‘",
+    "result": {
+      "status": "matched",
+      "actualString": "(nn",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "“\"\t(”‘"
+  },
+  {
+    "content": "0”’0é—😀’\n”bu😀0\\\t“",
+    "search": "1: 0”’0é—😀’\n2: ”bu😀0",
+    "replaceAll": false,
+    "newString": "'😀(b‘",
+    "result": {
+      "status": "matched",
+      "actualString": "0”’0é—😀’\n”bu😀0",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "‘😀(b‘"
+  },
+  {
+    "content": "“‘a“'\t‘a\"0\\b\"n\n",
+    "search": "\"",
+    "replaceAll": false,
+    "newString": "b\n‘😀ba",
+    "result": {
+      "status": "matched",
+      "actualString": "\"",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "b\n‘😀ba"
+  },
+  {
+    "content": "1\n \n:u1‘",
+    "search": "1\n \n",
+    "replaceAll": true,
+    "newString": "0——‘",
+    "result": {
+      "status": "matched",
+      "actualString": "1\n \n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0——‘"
+  },
+  {
+    "content": "ab0\"’\t:a\"—‘\"😀bn’\n",
+    "search": "  \"",
+    "replaceAll": false,
+    "newString": "\t",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "a—:\\:”:“au”\t—0n” “0😀”",
+    "search": "u\"",
+    "replaceAll": false,
+    "newString": "\t1“",
+    "result": {
+      "status": "matched",
+      "actualString": "u”",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\t1“"
+  },
+  {
+    "content": "’",
+    "search": "'",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "’",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "aub”",
+    "search": "aub",
+    "replaceAll": true,
+    "newString": "b”\t",
+    "result": {
+      "status": "matched",
+      "actualString": "aub",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "b”\t"
+  },
+  {
+    "content": "😀é\\: b \t\\a“0a’é‘‘'u\\’0\\—'\té( 0—u’",
+    "search": "u\\’0\\—'\té( 0",
+    "replaceAll": true,
+    "newString": "1”'\t",
+    "result": {
+      "status": "matched",
+      "actualString": "u\\’0\\—'\té( 0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "1”'\t"
+  },
+  {
+    "content": "\n\"—‘”“a:0n'\n",
+    "search": "\"\"a",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "”“a",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "\\:1",
+    "search": ":1",
+    "replaceAll": false,
+    "newString": "\\\\",
+    "result": {
+      "status": "matched",
+      "actualString": ":1",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\\\"
+  },
+  {
+    "content": "1—’0\né\n“😀’\tn”\n’uu(b",
+    "search": "n”\\n’uu",
+    "replaceAll": false,
+    "newString": "0\n:",
+    "result": {
+      "status": "matched",
+      "actualString": "n”\n’uu",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "0\n:"
+  },
+  {
+    "content": "u😀0(:’:\n1",
+    "search": "u😀0(:’",
+    "replaceAll": true,
+    "newString": "0😀1",
+    "result": {
+      "status": "matched",
+      "actualString": "u😀0(:’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0😀1"
+  },
+  {
+    "content": "😀\t’é:b'1",
+    "search": "1\t’é:",
+    "replaceAll": true,
+    "newString": "0\"’\"",
+    "result": {
+      "status": "matched",
+      "actualString": "’é:",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "0\"’\""
+  },
+  {
+    "content": "an\\“a \\\" 1\n😀1",
+    "search": "  \" 1\n  ",
+    "replaceAll": false,
+    "newString": "\\”:a",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "😀“10’1(“‘:““é’: \t\"—(",
+    "search": ": \t\"—",
+    "replaceAll": true,
+    "newString": "’—’”—\t ",
+    "result": {
+      "status": "matched",
+      "actualString": ": \t\"—",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "’—’”—\t "
+  },
+  {
+    "content": "n0na”:\n0\\éu“\\",
+    "search": "1: :\n2: 0\\éu“",
+    "replaceAll": false,
+    "newString": "’”:'\t",
+    "result": {
+      "status": "matched",
+      "actualString": ":\n0\\éu“",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "’”:'\t"
+  },
+  {
+    "content": ":\\😀 “\\nu(b‘'\n\n\n”  nn‘\t😀““1\\0\t’",
+    "search": "1\\0",
+    "replaceAll": false,
+    "newString": " 0\t",
+    "result": {
+      "status": "matched",
+      "actualString": "1\\0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": " 0\t"
+  },
+  {
+    "content": ":‘“'😀n:\n😀”'’0\t’😀😀‘u\\b\ta\\‘\n ’😀 n",
+    "search": "''0\t'😀😀'u\\",
+    "replaceAll": false,
+    "newString": "bn'\n(a(",
+    "result": {
+      "status": "matched",
+      "actualString": "'’0\t’😀😀‘u\\",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "bn’\n(a("
+  },
+  {
+    "content": "”n 😀é1(b‘1",
+    "search": " 😀é1(b'1",
+    "replaceAll": false,
+    "newString": "'",
+    "result": {
+      "status": "matched",
+      "actualString": " 😀é1(b‘1",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "‘"
+  },
+  {
+    "content": " é\n'”\"",
+    "search": "\"",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "\"",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "’ ",
+    "search": "  ’",
+    "replaceAll": false,
+    "newString": "n",
+    "result": {
+      "status": "matched",
+      "actualString": "’ ",
+      "strategy": "line_trimmed",
+      "candidateCount": 1
+    },
+    "replacement": "n"
+  },
+  {
+    "content": "n:0éa\"0n1\t\\ 😀a—“😀“bu\\é’",
+    "search": "  “😀“bu\\",
+    "replaceAll": true,
+    "newString": "n\"n",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "n'(”'”n—au—",
+    "search": "'(”'”n—au—",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "'(”'”n—au—",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "u:u“0‘n(:1n  😀:1é'’”",
+    "search": "u“0‘n(:1n ",
+    "replaceAll": true,
+    "newString": "'",
+    "result": {
+      "status": "matched",
+      "actualString": "u“0‘n(:1n ",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "'"
+  },
+  {
+    "content": "nb”a—’——a”b(”0",
+    "search": "nb”a—",
+    "replaceAll": false,
+    "newString": "ba”(",
+    "result": {
+      "status": "matched",
+      "actualString": "nb”a—",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "ba”("
+  },
+  {
+    "content": "‘\n‘a‘",
+    "search": "\n",
+    "replaceAll": true,
+    "newString": "\n:—",
+    "result": {
+      "status": "matched",
+      "actualString": "\n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\n:—"
+  },
+  {
+    "content": "\"u:n““”:é",
+    "search": ":",
+    "replaceAll": true,
+    "newString": "😀:",
+    "result": {
+      "status": "matched",
+      "actualString": ":",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "😀:"
+  },
+  {
+    "content": " ”b\n1—1\t\"0aé”—(é\\\tb’\n‘(\\\n—\n‘'\n'’\t1a0’0éé",
+    "search": "1a0’",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "1a0’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "1é\té\\a”n0a ‘\t\n",
+    "search": "é\té\\a\"n0",
+    "replaceAll": false,
+    "newString": " ”",
+    "result": {
+      "status": "matched",
+      "actualString": "é\té\\a”n0",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": " ”"
+  },
+  {
+    "content": "\"0\\——0”—“\\😀\n(:u\\(b—:”\nab’0:é—😀’n1n\té",
+    "search": ":u\\(b—:\"\nab",
+    "replaceAll": false,
+    "newString": "—0\"u\t",
+    "result": {
+      "status": "matched",
+      "actualString": ":u\\(b—:”\nab",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "—0”u\t"
+  },
+  {
+    "content": "1— '😀''“\t‘‘(’",
+    "search": "“\t‘",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "“\t‘",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "”\\:’n”😀",
+    "search": "1\t”",
+    "replaceAll": false,
+    "newString": "’\tbu",
+    "result": {
+      "status": "matched",
+      "actualString": "”",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 2
+    },
+    "replacement": "’\tbu"
+  },
+  {
+    "content": "bu —b’1”—’ :bn':(un’\\\\",
+    "search": "bn':(un’",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "bn':(un’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "\n: n\nn\\\n“\"u‘",
+    "search": "\nn",
+    "replaceAll": false,
+    "newString": "\\‘😀\"\\u",
+    "result": {
+      "status": "matched",
+      "actualString": "\nn",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\‘😀\"\\u"
+  },
+  {
+    "content": " u’(‘😀—\n:",
+    "search": "('",
+    "replaceAll": true,
+    "newString": "\t",
+    "result": {
+      "status": "matched",
+      "actualString": "(‘",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\t"
+  },
+  {
+    "content": "😀\n ééu”“u’a'éa—:n((0\\’éab—‘’\\\nu\t",
+    "search": "1\t\\\n2: ",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "\\\n",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "0 \"’ —\"ué—\\a0 :\"’a': 1b’'\t0",
+    "search": "’a': 1b",
+    "replaceAll": false,
+    "newString": "😀aé",
+    "result": {
+      "status": "matched",
+      "actualString": "’a': 1b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀aé"
+  },
+  {
+    "content": "\n(’(\"('“‘‘”😀:é\n“\n\"”\"1:—é\té‘😀:\n'’\n0é(",
+    "search": "(",
+    "replaceAll": true,
+    "newString": "' \"”",
+    "result": {
+      "status": "matched",
+      "actualString": "(",
+      "strategy": "exact",
+      "candidateCount": 4
+    },
+    "replacement": "' \"”"
+  },
+  {
+    "content": ":u:’““éuu‘",
+    "search": "1: ““é",
+    "replaceAll": true,
+    "newString": "—0’",
+    "result": {
+      "status": "matched",
+      "actualString": "““é",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "—0’"
+  },
+  {
+    "content": "‘0'n: \n",
+    "search": "0",
+    "replaceAll": false,
+    "newString": "u\"1u\ta",
+    "result": {
+      "status": "matched",
+      "actualString": "0",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "u\"1u\ta"
+  },
+  {
+    "content": "'“a\n'",
+    "search": "a\n'",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "a\n'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "‘—an“\"0:\"",
+    "search": "“\"0:",
+    "replaceAll": true,
+    "newString": ":'\\'\\😀",
+    "result": {
+      "status": "matched",
+      "actualString": "“\"0:",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ":'\\'\\😀"
+  },
+  {
+    "content": "1a’é 1a😀",
+    "search": "😀",
+    "replaceAll": true,
+    "newString": "\\’“\\—",
+    "result": {
+      "status": "matched",
+      "actualString": "😀",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\’“\\—"
+  },
+  {
+    "content": "1é1an\t\"é—\n—‘’1😀”bun1\n01\\u’",
+    "search": "un1\n01\\u’",
+    "replaceAll": false,
+    "newString": " \\ un1",
+    "result": {
+      "status": "matched",
+      "actualString": "un1\n01\\u’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": " \\ un1"
+  },
+  {
+    "content": "😀u\n\\:😀n1",
+    "search": ":😀n",
+    "replaceAll": true,
+    "newString": "\n(",
+    "result": {
+      "status": "matched",
+      "actualString": ":😀n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\n("
+  },
+  {
+    "content": "’\nn\\“—b\t(“\\u(\n'\n””ua(1“é\t:0é:’u1",
+    "search": "a(1“é\\t:0é:’",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "a(1“é\t:0é:’",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "b0‘\t\n’\":“1uu\t0😀0😀😀\"”",
+    "search": "uu\\t0",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "uu\t0",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "— ”é”” ”:",
+    "search": ":",
+    "replaceAll": true,
+    "newString": "””\t1😀b—",
+    "result": {
+      "status": "matched",
+      "actualString": ":",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "””\t1😀b—"
+  },
+  {
+    "content": "“😀",
+    "search": "1: “😀",
+    "replaceAll": false,
+    "newString": "‘a",
+    "result": {
+      "status": "matched",
+      "actualString": "“😀",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "‘a"
+  },
+  {
+    "content": "'é1'b\\u\\:0“a\t”b\n\"nu1“\"—n\nu\"”0’é1éna",
+    "search": "u",
+    "replaceAll": false,
+    "newString": "\n😀1",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "exact",
+      "candidateCount": 3
+    },
+    "replacement": "\n😀1"
+  },
+  {
+    "content": "(1aé",
+    "search": "\\u00e9",
+    "replaceAll": false,
+    "newString": "\"\n\\—”’",
+    "result": {
+      "status": "matched",
+      "actualString": "é",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\"\n\\—”’"
+  },
+  {
+    "content": "\tua01au“é'éa‘\t‘\\",
+    "search": "1\té'éa",
+    "replaceAll": false,
+    "newString": "“—",
+    "result": {
+      "status": "matched",
+      "actualString": "é'éa",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "“—"
+  },
+  {
+    "content": "😀1“😀\\\n\t'",
+    "search": "1\t“",
+    "replaceAll": true,
+    "newString": "\\—😀 ’😀”",
+    "result": {
+      "status": "matched",
+      "actualString": "“",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\\—😀 ’😀”"
+  },
+  {
+    "content": "”1“:\" 1aé“—\"—\"\nu(‘:\t—u 1: \"\"n \\aa0“’",
+    "search": "1: \"\"n \\aa0“’",
+    "replaceAll": false,
+    "newString": "' n0 1\t",
+    "result": {
+      "status": "matched",
+      "actualString": "1: \"\"n \\aa0“’",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "' n0 1\t"
+  },
+  {
+    "content": "”a1'”“\\“😀  \n10\"b'\n\"\\’a1(”“",
+    "search": "“\\“😀",
+    "replaceAll": true,
+    "newString": "\\n",
+    "result": {
+      "status": "matched",
+      "actualString": "“\\“😀",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\n"
+  },
+  {
+    "content": "a \\é\ta0n0n1\tb\"\n0aén01'0—’’'1u—\"‘':”(‘é\\",
+    "search": "\ta0n0n1\tb\"\n0aén01'0—'''1",
+    "replaceAll": false,
+    "newString": "—a \n",
+    "result": {
+      "status": "matched",
+      "actualString": "\ta0n0n1\tb\"\n0aén01'0—’’'1",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "—a \n"
+  },
+  {
+    "content": "aén'—0b’’’1\"('“\"'’ \"é:\n'nu—😀\\a",
+    "search": "é:\n'nu—😀\\",
+    "replaceAll": false,
+    "newString": "“u",
+    "result": {
+      "status": "matched",
+      "actualString": "é:\n'nu—😀\\",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "“u"
+  },
+  {
+    "content": "😀\né“’ \"é’1b\n\t1nna‘u1",
+    "search": "😀\n",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "😀\n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "\nnb” ‘ \"‘:1\\\\au 'a😀\tau(",
+    "search": "1: :1\\\\au 'a😀\tau(",
+    "replaceAll": false,
+    "newString": "😀'”—u",
+    "result": {
+      "status": "matched",
+      "actualString": ":1\\\\au 'a😀\tau(",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "😀'”—u"
+  },
+  {
+    "content": "\n\\”——’\"'\n\n“—😀\naban“a\\(“één\n:bn\\",
+    "search": "a\\(“één\n:b",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "a\\(“één\n:b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "0\" 😀'u\"bé:\n\\''n:\t'é\t“1a a😀 '\n1 😀\n\n(1😀é",
+    "search": "'é",
+    "replaceAll": false,
+    "newString": "\\10\n😀(a",
+    "result": {
+      "status": "matched",
+      "actualString": "'é",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\\10\n😀(a"
+  },
+  {
+    "content": "’\n😀0n é”é\t0\\—\t’—“'(’0u\t”' ’ ’\n—‘a'😀1\n\\",
+    "search": "—“'(’0u\\t”' ",
+    "replaceAll": true,
+    "newString": "b”’:“u",
+    "result": {
+      "status": "matched",
+      "actualString": "—“'(’0u\t”' ",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "b”’:“u"
+  },
+  {
+    "content": "u“(an n—\\:1b“(1”b😀 u'\\ué((\"\"bé‘😀u (‘\n—😀—",
+    "search": "an n—",
+    "replaceAll": true,
+    "newString": "a\t”\" a",
+    "result": {
+      "status": "matched",
+      "actualString": "an n—",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a\t”\" a"
+  },
+  {
+    "content": "u'éu\" n'bn0‘b😀 ‘ \"“—😀\n(\"éa\nb0(11—1én b",
+    "search": " n'",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": " n'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "a\n",
+    "search": "\\n",
+    "replaceAll": false,
+    "newString": "”",
+    "result": {
+      "status": "matched",
+      "actualString": "\n",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "”"
+  },
+  {
+    "content": "(‘0b”na😀“—”(’”é😀0\"😀😀”’”\\ ”é(😀'a\"‘\"\"”\t",
+    "search": "’”\\ ”é(😀'a\"‘\"\"”\\t",
+    "replaceAll": true,
+    "newString": "\n'\n\n\\0",
+    "result": {
+      "status": "matched",
+      "actualString": "’”\\ ”é(😀'a\"‘\"\"”\t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\n‘\n\n\\0"
+  },
+  {
+    "content": "”u😀'n\\b”'’1(\\é\"\\😀‘u'\t1’:‘—a00😀",
+    "search": "😀‘u'\t1’:‘—a00",
+    "replaceAll": true,
+    "newString": "a\\”“’",
+    "result": {
+      "status": "matched",
+      "actualString": "😀‘u'\t1’:‘—a00",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a\\”“’"
+  },
+  {
+    "content": "”—\tu:—u“u1 u\t😀",
+    "search": "1: “",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "“",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "a\nab””'\tn10\"“0n—😀\\0😀u'‘\t",
+    "search": "😀\\0😀u'‘\\t",
+    "replaceAll": false,
+    "newString": "\n1b",
+    "result": {
+      "status": "matched",
+      "actualString": "😀\\0😀u'‘\t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\n1b"
+  },
+  {
+    "content": "0'\"a:b“b“😀unnu\nab0n",
+    "search": "“😀unnu\n",
+    "replaceAll": false,
+    "newString": " ’b",
+    "result": {
+      "status": "matched",
+      "actualString": "“😀unnu\n",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": " ’b"
+  },
+  {
+    "content": "0(\n‘ua“““\t“\\0é\"aa‘0",
+    "search": "\\u00e9\"aa",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "é\"aa",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "”’\\a‘—\téén“na\néb1(n 😀😀\tn‘",
+    "search": "\t\\u00e9\\u00e9n“na\n\\u00e9b1",
+    "replaceAll": false,
+    "newString": "\\(\\",
+    "result": {
+      "status": "matched",
+      "actualString": "\téén“na\néb1",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "\\(\\"
+  },
+  {
+    "content": "(—u”",
+    "search": "1\tu",
+    "replaceAll": false,
+    "newString": "”😀",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "”😀"
+  },
+  {
+    "content": "\n\n\\0b😀a\n11\t\\0—😀n \"“’é\t(é\" (😀\\”(\"’’’\t'’",
+    "search": "\"“",
+    "replaceAll": false,
+    "newString": "“n’'😀“—",
+    "result": {
+      "status": "matched",
+      "actualString": "\"“",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "“n’'😀“—"
+  },
+  {
+    "content": "😀u(:a\"n(b’0\t\"0u",
+    "search": "1: (b’0\t",
+    "replaceAll": true,
+    "newString": "“\\",
+    "result": {
+      "status": "matched",
+      "actualString": "(b’0\t",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "“\\"
+  },
+  {
+    "content": "1'“0u(\t 0\t—”\\‘1'101'é(‘\"éu—u",
+    "search": "—\"\\'1'101'é(",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "—”\\‘1'101'é(",
+      "strategy": "quote_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "n\\un\t(:1’1’\"a(a1\\:11 'u",
+    "search": "1\t\t",
+    "replaceAll": false,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "\t",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "\\‘😀😀::bu😀“(😀00\n😀(0:'\n \n\\”“‘aa\t::—:1é‘\"—",
+    "search": "  '\n\n  \\”“‘",
+    "replaceAll": true,
+    "newString": "“:n\n”",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "1:‘a:😀b\\a''\"😀\\‘’",
+    "search": "1: \\",
+    "replaceAll": true,
+    "newString": "éu—",
+    "result": {
+      "status": "matched",
+      "actualString": "\\",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 2
+    },
+    "replacement": "éu—"
+  },
+  {
+    "content": "énéb0😀1a“’😀1 ’a’é— \t‘n‘—",
+    "search": "😀1 ’a’é— \\t",
+    "replaceAll": true,
+    "newString": "é”\n\t",
+    "result": {
+      "status": "matched",
+      "actualString": "😀1 ’a’é— \t",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "é”\n\t"
+  },
+  {
+    "content": ":‘ba:\té\\”:na“é😀(b—1((\"—101—n'\t“—'",
+    "search": "‘b",
+    "replaceAll": false,
+    "newString": "\"",
+    "result": {
+      "status": "matched",
+      "actualString": "‘b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\""
+  },
+  {
+    "content": "”é 'u“(\tn\"n\n0‘\n“b😀1\n1na",
+    "search": "”é '",
+    "replaceAll": false,
+    "newString": "'”:😀",
+    "result": {
+      "status": "matched",
+      "actualString": "”é '",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "'”:😀"
+  },
+  {
+    "content": "'\"“an’nn‘1(—b0“”\"é\"u’:”\tnéé’:b ‘’",
+    "search": "\"“a",
+    "replaceAll": false,
+    "newString": "a",
+    "result": {
+      "status": "matched",
+      "actualString": "\"“a",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a"
+  },
+  {
+    "content": "n 01é\n“a’\"’\n“😀'😀“😀\\\\ \t1—\ta—u\"u",
+    "search": "😀“😀\\\\ \t",
+    "replaceAll": true,
+    "newString": "\n”",
+    "result": {
+      "status": "matched",
+      "actualString": "😀“😀\\\\ \t",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "\n”"
+  },
+  {
+    "content": "😀é0n\\“\"1",
+    "search": "1\t0n\\",
+    "replaceAll": false,
+    "newString": "\"\nn\\\tu“",
+    "result": {
+      "status": "matched",
+      "actualString": "0n\\",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\"\nn\\\tu“"
+  },
+  {
+    "content": "'n\\(a:\té(u'\\\nu",
+    "search": "(a:\\té(u'",
+    "replaceAll": false,
+    "newString": "’n",
+    "result": {
+      "status": "matched",
+      "actualString": "(a:\té(u'",
+      "strategy": "escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "’n"
+  },
+  {
+    "content": "u\n“\\“\t‘ b\ta\"”(\\“nb1”\tb\"\"'b’“u\"a—:“",
+    "search": "b’“u\"a—",
+    "replaceAll": false,
+    "newString": "a\né“(u",
+    "result": {
+      "status": "matched",
+      "actualString": "b’“u\"a—",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "a\né“(u"
+  },
+  {
+    "content": "”‘\ta”\t”’😀”b'’\tn\"an\"é‘—é0—11a\\””1é0 éb:\n",
+    "search": "1\t‘—é0",
+    "replaceAll": false,
+    "newString": "\t'‘‘(u",
+    "result": {
+      "status": "matched",
+      "actualString": "‘—é0",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "\t‘‘‘(u"
+  },
+  {
+    "content": "\\n:—\\”(énu\\b:1\\😀\\1u(u'😀\t1’”:“1😀",
+    "search": "’”:",
+    "replaceAll": false,
+    "newString": "0“né'—\t",
+    "result": {
+      "status": "matched",
+      "actualString": "’”:",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0“né'—\t"
+  },
+  {
+    "content": "“\tnn”1:”“’(—“a\n“1‘aééu(—\n‘nb0“",
+    "search": ":”“’(—“a\n“1‘a\\u00e9\\u00e9u",
+    "replaceAll": false,
+    "newString": "’‘\n\n’",
+    "result": {
+      "status": "matched",
+      "actualString": ":”“’(—“a\n“1‘aééu",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": "’‘\n\n’"
+  },
+  {
+    "content": "a‘’—1:\n00\t \"éb‘“bb\"“(\\‘",
+    "search": "\"",
+    "replaceAll": true,
+    "newString": "é u \t",
+    "result": {
+      "status": "matched",
+      "actualString": "\"",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "é u \t"
+  },
+  {
+    "content": "u”1‘—\n'😀’‘\"0\n0‘\\’”“\t”a",
+    "search": "—\n'😀’‘\"0\n0‘\\’”",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "—\n'😀’‘\"0\n0‘\\’”",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "'1—\n—“é(\"u\"",
+    "search": "\"",
+    "replaceAll": false,
+    "newString": "1😀\"”\n😀",
+    "result": {
+      "status": "matched",
+      "actualString": "\"",
+      "strategy": "exact",
+      "candidateCount": 2
+    },
+    "replacement": "1😀\"”\n😀"
+  },
+  {
+    "content": "‘é1‘\"\"'éb😀a‘é\\\\—\nu1\\(”'\"n:”‘:\t’é—\né((”“",
+    "search": "1\t‘\"\"'éb😀a‘é\\\\—\n2\tu1\\(”'\"n:”‘:\t’é—\n3\té((”“",
+    "replaceAll": false,
+    "newString": "‘",
+    "result": {
+      "status": "matched",
+      "actualString": "‘\"\"'éb😀a‘é\\\\—\nu1\\(”'\"n:”‘:\t’é—\né((”“",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "‘"
+  },
+  {
+    "content": "é’’1(n1\"\\'0",
+    "search": "'",
+    "replaceAll": true,
+    "newString": "u“'",
+    "result": {
+      "status": "matched",
+      "actualString": "'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "u“'"
+  },
+  {
+    "content": "01’”\\u\\“'",
+    "search": "1: u",
+    "replaceAll": false,
+    "newString": "”“u",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 1
+    },
+    "replacement": "”“u"
+  },
+  {
+    "content": "b",
+    "search": "b",
+    "replaceAll": false,
+    "newString": "0”(’\t1\t",
+    "result": {
+      "status": "matched",
+      "actualString": "b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "0”(’\t1\t"
+  },
+  {
+    "content": "n\"a“\"—",
+    "search": "1\t\"",
+    "replaceAll": false,
+    "newString": "u\tu",
+    "result": {
+      "status": "matched",
+      "actualString": "\"",
+      "strategy": "line_number_prefix_stripped",
+      "candidateCount": 2
+    },
+    "replacement": "u\tu"
+  },
+  {
+    "content": "(😀’:ua😀“0a“00\\'n‘",
+    "search": "a😀“0a“",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "a😀“0a“",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "—'é01”",
+    "search": "  0",
+    "replaceAll": true,
+    "newString": "\t\t'\\aa0",
+    "result": {
+      "status": "not_found"
+    }
+  },
+  {
+    "content": "b",
+    "search": "b",
+    "replaceAll": false,
+    "newString": "“",
+    "result": {
+      "status": "matched",
+      "actualString": "b",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "“"
+  },
+  {
+    "content": "\"\na'(0\\ u ”'\"’“\n:\" “\t1’—(—\\\t“ ’\tb’😀’\"😀",
+    "search": "“\n:\" ",
+    "replaceAll": false,
+    "newString": "😀u",
+    "result": {
+      "status": "matched",
+      "actualString": "“\n:\" ",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "😀u"
+  },
+  {
+    "content": "”’😀(”a\\ \n’a😀10'n:\\'\\a(0:'‘“\t'b",
+    "search": "10'n:\\'\\a(0:'",
+    "replaceAll": false,
+    "newString": "'😀0\t",
+    "result": {
+      "status": "matched",
+      "actualString": "10'n:\\'\\a(0:'",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "'😀0\t"
+  },
+  {
+    "content": "b:é\"— —\t’😀”\"é(: né:😀1:1😀(",
+    "search": ": n\\u00e9:😀1",
+    "replaceAll": false,
+    "newString": ":",
+    "result": {
+      "status": "matched",
+      "actualString": ": né:😀1",
+      "strategy": "unicode_escape_normalized",
+      "candidateCount": 1
+    },
+    "replacement": ":"
+  },
+  {
+    "content": "'\"' ”u",
+    "search": "u",
+    "replaceAll": true,
+    "newString": "",
+    "result": {
+      "status": "matched",
+      "actualString": "u",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": ""
+  },
+  {
+    "content": "—ua:“au(a:1\n—nub",
+    "search": "au(",
+    "replaceAll": false,
+    "newString": "aé”\n",
+    "result": {
+      "status": "matched",
+      "actualString": "au(",
+      "strategy": "exact",
+      "candidateCount": 1
+    },
+    "replacement": "aé”\n"
+  },
+  {
+    "content": "\n\ta'’(”n—é —'é\n‘",
+    "search": "'é\n  ",
+    "replaceAll": true,
+    "newString": "—\n",
+    "result": {
+      "status": "not_found"
+    }
+  }
+]

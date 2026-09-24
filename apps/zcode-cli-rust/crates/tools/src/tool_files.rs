@@ -1,3 +1,5 @@
+use super::file_write::{atomic_write, patch};
+use super::tool_edit as edit;
 use super::tools::{boolean, check_cancel, keys, resolve, string, uint};
 use crate::contract::ToolOutput;
 use anyhow::{Context, Result, bail};
@@ -7,10 +9,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::Mutex,
-};
+use tokio::{io::AsyncReadExt, sync::Mutex};
 use tokio_util::sync::CancellationToken;
 const READ_BYTES: usize = 64 * 1024;
 const EDIT_BYTES: u64 = 8 * 1024 * 1024;
@@ -21,6 +20,8 @@ pub struct FileState {
 struct Observation {
     hash: Vec<u8>,
     full: bool,
+    /// The Read output was cut short (Node `isPartialView`): Edit treats it as unread.
+    partial: bool,
 }
 pub struct FileTools<'a> {
     pub sink: Option<&'a crate::contract::EventSink>,
@@ -37,6 +38,21 @@ impl FileTools<'_> {
         args: &Value,
         cancel: &CancellationToken,
     ) -> Result<ToolOutput> {
+        if name == "Edit" {
+            // Node：先判断无改动，再判断空路径，二者都先于路径解析。
+            if string(args, "old_string")? == string(args, "new_string")? {
+                return Err(edit::failure(
+                    edit::code::NO_CHANGE,
+                    "No changes to make: old_string and new_string are exactly the same.",
+                ));
+            }
+            if string(args, "file_path")?.is_empty() {
+                return Err(edit::failure(
+                    edit::code::INVALID_PATH,
+                    "Tool path must not be empty",
+                ));
+            }
+        }
         let path = resolve(self.cwd, string(args, "file_path")?)?;
         if name == "Read" {
             keys(args, &["file_path", "offset", "limit"])?;
@@ -53,13 +69,20 @@ impl FileTools<'_> {
         let _guard = tokio::select! { _=cancel.cancelled()=>bail!("Cancelled"), lock=self.writes.lock()=>lock };
         self.write(name, &path, args, cancel).await
     }
-    async fn remember(&self, path: PathBuf, hash: Vec<u8>, full: bool) {
+    async fn remember(&self, path: PathBuf, hash: Vec<u8>, full: bool, partial: bool) {
         let mut state = self.state.lock().await;
         // 读取观察缓存有界；淘汰只会要求重新 Read，不会跳过新鲜度检查。
         if state.entries.len() >= 1024 && !state.entries.contains_key(&path) {
             state.entries.clear();
         }
-        state.entries.insert(path, Observation { hash, full });
+        state.entries.insert(
+            path,
+            Observation {
+                hash,
+                full,
+                partial,
+            },
+        );
     }
     async fn read(
         &self,
@@ -133,7 +156,7 @@ impl FileTools<'_> {
             content.split('\n').count()
         };
         let full = start == 1 && !truncated && count as u64 >= total;
-        self.remember(path.clone(), hash.finalize().to_vec(), full)
+        self.remember(path.clone(), hash.finalize().to_vec(), full, truncated)
             .await;
         let numbered = content
             .split('\n')
@@ -190,19 +213,10 @@ impl FileTools<'_> {
             Err(e) => return Err(e.into()),
         };
         check_cancel(cancel)?;
-        if let Some(bytes) = &original {
-            let state = self.state.lock().await;
-            let read = state.entries.get(&path).context(if name == "Write" {
-                "write_file_not_read: Read the file before overwriting"
-            } else {
-                "edit_file_not_read: Read the file before editing"
-            })?;
-            if name == "Write" && !read.full {
-                bail!("write_partial_read: Read the complete file before overwriting");
-            }
-            if read.hash != Sha256::digest(bytes).as_slice() {
-                bail!("{name}: stale_file; file changed since Read, read it again");
-            }
+        let edit = name == "Edit";
+        if edit && original.is_none() && !string(args, "old_string")?.is_empty() {
+            let message = edit::missing_message(&path, self.cwd).await;
+            return Err(edit::failure(edit::code::FILE_NOT_EXIST, message));
         }
         let raw = std::str::from_utf8(original.as_deref().unwrap_or_default())
             .context("Write/Edit requires UTF-8 text")?;
@@ -210,22 +224,50 @@ impl FileTools<'_> {
             bail!("Write/Edit does not support binary files");
         }
         let bom = raw.starts_with('\u{feff}');
-        let crlf = raw.contains("\r\n")
-            || (original.is_none()
-                && args[if name == "Write" {
-                    "content"
-                } else {
-                    "new_string"
-                }]
-                .as_str()
-                .is_some_and(|s| s.contains("\r\n")));
+        // Node：已有文件按多数行尾写回，新建文件为 LF。
+        let crlf = edit::crlf(raw)
+            || (!edit
+                && original.is_none()
+                && args["content"].as_str().is_some_and(|s| s.contains("\r\n")));
         let old = raw.trim_start_matches('\u{feff}').replace("\r\n", "\n");
-        let mut match_count = 0;
-        let replace_all = if name == "Edit" {
-            boolean(args, "replace_all", false)?
+        let replace_all = edit && boolean(args, "replace_all", false)?;
+        let search = if edit {
+            string(args, "old_string")?
         } else {
-            false
+            ""
         };
+        if edit && search.is_empty() && !crate::domain::edit_match::js_trim(&old).is_empty() {
+            return Err(edit::failure(
+                edit::code::FILE_EXISTS_NO_OLD_STRING,
+                "Cannot create new file - file already exists.",
+            ));
+        }
+        if edit && !search.is_empty() && path.to_string_lossy().ends_with(".ipynb") {
+            return Err(edit::failure(
+                edit::code::NOTEBOOK_FILE,
+                "File is a Jupyter Notebook. Use the NotebookEdit to edit this file.",
+            ));
+        }
+        if let Some(bytes) = &original {
+            let state = self.state.lock().await;
+            let read = state.entries.get(&path).filter(|r| !(edit && r.partial));
+            let Some(read) = read else {
+                if edit {
+                    return Err(edit::failure(edit::code::FILE_NOT_READ, edit::NOT_READ));
+                }
+                bail!("write_file_not_read: Read the file before overwriting");
+            };
+            if name == "Write" && !read.full {
+                bail!("write_partial_read: Read the complete file before overwriting");
+            }
+            if read.hash != Sha256::digest(bytes).as_slice() {
+                if edit {
+                    return Err(edit::failure(edit::code::STALE_FILE, edit::STALE));
+                }
+                bail!("{name}: stale_file; file changed since Read, read it again");
+            }
+        }
+        let mut planned = None;
         let (new, search, replacement) = if name == "Write" {
             (
                 string(args, "content")?.replace("\r\n", "\n"),
@@ -233,31 +275,22 @@ impl FileTools<'_> {
                 String::new(),
             )
         } else {
-            let search = string(args, "old_string")?.replace("\r\n", "\n");
+            let search = search.replace("\r\n", "\n");
             let replacement = string(args, "new_string")?.replace("\r\n", "\n");
-            if search == replacement {
-                bail!("edit_no_change: old_string and new_string are identical");
-            }
-            let value = if search.is_empty() {
-                if !old.trim().is_empty() {
-                    bail!("edit_file_exists_no_old_string");
-                }
-                replacement.clone()
+            if search.is_empty() {
+                (replacement.clone(), search, replacement)
             } else {
-                match_count = old.matches(&search).count();
-                if match_count == 0 {
-                    bail!("edit_old_string_not_found: String to replace not found in file");
-                }
-                if !replace_all && match_count > 1 {
-                    bail!("edit_ambiguous_replace: Provide more context or replace_all");
-                }
-                if replace_all {
-                    old.replace(&search, &replacement)
-                } else {
-                    old.replacen(&search, &replacement, 1)
-                }
-            };
-            (value, search, replacement)
+                let raw_old = string(args, "old_string")?;
+                let edit::Planned {
+                    content,
+                    actual_old,
+                    actual_new,
+                    strategy,
+                    candidates,
+                } = edit::plan(&old, &search, &replacement, replace_all, raw_old)?;
+                planned = Some((strategy, candidates));
+                (content, actual_old, actual_new)
+            }
         };
         if new.len() as u64 > EDIT_BYTES {
             bail!("Write exceeds native edit budget (8 MiB)");
@@ -284,25 +317,26 @@ impl FileTools<'_> {
         }
         atomic_write(&path, &bytes, original.as_deref(), cancel).await?;
         let path = tokio::fs::canonicalize(path).await?;
-        self.remember(path.clone(), Sha256::digest(&bytes).to_vec(), true)
+        self.remember(path.clone(), Sha256::digest(&bytes).to_vec(), true, false)
             .await;
         let (patch, additions, deletions) = patch(&old, &new);
         let mut data = if name == "Write" {
             json!({"type":if original.is_some(){"update"}else{"create"},"filePath":path,"content":new,"originalFile":original.as_ref().map(|_|&old),"structuredPatch":patch,"userModified":false})
         } else {
-            json!({"filePath":path,"oldString":search,"newString":replacement,"originalFile":old,"structuredPatch":patch,"userModified":false,"replaceAll":replace_all,"matchStrategy":"exact","matchCandidateCount":match_count})
+            json!({"filePath":path,"oldString":search,"newString":replacement,"originalFile":old,"structuredPatch":patch,"userModified":false,"replaceAll":replace_all,"matchStrategy":planned.map(|p|p.0),"matchCandidateCount":planned.map(|p|p.1)})
         };
         let mut display = json!({"kind":"file_diff","filePath":path,"additions":additions,"deletions":deletions,"structuredPatch":data["structuredPatch"]});
         if serde_json::to_vec(&display)?.len() > 32 * 1024 {
             display["structuredPatch"] = json!([]);
             display["truncated"] = true.into();
         }
-        let mut content = format!(
-            "The file {} has been {} successfully.",
-            path.display(),
-            if name == "Edit" { "updated" } else { "written" }
-        );
-        if serde_json::to_vec(&data)?.len() > 64 * 1024 {
+        let mut content = if edit {
+            // Node formatEditModelContent：使用模型给出的 file_path。
+            edit::model_content(string(args, "file_path")?, replace_all)
+        } else {
+            format!("The file {} has been written successfully.", path.display())
+        };
+        if !edit && serde_json::to_vec(&data)?.len() > 64 * 1024 {
             tokio::fs::create_dir_all(self.artifacts).await?;
             let artifact = self.artifacts.join(format!("{}.json", super::id()));
             tokio::fs::write(&artifact, serde_json::to_vec(&data)?).await?;
@@ -313,71 +347,4 @@ impl FileTools<'_> {
         result.display = Some(display);
         Ok(result)
     }
-}
-pub(super) async fn atomic_write(
-    path: &Path,
-    bytes: &[u8],
-    expected: Option<&[u8]>,
-    cancel: &CancellationToken,
-) -> Result<()> {
-    check_cancel(cancel)?;
-    let parent = path.parent().context("File requires a parent directory")?;
-    tokio::fs::create_dir_all(parent).await?;
-    let temp = parent.join(format!(".zcode-{}.tmp", super::id()));
-    let result = async {
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)
-            .await?;
-        if let Ok(meta) = tokio::fs::metadata(path).await {
-            file.set_permissions(meta.permissions()).await?;
-        }
-        file.write_all(bytes).await?;
-        file.sync_all().await?;
-        drop(file);
-        check_cancel(cancel)?;
-        let actual = match tokio::fs::read(path).await {
-            Ok(v) => Some(v),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(e.into()),
-        };
-        // 原子替换前再次核对观察版本，避免等待 IO 时覆盖外部写入。
-        if actual.as_deref() != expected {
-            bail!("stale_file: changed before atomic commit");
-        }
-        tokio::fs::rename(&temp, path).await?;
-        Ok::<_, anyhow::Error>(())
-    }
-    .await;
-    if result.is_err() {
-        let _ = tokio::fs::remove_file(temp).await;
-    }
-    result
-}
-pub(super) fn patch(old: &str, new: &str) -> (Value, usize, usize) {
-    if old == new {
-        return (json!([]), 0, 0);
-    }
-    let a: Vec<_> = old.lines().collect();
-    let b: Vec<_> = new.lines().collect();
-    let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
-    let suffix = a[prefix..]
-        .iter()
-        .rev()
-        .zip(b[prefix..].iter().rev())
-        .take_while(|(x, y)| x == y)
-        .count();
-    let removed = &a[prefix..a.len() - suffix];
-    let added = &b[prefix..b.len() - suffix];
-    let lines: Vec<_> = removed
-        .iter()
-        .map(|s| format!("-{s}"))
-        .chain(added.iter().map(|s| format!("+{s}")))
-        .collect();
-    (
-        json!([{"oldStart":prefix+1,"oldLines":removed.len(),"newStart":prefix+1,"newLines":added.len(),"lines":lines}]),
-        added.len(),
-        removed.len(),
-    )
 }

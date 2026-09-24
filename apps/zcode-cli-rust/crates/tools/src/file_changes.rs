@@ -1,4 +1,4 @@
-use super::{checkpoint_blobs as blobs, tool_files::patch};
+use super::{checkpoint_blobs as blobs, file_write::patch};
 use crate::domain::file_checkpoint::FileCheckpoint;
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
