@@ -1,0 +1,127 @@
+name: Build Electron App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS ARM64
+            runner: macos-14
+            os: mac
+            arch: arm64
+            artifact: zcode-macos-arm64
+            installer: packages/desktop/dist/*mac-arm64.dmg
+          - name: Windows x64
+            runner: windows-2022
+            os: win
+            arch: x64
+            artifact: zcode-windows-x64
+            installer: packages/desktop/dist/*win-x64.exe
+    env:
+      ZCODE_ENV: production
+      ZCODE_TARGET_OS: ${{ matrix.os }}
+      ZCODE_TARGET_ARCH: ${{ matrix.arch }}
+      ZCODE_SKIP_REMOTE_ASSETS: "1"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      HUSKY: "0"
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Read pinned Node version
+        id: toolchain
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from 'node:fs/promises';
+          const mise = await readFile('mise.toml', 'utf8');
+          const version = mise.match(/^node\s*=\s*"([^"]+)"/m)?.[1];
+          if (!version) throw new Error('Missing Node version in mise.toml');
+          await appendFile(process.env.GITHUB_OUTPUT, `node=${version}\n`);
+          NODE
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ steps.toolchain.outputs.node }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test packaging scripts
+        run: node --test scripts/ci/desktop-build.test.mjs
+
+      - name: Prepare desktop runtime
+        run: pnpm prepare:desktop-runtime
+
+      - name: Build Electron app
+        run: pnpm --filter @zcode/desktop build:no-runtime-assets
+
+      - name: Package macOS (sign and notarize when configured)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/ci/build-macos.sh
+        env:
+          APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        run: pnpm bundle:desktop -- --os win --arch x64 --skip-prepare --skip-build
+
+      - name: Verify packaged runtime and terminal
+        run: node scripts/ci/smoke-desktop.mjs
+
+      - name: Generate installer checksum
+        shell: bash
+        env:
+          INSTALLER_GLOB: ${{ matrix.installer }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { createReadStream } from 'node:fs';
+          import { glob, writeFile } from 'node:fs/promises';
+          import { basename } from 'node:path';
+          const installers = await Array.fromAsync(glob(process.env.INSTALLER_GLOB));
+          if (installers.length !== 1) throw new Error(`Expected one installer, found ${installers.length}`);
+          const hash = createHash('sha256');
+          for await (const chunk of createReadStream(installers[0])) hash.update(chunk);
+          await writeFile('packages/desktop/dist/SHA256SUMS.txt', `${hash.digest('hex')}  ${basename(installers[0])}\n`);
+          NODE
+
+      - name: Upload installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.installer }}
+            packages/desktop/dist/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

@@ -707,6 +707,9 @@ async function main() {
     "electron-builder.config.js",
     osBuilderFlagMap[os],
     archBuilderFlagMap[arch],
+    // tag CI 会触发 electron-builder 的自动发布推断；打包入口只负责构建和校验产物。
+    "--publish",
+    "never",
   ];
 
   console.log(`[bundle] target=${os}/${arch}`);

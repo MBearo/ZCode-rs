@@ -1,4 +1,5 @@
 import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { chmod } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 
@@ -68,4 +69,12 @@ export function resolvePackagedNodePtyPrebuildPath({ resourcesDir, platformKey }
     platformKey,
     "pty.node",
   );
+}
+
+export async function ensurePackagedNodePtySpawnHelper({ resourcesDir, platformKey }) {
+  if (!platformKey.startsWith("darwin-")) return;
+  // npm prebuild 和 ASAR extract 都可能让 spawn-helper 变为 0644，实包会报 posix_spawnp failed。
+  // ASAR 对 unpacked 文件不记录 executable，因此必须在最后一次重打包之后、签名之前修复。
+  const binary = resolvePackagedNodePtyPrebuildPath({ resourcesDir, platformKey });
+  await chmod(resolve(dirname(binary), "spawn-helper"), 0o755);
 }

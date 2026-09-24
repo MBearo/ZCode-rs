@@ -11,6 +11,7 @@ import { resolveNativeSearchReleasePlan } from "../../scripts/native-search-tool
 import { getBuildMetadata } from "./scripts/build-metadata.mjs";
 import { collectRuntimeModuleClosureEntries } from "./scripts/runtime-dependency-closure.mjs";
 import {
+  ensurePackagedNodePtySpawnHelper,
   resolvePackagedNodePtyPrebuildPath,
   restoreTargetNodePtyPrebuild,
 } from "./scripts/node-pty-package-assets.mjs";
@@ -439,13 +440,17 @@ function assertPackagedNativeResourcePolicy(context) {
   }
 }
 
-function assertPackagedNodePtyPrebuild(context) {
+async function preparePackagedNodePtyPrebuild(context) {
   const targetBinaryPath = resolvePackagedNodePtyPrebuildPath({
     resourcesDir: resolvePackagedResourcesDir(context),
     platformKey: targetPlatform.key,
   });
   if (!existsSync(targetBinaryPath))
     throw new Error(`node-pty 预编译产物缺失: ${targetBinaryPath}`);
+  await ensurePackagedNodePtySpawnHelper({
+    resourcesDir: resolvePackagedResourcesDir(context),
+    platformKey: targetPlatform.key,
+  });
 }
 
 /** @type {import("electron-builder").Configuration} */
@@ -477,6 +482,8 @@ export default {
     mirror: resolveElectronDownloadMirror(),
   },
   productName: desktopProductIdentity.productName,
+  // 已要求正式签名时禁止 electron-builder 在找不到证书后回退到 ad-hoc。
+  forceCodeSigning: shouldEnableMacSigning,
   directories: {
     // macOS arm64/x64 CI 可能共享同一个 checkout 并行打包。
     // 输出根目录允许按架构隔离，避免一个 job 清理 dist 时删除另一个 job 正在签名的 .app。
@@ -556,8 +563,8 @@ export default {
     runTimedSync("afterPack:assertPackagedNativeResourcePolicy", () =>
       assertPackagedNativeResourcePolicy(context),
     );
-    runTimedSync("afterPack:assertPackagedNodePtyPrebuild", () =>
-      assertPackagedNodePtyPrebuild(context),
+    await runTimedAsync("afterPack:preparePackagedNodePtyPrebuild", () =>
+      preparePackagedNodePtyPrebuild(context),
     );
     if (actualWindowsTarget) {
       await runTimedAsync("afterPack:writeWindowsInstallManifest", () =>
@@ -667,7 +674,12 @@ export default {
     // z-code 之前只有本地未签名打包配置，CI 即使注入了证书变量，
     // electron-builder 也不会自动切到 hardened runtime / entitlement 这套发布参数。
     // 这里显式收拢到环境开关，保证本地开发不被签名配置绑死，CI 发布时再按需打开。
-    identity: shouldEnableMacSigning ? macSigningIdentity : null,
+    // Apple Silicon 的本地代码也需要有效签名；无 Developer ID 时使用 ad-hoc，避免产物被系统直接终止。
+    identity: shouldEnableMacSigning
+      ? macSigningIdentity
+      : targetPlatform.arch === "arm64"
+        ? "-"
+        : null,
     // macOS 产物采用“build 阶段签名 + 独立公证阶段”的两段式流水线。
     // 如果这里不显式关闭 electron-builder 内置 notarize，它会在 build 阶段读取 Apple 凭据后直接尝试公证，
     // 并强制要求 APPLE_APP_SPECIFIC_PASSWORD，导致 build 还没产出 DMG 就提前失败。
