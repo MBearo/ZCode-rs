@@ -1,0 +1,760 @@
+{
+  "normalize": [
+    {
+      "input": "http://example.com/a?b#c",
+      "ok": "https://example.com/a?b#c"
+    },
+    {
+      "input": "  https://example.com  ",
+      "ok": "https://example.com/"
+    },
+    {
+      "input": "https://EXAMPLE.com/Path",
+      "ok": "https://example.com/Path"
+    },
+    {
+      "input": "https://例子.测试/",
+      "ok": "https://xn--fsqu00a.xn--0zwm56d/"
+    },
+    {
+      "input": "https://0x7f.1/",
+      "ok": "https://127.0.0.1/"
+    },
+    {
+      "input": "https://2130706433/",
+      "ok": "https://127.0.0.1/"
+    },
+    {
+      "input": "https://example.com./",
+      "ok": "https://example.com./"
+    },
+    {
+      "input": "https://intranet/",
+      "error": {
+        "code": "webfetch_invalid_url",
+        "message": "Invalid URL"
+      }
+    },
+    {
+      "input": "http://example.com:8080/x",
+      "ok": "https://example.com:8080/x"
+    },
+    {
+      "input": "http://example.com:443/x",
+      "ok": "https://example.com/x"
+    },
+    {
+      "input": "https://example.com:443/x",
+      "ok": "https://example.com/x"
+    },
+    {
+      "input": "ftp://example.com/",
+      "error": {
+        "code": "webfetch_unsupported_protocol",
+        "message": "WebFetch only supports http and https URLs"
+      }
+    },
+    {
+      "input": "https://user:pw@example.com/",
+      "error": {
+        "code": "webfetch_credentials_in_url",
+        "message": "WebFetch URLs must not include credentials"
+      }
+    },
+    {
+      "input": "https://user@example.com/",
+      "error": {
+        "code": "webfetch_credentials_in_url",
+        "message": "WebFetch URLs must not include credentials"
+      }
+    },
+    {
+      "input": "https://localhost/",
+      "error": {
+        "code": "webfetch_invalid_url",
+        "message": "WebFetch requires a public hostname"
+      }
+    },
+    {
+      "input": "https://a.localhost/",
+      "error": {
+        "code": "webfetch_invalid_url",
+        "message": "WebFetch requires a public hostname"
+      }
+    },
+    {
+      "input": "https://printer.local/",
+      "error": {
+        "code": "webfetch_invalid_url",
+        "message": "WebFetch requires a public hostname"
+      }
+    },
+    {
+      "input": "https://[::1]/",
+      "ok": "https://[::1]/"
+    },
+    {
+      "input": "https://10.0.0.1/",
+      "ok": "https://10.0.0.1/"
+    },
+    {
+      "input": "https://[2001:4860:4860::8888]/",
+      "ok": "https://[2001:4860:4860::8888]/"
+    },
+    {
+      "input": "not a url",
+      "error": {
+        "code": "webfetch_invalid_url",
+        "message": "Invalid URL: not a url"
+      }
+    },
+    {
+      "input": "https://",
+      "error": {
+        "code": "webfetch_invalid_url",
+        "message": "Invalid URL: https://"
+      }
+    },
+    {
+      "input": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "error": {
+        "code": "webfetch_invalid_url",
+        "message": "URL is too long"
+      }
+    },
+    {
+      "input": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": "https://exa mple.com/",
+      "error": {
+        "code": "webfetch_invalid_url",
+        "message": "Invalid URL: https://exa mple.com/"
+      }
+    },
+    {
+      "input": "HTTPS://Example.COM:0443/%7euser?q=a b",
+      "ok": "https://example.com/%7euser?q=a%20b"
+    }
+  ],
+  "redirects": [
+    {
+      "from": "https://example.com/a",
+      "location": "/b",
+      "next": "https://example.com/b",
+      "redacted": "https://example.com/b",
+      "permitted": true
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "https://www.example.com/a",
+      "next": "https://www.example.com/a",
+      "redacted": "https://www.example.com/a",
+      "permitted": true
+    },
+    {
+      "from": "https://www.example.com/a",
+      "location": "https://example.com/a",
+      "next": "https://example.com/a",
+      "redacted": "https://example.com/a",
+      "permitted": true
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "http://example.com/a",
+      "next": "http://example.com/a",
+      "redacted": "http://example.com/a",
+      "permitted": false
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "https://other.com/a",
+      "next": "https://other.com/a",
+      "redacted": "https://other.com/a",
+      "permitted": false
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "https://example.com:8443/a",
+      "next": "https://example.com:8443/a",
+      "redacted": "https://example.com:8443/a",
+      "permitted": false
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "https://user:pw@example.com/a",
+      "next": "https://user:pw@example.com/a",
+      "redacted": "https://example.com/a",
+      "permitted": false
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "https://127.0.0.1/a",
+      "next": "https://127.0.0.1/a",
+      "redacted": "https://127.0.0.1/a",
+      "permitted": false
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "https://sub.example.com/a",
+      "next": "https://sub.example.com/a",
+      "redacted": "https://sub.example.com/a",
+      "permitted": false
+    },
+    {
+      "from": "https://example.com:443/a",
+      "location": "https://example.com/b",
+      "next": "https://example.com/b",
+      "redacted": "https://example.com/b",
+      "permitted": true
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "https://localhost/a",
+      "next": "https://localhost/a",
+      "redacted": "https://localhost/a",
+      "permitted": false
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "//example.com/c?x#y",
+      "next": "https://example.com/c?x#y",
+      "redacted": "https://example.com/c?x#y",
+      "permitted": true
+    },
+    {
+      "from": "https://example.com/a/b",
+      "location": "../c",
+      "next": "https://example.com/c",
+      "redacted": "https://example.com/c",
+      "permitted": true
+    },
+    {
+      "from": "https://example.com/a",
+      "location": "https://[::1]/",
+      "next": "https://[::1]/",
+      "redacted": "https://[::1]/",
+      "permitted": false
+    }
+  ],
+  "egress": [
+    {
+      "url": "https://10.0.0.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://127.0.0.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://169.254.169.254/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[::ffff:127.0.0.1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[::ffff:8.8.8.8]/",
+      "ok": true
+    },
+    {
+      "url": "https://[64:ff9b::a00:1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[64:ff9b::808:808]/",
+      "ok": true
+    },
+    {
+      "url": "https://198.18.0.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://198.20.0.1/",
+      "ok": true
+    },
+    {
+      "url": "https://100.64.0.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://8.8.8.8/",
+      "ok": true
+    },
+    {
+      "url": "https://[2001:4860:4860::8888]/",
+      "ok": true
+    },
+    {
+      "url": "https://0.0.0.0/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://255.255.255.255/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://224.0.0.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://172.16.5.4/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://172.32.0.1/",
+      "ok": true
+    },
+    {
+      "url": "https://192.168.1.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://192.0.0.8/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://192.0.2.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://192.88.99.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://198.51.100.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://203.0.113.9/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://240.0.0.1/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[fe80::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[ff02::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[fc00::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[fd12::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[::]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[2002::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[2001::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[2001:db8::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[64:ff9b:1::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[100::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[2001:2::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[2001:10::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[2001:20::1]/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local IP addresses"
+      }
+    },
+    {
+      "url": "https://[2001:30::1]/",
+      "ok": true
+    },
+    {
+      "url": "https://localhost/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local hostnames"
+      }
+    },
+    {
+      "url": "https://x.localhost/",
+      "error": {
+        "code": "webfetch_egress_blocked",
+        "message": "WebFetch cannot access private or local hostnames"
+      }
+    },
+    {
+      "url": "https://example.com/",
+      "ok": true
+    },
+    {
+      "url": "https://printer.local/",
+      "ok": true
+    }
+  ],
+  "extract": [
+    {
+      "body": "PCFET0NUWVBFIGh0bWw+PGh0bWw+PGhlYWQ+PHRpdGxlPlQ8L3RpdGxlPjxzdHlsZT5we2NvbG9yOnJlZH08L3N0eWxlPgo8c2NyaXB0PnZhciB4ID0gIjxwPiI7PC9zY3JpcHQ+PC9oZWFkPjxib2R5PjwhLS0gaGlkZGVuIC0tPgo8aDEgY2xhc3M9IngiPkhlbGxvICZhbXA7IFdvcmxkPC9oMT48cD5QYXJhIG9uZTxicj5saW5lMjwvcD4KPHVsPjxsaT5hPC9saT48bGk+YiA8YSBocmVmPSJodHRwczovL3guY29tL3kiPmxpbms8L2E+PC9saT48L3VsPjxub3NjcmlwdD5ubzwvbm9zY3JpcHQ+CjxwPiZsdDt0YWcmZ3Q7ICZxdW90O3EmcXVvdDsgJiMzOTtzJiMzOTsgJiM2NTsmI3g0MjsgeDwvcD48dGFibGU+PHRyPjx0ZD5jMTwvdGQ+PHRkPmMyPC90ZD48L3RyPjwvdGFibGU+CjxpbWcgYWx0PSJwaWMiIHNyYz0icC5wbmciPjxwcmU+Y29kZQogICBibG9jazwvcHJlPjxkaXY+ZW5kPC9kaXY+PC9ib2R5PjwvaHRtbD4=",
+      "contentType": "text/html; charset=utf-8",
+      "ok": "T\n\n# Hello & World\nPara one\nline2\n\n- a\n- b [link](https://x.com/y)\n\n<tag> \"q\" 's' AB x\nc1c2\n\ncode\nblockend"
+    },
+    {
+      "body": "JmFtcDtsdDtiJmFtcDtndDsgeA==",
+      "contentType": "text/html",
+      "ok": "<b> x"
+    },
+    {
+      "body": "YSA8IGIgYW5kIGMgPiBk",
+      "contentType": "text/html",
+      "ok": "a d"
+    },
+    {
+      "body": "PEEgSFJFRj0naHR0cHM6Ly91LnRlc3QvcCc+VXA8Qj4hPC9CPjwvQT4gPGEgaHJlZj1odHRwczovL3g+dW5xPC9hPiA8YSBjbGFzcz14Pm5vaHJlZjwvYT4=",
+      "contentType": "text/html",
+      "ok": "[Up!](https://u.test/p) unq nohref"
+    },
+    {
+      "body": "PHVsPjxsaT5vbmU8dWw+PGxpPnR3bzwvbGk+PC91bD48L2xpPjwvdWw+",
+      "contentType": "text/html",
+      "ok": "- onetwo"
+    },
+    {
+      "body": "PHA+bDE8L3A+DQoNCg0KPHA+bDI8L3A+",
+      "contentType": "text/html",
+      "ok": "l1\n\nl2"
+    },
+    {
+      "body": "PHNjcmlwdHM+a2VlcDwvc2NyaXB0cz48c2NyaXB0LXg+ZHJvcDwvc2NyaXB0Pg==",
+      "contentType": "text/html",
+      "ok": "keep"
+    },
+    {
+      "body": "eCYjOTk5OTk5OTk7eQ==",
+      "contentType": "text/html",
+      "error": {
+        "code": null,
+        "message": "Invalid code point 99999999"
+      }
+    },
+    {
+      "body": "eCYjeDExMDAwMDt5",
+      "contentType": "text/html",
+      "error": {
+        "code": null,
+        "message": "Invalid code point 1114112"
+      }
+    },
+    {
+      "body": "JiN4RDgzRDsmI3hERTAwOyAmIzEyODUxMjsgJiNYNDE7",
+      "contentType": "text/html",
+      "ok": "😀 😀 A"
+    },
+    {
+      "body": "PGJyIGNsYXNzPXg+YTxicj5iPEJSLz5j",
+      "contentType": "text/html",
+      "ok": "a\nb\nc"
+    },
+    {
+      "body": "wqAgbGVhZMKgCSB0YWlsIMKg",
+      "contentType": "text/html",
+      "ok": "lead  tail"
+    },
+    {
+      "body": "PFNDUklQVCB0eXBlPXg+YTwvU0NSSVBUID5iPFNUWUxFPmM8L3N0eWxlPmQ=",
+      "contentType": "text/html",
+      "ok": "abd"
+    },
+    {
+      "body": "PGgyPlR3bzwvaDI+PGg2IGlkPXo+U2l4PC9oNj50ZXh0",
+      "contentType": "text/x-html-ish",
+      "ok": "## Two\n\n###### Six\ntext"
+    },
+    {
+      "body": "PHA+a2VwdCByYXc8L3A+",
+      "contentType": "",
+      "ok": "<p>kept raw</p>"
+    },
+    {
+      "body": "77u/ICBoaQ0K",
+      "contentType": "text/plain",
+      "ok": "hi"
+    },
+    {
+      "body": "eyJhIjogMX0=",
+      "contentType": "application/json",
+      "ok": "{\"a\": 1}"
+    },
+    {
+      "body": "PHgvPg==",
+      "contentType": "application/atom+xml",
+      "ok": "<x/>"
+    },
+    {
+      "body": "cG5n",
+      "contentType": "image/png",
+      "error": {
+        "code": "webfetch_fetch_failed",
+        "message": "Unsupported WebFetch content type: image/png"
+      }
+    },
+    {
+      "body": "cGRm",
+      "contentType": "Application/PDF; x=1",
+      "error": {
+        "code": "webfetch_fetch_failed",
+        "message": "Unsupported WebFetch content type: application/pdf"
+      }
+    },
+    {
+      "body": "JiN4MjY7IzY1Ow==",
+      "contentType": "text/html",
+      "ok": "A"
+    },
+    {
+      "body": "PHA+Cgo8L3A+CgoKPHA+eDwvcD4=",
+      "contentType": "TEXT/HTML",
+      "ok": "x"
+    },
+    {
+      "body": "77u/aGk=",
+      "contentType": "text/plain",
+      "ok": "hi"
+    },
+    {
+      "body": "Y2Fm6Q==",
+      "contentType": "text/plain; charset=iso-8859-1",
+      "ok": "caf�"
+    },
+    {
+      "body": "YfCfmGI=",
+      "contentType": "text/plain",
+      "ok": "a�b"
+    }
+  ],
+  "truncate": [
+    {
+      "length": 99999,
+      "truncated": false,
+      "resultLength": 99999,
+      "tail": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    {
+      "length": 100000,
+      "truncated": false,
+      "resultLength": 100000,
+      "tail": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    {
+      "length": 100001,
+      "truncated": true,
+      "resultLength": 100000,
+      "tail": "yyyyy\n\n[WebFetch content truncated before prompt processing]"
+    },
+    {
+      "length": 250000,
+      "truncated": true,
+      "resultLength": 100000,
+      "tail": "yyyyy\n\n[WebFetch content truncated before prompt processing]"
+    }
+  ],
+  "prompts": [
+    {
+      "content": "page body",
+      "prompt": "Summarize",
+      "preapproved": false,
+      "contentType": "text/html",
+      "result": {
+        "result": "answer",
+        "truncated": false
+      },
+      "message": "\nWeb page content:\n---\npage body\n---\n\nSummarize\n\nProvide a concise response based only on the content above. In your response:\n - Enforce a strict 125-character maximum for quotes from any source document. Open Source Software is ok as long as we respect the license.\n - Use quotation marks for exact language from articles; any language outside of the quotation should never be word-for-word the same.\n - You are not a lawyer and never comment on the legality of your own prompts and responses.\n - Never produce or reproduce exact song lyrics.\n",
+      "options": {
+        "reasoningLevel": "low",
+        "maxOutputTokens": 2048
+      }
+    },
+    {
+      "content": "doc body",
+      "prompt": "What?",
+      "preapproved": true,
+      "contentType": "text/html",
+      "result": {
+        "result": "answer",
+        "truncated": false
+      },
+      "message": "\nWeb page content:\n---\ndoc body\n---\n\nWhat?\n\nProvide a concise response based on the content above. Include relevant details, code examples, and documentation excerpts as needed.\n",
+      "options": {
+        "reasoningLevel": "low",
+        "maxOutputTokens": 2048
+      }
+    },
+    {
+      "content": "# md",
+      "prompt": "What?",
+      "preapproved": true,
+      "contentType": "text/markdown",
+      "result": {
+        "result": "# md",
+        "truncated": false
+      },
+      "message": null,
+      "options": null
+    },
+    {
+      "content": "# md",
+      "prompt": "What?",
+      "preapproved": false,
+      "contentType": "text/markdown",
+      "result": {
+        "result": "answer",
+        "truncated": false
+      },
+      "message": "\nWeb page content:\n---\n# md\n---\n\nWhat?\n\nProvide a concise response based only on the content above. In your response:\n - Enforce a strict 125-character maximum for quotes from any source document. Open Source Software is ok as long as we respect the license.\n - Use quotation marks for exact language from articles; any language outside of the quotation should never be word-for-word the same.\n - You are not a lawyer and never comment on the legality of your own prompts and responses.\n - Never produce or reproduce exact song lyrics.\n",
+      "options": {
+        "reasoningLevel": "low",
+        "maxOutputTokens": 2048
+      }
+    },
+    {
+      "content": "x*100001",
+      "prompt": "Big",
+      "preapproved": false,
+      "contentType": "text/plain",
+      "result": {
+        "result": "answer",
+        "truncated": true
+      },
+      "message": {
+        "length": 100530,
+        "head": "\nWeb page content:\n---\nxxxxxxxxxxxxxxxxx",
+        "tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\n[WebFetch content truncated before prompt processing]\n---\n\nBig\n\nProvide a concise response based only on the content above. In your response:\n - Enforce a strict 125-character maximum for quotes from any source document. Open Source Software is ok as long as we respect the license.\n - Use quotation marks for exact language from articles; any language outside of the quotation should never be word-for-word the same.\n - You are not a lawyer and never comment on the legality of your own prompts and responses.\n - Never produce or reproduce exact song lyrics.\n"
+      },
+      "options": {
+        "reasoningLevel": "low",
+        "maxOutputTokens": 2048
+      }
+    }
+  ]
+}

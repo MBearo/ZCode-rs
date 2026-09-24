@@ -291,13 +291,25 @@ pub(super) async fn hidden_summary(
     sink: &EventSink,
     cancel: &CancellationToken,
 ) -> Result<ModelOutput> {
+    hidden_request(model, messages, sink, "compact", cancel).await
+}
+
+/// A request of the run outside the agent step: retries, auth and network
+/// status go to the run, the output does not.
+pub(super) async fn hidden_request(
+    model: &dyn ModelPort,
+    messages: Vec<Value>,
+    sink: &EventSink,
+    query_source: &'static str,
+    cancel: &CancellationToken,
+) -> Result<ModelOutput> {
     let (tx, mut rx) = mpsc::channel(32);
     let hidden = EventSink {
         session_id: sink.session_id.clone(),
         run_id: sink.run_id.clone(),
         tx,
-        // 压缩不是 agent step，与 Node 一样按 other 归属。
-        origin: sink.origin.auxiliary(),
+        // 压缩与工具内部请求不是 agent step，与 Node 一样按 other 归属。
+        origin: sink.origin.other(query_source),
         request_auth: sink.request_auth.clone(),
     };
     let request = model.complete(messages, &[], &hidden, cancel);

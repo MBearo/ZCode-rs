@@ -19,6 +19,7 @@ mod mcp_sse;
 mod plan_file;
 #[cfg(unix)]
 mod process_tree;
+mod tool_definitions;
 mod tool_edit;
 mod tool_files;
 mod tool_process;
@@ -26,5 +27,6 @@ mod tool_search;
 mod tool_shell;
 mod tool_skills;
 pub mod tools;
+mod web_fetch;
 pub use tools::WorkspaceTools;
 use zcode_cli_host::{id, now};

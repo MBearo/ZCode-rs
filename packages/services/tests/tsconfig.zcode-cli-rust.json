@@ -12,5 +12,5 @@
       "@zcode/model-option-map": ["../../model-option-map/src/index.ts"]
     }
   },
-  "include": ["./zcode-cli-rust-*.ts"]
+  "include": ["./zcode-cli-rust-*.ts", "../src/runtime-tools/node-forge.d.ts"]
 }

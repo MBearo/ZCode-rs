@@ -138,6 +138,15 @@ pub trait ToolPort: Send + Sync {
     ) -> Result<zcode_cli_domain::hooks::output::Exec> {
         anyhow::bail!("Hooks unavailable")
     }
+    /// WebFetch's network side behind the process cache (Node
+    /// `fetchAndExtractContent`); URL checks run first.
+    async fn web_fetch(
+        &self,
+        _request: &zcode_cli_domain::web::FetchRequest,
+        _cancel: &CancellationToken,
+    ) -> Result<zcode_cli_domain::web::Fetched> {
+        anyhow::bail!("HttpClientPort is not configured for WebFetch tool")
+    }
     fn concurrent_safe(&self, _name: &str) -> bool {
         false
     }

@@ -22,6 +22,8 @@ pub(super) struct Scope<'a> {
     pub tool_filter: &'a crate::domain::session_runtime::ToolFilter,
     /// The run's hooks; `None` in subagents.
     pub hooks: Option<&'a std::sync::Arc<super::hook_runner::Hooks>>,
+    /// The run's model, for tools that ask it (WebFetch).
+    pub model: &'a dyn crate::contract::ModelPort,
 }
 async fn execute(
     tools: &dyn ToolPort,
@@ -38,6 +40,7 @@ async fn execute(
         permissions,
         tool_filter,
         hooks,
+        model,
     } = context;
     let (skills, profile, profiles, permissions, hooks) =
         (*skills, *profile, *profiles, *permissions, *hooks);
@@ -144,6 +147,9 @@ async fn execute(
             }
             Some(args) if name == "Skill" => {
                 super::skills::execute(tools, skills, &args, cancel).await
+            }
+            Some(args) if name == "WebFetch" => {
+                super::web_tools::web_fetch(tools, *model, &args, sink, cancel).await
             }
             Some(args) => tools.execute_scoped(name, &args, sink, cancel).await,
             None => Err(anyhow::anyhow!("Invalid tool JSON arguments")),

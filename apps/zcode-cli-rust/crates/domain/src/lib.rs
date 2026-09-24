@@ -43,6 +43,7 @@ pub mod skills;
 pub mod subagent;
 mod subagent_row;
 pub mod todo;
+pub mod web;
 pub mod zod;
 
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;

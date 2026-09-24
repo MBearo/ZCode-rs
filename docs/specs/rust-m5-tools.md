@@ -85,3 +85,69 @@
 与 Node 的差异：超时仍终止进程（Node 把多数前台命令转入后台，属 Bash 项）；未实现 cwd 重置提示、读后修改提示、gh 限流提示、图片输出与 `TASK_MAX_OUTPUT_LENGTH`；启动失败按抛出错误处理。
 
 后续子项（TR §6.5）：Grep、Write、Read 文本与输入校验信封、预算与持久化信封（M5.2c 起）。
+
+## 3. WebFetch（M5.4a）
+
+依据：`scratchpad/research/webfetch-websearch.md`（下称 WW）；Node `core/src/tool/handlers/webfetch*.ts`、`core/src/tool/webfetch-preapproved.ts`、`contracts/src/tools/webfetch.ts`。
+
+### 3.1 所有者与分层
+
+- `domain::web`（纯逻辑，Node 夹具逐条比对）：URL 规则、字面 IP 出网检查、可读内容抽取、模型文本。
+- `tools::web_fetch::WebFetcher`（每进程一个，属于 `WorkspaceTools`）：重定向循环、响应上限、进程级缓存、大页面的原文保存。经 `ToolPort::web_fetch` 暴露。
+- `core::web_tools`（核心内置工具，与 `Skill` 同层）：输入校验、调用 `ToolPort::web_fetch`、用本轮模型处理页面、组装结果。需要本轮模型，因此 `tool_execution::Scope` 携带 `model`。
+- `net::Purpose::WebFetch`：独立的客户端；手动重定向；显式代理或 shell 捕获的代理（Node `resolveWebFetchProxyForRequest`）；自定义 CA 替换根证书；连接超时 10 秒；不发送 `accept-encoding`、不解压。
+
+```mermaid
+sequenceDiagram
+    participant C as core web_tools
+    participant T as WebFetcher（进程缓存）
+    participant N as 目标站点
+    participant M as 本轮模型（辅助档位）
+    C->>C: 输入校验（InputValidationError / zod url）
+    C->>T: web_fetch(原始 url, trace)
+    T->>T: 规范化 URL（失败即返回错误，先于缓存）
+    alt 缓存命中
+        T-->>C: Page（cacheHit）
+    else
+        loop 至多 11 次 GET
+            T->>T: 字面 IP 检查
+            T->>N: GET（UA、Accept、x-zcode-trace-id）
+            N-->>T: 响应（正文读取，上限 10 MiB）
+        end
+        T-->>C: Page / Redirect / HttpError
+    end
+    alt Page
+        C->>M: 处理提示（单条 user 消息，无工具）
+        M-->>C: 文本
+    end
+    C-->>C: 结果文本与结构化数据
+```
+
+### 3.2 规则（与 Node 一致）
+
+- **URL**（`webfetch-url.ts`）：UTF-16 长度超过 2000 为 `URL is too long`；JS `trim` 后 WHATWG 解析失败为 `Invalid URL: <原值>`；非 http/https 为 `WebFetch only supports http and https URLs`；带凭据为 `WebFetch URLs must not include credentials`；http 升级为 https（`:443` 视为默认端口去掉）；`localhost` / `*.localhost` / `*.local` 为 `WebFetch requires a public hostname`；非 IP 且少于两段为 `Invalid URL`。IP 字面量留给出网检查。
+- **出网检查**（`webfetch-egress-guard.ts`，每次 GET 前）：`localhost` 类为 `WebFetch cannot access private or local hostnames`；IP 字面量按 ipaddr.js 1.9.1 的非 unicast 表加 198.18.0.0/15、IPv6 特殊用途表判断，IPv4 映射与 DNS64 地址先还原为 IPv4；不通过为 `WebFetch cannot access private or local IP addresses`。不解析域名（D12）。
+- **重定向**：301/302/303/307/308；缺少 Location 按 HTTP 错误；Location 无法解析为 `Redirect Location is not a valid URL: <location>`；同协议、同端口、同主机（忽略 `www.`）、无凭据、公网主机才继续跟随，否则返回 `REDIRECT DETECTED` 文本；11 次后仍是重定向为 `WebFetch exceeded the safe redirect limit`。
+- **响应**：`x-proxy-error: blocked-by-allowlist` 为 JSON 文本 `{"error_type":"EGRESS_BLOCKED","domain":…,"message":"Access to <host> is blocked by the network egress proxy."}`；非 2xx 为 HTTP 错误文本（`Retry-After` 仅保留 1–6 位数字）；正文超过 10 MiB 为 `HTTP response is too large: content-length=<n>, max=10485760` 或 `… bytes>10485760`（重定向与错误响应同样读取正文）。
+- **内容**（`webfetch-content.ts`）：MIME 白名单（空、`text/*`、JSON、XML、XHTML、JavaScript、`+json`、`+xml`），否则 `Unsupported WebFetch content type: <mime|unknown>`；总是按 UTF-8 解码（去 BOM，非法字节为 U+FFFD）；HTML 走 Node 的正则管线（JS 语义：ASCII `\b`、只做 ASCII 大小写折叠），实体按 Node 顺序解码，`String.fromCodePoint` 越界为 `Invalid code point <n>`。
+- **缓存**：以原始输入 URL 为键，15 分钟，总计 50 MiB，最久未用先淘汰，只缓存可读页面，进程内所有会话共享。
+- **处理**（`webfetch-processing.ts`）：预批准站点且内容类型含 `text/markdown`、长度小于 100 000 时直接返回原文；否则内容超过 100 000 个 UTF-16 码元时截断并追加 `\n\n[WebFetch content truncated before prompt processing]`，以 Node 的模板作为单条 user 消息、无工具，请求本轮模型的辅助版本（最低推理档位、输出上限 `min(4096, max)`）；请求归属 `other`，`querySource: "web_fetch_processing"`。结果为去首尾空白的文本，空时为 `WebFetch completed, but the extraction model returned no text.`；模型失败为其消息（空时 `WebFetch prompt processing failed`）。
+- **模型可见结果**：只有 `result`。结构化数据：`url, finalUrl, status, statusText, contentType, bytes, durationMs, result, cacheHit, redirects, artifactPath?, truncated`；`statusText` 取 Node `http.STATUS_CODES`（生成资产 `schema/http-status.json`），没有时为 `Unknown Status`。
+- **输入校验**：缺少 `url` / `prompt` 或类型不是字符串时为 `<tool_use_error>InputValidationError: WebFetch failed due to the following issue(s):\n…</tool_use_error>`（缺失行在前、类型行在后）；未知键忽略（schema 非 strict）；`url` 不能被 WHATWG 解析时为折叠空白后的 ZodError JSON。
+- **限时与取消**：整次调用 60 秒，超时为 `Tool execution timed out after 60000ms`；取消为 `WebFetch was cancelled before the page could be processed`。
+- 其他：并发安全；microcompact 可压缩；权限沿用已有策略（build/edit 询问、plan 允许、预批准站点允许）。
+
+### 3.3 与 Node 的差异
+
+1. 网络错误文本：常见类别映射为 Node 形态（`fetch failed: getaddrinfo ENOTFOUND <host>`、`fetch failed: connect ECONNREFUSED <host>:<port>`、`fetch failed: read ECONNRESET`、`Connect Timeout Error (<port>, timeout 10000ms)`、`HTTP request timed out after 60000ms`），其余为 `fetch failed: <底层消息>`。
+2. 请求头为一套固定集合（UA、Accept、`accept-language: *`、`sec-fetch-mode: cors`、`x-zcode-trace-id`），不请求压缩；Node 直连与代理两条路径的头不同。
+3. `statusText` 总是取状态码表（Rust 取不到服务器的原始短语；HTTP/2 与标准短语时与 Node 相同）。
+4. 未配对的代理项实体以 U+FFFD 代替（Node 保留孤立代理项）；UTF-16 截断落在代理对中间时丢弃半个字符。
+5. 没有 `NetworkRequestStatus` 事件（桌面与 V4 都不消费）；处理请求的网络状态不带 `toolCallId`。
+6. 直接返回的 markdown 超过 100 000 字节时 Node 走结果预算信封，Rust 暂不处理（结果预算层属 M5.2c）。
+7. 处理请求为流式（Node 为非流式 `generateText`），文本相同。
+
+### 3.4 验收
+
+- 夹具（`scripts/zcode-cli-rust-web-fixtures.mjs` → `fixtures/web.json`）：URL 规范化、重定向判定与脱敏、出网检查、内容抽取（含实体、BOM、非法 UTF-8、MIME）、截断、处理提示与直接返回。
+- 集成测试（`zcode-cli-rust-webfetch.test.ts`）：TLS 站点经 CONNECT 代理（通过 `ZCODE_TOOL_ENV_PASSTHROUGH_JSON` 的 `https_proxy` 注入，CA 由 `ZCODE_AGENT_CA_CERT` 提供）；http 升级、处理提示、缓存命中不出网、同主机与跨主机重定向、404 与 `Retry-After`、不支持的内容类型、字面 IP、`Invalid URL`、zod url 与 InputValidationError 文本。

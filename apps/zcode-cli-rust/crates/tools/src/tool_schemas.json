@@ -422,5 +422,22 @@
     "required": ["questions"],
     "additionalProperties": false,
     "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "WebFetch": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "format": "uri",
+        "description": "The URL to fetch content from"
+      },
+      "prompt": {
+        "type": "string",
+        "description": "The prompt to run on the fetched content"
+      }
+    },
+    "required": ["url", "prompt"],
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
   }
 }

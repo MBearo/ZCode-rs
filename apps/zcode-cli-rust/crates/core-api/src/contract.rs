@@ -175,6 +175,11 @@ pub trait ModelPort: Send + Sync {
     fn bind(&self) -> Option<Arc<dyn ModelPort>> {
         None
     }
+    /// Node `auxiliaryModelOptions` with `maxOutputTokens ≤ 4096`: the lowest
+    /// reasoning level of the current model; `None` keeps this model.
+    fn auxiliary(&self) -> Option<Arc<dyn ModelPort>> {
+        None
+    }
     fn context_policy(&self) -> zcode_cli_domain::context::ContextPolicy {
         Default::default()
     }

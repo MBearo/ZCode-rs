@@ -30,6 +30,29 @@ impl ModelPort for LiveModel {
     fn context_policy(&self) -> crate::domain::context::ContextPolicy {
         self.bind().unwrap().context_policy()
     }
+    fn auxiliary(&self) -> Option<Arc<dyn ModelPort>> {
+        let mut selection = self.selection.borrow().clone();
+        let lowest = self
+            .registry
+            .model_options()
+            .into_iter()
+            .find(|o| {
+                o["modelProviderId"] == selection.provider_id.as_str()
+                    && o["value"] == selection.model_id.as_str()
+            })
+            .and_then(|o| o["modelThoughtLevels"][0].as_str().map(str::to_owned));
+        if let Some(level) = lowest {
+            selection.reasoning_level = level;
+        }
+        let model = self.registry.resolve(&selection).ok()?;
+        Some(
+            model
+                .with_max_output_tokens(4096)
+                .ok()
+                .flatten()
+                .unwrap_or(model),
+        )
+    }
     async fn complete(
         &self,
         messages: Vec<Value>,

@@ -103,6 +103,11 @@ impl ProxyRules {
         self.explicit.is_some()
     }
 
+    /// Whether a WebFetch request can be proxied (explicit or captured shell proxy).
+    pub fn has_web_fetch_proxy(&self) -> bool {
+        self.explicit.is_some() || self.captured.is_some()
+    }
+
     /// Node `resolveProxyForRequest` (`web_fetch` = `resolveWebFetchProxyForRequest`).
     pub fn resolve(&self, url: &str, web_fetch: bool) -> ProxyResolution {
         let Some(url) = Url::parse(url)

@@ -5,6 +5,7 @@ import { askUserQuestionToolEntry } from "../apps/zcode-cli/packages/core/src/to
 import { skillToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/skill.ts";
 import { createAgentToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/agent.ts";
 import { sendMessageToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/send-message.ts";
+import { webFetchToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/webfetch.ts";
 import { normalizeAgentProfiles } from "../apps/zcode-cli/packages/core/src/subagent/profile.ts";
 import { buildExploreAgentPrompt } from "../apps/zcode-cli/packages/core/src/subagent/explore.ts";
 import { buildSubagentCommonNotes } from "../apps/zcode-cli/packages/core/src/subagent/system-prompt.ts";
@@ -29,6 +30,7 @@ const tools = [
   ["TaskOutput", "task-output", "TaskOutputInputJsonSchema"],
   ["TaskStop", "task-stop", "TaskStopInputJsonSchema"],
   ["AskUserQuestion", "ask-user-question", "AskUserQuestionInputJsonSchema"],
+  ["WebFetch", "webfetch", "WebFetchInputJsonSchema"],
 ];
 const schemas = {};
 for (const [name, file, key] of tools) {
@@ -76,6 +78,7 @@ for (const [file, data] of [
     },
   ],
   ["question_description.json", askUserQuestionToolEntry.metadata.description],
+  ["web_descriptions.json", { WebFetch: webFetchToolEntry.metadata.description }],
 ]) {
   const directory = file === "../domain/agent_profiles.json" ? "domain" : "tools";
   const name = file.replace("../domain/", "");

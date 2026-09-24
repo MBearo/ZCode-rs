@@ -296,7 +296,7 @@ sequenceDiagram
 
 - **WebFetch**：
   - URL 校验：长度、协议、凭据、http 升级为 https、本地与内网名称拦截。
-  - 每一跳做字面 IP 检查，并在 DNS 解析器层过滤非公网地址（防 DNS rebinding，比 Node 更严）。
+  - 每一跳只做字面 IP 检查，不解析域名（D12 保持 Node 语义，见第 6 节）。
   - 同主机重定向最多 10 次，跨主机时返回 `REDIRECT DETECTED`。
   - 10 MiB 响应上限，内容类型白名单。
   - HTML 转 markdown 移植 Node 的正则转换器，保证输出一致。

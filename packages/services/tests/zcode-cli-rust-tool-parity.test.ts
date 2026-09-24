@@ -28,6 +28,7 @@ import {
 import { TaskOutputInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/task-output.js";
 import { TaskStopInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/task-stop.js";
 import { AskUserQuestionInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/ask-user-question.js";
+import { WebFetchInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/webfetch.js";
 import { SkillInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/skill.js";
 import { AgentInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/agent.js";
 import { SendMessageInputJsonSchema } from "../../../apps/zcode-cli/packages/contracts/src/tools/send-message.js";
@@ -111,6 +112,7 @@ test("Rust tool definitions use current TS schemas and real TS file/search handl
       TaskOutput: TaskOutputInputJsonSchema,
       TaskStop: TaskStopInputJsonSchema,
       AskUserQuestion: AskUserQuestionInputJsonSchema,
+      WebFetch: WebFetchInputJsonSchema,
       EnterPlanMode: EnterPlanModeInputJsonSchema,
       ExitPlanMode: ExitPlanModeInputJsonSchema,
       ...Object.fromEntries(

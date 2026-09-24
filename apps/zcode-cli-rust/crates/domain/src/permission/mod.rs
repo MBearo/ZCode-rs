@@ -10,6 +10,7 @@ mod tests;
 pub use capability::{PermissionSpec, Resolved, ToolCapability, resolve};
 pub use options::{
     default_updates, denied_by_user, denied_content, protocol_options, tool_capability, v4_options,
+    webfetch_preapproved,
 };
 pub use rules::{Behavior, Rule, Ruleset, Update, apply_updates, matches_content};
 

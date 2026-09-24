@@ -305,6 +305,9 @@ impl ModelPort for HttpModel {
     fn format_properties(&self) -> Value {
         self.config.format_properties.clone().unwrap_or_else(|| serde_json::json!({"inputFormat":{"supportsText":true,"supportsImage":false,"supportsVideo":false,"supportsAudio":false,"supportsPdf":false},"outputFormat":{"supportsText":true}}))
     }
+    fn auxiliary(&self) -> Option<Arc<dyn ModelPort>> {
+        self.with_max_output_tokens(4096).ok().flatten()
+    }
     fn with_max_output_tokens(
         &self,
         max: usize,

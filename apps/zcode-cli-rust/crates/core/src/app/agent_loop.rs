@@ -215,6 +215,7 @@ pub(super) async fn run(
             permissions: permissions.as_ref(),
             tool_filter: &tool_filter,
             hooks: turn.as_ref().map(|t| &t.hooks),
+            model,
         };
         // 与 Node turnControl 一致：结果要求停轮时，其后的工具取消且本轮不再请求模型。
         if super::tool_execution::run_calls(tools, &scope, output.calls, history, sink, cancel)

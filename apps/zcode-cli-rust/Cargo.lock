@@ -2311,6 +2311,7 @@ dependencies = [
  "tokio-util",
  "unicode-normalization",
  "url",
+ "uuid",
  "zcode-cli-bash",
  "zcode-cli-bash-parse",
  "zcode-cli-core-api",

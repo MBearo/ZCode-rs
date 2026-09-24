@@ -24,6 +24,9 @@ use tokio::sync::OnceCell;
 pub enum Purpose {
     Model,
     Mcp,
+    /// WebFetch GETs: shell proxies apply as a fallback (Node
+    /// `resolveWebFetchProxyForRequest`), redirects are handled by the tool.
+    WebFetch,
 }
 
 #[derive(Debug)]
@@ -56,7 +59,7 @@ pub struct Egress {
     tool_env: Arc<[(String, String)]>,
     device_file: PathBuf,
     device: OnceCell<String>,
-    clients: [OnceCell<reqwest::Client>; 2],
+    clients: [OnceCell<reqwest::Client>; 3],
 }
 
 impl Egress {
@@ -152,9 +155,10 @@ fn build_client(
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy();
-    if rules.has_explicit_proxy() {
+    let web_fetch = purpose == Purpose::WebFetch;
+    if rules.has_explicit_proxy() || web_fetch && rules.has_web_fetch_proxy() {
         builder = builder.proxy(reqwest::Proxy::custom(move |url| {
-            rules.resolve(url.as_str(), false).proxy
+            rules.resolve(url.as_str(), web_fetch).proxy
         }));
     }
     if let Some(path) = ca_cert_file {
@@ -169,6 +173,8 @@ fn build_client(
             .pool_idle_timeout(Duration::from_secs(90))
             .tcp_nodelay(true),
         Purpose::Mcp => builder.connect_timeout(Duration::from_secs(15)),
+        // undici 的默认连接超时（Node WebFetch 的 `Connect Timeout Error` 文本依赖它）。
+        Purpose::WebFetch => builder.connect_timeout(Duration::from_secs(10)),
     };
     builder.build().map_err(EgressError::Client)
 }

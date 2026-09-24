@@ -51,7 +51,7 @@ pub fn denied_content(feedback: Option<&str>) -> String {
 }
 
 /// Node `isWebFetchPreapprovedUrl`.
-pub(super) fn webfetch_preapproved(value: &str) -> bool {
+pub fn webfetch_preapproved(value: &str) -> bool {
     let Ok(url) = url::Url::parse(value) else {
         return false;
     };

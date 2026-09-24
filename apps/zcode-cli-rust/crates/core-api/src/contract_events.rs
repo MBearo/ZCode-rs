@@ -258,9 +258,14 @@ impl RequestOrigin {
     }
     /// The same run context for work that is not an agent step (compaction).
     pub fn auxiliary(&self) -> std::sync::Arc<Self> {
+        self.other("compact")
+    }
+    /// A run's internal request outside the agent step (Node `other` session
+    /// type), e.g. `web_fetch_processing`.
+    pub fn other(&self, query_source: &'static str) -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
             kind: RequestKind::Other,
-            query_source: "compact",
+            query_source,
             ..self.clone()
         })
     }

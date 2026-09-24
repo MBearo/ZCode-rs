@@ -4,7 +4,7 @@ use super::{
 };
 use crate::contract::{EventSink, ToolOutput, ToolPort};
 use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -24,8 +24,15 @@ pub struct WorkspaceTools {
     mcp: super::mcp_hub::Hub,
     /// Complete child environment shared by shell tools and hooks.
     env: Arc<[(String, String)]>,
+    web: super::web_fetch::WebFetcher,
 }
 impl WorkspaceTools {
+    fn session_artifacts(&self, session: &str) -> PathBuf {
+        self.artifacts.join(format!(
+            "{:x}",
+            <sha2::Sha256 as sha2::Digest>::digest(session.as_bytes())
+        ))
+    }
     pub fn new(
         cwd: PathBuf,
         artifacts: PathBuf,
@@ -36,6 +43,7 @@ impl WorkspaceTools {
         Self {
             shell: ShellTasks::new(env.clone()),
             env,
+            web: super::web_fetch::WebFetcher::new(egress.clone()),
             mcp: super::mcp_hub::Hub::new(cwd.clone(), config.clone(), egress),
             config,
             cwd,
@@ -65,10 +73,7 @@ impl WorkspaceTools {
         if !args.is_object() {
             bail!("Tool arguments must be an object");
         }
-        let artifacts = self.artifacts.join(format!(
-            "{:x}",
-            <sha2::Sha256 as sha2::Digest>::digest(session.as_bytes())
-        ));
+        let artifacts = self.session_artifacts(session);
         match name {
             name if name.starts_with("mcp__") => self.mcp.call(session, name, args, cancel).await,
             "Read" | "Write" | "Edit" => {
@@ -221,36 +226,7 @@ impl ToolPort for WorkspaceTools {
         super::tool_skills::load(skill, name, cancel).await
     }
     fn definitions(&self) -> Vec<Value> {
-        let schemas: Value = serde_json::from_str(include_str!("tool_schemas.json"))
-            .expect("validated tool schemas");
-        let mut definitions: Vec<Value> = [
-            ("Read","Read a text file with 1-based numbered lines. Use offset and limit for large files."),
-            ("Write","Create or overwrite a text file. Read existing files fully before overwriting."),
-            ("Edit","Replace a unique exact string, or every occurrence with replace_all. Read the file first."),
-            ("Glob","Find files by glob pattern, sorted by modification time. Returns at most 100 matches."),
-            ("Grep","Search text with regex, glob/type filters, context, multiline and paginated output."),
-            ("Bash","Execute a shell command in the workspace. run_in_background returns a task ID and output path. Use TaskOutput or Read for output; TaskStop stops the process tree."),
-            ("TaskOutput","Retrieve a session-owned background shell task's output. block waits up to timeout milliseconds."),
-            ("TaskStop","Stop a session-owned background shell task and wait for its process tree to exit."),
-        ].into_iter().map(|(name,description)|json!({"type":"function","function":{"name":name,"description":description,"parameters":schemas[name]}})).collect();
-        let description: String = serde_json::from_str(include_str!("skill_description.json"))
-            .expect("validated Skill description");
-        definitions.push(json!({"type":"function","function":{"name":"Skill","description":description,"parameters":schemas["Skill"]}}));
-        let description: String = serde_json::from_str(include_str!("question_description.json"))
-            .expect("validated question description");
-        definitions.push(json!({"type":"function","function":{"name":"AskUserQuestion","description":description,"parameters":schemas["AskUserQuestion"]}}));
-        let descriptions: Value = serde_json::from_str(include_str!("todo_descriptions.json"))
-            .expect("validated todo descriptions");
-        for name in ["TodoRead", "TodoWrite"] {
-            definitions.push(json!({"type":"function","function":{"name":name,"description":descriptions[name],"parameters":schemas[name]}}));
-        }
-        let descriptions: Value = serde_json::from_str(include_str!("agent_descriptions.json"))
-            .expect("agent descriptions");
-        for name in ["Agent", "SendMessage"] {
-            definitions.push(json!({"type":"function","function":{"name":name,"description":descriptions[name],"parameters":schemas[name]}}));
-        }
-        definitions.extend(crate::domain::plan_mode::definitions());
-        definitions
+        super::tool_definitions::definitions()
     }
     fn capability(
         &self,
@@ -299,6 +275,8 @@ impl ToolPort for WorkspaceTools {
                 | "Skill"
                 | "Agent"
                 | "Task"
+                | "WebFetch"
+                | "WebSearch"
         )
     }
     async fn execute(
@@ -318,6 +296,14 @@ impl ToolPort for WorkspaceTools {
     ) -> Result<ToolOutput> {
         self.call_inner(&sink.session_id, name, args, Some(sink), cancel)
             .await
+    }
+    async fn web_fetch(
+        &self,
+        request: &crate::domain::web::FetchRequest,
+        cancel: &CancellationToken,
+    ) -> Result<crate::domain::web::Fetched> {
+        let artifacts = self.session_artifacts(&request.session);
+        self.web.fetch(request, &artifacts, cancel).await
     }
     async fn cancel_session(&self, session: &str, task: Option<&str>) -> Result<()> {
         self.shell.cancel(session, task).await

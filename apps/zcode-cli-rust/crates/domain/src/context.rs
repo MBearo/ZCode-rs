@@ -134,7 +134,16 @@ pub fn microcompact(mut messages: Vec<Value>, threshold: usize) -> Vec<Value> {
         if m["_zcode_tool_failed"] != true
             && matches!(
                 name,
-                Some(&("Read" | "Bash" | "Grep" | "Glob" | "Edit" | "Write"))
+                Some(
+                    &("Read"
+                        | "Bash"
+                        | "Grep"
+                        | "Glob"
+                        | "Edit"
+                        | "Write"
+                        | "WebFetch"
+                        | "WebSearch")
+                )
             )
             && m["content"].is_string()
         {

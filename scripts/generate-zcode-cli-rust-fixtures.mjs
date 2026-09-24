@@ -14,6 +14,7 @@ import { egressFixtures } from "./zcode-cli-rust-egress-fixtures.mjs";
 import { permissionData, permissionFixtures } from "./zcode-cli-rust-permission-fixtures.mjs";
 import { bashFixtures, bashPolicyData, bashRegistry } from "./zcode-cli-rust-bash-fixtures.mjs";
 import { legacyParamsFixtures } from "./zcode-cli-rust-legacy-params-fixtures.mjs";
+import { httpStatusCodes, webFixtures } from "./zcode-cli-rust-web-fixtures.mjs";
 import { editMatchFixtures } from "./zcode-cli-rust-edit-fixtures.mjs";
 import { planModeData } from "./zcode-cli-rust-plan-mode-fixtures.mjs";
 import { hookFixtures } from "./zcode-cli-rust-hooks-fixtures.mjs";
@@ -217,6 +218,8 @@ await emit(
   legacyParamsFixtures(),
 );
 await emit("../apps/zcode-cli-rust/crates/domain/fixtures/edit-match.json", editMatchFixtures());
+await emit("../apps/zcode-cli-rust/crates/domain/fixtures/web.json", await webFixtures());
+await emit("../apps/zcode-cli-rust/crates/domain/schema/http-status.json", httpStatusCodes());
 await emit(
   "../apps/zcode-cli-rust/crates/bash-parse/fixtures/analysis.json",
   bashAnalysisFixtures(),
