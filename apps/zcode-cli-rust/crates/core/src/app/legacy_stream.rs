@@ -6,7 +6,6 @@ use super::{Engine, Event};
 use crate::{
     contract::{RuntimeError, ServerMsg},
     domain::{
-        execution::Phase,
         legacy_params,
         legacy_stream::{RunKind, TurnTally, model_usage, usage_json},
     },
@@ -121,6 +120,20 @@ impl Engine {
 
     /// Sends `events` (`(type, payload)`) on `id`'s legacy stream; with no
     /// events it only closes the batching window. `turn` is the envelope's turn.
+    /// Node's `model_complete` of a compaction summary (`querySource: compact`),
+    /// forwarded as `session.updated`.
+    pub(super) fn legacy_compact_complete(
+        &mut self,
+        id: &str,
+        turn: &str,
+        summary: &str,
+        usage: &Value,
+    ) {
+        let payload = json!({"content": summary, "stopReason": "stop",
+            "usage": usage_json(model_usage(usage)), "querySource": "compact", "toolCallCount": 0});
+        self.legacy_emit(id, Some(turn), vec![("session.updated", payload)]);
+    }
+
     pub(super) fn legacy_emit(&mut self, id: &str, turn: Option<&str>, events: Vec<(&str, Value)>) {
         let subscribed = self
             .sessions
@@ -262,12 +275,33 @@ impl Engine {
                     tally.model_done(&usage, &content, calls.len());
                 }
                 let usage = model_usage(&usage);
-                let mut payload = json!({"content": content, "querySource": "main_turn",
-                    "stopReason": if calls.is_empty() { "stop" } else { "tool-calls" },
-                    "usage": usage_json(usage), "toolCallCount": calls.len()});
-                if let Some(window) = s.usage["contextWindow"]["maxTokens"].as_u64() {
-                    payload["contextWindow"] = window.into();
+                // Node 的 model_complete 负载：main_turn 才带窗口、cache 命中与 breakdown，
+                // 子代理 step 的 querySource 是 subagent（spec rust-m9-usage-logs §4.2）。
+                let main = s.task_type != "subagent_child";
+                let window = &s.usage["contextWindow"];
+                let mut payload = json!({"content": content});
+                if let Some(max) = window["maxTokens"].as_u64().filter(|_| main) {
+                    payload["contextWindow"] = max.into();
                 }
+                payload["querySource"] = if main { "main_turn" } else { "subagent" }.into();
+                payload["stopReason"] = if calls.is_empty() {
+                    "stop"
+                } else {
+                    "tool-calls"
+                }
+                .into();
+                payload["usage"] = usage_json(usage);
+                if main {
+                    for (from, to) in [
+                        ("cache", "cacheHit"),
+                        ("breakdown", "contextUsageBreakdown"),
+                    ] {
+                        if let Some(value) = window.get(from) {
+                            payload[to] = value.clone();
+                        }
+                    }
+                }
+                payload["toolCallCount"] = calls.len().into();
                 self.legacy_emit(id, Some(turn), vec![("session.updated", payload)]);
                 self.legacy_scheduled(id, turn, &calls);
             }
@@ -293,85 +327,6 @@ impl Engine {
             Fact::Barrier => self.legacy_emit(id, Some(turn), vec![]),
             Fact::Finished => return self.legacy_turn_finished(id, turn),
         }
-        Ok(())
-    }
-
-    /// Node `turn_complete` / `turn_error`, then `afterLegacyStateMutation`
-    /// (`prompt_completed` / `prompt_failed`).
-    fn legacy_turn_finished(&mut self, id: &str, turn: &str) -> Result<()> {
-        let now = self.clock.now();
-        let s = self.sessions.get_mut(id).unwrap();
-        let tally = s.runtime.legacy.turn.take().unwrap_or_default();
-        s.runtime.legacy.turns_completed += 1;
-        let duration = now.saturating_sub(tally.started_at);
-        let success = s.phase == Phase::CompletedSuccess;
-        let reason = tally
-            .kind
-            .end_reason(success, !success && s.phase != Phase::Error);
-        let (kind, mut payload) = match s.phase {
-            Phase::CompletedSuccess => (
-                "turn.completed",
-                json!({"response": tally.response, "tokenCount": tally.token_count,
-                    "usage": tally.summary(), "toolCallCount": tally.tool_calls,
-                    "historyRoundCount": tally.rounds, "duration": duration, "resultType": "success"}),
-            ),
-            Phase::Error => {
-                let error = s.last_error.clone().unwrap_or_default();
-                let code = error["code"].as_str().unwrap_or("fault.runtime.execution");
-                let mut detail = json!({"type": code, "code": code,
-                    "message": error["message"].as_str().filter(|m| !m.trim().is_empty()).unwrap_or("Turn execution failed")});
-                if error["attribution"].is_object() {
-                    detail["attribution"] = error["attribution"].clone();
-                    detail["retryable"] = error["recoverable"].clone();
-                }
-                (
-                    "turn.failed",
-                    json!({"error": detail, "turnPhase": "execution"}),
-                )
-            }
-            _ => (
-                "turn.completed",
-                json!({"response": "", "tokenCount": 0, "usage": tally.summary(), "toolCallCount": 0,
-                    "historyRoundCount": tally.rounds, "duration": duration, "resultType": "cancelled"}),
-            ),
-        };
-        if let Some(input) = &tally.input_id {
-            payload["inputId"] = input.clone().into();
-        }
-        self.legacy_emit(id, Some(turn), vec![(kind, payload)]);
-        self.legacy_state_updated(id, reason)
-    }
-
-    /// Node `afterStateMutation` for a non-configuration reason: the legacy
-    /// revision advances and the Host gets the current settings. Sent whether
-    /// or not a legacy stream is subscribed.
-    pub(super) fn legacy_state_updated(&mut self, id: &str, reason: &str) -> Result<()> {
-        self.legacy_state_patch(id, reason, None)
-    }
-
-    /// `legacy_state_updated` with Node `afterPromptAccepted`'s `patch`
-    /// (`{status: "running"}`) in place of the settings.
-    pub(super) fn legacy_state_patch(
-        &mut self,
-        id: &str,
-        reason: &str,
-        patch: Option<Value>,
-    ) -> Result<()> {
-        let s = self.sessions.get_mut(id).unwrap();
-        s.runtime.state_revision += 1;
-        let revision = s.runtime.state_revision;
-        let s = &self.sessions[id];
-        let workspace = s
-            .runtime
-            .workspace
-            .clone()
-            .unwrap_or_else(|| self.rebuilt_workspace(id));
-        let patch = patch.unwrap_or_else(|| self.legacy_settings(s, false));
-        self.outbox.push(ServerMsg::HostNotification {
-            method: "state.updated",
-            params: json!({"patch": patch, "reason": reason, "revision": revision,
-                "scope": "session", "sessionId": id, "type": "state.updated", "workspace": workspace}),
-        });
         Ok(())
     }
 }

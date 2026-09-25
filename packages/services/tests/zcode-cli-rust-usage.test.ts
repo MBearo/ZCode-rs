@@ -83,6 +83,29 @@ test("Rust records usage of a turn and answers the usage queries like Node", asy
     };
     assert.deepEqual(await conversation(h, "v4/conversation/usage", id), expected);
     assert.deepEqual(await conversation(h, "session/usage", ` ${id} `), expected);
+    // v4 usage 状态同 Node onModelComplete：水位是最近一次主轮次请求的 provider 用量，
+    // 阈值为 null，累计值是两次请求之和（spec rust-m9-usage-logs §4.2）。
+    const usage = h.messages
+      .slice(after)
+      .filter((m) => m.params?.frame?.topic === `conversation/${id}`)
+      .flatMap((m) => m.params.frame.payload?.deltas ?? [])
+      .filter((d: Message) => d.patch?.usage)
+      .map((d: Message) => d.patch.usage);
+    assert.equal(usage.length, 2);
+    const last = usage.at(-1);
+    assert.equal(last.contextWindow.usedTokens, 14);
+    assert.equal(last.contextWindow.autoCompactThresholdTokens, null);
+    assert.ok(last.contextWindow.maxTokens > 0);
+    const sources = last.contextWindow.breakdown.map((b: Message) => b.source);
+    for (const source of ["system_prompt", "system_tool_schemas", "messages"])
+      assert.ok(sources.includes(source), sources.join(","));
+    assert.equal(last.contextWindow.cache.hitRateRequestCount, 2);
+    assert.deepEqual(last.cumulative, {
+      inputTokens: 20,
+      outputTokens: 8,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
     assert.equal((await conversation(h, "session/usage", "unknown")).modelRequestCount, 0);
 
     const week = await stats(h, { range: "7d", timeZone: "Asia/Shanghai" });

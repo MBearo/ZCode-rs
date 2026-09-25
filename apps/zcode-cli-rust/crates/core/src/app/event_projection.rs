@@ -52,7 +52,7 @@ impl Engine {
             event.event,
             Event::SkillsInitialized { .. }
                 | Event::PromptInitialized { .. }
-                | Event::ContextUsage(_)
+                | Event::RequestContext { .. }
                 | Event::CompactStarted { .. }
                 | Event::CompactDone { .. }
                 | Event::CompactFailed { .. }
@@ -182,7 +182,7 @@ impl Engine {
             | Event::StreamRecovery { .. }
             | Event::UsageDone { .. }
             | Event::RequestAuth { .. }
-            | Event::ContextUsage(_)
+            | Event::RequestContext { .. }
             | Event::CompactStarted { .. }
             | Event::CompactDone { .. }
             | Event::CompactFailed { .. } => unreachable!(),
@@ -228,6 +228,7 @@ impl Engine {
                 committed,
             } => {
                 receipt = Some(committed);
+                let index = s.messages.len();
                 if let Some(message) = message {
                     s.append_message(message);
                 }
@@ -240,7 +241,8 @@ impl Engine {
                 if stable {
                     s.record_response(&turn);
                 }
-                super::goal_events::account_usage(s, &usage, now);
+                let request = self.active.get_mut(&id).and_then(|a| a.request.take());
+                super::usage_state::step_done(s, request, &usage, (index, now));
             }
             Event::ToolStart { call } => {
                 let call_id = call["id"].as_str().unwrap();

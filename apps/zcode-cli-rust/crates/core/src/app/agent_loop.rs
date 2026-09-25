@@ -5,7 +5,7 @@ use crate::contract::{ContextPort, Event, EventSink, ModelPort, ToolPort};
 use crate::domain::compact;
 use crate::domain::stream_recovery as recovering;
 use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -74,7 +74,7 @@ pub(super) async fn run(
         // 手动压缩的摘要请求带与 agent step 相同的前缀与工具（Node compactActiveConversation）。
         let bound = model.bind();
         let model = bound.as_deref().unwrap_or(model);
-        let prefix =
+        let (prefix, _) =
             step_prefix(model, context, history, (&skills, profile.as_ref()), cancel).await?;
         let reminder = super::plan_tools::plan_reference(tools, sink).await?;
         let request = Request {
@@ -132,11 +132,11 @@ pub(super) async fn run(
             };
             history.push(message);
         }
-        let prefix =
+        let (prefix, chars) =
             step_prefix(model, context, history, (&skills, profile.as_ref()), cancel).await?;
         let identity = model.identity();
         super::plan_tools::remind(history, sink).await?;
-        let (mut messages, mut tokens) = history.projection(&prefix, tool_tokens);
+        let (mut messages, tokens) = history.projection(&prefix, tool_tokens);
         if policy.automatic
             && tokens >= policy.threshold()
             && history.compact_failures < compact::MAX_CONSECUTIVE_FAILURES
@@ -160,7 +160,7 @@ pub(super) async fn run(
                 Ok(Outcome::Compacted) => {
                     refill.compacted(count);
                     history.compact_failures = 0;
-                    (messages, tokens) = history.projection(&prefix, tool_tokens);
+                    messages = history.projection(&prefix, tool_tokens).0;
                 }
                 Ok(Outcome::Skipped) => {}
                 // Node：自动压缩失败只计数，本次请求照常发送。
@@ -168,7 +168,15 @@ pub(super) async fn run(
                 Err(error) => return Err(error),
             }
         }
-        sink.send(Event::ContextUsage(json!({"usedTokens":tokens,"maxTokens":policy.window,"autoCompactThresholdTokens":if policy.automatic {Some(policy.threshold())} else {None}}))).await?;
+        // Node 只给主轮次请求算 contextUsageBreakdown；子代理（带 profile）不算。
+        let breakdown = profile
+            .is_none()
+            .then(|| crate::domain::usage::breakdown(chars, &definitions, &messages));
+        sink.send(Event::RequestContext {
+            window: policy.window,
+            breakdown,
+        })
+        .await?;
         let recovering;
         let request = match recovery.take() {
             Some(status) => {

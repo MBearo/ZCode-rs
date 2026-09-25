@@ -74,6 +74,7 @@ impl Engine {
                 legacy_lock: kind != crate::domain::legacy_stream::RunKind::Prompt,
                 step: Default::default(),
                 usage: crate::domain::usage::RunUsage::new(who, self.clock.now()),
+                request: None,
             },
         );
         let manual = session

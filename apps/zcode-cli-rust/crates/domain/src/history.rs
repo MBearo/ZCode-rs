@@ -216,6 +216,7 @@ impl Session {
             return;
         }
         self.messages.truncate(message);
+        self.cache_hits.truncate(message);
         self.history.responses.retain(|b| b.message <= message);
         self.context_tokens = None;
         self.history_rewrite = true;
@@ -227,6 +228,7 @@ impl Session {
     pub fn cut_history(&mut self, row: usize, message: usize, state: &State) {
         self.rows.truncate(row);
         self.messages.truncate(message);
+        self.cache_hits.truncate(message);
         self.history.inputs.retain(|b| b.row < row);
         self.history
             .responses

@@ -57,6 +57,7 @@ mod node_media;
 mod stream_recovery;
 mod todos;
 mod usage;
+mod usage_state;
 mod web_tools;
 
 mod goal_commands;
@@ -73,6 +74,7 @@ mod legacy_setters;
 mod legacy_snapshot;
 mod legacy_stream;
 mod legacy_tools;
+mod legacy_turn_end;
 mod mcp;
 mod plugin_events;
 mod plugin_reference;

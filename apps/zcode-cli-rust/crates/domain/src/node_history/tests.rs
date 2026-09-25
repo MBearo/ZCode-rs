@@ -118,3 +118,32 @@ fn context_use_is_the_latest_post_compact_count_or_assistant_tokens() {
     let empty: [Record; 0] = [];
     assert_eq!(super::context_used(&empty), None);
 }
+
+#[test]
+fn cache_hits_rebuild_at_each_assistant_message() {
+    let tokens = |input: u64, read: u64| json!({"input": input, "output": 1, "cache": {"read": read, "write": 0}});
+    let mut first = record("a1", "assistant", vec![]);
+    first.info["tokens"] = tokens(100, 60);
+    let mut empty = record("a2", "assistant", vec![]);
+    empty.info["tokens"] = tokens(0, 0);
+    let mut last = record("a3", "assistant", vec![]);
+    last.info["tokens"] = tokens(50, 0);
+    let mut summary = record("s", "assistant", vec![]);
+    summary.info["summary"] = true.into();
+    summary.info["tokens"] = tokens(10, 10);
+    let active = [record("u1", "user", vec![]), first, empty, summary, last];
+    // a1 带一条工具结果（两个模型消息）；a2 没有用量；摘要 assistant 不计。
+    let sources: Vec<String> = ["u1", "a1", "a1", "a2", "a3"].map(String::from).to_vec();
+    let mut hits = super::cache_hits(&active, &sources);
+    let usage = json!({"inputTokens": 10});
+    // 冷加载的两条记录在消息 1 与 4；回退到消息 4 之前只剩 a1。
+    assert_eq!(
+        hits.clone().record(9, &usage).unwrap()["hitRateRequestCount"],
+        3
+    );
+    hits.truncate(4);
+    let rebuilt = hits.record(9, &usage).unwrap();
+    assert_eq!(rebuilt["hitRateRequestCount"], 2);
+    assert_eq!(rebuilt["totalInputTokens"], 110);
+    assert_eq!(rebuilt["totalCacheReadTokens"], 60);
+}

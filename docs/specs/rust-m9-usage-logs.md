@@ -171,6 +171,64 @@ sequenceDiagram
 - 本地 Anthropic Messages 模型（流式与非流式、cache 读写与 `server_tool_use` 用量）；共用 Provider Registry 形态的 HOME（`scripts/zcode-cli-rust-interop-runtime.mjs`）。
 - 场景：普通轮、Bash 工具轮、WebSearch（内部搜索请求）、模型 400 失败、流式中停止、手动压缩、子代理。每个场景一个新会话，Node 与 Rust 各用一个临时库。
 - 比较：三张表的行按记录对象（来源或工具名）排序后逐字段比较；会话、轮次、消息、trace、span、调用 id 按首次出现替换为占位，时刻与时长只比较是否为空，`*_json` 解析后比较。
-- 同时收集两边的 `v4/telemetry/event`（§4 对齐前只列出种类）。
-- 已知差异（脚本列出、不计数）：标题的 `provider_metadata_json`（§2.6）；工具失败文本里的工作目录（Rust 把工作区 realpath 化，单列对齐项）。
-- 场景：普通轮、Bash、WebSearch、模型失败、停止、手动压缩、子代理、工具失败（Read 不存在的文件）、build 模式下拒绝权限。2026-09-25 的结果：9 个场景三张表逐字段一致（差异 0）。
+- 同时收集两边的 `v4/telemetry/event`（§5 对齐前只列出种类）与每个会话的 v4 `usage` 补丁、压缩标记（§4）。
+- 环境：临时根目录先 realpath，两边都以 `SHELL=/bin/bash` 启动，并在用户配置里抑制官方内置插件 `browser-use`（Node 在空 HOME 中播种并默认启用它，技能清单、会话指引与 `mcp__node_repl__js` 会进入请求前缀；浏览器工具单独对齐）。工作区 realpath 与登录 shell 名是单列的环境对齐项，不是统计差异。
+- 已知差异（脚本列出、不计数）：标题的 `provider_metadata_json`（§2.6）；breakdown 中工具定义的字符数（§4.3）；Rust 在 run 结束时重发本轮全部行，压缩标记因此多一次相同的 upsert。
+- 场景：普通轮、Bash、WebSearch、模型失败、停止、手动压缩、子代理、工具失败（Read 不存在的文件）、build 模式下拒绝权限。2026-09-25 的结果：9 个场景三张表逐字段一致（差异 0）；M9.4 之后 v4 `usage` 补丁序列（水位、窗口、阈值、cache、breakdown 的提示词与消息类别、累计值）与压缩标记（前后 token、`summaryRef`）也逐字段一致。
+
+## 4. 协议层用量状态（M9.4）
+
+依据：Node `bootstrap/src/zcode-protocol-v4/product-projection.ts`（`onModelSelected`、`onModelComplete`、`onCompactLifecycle`、`seedUsage`）、`core/src/runtime/methods/turn-model-step.ts`（main_turn 的 `ModelComplete` 携带 `contextWindow`、`cacheHit`、`contextUsageBreakdown`）、`turn-model-step-usage.ts`（`recordMainTurnCacheHitUsage`、`mainTurnCacheHitAggregateFromMessages`）、`context-usage.ts`（breakdown）、`compact-active.ts`（压缩前后 token）、`contracts/src/model/index.ts`（`getModelUsageContextTokens`）、`contracts/src/events/event-reducer.ts`（旧协议 projection）。以 §3 的脚本实测 Node 为准。
+
+### 4.1 所有者与事件顺序
+
+- v4 `usage`（`contextWindow`、`cumulative`）只由 Engine 写入 `Session.usage`；缓存命中累计由 Engine 持有（`Session.cache_hits`，按模型消息下标记录每个主轮次请求的 input / cache read / cache write）。
+- agent loop 每次 step 请求前发 `RequestContext`（本次请求模型的窗口，以及根会话请求的 breakdown），Engine 只把它挂在 `Active` 上，不改状态；随后同一 run 的 `ModelDone` 用它投影。事件在同一 run 通道内有序，不需要超时或兜底。
+- 只有根会话（非 `subagent_child`）的 step 请求是 Node 的 `main_turn`，才更新 `usage`；子会话、压缩、目标验证、标题、工具内部请求都不更新 `cumulative` 与 `contextWindow`（Node `onModelComplete` 的 `isMainTurn`）。
+- 压缩成功后 `contextWindow.usedTokens` 取压缩后的估算；切换模型时按新模型的窗口更新 `maxTokens`。
+
+```mermaid
+sequenceDiagram
+  participant L as agent loop（根会话 step）
+  participant E as Engine（usage 所有者）
+  participant C as 订阅者
+  L->>E: RequestContext{window, breakdown}
+  Note over E: 记在 Active，不发补丁
+  L->>E: ModelDone{usage}
+  E->>E: cache_hits 追加本次请求
+  E->>C: state.updated usage{contextWindow{usedTokens, maxTokens, threshold, cache?, breakdown?}, cumulative}
+  L->>E: CompactDone{tokensAfter}
+  E->>C: 压缩标记 success{tokensBefore, tokensAfter, summaryRef}
+  E->>C: state.updated usage{contextWindow{usedTokens = tokensAfter}}
+  Note over E: 切换模型（选择变化）
+  E->>C: state.updated usage{contextWindow.maxTokens = 新窗口}
+```
+
+### 4.2 规则
+
+- 上下文用量（Node `getModelUsageContextTokens`）：输入窗口 + 输出；输入窗口依次取正的 `inputTokens`、`totalTokens - outputTokens`、`cacheRead + cacheWrite`；两者和为 0 时取正的 `totalTokens`，否则 0。
+- main_turn 完成：`contextWindow = {usedTokens, maxTokens: 请求模型的窗口, autoCompactThresholdTokens: 之前的值或 null, cache?, breakdown?}`；`cumulative` 的四项加上本次 provider 用量。Node 的实时状态从不给出自动压缩阈值，因此阈值始终为 null（冷恢复种子也是 null）。
+- `cache`（Node `recordMainTurnCacheHitUsage`）：本次 input 窗口、cache read、cache write 都不为正时不记录、不带 `cache`；否则累计加一，字段顺序 `inputTokens, cacheReadTokens, cacheWriteTokens, latestHitRate, hitRate, hitRateRequestCount, totalInputTokens, totalCacheReadTokens, totalCacheWriteTokens`，比率分母为 0 时为 null。回退（rewind）与截断后丢弃被移除消息的记录；冷加载按活动分支中非摘要 assistant 记录的 `tokens.input / cache.read / cache.write` 重建（Node `mainTurnCacheHitAggregateFromMessages`）。
+- `breakdown`（Node `buildContextUsageBreakdownFromSnapshot`）：按 `system_prompt, meta_user_context, skills, tool_prompt, system_tool_schemas, mcp_tool_schemas, messages` 顺序给出字符数为正的类别，字符数按 JS 字符串长度（UTF-16）：
+  - `system_prompt`：各 system section 正文长度之和（不含 section 间的分隔）；
+  - `meta_user_context`：工作区说明与当前日期两个 section 正文之和；
+  - `skills`：技能清单正文（不含 `<system-reminder>` 包装）；
+  - `system_tool_schemas` / `mcp_tool_schemas`：每个工具 `JSON.stringify({name, description, inputSchema, readOnly, destructive, sideEffectScope})` 的长度，`mcp__` 前缀归 MCP；
+  - `messages`：非 system、且不是 `<system-reminder>` 开头的用户消息（任务通知除外）按 Node 消息形态 `JSON.stringify({role, content, toolCalls, toolCallId, toolName})` 的长度之和。
+- 压缩标记：`tokensBefore` 为压缩前请求前缀加全部会话消息的估算，`tokensAfter` 为请求前缀加摘要、保留消息与压缩后提醒的估算（Node `estimateRuntimeEntryTokens` 的 `preCompactTokenCount` / `truePostCompactTokenCount`，都不含工具定义）；成功标记带 `summaryRef`（摘要消息 id）。压缩成功后 `contextWindow.usedTokens = tokensAfter`，窗口未知时不建对象。
+- 切换模型：选择变化后，`contextWindow` 为空时新建 `{usedTokens: 当前用量, maxTokens: 新窗口, autoCompactThresholdTokens: null}`，否则只改 `maxTokens`；窗口不变不发补丁。创建会话不发补丁（Node 初始快照 `contextWindow` 为 null）。
+- 旧协议：main_turn 的 `session.updated`（model_complete）带 `contextWindow`、`cacheHit`、`contextUsageBreakdown`；压缩、目标验证、目标摘要标题的 model_complete 也转发（会话标题的隐藏）；快照的 `projection.totalTokenCount` 为本进程内各轮 `turn_complete.tokenCount` 之和，`contextUsed` 同 v4 `usedTokens`。
+
+### 4.3 与 Node 的差异
+
+- 工具定义的字符数：Node 的工具契约还序列化 `capability`、`outputSchema`、`permission`、`resultBudget`，Rust 的工具定义没有这些字段，`system_tool_schemas` 与 `mcp_tool_schemas` 的字符数小于 Node（实测同一工具集约为 Node 的三分之一，比例图中工具占比偏低）。差分脚本把这两个类别列为已知差异。
+- 旧协议 model_complete：目标验证与目标摘要标题的 model_complete 不转发（Rust 的验证事件不带模型原文，旧 projection 的 `targetCompletionVerifications` 本就为空）；`stopReason` 仍按有无工具调用给出 `stop` / `tool-calls`。
+
+### 4.4 修复
+
+- 原先每次请求前用本地估算（含工具定义）覆盖 `contextWindow`，阈值取自动压缩阈值；子会话、压缩与目标验证的用量也计入 `cumulative`，压缩前后 token 只估算会话消息。与 Node 的 context meter 口径不一致（Node 用 provider 实际用量），现按 4.2 修正。
+
+### 4.5 验收
+
+- 单元测试：上下文用量公式、缓存累计与回退截断、breakdown 类别与字符数、冷加载重建。
+- 差分脚本（§3）：普通、工具、WebSearch、压缩、子代理场景的 `usage` 补丁序列与压缩标记逐字段一致（工具定义字符数除外）。

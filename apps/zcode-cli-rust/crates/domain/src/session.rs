@@ -38,6 +38,10 @@ pub struct Session {
     /// the engine, as Node's cold usage seed).
     #[serde(skip)]
     pub cold_context_used: Option<u64>,
+    /// The main-turn requests' cache use by model message (spec
+    /// rust-m9-usage-logs §4.2); rebuilt from the stored branch on load.
+    #[serde(skip)]
+    pub cache_hits: crate::usage::CacheHits,
     #[serde(default)]
     pub rewind_committed: Option<String>,
     #[serde(default, skip_serializing)]
@@ -200,6 +204,7 @@ impl Session {
             file_checkpoints: vec![],
             imported_checkpoints: vec![],
             cold_context_used: None,
+            cache_hits: Default::default(),
             rewind_committed: None,
             history: Default::default(),
             row_highwater: 0,

@@ -53,6 +53,12 @@ pub struct RuntimeOptions {
     pub compact_failures: u32,
     /// Plugin reference catalog frozen for this activation (spec rust-m10-plugins §3.9).
     pub plugin_catalog: Option<std::sync::Arc<[serde_json::Value]>>,
+    /// The stored summary message of the compaction in progress (the marker's
+    /// `summaryRef`, spec rust-m9-usage-logs §4.2).
+    pub compact_summary: Option<String>,
+    /// Node legacy projection `totalTokenCount`: the `turn_complete` token
+    /// counts of this activation.
+    pub legacy_tokens: u64,
 }
 
 /// A transient reminder kept in the process history (never persisted).

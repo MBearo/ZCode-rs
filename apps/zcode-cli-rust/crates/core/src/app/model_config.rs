@@ -101,16 +101,7 @@ impl Engine {
         if s.usage["contextWindow"].is_object() {
             return;
         }
-        let identity = ModelIdentity {
-            provider_id: s.provider.clone(),
-            model_id: s.model.clone(),
-            reasoning_level: s.reasoning_level.clone(),
-        };
-        let model = match &self.registry {
-            Some(registry) => registry.resolve(&identity).ok(),
-            None => self.model.clone(),
-        };
-        let window = model.map(|m| m.context_policy().window);
+        let window = self.model_window(s);
         s.usage["contextWindow"] = json!({"usedTokens": used, "maxTokens": window,
             "autoCompactThresholdTokens": null});
     }
@@ -242,6 +233,7 @@ impl Engine {
         s.thought_levels = levels;
         if changed {
             self.node(id, |s, now| s.node_model_selection(now));
+            self.window_selected(id);
         }
         Ok(())
     }

@@ -82,7 +82,7 @@ impl Engine {
         if let Some(archived) = s.archived_at {
             info["archivedAt"] = archived.into();
         }
-        let mut projection = json!({"sessionId":s.id,"status":status,"mode":s.mode,"turnCount":s.rows.iter().filter(|r|r["kind"]=="turnHeader").count(),"totalTokenCount":s.usage["cumulative"]["inputTokens"].as_u64().unwrap_or(0).saturating_add(s.usage["cumulative"]["outputTokens"].as_u64().unwrap_or(0)),"contextUsed":s.usage["contextWindow"]["usedTokens"].as_u64().unwrap_or(0),"contextWindow":s.usage["contextWindow"]["maxTokens"].as_u64().unwrap_or(0),"pendingPermissions":[],"activeToolCalls":s.rows.iter().filter(|r|r["kind"]=="toolCall" && r["status"]=="running").map(|r|json!({"toolCallId":r["toolCallId"],"toolName":r["toolName"],"status":"running","startedAt":r["startedAt"]})).collect::<Vec<_>>(),"backgroundJobs":s.background.values().filter(|t|t.status=="running").map(|t|t.projection()).collect::<Vec<_>>()});
+        let mut projection = json!({"sessionId":s.id,"status":status,"mode":s.mode,"turnCount":s.rows.iter().filter(|r|r["kind"]=="turnHeader").count(),"totalTokenCount":s.runtime.legacy_tokens,"contextUsed":s.usage["contextWindow"]["usedTokens"].as_u64().unwrap_or(0),"contextWindow":s.usage["contextWindow"]["maxTokens"].as_u64().unwrap_or(0),"pendingPermissions":[],"activeToolCalls":s.rows.iter().filter(|r|r["kind"]=="toolCall" && r["status"]=="running").map(|r|json!({"toolCallId":r["toolCallId"],"toolName":r["toolName"],"status":"running","startedAt":r["startedAt"]})).collect::<Vec<_>>(),"backgroundJobs":s.background.values().filter(|t|t.status=="running").map(|t|t.projection()).collect::<Vec<_>>()});
         if let Some(error) = &s.last_error {
             let mut error = error.clone();
             error

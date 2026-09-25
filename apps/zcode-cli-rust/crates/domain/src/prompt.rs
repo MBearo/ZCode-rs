@@ -1,3 +1,4 @@
+use crate::usage::{SectionChars, js_len};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::OnceLock;
@@ -55,7 +56,32 @@ pub fn prefix(
     model: Option<(&str, &str)>,
     desktop: bool,
 ) -> Vec<Value> {
+    prefix_with_chars(snapshot, sources, model, desktop).0
+}
+/// The request prefix and the characters of its system and meta-user context
+/// sections (Node `ContextSection.chars`, spec rust-m9-usage-logs §4.2).
+pub fn prefix_with_chars(
+    snapshot: &PromptSnapshot,
+    sources: &[InstructionSource],
+    model: Option<(&str, &str)>,
+    desktop: bool,
+) -> (Vec<Value>, SectionChars) {
     let templates = templates();
+    let mut chars = SectionChars {
+        system: [
+            &templates.cli,
+            &templates.identity,
+            &templates.behavior,
+            &templates.context_management,
+        ]
+        .map(|t| js_len(t))
+        .iter()
+        .sum(),
+        ..SectionChars::default()
+    };
+    if desktop {
+        chars.system += js_len(&templates.desktop);
+    }
     let stable = if desktop {
         format!("{}\n\n{}", templates.identity, templates.desktop)
     } else {
@@ -74,11 +100,13 @@ pub fn prefix(
             "\n- You are powered by the model named {provider}/{model}."
         ));
     }
+    chars.system += js_len(&env);
     let mut dynamic = format!(
         "\n\n{}\n\n{env}\n\n{}",
         templates.behavior, templates.context_management
     );
     if let Some(git) = &snapshot.git {
+        let start = dynamic.len() + 2;
         dynamic.push_str("\n\ngitStatus: This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.");
         for (label, value) in [
             ("Current branch", &git.branch),
@@ -101,6 +129,7 @@ pub fn prefix(
             },
             git.recent_commits
         ));
+        chars.system += js_len(&dynamic[start..]);
     }
     let mut messages = [&templates.cli, &stable, &dynamic].map(|content| {
         json!({"role":"system","content":content,"_zcode_cache_control":{"type":"ephemeral"}})
@@ -135,6 +164,7 @@ pub fn prefix(
             snapshot.current_date
         ));
     }
+    chars.meta_user = context.iter().map(|c| js_len(c)).sum();
     if !context.is_empty() {
         let body = format!(
             "As you answer the user's questions, you can use the following context:\n{}\n\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.",
@@ -148,5 +178,5 @@ pub fn prefix(
             });
         messages.push(json!({"role":"user","content":format!("<system-reminder>\n{escaped}\n</system-reminder>\n")}));
     }
-    messages
+    (messages, chars)
 }

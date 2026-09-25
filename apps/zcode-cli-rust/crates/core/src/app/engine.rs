@@ -40,6 +40,9 @@ pub(super) struct Active {
     pub step: crate::domain::stream_recovery::StepProbe,
     /// Usage facts in progress (spec rust-m9-usage-logs §2.3).
     pub usage: crate::domain::usage::RunUsage,
+    /// The step request in flight: its model window and context breakdown
+    /// (spec rust-m9-usage-logs §4.1).
+    pub request: Option<super::usage_state::StepRequest>,
 }
 pub struct Engine {
     pub(super) child_updates:

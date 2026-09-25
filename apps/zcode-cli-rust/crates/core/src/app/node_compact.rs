@@ -48,6 +48,7 @@ impl Engine {
                 trigger,
                 instructions,
                 tokens,
+                prefix,
                 ..
             } => {
                 let ids = (
@@ -71,7 +72,7 @@ impl Engine {
                         ids,
                         trigger,
                         source_command: command.as_deref(),
-                        pre_tokens: *tokens as u64,
+                        pre_tokens: (tokens + prefix) as u64,
                         custom_instructions: *instructions,
                     },
                 );
@@ -79,6 +80,7 @@ impl Engine {
             Event::CompactDone {
                 context,
                 tokens,
+                prefix,
                 usage,
                 body,
                 groups,
@@ -112,8 +114,9 @@ impl Engine {
                     .collect();
                 let s = &self.sessions[id];
                 let selection = json!({"providerId": s.provider, "modelId": s.model});
+                let summary = nj::message_id(now, &self.clock.id());
                 let done = json!({
-                    "summaryMessageId": nj::message_id(now, &self.clock.id()),
+                    "summaryMessageId": summary,
                     "textPartId": nj::part_id(now, &self.clock.id()),
                     "compactionPartId": nj::part_id(now, &self.clock.id()),
                     "boundaryId": format!("compact_{}", self.clock.id()),
@@ -126,13 +129,12 @@ impl Engine {
                     "summarizedMessageCount": summarized,
                     "groupsPreserved": groups,
                     "postCompactTokenCount": total_tokens(usage),
-                    "truePostCompactTokenCount": tokens,
+                    "truePostCompactTokenCount": tokens + prefix,
                     "reminders": reminders,
                 });
-                self.sessions
-                    .get_mut(id)
-                    .unwrap()
-                    .node_compact_done(now, done);
+                let s = self.sessions.get_mut(id).unwrap();
+                s.node_compact_done(now, done);
+                s.runtime.compact_summary = Some(summary);
             }
             Event::CompactFailed { .. } => {
                 self.sessions

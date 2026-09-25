@@ -70,10 +70,11 @@ impl Engine {
                 self.persist(id, None).await?;
                 let _ = reply.send(Some(frozen));
             }
+            // Node：verifier 的用量不计入目标 tokens，也不是 main_turn，不进 v4 usage。
             Event::GoalVerdict {
                 target_id,
                 verdict,
-                usage,
+                usage: _,
                 reply,
             } => {
                 let Some(goal) = s
@@ -102,8 +103,6 @@ impl Engine {
                     }
                     deltas.push(json!({"op":"row.upserted","row":row}));
                 }
-                // Node：verifier 的用量只进会话用量，不计入目标 tokens。
-                account_usage(s, &usage, now);
                 s.node_goal_verification(now, (event_id, trace), Some(&verdict));
                 let goal = s.goal.as_mut().unwrap();
                 record(goal, &verdict, anchor, now);
@@ -188,31 +187,5 @@ pub(super) fn account_nested(
         && let (Some(usage), Some(goal)) = (&facts.model_usage, s.goal.as_mut())
     {
         goal.account_tokens(crate::domain::usage::usage_total(usage), now);
-    }
-}
-
-pub(super) fn account_usage(s: &mut crate::domain::session::Session, usage: &Value, now: u64) {
-    if let Some(goal) = s.goal.as_mut() {
-        goal.account(usage, now);
-    }
-    for (from, to) in [
-        ("prompt_tokens", "inputTokens"),
-        ("completion_tokens", "outputTokens"),
-    ] {
-        s.usage["cumulative"][to] = s.usage["cumulative"][to]
-            .as_u64()
-            .unwrap_or(0)
-            .saturating_add(usage[from].as_u64().unwrap_or(0))
-            .into();
-    }
-    for (key, field) in [
-        ("cacheReadTokens", "cached_tokens"),
-        ("cacheWriteTokens", "cache_write_tokens"),
-    ] {
-        s.usage["cumulative"][key] = s.usage["cumulative"][key]
-            .as_u64()
-            .unwrap_or(0)
-            .saturating_add(usage["prompt_tokens_details"][field].as_u64().unwrap_or(0))
-            .into();
     }
 }

@@ -42,6 +42,8 @@ pub struct Resume {
     pub conversation: Cold,
     /// Node `contextUsageFromPersistedMessages` (`used`) of the active branch.
     pub context_used: Option<u64>,
+    /// Node `mainTurnCacheHitAggregateFromMessages` of the active branch.
+    pub cache_hits: crate::domain::usage::CacheHits,
     /// The shared context import (spec §5.6).
     pub shared: Option<crate::domain::shared_context::SharedContext>,
     /// The workspace checkpoints (spec §5.5).
@@ -233,6 +235,7 @@ pub fn resume(
         })
         .count();
     let history = cold::history_of(&active, artifacts);
+    let cache_hits = node_history::cache_hits(&active, &history.sources);
     drop(active);
     // 最新消息锚点不含压缩保留段：保留段不是压缩后时间线的最新位置。
     let timeline = node_history::active_messages(&all, &branch, false);
@@ -275,6 +278,7 @@ pub fn resume(
         checkpoints: super::checkpoints::read(conn, id, artifacts)?,
         shared: super::shared::read(conn, id)?,
         context_used,
+        cache_hits,
         conversation: node_rows::replay(id, &events),
         session,
     }))

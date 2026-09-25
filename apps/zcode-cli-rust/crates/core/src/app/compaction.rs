@@ -102,6 +102,7 @@ impl RunContext {
             _ => (false, None),
         };
         let before = self.estimated;
+        let prefix = estimate(request.prefix);
         let id = format!(
             "compact-{}-{}-{}",
             sink.run_id,
@@ -130,6 +131,7 @@ impl RunContext {
             },
             instructions: instructions.is_some_and(|text| !text.trim().is_empty()),
             tokens: before,
+            prefix,
             committed: done,
         })
         .await?;
@@ -141,6 +143,7 @@ impl RunContext {
                 id,
                 context: self.state.clone(),
                 tokens: before,
+                prefix,
                 usage: Value::Null,
                 body: String::new(),
                 groups: 0,
@@ -221,6 +224,7 @@ impl RunContext {
             id,
             context: next.clone(),
             tokens: after,
+            prefix,
             usage,
             body: compact::format_summary(&summary),
             groups: plan.preserved,

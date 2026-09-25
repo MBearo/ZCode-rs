@@ -4,7 +4,7 @@
 // model, then their `model_usage`, `turn_usage` and `tool_usage` rows and the
 // `v4/telemetry/event` facts are compared after ids and times are normalized.
 // Usage: [zcode.cjs] [rust] [--only=<scenario,...>] [--show=<table,...>]
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -23,6 +23,7 @@ const binary = resolve(positional[1] ?? "apps/zcode-cli-rust/target/debug/zcode-
 const only = option("only");
 const show = option("show");
 
+const BROWSER_USE = "browser-use@zcode-plugins-official";
 const TERMINAL = ["completedSuccess", "error", "completedInterrupted"];
 
 /** Waits for the next terminal control phase after frame `from`. */
@@ -87,13 +88,6 @@ const SCENARIOS = {
 
 /** Differences the spec records (rust-m9-usage-logs §2.6), not counted. */
 const KNOWN = [
-  // Rust 把工作区 realpath 化（macOS /var -> /private/var），工具文本里的工作目录与 Node 不同；
-  // 这是单列的工作目录对齐项，不是统计差异。
-  (table, row, field) =>
-    table === "tool_usage" &&
-    field === "error_message" &&
-    typeof row[field] === "string" &&
-    row[field].includes("current working directory is <root>"),
   // Node 以非流式请求生成标题，provider_metadata 是 AI SDK 的供应商元数据。
   (table, row, field) =>
     table === "model_usage" &&
@@ -102,30 +96,58 @@ const KNOWN = [
 ];
 
 async function runRuntime(kind, model) {
-  const root = await mkdtemp(join(tmpdir(), `zcode-usage-${kind}-`));
+  // 工作区路径与 shell 名进入请求前缀：用 realpath 与固定 SHELL，比较不受 macOS /var 链接与登录
+  // shell 影响（这两项是单列的环境对齐项，不是统计差异）。
+  const root = await realpath(await mkdtemp(join(tmpdir(), `zcode-usage-${kind}-`)));
   try {
     const env = await prepareHome(root, model.baseUrl, {
       api: "anthropic-messages",
       properties: { contextWindow: 256000, supportsNativeWebSearch: true },
+      // Node 在空 HOME 里播种并默认启用官方 browser-use 插件（技能、node_repl 工具）；
+      // 用量比较在相同的请求前缀上进行，浏览器工具的对齐单独核对。
+      config: { plugins: { suppressedBuiltins: [BROWSER_USE] } },
     });
     const cwd = join(root, "ws");
     await mkdir(cwd, { recursive: true });
     await writeFile(join(cwd, "note.txt"), "usage note\n");
-    const runtime = startRuntime(kind, { bundle, binary, cwd, env, dataDir: join(root, "data") });
+    const runtime = startRuntime(kind, {
+      bundle,
+      binary,
+      cwd,
+      env: { ...env, SHELL: "/bin/bash" },
+      dataDir: join(root, "data"),
+    });
     const sessions = {};
     const phases = {};
+    const initial = {};
     for (const [name, run] of Object.entries(SCENARIOS)) {
       if (only && !only.includes(name)) continue;
       const created = await runtime.command("createSession", null, { workspaceId: cwd });
       const id = created.result?.sessionId;
       if (!id) throw new Error(`${kind}: ${JSON.stringify(created)}`);
+      const subscribed = runtime.frames.length;
       await runtime.subscribe(id);
+      initial[name] = (await runtime.snapshot(subscribed)).usage;
       sessions[name] = id;
       phases[name] = await run(runtime, id);
       // 标题等旁路请求在轮次后异步完成；留出落库时间。
       await new Promise((r) => setTimeout(r, 300));
     }
     await runtime.close();
+    // v4 `usage` 状态补丁按会话收集（spec rust-m9-usage-logs §4）。
+    const usage = Object.fromEntries(
+      Object.entries(sessions).map(([name, id]) => [
+        name,
+        [
+          { snapshot: initial[name] },
+          ...runtime.frames
+            .filter((frame) => frame.params?.frame?.topic === `conversation/${id}`)
+            .flatMap((frame) => frame.params?.frame?.payload?.deltas ?? [])
+            .filter((delta) => delta.patch?.usage || delta.row?.marker?.type === "compact")
+            .map((delta) => delta.patch?.usage ?? { compact: delta.row.marker }),
+        ],
+      ]),
+    );
     const telemetry = runtime.frames
       .filter((frame) => frame.method === "v4/telemetry/event")
       .map((frame) => frame.params);
@@ -141,7 +163,7 @@ async function runRuntime(kind, model) {
       tool_usage: read("tool_usage"),
     };
     db.close();
-    return { root, sessions, phases, tables, telemetry };
+    return { root, sessions, phases, tables, telemetry, usage };
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -213,6 +235,24 @@ const ordered = (rows) =>
     )
     .map(({ row }) => row);
 
+/**
+ * A session's usage patches and compaction markers for comparison: the
+ * summary message id is a placeholder, and tool definition characters are a
+ * known difference (spec rust-m9-usage-logs §4.3).
+ */
+const usageTrail = (entries) =>
+  JSON.parse(JSON.stringify(entries), (key, value) => {
+    if (key === "summaryRef" && typeof value === "string") return "<ref>";
+    if (value?.source?.endsWith?.("_tool_schemas")) return { source: value.source };
+    return value;
+  }).filter(
+    // Rust 在 run 结束时重发本轮全部行（§3 已知差异）：与上一条相同的压缩标记不计。
+    (entry, index, all) =>
+      !entry.compact ||
+      JSON.stringify(entry) !==
+        JSON.stringify(all.slice(0, index).findLast((previous) => previous.compact)),
+  );
+
 /** Differences between the Node and Rust rows of one table (`[]` when equal). */
 function diffRows(table, nodeRows, rustRows) {
   const [node, rust] = [ordered(nodeRows), ordered(rustRows)];
@@ -267,6 +307,12 @@ try {
     const n = bySession(node);
     const r = bySession(rust);
     const report = { scenario: name, phases };
+    const trails = { node: usageTrail(node.usage[name]), rust: usageTrail(rust.usage[name]) };
+    if (show?.includes("usage")) report.usage = trails;
+    if (JSON.stringify(trails.node) !== JSON.stringify(trails.rust)) {
+      report.usageTrail = trails;
+      differences += 1;
+    }
     for (const table of Object.keys(n)) {
       const diff = diffRows(table, n[table], r[table]);
       if (show?.includes(table)) report[`${table}:node`] = n[table];

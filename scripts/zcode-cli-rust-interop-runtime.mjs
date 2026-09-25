@@ -81,13 +81,13 @@ export async function modelServer() {
 export async function prepareHome(
   root,
   baseUrl,
-  { api = "openai-chat-completions", properties = { contextWindow: 256000 } } = {},
+  { api = "openai-chat-completions", properties = { contextWindow: 256000 }, config = {} } = {},
 ) {
   const home = join(root, "home");
   await mkdir(join(home, ".zcode", "cli"), { recursive: true });
   await writeFile(
     join(home, ".zcode", "cli", "config.json"),
-    JSON.stringify({ permission: { mode: "yolo" } }),
+    JSON.stringify({ permission: { mode: "yolo" }, ...config }),
   );
   const builtin = JSON.parse(await readFile(resolve("config/provider/zcode-builtin.json"), "utf8"));
   builtin.config.providerConfigRules.providerRules = [];

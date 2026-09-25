@@ -4,11 +4,14 @@ use anyhow::{Result, ensure};
 use serde_json::json;
 impl Engine {
     pub(super) async fn context_event(&mut self, id: &str, event: Event) -> Result<()> {
+        // 压缩事件的 `id` 是标记 id，会遮蔽会话 id。
+        let session_id = id;
         self.node_compact(id, &event);
         let turn = self.active[id].turn_id.clone();
         let session = self.sessions.get_mut(id).unwrap();
         let mut deltas = vec![];
-        let mut receipt = None;
+        let receipt;
+        let mut compact_complete = None;
         match event {
             Event::SkillsInitialized { catalog, reply } => {
                 // catalog RPC 可能先于发现事件完成；统一返回 owner 已提交的快照，避免两份能力目录。
@@ -41,14 +44,22 @@ impl Engine {
                 let _ = committed.send(self.sessions[id].skills.clone().unwrap());
                 return Ok(());
             }
-            Event::ContextUsage(usage) => session.usage["contextWindow"] = usage,
+            Event::RequestContext { window, breakdown } => {
+                if let Some(active) = self.active.get_mut(id) {
+                    active.request = Some(super::usage_state::StepRequest { window, breakdown });
+                }
+                return Ok(());
+            }
             Event::CompactStarted {
                 id,
                 manual,
                 tokens,
+                prefix,
                 committed,
                 ..
             } => {
+                // Node 的压缩前 token 包含请求前缀（system prompt、上下文与技能提醒）。
+                let tokens = tokens + prefix;
                 let mut row = session.row("timelineMarker", &turn, &id, self.clock.now());
                 row["lane"] = "assistantWork".into();
                 row["marker"] = json!({"type":"compact","origin":if manual {"manual"} else {"auto"},"status":"running","tokensBefore":tokens});
@@ -60,7 +71,9 @@ impl Engine {
                 id,
                 context,
                 tokens,
+                prefix,
                 usage,
+                body,
                 reminders,
                 committed,
                 ..
@@ -94,18 +107,18 @@ impl Engine {
                 if let Some(goal) = session.goal.as_mut() {
                     goal.account(&usage, self.clock.now());
                 }
-                if session.usage["contextWindow"].is_object() {
-                    session.usage["contextWindow"]["usedTokens"] = tokens.into();
-                }
-                for (from, to) in [
-                    ("prompt_tokens", "inputTokens"),
-                    ("completion_tokens", "outputTokens"),
-                ] {
-                    session.usage["cumulative"][to] = session.usage["cumulative"][to]
-                        .as_u64()
-                        .unwrap_or(0)
-                        .saturating_add(usage[from].as_u64().unwrap_or(0))
-                        .into();
+                // 修复：压缩摘要请求不是 main_turn，原先把它计入 cumulative；前后 token 也只估算
+                // 会话消息。Node 的标记与 context 水位都含请求前缀，cumulative 不变（spec
+                // rust-m9-usage-logs §4.2）。
+                let tokens = tokens + prefix;
+                let summary = session.runtime.compact_summary.take();
+                let window = changed
+                    .then(|| self.model_window(&self.sessions[session_id]))
+                    .flatten();
+                let session = self.sessions.get_mut(session_id).unwrap();
+                if changed {
+                    super::usage_state::compacted(session, tokens, window);
+                    compact_complete = Some((body, usage));
                 }
                 let row = session
                     .rows
@@ -114,6 +127,9 @@ impl Engine {
                     .ok_or_else(|| anyhow::anyhow!("Compaction marker missing"))?;
                 row["marker"]["status"] = if changed { "success" } else { "noop" }.into();
                 row["marker"]["tokensAfter"] = tokens.into();
+                if let Some(summary) = summary.filter(|_| changed) {
+                    row["marker"]["summaryRef"] = summary.into();
+                }
                 deltas.push(json!({"op":"row.upserted","row":row}));
                 receipt = Some(committed);
                 session.revision += 1;
@@ -132,6 +148,9 @@ impl Engine {
                 receipt = Some(committed);
             }
             _ => unreachable!(),
+        }
+        if let Some((summary, usage)) = compact_complete {
+            self.legacy_compact_complete(id, &turn, &summary, &usage);
         }
         self.publish(id, deltas)?;
         if let Some(receipt) = receipt {

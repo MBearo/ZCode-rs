@@ -39,7 +39,9 @@ impl SkillCatalog {
     pub fn response(&self, authority: &str) -> Value {
         json!({"authority":authority,"skills":self.skills.iter().map(Skill::entry).collect::<Vec<_>>()})
     }
-    pub fn reminder(&self) -> Option<Value> {
+    /// The skills section (Node `buildSkillsSection` content); the request
+    /// carries it wrapped as a `<system-reminder>` user message.
+    pub fn listing(&self) -> Option<String> {
         if !self.include_instructions || self.skills.is_empty() {
             return None;
         }
@@ -82,9 +84,7 @@ impl SkillCatalog {
         if content.encode_utf16().count() > self.metadata_budget {
             content = format!("{header}{}", lines(false));
         }
-        Some(
-            json!({"role":"user","content":format!("<system-reminder>\n{content}\n</system-reminder>")}),
-        )
+        Some(content)
     }
 }
 

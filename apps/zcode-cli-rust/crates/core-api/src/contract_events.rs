@@ -123,7 +123,12 @@ pub enum Event {
         access: Value,
         reply: oneshot::Sender<Value>,
     },
-    ContextUsage(Value),
+    /// The model window and, for a root-session step, the context breakdown of
+    /// the step request about to be sent (spec rust-m9-usage-logs §4.1).
+    RequestContext {
+        window: usize,
+        breakdown: Option<Vec<Value>>,
+    },
     CompactStarted {
         id: String,
         manual: bool,
@@ -131,13 +136,20 @@ pub enum Event {
         trigger: &'static str,
         /// The manual compaction carries custom instructions.
         instructions: bool,
+        /// The history estimate (without the request prefix).
         tokens: usize,
+        /// The request prefix estimate (system prompt, context and skills
+        /// reminders): Node's compaction token counts include it.
+        prefix: usize,
         committed: oneshot::Sender<()>,
     },
     CompactDone {
         id: String,
         context: zcode_cli_domain::context::ContextState,
+        /// The history estimate after compaction (without the request prefix).
         tokens: usize,
+        /// The request prefix estimate, as in `CompactStarted`.
+        prefix: usize,
         usage: Value,
         /// The summary text before it is wrapped into the summary message.
         body: String,

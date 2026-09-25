@@ -1,11 +1,13 @@
 //! Usage facts and their aggregation (Node usage store, `usage-observability.ts`
 //! and `usage-stats-builder.ts`), without IO. Spec rust-m9-usage-logs §2.
+mod context;
 mod metadata;
 mod snapshot;
 mod task;
 mod tracker;
 mod tz;
 
+pub use context::{CacheHits, CacheUse, SectionChars, breakdown, context_tokens, js_len};
 pub use metadata::{ToolMeta, model_usage, tool_meta};
 pub use snapshot::{AppRows, DayModelRow, DayRow, ModelRow, SnapshotOptions, ToolRow, snapshot};
 pub use task::{TaskRow, task_usage};

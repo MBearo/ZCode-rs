@@ -240,7 +240,7 @@ pub(super) async fn step_prefix(
         Option<&crate::domain::subagent::Profile>,
     ),
     cancel: &CancellationToken,
-) -> Result<Vec<Value>> {
+) -> Result<(Vec<Value>, crate::domain::usage::SectionChars)> {
     let instructions = if profile.is_some_and(|p| p.inject_agents_md == Some(false)) {
         vec![]
     } else {
@@ -251,7 +251,7 @@ pub(super) async fn step_prefix(
         .prompt_snapshot
         .as_ref()
         .context("Prompt snapshot missing")?;
-    let mut prefix = crate::domain::prompt::prefix(
+    let (mut prefix, mut chars) = crate::domain::prompt::prefix_with_chars(
         snapshot,
         &instructions,
         identity
@@ -259,8 +259,9 @@ pub(super) async fn step_prefix(
             .map(|id| (id.provider_id.as_str(), id.model_id.as_str())),
         context.desktop(),
     );
-    if let Some(reminder) = skills.reminder() {
-        prefix.push(reminder);
+    if let Some(listing) = skills.listing() {
+        chars.skills = crate::domain::usage::js_len(&listing);
+        prefix.push(json!({"role":"user","content":format!("<system-reminder>\n{listing}\n</system-reminder>")}));
     }
     if let Some(profile) = profile {
         prefix.push(json!({"role":"system","content":profile.system_prompt}));
@@ -268,5 +269,5 @@ pub(super) async fn step_prefix(
     if let Some(goal) = history.goal.as_ref().filter(|g| g.active()) {
         prefix.push(json!({"role":"user","content":format!("<system-reminder>\n{}\n</system-reminder>",goal.prompt("goalState", None))}));
     }
-    Ok(prefix)
+    Ok((prefix, chars))
 }

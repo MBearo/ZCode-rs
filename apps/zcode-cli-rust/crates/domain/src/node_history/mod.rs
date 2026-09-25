@@ -67,5 +67,28 @@ pub fn context_used(active: &[impl AsRef<Record>]) -> Option<u64> {
     None
 }
 
+/// Node `mainTurnCacheHitAggregateFromMessages` over the active branch: each
+/// non-summary assistant record's cache use, at the model message index of
+/// its first rebuilt message (`sources` names the stored message of each).
+pub fn cache_hits(active: &[impl AsRef<Record>], sources: &[String]) -> crate::usage::CacheHits {
+    let mut cursor = 0;
+    let mut entries = vec![];
+    for record in active {
+        let record = record.as_ref();
+        let start = cursor;
+        while sources.get(cursor).is_some_and(|s| s == record.id()) {
+            cursor += 1;
+        }
+        let info = &record.info;
+        if info["role"] != "assistant" || branch::truthy(info.get("summary")) {
+            continue;
+        }
+        if let Some(cache) = crate::usage::CacheUse::stored(&info["tokens"]) {
+            entries.push((start, cache));
+        }
+    }
+    crate::usage::CacheHits::new(entries)
+}
+
 #[cfg(test)]
 mod tests;
