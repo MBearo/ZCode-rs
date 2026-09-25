@@ -28,6 +28,10 @@ impl Engine {
         Ok(ack)
     }
     pub(super) async fn query_acks(&mut self, p: &Value) -> Result<Value> {
+        // Node：时钟校准只是探测，不经过命令账本与工作区校验。
+        if let Some(clock) = self.ttft_clock_probe(p)? {
+            return Ok(clock);
+        }
         self.validate_workspace(p)?;
         let keys = p["commands"].as_array().context("Command keys required")?;
         ensure!(

@@ -118,6 +118,8 @@ impl Engine {
             let from = session.seq;
             session.seq += deltas.len() as u64;
             let to = session.seq;
+            let ttft = self.ttft_observations(id, &deltas);
+            let session = self.sessions.get_mut(id).unwrap();
             let deltas = sized(deltas);
             // 日志始终记账，与订阅无关：手机重连时即使无人订阅过也能续传。
             session
@@ -131,6 +133,7 @@ impl Engine {
                         from,
                         to,
                         deltas,
+                        ttft,
                     }));
             }
         }

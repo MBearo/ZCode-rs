@@ -96,6 +96,9 @@ impl Assembly {
                 let name = string(&part["function"]["name"])?.unwrap_or("");
                 let args = string(&part["function"]["arguments"])?.unwrap_or("");
                 self.count(id.len() + name.len() + args.len())?;
+                if !crate::domain::js_string::trim(args).is_empty() {
+                    output.tool().await?;
+                }
                 let call = self.calls.entry(index).or_default();
                 call.id.push_str(id);
                 call.name.push_str(name);
@@ -103,6 +106,10 @@ impl Assembly {
             }
         }
         Ok(())
+    }
+    /// A call with a name (Node's completed `tool_call` at the stream end).
+    pub(super) fn named_call(&self) -> bool {
+        self.calls.values().any(|c| !c.name.trim().is_empty())
     }
     pub(super) fn count(&mut self, bytes: usize) -> Result<(), ModelFailure> {
         self.bytes = self.bytes.saturating_add(bytes);
@@ -182,6 +189,7 @@ pub struct TextBuffer<'a> {
     pub first_content: Option<Instant>,
     /// First non-empty answer text (Node `timeToFirstTextMs`).
     pub first_text: Option<Instant>,
+    tool_output: bool,
 }
 impl<'a> TextBuffer<'a> {
     pub fn new(sink: &'a EventSink) -> Self {
@@ -194,7 +202,18 @@ impl<'a> TextBuffer<'a> {
             committed: false,
             first_content: None,
             first_text: None,
+            tool_output: false,
         }
+    }
+    /// The first tool-call output of the response, reported once.
+    pub async fn tool(&mut self) -> Result<(), ModelFailure> {
+        if std::mem::replace(&mut self.tool_output, true) {
+            return Ok(());
+        }
+        self.sink
+            .send(Event::ToolStreaming)
+            .await
+            .map_err(|_| ModelFailure::cancelled())
     }
     /// Reports one model network status to the run.
     pub async fn status(&self, payload: serde_json::Value) -> Result<(), ModelFailure> {

@@ -146,6 +146,8 @@ pub(crate) struct Reporter<'a> {
     pub config: &'a ModelConfig,
     pub origin: &'a RequestOrigin,
     pub max_attempts: u32,
+    /// Node `modelCall.logicalCallId`: one per call, shared by its retries.
+    pub logical_call: &'a str,
 }
 
 impl Reporter<'_> {
@@ -179,6 +181,7 @@ impl Reporter<'_> {
             status["requestHeaderCount"] = 0.into();
             status["requestHeaders"] = json!({});
         }
+        status[crate::domain::local_ttft::LOGICAL_CALL_KEY] = self.logical_call.into();
         status
     }
 

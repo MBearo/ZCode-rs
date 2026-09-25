@@ -345,3 +345,54 @@ sequenceDiagram
 - 单元测试：`mcpId`（内置编码、HMAC 与 RFC 4231 向量）、`ps` / `tasklist` 解析与进程树、`cputime` 格式。
 - 集成测试（`zcode-cli-rust-telemetry.test.ts`）：stdio server 崩溃时的 `process_start`、`session_startup`、`process_crash` 通过共享 strict schema，`process/childProcesses` 列出存活进程。
 - 差分脚本（§3）：新增会话级 stdio server 崩溃场景，进程遥测（HMAC 与实例 id 为占位）、工具失败的用量行与事实逐字段一致。
+
+## 7. 本地首字时间（M9.7）
+
+依据：Node `bootstrap/src/zcode-protocol-v4/local-ttft.ts`（`LocalTtftRecorder`、`LocalTtftClockWatch`）、`local-ttft-compaction.ts`、`v4-gateway.ts`（`v4/command` 的 `ttft`、`v4/telemetry/local-ttft`、帧上的 `ttft` / `ttftRelated`、`v4/commands/query {clock}`），共享 schema `packages/shared/src/localTtft.ts`。
+
+### 7.1 所有者与事件顺序
+
+- Engine 持有记录器（`domain::local_ttft::Recorder`），只观察、不影响会话。只有带 `ttft.observationId` 的 `v4/command` 才建立记录：记录上限 128 条（满时 ACK 带 `ttftExcluded: "capacity"`），TTL 300 秒，每条最多 64 条明细（超出记 `truncated`）。
+- 命令执行前记 `admittedAt`；命令被拒绝时整条记录作废（Node 不接纳就没有 checkpoint）。
+- 会话事件经遥测事实推进记录。处理顺序与 Node 相同：压缩明细、事实（`turn.started` 绑定轮次与 `executionAt`，`model.request.status` 产生 attempt / retry_wait 明细）、`logicalCallId`、流式输出。
+- 主响应第一次可见输出记 `outputAt` / `outputKind`：非空文本、推理，或工具调用（首个非空参数片段；参数为空时在流结束时）。子会话的输出不计。
+- 记录内容变化才发 checkpoint（`v4/telemetry/local-ttft`，revision 递增）。轮次终态、guide 合入或队列丢弃后记录退役，此后不再发 checkpoint，但仍保留，供之后的帧附带。
+- 连续订阅者的在线帧附带其 delta 涉及轮次的记录（`ttft`，找不到时用会话最近的一条），并附 CLI 版本与产品轮次 id。
+- 有记录时每秒检查时钟：暂停超过 5 秒或墙钟漂移超过 100 ms，未产出输出的记录标 `clockInvalid`。
+- `v4/commands/query {clock: true}` 立即返回实例 id 与收发时刻，用于时钟校准。
+
+```mermaid
+sequenceDiagram
+  participant D as Host
+  participant E as Engine
+  participant R as 记录器
+  participant M as 模型流
+  D->>E: v4/command（ttft.observationId）
+  E->>R: receive、admitted
+  R-->>D: checkpoint r1
+  E->>R: turn.started 事实（turnId、executionAt）
+  M->>E: model_request_started（requestId、logicalCallId）
+  E->>R: attempt 明细、requestAt
+  M->>E: 首个文本 / 工具参数片段
+  E->>R: outputAt、attempt 结果 first_output
+  R-->>D: checkpoint rN
+  E-->>D: 在线帧（ttft）
+  E->>R: turn.terminal → 退役
+```
+
+### 7.2 规则
+
+- `logicalCallId`：一次模型调用（含其重试）共用一个值（Node `modelCall.logicalCallId`）。模型层把它放在状态的私有键 `_zcode_logical_call_id` 中，只有记录器读取；`session/debug` 与旧版事件输出前移除。记录的当前请求与该请求的 attempt 明细带此值。
+- 工具调用输出：模型层每个响应只发一次 `Event::ToolStreaming`。Engine 只把它交给记录器，不改变会话、行或遥测事实。
+- 压缩明细（`compact:<operationId>`）从 `compact_started` 开始，到完成、失败或中断结束；输出之后的压缩不计。
+
+### 7.3 与 Node 的差异
+
+- 准备阶段明细（`prepare:*`：context、hooks、persistence 等）来自 Node 内部流水线，Rust 不产生；checkpoint 次数因此不同。差分脚本不比较这两项。
+- 轮次 id：Node 的 runtime `turnId`（`turn_…`）与产品轮次 id（用户消息 id）是两个值，Rust 两者相同。这是整个 runtime 的轮次身份模型差异，不限于本地首字时间；差分脚本只比较两者是否出现。
+
+### 7.4 验收
+
+- 单元测试（`domain::local_ttft`）：输出、终态与退役；容量；时钟暂停。
+- 集成测试（`zcode-cli-rust-telemetry.test.ts`）：带 `ttft` 的 prompt 产生通过共享 strict schema 的 checkpoint，帧上的 `ttft` 带首字时间。
+- 差分脚本（§3）：plain、tool、compact 场景比较首个 checkpoint 与最后一帧的 `ttft`（时间与 id 为占位），逐字段一致。在 tool 场景中，attempt 在工具参数流出时结果为 `first_output`。

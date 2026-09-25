@@ -44,25 +44,27 @@ impl Engine {
             kind,
             payload: &payload,
         };
-        self.emit_telemetry(&event, &runtime);
+        let fact = self.emit_telemetry(&event, &runtime);
+        self.ttft_event(&event, fact.as_ref());
         if let Some(parent) = parent {
             self.mirror(id, &parent, kind, &payload);
         }
     }
 
-    fn emit_telemetry(&mut self, event: &telemetry::Event, runtime: &Runtime) {
+    /// The operation event and the fact of `event`; the fact is returned for local TTFT.
+    fn emit_telemetry(&mut self, event: &telemetry::Event, runtime: &Runtime) -> Option<Value> {
         if let Some(params) = telemetry::computer_use(event) {
             self.outbox.push(ServerMsg::HostNotification {
                 method: "computer-use/operation-event",
                 params,
             });
         }
-        if let Some(params) = self.telemetry.normalize(event, runtime) {
-            self.outbox.push(ServerMsg::HostNotification {
-                method: "v4/telemetry/event",
-                params,
-            });
-        }
+        let fact = self.telemetry.normalize(event, runtime)?;
+        self.outbox.push(ServerMsg::HostNotification {
+            method: "v4/telemetry/event",
+            params: fact.clone(),
+        });
+        Some(fact)
     }
 
     /// The parent's copy of a child's tool or permission event (Node
@@ -209,7 +211,8 @@ impl Engine {
             .iter()
             .rev()
             .find(|r| r["kind"] == "turnHeader" && r["turnId"] == turn);
-        let mut payload = json!({});
+        // Node 的 executionStartedAt（本地 TTFT 时钟）；归一化器不读它。
+        let mut payload = json!({"executionStartedAt": self.ttft_clock.now()});
         if s.task_type == "subagent_child" {
             // Node：子会话的轮次由子代理发起，没有 admission inputId。
             payload["inputSource"] = "subagent".into();

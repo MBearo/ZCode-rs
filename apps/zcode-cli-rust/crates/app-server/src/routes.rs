@@ -266,9 +266,12 @@ impl Server {
                 from,
                 to,
                 deltas,
-            } => self
-                .delivery
-                .deltas(&format!("conversation/{session}"), (from, to), &deltas, now),
+                ttft,
+            } => {
+                let topic = format!("conversation/{session}");
+                self.delivery.deltas(&topic, (from, to), &deltas, now);
+                self.delivery.ttft(&topic, &ttft);
+            }
             RuntimeEvent::IndexChanged {
                 workspace,
                 from,

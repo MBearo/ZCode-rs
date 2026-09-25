@@ -27,6 +27,7 @@ pub mod legacy_input_params;
 pub mod legacy_params;
 pub mod legacy_snapshot;
 pub mod legacy_stream;
+pub mod local_ttft;
 pub mod model;
 pub mod model_anomaly;
 pub mod node_history;

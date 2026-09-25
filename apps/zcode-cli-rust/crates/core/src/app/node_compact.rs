@@ -66,6 +66,7 @@ impl Engine {
                     .and_then(|r| r["sourceCommandId"].as_str())
                     .filter(|_| *manual)
                     .map(str::to_owned);
+                let operation = ids.0.clone();
                 s.node_compact_started(
                     now,
                     CompactStart {
@@ -76,6 +77,10 @@ impl Engine {
                         custom_instructions: *instructions,
                     },
                 );
+                // Node CompactStarted：本地 TTFT 以它开始压缩明细（遥测不产生事实）。
+                let started =
+                    json!({"operationId": operation, "status": "started", "trigger": trigger});
+                self.session_event(id, Some(&turn), "compact_started", started);
             }
             Event::CompactDone {
                 context,

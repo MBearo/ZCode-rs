@@ -19,6 +19,7 @@ impl Engine {
         status["turnId"] = turn.into();
         if let Some(map) = status.as_object_mut() {
             map.shift_remove(crate::domain::usage::RAW_FINISH_REASON);
+            map.shift_remove(crate::domain::local_ttft::LOGICAL_CALL_KEY);
         }
         let trace = s.runtime_trace.clone().unwrap_or_default();
         s.runtime.debug.observe(&status, &event_id, &trace, now);

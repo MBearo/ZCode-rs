@@ -40,6 +40,9 @@ impl Engine {
             self.model_status(&id, &turn, status);
             return Ok(());
         }
+        if let Event::ToolStreaming = event.event {
+            return self.ttft_tool(&id);
+        }
         if let Event::StreamRecovery { retry, max, reply } = event.event {
             let turn = active.turn_id.clone();
             return self.stream_recovery(&id, &turn, (retry, max), reply).await;
@@ -186,7 +189,8 @@ impl Engine {
             | Event::RequestContext { .. }
             | Event::CompactStarted { .. }
             | Event::CompactDone { .. }
-            | Event::CompactFailed { .. } => unreachable!(),
+            | Event::CompactFailed { .. }
+            | Event::ToolStreaming => unreachable!(),
             Event::Text {
                 response_id,
                 text,

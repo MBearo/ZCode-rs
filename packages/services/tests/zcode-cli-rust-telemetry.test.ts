@@ -3,8 +3,17 @@ import test from "node:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServerResponse } from "node:http";
-import { zcodeComputerUseOperationEventSchema, zcodeMcpTelemetryEventSchema } from "@zcode/shared";
-import { conversationTelemetryFactSchema } from "@zcode/shared/zcode-protocol-v4";
+import { randomUUID } from "node:crypto";
+import {
+  localTtftFactsSchema,
+  zcodeComputerUseOperationEventSchema,
+  zcodeMcpTelemetryEventSchema,
+} from "@zcode/shared";
+import {
+  commandsQueryResultSchema,
+  conversationTelemetryFactSchema,
+  conversationTopicFrameSchema,
+} from "@zcode/shared/zcode-protocol-v4";
 import { end, event, fixture } from "./zcode-cli-rust-fixture.js";
 
 type Message = Record<string, any>;
@@ -165,6 +174,58 @@ test("Rust MCP process telemetry reports a stdio server's start and crash", asyn
     assert.equal(crash.mcpInstanceId, start.mcpInstanceId);
     const processes = (await h.client.request("process/childProcesses", {})) as Message;
     assert.deepEqual(processes.processes, []);
+  } finally {
+    await f.close();
+  }
+});
+
+// spec rust-m9-usage-logs §7：带 ttft 的输入记录本地首字耗时，checkpoint 与帧上的事实都通过 strict schema。
+test("Rust local TTFT records a prompt to its first text", async () => {
+  const f = await fixture({ respond: (_req, res) => answer(res) });
+  try {
+    const h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    const probe = commandsQueryResultSchema.parse(
+      await h.client.request("v4/commands/query", {
+        commands: [{ sessionId: null, commandId: `ttft-clock-${randomUUID()}` }],
+        clock: true,
+      }),
+    );
+    assert.ok(probe.clock && probe.clock.sentAt >= probe.clock.receivedAt);
+    const after = h.messages.length;
+    const observationId = randomUUID();
+    const command = {
+      ...h.envelope("sendText", id, { text: "hello" }),
+      ttft: { version: 1, observationId },
+    };
+    await h.command(command);
+    await h.completed(id, after);
+    const checkpoints = h.messages
+      .slice(after)
+      .filter((m: Message) => m.method === "v4/telemetry/local-ttft")
+      .map((m: Message) => localTtftFactsSchema.parse(m.params));
+    assert.ok(checkpoints.length >= 3, JSON.stringify(checkpoints));
+    const revisions = checkpoints.map((c) => c.revision);
+    assert.deepEqual(
+      revisions,
+      revisions.map((_, i) => i + 1),
+    );
+    const last = checkpoints.at(-1)!;
+    assert.equal(last.commandId, command.commandId);
+    assert.equal(last.instanceId, probe.clock!.instanceId);
+    assert.equal(last.sendMode, "idle");
+    for (const at of [last.admittedAt, last.executionAt, last.requestAt])
+      assert.ok(at! >= last.receivedAt);
+    const frames = h.messages
+      .slice(after)
+      .map((m: Message) => m.params?.frame)
+      .filter((frame: Message) => frame?.ttft);
+    assert.ok(frames.length > 0);
+    const facts = conversationTopicFrameSchema.parse(frames.at(-1)).ttft!;
+    assert.equal(facts.observationId, observationId);
+    assert.equal(facts.outputKind, "text");
+    assert.ok(facts.outputAt! >= facts.requestAt! && facts.productTurnId && facts.cliVersion);
   } finally {
     await f.close();
   }

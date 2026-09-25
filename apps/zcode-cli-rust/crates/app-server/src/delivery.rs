@@ -195,6 +195,26 @@ impl Delivery {
         }
     }
 
+    /// Local TTFT facts for the next online frame of every continuous
+    /// subscriber of `topic` (Node attaches them to `continuous` + `online` frames).
+    pub fn ttft(&mut self, topic: &str, observations: &[Value]) {
+        let Some((first, related)) = observations.split_first() else {
+            return;
+        };
+        let mut fields = format!(r#","ttft":{first}"#);
+        if !related.is_empty() {
+            fields.push_str(&format!(
+                r#","ttftRelated":{}"#,
+                Value::from(related.to_vec())
+            ));
+        }
+        for sub in self.subscriptions.values_mut() {
+            if sub.topic == topic && sub.profile == Profile::Continuous && !sub.resync {
+                sub.ttft = Some(fields.clone());
+            }
+        }
+    }
+
     /// Snapshot to every subscriber of `topic` (history reset, config change),
     /// serialized once; paused subscribers recover when drained.
     pub fn snapshot_topic(
@@ -241,7 +261,7 @@ impl Delivery {
             if !sub.resync && (!sub.buffer.is_empty() || sub.sent_seq != sub.seq) {
                 let deltas = sub.buffer.take();
                 // 被 profile 过滤掉的 seq 也在区间内，客户端连续性判定不受过滤影响。
-                match sub.deltas_frame(id, "online", (sub.sent_seq, sub.seq), &deltas) {
+                match sub.online_frame(id, (sub.sent_seq, sub.seq), &deltas) {
                     Ok(lines) => out.lines.extend(lines),
                     Err(_) => sub.resync = true,
                 }

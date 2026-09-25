@@ -311,6 +311,13 @@ impl ProtocolStream {
             }
         }
     }
+    pub fn named_call(&self) -> bool {
+        match self {
+            Self::Chat(s) => s.named_call(),
+            Self::Responses(s) => s.inner.named_call(),
+            Self::Anthropic(s) => s.inner.named_call(),
+        }
+    }
     pub fn done(&self) -> bool {
         match self {
             Self::Chat(s) => s.done,

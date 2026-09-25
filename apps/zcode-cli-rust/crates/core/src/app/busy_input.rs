@@ -152,6 +152,11 @@ impl Engine {
         if self.active.get(id).is_none_or(|a| a.execution.is_none()) {
             self.apply_selection(id, selection)?;
         }
+        // Node TurnSteerDrained（guide）：本地 TTFT 记为 guided 并收口。
+        if let Some(command) = item["sourceCommandId"].as_str() {
+            self.ttft.guided(command);
+            self.ttft_flush();
+        }
         let s = self.sessions.get_mut(id).unwrap();
         s.queue.remove(pos);
         s.revision += 1;

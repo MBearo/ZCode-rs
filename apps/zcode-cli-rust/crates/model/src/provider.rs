@@ -150,6 +150,9 @@ impl HttpModel {
                 },
             }
         }
+        if assembly.named_call() {
+            output.tool().await?;
+        }
         Ok((assembly.finish()?, response_headers))
     }
     /// `current`: the in-flight attempt, reported as cancelled if the caller stops.
@@ -158,7 +161,7 @@ impl HttpModel {
         messages: Vec<Value>,
         tools: &[Value],
         sink: &EventSink,
-        current: &std::sync::Mutex<Option<Attempt>>,
+        (current, logical_call): (&std::sync::Mutex<Option<Attempt>>, &str),
     ) -> Result<ModelOutput> {
         let mut messages = messages;
         let has_attachments =
@@ -189,6 +192,7 @@ impl HttpModel {
             config: &self.config,
             origin: &sink.origin,
             max_attempts: self.retry.max_attempts,
+            logical_call,
         };
         let mut empty_retries = 0;
         // 断流恢复的新请求在适配层是 attempt 1；空闲超时按恢复次数继续递增（Node streamIdleTimeoutRetryNumber）。
@@ -355,9 +359,11 @@ impl ModelPort for HttpModel {
         cancel: &CancellationToken,
     ) -> Result<ModelOutput> {
         let current = std::sync::Mutex::new(None);
+        // Node 每次模型调用（含其重试）共用一个 logicalCallId。
+        let logical_call = uuid::Uuid::new_v4().to_string();
         let result = tokio::select! {biased;
             _=cancel.cancelled()=>Err(ModelFailure::cancelled()),
-            result=self.complete_inner(messages,tools,sink,&current)=>return result,
+            result=self.complete_inner(messages,tools,sink,(&current,&logical_call))=>return result,
         };
         let attempt = current.lock().unwrap().take();
         if let Some(attempt) = attempt {
@@ -365,6 +371,7 @@ impl ModelPort for HttpModel {
                 config: &self.config,
                 origin: &sink.origin,
                 max_attempts: self.retry.max_attempts,
+                logical_call: &logical_call,
             };
             let failure = ModelFailure::cancelled();
             let status = reporter.failed(&attempt, &failure, false, self.idle_ms(attempt.budget()));

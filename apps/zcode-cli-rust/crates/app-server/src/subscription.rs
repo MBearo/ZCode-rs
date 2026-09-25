@@ -22,6 +22,8 @@ pub struct Subscription {
     /// Runtime replies in flight; each covers every delta that arrives meanwhile.
     pub(super) recovering: u32,
     pub(super) due: Option<Instant>,
+    /// `,"ttft":…` members for the next online deltas frame (local TTFT).
+    pub(super) ttft: Option<String>,
 }
 
 impl Subscription {
@@ -44,6 +46,7 @@ impl Subscription {
             resync: false,
             recovering: 0,
             due: None,
+            ttft: None,
         }
     }
 
@@ -55,9 +58,21 @@ impl Subscription {
         (from, to): (u64, u64),
         payload: &str,
     ) -> Result<Vec<String>> {
+        self.frame_with(id, kind, (from, to), payload, "")
+    }
+
+    /// `extra` holds frame members after the payload (`,"ttft":…`).
+    fn frame_with(
+        &mut self,
+        id: &str,
+        kind: &str,
+        (from, to): (u64, u64),
+        payload: &str,
+        extra: &str,
+    ) -> Result<Vec<String>> {
         let ordinal = self.ordinal + 1;
         let frame_json = format!(
-            r#"{{"topic":{},"subscriptionId":{},"fromSeq":{from},"toSeq":{to},"sentAt":{},"payload":{payload}}}"#,
+            r#"{{"topic":{},"subscriptionId":{},"fromSeq":{from},"toSeq":{to},"sentAt":{},"payload":{payload}{extra}}}"#,
             Value::from(self.topic.as_str()),
             Value::from(id),
             now_ms(),
@@ -85,15 +100,18 @@ impl Subscription {
         range: (u64, u64),
         deltas: &[Value],
     ) -> Result<Vec<String>> {
-        let mut payload = String::from(r#"{"kind":"deltas","deltas":["#);
-        for (i, delta) in deltas.iter().enumerate() {
-            if i > 0 {
-                payload.push(',');
-            }
-            payload.push_str(&delta.to_string());
-        }
-        payload.push_str("]}");
-        self.frame(id, kind, range, &payload)
+        self.frame(id, kind, range, &deltas_payload(deltas))
+    }
+
+    /// An `online` deltas frame, with the pending local TTFT facts.
+    pub(super) fn online_frame(
+        &mut self,
+        id: &str,
+        range: (u64, u64),
+        deltas: &[Value],
+    ) -> Result<Vec<String>> {
+        let extra = self.ttft.take().unwrap_or_default();
+        self.frame_with(id, "online", range, &deltas_payload(deltas), &extra)
     }
 
     pub(super) fn snapshot_frame(
@@ -134,6 +152,18 @@ impl Subscription {
         let deltas = delivery::replay(self.profile, deltas);
         self.deltas_frame(id, kind, (from, seq), &deltas)
     }
+}
+
+fn deltas_payload(deltas: &[Value]) -> String {
+    let mut payload = String::from(r#"{"kind":"deltas","deltas":["#);
+    for (i, delta) in deltas.iter().enumerate() {
+        if i > 0 {
+            payload.push(',');
+        }
+        payload.push_str(&delta.to_string());
+    }
+    payload.push_str("]}");
+    payload
 }
 
 fn now_ms() -> u64 {

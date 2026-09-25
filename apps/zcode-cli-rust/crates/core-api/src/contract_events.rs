@@ -178,6 +178,9 @@ pub enum Event {
     },
     /// One Node `ModelNetworkStatusEvent` payload of the run's model request.
     ModelStatus(Value),
+    /// The main response's first tool-call output (Node `model_streaming`
+    /// `tool_input_delta` / `tool_call`); only local TTFT observes it.
+    ToolStreaming,
     Text {
         response_id: String,
         text: String,

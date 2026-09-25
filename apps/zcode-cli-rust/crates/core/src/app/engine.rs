@@ -47,6 +47,9 @@ pub(super) struct Active {
 pub struct Engine {
     /// The live telemetry normalizer (spec rust-m9-usage-logs §5).
     pub(super) telemetry: crate::domain::telemetry::Normalizer,
+    /// Local TTFT records and their clock (spec rust-m9-usage-logs §7).
+    pub(super) ttft: crate::domain::local_ttft::Recorder,
+    pub(super) ttft_clock: super::local_ttft::TtftClock,
     pub(super) child_updates:
         BTreeMap<String, tokio::sync::watch::Sender<crate::domain::subagent::Task>>,
     pub(super) uploads: crate::domain::attachment_upload::Uploads,
@@ -123,6 +126,8 @@ impl Engine {
         tools.attach_events(events.clone(), &workspace);
         Ok(Self {
             telemetry: Default::default(),
+            ttft: crate::domain::local_ttft::Recorder::new(clock.id()),
+            ttft_clock: Default::default(),
             child_updates: BTreeMap::new(),
             uploads: Default::default(),
             auxiliary: BTreeMap::new(),
@@ -194,7 +199,7 @@ impl Engine {
                         self.outbox.push(ServerMsg::HostNotification{method,params});self.flush(&output).await?;
                     },
                     _=refresh.tick()=>{
-                        self.uploads.prune(self.clock.now());
+                        self.uploads.prune(self.clock.now());if self.ttft.active() {self.ttft_tick();self.flush(&output).await?;}
                         if let Some(registry) = &self.registry && registry.refresh(None).await.unwrap_or(false) { self.refresh_catalog()?; self.flush(&output).await?; }
                     },
                 }
@@ -313,7 +318,7 @@ impl Engine {
             Method::Command => match crate::domain::protocol::validate_command(p) {
                 Err(issue) => Ok(crate::domain::protocol::invalid_payload_ack(p, &issue)),
                 Ok(()) => match serde_json::from_value(call.params.clone()) {
-                    Ok(command) => self.command(command).await,
+                    Ok(command) => self.ttft_command(command, p).await,
                     Err(_) => Err(RuntimeError::invalid_params("Invalid command envelope")),
                 },
             },

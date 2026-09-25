@@ -155,6 +155,9 @@ pub enum RuntimeEvent {
         from: u64,
         to: u64,
         deltas: zcode_cli_domain::topic_log::Deltas,
+        /// Local TTFT facts of the turns these deltas touch (spec
+        /// rust-m9-usage-logs §7): online continuous frames carry them.
+        ttft: Vec<Value>,
     },
     /// History was rewritten; subscribers must replace their state with `snapshot`.
     ConversationReset {

@@ -164,3 +164,89 @@ export function diffFacts(node, rust) {
   }
   return out;
 }
+
+const TTFT_TIMES = new Set([
+  "receivedAt",
+  "admittedAt",
+  "executionAt",
+  "requestAt",
+  "outputAt",
+  "start",
+  "end",
+]);
+const TTFT_IDS = new Set([
+  "observationId",
+  "instanceId",
+  "commandId",
+  "sessionId",
+  "logicalCallId",
+  "queryId",
+  "requestId",
+  "id",
+]);
+
+// MCP 进程遥测是独立通道：Node 在会话 runtime 创建时连接 MCP，Rust 在首个 step 准备工具时，
+// 与会话事实的相对顺序不同，单独比较。
+export const PROCESS = ["process/mcpTelemetry"];
+
+/** Process events have no session: they belong to the scenario's frame range. */
+export function processFacts(result, name) {
+  const [from, to] = result.ranges[name];
+  return normalizeFacts(
+    result.telemetry
+      .filter((f) => PROCESS.includes(f.method))
+      .filter((f) => f.index >= from && f.index < to)
+      .filter((f) => !f.params.sessionId || f.params.sessionId === result.sessions[name])
+      .map((f) => ({ method: f.method, ...f.params })),
+    [result.root],
+  );
+}
+
+/**
+ * The local TTFT of a scenario's frame range: the first checkpoint and the
+ * last framed facts. Preparation details come from Node's internal pipeline
+ * (context, hooks, persistence) and change its checkpoint count, so neither
+ * is compared (spec rust-m9-usage-logs §7.3).
+ */
+export function localTtft(frames, [from, to]) {
+  const inRange = frames.filter((f) => f.index >= from && f.index < to);
+  const first = inRange.find((f) => f.method === "v4/telemetry/local-ttft")?.params;
+  const framed = inRange.map((f) => f.params?.frame?.ttft).filter(Boolean);
+  // 已知差异（spec §7.3）：Node 的 runtime turnId（`turn_…`）与产品 turnId（用户消息 id）是两个值，
+  // Rust 的两者相同；只比较两者是否出现，不比较是否相等。
+  const turn = (value, name) => (value === undefined ? undefined : name);
+  const facts = [first, ...framed.slice(-1)]
+    .filter(Boolean)
+    .map(({ revision: _revision, ...rest }) => ({
+      ...rest,
+      turnId: turn(rest.turnId, "<turn>"),
+      productTurnId: turn(rest.productTurnId, "<product-turn>"),
+      details: rest.details.filter((d) => d.stage !== undefined && !d.id.startsWith("prepare:")),
+    }));
+  return normalizeTtft(facts);
+}
+
+/** Local TTFT checkpoints (spec rust-m9-usage-logs §7): times and ids as placeholders. */
+function normalizeTtft(list) {
+  const ids = new Map();
+  const id = (value) => {
+    // 明细 id 由前缀与请求 id 组成：只替换请求部分。
+    const [prefix, rest] = value.includes(":") ? value.split(/:(.*)/s) : ["", value];
+    if (!ids.has(rest)) ids.set(rest, `<id#${ids.size + 1}>`);
+    return prefix ? `${prefix}:${ids.get(rest)}` : ids.get(rest);
+  };
+  const walk = (value, key) => {
+    if (Array.isArray(value)) return value.map((item) => walk(item));
+    if (value && typeof value === "object")
+      return Object.fromEntries(
+        Object.keys(value)
+          .sort()
+          .map((k) => [k, walk(value[k], k)]),
+      );
+    if (TTFT_TIMES.has(key) && typeof value === "number") return "<time>";
+    if (TTFT_IDS.has(key) && typeof value === "string") return id(value);
+    if (key === "cliVersion") return "<version>";
+    return value;
+  };
+  return list.map((item) => walk(item));
+}

@@ -4,6 +4,7 @@
 // model, then their `model_usage`, `turn_usage` and `tool_usage` rows and the
 // `v4/telemetry/event` facts are compared after ids and times are normalized.
 // Usage: [zcode.cjs] [rust] [--only=<scenario,...>] [--show=<table,...>]
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,6 +13,9 @@ import { prepareHome, startRuntime } from "./zcode-cli-rust-interop-runtime.mjs"
 import {
   diffFacts,
   normalizeFacts,
+  localTtft,
+  PROCESS,
+  processFacts,
   scenarioSessions,
   sessionNotifications,
 } from "./zcode-cli-rust-telemetry-diff.mjs";
@@ -31,9 +35,6 @@ const show = option("show");
 
 const BROWSER_USE = "browser-use@zcode-plugins-official";
 const TELEMETRY = ["v4/telemetry/event", "computer-use/operation-event"];
-// MCP 进程遥测是独立通道：Node 在会话 runtime 创建时连接 MCP，Rust 在首个 step 准备工具时，
-// 与会话事实的相对顺序不同，单独比较。
-const PROCESS = ["process/mcpTelemetry"];
 const TERMINAL = ["completedSuccess", "error", "completedInterrupted"];
 
 /** Waits for the next terminal control phase after frame `from`. */
@@ -46,17 +47,21 @@ async function terminal(runtime, from, timeoutMs = 30_000) {
   return done.patch.control.phase;
 }
 
-async function send(runtime, id, text) {
+/** Scenarios whose prompts carry `ttft` (local TTFT, spec rust-m9-usage-logs §7). */
+const TTFT = ["plain", "tool", "compact"];
+
+async function send(runtime, id, text, ttft = false) {
   const from = runtime.frames.length;
-  const ack = await runtime.command("sendText", id, { text });
+  const extra = ttft ? { ttft: { version: 1, observationId: randomUUID() } } : {};
+  const ack = await runtime.command("sendText", id, { text }, undefined, extra);
   if (ack.status !== "accepted") throw new Error(`${runtime.kind}: ${JSON.stringify(ack)}`);
   return terminal(runtime, from);
 }
 
 /** Scenario name → steps on a fresh session; returns the terminal phases. */
 const SCENARIOS = {
-  plain: async (rt, id) => [await send(rt, id, "plain hello there")],
-  tool: async (rt, id) => [await send(rt, id, "please use tool now")],
+  plain: async (rt, id) => [await send(rt, id, "plain hello there", true)],
+  tool: async (rt, id) => [await send(rt, id, "please use tool now", true)],
   search: async (rt, id) => [await send(rt, id, "please web search this")],
   fail: async (rt, id) => [await send(rt, id, "please fail now")],
   cancel: async (rt, id) => {
@@ -67,7 +72,7 @@ const SCENARIOS = {
     return [await terminal(rt, from)];
   },
   compact: async (rt, id) => {
-    const first = await send(rt, id, "plain before compaction");
+    const first = await send(rt, id, "plain before compaction", true);
     const from = rt.frames.length;
     await rt.command("compact", id, {});
     return [first, await terminal(rt, from)];
@@ -185,6 +190,9 @@ async function runRuntime(kind, model) {
         ],
       ]),
     );
+    const frames = runtime.frames
+      .map((frame, index) => ({ ...frame, index }))
+      .filter((f) => f.method === "v4/telemetry/local-ttft" || f.params?.frame?.ttft !== undefined);
     const telemetry = runtime.frames
       .map((frame, index) => ({ ...frame, index }))
       .filter((frame) => [...TELEMETRY, ...PROCESS].includes(frame.method));
@@ -200,7 +208,7 @@ async function runRuntime(kind, model) {
       tool_usage: read("tool_usage"),
     };
     db.close();
-    return { root, sessions, phases, tables, telemetry, usage, ranges };
+    return { root, sessions, phases, tables, telemetry, usage, ranges, frames };
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -353,21 +361,15 @@ try {
         ),
         [result.root],
       );
-    // 进程事件没有会话：按场景运行期间的帧范围归属。
-    const processes = (result) =>
-      normalizeFacts(
-        result.telemetry
-          .filter((f) => PROCESS.includes(f.method))
-          .filter((f) => f.index >= result.ranges[name][0] && f.index < result.ranges[name][1])
-          .filter((f) => !f.params.sessionId || f.params.sessionId === result.sessions[name])
-          .map((f) => ({ method: f.method, ...f.params })),
-        [result.root],
-      );
+    const processes = (result) => processFacts(result, name);
+    const ttft = (result) => localTtft(result.frames, result.ranges[name]);
     const factDiff = [
       ...diffFacts(facts(node), facts(rust)),
       ...diffFacts(processes(node), processes(rust)),
+      ...(TTFT.includes(name) ? diffFacts(ttft(node), ttft(rust)) : []),
     ];
     if (show?.includes("telemetry")) report.telemetry = { node: facts(node), rust: facts(rust) };
+    if (show?.includes("ttft")) report.ttft = { node: ttft(node), rust: ttft(rust) };
     if (factDiff.length) report.telemetryDiff = factDiff;
     differences += factDiff.length;
     const trails = { node: usageTrail(node.usage[name]), rust: usageTrail(rust.usage[name]) };

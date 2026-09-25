@@ -84,6 +84,11 @@ impl Engine {
         // Node settleRemovedSessionInput：用户移除的排队输入先写 cancelled 终态。
         let queue_id = item["queueItemId"].as_str().unwrap_or("");
         session.node_settle_input(now, queue_id, "cancelled", "user_removed");
+        // Node TurnSteerDiscarded（用户移除）：本地 TTFT 记为 cancelled 并收口。
+        if let Some(command) = item["sourceCommandId"].as_str() {
+            self.ttft.discarded(command, false);
+            self.ttft_flush();
+        }
         let key = serde_json::to_string(&(Some(id), item["sourceCommandId"].as_str().unwrap()))?;
         if let Some(ack) = self.acks.get_mut(&key) {
             ack["status"] = "failed".into();
