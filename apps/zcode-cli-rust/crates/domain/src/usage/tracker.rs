@@ -1,13 +1,13 @@
-//! Usage facts of one run, derived from its events (Node `recordModelUsageFact`,
-//! `recordTurnUsageFact` and the tool usage recorders).
-use super::{
-    ErrorInfo, Fact, ModelFact, RECORDED_SOURCES, Tokens, ToolFact, TurnFact, usage_total,
-};
-use serde_json::Value;
+//! Usage facts of one run, derived from its events (Node `recordModelUsageFact`
+//! and `recordTurnUsageFact`; tools in `tracker_tools.rs`). Spec
+//! rust-m9-usage-logs §2.3.
+use super::{ErrorInfo, Fact, ModelFact, RECORDED_SOURCES, Tokens, TurnFact, usage_total};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-/// Failure texts are stored up to this size (the result text can be tool output).
-const ERROR_MESSAGE_BYTES: usize = 1024;
+#[path = "tracker_tools.rs"]
+mod tools;
+pub use tools::ToolEnd;
 
 /// Who a run's facts belong to, fixed at run start.
 #[derive(Clone, Debug, Default)]
@@ -18,9 +18,18 @@ pub struct Attribution {
     pub trace_id: String,
     pub variant: Option<String>,
     pub mode: String,
+    /// Node `runtime.config.agentName`: `zcode-agent`, a child `zcode-<type>`.
+    pub agent: String,
     pub subagent: bool,
-    /// Manual compaction, recorded in every outcome (Node `compact.ts`).
+    /// Manual compaction (no user message; Node `compact.ts`).
     pub compact: bool,
+}
+
+/// The Node message ids around one model step, from the Node journal.
+#[derive(Clone, Debug, Default)]
+pub struct StepIds {
+    pub user: Option<String>,
+    pub assistant: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +42,8 @@ pub enum Outcome {
 /// A logical model request in flight.
 struct Probe {
     source: String,
+    span: String,
+    attempt: u64,
     started_at: u64,
     provider: String,
     model: String,
@@ -40,21 +51,16 @@ struct Probe {
     first_token_at: Option<u64>,
 }
 
-struct ToolProbe {
-    name: String,
-    started_at: u64,
-    executing_at: Option<u64>,
-    requested: bool,
-}
-
 pub struct RunUsage {
     who: Attribution,
     started_at: u64,
-    requests: u64,
     request: Option<Probe>,
     /// A completed agent step waiting for its `ModelDone` (tool call count).
     step: Option<ModelFact>,
-    tools: BTreeMap<String, ToolProbe>,
+    tools: BTreeMap<String, tools::ToolProbe>,
+    /// Compaction requests retried after prompt-too-long (Node `attemptIndex`).
+    compact_attempts: u64,
+    requests: u64,
     first_model_start_at: Option<u64>,
     first_token_at: Option<u64>,
     retries: u64,
@@ -62,18 +68,22 @@ pub struct RunUsage {
     tool_errors: u64,
     tokens: Tokens,
     computed_total: u64,
+    /// Some request reported usage (Node `aggregateModelUsage` is otherwise undefined).
+    usage_seen: bool,
 }
 
 fn text(value: &Value) -> Option<String> {
     value.as_str().filter(|s| !s.is_empty()).map(str::to_owned)
 }
 
-fn truncated(message: &str) -> String {
-    let mut end = message.len().min(ERROR_MESSAGE_BYTES);
-    while !message.is_char_boundary(end) {
-        end -= 1;
-    }
-    message[..end].to_owned()
+/// Agent steps: their usage waits for the committed assistant message.
+fn step_source(source: &str) -> bool {
+    matches!(source, "main_turn" | "subagent")
+}
+
+/// Sources in the turn's own events (Node `events`): the verifier keeps its own.
+fn in_turn(source: &str) -> bool {
+    source != "target_completion_verification"
 }
 
 impl RunUsage {
@@ -81,10 +91,11 @@ impl RunUsage {
         Self {
             who,
             started_at: now,
-            requests: 0,
             request: None,
             step: None,
             tools: BTreeMap::new(),
+            compact_attempts: 0,
+            requests: 0,
             first_model_start_at: None,
             first_token_at: None,
             retries: 0,
@@ -92,22 +103,30 @@ impl RunUsage {
             tool_errors: 0,
             tokens: Tokens::default(),
             computed_total: 0,
+            usage_seen: false,
         }
     }
 
-    fn model_fact(&self, probe: Probe, status: &'static str, now: u64) -> ModelFact {
-        let logical = format!("{}:{}", self.who.run_id, self.requests);
+    fn model_fact(&self, probe: Probe, status: &'static str, ids: &StepIds, now: u64) -> ModelFact {
+        let step = step_source(&probe.source);
+        let assistant = ids.assistant.clone().filter(|_| step);
+        // Node：step 以 assistant 消息为逻辑请求 id，其他来源用 span id。
+        let logical = assistant.clone().unwrap_or_else(|| probe.span.clone());
         ModelFact {
-            id: format!("usage_model_{}_{logical}_0", probe.source),
+            id: format!("usage_model_{}_{logical}_{}", probe.source, probe.attempt),
             logical_request_id: logical,
+            attempt_index: probe.attempt,
             session_id: self.who.session_id.clone(),
             turn_id: Some(self.who.turn_id.clone()),
             trace_id: Some(self.who.trace_id.clone()),
+            span_id: Some(probe.span),
+            assistant_message_id: assistant,
+            parent_user_message_id: ids.user.clone().filter(|_| step),
             query_source: probe.source,
             provider_id: probe.provider,
             model_id: probe.model,
             variant: self.who.variant.clone(),
-            agent: "zcode-agent".into(),
+            agent: self.who.agent.clone(),
             mode: self.who.mode.clone(),
             task_type: if self.who.subagent {
                 "subagent_child"
@@ -125,8 +144,14 @@ impl RunUsage {
         }
     }
 
-    /// One `ModelStatus` payload; returns the facts it completes.
-    pub fn on_status(&mut self, status: &Value, now: u64) -> Vec<Fact> {
+    /// One `ModelStatus` payload; `span` names a new logical request.
+    pub fn on_status(
+        &mut self,
+        status: &Value,
+        ids: &StepIds,
+        span: impl FnOnce() -> String,
+        now: u64,
+    ) -> Vec<Fact> {
         let source = status["querySource"].as_str().unwrap_or("");
         if !RECORDED_SOURCES.contains(&source) {
             return vec![];
@@ -140,12 +165,22 @@ impl RunUsage {
                     facts.push(Fact::Model(Box::new(step)));
                 }
                 if let Some(probe) = self.request.take() {
-                    facts.push(Fact::Model(Box::new(self.model_fact(probe, "error", now))));
+                    facts.push(Fact::Model(Box::new(
+                        self.model_fact(probe, "error", ids, now),
+                    )));
                 }
-                self.requests += 1;
-                self.first_model_start_at.get_or_insert(now);
+                if in_turn(source) {
+                    self.requests += 1;
+                    self.first_model_start_at.get_or_insert(now);
+                }
                 self.request = Some(Probe {
                     source: source.into(),
+                    span: span(),
+                    attempt: if source == "compact" {
+                        self.compact_attempts
+                    } else {
+                        0
+                    },
                     started_at: now,
                     provider: status["providerId"].as_str().unwrap_or("").into(),
                     model: status["modelId"].as_str().unwrap_or("").into(),
@@ -156,19 +191,28 @@ impl RunUsage {
             "model_retry_scheduled" => {
                 if let Some(probe) = &mut self.request {
                     probe.retries += 1;
-                    self.retries += 1;
+                    if in_turn(&probe.source) {
+                        self.retries += 1;
+                    }
                 }
             }
             "model_request_failed" if status["retryable"] != true => {
                 if let Some(probe) = self.request.take() {
-                    let cancelled = status["reason"] == "cancelled";
-                    let mut fact =
-                        self.model_fact(probe, if cancelled { "cancelled" } else { "error" }, now);
-                    fact.context_exceeded = status["reason"] == "context_exceeded";
+                    let reason = status["reason"].as_str().unwrap_or("");
+                    if probe.source == "compact" && reason == "context_exceeded" {
+                        self.compact_attempts += 1;
+                    }
+                    let cancelled = reason == "cancelled";
+                    let status_text = if cancelled { "cancelled" } else { "error" };
+                    let mut fact = self.model_fact(probe, status_text, ids, now);
+                    // Node `errorInfo.retryable ?? retryCount > 0`：终态失败事件带 retryable=false。
+                    fact.retryable = false;
+                    fact.context_exceeded = reason == "context_exceeded";
+                    // Node 的模型适配器错误不是 CoreError：没有 code，message 是分类后的通用文案。
                     fact.error = ErrorInfo {
                         kind: text(&status["reason"]),
-                        code: text(&status["errorCode"]),
-                        message: text(&status["message"]),
+                        code: None,
+                        message: Some(crate::model::describe(reason).1.into()),
                     };
                     facts.push(Fact::Model(Box::new(fact)));
                 }
@@ -176,15 +220,21 @@ impl RunUsage {
             "model_request_completed" => {
                 if let Some(probe) = self.request.take() {
                     let usage = &status["usage"];
-                    let step = matches!(probe.source.as_str(), "main_turn" | "subagent");
-                    let mut fact = self.model_fact(probe, "completed", now);
+                    let step = step_source(&probe.source);
+                    let counted = in_turn(&probe.source);
+                    let mut fact = self.model_fact(probe, "completed", ids, now);
                     fact.finish_reason = text(&status["finishReason"]);
+                    fact.provider_metadata = text(&status[super::RAW_FINISH_REASON])
+                        .map(|raw| json!({"rawFinishReason": raw}));
                     if usage.as_object().is_some_and(|u| !u.is_empty()) {
                         fact.tokens = Tokens::from_usage(usage);
                         fact.provider_total_tokens = usage["totalTokens"].as_u64();
                         fact.raw_usage = Some(usage.clone());
-                        self.tokens.add(&fact.tokens);
-                        self.computed_total += usage_total(usage);
+                        if counted {
+                            self.tokens.add(&fact.tokens);
+                            self.computed_total += usage_total(usage);
+                            self.usage_seen = true;
+                        }
                     }
                     if step {
                         self.step = Some(fact);
@@ -207,104 +257,41 @@ impl RunUsage {
     }
 
     /// The step's assistant message committed.
-    pub fn on_model_done(&mut self, message: Option<&Value>) -> Vec<Fact> {
+    pub fn on_model_done(&mut self, message: Option<&Value>, ids: &StepIds) -> Vec<Fact> {
         let Some(mut fact) = self.step.take() else {
             return vec![];
         };
         fact.tool_call_count = message
             .and_then(|m| m["tool_calls"].as_array())
             .map_or(0, |calls| calls.len() as u64);
+        if fact.assistant_message_id.is_none()
+            && let Some(assistant) = &ids.assistant
+        {
+            fact.id = fact.id.replace(&fact.logical_request_id, assistant);
+            fact.logical_request_id = assistant.clone();
+            fact.assistant_message_id = Some(assistant.clone());
+        }
         vec![Fact::Model(Box::new(fact))]
     }
 
-    fn tool_fact(&self, id: &str, probe: &ToolProbe, status: &'static str) -> ToolFact {
-        ToolFact {
-            session_id: self.who.session_id.clone(),
-            turn_id: Some(self.who.turn_id.clone()),
-            trace_id: Some(self.who.trace_id.clone()),
-            tool_call_id: id.into(),
-            tool_name: probe.name.clone(),
-            approval_status: if probe.requested { "requested" } else { "none" },
-            status,
-            started_at: probe.started_at,
-            ..ToolFact::default()
+    /// A tool's internal model request (Node `ModelComplete {stopReason:
+    /// "tool_internal"}`): its usage joins the turn, not `model_usage`.
+    pub fn on_nested_usage(&mut self, usage: &Value) {
+        if usage.as_object().is_some_and(|u| !u.is_empty()) {
+            self.tokens.add(&Tokens::from_usage(usage));
+            self.computed_total += usage_total(usage);
+            self.usage_seen = true;
         }
     }
 
-    pub fn on_tool_start(&mut self, call: &Value, now: u64) -> Vec<Fact> {
-        let Some(id) = call["id"].as_str() else {
-            return vec![];
-        };
-        let probe = ToolProbe {
-            name: text(&call["function"]["name"]).unwrap_or_else(|| "unknown".into()),
-            started_at: now,
-            executing_at: None,
-            requested: false,
-        };
-        let fact = self.tool_fact(id, &probe, "running");
-        self.tools.insert(id.into(), probe);
-        self.tool_calls += 1;
-        vec![Fact::Tool(Box::new(fact))]
-    }
-
-    pub fn on_permission(&mut self, call_id: &str) {
-        if let Some(probe) = self.tools.get_mut(call_id) {
-            probe.requested = true;
-        }
-    }
-
-    pub fn on_tool_executing(&mut self, call_id: &str, now: u64) {
-        if let Some(probe) = self.tools.get_mut(call_id) {
-            probe.executing_at.get_or_insert(now);
-        }
-    }
-
-    /// `(failed, denied, cancelled)`: the result's flags and whether the run was cancelled.
-    pub fn on_tool_done(
-        &mut self,
-        call_id: &str,
-        (failed, denied, cancelled): (bool, bool, bool),
-        result: &str,
-        now: u64,
-    ) -> Vec<Fact> {
-        let Some(probe) = self.tools.remove(call_id) else {
-            return vec![];
-        };
-        let status = match (failed || denied, cancelled && !denied) {
-            (false, _) => "completed",
-            (true, true) => "cancelled",
-            (true, false) => "error",
-        };
-        let mut fact = self.tool_fact(call_id, &probe, status);
-        fact.approval_status = match (denied, probe.requested) {
-            (true, _) => "denied",
-            (false, true) => "allowed",
-            (false, false) => "none",
-        };
-        fact.completed_at = Some(now);
-        fact.duration_ms = probe.executing_at.map(|at| now.saturating_sub(at));
-        fact.output_bytes = result.len() as u64;
-        if failed || denied {
-            self.tool_errors += 1;
-            fact.cancelled_by_user = status == "cancelled";
-            fact.error = ErrorInfo {
-                kind: Some(
-                    match status {
-                        "cancelled" => "tool_cancelled",
-                        _ if denied => "permission_denied",
-                        _ => "tool_execution_failed",
-                    }
-                    .into(),
-                ),
-                code: None,
-                message: Some(truncated(result)),
-            };
-        }
-        vec![Fact::Tool(Box::new(fact))]
+    /// The run's total tokens (Node `aggregateModelUsage(...).totalTokens`),
+    /// `None` when no request reported usage.
+    pub fn total_tokens(&self) -> Option<u64> {
+        self.usage_seen.then_some(self.computed_total)
     }
 
     /// Facts still open when the run ends, closed with the run's outcome.
-    fn close_open(&mut self, outcome: Outcome, failure: Option<&ErrorInfo>, now: u64) -> Vec<Fact> {
+    fn close_open(&mut self, outcome: Outcome, failure: &ErrorInfo, now: u64) -> Vec<Fact> {
         let status = if outcome == Outcome::Cancelled {
             "cancelled"
         } else {
@@ -315,76 +302,71 @@ impl RunUsage {
             // 已报告完成但没有提交的步骤（终止的空响应、提交前结束）按 run 的结局收口。
             if outcome != Outcome::Completed {
                 step.status = status;
-                step.error = failure.cloned().unwrap_or_default();
+                step.error = failure.clone();
             }
             facts.push(Fact::Model(Box::new(step)));
         }
         if let Some(probe) = self.request.take() {
-            let mut fact = self.model_fact(probe, status, now);
-            fact.error = failure.cloned().unwrap_or_default();
+            let mut fact = self.model_fact(probe, status, &StepIds::default(), now);
+            fact.error = failure.clone();
             facts.push(Fact::Model(Box::new(fact)));
         }
         facts
     }
 
-    /// The run ended; `failure` is the model failure's `(reason, code)` when it failed on one.
+    /// The run ended; `failure` is the model failure's `(reason, code)` when it
+    /// failed on one, `user` the turn's user message (none for compaction).
     pub fn finish(
         &mut self,
         outcome: Outcome,
         failure: Option<(&str, &str)>,
+        user: Option<String>,
         now: u64,
     ) -> Vec<Fact> {
-        let error = match outcome {
-            Outcome::Completed => ErrorInfo::default(),
-            Outcome::Cancelled => ErrorInfo {
-                kind: Some("turn_cancelled".into()),
-                ..ErrorInfo::default()
-            },
-            Outcome::Failed => ErrorInfo {
-                kind: Some(failure.map_or("runtime", |f| f.0).into()),
-                code: failure.map(|f| f.1.to_owned()),
-                message: None,
-            },
+        let context_exceeded = failure.is_some_and(|f| f.0 == "context_exceeded");
+        // Node `createTurnFailureError`：取消、超出上下文之外的失败都包装为 UnknownError。
+        let (kind, code, retryable) = match outcome {
+            Outcome::Completed => (None, None, false),
+            Outcome::Cancelled => (Some("turn_cancelled"), Some("TURN_CANCELLED"), false),
+            Outcome::Failed if context_exceeded => (
+                Some("model_context_exceeded"),
+                Some("MODEL_CONTEXT_EXCEEDED"),
+                true,
+            ),
+            Outcome::Failed => (Some("unknown_error"), Some("UNKNOWN_ERROR"), false),
         };
-        let mut facts = self.close_open(outcome, Some(&error), now);
-        let tools = std::mem::take(&mut self.tools);
-        for (id, probe) in tools {
-            let status = if outcome == Outcome::Cancelled {
-                "cancelled"
-            } else {
-                "error"
-            };
-            let mut fact = self.tool_fact(&id, &probe, status);
-            fact.completed_at = Some(now);
-            fact.cancelled_by_user = status == "cancelled";
-            facts.push(Fact::Tool(Box::new(fact)));
-        }
-        // Node：普通轮只在成功时写 turn_usage；手动压缩在每种结局都写。
-        if outcome == Outcome::Completed || self.who.compact {
-            facts.push(Fact::Turn(Box::new(TurnFact {
-                session_id: self.who.session_id.clone(),
-                turn_id: self.who.turn_id.clone(),
-                trace_id: Some(self.who.trace_id.clone()),
-                status: match outcome {
-                    Outcome::Completed => "completed",
-                    Outcome::Failed => "error",
-                    Outcome::Cancelled => "cancelled",
-                },
-                started_at: self.started_at,
-                first_model_start_at: self.first_model_start_at,
-                first_token_at: self.first_token_at,
-                completed_at: now,
-                model_request_count: self.requests,
-                model_retry_count: self.retries,
-                tool_call_count: self.tool_calls,
-                tool_error_count: self.tool_errors,
-                tokens: self.tokens,
-                computed_total_tokens: self.computed_total,
-                cancelled_by_user: outcome == Outcome::Cancelled,
-                context_exceeded: failure.is_some_and(|f| f.0 == "context_exceeded"),
-                error,
-            })));
-        }
+        let error = ErrorInfo {
+            kind: kind.map(str::to_owned),
+            code: code.map(str::to_owned),
+            message: None,
+        };
+        let mut facts = self.close_open(outcome, &error, now);
+        facts.extend(self.close_tools(outcome, now));
+        facts.push(Fact::Turn(Box::new(TurnFact {
+            session_id: self.who.session_id.clone(),
+            turn_id: self.who.turn_id.clone(),
+            trace_id: Some(self.who.trace_id.clone()),
+            user_message_id: user.filter(|_| !self.who.compact),
+            status: match outcome {
+                Outcome::Completed => "completed",
+                Outcome::Failed => "error",
+                Outcome::Cancelled => "cancelled",
+            },
+            started_at: self.started_at,
+            first_model_start_at: self.first_model_start_at,
+            first_token_at: self.first_token_at,
+            completed_at: now,
+            model_request_count: self.requests,
+            model_retry_count: self.retries,
+            tool_call_count: self.tool_calls,
+            tool_error_count: self.tool_errors,
+            tokens: self.tokens,
+            computed_total_tokens: self.computed_total,
+            retryable,
+            cancelled_by_user: outcome == Outcome::Cancelled,
+            context_exceeded,
+            error,
+        })));
         facts
     }
 }

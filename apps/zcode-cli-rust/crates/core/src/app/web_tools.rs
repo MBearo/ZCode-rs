@@ -148,17 +148,6 @@ pub(super) async fn web_fetch(
     }
 }
 
-/// Node `ModelUsage` of an internal request (token counts only).
-fn model_usage(usage: &Value) -> Value {
-    let input = usage["prompt_tokens"].as_u64();
-    let output = usage["completion_tokens"].as_u64();
-    if input.is_none() && output.is_none() {
-        return Value::Null;
-    }
-    let (input, output) = (input.unwrap_or(0), output.unwrap_or(0));
-    json!({"inputTokens": input, "outputTokens": output, "totalTokens": input + output})
-}
-
 async fn search(
     model: &dyn ModelPort,
     args: &Value,
@@ -179,7 +168,8 @@ async fn search(
             .await?;
     let text = output.message["content"].as_str().unwrap_or("");
     let elapsed = started.elapsed().as_millis() as u64;
-    let data = web::search::output(query, text, model_usage(&output.usage), elapsed);
+    let usage = crate::domain::usage::model_usage(&output.usage);
+    let data = web::search::output(query, text, usage, elapsed);
     let content = crate::domain::persisted_output::truncate(
         &web::search::model_content(&data),
         web::search::MODEL_BYTES,

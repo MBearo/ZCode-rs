@@ -225,7 +225,16 @@ impl Anthropic {
                                 .as_u64()
                                 .unwrap_or(0),
                         );
-                    self.inner.consume_value(&json!({"choices":[{"delta":{},"finish_reason":finish}],"usage":if self.usage.as_object().is_some_and(|u| !u.is_empty()) {json!({"prompt_tokens":input,"completion_tokens":self.usage["output_tokens"],"prompt_tokens_details":{"cached_tokens":self.usage["cache_read_input_tokens"],"cache_write_tokens":self.usage["cache_creation_input_tokens"]}})} else {Value::Null}}),output).await?;
+                    let mut usage = if self.usage.as_object().is_some_and(|u| !u.is_empty()) {
+                        json!({"prompt_tokens":input,"completion_tokens":self.usage["output_tokens"],"prompt_tokens_details":{"cached_tokens":self.usage["cache_read_input_tokens"],"cache_write_tokens":self.usage["cache_creation_input_tokens"]}})
+                    } else {
+                        Value::Null
+                    };
+                    // Node `normalizeUsage` 读取原始 usage 的 server_tool_use（原生搜索与抓取次数）。
+                    if self.usage["server_tool_use"].is_object() {
+                        usage["server_tool_use"] = self.usage["server_tool_use"].clone();
+                    }
+                    self.inner.consume_value(&json!({"choices":[{"delta":{},"finish_reason":finish,"_zcode_raw_finish":reason}],"usage":usage}),output).await?;
                     self.stopped = true;
                 }
             }

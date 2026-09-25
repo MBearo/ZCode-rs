@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { ServerResponse } from "node:http";
 import {
   v4ConversationUsageResultSchema,
@@ -130,6 +131,65 @@ test("Rust records usage of a turn and answers the usage queries like Node", asy
     assert.equal(all.timeZone, "UTC");
     assert.equal(all.heatmap.startDate, all.heatmap.endDate);
     assert.equal(all.summary.totalTokens, 28);
+
+    // 行的身份与工具元数据同 Node（spec rust-m9-usage-logs §2.3）。
+    const db = new DatabaseSync(f.db, { readOnly: true });
+    const steps = db
+      .prepare("select * from model_usage where query_source = 'main_turn' order by started_at")
+      .all() as Message[];
+    const turnRow = db.prepare("select * from turn_usage").get() as Message;
+    const tool = db.prepare("select * from tool_usage").get() as Message;
+    db.close();
+    for (const step of steps) {
+      assert.equal(step.id, `usage_model_main_turn_${step.assistant_message_id}_0`);
+      assert.equal(step.logical_request_id, step.assistant_message_id);
+      assert.equal(step.parent_user_message_id, turnRow.user_message_id);
+      assert.equal(String(step.span_id).length, 16);
+    }
+    assert.match(String(turnRow.user_message_id), /^msg_/);
+    assert.deepEqual(
+      [tool.side_effect_scope, tool.read_only, tool.destructive, tool.exit_code],
+      ["none", 1, 0, 0],
+    );
+    assert.equal(tool.approval_status, "none");
+    assert.equal(typeof tool.first_output_at, "number");
+  } finally {
+    await f.close();
+  }
+});
+
+test("Rust records failed turns like Node createTurnFailureError", async () => {
+  const f = await fixture({
+    respond(_req, res) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "rejected", type: "invalid_request_error" } }));
+    },
+  });
+  try {
+    const h = f.start();
+    const id = await h.create();
+    await h.subscribe(`conversation/${id}`);
+    const after = h.messages.length;
+    await h.command(h.envelope("sendText", id, { text: "fail please" }));
+    await h.wait(
+      (m) =>
+        m.params?.frame?.payload?.deltas?.some((d: Message) => d.patch?.control?.phase === "error"),
+      after,
+    );
+    const db = new DatabaseSync(f.db, { readOnly: true });
+    const turnRow = db.prepare("select * from turn_usage").get() as Message;
+    const model = db.prepare("select * from model_usage").get() as Message;
+    db.close();
+    // 普通轮失败也记录（Node turn.ts catch 路径），错误是包装后的 UnknownError。
+    assert.deepEqual(
+      [turnRow.status, turnRow.error_type, turnRow.error_code, turnRow.cancelled_by_user],
+      ["error", "unknown_error", "UNKNOWN_ERROR", 0],
+    );
+    // 模型行是适配器错误：reason 作类型，没有 code，message 是通用文案。
+    assert.deepEqual(
+      [model.status, model.error_type, model.error_code, model.error_message],
+      ["error", "invalid_request", null, "Provider rejected the model request."],
+    );
   } finally {
     await f.close();
   }

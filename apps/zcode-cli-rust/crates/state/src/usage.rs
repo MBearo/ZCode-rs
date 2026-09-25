@@ -16,6 +16,11 @@ fn model(conn: &Connection, prefix: &str, f: &ModelFact) -> Result<()> {
         .as_ref()
         .map(serde_json::to_string)
         .transpose()?;
+    let metadata = f
+        .provider_metadata
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
     // Node 的冲突更新覆盖全部列，与整行替换等价。
     conn.prepare_cached(
         &"INSERT OR REPLACE INTO rust_model_usage(id,logical_request_id,attempt_index,session_id,turn_id,
@@ -23,9 +28,10 @@ fn model(conn: &Connection, prefix: &str, f: &ModelFact) -> Result<()> {
           first_token_at,completed_at,duration_ms,time_to_first_token_ms,finish_reason,tool_call_count,
           input_tokens,output_tokens,reasoning_tokens,cache_creation_input_tokens,cache_read_input_tokens,
           provider_total_tokens,computed_total_tokens,retry_count,retryable,cancelled_by_user,
-          context_exceeded,error_type,error_code,error_message,raw_usage_json)
-        VALUES(?1,?2,0,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,
-          ?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35)"
+          context_exceeded,error_type,error_code,error_message,raw_usage_json,span_id,
+          assistant_message_id,parent_user_message_id,provider_metadata_json)
+        VALUES(?1,?2,?36,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,
+          ?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?37,?38,?39,?40)"
             .replace("rust_", prefix),
     )?
     .execute(params![
@@ -64,6 +70,11 @@ fn model(conn: &Connection, prefix: &str, f: &ModelFact) -> Result<()> {
         f.error.code,
         f.error.message,
         raw,
+        f.attempt_index as i64,
+        f.span_id,
+        f.assistant_message_id,
+        f.parent_user_message_id,
+        metadata,
     ])?;
     Ok(())
 }
@@ -74,10 +85,11 @@ fn turn(conn: &Connection, prefix: &str, f: &TurnFact) -> Result<()> {
           first_token_at,completed_at,duration_ms,time_to_first_token_ms,model_request_count,
           model_retry_count,tool_call_count,tool_error_count,input_tokens,output_tokens,reasoning_tokens,
           cache_creation_input_tokens,cache_read_input_tokens,computed_total_tokens,retryable,
-          cancelled_by_user,context_exceeded,error_type,error_code)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,0,?21,?22,?23,?24)
+          cancelled_by_user,context_exceeded,error_type,error_code,user_message_id)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?25,?21,?22,?23,?24,?26)
         ON CONFLICT(session_id,turn_id) DO UPDATE SET
           trace_id=coalesce(excluded.trace_id,rust_turn_usage.trace_id),
+          user_message_id=coalesce(excluded.user_message_id,rust_turn_usage.user_message_id),
           status=excluded.status,
           started_at=min(rust_turn_usage.started_at,excluded.started_at),
           first_model_start_at=coalesce(rust_turn_usage.first_model_start_at,excluded.first_model_start_at),
@@ -122,6 +134,8 @@ fn turn(conn: &Connection, prefix: &str, f: &TurnFact) -> Result<()> {
         f.context_exceeded,
         f.error.kind,
         f.error.code,
+        f.retryable,
+        f.user_message_id,
     ])?;
     Ok(())
 }
@@ -130,21 +144,29 @@ fn tool(conn: &Connection, prefix: &str, f: &ToolFact) -> Result<()> {
     conn.prepare_cached(
         &"INSERT INTO rust_tool_usage(id,session_id,turn_id,trace_id,tool_call_id,tool_name,approval_status,
           status,started_at,completed_at,duration_ms,output_bytes,cancelled_by_user,error_type,error_code,
-          error_message)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+          error_message,side_effect_scope,read_only,destructive,first_output_at,time_to_first_output_ms,
+          exit_code,truncated)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)
         ON CONFLICT(id) DO UPDATE SET
           session_id=excluded.session_id,
           turn_id=coalesce(excluded.turn_id,rust_tool_usage.turn_id),
           trace_id=coalesce(excluded.trace_id,rust_tool_usage.trace_id),
           tool_call_id=excluded.tool_call_id,
           tool_name=CASE WHEN excluded.tool_name='unknown' THEN rust_tool_usage.tool_name ELSE excluded.tool_name END,
+          side_effect_scope=coalesce(excluded.side_effect_scope,rust_tool_usage.side_effect_scope),
+          read_only=coalesce(excluded.read_only,rust_tool_usage.read_only),
+          destructive=coalesce(excluded.destructive,rust_tool_usage.destructive),
           approval_status=coalesce(excluded.approval_status,rust_tool_usage.approval_status),
           status=CASE WHEN rust_tool_usage.status IN ('completed','error','cancelled') AND excluded.status='running'
             THEN rust_tool_usage.status ELSE excluded.status END,
           started_at=min(rust_tool_usage.started_at,excluded.started_at),
+          first_output_at=coalesce(rust_tool_usage.first_output_at,excluded.first_output_at),
           completed_at=coalesce(excluded.completed_at,rust_tool_usage.completed_at),
           duration_ms=coalesce(excluded.duration_ms,rust_tool_usage.duration_ms),
+          time_to_first_output_ms=coalesce(excluded.time_to_first_output_ms,rust_tool_usage.time_to_first_output_ms),
+          exit_code=coalesce(excluded.exit_code,rust_tool_usage.exit_code),
           output_bytes=max(rust_tool_usage.output_bytes,excluded.output_bytes),
+          truncated=max(rust_tool_usage.truncated,excluded.truncated),
           cancelled_by_user=excluded.cancelled_by_user,
           error_type=coalesce(excluded.error_type,rust_tool_usage.error_type),
           error_code=coalesce(excluded.error_code,rust_tool_usage.error_code),
@@ -168,6 +190,13 @@ fn tool(conn: &Connection, prefix: &str, f: &ToolFact) -> Result<()> {
         f.error.kind,
         f.error.code,
         f.error.message,
+        f.meta.map(|m| m.scope),
+        f.meta.map(|m| m.read_only),
+        f.meta.map(|m| m.destructive),
+        f.first_output_at.map(|at| at as i64),
+        f.time_to_first_output_ms.map(|ms| ms as i64),
+        f.exit_code,
+        f.truncated,
     ])?;
     Ok(())
 }

@@ -90,6 +90,10 @@ impl Engine {
                     session.append_message(reminder);
                 }
                 session.context_tokens = Some(tokens);
+                // Node：轮内压缩的 ModelComplete 在本轮事件里，目标的 tokensUsed 包含它。
+                if let Some(goal) = session.goal.as_mut() {
+                    goal.account(&usage, self.clock.now());
+                }
                 if session.usage["contextWindow"].is_object() {
                     session.usage["contextWindow"]["usedTokens"] = tokens.into();
                 }

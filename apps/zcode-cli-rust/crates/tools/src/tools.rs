@@ -269,6 +269,9 @@ impl ToolPort for WorkspaceTools {
     fn concurrent_safe_scoped(&self, session: &str, name: &str) -> bool {
         self.concurrent_safe(name) || self.mcp.safe(session, name)
     }
+    fn mcp_annotations(&self, session: &str, name: &str) -> Option<Value> {
+        self.mcp.hints(session, name)
+    }
     async fn evict_session(&self, session: &str) -> Result<()> {
         self.shell.close_session(session).await?;
         self.reads.lock().await.remove(session);

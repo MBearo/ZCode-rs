@@ -110,6 +110,7 @@ impl ModelPort for Model {
             message: json!({"role":"assistant","content":if limited {"partial"} else {"summary"}}),
             calls: vec![],
             usage: json!({}),
+            raw_finish_reason: None,
         })
     }
 }

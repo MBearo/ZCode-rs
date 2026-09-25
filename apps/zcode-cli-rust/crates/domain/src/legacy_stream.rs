@@ -217,6 +217,9 @@ pub struct TurnTally {
     pub token_count: u64,
     pub tool_calls: u64,
     pub rounds: u64,
+    /// Node `serverToolUse` sums (`webSearchRequests`, `webFetchRequests`).
+    pub web_search: u64,
+    pub web_fetch: u64,
     /// Assistant response id of the latest text (`assistantMessageId`).
     pub message_id: Option<String>,
     /// This turn's tool calls by id.
@@ -250,8 +253,15 @@ pub fn input_summary(input: &Value) -> Value {
 }
 
 impl TurnTally {
-    /// One committed model step.
-    pub fn model_done(&mut self, usage: [u64; 6], text: &str, calls: usize) {
+    /// One committed model step; `raw` is its adapter usage.
+    pub fn model_done(&mut self, raw: &Value, text: &str, calls: usize) {
+        let usage = model_usage(raw);
+        self.web_search += raw["server_tool_use"]["web_search_requests"]
+            .as_u64()
+            .unwrap_or(0);
+        self.web_fetch += raw["server_tool_use"]["web_fetch_requests"]
+            .as_u64()
+            .unwrap_or(0);
         self.requests += 1;
         self.rounds += 1;
         for (sum, value) in self.usage.iter_mut().zip(usage) {
@@ -263,13 +273,37 @@ impl TurnTally {
         self.response = text.to_owned();
     }
 
+    /// A tool's internal request (Node `ModelComplete {stopReason:
+    /// "tool_internal"}`): its Node `ModelUsage` joins the summary.
+    pub fn nested(&mut self, usage: &Value) {
+        let n = |key: &str| usage[key].as_u64().unwrap_or(0);
+        let values = [
+            n("inputTokens"),
+            n("outputTokens"),
+            crate::usage::usage_total(usage),
+            n("cacheReadTokens"),
+            n("cacheWriteTokens"),
+            n("reasoningTokens"),
+        ];
+        self.requests += 1;
+        for (sum, value) in self.usage.iter_mut().zip(values) {
+            *sum = sum.saturating_add(value);
+        }
+        self.web_search += usage["serverToolUse"]["webSearchRequests"]
+            .as_u64()
+            .unwrap_or(0);
+        self.web_fetch += usage["serverToolUse"]["webFetchRequests"]
+            .as_u64()
+            .unwrap_or(0);
+    }
+
     /// Node `ModelUsageSummary`.
     pub fn summary(&self) -> Value {
         let mut usage = usage_json(self.usage);
         usage["source"] = "provider".into();
         usage["modelRequestCount"] = self.requests.into();
-        usage["webSearchRequests"] = 0.into();
-        usage["webFetchRequests"] = 0.into();
+        usage["webSearchRequests"] = self.web_search.into();
+        usage["webFetchRequests"] = self.web_fetch.into();
         usage
     }
 }

@@ -61,8 +61,9 @@ impl Engine {
                 .push_str("\n[Subagent result truncated; inspect child session for full content]");
         }
         let tools = s.rows.iter().filter(|r| r["kind"] == "toolCall").count() as u64;
-        let tokens = s.usage["cumulative"]["inputTokens"].as_u64().unwrap_or(0)
-            + s.usage["cumulative"]["outputTokens"].as_u64().unwrap_or(0);
+        // Node `aggregateModelUsage`：本次子运行全部 ModelComplete 的 totalTokens 之和（含
+        // 轮内压缩与工具内部请求），原先取子会话累计的 input+output。
+        let tokens = s.runtime.run_tokens;
         let output_file = self.tools.agent_output(id, &output).await?;
         let owner = self.sessions.get_mut(&parent).unwrap();
         let task = owner.children.get_mut(&task.id).unwrap();

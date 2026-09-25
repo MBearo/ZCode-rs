@@ -97,10 +97,14 @@ pub fn output(query: &str, text: &str, usage: Value, duration_ms: u64) -> Value 
             None => json!({"url": url}),
         })
         .collect();
-    let mut output =
-        json!({"query": query, "results": [], "sources": sources, "durationMs": duration_ms});
+    // Node 的键序：query、results、sources、summary、durationMs、webSearchRequests、modelUsage。
+    let mut output = json!({"query": query, "results": [], "sources": sources});
     if !summary.is_empty() {
         output["summary"] = summary.into();
+    }
+    output["durationMs"] = duration_ms.into();
+    if let Some(requests) = usage["serverToolUse"]["webSearchRequests"].as_u64() {
+        output["webSearchRequests"] = requests.into();
     }
     if usage.as_object().is_some_and(|u| !u.is_empty()) {
         output["modelUsage"] = usage;

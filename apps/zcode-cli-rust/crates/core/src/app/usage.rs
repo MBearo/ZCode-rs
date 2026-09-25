@@ -13,19 +13,40 @@ impl Engine {
     /// (which skips events after cancellation) sees it.
     pub(super) async fn observe_usage(&mut self, id: &str, event: &Event) {
         let now = self.clock.now();
+        if let Some(s) = self.sessions.get_mut(id) {
+            super::goal_events::account_nested(s, event, now);
+        }
+        // Node span id：`randomUUID().slice(0, 16)`，每个逻辑请求一个。
+        let span = self.clock.id().chars().take(16).collect::<String>();
+        let journal = self.sessions.get(id).and_then(|s| s.node.turn.as_ref());
+        let ids = usage::StepIds {
+            user: journal.map(|t| t.user.clone()),
+            assistant: journal
+                .and_then(|t| t.step.as_ref())
+                .map(|s| s.assistant.clone()),
+        };
+        let meta = match event {
+            Event::ToolStart { call } => {
+                let name = call["function"]["name"].as_str().unwrap_or("");
+                let hints = self.tools.mcp_annotations(id, name);
+                usage::tool_meta(name, hints.as_ref())
+            }
+            _ => None,
+        };
         let Some(active) = self.active.get_mut(id) else {
             return;
         };
         let cancelled = active.cancel.is_cancelled();
+        let mut run_tokens = None;
         let run = &mut active.usage;
         let facts = match event {
-            Event::ModelStatus(status) => run.on_status(status, now),
+            Event::ModelStatus(status) => run.on_status(status, &ids, || span, now),
             Event::Text { .. } => {
                 run.on_text(now);
                 vec![]
             }
-            Event::ModelDone { message, .. } => run.on_model_done(message.as_ref()),
-            Event::ToolStart { call } => run.on_tool_start(call, now),
+            Event::ModelDone { message, .. } => run.on_model_done(message.as_ref(), &ids),
+            Event::ToolStart { call } => run.on_tool_start(call, meta, now),
             Event::Permission { call, .. } => {
                 run.on_permission(call["id"].as_str().unwrap_or(""));
                 vec![]
@@ -39,8 +60,23 @@ impl Engine {
                 result,
                 failed,
                 denied,
+                facts,
                 ..
-            } => run.on_tool_done(id, (*failed, *denied, cancelled), result, now),
+            } => {
+                // Node 在工具结果之后追加 tool_internal 的 ModelComplete：用量计入本轮。
+                if let Some(usage) = &facts.model_usage {
+                    run.on_nested_usage(usage);
+                }
+                let end = usage::ToolEnd {
+                    failed: *failed,
+                    denied: *denied,
+                    cancelled,
+                    result,
+                    exit_code: facts.exit_code,
+                    truncated: facts.truncated,
+                };
+                run.on_tool_done(id, end, now)
+            }
             Event::Finished {
                 error,
                 model_failure,
@@ -54,10 +90,14 @@ impl Engine {
                     Outcome::Completed
                 };
                 let failure = model_failure.as_ref().map(|f| (f.reason, f.code));
-                run.finish(outcome, failure, now)
+                run_tokens = Some(run.total_tokens());
+                run.finish(outcome, failure, ids.user, now)
             }
             _ => vec![],
         };
+        if let (Some(tokens), Some(s)) = (run_tokens, self.sessions.get_mut(id)) {
+            s.runtime.run_tokens = tokens;
+        }
         for fact in facts {
             self.store.record_usage(fact).await;
         }

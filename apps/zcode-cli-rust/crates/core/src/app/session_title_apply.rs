@@ -7,18 +7,6 @@ use crate::domain::usage::{ErrorInfo, Fact, Tokens};
 use anyhow::Result;
 use serde_json::{Value, json};
 
-/// The OpenAI-shaped usage of a completion as Node usage tokens.
-fn tokens(usage: &Value) -> Tokens {
-    let count = |v: &Value| v.as_u64().unwrap_or(0);
-    Tokens {
-        input: count(&usage["prompt_tokens"]),
-        output: count(&usage["completion_tokens"]),
-        reasoning: count(&usage["completion_tokens_details"]["reasoning_tokens"]),
-        cache_write: count(&usage["prompt_tokens_details"]["cache_write_tokens"]),
-        cache_read: count(&usage["prompt_tokens_details"]["cached_tokens"]),
-    }
-}
-
 impl Engine {
     /// The sidecar's answer (Node `generateAndPersistSessionTitle` and
     /// `generateAndPersistGoalSummaryTitle`).
@@ -36,8 +24,9 @@ impl Engine {
         let generated = match &result {
             Ok(out) => {
                 fact.status = "completed";
-                fact.tokens = tokens(&out["usage"]);
-                fact.provider_total_tokens = out["usage"]["total_tokens"].as_u64();
+                let usage = crate::domain::usage::model_usage(&out["usage"]);
+                fact.tokens = Tokens::from_usage(&usage);
+                fact.provider_total_tokens = usage["totalTokens"].as_u64();
                 fact.tool_call_count = out["calls"].as_u64().unwrap_or(0);
                 let finish = match (fact.tool_call_count, out["limit"] == true) {
                     (0, false) => "stop",
@@ -45,7 +34,10 @@ impl Engine {
                     _ => "tool-calls",
                 };
                 fact.finish_reason = Some(finish.into());
-                fact.raw_usage = Some(out["usage"].clone());
+                fact.raw_usage = Some(usage).filter(|u| !u.is_null());
+                fact.provider_metadata = out["rawFinish"]
+                    .as_str()
+                    .map(|raw| json!({"rawFinishReason": raw}));
                 (fact.tool_call_count == 0)
                     .then(|| title::clean(out["text"].as_str().unwrap_or("")))
                     .flatten()
@@ -59,7 +51,8 @@ impl Engine {
                 fact.retryable = failure.retryable;
                 fact.error = ErrorInfo {
                     kind: Some(failure.reason.into()),
-                    code: Some(failure.code.into()),
+                    // Node 标题失败是模型适配器错误：不是 CoreError，没有 code。
+                    code: None,
                     message: Some(failure.message.into()),
                 };
                 None

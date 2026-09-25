@@ -80,7 +80,8 @@ pub struct Task {
     pub output: String,
     pub output_file: String,
     pub tool_uses: u64,
-    pub tokens: u64,
+    #[serde(default)]
+    pub tokens: Option<u64>,
 }
 impl Task {
     pub fn running(&self) -> bool {
@@ -105,28 +106,40 @@ impl Task {
                 self.id, self.id, self.output_file
             )
         } else {
+            // Node：没有用量时省略 subagent_tokens 行。
+            let tokens = self
+                .tokens
+                .map_or(String::new(), |t| format!("subagent_tokens: {t}\n"));
             format!(
-                "{}\nagentId: {} (use SendMessage with to: '{}' to continue this agent)\n<usage>subagent_tokens: {}\ntool_uses: {}\nduration_ms: {}</usage>",
+                "{}\nagentId: {} (use SendMessage with to: '{}' to continue this agent)\n<usage>{tokens}tool_uses: {}\nduration_ms: {}</usage>",
                 self.output,
                 self.id,
                 self.id,
-                self.tokens,
                 self.tool_uses,
-                self.ended_at
-                    .unwrap_or(self.started_at)
-                    .saturating_sub(self.started_at)
+                self.duration_ms()
             )
         }
     }
+    fn duration_ms(&self) -> u64 {
+        self.ended_at
+            .unwrap_or(self.started_at)
+            .saturating_sub(self.started_at)
+    }
     pub fn notification(&self) -> String {
+        // Node `formatLocalAgentUsage`：结果之后是一行 usage（没有用量时省略 token）。
+        let tokens = self.tokens.map_or(String::new(), |t| {
+            format!("<subagent_tokens>{t}</subagent_tokens>")
+        });
         format!(
-            "<task-notification>\n<task-id>{}</task-id>\n<tool-use-id>{}</tool-use-id>\n<output-file>{}</output-file>\n<status>{}</status>\n<summary>{}</summary>\n<result>{}</result>\n</task-notification>",
+            "<task-notification>\n<task-id>{}</task-id>\n<tool-use-id>{}</tool-use-id>\n<output-file>{}</output-file>\n<status>{}</status>\n<summary>{}</summary>\n<result>{}</result>\n<usage>{tokens}<tool_uses>{}</tool_uses><duration_ms>{}</duration_ms></usage>\n</task-notification>",
             escape(&self.id),
             escape(&self.call_id),
             escape(&self.output_file),
             escape(&self.status),
             escape(&self.description),
-            escape(&self.output)
+            escape(&self.output),
+            self.tool_uses,
+            self.duration_ms()
         )
     }
     pub fn task_output(&self, timed_out: bool) -> Value {

@@ -158,7 +158,7 @@ impl Engine {
             output: String::new(),
             output_file,
             tool_uses: 0,
-            tokens: 0,
+            tokens: None,
         };
         self.sessions
             .get_mut(parent)

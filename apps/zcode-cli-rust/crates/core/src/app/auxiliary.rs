@@ -85,7 +85,14 @@ impl Engine {
         tokio::spawn(async move {
             let result=model.complete(messages,&tools,&sink,&cancel).await.map(|out|{
                 if connectivity {return json!({"success":true});}
-                json!({"text":out.message["content"].as_str().unwrap_or(""),"selection":{"providerId":selected.provider_id,"modelId":selected.model_id,"options":{"reasoningLevel":selected.reasoning_level}},"toolCalls":out.calls.iter().map(|c|json!({"id":c["id"],"name":c["function"]["name"],"input":serde_json::from_str::<Value>(c["function"]["arguments"].as_str().unwrap_or("{}")).unwrap_or(Value::Null)})).collect::<Vec<_>>(),"finishReason":if out.output_limit{"length"}else if out.calls.is_empty(){"stop"}else{"tool-calls"},"usage":{"inputTokens":out.usage["prompt_tokens"].as_u64().unwrap_or(0),"outputTokens":out.usage["completion_tokens"].as_u64().unwrap_or(0)}})
+                // Node 返回完整的 ModelUsage（cache、reasoning、serverToolUse），没有用量时省略。
+                let mut result = json!({"text":out.message["content"].as_str().unwrap_or(""),"selection":{"providerId":selected.provider_id,"modelId":selected.model_id,"options":{"reasoningLevel":selected.reasoning_level}},"finishReason":if out.output_limit{"length"}else if out.calls.is_empty(){"stop"}else{"tool-calls"}});
+                let usage = crate::domain::usage::model_usage(&out.usage);
+                if !usage.is_null() {
+                    result["usage"] = usage;
+                }
+                result["toolCalls"] = out.calls.iter().map(|c|json!({"id":c["id"],"name":c["function"]["name"],"input":serde_json::from_str::<Value>(c["function"]["arguments"].as_str().unwrap_or("{}")).unwrap_or(Value::Null)})).collect::<Vec<_>>().into();
+                result
             });
             let _ = sink.send(Event::AuxiliaryDone { result }).await;
         });

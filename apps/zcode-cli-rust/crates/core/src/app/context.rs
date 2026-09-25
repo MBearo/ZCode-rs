@@ -208,15 +208,26 @@ pub(super) async fn hidden_request(
     };
     let request = model.complete(messages, tools, &hidden, cancel);
     tokio::pin!(request);
-    loop {
+    let result = loop {
         tokio::select! {biased;
             _=cancel.cancelled()=>bail!("Cancelled"),
             Some(event)=rx.recv()=> {
                 if matches!(event.event, Event::RequestAuth{..} | Event::ModelStatus(_)) { sink.send(event.event).await?; }
             },
-            result=&mut request=> return Ok(result?),
+            result=&mut request=> break result,
+        }
+    };
+    // 请求结束时通道里可能还有未转发的状态（含带 usage 的 completed）。原先直接返回会丢掉它，
+    // 压缩与目标验证的用量因此在 run 结束时被记成 error、token 为 0；这里先转发完再返回。
+    while let Ok(event) = rx.try_recv() {
+        if matches!(
+            event.event,
+            Event::RequestAuth { .. } | Event::ModelStatus(_)
+        ) {
+            sink.send(event.event).await?;
         }
     }
+    Ok(result?)
 }
 /// The request prefix of an agent step (system prompt, instructions, skills,
 /// profile and goal state), shared by the compaction summary request.

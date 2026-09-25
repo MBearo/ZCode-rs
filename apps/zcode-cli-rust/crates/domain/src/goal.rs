@@ -138,6 +138,14 @@ impl Goal {
             usage["prompt_tokens"].as_u64().unwrap_or(0)
                 + usage["completion_tokens"].as_u64().unwrap_or(0)
         });
+        self.account_tokens(total, now);
+    }
+    /// Tokens of the open run outside its steps (Node's turn usage also sums
+    /// in-turn compaction and tools' internal requests).
+    pub fn account_tokens(&mut self, total: u64, now: u64) {
+        if !self.running() {
+            return;
+        }
         self.run_tokens = self.run_tokens.saturating_add(total);
         self.heartbeat(now);
     }

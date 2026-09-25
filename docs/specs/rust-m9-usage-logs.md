@@ -51,44 +51,66 @@ sequenceDiagram
 - upsert 规则同 Node：模型请求按 id 整行覆盖；轮次按 `(session_id, turn_id)` 合并（started_at 取小，首个时刻保留，终态字段覆盖）；工具按 id 合并（终态不被 running 覆盖，字节取大，错误字段保留首个非空值）。
 - 保留 30 天：按 started_at 删除三表中早于 `now - 30 天` 的行。Node 每次写入后执行；Rust 在写入时最多每分钟执行一次，过期行最多多保留 1 分钟。
 
-### 2.3 记录规则
+### 2.3 记录规则（M9.3 按 Node 实测对齐）
 
-**模型请求（`model_usage`）**
+对照依据是 `scripts/zcode-cli-rust-usage-diff.mjs`（§3）：同一本地模型下真实 Node CLI 与 Rust 跑相同场景，三张表的行归一化 id 与时刻后逐字段比较。以下规则都来自 Node 源码并经该脚本核对。
 
-- 记录的来源：`main_turn`（根会话的 agent step）、`subagent`（子会话的 step）、`compact`（手动与自动压缩摘要）、`target_completion_verification`（目标完成验证）。WebFetch 处理（`web_fetch_processing`）与 WebSearch（`web_search_tool`）不记录，Node 同样不记录。
+**模型请求（`model_usage`，Node `recordModelUsageFact`）**
+
+- 记录的来源：`main_turn`（根会话的 agent step）、`subagent`（子会话的 step）、`compact`（手动与自动压缩摘要）、`target_completion_verification`、`session_title`、`goal_summary_title`。WebSearch（`web_search_tool`）、WebFetch 处理（`web_fetch_processing`）与连通性测试不记录，Node 同样不记录。
 - 一个逻辑请求从 attempt 1 的 `model_request_started` 开始，每个 `model_retry_scheduled` 使 retry_count 加 1。
+- 身份：
+  - step 请求：`assistant_message_id` 为该步骤的 Node assistant 消息 id，`parent_user_message_id` 为本轮的 user 消息 id，`logical_request_id` 取 assistant 消息 id。
+  - 其他来源：`logical_request_id` 取该请求的 span id；标题请求的 `parent_user_message_id` 为触发标题的 user 消息 id，压缩与目标验证为空。
+  - `id` 为 `usage_model_<来源>_<logical_request_id>_<attempt_index>`；`attempt_index` 为压缩在 prompt-too-long 之后的重试序号，其余为 0。
+  - `span_id`：每个逻辑请求一个 Node 格式的 span id（`randomUUID().slice(0, 16)`）。
 - 终态：
-  - `model_request_completed`：status 为 completed。token 取该状态的 `usage`（Node ModelUsage 口径），finish_reason 取其 finishReason。step 请求（main_turn、subagent）在随后的 `ModelDone` 落库，tool_call_count 为该 assistant 消息的工具调用数；其他来源立即落库，tool_call_count 为 0。
-  - `retryable` 为 false 的 `model_request_failed`：reason 为 `cancelled` 时 status 为 cancelled（cancelled_by_user 为 1），否则为 error。error_type、error_code、error_message 分别取 reason、errorCode、message；reason 为 `context_exceeded` 时 context_exceeded 为 1。
+  - `model_request_completed`：status 为 completed。token 取 Node `ModelUsage`（`raw_usage_json` 与 `provider_total_tokens` 都用这一归一化形态，标题请求也一样），finish_reason 取归一化的 finishReason，`provider_metadata_json` 为 `{rawFinishReason}`（供应商原始结束原因）。step 请求在随后的 `ModelDone` 落库，tool_call_count 为该 assistant 消息的工具调用数；其他来源立即落库，tool_call_count 为 0。
+  - `retryable` 为 false 的 `model_request_failed`：reason 为 `cancelled` 时 status 为 cancelled（cancelled_by_user 为 1），否则为 error。error_type 取 reason，error_code 为空（Node 的模型适配器错误不是 CoreError，没有 code），error_message 为该 reason 的通用失败文案（Node 适配器错误的 message，例如 `Provider rejected the model request.`），不是供应商原文。reason 为 `context_exceeded` 时 context_exceeded 为 1。
   - run 结束时仍未终结的请求：run 被取消时记 cancelled，否则记 error。
-- 时刻：started_at 为 Engine 收到 attempt 1 开始状态的时刻。first_token_at 为该请求首个非空文本或推理增量的时刻；只有 step 请求有流式增量，其他来源为空（与 Node 相同）。completed_at 与 duration_ms 取终态时刻。
-- token：computed_total_tokens 为输入侧加 outputTokens，其中输入侧在 inputTokens 大于 0 时取 inputTokens，否则取 cache 读写之和。provider_total_tokens 为 usage.totalTokens，raw_usage_json 为该 usage 对象。retryable 为 retry_count 大于 0。
-- 归属：
-  - provider_id、model_id 取状态中的值，即请求开始时的模型快照。
-  - variant 为会话当前的推理档位，agent 固定为 `zcode-agent`，mode 为会话权限模式。
-  - task_type：根会话为 `interactive`，子会话为 `subagent_child`。
-  - turn_id 为 run 的轮次 id，trace_id 为 run 的 trace。
+- 时刻：started_at 为 Engine 收到 attempt 1 开始状态的时刻。first_token_at 为该请求首个非空文本或推理增量的时刻；只有 step 请求有流式增量，其他来源为空（与 Node 相同）。
+- token：computed_total_tokens 为输入侧加 outputTokens，其中输入侧在 inputTokens 大于 0 时取 inputTokens，否则取 cache 读写之和。retryable 为 retry_count 大于 0。
+- 归属：provider_id、model_id 取请求开始时的模型快照；variant 为会话当前的推理档位；mode 为会话权限模式；agent 为 `zcode-agent`，子会话为 `zcode-<子代理类型>`（Node 子代理 runtime 的 `agentName`）；task_type 根会话为 `interactive`，子会话为 `subagent_child`；turn_id、trace_id 为 run 的轮次与 trace，标题请求取触发它的轮次。
 
-**轮次（`turn_usage`）**
+**轮次（`turn_usage`，Node `recordTurnUsageFact`）**
 
-- 记录时机：
-  - 普通输入与目标续跑的 run 只在成功结束时记录。Node `turn.ts` 只在 completed 路径写入，失败与取消的普通轮不记录，Rust 保留这一行为。
-  - 手动压缩的 run 在成功、失败、取消时都记录（Node `compact.ts`）。
+- 记录时机（Node `turn.ts`、`compact.ts`）：普通输入与目标续跑的 run 在成功、失败、取消时都记录；UserPromptSubmit hook 拦截的输入按成功记录；手动压缩的 run 在每种结局都记录。
 - 字段：
+  - `user_message_id` 为本轮 user 消息 id，手动压缩为空。
   - started_at 为 run 开始时刻，completed_at 与 duration_ms 取结束时刻。
-  - model_request_count 与 model_retry_count 为本 run 记录的模型请求数与重试数之和。
-  - tool_call_count 为开始的工具调用数，tool_error_count 为失败或被拒绝的调用数。
-  - token 为本 run 已完成请求的 usage 之和；computed_total_tokens 按 Node `getModelUsageTotalTokens` 累加。
-  - 失败信息：cancelled_by_user；error_type 为模型失败的 reason，其他失败为 `runtime`；error_code 为模型失败的 code；context_exceeded。
+  - model_request_count 与 model_retry_count 为本轮事件中的模型请求数与重试数：agent step 与轮内压缩计入，目标验证（自有事件列表）、标题（旁路）与 WebSearch 的内部请求不计入。
+  - tool_call_count 为调度的工具调用数。tool_error_count 只数本轮事件里的 ToolCallError：Node 执行器的工具事件不进入轮次事件列表，只有 run 结束时合成的中断调用计入（Rust 为 run 结束时仍未完成的调用），普通失败与拒绝不计。
+  - token 为本轮所有 ModelComplete 的 usage 之和：agent step、轮内压缩，以及工具内部请求的嵌套用量（§2.3.1）；目标验证不计入。computed_total_tokens 按 Node `getModelUsageTotalTokens` 累加。
+  - 失败信息同 Node `createTurnFailureError`：取消为 `turn_cancelled` / `TURN_CANCELLED`（cancelled_by_user 为 1）；超出上下文为 `model_context_exceeded` / `MODEL_CONTEXT_EXCEEDED`、retryable 为 1、context_exceeded 为 1；其他失败为 `unknown_error` / `UNKNOWN_ERROR`。
 
-**工具（`tool_usage`）**
+**工具（`tool_usage`，Node `recordToolUsageFromEvent` 与 `recordToolUsageFromResult`，经同一 upsert 合并）**
 
 - id 为 `usage_tool_<session>_<callId>`。
-- 状态：
-  - `ToolStart` 写入 running，approval_status 为 `none`；发起权限请求后为 `requested`。
-  - `ToolDone` 写终态：被拒绝为 error 且 approval_status 为 `denied`；失败为 error（run 已取消时为 cancelled，cancelled_by_user 为 1）；成功为 completed（请求过权限时 approval_status 为 `allowed`）。
-  - run 结束时仍未完成的调用：run 被取消时记 cancelled，否则记 error。
-- 字段：started_at 为 `ToolStart` 时刻；duration_ms 为 `ToolExecuting` 到 `ToolDone` 的时长，处理器没有运行时为空；output_bytes 为结果文本的字节数；失败时 error_message 为结果文本（最多 1 KiB，结果文本可能是整段工具输出）。
+- `side_effect_scope`、`read_only`、`destructive` 取 Node 工具注册元数据：Read、Glob、Grep、TaskOutput、TodoRead 为 `none`/只读；Write、Edit 为 `workspace`；Bash 为 `system`；WebFetch、WebSearch 为 `network`/只读；TodoWrite、Skill、Agent 为 `session`/只读；SendMessage、TaskStop、EnterPlanMode、ExitPlanMode 为 `session`；AskUserQuestion 为 `userInteraction`/只读；MCP 工具为 `network`（宿主 `node_repl` 的 `js` 为 `system`），只读与破坏性取 annotations 的 `readOnlyHint === true`、`destructiveHint === true`。
+- 状态：调度时 running；成功为 completed，失败与拒绝为 error，run 取消导致的失败为 cancelled（cancelled_by_user 为 1）。run 结束时仍未完成的调用按 run 的结局收口。
+- approval_status：权限事件依次写 `requested`、`allowed` / `denied`，但 Node 的结果记录器最后写入 `none`，upsert 的 coalesce 让它覆盖前值；有结果的调用最终都是 `none`（照 Node 保留）。
+- 字段：
+  - started_at 为调度时刻；duration_ms 为执行时长，被拒绝的调用从调度算起（Node 结果记录器总有时长）。
+  - first_output_at 为首次输出时刻：Bash 输出的首个增量，其他工具为完成时刻；time_to_first_output_ms 为完成时刻减执行开始时刻（Node 结果记录器）。
+  - exit_code 为 Bash 的退出码，其他工具为 0（Node 结果事件对缺失的退出码写 0）。
+  - output_bytes 为结果文本的字节数，失败与拒绝为 0（没有序列化输出）；truncated 为结果是否被预算截断。
+  - 失败时 error_type 为 Node 的错误类型（`tool_execution_failed`、`tool_cancelled`、`permission_denied`），error_code 为 CoreError 的大写类型（`TOOL_EXECUTION_FAILED`、`TOOL_CANCELLED`），权限拒绝没有 code；error_message 为错误文本。
+
+#### 2.3.1 工具内部请求的嵌套用量（Node `appendNestedToolModelUsage`）
+
+- 工具结果带 `modelUsage` 时（WebSearch 的内部模型请求），Node 在本轮追加一条 `ModelComplete {stopReason: "tool_internal"}`。Rust 在工具结果提交时把这份用量计入：
+  - 本轮 `turn_usage` 的 token（不计入 model_request_count）；
+  - 旧协议 `turn.completed` 的 usage，其中 `webSearchRequests`、`webFetchRequests` 累加 `serverToolUse`；
+  - 目标的 `tokensUsed`（Node `accountTargetTurnCompletion` 取本轮 usage 的 totalTokens）；
+  - 子代理返回给父会话的用量（Node `aggregateModelUsage` 汇总子会话本次运行的全部 ModelComplete）。
+- 不计入 `model_usage`（所以不进入 `v4/conversation/usage` 与 `v4/usage/stats`），也不计入 v4 `usage` 状态与上下文用量，与 Node 相同。
+- WebSearch 输出的 `modelUsage` 为内部请求的 Node `ModelUsage`（input/output/total、cache 读写、reasoning、`serverToolUse.webSearchRequests/webFetchRequests`），并带顶层 `webSearchRequests`。
+
+#### 2.3.2 标题的时机
+
+- app-server（Node 协议模式）：Node 的 `providerRuntimeHeadersPort.shouldRefreshBeforeModelRequest` 恒为 true，首条输入的标题总是推迟到该轮成功结束后生成；失败或取消的首轮不生成，推迟的标题也随之丢弃，之后第一条成功的轮次生成。Rust 原先只对账号类供应商推迟，现与 Node 相同。
+- `turnNumber === 0` 的判定：本次激活之前已存的输入（加载时的历史）加上本次激活成功结束的 run（压缩除外）为 0；本次激活开始的输入与 `/goal` 目标不计入（原先按消息里的输入条数判断，失败的首轮会让之后永远不生成标题）。
+- 标题用量的 turn_id、trace_id 为触发它的 run。
 
 ### 2.4 查询
 
@@ -105,7 +127,7 @@ sequenceDiagram
 
 **`v4/conversation/usage` 与旧 `session/usage`**
 
-- 参数：严格对象 `{sessionId}`。v4 为 `z.string().min(1)`，旧方法为去空白后非空。
+- 参数：严格对象 `{sessionId}`，两个方法都按 Node 服务端实际使用的 `zcodeTaskTokenUsageParamsSchema` 去空白后非空。
 - 计算：按 started_at、id 升序读取该会话的模型请求，规则同 Node `queryTaskUsage`：
   - main_turn、subagent、workflow_child 三个来源的输入侧按各自基线取增量，压缩后基线随之下降；其他来源全额计入。
   - 输入侧口径同 Node `inputSideTokensFromStoredUsage`。
@@ -119,13 +141,15 @@ sequenceDiagram
 ### 2.6 与 Node 的差异
 
 - 保留清理最多每分钟一次（见 2.2）。
-- `workspace/generateText` 与 `provider/testModelConnectivity` 不记录用量。Node 在有活动会话时记到该会话，否则因会话外键缺失而写入失败；Rust 不把这些 workspace 级请求归到会话。
-- tool_usage 的 side_effect_scope、read_only、destructive 为空，exit_code 与 stdout / stderr 字节不记录。这些字段 Node 只写入，不参与任何查询。
+- `workspace/generateText` 不记录用量：Node 记到工作区的活动会话，没有活动会话时因会话外键写入失败；Rust 不把 workspace 级请求归到会话。连通性测试两边都不记录。
+- stdout / stderr 字节只在 Node 的 Bash 进度事件里有值，Rust 不单独统计，记 0。
+- 标题请求 Node 走非流式 `generateText`，`provider_metadata_json` 是 AI SDK 的供应商元数据（例如 `{anthropic: {usage, cacheCreationInputTokens, …}}`）；Rust 以流式请求生成标题，记 `{rawFinishReason}`。
 - 时刻取 Engine 收到事件的时间，Node 取事件对象的时间戳；两者只差进程内的通道延迟。
 
 ### 2.7 修复
 
 - 目标完成验证原先复用压缩的隐藏请求，请求来源为 `compact`；现改为 Node 的 `target_completion_verification`，网络状态、`session/debug` 与用量的归属都与 Node 一致。
+- 隐藏请求（压缩、目标验证、WebSearch）在请求结束时直接返回，通道里尚未转发的 completed 状态被丢弃，压缩用量因此记为 error、token 为 0，轮次 token 缺少压缩部分。现在请求结束后先转发剩余状态。
 
 ### 2.8 验收
 
@@ -139,3 +163,14 @@ sequenceDiagram
   - `v4/usage/stats` 的 summary、模型与工具排行、热力图。
   - 参数错误。
   - Node 写入的用量行出现在统计中。
+
+## 3. 与 Node 的差分检查（M9.3）
+
+`TSX_TSCONFIG_PATH=packages/services/tests/tsconfig.zcode-cli-rust.json node --import tsx scripts/zcode-cli-rust-usage-diff.mjs [zcode.cjs] [rust] [--only=…] [--show=…]`：
+
+- 本地 Anthropic Messages 模型（流式与非流式、cache 读写与 `server_tool_use` 用量）；共用 Provider Registry 形态的 HOME（`scripts/zcode-cli-rust-interop-runtime.mjs`）。
+- 场景：普通轮、Bash 工具轮、WebSearch（内部搜索请求）、模型 400 失败、流式中停止、手动压缩、子代理。每个场景一个新会话，Node 与 Rust 各用一个临时库。
+- 比较：三张表的行按记录对象（来源或工具名）排序后逐字段比较；会话、轮次、消息、trace、span、调用 id 按首次出现替换为占位，时刻与时长只比较是否为空，`*_json` 解析后比较。
+- 同时收集两边的 `v4/telemetry/event`（§4 对齐前只列出种类）。
+- 已知差异（脚本列出、不计数）：标题的 `provider_metadata_json`（§2.6）；工具失败文本里的工作目录（Rust 把工作区 realpath 化，单列对齐项）。
+- 场景：普通轮、Bash、WebSearch、模型失败、停止、手动压缩、子代理、工具失败（Read 不存在的文件）、build 模式下拒绝权限。2026-09-25 的结果：9 个场景三张表逐字段一致（差异 0）。

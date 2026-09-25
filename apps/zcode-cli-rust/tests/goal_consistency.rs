@@ -99,6 +99,7 @@ impl ModelPort for Model {
             message: json!({"role":"assistant","content":content}),
             calls: vec![],
             usage: json!({"prompt_tokens":10,"completion_tokens":3}),
+            raw_finish_reason: None,
         })
     }
 }

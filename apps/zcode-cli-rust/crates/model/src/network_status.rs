@@ -212,6 +212,10 @@ impl Reporter<'_> {
         };
         status["finishReason"] = finish.into();
         status["usage"] = usage(output.map_or(&Value::Null, |o| &o.usage));
+        // 用量记录要供应商原始结束原因（Node providerMetadata.rawFinishReason）；旧协议转发前去掉。
+        if let Some(raw) = output.and_then(|o| o.raw_finish_reason.as_deref()) {
+            status[crate::domain::usage::RAW_FINISH_REASON] = raw.into();
+        }
         if let Some(id) = PROVIDER_REQUEST_HEADERS.iter().find_map(|h| {
             response
                 .get(*h)
@@ -361,36 +365,12 @@ fn exception_type(failure: &ModelFailure) -> &'static str {
     }
 }
 
-/// Node `ModelUsage` from an OpenAI-style usage object; unknown fields are omitted.
+/// Node `ModelUsage` from the adapter's usage object.
 fn usage(usage: &Value) -> Value {
-    let mut out = Map::new();
-    let input = usage["prompt_tokens"].as_u64();
-    let output = usage["completion_tokens"].as_u64();
-    let total = usage["total_tokens"]
-        .as_u64()
-        .or(input.zip(output).map(|(i, o)| i + o));
-    for (key, value) in [
-        ("inputTokens", input),
-        ("outputTokens", output),
-        ("totalTokens", total),
-        (
-            "cacheReadTokens",
-            usage["prompt_tokens_details"]["cached_tokens"].as_u64(),
-        ),
-        (
-            "cacheWriteTokens",
-            usage["prompt_tokens_details"]["cache_write_tokens"].as_u64(),
-        ),
-        (
-            "reasoningTokens",
-            usage["completion_tokens_details"]["reasoning_tokens"].as_u64(),
-        ),
-    ] {
-        if let Some(value) = value {
-            out.insert(key.into(), value.into());
-        }
+    match crate::domain::usage::model_usage(usage) {
+        Value::Null => Value::Object(Map::new()),
+        usage => usage,
     }
-    out.into()
 }
 
 #[cfg(test)]

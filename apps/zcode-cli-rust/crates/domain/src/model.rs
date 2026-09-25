@@ -28,61 +28,67 @@ pub struct FailureDetail {
     pub provider_error_message: Option<String>,
     pub provider_request_id: Option<String>,
 }
+/// The code and the controlled message of a failure `reason` (the message
+/// Node's model adapter error carries).
+pub fn describe(reason: &str) -> (&'static str, &'static str) {
+    match reason {
+        "cancelled" => ("model_request_cancelled", "Model request was cancelled."),
+        "timeout" => ("model_request_timeout", "Model request timed out."),
+        "stream_idle_timeout" => ("model_request_timeout", "Model stream stalled."),
+        "rate_limited" => (
+            "model_rate_limited",
+            "Provider rate limited the model request.",
+        ),
+        "auth_failed" => ("provider_not_configured", "Provider authentication failed."),
+        "context_exceeded" => ("model_context_exceeded", "Model context window exceeded."),
+        "attachment_unavailable" => (
+            "attachment_unavailable",
+            "An attachment snapshot is missing or invalid.",
+        ),
+        // Node `MEDIA_BUDGET_CURRENT_ATTACHMENT_TOO_LARGE_ERROR_CODE`（UI 按该码本地化）。
+        "media_budget" => (
+            "MEDIA_BUDGET_CURRENT_ATTACHMENT_TOO_LARGE",
+            "Current attachments are too large to send. Remove or compress attachments and try again.",
+        ),
+        "attachment_unsupported" => (
+            "attachment_unsupported",
+            "The selected model does not support an attachment format.",
+        ),
+        "model_output_limit_exceeded" => (
+            "model_output_limit_exceeded",
+            "The model's response exceeded the output token maximum.",
+        ),
+        "invalid_request" => (
+            "invalid_model_request",
+            "Provider rejected the model request.",
+        ),
+        // Node tool-transform：只有 Anthropic 协议能编码 provider 原生搜索。
+        "native_search_chat" => (
+            "invalid_model_request",
+            "Provider API kind openai-compatible does not encode provider-native WebSearch",
+        ),
+        "native_search_responses" => (
+            "invalid_model_request",
+            "Provider API kind openai does not encode provider-native WebSearch",
+        ),
+        "invalid_response" => (
+            "invalid_model_response",
+            "Provider response was invalid or incomplete.",
+        ),
+        "tls_error" => ("model_request_failed", "Provider TLS validation failed."),
+        "network_error" => (
+            "model_request_failed",
+            "Provider connection or stream interrupted.",
+        ),
+        "provider_overloaded" => ("model_request_failed", "Provider is overloaded."),
+        "server_error" => ("model_request_failed", "Provider returned a server error."),
+        _ => ("model_request_failed", "Model request failed."),
+    }
+}
+
 impl ModelFailure {
     pub fn new(reason: &'static str, retryable: bool) -> Self {
-        let (code, message) = match reason {
-            "cancelled" => ("model_request_cancelled", "Model request was cancelled."),
-            "timeout" => ("model_request_timeout", "Model request timed out."),
-            "stream_idle_timeout" => ("model_request_timeout", "Model stream stalled."),
-            "rate_limited" => (
-                "model_rate_limited",
-                "Provider rate limited the model request.",
-            ),
-            "auth_failed" => ("provider_not_configured", "Provider authentication failed."),
-            "context_exceeded" => ("model_context_exceeded", "Model context window exceeded."),
-            "attachment_unavailable" => (
-                "attachment_unavailable",
-                "An attachment snapshot is missing or invalid.",
-            ),
-            // Node `MEDIA_BUDGET_CURRENT_ATTACHMENT_TOO_LARGE_ERROR_CODE`（UI 按该码本地化）。
-            "media_budget" => (
-                "MEDIA_BUDGET_CURRENT_ATTACHMENT_TOO_LARGE",
-                "Current attachments are too large to send. Remove or compress attachments and try again.",
-            ),
-            "attachment_unsupported" => (
-                "attachment_unsupported",
-                "The selected model does not support an attachment format.",
-            ),
-            "model_output_limit_exceeded" => (
-                "model_output_limit_exceeded",
-                "The model's response exceeded the output token maximum.",
-            ),
-            "invalid_request" => (
-                "invalid_model_request",
-                "Provider rejected the model request.",
-            ),
-            // Node tool-transform：只有 Anthropic 协议能编码 provider 原生搜索。
-            "native_search_chat" => (
-                "invalid_model_request",
-                "Provider API kind openai-compatible does not encode provider-native WebSearch",
-            ),
-            "native_search_responses" => (
-                "invalid_model_request",
-                "Provider API kind openai does not encode provider-native WebSearch",
-            ),
-            "invalid_response" => (
-                "invalid_model_response",
-                "Provider response was invalid or incomplete.",
-            ),
-            "tls_error" => ("model_request_failed", "Provider TLS validation failed."),
-            "network_error" => (
-                "model_request_failed",
-                "Provider connection or stream interrupted.",
-            ),
-            "provider_overloaded" => ("model_request_failed", "Provider is overloaded."),
-            "server_error" => ("model_request_failed", "Provider returned a server error."),
-            _ => ("model_request_failed", "Model request failed."),
-        };
+        let (code, message) = describe(reason);
         Self {
             code,
             reason,

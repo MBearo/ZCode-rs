@@ -55,6 +55,7 @@ impl Engine {
             trace_id: origin.trace_id.clone(),
             variant: Some(identity.reasoning_level.clone()).filter(|level| !level.is_empty()),
             mode: session.mode.as_str().into(),
+            agent: session.node_agent(),
             subagent: session.parent_id.is_some(),
             compact: kind == crate::domain::legacy_stream::RunKind::Compact,
         };

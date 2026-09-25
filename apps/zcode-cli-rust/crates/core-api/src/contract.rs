@@ -58,7 +58,7 @@ pub enum Input {
 
 pub use crate::contract_events::{
     Event, EventSink, Guide, ModelOutput, PermissionAnswer, PermissionRequest, RequestAuth,
-    RequestKind, RequestOrigin, RunEvent, SessionHooks, WorkspaceHooks,
+    RequestKind, RequestOrigin, RunEvent, SessionHooks, ToolFacts, WorkspaceHooks,
 };
 pub use crate::contract_tools::{
     HookProcess, ToolError, ToolOutput, ToolPermission, ToolPort, TrustLoad, TrustStorePort,

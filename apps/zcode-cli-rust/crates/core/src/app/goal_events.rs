@@ -177,6 +177,20 @@ fn record(goal: &mut Goal, verdict: &Verdict, anchor: Value, now: u64) {
     goal.verifications.drain(..excess);
 }
 
+/// A tool's internal model usage (Node `tool_internal`) counts toward the
+/// running goal like the turn's other usage.
+pub(super) fn account_nested(
+    s: &mut crate::domain::session::Session,
+    event: &crate::contract::Event,
+    now: u64,
+) {
+    if let crate::contract::Event::ToolDone { facts, .. } = event
+        && let (Some(usage), Some(goal)) = (&facts.model_usage, s.goal.as_mut())
+    {
+        goal.account_tokens(crate::domain::usage::usage_total(usage), now);
+    }
+}
+
 pub(super) fn account_usage(s: &mut crate::domain::session::Session, usage: &Value, now: u64) {
     if let Some(goal) = s.goal.as_mut() {
         goal.account(usage, now);

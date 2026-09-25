@@ -68,6 +68,7 @@ impl ModelPort for Model {
                 message: json!({"role": "assistant", "content": verdict.to_string()}),
                 calls: vec![],
                 usage: json!({"prompt_tokens": 20, "completion_tokens": 5}),
+                raw_finish_reason: None,
             });
         }
         let compaction = messages.last().is_some_and(|m| {
@@ -126,6 +127,7 @@ impl ModelPort for Model {
                     "_zcode_origin": {"provider": "p", "model": "m"}}),
                 calls: vec![call],
                 usage: json!({}),
+                raw_finish_reason: None,
             });
         }
         if compaction {
@@ -136,6 +138,7 @@ impl ModelPort for Model {
                     "content": "<analysis>ok</analysis><summary>Fixed the parser.</summary>"}),
                 calls: vec![],
                 usage: json!({"prompt_tokens": 50, "completion_tokens": 10}),
+                raw_finish_reason: None,
             });
         }
         let n = self.calls.fetch_add(1, Ordering::SeqCst);
@@ -197,6 +200,7 @@ impl ModelPort for Model {
             message,
             calls,
             usage: json!({"prompt_tokens": 100, "completion_tokens": 5}),
+            raw_finish_reason: None,
         })
     }
 }

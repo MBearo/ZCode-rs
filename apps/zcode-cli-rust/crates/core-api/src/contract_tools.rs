@@ -128,6 +128,10 @@ pub trait ToolPort: Send + Sync {
     fn concurrent_safe_scoped(&self, _session: &str, name: &str) -> bool {
         self.concurrent_safe(name)
     }
+    /// The annotations of a session's MCP tool (`readOnlyHint`, `destructiveHint`).
+    fn mcp_annotations(&self, _session: &str, _name: &str) -> Option<Value> {
+        None
+    }
     async fn evict_session(&self, session: &str) -> Result<()> {
         self.close_session(session).await
     }
@@ -304,6 +308,8 @@ pub struct ToolOutput {
     pub model_content: Option<Value>,
     pub data: Value,
     pub display: Option<Value>,
+    /// The result was cut to its budget (Node `serialization.truncated`).
+    pub truncated: bool,
 }
 impl ToolOutput {
     pub fn text(content: String) -> Self {
@@ -315,6 +321,7 @@ impl ToolOutput {
             model_content: None,
             data: Value::Null,
             display: None,
+            truncated: false,
         }
     }
     pub fn new(content: String, data: Value) -> Self {
@@ -326,6 +333,7 @@ impl ToolOutput {
             model_content: None,
             data,
             display: None,
+            truncated: false,
         }
     }
 }

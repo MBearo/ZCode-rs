@@ -193,6 +193,7 @@ impl ModelPort for Model {
             message,
             calls,
             usage: json!({}),
+            raw_finish_reason: None,
         })
     }
 }

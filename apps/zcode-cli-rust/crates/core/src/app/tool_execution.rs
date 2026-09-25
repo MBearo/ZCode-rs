@@ -238,6 +238,7 @@ async fn apply_budget(
     };
     output.content = text;
     output.model_content = None;
+    output.truncated = true;
 }
 
 pub(super) async fn run_calls(
@@ -320,6 +321,12 @@ async fn commit(
         .then(|| crate::domain::node_journal::checkpoint::candidate(&output.data))
         .flatten()
         .map(Box::new);
+    let facts = crate::contract::ToolFacts {
+        exit_code: output.data["exitCode"].as_i64(),
+        truncated: output.truncated,
+        model_usage: Some(output.data["modelUsage"].clone())
+            .filter(|u| u.as_object().is_some_and(|u| !u.is_empty())),
+    };
     sink.send(Event::ToolDone {
         id: id.into(),
         result: content,
@@ -328,6 +335,7 @@ async fn commit(
         failed,
         denied: output.denied,
         checkpoint,
+        facts,
         committed,
     })
     .await?;

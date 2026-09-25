@@ -210,6 +210,8 @@ pub enum Event {
         denied: bool,
         /// Node's workspace checkpoint candidate of a file-mutating result.
         checkpoint: Option<Box<Value>>,
+        /// What the usage recorders read from the result.
+        facts: ToolFacts,
         committed: oneshot::Sender<()>,
     },
     StepBoundary {
@@ -235,11 +237,25 @@ pub struct WorkspaceHooks {
     pub view:
         tokio::sync::watch::Receiver<std::sync::Arc<zcode_cli_domain::hooks::trust::AdmissionView>>,
 }
+/// The usage facts of a tool result (Node `recordToolUsageFromResult` and
+/// `appendNestedToolModelUsage`).
+#[derive(Clone, Debug, Default)]
+pub struct ToolFacts {
+    /// Bash's exit code (Node `perf.detail.command.exitCode`).
+    pub exit_code: Option<i64>,
+    pub truncated: bool,
+    /// Node `output.modelUsage`: a tool's internal model request (WebSearch).
+    pub model_usage: Option<Value>,
+}
+
 pub struct ModelOutput {
     pub message: Value,
     pub calls: Vec<Value>,
     pub usage: Value,
     pub output_limit: bool,
+    /// The provider's own finish reason (AI SDK `rawFinishReason`): Anthropic
+    /// `stop_reason`, Chat `finish_reason`, Responses `incomplete_details.reason`.
+    pub raw_finish_reason: Option<String>,
 }
 /// A tool call the policy asked the user about.
 pub struct PermissionRequest {

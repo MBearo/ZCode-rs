@@ -218,7 +218,8 @@ impl Responses {
                     .items
                     .values()
                     .any(|i| i.value["type"] == "function_call");
-                self.inner.consume_value(&json!({"choices":[{"delta":{},"finish_reason":if output_limit{"length"}else if calls{"tool_calls"}else{"stop"}}],"usage":if usage.is_object(){json!({"prompt_tokens":usage["input_tokens"],"completion_tokens":usage["output_tokens"],"prompt_tokens_details":{"cached_tokens":usage["input_tokens_details"]["cached_tokens"]}})}else{Value::Null}}),output).await?;
+                let raw = &value["response"]["incomplete_details"]["reason"];
+                self.inner.consume_value(&json!({"choices":[{"delta":{},"finish_reason":if output_limit{"length"}else if calls{"tool_calls"}else{"stop"},"_zcode_raw_finish":raw}],"usage":if usage.is_object(){json!({"prompt_tokens":usage["input_tokens"],"completion_tokens":usage["output_tokens"],"prompt_tokens_details":{"cached_tokens":usage["input_tokens_details"]["cached_tokens"]}})}else{Value::Null}}),output).await?;
                 self.inner.done = true;
             }
             _ => {}

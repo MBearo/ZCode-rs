@@ -13,6 +13,8 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+#[path = "mcp_hub_bindings.rs"]
+mod bindings;
 #[derive(Clone)]
 struct Binding {
     name: String,
@@ -96,15 +98,6 @@ impl Hub {
             }
         }
         servers
-    }
-    pub fn safe(&self, session: &str, name: &str) -> bool {
-        self.state
-            .read()
-            .unwrap()
-            .bindings
-            .get(session)
-            .and_then(|b| b.iter().find(|b| b.name == name))
-            .is_some_and(|b| b.safe)
     }
     pub async fn definitions(
         &self,

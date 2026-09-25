@@ -33,6 +33,8 @@ pub(super) enum Fact {
         failed: bool,
         denied: bool,
         result: Option<String>,
+        /// The tool's internal model usage (Node `tool_internal` completion).
+        nested: Option<Value>,
     },
     Finished,
     /// Any other fact: ends the delta batching window.
@@ -77,12 +79,14 @@ pub(super) fn fact(event: &Event, subscribed: bool) -> Fact {
             result,
             failed,
             denied,
+            facts,
             ..
         } => Fact::ToolDone {
             call: id.clone(),
             failed: *failed,
             denied: *denied,
             result: subscribed.then(|| result.clone()),
+            nested: facts.model_usage.clone(),
         },
         Event::Finished { .. } => Fact::Finished,
         _ => Fact::Barrier,
@@ -254,10 +258,10 @@ impl Engine {
                 calls,
                 usage,
             } => {
-                let usage = model_usage(&usage);
                 if let Some(tally) = &mut s.runtime.legacy.turn {
-                    tally.model_done(usage, &content, calls.len());
+                    tally.model_done(&usage, &content, calls.len());
                 }
+                let usage = model_usage(&usage);
                 let mut payload = json!({"content": content, "querySource": "main_turn",
                     "stopReason": if calls.is_empty() { "stop" } else { "tool-calls" },
                     "usage": usage_json(usage), "toolCallCount": calls.len()});
@@ -272,7 +276,20 @@ impl Engine {
                 failed,
                 denied,
                 result,
-            } => self.legacy_tool_done(id, turn, &call, (failed, denied), result),
+                nested,
+            } => {
+                self.legacy_tool_done(id, turn, &call, (failed, denied), result);
+                // Node 在工具结果之后追加 tool_internal 的 model_complete，旧协议作为 session.updated 转发。
+                if let Some(usage) = nested {
+                    let s = self.sessions.get_mut(id).unwrap();
+                    if let Some(tally) = &mut s.runtime.legacy.turn {
+                        tally.nested(&usage);
+                    }
+                    let payload = json!({"content": "", "stopReason": "tool_internal",
+                        "usage": usage, "toolCallCount": 0});
+                    self.legacy_emit(id, Some(turn), vec![("session.updated", payload)]);
+                }
+            }
             Fact::Barrier => self.legacy_emit(id, Some(turn), vec![]),
             Fact::Finished => return self.legacy_turn_finished(id, turn),
         }

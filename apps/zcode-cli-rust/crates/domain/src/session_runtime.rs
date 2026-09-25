@@ -23,6 +23,13 @@ pub struct RuntimeOptions {
     /// A first prompt whose title waits for the turn to end (providers that
     /// refresh runtime headers first run the turn): `(input, user message)`.
     pub title_deferred: Option<(String, Option<String>)>,
+    /// Real prompts that started a run in this activation, and runs that
+    /// completed (Node `turnNumber` counts the stored prompts at load, then
+    /// each successful turn).
+    pub prompts_started: u64,
+    pub turns_completed: u64,
+    /// The last finished run's total tokens (a subagent's `subagent_tokens`).
+    pub run_tokens: Option<u64>,
     /// Legacy `runtime.stateRevision`: model and thought-level mutations of this activation.
     pub state_revision: u64,
     /// Workspace ref echoed by legacy snapshots (the create / resume params).

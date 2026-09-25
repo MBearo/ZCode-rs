@@ -74,8 +74,15 @@ export async function modelServer() {
   };
 }
 
-/** The shared HOME: yolo user config and a Provider Registry with the local model. */
-export async function prepareHome(root, baseUrl) {
+/**
+ * The shared HOME: yolo user config and a Provider Registry with the local model
+ * (`api` is the provider API type, `properties` the model properties).
+ */
+export async function prepareHome(
+  root,
+  baseUrl,
+  { api = "openai-chat-completions", properties = { contextWindow: 256000 } } = {},
+) {
   const home = join(root, "home");
   await mkdir(join(home, ".zcode", "cli"), { recursive: true });
   await writeFile(
@@ -95,7 +102,7 @@ export async function prepareHome(root, baseUrl) {
             config: {
               group: "standard-personal",
               access: { type: "api-key", apiKey: "fixture-only" },
-              api: { type: "openai-chat-completions", baseUrl },
+              api: { type: api, baseUrl },
               personalModelIds: ["model-a"],
             },
           },
@@ -107,7 +114,7 @@ export async function prepareHome(root, baseUrl) {
             providerId: "personal:fixture",
             modelId: "model-a",
             config: {
-              properties: { contextWindow: 256000 },
+              properties,
               optionSpecs: { reasoningLevel: { values: ["none"], map: "{}" } },
             },
           },
@@ -191,7 +198,8 @@ export function startRuntime(kind, { bundle, binary, cwd, env, dataDir }) {
     get stderr() {
       return stderr;
     },
-    command(type, sessionId, payload = {}, commandId = randomUUID()) {
+    /** A v4 command; `extra` adds envelope members such as `baseRevision`. */
+    command(type, sessionId, payload = {}, commandId = randomUUID(), extra = {}) {
       return rpc("v4/command", {
         commandId,
         clientId: `interop-${kind}`,
@@ -199,6 +207,7 @@ export function startRuntime(kind, { bundle, binary, cwd, env, dataDir }) {
         type,
         payload,
         issuedAt: Date.now(),
+        ...extra,
       });
     },
     subscribe(sessionId) {

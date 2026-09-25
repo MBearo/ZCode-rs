@@ -16,6 +16,9 @@ impl Engine {
             return;
         };
         status["turnId"] = turn.into();
+        if let Some(map) = status.as_object_mut() {
+            map.shift_remove(crate::domain::usage::RAW_FINISH_REASON);
+        }
         let trace = s.runtime_trace.clone().unwrap_or_default();
         s.runtime.debug.observe(&status, &event_id, &trace, now);
         if status["querySource"] == "session_title" {

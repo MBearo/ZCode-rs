@@ -94,6 +94,7 @@ impl ModelPort for Model {
             calls,
             usage: json!({}),
             output_limit: false,
+            raw_finish_reason: None,
         })
     }
 }

@@ -26,7 +26,8 @@ pub(super) struct TitleJob {
     pub fact: ModelFact,
 }
 
-/// Node `turnNumber === 0`: no real prompt before this one.
+/// Node `turnNumber === 0`: no prompt stored before this activation and no
+/// turn completed in it (a failed or cancelled first turn does not count).
 fn first_turn(s: &crate::domain::session::Session) -> bool {
     let prompts = s
         .messages
@@ -37,8 +38,9 @@ fn first_turn(s: &crate::domain::session::Session) -> bool {
                     .as_str()
                     .is_some_and(|c| c.starts_with("<system-reminder>"))
         })
-        .count();
-    prompts <= 1 && s.context.summary.is_none()
+        .count() as u64;
+    let before = prompts.saturating_sub(s.runtime.prompts_started);
+    before + s.runtime.turns_completed == 0 && s.context.summary.is_none()
 }
 
 impl Engine {
@@ -78,6 +80,7 @@ impl Engine {
             return;
         };
         let message = s.history.inputs.last().and_then(|i| i.node_message.clone());
+        self.sessions.get_mut(id).unwrap().runtime.prompts_started += 1;
         self.start_title(id, &input, message, None, true);
     }
 
@@ -91,13 +94,19 @@ impl Engine {
         let Some(target) = s.goal.as_ref().map(|g| g.target_id.clone()) else {
             return;
         };
+        // 目标的 objective 是本次激活的输入，不算之前的轮次（Node turnNumber 仍为 0）。
+        self.sessions.get_mut(id).unwrap().runtime.prompts_started += 1;
         if !self.start_title(id, objective, message, Some(target.clone()), false) {
             self.goal_summary_title(id, objective, &target);
         }
     }
 
-    /// The first prompt's deferred title, once its turn completed.
+    /// The first prompt's deferred title, once its turn completed; the run
+    /// counts toward Node's `turnNumber` after it (a compaction does not).
     pub(super) fn title_turn_end(&mut self, id: &str, event: &Event) {
+        if !matches!(event, Event::Finished { .. }) {
+            return;
+        }
         let completed = matches!(
             event,
             Event::Finished {
@@ -109,11 +118,23 @@ impl Engine {
             .active
             .get(id)
             .is_some_and(|a| !a.cancel.is_cancelled());
-        let Some(s) = self.sessions.get_mut(id).filter(|_| completed) else {
+        let compaction = self
+            .active
+            .get(id)
+            .is_some_and(|a| a.kind == crate::domain::legacy_stream::RunKind::Compact);
+        let Some(s) = self.sessions.get_mut(id) else {
             return;
         };
-        if let Some((input, message)) = s.runtime.title_deferred.take() {
+        // Node 只在本轮成功后补发推迟的标题；失败或取消的轮次不留到之后的其他 run。
+        let deferred = s.runtime.title_deferred.take();
+        if !completed {
+            return;
+        }
+        if let Some((input, message)) = deferred {
             self.start_title(id, &input, message, None, false);
+        }
+        if !compaction && let Some(s) = self.sessions.get_mut(id) {
+            s.runtime.turns_completed += 1;
         }
     }
 
@@ -140,8 +161,9 @@ impl Engine {
             return false;
         }
         let model = self.title_model(id);
-        if defer && model.as_ref().is_none_or(|(_, auth)| *auth) {
-            // Node：需要先刷新运行时请求头的 provider 让本轮先发出，结束后再补标题。
+        if defer {
+            // Node 协议模式的 providerRuntimeHeadersPort.shouldRefreshBeforeModelRequest 恒为
+            // true：首条输入的标题总是等本轮成功结束后再生成（原先只对账号类供应商推迟）。
             let s = self.sessions.get_mut(id).unwrap();
             s.runtime.title_deferred = Some((input.into(), message));
             return false;
@@ -195,14 +217,21 @@ impl Engine {
         let identity = model
             .identity()
             .unwrap_or_else(|| self.session_selection(id).unwrap());
-        let logical = format!("{source}_{}", self.clock.id());
-        let trace = s.runtime_trace.clone().unwrap_or_else(|| self.clock.id());
+        // Node：标题请求以 span id 为逻辑请求 id，归属触发它的轮次与 user 消息。
+        let span: String = self.clock.id().chars().take(16).collect();
+        let active = self.active.get(id);
+        let trace = active
+            .map(|a| a.origin.trace_id.clone())
+            .or_else(|| s.runtime_trace.clone())
+            .unwrap_or_else(|| self.clock.id());
         let fact = ModelFact {
-            id: format!("usage_model_{source}_{logical}_0"),
-            logical_request_id: logical,
+            id: format!("usage_model_{source}_{span}_0"),
+            logical_request_id: span.clone(),
             session_id: id.into(),
-            turn_id: s.node.turn.as_ref().map(|t| t.runtime.clone()),
+            turn_id: active.map(|a| a.turn_id.clone()),
             trace_id: Some(trace.clone()),
+            span_id: Some(span),
+            parent_user_message_id: message.clone(),
             query_source: source.into(),
             provider_id: identity.provider_id.clone(),
             model_id: identity.model_id.clone(),
@@ -256,7 +285,8 @@ impl Engine {
             let result = match tokio::time::timeout(timeout, request).await {
                 Ok(result) => result.map(|out| {
                     json!({"text": out.message["content"], "calls": out.calls.len(),
-                        "usage": out.usage, "limit": out.output_limit})
+                        "usage": out.usage, "limit": out.output_limit,
+                        "rawFinish": out.raw_finish_reason})
                 }),
                 Err(_) => Err(ModelFailure::new("timeout", true)),
             };

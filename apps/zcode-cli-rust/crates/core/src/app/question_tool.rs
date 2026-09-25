@@ -35,5 +35,6 @@ pub(super) async fn execute(
         data: answer.data,
         failed: answer.failed,
         display: None,
+        truncated: false,
     })
 }

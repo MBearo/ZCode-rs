@@ -115,12 +115,12 @@ fn domains_count_separately_and_nothing_goes_out_unsubscribed() {
 
 #[test]
 fn tallies_turn_usage_like_node() {
-    let usage = model_usage(&json!({"prompt_tokens": 10, "completion_tokens": 4,
-        "prompt_tokens_details": {"cached_tokens": 6}}));
-    assert_eq!(usage, [10, 4, 14, 6, 0, 0]);
+    let raw = json!({"prompt_tokens": 10, "completion_tokens": 4,
+        "prompt_tokens_details": {"cached_tokens": 6}});
+    assert_eq!(model_usage(&raw), [10, 4, 14, 6, 0, 0]);
     let mut turn = TurnTally::default();
-    turn.model_done(usage, "Hel", 1);
-    turn.model_done(usage, "lo", 0);
+    turn.model_done(&raw, "Hel", 1);
+    turn.model_done(&raw, "lo", 0);
     assert_eq!(turn.response, "lo");
     assert_eq!((turn.token_count, turn.tool_calls, turn.rounds), (28, 1, 2));
     assert_eq!(
@@ -129,4 +129,19 @@ fn tallies_turn_usage_like_node() {
             "outputTokens": 8, "totalTokens": 28, "cacheReadTokens": 12, "cacheWriteTokens": 0,
             "reasoningTokens": 0, "webSearchRequests": 0, "webFetchRequests": 0})
     );
+    // WebSearch 的内部请求（Node tool_internal）计入汇总与搜索次数。
+    turn.nested(
+        &json!({"inputTokens": 5, "outputTokens": 2, "totalTokens": 7,
+        "cacheReadTokens": 1, "serverToolUse": {"webSearchRequests": 1}}),
+    );
+    let summary = turn.summary();
+    assert_eq!(
+        (
+            &summary["modelRequestCount"],
+            &summary["totalTokens"],
+            &summary["cacheReadTokens"]
+        ),
+        (&json!(3), &json!(35), &json!(13))
+    );
+    assert_eq!(summary["webSearchRequests"], 1);
 }

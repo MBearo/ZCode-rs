@@ -22,6 +22,9 @@ pub struct Assembly {
     calls: BTreeMap<u64, Call>,
     usage: Value,
     finish: Option<String>,
+    /// The provider's finish reason before mapping (`_zcode_raw_finish` of a
+    /// translated protocol, else the Chat `finish_reason`).
+    raw_finish: Option<String>,
     bytes: usize,
     pub done: bool,
 }
@@ -56,6 +59,10 @@ impl Assembly {
         let choice = &value["choices"][0];
         if let Some(reason) = choice["finish_reason"].as_str() {
             self.finish = Some(reason.into());
+            self.raw_finish = choice
+                .get("_zcode_raw_finish")
+                .map_or(Some(reason), Value::as_str)
+                .map(str::to_owned);
         }
         let delta = &choice["delta"];
         for (key, reasoning) in [("reasoning_content", true), ("content", false)] {
@@ -152,6 +159,7 @@ impl Assembly {
             calls,
             usage: self.usage,
             output_limit,
+            raw_finish_reason: self.raw_finish,
         })
     }
 }
