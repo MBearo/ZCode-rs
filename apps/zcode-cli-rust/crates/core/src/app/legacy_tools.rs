@@ -106,10 +106,9 @@ impl Engine {
         id: &str,
         turn: &str,
         call: &str,
-        outcome: (bool, bool),
+        (failed, denied, error): (bool, bool, Option<(&'static str, &'static str)>),
         (result, perf): (Option<String>, Option<Value>),
     ) {
-        let (failed, denied) = outcome;
         let now = self.clock.now();
         let Some(track) = self
             .sessions
@@ -145,7 +144,8 @@ impl Engine {
             } else {
                 result
             };
-            json!({"toolCallId": call, "error": {"type": "tool_execution_failed", "message": message},
+            let (kind, code) = error.unwrap_or(("tool_execution_failed", "TOOL_EXECUTION_FAILED"));
+            json!({"toolCallId": call, "error": {"type": kind, "code": code, "message": message},
                 "kind": "error"})
         } else {
             let duration = track.started_at.map_or(0, |at| now.saturating_sub(at));

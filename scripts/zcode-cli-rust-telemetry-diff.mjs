@@ -21,8 +21,9 @@ const ID_MEMBERS = new Set([
   "operationId",
   "messageId",
   "summaryMessageId",
+  "mcpInstanceId",
 ]);
-const TIME_MEMBERS = new Set(["occurredAt", "timestamp", "startedAt", "endedAt"]);
+const TIME_MEMBERS = new Set(["occurredAt", "timestamp", "startedAt", "endedAt", "sampledAt"]);
 const DURATION_MEMBERS = new Set([
   "durationMs",
   "delayMs",
@@ -37,6 +38,7 @@ const DURATION_MEMBERS = new Set([
   "fsWriteMs",
   "matchMs",
   "patchMatchMs",
+  "uptimeMs",
 ]);
 
 /** The notifications of `methods` that belong to `sessions` (child sessions included). */
@@ -134,6 +136,9 @@ export function normalizeFacts(facts, roots = []) {
         );
       else if (key === "eventSeq" || key === "sequenceNumber") out[key] = seqOf.get(fact);
       else if (key === "transport" && TITLE_SOURCES.has(fact.querySource)) out[key] = "<title>";
+      // 非内置 MCP 的 id 是按进程随机盐的 HMAC，只比较形态。
+      else if (key === "mcpId" && /^(custom|plugin):[a-f0-9]{12}$/.test(value))
+        out[key] = value.replace(/:.*/, ":<hmac>");
       else out[key] = typeof value === "string" ? text(value) : value;
     }
     return out;

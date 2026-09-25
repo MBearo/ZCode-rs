@@ -1,4 +1,5 @@
 use super::mcp_config::Server;
+use super::mcp_telemetry::Tracker;
 use crate::contract::{ProcessCleanupFailure, ToolOutput};
 use anyhow::{Context, Result, bail, ensure};
 use futures_util::StreamExt;
@@ -11,6 +12,10 @@ use rmcp::{
     },
 };
 use serde_json::{Value, json};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::{collections::BTreeSet, process::Stdio, time::Duration};
 use tokio::{
     process::{Child, Command},
@@ -33,14 +38,20 @@ pub(super) struct Connection {
     pub modern: bool,
     timeout: Duration,
     service: Mutex<Option<Service>>,
-    child: Mutex<Option<(Child, u32)>>,
+    child: Arc<Mutex<Option<(Child, u32)>>>,
+    /// A `close` is under way: the process end that follows is not a crash.
+    closing: Arc<AtomicBool>,
+    /// The process telemetry of a stdio server (spec rust-m9-usage-logs §6).
+    process: Option<(Arc<Tracker>, String)>,
 }
 impl Connection {
+    /// `telemetry` is the tracker and this connection's key.
     pub async fn open(
         config: &Server,
         transport: Transport,
         auth: &std::sync::Arc<super::official_auth::OfficialAuth>,
         cancel: &CancellationToken,
+        telemetry: (&Arc<Tracker>, &str),
     ) -> Result<Self> {
         let (env, http) = match transport {
             Transport::Stdio(env) => (Some(env), None),
@@ -72,6 +83,7 @@ impl Connection {
         client.client_info.version = env!("CARGO_PKG_VERSION").into();
         let lifecycle = CancellationToken::new();
         let mut owned = None;
+        let mut ended = None;
         let init = async {
             if config.transport == "stdio" {
                 let mut command = Command::new(config.raw["command"].as_str().unwrap());
@@ -108,6 +120,8 @@ impl Connection {
                 )
                 .take_while(|r| std::future::ready(r.is_ok()))
                 .filter_map(|r| std::future::ready(r.ok()));
+                let (reader, end) = super::mcp_process::EndSignal::new(Box::pin(reader));
+                ended = Some(end);
                 if let Some(official) = &official {
                     // 官方 stdio server：每条出站请求与通知的 _meta 携带本次身份头。
                     let writer =
@@ -212,13 +226,16 @@ impl Connection {
         let modern = service
             .peer_info()
             .is_some_and(|i| i.protocol_version >= ProtocolVersion::V_2026_07_28);
+        let pid = owned.as_ref().map(|(_, pid)| *pid);
         let mut connection = Self {
             peer: service.peer().clone(),
             tools: vec![],
             modern,
             timeout: config.timeout,
             service: Mutex::new(Some(service)),
-            child: Mutex::new(owned),
+            child: Arc::new(Mutex::new(owned)),
+            closing: Arc::default(),
+            process: None,
         };
         match connection.discover(cancel).await {
             Ok(tools) => connection.tools = tools,
@@ -226,6 +243,18 @@ impl Connection {
                 connection.close().await?;
                 return Err(error.context("tool_list_failed"));
             }
+        }
+        // Node：stdio server 连接并列出工具后才记 process_start。
+        if let (Some(pid), Some(ended)) = (pid, ended) {
+            let (tracker, key) = telemetry;
+            let instance = tracker.started(key, config, pid);
+            super::mcp_process::Watch {
+                tracker: tracker.clone(),
+                instance: instance.clone(),
+                closing: connection.closing.clone(),
+            }
+            .spawn(ended, connection.child.clone());
+            connection.process = Some((tracker.clone(), instance));
         }
         Ok(connection)
     }
@@ -274,7 +303,12 @@ impl Connection {
                 let _=tokio::time::timeout(Duration::from_secs(2),self.peer.notify_cancelled(rmcp::model::CancelledNotificationParam::new(Some(id),Some("Cancelled".into())))).await;
                 Err(anyhow::anyhow!("Cancelled"))
             },
-            result=handle.await_response()=>result.map_err(|_|anyhow::anyhow!("MCP request failed or timed out")),
+            // Node：进程退出后 SDK 以 McpError(ConnectionClosed) 失败，工具错误为 SdkError/CONNECTION_CLOSED。
+            result=handle.await_response()=>result.map_err(|_| if self.peer.is_transport_closed() {
+                crate::contract::ToolError::Sdk { code: "CONNECTION_CLOSED", message: "Connection closed".into() }.into()
+            } else {
+                anyhow::anyhow!("MCP request failed or timed out")
+            }),
         };
         if result.is_err() && method == "tools/call" {
             self.close().await?;
@@ -314,6 +348,15 @@ impl Connection {
         Ok(output)
     }
     pub async fn close(&self) -> Result<()> {
+        // 进程先退出（传输已断）后的关闭是崩溃的收口（如调用失败后关闭）：Node 仍记 process_crash。
+        let crashed = self.peer.is_transport_closed() && !self.closing.swap(true, Ordering::SeqCst);
+        self.closing.store(true, Ordering::SeqCst);
+        if let Some((tracker, instance)) = &self.process {
+            if crashed && let Some((child, _)) = self.child.lock().await.as_mut() {
+                super::mcp_process::report_exit(tracker, instance, child).await;
+            }
+            tracker.closed(instance);
+        }
         if let Some(mut service) = self.service.lock().await.take() {
             // 先断协议再等待进程树；不能只 drop transport 后宣告停止完成。
             let mut child = self.child.lock().await.take();

@@ -170,6 +170,8 @@ impl Engine {
     ) -> Result<()> {
         let mut refresh = tokio::time::interval(std::time::Duration::from_secs(1));
         refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // 工具层的进程遥测（MCP 进程启动、崩溃、资源采样）经 Engine 输出（spec rust-m9-usage-logs §6）。
+        let mut process_events = self.tools.process_events();
         let serving = async {
             loop {
                 let question_delay = self.question_delay();
@@ -187,6 +189,9 @@ impl Engine {
                         let terminal=matches!(&event.event,Event::Finished {..}) || matches!(&event.event,Event::Background {task,..} if task.status!="running");
                         self.apply_event(event).await?;self.flush(&output).await?;
                         if terminal {self.trim_resident().await?;}
+                    },
+                    Some((method, params))=async {match process_events.as_mut() {Some(rx)=>rx.recv().await, None=>std::future::pending().await}}=>{
+                        self.outbox.push(ServerMsg::HostNotification{method,params});self.flush(&output).await?;
                     },
                     _=refresh.tick()=>{
                         self.uploads.prune(self.clock.now());

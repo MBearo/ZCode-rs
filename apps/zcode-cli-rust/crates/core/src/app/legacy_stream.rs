@@ -37,6 +37,8 @@ pub(super) enum Fact {
         nested: Option<Value>,
         /// Node `result.perf` without the permission wait.
         perf: Option<Value>,
+        /// A failure's own `(error type, code)`.
+        error: Option<(&'static str, &'static str)>,
     },
     Finished,
     /// Any other fact: ends the delta batching window.
@@ -106,6 +108,7 @@ pub(super) fn fact(event: &Event, subscribed: bool) -> Fact {
             result: (subscribed || *failed).then(|| result.clone()),
             nested: facts.model_usage.clone(),
             perf: facts.perf.clone(),
+            error: facts.error,
         },
         Event::Finished { .. } => Fact::Finished,
         _ => Fact::Barrier,
@@ -340,8 +343,9 @@ impl Engine {
                 result,
                 nested,
                 perf,
+                error,
             } => {
-                self.legacy_tool_done(id, turn, &call, (failed, denied), (result, perf));
+                self.legacy_tool_done(id, turn, &call, (failed, denied, error), (result, perf));
                 // Node 在工具结果之后追加 tool_internal 的 model_complete，旧协议作为 session.updated 转发。
                 if let Some(usage) = nested {
                     let s = self.sessions.get_mut(id).unwrap();

@@ -27,6 +27,8 @@ pub struct ToolEnd<'a> {
     pub exit_code: Option<i64>,
     /// The result was cut to its budget.
     pub truncated: bool,
+    /// `(error type, code)` of a failure with its own error class (Node `SdkError`).
+    pub error: Option<(&'a str, &'a str)>,
 }
 
 fn text(value: &Value) -> Option<String> {
@@ -129,6 +131,11 @@ impl RunUsage {
                 code: (!end.denied).then(|| kind.to_uppercase()),
                 message: Some(end.result.to_owned()),
             };
+            // SDK 自己的错误（MCP 连接断开）记其错误类与 code。
+            if let (Some((kind, code)), "error") = (end.error, status) {
+                fact.error.kind = Some(kind.into());
+                fact.error.code = Some(code.into());
+            }
         }
         vec![Fact::Tool(Box::new(fact))]
     }

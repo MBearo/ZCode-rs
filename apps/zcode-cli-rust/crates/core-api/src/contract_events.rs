@@ -261,6 +261,8 @@ pub struct ToolFacts {
     /// Node `ToolCallResult.result.perf` without the permission wait: the
     /// call's `totalMs` and the tool's detail.
     pub perf: Option<Value>,
+    /// `(error type, code)` of a failure with its own error class (`ToolOutput.error`).
+    pub error: Option<(&'static str, &'static str)>,
 }
 
 pub struct ModelOutput {

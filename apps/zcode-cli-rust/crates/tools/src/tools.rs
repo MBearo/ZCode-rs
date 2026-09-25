@@ -28,6 +28,9 @@ pub struct WorkspaceTools {
     web: super::web_fetch::WebFetcher,
     /// Network egress of plugin management (marketplace and archive downloads).
     pub(super) egress: Arc<zcode_cli_net::Egress>,
+    /// MCP process notifications until the engine takes them.
+    process_events:
+        std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<(&'static str, Value)>>>,
 }
 impl WorkspaceTools {
     fn session_artifacts(&self, session: &str) -> PathBuf {
@@ -43,11 +46,18 @@ impl WorkspaceTools {
         egress: Arc<zcode_cli_net::Egress>,
     ) -> Self {
         let env = egress.tool_env();
+        let (sink, events) = tokio::sync::mpsc::unbounded_channel();
+        let mcp = super::mcp_hub::Hub::new(cwd.clone(), config.clone(), egress.clone(), Some(sink));
+        // 资源采样依赖运行时；没有 tokio 运行时的构造（单元测试）不采样。
+        if tokio::runtime::Handle::try_current().is_ok() {
+            super::mcp_resources::start(mcp.telemetry.clone(), mcp.stopped());
+        }
         Self {
             shell: ShellTasks::new(env.clone()),
             env,
             web: super::web_fetch::WebFetcher::new(egress.clone()),
-            mcp: super::mcp_hub::Hub::new(cwd.clone(), config.clone(), egress.clone()),
+            mcp,
+            process_events: std::sync::Mutex::new(Some(events)),
             egress,
             config,
             cwd,
@@ -127,6 +137,14 @@ impl WorkspaceTools {
 }
 #[async_trait::async_trait]
 impl ToolPort for WorkspaceTools {
+    fn process_events(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<(&'static str, Value)>> {
+        self.process_events.lock().unwrap().take()
+    }
+    fn child_processes(&self) -> Vec<Value> {
+        self.mcp.telemetry.processes()
+    }
     async fn file_changes(
         &self,
         changes: &[crate::domain::file_checkpoint::FileCheckpoint],
@@ -215,28 +233,7 @@ impl ToolPort for WorkspaceTools {
         self.mcp.inventory(session)
     }
     async fn persist_result(&self, session: &str, call_id: &str, content: &str) -> Result<String> {
-        // Node sanitizePathSegment + `<toolCallId>-tool-result-<uuid>.json`。
-        let call: String = call_id
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || "._-".contains(c) {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .take(120)
-            .collect();
-        let call = if call.is_empty() {
-            "unknown".into()
-        } else {
-            call
-        };
-        let dir = self.session_artifacts(session);
-        tokio::fs::create_dir_all(&dir).await?;
-        let path = dir.join(format!("{call}-tool-result-{}.json", uuid::Uuid::new_v4()));
-        tokio::fs::write(&path, content).await?;
-        Ok(path.to_string_lossy().into_owned())
+        super::result_file::persist(&self.session_artifacts(session), call_id, content).await
     }
     fn attach_events(
         &self,

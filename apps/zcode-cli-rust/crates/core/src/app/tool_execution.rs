@@ -176,6 +176,10 @@ async fn execute(
         return Err(result.err().unwrap());
     }
     let failed = result.as_ref().map_or(true, |output| output.failed);
+    let sdk = match result.as_ref().err().and_then(|e| e.downcast_ref()) {
+        Some(crate::contract::ToolError::Sdk { code, .. }) => Some(("SdkError", *code)),
+        _ => None,
+    };
     let message = match &result {
         Err(error) => {
             crate::domain::js_string::sanitize_message(&error.to_string()).unwrap_or_default()
@@ -185,6 +189,7 @@ async fn execute(
     // Node createErrorResult：处理器失败包 <tool_use_error>，其余错误为规整后的消息。
     let mut content =
         result.unwrap_or_else(|error| ToolOutput::text(crate::contract::render_failure(&error)));
+    content.error = content.error.or(sdk);
     if !failed && crate::domain::js_string::trim(&content.content).is_empty() {
         // Node serializeOutput：空结果给出占位，避免模型误读为缺失结果。
         content.content = format!("({name} completed with no output)");
@@ -340,6 +345,7 @@ async fn commit(
         model_usage: Some(output.data["modelUsage"].clone())
             .filter(|u| u.as_object().is_some_and(|u| !u.is_empty())),
         perf: output.perf,
+        error: output.error,
     };
     sink.send(Event::ToolDone {
         id: id.into(),

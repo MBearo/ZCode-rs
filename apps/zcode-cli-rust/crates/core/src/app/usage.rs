@@ -74,6 +74,7 @@ impl Engine {
                     result,
                     exit_code: facts.exit_code,
                     truncated: facts.truncated,
+                    error: facts.error,
                 };
                 run.on_tool_done(id, end, now)
             }

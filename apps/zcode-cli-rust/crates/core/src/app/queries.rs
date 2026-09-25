@@ -60,7 +60,7 @@ impl Engine {
             Method::RuntimeCapabilities => Ok(
                 json!({"workspaceExecutionCapabilities":true,"independentPlanState":true,"accountProviderConfig":self.registry.is_some()}),
             ),
-            Method::ProcessChildProcesses => Ok(json!({"processes":[]})),
+            Method::ProcessChildProcesses => Ok(json!({"processes": self.tools.child_processes()})),
             Method::WorkspaceReadPresentation => {
                 // 旧 App 使用 strict schema；未协商的客户端不能收到新增字段。
                 let mut presentation = json!({"workspace":p["workspace"],"mode":"yolo","slashCommands":[{"name":"compact","description":"Compact conversation context","source":"builtin"}]});

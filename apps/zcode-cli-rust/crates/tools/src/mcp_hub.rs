@@ -1,7 +1,4 @@
-use super::{
-    mcp_config::{self, Server},
-    mcp_connection::Connection,
-};
+use super::{mcp_config, mcp_connection::Connection};
 use crate::contract::{ProcessCleanupFailure, ToolOutput};
 use anyhow::{Context, Result, ensure};
 use futures_util::{StreamExt, stream};
@@ -45,6 +42,8 @@ pub(super) struct Hub {
     state: RwLock<State>,
     gate: tokio::sync::Mutex<()>,
     stop: CancellationToken,
+    /// Process telemetry of stdio servers (spec rust-m9-usage-logs §6).
+    pub telemetry: Arc<super::mcp_telemetry::Tracker>,
 }
 impl Hub {
     pub fn inherit(&self, parent: &str, child: &str) {
@@ -57,8 +56,10 @@ impl Hub {
         cwd: PathBuf,
         config: std::sync::Arc<dyn crate::contract::ConfigSource>,
         egress: Arc<zcode_cli_net::Egress>,
+        sink: Option<super::mcp_telemetry::ProcessSink>,
     ) -> Self {
         Self {
+            telemetry: Arc::new(super::mcp_telemetry::Tracker::new(sink)),
             official: super::official_auth::OfficialAuth::for_workspace(&egress, &cwd),
             cwd,
             config,
@@ -166,6 +167,7 @@ impl Hub {
         let mut bindings = vec![];
         let mut statuses = BTreeMap::new();
         let mut names = BTreeSet::new();
+        let enabled = configs.iter().filter(|c| c.enabled).count();
         let mut futures = stream::iter(configs)
             .map(|server| async move {
                 let key = server.key(session);
@@ -193,7 +195,8 @@ impl Hub {
                     };
                     match transport {
                         Ok(transport) => {
-                            Connection::open(&server, transport, &self.official, cancel)
+                            let telemetry = (&self.telemetry, key.as_str());
+                            Connection::open(&server, transport, &self.official, cancel, telemetry)
                                 .await
                                 .map(|c| Some(Arc::new(c)))
                         }
@@ -213,7 +216,7 @@ impl Hub {
                     );
                 }
                 Ok(Some(connection)) => {
-                    let discovered = bind(&server, &key, &connection, &mut names);
+                    let discovered = bindings::bind(&server, &key, &connection, &mut names);
                     match discovered {
                         Ok(entries) => {
                             let mut status =
@@ -275,6 +278,19 @@ impl Hub {
                 }
             }
         }
+        // Node session_startup：会话首次快照时的已配置、已连接与 stdio 进程数。
+        let keys: BTreeSet<String> = bindings.iter().map(|b| b.key.clone()).collect();
+        self.telemetry.bind(session, &keys);
+        let connected = statuses.values().filter(|s| s["status"] == "connected");
+        let processes = connected
+            .clone()
+            .filter(|s| s["transport"] == "stdio")
+            .count();
+        // Node：features.mcp 关闭时不建 tracker，不发任何进程遥测。
+        if config.config["features"]["mcp"] != false {
+            self.telemetry
+                .session_startup(session, (enabled, connected.count(), processes));
+        }
         {
             let mut state = self.state.write().unwrap();
             state.bindings.insert(session.into(), bindings);
@@ -313,6 +329,7 @@ impl Hub {
             let mut state = self.state.write().unwrap();
             state.bindings.remove(session);
             state.borrowed.remove(session);
+            self.telemetry.unbind(session);
             if forget {
                 state.overrides.remove(session);
             }
@@ -343,6 +360,10 @@ impl Hub {
         }
         Ok(())
     }
+    /// Cancelled when the hub shuts down (the resource sampler stops with it).
+    pub fn stopped(&self) -> CancellationToken {
+        self.stop.clone()
+    }
     pub async fn shutdown(&self) -> Result<()> {
         self.stop.cancel();
         let _gate = self.gate.lock().await;
@@ -353,39 +374,4 @@ impl Hub {
         }
         self.prune().await
     }
-}
-fn bind(
-    server: &Server,
-    key: &str,
-    connection: &Arc<Connection>,
-    names: &mut BTreeSet<String>,
-) -> Result<Vec<Binding>> {
-    let mut bindings = vec![];
-    for tool in &connection.tools {
-        let original = tool["name"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .context("MCP tool name required")?;
-        let name = mcp_config::tool_name(&server.name, original);
-        ensure!(names.insert(name.clone()), "MCP tool namespace collision");
-        ensure!(tool["inputSchema"].is_object(), "MCP tool schema required");
-        let definition = json!({"type":"function","function":{"name":name,"description":tool["description"].as_str().unwrap_or(""),"parameters":tool["inputSchema"]}});
-        ensure!(
-            definition.to_string().len() <= 256 * 1024,
-            "MCP schema exceeds size limit"
-        );
-        bindings.push(Binding {
-            name,
-            server: server.name.clone(),
-            original: original.into(),
-            key: key.into(),
-            safe: tool["annotations"]["readOnlyHint"] == true
-                && tool["annotations"]["destructiveHint"] == false,
-            read_only: tool["annotations"]["readOnlyHint"] == true,
-            destructive: tool["annotations"]["destructiveHint"] == true,
-            definition,
-            connection: connection.clone(),
-        });
-    }
-    Ok(bindings)
 }

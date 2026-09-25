@@ -37,5 +37,6 @@ pub(super) async fn execute(
         display: None,
         truncated: false,
         perf: None,
+        error: None,
     })
 }

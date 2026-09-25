@@ -148,6 +148,9 @@ export async function anthropicModel() {
         "tool_use",
       );
     }
+    if (lastText.includes("crash mcp")) {
+      return reply([tool("toolu_mcp", "mcp__fixture__crash", {})], "tool_use");
+    }
     if (lastText.includes("create note")) {
       return reply(
         [tool("toolu_write", "Write", { file_path: "new.txt", content: "a\n" })],
@@ -200,3 +203,19 @@ export async function anthropicModel() {
     },
   };
 }
+
+/** A stdio MCP server with one tool, `crash`, that exits the process with code 3. */
+export const MCP_FIXTURE = `import { createInterface } from "node:readline";
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const m = JSON.parse(line);
+  if (m.method === "initialize")
+    send({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: m.params.protocolVersion,
+      capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1.0.0" } } });
+  else if (m.method === "tools/list")
+    send({ jsonrpc: "2.0", id: m.id, result: { tools: [{ name: "crash",
+      description: "Exits the server", inputSchema: { type: "object", properties: {} } }] } });
+  else if (m.method === "tools/call") process.exit(3);
+  else if (m.id !== undefined) send({ jsonrpc: "2.0", id: m.id, result: {} });
+});
+`;

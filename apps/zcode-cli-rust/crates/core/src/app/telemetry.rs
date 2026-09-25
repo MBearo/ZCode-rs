@@ -249,11 +249,9 @@ pub(super) fn tool_done_event(
         ));
     }
     if failed {
-        let message = &legacy["error"]["message"];
         return Some((
             "tool_call_error",
-            json!({"toolCallId": call, "error": {"type": "tool_execution_failed",
-                "code": "TOOL_EXECUTION_FAILED", "message": message}}),
+            json!({"toolCallId": call, "error": legacy["error"]}),
         ));
     }
     let mut result = json!({"success": true});

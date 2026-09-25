@@ -60,9 +60,9 @@ pub use crate::contract_events::{
     Event, EventSink, Guide, ModelOutput, PermissionAnswer, PermissionRequest, RequestAuth,
     RequestKind, RequestOrigin, RunEvent, SessionHooks, ToolFacts, WorkspaceHooks,
 };
+pub use crate::contract_tool_error::{ToolError, render_failure};
 pub use crate::contract_tools::{
-    HookProcess, ToolError, ToolOutput, ToolPermission, ToolPort, TrustLoad, TrustStorePort,
-    render_failure,
+    HookProcess, ToolOutput, ToolPermission, ToolPort, TrustLoad, TrustStorePort,
 };
 #[async_trait]
 pub trait SessionStore: Send + Sync {

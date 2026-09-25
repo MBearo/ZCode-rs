@@ -15,7 +15,7 @@ import {
   scenarioSessions,
   sessionNotifications,
 } from "./zcode-cli-rust-telemetry-diff.mjs";
-import { anthropicModel } from "./zcode-cli-rust-usage-model.mjs";
+import { MCP_FIXTURE, anthropicModel } from "./zcode-cli-rust-usage-model.mjs";
 
 const args = process.argv.slice(2);
 const positional = args.filter((a) => !a.startsWith("--"));
@@ -31,6 +31,9 @@ const show = option("show");
 
 const BROWSER_USE = "browser-use@zcode-plugins-official";
 const TELEMETRY = ["v4/telemetry/event", "computer-use/operation-event"];
+// MCP 进程遥测是独立通道：Node 在会话 runtime 创建时连接 MCP，Rust 在首个 step 准备工具时，
+// 与会话事实的相对顺序不同，单独比较。
+const PROCESS = ["process/mcpTelemetry"];
 const TERMINAL = ["completedSuccess", "error", "completedInterrupted"];
 
 /** Waits for the next terminal control phase after frame `from`. */
@@ -76,6 +79,7 @@ const SCENARIOS = {
     await send(rt, id, "please create note"),
     await send(rt, id, "please change note"),
   ],
+  mcpCrash: async (rt, id) => [await send(rt, id, "please crash mcp")],
   allowed: async (rt, id) => answered(rt, id, /allow|once/i),
   denied: async (rt, id) => answered(rt, id, /deny|reject/i),
 };
@@ -129,6 +133,14 @@ async function runRuntime(kind, model) {
     const cwd = join(root, "ws");
     await mkdir(cwd, { recursive: true });
     await writeFile(join(cwd, "note.txt"), "usage note\n");
+    const fixture = join(root, "mcp-fixture.mjs");
+    await writeFile(fixture, MCP_FIXTURE);
+    // 只有 mcpCrash 场景的会话带 stdio MCP server（进程启动与崩溃遥测，spec §6）。
+    const extra = {
+      mcpCrash: {
+        mcpServers: [{ name: "fixture", command: process.execPath, args: [fixture], env: [] }],
+      },
+    };
     const runtime = startRuntime(kind, {
       bundle,
       binary,
@@ -139,9 +151,14 @@ async function runRuntime(kind, model) {
     const sessions = {};
     const phases = {};
     const initial = {};
+    const ranges = {};
     for (const [name, run] of Object.entries(SCENARIOS)) {
       if (only && !only.includes(name)) continue;
-      const created = await runtime.command("createSession", null, { workspaceId: cwd });
+      const start = runtime.frames.length;
+      const created = await runtime.command("createSession", null, {
+        workspaceId: cwd,
+        ...extra[name],
+      });
       const id = created.result?.sessionId;
       if (!id) throw new Error(`${kind}: ${JSON.stringify(created)}`);
       const subscribed = runtime.frames.length;
@@ -151,6 +168,7 @@ async function runRuntime(kind, model) {
       phases[name] = await run(runtime, id);
       // 标题等旁路请求在轮次后异步完成；留出落库时间。
       await new Promise((r) => setTimeout(r, 300));
+      ranges[name] = [start, runtime.frames.length];
     }
     await runtime.close();
     // v4 `usage` 状态补丁按会话收集（spec rust-m9-usage-logs §4）。
@@ -167,7 +185,9 @@ async function runRuntime(kind, model) {
         ],
       ]),
     );
-    const telemetry = runtime.frames.filter((frame) => TELEMETRY.includes(frame.method));
+    const telemetry = runtime.frames
+      .map((frame, index) => ({ ...frame, index }))
+      .filter((frame) => [...TELEMETRY, ...PROCESS].includes(frame.method));
     const db = new DatabaseSync(env.ZCODE_SESSION_DB_PATH, { readOnly: true });
     const read = (table) =>
       db
@@ -180,7 +200,7 @@ async function runRuntime(kind, model) {
       tool_usage: read("tool_usage"),
     };
     db.close();
-    return { root, sessions, phases, tables, telemetry, usage };
+    return { root, sessions, phases, tables, telemetry, usage, ranges };
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -324,16 +344,29 @@ try {
     const n = bySession(node);
     const r = bySession(rust);
     const report = { scenario: name, phases };
-    const facts = (result) =>
+    const facts = (result, methods = TELEMETRY) =>
       normalizeFacts(
         sessionNotifications(
           result.telemetry,
-          TELEMETRY,
+          methods,
           scenarioSessions(result.telemetry, result.sessions[name]),
         ),
         [result.root],
       );
-    const factDiff = diffFacts(facts(node), facts(rust));
+    // 进程事件没有会话：按场景运行期间的帧范围归属。
+    const processes = (result) =>
+      normalizeFacts(
+        result.telemetry
+          .filter((f) => PROCESS.includes(f.method))
+          .filter((f) => f.index >= result.ranges[name][0] && f.index < result.ranges[name][1])
+          .filter((f) => !f.params.sessionId || f.params.sessionId === result.sessions[name])
+          .map((f) => ({ method: f.method, ...f.params })),
+        [result.root],
+      );
+    const factDiff = [
+      ...diffFacts(facts(node), facts(rust)),
+      ...diffFacts(processes(node), processes(rust)),
+    ];
     if (show?.includes("telemetry")) report.telemetry = { node: facts(node), rust: facts(rust) };
     if (factDiff.length) report.telemetryDiff = factDiff;
     differences += factDiff.length;

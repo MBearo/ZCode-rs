@@ -132,6 +132,17 @@ pub trait ToolPort: Send + Sync {
     fn mcp_annotations(&self, _session: &str, _name: &str) -> Option<Value> {
         None
     }
+    /// The process notifications of the tools (`process/mcpTelemetry`,
+    /// `process/mcpResourceSamples`); the engine takes the receiver once.
+    fn process_events(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<(&'static str, Value)>> {
+        None
+    }
+    /// The live MCP server processes (`process/childProcesses`).
+    fn child_processes(&self) -> Vec<Value> {
+        vec![]
+    }
     async fn evict_session(&self, session: &str) -> Result<()> {
         self.close_session(session).await
     }
@@ -313,6 +324,9 @@ pub struct ToolOutput {
     /// Node's non-enumerable `perf` detail (`ToolExecutionTelemetry.detail`):
     /// telemetry only, never stored with the result.
     pub perf: Option<Value>,
+    /// `(error type, code)` of a failure Node reports with its own error class
+    /// (`SdkError`); `None` is Node's `tool_execution_failed`.
+    pub error: Option<(&'static str, &'static str)>,
 }
 impl ToolOutput {
     pub fn text(content: String) -> Self {
@@ -326,6 +340,7 @@ impl ToolOutput {
             display: None,
             truncated: false,
             perf: None,
+            error: None,
         }
     }
     pub fn new(content: String, data: Value) -> Self {
@@ -339,47 +354,7 @@ impl ToolOutput {
             display: None,
             truncated: false,
             perf: None,
+            error: None,
         }
-    }
-}
-
-/// A tool failure as the model reads it (Node `createErrorResult`). Other
-/// errors a tool returns are thrown errors: their message, sanitized.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolError {
-    /// Node `ToolHandlerFailure`: `<tool_use_error>{message}</tool_use_error>`, message kept raw.
-    Handler { code: u32, message: String },
-    /// Model content used as given (e.g. an input validation envelope).
-    Rendered(String),
-}
-impl std::fmt::Display for ToolError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Handler { message, .. } => f.write_str(message),
-            Self::Rendered(text) => f.write_str(text),
-        }
-    }
-}
-impl std::error::Error for ToolError {}
-impl ToolError {
-    pub fn handler(code: u32, message: impl Into<String>) -> anyhow::Error {
-        Self::Handler {
-            code,
-            message: message.into(),
-        }
-        .into()
-    }
-}
-/// Node's fallback when a thrown error has no readable message.
-const FALLBACK_FAILURE: &str = "Turn execution failed";
-/// The model-visible text of a failed tool call.
-pub fn render_failure(error: &anyhow::Error) -> String {
-    match error.downcast_ref::<ToolError>() {
-        Some(ToolError::Handler { message, .. }) => {
-            format!("<tool_use_error>{message}</tool_use_error>")
-        }
-        Some(ToolError::Rendered(text)) => text.clone(),
-        None => zcode_cli_domain::js_string::sanitize_message(&error.to_string())
-            .unwrap_or_else(|| FALLBACK_FAILURE.into()),
     }
 }

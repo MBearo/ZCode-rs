@@ -174,7 +174,7 @@ sequenceDiagram
 - 同时比较两边的 `v4/telemetry/event` 与 `computer-use/operation-event`（§5，`scripts/zcode-cli-rust-telemetry-diff.mjs`）与每个会话的 v4 `usage` 补丁、压缩标记（§4）。
 - 环境：临时根目录先 realpath，两边都以 `SHELL=/bin/bash` 启动，并在用户配置里抑制官方内置插件 `browser-use`（Node 在空 HOME 中播种并默认启用它，技能清单、会话指引与 `mcp__node_repl__js` 会进入请求前缀；浏览器工具单独对齐）。工作区 realpath 与登录 shell 名是单列的环境对齐项，不是统计差异。
 - 已知差异（脚本列出、不计数）：标题的 `provider_metadata_json`（§2.6）；breakdown 中工具定义的字符数（§4.3）；Rust 在 run 结束时重发本轮全部行，压缩标记因此多一次相同的 upsert。
-- 场景：普通轮、Bash、WebSearch、模型失败、停止、手动压缩、子代理、工具失败（Read 不存在的文件）、子代理内 Bash、Write 后 Edit、build 模式下允许与拒绝权限。2026-09-25 的结果：9 个场景三张表逐字段一致（差异 0）；M9.4 之后 v4 `usage` 补丁序列（水位、窗口、阈值、cache、breakdown 的提示词与消息类别、累计值）与压缩标记（前后 token、`summaryRef`）也逐字段一致。
+- 场景：普通轮、Bash、WebSearch、模型失败、停止、手动压缩、子代理、工具失败（Read 不存在的文件）、子代理内 Bash、Write 后 Edit、会话级 stdio MCP server 崩溃、build 模式下允许与拒绝权限。2026-09-25 的结果：9 个场景三张表逐字段一致（差异 0）；M9.4 之后 v4 `usage` 补丁序列（水位、窗口、阈值、cache、breakdown 的提示词与消息类别、累计值）与压缩标记（前后 token、`summaryRef`）也逐字段一致。
 
 ## 4. 协议层用量状态（M9.4）
 
@@ -299,3 +299,49 @@ sequenceDiagram
 - 单元测试：归一化器（命令关联、首块、请求身份队列、工具名缓存与性能白名单、权限、子代理、压缩）、computer-use 映射、Bash 命令分类。
 - 集成测试（`zcode-cli-rust-telemetry.test.ts`）：一轮工具调用的通知全部通过共享的 strict schema。
 - 差分脚本（§3）：12 个场景（新增子代理内 Bash、Write 后 Edit、权限允许）的事实流与 computer-use 事件逐字段一致（id、时刻、时长为占位；`memoryEnabled`、标题 `transport` 与只读工具的提前交错为已知差异）。
+
+## 6. MCP 进程遥测（M9.6）
+
+依据：Node `adapters/src/mcp/telemetry.ts`（tracker、`mcpId`）、`pool.ts`（lease 的首次快照）、`index.ts`（stdio 连接后的 process_start、非预期关闭的 process_crash）、`resource-telemetry.ts` 与 `device/process-probe*.ts`（5 分钟资源采样）、`bootstrap/src/zcode-protocol-entrypoint.ts`（`process/mcpTelemetry`、`process/mcpResourceSamples` 与 `features.mcp` 开关）。
+
+### 6.1 所有者与事件顺序
+
+- MCP hub 持有 tracker（进程级随机盐、进程实例表、连接 key 的会话 owner、已报告首次快照的会话）；通知经工具层的无界通道交给 Engine，Engine 在主循环里原样输出，不改变会话状态。
+- stdio server 连接并列出工具后记 `process_start`（每次启动一个实例 id）；server 的 stdout 结束且不是 `close` 引起、进程在宽限期内退出时记 `process_crash`（退出码、信号名、运行时长、绑定该连接的会话数）；有意关闭只清除记录。实例按进程区分，替换连接不会清掉新进程的记录。
+- 会话首次准备 MCP 工具时记一次 `session_startup`（已启用的配置数、已连接数、失败数、已连接的 stdio 数）；`mcp/list` 的状态查询不算会话，子会话沿用父会话的绑定不单独报告。`features.mcp` 为 false 时不发任何进程遥测。
+- 资源采样每 5 分钟一次（启动后首个间隔才采样）：没有被跟踪的进程时不发送；macOS 与 Linux 用 `ps -eo pid=,ppid=,rss=,cputime=` 取进程树，Windows 用 `tasklist` 只取根进程；按 `mcpId` 聚合进程数、RSS 总量与单进程最大值、相对同一实例上次采样的 CPU 增量、运行分钟数，附平台、架构、逻辑 CPU 数与内存 GB。
+- `process/childProcesses` 返回被跟踪的进程（pid、server 名、来源、插件名）。
+
+```mermaid
+sequenceDiagram
+  participant H as MCP hub（tracker）
+  participant P as stdio server 进程
+  participant E as Engine
+  participant D as Host
+  H->>P: 启动、握手、tools/list
+  H->>E: process_start
+  H->>E: session_startup（会话首次快照）
+  P--xH: stdout 结束（未在关闭）
+  H->>E: process_crash（退出码、信号、受影响会话数）
+  E->>D: process/mcpTelemetry
+  Note over H: 每 5 分钟
+  H->>E: process/mcpResourceSamples（按 mcpId 聚合）
+  E->>D: process/mcpResourceSamples
+```
+
+### 6.2 规则
+
+- `mcpId`：内置 server（`node_repl`，或宿主标注 `source.kind: builtin`）为 `builtin:` 加按段百分号编码的名字；插件与自定义 server 为 `plugin:` / `custom:` 加以进程盐为密钥的 HMAC-SHA256 前 12 位十六进制，server 名不出进程。
+- `platform` / `arch` 使用 Node 的取值（`darwin`、`win32`、`linux`；`x64`、`arm64` 等）。
+- MCP 调用因 server 进程退出而失败时，工具错误与 Node 一致：模型读到 `Connection closed`，用量表与遥测的错误类为 `SdkError`、code 为 `CONNECTION_CLOSED`（原先为 `MCP request failed or timed out` 与 `tool_execution_failed`）。
+
+### 6.3 与 Node 的差异
+
+- `session_startup` 的时机：Node 在会话 runtime 创建时连接 MCP，Rust 在首个 step 准备工具时；事件内容相同，与会话事实的相对顺序不同。
+- Linux 的进程探测用 `ps`（Node 读 `/proc`），字段含义相同。
+
+### 6.4 验收
+
+- 单元测试：`mcpId`（内置编码、HMAC 与 RFC 4231 向量）、`ps` / `tasklist` 解析与进程树、`cputime` 格式。
+- 集成测试（`zcode-cli-rust-telemetry.test.ts`）：stdio server 崩溃时的 `process_start`、`session_startup`、`process_crash` 通过共享 strict schema，`process/childProcesses` 列出存活进程。
+- 差分脚本（§3）：新增会话级 stdio server 崩溃场景，进程遥测（HMAC 与实例 id 为占位）、工具失败的用量行与事实逐字段一致。
