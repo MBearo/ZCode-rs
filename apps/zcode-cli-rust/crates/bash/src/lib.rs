@@ -22,6 +22,12 @@ pub use git::invokes_git;
 pub use rules::BashRules;
 pub use zcode_cli_bash_parse::{Analysis, Invocation, analyze, is_permission_safe};
 
+/// The executable is a key of the public command registry (Node
+/// `Object.hasOwn(BASH_COMMAND_REGISTRY, executable)`).
+pub fn registered(executable: &str) -> bool {
+    registry::command(executable).is_some()
+}
+
 /// Node `isRuntimeReadOnlyBashCommand` for an analysed command.
 pub fn is_read_only_analysis(analysis: &Analysis, git_unsafe: bool) -> bool {
     if !is_permission_safe(analysis) || analysis.commands.is_empty() {

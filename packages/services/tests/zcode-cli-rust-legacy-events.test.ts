@@ -189,7 +189,10 @@ test("Rust legacy stream reports failed and cancelled turns like Node", async ()
     const failedUpdate = await stateUpdated(h, failedAt);
     const failure = events(h, failedAt).at(-1)!;
     assert.equal(failure.type, "turn.failed");
-    assert.equal(failure.payload.turnPhase, "execution");
+    // 真实 Node：首个请求失败时 TurnMachine 仍在 processing_input；error.type 是 CoreError 类型。
+    assert.equal(failure.payload.turnPhase, "processing_input");
+    assert.equal(failure.payload.error.type, "unknown_error");
+    assert.equal(failure.payload.error.retryable, undefined);
     assert.equal(failure.payload.inputId, command.commandId);
     assert.ok(failure.payload.error.message.length > 0);
     assert.equal(failedUpdate.params.reason, "prompt_failed");

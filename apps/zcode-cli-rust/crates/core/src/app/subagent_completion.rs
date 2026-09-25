@@ -42,6 +42,13 @@ impl Engine {
         } else {
             "failed"
         };
+        let error = (status == "failed").then(|| {
+            s.last_error
+                .as_ref()
+                .and_then(|e| e["message"].as_str())
+                .unwrap_or("execution interrupted")
+                .to_owned()
+        });
         if status != "completed" {
             output = format!(
                 "Subagent {status}: {}",
@@ -84,12 +91,13 @@ impl Engine {
             .find(|r| r["toolCallId"] == task.call_id)
             .and_then(|r| r["turnId"].as_str())
             .map(str::to_owned);
-        let mut deltas = if let Some(turn) = turn {
-            super::file_changes::hydrate(owner, self.tools.as_ref(), Some(&turn)).await?
+        let mut deltas = if let Some(turn) = &turn {
+            super::file_changes::hydrate(owner, self.tools.as_ref(), Some(turn)).await?
         } else {
             vec![]
         };
         deltas.extend(owner.sync_subagent_row(&task.id));
+        self.telemetry_subagent(&parent, turn.as_deref(), &task, error.as_deref());
         self.publish(&parent, deltas)?;
         self.persist(&parent, None).await?;
         if let Some(watch) = self.child_updates.get(id) {

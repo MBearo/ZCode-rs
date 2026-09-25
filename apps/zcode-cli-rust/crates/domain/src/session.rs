@@ -42,6 +42,10 @@ pub struct Session {
     /// rust-m9-usage-logs §4.2); rebuilt from the stored branch on load.
     #[serde(skip)]
     pub cache_hits: crate::usage::CacheHits,
+    /// The session's live event sequence (Node `SessionEvent.sequenceNumber`)
+    /// of this process.
+    #[serde(skip)]
+    pub event_seq: u64,
     #[serde(default)]
     pub rewind_committed: Option<String>,
     #[serde(default, skip_serializing)]
@@ -205,6 +209,7 @@ impl Session {
             imported_checkpoints: vec![],
             cold_context_used: None,
             cache_hits: Default::default(),
+            event_seq: 0,
             rewind_committed: None,
             history: Default::default(),
             row_highwater: 0,

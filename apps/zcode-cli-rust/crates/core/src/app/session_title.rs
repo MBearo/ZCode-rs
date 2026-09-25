@@ -263,11 +263,13 @@ impl Engine {
                 title: Some(Box::new(job)),
             },
         );
+        // Node 的标题请求沿用触发轮次的 queryId（网络状态与遥测据此归属）。
+        let query = self.active.get(id).and_then(|a| a.origin.query_id.clone());
         let origin = RequestOrigin {
             kind: RequestKind::Other,
             session_id: Some(id.into()),
             trace_id: trace,
-            query_id: None,
+            query_id: query,
             query_source: source,
             stream_recovery: None,
         };

@@ -10,6 +10,7 @@ impl Engine {
     /// Observed for `session/debug` whether or not a legacy stream is
     /// subscribed; title requests stay out of the stream.
     pub(super) fn model_status(&mut self, id: &str, turn: &str, mut status: Value) {
+        self.session_event(id, Some(turn), "model_network_status", status.clone());
         let now = self.clock.now();
         let event_id = self.clock.id();
         let Some(s) = self.sessions.get_mut(id).filter(|s| s.parent_id.is_none()) else {

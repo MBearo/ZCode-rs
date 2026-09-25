@@ -9,6 +9,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { prepareHome, startRuntime } from "./zcode-cli-rust-interop-runtime.mjs";
+import {
+  diffFacts,
+  normalizeFacts,
+  scenarioSessions,
+  sessionNotifications,
+} from "./zcode-cli-rust-telemetry-diff.mjs";
 import { anthropicModel } from "./zcode-cli-rust-usage-model.mjs";
 
 const args = process.argv.slice(2);
@@ -24,6 +30,7 @@ const only = option("only");
 const show = option("show");
 
 const BROWSER_USE = "browser-use@zcode-plugins-official";
+const TELEMETRY = ["v4/telemetry/event", "computer-use/operation-event"];
 const TERMINAL = ["completedSuccess", "error", "completedInterrupted"];
 
 /** Waits for the next terminal control phase after frame `from`. */
@@ -64,27 +71,39 @@ const SCENARIOS = {
   },
   agent: async (rt, id) => [await send(rt, id, "please spawn agent")],
   toolError: async (rt, id) => [await send(rt, id, "please read missing file")],
-  denied: async (rt, id) => {
-    // 模式切换是 CAS 命令：信封带订阅快照的 revision。
-    const snapshot = await rt.snapshot();
-    const switched = await rt.command("switchCollaborationMode", id, { mode: "build" }, undefined, {
-      baseRevision: snapshot.revision,
-    });
-    if (switched.status !== "accepted") throw new Error(`${rt.kind}: ${JSON.stringify(switched)}`);
-    const from = rt.frames.length;
-    await rt.command("sendText", id, { text: "please write file now" });
-    const asked = await rt.until((d) => d.patch?.pendingInteractions?.length > 0, from);
-    const interaction = asked.patch.pendingInteractions[0];
-    const options = interaction.payload?.options ?? [];
-    const deny =
-      options.find((o) => /deny|reject/i.test(`${o.id ?? o.optionId}`)) ?? options.at(-1);
-    await rt.command("resolveInteraction", id, {
-      interactionId: interaction.interactionId ?? interaction.id,
-      answer: { optionId: deny?.id ?? deny?.optionId ?? "deny" },
-    });
-    return [await terminal(rt, from)];
-  },
+  childTool: async (rt, id) => [await send(rt, id, "please run helper agent")],
+  files: async (rt, id) => [
+    await send(rt, id, "please create note"),
+    await send(rt, id, "please change note"),
+  ],
+  allowed: async (rt, id) => answered(rt, id, /allow|once/i),
+  denied: async (rt, id) => answered(rt, id, /deny|reject/i),
 };
+
+/** A build-mode Bash call whose permission prompt is answered with `choice`. */
+async function answered(rt, id, choice) {
+  // 模式切换是 CAS 命令：信封带订阅快照的 revision。
+  const snapshot = await rt.snapshot();
+  const switched = await rt.command("switchCollaborationMode", id, { mode: "build" }, undefined, {
+    baseRevision: snapshot.revision,
+  });
+  // 模式是项目偏好：前一场景切过后，新会话已在 build 模式（noop）。
+  if (!["accepted", "noop"].includes(switched.status))
+    throw new Error(`${rt.kind}: ${JSON.stringify(switched)}`);
+  const from = rt.frames.length;
+  await rt.command("sendText", id, { text: "please write file now" });
+  const asked = await rt.until((d) => d.patch?.pendingInteractions?.length > 0, from);
+  const interaction = asked.patch.pendingInteractions[0];
+  const options = interaction.payload?.options ?? [];
+  const option = options.find((o) => choice.test(`${o.id ?? o.optionId}`)) ?? options.at(-1);
+  // 权限等待时长进入工具的 performance（permissionWaitMs）。
+  await new Promise((r) => setTimeout(r, 30));
+  await rt.command("resolveInteraction", id, {
+    interactionId: interaction.interactionId ?? interaction.id,
+    answer: { optionId: option?.id ?? option?.optionId },
+  });
+  return [await terminal(rt, from)];
+}
 
 /** Differences the spec records (rust-m9-usage-logs §2.6), not counted. */
 const KNOWN = [
@@ -148,9 +167,7 @@ async function runRuntime(kind, model) {
         ],
       ]),
     );
-    const telemetry = runtime.frames
-      .filter((frame) => frame.method === "v4/telemetry/event")
-      .map((frame) => frame.params);
+    const telemetry = runtime.frames.filter((frame) => TELEMETRY.includes(frame.method));
     const db = new DatabaseSync(env.ZCODE_SESSION_DB_PATH, { readOnly: true });
     const read = (table) =>
       db
@@ -307,6 +324,19 @@ try {
     const n = bySession(node);
     const r = bySession(rust);
     const report = { scenario: name, phases };
+    const facts = (result) =>
+      normalizeFacts(
+        sessionNotifications(
+          result.telemetry,
+          TELEMETRY,
+          scenarioSessions(result.telemetry, result.sessions[name]),
+        ),
+        [result.root],
+      );
+    const factDiff = diffFacts(facts(node), facts(rust));
+    if (show?.includes("telemetry")) report.telemetry = { node: facts(node), rust: facts(rust) };
+    if (factDiff.length) report.telemetryDiff = factDiff;
+    differences += factDiff.length;
     const trails = { node: usageTrail(node.usage[name]), rust: usageTrail(rust.usage[name]) };
     if (show?.includes("usage")) report.usage = trails;
     if (JSON.stringify(trails.node) !== JSON.stringify(trails.rust)) {
@@ -321,10 +351,6 @@ try {
     }
     console.log(JSON.stringify(report, null, 1));
   }
-  const kinds = (facts) => facts.map((f) => f.kind).join(",");
-  console.log(
-    JSON.stringify({ telemetry: { node: kinds(node.telemetry), rust: kinds(rust.telemetry) } }),
-  );
   console.log(JSON.stringify({ differences }));
   if (differences) process.exitCode = 1;
 } finally {

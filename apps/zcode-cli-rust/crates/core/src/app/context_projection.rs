@@ -111,6 +111,9 @@ impl Engine {
                 // 会话消息。Node 的标记与 context 水位都含请求前缀，cumulative 不变（spec
                 // rust-m9-usage-logs §4.2）。
                 let tokens = tokens + prefix;
+                if let Some(tally) = session.runtime.legacy.turn.as_mut() {
+                    tally.compacted(&usage, changed, tokens as u64);
+                }
                 let summary = session.runtime.compact_summary.take();
                 let window = changed
                     .then(|| self.model_window(&self.sessions[session_id]))

@@ -62,6 +62,7 @@ mod subagent_outcome;
 mod subagent_page;
 pub mod subagent_query;
 mod subagent_row;
+pub mod telemetry;
 pub mod todo;
 pub mod tool_input;
 pub mod topic_log;

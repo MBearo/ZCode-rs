@@ -171,10 +171,10 @@ sequenceDiagram
 - 本地 Anthropic Messages 模型（流式与非流式、cache 读写与 `server_tool_use` 用量）；共用 Provider Registry 形态的 HOME（`scripts/zcode-cli-rust-interop-runtime.mjs`）。
 - 场景：普通轮、Bash 工具轮、WebSearch（内部搜索请求）、模型 400 失败、流式中停止、手动压缩、子代理。每个场景一个新会话，Node 与 Rust 各用一个临时库。
 - 比较：三张表的行按记录对象（来源或工具名）排序后逐字段比较；会话、轮次、消息、trace、span、调用 id 按首次出现替换为占位，时刻与时长只比较是否为空，`*_json` 解析后比较。
-- 同时收集两边的 `v4/telemetry/event`（§5 对齐前只列出种类）与每个会话的 v4 `usage` 补丁、压缩标记（§4）。
+- 同时比较两边的 `v4/telemetry/event` 与 `computer-use/operation-event`（§5，`scripts/zcode-cli-rust-telemetry-diff.mjs`）与每个会话的 v4 `usage` 补丁、压缩标记（§4）。
 - 环境：临时根目录先 realpath，两边都以 `SHELL=/bin/bash` 启动，并在用户配置里抑制官方内置插件 `browser-use`（Node 在空 HOME 中播种并默认启用它，技能清单、会话指引与 `mcp__node_repl__js` 会进入请求前缀；浏览器工具单独对齐）。工作区 realpath 与登录 shell 名是单列的环境对齐项，不是统计差异。
 - 已知差异（脚本列出、不计数）：标题的 `provider_metadata_json`（§2.6）；breakdown 中工具定义的字符数（§4.3）；Rust 在 run 结束时重发本轮全部行，压缩标记因此多一次相同的 upsert。
-- 场景：普通轮、Bash、WebSearch、模型失败、停止、手动压缩、子代理、工具失败（Read 不存在的文件）、build 模式下拒绝权限。2026-09-25 的结果：9 个场景三张表逐字段一致（差异 0）；M9.4 之后 v4 `usage` 补丁序列（水位、窗口、阈值、cache、breakdown 的提示词与消息类别、累计值）与压缩标记（前后 token、`summaryRef`）也逐字段一致。
+- 场景：普通轮、Bash、WebSearch、模型失败、停止、手动压缩、子代理、工具失败（Read 不存在的文件）、子代理内 Bash、Write 后 Edit、build 模式下允许与拒绝权限。2026-09-25 的结果：9 个场景三张表逐字段一致（差异 0）；M9.4 之后 v4 `usage` 补丁序列（水位、窗口、阈值、cache、breakdown 的提示词与消息类别、累计值）与压缩标记（前后 token、`summaryRef`）也逐字段一致。
 
 ## 4. 协议层用量状态（M9.4）
 
@@ -232,3 +232,70 @@ sequenceDiagram
 
 - 单元测试：上下文用量公式、缓存累计与回退截断、breakdown 类别与字符数、冷加载重建。
 - 差分脚本（§3）：普通、工具、WebSearch、压缩、子代理场景的 `usage` 补丁序列与压缩标记逐字段一致（工具定义字符数除外）。
+
+## 5. 实时遥测（M9.5）
+
+依据：Node `bootstrap/src/zcode-protocol-v4/conversation-telemetry-facts.ts`（`ConversationTelemetryFactNormalizer`）、`v4-gateway.ts`（`emitLiveTelemetryFact`）、`zcode-protocol/computer-use-operation-event.ts`、`core/src/subagent/tool-event-mirror.ts`、`tool/executor/call-runner.ts`（`totalMs`）、`permission-flow.ts`（`permissionWaitMs`）、`tool/handlers/tool-perf.ts`、`bash-output.ts`、`write.ts`、`edit.ts`。消费方为 `packages/services` 的 `v4/telemetry/event` 与 `computer-use/operation-event` 分支（strict schema）。
+
+### 5.1 所有者与事件顺序
+
+- Engine 是唯一发送者：本进程的每个实时会话事件（Node `SessionEvent` 的对应物，根会话与子会话都算）先发 `computer-use/operation-event`，再发 `v4/telemetry/event`。事件 id 为新 UUID，序号是会话在本进程内的递增计数，时间取 Engine 收到事件的时刻。冷加载、回放不发。
+- 归一化器（有界 2000 键的轮次命令、首块、工具名、会话模型与已完成请求队列）挂在 Engine 上，与 Node 的网关实例同寿命。
+- 子会话的工具与权限事件另以父会话身份镜像一次（Node `mirrorSubagentToolEvent`）：序号 0，`toolCallId` 改写为 `tool_subagent_<agentId>_<childToolCallId>`，带子会话、子调用、父调用与 agent 字段，轮次是父会话发起该子代理的轮次。
+
+```mermaid
+sequenceDiagram
+  participant R as run / 工具执行
+  participant E as Engine（归一化器）
+  participant H as Host
+  R->>E: run 开始 / ModelStatus / Text / ModelDone / ToolStart / ToolExecuting / ToolDone
+  E->>E: session_event(Node 事件类型, 负载)：分配 id、序号、时间
+  E->>H: computer-use/operation-event（轮次与工具调度、开始）
+  E->>H: v4/telemetry/event（归一化后的事实）
+  Note over E: 子会话的工具与权限事件
+  E->>H: 父会话身份的镜像事实（序号 0）
+```
+
+### 5.2 事件来源
+
+| Rust 事实                                                         | Node 事件                                                                                                                                 |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| run 开始（输入命令、续跑来源、自动化与闲时任务字段）              | `turn_started`                                                                                                                            |
+| `ModelStatus`（含压缩、目标验证、WebSearch 等内部请求与标题请求） | `model_network_status`                                                                                                                    |
+| `Text`                                                            | `model_streaming`（`assistantMessageId` 为本步的 Node assistant 消息）                                                                    |
+| step 的 `ModelDone`                                               | `model_complete`（`main_turn` / `subagent`）                                                                                              |
+| `ToolStart` / `ToolExecuting`                                     | `tool_call_scheduled` / `tool_call_started`                                                                                               |
+| `ToolDone`                                                        | `tool_call_result`（成功，带 `perf`）、`tool_call_error`（`TOOL_EXECUTION_FAILED`）、策略拒绝为 `permission_denied`；询问后被拒不再有事件 |
+| 权限询问与应答                                                    | `permission_requested` / `permission_resolved`                                                                                            |
+| 子代理启动与结束                                                  | `subagent_spawned` / `subagent_stopped`                                                                                                   |
+| run 结束（旧协议轮次合计，子会话同样统计）                        | `turn_complete` / `turn_error`（`turnPhase` 为 Node TurnMachine 阶段）                                                                    |
+| 压缩成功、失败或随 run 中断                                       | `compact_completed` / `compact_failed`                                                                                                    |
+
+### 5.3 规则
+
+- 事实映射与 Node 归一化器逐项一致：`sourceCommandId` 取本轮 `turn_started.inputId`（终态优先取 payload 的 `inputId`，压缩只取压缩负载的命令），`firstChunk` 按会话、轮次、通道、part 与父调用区分，`usage.delta` 只给 agent step（按会话与请求来源的 FIFO 取已完成请求的身份），排队/准入状态与未知 `inputSource` 不产生事实。
+- 工具 `performance`：`totalMs` 为调用从开始到 PostToolUse 结束的整个生命周期；只有真正弹出权限询问的调用带 `permissionWaitMs`；Bash 带命令明细（分类、公开命令表中的可执行名或 `compound` / `other`、命令数、状态、运行时长、无输出时长、退出码、超时、输出字节，不含命令原文）；Write 带 `filesystem`，Edit 带 `filesystem` 与 `patch`（子代理中 `workspaceKind` 为 `unknown`）。`perf` 只进遥测，不写入结果存储。
+- `computer-use/operation-event`：轮次开始、完成、失败，工具调度（`mcp__node_repl__js` 且代码含 `setupComputerUseRuntime` 时 `computerUse: true`）与工具开始。
+
+### 5.4 与 Node 的差异
+
+- 不带 `memoryEnabled`：Rust 不向 Host 请求会话运行偏好（`session/requestRuntimePreferences`），也没有 Memory 功能。
+- 标题请求 Rust 用流式发送，`transport` 为 `sse`（Node `http`，见 §2.6）。
+- Node 在流式输出时就调度并启动可并发的只读工具，其 scheduled / started 事实可能早于请求完成；Rust 在请求完成后执行工具。
+- Bash 不带 `firstOutputMs`（Node 只在流式进度计时存在时带，短命令同样没有）。
+- 没有 `workflow.lifecycle` 与 CronCreate 的 `automationId`：Rust 没有动态工作流与定时任务工具。
+
+### 5.5 修复
+
+- 子会话的模型请求原先沿用父轮次的 `queryId`；Node 子会话轮次没有 inputId，`queryId` 为新 id。
+- WebSearch 与 WebFetch 处理等工具内部请求原先带本轮 `queryId`；Node 在工具的 trace 上下文中发出，不带。
+- 标题请求原先不带 `queryId`、网络状态不进入会话；现沿用触发轮次的 `queryId`，状态进入会话遥测。
+- 旧协议 `turn.failed` 的 `turnPhase` 原先固定为 `execution`；现为失败时的 TurnMachine 阶段（首个请求失败为 `processing_input`）。
+- 手动压缩轮的 `turn_complete` 原先 `tokenCount` 为 0、`response` 为空；Node 为压缩请求的 token、`Compacted`（无可压缩内容时为预估 token 与 `Context is up to date; no compression needed`），`historyRoundCount` 为 1；轮内压缩的用量计入该轮的 `usage`。
+- Write 的结果文本原先为旧版 `The file <绝对路径> has been written successfully.`；现与 Node 一致：新建为 `File created successfully at: <file_path>`，覆盖为 `The file <file_path> has been updated successfully.`，并附文件状态已在上下文中的提示。
+
+### 5.6 验收
+
+- 单元测试：归一化器（命令关联、首块、请求身份队列、工具名缓存与性能白名单、权限、子代理、压缩）、computer-use 映射、Bash 命令分类。
+- 集成测试（`zcode-cli-rust-telemetry.test.ts`）：一轮工具调用的通知全部通过共享的 strict schema。
+- 差分脚本（§3）：12 个场景（新增子代理内 Bash、Write 后 Edit、权限允许）的事实流与 computer-use 事件逐字段一致（id、时刻、时长为占位；`memoryEnabled`、标题 `transport` 与只读工具的提前交错为已知差异）。

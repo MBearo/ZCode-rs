@@ -258,6 +258,9 @@ pub struct ToolFacts {
     pub truncated: bool,
     /// Node `output.modelUsage`: a tool's internal model request (WebSearch).
     pub model_usage: Option<Value>,
+    /// Node `ToolCallResult.result.perf` without the permission wait: the
+    /// call's `totalMs` and the tool's detail.
+    pub perf: Option<Value>,
 }
 
 pub struct ModelOutput {

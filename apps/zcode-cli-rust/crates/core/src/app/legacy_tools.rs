@@ -34,6 +34,9 @@ impl Engine {
         else {
             return;
         };
+        if !calls.is_empty() {
+            tally.phase = Some("scheduling_tools");
+        }
         let mut events = vec![];
         for call in calls {
             let input = call["function"]["arguments"]
@@ -60,7 +63,11 @@ impl Engine {
             }
             events.push(("tool.updated", payload));
         }
+        let scheduled: Vec<Value> = events.iter().map(|(_, p)| p.clone()).collect();
         self.legacy_emit(id, Some(turn), events);
+        for payload in scheduled {
+            self.session_event(id, Some(turn), "tool_call_scheduled", payload);
+        }
     }
 
     /// Node `tool_call_started`, after hooks and permission.
@@ -76,11 +83,20 @@ impl Engine {
         };
         track.started_at = Some(now);
         let name = track.name.clone();
+        if let Some(tally) = self
+            .sessions
+            .get_mut(id)
+            .and_then(|s| s.runtime.legacy.turn.as_mut())
+        {
+            tally.phase = Some("executing_tools");
+        }
         let read_only = self.tools.concurrent_safe_scoped(id, &name);
         // D16：Node 带出 readOnly（与 sideEffectScope）；strict schema 不含，Host 丢弃整条事件。
         let payload = json!({"toolCallId": call, "toolName": name, "startedAt": now,
             "readOnly": read_only, "kind": "started"});
         self.legacy_emit(id, Some(turn), vec![("tool.updated", payload)]);
+        let started = json!({"toolCallId": call, "toolName": name});
+        self.session_event(id, Some(turn), "tool_call_started", started);
     }
 
     /// The call's result. A policy refusal is Node `permission_denied`; a
@@ -91,7 +107,7 @@ impl Engine {
         turn: &str,
         call: &str,
         outcome: (bool, bool),
-        result: Option<String>,
+        (result, perf): (Option<String>, Option<Value>),
     ) {
         let (failed, denied) = outcome;
         let now = self.clock.now();
@@ -104,6 +120,13 @@ impl Engine {
             return;
         };
         track.succeeded = Some(!failed);
+        // Node permissionWaitMs：只有真正弹出权限询问的调用才有等待时长。
+        let perf = perf.map(|mut perf| {
+            if let Some(wait) = track.permission_wait {
+                perf["permissionWaitMs"] = wait.into();
+            }
+            perf
+        });
         let result = result.unwrap_or_default();
         let payload = if denied {
             if track.prompted {
@@ -134,7 +157,11 @@ impl Engine {
         } else {
             "tool.updated"
         };
+        let event = super::telemetry::tool_done_event(&payload, (failed, denied), perf);
         self.legacy_emit(id, Some(turn), vec![(kind, payload)]);
+        if let Some((kind, payload)) = event {
+            self.session_event(id, Some(turn), kind, payload);
+        }
     }
 
     /// Node `tool_batch_complete` for one executed group.
@@ -152,6 +179,13 @@ impl Engine {
             .count();
         let payload = json!({"toolCallIds": ids, "successCount": succeeded,
             "errorCount": ids.len() - succeeded, "kind": "batch"});
+        if let Some(tally) = self
+            .sessions
+            .get_mut(id)
+            .and_then(|s| s.runtime.legacy.turn.as_mut())
+        {
+            tally.phase = Some("aggregating_results");
+        }
         self.legacy_emit(id, Some(turn), vec![("tool.updated", payload)]);
     }
 
@@ -176,6 +210,7 @@ impl Engine {
             .and_then(|t| t.tools.get_mut(call_id))
         {
             track.prompted = true;
+            track.permission_at = Some(self.clock.now());
         }
         let policy = request.options_policy.as_ref().map(|_| "no-always-allow");
         let reason = if request.reason.is_empty() {
@@ -191,7 +226,16 @@ impl Engine {
             // D16：Node 的 fullAccessSupported 不在 strict schema 中，Host 丢弃整条事件。
             payload["fullAccessSupported"] = true.into();
         }
+        if let Some(tally) = self
+            .sessions
+            .get_mut(id)
+            .and_then(|s| s.runtime.legacy.turn.as_mut())
+        {
+            tally.phase = Some("awaiting_permission");
+        }
+        let requested = json!({"requestId": interaction, "toolCallId": call_id, "toolName": tool});
         self.legacy_emit(id, turn.as_deref(), vec![("permission.requested", payload)]);
+        self.session_event(id, turn.as_deref(), "permission_requested", requested);
     }
 
     /// Node `permission_resolved` with the broker's decision.
@@ -203,6 +247,15 @@ impl Engine {
         answer: &PermissionAnswer,
     ) {
         let turn = self.active.get(owner).map(|a| a.turn_id.clone());
+        let now = self.clock.now();
+        if let Some(track) = self
+            .sessions
+            .get_mut(owner)
+            .and_then(|s| s.runtime.legacy.turn.as_mut())
+            .and_then(|t| t.tools.get_mut(call))
+        {
+            track.permission_wait = track.permission_at.map(|at| now.saturating_sub(at));
+        }
         let mut payload = json!({"requestId": interaction, "toolCallId": call});
         match answer {
             PermissionAnswer::Allow | PermissionAnswer::Fail(_) => {
@@ -219,10 +272,13 @@ impl Engine {
                 }
             }
         }
+        let resolved = json!({"requestId": interaction, "toolCallId": call,
+            "decision": payload["decision"]});
         self.legacy_emit(
             owner,
             turn.as_deref(),
             vec![("permission.resolved", payload)],
         );
+        self.session_event(owner, turn.as_deref(), "permission_resolved", resolved);
     }
 }

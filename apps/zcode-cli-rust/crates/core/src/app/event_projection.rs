@@ -144,6 +144,7 @@ impl Engine {
             // run 结束：权限、问答与 Host 请求统一在此收口，不再分散清理。
             self.release_waiters(&id);
         }
+        self.telemetry_chunk(&id, &turn, &event.event);
         let now = self.clock.now();
         let s = self.sessions.get_mut(&id).unwrap();
         let legacy = super::legacy_stream::fact(&event.event, s.runtime.legacy.kind().is_some());

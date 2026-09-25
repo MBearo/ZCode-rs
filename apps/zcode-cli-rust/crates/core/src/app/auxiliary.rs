@@ -105,6 +105,13 @@ impl Engine {
         }
         match event.event {
             Event::ToolCleanupFailed(message) => anyhow::bail!("{message}"),
+            // Node：标题请求的网络状态照常进入会话遥测，归属触发它的轮次。
+            Event::ModelStatus(status) => {
+                if let Some(title) = self.auxiliary[&id].title.as_ref() {
+                    let (session, turn) = (title.session.clone(), title.fact.turn_id.clone());
+                    self.session_event(&session, turn.as_deref(), "model_network_status", status);
+                }
+            }
             Event::RequestAuth {
                 provider,
                 selection,

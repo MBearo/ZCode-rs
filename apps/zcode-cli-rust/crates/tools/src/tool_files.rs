@@ -1,4 +1,4 @@
-use super::file_write::{atomic_write, patch};
+use super::file_write::atomic_write;
 use super::tool_edit as edit;
 use super::tools::{boolean, check_cancel, keys, resolve, string, uint};
 use crate::contract::ToolOutput;
@@ -241,6 +241,7 @@ impl FileTools<'_> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => input.to_owned(),
             Err(e) => return Err(e.into()),
         };
+        let read_started = std::time::Instant::now();
         let original = match tokio::fs::metadata(&path).await {
             Ok(meta) => {
                 if !meta.is_file() {
@@ -254,8 +255,14 @@ impl FileTools<'_> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e.into()),
         };
-        check_cancel(cancel)?;
         let edit = name == "Edit";
+        // Node：Edit 新建文件不读取（fsReadMs 为 0），其余按读取耗时。
+        let read_ms = if edit && original.is_none() {
+            0
+        } else {
+            read_started.elapsed().as_millis() as u64
+        };
+        check_cancel(cancel)?;
         if edit && original.is_none() && !string(args, "old_string")?.is_empty() {
             let message = edit::missing_message(&path, self.cwd).await;
             return Err(edit::failure(edit::code::FILE_NOT_EXIST, message));
@@ -309,7 +316,7 @@ impl FileTools<'_> {
                 bail!("{name}: stale_file; file changed since Read, read it again");
             }
         }
-        let mut planned = None;
+        let (mut planned, mut match_ms) = (None, None);
         let (new, search, replacement) = if name == "Write" {
             (
                 string(args, "content")?.replace("\r\n", "\n"),
@@ -323,6 +330,7 @@ impl FileTools<'_> {
                 (replacement.clone(), search, replacement)
             } else {
                 let raw_old = string(args, "old_string")?;
+                let started = std::time::Instant::now();
                 let edit::Planned {
                     content,
                     actual_old,
@@ -331,6 +339,7 @@ impl FileTools<'_> {
                     candidates,
                 } = edit::plan(&old, &search, &replacement, replace_all, raw_old)?;
                 planned = Some((strategy, candidates));
+                match_ms = Some(started.elapsed().as_millis() as u64);
                 (content, actual_old, actual_new)
             }
         };
@@ -357,7 +366,9 @@ impl FileTools<'_> {
             )
             .await?;
         }
+        let write_started = std::time::Instant::now();
         atomic_write(&path, &bytes, original.as_deref(), cancel).await?;
+        let write_ms = write_started.elapsed().as_millis() as u64;
         let path = tokio::fs::canonicalize(path).await?;
         self.remember(path.clone(), Sha256::digest(&bytes).to_vec(), true, false)
             .await;
@@ -367,32 +378,21 @@ impl FileTools<'_> {
             .await
             .views
             .record(path.clone(), (1, None), None);
-        let (patch, additions, deletions) = patch(&old, &new);
-        let mut data = if name == "Write" {
-            json!({"type":if original.is_some(){"update"}else{"create"},"filePath":path,"content":new,"originalFile":original.as_ref().map(|_|&old),"structuredPatch":patch,"userModified":false})
-        } else {
-            json!({"filePath":path,"oldString":search,"newString":replacement,"originalFile":old,"structuredPatch":patch,"userModified":false,"replaceAll":replace_all,"matchStrategy":planned.map(|p|p.0),"matchCandidateCount":planned.map(|p|p.1)})
+        let written = super::file_result::Written {
+            path,
+            original: original.is_some(),
+            old,
+            new,
+            search,
+            replacement,
+            replace_all,
+            planned,
         };
-        let mut display = json!({"kind":"file_diff","filePath":path,"additions":additions,"deletions":deletions,"structuredPatch":data["structuredPatch"]});
-        if serde_json::to_vec(&display)?.len() > 32 * 1024 {
-            display["structuredPatch"] = json!([]);
-            display["truncated"] = true.into();
-        }
-        let mut content = if edit {
-            // Node formatEditModelContent：使用模型给出的 file_path。
-            edit::model_content(string(args, "file_path")?, replace_all)
-        } else {
-            format!("The file {} has been written successfully.", path.display())
+        let timings = super::file_result::Timings {
+            read_ms,
+            write_ms,
+            match_ms,
         };
-        if !edit && serde_json::to_vec(&data)?.len() > 64 * 1024 {
-            tokio::fs::create_dir_all(self.artifacts).await?;
-            let artifact = self.artifacts.join(format!("{}.json", super::id()));
-            tokio::fs::write(&artifact, serde_json::to_vec(&data)?).await?;
-            content.push_str(&format!(" Full change result: {}", artifact.display()));
-        }
-        // data is adapter-local validation output; only bounded display/model text crosses stdio.
-        let mut result = ToolOutput::new(content, std::mem::take(&mut data));
-        result.display = Some(display);
-        Ok(result)
+        super::file_result::result(self, name, args, written, timings).await
     }
 }

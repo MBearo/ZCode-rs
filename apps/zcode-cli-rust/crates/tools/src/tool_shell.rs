@@ -157,23 +157,24 @@ impl ShellTasks {
         };
         if !background {
             // Node：超时的前台命令转入后台（sleep 开头的命令除外），没有会话 owner 时照旧超时终止。
+            let started = std::time::Instant::now();
             if let (Some(sink), Some(deadline)) = (sink, timeout)
                 && auto_eligible(&command)
             {
                 let data = self
                     .auto((cwd, session), sink, launch, deadline, cancel)
                     .await?;
-                return Ok(shell_output(&command, data));
+                return Ok(shell_output(&command, data, Some(started)));
             }
             let Launch { path, combined, .. } = launch;
             let data = run(cwd, &self.env, &command, &path, combined, timeout, cancel).await?;
-            return Ok(shell_output(&command, data));
+            return Ok(shell_output(&command, data, Some(started)));
         }
         let sink = sink.context("Background execution requires a session owner")?;
         let data = self
             .explicit((cwd, session), sink, launch, timeout, cancel)
             .await?;
-        Ok(shell_output(&command, data))
+        Ok(shell_output(&command, data, None))
     }
     pub async fn cancel(&self, session: &str, id: Option<&str>) -> Result<()> {
         let all = self.jobs.lock().await;
@@ -224,9 +225,16 @@ impl ShellTasks {
     }
 }
 /// Node `formatBashModelContent`; `failed` is Node's provider `is_error`.
-fn shell_output(command: &str, data: Value) -> ToolOutput {
+/// `started` is `None` for a background launch.
+fn shell_output(command: &str, data: Value, started: Option<std::time::Instant>) -> ToolOutput {
     let (content, failed) = super::bash_output::bash_content(command, &data);
+    // 前台转入后台的命令没有退出结果，Node 按 backgrounded 记。
+    let run_ms = started
+        .filter(|_| data.get("backgroundTaskId").is_none())
+        .map(|at| at.elapsed().as_millis() as u64);
+    let perf = super::bash_perf::detail(command, &data, run_ms);
     let mut output = ToolOutput::new(content, data);
     output.failed = failed;
+    output.perf = Some(perf);
     output
 }

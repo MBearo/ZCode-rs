@@ -49,6 +49,8 @@ async fn execute(
         bail!("Cancelled");
     }
     sink.send(Event::ToolStart { call: call.clone() }).await?;
+    // Node totalMs：查找、校验、Hook、权限等待、执行与 PostToolUse 的整个生命周期。
+    let started = std::time::Instant::now();
     let name = call["function"]["name"]
         .as_str()
         .context("Tool name missing")?;
@@ -105,7 +107,7 @@ async fn execute(
         {
             Gate::Stop(mut output) => {
                 tool_hooks::append_contexts(&mut output, &pre.additional_contexts, name);
-                return Ok((id, output, true));
+                return Ok((id, *output, true));
             }
             Gate::Run(Some(modified)) => parsed = Some(modified),
             Gate::Run(None) => {}
@@ -212,6 +214,17 @@ async fn execute(
         }
     }
     tool_hooks::append_contexts(&mut content, &contexts, name);
+    if !failed {
+        let mut perf = json!({"totalMs": started.elapsed().as_millis() as u64});
+        if let Some(mut detail) = content.perf.take() {
+            // Node workspaceKind：子代理内的文件工具记为 unknown。
+            if profile.is_some() && detail["filesystem"].is_object() {
+                detail["filesystem"]["workspaceKind"] = "unknown".into();
+            }
+            perf["detail"] = detail;
+        }
+        content.perf = Some(perf);
+    }
     Ok((id, content, failed))
 }
 
@@ -326,6 +339,7 @@ async fn commit(
         truncated: output.truncated,
         model_usage: Some(output.data["modelUsage"].clone())
             .filter(|u| u.as_object().is_some_and(|u| !u.is_empty())),
+        perf: output.perf,
     };
     sink.send(Event::ToolDone {
         id: id.into(),

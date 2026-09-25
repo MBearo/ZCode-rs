@@ -110,6 +110,12 @@ export async function anthropicModel() {
       return reply([text("<summary>compacted history</summary>")], "end_turn");
     }
     if (toolResult) return reply([text(`done: ${firstUser}`)], "end_turn");
+    if (lastText.includes("child tool")) {
+      return reply(
+        [tool("toolu_child", "Bash", { command: "echo child", description: "Echo in child" })],
+        "tool_use",
+      );
+    }
     if (lastText.includes("child task")) return reply([text("child done")], "end_turn");
     if (lastText.includes("fail now")) {
       response.writeHead(400, { "content-type": "application/json" });
@@ -137,6 +143,30 @@ export async function anthropicModel() {
           tool("toolu_touch", "Bash", {
             command: "touch denied.txt",
             description: "Create a file",
+          }),
+        ],
+        "tool_use",
+      );
+    }
+    if (lastText.includes("create note")) {
+      return reply(
+        [tool("toolu_write", "Write", { file_path: "new.txt", content: "a\n" })],
+        "tool_use",
+      );
+    }
+    if (lastText.includes("change note")) {
+      return reply(
+        [tool("toolu_edit", "Edit", { file_path: "new.txt", old_string: "a", new_string: "b" })],
+        "tool_use",
+      );
+    }
+    if (lastText.includes("helper agent")) {
+      return reply(
+        [
+          tool("toolu_helper", "Agent", {
+            description: "Helper task",
+            prompt: "child tool gamma",
+            subagent_type: "general-purpose",
           }),
         ],
         "tool_use",

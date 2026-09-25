@@ -45,6 +45,8 @@ pub(super) struct Active {
     pub request: Option<super::usage_state::StepRequest>,
 }
 pub struct Engine {
+    /// The live telemetry normalizer (spec rust-m9-usage-logs §5).
+    pub(super) telemetry: crate::domain::telemetry::Normalizer,
     pub(super) child_updates:
         BTreeMap<String, tokio::sync::watch::Sender<crate::domain::subagent::Task>>,
     pub(super) uploads: crate::domain::attachment_upload::Uploads,
@@ -120,6 +122,7 @@ impl Engine {
         let (events, event_rx) = mpsc::channel(128);
         tools.attach_events(events.clone(), &workspace);
         Ok(Self {
+            telemetry: Default::default(),
             child_updates: BTreeMap::new(),
             uploads: Default::default(),
             auxiliary: BTreeMap::new(),

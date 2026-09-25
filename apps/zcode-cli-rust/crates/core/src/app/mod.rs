@@ -55,6 +55,7 @@ mod node_goal;
 mod node_hooks;
 mod node_media;
 mod stream_recovery;
+mod telemetry;
 mod todos;
 mod usage;
 mod usage_state;

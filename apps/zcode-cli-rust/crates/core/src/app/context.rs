@@ -190,6 +190,19 @@ impl RunContext {
 }
 /// A request of the run outside the agent step: retries, auth and network
 /// status go to the run, the output does not.
+/// Node：工具内部请求（WebSearch、WebFetch 处理）在工具调用的 trace 上下文里发出，没有
+/// queryId；压缩与目标验证沿用本轮的 queryId。
+fn hidden_origin(
+    origin: &crate::contract::RequestOrigin,
+    query_source: &'static str,
+) -> std::sync::Arc<crate::contract::RequestOrigin> {
+    let mut hidden = (*origin.other(query_source)).clone();
+    if matches!(query_source, "web_search_tool" | "web_fetch_processing") {
+        hidden.query_id = None;
+    }
+    std::sync::Arc::new(hidden)
+}
+
 pub(super) async fn hidden_request(
     model: &dyn ModelPort,
     (messages, tools): (Vec<Value>, &[Value]),
@@ -203,7 +216,7 @@ pub(super) async fn hidden_request(
         run_id: sink.run_id.clone(),
         tx,
         // 压缩与工具内部请求不是 agent step，与 Node 一样按 other 归属。
-        origin: sink.origin.other(query_source),
+        origin: hidden_origin(&sink.origin, query_source),
         request_auth: sink.request_auth.clone(),
     };
     let request = model.complete(messages, tools, &hidden, cancel);

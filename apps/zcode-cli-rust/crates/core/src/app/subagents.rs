@@ -175,6 +175,8 @@ impl Engine {
             .collect();
         self.publish(parent, deltas)?;
         self.persist(parent, None).await?;
+        let parent_turn = self.active[parent].turn_id.clone();
+        self.telemetry_subagent(parent, Some(&parent_turn), &task, None);
         let handle = self.child_handle(task, None, None);
         self.start_run(&child, turn)?;
         Ok(handle)

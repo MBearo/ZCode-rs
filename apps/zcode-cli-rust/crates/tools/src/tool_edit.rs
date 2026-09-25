@@ -19,7 +19,8 @@ pub(super) mod code {
 
 pub(super) const NOT_READ: &str = "File has not been read yet. Read it first before writing to it.";
 pub(super) const STALE: &str = "File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.";
-const FRESHNESS_SUFFIX: &str = " (file state is current in your context — no need to Read it back)";
+pub(super) const FRESHNESS_SUFFIX: &str =
+    " (file state is current in your context — no need to Read it back)";
 const NON_UNIQUE: &str = "old_string is not unique in the file. Provide more surrounding context or set replace_all to true.";
 
 /// Node `ToolHandlerFailure` with an `EditErrorCode`.

@@ -46,6 +46,11 @@ impl Engine {
             "Run started"
         );
         let kind = super::legacy_input::run_kind(session, &turn_id);
+        let admission = [
+            ("automationId", submission.automation_id.clone()),
+            ("offPeakTaskId", submission.off_peak_task_id.clone()),
+            ("offPeakRunType", submission.off_peak_run_type.clone()),
+        ];
         let estimated = session.active_context_tokens();
         let run_id = session.run_id.clone().context("Run reservation required")?;
         let who = crate::domain::usage::Attribution {
@@ -135,6 +140,7 @@ impl Engine {
         ));
         history.permissions = Some(permission_updates);
         self.legacy_turn_started(id, &turn_id, kind);
+        self.telemetry_turn_started(id, &turn_id, admission);
         // Node 只解析用户可见输入的原文；子代理与模型专用续跑不产生引用提醒。
         if self.sessions[id].parent_id.is_none()
             && let Some((text, _)) = &submission.prompt
@@ -256,7 +262,9 @@ impl Engine {
                 kind: RequestKind::Subagent,
                 session_id: Some(id.into()),
                 trace_id: parent.trace_id.clone(),
-                query_id: parent.query_id.clone(),
+                // 修复：原先沿用父轮次的 queryId；Node 的子会话轮次没有 inputId，queryId 是新 id
+                // （`createQueryId`），网络状态与遥测据此区分父子请求。
+                query_id: Some(self.clock.id()),
                 query_source: "subagent",
                 stream_recovery: None,
             },

@@ -17,7 +17,7 @@ pub(super) enum Gate {
     /// Run the tool; `Some` replaces its input (PermissionRequest `modify`).
     Run(Option<Value>),
     /// The result the model reads instead (a refusal, or a failure after allow).
-    Stop(ToolOutput),
+    Stop(Box<ToolOutput>),
 }
 
 /// Node `resolveToolPermission`. `hooks` carries the run's hooks and the
@@ -50,7 +50,7 @@ pub(super) async fn authorize(
     let plan_exit = name == crate::domain::plan_mode::EXIT && snapshot.state.plan_enabled;
     let stop = |mut output: ToolOutput| {
         output.stop_turn |= plan_exit;
-        Gate::Stop(output)
+        Gate::Stop(Box::new(output))
     };
     match decision.behavior {
         Behavior::Allow => Ok(Gate::Run(None)),
@@ -129,12 +129,12 @@ pub(super) async fn authorize(
                     };
                     let mut output = refusal(text.into());
                     output.stop_turn = feedback.is_none();
-                    Gate::Stop(output)
+                    Gate::Stop(Box::new(output))
                 }
                 PermissionAnswer::Fail(message) => {
                     let mut output = ToolOutput::text(message);
                     output.failed = true;
-                    Gate::Stop(output)
+                    Gate::Stop(Box::new(output))
                 }
             })
         }

@@ -274,7 +274,9 @@ impl Engine {
         self.title_turn_end(id, event);
         let media = self.node_tool_media(id, event).await?;
         let checkpoint = self.node_checkpoint_artifact(id, event).await?;
+        let compaction = self.open_compaction(id, event);
         let flush = self.node_event(id, event, (media.as_ref(), checkpoint.as_deref()));
+        self.compaction_ended(id, compaction);
         self.observe_step(id, event)?;
         if flush {
             self.persist(id, None).await?;

@@ -65,14 +65,17 @@ test("Agent creates isolated real child sessions, runs foreground siblings concu
     await h.command(h.envelope("sendText", sid, { text: "parent secret" }));
     await h.completed(sid);
     const agents = await listing(h, sid);
-    // 与 Node 一致：子代理请求按 subagent 归属，沿用父 run 的 trace 与 query。
+    // 与 Node 一致：子代理请求按 subagent 归属，沿用父 run 的 trace；子会话轮次没有
+    // inputId，queryId 是新 id（Node header 与网络状态同取 statusContext.queryId，
+    // 真实 Node 的遥测差分核对过，spec rust-m9-usage-logs §5.5）。
     const [parent] = f.requestHeaders;
     const childRequests = f.requestHeaders.filter((r) => r["x-zcode-session-type"] === "subagent");
     assert(childRequests.length >= 2);
     assert.equal(parent!["x-zcode-session-type"], "main");
     for (const child of childRequests) {
       assert.equal(child["x-zcode-trace-id"], parent!["x-zcode-trace-id"]);
-      assert.equal(child["x-query-id"], parent!["x-query-id"]);
+      assert.ok(child["x-query-id"]);
+      assert.notEqual(child["x-query-id"], parent!["x-query-id"]);
       assert.notEqual(child["x-session-id"], parent!["x-session-id"]);
     }
     assert.equal(agents.ended.total, 2);

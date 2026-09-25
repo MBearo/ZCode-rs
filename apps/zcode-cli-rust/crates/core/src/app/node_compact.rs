@@ -133,14 +133,23 @@ impl Engine {
                     "reminders": reminders,
                 });
                 let s = self.sessions.get_mut(id).unwrap();
+                let update = json!({"endedAt": now, "summaryMessageId": summary,
+                    "postCompactTokenCount": done["postCompactTokenCount"],
+                    "truePostCompactTokenCount": tokens + prefix});
+                let payload = s.node_compact_payload("completed", &update);
                 s.node_compact_done(now, done);
                 s.runtime.compact_summary = Some(summary);
+                if let Some(payload) = payload {
+                    self.session_event(id, Some(&turn), "compact_completed", payload);
+                }
             }
             Event::CompactFailed { .. } => {
-                self.sessions
-                    .get_mut(id)
-                    .unwrap()
-                    .node_compact_ended(now, "failed", None);
+                let s = self.sessions.get_mut(id).unwrap();
+                let payload = s.node_compact_payload("failed", &json!({"endedAt": now}));
+                s.node_compact_ended(now, "failed", None);
+                if let Some(payload) = payload {
+                    self.session_event(id, Some(&turn), "compact_failed", payload);
+                }
             }
             _ => {}
         }

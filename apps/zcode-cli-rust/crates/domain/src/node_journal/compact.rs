@@ -83,6 +83,18 @@ impl Session {
         self.node.compaction = Some(compaction);
     }
 
+    /// Node's `CompactCompleted` / `CompactFailed` payload of the compaction in
+    /// progress (the live event the telemetry reads), before it is journaled.
+    pub fn node_compact_payload(&self, status: &str, update: &Value) -> Option<Value> {
+        let c = self.node.compaction.as_ref()?;
+        let mut update = update.clone();
+        if status == "failed" && c.max_attempts > 1 {
+            update["attempt"] = c.max_attempts.into();
+            update["maxAttempts"] = c.max_attempts.into();
+        }
+        Some(c.payload(status, &update))
+    }
+
     /// A compaction ended without a summary: `skipped` (nothing to compact),
     /// `failed` or `interrupted` (Node `finishCompactTimelineFailure`).
     pub fn node_compact_ended(&mut self, now: u64, status: &str, reason: Option<&str>) {

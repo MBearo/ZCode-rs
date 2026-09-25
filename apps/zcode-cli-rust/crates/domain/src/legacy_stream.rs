@@ -224,6 +224,15 @@ pub struct TurnTally {
     pub message_id: Option<String>,
     /// This turn's tool calls by id.
     pub tools: BTreeMap<String, ToolTrack>,
+    /// Node `TurnMachine` phase (`None` before the first model response is
+    /// `processing_input`); a turn error reports it as `turnPhase`.
+    pub phase: Option<&'static str>,
+}
+
+impl TurnTally {
+    pub fn phase(&self) -> &'static str {
+        self.phase.unwrap_or("processing_input")
+    }
 }
 
 /// One tool call's legacy lifecycle facts.
@@ -235,6 +244,10 @@ pub struct ToolTrack {
     pub started_at: Option<u64>,
     /// A permission prompt was shown; its answer already went out.
     pub prompted: bool,
+    /// When the prompt went out, and how long its answer took (Node
+    /// `permissionWaitMs`).
+    pub permission_at: Option<u64>,
+    pub permission_wait: Option<u64>,
     pub succeeded: Option<bool>,
 }
 
@@ -298,6 +311,30 @@ impl TurnTally {
     }
 
     /// Node `ModelUsageSummary`.
+    /// A compaction in this turn: its summary request counts in the turn's
+    /// usage; a manual compaction turn (Node `compact.ts`) is one round whose
+    /// response and token count are the compaction's.
+    pub fn compacted(&mut self, raw: &Value, done: bool, tokens: u64) {
+        let usage = model_usage(raw);
+        if done {
+            self.requests += 1;
+            for (sum, value) in self.usage.iter_mut().zip(usage) {
+                *sum = sum.saturating_add(value);
+            }
+        }
+        if self.kind == RunKind::Compact {
+            self.rounds = 1;
+            (self.response, self.token_count) = if done {
+                ("Compacted".into(), usage[2])
+            } else {
+                (
+                    "Context is up to date; no compression needed".into(),
+                    tokens,
+                )
+            };
+        }
+    }
+
     pub fn summary(&self) -> Value {
         let mut usage = usage_json(self.usage);
         usage["source"] = "provider".into();

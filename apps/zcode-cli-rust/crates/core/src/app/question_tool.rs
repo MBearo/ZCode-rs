@@ -36,5 +36,6 @@ pub(super) async fn execute(
         failed: answer.failed,
         display: None,
         truncated: false,
+        perf: None,
     })
 }

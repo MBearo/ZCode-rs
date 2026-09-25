@@ -310,6 +310,9 @@ pub struct ToolOutput {
     pub display: Option<Value>,
     /// The result was cut to its budget (Node `serialization.truncated`).
     pub truncated: bool,
+    /// Node's non-enumerable `perf` detail (`ToolExecutionTelemetry.detail`):
+    /// telemetry only, never stored with the result.
+    pub perf: Option<Value>,
 }
 impl ToolOutput {
     pub fn text(content: String) -> Self {
@@ -322,6 +325,7 @@ impl ToolOutput {
             data: Value::Null,
             display: None,
             truncated: false,
+            perf: None,
         }
     }
     pub fn new(content: String, data: Value) -> Self {
@@ -334,6 +338,7 @@ impl ToolOutput {
             data,
             display: None,
             truncated: false,
+            perf: None,
         }
     }
 }

@@ -834,9 +834,15 @@ async fn stop_during_start_now_reservation_holds_input_and_rejects_competing_pro
         ))
         .await
         .unwrap();
-    let rejection = runtime.output.recv().await.unwrap();
+    // 输出中夹有遥测通知（spec rust-m9-usage-logs §5）：按请求 id 取竞争命令的回复。
+    let rejection = loop {
+        let batch = runtime.output.recv().await.unwrap();
+        if let Some(reply) = batch.into_iter().find(|m| m["id"] == "other") {
+            break reply;
+        }
+    };
     assert_eq!(
-        rejection[0]["result"]["reasonCode"],
+        rejection["result"]["reasonCode"],
         "guard.queuePromotionBusy"
     );
     runtime
