@@ -4,7 +4,7 @@
 
 App 唯一基线为原产品仓库 `v3.14.3`（`ab4d5e6ba0bc1d7c684d4159427fc6a1d6cf58c9`）。当前开源分支的 Host、协议客户端和存储初始化适配不能作为已发布 App 能力的证据。Rust 使用当前 Cargo workspace。
 
-首版提供 npm 命令 `zcode-rust app launch`、`app status`、`app doctor`。`launch` 自动安装 npm 平台包内的预编译 binary 到用户运行时目录，再从版本专用目录直接启动已安装 App。支持显式 `--app`、`--runtime-dir`；开发验收可用 `--binary` 指向本地 release binary。npm 包名默认 `@zcode/rust`，发布构建允许指定拥有权限的 scope。不自动发布、不覆盖 App 文件、不改系统全局环境或用户工作区。
+首版提供 npm 命令 `zcode-rust app launch`、`app status`、`app doctor`。`launch` 自动安装 npm 平台包内的预编译 binary 到用户运行时目录，再从版本专用目录直接启动已安装 App。支持显式 `--app`、`--runtime-dir`；开发验收可用 `--binary` 指向本地 release binary。npm 入口包名为 `@mbears/zcode-rs`，平台包名为 `@mbears/zcode-rs-<platform>`。入口 `package.json` 是包名的唯一来源；发布构建允许通过 `--scope` 只替换 scope，保留 `zcode-rs` 包名。命令行入口仍为 `zcode-rust`。不自动发布、不覆盖 App 文件、不改系统全局环境或用户工作区。
 
 原图标继续启动内置 CLI；退出 Rust 入口启动的 App 后从原图标启动即回退。`launch` 不杀已有 App；发现已有实例则拒绝并要求完整退出。未知 App 版本在启动前拒绝。首版明确只允许 3.14.3。远端 SSH/WSL 不受本地启动器影响。
 
@@ -49,6 +49,8 @@ Node bridge 不派生脱离 Host 进程组的进程；父进程退出、EOF、EP
 ## 分发与验收
 
 构建脚本输出入口包和所选平台包，平台包以 os/cpu/libc 约束安装，optionalDependencies 固定相同版本。发布所需平台都准备完成后才发布入口包。平台、系统最低版本及二进制签名按真实构建证据声明，不把本机测试视为三平台通过。
+
+包名变更通过真实 `npm pack` 和全新消费者目录的离线安装验收：默认产物使用 `@mbears/zcode-rs`，入口 optionalDependencies 与安装器解析的平台包一致；覆盖 scope 后入口和全部平台依赖仍使用 `zcode-rs`。`npx @mbears/zcode-rs@beta app doctor` / `app launch` 为公开使用命令。
 
 验收先写测试，覆盖：错误 App 版本/路径、平台包缺失/损坏、路径含空格、重复安装、并发启动隔离、环境覆盖清除、Worker 原版入口、原始协议字节转发、EOF/信号/异常退出与子进程回收。冻结 tag resolver 的回归测试证明环境覆盖失败而桥接入口通过。
 

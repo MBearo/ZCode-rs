@@ -1,5 +1,5 @@
 {
-  "name": "@zcode/rust",
+  "name": "@mbears/zcode-rs",
   "version": "0.1.0",
   "description": "Rust CLI launcher for the installed ZCode 3.14.3 desktop app",
   "license": "Apache-2.0",

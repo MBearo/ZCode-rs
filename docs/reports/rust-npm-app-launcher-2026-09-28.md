@@ -36,7 +36,19 @@
 6. 使用离线安装的 npm 包执行 `binarySource`、`installBinary`、`prepareLaunch`，将临时消费者的整个 `node_modules` 移走后，再启动原版 App。历史恢复成功，`PACKAGED_WITHOUT_NPM_CACHE_OK` 获得完整回复；Rust executable 位于稳定的版本目录。
 7. 退出测试 App 后桥接记录 `agent-exited` / code 0，确认测试 Rust 和桥接进程已退出。
 
-打包产物为 `dist-release/rust-npm/zcode-rust-0.1.0.tgz` 和 `zcode-rust-darwin-arm64-0.1.0.tgz`。native SHA-256：`03303aebebd2e24cd46df1ef39513a430861c8683ede8ca9a816a54e04e5eaad`。两份包的文件清单仅包含启动器或 executable、元数据及许可证，不携带测试、账号或开发机配置。
+初次验收（更名前）的打包产物为 `dist-release/rust-npm/zcode-rust-0.1.0.tgz` 和 `zcode-rust-darwin-arm64-0.1.0.tgz`。native SHA-256：`03303aebebd2e24cd46df1ef39513a430861c8683ede8ca9a816a54e04e5eaad`。两份包的文件清单仅包含启动器或 executable、元数据及许可证，不携带测试、账号或开发机配置。
+
+## npm 包名更新验收
+
+入口包改为 `@mbears/zcode-rs`，平台包为 `@mbears/zcode-rs-<platform>`，版本仍为 0.1.0。打包脚本从入口 manifest 读取包名，`--scope` 只覆盖 scope。命令行入口仍为 `zcode-rust`。
+
+- 基于包含上游同步提交 `ed9f925` 的源码重新完成 release 构建，native SHA-256 为 `e48506181d5897bcc14640d7bb0c586a0cef1576837cb344138ba6113ac3cbe9`。
+- 默认打包生成 `dist-release/rust-npm/mbears-zcode-rs-0.1.0.tgz` 与 `mbears-zcode-rs-darwin-arm64-0.1.0.tgz`，文件清单只含启动器或二进制、元数据及许可证。
+- 在全新消费者目录通过 `npm install --offline --ignore-scripts` 安装两份 tgz；入口包的六个平台依赖均使用相同名称前缀和精确版本。安装器解析正确的平台包、校验并复制 binary，执行 `--version` 返回 0.1.0。
+- `npx --offline @mbears/zcode-rs@0.1.0 app doctor` 通过。用临时 `@rename-check` scope 重复打包、离线安装和 doctor 检查也通过；临时产物已清理。
+- `pnpm test:rust-npm` 13/13 通过；`pnpm typecheck`、架构检查、改动文件格式检查及 `git diff --check` 通过；Lint 为 70 warning、0 error。
+
+本轮验证包名与打包链路，没有发布 npm，也没有重新执行上面的原版 App UI 端到端验收或 Windows/Linux 验收；不将其视为完整 runtime 的发布验收。
 
 ## 已确认的限制
 

@@ -18,7 +18,7 @@ const { values } = parseArgs({
   options: {
     binary: { type: "string" },
     platform: { type: "string" },
-    scope: { type: "string", default: "@zcode" },
+    scope: { type: "string" },
     out: { type: "string", default: "dist-release/rust-npm" },
     help: { type: "boolean" },
   },
@@ -30,7 +30,8 @@ if (values.help) {
   process.exit(0);
 }
 if (!values.binary) throw Error("--binary is required. Build the release binary first.");
-if (!/^@[a-z0-9][a-z0-9-]*$/.test(values.scope)) throw Error("Invalid npm scope");
+if (values.scope !== undefined && !/^@[a-z0-9][a-z0-9-]*$/.test(values.scope))
+  throw Error("Invalid npm scope");
 const targets = {
   "darwin-arm64": { os: ["darwin"], cpu: ["arm64"] },
   "darwin-x64": { os: ["darwin"], cpu: ["x64"] },
@@ -53,7 +54,8 @@ if (platform === platformKey()) {
   if (stdout.trim() !== pkg.version)
     throw Error(`Binary version ${stdout.trim()} does not match npm version ${pkg.version}`);
 }
-const name = `${values.scope}/rust`,
+// 包名由入口 manifest 统一拥有；覆盖 scope 时保留包名，避免平台依赖仍使用旧名称。
+const name = values.scope ? pkg.name.replace(/^@[^/]+/, values.scope) : pkg.name,
   nativeName = `${name}-${platform}`;
 await mkdir(out, { recursive: true });
 // 每次使用全新 staging，避免重复打包混入上一版本已经删除的文件。
