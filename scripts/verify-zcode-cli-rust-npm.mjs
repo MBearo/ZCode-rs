@@ -37,7 +37,7 @@ try {
   await writeFile(join(app, "resources/app/package.json"), JSON.stringify({ version: "3.14.3" }));
   await writeFile(join(app, "resources/glm/zcode.cjs"), "// Metadata fixture only\n");
   const executable = join(app, process.platform === "win32" ? "ZCode.exe" : "zcode");
-  await writeFile(executable, "metadata fixture");
+  await writeFile(executable, "metadata fixture", { mode: 0o755 });
   const { stdout } = await exec(process.execPath, [
     join(entry, "bin.mjs"),
     "app",
