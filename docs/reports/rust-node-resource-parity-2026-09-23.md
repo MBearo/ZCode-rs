@@ -2,6 +2,8 @@
 
 测试日期：2026-09-23。测试机为 Apple M2 Pro、macOS arm64、Node.js 24.14.0、Rust release 二进制。Node 版本由 [`apps/zcode-cli/packages/cli/src/main.ts`](../../apps/zcode-cli/packages/cli/src/main.ts) 构建，Rust 版本由 [`apps/zcode-cli-rust/src/main.rs`](../../apps/zcode-cli-rust/src/main.rs) 构建。
 
+本文保留 2026-09-23 的测量及功能快照，下方 TODO 不代表当前状态。后续已交付权限/Plan/hooks、Web 与媒体工具、插件管理、订阅增量恢复和 Node 共用会话库；macOS ARM64、Windows x64 npm 平台包已发布。当前进度见[根 README](../../README.md)和[对齐清单](../specs/rust-parity-remaining.md)，切换到 Node 会话库后的资源数据见 [2026-09-25 性能报告](rust-performance-2026-09-25.md)，发行验证边界见 [npm 启动器报告](rust-npm-app-launcher-2026-09-28.md)。
+
 ## 资源对比
 
 基准使用同一个本地 OpenAI Chat Completions SSE fixture，8 个回合，每回合 256 个流式 chunk，单 session，context window 256000。两端都通过 stdio App Server 创建 session、订阅 conversation、发送文本并等待 `completedSuccess`；Node 通过 Provider Registry 选中 fixture，Rust 通过等价的显式模型 JSON 选中 fixture。两端均使用临时 HOME、工作区和 SQLite，未读取用户历史或真实模型。
@@ -32,7 +34,7 @@ Rust 的启动中位数受本机文件缓存影响：5 次为 21.4、8.1、8.2�
 
 ## 功能对照和 TODO
 
-勾选表示 Rust 当前已有实现，并有自动化或真实 App 验收证据；部分完成项保留在 TODO 中，不能按勾选项推断已经全量替换 TypeScript CLI。
+以下勾选表示截至 2026-09-23 已有实现，并有自动化或真实 App 验收证据；部分完成项保留在当时的 TODO 中，不能按勾选项推断已经全量替换 TypeScript CLI。
 
 ### 已完成
 

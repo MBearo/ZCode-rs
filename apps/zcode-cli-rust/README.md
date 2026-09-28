@@ -16,14 +16,14 @@ crate 边界见 [架构规格](../../docs/specs/rust-cli-architecture.md)：`pro
 - 会话创建、重命名、历史读取、FIFO 输入/compact 维护队列、队列编辑、held queue 保留/清空发送、sendQueuedNow、stop 和幂等 ACK 查询。
 - 手动 /compact、自动预算压缩、超限后的单次反应式压缩、旧工具结果 microcompact；摘要边界与时间线同事务保存，完整历史保留；每次请求刷新根 AGENTS.md。
 - 会话只存 Node 的 `db.sqlite`（记录格式与 Node 逐字节一致）；崩溃中断恢复、workspace identity 隔离、进程 owner 锁、旧 run 事件丢弃。
-- V4 conversation/sessions-index/workspace-config 投影、desktop/mobile 独立订阅、分片校验和 snapshot 恢复。
+- V4 conversation/sessions-index/workspace-config 投影、desktop/mobile 独立订阅、分片校验、有界增量回放、snapshot 恢复和流控。
 - App 原生存储准备、能力协商和显式 runtime 选择。
 - 直接读取 App Provider Registry、个人设置及账号 overlay；热更新、模型/档位切换、每请求 Host 鉴权、连通性测试和 workspace 文本生成/取消。
 - 与 Node 共用会话库：Node 写入的会话直接冷加载并可继续，Rust 写入的会话 Node 同样可读，两个进程可交替续写同一会话、同时写不同会话；附件分块预览读取 Node 产物。
 - 提示附件按 Node 规则解析：图片按 Node Jimp 规则缩放（长边 2000、5 MiB），本地视频上限 30 MiB；每个模型请求的媒体按 Node 的 40 MiB 预算保留最新输入与较新的历史媒体。
 - 模型/工具结果及后台登记提交屏障；Read/List/Glob/Grep 最多四并发，写入/Shell 顺序执行；存储失败停止执行且禁止收口再次提交失败状态。
 
-尚未替换默认 TypeScript runtime。不支持 MCP OAuth、工作流/自动任务/浏览器工具、Node REPL；TUI 只保留子命令入口；未支持的命令明确拒绝。与 Node 的刻意差异和照 Node 保留的缺陷见 [M11 spec](../../docs/specs/rust-m11-node-storage.md) §2.5、§5.3，其余未完成项见[对齐清单](../../docs/specs/rust-parity-remaining.md)。重连通过新 snapshot 恢复，不承诺增量日志 replay。Shell 不提供 OS sandbox。
+尚未替换默认 TypeScript runtime。MCP OAuth、自动任务、Cron/OffPeak、浏览器/CUA、Node REPL 和主代理记忆尚未实现；动态工作流不在当前迁移范围，TUI 只保留子命令入口；未支持的命令明确拒绝。与 Node 的刻意差异和照 Node 保留的缺陷见 [M11 spec](../../docs/specs/rust-m11-node-storage.md) §2.5、§5.3，其余未完成项见[对齐清单](../../docs/specs/rust-parity-remaining.md)。订阅重连在 epoch 与日志水位有效时增量恢复，日志淘汰或 epoch 变化时回退 snapshot；协议测试覆盖两种 profile，真实手机远控完整验收仍待完成，见 [M8 spec](../../docs/specs/rust-m8-delivery.md)。Shell 不提供 OS sandbox。
 
 ## 构建与验证
 
@@ -127,7 +127,7 @@ stdout 仅输出 NDJSON；stderr 为诊断。`--prepare-storage` 使用原 Host 
 
 切回 Node 时取消 runtime override 即可，Node 直接读取 Rust 写入的会话。P0 实现与验收见 [spec](../../docs/specs/rust-app-p0.md) 和 [报告](../../docs/reports/rust-app-p0.md)。
 
-当前集成验证在 macOS 完成；真实 GLM-5.3 与 Electron Renderer 的基础对话、工具、输入、附件和问答已有[实机证据](../../docs/specs/rust-parity-remaining.md)。完整供应商/交互矩阵、Windows/Linux 实机及发布打包仍待验证。
+App 集成验证主要在 macOS 完成；真实 GLM-5.3 与 Electron Renderer 的基础对话、工具、输入、附件和问答已有[实机证据](../../docs/specs/rust-parity-remaining.md)。截至 2026-09-28，macOS ARM64 与 Windows x64 npm 平台包已发布；Windows 已完成原生构建、公开 npm 安装、exe 执行与启动器 fixture 验证，macOS 原版 App 已完成 Rust → Node → Rust 的基础切换验收，见[npm 启动器报告](../../docs/reports/rust-npm-app-launcher-2026-09-28.md)。完整供应商/交互矩阵、Windows 桌面端到端、其余平台与 SSH/WSL 部署仍待验证。
 
 ## Coding 工具与后台执行
 
