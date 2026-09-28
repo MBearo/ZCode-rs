@@ -54,7 +54,7 @@ Node bridge 不派生脱离 Host 进程组的进程；父进程退出、EOF、EP
 
 已发布入口 `@mbears/zcode-rs@0.1.0` 已声明精确版本的 Windows x64 optional dependency；补发 `@mbears/zcode-rs-win32-x64@0.1.0` 不重新发布入口包。Windows CI 拥有构建、验证和产物归档，发布仍由已授权的本机 npm 会话完成，CI 不持有 npm 发布凭据。
 
-Windows x64 job 使用 MSVC target `x86_64-pc-windows-msvc`、锁定 Cargo 依赖和 Rust 1.95.0，执行 release 构建、协议/领域测试及适用的 launcher 测试。现有 POSIX signal 测试在 Windows 跳过，不能计作 Windows 通过。
+Windows x64 job 使用 MSVC target `x86_64-pc-windows-msvc`、锁定 Cargo 依赖和 Rust 1.95.0，静态链接 CRT，执行 release 构建、协议/领域测试及适用的 launcher 测试。归档 PE DLL 依赖并拒绝额外的 VC runtime DLL 依赖，避免消费者还需安装开发机运行库。现有 POSIX signal 测试在 Windows 跳过，不能计作 Windows 通过。
 
 验收从全新消费者目录安装真实 tgz，检查平台选择、PE x64 类型、SHA-256、稳定目录复制和已安装 executable 的 `--version`，再通过含空格的 App 元数据 fixture 验证 `app doctor`。公开发布后另用全新 npm 缓存按包名安装并重复验收。fixture 不冒充真实 ZCode Windows App；未执行 Windows 桌面 UI、Host taskkill 或真实会话回归时，发布记录须明确此边界。
 

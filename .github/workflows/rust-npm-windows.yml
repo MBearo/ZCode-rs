@@ -21,6 +21,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_TERM_COLOR: never
+      RUSTFLAGS: "-C target-feature=+crt-static"
     defaults:
       run:
         shell: pwsh
@@ -71,6 +72,13 @@ jobs:
         run: |
           git rev-parse HEAD | Set-Content dist-release/rust-npm/source-commit.txt
           Get-FileHash apps/zcode-cli-rust/target/x86_64-pc-windows-msvc/release/zcode-cli-rust.exe -Algorithm SHA256 | Format-List | Out-File dist-release/rust-npm/binary-sha256.txt
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$dumpbin) { throw 'dumpbin.exe not found' }
+          $dependencies = & $dumpbin.FullName /dependents apps/zcode-cli-rust/target/x86_64-pc-windows-msvc/release/zcode-cli-rust.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dependencies | Set-Content dist-release/rust-npm/binary-dependencies.txt
+          if ($dependencies -match '(?i)(VCRUNTIME|MSVCP)\d+.*\.dll') { throw 'Unexpected VC runtime DLL dependency' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: inputs.package_source != 'public'
         with:
