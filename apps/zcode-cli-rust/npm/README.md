@@ -34,6 +34,10 @@ node scripts/pack-zcode-cli-rust-npm.mjs --binary apps/zcode-cli-rust/target/rel
 
 Windows binary 带 `.exe`。交叉构建产物用 `--platform` 指定目标，必须在对应 OS 上验证后发布。输出在 `dist-release/rust-npm`，含入口包及所选平台包的 `.tgz`。平台包直接携带 executable、SHA-256 manifest 与许可证，无 postinstall 下载或本机编译。
 
+Windows x64 的原生构建与验收由 `.github/workflows/rust-npm-windows.yml` 提供：Windows Server 2022 runner、Rust 1.95.0、`x86_64-pc-windows-msvc` target，并通过 `-C target-feature=+crt-static` 静态链接 C 运行库。工作流归档 tgz、源码 commit、binary SHA-256 与 DLL 依赖清单；`package_source=public` 模式只从 npm 公开源安装并验证已发布版本。CI 不自动发布 npm。
+
+`scripts/verify-zcode-cli-rust-npm.mjs <消费者安装目录>` 检查平台包选择、binary 校验、稳定目录安装、真实 executable 版本和 `app doctor` 元数据 fixture。它没有启动真实 Windows App，不能替代 Windows 桌面 UI 或真实会话验收。
+
 默认入口包为 `@mbears/zcode-rs`，平台包为 `@mbears/zcode-rs-<platform>`；例如 macOS ARM64 的 0.1.0 产物是 `mbears-zcode-rs-0.1.0.tgz` 和 `mbears-zcode-rs-darwin-arm64-0.1.0.tgz`。如需其他发布归属，追加 `--scope @your-scope`，包名仍为 `zcode-rs`。安装后的命令行入口为 `zcode-rust`。
 
 发布时先发布已经验证的平台包，再发布入口包，使用 `npm publish <tgz> --access public --tag beta`。所有包版本一致，入口 optionalDependencies 固定精确版本；不支持的平台或漏装 optional dependencies 会给出明确错误。构建脚本不会执行发布。

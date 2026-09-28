@@ -65,6 +65,20 @@
 - 消费者目录执行 `node_modules/.bin/zcode-rust app doctor` 成功，识别已安装 ZCode 3.14.3、平台 `darwin-arm64` 和 runtime 0.1.0；临时消费者目录及缓存已清理。
 - 本次只发布并验证 macOS ARM64 平台包；其余五个平台依赖尚未发布。本次没有再次启动原版 App 或运行完整 UI 端到端验收。
 
+## Windows x64 补充验收
+
+产物来自源码提交 `72ebed94751c4c65613b571e1ee2671d1307eee3`，由 [Windows CI](https://github.com/MBearo/ZCode-rs/actions/runs/36379599843) 在 Windows Server 2022 x64、Node 24.14.0、Rust 1.95.0 上构建。target 为 `x86_64-pc-windows-msvc`，使用 `--release --locked` 和 `RUSTFLAGS="-C target-feature=+crt-static"`。
+
+- 首次 Windows 测试发现配置用例硬编码 POSIX 路径，实际 Windows 路径为反斜杠。将用例改为各系统真实绝对路径后，本地目标用例通过，Windows 协议/领域测试 **171/171** 通过；没有修改配置解析的运行时行为。
+- Windows launcher 测试 **9 通过、4 跳过、0 失败**；跳过项为 macOS 进程名检测及 POSIX 进程/信号用例。本地 macOS launcher 测试仍为 **13/13**。
+- Windows 上从 tgz 安装到全新消费者目录，通过平台包选择、PE x64 检查、SHA-256、稳定目录复制和真实 exe `--version`（0.1.0），并通过带空格路径的 `app doctor` 元数据 fixture。
+- 平台包 `@mbears/zcode-rs-win32-x64@0.1.0` 仅含 executable、`runtime.json`、`package.json` 和许可证；压缩后 15,318,806 字节。native SHA-256 为 `d0704f4b8587e77e8d5e0740117deecd819eb26438b20cd02ffb52c63df1886a`。
+- CI 的 `dumpbin` 及本地 PE 导入表复核均通过，仅依赖 Windows 系统 DLL，无 VC runtime 或额外压缩库 DLL 依赖。
+- 本地 `pnpm typecheck`、架构检查、格式检查及 `git diff --check` 通过；Lint 70 warning、0 error。Windows Rust release 构建有 2 条已有平台条件代码的 unused 警告。
+- npm publish dry-run 通过；正式发布已发起，等待 npm 浏览器身份验证，尚未完成公开安装验收。
+
+Windows 这轮没有运行真实 ZCode 桌面 UI、Host taskkill 或真实会话端到端测试；`app doctor` 的 App 元数据 fixture 不作为这些行为通过的证据。
+
 ## 已确认的限制
 
 - 仅绑定 3.14.3。原图标继续使用原内置 CLI；每次需要 Rust 时使用 launcher。远端 runtime 不随本地切换。
