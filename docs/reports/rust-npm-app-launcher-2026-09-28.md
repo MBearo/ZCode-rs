@@ -1,0 +1,48 @@
+# Rust npm App launcher 验收记录
+
+## 基线
+
+- 已安装原版 ZCode **3.14.3**，macOS ARM64，Electron 41.0.3；没有构建或修改当前开源分支的 App。
+- App 源码取原产品仓库 tag `v3.14.3`，commit `ab4d5e6ba0bc1d7c684d4159427fc6a1d6cf58c9`。冻结 resolver 测试记录了文件路径、完整源文件 SHA-256 和提取的函数。
+- Rust 来自当前 Cargo workspace，版本 0.1.0。Node 24.14.0 / pnpm 10.33.2。
+- 本地产物由开发工作区构建，包含开工前已有的插件 schema 改动；这些无关改动未纳入本次提交。本次产物用于验收，没有发布 npm。
+
+## 已执行的检查
+
+| 检查                                                                                                 | 结果                                      |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `node scripts/check-workspace-freshness.mjs`                                                         | 通过                                      |
+| `cargo build --release --locked --manifest-path apps/zcode-cli-rust/Cargo.toml --bin zcode-cli-rust` | 通过，设置 `CARGO_INCREMENTAL=0`          |
+| `pnpm test:rust-npm`                                                                                 | 13 / 13 通过                              |
+| `pnpm typecheck`                                                                                     | 通过                                      |
+| `pnpm lint`                                                                                          | 0 错误，70 条已有警告；新增文件没有警告   |
+| `pnpm architecture:check --changed`                                                                  | 0 违规，0 新增违规                        |
+| 改动文件 `oxfmt --check`、`git diff --check`                                                         | 通过                                      |
+| npm pack + 全新目录离线安装两份 tgz                                                                  | 通过，`--ignore-scripts` 下无需下载或编译 |
+| 消费者目录 `npm exec --offline -- zcode-rust app doctor`                                             | 识别原版 App、native 0.1.0、darwin-arm64  |
+| 已有 App 时 `app launch`                                                                             | exit 1，提示完整退出；未创建本次启动目录  |
+
+自动化测试覆盖原版 packaged resolver、存储 Worker、透明字节流、EOF、退出码、信号、桥接被强杀后的子进程 EOF、损坏 binary、并发安装、独立启动目录、含空格路径、ASAR 元数据读取、错误版本、环境净化，以及 App 改写进程标题后的运行实例检测。
+
+## 原版 App 端到端
+
+使用独立 HOME、`ZCODE_DESKTOP_HOME_DIR`、Electron userData/sessionData、数据库与 Rust 目录；模型为本机 Chat Completions fixture。测试 harness 直接调用 launcher 模块启动隔离实例，以便不关闭用户已运行的原版 App。产品 CLI 的已有实例拒绝行为另行验证。
+
+1. 通过桥接启动原版 App，回执包含 `storage-bridge-loaded` 和 `agent-started`；实际进程树是原 Host → JS bridge → Rust。
+2. 在 App UI 发出 `RUST_LAUNCHER_3143_OK`，渲染 `answer: RUST_LAUNCHER_3143_OK`。
+3. 退出测试 App，从不包含桥接入口的目录启动同一安装包，用原内置 Node 打开同一数据库、同一任务。历史可见，`NODE_ROLLBACK_3143_OK` 获得完整回复。
+4. 退出并重新以最新管道桥接启动 Rust，同一任务显示两轮历史，`RUST_RESUME_3143_OK` 获得完整回复。
+5. 发出 `use tool RUST_READ_3143_OK`，UI 展示 Read / note.txt 并完成回复。隔离数据库里的工具状态为 `completed`，输出包含测试文件的 `RUST_BRIDGE_READ_TOOL_OK`。
+6. 使用离线安装的 npm 包执行 `binarySource`、`installBinary`、`prepareLaunch`，将临时消费者的整个 `node_modules` 移走后，再启动原版 App。历史恢复成功，`PACKAGED_WITHOUT_NPM_CACHE_OK` 获得完整回复；Rust executable 位于稳定的版本目录。
+7. 退出测试 App 后桥接记录 `agent-exited` / code 0，确认测试 Rust 和桥接进程已退出。
+
+打包产物为 `dist-release/rust-npm/zcode-rust-0.1.0.tgz` 和 `zcode-rust-darwin-arm64-0.1.0.tgz`。native SHA-256：`03303aebebd2e24cd46df1ef39513a430861c8683ede8ca9a816a54e04e5eaad`。两份包的文件清单仅包含启动器或 executable、元数据及许可证，不携带测试、账号或开发机配置。
+
+## 已确认的限制
+
+- 仅绑定 3.14.3。原图标继续使用原内置 CLI；每次需要 Rust 时使用 launcher。远端 runtime 不随本地切换。
+- 原版 Host 不传原始 `--cwd`。`/var` 与 `/private/var` 等符号链接别名可触发 workspace identity mismatch；保留别名和真实路径两份 workspace 还可能导致同一物理目录的 owner 冲突。首版只支持真实工作区路径，没有改写身份或合并用户数据。
+- Windows、Linux、macOS x64 的打包选择已实现，未在对应系统完成运行验收；不能把本机结果算作这些平台通过。
+- 模型使用本机 fixture，未验证线上账号鉴权、手机远控、SSH/WSL、所有工具、所有历史数据形态或 Rust/Node 的完全功能等价。
+
+实现与所有权见 [spec](../specs/rust-npm-app-launcher.md)，命令和发布顺序见 [launcher README](../../apps/zcode-cli-rust/npm/README.md)。

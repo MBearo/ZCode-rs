@@ -1,0 +1,26 @@
+{
+  "name": "@zcode/rust",
+  "version": "0.1.0",
+  "description": "Rust CLI launcher for the installed ZCode 3.14.3 desktop app",
+  "license": "Apache-2.0",
+  "bin": {
+    "zcode-rust": "bin.mjs"
+  },
+  "files": [
+    "bin.mjs",
+    "bridge.cjs",
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

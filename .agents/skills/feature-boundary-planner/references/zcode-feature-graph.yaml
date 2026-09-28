@@ -399,6 +399,22 @@ nodes:
       - Compaction preserves append-only canonical history and commits its context boundary before the next model request.
       - Output-limit continuations wait for partial-output commits; temporary prompts never enter canonical history or context offsets.
       - Queued-now promotion waits for the previous run to finish; held-queue discard ACKs share the new input transaction.
+  - id: capability.rust-npm-app-launcher
+    kind: capability
+    label: npm launcher for the installed ZCode 3.14.3 app
+    aliases: [Rust npm, npx Rust, 已安装 App 切换 Rust]
+    codeSeeds:
+      - file: apps/zcode-cli-rust/npm/lib/launch.mjs
+        symbol: prepareLaunch
+      - file: apps/zcode-cli-rust/npm/lib/app.mjs
+        symbol: inspectApp
+      - file: apps/zcode-cli-rust/npm/bridge.cjs
+        symbol: main
+    invariants:
+      - App compatibility is frozen at original product tag v3.14.3, not current Desktop source.
+      - Original App storage Worker loads the installed Node bundle; session stdio is forwarded to Rust.
+      - Versioned runtime and per-launch cwd survive removal of the npm cache; installed App files remain untouched.
+      - Existing App instances are rejected; launching the original icon after a full quit restores the bundled CLI.
   - id: service.agent-storage-preparation
     kind: service
     label: Host-owned JavaScript and native Agent storage preparation
@@ -410,6 +426,14 @@ nodes:
       - file: apps/zcode-cli-rust/crates/app-server/src/stdio.rs
         symbol: storage_prepare
 edges:
+  - from: capability.rust-npm-app-launcher
+    to: capability.zcode-cli-rust
+    type: launches
+    rank: must-inspect
+  - from: capability.rust-npm-app-launcher
+    to: boundary.workspace-key
+    type: isolated-by
+    rank: must-inspect
   - from: capability.zcode-cli-rust
     to: service.agent-storage-preparation
     type: initializes-through

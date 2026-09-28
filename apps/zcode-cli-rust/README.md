@@ -74,6 +74,8 @@ TSX_TSCONFIG_PATH=packages/services/tests/tsconfig.zcode-cli-rust.json node --im
 
 ## 接入 App
 
+已安装的正式版 **ZCode 3.14.3** 可通过 [npm 启动器](npm/README.md) 使用 Rust；它以原产品 tag 为兼容基线，从专用启动目录运行原 App。下面的开发命令使用当前仓库的 Desktop，不作为已发布 App 的兼容依据。
+
 通常直接使用现有 App 设置，无需 Rust 模型 JSON：
 
 ```sh

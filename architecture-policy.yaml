@@ -57,7 +57,7 @@ modules:
     managed: false
   # 当前 JS/TS checker 不解析 Rust；Rust 层边界由 native check + Cargo 检查负责。
   - id: zcode-cli-rust
-    roots: [apps/zcode-cli-rust/crates]
+    roots: [apps/zcode-cli-rust/crates, apps/zcode-cli-rust/npm]
     managed: false
     owner: agent-runtime
     publicEntrypoints: [apps/zcode-cli-rust/crates/core-api/src/contract.rs]
