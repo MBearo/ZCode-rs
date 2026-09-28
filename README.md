@@ -2,6 +2,30 @@
 
 这是将 ZCode CLI 从 TypeScript 迁移到 Rust 的工作仓库。Rust 实现位于 [`apps/zcode-cli-rust/`](apps/zcode-cli-rust/)，以 Cargo workspace 组织协议、Session 核心、模型适配、工具执行、App Server 和 TUI。当前 Rust runtime 通过显式命令启动，现有 TypeScript runtime 仍是默认实现。
 
+## 通过 npm 使用 Rust runtime
+
+通过 [`@mbears/zcode-rs`](https://www.npmjs.com/package/@mbears/zcode-rs) 启动已安装的 ZCode，无需克隆仓库或自行编译 Rust。
+
+- 已安装 **ZCode 3.14.3**；启动器会拒绝其他 App 版本。
+- 已安装 **Node.js 22.16.0 或更高版本**（含 npm / npx）。
+- 当前 npm 版本为 **0.1.0**，已发布 **macOS Apple Silicon（ARM64）** 和 **Windows x64** 平台包。
+
+先完整退出 ZCode；Windows 若有托盘图标，也需要从托盘退出。然后在终端或 PowerShell 中执行：
+
+```sh
+# 检查 App 版本和当前平台的 Rust 包
+npx @mbears/zcode-rs@beta app doctor
+
+# 使用 Rust runtime 启动 ZCode
+npx @mbears/zcode-rs@beta app launch
+```
+
+npm 会自动选择对应平台的预编译包。`app launch` 使用已安装 App 的界面，并为这次启动选择本地 Rust runtime；远端 SSH/WSL runtime 不随之切换。
+
+**恢复原版：**完整退出这次启动的 ZCode，再从原来的应用图标、桌面或开始菜单快捷方式打开，即使用原版内置 CLI。启动器没有覆盖 App 安装文件或修改原快捷方式，无需重装或卸载 npm 包；回退不会撤销使用期间产生的会话和文件改动。
+
+当前为测试版，Rust 功能范围和已知限制见下文及 [启动器说明](apps/zcode-cli-rust/npm/README.md)。Windows x64 已通过原生编译、公开 npm 安装、exe 执行和启动器检查，尚未覆盖真实 Windows 桌面 UI 端到端测试；详见 [验收记录](docs/reports/rust-npm-app-launcher-2026-09-28.md)。
+
 ## 核心目标
 
 本仓库的核心任务是把现有 Node.js/TypeScript zcode CLI runtime 迁移到 Rust，在保持 App stdio/V4 协议、Session 状态、模型请求、工具执行、持久化和桌面接入语义的前提下，逐步用 Rust runtime 替换 Node.js runtime。只有功能对齐、性能、数据迁移、跨平台和发布回退完成验收后，才切换默认 runtime。
