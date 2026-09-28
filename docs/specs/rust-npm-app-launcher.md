@@ -50,6 +50,27 @@ Node bridge 不派生脱离 Host 进程组的进程；父进程退出、EOF、EP
 
 构建脚本输出入口包和所选平台包，平台包以 os/cpu/libc 约束安装，optionalDependencies 固定相同版本。发布所需平台都准备完成后才发布入口包。平台、系统最低版本及二进制签名按真实构建证据声明，不把本机测试视为三平台通过。
 
+### Windows x64 补充分发
+
+已发布入口 `@mbears/zcode-rs@0.1.0` 已声明精确版本的 Windows x64 optional dependency；补发 `@mbears/zcode-rs-win32-x64@0.1.0` 不重新发布入口包。Windows CI 拥有构建、验证和产物归档，发布仍由已授权的本机 npm 会话完成，CI 不持有 npm 发布凭据。
+
+Windows x64 job 使用 MSVC target `x86_64-pc-windows-msvc`、锁定 Cargo 依赖和 Rust 1.95.0，执行 release 构建、协议/领域测试及适用的 launcher 测试。现有 POSIX signal 测试在 Windows 跳过，不能计作 Windows 通过。
+
+验收从全新消费者目录安装真实 tgz，检查平台选择、PE x64 类型、SHA-256、稳定目录复制和已安装 executable 的 `--version`，再通过含空格的 App 元数据 fixture 验证 `app doctor`。公开发布后另用全新 npm 缓存按包名安装并重复验收。fixture 不冒充真实 ZCode Windows App；未执行 Windows 桌面 UI、Host taskkill 或真实会话回归时，发布记录须明确此边界。
+
+```mermaid
+sequenceDiagram
+  participant CI as Windows build job
+  participant L as 本机发布会话
+  participant N as npm registry
+  CI->>CI: build → tests → pack → clean install → native smoke
+  CI-->>L: tgz + source commit + SHA-256
+  L->>L: 校验构建状态和产物
+  L->>N: 发布缺少的 win32-x64 0.1.0
+  CI->>N: 全新缓存按公开入口包名安装
+  CI->>CI: 平台选择和 native smoke
+```
+
 包名变更通过真实 `npm pack` 和全新消费者目录的离线安装验收：默认产物使用 `@mbears/zcode-rs`，入口 optionalDependencies 与安装器解析的平台包一致；覆盖 scope 后入口和全部平台依赖仍使用 `zcode-rs`。`npx @mbears/zcode-rs@beta app doctor` / `app launch` 为公开使用命令。
 
 验收先写测试，覆盖：错误 App 版本/路径、平台包缺失/损坏、路径含空格、重复安装、并发启动隔离、环境覆盖清除、Worker 原版入口、原始协议字节转发、EOF/信号/异常退出与子进程回收。冻结 tag resolver 的回归测试证明环境覆盖失败而桥接入口通过。

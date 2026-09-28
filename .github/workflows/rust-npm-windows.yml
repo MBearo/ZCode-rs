@@ -1,0 +1,80 @@
+name: Rust npm Windows x64
+
+on:
+  push:
+    branches: [codex/windows-x64-npm-release]
+  workflow_dispatch:
+    inputs:
+      package_source:
+        description: Build local packages or verify the published version
+        type: choice
+        options: [local, public]
+        default: local
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: never
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.14.0" # mise.toml
+      - name: Install Rust
+        if: inputs.package_source != 'public'
+        run: rustup toolchain install 1.95.0 --profile minimal --target x86_64-pc-windows-msvc
+      - name: Build Windows release
+        if: inputs.package_source != 'public'
+        run: cargo +1.95.0 build --release --locked --manifest-path apps/zcode-cli-rust/Cargo.toml --target x86_64-pc-windows-msvc --bin zcode-cli-rust
+      - name: Test protocol and domain
+        if: inputs.package_source != 'public'
+        run: cargo +1.95.0 test --locked --manifest-path apps/zcode-cli-rust/Cargo.toml --target x86_64-pc-windows-msvc -p zcode-cli-protocol -p zcode-cli-domain
+      - name: Install launcher test dependency
+        if: inputs.package_source != 'public'
+        run: npm install --prefix apps/zcode-cli-rust/npm --ignore-scripts --no-save --package-lock=false @electron/asar@3.4.1
+      - name: Test launcher
+        if: inputs.package_source != 'public'
+        run: node --test apps/zcode-cli-rust/npm/test/*.test.mjs
+      - name: Pack Windows release
+        if: inputs.package_source != 'public'
+        run: node scripts/pack-zcode-cli-rust-npm.mjs --binary apps/zcode-cli-rust/target/x86_64-pc-windows-msvc/release/zcode-cli-rust.exe --platform win32-x64
+      - name: Install in a fresh consumer directory
+        env:
+          PACKAGE_SOURCE: ${{ inputs.package_source }}
+        run: |
+          $consumer = Join-Path $env:RUNNER_TEMP 'npm-consumer'
+          New-Item -ItemType Directory -Path $consumer | Out-Null
+          Set-Content -Path (Join-Path $consumer 'package.json') -Value '{"name":"rust-npm-smoke","version":"1.0.0","private":true}'
+          Set-Content -Path (Join-Path $consumer 'empty.npmrc') -Value ''
+          $version = (Get-Content apps/zcode-cli-rust/npm/package.json | ConvertFrom-Json).version
+          if ($env:PACKAGE_SOURCE -eq 'public') {
+            $packages = @("@mbears/zcode-rs@$version")
+          } else {
+            $packages = @((Resolve-Path "dist-release/rust-npm/mbears-zcode-rs-$version.tgz").Path, (Resolve-Path "dist-release/rust-npm/mbears-zcode-rs-win32-x64-$version.tgz").Path)
+          }
+          npm install --prefix $consumer --userconfig (Join-Path $consumer 'empty.npmrc') --cache (Join-Path $consumer 'cache') --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/ @packages
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/verify-zcode-cli-rust-npm.mjs $consumer
+      - name: Record build identity
+        if: inputs.package_source != 'public'
+        run: |
+          git rev-parse HEAD | Set-Content dist-release/rust-npm/source-commit.txt
+          Get-FileHash apps/zcode-cli-rust/target/x86_64-pc-windows-msvc/release/zcode-cli-rust.exe -Algorithm SHA256 | Format-List | Out-File dist-release/rust-npm/binary-sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.package_source != 'public'
+        with:
+          name: rust-npm-win32-x64
+          path: dist-release/rust-npm/
+          if-no-files-found: error
+          retention-days: 14
