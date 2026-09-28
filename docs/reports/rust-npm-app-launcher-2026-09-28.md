@@ -50,6 +50,21 @@
 
 本轮验证包名与打包链路，没有发布 npm，也没有重新执行上面的原版 App UI 端到端验收或 Windows/Linux 验收；不将其视为完整 runtime 的发布验收。
 
+## npm 公开发布验收
+
+2026-09-28，经用户授权，从源码提交 `2a9920c` 发布以下公开包：
+
+- 入口包：`@mbears/zcode-rs@0.1.0`。
+- macOS Apple Silicon 平台包：`@mbears/zcode-rs-darwin-arm64@0.1.0`。
+
+两次 `npm publish --access public --tag beta` 均成功。Registry 实际为两包同时建立 `beta` 和 `latest` 标签，均指向 `0.1.0`；尝试移除平台包的 `latest` 时返回 HTTP 400，最终保留并核实了这两个标签。
+
+- 匿名读取两个版本的 metadata、下载公开 tarball 均成功，SHA-512 integrity 与本地发布包完全一致。
+- 入口包发布后曾出现完整包索引 HTTP 404；后续索引恢复，并在空用户配置、全新 npm 缓存和消费者目录下通过 `npm install @mbears/zcode-rs@beta --ignore-scripts --no-audit --no-fund`，实际安装入口包和对应平台包各一份。
+- 公开安装的 native SHA-256 为 `e48506181d5897bcc14640d7bb0c586a0cef1576837cb344138ba6113ac3cbe9`，与本地 release 构建一致。
+- 消费者目录执行 `node_modules/.bin/zcode-rust app doctor` 成功，识别已安装 ZCode 3.14.3、平台 `darwin-arm64` 和 runtime 0.1.0；临时消费者目录及缓存已清理。
+- 本次只发布并验证 macOS ARM64 平台包；其余五个平台依赖尚未发布。本次没有再次启动原版 App 或运行完整 UI 端到端验收。
+
 ## 已确认的限制
 
 - 仅绑定 3.14.3。原图标继续使用原内置 CLI；每次需要 Rust 时使用 launcher。远端 runtime 不随本地切换。
