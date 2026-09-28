@@ -75,7 +75,8 @@
 - 平台包 `@mbears/zcode-rs-win32-x64@0.1.0` 仅含 executable、`runtime.json`、`package.json` 和许可证；压缩后 15,318,806 字节。native SHA-256 为 `d0704f4b8587e77e8d5e0740117deecd819eb26438b20cd02ffb52c63df1886a`。
 - CI 的 `dumpbin` 及本地 PE 导入表复核均通过，仅依赖 Windows 系统 DLL，无 VC runtime 或额外压缩库 DLL 依赖。
 - 本地 `pnpm typecheck`、架构检查、格式检查及 `git diff --check` 通过；Lint 70 warning、0 error。Windows Rust release 构建有 2 条已有平台条件代码的 unused 警告。
-- npm publish dry-run 通过；正式发布已发起，等待 npm 浏览器身份验证，尚未完成公开安装验收。
+- npm publish dry-run 通过；浏览器身份验证后，`@mbears/zcode-rs-win32-x64@0.1.0` 公开发布成功，`beta` 与 `latest` 均指向 0.1.0。入口包保持已发布的 0.1.0，无需重新发布。
+- 匿名读取版本 metadata 和下载公开 tarball 成功，SHA-512 integrity 与 CI 产物一致。发布初期完整包索引返回 HTTP 404，首次 Windows 公开安装未拉到 optional 平台包；索引恢复后，[公开安装验证](https://github.com/MBearo/ZCode-rs/actions/runs/36381809932) 通过：Windows 全新消费者目录、空用户配置和全新缓存从 npm 按 `@mbears/zcode-rs@0.1.0` 安装，自动获得 Windows x64 平台包，并通过相同的 native SHA-256、稳定目录安装、exe 版本和 `app doctor` fixture 检查。
 
 Windows 这轮没有运行真实 ZCode 桌面 UI、Host taskkill 或真实会话端到端测试；`app doctor` 的 App 元数据 fixture 不作为这些行为通过的证据。
 
@@ -83,7 +84,7 @@ Windows 这轮没有运行真实 ZCode 桌面 UI、Host taskkill 或真实会话
 
 - 仅绑定 3.14.3。原图标继续使用原内置 CLI；每次需要 Rust 时使用 launcher。远端 runtime 不随本地切换。
 - 原版 Host 不传原始 `--cwd`。`/var` 与 `/private/var` 等符号链接别名可触发 workspace identity mismatch；保留别名和真实路径两份 workspace 还可能导致同一物理目录的 owner 冲突。首版只支持真实工作区路径，没有改写身份或合并用户数据。
-- Windows、Linux、macOS x64 的打包选择已实现，未在对应系统完成运行验收；不能把本机结果算作这些平台通过。
+- Windows x64 已完成原生构建与上述 executable/启动器验证，桌面 UI 和真实会话验收仍未覆盖。Windows ARM64、Linux、macOS x64 未完成对应系统运行验收。
 - 模型使用本机 fixture，未验证线上账号鉴权、手机远控、SSH/WSL、所有工具、所有历史数据形态或 Rust/Node 的完全功能等价。
 
 实现与所有权见 [spec](../specs/rust-npm-app-launcher.md)，命令和发布顺序见 [launcher README](../../apps/zcode-cli-rust/npm/README.md)。
