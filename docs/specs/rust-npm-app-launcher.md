@@ -71,7 +71,7 @@ sequenceDiagram
   CI->>CI: 平台选择和 native smoke
 ```
 
-包名变更通过真实 `npm pack` 和全新消费者目录的离线安装验收：默认产物使用 `@mbears/zcode-rs`，入口 optionalDependencies 与安装器解析的平台包一致；覆盖 scope 后入口和全部平台依赖仍使用 `zcode-rs`。`npx @mbears/zcode-rs@beta app doctor` / `app launch` 为公开使用命令。
+包名变更通过真实 `npm pack` 和全新消费者目录的离线安装验收：默认产物使用 `@mbears/zcode-rs`，入口 optionalDependencies 与安装器解析的平台包一致；覆盖 scope 后入口和全部平台依赖仍使用 `zcode-rs`。公开使用命令固定版本号，与文档描述的发布版本一致：`npx @mbears/zcode-rs@0.1.0 app doctor` / `app launch`，不依赖浮动标签。
 
 验收先写测试，覆盖：错误 App 版本/路径、平台包缺失/损坏、路径含空格、重复安装、并发启动隔离、环境覆盖清除、Worker 原版入口、原始协议字节转发、EOF/信号/异常退出与子进程回收。冻结 tag resolver 的回归测试证明环境覆盖失败而桥接入口通过。
 

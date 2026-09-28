@@ -4,12 +4,12 @@
 
 ## 使用
 
-发布后：
+使用已发布的 **0.1.0** 版本：
 
 ```sh
-npx @mbears/zcode-rs@beta app doctor
-npx @mbears/zcode-rs@beta app launch
-npx @mbears/zcode-rs@beta app status
+npx @mbears/zcode-rs@0.1.0 app doctor
+npx @mbears/zcode-rs@0.1.0 app launch
+npx @mbears/zcode-rs@0.1.0 app status
 ```
 
 先完整退出 ZCode。`launch` 自动把对应平台 binary 安装到 `~/.zcode/runtimes/rust-launcher`，从专用目录启动原 App；不会中断已有 App。`status` 展示最近启动和桥接回执，不将历史 PID 当成存活保证。需要 Node >= 22.16 来运行安装命令；之后 App 使用固定安装目录，不依赖 npm 缓存。
@@ -40,13 +40,13 @@ Windows x64 的原生构建与验收由 `.github/workflows/rust-npm-windows.yml`
 
 默认入口包为 `@mbears/zcode-rs`，平台包为 `@mbears/zcode-rs-<platform>`；例如 macOS ARM64 的 0.1.0 产物是 `mbears-zcode-rs-0.1.0.tgz` 和 `mbears-zcode-rs-darwin-arm64-0.1.0.tgz`。如需其他发布归属，追加 `--scope @your-scope`，包名仍为 `zcode-rs`。安装后的命令行入口为 `zcode-rust`。
 
-发布时先发布已经验证的平台包，再发布入口包，使用 `npm publish <tgz> --access public --tag beta`。所有包版本一致，入口 optionalDependencies 固定精确版本；不支持的平台或漏装 optional dependencies 会给出明确错误。构建脚本不会执行发布。
+发布时先发布已经验证的平台包，再发布入口包，使用 `npm publish <tgz> --access public`。所有包版本一致，入口 optionalDependencies 固定精确版本；不支持的平台或漏装 optional dependencies 会给出明确错误。构建脚本不会执行发布。
 
 例如发布 macOS ARM64 的 0.1.0：
 
 ```sh
-npm publish ./dist-release/rust-npm/mbears-zcode-rs-darwin-arm64-0.1.0.tgz --access public --tag beta --registry=https://registry.npmjs.org/
-npm publish ./dist-release/rust-npm/mbears-zcode-rs-0.1.0.tgz --access public --tag beta --registry=https://registry.npmjs.org/
+npm publish ./dist-release/rust-npm/mbears-zcode-rs-darwin-arm64-0.1.0.tgz --access public --registry=https://registry.npmjs.org/
+npm publish ./dist-release/rust-npm/mbears-zcode-rs-0.1.0.tgz --access public --registry=https://registry.npmjs.org/
 ```
 
 ## 启动边界

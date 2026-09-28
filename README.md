@@ -14,10 +14,10 @@
 
 ```sh
 # 检查 App 版本和当前平台的 Rust 包
-npx @mbears/zcode-rs@beta app doctor
+npx @mbears/zcode-rs@0.1.0 app doctor
 
 # 使用 Rust runtime 启动 ZCode
-npx @mbears/zcode-rs@beta app launch
+npx @mbears/zcode-rs@0.1.0 app launch
 ```
 
 npm 会自动选择对应平台的预编译包。`app launch` 使用已安装 App 的界面，并为这次启动选择本地 Rust runtime；远端 SSH/WSL runtime 不随之切换。
