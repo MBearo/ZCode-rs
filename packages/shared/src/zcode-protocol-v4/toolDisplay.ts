@@ -151,9 +151,10 @@ const toolResultDisplaySchema = z.discriminatedUnion("kind", [
 export type ToolResultDisplay = z.infer<typeof toolResultDisplaySchema>;
 
 // toolCall。终态 output 全档统一 head+tail 截断，超出走 truncated.ref 按需拉。
+// display 是展示载荷；版本不兼容时降级为无卡片，避免同一内容导致整条订阅反复恢复失败。
 export const toolOutputSchema = z.object({
   text: z.string(),
-  display: toolResultDisplaySchema.optional(),
+  display: toolResultDisplaySchema.optional().catch(undefined),
   truncated: z
     .object({
       totalBytes: z.number(),

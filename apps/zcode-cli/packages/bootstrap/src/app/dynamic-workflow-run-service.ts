@@ -54,6 +54,8 @@ import type {
   DynamicWorkflowRunPort,
   DynamicWorkflowRunProgressPayload,
   DynamicWorkflowRunResumeResult,
+  DynamicWorkflowRunRetuneRequest,
+  DynamicWorkflowRunRetuneResult,
   DynamicWorkflowRunSessionSummary,
   DynamicWorkflowRunSnapshot,
   DynamicWorkflowRunAmendRequest,
@@ -112,8 +114,12 @@ import {
   createRunServiceLifecycle,
   type DynamicWorkflowRunSettledNotice,
 } from "./dynamic-workflow-run-lifecycle.js";
+import { retuneRunConcurrency } from "./dynamic-workflow-run-retune.js";
 import type { ActorTranscriptStore } from "./workflow-actor-transcript.js";
-import { resolveWorkflowConcurrencyCeiling } from "./workflow-concurrency-ceiling.js";
+import {
+  clampRunConcurrency,
+  resolveWorkflowConcurrencyCeiling,
+} from "./workflow-concurrency-ceiling.js";
 import type { WorkflowConcurrencyPort } from "./workflow-concurrency-governor.js";
 import type { AgentRuntimeWorkflowDriverDeps } from "./workflow-driver-types.js";
 import {
@@ -124,18 +130,6 @@ import {
 /** listRunsForSession 的默认/上限条数（枚举面有界，绝不无界扫库）。 */
 const DEFAULT_LIST_RUNS_LIMIT = 16;
 const MAX_LIST_RUNS_LIMIT = 64;
-
-/**
- * 请求的并发上界 → 本 run 实际生效的上界。
- *
- * **钳制而不是拒绝**：这个旋钮只为压低并发，一个过大的值表达的意愿是「别限制我」，把它变成
- * 一次工具失败只会让模型去猜机器有几个核。缺席 / 非有限数同样读作「不限制」= 天花板，非整数
- * 向下取整（要「3.7 个在飞的 ask」没有意义，而向上取整会偷偷越过用户说的数）。
- */
-function clampRunConcurrency(requested: number | undefined, ceiling: number): number {
-  if (requested === undefined || !Number.isFinite(requested)) return ceiling;
-  return Math.max(1, Math.min(ceiling, Math.floor(requested)));
-}
 
 /** actor runtime 工厂的输入。runId 在内，因为会话 id 与 task link 都要 run 作用域。 */
 export interface DynamicWorkflowActorRuntimeInput {
@@ -393,6 +387,19 @@ export function createDynamicWorkflowRunService(
      * 落库的值相等，否则确认窗显示的就不是将要生效的那个数。
      */
     concurrencyCeiling,
+
+    /**
+     * 就地改一个在飞 run 自己的并发上界（端口契约见
+     * {@link DynamicWorkflowRunPort.retuneConcurrency}；实现体在 dynamic-workflow-run-retune.ts）。
+     *
+     * 刻意**不过关闭门**：三条启动入口要 `assertOpen` 是因为它们会起引擎，而这一条什么都不起——
+     * 关闭中的 service 里每个条目都在结算，存活判定自己会把它报成 `not_live`。
+     */
+    async retuneConcurrency(
+      request: DynamicWorkflowRunRetuneRequest,
+    ): Promise<DynamicWorkflowRunRetuneResult> {
+      return retuneRunConcurrency({ runs, journal: deps.journal, concurrencyCeiling }, request);
+    },
 
     async resume(runId: string): Promise<DynamicWorkflowRunResumeResult> {
       assertOpen();

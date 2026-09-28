@@ -196,6 +196,7 @@ export {
   type EngineConfig,
   type ImportedActorCandidate,
   type ImportedAskEntry,
+  type ImportedInFlightAsk,
   type ImportedRunCache,
   type ImportedWorldEntry,
   type InstanceRef,

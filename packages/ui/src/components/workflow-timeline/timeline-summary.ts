@@ -1,4 +1,4 @@
-import type { WorkflowRunState } from "@zcode/shared/zcode-protocol-v4";
+import { workflowRunStepCounts, type WorkflowRunState } from "@zcode/shared/zcode-protocol-v4";
 import type { WorkflowCausalityGraphData } from "@/components/workflow-graph/types.js";
 import { workflowSubagentModelCardLabel } from "./subagent-model-label.js";
 import type { WorkflowTimelineModel } from "./timeline-model.js";
@@ -40,15 +40,6 @@ export function timelineRounds(model: WorkflowTimelineModel): number {
     if (station.onLoop && station.rounds > rounds) rounds = station.rounds;
   }
   return rounds;
-}
-
-export function workflowRunStepCounts(run: WorkflowRunState): {
-  settled: number;
-  observed: number;
-} {
-  let settled = 0;
-  for (const node of run.nodes) if (node.phase === "settled") settled += 1;
-  return { observed: run.nodes.length, settled };
 }
 
 function count(format: FormatMessage, one: string, many: string, value: number): string {
@@ -199,10 +190,9 @@ export function workflowSummaryParts(
       ),
     );
   }
-  const { observed, settled } = workflowRunStepCounts(run);
-  parts.push(
-    format({ id: "chat.toolCall.workflow.card.steps" }, { done: settled, total: observed }),
-  );
+  // 步数走 @zcode/shared 的唯一实现：表内 + 表外（撞界后没进表的实例仍算步数）。
+  const { settled, total } = workflowRunStepCounts(run);
+  parts.push(format({ id: "chat.toolCall.workflow.card.steps" }, { done: settled, total }));
   if (options.tokens !== false) {
     parts.push(
       format(

@@ -45,8 +45,11 @@ import {
   type RunLaunch,
 } from "./dynamic-workflow-run-launch-anchor.js";
 import { resolveWorkflowConcurrencyCeiling } from "./workflow-concurrency-ceiling.js";
+import type { ActorSessionQuiescence } from "./workflow-driver-quiescence.js";
 import { createAgentRuntimeWorkflowDriver, mintActorSessionId } from "./workflow-driver.js";
 import type { WorkflowEscalationRegistry } from "./workflow-escalation-registry.js";
+import type { WorkflowRunControl } from "./workflow-run-control.js";
+import { createWorkflowRunSeatGate } from "./workflow-seat-gate.js";
 import type { DynamicWorkflowRunServiceDeps } from "./dynamic-workflow-run-service.js";
 
 /** 适配包内校验器到引擎的 ValidateFn 契约（launch 是 runWorkflowScript 的唯一调用点）。 */
@@ -113,6 +116,20 @@ interface LaunchDynamicWorkflowRunInput {
    * 索引，两条入口各持一张会让 resume 之后的 run 作答不到自己刚提的问题。
    */
   escalationRegistry: WorkflowEscalationRegistry;
+  /**
+   * 本 run 的活体控制面。由 run
+   * service 按**注册表条目**造一个（submit / amend / resume 三条入口都造），本函数在这里把它的
+   * 两端接上：harness 负责 `bind(engine)`，本函数负责 `bindSeatGate`。
+   *
+   * 缺席即这次启动没有控制面（如 snippet 执行）——run 照常跑完，只是上界中途改不了。
+   */
+  control?: WorkflowRunControl;
+  /**
+   * 接住本次 launch 造出来的 driver 的**会话静默探针**（workflow-driver-quiescence.ts）。
+   * 三条入口都传同一件事：把它挂到这个 run 的注册表条目上，好让将来修订它的那次 amend
+   * 问得着「前驱的会话写完了没有」。原样下传，本文件不读它。
+   */
+  onQuiescenceProbe?: (probe: ActorSessionQuiescence) => void;
 }
 
 /**
@@ -126,6 +143,7 @@ export function launchDynamicWorkflowRun(
     args,
     caps,
     compiled,
+    control,
     cwd,
     deps,
     escalationRegistry,
@@ -139,6 +157,11 @@ export function launchDynamicWorkflowRun(
     toolCallId,
   } = input;
   const childSpawn = dynamicWorkflowChildSpawn();
+  // 本 run 自己上界的**第二个**执行点：调度器管「还能不能再派一个 ask」，闸门管「已经在跑的那些下一次请求能不能发出去」。
+  // 起点就是这次启动的 caps（submit 是钳过的请求值，resume 是 journal 行里的那一份），所以一个
+  // 从未被 retune 过的 run 永远走闸门的快路径——不发事件、不持票、与从前逐字相同。
+  const seatGate = createWorkflowRunSeatGate({ limit: caps.maxConcurrency });
+  control?.bindSeatGate(seatGate);
   // 锚点：submit 给的（本次建 run）或 journal 里的（resume）。升级前的 run 两边都没有 → 缺席，
   // 进度事件不带 launchInputId，子代理不上报。
   const launch = input.launch ?? readRunLaunchAnchor(deps.journal, runId);
@@ -222,8 +245,15 @@ export function launchDynamicWorkflowRun(
     // 进程级并发治理器的窄端口：在场时 driver 给每个
     // actor runtime 一个请求级准入端口（下面 runtimeFactory 原样下传）；缺席即 actor 不受闸门约束。
     ...(deps.concurrency === undefined ? {} : { concurrency: deps.concurrency }),
+    // 本 run 的座位闸门：driver 把每个 actor 的准入端口包进它，并把 ask 的起止喂给它
+    // （startAsk 与引擎的 `node-settled`）。
+    seatGate,
     // 测试注入的 driver 时钟（故障矩阵）；生产缺席，driver 走真时间。
     ...(deps.driverClock === undefined ? {} : { clock: deps.driverClock }),
+    // 会话静默探针的回填口（见入参字段注释）：driver 在构造时调一次。
+    ...(input.onQuiescenceProbe === undefined
+      ? {}
+      : { onQuiescenceProbe: input.onQuiescenceProbe }),
     runtimeFactory: async ({
       sessionId,
       actor,
@@ -331,6 +361,9 @@ export function launchDynamicWorkflowRun(
     // 锚点只在建 run 那一世落 journal（引擎侧的门），resume 时传它无害。
     ...(launch === undefined ? {} : { launch }),
     signal,
+    // 控制面与 signal 同一条缝：那个是「停下这个 run」，这个是「改这个 run 的一项设置」。
+    // harness 在引擎构造好的同一同步片里 bind（harness.ts），所以 run 从第一条事件起就可被改。
+    ...(control === undefined ? {} : { control }),
     validate: validateFn,
   });
 }
@@ -556,17 +589,12 @@ export function toProtocolEvent(sequence: number, event: RunEvent): DynamicWorkf
 }
 
 /**
- * RunEvent → 会话事件载荷。`payload` 与 {@link toProtocolEvent} 逐字节相同（一次序列化、
- * 两个消费者），另加两个**派生字段**。
+ * RunEvent → 会话事件载荷。`payload` 与 {@link toProtocolEvent} 使用同一次序列化，
+ * 派生字段放在 payload 之外，保留引擎事件原文。
  *
- * 派生字段放在 payload **之外**是有意的：payload 必须保持"引擎发了什么"的原样，否则事件日志
- * 就在展示我们的加工品。两个字段各自都不是可观察事实，但缺了它们下游只能自己重造一份契约：
- *
- *   - `actorSessionId`：Boundary C 的 actor-created 不带会话 id（它由 driver 铸造）。让
- *     renderer 按 (runId, actorRef) 自己拼，等于把 sanitize 契约复制进 UI 层；这里调用
- *     铸造它的**同一个函数**，两边不可能漂移（测试钉住相等）。
- *   （曾经还有第二个派生字段 `spentTokens`：老的 budget-updated 只发剩余量。现在 usage-updated
- *   自己携带已花总量，与 dwf_run.spent_tokens 在同一同步步骤产生，不再需要派生。）
+ * `actorSessionId` 通过与 driver 相同的生成函数获取，避免 renderer 重复实现会话 ID 规则。
+ * `actor-created` 和带 actor 的 `node-dispatched` 都补充该字段，使运行中实例被收进有界表时，
+ * 仍能关联到对应的子代理会话。进程并发上限和子代理来源按下方各自的事件条件补充。
  */
 export function toProgressPayload(input: {
   event: RunEvent;
@@ -578,11 +606,14 @@ export function toProgressPayload(input: {
   /** 修订 run 的前驱；只在 `run-started` 上派生（卡片的「调整自 run X」）。 */
   resumedFrom?: string;
   /**
-   * 铸造这条载荷那一刻的进程并发天花板；只在 `run-started` 上派生
+   * 铸造这条载荷那一刻的进程并发天花板；在 `run-started` 与 `run-caps-changed` 两种事件上派生。
    *
    * 引擎事件只带它自己的 `caps.maxConcurrency`，而「这个数值不值得显示」要拿它和天花板比——
    * 天花板是宿主事实（机器核数），引擎既看不见也不该看见。投影侧据 `caps.maxConcurrency <
    * concurrencyCeiling` 记下本 run 的自有上界，UI 的并发 chip 再取 min(共享 cap, 本 run 上界)。
+   *
+   * 一次就地 retune 发的 `run-caps-changed` 带着**新的** caps，判据却是同一条：低于天花板就写下
+   * 上界、等于天花板就把它清掉（= 解除限制）。所以两种事件必须拿到同一个天花板，也就是这一个。
    */
   concurrencyCeiling?: number;
   /**
@@ -604,6 +635,7 @@ export function toProgressPayload(input: {
     subagentModel,
   } = input;
   const protocolEvent = toProtocolEvent(sequence, event);
+  const actorRef = actorSessionRefOf(event);
   return {
     runId,
     ...(toolCallId === undefined ? {} : { toolCallId }),
@@ -616,6 +648,8 @@ export function toProgressPayload(input: {
     // `run-started` 多带 `resumedFrom`：引擎事件不带它（引擎不读 lineage），但卡片要画这条边。
     // 同一条缝里还多带 `concurrencyCeiling`：引擎只发自己的 caps，而「这个上界是不是默认值」
     // 要拿它和宿主的天花板比（见上面的字段注释）。两者互不相关，各自缺席即各自不出。
+    // `run-caps-changed` 走**同一条**缝、同一个天花板：一次就地 retune 之后读面要靠它判断新上界
+    // 该写下还是该清掉，缺了它这条事件就只是两个没有标尺的数。
     payload:
       event.type === "run-settled" && isResumableSettlement(event.status, event.stopReason)
         ? { ...protocolEvent.payload, resumable: true }
@@ -626,16 +660,31 @@ export function toProgressPayload(input: {
               ...(concurrencyCeiling === undefined ? {} : { concurrencyCeiling }),
               ...(subagentModel === undefined ? {} : { subagentModel }),
             }
-          : protocolEvent.payload,
+          : event.type === "run-caps-changed"
+            ? {
+                ...protocolEvent.payload,
+                ...(concurrencyCeiling === undefined ? {} : { concurrencyCeiling }),
+              }
+            : protocolEvent.payload,
     ...(protocolEvent.truncated ? { truncated: true } : {}),
-    ...(event.type === "actor-created"
-      ? { actorSessionId: mintActorSessionId(runId, event.actor) }
-      : {}),
-    // 第三个派生字段：下游只在这两种事件上
+    ...(actorRef === undefined ? {} : { actorSessionId: mintActorSessionId(runId, actorRef) }),
+    // 第三个派生字段：埋点事实层只在这两种事件上
     // 需要锚点——actor-created 登记子代理归属，run-settled 结算该 run 全部子代理。
     ...((event.type === "actor-created" || event.type === "run-settled") &&
     launchInputId !== undefined
       ? { launchInputId }
       : {}),
   };
+}
+
+/**
+ * 这条事件点名了哪个子代理（要补 `actorSessionId` 的那个 ref），没点名即 undefined。
+ *
+ * 两种事件：`actor-created`（子代理的出生），以及带 `actor` 的 `node-dispatched`（ask 派发时重复出生事实）。
+ * world-read 的派发不带 `actor`，因此不补——它没有转录可开。
+ */
+function actorSessionRefOf(event: RunEvent): ActorRef | undefined {
+  if (event.type === "actor-created") return event.actor;
+  if (event.type === "node-dispatched") return event.actor;
+  return undefined;
 }

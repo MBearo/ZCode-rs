@@ -4,6 +4,7 @@
 
 import {
   AMEND_WORKFLOW_TOOL_NAME,
+  isAmendWorkflowOwnedPredecessor,
   PermissionCapabilityGroup,
   type PermissionCapabilityGroup as PermissionCapabilityGroupType,
   type PermissionRuleValue,
@@ -92,7 +93,6 @@ export class PermissionService {
   grantSessionPermission(updates: PermissionUpdate[]): void {
     this.sessionRules = applyPermissionUpdates(this.sessionRules, updates);
   }
-
 
   checkPermission(
     context: PermissionContext,
@@ -395,10 +395,8 @@ export class PermissionService {
   private isOwnedWorkflowAmend(context: PermissionContext): boolean {
     if (context.toolName !== AMEND_WORKFLOW_TOOL_NAME) return false;
     if (!context.input || typeof context.input !== "object") return false;
-    const predecessor = (context.input as Record<string, unknown>).predecessor;
-    if (!predecessor || typeof predecessor !== "object") return false;
-    const facts = predecessor as Record<string, unknown>;
-    return facts.owned_by_this_session === true && facts.stop_reason !== "user";
+    // 谓词本体住在契约里：就地调并发落回修订时读的必须是同一条规则，不能各写一遍。
+    return isAmendWorkflowOwnedPredecessor((context.input as Record<string, unknown>).predecessor);
   }
 
   private checkPlanMode(
@@ -586,8 +584,7 @@ export class PermissionService {
   ): ResolvedPermissionCapability {
     return {
       allowedInPlanMode: toolCapability?.allowedInPlanMode ?? false,
-      alwaysAsk:
-        toolCapability?.permission?.alwaysAsk ?? toolCapability?.alwaysAsk ?? false,
+      alwaysAsk: toolCapability?.permission?.alwaysAsk ?? toolCapability?.alwaysAsk ?? false,
       readOnly: toolCapability?.readOnly ?? this.isReadOnlyTool(context.toolName),
       destructive: toolCapability?.destructive ?? this.isDestructiveTool(context.toolName),
       requiresUserInteraction:

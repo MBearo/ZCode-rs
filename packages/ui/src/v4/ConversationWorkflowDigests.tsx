@@ -38,7 +38,22 @@ export function ConversationWorkflowDigests({
         const { runId, summary } = digest;
         const name = digest.name ?? fallbackName;
         const sessionId = context.sessionId;
-        // 「还有 n 个」那一行带落点；⤢ 与问题芯片不带。
+        // 就地生效的设置轮：那一行就是
+        // 全部呈现。提前返回，下面整套卡的接线（打开、Resume、Stop、药丸、「配置」）一条都不建——
+        // 那些都是卡上的控件，而这一轮没有卡。
+        if (digest.rowOnly && digest.settings !== undefined) {
+          return (
+            <WorkflowSettingsChangeRow
+              amend={digest.settings.amend}
+              key={digest.key}
+              {...(digest.settings.at === undefined ? {} : { at: digest.settings.at })}
+              {...(subagentModelProviderName === undefined
+                ? {}
+                : { providerName: subagentModelProviderName })}
+            />
+          );
+        }
+        // 「还有 n 个」那一行带落点（追记「五枚药丸与一扇门」）；⤢ 与问题芯片不带。
         const onOpenRun =
           context.onOpenWorkflowRun && sessionId
             ? (landing?: { phaseId: string }) =>

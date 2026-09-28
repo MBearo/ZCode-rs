@@ -389,7 +389,7 @@ export function workflowRunEventLines(
       }
 
       default: {
-        // 自适应并发的三条观察事件（node-waiting / node-executing / concurrency-changed）
+        // 并发的四条事件（node-waiting / node-executing / concurrency-changed / run-caps-changed）
         // 住在同族的 workflowRunThrottle.ts（max-lines 门）。
         const concurrencyLine = workflowRunConcurrencyEventLine(event, formatMessage);
         if (concurrencyLine !== undefined) return concurrencyLine;

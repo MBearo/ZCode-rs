@@ -51,6 +51,20 @@ import { writeChildEntryFile, type HarnessWarning } from "./child-entry-file.js"
 export type DriverFactory = (sink: WorkflowReportSink) => WorkflowDriver;
 
 /**
+ * run 的**活体控制面**：harness 在引擎构造好之后把这一世的引擎交给它，于是持有句柄的那一侧
+ * （run service）能够到活着的引擎。今日只有一条命令——就地改本 run 的并发上界。
+ *
+ * 收窄成 `Pick<…, "setMaxConcurrency">` 而不是整个引擎：控制面是一条**命令**通道，不是让
+ * 宿主绕过 harness 去驱动 run 生命周期的后门（结算仍然只经 complete/stop/fail 那三条路）。
+ *
+ * 与 `signal` 同规：harness 只做接线，不解释、不校验、不兜底；命令的存活判定与 no-op 语义
+ * 全在引擎里（`setMaxConcurrency` 返回 false 即这次什么也没发生）。
+ */
+export interface RunControlBinding {
+  bind(engine: Pick<WorkflowEngine, "setMaxConcurrency">): void;
+}
+
+/**
  * {@link runWorkflowScript} 的入参。执行体来自 `scriptText` 或 `lowered`（后者优先）；
  * 两者同时给出正是「编译一次」的形态——调用方自己编译得到 `lowered`，同时把作者写的
  * `scriptText` 交下来落库。
@@ -84,6 +98,12 @@ export interface RunWorkflowOptions {
   validate: ValidateFn;
   /** 外部取消信号：中止在飞 ask 并 kill 子进程，run 结算 cancelled。 */
   signal?: AbortSignal;
+  /**
+   * 活体控制面的绑定口（见 {@link RunControlBinding}）。与 `signal` 同一条缝递进来：
+   * 那个是「停下这个 run」的通道，这个是「改这个 run 的一项设置」的通道。缺席即本次启动
+   * 没有控制面（如 snippet 执行）。
+   */
+  control?: RunControlBinding;
   /** 墙钟超时（ms）：到点 kill 子进程，run 结算 failed。缺省不限。 */
   timeoutMs?: number;
   /** 子进程堆上限（MB），映射为 `--max-old-space-size`。缺省 256。 */
@@ -212,6 +232,9 @@ export async function runWorkflowScript(options: RunWorkflowOptions): Promise<Ru
     ...(options.inheritedTokens === undefined ? {} : { inheritedTokens: options.inheritedTokens }),
     cwd: options.cwd ?? process.cwd(),
   });
+  // 控制面一构造好就绑：run 从第一条事件起就可被改设置，而**不必**等子进程起来——下面那条
+  // spawn 失败路径也经引擎结算，句柄在那之后照样安全（命令自己的 settled 判定负责收口）。
+  options.control?.bind(engine);
 
   const maxOldSpaceSizeMb = options.maxOldSpaceSizeMb ?? DEFAULT_MAX_OLD_SPACE_MB;
   const cwd = options.cwd ?? process.cwd();

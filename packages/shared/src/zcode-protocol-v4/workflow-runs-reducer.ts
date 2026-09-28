@@ -17,7 +17,8 @@
 //   1. 节点相位就是引擎实际发出的事件：queued/dispatched/executing/waiting/repairing/nudged/settled。
 //      `executing` / `waiting` 是 driver 的观察：
 //      模型请求真的发出去了 / 在等进程级槽位或退避；两者在 dispatched 之后来回切换。
-//   2. resume 的完结命中短路**直接发 node-settled**，不经 node-queued（engine.ts），
+//   2. resume 的完结命中短路**直接发 node-settled**，不经 node-queued（ask 在 scheduler.ts 的
+//      releaseCachedAsk / tryImportedSettle，world-read 在 engine-world.ts 的重放与导入命中），
 //      而 `kind` 只在 queued 上携带——所以 node.kind 是可缺省的，不是漏填。
 //   3. run 级用量：`usage-updated` 直接携带已花 token 总量；
 //      `nodesUsed` 由 `node-dispatched` 的首次相位跃迁计数（同一实例重放不重复计数），
@@ -25,7 +26,6 @@
 
 import {
   WORKFLOW_RUNS_LIMITS,
-  type WorkflowRunActor,
   type WorkflowRunNode,
   type WorkflowRunPendingQuestion,
   type WorkflowRunReport,
@@ -34,16 +34,42 @@ import {
 } from "./workflow-runs.js";
 
 import { serializeWorkflowArtifact } from "./workflow-artifact.js";
+import { withDerivedWorkflowActorStatuses } from "./workflow-runs-actor-status.js";
 import {
   countTaggedReport,
   upsertBoundedByArtifactId,
   workflowArtifactSummary,
 } from "./workflow-runs-artifacts.js";
-import { reduceConcurrencyChanged, withoutCooldown } from "./workflow-runs-concurrency.js";
+import {
+  countUnlistedInstance,
+  discountUnlistedInstance,
+  evictForEntryBudget,
+} from "./workflow-runs-caps.js";
+import {
+  absorbRefusedActor,
+  absorbRefusedSettledNode,
+  admitsNewEntry,
+  seatWorkflowNode,
+  withRoomForActor,
+  type WorkflowRunEntryLimits,
+} from "./workflow-runs-eviction.js";
+import {
+  reduceConcurrencyChanged,
+  reduceRunCapsChanged,
+  withoutCooldown,
+} from "./workflow-runs-concurrency.js";
+import {
+  boundedActorName,
+  boundedPhaseName,
+  nonEmptyString,
+  workflowActorEntry,
+} from "./workflow-runs-entries.js";
+import { canonicalWorkflowRun, workflowRunUnchanged } from "./workflow-runs-delta.js";
 import { readRunIdField, readWorkflowRunStopReason } from "./workflow-runs-lineage.js";
 import { carryNodeProgress, reduceNodeProgress } from "./workflow-runs-node-progress.js";
 import { reducePhaseEntered, reduceRunLaunched } from "./workflow-runs-phases.js";
 import { reduceRunStarted } from "./workflow-runs-started.js";
+import { upsertBoundedByInstance, upsertBoundedByQid } from "./workflow-runs-tables.js";
 
 /**
  * 节点事件 → 相位。不用 `eventType.slice("node-".length)`（事件名恰好就是相位名），改用显式表
@@ -84,11 +110,13 @@ export interface WorkflowRunProgressEnvelope {
  * 内容逐字节相同。调用方据此决定不发 `state.updated` / 不刷 UI——revision 因此只在真有
  * 变化时抬升（幂等重放不抬 revision）。
  *
- * `previous` 缺席等价于空态 `{ revision: 0, runs: [] }`。
+ * `previous` 缺席等价于空态 `{ revision: 0, runs: [] }`。`limits` 默认使用
+ * {@link WORKFLOW_RUNS_LIMITS}（生产上没有第二套界）。
  */
 export function reduceWorkflowRunsState(
   previous: WorkflowRunsState | undefined,
   envelope: WorkflowRunProgressEnvelope,
+  limits: WorkflowRunEntryLimits = WORKFLOW_RUNS_LIMITS,
 ): WorkflowRunsState | null {
   const runId = envelope.runId;
   if (!runId || typeof envelope.eventType !== "string") return null;
@@ -107,25 +135,39 @@ export function reduceWorkflowRunsState(
     lastEventSequence: sequence,
   };
 
-  const next = applyWorkflowRunEvent(base, envelope.eventType, payload, {
-    ...(envelope.actorSessionId === undefined ? {} : { actorSessionId: envelope.actorSessionId }),
-    ...(envelope.toolCallId === undefined ? {} : { toolCallId: envelope.toolCallId }),
-    // 单调：迟到/重放的事件不会把水位拉回去。
-    sequence: Math.max(base.lastEventSequence, sequence),
-  });
+  // 规范键序（workflow-runs-delta.ts）：归约靠 `{...run, 新键: v}` 推进，新出现的可选键因此按
+  // **到达顺序**缀在尾部，而键级增量的消费侧没有那段历史。两边各自按 schema 序重排一次，
+  // `JSON.stringify(apply(prior, diff(prior, next))) === JSON.stringify(next)` 才是逐字节成立的。
+  const next = canonicalWorkflowRun(
+    applyWorkflowRunEvent(base, envelope.eventType, payload, {
+      ...(envelope.actorSessionId === undefined ? {} : { actorSessionId: envelope.actorSessionId }),
+      ...(envelope.toolCallId === undefined ? {} : { toolCallId: envelope.toolCallId }),
+      // 单调：迟到/重放的事件不会把水位拉回去。
+      sequence: Math.max(base.lastEventSequence, sequence),
+      // 被拒实例的计数器是**加出来**的，没有可去重的身份，所以只认抬过水位的事件
+      // （见 workflow-runs-caps.ts）。水位取的是**本条事件之前**的值。
+      advancesWaterMark: sequence > base.lastEventSequence,
+      limits,
+    }),
+  );
 
-  // 幂等：语义无变化不产 delta（同一条事件重放不抬 revision）。
-  if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(next)) return null;
+  // 幂等：语义无变化不产 delta（同一条事件重放不抬 revision）。判据是**结构**比较而不是整条 run
+  // 的 JSON.stringify——后者每条事件都要序列化一遍整张表（正是这次改造要消掉的那份 O(N) 字节），
+  // 而且会把「键序不同、内容相同」误判成变化。与 diff 的「这个键变了吗」共用同一份判据。
+  if (existing !== undefined && workflowRunUnchanged(existing, next)) return null;
 
   const runs = existing
     ? prior.runs.map((run) => (run.runId === runId ? next : run))
     : [...prior.runs, next];
   // 最近 ~8 个，按最旧淘汰。终态 run 的完整事实仍在 journal（详情页经事件日志 query 可取）。
+  // 这两条**跨 run** 的界用的是真常量，不走 `limits` 注入口：后者只为把单条 run 的表压小，
+  // 而 run 条数与条目预算跟被注入的那些规则无关。
   const bounded =
     runs.length > WORKFLOW_RUNS_LIMITS.maxRuns
       ? runs.slice(runs.length - WORKFLOW_RUNS_LIMITS.maxRuns)
       : runs;
-  return { revision: prior.revision + 1, runs: bounded };
+  // 条目预算在条数之后再收一道：8 条满界的 run 加起来离快照上限太近（workflow-runs-caps.ts）。
+  return { revision: prior.revision + 1, runs: evictForEntryBudget(bounded, runId) };
 }
 
 function applyWorkflowRunEvent(
@@ -136,6 +178,8 @@ function applyWorkflowRunEvent(
     actorSessionId?: string;
     toolCallId?: string;
     sequence: number;
+    advancesWaterMark: boolean;
+    limits: WorkflowRunEntryLimits;
   },
 ): WorkflowRunState {
   const run: WorkflowRunState = {
@@ -154,24 +198,25 @@ function applyWorkflowRunEvent(
     case "actor-created": {
       const ref = workflowInstanceRef(payload.actor);
       if (!ref) return run;
-      const name = boundedActorName(nonEmptyString(payload.name));
-      // 出生阶段名：`actor-created` 是 actor 的出生事件，戳只在这里到，
+      // 出生阶段：`actor-created` 是 actor 的出生事件，戳只在这里到，
       // 没有后续事件可以携带或改写它。
       const phaseName = boundedPhaseName(nonEmptyString(payload.phaseName));
-      const actor: WorkflowRunActor = {
-        siteId: ref.siteId,
-        ordinal: ref.ordinal,
-        ...(name ? { name } : {}),
-        ...(derived.actorSessionId ? { sessionId: derived.actorSessionId } : {}),
-        ...(phaseName === undefined ? {} : { phaseName }),
-        // 占位值：紧接着的 withDerivedWorkflowActorStatuses 会按节点与 run 终态重算。
-        status: "waiting",
-      };
-      const upserted = upsertBoundedByInstance(run.actors, actor, WORKFLOW_RUNS_LIMITS.maxActors);
+      const actor = workflowActorEntry(ref, payload.name, phaseName, derived.actorSessionId);
+      // 表满时给这个活的新人腾位（workflow-runs-eviction.ts）；腾不出位就照旧拒新。
+      // 重放的事件既不腾位也不入座（后者只在**溢出过的** run 上收紧，见 admitsNewEntry）。
+      const seated = derived.advancesWaterMark ? withRoomForActor(run, ref, derived.limits) : run;
+      const upserted = upsertBoundedByInstance(seated.actors, actor, derived.limits.maxActors, {
+        admitNew: admitsNewEntry(run, derived.advancesWaterMark),
+      });
+      // 被拒的子代理也要可数：run 级没有 actor 计数器，它唯一的痕迹是自己出生阶段那一格。
+      const absorbed =
+        upserted.truncated && derived.advancesWaterMark
+          ? absorbRefusedActor(seated, phaseName, derived.limits)
+          : seated;
       return withDerivedWorkflowActorStatuses({
-        ...run,
+        ...absorbed,
         actors: upserted.list,
-        ...(upserted.truncated || run.truncated ? { truncated: true } : {}),
+        ...(upserted.truncated || seated.truncated ? { truncated: true } : {}),
       });
     }
     case "node-queued":
@@ -184,10 +229,42 @@ function applyWorkflowRunEvent(
       const ref = workflowInstanceRef(payload.instance);
       if (!ref) return run;
       const phase = NODE_EVENT_PHASE[eventType]!;
-      const previousNode = run.nodes.find(
+      // 出生事件有两条（与 workflow-runs-caps.ts 的判定逐字同一条）：`node-queued`，以及 replay
+      // 命中时直接发的 `node-settled { cached: true }`。**溢出过的** run 只认活的出生事件带来的
+      // 新键（见 admitsNewEntry）：重放的事件、以及一条表外实例的中间相位，都不该把它放回表里
+      // ——它早已计进 nodesUnlisted，再列一次就是既列又计。
+      const born =
+        eventType === "node-queued" || (eventType === "node-settled" && payload.cached === true);
+      const actorRef = workflowInstanceRef(payload.actor);
+      // 带出生事实的 `node-dispatched`：引擎在派发那一刻重发这条实例的 `node-queued` 与它子代理的 `actor-created`
+      // 携带过的同一份事实，于是表外的实例可以在**被派活的那一刻**连人带活回到表上。
+      // 缺 actor ref 即老 journal 或 world-read 的裸派发，照旧处理。
+      const dispatchActor =
+        eventType === "node-dispatched" && actorRef !== null
+          ? workflowActorEntry(
+              actorRef,
+              payload.actorName,
+              boundedPhaseName(nonEmptyString(payload.actorPhaseName)),
+              derived.actorSessionId,
+            )
+          : null;
+      // 腾位、B2 的拒绝与 activation 三件事的唯一入口（workflow-runs-eviction.ts）。
+      const seating = seatWorkflowNode(
+        run,
+        {
+          eventType,
+          ref,
+          actorRef,
+          actor: dispatchActor,
+          born,
+          advancesWaterMark: derived.advancesWaterMark,
+        },
+        derived.limits,
+      );
+      const seated = seating.run;
+      const previousNode = seated.nodes.find(
         (node) => node.siteId === ref.siteId && node.ordinal === ref.ordinal,
       );
-      const actorRef = workflowInstanceRef(payload.actor);
       const kind =
         payload.kind === "ask" || payload.kind === "world-read" ? payload.kind : previousNode?.kind;
       // 出生阶段名：引擎只在出生事件上打戳——`node-queued`，以及 replay 命中时
@@ -216,18 +293,43 @@ function applyWorkflowRunEvent(
         // 规则在同族的 workflow-runs-node-progress.ts（那里也讲了为什么必须显式携带）。
         ...carryNodeProgress(eventType, payload, previousNode),
       };
-      const upsertedNodes = upsertBoundedByInstance(run.nodes, node, WORKFLOW_RUNS_LIMITS.maxNodes);
+      const upsertedNodes = upsertBoundedByInstance(seated.nodes, node, derived.limits.maxNodes, {
+        admitNew: seating.admitNew,
+      });
       // 步数：一个实例**首次**派发计一步。重放同一条 node-dispatched 时 previousNode 已在
-      // dispatched 之后的相位，不再计数——归约必须幂等（顶层靠逐字节比对判「无变化」）。
+      // dispatched 之后的相位，不再计数——归约必须幂等（顶层靠结构比对判「无变化」）。
       // 触界被拒的实例查不到 previousNode，会照常计数：步数是 run 级事实，不受展示界约束。
+      // 也正因为它查不到 previousNode，相位这道去重对它无效——重放那条 dispatched 会把步数
+      // 越推越高。所以在**溢出过的** run 上这条计数与 nodesUnlisted 同规，
+      // 只认抬过水位的事件；界之下每条实例都有自己那行，相位去重够用，一个字节都不必变。
       const firstDispatch =
         eventType === "node-dispatched" &&
+        admitsNewEntry(run, derived.advancesWaterMark) &&
         (previousNode === undefined || previousNode.phase === "queued");
+      // 回到表上的实例先从 `nodesUnlisted` 里减回去：它既列又计就会让步数多出一条。
+      const restored = seating.activated ? discountUnlistedInstance(seated.usage) : seated.usage;
+      // 被拒实例的两个计数器（workflow-runs-caps.ts）：`upsertedNodes.truncated` 恰好就是
+      // 「这条实例没能进表」——run 级的 truncated 位在下面另算，两者不能混用。
+      const usage = countUnlistedInstance(
+        firstDispatch ? { ...restored, nodesUsed: restored.nodesUsed + 1 } : restored,
+        {
+          rejected: upsertedNodes.truncated,
+          advancesWaterMark: derived.advancesWaterMark,
+          eventType,
+          cached: payload.cached === true,
+        },
+      );
+      // 被拒的**出生即结算**实例：run 级计数上面记过了，这里记它出生阶段那一格，并按孤儿规则
+      // 摘掉那个带不进自己节点的 actor（workflow-runs-eviction.ts）。
+      const absorbed =
+        upsertedNodes.truncated && derived.advancesWaterMark && born && phase === "settled"
+          ? absorbRefusedSettledNode(seated, node, derived.limits)
+          : seated;
       return withDerivedWorkflowActorStatuses({
-        ...run,
-        ...(firstDispatch ? { usage: { ...run.usage, nodesUsed: run.usage.nodesUsed + 1 } } : {}),
+        ...absorbed,
+        ...(usage === seated.usage ? {} : { usage }),
         nodes: upsertedNodes.list,
-        ...(upsertedNodes.truncated || run.truncated ? { truncated: true } : {}),
+        ...(upsertedNodes.truncated || seated.truncated ? { truncated: true } : {}),
       });
     }
     /**
@@ -405,6 +507,14 @@ function applyWorkflowRunEvent(
     case "concurrency-changed":
       return reduceConcurrencyChanged(run, payload);
 
+    /**
+     * run-caps-changed：run **在飞时**它自己的那条并发界被改了（只改 `max_concurrency` 的修订就地生效，不停这次 run、不另起一次）。载荷与
+     * `run-started` 同形，规则也是同一条，所以与它同住 workflow-runs-concurrency.ts。
+     * 同样不碰 `nodes[]` 与 actor 状态：界是闸门，不是任何节点的事。
+     */
+    case "run-caps-changed":
+      return reduceRunCapsChanged(run, payload);
+
     /** phase-entered / run-launched：阶段归约在同族的 workflow-runs-phases.ts（后者只搬运声明阶段表）。 */
     case "phase-entered":
       return reducePhaseEntered(run, payload);
@@ -468,51 +578,6 @@ function workflowInstanceRef(value: unknown): { siteId: string; ordinal: number 
 }
 
 /**
- * 按 (siteId, ordinal) upsert 进有界列表。
- *
- * 触界时的语义是**拒绝新条目、仍接受已有条目的更新**：把一个正在跑的实例的相位冻结在
- * "queued" 上，比少列一个实例更容易误导读者（图上那一格会永远显示没开始）。
- */
-function upsertBoundedByInstance<T extends { siteId: string; ordinal: number }>(
-  list: readonly T[],
-  entry: T,
-  limit: number,
-): { list: T[]; truncated: boolean } {
-  const index = list.findIndex(
-    (item) => item.siteId === entry.siteId && item.ordinal === entry.ordinal,
-  );
-  if (index >= 0) {
-    const next = [...list];
-    next[index] = entry;
-    return { list: next, truncated: false };
-  }
-  if (list.length >= limit) return { list: [...list], truncated: true };
-  return { list: [...list, entry], truncated: false };
-}
-
-/**
- * 按 `qid` upsert 进有界的停驻问题表。
- *
- * 与 `upsertBoundedByInstance` 是同一条触界语义（拒新、仍更新已有），只是键不同：升级没有
- * 站点实例身份，qid 才是它的键。没有把两者合并成一个泛型函数，是因为键的**取法**正是这里
- * 唯一要说的事——合并之后调用点要传一个取键函数，读者反而看不出"这张表按什么去重"。
- */
-function upsertBoundedByQid(
-  list: readonly WorkflowRunPendingQuestion[],
-  entry: WorkflowRunPendingQuestion,
-  limit: number,
-): { list: WorkflowRunPendingQuestion[]; truncated: boolean } {
-  const index = list.findIndex((item) => item.qid === entry.qid);
-  if (index >= 0) {
-    const next = [...list];
-    next[index] = entry;
-    return { list: next, truncated: false };
-  }
-  if (list.length >= limit) return { list: [...list], truncated: true };
-  return { list: [...list, entry], truncated: false };
-}
-
-/**
  * 按谓词保留停驻问题，并在**一条不剩时把整个键摘掉**（而不是留一个空数组）。
  *
  * 「零条 ⇒ 键缺席」是这个字段的协议约定（见 schema 注释），侧栏据此整区不渲染。它同时是
@@ -556,86 +621,6 @@ function workflowReportPreview(item: unknown): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
 }
 
-/**
- * actor 的 `status` 是**派生**的：Boundary C 除了 `actor-created` 之外不发任何 actor
- * 生命周期事件，所以"这个 actor 在动吗、在等吗、干完了吗"只能由它名下节点的相位与 run 的终态回答。
- *
- * 键用 `\0` 连接而不是任何可打印字符：siteId 是引擎给的字符串，用 `-` 之类会让
- * ("a-1", 2) 与 ("a", "1-2") 撞车。（搬来时保留原实现的分隔符语义，只把源码里的裸 NUL
- * 字节写成转义 `\0`——同一个运行时字符串，但文件不再是 grep 眼里的二进制。）
- */
-function withDerivedWorkflowActorStatuses(run: WorkflowRunState): WorkflowRunState {
-  // 三态推导：
-  //   running   有节点在 executing / repairing / nudged（模型请求已发出、正在跑）
-  //   waiting   有 live 节点（queued / dispatched / waiting），或尚无任何节点且 run 未终态
-  //   completed 其余：全部节点已结算，或 run 已终态（终态压过一切：一个终态 run 里没有任何人
-  //             还在跑或在等，哪怕某个节点的 settled 事件没来得及落下）
-  // `dispatched` 归 waiting 而不是 running：它是「会话就绪、首个请求尚未准入」的短暂相位，
-  // 真正在跑由 node-executing 说。
-  const executing = new Set<string>();
-  const live = new Set<string>();
-  const owned = new Set<string>();
-  for (const node of run.nodes) {
-    if (node.actorSiteId === undefined || node.actorOrdinal === undefined) continue;
-    const key = `${node.actorSiteId}\0${node.actorOrdinal}`;
-    owned.add(key);
-    switch (node.phase) {
-      case "executing":
-      case "repairing":
-      case "nudged":
-        executing.add(key);
-        break;
-      case "queued":
-      case "dispatched":
-      case "waiting":
-        live.add(key);
-        break;
-      default:
-        break;
-    }
-  }
-  const runLive = run.status === "pending" || run.status === "running";
-  return {
-    ...run,
-    actors: run.actors.map((actor) => {
-      const key = `${actor.siteId}\0${actor.ordinal}`;
-      const status: WorkflowRunActor["status"] = !runLive
-        ? "completed"
-        : executing.has(key)
-          ? "running"
-          : live.has(key) || !owned.has(key)
-            ? "waiting"
-            : "completed";
-      return actor.status === status ? actor : { ...actor, status };
-    }),
-  };
-}
-
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-/**
- * 子代理名曾原样透传上线。名字由脚本任意拼（`agent("reader-" + paths.join("+"))`），
- * 一个 131 字的名字超过了 `workflowRunActorSchema.name` 的 128 上界，而 CLI 不校验出站帧、渲染端
- * 对每一帧做严格校验——于是父会话在这个 actor 出现之后的每一帧（online / recovery / initial 快照）
- * 全部被拒，订阅以 `fault.subscription.recoveryFailed` 永久失效。修法与 `boundedQuestionText` 同族：
- * 生产者按 schema 界裁剪，线上永远合法；完整名字仍在 journal（`dwf_actor.name`）里。
- */
-function boundedActorName(name: string | undefined): string | undefined {
-  return name === undefined ? undefined : name.slice(0, WORKFLOW_RUNS_LIMITS.maxActorNameLength);
-}
-
-/**
- * 实例出生阶段名的线上界。与
- * `boundedActorName` 同族、同理由：名字是脚本作者写的任意字符串（`phase("检查 " + file)`），
- * 超界会让父会话之后的每一帧被渲染端拒收。**直接截断、不加省略号**——这个字段不是给人读的
- * 文本而是一个关联键，UI 的 `phaseNameMatches` 正是按前缀把截断的名字关联回 display 阶段。
- */
-function boundedPhaseName(name: string | undefined): string | undefined {
-  return name === undefined ? undefined : name.slice(0, WORKFLOW_RUNS_LIMITS.maxPhaseNameLength);
 }

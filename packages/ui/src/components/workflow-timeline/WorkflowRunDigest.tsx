@@ -27,6 +27,7 @@ import {
   type WorkflowRunSettingsHost,
 } from "./WorkflowRunSettingsPopover.js";
 import { timelineHeight, WorkflowTimeline } from "./WorkflowTimeline.js";
+import { WorkflowTruncatedNotice } from "./WorkflowTruncatedNotice.js";
 
 /** 下方运行卡默认展开，无箭头但仍可收起；状态由标题表达。 */
 export interface WorkflowRunDigestProps {
@@ -258,7 +259,12 @@ export function WorkflowRunDigest({
           />
         </div>
       )}
-      {/* 产物条：run 的交付物，收起与展开态都在——它是收据上最有用的一行。 */}
+      {/* 时间线下的那一句「仅展示 n/m 步的详情」：表头的计数已经是真实步数，这一行只说
+          停在界上的是**详情**。收起态也在——它解释的是上面那些数，不是药丸。
+          没有轨道的卡（行窗口里翻不到发起行）按规范是**单行**，也没有任何计数可供限定，
+          这一句跟着一起缺席。 */}
+      {hasRail ? <WorkflowTruncatedNotice run={run} testId="workflow-digest-truncated" /> : null}
+      {/* 产物条（追记「产物药丸」）：run 的交付物，收起与展开态都在——它是收据上最有用的一行。 */}
       {run?.artifacts !== undefined && run.artifacts.length > 0 ? (
         <WorkflowArtifactStrip
           artifacts={run.artifacts}

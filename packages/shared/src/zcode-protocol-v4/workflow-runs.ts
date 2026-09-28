@@ -15,14 +15,22 @@ export const WORKFLOW_RUNS_LIMITS = {
   /** 最近若干个 run；超出按最旧淘汰。 */
   maxRuns: 8,
   /**
-   * actors 与 nodes **同界**。每个节点都属于某个 actor，所以 nodes 的界已经隐含了 actor
-   * 数的量级；把 actors 压得更低（曾是 32）只会让一个平常的 50 路 fan-out 在检视器里
-   * 静默少掉 18 个子代理，而节点表、引擎、图三层都装得下。这条界的唯一职责是挡住
-   * 「疯掉的脚本在循环里 `agent()`」——状态键按事件整体重发，无界会是 O(N²) 字节——
-   * 不是产品意义上的子代理上限。
+   * actors 与 nodes 使用相同的容量上限，避免节点可展示而所属子代理提前被截断。
+   * 键级增量使每个事件只传输改动部分；容量上限用于限制单条 run 的投影大小，
+   * 并限制异常脚本持续创建条目带来的资源消耗。跨 run 的总量由 {@link maxTotalEntries} 控制。
+   * 这是展示状态的容量限制，不限制引擎实际运行的子代理数量。
    */
-  maxActors: 256,
-  maxNodes: 256,
+  maxActors: 1_024,
+  maxNodes: 1_024,
+  /**
+   * 整个状态键的条目预算：所有 run 的 `nodes.length + actors.length` 之和。
+   *
+   * 单条 run 的界乘以 {@link maxRuns} 是 16384 条，按每条约 150 字节算就是 ~2.5 MB ——
+   * 离 16 MiB 的快照上限不远，而快照是要整份序列化的。预算把最坏情形压回 ~1 MB，
+   * 代价是**最旧的终态 run** 会提前离场（它的完整事实仍在 journal 里，详情页照样查得到）。
+   * 归约在超预算时只淘汰终态 run，绝不动在跑的 run，也绝不动事件所属的那条。
+   */
+  maxTotalEntries: 6_144,
   /**
    * 详情页 Results 区的**展示**预算，刻意远小于引擎的 run 级 report 上限（256 条）：
    * 协议线上的界是展示预算，引擎的界才是契约，两者不必相等。超出这个界的条目仍在
@@ -90,6 +98,20 @@ export const WORKFLOW_RUNS_LIMITS = {
 } as const;
 
 /**
+ * **旧消费者**（没有 `workflowRunDeltas` 能力的那一代）编译进去的 actors / nodes 界。
+ *
+ * ⚠ 这两个数**永远不能改**：它们不是我们的界，是别人二进制里的校验界。超界的载荷不会被
+ * 剥掉一个键——它会让整个 `state.updated` patch 解析失败、整帧被丢，那条订阅从此静默。所以给这类订阅者
+ * 发帧前必须先过 `clampWorkflowRunsForLegacy`。
+ *
+ * 「前 256 条」不是随手取的：旧归约触界时是**拒新**，它产出的恰好就是最早的那 256 条。
+ */
+export const WORKFLOW_RUNS_LEGACY_LIMITS = {
+  maxActors: 256,
+  maxNodes: 256,
+} as const;
+
+/**
  * 一个被控制流进入过的阶段（`phase("…")` 标记）。`name` 是作者原词（时间线按它关联 display 的 `phases[].name`）；`rounds` 是进入
  * 次数——单调（reducer 取 max），所以 resume 重放的前缀不会把它加倍。
  */
@@ -100,6 +122,28 @@ export const workflowRunPhaseSchema = z.object({
 export type WorkflowRunPhase = z.infer<typeof workflowRunPhaseSchema>;
 
 /**
+ * 界在某个**出生阶段**上花掉了多少。
+ *
+ * 两个计数器（{@link workflowRunUsageSchema} 的 `nodesUnlisted` / `nodesUnlistedSettled`）说得出
+ * 一条 run 总共少列了多少，说不出少在**哪一站**——而读面是按站画的：一个站点的花名册、计数环和
+ * 「N more」都得把自己那格的表外条目加回去，否则宽 fan-out 的站点会显示成一个小数字。
+ *
+ * `phaseName` 缺席 = 无阶段那一格（出生在任何 `phase()` 标记之前，或旧 CLI 没打戳）。`actors` 是
+ * 这个阶段**此刻不在 actor 表上**的子代理数（被拒的、被淘汰的、按孤儿规则摘掉的都算），
+ * `actorsSettled` 是其中已知已经结束的、`actorsFailed` 又是其中失败的，`settled` 是记在这一格上的
+ * 表外已结算节点数。`actors` 可加可减：一个被淘汰的子代理在下次被派活时会回到表上。
+ * 零值的可选子键缺席，四个数全零的格子整个不在（与本文件其余「无则缺席」同规）。
+ */
+export const workflowRunUnlistedPhaseSchema = z.object({
+  phaseName: z.string().min(1).max(WORKFLOW_RUNS_LIMITS.maxPhaseNameLength).optional(),
+  actors: z.number().int().nonnegative(),
+  actorsSettled: z.number().int().nonnegative().optional(),
+  actorsFailed: z.number().int().nonnegative().optional(),
+  settled: z.number().int().nonnegative(),
+});
+export type WorkflowRunUnlistedPhase = z.infer<typeof workflowRunUnlistedPhaseSchema>;
+
+/**
  * run 级用量：观察面，不是控制面。`spentTokens` 直接取
  * 引擎 `usage-updated` 事件携带的已花总量（与 `dwf_run.spent_tokens` 同一同步步骤写入，
  * 二者永远相等）；`nodesUsed` 是本 run 已派发（dispatched）的节点数，由节点事件计数——
@@ -108,6 +152,16 @@ export type WorkflowRunPhase = z.infer<typeof workflowRunPhaseSchema>;
 export const workflowRunUsageSchema = z.object({
   spentTokens: z.number().int().nonnegative(),
   nodesUsed: z.number().int().nonnegative(),
+  /**
+   * 撞上 {@link WORKFLOW_RUNS_LIMITS.maxNodes} 被**拒之表外**的实例数，以及其中已结算的条数。`truncated` 只说得出「有东西没进来」，说不出
+   * 有多少——于是一个 3000 路 fan-out 的 run 在读面上会显示成「1024 步」，那是一句假话。
+   *
+   * 两条都是**加出来**的计数（被拒实例根本不在表里，没有可去重的身份），所以归约只在事件
+   * **抬过水位**时才计，重传的队尾事件不会把它们越推越高。`run-started` 连同整个 usage 一起
+   * 清零：resume 会把脚本前缀重发一遍，不清零等于把两世的步数加在一起。零时整个键缺席。
+   */
+  nodesUnlisted: z.number().int().nonnegative().optional(),
+  nodesUnlistedSettled: z.number().int().nonnegative().optional(),
 });
 export type WorkflowRunUsage = z.infer<typeof workflowRunUsageSchema>;
 
@@ -161,7 +215,8 @@ export type WorkflowRunNodeLastTool = z.infer<typeof workflowRunNodeLastToolSche
  * `node-executing` = 该 ask 的模型请求真的发出去了；`node-waiting` = 它在等进程级槽位或在退避。
  * `dispatched` 因此是「会话就绪、首个请求尚未准入」的短暂相位，读面把它与 queued / waiting 同归「等待」。
  *
- * `kind` 可缺省：resume 的完结命中短路直接发 `node-settled`（engine.ts），
+ * `kind` 可缺省：resume 的完结命中短路直接发 `node-settled`（ask 走 scheduler.ts 的
+ * releaseCachedAsk / tryImportedSettle，world-read 走 engine-world.ts 的重放与导入命中），
  * 不经 `node-queued`，而 kind 只在 queued 上携带。
  */
 export const workflowRunNodeSchema = z.object({
@@ -429,8 +484,20 @@ export const workflowRunSchema = z.object({
     .max(WORKFLOW_RUNS_LIMITS.maxPhases)
     .optional(),
   /**
+   * 界在各个出生阶段上花掉了多少（见 {@link workflowRunUnlistedPhaseSchema}）。**一格都没有时
+   * 整个键缺席**。表长比 `maxPhases` 多一格：那一格是「无阶段」，它与具名阶段共用同一张表。
+   *
+   * 表满之后新阶段的归属**丢掉**，run 级两个计数器照旧准——一个站点可以少一个它本来就没有的
+   * 数字，run 的总数不可以说假话。
+   */
+  unlistedByPhase: z
+    .array(workflowRunUnlistedPhaseSchema)
+    .max(WORKFLOW_RUNS_LIMITS.maxPhases + 1)
+    .optional(),
+  /**
    * actors / nodes / reports / pendingQuestions / artifacts / phases 触到上限后置位；
-   * 原始事实仍在 journal。
+   * 原始事实仍在 journal。淘汰（给活的新人腾位）同样置位：这条 run 的条目表已经装不下它
+   * 自己的事实了，而 `run-started` 正是按这一位决定新一世要不要从空表重开。
    */
   truncated: z.boolean().optional(),
   /** 最后一条已归约事件的 journal sequence；抬升即事件日志重取的触发条件。 */

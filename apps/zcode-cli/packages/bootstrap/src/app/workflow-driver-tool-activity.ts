@@ -56,6 +56,16 @@ interface ActorToolActivity {
   reset(): void;
   /** 本 ask 至今观察到的工具调用计数。 */
   counts(): ActorToolCounts;
+  /**
+   * 此刻**还在跑**的工具调用数（started 减去 result / error，按 toolCallId 去重，所以一轮里并行
+   * 发出的四次 WebSearch 数出来就是 4）。
+   *
+   * 唯一的读者是座位闸门（workflow-seat-gate.ts）：准入调用上只有 `{model}`，分不出一次模型请求
+   * 是这个子代理的下一个 turn step 还是它某个工具内部发的，而**工具侧的请求永不停驻**。有工具在
+   * 跑就是工具侧，一个都没有就是下一个 turn step。用 started/结束配对而不是「上一次事件是什么」：
+   * 并行调用下后者会在第一个工具返回时就误判成空闲。
+   */
+  inFlight(): number;
   /** 本 ask 至今**最近**一次真正开跑的工具调用；一次都没有时缺席。 */
   lastTool(): AskLastTool | undefined;
   /** 订阅 runtime 的 `ToolCallStarted` 会话事件；最小 stub runtime 没有 subscribeEvents 时空操作。 */
@@ -73,6 +83,8 @@ export function createActorToolActivity(handlers: {
   let lastTool: AskLastTool | undefined;
   /** toolCallId → scheduled 时的名字与入参，等 started 来认领。 */
   const scheduled = new Map<string, ToolCallSummaryHold>();
+  /** 已 started 还没等到 result / error 的那些 toolCallId（见 {@link ActorToolActivity.inFlight}）。 */
+  const running = new Set<string>();
   let unsubscribeEvents: (() => void) | undefined;
   return {
     reset: () => {
@@ -81,8 +93,12 @@ export function createActorToolActivity(handlers: {
       worldToolCalls = 0;
       lastTool = undefined;
       scheduled.clear();
+      // ask 边界上不该还有工具在跑（上一个 ask 的 turn 已经落地或被 abort），归零只是不让
+      // 一次异常路径把残留带进下一个 ask——那会让闸门永远把它当成工具侧请求放行。
+      running.clear();
     },
     counts: () => ({ toolCalls, worldToolCalls }),
+    inFlight: () => running.size,
     lastTool: () => lastTool,
     observe: (runtime, sessionId) => {
       if (typeof (runtime as Partial<AgentRuntime>).subscribeEvents !== "function") return;
@@ -93,8 +109,18 @@ export function createActorToolActivity(handlers: {
             holdScheduled(scheduled, event.payload as ToolCallScheduledPayload);
             return;
           }
+          // 一次调用的结束：执行器在 started 之后的 try/catch 两支上各发一条，所以 started 必有配对
+          // （权限拒绝、schema 失败、registry miss 都发生在 started **之前**，只发 error，不影响配对）。
+          if (
+            event.type === SessionEventType.ToolCallResult ||
+            event.type === SessionEventType.ToolCallError
+          ) {
+            running.delete(String((event.payload as { toolCallId: unknown }).toolCallId));
+            return;
+          }
           if (event.type !== SessionEventType.ToolCallStarted) return;
           const capability = event.payload as ToolCallStartedPayload;
+          running.add(String(capability.toolCallId));
           const hold = scheduled.get(String(capability.toolCallId));
           scheduled.delete(String(capability.toolCallId));
           lastTool =

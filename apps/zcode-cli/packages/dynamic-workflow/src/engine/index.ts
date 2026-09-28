@@ -43,6 +43,7 @@ export {
   type JournalStorePort,
   type ImportedActorCandidate,
   type ImportedAskEntry,
+  type ImportedInFlightAsk,
   type ImportedRunCache,
   type ImportedWorldEntry,
   type ListEventsOptions,

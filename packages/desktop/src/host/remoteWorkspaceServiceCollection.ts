@@ -14,6 +14,7 @@ import {
   IZCodeAgentService,
   IZCodeSessionService,
   IConversationShareService,
+  IBotsService,
   IFileWatcherService,
   IOAuthService,
   IModelSelectionService,
@@ -54,6 +55,7 @@ import {
   resolveCurrentAccountAccess,
   resolveAccountTeamPlanRuntimeApiKey,
   createSettingsSyncService,
+  createBotsService,
   createUsageStatsService,
   createMediaPreviewService,
   createCodingPlanSubscriptionService,
@@ -322,6 +324,19 @@ export function createRemoteWorkspaceServiceCollection(params: {
     .register(IZCodeAgentService, params.connectionServices.zcodeAgentService)
     .register(IZCodeSessionService, remoteZCodeSessionService)
     .register(IConversationShareService, conversationShareService)
+    .register(
+      IBotsService,
+      createBotsService({
+        credentialService: localCredentialService,
+        zcodeTaskService: remoteZCodeTaskService,
+        broadcastService: localBroadcastService,
+        settingService: localSettingService,
+        modelSelectionService: params.connectionServices.modelSelectionService,
+        // 修复原因：remote workspace host 首屏只需要远端文件/agent 能力；
+        // bot 启动后台任务如果立即轮询或 getAll，会重复拉本机 preset 并放大 SSH/Docker 连接耗时。
+        runStartupBackgroundTasks: false,
+      }),
+    )
     .register(IFileWatcherService, params.connectionServices.fileWatcherService)
     .register(
       IOAuthService,

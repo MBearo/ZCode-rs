@@ -34,6 +34,7 @@ import {
 } from "./create-workflow-source.js";
 import { describeWorkflowSubagentModel, parseWorkflowSubagentModel } from "./model-reference.js";
 import { boundGraphOfAnalysis, displayOfAnalysis } from "./workflow-analysis-display.js";
+import { recordAuthoredWorkflowDraft } from "./workflow-draft-read-state.js";
 import { resolveWorkflowDraftName, writeWorkflowDraft } from "./workflow-drafts.js";
 import {
   formatWorkflowDiagnosticLines,
@@ -44,6 +45,7 @@ import {
 } from "./workflow-script-notes.js";
 import { analyzeScript } from "./workflow-script-analysis.js";
 import { describeWorkflowScriptPath } from "./workflow-script-path.js";
+import { createWorkflowNeedsSkill, requireDynamicWorkflowSkill } from "./workflow-skill-gate.js";
 
 const CREATE_WORKFLOW_TOOL_NAME = "CreateWorkflow";
 const CREATE_WORKFLOW_TIMEOUT_MS = 15_000;
@@ -89,6 +91,14 @@ const createWorkflowHandler: ToolHandler = async (input, context) => {
           source: script,
         })
       : undefined;
+  // 这份草稿的字节就是模型本次的 `script`：记作它写过的文件，下一次 Edit 不必先 Read。
+  if (inlineDraft !== undefined) {
+    await recordAuthoredWorkflowDraft(context, {
+      path: inlineDraft.path,
+      source: script,
+      toolName: "CreateWorkflow",
+    });
+  }
   const location = describeScriptLocation(parsed, inlineDraft?.path, cwd);
 
   if (!ok) {
@@ -325,13 +335,19 @@ export const createWorkflowToolEntry: ToolEntry = {
   // 天花板同在这里读：钳制必须发生在确认窗之前，否则用户批准的是一个不会生效的数。
   // 模型目录同在这里读：`subagent_model` 必须在确认窗之前解析成规范形，否则用户批准的是一个
   // 还没被认出来的名字，而解不出来的调用会在批准之后才失败。
-  resolveInput: (input, context) =>
-    resolveCreateWorkflowInput(
+  resolveInput: (input, context) => {
+    // 技能门先于一切解析：没读过 dynamic-workflows 就拒绝提交脚本（saved 来源例外，见 gate 模块）。
+    if (createWorkflowNeedsSkill(input)) {
+      const refused = requireDynamicWorkflowSkill(context, CREATE_WORKFLOW_TOOL_NAME);
+      if (refused) return refused;
+    }
+    return resolveCreateWorkflowInput(
       input,
       context.workingDirectory ?? ".",
       context.dynamicWorkflowRunPort?.concurrencyCeiling?.(),
       context.modelCatalogPort,
-    ),
+    );
+  },
   prepareApproval: prepareCreateWorkflowApproval,
   inputSchema: CreateWorkflowInputJsonSchema,
   outputSchema: CreateWorkflowOutputJsonSchema,

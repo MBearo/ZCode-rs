@@ -63,6 +63,7 @@ import type {
   ZCodeWorkspaceGenerateTextResult,
   ZCodeWorkspaceGenerateTextParams,
   ZCodeWorkspaceHookTrustGrantResult,
+  ZCodeAutomationBotDeliveryTarget,
 } from "@zcode/shared";
 import type {
   ClientHello,
@@ -266,6 +267,8 @@ export interface ZCodeAgentSendPromptParamsBase extends ZCodeAgentSessionTarget 
   expectedProviderRevision?: string;
   runtimeProviderHeaders?: Record<string, string>;
   toolDenylist?: string[];
+  /** Bot 来源 turn 的稳定回推地址；只在当前 turn 内供 CronCreate 读取。 */
+  botDeliveryTarget?: ZCodeAutomationBotDeliveryTarget;
 }
 
 export type ZCodeAgentSendPromptParams = ZCodeAgentSendPromptParamsBase &

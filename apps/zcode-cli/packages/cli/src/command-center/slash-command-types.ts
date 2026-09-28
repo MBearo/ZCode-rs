@@ -37,6 +37,12 @@ export type SlashCommand =
     }
   | {
       args: string;
+      name: "workflow";
+      rawName: string;
+      type: "known";
+    }
+  | {
+      args: string;
       name: "locale";
       rawName: string;
       type: "known";

@@ -51,6 +51,8 @@ const BROWSER_USE_SCOPE_ERROR =
 const SURFACE_SCOPE_ERROR =
   "--surface can only be used with --prompt, --target, app-server, or agent-server.";
 const MEMORY_BENCH_SCOPE_ERROR = "--memory-bench can only be used with -p/--prompt.";
+const ENABLE_WORKFLOW_SCOPE_ERROR =
+  "--enable-workflow can only be used with -p/--prompt or --target.";
 
 const pluginsCommandFlags = (
   values: ReturnType<typeof parseGlobalArgs>["values"],
@@ -99,6 +101,7 @@ const globalOptions = (
     browserExecutable,
     browserUse,
     detectedLocale,
+    ...(values["enable-workflow"] === true ? { enableWorkflow: true } : {}),
     force: values.force === true,
     json: values.json === true,
     locale,
@@ -423,6 +426,15 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
   if (parsed.values.version === true) {
     ctx.stdout.write(`${version}\n`);
     return 0;
+  }
+
+  if (
+    options.enableWorkflow &&
+    (parsed.positionals.length > 0 ||
+      (typeof parsed.values.prompt !== "string" && targetRequest === undefined))
+  ) {
+    ctx.stderr.write(`${ENABLE_WORKFLOW_SCOPE_ERROR}\n`);
+    return 1;
   }
 
   if (

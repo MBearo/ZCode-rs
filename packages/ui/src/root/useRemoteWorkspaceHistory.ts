@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   AppSettings,
+  BotRemoteWorkspaceReconnectedEvent,
   IPlatformService,
   RemoteSessionClosedEvent,
   RemoteWorkspaceSessionEntry,
@@ -68,6 +69,20 @@ async function bindRemoteWorkspaceContextAndGetSession(params: {
     throw new Error(`远程 workspace session 不存在: ${params.sessionId}`);
   }
   return currentSession;
+}
+
+function resolveBotRemoteWorkspaceReconnectedIdentity(params: {
+  event: Pick<BotRemoteWorkspaceReconnectedEvent, "workspaceIdentity">;
+  resolvedWorkspacePath: string;
+  target: BotRemoteWorkspaceReconnectedEvent["target"];
+}): string {
+  const eventWorkspaceIdentity = params.event.workspaceIdentity.trim();
+  if (eventWorkspaceIdentity) {
+    // Bugfix: Bot task/stream 广播继续使用 bot context 捕获的 workspaceIdentity。
+    // 这里如果用 canonical path 重新计算 identity，UI tab 会订阅到另一个 key，导致远端结果被过滤掉。
+    return eventWorkspaceIdentity;
+  }
+  return buildRemoteWorkspaceIdentity(params.resolvedWorkspacePath, params.target);
 }
 
 function shouldPersistRemoteWorkspaceFailure(params: {
@@ -1196,11 +1211,99 @@ export function useRemoteWorkspaceHistory({
     [commitRemoteWorkspaceSessionMutation, tabStoreApi],
   );
 
+  const handleBotRemoteWorkspaceReconnected = useCallback(
+    async (event: BotRemoteWorkspaceReconnectedEvent) => {
+      if (!canUseRemoteWorkspace) {
+        return;
+      }
+
+      const sessionId = event.sessionId.trim();
+      if (!sessionId) {
+        return;
+      }
+
+      try {
+        await waitForRemoteWorkspaceSessionReady(sessionId);
+        const remoteSession = getRemoteWorkspaceSession(sessionId);
+        if (!remoteSession) {
+          throw new Error(`远程 workspace session 不存在: ${sessionId}`);
+        }
+        if (!remoteSession.target) {
+          // Bugfix: Bot 重连事件来自 main/host，必须带可持久化的 target。
+          // Web relay 的桥接 session 没有 target，不能进入远程历史重连分支。
+          throw new Error(`远程 workspace session 缺少连接目标: ${sessionId}`);
+        }
+
+        const resolvedWorkspacePath = await resolveRemoteWorkspaceCanonicalPath(
+          sessionId,
+          event.workspacePath,
+        );
+        const resolvedWorkspaceIdentity = resolveBotRemoteWorkspaceReconnectedIdentity({
+          event,
+          resolvedWorkspacePath,
+          target: remoteSession.target,
+        });
+
+        bindRemoteWorkspacePath(resolvedWorkspacePath, sessionId);
+        bindRemoteWorkspaceIdentity(resolvedWorkspaceIdentity, sessionId);
+        // Bugfix: Bot 触发的远端重连发生在 main/host，不会经过侧栏手动重连的 React 流程。
+        // 这里收到 main 的成功事件后，把已创建的 session 绑定回 tab 和远端历史，UI 才会从“未连接”变为“已连接”。
+        tabStoreApi.getState().ensureWorkspaceTab(resolvedWorkspacePath, {
+          remoteSessionId: sessionId,
+          remoteTarget: remoteSession.target,
+          workspaceIdentity: resolvedWorkspaceIdentity,
+        });
+        await commitRemoteWorkspaceSessionMutation(
+          buildRemoteWorkspaceSessionMutation({
+            remoteSessions: remoteWorkspaceSessionsRef.current,
+            workspacePath: resolvedWorkspacePath,
+            workspaceIdentity: resolvedWorkspaceIdentity,
+            target: remoteSession.target,
+            lastConnectionStatus: "connected",
+            touchOpenedAt: true,
+          }),
+        );
+        await Promise.all([
+          refreshRemotePinnedTasksForSession({
+            sessionId,
+            workspacePath: resolvedWorkspacePath,
+            workspaceIdentity: resolvedWorkspaceIdentity,
+          }),
+          refreshRemoteTimelineTasksForSession({
+            sessionId,
+            workspacePath: resolvedWorkspacePath,
+            workspaceIdentity: resolvedWorkspaceIdentity,
+          }),
+        ]);
+      } catch (error) {
+        logger.warn("[Root] Bot 远端 workspace 重连成功后同步 UI 状态失败", {
+          sessionId,
+          workspacePath: event.workspacePath,
+          workspaceIdentity: event.workspaceIdentity,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [
+      canUseRemoteWorkspace,
+      commitRemoteWorkspaceSessionMutation,
+      resolveRemoteWorkspaceCanonicalPath,
+      tabStoreApi,
+      waitForRemoteWorkspaceSessionReady,
+    ],
+  );
+
   useEffect(() => {
     return platform.onRemoteSessionClosed((event) => {
       void handleRemoteWorkspaceSessionClosed(event);
     });
   }, [handleRemoteWorkspaceSessionClosed, platform]);
+
+  useEffect(() => {
+    return platform.onBotRemoteWorkspaceReconnected((event) => {
+      void handleBotRemoteWorkspaceReconnected(event);
+    });
+  }, [handleBotRemoteWorkspaceReconnected, platform]);
 
   const handleRemoteWorkspaceTabsClosed = useCallback(
     (workspaceKeys: string[]) => {

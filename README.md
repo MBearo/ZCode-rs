@@ -28,6 +28,10 @@
 
 这组数据只代表当前本地 fixture 和构建形态；真实供应商、Electron/Host 总进程、大历史、MCP、Windows/Linux 和移动远控仍需单独验收。完整测量方法、功能差异和 TODO 见 [`docs/reports/rust-node-resource-parity-2026-09-23.md`](docs/reports/rust-node-resource-parity-2026-09-23.md)。
 
+## 上游同步记录
+
+- **v3.14.3**：同步上游 ZCode v3.14.3 更新，保留本仓库的 Rust CLI 迁移实现。
+
 ## 环境要求
 
 - Rust `1.89` 或更高版本

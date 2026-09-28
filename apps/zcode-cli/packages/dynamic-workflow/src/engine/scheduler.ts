@@ -11,7 +11,17 @@
 
 import { inputHash } from "./hash.js";
 import { importedAskRecord, type ImportedActorState } from "./imported-cache.js";
-import { defer, type Actor, type AskNode, type Deferred, type SchedulerHost } from "./scheduler-types.js";
+import {
+  defer,
+  drainActorAdmission,
+  hashMismatch,
+  describeCause,
+  headOfInstructions,
+  type Actor,
+  type AskNode,
+  type Deferred,
+  type SchedulerHost,
+} from "./scheduler-types.js";
 import { handleSubmitAttempted, handleTurnEnded, type SubmitSeam } from "./scheduler-submit.js";
 import type {
   ActorId,
@@ -25,20 +35,21 @@ import type {
   PersonaSpec,
   SessionRef,
 } from "./types.js";
-import {
-  INSTRUCTIONS_HEAD_MAX_CHARS,
-  NUDGE_ATTEMPTS,
-  refToString,
-  REPAIR_ATTEMPTS,
-  WorkflowError,
-} from "./types.js";
+import { NUDGE_ATTEMPTS, refToString, REPAIR_ATTEMPTS, WorkflowError } from "./types.js";
 
+export { hashMismatch } from "./scheduler-types.js";
 export type { SchedulerHost } from "./scheduler-types.js";
 
 export class AskScheduler {
   private readonly actors = new Map<ActorId, Actor>();
   private readonly actorOrder: Actor[] = [];
   private readonly liveNodes = new Map<string, AskNode>();
+  /**
+   * 「转录早于本次派发」的 ask 实例（`siteId@ordinal`）：续跑前驱在飞 ask 的，以及 resume 时
+   * 据 running 行重新派发的。它们落 journal 的 stats 要抹掉 `worldToolCalls`，见 {@link journaledStats}。
+   * 结算后不清理——迟到的 stats 回填还要查它。
+   */
+  private readonly priorTranscriptAsks = new Set<string>();
   private activeAsks = 0;
 
   /** scheduler-submit.ts 的自由函数经它查 live 节点、按结果结算（见 {@link SubmitSeam}）。 */
@@ -74,7 +85,9 @@ export class AskScheduler {
   ): Actor {
     const recordedCount = this.journal
       .listNodes(this.host.runId)
-      .filter((n) => n.kind === "ask" && n.actorSiteId === ref.siteId && n.actorOrdinal === ref.ordinal).length;
+      .filter(
+        (n) => n.kind === "ask" && n.actorSiteId === ref.siteId && n.actorOrdinal === ref.ordinal,
+      ).length;
     const actor: Actor = {
       ref,
       id,
@@ -100,7 +113,12 @@ export class AskScheduler {
   }
 
   /** 受理一次 ask：完结命中短路（走 hold 规则），running 命中或未命中则 live 派发。 */
-  admitAsk(siteId: string, actorId: ActorId, instructions: string, spec: AskSpec): Promise<unknown> {
+  admitAsk(
+    siteId: string,
+    actorId: ActorId,
+    instructions: string,
+    spec: AskSpec,
+  ): Promise<unknown> {
     const actor = this.actors.get(actorId)!;
     const ordinal = this.host.nextOrdinal(siteId);
     const instance: InstanceRef = { siteId, ordinal };
@@ -116,16 +134,24 @@ export class AskScheduler {
         return Promise.reject(err);
       }
       const seq = recorded.actorSeq ?? 0;
+      const reconcile = (): void =>
+        actor.imported?.reconcileRecorded(
+          seq,
+          recorded.inputHash,
+          this.host.wasLiveBeforeResume(instance),
+          this.host.wasQueuedBeforeImportClose(instance),
+        );
       if (recorded.status === "running") {
         // 崩溃于执行中：按记录的 actorSeq 位置重新 live 派发（hold 规则保证其准入次序）。
+        // 这一条的转录里已经有上一轮跑出来的那些消息，所以按「转录早于本次派发」记 stats。
         actor.pendingRecorded.set(seq, () => {
-          actor.imported?.reconcileRecorded(seq, recorded.inputHash, this.host.wasLiveBeforeResume(instance));
-          this.admitLive(instance, actor, seq, instructions, hash, spec, deferred);
+          reconcile();
+          this.admitLive(instance, actor, seq, instructions, hash, spec, deferred, true);
         });
       } else {
         // completed / failed：短路结算，无 driver 调用。
         actor.pendingRecorded.set(seq, () => {
-          actor.imported?.reconcileRecorded(seq, recorded.inputHash, this.host.wasLiveBeforeResume(instance));
+          reconcile();
           this.releaseCachedAsk(instance, recorded, deferred);
         });
       }
@@ -138,14 +164,21 @@ export class AskScheduler {
     actor.pendingLive.push(() => {
       const seq = actor.nextAdmitSeq++;
       if (this.tryImportedSettle(instance, actor, seq, hash, deferred)) return;
-      this.admitLive(instance, actor, seq, instructions, hash, spec, deferred);
+      // 未命中之后才知道它是不是「续跑前驱的在飞 ask」——判定在 take 里随分歧一起做出。
+      const carried = actor.imported?.carriedAt(seq) === true;
+      this.admitLive(instance, actor, seq, instructions, hash, spec, deferred, carried);
     });
     this.drainAdmission(actor);
     this.pumpAll();
     return deferred.promise;
   }
 
-  /** 把一个 ask 作为 live 节点准入：建节点、准入即落 running 记录、入队并记事件。 */
+  /**
+   * 把一个 ask 作为 live 节点准入：建节点、准入即落 running 记录、入队并记事件。
+   *
+   * `priorTranscript` 为真表示这一条不是从空转录开跑的（续跑前驱在飞 ask，或 resume 据 running
+   * 行重新派发）——它只影响 stats 怎么落库，见 {@link journaledStats}。
+   */
   private admitLive(
     instance: InstanceRef,
     actor: Actor,
@@ -154,7 +187,13 @@ export class AskScheduler {
     hash: string,
     spec: AskSpec,
     deferred: Deferred<unknown>,
+    priorTranscript = false,
   ): void {
+    if (priorTranscript) this.priorTranscriptAsks.add(refToString(instance));
+    // 指令开头随出生事件一起落轨：这里的 instructions 还是
+    // 作者的原文——driver 的质量 / schema 尾注在 startAsk 里才追加，所以摘要里不会混进引擎的话。
+    // 算一次存在节点上：派发要重复出生事实，两条事件带的必须是同一个串。
+    const instructionsHead = headOfInstructions(instructions);
     const node: AskNode = {
       instance,
       actor,
@@ -167,6 +206,7 @@ export class AskScheduler {
       nudgesRemaining: NUDGE_ATTEMPTS,
       settled: false,
       dispatched: false,
+      ...(instructionsHead === undefined ? {} : { instructionsHead }),
     };
     this.liveNodes.set(refToString(instance), node);
     // 准入即落 running（携 actorSeq + inputHash）：崩溃于执行中的节点 resume 可据此重新派发。
@@ -182,9 +222,6 @@ export class AskScheduler {
       status: "running",
     });
     actor.liveQueue.push(node);
-    // 指令开头随出生事件一起落轨：这里的 instructions 还是
-    // 作者的原文——driver 的质量 / schema 尾注在 startAsk 里才追加，所以摘要里不会混进引擎的话。
-    const instructionsHead = headOfInstructions(instructions);
     this.host.record({
       type: "node-queued",
       instance,
@@ -253,7 +290,22 @@ export class AskScheduler {
     // 尽力而为且幂等；预算扣减仍在 engine.askStats（此处只补 journal 完整性）。
     const recorded = this.journal.getNode(this.host.runId, instance.siteId, instance.ordinal);
     if (recorded === undefined) return;
-    this.journal.putNode({ ...recorded, stats });
+    this.journal.putNode({ ...recorded, stats: this.journaledStats(instance, stats) });
+  }
+
+  /**
+   * 落 journal 的 stats：**转录早于本次派发**的 ask 抹掉 `worldToolCalls`。
+   *
+   * 根因：driver 的工具计数器是内存态、每次 ask 起跑时清零，所以接着一段既有转录跑的 ask 只数
+   * 得到自己这几轮，转录里原有的工具调用一个也数不到。少报的后果不是账目不准（那是 tokens 的
+   * 事），而是**纯度判据被污染**：一个报 0 的 ask 会被后来的修订当成纯条目，在关门之后仍从缓存
+   * 结算——而它其实碰过工作区。缺席这个键本就表示「碰过」（保守读法），所以抹掉才是诚实记录。
+   * tokens / toolCalls / turns 照记：它们是用量，不是纯度声明。
+   */
+  private journaledStats(instance: InstanceRef, stats: AskStats): AskStats {
+    if (!this.priorTranscriptAsks.has(refToString(instance))) return stats;
+    const { worldToolCalls: _unreliable, ...rest } = stats;
+    return rest;
   }
 
   failed(instance: InstanceRef, error: WorkflowError): void {
@@ -292,38 +344,50 @@ export class AskScheduler {
   // ——————————————————————————————— 内部：准入 / 派发 ———————————————————————————————
 
   private drainAdmission(actor: Actor): void {
-    let progressed = true;
-    while (progressed) {
-      progressed = false;
-      const release = actor.pendingRecorded.get(actor.nextAdmitSeq);
-      if (release !== undefined) {
-        actor.pendingRecorded.delete(actor.nextAdmitSeq);
-        actor.nextAdmitSeq++;
-        release();
-        progressed = true;
-        continue;
-      }
-      if (actor.nextAdmitSeq >= actor.recordedCount && actor.pendingLive.length > 0) {
-        const admit = actor.pendingLive.shift()!;
-        admit();
-        progressed = true;
-      }
-    }
+    drainActorAdmission(actor);
     this.pumpActor(actor);
   }
 
-  private releaseCachedAsk(instance: InstanceRef, recorded: NodeRecord, deferred: Deferred<unknown>): void {
+  /**
+   * 命中记录的 ask：按 journal 记下的**结算次序**释放。hold 规则定的是同一个 actor 内的准入次序，跨 actor 的
+   * 完成次序要这一道闸才回得来——扇出分支在 await 之后的每一次 journal 调用都按它编号。
+   */
+  private releaseCachedAsk(
+    instance: InstanceRef,
+    recorded: NodeRecord,
+    deferred: Deferred<unknown>,
+  ): void {
+    this.host.holdForReplay(instance, () => this.settleCachedAsk(instance, recorded, deferred));
+  }
+
+  private settleCachedAsk(
+    instance: InstanceRef,
+    recorded: NodeRecord,
+    deferred: Deferred<unknown>,
+  ): void {
     if (recorded.status === "completed") {
       this.host.record({ type: "node-settled", instance, outcome: "ok", cached: true });
       deferred.resolve(recorded.result);
     } else {
       // 已记录的失败也要短路复现：脚本可能已 try/catch 过它并据此分支，replay 必须重放同一 rejection。
-      this.host.record({ type: "node-settled", instance, outcome: "failed", cached: true, error: recorded.error });
+      this.host.record({
+        type: "node-settled",
+        instance,
+        outcome: "failed",
+        cached: true,
+        error: recorded.error,
+      });
       deferred.reject(WorkflowError.fromJSON(recorded.error!));
     }
   }
 
-  private pumpAll(): void {
+  /**
+   * 重扫每个 actor 的待派发队列。公开面**只为一个调用方**：引擎在抬高本 run 的并发上界之后
+   * 调它。上界本身是
+   * {@link pumpActor} 每次派发前现读的，但没有任何别的事件会触发一次重扫——排队的 ask
+   * 否则要一直等到下一次结算才动，而「抬高之后立刻多跑几个」正是这条命令买的东西。
+   */
+  pumpAll(): void {
     for (const actor of this.actorOrder) this.pumpActor(actor);
   }
 
@@ -361,7 +425,16 @@ export class AskScheduler {
     // node-dispatched 在会话就绪之后。进程级并发闸门
     // 不在这里：它按**模型请求**准入，住在 driver 之下的 runtime deps 里；调度器只守
     // per-run 的 ask 级上界。
-    this.host.record({ type: "node-dispatched", instance: node.instance });
+    // 这一条重复该实例的出生事实（types.ts 的 `node-dispatched`）：调度器手上现成的那几样
+    // 与它的 `node-queued` 同源，两个出生阶段名由引擎在 record 里按同一张铸造表补。
+    this.host.record({
+      type: "node-dispatched",
+      instance: node.instance,
+      kind: "ask",
+      actor: node.actor.ref,
+      ...(node.actor.name === undefined ? {} : { actorName: node.actor.name }),
+      ...(node.instructionsHead === undefined ? {} : { instructionsHead: node.instructionsHead }),
+    });
     node.dispatched = true;
     const message: AskMessage = {
       instructions: node.instructions,
@@ -376,27 +449,29 @@ export class AskScheduler {
     // 种子只有到分歧点才知道（运行期发现），所以必须在这里、由引擎侧交给 driver——引擎持有
     // 导入态，driver 持有会话 store，这个签名是两者的最小汇合点。
     const seed = actor.imported?.seed();
-    const promise = this.host.driver.createActorSession(actor.ref, actor.persona, seed).then((session) => {
-      actor.session = session;
-      // resolvedModel 由宿主侧的 runtime 工厂在 createActorSession **内部**写下（它才知道
-      // "lite" 落到哪个模型）。putActor 是整条记录的替换，所以这条写入必须把刚写下的值读回来
-      // 带过去，否则这里就会把它抹掉——档位解析的审计与 resume 依据随之丢失。
-      const resolvedModel = this.journal.getActor(
-        this.host.runId,
-        actor.ref.siteId,
-        actor.ref.ordinal,
-      )?.resolvedModel;
-      this.journal.putActor({
-        runId: this.host.runId,
-        siteId: actor.ref.siteId,
-        ordinal: actor.ref.ordinal,
-        name: actor.name,
-        persona: actor.persona,
-        sessionId: session.id,
-        resolvedModel,
+    const promise = this.host.driver
+      .createActorSession(actor.ref, actor.persona, seed)
+      .then((session) => {
+        actor.session = session;
+        // resolvedModel 由宿主侧的 runtime 工厂在 createActorSession **内部**写下（它才知道
+        // "lite" 落到哪个模型）。putActor 是整条记录的替换，所以这条写入必须把刚写下的值读回来
+        // 带过去，否则这里就会把它抹掉——档位解析的审计与 resume 依据随之丢失。
+        const resolvedModel = this.journal.getActor(
+          this.host.runId,
+          actor.ref.siteId,
+          actor.ref.ordinal,
+        )?.resolvedModel;
+        this.journal.putActor({
+          runId: this.host.runId,
+          siteId: actor.ref.siteId,
+          ordinal: actor.ref.ordinal,
+          name: actor.name,
+          persona: actor.persona,
+          sessionId: session.id,
+          resolvedModel,
+        });
+        return session;
       });
-      return session;
-    });
     actor.sessionPromise = promise;
     return promise;
   }
@@ -418,7 +493,12 @@ export class AskScheduler {
     // 结算失败必须落 journal（覆盖准入时的 running）：失败是"完结"，且脚本可能已观察到该 rejection
     // 并据此分支，replay 必须复现它——journal 化失败是重放正确性的硬性要求，而非可选。
     this.journal.putNode(this.nodeRecordFor(node, { status: "failed", error: error.toJSON() }));
-    this.host.record({ type: "node-settled", instance: node.instance, outcome: "failed", error: error.toJSON() });
+    this.host.record({
+      type: "node-settled",
+      instance: node.instance,
+      outcome: "failed",
+      error: error.toJSON(),
+    });
     this.finishLiveNode(node);
     // 节点失败只 reject 该 ask，不失败整个 run（脚本可 try/catch）。
     node.deferred.reject(error);
@@ -435,7 +515,9 @@ export class AskScheduler {
 
   private nodeRecordFor(
     node: AskNode,
-    outcome: { status: "completed"; result: unknown } | { status: "failed"; error: NodeRecord["error"] },
+    outcome:
+      | { status: "completed"; result: unknown }
+      | { status: "failed"; error: NodeRecord["error"] },
   ): NodeRecord {
     const record: NodeRecord = {
       runId: this.host.runId,
@@ -450,39 +532,8 @@ export class AskScheduler {
     };
     if (outcome.status === "completed") record.result = outcome.result;
     else record.error = outcome.error;
-    if (node.lastStats !== undefined) record.stats = node.lastStats;
+    if (node.lastStats !== undefined)
+      record.stats = this.journaledStats(node.instance, node.lastStats);
     return record;
   }
-}
-
-/** replay 命中但 inputHash 不一致——纯度契约被破坏，run 大声失败。 */
-export function hashMismatch(instance: InstanceRef, expected: string, got: string): WorkflowError {
-  return new WorkflowError(
-    "InputHashMismatch",
-    `Replay hit at ${refToString(instance)} but inputHash differs (expected ${expected}, got ` +
-      `${got}): the script is not deterministic, so the journal cannot be replayed.`,
-    // 结构化 mismatch 与 ScriptHashMismatch 对齐：两个哈希不一致错误共用同一个字段，
-    // 读端不必再从 message 文本里抠哈希。
-    { mismatch: { expected, got } },
-  );
-}
-
-/** cause → 一行有界文本（Error 取 message，其余 String()；空则给占位）。 */
-function describeCause(cause: unknown): string {
-  const text = cause instanceof Error ? cause.message : String(cause);
-  const trimmed = text.trim();
-  if (trimmed.length === 0) return "unknown error";
-  return trimmed.length > 300 ? `${trimmed.slice(0, 300)}…` : trimmed;
-}
-
-/**
- * 作者指令的开头（{@link INSTRUCTIONS_HEAD_MAX_CHARS} 个字符，去两端空白，**不加省略号**）。
- * 空指令返回 undefined：缺席的键比一个空串诚实——读面据此退回「不知道它被交代了什么」。
- */
-function headOfInstructions(instructions: string): string | undefined {
-  const trimmed = instructions.trim();
-  if (trimmed.length === 0) return undefined;
-  return trimmed.length <= INSTRUCTIONS_HEAD_MAX_CHARS
-    ? trimmed
-    : trimmed.slice(0, INSTRUCTIONS_HEAD_MAX_CHARS);
 }

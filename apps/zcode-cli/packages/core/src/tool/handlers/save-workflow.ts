@@ -51,6 +51,7 @@ import {
 } from "./saved-workflows/index.js";
 import { readWorkflowScriptFile } from "./workflow-path-source.js";
 import { analyzeScript } from "./workflow-script-analysis.js";
+import { requireDynamicWorkflowSkill } from "./workflow-skill-gate.js";
 
 const SAVE_WORKFLOW_TIMEOUT_MS = 15_000;
 const SAVE_WORKFLOW_MODEL_BYTES = 24_000;
@@ -264,6 +265,8 @@ export const saveWorkflowToolEntry: ToolEntry = {
   validateInput: (input) => validateSaveWorkflowInput(input),
   // 把落点与覆盖判定算进入参：确认窗与 hook 读的是同一份事实，且对所有客户端版本可见。
   resolveInput: (input, context) =>
+    // 技能门先于落点解析（handlers/workflow-skill-gate.ts）：保存的也是一段脚本。
+    requireDynamicWorkflowSkill(context, SAVE_WORKFLOW_TOOL_NAME) ??
     resolveSaveWorkflowInput(input, context.workingDirectory ?? "."),
   prepareApproval: prepareSaveWorkflowApproval,
   inputSchema: SaveWorkflowInputJsonSchema,

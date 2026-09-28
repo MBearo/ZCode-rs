@@ -21,6 +21,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import type { workflowRunResultView } from "@/app-shell/workflowRunPanel.js";
 import { workflowRunConcurrencyView } from "@/app-shell/workflowRunThrottle.js";
 import { WorkflowRunStatus } from "@/components/workflow-timeline/WorkflowCardChrome.js";
+import { WorkflowTruncatedNotice } from "@/components/workflow-timeline/WorkflowTruncatedNotice.js";
 import { useNowTicker } from "@/components/workflow-graph/use-now-ticker.js";
 
 function formatCount(value: number): string {
@@ -345,6 +346,9 @@ export const WorkflowRunStatusHeader = memo(function WorkflowRunStatusHeader({
           </span>
         </div>
       ) : null}
+      {/* 摘要行下的那一句「仅展示 n/m 步的详情」，与卡上同一份实现：脊柱列的是实例表留住的
+          那些，行里的数却已经把表外的算进来了——这一行说的正是这个差额。 */}
+      <WorkflowTruncatedNotice className="mt-1.5" run={run} testId="workflow-run-truncated" />
     </div>
   );
 });

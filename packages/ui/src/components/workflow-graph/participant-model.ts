@@ -218,42 +218,43 @@ export function liveParticipantView(
   const binder = phaseBinder(graph, run);
   const sitesOf = (participant: WorkflowParticipantData) =>
     new Set(participant.steps.map((id) => siteOf.get(id) ?? id));
+  const index = runIndex(run);
   /**
    * 这张卡名下的实例：车道上在**这张卡的站点**留下过节点、且该节点的戳落在这张卡的阶段的
    * actor；在这些站点上还一个节点都没有的 actor（建了还没被 ask，或还没走到这一站）则按它
    * **自己的出生戳**归位。无戳的 run 里 `phasesOf` 恒是全部阶段，两条合起来正是今天的
    * 「按车道」——旧 run 逐字节不变。
+   *
+   * 走车道索引而不是每张卡重扫一遍 `run.nodes`：见 {@link runIndex}。整条车道只排一次序，
+   * 与原来「先筛后排」同序——排序稳定，筛选保序。
    */
-  const instancesOfCard = (participant: WorkflowParticipantData) => {
-    const sites = sitesOf(participant);
-    const seen = new Set<number>();
-    const here = new Set<number>();
-    for (const node of run.nodes) {
-      if (node.actorSiteId !== participant.lane || !sites.has(node.siteId)) continue;
-      if (node.actorOrdinal === undefined) continue;
-      seen.add(node.actorOrdinal);
-      if (binder.has(participant.phase, node.phaseName)) here.add(node.actorOrdinal);
+  const instancesOfCard = (participant: WorkflowParticipantData, sites: ReadonlySet<string>) => {
+    const claimed: WorkflowRunState["actors"][number][] = [];
+    for (const actor of index.actorsBySite.get(participant.lane) ?? []) {
+      let seen = false;
+      let here = false;
+      for (const node of index.nodesByActor.get(actorKey(participant.lane, actor.ordinal)) ?? []) {
+        if (!sites.has(node.siteId)) continue;
+        seen = true;
+        if (binder.has(participant.phase, node.phaseName)) {
+          here = true;
+          break;
+        }
+      }
+      if (here || (!seen && binder.has(participant.phase, actor.phaseName))) claimed.push(actor);
     }
-    return run.actors
-      .filter(
-        (actor) =>
-          actor.siteId === participant.lane &&
-          (here.has(actor.ordinal) ||
-            (!seen.has(actor.ordinal) && binder.has(participant.phase, actor.phaseName))),
-      )
-      .sort((a, b) => a.ordinal - b.ordinal);
+    return claimed;
   };
-  const statusFor = (participant: WorkflowParticipantData, ordinal: number): StepRunStatus => {
-    const sites = sitesOf(participant);
-    const values = run.nodes
-      .filter(
-        (node) =>
-          sites.has(node.siteId) &&
-          node.actorSiteId === participant.lane &&
-          node.actorOrdinal === ordinal &&
-          binder.has(participant.phase, node.phaseName),
-      )
-      .map(statusOfRunNode);
+  const statusFor = (
+    participant: WorkflowParticipantData,
+    ordinal: number,
+    sites: ReadonlySet<string>,
+  ): StepRunStatus => {
+    const values: StepRunStatus[] = [];
+    for (const node of index.nodesByActor.get(actorKey(participant.lane, ordinal)) ?? []) {
+      if (!sites.has(node.siteId) || !binder.has(participant.phase, node.phaseName)) continue;
+      values.push(statusOfRunNode(node));
+    }
     return aggregateRunStatuses(values) ?? "pending";
   };
 
@@ -263,11 +264,12 @@ export function liveParticipantView(
   const instances: Record<string, ParticipantInstance> = {};
   let changed = false;
   for (const participant of graph.participants) {
-    const actors = instancesOfCard(participant);
+    const sites = sitesOf(participant);
+    const actors = instancesOfCard(participant, sites);
     if (participant.member !== undefined) {
       const actor = actors[participant.member.index];
       participantStatuses[participant.id] =
-        actor === undefined ? "pending" : statusFor(participant, actor.ordinal);
+        actor === undefined ? "pending" : statusFor(participant, actor.ordinal, sites);
       if (actor !== undefined) instances[participant.id] = boundInstance(participant.id, actor);
       participants.push(participant);
       continue;
@@ -288,7 +290,7 @@ export function liveParticipantView(
         const id = instanceCardId(participant.id, actor.ordinal);
         const { many: _many, ...rest } = participant;
         participants.push({ ...rest, id });
-        participantStatuses[id] = statusFor(participant, actor.ordinal);
+        participantStatuses[id] = statusFor(participant, actor.ordinal, sites);
         instances[id] = {
           ordinal: actor.ordinal,
           participant: participant.id,
@@ -310,6 +312,48 @@ export function liveParticipantView(
     for (const from of froms) for (const to of tos) handoffs.push({ ...edge, from, to });
   }
   return { graph: { ...graph, handoffs, participants }, instances, participantStatuses };
+}
+
+/**
+ * 键用 `\0` 连接，与 shared 的 `workflow-runs-actor-status.ts` 同一条理由：siteId 是引擎给的
+ * 任意字符串，用 `-` 之类可打印分隔符会让 ("a-1", 2) 与 ("a", "1-2") 撞车。
+ */
+function actorKey(siteId: string, ordinal: number): string {
+  return `${siteId}\0${ordinal}`;
+}
+
+interface RunIndex {
+  /** `actorKey` → 该实例名下的节点，保持 `run.nodes` 的顺序。 */
+  nodesByActor: ReadonlyMap<string, WorkflowRunState["nodes"][number][]>;
+  /** 车道 → 该车道上的 actor，已按 ordinal 升序（认领顺序）。 */
+  actorsBySite: ReadonlyMap<string, WorkflowRunState["actors"][number][]>;
+}
+
+/**
+ * 一次视图建一遍的两张索引。没有它们，每张实例卡都要重扫一遍 `run.nodes` 才能收自己的状态——表界是 1024
+ * 个实例 × 1024 个节点，也就是每帧一百万次比较。
+ * 索引之后建模按 actors + nodes 线性。
+ *
+ * 没有 actor 的节点（world-read）与不带 ordinal 的旧载荷不进索引：原来的筛选条件
+ * `node.actorSiteId === lane && node.actorOrdinal === ordinal` 对它们恒假，丢掉等价。
+ */
+function runIndex(run: WorkflowRunState): RunIndex {
+  const nodesByActor = new Map<string, WorkflowRunState["nodes"][number][]>();
+  for (const node of run.nodes) {
+    if (node.actorSiteId === undefined || node.actorOrdinal === undefined) continue;
+    const key = actorKey(node.actorSiteId, node.actorOrdinal);
+    const bucket = nodesByActor.get(key);
+    if (bucket === undefined) nodesByActor.set(key, [node]);
+    else bucket.push(node);
+  }
+  const actorsBySite = new Map<string, WorkflowRunState["actors"][number][]>();
+  for (const actor of run.actors) {
+    const bucket = actorsBySite.get(actor.siteId);
+    if (bucket === undefined) actorsBySite.set(actor.siteId, [actor]);
+    else bucket.push(actor);
+  }
+  for (const actors of actorsBySite.values()) actors.sort((a, b) => a.ordinal - b.ordinal);
+  return { actorsBySite, nodesByActor };
 }
 
 function boundInstance(

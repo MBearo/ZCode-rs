@@ -32,7 +32,9 @@ import type {
 import type { ActorTranscriptStore } from "./workflow-actor-transcript.js";
 import type { WorkflowConcurrencyPort } from "./workflow-concurrency-governor.js";
 import type { ActorModelActivity, WorkflowClock } from "./workflow-driver-concurrency.js";
+import type { ActorSessionQuiescence } from "./workflow-driver-quiescence.js";
 import type { WorkflowEscalationRegistry } from "./workflow-escalation-registry.js";
+import type { WorkflowRunSeatGate } from "./workflow-seat-gate.js";
 
 /** 一个可外部结算的 promise。 */
 export interface Deferred<T> {
@@ -154,6 +156,17 @@ export interface AgentRuntimeWorkflowDriverDeps {
    */
   concurrency?: WorkflowConcurrencyPort;
   /**
+   * 本 run 的座位闸门：本 run
+   * **自己**的并发上界中途被改低时，超出的子代理在下一个 turn step 前停住。在场时 driver 做两件
+   * 事——把每个 actor 的准入端口包进闸门，以及把 ask 的起止喂给它（startAsk 与引擎的
+   * `node-settled`，见 workflow-driver.ts）。
+   *
+   * 可选：缺席即这个 run 的上界从不中途变动（如不支持动态并发调整的 snippet 装配），准入端口与
+   * 从前逐字相同。**在场也不改变从未被改低过的 run 的行为**：上界之上的请求原地通过，闸门不发
+   * 任何事件、不持任何票。
+   */
+  seatGate?: WorkflowRunSeatGate;
+  /**
    * actor 会话的转录存取面（生产是 session store 本身）。两个用途共用它，且**必须**是同一个：
    * ask 边界记账的计数，与种子截断的复制（见 workflow-actor-transcript.ts 的模块说明）。
    *
@@ -171,15 +184,29 @@ export interface AgentRuntimeWorkflowDriverDeps {
    */
   runId?: string;
   /**
-   * 时钟与定时器：run 级 stall 时钟与瞬态失败的退避
-   * 重驱都用它。可注入只为测试假时间；`stallAfterMs` 缺省 20 分钟；`random` 供退避抖动。
+   * 时钟与定时器：run 级 stall 时钟、瞬态失败的退避
+   * 重驱与会话静默的有界等待都用它。支持注入时钟；`stallAfterMs` 缺省 20 分钟；
+   * `quiesceMs` 缺省 {@link AMEND_TRANSCRIPT_QUIESCE_MS}；`random` 供退避抖动。
    */
-  clock?: WorkflowClock & { stallAfterMs?: number; random?: () => number };
+  clock?: WorkflowClock & {
+    stallAfterMs?: number;
+    quiesceMs?: number;
+    random?: () => number;
+  };
+  /**
+   * 交出本 driver 的**会话静默探针**（workflow-driver-quiescence.ts）。构造时恰好调一次，
+   * 调用方把探针挂到自己那条 run 的注册表条目上——amend 接续在飞 ask 之前要问它。
+   *
+   * 走回调而不是让 `createAgentRuntimeWorkflowDriver` 返回一个二元组：driver 实例由**引擎**
+   * 在 `makeDriver(sink)` 时才造出来，装配方拿不到那个返回值。缺席即调用方不关心静默
+   * （如直接使用 harness 的路径）。
+   */
+  onQuiescenceProbe?: (probe: ActorSessionQuiescence) => void;
 }
 
 /**
  * 每个 actor 会话的运行态。per-actor FIFO（引擎保证）→ 每会话至多一个在飞 ask，因此
- * currentInstance / pendingSubmit / accepted / cancelled 都是「单前实例」语义，无需按 instance 细分。
+ * currentInstance / pendingSubmit / accepted / cancelled 都是「当前实例」语义，无需按 instance 细分。
  */
 export interface SessionState {
   readonly ref: SessionRef;

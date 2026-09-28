@@ -7,6 +7,7 @@
 // 视图是 props 的纯函数（TUI 测试按函数式调用组件，不起终端）。
 import React from "react";
 import type { TuiCopy } from "@zcode/i18n";
+import type { WorkflowRunActor } from "@zcode/shared/zcode-protocol-v4";
 import { palette } from "./app-model.js";
 import { DEFAULT_TUI_COPY } from "./app-locale.js";
 import { truncateDisplay } from "./app-terminal-width.js";
@@ -14,8 +15,38 @@ import type { TuiWorkflowCard } from "./app-workflow-mirror.js";
 
 const CARD_DETAIL_INDENT = "  ";
 const CARD_LOG_INDENT = "    ";
-const MAX_ACTOR_ROWS = 6;
+export const MAX_ACTOR_ROWS = 6;
 const MAX_RESULT_PREVIEW_WIDTH = 200;
+
+/** 六行位置按状态分桶：跑着的排前面。 */
+const ACTOR_ROW_RANK: Record<WorkflowRunActor["status"], number> = {
+  running: 0,
+  waiting: 1,
+  completed: 2,
+};
+
+/**
+ * 卡片要显示的 actor 行。
+ *
+ * 为什么不是 `actors.slice(0, MAX_ACTOR_ROWS)`：`run.actors` 是协议顺序（出生序），一条宽 run
+ * 里最先出生的六个往往都已结算，于是六行全是干完的人，正在跑的一个都看不见。改成按状态分桶
+ * 挑选——running → waiting → completed，桶内仍按协议顺序（稳定，所以一个 actor 只在它自己换
+ * 状态时才移动）。
+ */
+export function actorRowsForCard(
+  actors: readonly WorkflowRunActor[],
+  limit: number = MAX_ACTOR_ROWS,
+): readonly WorkflowRunActor[] {
+  return actors
+    .map((actor, index) => ({ actor, index }))
+    .sort(
+      (left, right) =>
+        ACTOR_ROW_RANK[left.actor.status] - ACTOR_ROW_RANK[right.actor.status] ||
+        left.index - right.index,
+    )
+    .slice(0, limit)
+    .map((entry) => entry.actor);
+}
 
 const h = React.createElement as (
   type: React.ElementType | string,
@@ -79,7 +110,7 @@ function expandedDetailNodes(
 
   if (card.actors.length > 0) {
     nodes.push(detailLine("actors-title", workflowCopy.actors, width));
-    for (const [index, actor] of card.actors.slice(0, MAX_ACTOR_ROWS).entries()) {
+    for (const [index, actor] of actorRowsForCard(card.actors).entries()) {
       nodes.push(
         h(
           "text",

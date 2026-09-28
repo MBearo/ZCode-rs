@@ -21,15 +21,7 @@ export const EVAL_WORKFLOW_SNIPPET_SOURCE_ERROR =
 
 export const EvalWorkflowSnippetInputSchema = z
   .object({
-    code: z
-      .string()
-      .min(1)
-      .optional()
-      .describe(
-        "TypeScript snippet written against the snippet facade (files.*, git.*, log, " +
-          "plain interface declarations, top-level await and return). No agent()/report(). " +
-          "Provide this OR `path`, never both.",
-      ),
+    code: z.string().min(1).optional().describe("The snippet, inline. This OR `path`, never both."),
     /**
      * 片段的第二条来源。**整个文件就是代码**：
      * 片段没有保存定义那套语义，一段恰好以 `/* zcode-workflow` 开头的文件也不该被当成声明块剥掉。
@@ -38,16 +30,14 @@ export const EvalWorkflowSnippetInputSchema = z
       .string()
       .min(1)
       .optional()
-      .describe(
-        "A file holding the snippet, relative to the working directory or absolute. Provide this OR `code`, never both. The whole file is the snippet; it is read as-is, with no metadata block handling.",
-      ),
+      .describe("A file holding the snippet, read whole. This OR `code`, never both."),
     timeoutMs: z
       .number()
       .int()
       .min(EVAL_WORKFLOW_SNIPPET_MIN_TIMEOUT_MS)
       .max(EVAL_WORKFLOW_SNIPPET_MAX_TIMEOUT_MS)
       .optional()
-      .describe("Wall-clock timeout for the whole snippet in milliseconds. Default 60000."),
+      .describe("Wall clock for the whole snippet, in ms. Default 60000, at most 600000."),
   })
   .strict();
 

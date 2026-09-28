@@ -8,6 +8,14 @@ import { SAVED_WORKFLOW_MAX_NAME_CHARS, SavedWorkflowScopeSchema } from "./saved
 
 export const CREATE_WORKFLOW_TOOL_NAME = "CreateWorkflow";
 
+/**
+ * 教模型写工作流的内置技能名（apps/zcode-cli/packages/bundled-skills/skills/<name>/SKILL.md）。
+ * 四个创作工具（Create/Amend/Save/EvalWorkflowSnippet）的 resolveInput 以它为门：会话里没有
+ * 加载过这份技能就拒绝提交脚本。
+ * 住在 contracts 里是因为 core 的门与 bootstrap 的技能包都读它，而两者不能互相 import。
+ */
+export const DYNAMIC_WORKFLOW_SKILL_NAME = "dynamic-workflows";
+
 /** 「恰好给一个执行体来源」的违规说明。写成常量是因为模型是它唯一的读者，三条路径同一句话。 */
 export const CREATE_WORKFLOW_SOURCE_ERROR =
   "Provide exactly one workflow source: `script` for a one-off script written inline, `saved` to run a workflow saved in this project, or `path` for a script file on disk (the file a previous result named). Passing more than one, or none, is ambiguous.";
@@ -29,13 +37,11 @@ export const CreateWorkflowSavedSourceSchema = z
       .string()
       .min(1)
       .max(SAVED_WORKFLOW_MAX_NAME_CHARS)
-      .describe("Name of a workflow saved in this project or globally (see ListSavedWorkflows)."),
+      .describe("Name of a saved workflow (see ListSavedWorkflows)."),
     args: z
       .record(z.unknown())
       .optional()
-      .describe(
-        "Values for the arguments the saved workflow declares. Unknown keys and type mismatches are rejected before anything runs.",
-      ),
+      .describe("Values for the arguments the saved workflow declares."),
     /** 解析回填：保存文件的落点。模型不填。 */
     path: z.string().min(1).optional(),
     /**
@@ -43,7 +49,7 @@ export const CreateWorkflowSavedSourceSchema = z
      * 归一化后 `scope` 变成**命中**的那一根，见 create-workflow-source.ts。
      */
     scope: SavedWorkflowScopeSchema.optional().describe(
-      "Which archive to take the workflow from. Omit to use the normal lookup order (a project workflow hides a global one with the same name).",
+      "Which archive to take it from; omit for the normal lookup order.",
     ),
   })
   .strict();
@@ -82,16 +88,14 @@ const CreateWorkflowModelInputSchema = z
       .min(1)
       .optional()
       .describe(
-        "Short display label for this run, in the user's language (\"PR review\", \"代码评审\"). Always pass it for an inline script: it labels the run everywhere and names its draft file under .zcode/workflow-drafts/. Defaults to the saved workflow's name when running a saved workflow.",
+        "Short run label in the user's language. Always pass it for an inline script; defaults to the saved workflow's name.",
       ),
     script: z
       .string()
       .optional()
-      .describe(
-        "Full TypeScript workflow script written against the dynamic-workflow facade, inline. Provide exactly one of `script`, `saved` and `path`. An inline script is saved to a file for you, and the result names it: revise it with `path`, not by pasting the script again.",
-      ),
+      .describe("The whole workflow script, inline. Exactly one of `script`, `saved` and `path`."),
     saved: CreateWorkflowSavedSourceSchema.optional().describe(
-      "Run a workflow saved in this project or globally instead of an inline script. Provide exactly one of `script`, `saved` and `path`.",
+      "A saved workflow to run, by name. Exactly one of `script`, `saved` and `path`.",
     ),
     /**
      * 第三条来源：
@@ -104,7 +108,7 @@ const CreateWorkflowModelInputSchema = z
       .min(1)
       .optional()
       .describe(
-        "A script file on disk, relative to the working directory or absolute — normally the file a previous CreateWorkflow/AmendWorkflow result named. Provide exactly one of `script`, `saved` and `path`. Prefer this over pasting a revised script: edit the file and pass its path.",
+        "A script file on disk (relative or absolute), usually the file a previous result named. Exactly one of `script`, `saved` and `path`.",
       ),
     /**
      * `path` 文件声明的实参。`saved` 有自己的 `saved.args`（同一套校验规则），内联脚本没有声明，
@@ -113,9 +117,7 @@ const CreateWorkflowModelInputSchema = z
     args: z
       .record(z.unknown())
       .optional()
-      .describe(
-        "Values for the arguments a `path` file declares in its `/* zcode-workflow` block. Only with `path`; with `saved` use `saved.args`. Unknown keys, missing required values and type mismatches are rejected before anything runs.",
-      ),
+      .describe("Values for the arguments a `path` file declares. Only with `path`."),
     /**
      * run 自己的并发上界。只压低、不抬高：
      * `resolveInput` 钳到 `[1, 天花板]`，确认窗与 handler 看到的就是将要生效的值。缺席即天花板。
@@ -127,7 +129,7 @@ const CreateWorkflowModelInputSchema = z
       .positive()
       .optional()
       .describe(
-        'Upper bound on how many subagents work at the same time in this run. Set it ONLY when the user asks to limit parallelism ("at most 3 at a time", "don\'t run so many at once"). Never set it on your own initiative and never in response to provider rate limits or errors — the runtime already adapts to those. A value above what this machine allows is lowered to that maximum. Omit for the default.',
+        "Upper bound on subagents working at once. Only when the user asks to limit parallelism; never as a reaction to provider errors.",
       ),
     /**
      * 本 run 子代理跑在哪个模型上。与
@@ -141,7 +143,7 @@ const CreateWorkflowModelInputSchema = z
       .min(1)
       .optional()
       .describe(
-        'Model for the workflow\'s subagents, as `providerId/modelId` or a bare model id (optionally `$reasoningLevel`). Set it ONLY when the user asks for the subagents to run on a specific model ("run the subagents on GLM-5.3-Flash"). Pass the name the user used; if the tool answers that it cannot resolve it, pick from the listed ids or call ListModels. The main agent (you) keeps the session model regardless. Omit to run subagents on the session model.',
+        "Model for the subagents (`providerId/modelId` or a model id). Only when the user asks; you stay on the session model.",
       ),
     // 修订续跑不在这里：它是 `AmendWorkflow` 的工作（amend-workflow.ts）。`.strict()` 让旧写法 `resume_from` 成为可见的 schema 错误，
     // 而不是被静默忽略后变成一次全价重跑。
@@ -480,6 +482,26 @@ export const CreateWorkflowOutputSchema = z
     status: z.literal("backgrounded").optional(),
     /** 后台任务 id ≡ taskId ≡ runId（取消与状态查询都以它为键）。 */
     backgroundTaskId: z.string().min(1).optional(),
+    /**
+     * `AmendWorkflow` 只改并发、就地生效时才在场：**没有**新 run，所以既没有 `status: "backgrounded"` 也没有
+     * `backgroundTaskId`，run 还是调用里那一个。
+     *
+     * 是一个显式的块而不是让消费方按形状去猜：「ok 且没有 status」在这个工具上还有别的来路
+     * （没有 run 端口时的「只 typecheck」）。数都是绝对值，`maxConcurrency === ceiling` 即
+     * 「这个 run 没有自己的界」。
+     *
+     * ⚠ 这条事实**不跨 v4**：协议的 `toolOutputSchema` 只带 `text` / `display` / `truncated`，
+     * 所以它服务的是 CLI/TUI、进程内消费方，桌面 UI 读不到它。
+     */
+    retuned: z
+      .object({
+        runId: z.string().min(1),
+        maxConcurrency: z.number().int().positive(),
+        previous: z.number().int().positive(),
+        ceiling: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

@@ -21,7 +21,13 @@ import {
   createWorkflowPhaseAlongside,
   createWorkflowPhaseNames,
 } from "@zcode/contracts";
-import type { ToolApprovalGate, ToolEntry, ToolHandler, ToolHandlerFailure } from "../types.js";
+import type {
+  ToolApprovalGate,
+  ToolEntry,
+  ToolExecutionContext,
+  ToolHandler,
+  ToolHandlerFailure,
+} from "../types.js";
 import { AMEND_WORKFLOW_TOOL_DESCRIPTION } from "./amend-workflow-description.js";
 import {
   AMEND_WORKFLOW_ERROR_CODE,
@@ -31,6 +37,11 @@ import {
   validateAmendWorkflowSource,
 } from "./amend-workflow-resolve.js";
 import {
+  isConcurrencyOnlyAmend,
+  resolveRetuneFallbackAmend,
+  runConcurrencyRetune,
+} from "./amend-workflow-retune.js";
+import {
   DIAGNOSTICS_NOT_EXECUTED_NOTE,
   EXECUTION_UNAVAILABLE_NOTE,
   describeWorkflowConcurrencyLimit,
@@ -38,6 +49,7 @@ import {
 } from "./create-workflow.js";
 import { describeWorkflowSubagentModel, parseWorkflowSubagentModel } from "./model-reference.js";
 import { boundGraphOfAnalysis, displayOfAnalysis } from "./workflow-analysis-display.js";
+import { recordAuthoredWorkflowDraft } from "./workflow-draft-read-state.js";
 import { resolveWorkflowDraftName, writeWorkflowDraft } from "./workflow-drafts.js";
 import {
   formatWorkflowDiagnosticLines,
@@ -47,6 +59,7 @@ import {
 } from "./workflow-script-notes.js";
 import { analyzeScript } from "./workflow-script-analysis.js";
 import { describeWorkflowScriptPath } from "./workflow-script-path.js";
+import { amendWorkflowNeedsSkill, requireDynamicWorkflowSkill } from "./workflow-skill-gate.js";
 
 const AMEND_WORKFLOW_TIMEOUT_MS = 15_000;
 const AMEND_WORKFLOW_MODEL_BYTES = 24_000;
@@ -111,6 +124,24 @@ function compileFailureResponse(
 
 const amendWorkflowHandler: ToolHandler = async (input, context) => {
   const parsed = AmendWorkflowInputSchema.parse(input) as AmendWorkflowInput;
+  // 就地调并发：
+  // resolveInput 判过的那条路在这里只剩一个痕迹——没有脚本、只有一个并发值。端口答 `not_live`
+  // （run 在两步之间结算了）时回落到一次真正的修订，脚本与编译推迟到那一刻才发生。
+  if (isConcurrencyOnlyAmend(parsed)) {
+    const retuned = await runConcurrencyRetune(parsed, context);
+    if (retuned !== undefined) return retuned;
+    const fallback = await resolveRetuneFallbackAmend(parsed, context);
+    if (!fallback.result) return fallback;
+    return await amendResolvedWorkflow(fallback.input, context);
+  }
+  return await amendResolvedWorkflow(parsed, context);
+};
+
+/** 修订本体：入参此刻必定带着将要跑的那份脚本（工具路由与落回路都已落定它）。 */
+async function amendResolvedWorkflow(
+  parsed: AmendWorkflowInput,
+  context: ToolExecutionContext,
+): Promise<CreateWorkflowOutput | ToolHandlerFailure> {
   // resolveInput 恒把脚本落定进来（`path` 读成 `script`、省略的从前驱回填，或当场失败）；到这里还
   // 缺脚本，只可能是绕过归一化的调用方——同样回结构化失败，而不是把 undefined 交给编译器。
   const script = parsed.script;
@@ -133,6 +164,15 @@ const amendWorkflowHandler: ToolHandler = async (input, context) => {
           source: script,
         })
       : undefined;
+  // 模型本次亲手写的脚本才记作它写过的文件；沿用前驱脚本的新草稿不记——那份字节可能来自别的
+  // 会话或压缩之前，替模型担保它没看过的内容正是 read-before-edit 要防的事。
+  if (inlineDraft !== undefined && parsed.predecessor?.script_inherited !== true) {
+    await recordAuthoredWorkflowDraft(context, {
+      path: inlineDraft.path,
+      source: script,
+      toolName: "AmendWorkflow",
+    });
+  }
   // run 记的永远是**装着这一次脚本**的文件。脚本改了就绝不沿用前驱的路径：那个文件装的是旧
   // 脚本，记到新 run 上就是让模型下次去编辑一段已经不在跑的代码。沿用脚本时前驱的文件可以继续
   // 记，但只在它此刻的字节仍是这份脚本时（resolveKeptScriptFile 已核对过）。
@@ -222,7 +262,7 @@ const amendWorkflowHandler: ToolHandler = async (input, context) => {
     backgroundTaskId: amended.runId,
     ...(causalityGraph === undefined ? {} : { causalityGraph }),
   } satisfies CreateWorkflowOutput;
-};
+}
 
 /**
  * 确认窗预览：与 CreateWorkflow 同一段代码（编不过即放行给 handler 回诊断）。display 的 kind
@@ -231,8 +271,11 @@ const amendWorkflowHandler: ToolHandler = async (input, context) => {
  */
 function prepareAmendWorkflowApproval(input: unknown): ToolApprovalGate {
   const parsed = AmendWorkflowInputSchema.safeParse(input);
-  // 归一化之后 `script` 必在场；缺席即有人绕过了生命周期，放行给 handler：它回结构化失败，窗开了
-  // 也无物可批。
+  // 没有脚本就没有可批的东西，两种情形共用这一条放行：
+  //   - 就地调并发：窗的用处是
+  //     把将要跑的脚本摆到人面前，而这条路一段脚本都不跑，只把一个数挪进 `[1, 天花板]`；
+  //     **归属无关**——别人的 run 也不弹窗，否则一次「什么都没批」会被当成批准了一次新 run。
+  //   - 有人绕过了归一化：放行给 handler，它回结构化失败，窗开了也无物可批。
   if (!parsed.success || parsed.data.script === undefined) return { gate: "proceed" };
   const analysis = analyzeScript(parsed.data.script);
   if (!analysis.ok) return { gate: "proceed" };
@@ -258,7 +301,14 @@ export const amendWorkflowToolEntry: ToolEntry = {
   handler: amendWorkflowHandler,
   // 修订脚本至多给一个，只对模型入参成立（归一化后 `script` 与 `path` 同时在场是合法执行态）。
   validateInput: (input) => validateAmendWorkflowSource(input),
-  resolveInput: resolveAmendWorkflowInput,
+  resolveInput: (input, context) => {
+    // 技能门先于前驱解析：带 `path` / `script` 的修订是在写脚本；只改设定的调用沿用前驱脚本，放行。
+    if (amendWorkflowNeedsSkill(input)) {
+      const refused = requireDynamicWorkflowSkill(context, AMEND_WORKFLOW_TOOL_NAME);
+      if (refused) return refused;
+    }
+    return resolveAmendWorkflowInput(input, context);
+  },
   prepareApproval: prepareAmendWorkflowApproval,
   inputSchema: AmendWorkflowInputJsonSchema,
   outputSchema: CreateWorkflowOutputJsonSchema,

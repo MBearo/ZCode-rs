@@ -723,8 +723,7 @@
             "exclusiveMinimum": 0,
             "maximum": 9007199254740991
           }
-        },
-        "required": ["predecessorRunId"]
+        }
       }
     },
     "required": ["runId", "toolCallId"]

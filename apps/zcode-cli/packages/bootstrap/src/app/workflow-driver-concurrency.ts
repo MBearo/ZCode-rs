@@ -27,6 +27,7 @@ import {
   workflowConcurrencyKey,
   type WorkflowConcurrencyPort,
 } from "./workflow-concurrency-governor.js";
+import type { WorkflowRunSeatGate } from "./workflow-seat-gate.js";
 
 /** 与治理器同一条纪律：这两种 retry 不是 provider 失败，不值一个徽标。 */
 const NON_FAILURE_RETRY_REASONS: ReadonlySet<string> = new Set([
@@ -111,6 +112,11 @@ export function createActorModelActivity(input: {
   /** 当前在飞 ask 的实例（结算 / 取消后为 undefined）；只有工具活动的上报需要它。 */
   live?: () => InstanceRef | undefined;
   handlers: ActorModelActivityHandlers;
+  /**
+   * 本 run 的座位闸门与这个子代理在闸门里的键。在场时准入端口再包一层：先等座位、再过治理器。缺席即这个 run
+   * 的上界从不中途变动（snippet 执行、不带闸门的装配），准入端口与从前逐字相同。
+   */
+  seat?: { gate: WorkflowRunSeatGate; key: string };
 }): ActorModelActivity {
   const chains = new Map<string, Chain>();
   let executing = false;
@@ -120,7 +126,7 @@ export function createActorModelActivity(input: {
   let turnsResolved = 0;
   let waitSeq = 0;
   let unsubscribeEvents: (() => void) | undefined;
-  const { handlers, live, port, runId } = input;
+  const { handlers, live, port, runId, seat } = input;
   // 同一条会话事件流的第二个读者：工具调用。实现单独成文件（判定与计数都在那里），这里只把它
   // 编进同一个生命周期，好让 driver 侧仍然只有一个观察对象。
   const toolActivity = createActorToolActivity({
@@ -171,7 +177,7 @@ export function createActorModelActivity(input: {
 
   // 准入端口就是治理器端口的窄包装：快路径 = tryAdmit，排队 = admit（waiting(slot)
   // 由 runner 的 queued 事件报，这里不再自己发）。acquire 仍先试快路径，兼容没有走 tryAcquire 的调用方。
-  const admission: ModelRequestAdmission | undefined =
+  const governed: ModelRequestAdmission | undefined =
     port === undefined
       ? undefined
       : {
@@ -184,6 +190,12 @@ export function createActorModelActivity(input: {
             );
           },
         };
+  // 本 run 自己的上界在**共享 cap 之上**再包一层。闸门要的那条子代理事实——
+  // 此刻有没有工具在跑——就取自同一个对象里的工具观察面，所以两个读者共用一份账。
+  const admission =
+    seat === undefined
+      ? governed
+      : seat.gate.wrap(seat.key, { toolsInFlight: () => toolActivity.inFlight() }, governed);
 
   return {
     admission,

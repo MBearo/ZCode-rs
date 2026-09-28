@@ -8,9 +8,29 @@
 //   2. `port.amend` 在前驱结算之后构建缓存（{@link buildImportedCache}）；
 //   3. `port.resume` 见 `record.resumedFrom` 在场：崩溃后重建同一张表。
 //
-// 两处必须是**同一个纯函数**：修订 run 的 journal 只对「已到达的执行前缀」自含，未消费的导入
-// 靠重建补回。所以确定性不是风格偏好而是正确性前提——同一份 journal 状态必须给出同一张表
-// （无时间戳、无随机、遍历序全部来自 journal 的插入序）。
+// 两处共用同一套构建规则：修订 run 的 journal 只包含已消费的执行前缀，未消费的导入需要重建。
+// 已完成条目只由 journal 决定，遍历顺序取自 journal 的插入序；未完成 ask 的边界还依赖源转录。
+//
+// 一处例外要说清楚，它是这张表里**第一个不是 journal 纯函数**的数：在飞 ask 的接续
+// （`inFlight`）的边界取自**前驱会话此刻的消息条数**，不是 journal 里的某一列。
+//
+// 它在两次构建之间大体稳定，靠的是「前驱已经结算、没人再写它的会话」：
+//   - 提交时由 {@link AmendImportOptions.quietSessions} 保证（被取代的前驱刚 abort，driver 等它
+//     的 turn 落地；没等到的会话不接续）；
+//   - 重建时前驱早已终态、本进程里没有它的 driver，天然无人在写，所以不带这个集合（缺席 =
+//     全部静默）。
+//
+// 但「大体」不是「一定」，而且**不必**是：两条路能让重建算出一个更大的 M——前驱被重新 resume
+// 过又写了几轮（被 supersede 的前驱不可 resume，所以只有「修订一个早已 stopped 的 run、之后
+// 又去 resume 它」构造得出），或者一条迟到的后台通知消息落进了那个会话。两者都只会让 M **变大**，
+// 而正确性不依赖 M 稳定：
+//   - 抄进去的那一侧已经把门关死了——`seedActorTranscript` 只往「空的、或只装着本会话种子
+//     消息的」目标里写（workflow-actor-transcript.ts 的性质 2）。后继一旦跑出自己的消息，更大的
+//     M 再送回来也一个字节都不会被写进去，所以绝无「前驱的消息被追加到本会话历史之后」这种
+//     静默错乱；
+//   - 后继还没跑出自己的消息时，更大的 M 抄来的是**同一条 ask 的更晚快照**，顺序仍由下标决定
+//     （种子 id 按 (会话, 下标) 纯确定，重抄是 upsert），所以那只是多带一点上文，不会变错。
+// 这条也是给**将来**每一个非 journal 事实的兜底：不必逐个去证明它们不会变大，复制点一次性堵死。
 //
 // 唯一的 I/O 是 journal 读与转录条数读（两者都经窄端口注入），本模块自己不碰会话存储实现。
 
@@ -19,6 +39,7 @@ import type {
   ActorRecord,
   ImportedActorCandidate,
   ImportedAskEntry,
+  ImportedInFlightAsk,
   ImportedRunCache,
   ImportedWorldEntry,
   NodeRecord,
@@ -118,7 +139,29 @@ interface AmendImportDeps {
 }
 
 /**
- * 读前驱 journal，构建 {@link ImportedRunCache}。**纯确定**：同一份 journal 状态恒给出同一张表。
+ * 构建期能看到的**运行期旁证**，与 journal 事实相对。今天只有一条：哪些前驱会话已经写完了。
+ *
+ * 刻意不进 {@link AmendImportDeps}：deps 是装配（journal、转录面、logger），一个进程里从头到尾
+ * 是同一份；本对象是**这一次构建**才成立的观察，两次构建可以不同。混进 deps 会让「同一份 deps
+ * 必给同一张表」这句话变味。
+ */
+export interface AmendImportOptions {
+  /**
+   * 已**静默**（不再有在写的 turn）的前驱会话 id。只影响在飞 ask 的接续：完结前缀的边界是
+   * journal 事实，与会话此刻长不长无关。
+   *
+   * **缺席 = 全部静默**，而不是「全都不静默」。两个调用点各取一半：amend 刚 abort 掉在飞前驱，
+   * 被中止的 turn 可能仍在落最后几条消息，所以它带着 driver 算出的集合进来；resume 侧的重建
+   * （{@link rebuildImportedCacheForResume}）面对的是一个早已结算、本进程里没有 driver 的前驱，
+   * 没有任何东西在写它的会话——缺席即此。方向反过来的话，重建出的表会比提交时那张少一个
+   * `inFlight`，而两侧必须是同一张表（见本文件头）。
+   */
+  quietSessions?: ReadonlySet<string>;
+}
+
+/**
+ * 读取前驱 journal 与转录状态，构建 {@link ImportedRunCache}。
+ * 已完成前缀由 journal 决定；未完成 ask 的接续还取决于源会话条数与静默状态。
  *
  * 三道门按序（先门后建：门不过时一行都不必读）：
  *   1. 前驱不存在 → `run_not_found`；
@@ -128,13 +171,14 @@ interface AmendImportDeps {
  * 门 3 之所以**严格到全表**（而不是只检查真正会被导入的那些）：无 marker 只有两种成因——
  * marker 列引入之前写下的 journal，与 driver 侧记账失败——两者都意味着「这个 run 的边界记账不可信」，
  * 而不是「这一条恰好没记上」。逐条放行等于让一个记账半坏的前驱产出一张看似完整的表，
- * 分歧时截断到一个错误的位置（模型看见的上文与 journal 记的边界悄悄错位）。dwf 未发布，
- * 无 marker 的 journal 只存在于开发机（整体拒绝，不做合成播种回退）。
+ * 分歧时截断到一个错误的位置（模型看见的上文与 journal 记的边界悄悄错位）。
+ * 缺少已完成 ask 边界的 journal 整体拒绝，不合成可能错误的转录边界。
  * 未完结的 ask 没有边界是**正常**的（它们从不进导入前缀），所以门只看 completed 行。
  */
 export async function buildImportedCache(
   deps: AmendImportDeps,
   predecessorRunId: string,
+  options?: AmendImportOptions,
 ): Promise<BuildImportedCacheResult> {
   const { actorTranscriptStore: transcripts, journal, logger } = deps;
 
@@ -157,6 +201,7 @@ export async function buildImportedCache(
       ...(logger === undefined ? {} : { logger }),
       nodes,
       predecessorRunId,
+      ...(options?.quietSessions === undefined ? {} : { quietSessions: options.quietSessions }),
       ...(transcripts === undefined ? {} : { transcripts }),
     });
     if (candidate !== undefined) actors.set(name, candidate);
@@ -215,17 +260,20 @@ async function buildActorCandidate(input: {
   logger?: Logger;
   nodes: NodeRecord[];
   predecessorRunId: string;
+  quietSessions?: ReadonlySet<string>;
   transcripts?: ActorTranscriptStore;
 }): Promise<ImportedActorCandidate | undefined> {
-  const { actor, journal, logger, nodes, predecessorRunId, transcripts } = input;
+  const { actor, journal, logger, nodes, predecessorRunId, quietSessions, transcripts } = input;
   const name = actor.name!;
 
   // persona 是引擎在 createActor 时同步落的冻结身份，所以正常必在场；缺席只可能是被外力
   // 改写过的行。运行期比对没有比对物就无从谈起 persona 一致性——弃候选而不是拿 `{}` 顶。
   if (actor.persona === undefined) return undefined;
 
-  const entries = completedAskPrefix(nodes, actor);
-  if (entries.length === 0) return undefined;
+  const { entries, next } = completedAskPrefix(nodes, actor);
+  // 既没有完结前缀、前缀后面也没有在飞的 ask：这个 actor 确实一点可导入的东西都没有。
+  // 早退省掉下面的链行走与一次转录读。
+  if (entries.length === 0 && next?.status !== "running") return undefined;
 
   const source = resolveTranscriptSource({
     actorName: name,
@@ -244,11 +292,13 @@ async function buildActorCandidate(input: {
     return undefined;
   }
 
-  const boundary = entries[entries.length - 1]!.messageBoundary;
-  if (
-    transcripts !== undefined &&
-    !(await honorsBoundary(transcripts, source.sessionId, boundary))
-  ) {
+  // 空前缀的边界是 0（没有任何完结交换，接续位置只能从 0 往后算）。
+  const boundary = entries.length === 0 ? 0 : entries[entries.length - 1]!.messageBoundary;
+  // 转录条数**只读一次**：源诚实性检查与在飞 ask 的接续位置用的是同一个数。读两次等于给
+  // 同一个事实开两个观察窗，而它们之间可以不相等。
+  const messageCount =
+    transcripts === undefined ? undefined : await countSource(transcripts, source.sessionId);
+  if (transcripts !== undefined && (messageCount === undefined || messageCount < boundary)) {
     logger?.warn?.(
       "Dynamic workflow amend: transcript source shorter than boundary, import dropped",
       {
@@ -262,23 +312,97 @@ async function buildActorCandidate(input: {
     return undefined;
   }
 
+  const inFlight = resolveInFlightAsk({
+    actor,
+    boundary,
+    ...(logger === undefined ? {} : { logger }),
+    ...(messageCount === undefined ? {} : { messageCount }),
+    ...(next === undefined ? {} : { next }),
+    predecessorRunId,
+    ...(quietSessions === undefined ? {} : { quietSessions }),
+    sourceSessionId: source.sessionId,
+  });
+  // 前缀为空且接续没谈成：这个候选一个字节都带不走，收下它只会让引擎为一张空表建会话。
+  if (entries.length === 0 && inFlight === undefined) return undefined;
+
   return {
     persona: actor.persona,
     entries,
+    ...(inFlight === undefined ? {} : { inFlight }),
     transcriptSourceSessionId: source.sessionId,
     ...(source.resolvedModel === undefined ? {} : { resolvedModel: source.resolvedModel }),
   };
 }
 
 /**
- * 该 actor 的**最长全 completed ask 前缀**（按 actorSeq 0..k 连续）。
+ * 前驱停下时**还在飞**的那条 ask。五个条件缺一不可：
+ *
+ *   1. 紧接前缀的那个位置上有一行，且它是 `running`——被取消的 ask 保留 running 行，所以停掉的
+ *      run 也有；`failed` 与序号空洞都不是「还在飞」，它们只是前缀停下的另外两种理由；
+ *   2. 转录源就是前驱**自己**那一行的会话：那半场未完的对话只存在于这里，从更早祖先解析出的
+ *      源只承载完整前缀（chain 上每一跳都只保证前缀等价）；
+ *   3. 数得出会话条数（有转录面且读得到）——没有数就没有接续位置，driver 也无从截断；
+ *   4. 该会话已经**静默**，见 {@link AmendImportOptions.quietSessions}；
+ *   5. 条数**严格大于**前缀边界。排队却从未派发的 ask 没有多出来的转录可带，而一个等于边界
+ *      （或为 0）的 messageCount 会让 driver 播种出一段「其实就是前缀」甚至空无一物的种子，
+ *      却把 actor 标记成接续过——分歧判定与转录内容随之对不上。
+ *
+ * 任一条不成立都只是**不接续**（完结前缀照旧导入），与本模块「降级而不失败」的总基调一致。
+ */
+function resolveInFlightAsk(input: {
+  actor: ActorRecord;
+  boundary: number;
+  logger?: Logger;
+  messageCount?: number;
+  next?: NodeRecord;
+  predecessorRunId: string;
+  quietSessions?: ReadonlySet<string>;
+  sourceSessionId: string;
+}): ImportedInFlightAsk | undefined {
+  const { actor, boundary, logger, messageCount, next, quietSessions, sourceSessionId } = input;
+  if (next === undefined || next.status !== "running") return undefined;
+
+  const drop = (reason: string): undefined => {
+    logger?.info?.("Dynamic workflow amend: in-flight ask not carried", {
+      actorName: actor.name,
+      event: "dynamic_workflow.amend.in_flight_dropped",
+      module: "bootstrap.app",
+      reason,
+      runId: input.predecessorRunId,
+      sessionId: sourceSessionId,
+    });
+    return undefined;
+  };
+
+  if (actor.sessionId === undefined || actor.sessionId !== sourceSessionId) {
+    return drop("transcript_source_is_ancestor");
+  }
+  if (messageCount === undefined) return drop("no_transcript_count");
+  // 缺席 = 全部静默（见 {@link AmendImportOptions.quietSessions}）。
+  if (quietSessions !== undefined && !quietSessions.has(sourceSessionId)) {
+    return drop("session_not_quiescent");
+  }
+  if (messageCount <= boundary) return drop("no_transcript_beyond_prefix");
+
+  return { inputHash: next.inputHash, messageBoundary: messageCount };
+}
+
+/**
+ * 该 actor 的**最长全 completed ask 前缀**（按 actorSeq 0..k 连续），外加**紧接其后**那一行。
  *
  * 前缀在第一个非 completed 处停死，三种停法同一处理：失败、崩溃中（running）、序号空洞。
  * 失败的 ask 对新 run **无约束力**（模型有随机性，修订常常就是为了越过一次失败），所以它自己
  * 不导入；但跳过它去导入其后的条目会走私上下文——被跳过那一轮的问答仍在源会话转录里，
  * 而缓存却声称它没发生过。停在第一个非 completed 处是唯一自洽的读法。
+ *
+ * `next` 就是**让前缀停下的**那一行（空洞时缺席）。它与前缀同来同走，因为「在飞的那条 ask」
+ * 按定义正是这一行：另起一次遍历去找 `actorSeq === entries.length` 的行，等于把「紧接前缀」
+ * 这个坐标在两处各算一次。
  */
-function completedAskPrefix(nodes: NodeRecord[], actor: ActorRecord): ImportedAskEntry[] {
+function completedAskPrefix(
+  nodes: NodeRecord[],
+  actor: ActorRecord,
+): { entries: ImportedAskEntry[]; next?: NodeRecord } {
   const bySeq = new Map<number, NodeRecord>();
   for (const node of nodes) {
     if (node.kind !== "ask") continue;
@@ -290,7 +414,9 @@ function completedAskPrefix(nodes: NodeRecord[], actor: ActorRecord): ImportedAs
   const entries: ImportedAskEntry[] = [];
   for (let seq = 0; ; seq++) {
     const node = bySeq.get(seq);
-    if (node === undefined || node.status !== "completed") break;
+    if (node === undefined || node.status !== "completed") {
+      return { entries, ...(node === undefined ? {} : { next: node }) };
+    }
     // 边界必在场：门 3 已对整个前驱把关，所以这里不是乐观读而是不变式的兑现。
     const entry: ImportedAskEntry = {
       inputHash: node.inputHash,
@@ -300,7 +426,6 @@ function completedAskPrefix(nodes: NodeRecord[], actor: ActorRecord): ImportedAs
     if (node.stats !== undefined) entry.stats = node.stats;
     entries.push(entry);
   }
-  return entries;
 }
 
 /**
@@ -344,25 +469,23 @@ function resolveTranscriptSource(input: {
 }
 
 /**
- * 源会话是否真兑现得了边界（消息数 ≥ 边界）。
+ * 源会话此刻的消息条数；读失败回 `undefined`。
  *
- * 这道检查把 driver 的**大声失败**语义与构建期的**降级**语义接在一起：driver 的
- * `seedActorTranscript` 对短会话抛 `DriverError`（corruption 级，见那边的性质 3）；构建期缺少转录时则降级为全新重跑。两者都对，但作用域不同——**可预见的**缺料（会话被清理 / 被截断）
- * 应当在构建期就把候选弃掉，driver 那一侧的失败因此退化成真正不该发生时的兜底。
+ * 两个读者共用这一次读取（见 {@link buildActorCandidate}）：
+ * - 检查源会话是否达到已完成前缀的边界。条数不足或无法读取时，构建器丢弃该候选，
+ *   让后继重新执行；driver 复制转录时仍会拒绝短于边界的源，防止写入不完整的上下文。
+ * - 计算未完成 ask 的接续位置（见 {@link resolveInFlightAsk}）。
  *
- * 读失败（会话不存在等）同样按「兑现不了」处理：构建器不为会话存储的错误分类负责，而任何
- * 读不到的源都不是可用的源。
+ * 条数口径必须与 driver 记账及 core 历史恢复一致，均使用同一消息存储接口。
  */
-async function honorsBoundary(
+async function countSource(
   transcripts: ActorTranscriptStore,
   sessionId: string,
-  boundary: number,
-): Promise<boolean> {
+): Promise<number | undefined> {
   try {
-    const messages = await transcripts.messages({ sessionID: sessionId as SessionId });
-    return messages.length >= boundary;
+    return (await transcripts.messages({ sessionID: sessionId as SessionId })).length;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -409,6 +532,10 @@ function buildWorldQueues(nodes: NodeRecord[]): ReadonlyMap<string, ImportedWorl
  * 所以这里连门的三个理由都不区分：对 resume 而言 `run_not_found`（前驱被清理）与
  * `missing_boundaries` 是同一件事——「这次没有缓存可用」。前驱 journal 因此是修订 run 的**存续
  * 依赖，但只是加速结构**：丢了变贵，不变错。记一条 info 便于事后解释账单。
+ *
+ * **不带 {@link AmendImportOptions.quietSessions}**：走到这里的前驱早已终态，本进程里没有它的
+ * driver，没有任何东西在写它的会话。带一个空集合进来会让重建出的表比提交时那张少一个
+ * `inFlight`，而两侧必须是同一张表（见本文件头）。
  */
 export async function rebuildImportedCacheForResume(
   deps: AmendImportDeps,

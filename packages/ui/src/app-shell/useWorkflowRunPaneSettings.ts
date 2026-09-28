@@ -5,7 +5,7 @@
 // 「面板跟着工作流走」——新 run 一进投影，就把这个 tab 原地换成新 run 的 tab（同一个位置、同一个名字，
 // 不展开已收起的侧栏）。等的是投影里出现新 run 这一事实，不是一个超时。
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SessionConfigState, WorkflowRunState } from "@zcode/shared/zcode-protocol-v4";
 import {
   useWorkflowRunSettingsPopoverState,
@@ -91,6 +91,14 @@ export function useWorkflowRunPaneSettings({
 
   // 跟随：被接受的那一刻新 run 未必已在投影里（run-started 随后才到），所以先记下，等它出现再换 tab。
   const [follow, setFollow] = useState<WorkflowRunSettingsAccepted | undefined>(undefined);
+  // 就地生效的修订（只改并发上限、run 仍在运行）没有后继，
+  // 结果里的 runId 就是这个 tab 自己——没有可跟随的东西，记下它只会请求把 tab 换成它自己。
+  const onAccepted = useCallback(
+    (accepted: WorkflowRunSettingsAccepted) => {
+      if (accepted.runId !== tab.runId) setFollow(accepted);
+    },
+    [tab.runId],
+  );
   const successorArrived =
     follow !== undefined && (runs ?? []).some((candidate) => candidate.runId === follow.runId);
   useEffect(() => {
@@ -119,7 +127,7 @@ export function useWorkflowRunPaneSettings({
   return {
     configurable,
     host,
-    onAccepted: setFollow,
+    onAccepted,
     popover,
   };
 }

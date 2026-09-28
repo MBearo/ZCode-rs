@@ -244,7 +244,8 @@ export const permissionRequestPayloadSchema = z.object({
   freeText: z.boolean().optional(),
   origin: zcodeInteractionRequestOriginSchema.optional(),
   // 工具自报的确认预览，复用 row 的 display 投影（同一有界形状）。缺省 = 纯文本 ask。
-  display: toolCallDisplaySchema.optional(),
+  // 同样不设门：预览解析失败退化成纯文本 ask，不拒整份 snapshot（见 toolDisplay.ts 注释）。
+  display: toolCallDisplaySchema.optional().catch(undefined),
   // 独立 additive 能力：旧 UI 忽略此字段，仍只显示原 options，不出现半实现授权入口。
   fullAccessOption: permissionOptionSchema
     .extend({

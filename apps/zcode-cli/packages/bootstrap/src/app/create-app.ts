@@ -69,10 +69,8 @@ import { createPluginFacadeForApp } from "./plugin-facade.js";
 import { resolvePluginRuntimeFeatures } from "./plugin-runtime-features.js";
 import { createSessionFacade } from "./session-facade.js";
 import { resolveAppRuntimeConfig, runtimeConfigLogContext } from "./runtime-config.js";
-import {
-  collectDynamicWorkflowDisabledSkillPaths,
-  DYNAMIC_WORKFLOW_GATED_COMMAND_NAMES,
-} from "./dynamic-workflow-gate.js";
+import { resolveBundledSkillRoots } from "./bundled-skills.js";
+import { collectDynamicWorkflowDisabledSkillPaths } from "./dynamic-workflow-gate.js";
 import { createWorkspaceHookRuntimeSecurity } from "./workspace-hook-trust.js";
 import { createScriptWorkflowBridge } from "./script-workflow-methods.js";
 import {
@@ -220,6 +218,8 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       startupTimer,
       workingDirectory,
     });
+    // 随 CLI 内置的技能包（dynamic-workflows 等）：不属于任何插件，用户无法停用或卸载。
+    const bundledSkillRoots = await resolveBundledSkillRoots({ cliStorageRoot, logger });
     const pluginSubagentProfiles = loadPluginAgentProfiles({
       logger,
       plugins: pluginOutcome.plugins,
@@ -747,13 +747,13 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           ? (options.skillPort ??
             createNodeSkillAdapter({
               extraRoots: configResult.config.skills.roots,
-              extraResolvedRoots: pluginOutcome.skillRoots,
+              extraResolvedRoots: [...pluginOutcome.skillRoots, ...bundledSkillRoots],
               disabledPaths: [
                 ...collectDisabledPaths(configResult.config.skillOverrides),
-                // 动态工作流灰度关闭时不提供 dynamic-workflows 技能：
+                // 动态工作流关闭时不提供 dynamic-workflows 技能：
                 // 十个工具都不在场，再让模型读到「怎么写工作流脚本」只会诱导它去调不存在的工具。
                 ...(runtimeConfig.dynamicWorkflowEnabled === false
-                  ? collectDynamicWorkflowDisabledSkillPaths(pluginOutcome.skillRoots)
+                  ? collectDynamicWorkflowDisabledSkillPaths(bundledSkillRoots)
                   : []),
               ],
             }))
@@ -792,18 +792,16 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       artifactStore,
       customCommandPromptResolver: async (text, resolverOptions) => {
         const builtinPrompt = resolveZCodeBuiltinPromptCommand(text, {
+          // 动态工作流关闭时内置 `/workflow` 不得展开。目录侧已经把它从 `/` 面板
+          // 剔除，但用户仍可手打命令名，两条路径必须给出同一个结论。TUI 缺席时不设门禁；
+          // headless 按 --enable-workflow 显式取值，见 runtimeConfig 字段注释。
+          dynamicWorkflowEnabled: runtimeConfig.dynamicWorkflowEnabled,
           workingDirectory,
         });
         if (builtinPrompt !== undefined) {
           return builtinPrompt;
         }
         return await resolveZCodeCustomCommandPrompt(text, {
-          // 动态工作流灰度关闭时 `/workflow` 不得展开成插件提示词。目录侧已经
-          // 把它从 `/` 面板剔除，但用户仍可手打命令名，两条路径必须给出同一个结论。
-          // 缺席（TUI、headless、workflow_child）不设门禁，见 runtimeConfig 字段注释。
-          ...(runtimeConfig.dynamicWorkflowEnabled === false
-            ? { disabledCommandNames: DYNAMIC_WORKFLOW_GATED_COMMAND_NAMES }
-            : {}),
           env: options.env,
           executionPort,
           logger,

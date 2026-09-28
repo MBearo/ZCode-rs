@@ -52,6 +52,7 @@ import {
 import { isResumableRecord, type RunRegistryEntry } from "./dynamic-workflow-run-observation.js";
 import type { DynamicWorkflowRunServiceDeps } from "./dynamic-workflow-run-service.js";
 import type { WorkflowEscalationRegistry } from "./workflow-escalation-registry.js";
+import { createWorkflowRunControl } from "./workflow-run-control.js";
 
 /**
  * 两条入口要用的 service 内部状态。全是**引用**而不是副本：注册表与停驻表是 service 的那一份，
@@ -108,8 +109,10 @@ export async function submitDynamicWorkflowRun(
  *   2. 铸新 id；
  *   3. 前驱在飞则以 `{ superseded: newRunId }` 取消并 **await 它自己的结算 promise**——不是超时、
  *      不是轮询 journal；前驱因此结算成 `stopped(superseded, supersededBy)`；
- *   4. 从已结算的前驱构建缓存——预检已过，这里再被拒只可能是宿主故障，上抛；
- *   5. 与全新 submit 同一条 launch 路启动，带 `resumedFrom` 与缓存。
+ *   4. 有界地等被中止的 turn 把尾巴写完，问出「哪些会话此刻可以放心去数」——只有它影响在飞
+ *      ask 的接续，完结前缀的边界是 journal 事实（见下面那段注释的完整论证）；
+ *   5. 从已结算的前驱构建缓存——预检已过，这里再被拒只可能是宿主故障，上抛；
+ *   6. 与全新 submit 同一条 launch 路启动，带 `resumedFrom` 与缓存。
  *
  * 旧版让 `submit({resumeFrom})` 对在飞前驱回 `not_amendable`，模型只能 TaskStop → 轮询到
  * stopped → 重提交三步；本方法把停止与结算等待收进 service，竞态随之消失。
@@ -150,7 +153,34 @@ export async function amendDynamicWorkflowRun(
     });
   }
 
-  const built = await buildImportedCache(deps, request.predecessorRunId);
+  // 静默闸门。
+  //
+  // 根因：`dispose()` 是同步的，对还有在飞 turn 的会话只挂了一条 `state.turn.then(close, close)`
+  // 而不等它；引擎在 `cancelAsk` 中止 turn 之后立刻结算。所以上面那句 `await live.settlement`
+  // 保证的是「run 结算了」，**不是**「被中止的 turn 把它的尾巴写完了」。此刻去数前驱会话的
+  // 消息条数，可能少数一条，或者数到一条 part 还没落全的消息——而那个数会变成接续位置
+  // （`inFlight.messageBoundary`），被 driver 拿去截断复制。已完结前缀不在此列：它们的边界在
+  // ask 结算时就已经 journal 了，是事实而不是此刻的观察。
+  //
+  // 所以问一次 driver「哪些会话已经静默」，只对静默的会话谈接续。**这不是用超时掩盖竞态**：
+  // 到点仍未落地的会话不会被当作静默继续用，它只是拿不到 `inFlight`——也就是本特性之前的
+  // 行为（整段在飞转录丢弃，ask 从完整前缀重开）。我们宁可少做一次优化，也绝不拿一个正在
+  // 变动的条数去截断转录。
+  //
+  // 两种情形一秒都不等，因为两者都没有可疑的数可言：
+  //   - 本进程没有这个前驱的活条目（早已终态，或死进程留下的行）→ 没有 driver 就没有东西在
+  //     写它的会话；
+  //   - 整个装配没有转录存取面 → 根本数不出条数，`inFlight` 无从产生（构建器那边同样要
+  //     `messageCount` 才谈接续），等待纯属白付。
+  // 两者都落到「缺席 = 全部静默」这一条上（见 AmendImportOptions.quietSessions）。
+  const quietSessions =
+    deps.actorTranscriptStore === undefined ? undefined : await live?.quiescence?.quietSessions();
+
+  const built = await buildImportedCache(
+    deps,
+    request.predecessorRunId,
+    quietSessions === undefined ? undefined : { quietSessions },
+  );
   if (!built.ok) {
     // 预检刚通过：run 存在、边界齐全；到这里还被拒只剩「前驱非终态」——注册表说它不在飞而
     // journal 说它还在跑（别的进程持有）。这不是模型能改的输入，按接线故障上抛。
@@ -286,8 +316,13 @@ function startNewRun(ctx: DynamicWorkflowRunEntryContext, input: StartNewRunInpu
   // 立刻开始轮询快照——注册表是「run 已存在」的唯一同步事实（journal 的 dwf_run 行
   // 要等引擎构造，晚若干个微任务）。
   const controller = new AbortController();
+  // 活体控制面与 AbortController 同时造、同时进条目（见 RunRegistryEntry.control）：
+  // 「停下这个 run」与「改这个 run 的一项设置」是同一刻就该可用的两条通道，而两者都要在
+  // launch 之前存在——retune 可能在 submit 返回后的任意一个微任务里到达。
+  const control = createWorkflowRunControl();
   const entry: RunRegistryEntry = {
     controller,
+    control,
     startedAt: new Date(),
     ...(input.toolCallId === undefined ? {} : { toolCallId: input.toolCallId }),
     ...(input.parentSessionId === undefined ? {} : { parentSessionId: input.parentSessionId }),
@@ -331,10 +366,17 @@ function startNewRun(ctx: DynamicWorkflowRunEntryContext, input: StartNewRunInpu
       ...(input.args === undefined ? {} : { args: input.args }),
       ...(entry.parentSessionId === undefined ? {} : { parentSessionId: entry.parentSessionId }),
       escalationRegistry: escalations,
+      control,
       runId,
       scriptText: input.scriptText,
       signal: controller.signal,
       ...(entry.toolCallId === undefined ? {} : { toolCallId: entry.toolCallId }),
+      // 会话静默探针回填到条目上：本 run 将来被修订时，那次 amend 要问它
+      // （dynamic-workflow-import.ts 的 quietSessions）。三条入口都接，因为哪个 run 会成为
+      // 前驱是将来才知道的事。
+      onQuiescenceProbe: (probe) => {
+        entry.quiescence = probe;
+      },
       // lineage 指针与缓存表成对下传（launch → harness → EngineConfig）：前者落 dwf_run
       // 的 resumed_from（createRun 一次写死），后者只活在本次执行里。
       ...(imported === undefined
@@ -429,9 +471,17 @@ export async function resumeDynamicWorkflowRun(
   const resumedSubagentModel = readRunSubagentModel(deps.journal, runId);
   const resumedScriptPath = readRunScriptPath(deps.journal, runId);
   const controller = new AbortController();
+  // 与 submit 路同规：新条目 = 新 AbortController + 新控制面。上一世的句柄绑的是已经结算的那个
+  // 引擎，留着它会让 retune 对一个死引擎说话。
+  const control = createWorkflowRunControl();
   const entry: RunRegistryEntry = {
     controller,
+    control,
     startedAt: new Date(),
+    // 本 run 生效的并发上界：**resume 路以 journal 行为准**（一次就地 retune 已经把新值写进
+    // `caps_max_concurrency`，所以行里那个就是这一世要跑的上界）。抄进条目是为了让
+    // `retuneConcurrency` 与两条读面只剩一条规则——有条目就读条目。
+    maxConcurrency: record.caps.maxConcurrency,
     ...(record.toolCallId === undefined ? {} : { toolCallId: record.toolCallId }),
     ...(record.parentSessionId === undefined ? {} : { parentSessionId: record.parentSessionId }),
     // 枚举面的间隙元数据（见 RunRegistryEntry）：resume 的权威在 journal 记录里，
@@ -472,10 +522,16 @@ export async function resumeDynamicWorkflowRun(
       ...(record.parentSessionId === undefined ? {} : { parentSessionId: record.parentSessionId }),
       // 两条入口共用同一张停驻表（见上面的字段注释）。
       escalationRegistry: escalations,
+      // 控制面与停驻表不同：**每条入口各造一个**（它绑的是这一世的引擎与这一世的座位闸门）。
+      control,
       runId,
       scriptText: record.scriptText,
       signal: controller.signal,
       ...(record.toolCallId === undefined ? {} : { toolCallId: record.toolCallId }),
+      // 与 submit / amend 同一条：resume 起来的 run 照样可能成为下一次修订的前驱。
+      onQuiescenceProbe: (probe) => {
+        entry.quiescence = probe;
+      },
       // resumedFrom 不再下传：createRun 早在提交时就把它写死了，resume 路径上引擎命中既有
       // 行、根本不走 createRun。只有重建出来的缓存需要下去。
       ...(rebuilt === undefined ? {} : { importedCache: rebuilt }),

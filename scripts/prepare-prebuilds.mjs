@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable max-lines */
 
+import { access, cp, mkdir } from "node:fs/promises";
 import {
   chmodSync,
   copyFileSync,
@@ -117,6 +118,18 @@ const remoteOfficialPluginPackages = [
     stagedPath: "packages/node-repl-host",
   },
 ];
+// 随 CLI 内置的技能包（不是插件）：远端 agent 的 bootstrap 沿官方插件同款候选目录在 zcode.cjs 旁
+// 找 packages/bundled-skills 并原地读取；与 packages/desktop/scripts/prepare-agent-node-bundle.mjs 同一份清单。
+const remoteBundledSkillPack = {
+  relativePath: "apps/zcode-cli/packages/bundled-skills",
+  requiredPaths: [
+    "skills/dynamic-workflows/SKILL.md",
+    "skills/dynamic-workflows/patterns.md",
+    "skills/dynamic-workflows/examples.md",
+  ],
+  stagedPath: "packages/bundled-skills",
+  topLevelPaths: ["skills"],
+};
 const remoteOfficialPluginTopLevelPaths = new Set([
   ".mcp.json",
   ".zcode-plugin",
@@ -485,11 +498,29 @@ function stageRemoteOfficialPlugins(glmDir) {
   }
 }
 
+async function stageRemoteBundledSkillPack(glmDir) {
+  const sourceRoot = join(rootDir, remoteBundledSkillPack.relativePath);
+  const targetRoot = join(glmDir, ...remoteBundledSkillPack.stagedPath.split("/"));
+  await mkdir(targetRoot, { recursive: true });
+  for (const entryName of remoteBundledSkillPack.topLevelPaths) {
+    const sourcePath = join(sourceRoot, entryName);
+    await cp(sourcePath, join(targetRoot, entryName), {
+      recursive: true,
+      filter: shouldCopyOfficialPluginAsset,
+    });
+  }
+  for (const relativePath of remoteBundledSkillPack.requiredPaths) {
+    const stagedAssetPath = join(targetRoot, ...relativePath.split("/"));
+    await access(stagedAssetPath);
+  }
+  console.log(`  [ok] mock-cdn glm bundled skill pack ${remoteBundledSkillPack.stagedPath}`);
+}
+
 // 远端 agent 现在跑编译出来的 zcode.cjs（而不是各平台独立的原生二进制）：
 // 远端部署时已经有一份独立 node（跑 zcode-server.cjs），agent 复用它执行 zcode.cjs 即可，
 // 不必再为每个平台准备一份内嵌 node 的 SEA 二进制。zcode.cjs 跨平台同一份，逐平台只是放进各自的
 // glm/<platform> 组件目录，保持现有 manifest 组件结构不变。
-function stageRemoteAgentBundles() {
+async function stageRemoteAgentBundles() {
   console.log("==> Building zcode-cli bundle for remote agents");
   // 复用桌面同款构建脚本（turbo build:desktop-agent --filter=@zcode/cli），命中缓存时几乎瞬时。
   runCommand(process.execPath, [join(rootDir, "scripts/build-desktop-agent-cli.mjs")], {
@@ -512,6 +543,7 @@ function stageRemoteAgentBundles() {
     mkdirSync(glmDir, { recursive: true });
     copyFileSync(cliBundlePath, join(glmDir, "zcode.cjs"));
     stageRemoteOfficialPlugins(glmDir);
+    await stageRemoteBundledSkillPack(glmDir);
     console.log(`  [ok] mock-cdn glm/${platformKey}/zcode.cjs`);
   }
 }
@@ -1011,7 +1043,7 @@ async function main() {
   buildServerBundle();
   copyServerBundle();
   copyNodePtyPrebuilds();
-  stageRemoteAgentBundles();
+  await stageRemoteAgentBundles();
   await prepareRemoteNativeSearchTools();
   // 修复：server、pty、agent 均可独立下载，需在组件哈希计算前补齐各自的声明。
   await stageThirdPartyNotices(join(releaseDir, "server"), rootDir);

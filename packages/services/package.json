@@ -17,6 +17,7 @@
     "lint:fix": "oxlint --fix"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.64.0",
     "@zcode/provider": "workspace:*",
     "@zcode/provider-node": "workspace:*",
     "@zcode/rpc": "workspace:*",

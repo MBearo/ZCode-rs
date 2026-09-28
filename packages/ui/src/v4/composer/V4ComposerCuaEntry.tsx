@@ -60,7 +60,7 @@ function V4ComposerCuaEntryMounted(props: V4ComposerCuaEntryProps) {
         variant="ghost"
         size="default"
         data-testid={TID_V4_COMPOSER_CUA_ENTRY}
-        data-composer-collapse-priority="1"
+        data-composer-collapse-priority="0"
         // e2e / 排障锚点：对外 UI 态与禁用原因，避免测试去反推颜色类名。
         data-cua-state={view.uiState}
         data-cua-interaction-disabled={view.interactionDisabled ? "true" : "false"}
@@ -72,13 +72,13 @@ function V4ComposerCuaEntryMounted(props: V4ComposerCuaEntryProps) {
         aria-disabled={view.interactionDisabled || undefined}
         onClick={view.clickAction === "open-settings" ? onActivate : undefined}
         className={
-          "group/cua h-7 w-fit justify-center gap-1 rounded-lg px-1.5 py-1.5 text-ui-base " +
+          "group/cua h-7 w-fit justify-center gap-1 rounded-lg px-1.5 py-1.5 text-ui-base data-[composer-compact=true]:size-7 data-[composer-compact=true]:gap-0 data-[composer-compact=true]:p-0 " +
           (view.interactionDisabled ? "opacity-50" : "")
         }
       >
         <MonitorCogIcon className="size-4 shrink-0" aria-hidden />
         <span
-          className="hidden whitespace-nowrap @xl/composer:inline-flex group-data-[composer-compact=true]/cua:hidden"
+          className="inline-flex whitespace-nowrap group-data-[composer-compact=true]/cua:hidden"
           data-cua-label
         >
           {label}

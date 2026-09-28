@@ -27,6 +27,10 @@ export function createCreateWorkflowDisplay(
   }
   const parsed = CreateWorkflowOutputSchema.safeParse(output);
   if (!parsed.success) return undefined;
+  // 就地调并发没有 display：这条路一行脚本都没编译，而 `create_workflow` 这块载荷的 `ok` 在 UI 上读作
+  // 「已编译」。判据是**显式的 `retuned` 块**而不是形状——「ok 且没有 status」在本工具上还有
+  // 「没有 run 端口、只 typecheck」这条来路。工具卡因此退回响应正文那一段。
+  if (parsed.data.retuned !== undefined) return undefined;
 
   const { causalityGraph, diagnostics, ok } = parsed.data;
   // display 不经过 tool result budget：诊断条数与单条 message 长度都必须在进入实时事件和

@@ -13,7 +13,7 @@ import { laneDisplayName } from "@/components/workflow-graph/lane-name.js";
 import { phaseDisplayName } from "@/components/workflow-graph/phase-name.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import type { TimelinePill, TimelineStation, WorkflowTimelineModel } from "./timeline-model.js";
-import { ROSTER_PINS_CARD, rosterMore, stationRoster } from "./roster-model.js";
+import { ROSTER_PINS_CARD, rosterMore, stationRosterOf } from "./roster-model.js";
 import { useTypewriter } from "./use-typewriter.js";
 import { WorkflowAgentPill } from "./WorkflowAgentPill.js";
 import { WorkflowMoreRow } from "./WorkflowMoreRow.js";
@@ -68,7 +68,7 @@ export { STATION_GAP, STATION_PITCH, STATION_WIDTH, timelineWidth } from "./time
 function stationHeight(station: TimelineStation): number {
   // 过了阈值的站是五枚钉住的药丸加一行「还有 n 个」：那一行就是第六枚
   // 药丸，所以一站永远不高于六枚药丸。
-  const roster = stationRoster(station.pills, { pins: ROSTER_PINS_CARD });
+  const roster = stationRosterOf(station, ROSTER_PINS_CARD);
   const n = roster === undefined ? station.pills.length : roster.pinned.length + 1;
   return n === 0 ? 0 : n * PILL_HEIGHT + (n - 1) * PILL_GAP;
 }
@@ -359,8 +359,9 @@ export const WorkflowTimeline = memo(function WorkflowTimeline({
             )}
 
             {stations.map((station, i) => {
-              if (station.pills.length === 0) return null;
-              const roster = stationRoster(station.pills, { pins: ROSTER_PINS_CARD });
+              const roster = stationRosterOf(station, ROSTER_PINS_CARD);
+              // 名册在就还有话说：一站的药丸全被界淘汰掉时剩下「还有 n 个」那一行，而不是凭空消失。
+              if (station.pills.length === 0 && roster === undefined) return null;
               return (
                 <div
                   className="absolute flex flex-col"

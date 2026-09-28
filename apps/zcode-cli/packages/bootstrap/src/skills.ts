@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
-import { createConfig } from "@zcode/adapters/config";
+import { createConfig, resolvePath } from "@zcode/adapters/config";
 import { createNodeSkillAdapter } from "@zcode/adapters/skills";
 import type { Logger, SkillContent, SkillDiagnostic, SkillLoadOutcome } from "@zcode/contracts";
+import { resolveBundledSkillRoots } from "./app/bundled-skills.js";
+import { getCliStorageRoot } from "./app/paths.js";
 import { resolveZCodePlugins } from "./plugins.js";
 import { collectDisabledPaths } from "./skill-command-overrides.js";
 
@@ -26,7 +28,7 @@ export interface ZCodeSkillInspection {
 export async function listZCodeSkills(
   options: ListZCodeSkillsOptions = {},
 ): Promise<SkillLoadOutcome> {
-  const discovery = createSkillDiscovery(options);
+  const discovery = await createSkillDiscovery(options);
   if (!discovery.enabled) {
     return {
       diagnostics: [],
@@ -43,7 +45,7 @@ export async function listZCodeSkills(
 export async function inspectZCodeSkill(
   options: InspectZCodeSkillOptions,
 ): Promise<ZCodeSkillInspection> {
-  const discovery = createSkillDiscovery(options);
+  const discovery = await createSkillDiscovery(options);
   if (!discovery.enabled) {
     throw new Error("Skills are disabled.");
   }
@@ -70,7 +72,7 @@ export async function inspectZCodeSkill(
   };
 }
 
-function createSkillDiscovery(options: ListZCodeSkillsOptions):
+async function createSkillDiscovery(options: ListZCodeSkillsOptions): Promise<
   | {
       enabled: false;
       workingDirectory: string;
@@ -79,7 +81,8 @@ function createSkillDiscovery(options: ListZCodeSkillsOptions):
       enabled: true;
       skillPort: ReturnType<typeof createNodeSkillAdapter>;
       workingDirectory: string;
-    } {
+    }
+> {
   const workingDirectory = resolve(options.workingDirectory ?? process.cwd());
   const configResult = createConfig({
     env: options.env,
@@ -105,11 +108,17 @@ function createSkillDiscovery(options: ListZCodeSkillsOptions):
     workingDirectory,
   });
 
+  // 内置技能包与插件技能根并列注入：`zcode skills list`、引用目录与 runtime 看到同一份发现结果。
+  const bundledSkillRoots = await resolveBundledSkillRoots({
+    cliStorageRoot: getCliStorageRoot(resolvePath(configResult.config.storage.dir)),
+    logger: options.logger,
+  });
+
   return {
     enabled: true,
     skillPort: createNodeSkillAdapter({
       extraRoots: configResult.config.skills.roots,
-      extraResolvedRoots: pluginOutcome.skillRoots,
+      extraResolvedRoots: [...pluginOutcome.skillRoots, ...bundledSkillRoots],
       disabledPaths: collectDisabledPaths(configResult.config.skillOverrides),
     }),
     workingDirectory,

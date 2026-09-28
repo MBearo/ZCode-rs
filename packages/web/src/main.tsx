@@ -200,6 +200,7 @@ function createWebPlatform(): IPlatformService {
       Promise.reject(new Error("Temporary text attachments require a desktop host")),
     onRemoteConnectionLog: () => () => {},
     onRemoteSessionClosed: () => () => {},
+    onBotRemoteWorkspaceReconnected: () => () => {},
     // Web 端无多窗口管理
     activateOrSetWorkspace: () => Promise.resolve({ activated: false }),
     // TODO(web-remote-workspace): 普通 Web 模式先只保证 server 本地工作区可用。

@@ -1,4 +1,5 @@
 import { BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES, type ZCodeSlashCommand } from "@zcode/shared";
+import { BUILTIN_WORKFLOW_COMMAND_NAME } from "../builtin-workflow-command.js";
 import {
   listZCodeCustomCommands,
   type ListZCodeCustomCommandsOptions,
@@ -9,17 +10,10 @@ import {
   isReservedZCodeSlashCommandName,
 } from "../slash-command-surface.js";
 
-/**
- * `workflow` 是 zcode-guide 内置插件的自定义命令，随 CLI 打包，不受用户 commandOverrides
- * 影响；灰度关闭时只能在装配目录时按名剔除。
- */
-const DYNAMIC_WORKFLOW_SLASH_COMMAND_NAME = "workflow";
-
 export interface ListProtocolSlashCommandsOptions extends ListZCodeCustomCommandsOptions {
   /**
-   * 动态工作流灰度门。**只有显式 false
-   * 才剔除** `workflow`：CLI 自身的目录装配（TUI / 未参与灰度的调用方）缺席该字段，
-   * 必须保持原样。协议服务端一律从 appRuntimePreferences 传入显式布尔。
+   * 动态工作流开关。只有显式 false 才从目录中剔除内置 `workflow`。
+   * 未传入该字段的调用方保留默认目录；协议服务端从 appRuntimePreferences 传入显式布尔。
    */
   dynamicWorkflowEnabled?: boolean;
 }
@@ -27,7 +21,13 @@ export interface ListProtocolSlashCommandsOptions extends ListZCodeCustomCommand
 export async function listProtocolSlashCommands(
   options: ListProtocolSlashCommandsOptions = {},
 ): Promise<ZCodeSlashCommand[]> {
-  const builtins = listAppProtocolBuiltinSlashCommands();
+  // 动态工作流关闭时：composer 的加号菜单与 `/` 面板都只读这份目录，剔除即两个入口一起消失。
+  // `workflow` 是内置命令且是保留名，用户/插件的同名自定义命令在下面的 reserved 过滤里一并消失，
+  // 不会在门关着时借自定义命令的身份漏回目录。
+  const builtins = listAppProtocolBuiltinSlashCommands().filter(
+    (command) =>
+      options.dynamicWorkflowEnabled !== false || command.name !== BUILTIN_WORKFLOW_COMMAND_NAME,
+  );
   let customCommands: Awaited<ReturnType<typeof listZCodeCustomCommands>>["commands"] = [];
   try {
     const outcome = await listZCodeCustomCommands(options);
@@ -37,44 +37,21 @@ export async function listProtocolSlashCommands(
     customCommands = [];
   }
 
-  return pinWorkflowAfterGoal([
+  return [
     ...builtins,
     ...customCommands
       .filter((command) => !command.disableNonInteractive)
       .filter((command) => !isReservedZCodeSlashCommandName(command.name))
-      // 灰度关闭：composer 的加号菜单与 `/` 面板都只读这份目录，剔除即两个入口一起消失。开启时后面的 pinWorkflowAfterGoal 继续把它钉在 goal 之后。
-      .filter(
-        (command) =>
-          options.dynamicWorkflowEnabled !== false ||
-          command.name !== DYNAMIC_WORKFLOW_SLASH_COMMAND_NAME,
-      )
       .map((command) => ({
         description: command.description,
         inputHint: `/${command.name}${command.argumentHint ? ` ${command.argumentHint}` : ""}`,
         name: command.name,
         source: "custom" as const,
       })),
-  ]);
+  ];
 }
 
-/**
- * App `/` 面板按本目录顺序展示，本函数是唯一的排序点（UI 不维护排序白名单）。
- * `workflow` 是 zcode-guide 内置插件的自定义命令，
- * 按发现顺序会沉在 custom 段末尾；产品要求它与 `goal` 一样作为「开启一段工作」的入口，
- * 紧随 goal 之后。
- * 只调顺序：来源、去重与 reserved 规则不变；任一方缺席时保持原序。
- */
-function pinWorkflowAfterGoal(commands: ZCodeSlashCommand[]): ZCodeSlashCommand[] {
-  const workflowIndex = commands.findIndex(
-    (command) => command.name === DYNAMIC_WORKFLOW_SLASH_COMMAND_NAME,
-  );
-  if (workflowIndex < 0 || !commands.some((command) => command.name === "goal")) return commands;
-  const [workflow] = commands.splice(workflowIndex, 1);
-  const goalIndex = commands.findIndex((command) => command.name === "goal");
-  commands.splice(goalIndex + 1, 0, workflow!);
-  return commands;
-}
-
+/** App `/` 面板按本目录顺序展示；内置段的顺序由 APP_PROTOCOL_VISIBLE_BUILTIN_SLASH_COMMAND_NAMES 决定。 */
 function listAppProtocolBuiltinSlashCommands(): ZCodeSlashCommand[] {
   const sharedBuiltins = APP_PROTOCOL_VISIBLE_BUILTIN_SLASH_COMMAND_NAMES.flatMap((name) => {
     const command = BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES.find((entry) => entry.name === name);

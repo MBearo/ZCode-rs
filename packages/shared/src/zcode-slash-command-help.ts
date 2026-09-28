@@ -187,4 +187,14 @@ export const BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES: readonly BuiltinZCodeSlas
       summary: "Show or set the current session goal.",
       usage: "/goal [pause|resume|clear|replace <objective>|<objective>]",
     },
+    {
+      details: [
+        "Loads the dynamic-workflows skill, then writes a workflow script and submits it with CreateWorkflow.",
+        "Runs as a normal agent turn; the workflow starts only after you confirm the script.",
+        "In the desktop app the command is offered only while dynamic workflows are enabled for this client.",
+      ],
+      name: "workflow",
+      summary: "Design and launch a dynamic workflow for a task.",
+      usage: "/workflow [what the workflow should accomplish]",
+    },
   ] as const;

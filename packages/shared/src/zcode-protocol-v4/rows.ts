@@ -200,7 +200,9 @@ export const toolCallRowSchema = z.object({
   input: z.unknown().optional(),
   cuaApp: cuaAppIdentitySchema.optional(),
   output: toolOutputSchema.optional(),
-  display: toolCallDisplaySchema.optional(),
+  // display 解析失败只丢这张卡的载荷，不拒整条 row（理由见 toolDisplay.ts 的 toolOutputSchema
+  // 注释：装饰载荷不得决定 row/帧/订阅的生死）。
+  display: toolCallDisplaySchema.optional().catch(undefined),
   // status=error 时必带。
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   // 仅 replayable 档运行中出现，终态清除。

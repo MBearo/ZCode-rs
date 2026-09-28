@@ -12,12 +12,11 @@ import {
 } from "@/components/workflow-timeline/timeline-model.js";
 import {
   ROSTER_PINS_PANE,
-  ROSTER_THRESHOLD,
   pillInstanceKey,
-  rosterCounts,
   rosterMore,
+  rosterRestCounts,
   rosterRoll,
-  stationRoster,
+  stationRosterOf,
 } from "@/components/workflow-timeline/roster-model.js";
 import {
   WorkflowAgentPill,
@@ -53,9 +52,10 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
  * 折起的阶段在节头带一串头像（至多 3 枚 + `+n`）：折叠不能让「谁在这一站」不可见。
  * 正在运行的阶段自己展开：**每一个**正在跑的站都开（带里两条轨道可以同时在跑），已展开的不动。
  *
- * 参与者过了阈值的站是名册：钉 5 枚药丸（failed → asking →
- * stragglers → 补位），第六枚是门（关着带其余人的计数行），门后是其余人的名单——每人一次、按状态分组、
- * 两列 `row` 药丸；折叠节头上头像串换成迷你量条。
+ * 参与者过了阈值的站是名册（追记「阶段名册」、「一扇门与一卷名单」）：钉 5 枚药丸（asking → running →
+ * failed → 补位），第六枚是门（关着带其余人的计数行），门后是其余人的名单——每人一次、按状态分组、
+ * 两列 `row` 药丸；折叠节头上头像串换成迷你量条。界上列不出来的子代理（`station.unlisted`）进门的
+ * 人数、计数行与量条，却没有行可落，所以名单末尾用一行淡字交代这个差额。
  *
  * 落点：卡上「还有 n 个」那一行或站头把站 id 交给宿主，tab 带着
  * `focusPhaseId` 到这里——展开这一站、把门打开、节头滚到顶、底色亮一下再退回。一次打开只落一次
@@ -318,7 +318,7 @@ export const WorkflowRunPhaseList = memo(function WorkflowRunPhaseList({
         const spine = sections[index] ?? { curves: [], rails: [] };
         // 分支站整节右移一格：节头、药丸与灯一起，轨道之间 12px。
         const indent = station.track === 0 ? undefined : { paddingLeft: 39 + 12 * station.track };
-        const roster = stationRoster(station.pills, { pins: ROSTER_PINS_PANE });
+        const roster = stationRosterOf(station, ROSTER_PINS_PANE);
         return (
           <section
             className="relative"
@@ -362,8 +362,8 @@ export const WorkflowRunPhaseList = memo(function WorkflowRunPhaseList({
                 {name}
               </span>
               <span className="flex shrink-0 items-center gap-2.5 font-mono text-ui-xs tabular-nums text-foreground-subtlest">
-                {expanded ? null : station.pills.length > ROSTER_THRESHOLD ? (
-                  <RosterMeter counts={rosterCounts(station.pills)} mini />
+                {expanded ? null : roster !== undefined ? (
+                  <RosterMeter counts={roster.counts} mini />
                 ) : (
                   <AvatarCluster nameOf={nameOf} pills={station.pills} />
                 )}
@@ -394,7 +394,7 @@ export const WorkflowRunPhaseList = memo(function WorkflowRunPhaseList({
                     <WorkflowMoreRow
                       door={{
                         open: listed.has(station.id),
-                        tally: rosterCounts(roster.rest),
+                        tally: rosterRestCounts(roster),
                       }}
                       more={rosterMore(roster)}
                       onOpen={() => toggleListed(station.id)}
@@ -402,6 +402,7 @@ export const WorkflowRunPhaseList = memo(function WorkflowRunPhaseList({
                     {listed.has(station.id) ? (
                       <WorkflowRoll
                         groups={rosterRoll(roster)}
+                        unlisted={roster.unlisted.actors}
                         renderRow={(pill, enterDelayMs) => (
                           <WorkflowAgentPill
                             enterDelayMs={enterDelayMs}

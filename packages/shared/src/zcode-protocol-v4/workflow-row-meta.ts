@@ -104,7 +104,11 @@ const workflowSubagentModelTextSchema = z
 // 这一块说**改了什么**：只有改动过的设置在场；每一项的 from / to 缺一端即那一端是默认
 // （模型 = 会话模型，上限 = 本机上限）。`ceiling` 是本机上限，供「13 → 4」这种读法。
 export const workflowSettingsAmendMetaSchema = z.object({
-  predecessorRunId: z.string().min(1).max(128),
+  // 修订自哪个 run。**缺席 = 就地生效**：只改并发上限、run
+  // 又在飞时，那次「配置」不停这次 run、也不另起一次，于是没有前驱可指——`runId` 指的就是被调整的
+  // 那一个。渲染端据此只出那一行、不再出卡（同一条 run 画两张卡会读成两次运行）。
+  // 此字段为可选；生产者和消费者需使用一致的 schema 才能解析就地调整的设置记录。
+  predecessorRunId: z.string().min(1).max(128).optional(),
   subagentModel: z
     .object({
       from: workflowSubagentModelTextSchema.optional(),
@@ -148,7 +152,8 @@ export const workflowLaunchMetaSchema = z.object({
   description: z.string().max(500).optional(),
   // 启动前编译得到的 create_workflow display（有界因果图 + 诊断）：run 详情侧板按 toolCallId 找
   // 「发起行」取图，直接启动没有工具行，图从这里取。与工具行 display 同一 schema。
-  display: toolCallCreateWorkflowDisplaySchema.optional(),
+  // 同样不设门：图解析失败只是这一行没有图，不拒整帧（见 toolDisplay.ts 注释）。
+  display: toolCallCreateWorkflowDisplaySchema.optional().catch(undefined),
   // 本次 run 实际执行的脚本原文（侧板 Script 区），对应工具行的 input.script；上界与 contracts
   // WORKFLOW_LAUNCH_SCRIPT_MAX_CHARS 同值。
   script: z.string().max(256_000).optional(),

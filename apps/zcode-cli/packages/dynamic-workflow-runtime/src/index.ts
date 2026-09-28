@@ -7,7 +7,12 @@
  * `import()` 文件并调它的 `start`。
  */
 
-export { runWorkflowScript, type RunWorkflowOptions, type DriverFactory } from "./harness.js";
+export {
+  runWorkflowScript,
+  type DriverFactory,
+  type RunControlBinding,
+  type RunWorkflowOptions,
+} from "./harness.js";
 export {
   childMain,
   renderChildEntry,

@@ -30,11 +30,15 @@ import type { AgentRuntimeWorkflowDriverDeps, SessionState } from "./workflow-dr
  *      此刻会话行与消息都刚落好，所以这里不复制 launch 侧那条 `SessionNotFound → 全新`
  *      的降级分支：那条分支的成因是"会话被清理"，而在这里它只可能意味着接线错了，该大声失败。
  *
- * 第 3 步的**条件**：真复制了就必须水化；一条没抄（幂等跳过）且 journal 已记下这个会话 id，
+ * 第 3 步的**条件**：真复制了就必须水化；一条没抄（跳过）且 journal 已记下这个会话 id，
  * 说明 runtime 工厂刚才已经按 resume 路径重挂过了（launch 的 attachActorSession），再水化一次
  * 只会多发一条 SessionResumed、多跑一轮 SessionStart 钩子。两个条件都不成立的情形（跳过复制
  * 且 journal 无记录 = 上一世崩在复制与 putActor 之间）仍要水化，否则 runtime 会带着一个装满
  * 消息的会话从空上下文开跑。
+ *
+ * 这个条件对 {@link seedActorTranscript} 的**两种**跳过都成立，不必分辨是哪一种：两者的判据
+ * 都是「目标会话已经有自己的内容」，而 `attachActorSession` 决定要不要重挂用的是同一个谓词
+ * （journal 上有没有这个 actor 的 sessionId），所以两处永远同时成立或同时不成立。
  */
 export async function seedActorSession(
   deps: AgentRuntimeWorkflowDriverDeps,
@@ -54,7 +58,12 @@ export async function seedActorSession(
         `transcript store (wiring error).`,
     );
   }
-  const copied = await seedActorTranscript({ seed, store, targetSessionId: sessionId });
+  const copied = await seedActorTranscript({
+    ...(deps.logger === undefined ? {} : { logger: deps.logger }),
+    seed,
+    store,
+    targetSessionId: sessionId,
+  });
   if (copied === undefined && journaledSessionId !== undefined) return;
   await runtime.resumeFromStore();
 }

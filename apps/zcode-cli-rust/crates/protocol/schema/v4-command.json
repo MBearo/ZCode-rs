@@ -1152,6 +1152,29 @@
           "type": "string",
           "enum": ["init", "resume"]
         },
+        "botDeliveryTarget": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": ["feishu", "lark", "weixin"]
+            },
+            "botId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "providerUserId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "chatType": {
+              "type": "string",
+              "enum": ["private", "group"]
+            }
+          },
+          "required": ["provider", "botId", "providerUserId", "chatType"],
+          "additionalProperties": false
+        },
         "toolDisallowlist": {
           "type": "array",
           "items": {

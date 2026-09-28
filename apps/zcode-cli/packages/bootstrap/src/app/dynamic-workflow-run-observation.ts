@@ -27,9 +27,12 @@ import type {
   WorkflowErrorJson,
 } from "@zcode/dynamic-workflow";
 import { artifactsOf } from "./dynamic-workflow-run-artifact-projection.js";
+import { runLineageActiveMs } from "./dynamic-workflow-run-elapsed.js";
 import { readRunScriptPath, readRunSubagentModel } from "./dynamic-workflow-run-launch-anchor.js";
 import { resolveDynamicWorkflowRunLabel } from "./dynamic-workflow-run-label.js";
 import { lineageFields, supersededByOf } from "./dynamic-workflow-run-lineage.js";
+import type { ActorSessionQuiescence } from "./workflow-driver-quiescence.js";
+import type { WorkflowRunControl } from "./workflow-run-control.js";
 
 /**
  * 产物归并住在 dynamic-workflow-run-artifact-projection.ts（本文件顶到 oxlint 的 400 行上限）。
@@ -58,6 +61,16 @@ export interface RunRegistryEntry {
    */
   maxConcurrency?: number;
   /**
+   * 本 run 的活体控制面。与
+   * {@link controller} 并列而非合并：那个是「停下这个 run」的唯一通道，这个是「改这个 run 的一项
+   * 设置」的唯一通道，两者的收件人（harness 的 signal / 引擎与座位闸门）也不是同一个。
+   *
+   * 三条建条目的路都造一个（submit / amend / resume），launch 把它的两端接上。条目在、句柄的
+   * `setMaxConcurrency` 却回 false，就是「run 在这两步之间结算了」——`retuneConcurrency` 据此
+   * 回 `not_live`。
+   */
+  control?: WorkflowRunControl;
+  /**
    * 本 run 的子代理模型（`run-launched` 事件上那个规范 picker 串
    * `providerId/modelId[$reasoningLevel]` 的内存副本）。
    * 同一条间隙论证：`AmendWorkflow` 的 resolveInput 读快照判「沿用什么」，而修订一个刚起步的
@@ -82,6 +95,15 @@ export interface RunRegistryEntry {
    * resume 的行早就在了。
    */
   inheritedTokens?: number;
+  /**
+   * 本 run 的 driver 交出来的**会话静默探针**（workflow-driver-quiescence.ts）。driver 构造时
+   * 回填，所以刚建好的条目上还没有——那个间隙里这个 run 连一个 actor 会话都还没建，问它也无话可说。
+   *
+   * 唯一的读者是 amend：取代一个在飞前驱之后，它要先确认那些会话已经写完，才谈得上接续那条
+   * 未完的 ask（`inFlight`）。探针的所有权就在这个条目上——一个 run 一份，随 driver 生灭，
+   * 不另立进程级注册表。
+   */
+  quiescence?: ActorSessionQuiescence;
   /** 结算 promise；waitForTask 等它。fire-and-forget 的那条链就挂在这里。 */
   settlement: Promise<RunSettlement>;
   /** 已结算时的终态（产物/错误只在这里，journal 不存脚本返回值）。 */
@@ -136,6 +158,10 @@ export function snapshotOf(
   // 分别 listNodes 就是把一个 256 节点 run 的全表解码做两遍。
   const nodes = status === "running" ? undefined : journal.listNodes(taskId);
 
+  // lineage 的活动时长：
+  // 与 nodes 同一道终态闸门、同一条论证——它的唯一消费者是终态通知，而快照被后台追踪器反复轮询。
+  const activeDurationMs = status === "running" ? undefined : runLineageActiveMs(journal, taskId);
+
   // 真实终态词 + 停止原因 + 结构化失败：快照基类的
   // `status` 是后台任务追踪器的通用词汇（stopped 折成 cancelled、errored 折成 failed），通知
   // 要说真话只能读这三个字段。终态之前不带（还没有可说的终局）。
@@ -176,6 +202,7 @@ export function snapshotOf(
       entry === undefined ? readRunScriptPath(journal, taskId) : entry.scriptPath,
     ),
     ...(failure === undefined ? {} : { failure }),
+    ...(activeDurationMs === undefined ? {} : { activeDurationMs }),
     ...(entry?.completedAt === undefined ? {} : { completedAt: entry.completedAt }),
     ...(error === undefined ? {} : { error }),
     // 零条时整字段缺席（与 reports 同规）：读侧据此让整块 pending 区消失，不渲染空节。

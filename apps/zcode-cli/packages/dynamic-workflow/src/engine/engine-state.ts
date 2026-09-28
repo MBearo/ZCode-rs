@@ -15,6 +15,7 @@ import type { ImportedWorldQueue } from "./imported-cache.js";
 import type { ArtifactOp } from "../facade/registry.js";
 import type {
   ImportedRunCache,
+  InstanceRef,
   JournalStorePort,
   RunEvent,
   RunStopReason,
@@ -72,6 +73,11 @@ export interface EngineState {
   record(event: RunEvent): void;
   /** 站点序号的唯一铸造点。 */
   nextOrdinal(siteId: string): number;
+  /**
+   * 受 replay 结算次序约束地释放一次命中。
+   * 非 resume、或次序表里没有这个实例时立即执行 `release`。
+   */
+  holdForReplay(instance: InstanceRef, release: () => void): void;
 
   /** 本 run 已发布的报告条数（REPORT_CAPS.maxItemsPerRun 的计数器，跨 resume 连续）。 */
   reportCount(): number;

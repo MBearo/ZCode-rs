@@ -7,8 +7,8 @@ import type {
   ToolCallRow,
   WorkflowRunState,
 } from "@zcode/shared/zcode-protocol-v4";
+import { workflowRunStepCounts } from "@zcode/shared/zcode-protocol-v4";
 import { extractPlanToolCallContent, getPlanDirectoryTitle } from "@/lib/planToolCall.js";
-import { workflowRunStepCounts } from "@/v4/workflowRunCardJoin.js";
 
 export interface ConversationStatusPanelGitModel {
   branchName: string | null;
@@ -243,12 +243,14 @@ function buildRunningWorkflowRuns(
     if (run.status !== "pending" && run.status !== "running") continue;
     const work = workflowWorkByWorkId.get(run.runId);
     if (work) joinedWorkIds.add(run.runId);
+    // 计数与聊天紧凑卡同源（唯一实现在 @zcode/shared 的 workflowRunStepCounts：表内 + 表外）。
+    const steps = workflowRunStepCounts(run);
     rows.push({
       runId: run.runId,
       ...(run.toolCallId ? { toolCallId: run.toolCallId } : {}),
       status: run.status,
-      // 计数与聊天紧凑卡同源（唯一实现在 workflowRunCardJoin.ts）。
-      ...workflowRunStepCounts(run),
+      nodesSettled: steps.settled,
+      nodesTotal: steps.total,
       ...(work ? { title: work.title, startedAt: work.startedAt } : {}),
       ...(work?.status === "running"
         ? {

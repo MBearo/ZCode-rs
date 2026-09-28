@@ -628,8 +628,9 @@ function officialPluginCacheRoot(
   );
 }
 
-function candidateBaseDirs(): string[] {
-  // Electron app-server 运行在 resources/glm/zcode.cjs，官方插件资源也随桌面包
+/** 内置技能包（bundled-skills.ts）沿同一组候选目录定位，保证两类内置资产在每种运行布局下同进同出。 */
+export function candidateBaseDirs(): string[] {
+  // 修复原因：Electron app-server 运行在 resources/glm/zcode.cjs，官方插件资源也随桌面包
   // stage 到同级 packages/*-plugin。候选目录必须优先看入口文件目录，避免生产态退回到
   // monorepo-only 的 __dirname 查找假设。
   return [entrypointDir(), runtimeDir(), process.cwd()].filter(

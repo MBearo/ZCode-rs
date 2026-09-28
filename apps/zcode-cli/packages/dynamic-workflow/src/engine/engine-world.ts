@@ -7,6 +7,7 @@
  */
 
 import { canonicalJson, inputHash } from "./hash.js";
+import { heldResolution } from "./replay-order.js";
 import { boundWorldReadInput } from "./world-read-input.js";
 import { hashMismatch } from "./scheduler.js";
 import type { EngineState } from "./engine-state.js";
@@ -47,19 +48,25 @@ export function readWorld(
       return Promise.reject(err);
     }
     // 完结命中短路（journal 化世界读取使 resume 免疫于 run 与 resume 之间的磁盘变化）。
+    // 释放点过 replay 次序闸：一条扇出分支里的 world 读取同样是别人的续体在等的东西，
+    // 按准入顺序放会把 join 之后的序号错位。
     if (recorded.status === "completed") {
-      state.record({ type: "node-settled", instance, outcome: "ok", cached: true });
-      return Promise.resolve(recorded.result);
+      return heldResolution(state.holdForReplay, instance, () => {
+        state.record({ type: "node-settled", instance, outcome: "ok", cached: true });
+        return recorded.result;
+      });
     }
     if (recorded.status === "failed") {
-      state.record({
-        type: "node-settled",
-        instance,
-        outcome: "failed",
-        cached: true,
-        error: recorded.error,
+      return heldResolution(state.holdForReplay, instance, () => {
+        state.record({
+          type: "node-settled",
+          instance,
+          outcome: "failed",
+          cached: true,
+          error: recorded.error,
+        });
+        throw WorkflowError.fromJSON(recorded.error!);
       });
-      return Promise.reject(WorkflowError.fromJSON(recorded.error!));
     }
     // status === "running"：崩溃于执行中，落到下面重新 live 执行。
   }
@@ -181,23 +188,31 @@ export function closeImportCache(
 }
 
 /**
- * resume 时恢复关门判定与「曾 live 的 ask 实例」集合。
+ * resume 时恢复关门判定、「曾 live 的 ask 实例」集合，以及「关门之前就已准入的 ask 实例」集合。
  *
  * 事实来源是本 run 自己的事件：live 节点在准入时发 `node-queued`（ask 的带 actor ref），缓存
  * 命中只发 `node-settled cached:true`，所以「哪些 ask 曾 live」是精确集合。门是否已关则由
  * `import-cache-closed` 事件决定——ask 转 live 不再意味着关门（它可能一个文件都没碰），只有
  * 写入才关，而写入这件事只有这条事件记着。零 schema 变更。
+ *
+ * `queuedBeforeClose` 同样零 schema 变更，靠的是**事件次序**：续跑在飞 ask 的判定与该 ask 的
+ * `node-queued` 落在准入的同一个同步片里（见 scheduler 的 admitAsk → tryImportedSettle →
+ * admitLive），所以「准入那一刻门开着」⇔「这条 node-queued 早于第一条 import-cache-closed」。
+ * 没有关门事件时全体都算在内。
  */
 export function recoverImportClosure(
   journal: JournalStorePort,
   runId: string,
-): { live: ReadonlySet<string>; closed: boolean } {
+): { live: ReadonlySet<string>; queuedBeforeClose: ReadonlySet<string>; closed: boolean } {
   const live = new Set<string>();
+  const queuedBeforeClose = new Set<string>();
   let closed = false;
   for (const { event } of journal.listEvents(runId)) {
     if (event.type === "import-cache-closed") closed = true;
     if (event.type !== "node-queued" || event.kind !== "ask") continue;
-    live.add(refToString(event.instance));
+    const key = refToString(event.instance);
+    live.add(key);
+    if (!closed) queuedBeforeClose.add(key);
   }
-  return { live, closed };
+  return { live, queuedBeforeClose, closed };
 }

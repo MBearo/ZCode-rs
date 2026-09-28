@@ -7,6 +7,7 @@
 
 import type {
   ActorRecord,
+  Caps,
   JournalStorePort,
   ListEventsOptions,
   NodeRecord,
@@ -84,6 +85,14 @@ export class InMemoryJournalStore implements JournalStorePort {
     r.spentTokens = spentTokens;
   }
 
+  updateRunCaps(runId: string, caps: Caps): void {
+    const r = this.runs.get(runId);
+    if (r === undefined) throw new Error(`journal: unknown run ${runId}`);
+    // 深拷贝与其余写入同规（存储边界两侧不共享引用）：调用方手里的那份 caps 随后被换掉，
+    // 不该顺手改动已落库的行。
+    r.caps = clone(caps);
+  }
+
   putActor(record: ActorRecord): void {
     const bucket = this.requireActorBucket(record.runId);
     bucket.set(key(record.siteId, record.ordinal), clone(record));
@@ -138,7 +147,8 @@ export class InMemoryJournalStore implements JournalStorePort {
     // `where sequence > ?`。两侧共用同一份契约测，语义必须逐字相同。
     const after = opts?.afterSequence;
     const filtered = after === undefined ? list : list.filter((e) => e.sequence > after);
-    const limited = opts?.limit === undefined ? filtered : filtered.slice(0, Math.max(0, opts.limit));
+    const limited =
+      opts?.limit === undefined ? filtered : filtered.slice(0, Math.max(0, opts.limit));
     return limited.map(clone);
   }
 

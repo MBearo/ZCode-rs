@@ -138,6 +138,7 @@ import type {
   SessionUsageSeed,
 } from "./product-projection.js";
 import type { ConversationRowTargetAction } from "./product-projection.js";
+import { SessionsIndexFanoutThrottle } from "./sessions-index-fanout-throttle.js";
 import { SessionsIndexPublisher } from "./sessions-index-publisher.js";
 import { SessionsIndexPublisherRegistry } from "./sessions-index-publisher-registry.js";
 import { WorkspaceConfigPublisher } from "./workspace-config-publisher.js";
@@ -612,6 +613,10 @@ export class ConversationV4Gateway {
       if (parsed.success) this.host.emitLocalTtftFacts?.(parsed.data);
     },
   );
+  /** 高频进度事件的 index fan-out 节流（14-sessions-index「事件 fan-out 节奏」）。 */
+  private readonly indexFanoutThrottle = new SessionsIndexFanoutThrottle({
+    publish: (sessionId) => this.publishCurrentSummaryToIndex(sessionId),
+  });
   private readonly attachmentPruneTimer: ReturnType<typeof setInterval>;
   private readonly now: () => number;
   private readonly createLogEpoch: (sessionId: string) => string;
@@ -1074,6 +1079,12 @@ export class ConversationV4Gateway {
    */
   private fanOutToIndex(sessionId: string, event: SessionEvent): void {
     if (event.type === SessionEventType.ModelStreaming) return;
+    // 工作流进度同样是高频流（实测 8s 4000 条），但列表要继续动，所以不是丢弃而是
+    // leading + trailing 窗口节流：窗内合并为窗末一帧，终态仍在一个窗口内送达。
+    if (event.type === SessionEventType.DynamicWorkflowRunProgress) {
+      this.indexFanoutThrottle.request(sessionId);
+      return;
+    }
     this.publishCurrentSummaryToIndex(sessionId);
   }
 
@@ -1086,6 +1097,8 @@ export class ConversationV4Gateway {
    * task-index syncer 无法观察到 draft→visible，也就不会创建侧栏 task row。
    */
   private publishCurrentSummaryToIndex(sessionId: string): void {
+    // 这一次发布带的就是窗内合并后的当前摘要：待发的 trailing 到此被满足，不重复发帧。
+    this.indexFanoutThrottle.notePublished(sessionId);
     const getWorkspaceId = this.host.getSessionWorkspaceId;
     if (!getWorkspaceId) return;
     try {
@@ -1402,6 +1415,9 @@ export class ConversationV4Gateway {
       connectionId: params.connectionId,
       base: params.base,
       deliveryProfile: profileName,
+      // 与 clientMode 同族的可信注入：能力位来自该连接的 clientHello，缺席一律按旧消费者办
+      // （整键 patch + 旧界裁剪）。resync / rehydrate 沿用订阅上已记下的这一位，不再重取。
+      workflowRunDeltas: params.workflowRunDeltas === true,
     });
     const routeKey = subscriptionRouteKey(
       params.topic,
@@ -2749,6 +2765,7 @@ export class ConversationV4Gateway {
         this.host.onError?.("v4.sessionsIndex.remove", error);
       }
     }
+    this.indexFanoutThrottle.clearSession(sessionId);
     for (const [routeKey, state] of this.flushStates) {
       if (state.sessionId !== sessionId) continue;
       if (state.timer) clearTimeout(state.timer);
@@ -2799,6 +2816,7 @@ export class ConversationV4Gateway {
       );
     }
     clearInterval(this.attachmentPruneTimer);
+    this.indexFanoutThrottle.clear();
     this.attachmentUploads.clear();
     this.binaryReadCache.clear();
     this.binaryReadCacheBytes = 0;

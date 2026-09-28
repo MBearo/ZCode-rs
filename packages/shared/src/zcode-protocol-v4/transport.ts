@@ -29,6 +29,12 @@ export const hostCapabilitiesSchema = z.object({
   // Wire-compatible：旧 Host 缺失等价于 false；调用方必须用 === true 判断。
   workspaceHookReview: z.boolean().optional(),
   independentPlanState: z.boolean().optional(),
+  /**
+   * 本 Host 会发 `workflowRun.*` 键级增量（delta.ts 的两条 op），因而 `workflowRuns` 的
+   * actors / nodes 可以到 1024 而不是旧界的 256。没有这个位的消费者收到的仍是整键
+   * `state.updated`，并且先经 `clampWorkflowRunsForLegacy` 裁到旧界。
+   */
+  workflowRunDeltas: z.boolean().optional(),
 });
 export type HostCapabilities = z.infer<typeof hostCapabilitiesSchema>;
 
@@ -67,7 +73,18 @@ export const clientHelloSchema = z
     clientKind: z.enum(["desktop", "web", "mobileRemote", "mobileApp"]).optional(),
     appVersion: z.string(),
     // 缺失代表旧客户端，不具备 Settings-centered review UI。
-    capabilities: z.object({ workspaceHookReviewUi: z.boolean().optional() }).strict().optional(),
+    capabilities: z
+      .object({
+        workspaceHookReviewUi: z.boolean().optional(),
+        /**
+         * 本客户端认得 `workflowRun.*` 增量。⚠ 声明规则是**单向**的：客户端只有在 Host 的
+         * hello 里见到 `workflowRunDeltas === true` 时才能带上这个键——这个 capabilities 对象
+         * 是 `.strict()` 的，老 Host 见到不认识的键会整条 clientHello 解析失败、连接握不上手。
+         */
+        workflowRunDeltas: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ClientHello = z.infer<typeof clientHelloSchema>;
@@ -80,7 +97,15 @@ export function clientSupportsWorkspaceHookReview(clientHello: ClientHello): boo
   return clientHello.capabilities?.workspaceHookReviewUi === true;
 }
 
-// ── 订阅 ──
+export function hostSupportsWorkflowRunDeltas(capabilities: HostCapabilities): boolean {
+  return capabilities.workflowRunDeltas === true;
+}
+
+export function clientSupportsWorkflowRunDeltas(clientHello: ClientHello): boolean {
+  return clientHello.capabilities?.workflowRunDeltas === true;
+}
+
+// ── §3.1 订阅 ──
 export const subscribeParamsSchema = z
   .object({
     // "conversation/<sessionId>" | "sessions-index/<workspaceId>" | ...
@@ -403,6 +428,12 @@ export const v4ConversationSubscribeParamsSchema = subscribeParamsSchema.extend(
   legacyTaskIds: z.array(z.string().min(1)).max(MAX_LEGACY_TASK_IDS_PER_SUBSCRIBE).optional(),
   // 仅供 host→CLI cold resume 使用；live conversation 不消费该 hint。
   resumeThoughtLevel: z.string().trim().min(1).optional(),
+  /**
+   * 这条订阅收不收 `workflowRun.*` 键级增量。与 `clientMode` 同族：由**可信 host** 从该连接的
+   * clientHello 注入，面向 UI 的 subscribe 选不了它——一个客户端能不能认得增量是连接的事实，
+   * 不是某一次订阅可以自选的口味。缺席 = 按旧消费者处理（整键 patch + 旧界裁剪）。
+   */
+  workflowRunDeltas: z.boolean().optional(),
 });
 export type V4ConversationSubscribeParams = z.infer<typeof v4ConversationSubscribeParamsSchema>;
 

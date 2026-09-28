@@ -13,6 +13,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   ActorRecord,
+  Caps,
   JournalStorePort,
   ListEventsOptions,
   NodeRecord,
@@ -51,12 +52,14 @@ import {
   countNodesByStatus,
   getRunRow,
   listRecentLogEvents,
+  listRunLifeSpans,
   listRuns,
   listRunsByParentSession,
   listWorldNodes,
   type DwfListRunsQuery,
   type DwfNodeStatusCounts,
   type DwfRunIntrospectionQueries,
+  type DwfRunLifeSpan,
 } from "./dwf-journal-introspection.js";
 
 export type { DwfArtifactItem, DwfArtifactItemsQuery } from "./dwf-journal-artifacts.js";
@@ -66,6 +69,7 @@ export type {
   DwfListRunsQuery,
   DwfNodeStatusCounts,
   DwfRunIntrospectionQueries,
+  DwfRunLifeSpan,
 } from "./dwf-journal-introspection.js";
 
 class SqliteDwfJournalStore implements JournalStorePort, DwfRunIntrospectionQueries {
@@ -102,6 +106,9 @@ class SqliteDwfJournalStore implements JournalStorePort, DwfRunIntrospectionQuer
           // lineage 同属这条只写一次的元数据路：修订是 supersede，前驱行零触碰，
           // 所以「本 run 修订自谁」只有建 run 这一刻能写下。
           record.resumedFrom ?? null,
+          // caps 与上面几列**不**同路：它不是只写一次的元数据。`updateRunCaps` 是这一列的第二个
+          // 写入者——一次只改 `max_concurrency` 的修订就地作用在活着的 run 上，而 resume 沿用
+          // 行里的值。
           record.caps.maxConcurrency,
           record.spentTokens,
           settlement.status,
@@ -183,6 +190,19 @@ class SqliteDwfJournalStore implements JournalStorePort, DwfRunIntrospectionQuer
   }
 
   /**
+   * 本 run 并发上界的就地更新。
+   * 与 `updateRunUsage` 同族的窄写入：**只列 caps_max_concurrency**，状态、用量与结算信封
+   * 都不在这条语句里——它们各有自己的写入路径，混进来就会让一次改上界顺手回退一个结算。
+   * 零迁移：列早已存在，本方法只是它的第二个写入者。
+   */
+  updateRunCaps(runId: string, caps: Caps): void {
+    const { changes } = this.db
+      .prepare("update dwf_run set caps_max_concurrency = ?, time_updated = ? where id = ?")
+      .run(caps.maxConcurrency, Date.now(), runId);
+    this.assertRunTouched(changes, runId);
+  }
+
+  /**
    * 某个父会话名下所有**非终态**的 run。刻意不在 `JournalStorePort` 上：引擎从不按父会话找
    * run，这条查询只服务于宿主侧的孤儿收敛——一个进程被杀掉的 run 会永远停在 `running`，
    * 由下一次同会话的 app 构造把它收敛掉（`bootstrap/src/app/dynamic-workflow-run-service.ts`，
@@ -226,10 +246,13 @@ class SqliteDwfJournalStore implements JournalStorePort, DwfRunIntrospectionQuer
     return listRecentLogEvents(this.db, runId, limit);
   }
 
+  listRunLifeSpans(runId: string): DwfRunLifeSpan[] {
+    return listRunLifeSpans(this.db, runId);
+  }
+
   listRunsByParentSession(parentSessionId: string, limit: number): DwfRunSessionListItem[] {
     return listRunsByParentSession(this.db, parentSessionId, limit);
   }
-
 
   putActor(record: ActorRecord): void {
     const now = Date.now();

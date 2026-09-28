@@ -4,6 +4,7 @@ import { z } from "zod";
 import { PROTOCOL_V4_LIMITS } from "./core.js";
 import { crc32WireBytes, decodeWireBase64 } from "./wire-binary.js";
 import type { TopicFrameDeliveryKind, TopicWireFrame } from "./wire.js";
+import { WIRE_FAULT_INVALID_PAYLOAD } from "./wire-fault.js";
 
 export type ReassembleTopicWireFramesResult<F> =
   | { kind: "complete"; frame: F; deliveryKind: TopicFrameDeliveryKind }
@@ -64,7 +65,7 @@ export function reassembleTopicWireFrames<F>(
     const parsed = frameSchema.safeParse(first.frame);
     return parsed.success
       ? { kind: "complete", frame: parsed.data, deliveryKind: first.deliveryKind }
-      : { kind: "rejected", reasonCode: "proto.frameAssemblyInvalidPayload" };
+      : { kind: "rejected", reasonCode: WIRE_FAULT_INVALID_PAYLOAD };
   }
 
   if (first.fragmentCount > PROTOCOL_V4_LIMITS.logicalFrameAssemblyMaxFragments) {
@@ -203,5 +204,5 @@ export function reassembleTopicWireFrames<F>(
   const parsed = frameSchema.safeParse(value);
   return parsed.success
     ? { kind: "complete", frame: parsed.data, deliveryKind: first.deliveryKind }
-    : { kind: "rejected", reasonCode: "proto.frameAssemblyInvalidPayload" };
+    : { kind: "rejected", reasonCode: WIRE_FAULT_INVALID_PAYLOAD };
 }

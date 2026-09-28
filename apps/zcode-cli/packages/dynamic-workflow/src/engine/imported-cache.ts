@@ -31,6 +31,11 @@ export class ImportedActorState {
   /** 已消费的导入条目数 = 下一个可命中的 actorSeq（也是转录截断边界的下标 + 1）。 */
   private consumed = 0;
   private diverged = false;
+  /**
+   * 「续跑前驱在飞 ask」的那个 seq（没有续跑即缺席）。至多一个：续跑本身就是分歧，
+   * 分歧单调，所以第二次不会再有。
+   */
+  private carriedSeq?: number;
 
   constructor(private readonly candidate: ImportedActorCandidate) {}
 
@@ -40,12 +45,14 @@ export class ImportedActorState {
    * 两种不命中同等处理：哈希不符（指令变了）与 `seq >= entries.length`（新脚本在此 actor 上
    * 扩了新 ask）。分歧的**级联**是免费且动态的——上游 ask 转 live 拿到新结果，下游用它插值出的
    * 指令哈希必变，于是下游自动分歧，不需要任何显式传播。
+   *
+   * 本方法只在导入缓存**开着**时被调用（关门后走 {@link takeIfPure}），所以未命中时可以谈续跑。
    */
   take(seq: number, hash: string): ImportedAskEntry | undefined {
     if (this.diverged) return undefined;
     const entry = this.candidate.entries[seq];
     if (entry === undefined || entry.inputHash !== hash) {
-      this.diverged = true;
+      this.diverge(seq, hash, true);
       return undefined;
     }
     this.consumed = seq + 1;
@@ -57,16 +64,23 @@ export class ImportedActorState {
    * 转录前缀——两者都在哈希链里——与工作区无关，所以关门不影响它的答案。碰过外部世界的条目即便同哈希
    * 也不给：它读过的工作区可能已被改写；这个 ask 转 live，actor 从此分歧（转录不再与前驱一致，
    * 后缀条目不可复活）。没有 stats、或 stats 里没有这个键的老条目按「碰过」处理（保守）。
+   *
+   * 关门后同样不续跑在飞 ask：那半场转录里全是前驱对**旧工作区**的观察，与带工具的条目同理。
    */
   takeIfPure(seq: number, hash: string): ImportedAskEntry | undefined {
     if (this.diverged) return undefined;
     const entry = this.candidate.entries[seq];
     if (entry === undefined || entry.inputHash !== hash || entry.stats?.worldToolCalls !== 0) {
-      this.diverged = true;
+      this.diverge(seq, hash, false);
       return undefined;
     }
     this.consumed = seq + 1;
     return entry;
+  }
+
+  /** 该 seq 的 ask 是否续跑了前驱的在飞 ask（调度器据此决定 stats 记不记 worldToolCalls）。 */
+  carriedAt(seq: number): boolean {
+    return this.carriedSeq === seq;
   }
 
   /**
@@ -78,19 +92,30 @@ export class ImportedActorState {
    * inputHash 与导入条目比对，恰好重建了原次执行当时的判定（准入按 seq 升序，hold 规则保证
    * 这一点），因此这个重推是精确的，不是保守近似。`wasLive` 补上哈希看不见的那一种 live
    * （缓存关闭后带工具的 ask，见 scheduler 的 tryImportedSettle）。
+   *
+   * `queuedBeforeClose` 是续跑判定的那一半事实：续跑与该 ask 的 `node-queued` 在准入的同一个
+   * 同步片里发生，所以「当时门开着」等价于「这条 node-queued 早于第一条 import-cache-closed」
+   * （见 engine-world.ts 的 recoverImportClosure）。必须精确——错判成续跑会让 seedActorTranscript
+   * 往一个**已经分歧**的会话里多抄一段前驱消息（driver 的幂等判据只看目标够不够长）。
    */
-  reconcileRecorded(seq: number, recordedHash: string, wasLive: boolean): void {
+  reconcileRecorded(
+    seq: number,
+    recordedHash: string,
+    wasLive: boolean,
+    queuedBeforeClose: boolean,
+  ): void {
     if (this.diverged) return;
     // 缓存关闭之后，一个带工具 actor 的 ask 即便与导入
     // 条目同哈希也是 live 跑的——按哈希算成「已消费」会让种子边界取自前驱条目，而本会话的
     // 真实转录在那个位置根本不是那些消息。live 与否是事件里的事实（node-queued），不是哈希
     // 能推出来的。
     if (wasLive) {
-      this.diverged = true;
+      this.diverge(seq, recordedHash, queuedBeforeClose);
       return;
     }
     const entry = this.candidate.entries[seq];
     if (entry === undefined || entry.inputHash !== recordedHash) {
+      // 没 live 过的行不可能是续跑（续跑的 ask 一定被派发过，一定有 node-queued）。
       this.diverged = true;
       return;
     }
@@ -104,16 +129,49 @@ export class ImportedActorState {
    * 结算，新会话要接着的正是那 k 次完整交换之后的位置（含它们的 repair / nudge 轮）。
    * 一条也没消费就没有种子——全新会话、全新模型解析、不带 pin：pin 是为「转录接续下不静默
    * 换模型」存在的，没有接续就没有它的用武之地。
+   *
+   * **续跑是例外**：边界改取 `inFlight.messageBoundary`（前驱整个会话），因此一条都没消费也有
+   * 种子——那正是「扇出第一轮在飞时被修订」的形状。
    */
   seed(): ActorSessionSeed | undefined {
+    const inFlight = this.candidate.inFlight;
+    if (this.carriedSeq !== undefined && inFlight !== undefined) {
+      return this.seedAt(inFlight.messageBoundary);
+    }
     if (this.consumed === 0) return undefined;
     const last = this.candidate.entries[this.consumed - 1];
     if (last === undefined) return undefined;
+    return this.seedAt(last.messageBoundary);
+  }
+
+  /**
+   * 置分歧，并在此顺带判定这次未命中是不是**续跑前驱的在飞 ask**。
+   *
+   * 续跑的四个条件缺一不可：此前未分歧（否则本 actor 的转录早已不是前驱那条）、`seq` 恰在
+   * 前缀之后（在飞 ask 的位置）、整个前缀都已消费、指令哈希与在飞 ask 相符。`cacheOpen`
+   * 是第五个：关门之后那半场转录只是对旧工作区的观察，不比缓存的 world 读取更可信。
+   */
+  private diverge(seq: number, hash: string, cacheOpen: boolean): void {
+    const inFlight = this.candidate.inFlight;
+    if (
+      cacheOpen &&
+      inFlight !== undefined &&
+      seq === this.candidate.entries.length &&
+      this.consumed === seq &&
+      inFlight.inputHash === hash
+    ) {
+      this.carriedSeq = seq;
+    }
+    this.diverged = true;
+  }
+
+  private seedAt(messageCount: number): ActorSessionSeed {
     const seed: ActorSessionSeed = {
       sourceSessionId: this.candidate.transcriptSourceSessionId,
-      messageCount: last.messageBoundary,
+      messageCount,
     };
-    if (this.candidate.resolvedModel !== undefined) seed.resolvedModel = this.candidate.resolvedModel;
+    if (this.candidate.resolvedModel !== undefined)
+      seed.resolvedModel = this.candidate.resolvedModel;
     return seed;
   }
 }

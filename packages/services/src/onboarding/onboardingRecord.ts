@@ -2,6 +2,7 @@ import type {
   OnboardingRecordEntry,
   OnboardingRecordEntryInput,
   OnboardingRecordFile,
+  OnboardingDecision,
 } from "@zcode/shared";
 import { ServiceChannels, type AppSettings } from "@zcode/shared";
 import { createServiceDescriptor } from "../descriptors.js";
@@ -22,7 +23,9 @@ export interface IOnboardingRecordService {
    */
   appendRecord(deviceMid: string, entry: OnboardingRecordEntryInput): Promise<void>;
   /** 触发判定：当前用户（登录→userId；apikey/未登录→null）没有对应记录或文件不存在时为 true。 */
-  shouldOnboard(): Promise<boolean>;
+  shouldOnboard(deviceMid: string): Promise<boolean>;
+  /** 用户关闭首次引导时持久化 dismissed；已有作答时为空操作。 */
+  dismissOnboarding(deviceMid: string): Promise<void>;
   /**
    * 登录认领：当前 userId 没有条目而存在匿名（null）条目时，把 null 条目移交给该 userId
    * （改写而非复制，避免同一引导行为产生双条目污染上传统计）。同一人"未登录答一次→登录"
@@ -56,6 +59,7 @@ export interface IOnboardingRecordService {
 /** 工厂入参：userId 解析注入（正式装配用 oauthCredentialRepo，测试用桩）。 */
 export interface CreateOnboardingRecordServiceOptions {
   loadUserId: () => Promise<string | null>;
+  hasExistingLocalTask: () => Promise<boolean>;
 }
 
 export type OnboardingRecordServiceFactory = (
@@ -66,4 +70,9 @@ export const IOnboardingRecordService = createServiceDescriptor<IOnboardingRecor
   ServiceChannels.OnboardingRecord,
 );
 
-export type { OnboardingRecordEntry, OnboardingRecordEntryInput, OnboardingRecordFile };
+export type {
+  OnboardingDecision,
+  OnboardingRecordEntry,
+  OnboardingRecordEntryInput,
+  OnboardingRecordFile,
+};

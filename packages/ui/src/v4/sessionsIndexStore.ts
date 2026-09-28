@@ -3,7 +3,9 @@
 // snapshot 帧全量替换；delta 帧仅在区间衔接（frame.fromSeq === watermark）时 apply，
 // 断档不猜、不缓存补偿——重订阅交由服务端裁决续传或全量（与 ConversationProjectionStore 同策略）。
 import {
+  isDeterministicContentFault,
   PROTOCOL_V4_LIMITS,
+  SUBSCRIPTION_CONTENT_REJECTED,
   type SessionSummary,
   type SessionsIndexTopicFrame,
   type TopicFrameDeliveryKind,
@@ -159,6 +161,8 @@ export class SessionsIndexStore {
     forceSnapshot: boolean;
     postRecoveryGapPending: boolean;
     frameDeadline: ReturnType<typeof setTimeout> | null;
+    /** 本次 flight 是为内容确定性失败发起的：终态用 contentRejected，且不再无限退避重订阅。 */
+    contentFault: boolean;
   } | null = null;
   private status: SessionsIndexStoreStatus = "idle";
   private generation = 0;
@@ -212,7 +216,7 @@ export class SessionsIndexStore {
       this.frameUnsub = transport.onFrame((frame, context) => this.handleFrame(frame, context));
       this.faultUnsub = transport.onAssemblyFault((fault) => {
         if (fault.subscriptionId === this.subscriptionId) {
-          this.handleAssemblyFault(fault.subscriptionId, fault.deliveryKind);
+          this.handleAssemblyFault(fault.subscriptionId, fault.deliveryKind, fault.reasonCode);
         }
       });
       if (transport.onRuntimeLifecycle) {
@@ -381,13 +385,24 @@ export class SessionsIndexStore {
     if (deliveryKind === "recovery") this.markRecoveryFrameSeen();
   }
 
-  private handleAssemblyFault(subscriptionId: string, deliveryKind?: TopicFrameDeliveryKind): void {
+  private handleAssemblyFault(
+    subscriptionId: string,
+    deliveryKind?: TopicFrameDeliveryKind,
+    reasonCode?: string,
+  ): void {
     if (subscriptionId !== this.subscriptionId) return;
     if (
       this.awaitingInitial?.subscriptionId === subscriptionId &&
       (deliveryKind === "initial" || deliveryKind === "recovery" || deliveryKind === undefined)
     ) {
       this.awaitingInitial = null;
+    }
+    // 内容确定性失败不进瞬态阶梯（04-sync 封闭规则 11）：resume 只会重投同一批被拒的内容。
+    // 直接跳到唯一可能产出不同字节的强制 snapshot；它再被内容拒绝就停手。本 store 的 fail
+    // closed 会清空投影并有界退避重订阅——对确定性失败那就是一个永不收敛的重订阅循环。
+    if (isDeterministicContentFault(reasonCode)) {
+      this.requestRecovery(true, { contentFault: true });
+      return;
     }
     if (deliveryKind === "online" && this.recovery) {
       this.recovery.postRecoveryGapPending ||= this.recovery.validFrameSeen;
@@ -398,12 +413,15 @@ export class SessionsIndexStore {
     );
   }
 
-  private requestRecovery(recoveryEvent = false): void {
+  private requestRecovery(recoveryEvent = false, options: { contentFault?: boolean } = {}): void {
     const transport = this.transport;
     const subscriptionId = this.subscriptionId;
     if (this.closed || !transport || !subscriptionId) return;
+    const contentFault = options.contentFault === true;
     const existing = this.recovery;
     if (existing) {
+      // 一旦本次 flight 出现过内容失败，终态就归内容失败：后续瞬态 fault 不该把它洗白。
+      if (contentFault) existing.contentFault = true;
       if (!recoveryEvent) return;
       if (existing.forceSnapshot) {
         this.failRecovery("fault.subscription.recoveryFailed");
@@ -427,9 +445,11 @@ export class SessionsIndexStore {
       forceSnapshot: false,
       postRecoveryGapPending: false,
       frameDeadline: null,
+      contentFault,
     };
     this.recovery = recovery;
-    this.issueRecovery(recovery, false);
+    // 内容失败跳过 resume 档直接强制 snapshot；瞬态失败仍按原阶梯先试 resume。
+    this.issueRecovery(recovery, contentFault);
   }
 
   private issueRecovery(
@@ -517,7 +537,8 @@ export class SessionsIndexStore {
       recovery.frameDeadline = null;
       if (this.closed || this.recovery !== recovery || recovery.validFrameSeen) return;
       if (!recovery.forceSnapshot) this.issueRecovery(recovery, true);
-      else this.failRecovery("fault.subscription.recoveryFrameTimedOut");
+      else
+        this.failRecovery("fault.subscription.recoveryFrameTimedOut", { contentEligible: false });
     }, PROTOCOL_V4_LIMITS.logicalFrameAssemblyTimeoutMs);
   }
 
@@ -544,15 +565,32 @@ export class SessionsIndexStore {
     this.errorRecoveryRetryTimer = null;
   }
 
-  private failRecovery(reasonCode: string): void {
-    this.failAndScheduleRecovery(reasonCode);
+  /**
+   * 内容确定性失败：终态 code 与传输失败区分，且**不排退避重订阅**——重订阅会拿到同一份读不懂的
+   * 内容，本 store 的退避会因此变成永不收敛的循环（清空投影 → 重订阅 → 再被拒 → …）。自愈仍有
+   * 路径：runtime 换代、fresh connect、用户重连都会重新订阅；被拿掉的只是那个循环。
+   *
+   * `contentEligible: false` 给**超时**终态用：deadline 没等到 recovery 帧是传输症状，不该被重标
+   * 成 contentRejected，更不该因此取消那次仍然有意义的重试。
+   */
+  private failRecovery(reasonCode: string, options: { contentEligible?: boolean } = {}): void {
+    // contentFault 必须在 discardRecovery 之前读。
+    const contentFault = this.recovery?.contentFault === true && options.contentEligible !== false;
+    this.failAndScheduleRecovery(contentFault ? SUBSCRIPTION_CONTENT_REJECTED : reasonCode, {
+      scheduleRetry: !contentFault,
+    });
   }
 
   /**
    * recovery/subscribe 失败时撤销旧 projection 的 live 证明，并用有界退避重新取权威
    * snapshot。error 仍对外可观测；重试仅在 transport/runtime 仍属于当前代际时执行。
+   *
+   * `scheduleRetry: false` 只给确定性失败用：重试必然得到同一结果时不该排它。
    */
-  private failAndScheduleRecovery(reasonCode: string): void {
+  private failAndScheduleRecovery(
+    reasonCode: string,
+    options: { scheduleRetry?: boolean } = {},
+  ): void {
     const transport = this.transport;
     const previousSubscriptionId = this.subscriptionId;
     this.discardRecovery();
@@ -567,7 +605,7 @@ export class SessionsIndexStore {
       void unsubscribeIgnoringFailure(transport, previousSubscriptionId);
     }
     this.clearErrorRecoveryRetry();
-    if (transport && !this.closed) {
+    if (transport && !this.closed && options.scheduleRetry !== false) {
       const attempt = this.errorRecoveryRetryAttempt;
       const delayMs =
         ERROR_RECOVERY_RETRY_DELAYS_MS[

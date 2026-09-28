@@ -329,7 +329,7 @@ function WorkflowRunSettingsForm({
         className="text-ui-sm text-foreground-subtle"
         data-testid="workflow-run-settings-consequence"
       >
-        {format(workflowRunSettingsConsequenceId(run.status))}
+        {format(workflowRunSettingsConsequenceId(run.status, change))}
       </p>
       {rejection === undefined ? null : (
         <div

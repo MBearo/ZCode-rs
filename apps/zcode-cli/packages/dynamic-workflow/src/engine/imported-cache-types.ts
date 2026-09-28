@@ -24,13 +24,37 @@ export interface ImportedAskEntry {
 }
 
 /**
+ * 前驱停下时**还在飞**的那一条 ask（`actorSeq === entries.length`，紧接前缀之后的 running 行）。
+ *
+ * 它没有结果可导入，导入的是**它已经跑出来的那段转录**：修订若在同一位置重发同一条指令
+ * （`inputHash` 相符），新会话就从这里接着跑，而不是把那半场对话扔掉重来。
+ */
+export interface ImportedInFlightAsk {
+  /** 前驱记录的 inputHash（对指令正文）。与本次 ask 的哈希相符才谈得上续跑。 */
+  inputHash: string;
+  /**
+   * 前驱**整个已结算会话**的消息数（不是某一条 ask 的记账边界——未完结的 ask 没有边界可记）。
+   * 它既含前缀那些完整交换，也含这半场未完的问答，正是续跑要接上的位置。
+   */
+  messageBoundary: number;
+}
+
+/**
  * 前驱 run 里一个具名 actor 的可导入前缀。由 run service 从前驱 journal 构建（纯确定，可重建）。
  */
 export interface ImportedActorCandidate {
   /** 前驱记录的规范化 persona——运行期 createActor 比对用（不一致即弃该候选）。 */
   persona: PersonaSpec;
-  /** 最长全 completed ask 前缀，按 actorSeq 0..n-1 索引。 */
+  /**
+   * 最长全 completed ask 前缀，按 actorSeq 0..n-1 索引。**可以为空**：带 {@link inFlight} 的候选
+   * 常常一条都没做完（扇出第一轮在飞时被修订，正是这个形状）。
+   */
   entries: ImportedAskEntry[];
+  /**
+   * 前驱停下时还在飞的那条 ask（若有）。只在转录源就是前驱自己那一行时导入——那半场对话只
+   * 存在于前驱的会话里，从更早祖先解析出的源只有完整前缀。
+   */
+  inFlight?: ImportedInFlightAsk;
   /**
    * 经 `resumed_from` 链解析出的转录源会话 id。service 保证在场——链上没有任何祖先
    * 持有该 actor 会话的候选在 service 侧就已弃置（降级为全新 actor），所以这里不是可选。
@@ -63,4 +87,20 @@ export interface ImportedRunCache {
    * `{op,args}` 的第 n 次出现对第 n 条记录，队列头即下一次命中。
    */
   world: ReadonlyMap<string, ImportedWorldEntry[]>;
+}
+
+/**
+ * 会话种子：分歧 actor 首次 live 派发时交给 {@link WorkflowDriver.createActorSession}，
+ * 让新会话以源会话的**全保真转录前缀**开场。
+ */
+export interface ActorSessionSeed {
+  /** 转录来源会话（前驱或更早祖先的该名 actor 会话）。 */
+  sourceSessionId: string;
+  /**
+   * 复制源会话前多少条消息 = 最后一条被消费导入 ask 的 {@link NodeRecord.messageBoundary}。
+   * count offset 跨前缀复制不变，所以这个值在链上任何持会话祖先处都直接可用。
+   */
+  messageCount: number;
+  /** 承袭的模型 pin（转录接续下静默换模型正是 pin 要防的身份突变）。 */
+  resolvedModel?: string;
 }

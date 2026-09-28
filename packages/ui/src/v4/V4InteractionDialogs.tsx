@@ -44,6 +44,17 @@ function getCurrentSessionInteractionSnapshot(
   return snapshot?.sessionId === sessionId ? snapshot : null;
 }
 
+function resolveV4ElicitationRequest(
+  projected: ZCodeElicitationRequest | null,
+  botProgress: ZCodeElicitationRequest | null,
+): ZCodeElicitationRequest | null {
+  // Bugfix：V4 snapshot 只保留原始阻塞请求，Bot 代答后的逐题进度必须覆盖同一 request 的投影。
+  if (projected && botProgress?.requestId === projected.requestId) {
+    return botProgress;
+  }
+  return projected;
+}
+
 function buildV4ElicitationProgressKey(request: ZCodeElicitationRequest): string {
   return `${request.requestId}:${request.currentQuestionIndex ?? 0}:${JSON.stringify(request.answerDrafts ?? {})}`;
 }
@@ -110,6 +121,11 @@ export function V4InteractionDialogs({
     (interaction) => interaction.payload.kind === "workspaceHookReview",
   );
   const notificationEnabled = useZCodeStoreWithDefault((state) => state.notificationEnabled, true);
+  const botElicitationProgress = useZCodeSessionStore(
+    (state) =>
+      getTaskUiState(getWorkspaceState(state, workspacePath, workspaceIdentity), sessionId)
+        .elicitationRequest,
+  );
   const localElicitationDraft = useZCodeSessionStore((state) => {
     if (!pending || pending.payload.kind !== "userInput") return undefined;
     return getTaskUiState(getWorkspaceState(state, workspacePath, workspaceIdentity), sessionId)
@@ -338,10 +354,14 @@ export function V4InteractionDialogs({
     );
   }
 
-  const elicitationRequest = pendingUserInputToElicitationRequest(sessionId, {
+  const projectedElicitationRequest = pendingUserInputToElicitationRequest(sessionId, {
     ...pending,
     payload: pending.payload,
   });
+  const elicitationRequest = resolveV4ElicitationRequest(
+    projectedElicitationRequest,
+    botElicitationProgress,
+  );
   if (elicitationRequest) {
     const isExitPlanMode = pending.payload.toolName?.trim().toLowerCase() === "exitplanmode";
     const isAskUserQuestion =
@@ -351,7 +371,11 @@ export function V4InteractionDialogs({
       <ElicitationDialog
         key={buildV4ElicitationProgressKey(elicitationRequest)}
         request={elicitationRequest}
-        initialFormDraft={localElicitationDraft}
+        initialFormDraft={
+          botElicitationProgress?.requestId === elicitationRequest.requestId
+            ? undefined
+            : localElicitationDraft
+        }
         onFormDraftChange={persistElicitationDraft}
         autoResolution={isAskUserQuestion ? pending.autoResolution : undefined}
         onFirstInteraction={

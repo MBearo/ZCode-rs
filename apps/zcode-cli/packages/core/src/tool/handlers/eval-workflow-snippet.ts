@@ -43,6 +43,7 @@ import { EVAL_WORKFLOW_SNIPPET_TOOL_DESCRIPTION } from "./eval-workflow-snippet-
 import { readWorkflowScriptFile } from "./workflow-path-source.js";
 import { formatWorkflowDiagnosticLines } from "./workflow-script-notes.js";
 import { describeWorkflowScriptPath } from "./workflow-script-path.js";
+import { requireDynamicWorkflowSkill } from "./workflow-skill-gate.js";
 
 // 工具级超时是**外层兜底**，不是 snippet 的墙钟：入参 timeoutMs（≤600s）驱动 harness
 // 到点 kill 子进程并正常返回失败；这里再留编译与收尾的余量。双时钟语义刻意不存在——
@@ -50,7 +51,8 @@ import { describeWorkflowScriptPath } from "./workflow-script-path.js";
 const EVAL_WORKFLOW_SNIPPET_TOOL_TIMEOUT_MS = 660_000;
 const EVAL_WORKFLOW_SNIPPET_MODEL_BYTES = 24_000;
 
-const NOT_EXECUTED_NOTE = "NOTE: The snippet was NOT executed — fix the errors above and call the tool again.";
+const NOT_EXECUTED_NOTE =
+  "NOTE: The snippet was NOT executed — fix the errors above and call the tool again.";
 const UNAVAILABLE_NOTE =
   "NOTE: The snippet was NOT executed — snippet evaluation is not available in this session.";
 
@@ -261,6 +263,8 @@ export const evalWorkflowSnippetToolEntry: ToolEntry = {
   // 来源二选一只对模型入参成立；`path` 在归一化里读成 `code`，确认门与 handler 因此同形。
   validateInput: (input) => validateEvalWorkflowSnippetInput(input),
   resolveInput: (input, context) =>
+    // 技能门先于 path 归一化（handlers/workflow-skill-gate.ts）：片段的语言规则也在技能里。
+    requireDynamicWorkflowSkill(context, EVAL_WORKFLOW_SNIPPET_TOOL_NAME) ??
     resolveEvalWorkflowSnippetInput(input, context.workingDirectory ?? "."),
   inputSchema: EvalWorkflowSnippetInputJsonSchema,
   outputSchema: EvalWorkflowSnippetOutputJsonSchema,

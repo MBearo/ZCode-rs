@@ -16,6 +16,7 @@ import type {
   WorldReadOp,
 } from "../facade/registry.js";
 import type { AskProgress, AskStats } from "./ask-observation-types.js";
+import type { ActorSessionSeed } from "./imported-cache-types.js";
 
 // ————————————————————————————————————————————————————————————————
 // 身份（identity）
@@ -108,8 +109,12 @@ export interface AskSpec {
 export type ImportCloseCause = "mutating-tool" | "world-run";
 
 /**
- * run 级别的容量上限，submit 时固定并存入 dwf_run；当前只有并发上界，
- * 取消是唯一的控制面。
+ * run 级别的容量上限，submit 时定下并存入 dwf_run。保存并发上界；
+ * 停止运行通过取消接口控制。
+ *
+ * 值**在 run 存活期间可以变一次以上**：一次只改 `max_concurrency` 的修订作用在活着的 run 上
+ * （{@link WorkflowEngine.setMaxConcurrency}）。引擎因此整份替换自己持有的 caps 而不是原地改字段——已记进
+ * `run-started` / `run-caps-changed` 事件的那几份必须保持它们被记下时的样子。
  */
 export interface Caps {
   maxConcurrency: number;
@@ -125,148 +130,12 @@ export type { ProviderStopDetails, RunStallInfo };
 // 结构化错误（errors are first-class）
 // ————————————————————————————————————————————————————————————————
 
-/**
- * 稳定错误码。区分 node 级（拒绝单个 ask 的 promise）与 run 级（使整个 run 失败）：
- * - node 级：ValidationFailed / ResultNotSubmitted / DriverError / Cancelled / ContextLimit /
- *   WorldReadCapExceeded——一次世界读取超过它那个 op 的上限（`files.grep`：2000 条命中或
- *   256KB 序列化，先到先拒；`git.diff`：512KB；见 `facade/world-read-caps.ts`）。它是 node 级
- *   而不是 run 级，靠的是**拒绝通道**而不是严重程度：世界读取返回一个脚本能 `catch` 的
- *   promise，所以"缩窄 pattern 或加个 glob"是一条脚本真能走的路。也刻意**不**折进
- *   DriverError——上限是脚本可以据以重写自己的契约，而靠匹配 message 文本区分两者，
- *   正是这个联合类型存在的目的所要防的。
- * - run 级：InputHashMismatch / UnknownActor / MissingAskSpec /
- *   DuplicateActorName——同一个 run 内两次 createActor 得到相同的**非空**有效名
- *   （有效名 = normalizePersona 后的 `spec.name`，persona.name 压过 name 实参）。规则对
- *   **所有** run 生效而不只是修订 run：具名 actor 是 amend-resume 缓存导入的身份键，而任何
- *   run 都是未来修订的潜在前驱，前驱里重名会让导入匹配歧义。匿名（名缺席或空串）不查、不禁——代价是没有缓存资格。
- *   字面量重名另有编译期 courtesy 诊断（analysis/actor-names.ts），但动态名只有运行期能查，
- *   所以这条才是真正的门。
- *   ReportCapExceeded——一个 run 超过 256 条报告，或单条 item 序列化超过 32KB
- *   （见 `facade/report-caps.ts`）。它是 run 级而不是 node 级，与上面 WorldReadCapExceeded 的
- *   分界同理、结论相反：`report` 返回 `void`，脚本**没有**可以 catch 的通道，除了 run 无处可放。
- *   也正因如此这两个数字必须宽到讲道理的脚本永远碰不到——脚本作者写不出恢复路径。
- *   同样刻意不折进 DriverError：上限是脚本可据以重写自己的契约。
- * - 构造期（run 尚未开始，引擎构造函数同步抛出）：ScriptHashMismatch
- * - 宿主级（**引擎从不产出**）：Interrupted——拥有该 run 的进程在结算之前就没了，由宿主在
- *   下一次构造时收敛那行永远停在 running 的记录。它必须是**独立的码**而不是复用 DriverError：脚本
- *   自己抛错也编码成 DriverError（`dynamic-workflow-runtime/src/harness.ts`），两者若同码，
- *   「进程被杀」与「脚本真失败」就只能靠 message 文本区分——而这正是本联合类型要避免的。
- *   ProviderStop——一个子代理（或工具侧）的模型请求撞上**确定性的**模型侧错误（认证失效、
- *   模型不在套餐里、配额耗尽……），driver 让
- *   run 以 `stopped(provider)` 停下而不是让节点失败；结构化明细在 `providerStop`。它是宿主级
- *   的另一条：引擎只在 `stop("provider", error)` 里原样落库。
- * 流程判断一律用这里的码，绝不匹配错误文本。
- */
-export type WorkflowErrorCode =
-  | "ValidationFailed"
-  | "ResultNotSubmitted"
-  | "DriverError"
-  | "WorldReadCapExceeded"
-  | "Cancelled"
-  | "ContextLimit"
-  | "ReportCapExceeded"
-  | "InputHashMismatch"
-  | "UnknownActor"
-  | "MissingAskSpec"
-  | "DuplicateActorName"
-  | "ScriptHashMismatch"
-  | "Interrupted"
-  | "ProviderStop"
-  // ——————————— 用户面产物 ———————————
-  // ⚠ 术语：这一批 artifact 全是**用户面产物**（脚本发布给用户看的产出），与
-  // `RunSettlement.artifact`（顶层返回值）无关。
-  //
-  // 通道按**成员族**分裂，与 WorldReadCapExceeded / ReportCapExceeded 的分界同一条论证：
-  // 内容成员（`file`/`markdown`）返回 promise，脚本可 catch，所以是节点级拒绝；预置成员
-  // 返回 void，没有可拒绝进去的地方，所以同样的事实在那一族是 failRun。三个 driver 侧的
-  // 码（Missing/Outside/TooLarge/StoreUnavailable）只可能来自内容成员，故恒为节点级。
-  | "ArtifactSourceMissing"
-  | "ArtifactPathOutsideWorkspace"
-  | "ArtifactTooLarge"
-  | "ArtifactStoreUnavailable"
-  | "ArtifactVersionCapExceeded"
-  | "ArtifactKindMismatch"
-  | "ArtifactCapExceeded"
-  | "ArtifactSpecInvalid"
-  | "ArtifactRedeclared"
-  | "ArtifactUndeclared"
-  // 第二个 id 想当 primary：内容成员是节点级拒绝，
-  // 预置成员是 failRun——与上面几条同一条分界。
-  | "ArtifactPrimaryConflict";
+// 错误码、可序列化形态与 WorkflowError 本身住在 errors.ts，从这里原样再导出（与上面的
+// run-terminal.ts 同一条理由：本文件已抵 400 行门，而消费者按惯例从 types 取）。
+import type { WorkflowError, WorkflowErrorJson } from "./errors.js";
 
-/**
- * 值不匹配的结构化比对（哪一侧变了）。记录里的值是 `expected`，本次传入的是 `got`。
- * 排查 resume 被拒的人需要的是这两个值，而不是从 message 里正则抠——流程判断与展示
- * 都不该依赖错误文本。
- */
-export interface WorkflowErrorMismatch {
-  expected: string;
-  got: string;
-}
-
-/** 错误的可序列化形态，落 journal（dwf_node.error_json / dwf_run.failure_json）。 */
-export interface WorkflowErrorJson {
-  code: WorkflowErrorCode;
-  message: string;
-  violations?: Violation[];
-  finalText?: string;
-  mismatch?: WorkflowErrorMismatch;
-  /** 只在 `code === "ProviderStop"` 时在场。 */
-  providerStop?: ProviderStopDetails;
-}
-
-/**
- * 跨 Boundary A 抛出的结构化错误。带稳定 code 与可选的 violations / finalText / mismatch，
- * 使脚本侧 try/catch 与上层都能按结构处理，而不依赖字符串匹配。
- */
-export class WorkflowError extends Error {
-  readonly code: WorkflowErrorCode;
-  readonly violations?: Violation[];
-  readonly finalText?: string;
-  readonly mismatch?: WorkflowErrorMismatch;
-  readonly providerStop?: ProviderStopDetails;
-
-  constructor(
-    code: WorkflowErrorCode,
-    message: string,
-    extra?: {
-      violations?: Violation[];
-      finalText?: string;
-      mismatch?: WorkflowErrorMismatch;
-      providerStop?: ProviderStopDetails;
-      cause?: unknown;
-    },
-  ) {
-    super(message);
-    this.name = "WorkflowError";
-    this.code = code;
-    if (extra?.violations !== undefined) this.violations = extra.violations;
-    if (extra?.finalText !== undefined) this.finalText = extra.finalText;
-    if (extra?.mismatch !== undefined) this.mismatch = extra.mismatch;
-    if (extra?.providerStop !== undefined) this.providerStop = extra.providerStop;
-    if (extra?.cause !== undefined) (this as { cause?: unknown }).cause = extra.cause;
-  }
-
-  /** 转为可序列化形态落 journal。 */
-  toJSON(): WorkflowErrorJson {
-    const json: WorkflowErrorJson = { code: this.code, message: this.message };
-    if (this.violations !== undefined) json.violations = this.violations;
-    if (this.finalText !== undefined) json.finalText = this.finalText;
-    if (this.mismatch !== undefined) json.mismatch = this.mismatch;
-    if (this.providerStop !== undefined) json.providerStop = this.providerStop;
-    return json;
-  }
-
-  /** 从 journal 记录重建（replay 命中失败节点时用）。 */
-  static fromJSON(json: WorkflowErrorJson): WorkflowError {
-    return new WorkflowError(json.code, json.message, {
-      violations: json.violations,
-      finalText: json.finalText,
-      mismatch: json.mismatch,
-      providerStop: json.providerStop,
-    });
-  }
-}
+export { WorkflowError } from "./errors.js";
+export type { WorkflowErrorCode, WorkflowErrorJson, WorkflowErrorMismatch } from "./errors.js";
 
 // ————————————————————————————————————————————————————————————————
 // Boundary A：host API（沙箱脚本调用）
@@ -664,7 +533,31 @@ export type RunEvent =
        */
       instructionsHead?: string;
     }
-  | { type: "node-dispatched"; instance: InstanceRef }
+  /**
+   * 派发：driver 被告知开跑。ask 的这一条**重复它自己的出生事实**——`kind` / `actor` /
+   * `phaseName` / `instructionsHead` 与该实例的 `node-queued` 逐字相同，`actorName` /
+   * `actorPhaseName` 则是它那个子代理的 `actor-created` 带过的 `name` / `phaseName`。
+   *
+   * 为什么要重复一遍已经发过的事实：读面的表是**有界**的，而「重要」发生在派发这一刻，不在
+   * 排队那一刻。2000 个 agent 的 run 会在头几秒里把
+   * 全部 `actor-created` / `node-queued` 发完，表被前 1024 个排队者占满、一个都还没结算，
+   * 此后每一个**真正在跑**的实例都进不了表。带上出生事实，这条事件就是一次自足的出生：
+   * 读面可以据它把实例连同它的子代理一起收进表，而不必回头去找那条早已被拒的 queued。
+   *
+   * 两个阶段名都是**出生戳**，不是发这条事件时的当前阶段：排队的 ask 会卡在并发上界后面，
+   * 而脚本早已走进后面的阶段（打戳见 engine-phase-stamp.ts，读的是铸造点写下的那张表）。
+   * world-read 的派发不带这些键：它紧跟着自己的 `node-queued` 发出，也没有子代理。
+   */
+  | {
+      type: "node-dispatched";
+      instance: InstanceRef;
+      kind?: NodeKind;
+      actor?: ActorRef;
+      actorName?: string;
+      actorPhaseName?: string;
+      phaseName?: string;
+      instructionsHead?: string;
+    }
   | { type: "node-repairing"; instance: InstanceRef; attempt: number; violations: Violation[] }
   | { type: "node-nudged"; instance: InstanceRef }
   /**
@@ -677,6 +570,16 @@ export type RunEvent =
   | ({ type: "node-waiting"; instance: InstanceRef } & AskWaitInfo)
   | { type: "node-executing"; instance: InstanceRef }
   | ({ type: "concurrency-changed" } & ConcurrencyChange)
+  /**
+   * 本 run **自己**的并发上界被就地改了：一次只带 `max_concurrency` 的修订作用在活着的 run 上，同一个
+   * runId、不铸后继、在飞 ask 一个不丢。
+   *
+   * 与紧挨着的 `concurrency-changed` 分属**两条界**，别混：那条是进程级共享 cap 的治理器观察
+   * （单位是模型请求，引擎只 record），这条是本 run 的在飞 ask 上界，且是一次**命令**的结果
+   * ——换 caps、写 `dwf_run.caps_max_concurrency`、发这条事件在同一个同步步骤里发生，三者永远一致。
+   * `previous` 是改之前的那一份：读面要说的是「8 → 2」，从单个 caps 值推不出来。
+   */
+  | { type: "run-caps-changed"; runId: string; caps: Caps; previous: Caps }
   | {
       type: "node-settled";
       instance: InstanceRef;
@@ -702,7 +605,12 @@ export type RunEvent =
    * （`cause: "world-run"`）。每个 run 最多一条；修订 run 崩溃后 resume 据它恢复「门已关」——这是
    * 关门的**唯一**事实来源，不再由「曾有 ask live」推断。非修订 run 没有表可关，不发。
    */
-  | { type: "import-cache-closed"; instance: InstanceRef; cause: ImportCloseCause; actorName?: string }
+  | {
+      type: "import-cache-closed";
+      instance: InstanceRef;
+      cause: ImportCloseCause;
+      actorName?: string;
+    }
   /**
    * 控制流经过了一个 `phase("…")` 标记。**无站点、无 journal 行、无 driver 往返**——标记不是一步工作，它只是
    * 「跑到哪了」的一个刻度。`name` 是作者的原词（去两端空白，与分析器铸造阶段 id 的键同一）；
@@ -976,6 +884,14 @@ export interface JournalStorePort {
    * 绝不触碰 status / failure——用量更新与 run 结算是两条独立的写入路径。
    */
   updateRunUsage(runId: string, spentTokens: number): void;
+  /**
+   * 单独持久化本 run 的并发上界（`dwf_run.caps_max_concurrency`）。未知 runId 必须抛错；
+   * **只碰这一列**——状态、用量与结算袋都不在这条写入的范围里，与 {@link updateRunUsage} 同族。
+   *
+   * 它是那一列的**第二个写入者**（第一个是 {@link createRun}）：一次只改 `max_concurrency` 的
+   * 修订就地作用在活着的 run 上，而 resume 沿用行里的 caps——不落库，恢复出来的就还是旧上界。
+   */
+  updateRunCaps(runId: string, caps: Caps): void;
 
   putActor(record: ActorRecord): void;
   getActor(runId: string, siteId: string, ordinal: number): ActorRecord | undefined;
@@ -1009,27 +925,13 @@ export type { AskLastTool, AskProgress, AskStats } from "./ask-observation-types
 
 // 导入缓存的数据结构住在 imported-cache-types.ts（本文件到 max-lines 上限后拆出），此处转出口以保持引用路径。
 export type {
+  ActorSessionSeed,
   ImportedActorCandidate,
   ImportedAskEntry,
+  ImportedInFlightAsk,
   ImportedRunCache,
   ImportedWorldEntry,
 } from "./imported-cache-types.js";
-
-/**
- * 会话种子：分歧 actor 首次 live 派发时交给 {@link WorkflowDriver.createActorSession}，
- * 让新会话以源会话的**全保真转录前缀**开场。
- */
-export interface ActorSessionSeed {
-  /** 转录来源会话（前驱或更早祖先的该名 actor 会话）。 */
-  sourceSessionId: string;
-  /**
-   * 复制源会话前多少条消息 = 最后一条被消费导入 ask 的 {@link NodeRecord.messageBoundary}。
-   * count offset 跨前缀复制不变，所以这个值在链上任何持会话祖先处都直接可用。
-   */
-  messageCount: number;
-  /** 承袭的模型 pin（转录接续下静默换模型正是 pin 要防的身份突变）。 */
-  resolvedModel?: string;
-}
 
 // ————————————————————————————————————————————————————————————————
 // 策略常量（此契约的一部分）

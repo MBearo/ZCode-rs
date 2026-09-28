@@ -62,15 +62,14 @@ export function resolveRuntimeDisallowedTools(
 }
 
 /**
- * 动态工作流灰度门在 registerBuiltInTools 上的取值。
- * **缺席即开启**：TUI、headless `-p` 和 workflow_child 都不写这个字段，它们必须保留完整工具面；
- * 只有受信 Host 创建的 protocol session 会显式写 false。fail-closed 的缺省值在协议服务端的
- * appRuntimePreferences，不在这一层。
+ * 动态工作流开关在 registerBuiltInTools 上的取值。
+ * **缺席即开启**：TUI 保留默认工具面；headless 根据 --enable-workflow 显式写 true/false，
+ * protocol session 由受信 Host 控制，workflow_child 继承父配置。fail-closed 的缺省值在
+ * headless 入口和协议服务端的 appRuntimePreferences，不在这一层。
  *
  * 之所以和 resolveRuntimeDisallowedTools 一样收在这里而不是写在调用点：注册面有**两个**入口
  * （helpers/runtime-tools.ts 的首次装配、methods/embedded-search-branch.ts 的分支刷新），
- * 两份各写一遍必然漂移。就漂过一次——刷新那份漏掉了这个字段，于是
- * 「缺席即开启」把十个工具原样加回注册表，灰度关闭的会话里模型仍然调到了 ListSavedWorkflows。
+ * 两个入口必须使用同一规则，否则刷新工具列表时可能重新注册已关闭的工作流工具。
  */
 export function resolveRuntimeDynamicWorkflowToolsIncluded(config: AgentRuntimeConfig): boolean {
   return config.dynamicWorkflowEnabled !== false;

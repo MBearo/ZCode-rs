@@ -5,37 +5,16 @@ function fitComposerToolbar(root: HTMLElement) {
   const available = root.querySelector<HTMLElement>("[data-composer-leading-actions]");
   const content = root.querySelector<HTMLElement>("[data-composer-leading-content]");
   if (!available || !content) return;
-  const controls = Array.from(
-    root.querySelectorAll<HTMLElement>("[data-composer-collapse-priority]"),
-  ).sort(
-    (a, b) =>
-      Number(a.dataset.composerCollapsePriority) - Number(b.dataset.composerCollapsePriority),
-  );
-  if (!controls.length) return;
+  const controls = root.querySelectorAll<HTMLElement>("[data-composer-collapse-priority]");
   // 每次从完整布局测量，避免各按钮独立 observer 互相抢空间，也覆盖语言与异步入口变化。
   delete root.dataset.composerModelIcon;
-  root.style.removeProperty("--composer-model-max-width");
   delete root.dataset.composerProviderCompact;
   for (const control of controls) delete control.dataset.composerCompact;
-  const prefixLine = root.querySelector<HTMLElement>(".composer-provider-prefix")?.parentElement;
-  if (prefixLine && prefixLine.scrollWidth > prefixLine.clientWidth) {
-    root.dataset.composerProviderCompact = "true";
-  }
-  const fits = () =>
-    content.getBoundingClientRect().width <= available.getBoundingClientRect().width;
-  for (const control of controls) {
-    if (fits()) return;
-    control.dataset.composerCompact = "true";
-    if (control.dataset.composerCollapsePriority === "0" && !fits()) {
-      root.dataset.composerProviderCompact = "true";
-    }
-  }
-  if (!fits()) {
-    const model = root.querySelector<HTMLElement>(".composer-model-trigger");
-    if (!model) return;
-    const trailing = root.querySelector<HTMLElement>("[data-composer-trailing-actions]");
-    const gap = Number.parseFloat(getComputedStyle(root).columnGap) || 12;
-    const overflow = Math.max(
+  const trailing = root.querySelector<HTMLElement>("[data-composer-trailing-actions]");
+  const gap = Number.parseFloat(getComputedStyle(root).columnGap) || 12;
+  const overflow = () =>
+    Math.max(
+      0,
       content.getBoundingClientRect().width - available.getBoundingClientRect().width,
       trailing
         ? content.getBoundingClientRect().width +
@@ -44,11 +23,25 @@ function fitComposerToolbar(root: HTMLElement) {
             root.getBoundingClientRect().width
         : 0,
     );
-    const modelWidth = Math.max(28, model.getBoundingClientRect().width - overflow);
-    // 收起左侧文案后，剩余空间必须让给同一行的模型与发送按钮，不能靠换行掩盖溢出。
-    if (modelWidth < 80) root.dataset.composerModelIcon = "true";
-    else root.style.setProperty("--composer-model-max-width", `${modelWidth}px`);
+  // 前四档依次收起 Computer、mode、Plan、think 文字，不能合并裁决。
+  for (const priority of ["0", "1", "2", "3"]) {
+    if (overflow() <= 0) return;
+    for (const control of controls) {
+      if (control.dataset.composerCollapsePriority === priority) {
+        control.dataset.composerCompact = "true";
+      }
+    }
   }
+  if (overflow() <= 0) return;
+  if (root.querySelector(".composer-provider-prefix")) {
+    root.dataset.composerProviderCompact = "true";
+  }
+  if (overflow() <= 0) return;
+  const thought = root.querySelector<HTMLElement>("[data-composer-thought-control]");
+  if (thought) thought.dataset.composerCompact = "icon";
+  // think 去掉绿条后重新测量；只差这点宽度时应保留完整模型名。
+  if (overflow() <= 0) return;
+  root.dataset.composerModelIcon = "true";
 }
 
 export function useComposerToolbarFit() {
@@ -77,14 +70,12 @@ export function useComposerToolbarFit() {
           if (probe.dataset[key]) root.dataset[key] = probe.dataset[key];
           else delete root.dataset[key];
         }
-        const modelMaxWidth = probe.style.getPropertyValue("--composer-model-max-width");
-        if (modelMaxWidth) root.style.setProperty("--composer-model-max-width", modelMaxWidth);
-        else root.style.removeProperty("--composer-model-max-width");
         const live = root.querySelectorAll<HTMLElement>("[data-composer-collapse-priority]");
         const measured = probe.querySelectorAll<HTMLElement>("[data-composer-collapse-priority]");
         live.forEach((control, index) => {
-          if (measured[index]?.dataset.composerCompact) control.dataset.composerCompact = "true";
-          else delete control.dataset.composerCompact;
+          if (measured[index]?.dataset.composerCompact) {
+            control.dataset.composerCompact = measured[index].dataset.composerCompact;
+          } else delete control.dataset.composerCompact;
         });
       } finally {
         probe.remove();

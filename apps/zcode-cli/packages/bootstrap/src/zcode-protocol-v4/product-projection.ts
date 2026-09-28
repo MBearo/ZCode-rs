@@ -115,6 +115,7 @@ import {
   applyConversationDeltas,
   applyConversationDeltasMutable,
   createMutableConversationSnapshotAccumulator,
+  diffWorkflowRunsState,
   reduceWorkflowRunsState,
   workspaceHookReviewRequestPayloadSchema,
 } from "@zcode/shared/zcode-protocol-v4";
@@ -1051,14 +1052,19 @@ export class ProductProjection {
    * wire encoder 报错，权威内存态会永久停在“无法发 snapshot”的状态。候选实例同时
    * 隔离 snapshot 与 reducer 的各类 side-map；拒绝时当前实例完全不变，客户端仍可从
    * 最后一个可传输 snapshot 恢复。
+   *
+   * `accept` 同时拿到这条事件**实际产出**的 delta：有些事件类别可以只按 delta 的字节数给出
+   * 一个可靠上界，不必把整份候选快照再序列化一遍（publisher 的 ingest 快路径）。传的是实际
+   * 产出而不是预演，正是因为预演算不准——投影在 reducer 之上还叠了 subagent 镜像与命令
+   * actions 的 materialization，少算一条就把 16MiB 闸门算松了。
    */
   applyEventAtomically(
     event: SessionEvent,
-    accept: (snapshot: ConversationSnapshot) => boolean,
+    accept: (snapshot: ConversationSnapshot, deltas: readonly ConversationDelta[]) => boolean,
   ): ConversationDelta[] | null {
     const candidate = this.cloneProjection();
     const deltas = candidate.applyEvent(event);
-    if (!accept(candidate.snapshot)) return null;
+    if (!accept(candidate.snapshot, deltas)) return null;
     this.adoptProjection(candidate);
     return deltas;
   }
@@ -1981,7 +1987,7 @@ export class ProductProjection {
             `model-change:${turnId}:${this.lastTurnModel.provider}/${this.lastTurnModel.model}->${config.provider}/${config.model}`,
           ),
           kind: "timelineMarker",
-        // lane 由投影裁决（UI 不得按 marker type 自行推断落位语义）。
+          // lane 由投影裁决（UI 不得按 marker type 自行推断落位语义）。
           lane: "lightBoundary",
           marker: {
             type: "modelChange",
@@ -3862,6 +3868,10 @@ export class ProductProjection {
             return true;
           }
           break;
+        // 非行 op：只动 workflowRuns 状态键，与 subagent 行投影的输入没有交集。
+        case "workflowRun.updated":
+        case "workflowRun.removed":
+          break;
         default: {
           const exhaustiveDelta: never = delta;
           return exhaustiveDelta;
@@ -4005,6 +4015,9 @@ export class ProductProjection {
       switch (delta.op) {
         case "row.appended":
         case "state.updated":
+        // 非行 op：改不了这一行的 prospective 形态。
+        case "workflowRun.updated":
+        case "workflowRun.removed":
           break;
         case "row.upserted":
           if (delta.row.rowId === prospective.rowId) prospective = delta.row;
@@ -4308,16 +4321,21 @@ export class ProductProjection {
   //
   // 归约本体在 @zcode/shared 的 workflow-runs-reducer（与状态 schema 同居）：TUI 镜像要用
   // 同一份归约，两处各写一份就是两个时钟。
-  // 留在这里的只有投影的非纯部分——从事件信封取载荷、把新状态发成 state.updated。
+  // 留在这里的只有投影的非纯部分——从事件信封取载荷、把新旧状态之差发成键级增量。
   private onDynamicWorkflowRunProgress(event: SessionEvent): ConversationDelta[] {
     // 先转 contracts 的有界 payload、再赋给 shared 的结构化入参：这行赋值就是"两边形状不漂移"
     // 的编译期闸（shared 不得反向依赖 contracts，所以入参类型只能结构化定义）。
     const envelope: WorkflowRunProgressEnvelope =
       event.payload as DynamicWorkflowRunProgressPayload;
-    const workflowRuns = reduceWorkflowRunsState(this.snapshot.workflowRuns, envelope);
+    const prior = this.snapshot.workflowRuns;
+    const workflowRuns = reduceWorkflowRunsState(prior, envelope);
     // null = 语义无变化（无效事件或同一条事件重放）：不产 delta，revision 不抬。
     if (workflowRuns === null) return [];
-    return [{ op: "state.updated", patch: { workflowRuns } }];
+    // 发**差**而不是整键：一条引擎事件只动一个节点，整键重发是每事件 O(N) 字节、一条 run
+    // 全程 O(N²)（workflow-runs-delta.ts 的文件头讲了这笔账怎么变成节点上界和 UI 卡死的）。
+    // `applyAll(prior, diff(prior, next))` 与 next **逐字节**一致是增量协议的契约，
+    // 所以 applyEventInternal 把这串 delta 应用回去之后，this.snapshot.workflowRuns 仍是 next。
+    return diffWorkflowRunsState(prior, workflowRuns);
   }
 
   private removeQueueItems(ids: readonly string[]): ConversationDelta[] {

@@ -7,8 +7,10 @@
 // 除 optimistic overlay（pending 命令展示）外，本 store 不产生任何 conversation 事实。
 import {
   applyConversationDeltas,
+  isDeterministicContentFault,
   parseConversationTopic,
   PROTOCOL_V4_LIMITS,
+  SUBSCRIPTION_CONTENT_REJECTED,
   type ConversationRow,
   type ConversationSnapshot,
   type ConversationOpenTiming,
@@ -304,6 +306,8 @@ export class ConversationProjectionStore {
     forceSnapshot: boolean;
     postRecoveryGapPending: boolean;
     frameDeadline: ReturnType<typeof setTimeout> | null;
+    /** 本次 flight 是为内容确定性失败发起的：终态用 contentRejected，不混进瞬态统计。 */
+    contentFault: boolean;
   } | null = null;
   private readonly offAssemblyFault: () => void;
   private readonly offRuntimeRestart: (() => void) | null = null;
@@ -334,7 +338,7 @@ export class ConversationProjectionStore {
     liveProjectionStores.add(this);
     this.offAssemblyFault = transport.onAssemblyFault((fault) => {
       if (fault.topic === this.topic) {
-        this.handleAssemblyFault(fault.subscriptionId, fault.deliveryKind);
+        this.handleAssemblyFault(fault.subscriptionId, fault.deliveryKind, fault.reasonCode);
       }
     });
     // runtime 换代（CLI 进程换代）按 sessionsIndexStore 的约定优先走 lifecycle：dispose
@@ -766,13 +770,24 @@ export class ConversationProjectionStore {
   }
 
   /** physical assembly fault：旧 projection 保持可见，active sub 上 single-flight 恢复。 */
-  handleAssemblyFault(subscriptionId: string, deliveryKind?: TopicFrameDeliveryKind): void {
+  handleAssemblyFault(
+    subscriptionId: string,
+    deliveryKind?: TopicFrameDeliveryKind,
+    reasonCode?: string,
+  ): void {
     if (this.closed || subscriptionId !== this.state.subscriptionId) return;
     if (
       this.awaitingInitial?.subscriptionId === subscriptionId &&
       (deliveryKind === "initial" || deliveryKind === "recovery" || deliveryKind === undefined)
     ) {
       this.awaitingInitial = null;
+    }
+    // 内容确定性失败不进瞬态阶梯（04-sync 封闭规则 11）：resume 只会把同一批 delta 再投一遍，
+    // 必然再被拒；deliveryKind 也不改变结论——本端读不懂这份内容。唯一可能产出不同字节的是
+    // 强制 snapshot，所以直接跳到它，它再被内容拒绝就停手，不把订阅烧在必然失败的重试上。
+    if (isDeterministicContentFault(reasonCode)) {
+      this.requestRecovery(true, { contentFault: true });
+      return;
     }
     // 缺失/伪 deliveryKind 会以 undefined typed fault 到达；若 recovery 已在途，
     // 必须 fail closed/升级，不能把坏 recovery 当普通 burst 后永远等待。
@@ -785,15 +800,18 @@ export class ConversationProjectionStore {
     this.requestRecovery(recoveryFault);
   }
 
-  private requestRecovery(recoveryEvent = false): void {
+  private requestRecovery(recoveryEvent = false, options: { contentFault?: boolean } = {}): void {
     if (this.closed) return;
     const subscriptionId = this.state.subscriptionId;
     if (!subscriptionId) {
       void this.connect({ forceSnapshot: true });
       return;
     }
+    const contentFault = options.contentFault === true;
     const existing = this.recovery;
     if (existing) {
+      // 一旦本次 flight 里出现过内容失败，终态就归内容失败：后续瞬态 fault 不该把它洗白。
+      if (contentFault) existing.contentFault = true;
       if (!recoveryEvent) return;
       if (existing.forceSnapshot) {
         this.failRecovery("fault.subscription.recoveryFailed");
@@ -819,9 +837,11 @@ export class ConversationProjectionStore {
       forceSnapshot: false,
       postRecoveryGapPending: false,
       frameDeadline: null,
+      contentFault,
     };
     this.recovery = recovery;
-    this.issueRecovery(recovery, false);
+    // 内容失败跳过 resume 档直接强制 snapshot；瞬态失败仍按原阶梯先试 resume。
+    this.issueRecovery(recovery, contentFault);
   }
 
   private issueRecovery(
@@ -908,7 +928,8 @@ export class ConversationProjectionStore {
       recovery.frameDeadline = null;
       if (this.closed || this.recovery !== recovery || recovery.validFrameSeen) return;
       if (!recovery.forceSnapshot) this.issueRecovery(recovery, true);
-      else this.failRecovery("fault.subscription.recoveryFrameTimedOut");
+      else
+        this.failRecovery("fault.subscription.recoveryFrameTimedOut", { contentEligible: false });
     }, PROTOCOL_V4_LIMITS.logicalFrameAssemblyTimeoutMs);
   }
 
@@ -925,11 +946,19 @@ export class ConversationProjectionStore {
     this.recovery = null;
   }
 
-  private failRecovery(reasonCode: string): void {
+  /**
+   * `contentEligible: false` 给**超时**终态用：deadline 没等到 recovery 帧是传输症状，即使本次
+   * flight 起因是内容失败，也不该被重标成 contentRejected——那会连带取消一次仍然有意义的重试。
+   */
+  private failRecovery(reasonCode: string, options: { contentEligible?: boolean } = {}): void {
     if (!this.recovery) return;
+    // 内容确定性失败与传输失败必须可区分：前者重连不会变好，遥测按 code 聚合时也不该把一次
+    // 版本失配读成网络抖动（reasonCode 词表见 wire-fault.ts）。
+    const contentFault = this.recovery.contentFault && options.contentEligible !== false;
+    const code = contentFault ? SUBSCRIPTION_CONTENT_REJECTED : reasonCode;
     this.discardRecovery();
-    logger.warn(`[v4-store] ${this.topic} recovery fail-closed: ${reasonCode}`);
-    this.setState({ status: "error", lastError: reasonCode });
+    logger.warn(`[v4-store] ${this.topic} recovery fail-closed: ${code}`);
+    this.setState({ status: "error", lastError: code });
   }
 
   private handleRuntimeRestart(reason?: "runtimeRestart" | "transportReplaced"): void {

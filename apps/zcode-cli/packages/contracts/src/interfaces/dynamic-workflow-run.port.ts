@@ -7,6 +7,15 @@ import type {
   DynamicWorkflowRunPhaseView,
   DynamicWorkflowRunSubagentView,
 } from "./dynamic-workflow-run-roster.port.js";
+import type {
+  DynamicWorkflowRunRetuneRequest,
+  DynamicWorkflowRunRetuneResult,
+} from "./dynamic-workflow-run-retune.port.js";
+import type {
+  DynamicWorkflowRunWorkspaceNode,
+  DynamicWorkflowRunWorkspaceNodeResult,
+  DynamicWorkflowRunWorkspaceNodeResultQuery,
+} from "./dynamic-workflow-run-workspace.port.js";
 import type { DynamicWorkflowRunProgressPayload } from "../events/session.events.js";
 import type { ModelSelection } from "../model/model.js";
 import type { SessionId, ToolCallId } from "./shared.js";
@@ -234,6 +243,15 @@ export type DynamicWorkflowRunSnapshot = Omit<WorkflowTaskSnapshot, "output"> & 
   scriptPath?: string;
   /** 结构化失败（与 {@link DynamicWorkflowRunDetail.error} 同源）；基类的 `error` 是它的 message。 */
   failure?: DynamicWorkflowRunError;
+  /**
+   * 本 run 及其 lineage 的**活动**时长（毫秒）：本 run 的每一世加上每个前驱的每一世，世与世
+   * 之间的空档不计。完成卡的「时间」格报的就是它。
+   *
+   * 与 `reports` / `artifacts` 同规**只在终态在场**（`getTask` 被反复轮询，而消费者只有终态
+   * 通知），且 journal 说不出话时整字段缺席——不是 0。缺席即读侧退回 `completedAt − startedAt`：
+   * 那是结算它的那个进程自己看到的一世，一个更保守但永不虚报的答案。
+   */
+  activeDurationMs?: number;
   reports?: readonly unknown[];
   /**
    * 此刻停驻在这个 run 上、等主代理作答的升级问题。
@@ -333,75 +351,6 @@ export interface DynamicWorkflowRunArtifactItemPage {
 export interface DynamicWorkflowRunArtifactBytes {
   bytes: Uint8Array;
   contentType: string;
-}
-
-// ————————————————————————————————————————————————————————————————
-// 工作区 transcript
-// ————————————————————————————————————————————————————————————————
-
-/** 工作区节点的种类：journal `dwf_node.kind` 的两个 world 值。 */
-export type DynamicWorkflowRunWorkspaceNodeKind = "world-read" | "world-run";
-
-/** 节点行的状态，= journal 的 `NodeRecordStatus`（刻意在这里重申，理由同 lifecycle status）。 */
-export type DynamicWorkflowRunWorkspaceNodeStatus = "running" | "completed" | "failed";
-
-/**
- * 清单上一行的**摘要**：不把正文解出来就能报的那几个数。由存储层用 SQLite 的 JSON 函数在
- * 查询里算出（`resultBytes` / `resultCount` / `exitCode` / `stdoutBytes` / `stderrBytes`），
- * 端口原样透传。哪个字段在场取决于 op：数组正文（glob / grep / changedFiles）有 `resultCount`，
- * `world.run` 有 exitCode 与两路输出的字节数，字符串正文只有 `resultBytes`。
- */
-export interface DynamicWorkflowRunWorkspaceNodeSummary {
-  /** 正文序列化后的 UTF-8 字节数。 */
-  resultBytes: number;
-  resultCount?: number;
-  exitCode?: number;
-  stdoutBytes?: number;
-  stderrBytes?: number;
-}
-
-/**
- * 工作区 transcript 的一行：一次 `files.*` / `git.*` / `world.run` 调用，**不带正文**。
- *
- * `op` / `args` 来自迁移 0030 加的 `input_json`（admission 时写下、≤ 4 KB）；升级前的历史行
- * 两者缺席，UI 退回静态图上的步标签。`inputTruncated` 表示 args 是逐项字符串预览而不是原值。
- */
-export interface DynamicWorkflowRunWorkspaceNode {
-  siteId: string;
-  ordinal: number;
-  kind: DynamicWorkflowRunWorkspaceNodeKind;
-  op?: string;
-  args?: readonly unknown[];
-  inputTruncated?: true;
-  status: DynamicWorkflowRunWorkspaceNodeStatus;
-  /** failed 行的结构化失败（journal `error_json` 的 code + message；其余字段不出端口）。 */
-  error?: DynamicWorkflowRunError;
-  /** 结算成功的行才有。 */
-  summary?: DynamicWorkflowRunWorkspaceNodeSummary;
-  /** journal 行的建立 / 最近更新时刻（epoch 毫秒）；二者之差就是这一步的耗时。 */
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** {@link DynamicWorkflowRunPort.readWorkspaceNodeResult} 的分页袋：正文的字节上限。 */
-export interface DynamicWorkflowRunWorkspaceNodeResultQuery {
-  /** 必填；端口按它**有界化**正文（截断而不是拒绝——这是审计面，不是脚本的取数面）。 */
-  maxBytes: number;
-}
-
-/**
- * 一个工作区节点的正文：按形状有界化过的 `result`。
- *
- * 截断是**保形**的：字符串切尾、数组去尾、`world.run` 的 stdout / stderr 各自切尾，
- * `truncated` 说明发生过截断，`totalBytes` 是截断前的字节数。running 行没有正文；failed 行
- * 只有 `error`。
- */
-export interface DynamicWorkflowRunWorkspaceNodeResult {
-  status: DynamicWorkflowRunWorkspaceNodeStatus;
-  result?: unknown;
-  error?: DynamicWorkflowRunError;
-  truncated: boolean;
-  totalBytes: number;
 }
 
 /** 一个停驻中的升级问题。字段与 `escalation-raised` 事件同源，另加提问时刻。 */
@@ -622,6 +571,23 @@ export interface DynamicWorkflowRunPort {
    * 缺席时工具层不钳、原样下传（端口实现自己还会钳一次）。
    */
   concurrencyCeiling?(): number;
+  /**
+   * 就地改一个**在飞** run 自己的并发上界：同一个 runId、不铸后继、不 supersede、不导入缓存、在飞 ask 一个不丢。
+   *
+   * 与 {@link amend} 并列而非合并：修订换的是**脚本**，代价是停下前驱、铸新 run、从缓存重放；
+   * 而「只把这个 run 调慢一点」不该付那笔账。两个调用方（`AmendWorkflow` 的 handler 与 GUI 的
+   * `amendWorkflowRunSettings`）读同一个答案，于是「什么算一次 retune」只有一个定义。
+   *
+   * 三件事在一个同步片里发生或者一件都不发生：换引擎的 caps（调度器现读）、写
+   * `dwf_run.caps_max_concurrency`（resume 因此续在新上界上）、记一条 `run-caps-changed`。
+   * 服务另把自己那份内存上界一并挪动，于是快照、详情与 `GetWorkflowRun` 立刻报新值。
+   *
+   * **可选成员**（消费方 `typeof` 探测），理由同 {@link resume}：端口 stub 不必为一条控制面全员
+   * 陪跑，而「端口缺席」与「方法缺席」对调用方是同一个业务事实——回落到一次真正的修订。
+   */
+  retuneConcurrency?(
+    request: DynamicWorkflowRunRetuneRequest,
+  ): Promise<DynamicWorkflowRunRetuneResult>;
   getTask(taskId: string): Promise<DynamicWorkflowRunSnapshot | undefined>;
   waitForTask(
     taskId: string,
@@ -924,6 +890,13 @@ export interface DynamicWorkflowRunProviderStop {
 // 情势截面（阶段 / 子代理 / 健康）的类型住在 dynamic-workflow-run-roster.port.ts（同上），
 // 此处原样再导出以保持 `@zcode/contracts` 的导入路径不变。
 export type * from "./dynamic-workflow-run-roster.port.js";
+
+// retune（就地改在飞 run 的并发上界）的三个类型住在 dynamic-workflow-run-retune.port.ts，
+// 同上原样再导出。
+export type * from "./dynamic-workflow-run-retune.port.js";
+
+// 工作区 transcript 的六个类型住在 dynamic-workflow-run-workspace.port.ts，同上原样再导出。
+export type * from "./dynamic-workflow-run-workspace.port.js";
 
 /** 单 run 详情：共同截面 + 进度 + 情势截面 + 按终态分叉的产物 / 失败。 */
 export interface DynamicWorkflowRunDetail extends DynamicWorkflowRunSummary {

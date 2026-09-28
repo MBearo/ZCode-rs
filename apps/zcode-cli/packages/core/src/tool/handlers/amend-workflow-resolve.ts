@@ -10,8 +10,6 @@
 import {
   AmendWorkflowInputSchema,
   type AmendWorkflowInput,
-  type AmendWorkflowPredecessor,
-  type DynamicWorkflowRunSnapshot,
   type ModelCatalogPort,
 } from "@zcode/contracts";
 import type {
@@ -19,13 +17,13 @@ import type {
   ToolInputResolutionContext,
   ToolInputResolutionResult,
 } from "../types.js";
-import {
-  SUBAGENT_MODEL_UNAVAILABLE,
-  clampWorkflowMaxConcurrency,
-} from "./create-workflow-source.js";
+import { SUBAGENT_MODEL_UNAVAILABLE } from "./create-workflow-source.js";
+import { resolveConcurrencyRetuneRoute } from "./amend-workflow-retune.js";
 import {
   AMEND_WORKFLOW_ERROR_CODE,
+  describePredecessor,
   refuseUnchangedScript,
+  resolveAmendMaxConcurrency,
   resolveAmendScript,
 } from "./amend-workflow-source.js";
 import { resolveModelReference } from "./model-reference.js";
@@ -33,6 +31,7 @@ import { workflowRunNotFoundFailure } from "./workflow-run-introspection.js";
 
 export {
   AMEND_WORKFLOW_ERROR_CODE,
+  resolveAmendMaxConcurrency,
   scriptUnavailableFailure,
   validateAmendWorkflowSource,
 } from "./amend-workflow-source.js";
@@ -107,6 +106,17 @@ export async function resolveAmendWorkflowInput(
   }
   const snapshot = await port.getTask(parsed.data.run_id);
   if (snapshot === undefined) return predecessorNotFoundFailure(parsed.data.run_id);
+  const predecessor = describePredecessor(snapshot, context.sessionId);
+  // 路由在这里分岔，而且只能在这里：刚读完前驱（于是知道它还活不活），入参形状又摆在眼前
+  // （于是知道除并发外有没有别的要变）。命中即就地调并发——不读脚本、不继承、不编译，
+  // 归一化后的入参因此**没有 script**，那也是 handler 与 prepareApproval 认出这条路的凭据。
+  const retune = resolveConcurrencyRetuneRoute({
+    model: parsed.data,
+    port,
+    predecessor,
+    inherited: snapshot.maxConcurrency,
+  });
+  if (retune !== undefined) return retune;
   const subagentModel = resolveAmendSubagentModel(
     parsed.data.subagent_model,
     snapshot.subagentModel,
@@ -148,7 +158,7 @@ export async function resolveAmendWorkflowInput(
     ),
     ...subagentModel.field,
     predecessor: {
-      ...describePredecessor(snapshot, context.sessionId),
+      ...predecessor,
       ...(script.inherited ? { script_inherited: true as const } : {}),
     },
   };
@@ -224,45 +234,5 @@ function subagentModelFailure(message: string): ToolHandlerFailure {
     result: false,
     errorCode: AMEND_WORKFLOW_ERROR_CODE.SUBAGENT_MODEL,
     message: `workflow_subagent_model_unresolved: ${message} Nothing was stopped or created.`,
-  };
-}
-
-/**
- * 并发上界的三态归一：
- *
- *   - 数 → 钳到 `[1, 天花板]`；
- *   - `null` → 解除，键整个消失（新 run 跑在天花板上）；
- *   - 省略 → 沿用前驱的上界。快照**只在低于天花板时**带 `maxConcurrency`，所以「前驱没设过」
- *     与「前驱跑在天花板上」在这里是同一件事：也是键消失。沿用的值同样再钳一次——前驱可能
- *     是在另一台机器（另一个天花板）上起的。
- *
- * 三态只活到这里：确认窗与 handler 之后面对的只有「一个数或没有」。
- */
-export function resolveAmendMaxConcurrency(
-  requested: number | null | undefined,
-  inherited: number | undefined,
-  ceiling: number | undefined,
-): { max_concurrency?: number } {
-  if (requested === null) return {};
-  const resolved = requested ?? inherited;
-  if (resolved === undefined) return {};
-  return { max_concurrency: clampWorkflowMaxConcurrency(resolved, ceiling) };
-}
-
-function describePredecessor(
-  snapshot: DynamicWorkflowRunSnapshot,
-  sessionId: string | undefined,
-): AmendWorkflowPredecessor {
-  // 快照的 `status` 是追踪器的通用词（stopped 折成 cancelled …）；真实词在 `runStatus`，只在
-  // 终态在场——非终态一律读作 running（pending 在这里与 running 无分别：都会被 amend 停下）。
-  const status = snapshot.runStatus ?? "running";
-  return {
-    ...(snapshot.name === undefined ? {} : { name: snapshot.name }),
-    status,
-    ...(snapshot.stopReason === undefined ? {} : { stop_reason: snapshot.stopReason }),
-    owned_by_this_session:
-      sessionId !== undefined &&
-      snapshot.parentSessionId !== undefined &&
-      snapshot.parentSessionId === sessionId,
   };
 }

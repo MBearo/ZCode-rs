@@ -13,6 +13,12 @@ import {
   type ArtifactContentOp,
   type ArtifactPresetOp,
 } from "../facade/registry.js";
+import { heldResolution } from "./replay-order.js";
+import {
+  primaryArtifactId,
+  primaryConflict,
+  primaryConflictMessage,
+} from "./engine-artifacts-primary.js";
 import { validateArtifactSpec } from "./artifact-spec.js";
 import { hashMismatch } from "./scheduler.js";
 import type { EngineState } from "./engine-state.js";
@@ -102,12 +108,19 @@ export function publishContentArtifact(
       state.failRun(err);
       return Promise.reject(err);
     }
+    // 与 ask / world 命中同规：释放点过 replay 次序闸。发布是效应、脚本要 await 它，所以它也是一个能决定
+    // 后续续体次序的释放点；预置声明是同步 void，从不走这条路，也就从不占闸。
     if (recorded.status === "completed") {
       const record = recorded.result as ArtifactVersionRecord;
-      return Promise.resolve({ id: record.id, version: record.version });
+      return heldResolution(state.holdForReplay, instance, () => ({
+        id: record.id,
+        version: record.version,
+      }));
     }
     if (recorded.status === "failed") {
-      return Promise.reject(WorkflowError.fromJSON(recorded.error!));
+      return heldResolution(state.holdForReplay, instance, () => {
+        throw WorkflowError.fromJSON(recorded.error!);
+      });
     }
     // status === "running"：崩溃于执行中，落到下面重新 live 执行（字节的拷贝是幂等的，
     // 而版本号从**已 completed 的行数**派生，所以重跑不会跳号）。
@@ -371,7 +384,12 @@ function settleArtifactPublish(
       issued,
       new WorkflowError(
         "ArtifactPrimaryConflict",
-        primaryConflictMessage(issued.id, holder, `publish "${issued.id}" without primary`, instance),
+        primaryConflictMessage(
+          issued.id,
+          holder,
+          `publish "${issued.id}" without primary`,
+          instance,
+        ),
       ),
     );
   }
@@ -394,32 +412,6 @@ function settleArtifactPublish(
   });
   state.record({ type: "artifact-published", instance, artifact: stored });
   return { id: issued.id, version: issued.version };
-}
-
-/** 本 run 目前的 primary id（至多一个）；没有则 undefined。从 `state.artifacts` 派生，resume 后自然一致。 */
-function primaryArtifactId(state: EngineState): string | undefined {
-  for (const [id, idState] of state.artifacts) if (idState.primary) return id;
-  return undefined;
-}
-
-/** `id` 想当 primary 而**别的** id 已经是 ⇒ 返回那个 id；否则 undefined（不想当 / 就是它自己）。 */
-function primaryConflict(state: EngineState, id: string, primary: boolean): string | undefined {
-  if (!primary) return undefined;
-  const holder = primaryArtifactId(state);
-  return holder === undefined || holder === id ? undefined : holder;
-}
-
-function primaryConflictMessage(
-  id: string,
-  holder: string,
-  fix: string,
-  instance: InstanceRef | undefined,
-): string {
-  const where = instance === undefined ? "" : ` (at ${refToString(instance)})`;
-  return (
-    `Cannot mark "${id}" as primary${where}: "${holder}" is already this run's primary artifact. ` +
-    `A run has one deliverable; ${fix}, or publish it as a new version of "${holder}".`
-  );
 }
 
 /**

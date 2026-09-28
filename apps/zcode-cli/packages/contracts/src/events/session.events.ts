@@ -330,8 +330,12 @@ export type WorkflowLaunchDisplay = Extract<ToolResultDisplayPayload, { kind: "c
  * 供「13 → 4」这种读法。与 shared 的 `workflowSettingsAmendMetaSchema` 同形。
  */
 export interface WorkflowSettingsAmendMeta {
-  /** 被这次调整替代（或接着跑）的那个 run。 */
-  predecessorRunId: string;
+  /**
+   * 被这次调整替代（或接着跑）的那个 run。**缺席即就地生效**：只改并发上界、run 又还在飞时，
+   * 那次「配置」既不停这次 run 也不另起一次，于是没有前驱可指——`runId` 指的就是被调整的那一个。
+   * 与 shared 的 `workflowSettingsAmendMetaSchema` 同形。
+   */
+  predecessorRunId?: string;
   subagentModel?: { from?: string; to?: string };
   maxConcurrency?: { from?: number; to?: number };
   ceiling?: number;

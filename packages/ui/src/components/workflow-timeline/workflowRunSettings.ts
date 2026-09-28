@@ -148,8 +148,28 @@ export function clampWorkflowRunSettingsBound(value: number, ceiling: number | u
   return ceiling === undefined ? floor : Math.min(floor, ceiling);
 }
 
-/** 后果句的文案 key：随 run 状态换最后一句（completed 不会走到这里）。 */
-export function workflowRunSettingsConsequenceId(status: WorkflowRunState["status"]): string {
+/**
+ * 只动了并发上限（`null` = 解除本 run 自己的界，也算）。判据是载荷里**只有**这一个键——
+ * 与 agent 侧的路由同一条：那里也只认这一种载荷，多一个字段就走原来的修订。
+ */
+function isConcurrencyOnlyChange(change: WorkflowRunSettingsChange | undefined): boolean {
+  if (change === undefined) return false;
+  return Object.keys(change).length === 1 && change.maxConcurrency !== undefined;
+}
+
+/**
+ * 后果句的文案 key：随 run 状态换最后一句（completed 不会走到这里）。
+ *
+ * **正在跑**的 run 只改并发上限时会就地生效，不停止或另起 run，
+ * 因此这里显示并发调整的后果说明。`pending` 不算在内：它的引擎可能还没建起来，就地设不上就照旧退回一次
+ * 真正的修订，那时原句仍然是对的。
+ */
+export function workflowRunSettingsConsequenceId(
+  status: WorkflowRunState["status"],
+  change?: WorkflowRunSettingsChange,
+): string {
+  if (status === "running" && isConcurrencyOnlyChange(change))
+    return "chat.toolCall.workflow.run.settings.consequence.concurrencyLive";
   switch (status) {
     case "pending":
       return "chat.toolCall.workflow.run.settings.consequence.pending";

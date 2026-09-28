@@ -105,6 +105,20 @@ export interface DynamicWorkflowIntrospectableJournal
   extends JournalStorePort, DwfRunIntrospectionQueries {}
 
 /**
+ * journal 是否带「每一世的活动区间」读面（完成卡的时长口径）。
+ *
+ * **独立探测，不并入 {@link supportsRunIntrospection} 的四条**：那四条一起探是因为它们共同
+ * 支撑两个工具的可用性，而这一条只支撑一个数字。缺它的后果是时长退回「本世墙钟」——一个更
+ * 保守的答案，不是一个坏掉的工具，所以它不该连坐 `GetWorkflowRun` 的可用性（引擎自带的内存
+ * journal 就不提供它，而内存 journal 里的 run 本来也活不过进程）。
+ */
+export function supportsRunLifeSpans(
+  journal: JournalStorePort,
+): journal is JournalStorePort & Pick<DwfRunIntrospectionQueries, "listRunLifeSpans"> {
+  return typeof (journal as Partial<DwfRunIntrospectionQueries>).listRunLifeSpans === "function";
+}
+
+/**
  * journal 是否带 run 内省查询。**四条一起探**：能力是整体的（列表要 listRuns，详情要另外三条），
  * 部分在场的实现只会让某一个工具在运行时炸掉，而不是可见地降级。
  */

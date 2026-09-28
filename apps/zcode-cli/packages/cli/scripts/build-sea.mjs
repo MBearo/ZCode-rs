@@ -23,6 +23,7 @@ import {
 import { removeWindowsAuthenticodeSignature } from "./windows-authenticode.mjs";
 import { collectSeaTuiAssets } from "./sea-tui-assets.mjs";
 import { collectSeaOfficialPluginAssets } from "./sea-official-plugin-assets.mjs";
+import { collectSeaBundledSkillAssets } from "./sea-bundled-skill-assets.mjs";
 import { collectSeaRuntimeToolAssets } from "./sea-runtime-tool-assets.mjs";
 import { prepareSeaRuntimeToolAssets } from "./sea-runtime-tool-prepare.mjs";
 import { collectSeaPlaywrightAssets } from "./sea-playwright-assets.mjs";
@@ -154,6 +155,11 @@ const prepareSeaBlob = async (target, nodeVersion) => {
     root,
     stagingDirectory: seaAssetStagingForTarget(`${target}-official-plugins`),
   });
+  const { assets: bundledSkillAssets, manifest: bundledSkillManifest } =
+    await collectSeaBundledSkillAssets({
+      root,
+      stagingDirectory: seaAssetStagingForTarget(`${target}-bundled-skills`),
+    });
   const { assets: runtimeToolAssets, manifest: runtimeToolManifest } =
     await collectSeaRuntimeToolAssets({
       root: repositoryRoot,
@@ -167,7 +173,11 @@ const prepareSeaBlob = async (target, nodeVersion) => {
       target,
     });
   const providerConfigAssets = await collectSeaProviderConfigAssets({ root: repositoryRoot });
-  const nodeLicensePath = await stageNodeNotices(seaAssetStagingForTarget(`${target}-node`), nodeVersion, repositoryRoot);
+  const nodeLicensePath = await stageNodeNotices(
+    seaAssetStagingForTarget(`${target}-node`),
+    nodeVersion,
+    repositoryRoot,
+  );
 
   await writeFile(
     seaConfig,
@@ -176,6 +186,7 @@ const prepareSeaBlob = async (target, nodeVersion) => {
         assets: {
           ...tuiAssets,
           ...pluginAssets,
+          ...bundledSkillAssets,
           ...runtimeToolAssets,
           ...playwrightAssets,
           ...providerConfigAssets,
@@ -193,7 +204,7 @@ const prepareSeaBlob = async (target, nodeVersion) => {
   );
 
   console.log(
-    `[sea] generating SEA blob for ${target} with ${tuiManifest.files.length} TUI assets, ${pluginManifest.plugins.length} official plugins, ${runtimeToolManifest.tools.length} runtime tools, and ${playwrightManifest.files.length} Playwright assets`,
+    `[sea] generating SEA blob for ${target} with ${tuiManifest.files.length} TUI assets, ${pluginManifest.plugins.length} official plugins, ${bundledSkillManifest.files.length} bundled skill files, ${runtimeToolManifest.tools.length} runtime tools, and ${playwrightManifest.files.length} Playwright assets`,
   );
   run(process.execPath, ["--experimental-sea-config", seaConfig]);
   return seaBlob;

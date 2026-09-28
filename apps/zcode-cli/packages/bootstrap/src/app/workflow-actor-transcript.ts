@@ -19,6 +19,7 @@
 import {
   createMessageId,
   createPartId,
+  type Logger,
   type MessageId,
   type MessageInfo,
   type MessagePart,
@@ -66,24 +67,52 @@ export async function countActorTranscript(
  *    与 part 内嵌锚点跟着重映射，这正是 core 的 fork 克隆器 {@link cloneMessageForFork} /
  *    {@link clonePartForFork} 已经做对的事（fork 与本函数是同一个动作：按值复制一段转录到另一个
  *    会话，child 用本地 id 续写），所以这里复用它们而不是写第二份。
- * 2. **幂等**。目标会话已经有 ≥ messageCount 条消息即整段跳过：那是修订 run 崩溃后 resume 的情形
- *    ——会话 id 由 (runId, actorRef) 纯确定地铸出，重挂拿到的就是那个已经装着"复制的 + 新产的"
- *    内容的会话，再抄一遍等于把上文翻倍。不足则重抄（复制中途崩溃留下的半截前缀）：id 按
- *    (目标会话, 下标) 纯确定，重抄是对已有行的 upsert，不会产生重复。
+ * 2. **幂等，且绝不写进一个已经开跑的会话**。两条跳过规则，缺一不可：
+ *
+ *    - 目标已经有 ≥ messageCount 条消息即整段跳过：那是修订 run 崩溃后 resume 的情形——会话 id
+ *      由 (runId, actorRef) 纯确定地铸出，重挂拿到的就是那个已经装着「复制的 + 新产的」内容的
+ *      会话，再抄一遍等于把上文翻倍。
+ *    - 目标里但凡有一条**不是**本会话种子 id 的消息（见 {@link seededMessageId}），同样跳过。
+ *      只装着种子消息的会话是一截「复制到一半」的前缀，照旧补齐；装着别的东西的会话有自己的
+ *      历史，一个字节都不许动。
+ *
+ *    第二条用于防止**边界增长后再次复制**：`inFlight.messageBoundary` 取自
+ *    前驱会话此刻的消息条数，是导入缓存里唯一一个不是 journal 事实的数（见
+ *    dynamic-workflow-import.ts 的文件头）。它在两次构建之间变大时（前驱被重新 resume 过又写了
+ *    几轮，或者一条迟到的后台通知消息落了进去），修订 run 的一次普通「停止 → resume」就会带着
+ *    更大的 M 再次调到这里；若此时目标里已有自己的 live 消息但总数仍 < M，老规则会去重抄
+ *    0..M-1——前 N 条是对既有种子 id 的 upsert（无害），而 N..M-1 是**新 id**，于是前驱的消息被
+ *    追加到本会话自己的历史**之后**（`message.sequence` 在 insert 时取 `max+1`，adapters 的
+ *    messages.ts）。那是一段读起来前后颠倒、且不属于这个子代理的上文，而且悄无声息。
+ *    「只有全是种子 id 才动它」把这件事在**复制点**一次性堵死，对将来任何一个非 journal 事实
+ *    都成立，不必逐个去证明它们不会变大。
  * 3. **缺料即大声失败**。源会话不存在（读回空）或短于边界，说明 service 从 journal 事实构造出的
  *    种子这个 store 兑现不了——corruption 级，不是可降级情形（可降级的那一半在 service 侧的门里：
  *    链上缺会话的候选在那里就该被弃置）。
  *
- * @returns 实际复制的条数；`undefined` 表示幂等跳过。
+ * @returns 实际复制的条数；`undefined` 表示跳过（两条规则都归到这一个返回值，因为调用方对
+ *          两者的处理相同：不再水化第二次，见 workflow-driver-transcript.ts 的 seedActorSession）。
  */
 export async function seedActorTranscript(input: {
+  logger?: Logger;
   seed: ActorSessionSeed;
   store: ActorTranscriptStore;
   targetSessionId: SessionId;
 }): Promise<number | undefined> {
-  const { seed, store, targetSessionId } = input;
+  const { logger, seed, store, targetSessionId } = input;
   const existing = await store.messages({ sessionID: targetSessionId });
   if (existing.length >= seed.messageCount) return undefined;
+  if (!holdsOnlySeedMessages(existing, targetSessionId)) {
+    // 记一条：走到这里说明种子边界比上一次大了，而这是唯一能看见它的地方。
+    logger?.warn?.("Dynamic workflow actor session already has its own history; seeding skipped", {
+      event: "dynamic_workflow.actor.seed_skipped_live_session",
+      existingMessageCount: existing.length,
+      messageCount: seed.messageCount,
+      module: "bootstrap.app",
+      sessionId: targetSessionId,
+    });
+    return undefined;
+  }
 
   const source = await store.messages({ sessionID: seed.sourceSessionId as SessionId });
   if (source.length < seed.messageCount) {
@@ -120,6 +149,22 @@ export async function seedActorTranscript(input: {
     }
   }
   return seed.messageCount;
+}
+
+/**
+ * 目标会话里是不是**只有**本会话的种子副本（第 i 条恰好是 {@link seededMessageId} 的第 i 个）。
+ *
+ * 判据用 id 而不是条数或时间：种子 id 按 (目标会话, 下标) 纯确定，所以「这条消息是不是我抄进来
+ * 的」有一个不依赖任何时钟、也不依赖读取顺序之外任何东西的答案。空会话按真处理（还没抄过，
+ * 当然可以抄）。`messages()` 按 `sequence` 升序返回，而种子是按下标顺序写的，所以下标就是位置。
+ */
+function holdsOnlySeedMessages(
+  existing: readonly MessageWithParts[],
+  targetSessionId: SessionId,
+): boolean {
+  return existing.every(
+    (message, index) => message.info.id === seededMessageId(targetSessionId, index),
+  );
 }
 
 /**

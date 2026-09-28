@@ -214,6 +214,14 @@ export function createCommandCenter(deps: CommandCenterDeps): TuiSubmitPrompt {
         return attachCurrentSessionMetadata(await app.submitPrompt(prompt, options), deps, app);
       }
 
+      if (command.name === "workflow") {
+        const app = await deps.getApp();
+        const prompt = command.args ? `/workflow ${command.args}` : "/workflow";
+        // 与 /init 同款：原文交给 app.submitPrompt，由 bootstrap 的 builtin resolver 展开成
+        // 「先加载 dynamic-workflows 技能，再写脚本调 CreateWorkflow」的提示词。
+        return attachCurrentSessionMetadata(await app.submitPrompt(prompt, options), deps, app);
+      }
+
       if (command.name === "expert") {
         return handleExpertCommand(command.args, deps, options);
       }

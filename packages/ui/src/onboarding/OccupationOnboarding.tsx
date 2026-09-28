@@ -73,10 +73,12 @@ export function OccupationOnboarding({
   const savingRef = useRef(false);
   const [error, setError] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const loadDeviceMid = useCallback(() => platform.getDeviceId(), [platform]);
   const [needsOnboarding, markOnboarded] = useOnboardingTrigger({
     onboardingRecord,
     userId,
     hasStoredOccupation: Boolean(settings?.onboardingOccupation),
+    loadDeviceMid,
     update,
   });
   const onboardingVisible = requested || (needsOnboarding === true && !dismissed);
@@ -99,7 +101,12 @@ export function OccupationOnboarding({
     setStep(0);
     setDismissed(true);
     setRequested(false);
-  }, [captureEnd, intl, setRequested]);
+    if (onboardingRecord) {
+      void onboardingRecord.dismissOnboarding(platform.getDeviceId()).catch((cause: unknown) => {
+        logger.warn("[occupation-onboarding] 写入关闭决策失败", { error: String(cause) });
+      });
+    }
+  }, [captureEnd, intl, onboardingRecord, platform, setRequested]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -120,8 +127,7 @@ export function OccupationOnboarding({
         return;
       }
       if (event.key === "Escape" && onboardingVisible && !saving) {
-        // 直接退出引导（设置里主动打开的场景尤其需要）：不保存、不改记录，
-        // 本次会话不再显示，下次启动按记录重新触发。
+        // 直接退出不改偏好；首次引导会持久化 dismissed，避免下次启动重复展示。
         event.preventDefault();
         event.stopImmediatePropagation();
         closeOnboarding();

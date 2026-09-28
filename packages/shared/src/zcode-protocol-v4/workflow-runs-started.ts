@@ -7,6 +7,7 @@
 // `run-started` 既要清掉上一世的结算残影，又不能把进程里已经学到的共享 cap 抹回天花板。
 
 import { reduceRunStartedConcurrency } from "./workflow-runs-concurrency.js";
+import { workflowRunTablesForNewLife } from "./workflow-runs-eviction.js";
 import { readRunIdField } from "./workflow-runs-lineage.js";
 import { WORKFLOW_RUNS_LIMITS, type WorkflowRunState } from "./workflow-runs.js";
 
@@ -35,6 +36,12 @@ function readSubagentModel(value: unknown): string | undefined {
  * 等不到答案、也再没有人在等它的问题。
  * `resumable` 同属上一世的结算事实：resume 一旦开跑，它就不再可恢复。
  *
+ * 用量整体换成零对象，因此**被拒实例的两个计数器（`nodesUnlisted` / `nodesUnlistedSettled`）
+ * 也随之清零**——这正是它们需要的语义：重臂会把整段脚本前缀再发一遍（已完成实例的 cached
+ * settle、新实例的 queued），不清零等于把两世「没进表的步数」加在一起。见 workflow-runs-caps.ts。
+ * 同理由清掉 `unlistedByPhase`（那是上一世的界花在哪里），并且**溢出过的 run 连两张表一起清空**
+ * ——规则与理由在 workflow-runs-eviction.ts 的 workflowRunTablesForNewLife。
+ *
  * `concurrency` **不**在剥除之列：它不是上一世的残影，而是这个 run 跑在什么并发下的事实
  * （两条界都是），而共享桶那一侧甚至是进程级的现状。规则在 workflow-runs-concurrency.ts。
  * `subagentModel` 同理，而且更硬：它是用户给这次 run 定下的条件，resume 重臂带同一个值。
@@ -49,9 +56,17 @@ export function reduceRunStarted(
     pendingQuestions: staleQuestions,
     resumable: staleResumable,
     stopReason: staleStopReason,
+    unlistedByPhase: staleUnlisted,
     ...rebased
   } = run;
-  void [staleError, staleResultPreview, staleQuestions, staleResumable, staleStopReason];
+  void [
+    staleError,
+    staleResultPreview,
+    staleQuestions,
+    staleResumable,
+    staleStopReason,
+    staleUnlisted,
+  ];
   // lineage 指针随 `run-started` 到达（CLI 从 launch 入参或 journal 行派生）；重臂带同一个值，搬运即可。
   const resumedFrom = readRunIdField(payload.resumedFrom) ?? rebased.resumedFrom;
   // 子代理模型：与 `limit` 同族的「本 run 自己的条件」，只随
@@ -65,6 +80,7 @@ export function reduceRunStarted(
       ...(subagentModel === undefined ? {} : { subagentModel }),
       status: "running",
       usage: { spentTokens: 0, nodesUsed: 0 },
+      ...workflowRunTablesForNewLife(run),
     },
     payload,
   );

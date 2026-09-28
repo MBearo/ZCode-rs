@@ -1733,6 +1733,76 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
           onCronSchedulerWakeRequested: wakeCronScheduler,
           onOffPeakSchedulerWakeRequested: wakeOffPeakScheduler,
           authorizeLocalMediaPreviewPath: localMediaPreviewPathRegistry.authorize,
+          // Bugfix: bot service 运行在本地窗口 host 内，/reconnect 必须能从本地 host 请求 main 创建远端 session。
+          handleBotRemoteWorkspaceReconnectRequest: async ({
+            win,
+            requestId,
+            workspacePath,
+            workspaceIdentity,
+            target,
+          }) => {
+            try {
+              const sessionId = await remoteSessionManager.reconnectBotRemoteWorkspaceSession(win, {
+                target,
+                workspacePath,
+                workspaceIdentity,
+                requestId,
+              });
+              if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+                win.webContents.send(PlatformChannels.BotRemoteWorkspaceReconnected, {
+                  sessionId,
+                  workspacePath,
+                  workspaceIdentity,
+                  target,
+                });
+              }
+              return { ok: true, sessionId };
+            } catch (error) {
+              return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              };
+            }
+          },
+          handleBotRemoteWorkspaceConnectionStatusRequest: async ({
+            win,
+            target,
+            workspacePath,
+            workspaceIdentity,
+          }) => ({
+            ok: true,
+            // Bugfix: Bot 远端连接状态必须按 workspaceIdentity/workspacePath 精确隔离。
+            // 只按 SSH target 判断会把同一台机器上的其他目录误判为当前 workspace 已连接。
+            connected: remoteSessionManager.hasRemoteWorkspaceSessionForTarget(win, target, {
+              workspacePath,
+              workspaceIdentity,
+            }),
+          }),
+          handleBotRemoteWorkspaceRuntimePortRequest: async ({
+            win,
+            requestId,
+            workspacePath,
+            workspaceIdentity,
+            target,
+          }) => {
+            try {
+              const port = await remoteSessionManager.createBotRemoteWorkspaceRuntimePort(
+                win,
+                {
+                  target,
+                  workspacePath,
+                  workspaceIdentity,
+                },
+                requestId,
+              );
+              return { ok: true, port };
+            } catch (error) {
+              return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              };
+            }
+          },
           // browser-use：main 用 WebContentsView+CDP 执行命令。
           handleBrowserExecuteRequest: ({ win: browserWin, ...request }) =>
             runBrowserCommandOnView({ win: browserWin, ...request }),

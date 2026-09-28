@@ -214,6 +214,7 @@ async function executeToolCallImpl(
         : { dynamicWorkflowRunPort: deps.dynamicWorkflowRunPort }),
       ...(deps.modelCatalogPort === undefined ? {} : { modelCatalogPort: deps.modelCatalogPort }),
       sessionId: deps.sessionId,
+      ...(deps.hasLoadedSkill === undefined ? {} : { hasLoadedSkill: deps.hasLoadedSkill }),
     });
     if (isToolHandlerFailure(resolution)) {
       // 与 validateInput 同一条生命周期出口：解析不出来是模型该立刻拿回去修的东西，

@@ -15,6 +15,7 @@
 
 import {
   reduceWorkflowRunsState,
+  workflowRunStepCounts as sharedWorkflowRunStepCounts,
   type WorkflowRunActor,
   type WorkflowRunUsage,
   type WorkflowRunProgressEnvelope,
@@ -99,19 +100,19 @@ export function seedWorkflowMirror(
 /**
  * 步数进度：**已结算 / 已排程**（settled / observed）。
  *
- * 动态工作流没有静态总数，所以分母是已排程节点数，绝不冒充全程百分比。规则来源是
- * GUI 的 `packages/ui/src/v4/workflowRunCardJoin.ts`（同一条规则的桌面侧唯一实现）；
- * TUI 不能 import packages/ui（那是 Electron renderer 的 React 层），所以这里按同规重写。
+ * 动态工作流没有静态总数，所以分母是已排程节点数，绝不冒充全程百分比。
+ *
+ * 数法只有一处——@zcode/shared 的 `workflowRunStepCounts`（run 卡、时间线摘要与这里共用）。
+ * 这里此前自己数 `nodes`，于是一条撞过节点界的 run 在三个读面上显示三个数字，而且三个都比
+ * 真实步数小：触界是**拒新**，被拒的实例根本不在 `nodes` 里，只在 usage 的两个计数器上。
+ * 本函数只保留 TUI 的字段名（卡片与 i18n 说的是 nodesSettled / nodesTotal）。
  */
 export function workflowRunStepCounts(run: WorkflowRunState): {
   nodesSettled: number;
   nodesTotal: number;
 } {
-  let nodesSettled = 0;
-  for (const node of run.nodes) {
-    if (node.phase === "settled") nodesSettled += 1;
-  }
-  return { nodesSettled, nodesTotal: run.nodes.length };
+  const { total, settled } = sharedWorkflowRunStepCounts(run);
+  return { nodesSettled: settled, nodesTotal: total };
 }
 
 /** 卡片渲染需要的全部事实——让视图成为 props 的纯函数（TUI 测试按函数式调用组件）。 */

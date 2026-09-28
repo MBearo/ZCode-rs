@@ -61,14 +61,6 @@ export function RollingToolbarLabel({
       label
     );
 
-  if (reducedMotion) {
-    return (
-      <span className={className} title={label}>
-        {content}
-      </span>
-    );
-  }
-
   return (
     <span
       className={cn(
@@ -77,18 +69,23 @@ export function RollingToolbarLabel({
       )}
       title={label}
     >
-      <AnimatePresence initial={false} mode="popLayout">
-        <motion.span
-          key={label}
-          className="inline-flex min-w-0 whitespace-nowrap leading-[1.25]"
-          initial={{ y: "0.75em", opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: "-0.75em", opacity: 0 }}
-          transition={LABEL_ROLL_TRANSITION}
-        >
-          {content}
-        </motion.span>
-      </AnimatePresence>
+      {/* 减少动画也保留同一层文字行：模型触发器的截断样式不能落到供应商／模型片段上。 */}
+      {reducedMotion ? (
+        <span className="inline-flex min-w-0 whitespace-nowrap leading-[1.25]">{content}</span>
+      ) : (
+        <AnimatePresence initial={false} mode="popLayout">
+          <motion.span
+            key={label}
+            className="inline-flex min-w-0 whitespace-nowrap leading-[1.25]"
+            initial={{ y: "0.75em", opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: "-0.75em", opacity: 0 }}
+            transition={LABEL_ROLL_TRANSITION}
+          >
+            {content}
+          </motion.span>
+        </AnimatePresence>
+      )}
     </span>
   );
 }

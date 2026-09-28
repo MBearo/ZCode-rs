@@ -13,7 +13,9 @@
  * 本文件聚焦 run 生命周期：host API 入口、用量记账、run 结算与事件记录。用户面产物、report、
  * world 节点与导入缓存、run 终态三条路径的方法体各在兄弟模块（engine-artifacts.ts / engine-report.ts /
  * engine-world.ts / engine-settlement.ts），经 engine-state.ts 的 {@link EngineState} 接缝读写这里的
- * 私有状态；本类上只留薄委托（拆分原因：oxlint max-lines 上限 400 行）。
+ * 私有状态；本类上只留薄委托（拆分原因：oxlint max-lines 上限 400 行）。出生阶段坐标的两个
+ * 打戳函数（事件与 ProviderStop）是纯函数，住在 engine-phase-stamp.ts，只读本类拥有的
+ * `instancePhases` 表。
  */
 
 import { ImportedWorldQueue, matchImportedActor } from "./imported-cache.js";
@@ -27,6 +29,7 @@ import {
 } from "./engine-artifacts.js";
 import { publishReport } from "./engine-report.js";
 import { closeImportCache, readWorld, recoverImportClosure } from "./engine-world.js";
+import { recoverSettleOrder, ReplaySettleOrder } from "./replay-order.js";
 import { settleCompleted, settleFailed, settleStopped } from "./engine-settlement.js";
 import type {
   ActorId,
@@ -53,6 +56,7 @@ import type {
 } from "./types.js";
 import { refToString, WorkflowError } from "./types.js";
 import { runLaunchedEvent, type RunLaunchConfig } from "./engine-launch.js";
+import { enrichProviderStopPhase, stampBirthPhase } from "./engine-phase-stamp.js";
 
 /** 引擎构造配置。 */
 export interface EngineConfig {
@@ -137,7 +141,12 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
   private readonly runId: string;
   private readonly driver: WorkflowDriver;
   private readonly journal: JournalStorePort;
-  private readonly caps: Caps;
+  /**
+   * 本 run 的并发上界。**可变**（见 {@link setMaxConcurrency}）：一次只改 `max_concurrency`
+   * 的修订就地作用在活着的 run 上。整份替换而不是原地改字段——已记进事件与 journal 的那几份
+   * caps 必须保持它们被记下时的样子（调用方递进来的那个对象同理不被回写）。
+   */
+  private caps: Caps;
   private readonly askSpecs: ReadonlyMap<string, AskSpec>;
   private readonly validate: ValidateFn;
   private readonly scheduler: AskScheduler;
@@ -179,8 +188,16 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
    * 纯 ask（toolCalls 0）照常命中。resume 时从 `import-cache-closed` 事件恢复，见 {@link recoverImportClosure}。
    */
   private importClosed = false;
+  /**
+   * replay 的结算次序闸：命中缓存的
+   * 结算按 journal 记下的**首生结算次序**释放，而不是按准入次序——join 之后的每一个站点序号
+   * 都由那个次序决定。非 resume 恒为空闸（人人放行）。
+   */
+  private replaySettleOrder = ReplaySettleOrder.empty();
   /** resume 时从事件恢复的「崩溃前曾 live 的 ask 实例」（`siteId@ordinal`）；非 resume 为空。 */
   private liveAskInstances: ReadonlySet<string> = new Set();
+  /** resume 时从事件次序恢复的「准入早于关门的 ask 实例」；续跑在飞 ask 的判定据此复原。 */
+  private queuedBeforeImportClose: ReadonlySet<string> = new Set();
 
   /**
    * 本 run 已发布的报告条数（REPORT_CAPS.maxItemsPerRun 的计数器）。resume 时按 journal 里
@@ -210,7 +227,8 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
     this.runId = config.runId;
     this.driver = config.driver;
     this.journal = config.driver.journal;
-    this.caps = config.caps;
+    // 自己留一份：调用方（harness / run service）手里的那个对象不该因为一次 retune 而被改写。
+    this.caps = { maxConcurrency: config.caps.maxConcurrency };
     this.askSpecs = config.askSpecs;
     this.validate = config.validate;
     this.importedCache = config.importedCache;
@@ -234,6 +252,9 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
       failRun: (error) => this.failRun(error),
       record: (event) => this.record(event),
       nextOrdinal: (siteId) => this.nextOrdinal(siteId),
+      holdForReplay: (instance, release) => {
+        this.replaySettleOrder.hold(instance, release);
+      },
       reportCount: () => this.reportCount,
       countReport: () => {
         this.reportCount++;
@@ -245,23 +266,36 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
       markSettled: (failure) => {
         this.runSettled = true;
         if (failure !== undefined) this.runFailure = failure;
+        // 闸门随结算永久打开：还挂在次序表上的释放动作一律放掉，否则脚本那侧的 promise
+        // 永不兑现（沙箱会被关掉，但同进程跑脚本的装配就此挂死）。
+        this.replaySettleOrder.open();
       },
       abortInFlight: (error, emitCancelled) => this.scheduler.abortInFlight(error, emitCancelled),
       resolveSettled: (settlement) => this.settledDeferred.resolve(settlement),
     };
 
+    // caps 对调度器是**现读**：setMaxConcurrency 整份换掉 this.caps，而派发判据必须看见新值
+    // （见 SchedulerHost.caps）。箭头闭包而不是对象字面量里的 `this`——后者指的是字面量自己。
+    const readCaps = (): Caps => this.caps;
     const host: SchedulerHost = {
       runId: this.runId,
-      caps: this.caps,
+      get caps(): Caps {
+        return readCaps();
+      },
       driver: this.driver,
       validate: this.validate,
       nextOrdinal: (siteId) => this.nextOrdinal(siteId),
+      holdForReplay: (instance, release) => {
+        this.replaySettleOrder.hold(instance, release);
+      },
       record: (event) => this.record(event),
       isRunSettled: () => this.runSettled,
       runError: () => this.runError(),
       failRun: (error) => this.failRun(error),
       importCacheClosed: () => this.importClosed,
       wasLiveBeforeResume: (instance) => this.liveAskInstances.has(refToString(instance)),
+      wasQueuedBeforeImportClose: (instance) =>
+        this.queuedBeforeImportClose.has(refToString(instance)),
     };
     this.scheduler = new AskScheduler(host);
 
@@ -312,8 +346,12 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
           { mismatch: { expected: existing.scriptHash, got: config.scriptHash } },
         );
       }
-      // resume：报告计数按 journal 里 kind:"report" 的行数恢复；用量从记录恢复（跨生命周期连续）。
+      // resume：结算次序按本 run 自己的事件恢复（本闸是 replay 正确性的一部分，不是观察面：
+      // 站点序号依调用到达顺序，而扇出的到达顺序只有首生的结算次序能复现）。节点行只读一次，
+      // 下面的报告计数与产物恢复共用它。
       const nodes = this.journal.listNodes(this.runId);
+      this.replaySettleOrder = recoverSettleOrder(this.journal, this.runId, nodes);
+      // 报告计数按 journal 里 kind:"report" 的行数恢复；用量从记录恢复（跨生命周期连续）。
       this.reportCount = nodes.filter((n) => n.kind === "report").length;
       // 产物状态与 reportCount 同席恢复：id 归属（种类、预置 spec）与已成功版本数全部由
       // journal 行派生，所以崩溃恢复后第 3 版仍然是第 3 版，而不是从 1 重新数起。
@@ -326,6 +364,7 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
       if (this.importedCache !== undefined) {
         const recovered = recoverImportClosure(this.journal, this.runId);
         this.liveAskInstances = recovered.live;
+        this.queuedBeforeImportClose = recovered.queuedBeforeClose;
         this.importClosed = recovered.closed;
       }
       this.journal.updateRunStatus(this.runId, "running");
@@ -519,6 +558,38 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
     this.failRun(error);
   }
 
+  /**
+   * 就地改本 run **自己**的并发上界。
+   * 一次只带 `max_concurrency` 的修订作用在活着的 run 上：同一个 runId、不铸后继、不 supersede、
+   * 在飞 ask 一个不丢——这正是它与 AmendWorkflow 的全部差别，也是它存在的唯一理由。
+   *
+   * 返回**这次是否真的改了**。两条 no-op 都返回 false 且不写库、不发事件：run 已结算（宿主的
+   * 存活判定与本调用之间的竞态——调用方据此回落到一次真正的 amend），以及新值与当前值相同。
+   *
+   * 改成时三件事在同一个同步步骤里发生，于是三者永远一致：整份换掉 caps（调度器现读）、写
+   * `dwf_run.caps_max_concurrency`（resume 沿用行里的 caps，不落库就恢复成旧上界）、记一条
+   * `run-caps-changed`。**抬高**还多一次 `pumpAll()`——上界是派发前现读的，但没有别的事件会
+   * 触发重扫，排队的 ask 否则要等到下一次结算。调低不召回在飞 ask：它们照常跑完，上界只管
+   * 「还能不能再放一个」。
+   *
+   * 钳到 `[1, 天花板]` 归调用方——天花板是宿主事实（机器核数），引擎既看不见也不该看见。
+   * 这里只做落库归一，与构造函数里的 `inheritedTokens` 同一条纪律：这个数要落
+   * `caps_max_concurrency`（integer not null），一个 NaN 会同时毒化列值与派发判据。
+   */
+  setMaxConcurrency(maxConcurrency: number): boolean {
+    if (this.runSettled) return false;
+    if (!Number.isFinite(maxConcurrency)) return false;
+    const previous = this.caps;
+    const next = Math.max(1, Math.floor(maxConcurrency));
+    if (next === previous.maxConcurrency) return false;
+    const caps: Caps = { maxConcurrency: next };
+    this.caps = caps;
+    this.journal.updateRunCaps(this.runId, caps);
+    this.record({ type: "run-caps-changed", runId: this.runId, caps, previous });
+    if (next > previous.maxConcurrency) this.scheduler.pumpAll();
+    return true;
+  }
+
   // ——————————————————————————— Boundary B（向上回报）———————————————————————————
 
   askSubmitAttempted(instance: InstanceRef, payload: unknown): void {
@@ -638,31 +709,9 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
    * 必须是**同一个对象**：bootstrap 的 `createJournalSequenceCapture` 按引用相等核对序号。
    */
   private record(event: RunEvent): void {
-    const stamped = this.stampBirthPhase(event);
+    const stamped = stampBirthPhase(event, this.instancePhases);
     this.journal.appendEvent(this.runId, stamped);
     this.driver.emit(stamped);
-  }
-
-  /**
-   * actor 的 `actor-created` 按 actor 查表，
-   * 节点的 `node-queued` 按 instance 查表，命中缓存的 `node-settled { cached: true }` 同样按
-   * instance——命中的节点没有 queued，那条 settle 就是它的出生事件。其余事件原样返回：
-   * 调度器的十处发射点零改动，reducer 沿用 `actorSiteId` 的先例向前携带。
-   */
-  private stampBirthPhase(event: RunEvent): RunEvent {
-    if (event.type === "actor-created") {
-      const phaseName = this.instancePhases.get(refToString(event.actor));
-      return phaseName === undefined ? event : { ...event, phaseName };
-    }
-    if (event.type === "node-queued") {
-      const phaseName = this.instancePhases.get(refToString(event.instance));
-      return phaseName === undefined ? event : { ...event, phaseName };
-    }
-    if (event.type === "node-settled" && event.cached === true) {
-      const phaseName = this.instancePhases.get(refToString(event.instance));
-      return phaseName === undefined ? event : { ...event, phaseName };
-    }
-    return event;
   }
 }
 
@@ -674,25 +723,4 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
     typeof persona === "string" ? { system: persona } : persona ? { ...persona } : {};
   if (base.name === undefined && name !== undefined) base.name = name;
   return base;
-}
-
-/**
- * 给 `ProviderStop` 补上触发停止的子代理的**出生阶段**：driver 只知道 actor ref，阶段只有引擎知道（`instancePhases`，
- * 与事件流上 `phaseName` 的同一张表）。没有 providerStop、没有 subagent、或该 ref 出生在
- * 任何 `phase()` 标记之前 → 原样返回。
- */
-function enrichProviderStopPhase(
-  error: WorkflowError,
-  instancePhases: ReadonlyMap<string, string>,
-): WorkflowError {
-  const details = error.providerStop;
-  if (details === undefined || details.subagent === undefined || details.phase !== undefined) {
-    return error;
-  }
-  const phase = instancePhases.get(details.subagent);
-  if (phase === undefined) return error;
-  return new WorkflowError(error.code, error.message, {
-    providerStop: { ...details, phase },
-    cause: (error as { cause?: unknown }).cause,
-  });
 }
