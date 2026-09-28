@@ -102,17 +102,28 @@ fn invalid_json_and_missing_files() {
 
 #[test]
 fn project_files_strip_hooks_and_resolve_stdio_cwd() {
+    // Windows 原生路径会规范化为反斜杠；使用带盘符的绝对路径，不能沿用 POSIX 预期。
+    let (config_path, relative_cwd, base_cwd, absolute_cwd) = if cfg!(windows) {
+        (
+            r"C:\repo\.zcode\config.json",
+            r"C:\repo\tools",
+            r"C:\repo",
+            r"C:\opt",
+        )
+    } else {
+        ("/repo/.zcode/config.json", "/repo/tools", "/repo", "/opt")
+    };
     let text = json!({
         "hooks": {"enabled": true, "events": {}},
         "mcp": {"servers": {
             "rel": {"type":"stdio","command":"x","cwd":"tools"},
             "none": {"type":"stdio","command":"x"},
-            "abs": {"type":"stdio","command":"x","cwd":"/opt"},
+            "abs": {"type":"stdio","command":"x","cwd":absolute_cwd},
             "web": {"type":"http","url":"https://x"}
         }}
     })
     .to_string();
-    let (file, hooks) = project_file(parse_file("/repo/.zcode/config.json", Ok(Some(&text))));
+    let (file, hooks) = project_file(parse_file(config_path, Ok(Some(&text))));
     assert!(hooks.is_some());
     assert!(!file.patch.contains_key("hooks"));
     assert!(
@@ -121,9 +132,9 @@ fn project_files_strip_hooks_and_resolve_stdio_cwd() {
             .any(|d| d.code == "config_project_hooks_pending_trust")
     );
     let servers = &file.patch["mcp"]["servers"];
-    assert_eq!(servers["rel"]["cwd"], "/repo/tools");
-    assert_eq!(servers["none"]["cwd"], "/repo");
-    assert_eq!(servers["abs"]["cwd"], "/opt");
+    assert_eq!(servers["rel"]["cwd"], relative_cwd);
+    assert_eq!(servers["none"]["cwd"], base_cwd);
+    assert_eq!(servers["abs"]["cwd"], absolute_cwd);
     assert!(servers["web"].get("cwd").is_none());
 }
 

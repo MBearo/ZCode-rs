@@ -59,6 +59,7 @@ host::config::load(cwd, env)            （IO：发现并读取文件）
 ### 2.4 验收
 
 - 纯函数的表驱动测试，夹具由 `scripts/generate-zcode-cli-rust-fixtures.mjs` 调用 TS 的 `parseConfigFileToRuntimePatchWithDiagnostics`、`mergeConfigs`、`parseEnvConfig` 批量生成。
+- 项目 MCP cwd 用例使用当前 OS 的真实绝对路径：Windows 带盘符并预期反斜杠，POSIX 预期 `/`。分别验证相对 cwd、缺省 cwd、绝对 cwd 与 HTTP server 不注入 cwd，避免把 POSIX fixture 的表示差异误判为 Windows 解析失败。
 - MCP、Skill、Agent profile、插件发现改用快照后，现有集成测试保持通过；新增用户层覆盖项目层 MCP 的集成用例。
 
 ## 3. 运行环境与网络出口
