@@ -1,8 +1,8 @@
 //! 终端关掉之后的画帧（F14，docs/specs/rust-cli/session-lifecycle.md §3.5）：真实的终端关闭（关窗口、SSH 断开）
 //! 先让写终端失败（EIO），SIGHUP 随后才到；修前 `draw()?` 直接返回错误，回合不中止、SessionEnd 不跑。现在画不出来
 //! 就按收到退出信号收尾。终端是包了一层的 `TestBackend`：打开开关后每次画帧都失败。
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
 use ratatui::buffer::Cell;
@@ -19,6 +19,15 @@ use super::support::{GatedModel, Setup, send, with_ui_exit};
 pub struct Hangable {
     pub inner: TestBackend,
     pub dead: Arc<AtomicBool>,
+    /// 终端光标的显示与位置（每帧画完时更新，测试读它断言光标，tui.md §7.6）。
+    pub cursor: Arc<Mutex<Cursor>>,
+}
+
+/// 终端光标：是否显示、最后一次放到的（列，行）。
+#[derive(Debug, Default)]
+pub struct Cursor {
+    pub visible: bool,
+    pub at: (u16, u16),
 }
 
 fn io<T>(result: Result<T, core::convert::Infallible>) -> std::io::Result<T> {
@@ -39,10 +48,12 @@ impl Backend for Hangable {
     }
 
     fn hide_cursor(&mut self) -> std::io::Result<()> {
+        self.cursor.lock().unwrap().visible = false;
         io(self.inner.hide_cursor())
     }
 
     fn show_cursor(&mut self) -> std::io::Result<()> {
+        self.cursor.lock().unwrap().visible = true;
         io(self.inner.show_cursor())
     }
 
@@ -51,6 +62,8 @@ impl Backend for Hangable {
     }
 
     fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> std::io::Result<()> {
+        let position = position.into();
+        self.cursor.lock().unwrap().at = (position.x, position.y);
         io(self.inner.set_cursor_position(position))
     }
 

@@ -1,7 +1,7 @@
 //! 文件工具的权限（shell-permissions.md §4.4）。
 //!
 //! 读：deny 规则 → ask 规则 → 工作目录、内部目录或本会话计划文件里放行 → allow 规则 → 询问。
-//! 写：deny 规则 → 本会话计划文件放行（ask 规则除外）→ 安全路径询问（bypass 也问）→ ask 规则 →
+//! 写：deny 规则 → 本会话计划文件放行（ask 规则除外）→ ask 规则 → 安全路径询问（allow 规则盖不过，bypass 放行）→
 //! plan 模式询问 → acceptEdits 下工作目录里放行 → allow 规则 → 询问。
 //! 读规则的工具名是 `Read`，写规则是 `Edit`（Write、NotebookEdit 共用）。
 
@@ -121,11 +121,13 @@ pub fn check(access: Access, path: Option<&str>, inputs: &Inputs<'_>) -> Check {
                 }
                 return Check::Allow;
             }
-            if sensitive(&resolved, paths.style == PathStyle::Windows) {
-                return ask(texts::file_sensitive(&resolved), AskKind::Safety);
-            }
+            // 修复线 F68：ask 规则排在敏感文件之前。敏感文件的询问在 bypass 下放行之后，原来的顺序会让
+            // `Edit(.bashrc)` 这类 ask 规则在 bypass 下失效。
             if rule(RuleBehavior::Ask) {
                 return ask(texts::file_write_request(&resolved), AskKind::Rule);
+            }
+            if sensitive(&resolved, paths.style == PathStyle::Windows) {
+                return ask(texts::file_sensitive(&resolved), AskKind::Safety);
             }
             // plan 模式下其余写入一律询问，排在 acceptEdits 与 allow 规则之前；
             // 外层再按 plan 模式交分类器或询问用户。

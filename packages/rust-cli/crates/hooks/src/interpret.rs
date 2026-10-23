@@ -93,7 +93,7 @@ pub(crate) fn repl(executed: Executed, command: &str, event: &str) -> HookResult
             exit,
         }) => command_result(command, event, &stdout, &stderr, exit),
         Executed::Raw(Raw::Http { status, body }) => http_result(command, event, status, &body),
-        Executed::Raw(Raw::Cancelled) => HookResult::cancelled(),
+        Executed::Raw(Raw::Cancelled | Raw::TimedOut) => HookResult::cancelled(),
         Executed::Raw(Raw::Backgrounded) => HookResult::default(),
         Executed::Raw(Raw::Failed(message)) => HookResult::non_blocking(message),
     }
@@ -149,7 +149,7 @@ pub(crate) fn outside(executed: Executed, command: &str) -> Summary {
                 Parsed::Async | Parsed::Plain => summary(true, body, false),
             }
         }
-        Executed::Raw(Raw::Cancelled) => Summary {
+        Executed::Raw(Raw::Cancelled | Raw::TimedOut) => Summary {
             cancelled: true,
             ..summary(false, "Hook cancelled".to_owned(), false)
         },

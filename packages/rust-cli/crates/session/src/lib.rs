@@ -102,7 +102,7 @@ pub struct SessionDeps {
     pub inputs: Arc<dyn rust_cli_kernel_api::user_input::UserInputs>,
     /// checkpoint 的 artifact（rewind 读回写入前后的内容）。
     pub artifacts: Arc<dyn ArtifactStore>,
-    /// fork 出的会话的创建时间。
+    /// fork 出的会话的创建时间；会话标题请求的用量计时（工作线 F73）。
     pub clock: Arc<dyn Clock>,
     /// 本地执行环境实例的 generation（回退事务的操作上下文）。
     pub generation: Generation,

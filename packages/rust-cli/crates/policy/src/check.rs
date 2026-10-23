@@ -6,15 +6,28 @@ use crate::paths::PathContext;
 use crate::rules::Rules;
 use crate::texts::Reason;
 
-/// 询问的性质：决定 bypassPermissions 与整个工具的 allow 规则能不能盖过它。
+/// 询问的性质：决定 bypassPermissions 与整个工具的 allow 规则能不能盖过它（shell-permissions.md §4.1 的表）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AskKind {
     /// 命中带 content 的 ask 规则：bypass 也要询问。
     Rule,
-    /// 安全路径（`.git/`、shell 配置等）：bypass 也要询问（1g），自动模式不经分类器。
+    /// 安全检查（敏感文件）：allow 规则盖不过；bypassPermissions / guarded 放行，hook 放行之后仍询问；
+    /// 自动模式不经分类器。
+    ///
+    /// 修复线 F68（审计 P1）：以前按“安全检查一律 bypass 也问”处理，bypass 下写 `.bashrc`、`.git/…` 仍询问，`-p` 里
+    /// 等于拒绝；现在只有 [`AskKind::Immune`] 一类 bypass 也问。
     Safety,
+    /// bypass 也要询问、allow 规则盖不过的安全检查（危险删除、guarded 的危险命令）；自动模式不经分类器。
+    Immune,
     /// 其他理由。
     Other,
+}
+
+impl AskKind {
+    /// 安全检查（两种都算）：allow 规则盖不过，自动模式不经分类器。
+    pub fn is_safety(&self) -> bool {
+        matches!(self, Self::Safety | Self::Immune)
+    }
 }
 
 /// 一次工具专属检查的结果。
@@ -64,4 +77,6 @@ pub struct Inputs<'a> {
     pub root: &'a str,
     /// 这次调用是 guarded 下命中危险命令规则的 Bash 命令（`guarded::applies`，修复线 F20）。
     pub dangerous: bool,
+    /// hook 放行之后的检查（`PermissionGate::check_rules`）：[`AskKind::Safety`] 的询问也留下，不按 bypass 放行。
+    pub hook_check: bool,
 }

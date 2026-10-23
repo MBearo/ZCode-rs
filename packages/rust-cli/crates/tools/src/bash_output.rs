@@ -103,6 +103,13 @@ pub fn success(head: &str, total: u64, output_file: &str, cwd_reset: Option<&str
         .join("\n")
 }
 
+/// 后台命令里有 cd 时启动说明后面的一行：后台命令不改会话的当前目录（shell-permissions.md §1.2，修复线 F68）。
+pub fn background_cwd_hint(cwd: &str) -> String {
+    format!(
+        "Session cwd remains {cwd}; directory changes made by the backgrounded command do not apply to subsequent commands."
+    )
+}
+
 /// 后台命令启动后立即返回的文本（非用户手动转后台的分支）。
 pub fn backgrounded(task: &ShellTaskId, output_file: &str) -> String {
     format!(

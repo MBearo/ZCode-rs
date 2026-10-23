@@ -239,11 +239,11 @@ fn finished(
             stderr: String::from_utf8_lossy(stderr).into_owned(),
             exit: exit_code.unwrap_or(1),
         },
-        // 超时与取消都按 cancelled。
+        // 超时与取消都按 cancelled（超时另记一种，`onError: "deny"` 要区分）。
         Outcome::Completed | Outcome::Cancelled | Outcome::Interrupted => Raw::Cancelled,
         Outcome::Failed {
             code: Some(code), ..
-        } if code == "timeout" => Raw::Cancelled,
+        } if code == "timeout" => Raw::TimedOut,
         Outcome::Failed { message, .. } | Outcome::Rejected { message } => {
             Raw::Failed(format!("Failed to run: {message}"))
         }

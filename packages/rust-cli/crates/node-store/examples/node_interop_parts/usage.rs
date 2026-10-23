@@ -2,8 +2,8 @@
 //!
 //! - `usage-write <storage-dir>`：写一个会话：两次请求（第一次带一个工具调用）、一次工具调用、回合结束，以及一个
 //!   子代理子会话里的一次请求（没有消息）；输出会话 id 与写入时用的时刻和值；
-//! - `usage-side <storage-dir>`：另一个会话里会话标题与 WebFetch 摘要的两次旁路请求（没有消息，工作线 F71）；输出会话 id、
-//!   写入时用的时刻与两次请求的 id；
+//! - `usage-side <storage-dir>`：另一个会话里会话标题的旁路请求（没有消息，工作线 F71；F73 起按产品的写法：单独一批、锚在
+//!   首条输入、没有首字时间），之后这一轮结束；输出会话 id、写入时用的时刻与输入、请求的 id；
 //! - `metering <storage-dir> <session>`：`SessionStore::metering` 的结果；
 //! - `activity <storage-dir> <all|week|month> <today> <offset-minutes>`：`SessionStore::activity` 的结果；
 //! - `request-stats <storage-dir> <session>`：`SessionStore::request_stats` 的结果与它给出的 TPS、命中率（footer 的
@@ -11,7 +11,7 @@
 use rust_cli_kernel_api::metering::{
     ActivityQuery, ActivityRange, CallStatus, ModelCall, ToolCall,
 };
-use rust_cli_kernel_api::model::{QuerySource, SIDE_SESSION_TITLE, SIDE_WEB_FETCH};
+use rust_cli_kernel_api::model::{QuerySource, SIDE_SESSION_TITLE};
 
 use super::*;
 
@@ -169,12 +169,14 @@ pub(super) async fn write(dir: &str) -> Result<()> {
     }))
 }
 
-/// 旁路请求的行（工作线 F71，usage.md §2.1）：用量表的 `query_source` 写 Node 的名字。
+/// 会话标题的行（工作线 F71、F73，usage.md §2.1.1）：`query_source` 写 Node 的名字；按会话 actor 的写法单独一批、锚在
+/// 首条输入，没有首字时间（Node 的标题请求不流式）。之后这一轮结束：回合用量不数标题行。WebFetch 摘要 Node 不写行，
+/// 这里也不写（F73 起去掉）。
 pub(super) async fn side(dir: &str) -> Result<()> {
     let store = store(dir)?;
     let base = now_ms() - 60_000;
     let session = create(&store).await?;
-    let (user_id, title, fetch) = (message_id(), message_id(), message_id());
+    let (user_id, title) = (message_id(), message_id());
     let mut turn = None;
     store
         .commit(
@@ -182,24 +184,35 @@ pub(super) async fn side(dir: &str) -> Result<()> {
             anchored(&mut turn, vec![user(&user_id, "Name this session")]),
         )
         .await?;
-    for (id, name, at) in [
-        (&title, SIDE_SESSION_TITLE, base),
-        (&fetch, SIDE_WEB_FETCH, base + 1_000),
-    ] {
-        let call = model(
-            id,
-            QuerySource::Side(name.to_owned()),
-            (at, at + 100, at + 400),
-            StopReason::EndTurn,
-        );
-        store
-            .commit(&session, anchored(&mut turn, vec![call]))
-            .await?;
-    }
+    let call = Fact::ModelCalled {
+        call: ModelCall {
+            message: title.clone(),
+            source: QuerySource::Side(SIDE_SESSION_TITLE.to_owned()),
+            selection: requested(),
+            started_at_ms: base,
+            first_token_at_ms: None,
+            completed_at_ms: base + 400,
+            status: CallStatus::Completed,
+            stop_reason: Some(StopReason::EndTurn),
+            tool_calls: 0,
+            usage: Some(usage()),
+            retries: 0,
+            error: None,
+        },
+    };
+    store
+        .commit(&session, anchored(&mut turn, vec![call]))
+        .await?;
+    let ended = Fact::TurnEnded {
+        status: CallStatus::Completed,
+    };
+    store
+        .commit(&session, anchored(&mut turn, vec![ended]))
+        .await?;
     print(&json!({
         "session": session.as_str(),
         "base": base,
-        "messages": {"user": user_id.as_str(), "title": title.as_str(), "fetch": fetch.as_str()},
+        "messages": {"user": user_id.as_str(), "title": title.as_str()},
     }))
 }
 

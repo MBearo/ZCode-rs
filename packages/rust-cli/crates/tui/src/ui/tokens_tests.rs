@@ -161,3 +161,18 @@ fn subagent_tokens_in_both_themes() {
         Style::default().fg(Color::White).bg(Color::Cyan)
     );
 }
+
+/// 工作线 F74（tui.md §7.6）：成功色深浅背景各一种绿，16 色按背景取亮绿或绿，背景不知道时按深色。
+#[test]
+fn success_is_green_in_both_themes() {
+    let p = palette(ColorLevel::TrueColor, DARK, None);
+    assert_eq!(p.success(), Style::default().fg(Color::Rgb(78, 186, 101)));
+    let p = palette(ColorLevel::TrueColor, LIGHT, None);
+    assert_eq!(p.success(), Style::default().fg(Color::Rgb(44, 122, 57)));
+    let p = Palette::new(ColorLevel::TrueColor, None);
+    assert_eq!(p.success(), Style::default().fg(Color::Rgb(78, 186, 101)));
+    let p = palette(ColorLevel::Ansi16, DARK, None);
+    assert_eq!(p.success(), Style::default().fg(Color::LightGreen));
+    let p = palette(ColorLevel::Ansi16, LIGHT, None);
+    assert_eq!(p.success(), Style::default().fg(Color::Green));
+}

@@ -88,7 +88,7 @@ fn file_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
-/// 输入行的文字：有文字时显示文字，否则 dim 的占位文字（焦点由 `›` 表示）。
+/// 输入行的文字：有文字时显示文字，否则 dim 的占位文字（焦点由行首的指针表示）。
 pub(super) fn input(text: &str, placeholder: &str) -> Vec<Span<'static>> {
     if text.is_empty() {
         vec![Span::styled(placeholder.to_owned(), dim())]

@@ -45,6 +45,8 @@ pub struct NodeHook {
     pub enabled: Option<bool>,
     pub timeout_ms: Option<f64>,
     pub status_message: Option<String>,
+    /// `onError: "deny"`：PreToolUse 里这个 hook 出错时拦下工具（hooks.md §4.1 末段）；`"allow"` 与缺省同义。
+    pub deny_on_error: bool,
 }
 
 impl NodeHook {
@@ -87,6 +89,7 @@ impl NodeHook {
                 condition: None,
                 background: *background,
                 plugin_root: None,
+                deny_on_error: self.deny_on_error,
             },
             NodeHookKind::Process { args } => CommandHook {
                 command: self.command.clone(),
@@ -96,6 +99,7 @@ impl NodeHook {
                 condition: None,
                 background: false,
                 plugin_root: None,
+                deny_on_error: self.deny_on_error,
             },
         };
         HookCommand::Command(hook)
@@ -185,12 +189,21 @@ fn parse_hook(value: &Value) -> Result<NodeHook, String> {
         Some(other) => return Err(format!("hook type `{other}` is not supported")),
         None => return Err("hook has no type".to_owned()),
     };
+    // 修复线 F68（审计 C1）：以前不解析 `onError`，守卫 hook 出错时工具照常执行，Node 与 App 会拦下；带 `deny` 的项目
+    // 声明 digest 也与 Node 不同，授权互不认。
+    let deny_on_error = match object.get("onError") {
+        None => false,
+        Some(Value::String(value)) if value == "deny" => true,
+        Some(Value::String(value)) if value == "allow" => false,
+        Some(_) => return Err("`onError` must be \"allow\" or \"deny\"".to_owned()),
+    };
     Ok(NodeHook {
         command,
         kind,
         enabled: boolean(object, "enabled")?,
         timeout_ms: positive(object, "timeoutMs")?,
         status_message: non_empty(object, "statusMessage")?,
+        deny_on_error,
     })
 }
 

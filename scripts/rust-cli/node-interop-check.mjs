@@ -817,8 +817,9 @@ try {
         "both ways with the same file text, and both sides resolve the same initial model for " +
         "new sessions (Node resolveInitialModelSelection); /mcp enable and disable write the enabled field Node reads; " +
         "a rust-cli fork is read and continued by Node, and a Node fork is read by rust-cli; " +
-        "the usage rows rust-cli writes (side requests under the Node names session_title and " +
-        "web_fetch_processing) match Node's rows column by column and Node's usage " +
+        "the usage rows rust-cli writes (the session title row under the Node name session_title, " +
+        "outside turn_usage as Node's recordModelUsageFact and recordTurnUsageFact write it) match " +
+        "Node's rows column by column and Node's usage " +
         "queries read them, and rust-cli's /usage queries read a Node session and its footer " +
         "TPS and cache hit rate match Node's debug panel over the same requests; every message " +
         "passes the App protocol schema, interrupted steps, a turn interrupted before its request " +

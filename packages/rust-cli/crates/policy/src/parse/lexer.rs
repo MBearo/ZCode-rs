@@ -38,6 +38,26 @@ pub(crate) struct HereDocBody {
     pub end: usize,
 }
 
+/// 扫描单词结构时遇到的一处替换（修复线 F68，shell-permissions.md §4.5.2）。只在重新扫描单词结构（`bp`）时记下。
+#[derive(Clone, Debug)]
+pub(crate) struct RawSub {
+    pub kind: crate::parse::SubstitutionKind,
+    /// 在双引号里。
+    pub quoted: bool,
+    /// 整段原文（`$(…)`、`` `…` ``、`<(…)`）。
+    pub raw: Vec<u8>,
+    /// 命令替换里的命令原文（反引号去掉转义）。
+    pub inner: Vec<u8>,
+}
+
+/// 原文里有会执行命令的写法：`$(`、反引号、`<(`、`>(`。
+pub(crate) fn runs_a_command(text: &[u8]) -> bool {
+    text.contains(&b'`')
+        || text
+            .windows(2)
+            .any(|pair| matches!(pair, [b'$' | b'<' | b'>', b'(']))
+}
+
 pub(crate) struct Lexer<'a> {
     src: &'a [u8],
     src_end: usize,
@@ -67,6 +87,9 @@ pub(crate) struct Lexer<'a> {
     here_delim: Vec<u8>,
     here_quoted: bool,
     brace_memo: Option<scan::BraceMemo>,
+    /// 修复线 F68：重新扫描单词结构时遇到的替换，与正在扫描的双引号层数。
+    pub(crate) subs: Vec<RawSub>,
+    dq_depth: u32,
 }
 
 impl<'a> Lexer<'a> {
@@ -111,6 +134,20 @@ impl<'a> Lexer<'a> {
             here_delim: Vec::new(),
             here_quoted: false,
             brace_memo: None,
+            subs: Vec::new(),
+            dq_depth: 0,
+        }
+    }
+
+    /// 记下一处替换（只在 `bp` 时）。
+    fn record(&mut self, kind: crate::parse::SubstitutionKind, raw: &[u8], inner: Vec<u8>) {
+        if self.bp {
+            self.subs.push(RawSub {
+                kind,
+                quoted: self.dq_depth > 0,
+                raw: raw.to_vec(),
+                inner,
+            });
         }
     }
 

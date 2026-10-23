@@ -49,6 +49,12 @@ pub const SUBAGENT_TEXT_DARK: Rgb = (0, 0, 0);
 pub const SUBAGENT_TEXT_LIGHT: Rgb = (255, 255, 255);
 pub const SUBAGENT_TEXT_NAMED_DARK: Color = Color::Black;
 pub const SUBAGENT_TEXT_NAMED_LIGHT: Color = Color::White;
+/// 成功色（工作线 F74，tui.md §7.4、§7.6）：提问视图里勾上的 `[✔]`、单选已选项与确认页的回答。深浅背景各一种绿，
+/// 不按对比度调；16 色终端深色背景用亮绿、浅色背景用绿。
+pub const SUCCESS_DARK: Rgb = (78, 186, 101);
+pub const SUCCESS_LIGHT: Rgb = (44, 122, 57);
+pub const SUCCESS_NAMED_DARK: Color = Color::LightGreen;
+pub const SUCCESS_NAMED_LIGHT: Color = Color::Green;
 
 fn luminance((r, g, b): Rgb) -> f64 {
     let channel = |value: u8| {
@@ -199,6 +205,16 @@ impl Palette {
             SUBAGENT_NAMED_DARK
         };
         self.tint(SUBAGENT).unwrap_or(named)
+    }
+
+    /// 成功色（[`SUCCESS_DARK`] / [`SUCCESS_LIGHT`]），16 色终端按背景取亮绿或绿。
+    pub fn success(&self) -> Style {
+        let (rgb, named) = if self.light {
+            (SUCCESS_LIGHT, SUCCESS_NAMED_LIGHT)
+        } else {
+            (SUCCESS_DARK, SUCCESS_NAMED_DARK)
+        };
+        Style::default().fg(self.tint(rgb).unwrap_or(named))
     }
 
     /// 状态栏一类的颜色（Codex `status_line_style.rs`）：深 / 浅背景各一种主题色，柔化后按背景调对比度；

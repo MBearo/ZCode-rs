@@ -74,5 +74,31 @@
         }
       }
     ]
+  },
+  {
+    "name": "onError deny is part of the declaration digest",
+    "workspacePath": "/Users/dev/repo",
+    "userHooks": null,
+    "sources": [
+      {
+        "path": "/Users/dev/repo/.zcode/config.json",
+        "discoveryOrder": 0,
+        "hooks": {
+          "enabled": true,
+          "events": {
+            "PreToolUse": [
+              {
+                "matcher": "Bash",
+                "hooks": [
+                  { "type": "command", "command": "guard.sh", "onError": "deny" },
+                  { "type": "command", "command": "guard.sh", "onError": "allow" },
+                  { "type": "process", "command": "node", "args": ["check.js"], "onError": "deny" }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
   }
 ]

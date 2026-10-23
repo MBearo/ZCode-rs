@@ -1,17 +1,19 @@
 //! Bash 的权限检查（shell-permissions.md §4.5）。
 //!
-//! 整条命令先比精确规则；再按子命令（`&&`、`||`、`;`、`|`）逐个检查：deny 前缀 → ask 前缀 →
-//! 路径 → 精确 / 前缀 allow → acceptEdits 下的文件命令 → 只读命令放行 → “需要批准”。全部放行才
-//! 放行；任何一个拒绝就拒绝；复合命令的询问列出需要批准的部分。
+//! 整条命令先比精确规则；再按子命令（`&&`、`||`、`;`、`|`，加上从替换里拆出的命令，§4.5.2）逐个检查：deny 前缀 →
+//! ask 前缀 → 路径（含危险删除，§4.5.3）→ 精确 / 前缀 allow → acceptEdits 下的文件命令 → 只读命令放行 →
+//! “需要批准”。全部放行才放行；任何一个拒绝就拒绝；危险删除与“cd 加写入”按那个子命令询问；复合命令的其余询问
+//! 列出需要批准的部分。
 
 use rust_cli_kernel_api::permission::{PermissionMode, PermissionRule, RuleBehavior};
 
-use crate::bash_paths;
+use crate::bash_subst::{self, Expanded};
 use crate::check::{AskKind, Check, Inputs};
 use crate::parse::{Invocation, analyze};
 use crate::readonly::is_read_only;
 use crate::shell_rules::{self, Mode};
 use crate::texts::{self, Reason};
+use crate::{bash_paths, removal};
 
 const TOOL: &str = "Bash";
 /// acceptEdits 下自动放行的文件命令。
@@ -112,8 +114,11 @@ fn check_subcommand(
     {
         return ask.into();
     }
+    // 修复线 F68：解析不了的命令（子 shell、后台等）只认精确的 allow 规则。以前前缀与通配规则把整段原文当成一条
+    // 命令比较，`echo hi; (mkdir x)` 命中 `Bash(echo:*)` 就放行。
     let allowed = matches_any(inputs, RuleBehavior::Allow, &candidates, Mode::Exact)
-        || matches_any(inputs, RuleBehavior::Allow, &candidates, Mode::Prefix);
+        || (invocation.is_some()
+            && matches_any(inputs, RuleBehavior::Allow, &candidates, Mode::Prefix));
     if let Some(invocation) = invocation {
         let verdict = bash_paths::check(invocation, compound_has_cd, inputs);
         match verdict.check {
@@ -171,25 +176,31 @@ pub fn check(command: &str, inputs: &Inputs<'_>) -> Check {
     let parsed = !analysis.has_parse_errors
         && !analysis.has_unsupported_syntax
         && !analysis.commands.is_empty();
-    let parts: Vec<(String, Option<&Invocation>)> = if parsed {
-        analysis
-            .commands
-            .iter()
-            .map(|invocation| (invocation.command_text.clone(), Some(invocation)))
-            .collect()
+    let parts: Vec<(String, Option<Invocation>)> = if parsed {
+        match bash_subst::expand(&analysis.commands) {
+            Expanded::Parts(parts) => parts
+                .into_iter()
+                .map(|invocation| (invocation.command_text.clone(), Some(invocation)))
+                .collect(),
+            Expanded::Complex(reason) => {
+                return too_complex(command, &analysis.commands, reason, inputs);
+            }
+        }
     } else {
         vec![(command.to_owned(), None)]
     };
     let compound_has_cd = parts.len() > 1
-        && parts
-            .iter()
-            .any(|(_, invocation)| invocation.is_some_and(|invocation| invocation.name == "cd"));
+        && parts.iter().any(|(_, invocation)| {
+            invocation
+                .as_ref()
+                .is_some_and(|invocation| invocation.name == "cd")
+        });
     let subs: Vec<(String, Sub)> = parts
         .iter()
         .map(|(text, invocation)| {
             (
-                display(*invocation, text),
-                check_subcommand(text, *invocation, compound_has_cd, inputs),
+                display(invocation.as_ref(), text),
+                check_subcommand(text, invocation.as_ref(), compound_has_cd, inputs),
             )
         })
         .collect();
@@ -198,6 +209,18 @@ pub fn check(command: &str, inputs: &Inputs<'_>) -> Check {
         .find(|(_, sub)| matches!(sub.check, Check::Deny { .. }))
     {
         return denied.check.clone();
+    }
+    // 危险删除（bypass 也问）在整条命令上按它询问，不并进多操作列表。
+    if let Some((_, removal)) = subs.iter().find(|(_, sub)| {
+        matches!(
+            sub.check,
+            Check::Ask {
+                kind: AskKind::Immune,
+                ..
+            }
+        )
+    }) {
+        return removal.check.clone();
     }
     // “cd 加写入”在整条命令上询问，不并进多操作列表。
     if let Some((_, sub)) = subs.iter().find(|(_, sub)| sub.cd_with_write) {
@@ -220,7 +243,7 @@ pub fn check(command: &str, inputs: &Inputs<'_>) -> Check {
         .collect();
     let kind = results.iter().find_map(|(_, check)| match check {
         Check::Ask {
-            kind: kind @ (AskKind::Rule | AskKind::Safety),
+            kind: kind @ (AskKind::Rule | AskKind::Safety | AskKind::Immune),
             ..
         } => Some(kind.clone()),
         _ => None,
@@ -244,6 +267,60 @@ pub fn check(command: &str, inputs: &Inputs<'_>) -> Check {
     }
 }
 
+/// 整条命令不能静态检查时（命令替换、进程替换，§4.5.2）：整条命令的前缀 deny / ask 规则 → 每一段（含替换里面的
+/// 命令）的 deny 规则，文字用整条命令 → 危险删除 → 整条命令的精确 allow 规则 → 按理由询问（bypass 与整个工具的 allow
+/// 规则可以放行）。精确的 deny / ask 规则在 [`check`] 开头已经查过。
+fn too_complex(
+    command: &str,
+    commands: &[Invocation],
+    reason: &'static str,
+    inputs: &Inputs<'_>,
+) -> Check {
+    let whole = shell_rules::candidates(command);
+    if matches_any(inputs, RuleBehavior::Deny, &whole, Mode::Prefix) {
+        return Check::deny(texts::bash_command_denied(command));
+    }
+    if matches_any(inputs, RuleBehavior::Ask, &whole, Mode::Prefix) {
+        return Check::Ask {
+            message: texts::request_message(TOOL, None),
+            kind: AskKind::Rule,
+            suggestions: Vec::new(),
+        };
+    }
+    let segments = bash_subst::segments(commands);
+    let denied = segments.iter().any(|segment| {
+        let candidates = shell_rules::candidates(&segment.command_text);
+        matches_any(inputs, RuleBehavior::Deny, &candidates, Mode::Exact)
+            || matches_any(inputs, RuleBehavior::Deny, &candidates, Mode::Prefix)
+    });
+    if denied {
+        return Check::deny(texts::bash_command_denied(command));
+    }
+    let has_cd = segments.len() > 1 && segments.iter().any(|segment| segment.name == "cd");
+    if let Some(removal) = segments
+        .iter()
+        .find_map(|segment| removal::check(segment, has_cd, inputs))
+    {
+        return removal;
+    }
+    if matches_any(inputs, RuleBehavior::Allow, &whole, Mode::Exact) {
+        return Check::Allow;
+    }
+    Check::Ask {
+        message: reason.to_owned(),
+        kind: AskKind::Other,
+        suggestions: Vec::new(),
+    }
+}
+
 #[cfg(test)]
 #[path = "bash_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bash_subst_tests.rs"]
+mod subst_tests;
+
+#[cfg(test)]
+#[path = "removal_tests.rs"]
+mod removal_tests;

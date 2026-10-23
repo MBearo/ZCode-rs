@@ -55,6 +55,7 @@ fn parses_every_hook_type_and_field() {
             condition: Some("Bash(git *)".to_owned()),
             background: true,
             plugin_root: None,
+            deny_on_error: false,
         })
     );
     assert_eq!(hooks[0].display(), "node a.js");

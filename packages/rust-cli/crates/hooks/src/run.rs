@@ -46,7 +46,7 @@ pub(crate) struct Batch<'a> {
     pub prompt_model: Option<&'a ModelSelection>,
 }
 
-fn timeout_ms(hook: &HookCommand, default: u64) -> u64 {
+pub(crate) fn timeout_ms(hook: &HookCommand, default: u64) -> u64 {
     match hook.timeout() {
         // 设置里是秒。
         #[expect(

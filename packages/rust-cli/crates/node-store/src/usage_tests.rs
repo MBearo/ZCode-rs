@@ -366,6 +366,44 @@ async fn a_turn_aggregates_its_rows_and_keeps_the_earliest_start() {
     );
 }
 
+/// 会话标题的行（工作线 F73，usage.md §2.1.1）在输入的这一轮里，但回合用量只数主循环的请求（Node 的回合用量按回合
+/// 自己的请求事件数，标题有自己的事件列表）。
+#[tokio::test]
+async fn title_rows_do_not_count_in_the_turn() {
+    use rust_cli_kernel_api::model::SIDE_SESSION_TITLE;
+    let t = TestStore::new();
+    started(&t, "sess_1").await;
+    commit(&t, &sid(), vec![user("msg_u1", "name this session please")]).await;
+    let mut title = call("msg_t1", CallStatus::Completed);
+    title.source = QuerySource::Side(SIDE_SESSION_TITLE.to_owned());
+    title.started_at_ms = 1_500;
+    title.first_token_at_ms = None;
+    title.tool_calls = 0;
+    commit(&t, &sid(), vec![Fact::ModelCalled { call: title }]).await;
+    let main = call("msg_a1", CallStatus::Completed);
+    commit(&t, &sid(), vec![Fact::ModelCalled { call: main }]).await;
+    commit(
+        &t,
+        &sid(),
+        vec![Fact::TurnEnded {
+            status: CallStatus::Completed,
+        }],
+    )
+    .await;
+    assert_eq!(
+        t.rows("select turn_id, parent_user_message_id from model_usage where query_source = 'session_title'"),
+        vec![vec![turn_of(&t, "msg_u1"), json!("msg_u1")]],
+        "the title row is in the turn of the input"
+    );
+    assert_eq!(
+        t.rows(
+            "select model_request_count, first_model_start_at, input_tokens, output_tokens
+               from turn_usage"
+        ),
+        vec![vec![json!(1), json!(2_000), json!(15), json!(5)]]
+    );
+}
+
 #[tokio::test]
 async fn a_turn_without_a_real_user_input_is_not_written() {
     let t = TestStore::new();

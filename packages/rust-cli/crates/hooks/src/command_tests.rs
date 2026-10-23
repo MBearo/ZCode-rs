@@ -16,6 +16,7 @@ fn hook(command: &str) -> CommandHook {
         condition: None,
         background: false,
         plugin_root: None,
+        deny_on_error: false,
     }
 }
 
@@ -115,6 +116,7 @@ fn exec_form_expands_the_session_id() {
     );
 }
 
+/// 超时与取消都按 cancelled 解释；超时另记一种（`onError: "deny"` 只把超时当出错）。
 #[tokio::test]
 async fn timeout_and_cancel_are_cancelled() {
     let slow = Script {
@@ -124,7 +126,7 @@ async fn timeout_and_cancel_are_cancelled() {
     let env = Arc::new(ScriptedEnv::with(&[("slow", slow)]));
     assert_eq!(
         run_with(&env, &hook("slow"), 20, CancellationToken::new()).await,
-        Raw::Cancelled
+        Raw::TimedOut
     );
     let cancel = CancellationToken::new();
     let trigger = cancel.clone();

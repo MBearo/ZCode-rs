@@ -256,9 +256,16 @@ pub struct Ui {
     pub notifications: Arc<Mutex<Vec<String>>>,
     /// 画帧（`draw`）与终端交出 / 收回（`suspend` / `resume`）的顺序（tui-input.md §4.1）。
     pub handovers: Arc<Mutex<Vec<&'static str>>>,
+    cursor: Arc<Mutex<super::dead_terminal::Cursor>>,
 }
 
 impl Ui {
+    /// 终端光标的（列，行）；隐藏时 None（tui.md §7.6）。
+    pub fn cursor(&self) -> Option<(u16, u16)> {
+        let cursor = self.cursor.lock().unwrap();
+        cursor.visible.then_some(cursor.at)
+    }
+
     pub fn press(&self, code: KeyCode, modifiers: KeyModifiers) {
         self.keys
             .send(Event::Key(KeyEvent::new(code, modifiers)))
@@ -428,9 +435,11 @@ where
         notifications: notifications.clone(),
         handovers: handovers.clone(),
     };
+    let cursor = Arc::new(Mutex::new(super::dead_terminal::Cursor::default()));
     let mut terminal = Terminal::new(super::dead_terminal::Hangable {
         inner: TestBackend::new(setup.width, setup.height),
         dead: setup.hang.clone(),
+        cursor: cursor.clone(),
     })
     .unwrap();
     let keys_only = stream::unfold(receiver, |mut receiver| async move {
@@ -475,6 +484,7 @@ where
         copies,
         notifications,
         handovers,
+        cursor,
     };
     let kernel = kernel(
         model,

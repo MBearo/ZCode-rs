@@ -124,7 +124,7 @@ enum Next {
     Agent(AgentSignal),
     Cron,
     Job(Result<JobDone, rust_cli_base::TaskError>),
-    Title((MessageId, Result<Option<String>, rust_cli_base::TaskError>)),
+    Title(crate::title::TitleDone),
     Name(Result<Option<String>, rust_cli_base::TaskError>),
     /// 跨会话的入站（消息或回执，cross-session.md §2.4）。
     Peer(rust_cli_kernel_api::peers::PeerSignal),
@@ -188,7 +188,7 @@ pub(crate) struct Actor {
     pub(crate) goal: crate::goal::Goals,
     seen: HashSet<CommandId>,
     /// 当前轮（开启它的真实用户输入与轮次 ID）：随每个批次交给存储（node-store.md §4，修复线 F6）；冷加载时取
-    /// `LoadedSession.turn`。只在 `commit` 里读改，锁不跨 await。
+    /// `LoadedSession.turn`。只在 `commit` 里改，锁不跨 await。
     turn: std::sync::Mutex<Option<TurnAnchor>>,
     /// 正在关闭：前台工作收尾后回复它并退出循环；期间不开新回合、不接新命令（spec §3.3）。
     pub(crate) closing: Option<oneshot::Sender<()>>,
@@ -316,7 +316,7 @@ impl Actor {
                 Next::Agent(signal) => self.on_agent_signal(signal).await,
                 Next::Cron => self.on_cron_wakeup().await,
                 Next::Job(done) => self.on_job(done).await,
-                Next::Title((prompt, result)) => self.on_title(prompt, result).await,
+                Next::Title(done) => self.on_title(done).await,
                 Next::Name(result) => self.on_name(result).await,
                 Next::Peer(signal) => self.on_peer_signal(signal).await,
                 Next::PeerDeadline => self.peers_expire(true).await,
@@ -518,7 +518,28 @@ impl Actor {
         Ok(())
     }
 
-    fn turn_anchor(&self) -> Option<TurnAnchor> {
+    /// 提交一批锚在给定回合的事实，不改当前轮：起任务时记下回合、结果晚到的旁路请求用（会话标题的用量行，
+    /// usage.md §2.1.1，工作线 F73）。
+    pub(crate) async fn commit_in_turn(
+        &self,
+        turn: Option<TurnAnchor>,
+        facts: Vec<Fact>,
+    ) -> Result<(), String> {
+        let batch = FactBatch {
+            owner_epoch: OwnerEpoch::LOCAL,
+            command: None,
+            facts,
+            turn,
+        };
+        self.deps
+            .store
+            .commit(&self.meta.id, batch)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn turn_anchor(&self) -> Option<TurnAnchor> {
         self.turn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

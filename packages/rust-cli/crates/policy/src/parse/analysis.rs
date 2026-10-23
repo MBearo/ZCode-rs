@@ -8,15 +8,20 @@
 use std::collections::HashMap;
 
 use crate::parse::js::{lossy, slice};
+use crate::parse::lexer::RawSub;
 use crate::parse::nodes::{CommandNode, OpBefore, RedirectNode, Script, WordRef};
 use crate::parse::parts::{Structure, heredoc_structure, word_structure};
-use crate::parse::{Analysis, EnvAssignment, Invocation, Operator, Redirect};
+use crate::parse::{
+    Analysis, EnvAssignment, Invocation, Operator, Redirect, Substitution, SubstitutionKind,
+};
 
 struct Resolved {
     value: Vec<u8>,
     dynamic: bool,
     /// 有结构化部件（unbash `Word.parts` 不为空）。
     structured: bool,
+    /// 词里的替换（修复线 F68）。
+    subs: Vec<RawSub>,
 }
 
 struct Collector<'a> {
@@ -101,6 +106,7 @@ impl Collector<'_> {
             structured: structure.value.is_some(),
             value: structure.value.clone().unwrap_or_else(|| word.text.clone()),
             dynamic: structure.dynamic,
+            subs: structure.subs.clone(),
         }
     }
 
@@ -149,6 +155,7 @@ impl Collector<'_> {
         self.has_dynamic_words |= has_dynamic_words;
         self.has_redirects |= !redirects.is_empty();
 
+        let substitutions = self.substitutions(node, &words, &values, &redirects, &targets);
         let name = if node.name.is_some() {
             lossy(&words[0].value)
         } else {
@@ -191,6 +198,70 @@ impl Collector<'_> {
                     target: lossy(&target.value),
                 })
                 .collect(),
+            substitutions,
         }
     }
+
+    /// 修复线 F68（shell-permissions.md §4.5.2）：命令里的替换按出现的顺序。双引号里的命令替换、整个赋值的值就是
+    /// 一个命令替换时能拆成单独的子命令；其余（不在双引号里的参数、重定向目标、heredoc 正文）不能拆。
+    fn substitutions(
+        &self,
+        node: &CommandNode,
+        words: &[Resolved],
+        values: &[Option<Resolved>],
+        redirects: &[&RedirectNode],
+        targets: &[Resolved],
+    ) -> Vec<Substitution> {
+        let convert = |sub: &RawSub, whole: bool| Substitution {
+            kind: sub.kind,
+            splittable: sub.kind == SubstitutionKind::Command && (sub.quoted || whole),
+            inner: lossy(&sub.inner),
+        };
+        let mut found = Vec::new();
+        for (assignment, value) in node.prefix.iter().zip(values) {
+            let (Some(word), Some(value)) = (&assignment.value, value) else {
+                continue;
+            };
+            let text = slice(self.source, word.pos, word.end);
+            found.extend(value.subs.iter().map(|sub| convert(sub, sub.raw == text)));
+        }
+        for word in words {
+            found.extend(word.subs.iter().map(|sub| convert(sub, false)));
+        }
+        for (redirect, target) in redirects.iter().zip(targets) {
+            found.extend(target.subs.iter().map(|sub| Substitution {
+                splittable: false,
+                ..convert(sub, false)
+            }));
+            // 不加引号的 heredoc 正文里的 `$(` 与反引号同样执行（正文没有加引号的规则，按原文找，`\$(` 不算）。
+            if let Some(body) = redirect.body
+                && heredoc_runs_a_command(slice(self.source, body.pos, body.end))
+            {
+                found.push(Substitution {
+                    kind: SubstitutionKind::Hidden,
+                    splittable: false,
+                    inner: String::new(),
+                });
+            }
+        }
+        found
+    }
+}
+
+/// 不加引号的 heredoc 正文里有没有被转义的 `$(` 或反引号。
+fn heredoc_runs_a_command(body: &[u8]) -> bool {
+    let mut escaped = false;
+    for (index, &byte) in body.iter().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match byte {
+            b'\\' => escaped = true,
+            b'`' => return true,
+            b'$' if body.get(index + 1) == Some(&b'(') => return true,
+            _ => {}
+        }
+    }
+    false
 }

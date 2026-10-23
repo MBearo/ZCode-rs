@@ -165,6 +165,9 @@ impl Lexer<'_> {
                 }
                 let mut glob = b"(".to_vec();
                 glob.extend_from_slice(self.slice(inner_start, pos));
+                if super::runs_a_command(&glob[1..]) {
+                    self.record(crate::parse::SubstitutionKind::Hidden, &glob, Vec::new());
+                }
                 text.extend_from_slice(&glob);
                 if bp && u32::from(last) != EQ {
                     if !lit.is_empty() {
@@ -259,6 +262,9 @@ impl Lexer<'_> {
                 LBRACE => {
                     if let Some(end) = self.scan_brace_expansion(pos, len) {
                         let brace = self.slice(pos, end);
+                        if super::runs_a_command(brace) {
+                            self.record(crate::parse::SubstitutionKind::Hidden, brace, Vec::new());
+                        }
                         text.extend_from_slice(brace);
                         if bp {
                             flush(&mut parts, &mut lit);
@@ -295,7 +301,9 @@ impl Lexer<'_> {
         if (ch == LT || ch == GT) && start + 1 < self.src_end && self.c(start + 1) == LPAREN {
             self.pos = start + 2;
             self.extract_balanced();
-            let substitution = Part::Dynamic(self.slice(start, self.pos).to_vec());
+            let raw = self.slice(start, self.pos);
+            self.record(crate::parse::SubstitutionKind::Process, raw, Vec::new());
+            let substitution = Part::Dynamic(raw.to_vec());
             if self.pos >= self.src_end {
                 return Some(vec![substitution]);
             }

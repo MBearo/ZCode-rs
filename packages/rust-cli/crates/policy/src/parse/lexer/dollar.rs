@@ -5,6 +5,7 @@ use super::{
     AT, BACKSLASH, BACKTICK, BANG, DASH, DOLLAR, DQUOTE, HASH, LBRACE, LPAREN, Lexer, NL, PIPE,
     QUESTION, RBRACE, RPAREN, SPACE, SQUOTE, STAR, TAB, is_digit, is_id_continue, is_id_start,
 };
+use crate::parse::SubstitutionKind;
 use crate::parse::parts::Part;
 
 impl Lexer<'_> {
@@ -32,6 +33,10 @@ impl Lexer<'_> {
         let mut text = Vec::new();
         let mut has_exp = false;
         let mut dynamic = false;
+        // 修复线 F68：这个双引号字符串里的字面内容（不含展开），与它开始时已记下的替换个数。
+        let mut literal = Vec::new();
+        let subs_start = self.subs.len();
+        self.dq_depth += 1;
         while self.pos < len && self.c(self.pos) != DQUOTE {
             let run = self.pos;
             while self.pos < len
@@ -40,6 +45,7 @@ impl Lexer<'_> {
                 self.pos += 1;
             }
             text.extend_from_slice(self.slice(run, self.pos));
+            literal.extend_from_slice(self.slice(run, self.pos));
             if self.pos >= len || self.c(self.pos) == DQUOTE {
                 break;
             }
@@ -54,8 +60,10 @@ impl Lexer<'_> {
                         }
                         if !matches!(next, DOLLAR | BACKTICK | DQUOTE | BACKSLASH) {
                             text.push(b'\\');
+                            literal.push(b'\\');
                         }
                         text.extend_from_slice(self.unit(self.pos));
+                        literal.extend_from_slice(self.unit(self.pos));
                         self.pos += 1;
                     }
                 }
@@ -63,6 +71,7 @@ impl Lexer<'_> {
                     // 双引号内的 `$"` 是字面 `$` 加闭合引号，不是 locale 字符串
                     if self.pos + 1 < len && self.c(self.pos + 1) == DQUOTE {
                         text.push(b'$');
+                        literal.push(b'$');
                         self.pos += 1;
                         continue;
                     }
@@ -72,6 +81,8 @@ impl Lexer<'_> {
                     // 只有展开类部件是双引号的子节点；`$'..'` 等被当作字面量并入文本
                     if matches!(self.result_part.take(), Some(Part::Dynamic(_))) {
                         dynamic = true;
+                    } else {
+                        literal.extend_from_slice(&self.result_text);
                     }
                 }
                 _ => {
@@ -82,6 +93,18 @@ impl Lexer<'_> {
                 }
             }
         }
+        // 字面内容不到两个字符时，替换的输出几乎就是这个参数本身（可能是路径或选项）：这里的命令替换不能拆。
+        if self.bp
+            && self.subs.len() > subs_start
+            && String::from_utf8_lossy(&literal).chars().count() <= 1
+        {
+            for sub in &mut self.subs[subs_start..] {
+                if sub.kind == SubstitutionKind::Command {
+                    sub.kind = SubstitutionKind::Quoted;
+                }
+            }
+        }
+        self.dq_depth -= 1;
         if self.pos < len {
             self.pos += 1;
         } else {
@@ -114,12 +137,19 @@ impl Lexer<'_> {
                 let mut text = b"$((".to_vec();
                 text.extend_from_slice(&body);
                 text.extend_from_slice(b"))");
+                if super::runs_a_command(&body) {
+                    self.record(SubstitutionKind::Hidden, &text, Vec::new());
+                }
                 self.set_result(text.clone(), false, Some(Part::Dynamic(text)));
             }
             LPAREN => {
                 self.pos += 1;
                 self.extract_balanced();
                 let text = self.slice(dollar, self.pos).to_vec();
+                // 去掉 `$(` 与配对的 `)`；没有配对时取到结尾。
+                let close = usize::from(text.len() > 2 && text.ends_with(b")"));
+                let inner = text[2..text.len() - close].to_vec();
+                self.record(SubstitutionKind::Command, &text, inner);
                 self.set_result(text.clone(), true, Some(Part::Dynamic(text)));
             }
             LBRACE => {
@@ -230,6 +260,8 @@ impl Lexer<'_> {
         let mut text = prefix.to_vec();
         text.extend_from_slice(&crate::parse::js::trim_bytes(raw_inner));
         text.extend_from_slice(b" }");
+        // `${ cmd; }` 在当前 shell 里执行命令。
+        self.record(SubstitutionKind::Hidden, &text, Vec::new());
         self.set_result(text.clone(), true, Some(Part::Dynamic(text)));
     }
 
@@ -266,6 +298,7 @@ impl Lexer<'_> {
             self.errors += 1; // unterminated backtick
         }
         let raw = self.slice(start - 1, self.pos).to_vec();
+        self.record(SubstitutionKind::Command, &raw, inner.clone());
         self.set_result(inner, true, Some(Part::Dynamic(raw)));
     }
 
@@ -300,6 +333,9 @@ impl Lexer<'_> {
             self.pos += 1;
         }
         let text = self.slice(start - 1, self.pos).to_vec();
+        if super::runs_a_command(&text) {
+            self.record(SubstitutionKind::Hidden, &text, Vec::new());
+        }
         self.set_result(text.clone(), false, Some(Part::Dynamic(text)));
     }
 

@@ -292,3 +292,73 @@ async fn cd_outside_the_workspace_resets_and_relative_paths_follow_the_reset() {
     let (text, error) = bench.call("Read", json!({"file_path": "a.txt"})).await;
     assert!(!error && text.contains("1\talpha"), "{text}");
 }
+
+/// 后台命令里的 `cd` 不改会话的当前目录（shell-permissions.md §1.2）：后台命令什么时候结束不确定，以前结束时把
+/// cwd 写回会话，之后任意两个工具调用之间会话的当前目录都可能跳走。现在结束之后 `pwd` 仍是原来的目录。
+#[tokio::test]
+async fn a_background_cd_does_not_move_the_session_directory() {
+    let mut bench = Bench::new(
+        PermissionMode::AcceptEdits,
+        &[(RuleBehavior::Allow, "Bash")],
+    );
+    let (text, error) = bench
+        .call(
+            "Bash",
+            json!({"command": "cd sub && pwd", "description": "Go", "run_in_background": true}),
+        )
+        .await;
+    assert!(!error, "{text}");
+    assert!(
+        text.ends_with(&format!(
+            "\nSession cwd remains {}; directory changes made by the backgrounded command do not apply to subsequent commands.",
+            bench.root.display()
+        )),
+        "{text}"
+    );
+    // 等后台命令写完终态（输出文件末尾的 `[exited with code N]`）。
+    let output = text
+        .split("Output is being written to: ")
+        .nth(1)
+        .and_then(|rest| rest.split(". You will be notified").next())
+        .unwrap()
+        .to_owned();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if read(Path::new(&output)).is_some_and(|text| text.contains("[exited with code")) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the background command did not finish"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        read(Path::new(&output)).unwrap(),
+        format!("{}\n\n[exited with code 0]\n", bench.path("sub"))
+    );
+    let (text, error) = bench.call("Bash", json!({"command": "pwd"})).await;
+    assert!(!error, "{text}");
+    assert_eq!(text, bench.root.display().to_string());
+    // 后台命令从会话的当前目录启动。
+    bench.call("Bash", json!({"command": "cd sub"})).await;
+    let (text, _) = bench
+        .call(
+            "Bash",
+            json!({"command": "pwd > where.txt", "description": "Where", "run_in_background": true}),
+        )
+        .await;
+    assert!(!text.contains("Session cwd remains"), "{text}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while read(&bench.root.join("sub/where.txt")).is_none_or(|text| text.is_empty()) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "where.txt was not written"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        read(&bench.root.join("sub/where.txt")).unwrap(),
+        format!("{}\n", bench.path("sub"))
+    );
+}

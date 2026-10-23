@@ -1,19 +1,35 @@
 //! 会话标题（docs/specs/rust-cli/titles.md §2、§4）：会话 actor 是标题与标题来源的唯一 owner。
 //!
 //! 首条人类输入提交后：内存里的标题换成 `first_input`（node-store 在同一事务里按 Node 写好）并发
-//! `TitleChanged`；满足触发条件时起一个标题任务，它只算候选标题，结果回到 actor 后才提交
-//! `TitleGenerated`（存储按 Node 的来源条件写）、改内存、发事件。用户改名（`Rename`）或 hook 改过标题后，
-//! 候选标题丢弃。
+//! `TitleChanged`；满足触发条件时起一个标题任务，它只算候选标题与这次请求的用量事实，结果回到 actor 后先提交用量行
+//! （工作线 F73，usage.md §2.1.1），再提交 `TitleGenerated`（存储按 Node 的来源条件写）、改内存、发事件。用户改名
+//! （`Rename`）或 hook 改过标题后，候选标题丢弃（用量行照写）。
 
 use rust_cli_base::{Task, TaskError};
 use rust_cli_kernel_api::ids::{CommandId, MessageId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
 use rust_cli_kernel_api::session_api::{Ack, KernelEvent};
-use rust_cli_kernel_api::store::{Fact, SessionKind};
+use rust_cli_kernel_api::store::{Fact, SessionKind, TurnAnchor};
 use tokio_util::sync::CancellationToken;
 
 use crate::actor::{Actor, accepted, rejected};
-use crate::title_model::long_enough;
+use crate::title_model::{Generated, long_enough};
+
+/// 在跑的标题任务。
+struct TitleJob {
+    /// 首条输入的消息 ID。
+    prompt: MessageId,
+    /// 起任务时的回合锚点（首条输入与它的轮次）：用量行写在这一轮，标题晚于下一条输入回来也不变。
+    turn: Option<TurnAnchor>,
+    task: Task<Generated>,
+}
+
+/// 标题任务的结果与它的首条输入、回合锚点。
+pub(crate) struct TitleDone {
+    prompt: MessageId,
+    turn: Option<TurnAnchor>,
+    result: Result<Generated, TaskError>,
+}
 
 /// 标题生成的状态（actor 的一个字段）。
 #[derive(Default)]
@@ -22,8 +38,8 @@ pub(crate) struct TitleState {
     attempted: bool,
     /// 标题来源是 `custom`（本会话里改过名或 hook 改过标题）。
     custom: bool,
-    /// 在跑的标题任务与首条输入的消息 ID。
-    task: Option<(MessageId, Task<Option<String>>)>,
+    /// 在跑的标题任务。
+    task: Option<TitleJob>,
     /// 本 actor 里改名（`Rename`、hook 的标题、起名写入）的次数：起名期间有新的改名时不写
     /// （titles.md §8.2，`superseded`）。
     renames: u64,
@@ -41,13 +57,15 @@ impl TitleState {
 }
 
 /// 标题任务的结果；没有任务时一直等（actor 的 select 分支）。
-pub(crate) async fn title_done(
-    state: &mut TitleState,
-) -> (MessageId, Result<Option<String>, TaskError>) {
+pub(crate) async fn title_done(state: &mut TitleState) -> TitleDone {
     match &mut state.task {
-        Some((prompt, task)) => {
-            let result = task.await;
-            (prompt.clone(), result)
+        Some(job) => {
+            let result = (&mut job.task).await;
+            TitleDone {
+                prompt: job.prompt.clone(),
+                turn: job.turn.clone(),
+                result,
+            }
         }
         None => std::future::pending().await,
     }
@@ -111,33 +129,52 @@ impl Actor {
             .running
             .as_ref()
             .and_then(|running| running.run.clone());
+        // 用量事实的时钟与逻辑请求 ID（工作线 F73）。
+        let clock = self.deps.clock.clone();
+        let request = self.deps.ids.message();
         let task = self.deps.spawner.spawn("session-title", async move {
             titles
                 .generate(
                     &selection,
                     (&session, run.as_ref()),
                     &text,
+                    (clock.as_ref(), request),
                     CancellationToken::new(),
                 )
                 .await
         });
-        self.titles.task = Some((message.id().clone(), task));
+        self.titles.task = Some(TitleJob {
+            prompt: message.id().clone(),
+            turn: self.turn_anchor(),
+            task,
+        });
     }
 
-    /// 候选标题回到 actor：仍可写时提交、改内存、发事件。
-    pub(crate) async fn on_title(
-        &mut self,
-        prompt: MessageId,
-        result: Result<Option<String>, TaskError>,
-    ) {
+    /// 标题任务回到 actor：先提交这次请求的用量行，候选标题仍可写时再提交、改内存、发事件。
+    pub(crate) async fn on_title(&mut self, done: TitleDone) {
         self.titles.task = None;
-        let title = match result {
-            Ok(Some(title)) => title,
-            Ok(None) => return,
+        let TitleDone {
+            prompt,
+            turn,
+            result,
+        } = done;
+        let generated = match result {
+            Ok(generated) => generated,
             Err(error) => {
                 tracing::warn!(%error, "the session title task ended without a result");
                 return;
             }
+        };
+        // 工作线 F73（usage.md §2.1.1）：Node 在标题请求结束时就写用量行，不看标题用不用；单独一批，锚在起任务时的
+        // 回合；写入失败只记日志（Node 同）。
+        let usage = vec![Fact::ModelCalled {
+            call: generated.call,
+        }];
+        if let Err(reason) = self.commit_in_turn(turn, usage).await {
+            tracing::warn!(%reason, "the session title usage was not stored");
+        }
+        let Some(title) = generated.title else {
+            return;
         };
         // 用户先改了名，或首条输入已被回退掉（Node `isSuppressedByFirstQueryEdit`）：丢弃。
         if self.titles.custom || !self.messages.iter().any(|m| m.id() == &prompt) {

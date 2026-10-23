@@ -189,7 +189,7 @@ async fn whole_tool_rules_come_first_and_last() {
 }
 
 #[tokio::test]
-async fn bypass_still_respects_deny_ask_rules_and_safety_paths() {
+async fn bypass_still_respects_deny_and_ask_rules() {
     let gate = PolicyGate::new(rules(&[
         (RuleBehavior::Deny, "Bash(rm:*)"),
         (RuleBehavior::Ask, "Bash(git push:*)"),
@@ -204,17 +204,6 @@ async fn bypass_still_respects_deny_ask_rules_and_safety_paths() {
         bash(&gate, mode, "git push").await,
         PermissionDecision::Ask { .. }
     ));
-    let sensitive = decide(
-        &gate,
-        mode,
-        "Write",
-        json!({"file_path": "/w/.git/hooks/pre-commit"}),
-    )
-    .await;
-    assert_eq!(
-        ask_message(&sensitive),
-        "ZCode requested permissions to edit /w/.git/hooks/pre-commit which is a sensitive file."
-    );
 }
 
 #[tokio::test]
@@ -284,3 +273,6 @@ mod guarded_chain;
 
 #[path = "lib_tests_find.rs"]
 mod find_paths;
+
+#[path = "lib_tests_safety.rs"]
+mod safety;

@@ -38,6 +38,8 @@ pub struct CommandHook {
     pub background: bool,
     /// 插件目录：插件提供的 hook 才有（hooks.md §2.2 第 7 条）。
     pub plugin_root: Option<String>,
+    /// Node 配置的 `onError: "deny"`：PreToolUse 里出错时拦下工具（hooks.md §4.1 末段）。`settings.json` 形状的设置没有这一项。
+    pub deny_on_error: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,6 +77,11 @@ pub enum HookCommand {
 }
 
 impl HookCommand {
+    /// Node 配置的 `onError: "deny"`（只有 command hook 有）。
+    pub fn denies_on_error(&self) -> bool {
+        matches!(self, Self::Command(hook) if hook.deny_on_error)
+    }
+
     pub fn condition(&self) -> Option<&str> {
         match self {
             Self::Command(hook) => hook.condition.as_deref(),
@@ -177,6 +184,7 @@ fn parse_hook(value: &Value) -> Result<HookCommand, String> {
                 condition,
                 background: flag(object, "async") || flag(object, "asyncRewake"),
                 plugin_root: None,
+                deny_on_error: false,
             }))
         }
         Some("prompt") => Ok(HookCommand::Prompt(PromptHook {

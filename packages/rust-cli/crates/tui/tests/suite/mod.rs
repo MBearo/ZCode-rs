@@ -36,6 +36,7 @@ mod peers;
 mod permissions;
 mod plan_open;
 mod projects;
+mod questions;
 mod queue;
 mod resume_page;
 mod sessions_seed;

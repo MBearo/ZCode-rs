@@ -192,13 +192,18 @@ async fn changes_follow_writes_to_the_tasks_file() {
         .await
         .unwrap();
     let mut changes = store.changes();
+    let wait = std::time::Duration::from_secs(10);
+    // 监听建好时先产出一项（工作线 F73：登记在阻塞线程上，之后的写入才有事件）。
+    tokio::time::timeout(wait, changes.next())
+        .await
+        .expect("a reread once watching")
+        .unwrap();
     store
         .change(CronTasksChange::Add {
             task: new_task("a1", "sess_a"),
         })
         .await
         .unwrap();
-    let wait = std::time::Duration::from_secs(10);
     tokio::time::timeout(wait, changes.next())
         .await
         .expect("a change after our own write")

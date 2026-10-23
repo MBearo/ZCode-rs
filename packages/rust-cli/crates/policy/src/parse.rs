@@ -68,6 +68,33 @@ pub struct Invocation {
     /// 管道带 `time` 关键字时第一条命令前面补一个 `time`（Node `collectPipelineCommands`）。
     #[serde(skip)]
     pub words: Vec<WordText>,
+    /// 这条命令里的替换（词、前缀赋值的值、重定向目标、heredoc 正文），按出现的顺序（修复线 F68，
+    /// shell-permissions.md §4.5.2；不进 JSON，Node 的分析结果不变）。
+    #[serde(skip)]
+    pub substitutions: Vec<Substitution>,
+}
+
+/// 替换的种类。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubstitutionKind {
+    /// `$(…)` 或反引号。
+    Command,
+    /// 双引号里的命令替换，但这个双引号字符串除了展开只有不到两个字符（`"$(cmd)"`）：输出几乎就是参数本身，不能拆。
+    Quoted,
+    /// `<(…)` 或 `>(…)`。
+    Process,
+    /// 藏在别的展开里的命令（`${…}`、`$((…))`、花括号展开、extglob、`${ cmd; }`、heredoc 正文）。
+    Hidden,
+}
+
+/// 命令里的一处替换。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Substitution {
+    pub kind: SubstitutionKind,
+    /// 能拆成单独的子命令：双引号里的命令替换，或整个赋值的值就是一个命令替换。
+    pub splittable: bool,
+    /// 命令替换里的命令原文（反引号去掉转义）；藏在别的展开里与进程替换为空。
+    pub inner: String,
 }
 
 /// 一个词的原文（`Word.text`）与它是否有结构化部件（unbash `Word.parts` 不为空：带引号或展开）。

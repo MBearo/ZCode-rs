@@ -3,10 +3,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures_util::stream::{self, BoxStream, StreamExt};
-use rust_cli_kernel_api::message::UserMessage;
-use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, ModelRequest};
+use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::message::{StopReason, Usage, UserMessage};
+use rust_cli_kernel_api::metering::{CallStatus, ModelCall};
+use rust_cli_kernel_api::model::{
+    ModelError, ModelEvent, ModelPort, ModelRequest, QuerySource, SIDE_SESSION_TITLE,
+};
 use rust_cli_kernel_api::session_api::{Command, SessionHandle};
-use rust_cli_kernel_api::testing::{ScriptedModel, text_response};
+use rust_cli_kernel_api::testing::{MemoryStore, ScriptedModel, text_response};
 use tokio::sync::Notify;
 
 use super::*;
@@ -30,6 +34,54 @@ fn generated(facts: &[Fact]) -> Vec<Fact> {
         .filter(|fact| matches!(fact, Fact::TitleGenerated { .. }))
         .cloned()
         .collect()
+}
+
+/// 标题请求的用量事实（工作线 F73，usage.md §2.1.1）。
+fn title_calls(facts: &[Fact]) -> Vec<ModelCall> {
+    facts
+        .iter()
+        .filter_map(|fact| match fact {
+            Fact::ModelCalled { call }
+                if call.source == QuerySource::Side(SIDE_SESSION_TITLE.to_owned()) =>
+            {
+                Some(call.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// 等标题请求的用量事实提交（失败的请求没有界面事件可等）。
+async fn until_title_call(store: &MemoryStore) -> ModelCall {
+    let session = SessionId::new("sess_1");
+    for _ in 0..500 {
+        if let Some(call) = title_calls(&store.facts(&session)).pop() {
+            return call;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("no usage row for the title request");
+}
+
+/// 带用量的文本响应：开头的输入用量与结尾的输出用量。
+fn with_usage(
+    mut events: Vec<Result<ModelEvent, ModelError>>,
+) -> Vec<Result<ModelEvent, ModelError>> {
+    for event in &mut events {
+        match event {
+            Ok(ModelEvent::MessageStart { usage, .. }) => {
+                *usage = Usage {
+                    input_tokens: 20,
+                    output_tokens: 1,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 4,
+                };
+            }
+            Ok(ModelEvent::MessageDelta { usage, .. }) => usage.output_tokens = 6,
+            _ => {}
+        }
+    }
+    events
 }
 
 #[tokio::test]
@@ -181,6 +233,8 @@ async fn a_rename_before_the_title_arrives_wins() {
     for _ in 0..20 {
         assert_eq!(built.session.view().await.unwrap().meta.title, "Mine");
     }
+    // 丢弃的标题照样写用量行（Node 在请求结束时就写），之后也没有 `TitleGenerated`。
+    until_title_call(&built.store).await;
     let facts = built
         .store
         .facts(&rust_cli_kernel_api::ids::SessionId::new("sess_1"));
@@ -190,4 +244,104 @@ async fn a_rename_before_the_title_arrives_wins() {
             .iter()
             .any(|fact| matches!(fact, Fact::TitleChanged { title } if title == "Mine"))
     );
+}
+
+/// 标题请求在请求结束时写一行用量（工作线 F73，usage.md §2.1.1）：单独一批，锚在起标题时的首条输入（标题晚于第二条
+/// 输入回来也一样）；没有首字时间；这个 ID 没有消息。
+#[tokio::test]
+async fn the_title_request_writes_a_usage_row_in_the_prompt_turn() {
+    let main = Arc::new(ScriptedModel::new(vec![
+        text_response(&["one"]),
+        text_response(&["two"]),
+    ]));
+    let open = Arc::new(Notify::new());
+    let served = Arc::new(AtomicUsize::new(0));
+    let mut setup = Setup::new(main);
+    setup.titles = titles(Arc::new(Gated {
+        open: open.clone(),
+        served,
+    }));
+    let built = setup.build().await;
+    let mut events = built.session.subscribe(None);
+    built
+        .session
+        .send(submit("c1", "please name this session later"))
+        .await;
+    until(&mut events, finished).await;
+    built
+        .session
+        .send(submit("c2", "and here is a second message"))
+        .await;
+    until(&mut events, finished).await;
+    open.notify_one();
+    until(&mut events, |event| titled(event, "Generated name")).await;
+
+    let session = SessionId::new("sess_1");
+    let facts = built.store.facts(&session);
+    let [call] = title_calls(&facts).try_into().expect("one title usage row");
+    assert_eq!(call.status, CallStatus::Completed);
+    assert_eq!(call.stop_reason, Some(StopReason::EndTurn));
+    assert_eq!((call.started_at_ms, call.completed_at_ms), (1_000, 1_000));
+    assert_eq!(call.first_token_at_ms, None, "no first token, as in Node");
+    assert_eq!((call.tool_calls, call.retries), (0, 0));
+    assert!(call.error.is_none());
+    assert!(
+        !facts.iter().any(|fact| matches!(
+            fact,
+            Fact::MessageAppended { message } if message.id() == &call.message
+        )),
+        "the row has no assistant message"
+    );
+    let prompts: Vec<MessageId> = facts
+        .iter()
+        .filter_map(|fact| match fact {
+            Fact::MessageAppended {
+                message: message @ Message::User(user),
+            } if matches!(user.origin, UserOrigin::Human) => Some(message.id().clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(prompts.len(), 2);
+    // 最后两批：标题的用量（首条输入的轮次）、生成的标题（当前轮，第二条输入）。
+    let turns = built.store.batch_turns(&session);
+    let anchor = |index: usize| {
+        turns[turns.len() - index]
+            .as_ref()
+            .map(|turn| turn.prompt.clone())
+    };
+    assert_eq!(anchor(2), Some(prompts[0].clone()));
+    assert_eq!(anchor(1), Some(prompts[1].clone()));
+    assert!(matches!(facts.last(), Some(Fact::TitleGenerated { .. })));
+}
+
+/// 失败的标题请求也写一行（Node 在失败时同样记 `error`），用量取已经报告的部分。
+#[tokio::test]
+async fn a_failed_title_request_still_writes_a_usage_row() {
+    let main = Arc::new(ScriptedModel::new(vec![text_response(&["Sure."])]));
+    let mut events = with_usage(text_response(&["{\"title\": \"Half"]));
+    events.truncate(3);
+    events.push(Err(ModelError::Overloaded {
+        message: "busy".to_owned(),
+    }));
+    let title_model = Arc::new(ScriptedModel::new(vec![events]));
+    let mut setup = Setup::new(main);
+    setup.titles = titles(title_model);
+    let built = setup.build().await;
+    let mut stream = built.session.subscribe(None);
+    built
+        .session
+        .send(submit("c1", "Explain the hook trust digest"))
+        .await;
+    until(&mut stream, finished).await;
+    let call = until_title_call(&built.store).await;
+    assert_eq!(call.status, CallStatus::Error);
+    assert!(matches!(call.error, Some(ModelError::Overloaded { .. })));
+    assert_eq!(call.stop_reason, None);
+    assert_eq!(
+        call.usage
+            .map(|usage| (usage.input_tokens, usage.output_tokens)),
+        Some((20, 1))
+    );
+    let facts = built.store.facts(&SessionId::new("sess_1"));
+    assert!(generated(&facts).is_empty());
 }

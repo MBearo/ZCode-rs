@@ -35,6 +35,7 @@ mod interpret;
 mod listing;
 mod matcher;
 pub mod node_config;
+mod on_error;
 mod output;
 mod persist;
 mod plugin;
@@ -214,7 +215,17 @@ impl HookRunner for HookEngine {
         }
         let mut results: Vec<_> = done
             .into_iter()
-            .map(|(index, executed)| interpret::repl(executed, &hooks[index].display(), event_name))
+            .map(|(index, executed)| {
+                let hook = &hooks[index];
+                let display = hook.display();
+                // Node 配置的 `onError: "deny"`（修复线 F68）：PreToolUse 的这个 hook 出错时拦下工具。
+                if event.name == HookEventName::PreToolUse && hook.denies_on_error() {
+                    let timeout = run::timeout_ms(hook, batch.default_timeout_ms);
+                    let result = interpret::repl(executed.clone(), &display, event_name);
+                    return on_error::deny(&executed, result, &display, timeout);
+                }
+                interpret::repl(executed, &display, event_name)
+            })
             .collect();
         // 超过 10000 字符的输出先落盘、换成预览，再折叠（hooks.md §4.5，修复线 F15）。
         persist::results(
@@ -296,3 +307,7 @@ impl HookRunner for HookEngine {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "on_error_tests.rs"]
+mod on_error_tests;

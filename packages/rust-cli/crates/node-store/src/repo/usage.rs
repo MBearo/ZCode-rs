@@ -472,6 +472,10 @@ pub struct TurnTotals {
 }
 
 /// 按 `(session_id, turn_id)` 聚合（索引 `model_usage_session_turn_idx`、`tool_usage_session_turn_idx`）。
+///
+/// 模型请求只数主循环的（Node `querySourceForTask` 的三种来源）。修 bug（工作线 F73）：会话标题的行与首条输入同一轮
+/// （usage.md §2.1.1），以前按轮聚合会把它算进回合用量；Node 的回合用量只数回合自己的请求事件，标题有自己的事件列表。
+/// `+query_source` 不让 SQLite 改用来源的索引。
 pub fn turn_totals(conn: &Connection, session: &str, turn: &str) -> Result<TurnTotals> {
     let mut totals = conn
         .prepare_cached(
@@ -480,7 +484,8 @@ pub fn turn_totals(conn: &Connection, session: &str, turn: &str) -> Result<TurnT
                coalesce(sum(cache_creation_input_tokens), 0), coalesce(sum(cache_read_input_tokens), 0),
                coalesce(sum(computed_total_tokens), 0), min(started_at), min(first_token_at),
                coalesce(max(context_exceeded), 0)
-             from model_usage where session_id = ? and turn_id = ?",
+             from model_usage where session_id = ? and turn_id = ?
+              and +query_source in ('main_turn', 'subagent', 'workflow_child')",
         )?
         .query_row([session, turn], |r| {
             Ok(TurnTotals {

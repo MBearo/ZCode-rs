@@ -53,18 +53,29 @@ pub fn run<T>(
     entries: &[(RuleBehavior, &str)],
     check: impl FnOnce(&Inputs<'_>) -> T,
 ) -> T {
+    run_in(&paths(), mode, entries, check)
+}
+
+/// 同 [`run`]，路径事实由调用方给出（规则的根是第一个工作目录）。
+pub fn run_in<T>(
+    paths: &PathContext,
+    mode: PermissionMode,
+    entries: &[(RuleBehavior, &str)],
+    check: impl FnOnce(&Inputs<'_>) -> T,
+) -> T {
     let base = rules(entries);
     let rules = Rules {
         base: &base,
         session: &[],
     };
-    let paths = paths();
+    let root = paths.roots.first().map_or(CWD, String::as_str);
     let inputs = Inputs {
         mode,
         rules: &rules,
-        paths: &paths,
-        root: CWD,
+        paths,
+        root,
         dangerous: false,
+        hook_check: false,
     };
     check(&inputs)
 }

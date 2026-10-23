@@ -1,7 +1,7 @@
 //! 标题请求的形状与辅助选项（titles.md §3）。
 use async_trait::async_trait;
 use rust_cli_kernel_api::provider::{CatalogModel, ModelCatalog, WireProtocol};
-use rust_cli_kernel_api::testing::{ScriptedModel, selection, text_response};
+use rust_cli_kernel_api::testing::{FixedClock, ScriptedModel, selection, text_response};
 
 use super::*;
 
@@ -39,7 +39,7 @@ async fn the_request_uses_the_title_prompt_and_node_auxiliary_options() {
         model: model.clone(),
         directory: Some(Arc::new(Directory)),
     };
-    let title = titles
+    let generated = titles
         .generate(
             &selection(),
             (
@@ -47,10 +47,19 @@ async fn the_request_uses_the_title_prompt_and_node_auxiliary_options() {
                 Some(&RunId::new("run_title")),
             ),
             "  read the   Node config files  ",
+            (&FixedClock(7_000), MessageId::new("msg_title")),
             CancellationToken::new(),
         )
         .await;
-    assert_eq!(title.as_deref(), Some("Config files"));
+    assert_eq!(generated.title.as_deref(), Some("Config files"));
+    // 用量事实（工作线 F73，usage.md §2.1.1）：请求时的选择与来源、注入的时钟、没有首字时间。
+    let call = &generated.call;
+    assert_eq!(call.message, MessageId::new("msg_title"));
+    assert_eq!(call.selection, model.requests()[0].selection);
+    assert_eq!(call.source, model.requests()[0].source);
+    assert_eq!((call.started_at_ms, call.completed_at_ms), (7_000, 7_000));
+    assert_eq!(call.first_token_at_ms, None);
+    assert_eq!(call.status, CallStatus::Completed);
     let request = &model.requests()[0];
     // 工作线 F52：带上会话（`metadata.user_id` 的 `session_id`）。
     assert_eq!(
@@ -88,15 +97,16 @@ async fn without_a_directory_the_output_cap_is_5000() {
         model: model.clone(),
         directory: None,
     };
-    let title = titles
+    let generated = titles
         .generate(
             &selection(),
             (&SessionId::new("sess_title"), None),
             "trust the project hooks",
+            (&FixedClock(0), MessageId::new("msg_title")),
             CancellationToken::new(),
         )
         .await;
-    assert_eq!(title.as_deref(), Some("Hook trust"));
+    assert_eq!(generated.title.as_deref(), Some("Hook trust"));
     assert_eq!(model.requests()[0].max_tokens, 5_000);
     assert!(long_enough("0123456789"));
     assert!(!long_enough("  short  "));

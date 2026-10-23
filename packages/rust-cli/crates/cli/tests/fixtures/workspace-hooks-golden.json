@@ -88,5 +88,35 @@
         "hookDeclarationDigest": "df5fd4531e9c3f4b3326cf2c644b4d5c03bcd33fb1e1ba011aaee73455f868bd"
       }
     ]
+  },
+  {
+    "name": "onError deny is part of the declaration digest",
+    "bundleDigest": "7e0b44e2669fa90d56df9d0d77dd03f1bb3f9293b47a6cd72c27c8c5bfd89944",
+    "hooks": [
+      {
+        "reviewItemId": "workspace-hook-0-PreToolUse-0-0",
+        "sourceRelativePath": ".zcode/config.json",
+        "resolvedTimeoutMs": 60000,
+        "configuredEnabled": true,
+        "editable": true,
+        "hookDeclarationDigest": "a413ad963fa339806fd9b7b6470e933d2354c074cb9a9bc25962cac2d155f498"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-PreToolUse-0-1",
+        "sourceRelativePath": ".zcode/config.json",
+        "resolvedTimeoutMs": 60000,
+        "configuredEnabled": true,
+        "editable": true,
+        "hookDeclarationDigest": "4381d57cd531735857f17cca03e65bd52fa0333d4a227c6d066dfd3abe761a8e"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-PreToolUse-0-2",
+        "sourceRelativePath": ".zcode/config.json",
+        "resolvedTimeoutMs": 60000,
+        "configuredEnabled": true,
+        "editable": true,
+        "hookDeclarationDigest": "8e137da0c0075889db2e360e4ec4228e7db70aa2cfe7efa4a99ff0016f135d98"
+      }
+    ]
   }
 ]

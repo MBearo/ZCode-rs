@@ -397,7 +397,9 @@ impl BashTool {
         let workspace = &context.workspace;
         // 子代理不改主线程的 cwd：在子会话的当前目录启动（派生时取自父会话，
         // tools-files.md §3.3）、结束后不保留。
-        let (cwd, cwd_scope) = if context.agent.is_some() {
+        // 修复线 F68（审计 T3）：主线程的后台命令也这样。以前后台命令用会话范围，结束时把 cwd 写回会话；后台命令
+        // 什么时候结束不确定，会话的当前目录会在之后任意两个工具调用之间跳走（竞态）。
+        let (cwd, cwd_scope) = if context.agent.is_some() || background {
             let current =
                 env_shell::current_dir(context.env.as_ref(), workspace, &context.session).await;
             (current, CwdScope::Pinned)
@@ -407,7 +409,7 @@ impl BashTool {
         };
         let start = StartCommand {
             command: input.command.clone(),
-            cwd,
+            cwd: cwd.clone(),
             timeout_ms: start_timeout,
             task: task.clone(),
             shell: ShellKind::Bash,
@@ -427,7 +429,12 @@ impl BashTool {
             .map_err(env_failure)?;
         if background {
             let file = started(&context).await?;
-            return Ok(Ran::Text(output::backgrounded(&task, &file)));
+            let mut text = output::backgrounded(&task, &file);
+            if changes_directory(&input.command) {
+                text.push('\n');
+                text.push_str(&output::background_cwd_hint(cwd.as_str()));
+            }
+            return Ok(Ran::Text(text));
         }
         let collected = collect(&context, &progress, task.as_str(), timeout_ms).await?;
         if collected.finished == CommandEvent::Backgrounded {
@@ -488,6 +495,34 @@ impl BashTool {
             reset,
         )))
     }
+}
+
+/// 命令的任一子命令去掉包装（`timeout`、`nohup`、安全的环境变量等）后第一个词是 `cd`、`pushd`、`popd` 或 `chdir`。
+/// 解析不了时按 `&&`、`||`、`;`、`|`、换行粗拆。
+fn changes_directory(command: &str) -> bool {
+    const NAMES: [&str; 4] = ["cd", "pushd", "popd", "chdir"];
+    let analysis = rust_cli_policy::analyze(command);
+    let parts: Vec<String> = if analysis.has_parse_errors
+        || analysis.has_unsupported_syntax
+        || analysis.commands.is_empty()
+    {
+        command
+            .split(['&', '|', ';', '\n'])
+            .map(|part| part.trim_start().trim_start_matches(['(', '{']).to_owned())
+            .collect()
+    } else {
+        analysis
+            .commands
+            .into_iter()
+            .map(|invocation| invocation.command_text)
+            .collect()
+    };
+    parts.iter().any(|part| {
+        rust_cli_policy::shell_rules::strip_safe_wrappers(part)
+            .split_whitespace()
+            .next()
+            .is_some_and(|word| NAMES.contains(&word))
+    })
 }
 
 #[cfg(test)]

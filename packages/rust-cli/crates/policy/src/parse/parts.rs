@@ -49,9 +49,15 @@ pub(crate) struct Structure {
     pub dynamic: bool,
     /// 重新扫描时 unbash 会死循环或栈溢出：发生在 `analyzeBashCommand` 的 try 之外，Node 拿不到结果。
     pub hung: bool,
+    /// 扫描时遇到的替换（修复线 F68）。
+    pub subs: Vec<crate::parse::lexer::RawSub>,
 }
 
-fn summarize(parts: Option<Vec<Part>>, hung: bool) -> Structure {
+fn summarize(
+    parts: Option<Vec<Part>>,
+    hung: bool,
+    subs: Vec<crate::parse::lexer::RawSub>,
+) -> Structure {
     let dynamic = parts
         .as_ref()
         .is_some_and(|parts| parts.iter().any(Part::is_dynamic));
@@ -65,6 +71,7 @@ fn summarize(parts: Option<Vec<Part>>, hung: bool) -> Structure {
         value,
         dynamic,
         hung,
+        subs,
     }
 }
 
@@ -72,12 +79,14 @@ fn summarize(parts: Option<Vec<Part>>, hung: bool) -> Structure {
 pub(crate) fn word_structure(source: &[u8], pos: usize, end: usize) -> Structure {
     let mut lexer = Lexer::bounded(source, pos, end, true);
     let parts = lexer.build_word_parts(pos);
-    summarize(parts, lexer.hung || lexer.overflow)
+    let hung = lexer.hung || lexer.overflow;
+    summarize(parts, hung, std::mem::take(&mut lexer.subs))
 }
 
 /// heredoc 正文单词（`computeHereDocBodyParts`）的结构。
 pub(crate) fn heredoc_structure(source: &[u8], pos: usize, end: usize) -> Structure {
     let mut lexer = Lexer::bounded(source, pos, end, true);
     let parts = lexer.build_heredoc_parts(pos, end);
-    summarize(parts, lexer.hung || lexer.overflow)
+    let hung = lexer.hung || lexer.overflow;
+    summarize(parts, hung, std::mem::take(&mut lexer.subs))
 }

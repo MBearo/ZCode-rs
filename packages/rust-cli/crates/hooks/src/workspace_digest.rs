@@ -127,19 +127,25 @@ fn declaration_digest(
     hook: &NodeHook,
     (timeout_ms, max_output_bytes): (f64, f64),
 ) -> String {
-    sha256(&json!([
-        "workspace-hook-declaration",
-        SCHEMA_VERSION,
-        source.relative_path,
-        source.discovery_order,
-        event.as_str(),
-        matcher,
-        matcher_index,
-        hook_index,
+    let mut payload = vec![
+        json!("workspace-hook-declaration"),
+        json!(SCHEMA_VERSION),
+        json!(source.relative_path),
+        json!(source.discovery_order),
+        json!(event.as_str()),
+        json!(matcher),
+        json!(matcher_index),
+        json!(hook_index),
         execution(hook),
-        timeout_ms,
-        max_output_bytes,
-    ]))
+        json!(timeout_ms),
+        json!(max_output_bytes),
+    ];
+    // `onError: "deny"` 只在写成 deny 时追加：没写或写 allow 时 digest 与以前逐字节相同，已有信任不失效
+    // （Node `canonicalDeclarationPayload`，修复线 F68）。
+    if hook.deny_on_error {
+        payload.push(json!(["onError", "deny"]));
+    }
+    sha256(&Value::Array(payload))
 }
 
 /// Node `resolveWorkspaceHookEntries`：来源 → 7 个事件的固定顺序 → matcher → hook。

@@ -10,7 +10,7 @@ use crate::check::{AskKind, Check, Inputs};
 use crate::files::{Access, path_rule};
 use crate::parse::Invocation;
 use crate::readonly::strip_wrappers;
-use crate::texts;
+use crate::{removal, texts};
 
 /// 命令的动作说明与操作类型。
 fn command_kind(name: &str) -> Option<(&'static str, Access)> {
@@ -255,6 +255,13 @@ fn redirect_targets(invocation: &Invocation, inputs: &Inputs<'_>) -> Vec<Target>
 pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>) -> PathVerdict {
     let argv = strip_wrappers(&invocation.argv);
     let name = argv.first().map(String::as_str).unwrap_or_default();
+    // 危险删除（§4.5.3，修复线 F68）：路径的 deny 规则之后、其余路径询问（含“cd 加写入”与运行时才知道的目标）之前；
+    // allow 规则盖不过它。
+    let removal = removal::check(invocation, compound_has_cd, inputs).map(|check| PathVerdict {
+        check,
+        overridable: false,
+        cd_with_write: false,
+    });
     let mut targets = redirect_targets(invocation, inputs);
     if let Some((action, mut access)) = command_kind(name) {
         if name == "sed"
@@ -265,7 +272,7 @@ pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>
             access = Access::Read;
         }
         if access == Access::Write && invocation.has_dynamic_words {
-            return asked(texts::runtime_target(name), false);
+            return removal.unwrap_or_else(|| asked(texts::runtime_target(name), false));
         }
         if matches!(name, "mv" | "cp") && argv.iter().skip(1).any(|arg| arg.starts_with('-')) {
             return asked(
@@ -295,6 +302,9 @@ pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>
         }
     }
     if compound_has_cd && targets.iter().any(|target| target.access == Access::Write) {
+        if let Some(removal) = removal {
+            return removal;
+        }
         return PathVerdict {
             check: Check::Ask {
                 message: texts::CD_WITH_WRITE.to_owned(),
@@ -322,6 +332,9 @@ pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>
                 cd_with_write: false,
             };
         }
+    }
+    if let Some(removal) = removal {
+        return removal;
     }
     let mut first_overridable = None;
     for target in &targets {

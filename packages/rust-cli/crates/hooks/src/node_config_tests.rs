@@ -110,6 +110,7 @@ fn timeouts_round_and_stay_positive() {
         enabled: None,
         timeout_ms: None,
         status_message: None,
+        deny_on_error: false,
     };
     assert_eq!(hook.resolved_timeout_ms(60_000.0), 1.0);
     let rounded = NodeHook {

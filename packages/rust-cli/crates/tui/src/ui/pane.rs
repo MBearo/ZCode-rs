@@ -16,28 +16,27 @@ use super::status_line::{self, Clock};
 /// 底部区域的一行可点击区域：（行，起始列，宽度，目标）；宽度为 None 时占整行。
 pub(super) type RowTarget = (usize, usize, Option<usize>, Target);
 
-/// 替换输入区的视图（列表、审批与提问）与其中可点击的行；没有视图时返回 None。
-fn view_lines(
-    app: &App,
-    width: usize,
-    height: usize,
-    now_ms: u64,
-) -> Option<(Vec<Line<'static>>, Vec<RowTarget>)> {
+/// 视图的行、其中可点击的行与终端光标（行，列）。
+type ViewLines = (Vec<Line<'static>>, Vec<RowTarget>, Option<(u16, u16)>);
+
+/// 替换输入区的视图（列表、审批与提问）；没有视图时返回 None。光标只有提问的“其他”行聚焦时有
+/// （tui.md §7.6），别的视图隐藏光标。
+fn view_lines(app: &App, width: usize, height: usize, now_ms: u64) -> Option<ViewLines> {
     if let Some(Overlay::Login(view)) = &app.overlay {
         let lines = super::login::lines(view, app.strings, &app.palette, width);
-        return Some((lines, Vec::new()));
+        return Some((lines, Vec::new(), None));
     }
     if let Some(Overlay::Diff(view)) = &app.overlay {
         let lines = super::diff_view_lines::lines(app, view, width, height, now_ms);
-        return Some((lines, Vec::new()));
+        return Some((lines, Vec::new(), None));
     }
     if let Some(Overlay::Export(view)) = &app.overlay {
         let lines = super::export::lines(view, app.lang, &app.palette, width);
-        return Some((lines, Vec::new()));
+        return Some((lines, Vec::new(), None));
     }
     if let Some(Overlay::Permissions(view)) = &app.overlay {
         let lines = super::permissions_lines::lines(view, app.lang, &app.palette, width, height);
-        return Some((lines, Vec::new()));
+        return Some((lines, Vec::new(), None));
     }
     if let Some(Overlay::Background(_)) = &app.overlay {
         let (lines, rows) = app.background_lines(width, height, Instant::now());
@@ -45,7 +44,7 @@ fn view_lines(
             .into_iter()
             .map(|(row, index)| (row, 0, None, Target::Background(index)))
             .collect();
-        return Some((lines, targets));
+        return Some((lines, targets, None));
     }
     if let Some(Overlay::List(list)) = &app.overlay {
         let (lines, items) = list.lines(width, height, app.lang, &app.palette);
@@ -53,7 +52,7 @@ fn view_lines(
             .into_iter()
             .map(|(row, index)| (row, 0, None, Target::Item(index)))
             .collect();
-        return Some((lines, targets));
+        return Some((lines, targets, None));
     }
     // 扣住的同伴消息（cross-session.md §2.6）：没有待回答的交互时显示批准框，替换输入区。
     if app.view.pending().is_none()
@@ -68,7 +67,7 @@ fn view_lines(
         };
         let (lines, _) =
             super::peer_view::lines(held, app.view.peer_held_count(), app.peer_choice, &view);
-        return Some((lines, Vec::new()));
+        return Some((lines, Vec::new(), None));
     }
     let (_, request) = app.view.pending()?;
     let interaction = app.interaction.as_ref()?;
@@ -84,7 +83,10 @@ fn view_lines(
         .into_iter()
         .map(|(row, index)| (row, 0, None, Target::Choice(index)))
         .collect();
-    Some((lines, targets))
+    let cursor = interaction
+        .cursor(request, &view)
+        .and_then(|(row, column)| Some((u16::try_from(row).ok()?, u16::try_from(column).ok()?)));
+    Some((lines, targets, cursor))
 }
 
 /// 底部区域：行、光标（相对行，列）、可点击的行、输入框文字区（起始行，行数，第一可见行）。
@@ -103,10 +105,10 @@ pub(super) fn bottom_lines(
     now: Instant,
     now_ms: u64,
 ) -> Bottom {
-    if let Some((lines, targets)) = view_lines(app, width, max_bottom, now_ms) {
+    if let Some((lines, targets, cursor)) = view_lines(app, width, max_bottom, now_ms) {
         return Bottom {
             lines,
-            cursor: None,
+            cursor,
             targets,
             composer: None,
         };

@@ -254,6 +254,40 @@ async fn background_commands_return_the_output_file_at_once() {
     assert!(env.cancelled.lock().unwrap().is_empty());
 }
 
+/// 后台命令不改会话的当前目录：在当前目录启动、结束时不写回；命令里有 cd 时结果说明这一点。
+#[tokio::test]
+async fn background_commands_start_in_the_current_cwd_without_moving_it() {
+    let hint = "Session cwd remains /w/sub; directory changes made by the backgrounded command do not apply to subsequent commands.";
+    for (command, hinted) in [
+        ("cd .. && make", true),
+        ("make; pushd /tmp", true),
+        ("nohup popd", true),
+        ("echo cd", false),
+        ("sleep 9", false),
+    ] {
+        let env = Arc::new(Scripted {
+            hold: true,
+            ..Scripted::default()
+        });
+        let input = json!({"command": command, "description": "Run", "run_in_background": true});
+        let output = call(env.clone(), input, None).await.unwrap();
+        let start = env.started.lock().unwrap()[0].clone();
+        assert_eq!(
+            (start.cwd.as_str(), start.cwd_scope),
+            ("/w/sub", CwdScope::Pinned),
+            "{command}"
+        );
+        let task = output::task_id(&OperationId::new("op_1"));
+        let started = output::backgrounded(&task, "/t/b.output");
+        let expected = if hinted {
+            format!("{started}\n{hint}")
+        } else {
+            started
+        };
+        assert_eq!(text_of(&output), expected, "{command}");
+    }
+}
+
 #[tokio::test]
 async fn nonzero_exits_are_errors_unless_the_command_says_otherwise() {
     let env = Arc::new(Scripted {

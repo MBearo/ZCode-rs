@@ -10,6 +10,7 @@
 
 mod bash;
 mod bash_paths;
+mod bash_subst;
 mod bfs_args;
 pub mod chain;
 pub mod check;
@@ -19,6 +20,7 @@ pub mod guarded;
 mod parse;
 pub mod paths;
 pub mod readonly;
+mod removal;
 pub mod rules;
 mod safe_env;
 pub mod shell_rules;
@@ -233,6 +235,7 @@ impl PolicyGate {
                 paths: &paths,
                 root,
                 dangerous: guarded::applies(mode, name, input, paths.style),
+                hook_check: false,
             };
             let (check, updated) = chain::own(name, own.clone(), input, &inputs);
             chain::inner(name, check, updated, &inputs)
@@ -272,7 +275,7 @@ impl PermissionGate for PolicyGate {
 
     /// hook 放行或询问时仍然生效的检查（不可绕过的权限关卡，
     /// docs/specs/rust-cli/hooks.md §6）：按 bypassPermissions 跑内层判决链，仍然拒绝或询问的就是
-    /// deny / ask 规则、工具检查的拒绝与规则 / 安全路径的询问。
+    /// deny / ask 规则、工具检查的拒绝与规则 / 安全检查的询问（敏感文件也算：`hook_check`）。
     async fn check_rules(
         &self,
         tool: &dyn Tool,
@@ -296,6 +299,7 @@ impl PermissionGate for PolicyGate {
             paths: &paths,
             root: context.workspace.root.as_str(),
             dangerous: guarded::applies(mode, tool.name(), input, paths.style),
+            hook_check: true,
         };
         let own = tool.check_permissions(input, context).await;
         let (check, updated) = chain::own(tool.name(), own, input, &inputs);

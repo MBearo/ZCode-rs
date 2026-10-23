@@ -184,3 +184,77 @@ pub fn file_read_denied(path: &str) -> String {
 pub fn file_edit_denied(path: &str) -> String {
     format!("Permission to edit {path} has been denied.")
 }
+
+/// 危险删除的询问都以这一句收尾（shell-permissions.md §4.5.3）。
+const REMOVAL_TAIL: &str =
+    "This requires explicit approval and cannot be auto-allowed by permission rules.";
+
+/// 危险删除：字面目标命中的情况。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Removal {
+    /// 复合命令里有 cd，相对的 glob 目标定不下来。
+    ChangesDirectories,
+    /// glob 目标定不到一个目录。
+    Unresolved,
+    /// 关键目录（根、根下的一级目录、home）。
+    Critical,
+    /// 工作目录或它的上级。
+    Workspace,
+    /// glob 跨了多层目录。
+    Traverses,
+}
+
+/// 字面目标的危险删除。`command` 是 `rm` 或 `rmdir`，`target` 是解析后的目标。
+pub fn dangerous_removal(command: &str, target: &str, why: Removal) -> String {
+    let why = match why {
+        Removal::ChangesDirectories => {
+            "This command changes directories before the removal, so the relative glob target cannot be statically resolved."
+        }
+        Removal::Unresolved => {
+            "This command's removal target cannot be statically resolved to a directory."
+        }
+        Removal::Critical => "This command would remove a critical system directory.",
+        Removal::Workspace => {
+            "This command would remove a workspace directory (the working directory, an additional working directory, or one of their parent directories)."
+        }
+        Removal::Traverses => {
+            "This command's glob pattern traverses directories that cannot be statically enumerated."
+        }
+    };
+    format!("Dangerous {command} operation detected: '{target}'\n\n{why} {REMOVAL_TAIL}")
+}
+
+/// Windows 上只有反斜杠的目标（Git Bash 里是盘符根）。
+pub fn dangerous_backslash_removal(command: &str, target: &str) -> String {
+    format!(
+        "Dangerous {command} operation detected: '{target}'\n\nA backslash-only target is the drive root in Git Bash on Windows. {REMOVAL_TAIL}\n\nWrite the directory you mean as a path, for example /c/work/build or C:/work/build."
+    )
+}
+
+/// `rm -r` 的目标整个是命令替换的输出。
+pub fn dangerous_substitution_removal() -> String {
+    format!(
+        "Dangerous rm operation detected: the target is the output of a command substitution (`$(...)` or backticks) and cannot be checked before the command runs. {REMOVAL_TAIL}\n\nRun the substitution on its own first, then remove the literal paths it prints."
+    )
+}
+
+/// 目标是变量为空时会变成根（`root_child` 为 None）或根下一级目录的展开。`names` 是 `$A or $B`。
+pub fn dangerous_variable_removal(
+    command: &str,
+    invocation: &str,
+    target: &str,
+    names: &str,
+    root_child: Option<&str>,
+    advice: &str,
+) -> String {
+    let (becomes, reach) = match root_child {
+        None => (
+            "`/`, `/*` or a top-level path".to_owned(),
+            "the filesystem root",
+        ),
+        Some(child) => (format!("`/{child}`"), "a top-level directory"),
+    };
+    format!(
+        "Dangerous {command} operation detected in `{invocation}`. The target '{target}' is a shell variable expansion: when {names} is unset or empty it becomes {becomes}. {REMOVAL_TAIL}\n\nThis check does not fire on a target that cannot expand to {reach}: {advice}."
+    )
+}

@@ -96,8 +96,10 @@ pub(crate) enum Raw {
         status: u16,
         body: String,
     },
-    /// 取消或超时。
+    /// 被取消（调用方取消，或 http hook 超时）。
     Cancelled,
+    /// command hook 超时：与取消同样处理，只有 Node 的 `onError: "deny"` 把它当作出错（修复线 F68）。
+    TimedOut,
     /// `async`：启动后不等待。
     Backgrounded,
     /// 没能运行；文本是错误说明。

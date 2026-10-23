@@ -8,7 +8,9 @@
 // 3. rust-cli 的 `activity` / `metering` 读 Node 跑过的会话（Node 建会话、写输入与用量行）：会话数与消息数各加上
 //    Node 的那一份，token 与 API 时长按两边的行算；
 // 4. footer 的请求统计（usage.md §4.1，修复线 F27）：rust-cli 的 `request_stats` 读两边的行，TPS 与缓存命中率与 Node
-//    调试面板（`observeSessionDebug`）对同一组请求算出的值相同。
+//    调试面板（`observeSessionDebug`）对同一组请求算出的值相同；
+// 5. 会话标题的行（usage.md §2.1.1，工作线 F71、F73）：rust-cli 按产品的写法写，Node 用自己的 `recordModelUsageFact` /
+//    `recordTurnUsageFact` 写同样的输入，两边的行除身份列外相同，回合用量都不数标题行。
 import { importNode } from "./node-root.mjs";
 
 /** 行里与身份有关的列（会话、消息、轮次、trace、id）；其余列两边必须相同。 */
@@ -357,9 +359,15 @@ export async function checkUsage(ctx) {
     );
   }
 
-  // 5. 旁路请求的行（工作线 F71，usage.md §2.1）：rust-cli 在另一个会话里写会话标题与 WebFetch 摘要的两次请求，
-  // `query_source` 与行 id 用 Node 的名字（`session_title`、`web_fetch_processing`）；Node 对同样输入写的行逐列相同。
+  // 5. 会话标题的行（工作线 F71、F73，usage.md §2.1.1）：rust-cli 在另一个会话里按产品的写法写标题请求的行（单独一批、
+  // 锚在首条输入、没有首字时间），之后这一轮结束。Node 一侧调用 Node 自己的 `recordModelUsageFact` 与
+  // `recordTurnUsageFact`，输入照 `title-generation-sidecar.ts`：请求与完成两个事件、没有流式增量；回合用量只数回合
+  // 自己的事件（标题有自己的事件列表）。两边的行除身份列外逐列相同。WebFetch 摘要 Node 不写行（F73 起不再比较）。
   // 放在最后，不影响上面的会话数与合计。
+  const { recordModelUsageFact, recordTurnUsageFact } = await importNode(
+    nodeRoot,
+    "core/src/runtime/methods/usage-observability.ts",
+  );
   const side = rust("usage-side", dir);
   const nodeSide = `sess_${crypto.randomUUID()}`;
   await store.createSession({
@@ -374,34 +382,78 @@ export async function checkUsage(ctx) {
     traceID: nodeSide,
     permission: { mode: "edit" },
   });
-  for (const [querySource, at] of [
-    ["session_title", side.base],
-    ["web_fetch_processing", side.base + 1_000],
-  ]) {
-    const id = createMessageId();
-    await store.recordModelUsage({
-      ...modelRecord(id, at, at + 100, at + 400, "stop", 0),
-      id: `usage_model_${querySource}_${id}_0`,
-      sessionID: nodeSide,
-      traceID: nodeSide,
-      assistantMessageID: undefined,
-      querySource,
+  const sideRuntime = { sessionId: nodeSide, sessionStore: store, config: { mode: "edit" } };
+  const [sideUser, sideTurn] = [createMessageId(), createTurnId()];
+  // 子 trace 不带 spanId：本工程没有 span（usage.md D4），两边的 `span_id` 都为空。
+  const sideTrace = { traceId: nodeSide, turnId: sideTurn };
+  const event = (type, payload) => ({ type, payload, timestamp: new Date(side.base) });
+  const realNow = Date.now;
+  // `recordModelUsageFact` 在记行时读 `Date.now()` 作完成时刻：固定成 rust-cli 写的那一刻。
+  Date.now = () => side.base + 400;
+  try {
+    await recordModelUsageFact(sideRuntime, {
+      events: [
+        event(SessionEventType.ModelRequest, { querySource: "session_title", toolCount: 0 }),
+        event(SessionEventType.ModelComplete, { querySource: "session_title", toolCallCount: 0 }),
+      ],
+      model: {
+        providerId: "anthropic",
+        modelId: "claude-opus-5-5",
+        options: { reasoningLevel: "max" },
+      },
+      networkEventStartIndex: 1,
+      parentUserMessageId: sideUser,
+      querySource: "session_title",
+      result: { text: '{"title":"Named"}', usage, finishReason: "stop" },
+      startedAt: side.base,
+      status: "completed",
+      toolCallCount: 0,
+      traceContext: sideTrace,
     });
+  } finally {
+    Date.now = realNow;
   }
-  const sideRows = (session) =>
-    rowsOf(store, "select * from model_usage where session_id = ? order by started_at", session);
-  const rustSide = sideRows(side.session);
+  const sideRows = (table, session) =>
+    rowsOf(store, `select * from ${table} where session_id = ? order by started_at`, session);
+  const [rustTitle] = sideRows("model_usage", side.session);
+  const sideTurnOfRust = JSON.parse(
+    store.db.prepare("select data from message where id = ?").get(side.messages.user).data,
+  ).anchor.turnId;
   expectEqual(
-    "rust-cli side request rows use the Node names",
-    rustSide.map((row) => [row.id, row.query_source, row.assistant_message_id]),
+    "rust-cli title row uses the Node name and the turn of the input",
+    rustTitle && [
+      rustTitle.id,
+      rustTitle.query_source,
+      rustTitle.assistant_message_id,
+      rustTitle.parent_user_message_id,
+      rustTitle.turn_id,
+    ],
     [
-      [`usage_model_session_title_${side.messages.title}_0`, "session_title", null],
-      [`usage_model_web_fetch_processing_${side.messages.fetch}_0`, "web_fetch_processing", null],
+      `usage_model_session_title_${side.messages.title}_0`,
+      "session_title",
+      null,
+      side.messages.user,
+      sideTurnOfRust,
     ],
   );
   expectEqual(
-    "side request rows written by rust-cli and Node",
-    rustSide.map(strip),
-    sideRows(nodeSide).map(strip),
+    "title rows written by rust-cli and by Node recordModelUsageFact",
+    sideRows("model_usage", side.session).map(strip),
+    sideRows("model_usage", nodeSide).map(strip),
+  );
+  const [rustSideTurn] = sideRows("turn_usage", side.session);
+  await recordTurnUsageFact(sideRuntime, {
+    completedAt: rustSideTurn.completed_at,
+    events: [],
+    startedAt: rustSideTurn.started_at,
+    status: "completed",
+    traceContext: sideTrace,
+    turnId: sideTurn,
+    userMessageId: sideUser,
+  });
+  expectEqual(
+    "the title row does not count in turn_usage (rust-cli and Node)",
+    [strip(rustSideTurn), rustSideTurn.model_request_count],
+    [strip(sideRows("turn_usage", nodeSide)[0]), 0],
   );
 }

@@ -1,7 +1,8 @@
 //! 判决链（shell-permissions.md §4.1）。
 //!
 //! 内层顺序：整个工具的 deny 规则 → 整个工具的 ask 规则 → 工具自身的检查（Bash、文件工具、WebFetch
-//! 的内置检查在这里）→ 检查拒绝则拒绝 → 命中 ask 规则或安全路径的询问（bypass 也问）→
+//! 的内置检查在这里）→ 检查拒绝则拒绝 → 命中 ask 规则或 bypass 也问的安全检查（危险删除）的询问 →
+//! 其余安全检查（敏感文件）在 bypassPermissions / guarded 下放行、否则询问 →
 //! bypassPermissions 放行 → 整个工具的 allow 规则放行 → 没有意见转成询问。
 //! 外层按模式改写询问：dontAsk 拒绝；auto（与开启自动语义的 plan）先走 acceptEdits 快速放行
 //! （只在 auto），再交给分类器；没有人能回答时（`avoid_prompts`）询问直接按拒绝处理。
@@ -152,14 +153,22 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
         _ if inputs.dangerous => {
             return Inner::Ask {
                 message: texts::GUARDED_ASK.to_owned(),
-                kind: AskKind::Safety,
+                kind: AskKind::Immune,
                 suggestions: Vec::new(),
             };
         }
         Check::Allow => return Inner::Allow { updated_input },
+        // 修复线 F68（审计 P1）：bypass 类模式下只有 bypass 也问的安全检查留下，敏感文件放行；hook 放行之后的检查
+        // 照旧询问。以前安全检查一律 bypass 也问。
+        Check::Ask {
+            kind: AskKind::Safety,
+            ..
+        } if bypass_category(inputs.mode) && !inputs.hook_check => {
+            return Inner::Allow { updated_input };
+        }
         Check::Ask {
             message,
-            kind: kind @ (AskKind::Rule | AskKind::Safety),
+            kind: kind @ (AskKind::Rule | AskKind::Safety | AskKind::Immune),
             suggestions,
         } => {
             return Inner::Ask {
@@ -178,11 +187,7 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
             suggestions,
         } => (None, reason, AskKind::Other, suggestions),
     };
-    // guarded 在危险命令以外同 bypassPermissions（Node `mode === "yolo" || mode === "guarded"`）。
-    if matches!(
-        inputs.mode,
-        PermissionMode::BypassPermissions | PermissionMode::Guarded
-    ) || inputs.rules.whole_tool(tool, RuleBehavior::Allow).is_some()
+    if bypass_category(inputs.mode) || inputs.rules.whole_tool(tool, RuleBehavior::Allow).is_some()
     {
         return Inner::Allow { updated_input };
     }
@@ -191,6 +196,14 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
         kind,
         suggestions,
     }
+}
+
+/// bypass 类模式：guarded 在危险命令以外同 bypassPermissions（Node `mode === "yolo" || mode === "guarded"`）。
+fn bypass_category(mode: PermissionMode) -> bool {
+    matches!(
+        mode,
+        PermissionMode::BypassPermissions | PermissionMode::Guarded
+    )
 }
 
 /// 外层的选项。
@@ -241,7 +254,7 @@ pub async fn outer(
     }
     let automatic =
         mode == PermissionMode::Auto || (mode == PermissionMode::Plan && options.auto_in_plan);
-    if automatic && kind != AskKind::Safety {
+    if automatic && !kind.is_safety() {
         if mode == PermissionMode::Auto
             && let Inner::Allow { updated_input } = accept_edits()
         {

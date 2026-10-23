@@ -15,6 +15,7 @@ fn cmd(text: &str, condition: Option<&str>) -> HookCommand {
         condition: condition.map(str::to_owned),
         background: false,
         plugin_root: None,
+        deny_on_error: false,
     })
 }
 
