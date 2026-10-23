@@ -1,0 +1,1 @@
+[Cross-session delivery notice] {{subject}} {{was}} refused{{details}}: that session is not accepting cross-session messages (the feature is off there, or a setting or policy there refuses them). Not delivered to that session's ZCode. Do not wait for a reply and do not resend; tell the user, or choose another approach.

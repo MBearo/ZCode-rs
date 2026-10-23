@@ -1,0 +1,21 @@
+[package]
+name = "rust-cli-memory"
+description = "Memory directory, extraction, recall and consolidation of rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+rust-cli-kernel-api.workspace = true
+
+[dev-dependencies]
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

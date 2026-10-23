@@ -64,6 +64,11 @@ modules:
   - id: e2e-report
     roots: [packages/e2e-report/src]
     managed: false
+  # Rust 由 Cargo 与 scripts/rust-cli 的原生边界检查验证，TS checker 不解析 .rs。
+  - id: rust-cli
+    roots: [packages/rust-cli]
+    managed: false
+    owner: agent-runtime
   - id: zcode-cli
     roots: [apps/zcode-cli]
     managed: false

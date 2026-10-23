@@ -1,0 +1,11 @@
+# rust-cli 的 cargo 构建配置。
+# 来源：feat/rust-cli-archive（f6eceb801e）仓库根的 .cargo/config.toml，内容不变（工作线 F46）。
+# cargo 从当前目录往上找这个文件：与 rust-toolchain.toml 相同，cargo 在 packages/rust-cli 下执行。
+# Windows MSVC 目标静态链接 C 运行时，安装后的二进制不依赖 VC++ 运行库。
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# pcre2-sys（内嵌的 rg 与 ugrep 的 PCRE2，docs/specs/rust-cli/embedded-search.md §5）总用自带的源码静态链接：否则它在
+# 找得到系统库时动态链接（例如 Homebrew 的 libpcre2-8.dylib），发布的二进制在别的机器上起不来。
+[env]
+PCRE2_SYS_STATIC = "1"

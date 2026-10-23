@@ -1,0 +1,1 @@
+The date has changed. Today's date is now {{date}}. No need to announce the new date — the user's own clock shows it.

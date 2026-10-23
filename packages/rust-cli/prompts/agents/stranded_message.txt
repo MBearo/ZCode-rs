@@ -1,0 +1,4 @@
+The coordinator sent a message while you were working:
+{{message}}
+
+Address this before completing your current task.

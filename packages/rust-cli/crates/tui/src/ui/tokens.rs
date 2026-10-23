@@ -1,0 +1,220 @@
+//! 配色记号（docs/specs/rust-cli/tui.md §7.4，修复线 F26，用户决定）：次要文字、按键、选中行、模型名与工作区路径。
+//! 取值与规则参照 Codex TUI（`codex-rs/tui/src`，c3d3b142d）的 `style.rs`、`style/contrast.rs`、`key_hint.rs`、
+//! `bottom_pane/status_line_style.rs`；代码自己写，没有复制。颜色只取决于启动时探测到的终端事实（`Palette`）。
+use ratatui::style::{Color, Modifier, Style};
+
+use super::palette::{ColorLevel, Palette, Rgb, blend, is_light};
+
+// 配色的命名常量（tui.md §7.4）：别处要同样的颜色时用这里的常量与 `Palette` 的方法，不另写字面量（F27 的 footer
+// 右侧统计复用它们）。
+
+/// 文字与背景的最低对比度（Codex `MIN_TEXT_CONTRAST`）。
+pub const MIN_TEXT_CONTRAST: f64 = 4.5;
+/// 次要文字：前景在背景上的比例（Codex `secondary_text_style` 的 0.6）。
+pub const SECONDARY_ALPHA: f64 = 0.6;
+/// 浅色背景上按键的前景比例（Codex `key_hint_style` 的 0.85）。
+pub const KEY_ALPHA_LIGHT: f64 = 0.85;
+/// 选中行的底色：深色背景用 BLUE_200，浅色背景用 BLUE_100（Codex `CHATGPT_BLUE_*`）。
+pub const SELECTION_FILL_DARK: Rgb = (99, 168, 248);
+pub const SELECTION_FILL_LIGHT: Rgb = (164, 205, 251);
+/// 强调色（Codex `UI_ACCENT` / `LIGHT_BG_ACCENT_RGB`）：深色背景就是选中行的深色底色，浅色背景另取深一些的蓝；
+/// 16 色终端用 `ACCENT_NAMED`。列表与面板顶上的线和标题、工作区信任对话框（F26 起不再用黄色）都用它。
+pub const ACCENT_DARK: Rgb = SELECTION_FILL_DARK;
+pub const ACCENT_LIGHT: Rgb = (28, 100, 200);
+pub const ACCENT_NAMED: Color = Color::Cyan;
+/// 选中行的文字（Codex `selection_style` 的 `(0, 0, 46)`）。
+pub const SELECTION_TEXT: Rgb = (0, 0, 46);
+/// 底色与背景的对比度低于这个值时换另一种蓝（Codex `selection_style`）。
+pub const SELECTION_MIN_RATIO: f64 = 1.25;
+/// 状态栏颜色的柔化：原色占的百分比（Codex `STATUS_LINE_COLOR_SATURATION_PERCENT`）。
+pub const STATUS_SATURATION_PERCENT: u32 = 85;
+/// 模型名：Codex 状态栏 Model 的缺省主题色（catppuccin mocha / latte 的类型色）；16 色终端用 `MODEL_NAMED`。
+pub const MODEL_DARK: Rgb = (249, 226, 175);
+pub const MODEL_LIGHT: Rgb = (223, 142, 29);
+pub const MODEL_NAMED: Color = Color::Cyan;
+/// 工作区路径：Codex 状态栏 Path 的缺省主题色（catppuccin 的字符串色）；16 色终端用 `PATH_NAMED`。
+pub const PATH_DARK: Rgb = (166, 227, 161);
+pub const PATH_LIGHT: Rgb = (64, 160, 43);
+pub const PATH_NAMED: Color = Color::Green;
+/// footer 右侧“上下文快满”且自动压缩关闭时的颜色（compact.md §2.1 的 `Context low`）。
+pub const CONTEXT_LOW: Color = Color::Red;
+/// 查看子代理时输入框的边线与标签的底色（修复线 F62，tui-panels.md §1.6、tui.md §7.4）：深浅两种背景都是这个青色；
+/// 16 色终端深色背景用亮青、浅色背景用青。
+pub const SUBAGENT: Rgb = (8, 145, 178);
+pub const SUBAGENT_NAMED_DARK: Color = Color::LightCyan;
+pub const SUBAGENT_NAMED_LIGHT: Color = Color::Cyan;
+/// 标签的字：与终端文字相反的颜色（深色背景黑、浅色背景白）。不按 [`MIN_TEXT_CONTRAST`] 调：白字与底色 3.7:1，
+/// 调了就成了黑字，与用户要的截图不同（tui.md §7.4）。
+pub const SUBAGENT_TEXT_DARK: Rgb = (0, 0, 0);
+pub const SUBAGENT_TEXT_LIGHT: Rgb = (255, 255, 255);
+pub const SUBAGENT_TEXT_NAMED_DARK: Color = Color::Black;
+pub const SUBAGENT_TEXT_NAMED_LIGHT: Color = Color::White;
+
+fn luminance((r, g, b): Rgb) -> f64 {
+    let channel = |value: u8| {
+        let value = f64::from(value) / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+/// 两种颜色的对比度（WCAG）。
+pub fn ratio(a: Rgb, b: Rgb) -> f64 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// 在 `background` 上读得清的 `preferred`（Codex `contrast::foreground` 的真彩色分支）：对比度够就用原色，
+/// 否则向黑或白（对比度大的那个）靠，取第一个够 4.5:1 的颜色。
+pub fn readable(preferred: Rgb, background: Rgb) -> Rgb {
+    if ratio(preferred, background) >= MIN_TEXT_CONTRAST {
+        return preferred;
+    }
+    let endpoint = if ratio((0, 0, 0), background) >= ratio((255, 255, 255), background) {
+        (0, 0, 0)
+    } else {
+        (255, 255, 255)
+    };
+    (1..=255)
+        .map(|step| blend(preferred, endpoint, f64::from(step) / 255.0))
+        .find(|candidate| ratio(*candidate, background) >= MIN_TEXT_CONTRAST)
+        .unwrap_or(endpoint)
+}
+
+/// Codex `soften_status_line_color`：85% 原色加 15% 亮度。
+fn soften((r, g, b): Rgb) -> Rgb {
+    let luma = (77 * u32::from(r) + 150 * u32::from(g) + 29 * u32::from(b)) / 256;
+    let channel = |c: u8| {
+        ((u32::from(c) * STATUS_SATURATION_PERCENT + luma * (100 - STATUS_SATURATION_PERCENT) + 50)
+            / 100)
+            .min(255) as u8
+    };
+    (channel(r), channel(g), channel(b))
+}
+
+impl Palette {
+    /// 前景与背景都知道、并且前景与背景的明暗相反时的（前景，背景）；Codex 两个都要知道。
+    fn pair(&self) -> Option<(Rgb, Rgb)> {
+        let background = self.background?;
+        let foreground = self.foreground?;
+        (is_light(foreground) != self.light).then_some((foreground, background))
+    }
+
+    /// 次要文字（Codex `secondary_text_style`）：`blend(前景, 背景, 0.6)`，调到 4.5:1；颜色不知道或 16 色时 dim。
+    pub fn secondary(&self) -> Style {
+        let color = self
+            .pair()
+            .and_then(|(fg, bg)| self.tint(readable(blend(bg, fg, SECONDARY_ALPHA), bg)));
+        match color {
+            Some(color) => Style::default()
+                .fg(color)
+                .remove_modifier(Modifier::DIM | Modifier::BOLD),
+            None => Style::default().add_modifier(Modifier::DIM),
+        }
+    }
+
+    /// 按键（Codex `key_hint_style`）：粗体、不 dim；浅色背景上前景是 `blend(前景, 背景, 0.85)`，否则终端的前景色。
+    pub fn key(&self) -> Style {
+        let style = Style::default()
+            .add_modifier(Modifier::BOLD)
+            .remove_modifier(Modifier::DIM);
+        match self.pair() {
+            Some((fg, bg)) if self.light => self
+                .tint(readable(blend(bg, fg, KEY_ALPHA_LIGHT), bg))
+                .map_or(style, |color| style.fg(color)),
+            _ => style,
+        }
+    }
+
+    /// 选中行（Codex `contrast::selection_style`）：整行铺蓝色底色，文字 (0,0,46) 按底色调对比度、粗体；
+    /// 背景不知道或 16 色时反色加粗。
+    pub fn selection(&self) -> Style {
+        let fallback = Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED);
+        let Some(background) = self.background else {
+            return fallback;
+        };
+        if self.level == ColorLevel::Ansi16 {
+            return fallback;
+        }
+        let (mut fill, alternate) = if self.light {
+            (SELECTION_FILL_LIGHT, SELECTION_FILL_DARK)
+        } else {
+            (SELECTION_FILL_DARK, SELECTION_FILL_LIGHT)
+        };
+        // 底色太接近背景（蓝色的终端）时换另一种蓝。
+        if ratio(fill, background) < 1.25 && ratio(alternate, background) > ratio(fill, background)
+        {
+            fill = alternate;
+        }
+        match (self.tint(readable(SELECTION_TEXT, fill)), self.tint(fill)) {
+            (Some(fg), Some(bg)) => Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+            _ => fallback,
+        }
+    }
+
+    /// 模型名（Codex 状态栏的 Model）：主题的类型色，柔化后调对比度；16 色终端是青色。
+    pub fn model(&self) -> Style {
+        self.status_line(MODEL_DARK, MODEL_LIGHT, MODEL_NAMED)
+    }
+
+    /// 工作区路径（Codex 状态栏的 Path）：主题的字符串色，柔化后调对比度；16 色终端是绿色。
+    pub fn path(&self) -> Style {
+        self.status_line(PATH_DARK, PATH_LIGHT, PATH_NAMED)
+    }
+
+    /// footer 右侧“上下文”提示（compact.md §2.1）：快满且自动压缩关闭时 [`CONTEXT_LOW`]，其余是次要文字。
+    pub fn context_notice(&self, low: bool) -> Style {
+        if low {
+            Style::default().fg(CONTEXT_LOW)
+        } else {
+            self.secondary()
+        }
+    }
+
+    /// 查看子代理时输入框的上下边线（修复线 F62）：[`SUBAGENT`]，16 色终端按背景取亮青或青。
+    pub fn subagent_rule(&self) -> Style {
+        Style::default().fg(self.subagent_color())
+    }
+
+    /// 查看子代理时上边线右侧的标签（修复线 F62）：[`SUBAGENT`] 的底色，反色的字（深色背景黑、浅色背景白）。
+    pub fn subagent_label(&self) -> Style {
+        let (text, named) = if self.light {
+            (SUBAGENT_TEXT_LIGHT, SUBAGENT_TEXT_NAMED_LIGHT)
+        } else {
+            (SUBAGENT_TEXT_DARK, SUBAGENT_TEXT_NAMED_DARK)
+        };
+        Style::default()
+            .fg(self.tint(text).unwrap_or(named))
+            .bg(self.subagent_color())
+    }
+
+    fn subagent_color(&self) -> Color {
+        let named = if self.light {
+            SUBAGENT_NAMED_LIGHT
+        } else {
+            SUBAGENT_NAMED_DARK
+        };
+        self.tint(SUBAGENT).unwrap_or(named)
+    }
+
+    /// 状态栏一类的颜色（Codex `status_line_style.rs`）：深 / 浅背景各一种主题色，柔化后按背景调对比度；
+    /// 16 色终端用 `named`。模型名与路径用它；别的 footer 统计要同一套规则时也用它。
+    pub fn status_line(&self, dark: Rgb, light: Rgb, named: Color) -> Style {
+        if self.level == ColorLevel::Ansi16 {
+            return Style::default().fg(named);
+        }
+        let preferred = soften(if self.light { light } else { dark });
+        let color = self
+            .background
+            .map_or(preferred, |background| readable(preferred, background));
+        Style::default().fg(self.tint(color).unwrap_or(named))
+    }
+}
+
+#[cfg(test)]
+#[path = "tokens_tests.rs"]
+mod tests;

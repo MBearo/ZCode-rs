@@ -1,0 +1,2 @@
+The following deferred tools are no longer available in this session. Do not search for them — ToolSearch will return no match:
+{{lines}}

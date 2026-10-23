@@ -1,0 +1,1 @@
+This session is {{self}} — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).

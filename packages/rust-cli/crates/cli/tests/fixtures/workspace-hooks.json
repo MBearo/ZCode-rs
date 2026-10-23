@@ -1,0 +1,78 @@
+[
+  {
+    "name": "one project file with command and process hooks",
+    "workspacePath": "/Users/dev/repo",
+    "userHooks": null,
+    "sources": [
+      {
+        "path": "/Users/dev/repo/.zcode/config.json",
+        "discoveryOrder": 0,
+        "hooks": {
+          "enabled": true,
+          "events": {
+            "PreToolUse": [
+              {
+                "matcher": "Bash|Write",
+                "hooks": [
+                  { "type": "command", "command": "guard.sh", "timeout": 2.5, "async": true, "shell": true },
+                  { "type": "process", "command": "node", "args": ["check.js", "--strict"], "statusMessage": "Checking" },
+                  { "type": "command", "command": "off.sh", "enabled": false }
+                ]
+              }
+            ],
+            "Stop": [{ "hooks": [{ "type": "command", "command": "echo \"héllo\"\t\\ done", "shell": "/bin/zsh" }] }]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "ancestor files, user root and source switches",
+    "workspacePath": "/Users/dev/repo/app",
+    "userHooks": { "enabled": true, "timeoutMs": 30000 },
+    "sources": [
+      {
+        "path": "/Users/dev/repo/zcode.json",
+        "discoveryOrder": 0,
+        "hooks": {
+          "timeoutMs": 1500.5,
+          "maxOutputBytes": 1024,
+          "events": { "UserPromptSubmit": [{ "hooks": [{ "type": "process", "command": "audit" }] }] }
+        }
+      },
+      {
+        "path": "/Users/dev/repo/.zcode/config.json",
+        "discoveryOrder": 2,
+        "hooks": {}
+      },
+      {
+        "path": "/Users/dev/repo/app/zcode.json",
+        "discoveryOrder": 3,
+        "hooks": {
+          "enabled": false,
+          "events": {
+            "SessionStart": [{ "matcher": "startup", "hooks": [{ "type": "command", "command": "warm.sh", "timeoutMs": 999.6 }] }],
+            "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "fail.sh" }] }]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "runtime root disabled",
+    "workspacePath": "/Users/dev/repo",
+    "userHooks": { "timeoutMs": 45000 },
+    "sources": [
+      {
+        "path": "/Users/dev/repo/zcode.json",
+        "discoveryOrder": 0,
+        "hooks": {
+          "events": {
+            "PermissionRequest": [{ "matcher": "Edit", "hooks": [{ "type": "command", "command": "ask.sh" }] }],
+            "PostToolUse": [{ "hooks": [{ "type": "process", "command": "fmt", "args": [] }] }]
+          }
+        }
+      }
+    ]
+  }
+]

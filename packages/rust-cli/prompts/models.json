@@ -1,0 +1,17 @@
+{
+  "models": [
+    {
+      "id": "claude-opus-5-5",
+      "marketing_name": "Opus 5.5",
+      "knowledge_cutoff": "June 2026",
+      "max_output_tokens": 128000,
+      "context_window": 1000000,
+      "adaptive_thinking": true,
+      "default_effort": "medium",
+      "system_turns": true,
+      "per_turn_effort": true,
+      "silent_turn_reminder": true,
+      "tool_search": true
+    }
+  ]
+}

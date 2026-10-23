@@ -1,0 +1,11 @@
+# /loop tick — tasks from {{path}}
+
+The user configured a loop-tasks file. Work through the tasks defined below; these are the instructions for this tick and every subsequent tick (the reminder on later fires refers back to this message).
+
+---
+
+{{content}}
+
+---
+
+{{tick}}

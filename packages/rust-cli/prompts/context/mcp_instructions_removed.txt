@@ -1,0 +1,2 @@
+The following MCP servers have disconnected. Their instructions above no longer apply:
+{{names}}

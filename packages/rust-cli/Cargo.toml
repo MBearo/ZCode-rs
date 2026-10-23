@@ -1,0 +1,202 @@
+# rust-cli：Rust 写的 zcode CLI（docs/specs/rust-cli/README.md）。
+# 自包含：不 path 依赖本目录以外的 crate；从仓库其他位置复制的代码在文件头注明来源。
+# crate 之间的依赖方向由 scripts/rust-cli/check-boundaries.mjs 的 ALLOWED 表约束。
+[workspace]
+members = [
+  "crates/base",
+  "crates/paths",
+  "crates/fs",
+  "crates/proc",
+  "crates/net",
+  "crates/kernel-api",
+  "crates/prompts",
+  "crates/node-store",
+  "crates/model",
+  "crates/env-local",
+  "crates/peers",
+  "crates/policy",
+  "crates/hooks",
+  "crates/context",
+  "crates/tools",
+  "crates/compact",
+  "crates/memory",
+  "crates/agents",
+  "crates/ext",
+  "crates/query",
+  "crates/session",
+  "crates/runtime",
+  "crates/platform",
+  "crates/tui",
+  "crates/headless",
+  "crates/cli",
+]
+# 第三方源码（rg、bfs、ugrep，docs/specs/rust-cli/embedded-search.md）：cli 的 path 依赖，不是成员——不受本工程的
+# lints 与 clippy.toml 约束，也不在 crates/ 的边界检查里（边界脚本把它们当作只有 cli 能用的 IO 类第三方库）。
+exclude = ["vendor"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+# 规则来源：docs/specs/rust-engineering-practices.md §2.1；与 rust/Cargo.toml 的列表相同。
+await_holding_invalid_type = "deny"
+await_holding_lock = "deny"
+disallowed_methods = "deny"
+disallowed_types = "deny"
+manual_clamp = "deny"
+manual_filter = "deny"
+manual_find = "deny"
+manual_flatten = "deny"
+manual_map = "deny"
+manual_ok_or = "deny"
+manual_range_contains = "deny"
+manual_retain = "deny"
+manual_strip = "deny"
+manual_unwrap_or = "deny"
+needless_borrow = "deny"
+needless_collect = "deny"
+needless_question_mark = "deny"
+# 终端界面与 stream-json 都占用 stdout；库 crate 不打印，测试中由 clippy.toml 放行。
+print_stderr = "deny"
+print_stdout = "deny"
+redundant_clone = "deny"
+redundant_closure = "deny"
+redundant_closure_for_method_calls = "deny"
+trivially_copy_pass_by_ref = "deny"
+uninlined_format_args = "deny"
+unnecessary_lazy_evaluations = "deny"
+unnecessary_to_owned = "deny"
+# 新代码从第一天起不允许 unwrap / expect（测试由 clippy.toml 放行），每个 unsafe 块都要写 SAFETY 说明。
+expect_used = "deny"
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "deny"
+
+[workspace.dependencies]
+# 只列出已使用的依赖（cargo-shear 会拒绝未使用的 workspace 依赖）。
+anyhow = "1"
+# rust-cli-net 的出口策略快照（R4）：热替换时整份发布，读的一方不必等。
+arc-swap = "1"
+async-trait = "0.1"
+# rust-cli-platform：credentials.json 的 base64url（Node `Buffer` 的 base64url，无填充）。
+base64 = "0.23"
+bytes = "1"
+# rust-cli-tui：终端输入流（event-stream）；与 ratatui 0.30 的 crossterm 后端同版本。
+crossterm = { version = "0.29", features = ["event-stream"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Retry-After 的 HTTP-date 形式。
+httpdate = "1"
+# rust-cli-tui：markdown 解析（复制来的组件层，docs/specs/rust-cli/tui.md §3）。
+pulldown-cmark = { version = "0.13", default-features = false }
+# rust-cli-tui：全屏终端界面。
+ratatui = "0.30"
+# rust-cli-tui：unix 上探测终端背景色（OSC 11）时的 poll / read。
+rustix = { version = "1", features = ["event"] }
+# rust-cli-tui：代码块、diff 与命令的高亮（主题来自 two-face）。
+syntect = { version = "5.3", default-features = false, features = ["parsing", "default-syntaxes", "default-themes", "regex-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+unicode-width = "0.2"
+# kernel-api `env_path::nfc`：工具路径参数的 NFC（docs/specs/rust-cli/tools-files.md §3.2）。
+# Cargo.lock 里本来就有（url → idna → idna_adapter），只打开内置数据，不引入新包。
+icu_normalizer = { version = "2.3", default-features = false, features = ["compiled_data"] }
+# 内容搜索：ripgrep 自己的搜索库（env-local 的 Grep，docs/specs/rust-cli/tools-files.md §3）。
+grep-matcher = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+# 目录遍历、忽略规则与 rg 的 --glob / --type 语义（env-local 的 Glob / Grep）。
+ignore = "0.4"
+libc = "0.2"
+# rust-cli（cli）：Linux musl 版的全局分配器（docs/specs/rust-cli/linux.md §8.3，工作线 F44）。只在 `*-linux-musl`
+# 进依赖图；不打开 override（C 代码仍用 musl 的 malloc）。
+mimalloc = { version = "0.1.52", default-features = false }
+# env-local：持久定时任务文件的监听（.zcode/scheduled_tasks.json，docs/specs/rust-cli/tools-more.md §16.2）。
+notify = "8"
+regex = "1"
+# rust-cli-platform：Provider 规则的 matcher 是 JS RegExp 语法（look-around），与 Host / Node 相同用 ECMAScript 语义。
+regress = "0.12"
+# rust-cli-platform：credentials.json 的 AES-256-GCM（与 rustls 共用同一个 ring）。
+ring = "0.17"
+# 只在 rust-cli-net。与 apps/zcode-cli-rust 同为 0.13；关闭 system-proxy（默认特性），代理只按显式配置。
+# rustls-no-provider 不自带算法，统一用 ring（与 rustls 的 ring 特性配套）。
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "socks"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# 只在 rust-cli-net：内置的 Mozilla 根证书（docs/specs/rust-cli/config.md §2.4，工作线 F44）。Cargo.lock 里本来就有
+# （rustls-platform-verifier 在 wasm 上用它），不引入新包。
+webpki-root-certs = "1"
+# 只有 node-store 使用（spec §4：rusqlite 只在 sqlite / node-store）；bundled 自带 SQLite，不依赖系统库。
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", default-features = false, features = ["std"] }
+# preserve_order：JS 的 JSON 文本按插入顺序输出键（rust_cli_base::js::json），Node 记录逐字节一致依赖它。
+serde_json = { version = "1", features = ["preserve_order"] }
+# Node 迁移校验和 sha256(sql.trim())。
+sha2 = "0.10"
+tempfile = "3"
+# 只在测试：真实进程测试里现生成 CA 与服务器证书（docs/specs/rust-cli/config.md §5，F21）；与 rustls 共用 ring。
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
+thiserror = "2"
+# rust-cli-platform：Provider 配置的 baseUrl 校验（与 Host 相同用 WHATWG URL 解析）。
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+# 只打开不做 IO 的特性。做 IO 的特性（fs、process、io-std、net）由用到的 crate 自己声明，
+# scripts/rust-cli/check-boundaries.mjs 按 README §4 的表核对（F7，审查 R2-9：以前 process / fs / net 对全体打开）。
+# clippy.toml 里 tokio::fs / net / process 的禁令写 `allow-invalid = true`，单独检查没打开这些特性的 crate 时不报路径无效。
+tokio = { version = "1", features = [
+  "io-util",
+  "macros",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+# 只用 CancellationToken。
+tokio-util = { version = "0.7", default-features = false }
+# 只用门面宏；订阅者由入口 crate 安装。
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+# rust-cli-proc 的 Job Object；cli 的系统时区与系统版本（`RtlGetVersion`，修复线 F65）。
+windows-sys = { version = "0.61", features = [
+  "Wdk_System_SystemServices",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_System_Time",
+] }
+
+rust-cli-base = { path = "crates/base" }
+rust-cli-paths = { path = "crates/paths" }
+rust-cli-net = { path = "crates/net" }
+rust-cli-fs = { path = "crates/fs" }
+rust-cli-platform = { path = "crates/platform" }
+rust-cli-proc = { path = "crates/proc" }
+rust-cli-prompts = { path = "crates/prompts" }
+rust-cli-kernel-api = { path = "crates/kernel-api" }
+rust-cli-node-store = { path = "crates/node-store" }
+rust-cli-model = { path = "crates/model" }
+rust-cli-env-local = { path = "crates/env-local" }
+rust-cli-peers = { path = "crates/peers" }
+rust-cli-policy = { path = "crates/policy" }
+rust-cli-hooks = { path = "crates/hooks" }
+rust-cli-context = { path = "crates/context" }
+rust-cli-tools = { path = "crates/tools" }
+rust-cli-compact = { path = "crates/compact" }
+rust-cli-agents = { path = "crates/agents" }
+rust-cli-ext = { path = "crates/ext" }
+rust-cli-memory = { path = "crates/memory" }
+rust-cli-query = { path = "crates/query" }
+rust-cli-session = { path = "crates/session" }
+rust-cli-runtime = { path = "crates/runtime" }
+rust-cli-tui = { path = "crates/tui" }
+rust-cli-headless = { path = "crates/headless" }
+
+[profile.release]
+lto = "thin"
+strip = true

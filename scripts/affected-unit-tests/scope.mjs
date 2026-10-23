@@ -11,7 +11,10 @@ async function commit(root, ref) {
   }
 }
 async function isAncestor(root, ancestor, head) {
+  // 修复：以前没传 cwd，在进程当前目录的仓库里判断；结果被下面 merge-base 的回退掩盖（同样得到
+  // remote），但进程内调用方（pre-push-rust-cli）的 cwd 不一定是 root，判断要在同一个仓库里做。
   const check = await run("git", ["merge-base", "--is-ancestor", ancestor, head], {
+    cwd: root,
     allowFailure: true,
   });
   return check.code === 0;

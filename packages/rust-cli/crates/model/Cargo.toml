@@ -1,0 +1,35 @@
+[package]
+name = "rust-cli-model"
+description = "Model port: Anthropic-shaped requests encoded for each provider protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# 读对照数据的测试只在完整的源码仓库编译（docs/specs/rust-cli/export.md §5）；不传给依赖。
+parity = []
+
+[dependencies]
+async-trait.workspace = true
+futures-util.workspace = true
+# 请求方案表的正则（JS RegExp 语义，同 Node 的 providerSiteRules，model.md §3.2）。
+regress.workspace = true
+rust-cli-base.workspace = true
+rust-cli-kernel-api.workspace = true
+rust-cli-net.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# 测试夹具的本地 HTTP 服务（套接字只在测试里，README §4）；test-util：读流的看门狗在暂停的时钟上测（F17）。
+tokio = { workspace = true, features = ["net", "test-util"] }

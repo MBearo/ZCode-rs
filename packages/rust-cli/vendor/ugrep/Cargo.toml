@@ -1,0 +1,36 @@
+# ugrep 7.8.4（带 PCRE2、zlib、bzip2、zstd、brotli 与自带的 7z 解码），作为库供 zcode 按 argv0 分派
+# （docs/specs/rust-cli/embedded-search.md §7）。第三方代码：不是 workspace 成员（根 Cargo.toml 的 workspace.exclude），
+# 不受本工程的 lints 与 clippy.toml 约束；ugrep/、pcre2/、brotli/ 下的文件由 scripts/rust-cli/vendor/fetch.mjs 按
+# vendor/sources.json 生成，config/ 的 Unix 三份由 scripts/rust-cli/vendor/ugrep-config.mjs 用 ugrep 的 configure 生成，
+# 都不手改。
+[package]
+name = "rust-cli-vendor-ugrep"
+version = "7.8.4"
+edition = "2024"
+license = "BSD-3-Clause AND MIT AND Zlib AND bzip2-1.0.6 AND BSD-3-Clause"
+publish = false
+build = "build.rs"
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+
+[lib]
+path = "lib.rs"
+doctest = false
+test = false
+
+[dependencies]
+# PCRE2 与内嵌的 rg 共用同一份静态库（pcre2-sys 0.2.10 编的 PCRE2 10.46）；ugrep 用 vendor 的 10.46 官方头文件，
+# 版本固定，两边一致。
+pcre2-sys = "=0.2.10"
+# zlib、bzip2、zstd：crates.io 上维护中的 -sys crate，自带上游源码、静态编译；它们的 links 键把头文件目录交给 build.rs。
+libz-sys = { version = "1.1", default-features = false, features = ["static"] }
+bzip2-sys = { version = "0.1.13", features = ["static"] }
+zstd-sys = { version = "2", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1"

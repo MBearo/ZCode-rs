@@ -1,0 +1,5 @@
+/target/
+# 性能剖析等用的其他 target 目录（F6 曾误把 target-prof 提交进来）
+/target-*/
+# release 编译写计数文件的临时文件（docs/specs/rust-cli/version.md §2）：rename 之前被打断时留下
+/build-number.tmp

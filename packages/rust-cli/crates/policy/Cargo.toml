@@ -1,0 +1,31 @@
+[package]
+name = "rust-cli-policy"
+description = "Permission modes, rules and the decision chain of rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+async-trait.workspace = true
+regex.workspace = true
+# 只读表用 `include_lf!` 编入（修复线 F56，docs/specs/rust-cli/prompts.md「换行」）；敏感目录用产品目录名
+# `.zcode`（README §4.1，F55）。
+rust-cli-base.workspace = true
+rust-cli-kernel-api.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# WebFetch 预批准域名的 URL 解析（WHATWG URL 规则）。
+url.workspace = true
+
+[dev-dependencies]
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+tokio-util.workspace = true

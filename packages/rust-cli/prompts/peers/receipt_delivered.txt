@@ -1,0 +1,1 @@
+[Cross-session delivery notice] {{subject}} {{was}} approved and released to that session{{details}}.

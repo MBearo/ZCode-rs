@@ -1,0 +1,3 @@
+
+
+REMINDER: Do NOT call any tools. Respond with plain text only — {{reply_shape}}. Tool calls will be rejected and you will fail the task.

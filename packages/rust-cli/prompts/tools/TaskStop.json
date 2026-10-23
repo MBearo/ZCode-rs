@@ -1,0 +1,19 @@
+{
+  "name": "TaskStop",
+  "description": "\n- Stops a running background task by its ID\n- Takes a task_id parameter identifying the task to stop\n- To stop an agent-team teammate, pass its agent ID or bare teammate name as task_id\n- To stop a background agent spawned with a name, pass that name as task_id\n- Returns a success or failure status\n- Use this tool when you need to terminate a long-running task\n",
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "description": "The ID of the background task to stop. Agent-team teammates and named background agents are also accepted by agent ID or name.",
+        "type": "string"
+      },
+      "shell_id": {
+        "description": "Deprecated: use task_id instead",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "ListMcpResourcesTool",
+  "description": "\nList available resources from configured MCP servers.\nEach returned resource will include all standard MCP resource fields plus a 'server' field \nindicating which server the resource belongs to.\n\nParameters:\n- server (optional): The name of a specific MCP server to get resources from. If not provided,\n  resources from all servers will be returned.\n",
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "server": {
+        "description": "Optional server name to filter resources by",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false
+  }
+}

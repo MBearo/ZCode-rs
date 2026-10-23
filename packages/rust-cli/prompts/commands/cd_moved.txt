@@ -1,0 +1,1 @@
+The session's working directory has changed to {{dir}} (via /cd). The environment block at the start of this conversation still names the previous directory — that information is stale. All tool calls and relative paths now resolve from {{dir}}; its AGENTS.md, if any, follows below.

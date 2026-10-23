@@ -1,0 +1,1 @@
+<usage><subagent_tokens>{{tokens}}</subagent_tokens><tool_uses>{{tool_uses}}</tool_uses><duration_ms>{{duration}}</duration_ms></usage>

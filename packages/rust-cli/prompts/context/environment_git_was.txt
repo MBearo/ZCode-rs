@@ -1,0 +1,1 @@
+Is a git repository: {{value}} (was {{from}})

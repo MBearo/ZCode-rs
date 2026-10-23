@@ -1,0 +1,22 @@
+{
+  "type": "json_schema",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "ok": {
+        "type": "boolean"
+      },
+      "reason": {
+        "type": "string"
+      },
+      "impossible": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "ok",
+      "reason"
+    ],
+    "additionalProperties": false
+  }
+}

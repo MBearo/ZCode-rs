@@ -1,0 +1,50 @@
+[package]
+name = "rust-cli-tui"
+description = "Terminal interface of rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+crossterm.workspace = true
+futures-util.workspace = true
+pulldown-cmark.workspace = true
+ratatui.workspace = true
+rust-cli-base.workspace = true
+rust-cli-kernel-api.workspace = true
+rust-cli-platform.workspace = true
+# 权限规则文字的解析与格式（`/permissions` 显示用，与判决链同一个实现，tui-manage.md §1.3）。
+rust-cli-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+syntect.workspace = true
+tokio = { workspace = true, features = ["macros", "sync", "time"] }
+# 登录的取消令牌（取消是一条消息，tui.md §7.2）。
+tokio-util.workspace = true
+two-face.workspace = true
+unicode-width.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+# Windows 控制台：stdin 是不是控制台（mintty 的判断，tui-input.md §9.6）与背景色探测读控制台输入（tui.md §7.4），
+# 工作线 F71。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }
+
+[dev-dependencies]
+async-trait.workspace = true
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+# test-util：终端通知的计时用暂停的时钟推进（tui-manage.md §5.3）。
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "test-util", "time"] }
+tokio-util.workspace = true

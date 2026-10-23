@@ -1,0 +1,31 @@
+[package]
+name = "rust-cli-fs"
+description = "The single entry point for local storage file IO in rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+rust-cli-base.workspace = true
+# 目录锁 owner 文件的 `{pid, createdAt, token}`。
+serde_json.workspace = true
+# 本机存储的异步文件 IO（README §4 的 tokio 特性表）。
+tokio = { workspace = true, features = ["fs"] }
+
+# 目录锁的 owner 存活判断（Node `process.kill(pid, 0)`）。
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

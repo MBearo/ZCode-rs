@@ -1,0 +1,316 @@
+use serde_json::json;
+
+use super::*;
+
+fn sse(name: &str, data: Value) -> SseEvent {
+    SseEvent {
+        event: Some(name.to_owned()),
+        data: data.to_string(),
+    }
+}
+
+fn typed(data: Value) -> SseEvent {
+    let name = data["type"].as_str().unwrap().to_owned();
+    sse(&name, data)
+}
+
+fn start() -> SseEvent {
+    typed(json!({"type": "message_start", "message": {
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-sonnet-4-5",
+        "content": [], "stop_reason": null, "stop_sequence": null,
+        "usage": {"input_tokens": 12, "cache_creation_input_tokens": 3,
+                  "cache_read_input_tokens": 100, "output_tokens": 1}}}))
+}
+
+fn decode(events: Vec<SseEvent>) -> (Vec<ModelEvent>, Option<ModelError>) {
+    let mut decoder = AnthropicStream::default();
+    let mut out = VecDeque::new();
+    for event in events {
+        if let Err(error) = decoder.decode(event, &mut out) {
+            return (out.into(), Some(error));
+        }
+    }
+    (out.into(), None)
+}
+
+fn usage(input: u64, output: u64, creation: u64, read: u64) -> Usage {
+    Usage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_creation_input_tokens: creation,
+        cache_read_input_tokens: read,
+    }
+}
+
+#[test]
+fn text_thinking_and_tool_use_map_to_model_events() {
+    let (events, error) = decode(vec![
+        start(),
+        sse("ping", json!({"type": "ping"})),
+        typed(json!({"type": "content_block_start", "index": 0,
+                     "content_block": {"type": "thinking", "thinking": "", "signature": ""}})),
+        typed(json!({"type": "content_block_delta", "index": 0,
+                     "delta": {"type": "thinking_delta", "thinking": "Let me "}})),
+        typed(json!({"type": "content_block_delta", "index": 0,
+                     "delta": {"type": "signature_delta", "signature": "EqQB"}})),
+        typed(json!({"type": "content_block_stop", "index": 0})),
+        // start 里的文本被忽略：SDK 有时在 start 与 delta 里各给一次。
+        typed(json!({"type": "content_block_start", "index": 1,
+                     "content_block": {"type": "text", "text": "dup"}})),
+        typed(json!({"type": "content_block_delta", "index": 1,
+                     "delta": {"type": "text_delta", "text": "dup"}})),
+        typed(json!({"type": "content_block_delta", "index": 1,
+                     "delta": {"type": "citations_delta", "citation": {}}})),
+        typed(json!({"type": "content_block_stop", "index": 1})),
+        typed(json!({"type": "content_block_start", "index": 2,
+                     "content_block": {"type": "tool_use", "id": "toolu_9", "name": "Read", "input": {}}})),
+        typed(json!({"type": "content_block_delta", "index": 2,
+                     "delta": {"type": "input_json_delta", "partial_json": "{\"file_"}})),
+        typed(json!({"type": "content_block_delta", "index": 2,
+                     "delta": {"type": "input_json_delta", "partial_json": "path\":\"/a\"}"}})),
+        typed(json!({"type": "content_block_stop", "index": 2})),
+        typed(
+            json!({"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": null},
+                     "usage": {"output_tokens": 42}}),
+        ),
+        typed(json!({"type": "message_stop"})),
+    ]);
+    assert_eq!(error, None);
+    let delta = |index, delta| ModelEvent::BlockDelta { index, delta };
+    assert_eq!(
+        events,
+        vec![
+            ModelEvent::MessageStart {
+                id: "msg_1".to_owned(),
+                model: "claude-sonnet-4-5".to_owned(),
+                usage: usage(12, 1, 3, 100),
+            },
+            ModelEvent::BlockStart {
+                index: 0,
+                block: ContentBlock::Thinking {
+                    thinking: String::new(),
+                    signature: Some(String::new()),
+                },
+            },
+            delta(0, BlockDelta::Thinking("Let me ".to_owned())),
+            delta(0, BlockDelta::Signature("EqQB".to_owned())),
+            ModelEvent::BlockStop { index: 0 },
+            ModelEvent::BlockStart {
+                index: 1,
+                block: ContentBlock::Text {
+                    text: String::new()
+                },
+            },
+            delta(1, BlockDelta::Text("dup".to_owned())),
+            ModelEvent::BlockStop { index: 1 },
+            ModelEvent::BlockStart {
+                index: 2,
+                block: ContentBlock::ToolUse {
+                    id: ToolUseId::new("toolu_9"),
+                    name: "Read".to_owned(),
+                    input: json!({}),
+                },
+            },
+            delta(2, BlockDelta::InputJson("{\"file_".to_owned())),
+            delta(2, BlockDelta::InputJson("path\":\"/a\"}".to_owned())),
+            ModelEvent::BlockStop { index: 2 },
+            ModelEvent::MessageDelta {
+                stop_reason: Some(StopReason::ToolUse),
+                usage: usage(12, 42, 3, 100),
+            },
+            ModelEvent::MessageStop,
+        ]
+    );
+}
+
+#[test]
+fn usage_merges_into_the_running_total() {
+    let (events, _) = decode(vec![
+        start(),
+        // input 与缓存 token 为 0 或 null 时保留 message_start 的值；output 只要给出就覆盖。
+        typed(
+            json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+                     "usage": {"input_tokens": 0, "cache_read_input_tokens": null, "output_tokens": 0}}),
+        ),
+        typed(
+            json!({"type": "message_delta", "delta": {"stop_reason": null},
+                     "usage": {"input_tokens": 20, "cache_creation_input_tokens": 5}}),
+        ),
+        typed(
+            json!({"type": "message_delta", "delta": {"stop_reason": "model_context_window_exceeded"},
+                     "usage": {}}),
+        ),
+    ]);
+    assert_eq!(
+        events[1..],
+        [
+            ModelEvent::MessageDelta {
+                stop_reason: Some(StopReason::EndTurn),
+                usage: usage(12, 0, 3, 100),
+            },
+            ModelEvent::MessageDelta {
+                stop_reason: None,
+                usage: usage(20, 0, 5, 100),
+            },
+            ModelEvent::MessageDelta {
+                stop_reason: Some(StopReason::Unknown),
+                usage: usage(20, 0, 5, 100),
+            },
+        ]
+    );
+}
+
+#[test]
+fn error_events_are_classified() {
+    let (events, error) = decode(vec![
+        start(),
+        sse(
+            "error",
+            json!({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}),
+        ),
+    ]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        error,
+        Some(ModelError::Overloaded {
+            message: "Overloaded".to_owned()
+        })
+    );
+}
+
+#[test]
+fn redacted_thinking_and_unsupported_blocks() {
+    let (events, error) = decode(vec![
+        start(),
+        typed(json!({"type": "content_block_start", "index": 0,
+                     "content_block": {"type": "redacted_thinking", "data": "opaque"}})),
+        typed(json!({"type": "content_block_stop", "index": 0})),
+        // 服务端工具的块（tools-more.md §5）：开始事件带内容，增量不输出。
+        typed(json!({"type": "content_block_start", "index": 1,
+                     "content_block": {"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search", "input": {}}})),
+        typed(json!({"type": "content_block_delta", "index": 1,
+                     "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+        typed(json!({"type": "content_block_stop", "index": 1})),
+        typed(json!({"type": "content_block_start", "index": 2,
+                     "content_block": {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_1",
+                                       "content": [{"type": "web_search_result", "title": "T", "url": "https://example.com"}]}})),
+        typed(json!({"type": "content_block_stop", "index": 2})),
+        // 内核没有形状的块：整个块被跳过。
+        typed(json!({"type": "content_block_start", "index": 3,
+                     "content_block": {"type": "mcp_tool_use", "id": "x"}})),
+        typed(json!({"type": "content_block_stop", "index": 3})),
+    ]);
+    assert_eq!(error, None);
+    assert_eq!(
+        events[1..],
+        [
+            ModelEvent::BlockStart {
+                index: 0,
+                block: ContentBlock::RedactedThinking {
+                    data: "opaque".to_owned()
+                },
+            },
+            ModelEvent::BlockStop { index: 0 },
+            ModelEvent::BlockStart {
+                index: 1,
+                block: ContentBlock::ServerToolUse {
+                    id: "srvtoolu_1".to_owned(),
+                    name: "web_search".to_owned(),
+                    input: json!({}),
+                },
+            },
+            ModelEvent::BlockStop { index: 1 },
+            ModelEvent::BlockStart {
+                index: 2,
+                block: ContentBlock::WebSearchToolResult {
+                    tool_use_id: "srvtoolu_1".to_owned(),
+                    content: json!([{"type": "web_search_result", "title": "T", "url": "https://example.com"}]),
+                },
+            },
+            ModelEvent::BlockStop { index: 2 },
+        ]
+    );
+}
+
+#[test]
+fn events_are_dispatched_by_their_sse_name() {
+    let unnamed = SseEvent {
+        event: None,
+        data: json!({"type": "message_start", "message": {}}).to_string(),
+    };
+    // 与 SDK 相同：没有 `event:` 名或名字未知的事件被忽略；`message` 名按 data 的 type 处理。
+    let (events, error) = decode(vec![
+        unnamed,
+        sse("future_event", json!({"type": "future_event"})),
+        sse(
+            "message",
+            json!({"type": "message_start", "message": {"id": "m", "model": "x"}}),
+        ),
+        sse("message_stop", json!({"type": "message_stop"})),
+        sse(
+            "message_delta",
+            json!({"type": "message_delta", "delta": {}, "usage": {}}),
+        ),
+    ]);
+    assert_eq!(error, None);
+    assert_eq!(
+        events,
+        vec![
+            ModelEvent::MessageStart {
+                id: "m".to_owned(),
+                model: "x".to_owned(),
+                usage: Usage::default(),
+            },
+            ModelEvent::MessageStop,
+        ]
+    );
+}
+
+#[test]
+fn protocol_violations_are_errors() {
+    let block_start = |index, kind: &str| {
+        typed(
+            json!({"type": "content_block_start", "index": index, "content_block": {"type": kind}}),
+        )
+    };
+    let delta = |kind: &str, field: &str| {
+        typed(
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": kind, field: "x"}}),
+        )
+    };
+    let cases = vec![
+        vec![block_start(0, "text")],
+        vec![start(), delta("text_delta", "text")],
+        vec![
+            start(),
+            block_start(0, "text"),
+            delta("input_json_delta", "partial_json"),
+        ],
+        vec![
+            start(),
+            block_start(0, "thinking"),
+            delta("text_delta", "text"),
+        ],
+        vec![start(), block_start(0, "text"), block_start(0, "text")],
+        vec![
+            start(),
+            typed(json!({"type": "content_block_stop", "index": 3})),
+        ],
+        vec![start(), typed(json!({"type": "content_block_stop"}))],
+        vec![start(), block_start(0, "tool_use")],
+        vec![
+            sse("message_start", Value::Null),
+            SseEvent {
+                event: Some("content_block_delta".to_owned()),
+                data: "{not json".to_owned(),
+            },
+        ],
+    ];
+    for (case, events) in cases.into_iter().enumerate() {
+        let (_, error) = decode(events);
+        assert!(
+            matches!(error, Some(ModelError::Protocol { .. })),
+            "case {case}: {error:?}"
+        );
+    }
+}

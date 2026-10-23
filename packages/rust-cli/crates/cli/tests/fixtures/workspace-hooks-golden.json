@@ -1,0 +1,92 @@
+[
+  {
+    "name": "one project file with command and process hooks",
+    "bundleDigest": "e906940aaf844b5ccd6394da452354a4173f6ac305115126ec9dc7945c9edc0d",
+    "hooks": [
+      {
+        "reviewItemId": "workspace-hook-0-PreToolUse-0-0",
+        "sourceRelativePath": ".zcode/config.json",
+        "resolvedTimeoutMs": 2500,
+        "configuredEnabled": true,
+        "editable": true,
+        "hookDeclarationDigest": "c3c4404948a1fbc0a2d5f135656de7f2b63e38907db3f6758cd68f8e3a15c042"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-PreToolUse-0-1",
+        "sourceRelativePath": ".zcode/config.json",
+        "resolvedTimeoutMs": 60000,
+        "configuredEnabled": true,
+        "editable": true,
+        "hookDeclarationDigest": "fa62d0ce7b4ac477f410db0b1c3c076fbdd19a1eeeb0c109c31e96938fb9f73b"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-PreToolUse-0-2",
+        "sourceRelativePath": ".zcode/config.json",
+        "resolvedTimeoutMs": 60000,
+        "configuredEnabled": false,
+        "editable": true,
+        "hookDeclarationDigest": "858fa21300fd201e3b8529443226822b9c1c131b4cc03dd48e3c51ddb57c6d1a"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-Stop-0-0",
+        "sourceRelativePath": ".zcode/config.json",
+        "resolvedTimeoutMs": 60000,
+        "configuredEnabled": true,
+        "editable": true,
+        "hookDeclarationDigest": "f646294ec62340cf5b9ec27bfac28d46882634d0fffcfaba14257b5bba3a6a6c"
+      }
+    ]
+  },
+  {
+    "name": "ancestor files, user root and source switches",
+    "bundleDigest": "40d93f3db28965e0645a849788dc9ceba63a3044613a0c10d801359a497c7c7e",
+    "hooks": [
+      {
+        "reviewItemId": "workspace-hook-0-UserPromptSubmit-0-0",
+        "sourceRelativePath": "../zcode.json",
+        "resolvedTimeoutMs": 1501,
+        "configuredEnabled": true,
+        "editable": false,
+        "hookDeclarationDigest": "c8fe484b526910ec47dfbd74943e46c865f7c3be831b96960eb29f6aaf1a7eca"
+      },
+      {
+        "reviewItemId": "workspace-hook-2-SessionStart-0-0",
+        "sourceRelativePath": "zcode.json",
+        "resolvedTimeoutMs": 1000,
+        "configuredEnabled": false,
+        "editable": false,
+        "hookDeclarationDigest": "546d48ac182955194f7fca2cf96995182cbea0d800d8b7669b2a9dffea00763a"
+      },
+      {
+        "reviewItemId": "workspace-hook-2-PostToolUseFailure-0-0",
+        "sourceRelativePath": "zcode.json",
+        "resolvedTimeoutMs": 1501,
+        "configuredEnabled": false,
+        "editable": false,
+        "hookDeclarationDigest": "d9cb8f049fef12c8c2cc2051fa2df3fcf65fc9f74e9aa5d477027ccb59df2640"
+      }
+    ]
+  },
+  {
+    "name": "runtime root disabled",
+    "bundleDigest": "14b8b62696e885d1de7a076f8908bf8a151d1222bf0383933187272e66d76989",
+    "hooks": [
+      {
+        "reviewItemId": "workspace-hook-0-PermissionRequest-0-0",
+        "sourceRelativePath": "zcode.json",
+        "resolvedTimeoutMs": 45000,
+        "configuredEnabled": false,
+        "editable": false,
+        "hookDeclarationDigest": "03e9d175f0a51368aee939a725eee692ed9bca1e3eceb552971f41af0cdc6d2e"
+      },
+      {
+        "reviewItemId": "workspace-hook-0-PostToolUse-0-0",
+        "sourceRelativePath": "zcode.json",
+        "resolvedTimeoutMs": 45000,
+        "configuredEnabled": false,
+        "editable": false,
+        "hookDeclarationDigest": "df5fd4531e9c3f4b3326cf2c644b4d5c03bcd33fb1e1ba011aaee73455f868bd"
+      }
+    ]
+  }
+]

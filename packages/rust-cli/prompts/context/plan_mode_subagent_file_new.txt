@@ -1,0 +1,1 @@
+No plan file exists yet. You should create your plan at {{path}} using the Write tool if you need to.

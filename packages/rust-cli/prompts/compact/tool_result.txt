@@ -1,0 +1,2 @@
+Result of calling the {{tool}} tool:
+{{result}}

@@ -1,0 +1,1 @@
+No reachable agents — no other ZCode session is running on this machine right now (peer messaging itself is available; a session appears here once it is started).

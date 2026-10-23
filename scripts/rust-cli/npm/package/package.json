@@ -1,0 +1,26 @@
+{
+  "name": "@mbearo/zcode",
+  "description": "Standalone ZCode Rust CLI",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MBearo/ZCode-rs.git",
+    "directory": "scripts/rust-cli/npm/package"
+  },
+  "bin": {
+    "zcode": "bin/zcode.cjs"
+  },
+  "files": [
+    "bin",
+    "platforms.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

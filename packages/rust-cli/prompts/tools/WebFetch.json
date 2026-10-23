@@ -1,0 +1,30 @@
+{
+  "name": "WebFetch",
+  "description": "Fetches a URL, converts the page to markdown, and answers `prompt` against it using a small fast model.\n\n- Fails on authenticated/private URLs — use an authenticated MCP tool or `gh` for those instead.\n- Fails on localhost and other hostnames without a dot; for a local server, use curl via Bash.\n- HTTP is upgraded to HTTPS. Cross-host redirects are returned to you rather than followed; call again with the redirect URL.\n- Responses are cached for 15 minutes per URL.",
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "url": {
+        "description": "The URL to fetch content from",
+        "type": "string",
+        "format": "uri"
+      },
+      "prompt": {
+        "description": "The prompt to run on the fetched content",
+        "type": "string"
+      },
+      "offset": {
+        "description": "Character position in the page text to start reading from. Use it to read on through a page too long for one call, with the value the previous result gave.",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    },
+    "required": [
+      "url",
+      "prompt"
+    ],
+    "additionalProperties": false
+  }
+}

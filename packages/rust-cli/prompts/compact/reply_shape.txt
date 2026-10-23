@@ -1,0 +1,1 @@
+an <analysis> block followed by a <summary> block

@@ -1,0 +1,1 @@
+This is ambient context — do not narrate it to the user unless they ask or it is directly relevant to their request.

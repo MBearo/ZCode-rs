@@ -1,0 +1,5 @@
+# MCP Server Instructions
+
+The following MCP servers have provided instructions for how to use their tools and resources:
+
+{{blocks}}

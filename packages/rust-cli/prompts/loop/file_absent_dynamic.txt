@@ -1,0 +1,7 @@
+# /loop tick — loop.md absent (dynamic pacing)
+
+loop.md is not currently present. Run the autonomous check using the loop instructions established earlier in this conversation.
+
+You scheduled this tick via the ScheduleWakeup tool (not a recurring cron). To keep the loop alive — and to pick up loop.md if it is recreated — call ScheduleWakeup again this turn with `prompt` set to the literal sentinel `<<loop.md-dynamic>>` and `noop` set to `true` if this tick changed nothing (or `false` if it did) — otherwise the loop ends after this tick.
+
+If a Monitor is armed (check TaskList), keep `delaySeconds` at 1200–1800s — the Monitor is the wake signal and this is only the fallback heartbeat. If you were woken by a `<task-notification>`, handle the event before deciding whether to re-arm. After re-arming, write a brief status update for this tick. This must be ordinary visible response text — the user cannot see your thinking/reasoning, so an update written only there is invisible to them. Make it the last thing in the turn, then end the turn. To stop the loop, call ScheduleWakeup with `stop: true` and TaskStop the monitor (use TaskList to find its task ID if no longer in context).

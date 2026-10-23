@@ -1,0 +1,21 @@
+{
+  "name": "ListAgents",
+  "description": "Lists agents you can SendMessage to — in-process subagents you spawned, other local ZCode sessions on this machine, each row labeled by kind. Names are the address: send with `SendMessage({to: \"<name>\", message: \"...\"})`, copying the name exactly as a row prints it. Append a row's ` [ref]` only when the bare name is not enough — two rows share it, or an error asks you to disambiguate.",
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "channel": {
+        "description": "Not available in this build; leave unset.",
+        "type": "string",
+        "maxLength": 256
+      },
+      "q": {
+        "description": "Not available in this build; leave unset.",
+        "type": "string",
+        "maxLength": 256
+      }
+    },
+    "additionalProperties": false
+  }
+}

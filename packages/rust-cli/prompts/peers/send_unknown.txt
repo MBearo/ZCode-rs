@@ -1,0 +1,2 @@
+No agent named '{{to}}' is reachable.
+Use ListAgents to see everyone you can message.

@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "config": {
+    "providerOrder": [
+      "personal:responses",
+      "personal:gateway"
+    ],
+    "providerConfigRules": {
+      "providerRules": [
+        {
+          "providerId": "personal:gateway",
+          "providerName": "My Gateway",
+          "enabled": true,
+          "config": {
+            "group": "standard-personal",
+            "access": {
+              "type": "api-key",
+              "apiKey": "sk-personal-fixture"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://gateway.example.com/v1",
+              "headers": {
+                "X-Team": "dev"
+              }
+            },
+            "personalModelIds": [
+              "glm-5",
+              "custom-chat"
+            ]
+          }
+        },
+        {
+          "providerId": "personal:responses",
+          "providerName": "Responses",
+          "enabled": true,
+          "config": {
+            "group": "standard-personal",
+            "access": {
+              "type": "api-key",
+              "apiKey": "sk-responses-fixture"
+            },
+            "api": {
+              "type": "openai-responses",
+              "baseUrl": "https://responses.example.com/v1"
+            },
+            "personalModelIds": [
+              "gpt-5.4"
+            ]
+          }
+        },
+        {
+          "providerId": "personal:disabled",
+          "providerName": "Disabled",
+          "enabled": false,
+          "config": {
+            "group": "standard-personal",
+            "access": {
+              "type": "api-key",
+              "apiKey": "sk-disabled"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://anthropic.example.com"
+            },
+            "personalModelIds": [
+              "claude-opus-5"
+            ]
+          }
+        },
+        {
+          "providerId": "personal:nokey",
+          "providerName": "No key",
+          "enabled": true,
+          "config": {
+            "group": "standard-personal",
+            "access": {
+              "type": "api-key"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://anthropic.example.com"
+            },
+            "personalModelIds": [
+              "claude-opus-5"
+            ]
+          }
+        },
+        {
+          "providerId": "personal:anthropic",
+          "providerName": "Anthropic",
+          "enabled": true,
+          "config": {
+            "group": "standard-personal",
+            "access": {
+              "type": "api-key",
+              "apiKey": "sk-ant-fixture"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://anthropic.example.com"
+            },
+            "personalModelIds": [
+              "claude-opus-5"
+            ]
+          }
+        }
+      ]
+    },
+    "modelConfigRules": {
+      "providerModelRules": [
+        {
+          "modelId": "custom-chat",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "requiresMfjsToolSchema": false,
+              "contextWindow": 64000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "outputFormat": {
+                "supportsText": true
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false,
+              "supportsMidConversationSystem": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": [
+                  "low",
+                  "high"
+                ]
+              },
+              "maxOutputTokens": {
+                "max": 8192
+              }
+            }
+          },
+          "providerId": "personal:gateway"
+        }
+      ],
+      "manualProviderModelRules": []
+    },
+    "defaultModelSelection": {
+      "providerId": "account:zai-individual-coding-plan",
+      "modelId": "GLM-5.3"
+    }
+  }
+}

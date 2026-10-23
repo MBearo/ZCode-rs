@@ -1,0 +1,1 @@
+Called the {{tool}} tool with the following input: {{input}}

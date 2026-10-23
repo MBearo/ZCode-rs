@@ -6,7 +6,7 @@
 - `pre-push` 会执行 `pnpm run verify:pre-push`。
 - 根 `pnpm test` 现在只跑单测，不再误把桌面端 `packages/desktop/test/e2e` 当成 Vitest 用例。
 - Bugfix：单测脚本里的 E2E exclude glob 必须加引号；否则 shell 会先把 `packages/desktop/test/e2e/**/*.test.ts` 展开成真实文件列表，导致 Vitest 把多余文件当成 filters，同时又被 exclude 排除，最终报 `No test files found` 并阻止 push。
-- `verify:pre-push` 依次执行 lint、架构检查和 push 范围的受影响单测；lint、架构检查、选中测试或脚本自身失败都会阻止 push。
+- `verify:pre-push` 依次执行 lint、架构检查和 push 范围的受影响单测，最后在 push 范围改了 rust-cli 时跑 rust-cli 的检查（见文末“rust-cli 检查”）；lint、架构检查、选中测试、rust-cli 检查或脚本自身失败都会阻止 push。
 
 这样可以在代码推到远端前，先用更快的静态检查拦住明显问题，再把单测问题拦在本地，同时保留 `pnpm test:e2e` 作为桌面端 E2E 的独立入口。
 
@@ -96,3 +96,30 @@ Push 要求已暂存、未暂存、未跟踪改动均为空（忽略 Git 已忽�
 affected 只选择根 Vitest UT，工具 Node 测试另行执行，不代替 CLI 的原生 `pnpm --filter zcode-cli test`。CLI 的 CUA 同步测试使用明确传入的 `ZCODE_CUA_REPO` 定位 producer checkout，Turbo 的 test task 将其计入缓存键并传入测试；不记录本机绝对路径，不更改 producer pin。`VITEST_MAX_WORKERS` 同样传入并参与缓存键，资源受限的全量验证可显式限制单套件并发，不能靠扩大超时掩盖断言失败。
 
 CLI 全量入口通过 pretest 构建根 workspace 的 `@zcode/model-option-map`，确保 SEA 测试从干净 checkout 也能读取运行时资源；不能依赖先前手动构建的 dist。
+
+## rust-cli 检查
+
+`verify:pre-push` 的最后一步是 `node scripts/pre-push-rust-cli.mjs`：push 范围改了 rust-cli（`packages/rust-cli` 或 `scripts/rust-cli`）时跑 `pnpm check:rust-cli`。CI 检查使用 `.github/workflows/rust-cli.yml` 的三平台手动任务；构建与 npm 发布使用 `.github/workflows/rust-cli-release.yml`。
+
+Rust CLI 的依赖与 IO 边界规则以 `scripts/rust-cli/boundaries/policy.mjs` 为准，检查 Cargo 依赖图、源码与 clippy 配置，不依赖设计文档。`packages/rust-cli/**`、`scripts/rust-cli/**`（`scripts/rust-cli/npm/**` 除外）与 `scripts/pre-push-rust-cli.mjs`（及其测试）由同步整体覆盖，不在本仓库单独修改；本仓库自有的是 `scripts/rust-cli/npm/**`、`.github/workflows/rust-cli*.yml` 与根 `package.json` 的 rust-cli 脚本。
+
+```text
+检出里有 packages/rust-cli/Cargo.toml？
+  ├─ 没有（不含 Rust CLI 的检出）→ 不输出，exit 0
+  └─ 有 → push 范围（与 affected 同一个 resolveScope）
+           → 每个基线：git diff --name-only --no-renames <基线>...HEAD
+           ├─ 没有 rust-cli 文件 → 说明一行，exit 0（不调用 cargo）
+           └─ 有 → ZCODE_PRE_PUSH_SKIP_RUST_CLI=1？
+                    ├─ 是 → 警告“没有检查”，exit 0
+                    └─ 否 → cargo --version
+                             ├─ 失败或找不到 → 说明安装与跳过的写法，exit 2（阻止 push）
+                             └─ 有 → pnpm run check:rust-cli；失败 exit 1
+```
+
+- 什么算改了 rust-cli：路径以 `packages/rust-cli/` 或 `scripts/rust-cli/` 开头。clippy 与 rustfmt 的版本由 `packages/rust-cli/rust-toolchain.toml` 固定，按前缀算在里面（工作线 F46 把它从仓库根移到这里，仓库根的同名文件不再触发）。只改文档或其他目录不跑。
+- push 范围不另算：沿用上文 Push 的基线（hook 输入的每个非删除 ref、显式基线 `ZCODE_AFFECTED_TEST_BASE` / `ZCODE_PRE_PUSH_BASE`、首次推送用 origin/staging 的 merge-base、手动运行用 upstream），脏工作区、目标不是 HEAD、基线无效同样 exit 2；只有删除 ref 时不跑。文件清单与 Vitest changed 相同，用三点比较 `<基线>...HEAD`；另加 `--no-renames`，移出 rust-cli 的文件也算改动。集成合并带入的 rust-cli 改动照常算（与 affected 相同，不按来源过滤）。
+- 跑什么：`pnpm check:rust-cli`，即 `scripts/rust-cli/` 下脚本的单测（边界、Linux 构建、计数文件、可执行文件名、Windows 交叉检查、换行、vendor、模型替身、npm 打包）、`scripts/rust-cli/check-boundaries.mjs`、`cargo fmt --check` 与 `scripts/rust-cli/clippy.mjs`（`cargo clippy --locked --workspace --all-targets -- -D warnings`）。Windows 目标的交叉检查是单独的 `pnpm check:rust-cli:windows`（要 `rustup target add x86_64-pc-windows-msvc`），不在 pre-push 里跑。耗时（2026-10-19，macOS，负载约 30）：没有改动时约 4 秒，改一个上层 crate 约 6 秒，没有 target 目录时约 47 秒。
+- 不跑 `pnpm test:rust-cli`：它是 nextest 全量（1892 项；同一台机器上没有改动时约 16 秒，改 base crate 约 48 秒，测试第一次编译约 83 秒），要另装 cargo-nextest，也没有按改动选择测试的入口；pre-push 只跑受影响的测试、不自动全量（见上文）。rust-cli 的测试（`pnpm test:rust-cli`）、npm 打包的测试（`pnpm test:rust-cli:npm`）与 Node 互操作（`node scripts/rust-cli/node-interop-check.mjs`）在合并前执行，入口以根 `package.json` 和 `scripts/rust-cli/` 中的实际脚本为准。
+- 没有 Rust 工具链：不静默跳过。阻止 push，列出触发的文件，提示安装 rustup（版本与组件由 `packages/rust-cli/rust-toolchain.toml` 固定）。探测 `cargo --version` 在 `packages/rust-cli` 下执行：rustup 只从当前目录往上找工具链文件，不看 `--manifest-path`，探测与 `check:rust-cli` 要用同一个工具链。改动只是合并带入、自己没改 rust-cli 时，可以用 `ZCODE_PRE_PUSH_SKIP_RUST_CLI=1 git push` 只跳过这一项（输出警告，其他检查照常）。没改 rust-cli 的推送不调用 cargo，没装 Rust 的人不受影响。
+- 不含 Rust CLI 的检出：没有 `packages/rust-cli/Cargo.toml` 时这一步什么都不做，不解析 push 范围，不调用 git 与 cargo。当前仓库完整包含 Rust CLI，所以按实际 push 范围执行检查。
+- 回归验收：`scripts/pre-push-rust-cli.test.mjs`（根 UT）用临时 Git 仓库覆盖改了 rust-cli / scripts / 工具链文件、只改 spec、其他目录或仓库根的 `rust-toolchain.toml`、在 `packages/rust-cli` 下探测 cargo（Windows 跳过：替身是 sh 脚本）、开源树（含入口在不是 Git 仓库的副本里直接退出 0）、合并带入、移出目录的改名、首次推送、只删除 ref、多个 ref、脏工作区与非 HEAD、没有 cargo、显式跳过、不经 pnpm 运行。入口按真实路径判断是否被直接运行：经符号链接的路径启动时也会跑，不会静默 exit 0。

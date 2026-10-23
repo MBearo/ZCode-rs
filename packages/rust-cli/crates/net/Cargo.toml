@@ -1,0 +1,37 @@
+[package]
+name = "rust-cli-net"
+description = "The single network egress of rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+arc-swap.workspace = true
+bytes.workspace = true
+httpdate.workspace = true
+reqwest.workspace = true
+rust-cli-base.workspace = true
+rustls.workspace = true
+thiserror.workspace = true
+# 跨会话的收件箱：Unix 域套接字（docs/specs/rust-cli/cross-session.md §2.1，F28）。
+tokio = { workspace = true, features = ["net"] }
+tracing.workspace = true
+# 内置的 Mozilla 根证书（docs/specs/rust-cli/config.md §2.4，F44）。
+webpki-root-certs.workspace = true
+
+[dev-dependencies]
+# PEM 读法的单测现生成证书（docs/specs/rust-cli/config.md §5，F21）。
+rcgen.workspace = true
+# 根证书合并的 TLS 测试：本地 HTTPS 服务（rustls 服务端，egress_tests.rs，F44）。
+rustls = { workspace = true, features = ["std"] }
+# 测试夹具的本地 HTTP 服务。
+tokio = { workspace = true, features = ["net", "macros", "rt"] }
+tempfile.workspace = true

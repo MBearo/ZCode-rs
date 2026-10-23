@@ -1,0 +1,1 @@
+Write the title in the predominant language of the session — a stray word or code token in another language doesn't change it, and neither does the English of these instructions.

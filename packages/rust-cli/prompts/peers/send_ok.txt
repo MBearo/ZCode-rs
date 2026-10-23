@@ -1,0 +1,1 @@
+“{{summary}}” → {{name}} (another ZCode session on this machine; in that session's inbox, not yet read by its ZCode — a [Cross-session delivery notice] follows if that session holds it (usually a different permission mode) or refuses it)

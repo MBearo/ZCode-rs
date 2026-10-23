@@ -1,0 +1,3304 @@
+{
+  "tokenCustomer": {
+    "organizations": [
+      {
+        "organizationId": "org-1",
+        "organizationName": "默认机构（个人）",
+        "projects": [
+          {
+            "projectId": "p-team",
+            "projectName": "默认项目",
+            "projectType": 2
+          },
+          {
+            "projectId": "p-own",
+            "projectName": "个人",
+            "projectType": "1"
+          }
+        ]
+      },
+      {
+        "organizationId": "org-t",
+        "organizationName": "团队",
+        "projects": [
+          {
+            "projectId": "p-t",
+            "projectName": "团队项目",
+            "projectType": "2"
+          }
+        ]
+      }
+    ]
+  },
+  "tokens": {
+    "teamZaiCreated": {
+      "input": {
+        "family": "zai",
+        "team": {
+          "organizationId": "org-t",
+          "projectId": "p-t"
+        },
+        "keys": [
+          {
+            "name": "zcode-team-api-key",
+            "apiKey": "key-wrong-type",
+            "keyType": 1
+          },
+          {
+            "name": "zcode-api-key",
+            "apiKey": "key-personal"
+          }
+        ]
+      },
+      "origin": "https://api.example.com",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/biz/customer/getCustomerInfo",
+          "headers": {
+            "authorization": "jwt-zai",
+            "content-type": "application/json"
+          },
+          "body": null
+        },
+        {
+          "method": "GET",
+          "path": "/api/biz/v1/organization/org-t/projects/p-t/api_keys",
+          "headers": {
+            "authorization": "jwt-zai",
+            "bigmodel-organization": "org-t",
+            "bigmodel-project": "p-t",
+            "content-type": "application/json"
+          },
+          "body": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-t/projects/p-t/api_keys",
+          "headers": {
+            "authorization": "jwt-zai",
+            "bigmodel-organization": "org-t",
+            "bigmodel-project": "p-t",
+            "content-type": "application/json"
+          },
+          "body": {
+            "name": "zcode-team-api-key",
+            "keyType": 2,
+            "usageScene": 1
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-t/projects/p-t/api_keys/key-new/access_tokens",
+          "headers": {
+            "authorization": "Bearer jwt-zai",
+            "content-type": "application/json"
+          },
+          "body": {
+            "clientType": "zcode",
+            "clientVersion": "0.0.0-dev"
+          }
+        }
+      ],
+      "saved": [
+        [
+          "project-key-location:v1:%5B%22https%3A%2F%2Fapi.example.com%22%2C%22zai%22%2C%22u-1%22%2C%7B%22organizationId%22%3A%22org-t%22%2C%22projectId%22%3A%22p-t%22%7D%2C1%2Cnull%5D",
+          "{\"organizationId\":\"org-t\",\"projectId\":\"p-t\",\"apiKeyId\":\"key-new\"}"
+        ]
+      ],
+      "material": {
+        "token": "pat-1",
+        "organizationId": "org-t",
+        "projectId": "p-t",
+        "apiKeyId": "key-new"
+      }
+    },
+    "teamBigmodelReused": {
+      "input": {
+        "family": "bigmodel",
+        "team": {
+          "organizationId": "org-t",
+          "projectId": "p-t"
+        },
+        "keys": [
+          {
+            "name": "zcode-team-api-key",
+            "apiKey": " key-team ",
+            "keyType": 2
+          }
+        ]
+      },
+      "origin": "https://big.example.com",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/biz/customer/getCustomerInfo",
+          "headers": {
+            "authorization": "at-big",
+            "content-type": "application/json"
+          },
+          "body": null
+        },
+        {
+          "method": "GET",
+          "path": "/api/biz/v1/organization/org-t/projects/p-t/api_keys",
+          "headers": {
+            "authorization": "at-big",
+            "bigmodel-organization": "org-t",
+            "bigmodel-project": "p-t",
+            "content-type": "application/json"
+          },
+          "body": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-t/projects/p-t/api_keys/key-team/access_tokens",
+          "headers": {
+            "authorization": "Bearer at-big",
+            "content-type": "application/json"
+          },
+          "body": {
+            "clientType": "zcode",
+            "clientVersion": "0.0.0-dev"
+          }
+        }
+      ],
+      "saved": [
+        [
+          "project-key-location:v1:%5B%22https%3A%2F%2Fbig.example.com%22%2C%22bigmodel%22%2C%22u-1%22%2C%7B%22organizationId%22%3A%22org-t%22%2C%22projectId%22%3A%22p-t%22%7D%2C1%2Cnull%5D",
+          "{\"organizationId\":\"org-t\",\"projectId\":\"p-t\",\"apiKeyId\":\"key-team\"}"
+        ]
+      ],
+      "material": {
+        "token": "pat-1",
+        "organizationId": "org-t",
+        "projectId": "p-t",
+        "apiKeyId": "key-team"
+      }
+    },
+    "personalZaiNonTeam": {
+      "input": {
+        "family": "zai",
+        "keys": []
+      },
+      "origin": "https://api.example.com",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/biz/customer/getCustomerInfo",
+          "headers": {
+            "authorization": "jwt-zai",
+            "content-type": "application/json"
+          },
+          "body": null
+        },
+        {
+          "method": "GET",
+          "path": "/api/biz/v1/organization/org-1/projects/p-own/api_keys",
+          "headers": {
+            "authorization": "Bearer jwt-zai",
+            "content-type": "application/json"
+          },
+          "body": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-1/projects/p-own/api_keys",
+          "headers": {
+            "authorization": "Bearer jwt-zai",
+            "content-type": "application/json"
+          },
+          "body": {
+            "name": "zcode-api-key",
+            "usageScene": 1
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-1/projects/p-own/api_keys/key-new/access_tokens",
+          "headers": {
+            "authorization": "Bearer jwt-zai",
+            "content-type": "application/json"
+          },
+          "body": {
+            "clientType": "zcode",
+            "clientVersion": "0.0.0-dev"
+          }
+        }
+      ],
+      "saved": [
+        [
+          "project-key-location:v1:%5B%22https%3A%2F%2Fapi.example.com%22%2C%22zai%22%2C%22u-1%22%2Cnull%2C1%2C%22non-team%22%5D",
+          "{\"organizationId\":\"org-1\",\"projectId\":\"p-own\",\"apiKeyId\":\"key-new\"}"
+        ]
+      ],
+      "material": {
+        "token": "pat-1",
+        "organizationId": "org-1",
+        "projectId": "p-own",
+        "apiKeyId": "key-new"
+      }
+    },
+    "personalBigmodelNonTeam": {
+      "input": {
+        "family": "bigmodel",
+        "keys": [
+          {
+            "name": "zcode-api-key",
+            "apiKey": "key-own"
+          }
+        ]
+      },
+      "origin": "https://big.example.com",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/biz/customer/getCustomerInfo",
+          "headers": {
+            "authorization": "at-big",
+            "content-type": "application/json"
+          },
+          "body": null
+        },
+        {
+          "method": "GET",
+          "path": "/api/biz/v1/organization/org-1/projects/p-own/api_keys",
+          "headers": {
+            "authorization": "at-big",
+            "content-type": "application/json"
+          },
+          "body": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-1/projects/p-own/api_keys/key-own/access_tokens",
+          "headers": {
+            "authorization": "Bearer at-big",
+            "content-type": "application/json"
+          },
+          "body": {
+            "clientType": "zcode",
+            "clientVersion": "0.0.0-dev"
+          }
+        }
+      ],
+      "saved": [
+        [
+          "project-key-location:v1:%5B%22https%3A%2F%2Fbig.example.com%22%2C%22bigmodel%22%2C%22u-1%22%2Cnull%2C1%2C%22non-team%22%5D",
+          "{\"organizationId\":\"org-1\",\"projectId\":\"p-own\",\"apiKeyId\":\"key-own\"}"
+        ]
+      ],
+      "material": {
+        "token": "pat-1",
+        "organizationId": "org-1",
+        "projectId": "p-own",
+        "apiKeyId": "key-own"
+      }
+    }
+  },
+  "entitlements": {
+    "available": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "hasSubscription": true,
+              "status": "EFFECTIVE",
+              "memberGrantStatus": "VALID",
+              "productId": "prod-1"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "unassigned": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "hasSubscription": true,
+              "status": "EFFECTIVE",
+              "memberGrantStatus": "UNASSIGNED",
+              "productId": "prod-1"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "expired": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "hasSubscription": true,
+              "status": "EXPIRED",
+              "memberGrantStatus": "VALID"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "noSubscription": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "hasSubscription": false
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "newStatus": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "hasSubscription": true,
+              "status": "PAUSED",
+              "memberGrantStatus": "VALID"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "effectiveNullGrant": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "hasSubscription": true,
+              "status": "EFFECTIVE",
+              "memberGrantStatus": null,
+              "productId": "prod-1"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "badField": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "hasSubscription": true,
+              "status": 1
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "missingHas": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "status": "EFFECTIVE",
+              "memberGrantStatus": "VALID"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "envelopeFailed": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": 500,
+            "data": {
+              "hasSubscription": true,
+              "status": "EFFECTIVE",
+              "memberGrantStatus": "VALID",
+              "productId": "prod-1"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "envelopeSuccessFalse": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "success": false,
+            "data": {
+              "hasSubscription": true,
+              "status": "EFFECTIVE",
+              "memberGrantStatus": "VALID",
+              "productId": "prod-1"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "envelopeStringCode": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "code": "200",
+            "data": {
+              "hasSubscription": true,
+              "status": "EFFECTIVE",
+              "memberGrantStatus": "VALID",
+              "productId": "prod-1"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "envelopeNoCode": {
+      "script": {
+        "detail": {
+          "status": 200,
+          "body": {
+            "data": {
+              "hasSubscription": true,
+              "status": "EFFECTIVE",
+              "memberGrantStatus": "VALID",
+              "productId": "prod-1"
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "detail401": {
+      "script": {
+        "detail": {
+          "status": 401,
+          "body": {
+            "code": 401
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "detail403": {
+      "script": {
+        "detail": {
+          "status": 403,
+          "body": {}
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "detail500": {
+      "script": {
+        "detail": {
+          "status": 500,
+          "body": {}
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "detail404": {
+      "script": {
+        "detail": {
+          "status": 404,
+          "body": {}
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "Bearer jwt-zai",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          },
+          {
+            "method": "GET",
+            "path": "/api/biz/team/subscribe/product/querySubscribeDetail",
+            "headers": {
+              "authorization": "at-big",
+              "bigmodel-organization": "org-t",
+              "bigmodel-project": "p-t"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "customer401": {
+      "script": {
+        "customer": {
+          "status": 401,
+          "body": {}
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "customer403": {
+      "script": {
+        "customer": {
+          "status": 403,
+          "body": {}
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "customerFailedEnvelope": {
+      "script": {
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 1001,
+            "data": null
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "customerStringCode": {
+      "script": {
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": "200",
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-t ",
+                  "projects": [
+                    {
+                      "projectId": "p-t",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "customerNoOrganizations": {
+      "script": {
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 0,
+            "data": {}
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "customerNotTeamProject": {
+      "script": {
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": "org-t",
+                  "projects": [
+                    {
+                      "projectId": "p-t",
+                      "projectType": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "customerOtherOrganization": {
+      "script": {
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": "org-x",
+                  "projects": [
+                    {
+                      "projectId": "p-t",
+                      "projectType": "2"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      }
+    },
+    "customerBadOrganizationId": {
+      "script": {
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": 7,
+                  "projects": []
+                }
+              ]
+            }
+          }
+        }
+      },
+      "zai": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "//api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "jwt-zai",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "availability": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/customer/getCustomerInfo",
+            "headers": {
+              "authorization": "at-big",
+              "content-type": "application/json"
+            },
+            "body": null
+          }
+        ]
+      }
+    }
+  },
+  "detailReasons": {
+    "available": {
+      "kind": "available",
+      "reason": null
+    },
+    "unassigned": {
+      "kind": "unavailable",
+      "reason": "unassigned"
+    },
+    "expired": {
+      "kind": "unavailable",
+      "reason": "expired"
+    },
+    "noSubscription": {
+      "kind": "unavailable",
+      "reason": null
+    },
+    "newStatus": {
+      "kind": "unknown",
+      "reason": null
+    },
+    "effectiveNullGrant": {
+      "kind": "unknown",
+      "reason": null
+    },
+    "badField": {
+      "kind": "unknown",
+      "reason": null
+    },
+    "missingHas": {
+      "kind": "unknown",
+      "reason": null
+    },
+    "envelopeFailed": {
+      "kind": "unknown",
+      "reason": null
+    },
+    "envelopeSuccessFalse": {
+      "kind": "unknown",
+      "reason": null
+    },
+    "envelopeStringCode": {
+      "kind": "unknown",
+      "reason": null
+    },
+    "envelopeNoCode": {
+      "kind": "available",
+      "reason": null
+    }
+  },
+  "teamLists": {
+    "completeContext": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true,
+                  "organizationId": "org-a",
+                  "organizationName": "团队 A",
+                  "projectId": "p-a1"
+                },
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-2",
+                  "subscribed": false,
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projectId": "p-b"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 500,
+          "body": {}
+        }
+      },
+      "rows": [
+        {
+          "productId": "prod-1",
+          "organizationId": "org-a",
+          "projectId": "p-a1",
+          "name": "团队 A"
+        }
+      ],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "completeContextZai": {
+      "family": "zai",
+      "script": {
+        "family": "zai",
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-z",
+                  "subscribed": true,
+                  "organizationId": "org-a",
+                  "organizationName": "团队 A",
+                  "projectId": "p-a1"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "productId": "prod-z",
+          "organizationId": "org-a",
+          "projectId": "p-a1",
+          "name": "团队 A"
+        }
+      ],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "jwt-zai",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "completeContextWithoutName": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true,
+                  "organizationId": "org-a",
+                  "projectId": "p-a1"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "organizationOnly": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true,
+                  "organizationId": "org-a"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "productId": "prod-1",
+          "organizationId": "org-a",
+          "projectId": "p-a1",
+          "name": "团队 A"
+        },
+        {
+          "productId": "prod-1",
+          "organizationId": "org-a",
+          "projectId": "p-a2",
+          "name": "团队 A"
+        }
+      ],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "organizationOnlyZai": {
+      "family": "zai",
+      "script": {
+        "family": "zai",
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true,
+                  "organizationId": "org-a"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "productId": "prod-1",
+          "organizationId": "org-a",
+          "projectId": "p-a1",
+          "name": "团队 A"
+        },
+        {
+          "productId": "prod-1",
+          "organizationId": "org-a",
+          "projectId": "p-a2",
+          "name": "团队 A"
+        }
+      ],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "jwt-zai",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "nameFromProduct": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true,
+                  "organizationId": "org-c",
+                  "organizationName": "产品上的名字"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "productId": "prod-1",
+          "organizationId": "org-c",
+          "projectId": "p-c",
+          "name": "产品上的名字"
+        }
+      ],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "noSubscribedFallback": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "LITE",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "QUARTERLY",
+                  "productId": "lite",
+                  "subscribed": false
+                },
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "ONE_TIME",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "pro-once",
+                  "subscribed": false
+                },
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "pro",
+                  "subscribed": null
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "productId": "pro-once",
+          "organizationId": "org-a",
+          "projectId": "p-a1",
+          "name": "团队 A"
+        },
+        {
+          "productId": "pro-once",
+          "organizationId": "org-a",
+          "projectId": "p-a2",
+          "name": "团队 A"
+        },
+        {
+          "productId": "pro-once",
+          "organizationId": "org-b",
+          "projectId": "p-b",
+          "name": "团队 B"
+        },
+        {
+          "productId": "pro-once",
+          "organizationId": "org-c",
+          "projectId": "p-c",
+          "name": "团队 A"
+        }
+      ],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "noSubscribedNoTeamProjects": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "pro",
+                  "subscribed": false
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": "org-a",
+                  "projects": [
+                    {
+                      "projectId": "p-own",
+                      "projectType": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "twoProductsOneProject": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true,
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projectId": "p-b"
+                },
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-2",
+                  "subscribed": true,
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projectId": "p-b"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "productId": "prod-1",
+          "organizationId": "org-b",
+          "projectId": "p-b",
+          "name": "团队 B"
+        },
+        {
+          "productId": "prod-2",
+          "organizationId": "org-b",
+          "projectId": "p-b",
+          "name": "团队 B"
+        }
+      ],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "blankProductId": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "  ",
+                  "subscribed": true,
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projectId": "p-b"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "emptyProductList": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": []
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "pricingCode0": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 0,
+            "data": {
+              "productList": []
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": null,
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "pricingSuccessFalse": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "success": false,
+            "data": {
+              "productList": []
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": null,
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "pricingNoData": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": null,
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "pricing500": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 500,
+          "body": {}
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": null,
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "pricing401": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 401,
+          "body": {
+            "code": 401
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": null,
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "customerNeededFails": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true,
+                  "organizationId": "org-a"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 500,
+          "body": {}
+        }
+      },
+      "rows": null,
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "customerNoEnvelope": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true,
+                  "organizationId": "org-b"
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 1001,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": " org-a ",
+                  "organizationName": " 团队 A ",
+                  "projects": [
+                    {
+                      "projectId": "p-a1",
+                      "projectName": "一",
+                      "projectType": 2
+                    },
+                    {
+                      "projectId": " p-a2 ",
+                      "projectName": "二",
+                      "projectType": " 2 "
+                    },
+                    {
+                      "projectId": "p-own",
+                      "projectName": "个人",
+                      "projectType": "1"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-b",
+                  "organizationName": "团队 B",
+                  "projects": [
+                    {
+                      "projectId": "p-b",
+                      "projectType": "2"
+                    }
+                  ]
+                },
+                {
+                  "organizationId": "org-c",
+                  "organizationName": null,
+                  "projects": [
+                    {
+                      "projectId": "p-c",
+                      "projectType": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "productId": "prod-1",
+          "organizationId": "org-b",
+          "projectId": "p-b",
+          "name": "团队 B"
+        }
+      ],
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    },
+    "customerBadOrganizationId": {
+      "family": "bigmodel",
+      "script": {
+        "pricing": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "productList": [
+                {
+                  "tier": "PRO",
+                  "subscribeMode": "CONTINUOUS",
+                  "subscribePeriod": "MONTHLY",
+                  "productId": "prod-1",
+                  "subscribed": true
+                }
+              ]
+            }
+          }
+        },
+        "customer": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "data": {
+              "organizations": [
+                {
+                  "organizationId": 7,
+                  "projects": []
+                }
+              ]
+            }
+          }
+        }
+      },
+      "rows": null,
+      "pricingRequest": {
+        "method": "GET",
+        "path": "/api/biz/subscription/enterprise/v2/pricing",
+        "headers": {
+          "authorization": "at-big",
+          "content-type": "application/json"
+        },
+        "body": null
+      }
+    }
+  }
+}

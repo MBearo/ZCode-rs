@@ -1,0 +1,2 @@
+- End git commit messages with:
+{{value}}

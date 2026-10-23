@@ -1,0 +1,1439 @@
+{
+  "source": [
+    {
+      "env": {},
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {
+        "ZCODE_ENV": " TEST "
+      },
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "test"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {
+        "ZCODE_ENV": "test",
+        "ZCODE_TEST_BASE_URL": "https://test.example.com/x"
+      },
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://test.example.com"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "test"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {
+        "ZCODE_BASE_URL": "https://zcode.example.com:8443/path"
+      },
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.example.com:8443"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {
+        "ZCODE_APP_VERSION": "3.4.5"
+      },
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/3.4.5"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "3.4.5"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {
+        "ZCODE_APP_VERSION": ""
+      },
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/unknown"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {
+        "ZCODE_APP_VERSION": " 3.4.5-beta.1 "
+      },
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/3.4.5-beta.1"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "3.4.5-beta.1"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {},
+      "appVersion": "版本",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/unknown"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {},
+      "appVersion": "",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/unknown"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {},
+      "appVersion": "0.1.52",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "unknown"
+        ],
+        [
+          "X-Client-Timezone",
+          "unknown"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {},
+      "appVersion": "0.1.52",
+      "locale": "de-DE-x-lvariant-euro",
+      "timeZone": "Asia/Tokyo é",
+      "platform": "darwin",
+      "arch": "arm64",
+      "release": "24.6.0",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "de-DE-x-lvariant-euro"
+        ],
+        [
+          "X-Client-Timezone",
+          "unknown"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "darwin-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "macos"
+        ],
+        [
+          "X-Os-Version",
+          "24.6.0"
+        ]
+      ]
+    },
+    {
+      "env": {},
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "win32",
+      "arch": "x64",
+      "release": "10.0.22631",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "win32-x64"
+        ],
+        [
+          "X-Os-Category",
+          "windows"
+        ],
+        [
+          "X-Os-Version",
+          "10.0.22631"
+        ]
+      ]
+    },
+    {
+      "env": {},
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "linux",
+      "arch": "arm64",
+      "release": "6.8.0-45-generic",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "linux-arm64"
+        ],
+        [
+          "X-Os-Category",
+          "linux"
+        ],
+        [
+          "X-Os-Version",
+          "6.8.0-45-generic"
+        ]
+      ]
+    },
+    {
+      "env": {},
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "linux",
+      "arch": "x64",
+      "release": " ",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "linux-x64"
+        ],
+        [
+          "X-Os-Category",
+          "linux"
+        ]
+      ]
+    },
+    {
+      "env": {},
+      "appVersion": "0.1.52",
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai",
+      "platform": "freebsd",
+      "arch": "x64",
+      "release": "14.1-RELEASE",
+      "headers": [
+        [
+          "HTTP-Referer",
+          "https://zcode.z.ai"
+        ],
+        [
+          "User-Agent",
+          "ZCode/0.1.52"
+        ],
+        [
+          "X-ZCode-App-Version",
+          "0.1.52"
+        ],
+        [
+          "X-Title",
+          "Z Code@cli"
+        ],
+        [
+          "X-Release-Channel",
+          "production"
+        ],
+        [
+          "X-Client-Language",
+          "en-US"
+        ],
+        [
+          "X-Client-Timezone",
+          "Asia/Shanghai"
+        ],
+        [
+          "X-ZCode-Agent",
+          "glm"
+        ],
+        [
+          "X-Platform",
+          "freebsd-x64"
+        ],
+        [
+          "X-Os-Category",
+          "linux"
+        ],
+        [
+          "X-Os-Version",
+          "14.1-RELEASE"
+        ]
+      ]
+    }
+  ],
+  "locales": [
+    {
+      "env": {},
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": ""
+      },
+      "locale": "und"
+    },
+    {
+      "env": {
+        "LANG": "C"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "POSIX"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "C.UTF-8"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "POSIX.UTF-8"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "en_US.UTF-8"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "zh_CN.UTF-8"
+      },
+      "locale": "zh-CN"
+    },
+    {
+      "env": {
+        "LANG": "zh_TW.UTF-8"
+      },
+      "locale": "zh-TW"
+    },
+    {
+      "env": {
+        "LANG": "ja_JP.UTF-8"
+      },
+      "locale": "ja-JP"
+    },
+    {
+      "env": {
+        "LANG": "ko_KR.UTF-8"
+      },
+      "locale": "ko-KR"
+    },
+    {
+      "env": {
+        "LANG": "de_DE.UTF-8"
+      },
+      "locale": "de-DE"
+    },
+    {
+      "env": {
+        "LANG": "fr_FR.ISO8859-1"
+      },
+      "locale": "fr-FR"
+    },
+    {
+      "env": {
+        "LANG": "pt_BR"
+      },
+      "locale": "pt-BR"
+    },
+    {
+      "env": {
+        "LANG": "en_GB.UTF-8"
+      },
+      "locale": "en-GB"
+    },
+    {
+      "env": {
+        "LANG": "zh_CN.GB18030"
+      },
+      "locale": "zh-CN"
+    },
+    {
+      "env": {
+        "LANG": "en"
+      },
+      "locale": "en"
+    },
+    {
+      "env": {
+        "LANG": "en.UTF-8"
+      },
+      "locale": "en"
+    },
+    {
+      "env": {
+        "LANG": "zh_Hans_CN.UTF-8"
+      },
+      "locale": "zh-Hans-CN"
+    },
+    {
+      "env": {
+        "LANG": "zh_hant_tw"
+      },
+      "locale": "zh-Hant-TW"
+    },
+    {
+      "env": {
+        "LANG": "ZH_cn.utf8"
+      },
+      "locale": "zh-CN"
+    },
+    {
+      "env": {
+        "LANG": "EN_us"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "en-us"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "es_419"
+      },
+      "locale": "es-419"
+    },
+    {
+      "env": {
+        "LANG": "en_001"
+      },
+      "locale": "en-001"
+    },
+    {
+      "env": {
+        "LANG": "en_840"
+      },
+      "locale": "en-840"
+    },
+    {
+      "env": {
+        "LANG": "xx_YY.UTF-8"
+      },
+      "locale": "xx-YY"
+    },
+    {
+      "env": {
+        "LANG": "fil_PH"
+      },
+      "locale": "fil-PH"
+    },
+    {
+      "env": {
+        "LANG": "yue_HK"
+      },
+      "locale": "yue-HK"
+    },
+    {
+      "env": {
+        "LANG": "nb_NO"
+      },
+      "locale": "nb-NO"
+    },
+    {
+      "env": {
+        "LANG": "no_NO"
+      },
+      "locale": "no-NO"
+    },
+    {
+      "env": {
+        "LANG": "iw_IL"
+      },
+      "locale": "he-IL"
+    },
+    {
+      "env": {
+        "LANG": "in_ID"
+      },
+      "locale": "id-ID"
+    },
+    {
+      "env": {
+        "LANG": "ji"
+      },
+      "locale": "yi"
+    },
+    {
+      "env": {
+        "LANG": "jw_ID"
+      },
+      "locale": "jv-ID"
+    },
+    {
+      "env": {
+        "LANG": "mo_MD"
+      },
+      "locale": "ro-MD"
+    },
+    {
+      "env": {
+        "LANG": "sh_RS"
+      },
+      "locale": "sh-RS"
+    },
+    {
+      "env": {
+        "LANG": "de_DE@euro"
+      },
+      "locale": "de-DE-x-lvariant-euro"
+    },
+    {
+      "env": {
+        "LANG": "de_DE.UTF-8@euro"
+      },
+      "locale": "de-DE-x-lvariant-euro"
+    },
+    {
+      "env": {
+        "LANG": "en_us.utf8@euro"
+      },
+      "locale": "en-US-x-lvariant-euro"
+    },
+    {
+      "env": {
+        "LANG": "sr_RS@latin"
+      },
+      "locale": "sr-RS-latin"
+    },
+    {
+      "env": {
+        "LANG": "ca_ES@valencia"
+      },
+      "locale": "ca-ES-valencia"
+    },
+    {
+      "env": {
+        "LANG": "zh_CN@pinyin"
+      },
+      "locale": "zh-CN-pinyin"
+    },
+    {
+      "env": {
+        "LANG": "no@nynorsk"
+      },
+      "locale": "no-x-lvariant-ny"
+    },
+    {
+      "env": {
+        "LANG": "en_US@x"
+      },
+      "locale": "en-US-x-lvariant-x"
+    },
+    {
+      "env": {
+        "LANG": "en_US@posix"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "de_DE@posix"
+      },
+      "locale": "de-DE-u-va-posix"
+    },
+    {
+      "env": {
+        "LANG": "en_US_POSIX"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "en__POSIX"
+      },
+      "locale": "en-u-va-posix"
+    },
+    {
+      "env": {
+        "LANG": "de_DE_1901"
+      },
+      "locale": "de-DE-1901"
+    },
+    {
+      "env": {
+        "LANG": "en_Latn"
+      },
+      "locale": "en-Latn"
+    },
+    {
+      "env": {
+        "LANG": "en_Latn_US_FOO"
+      },
+      "locale": "en-Latn-US-x-lvariant-foo"
+    },
+    {
+      "env": {
+        "LANG": "ab_CD_EFGHI_JK"
+      },
+      "locale": "ab-CD-efghi-x-lvariant-jk"
+    },
+    {
+      "env": {
+        "LANG": "aa_BB_cccc"
+      },
+      "locale": "aa-BB-x-lvariant-cccc"
+    },
+    {
+      "env": {
+        "LANG": "en_U"
+      },
+      "locale": "en-x-lvariant-u"
+    },
+    {
+      "env": {
+        "LANG": "en_US_x"
+      },
+      "locale": "en-US-x-lvariant-x"
+    },
+    {
+      "env": {
+        "LANG": " en_US"
+      },
+      "locale": "und-US"
+    },
+    {
+      "env": {
+        "LANG": "_US"
+      },
+      "locale": "und-US"
+    },
+    {
+      "env": {
+        "LANG": "en_"
+      },
+      "locale": "en"
+    },
+    {
+      "env": {
+        "LANG": "root"
+      },
+      "locale": "und"
+    },
+    {
+      "env": {
+        "LANG": "abcdefghi"
+      },
+      "locale": "und"
+    },
+    {
+      "env": {
+        "LANG": "e"
+      },
+      "locale": "und"
+    },
+    {
+      "env": {
+        "LANG": "c"
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LANG": "posix"
+      },
+      "locale": "posix"
+    },
+    {
+      "env": {
+        "LANG": "en_US.UTF-8 "
+      },
+      "locale": "en-US"
+    },
+    {
+      "env": {
+        "LC_ALL": "de_DE.UTF-8",
+        "LC_MESSAGES": "ja_JP.UTF-8",
+        "LANG": "fr_FR.UTF-8"
+      },
+      "locale": "de-DE"
+    },
+    {
+      "env": {
+        "LC_MESSAGES": "ja_JP",
+        "LANG": "fr_FR"
+      },
+      "locale": "ja-JP"
+    },
+    {
+      "env": {
+        "LC_ALL": "",
+        "LANG": "fr_FR"
+      },
+      "locale": "und"
+    },
+    {
+      "env": {
+        "LC_MESSAGES": "",
+        "LANG": "fr_FR"
+      },
+      "locale": "und"
+    },
+    {
+      "env": {
+        "LC_CTYPE": "ja_JP",
+        "LANG": "fr_FR"
+      },
+      "locale": "fr-FR"
+    },
+    {
+      "env": {
+        "LANGUAGE": "ja",
+        "LANG": "fr_FR"
+      },
+      "locale": "fr-FR"
+    }
+  ],
+  "timeZones": [
+    {
+      "tz": "",
+      "timeZone": "Etc/Unknown"
+    },
+    {
+      "tz": "UTC",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/UTC",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "UCT",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/UCT",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Universal",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/Universal",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Zulu",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/Zulu",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "GMT0",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "GMT+0",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "GMT-0",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/GMT",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/GMT0",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/GMT+0",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/GMT-0",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Greenwich",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "Etc/Greenwich",
+      "timeZone": "UTC"
+    },
+    {
+      "tz": "GMT",
+      "timeZone": "+00:00"
+    },
+    {
+      "tz": "Asia/Shanghai",
+      "timeZone": "Asia/Shanghai"
+    },
+    {
+      "tz": ":Asia/Shanghai",
+      "timeZone": "Asia/Shanghai"
+    },
+    {
+      "tz": "/usr/share/zoneinfo/Asia/Tokyo",
+      "timeZone": null
+    },
+    {
+      "tz": ":/usr/share/zoneinfo/Asia/Tokyo",
+      "timeZone": null
+    },
+    {
+      "tz": "Asia/Shanghai ",
+      "timeZone": null
+    },
+    {
+      "tz": "Europe/London",
+      "timeZone": "Europe/London"
+    },
+    {
+      "tz": "America/New_York",
+      "timeZone": "America/New_York"
+    },
+    {
+      "tz": "Etc/GMT-14",
+      "timeZone": "Etc/GMT-14"
+    },
+    {
+      "tz": "America/Buenos_Aires",
+      "timeZone": "America/Buenos_Aires"
+    },
+    {
+      "tz": "Europe/Kiev",
+      "timeZone": "Europe/Kiev"
+    },
+    {
+      "tz": "Asia/Calcutta",
+      "timeZone": "Asia/Calcutta"
+    },
+    {
+      "tz": "Asia/Kolkata",
+      "timeZone": "Asia/Calcutta"
+    },
+    {
+      "tz": "Asia/Ho_Chi_Minh",
+      "timeZone": "Asia/Saigon"
+    },
+    {
+      "tz": "Asia/Kathmandu",
+      "timeZone": "Asia/Katmandu"
+    },
+    {
+      "tz": "Asia/Yangon",
+      "timeZone": "Asia/Rangoon"
+    },
+    {
+      "tz": "Europe/Kyiv",
+      "timeZone": "Europe/Kiev"
+    },
+    {
+      "tz": "America/Nuuk",
+      "timeZone": "America/Godthab"
+    },
+    {
+      "tz": "Atlantic/Faroe",
+      "timeZone": "Atlantic/Faeroe"
+    },
+    {
+      "tz": "Pacific/Chuuk",
+      "timeZone": "Pacific/Truk"
+    },
+    {
+      "tz": "Pacific/Pohnpei",
+      "timeZone": "Pacific/Ponape"
+    },
+    {
+      "tz": "Pacific/Kanton",
+      "timeZone": "Pacific/Enderbury"
+    },
+    {
+      "tz": "America/Atikokan",
+      "timeZone": "America/Coral_Harbour"
+    },
+    {
+      "tz": "America/Argentina/Buenos_Aires",
+      "timeZone": "America/Buenos_Aires"
+    },
+    {
+      "tz": "America/Indiana/Indianapolis",
+      "timeZone": "America/Indianapolis"
+    },
+    {
+      "tz": "America/Kentucky/Louisville",
+      "timeZone": "America/Louisville"
+    },
+    {
+      "tz": "Africa/Asmara",
+      "timeZone": "Africa/Asmera"
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+name: Rust CLI packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/rust-cli/**
+      - scripts/rust-cli/**
+      - .github/workflows/rust-cli-release.yml
+      - mise.toml
+      - LICENSE
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish this version to npm (requires configured trusted publishers)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-cli-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.metadata.outputs.matrix }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: mise.toml
+          package-manager-cache: false
+      - id: metadata
+        name: Resolve version and platforms
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFile } from "node:fs/promises";
+          import { platforms, verifyVersion } from "./scripts/rust-cli/npm/package.mjs";
+          await appendFile(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify({include:platforms})}\nversion=${await verifyVersion()}\n`);
+          NODE
+      - name: Test npm packaging
+        run: node --test scripts/rust-cli/npm/package.test.mjs scripts/rust-cli/npm/smoke.test.mjs scripts/rust-cli/npm/toolchain.test.mjs
+      - name: Pack entry
+        run: node scripts/rust-cli/npm/package.mjs entry - dist/rust-cli-npm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-entry
+          path: dist/rust-cli-npm/*.tgz
+          if-no-files-found: error
+          retention-days: 3
+
+  build:
+    needs: prepare
+    name: Build ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: never
+      CARGO_INCREMENTAL: "0"
+      ZCODE_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: mise.toml
+          package-manager-cache: false
+      # 内嵌的 ugrep 是 C++：linux-gnu 静态链接 libstdc++（要 g++ 与 libstdc++.a），Windows 的 SIMD 文件用 MSVC 的
+      # /arch:AVX512（VS 2019 16.3 起）。缺了在 cargo 之前报错。
+      - name: Install g++ and the static libstdc++
+        if: matrix.os == 'linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends g++
+      - name: Check the C/C++ toolchain for the bundled search tools
+        run: node scripts/rust-cli/npm/toolchain.mjs
+      # cargo 产物在三个平台上都叫 zcode-rs（Windows zcode-rs.exe）；打包时 Windows 复制成平台包里的 bin/zcode.exe，
+      # 其余平台是 bin/zcode-rs（名字只在启动器 bin/zcode.cjs 定义），进程列表里显示它。用户敲的命令仍是 npm 包 bin 的 zcode。
+      - name: Compile release
+        working-directory: packages/rust-cli
+        run: cargo build --release --locked -p rust-cli --bin zcode-rs --target "${{ matrix.target }}"
+      - name: Pack native binary
+        env:
+          TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.id }}
+          EXE: ${{ matrix.os == 'win32' && '.exe' || '' }}
+        run: node scripts/rust-cli/npm/package.mjs "$PLATFORM" "packages/rust-cli/target/$TARGET/release/zcode-rs$EXE" dist/rust-cli-npm
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-entry
+          path: dist/rust-cli-npm
+      # 安装打好的包后先跑 --version，再在临时 HOME 下运行 `zcode -p -c x`：真正打开会话库、跑迁移，之后核对
+      # schema_migration 的校验和与 Node 的账本相同（Windows 的 CRLF 检出曾让它们不同，--version 查不出来）。
+      # 再核对平台包里有 bin/zcode-rs（Windows bin/zcode.exe）与 THIRD-PARTY-NOTICES.txt，内嵌的 rg / ugrep / bfs（Windows 没有 bfs）能按
+      # ARGV0 运行，Linux 上不依赖 libstdc++.so。
+      - name: Install packed CLI, open the session store and check migrations and bundled tools
+        run: node scripts/rust-cli/npm/smoke.mjs dist/rust-cli-npm "${{ matrix.id }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.id }}
+          path: dist/rust-cli-npm/mbearo-zcode-${{ matrix.id }}-*.tgz
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: mise.toml
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-*
+          merge-multiple: true
+          path: dist/rust-cli-npm
+      - name: Publish platform packages and entry via npm OIDC
+        run: node scripts/rust-cli/npm/publish.mjs dist/rust-cli-npm

@@ -1,0 +1,38 @@
+# ripgrep 15.2.0 的命令行（上游 crates/core），作为库供 zcode 按 argv0 分派（docs/specs/rust-cli/embedded-search.md §5）。
+# 第三方代码：不是 workspace 成员（根 Cargo.toml 的 workspace.exclude），不受本工程的 lints 与 clippy.toml 约束；
+# ripgrep/ 下的文件由 scripts/rust-cli/vendor/fetch.mjs 按 vendor/sources.json 生成，不手改。
+# 依赖与上游 Cargo.toml 相同（去掉只在 musl 上用的 tikv-jemallocator），版本由 workspace 的 Cargo.lock 决定。
+[package]
+name = "rust-cli-vendor-rg"
+# `rg --version` 用 CARGO_PKG_VERSION：与上游版本相同。
+version = "15.2.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Unlicense OR MIT"
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+
+[lib]
+path = "ripgrep/crates/core/main.rs"
+doctest = false
+test = false
+
+[dependencies]
+anyhow = "1.0.75"
+bstr = "1.7.0"
+grep = "0.4.1"
+ignore = "0.4.29"
+lexopt = "0.3.0"
+log = "0.4.5"
+serde_json = "1.0.23"
+termcolor = "1.4.0"
+textwrap = { version = "0.16.0", default-features = false }
+
+# 上游的 `pcre2` 特性（源码里按 `feature = "pcre2"` 判断），缺省打开：内嵌的 rg 带 PCRE2（embedded-search.md §5）。
+# PCRE2 来自 pcre2-sys 自带的源码，静态链接（.cargo/config.toml 的 PCRE2_SYS_STATIC）。
+[features]
+default = ["pcre2"]
+pcre2 = ["grep/pcre2"]

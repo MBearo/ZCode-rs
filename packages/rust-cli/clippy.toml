@@ -1,0 +1,149 @@
+# rust-cli 的 clippy 配置（docs/specs/rust-cli/README.md §4）。clippy 从 crate 目录向上找到最近的
+# 一个 clippy.toml，所以本文件替代仓库根的 clippy.toml：根规则全部保留，另加各类 IO 的禁令。
+#
+# 每条禁令按路径前缀归入一个 IO 类别（文件、进程、环境、网络、时间、ID、随机），类别与可以豁免它的入口 crate 登记在
+# scripts/rust-cli/boundaries/policy.mjs。入口 crate 在具体函数上写
+# `#[expect(clippy::disallowed_methods, reason = "…")]`；scripts/rust-cli/check-boundaries.mjs 找出每个豁免覆盖的
+# 被禁调用，核对这个 crate 是不是该类别的入口。fs 只对文件类在 crate 级放开：crates/fs/clippy.toml 是本文件去掉
+# 文件类的禁令（脚本逐条比对，改这里时同步改它）。
+#
+# `allow-invalid = true` 只给按平台（std::os::unix / windows）或按 tokio 特性（fs / net / process，由各 crate
+# 自己声明）才存在的路径：单独检查一个没有这些路径的 crate 时不报路径无效。脚本拒绝别处使用它。
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true
+
+# tokio 的锁 guard 跨 .await 持有时，其他任务会一直等待；std 的 guard 由 await_holding_lock 覆盖。
+await-holding-invalid-types = [
+  "tokio::sync::MutexGuard",
+  "tokio::sync::OwnedMutexGuard",
+  "tokio::sync::RwLockReadGuard",
+  "tokio::sync::RwLockWriteGuard",
+]
+
+disallowed-methods = [
+  # 进程：只经 rust-cli-proc。
+  { path = "std::process::Command::new", reason = "use rust_cli_proc::std_command (docs/specs/rust-cli/README.md §4)" },
+  { path = "tokio::process::Command::new", reason = "use rust_cli_proc::command (docs/specs/rust-cli/README.md §4)", allow-invalid = true },
+  # 环境：进程环境、cwd、参数与本机目录只在入口 crate 读，往下显式传。
+  { path = "std::env::var", reason = "read the env snapshot passed down from the entry crate (§4)" },
+  { path = "std::env::var_os", reason = "read the env snapshot passed down from the entry crate (§4)" },
+  { path = "std::env::vars", reason = "read the env snapshot passed down from the entry crate (§4)" },
+  { path = "std::env::vars_os", reason = "read the env snapshot passed down from the entry crate (§4)" },
+  { path = "std::env::current_dir", reason = "use an explicit base directory or EnvPath (§4)" },
+  { path = "std::env::set_current_dir", reason = "the process cwd is not workspace state (§6 rule 11)" },
+  { path = "std::env::home_dir", reason = "the entry crate resolves home once (rust_cli_paths::home_dir_with, §4)" },
+  { path = "std::env::temp_dir", reason = "the entry crate resolves the temp directory once (§4)" },
+  { path = "std::env::args", reason = "only the entry crate reads the process arguments (§4)" },
+  { path = "std::env::args_os", reason = "only the entry crate reads the process arguments (§4)" },
+  { path = "std::env::current_exe", reason = "only the entry crate reads process facts (§4)" },
+  # 改进程环境：EnvSnapshot 在入口捕获一次，别处改了快照就不准（F55，README §4）。
+  { path = "std::env::set_var", reason = "the process environment is captured once by the entry crate (§4)" },
+  { path = "std::env::remove_var", reason = "the process environment is captured once by the entry crate (§4)" },
+  # 文件：本机存储只经 rust-cli-fs；工作区文件经 Environment 端口（env-local）。
+  { path = "std::fs::read", reason = "local storage IO goes through rust-cli-fs; workspace files through the Environment port (§4)" },
+  { path = "std::fs::read_to_string", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::write", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::create_dir", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::create_dir_all", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::remove_file", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::remove_dir", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::remove_dir_all", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::rename", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::copy", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::hard_link", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::metadata", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::symlink_metadata", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::read_dir", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::read_link", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::canonicalize", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::set_permissions", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::exists", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::File::open", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::File::create", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::File::create_new", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::OpenOptions::open", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::fs::DirBuilder::create", reason = "local storage IO goes through rust-cli-fs (§4)" },
+  { path = "std::os::unix::fs::symlink", reason = "creating symlinks is file IO; go through rust-cli-fs or the Environment port (§4)", allow-invalid = true },
+  { path = "std::os::windows::fs::symlink_file", reason = "creating symlinks is file IO; go through rust-cli-fs or the Environment port (§4)", allow-invalid = true },
+  { path = "std::os::windows::fs::symlink_dir", reason = "creating symlinks is file IO; go through rust-cli-fs or the Environment port (§4)", allow-invalid = true },
+  # F55 补：旧名的建符号链接与改属主 / 根目录也是文件 IO。
+  { path = "std::fs::soft_link", reason = "creating symlinks is file IO; go through rust-cli-fs or the Environment port (§4)" },
+  { path = "std::os::unix::fs::chown", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "std::os::unix::fs::fchown", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "std::os::unix::fs::lchown", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "std::os::unix::fs::chroot", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "std::path::Path::exists", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "std::path::Path::try_exists", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "std::path::Path::is_file", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "std::path::Path::is_dir", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "std::path::Path::metadata", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "std::path::Path::symlink_metadata", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "std::path::Path::read_dir", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "std::path::Path::read_link", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "std::path::Path::canonicalize", reason = "touches the file system; use rust-cli-fs or the Environment port (§4)" },
+  { path = "tokio::fs::read", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::read_to_string", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::write", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::create_dir", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::create_dir_all", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::remove_file", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::remove_dir", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::remove_dir_all", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::rename", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::copy", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::hard_link", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::metadata", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::symlink_metadata", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::read_dir", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::read_link", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::canonicalize", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::set_permissions", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::try_exists", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::symlink", reason = "creating symlinks is file IO; go through rust-cli-fs or the Environment port (§4)", allow-invalid = true },
+  { path = "tokio::fs::symlink_file", reason = "creating symlinks is file IO; go through rust-cli-fs or the Environment port (§4)", allow-invalid = true },
+  { path = "tokio::fs::symlink_dir", reason = "creating symlinks is file IO; go through rust-cli-fs or the Environment port (§4)", allow-invalid = true },
+  { path = "tokio::fs::File::open", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::File::create", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::File::create_new", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::OpenOptions::open", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  { path = "tokio::fs::DirBuilder::create", reason = "local storage IO goes through rust-cli-fs (§4)", allow-invalid = true },
+  # 网络：HTTP 客户端、套接字与名字解析只在 rust-cli-net。
+  { path = "reqwest::Client::new", reason = "network egress goes through rust_cli_net::Egress (§4)" },
+  { path = "reqwest::Client::builder", reason = "network egress goes through rust_cli_net::Egress (§4)" },
+  { path = "std::net::TcpStream::connect", reason = "network egress goes through rust-cli-net (§4)" },
+  { path = "std::net::TcpStream::connect_timeout", reason = "network egress goes through rust-cli-net (§4)" },
+  { path = "std::net::TcpListener::bind", reason = "network listeners go through rust-cli-net (§4)" },
+  { path = "std::net::UdpSocket::bind", reason = "network egress goes through rust-cli-net (§4)" },
+  { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "name resolution is network IO; go through rust-cli-net (§4)" },
+  { path = "std::os::unix::net::UnixStream::connect", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixListener::bind", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram::bind", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram::unbound", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  # F55 补：按 SocketAddr 连接 / 监听的写法。
+  { path = "std::os::unix::net::UnixStream::connect_addr", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixListener::bind_addr", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram::bind_addr", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::TcpStream::connect", reason = "network egress goes through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::TcpListener::bind", reason = "network listeners go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UdpSocket::bind", reason = "network egress goes through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::TcpSocket::new_v4", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::TcpSocket::new_v6", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UnixStream::connect", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UnixListener::bind", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UnixDatagram::bind", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UnixDatagram::unbound", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::windows::named_pipe::ClientOptions::open", reason = "named pipes go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::windows::named_pipe::ServerOptions::create", reason = "named pipes go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::lookup_host", reason = "name resolution is network IO; go through rust-cli-net (§4)", allow-invalid = true },
+  # 时间：业务时间只经注入的 Clock（本机实现 node-store 的 SystemClock）。
+  { path = "std::time::SystemTime::now", reason = "take the time from the injected Clock (§4, §6 rule 12)" },
+  # F55 补：`SystemTime::elapsed` 内部读当前时间（`UNIX_EPOCH.elapsed()` 就是 now）。
+  { path = "std::time::SystemTime::elapsed", reason = "reads the current time; take the time from the injected Clock (§4, §6 rule 12)" },
+  # ID：随机 ID 只经注入的 Ids（本机实现 node-store 的 NodeIds）。
+  { path = "uuid::Uuid::new_v4", reason = "take IDs from the injected Ids (§4)" },
+  # 随机（F58）：随机种子只经 base 的 random；加密强度的随机只在 platform（ring）。`hash_map::RandomState` 是同一个类型。
+  { path = "std::hash::RandomState::new", reason = "take random values from rust_cli_base::random (§4)" },
+  { path = "ring::rand::SystemRandom::new", reason = "cryptographic randomness stays in rust-cli-platform (§4)" },
+]

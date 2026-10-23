@@ -1,0 +1,51 @@
+name: Rust CLI
+
+# 从源仓库的 GitLab 三平台任务迁入；保持手动运行，暂不增加自动 PR 准入。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-cli:
+    name: Rust CLI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: never
+      COREPACK_ENABLE_PROJECT_SPEC: "0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: mise.toml
+          package-manager-cache: false
+      - name: Prepare pnpm
+        run: |
+          corepack enable
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+      - name: Prepare Rust and nextest
+        working-directory: packages/rust-cli
+        run: |
+          cargo --version
+          cargo install cargo-nextest --locked
+      # 内嵌的 ugrep 是 C++：linux-gnu 静态链接 libstdc++，Windows 用 MSVC 的 /arch:AVX512（同发版的 workflow）。
+      - name: Install g++ and the static libstdc++
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends g++
+      - name: Check the C/C++ toolchain for the bundled search tools
+        run: node scripts/rust-cli/npm/toolchain.mjs
+      - name: Check Rust CLI
+        run: pnpm check:rust-cli
+      - name: Test Rust CLI
+        run: pnpm test:rust-cli

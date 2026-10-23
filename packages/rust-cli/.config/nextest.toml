@@ -1,0 +1,9 @@
+# nextest 配置：与仓库其他 Rust workspace 相同（docs/specs/rust-u0-foundation.md §2）。
+[profile.default]
+# 慢测试 30 s 时报告，60 s 时终止；失败重试一次，偶发失败不会直接挡住 CI，但会在报告中标为 flaky。
+slow-timeout = { period = "30s", terminate-after = 2 }
+retries = 1
+fail-fast = false
+
+[profile.default.junit]
+path = "junit.xml"

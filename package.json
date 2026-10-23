@@ -2,6 +2,7 @@
   "name": "zcode",
   "version": "3.16.1",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev:web": "concurrently -k -n server,web -c blue,green \"pnpm --filter @zcode/server dev\" \"pnpm --filter @zcode/web dev\"",
@@ -35,7 +36,7 @@
     "test:unit": "vitest run --exclude \"packages/desktop/test/e2e/**/*.test.ts\"",
     "test:unit:affected": "node scripts/run-affected-unit-tests.mjs",
     "test:docker:web-app-gateway": "node scripts/test-web-app-gateway-reset.mjs",
-    "verify:pre-push": "pnpm run lint && pnpm run db:schema:check && pnpm run test:architecture && pnpm run architecture:check -- --changed && pnpm run test:unit:affected --scope push",
+    "verify:pre-push": "pnpm run lint && pnpm run db:schema:check && pnpm run test:architecture && pnpm run architecture:check -- --changed && pnpm run test:unit:affected --scope push && node scripts/pre-push-rust-cli.mjs",
     "build": "pnpm -r build",
     "build:desktop-agent:bytecode": "node scripts/build-desktop-agent-bytecode.mjs",
     "build:docs": "pnpm --filter @zcode/dev-docs build",
@@ -76,7 +77,13 @@
     "test:architecture": "node --test scripts/test/architecture-governance.test.mjs scripts/test/architecture-governance-review.test.mjs scripts/test/architecture-upstream-admission.test.mjs scripts/test/source-size-policy.test.mjs",
     "architecture:adopt": "node scripts/architecture/architecture-check.mjs adopt",
     "db:schema:check": "node --test scripts/test/sqlite-schema-contract.test.mjs && pnpm --dir apps/zcode-cli exec tsx ../../scripts/check-sqlite-schema.ts",
-    "db:schema:update": "pnpm --dir apps/zcode-cli exec tsx ../../scripts/check-sqlite-schema.ts --update"
+    "db:schema:update": "pnpm --dir apps/zcode-cli exec tsx ../../scripts/check-sqlite-schema.ts --update",
+    "build:rust-cli": "cd packages/rust-cli && cargo build --locked",
+    "check:rust-cli": "node --test --test-reporter=dot scripts/rust-cli/boundaries/check.test.mjs scripts/rust-cli/linux/linux.test.mjs scripts/rust-cli/build-number.test.mjs scripts/rust-cli/binary.test.mjs scripts/rust-cli/windows/cross.test.mjs scripts/rust-cli/eol.test.mjs scripts/rust-cli/vendor/vendor.test.mjs scripts/rust-cli/fixture/model.test.mjs scripts/rust-cli/npm/package.test.mjs scripts/rust-cli/npm/smoke.test.mjs scripts/rust-cli/npm/toolchain.test.mjs && node scripts/rust-cli/check-boundaries.mjs && cd packages/rust-cli && cargo fmt --all --check && node ../../scripts/rust-cli/clippy.mjs",
+    "check:rust-cli:windows": "node scripts/rust-cli/clippy.mjs --target windows",
+    "test:rust-cli": "node scripts/rust-cli/test.mjs",
+    "build:rust-cli:linux": "node scripts/rust-cli/build-linux.mjs",
+    "test:rust-cli:npm": "node --test scripts/rust-cli/npm/package.test.mjs scripts/rust-cli/npm/smoke.test.mjs scripts/rust-cli/npm/toolchain.test.mjs"
   },
   "dependencies": {
     "border-beam": "^1.0.1",
@@ -128,6 +135,5 @@
       "@ai-sdk/openai-compatible@2.0.60": "patches/@ai-sdk__openai-compatible@2.0.60.patch",
       "@ai-sdk/anthropic@3.0.81": "patches/@ai-sdk__anthropic@3.0.81.patch"
     }
-  },
-  "license": "Apache-2.0"
+  }
 }

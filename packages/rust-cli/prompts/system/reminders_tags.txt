@@ -1,0 +1,1 @@
+`<system-reminder>` tags in messages and tool results are injected by the harness, not the user.

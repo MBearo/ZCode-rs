@@ -1,0 +1,75 @@
+# rust-cli-fs 自己的 clippy 配置（docs/specs/rust-cli/README.md §4，F7，审查 R2-10）：fs 是本机存储 IO 的唯一入口，
+# 只对文件类在 crate 级放开——内容是 packages/rust-cli/clippy.toml 去掉文件类的禁令，其余逐条相同
+# （scripts/rust-cli/check-boundaries.mjs 比对；改根配置时同步改这里）。fs 里的进程、环境、网络、时间、ID 调用
+# 仍要在具体函数上写 `#[expect(clippy::disallowed_methods, reason = "…")]`。以前 fs 用 crate 级的
+# `#![expect]`，连进程、环境、套接字一起放开了。
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true
+
+# tokio 的锁 guard 跨 .await 持有时，其他任务会一直等待；std 的 guard 由 await_holding_lock 覆盖。
+await-holding-invalid-types = [
+  "tokio::sync::MutexGuard",
+  "tokio::sync::OwnedMutexGuard",
+  "tokio::sync::RwLockReadGuard",
+  "tokio::sync::RwLockWriteGuard",
+]
+
+disallowed-methods = [
+  # 进程：只经 rust-cli-proc。
+  { path = "std::process::Command::new", reason = "use rust_cli_proc::std_command (docs/specs/rust-cli/README.md §4)" },
+  { path = "tokio::process::Command::new", reason = "use rust_cli_proc::command (docs/specs/rust-cli/README.md §4)", allow-invalid = true },
+  # 环境：进程环境、cwd、参数与本机目录只在入口 crate 读，往下显式传。
+  { path = "std::env::var", reason = "read the env snapshot passed down from the entry crate (§4)" },
+  { path = "std::env::var_os", reason = "read the env snapshot passed down from the entry crate (§4)" },
+  { path = "std::env::vars", reason = "read the env snapshot passed down from the entry crate (§4)" },
+  { path = "std::env::vars_os", reason = "read the env snapshot passed down from the entry crate (§4)" },
+  { path = "std::env::current_dir", reason = "use an explicit base directory or EnvPath (§4)" },
+  { path = "std::env::set_current_dir", reason = "the process cwd is not workspace state (§6 rule 11)" },
+  { path = "std::env::home_dir", reason = "the entry crate resolves home once (rust_cli_paths::home_dir_with, §4)" },
+  { path = "std::env::temp_dir", reason = "the entry crate resolves the temp directory once (§4)" },
+  { path = "std::env::args", reason = "only the entry crate reads the process arguments (§4)" },
+  { path = "std::env::args_os", reason = "only the entry crate reads the process arguments (§4)" },
+  { path = "std::env::current_exe", reason = "only the entry crate reads process facts (§4)" },
+  # 改进程环境：EnvSnapshot 在入口捕获一次，别处改了快照就不准（F55，README §4）。
+  { path = "std::env::set_var", reason = "the process environment is captured once by the entry crate (§4)" },
+  { path = "std::env::remove_var", reason = "the process environment is captured once by the entry crate (§4)" },
+  # 网络：HTTP 客户端、套接字与名字解析只在 rust-cli-net。
+  { path = "reqwest::Client::new", reason = "network egress goes through rust_cli_net::Egress (§4)" },
+  { path = "reqwest::Client::builder", reason = "network egress goes through rust_cli_net::Egress (§4)" },
+  { path = "std::net::TcpStream::connect", reason = "network egress goes through rust-cli-net (§4)" },
+  { path = "std::net::TcpStream::connect_timeout", reason = "network egress goes through rust-cli-net (§4)" },
+  { path = "std::net::TcpListener::bind", reason = "network listeners go through rust-cli-net (§4)" },
+  { path = "std::net::UdpSocket::bind", reason = "network egress goes through rust-cli-net (§4)" },
+  { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "name resolution is network IO; go through rust-cli-net (§4)" },
+  { path = "std::os::unix::net::UnixStream::connect", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixListener::bind", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram::bind", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram::unbound", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  # F55 补：按 SocketAddr 连接 / 监听的写法。
+  { path = "std::os::unix::net::UnixStream::connect_addr", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixListener::bind_addr", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram::bind_addr", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::TcpStream::connect", reason = "network egress goes through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::TcpListener::bind", reason = "network listeners go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UdpSocket::bind", reason = "network egress goes through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::TcpSocket::new_v4", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::TcpSocket::new_v6", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UnixStream::connect", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UnixListener::bind", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UnixDatagram::bind", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::UnixDatagram::unbound", reason = "sockets go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::windows::named_pipe::ClientOptions::open", reason = "named pipes go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::windows::named_pipe::ServerOptions::create", reason = "named pipes go through rust-cli-net (§4)", allow-invalid = true },
+  { path = "tokio::net::lookup_host", reason = "name resolution is network IO; go through rust-cli-net (§4)", allow-invalid = true },
+  # 时间：业务时间只经注入的 Clock（本机实现 node-store 的 SystemClock）。
+  { path = "std::time::SystemTime::now", reason = "take the time from the injected Clock (§4, §6 rule 12)" },
+  # F55 补：`SystemTime::elapsed` 内部读当前时间（`UNIX_EPOCH.elapsed()` 就是 now）。
+  { path = "std::time::SystemTime::elapsed", reason = "reads the current time; take the time from the injected Clock (§4, §6 rule 12)" },
+  # ID：随机 ID 只经注入的 Ids（本机实现 node-store 的 NodeIds）。
+  { path = "uuid::Uuid::new_v4", reason = "take IDs from the injected Ids (§4)" },
+  # 随机（F58）：随机种子只经 base 的 random；加密强度的随机只在 platform（ring）。`hash_map::RandomState` 是同一个类型。
+  { path = "std::hash::RandomState::new", reason = "take random values from rust_cli_base::random (§4)" },
+  { path = "ring::rand::SystemRandom::new", reason = "cryptographic randomness stays in rust-cli-platform (§4)" },
+]

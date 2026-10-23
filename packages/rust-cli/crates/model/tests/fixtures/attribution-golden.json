@@ -1,0 +1,3573 @@
+{
+  "attribution": [
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_2d480878-38af-4bae-a54f-096e2fb0f4d7",
+      "run": "run_r1",
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r1"
+        ],
+        [
+          "x-session-id",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ],
+        [
+          "x-opencode-session",
+          "2d480878-38af-4bae-a54f-096e2fb0f4d7"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "sess_subagent_agent_a1",
+      "run": "run_r2",
+      "agent": "agent_a1",
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-query-id",
+          "r2"
+        ],
+        [
+          "x-session-id",
+          "a1"
+        ],
+        [
+          "x-opencode-session",
+          "a1"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "subagent_agent_a2",
+      "run": null,
+      "agent": "agent_a2",
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "subagent"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-session-id",
+          "a2"
+        ],
+        [
+          "x-opencode-session",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": "sess_",
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "main"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-session-id",
+          "sess_"
+        ],
+        [
+          "x-opencode-session",
+          "sess_"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "main_thread"
+      },
+      "querySource": "main_turn",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "main_turn"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "subagent",
+        "name": "Explore"
+      },
+      "querySource": "subagent",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "subagent"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "compact"
+      },
+      "querySource": "compact",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "compact"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "generate_session_title"
+      },
+      "querySource": "session_title",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "session_title"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_fetch_apply"
+      },
+      "querySource": "web_fetch_processing",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_fetch_processing"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "web_search_tool"
+      },
+      "querySource": "web_search_tool",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "web_search_tool"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "hook_prompt"
+      },
+      "querySource": "hook_prompt",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "hook_prompt"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "rename_generate_name"
+      },
+      "querySource": "rename_generate_name",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ],
+        [
+          "x-zcode-query-source",
+          "rename_generate_name"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "has space"
+      },
+      "querySource": "has space",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ]
+      ]
+    },
+    {
+      "session": null,
+      "run": null,
+      "agent": null,
+      "source": {
+        "kind": "side",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "querySource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseUrl": "https://opencode.ai/zen/go/v1/",
+      "headers": [
+        [
+          "x-request-id",
+          "req-1"
+        ],
+        [
+          "x-zcode-session-type",
+          "other"
+        ],
+        [
+          "x-zcode-trace-id",
+          "trace-1"
+        ]
+      ]
+    }
+  ],
+  "merge": [
+    {
+      "sources": [
+        [
+          [
+            "User-Agent",
+            "ZCode/1"
+          ]
+        ],
+        [
+          [
+            "user-agent",
+            "ProbeUA/9"
+          ]
+        ]
+      ],
+      "merged": [
+        [
+          "user-agent",
+          "ProbeUA/9"
+        ]
+      ]
+    },
+    {
+      "sources": [
+        [
+          [
+            "X-Title",
+            "a"
+          ],
+          [
+            "Accept",
+            "b"
+          ]
+        ],
+        [
+          [
+            "ACCEPT",
+            "c"
+          ]
+        ],
+        [
+          [
+            "x-title",
+            "d"
+          ],
+          [
+            "X-New",
+            "e"
+          ]
+        ]
+      ],
+      "merged": [
+        [
+          "ACCEPT",
+          "c"
+        ],
+        [
+          "x-title",
+          "d"
+        ],
+        [
+          "X-New",
+          "e"
+        ]
+      ]
+    },
+    {
+      "sources": [
+        [
+          [
+            "anthropic-version",
+            "2023-06-01"
+          ]
+        ],
+        [],
+        [
+          [
+            "Anthropic-Version",
+            "2099-01-01"
+          ]
+        ]
+      ],
+      "merged": [
+        [
+          "Anthropic-Version",
+          "2099-01-01"
+        ]
+      ]
+    },
+    {
+      "sources": [
+        [
+          [
+            "a",
+            "1"
+          ],
+          [
+            "B",
+            "2"
+          ],
+          [
+            "c",
+            "3"
+          ]
+        ],
+        [
+          [
+            "b",
+            "4"
+          ]
+        ]
+      ],
+      "merged": [
+        [
+          "a",
+          "1"
+        ],
+        [
+          "c",
+          "3"
+        ],
+        [
+          "b",
+          "4"
+        ]
+      ]
+    }
+  ]
+}

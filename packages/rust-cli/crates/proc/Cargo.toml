@@ -1,0 +1,30 @@
+[package]
+name = "rust-cli-proc"
+description = "The single entry point for spawning and terminating child processes in rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+# 子进程与私有临时目录、进程账本（README §4 的 tokio 特性表：process 只在这里）。
+tokio = { workspace = true, features = ["fs", "process"] }
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+futures-util.workspace = true
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

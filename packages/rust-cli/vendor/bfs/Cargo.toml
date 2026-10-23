@@ -1,0 +1,26 @@
+# bfs 4.1.4（带 Oniguruma 6.9.10），作为库供 zcode 按 argv0 分派（docs/specs/rust-cli/embedded-search.md §6）。
+# 第三方代码：不是 workspace 成员（根 Cargo.toml 的 workspace.exclude），不受本工程的 lints 与 clippy.toml 约束；
+# bfs/、oniguruma/ 下的文件由 scripts/rust-cli/vendor/fetch.mjs 按 vendor/sources.json 生成，config/ 由
+# scripts/rust-cli/vendor/bfs-config.mjs 用 bfs 的 configure 生成，都不手改。只在 Unix 目标编译（Windows 没有 bfs，§6.4）。
+[package]
+name = "rust-cli-vendor-bfs"
+version = "4.1.4"
+edition = "2024"
+license = "0BSD AND BSD-2-Clause"
+publish = false
+build = "build.rs"
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+
+[lib]
+path = "lib.rs"
+doctest = false
+test = false
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1"

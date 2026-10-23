@@ -1,0 +1,3 @@
+Based on the conversation transcript above, has the following stopping condition been satisfied? Answer based on transcript evidence only.
+
+Condition: {{condition}}

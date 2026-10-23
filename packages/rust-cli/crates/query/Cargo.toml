@@ -1,0 +1,29 @@
+[package]
+name = "rust-cli-query"
+description = "Query loop, streaming tool executor and recovery of rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+async-trait.workspace = true
+futures-util.workspace = true
+rust-cli-base.workspace = true
+rust-cli-kernel-api.workspace = true
+rust-cli-prompts.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+serde_json.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time", "test-util"] }
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }

@@ -1,0 +1,2 @@
+Available agent types for the Agent tool:
+{{lines}}

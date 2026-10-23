@@ -1,0 +1,18 @@
+{
+  "name": "WaitForMcpServers",
+  "description": "Wait for MCP servers that are still connecting and whose tools are not\nyet in your tool list. Pass `servers` to wait for specific ones, or omit\nit to wait for all pending servers (once none is pending, a call without\n`servers` reports any server that failed to connect or is not configured).\n\nIf the user's request needs tools from a still-connecting server, call this\ntool to wait for it. Once it connects, its tools will be added to your tool\nlist and you can use them directly. Returns ready=true when servers are\nready, ready=false if they failed to connect, need authentication, or are\ndisabled.\n\nYou do not need to ask the user for confirmation to use this tool.",
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "servers": {
+        "description": "Server names to wait for (default: all pending)",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "additionalProperties": false
+  }
+}

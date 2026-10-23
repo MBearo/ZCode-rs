@@ -1,0 +1,9 @@
+# 所有文本固定 LF（修复线 F56，docs/specs/rust-cli/prompts.md「换行」、node-store.md §2.1）：编入二进制的文本
+# （迁移 SQL、prompts、JSON 资产）按字节进 `include_str!`。以前没有这条规则，Windows 的 `core.autocrlf=true` 检出
+# 成 CRLF，迁移的校验和与 Node 不同（0.1.52 的 checksum_mismatch），发给模型的文本也带 `\r`。
+* text=auto eol=lf
+# 第三方源码与许可证声明按字节保存（THIRD-PARTY-NOTICES.txt 里有带 CRLF 的许可证原文），不做换行转换。
+/vendor/** -text
+# 计数文件 build-number（docs/specs/rust-cli/version.md §2、§5）：固定 LF；合并冲突时取较大值，配置了驱动
+# zcode-build-number 的克隆自动处理（git config 的命令见 version.md §5；没配置时 git 用缺省的文本合并）。
+/build-number text eol=lf merge=zcode-build-number

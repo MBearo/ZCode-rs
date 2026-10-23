@@ -1,0 +1,99 @@
+[package]
+name = "rust-cli"
+description = "rust-cli composition root and the zcode-rs executable (command name zcode)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# 可执行文件名 `zcode-rs`（macOS / Linux 的进程列表里显示它），用户敲的命令仍是 `zcode`（npm 包的 bin 名）：
+# docs/specs/rust-cli/cli-args.md §13，工作线 F59。脚本经 scripts/rust-cli/binary.mjs 取这个名字。Windows 的平台包里
+# 打包时复制成 `zcode.exe`（工作线 F71；cargo 不能按平台起不同的名字）。
+[[bin]]
+name = "zcode-rs"
+path = "src/main.rs"
+doctest = false
+
+[features]
+# 读对照数据的测试只在完整的源码仓库编译（docs/specs/rust-cli/export.md §5）；不传给依赖。
+parity = []
+
+[dependencies]
+anyhow.workspace = true
+# Windows 剪贴板图片的 base64（tui-input.md §3.1）。
+base64.workspace = true
+# TUI 的服务端口（界面语言的写回、登录）返回 BoxFuture（docs/specs/rust-cli/tui.md §7.1）。
+futures-util.workspace = true
+rust-cli-base.workspace = true
+rust-cli-env-local.workspace = true
+rust-cli-ext.workspace = true
+rust-cli-fs.workspace = true
+rust-cli-headless.workspace = true
+# 配置文件的 hooks 段与快照（docs/specs/rust-cli/config.md）。
+rust-cli-hooks.workspace = true
+rust-cli-kernel-api.workspace = true
+rust-cli-memory.workspace = true
+rust-cli-model.workspace = true
+rust-cli-net.workspace = true
+rust-cli-node-store.workspace = true
+rust-cli-paths.workspace = true
+# 本机跨会话通信（docs/specs/rust-cli/cross-session.md）。
+rust-cli-peers.workspace = true
+rust-cli-platform.workspace = true
+rust-cli-policy.workspace = true
+# `zcode login` 打开浏览器（docs/specs/rust-cli/platform.md §5.6）。
+rust-cli-proc.workspace = true
+# stream-json 输入的 MCP prewait 按模型卡片判断能不能用工具搜索（headless.md §6）。
+rust-cli-prompts.workspace = true
+rust-cli-runtime.workspace = true
+rust-cli-tui.workspace = true
+# 内嵌的 ripgrep：zcode 以 `rg` 的名字启动时直接跑它（docs/specs/rust-cli/embedded-search.md §3、§5，F53）。
+rust-cli-vendor-rg = { path = "../../vendor/rg" }
+# 内嵌的 ugrep：zcode 以 `ugrep` 的名字启动时直接跑它（embedded-search.md §3、§7，F53）。
+rust-cli-vendor-ugrep = { path = "../../vendor/ugrep" }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-std", "signal", "sync"] }
+# 退出信号交给前端的取消令牌（session-lifecycle.md §3.5）。
+tokio-util.workspace = true
+# 账号服务地址的环境变量取 origin（Node `normalizeZCodeEndpointOrigin`）。
+url.workspace = true
+tracing.workspace = true
+
+# 系统时区（docs/specs/rust-cli/time-zone.md §1）：Unix 的 tzset / localtime_r。
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+# 内嵌的 bfs：zcode 以 `bfs` 的名字启动时直接跑它（embedded-search.md §3、§6，F53）。Windows 没有 bfs（§6.4）。
+rust-cli-vendor-bfs = { path = "../../vendor/bfs" }
+
+# Linux musl 版的全局分配器（docs/specs/rust-cli/linux.md §8.3，F44）：musl 的 malloc 在多线程下慢。
+# macOS 与 glibc 不变（系统分配器没有这个问题）。
+[target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
+mimalloc.workspace = true
+
+# 系统时区：Windows 的 GetDynamicTimeZoneInformation / SystemTimeToTzSpecificLocalTimeEx。
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+futures-util.workspace = true
+rust-cli-context.workspace = true
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+rust-cli-query.workspace = true
+rust-cli-tools.workspace = true
+# 真实进程测试的本地 HTTPS 模型端点：现生成的证书与 rustls 服务端（config.md §5，F21）。
+rcgen.workspace = true
+rustls = { workspace = true, features = ["std"] }
+serde_json.workspace = true
+tempfile.workspace = true
+# fs：测试读回写出的文件（README §4）。
+tokio = { workspace = true, features = ["fs", "macros", "rt", "time"] }
+tokio-util.workspace = true
+
+# Windows 的真实进程测试给子进程发控制台事件（tests/windows_process.rs，工作线 F66）。
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }

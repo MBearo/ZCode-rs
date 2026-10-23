@@ -1,0 +1,43 @@
+[package]
+name = "rust-cli-platform"
+description = "Account login, provider registry and settings for rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+# option_map.rs 复制自 rust/crates/shared，内部错误沿用 anyhow；对外的错误类型用 thiserror。
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+# 团队列表与各项目的权益同时查询（join_all，不起任务，platform.md §9.2）。
+futures-util.workspace = true
+regress.workspace = true
+ring.workspace = true
+rust-cli-base.workspace = true
+rust-cli-fs.workspace = true
+rust-cli-kernel-api.workspace = true
+# 项目令牌与 CLI OAuth 登录的请求（docs/specs/rust-cli/platform.md §5.4、§5.6）。
+rust-cli-net.workspace = true
+rust-cli-paths.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "sync", "time"] }
+# 登录的取消令牌（TUI 的 esc，platform.md §5.6）。
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+# fs、net：测试读回文件、搭本地 HTTP 夹具（README §4）。
+tokio = { workspace = true, features = ["fs", "macros", "net", "rt"] }

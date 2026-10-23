@@ -1,0 +1,98 @@
+//! 终端界面的组件层（docs/specs/rust-cli/tui.md §3）：复制自 `apps/zcode-host/crates/tui/src/ui`，
+//! 只持有草稿、滚动、视图等界面状态；会话内容来自 `view::Transcript`，每一帧按当前宽度重新排版。
+pub mod agents;
+pub mod agents_tree;
+pub mod app;
+pub mod background;
+pub mod bottom;
+pub mod cells;
+pub mod clipboard;
+pub mod commands;
+mod compose;
+mod compose_input;
+pub mod composer;
+pub mod console;
+pub mod context;
+pub mod context_page;
+pub mod detail;
+pub mod diff_view;
+pub mod diff_view_lines;
+pub mod draw;
+pub mod export;
+pub mod file_index;
+pub mod footer;
+pub mod footer_stats;
+pub mod fork;
+pub mod goal;
+pub mod highlight;
+pub mod i18n;
+pub mod i18n_input;
+pub mod i18n_panels;
+pub mod i18n_peers;
+pub mod i18n_projects;
+pub mod i18n_trust;
+pub mod i18n_update;
+pub mod i18n_usage;
+pub mod input_box;
+pub mod interaction;
+pub mod interaction_view;
+pub mod key_hint;
+pub mod keyboard;
+mod keys;
+mod keys_burst;
+pub mod list;
+mod locale;
+pub mod login;
+pub mod logo;
+pub mod manage;
+pub mod markdown;
+pub mod mcp_control;
+pub mod mention;
+pub mod mouse;
+pub mod notice;
+pub mod notify;
+pub mod page;
+pub mod palette;
+pub mod pane;
+pub mod panels;
+pub mod paste_burst;
+pub(crate) mod peer_view;
+pub mod permissions;
+pub mod permissions_lines;
+pub mod pick;
+// Windows 的前景 / 背景色探测（工作线 F71）：只在 Windows 上调用，其他平台只有测试用。
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "只在 Windows 上调用；其他平台只有测试用")
+)]
+mod probe_console;
+pub mod projects;
+pub mod projects_draw;
+pub mod resume;
+pub mod resume_draw;
+pub mod resume_transcript;
+pub mod retry_status;
+pub mod rewind;
+pub mod selection;
+pub mod session_rows;
+pub mod shimmer;
+pub mod shortcuts;
+mod slash;
+mod slash_more;
+pub mod slash_theme;
+pub mod status_line;
+pub mod tasks;
+pub mod terminal;
+pub mod text;
+pub mod textarea;
+pub mod tokens;
+pub mod transcript;
+pub mod trust_ask;
+pub mod trust_view;
+pub mod update_notice;
+pub mod update_view;
+pub mod usage;
+pub mod usage_stats;
+pub mod wheel;
+
+pub use slash::resolve_model;

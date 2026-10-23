@@ -1,0 +1,23 @@
+{
+  "name": "ReadMcpResourceDirTool",
+  "description": "\nList the direct children of a directory resource on an MCP server (`resources/directory/read`).\n\nParameters:\n- server (required): The name of the MCP server to read from\n- uri (required): The URI of the directory resource\n\nThe listing is not recursive. Each entry carries its own `uri`; subdirectories appear with mimeType \"inode/directory\" — call this tool again on a subdirectory's `uri` to descend.\n\nOnly usable against a server that has declared support for directory listing; other servers return an error.\n",
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "server": {
+        "description": "The MCP server name",
+        "type": "string"
+      },
+      "uri": {
+        "description": "The directory resource URI to list",
+        "type": "string"
+      }
+    },
+    "required": [
+      "server",
+      "uri"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,7 @@
+# rust-cli 的工具链。升级单独提交。
+# 来源：feat/rust-cli-archive（f6eceb801e）仓库根的 rust-toolchain.toml，内容不变（工作线 F46）。
+# rustup 只从当前目录往上找这个文件，不看 cargo 的 --manifest-path：调用 cargo、rustup、rustc 的脚本
+# 都在 packages/rust-cli 下执行（docs/specs/rust-cli/README.md §9）。
+[toolchain]
+channel = "1.95.0"
+components = ["clippy", "rustfmt", "rust-src"]

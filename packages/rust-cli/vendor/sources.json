@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "note": "第三方源码（docs/specs/rust-cli/embedded-search.md）。由 scripts/rust-cli/vendor/fetch.mjs 从 url 下载、核对 sha256、只保留 keep、按 edits 替换后写进 into；--check 核对。",
+  "components": [
+    {
+      "id": "ripgrep",
+      "version": "15.2.0",
+      "url": "https://github.com/BurntSushi/ripgrep/archive/refs/tags/15.2.0.tar.gz",
+      "sha256": "7605249d3eb0d5f170e3414498e3344e26b1e7a147aec518b57090b80036a562",
+      "license": "MIT OR Unlicense",
+      "licenseFiles": ["COPYING", "LICENSE-MIT", "UNLICENSE"],
+      "strip": 1,
+      "into": "rg/ripgrep",
+      "keep": ["crates/core", "COPYING", "LICENSE-MIT", "UNLICENSE", "rustfmt.toml"],
+      "edits": {
+        "crates/core/main.rs": [
+          {
+            "old": "#[cfg(all(target_env = \"musl\", target_pointer_width = \"64\"))]\n#[global_allocator]\nstatic ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;\n",
+            "new": "// rust-cli：全局分配器由 zcode 的入口设置（musl 上是 mimalloc），这里不再设\n// （docs/specs/rust-cli/embedded-search.md §5）。\n"
+          },
+          {
+            "old": "fn main() -> ExitCode {",
+            "new": "// rust-cli：作为库的入口，由 zcode 按 argv0 分派时调用。\npub fn main() -> ExitCode {"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bfs",
+      "version": "4.1.4",
+      "url": "https://github.com/tavianator/bfs/releases/download/4.1.4/bfs-4.1.4.tar.gz",
+      "sha256": "0282f10655008ee85623f9bd22705c595e569f455b0ca4250b841155ba34f935",
+      "license": "0BSD",
+      "licenseFiles": ["LICENSE"],
+      "strip": 0,
+      "into": "bfs/bfs",
+      "keep": ["src", "build", "configure", "Makefile", "LICENSE"]
+    },
+    {
+      "id": "oniguruma",
+      "version": "6.9.10",
+      "url": "https://github.com/kkos/oniguruma/releases/download/v6.9.10/onig-6.9.10.tar.gz",
+      "sha256": "2a5cfc5ae259e4e97f86b68dfffc152cdaffe94e2060b770cb827238d769fc05",
+      "license": "BSD-2-Clause",
+      "licenseFiles": ["COPYING"],
+      "strip": 1,
+      "into": "bfs/oniguruma",
+      "keep": ["src", "COPYING"]
+    },
+    {
+      "id": "ugrep",
+      "version": "7.8.4",
+      "url": "https://codeload.github.com/Genivia/ugrep/tar.gz/550599a6434fc5315fb6ecd415a5d859e6d846a8",
+      "sha256": "0b3ed2dc7c3902d89f2ef8b66961db2e31a32f240fa2a2e0eb8d559827f36dab",
+      "license": "BSD-3-Clause",
+      "licenseFiles": ["LICENSE.txt"],
+      "strip": 1,
+      "into": "ugrep/ugrep",
+      "keep": [
+        "src",
+        "lib",
+        "include",
+        "lzma",
+        "LICENSE.txt",
+        "configure",
+        "config.h.in",
+        "Makefile.in",
+        "config.guess",
+        "config.sub",
+        "install-sh",
+        "missing",
+        "compile",
+        "depcomp",
+        "ar-lib"
+      ]
+    },
+    {
+      "id": "pcre2",
+      "version": "10.46",
+      "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.46/pcre2-10.46.tar.gz",
+      "sha256": "8d28d7f2c3b970c3a4bf3776bcbb5adfc923183ce74bc8df1ebaad8c1985bd07",
+      "license": "BSD-3-Clause WITH PCRE2-exception",
+      "licenseFiles": ["LICENCE.md"],
+      "strip": 1,
+      "into": "ugrep/pcre2",
+      "keep": ["src/pcre2.h.generic", "LICENCE.md"]
+    },
+    {
+      "id": "brotli",
+      "version": "1.2.1",
+      "url": "https://github.com/google/brotli/archive/refs/tags/v1.2.1.tar.gz",
+      "sha256": "98d35d11a78dc453aebb7d10c3748f3f73ff78c8267c0dc697b8631f67bf7e8f",
+      "license": "MIT",
+      "licenseFiles": ["LICENSE"],
+      "strip": 1,
+      "into": "ugrep/brotli",
+      "keep": ["c/common", "c/dec", "c/include", "LICENSE"]
+    }
+  ]
+}

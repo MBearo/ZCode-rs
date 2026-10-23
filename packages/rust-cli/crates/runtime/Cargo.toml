@@ -1,0 +1,46 @@
+[package]
+name = "rust-cli-runtime"
+description = "Assembles the rust-cli kernel from its capability crates"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# 读对照数据的测试只在完整的源码仓库编译（docs/specs/rust-cli/export.md §5）；不传给依赖。
+parity = []
+
+[dependencies]
+async-trait.workspace = true
+# /context 的计数并发发出（`join!`）、按请求内容缓存（docs/specs/rust-cli/context-usage.md §3）。
+futures-util = { workspace = true, features = ["async-await", "async-await-macro"] }
+serde_json.workspace = true
+rust-cli-base.workspace = true
+rust-cli-kernel-api.workspace = true
+rust-cli-agents.workspace = true
+rust-cli-compact.workspace = true
+rust-cli-context.workspace = true
+rust-cli-ext.workspace = true
+rust-cli-hooks.workspace = true
+rust-cli-policy.workspace = true
+# /context 的延迟加载规则看模型卡片（docs/specs/rust-cli/context-usage.md §3）。
+rust-cli-prompts.workspace = true
+rust-cli-query.workspace = true
+rust-cli-session.workspace = true
+rust-cli-tools.workspace = true
+tracing.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tokio-util.workspace = true

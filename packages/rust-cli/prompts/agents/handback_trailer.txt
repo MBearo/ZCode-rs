@@ -1,0 +1,4 @@
+agentId: {{id}} (use SendMessage with to: '{{id}}', summary: '<5-10 word recap>' to continue this agent)
+<usage>subagent_tokens: {{tokens}}
+tool_uses: {{tool_uses}}
+duration_ms: {{duration}}</usage>

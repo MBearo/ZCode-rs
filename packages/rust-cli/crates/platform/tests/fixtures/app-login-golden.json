@@ -1,0 +1,1410 @@
+{
+  "secret": "golden-secret",
+  "customer": {
+    "organizations": [
+      {
+        "organizationId": "org-t",
+        "organizationName": "团队",
+        "projects": [
+          {
+            "projectId": "p-t",
+            "projectName": "默认项目",
+            "projectType": 2
+          }
+        ]
+      },
+      {
+        "organizationId": "org-1",
+        "organizationName": "默认机构",
+        "projects": [
+          {
+            "projectId": "p-1",
+            "projectName": "默认项目",
+            "projectType": "1"
+          }
+        ]
+      }
+    ]
+  },
+  "logins": {
+    "zai": {
+      "family": "zai",
+      "origin": "https://api.example.com",
+      "pollUser": {
+        "user_id": "u-1",
+        "name": " Dev ",
+        "email": "dev@example.com",
+        "avatar": " https://avatar.example.com/a.png ",
+        "locale": "zh-CN"
+      },
+      "loginRequests": [
+        {
+          "method": "POST",
+          "path": "/api/v1/oauth/cli/init",
+          "authorization": "Bearer ce4dc3960a14be522997af05725e3b4b0952b8c3e14b5c8d248fcfbd1918f8ef",
+          "body": {
+            "provider": "zai"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/oauth/cli/poll/f1",
+          "authorization": "Bearer ce4dc3960a14be522997af05725e3b4b0952b8c3e14b5c8d248fcfbd1918f8ef",
+          "body": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/z/login",
+          "authorization": null,
+          "body": {
+            "token": "zai-oauth"
+          }
+        }
+      ],
+      "loginFile": "{\n  \"oauth:zai:access_token\": \"enc:v1:O6--KsT4cPB4TUfj.gq_i8KNK87doKVPm7v-HcA.zjLbo83auQ\",\n  \"zcodejwttoken\": \"enc:v1:0lKtvauoIpjUo_oX.HpRKWKhbyKhoy1-TQeXT4g.vm5cRbeEupZI\",\n  \"oauth:zai:user_info\": \"enc:v1:-Q3R8aviUa9IQgQu.s0Ee1pL9rM-ICmbcKZjy9g.LwW62w5XbO8_kuq0O3owlD4SILSQtOQHUxbKxXgQXkLcxaB0_uHoHdHP7ZmpJVEVvpAZy-6FoUwQJQpYf_PIcRWFTgGaiBhWrFXxamVxTTZB0FOdvTEox1eUGyY-d3oaLESPIoRs1WznVUwjNoJIDmEs3MMQWYLWnQ\",\n  \"oauth:active_provider\": \"enc:v1:gkd8JzI0nTT-Gdb6.6QguVd7wwBO3_I7HlHbGQQ.hA1T\"\n}\n",
+      "loginRecord": {
+        "oauth:zai:access_token": "jwt-zai",
+        "zcodejwttoken": "zcode-jwt",
+        "oauth:zai:user_info": "{\"user_id\":\"u-1\",\"name\":\" Dev \",\"email\":\"dev@example.com\",\"avatar\":\" https://avatar.example.com/a.png \",\"locale\":\"zh-CN\"}",
+        "oauth:active_provider": "zai"
+      },
+      "profileId": "u-1",
+      "material": {
+        "token": "pat-1",
+        "apiKeyId": "key-1"
+      },
+      "locationRequests": [
+        {
+          "method": "GET",
+          "path": "/api/biz/customer/getCustomerInfo",
+          "authorization": "jwt-zai",
+          "body": null
+        },
+        {
+          "method": "GET",
+          "path": "/api/biz/v1/organization/org-1/projects/p-1/api_keys",
+          "authorization": "Bearer jwt-zai",
+          "body": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-1/projects/p-1/api_keys",
+          "authorization": "Bearer jwt-zai",
+          "body": {
+            "name": "zcode-api-key",
+            "usageScene": 1
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-1/projects/p-1/api_keys/key-1/access_tokens",
+          "authorization": "Bearer jwt-zai",
+          "body": {
+            "clientType": "zcode",
+            "clientVersion": "0.0.0-dev"
+          }
+        }
+      ],
+      "location": {
+        "key": "project-key-location:v1:%5B%22https%3A%2F%2Fapi.example.com%22%2C%22zai%22%2C%22u-1%22%2Cnull%2C1%2C%22non-team%22%5D",
+        "value": "{\"organizationId\":\"org-1\",\"projectId\":\"p-1\",\"apiKeyId\":\"key-1\"}"
+      },
+      "locationFile": "{\n  \"oauth:zai:access_token\": \"enc:v1:O6--KsT4cPB4TUfj.gq_i8KNK87doKVPm7v-HcA.zjLbo83auQ\",\n  \"zcodejwttoken\": \"enc:v1:0lKtvauoIpjUo_oX.HpRKWKhbyKhoy1-TQeXT4g.vm5cRbeEupZI\",\n  \"oauth:zai:user_info\": \"enc:v1:-Q3R8aviUa9IQgQu.s0Ee1pL9rM-ICmbcKZjy9g.LwW62w5XbO8_kuq0O3owlD4SILSQtOQHUxbKxXgQXkLcxaB0_uHoHdHP7ZmpJVEVvpAZy-6FoUwQJQpYf_PIcRWFTgGaiBhWrFXxamVxTTZB0FOdvTEox1eUGyY-d3oaLESPIoRs1WznVUwjNoJIDmEs3MMQWYLWnQ\",\n  \"oauth:active_provider\": \"enc:v1:gkd8JzI0nTT-Gdb6.6QguVd7wwBO3_I7HlHbGQQ.hA1T\",\n  \"project-key-location:v1:%5B%22https%3A%2F%2Fapi.example.com%22%2C%22zai%22%2C%22u-1%22%2Cnull%2C1%2C%22non-team%22%5D\": \"enc:v1:78ZIFEbg3LPcQJuH._qBwl2MU01RvMiXjDOPweg.Pe2VGDWVbmF5KKlCHoBlqDXVcQl2l8qTT_CevGoENdXS7avOxolejGzZj-FN41RykWq-H7IrHG4bO6X2OUay\"\n}\n",
+      "reuse": {
+        "token": "pat-2",
+        "requests": [
+          {
+            "method": "POST",
+            "path": "/api/biz/v1/organization/org-1/projects/p-1/api_keys/key-1/access_tokens",
+            "authorization": "Bearer jwt-zai",
+            "body": {
+              "clientType": "zcode",
+              "clientVersion": "0.0.0-dev"
+            }
+          }
+        ]
+      }
+    },
+    "bigmodel": {
+      "family": "bigmodel",
+      "origin": "https://big.example.com",
+      "pollUser": {
+        "user_id": "u-1",
+        "name": " Dev ",
+        "email": "dev@example.com",
+        "avatar": " https://avatar.example.com/a.png ",
+        "locale": "zh-CN"
+      },
+      "loginRequests": [
+        {
+          "method": "POST",
+          "path": "/api/v1/oauth/cli/init",
+          "authorization": "Bearer 71dcbc550e93acd7d102fd57b6b7a6de055c4cf8d98ca3c35ed11f869802f39d",
+          "body": {
+            "provider": "bigmodel"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/oauth/cli/poll/f1",
+          "authorization": "Bearer 71dcbc550e93acd7d102fd57b6b7a6de055c4cf8d98ca3c35ed11f869802f39d",
+          "body": null
+        }
+      ],
+      "loginFile": "{\n  \"oauth:bigmodel:access_token\": \"enc:v1:yYFSJpN5AhMypGfy.WmXGdfQirMXHAoIv1h7GQg.8M8RlQyx\",\n  \"oauth:bigmodel:refresh_token\": \"enc:v1:uezv_waz74NoTf19.6p7MShx4x9DxRjxApCGNig.-eDT9dQv\",\n  \"zcodejwttoken\": \"enc:v1:ynWrYSKVuNOEPA33.I3hFBnx4ZYhdTbSqNAPOUA.xSRiwJ4BnKeI\",\n  \"oauth:bigmodel:user_info\": \"enc:v1:u9Btrsgr72eVD51r.Vy1PtUpijjyn640teA2Xpw.TtzN2D7aMhg2kOjX8pxFxYjF9j5-Be_wigYXrQXa1yWn4in7nbDZHq061GGurxzUFVmcBWbCB2YktJZDinlHxOu6-Gt1R_Es11D9tU9_XrV4a2pbZtzS1CGw77GqfPWkoqprLU81WTfAkxiX9zoPVi-1zI2iDJUh2M9myVJxzjStLSunrp0q-Q8jzR7gPT6s7E0x5VdMeQnty3x7Au2dQWm9Sl7xYmn1Z80xyi6iDbb13W0bhWok9d9VmLMazrU4SE-WZIsf-RMCw_5Dvw-BXKd0KiTB2C2NzRkfJ0902VAY2lcKAEk0b2Broex05oVsI8ZaSfAeyUnupyJOY5EfcP8gp-Me\",\n  \"oauth:active_provider\": \"enc:v1:XaGRV7Q0Kb7XK91i.zoaFB3H_VG3ifZyeN2j3eg.ZIiIXxOriVk\"\n}\n",
+      "loginRecord": {
+        "oauth:bigmodel:access_token": "at-big",
+        "oauth:bigmodel:refresh_token": "rt-big",
+        "zcodejwttoken": "zcode-jwt",
+        "oauth:bigmodel:user_info": "{\"id\":\"u-1\",\"username\":\"Dev\",\"displayName\":\"Dev\",\"avatarUrl\":\"https://avatar.example.com/a.png\",\"rawProfile\":{\"user_id\":\"u-1\",\"name\":\" Dev \",\"email\":\"dev@example.com\",\"avatar\":\" https://avatar.example.com/a.png \",\"locale\":\"zh-CN\",\"zcodeProfileSchemaVersion\":2}}",
+        "oauth:active_provider": "bigmodel"
+      },
+      "profileId": "u-1",
+      "material": {
+        "token": "pat-1",
+        "apiKeyId": "key-1"
+      },
+      "locationRequests": [
+        {
+          "method": "GET",
+          "path": "/api/biz/customer/getCustomerInfo",
+          "authorization": "at-big",
+          "body": null
+        },
+        {
+          "method": "GET",
+          "path": "/api/biz/v1/organization/org-1/projects/p-1/api_keys",
+          "authorization": "at-big",
+          "body": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-1/projects/p-1/api_keys",
+          "authorization": "at-big",
+          "body": {
+            "name": "zcode-api-key",
+            "usageScene": 1
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/biz/v1/organization/org-1/projects/p-1/api_keys/key-1/access_tokens",
+          "authorization": "Bearer at-big",
+          "body": {
+            "clientType": "zcode",
+            "clientVersion": "0.0.0-dev"
+          }
+        }
+      ],
+      "location": {
+        "key": "project-key-location:v1:%5B%22https%3A%2F%2Fbig.example.com%22%2C%22bigmodel%22%2C%22u-1%22%2Cnull%2C1%2C%22non-team%22%5D",
+        "value": "{\"organizationId\":\"org-1\",\"projectId\":\"p-1\",\"apiKeyId\":\"key-1\"}"
+      },
+      "locationFile": "{\n  \"oauth:bigmodel:access_token\": \"enc:v1:yYFSJpN5AhMypGfy.WmXGdfQirMXHAoIv1h7GQg.8M8RlQyx\",\n  \"oauth:bigmodel:refresh_token\": \"enc:v1:uezv_waz74NoTf19.6p7MShx4x9DxRjxApCGNig.-eDT9dQv\",\n  \"zcodejwttoken\": \"enc:v1:ynWrYSKVuNOEPA33.I3hFBnx4ZYhdTbSqNAPOUA.xSRiwJ4BnKeI\",\n  \"oauth:bigmodel:user_info\": \"enc:v1:u9Btrsgr72eVD51r.Vy1PtUpijjyn640teA2Xpw.TtzN2D7aMhg2kOjX8pxFxYjF9j5-Be_wigYXrQXa1yWn4in7nbDZHq061GGurxzUFVmcBWbCB2YktJZDinlHxOu6-Gt1R_Es11D9tU9_XrV4a2pbZtzS1CGw77GqfPWkoqprLU81WTfAkxiX9zoPVi-1zI2iDJUh2M9myVJxzjStLSunrp0q-Q8jzR7gPT6s7E0x5VdMeQnty3x7Au2dQWm9Sl7xYmn1Z80xyi6iDbb13W0bhWok9d9VmLMazrU4SE-WZIsf-RMCw_5Dvw-BXKd0KiTB2C2NzRkfJ0902VAY2lcKAEk0b2Broex05oVsI8ZaSfAeyUnupyJOY5EfcP8gp-Me\",\n  \"oauth:active_provider\": \"enc:v1:XaGRV7Q0Kb7XK91i.zoaFB3H_VG3ifZyeN2j3eg.ZIiIXxOriVk\",\n  \"project-key-location:v1:%5B%22https%3A%2F%2Fbig.example.com%22%2C%22bigmodel%22%2C%22u-1%22%2Cnull%2C1%2C%22non-team%22%5D\": \"enc:v1:TqTAiOLqjrGK4Fx5.-vPNmwokRoFEC-9JCq6-3Q.GjTTzDrbKtVc9uoSxvDRtUxXHPcZREiM8nePwbYvKsZMaBikOaM1x4krvwt0UM0AEIYeyAh6ZBP00bAH5I4P\"\n}\n",
+      "reuse": {
+        "token": "pat-2",
+        "requests": [
+          {
+            "method": "POST",
+            "path": "/api/biz/v1/organization/org-1/projects/p-1/api_keys/key-1/access_tokens",
+            "authorization": "Bearer at-big",
+            "body": {
+              "clientType": "zcode",
+              "clientVersion": "0.0.0-dev"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "subscriptions": {
+    "available": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "availableByProductId": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"Coding-Lite\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "availableUpperCase": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"x\",\"productName\":\"GLM CODING PLAN\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "availableWithExtras": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true,\"autoRenew\":1,\"nextRenewTime\":\"2026-12-01\",\"valid\":\"Y\",\"billingCycle\":\"MONTH\",\"x\":[]}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "availableAfterOthers": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productName\":\"Token Pack\",\"status\":\"VALID\",\"inCurrentPeriod\":true},{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"EXPIRED\",\"inCurrentPeriod\":false},{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "availableAfterMalformed": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":\"yes\"},{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "expired": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"EXPIRED\",\"inCurrentPeriod\":false}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "notInPeriod": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":false}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "otherProductOnly": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productName\":\"Token Pack\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "emptyList": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "malformedCoding": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\"}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "malformedCodingNullName": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"coding-1\",\"productName\":null,\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "malformedCodingStatus": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":1,\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "malformedAutoRenew": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true,\"autoRenew\":\"yes\"}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "malformedOther": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productName\":\"Token Pack\",\"status\":1}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "notObjectItems": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[\"coding\",1,null,[\"coding\"]]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_not_entitled"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "codingIdNotString": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":[{\"productId\":7,\"productName\":\"coding\",\"status\":\"VALID\"}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "dataObject": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"data\":{\"list\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "dataMissing": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "code0": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":0,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "noCode": {
+      "script": {
+        "status": 200,
+        "body": "{\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "available"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "code500": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":500,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "codeString": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":\"200\",\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "codeNull": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":null,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "successFalse": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"success\":false,\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "successString": {
+      "script": {
+        "status": 200,
+        "body": "{\"code\":200,\"success\":\"true\",\"data\":[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "envelopeArray": {
+      "script": {
+        "status": 200,
+        "body": "[{\"productId\":\"prod-c\",\"productName\":\"GLM Coding Plan Pro\",\"status\":\"VALID\",\"inCurrentPeriod\":true}]"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "notJson": {
+      "script": {
+        "status": 200,
+        "body": "not json"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "http401": {
+      "script": {
+        "status": 401,
+        "body": "{\"code\":401}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "http403": {
+      "script": {
+        "status": 403,
+        "body": "{}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unavailable",
+          "reason": "coding_plan_auth_failed"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "http404": {
+      "script": {
+        "status": 404,
+        "body": "{}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "http500": {
+      "script": {
+        "status": 500,
+        "body": "{}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "http429": {
+      "script": {
+        "status": 429,
+        "body": "{}"
+      },
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/biz/subscription/list",
+            "authorization": "pat-1",
+            "body": null
+          }
+        ]
+      }
+    },
+    "noProjectToken": {
+      "script": null,
+      "zai": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": []
+      },
+      "bigmodel": {
+        "result": {
+          "kind": "unknown"
+        },
+        "requests": []
+      }
+    }
+  },
+  "profiles": {
+    "zaiRaw": {
+      "value": "{\"user_id\":\"u-1\",\"name\":\"Dev\"}",
+      "zai": "u-1",
+      "bigmodel": null
+    },
+    "zaiRawUntrimmed": {
+      "value": "{\"user_id\":\" u-1 \",\"email\":\"dev@example.com\"}",
+      "zai": " u-1 ",
+      "bigmodel": null
+    },
+    "appShape": {
+      "value": "{\"id\":\"u-2\",\"username\":\"dev\",\"displayName\":\"Dev\"}",
+      "zai": "u-2",
+      "bigmodel": "u-2"
+    },
+    "appShapeWithRaw": {
+      "value": "{\"id\":\"u-3\",\"username\":\"dev\",\"displayName\":\"Dev\",\"rawProfile\":{\"user_id\":\"u-3\",\"zcodeProfileSchemaVersion\":2}}",
+      "zai": "u-3",
+      "bigmodel": "u-3"
+    },
+    "nodeBigmodel": {
+      "value": "{\"id\":\"key-0123456789abcdef01234567\",\"username\":\"dev\",\"displayName\":\"dev\",\"rawProfile\":{\"user_id\":\"u-4\"}}",
+      "zai": "key-0123456789abcdef01234567",
+      "bigmodel": "key-0123456789abcdef01234567"
+    },
+    "idNotString": {
+      "value": "{\"id\":1,\"username\":\"dev\",\"displayName\":\"Dev\"}",
+      "zai": null,
+      "bigmodel": null
+    },
+    "missingDisplayName": {
+      "value": "{\"id\":\"u-5\",\"username\":\"dev\"}",
+      "zai": null,
+      "bigmodel": null
+    },
+    "rawNoUserId": {
+      "value": "{\"name\":\"Dev\"}",
+      "zai": "unknown",
+      "bigmodel": null
+    },
+    "rawUserIdNumber": {
+      "value": "{\"user_id\":7,\"email\":\"dev@example.com\"}",
+      "zai": "unknown",
+      "bigmodel": null
+    },
+    "rawEmpty": {
+      "value": "{}",
+      "zai": null,
+      "bigmodel": null
+    },
+    "rawNameBlank": {
+      "value": "{\"name\":\"  \"}",
+      "zai": null,
+      "bigmodel": null
+    },
+    "blankId": {
+      "value": "{\"id\":\"  \",\"username\":\"dev\",\"displayName\":\"Dev\"}",
+      "zai": "  ",
+      "bigmodel": "  "
+    },
+    "array": {
+      "value": "[]",
+      "zai": null,
+      "bigmodel": null
+    },
+    "string": {
+      "value": "\"u-1\"",
+      "zai": null,
+      "bigmodel": null
+    },
+    "notJson": {
+      "value": "u-1",
+      "zai": null,
+      "bigmodel": null
+    }
+  },
+  "logout": {
+    "record": {
+      "oauth:active_provider": "zai",
+      "oauth:zai:access_token": "jwt-zai",
+      "oauth:zai:refresh_token": "rt-zai",
+      "oauth:zai:user_info": "{\"user_id\":\"u-zai\"}",
+      "oauth:bigmodel:access_token": "at-big",
+      "oauth:bigmodel:refresh_token": "rt-big",
+      "oauth:bigmodel:user_info": "{\"id\":\"u-big\",\"username\":\"dev\",\"displayName\":\"Dev\"}",
+      "zcodejwttoken": "zcode-jwt",
+      "oauth:login_attribution": "{\"source\":\"x\"}",
+      "account-provider:coding-plan:account:zai-individual-coding-plan:account:u-zai:api-key": "legacy-zai",
+      "account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:u-big:api-key": "legacy-big",
+      "account-provider:coding-plan:account:zai-individual-coding-plan:account:other:api-key": "other",
+      "project-key-location:v1:%5B%22https%3A%2F%2Fapi.example.com%22%2C%22zai%22%2C%22u-1%22%2Cnull%2C1%2C%22non-team%22%5D": "{\"organizationId\":\"org-1\",\"projectId\":\"p-1\",\"apiKeyId\":\"key-1\"}",
+      "ssh:host": "kept"
+    },
+    "remaining": [
+      "account-provider:coding-plan:account:zai-individual-coding-plan:account:other:api-key",
+      "oauth:login_attribution",
+      "project-key-location:v1:%5B%22https%3A%2F%2Fapi.example.com%22%2C%22zai%22%2C%22u-1%22%2Cnull%2C1%2C%22non-team%22%5D",
+      "ssh:host"
+    ]
+  }
+}

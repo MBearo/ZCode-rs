@@ -1,0 +1,21 @@
+[package]
+name = "rust-cli-prompts"
+description = "Model-visible texts of rust-cli, kept verbatim as data files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+# 编入文本的换行断言 `include_lf!`（修复线 F56，docs/specs/rust-cli/prompts.md「换行」）；产品目录名 `.zcode`
+# （loop.md 的位置，README §4.1，F55）。
+rust-cli-base.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true

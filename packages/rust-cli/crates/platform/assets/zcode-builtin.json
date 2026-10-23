@@ -1,0 +1,6310 @@
+{
+  "schemaVersion": 1,
+  "revision": 33,
+  "config": {
+    "providerConfigRules": {
+      "templateRules": [
+        {
+          "templateId": "zai-api",
+          "templateNameMap": {
+            "zh-CN": "Z.ai Coding Plan",
+            "en-US": "Z.ai Coding Plan"
+          },
+          "config": {
+            "access": {
+              "type": "zhipu-coding-plan-api-key",
+              "apiKeyManagementUrl": "https://z.ai/manage-apikey/apikey-list"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.z.ai/api/anthropic"
+            },
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "logo": {
+              "type": "builtin",
+              "key": "zai"
+            }
+          }
+        },
+        {
+          "templateId": "zai-standard-api",
+          "templateNameMap": {
+            "zh-CN": "Z.ai API",
+            "en-US": "Z.ai API"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://z.ai/manage-apikey/apikey-list"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://api.z.ai/api/paas/v4"
+            },
+            "builtinModelIds": [
+              "GLM-5.3",
+              "GLM-5.3-Flash",
+              "GLM-5V-Turbo",
+              "GLM-5.1",
+              "GLM-5.1-Highspeed",
+              "GLM-5",
+              "GLM-5-Turbo",
+              "GLM-4.7",
+              "GLM-4.7-FlashX",
+              "GLM-4.7-Flash",
+              "GLM-4.6",
+              "GLM-4.5-Air",
+              "GLM-4.5",
+              "GLM-4.6V",
+              "GLM-4.6V-Flash",
+              "GLM-4.6V-FlashX",
+              "GLM-4.1V-Thinking-FlashX",
+              "GLM-4.1V-Thinking-Flash",
+              "GLM-4-FlashX-250414",
+              "GLM-4-Flash-250414",
+              "GLM-4V-Flash",
+              "codegeex-4",
+              "charglm-4",
+              "emohaa"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "zai"
+            }
+          }
+        },
+        {
+          "templateId": "bigmodel-api",
+          "templateNameMap": {
+            "zh-CN": "BigModel Coding Plan",
+            "en-US": "BigModel Coding Plan"
+          },
+          "config": {
+            "access": {
+              "type": "zhipu-coding-plan-api-key",
+              "apiKeyManagementUrl": "https://bigmodel.cn/coding-plan/personal/overview"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://open.bigmodel.cn/api/anthropic"
+            },
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "logo": {
+              "type": "builtin",
+              "key": "bigmodel"
+            }
+          }
+        },
+        {
+          "templateId": "bigmodel-standard-api",
+          "templateNameMap": {
+            "zh-CN": "BigModel API",
+            "en-US": "BigModel API"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://bigmodel.cn/usercenter/proj-mgmt/apikeys"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://open.bigmodel.cn/api/paas/v4"
+            },
+            "builtinModelIds": [
+              "GLM-5.3",
+              "GLM-5.3-Flash",
+              "GLM-5V-Turbo",
+              "GLM-5.1",
+              "GLM-5.1-Highspeed",
+              "GLM-5",
+              "GLM-5-Turbo",
+              "GLM-4.7",
+              "GLM-4.7-FlashX",
+              "GLM-4.7-Flash",
+              "GLM-4.6",
+              "GLM-4.5-Air",
+              "GLM-4.5",
+              "GLM-4.6V",
+              "GLM-4.6V-Flash",
+              "GLM-4.6V-FlashX",
+              "GLM-4.1V-Thinking-FlashX",
+              "GLM-4.1V-Thinking-Flash",
+              "GLM-4-FlashX-250414",
+              "GLM-4-Flash-250414",
+              "GLM-4V-Flash",
+              "codegeex-4",
+              "charglm-4",
+              "emohaa"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "bigmodel"
+            }
+          }
+        },
+        {
+          "templateId": "moonshot-kimi",
+          "templateNameMap": {
+            "zh-CN": "Kimi",
+            "en-US": "Kimi"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.kimi.com/console/api-keys"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.moonshot.cn/anthropic"
+            },
+            "builtinModelIds": [
+              "kimi-k3",
+              "kimi-k2.7-code",
+              "kimi-k2.6",
+              "kimi-k2.7-code-highspeed",
+              "k3",
+              "k3-256k"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "moonshot-kimi"
+            }
+          }
+        },
+        {
+          "templateId": "minimax",
+          "templateNameMap": {
+            "zh-CN": "MiniMax",
+            "en-US": "MiniMax"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.minimaxi.com/console/access?tab=api-keys"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.minimaxi.com/anthropic"
+            },
+            "builtinModelIds": [
+              "MiniMax-M3",
+              "MiniMax-M2.7",
+              "MiniMax-M2.7-highspeed",
+              "MiniMax-M2.5",
+              "MiniMax-M2.5-highspeed",
+              "MiniMax-M2.1",
+              "MiniMax-M2.1-highspeed",
+              "MiniMax-M2"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "minimax"
+            }
+          }
+        },
+        {
+          "templateId": "deepseek",
+          "templateNameMap": {
+            "zh-CN": "DeepSeek",
+            "en-US": "DeepSeek"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.deepseek.com/api_keys"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.deepseek.com/anthropic"
+            },
+            "builtinModelIds": ["deepseek-flash", "deepseek-v4-pro"],
+            "logo": {
+              "type": "builtin",
+              "key": "deepseek"
+            }
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "templateNameMap": {
+            "zh-CN": "阿里云百炼（中国）",
+            "en-US": "Alibaba Cloud (China)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://bailian.console.aliyun.com/cn-beijing?tab=model"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://dashscope.aliyuncs.com/apps/anthropic"
+            },
+            "builtinModelIds": [
+              "qwen3.8-max",
+              "qwen3.8-flash",
+              "qwen3.7-max",
+              "qwen3.7-plus",
+              "qwen3.7-flash",
+              "qwen3.6-plus",
+              "qwen3.6-flash",
+              "qwen3.5-plus",
+              "qwen3.5-flash",
+              "qwen3-max",
+              "qwen-plus",
+              "qwen-flash",
+              "qwen3-vl-plus"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "alibaba-model-studio"
+            }
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "templateNameMap": {
+            "zh-CN": "阿里云百炼（国际）",
+            "en-US": "Alibaba Cloud (Global)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://modelstudio.console.aliyun.com/ap-southeast-1?tab=dashboard"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            },
+            "builtinModelIds": [
+              "qwen3.8-max",
+              "qwen3.8-flash",
+              "qwen3.8-omni-flash",
+              "qwen3.7-max",
+              "qwen3.7-plus",
+              "qwen3.7-flash",
+              "qwen3.6-plus",
+              "qwen3.6-flash",
+              "qwen3.5-plus",
+              "qwen3.5-flash",
+              "qwen3-max",
+              "qwen-plus",
+              "qwen-flash",
+              "qwen3-vl-plus"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "alibaba-model-studio"
+            }
+          }
+        },
+        {
+          "templateId": "xiaomi-mimo",
+          "templateNameMap": {
+            "zh-CN": "Xiaomi MiMo API",
+            "en-US": "Xiaomi MiMo API"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.xiaomimimo.com/"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.xiaomimimo.com/anthropic"
+            },
+            "builtinModelIds": ["mimo-v2.6-pro", "mimo-v2.6-flash", "mimo-v2.5-pro", "mimo-v2.5"],
+            "logo": {
+              "type": "builtin",
+              "key": "xiaomi-mimo"
+            }
+          }
+        },
+        {
+          "templateId": "xiaomi-mimo-token-plan",
+          "templateNameMap": {
+            "zh-CN": "Xiaomi MiMo Token Plan",
+            "en-US": "Xiaomi MiMo Token Plan"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.xiaomimimo.com/"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://token-plan-cn.xiaomimimo.com/anthropic"
+            },
+            "builtinModelIds": ["mimo-v2.6-pro", "mimo-v2.6-flash"],
+            "logo": {
+              "type": "builtin",
+              "key": "xiaomi-mimo"
+            }
+          }
+        },
+        {
+          "templateId": "openai",
+          "templateNameMap": {
+            "zh-CN": "OpenAI",
+            "en-US": "OpenAI"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.openai.com/api-keys"
+            },
+            "api": {
+              "type": "openai-responses",
+              "baseUrl": "https://api.openai.com/v1"
+            },
+            "builtinModelIds": [
+              "gpt-6-astra",
+              "gpt-5.6-sol",
+              "gpt-5.6-terra",
+              "gpt-5.6-luna",
+              "gpt-5.6",
+              "gpt-5.4",
+              "gpt-5.4-pro",
+              "gpt-5.4-mini",
+              "gpt-5.4-nano",
+              "gpt-5.3-codex"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "openai"
+            }
+          }
+        },
+        {
+          "templateId": "anthropic",
+          "templateNameMap": {
+            "zh-CN": "Anthropic",
+            "en-US": "Anthropic"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://console.anthropic.com/settings/keys"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.anthropic.com/v1"
+            },
+            "builtinModelIds": [
+              "claude-fable-5-1",
+              "claude-fable-5",
+              "claude-opus-5",
+              "claude-sonnet-5",
+              "claude-haiku-4-5-20251001"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "anthropic"
+            }
+          }
+        },
+        {
+          "templateId": "xai",
+          "templateNameMap": {
+            "zh-CN": "xAI",
+            "en-US": "xAI"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://console.x.ai"
+            },
+            "api": {
+              "type": "openai-responses",
+              "baseUrl": "https://api.x.ai/v1"
+            },
+            "builtinModelIds": ["grok-4.6", "grok-build-0.1", "grok-4.3"],
+            "logo": {
+              "type": "builtin",
+              "key": "xai"
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "templateNameMap": {
+            "zh-CN": "OpenRouter",
+            "en-US": "OpenRouter"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://openrouter.ai/keys"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://openrouter.ai/api"
+            },
+            "builtinModelIds": [
+              "anthropic/claude-fable-5.1",
+              "openai/gpt-6-astra",
+              "openai/gpt-5.6-sol",
+              "anthropic/claude-opus-5",
+              "deepseek/deepseek-v4-pro",
+              "moonshotai/kimi-k3",
+              "z-ai/glm-5.3",
+              "qwen/qwen3.8-max",
+              "minimax/minimax-m3",
+              "xiaomi/mimo-v2.5-pro",
+              "x-ai/grok-4.6",
+              "deepseek/deepseek-v4.1-flash",
+              "qwen/qwen3.8-max-0902",
+              "openai/gpt-5.6-terra",
+              "openai/gpt-5.6-luna",
+              "openai/gpt-5.6",
+              "openai/gpt-5.4",
+              "openai/gpt-5.4-pro",
+              "openai/gpt-5.4-mini",
+              "openai/gpt-5.4-nano",
+              "openai/gpt-5.3-codex",
+              "anthropic/claude-sonnet-5",
+              "anthropic/claude-haiku-4.5",
+              "anthropic/claude-opus-4.8",
+              "anthropic/claude-opus-4.7",
+              "anthropic/claude-opus-4.6",
+              "anthropic/claude-opus-4.5",
+              "anthropic/claude-sonnet-4.6",
+              "anthropic/claude-sonnet-4.5",
+              "deepseek/deepseek-v4-flash",
+              "moonshotai/kimi-k2.7-code",
+              "moonshotai/kimi-k2.6",
+              "moonshotai/kimi-k2.5",
+              "z-ai/glm-5.3-flash",
+              "z-ai/glm-5.2",
+              "z-ai/glm-5.1",
+              "z-ai/glm-5v-turbo",
+              "z-ai/glm-5",
+              "z-ai/glm-5-turbo",
+              "z-ai/glm-4.7",
+              "z-ai/glm-4.7-flash",
+              "z-ai/glm-4.6",
+              "z-ai/glm-4.6v",
+              "z-ai/glm-4.5-air",
+              "z-ai/glm-4.5",
+              "qwen/qwen3.8-flash",
+              "qwen/qwen3.7-max",
+              "qwen/qwen3.7-plus",
+              "qwen/qwen3.7-flash",
+              "qwen/qwen3.6-plus",
+              "qwen/qwen3.6-flash",
+              "qwen/qwen3.5-plus-20260420",
+              "qwen/qwen3-vl-plus",
+              "qwen/qwen3-vl-flash",
+              "minimax/minimax-m2.7",
+              "minimax/minimax-m2.5",
+              "xiaomi/mimo-v2.5",
+              "x-ai/grok-build-0.1",
+              "x-ai/grok-4.3"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "openrouter"
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "templateNameMap": {
+            "zh-CN": "OpenCode Go (Chat)",
+            "en-US": "OpenCode Go (Chat)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://opencode.ai/auth"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://opencode.ai/zen/go/v1"
+            },
+            "builtinModelIds": [
+              "glm-5.3-flash",
+              "glm-5.3",
+              "kimi-k3",
+              "kimi-k2.7-code",
+              "deepseek-v4.1-flash",
+              "deepseek-v4-pro",
+              "mimo-v2.5",
+              "mimo-v2.5-pro",
+              "glm-5.2",
+              "glm-5.1",
+              "kimi-k2.6",
+              "deepseek-v4-flash",
+              "deepseek-v4-flash-vision-exp",
+              "hy4-preview",
+              "hy3"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "opencode"
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "templateNameMap": {
+            "zh-CN": "OpenCode Go (Anthropic)",
+            "en-US": "OpenCode Go (Anthropic)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://opencode.ai/auth"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://opencode.ai/zen/go/v1"
+            },
+            "builtinModelIds": [
+              "minimax-m3",
+              "qwen3.8-max",
+              "qwen3.8-flash",
+              "minimax-m2.7",
+              "minimax-m2.5",
+              "qwen3.7-max",
+              "qwen3.7-plus",
+              "qwen3.6-plus"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "opencode"
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-responses",
+          "templateNameMap": {
+            "zh-CN": "OpenCode Go (Responses)",
+            "en-US": "OpenCode Go (Responses)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://opencode.ai/auth"
+            },
+            "api": {
+              "type": "openai-responses",
+              "baseUrl": "https://opencode.ai/zen/go/v1"
+            },
+            "builtinModelIds": ["gpt-5.6-luna", "grok-4.6"],
+            "logo": {
+              "type": "builtin",
+              "key": "opencode"
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "templateNameMap": {
+            "zh-CN": "OpenCode Zen (Responses)",
+            "en-US": "OpenCode Zen (Responses)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://opencode.ai/auth"
+            },
+            "api": {
+              "type": "openai-responses",
+              "baseUrl": "https://opencode.ai/zen/v1"
+            },
+            "builtinModelIds": [
+              "gpt-6-astra",
+              "gpt-5.6-sol",
+              "gpt-5.6-terra",
+              "gpt-5.6-luna",
+              "gpt-5.5",
+              "gpt-5.5-pro",
+              "gpt-5.4",
+              "gpt-5.4-pro",
+              "gpt-5.4-mini",
+              "gpt-5.4-nano",
+              "gpt-5.3-codex",
+              "gpt-5.3-codex-spark",
+              "gpt-5.2",
+              "gpt-5.1"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "opencode"
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "templateNameMap": {
+            "zh-CN": "OpenCode Zen (Anthropic)",
+            "en-US": "OpenCode Zen (Anthropic)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://opencode.ai/auth"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://opencode.ai/zen/v1"
+            },
+            "builtinModelIds": [
+              "claude-fable-5-1",
+              "claude-fable-5",
+              "qwen3.7-max",
+              "qwen3.6-plus",
+              "qwen3.5-plus",
+              "claude-opus-5",
+              "claude-sonnet-5",
+              "claude-haiku-4-5",
+              "claude-opus-4-8",
+              "claude-opus-4-7",
+              "claude-opus-4-6",
+              "claude-opus-4-5",
+              "claude-sonnet-4-6",
+              "claude-sonnet-4-5",
+              "qwen3.7-plus"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "opencode"
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "templateNameMap": {
+            "zh-CN": "OpenCode Zen (Chat)",
+            "en-US": "OpenCode Zen (Chat)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://opencode.ai/auth"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://opencode.ai/zen/v1"
+            },
+            "builtinModelIds": [
+              "kimi-k3",
+              "minimax-m3",
+              "deepseek-v4-pro",
+              "glm-5.2",
+              "big-pickle",
+              "mimo-v2.5-free",
+              "hy3-free",
+              "ling-3.0-flash-fin-free",
+              "nemotron-3-ultra-free",
+              "muse-spark-1.2-contributor-free",
+              "minimax-m2.7",
+              "deepseek-v4-flash",
+              "glm-5.1",
+              "nemotron-3.5-lightning-free"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "opencode"
+            }
+          }
+        }
+      ],
+      "providerRules": [
+        {
+          "providerId": "account:zai-individual-coding-plan",
+          "providerName": "Z.AI Individual Coding Plan",
+          "config": {
+            "group": "zai-family",
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "access": {
+              "type": "zhipu-account",
+              "mode": "individual-coding-plan",
+              "accountType": "zai"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.z.ai/api/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "zai"
+            }
+          }
+        },
+        {
+          "providerId": "account:zai-team-coding-plan",
+          "providerName": "Z.AI Team Coding Plan",
+          "config": {
+            "group": "zai-family",
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "access": {
+              "type": "zhipu-account",
+              "mode": "team-coding-plan",
+              "accountType": "zai"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.z.ai/api/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "zai"
+            }
+          }
+        },
+        {
+          "providerId": "account:zai-start-plan",
+          "providerName": "Start Plan",
+          "config": {
+            "group": "zai-family",
+            "builtinModelIds": ["GLM-5.3-Flash", "GLM-5.2", "GLM-5-Turbo"],
+            "access": {
+              "type": "zhipu-account",
+              "mode": "start-plan",
+              "accountType": "zai"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://zcode.z.ai/api/v1/zcode-plan/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "start-plan"
+            }
+          }
+        },
+        {
+          "providerId": "account:bigmodel-individual-coding-plan",
+          "providerName": "BigModel Individual Coding Plan",
+          "config": {
+            "group": "bigmodel-family",
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "access": {
+              "type": "zhipu-account",
+              "mode": "individual-coding-plan",
+              "accountType": "bigmodel"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://open.bigmodel.cn/api/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "bigmodel"
+            }
+          }
+        },
+        {
+          "providerId": "account:bigmodel-team-coding-plan",
+          "providerName": "BigModel Team Coding Plan",
+          "config": {
+            "group": "bigmodel-family",
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "access": {
+              "type": "zhipu-account",
+              "mode": "team-coding-plan",
+              "accountType": "bigmodel"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://open.bigmodel.cn/api/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "bigmodel"
+            }
+          }
+        },
+        {
+          "providerId": "account:bigmodel-start-plan",
+          "providerName": "Start Plan",
+          "config": {
+            "group": "bigmodel-family",
+            "builtinModelIds": ["GLM-5.3-Flash", "GLM-5.2", "GLM-5-Turbo"],
+            "access": {
+              "type": "zhipu-account",
+              "mode": "start-plan",
+              "accountType": "bigmodel"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://zcode.z.ai/api/v1/zcode-plan/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "start-plan"
+            }
+          }
+        },
+        {
+          "providerId": "account:zai-offpeak-idle-plan",
+          "providerName": "Z.AI Idle plan",
+          "config": {
+            "group": "zai-family",
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "visibility": "hidden",
+            "access": {
+              "type": "zhipu-account",
+              "mode": "off-peak",
+              "accountType": "zai"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://zcode.z.ai/api/v1/off-peak/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "zai"
+            }
+          }
+        },
+        {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "providerName": "BigModel Idle plan",
+          "config": {
+            "group": "bigmodel-family",
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "visibility": "hidden",
+            "access": {
+              "type": "zhipu-account",
+              "mode": "off-peak",
+              "accountType": "bigmodel"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://zcode.z.ai/api/v1/off-peak/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "bigmodel"
+            }
+          }
+        },
+        {
+          "providerId": "account:zai-highspeed-card",
+          "providerName": "Z.AI Highspeed card",
+          "config": {
+            "group": "zai-family",
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "visibility": "hidden",
+            "access": {
+              "type": "zhipu-account",
+              "mode": "highspeed",
+              "accountType": "zai"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://zcode.z.ai/api/v1/highspeed/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "zai"
+            }
+          }
+        },
+        {
+          "providerId": "account:bigmodel-highspeed-card",
+          "providerName": "BigModel Highspeed card",
+          "config": {
+            "group": "bigmodel-family",
+            "builtinModelIds": ["GLM-5.3", "GLM-5.3-Flash"],
+            "visibility": "hidden",
+            "access": {
+              "type": "zhipu-account",
+              "mode": "highspeed",
+              "accountType": "bigmodel"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://zcode.z.ai/api/v1/highspeed/anthropic"
+            },
+            "logo": {
+              "type": "builtin",
+              "key": "bigmodel"
+            }
+          }
+        }
+      ]
+    },
+    "modelConfigRules": {
+      "modelRules": [
+        {
+          "modelMatch": ".*",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "outputFormat": {
+                "supportsText": true
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false,
+              "supportsMidConversationSystem": false,
+              "requiresMfjsToolSchema": false
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 128000
+              },
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"],
+                "map": "{}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 64000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*GLM-5\\.2.*",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 128000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*GLM-5-Turbo.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 64000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5\\.3.*",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 128000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5\\.3-flash.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": true
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5\\.1.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 64000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5\\.1-highspeed.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 64000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5v-turbo.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.7.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.7-flash.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.7-flashx.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.6.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.5.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 98304
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.5-air.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 98304
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.6v.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.6v-flash.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.6v-flashx.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.1v-thinking-flash.*",
+          "config": {
+            "properties": {
+              "contextWindow": 65536,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.1v-thinking-flashx.*",
+          "config": {
+            "properties": {
+              "contextWindow": 65536,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4-flashx-250414.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 16384
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4-flash-250414.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 16384
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4v-flash.*",
+          "config": {
+            "properties": {
+              "contextWindow": 16384,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 1024
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*codegeex-4.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*charglm-4.*",
+          "config": {
+            "properties": {
+              "contextWindow": 8192,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 4096
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*emohaa.*",
+          "config": {
+            "properties": {
+              "contextWindow": 8192,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 4096
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.6.*",
+          "config": {
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh", "max"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.3-codex.*",
+          "config": {
+            "properties": {
+              "contextWindow": 400000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-6-astra.*",
+          "config": {
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.4.*",
+          "config": {
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.4-pro.*",
+          "config": {
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["medium", "high", "xhigh"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.4-mini.*",
+          "config": {
+            "properties": {
+              "contextWindow": 400000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.4-nano.*",
+          "config": {
+            "properties": {
+              "contextWindow": 400000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*claude-(?:fable|opus|sonnet)-5.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*claude-haiku-4[.-]5.*",
+          "config": {
+            "properties": {
+              "contextWindow": 200000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 64000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*claude-(?:fable|mythos)-5[.-]1.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*grok-4\\.6.*",
+          "config": {
+            "properties": {
+              "contextWindow": 500000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*grok-build-0\\.1.*",
+          "config": {
+            "properties": {
+              "contextWindow": 256000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsJsonSchemaOutput": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*grok-4\\.3.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsJsonSchemaOutput": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k3.*",
+          "config": {
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*k3.*",
+          "config": {
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*k3-256k.*",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.7-code.*",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 98304
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.6.*",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 98304
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.5.*",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 98304
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*moonshot-v1-8k.*",
+          "config": {
+            "properties": {
+              "contextWindow": 8192,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*moonshot-v1-32k.*",
+          "config": {
+            "properties": {
+              "contextWindow": 32768,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*moonshot-v1-128k.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*moonshot-v1-8k-vision-preview.*",
+          "config": {
+            "properties": {
+              "contextWindow": 8192,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*moonshot-v1-32k-vision-preview.*",
+          "config": {
+            "properties": {
+              "contextWindow": 32768,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*moonshot-v1-128k-vision-preview.*",
+          "config": {
+            "properties": {
+              "contextWindow": 131072,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*MiniMax-M3.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*MiniMax-M2.*",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*MiniMax-M2\\.7.*",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*MiniMax-M2\\.7-highspeed.*",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*MiniMax-M2\\.5.*",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*MiniMax-M2\\.5-highspeed.*",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*MiniMax-M2\\.1.*",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*MiniMax-M2\\.1-highspeed.*",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 32000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4-flash.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "low", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 384000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4-pro.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "low", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 384000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-flash.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "low", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 384000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4[.-]1-flash.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": false
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "low", "high", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 384000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.8-(?:max|flash).*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "xhigh"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.5-plus.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.5-flash.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3-max.*",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen-plus.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen-flash.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3-vl-plus.*",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 32768
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.7-max.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.7-plus.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.7-flash.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.6-plus.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.6-flash.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.7-max-2026-06-08.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.8-omni-flash.*",
+          "config": {
+            "properties": {
+              "contextWindow": 65536,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": true
+              },
+              "supportsJsonSchemaOutput": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+              },
+              "maxOutputTokens": {
+                "max": 16384
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2\\.6-(?:pro|flash).*",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": true
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2\\.5.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": true
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2\\.5-pro.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsAudio": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2-pro.*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2-omni.*",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2-flash.*",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsImage": false,
+                "supportsVideo": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        }
+      ],
+      "modelApiRules": [
+        {
+          "modelMatch": ".*claude-(?:opus-(?:4[.-]8|5)|(?:fable|mythos)-5(?:[.-]1)?).*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "properties": {
+              "supportsMidConversationSystem": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"adaptive\"\n      },\n      \"output_config\": {\n        \"effort\": reasoningLevel == \"enabled\" ? \"high\" : reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "map": "{'max_tokens': maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"disabled\" || reasoningLevel == \"none\" ? \"disabled\" : \"enabled\"\n  },\n  \"enable_thinking\": reasoningLevel != \"disabled\" && reasoningLevel != \"none\",\n  \"reasoning_effort\": reasoningLevel == \"disabled\" ? \"none\" : reasoningLevel == \"enabled\" ? \"high\" : reasoningLevel,\n  \"reasoning\": {\n    \"effort\": reasoningLevel == \"disabled\" ? \"none\" : reasoningLevel == \"enabled\" ? \"high\" : reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{'max_completion_tokens': maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel == \"disabled\" ? \"none\" : reasoningLevel == \"enabled\" ? \"high\" : reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{'max_output_tokens': maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*(?:ox-alpha|glm-x-preview-f|x-preview-f-free).*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*(?:ox-alpha|glm-x-preview-f|x-preview-f-free).*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*GLM-5\\.2.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*GLM-5-Turbo.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5\\.3.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": \"enabled\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5\\.1.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5\\.1-highspeed.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-5v-turbo.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.7.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.7-flashx.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.7-flash.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.6(?!v).*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.5.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*glm-4\\.5-air.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.6.*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.3-codex.*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*claude-(?:fable|opus|sonnet)-5.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*grok-4\\.6.*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k3.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k3.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*k3.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*k3.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*k3-256k.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*k3-256k.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.7-code.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"disabled\" ? \"disabled\" : \"enabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.7-code.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"disabled\" ? \"disabled\" : \"enabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.7-code.*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel == \"disabled\" ? \"none\" : \"high\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.6.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.6.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.5.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*kimi-k2\\.5.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4-flash.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4-flash.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"reasoning_effort\": reasoningLevel\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4-pro.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4-pro.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"reasoning_effort\": reasoningLevel\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.8-(?:max|flash).*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": \"enabled\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.8-(?:max|flash).*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.8-(?:max|flash).*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.5-plus.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.5-plus.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"enable_thinking\": reasoningLevel == \"enabled\"}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.5-flash.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.5-flash.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"enable_thinking\": reasoningLevel == \"enabled\"}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen-plus.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen-plus.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"enable_thinking\": reasoningLevel == \"enabled\"}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen-flash.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen-flash.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"enable_thinking\": reasoningLevel == \"enabled\"}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3-vl-plus.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3-vl-plus.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"enable_thinking\": reasoningLevel == \"enabled\"}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2\\.6-(?:pro|flash).*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2\\.5.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2\\.5.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2\\.5-pro.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2\\.5-pro.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2-flash.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*mimo-v2-flash.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-6-astra.*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*claude-(?:fable|mythos)-5[.-]1.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-flash.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-flash.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"reasoning_effort\": reasoningLevel\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.4.*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.4.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4[.-]1-flash.*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4[.-]1-flash.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"enabled\"\n      },\n      \"reasoning_effort\": reasoningLevel\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.(?:7-(?:max|plus|flash)|6-(?:plus|flash)).*",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"enabled\" ? \"enabled\" : \"disabled\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.(?:7-(?:max|plus|flash)|6-(?:plus|flash)).*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"enable_thinking\": reasoningLevel == \"enabled\"}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.(?:7-(?:max|plus|flash)|6-(?:plus|flash)).*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel == \"disabled\" ? \"none\" : \"high\"\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.8-omni-flash.*",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.8-omni-flash.*",
+          "apiTypeMatch": "openai-responses",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        }
+      ],
+      "providerSiteRules": [
+        {
+          "modelMatch": "glm-5\\.3-flash",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": true,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "glm-5\\.3",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "glm-5\\.2",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "glm-5\\.1",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 202752,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{}"
+              },
+              "maxOutputTokens": {
+                "max": 32768,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "kimi-k3",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "kimi-k2\\.7-code",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{}"
+              },
+              "maxOutputTokens": {
+                "max": 262144,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "kimi-k2\\.6",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{}"
+              },
+              "maxOutputTokens": {
+                "max": 65536,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "deepseek-v4\\.1-flash",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 384000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "deepseek-v4-pro",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 384000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "deepseek-v4-flash",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 384000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "deepseek-v4-flash-vision-exp",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 384000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "mimo-v2\\.5",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": true
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{}"
+              },
+              "maxOutputTokens": {
+                "max": 128000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "mimo-v2\\.5-pro",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{}"
+              },
+              "maxOutputTokens": {
+                "max": 128000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "hy4-preview",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1024000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "high"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 64000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "hy3",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 256000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "high"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 128000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "minimax-m3",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"],
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel == \"disabled\" ? \"disabled\" : \"adaptive\"\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "minimax-m2\\.7",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{}"
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "minimax-m2\\.5",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 204800,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{}"
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "qwen3\\.8-max",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "xhigh"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "qwen3\\.8-flash",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "xhigh"]
+              },
+              "maxOutputTokens": {
+                "max": 131072
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "qwen3\\.7-max",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "qwen3\\.7-plus",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "qwen3\\.6-plus",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"]
+              },
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "gpt-5\\.6-luna",
+          "apiTypeMatch": "openai-responses",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsPdf": true,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 128000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "grok-4\\.6",
+          "apiTypeMatch": "openai-responses",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "contextWindow": 500000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsPdf": false,
+                "supportsAudio": false
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 500000
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*(?:glm-|deepseek-|kimi-k2|qwen|mimo-).*",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\" || reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"thinking\": {\n        \"type\": \"adaptive\"\n      },\n      \"output_config\": {\n        \"effort\": reasoningLevel == \"enabled\" ? \"high\" : reasoningLevel\n      }\n    }"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "baseUrlMatch": "https://api\\.z\\.ai/api/anthropic/?",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "baseUrlMatch": "https://open\\.bigmodel\\.cn/api/anthropic/?",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "baseUrlMatch": "https://zcode\\.z\\.ai/api/v1/zcode-plan/anthropic/?",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "baseUrlMatch": "https://zcode\\.z\\.ai/api/v1/highspeed/anthropic/?",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsVideo": true
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*claude-.*",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "(?:https://api\\.anthropic\\.com/v1)",
+          "config": {
+            "properties": {
+              "supportsNativeWebSearch": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*(?:kimi-k3|k3|k3-256k)(?:[.\\-:/\\[].*)?",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "(?:https://api\\.moonshot\\.cn/anthropic)",
+          "config": {
+            "properties": {
+              "requiresMfjsToolSchema": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "(?:https://api\\.deepseek\\.com/anthropic)",
+          "config": {
+            "properties": {
+              "supportsNativeWebSearch": true,
+              "supportsMidConversationSystem": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.(?:6(?:-(?:sol|terra|luna))?|3-codex)(?:[.\\-:/\\[].*)?",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://api\\.z\\.ai/api/anthropic/?",
+          "config": {
+            "properties": {
+              "supportsNativeWebSearch": true,
+              "supportsMidConversationSystem": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://open\\.bigmodel\\.cn/api/anthropic/?",
+          "config": {
+            "properties": {
+              "supportsNativeWebSearch": true,
+              "supportsMidConversationSystem": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://zcode\\.z\\.ai/api/v1/zcode-plan/anthropic/?",
+          "config": {
+            "properties": {
+              "supportsNativeWebSearch": true,
+              "supportsMidConversationSystem": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://zcode\\.z\\.ai/api/v1/off-peak/anthropic/?",
+          "config": {
+            "properties": {
+              "supportsNativeWebSearch": false,
+              "supportsMidConversationSystem": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://zcode\\.z\\.ai/api/v1/highspeed/anthropic/?",
+          "config": {
+            "properties": {
+              "supportsNativeWebSearch": true,
+              "supportsMidConversationSystem": true
+            }
+          }
+        },
+        {
+          "modelMatch": "deepseek-v4-flash",
+          "apiTypeMatch": "openai-responses",
+          "baseUrlMatch": "https://api\\.deepseek\\.com(?:/.*)?",
+          "config": {
+            "properties": {
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel == \"disabled\" ? \"none\" : reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "deepseek-v4-pro",
+          "apiTypeMatch": "openai-responses",
+          "baseUrlMatch": "https://api\\.deepseek\\.com(?:/.*)?",
+          "config": {
+            "properties": {
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel == \"disabled\" ? \"none\" : reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "deepseek-flash",
+          "apiTypeMatch": "openai-responses",
+          "baseUrlMatch": "https://api\\.deepseek\\.com(?:/.*)?",
+          "config": {
+            "properties": {
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel == \"disabled\" ? \"none\" : reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "deepseek-v4-flash(?:-vision-exp)?",
+          "baseUrlMatch": "https://api\\.deepseek\\.com(?:/.*)?",
+          "apiTypeMatch": ".*",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-6-astra(?:[.\\-:/\\[].*)?",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*gpt-5\\.4(?:-(?:pro|mini|nano))?(?:-20\\d{2}(?:-?\\d{2}){2})?(?:[:/\\[].*)?",
+          "apiTypeMatch": "anthropic-messages",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              }
+            }
+          },
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?"
+        },
+        {
+          "modelMatch": ".*deepseek-v4[.-]1-flash(?:[.\\-:/\\[].*)?",
+          "apiTypeMatch": ".*",
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?",
+          "config": {
+            "properties": {
+              "contextWindow": 1048576,
+              "supportsJsonSchemaOutput": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*deepseek-v4[.-]1-flash(?:[.\\-:/\\[].*)?",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "reasoningLevel == \"disabled\"\n  ? {\n      \"reasoning\": {\n        \"enabled\": false\n      }\n    }\n  : {\n      \"reasoning\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              }
+            }
+          },
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?"
+        },
+        {
+          "modelMatch": ".*qwen3\\.(?:7-(?:max|plus|flash)|6-(?:plus|flash))(?:-20\\d{2}(?:-?\\d{2}){2})?(?:[:/\\[].*)?",
+          "apiTypeMatch": "openai-chat-completions",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"reasoning\": {\n    \"enabled\": reasoningLevel == \"enabled\"\n  }\n}"
+              }
+            }
+          },
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?"
+        },
+        {
+          "modelMatch": ".*qwen3\\.7-flash(?:-20\\d{2}(?:-?\\d{2}){2})?(?:[:/\\[].*)?",
+          "apiTypeMatch": ".*",
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?",
+          "config": {
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "max": 65536
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.7-plus(?:-20\\d{2}(?:-?\\d{2}){2})?(?:[:/\\[].*)?",
+          "apiTypeMatch": ".*",
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsVideo": false
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.7-(?:max|plus|flash)(?:-20\\d{2}(?:-?\\d{2}){2})?(?:[:/\\[].*)?",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://dashscope\\.aliyuncs\\.com/apps/anthropic/?",
+          "config": {
+            "properties": {
+              "supportsJsonSchemaOutput": true
+            }
+          }
+        },
+        {
+          "modelMatch": ".*qwen3\\.7-(?:max|plus|flash)(?:-20\\d{2}(?:-?\\d{2}){2})?(?:[:/\\[].*)?",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://dashscope-intl\\.aliyuncs\\.com/apps/anthropic/?",
+          "config": {
+            "properties": {
+              "supportsJsonSchemaOutput": true
+            }
+          }
+        },
+        {
+          "modelMatch": "qwen/qwen3\\.8-max-0902",
+          "apiTypeMatch": ".*",
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?",
+          "config": {
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["minimal", "low", "medium", "high", "xhigh"]
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "qwen/qwen3\\.6-(?:plus|flash)",
+          "apiTypeMatch": ".*",
+          "baseUrlMatch": "https://openrouter\\.ai/api(?:/v1)?/?",
+          "config": {
+            "properties": {
+              "supportsJsonSchemaOutput": true
+            }
+          }
+        }
+      ],
+      "templateModelRules": [
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "glm-5.3-flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "glm-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "glm-5.2",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "glm-5.1",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "kimi-k3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "kimi-k2.7-code",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "kimi-k2.6",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "deepseek-v4.1-flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "deepseek-v4-pro",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "deepseek-v4-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "deepseek-v4-flash-vision-exp",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "mimo-v2.5",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "mimo-v2.5-pro",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "hy4-preview",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "hy3",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "minimax-m3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "minimax-m2.7",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "minimax-m2.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "qwen3.8-max",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "qwen3.8-flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "qwen3.7-max",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "qwen3.7-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "qwen3.6-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-go-responses",
+          "modelId": "gpt-5.6-luna",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-go-responses",
+          "modelId": "grok-4.6",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "GLM-5-Turbo",
+          "templateId": "zai-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5-Turbo",
+          "templateId": "bigmodel-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5.3",
+          "templateId": "zai-api",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "GLM-5.3-Flash",
+          "templateId": "zai-api",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "GLM-5.3",
+          "templateId": "bigmodel-api",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "GLM-5.3-Flash",
+          "templateId": "bigmodel-api",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "kimi-k3",
+          "templateId": "moonshot-kimi",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "kimi-k2.7-code",
+          "templateId": "moonshot-kimi",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "kimi-k2.6",
+          "templateId": "moonshot-kimi",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "k3",
+          "templateId": "moonshot-kimi",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "k3-256k",
+          "templateId": "moonshot-kimi",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "MiniMax-M2.7",
+          "templateId": "minimax",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "MiniMax-M2.7-highspeed",
+          "templateId": "minimax",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "MiniMax-M3",
+          "templateId": "minimax",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "MiniMax-M2.5",
+          "templateId": "minimax",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "MiniMax-M2.5-highspeed",
+          "templateId": "minimax",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "MiniMax-M2.1",
+          "templateId": "minimax",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "MiniMax-M2.1-highspeed",
+          "templateId": "minimax",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "MiniMax-M2",
+          "templateId": "minimax",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "deepseek-v4-pro",
+          "templateId": "deepseek",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "qwen3.8-max",
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "qwen3.8-flash",
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "qwen3.5-plus",
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen3.5-flash",
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen3-max",
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen-plus",
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen-flash",
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen3-vl-plus",
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen3.8-max",
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "qwen3.8-flash",
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "qwen3.5-plus",
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen3.5-flash",
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen3-max",
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen-plus",
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen-flash",
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "qwen3-vl-plus",
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "mimo-v2.6-pro",
+          "templateId": "xiaomi-mimo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "mimo-v2.6-flash",
+          "templateId": "xiaomi-mimo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "mimo-v2.6-pro",
+          "templateId": "xiaomi-mimo-token-plan",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "mimo-v2.6-flash",
+          "templateId": "xiaomi-mimo-token-plan",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "mimo-v2.5-pro",
+          "templateId": "xiaomi-mimo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "mimo-v2.5",
+          "templateId": "xiaomi-mimo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "gpt-5.6-sol",
+          "templateId": "openai",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "gpt-5.6-terra",
+          "templateId": "openai",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "gpt-5.6-luna",
+          "templateId": "openai",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "gpt-5.6",
+          "templateId": "openai",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "gpt-5.3-codex",
+          "templateId": "openai",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "claude-fable-5",
+          "templateId": "anthropic",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "claude-opus-5",
+          "templateId": "anthropic",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "claude-sonnet-5",
+          "templateId": "anthropic",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "claude-haiku-4-5-20251001",
+          "templateId": "anthropic",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "grok-4.6",
+          "templateId": "xai",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "grok-build-0.1",
+          "templateId": "xai",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "grok-4.3",
+          "templateId": "xai",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.6-sol",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.6-terra",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.6-luna",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.3-codex",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-opus-5",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-sonnet-5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-haiku-4.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "deepseek/deepseek-v4-pro",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "deepseek/deepseek-v4-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "moonshotai/kimi-k3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "moonshotai/kimi-k2.7-code",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-5.3-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-5.2",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.8-max",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.8-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "minimax/minimax-m3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "xiaomi/mimo-v2.5-pro",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "xiaomi/mimo-v2.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "x-ai/grok-4.6",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.6-sol",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.6-terra",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.6-luna",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.5-pro",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.4",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.4-pro",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.4-mini",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.4-nano",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.3-codex",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.3-codex-spark",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.2",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-5.1",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-fable-5",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-opus-5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-sonnet-5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-haiku-4-5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-opus-4-8",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-opus-4-7",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-opus-4-6",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-opus-4-5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-sonnet-4-6",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-sonnet-4-5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "qwen3.7-max",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "qwen3.7-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "qwen3.6-plus",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "qwen3.5-plus",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "kimi-k3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "minimax-m3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "minimax-m2.7",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "deepseek-v4-pro",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "deepseek-v4-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "glm-5.2",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "glm-5.1",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "big-pickle",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "mimo-v2.5-free",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "hy3-free",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "ling-3.0-flash-fin-free",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "nemotron-3-ultra-free",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "nemotron-3.5-lightning-free",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "muse-spark-1.2-contributor-free",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.6",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-opus-4.8",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-opus-4.7",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-opus-4.6",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-opus-4.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-sonnet-4.6",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-sonnet-4.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "moonshotai/kimi-k2.6",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "moonshotai/kimi-k2.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-5.1",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-5v-turbo",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-5-turbo",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-4.7",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-4.7-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-4.6",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-4.6v",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-4.5-air",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-4.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.7-max",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.7-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.7-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.6-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.6-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.5-plus-20260420",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3-vl-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3-vl-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "minimax/minimax-m2.7",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "minimax/minimax-m2.5",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "x-ai/grok-build-0.1",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "x-ai/grok-4.3",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5.3",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "GLM-5.3-Flash",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "GLM-5V-Turbo",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5.1",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5.1-Highspeed",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5-Turbo",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.7",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.7-FlashX",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.7-Flash",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.6",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.5-Air",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.5",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.6V",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.6V-Flash",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.6V-FlashX",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.1V-Thinking-FlashX",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.1V-Thinking-Flash",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4-FlashX-250414",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4-Flash-250414",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4V-Flash",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "codegeex-4",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "charglm-4",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "emohaa",
+          "templateId": "zai-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5.3",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "GLM-5.3-Flash",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "modelId": "GLM-5V-Turbo",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5.1",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5.1-Highspeed",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-5-Turbo",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.7",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.7-FlashX",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.7-Flash",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.6",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.5-Air",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.5",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.6V",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.6V-Flash",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.6V-FlashX",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.1V-Thinking-FlashX",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4.1V-Thinking-Flash",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4-FlashX-250414",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4-Flash-250414",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "GLM-4V-Flash",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "codegeex-4",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "charglm-4",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "modelId": "emohaa",
+          "templateId": "bigmodel-standard-api",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openai",
+          "modelId": "gpt-6-astra",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-6-astra",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "anthropic",
+          "modelId": "claude-fable-5-1",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-fable-5-1",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-6-astra",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-fable-5.1",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "deepseek",
+          "modelId": "deepseek-flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "templateId": "openai",
+          "modelId": "gpt-5.4",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openai",
+          "modelId": "gpt-5.4-pro",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openai",
+          "modelId": "gpt-5.4-mini",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openai",
+          "modelId": "gpt-5.4-nano",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.4",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.4-pro",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.4-mini",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-5.4-nano",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "modelId": "qwen3.7-max",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "modelId": "qwen3.7-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "modelId": "qwen3.7-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "modelId": "qwen3.6-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-cn",
+          "modelId": "qwen3.6-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "modelId": "qwen3.7-max",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "modelId": "qwen3.7-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "modelId": "qwen3.7-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "modelId": "qwen3.6-plus",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "modelId": "qwen3.6-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "qwen-alibaba-model-studio-intl",
+          "modelId": "qwen3.8-omni-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "moonshot-kimi",
+          "modelId": "kimi-k2.7-code-highspeed",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "deepseek/deepseek-v4.1-flash",
+          "config": {
+            "enabled": false
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "qwen/qwen3.8-max-0902",
+          "config": {
+            "enabled": false
+          }
+        }
+      ],
+      "builtinProviderModelRules": [
+        {
+          "providerId": "account:zai-individual-coding-plan",
+          "modelId": "GLM-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-individual-coding-plan",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-individual-coding-plan",
+          "modelId": "GLM-5.2",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-individual-coding-plan",
+          "modelId": "GLM-5-Turbo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-team-coding-plan",
+          "modelId": "GLM-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-team-coding-plan",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-team-coding-plan",
+          "modelId": "GLM-5.2",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-team-coding-plan",
+          "modelId": "GLM-5-Turbo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-start-plan",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-start-plan",
+          "modelId": "GLM-5.2",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-start-plan",
+          "modelId": "GLM-5-Turbo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-individual-coding-plan",
+          "modelId": "GLM-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-individual-coding-plan",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-individual-coding-plan",
+          "modelId": "GLM-5.2",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-individual-coding-plan",
+          "modelId": "GLM-5-Turbo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-team-coding-plan",
+          "modelId": "GLM-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-team-coding-plan",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-team-coding-plan",
+          "modelId": "GLM-5.2",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-team-coding-plan",
+          "modelId": "GLM-5-Turbo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-start-plan",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-start-plan",
+          "modelId": "GLM-5.2",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-start-plan",
+          "modelId": "GLM-5-Turbo",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-offpeak-idle-plan",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-highspeed-card",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:zai-highspeed-card",
+          "modelId": "GLM-5.3",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-highspeed-card",
+          "modelId": "GLM-5.3-Flash",
+          "config": {
+            "enabled": true
+          }
+        },
+        {
+          "providerId": "account:bigmodel-highspeed-card",
+          "modelId": "GLM-5.3",
+          "config": {
+            "enabled": true
+          }
+        }
+      ]
+    }
+  }
+}

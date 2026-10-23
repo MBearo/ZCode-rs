@@ -1,0 +1,6 @@
+{
+  "min_input_chars": 10,
+  "input_cap_chars": 2000,
+  "input_cap_head_chars": 1500,
+  "conversation_tail_chars": 1000
+}

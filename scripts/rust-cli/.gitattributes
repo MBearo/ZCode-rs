@@ -1,0 +1,4 @@
+# 所有文本固定 LF（修复线 F56，docs/specs/rust-cli/prompts.md「换行」）：抓到的原文（例如 CL5 的
+# stdout.txt）与 `zcode --help` 的输出逐字比较，golden 文件也按原文比较；Windows 的 `core.autocrlf=true`
+# 检出成 CRLF 会误报差异。
+* text=auto eol=lf

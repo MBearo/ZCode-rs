@@ -1,0 +1,33 @@
+{
+  "name": "WebSearch",
+  "description": "Search the web. Returns result blocks with titles and URLs. US-only.\n\n- The current month is (provided in the conversation below) — use this when searching for recent information.\n- `allowed_domains` / `blocked_domains` filter results.\n- After answering from results, end with a \"Sources:\" list of the URLs you used as markdown links.",
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "query": {
+        "description": "The search query to use",
+        "type": "string",
+        "minLength": 2
+      },
+      "allowed_domains": {
+        "description": "Only include search results from these domains",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "blocked_domains": {
+        "description": "Never include search results from these domains",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "additionalProperties": false
+  }
+}
