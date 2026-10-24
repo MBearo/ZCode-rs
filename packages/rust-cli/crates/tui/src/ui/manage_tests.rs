@@ -11,6 +11,7 @@ fn entry(id: &str, kind: BackgroundKind, status: BackgroundStatus) -> Background
         description: id.into(),
         status,
         output: None,
+        machine: None,
     }
 }
 

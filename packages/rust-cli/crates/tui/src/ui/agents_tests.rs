@@ -40,6 +40,7 @@ fn entry(id: &str, status: SubagentStatus, ended_ago_ms: Option<u64>) -> Subagen
         owner: None,
         activity: None,
         parked: false,
+        machine: None,
     }
 }
 
@@ -348,4 +349,34 @@ fn the_duration_stays_in_place_when_the_activity_changes() {
     let text = plain(&app.agents_lines(40, now).0);
     assert!(text[2].ends_with(" 13s"), "{text:?}");
     assert!(text[2].width() <= 40, "{text:?}");
+}
+
+/// 远端执行 R4（remote-exec.md §21.6）：子代理的缺省机器在远端时，类型后面标 ` @机器`（强调色），描述列照旧对齐。
+#[test]
+fn agents_on_a_remote_machine_name_it() {
+    let mut app = app();
+    let now = Instant::now();
+    let mut remote = entry("agent_a", SubagentStatus::Running, None);
+    remote.machine = Some("dev-a".into());
+    let local = entry("agent_b", SubagentStatus::Running, None);
+    app.agents = AgentList {
+        entries: vec![remote, local],
+        at: Some(now),
+    };
+    let (lines, _) = app.agents_lines(80, now);
+    let text = plain(&lines);
+    assert!(
+        text[2].starts_with("  ◯ Explore @dev-a  Look at agent_a"),
+        "{text:?}"
+    );
+    assert!(
+        text[3].starts_with("  ◯ Explore         Look at agent_b"),
+        "{text:?}"
+    );
+    let tag = lines[2]
+        .spans
+        .iter()
+        .find(|span| span.content == " @dev-a")
+        .unwrap();
+    assert_eq!(tag.style.fg, Some(app.palette.accent));
 }

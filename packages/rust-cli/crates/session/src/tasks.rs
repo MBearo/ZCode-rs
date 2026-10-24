@@ -1,12 +1,14 @@
 //! 后台任务的查看与停止（docs/specs/rust-cli/tui-display.md §3.1，工作线 L28）。
 //!
 //! 后台命令的事实在执行环境的账本里，后台子代理在 agents 里；这里只汇总给前端看，停止交给 agents 的
-//! 同一条 TaskStop 路径，会话 actor 不另记任务表。
+//! 同一条 TaskStop 路径，会话 actor 不另记任务表。远端执行 R4（docs/specs/rust-cli/remote-exec.md §21.6）：连上的远端
+//! 机器上的后台命令也列出来（各台机器的执行器有自己的账本），条目带机器名；Shell 详情按任务 ID 依次问各台机器。
 
 use rust_cli_kernel_api::env::{OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{ReadText, TextRead};
 use rust_cli_kernel_api::env_shell::{BackgroundStatus, BackgroundTask};
 use rust_cli_kernel_api::ids::{OwnerEpoch, SessionId};
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind, OUTPUT_TAIL_LINES};
 use rust_cli_kernel_api::panels::{SHELL_DETAIL_LINES, ShellDetail, ShellOutput, TasksSnapshot};
 use rust_cli_kernel_api::session_api::Ack;
@@ -46,15 +48,56 @@ pub(crate) async fn snapshot(
     }
 }
 
-/// 执行环境账本里还在跑的后台命令；`tail` 为真时带输出文件的末尾。
+/// 一台机器：执行端口、它上面的工作区、远端时的名字（本机为 None）。
+struct Place {
+    machine: MachineEnv,
+    workspace: WorkspaceRef,
+    name: Option<String>,
+}
+
+/// 本机在前，再是连上的远端机器（按名字，注册表的快照）。
+fn places(deps: &SessionDeps, workspace: &WorkspaceRef) -> Vec<Place> {
+    let mut places = vec![Place {
+        machine: deps.machine.clone(),
+        workspace: workspace.clone(),
+        name: None,
+    }];
+    for remote in deps.machines.machines().machines {
+        if let Some((machine, workspace)) = deps.machines.remote(&remote.name) {
+            places.push(Place {
+                machine,
+                workspace,
+                name: Some(remote.name),
+            });
+        }
+    }
+    places
+}
+
+/// 本机与连上的远端机器的账本里还在跑的后台命令；`tail` 为真时带输出文件的末尾。
 async fn running_shells(
     deps: &SessionDeps,
     workspace: &WorkspaceRef,
     session: &SessionId,
     tail: bool,
 ) -> Vec<BackgroundEntry> {
+    // 各台机器同时问（一台慢不拖住别的台；结果仍按本机在前、远端按名字的顺序）。
+    let places = places(deps, workspace);
+    let lists =
+        futures_util::future::join_all(places.iter().map(|place| running_on(place, session, tail)))
+            .await;
+    lists.into_iter().flatten().collect()
+}
+
+/// 一台机器的账本里还在跑的后台命令。
+async fn running_on(place: &Place, session: &SessionId, tail: bool) -> Vec<BackgroundEntry> {
     let mut entries = Vec::new();
-    let Ok(state) = deps.machine.shell().shell_state(workspace, session).await else {
+    let Ok(state) = place
+        .machine
+        .shell()
+        .shell_state(&place.workspace, session)
+        .await
+    else {
         return entries;
     };
     for task in state.background {
@@ -62,16 +105,14 @@ async fn running_shells(
             session: session.clone(),
             task: task.clone(),
         };
-        let Ok(Some(info)) = deps.machine.background().background_command(key).await else {
+        let Ok(Some(info)) = place.machine.background().background_command(key).await else {
             continue;
         };
         if info.status != BackgroundStatus::Running {
             continue;
         }
         let output = match &state.outputs {
-            Some(dir) if tail => {
-                output_tail(deps, workspace, &output_path(dir, task.as_str())).await
-            }
+            Some(dir) if tail => output_tail(place, &output_path(dir, task.as_str())).await,
             _ => None,
         };
         entries.push(BackgroundEntry {
@@ -80,6 +121,7 @@ async fn running_shells(
             description: info.command,
             status: info.status,
             output,
+            machine: place.name.clone(),
         });
     }
     entries
@@ -95,7 +137,8 @@ fn output_path(
 }
 
 /// 一个后台命令的详情（Shell 详情，docs/specs/rust-cli/tui-panels.md §3.3）：与 `/tasks` 同一份账本与输出
-/// 文件；不认识时为 None。在调用方的任务里跑，不占用 actor。
+/// 文件；不认识时为 None。按本机、再按连上的远端机器依次问（任务 ID 跨机器不重复，remote-exec.md §20.7.2、§21.6）。
+/// 在调用方的任务里跑，不占用 actor。
 pub(crate) async fn shell_detail(
     deps: &SessionDeps,
     workspace: &WorkspaceRef,
@@ -106,29 +149,37 @@ pub(crate) async fn shell_detail(
         session: session.clone(),
         task: rust_cli_kernel_api::ids::ShellTaskId::new(task),
     };
-    let info = deps
-        .machine
-        .background()
-        .background_command(key.clone())
-        .await
-        .ok()
-        .flatten()?;
-    let elapsed_ms = deps
+    let mut found = None;
+    for place in places(deps, workspace) {
+        let info = place
+            .machine
+            .background()
+            .background_command(key.clone())
+            .await
+            .ok()
+            .flatten();
+        if let Some(info) = info {
+            found = Some((place, info));
+            break;
+        }
+    }
+    let (place, info) = found?;
+    let elapsed_ms = place
         .machine
         .background()
         .background_elapsed(key)
         .await
         .ok()
         .flatten();
-    let outputs = deps
+    let outputs = place
         .machine
         .shell()
-        .shell_state(workspace, session)
+        .shell_state(&place.workspace, session)
         .await
         .ok()
         .and_then(|state| state.outputs);
     let output = match outputs {
-        Some(dir) => output_preview(deps, workspace, &output_path(&dir, task)).await,
+        Some(dir) => output_preview(&place, &output_path(&dir, task)).await,
         None => ShellOutput::Unavailable,
     };
     Some(ShellDetail {
@@ -141,18 +192,19 @@ pub(crate) async fn shell_detail(
 }
 
 /// 输出文件的末尾（最多 [`SHELL_DETAIL_LINES`] 行）与总行数；还没有文件时是空的，太大时不预览。
-async fn output_preview(
-    deps: &SessionDeps,
-    workspace: &WorkspaceRef,
-    path: &rust_cli_kernel_api::env::EnvPath,
-) -> ShellOutput {
+async fn output_preview(place: &Place, path: &rust_cli_kernel_api::env::EnvPath) -> ShellOutput {
     let request = ReadText {
         path: path.clone(),
         start_line: 0,
         max_lines: None,
         max_bytes: Some(OUTPUT_MAX_BYTES),
     };
-    match deps.machine.files().read_text(workspace, request).await {
+    match place
+        .machine
+        .files()
+        .read_text(&place.workspace, request)
+        .await
+    {
         Ok(TextRead::Text(slice)) => {
             let lines: Vec<&str> = slice.content.lines().collect();
             let tail = &lines[lines.len().saturating_sub(SHELL_DETAIL_LINES)..];
@@ -170,21 +222,17 @@ async fn output_preview(
     }
 }
 
-async fn output_tail(
-    deps: &SessionDeps,
-    workspace: &WorkspaceRef,
-    path: &rust_cli_kernel_api::env::EnvPath,
-) -> Option<String> {
+async fn output_tail(place: &Place, path: &rust_cli_kernel_api::env::EnvPath) -> Option<String> {
     let request = ReadText {
         path: path.clone(),
         start_line: 0,
         max_lines: None,
         max_bytes: Some(OUTPUT_MAX_BYTES),
     };
-    let TextRead::Text(slice) = deps
+    let TextRead::Text(slice) = place
         .machine
         .files()
-        .read_text(workspace, request)
+        .read_text(&place.workspace, request)
         .await
         .ok()?
     else {

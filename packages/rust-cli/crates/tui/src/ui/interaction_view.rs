@@ -173,6 +173,23 @@ fn asked_from(
     truncate_line(Line::from(spans), view.width)
 }
 
+/// 远端机器上的调用（remote-exec.md §21.6）：标题行（来源之后）接 dim 的 `· ` 与 `runs on <机器>`（机器名用强调色）。
+fn runs_on(title: &Line<'static>, machine: &str, view: &View<'_>) -> Line<'static> {
+    let mut spans = title.spans.clone();
+    let (before, after) = super::i18n_machines::runs_on(view.lang);
+    spans.extend([
+        Span::raw(" "),
+        Span::styled("· ", dim()),
+        Span::raw(before),
+        Span::styled(
+            machine.to_owned(),
+            ratatui::style::Style::default().fg(view.palette.accent),
+        ),
+        Span::raw(after),
+    ]);
+    truncate_line(Line::from(spans), view.width)
+}
+
 /// 参数的一行摘要（`键: 值, …`）。
 fn summary(input: &Value) -> String {
     match input {
@@ -216,6 +233,7 @@ impl Interaction {
                 message,
                 suggestions,
                 asked_by,
+                machine,
                 ..
             } => {
                 let always = self.always_label(tool, suggestions, view);
@@ -223,6 +241,9 @@ impl Interaction {
                 let mut layout = self.permission_lines(tool, input, message, always, editing, view);
                 if let Some(name) = asked_by {
                     layout.0[1] = asked_from(&layout.0[1], name, self.origin.as_deref(), view);
+                }
+                if let Some(machine) = machine {
+                    layout.0[1] = runs_on(&layout.0[1], machine, view);
                 }
                 layout
             }

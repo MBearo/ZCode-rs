@@ -49,6 +49,10 @@ pub struct SubagentEntry {
     /// 列表据此区分停放与真的结束了（修复线 F30，tui-panels.md §1.2：停放的不驱逐、照常当父代理）。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub parked: bool,
+    /// 子代理的缺省机器（Agent 的 `machine`，remote-exec.md §20.6）；本机为 None。界面在列表里标出它（远端执行 R4，
+    /// §21.6）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 /// 子代理的当前活动：子循环事件的投影（stall-visibility.md §4.3）。

@@ -18,15 +18,28 @@ fn subagent_entries_round_trip() {
         owner: None,
         activity: None,
         parked: false,
+        machine: None,
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["status"], "running");
     assert!(json.get("ended_ago_ms").is_none());
     assert!(json.get("activity").is_none());
     assert!(json.get("parked").is_none());
+    assert!(json.get("machine").is_none());
     assert_eq!(
         serde_json::from_value::<SubagentEntry>(json).unwrap(),
         entry
+    );
+    // 远端执行 R4（remote-exec.md §21.7）：缺省机器在远端的子代理写出 `machine`。
+    let remote = SubagentEntry {
+        machine: Some("dev-a".to_owned()),
+        ..entry.clone()
+    };
+    let json = serde_json::to_value(&remote).unwrap();
+    assert_eq!(json["machine"], "dev-a");
+    assert_eq!(
+        serde_json::from_value::<SubagentEntry>(json).unwrap(),
+        remote
     );
     // 修复线 F30：停放的条目写出 `parked`；旧的快照没有它，读成 false（下面的 activity 一项同）。
     let parked = SubagentEntry {
@@ -93,6 +106,7 @@ fn tasks_snapshots_round_trip() {
             owner: None,
             activity: None,
             parked: false,
+            machine: None,
         }],
         background: vec![crate::manage::BackgroundEntry {
             id: "agent_1".to_owned(),
@@ -100,6 +114,7 @@ fn tasks_snapshots_round_trip() {
             description: "Alpha task".to_owned(),
             status: BackgroundStatus::Running,
             output: None,
+            machine: None,
         }],
     };
     let json = serde_json::to_value(&snapshot).unwrap();

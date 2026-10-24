@@ -34,6 +34,9 @@ impl Command {
             "mcp" => Some("[reconnect|enable|disable [<server>|all]]"),
             "copy" => Some("[N]"),
             "cd" => Some("<path>"),
+            "machines" => {
+                Some("[add <name> <ssh target> [dir] | connect | disconnect | remove <name>]")
+            }
             _ => None,
         }
     }
@@ -86,6 +89,7 @@ commands! {
     "usage", true, "Show session cost, plan usage, and activity stats", "查看会话用量与活动统计";
     "theme", true, "Change the theme", "切换主题";
     "cd", true, "Move this session to a new working directory", "把会话移到新的工作目录";
+    "machines", true, "Manage remote machines that tools can run on", "管理工具可以在上面执行的远端机器";
     "exit", true, "Exit the CLI", "退出";
 }
 
@@ -226,7 +230,7 @@ mod tests {
     #[test]
     fn prefix_matches_win_over_subsequences() {
         let names = |typed: &str| matching(typed).iter().map(|c| c.name).collect::<Vec<_>>();
-        assert_eq!(names("m"), ["model", "memory", "mcp", "mode"]);
+        assert_eq!(names("m"), ["model", "memory", "mcp", "mode", "machines"]);
         assert_eq!(names("exit"), ["exit"]);
         assert_eq!(names("mdl"), ["model"]);
         assert_eq!(

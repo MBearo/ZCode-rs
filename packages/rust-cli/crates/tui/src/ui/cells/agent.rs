@@ -117,10 +117,14 @@ fn activity_line(item: &Activity, ctx: &Ctx<'_>) -> Line<'static> {
                 activity: None,
             };
             let (label, args, note) = tools::head_parts(&row, ctx);
-            let text = match args {
+            let mut text = match args {
                 Some(args) => format!("{label}({args}){note}"),
                 None => format!("{label}{note}"),
             };
+            // 子代理的调用显式写了远端的 `machine`（remote-exec.md §21.6）。
+            if let Some(machine) = crate::ui::machines::machine_of(input) {
+                text.push_str(&format!("  @{machine}"));
+            }
             let style = if *status == ToolStatus::Error {
                 red()
             } else {
@@ -229,13 +233,18 @@ fn done_line(tool_uses: u64, tokens: u64, duration_ms: u64, lang: Lang) -> Strin
 pub(super) fn agent(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     let name = display_name(&tool.input);
     let description = tool.input["description"].as_str().unwrap_or_default();
-    let head = Line::from(vec![
+    let mut spans = vec![
         dot(tool.status.into(), ctx),
         Span::raw(" "),
         Span::styled(name, bold()),
         Span::raw(format!("({description})")),
-    ]);
-    let mut lines = vec![truncate_line(head, ctx.width)];
+    ];
+    // Agent 的 `machine` 是子代理的缺省机器（remote-exec.md §21.6）。
+    if let Some(machine) = crate::ui::machines::machine_of(&tool.input) {
+        spans.push(Span::raw("  "));
+        spans.push(crate::ui::machines::tag(ctx.palette, machine));
+    }
+    let mut lines = vec![truncate_line(Line::from(spans), ctx.width)];
     match tool.status {
         ToolStatus::Running | ToolStatus::Pending | ToolStatus::Approval => {
             lines.extend(progress(tool.activity.as_ref(), ctx));

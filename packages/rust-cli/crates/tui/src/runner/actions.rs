@@ -263,6 +263,7 @@ impl<B: Backend> Loop<'_, B> {
             Action::Manage(manage) => self.manage(manage)?,
             Action::Panel(panel) => self.panel(panel),
             Action::Projects(request) => self.projects(request),
+            Action::Machines(request) => self.machine_request(request),
         }
         Ok(())
     }

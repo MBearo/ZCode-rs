@@ -265,6 +265,62 @@ async fn the_client_answers_pings() {
     server.await.unwrap();
 }
 
+/// 延迟（远端执行 R4，remote-exec.md §21.2）：握手后马上发一次 ping（不等心跳间隔，这里是 30 s），同一个 nonce 的
+/// pong 回来时记下往返时间；nonce 对不上的 pong 不算。
+#[tokio::test]
+async fn the_first_ping_measures_the_round_trip() {
+    let (connector, listener) = network_with(vec![Faults::new()]);
+    let (pinged, ping_seen) = tokio::sync::oneshot::channel();
+    let (stray_sent, stray_done) = tokio::sync::oneshot::channel();
+    let (answer, answered) = tokio::sync::oneshot::channel::<()>();
+    let server = rust_cli_base::owned(async move {
+        let mut peer = Peer::accept(&listener).await;
+        peer.handshake("exec-1", Capabilities::ports()).await;
+        let ping: Beat = peer.next(Kind::Ping).await.header().unwrap();
+        pinged.send(ping.nonce).unwrap();
+        // 先回一个对不上的 nonce：不算。再要一次 pong：客户端按顺序处理帧，它回来时那个对不上的已经处理过了。
+        peer.send(
+            Kind::Pong,
+            &Beat {
+                nonce: ping.nonce + 100,
+            },
+            &Body::empty(),
+        )
+        .await;
+        peer.send(Kind::Ping, &Beat { nonce: 77 }, &Body::empty())
+            .await;
+        let pong: Beat = peer.next(Kind::Pong).await.header().unwrap();
+        assert_eq!(pong.nonce, 77);
+        stray_sent.send(()).unwrap();
+        answered.await.unwrap();
+        peer.send(Kind::Pong, &Beat { nonce: ping.nonce }, &Body::empty())
+            .await;
+        // 连接留着，直到客户端结束。
+        let _ = peer.try_frame().await;
+    });
+    let client = ExecClient::connect(connector, options()).await.unwrap();
+    let mut latencies = client.latencies();
+    assert_eq!(client.latency(), None);
+    tokio::time::timeout(Duration::from_secs(5), ping_seen)
+        .await
+        .expect("a ping right after the handshake")
+        .unwrap();
+    stray_done.await.unwrap();
+    assert_eq!(
+        client.latency(),
+        None,
+        "a pong for another nonce is ignored"
+    );
+    answer.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), latencies.changed())
+        .await
+        .expect("the matching pong records the round trip")
+        .unwrap();
+    assert!(client.latency().is_some());
+    client.close().await;
+    server.await.unwrap();
+}
+
 #[tokio::test]
 async fn large_messages_are_sent_in_parts() {
     let (connector, listener) = network_with(Vec::new());

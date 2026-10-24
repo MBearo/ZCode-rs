@@ -32,8 +32,23 @@ fn unused() -> EnvError {
     }
 }
 
-/// 只有两条后台命令的执行环境：`b1` 在跑（有输出文件），`b2` 已结束。
-struct Shells;
+/// 只有两条后台命令的执行环境：`b1` 在跑（有输出文件），`b2` 已结束。远端执行 R4：另一台机器用 [`Shells::REMOTE`]
+/// （任务 `r1`、`r2`，输出在 `/srv/tasks`）；不是自己前缀的任务不认识。
+struct Shells {
+    prefix: &'static str,
+    outputs: &'static str,
+}
+
+impl Shells {
+    const LOCAL: Self = Self {
+        prefix: "b",
+        outputs: "/tmp/tasks",
+    };
+    const REMOTE: Self = Self {
+        prefix: "r",
+        outputs: "/srv/tasks",
+    };
+}
 
 #[async_trait]
 impl EnvInfo for Shells {
@@ -58,17 +73,18 @@ impl Files for Shells {
     }
 
     async fn read_text(&self, _w: &WorkspaceRef, request: ReadText) -> Result<TextRead, EnvError> {
+        let (outputs, prefix) = (self.outputs, self.prefix);
         // b2 的输出太大，b3 还没有输出文件（tui-panels.md §3.3）。
-        match request.path.as_str() {
-            "/tmp/tasks/b2.output" => return Ok(TextRead::TooLarge { size: 2 << 20 }),
-            "/tmp/tasks/b3.output" => {
-                return Err(EnvError::NotFound {
-                    path: request.path.as_str().to_owned(),
-                });
-            }
-            _ => {}
+        let path = request.path.as_str();
+        if path == format!("{outputs}/{prefix}2.output") {
+            return Ok(TextRead::TooLarge { size: 2 << 20 });
         }
-        assert_eq!(request.path.as_str(), "/tmp/tasks/b1.output");
+        if path == format!("{outputs}/{prefix}3.output") {
+            return Err(EnvError::NotFound {
+                path: path.to_owned(),
+            });
+        }
+        assert_eq!(path, format!("{outputs}/{prefix}1.output"));
         let content = (1..=45)
             .map(|n| format!("line {n}"))
             .collect::<Vec<_>>()
@@ -120,10 +136,14 @@ impl Commands for Shells {
 #[async_trait]
 impl Shell for Shells {
     async fn shell_state(&self, _w: &WorkspaceRef, _s: &SessionId) -> Result<ShellState, EnvError> {
+        let prefix = self.prefix;
         Ok(ShellState {
             cwd: EnvPath::new("/Users/dev/project"),
-            outputs: Some(EnvPath::new("/tmp/tasks")),
-            background: vec![ShellTaskId::new("b1"), ShellTaskId::new("b2")],
+            outputs: Some(EnvPath::new(self.outputs)),
+            background: vec![
+                ShellTaskId::new(format!("{prefix}1")),
+                ShellTaskId::new(format!("{prefix}2")),
+            ],
         })
     }
 }
@@ -134,7 +154,10 @@ impl Background for Shells {
         &self,
         task: BackgroundTask,
     ) -> Result<Option<BackgroundInfo>, EnvError> {
-        let status = if task.task.as_str() == "b1" {
+        if !task.task.as_str().starts_with(self.prefix) {
+            return Ok(None);
+        }
+        let status = if task.task.as_str() == format!("{}1", self.prefix) {
             BackgroundStatus::Running
         } else {
             BackgroundStatus::Completed
@@ -146,7 +169,7 @@ impl Background for Shells {
     }
 
     async fn background_elapsed(&self, task: BackgroundTask) -> Result<Option<u64>, EnvError> {
-        Ok((task.task.as_str() == "b1").then_some(65_000))
+        Ok((task.task.as_str() == format!("{}1", self.prefix)).then_some(65_000))
     }
 }
 
@@ -178,6 +201,7 @@ impl AgentSignals for OneAgent {
             description: "Review".to_owned(),
             status: BackgroundStatus::Running,
             output: None,
+            machine: None,
         }]
     }
     async fn stop_task(
@@ -198,7 +222,7 @@ impl AgentSignals for OneAgent {
 #[tokio::test]
 async fn background_tasks_list_running_commands_and_agents() {
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells));
+    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
     setup.agents = std::sync::Arc::new(OneAgent::default());
     let built = setup.build().await;
     let entries = built.session.background_tasks().await.unwrap();
@@ -245,7 +269,7 @@ impl AgentSignals for OneRead {
 #[tokio::test]
 async fn the_tasks_snapshot_has_the_commands_and_the_agents_in_one_reply() {
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells));
+    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
     setup.agents = std::sync::Arc::new(OneRead);
     let built = setup.build().await;
     let snapshot = built.session.tasks_snapshot().await.unwrap();
@@ -300,7 +324,7 @@ async fn stop_task_goes_through_the_agents_stop_path() {
 #[tokio::test]
 async fn shell_details_show_the_last_ten_lines_and_the_runtime() {
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells));
+    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
     let built = setup.build().await;
     let detail = built.session.shell_detail("b1").await.unwrap().unwrap();
     assert_eq!(detail.command, "run b1");
@@ -329,4 +353,49 @@ async fn shell_details_show_the_last_ten_lines_and_the_runtime() {
             total: 0
         }
     );
+}
+
+/// 远端执行 R4（remote-exec.md §21.6）：后台任务的快照也列连上的远端机器上在跑的命令（带 `machine`）；Shell 详情按
+/// 任务 ID 依次问本机与远端，在哪台找到就读那台的输出文件。
+#[tokio::test]
+async fn remote_background_commands_are_listed_with_their_machine() {
+    use rust_cli_kernel_api::testing::TestMachines;
+    let machines = TestMachines::new(std::sync::Arc::new(Shells::LOCAL));
+    machines.connect("dev-a", std::sync::Arc::new(Shells::REMOTE), "/srv/proj");
+    let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
+    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.machines = Some(machines);
+    setup.agents = std::sync::Arc::new(OneAgent::default());
+    let built = setup.build().await;
+    let entries = built.session.background_tasks().await.unwrap();
+    let rows: Vec<_> = entries
+        .iter()
+        .map(|e| (e.id.as_str(), e.machine.as_deref()))
+        .collect();
+    assert_eq!(
+        rows,
+        [("b1", None), ("r1", Some("dev-a")), ("agent_1", None)]
+    );
+    // 远端的输出末尾读那台机器的文件。
+    assert!(entries[1].output.as_deref().unwrap().ends_with("line 45"));
+    let snapshot = built.session.tasks_snapshot().await.unwrap();
+    let rows: Vec<_> = snapshot
+        .background
+        .iter()
+        .map(|e| (e.id.as_str(), e.machine.as_deref(), e.output.is_none()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("b1", None, true),
+            ("r1", Some("dev-a"), true),
+            ("agent_1", None, true)
+        ]
+    );
+    let detail = built.session.shell_detail("r1").await.unwrap().unwrap();
+    assert_eq!(detail.command, "run r1");
+    assert_eq!(detail.status, BackgroundStatus::Running);
+    assert_eq!(detail.elapsed_ms, Some(65_000));
+    assert!(matches!(detail.output, ShellOutput::Tail { total: 45, .. }));
+    assert!(built.session.shell_detail("x9").await.unwrap().is_none());
 }

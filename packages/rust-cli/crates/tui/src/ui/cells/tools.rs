@@ -23,11 +23,16 @@ const COMMAND_LIMIT: usize = 160;
 
 pub(super) const PATCH_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
-/// 参数摘要：`键: 值, 键: 值`（按 JSON 写值，字符串带引号）。
+/// 参数摘要：`键: 值, 键: 值`（按 JSON 写值，字符串带引号）。远端的 `machine` 不写在这里，接在行尾（`@机器`，
+/// remote-exec.md §21.6）。
 fn args_summary(args: &Value) -> String {
     match args {
         Value::Object(map) => map
             .iter()
+            .filter(|(key, _)| {
+                !(key.as_str() == rust_cli_kernel_api::machine_param::MACHINE
+                    && crate::ui::machines::machine_of(args).is_some())
+            })
             .map(|(key, value)| format!("{key}: {value}"))
             .collect::<Vec<_>>()
             .join(", "),
@@ -116,8 +121,34 @@ pub(super) fn head_parts(tool: &ToolRow, ctx: &Ctx<'_>) -> (String, Option<Strin
     (name.to_owned(), args_text, "")
 }
 
-/// 第一行：圆点、粗体的名称、`(参数)`。紧凑模式截断参数；详细模式完整显示，续行缩进 2 列。
+/// 第一行：圆点、粗体的名称、`(参数)`。紧凑模式截断参数；详细模式完整显示，续行缩进 2 列。远端的调用在行尾接
+/// `  @机器`（remote-exec.md §21.6）。
 fn head(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
+    let mut lines = head_without_machine(tool, ctx);
+    if let (Some(machine), Some(last)) = (
+        crate::ui::machines::machine_of(&tool.input),
+        lines.last_mut(),
+    ) {
+        let tag = crate::ui::machines::tag(ctx.palette, machine);
+        let tag_width = unicode_width::UnicodeWidthStr::width(tag.content.as_ref());
+        let room = ctx.width.saturating_sub(last.width());
+        if room >= 2 + tag_width {
+            last.spans.push(Span::raw("  "));
+            last.spans.push(tag);
+        } else if !ctx.expanded {
+            // 紧凑模式放不下：截掉参数的末尾给标记让位。
+            let keep = ctx.width.saturating_sub(2 + tag_width);
+            *last = truncate_line(std::mem::take(last), keep);
+            last.spans.push(Span::raw("  "));
+            last.spans.push(tag);
+        } else {
+            lines.push(Line::from(vec![Span::raw("  "), tag]));
+        }
+    }
+    lines
+}
+
+fn head_without_machine(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     let (name, args, note) = head_parts(tool, ctx);
     let lead = vec![
         dot(Dot::from(tool.status), ctx),

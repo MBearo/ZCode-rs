@@ -6,9 +6,10 @@
 //! 工作目录。TUI 在后台连（不挡启动）；`-p` 只在测试变量下连，而且同步连完。
 
 mod endpoint;
+mod fleet;
 mod registry;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result, anyhow};
 use rust_cli_base::TaskScope;
@@ -19,8 +20,9 @@ use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, MachineFacts, RemoteMachine};
 use rust_cli_kernel_api::ids::EnvironmentId;
-use rust_cli_machines::{Machine, MachineEntry, MachineList, MachineState};
+use rust_cli_machines::{MachineEntry, MachineList};
 
+pub(crate) use fleet::{Changed, Fleet, FleetError, Seen};
 pub(crate) use registry::MachineRegistry;
 
 /// 机器怎么连。
@@ -46,10 +48,12 @@ pub(crate) enum When {
     Now,
 }
 
-/// 注册表与各台机器的状态机（都属于这里；进程退出时随之结束）。
+/// 注册表、机器清单与各台机器的状态机（都属于这里；进程退出时随之结束）。
 pub(crate) struct Machines {
     registry: Arc<MachineRegistry>,
     scope: TaskScope,
+    /// 清单与连接（R4，remote-exec.md §21.2）：`start` 时建（`-p` 不连机器时没有）。
+    fleet: OnceLock<Arc<Fleet>>,
 }
 
 /// 启动时的输入（自己持有，不借用 `Startup`：入口之后会把 `Startup` 的一部分移走）。
@@ -108,44 +112,58 @@ impl Machines {
             scope: TaskScope::root("machines", |panic| {
                 tracing::error!(task = panic.task, message = %panic.message, "machine task panicked");
             }),
+            fleet: OnceLock::new(),
         }
+    }
+
+    /// TUI 的机器服务（R4，§21.2）；`start` 之前或不连机器时没有。
+    pub(crate) fn service(&self) -> Option<Arc<dyn rust_cli_tui::machines::Machines>> {
+        self.fleet
+            .get()
+            .map(|fleet| crate::tui_machines::service(fleet.clone()))
     }
 
     pub(crate) fn registry(&self) -> Arc<dyn EnvironmentRegistry> {
         self.registry.clone()
     }
 
-    /// 自动连上次连着的机器（§20.3.2）。
+    /// 读清单、建 Fleet，自动连上次连着的机器（§20.3.2）：TUI 在后台连（不挡启动，连不上只记 warn）；测试变量下的
+    /// `-p` 同步连完，连不上就报错。
     pub(crate) async fn start(&self, start: Start) -> Result<()> {
-        if start.when == When::Never {
+        let when = start.when;
+        if when == When::Never {
             return Ok(());
         }
         let entries = match start.list.load().await {
             Ok(entries) => entries,
-            Err(error) if start.when == When::Now => return Err(error.into()),
+            Err(error) if when == When::Now => return Err(error.into()),
             Err(error) => {
                 tracing::warn!(%error, "the machine list could not be read");
-                return Ok(());
+                Vec::new()
             }
         };
-        for entry in entries.into_iter().filter(|entry| entry.connected) {
-            let name = entry.name.clone();
-            let registry = self.registry.clone();
-            let spawner = self.scope.spawner();
-            let machine = endpoint::machine(&start, &entry);
-            match start.when {
-                When::Now => connect(registry, machine?, entry, &spawner)
+        let list = start.list.clone();
+        let make = move |entry: &MachineEntry| endpoint::machine(&start, entry);
+        let fleet = Arc::new(Fleet::new(
+            (list, Box::new(make)),
+            entries,
+            self.registry.clone(),
+            self.scope.spawner(),
+        ));
+        let fleet = self.fleet.get_or_init(|| fleet).clone();
+        for name in fleet.remembered() {
+            match when {
+                When::Now => fleet
+                    .connect(&name)
                     .await
-                    .with_context(|| format!("connecting machine {name}"))?,
-                // 后台连：连不上（包括端点建不出来）只记 warn，不挡启动。
+                    .map_err(anyhow::Error::from)
+                    .with_context(|| format!("connecting machine {name}"))
+                    .map(drop)?,
                 When::Background => {
+                    let fleet = fleet.clone();
                     drop(self.scope.spawner().spawn("machine-connect", async move {
-                        let result = match machine {
-                            Ok(machine) => connect(registry, machine, entry, &spawner).await,
-                            Err(error) => Err(error),
-                        };
-                        if let Err(error) = result {
-                            tracing::warn!(machine = %name, error = %format!("{error:#}"), "machine not connected");
+                        if let Err(error) = fleet.connect(&name).await {
+                            tracing::warn!(machine = %name, %error, "machine not connected");
                         }
                     }));
                 }
@@ -198,41 +216,6 @@ fn attach(registry: &MachineRegistry, entry: &MachineEntry, client: ExecClient) 
     let remote = Arc::new(RemoteEnvironment::new(client)).machine();
     registry.connected(remote.named(entry.name.as_str()), info);
     tracing::info!(event = "machine.connected", machine = %entry.name, "machine connected");
-    Ok(())
-}
-
-/// 连上一台机器并跟着它的状态：就绪时放进注册表；重连中仍留着（调用等重连，暂定，§20.3.2）；重连失败或断开时拿走。
-async fn connect(
-    registry: Arc<MachineRegistry>,
-    machine: Machine,
-    entry: MachineEntry,
-    spawner: &rust_cli_base::Spawner,
-) -> Result<()> {
-    let client = machine.connect().await?;
-    attach(&registry, &entry, client)?;
-    drop(spawner.spawn("machine-follow", async move {
-        let mut states = machine.states();
-        states.borrow_and_update();
-        while states.changed().await.is_ok() {
-            let state = states.borrow_and_update().clone();
-            match state {
-                MachineState::Ready(_) => {
-                    if let Some(client) = machine.client()
-                        && let Err(error) = attach(&registry, &entry, client)
-                    {
-                        tracing::warn!(machine = %entry.name, error = %format!("{error:#}"), "machine not attached");
-                    }
-                }
-                MachineState::Failed { .. } | MachineState::Unconnected => {
-                    registry.disconnected(&entry.name);
-                    tracing::info!(event = "machine.disconnected", machine = %entry.name, state = ?state, "machine disconnected");
-                }
-                MachineState::Provisioning
-                | MachineState::Handshaking
-                | MachineState::Reconnecting { .. } => {}
-            }
-        }
-    }));
     Ok(())
 }
 

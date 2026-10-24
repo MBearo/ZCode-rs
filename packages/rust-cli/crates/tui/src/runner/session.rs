@@ -107,6 +107,8 @@ pub(super) enum Done {
     Stopping {
         running: bool,
     },
+    /// 机器服务的回执（`machines.rs`，remote-exec.md §21.3）。
+    Machines(super::machines::MachinesDone),
 }
 
 /// 执行环境路径的分隔符：工作区根是盘符或 `\\` 开头时是 `\`（Windows），否则是 `/`。
@@ -309,6 +311,7 @@ impl<B: Backend> Loop<'_, B> {
             Done::Panel(done) => self.on_panel(done),
             Done::Projects(done) => self.on_projects(done),
             Done::Usage(done) => self.on_usage(done),
+            Done::Machines(done) => self.on_machines(done),
             Done::Model(done) => self.on_model(done),
             // 回合已经不在跑：直接离开；还在跑时等它的 TurnFinished（`on_event`）。
             Done::Stopping { running } => self.app.quit |= !running,

@@ -482,7 +482,24 @@ fn dispatch(shared: &Shared, frame: Frame) -> Result<(), String> {
             let _ = shared.control.try_send(Control::Pong(nonce));
             Ok(())
         }
-        Kind::Pong => Ok(()),
+        // 远端执行 R4（remote-exec.md §21.2）：最近一次 ping 的 pong 回来时记下往返时间；对不上的（旧连接、重复）不算。
+        Kind::Pong => {
+            let nonce = frame.header::<Beat>().map(|beat| beat.nonce).ok();
+            let sent = {
+                let mut state = shared.state();
+                match state.beat {
+                    Some((sent, at)) if Some(sent) == nonce => {
+                        state.beat = None;
+                        Some(at)
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(at) = sent {
+                shared.latency.send_replace(Some(at.elapsed()));
+            }
+            Ok(())
+        }
         other => Err(format!("unexpected {other:?} frame from the executor")),
     }
 }
@@ -533,16 +550,28 @@ fn deliver(shared: &Shared, header: EventHeader, body: Body) {
     }
 }
 
+/// 心跳：连上就先 ping 一次（远端执行 R4：马上量出延迟，remote-exec.md §21.2），之后每个间隔一次；三个间隔没收到任何
+/// 帧就当连接断了。
 async fn heartbeat_loop(shared: Arc<Shared>, seen: Arc<Mutex<Instant>>) -> String {
     let interval = shared.options.heartbeat;
-    let mut nonce = 0;
     loop {
+        ping(&shared);
         tokio::time::sleep(interval).await;
         let quiet = seen.lock().map(|seen| seen.elapsed()).unwrap_or_default();
         if quiet > liveness(&shared) {
             return format!("no frame from the executor for {} ms", quiet.as_millis());
         }
-        nonce += 1;
-        let _ = shared.control.try_send(Control::Ping(nonce));
     }
+}
+
+/// 发一个 ping，记下它的 nonce 与时刻（pong 回来时算往返）。
+fn ping(shared: &Shared) {
+    let nonce = {
+        let mut state = shared.state();
+        state.beats += 1;
+        let nonce = state.beats;
+        state.beat = Some((nonce, Instant::now()));
+        nonce
+    };
+    let _ = shared.control.try_send(Control::Ping(nonce));
 }

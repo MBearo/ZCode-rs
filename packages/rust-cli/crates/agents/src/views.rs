@@ -51,6 +51,8 @@ fn entry(agent: &LiveAgent, now: u64) -> SubagentEntry {
         owner: agent.owner.clone(),
         activity,
         parked: matches!(agent.state, AgentState::Parked(_)),
+        // 子代理的缺省机器（远端执行 R4，remote-exec.md §21.6）。
+        machine: agent.machine.clone(),
     }
 }
 
@@ -69,6 +71,7 @@ pub(crate) fn background_entry(agent: &LiveAgent) -> BackgroundEntry {
         description: agent.description.clone(),
         status: BackgroundStatus::Running,
         output: None,
+        machine: agent.machine.clone(),
     }
 }
 

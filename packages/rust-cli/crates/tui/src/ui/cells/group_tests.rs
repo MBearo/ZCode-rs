@@ -248,3 +248,31 @@ fn thinking_time_prefers_the_duration_then_the_next_row_then_now() {
         ]
     );
 }
+
+/// 远端执行 R4（remote-exec.md §21.6，暂定）：带远端 `machine` 的调用不并进工作段，单独一块，行尾标出机器。
+#[test]
+fn remote_calls_stay_out_of_the_summary() {
+    let rows = [
+        turn(1, TurnState::Success),
+        bash(2, "ls"),
+        done(
+            3,
+            "Bash",
+            json!({"command": "uname -a", "machine": "dev-a"}),
+            "Linux",
+        ),
+        bash(4, "pwd"),
+    ];
+    let shown = summary(&rows);
+    assert_eq!(shown[0], "  Ran 1 shell command");
+    assert_eq!(shown[1], format!("{}  @dev-a", b("Bash(uname -a)")));
+    assert!(shown.contains(&"  Ran 1 shell command".to_owned()));
+    assert_eq!(
+        shown
+            .iter()
+            .filter(|line| line.contains("Ran 1 shell command"))
+            .count(),
+        2,
+        "{shown:?}"
+    );
+}

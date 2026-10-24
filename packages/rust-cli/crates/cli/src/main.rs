@@ -69,6 +69,7 @@ mod temp_dir;
 mod time_zone;
 mod tui;
 mod tui_account;
+mod tui_machines;
 mod tui_mcp;
 mod update;
 mod workspace_trust;
@@ -641,6 +642,7 @@ async fn session(
                 }),
                 os,
                 question_timeout: config.question_timeout,
+                machines: machines.service(),
             };
             let exit = rust_cli_tui::run(kernel, tui::options(inputs, VERSION)).await;
             // TUI 退出后入口全部释放：等写者写完剩下的；跨会话的登记与 socket 删掉。

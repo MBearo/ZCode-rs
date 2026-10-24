@@ -227,7 +227,8 @@ impl App {
                 Overlay::Login(_)
                 | Overlay::Export(_)
                 | Overlay::Shortcuts
-                | Overlay::YoloConfirm(_),
+                | Overlay::YoloConfirm(_)
+                | Overlay::Machines(_),
             )
             | None => {
                 self.scroll_by(-lines);

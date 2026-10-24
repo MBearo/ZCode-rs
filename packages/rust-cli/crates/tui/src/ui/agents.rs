@@ -105,6 +105,14 @@ fn kind(entry: &SubagentEntry) -> &str {
     }
 }
 
+/// 子代理的缺省机器在远端时名字后面的 ` @机器`（远端执行 R4，remote-exec.md §21.6）。
+fn machine_suffix(entry: &SubagentEntry) -> String {
+    entry
+        .machine
+        .as_ref()
+        .map_or_else(String::new, |machine| format!(" @{machine}"))
+}
+
 /// 名字后面的 ` (+N)`。
 fn suffix(row: &TreeRow<'_>) -> String {
     if row.descendants > 0 {
@@ -242,7 +250,12 @@ impl App {
         // 连接符宽，所以不同深度的描述列对齐。
         let label_width = rows
             .iter()
-            .map(|row| 2 * row.depth + kind(row.entry).width() + suffix(row).width())
+            .map(|row| {
+                2 * row.depth
+                    + kind(row.entry).width()
+                    + suffix(row).width()
+                    + machine_suffix(row.entry).width()
+            })
             .max()
             .unwrap_or(0)
             .clamp(LABEL_MIN, LABEL_MAX);
@@ -279,15 +292,16 @@ impl App {
                 dim()
             };
             let name_box = label_width.saturating_sub(connector.width());
-            let (name, tail) = (kind(entry), suffix(row));
-            let mut name_spans = if name.width() + tail.width() <= name_box {
+            let (name, tail, machine) = (kind(entry), suffix(row), machine_suffix(entry));
+            let mut name_spans = if name.width() + tail.width() + machine.width() <= name_box {
                 vec![
                     Span::styled(name.to_owned(), base),
                     Span::styled(tail, dim()),
+                    Span::styled(machine, Style::default().fg(self.palette.accent)),
                 ]
             } else {
                 vec![Span::styled(
-                    truncate(&format!("{name}{tail}"), name_box),
+                    truncate(&format!("{name}{tail}{machine}"), name_box),
                     base,
                 )]
             };

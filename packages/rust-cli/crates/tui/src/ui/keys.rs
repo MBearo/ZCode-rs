@@ -256,6 +256,9 @@ impl App {
         if matches!(self.overlay, Some(Overlay::YoloConfirm(_))) {
             return self.yolo_confirm_key(key);
         }
+        if matches!(self.overlay, Some(Overlay::Machines(_))) {
+            return self.machines_key(key);
+        }
         let ctrl = self.typing.ctrl(&key);
         match self.overlay.as_mut()? {
             Overlay::List(list) => match list.on_key(key, self.typing) {
@@ -302,7 +305,8 @@ impl App {
             | Overlay::Trust(_)
             | Overlay::Background(_)
             | Overlay::Usage(_)
-            | Overlay::YoloConfirm(_) => None,
+            | Overlay::YoloConfirm(_)
+            | Overlay::Machines(_) => None,
         }
     }
 

@@ -183,4 +183,6 @@ pub struct Services {
     /// 提问框的空闲超时（配置的 `askUserQuestionTimeout` 与 `ZCODE_AFK_*`，tools-more.md §1.1，工作线 F72）；
     /// 没有时不计时。
     pub question_timeout: Option<crate::ui::afk::QuestionTimeout>,
+    /// 远端机器（remote-exec.md §21.2）：`/machines` 与机器状态行；没有时 `/machines` 提示不可用、状态行不出现。
+    pub machines: Option<Arc<dyn crate::machines::Machines>>,
 }

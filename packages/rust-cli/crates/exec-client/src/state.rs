@@ -54,6 +54,10 @@ pub(crate) struct State {
     pub connected: bool,
     /// 不再工作的原因（关闭或断线后不再重连）。
     pub closed: Option<ClientError>,
+    /// 发过的心跳个数（nonce 的来源，跨连接递增）。
+    pub beats: u64,
+    /// 最近一次 ping 的 nonce 与发出的时刻：同一个 nonce 的 pong 回来时算往返（远端执行 R4，remote-exec.md §21.2）。
+    pub beat: Option<(u64, tokio::time::Instant)>,
 }
 
 impl State {
@@ -113,6 +117,8 @@ pub(crate) struct Shared {
     pub shutdown: CancellationToken,
     /// 连接的状态（§19.8）；只由管连接的任务（与 `close`）改。
     pub connection: watch::Sender<ConnectionState>,
+    /// 最近一次心跳的往返时间（R4，§21.2）；还没量到时 None。只由读任务改。
+    pub latency: watch::Sender<Option<std::time::Duration>>,
 }
 
 impl Shared {
@@ -136,6 +142,7 @@ impl Shared {
                 error: ClientError::Connect("not connected yet".to_owned()),
             })
             .0,
+            latency: watch::channel(None).0,
         }
     }
 

@@ -29,6 +29,8 @@ mod lifecycle;
 mod locale;
 mod login;
 mod logo;
+mod machines;
+mod machines_marks;
 mod manage;
 mod mode_picker;
 mod model_default;

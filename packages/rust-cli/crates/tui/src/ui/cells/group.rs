@@ -34,6 +34,10 @@ fn member(row: &Row) -> Option<Member> {
         Body::Tool(tool) => tool,
         _ => return None,
     };
+    // 远端的调用不并进工作段（remote-exec.md §21.6，暂定）：单独一行，行尾标出机器。
+    if crate::ui::machines::machine_of(&tool.input).is_some() {
+        return None;
+    }
     if tool.name.starts_with("mcp__") {
         return Some(Member::Mcp);
     }

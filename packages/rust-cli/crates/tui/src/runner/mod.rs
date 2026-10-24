@@ -5,6 +5,7 @@ mod actions;
 mod fork_goal;
 mod input;
 mod lifecycle;
+mod machines;
 mod manage;
 mod model_default;
 mod panels;
@@ -165,6 +166,8 @@ struct Loop<'a, B: Backend> {
     /// esc / ctrl+c 发过中断（user-cancel；运行中的中断与空闲路径的取消唤醒都算，修复线 F45）：回合结束时据此
     /// 判断要不要撤回（restore.rs，修复线 F38）。
     user_cancel: bool,
+    /// 机器服务的变化通知（远端执行 R4，remote-exec.md §21.2）：出项时重取快照；没有服务时永远不出项。
+    machine_changes: BoxStream<'static, ()>,
 }
 
 /// 跑事件循环直到退出；返回退出时的会话与还没跑的 SessionEnd（[`Exit`]）。真实终端与测试（`TestBackend`）走同一个循环。
@@ -220,6 +223,7 @@ pub async fn drive<B: Backend>(
         }
     }
     let detached = kernel.detached_asks();
+    let machine_changes = machines::changes(&options.services);
     let mut state = Loop {
         kernel,
         detached,
@@ -243,10 +247,12 @@ pub async fn drive<B: Backend>(
         projects: projects::Projects::default(),
         stopping: false,
         user_cancel: false,
+        machine_changes,
     };
     let (startup, fork) = (state.options.startup.clone(), state.options.fork);
     state.startup(startup, fork);
     state.fetch_commands();
+    state.start_machines();
     let stop = state.options.stop.clone();
     while !state.app.quit {
         // 缺陷修复（F14）：终端关掉时（关窗口、SSH 断开）写终端先失败（EIO），SIGHUP 随后才到；以前 `draw()?`
@@ -294,6 +300,11 @@ pub async fn drive<B: Backend>(
                 if afk_at.is_some() => state.afk()?,
             // 子代理有变化：重取子代理列表与后台任务的同一份快照（修复线 F34，tui-panels.md §0）。
             () = state.panels.changed() => state.refresh_tasks(),
+            // 机器的状态、延迟或清单变了（remote-exec.md §21.2）：重取快照。
+            change = state.machine_changes.next() => match change {
+                Some(()) => state.refresh_machines(),
+                None => state.machines_ended(),
+            },
             // 缺陷修复（R5-2）：原来入口不处理退出信号，SIGTERM / SIGHUP 直接结束进程，终端停在备用屏、
             // 子进程留成孤儿。现在入口把信号变成这个令牌，界面走已有的退出路径（session-lifecycle.md §3.5）。
             () = stop.cancelled(), if !state.stopping => state.stop(),

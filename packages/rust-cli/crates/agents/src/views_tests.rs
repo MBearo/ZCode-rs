@@ -172,6 +172,42 @@ fn the_tasks_snapshot_reads_the_rows_and_the_background_agents_together() {
     assert_eq!(ids(&snapshot).1, vec!["agent_a".to_owned()]);
 }
 
+/// 远端执行 R4（remote-exec.md §21.6）：子代理条目与后台子代理带它的缺省机器（Agent 的 `machine`），本机的没有。
+#[test]
+fn entries_carry_the_default_machine() {
+    let live = Live::default();
+    let mut remote = running("agent_r", "sess_root");
+    remote.machine = Some("dev-a".to_owned());
+    live.insert(remote);
+    live.insert(running("agent_l", "sess_root"));
+    let root = SessionId::new("sess_root");
+    let snapshot = tasks(&live, &root);
+    let rows: Vec<_> = snapshot
+        .subagents
+        .iter()
+        .map(|entry| (entry.agent.to_string(), entry.machine.clone()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("agent_r".to_owned(), Some("dev-a".to_owned())),
+            ("agent_l".to_owned(), None)
+        ]
+    );
+    let background: Vec<_> = snapshot
+        .background
+        .iter()
+        .map(|entry| (entry.id.clone(), entry.machine.clone()))
+        .collect();
+    assert_eq!(
+        background,
+        [
+            ("agent_l".to_owned(), None),
+            ("agent_r".to_owned(), Some("dev-a".to_owned()))
+        ]
+    );
+}
+
 #[tokio::test]
 async fn every_change_wakes_the_subscribers_and_versions_count_commits() {
     let live = Live::default();

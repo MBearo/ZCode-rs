@@ -358,3 +358,36 @@ fn waiting_for_mcp_servers_has_its_own_label() {
     let lines = text(&[named], false);
     assert_eq!(&lines[1..], ["  ⎿  ready: false", "     Still connecting"]);
 }
+
+/// 远端执行 R4（remote-exec.md §21.6）：远端的调用在行尾接 `  @机器`（强调色），`machine` 不进参数摘要；`local` 不标。
+#[test]
+fn remote_calls_end_with_their_machine() {
+    let rows = [
+        done(
+            1,
+            "Grep",
+            json!({"pattern": "x", "machine": "dev-a"}),
+            "Found 1 file\n/srv/a",
+        ),
+        done(
+            2,
+            "Glob",
+            json!({"pattern": "*.md", "machine": "local"}),
+            "No files found",
+        ),
+    ];
+    assert_eq!(
+        text(&rows, false),
+        [
+            format!("{}  @dev-a", b("Grep(pattern: \"x\")")),
+            "  ⎿  Found 1 file".into(),
+            b("Glob(pattern: \"*.md\")"),
+            "  ⎿  Found 0 files".into(),
+        ]
+    );
+    let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
+    let lines = render(&build(&rows, false)[0], &ctx(&palette, false));
+    let tag = lines[0].spans.last().unwrap();
+    assert_eq!(tag.content, "@dev-a");
+    assert_eq!(tag.style.fg, Some(palette.accent));
+}

@@ -37,6 +37,8 @@ pub struct ShellView {
     pub last: Option<ShellDetail>,
     /// 内核已不认识它（结束且通知已 ack、或已停止）：不再读取。
     pub gone: bool,
+    /// 所在的远端机器（远端执行 R4，remote-exec.md §21.6）；本机为 None。
+    pub machine: Option<String>,
 }
 
 /// 面板里的一项。
@@ -256,6 +258,7 @@ impl App {
             KeyCode::Enter => match entry? {
                 Entry::Shell(shell) => {
                     let (id, command) = (shell.id.clone(), shell.description.clone());
+                    let machine = shell.machine.clone();
                     if let Some(view) = self.background_view_mut() {
                         view.detail = Some(ShellView {
                             id: id.clone(),
@@ -263,6 +266,7 @@ impl App {
                             seq: 0,
                             last: None,
                             gone: false,
+                            machine,
                         });
                     }
                     return Some(Action::Panel(Panel::ReadShell(id)));
@@ -390,6 +394,12 @@ impl App {
             Entry::Shell(_) => shell_status(BackgroundStatus::Running, lang),
             Entry::Agent(agent) => agent_status(agent, lang),
         };
+        // 远端的后台命令与缺省在远端的子代理：名称后面接 ` @机器`（远端执行 R4，remote-exec.md §21.6）。
+        let machine_of = |entry: &Entry| match entry {
+            Entry::Shell(shell) => shell.machine.clone(),
+            Entry::Agent(agent) => agent.machine.clone(),
+        };
+        let tag_width = |entry: &Entry| machine_of(entry).map_or(0, |machine| 2 + machine.width());
         let status_width = entries
             .iter()
             .map(|e| status_of(e).width())
@@ -398,7 +408,7 @@ impl App {
         // 指针 2 列、圆点 2 列、名称与状态之间至少 3 列。
         let label_width = entries
             .iter()
-            .map(|e| label_of(e).width())
+            .map(|e| label_of(e).width() + tag_width(e))
             .max()
             .unwrap_or(0)
             .min(width.saturating_sub(4 + 3 + status_width));
@@ -427,19 +437,34 @@ impl App {
                 }
             }
             let focused = index == selected;
-            let label = truncate(&label_of(entry), label_width);
-            let pad = label_width.saturating_sub(label.width()) + 3;
+            let tag = machine_of(entry);
+            let label = truncate(
+                &label_of(entry),
+                label_width.saturating_sub(tag_width(entry)),
+            );
+            let pad = label_width.saturating_sub(label.width() + tag_width(entry)) + 3;
+            let mut named = vec![Span::raw(label)];
+            if let Some(machine) = &tag {
+                named.push(Span::raw(" "));
+                named.push(super::machines::tag(&self.palette, machine));
+            }
             // 选择列表组件（`› ` 加底色条，tui.md §7.4，修复线 F26；原来是强调色的 `❯ `）。
             body.push((
                 super::pick::paint(
                     truncate_line(
-                        Line::from(vec![
-                            super::pick::pointer(focused),
-                            Span::styled(format!("{} ", super::cells::BULLET), dim()),
-                            Span::raw(label),
-                            Span::raw(" ".repeat(pad)),
-                            Span::styled(status_of(entry), self.palette.secondary()),
-                        ]),
+                        Line::from(
+                            [
+                                super::pick::pointer(focused),
+                                Span::styled(format!("{} ", super::cells::BULLET), dim()),
+                            ]
+                            .into_iter()
+                            .chain(named)
+                            .chain([
+                                Span::raw(" ".repeat(pad)),
+                                Span::styled(status_of(entry), self.palette.secondary()),
+                            ])
+                            .collect::<Vec<_>>(),
+                        ),
                         width,
                     ),
                     focused,
@@ -515,11 +540,18 @@ impl App {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             )),
             Line::default(),
-            field(
-                pick(lang, "Status: ", "状态："),
-                shell_status(status, lang).to_owned(),
-            ),
         ];
+        // 远端的任务写明机器（远端执行 R4，remote-exec.md §21.6）。
+        if let Some(machine) = &open.machine {
+            lines.push(field(
+                super::i18n_machines::machine_field(lang),
+                machine.clone(),
+            ));
+        }
+        lines.push(field(
+            pick(lang, "Status: ", "状态："),
+            shell_status(status, lang).to_owned(),
+        ));
         if let Some(elapsed) = open.last.as_ref().and_then(|last| last.elapsed_ms) {
             lines.push(field(
                 pick(lang, "Runtime: ", "运行时长："),

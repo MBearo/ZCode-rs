@@ -80,6 +80,16 @@ impl ExecClient {
         self.inner.shared.connection.subscribe()
     }
 
+    /// 最近一次心跳的往返时间（远端执行 R4，remote-exec.md §21.2）；还没量到时 None。
+    pub fn latency(&self) -> Option<std::time::Duration> {
+        *self.inner.shared.latency.borrow()
+    }
+
+    /// 订阅往返时间：每次量到一个新值出一项。
+    pub fn latencies(&self) -> watch::Receiver<Option<std::time::Duration>> {
+        self.inner.shared.latency.subscribe()
+    }
+
     /// 一次请求，等它的回复。
     pub async fn call(&self, request: Request, body: Body) -> Result<Answer, ClientError> {
         let (tx, rx) = oneshot::channel();

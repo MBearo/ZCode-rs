@@ -32,6 +32,7 @@ fn shell(id: &str, command: &str) -> BackgroundEntry {
         description: command.into(),
         status: BackgroundStatus::Running,
         output: None,
+        machine: None,
     }
 }
 
@@ -50,6 +51,7 @@ fn agent(id: &str) -> SubagentEntry {
         owner: None,
         activity: None,
         parked: false,
+        machine: None,
     }
 }
 
@@ -232,4 +234,49 @@ fn output_previews_cover_the_empty_large_and_missing_cases() {
 #[test]
 fn ansi_and_control_characters_are_stripped() {
     assert_eq!(plain_output("\u{1b}[31mred\u{1b}[0m\tx\u{7}"), "red    x");
+}
+
+/// 远端执行 R4（remote-exec.md §21.6）：远端的后台命令与缺省在远端的子代理在名称后面标 `@机器`（强调色），Shell 详情
+/// 多一行机器。
+#[test]
+fn remote_entries_name_their_machine() {
+    let mut app = app();
+    let now = Instant::now();
+    let mut remote = shell("b2", "make data");
+    remote.machine = Some("dev-a".into());
+    let mut helper = agent("agent_a");
+    helper.machine = Some("gpu-1".into());
+    app.background = vec![shell("b1", "npm test"), remote];
+    app.agents = AgentList {
+        entries: vec![helper],
+        at: Some(now),
+    };
+    app.open_background();
+    let (lines, _) = app.background_lines(80, 30, now);
+    let text = plain(&lines);
+    assert!(
+        text.iter().any(|row| row.contains(" make data @dev-a ")),
+        "{text:?}"
+    );
+    assert!(
+        text.iter().any(|row| row.contains(" Review code @gpu-1 ")),
+        "{text:?}"
+    );
+    assert!(
+        text.iter()
+            .any(|row| row.contains(" npm test ") && !row.contains('@')),
+        "{text:?}"
+    );
+    let tag = lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .find(|span| span.content == "@dev-a")
+        .unwrap();
+    assert_eq!(tag.style.fg, Some(app.palette.accent));
+    // 焦点移到远端的命令，打开详情。
+    app.on_key(key(KeyCode::Down), now);
+    app.on_key(key(KeyCode::Enter), now);
+    let text = plain(&app.background_lines(80, 30, now).0);
+    assert_eq!(text[3], "  Machine: dev-a");
+    assert!(text[4].starts_with("  Status: "), "{text:?}");
 }

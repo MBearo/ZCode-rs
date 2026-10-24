@@ -9,13 +9,26 @@ fn entries_round_trip() {
         description: "sleep 10".to_owned(),
         status: BackgroundStatus::Running,
         output: Some("tick".to_owned()),
+        machine: None,
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["kind"], "shell");
     assert_eq!(json["status"], "running");
+    // 本机的条目不写 `machine`（远端执行 R4，remote-exec.md §21.7）。
+    assert!(json.get("machine").is_none());
     assert_eq!(
         serde_json::from_value::<BackgroundEntry>(json).unwrap(),
         entry
+    );
+    let remote = BackgroundEntry {
+        machine: Some("dev-a".to_owned()),
+        ..entry
+    };
+    let json = serde_json::to_value(&remote).unwrap();
+    assert_eq!(json["machine"], "dev-a");
+    assert_eq!(
+        serde_json::from_value::<BackgroundEntry>(json).unwrap(),
+        remote
     );
 
     let server = McpServerInfo {

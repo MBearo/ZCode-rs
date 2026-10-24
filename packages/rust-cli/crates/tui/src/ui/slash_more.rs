@@ -66,6 +66,8 @@ impl App {
             "plan" if args == "open" => Some(Action::Manage(Manage::PlanOpen)),
             "plan" if !args.is_empty() => Some(Action::Manage(Manage::PlanPrompt(args.to_owned()))),
             "status" => Some(Action::Manage(Manage::Status)),
+            // 远端机器（remote-exec.md §21.3）。
+            "machines" => self.machines_command(args),
             _ => return None,
         })
     }

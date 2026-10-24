@@ -2,6 +2,7 @@
 //!
 //! 组件层复制自 `apps/zcode-host/crates/tui/src/ui`（不含 V4 部分），之后各自演进；runner 只经内核
 //! 会话 API（`rust_cli_kernel_api::session_api`）驱动会话。
+pub mod machines;
 pub mod os;
 pub mod runner;
 pub mod services;

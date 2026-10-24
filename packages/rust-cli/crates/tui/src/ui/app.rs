@@ -134,6 +134,8 @@ pub enum Action {
     Panel(super::panels::Panel),
     /// ← 项目页与 `/resume` 页（修复线 F29，tui-panels.md §2、tui-manage.md §10）。
     Projects(super::projects::Request),
+    /// `/machines` 的子命令与列表里的动作（远端执行 R4，remote-exec.md §21.3）：经入口的机器服务。
+    Machines(super::machines::MachineRequest),
 }
 
 /// 插在 transcript 里的本地 cell（不属于会话事实）。
@@ -204,6 +206,8 @@ pub enum Overlay {
     Usage(Box<super::usage::UsageView>),
     /// 切到完全访问的确认框（tui.md §7.8，工作线 F87）：替换底部区域，不是全屏视图。
     YoloConfirm(super::yolo_confirm::YoloConfirm),
+    /// `/machines` 的列表（远端执行 R4，remote-exec.md §21.3）：替换底部区域。
+    Machines(super::machines::MachinesView),
 }
 
 pub struct App {
@@ -304,6 +308,10 @@ pub struct App {
     pub typing: super::keyboard::Typing,
     pub releases: super::keyboard::Releases,
     pub burst: Option<super::paste_burst::PasteBurst>,
+    /// 机器服务的最新快照（远端执行 R4，remote-exec.md §21.2；runner 在服务的变化通知之后重取）：状态行与 `/machines`。
+    pub machines: Vec<crate::machines::MachineRow>,
+    /// 入口注入了机器服务（没有时 `/machines` 提示不可用）。
+    pub machines_enabled: bool,
     pub quit: bool,
 }
 
@@ -388,6 +396,8 @@ impl App {
             typing: super::keyboard::Typing::default(),
             releases: super::keyboard::Releases::default(),
             burst: None,
+            machines: Vec::new(),
+            machines_enabled: false,
             quit: false,
         }
     }

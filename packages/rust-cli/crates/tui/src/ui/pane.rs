@@ -65,6 +65,10 @@ fn view_lines(
         let lines = super::yolo_confirm::lines(confirm, &view, height);
         return Some((lines, Vec::new(), None));
     }
+    // `/machines` 的列表（remote-exec.md §21.3）。
+    if let Some(Overlay::Machines(_)) = &app.overlay {
+        return Some((app.machines_lines(width, height), Vec::new(), None));
+    }
     if let Some(Overlay::List(list)) = &app.overlay {
         let (lines, items) = list.lines(width, height, app.lang, &app.palette);
         let targets = items
@@ -186,6 +190,8 @@ pub(super) fn bottom_lines(
         if let Some(col) = footer::search_cursor(app) {
             cursor = Some(((lines.len() - 1) as u16, col));
         }
+        // footer 下面的机器状态行（远端执行 R4，remote-exec.md §21.5）：清单里有机器时才有。
+        lines.extend(app.machine_status_line(width));
         // footer 下面的子代理列表（tui-panels.md §1.2）。
         let (agents, rows) = app.agents_lines(width, now);
         let first = lines.len();

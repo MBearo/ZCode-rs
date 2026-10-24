@@ -27,6 +27,10 @@ pub struct BackgroundEntry {
     /// 命令输出文件的末尾（最多 [`OUTPUT_TAIL_LINES`] 行）；子代理没有。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// 远端的后台命令所在的机器；后台子代理是它的缺省机器（Agent 的 `machine`）；本机为 None（远端执行 R4，
+    /// docs/specs/rust-cli/remote-exec.md §21.7）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 /// `BackgroundEntry.output` 最多保留的行数。

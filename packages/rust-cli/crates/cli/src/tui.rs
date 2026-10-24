@@ -99,6 +99,8 @@ pub(crate) struct Inputs<'a> {
     pub os: rust_cli_tui::Os,
     /// 配置的 `askUserQuestionTimeout`（毫秒，tools-more.md §1.1，工作线 F72）。
     pub question_timeout: Option<u64>,
+    /// 远端机器（remote-exec.md §21.2）：`/machines` 与机器状态行。
+    pub machines: Option<Arc<dyn rust_cli_tui::machines::Machines>>,
 }
 
 /// 界面语言写回用户级配置文件（tui.md §7.1，platform `write_ui_locale`）。
@@ -258,6 +260,7 @@ pub(crate) fn options(inputs: Inputs<'_>, version: &str) -> Options {
             trust: Some(inputs.trust),
             update: inputs.update,
             question_timeout: question_timeout(inputs.question_timeout, inputs.env),
+            machines: inputs.machines,
         },
         clock: inputs.clock,
         ids: inputs.ids,

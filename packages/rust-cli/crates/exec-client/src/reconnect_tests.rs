@@ -210,7 +210,8 @@ async fn the_connection_state_follows_the_link() {
         switches.switch(0).cut();
         let mut second = Peer::accept(&listener).await;
         second.handshake("exec-1", Capabilities::ports()).await;
-        let _ = second.try_frame().await;
+        // 连接留着直到客户端结束：握手后客户端马上发 ping（R4 量延迟，remote-exec.md §21.2），读到帧不算结束。
+        while second.try_frame().await.is_some() {}
     });
     let client = ExecClient::connect(connector, reconnecting(1000))
         .await
