@@ -62,7 +62,7 @@ fn starts_on_the_current_item_wraps_around_and_chooses_with_enter_or_digits() {
 #[test]
 fn the_frame_has_a_rule_a_bold_title_a_focus_pointer_and_a_hint() {
     let list = ListView::new(
-        Purpose::Permissions,
+        Purpose::Effort,
         "Pick".into(),
         vec![item("a", false), item("b", true)],
         "none".into(),
@@ -81,6 +81,35 @@ fn the_frame_has_a_rule_a_bold_title_a_focus_pointer_and_a_hint() {
         "{lines:?}"
     );
     assert_eq!(lines.last().unwrap(), "  Enter to select · Esc to cancel");
+}
+
+/// `/mode` 的选择器（工作线 F76，照 App 的菜单）：每个模式两行，名称（当前的打勾）与下面一行的说明。
+#[test]
+fn the_mode_picker_puts_the_description_under_the_name() {
+    let mode = |label: &str, value: &str, current: bool| Item {
+        label: label.into(),
+        description: format!("{label} description"),
+        current,
+        value: value.into(),
+        ..Item::default()
+    };
+    let list = ListView::new(
+        Purpose::Permissions,
+        "Mode".into(),
+        vec![
+            mode("Ask before changes", "build", true),
+            mode("Full access", "yolo", false),
+        ],
+        "none".into(),
+    );
+    let lines = text(&list, 50);
+    assert!(
+        lines[3].starts_with("  › 1. Ask before changes ✔"),
+        "{lines:?}"
+    );
+    assert_eq!(lines[4].trim_end(), "       Ask before changes description");
+    assert_eq!(lines[5].trim_end(), "    2. Full access");
+    assert_eq!(lines[6].trim_end(), "       Full access description");
 }
 
 #[test]
@@ -124,7 +153,7 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
 #[test]
 fn two_line_lists_search_and_two_lines_per_item() {
     let mut list = ListView::new(
-        Purpose::Fork,
+        Purpose::Rewind,
         "Resume session".into(),
         vec![
             Item {

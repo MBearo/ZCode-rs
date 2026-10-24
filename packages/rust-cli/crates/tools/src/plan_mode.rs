@@ -158,7 +158,8 @@ impl ExitPlanModeTool {
 /// Node 的位置 `<工作区>/.zcode/plans/plan-<会话>.md`；会话 ID 净化后为空时报错（Node 同样报错）。
 pub(crate) async fn plan_file(context: &ToolUseContext) -> Result<String, ToolError> {
     let facts = context
-        .env
+        .machine
+        .info()
         .path_facts(&context.workspace)
         .await
         .map_err(|error| failed(error.to_string()))?;
@@ -177,7 +178,12 @@ async fn read_plan(context: &ToolUseContext, path: &str) -> Option<String> {
         max_lines: None,
         max_bytes: None,
     };
-    match context.env.read_text(&context.workspace, request).await {
+    match context
+        .machine
+        .files()
+        .read_text(&context.workspace, request)
+        .await
+    {
         Ok(TextRead::Text(slice)) => Some(slice.content),
         Ok(TextRead::Directory | TextRead::TooLarge { .. }) | Err(_) => None,
     }

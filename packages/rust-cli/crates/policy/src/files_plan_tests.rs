@@ -11,7 +11,7 @@ use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, PermissionGate,
 };
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode, RuleBehavior};
-use rust_cli_kernel_api::testing::{MemoryEnvironment, MemoryStore};
+use rust_cli_kernel_api::testing::{MemoryEnvironment, MemoryStore, local_services, machine};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
@@ -67,7 +67,7 @@ impl Tool for Builtin {
 }
 
 fn context(mode: PermissionMode, home: Option<&str>) -> ToolUseContext {
-    let env = MemoryEnvironment::new(EnvFacts {
+    let env = Arc::new(MemoryEnvironment::new(EnvFacts {
         cwd: EnvPath::new("/w"),
         platform: "linux".to_owned(),
         os_version: "Linux 6.8.0".to_owned(),
@@ -75,7 +75,7 @@ fn context(mode: PermissionMode, home: Option<&str>) -> ToolUseContext {
         is_git_repo: false,
         additional_directories: Vec::new(),
         home: home.map(EnvPath::new),
-    });
+    }));
     let session = SessionId::new("s1");
     ToolUseContext {
         session: session.clone(),
@@ -88,7 +88,8 @@ fn context(mode: PermissionMode, home: Option<&str>) -> ToolUseContext {
         },
         mode,
         cancel: CancellationToken::new(),
-        env: Arc::new(env),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: Arc::new(NoAnswers),
         operation: OperationContext {

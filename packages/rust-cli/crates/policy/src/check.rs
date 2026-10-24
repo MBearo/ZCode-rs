@@ -11,8 +11,9 @@ use crate::texts::Reason;
 pub enum AskKind {
     /// 命中带 content 的 ask 规则：bypass 也要询问。
     Rule,
-    /// 安全检查（敏感文件）：allow 规则盖不过；bypassPermissions / guarded 放行，hook 放行之后仍询问；
-    /// 自动模式不经分类器。
+    /// 安全检查（敏感文件、后台 `&`）：allow 规则盖不过；yolo 放行，guarded 与其他模式询问，hook 放行之后仍询问；
+    /// 自动模式不经分类器。工作线 F76：guarded 改回询问（用户决定 2026-10-23，F68 曾按 bypass 放行）。后台 `&` 的这一问
+    /// 在 guarded 下不产生（工作线 F80，同 Node，Bash 检查按模式决定）。
     ///
     /// 修复线 F68（审计 P1）：以前按“安全检查一律 bypass 也问”处理，bypass 下写 `.bashrc`、`.git/…` 仍询问，`-p` 里
     /// 等于拒绝；现在只有 [`AskKind::Immune`] 一类 bypass 也问。
@@ -79,4 +80,22 @@ pub struct Inputs<'a> {
     pub dangerous: bool,
     /// hook 放行之后的检查（`PermissionGate::check_rules`）：[`AskKind::Safety`] 的询问也留下，不按 bypass 放行。
     pub hook_check: bool,
+    /// 完全访问：会话的模式是 bypassPermissions（yolo）且 plan 关着（plan 开着时判决用的模式是 plan）。除拒绝外的
+    /// 询问一律放行（工作线 F76，用户决定 2026-10-23“如果是 yolo 啥也不问”，shell-permissions.md §4.6.2）。
+    pub full_access: bool,
+}
+
+impl Inputs<'_> {
+    /// 同样的输入，路径事实换成 `paths`（cd 之后按别的当前目录检查，shell-permissions.md §4.5.7）。
+    pub(crate) fn with_paths<'b>(&'b self, paths: &'b crate::paths::PathContext) -> Inputs<'b> {
+        Inputs {
+            mode: self.mode,
+            rules: self.rules,
+            paths,
+            root: self.root,
+            dangerous: self.dangerous,
+            hook_check: self.hook_check,
+            full_access: self.full_access,
+        }
+    }
 }

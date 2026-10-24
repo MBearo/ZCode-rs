@@ -12,6 +12,8 @@
 //! - [`retry`]：与协议无关的退避策略、Retry-After 与 `x-should-retry` 解析。哪些错误可以重试由
 //!   协议适配器决定（例如 Anthropic 的 `overloaded_error`）。
 //! - [`timeout`]：每种请求的单次超时（只等响应头），按服务各有来源，只定义在这里（F58）。
+//! - [`websocket`]：WebSocket 客户端（Monitor 的 ws 来源，docs/specs/rust-cli/tools-more.md §19.7，F83），经
+//!   [`Egress::websocket`] 用同一个 HTTP 客户端升级。
 //!
 //! 审计日志只记方法、脱敏后的 URL、状态码与耗时；header 值不进日志，错误文本按值脱敏
 //! （`rust_cli_base::redact`）。
@@ -23,9 +25,11 @@ mod http;
 mod no_proxy;
 pub mod retry;
 mod roots;
+mod sha1;
 pub mod sse;
 pub mod timeout;
 pub mod uds;
+pub mod websocket;
 
 pub use bytes::Bytes;
 pub use egress::{Egress, NetworkPolicy};

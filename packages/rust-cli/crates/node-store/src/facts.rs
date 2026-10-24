@@ -118,7 +118,8 @@ pub fn live_session(conn: &Connection, session: &SessionId) -> Result<SessionRow
         })
 }
 
-/// 在一个 `begin immediate` 事务里应用整批事实；任一事实失败（含不支持）则整批回滚。
+/// 在一个 `begin immediate` 事务里应用整批事实；任一事实失败（含不支持）则整批回滚。用量事实例外：写不进去时只回退
+/// 它自己（[`crate::usage::observe`]）。
 pub fn commit(
     conn: &mut Connection,
     session: &SessionId,
@@ -147,9 +148,9 @@ pub fn commit(
     for fact in &batch.facts {
         apply(&ctx, fact)?;
     }
-    // 写过用量行：同一事务里按 Node 的保留期删旧行（usage.md §2.5）。
+    // 写过用量行：同一事务里按 Node 的保留期删旧行（usage.md §2.5）；删不掉只记日志（工作线 F77）。
     if crate::usage::touches_usage(&batch.facts) {
-        crate::usage::prune(&ctx)?;
+        crate::usage::observe(&ctx, "usage.prune.failed", || crate::usage::prune(&ctx))?;
     }
     let sequence = next_sequence(&ctx)?;
     tx.commit().storage()?;
@@ -238,11 +239,21 @@ pub(crate) fn apply(ctx: &Commit<'_>, fact: &Fact) -> Result<(), StoreError> {
             crate::project_rules::add(ctx, *behavior, rules)
         }
         Fact::ProjectModeSet { mode } => crate::project_mode::write(ctx, *mode),
-        Fact::ModelCalled { call } => crate::usage::model_called(ctx, call),
-        Fact::ToolCalled { call } => crate::usage::tool_called(ctx, call),
+        // 用量行是观测：写不进去只回退它自己（usage.md §2.5，工作线 F77）。
+        Fact::ModelCalled { call } => {
+            crate::usage::observe(ctx, "usage.model.write.failed", || {
+                crate::usage::model_called(ctx, call)
+            })
+        }
+        Fact::ToolCalled { call } => crate::usage::observe(ctx, "usage.tool.write.failed", || {
+            crate::usage::tool_called(ctx, call)
+        }),
         Fact::TurnEnded { status } => {
+            // `lastOutcome` 是业务事实，在 savepoint 之外。
             last_outcome(ctx, *status)?;
-            crate::usage::turn_ended(ctx, *status)
+            crate::usage::observe(ctx, "usage.turn.write.failed", || {
+                crate::usage::turn_ended(ctx, *status)
+            })
         }
         Fact::SubagentLinked {
             tool_use,

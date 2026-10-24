@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::testing::{MemoryStore, text_response};
+use rust_cli_kernel_api::testing::{MemoryStore, environments, text_response};
 
 use super::sessions_seed::{Seed, seed};
 use super::support::{GatedModel, Setup, Ui, with_ui};
@@ -240,7 +240,7 @@ async fn rename_and_delete_with_confirmation() {
 /// 当前目录（只对这次打开有效，tui-manage.md §10.5）。
 async fn resume_other(current: bool) -> String {
     let (_, mut setup) = setup(100).await;
-    setup.env = super::sessions_seed::env();
+    setup.environments = environments(super::sessions_seed::env());
     let model = GatedModel::scripted(Vec::new());
     let (sender, receiver) = std::sync::mpsc::channel();
     with_ui(model, setup, |mut ui| async move {

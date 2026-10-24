@@ -48,6 +48,30 @@ mod imp {
             let (stream, _) = self.inner.accept().await?;
             Ok(UdsStream::new(stream))
         }
+
+        /// 接受一个连接，交出读写两半的字节流（常驻执行器的 socket：帧由调用方切分）。
+        pub async fn accept_raw(&self) -> io::Result<super::UdsHalves> {
+            let (stream, _) = self.inner.accept().await?;
+            Ok(halves(stream))
+        }
+    }
+
+    fn halves(stream: tokio::net::UnixStream) -> super::UdsHalves {
+        let (read, write) = stream.into_split();
+        super::UdsHalves {
+            read: Box::new(read),
+            write: Box::new(write),
+        }
+    }
+
+    /// 连接 `path`，交出读写两半的字节流。
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "net 是套接字的唯一入口（README §4）：常驻执行器的代理在这里连接（remote-exec.md §19.5）"
+    )]
+    pub async fn connect_raw(path: &Path) -> io::Result<super::UdsHalves> {
+        let stream = tokio::net::UnixStream::connect(path).await?;
+        Ok(halves(stream))
     }
 
     /// 一个连接：按行读写。
@@ -157,9 +181,25 @@ mod imp {
     pub async fn connect(_path: &Path) -> io::Result<UdsStream> {
         Err(unsupported())
     }
+
+    pub async fn connect_raw(_path: &Path) -> io::Result<super::UdsHalves> {
+        Err(unsupported())
+    }
+
+    impl UdsListener {
+        pub async fn accept_raw(&self) -> io::Result<super::UdsHalves> {
+            Err(unsupported())
+        }
+    }
 }
 
-pub use imp::{UdsListener, UdsStream, connect};
+pub use imp::{UdsListener, UdsStream, connect, connect_raw};
+
+/// 一条连接的读写两半（字节流，不按行）：常驻执行器的 socket 上跑执行协议的帧（remote-exec.md §19.5）。
+pub struct UdsHalves {
+    pub read: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+    pub write: Box<dyn tokio::io::AsyncWrite + Send + Unpin>,
+}
 
 /// 连接、写一行、读一行回复（对方没回就关闭时为 None）。
 pub async fn request(path: &Path, line: &str) -> io::Result<Option<String>> {

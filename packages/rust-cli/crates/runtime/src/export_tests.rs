@@ -42,6 +42,7 @@ async fn the_text_is_written_through_the_environment() {
     };
     let path = write(
         &env,
+        &env,
         &SequentialIds::default(),
         &Generation::new("gen_1"),
         ExportFile {

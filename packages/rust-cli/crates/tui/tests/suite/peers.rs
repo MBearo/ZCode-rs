@@ -246,3 +246,50 @@ async fn the_chinese_dialog_denies_with_escape() {
         [ReceiptStatus::Held, ReceiptStatus::Denied]
     );
 }
+
+/// 批准框的焦点行（tui.md §7.7，工作线 F76，用户决定 2026-10-23）：与提问视图相同，不铺底色条，`❯` 与名字是强调色；
+/// 深浅两种背景。旧代码整行铺底色条。
+#[tokio::test(flavor = "multi_thread")]
+async fn the_focused_choice_has_no_bar_in_both_themes() {
+    for (background, accent) in [
+        ((0, 0, 0), Color::Rgb(99, 168, 248)),
+        ((255, 255, 255), Color::Rgb(28, 100, 200)),
+    ] {
+        let port = FakePort::new();
+        let model = GatedModel::scripted(vec![text_response(&["first"])]);
+        let probe = port.clone();
+        with_ui(
+            model,
+            setup(&port, "en_US.UTF-8", background),
+            |mut ui| async move {
+                ui.submit("start");
+                ui.wait_for("first").await;
+                probe.push_held();
+                ui.wait("the pointer on deny", |s| s.contains("❯ 1. Deny"))
+                    .await;
+                let buffer = ui.buffer.lock().unwrap().clone().unwrap();
+                let area = buffer.area;
+                let row = |needle: &str| {
+                    (area.top()..area.bottom()).find(|&y| {
+                        let text: String = (area.left()..area.right())
+                            .map(|x| buffer[(x, y)].symbol())
+                            .collect();
+                        text.contains(needle)
+                    })
+                };
+                let focused = row("❯ 1. Deny").unwrap();
+                let other = row("2. Deliver").unwrap();
+                for y in [focused, other] {
+                    for x in area.left()..area.right() {
+                        assert_eq!(buffer[(x, y)].bg, Color::Reset, "column {x} of row {y}");
+                    }
+                }
+                assert_eq!(color_of(&ui, "❯ 1. Deny"), Some(accent));
+                assert_eq!(color_of(&ui, "Deny —"), Some(accent));
+                assert_eq!(color_of(&ui, "Deliver this"), Some(Color::Reset));
+                ui.key(KeyCode::Esc);
+            },
+        )
+        .await;
+    }
+}

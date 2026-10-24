@@ -52,7 +52,8 @@ pub(crate) fn block_kind(block: &ContentBlock) -> &'static str {
         ContentBlock::RedactedThinking { .. } => "redacted_thinking",
         ContentBlock::ToolUse { .. } => "tool_use",
         ContentBlock::ToolResult { .. } => "tool_result",
-        // 只出现在 WebSearch 的旁路请求里，不落库（docs/specs/rust-cli/tools-more.md §5）。
+        // 不落库（同 Node）：WebSearch 的旁路请求里才用；主回复里端点自己产生的，query 组装时已去掉（工作线 F90，
+        // docs/specs/rust-cli/query.md §1.9）。这里仍拒收，挡住没走 query 的写入。
         ContentBlock::ServerToolUse { .. } => "server_tool_use",
         ContentBlock::WebSearchToolResult { .. } => "web_search_tool_result",
     }
@@ -219,6 +220,8 @@ fn append_assistant(ctx: &Commit<'_>, assistant: &AssistantMessage) -> Result<()
         tokens: tokens.clone(),
         finish,
         turn: turn.as_deref(),
+        // 续写占位（工作线 F77）：落库后 App 不显示它，Node 与本工程续写时照常发给模型（§4.2.1）。
+        model_only: assistant.is_resume_sentinel(),
     });
     messages::save_message(ctx.conn, &info, ctx.now as i64).storage()?;
     let owner = (ctx.session, id);

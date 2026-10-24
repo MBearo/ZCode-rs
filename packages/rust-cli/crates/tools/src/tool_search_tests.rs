@@ -94,14 +94,44 @@ async fn the_listing_names_deferred_tools_only_when_tool_search_is_on() {
         .map(|entry| entry.line.as_str())
         .collect();
     assert_eq!(deferred, ["EnterPlanMode"]);
-    // 没有 ToolSearch，或模型不支持延迟加载：不宣布。
+    // 没有 ToolSearch：不宣布。
     let off = catalog
         .listings(&request("claude-opus-5-5", &["Glob", "EnterPlanMode"]))
         .await
         .unwrap();
     assert!(off.deferred_tools.is_empty());
-    let unsupported = catalog.listings(&request("glm-5", &names)).await.unwrap();
-    assert!(unsupported.deferred_tools.is_empty());
+    // 工作线 F89（tools-more.md §3.2.1）：不区分模型，以前禁用表里的模型也宣布。修改：F84 时不宣布。
+    let haiku = catalog
+        .listings(&request("claude-3-5-haiku-20241022", &names))
+        .await
+        .unwrap();
+    assert_eq!(haiku.deferred_tools.len(), 1);
+    // 工作线 F84（tools-more.md §3.2）：端点不支持 `tool_reference` 时是本地 ToolSearch，清单照样宣布。修改：以前
+    // 不宣布（没有卡片的模型、端点不支持的都不开）。
+    let local = catalog.listings(&request("glm-5", &names)).await.unwrap();
+    let lines: Vec<&str> = local
+        .deferred_tools
+        .iter()
+        .map(|entry| entry.line.as_str())
+        .collect();
+    assert_eq!(lines, ["EnterPlanMode"]);
+}
+
+/// 工作线 F89（tools-more.md §3.2.1）：`ENABLE_TOOL_SEARCH` 为关时 ToolSearch 工具不启用（这一步的工具里没有它），开与自动时
+/// 启用（自动的门槛在主循环里按这一步判断）。
+#[test]
+fn the_setting_enables_the_tool_search_tool() {
+    use rust_cli_prompts::models::ToolSearchSetting;
+    for (setting, enabled) in [
+        (ToolSearchSetting::On, true),
+        (ToolSearchSetting::Auto { percent: 10 }, true),
+        (ToolSearchSetting::Off, false),
+    ] {
+        let tool = ToolSearchTool::new(Arc::new(ToolCatalog::new(setting)));
+        assert_eq!(tool.is_enabled(), enabled, "{setting:?}");
+    }
+    let (catalog, _registry) = catalog();
+    assert!(ToolSearchTool::new(catalog).is_enabled());
 }
 
 #[test]

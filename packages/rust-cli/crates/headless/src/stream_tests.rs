@@ -7,8 +7,8 @@ use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::EnvironmentId;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
-    text_response, tool_use_response,
+    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
+    selection, text_response, tool_use_response,
 };
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 use serde_json::Value;
@@ -21,7 +21,7 @@ fn kernel(model: ScriptedModel, max_turns: Option<u32>) -> Arc<dyn Kernel> {
     Arc::new(LocalKernel::new(
         Ports {
             model: Arc::new(model),
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(1_767_225_600_000)),

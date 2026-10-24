@@ -5,19 +5,23 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, Environment, FileContent, OperationContext, Origin,
-    OutputStream, ReadFile, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Origin, OutputStream,
+    ReadFile, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_shell::ShellState;
 use rust_cli_kernel_api::ids::{
     AgentId, EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
+};
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
 };
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
 };
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::MemoryStore;
+use rust_cli_kernel_api::testing::{MemoryStore, local_services, machine};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
@@ -39,17 +43,22 @@ struct Scripted {
 }
 
 #[async_trait]
-impl Environment for Scripted {
+impl EnvInfo for Scripted {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Err(EnvError::Unsupported {
             what: "facts".to_owned(),
         })
     }
+}
+
+#[async_trait]
+impl Files for Scripted {
     async fn read_file(&self, _w: &WorkspaceRef, _r: ReadFile) -> Result<FileContent, EnvError> {
         Err(EnvError::Unsupported {
             what: "read".to_owned(),
         })
     }
+
     async fn write_file(
         &self,
         _w: &WorkspaceRef,
@@ -60,6 +69,10 @@ impl Environment for Scripted {
             what: "write".to_owned(),
         })
     }
+}
+
+#[async_trait]
+impl Commands for Scripted {
     async fn start_command(
         &self,
         _w: &WorkspaceRef,
@@ -69,6 +82,7 @@ impl Environment for Scripted {
         self.started.lock().unwrap().push(request);
         Ok(())
     }
+
     fn watch_command(
         &self,
         _operation: OperationId,
@@ -110,17 +124,24 @@ impl Environment for Scripted {
         });
         stream::iter(first).chain(last).boxed()
     }
+
     async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
         self.cancelled.lock().unwrap().push(operation);
         self.released.notify_one();
         Ok(())
     }
+
     async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Ok(Outcome::Unknown)
     }
+
     async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {
         Ok(())
     }
+}
+
+#[async_trait]
+impl Shell for Scripted {
     async fn shell_state(&self, _w: &WorkspaceRef, _s: &SessionId) -> Result<ShellState, EnvError> {
         Ok(ShellState {
             cwd: EnvPath::new("/w/sub"),
@@ -129,6 +150,13 @@ impl Environment for Scripted {
         })
     }
 }
+
+impl Search for Scripted {}
+impl Background for Scripted {}
+impl Checkpoints for Scripted {}
+impl Pdf for Scripted {}
+impl Git for Scripted {}
+impl Fetch for Scripted {}
 
 struct Unused;
 
@@ -157,7 +185,8 @@ fn context(env: Arc<Scripted>, agent: Option<AgentId>) -> ToolUseContext {
         },
         mode: PermissionMode::Default,
         cancel: CancellationToken::new(),
-        env,
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: Arc::new(Unused),
         operation: OperationContext {

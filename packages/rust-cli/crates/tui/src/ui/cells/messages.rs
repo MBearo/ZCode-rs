@@ -165,7 +165,8 @@ const ERROR_LIMIT: usize = 1000;
 /// 缺陷修复（F25）：原来整条错误截到一行宽（`truncate`），Bedrock 这类长的 400 只显示到 `https…`，后半句与请求 ID
 /// 看不到也复制不到。
 pub fn error_lines(message: &str, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    let text = message.trim();
+    let message = words::turn_error(ctx.lang, message.trim());
+    let text = message.as_str();
     let cut = !ctx.expanded && text.chars().count() > ERROR_LIMIT;
     let shown = if cut {
         let mut shown: String = text.chars().take(ERROR_LIMIT).collect();

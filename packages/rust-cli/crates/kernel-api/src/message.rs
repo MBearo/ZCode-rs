@@ -154,6 +154,33 @@ pub struct AssistantMessage {
     pub usage: Option<Usage>,
 }
 
+/// 不是模型生成的 assistant 消息的模型名。
+pub const SYNTHETIC_MODEL: &str = "<synthetic>";
+
+/// 续写会话时补在最后一条没有回答的 user 消息之后的 assistant 文字（docs/specs/rust-cli/session-lifecycle.md
+/// §6.3.1）：界面不显示；随续写后的第一批提交落库，存成只给模型看的记录（工作线 F77）。
+pub const NO_RESPONSE_REQUESTED: &str = "No response requested.";
+
+/// 发给模型的内容为空时的占位文字（docs/specs/rust-cli/query.md §1.8 的配对兜底；context 的静默提醒不把它算作
+/// 可见输出）。
+pub const NO_CONTENT: &str = "(no content)";
+
+/// 续写时补给没有结果的调用的结果文字（`is_error`，docs/specs/rust-cli/session-lifecycle.md §6.3）：会话结束之前没有
+/// 记下结果，结果未知。会话的 settle 给本工程写的未结调用补它；Node 写的未结调用由存储冷读取补 Node 自己的文字
+/// （§6.3.2，工作线 F88）。
+pub const INTERRUPTED_CALL: &str = "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]";
+
+impl AssistantMessage {
+    /// 续写时补的 assistant（[`NO_RESPONSE_REQUESTED`]，模型名是 [`SYNTHETIC_MODEL`]）。
+    pub fn is_resume_sentinel(&self) -> bool {
+        self.model == SYNTHETIC_MODEL
+            && matches!(
+                self.content.as_slice(),
+                [ContentBlock::Text { text }] if text == NO_RESPONSE_REQUESTED
+            )
+    }
+}
+
 /// attachment（system-reminder 类内容）：渲染好的文本加上结构化数据。
 ///
 /// 落库形状是 `text` part + `synthetic` + `metadata.source`，`text` 自带 `<system-reminder>` 包装
@@ -230,6 +257,10 @@ pub struct CompactBoundary {
     pub summary: MessageId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preserved: Option<PreservedSegment>,
+    /// 压缩前已加载的工具（经 `tool_reference` 引用过的，加上前一个边界带下来的），排序：压缩之后照样算已加载
+    /// （docs/specs/rust-cli/compact.md §3.5）。旧记录没有这一项。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discovered_tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

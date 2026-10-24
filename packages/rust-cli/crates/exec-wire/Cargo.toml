@@ -1,0 +1,23 @@
+[package]
+name = "rust-cli-exec-wire"
+description = "Wire protocol of the remote executor: messages, capabilities and frame encoding (no IO)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+# 二进制段：一份字节在帧、分片与 DTO 之间共享，不复制。
+bytes.workspace = true
+# 握手里不透明的凭据用 base 的 RedactedString（Debug 不打印原值）。
+rust-cli-base.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true

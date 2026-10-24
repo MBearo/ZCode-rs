@@ -2,20 +2,28 @@
 
 use std::sync::Arc;
 
-use rust_cli_kernel_api::env::{EnvPath, Environment, OperationContext, Origin, WorkspaceRef};
+use async_trait::async_trait;
+use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
     AgentId, EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
+};
+use rust_cli_kernel_api::local_services::{Fetch, Git, LocalServices};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, MachineEnv, Pdf, Search, Shell,
 };
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::orchestration::Interactions;
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment};
+use rust_cli_kernel_api::testing::{
+    AllPorts, MemoryStore, UnusedEnvironment, local_services, machine,
+};
 use rust_cli_kernel_api::tool::{ToolOutput, ToolUseContext};
 use tokio_util::sync::CancellationToken;
 
 pub(crate) struct Ctx {
     pub(crate) interactions: Arc<dyn Interactions>,
-    pub(crate) env: Arc<dyn Environment>,
+    pub(crate) machine: MachineEnv,
+    pub(crate) local: LocalServices,
     pub(crate) mode: PermissionMode,
     pub(crate) agent: Option<AgentId>,
 }
@@ -24,10 +32,17 @@ impl Ctx {
     pub(crate) fn new(interactions: Arc<dyn Interactions>) -> Self {
         Self {
             interactions,
-            env: Arc::new(UnusedEnvironment),
+            machine: machine(Arc::new(UnusedEnvironment)),
+            local: local_services(Arc::new(UnusedEnvironment)),
             mode: PermissionMode::Default,
             agent: None,
         }
+    }
+
+    /// 工具调用的机器与本机服务都换成 `env`（一个替身实现全部端口）。
+    pub(crate) fn set_env<E: AllPorts + 'static>(&mut self, env: Arc<E>) {
+        self.machine = machine(env.clone());
+        self.local = local_services(env);
     }
 
     pub(crate) fn build(self) -> ToolUseContext {
@@ -42,7 +57,8 @@ impl Ctx {
             },
             mode: self.mode,
             cancel: CancellationToken::new(),
-            env: self.env,
+            machine: self.machine,
+            local: self.local,
             artifacts: Arc::new(MemoryStore::default()),
             interactions: self.interactions,
             operation: OperationContext {
@@ -122,8 +138,8 @@ fn unsupported() -> rust_cli_kernel_api::env::EnvError {
     }
 }
 
-#[async_trait::async_trait]
-impl Environment for TextEnv {
+#[async_trait]
+impl EnvInfo for TextEnv {
     async fn facts(
         &self,
         _workspace: &WorkspaceRef,
@@ -131,6 +147,19 @@ impl Environment for TextEnv {
         Err(unsupported())
     }
 
+    async fn path_facts(
+        &self,
+        _workspace: &WorkspaceRef,
+    ) -> Result<rust_cli_kernel_api::env_files::PathFacts, rust_cli_kernel_api::env::EnvError> {
+        Ok(rust_cli_kernel_api::env_files::PathFacts {
+            home: Some(EnvPath::new(self.home.clone())),
+            style: rust_cli_kernel_api::env_files::PathStyle::Posix,
+        })
+    }
+}
+
+#[async_trait]
+impl Files for TextEnv {
     async fn read_file(
         &self,
         _workspace: &WorkspaceRef,
@@ -148,6 +177,38 @@ impl Environment for TextEnv {
         Err(unsupported())
     }
 
+    async fn read_text(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: rust_cli_kernel_api::env_files::ReadText,
+    ) -> Result<rust_cli_kernel_api::env_files::TextRead, rust_cli_kernel_api::env::EnvError> {
+        let files = self
+            .files
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some((_, text)) = files.iter().find(|(path, _)| path == request.path.as_str()) else {
+            return Err(rust_cli_kernel_api::env::EnvError::NotFound {
+                path: request.path.as_str().to_owned(),
+            });
+        };
+        let lines = u64::try_from(text.lines().count()).unwrap_or(u64::MAX);
+        let bytes = u64::try_from(text.len()).unwrap_or(u64::MAX);
+        Ok(rust_cli_kernel_api::env_files::TextRead::Text(
+            rust_cli_kernel_api::env_files::TextSlice {
+                content: text.clone(),
+                line_count: lines,
+                total_lines: lines,
+                total_bytes: bytes,
+                read_bytes: bytes,
+                mtime_ms: 0,
+                version: rust_cli_kernel_api::env::FileVersion::new("v1"),
+            },
+        ))
+    }
+}
+
+#[async_trait]
+impl Commands for TextEnv {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
@@ -190,17 +251,10 @@ impl Environment for TextEnv {
     ) -> Result<(), rust_cli_kernel_api::env::EnvError> {
         Ok(())
     }
+}
 
-    async fn path_facts(
-        &self,
-        _workspace: &WorkspaceRef,
-    ) -> Result<rust_cli_kernel_api::env_files::PathFacts, rust_cli_kernel_api::env::EnvError> {
-        Ok(rust_cli_kernel_api::env_files::PathFacts {
-            home: Some(EnvPath::new(self.home.clone())),
-            style: rust_cli_kernel_api::env_files::PathStyle::Posix,
-        })
-    }
-
+#[async_trait]
+impl Fetch for TextEnv {
     async fn fetch_url(
         &self,
         _workspace: &WorkspaceRef,
@@ -216,33 +270,11 @@ impl Environment for TextEnv {
             .map(|(_, page)| page.clone())
             .ok_or_else(unsupported)
     }
-
-    async fn read_text(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env_files::ReadText,
-    ) -> Result<rust_cli_kernel_api::env_files::TextRead, rust_cli_kernel_api::env::EnvError> {
-        let files = self
-            .files
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some((_, text)) = files.iter().find(|(path, _)| path == request.path.as_str()) else {
-            return Err(rust_cli_kernel_api::env::EnvError::NotFound {
-                path: request.path.as_str().to_owned(),
-            });
-        };
-        let lines = u64::try_from(text.lines().count()).unwrap_or(u64::MAX);
-        let bytes = u64::try_from(text.len()).unwrap_or(u64::MAX);
-        Ok(rust_cli_kernel_api::env_files::TextRead::Text(
-            rust_cli_kernel_api::env_files::TextSlice {
-                content: text.clone(),
-                line_count: lines,
-                total_lines: lines,
-                total_bytes: bytes,
-                read_bytes: bytes,
-                mtime_ms: 0,
-                version: rust_cli_kernel_api::env::FileVersion::new("v1"),
-            },
-        ))
-    }
 }
+
+impl Search for TextEnv {}
+impl Shell for TextEnv {}
+impl Background for TextEnv {}
+impl Checkpoints for TextEnv {}
+impl Pdf for TextEnv {}
+impl Git for TextEnv {}

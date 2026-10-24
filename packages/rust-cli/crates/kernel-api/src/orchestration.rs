@@ -514,7 +514,8 @@ impl InteractionRequest {
 }
 
 pub use crate::interaction::{
-    InteractionAnswer, PermissionAnswer, PlanApprovalAnswer, QuestionAnswer,
+    DetachedAsk, DetachedEvent, InteractionAnswer, PermissionAnswer, PlanApprovalAnswer,
+    QuestionAnnotation, QuestionAnswer,
 };
 
 #[async_trait]
@@ -580,6 +581,19 @@ pub trait Interactions: Send + Sync {
         _session: &SessionId,
     ) -> Option<crate::model::ModelSelection> {
         None
+    }
+
+    /// Monitor 工具起好的 monitor 交给会话 actor（工作线 F83 新增，docs/specs/rust-cli/tools-more.md §19.6）：actor 是
+    /// 切行、批、限流与通知的唯一 owner，按游标读它的输出。不持有会话的实现（子代理、测试替身）返回 `Unsupported`，
+    /// 调用方停掉已经起的命令。
+    async fn arm_monitor(
+        &self,
+        _session: &SessionId,
+        _monitor: crate::monitor::MonitorArmed,
+    ) -> Result<(), OrchestrationError> {
+        Err(OrchestrationError::Unsupported {
+            what: "monitors".to_owned(),
+        })
     }
 
     /// 不随当前回合结束的询问入口（docs/specs/rust-cli/agents.md §4.1.1）：后台工作（交互界面里的后台子代理）

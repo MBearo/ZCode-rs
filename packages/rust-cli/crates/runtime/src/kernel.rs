@@ -20,6 +20,22 @@ impl Kernel for LocalKernel {
         self.create_session_as(request, StartSource::Startup).await
     }
 
+    /// 旧会话的询问（agents.md §4.1.2，工作线 F72）。
+    fn detached_asks(
+        &self,
+    ) -> futures_util::stream::BoxStream<'static, rust_cli_kernel_api::orchestration::DetachedEvent>
+    {
+        self.detached.subscribe()
+    }
+
+    async fn resolve_detached(
+        &self,
+        interaction: &rust_cli_kernel_api::ids::InteractionId,
+        answer: serde_json::Value,
+    ) -> Result<(), KernelError> {
+        self.detached.resolve(interaction, answer).await
+    }
+
     async fn open_session(
         &self,
         session: &SessionId,
@@ -75,6 +91,7 @@ impl Kernel for LocalKernel {
                 checkpoints: Vec::new(),
                 start,
                 turn: None,
+                last_turn_failed: false,
             },
             Opened::Created,
         );
@@ -124,6 +141,7 @@ impl Kernel for LocalKernel {
             checkpoints: loaded.checkpoints,
             start,
             turn: loaded.turn,
+            last_turn_failed: loaded.last_turn_failed,
         };
         Ok(self.start(state, Opened::Loaded))
     }
@@ -165,8 +183,8 @@ impl Kernel for LocalKernel {
         let request = rust_cli_kernel_api::env_files::ListFiles {
             cwd: workspace.root.clone(),
         };
-        self.ports
-            .env
+        self.machine
+            .search()
             .list_files(workspace, request)
             .await
             .map(|list| list.files)
@@ -193,7 +211,12 @@ impl Kernel for LocalKernel {
         &self,
         query: rust_cli_kernel_api::manage::PlanFileQuery,
     ) -> Result<rust_cli_kernel_api::manage::PlanFile, KernelError> {
-        directory::plan_file(self.ports.env.as_ref(), &query).await
+        directory::plan_file(
+            self.machine.info().as_ref(),
+            self.machine.files().as_ref(),
+            &query,
+        )
+        .await
     }
 
     /// `/cd <path>`：检查路径，有会话时经会话 actor 换工作目录（tui-manage.md §7.1）。
@@ -302,8 +325,8 @@ impl Kernel for LocalKernel {
         let request = rust_cli_kernel_api::env_git::GitDiffRequest {
             cwd: workspace.root.clone(),
         };
-        self.ports
-            .env
+        self.local
+            .git()
             .git_diff(workspace, request)
             .await
             .map_err(|error| KernelError::Failed {
@@ -317,7 +340,8 @@ impl Kernel for LocalKernel {
         file: rust_cli_kernel_api::manage::ExportFile,
     ) -> Result<String, KernelError> {
         export::write(
-            self.ports.env.as_ref(),
+            self.machine.info().as_ref(),
+            self.machine.files().as_ref(),
             self.ports.ids.as_ref(),
             &self.generation,
             file,

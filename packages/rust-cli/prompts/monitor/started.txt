@@ -1,0 +1,1 @@
+Monitor started (task {{task}}, expires in {{duration}} unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply.

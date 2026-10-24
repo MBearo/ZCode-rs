@@ -286,3 +286,140 @@ fn an_aborted_stream_keeps_the_unfinished_text_only() {
     ]);
     assert!(tool.is_empty(), "{tool:?}");
 }
+
+fn text_block(index: usize, value: &str) -> Vec<ModelEvent> {
+    vec![
+        ModelEvent::BlockStart {
+            index,
+            block: ContentBlock::Text {
+                text: String::new(),
+            },
+        },
+        ModelEvent::BlockDelta {
+            index,
+            delta: BlockDelta::Text(value.to_owned()),
+        },
+        ModelEvent::BlockStop { index },
+    ]
+}
+
+fn assembled(events: Vec<ModelEvent>) -> Assembler {
+    let mut assembler = Assembler::default();
+    for event in events {
+        assembler.push(event).unwrap();
+    }
+    assembler
+}
+
+/// 工作线 F90（query.md §1.9）：模型适配器跳过的块不输出任何事件，它的序号在组装器里是空槽。空槽不是没结束的块：
+/// 修 bug 前流正常结束也报 `stream ended with an unfinished block`，中断时停在空槽、截掉后面已经流出的文字。
+#[test]
+fn a_sequence_number_that_never_started_is_not_an_unfinished_block() {
+    let mut events = vec![start()];
+    // index 1 被跳过；index 3 在 index 2 之前开始（乱序）。
+    events.extend(text_block(0, "a"));
+    events.extend(text_block(3, "c"));
+    events.extend(text_block(2, "b"));
+    events.extend([
+        ModelEvent::MessageDelta {
+            stop_reason: Some(StopReason::EndTurn),
+            usage: Usage::default(),
+        },
+        ModelEvent::MessageStop,
+    ]);
+    let assembler = assembled(events);
+    assert_eq!(assembler.incomplete(), None);
+    let texts = |content: Vec<ContentBlock>| -> Vec<String> {
+        content
+            .into_iter()
+            .map(|block| match block {
+                ContentBlock::Text { text } => text,
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    };
+    assert_eq!(texts(assembler.finish().content), ["a", "b", "c"]);
+
+    // 中断：空槽之后已经结束的块与没写完的文字都留下。
+    let mut events = vec![start()];
+    events.extend(text_block(0, "a"));
+    events.extend(text_block(2, "b"));
+    events.extend([
+        ModelEvent::BlockStart {
+            index: 3,
+            block: ContentBlock::Text {
+                text: String::new(),
+            },
+        },
+        ModelEvent::BlockDelta {
+            index: 3,
+            delta: BlockDelta::Text("partial".to_owned()),
+        },
+    ]);
+    assert_eq!(
+        texts(assembled(events).finish_aborted().content),
+        ["a", "b", "partial"]
+    );
+}
+
+/// 工作线 F90（query.md §1.9、tools-more.md §5.1）：回复里端点自己产生的服务端块（`server_tool_use`、
+/// `web_search_tool_result`、assistant 一侧的 `tool_result`）不进回复，照 Node 不落库、不发回；收不到结束的服务端块
+/// 不让这次响应失败。修 bug 前它们留在回复里，node-store 拒收，整条回复与工具结果都没落库。
+#[test]
+fn server_blocks_are_not_part_of_the_reply() {
+    let server = |index, block| {
+        vec![
+            ModelEvent::BlockStart { index, block },
+            ModelEvent::BlockStop { index },
+        ]
+    };
+    let mut events = vec![start()];
+    events.extend(text_block(0, "before"));
+    events.extend(server(
+        1,
+        ContentBlock::ServerToolUse {
+            id: "srvtoolu_1".to_owned(),
+            name: "web_search".to_owned(),
+            input: json!({"query": "q"}),
+        },
+    ));
+    events.extend(server(
+        2,
+        ContentBlock::ToolResult {
+            tool_use_id: ToolUseId::new("srvtoolu_1"),
+            content: Vec::new(),
+            is_error: false,
+        },
+    ));
+    events.extend(server(
+        3,
+        ContentBlock::WebSearchToolResult {
+            tool_use_id: "srvtoolu_1".to_owned(),
+            content: json!([]),
+        },
+    ));
+    events.extend(text_block(4, "after"));
+    // 收不到结束的服务端块也不算没结束的块。
+    events.push(ModelEvent::BlockStart {
+        index: 5,
+        block: ContentBlock::ServerToolUse {
+            id: "srvtoolu_2".to_owned(),
+            name: "web_search".to_owned(),
+            input: json!({}),
+        },
+    });
+    events.push(ModelEvent::MessageStop);
+    let assembler = assembled(events);
+    assert_eq!(assembler.incomplete(), None);
+    assert_eq!(
+        assembler.finish().content,
+        [
+            ContentBlock::Text {
+                text: "before".to_owned()
+            },
+            ContentBlock::Text {
+                text: "after".to_owned()
+            },
+        ]
+    );
+}

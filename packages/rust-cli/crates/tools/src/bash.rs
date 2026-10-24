@@ -90,6 +90,10 @@ pub struct BashTool {
     background_deadline: bool,
     /// 前台与后台的缺省与上限（入口按 `BASH_*_TIMEOUT_MS` 给出，[`BashTool::with_timeouts`]）。
     timeouts: BashTimeouts,
+    /// 读文件的命令记进的 readFileState（tools-files.md §4.2）；None 时不记。
+    files: Option<std::sync::Arc<crate::file_state::ReadFileState>>,
+    /// Monitor 开着（工作线 F83，tools-more.md §19.9）：描述多一句，前台的长 `sleep` 拦下。
+    monitor: bool,
 }
 
 impl Default for BashTool {
@@ -105,7 +109,36 @@ impl BashTool {
             sandbox: None,
             background_deadline: true,
             timeouts: BashTimeouts::default(),
+            files: None,
+            monitor: false,
         }
+    }
+
+    /// Monitor 开着（工作线 F83，tools-more.md §19.9）：`run_in_background` 一行末尾加 “Foreground `sleep` is
+    /// blocked; …” 一句，没有 `run_in_background` 的前台长 `sleep` 拦下（errorCode 10）。与期限的两个方法先后无关。
+    #[must_use]
+    pub fn with_monitor(mut self, enabled: bool) -> Self {
+        if enabled && !self.monitor {
+            const ANCHOR: &str = "No `&` needed.";
+            self.definition.description = self.definition.description.replacen(
+                ANCHOR,
+                &format!("{ANCHOR}{}", rust_cli_prompts::monitor::bash_sentence()),
+                1,
+            );
+        }
+        self.monitor = enabled;
+        self
+    }
+
+    /// 读文件的命令（`cat`、`head`、`sed -n` 等）正常结束后把文件记进这份 readFileState（文件工具用的同一份，
+    /// tools-files.md §4.2）。
+    #[must_use]
+    pub fn with_file_state(
+        mut self,
+        files: std::sync::Arc<crate::file_state::ReadFileState>,
+    ) -> Self {
+        self.files = Some(files);
+        self
     }
 
     /// stream-json 输入的 `-p`：后台命令的缺省期限是 max(1800000, 前台
@@ -202,7 +235,10 @@ async fn collect(
     timeout_ms: u64,
 ) -> Result<Collected, ToolError> {
     let operation = context.operation.operation.clone();
-    let mut events = context.env.watch_command(operation.clone(), 0);
+    let mut events = context
+        .machine
+        .commands()
+        .watch_command(operation.clone(), 0);
     let mut output_file = String::new();
     let mut head = Vec::new();
     let mut total: u64 = 0;
@@ -212,7 +248,7 @@ async fn collect(
             event = events.next() => event,
             () = context.cancel.cancelled(), if !cancelled => {
                 cancelled = true;
-                context.env.cancel(operation.clone()).await.map_err(env_failure)?;
+                context.machine.commands().cancel(operation.clone()).await.map_err(env_failure)?;
                 continue;
             }
         };
@@ -265,7 +301,8 @@ async fn collect(
 /// 后台命令：只等 `Started` 拿到输出文件。
 async fn started(context: &ToolUseContext) -> Result<String, ToolError> {
     let mut events = context
-        .env
+        .machine
+        .commands()
         .watch_command(context.operation.operation.clone(), 0);
     while let Some(event) = events.next().await {
         if let CommandEvent::Started { output } = event.map_err(env_failure)? {
@@ -314,6 +351,28 @@ impl Tool for BashTool {
 
     fn max_result_size_chars(&self) -> Option<usize> {
         Some(INLINE_LIMIT)
+    }
+
+    async fn validate_input(
+        &self,
+        input: &Value,
+        _context: &ToolUseContext,
+    ) -> rust_cli_kernel_api::tool::Validation {
+        use rust_cli_kernel_api::tool::Validation;
+        if !self.monitor || input.get("run_in_background").and_then(Value::as_bool) == Some(true) {
+            return Validation::Ok;
+        }
+        let command = input
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        match crate::bash_sleep::blocked(command) {
+            Some(what) => Validation::Invalid {
+                message: rust_cli_prompts::monitor::bash_blocked(&what),
+                error_code: Some(10),
+            },
+            None => Validation::Ok,
+        }
     }
 
     async fn call(
@@ -384,6 +443,7 @@ impl BashTool {
                 command: BackgroundCommand {
                     description: description.clone(),
                     tool_use: Some(context.tool_use.clone()),
+                    kind: Default::default(),
                 },
                 deadline_ms: self
                     .background_deadline
@@ -400,8 +460,12 @@ impl BashTool {
         // 修复线 F68（审计 T3）：主线程的后台命令也这样。以前后台命令用会话范围，结束时把 cwd 写回会话；后台命令
         // 什么时候结束不确定，会话的当前目录会在之后任意两个工具调用之间跳走（竞态）。
         let (cwd, cwd_scope) = if context.agent.is_some() || background {
-            let current =
-                env_shell::current_dir(context.env.as_ref(), workspace, &context.session).await;
+            let current = env_shell::current_dir(
+                context.machine.shell().as_ref(),
+                workspace,
+                &context.session,
+            )
+            .await;
             (current, CwdScope::Pinned)
         } else {
             let roots = vec![workspace.root.clone()];
@@ -417,13 +481,16 @@ impl BashTool {
             background: background.then(|| BackgroundCommand {
                 description,
                 tool_use: Some(context.tool_use.clone()),
+                kind: Default::default(),
             }),
             sandbox: self.sandbox_for(&input),
             hook: None,
             on_timeout,
+            socket: None,
         };
         context
-            .env
+            .machine
+            .commands()
             .start_command(workspace, context.operation.clone(), start)
             .await
             .map_err(env_failure)?;
@@ -488,6 +555,11 @@ impl BashTool {
         }
         let reset = cwd_reset.as_ref().map(EnvPath::as_str);
         let total = output_bytes.max(head.len() as u64);
+        // 读文件的命令：记进 readFileState（输出太长、给的是预览时，记录不算在上下文里）。
+        if let Some(files) = &self.files {
+            let truncated = total > INLINE_LIMIT as u64;
+            crate::bash_reads::record(files, &context, &input.command, (code, truncated)).await;
+        }
         Ok(Ran::Text(output::success(
             &head,
             total,

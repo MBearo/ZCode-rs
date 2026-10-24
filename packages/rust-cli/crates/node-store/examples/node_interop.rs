@@ -6,10 +6,13 @@
 //!   checkpoint 与对话回退），输出会话 id；
 //! - `read <storage-dir> <session>`：输出一个会话的冷读取结果（`LoadedSession`）JSON；
 //! - `list <storage-dir> <workspace>`：输出该目录的会话列表 JSON；
-//! - `fork <storage-dir> <session>`：从最后一个 checkpoint 分出新会话（Node 的 `/fork`，`node_interop_parts/fork.rs`）；
+//! - `fork <storage-dir> <session> <through>`：分出新会话，复制到 `through`（`/fork` 按用户输入分叉的记录，`node_interop_parts/fork.rs`）；
 //! - `usage-write`、`usage-side`、`metering`、`activity`、`request-stats`：用量表与 `/usage`、footer 的查询（`node_interop_parts/usage.rs`）；
 //! - `compat-*`、`task-load`、`task-add`：与 Node 共用数据的兼容（`node_interop_parts/compat.rs`）；
-//! - `manage-write`、`rename`、`delete`、`query`：会话的改名、删除与项目页的查询（修复线 F29，`node_interop_parts/manage.rs`）。
+//! - `manage-write`、`rename`、`delete`、`query`：会话的改名、删除与项目页的查询（修复线 F29，`node_interop_parts/manage.rs`）；
+//! - `sentinel-write <storage-dir> <timing>`：续写占位落库的会话，`continue` 与新输入同一批、`open` 单独一批（工作线
+//!   F77、F79，`node_interop_parts/sentinel.rs`）；
+//! - `tool-order-write`：结果之间夹着附加上下文、补了中断结果的会话（工作线 F81，`node_interop_parts/tool_order.rs`）。
 //!
 //! 会话库是 `<storage-dir>/cli/db/db.sqlite`，artifacts 在 `<storage-dir>/cli/artifacts`。
 use std::path::Path;
@@ -48,8 +51,12 @@ mod compat;
 mod fork;
 #[path = "node_interop_parts/manage.rs"]
 mod manage;
+#[path = "node_interop_parts/sentinel.rs"]
+mod sentinel;
 #[path = "node_interop_parts/settings.rs"]
 mod settings;
+#[path = "node_interop_parts/tool_order.rs"]
+mod tool_order;
 #[path = "node_interop_parts/usage.rs"]
 mod usage;
 
@@ -456,10 +463,14 @@ async fn run(args: &[String]) -> Result<()> {
         [command, dir, workspace, change] if command == "rules-change" => {
             settings::rules_change(dir, workspace, change).await
         }
-        [command, dir, session] if command == "fork" => fork::fork(dir, session).await,
+        [command, dir, session, through] if command == "fork" => {
+            fork::fork(dir, session, through).await
+        }
         [command, dir] if command == "usage-write" => usage::write(dir).await,
         [command, dir] if command == "usage-side" => usage::side(dir).await,
         [command, dir] if command == "manage-write" => manage::write(dir).await,
+        [command, dir, timing] if command == "sentinel-write" => sentinel::write(dir, timing).await,
+        [command, dir] if command == "tool-order-write" => tool_order::write(dir).await,
         [command, dir, session, title] if command == "rename" => {
             manage::rename(dir, session, title).await
         }

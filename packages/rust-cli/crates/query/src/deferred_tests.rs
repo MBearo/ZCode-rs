@@ -8,6 +8,8 @@ use rust_cli_kernel_api::tool::{ToolError, ToolOutput, ToolProgress, ToolUseCont
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use rust_cli_prompts::models::ToolSearchMode;
+
 use super::*;
 
 /// 只有名字与延迟标记的工具。
@@ -98,7 +100,12 @@ fn referencing(name: &str) -> Message {
 
 #[test]
 fn deferred_tools_stay_out_until_referenced_and_the_placeholder_is_second_to_last() {
-    let wire = wire_tools(&pool(), &[], &prompt(), (true, ToolOrder::ByName));
+    let wire = wire_tools(
+        &pool(),
+        &[],
+        &prompt(),
+        (ToolSearchMode::Native, ToolOrder::ByName),
+    );
     // 内置按名字排序、MCP 在后（MCP 工具一律延迟）；占位工具在倒数第二位（在 Write 之前）。
     assert_eq!(
         names(&wire),
@@ -113,7 +120,12 @@ fn deferred_tools_stay_out_until_referenced_and_the_placeholder_is_second_to_las
     );
 
     let history = [referencing("WebFetch"), referencing("mcp__srv__ping")];
-    let wire = wire_tools(&pool(), &history, &prompt(), (true, ToolOrder::ByName));
+    let wire = wire_tools(
+        &pool(),
+        &history,
+        &prompt(),
+        (ToolSearchMode::Native, ToolOrder::ByName),
+    );
     assert_eq!(
         names(&wire),
         [
@@ -133,7 +145,12 @@ fn deferred_tools_stay_out_until_referenced_and_the_placeholder_is_second_to_las
 
 #[test]
 fn without_support_every_tool_is_inline_and_tool_search_is_dropped() {
-    let wire = wire_tools(&pool(), &[], &prompt(), (false, ToolOrder::ByName));
+    let wire = wire_tools(
+        &pool(),
+        &[],
+        &prompt(),
+        (ToolSearchMode::Off, ToolOrder::ByName),
+    );
     assert_eq!(
         names(&wire),
         [
@@ -148,7 +165,12 @@ fn without_support_every_tool_is_inline_and_tool_search_is_dropped() {
     assert!(wire.flags.is_empty());
     // 没有延迟工具时也不启用。
     let plain = vec![tool("Read", false), tool(TOOL_SEARCH, false)];
-    let wire = wire_tools(&plain, &[], &prompt(), (true, ToolOrder::ByName));
+    let wire = wire_tools(
+        &plain,
+        &[],
+        &prompt(),
+        (ToolSearchMode::Native, ToolOrder::ByName),
+    );
     assert_eq!(names(&wire), ["Read"]);
 }
 
@@ -164,7 +186,7 @@ fn referenced_results_get_the_tool_loaded_note_and_unavailable_ones_are_dropped(
     let message = referencing("WebFetch");
     let available = vec!["WebFetch".to_owned()];
     // 启用时：保留引用，末尾加 `Tool loaded.`；已有说明时不再加。
-    let sent = tool_references(&message, true, &available);
+    let sent = tool_references(&message, ToolSearchMode::Native, &available);
     let blocks = content(&sent);
     assert_eq!(blocks.len(), 2);
     assert_eq!(
@@ -173,9 +195,12 @@ fn referenced_results_get_the_tool_loaded_note_and_unavailable_ones_are_dropped(
             text: "Tool loaded.".to_owned()
         }
     );
-    assert_eq!(content(&tool_references(&sent, true, &available)).len(), 2);
+    assert_eq!(
+        content(&tool_references(&sent, ToolSearchMode::Native, &available)).len(),
+        2
+    );
     // 工具不在了 / 没有启用：引用去掉，换成占位文本，不加说明。
-    let gone = tool_references(&message, true, &[]);
+    let gone = tool_references(&message, ToolSearchMode::Native, &[]);
     let removed = |blocks: Vec<ContentBlock>| match &blocks[..] {
         [ContentBlock::ToolResult { content, .. }] => content.clone(),
         other => panic!("unexpected {other:?}"),
@@ -187,7 +212,11 @@ fn referenced_results_get_the_tool_loaded_note_and_unavailable_ones_are_dropped(
         }]
     );
     assert_eq!(
-        removed(content(&tool_references(&message, false, &available))),
+        removed(content(&tool_references(
+            &message,
+            ToolSearchMode::Off,
+            &available
+        ))),
         [ToolResultContent::Text {
             text: "[Tool references removed - tool search not enabled]".to_owned()
         }]
@@ -201,7 +230,160 @@ fn referenced_results_get_the_tool_loaded_note_and_unavailable_ones_are_dropped(
         origin: UserOrigin::Human,
     });
     assert!(matches!(
-        tool_references(&plain, true, &available),
+        tool_references(&plain, ToolSearchMode::Native, &available),
         std::borrow::Cow::Borrowed(_)
     ));
+}
+
+/// 压缩之后（docs/specs/rust-cli/compact.md §3.5）：边界带着压缩前已加载的工具，它们照样发出（带 `defer_loading`），
+/// 模型不用再加载一次。
+#[test]
+fn tools_loaded_before_compaction_stay_on_the_wire() {
+    use rust_cli_kernel_api::message::{CompactBoundary, CompactTrigger, SystemMessage};
+    let boundary = Message::System(SystemMessage::CompactBoundary(CompactBoundary {
+        id: MessageId::new("b1"),
+        trigger: CompactTrigger::Auto,
+        pre_tokens: 1,
+        summary: MessageId::new("s1"),
+        preserved: None,
+        discovered_tools: vec!["mcp__srv__ping".to_owned()],
+    }));
+    let history = [boundary, referencing("WebFetch")];
+    let wire = wire_tools(
+        &pool(),
+        &history,
+        &prompt(),
+        (ToolSearchMode::Native, ToolOrder::ByName),
+    );
+    assert_eq!(
+        names(&wire),
+        [
+            "Bash",
+            "Read",
+            TOOL_SEARCH,
+            "WebFetch",
+            "Write",
+            PLACEHOLDER,
+            "mcp__srv__ping"
+        ]
+    );
+    assert!(wire.flags["mcp__srv__ping"].defer_loading);
+}
+
+/// 本地 ToolSearch（工作线 F84，tools-more.md §3.2.2）：工具与顺序同原生，已加载的延迟工具是普通定义（不带
+/// `defer_loading`），没有占位工具；压缩边界带的同样算已加载。
+#[test]
+fn local_tool_search_sends_loaded_tools_as_plain_definitions() {
+    let wire = wire_tools(
+        &pool(),
+        &[],
+        &prompt(),
+        (ToolSearchMode::Local, ToolOrder::ByName),
+    );
+    assert_eq!(names(&wire), ["Bash", "Read", TOOL_SEARCH, "Write"]);
+    assert!(wire.flags.is_empty(), "{:?}", wire.flags);
+    assert_eq!(wire.mode, ToolSearchMode::Local);
+
+    use rust_cli_kernel_api::message::{CompactBoundary, CompactTrigger, SystemMessage};
+    let boundary = Message::System(SystemMessage::CompactBoundary(CompactBoundary {
+        id: MessageId::new("b1"),
+        trigger: CompactTrigger::Auto,
+        pre_tokens: 1,
+        summary: MessageId::new("s1"),
+        preserved: None,
+        discovered_tools: vec!["mcp__srv__ping".to_owned()],
+    }));
+    let history = [boundary, referencing("WebFetch")];
+    let wire = wire_tools(
+        &pool(),
+        &history,
+        &prompt(),
+        (ToolSearchMode::Local, ToolOrder::ByName),
+    );
+    assert_eq!(
+        names(&wire),
+        [
+            "Bash",
+            "Read",
+            TOOL_SEARCH,
+            "WebFetch",
+            "Write",
+            "mcp__srv__ping"
+        ]
+    );
+    assert!(wire.flags.is_empty(), "{:?}", wire.flags);
+    // 没有延迟工具时同样不开。
+    let plain = vec![tool("Read", false), tool(TOOL_SEARCH, false)];
+    let wire = wire_tools(
+        &plain,
+        &[],
+        &prompt(),
+        (ToolSearchMode::Local, ToolOrder::ByName),
+    );
+    assert_eq!(names(&wire), ["Read"]);
+    assert_eq!(wire.mode, ToolSearchMode::Off);
+}
+
+/// 本地 ToolSearch：每个引用换成文本块 `Tool loaded: <name>`，末尾照样加 `Tool loaded.`；不可用的工具的引用去掉，
+/// 全部去掉时同原生换成占位文本、不加说明。
+#[test]
+fn local_tool_search_turns_references_into_text() {
+    let message = Message::User(UserMessage {
+        id: MessageId::new("m1"),
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: ToolUseId::new("t1"),
+            content: vec![
+                ToolResultContent::ToolReference {
+                    tool_name: "WebFetch".to_owned(),
+                },
+                ToolResultContent::ToolReference {
+                    tool_name: "Gone".to_owned(),
+                },
+                ToolResultContent::ToolReference {
+                    tool_name: "NotebookEdit".to_owned(),
+                },
+            ],
+            is_error: false,
+        }],
+        origin: UserOrigin::ToolResult {
+            assistant: MessageId::new("a1"),
+        },
+    });
+    let available = vec!["WebFetch".to_owned(), "NotebookEdit".to_owned()];
+    let sent = tool_references(&message, ToolSearchMode::Local, &available);
+    let text = |text: &str| ToolResultContent::Text {
+        text: text.to_owned(),
+    };
+    assert_eq!(
+        content(&sent),
+        [
+            ContentBlock::ToolResult {
+                tool_use_id: ToolUseId::new("t1"),
+                content: vec![
+                    text("Tool loaded: WebFetch"),
+                    text("Tool loaded: NotebookEdit")
+                ],
+                is_error: false,
+            },
+            ContentBlock::Text {
+                text: "Tool loaded.".to_owned()
+            }
+        ]
+    );
+    // 再处理一次不变（已经没有引用块）。
+    assert_eq!(
+        content(&tool_references(&sent, ToolSearchMode::Local, &available)),
+        content(&sent)
+    );
+    let gone = tool_references(&message, ToolSearchMode::Local, &[]);
+    assert_eq!(
+        content(&gone),
+        [ContentBlock::ToolResult {
+            tool_use_id: ToolUseId::new("t1"),
+            content: vec![text(
+                "[Tool references removed - tools no longer available]"
+            )],
+            is_error: false,
+        }]
+    );
 }

@@ -32,6 +32,7 @@ fn start_command_round_trips_with_every_option() {
         background: Some(BackgroundCommand {
             description: "Run tests".to_owned(),
             tool_use: Some(ToolUseId::new("toolu_1")),
+            kind: Default::default(),
         }),
         sandbox: Some(SandboxPolicy {
             filesystem: FilesystemPolicy {
@@ -53,9 +54,11 @@ fn start_command_round_trips_with_every_option() {
             command: BackgroundCommand {
                 description: "Run tests".to_owned(),
                 tool_use: Some(ToolUseId::new("toolu_1")),
+                kind: Default::default(),
             },
             deadline_ms: Some(600_000),
         }),
+        socket: None,
     });
 }
 
@@ -121,6 +124,8 @@ fn command_events_and_notices_round_trip() {
         output: path("/tmp/b1.output"),
         outcome: Outcome::Completed,
         exit_code: Some(0),
+        kind: Default::default(),
+        output_bytes: 0,
     });
     round_trip(&ShellState {
         cwd: path("/w/sub"),
@@ -212,4 +217,71 @@ fn older_finished_payloads_have_no_output_limit() {
             .unwrap()
             .contains("output_limit")
     );
+}
+
+/// 工作线 F83：Monitor 的种类、WebSocket 来源与生命周期能序列化往返；缺省的 Bash 种类与 0 字节不写出，旧载荷照读。
+#[test]
+fn monitor_payloads_round_trip_and_older_ones_still_parse() {
+    let background = BackgroundCommand {
+        description: "errors in deploy.log".to_owned(),
+        tool_use: Some(ToolUseId::new("toolu_1")),
+        kind: BackgroundKind::Monitor,
+    };
+    round_trip(&background);
+    assert_eq!(
+        serde_json::to_value(&background).unwrap()["kind"],
+        json!("monitor")
+    );
+    let plain: BackgroundCommand =
+        serde_json::from_value(json!({"description": "Run tests"})).unwrap();
+    assert_eq!(plain.kind, BackgroundKind::Bash);
+    assert!(!serde_json::to_string(&plain).unwrap().contains("kind"));
+    round_trip(&MonitorSocket {
+        url: "wss://events.example.com/stream".to_owned(),
+        protocols: vec!["v1".to_owned()],
+    });
+    for event in [
+        SocketEvent::Error {
+            message: "Failed to connect".to_owned(),
+        },
+        SocketEvent::Rejected { status: 403 },
+        SocketEvent::Dropped { bytes: 2_000_000 },
+        SocketEvent::Closed {
+            code: 1000,
+            reason: String::new(),
+        },
+    ] {
+        round_trip(&event);
+    }
+    assert_eq!(
+        serde_json::to_value(SocketEvent::Closed {
+            code: 1006,
+            reason: "Failed to connect".to_owned(),
+        })
+        .unwrap(),
+        json!({"type": "closed", "code": 1006, "reason": "Failed to connect"})
+    );
+    let notice: ShellNotice = serde_json::from_value(json!({
+        "seq": 1, "operation": "op", "task": "b1", "description": "d",
+        "output": "/t/b1.output", "outcome": {"status": "completed"}, "exit_code": 0
+    }))
+    .unwrap();
+    assert_eq!(
+        (notice.kind, notice.output_bytes),
+        (BackgroundKind::Bash, 0)
+    );
+    let text = serde_json::to_string(&notice).unwrap();
+    assert!(
+        !text.contains("kind") && !text.contains("output_bytes"),
+        "{text}"
+    );
+    round_trip(&crate::monitor::MonitorArmed {
+        operation: crate::ids::OperationId::new("op_1"),
+        task: crate::ids::ShellTaskId::new("b1"),
+        tool_use: ToolUseId::new("toolu_1"),
+        description: "errors in deploy.log".to_owned(),
+        timeout_ms: 300_000,
+        source: crate::monitor::MonitorSource::Socket,
+        output: crate::env::EnvPath::new("/t/b1.output"),
+    });
 }

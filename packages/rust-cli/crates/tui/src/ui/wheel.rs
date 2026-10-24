@@ -223,7 +223,13 @@ impl App {
             Some(Overlay::Resume(_)) => self.resume_wheel(step),
             Some(Overlay::Trust(_)) => {}
             Some(Overlay::Background(_)) => self.background_wheel(step, now),
-            Some(Overlay::Login(_) | Overlay::Export(_) | Overlay::Shortcuts) | None => {
+            Some(
+                Overlay::Login(_)
+                | Overlay::Export(_)
+                | Overlay::Shortcuts
+                | Overlay::YoloConfirm(_),
+            )
+            | None => {
                 self.scroll_by(-lines);
             }
         }

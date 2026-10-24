@@ -1,0 +1,4 @@
+### Skill: {{name}}
+Path: {{path}}
+
+{{content}}

@@ -8,8 +8,9 @@
 mod select;
 
 use rust_cli_base::names::vars;
-use rust_cli_kernel_api::env::{EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{FileKind, ListDir, PathStyle, StatFile};
+use rust_cli_kernel_api::machine::Files;
 use rust_cli_kernel_api::mcp::McpTransportConfig;
 use serde_json::Value;
 
@@ -106,7 +107,7 @@ fn paths(value: Option<&Value>) -> Vec<String> {
 }
 
 struct Reader<'a> {
-    env: &'a dyn Environment,
+    files: &'a dyn Files,
     workspace: &'a WorkspaceRef,
 }
 
@@ -115,7 +116,7 @@ impl Reader<'_> {
         let request = StatFile {
             path: EnvPath::new(path),
         };
-        self.env
+        self.files
             .stat(self.workspace, request)
             .await
             .ok()
@@ -128,7 +129,7 @@ impl Reader<'_> {
             path: EnvPath::new(path),
         };
         let content = self
-            .env
+            .files
             .read_file(self.workspace, request)
             .await
             .map_err(|error| error.to_string())?;
@@ -154,7 +155,7 @@ impl Reader<'_> {
             let request = ListDir {
                 path: EnvPath::new(dir.as_str()),
             };
-            let Ok(mut entries) = self.env.list_dir(self.workspace, request).await else {
+            let Ok(mut entries) = self.files.list_dir(self.workspace, request).await else {
                 continue;
             };
             entries.sort_by(|left, right| left.name.cmp(&right.name));

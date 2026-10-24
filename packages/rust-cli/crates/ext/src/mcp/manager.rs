@@ -2,6 +2,7 @@
 //! 注册表每步读当前快照；`list_changed` 重新拉取；HTTP / SSE 断开后退避重连。
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use rust_cli_kernel_api::listing::ListingEntry;
 use rust_cli_kernel_api::mcp::{McpTransport, McpTransportConfig};
 use rust_cli_kernel_api::tool::Tool;
 use serde_json::Value;
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 use tokio_util::sync::CancellationToken;
 
 use super::config::{McpServer, McpServerOptions, McpSettings};
@@ -51,6 +52,10 @@ struct Server {
     expired: bool,
     /// 连上过、断开后在退避重连（HTTP / SSE）；状态是 Pending（直接调用时不等它，ext.md §3.8）。
     reconnecting: bool,
+    /// `-p` 里连上过的 stdio 服务器断开了，工具留着、等下次调用再连（ext.md §3.3.3）；状态仍是 Connected。
+    dormant: bool,
+    /// 叫醒等下次调用的连接任务。
+    wake: Arc<Notify>,
     /// 连接任务的代号：重连、停用时加一；旧任务的状态更新因代号不符被丢弃（tui-manage.md §6.1）。
     generation: u64,
     /// 停掉当前连接任务的取消消息。
@@ -69,6 +74,8 @@ impl Server {
             prompts: Vec::new(),
             expired: false,
             reconnecting: false,
+            dormant: false,
+            wake: Arc::new(Notify::new()),
             generation: 0,
             cancel: CancellationToken::new(),
         }
@@ -90,6 +97,10 @@ pub(crate) struct Inner {
     declared: Mutex<HashSet<SessionId>>,
     /// 名字太长、记过日志的工具（每个名字只记一次，ext.md §3.4）。
     noted_names: Mutex<HashSet<String>>,
+    /// print 会话（`-p`、stream-json）：连上过的 stdio 服务器断开时等下次调用再连（ext.md §3.3.3）。
+    print: AtomicBool,
+    /// 有 resources 能力的服务器连上过：之后三个资源工具一直在（ext.md §3.3.3）。
+    resources_seen: AtomicBool,
 }
 
 impl Inner {
@@ -127,6 +138,32 @@ impl Inner {
             .get(name)
             .filter(|server| server.status == McpStatus::Connected)
             .and_then(|server| server.client.clone())
+    }
+
+    /// `-p` 里断开、等下次调用的服务器：叫醒连接任务，等它重新连上（返回新的客户端）或失败（None）。不在等
+    /// 下次调用时也是 None。
+    pub(crate) async fn reconnect_dormant(&self, name: &str) -> Option<Arc<Client>> {
+        let wake = {
+            let servers = self.servers();
+            let server = servers.get(name).filter(|server| server.dormant)?;
+            server.wake.clone()
+        };
+        wake.notify_one();
+        let mut changes = self.changed.subscribe();
+        loop {
+            match self.servers().get(name) {
+                Some(server) if server.status == McpStatus::Connected && !server.dormant => {
+                    if let Some(client) = &server.client {
+                        return Some(client.clone());
+                    }
+                }
+                Some(server) if server.status == McpStatus::Connected => {}
+                _ => return None,
+            }
+            if changes.changed().await.is_err() {
+                return None;
+            }
+        }
     }
 
     pub(crate) fn expired(&self, name: &str) -> bool {
@@ -218,6 +255,9 @@ impl Inner {
             Vec::new()
         };
         let resources = has_capability(&capabilities, "resources");
+        if resources {
+            self.resources_seen.store(true, Ordering::Relaxed);
+        }
         let published = client.clone();
         self.update(name, generation, move |server| {
             server.status = McpStatus::Connected;
@@ -228,6 +268,7 @@ impl Inner {
             server.resources = resources;
             server.expired = false;
             server.reconnecting = false;
+            server.dormant = false;
         });
         tracing::info!(server = name, "MCP server connected");
         while let Some(notice) = notices.recv().await {
@@ -287,6 +328,22 @@ impl Inner {
                     connected_once = true;
                     attempts = 0;
                     let (reason, expired) = self.serve(&name, generation, session).await;
+                    // `-p` 里 stdio 断开：工具留着，等下次调用再连（ext.md §3.3.3）。
+                    if !remote && self.print.load(Ordering::Relaxed) {
+                        let mut wake = None;
+                        self.update(&name, generation, |server| {
+                            server.client = None;
+                            server.dormant = true;
+                            wake = Some(server.wake.clone());
+                        });
+                        let Some(wake) = wake else { return };
+                        tracing::info!(
+                            server = name,
+                            "MCP server closed; reconnecting on the next call"
+                        );
+                        wake.notified().await;
+                        continue;
+                    }
                     self.update(&name, generation, |server| {
                         server.status = McpStatus::Pending;
                         server.client = None;
@@ -310,6 +367,7 @@ impl Inner {
                     server.client = None;
                     server.tools.clear();
                     server.reconnecting = false;
+                    server.dormant = false;
                 });
                 return;
             }
@@ -347,7 +405,14 @@ impl McpManager {
             clock,
             declared: Mutex::default(),
             noted_names: Mutex::default(),
+            print: AtomicBool::new(false),
+            resources_seen: AtomicBool::new(false),
         }))
+    }
+
+    /// print 会话（`-p`、stream-json）：连上过的 stdio 服务器断开时不记失败，等下次调用再连（ext.md §3.3.3）。
+    pub fn set_print_session(&self, print: bool) {
+        self.0.print.store(print, Ordering::Relaxed);
     }
 
     /// 开始连接（每个服务器一个常驻任务，不等待）。同名的服务器只连一次。
@@ -457,7 +522,9 @@ fn tools_of(inner: &Arc<Inner>, servers: &BTreeMap<String, Server>) -> Vec<Arc<d
             .values()
             .filter(|server| server.status == McpStatus::Connected)
     };
-    let mut tools: Vec<Arc<dyn Tool>> = if connected().any(|server| server.resources) {
+    // 资源工具：有 resources 能力的服务器连上过一次之后一直在（服务器断开不撤回，ext.md §3.3.3）。
+    let seen = inner.resources_seen.load(Ordering::Relaxed);
+    let mut tools: Vec<Arc<dyn Tool>> = if seen || connected().any(|server| server.resources) {
         resources::tools(Arc::downgrade(inner))
     } else {
         Vec::new()
@@ -520,3 +587,7 @@ mod tests;
 #[cfg(test)]
 #[path = "manager_names_tests.rs"]
 mod names_tests;
+
+#[cfg(test)]
+#[path = "manager_dormant_tests.rs"]
+mod dormant_tests;

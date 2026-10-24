@@ -81,7 +81,8 @@ fn web_fetch(input: &Value, inputs: &Inputs<'_>) -> Check {
 
 /// 没有自己检查的内置工具，按名字套用对应的内置检查。
 pub fn builtin(tool: &str, input: &Value, inputs: &Inputs<'_>) -> Check {
-    if tool == "Bash" {
+    // Monitor 的命令来源照 Bash 判（工作线 F83，tools-more.md §19.4；ws 来源由工具自己的检查给出询问）。
+    if tool == "Bash" || (tool == "Monitor" && input.get("command").is_some()) {
         let command = input
             .get("command")
             .and_then(Value::as_str)
@@ -139,6 +140,14 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
             message: texts::tool_denied(tool),
         };
     }
+    // 工作线 F76（用户决定 2026-10-23“如果是 yolo 啥也不问”，shell-permissions.md §4.6.2）：yolo 下只有拒绝留下，
+    // ask 规则、危险删除、安全检查与工具自身的询问都放行（F68 起 ask 规则与危险删除 bypass 也问，D21）。
+    if inputs.full_access {
+        return match check {
+            Check::Deny { message } => Inner::Deny { message },
+            _ => Inner::Allow { updated_input },
+        };
+    }
     if inputs.rules.whole_tool(tool, RuleBehavior::Ask).is_some() {
         return Inner::Ask {
             message: texts::request_message(tool, None),
@@ -158,14 +167,8 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
             };
         }
         Check::Allow => return Inner::Allow { updated_input },
-        // 修复线 F68（审计 P1）：bypass 类模式下只有 bypass 也问的安全检查留下，敏感文件放行；hook 放行之后的检查
-        // 照旧询问。以前安全检查一律 bypass 也问。
-        Check::Ask {
-            kind: AskKind::Safety,
-            ..
-        } if bypass_category(inputs.mode) && !inputs.hook_check => {
-            return Inner::Allow { updated_input };
-        }
+        // 修复线 F68（审计 P1）放行了 bypass 类模式下的敏感文件；工作线 F76（用户决定 2026-10-23）guarded 改回询问
+        // （App 对自主模式的说明是“在有风险时询问”），yolo 由上面的 `full_access` 放行。
         Check::Ask {
             message,
             kind: kind @ (AskKind::Rule | AskKind::Safety | AskKind::Immune),
@@ -198,7 +201,8 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
     }
 }
 
-/// bypass 类模式：guarded 在危险命令以外同 bypassPermissions（Node `mode === "yolo" || mode === "guarded"`）。
+/// bypass 类模式：其他理由的询问放行。guarded 在这一点上同 bypassPermissions（Node `mode === "yolo" || mode === "guarded"`）；
+/// ask 规则、危险删除与安全检查 guarded 照样询问（工作线 F76）。
 fn bypass_category(mode: PermissionMode) -> bool {
     matches!(
         mode,

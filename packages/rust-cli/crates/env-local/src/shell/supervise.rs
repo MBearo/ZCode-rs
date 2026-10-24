@@ -10,7 +10,7 @@ use std::time::Duration;
 use rust_cli_kernel_api::env::{EnvError, EnvPath, Outcome, StartCommand};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::env_path::git_bash_spelling;
-use rust_cli_kernel_api::env_shell::{CwdScope, ShellNotice};
+use rust_cli_kernel_api::env_shell::{BackgroundKind, CwdScope, ShellNotice};
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
 use rust_cli_proc::ledger::{Containment, Isolation, Ledger, Purpose, Tracked};
 use rust_cli_proc::shell::single_quote;
@@ -30,6 +30,9 @@ pub(crate) struct Plan {
     pub output: PathBuf,
     /// hook 命令的 stderr 单独写这里（`StartCommand::hook`）；其他命令与 stdout 合流。
     pub errors: Option<PathBuf>,
+    /// 命令来源的 monitor（工作线 F83）：子进程的 stdout、stderr 接管道，stdout 写进这里与输出文件，stderr 加
+    /// `[stderr] ` 写进输出文件（[`tee`]）。
+    pub events: Option<PathBuf>,
     pub cwd_file: PathBuf,
     /// 实际启动目录。
     pub cwd: PathBuf,
@@ -163,8 +166,16 @@ pub(crate) async fn spawn(
         .env_clear()
         .envs(&plan.env)
         .stdin(if hook { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::from(output))
-        .stderr(Stdio::from(errors));
+        .stdout(if plan.events.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::from(output)
+        })
+        .stderr(if plan.events.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::from(errors)
+        });
     let mounted = launch.mounts.is_some();
     if let Some(created) = launch.mounts {
         shared.state().mounts.enter(created);
@@ -400,12 +411,87 @@ fn move_to_background(shared: &Shared, job: &Job) {
     job.running.backgrounded.send_replace(true);
 }
 
+/// monitor 的管道：stdout 写进事件流的文件与输出文件，stderr 每块前加 `[stderr] ` 写进输出文件（tools-more.md §19.5）。
+/// 读到两边都结束为止（根进程退出后进程组被结束，管道随之关闭）。
+#[expect(
+    clippy::disallowed_methods,
+    reason = "env-local 是进程 IO 的入口：输出文件在执行侧（docs/specs/rust-cli/README.md §4）"
+)]
+async fn tee(
+    stdout: Option<tokio::process::ChildStdout>,
+    stderr: Option<tokio::process::ChildStderr>,
+    plan: &Plan,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let Some(events) = &plan.events else {
+        return;
+    };
+    let open = |path: PathBuf| async move {
+        let mut options = tokio::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        options.open(path).await
+    };
+    let (Ok(mut events), Ok(mut merged), Ok(mut errors)) = (
+        open(events.clone()).await,
+        open(plan.output.clone()).await,
+        open(plan.output.clone()).await,
+    ) else {
+        tracing::warn!("could not open the monitor output files");
+        return;
+    };
+    let out = async {
+        let Some(mut stdout) = stdout else { return };
+        let mut buffer = vec![0_u8; 64 * 1024];
+        while let Ok(read) = stdout.read(&mut buffer).await {
+            if read == 0 {
+                break;
+            }
+            let _ = events.write_all(&buffer[..read]).await;
+            let _ = events.flush().await;
+            let _ = merged.write_all(&buffer[..read]).await;
+        }
+    };
+    let err = async {
+        let Some(mut stderr) = stderr else { return };
+        let mut buffer = vec![0_u8; 64 * 1024];
+        while let Ok(read) = stderr.read(&mut buffer).await {
+            if read == 0 {
+                break;
+            }
+            let mut chunk = b"[stderr] ".to_vec();
+            chunk.extend_from_slice(&buffer[..read]);
+            let _ = errors.write_all(&chunk).await;
+        }
+    };
+    tokio::join!(out, err);
+}
+
 pub(crate) async fn run(shared: Arc<Shared>, mut tracked: Tracked, job: Job) {
+    // monitor 的管道与进程同时处理：管道读完（进程组结束、管道关闭）之后才写终态，事件流在 `Finished` 之前读得到
+    // 全部 stdout。
+    let stdout = tracked.child().stdout.take();
+    let stderr = tracked.child().stderr.take();
+    let (piped, piped_done) = tokio::sync::oneshot::channel();
+    let pipes = async {
+        tee(stdout, stderr, &job.plan).await;
+        let _ = piped.send(());
+    };
+    let ((), ()) = tokio::join!(supervise(shared, tracked, &job, piped_done), pipes);
+}
+
+async fn supervise(
+    shared: Arc<Shared>,
+    mut tracked: Tracked,
+    job: &Job,
+    piped: tokio::sync::oneshot::Receiver<()>,
+) {
     let mut timeout = job.request.timeout_ms.map(Duration::from_millis);
     let stdin = tracked.child().stdin.take();
     let input = job.request.hook.as_ref().map(|hook| hook.stdin.as_str());
     // 输入与等待同时进行：输入超过管道缓冲、命令又不读时，靠超时或取消结束进程后写入随之失败。
-    let (ended, ()) = tokio::join!(wait_for(&mut tracked, timeout, &job), feed(stdin, input));
+    let (ended, ()) = tokio::join!(wait_for(&mut tracked, timeout, job), feed(stdin, input));
     // 修 bug（工作线 F69）：以前前台命令到了超时一律结束，长编译、长测试被杀，模型只能重跑。`on_timeout` 有值时
     // 不结束，转到后台继续跑，之后的期限是后台命令的期限（从这时算起）；结束时照后台命令处理。
     // 取消已经发出（调用被中断）时不转，照旧结束。
@@ -415,9 +501,9 @@ pub(crate) async fn run(shared: Arc<Shared>, mut tracked: Tracked, job: Job) {
     };
     let ended = match moved {
         Some(moved) => {
-            move_to_background(&shared, &job);
+            move_to_background(&shared, job);
             timeout = moved.deadline_ms.map(Duration::from_millis);
-            wait_for(&mut tracked, timeout, &job).await
+            wait_for(&mut tracked, timeout, job).await
         }
         None => ended,
     };
@@ -478,13 +564,24 @@ pub(crate) async fn run(shared: Arc<Shared>, mut tracked: Tracked, job: Job) {
             (Outcome::Cancelled, Some(CANCEL_EXIT), false)
         }
     };
+    // 进程组已经结束：等管道读完（没有管道时立即返回）。
+    let _ = piped.await;
     if job.mounted {
         leave_sandbox(&shared).await;
     }
-    if background.is_some() {
+    // monitor 的输出文件是事件流（工作线 F83）：不写终态一行，否则它会成为一条事件。
+    if background
+        .as_ref()
+        .is_some_and(|background| background.kind == BackgroundKind::Bash)
+    {
         mark_exit(&job.plan, &outcome, exit).await;
     }
     let (cwd, output_bytes) = read_back(&job.plan).await;
+    // monitor 的字节数是 stdout 的（终态 summary 分“有没有输出”）。
+    let output_bytes = match &job.plan.events {
+        Some(events) => file_size(events).await,
+        None => output_bytes,
+    };
     if output_limit.is_some() && background.is_none() {
         remove_outputs(&job.plan).await;
     }
@@ -492,7 +589,7 @@ pub(crate) async fn run(shared: Arc<Shared>, mut tracked: Tracked, job: Job) {
     let cwd_reset = if moved.is_some() {
         None
     } else {
-        record_cwd(&shared, &job, cwd)
+        record_cwd(&shared, job, cwd)
     };
     let finish = Finish {
         outcome,
@@ -519,11 +616,21 @@ pub(crate) async fn run(shared: Arc<Shared>, mut tracked: Tracked, job: Job) {
                 output: EnvPath::new(job.plan.output.to_string_lossy()),
                 outcome: finish.outcome.clone(),
                 exit_code: finish.exit_code,
+                kind: background.kind,
+                output_bytes: finish.output_bytes,
             });
         }
     }
     job.running.finished.send_replace(Some(finish));
     shared.notices.send_modify(|count| *count += 1);
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "env-local 是进程 IO 的入口：输出文件在执行侧（docs/specs/rust-cli/README.md §4）"
+)]
+async fn file_size(path: &Path) -> u64 {
+    tokio::fs::metadata(path).await.map_or(0, |meta| meta.len())
 }
 
 /// `CwdScope::Session`：结束目录在某个根里时保留；越界时回到起点并返回起点。

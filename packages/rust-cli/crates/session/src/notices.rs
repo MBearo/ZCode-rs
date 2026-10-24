@@ -39,6 +39,12 @@ impl Actor {
         if self.closing.is_some() {
             return;
         }
+        // Monitor 的终态（工作线 F83）：在看的 monitor 等事件流也结束了再合成（monitors.rs）。
+        if notice.kind == rust_cli_kernel_api::env_shell::BackgroundKind::Monitor
+            && self.monitor_notice(&notice).await
+        {
+            return;
+        }
         let work = notice.task.to_string();
         let status = task_status(&notice).to_owned();
         if !self.enqueue_notice(Waiting::Shell(notice)).await {
@@ -52,7 +58,13 @@ impl Actor {
     }
 
     pub(crate) async fn ack(&self, seq: u64) {
-        if let Err(error) = self.deps.env.ack_shell_notice(&self.meta.id, seq).await {
+        if let Err(error) = self
+            .deps
+            .machine
+            .shell()
+            .ack_shell_notice(&self.meta.id, seq)
+            .await
+        {
             // 没有 ack 的通知会再次送达，那时按 `enqueue_notice` 去重。
             tracing::warn!(%error, seq, "background notice was not acknowledged");
         }
@@ -61,7 +73,8 @@ impl Actor {
     /// 执行环境里还没有处理完的后台命令；执行环境不支持时为空。
     pub(crate) async fn background(&self) -> Vec<ShellTaskId> {
         self.deps
-            .env
+            .machine
+            .shell()
             .shell_state(&self.meta.workspace, &self.meta.id)
             .await
             .map(|state| state.background)

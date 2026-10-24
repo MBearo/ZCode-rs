@@ -1,4 +1,6 @@
-//! 执行环境端口的本地实现（docs/specs/rust-cli/README.md §6）。
+//! 执行端口的本地实现（docs/specs/rust-cli/README.md §6）：一台机器的 8 个端口（kernel-api `machine`）与只在本机的
+//! Git、取网页（`local_services`）都由 [`LocalEnvironment`] 实现，MCP 传输是 [`LocalMcpTransport`]；入口把两者装成
+//! `MachineEnv`（remote-exec.md §15.8.1）。
 //!
 //! 工作区文件（版本回执、条件写、apply_patch）、搜索（ignore + grep-searcher，rg 语义）、进程（shell、
 //! 后台任务账本、sandbox）、Git、环境事实、规则文件、MCP 传输、插件安装、回退事务。本机文件经
@@ -38,8 +40,8 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{
     DirEntry, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome, GrepSearch, ListDir,
@@ -54,6 +56,10 @@ use rust_cli_kernel_api::env_worktree::{
     WorktreeChanges, WorktreeCreate, WorktreeCreated, WorktreeInspect, WorktreeList, WorktreeRemove,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
 
 use crate::helpers::{on_path, path, run, run_walk, unknown_operation, unsupported};
 use crate::ledger::Ledger;
@@ -63,6 +69,15 @@ pub use crate::cron_store::LocalCronStore;
 pub use crate::hook_http::LocalHookHttp;
 pub use crate::mcp::LocalMcpTransport;
 pub use crate::shell::{EmbeddedSearch, ShellConfig};
+
+/// [`LocalEnvironment::busy`] 的结果。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Busy {
+    /// 还在跑的命令（前台与后台）。
+    pub commands: u64,
+    /// 还没 ack 的后台命令终态通知。
+    pub notices: u64,
+}
 
 /// 本机执行环境。`home` 由入口 crate 传入（只有它读进程环境），用于 `~` 展开。
 pub struct LocalEnvironment {
@@ -87,7 +102,7 @@ pub struct LocalEnvironment {
 }
 
 #[async_trait]
-impl Environment for LocalEnvironment {
+impl EnvInfo for LocalEnvironment {
     /// 环境事实（context.md §12）：cwd 是工作区根，git 仓库判断看最近的含 `.git` 的祖先目录。
     async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         let root = path(&workspace.root);
@@ -111,6 +126,23 @@ impl Environment for LocalEnvironment {
         })
     }
 
+    async fn path_facts(&self, _workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
+        Ok(PathFacts {
+            home: self
+                .home
+                .as_ref()
+                .map(|home| EnvPath::new(home.to_string_lossy())),
+            style: if cfg!(windows) {
+                PathStyle::Windows
+            } else {
+                PathStyle::Posix
+            },
+        })
+    }
+}
+
+#[async_trait]
+impl Files for LocalEnvironment {
     async fn read_file(
         &self,
         _workspace: &WorkspaceRef,
@@ -137,13 +169,88 @@ impl Environment for LocalEnvironment {
         })
     }
 
+    async fn stat(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: StatFile,
+    ) -> Result<Option<FileStat>, EnvError> {
+        run(on_path(&request.path, files::stat)).await
+    }
+
+    async fn list_dir(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: ListDir,
+    ) -> Result<Vec<DirEntry>, EnvError> {
+        run(on_path(&request.path, files::list_dir)).await
+    }
+
+    async fn read_text(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: ReadText,
+    ) -> Result<TextRead, EnvError> {
+        let target = path(&request.path);
+        run(move || files::read_text(&target, &request)).await
+    }
+
+    async fn put_file(
+        &self,
+        _workspace: &WorkspaceRef,
+        context: OperationContext,
+        request: PutFile,
+    ) -> Result<FileWritten, EnvError> {
+        // 同一个 operationId 只执行一次（spec §6 规则 3）：重放返回第一次的回执，参数不同则拒绝。
+        let fingerprint = Ledger::fingerprint(&request);
+        if let Some(done) = self.writes.replay(&context.operation, fingerprint)? {
+            return Ok(done);
+        }
+        let target = path(&request.path);
+        let written = run(move || files::put_file(&target, &request)).await?;
+        self.writes
+            .record(context.operation, fingerprint, written.clone());
+        Ok(written)
+    }
+}
+
+#[async_trait]
+impl Search for LocalEnvironment {
+    async fn glob(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: GlobFiles,
+    ) -> Result<GlobMatches, EnvError> {
+        run_walk(move |stop| search::glob(&request, stop)).await
+    }
+
+    async fn list_files(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: rust_cli_kernel_api::env_files::ListFiles,
+    ) -> Result<rust_cli_kernel_api::env_files::FileList, EnvError> {
+        run_walk(move |stop| search::list_files(&request, stop)).await
+    }
+
+    async fn grep(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: GrepSearch,
+    ) -> Result<GrepOutcome, EnvError> {
+        run_walk(move |stop| search::grep(&request, stop)).await
+    }
+}
+
+#[async_trait]
+impl Commands for LocalEnvironment {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
     ) -> Result<(), EnvError> {
-        self.shells()?.start(context, request).await
+        self.shells()?
+            .start_with(context, request, self.web.clone())
+            .await
     }
 
     fn watch_command(
@@ -191,88 +298,10 @@ impl Environment for LocalEnvironment {
         }
         Ok(())
     }
+}
 
-    async fn path_facts(&self, _workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
-        Ok(PathFacts {
-            home: self
-                .home
-                .as_ref()
-                .map(|home| EnvPath::new(home.to_string_lossy())),
-            style: if cfg!(windows) {
-                PathStyle::Windows
-            } else {
-                PathStyle::Posix
-            },
-        })
-    }
-
-    async fn stat(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: StatFile,
-    ) -> Result<Option<FileStat>, EnvError> {
-        run(on_path(&request.path, files::stat)).await
-    }
-
-    async fn list_dir(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: ListDir,
-    ) -> Result<Vec<DirEntry>, EnvError> {
-        run(on_path(&request.path, files::list_dir)).await
-    }
-
-    async fn read_text(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: ReadText,
-    ) -> Result<TextRead, EnvError> {
-        let target = path(&request.path);
-        run(move || files::read_text(&target, &request)).await
-    }
-
-    async fn put_file(
-        &self,
-        _workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: PutFile,
-    ) -> Result<FileWritten, EnvError> {
-        // 同一个 operationId 只执行一次（spec §6 规则 3）：重放返回第一次的回执，参数不同则拒绝。
-        let fingerprint = Ledger::fingerprint(&request);
-        if let Some(done) = self.writes.replay(&context.operation, fingerprint)? {
-            return Ok(done);
-        }
-        let target = path(&request.path);
-        let written = run(move || files::put_file(&target, &request)).await?;
-        self.writes
-            .record(context.operation, fingerprint, written.clone());
-        Ok(written)
-    }
-
-    async fn glob(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: GlobFiles,
-    ) -> Result<GlobMatches, EnvError> {
-        run_walk(move |stop| search::glob(&request, stop)).await
-    }
-
-    async fn grep(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: GrepSearch,
-    ) -> Result<GrepOutcome, EnvError> {
-        run_walk(move |stop| search::grep(&request, stop)).await
-    }
-
-    async fn list_files(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env_files::ListFiles,
-    ) -> Result<rust_cli_kernel_api::env_files::FileList, EnvError> {
-        run_walk(move |stop| search::list_files(&request, stop)).await
-    }
-
+#[async_trait]
+impl Shell for LocalEnvironment {
     async fn shell_state(
         &self,
         workspace: &WorkspaceRef,
@@ -297,11 +326,23 @@ impl Environment for LocalEnvironment {
         Ok(())
     }
 
+    async fn set_shell_cwd(&self, session: &SessionId, cwd: EnvPath) -> Result<(), EnvError> {
+        self.shells()?.set_cwd(session, path(&cwd));
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Background for LocalEnvironment {
     async fn background_command(
         &self,
         request: BackgroundTask,
     ) -> Result<Option<BackgroundInfo>, EnvError> {
         Ok(self.shells()?.background_command(&request))
+    }
+
+    async fn background_elapsed(&self, request: BackgroundTask) -> Result<Option<u64>, EnvError> {
+        Ok(self.shells()?.background_elapsed(&request))
     }
 
     async fn stop_background_command(
@@ -311,57 +352,10 @@ impl Environment for LocalEnvironment {
     ) -> Result<BackgroundStop, EnvError> {
         self.shells()?.stop(&context, &request)
     }
+}
 
-    async fn background_elapsed(&self, request: BackgroundTask) -> Result<Option<u64>, EnvError> {
-        Ok(self.shells()?.background_elapsed(&request))
-    }
-
-    async fn git_status(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: GitStatusRequest,
-    ) -> Result<GitStatus, EnvError> {
-        git::status(&path(&request.cwd), self.git_env()).await
-    }
-
-    async fn git_diff(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env_git::GitDiffRequest,
-    ) -> Result<rust_cli_kernel_api::env_git::GitDiff, EnvError> {
-        git::diff(&path(&request.cwd), self.git_env()).await
-    }
-
-    async fn fetch_url(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env_web::FetchUrl,
-    ) -> Result<rust_cli_kernel_api::env_web::FetchedUrl, EnvError> {
-        let egress = self.web.as_ref().ok_or_else(|| unsupported("web fetch"))?;
-        web::fetch(egress, request).await
-    }
-
-    /// PDF 的页数（`pdfinfo -`，tools-files.md §1.5）：环境是白名单投影（同 git）。
-    async fn pdf_page_count(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env_pdf::PdfPageCount,
-    ) -> Result<Option<u64>, EnvError> {
-        pdf::page_count(&path(&request.path), &self.git_env()).await
-    }
-
-    /// PDF 取页（`pdftoppm`）：输出目录在 shell 输出所在的私有临时目录下，所以要有 shell 配置。
-    async fn render_pdf_pages(
-        &self,
-        _workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env_pdf::RenderPdfPages,
-    ) -> Result<rust_cli_kernel_api::env_pdf::PdfRender, EnvError> {
-        let scratch = self.shells()?.scratch().to_path_buf();
-        let env = self.git_env();
-        let source = path(&request.path);
-        self.poppler.render(&source, &request, &scratch, &env).await
-    }
-
+#[async_trait]
+impl Checkpoints for LocalEnvironment {
     async fn rewind_prepare(
         &self,
         _workspace: &WorkspaceRef,
@@ -401,6 +395,49 @@ impl Environment for LocalEnvironment {
         self.rewinds.finish(token);
         Ok(())
     }
+}
+
+#[async_trait]
+impl Pdf for LocalEnvironment {
+    /// PDF 的页数（`pdfinfo -`，tools-files.md §1.5）：环境是白名单投影（同 git）。
+    async fn pdf_page_count(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: rust_cli_kernel_api::env_pdf::PdfPageCount,
+    ) -> Result<Option<u64>, EnvError> {
+        pdf::page_count(&path(&request.path), &self.git_env()).await
+    }
+
+    /// PDF 取页（`pdftoppm`）：输出目录在 shell 输出所在的私有临时目录下，所以要有 shell 配置。
+    async fn render_pdf_pages(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: rust_cli_kernel_api::env_pdf::RenderPdfPages,
+    ) -> Result<rust_cli_kernel_api::env_pdf::PdfRender, EnvError> {
+        let scratch = self.shells()?.scratch().to_path_buf();
+        let env = self.git_env();
+        let source = path(&request.path);
+        self.poppler.render(&source, &request, &scratch, &env).await
+    }
+}
+
+#[async_trait]
+impl Git for LocalEnvironment {
+    async fn git_status(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: GitStatusRequest,
+    ) -> Result<GitStatus, EnvError> {
+        git::status(&path(&request.cwd), self.git_env()).await
+    }
+
+    async fn git_diff(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: rust_cli_kernel_api::env_git::GitDiffRequest,
+    ) -> Result<rust_cli_kernel_api::env_git::GitDiff, EnvError> {
+        git::diff(&path(&request.cwd), self.git_env()).await
+    }
 
     async fn worktree_create(
         &self,
@@ -428,13 +465,16 @@ impl Environment for LocalEnvironment {
     ) -> Result<bool, EnvError> {
         worktree::remove(request, self.git_env()).await
     }
-
-    async fn set_shell_cwd(&self, session: &SessionId, cwd: EnvPath) -> Result<(), EnvError> {
-        self.shells()?.set_cwd(session, path(&cwd));
-        Ok(())
-    }
 }
 
-#[cfg(test)]
-#[path = "lib_tests.rs"]
-mod tests;
+#[async_trait]
+impl Fetch for LocalEnvironment {
+    async fn fetch_url(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: rust_cli_kernel_api::env_web::FetchUrl,
+    ) -> Result<rust_cli_kernel_api::env_web::FetchedUrl, EnvError> {
+        let egress = self.web.as_ref().ok_or_else(|| unsupported("web fetch"))?;
+        web::fetch(egress, request).await
+    }
+}

@@ -10,9 +10,10 @@
 use std::collections::HashMap;
 
 use regex::Regex;
-use rust_cli_kernel_api::env::{EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::ids::{SessionId, ToolUseId};
+use rust_cli_kernel_api::machine::Files;
 use rust_cli_kernel_api::message::{ContentBlock, Message, ToolResultContent};
 use serde_json::Value;
 
@@ -107,7 +108,7 @@ pub async fn restore_file_state(
     state: &ReadFileState,
     session: &SessionId,
     messages: &[Message],
-    env: &dyn Environment,
+    files: &dyn Files,
     workspace: &WorkspaceRef,
 ) {
     // 相对路径按工作区根解析，不按会话的当前目录：冷恢复的基准是启动时的目录，
@@ -144,7 +145,7 @@ pub async fn restore_file_state(
                     let request = ReadFile {
                         path: EnvPath::new(path.clone()),
                     };
-                    if let Ok(file) = env.read_file(workspace, request).await {
+                    if let Ok(file) = files.read_file(workspace, request).await {
                         let text = decode(&file.bytes).content;
                         entries.push((path.clone(), entry(text, Baseline::Version(file.version))));
                     }

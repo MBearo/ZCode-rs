@@ -7,10 +7,9 @@ use rust_cli_kernel_api::message::{
 /// 图片与文档的估算值。
 pub const IMAGE_TOKENS: u64 = 2_000;
 
-/// 字符数 / 4，四舍五入；字符数按 UTF-16 码元（JS 的 `length`）。
+/// 字符数 / 4，四舍五入；字符数按 UTF-16 码元（JS 的 `length`）。唯一定义在 kernel-api（压缩后带回的 skill 也用它）。
 pub(crate) fn rough(text: &str) -> u64 {
-    let units = text.encode_utf16().count() as u64;
-    (units + 2) / 4
+    rust_cli_kernel_api::compaction::rough_tokens(text)
 }
 
 fn result_content(content: &[ToolResultContent]) -> u64 {
@@ -91,11 +90,6 @@ pub fn measured(active: &[&Message]) -> Option<(u64, u64)> {
             usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
         (input > 0).then(|| (input, messages(active[index + 1..].iter().copied())))
     })
-}
-
-/// 一组消息的估算（字符数 / 4，图片 2000），`/context` 在计数接口不可用时用。
-pub fn estimate<'a>(items: impl IntoIterator<Item = &'a Message>) -> u64 {
-    messages(items)
 }
 
 #[cfg(test)]

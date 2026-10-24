@@ -11,7 +11,8 @@ use rust_cli_kernel_api::orchestration::{QueryError, QueryEvent, QueryRequest, Q
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::testing::{
     DirectExecutor, FixedContext, ListTools, MemoryStore, NeverCompact, NoHooks, RecordingSink,
-    ScriptedModel, SequentialIds, UnusedEnvironment, selection, text_response, tool_use_response,
+    ScriptedModel, SequentialIds, UnusedEnvironment, local_services, machine, selection,
+    text_response, tool_use_response,
 };
 use rust_cli_kernel_api::tool::Tool;
 use serde_json::json;
@@ -19,6 +20,7 @@ use serde_json::json;
 use crate::{QueryParts, RunScope};
 
 pub(crate) fn parts(model: Arc<dyn ModelPort>, tools: Vec<Arc<dyn Tool>>) -> QueryParts {
+    let env = Arc::new(UnusedEnvironment);
     QueryParts {
         model,
         context: Arc::new(FixedContext(vec![SystemBlock {
@@ -31,7 +33,8 @@ pub(crate) fn parts(model: Arc<dyn ModelPort>, tools: Vec<Arc<dyn Tool>>) -> Que
         hooks: Arc::new(NoHooks),
         ids: Arc::new(SequentialIds::default()),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         generation: Generation::new("g1"),
         non_interactive: false,

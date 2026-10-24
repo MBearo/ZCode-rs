@@ -1,4 +1,4 @@
-//! fork（`Command::Fork`，docs/specs/rust-cli/session-lifecycle.md §6.1）：新会话行 + 复制活动分支。
+//! fork（`Command::Fork`，docs/specs/rust-cli/session-lifecycle.md §6.1；F75 起只有 `--fork-session` 用）：新会话行 + 复制活动分支。
 //!
 //! Node 的 message id 全库唯一，所以复制时换新 ID，并映射引用了消息 ID 的字段（工具结果的
 //! assistant、压缩边界的摘要与保留段）；tool_use id 不变。文件不动，checkpoint 不复制。
@@ -25,15 +25,19 @@ pub(crate) fn fork_title(parent: &str) -> String {
     format!("Fork of {parent}")
 }
 
-/// 换新 ID 复制消息。
+/// 换新 ID 复制消息。续写时补的 assistant（session-lifecycle.md §6.3.1）不复制：新会话打开时按同一规则再补，随它的
+/// 第一批提交落库（F70 的缺陷修复把它从复制里去掉；F77 起它落库时是只给模型看的记录）。
 pub(crate) fn copy(messages: &[Message], ids: &dyn Ids) -> Vec<Message> {
-    let map: HashMap<MessageId, MessageId> = messages
-        .iter()
+    let persisted = || {
+        messages.iter().filter(
+            |message| !matches!(message, Message::Assistant(assistant) if assistant.is_resume_sentinel()),
+        )
+    };
+    let map: HashMap<MessageId, MessageId> = persisted()
         .map(|m| (m.id().clone(), ids.message()))
         .collect();
     let mapped = |id: &MessageId| map.get(id).cloned().unwrap_or_else(|| id.clone());
-    messages
-        .iter()
+    persisted()
         .map(|message| {
             let mut message = message.clone();
             match &mut message {

@@ -10,9 +10,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { importNode } from "./node-root.mjs";
 
-// Node 给未结束调用补的中断结果、rust-cli 只有数据的空 attachment 不比；相邻的工具结果按调用 id 排序
-// （Node 按声明顺序，rust-cli 按提交顺序）。
-const INTERRUPTED = "[Tool execution was interrupted before resume]";
+// rust-cli 只有数据的空 attachment 不比；相邻的工具结果按调用 id 排序（Node 按声明顺序，rust-cli 按提交顺序）。
+// Node 给 Node 写的未结调用补的中断结果，rust-cli 冷读取补同样的（Node 的文字与位置，node-store.md §4.6，工作线 F86、
+// F88），直接比。
 const joined = (texts) => texts.filter((text) => text.length > 0).join("\n\n");
 
 function sortToolRuns(items) {
@@ -50,7 +50,6 @@ function nodeContent(content) {
 export function nodeText(entries) {
   const items = entries
     .filter((entry) => entry.message && ["user", "assistant", "tool"].includes(entry.message.role))
-    .filter(({ message }) => !(message.role === "tool" && message.content === INTERRUPTED))
     .map(({ message }) => {
       if (message.role === "tool") {
         const content = nodeContent(message.content);
@@ -82,7 +81,10 @@ function rustContent(content) {
           mediaType: b.source.media_type,
           dataUrl: `data:${b.source.media_type};base64,${b.source.data}`,
         }
-      : { type: "text", text: b.text },
+      : // ToolSearch 的结果（tools-more.md §3.6）：Node 读的是落库的 `output`，同一句降级文字（第二十二段，F84）。
+        b.type === "tool_reference"
+        ? { type: "text", text: `Tool loaded: ${b.tool_name}` }
+        : { type: "text", text: b.text },
   );
 }
 

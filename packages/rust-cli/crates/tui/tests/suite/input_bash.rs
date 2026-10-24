@@ -7,11 +7,15 @@ use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext, Outcome,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
     OutputStream, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::testing::text_response;
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
+use rust_cli_kernel_api::testing::{environments, text_response};
 
 use super::support::{GatedModel, Setup, request_text, with_ui};
 
@@ -28,7 +32,7 @@ fn unsupported(what: &str) -> EnvError {
 }
 
 #[async_trait]
-impl Environment for ShellEnv {
+impl EnvInfo for ShellEnv {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Ok(EnvFacts {
             cwd: EnvPath::new("/Users/dev/project"),
@@ -40,9 +44,14 @@ impl Environment for ShellEnv {
             home: Some(EnvPath::new("/Users/dev")),
         })
     }
+}
+
+#[async_trait]
+impl Files for ShellEnv {
     async fn read_file(&self, _w: &WorkspaceRef, _r: ReadFile) -> Result<FileContent, EnvError> {
         Err(unsupported("read"))
     }
+
     async fn write_file(
         &self,
         _w: &WorkspaceRef,
@@ -51,6 +60,10 @@ impl Environment for ShellEnv {
     ) -> Result<WriteReceipt, EnvError> {
         Err(unsupported("write"))
     }
+}
+
+#[async_trait]
+impl Commands for ShellEnv {
     async fn start_command(
         &self,
         _w: &WorkspaceRef,
@@ -63,6 +76,7 @@ impl Environment for ShellEnv {
             .push((context.operation, request));
         Ok(())
     }
+
     fn watch_command(
         &self,
         operation: OperationId,
@@ -98,22 +112,33 @@ impl Environment for ShellEnv {
         ])
         .boxed()
     }
+
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
         Ok(())
     }
+
     async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Ok(Outcome::Unknown)
     }
+
     async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {
         Ok(())
     }
 }
 
+impl Search for ShellEnv {}
+impl Shell for ShellEnv {}
+impl Background for ShellEnv {}
+impl Checkpoints for ShellEnv {}
+impl Pdf for ShellEnv {}
+impl Git for ShellEnv {}
+impl Fetch for ShellEnv {}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn bang_runs_a_shell_command_and_the_model_sees_both_messages() {
     let env = Arc::new(ShellEnv::default());
     let setup = Setup {
-        env: env.clone(),
+        environments: environments(env.clone()),
         ..Setup::default()
     };
     let model = GatedModel::scripted(vec![text_response(&["listed the files"])]);

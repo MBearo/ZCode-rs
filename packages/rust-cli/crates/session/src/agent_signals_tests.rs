@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use rust_cli_kernel_api::agents::{AgentNotice, AgentSignal, AgentSignals};
 use rust_cli_kernel_api::ids::{AgentId, ShellTaskId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
+use rust_cli_kernel_api::testing::{local_services, machine};
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -61,6 +62,7 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
     store.create(meta()).await.unwrap();
     let ids = Arc::new(SequentialIds::default());
     let model = Arc::new(ScriptedModel::new(vec![text_response(&["noted"])]));
+    let env = Arc::new(UnusedEnvironment);
     let runner = Arc::new(QueryLoop::new(QueryParts {
         model,
         context: Arc::new(FixedContext(Vec::new())),
@@ -70,12 +72,14 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
         hooks: Arc::new(NoHooks),
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: store.clone(),
         generation: Generation::new("g1"),
         non_interactive: false,
         limits: rust_cli_query::RequestLimits::default(),
     }));
+    let env = Arc::new(UnusedEnvironment);
     let session = Session::spawn(
         SessionDeps {
             agents: signals.clone(),
@@ -84,7 +88,8 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
             ids,
             runner,
             compactor: Arc::new(rust_cli_kernel_api::testing::NeverCompact),
-            env: Arc::new(UnusedEnvironment),
+            machine: machine(env.clone()),
+            local: local_services(env),
             max_turns: None,
             hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
@@ -99,6 +104,7 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
             released: Arc::new(crate::NothingToRelease),
             directory_rules: Arc::new(rust_cli_kernel_api::orchestration::NoDirectoryRules),
             peers: crate::PeerDeps::off(),
+            detached: None,
         },
         SessionState {
             meta: meta(),
@@ -108,6 +114,7 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
             checkpoints: Vec::new(),
             start: rust_cli_kernel_api::session_api::StartSource::Startup,
             turn: None,
+            last_turn_failed: false,
         },
         Opened::Loaded,
     );

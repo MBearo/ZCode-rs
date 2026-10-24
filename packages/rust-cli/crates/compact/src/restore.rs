@@ -8,8 +8,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::env::{Environment, OperationContext, Origin};
+use rust_cli_kernel_api::env::{OperationContext, Origin};
 use rust_cli_kernel_api::ids::{Generation, OwnerEpoch, ToolUseId};
+use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::{AttachmentMessage, ContentBlock, Message, ToolResultContent};
 use rust_cli_kernel_api::orchestration::{CompactRequest, ToolRegistry};
 use rust_cli_kernel_api::permission::PermissionMode;
@@ -37,7 +39,8 @@ pub(crate) const SOURCE: &str = "file";
 /// 重读用到的端口。
 pub(crate) struct Restore<'a> {
     pub tools: &'a dyn ToolRegistry,
-    pub env: Arc<dyn Environment>,
+    pub machine: MachineEnv,
+    pub local: LocalServices,
     pub artifacts: Arc<dyn ArtifactStore>,
     pub ids: &'a dyn Ids,
     pub generation: Generation,
@@ -104,7 +107,8 @@ impl Restore<'_> {
             workspace: request.workspace.clone(),
             mode: request.mode.unwrap_or(PermissionMode::Default),
             cancel: cancel.clone(),
-            env: self.env.clone(),
+            machine: self.machine.clone(),
+            local: self.local.clone(),
             artifacts: self.artifacts.clone(),
             interactions: Arc::new(CollectSink::default()),
             operation: OperationContext {

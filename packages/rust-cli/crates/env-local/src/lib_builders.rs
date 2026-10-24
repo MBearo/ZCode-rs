@@ -47,6 +47,14 @@ impl LocalEnvironment {
         environ::project(&self.snapshot, None)
     }
 
+    /// 执行环境此刻有没有“结果还留在这里”的状态（常驻执行器的空闲判断，remote-exec.md §19.5）：还在跑的命令数与
+    /// 还没 ack 的后台通知数。不是端口方法：只有执行器的入口看它。
+    pub fn busy(&self) -> Busy {
+        self.shells
+            .as_ref()
+            .map_or_else(Busy::default, Shells::busy)
+    }
+
     pub(crate) fn shells(&self) -> Result<&Shells, EnvError> {
         self.shells
             .as_ref()

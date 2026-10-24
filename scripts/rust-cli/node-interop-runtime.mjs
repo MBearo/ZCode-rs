@@ -2,7 +2,7 @@
 // rust-cli 与 Node CLI 的互操作检查第十一段：Node 的真实运行时（docs/specs/rust-cli/node-store.md §6 第 11 步）。
 //
 // 前十段只调用 Node 的写入函数；这一段起 Node 的真实运行时（bootstrap 的 `createZCodeApp`，真实回合、回退、文件
-// 回退、压缩），与真实的 `zcode -p` 及 `node_kernel`（rust-cli 的 `/compact`、`/rewind`、`/branch`）轮流写同一个
+// 回退、压缩），与真实的 `zcode -p` 及 `node_kernel`（rust-cli 的 `/compact`、`/rewind`、`/fork`、`Fork`）轮流写同一个
 // 库、同一份 provider 配置，模型是本地替身（scripts/rust-cli/fixture/model.mjs）。场景见
 // node-interop-runtime-scenarios.mjs，驱动见 node-interop-runtime-harness.mjs。
 //

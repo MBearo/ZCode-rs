@@ -46,6 +46,12 @@ impl Settings {
             .filter(|origin| !origin.is_empty())
             .map(str::to_owned)
     }
+
+    /// App 的“完整保留模型 I/O”开关 `modelIoFullRetentionEnabled`（缺省关，只有 `true` 算开；工作线 F91，
+    /// docs/specs/rust-cli/model-io.md §3.4）。模型轨迹的写者每写一条读一次。
+    pub async fn model_io_full_retention(&self) -> bool {
+        self.read().await.get("modelIoFullRetentionEnabled") == Some(&Value::Bool(true))
+    }
 }
 
 #[cfg(test)]

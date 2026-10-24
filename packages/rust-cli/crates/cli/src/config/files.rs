@@ -5,9 +5,10 @@
 //! 存在的文件按顺序编号（读坏的文件也占序号，Node 的 `discoveryOrder`）。
 
 use rust_cli_base::names::{DOT_DIR, PROJECT_CONFIG_FILE};
-use rust_cli_kernel_api::env::{EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{PathStyle, StatFile};
 use rust_cli_kernel_api::env_git::has_git_marker;
+use rust_cli_kernel_api::machine::Files;
 use rust_cli_platform::ConfigFile;
 
 /// 每一层的 `zcode.json`（F55：以前写了 3 次；F58 起名字在 base，policy 的敏感文件表也用它）。
@@ -53,7 +54,7 @@ fn join(base: &str, name: &str) -> String {
 }
 
 struct Reader<'a> {
-    env: &'a dyn Environment,
+    files: &'a dyn Files,
     workspace: &'a WorkspaceRef,
 }
 
@@ -62,14 +63,14 @@ impl Reader<'_> {
         let request = StatFile {
             path: EnvPath::new(path),
         };
-        matches!(self.env.stat(self.workspace, request).await, Ok(Some(_)))
+        matches!(self.files.stat(self.workspace, request).await, Ok(Some(_)))
     }
 
     async fn read(&self, path: &str) -> ConfigFile {
         let request = ReadFile {
             path: EnvPath::new(path),
         };
-        match self.env.read_file(self.workspace, request).await {
+        match self.files.read_file(self.workspace, request).await {
             Ok(content) => ConfigFile::parse(&content.bytes),
             Err(error) => ConfigFile::Invalid {
                 reason: error.to_string(),
@@ -86,7 +87,7 @@ impl Reader<'_> {
         let mut levels = vec![root.clone()];
         let mut current = root.clone();
         loop {
-            if has_git_marker(self.env, self.workspace, &join(&current, ".git")).await {
+            if has_git_marker(self.files, self.workspace, &join(&current, ".git")).await {
                 levels.reverse();
                 return levels;
             }
@@ -125,8 +126,8 @@ pub(crate) fn project_file(
 }
 
 /// 发现并读取项目级配置文件，按发现顺序。
-pub(crate) async fn discover(env: &dyn Environment, workspace: &WorkspaceRef) -> Vec<ProjectFile> {
-    let reader = Reader { env, workspace };
+pub(crate) async fn discover(files: &dyn Files, workspace: &WorkspaceRef) -> Vec<ProjectFile> {
+    let reader = Reader { files, workspace };
     let root = workspace.root.as_str();
     let mut files = Vec::new();
     for level in reader.levels().await {

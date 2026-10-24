@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use rust_cli_base::names::{DOT_DIR, managed_dir};
-use rust_cli_kernel_api::env::{EnvFacts, EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvFacts, EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{FileKind, ListDir, PathStyle, StatFile};
 use rust_cli_kernel_api::env_git::project_levels;
+use rust_cli_kernel_api::machine::Files;
 
 use super::frontmatter::{self, Value};
 use super::{PluginSkillRoot, Skill, SkillCatalog, SkillShell, SkillSource};
@@ -32,7 +33,7 @@ fn base_roots(style: PathStyle, base: &str, source: &SkillSource) -> [Root; 2] {
 
 struct Reader<'a> {
     catalog: &'a SkillCatalog,
-    env: &'a dyn Environment,
+    files: &'a dyn Files,
     workspace: &'a WorkspaceRef,
     /// 路径规则按执行环境的 platform（kernel-api `env_path`）。修复（R1-9）：以前按“路径含不含 `\`”
     /// 猜风格，`C:\a` 的上一层算成 `C:`。
@@ -46,7 +47,7 @@ impl Reader<'_> {
     async fn project_levels(&self, facts: &EnvFacts) -> Vec<String> {
         let home = facts.home.as_ref().map(EnvPath::as_str);
         project_levels(
-            self.env,
+            self.files,
             self.workspace,
             self.style,
             facts.cwd.as_str(),
@@ -60,7 +61,7 @@ impl Reader<'_> {
         let request = ListDir {
             path: EnvPath::new(&root.dir),
         };
-        let Ok(mut entries) = self.env.list_dir(self.workspace, request).await else {
+        let Ok(mut entries) = self.files.list_dir(self.workspace, request).await else {
             return Vec::new();
         };
         entries.retain(|entry| entry.kind == FileKind::Directory);
@@ -85,7 +86,7 @@ impl Reader<'_> {
             path: EnvPath::new(&file),
         };
         let stat = self
-            .env
+            .files
             .stat(self.workspace, request)
             .await
             .ok()
@@ -107,7 +108,7 @@ impl Reader<'_> {
         let request = ReadFile {
             path: EnvPath::new(&file),
         };
-        let content = self.env.read_file(self.workspace, request).await.ok()?;
+        let content = self.files.read_file(self.workspace, request).await.ok()?;
         let raw = String::from_utf8_lossy(&content.bytes);
         let skill = Arc::new(parse(&raw, name, dir, source.clone()));
         self.catalog.remember(file, content.version, skill.clone());
@@ -125,7 +126,7 @@ pub(crate) async fn discover(
     let style = PathStyle::of_platform(&facts.platform);
     let reader = Reader {
         catalog,
-        env: catalog.env.as_ref(),
+        files: catalog.files.as_ref(),
         workspace,
         style,
     };

@@ -51,11 +51,14 @@ pub enum Request {
         root: Option<String>,
         order: SessionOrder,
     },
-    /// 切到别的目录的会话：先做信任检查；`cd` 是打开后要换到的目录（“Use current directory”）。
+    /// 切到别的目录的会话：先做信任检查；`cd` 是打开后要换到的目录（“Use current directory”）。`startup`：启动形态的
+    /// `/resume` 页（`--resume` 不带参数）选中的，打开时不写续写占位，同 `--resume <id>`（session-lifecycle.md §6.3.1，
+    /// 工作线 F79）；它选当前目录的会话也走这里（信任检查对当前目录不弹框）。
     Open {
         id: String,
         root: String,
         cd: Option<String>,
+        startup: bool,
     },
     /// 在这个目录新建会话（`n`）。
     New {
@@ -385,11 +388,17 @@ impl App {
         let root = self.view.workspace().root.as_str().to_owned();
         let row = page.focused_row(&root)?.clone();
         page.search = None;
-        self.open_row(&row, None)
+        self.open_row(&row, None, false)
     }
 
-    /// 两页共用的“打开这个会话”（tui-panels.md §2.4、tui-manage.md §10.5）。
-    pub(super) fn open_row(&mut self, row: &SessionRow, cd: Option<String>) -> Option<Action> {
+    /// 两页共用的“打开这个会话”（tui-panels.md §2.4、tui-manage.md §10.5）。`startup`：启动形态的 `/resume` 页
+    ///（`Request::Open.startup`）。
+    pub(super) fn open_row(
+        &mut self,
+        row: &SessionRow,
+        cd: Option<String>,
+        startup: bool,
+    ) -> Option<Action> {
         if row.current {
             self.overlay = None;
             let title = row.label();
@@ -403,19 +412,15 @@ impl App {
         }
         if cd.is_some() || row.root == self.view.workspace().root.as_str() {
             self.overlay = None;
-            return Some(match cd {
-                Some(cd) => Action::Projects(Request::Open {
-                    id: row.id.clone(),
-                    root: row.root.clone(),
-                    cd: Some(cd),
-                }),
-                None => Action::Resume(row.id.clone()),
-            });
+            if cd.is_none() && !startup {
+                return Some(Action::Resume(row.id.clone()));
+            }
         }
         Some(Action::Projects(Request::Open {
             id: row.id.clone(),
             root: row.root.clone(),
-            cd: None,
+            cd,
+            startup,
         }))
     }
 }

@@ -15,7 +15,8 @@ use rust_cli_ext::PluginSources;
 use rust_cli_ext::mcp::McpServer;
 use rust_cli_hooks::node_config::NodeHooks;
 use rust_cli_hooks::{HookSource, HooksConfig};
-use rust_cli_kernel_api::env::{Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::WorkspaceRef;
+use rust_cli_kernel_api::machine::Files as FilesPort;
 use rust_cli_kernel_api::permission::{
     PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
 };
@@ -32,7 +33,8 @@ use self::trust::{Pending, WorkspaceHooks};
 
 /// 组装需要的输入（入口捕获的事实与端口）。
 pub(crate) struct ConfigInputs<'a> {
-    pub(crate) env: &'a dyn Environment,
+    /// 项目级配置文件经本机的 `Files` 读（cli 从注册表的本机取，remote-exec.md §3）。
+    pub(crate) files: &'a dyn FilesPort,
     pub(crate) workspace: &'a WorkspaceRef,
     pub(crate) paths: &'a StoragePaths,
     /// 入口捕获的进程环境（http hook 的 header 插值用）。
@@ -71,6 +73,8 @@ pub(crate) struct ConfigSnapshot {
     pub(crate) theme: Option<rust_cli_platform::UiTheme>,
     /// 启动时检查新版本 `checkForUpdateOnStartup`（update.md §10，F48；缺省 true）。
     pub(crate) check_for_update: bool,
+    /// 提问框的空闲超时 `askUserQuestionTimeout`（毫秒，tools-more.md §1.1，工作线 F72；缺省不计时）。
+    pub(crate) question_timeout: Option<u64>,
     /// 项目级配置文件里会生效的 `permission.allowedTools`：最后写它的项目文件（相对工作区根）与规则原文
     /// （工作区信任对话框的项目授权，workspace-trust.md §2.4）。
     pub(crate) project_allow: Option<(String, Vec<String>)>,
@@ -170,7 +174,7 @@ pub(crate) async fn read_files(inputs: &ConfigInputs<'_>) -> Files {
     Files {
         user_path: inputs.paths.cli_config().as_path().display().to_string(),
         user: read_cli_config(inputs.paths).await,
-        projects: files::discover(inputs.env, inputs.workspace).await,
+        projects: files::discover(inputs.files, inputs.workspace).await,
     }
 }
 
@@ -223,6 +227,7 @@ pub(crate) async fn assemble(inputs: &ConfigInputs<'_>) -> ConfigSnapshot {
     let locale = merge::locale(&layers, &mut warnings);
     let theme = merge::theme(&layers, &mut warnings);
     let check_for_update = merge::check_for_update(&layers, &mut warnings);
+    let question_timeout = merge::question_timeout(&layers, &mut warnings);
     let root = inputs.workspace.root.as_str();
     let plugin_section = plugins::merge(&layers, &mut warnings);
     let storage = StorageLayers::from_layers(&layers, inputs.process_env);
@@ -283,6 +288,7 @@ pub(crate) async fn assemble(inputs: &ConfigInputs<'_>) -> ConfigSnapshot {
         locale,
         theme,
         check_for_update,
+        question_timeout,
         project_allow: project_allow(&projects, inputs.workspace.root.as_str()),
         storage,
     }

@@ -9,8 +9,8 @@ use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, CreateSession, Delivery, KernelEvent, TurnOutcome,
 };
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
-    text_response,
+    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
+    selection, text_response,
 };
 
 use super::*;
@@ -19,7 +19,7 @@ fn kernel(store: Arc<MemoryStore>, model: Arc<ScriptedModel>) -> LocalKernel {
     LocalKernel::new(
         Ports {
             model,
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(1_000)),
@@ -88,8 +88,9 @@ async fn a_created_session_runs_a_turn_and_reloads_after_restart() {
 
     let second = kernel(store, Arc::new(ScriptedModel::new(Vec::new())));
     let reopened = second.open_session(&id).await.unwrap();
-    // 一问一答之外，还有上下文这一步宣布的 attachment（模型身份、agent 清单（有 Agent 工具）、剩余
-    // token、日期；内置工具里有 Bash，所以也宣布署名），它们与对话一起落库、resume 后重放。
+    // 一问一答之外，还有上下文这一步宣布的 attachment（模型身份、延迟工具清单（本地 ToolSearch，工作线 F84：
+    // 测试替身答不出能力、模型没有卡片）、agent 清单（有 Agent 工具）、剩余 token、日期；内置工具里有 Bash，所以也宣布
+    // 署名），它们与对话一起落库、resume 后重放。
     let messages = reopened.view().await.unwrap().messages;
     let dialogue = messages
         .iter()
@@ -107,6 +108,7 @@ async fn a_created_session_runs_a_turn_and_reloads_after_restart() {
         sources,
         [
             "model",
+            "deferred_tools_delta",
             "agent_listing_delta",
             "total_tokens_reminder",
             "date",

@@ -190,7 +190,8 @@ fn keys_move_with_wraparound_and_r_edits_the_name() {
         Some(Action::Projects(Request::Open {
             id: "c".into(),
             root: "/w/alpha".into(),
-            cd: None
+            cd: None,
+            startup: false
         }))
     );
     assert!(app.overlay.is_some());

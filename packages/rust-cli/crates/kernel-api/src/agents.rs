@@ -206,6 +206,14 @@ pub trait TaskListStore: Send + Sync {
     async fn save(&self, session: &SessionId, list: &TaskList) -> Result<(), StoreError>;
 }
 
+/// 当步 attachment 的任务提醒读的任务清单（docs/specs/rust-cli/agents.md §7.4）：子会话读顶层会话的清单。由
+/// agents 实现，runtime 在建好 agents 之后交给 context。
+#[async_trait]
+pub trait TaskReader: Send + Sync {
+    /// 这个会话（子代理按顶层会话）现在的任务，按 ID 升序；读不到时为空。
+    async fn tasks(&self, session: &SessionId) -> Vec<TaskRecord>;
+}
+
 #[cfg(test)]
 #[path = "agents_tests.rs"]
 mod tests;

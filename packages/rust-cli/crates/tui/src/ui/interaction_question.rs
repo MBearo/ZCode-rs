@@ -32,10 +32,15 @@ impl Interaction {
         let list = questions(request);
         let pages = if list.len() > 1 { list.len() + 1 } else { 1 };
         let typed = input.is_text(&key);
+        let preview = list.get(self.question).is_some_and(Question::preview_mode);
+        // 预览题写备注时 tab 与左右键不切换题目（工作线 F72）。
+        if preview && self.typing {
+            return self.preview_key(&list, key, input);
+        }
         let switch = |this: &mut Self, page: usize| {
             this.question = page;
-            this.cursor = 0;
             this.typing = false;
+            this.enter_question(&list);
         };
         match key.code {
             KeyCode::Left if self.question > 0 => {
@@ -51,6 +56,9 @@ impl Interaction {
                 return None;
             }
             _ => {}
+        }
+        if preview {
+            return self.preview_key(&list, key, input);
         }
         // 确认页：1. Submit answers；2. Cancel。
         let Some(question) = list.get(self.question) else {
@@ -138,13 +146,13 @@ impl Interaction {
     }
 
     /// 下一题；只有一题或已在最后一题时：一题直接提交，多题进入确认页。
-    fn advance(&mut self, list: &[Question]) -> Option<Value> {
+    pub(super) fn advance(&mut self, list: &[Question]) -> Option<Value> {
         self.typing = false;
         if list.len() == 1 {
             return self.submit(list);
         }
         self.question += 1;
-        self.cursor = 0;
+        self.enter_question(list);
         None
     }
 }

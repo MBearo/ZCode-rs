@@ -59,6 +59,12 @@ texts! {
     deferred_tools => "context/deferred_tools",
     deferred_tools_removed => "context/deferred_tools_removed",
     deferred_tools_pending => "context/deferred_tools_pending",
+    deferred_tools_removed_mcp => "context/deferred_tools_removed_mcp",
+    deferred_tools_removed_mcp_many => "context/deferred_tools_removed_mcp_many",
+    deferred_tools_readded_mcp => "context/deferred_tools_readded_mcp",
+    deferred_tools_readded => "context/deferred_tools_readded",
+    ultrathink_effort => "context/ultrathink_effort",
+    skill_mention => "context/skill_mention",
     agents => "context/agents",
     agents_new => "context/agents_new",
     agents_removed => "context/agents_removed",
@@ -112,6 +118,13 @@ texts! {
     plan_mode_exit_file => "context/plan_mode_exit_file",
     // bypass 模式的宣布（shell-permissions.md §4.9，修复线 F43）。
     auto_mode_bypass => "context/auto_mode_bypass",
+    // 读过的文件在磁盘上被改动（tools-files.md §4.1，工作线 F70）。
+    edited_text_file => "context/edited_text_file",
+    edited_text_file_changes => "context/edited_text_file_changes",
+    edited_text_file_hidden => "context/edited_text_file_hidden",
+    // 任务工具的周期提醒（agents.md §7.4，工作线 F70）。
+    task_reminder => "context/task_reminder",
+    task_reminder_tasks => "context/task_reminder_tasks",
 }
 
 /// 填模板变量：`{{name}}` 换成 `vars` 里同名的值。只扫描模板本身一遍，值里出现的 `{{…}}`

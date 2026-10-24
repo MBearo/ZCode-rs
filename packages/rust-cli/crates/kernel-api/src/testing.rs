@@ -32,9 +32,15 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::clock::{Clock, Ids};
+use crate::env_registry::{EnvironmentRegistry, LocalRegistry};
 use crate::ids::{
     AgentId, InteractionId, MessageId, OperationId, RunId, SessionId, ToolUseId, TurnId,
 };
+use crate::local_services::{Fetch, Git, LocalServices};
+use crate::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, MachineEnv, Pdf, Search, Shell,
+};
+use crate::mcp::NoMcpTransport;
 use crate::message::{ContentBlock, Message, StopReason, ToolResultContent, Usage};
 use crate::model::{
     BlockDelta, ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection, SystemBlock,
@@ -47,6 +53,41 @@ use crate::tool::{Tool, ToolOutput, ToolProgress, ToolUseContext};
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// 把一个实现全部 8 个机器端口的替身装成一台机器；MCP 是 [`NoMcpTransport`]（remote-exec.md §15.8.1）。
+pub fn machine<E>(env: Arc<E>) -> MachineEnv
+where
+    E: EnvInfo + Files + Search + Commands + Shell + Background + Checkpoints + Pdf + 'static,
+{
+    MachineEnv::new(env, Arc::new(NoMcpTransport))
+}
+
+/// 把一个实现 Git 与 Fetch 的替身装成本机服务。
+pub fn local_services<S>(services: Arc<S>) -> LocalServices
+where
+    S: Git + Fetch + 'static,
+{
+    LocalServices::new(services)
+}
+
+/// 实现全部 10 个端口的替身（一台机器的 8 个与本机的 2 个）：测试的组装函数用它作约束。
+pub trait AllPorts:
+    EnvInfo + Files + Search + Commands + Shell + Background + Checkpoints + Pdf + Git + Fetch
+{
+}
+
+impl<T> AllPorts for T where
+    T: EnvInfo + Files + Search + Commands + Shell + Background + Checkpoints + Pdf + Git + Fetch
+{
+}
+
+/// 只有本机的注册表：机器与本机服务都是同一个替身，MCP 是 [`NoMcpTransport`]。
+pub fn environments<E: AllPorts + 'static>(env: Arc<E>) -> Arc<dyn EnvironmentRegistry> {
+    Arc::new(LocalRegistry::new(
+        machine(env.clone()),
+        local_services(env),
+    ))
 }
 
 /// 按顺序返回预先写好的响应，并记录收到的请求。

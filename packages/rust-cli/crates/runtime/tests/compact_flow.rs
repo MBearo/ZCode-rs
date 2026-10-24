@@ -18,8 +18,8 @@ mod flow {
         TurnOutcome,
     };
     use rust_cli_kernel_api::testing::{
-        FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
-        text_response,
+        FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
+        selection, text_response,
     };
     use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 
@@ -74,7 +74,7 @@ mod flow {
         let kernel = LocalKernel::new(
             Ports {
                 model: model.clone(),
-                env: Arc::new(UnusedEnvironment),
+                environments: environments(Arc::new(UnusedEnvironment)),
                 store: store.clone(),
                 artifacts: store,
                 clock: Arc::new(FixedClock(1_000)),

@@ -42,6 +42,13 @@ pub const SCHEDULED_TASKS_FILE: &str = "scheduled_tasks.json";
 /// 已安装清单、ext 的插件选择、入口合并 `plugins` 段都用它（F55：以前三处各写一份）。
 pub const OFFICIAL_MARKETPLACE: &str = "zcode-plugins-official";
 
+/// 执行器的目录（docs/specs/rust-cli/remote-exec.md §19.4）：用户根下的 `rust-cli/exec`。本机的位置由 paths 的
+/// `StoragePaths::executor()` 算；远端的位置由 ssh-connect 按远端的 home 拼（远端只用这个目录，不碰 `cli/`）。
+pub const EXECUTOR_HOME: &str = "rust-cli/exec";
+
+/// Unix 上的可执行文件名（cli-args.md §13）：上传到远端的执行器、远端探测的候选都是这个名字。
+pub const UNIX_EXECUTABLE: &str = "zcode-rs";
+
 /// 发给服务的客户端名：MCP `initialize` 的 `clientInfo.name` 与签发项目令牌的 `clientType`（F55：以前 ext 与
 /// platform 各写一份；版本号由入口传下去）。
 pub const CLIENT_NAME: &str = "zcode";

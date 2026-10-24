@@ -13,7 +13,6 @@ use std::sync::Arc;
 use rust_cli_base::names::DOT_DIR;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::clock::Clock;
-use rust_cli_kernel_api::model::ModelPort;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::provider::{
     ModelCatalog, ModelDirectory, ModelLimits, TokenLimits, WireProtocol,
@@ -34,6 +33,8 @@ pub(crate) struct Override {
     pub model: Option<String>,
     /// 只给测试用的两个声明（model.md §6，只在 debug 构建读）。
     pub assume: Assumptions,
+    /// 只给测试的 SSH 入口（remote-exec.md §19.11，只在 debug 构建读）。
+    pub ssh: Option<crate::options::SshAssumption>,
 }
 
 /// Node 配置里 Anthropic 官方 API 的写法（能力规则按它匹配，model.md §6；与请求方案共用 model 的定义，F55）。
@@ -88,16 +89,6 @@ impl ModelLimits for ExplicitLimits {
         self.rules
             .limits(WireProtocol::AnthropicMessages, &self.url, &selection.model)
     }
-}
-
-/// 这个选择能不能用工具搜索（stream-json 输入的 MCP prewait）：与主循环同一个判定，按端点的
-/// 能力（工作线 F52，tools-more.md §3.2）。
-pub(crate) async fn tool_search(model: &ProviderModel, selection: &ModelSelection) -> bool {
-    let configured = model.capabilities(selection).await;
-    rust_cli_prompts::models::supports_tool_search(
-        &selection.model,
-        configured.map(|found| found.supports_tool_search),
-    )
 }
 
 /// 显式覆盖的 Anthropic 端点：没有 API key 时为空。

@@ -6,9 +6,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::env::{Environment, OperationContext};
+use rust_cli_kernel_api::env::OperationContext;
 use rust_cli_kernel_api::env_shell::{BackgroundStatus, BackgroundStop, BackgroundTask};
 use rust_cli_kernel_api::ids::{AgentId, OperationId, SessionId, ShellTaskId};
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
@@ -78,7 +79,7 @@ pub(crate) struct TaskStopTool {
 pub(crate) struct Caller<'a> {
     pub(crate) session: &'a SessionId,
     pub(crate) agent: Option<&'a AgentId>,
-    pub(crate) env: &'a Arc<dyn Environment>,
+    pub(crate) machine: &'a MachineEnv,
     pub(crate) operation: &'a OperationContext,
 }
 
@@ -87,7 +88,7 @@ impl<'a> Caller<'a> {
         Self {
             session: &context.session,
             agent: context.agent.as_ref(),
-            env: &context.env,
+            machine: &context.machine,
             operation: &context.operation,
         }
     }
@@ -165,7 +166,7 @@ impl TaskStopTool {
                 session: session.clone(),
                 task: ShellTaskId::new(id),
             };
-            match context.env.background_command(key).await {
+            match context.machine.background().background_command(key).await {
                 Ok(Some(info)) if info.status == BackgroundStatus::Running => {
                     return Ok(Target::Command(session));
                 }
@@ -185,7 +186,8 @@ impl TaskStopTool {
             return;
         };
         let Ok(state) = context
-            .env
+            .machine
+            .shell()
             .shell_state(&entry.workspace, &entry.child)
             .await
         else {
@@ -198,7 +200,12 @@ impl TaskStopTool {
                 session: entry.child.clone(),
                 task,
             };
-            if let Err(error) = context.env.stop_background_command(operation, key).await {
+            if let Err(error) = context
+                .machine
+                .background()
+                .stop_background_command(operation, key)
+                .await
+            {
                 tracing::warn!(%error, "a parked agent's command was not stopped");
             }
         }
@@ -250,7 +257,8 @@ impl TaskStopTool {
                     task: ShellTaskId::new(id),
                 };
                 match context
-                    .env
+                    .machine
+                    .background()
                     .stop_background_command(context.operation.clone(), key)
                     .await?
                 {

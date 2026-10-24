@@ -5,7 +5,7 @@
 // App 共用的组装，回合走 provider 适配器、runtime、工具执行与会话存储，比 `zcode -p` 少的只有参数解析；模型目录用
 // Node 的 `createNodeProviderRegistryRuntime` 读同一份 `~/.zcode/v2/provider_config.json`（两边读同一个文件，与真实
 // 共用一致），没有凭据与网络。rust-cli 一侧回合用真实的 `zcode -p`（`-r` 续写），`-p` 没有的 `/compact`、`/rewind`、
-// `/branch` 用 `node_kernel` 例子程序发同样的内核命令。
+// `/fork` 与 `--fork-session` 的 `Fork` 用 `node_kernel` 例子程序发同样的内核命令。
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -25,6 +25,12 @@ const blocksOf = (content) =>
 export const stripReminders = (value) =>
   value.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
 
+/**
+ * rust-cli 发给模型时在 ToolSearch 结果之后加的说明（tools-more.md §3.6）：只在发出的请求里、不落库，Node 不加，比较
+ * 历史时不算（第二十二段，工作线 F84）。
+ */
+const TOOL_LOADED = "Tool loaded.";
+
 const resultText = (content) =>
   stripReminders(
     blocksOf(content)
@@ -43,7 +49,7 @@ export function conversation(body) {
     for (const block of blocksOf(message.content)) {
       if (block.type === "text") {
         const value = stripReminders(block.text);
-        if (value) items.push({ role: message.role, text: value });
+        if (value && value !== TOOL_LOADED) items.push({ role: message.role, text: value });
       } else if (block.type === "tool_use") {
         items.push({
           role: "assistant",
@@ -80,16 +86,21 @@ export function replyItems(reply) {
 
 const lastUser = (body) => (body?.messages ?? []).findLast((message) => message.role === "user");
 
-/** 输入里的动作：`[[read 路径]]`、`[[write 路径|内容]]`（内容里的 `\\n` 是换行），按出现的顺序。 */
+/**
+ * 输入里的动作，按出现的顺序：`[[read 路径]]`、`[[write 路径|内容]]`（内容里的 `\\n` 是换行）；第二十二段（工作线 F84）
+ * 另有 `[[search 查询]]`（ToolSearch）与 `[[call 工具|JSON 输入]]`。
+ */
 function actions(prompt) {
-  return [...prompt.matchAll(/\[\[(read|write) ([^|\]]+)(?:\|([^\]]*))?\]\]/g)].map(
-    ([, kind, path, body]) =>
-      kind === "read"
-        ? { name: "Read", input: { file_path: path } }
-        : {
-            name: "Write",
-            input: { file_path: path, content: (body ?? "").replaceAll("\\n", "\n") },
-          },
+  return [...prompt.matchAll(/\[\[(read|write|search|call) ([^|\]]+)(?:\|([^\]]*))?\]\]/g)].map(
+    ([, kind, arg, body]) => {
+      if (kind === "read") return { name: "Read", input: { file_path: arg } };
+      if (kind === "search") return { name: "ToolSearch", input: { query: arg } };
+      if (kind === "call") return { name: arg, input: JSON.parse(body ?? "{}") };
+      return {
+        name: "Write",
+        input: { file_path: arg, content: (body ?? "").replaceAll("\\n", "\n") },
+      };
+    },
   );
 }
 
@@ -320,6 +331,8 @@ export function rustSide({ zcode, kernel, interop, layout, baseUrl }) {
     rewind: (sessionId, target, scope) =>
       json(kernel, ["rewind", layout.storage, sessionId, target, scope]),
     branch: (sessionId) => json(kernel, ["branch", layout.storage, sessionId]),
+    /** `/fork` 选中 `message` 这条输入（F75）。 */
+    fork: (sessionId, message) => json(kernel, ["fork", layout.storage, sessionId, message]),
     options: (sessionId) => json(kernel, ["options", layout.storage, sessionId]),
     read: (sessionId) => json(interop, ["read", layout.storage, sessionId]),
   };

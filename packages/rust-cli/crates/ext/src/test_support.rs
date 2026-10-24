@@ -247,15 +247,15 @@ impl McpTransport for FakeMcp {
 }
 
 /// 一次工具调用的上下文（替身端口）。
-pub(crate) fn tool_context(
-    env: Arc<dyn rust_cli_kernel_api::env::Environment>,
+pub(crate) fn tool_context<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
+    env: Arc<E>,
     mode: rust_cli_kernel_api::permission::PermissionMode,
 ) -> rust_cli_kernel_api::tool::ToolUseContext {
     use rust_cli_kernel_api::env::{OperationContext, Origin};
     use rust_cli_kernel_api::ids::{
         Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
     };
-    use rust_cli_kernel_api::testing::{MemoryStore, RecordingSink};
+    use rust_cli_kernel_api::testing::{MemoryStore, RecordingSink, local_services, machine};
     let session = SessionId::new("sess_1");
     let run = RunId::new("run_1");
     rust_cli_kernel_api::tool::ToolUseContext {
@@ -266,7 +266,8 @@ pub(crate) fn tool_context(
         workspace: workspace(),
         mode,
         cancel: tokio_util::sync::CancellationToken::new(),
-        env,
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: Arc::new(RecordingSink::default()),
         operation: OperationContext {

@@ -8,8 +8,9 @@ use rust_cli_kernel_api::model::ModelSelection;
 /// 认的档位，按从低到高（警告与帮助里的顺序）。
 pub(crate) const LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
-/// 别名：`med` 是 `medium`，`ultracode` 是 `xhigh`（没有单独的 ultracode 模式，cli-args.md D20）。
-const ALIASES: [(&str, &str); 2] = [("med", "medium"), ("ultracode", "xhigh")];
+/// 别名：`med` 是 `medium`。`ultracode` 不是别名（工作线 F78，用户决定）：没有单独的 ultracode 模式，以前当
+/// `xhigh` 会让人以为开了那个模式；现在与其他不认识的值一样警告（cli-args.md D20）。
+const ALIASES: [(&str, &str); 1] = [("med", "medium")];
 
 /// 解析 `--effort` 的值：去掉首尾空白、不分大小写。不认识时返回写到 stderr 的警告（不带换行）。
 pub(crate) fn parse(value: &str) -> Result<&'static str, String> {

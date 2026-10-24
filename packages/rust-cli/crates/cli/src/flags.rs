@@ -1,8 +1,9 @@
 //! 要读文件、看目录的参数（docs/specs/rust-cli/cli-args.md §4、§6、§7）：入口读完环境之后、建内核之前处理，
 //! 文件与目录都经执行环境端口（与 `--mcp-config` 相同）。报错的文字固定，写 stderr、退出码 1。
 
-use rust_cli_kernel_api::env::{EnvError, EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvError, EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{FileKind, PathStyle, StatFile};
+use rust_cli_kernel_api::machine::Files;
 
 use serde_json::{Map, Value};
 
@@ -25,7 +26,7 @@ impl std::error::Error for Fatal {}
 
 /// 读文件要的上下文：执行环境、工作区、cwd 与 home（解析相对路径与 `~`）。
 pub(crate) struct Place<'a> {
-    pub(crate) env: &'a dyn Environment,
+    pub(crate) files: &'a dyn Files,
     pub(crate) workspace: &'a WorkspaceRef,
     pub(crate) cwd: &'a str,
     pub(crate) home: Option<&'a str>,
@@ -85,7 +86,7 @@ pub(crate) async fn prompt_text(
     let request = ReadFile {
         path: EnvPath::new(&path),
     };
-    let content = match place.env.read_file(place.workspace, request).await {
+    let content = match place.files.read_file(place.workspace, request).await {
         Ok(content) => String::from_utf8_lossy(&content.bytes).into_owned(),
         Err(EnvError::NotFound { .. }) => {
             return Err(Fatal(format!("{}: {path}", kind.not_found())));
@@ -112,7 +113,7 @@ pub(crate) async fn settings(place: &Place<'_>, value: &str) -> Result<Map<Strin
     let request = ReadFile {
         path: EnvPath::new(&path),
     };
-    let bytes = match place.env.read_file(place.workspace, request).await {
+    let bytes = match place.files.read_file(place.workspace, request).await {
         Ok(content) => content.bytes,
         Err(EnvError::NotFound { .. }) => {
             return Err(Fatal(format!("Error: Settings file not found: {path}")));
@@ -163,7 +164,7 @@ pub(crate) async fn add_dirs(place: &Place<'_>, raw: &[String]) -> AddedDirs {
         let request = StatFile {
             path: EnvPath::new(&path),
         };
-        let stat = place.env.stat(place.workspace, request).await;
+        let stat = place.files.stat(place.workspace, request).await;
         match stat {
             Ok(Some(stat)) if stat.kind == FileKind::Directory => {}
             Ok(Some(_)) => {

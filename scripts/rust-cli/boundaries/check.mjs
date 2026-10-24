@@ -450,3 +450,99 @@ export function checkGraph(policy, packages, internal, isInside) {
   }
   return failures;
 }
+
+/// 依赖图（docs/specs/rust-cli/remote-exec.md §15.6）：crate → 它依赖的本工程 crate（普通、构建与测试依赖都算，与依赖表的
+/// 口径相同）。
+export function internalGraph(packages, internal) {
+  const graph = new Map(packages.map((entry) => [entry.crate, new Set()]));
+  for (const { crate, dependencies } of packages) {
+    for (const dependency of dependencies) {
+      const target = internal.get(dependency.name);
+      if (target && target !== crate) graph.get(crate).add(target);
+    }
+  }
+  return graph;
+}
+
+/// 每个 crate 的入度 Ca、出度 Ce 与不稳定度 I = Ce / (Ca + Ce)（两者都是 0 时 I = 0）。
+export function instability(graph) {
+  const result = new Map([...graph.keys()].map((crate) => [crate, { ca: 0, ce: 0, i: 0 }]));
+  for (const [crate, targets] of graph) {
+    result.get(crate).ce = targets.size;
+    for (const target of targets) result.get(target).ca += 1;
+  }
+  for (const entry of result.values()) {
+    entry.i = entry.ca + entry.ce === 0 ? 0 : entry.ce / (entry.ca + entry.ce);
+  }
+  return result;
+}
+
+/// 稳定依赖原则（§15.6 第 4 条）：每条边 A → B 要求 I(B) ≤ I(A)；例外登记在 `SDP_EXCEPTIONS`（键 `A->B`，值是理由）。
+export function checkStableDependencies(policy, graph) {
+  const failures = [];
+  const values = instability(graph);
+  const used = new Set();
+  const round = (value) => value.toFixed(2);
+  for (const [crate, targets] of graph) {
+    for (const target of targets) {
+      const [from, to] = [values.get(crate).i, values.get(target).i];
+      if (to <= from + 1e-9) continue;
+      const key = `${crate}->${target}`;
+      if (key in policy.SDP_EXCEPTIONS) used.add(key);
+      else
+        failures.push(
+          `stable dependencies: ${crate} (I=${round(from)}) depends on the less stable ${target} (I=${round(to)}); depend on something more stable or register ${key} in SDP_EXCEPTIONS with a reason`,
+        );
+    }
+  }
+  for (const key of Object.keys(policy.SDP_EXCEPTIONS)) {
+    if (!used.has(key)) failures.push(`SDP_EXCEPTIONS.${key}: no longer an exception (dead entry)`);
+  }
+  return failures;
+}
+
+/// 反向依赖闭包：直接或间接依赖 `crate` 的全部 crate（改它会重编、可能要改的范围）。
+export function reverseClosure(graph, crate) {
+  const dependents = new Map([...graph.keys()].map((name) => [name, []]));
+  for (const [name, targets] of graph)
+    for (const target of targets) dependents.get(target)?.push(name);
+  const seen = new Set();
+  const queue = [crate];
+  while (queue.length) {
+    for (const next of dependents.get(queue.shift()) ?? []) {
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return seen;
+}
+
+/// 波及范围（§15.6 第 2 条）：`BLAST_RADIUS` 给出的反向依赖闭包必须与实际相等；任何一个的闭包里都不能有
+/// `BLAST_FORBIDDEN_LAYERS` 的 crate（内核与前端不认识远端）。
+export function checkBlastRadius(policy, graph) {
+  const failures = [];
+  for (const [crate, expected] of Object.entries(policy.BLAST_RADIUS)) {
+    if (!graph.has(crate)) {
+      failures.push(`BLAST_RADIUS.${crate}: no such crate (dead entry)`);
+      continue;
+    }
+    const actual = reverseClosure(graph, crate);
+    const missing = expected.filter((name) => !actual.has(name));
+    const extra = [...actual].filter((name) => !expected.includes(name)).sort();
+    if (missing.length || extra.length) {
+      failures.push(
+        `blast radius: crates depending on ${crate} are [${[...actual].sort().join(", ")}], BLAST_RADIUS.${crate} says [${[...expected].sort().join(", ")}]`,
+      );
+    }
+    for (const name of actual) {
+      if (policy.BLAST_FORBIDDEN_LAYERS.includes(policy.LAYERS[name])) {
+        failures.push(
+          `blast radius: ${name} (${policy.LAYERS[name]}) depends on ${crate}; kernel and frontend crates must not know the remote crates`,
+        );
+      }
+    }
+  }
+  return failures;
+}

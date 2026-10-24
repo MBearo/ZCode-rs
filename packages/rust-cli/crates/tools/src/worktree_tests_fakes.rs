@@ -5,8 +5,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::PathFacts;
 use rust_cli_kernel_api::env_worktree::{
@@ -14,6 +14,10 @@ use rust_cli_kernel_api::env_worktree::{
     WorktreeRemove,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::local_services::{Fetch, Git as GitPort};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
 use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
 };
@@ -77,11 +81,18 @@ impl Git {
 }
 
 #[async_trait]
-impl Environment for Git {
+impl EnvInfo for Git {
     async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         self.inner.facts(workspace).await
     }
 
+    async fn path_facts(&self, workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
+        self.inner.path_facts(workspace).await
+    }
+}
+
+#[async_trait]
+impl Files for Git {
     async fn read_file(
         &self,
         workspace: &WorkspaceRef,
@@ -98,7 +109,10 @@ impl Environment for Git {
     ) -> Result<WriteReceipt, EnvError> {
         self.inner.write_file(workspace, context, request).await
     }
+}
 
+#[async_trait]
+impl Commands for Git {
     async fn start_command(
         &self,
         workspace: &WorkspaceRef,
@@ -127,11 +141,10 @@ impl Environment for Git {
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
         self.inner.close_session(session, forget).await
     }
+}
 
-    async fn path_facts(&self, workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
-        self.inner.path_facts(workspace).await
-    }
-
+#[async_trait]
+impl GitPort for Git {
     async fn worktree_create(
         &self,
         _context: OperationContext,
@@ -186,3 +199,10 @@ impl Environment for Git {
         Ok(true)
     }
 }
+
+impl Search for Git {}
+impl Shell for Git {}
+impl Background for Git {}
+impl Checkpoints for Git {}
+impl Pdf for Git {}
+impl Fetch for Git {}

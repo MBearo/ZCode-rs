@@ -385,16 +385,10 @@ pub enum ModelStreamItem {
     Notice(ModelNotice),
 }
 
-/// `/v1/messages/count_tokens` 的请求（`/context`，docs/specs/rust-cli/context-usage.md §3）：只有消息与工具。
-/// 消息为空时适配器发一条 `foo`。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CountTokensRequest {
-    pub selection: ModelSelection,
-    pub messages: Vec<ApiMessage>,
-    pub tools: Vec<ToolDefinition>,
-}
-
 /// 模型调用。错误也作为流的元素返回，调用方只处理一个流。
+///
+/// 删除（工作线 F93，用户决定 2026-10-24，“只加不改”的破例，README §11.1）：`count_tokens` 与 `CountTokensRequest`。
+/// `/context` 只用本地估算（docs/specs/rust-cli/context-usage.md §3、D13）之后没有调用方。
 pub trait ModelPort: Send + Sync {
     fn stream(
         &self,
@@ -421,18 +415,5 @@ pub trait ModelPort: Send + Sync {
         _selection: &ModelSelection,
     ) -> futures_util::future::BoxFuture<'static, Option<crate::provider::ModelCapabilities>> {
         Box::pin(async { None })
-    }
-
-    /// 计数（Anthropic `count_tokens` 的 `input_tokens`）。默认不支持：调用方改用本地估算。
-    fn count_tokens(
-        &self,
-        _request: CountTokensRequest,
-        _cancel: CancellationToken,
-    ) -> futures_util::future::BoxFuture<'static, Result<u64, ModelError>> {
-        Box::pin(async {
-            Err(ModelError::Unsupported {
-                what: "count_tokens".to_owned(),
-            })
-        })
     }
 }

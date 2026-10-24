@@ -27,7 +27,7 @@ use serde_json::json;
 
 use crate::RunScope;
 use crate::compaction::Compaction;
-use crate::deferred::{ToolOrder, tool_references, wire_tools};
+use crate::deferred::{ToolOrder, step_tool_search, tool_references, wire_tools};
 use crate::limits::RequestLimits;
 use crate::normalize::{NormalizeOptions, normalize};
 use crate::recovery::{Fate, Guards, Outcome};
@@ -341,13 +341,17 @@ pub(crate) async fn run(
         let prompt = PromptContext { tool_names, mode };
         // 只发活动历史：最后一个压缩边界之后，保留段接回摘要之后（compact.md §5）。
         let active = history::active(&history);
-        // 延迟工具与 ToolSearch（tools-more.md §3.3）：排序、按需加载、占位工具与 `defer_loading`。
-        // 工作线 F52：按端点的能力，不按卡片（tools-more.md §3.2）。
-        let supported = models::supports_tool_search(
-            &selection.model,
-            capabilities
-                .as_ref()
-                .map(|found| found.supports_tool_search),
+        // 延迟工具与 ToolSearch（tools-more.md §3.3）：排序、按需加载、占位工具与 `defer_loading`。这一步开不开看工具里有没有
+        // ToolSearch 与 `ENABLE_TOOL_SEARCH`（自动时按门槛，工作线 F89，§3.2.1）；开着时的形式按端点的能力（§3.2.2：产品
+        // 路径一律本地，F89；F84 时 z.ai / bigmodel 原生）。
+        let tool_search = step_tool_search(
+            tools,
+            &prompt,
+            (
+                scope.parts.limits.tool_search,
+                &selection.model,
+                capabilities.as_ref(),
+            ),
         );
         // 子代理点名的工具清单按清单的顺序发（agents.md §4.2，F16），其余按名字排序。
         let order = if scope.parts.tools.keeps_order() {
@@ -356,11 +360,11 @@ pub(crate) async fn run(
             ToolOrder::ByName
         };
         let history_iter = active.iter().map(AsRef::as_ref);
-        let wired = wire_tools(tools, history_iter, &prompt, (supported, order));
+        let wired = wire_tools(tools, history_iter, &prompt, (tool_search, order));
         step.declare(&scope, &source);
         let active: Vec<_> = active
             .iter()
-            .map(|message| tool_references(message, wired.active, &prompt.tool_names))
+            .map(|message| tool_references(message, wired.mode, &prompt.tool_names))
             .collect();
         let user_context: Vec<Message> = context
             .user_context

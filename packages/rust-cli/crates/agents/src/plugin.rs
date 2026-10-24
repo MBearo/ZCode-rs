@@ -7,7 +7,8 @@
 use std::collections::BTreeMap;
 
 use rust_cli_base::names::vars;
-use rust_cli_kernel_api::env::{EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::machine::Files;
 
 use crate::definitions::{AgentDefinition, AgentSource};
 use crate::frontmatter::{self, Value};
@@ -101,7 +102,7 @@ pub(crate) fn parse(raw: &str, file: &PluginAgentFile, project_dir: &str) -> Age
 
 /// 读出并解析插件 agent 文件；读不了的文件跳过。
 pub(crate) async fn load(
-    env: &dyn Environment,
+    port: &dyn Files,
     workspace: &WorkspaceRef,
     files: &[PluginAgentFile],
 ) -> Vec<AgentDefinition> {
@@ -110,7 +111,7 @@ pub(crate) async fn load(
         let request = ReadFile {
             path: EnvPath::new(file.path.as_str()),
         };
-        match env.read_file(workspace, request).await {
+        match port.read_file(workspace, request).await {
             Ok(content) => {
                 let raw = String::from_utf8_lossy(&content.bytes);
                 found.push(parse(&raw, file, workspace.root.as_str()));

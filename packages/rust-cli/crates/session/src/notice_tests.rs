@@ -4,7 +4,8 @@
 use rust_cli_kernel_api::ids::{MessageId, ShellTaskId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::testing::{
-    DirectExecutor, ListTools, NoticeEnvironment, shell_notice, tool_use_response,
+    DirectExecutor, ListTools, NoticeEnvironment, local_services, machine, shell_notice,
+    tool_use_response,
 };
 use rust_cli_kernel_api::tool::Tool;
 use rust_cli_query::task_notification;
@@ -18,6 +19,26 @@ pub(super) async fn session(
     tools: Vec<Arc<dyn Tool>>,
     messages: Vec<Message>,
 ) -> Session {
+    session_on(
+        scope,
+        env,
+        model,
+        tools,
+        messages,
+        Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
+    )
+    .await
+}
+
+/// 同 [`session`]，执行环境可以是任何替身（monitors_tests 用自己的）。
+pub(crate) async fn session_on<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
+    scope: &TaskScope,
+    env: Arc<E>,
+    model: Arc<dyn ModelPort>,
+    tools: Vec<Arc<dyn Tool>>,
+    messages: Vec<Message>,
+    clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
+) -> Session {
     let store = Arc::new(MemoryStore::default());
     store.create(meta()).await.unwrap();
     let ids = Arc::new(SequentialIds::default());
@@ -30,7 +51,8 @@ pub(super) async fn session(
         hooks: Arc::new(NoHooks),
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        env: env.clone(),
+        machine: machine(env.clone()),
+        local: local_services(env.clone()),
         artifacts: store.clone(),
         generation: Generation::new("g1"),
         non_interactive: false,
@@ -44,13 +66,14 @@ pub(super) async fn session(
             ids,
             runner,
             compactor: Arc::new(NeverCompact),
-            env,
+            machine: machine(env.clone()),
+            local: local_services(env),
             max_turns: None,
             hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
             inputs: Arc::new(rust_cli_kernel_api::user_input::NoUserInputs),
             artifacts: Arc::new(rust_cli_kernel_api::testing::MemoryArtifacts::default()),
-            clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
+            clock,
             generation: rust_cli_kernel_api::ids::Generation::new("g1"),
             spawner: scope.spawner(),
             closing: scope.spawner(),
@@ -59,6 +82,7 @@ pub(super) async fn session(
             released: Arc::new(crate::NothingToRelease),
             directory_rules: Arc::new(rust_cli_kernel_api::orchestration::NoDirectoryRules),
             peers: crate::PeerDeps::off(),
+            detached: None,
         },
         SessionState {
             meta: meta(),
@@ -68,6 +92,7 @@ pub(super) async fn session(
             checkpoints: Vec::new(),
             start: rust_cli_kernel_api::session_api::StartSource::Startup,
             turn: None,
+            last_turn_failed: false,
         },
         Opened::Loaded,
     )

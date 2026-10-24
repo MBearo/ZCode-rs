@@ -10,8 +10,7 @@
       "default_effort": "medium",
       "system_turns": true,
       "per_turn_effort": true,
-      "silent_turn_reminder": true,
-      "tool_search": true
+      "silent_turn_reminder": true
     }
   ]
 }

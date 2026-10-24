@@ -39,7 +39,7 @@ use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent, SessionHandle,
 };
 use rust_cli_kernel_api::store::SessionStore;
-use rust_cli_kernel_api::testing::{ScriptedModel, selection, text_response};
+use rust_cli_kernel_api::testing::{ScriptedModel, environments, selection, text_response};
 use rust_cli_node_store::NodeStore;
 use rust_cli_node_store::{NodeIds, SystemClock};
 use rust_cli_paths::{StoragePaths, StorageSettings};
@@ -207,7 +207,9 @@ fn harness(workspace_parent: Option<&Path>, a_stall_at: Option<usize>) -> Harnes
     };
     let ports = Ports {
         model: model.clone(),
-        env: Arc::new(LocalEnvironment::new(Some(home)).with_shell(shell)),
+        environments: environments(Arc::new(
+            LocalEnvironment::new(Some(home)).with_shell(shell),
+        )),
         store: store.clone(),
         artifacts: store.clone(),
         clock,

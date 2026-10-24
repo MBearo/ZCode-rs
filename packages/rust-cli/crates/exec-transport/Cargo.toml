@@ -1,0 +1,28 @@
+[package]
+name = "rust-cli-exec-transport"
+description = "Transports of the remote executor: links that move opaque frames (stdio, in-memory, fault injection)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+async-trait.workspace = true
+bytes.workspace = true
+# stderr 的转发任务经 base 的 owned 启动（README §3.1）。
+rust-cli-base.workspace = true
+# stdio 传输的子进程经 proc 起（README §4）。
+rust-cli-proc.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

@@ -5,17 +5,16 @@
 //!
 //! 卡片与生效配置的分工（修复线 F23，用户决定 A5，docs/specs/rust-cli/model.md §11）：能力（对话中间的 system、
 //! 上下文窗口、媒体、WebSearch）只取 Node 的生效模型配置；卡片只留配置里没有的内容（身份段、请求
-//! 默认值、silent turn 提醒、ToolSearch、任务工具）。`system_turns` 与 `context_window` 只在模型端口答不出能力时
-//! 作回退（[`mid_conversation_system`]）。
+//! 默认值、silent turn 提醒、任务工具）。`system_turns` 与 `context_window` 只在模型端口答不出能力时
+//! 作回退（[`mid_conversation_system`]、[`context_window`]）。
 
 use std::sync::OnceLock;
 
 use rust_cli_base::include_lf;
 use serde::Deserialize;
 
-/// 没有卡片的模型的缺省输出上限（32000）。主循环、WebSearch、
-/// prompt hook、`/rename` 都用它（修复线 F58：以前四处各写一份；prompt hook 的注释写成“与旁路请求相同”，旁路是 8192，
-/// 实际值一直是这个）。
+/// 没有卡片的模型的缺省输出上限（32000）。主循环、prompt hook、`/rename` 都用它（修复线 F58：以前四处各写一份；
+/// prompt hook 的注释写成“与旁路请求相同”，旁路是 8192，实际值一直是这个）。WebSearch 在工作线 F90 起照 Node 用 4096。
 pub const UNKNOWN_MAX_OUTPUT_TOKENS: u32 = 32_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -37,10 +36,6 @@ pub struct ModelCard {
     /// 连续几轮没有可见输出时提醒向用户说明进展（按模型开启的 `silent_turn_reminder`）。
     #[serde(default)]
     pub silent_turn_reminder: bool,
-    /// 模型支持延迟加载工具（`defer_loading` 与 `tool_reference`，beta `advanced-tool-use`）：
-    /// 决定是否启用 ToolSearch（docs/specs/rust-cli/tools-more.md §3.2）。
-    #[serde(default)]
-    pub tool_search: bool,
 }
 
 #[derive(Deserialize)]
@@ -81,15 +76,82 @@ pub fn mid_conversation_system(model: &str, configured: Option<bool>) -> bool {
     configured.unwrap_or_else(|| card(model).is_some_and(|card| card.system_turns))
 }
 
-/// 这一步的端点支持延迟加载工具，ToolSearch 因此启用（docs/specs/rust-cli/tools-more.md §3.2）。主循环与子代理发请求、
-/// 延迟工具清单与 `/context` 的工具统计共用这一个判定（审查 R1-16：原来 tools、query、runtime 各写一份）。
-/// `configured` 是端点的能力 `supports_tool_search`（模型端口答得出时，唯一来源）；答不出时（测试替身、没有配置）按
-/// 卡片的 `tool_search` 回退，同 [`mid_conversation_system`]。
+/// 没有卡片、配置也没给窗口时的上下文窗口（压缩的窗口与 ToolSearch 的自动门槛共用，docs/specs/rust-cli/compact.md §2）。
+pub const DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
+
+/// 模型的上下文窗口：`configured` 是生效配置的 `contextWindow`（大于 0 时用它）；否则卡片，再没有时
+/// [`DEFAULT_CONTEXT_WINDOW`]（同 [`mid_conversation_system`] 的回退）。
+pub fn context_window(model: &str, configured: Option<u64>) -> u64 {
+    configured
+        .filter(|window| *window > 0)
+        .unwrap_or_else(|| card(model).map_or(DEFAULT_CONTEXT_WINDOW, |card| card.context_window))
+}
+
+/// ToolSearch 的形式（docs/specs/rust-cli/tools-more.md §3.2）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolSearchMode {
+    /// 不开：全部工具内联。
+    Off,
+    /// 本地：端点不支持 `tool_reference`。搜索照样在本机做；发出的请求里已加载的工具是普通定义，ToolSearch 的结果
+    /// 换成文字，没有 `defer_loading`、占位工具与 `advanced-tool-use`。
+    Local,
+    /// 原生：端点支持延迟加载（`defer_loading`、`tool_reference`、占位工具与 `advanced-tool-use`）。
+    Native,
+}
+
+impl ToolSearchMode {
+    /// 这一步开着（原生或本地）。
+    pub fn is_on(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+/// ToolSearch 开着时的形式（docs/specs/rust-cli/tools-more.md §3.2.2）：`configured` 是端点的能力 `supports_tool_search`，
+/// 为真时原生，否则本地；开不开由 [`ToolSearchSetting`] 与这一步的工具决定。主循环与子代理发请求、`/context` 的消息计数
+/// 共用这一个判定。
 ///
-/// 修 bug（工作线 F52，用户决定：只给 z.ai / bigmodel 域名下的模型开）：以前只看卡片，第三方网关上的 claude-opus-5-5
-/// 也开，请求带 `advanced-tool-use` beta，网关后面的 Bedrock 拒绝。
-pub fn supports_tool_search(model: &str, configured: Option<bool>) -> bool {
-    configured.unwrap_or_else(|| card(model).is_some_and(|card| card.tool_search))
+/// 修改（工作线 F89，用户决定：所有模型、所有端点都用本地，暂时不用原生）：端点的能力在产品路径上总为假（平台层不再按
+/// 端点算），只有 debug 构建读的测试声明把它设为真；不再看模型。以前禁用表里的模型（`claude-3-5-haiku`、
+/// `claude-3-haiku`）不开，端点答不出能力时按卡片回退成原生；F84 时 z.ai / bigmodel 的端点原生、其余本地。
+pub fn tool_search_mode(configured: Option<bool>) -> ToolSearchMode {
+    if configured == Some(true) {
+        ToolSearchMode::Native
+    } else {
+        ToolSearchMode::Local
+    }
+}
+
+/// `ENABLE_TOOL_SEARCH` 的取值（docs/specs/rust-cli/tools-more.md §3.2.1，工作线 F89）：入口读一次，经 runtime 交给内核。
+/// 只决定开不开，开时的形式见 [`tool_search_mode`]。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ToolSearchSetting {
+    /// 开（没设时的缺省）。
+    #[default]
+    On,
+    /// 关：ToolSearch 工具不启用，全部工具内联。
+    Off,
+    /// 自动（`auto` / `auto:N`）：这一步延迟工具的大小达到上下文窗口的 `percent`%（1–99）时开。
+    Auto { percent: u8 },
+}
+
+impl ToolSearchSetting {
+    /// 乐观判断：关以外都算开（ToolSearch 工具启用、stream-json 的 MCP prewait）。
+    pub fn allows(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+
+    /// 这一步开不开：自动时延迟工具的字符数（名字、描述与 schema 的 UTF-16 长度之和，只在自动时算）达到
+    /// `floor(floor(窗口 × N / 100) × 2.5)`；`window` 是模型的上下文窗口（[`context_window`]）。
+    pub fn reached(self, window: u64, deferred_chars: impl FnOnce() -> u64) -> bool {
+        match self {
+            Self::On => true,
+            Self::Off => false,
+            Self::Auto { percent } => {
+                let tokens = window.saturating_mul(u64::from(percent)) / 100;
+                deferred_chars() >= tokens.saturating_mul(5) / 2
+            }
+        }
+    }
 }
 
 /// 按 4 字符 / token 估算的旧模型。

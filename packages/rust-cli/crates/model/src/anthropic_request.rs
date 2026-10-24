@@ -13,13 +13,13 @@
 
 use rust_cli_base::js::json::{self, stringify};
 use rust_cli_kernel_api::model::{
-    ApiMessage, CacheControl, ContextEdit, ModelError, ModelRequest, ServerTool, SystemBlock,
-    ThinkingConfig, ToolChoice, ToolDefinition, ToolFlags,
+    CacheControl, ContextEdit, ModelError, ModelRequest, ServerTool, SystemBlock, ThinkingConfig,
+    ToolChoice, ToolDefinition, ToolFlags,
 };
 use serde_json::{Map, Number, Value};
 
 use crate::anthropic_betas::{self, MessageFlags, writes_diagnostics};
-use crate::profiles::{Profile, WebSearchTool};
+use crate::profiles::Profile;
 use crate::{anthropic_write, patch};
 
 /// 编码好的请求体与它要发的 `anthropic-beta`（model.md §3、§3.1）：`betas` 按请求用到的特性（一方），`node_betas` 照
@@ -31,7 +31,7 @@ pub(crate) struct Encoded {
 }
 
 /// 编码成请求体文本，见 [`encode`]。`first_party` 为真时按 Anthropic 官方方案，否则按“其他 Anthropic 兼容”
-/// （这一层只差 `diagnostics` 与服务端工具的版本；system 形状与卡片字段在 `anthropic_shape` 里改）。
+/// （这一层只差 `diagnostics`；system 形状与卡片字段在 `anthropic_shape` 里改）。
 #[cfg(test)]
 pub(crate) fn body(
     request: ModelRequest,
@@ -43,7 +43,7 @@ pub(crate) fn body(
 
 /// 编码成请求体与 beta 列表。消费请求：顶层的小字段移入对象，消息直接写成文本，不复制历史。
 ///
-/// `profile`：请求方案（决定是否写 `diagnostics` 与服务端工具的版本，model.md §3.2）；`patches`：Provider 的
+/// `profile`：请求方案（决定是否写 `diagnostics`，model.md §3.2）；`patches`：Provider 的
 /// option map 补丁；`explicit`：调用方显式要的 beta。
 pub(crate) fn encode(
     request: ModelRequest,
@@ -86,12 +86,7 @@ pub(crate) fn encode(
             tool(item, flags)
         })
         .collect();
-    tools.extend(
-        options
-            .server_tools
-            .into_iter()
-            .map(|tool| server_tool(tool, profile.web_search)),
-    );
+    tools.extend(options.server_tools.into_iter().map(server_tool));
     body.insert("tools".into(), Value::Array(tools));
     if let Some(choice) = tool_choice {
         body.insert("tool_choice".into(), self::tool_choice(choice));
@@ -180,11 +175,6 @@ fn write_body(body: &Value, messages: &str) -> String {
     out
 }
 
-/// count_tokens 的消息（同一个写法，解析成值）。
-pub(crate) fn message(message: ApiMessage) -> Result<Value, ModelError> {
-    anthropic_write::message_value(&message)
-}
-
 fn context_edit(edit: ContextEdit) -> Value {
     Value::Object(match edit {
         ContextEdit::ClearThinking { keep } => object([
@@ -208,34 +198,26 @@ fn text(value: &str) -> Value {
 /// Node 的 WebSearch 工具类型（`@ai-sdk/anthropic` 3.0.81）；beta 的判定按它认（F55：以前写了两次）。
 pub(crate) const NODE_WEB_SEARCH: &str = "web_search_20260209";
 
-/// 服务端工具的定义；没有的域名列表不写。版本按方案（model.md §3.2，修复线 F23）：`web_search_20250305`
-/// （域名在 `max_uses` 之前），或 Node 的 `web_search_20260209`（`@ai-sdk/anthropic` 3.0.81：`max_uses` 在域名
-/// 之前）。OpenAI 两种协议不走这里。
-fn server_tool(tool: ServerTool, version: WebSearchTool) -> Value {
+/// 服务端工具的定义；没有的域名列表不写。修改（工作线 F93，用户决定 2026-10-24，model.md §3.2）：一律是 Node 的
+/// `web_search_20260209`（`@ai-sdk/anthropic` 3.0.81：`max_uses` 在域名之前），F23 到 F93 之间官方地址用
+/// `web_search_20250305`（域名在 `max_uses` 之前）。OpenAI 两种协议不走这里。
+fn server_tool(tool: ServerTool) -> Value {
     match tool {
         ServerTool::WebSearch {
             allowed_domains,
             blocked_domains,
             max_uses,
         } => {
-            let node = version == WebSearchTool::V20260209;
-            let kind = if node {
-                NODE_WEB_SEARCH
-            } else {
-                "web_search_20250305"
-            };
-            let mut out = object([("type", text(kind)), ("name", text("web_search"))]);
-            if node {
-                out.insert("max_uses".into(), Value::from(max_uses));
-            }
+            let mut out = object([
+                ("type", text(NODE_WEB_SEARCH)),
+                ("name", text("web_search")),
+                ("max_uses", Value::from(max_uses)),
+            ]);
             if let Some(domains) = allowed_domains {
                 out.insert("allowed_domains".into(), domains.into());
             }
             if let Some(domains) = blocked_domains {
                 out.insert("blocked_domains".into(), domains.into());
-            }
-            if !node {
-                out.insert("max_uses".into(), Value::from(max_uses));
             }
             Value::Object(out)
         }

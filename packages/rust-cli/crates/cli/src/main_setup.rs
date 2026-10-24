@@ -2,6 +2,9 @@
 
 use super::*;
 use rust_cli_kernel_api::clock::Clock as _;
+use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, LocalRegistry};
+use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::machine::{Files, MachineEnv};
 
 /// 进程环境（`zcode update` 与启动快照共用，F48）。
 #[expect(
@@ -32,6 +35,20 @@ pub(super) fn windows_profile() -> Option<PathBuf> {
 #[cfg(not(windows))]
 pub(super) fn windows_profile() -> Option<PathBuf> {
     None
+}
+
+/// 存储位置：环境变量给的路径展开 `~`，相对路径相对 cwd（Node `resolveUserPath`）。`storage` 是配置层与
+/// 环境变量合并后的 `storage.*`（会话库与存储根，修复线 F2）；读配置之前（运行日志、平台层）用缺省。
+pub(super) fn storage_paths(startup: &Startup, storage: &StorageSettings<'_>) -> StoragePaths {
+    let resolve = |value: &str| startup.cwd.join(expand_home(value, &startup.home));
+    let mut paths = StoragePaths::resolve(storage, &startup.home, &startup.cwd);
+    if let Some(base) = &startup.data_base_dir {
+        paths = paths.with_data_base_dir(&resolve(base));
+    }
+    if let Some(file) = &startup.builtin_provider_config {
+        paths = paths.with_builtin_provider_config(&resolve(file));
+    }
+    paths
 }
 
 /// 平台层：Provider registry、账号（每请求鉴权、登录）与设置。
@@ -107,6 +124,18 @@ pub(super) async fn account(command: login::Command) -> Result<u8> {
     Ok(login::run(command, &platform).await)
 }
 
+/// 执行环境的注册表（remote-exec.md §15.8.1）：R0 只有本机——`LocalEnvironment` 实现一台机器的 8 个端口与本机的 Git、
+/// 取网页，MCP 传输是同一台机器的 `McpTransport` 端口。R3 加远端机器后，入口与内核读本机文件仍取这里的本机。
+pub(super) fn environments(
+    env: Arc<LocalEnvironment>,
+    mcp: Arc<LocalMcpTransport>,
+) -> Arc<dyn EnvironmentRegistry> {
+    Arc::new(LocalRegistry::new(
+        MachineEnv::new(env.clone(), mcp),
+        LocalServices::new(env),
+    ))
+}
+
 /// `zcode hooks trust …`：工作区文件经本机执行环境读，信任记录经 platform（config.md §4.3）。
 pub(super) async fn trust(command: hooks_trust::TrustCommand) -> Result<u8> {
     let startup = capture()?;
@@ -116,7 +145,7 @@ pub(super) async fn trust(command: hooks_trust::TrustCommand) -> Result<u8> {
     let now_ms = SystemClock::new(startup.zone.clone()).now_ms();
     let cwd = startup.cwd.to_string_lossy().into_owned();
     let context = hooks_trust::TrustContext {
-        env: &env,
+        files: &env,
         paths: &paths,
         cwd: &cwd,
         version: VERSION,
@@ -132,7 +161,7 @@ pub(super) async fn trust(command: hooks_trust::TrustCommand) -> Result<u8> {
 /// `--mcp-config`；`--plugin-dir` 相对 cwd，其余插件候选来自配置快照（ext.md §4.1）。`startup` 是（环境
 /// 快照、cwd、home）。
 pub(super) async fn extensions(
-    ports: &Ports,
+    files: &dyn Files,
     workspace: &WorkspaceRef,
     startup: (&[(String, String)], &std::path::Path, &std::path::Path),
     (flags, allowed): (&mcp::McpFlags, &[String]),
@@ -142,7 +171,7 @@ pub(super) async fn extensions(
     let mut extensions = Extensions::none();
     let (env, cwd, home) = startup;
     let settings = mcp::settings(
-        ports.env.as_ref(),
+        files,
         workspace,
         (flags, allowed),
         env,
@@ -206,7 +235,7 @@ pub(super) async fn resolve_flags(
     let cwd = startup.cwd.to_string_lossy();
     let home = startup.home.to_string_lossy();
     let place = flags::Place {
-        env: &probe,
+        files: &probe,
         workspace,
         cwd: &cwd,
         home: Some(&home),

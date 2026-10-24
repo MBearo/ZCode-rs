@@ -65,14 +65,23 @@ impl Shared {
     }
 }
 
-/// 三个 cron 工具（按工具池的顺序）。
-pub fn cron_tools(board: &CronBoard) -> Vec<std::sync::Arc<dyn Tool>> {
+/// 三个 cron 工具（按工具池的顺序）。`monitor`：Monitor 开着时 CronCreate 的描述在 `## Runtime behavior` 之前多
+/// “Not for live watching” 一节（工作线 F83，tools-more.md §19.9）。
+pub fn cron_tools(board: &CronBoard, monitor: bool) -> Vec<std::sync::Arc<dyn Tool>> {
+    let mut create = Shared::new(CREATE, board, "schedule a recurring or one-shot prompt");
+    if monitor {
+        const ANCHOR: &str = "## Runtime behavior";
+        create.definition.description = create.definition.description.replacen(
+            ANCHOR,
+            &format!(
+                "{}\n\n{ANCHOR}",
+                rust_cli_prompts::monitor::cron_create_section()
+            ),
+            1,
+        );
+    }
     vec![
-        std::sync::Arc::new(CronCreateTool(Shared::new(
-            CREATE,
-            board,
-            "schedule a recurring or one-shot prompt",
-        ))),
+        std::sync::Arc::new(CronCreateTool(create)),
         std::sync::Arc::new(CronDeleteTool(Shared::new(
             DELETE,
             board,

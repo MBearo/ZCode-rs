@@ -23,7 +23,7 @@ const ALL_AGENT_DISALLOWED: &[&str] = &[
     "AskUserQuestion",
 ];
 
-/// 后台子代理只能用的工具（含 SendMessage、TaskStop）。
+/// 后台子代理只能用的工具（含 SendMessage、TaskStop、Monitor）。
 const ASYNC_ALLOWED: &[&str] = &[
     "Read",
     "WebSearch",
@@ -43,6 +43,8 @@ const ASYNC_ALLOWED: &[&str] = &[
     "ExitWorktree",
     "SendMessage",
     "TaskStop",
+    // 工作线 F83：后台子代理的白名单里有 Monitor（tools-more.md §19.1）。
+    "Monitor",
 ];
 
 /// 能派生子代理的最大深度（固定值，没有环境变量能改）。

@@ -13,7 +13,7 @@ fn levels(names: &[&str]) -> Vec<String> {
     names.iter().map(|name| (*name).to_owned()).collect()
 }
 
-/// 五个档位去掉首尾空白、不分大小写；`med` 与 `ultracode` 是别名。
+/// 五个档位去掉首尾空白、不分大小写；`med` 是别名。
 #[test]
 fn levels_are_trimmed_and_case_insensitive() {
     for level in LEVELS {
@@ -22,7 +22,16 @@ fn levels_are_trimmed_and_case_insensitive() {
     assert_eq!(parse(" MAX "), Ok("max"));
     assert_eq!(parse("High"), Ok("high"));
     assert_eq!(parse("med"), Ok("medium"));
-    assert_eq!(parse("ultracode"), Ok("xhigh"));
+}
+
+/// `ultracode` 不是档位（工作线 F78，用户决定；以前当 `xhigh`）：与其他不认识的值同一句警告。
+#[test]
+fn ultracode_is_an_unknown_value() {
+    assert_eq!(
+        parse("ultracode"),
+        Err("Warning: Unknown --effort value 'ultracode' \u{2014} ignoring it and using the default effort. Valid values: low, medium, high, xhigh, max.".to_owned())
+    );
+    assert!(parse(" UltraCode ").is_err());
 }
 
 /// 不认识的值（含数字与空值）：警告的原文带原样的值，不报错。

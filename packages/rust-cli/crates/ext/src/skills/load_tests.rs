@@ -115,7 +115,8 @@ async fn sources_are_ordered_and_the_first_name_wins() {
     // 单个 .md 文件不是 skill；没有 SKILL.md 的目录也不是。
     env = env.with_file(&format!("{CWD}/.zcode/skills/loose.md"), "x");
     env = env.with_file(&format!("{CWD}/.zcode/skills/empty/README.md"), "x");
-    let catalog = SkillCatalog::new(Arc::new(env));
+    let env = Arc::new(env);
+    let catalog = SkillCatalog::new(env.clone(), env);
     let skills = catalog.skills(&workspace()).await;
     assert_eq!(
         names(&skills),
@@ -145,7 +146,8 @@ async fn project_levels_stop_at_the_git_root() {
             &format!("{CWD}/.zcode/skills/root/SKILL.md"),
             "---\ndescription: root\n---\n",
         );
-    let catalog = SkillCatalog::new(Arc::new(env));
+    let env = Arc::new(env);
+    let catalog = SkillCatalog::new(env.clone(), env);
     let skills = catalog.skills(&workspace()).await;
     assert_eq!(names(&skills), ["near=near", "root=root"]);
 }
@@ -167,7 +169,8 @@ async fn a_dot_git_that_is_neither_file_nor_directory_does_not_stop_the_levels()
             &format!("{CWD}/.zcode/skills/root/SKILL.md"),
             "---\ndescription: root\n---\n",
         );
-    let catalog = SkillCatalog::new(Arc::new(env));
+    let env = Arc::new(env);
+    let catalog = SkillCatalog::new(env.clone(), env);
     let skills = catalog.skills(&workspace()).await;
     assert_eq!(names(&skills), ["near=near", "root=root"]);
 }
@@ -195,7 +198,8 @@ async fn each_level_reads_zcode_before_agents_and_nearer_levels_first() {
     ] {
         env = env.with_file(&path, &text);
     }
-    let catalog = SkillCatalog::new(Arc::new(env));
+    let env = Arc::new(env);
+    let catalog = SkillCatalog::new(env.clone(), env);
     let skills = catalog.skills(&workspace()).await;
     assert_eq!(
         names(&skills),
@@ -214,7 +218,7 @@ async fn plugin_skills_are_prefixed_and_parsed_once_per_version() {
         "/plugins/kit/skills/deploy/SKILL.md",
         "---\ndescription: Deploy\n---\nGo\n",
     ));
-    let catalog = SkillCatalog::new(env.clone());
+    let catalog = SkillCatalog::new(env.clone(), env.clone());
     catalog.set_plugin_roots(vec![PluginSkillRoot {
         plugin: "kit".to_owned(),
         dir: "/plugins/kit/skills".to_owned(),

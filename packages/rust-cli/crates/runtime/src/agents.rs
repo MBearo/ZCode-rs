@@ -25,6 +25,17 @@ impl SubagentQueries for LoopFactory {
     }
 }
 
+/// 子代理里 Monitor 的终态：状态与信封（带剩下的行，agents.md §5.3，工作线 F83）。
+pub(crate) fn monitor_end(
+    notice: &rust_cli_kernel_api::env_shell::ShellNotice,
+    events: Option<&str>,
+) -> (&'static str, String) {
+    (
+        rust_cli_query::task_status(notice),
+        rust_cli_query::monitor_envelope(notice, events),
+    )
+}
+
 /// 后台命令通知的状态与信封，交给 agents（它不依赖 query，agents.md §5.2）。
 pub(crate) fn shell_notice(
     notice: &rust_cli_kernel_api::env_shell::ShellNotice,

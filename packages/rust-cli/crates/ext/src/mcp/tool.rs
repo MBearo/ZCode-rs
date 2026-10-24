@@ -68,9 +68,13 @@ pub(crate) struct McpTool {
     manager: Weak<Inner>,
 }
 
+/// 工具自己的不延迟标记：`_meta` 里这两个键任一为 `true`（ext.md §3.1、D35）。第一个是本工程的键；第二个是旧键，
+/// Node 与已有的 MCP 服务器用它，照样认（工作线 F77）。
+const ALWAYS_LOAD_KEYS: [&str; 2] = ["zcode/alwaysLoad", "anthropic/alwaysLoad"];
+
 impl McpTool {
     /// `tools/list` 的一项；没有名字的项为 None。不延迟：服务器配置的 `alwaysLoad`（`server_always_load`）
-    /// 或工具的 `_meta["zcode/alwaysLoad"] === true`（ext.md §3.1、D35）。
+    /// 或工具的 `_meta` 标记（[`ALWAYS_LOAD_KEYS`]）。
     pub(crate) fn from_listed(
         server: &str,
         listed: &Value,
@@ -78,11 +82,13 @@ impl McpTool {
         manager: Weak<Inner>,
     ) -> Option<Self> {
         let original = listed.get("name").and_then(Value::as_str)?.to_owned();
+        let meta = listed.get("_meta");
         let always_load = server_always_load
-            || listed
-                .pointer("/_meta/zcode~1alwaysLoad")
-                .and_then(Value::as_bool)
-                == Some(true);
+            || ALWAYS_LOAD_KEYS.iter().any(|key| {
+                meta.and_then(|meta| meta.get(*key))
+                    .and_then(Value::as_bool)
+                    == Some(true)
+            });
         Some(Self {
             name: tool_name(server, &original),
             description: listed
@@ -147,7 +153,7 @@ impl Tool for McpTool {
         true
     }
 
-    /// 与 `mcp_info().always_load` 同源（服务器的 `alwaysLoad` 或工具的 `_meta["zcode/alwaysLoad"]`）。
+    /// 与 `mcp_info().always_load` 同源（服务器的 `alwaysLoad` 或工具的 `_meta` 标记，[`ALWAYS_LOAD_KEYS`]）。
     fn always_load(&self) -> bool {
         self.info.always_load
     }
@@ -185,9 +191,12 @@ impl Tool for McpTool {
         let timeout = Duration::from_millis(timeout_ms);
         let mut retried = false;
         let value = loop {
-            let client = manager
-                .client(server)
-                .ok_or_else(|| failed(format!("MCP server \"{server}\" is not connected")))?;
+            // `-p` 里断开、等下次调用的服务器在这里再连（ext.md §3.3.3）。
+            let client = match manager.client(server) {
+                Some(client) => Some(client),
+                None => manager.reconnect_dormant(server).await,
+            }
+            .ok_or_else(|| failed(format!("MCP server \"{server}\" is not connected")))?;
             match client
                 .request("tools/call", params.clone(), timeout, &context.cancel)
                 .await
@@ -230,3 +239,7 @@ impl Tool for McpTool {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "tool_tests.rs"]
+mod tests;

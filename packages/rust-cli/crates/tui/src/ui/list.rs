@@ -9,6 +9,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
+use rust_cli_kernel_api::permission::PermissionMode;
+
 use super::i18n::Lang;
 use super::key_hint;
 use super::keyboard::Typing;
@@ -35,7 +37,8 @@ pub struct Item {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Purpose {
     Model,
-    /// `/mode` 不带参数的选择器（修复线 F26）：值是 Node 的模式名，选中后同 `/mode <名>`。
+    /// `/mode` 不带参数的选择器（修复线 F26）：值是 Node 的模式名，选中后同 `/mode <名>`。工作线 F76：照 App 的菜单
+    /// 每个模式两行（名称、说明），名称用模式的颜色。
     Permissions,
     /// `/effort` 不带参数的选择器（修复线 F26）：值是档位或 `auto`，选中后同 `/effort <档>`。
     Effort,
@@ -47,10 +50,8 @@ pub enum Purpose {
     Info,
     /// `/memory` 的文件（tui-input.md §4.2）；值是文件在列表里的下标。
     Memory,
-    /// `/fork` 的 checkpoint 列表：每条两行（回合输入、短 ID 与时间）。
+    /// `/fork` 的用户输入列表（session-lifecycle.md §6.5.3）：每条一行；值是消息 ID。
     Fork,
-    /// `/fork` 选中后文件的处理；值是 `restore|keep SEP checkpoint`。
-    ForkConfirm,
     /// `/theme`：深色 / 浅色。
     Theme,
 }
@@ -251,7 +252,10 @@ impl ListView {
             };
             lines.push(Line::from(Span::styled(format!("  {empty}"), dim)));
         }
-        let two_lines = matches!(self.purpose, Purpose::Rewind | Purpose::Fork);
+        // 每条两行：rewind（消息、改动）与 `/mode`（名称、说明，工作线 F76）；`/mode` 的 ✔ 在名称那一行。
+        let modes = self.purpose == Purpose::Permissions;
+        let two_lines = self.purpose == Purpose::Rewind || modes;
+        let ticked = |item: &Item| item.current && (!two_lines || modes);
         let per_item = if two_lines { 2 } else { 1 };
         let focused = visible.get(self.selected).copied();
         let effort = focused.filter(|item| !item.levels.is_empty());
@@ -262,7 +266,7 @@ impl ListView {
         let end = (start + room).min(visible.len());
         let label_width = visible
             .iter()
-            .map(|item| item.label.width() + if item.current && !two_lines { 2 } else { 0 })
+            .map(|item| item.label.width() + if ticked(item) { 2 } else { 0 })
             .max()
             .unwrap_or(0)
             .min(40);
@@ -283,9 +287,16 @@ impl ListView {
             if self.filter.is_none() {
                 spans.push(Span::styled(format!("{}. ", index + 1), secondary));
             }
-            spans.push(Span::raw(item.label.clone()));
+            let label = if modes {
+                let mode =
+                    PermissionMode::from_node_name(&item.value).unwrap_or(PermissionMode::Default);
+                super::footer::mode_style(mode, palette)
+            } else {
+                Style::default()
+            };
+            spans.push(Span::styled(item.label.clone(), label));
             let mut used = item.label.width();
-            if item.current && !two_lines {
+            if ticked(item) {
                 spans.push(Span::styled(" ✔", green));
                 used += 2;
             }
@@ -302,7 +313,7 @@ impl ListView {
             ));
             if two_lines {
                 let mut meta = item.description.clone();
-                if item.current {
+                if item.current && !modes {
                     meta.push_str(match lang {
                         Lang::En => " · current",
                         Lang::Zh => " · 当前",

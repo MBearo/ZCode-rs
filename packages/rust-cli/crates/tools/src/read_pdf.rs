@@ -158,7 +158,10 @@ async fn whole(
         let request = PdfPageCount {
             path: EnvPath::new(path),
         };
-        let asked = context.env.pdf_page_count(&context.workspace, request);
+        let asked = context
+            .machine
+            .pdf()
+            .pdf_page_count(&context.workspace, request);
         // 取不到页数（没装 pdfinfo、执行环境没有这项操作）时往下走。
         let count = cancellable(context, asked).await?.ok().flatten();
         if let Some(count) = count.filter(|count| *count > WHOLE_PAGES) {
@@ -183,7 +186,8 @@ async fn whole(
         path: EnvPath::new(path),
     };
     let file = context
-        .env
+        .machine
+        .files()
         .read_file(&context.workspace, request)
         .await
         .map_err(env_failure)?;
@@ -241,7 +245,10 @@ async fn extract(
         first_page: range.first,
         last_page: range.last,
     };
-    let asked = context.env.render_pdf_pages(&context.workspace, request);
+    let asked = context
+        .machine
+        .pdf()
+        .render_pdf_pages(&context.workspace, request);
     let rendered = match cancellable(context, asked).await? {
         Ok(rendered) => rendered,
         // 执行环境没有这项操作时与没装 pdftoppm 同一句（三平台、本地与远端都一样）。

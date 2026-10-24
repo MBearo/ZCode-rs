@@ -125,13 +125,17 @@ impl Assembler {
     }
 
     /// 流没有正常收尾（没有 `message_stop`，或还有没结束的块）时的错误。
+    ///
+    /// 修 bug（工作线 F90，query.md §1.9）：以前空槽（这个序号的块从没开始，例如模型适配器跳过的块，或序号乱序时还没
+    /// 到的块）也算没结束，GLM 的回复里只要有被跳过的块就报 `stream ended with an unfinished block`。只有开始了、没收到
+    /// 结束的块才算。
     pub(crate) fn incomplete(&self) -> Option<ModelError> {
         if !self.stopped {
             return Some(protocol("stream ended before message_stop"));
         }
         self.blocks
             .iter()
-            .any(|block| !matches!(block, Some(Partial::Done(_))))
+            .any(is_open)
             .then(|| protocol("stream ended with an unfinished block"))
     }
 
@@ -140,12 +144,17 @@ impl Assembler {
     ///
     /// 缺陷修复（R5-1）：原来正常结束走另一个返回 `Result` 的 `finish`，出错时调用方用 `?` 提前返回，已经开工的
     /// 工具被丢下、assistant 消息与计量都不落库。现在错误由调用方并入流后已有的“等工具、提交”路径。
+    ///
+    /// 服务端执行的块不进回复（工作线 F90，query.md §1.9）：主请求不带服务端工具，端点仍可能返回 `server_tool_use`、
+    /// `web_search_tool_result` 与 assistant 一侧的 `tool_result`。以前它们留在回复里，node-store 拒收（`not implemented:
+    /// node-store assistant server_tool_use block`），整条回复与工具结果都没落库。照 Node（执行与落库前过滤
+    /// `providerExecuted` 的调用、流兼容层丢掉裸 `tool_result`）去掉；发回模型时配对兜底本来也会去掉它们。
     pub(crate) fn finish(self) -> Assembled {
         let content = self
             .blocks
             .into_iter()
             .filter_map(|block| match block {
-                Some(Partial::Done(block)) => Some(block),
+                Some(Partial::Done(block)) if !server_executed(&block) => Some(block),
                 _ => None,
             })
             .collect();
@@ -162,10 +171,8 @@ impl Assembler {
     /// 主线程被中止时的结果（修复线 F38，query.md §1.4）：已经结束的块，
     /// 再加第一个没结束的块——只在它是文字、`trim` 后不为空时（thinking、tool_use 等没结束的块不留）。
     pub(crate) fn finish_aborted(mut self) -> Assembled {
-        let open = self
-            .blocks
-            .iter()
-            .position(|block| !matches!(block, Some(Partial::Done(_))));
+        // 空槽不是没写完的块（F90，同 `incomplete`）：以前停在空槽，后面已经结束的块与没写完的文字都被截掉。
+        let open = self.blocks.iter().position(is_open);
         if let Some(index) = open {
             let kept = match self.blocks[index].take() {
                 Some(Partial::Text(text)) if !text.trim().is_empty() => {
@@ -178,6 +185,26 @@ impl Assembler {
         }
         self.finish()
     }
+}
+
+/// 开始了、还没收到结束的块。空槽不算（那个序号的块从没开始）；服务端执行的块也不算：它们的内容在开始事件里、不进
+/// 回复（`finish`），收不到结束也不让这次响应失败（工作线 F90）。
+fn is_open(block: &Option<Partial>) -> bool {
+    match block {
+        None | Some(Partial::Done(_)) => false,
+        Some(Partial::Other(block)) => !server_executed(block),
+        Some(_) => true,
+    }
+}
+
+/// 服务端执行的块：主循环的回复不留它们（query.md §1.9）。
+fn server_executed(block: &ContentBlock) -> bool {
+    matches!(
+        block,
+        ContentBlock::ServerToolUse { .. }
+            | ContentBlock::WebSearchToolResult { .. }
+            | ContentBlock::ToolResult { .. }
+    )
 }
 
 /// 空输入按 `{}` 处理（Anthropic 对无参数工具只发空串）；字面量 `null` 同样是 `{}`。

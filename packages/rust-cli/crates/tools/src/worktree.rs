@@ -1,7 +1,7 @@
 //! EnterWorktree 与 worktree 会话的记录（docs/specs/rust-cli/tools-more.md §11）。ExitWorktree 在
 //! [`crate::worktree_exit`]。
 //!
-//! git 操作经执行环境（`Environment::worktree_*`）；会话的工作目录只有会话 actor 一个 owner，工具经
+//! git 操作经执行环境（`Git::worktree_*`）；会话的工作目录只有会话 actor 一个 owner，工具经
 //! `Interactions::set_workspace` 请求修改（§11.4）。worktree 会话的记录按
 //! 顶层会话放在 [`WorktreeBoard`]，只在改目录成功后记录或清除。
 
@@ -150,7 +150,8 @@ impl EnterWorktreeTool {
         let style = style(context);
         let wanted = resolve(context, context.workspace.root.as_str(), raw).await?;
         let listed = context
-            .env
+            .local
+            .git()
             .worktree_list(context.workspace.root.clone())
             .await
             .map_err(env_failure)?;
@@ -282,7 +283,8 @@ impl Tool for EnterWorktreeTool {
                     name,
                 };
                 let created = context
-                    .env
+                    .local
+                    .git()
                     .worktree_create(context.operation.clone(), request)
                     .await
                     .map_err(env_failure)?;

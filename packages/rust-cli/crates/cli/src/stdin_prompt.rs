@@ -67,6 +67,36 @@ pub(crate) fn too_large() -> String {
     )
 }
 
+/// `-p` 的输入（cli-args.md §2.3）：标准输入不是终端时读它，与 prompt 参数用换行连接；两样都
+/// 没有时报错退出。
+pub(crate) async fn print_prompt(prompt: Option<String>) -> anyhow::Result<String> {
+    use std::io::IsTerminal;
+    let piped = if std::io::stdin().is_terminal() {
+        None
+    } else {
+        match read_piped(tokio::io::stdin(), FIRST_DATA).await {
+            Ok(Piped::Text(text)) => Some(text),
+            Ok(Piped::Silent) => {
+                crate::output::eprint_line(NO_DATA_WARNING);
+                None
+            }
+            Ok(Piped::TooLarge) => {
+                return Err(crate::flags::Fatal(too_large()).into());
+            }
+            // 读不了标准输入时照常用 prompt 参数（只写日志）。
+            Err(error) => {
+                tracing::warn!(%error, "stdin could not be read");
+                None
+            }
+        }
+    };
+    let prompt = combine(prompt, piped);
+    if prompt.is_empty() {
+        return Err(crate::flags::Fatal(NO_INPUT.to_owned()).into());
+    }
+    Ok(prompt)
+}
+
 #[cfg(test)]
 #[path = "stdin_prompt_tests.rs"]
 mod tests;

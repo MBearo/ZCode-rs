@@ -23,6 +23,7 @@ rust-cli-kernel-api.workspace = true
 rust-cli-paths.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

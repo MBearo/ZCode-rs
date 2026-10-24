@@ -3,6 +3,9 @@
 //! [`ToolCatalog`] 是主线程注册表的弱引用：注册表在上下文之后才建好，由 runtime 绑定；ToolSearch 的
 //! 查找范围与 `deferred_tools_delta` 清单都从这里取，两处看到的延迟工具总是同一组。
 //!
+//! 目录也带 `ENABLE_TOOL_SEARCH` 的设置（工作线 F89，tools-more.md §3.2.1）：关时 ToolSearch 工具不启用，这一步的工具里就没有它，
+//! 延迟工具清单、WaitForMcpServers 的去留与主循环都随之是“没有 ToolSearch”。
+//!
 //! 先建后接是为了打破构造的环（注册表 → ToolSearch 工具 → 目录 → 注册表；注册表跨 tools、ext、agents 三个
 //! crate 组装，不能一次建好），保留最小形式：绑定一次。缺陷修复（审查 R1-13）：原来没绑定或注册表已释放时静默
 //! 当作没有工具（ToolSearch 什么都找不到、延迟清单为空），现在两处都返回错误。
@@ -20,6 +23,7 @@ use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
 use rust_cli_kernel_api::tool_search::{TOOL_SEARCH, compare_names, is_deferred};
+use rust_cli_prompts::models::ToolSearchSetting;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -28,13 +32,22 @@ use crate::texts_more as texts;
 use crate::tool_search_keywords::{self as keywords, Candidate};
 use crate::tool_search_mcp;
 
-/// 主线程注册表的弱引用（避免 注册表 → 工具 → 目录 → 注册表 的 `Arc` 环）。
+/// 主线程注册表的弱引用（避免 注册表 → 工具 → 目录 → 注册表 的 `Arc` 环）与 `ENABLE_TOOL_SEARCH` 的设置（缺省开）。
 #[derive(Default)]
 pub struct ToolCatalog {
     registry: OnceLock<Weak<dyn ToolRegistry>>,
+    setting: ToolSearchSetting,
 }
 
 impl ToolCatalog {
+    /// 带入口读到的 `ENABLE_TOOL_SEARCH` 设置（runtime 组装时给出）。
+    pub fn new(setting: ToolSearchSetting) -> Self {
+        Self {
+            registry: OnceLock::new(),
+            setting,
+        }
+    }
+
     /// 建好主线程注册表后绑定一次；之后的绑定被忽略。
     pub fn bind(&self, registry: &Arc<dyn ToolRegistry>) {
         let _ = self.registry.set(Arc::downgrade(registry));
@@ -88,16 +101,12 @@ impl ToolCatalog {
     }
 }
 
-/// `deferred_tools_delta` 的清单来源：启用 ToolSearch 时，这一步工具集里的延迟工具，每行是工具名。
+/// `deferred_tools_delta` 的清单来源：这一步的工具里有 ToolSearch 时（乐观判断，tools-more.md §3.2.1），工具集里的延迟
+/// 工具，每行是工具名。修改（工作线 F89）：不再看模型；`auto` 而这一步没到门槛时照样宣布。
 #[async_trait]
 impl ListingSource for ToolCatalog {
     async fn listings(&self, request: &ContextRequest) -> Result<Listings, OrchestrationError> {
-        let has_search = request.tool_names.iter().any(|name| name == TOOL_SEARCH);
-        let supported = rust_cli_prompts::models::supports_tool_search(
-            &request.selection.model,
-            request.capabilities.map(|found| found.supports_tool_search),
-        );
-        if !has_search || !supported {
+        if !request.tool_names.iter().any(|name| name == TOOL_SEARCH) {
             return Ok(Listings::default());
         }
         let deferred_tools = self
@@ -234,6 +243,11 @@ impl Tool for ToolSearchTool {
 
     fn description(&self, _context: &PromptContext) -> String {
         self.definition.description.clone()
+    }
+
+    /// `ENABLE_TOOL_SEARCH` 为关时不启用（工作线 F89，tools-more.md §3.2.1）。
+    fn is_enabled(&self) -> bool {
+        self.catalog.setting.allows()
     }
 
     fn is_read_only(&self, _input: &Value) -> bool {

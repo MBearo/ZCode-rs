@@ -520,3 +520,17 @@ pub fn turn_started(conn: &Connection, session: &str, turn: &str) -> Result<Opti
         .query_row([session, turn], |r| r.get(0))
         .optional()?)
 }
+
+/// 这条输入所在的轮次结束时是错误（`turn_usage.status = 'error'`，最近完成的一行）。没有这一行（还没结束、被中途
+/// 杀掉）时为 false。
+pub fn turn_failed(conn: &Connection, session: &str, user_message: &str) -> Result<bool> {
+    use rusqlite::OptionalExtension;
+    let status: Option<String> = conn
+        .prepare_cached(
+            "select status from turn_usage where session_id = ? and user_message_id = ? \
+             order by completed_at desc limit 1",
+        )?
+        .query_row([session, user_message], |r| r.get(0))
+        .optional()?;
+    Ok(status.as_deref() == Some("error"))
+}

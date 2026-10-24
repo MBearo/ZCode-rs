@@ -60,3 +60,32 @@ async fn a_fork_of_an_untitled_session_is_named_like_node() {
     let loaded = built.store.load(&child).await.unwrap();
     assert_eq!(loaded.meta.title, "Fork of Untitled session");
 }
+
+/// 续写时补的 assistant（session-lifecycle.md §6.3.1）：复制到新会话时不带它（新会话打开时再补）。
+#[test]
+fn the_resume_reply_is_not_copied() {
+    use rust_cli_kernel_api::ids::MessageId;
+    use rust_cli_kernel_api::message::{ContentBlock, UserMessage};
+    use rust_cli_kernel_api::testing::SequentialIds;
+    let input = |id: &str| {
+        Message::User(UserMessage {
+            id: MessageId::new(id),
+            content: vec![ContentBlock::Text {
+                text: "hi".to_owned(),
+            }],
+            origin: UserOrigin::Human,
+        })
+    };
+    let messages = vec![
+        input("u1"),
+        crate::resume_sentinel::sentinel(MessageId::new("a0")),
+        input("u2"),
+    ];
+    let copied = super::copy(&messages, &SequentialIds::default());
+    assert_eq!(copied.len(), 2, "{copied:?}");
+    assert!(
+        copied
+            .iter()
+            .all(|message| matches!(message, Message::User(_)))
+    );
+}

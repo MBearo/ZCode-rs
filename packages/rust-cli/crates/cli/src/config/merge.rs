@@ -124,6 +124,28 @@ pub(crate) fn check_for_update(layers: &[Layer<'_>], warnings: &mut Vec<String>)
     merged
 }
 
+/// 顶层 `askUserQuestionTimeout` 按键覆盖（提问框的空闲超时，docs/specs/rust-cli/tools-more.md §1.1，工作线 F72）：只认
+/// `60s`、`5m`、`10m`、`never`，坏值记警告、跳过这一层；没有或 `never` 时不计时（None）。返回毫秒。
+pub(crate) fn question_timeout(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> Option<u64> {
+    let mut merged = None;
+    for layer in layers {
+        let Some(value) = layer.object.get("askUserQuestionTimeout") else {
+            continue;
+        };
+        match value.as_str() {
+            Some("60s") => merged = Some(60_000),
+            Some("5m") => merged = Some(300_000),
+            Some("10m") => merged = Some(600_000),
+            Some("never") => merged = None,
+            _ => warnings.push(format!(
+                "{}: unknown askUserQuestionTimeout {value}",
+                layer.path
+            )),
+        }
+    }
+    merged
+}
+
 /// `features.mcp` 按键覆盖；最终为 `false` 时关闭 MCP。
 pub(crate) fn mcp_enabled(layers: &[Layer<'_>]) -> bool {
     layers

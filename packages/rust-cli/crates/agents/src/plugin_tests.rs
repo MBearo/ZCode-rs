@@ -75,7 +75,8 @@ async fn plugin_agents_sit_between_built_ins_and_user_agents() {
             "/Users/dev/.zcode/agents/kit-review.md",
             "---\nname: kit:review\ndescription: User override.\n---\nU.",
         );
-    let catalog = AgentCatalog::new(Arc::new(env));
+    let env = Arc::new(env);
+    let catalog = AgentCatalog::new(env.clone(), env);
     let workspace = WorkspaceRef {
         environment: EnvironmentId::new("local"),
         root: EnvPath::new("/Users/dev/repo"),

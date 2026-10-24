@@ -13,9 +13,10 @@ use super::list::{Outcome, Purpose, SEP};
 
 impl App {
     pub fn on_paste(&mut self, text: &str) -> Option<Action> {
-        if let (Some((_, request)), Some(interaction)) =
-            (self.view.pending(), self.interaction.as_mut())
-            && interaction.typing
+        if let (Some((_, request)), Some(interaction)) = (
+            super::app::pending_of(&self.view, &self.detached),
+            self.interaction.as_mut(),
+        ) && interaction.typing
         {
             interaction.paste(request, text);
             return None;
@@ -101,8 +102,10 @@ impl App {
         if self.overlay.is_some() {
             return self.overlay_key(key);
         }
-        if let (Some((id, request)), Some(ui)) = (self.view.pending(), self.interaction.as_mut())
-            && !(ctrl && key.code == KeyCode::Char('c'))
+        if let (Some((id, request)), Some(ui)) = (
+            super::app::pending_of(&self.view, &self.detached),
+            self.interaction.as_mut(),
+        ) && !(ctrl && key.code == KeyCode::Char('c'))
         {
             let answer = ui.on_key(request, key, now, self.typing)?;
             return Some(Action::Resolve {
@@ -111,7 +114,7 @@ impl App {
             });
         }
         // 扣住的同伴消息的批准框（cross-session.md §2.6）：待回答的交互优先；↑ 拒绝、↓ 投递，enter 确认，esc 拒绝。
-        if self.view.pending().is_none()
+        if self.pending().is_none()
             && let Some(held) = self.view.peer_held()
             && !(ctrl && key.code == KeyCode::Char('c'))
         {
@@ -250,6 +253,9 @@ impl App {
         if matches!(self.overlay, Some(Overlay::Usage(_))) {
             return self.usage_key(key);
         }
+        if matches!(self.overlay, Some(Overlay::YoloConfirm(_))) {
+            return self.yolo_confirm_key(key);
+        }
         let ctrl = self.typing.ctrl(&key);
         match self.overlay.as_mut()? {
             Overlay::List(list) => match list.on_key(key, self.typing) {
@@ -295,7 +301,8 @@ impl App {
             | Overlay::Resume(_)
             | Overlay::Trust(_)
             | Overlay::Background(_)
-            | Overlay::Usage(_) => None,
+            | Overlay::Usage(_)
+            | Overlay::YoloConfirm(_) => None,
         }
     }
 
@@ -329,7 +336,6 @@ impl App {
                 })
             }
             Purpose::Fork => self.fork_chosen(value),
-            Purpose::ForkConfirm => self.fork_confirmed(value),
             Purpose::Theme => self.set_theme(value),
             // 与带参数的命令走同一条路径（tui-display.md §4.3、§4.4）。
             Purpose::Permissions => self.mode_command(value),

@@ -173,7 +173,29 @@ pub trait Compactor: Send + Sync {
         request: CompactRequest,
         cancel: CancellationToken,
     ) -> Result<CompactResult, OrchestrationError>;
+
+    /// 发请求前的阻塞线（docs/specs/rust-cli/compact.md §2.2）：估算的 token 到了阻塞线、又不交给反应式压缩时，返回
+    /// 结束这次运行的错误文字，这一步不发请求。`failure` 是这一步自动压缩失败的说明（[`AutoCompactOutcome::Failed`]
+    /// 的 `message`），没有失败时为 None。默认不拦。
+    fn blocking_limit(
+        &self,
+        _history: &[Message],
+        _selection: &ModelSelection,
+        _failure: Option<&str>,
+    ) -> Option<String> {
+        None
+    }
 }
+
+/// 文字的粗估 token：字符数（UTF-16 码元，JS 的 `length`）/ 4，四舍五入。压缩的预算与压缩后附件的上限都用它。
+pub fn rough_tokens(text: &str) -> u64 {
+    let units = text.encode_utf16().count() as u64;
+    (units + 2) / 4
+}
+
+/// 到了阻塞线时结束回合的错误文字（docs/specs/rust-cli/compact.md §2.2）；压缩失败、带着原因时在它后面接
+/// ` · automatic compaction failed: <原因>`。界面按它换成“上下文满了”的提示。
+pub const PROMPT_TOO_LONG: &str = "Prompt is too long";
 
 /// 一次主循环运行内的自动压缩状态（docs/specs/rust-cli/compact.md §2）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,6 +249,17 @@ pub trait PostCompactContext: Send + Sync {
         request: ContextRequest,
         kept: &[Message],
     ) -> Result<Vec<AttachmentMessage>, OrchestrationError>;
+
+    /// 同 [`Self::post_compact`]，另带压缩前的全部历史 `history`：要从整段会话里取的附件（调用过的 skill，
+    /// docs/specs/rust-cli/compact.md §3.4）用它。缺省忽略历史。
+    async fn post_compact_with_history(
+        &self,
+        request: ContextRequest,
+        _history: &[Message],
+        kept: &[Message],
+    ) -> Result<Vec<AttachmentMessage>, OrchestrationError> {
+        self.post_compact(request, kept).await
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

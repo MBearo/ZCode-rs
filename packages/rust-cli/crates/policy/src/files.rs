@@ -77,11 +77,22 @@ fn sensitive(path: &str, windows: bool) -> bool {
 
 /// 路径命中某种行为的路径规则。
 pub fn path_rule(access: Access, path: &str, behavior: RuleBehavior, inputs: &Inputs<'_>) -> bool {
+    matched_path_rule(access, path, behavior, inputs).is_some()
+}
+
+/// 路径命中的第一条路径规则的 content。
+pub(crate) fn matched_path_rule<'a>(
+    access: Access,
+    path: &str,
+    behavior: RuleBehavior,
+    inputs: &Inputs<'a>,
+) -> Option<&'a str> {
     inputs
         .rules
         .contents(access.rule_tool(), behavior)
-        .iter()
-        .any(|(pattern, _)| rule_matches(pattern, path, inputs.root, inputs.paths, behavior))
+        .into_iter()
+        .map(|(pattern, _)| pattern)
+        .find(|pattern| rule_matches(pattern, path, inputs.root, inputs.paths, behavior))
 }
 
 /// 检查一次读或写。`path` 是工具输入里的原样路径（None 表示 cwd）。

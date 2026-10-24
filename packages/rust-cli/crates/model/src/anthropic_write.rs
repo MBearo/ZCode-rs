@@ -8,7 +8,6 @@
 use rust_cli_base::js::json::{write, write_str};
 use rust_cli_kernel_api::message::{ContentBlock, ImageSource, ToolResultContent};
 use rust_cli_kernel_api::model::{ApiContent, ApiMessage, ApiRole, CacheControl, ModelError};
-use serde_json::Value;
 
 /// `[消息…]`。
 pub(crate) fn messages(out: &mut String, messages: &[ApiMessage]) -> Result<(), ModelError> {
@@ -21,15 +20,6 @@ pub(crate) fn messages(out: &mut String, messages: &[ApiMessage]) -> Result<(), 
     }
     out.push(']');
     Ok(())
-}
-
-/// 一条消息解析成值（count_tokens 的请求体、补丁改了 `messages` 时用；与直接写出的是同一段文字）。
-pub(crate) fn message_value(item: &ApiMessage) -> Result<Value, ModelError> {
-    let mut out = String::new();
-    message(&mut out, item)?;
-    serde_json::from_str(&out).map_err(|error| ModelError::InvalidRequest {
-        message: format!("encoding a message: {error}"),
-    })
 }
 
 /// 键名与冒号。

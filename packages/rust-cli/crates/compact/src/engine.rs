@@ -13,6 +13,7 @@ use rust_cli_kernel_api::orchestration::{
 };
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::plan::PlanModeFlags;
+use rust_cli_kernel_api::tool_search;
 use rust_cli_prompts::compact as texts;
 use tokio_util::sync::CancellationToken;
 
@@ -92,6 +93,11 @@ impl Engine<'_> {
         if messages.is_empty() {
             return Err(Failure::NoMessages);
         }
+        // 压缩前已加载的工具（引用过的，加上活动历史开头那条边界带的）记在新边界上，压缩之后照样算已加载
+        // （docs/specs/rust-cli/compact.md §3.5）。以前不记，压缩之后已加载的延迟工具从 tools 里消失。
+        let discovered: Vec<String> = tool_search::loaded(refs.iter().copied())
+            .into_iter()
+            .collect();
         let instructions = hooks::pre_compact(self.ports.hooks.as_ref(), request, cancel).await?;
         let groups = groups::group(&messages);
         if groups.len() < 2 {
@@ -107,7 +113,11 @@ impl Engine<'_> {
                 cancel,
             )
             .await?;
-        self.finalize(request, pre_tokens, raw, split, cancel).await
+        let mut result = self
+            .finalize(request, pre_tokens, raw, split, cancel)
+            .await?;
+        result.boundary.discovered_tools = discovered;
+        Ok(result)
     }
 
     async fn attempt(
@@ -259,7 +269,7 @@ impl Engine<'_> {
         }
     }
 
-    /// 压缩附件里的清单增量（spec §3.4），排在文件之后；只在主线程。
+    /// 压缩附件里的计划模式、调用过的 skill 与清单增量（spec §3.4），排在文件之后；只在主线程。
     /// 生成失败时不带（吞掉错误），下一步由 context 照常宣布。
     async fn listings(&self, request: &CompactRequest, kept: &[&Message]) -> Vec<Message> {
         if request.agent.is_some() {
@@ -285,9 +295,10 @@ impl Engine<'_> {
             mcp: None,
         };
         let kept: Vec<Message> = kept.iter().map(|message| (*message).clone()).collect();
+        // 压缩前的全部历史：调用过的 skill 从它取（spec §3.4）。
         self.ports
             .context
-            .post_compact(context, &kept)
+            .post_compact_with_history(context, &request.messages, &kept)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -327,7 +338,8 @@ impl Engine<'_> {
         };
         let restore = Restore {
             tools: self.ports.tools.as_ref(),
-            env: self.ports.env.clone(),
+            machine: self.ports.machine.clone(),
+            local: self.ports.local.clone(),
             artifacts: self.ports.artifacts.clone(),
             ids,
             generation: self.ports.generation.clone(),
@@ -353,6 +365,7 @@ impl Engine<'_> {
                 pre_tokens,
                 summary: summary_id,
                 preserved,
+                discovered_tools: Vec::new(),
             },
             summary,
             restored,
@@ -367,3 +380,7 @@ mod tests;
 #[cfg(test)]
 #[path = "engine_gap_tests.rs"]
 mod gap_tests;
+
+#[cfg(test)]
+#[path = "carried_tools_tests.rs"]
+mod carried_tools_tests;

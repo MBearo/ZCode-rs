@@ -1,0 +1,1 @@
+[Monitor expired after {{duration}} with {{count}} {{noun}} delivered. Re-arm it if you still need the watch.]

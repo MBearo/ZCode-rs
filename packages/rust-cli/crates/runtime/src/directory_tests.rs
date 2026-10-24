@@ -7,7 +7,8 @@ use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{CreateSession, Kernel};
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryEnvironment, MemoryStore, ScriptedModel, SequentialIds, selection,
+    FixedClock, MemoryEnvironment, MemoryStore, ScriptedModel, SequentialIds, environments,
+    selection,
 };
 
 use super::*;
@@ -32,7 +33,7 @@ fn kernel() -> (LocalKernel, Arc<MemoryEnvironment>) {
     let kernel = LocalKernel::new(
         Ports {
             model: Arc::new(ScriptedModel::new(Vec::new())),
-            env: env.clone(),
+            environments: environments(env.clone()),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(1_000)),

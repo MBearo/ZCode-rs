@@ -23,6 +23,15 @@ impl Compactor for Fixed {
         Some((150_000, 180_000))
     }
 
+    fn blocking_limit(
+        &self,
+        _history: &[Message],
+        _selection: &ModelSelection,
+        failure: Option<&str>,
+    ) -> Option<String> {
+        Some(format!("blocked {failure:?}"))
+    }
+
     async fn compact(
         &self,
         _request: CompactRequest,
@@ -88,5 +97,14 @@ fn an_assembled_compactor_forwards_every_method() {
     assert_eq!(
         late.context_usage(&[], &selection()),
         Some((150_000, 180_000))
+    );
+    // 阻塞线（compact.md §2.2）同样转发；没有转发时主循环看到的是缺省的“不拦”。
+    assert_eq!(
+        late.blocking_limit(&[], &selection(), Some("why")),
+        Some("blocked Some(\"why\")".to_owned())
+    );
+    assert_eq!(
+        LateCompactor::default().blocking_limit(&[], &selection(), None),
+        None
     );
 }

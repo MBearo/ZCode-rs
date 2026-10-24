@@ -7,11 +7,15 @@ import { test } from "node:test";
 import {
   categoriesIn,
   categoryOf,
+  checkBlastRadius,
   checkClippy,
   checkDefinitions,
   checkGraph,
   checkSources,
+  checkStableDependencies,
+  instability,
   parseClippy,
+  reverseClosure,
   stringLiterals,
   stripCode,
 } from "./check.mjs";
@@ -334,10 +338,7 @@ test("F55 补的禁令：改环境、SystemTime::elapsed、改属主、按地址
   assert.deepEqual(
     check([
       source("cli", exempt('unsafe { std::env::remove_var("ARGV0") };')),
-      source(
-        "fs",
-        `use std::time::SystemTime;\n${exempt("let _ = modified.elapsed();")}`,
-      ),
+      source("fs", `use std::time::SystemTime;\n${exempt("let _ = modified.elapsed();")}`),
     ]),
     [],
   );
@@ -406,10 +407,20 @@ test("同一个名字只定义一处：`.zcode` 路径段只在 base 的 names.r
   // 用常量拼、注释里写、别的名字（`.zcode-plugin`、`.zcode.json`、`zcode.json`）、测试文件都不算。
   assert.deepEqual(
     definitions([
-      source("tools", 'const A: &str = ".zcode-plugin/plugin.json";\nconst B: &str = ".zcode.json";\n'),
-      source("tools", '// ~/.zcode/AGENTS.md\nfn f(root: &str) -> String { format!("{root}/{DOT_DIR}/x") }\n'),
+      source(
+        "tools",
+        'const A: &str = ".zcode-plugin/plugin.json";\nconst B: &str = ".zcode.json";\n',
+      ),
+      source(
+        "tools",
+        '// ~/.zcode/AGENTS.md\nfn f(root: &str) -> String { format!("{root}/{DOT_DIR}/x") }\n',
+      ),
       source("cli", 'const C: &str = "zcode.json";\n'),
-      source("tools", 'let p = "/w/.zcode/worktrees/a";\n', "crates/tools/src/worktree_tests_fakes.rs"),
+      source(
+        "tools",
+        'let p = "/w/.zcode/worktrees/a";\n',
+        "crates/tools/src/worktree_tests_fakes.rs",
+      ),
       source("context", 'let p = "/w/.zcode/rules";\n', "crates/context/src/a_tests.rs"),
     ]),
     [],
@@ -457,7 +468,7 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
     definitions([
       source("tui", 'const T: &str = "Create an AGENTS.md file in the project";\n'),
       source("tools", 'const U: &str = "edit .zcode.json or the MEMORY.md index.";\n'),
-      source("policy", '// zcode.json 与 MEMORY.md\nconst V: u8 = 1;\n'),
+      source("policy", "// zcode.json 与 MEMORY.md\nconst V: u8 = 1;\n"),
       source("context", 'let p = "/w/AGENTS.md";\n', "crates/context/src/a_tests.rs"),
     ]),
     [],
@@ -467,7 +478,10 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
     ['let f = "AGENTS.md";', "the rules file name AGENTS\\.md"],
     ['format!("{dir}/AGENTS.local.md")', "the local rules file name AGENTS\\.local\\.md"],
     ['const C: &str = "zcode.json";', "the project config file name zcode\\.json"],
-    ['let p = r"C:\\x\\scheduled_tasks.json";', "the scheduled tasks file name scheduled_tasks\\.json"],
+    [
+      'let p = r"C:\\x\\scheduled_tasks.json";',
+      "the scheduled tasks file name scheduled_tasks\\.json",
+    ],
     ['join(&dir, &["memory", "MEMORY.md"])', "the memory index file name MEMORY\\.md"],
   ]) {
     const failures = definitions([source("context", `fn f() {}\n${text}\n`)]);
@@ -477,9 +491,86 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
 });
 
 test("stringLiterals：普通、原始与字节串的原文与行号；注释与字符字面量不算", () => {
-  assert.deepEqual(stringLiterals('let a = "x\\"y"; // "c"\nlet b = r#"q"z"#; let c = \'"\'; let d = b"e";'), [
-    { value: 'x\\"y', line: 1 },
-    { value: 'q"z', line: 2 },
-    { value: "e", line: 2 },
+  assert.deepEqual(
+    stringLiterals('let a = "x\\"y"; // "c"\nlet b = r#"q"z"#; let c = \'"\'; let d = b"e";'),
+    [
+      { value: 'x\\"y', line: 1 },
+      { value: 'q"z', line: 2 },
+      { value: "e", line: 2 },
+    ],
+  );
+});
+
+// 三类检查（docs/specs/rust-cli/remote-exec.md §15.6）：波及范围与稳定依赖，只用合成的依赖图。
+const graphOf = (edges) =>
+  new Map(Object.entries(edges).map(([crate, to]) => [crate, new Set(to)]));
+const remote = {
+  LAYERS: {
+    base: "foundation",
+    wire: "foundation",
+    transport: "foundation",
+    "kernel-api": "kernel",
+    tools: "kernel",
+    tui: "frontend",
+    remote: "adapter",
+    host: "entry",
+    cli: "entry",
+  },
+  BLAST_FORBIDDEN_LAYERS: ["kernel", "frontend", "platform"],
+  BLAST_RADIUS: { wire: ["cli", "host", "remote"], remote: ["cli", "host"] },
+  SDP_EXCEPTIONS: {},
+};
+const remoteGraph = {
+  base: [],
+  wire: ["base"],
+  transport: ["base"],
+  "kernel-api": ["base"],
+  tools: ["kernel-api"],
+  tui: ["kernel-api"],
+  remote: ["kernel-api", "wire"],
+  host: ["remote", "transport"],
+  cli: ["host", "remote", "tools", "tui"],
+};
+
+test("波及范围：合成的基线没有违规；闭包是全部直接与间接的依赖方", () => {
+  const graph = graphOf(remoteGraph);
+  assert.deepEqual([...reverseClosure(graph, "wire")].sort(), ["cli", "host", "remote"]);
+  assert.deepEqual(checkBlastRadius(remote, graph), []);
+});
+
+test("波及范围：闭包与登记的不同、内核依赖远端 crate、登记了不存在的 crate", () => {
+  const graph = graphOf({ ...remoteGraph, tools: ["kernel-api", "wire"] });
+  const failures = checkBlastRadius(remote, graph);
+  assert.ok(failures.some((line) => line.includes("crates depending on wire")));
+  assert.ok(failures.some((line) => line.includes("tools (kernel) depends on wire")));
+  const dead = checkBlastRadius({ ...remote, BLAST_RADIUS: { gone: [] } }, graphOf(remoteGraph));
+  assert.deepEqual(dead, ["BLAST_RADIUS.gone: no such crate (dead entry)"]);
+});
+
+test("稳定依赖：I = 出度 /（入度 + 出度），只向更稳定的依赖；例外要登记、死项报错", () => {
+  const graph = graphOf(remoteGraph);
+  const values = instability(graph);
+  assert.equal(values.get("base").i, 0);
+  assert.equal(values.get("cli").i, 1);
+  assert.equal(values.get("wire").i, 0.5);
+  assert.deepEqual(checkStableDependencies(remote, graph), []);
+  // stable 被三个 crate 依赖（I = 1/4），却依赖一个出度 2、入度 1 的 shaky（I = 2/3）。
+  const worse = graphOf({
+    stable: ["shaky"],
+    shaky: ["x", "y"],
+    x: [],
+    y: [],
+    a: ["stable"],
+    b: ["stable"],
+    c: ["stable"],
+  });
+  assert.deepEqual(checkStableDependencies(remote, worse), [
+    "stable dependencies: stable (I=0.25) depends on the less stable shaky (I=0.67); depend on something more stable or register stable->shaky in SDP_EXCEPTIONS with a reason",
+  ]);
+  const allowed = { ...remote, SDP_EXCEPTIONS: { "stable->shaky": "reason" } };
+  assert.deepEqual(checkStableDependencies(allowed, worse), []);
+  const dead = { ...remote, SDP_EXCEPTIONS: { "cli->base": "reason" } };
+  assert.deepEqual(checkStableDependencies(dead, graph), [
+    "SDP_EXCEPTIONS.cli->base: no longer an exception (dead entry)",
   ]);
 });

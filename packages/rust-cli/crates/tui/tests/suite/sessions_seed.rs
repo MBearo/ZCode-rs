@@ -12,7 +12,7 @@ use rust_cli_kernel_api::store::{Fact, FactBatch, SessionKind, SessionMeta, Sess
 use rust_cli_kernel_api::testing::MemoryStore;
 use rust_cli_tui::trust::TrustPrompt;
 
-/// 一个预先放进库里的会话：首条输入与一条回复，给定的创建与活动时间（毫秒）。
+/// 一个预先放进库里的会话：首条输入与一条回复（`reply` 为空时没有回复：被中断的会话），给定的创建与活动时间（毫秒）。
 pub struct Seed {
     pub id: &'static str,
     pub root: &'static str,
@@ -48,25 +48,27 @@ pub async fn seed(store: &MemoryStore, seeds: &[Seed]) {
             }],
             origin: UserOrigin::Human,
         });
-        let assistant = Message::Assistant(AssistantMessage {
-            id: MessageId::new(format!("msg_a_{}", seed.id)),
-            content: vec![ContentBlock::Text {
-                text: seed.reply.to_owned(),
-            }],
-            stop_reason: Some(StopReason::EndTurn),
-            usage: None,
-            model: "scripted".to_owned(),
-        });
+        let mut facts = vec![Fact::MessageAppended { message: user }];
+        if !seed.reply.is_empty() {
+            facts.push(Fact::MessageAppended {
+                message: Message::Assistant(AssistantMessage {
+                    id: MessageId::new(format!("msg_a_{}", seed.id)),
+                    content: vec![ContentBlock::Text {
+                        text: seed.reply.to_owned(),
+                    }],
+                    stop_reason: Some(StopReason::EndTurn),
+                    usage: None,
+                    model: "scripted".to_owned(),
+                }),
+            });
+        }
         store
             .commit(
                 &id,
                 FactBatch {
                     owner_epoch: OwnerEpoch::LOCAL,
                     command: None,
-                    facts: vec![
-                        Fact::MessageAppended { message: user },
-                        Fact::MessageAppended { message: assistant },
-                    ],
+                    facts,
                     turn: None,
                 },
             )

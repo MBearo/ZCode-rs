@@ -23,21 +23,32 @@ pub fn hint(template: &str, palette: &super::palette::Palette) -> Vec<Span<'stat
     super::key_hint::spans(template, palette)
 }
 
-/// 权限模式的指示：符号、名称与颜色（docs/specs/rust-cli/tui.md §7）。
-pub fn mode_indicator(lang: Lang, mode: PermissionMode) -> (String, Style) {
-    let label = i18n::mode_label(lang, mode);
-    let colored =
-        |glyph: &str, color: Color| (format!("{glyph} {label}"), Style::default().fg(color));
+/// 权限模式名称的颜色（tui.md §7，工作线 F76，用户决定 2026-10-23“照 App 的配色”）：变更前确认是普通文字色，
+/// 自主模式是 App 的 icon-blue，完全访问是 App 的 warning（以前分别是 dim、黄、红）；`/mode` 选择器也用它。
+pub fn mode_style(mode: PermissionMode, palette: &super::palette::Palette) -> Style {
     match mode {
-        // 变更前确认：暂停图标，dim（与其他模式的符号对齐）。
-        PermissionMode::Default => (format!("⏸ {label}"), dim()),
-        PermissionMode::AcceptEdits => colored("⏵⏵", Color::Magenta),
-        PermissionMode::Plan => colored("⏸", Color::Cyan),
-        PermissionMode::Guarded | PermissionMode::Auto | PermissionMode::DontAsk => {
-            colored("⏵⏵", Color::Yellow)
-        }
-        PermissionMode::BypassPermissions => colored("⏵⏵", Color::Red),
+        PermissionMode::Default => Style::default(),
+        PermissionMode::Guarded => palette.icon_blue(),
+        PermissionMode::BypassPermissions => palette.warning(),
+        PermissionMode::AcceptEdits => Style::default().fg(Color::Magenta),
+        PermissionMode::Plan => Style::default().fg(Color::Cyan),
+        PermissionMode::Auto | PermissionMode::DontAsk => Style::default().fg(Color::Yellow),
     }
+}
+
+/// 权限模式的指示：符号、名称与颜色（docs/specs/rust-cli/tui.md §7）。
+pub fn mode_indicator(
+    lang: Lang,
+    mode: PermissionMode,
+    palette: &super::palette::Palette,
+) -> (String, Style) {
+    let label = i18n::mode_label(lang, mode);
+    // 变更前确认与计划模式是暂停图标，其余是 `⏵⏵`。
+    let glyph = match mode {
+        PermissionMode::Default | PermissionMode::Plan => "⏸",
+        _ => "⏵⏵",
+    };
+    (format!("{glyph} {label}"), mode_style(mode, palette))
 }
 
 /// plan 开着时在权限模式前面加 `⏸ Plan mode · `（修复线 F20，tui.md §7）：plan 是独立开关，shift+tab 改的是
@@ -45,11 +56,11 @@ pub fn mode_indicator(lang: Lang, mode: PermissionMode) -> (String, Style) {
 fn mode_spans(app: &App) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     if app.view.plan() {
-        let (label, style) = mode_indicator(app.lang, PermissionMode::Plan);
+        let (label, style) = mode_indicator(app.lang, PermissionMode::Plan, &app.palette);
         spans.push(Span::styled(label, style));
         spans.push(super::key_hint::separator(&app.palette));
     }
-    let (label, style) = mode_indicator(app.lang, app.view.mode());
+    let (label, style) = mode_indicator(app.lang, app.view.mode(), &app.palette);
     spans.push(Span::styled(label, style));
     // 用户决定（2026-10-20）：不显示 `(shift+tab to cycle)` / `（shift+tab 切换）`（tui.md §7 登记）。
     spans

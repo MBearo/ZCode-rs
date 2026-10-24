@@ -6,6 +6,8 @@
 //!   part 是一个 synthetic text 与一个 `compaction`，`compactBoundary` 只写 Node strict schema
 //!   （`contracts/src/compact/index.ts`）里的字段。
 //!
+//! 压缩前已加载的工具（compact.md §3.5）写在 `compaction` part 的 `metadata.rustCli`（不进 strict 的 `compactBoundary`）。
+//!
 //! 冷读取：带 `summary` 且有 `compactBoundary` 的 user 消息还原成边界 + 摘要；Node 自己写的同样能读。
 use rusqlite::{OptionalExtension, params};
 use rust_cli_kernel_api::ids::MessageId;
@@ -18,12 +20,16 @@ use serde_json::{Value, json};
 
 use crate::facts::{Commit, save_entry};
 use crate::ids::{created_at, part_id};
+use crate::notices::RUST_CLI;
 use crate::records::{self, AGENT};
 use crate::repo::{messages, sessions};
 use crate::{OrStorage, state, storage};
 
 /// entry 种类（不带 `rust-cli/` 前缀的部分）。
 const BOUNDARY_ENTRY: &str = "rust-cli/compact_boundary";
+
+/// `compaction` part 的 `metadata.rustCli` 里记压缩前已加载的工具的键（compact.md §3.5）。
+const DISCOVERED_KEY: &str = "preCompactDiscoveredTools";
 
 fn entry_id(session: &str, boundary: &str) -> String {
     format!("{session}:{BOUNDARY_ENTRY}:{boundary}")
@@ -75,15 +81,19 @@ fn boundary_for(ctx: &Commit<'_>, summary: &str) -> Result<CompactBoundary, Stor
         })
 }
 
-/// 有 message 行的 ID：工具结果消息没有行（存在 assistant 的 tool part 里），换成它的 assistant。
+/// 有 message 行的 ID：工具结果消息没有行（存在 assistant 的 tool part 里），换成它的 assistant。本工程写的结果按
+/// `resultMessageId` 找；Node 写的结果与冷读取给 Node 的未结调用补在内存里的结果用 part id 作消息 id，按 part id 找。
+/// 修 bug（工作线 F86）：以前只认 `resultMessageId`，保留段的首尾是这两种结果时提交报 `has no stored row`。
 fn row_id(ctx: &Commit<'_>, id: &str) -> Result<String, StoreError> {
     if messages::exists(ctx.conn, id).storage()? {
         return Ok(id.to_owned());
     }
     ctx.conn
         .query_row(
-            "select message_id from part where session_id = ?
-              and json_extract(data, '$.metadata.rustCli.resultMessageId') = ? limit 1",
+            "select message_id from part where session_id = ?1
+              and (json_extract(data, '$.metadata.rustCli.resultMessageId') = ?2
+                or (id = ?2 and json_extract(data, '$.type') = 'tool'))
+              limit 1",
             params![ctx.session, id],
             |row| row.get::<_, String>(0),
         )
@@ -174,9 +184,13 @@ pub fn append_summary(ctx: &Commit<'_>, user: &UserMessage) -> Result<(), StoreE
         "time": {"start": created, "end": created}});
     messages::save_part(ctx.conn, &text_part, ctx.now as i64).storage()?;
     let (trigger, phase, reason) = node_trigger(boundary.trigger);
-    let compaction = json!({"id": part_id(ctx.now, &(ctx.uuid)()), "sessionID": ctx.session,
+    let mut compaction = json!({"id": part_id(ctx.now, &(ctx.uuid)()), "sessionID": ctx.session,
         "messageID": id, "type": "compaction", "auto": trigger == "auto", "trigger": trigger,
         "phase": phase, "compactReason": reason, "compactBoundary": compact_boundary});
+    // 压缩前已加载的工具（compact.md §3.5）：`compactBoundary` 是 strict，放在 part 的 `metadata.rustCli`。
+    if !boundary.discovered_tools.is_empty() {
+        compaction["metadata"] = json!({ RUST_CLI: { DISCOVERED_KEY: boundary.discovered_tools } });
+    }
     messages::save_part(ctx.conn, &compaction, ctx.now as i64).storage()?;
     Ok(())
 }
@@ -195,6 +209,18 @@ pub fn hydrate_boundary(parts: &[Value], summary: &str) -> Option<Message> {
             tail: id("tailMessageId")?,
         })
     });
+    let compaction = parts
+        .iter()
+        .find(|part| part["type"] == "compaction" && part["compactBoundary"].is_object());
+    let discovered_tools = compaction
+        .and_then(|part| part["metadata"][RUST_CLI][DISCOVERED_KEY].as_array())
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(|name| name.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
     Some(Message::System(SystemMessage::CompactBoundary(
         CompactBoundary {
             id: MessageId::new(payload["boundaryId"].as_str()?),
@@ -202,6 +228,7 @@ pub fn hydrate_boundary(parts: &[Value], summary: &str) -> Option<Message> {
             pre_tokens: payload["preCompactTokenCount"].as_u64().unwrap_or(0),
             summary: MessageId::new(payload["summaryMessageIds"][0].as_str().unwrap_or(summary)),
             preserved,
+            discovered_tools,
         },
     )))
 }

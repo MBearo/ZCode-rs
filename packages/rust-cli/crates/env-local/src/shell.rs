@@ -11,6 +11,7 @@ pub(crate) mod environ;
 mod mounts;
 mod notices;
 mod sandbox;
+mod socket;
 mod stop;
 mod supervise;
 mod watch;
@@ -27,7 +28,7 @@ use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvPath, OperationContext, Origin, Outcome, StartCommand, WorkspaceRef,
 };
 use rust_cli_kernel_api::env_shell::{
-    BackgroundStop, BackgroundTask, CwdScope, ShellKind, ShellNotice, ShellState,
+    BackgroundKind, BackgroundStop, BackgroundTask, CwdScope, ShellKind, ShellNotice, ShellState,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId};
 use rust_cli_proc::ledger::Ledger;
@@ -83,6 +84,14 @@ fn hook_shell(config: &ShellConfig) -> Result<PathBuf, EnvError> {
     Ok(PathBuf::from("/bin/bash"))
 }
 
+/// Monitor 的后台命令（工作线 F83）。
+fn monitor(request: &StartCommand) -> bool {
+    request
+        .background
+        .as_ref()
+        .is_some_and(|background| background.kind == BackgroundKind::Monitor)
+}
+
 /// 输出文件的上限（docs/specs/rust-cli/shell-permissions.md §2.2“输出上限”，审查 R2-18）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OutputLimit {
@@ -135,6 +144,8 @@ pub(crate) struct Running {
     pub output: PathBuf,
     /// hook 命令的 stderr 文件（与 stdout 分开，终态前送达，hooks.md §5.1）。
     pub errors: Option<PathBuf>,
+    /// 命令来源的 monitor：stdout 单独的一份（事件流从这里读；输出文件里是 stdout 与 stderr，工作线 F83）。
+    pub events: Option<PathBuf>,
     pub cancel: CancellationToken,
     /// `None` 表示还在运行。
     pub finished: signal::Sender<Option<Finish>>,
@@ -244,10 +255,21 @@ impl Shells {
         self.shared.state().commands.get(operation).cloned()
     }
 
+    #[cfg(test)]
     pub(crate) async fn start(
         &self,
         context: OperationContext,
         request: StartCommand,
+    ) -> Result<(), EnvError> {
+        self.start_with(context, request, None).await
+    }
+
+    /// 同 [`Shells::start`]；`web` 是 ws 来源的 monitor 用的网络出口（工作线 F83）。
+    pub(crate) async fn start_with(
+        &self,
+        context: OperationContext,
+        request: StartCommand,
+        web: Option<Arc<rust_cli_net::Egress>>,
     ) -> Result<(), EnvError> {
         let fingerprint = serde_json::to_string(&request).map_err(|error| EnvError::Io {
             message: error.to_string(),
@@ -266,7 +288,10 @@ impl Shells {
                 what: "PowerShell commands in the local environment".to_owned(),
             });
         }
-        let bash = if request.hook.is_some() {
+        // ws 来源的 monitor 不起进程（工作线 F83），不需要 shell。
+        let bash = if request.socket.is_some() {
+            PathBuf::new()
+        } else if request.hook.is_some() {
             hook_shell(&self.config)?
         } else {
             self.config.bash.clone().ok_or_else(no_shell)?
@@ -310,10 +335,12 @@ impl Shells {
         };
         let plan = supervise::Plan {
             output: dir.join(format!("{}.output", request.task)),
-            errors: request
-                .hook
-                .as_ref()
-                .map(|_| dir.join(format!("{}.stderr", request.task))),
+            // hook 命令的 stderr 单独写；ws 来源的 monitor 把生命周期写在这里（tools-more.md §19.7）。
+            errors: (request.hook.is_some() || request.socket.is_some())
+                .then(|| dir.join(format!("{}.stderr", request.task))),
+            // 命令来源的 monitor：只有 stdout 是事件流，另写一份；输出文件里 stdout 与 stderr 都在（tools-more.md §19.5）。
+            events: (monitor(&request) && request.socket.is_none())
+                .then(|| dir.join(format!("{}.events", request.task))),
             cwd_file: dir.join(format!("{}.cwd", request.task)),
             dir,
             cwd,
@@ -322,6 +349,9 @@ impl Shells {
             bash,
             prelude,
         };
+        if let Some(socket) = request.socket.clone() {
+            return self.start_socket(context, request, socket, plan, session, fingerprint, web);
+        }
         let (launched, mounted) =
             supervise::spawn(&self.ledger, &self.backend, &self.shared, &plan, &request).await?;
         let running = Arc::new(Running {
@@ -330,6 +360,7 @@ impl Shells {
             command: request.command.clone(),
             output: plan.output.clone(),
             errors: plan.errors.clone(),
+            events: plan.events.clone(),
             cancel: CancellationToken::new(),
             finished: signal::channel(None).0,
             backgrounded: signal::channel(false).0,
@@ -365,6 +396,63 @@ impl Shells {
         Ok(())
     }
 
+    /// ws 来源的 monitor（工作线 F83，tools-more.md §19.7）：登记同命令，经 net 开 WebSocket（`socket::run`）。
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "启动时算好的几样东西原样交给监督任务"
+    )]
+    fn start_socket(
+        &self,
+        context: OperationContext,
+        request: StartCommand,
+        socket: rust_cli_kernel_api::env_shell::MonitorSocket,
+        plan: supervise::Plan,
+        session: SessionId,
+        fingerprint: String,
+        web: Option<Arc<rust_cli_net::Egress>>,
+    ) -> Result<(), EnvError> {
+        let running = Arc::new(Running {
+            fingerprint,
+            session: session.clone(),
+            command: request.command.clone(),
+            output: plan.output.clone(),
+            errors: plan.errors.clone(),
+            events: None,
+            cancel: CancellationToken::new(),
+            finished: signal::channel(None).0,
+            backgrounded: signal::channel(false).0,
+            started: std::time::Instant::now(),
+        });
+        {
+            let mut state = self.shared.state();
+            state
+                .commands
+                .insert(context.operation.clone(), running.clone());
+            if request.background.is_some() {
+                let shell = state.sessions.entry(session.clone()).or_default();
+                shell
+                    .background
+                    .insert(request.task.clone(), context.operation.clone());
+            }
+        }
+        let job = socket::SocketJob {
+            operation: context.operation,
+            session,
+            plan,
+            request,
+            socket,
+            running,
+            egress: web,
+        };
+        let shared = self.shared.clone();
+        drop(
+            self.scope
+                .spawner()
+                .spawn("monitor-socket", socket::run(shared, job)),
+        );
+        Ok(())
+    }
+
     pub(crate) fn watch(
         &self,
         operation: &OperationId,
@@ -382,6 +470,23 @@ impl Shells {
                 true
             }
             None => false,
+        }
+    }
+
+    /// 还在跑的命令数与还没 ack 的后台通知数（[`crate::Busy`]）。
+    pub(crate) fn busy(&self) -> crate::Busy {
+        let state = self.shared.state();
+        crate::Busy {
+            commands: state
+                .commands
+                .values()
+                .filter(|running| running.finished.borrow().is_none())
+                .count() as u64,
+            notices: state
+                .sessions
+                .values()
+                .map(|shell| shell.notices.len() as u64)
+                .sum(),
         }
     }
 
@@ -459,10 +564,6 @@ impl Shells {
 mod tests;
 
 #[cfg(test)]
-#[path = "shell_hook_tests.rs"]
-mod hook_tests;
-
-#[cfg(test)]
 #[path = "shell_limit_tests.rs"]
 mod limit_tests;
 
@@ -473,7 +574,3 @@ mod choice_tests;
 #[cfg(test)]
 #[path = "shell_embedded_tests.rs"]
 mod embedded_tests;
-
-#[cfg(test)]
-#[path = "shell_timeout_tests.rs"]
-mod timeout_tests;

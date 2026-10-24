@@ -65,9 +65,10 @@ fn deny_rules_match_prefixes_after_safe_wrappers() {
         verdict(PermissionMode::Default, &deny, "timeout 5 rm x"),
         "deny: Permission to use Bash with command timeout 5 rm x has been denied."
     );
+    // 工作线 F80：复合命令里一段被拒绝时文字是整条命令（以前是那一段）。
     assert_eq!(
         verdict(PermissionMode::Default, &deny, "ls && rm -rf b"),
-        "deny: Permission to use Bash with command rm -rf b has been denied."
+        "deny: Permission to use Bash with command ls && rm -rf b has been denied."
     );
     assert!(verdict(PermissionMode::Default, &deny, "rmdir x").starts_with("ask:"));
 }
@@ -121,24 +122,98 @@ fn reads_outside_the_working_directories_ask() {
     );
 }
 
+/// 工作线 F80（§4.5.5）：路径的 deny 规则拒绝时文字也是整条命令（以前是 `cat from '/etc/hosts' was blocked by a deny
+/// rule.`）。
 #[test]
 fn path_deny_rules_block_shell_access() {
     let deny = [(RuleBehavior::Deny, "Read(//etc/**)")];
     assert_eq!(
         verdict(PermissionMode::BypassPermissions, &deny, "cat /etc/hosts"),
-        "deny: cat from '/etc/hosts' was blocked by a deny rule."
+        "deny: Permission to use Bash with command cat /etc/hosts has been denied."
+    );
+}
+
+/// 整条命令的建议规则（§4.10）；期望值是同一组命令在对照实现上的实测结果。
+fn suggested(command: &str) -> Vec<String> {
+    run(PermissionMode::Default, &[], |inputs| {
+        match check(command, inputs) {
+            Check::Ask { suggestions, .. } | Check::Passthrough { suggestions, .. } => suggestions
+                .into_iter()
+                .map(|rule| rule.content.unwrap_or_default())
+                .collect(),
+            _ => Vec::new(),
+        }
+    })
+}
+
+#[test]
+fn compound_commands_combine_the_suggestions() {
+    assert_eq!(
+        suggested("mytool a && othertool b c"),
+        ["mytool a *", "othertool b *"]
+    );
+    assert_eq!(
+        suggested("mytool a || othertool b"),
+        ["mytool a *", "othertool b *"]
+    );
+    assert_eq!(suggested("mytool a; mytool a"), ["mytool a *"]);
+    assert_eq!(suggested("mytool a && mytool a"), ["mytool a *"]);
+    assert_eq!(
+        suggested("m1 x; m2 x; m3 x; m4 x; m5 x; m6 x"),
+        ["m1 x *", "m2 x *", "m3 x *", "m4 x *", "m5 x *"]
+    );
+    assert_eq!(
+        suggested("mytool a\nmytool b"),
+        ["mytool a *", "mytool b *"]
+    );
+    assert_eq!(suggested("cd sub && mytool x"), ["mytool x *"]);
+    // 管道按段接起来（对照实现每段一个 addRules，D17）。
+    assert_eq!(suggested("mytool a | grep x"), ["mytool a *"]);
+    assert_eq!(
+        suggested("mytool a | othertool b"),
+        ["mytool a *", "othertool b *"]
     );
 }
 
 #[test]
-fn suggestions_use_the_command_prefix() {
+fn single_commands_use_the_subcommand_text() {
     assert_eq!(
-        suggestion("npm install left-pad").content.as_deref(),
-        Some("npm install:*")
+        suggested("mytool build \\\n  --release"),
+        ["mytool build *"]
     );
-    assert_eq!(suggestion("make -j8").content.as_deref(), Some("make:*"));
     assert_eq!(
-        suggestion("python script.py").content.as_deref(),
-        Some("python script.py")
+        suggested("mytool --flag \\\n  --other"),
+        ["mytool --flag --other"]
     );
+    assert_eq!(suggested("mytool <<<hello"), ["mytool *"]);
+    assert_eq!(suggested("mytool <<'EOF'\nx\nEOF"), ["mytool"]);
+    assert_eq!(suggested("mytool sub \"unterminated"), ["mytool sub *"]);
+    assert_eq!(suggested("mytool a 2>&1"), ["mytool a *"]);
+    assert_eq!(suggested("mytool a > /dev/null"), ["mytool a *"]);
+    assert_eq!(suggested("mytool '$X'"), ["mytool '$X'"]);
+    assert_eq!(suggested("mytool \"a$\""), ["mytool \"a$\""]);
+    assert_eq!(suggested("mytool $((1+2))"), ["mytool $((1+2))"]);
+}
+
+#[test]
+fn some_commands_get_no_suggestion() {
+    for command in [
+        "mytool run <<EOF\nhello\nEOF",
+        "mytool <<-EOF\n\tx\nEOF",
+        "mytool $X",
+        "mytool \"$X\"",
+        "mytool `echo hi`",
+        "mytool ${X}",
+        "mytool $(echo hi)",
+        "mytool a=$X",
+        "X=$Y mytool sub",
+        "mytool a && $X b",
+        "(mytool a)",
+        "{ mytool a; }",
+        "for x in a; do mytool $x; done",
+        "case x in a) mytool a;; esac",
+        "f() { mytool a; }",
+    ] {
+        assert!(suggested(command).is_empty(), "{command}");
+    }
 }

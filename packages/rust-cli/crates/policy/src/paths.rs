@@ -90,7 +90,7 @@ fn glob_regex(glob: &str) -> Option<Regex> {
 
 /// 规则的根与相对根的 glob。根是本机写法
 /// （`/`、工作区根、home 或 Windows 的 `C:\`），glob 不以 `/` 开头。
-fn anchor(pattern: &str, root: &str, context: &PathContext) -> (String, String) {
+pub(crate) fn anchor(pattern: &str, root: &str, context: &PathContext) -> (String, String) {
     let windows = context.style == PathStyle::Windows;
     // Windows：`~\x`、`\x`（`\!`、`\#` 是 gitignore 的转义，除外）先把 `\` 全换成 `/`。
     let escaped = matches!(pattern.as_bytes().get(1), Some(b'!' | b'#'));
@@ -178,9 +178,19 @@ pub fn rule_matches(
     else {
         return false;
     };
-    let Some(regex) = glob_regex(glob.trim_end_matches('/')) else {
+    let glob = glob.trim_end_matches('/');
+    let Some(regex) = glob_regex(glob) else {
         return false;
     };
+    // 修复（工作线 F85）：`x/**` 也匹配 `x` 目录本身（对照实现按 gitignore 的 `x` 匹配）。以前只匹配它下面的，
+    // `Read(//etc/**)` 下 `cd /etc`、`ls /etc` 只按工作目录外询问。
+    if let Some(directory) = glob
+        .strip_suffix("/**")
+        .filter(|directory| directory.contains(|c| c != '/'))
+        && glob_regex(directory).is_some_and(|regex| regex.is_match(relative))
+    {
+        return true;
+    }
     let mut candidate = relative;
     loop {
         if regex.is_match(candidate) {

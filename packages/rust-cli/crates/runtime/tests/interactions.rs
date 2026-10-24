@@ -12,11 +12,15 @@ mod interactions {
     use futures_util::StreamExt;
     use futures_util::stream::BoxStream;
     use rust_cli_kernel_api::env::{
-        CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext,
-        Outcome, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+        CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
+        ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
     };
     use rust_cli_kernel_api::ids::{
         CommandId, EnvironmentId, InteractionId, OperationId, SessionId,
+    };
+    use rust_cli_kernel_api::local_services::{Fetch, Git};
+    use rust_cli_kernel_api::machine::{
+        Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
     };
     use rust_cli_kernel_api::message::{ContentBlock, Message, StopReason, Usage};
     use rust_cli_kernel_api::model::{BlockDelta, ModelError, ModelEvent, ModelPort, ModelRequest};
@@ -28,7 +32,8 @@ mod interactions {
     };
     use rust_cli_kernel_api::store::Fact;
     use rust_cli_kernel_api::testing::{
-        FixedClock, MemoryStore, SequentialIds, selection, text_response, tool_use_response,
+        FixedClock, MemoryStore, SequentialIds, environments, selection, text_response,
+        tool_use_response,
     };
     use rust_cli_runtime::{Defaults, LocalKernel, Ports};
     use serde_json::{Value, json};
@@ -122,11 +127,14 @@ mod interactions {
     }
 
     #[async_trait]
-    impl Environment for GatedEnv {
+    impl EnvInfo for GatedEnv {
         async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
             Err(unsupported())
         }
+    }
 
+    #[async_trait]
+    impl Files for GatedEnv {
         async fn read_file(
             &self,
             _workspace: &WorkspaceRef,
@@ -143,7 +151,10 @@ mod interactions {
         ) -> Result<WriteReceipt, EnvError> {
             Err(unsupported())
         }
+    }
 
+    #[async_trait]
+    impl Commands for GatedEnv {
         async fn start_command(
             &self,
             _workspace: &WorkspaceRef,
@@ -175,6 +186,14 @@ mod interactions {
         }
     }
 
+    impl Search for GatedEnv {}
+    impl Shell for GatedEnv {}
+    impl Background for GatedEnv {}
+    impl Checkpoints for GatedEnv {}
+    impl Pdf for GatedEnv {}
+    impl Git for GatedEnv {}
+    impl Fetch for GatedEnv {}
+
     fn workspace() -> WorkspaceRef {
         WorkspaceRef {
             environment: EnvironmentId::new("local"),
@@ -182,15 +201,15 @@ mod interactions {
         }
     }
 
-    fn kernel(
+    fn kernel<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
         model: Arc<dyn ModelPort>,
-        env: Arc<dyn Environment>,
+        env: Arc<E>,
         store: Arc<MemoryStore>,
     ) -> LocalKernel {
         LocalKernel::new(
             Ports {
                 model,
-                env,
+                environments: environments(env),
                 store: store.clone(),
                 artifacts: store,
                 clock: Arc::new(FixedClock(1_000)),

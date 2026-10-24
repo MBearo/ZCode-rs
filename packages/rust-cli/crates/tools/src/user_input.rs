@@ -78,7 +78,8 @@ impl UserInputTools {
                     path: EnvPath::new(&path),
                 };
                 let entries = context
-                    .env
+                    .machine
+                    .files()
                     .list_dir(&context.workspace, request)
                     .await
                     .ok()?;
@@ -140,7 +141,8 @@ impl UserInputTools {
             path: EnvPath::new(path),
         };
         let file = context
-            .env
+            .machine
+            .files()
             .read_file(&context.workspace, request)
             .await
             .ok()?;

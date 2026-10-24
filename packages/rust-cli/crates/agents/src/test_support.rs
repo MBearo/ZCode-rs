@@ -6,10 +6,12 @@ use async_trait::async_trait;
 use rust_cli_base::TaskScope;
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::agents::{SubagentQueries, TaskListStore};
-use rust_cli_kernel_api::env::{EnvPath, Environment, OperationContext, Origin, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
     EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
 };
+use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::message::{AssistantMessage, ContentBlock, Message, StopReason, Usage};
 use rust_cli_kernel_api::model::{QuerySource, SystemBlock};
@@ -20,8 +22,8 @@ use rust_cli_kernel_api::orchestration::{
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::{
-    FakeTool, FixedClock, FixedContext, ListTools, MemoryStore, RecordingSink, SequentialIds,
-    UnusedEnvironment, selection,
+    AllPorts, FakeTool, FixedClock, FixedContext, ListTools, MemoryStore, RecordingSink,
+    SequentialIds, UnusedEnvironment, local_services, machine, selection,
 };
 use rust_cli_kernel_api::tool::{Tool, ToolOutput, ToolUseContext, Validation};
 use serde_json::Value;
@@ -180,8 +182,9 @@ impl QueryRunner for FakeRunner {
 /// （`<tool_use_error>…</tool_use_error>`，is_error）。
 pub(crate) struct ParentRunner {
     pub(crate) registry: Arc<dyn ToolRegistry>,
-    /// 工具调用看到的执行环境。
-    pub(crate) env: Arc<dyn Environment>,
+    /// 工具调用看到的机器与本机服务。
+    pub(crate) machine: MachineEnv,
+    pub(crate) local: LocalServices,
     pub(crate) tool: String,
     pub(crate) input: Value,
     pub(crate) output: Arc<Mutex<Option<ToolOutput>>>,
@@ -195,6 +198,7 @@ pub(crate) fn workspace() -> WorkspaceRef {
 }
 
 pub(crate) fn tool_context(session: &SessionId, run: &RunId) -> ToolUseContext {
+    let env = Arc::new(UnusedEnvironment);
     ToolUseContext {
         session: session.clone(),
         run: run.clone(),
@@ -203,7 +207,8 @@ pub(crate) fn tool_context(session: &SessionId, run: &RunId) -> ToolUseContext {
         workspace: workspace(),
         mode: PermissionMode::DontAsk,
         cancel: CancellationToken::new(),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: Arc::new(RecordingSink::default()),
         operation: OperationContext {
@@ -231,7 +236,8 @@ impl QueryRunner for ParentRunner {
         let (progress, _updates) = mpsc::channel(16);
         let mut context = tool_context(&request.session, &request.run);
         context.agent = request.agent.clone();
-        context.env = self.env.clone();
+        context.machine = self.machine.clone();
+        context.local = self.local.clone();
         let output = match tool.validate_input(&self.input, &context).await {
             Validation::Invalid { message, .. } => ToolOutput {
                 content: vec![ToolResultContent::Text {
@@ -256,8 +262,9 @@ pub(crate) struct Harness {
     pub(crate) tasks: Arc<MemoryTaskLists>,
     pub(crate) seen: Arc<Mutex<Vec<Seen>>>,
     pub(crate) absorbed: Arc<Mutex<Vec<(SessionId, String)>>>,
-    /// 父运行里工具调用看到的执行环境（缺省什么都不支持）。
-    pub(crate) env: Arc<dyn Environment>,
+    /// 父运行里工具调用看到的机器与本机服务（缺省什么都不支持）。
+    pub(crate) machine: MachineEnv,
+    pub(crate) local: LocalServices,
     pub(crate) _scope: TaskScope,
 }
 
@@ -265,7 +272,7 @@ pub(crate) fn harness(gate: Option<Arc<Notify>>) -> Harness {
     built(
         gate.map(Gate::Shared),
         true,
-        Arc::new(UnusedEnvironment),
+        machine(Arc::new(UnusedEnvironment)),
         no_peers(),
     )
 }
@@ -276,7 +283,7 @@ fn no_peers() -> Arc<dyn rust_cli_kernel_api::peers::PeerMessaging> {
 
 /// 同伴会话换成 `peers`（cross-session.md §1.3、§1.4）。
 pub(crate) fn with_peers(peers: Arc<dyn rust_cli_kernel_api::peers::PeerMessaging>) -> Harness {
-    built(None, true, Arc::new(UnusedEnvironment), peers)
+    built(None, true, machine(Arc::new(UnusedEnvironment)), peers)
 }
 
 /// 每个子会话分别放行；`keep_alive` 是交互模式（停放）还是 `-p`。
@@ -285,18 +292,29 @@ pub(crate) fn held(gates: &Gates, keep_alive: bool) -> Harness {
 }
 
 /// 同 [`held`]，agents 自己用的执行环境换成 `env`（子会话里后台命令的通知，agents.md §5.2）。
-pub(crate) fn held_with_env(gates: &Gates, keep_alive: bool, env: Arc<dyn Environment>) -> Harness {
+pub(crate) fn held_with_env<E: AllPorts + 'static>(
+    gates: &Gates,
+    keep_alive: bool,
+    env: Arc<E>,
+) -> Harness {
     built(
         Some(Gate::PerSession(gates.clone())),
         keep_alive,
-        env,
+        machine(env),
         no_peers(),
     )
 }
 
 /// 基础注册表按规则藏起 `hidden` 里的名字（整个工具的 deny 规则，tools-files.md §1.1.1）。
 pub(crate) fn hiding(hidden: &'static [&'static str]) -> Harness {
-    built_with(None, true, Arc::new(UnusedEnvironment), no_peers(), hidden)
+    built_with(
+        None,
+        true,
+        machine(Arc::new(UnusedEnvironment)),
+        no_peers(),
+        hidden,
+        Arc::new(FixedClock(1_000)),
+    )
 }
 
 /// 藏起一些名字的基础注册表：自己的工具里去掉它们，`hides` 告诉外层。
@@ -326,18 +344,43 @@ impl ToolRegistry for Hiding {
 fn built(
     gate: Option<Gate>,
     keep_alive: bool,
-    env: Arc<dyn Environment>,
+    machine: MachineEnv,
     peers: Arc<dyn rust_cli_kernel_api::peers::PeerMessaging>,
 ) -> Harness {
-    built_with(gate, keep_alive, env, peers, &[])
+    built_with(
+        gate,
+        keep_alive,
+        machine,
+        peers,
+        &[],
+        Arc::new(FixedClock(1_000)),
+    )
+}
+
+/// 同 [`held_with_env`]，另给时钟（子代理里 monitor 的批与到期按时钟算，agents.md §5.3）。
+pub(crate) fn held_with_clock<E: AllPorts + 'static>(
+    gates: &Gates,
+    keep_alive: bool,
+    env: Arc<E>,
+    clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
+) -> Harness {
+    built_with(
+        Some(Gate::PerSession(gates.clone())),
+        keep_alive,
+        machine(env),
+        no_peers(),
+        &[],
+        clock,
+    )
 }
 
 fn built_with(
     gate: Option<Gate>,
     keep_alive: bool,
-    env: Arc<dyn Environment>,
+    machine_env: MachineEnv,
     peers: Arc<dyn rust_cli_kernel_api::peers::PeerMessaging>,
     hidden: &'static [&'static str],
+    clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
 ) -> Harness {
     let scope = TaskScope::root("agents-test", |_| {});
     let store = Arc::new(MemoryStore::default());
@@ -355,14 +398,26 @@ fn built_with(
     let ports = AgentsPorts {
         store: store.clone(),
         ids: Arc::new(SequentialIds::default()),
-        clock: Arc::new(FixedClock(1_000)),
-        env,
-        catalog: Arc::new(crate::AgentCatalog::new(Arc::new(UnusedEnvironment))),
+        clock,
+        machine: machine_env,
+        catalog: Arc::new(crate::AgentCatalog::new(
+            Arc::new(UnusedEnvironment),
+            Arc::new(UnusedEnvironment),
+        )),
         tasks: tasks.clone() as Arc<dyn TaskListStore>,
         queries: Arc::new(queries),
         context: Arc::new(FixedContext(Vec::new())),
         spawner: scope.spawner(),
         shell_notice: |notice| ("completed", format!("<task-id>{}</task-id>", notice.task)),
+        monitor: crate::MonitorTexts {
+            notice: |notice| format!("{notice:?}"),
+            end: |notice, events| {
+                (
+                    "completed",
+                    format!("<task-id>{}</task-id> end {events:?}", notice.task),
+                )
+            },
+        },
         peers,
     };
     let agents = Agents::new(
@@ -384,18 +439,26 @@ fn built_with(
         tasks,
         seen,
         absorbed,
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(Arc::new(UnusedEnvironment)),
+        local: local_services(Arc::new(UnusedEnvironment)),
         _scope: scope,
     }
 }
 
 impl Harness {
+    /// 父运行里工具调用看到的机器与本机服务换成 `env`（一个替身实现全部端口）。
+    pub(crate) fn set_env<E: AllPorts + 'static>(&mut self, env: Arc<E>) {
+        self.machine = machine(env.clone());
+        self.local = local_services(env);
+    }
+
     /// 在会话 `session` 的一次运行里调用 `tool`。
     pub(crate) async fn call(&self, session: &str, tool: &str, input: Value) -> ToolOutput {
         let output = Arc::new(Mutex::new(None));
         let parent = ParentRunner {
             registry: self.agents.registry(),
-            env: self.env.clone(),
+            machine: self.machine.clone(),
+            local: self.local.clone(),
             tool: tool.to_owned(),
             input,
             output: output.clone(),

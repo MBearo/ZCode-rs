@@ -251,6 +251,9 @@ pub(crate) enum ResultKind {
         result: String,
         ttft_ms: Option<u64>,
     },
+    /// 发请求前到了阻塞线（compact.md §2.2）：`success`、`is_error`，`result` 是错误文字，`terminal_reason` 是
+    /// `blocking_limit`。
+    Blocked { result: String },
     /// `error_max_turns`。
     MaxTurns { max: u64 },
     /// `error_during_execution`（被中断）。
@@ -261,7 +264,7 @@ impl ResultKind {
     pub(crate) fn is_error(&self) -> bool {
         match self {
             Self::Success { is_error, .. } => *is_error,
-            Self::MaxTurns { .. } | Self::Interrupted => true,
+            Self::Blocked { .. } | Self::MaxTurns { .. } | Self::Interrupted => true,
         }
     }
 
@@ -271,6 +274,7 @@ impl ResultKind {
                 is_error: false, ..
             } => "completed",
             Self::Success { is_error: true, .. } => "api_error",
+            Self::Blocked { .. } => "blocking_limit",
             Self::MaxTurns { .. } => "max_turns",
             Self::Interrupted => "aborted_streaming",
         }
@@ -341,6 +345,11 @@ pub(crate) fn turn_result(result: TurnResult<'_>) -> Value {
             if let (false, Some(ttft)) = (is_error, ttft_ms) {
                 put("ttft_ms", json!(ttft));
             }
+        }
+        ResultKind::Blocked { result: text } => {
+            put("subtype", json!("success"));
+            put("api_error_status", Value::Null);
+            put("result", json!(text));
         }
         ResultKind::MaxTurns { max } => {
             put("subtype", json!("error_max_turns"));

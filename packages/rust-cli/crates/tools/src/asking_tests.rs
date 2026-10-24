@@ -9,7 +9,7 @@ use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, QuestionAnswer,
 };
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment};
+use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment, local_services, machine};
 use rust_cli_kernel_api::tool::ToolUseContext;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -41,6 +41,7 @@ impl Interactions for Silent {
 }
 
 fn context(interactions: Arc<dyn Interactions>, cancel: CancellationToken) -> ToolUseContext {
+    let env = Arc::new(UnusedEnvironment);
     ToolUseContext {
         session: SessionId::new("sess_1"),
         run: RunId::new("run_1"),
@@ -52,7 +53,8 @@ fn context(interactions: Arc<dyn Interactions>, cancel: CancellationToken) -> To
         },
         mode: PermissionMode::Default,
         cancel,
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions,
         operation: OperationContext {

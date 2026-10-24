@@ -17,7 +17,7 @@ use rust_cli_kernel_api::orchestration::{
     QueryStop, RunSink, ToolRegistry,
 };
 use rust_cli_kernel_api::testing::{
-    ListTools, MemoryStore, NoHooks, SequentialIds, UnusedEnvironment,
+    ListTools, MemoryStore, NoHooks, SequentialIds, UnusedEnvironment, local_services, machine,
 };
 use rust_cli_kernel_api::tool::ReadFileStates;
 use serde_json::json;
@@ -146,6 +146,7 @@ pub(crate) fn ports_with_files(
     files: Arc<dyn ReadFileStates>,
 ) -> CompactPorts {
     let store = Arc::new(MemoryStore::default());
+    let env = Arc::new(UnusedEnvironment);
     CompactPorts {
         runner,
         tools,
@@ -153,7 +154,8 @@ pub(crate) fn ports_with_files(
         context: Arc::new(NoListings),
         hooks: Arc::new(NoHooks),
         ids: Arc::new(SequentialIds::default()),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: store,
         generation: Generation::new("g"),
     }

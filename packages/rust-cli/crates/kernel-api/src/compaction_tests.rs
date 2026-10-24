@@ -83,3 +83,72 @@ fn the_used_percent_is_the_context_used_formula() {
         serde_json::json!({"type": "context_usage", "used_tokens": 1, "max_tokens": 2})
     );
 }
+
+/// 阻塞线的缺省：编排 trait 的默认实现不拦；压缩附件带历史的入口缺省转到不带历史的那个。
+#[test]
+fn the_defaults_do_not_block_and_ignore_the_history() {
+    use super::{CompactRequest, CompactResult, Compactor, PostCompactContext};
+    use crate::message::{AttachmentMessage, Message};
+    use crate::model::ModelSelection;
+    use crate::orchestration::{ContextRequest, OrchestrationError};
+    use async_trait::async_trait;
+    use futures_util::FutureExt;
+    use tokio_util::sync::CancellationToken;
+
+    struct Plain;
+    #[async_trait]
+    impl Compactor for Plain {
+        fn should_auto_compact(&self, _: &[Message], _: &ModelSelection) -> bool {
+            false
+        }
+        async fn compact(
+            &self,
+            _: CompactRequest,
+            _: CancellationToken,
+        ) -> Result<CompactResult, OrchestrationError> {
+            Err(OrchestrationError::Unsupported {
+                what: "none".to_owned(),
+            })
+        }
+    }
+    #[async_trait]
+    impl PostCompactContext for Plain {
+        async fn post_compact(
+            &self,
+            _: ContextRequest,
+            kept: &[Message],
+        ) -> Result<Vec<AttachmentMessage>, OrchestrationError> {
+            Ok(vec![AttachmentMessage {
+                id: crate::ids::MessageId::new(format!("kept-{}", kept.len())),
+                source: "x".to_owned(),
+                text: String::new(),
+                data: serde_json::Value::Null,
+            }])
+        }
+    }
+    let selection: ModelSelection =
+        serde_json::from_value(serde_json::json!({"provider": "p", "model": "m"})).expect("model");
+    assert_eq!(Plain.blocking_limit(&[], &selection, Some("x")), None);
+    assert_eq!(super::PROMPT_TOO_LONG, "Prompt is too long");
+    let request: ContextRequest = serde_json::from_value(serde_json::json!({
+        "session": "s", "workspace": {"environment": "e", "root": "/w"}, "source": {"kind": "main_thread"},
+        "mode": "default", "tool_names": [], "selection": {"provider": "p", "model": "m"}
+    }))
+    .expect("request");
+    let found = Plain
+        .post_compact_with_history(request, &[], &[])
+        .now_or_never()
+        .expect("ready")
+        .expect("attachments");
+    assert_eq!(found[0].id.as_str(), "kept-0");
+}
+
+/// 粗估：UTF-16 码元数 / 4，四舍五入。
+#[test]
+fn rough_tokens_round_the_utf16_length() {
+    use super::rough_tokens;
+    assert_eq!(rough_tokens(""), 0);
+    assert_eq!(rough_tokens("ab"), 1);
+    assert_eq!(rough_tokens("abcdef"), 2);
+    assert_eq!(rough_tokens("😀😀"), 1);
+}

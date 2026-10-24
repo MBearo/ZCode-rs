@@ -55,4 +55,33 @@ pub trait ListingSource: Send + Sync {
     ) -> Result<Vec<ListingEntry>, OrchestrationError> {
         Ok(Vec::new())
     }
+
+    /// 这次会话调用过的 skill（压缩后带回，docs/specs/rust-cli/compact.md §3.4）：`history` 是全部历史（含之前的压缩
+    /// 边界之前的部分），最近调用的在前，同名只留最近一次。缺省没有。
+    async fn invoked_skills(
+        &self,
+        _request: &ContextRequest,
+        _history: &[Message],
+    ) -> Result<Vec<InvokedSkill>, OrchestrationError> {
+        Ok(Vec::new())
+    }
+
+    /// 人类输入中间写的 `/<名字>` 里对得上可调用 skill 的名字（`skill_mention`，docs/specs/rust-cli/ext.md §2.8、
+    /// context.md §4.4），同一个 skill 一次、按出现的顺序。`input` 是这条输入的文字。不是人类键入的输入
+    /// （`-p`、stream-json）返回空。缺省没有。
+    async fn skill_mentions(
+        &self,
+        _request: &ContextRequest,
+        _input: &str,
+    ) -> Result<Vec<String>, OrchestrationError> {
+        Ok(Vec::new())
+    }
+}
+
+/// 调用过的一个 skill：名字、来源路径（`<来源>:<名字>`）与调用时展开的正文。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InvokedSkill {
+    pub name: String,
+    pub path: String,
+    pub content: String,
 }

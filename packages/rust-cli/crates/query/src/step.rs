@@ -15,7 +15,6 @@ use rust_cli_kernel_api::mcp_state::{McpView, WAIT_FOR_MCP_SERVERS};
 use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
 use rust_cli_kernel_api::tool::Tool;
 use rust_cli_kernel_api::tool_search::TOOL_SEARCH;
-use rust_cli_prompts::models;
 
 use crate::RunScope;
 
@@ -27,8 +26,8 @@ pub(crate) struct StepTools {
 
 impl StepTools {
     /// 取快照并过滤：启用的工具；去掉当前模型的生效配置不支持的 WebSearch（要 `supportsNativeWebSearch`，修复线
-    /// F23，tools-more.md §5；模型端口答不出能力时不去掉）；启用 ToolSearch 时去掉 WaitForMcpServers
-    ///（tools-more.md §3.3 第 4 条）。
+    /// F23，tools-more.md §5；模型端口答不出能力时不去掉）；工具里有 ToolSearch 时去掉 WaitForMcpServers（tools-more.md
+    /// §3.3 第 4 条：乐观判断，`ENABLE_TOOL_SEARCH` 为关时 ToolSearch 不启用、不在快照里，工作线 F89）。
     pub(crate) async fn refresh(scope: &RunScope, selection: &ModelSelection) -> Self {
         let capabilities = scope.parts.model.capabilities(selection).await;
         let web_search = capabilities
@@ -40,13 +39,8 @@ impl StepTools {
             .into_iter()
             .filter(|tool| tool.is_enabled() && (web_search || !tool.needs_native_web_search()))
             .collect();
-        let tool_search = models::supports_tool_search(
-            &selection.model,
-            capabilities
-                .as_ref()
-                .map(|found| found.supports_tool_search),
-        ) && tools.iter().any(|tool| tool.name() == TOOL_SEARCH);
-        if tool_search {
+        // 修改（工作线 F89）：不再看模型（F84 时禁用表里的模型不开）；`auto` 而这一步没到门槛时也去掉（乐观判断，tools-more.md §3.2.1）。
+        if tools.iter().any(|tool| tool.name() == TOOL_SEARCH) {
             tools.retain(|tool| tool.name() != WAIT_FOR_MCP_SERVERS);
         }
         Self {

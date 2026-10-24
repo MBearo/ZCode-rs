@@ -6,8 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::env::{EnvPath, Environment, WorkspaceRef};
+use crate::env::{EnvPath, WorkspaceRef};
 use crate::env_files::{FileKind, PathStyle, StatFile};
+use crate::machine::Files;
 
 /// 读取 `cwd` 所在仓库的 git 状态（read）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,15 +72,11 @@ pub fn marks_git_root(kind: FileKind) -> bool {
 
 /// `dot_git`（某一层的 `.git`）是不是 git 根的标记：经执行环境 `stat`，种类按 [`marks_git_root`]；不存在或
 /// 出错都算不是。路径怎么拼由调用方决定。
-pub async fn has_git_marker(
-    env: &dyn Environment,
-    workspace: &WorkspaceRef,
-    dot_git: &str,
-) -> bool {
+pub async fn has_git_marker(files: &dyn Files, workspace: &WorkspaceRef, dot_git: &str) -> bool {
     let request = StatFile {
         path: EnvPath::new(dot_git),
     };
-    matches!(env.stat(workspace, request).await, Ok(Some(stat)) if marks_git_root(stat.kind))
+    matches!(files.stat(workspace, request).await, Ok(Some(stat)) if marks_git_root(stat.kind))
 }
 
 /// `.git` 文件的内容指向的 gitdir：去掉首尾空白、去掉 `gitdir:`、再去掉空白。不以
@@ -98,7 +95,7 @@ pub fn gitdir_pointer(text: &str) -> Option<&str> {
 ///
 /// F58：以前 ext（skill 目录）与 agents（agent 目录）各写一份。
 pub async fn project_levels(
-    env: &dyn Environment,
+    files: &dyn Files,
     workspace: &WorkspaceRef,
     style: PathStyle,
     cwd: &str,
@@ -110,7 +107,7 @@ pub async fn project_levels(
         if home.is_some_and(|home| style.same(&dir, home)) {
             break;
         }
-        let root = has_git_marker(env, workspace, &style.join(&dir, &[".git"])).await;
+        let root = has_git_marker(files, workspace, &style.join(&dir, &[".git"])).await;
         current = if root { None } else { style.parent(&dir) };
         levels.push(dir);
     }

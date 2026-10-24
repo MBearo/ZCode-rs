@@ -56,6 +56,22 @@ pub const SUCCESS_LIGHT: Rgb = (44, 122, 57);
 pub const SUCCESS_NAMED_DARK: Color = Color::LightGreen;
 pub const SUCCESS_NAMED_LIGHT: Color = Color::Green;
 
+/// 自主模式（guarded）的名称：App 的 `--color-icon-blue`（= `--color-terminal-bright-blue`，`packages/ui/src/styles.css`）。
+/// 浅色主题 sky-500、深色主题 sky-600（Tailwind 4 的 oklch 换成 sRGB）；不按对比度调（App 也不调）。16 色终端用蓝。
+/// 工作线 F76（用户决定 2026-10-23，tui.md §7.4）。
+pub const ICON_BLUE_LIGHT: Rgb = (0, 166, 244);
+pub const ICON_BLUE_DARK: Rgb = (0, 132, 209);
+pub const ICON_BLUE_NAMED: Color = Color::Blue;
+/// 完全访问（yolo）的名称：App 的 `--color-warning`，浅色主题 yellow-600、深色主题 yellow-500；16 色终端用黄。
+pub const WARNING_LIGHT: Rgb = (208, 135, 0);
+pub const WARNING_DARK: Rgb = (240, 177, 0);
+pub const WARNING_NAMED: Color = Color::Yellow;
+/// 切到完全访问的确认框里勾选之后的“确认启用”：App 的 `--color-destructive`（确认按钮是 `variant="destructive"`），
+/// 浅色主题 red-600、深色主题 red-500；16 色终端用红。工作线 F87（用户决定 2026-10-24，tui.md §7.4、§7.8）。
+pub const DESTRUCTIVE_LIGHT: Rgb = (231, 0, 11);
+pub const DESTRUCTIVE_DARK: Rgb = (251, 44, 54);
+pub const DESTRUCTIVE_NAMED: Color = Color::Red;
+
 fn luminance((r, g, b): Rgb) -> f64 {
     let channel = |value: u8| {
         let value = f64::from(value) / 255.0;
@@ -214,6 +230,27 @@ impl Palette {
         } else {
             (SUCCESS_DARK, SUCCESS_NAMED_DARK)
         };
+        Style::default().fg(self.tint(rgb).unwrap_or(named))
+    }
+
+    /// 自主模式的颜色（[`ICON_BLUE_LIGHT`] / [`ICON_BLUE_DARK`]），16 色终端是蓝。
+    pub fn icon_blue(&self) -> Style {
+        self.theme_color(ICON_BLUE_LIGHT, ICON_BLUE_DARK, ICON_BLUE_NAMED)
+    }
+
+    /// 完全访问的颜色（[`WARNING_LIGHT`] / [`WARNING_DARK`]），16 色终端是黄。
+    pub fn warning(&self) -> Style {
+        self.theme_color(WARNING_LIGHT, WARNING_DARK, WARNING_NAMED)
+    }
+
+    /// 确认框里可用的“确认启用”（[`DESTRUCTIVE_LIGHT`] / [`DESTRUCTIVE_DARK`]），16 色终端是红。
+    pub fn destructive(&self) -> Style {
+        self.theme_color(DESTRUCTIVE_LIGHT, DESTRUCTIVE_DARK, DESTRUCTIVE_NAMED)
+    }
+
+    /// 按背景的明暗取 App 主题里的一种颜色，原样用（不柔化、不调对比度）。
+    fn theme_color(&self, light: Rgb, dark: Rgb, named: Color) -> Style {
+        let rgb = if self.light { light } else { dark };
         Style::default().fg(self.tint(rgb).unwrap_or(named))
     }
 

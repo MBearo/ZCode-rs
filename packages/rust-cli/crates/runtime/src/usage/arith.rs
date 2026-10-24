@@ -17,7 +17,7 @@ pub(crate) struct McpTool {
 
 /// 消息的来源（§4 第 4 条）。
 pub(crate) enum Messages {
-    /// 没有用量锚点：计数接口（或估算）给出的数。
+    /// 没有用量锚点：活动历史的本地估算（工作线 F93 之前是计数接口给的数）。
     Counted(u64),
     /// 最近一次响应的输入（含缓存读写）与它之后消息的估算。
     Measured { input: u64, tail: u64 },

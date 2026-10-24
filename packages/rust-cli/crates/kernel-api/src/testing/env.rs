@@ -1,13 +1,16 @@
-//! 执行环境的测试替身。
+//! 执行环境的测试替身。每个替身实现一台机器的 8 个端口与本机的 2 个服务端口（remote-exec.md §15.8.1）；
+//! 没有覆盖的方法用端口的缺省（`Unsupported`）。
 
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, Environment, FileContent, FileVersion, OperationContext,
-    Outcome, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, FileVersion, OperationContext, Outcome,
+    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::ids::{OperationId, SessionId};
+use crate::local_services::{Fetch, Git};
+use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
 
 /// 文本回路用不到执行环境：每个操作都返回 `Unsupported`。
 pub struct UnusedEnvironment;
@@ -20,11 +23,14 @@ pub struct FactsEnvironment {
 }
 
 #[async_trait]
-impl Environment for FactsEnvironment {
+impl EnvInfo for FactsEnvironment {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Ok(self.facts.clone())
     }
+}
 
+#[async_trait]
+impl Files for FactsEnvironment {
     async fn read_file(
         &self,
         _workspace: &WorkspaceRef,
@@ -50,7 +56,10 @@ impl Environment for FactsEnvironment {
     ) -> Result<WriteReceipt, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Commands for FactsEnvironment {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
@@ -81,6 +90,14 @@ impl Environment for FactsEnvironment {
     }
 }
 
+impl Search for FactsEnvironment {}
+impl Shell for FactsEnvironment {}
+impl Background for FactsEnvironment {}
+impl Checkpoints for FactsEnvironment {}
+impl Pdf for FactsEnvironment {}
+impl Git for FactsEnvironment {}
+impl Fetch for FactsEnvironment {}
+
 fn unused() -> EnvError {
     EnvError::Unsupported {
         what: "test environment".to_owned(),
@@ -88,11 +105,14 @@ fn unused() -> EnvError {
 }
 
 #[async_trait]
-impl Environment for UnusedEnvironment {
+impl EnvInfo for UnusedEnvironment {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Files for UnusedEnvironment {
     async fn read_file(
         &self,
         _workspace: &WorkspaceRef,
@@ -109,7 +129,10 @@ impl Environment for UnusedEnvironment {
     ) -> Result<WriteReceipt, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Commands for UnusedEnvironment {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
@@ -139,3 +162,11 @@ impl Environment for UnusedEnvironment {
         Ok(())
     }
 }
+
+impl Search for UnusedEnvironment {}
+impl Shell for UnusedEnvironment {}
+impl Background for UnusedEnvironment {}
+impl Checkpoints for UnusedEnvironment {}
+impl Pdf for UnusedEnvironment {}
+impl Git for UnusedEnvironment {}
+impl Fetch for UnusedEnvironment {}

@@ -5,17 +5,13 @@
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use super::{PREVIEW, View, dashed, dim, frame, input, option};
+use super::{At, PREVIEW, Rows, View, dashed, dim, frame, input, input_row, named, option, prefix};
 use crate::ui::i18n::Lang;
 use crate::ui::interaction::Interaction;
 use crate::ui::markdown;
 
 impl Interaction {
-    pub(super) fn plan_lines(
-        &self,
-        plan: &str,
-        view: &View<'_>,
-    ) -> (Vec<Line<'static>>, Vec<(usize, usize)>) {
+    pub(super) fn plan_lines(&self, plan: &str, view: &View<'_>) -> (Vec<Line<'static>>, Rows, At) {
         let zh = view.lang == Lang::Zh;
         let mut lines = frame(
             if zh {
@@ -70,21 +66,30 @@ impl Interaction {
         };
         let last = labels.len() - 1;
         let mut options = Vec::new();
+        let mut cursor = None;
         for (index, label) in labels.into_iter().enumerate() {
-            let spans = if index == last && self.cursor == last {
-                input(
-                    &self.text,
-                    if zh {
-                        "告诉 ZCode 要改什么"
-                    } else {
-                        "Tell ZCode what to change"
-                    },
-                )
-            } else {
-                vec![Span::raw(label)]
-            };
+            let focused = self.cursor == index;
             options.push((lines.len(), index));
-            lines.push(option(self.cursor == index, index + 1, spans, view));
+            // 焦点在“继续计划”时这一行就是输入，显示光标（工作线 F76，tui.md §7.7）。
+            if index == last && focused {
+                let placeholder = if zh {
+                    "告诉 ZCode 要改什么"
+                } else {
+                    "Tell ZCode what to change"
+                };
+                let first = prefix(true, index + 1, view);
+                let content = input(&self.text, placeholder);
+                let (rows, at) = input_row(first, content, self.text.is_empty(), lines.len(), view);
+                lines.extend(rows);
+                cursor = Some(at);
+            } else {
+                lines.push(option(
+                    focused,
+                    index + 1,
+                    vec![named(label, focused, view)],
+                    view,
+                ));
+            }
         }
         lines.push(Line::default());
         let text = if zh {
@@ -93,6 +98,6 @@ impl Interaction {
             "{Enter} to select · {Esc} to keep planning"
         };
         lines.push(crate::ui::interaction_view::hint(text, view));
-        (lines, options)
+        (lines, options, cursor)
     }
 }

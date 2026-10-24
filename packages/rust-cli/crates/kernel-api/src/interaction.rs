@@ -41,12 +41,34 @@ pub enum PermissionAnswer {
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum QuestionAnswer {
     /// 问题文字 → 选中的标签（多选用 `, ` 连接；`Other` 是用户输入的文字），即工具结果里的
-    /// `answers`。
+    /// `answers`。其余字段是工作线 F72 新增的（serde 缺省为空、为空时不写出：旧的回答照读，只有 `answers` 的回答
+    /// JSON 不变；docs/specs/rust-cli/tools-more.md §1.1）。
     Answered {
         answers: std::collections::BTreeMap<String, String>,
+        /// 问题文字 → 这道题的预览与备注（工具结果里的 `annotations`）。
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        annotations: std::collections::BTreeMap<String, QuestionAnnotation>,
+        /// 用户没有选、直接写的回复（`response`）。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response: Option<String>,
+        /// 用户要求再多问几个（`followUp`）。
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        follow_up: bool,
+        /// 空闲到期自动提交：超时的毫秒数（`afkTimeoutMs`）。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        afk_timeout_ms: Option<u64>,
     },
     /// 用户不回答（esc）。
     Declined,
+}
+
+/// 一道题的注记：选中选项的预览（原文）与用户的备注（工作线 F72）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionAnnotation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 /// 计划审批（ExitPlanMode）的回答（[`InteractionAnswer::answer`] 的形状）。
@@ -70,4 +92,27 @@ pub enum PlanApprovalAnswer {
 pub struct InteractionAnswer {
     pub interaction: InteractionId,
     pub answer: Value,
+}
+
+/// 父会话已关闭（`/clear`、`/resume`）之后，旧会话里后台子代理的询问（docs/specs/rust-cli/agents.md §4.1.2，
+/// 工作线 F72 新增）：不属于任何打开着的会话，前端经 [`crate::session_api::Kernel::detached_asks`] 订阅。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetachedAsk {
+    pub interaction: InteractionId,
+    /// 发起询问的子代理所属的会话（已关闭）。
+    pub session: crate::ids::SessionId,
+    /// 那个会话关闭时的标题（没有标题时为空）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    pub request: crate::orchestration::InteractionRequest,
+}
+
+/// 旧会话询问的变化（[`crate::session_api::Kernel::detached_asks`] 的一项）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DetachedEvent {
+    /// 新的询问（订阅时先给出还没回答的）。装箱：询问比撤回大得多。
+    Asked { ask: Box<DetachedAsk> },
+    /// 回答了，或询问被撤回（子代理被停止）。
+    Resolved { interaction: InteractionId },
 }

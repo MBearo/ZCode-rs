@@ -70,18 +70,21 @@ async fn mode_and_effort_follow_node() {
         ui.wait_for("Ask before changes").await;
         ui.submit("/mode nope");
         ui.wait_for("Unsupported mode: nope.").await;
+        // 工作线 F76：照 App 只留三个模式，edit 不再收。
         ui.submit("/mode edit");
-        let screen = ui.wait_for("Mode switched to edit.").await;
-        assert!(screen.contains("Edit automatically"), "{screen}");
+        ui.wait_for("Unsupported mode: edit. Available modes: build, guarded, yolo.")
+            .await;
         // 修复线 F20：guarded 是真正的 guarded（App 的名称 Autonomous mode），以前当 Full access。
         ui.submit("/mode guarded");
         ui.wait_for("⏵⏵ Autonomous mode").await;
-        // F26 起不带参数是选择器：副标题写当前模式。
+        // F26 起不带参数是选择器：副标题写当前模式（F76 起是 App 的名称）。
         ui.submit("/mode");
-        ui.wait_for("Current mode: guarded.").await;
+        ui.wait_for("Current mode: Autonomous mode.").await;
         ui.key(KeyCode::Esc);
+        // 工作线 F87：切到完全访问先确认（yolo_confirm.rs）。
         ui.submit("/mode yolo");
-        ui.wait_for("Full access").await;
+        ui.confirm_full_access().await;
+        ui.wait_for("⏵⏵ Full access").await;
         ui.submit("/effort");
         ui.wait_for("Effort level: auto").await;
         // 测试的模型目录没有档位：只有 auto，`/effort` 不弹选择器。
@@ -103,15 +106,15 @@ async fn mode_without_arguments_opens_a_picker() {
         ui.wait_for("Ask before changes").await;
         ui.submit("/mode");
         let list = ui.wait_for("Choose a mode to switch to.").await;
-        assert!(list.contains("Current mode: build."), "{list}");
-        for name in ["plan", "build", "guarded", "yolo"] {
+        assert!(list.contains("Current mode: Ask before changes."), "{list}");
+        // 工作线 F76：App 的三个模式（名称与说明）。
+        for name in ["Ask before changes", "Autonomous mode", "Full access"] {
             assert!(list.contains(name), "{list}");
         }
         assert!(
-            list.contains("build ✔"),
+            list.contains("Ask before changes ✔"),
             "the current mode is marked: {list}"
         );
-        assert!(list.contains("Ask before changes"), "{list}");
         // esc 取消：列表关闭，模式不变。
         ui.key(KeyCode::Esc);
         let screen = ui
@@ -126,12 +129,13 @@ async fn mode_without_arguments_opens_a_picker() {
         ui.key(KeyCode::Down);
         ui.key(KeyCode::Down);
         ui.key(KeyCode::Enter);
-        let screen = ui.wait_for("Mode switched to yolo.").await;
-        assert!(screen.contains("Full access"), "{screen}");
+        ui.confirm_full_access().await;
+        let screen = ui.wait_for("Mode switched to Full access.").await;
+        assert!(screen.contains("⏵⏵ Full access"), "{screen}");
         // 再打开时当前值跟着变。
         ui.submit("/mode");
-        let list = ui.wait_for("Current mode: yolo.").await;
-        assert!(list.contains("yolo ✔"), "{list}");
+        let list = ui.wait_for("Current mode: Full access.").await;
+        assert!(list.contains("Full access ✔"), "{list}");
         ui.key(KeyCode::Esc);
     })
     .await;
@@ -223,7 +227,7 @@ async fn the_pickers_speak_chinese() {
         ui.wait_for("变更前确认").await;
         ui.submit("/mode");
         let list = ui.wait_for("选择要切换的模式").await;
-        assert!(list.contains("当前模式：build"), "{list}");
+        assert!(list.contains("当前模式：变更前确认"), "{list}");
         ui.key(KeyCode::Esc);
         ui.wait("the picker to close", |s| !s.contains("选择要切换的模式"))
             .await;

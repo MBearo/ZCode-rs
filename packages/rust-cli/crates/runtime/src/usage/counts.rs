@@ -1,28 +1,17 @@
-//! `/context` 的计数（docs/specs/rust-cli/context-usage.md §3）：经模型端口的 count_tokens，失败或不支持时
-//! 本地估算。成功的结果按请求内容缓存在内核里；消息的
-//! 计数不缓存。
-
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+//! `/context` 各部分的数（docs/specs/rust-cli/context-usage.md §3）：只用本地估算，不发模型请求。
+//!
+//! 修改（工作线 F93，用户决定 2026-10-24）：以前经模型端口的 count_tokens 计数，失败或不支持时才本地估算，成功的
+//! 结果按请求内容缓存；现在一律本地估算（计数失败时的同一套，D13），计数、缓存与只为计数服务的会话字段一起删掉。
 
 use rust_cli_kernel_api::message::ContentBlock;
-use rust_cli_kernel_api::model::{
-    ApiContent, ApiMessage, ApiRole, CountTokensRequest, ModelPort, ModelSelection, ToolDefinition,
-};
-use tokio_util::sync::CancellationToken;
+use rust_cli_kernel_api::model::{ApiContent, ApiMessage, ApiRole, ToolDefinition};
 
-/// 每次计数附带的工具开销：只有工具的请求减去它才是工具本身。
+/// 每次计数附带的工具开销：只有工具的那几项减去它才是工具本身。
 pub(crate) const TOOL_OVERHEAD: u64 = 500;
 
-/// 计数结果的缓存：键是请求的 JSON 文本。
-#[derive(Default)]
-pub(crate) struct Cache(Mutex<HashMap<String, u64>>);
-
-/// 一次 `/context` 的计数器。
-pub(crate) struct Counter<'a> {
-    pub(crate) model: &'a Arc<dyn ModelPort>,
-    pub(crate) selection: &'a ModelSelection,
-    pub(crate) cache: &'a Cache,
+/// 一次 `/context` 的估算器：每 token 字符数按模型（`rust_cli_prompts::models::chars_per_token`）。
+pub(crate) struct Counter {
+    pub(crate) per_token: u64,
 }
 
 /// 一段文字作为一条 user 消息。
@@ -45,8 +34,9 @@ pub(crate) fn rough(text: &str, per: u64) -> u64 {
     (units * 2 + per) / (per * 2)
 }
 
-/// 本地估算：消息按内容块（字符数 / 每 token 字符数，图片 2000），有工具时加 JSON 长度 / 2 与
-/// 开销。每 token 字符数按模型（修 bug（F10，context-usage.md D5）：以前一律按 4）。
+/// 本地估算（context-usage.md §3）：消息按内容块（字符数 / 每 token 字符数，图片 2000，其他块按 JSON 长度），有工具时加
+/// JSON 长度 / 2 与开销。没有消息时消息部分是 0（计数请求的占位 `foo` 不算）。每 token 字符数按模型（修 bug（F10，
+/// context-usage.md D5）：以前一律按 4）。
 fn estimate(messages: &[ApiMessage], tools: &[ToolDefinition], per: u64) -> u64 {
     let mut total: u64 = messages
         .iter()
@@ -65,64 +55,23 @@ fn estimate(messages: &[ApiMessage], tools: &[ToolDefinition], per: u64) -> u64 
     total
 }
 
-impl Counter<'_> {
-    /// 计一次；`cached` 为真时先查缓存、成功后写缓存（消息的计数传 false）。
-    pub(crate) async fn count(
-        &self,
-        messages: Vec<ApiMessage>,
-        tools: Vec<ToolDefinition>,
-        cached: bool,
-    ) -> u64 {
-        let key =
-            serde_json::to_string(&(&self.selection.model, &messages, &tools)).unwrap_or_default();
-        if cached && let Some(found) = self.lookup(&key) {
-            return found;
-        }
-        let request = CountTokensRequest {
-            selection: self.selection.clone(),
-            messages,
-            tools,
-        };
-        // 没有调用方会取消 `/context`：用一个不会被取消的令牌。
-        match self
-            .model
-            .count_tokens(request.clone(), CancellationToken::new())
-            .await
-        {
-            Ok(counted) => {
-                if cached {
-                    self.cache
-                        .0
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .insert(key, counted);
-                }
-                counted
-            }
-            Err(error) => {
-                tracing::debug!(%error, "count_tokens unavailable; estimating locally");
-                let per = rust_cli_prompts::models::chars_per_token(&self.selection.model);
-                estimate(&request.messages, &request.tools, per)
-            }
-        }
-    }
-
-    fn lookup(&self, key: &str) -> Option<u64> {
-        self.cache
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(key)
-            .copied()
+impl Counter {
+    /// 一组消息与工具。
+    pub(crate) fn count(&self, messages: &[ApiMessage], tools: &[ToolDefinition]) -> u64 {
+        estimate(messages, tools, self.per_token)
     }
 
     /// 一段文字（system 段落、规则文件、agent、MCP instructions）。
-    pub(crate) async fn text(&self, text: &str) -> u64 {
-        self.count(user_text(text), Vec::new(), true).await
+    pub(crate) fn text(&self, text: &str) -> u64 {
+        self.count(&user_text(text), &[])
     }
 
-    /// 一组工具（没有消息，发 `foo`）。
-    pub(crate) async fn tools(&self, tools: Vec<ToolDefinition>) -> u64 {
-        self.count(Vec::new(), tools, true).await
+    /// 一组工具（没有消息）。
+    pub(crate) fn tools(&self, tools: &[ToolDefinition]) -> u64 {
+        self.count(&[], tools)
     }
 }
+
+#[cfg(test)]
+#[path = "counts_tests.rs"]
+mod tests;

@@ -180,4 +180,7 @@ pub struct Services {
     pub trust: Option<Arc<dyn WorkspaceTrust>>,
     /// npm 上有更新的版本时，会话头下面插的提示（docs/specs/rust-cli/update.md §7，F48）。
     pub update: Option<crate::update::UpdateInfo>,
+    /// 提问框的空闲超时（配置的 `askUserQuestionTimeout` 与 `ZCODE_AFK_*`，tools-more.md §1.1，工作线 F72）；
+    /// 没有时不计时。
+    pub question_timeout: Option<crate::ui::afk::QuestionTimeout>,
 }

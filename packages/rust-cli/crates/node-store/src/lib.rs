@@ -455,3 +455,7 @@ mod artifacts_find_tests;
 #[cfg(test)]
 #[path = "model_connection_tests.rs"]
 mod model_connection_tests;
+
+#[cfg(test)]
+#[path = "resume_sentinel_tests.rs"]
+mod resume_sentinel_tests;

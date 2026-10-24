@@ -1,0 +1,2507 @@
+{
+  "ports": {
+    "EnvInfo": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "facts",
+          "signature": "async fn facts(&self,workspace:&WorkspaceRef) -> Result<EnvFacts,EnvError>",
+          "default": false
+        },
+        {
+          "name": "path_facts",
+          "signature": "async fn path_facts(&self,_workspace:&WorkspaceRef) -> Result<PathFacts,EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "Files": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "read_file",
+          "signature": "async fn read_file(&self,workspace:&WorkspaceRef,request:ReadFile,) -> Result<FileContent,EnvError>",
+          "default": false
+        },
+        {
+          "name": "write_file",
+          "signature": "async fn write_file(&self,workspace:&WorkspaceRef,context:OperationContext,request:WriteFile,) -> Result<WriteReceipt,EnvError>",
+          "default": false
+        },
+        {
+          "name": "stat",
+          "signature": "async fn stat(&self,_workspace:&WorkspaceRef,_request:StatFile,) -> Result<Option<FileStat>,EnvError>",
+          "default": true
+        },
+        {
+          "name": "list_dir",
+          "signature": "async fn list_dir(&self,_workspace:&WorkspaceRef,_request:ListDir,) -> Result<Vec<DirEntry>,EnvError>",
+          "default": true
+        },
+        {
+          "name": "read_text",
+          "signature": "async fn read_text(&self,_workspace:&WorkspaceRef,_request:ReadText,) -> Result<TextRead,EnvError>",
+          "default": true
+        },
+        {
+          "name": "put_file",
+          "signature": "async fn put_file(&self,_workspace:&WorkspaceRef,_context:OperationContext,_request:PutFile,) -> Result<FileWritten,EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "Search": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "glob",
+          "signature": "async fn glob(&self,_workspace:&WorkspaceRef,_request:GlobFiles,) -> Result<GlobMatches,EnvError>",
+          "default": true
+        },
+        {
+          "name": "list_files",
+          "signature": "async fn list_files(&self,_workspace:&WorkspaceRef,_request:ListFiles,) -> Result<FileList,EnvError>",
+          "default": true
+        },
+        {
+          "name": "grep",
+          "signature": "async fn grep(&self,_workspace:&WorkspaceRef,_request:GrepSearch,) -> Result<GrepOutcome,EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "Commands": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "start_command",
+          "signature": "async fn start_command(&self,workspace:&WorkspaceRef,context:OperationContext,request:StartCommand,) -> Result<(),EnvError>",
+          "default": false
+        },
+        {
+          "name": "watch_command",
+          "signature": "fn watch_command(&self,operation:OperationId,cursor:u64,) -> BoxStream<'static,Result<CommandEvent,EnvError>>",
+          "default": false
+        },
+        {
+          "name": "cancel",
+          "signature": "async fn cancel(&self,operation:OperationId) -> Result<(),EnvError>",
+          "default": false
+        },
+        {
+          "name": "operation_status",
+          "signature": "async fn operation_status(&self,operation:OperationId) -> Result<Outcome,EnvError>",
+          "default": false
+        },
+        {
+          "name": "close_session",
+          "signature": "async fn close_session(&self,session:&SessionId,forget:bool) -> Result<(),EnvError>",
+          "default": false
+        }
+      ]
+    },
+    "Shell": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "shell_state",
+          "signature": "async fn shell_state(&self,_workspace:&WorkspaceRef,_session:&SessionId,) -> Result<ShellState,EnvError>",
+          "default": true
+        },
+        {
+          "name": "shell_notices",
+          "signature": "fn shell_notices(&self,_session:&SessionId,_after:u64,) -> BoxStream<'static,Result<ShellNotice,EnvError>>",
+          "default": true
+        },
+        {
+          "name": "ack_shell_notice",
+          "signature": "async fn ack_shell_notice(&self,_session:&SessionId,_seq:u64) -> Result<(),EnvError>",
+          "default": true
+        },
+        {
+          "name": "set_shell_cwd",
+          "signature": "async fn set_shell_cwd(&self,_session:&SessionId,_cwd:EnvPath) -> Result<(),EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "Background": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "background_command",
+          "signature": "async fn background_command(&self,_request:BackgroundTask,) -> Result<Option<BackgroundInfo>,EnvError>",
+          "default": true
+        },
+        {
+          "name": "background_elapsed",
+          "signature": "async fn background_elapsed(&self,_request:BackgroundTask) -> Result<Option<u64>,EnvError>",
+          "default": true
+        },
+        {
+          "name": "stop_background_command",
+          "signature": "async fn stop_background_command(&self,_context:OperationContext,_request:BackgroundTask,) -> Result<BackgroundStop,EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "Checkpoints": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "rewind_prepare",
+          "signature": "async fn rewind_prepare(&self,_workspace:&WorkspaceRef,_context:OperationContext,_request:RewindPrepare,) -> Result<RewindPlan,EnvError>",
+          "default": true
+        },
+        {
+          "name": "rewind_apply",
+          "signature": "async fn rewind_apply(&self,_token:&OperationId) -> Result<RewindStatus,EnvError>",
+          "default": true
+        },
+        {
+          "name": "rewind_status",
+          "signature": "async fn rewind_status(&self,_token:&OperationId) -> Result<RewindStatus,EnvError>",
+          "default": true
+        },
+        {
+          "name": "rewind_finish",
+          "signature": "async fn rewind_finish(&self,_token:&OperationId) -> Result<(),EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "Pdf": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "pdf_page_count",
+          "signature": "async fn pdf_page_count(&self,_workspace:&WorkspaceRef,_request:PdfPageCount,) -> Result<Option<u64>,EnvError>",
+          "default": true
+        },
+        {
+          "name": "render_pdf_pages",
+          "signature": "async fn render_pdf_pages(&self,_workspace:&WorkspaceRef,_request:RenderPdfPages,) -> Result<PdfRender,EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "McpTransport": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "connect",
+          "signature": "async fn connect(&self,workspace:&WorkspaceRef,request:McpConnect,) -> Result<McpConnectionId,McpError>",
+          "default": false
+        },
+        {
+          "name": "send",
+          "signature": "async fn send(&self,connection:&McpConnectionId,message:Value) -> Result<(),McpError>",
+          "default": false
+        },
+        {
+          "name": "events",
+          "signature": "fn events(&self,connection:&McpConnectionId) -> BoxStream<'static,McpTransportEvent>",
+          "default": false
+        },
+        {
+          "name": "close",
+          "signature": "async fn close(&self,connection:&McpConnectionId) -> Result<(),McpError>",
+          "default": false
+        }
+      ]
+    },
+    "Git": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "git_status",
+          "signature": "async fn git_status(&self,_workspace:&WorkspaceRef,_request:GitStatusRequest,) -> Result<GitStatus,EnvError>",
+          "default": true
+        },
+        {
+          "name": "git_diff",
+          "signature": "async fn git_diff(&self,_workspace:&WorkspaceRef,_request:GitDiffRequest,) -> Result<GitDiff,EnvError>",
+          "default": true
+        },
+        {
+          "name": "worktree_create",
+          "signature": "async fn worktree_create(&self,_context:OperationContext,_request:WorktreeCreate,) -> Result<WorktreeCreated,EnvError>",
+          "default": true
+        },
+        {
+          "name": "worktree_list",
+          "signature": "async fn worktree_list(&self,_cwd:EnvPath) -> Result<WorktreeList,EnvError>",
+          "default": true
+        },
+        {
+          "name": "worktree_changes",
+          "signature": "async fn worktree_changes(&self,_request:WorktreeInspect,) -> Result<Option<WorktreeChanges>,EnvError>",
+          "default": true
+        },
+        {
+          "name": "worktree_remove",
+          "signature": "async fn worktree_remove(&self,_context:OperationContext,_request:WorktreeRemove,) -> Result<bool,EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "Fetch": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "fetch_url",
+          "signature": "async fn fetch_url(&self,_workspace:&WorkspaceRef,_request:FetchUrl,) -> Result<FetchedUrl,EnvError>",
+          "default": true
+        }
+      ]
+    },
+    "EnvironmentRegistry": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "local_machine",
+          "signature": "fn local_machine(&self) -> MachineEnv",
+          "default": false
+        },
+        {
+          "name": "machine",
+          "signature": "fn machine(&self,name:&str) -> Option<MachineEnv>",
+          "default": true
+        },
+        {
+          "name": "local",
+          "signature": "fn local(&self) -> LocalServices",
+          "default": false
+        }
+      ]
+    },
+    "FrameSink": {
+      "bounds": ":Send",
+      "methods": [
+        {
+          "name": "send",
+          "signature": "async fn send(&mut self,frame:Bytes) -> Result<(),LinkError>",
+          "default": false
+        },
+        {
+          "name": "close",
+          "signature": "async fn close(&mut self) -> Result<(),LinkError>",
+          "default": false
+        }
+      ]
+    },
+    "FrameSource": {
+      "bounds": ":Send",
+      "methods": [
+        {
+          "name": "recv",
+          "signature": "async fn recv(&mut self) -> Result<Option<Bytes>,LinkError>",
+          "default": false
+        }
+      ]
+    },
+    "Link": {
+      "bounds": ":Send",
+      "methods": [
+        {
+          "name": "split",
+          "signature": "fn split(self:Box<Self>) -> (Box<dyn FrameSink>,Box<dyn FrameSource>)",
+          "default": false
+        },
+        {
+          "name": "peer",
+          "signature": "fn peer(&self) -> String",
+          "default": false
+        }
+      ]
+    },
+    "Listener": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "accept",
+          "signature": "async fn accept(&self) -> Result<Box<dyn Link>,LinkError>",
+          "default": false
+        }
+      ]
+    },
+    "Connector": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "connect",
+          "signature": "async fn connect(&self) -> Result<Box<dyn Link>,LinkError>",
+          "default": false
+        },
+        {
+          "name": "describe",
+          "signature": "fn describe(&self) -> String",
+          "default": false
+        }
+      ]
+    },
+    "Provisioner": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "provision",
+          "signature": "async fn provision(&self) -> Result<Provisioned,ProvisionError>",
+          "default": false
+        }
+      ]
+    },
+    "ExecLedger": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "begin",
+          "signature": "async fn begin(&self,key:&CallKey,fingerprint:&str,kind:CallKind,) -> Result<Begun,LedgerError>",
+          "default": false
+        },
+        {
+          "name": "finish",
+          "signature": "async fn finish(&self,key:&CallKey,reply:Bytes) -> Result<(),LedgerError>",
+          "default": false
+        },
+        {
+          "name": "append_event",
+          "signature": "async fn append_event(&self,key:&CallKey,seq:u64,event:Bytes) -> Result<(),LedgerError>",
+          "default": false
+        },
+        {
+          "name": "ack_events",
+          "signature": "async fn ack_events(&self,key:&CallKey,seq:u64) -> Result<(),LedgerError>",
+          "default": false
+        },
+        {
+          "name": "events_after",
+          "signature": "async fn events_after(&self,key:&CallKey,seq:u64) -> Result<Vec<Bytes>,LedgerError>",
+          "default": false
+        },
+        {
+          "name": "forget",
+          "signature": "async fn forget(&self,key:&CallKey) -> Result<(),LedgerError>",
+          "default": false
+        },
+        {
+          "name": "recover",
+          "signature": "async fn recover(&self) -> Result<Vec<CallKey>,LedgerError>",
+          "default": false
+        },
+        {
+          "name": "identity",
+          "signature": "fn identity(&self) -> Option<String>",
+          "default": true
+        },
+        {
+          "name": "forget_client",
+          "signature": "async fn forget_client(&self,_instance:&str) -> Result<(),LedgerError>",
+          "default": true
+        }
+      ]
+    },
+    "Authenticator": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "authenticate",
+          "signature": "async fn authenticate(&self,hello:&Hello) -> Result<Principal,String>",
+          "default": false
+        }
+      ]
+    }
+  },
+  "wire": {
+    "admin.rs": {
+      "AdminAction": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Status"
+          },
+          {
+            "item": "Stop"
+          },
+          {
+            "item": "StopIfIdle"
+          },
+          {
+            "attributes": [
+              "other"
+            ],
+            "item": "Other"
+          }
+        ]
+      },
+      "AdminRequest": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "action:AdminAction"
+          }
+        ]
+      },
+      "AdminOutcome": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Status"
+          },
+          {
+            "item": "Stopping"
+          },
+          {
+            "item": "Busy"
+          },
+          {
+            "attributes": [
+              "other"
+            ],
+            "item": "Other"
+          }
+        ]
+      },
+      "ExecutorStatus": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "protocol:u32"
+          },
+          {
+            "item": "version:String"
+          },
+          {
+            "item": "instance:String"
+          },
+          {
+            "item": "pid:u32"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "executable:Option<String>"
+          },
+          {
+            "item": "uptime_ms:u64"
+          },
+          {
+            "item": "clients:u64"
+          },
+          {
+            "item": "calls:u64"
+          },
+          {
+            "item": "streams:u64"
+          },
+          {
+            "item": "commands:u64"
+          },
+          {
+            "item": "notices:u64"
+          },
+          {
+            "item": "idle:bool"
+          }
+        ]
+      },
+      "AdminReply": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "outcome:AdminOutcome"
+          },
+          {
+            "item": "status:ExecutorStatus"
+          }
+        ]
+      }
+    },
+    "blob.rs": {
+      "Blob": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "at:u64"
+          },
+          {
+            "item": "len:u64"
+          }
+        ]
+      },
+      "BodyBuilder": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "bytes:Vec<u8>"
+          }
+        ]
+      },
+      "Body": {
+        "kind": "struct",
+        "tuple": "(Bytes)"
+      }
+    },
+    "dto/command.rs": {
+      "StartCommand": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "command:String"
+          },
+          {
+            "item": "cwd:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "timeout_ms:Option<u64>"
+          },
+          {
+            "item": "task:String"
+          },
+          {
+            "item": "shell:ShellKind"
+          },
+          {
+            "item": "cwd_scope:CwdScope"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "background:Option<BackgroundCommand>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "sandbox:Option<SandboxPolicy>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "hook:Option<HookIo>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "on_timeout:Option<TimeoutBackground>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "socket:Option<MonitorSocket>"
+          }
+        ]
+      },
+      "ShellKind": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Bash"
+          },
+          {
+            "item": "PowerShell"
+          }
+        ]
+      },
+      "CwdScope": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Pinned"
+          },
+          {
+            "item": "Session{roots:Vec<String>}"
+          }
+        ]
+      },
+      "BackgroundCommand": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "description:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "tool_use:Option<String>"
+          },
+          {
+            "item": "kind:BackgroundKind"
+          }
+        ]
+      },
+      "BackgroundKind": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Bash"
+          },
+          {
+            "item": "Monitor"
+          }
+        ]
+      },
+      "SandboxPolicy": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "filesystem:FilesystemPolicy"
+          },
+          {
+            "item": "network:NetworkPolicy"
+          },
+          {
+            "attributes": [
+              "default"
+            ],
+            "item": "required:bool"
+          }
+        ]
+      },
+      "FilesystemPolicy": {
+        "kind": "struct",
+        "fields": [
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "allow_write:Vec<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "deny_write:Vec<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "deny_read:Vec<String>"
+          }
+        ]
+      },
+      "NetworkPolicy": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Unrestricted"
+          },
+          {
+            "item": "LocalOnly{#[serde(default)]allow_local_binding:bool,}"
+          },
+          {
+            "item": "Domains{allowed:Vec<String>,#[serde(default,skip_serializing_if = \"Vec::is_empty\")]denied:Vec<String>,}"
+          }
+        ]
+      },
+      "HookIo": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "stdin:Blob"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"BTreeMap::is_empty\""
+            ],
+            "item": "env:BTreeMap<String,String>"
+          }
+        ]
+      },
+      "TimeoutBackground": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "command:BackgroundCommand"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "deadline_ms:Option<u64>"
+          }
+        ]
+      },
+      "MonitorSocket": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "url:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "protocols:Vec<String>"
+          }
+        ]
+      },
+      "CommandEvent": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"type\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Started{output:String,}"
+          },
+          {
+            "item": "Output{stream:OutputStream,data:Blob,cursor:u64,}"
+          },
+          {
+            "item": "Backgrounded"
+          },
+          {
+            "item": "Finished{outcome:Outcome,#[serde(default,skip_serializing_if = \"Option::is_none\")]exit_code:Option<i32>,#[serde(default)]timed_out:bool,#[serde(default,skip_serializing_if = \"Option::is_none\")]cwd_reset:Option<String>,#[serde(default)]output_bytes:u64,#[serde(default,skip_serializing_if = \"Option::is_none\")]output_limit:Option<String>,}"
+          }
+        ]
+      },
+      "OutputStream": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Stdout"
+          },
+          {
+            "item": "Stderr"
+          }
+        ]
+      }
+    },
+    "dto/core.rs": {
+      "Workspace": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "environment:String"
+          },
+          {
+            "item": "root:String"
+          }
+        ]
+      },
+      "Origin": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Agent{session:String,run:String,}"
+          },
+          {
+            "item": "User{#[serde(default,skip_serializing_if = \"Option::is_none\")]session:Option<String>,}"
+          }
+        ]
+      },
+      "OperationContext": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "environment:String"
+          },
+          {
+            "item": "generation:String"
+          },
+          {
+            "item": "owner_epoch:u64"
+          },
+          {
+            "item": "operation:String"
+          },
+          {
+            "item": "origin:Origin"
+          }
+        ]
+      },
+      "Outcome": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"status\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Completed"
+          },
+          {
+            "item": "Failed{#[serde(default,skip_serializing_if = \"Option::is_none\")]code:Option<String>,message:String,}"
+          },
+          {
+            "item": "Rejected{message:String,}"
+          },
+          {
+            "item": "Running"
+          },
+          {
+            "item": "Unknown"
+          },
+          {
+            "item": "Interrupted"
+          },
+          {
+            "item": "Cancelled"
+          }
+        ]
+      },
+      "EnvFacts": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "cwd:String"
+          },
+          {
+            "item": "platform:String"
+          },
+          {
+            "item": "os_version:String"
+          },
+          {
+            "item": "shell:String"
+          },
+          {
+            "item": "is_git_repo:bool"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "additional_directories:Vec<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "home:Option<String>"
+          }
+        ]
+      },
+      "PathStyle": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Posix"
+          },
+          {
+            "item": "Windows"
+          }
+        ]
+      },
+      "PathFacts": {
+        "kind": "struct",
+        "fields": [
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "home:Option<String>"
+          },
+          {
+            "item": "style:PathStyle"
+          }
+        ]
+      }
+    },
+    "dto/files.rs": {
+      "FileKind": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "File"
+          },
+          {
+            "item": "Directory"
+          },
+          {
+            "item": "Other"
+          }
+        ]
+      },
+      "WritePrecondition": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",content = \"version\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Version(String)"
+          },
+          {
+            "item": "Absent"
+          },
+          {
+            "item": "Any"
+          }
+        ]
+      },
+      "FileContent": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "bytes:Blob"
+          },
+          {
+            "item": "version:String"
+          }
+        ]
+      },
+      "FileStat": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "kind:FileKind"
+          },
+          {
+            "item": "size:u64"
+          },
+          {
+            "item": "mtime_ms:u64"
+          },
+          {
+            "item": "version:String"
+          }
+        ]
+      },
+      "DirEntry": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "name:String"
+          },
+          {
+            "item": "kind:FileKind"
+          }
+        ]
+      },
+      "ReadText": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "item": "start_line:u64"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "max_lines:Option<u64>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "max_bytes:Option<u64>"
+          }
+        ]
+      },
+      "TextRead": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Text{slice:TextSlice}"
+          },
+          {
+            "item": "Directory"
+          },
+          {
+            "item": "TooLarge{size:u64}"
+          }
+        ]
+      },
+      "TextSlice": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "content:Blob"
+          },
+          {
+            "item": "line_count:u64"
+          },
+          {
+            "item": "total_lines:u64"
+          },
+          {
+            "item": "total_bytes:u64"
+          },
+          {
+            "item": "read_bytes:u64"
+          },
+          {
+            "item": "mtime_ms:u64"
+          },
+          {
+            "item": "version:String"
+          }
+        ]
+      },
+      "PutFile": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "item": "bytes:Blob"
+          },
+          {
+            "item": "precondition:WritePrecondition"
+          },
+          {
+            "attributes": [
+              "default"
+            ],
+            "item": "create_parents:bool"
+          }
+        ]
+      },
+      "FileWritten": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "version:String"
+          },
+          {
+            "item": "mtime_ms:u64"
+          },
+          {
+            "item": "created:bool"
+          }
+        ]
+      },
+      "GlobFiles": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "root:String"
+          },
+          {
+            "item": "pattern:String"
+          },
+          {
+            "item": "limit:u64"
+          },
+          {
+            "item": "hidden:bool"
+          },
+          {
+            "item": "respect_ignore:bool"
+          }
+        ]
+      },
+      "GlobMatches": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "files:Vec<String>"
+          },
+          {
+            "item": "total:u64"
+          }
+        ]
+      },
+      "GrepSearch": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "root:String"
+          },
+          {
+            "item": "pattern:String"
+          },
+          {
+            "attributes": [
+              "default"
+            ],
+            "item": "case_insensitive:bool"
+          },
+          {
+            "attributes": [
+              "default"
+            ],
+            "item": "multiline:bool"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "globs:Vec<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "file_type:Option<String>"
+          },
+          {
+            "attributes": [
+              "default"
+            ],
+            "item": "hidden:bool"
+          },
+          {
+            "item": "mode:GrepMode"
+          }
+        ]
+      },
+      "GrepMode": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "FilesWithMatches"
+          },
+          {
+            "item": "Count"
+          },
+          {
+            "item": "Content{#[serde(default)]before:u64,#[serde(default)]after:u64,}"
+          }
+        ]
+      },
+      "GrepOutcome": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Files{files:Vec<GrepFileHit>}"
+          },
+          {
+            "item": "Counts{counts:Vec<GrepCount>}"
+          },
+          {
+            "item": "Content{files:Vec<GrepFileLines>}"
+          },
+          {
+            "item": "Rejected{message:String}"
+          }
+        ]
+      },
+      "GrepFileHit": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "item": "mtime_ms:u64"
+          }
+        ]
+      },
+      "GrepCount": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "item": "count:u64"
+          }
+        ]
+      },
+      "GrepFileLines": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "item": "lines:Vec<GrepLine>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "binary_offset:Option<u64>"
+          }
+        ]
+      },
+      "GrepLine": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "kind:GrepLineKind"
+          },
+          {
+            "item": "line_number:u64"
+          },
+          {
+            "item": "text:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "submatches:Vec<GrepSubmatch>"
+          }
+        ]
+      },
+      "GrepLineKind": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Match"
+          },
+          {
+            "item": "Context"
+          }
+        ]
+      },
+      "GrepSubmatch": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "start:u64"
+          },
+          {
+            "item": "text:String"
+          }
+        ]
+      },
+      "RenderPdfPages": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "item": "first_page:u64"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "last_page:Option<u64>"
+          }
+        ]
+      },
+      "PdfRender": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Unavailable"
+          },
+          {
+            "item": "Failed{#[serde(default,skip_serializing_if = \"Option::is_none\")]exit_code:Option<i32>,stderr:String,}"
+          },
+          {
+            "item": "Rendered{pages:Vec<Blob>,}"
+          }
+        ]
+      }
+    },
+    "dto/rewind.rs": {
+      "RestoreFile": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "expected:Option<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "restore:Option<Blob>"
+          }
+        ]
+      },
+      "RewindConflict": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "current:Option<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "message:Option<String>"
+          }
+        ]
+      },
+      "RewindPlan": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"plan\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Ready"
+          },
+          {
+            "item": "Conflicts{files:Vec<RewindConflict>}"
+          }
+        ]
+      },
+      "RestoreAction": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Restore"
+          },
+          {
+            "item": "Delete"
+          }
+        ]
+      },
+      "RestoredFile": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "item": "action:RestoreAction"
+          }
+        ]
+      },
+      "RewindStatus": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"status\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Prepared"
+          },
+          {
+            "item": "Applying"
+          },
+          {
+            "item": "Applied{files:Vec<RestoredFile>,}"
+          },
+          {
+            "item": "Failed{message:String,#[serde(default,skip_serializing_if = \"Vec::is_empty\")]conflicts:Vec<RewindConflict>,}"
+          },
+          {
+            "item": "Unknown"
+          }
+        ]
+      }
+    },
+    "dto/shell.rs": {
+      "ShellState": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "cwd:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "outputs:Option<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "background:Vec<String>"
+          }
+        ]
+      },
+      "ShellNotice": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "seq:u64"
+          },
+          {
+            "item": "operation:String"
+          },
+          {
+            "item": "task:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "tool_use:Option<String>"
+          },
+          {
+            "item": "description:String"
+          },
+          {
+            "item": "output:String"
+          },
+          {
+            "item": "outcome:Outcome"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "exit_code:Option<i32>"
+          },
+          {
+            "item": "kind:BackgroundKind"
+          },
+          {
+            "attributes": [
+              "default"
+            ],
+            "item": "output_bytes:u64"
+          }
+        ]
+      },
+      "BackgroundTask": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "session:String"
+          },
+          {
+            "item": "task:String"
+          }
+        ]
+      },
+      "BackgroundStatus": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Running"
+          },
+          {
+            "item": "Completed"
+          },
+          {
+            "item": "Failed"
+          },
+          {
+            "item": "Killed"
+          }
+        ]
+      },
+      "BackgroundInfo": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "command:String"
+          },
+          {
+            "item": "status:BackgroundStatus"
+          }
+        ]
+      },
+      "BackgroundStop": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Stopped{command:String}"
+          },
+          {
+            "item": "NotRunning{status:BackgroundStatus}"
+          },
+          {
+            "item": "NotFound"
+          }
+        ]
+      }
+    },
+    "envelope.rs": {
+      "WireError": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "NotFound{path:String}"
+          },
+          {
+            "item": "PreconditionFailed{path:String}"
+          },
+          {
+            "item": "PermissionDenied{message:String}"
+          },
+          {
+            "item": "Stale{message:String}"
+          },
+          {
+            "item": "OperationConflict{operation:String}"
+          },
+          {
+            "item": "Io{message:String}"
+          },
+          {
+            "item": "Unsupported{what:String}"
+          },
+          {
+            "item": "BadRequest{message:String}"
+          },
+          {
+            "item": "Interrupted{message:String}"
+          }
+        ]
+      },
+      "RequestHeader": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "call:u64"
+          },
+          {
+            "item": "request:Request"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "resume_after:Option<u64>"
+          }
+        ]
+      },
+      "BadRequest": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "call:Option<u64>"
+          },
+          {
+            "item": "error:WireError"
+          }
+        ]
+      },
+      "ReplyHeader": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "call:u64"
+          },
+          {
+            "item": "result:ReplyResult"
+          }
+        ]
+      },
+      "ReplyResult": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Ok(Reply)"
+          },
+          {
+            "item": "Err(WireError)"
+          }
+        ]
+      },
+      "EventHeader": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "call:u64"
+          },
+          {
+            "item": "seq:u64"
+          },
+          {
+            "item": "item:StreamItem"
+          }
+        ]
+      },
+      "StreamItem": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Command{event:CommandEvent}"
+          },
+          {
+            "item": "Notice{notice:ShellNotice}"
+          },
+          {
+            "item": "Error{error:WireError}"
+          },
+          {
+            "item": "End"
+          }
+        ]
+      },
+      "Ack": {
+        "kind": "struct",
+        "fields": [
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "replies:Vec<u64>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "streams:Vec<StreamAck>"
+          }
+        ]
+      },
+      "StreamAck": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "call:u64"
+          },
+          {
+            "item": "seq:u64"
+          }
+        ]
+      },
+      "Close": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "call:u64"
+          }
+        ]
+      },
+      "Beat": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "nonce:u64"
+          }
+        ]
+      }
+    },
+    "frame.rs": {
+      "PART_SIZE": {
+        "kind": "const",
+        "value": ":usize = 256 * 1024"
+      },
+      "MAX_MESSAGE": {
+        "kind": "const",
+        "value": ":u64 = 512 * 1024 * 1024"
+      },
+      "Kind": {
+        "kind": "enum",
+        "variants": [
+          {
+            "item": "Hello"
+          },
+          {
+            "item": "Welcome"
+          },
+          {
+            "item": "Refuse"
+          },
+          {
+            "item": "Request"
+          },
+          {
+            "item": "Reply"
+          },
+          {
+            "item": "Event"
+          },
+          {
+            "item": "Ack"
+          },
+          {
+            "item": "Close"
+          },
+          {
+            "item": "Ping"
+          },
+          {
+            "item": "Pong"
+          },
+          {
+            "item": "Admin"
+          },
+          {
+            "item": "AdminReply"
+          }
+        ]
+      },
+      "FrameError": {
+        "kind": "enum",
+        "variants": [
+          {
+            "item": "Truncated"
+          },
+          {
+            "item": "Header(String)"
+          },
+          {
+            "item": "TooLarge{size:u64,max:u64}"
+          }
+        ]
+      },
+      "Frame": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "kind:Kind"
+          },
+          {
+            "item": "header:Bytes"
+          },
+          {
+            "item": "body:Body"
+          }
+        ]
+      },
+      "Decoded": {
+        "kind": "enum",
+        "variants": [
+          {
+            "item": "Frame(Frame)"
+          },
+          {
+            "item": "Part{message:u64,last:bool,chunk:Bytes,}"
+          },
+          {
+            "item": "Unknown(u8)"
+          }
+        ]
+      },
+      "Splitter": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "next:u64"
+          },
+          {
+            "item": "part_size:usize"
+          }
+        ]
+      },
+      "Reassembler": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "partial:HashMap<u64,BytesMut>"
+          },
+          {
+            "item": "max_message:u64"
+          }
+        ]
+      },
+      "Received": {
+        "kind": "enum",
+        "variants": [
+          {
+            "item": "Frame(Frame)"
+          },
+          {
+            "item": "Pending"
+          },
+          {
+            "item": "Unknown(u8)"
+          }
+        ]
+      }
+    },
+    "handshake.rs": {
+      "PROTOCOL": {
+        "kind": "const",
+        "value": ":u32 = 1"
+      },
+      "HEARTBEAT_MS": {
+        "kind": "const",
+        "value": ":u64 = 10_000"
+      },
+      "STREAM_WINDOW": {
+        "kind": "const",
+        "value": ":u64 = 64"
+      },
+      "Capability": {
+        "kind": "enum",
+        "variants": [
+          {
+            "item": "Info"
+          },
+          {
+            "item": "Files"
+          },
+          {
+            "item": "Search"
+          },
+          {
+            "item": "Commands"
+          },
+          {
+            "item": "Shell"
+          },
+          {
+            "item": "Background"
+          },
+          {
+            "item": "Checkpoints"
+          },
+          {
+            "item": "Pdf"
+          },
+          {
+            "item": "Mcp"
+          }
+        ]
+      },
+      "PORTS": {
+        "kind": "const",
+        "value": ":[Self"
+      },
+      "Capabilities": {
+        "kind": "struct",
+        "attributes": [
+          "transparent"
+        ],
+        "tuple": "(BTreeSet<String>)"
+      },
+      "Hello": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "protocol:u32"
+          },
+          {
+            "item": "client_version:String"
+          },
+          {
+            "item": "client_instance:String"
+          },
+          {
+            "item": "epoch:u64"
+          },
+          {
+            "item": "capabilities:Capabilities"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "heartbeat_ms:Option<u64>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "credentials:Option<RedactedString>"
+          }
+        ]
+      },
+      "Welcome": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "protocol:u32"
+          },
+          {
+            "item": "server_version:String"
+          },
+          {
+            "item": "server_instance:String"
+          },
+          {
+            "item": "os:String"
+          },
+          {
+            "item": "arch:String"
+          },
+          {
+            "item": "path_style:PathStyle"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "home:Option<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "shell:Option<String>"
+          },
+          {
+            "item": "capabilities:Capabilities"
+          },
+          {
+            "item": "max_message:u64"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "ledger:Option<String>"
+          }
+        ]
+      },
+      "Refuse": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "code:RefuseCode"
+          },
+          {
+            "item": "message:String"
+          }
+        ]
+      },
+      "RefuseCode": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Protocol"
+          },
+          {
+            "item": "Auth"
+          },
+          {
+            "item": "Stale"
+          },
+          {
+            "attributes": [
+              "other"
+            ],
+            "item": "Other"
+          }
+        ]
+      }
+    },
+    "op.rs": {
+      "Op": {
+        "kind": "enum",
+        "variants": [
+          {
+            "item": "Facts"
+          },
+          {
+            "item": "PathFacts"
+          },
+          {
+            "item": "ReadFile"
+          },
+          {
+            "item": "WriteFile"
+          },
+          {
+            "item": "Stat"
+          },
+          {
+            "item": "ListDir"
+          },
+          {
+            "item": "ReadText"
+          },
+          {
+            "item": "PutFile"
+          },
+          {
+            "item": "Glob"
+          },
+          {
+            "item": "ListFiles"
+          },
+          {
+            "item": "Grep"
+          },
+          {
+            "item": "StartCommand"
+          },
+          {
+            "item": "WatchCommand"
+          },
+          {
+            "item": "Cancel"
+          },
+          {
+            "item": "OperationStatus"
+          },
+          {
+            "item": "CloseSession"
+          },
+          {
+            "item": "ShellState"
+          },
+          {
+            "item": "ShellNotices"
+          },
+          {
+            "item": "AckShellNotice"
+          },
+          {
+            "item": "SetShellCwd"
+          },
+          {
+            "item": "BackgroundCommand"
+          },
+          {
+            "item": "BackgroundElapsed"
+          },
+          {
+            "item": "StopBackgroundCommand"
+          },
+          {
+            "item": "RewindPrepare"
+          },
+          {
+            "item": "RewindApply"
+          },
+          {
+            "item": "RewindStatus"
+          },
+          {
+            "item": "RewindFinish"
+          },
+          {
+            "item": "PdfPageCount"
+          },
+          {
+            "item": "RenderPdfPages"
+          }
+        ]
+      },
+      "ALL": {
+        "kind": "const",
+        "value": ":[Self"
+      }
+    },
+    "reply.rs": {
+      "Reply": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"op\",content = \"value\""
+        ],
+        "variants": [
+          {
+            "attributes": [
+              "rename = \"info.facts\""
+            ],
+            "item": "Facts(EnvFacts)"
+          },
+          {
+            "attributes": [
+              "rename = \"info.path_facts\""
+            ],
+            "item": "PathFacts(PathFacts)"
+          },
+          {
+            "attributes": [
+              "rename = \"files.read_file\""
+            ],
+            "item": "ReadFile(FileContent)"
+          },
+          {
+            "attributes": [
+              "rename = \"files.write_file\""
+            ],
+            "item": "WriteFile{version:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"files.stat\""
+            ],
+            "item": "Stat(Option<FileStat>)"
+          },
+          {
+            "attributes": [
+              "rename = \"files.list_dir\""
+            ],
+            "item": "ListDir(Vec<DirEntry>)"
+          },
+          {
+            "attributes": [
+              "rename = \"files.read_text\""
+            ],
+            "item": "ReadText(TextRead)"
+          },
+          {
+            "attributes": [
+              "rename = \"files.put_file\""
+            ],
+            "item": "PutFile(FileWritten)"
+          },
+          {
+            "attributes": [
+              "rename = \"search.glob\""
+            ],
+            "item": "Glob(GlobMatches)"
+          },
+          {
+            "attributes": [
+              "rename = \"search.list_files\""
+            ],
+            "item": "ListFiles{files:Vec<String>}"
+          },
+          {
+            "attributes": [
+              "rename = \"search.grep\""
+            ],
+            "item": "Grep(GrepOutcome)"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.start_command\""
+            ],
+            "item": "StartCommand"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.cancel\""
+            ],
+            "item": "Cancel"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.operation_status\""
+            ],
+            "item": "OperationStatus(Outcome)"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.close_session\""
+            ],
+            "item": "CloseSession"
+          },
+          {
+            "attributes": [
+              "rename = \"shell.shell_state\""
+            ],
+            "item": "ShellState(ShellState)"
+          },
+          {
+            "attributes": [
+              "rename = \"shell.ack_shell_notice\""
+            ],
+            "item": "AckShellNotice"
+          },
+          {
+            "attributes": [
+              "rename = \"shell.set_shell_cwd\""
+            ],
+            "item": "SetShellCwd"
+          },
+          {
+            "attributes": [
+              "rename = \"background.background_command\""
+            ],
+            "item": "BackgroundCommand(Option<BackgroundInfo>)"
+          },
+          {
+            "attributes": [
+              "rename = \"background.background_elapsed\""
+            ],
+            "item": "BackgroundElapsed(Option<u64>)"
+          },
+          {
+            "attributes": [
+              "rename = \"background.stop_background_command\""
+            ],
+            "item": "StopBackgroundCommand(BackgroundStop)"
+          },
+          {
+            "attributes": [
+              "rename = \"checkpoints.rewind_prepare\""
+            ],
+            "item": "RewindPrepare(RewindPlan)"
+          },
+          {
+            "attributes": [
+              "rename = \"checkpoints.rewind_apply\""
+            ],
+            "item": "RewindApply(RewindStatus)"
+          },
+          {
+            "attributes": [
+              "rename = \"checkpoints.rewind_status\""
+            ],
+            "item": "RewindStatus(RewindStatus)"
+          },
+          {
+            "attributes": [
+              "rename = \"checkpoints.rewind_finish\""
+            ],
+            "item": "RewindFinish"
+          },
+          {
+            "attributes": [
+              "rename = \"pdf.pdf_page_count\""
+            ],
+            "item": "PdfPageCount(Option<u64>)"
+          },
+          {
+            "attributes": [
+              "rename = \"pdf.render_pdf_pages\""
+            ],
+            "item": "RenderPdfPages(PdfRender)"
+          }
+        ]
+      }
+    },
+    "request.rs": {
+      "Request": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"op\",content = \"args\""
+        ],
+        "variants": [
+          {
+            "attributes": [
+              "rename = \"info.facts\""
+            ],
+            "item": "Facts{workspace:Workspace}"
+          },
+          {
+            "attributes": [
+              "rename = \"info.path_facts\""
+            ],
+            "item": "PathFacts{workspace:Workspace}"
+          },
+          {
+            "attributes": [
+              "rename = \"files.read_file\""
+            ],
+            "item": "ReadFile{workspace:Workspace,path:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"files.write_file\""
+            ],
+            "item": "WriteFile{workspace:Workspace,context:OperationContext,path:String,bytes:Blob,precondition:WritePrecondition,}"
+          },
+          {
+            "attributes": [
+              "rename = \"files.stat\""
+            ],
+            "item": "Stat{workspace:Workspace,path:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"files.list_dir\""
+            ],
+            "item": "ListDir{workspace:Workspace,path:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"files.read_text\""
+            ],
+            "item": "ReadText{workspace:Workspace,request:ReadText,}"
+          },
+          {
+            "attributes": [
+              "rename = \"files.put_file\""
+            ],
+            "item": "PutFile{workspace:Workspace,context:OperationContext,request:PutFile,}"
+          },
+          {
+            "attributes": [
+              "rename = \"search.glob\""
+            ],
+            "item": "Glob{workspace:Workspace,request:GlobFiles,}"
+          },
+          {
+            "attributes": [
+              "rename = \"search.list_files\""
+            ],
+            "item": "ListFiles{workspace:Workspace,cwd:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"search.grep\""
+            ],
+            "item": "Grep{workspace:Workspace,request:GrepSearch,}"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.start_command\""
+            ],
+            "item": "StartCommand{workspace:Workspace,context:OperationContext,request:Box<StartCommand>,}"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.watch_command\""
+            ],
+            "item": "WatchCommand{operation:String,cursor:u64}"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.cancel\""
+            ],
+            "item": "Cancel{operation:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.operation_status\""
+            ],
+            "item": "OperationStatus{operation:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"commands.close_session\""
+            ],
+            "item": "CloseSession{session:String,forget:bool}"
+          },
+          {
+            "attributes": [
+              "rename = \"shell.shell_state\""
+            ],
+            "item": "ShellState{workspace:Workspace,session:String,}"
+          },
+          {
+            "attributes": [
+              "rename = \"shell.shell_notices\""
+            ],
+            "item": "ShellNotices{session:String,after:u64}"
+          },
+          {
+            "attributes": [
+              "rename = \"shell.ack_shell_notice\""
+            ],
+            "item": "AckShellNotice{session:String,seq:u64}"
+          },
+          {
+            "attributes": [
+              "rename = \"shell.set_shell_cwd\""
+            ],
+            "item": "SetShellCwd{session:String,cwd:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"background.background_command\""
+            ],
+            "item": "BackgroundCommand{task:BackgroundTask}"
+          },
+          {
+            "attributes": [
+              "rename = \"background.background_elapsed\""
+            ],
+            "item": "BackgroundElapsed{task:BackgroundTask}"
+          },
+          {
+            "attributes": [
+              "rename = \"background.stop_background_command\""
+            ],
+            "item": "StopBackgroundCommand{context:OperationContext,task:BackgroundTask,}"
+          },
+          {
+            "attributes": [
+              "rename = \"checkpoints.rewind_prepare\""
+            ],
+            "item": "RewindPrepare{workspace:Workspace,context:OperationContext,files:Vec<RestoreFile>,}"
+          },
+          {
+            "attributes": [
+              "rename = \"checkpoints.rewind_apply\""
+            ],
+            "item": "RewindApply{token:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"checkpoints.rewind_status\""
+            ],
+            "item": "RewindStatus{token:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"checkpoints.rewind_finish\""
+            ],
+            "item": "RewindFinish{token:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"pdf.pdf_page_count\""
+            ],
+            "item": "PdfPageCount{workspace:Workspace,path:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"pdf.render_pdf_pages\""
+            ],
+            "item": "RenderPdfPages{workspace:Workspace,request:RenderPdfPages,}"
+          }
+        ]
+      }
+    }
+  },
+  "frames": {
+    "Hello": "0x01",
+    "Welcome": "0x02",
+    "Refuse": "0x03",
+    "Request": "0x10",
+    "Reply": "0x11",
+    "Event": "0x12",
+    "Ack": "0x13",
+    "Close": "0x14",
+    "Ping": "0x20",
+    "Pong": "0x21",
+    "Admin": "0x40",
+    "AdminReply": "0x41"
+  }
+}

@@ -54,11 +54,6 @@ impl Origin {
         }
     }
 
-    /// 没有会话、回合与来源的请求（`/context` 的计数）。
-    pub(crate) fn none() -> Self {
-        Self::default()
-    }
-
     /// `x-zcode-session-type`：Node 按发请求的 runtime 分（`resolveModelRequestSessionTypeFromTaskType`）。
     fn session_type(&self) -> &'static str {
         if self.subagent {

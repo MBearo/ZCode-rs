@@ -7,8 +7,8 @@ use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::Kernel;
 use rust_cli_kernel_api::store::SessionFilter;
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
-    text_response,
+    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
+    selection, text_response,
 };
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 
@@ -19,7 +19,7 @@ fn kernel(model: ScriptedModel) -> Arc<dyn Kernel> {
     Arc::new(LocalKernel::new(
         Ports {
             model: Arc::new(model),
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(0)),

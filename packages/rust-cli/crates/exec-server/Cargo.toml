@@ -1,0 +1,36 @@
+[package]
+name = "rust-cli-exec-server"
+description = "Executor side of remote execution: handshake, authentication, ledger and dispatch to a MachineEnv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+async-trait.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+# 任务经 base 的 TaskScope 启动；执行器实例的随机名经 base 的 random。
+rust-cli-base.workspace = true
+rust-cli-exec-transport.workspace = true
+rust-cli-exec-wire.workspace = true
+rust-cli-kernel-api.workspace = true
+serde_json.workspace = true
+# 调用的指纹（同一个调用 ID、不同的请求内容时拒绝）。
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "sync", "time"] }
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+serde.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }

@@ -1,7 +1,7 @@
 //! 新增请求选项（工具标记、消息级 output_config）与 Provider 补丁的编码。
 
 use rust_cli_kernel_api::message::ContentBlock;
-use rust_cli_kernel_api::model::{ApiContent, ApiRole, ToolFlags, TurnOutputConfig};
+use rust_cli_kernel_api::model::{ApiContent, ApiMessage, ApiRole, ToolFlags, TurnOutputConfig};
 use serde_json::json;
 
 use super::tests::request;

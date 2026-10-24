@@ -1,14 +1,12 @@
 //! Node `/fork` 的新会话（docs/specs/rust-cli/session-lifecycle.md §6.5.2、node-store.md §4.8）：会话行、模型与
 //! 模式、克隆的消息（`fork_clone.rs`）、目标状态、时间线与分叉提示在一个 `begin immediate` 事务里写完。
 //!
-//! 依据：Node `session-fork.ts`（`buildForkedSessionInput`、`createForkedSession`）、`workspace-checkpoints.ts`
-//! （`forkWorkspaceFromCheckpoint`）、`session-fork.ts` 的 `forkConversationFromMessage`、`timeline-persistence.ts`
-//! （`persistAssistantTimelinePartForSession`）、`message-persistence.ts`（`persistSyntheticUserNoticeForSession`）
-//! 与 `helpers/rewind.ts` 的两段提示。
+//! 依据：Node `session-fork.ts`（`buildForkedSessionInput`、`createForkedSession`、`forkConversationFromMessage`）、
+//! `timeline-persistence.ts`（`persistAssistantTimelinePartForSession`）、`message-persistence.ts`
+//! （`persistSyntheticUserNoticeForSession`）与 `helpers/rewind.ts` 的分叉对话提示。
 use std::borrow::Cow;
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
-use rust_cli_kernel_api::env_rewind::RestoreAction;
 use rust_cli_kernel_api::store::{Fact, ForkReceipt, SessionFork, StoreError};
 use serde_json::{Value, json};
 
@@ -76,58 +74,23 @@ fn sanitize(text: &str) -> String {
         .replace("<system-reminder", "&lt;system-reminder")
 }
 
-/// 分叉提示的正文（Node `formatWorkspaceForkNoticeBody` / `formatConversationForkNoticeBody`）。
+/// 分叉提示的正文（Node `formatConversationForkNoticeBody`）。
 fn notice_text(fork: &SessionFork) -> String {
-    let parent = fork.parent.as_str();
-    let mut lines = match &fork.checkpoint {
-        Some(checkpoint) => {
-            let mut lines = vec![
-                "This session was forked from a previous session checkpoint.".to_owned(),
-                format!("parentSessionId: {parent}"),
-                format!("checkpointId: {}", checkpoint.id),
-                format!("targetMessageId: {}", checkpoint.prompt),
-                format!(
-                    "restoredSnapshotRef: {}",
-                    crate::artifact_uri(&checkpoint.snapshot)
-                ),
-                format!("restoredFiles: {}", fork.restored.len()),
-            ];
-            let files: Vec<String> = fork
-                .restored
-                .iter()
-                .map(|file| {
-                    let action = match file.action {
-                        RestoreAction::Restore => "restore",
-                        RestoreAction::Delete => "delete",
-                    };
-                    format!("{action} {}", file.path.as_str())
-                })
-                .collect();
-            if !files.is_empty() {
-                lines.push(files.join("\n"));
-            }
-            lines
-        }
-        None => vec![
-            "This session was forked from a previous session message.".to_owned(),
-            format!("parentSessionId: {parent}"),
-            format!("targetMessageId: {}", fork.through),
-            "No workspace checkpoint was restored for this fork.".to_owned(),
-        ],
-    };
-    lines.push(CONTINUE.to_owned());
+    let lines = [
+        "This session was forked from a previous session message.".to_owned(),
+        format!("parentSessionId: {}", fork.parent),
+        format!("targetMessageId: {}", fork.through),
+        "No workspace checkpoint was restored for this fork.".to_owned(),
+        CONTINUE.to_owned(),
+    ];
     sanitize(&lines.join("\n"))
 }
 
-/// `forkContext`（提示的消息与 part 的 metadata）与时间线共用的字段。
+/// `forkContext`（提示的消息与 part 的 metadata）与时间线共用的字段；分叉对话不恢复文件，`restoredFileCount`
+/// 总是 0（Node 同样写 0）。
 fn context(fork: &SessionFork) -> Value {
-    let mut out = json!({"kind": "session_fork", "parentSessionId": fork.parent.as_str(),
-        "targetMessageId": fork.through.as_str()});
-    if let Some(checkpoint) = &fork.checkpoint {
-        out["targetCheckpointId"] = checkpoint.id.as_str().into();
-    }
-    out["restoredFileCount"] = fork.restored.len().into();
-    out
+    json!({"kind": "session_fork", "parentSessionId": fork.parent.as_str(),
+        "targetMessageId": fork.through.as_str(), "restoredFileCount": 0})
 }
 
 /// Node `persistAssistantTimelinePartForSession`：`session_fork` 分割线。
@@ -155,10 +118,7 @@ fn timeline(
         "semantics": {"origin": "system", "kind": "timeline_event", "uiVisibility": "visible",
             "providerVisibility": "hidden", "transcriptVisibility": "visible"}});
     messages::save_message(ctx.conn, &info, now as i64).storage()?;
-    let mut name = format!("fork_{}_{}", fork.parent, fork.through);
-    if let Some(checkpoint) = &fork.checkpoint {
-        name.push_str(&format!("_{}", checkpoint.id));
-    }
+    let name = format!("fork_{}_{}", fork.parent, fork.through);
     let mut part = json!({"timelineType": "session_fork", "display": "separator",
         "status": "completed"});
     if let Some(anchor) = anchor {
@@ -166,10 +126,7 @@ fn timeline(
     }
     part["parentSessionId"] = fork.parent.as_str().into();
     part["targetMessageId"] = fork.through.as_str().into();
-    if let Some(checkpoint) = &fork.checkpoint {
-        part["targetCheckpointId"] = checkpoint.id.as_str().into();
-    }
-    part["restoredFileCount"] = fork.restored.len().into();
+    part["restoredFileCount"] = 0.into();
     part["time"] = json!({"start": now, "end": now});
     part["id"] = format!("part_{name}_timeline").into();
     part["sessionID"] = ctx.session.into();

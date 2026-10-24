@@ -6,13 +6,17 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, Environment, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{
     FileStat, GlobFiles, GlobMatches, GrepOutcome, GrepSearch, StatFile,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
 use rust_cli_kernel_api::testing::ScriptedInteractions;
 use rust_cli_kernel_api::tool::{Tool, ToolError};
 use serde_json::json;
@@ -30,11 +34,14 @@ fn unused() -> EnvError {
 }
 
 #[async_trait]
-impl Environment for Endless {
+impl EnvInfo for Endless {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Files for Endless {
     async fn read_file(
         &self,
         _workspace: &WorkspaceRef,
@@ -52,6 +59,36 @@ impl Environment for Endless {
         Err(unused())
     }
 
+    async fn stat(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: StatFile,
+    ) -> Result<Option<FileStat>, EnvError> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
+impl Search for Endless {
+    async fn glob(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: GlobFiles,
+    ) -> Result<GlobMatches, EnvError> {
+        std::future::pending().await
+    }
+
+    async fn grep(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: GrepSearch,
+    ) -> Result<GrepOutcome, EnvError> {
+        std::future::pending().await
+    }
+}
+
+#[async_trait]
+impl Commands for Endless {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
@@ -80,35 +117,18 @@ impl Environment for Endless {
     async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {
         Ok(())
     }
-
-    async fn stat(
-        &self,
-        _workspace: &WorkspaceRef,
-        _request: StatFile,
-    ) -> Result<Option<FileStat>, EnvError> {
-        Ok(None)
-    }
-
-    async fn glob(
-        &self,
-        _workspace: &WorkspaceRef,
-        _request: GlobFiles,
-    ) -> Result<GlobMatches, EnvError> {
-        std::future::pending().await
-    }
-
-    async fn grep(
-        &self,
-        _workspace: &WorkspaceRef,
-        _request: GrepSearch,
-    ) -> Result<GrepOutcome, EnvError> {
-        std::future::pending().await
-    }
 }
+
+impl Shell for Endless {}
+impl Background for Endless {}
+impl Checkpoints for Endless {}
+impl Pdf for Endless {}
+impl Git for Endless {}
+impl Fetch for Endless {}
 
 async fn cancelled(tool: Arc<dyn Tool>, input: serde_json::Value) -> Result<(), ToolError> {
     let mut ctx = Ctx::new(Arc::new(ScriptedInteractions::default()));
-    ctx.env = Arc::new(Endless);
+    ctx.set_env(Arc::new(Endless));
     let context = ctx.build();
     let cancel = context.cancel.clone();
     let (progress, _updates) = mpsc::channel(4);

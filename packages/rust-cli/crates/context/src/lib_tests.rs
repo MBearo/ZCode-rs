@@ -32,9 +32,13 @@ fn request(source: QuerySource) -> ContextRequest {
 }
 
 fn assembler() -> PromptAssembler {
+    let env = Arc::new(UnusedEnvironment);
     PromptAssembler::new(
         ContextPorts {
-            env: Arc::new(UnusedEnvironment),
+            info: env.clone(),
+            files: env.clone(),
+            shell: env.clone(),
+            git: env,
             clock: Arc::new(FixedClock(1_792_224_000_000)),
             ids: Arc::new(SequentialIds::default()),
             listings: Arc::new(NoListings),
@@ -141,4 +145,80 @@ async fn the_main_thread_step_splits_turn_attachments_from_announcements() {
             .unwrap();
         assert!(turn.is_empty());
     }
+}
+
+/// 剩余 token 跨压缩（工作线 F82）：压缩前这次输入里用掉的不因压缩归还，压缩之后的工具轮照样从输入那一刻算。
+/// 以前只看边界之后的历史，压缩之后回到满额。
+#[tokio::test]
+async fn the_tokens_left_do_not_reset_at_a_compaction() {
+    use rust_cli_kernel_api::ids::{MessageId, ToolUseId};
+    use rust_cli_kernel_api::message::{
+        AssistantMessage, CompactBoundary, CompactTrigger, ContentBlock, ToolResultContent, Usage,
+        UserMessage, UserOrigin,
+    };
+    let round = |index: &str, input_tokens: u64| {
+        let assistant = MessageId::new(format!("a{index}"));
+        [
+            Message::Assistant(AssistantMessage {
+                id: assistant.clone(),
+                content: vec![ContentBlock::ToolUse {
+                    id: ToolUseId::new(format!("t{index}")),
+                    name: "Read".to_owned(),
+                    input: serde_json::json!({}),
+                }],
+                model: "m".to_owned(),
+                stop_reason: None,
+                usage: Some(Usage {
+                    input_tokens,
+                    output_tokens: 16,
+                    ..Usage::default()
+                }),
+            }),
+            Message::User(UserMessage {
+                id: MessageId::new(format!("r{index}")),
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: ToolUseId::new(format!("t{index}")),
+                    content: vec![ToolResultContent::Text {
+                        text: "ok".to_owned(),
+                    }],
+                    is_error: false,
+                }],
+                origin: UserOrigin::ToolResult { assistant },
+            }),
+        ]
+    };
+    let mut history = prompt();
+    history.extend(round("1", 990_000));
+    history.push(Message::System(SystemMessage::CompactBoundary(
+        CompactBoundary {
+            id: MessageId::new("b"),
+            trigger: CompactTrigger::Auto,
+            pre_tokens: 990_016,
+            summary: MessageId::new("s"),
+            preserved: None,
+            discovered_tools: Vec::new(),
+        },
+    )));
+    history.push(Message::User(UserMessage {
+        id: MessageId::new("s"),
+        content: vec![ContentBlock::Text {
+            text: "summary".to_owned(),
+        }],
+        origin: UserOrigin::CompactSummary,
+    }));
+    history.extend(round("2", 10));
+    let turn = assembler()
+        .turn_attachments(request(QuerySource::MainThread), &history)
+        .await
+        .unwrap();
+    let tokens = turn
+        .iter()
+        .find(|item| item.source == "total_tokens_reminder")
+        .unwrap();
+    // 压缩前的 990,016（990,000 + 16）滚进累计，加上压缩之后这一轮的 10 + 16。
+    assert!(
+        tokens.text.contains("14009958 tokens left"),
+        "{}",
+        tokens.text
+    );
 }

@@ -180,8 +180,22 @@ fn connecting_servers_are_announced_only_with_tool_search_and_a_snapshot() {
         Some(view.clone()),
     );
     assert_eq!(pending_servers(&on).unwrap(), ["alpha", "zeta"]);
-    // 工具里没有 ToolSearch、模型不支持延迟加载、没有快照：都不带。
+    // 工具里没有 ToolSearch、没有快照：都不带。
     assert!(pending_servers(&request("claude-opus-5-5", &["Read"], Some(view.clone()))).is_none());
-    assert!(pending_servers(&request("glm-4.6", &["ToolSearch"], Some(view))).is_none());
+    // 工作线 F89（tools-more.md §3.2.1）：不区分模型，以前禁用表里的模型也带。修改：F84 时不带。
+    assert_eq!(
+        pending_servers(&request(
+            "claude-3-haiku-20240307",
+            &["ToolSearch"],
+            Some(view.clone())
+        ))
+        .unwrap(),
+        ["alpha", "zeta"]
+    );
     assert!(pending_servers(&request("claude-opus-5-5", &["ToolSearch"], None)).is_none());
+    // 工作线 F84（tools-more.md §3.2）：本地 ToolSearch（没有卡片的模型、端点答不出能力）同样带。修改：以前不带。
+    assert_eq!(
+        pending_servers(&request("glm-4.6", &["ToolSearch"], Some(view))).unwrap(),
+        ["alpha", "zeta"]
+    );
 }

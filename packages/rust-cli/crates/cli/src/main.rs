@@ -13,6 +13,8 @@ mod config;
 mod editor;
 mod effort;
 mod embedded;
+mod executor;
+mod executor_run;
 mod flags;
 mod help;
 mod hooks_trust;
@@ -20,7 +22,10 @@ mod limits;
 mod log;
 mod log_writer;
 mod login;
+mod loopback;
 mod mcp;
+mod model_io;
+mod model_io_files;
 mod models;
 mod network;
 mod options;
@@ -30,6 +35,7 @@ mod peers;
 mod print_format;
 mod request_headers;
 mod signals;
+mod ssh_executor;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -144,6 +150,7 @@ fn capture() -> Result<Startup> {
             model: non_empty(var("ZCODE_MODEL")),
             // 测试声明只在 debug 构建读（工作线 F52b，model.md §6）。
             assume: options::assumptions(options::TestDeclarations::BUILD, var),
+            ssh: options::ssh_assumption(options::TestDeclarations::BUILD, var),
         },
         temp: temp_dir::node_tmpdir(&env, cfg!(windows)),
         max_output_tokens,
@@ -167,25 +174,11 @@ fn process_uid() -> Option<u32> {
     None
 }
 
-/// 存储位置：环境变量给的路径展开 `~`，相对路径相对 cwd（Node `resolveUserPath`）。`storage` 是配置层与
-/// 环境变量合并后的 `storage.*`（会话库与存储根，修复线 F2）；读配置之前（运行日志、平台层）用缺省。
-fn storage_paths(startup: &Startup, storage: &StorageSettings<'_>) -> StoragePaths {
-    let resolve = |value: &str| startup.cwd.join(expand_home(value, &startup.home));
-    let mut paths = StoragePaths::resolve(storage, &startup.home, &startup.cwd);
-    if let Some(base) = &startup.data_base_dir {
-        paths = paths.with_data_base_dir(&resolve(base));
-    }
-    if let Some(file) = &startup.builtin_provider_config {
-        paths = paths.with_builtin_provider_config(&resolve(file));
-    }
-    paths
-}
-
 /// 一次会话运行：先开运行日志（docs/specs/rust-cli/logging.md），记进程的开始与结束，退出前等日志写完。
 /// 返回进程的退出码（工作区信任的对话框里拒绝时不是 0，workspace-trust.md §2.4）。
 async fn run(invocation: Invocation) -> Result<u8> {
     let startup = capture()?;
-    let paths = storage_paths(&startup, &StorageSettings::default());
+    let paths = setup::storage_paths(&startup, &StorageSettings::default());
     let clock = Arc::new(SystemClock::new(startup.zone.clone()));
     // 只写文件：TUI 占着终端，`-p` 的 stdout 是输出（logging.md §6）。
     let log = log::RunLog::start(paths.logs().as_path().to_path_buf(), clock.clone());
@@ -204,7 +197,10 @@ async fn run(invocation: Invocation) -> Result<u8> {
     // 退出信号（session-lifecycle.md §3.5）：前端收到令牌后走已有的退出路径，退出码按信号（0 / 143 / 129）。
     let stop = signals::Stop::listen();
     let tokens = (stop.token.clone(), stop.cancel.clone());
-    let result = session(invocation, startup, paths, clock, tokens).await;
+    // 模型轨迹（model-io.md §6）：会话组装时打开写者；退出前等它写完（在 `process.exit` 之前）。
+    let model_io = model_io::ModelIo::default();
+    let result = session(invocation, startup, paths, clock, tokens, &model_io).await;
+    model_io.flush().await;
     let result = result.map(|code| stop.code().unwrap_or(code));
     match &result {
         Ok(code) => tracing::info!(
@@ -233,6 +229,7 @@ async fn session(
         tokio_util::sync::CancellationToken,
         tokio_util::sync::CancellationToken,
     ),
+    model_io: &model_io::ModelIo,
 ) -> Result<u8> {
     let Invocation {
         mode,
@@ -262,7 +259,7 @@ async fn session(
         Mode::Print if format.input == rust_cli_headless::InputFormat::StreamJson => {
             Some(prompt.unwrap_or_default())
         }
-        Mode::Print => Some(print_prompt(prompt).await?),
+        Mode::Print => Some(stdin_prompt::print_prompt(prompt).await?),
         _ if prompt.is_some() => {
             return Err(flags::Fatal(
                 "Error: a prompt argument needs -p (the interactive interface does not take one)"
@@ -309,6 +306,7 @@ async fn session(
         !names_search_tools(&allowed),
     )
     .await;
+    let monitor = options::monitor(startup.explicit.assume, shell.bash.is_some());
     // MCP stdio 服务器与 Bash 共用进程树账本（docs/specs/rust-cli/ext.md §3.2）；快照用 shell 改写过 `SHELL` 的那份（F58）。
     let mcp_transport = Arc::new(LocalMcpTransport::new(
         shell.ledger.clone(),
@@ -342,10 +340,21 @@ async fn session(
             .with_web(egress.clone())
             .with_additional_directories(additional.clone()),
     );
+    // 入口自己读的本机文件（配置、`.mcp.json`、工作区信任、记忆目录）也经注册表的本机取（remote-exec.md §3）。
+    // 只给测试的 loopback（remote-exec.md §18.6）：本机的执行端口经子进程执行器。
+    let environments = if let Some(ssh) = &startup.explicit.ssh {
+        ssh_executor::environments(&startup, ssh, env, mcp_transport).await?
+    } else if startup.explicit.assume.loopback {
+        let find_and_grep = !names_search_tools(&allowed);
+        loopback::environments(&startup, env, mcp_transport, &additional, find_and_grep).await?
+    } else {
+        setup::environments(env, mcp_transport)
+    };
+    let local_machine = environments.local_machine();
     // hooks、权限规则与 MCP 读 Node 的配置文件（docs/specs/rust-cli/config.md）；模式按 Node 的顺序
     //（命令行 → 本机项目的持久模式 → 配置 → default，config.md §2.2）。
     let mut config = config::assemble(&config::ConfigInputs {
-        env: env.as_ref(),
+        files: local_machine.files().as_ref(),
         workspace: &workspace,
         paths: &paths,
         process_env: &startup.env,
@@ -354,7 +363,7 @@ async fn session(
     .await;
     // 会话库与产物目录按 Node 的 `storage.sessionDbPath` / `storage.dir`（用户级 → 项目级 → 环境变量，
     // config.md §2.3）：先读配置再开库。修复线 F2：以前总在缺省位置，Node 设了这些值时两边各用一个库。
-    let paths = storage_paths(&startup, &config.storage.settings());
+    let paths = setup::storage_paths(&startup, &config.storage.settings());
     // 自动更新（docs/specs/rust-cli/update.md §3，F48，照 Codex）：只在 TUI、工作区信任之前；没有启动器标记时什么都
     // 不做。`updates` 留到返回：它持有后台刷新的任务作用域。选了 Update now 时不建会话，安装后以它的结果退出。
     let vars = tui::vars(&startup.env);
@@ -389,8 +398,9 @@ async fn session(
         (clock.clone(), device),
     )
     .await;
-    // stream-json 输入的 MCP prewait 看模型能不能用工具搜索（headless.md §6；F52 按端点）。
-    mcp_flags.tool_search = models::tool_search(&model, &selection).await;
+    // stream-json 输入的 MCP prewait 看能不能用工具搜索（headless.md §6.2）：乐观判断，`ENABLE_TOOL_SEARCH` 不是关（工作线
+    // F89，tools-more.md §3.2.1）。修改：F84 时看 `tool_search_mode`（禁用表里的模型不算）。
+    mcp_flags.tool_search = limits::tool_search(&startup.env).allows();
     // 模型请求的来源头与每请求头的 ID（照 Node，F64，model.md §2.4；`user-agent` 是来源头的一项，账号接口不发）。
     let var = |name: &str| startup.env.get(name).map(str::to_owned);
     let headers = request_headers::request_headers(&var, VERSION, ids.clone());
@@ -402,9 +412,20 @@ async fn session(
         // `ZCODE_MAX_OUTPUT_TOKENS`：每个请求的 `max_tokens` 不超过它（cli-args.md §9.1，F42）。
         .with_max_output_tokens(startup.max_output_tokens)
         .with_request_headers(headers.map_err(anyhow::Error::msg)?);
+    // 模型轨迹（工作线 F91，model-io.md §3）：目录跟随合并后的 `storage.dir`，全量保留读 App 的设置。
+    let model = model_io.attach(
+        model,
+        model_io::Target {
+            env: &startup.env,
+            paths: &paths,
+            storage_dir: config.storage.dir.as_deref(),
+            base: &startup.cwd,
+            settings: account.settings().clone(),
+        },
+    );
     let ports = Ports {
         model: Arc::new(model),
-        env,
+        environments,
         store: store.clone(),
         artifacts: store.clone(),
         clock: clock.clone(),
@@ -414,7 +435,8 @@ async fn session(
     // `-p` 不问。
     if matches!(mode, Mode::Tui) {
         let inputs = workspace_trust::Inputs {
-            env: ports.env.as_ref(),
+            info: local_machine.info().as_ref(),
+            files: local_machine.files().as_ref(),
             store: store.as_ref(),
             workspace: &workspace,
             grants: config
@@ -460,12 +482,17 @@ async fn session(
     let mut context = ContextConfig::new(surface);
     context.custom_system_prompt = resolved.system_prompt;
     context.append_system_prompt = resolved.append_system_prompt;
-    context.memory_dir =
-        options::memory_dir(ports.env.as_ref(), &paths, &workspace, &startup.env).await;
+    context.memory_dir = options::memory_dir(
+        local_machine.files().as_ref(),
+        &paths,
+        &workspace,
+        &startup.env,
+    )
+    .await;
     // 压缩的上限两种模式都接（显式覆盖按内置规则，修复线 F61：以前显式覆盖时是“没有目录”，按 200,000）。
     let compact = options::compact(&startup.env, startup.max_output_tokens, limits);
     let mut extensions = setup::extensions(
-        &ports,
+        local_machine.files().as_ref(),
         &workspace,
         (&startup.env, &startup.cwd, &startup.home),
         (&mcp_flags, &allowed),
@@ -473,7 +500,7 @@ async fn session(
         &config,
     )
     .await;
-    extensions.mcp = mcp_transport;
+    extensions.monitor = monitor;
     // 本机跨会话通信（cross-session.md §2）：进程启动时绑定收件箱、写登记；退出时删除。
     let peers = peers::start(
         peers::Startup {
@@ -589,7 +616,7 @@ async fn session(
                 account,
                 mcp: tui_mcp::McpConfigFiles {
                     origins: config.mcp_origins.clone(),
-                    env: kernel.ports().env.clone(),
+                    files: local_machine.files().clone(),
                     ids: kernel.ports().ids.clone(),
                     workspace: workspace.clone(),
                 },
@@ -598,11 +625,13 @@ async fn session(
                 ids,
                 update: updates.as_ref().and_then(update::Updates::notice),
                 trust: Arc::new(workspace_trust::InAppTrust {
-                    env: kernel.ports().env.clone(),
+                    info: local_machine.info().clone(),
+                    files: local_machine.files().clone(),
                     store: kernel.ports().store.clone(),
                     accepted: Arc::default(),
                 }),
                 os,
+                question_timeout: config.question_timeout,
             };
             let exit = rust_cli_tui::run(kernel, tui::options(inputs, VERSION)).await;
             // TUI 退出后入口全部释放：等写者写完剩下的；跨会话的登记与 socket 删掉。
@@ -646,6 +675,10 @@ fn main() -> ExitCode {
         return code;
     }
     let args = args();
+    // `zcode executor`（远端执行 R1 / R2，remote-exec.md §12、§18.6、§19.3）：执行器模式，不读凭据、不开会话库。
+    if let Some(parsed) = executor::parse(&args) {
+        return executor::main(parsed);
+    }
     // 登录与退出（Node：用法错误也是 `Error: …`、退出码 1）。
     let job = match login::parse(&args) {
         Some(Ok(command)) => Job::Account(command),
@@ -737,36 +770,6 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-/// `-p` 的输入（cli-args.md §2.3）：标准输入不是终端时读它，与 prompt 参数用换行连接；两样都
-/// 没有时报错退出。
-async fn print_prompt(prompt: Option<String>) -> Result<String> {
-    use std::io::IsTerminal;
-    let piped = if std::io::stdin().is_terminal() {
-        None
-    } else {
-        match stdin_prompt::read_piped(tokio::io::stdin(), stdin_prompt::FIRST_DATA).await {
-            Ok(stdin_prompt::Piped::Text(text)) => Some(text),
-            Ok(stdin_prompt::Piped::Silent) => {
-                eprint_line(stdin_prompt::NO_DATA_WARNING);
-                None
-            }
-            Ok(stdin_prompt::Piped::TooLarge) => {
-                return Err(flags::Fatal(stdin_prompt::too_large()).into());
-            }
-            // 读不了标准输入时照常用 prompt 参数（只写日志）。
-            Err(error) => {
-                tracing::warn!(%error, "stdin could not be read");
-                None
-            }
-        }
-    };
-    let prompt = stdin_prompt::combine(prompt, piped);
-    if prompt.is_empty() {
-        return Err(flags::Fatal(stdin_prompt::NO_INPUT.to_owned()).into());
-    }
-    Ok(prompt)
 }
 
 /// 这次启动要做的事。

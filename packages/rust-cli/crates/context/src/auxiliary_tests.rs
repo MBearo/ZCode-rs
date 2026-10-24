@@ -33,9 +33,13 @@ fn environment() -> MemoryEnvironment {
 }
 
 fn assembler() -> PromptAssembler {
+    let env = Arc::new(environment());
     PromptAssembler::new(
         ContextPorts {
-            env: Arc::new(environment()),
+            info: env.clone(),
+            files: env.clone(),
+            shell: env.clone(),
+            git: env,
             clock: Arc::new(FixedClock(1_792_224_000_000)),
             ids: Arc::new(SequentialIds::default()),
             listings: Arc::new(NoListings),

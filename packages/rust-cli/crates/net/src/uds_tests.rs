@@ -29,3 +29,29 @@ async fn connecting_to_a_missing_socket_fails() {
         std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
     ));
 }
+
+/// 字节流的两半（常驻执行器的 socket，remote-exec.md §19.5）：原样往返，不按行切。
+#[tokio::test]
+async fn raw_halves_carry_bytes_both_ways() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("raw.sock");
+    let listener = UdsListener::bind(&path).unwrap();
+    let server = tokio::spawn(async move {
+        let mut halves = listener.accept_raw().await.unwrap();
+        let mut buffer = [0u8; 3];
+        halves.read.read_exact(&mut buffer).await.unwrap();
+        halves
+            .write
+            .write_all(&[buffer[2], buffer[1], buffer[0]])
+            .await
+            .unwrap();
+        halves.write.shutdown().await.unwrap();
+    });
+    let mut halves = connect_raw(&path).await.unwrap();
+    halves.write.write_all(&[1, 0, 2]).await.unwrap();
+    let mut back = Vec::new();
+    halves.read.read_to_end(&mut back).await.unwrap();
+    assert_eq!(back, [2, 0, 1]);
+    server.await.unwrap();
+}

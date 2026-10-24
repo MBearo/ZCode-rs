@@ -1,11 +1,12 @@
 //! 真实内核的互操作驱动（docs/specs/rust-cli/node-store.md §6 第 11 段），由
 //! `scripts/rust-cli/node-interop-runtime.mjs` 调用：用入口同样的部件（LocalKernel、NodeStore、LocalEnvironment、
-//! 指向本地模型替身的 Anthropic 端点）打开一个已有会话，发 TUI 里 `/compact`、`/rewind`、`/branch` 发的命令，
-//! 等它完成后输出回执 JSON。回合（Submit）由真实的 `zcode -p` 跑，这里只做 `-p` 不支持的会话命令。
+//! 指向本地模型替身的 Anthropic 端点）打开一个已有会话，发 TUI 里 `/compact`、`/rewind`、`/fork` 发的命令与
+//! `--fork-session` 的 `Fork`，等它完成后输出回执 JSON。回合（Submit）由真实的 `zcode -p` 跑，这里只做 `-p` 不支持的会话命令。
 //!
 //! - `compact <storage-dir> <session> <base-url>`：`Command::Compact`，等这次压缩的 `TurnFinished`；
 //! - `rewind <storage-dir> <session> <message> <conversation|code|both>`：`Command::Rewind`（回执等事务结束）；
-//! - `branch <storage-dir> <session>`：`Command::Fork { at: None }`（`/branch`），输出新会话 ID；
+//! - `branch <storage-dir> <session>`：`Command::Fork { at: None }`（`--fork-session` 的命令；F75 之前是 `/branch`），输出新会话 ID；
+//! - `fork <storage-dir> <session> <message>`：`Command::ForkFromInput`（`/fork` 选中一条输入，F75），输出回执；
 //! - `options <storage-dir> <session>`：rewind 选择器的条目（每个回合改过的文件与能否恢复代码）。
 //!
 //! 会话库是 `<storage-dir>/cli/db/db.sqlite`，产物在 `<storage-dir>/cli/artifacts`（与 `node_interop` 相同）。
@@ -24,6 +25,7 @@ use rust_cli_kernel_api::session_api::{
     Ack, Command, CommandEnvelope, EndReason, Kernel, KernelEvent, RewindScope, SessionHandle,
     TurnOutcome,
 };
+use rust_cli_kernel_api::testing::environments;
 use rust_cli_model::{AnthropicEndpoint, ProviderModel};
 use rust_cli_net::{Egress, NetworkPolicy};
 use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
@@ -56,7 +58,7 @@ async fn kernel(dir: &str, base_url: Option<&str>) -> Result<LocalKernel> {
     };
     let ports = Ports {
         model: Arc::new(ProviderModel::anthropic(egress, endpoint, clock.clone())),
-        env: Arc::new(LocalEnvironment::new(Some(root.to_path_buf()))),
+        environments: environments(Arc::new(LocalEnvironment::new(Some(root.to_path_buf())))),
         store: store.clone(),
         artifacts: store,
         clock,
@@ -162,6 +164,18 @@ async fn branch(dir: &str, session: &str) -> Result<Value> {
     Ok(json!({"session": child}))
 }
 
+async fn fork(dir: &str, session: &str, input: &str) -> Result<Value> {
+    let kernel = kernel(dir, None).await?;
+    let handle = open(&kernel, session).await?;
+    let command = Command::ForkFromInput {
+        input: MessageId::new(input),
+    };
+    let ack = handle.send(envelope("interop-fork", command)).await;
+    let result = accepted(ack)?;
+    let _ = handle.close(EndReason::Other).await;
+    Ok(result)
+}
+
 async fn options(dir: &str, session: &str) -> Result<Value> {
     let kernel = kernel(dir, None).await?;
     let handle = open(&kernel, session).await?;
@@ -185,9 +199,10 @@ async fn run(args: &[String]) -> Result<()> {
             rewind(dir, session, target, scope).await?
         }
         [command, dir, session] if command == "branch" => branch(dir, session).await?,
+        [command, dir, session, input] if command == "fork" => fork(dir, session, input).await?,
         [command, dir, session] if command == "options" => options(dir, session).await?,
         _ => bail!(
-            "usage: node_kernel compact <dir> <session> <base-url> | rewind <dir> <session> <message> <scope> | branch <dir> <session> | options <dir> <session>"
+            "usage: node_kernel compact <dir> <session> <base-url> | rewind <dir> <session> <message> <scope> | branch <dir> <session> | fork <dir> <session> <message> | options <dir> <session>"
         ),
     };
     print(&value)

@@ -313,8 +313,9 @@ impl App {
                     let current = key.code == KeyCode::Enter && prompt.focus == 1;
                     let row = prompt.row.clone();
                     page.cwd = None;
+                    let startup = page.startup;
                     let cd = current.then(|| self.view.workspace().root.as_str().to_owned());
-                    return self.open_row(&row, cd);
+                    return self.open_row(&row, cd, startup);
                 }
                 _ => {}
             }
@@ -415,7 +416,8 @@ impl App {
                     page.cwd = Some(CwdPrompt { row, focus: 0 });
                     return None;
                 }
-                return self.open_row(&row, None);
+                let startup = page.startup;
+                return self.open_row(&row, None, startup);
             }
             KeyCode::Up => page.selected = page.selected.saturating_sub(1),
             KeyCode::Char('p' | 'k') if ctrl => page.selected = page.selected.saturating_sub(1),

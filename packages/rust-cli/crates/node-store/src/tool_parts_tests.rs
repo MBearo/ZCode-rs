@@ -74,7 +74,7 @@ async fn commit_each(t: &TestStore, facts: &[Fact]) {
 }
 
 /// tool_use 与结果合成同一个 tool part，结果不新建消息行；冷读取拆回内核的消息形状，结果按提交
-/// 顺序（并发调用可能后声明的先结束）。
+/// 顺序（并发调用可能后声明的先结束）。位置键是结算时最后一行（这里都是 assistant）。
 #[tokio::test]
 async fn tool_calls_and_results_read_back_as_kernel_messages() {
     let t = TestStore::new();
@@ -116,12 +116,14 @@ async fn tool_calls_and_results_read_back_as_kernel_messages() {
          order by sequence",
     );
     let completed = json!({"type": "tool", "callID": "toolu_2", "declarationIndex": 1,
-        "tool": "Read", "metadata": {"rustCli": {"resultMessageId": "msg_rw_r2", "resultIndex": 0}},
+        "tool": "Read", "metadata": {"rustCli": {"resultMessageId": "msg_rw_r2", "resultIndex": 0,
+            "afterMessageId": "msg_rv_a1"}},
         "state": {"status": "completed", "input": {"file_path": "/w/b"}, "output": "b",
             "title": "Read", "metadata": {"schemaVersion": 1},
             "time": {"start": 1003, "end": 1004}}});
     let failed = json!({"type": "tool", "callID": "toolu_1", "declarationIndex": 0,
-        "tool": "Read", "metadata": {"rustCli": {"resultMessageId": "msg_rx_r1", "resultIndex": 1}},
+        "tool": "Read", "metadata": {"rustCli": {"resultMessageId": "msg_rx_r1", "resultIndex": 1,
+            "afterMessageId": "msg_rv_a1"}},
         "state": {"status": "error", "input": {"file_path": "/w/a"}, "error": "no such file",
             "metadata": {"modelContent": "no such file"},
             "time": {"start": 1003, "end": 1005}}});

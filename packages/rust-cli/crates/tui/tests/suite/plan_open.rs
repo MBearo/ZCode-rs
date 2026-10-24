@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
-use rust_cli_kernel_api::testing::{MemoryEnvironment, text_response};
+use rust_cli_kernel_api::testing::{MemoryEnvironment, environments, text_response};
 use rust_cli_tui::{Editor, Services};
 
 use super::support::{GatedModel, Setup, with_ui};
@@ -52,7 +52,7 @@ async fn plan_open_switches_to_plan_and_opens_the_plan_file() {
     let editor = Arc::new(Opened::default());
     let env = env();
     let setup = Setup {
-        env: env.clone(),
+        environments: environments(env.clone()),
         services: Services {
             editor: Some(editor.clone()),
             ..Services::default()

@@ -180,10 +180,12 @@ impl<B: Backend> Loop<'_, B> {
     /// 检查通过之后：打开会话（会话自己的工作目录；`cd` 时打开后换到它）或在这个目录新建会话。
     fn proceed(&mut self, request: Request) {
         match request {
-            Request::Open { id, cd, .. } => {
+            Request::Open {
+                id, cd, startup, ..
+            } => {
                 self.app.overlay = None;
                 self.projects.cd_after_switch = cd;
-                self.switch(SessionId::new(id), StartSource::Resume, None);
+                self.switch(SessionId::new(id), StartSource::Resume, None, !startup);
             }
             Request::New { root } => {
                 self.app.overlay = None;

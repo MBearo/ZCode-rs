@@ -1,4 +1,4 @@
-//! 环境事实（`Environment::facts`，docs/specs/rust-cli/context.md §12）：平台、系统版本、shell 与
+//! 环境事实（`EnvInfo::facts`，docs/specs/rust-cli/context.md §12）：平台、系统版本、shell 与
 //! git 仓库判断。写法见 context.md §12 的环境段。
 
 use std::fs;

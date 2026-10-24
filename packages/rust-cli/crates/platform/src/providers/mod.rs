@@ -18,7 +18,6 @@ pub(crate) mod catalog;
 pub(crate) mod resolve;
 pub(crate) mod rules;
 pub(crate) mod site;
-pub(crate) mod tool_search;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};

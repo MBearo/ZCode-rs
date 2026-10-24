@@ -13,6 +13,7 @@ use rust_cli_kernel_api::testing::{ScriptedModel, text_response};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
+use rust_cli_prompts::models::ToolSearchSetting;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -107,13 +108,25 @@ async fn first_request_with(
     capabilities: Option<ModelCapabilities>,
     tools: Vec<Arc<dyn Tool>>,
 ) -> ModelRequest {
+    first_request_set(selection, capabilities, tools, ToolSearchSetting::On).await
+}
+
+/// 同 [`first_request_with`]，另给 `ENABLE_TOOL_SEARCH` 的设置。
+async fn first_request_set(
+    selection: ModelSelection,
+    capabilities: Option<ModelCapabilities>,
+    tools: Vec<Arc<dyn Tool>>,
+    setting: ToolSearchSetting,
+) -> ModelRequest {
     let model = Arc::new(Configured {
         inner: ScriptedModel::new(vec![text_response(&["ok"])]),
         capabilities,
     });
     let mut request = request("hi");
     request.selection = selection;
-    let (scope, _sink) = scope(parts(model.clone(), tools), &request, Abort::new());
+    let mut parts = parts(model.clone(), tools);
+    parts.limits.tool_search = setting;
+    let (scope, _sink) = scope(parts, &request, Abort::new());
     super::run(scope, request).await.unwrap();
     model.inner.requests().remove(0)
 }
@@ -207,13 +220,13 @@ fn endpoint(tool_search: bool) -> Option<ModelCapabilities> {
     })
 }
 
-/// 工作线 F52（tools-more.md §3.2，用户决定）：ToolSearch 只看端点的能力，不看模型卡片。修 bug：用户的场景（anthropic
-/// 协议的网关上的 claude-opus-5-5，网关后面是 Bedrock）以前按卡片打开 ToolSearch，请求带 `defer_loading`，beta
-/// `advanced-tool-use` 被拒绝。现在端点不支持时走“没有 ToolSearch”的分支：全部内联，没有占位工具与 `defer_loading`。
+/// 工作线 F84（tools-more.md §3.2，用户决定，推翻 F52 的“其他的不开”）：端点不支持 `tool_reference` 时是本地
+/// ToolSearch——ToolSearch 照常发、延迟工具等加载，没有占位工具与 `defer_loading`。用户的场景（anthropic 协议的网关上的
+/// claude-opus-5-5，网关后面是 Bedrock，F52 起因）因此仍然不带 `advanced-tool-use`。修改：F52 到 F84 之间这里全部内联。
 #[tokio::test]
 async fn tool_search_follows_the_endpoint_not_the_model_card() {
     let request = first_request_with(gateway_opus(), endpoint(false), search_tools()).await;
-    assert_eq!(names(&request), ["Read", "TaskStop"]);
+    assert_eq!(names(&request), ["Read", "ToolSearch"]);
     assert!(
         request
             .options
@@ -223,7 +236,8 @@ async fn tool_search_follows_the_endpoint_not_the_model_card() {
         "{:?}",
         request.options.tool_flags
     );
-    // z.ai / bigmodel 端点上的 GLM（没有卡片）：开；占位工具在倒数第二位（tools-more.md §3.3）。
+    // 端点的能力为真时原生（工作线 F89 起只有 debug 构建的测试声明这样设，F84 时是 z.ai / bigmodel 的端点）；占位工具在
+    // 倒数第二位（tools-more.md §3.3）。
     let request = first_request_with(glm(), endpoint(true), search_tools()).await;
     assert_eq!(
         names(&request),
@@ -232,16 +246,30 @@ async fn tool_search_follows_the_endpoint_not_the_model_card() {
     assert!(request.options.tool_flags["DeferredToolPlaceholder"].defer_loading);
 }
 
-/// 模型端口答不出能力（测试替身）时按卡片回退，与 `system_turns` 的回退相同（model.md §11）。
+/// 工作线 F89（tools-more.md §3.2.1，用户决定）：不区分模型，以前禁用表里的模型也用本地 ToolSearch。修改：F84 时这些
+/// 模型不开、全部内联。
 #[tokio::test]
-async fn without_capabilities_the_card_is_the_fallback() {
-    let request = first_request_with(gateway_opus(), None, search_tools()).await;
-    assert_eq!(
-        names(&request),
-        ["Read", "DeferredToolPlaceholder", "ToolSearch"]
-    );
-    let request = first_request_with(glm(), None, search_tools()).await;
-    assert_eq!(names(&request), ["Read", "TaskStop"]);
+async fn every_model_gets_local_tool_search() {
+    let haiku = ModelSelection {
+        model: "claude-3-5-haiku-20241022".to_owned(),
+        ..gateway_opus()
+    };
+    for capabilities in [endpoint(false), None] {
+        let request = first_request_with(haiku.clone(), capabilities, search_tools()).await;
+        assert_eq!(names(&request), ["Read", "ToolSearch"]);
+        assert!(request.options.tool_flags.is_empty());
+    }
+}
+
+/// 工作线 F89（tools-more.md §3.2.2）：模型端口答不出能力（测试替身）时也是本地，原生只能由端点的能力选到。修改：F84
+/// 时按卡片回退，claude-opus-5-5 是原生（带占位工具）。
+#[tokio::test]
+async fn without_capabilities_tool_search_is_local() {
+    for selection in [gateway_opus(), glm()] {
+        let request = first_request_with(selection, None, search_tools()).await;
+        assert_eq!(names(&request), ["Read", "ToolSearch"]);
+        assert!(request.options.tool_flags.is_empty());
+    }
 }
 
 /// 工作线 F52（model.md §3.3）：主循环、子代理与压缩的请求都带上发请求的会话（子代理跑在子会话里，`scope.session`
@@ -256,4 +284,35 @@ async fn the_request_names_the_session_that_sends_it() {
     // 工作线 F64（model.md §2.4）：这次运行（回合）给每请求头的 `x-query-id`；主线程没有子代理。
     assert!(request.options.run.is_some());
     assert_eq!(request.options.agent, None);
+}
+
+/// 工作线 F89（tools-more.md §3.2.1）：`ENABLE_TOOL_SEARCH` 为关时这一步不开，全部内联、没有 ToolSearch。
+#[tokio::test]
+async fn the_off_setting_sends_every_tool_inline() {
+    let request = first_request_set(
+        gateway_opus(),
+        endpoint(false),
+        search_tools(),
+        ToolSearchSetting::Off,
+    )
+    .await;
+    assert_eq!(names(&request), ["Read", "TaskStop"]);
+}
+
+/// 工作线 F89（tools-more.md §3.2.1）：自动时这一步的延迟工具（名字、描述与 schema 的字符数）要达到
+/// `floor(floor(窗口 × N / 100) × 2.5)`。TaskStop 是 8 + 13 + 17 = 38 个字符：窗口 100 的 10% 门槛是 25，开（本地）；
+/// 窗口 1000 的门槛是 250，不开、全部内联。
+#[tokio::test]
+async fn the_auto_setting_waits_for_enough_deferred_tools() {
+    let window = |context_window| {
+        Some(ModelCapabilities {
+            context_window,
+            ..ModelCapabilities::default()
+        })
+    };
+    let auto = ToolSearchSetting::Auto { percent: 10 };
+    let request = first_request_set(gateway_opus(), window(100), search_tools(), auto).await;
+    assert_eq!(names(&request), ["Read", "ToolSearch"]);
+    let request = first_request_set(gateway_opus(), window(1000), search_tools(), auto).await;
+    assert_eq!(names(&request), ["Read", "TaskStop"]);
 }

@@ -18,6 +18,14 @@ pub(crate) fn tool_error(message: &str) -> String {
     format!("<tool_use_error>{message}</tool_use_error>")
 }
 
+/// 请求前配对兜底（query.md §1.8）的几段文字。
+pub(crate) const MISSING_TOOL_RESULT: &str = "[Tool result missing due to internal error]";
+pub(crate) const ORPHANED_TOOL_RESULT: &str =
+    "[Orphaned tool result removed due to conversation resume]";
+pub(crate) const TOOL_USE_REMOVED: &str = "[Tool use removed]";
+pub(crate) const TOOL_USE_INTERRUPTED: &str = "[Tool use interrupted]";
+pub(crate) const NO_CONTENT: &str = rust_cli_kernel_api::message::NO_CONTENT;
+
 /// 输出上限续写的提示。
 pub(crate) const OUTPUT_LIMIT_NUDGE: &str = "Output token limit hit. Resume directly \u{2014} no apology, no recap of what you were doing. Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.";
 

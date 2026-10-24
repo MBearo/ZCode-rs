@@ -5,8 +5,9 @@
 use std::sync::{Arc, PoisonError, RwLock};
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::env::{Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::listing::{ListingEntry, ListingSource, Listings};
+use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::message::{AttachmentMessage, Message};
 use rust_cli_kernel_api::model::SystemBlock;
 use rust_cli_kernel_api::orchestration::{
@@ -60,15 +61,18 @@ impl ContextBuilder for SubagentContext {
 /// 主线程的 agent 清单（context）与 Agent 工具共用同一个实例（runtime 组装），两处看到的插件 agent
 /// 总是同一组。
 pub struct AgentCatalog {
-    env: Arc<dyn Environment>,
+    /// agent 定义是本机的文件（用户级与项目级目录、插件），经本机的端口读。
+    info: Arc<dyn EnvInfo>,
+    files: Arc<dyn Files>,
     /// 插件 agent 文件；只由 runtime 在插件加载后设置（agents.md §3）。
     plugins: RwLock<Vec<PluginAgentFile>>,
 }
 
 impl AgentCatalog {
-    pub fn new(env: Arc<dyn Environment>) -> Self {
+    pub fn new(info: Arc<dyn EnvInfo>, files: Arc<dyn Files>) -> Self {
         Self {
-            env,
+            info,
+            files,
             plugins: RwLock::default(),
         }
     }
@@ -87,10 +91,10 @@ impl AgentCatalog {
             .clone();
         let mut layers = vec![
             builtins(),
-            plugin::load(self.env.as_ref(), workspace, &files).await,
+            plugin::load(self.files.as_ref(), workspace, &files).await,
         ];
-        match self.env.facts(workspace).await {
-            Ok(facts) => layers.extend(custom::load(self.env.as_ref(), workspace, &facts).await),
+        match self.info.facts(workspace).await {
+            Ok(facts) => layers.extend(custom::load(self.files.as_ref(), workspace, &facts).await),
             Err(error) => tracing::debug!(%error, "custom agents are not available"),
         }
         merge(layers)

@@ -293,8 +293,8 @@ async fn remote_servers_reconnect_after_closing() {
     assert_eq!(initializes, 2);
 }
 
-/// 延迟加载（ext.md §3.4、§3.7，tools-more.md §3.1）：MCP 工具除 `alwaysLoad`（工具的
-/// `_meta["zcode/alwaysLoad"]`，ext.md D35）外都延迟，资源工具按 `shouldDefer` 延迟并带 `searchHint` 与旧名。
+/// 延迟加载（ext.md §3.4、§3.7，tools-more.md §3.1）：MCP 工具除 `alwaysLoad`（工具的 `_meta` 标记，ext.md
+/// D35，两个键见 `tool_tests.rs`）外都延迟，资源工具按 `shouldDefer` 延迟并带 `searchHint` 与旧名。
 #[tokio::test]
 async fn mcp_tools_are_deferred_unless_always_load() {
     use rust_cli_kernel_api::tool_search::is_deferred;

@@ -115,8 +115,18 @@ async fn attachments_and_the_next_request_share_one_tool_snapshot() {
 }
 
 fn mcp_registry() -> Arc<McpRegistry> {
-    let tools: Vec<Arc<dyn Tool>> = ["Echo", "ToolSearch", "WaitForMcpServers"]
-        .into_iter()
+    registry_of(&["Echo", "ToolSearch", "WaitForMcpServers"])
+}
+
+/// ToolSearch 被 deny 规则去掉时的工具快照（tools-more.md §3.2.1：这时 ToolSearch 不开）。
+fn mcp_registry_without_search() -> Arc<McpRegistry> {
+    registry_of(&["Echo", "WaitForMcpServers"])
+}
+
+fn registry_of(names: &[&'static str]) -> Arc<McpRegistry> {
+    let tools: Vec<Arc<dyn Tool>> = names
+        .iter()
+        .copied()
         .map(|name| Arc::new(FakeTool::new(name, true, name)) as Arc<dyn Tool>)
         .collect();
     McpRegistry::new(
@@ -162,9 +172,21 @@ async fn wait_for_mcp_servers_is_dropped_when_tool_search_is_on() {
     assert_eq!(registry.snapshots.load(Ordering::SeqCst), 1);
 }
 
+/// 工作线 F84（tools-more.md §3.2、§3.3 第 4 条）：本地 ToolSearch 同样不提供 WaitForMcpServers（模型端口答不出能力、
+/// 没有卡片的模型是本地）。修改：以前端点不支持时不开 ToolSearch，提供 WaitForMcpServers。
+#[tokio::test]
+async fn wait_for_mcp_servers_is_dropped_with_local_tool_search() {
+    let registry = mcp_registry();
+    let (requests, turns) = run_with(registry.clone(), "glm-4.6", QuerySource::MainThread).await;
+    // 没有延迟工具，ToolSearch 不发（§3.3 第 3 条）；WaitForMcpServers 看的是“开着且工具里有 ToolSearch”，同样去掉。
+    assert_eq!(wire_names(&requests[0]), ["Echo"]);
+    assert!(!turns[0].0.contains(&"WaitForMcpServers".to_owned()));
+    assert!(registry.mcp.declared.lock().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn wait_for_mcp_servers_is_sent_and_declared_without_tool_search() {
-    let registry = mcp_registry();
+    let registry = mcp_registry_without_search();
     let (requests, _) = run_with(registry.clone(), "glm-4.6", QuerySource::MainThread).await;
     assert!(wire_names(&requests[0]).contains(&"WaitForMcpServers".to_owned()));
     let declared: Vec<String> = registry
@@ -177,7 +199,7 @@ async fn wait_for_mcp_servers_is_sent_and_declared_without_tool_search() {
         .collect();
     assert_eq!(declared, ["sess_1"]);
     // 子代理的请求不算（只在主线程记下）。
-    let registry = mcp_registry();
+    let registry = mcp_registry_without_search();
     let (requests, _) = run_with(
         registry.clone(),
         "glm-4.6",

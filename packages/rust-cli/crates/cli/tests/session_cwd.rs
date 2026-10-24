@@ -28,7 +28,7 @@ use rust_cli_kernel_api::orchestration::{
 use rust_cli_kernel_api::permission::{
     PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
 };
-use rust_cli_kernel_api::testing::{MemoryStore, NoHooks, RoundTripEnv};
+use rust_cli_kernel_api::testing::{MemoryStore, NoHooks, RoundTripEnv, local_services, machine};
 use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
 use rust_cli_policy::PolicyGate;
 use rust_cli_policy::rules::parse_rule;
@@ -61,7 +61,7 @@ struct Bench {
     tools: BuiltinTools,
     bash: Arc<dyn Tool>,
     pipeline: Pipeline,
-    env: Arc<RoundTripEnv>,
+    env: Arc<RoundTripEnv<LocalEnvironment>>,
     mode: PermissionMode,
     step: usize,
 }
@@ -124,6 +124,7 @@ impl Bench {
     async fn call(&mut self, tool: &str, input: Value) -> (String, bool) {
         self.step += 1;
         let session = SessionId::new("00000000-0000-4000-8000-000000000001");
+        let env = self.env.clone();
         let context = ToolUseContext {
             session: session.clone(),
             run: RunId::new("run_1"),
@@ -135,7 +136,8 @@ impl Bench {
             },
             mode: self.mode,
             cancel: CancellationToken::new(),
-            env: self.env.clone(),
+            machine: machine(env.clone()),
+            local: local_services(env),
             artifacts: Arc::new(MemoryStore::default()),
             interactions: Arc::new(NoOneToAsk),
             operation: OperationContext {

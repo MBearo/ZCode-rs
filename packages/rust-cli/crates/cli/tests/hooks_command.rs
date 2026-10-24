@@ -26,7 +26,9 @@ use rust_cli_kernel_api::orchestration::{
 use rust_cli_kernel_api::permission::{
     PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
 };
-use rust_cli_kernel_api::testing::{MemoryArtifacts, MemoryStore, RoundTripEnv, SequentialIds};
+use rust_cli_kernel_api::testing::{
+    MemoryArtifacts, MemoryStore, RoundTripEnv, SequentialIds, local_services, machine,
+};
 use rust_cli_kernel_api::tool::ToolUseContext;
 use rust_cli_policy::PolicyGate;
 use rust_cli_policy::rules::parse_rule;
@@ -66,7 +68,7 @@ struct Harness {
     _dir: tempfile::TempDir,
     root: PathBuf,
     scripts: PathBuf,
-    env: Arc<RoundTripEnv>,
+    env: Arc<RoundTripEnv<LocalEnvironment>>,
 }
 
 #[expect(clippy::disallowed_methods, reason = "测试准备工作区与 hook 脚本")]
@@ -109,7 +111,8 @@ fn engine(harness: &Harness, settings: &Value) -> HookEngine {
     assert!(warnings.is_empty(), "{warnings:?}");
     HookEngine::with_config(
         HookPorts {
-            env: harness.env.clone(),
+            commands: harness.env.clone(),
+            shell: harness.env.clone(),
             ids: Arc::new(SequentialIds::default()),
             model: None,
             http: None,
@@ -133,6 +136,7 @@ fn workspace(root: &Path) -> WorkspaceRef {
 
 fn context(harness: &Harness, index: usize) -> ToolUseContext {
     let session = SessionId::new("sess_1");
+    let env = harness.env.clone();
     ToolUseContext {
         session: session.clone(),
         run: RunId::new("run_1"),
@@ -141,7 +145,8 @@ fn context(harness: &Harness, index: usize) -> ToolUseContext {
         workspace: workspace(&harness.root),
         mode: PermissionMode::DontAsk,
         cancel: CancellationToken::new(),
-        env: harness.env.clone(),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: Arc::new(NoOneToAsk),
         operation: OperationContext {

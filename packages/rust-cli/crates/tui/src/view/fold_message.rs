@@ -135,6 +135,8 @@ impl Transcript {
                 }
                 UserOrigin::Meta { .. } | UserOrigin::CompactSummary => {}
             },
+            // 续写时补的 assistant（session-lifecycle.md §6.3.1）：不显示。
+            Message::Assistant(assistant) if assistant.is_resume_sentinel() => {}
             Message::Assistant(assistant) => {
                 self.add_usage(&assistant.model, assistant.usage);
                 self.replace_segment(assistant.content, now_ms);

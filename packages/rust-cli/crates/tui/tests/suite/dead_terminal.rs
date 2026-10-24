@@ -10,7 +10,7 @@ use ratatui::layout::{Position, Size};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
-use rust_cli_kernel_api::testing::{MemoryStore, NoticeEnvironment};
+use rust_cli_kernel_api::testing::{MemoryStore, NoticeEnvironment, environments};
 use tokio_util::sync::CancellationToken;
 
 use super::support::{GatedModel, Setup, send, with_ui_exit};
@@ -101,7 +101,7 @@ async fn a_dead_terminal_ends_the_session_like_an_exit_signal() {
     let setup = Setup {
         stop: Some(stop),
         store: store.clone(),
-        env: env.clone(),
+        environments: environments(env.clone()),
         hang: hang.clone(),
         ..Setup::default()
     };

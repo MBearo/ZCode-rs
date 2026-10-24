@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-/// 模型请求（Anthropic 与 OpenAI 两种协议、count_tokens）：600 s（`@anthropic-ai/sdk` 的 `timeout: 600000`）。
+/// 模型请求（Anthropic 与 OpenAI 两种协议）：600 s（`@anthropic-ai/sdk` 的 `timeout: 600000`）。
 pub const MODEL: Duration = Duration::from_secs(600);
 
 /// 账号接口（项目令牌、customerInfo、团队列表与权益、订阅查询）：15 s（Node `coding-plan-api-key.ts`、App

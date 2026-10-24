@@ -59,15 +59,16 @@ fn commands_hidden_in_expansions_are_too_complex() {
     assert_eq!(echo_allowed("echo ${x:-y} $((1 + 2))"), "allow");
 }
 
+/// 拆出的命令单独检查。只有它不放行而且是询问时，整条按它询问（工作线 F76 改；F68 时列出多操作）。
 #[test]
 fn a_quoted_substitution_is_checked_as_its_own_subcommand() {
     assert_eq!(
         echo_allowed("echo \"made: $(mkdir zz6)\""),
-        "ask: This Bash command contains multiple operations. The following part requires approval: mkdir zz6"
+        "ask: mkdir in '/w/zz6' needs approval. The path is inside the working directories for this session ('/w'), and ZCode asks before a shell command creates, changes or removes files there."
     );
     assert_eq!(
         echo_allowed("echo \"before `mkdir zz5` after\""),
-        "ask: This Bash command contains multiple operations. The following part requires approval: mkdir zz5"
+        "ask: mkdir in '/w/zz5' needs approval. The path is inside the working directories for this session ('/w'), and ZCode asks before a shell command creates, changes or removes files there."
     );
     // 替换里的命令是只读的：两边都放行。
     assert_eq!(
@@ -77,7 +78,7 @@ fn a_quoted_substitution_is_checked_as_its_own_subcommand() {
     // 嵌套：每一层都要放行。
     assert_eq!(
         echo_allowed("echo \"a $(echo \"b $(mkdir zz13)\")\""),
-        "ask: This Bash command contains multiple operations. The following part requires approval: mkdir zz13"
+        "ask: mkdir in '/w/zz13' needs approval. The path is inside the working directories for this session ('/w'), and ZCode asks before a shell command creates, changes or removes files there."
     );
 }
 
@@ -120,9 +121,10 @@ fn deny_rules_reach_commands_inside_substitutions() {
         verdict(&rules, "echo \"$(rm -rf x)\""),
         "deny: Permission to use Bash with command echo \"$(rm -rf x)\" has been denied."
     );
+    // 工作线 F80：替换里拆出的命令被拒绝时文字也是整条命令。
     assert_eq!(
         verdict(&rules, "echo \"gone: $(rm -rf x)\""),
-        "deny: Permission to use Bash with command rm -rf x has been denied."
+        "deny: Permission to use Bash with command echo \"gone: $(rm -rf x)\" has been denied."
     );
 }
 
@@ -143,16 +145,27 @@ fn only_an_exact_rule_covers_a_too_complex_command() {
 }
 
 #[test]
-fn prefix_rules_do_not_cover_a_command_the_parser_cannot_split() {
-    // 子 shell、后台等解析不了的结构：整条命令只认精确规则。
-    assert_eq!(
-        echo_allowed("echo hi; (mkdir zz14)"),
-        "passthrough: This command requires approval"
-    );
+fn prefix_rules_do_not_cover_a_subshell() {
+    // 子 shell：工作线 F76 起拆开，拒绝与危险删除之外询问 shell operators（F68 时整条只认精确规则）；精确的
+    // allow 规则也不放行它。
+    let operators = "ask: This command uses shell operators that require approval for safety";
+    assert_eq!(echo_allowed("echo hi; (mkdir zz14)"), operators);
     assert_eq!(
         verdict(
             &[(RuleBehavior::Allow, "Bash(echo hi; (mkdir zz14))")],
             "echo hi; (mkdir zz14)"
+        ),
+        operators
+    );
+    // 解析不了的命令（缺 `)`）仍然只认精确规则。
+    assert_eq!(
+        echo_allowed("echo hi; (mkdir zz14"),
+        "passthrough: This command requires approval"
+    );
+    assert_eq!(
+        verdict(
+            &[(RuleBehavior::Allow, "Bash(echo hi; (mkdir zz14)")],
+            "echo hi; (mkdir zz14"
         ),
         "allow"
     );

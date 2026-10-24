@@ -3,10 +3,11 @@
 
 use std::collections::HashMap;
 
-use rust_cli_kernel_api::env::{EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{FileKind, StatFile};
 use rust_cli_kernel_api::env_git::{gitdir_pointer, marks_git_root};
 use rust_cli_kernel_api::ids::EnvironmentId;
+use rust_cli_kernel_api::machine::Files;
 use rust_cli_kernel_api::panels::{ProjectSession, ProjectSessions};
 use rust_cli_kernel_api::session_api::{Command, CommandEnvelope, SessionView};
 use rust_cli_kernel_api::store::{SessionQuery, SessionRecord};
@@ -81,11 +82,7 @@ fn absolute(path: &str) -> bool {
 
 /// 目录现在的 git 分支（tui-panels.md §2.1、D11）：从目录向上找 `.git`；是文件时按 `gitdir:` 找；读 `HEAD` 的
 /// `ref: refs/heads/<名字>`。只经执行环境的 `stat` / `read_file`，不跑 git。UNC 路径不读（同 workspace-trust.md §2.1）。
-async fn branch(
-    env: &dyn Environment,
-    environment: &EnvironmentId,
-    root: &EnvPath,
-) -> Option<String> {
+async fn branch(files: &dyn Files, environment: &EnvironmentId, root: &EnvPath) -> Option<String> {
     let workspace = WorkspaceRef {
         environment: environment.clone(),
         root: root.clone(),
@@ -93,7 +90,7 @@ async fn branch(
     let read = |path: String| {
         let workspace = workspace.clone();
         async move {
-            let content = env
+            let content = files
                 .read_file(
                     &workspace,
                     ReadFile {
@@ -108,7 +105,7 @@ async fn branch(
     let mut dir = Some(root.as_str());
     while let Some(current) = dir {
         let dot_git = join(current, ".git");
-        let stat = env
+        let stat = files
             .stat(
                 &workspace,
                 StatFile {
@@ -225,7 +222,7 @@ impl LocalKernel {
         for session in &mut sessions {
             let root = session.record.root.clone();
             if !branches.contains_key(&root) {
-                let found = branch(self.ports.env.as_ref(), &environment, &root).await;
+                let found = branch(self.machine.files().as_ref(), &environment, &root).await;
                 branches.insert(root.clone(), found);
             }
             session.branch = branches.get(&root).cloned().flatten();

@@ -11,6 +11,10 @@ export const LAYERS = {
   net: "foundation",
   proc: "foundation",
   prompts: "foundation",
+  // 远端执行的协议与传输（docs/specs/rust-cli/remote-exec.md §15.4）：不认识 kernel-api。
+  "exec-wire": "foundation",
+  "exec-transport": "foundation",
+  "exec-client": "foundation",
   "kernel-api": "kernel",
   policy: "kernel",
   hooks: "kernel",
@@ -26,11 +30,20 @@ export const LAYERS = {
   "node-store": "adapter",
   model: "adapter",
   "env-local": "adapter",
+  // 远端机器的执行端口（客户端）与执行器侧：wire ⇄ kernel-api 的换算只在这两个 crate（remote-exec.md §15.4）。
+  "env-remote": "adapter",
+  "exec-server": "adapter",
+  // SSH 的连接与部署（remote-exec.md §15.4、§19.9）：只认 exec-transport 的 Connector / Provisioner。
+  "ssh-connect": "adapter",
+  // 一台远端机器的连接状态机（remote-exec.md §15.4、§19.10）：只认 Connector / Provisioner 与 exec-client。
+  machines: "adapter",
   peers: "adapter",
   platform: "platform",
   tui: "frontend",
   headless: "frontend",
   cli: "entry",
+  // `zcode executor` 的组装（remote-exec.md §15.4）。
+  "executor-host": "entry",
 };
 
 /// 每层能依赖的层与 crate。改依赖表也不能越过它。
@@ -53,10 +66,26 @@ export const ALLOWED = {
   // base：`include_lf!`（F56）与产品目录名 `.zcode`（loop.md 的位置，README §4.1，F55）。
   prompts: ["base"],
   "kernel-api": ["base"],
+  // base：握手里不透明的凭据用 RedactedString（remote-exec.md §18.4）。
+  "exec-wire": ["base"],
+  // base：stderr 转发任务经 owned 启动；proc：stdio 传输的子进程（remote-exec.md §18.6）。
+  "exec-transport": ["base", "proc"],
+  // 会话层：任务经 base 的 TaskScope；凭据是 base 的 RedactedString（remote-exec.md §18.5）。
+  "exec-client": ["base", "exec-transport", "exec-wire"],
   "node-store": ["base", "fs", "kernel-api", "paths"],
   model: ["base", "kernel-api", "net"],
   "env-local": ["base", "fs", "kernel-api", "net", "proc"],
   peers: ["base", "fs", "kernel-api", "net"],
+  // MachineEnv 的 8 个端口经 exec-client 发请求（remote-exec.md §18）。§15.4 的表多写了 base：没有用到，不列。
+  "env-remote": ["exec-client", "exec-wire", "kernel-api"],
+  // 派发到注入的 MachineEnv；任务经 base 的 TaskScope，执行器实例名经 base 的 random（remote-exec.md §18）。
+  "exec-server": ["base", "exec-transport", "exec-wire", "kernel-api"],
+  // SSH 的 Connector 与 Provisioner（remote-exec.md §19.9）：ssh 进程经 proc；本机产物（ELF 头、sha256、上传的内容）经 fs；
+  // 远端目录与可执行文件的名字、任务取 base。不认识 exec-wire：要的版本与协议由组装根给。
+  "ssh-connect": ["base", "exec-transport", "fs", "proc"],
+  // 状态机与驱动（remote-exec.md §19.10）：任务经 base 的 TaskScope；exec-wire 只在测试里（假执行器的帧）。§15.4 的表多写了
+  // paths、fs（机器清单 machines.json 在 R3），R2 没有用到，不列。
+  machines: ["base", "exec-client", "exec-transport", "exec-wire"],
   // base：`include_lf!`（F56）与产品目录与文件的名字（README §4.1，F55）。
   policy: ["base", "kernel-api"],
   hooks: ["base", "kernel-api", "prompts"],
@@ -86,6 +115,40 @@ export const ALLOWED = {
   tui: ["base", "kernel-api", "platform", "runtime"],
   headless: ["base", "kernel-api", "runtime"],
   cli: "*",
+  // 入口：组装 exec-server 与注入的 env-local；测试依赖里有合同测试用到的 env-local、env-remote、exec-client。
+  "executor-host": "*",
+};
+
+/// 波及范围（docs/specs/rust-cli/remote-exec.md §15.6 第 2 条）：远端 crate 的反向依赖闭包（谁直接或间接依赖它，测试依赖也算），
+/// 实际必须与这里相等。“把 SSH 换成云只改两处”由此可查：新传输只被组装根依赖。
+export const BLAST_RADIUS = {
+  // machines：只在测试里（假执行器的帧）。
+  "exec-wire": ["cli", "env-remote", "exec-client", "exec-server", "executor-host", "machines"],
+  "exec-transport": [
+    "cli",
+    "env-remote",
+    "exec-client",
+    "exec-server",
+    "executor-host",
+    "machines",
+    "ssh-connect",
+  ],
+  "exec-client": ["cli", "env-remote", "executor-host", "machines"],
+  "env-remote": ["cli", "executor-host"],
+  "exec-server": ["cli", "executor-host"],
+  "executor-host": ["cli"],
+  // cli：`executor status --json` 的输出与部署探测的解析互相核对（测试依赖）。
+  "ssh-connect": ["cli"],
+  machines: ["cli"],
+};
+
+/// 上面任何一个闭包里都不能有这些层的 crate：内核、前端与平台层不认识远端（远端对它们只是另一台机器的 MachineEnv）。
+export const BLAST_FORBIDDEN_LAYERS = ["kernel", "frontend", "platform"];
+
+/// 稳定依赖原则的例外（remote-exec.md §15.6 第 4 条）：键 `A->B`，值是理由。
+export const SDP_EXCEPTIONS = {
+  "headless->runtime":
+    "runtime 只在 headless 的测试里用来组装内核（测试依赖）；headless 的产品代码只认 kernel-api 的会话 API",
 };
 
 /// IO 类别（README §4）：clippy.toml 的每条禁令按路径前缀归入一类；`entries` 是可以豁免这一类的 crate。

@@ -42,7 +42,8 @@ impl Actor {
             workspace: self.meta.workspace.clone(),
             mode: self.mode(),
             cancel: abort.token().clone(),
-            env: self.deps.env.clone(),
+            machine: self.deps.machine.clone(),
+            local: self.deps.local.clone(),
             artifacts: self.deps.artifacts.clone(),
             interactions,
             operation: OperationContext {

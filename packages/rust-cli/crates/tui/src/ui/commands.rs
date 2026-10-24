@@ -22,16 +22,15 @@ impl Command {
             "resume" => Some("[conversation id or search term]"),
             "export" => Some("[filename]"),
             "btw" => Some("[question]"),
-            "fork" => Some("[latest|checkpointId]"),
             "goal" => Some("[<condition> | clear]"),
-            "branch" => Some("[name]"),
             "rename" => Some("[name]"),
             "locale" => Some("[auto|en-US|zh-CN]"),
             // L28（tui-display.md）。
             "clear" => Some("[name]"),
             "plan" => Some("[open|<description>]"),
             "effort" => Some("[low|medium|high|xhigh|max|auto]"),
-            "mode" => Some("[plan|build|edit|yolo|guarded]"),
+            // 工作线 F76：照 App 只留三个模式（`plan` 照旧能用，同 `/plan`，不列出）。
+            "mode" => Some("[build|guarded|yolo]"),
             "mcp" => Some("[reconnect|enable|disable [<server>|all]]"),
             "copy" => Some("[N]"),
             "cd" => Some("<path>"),
@@ -65,10 +64,9 @@ commands! {
     "compact", true, "Free up context by summarizing the conversation so far", "总结目前的对话，腾出上下文";
     "resume", true, "Resume a previous conversation", "恢复之前的会话";
     "rewind", true, "Restore the code and/or conversation to a previous point", "把代码或对话恢复到之前的位置";
-    "branch", true, "Create a branch of the current conversation at this point", "在当前位置创建会话分支";
     "rename", true, "Rename the current conversation", "重命名当前会话";
     "goal", true, "Set a goal ZCode checks before stopping", "设置 ZCode 停止前要检查的目标";
-    "fork", true, "Fork a new session from a workspace checkpoint.", "从工作区 checkpoint 分出新会话";
+    "fork", true, "Fork the conversation after one of your messages into a new session", "从某条输入之后分出新会话";
     "export", true, "Export the current conversation to a file or clipboard", "把当前会话导出到文件或剪贴板";
     "init", false, "Initialize a new AGENTS.md file with codebase documentation", "为代码库创建 AGENTS.md";
     "memory", true, "Edit AGENTS.md files and memory settings", "编辑 AGENTS.md 与记忆设置";

@@ -23,7 +23,7 @@ impl PromptAssembler {
         let window = since_boundary(history);
         let missing = |source: &str| attachments(window, source).next().is_none();
         let mut out = Vec::new();
-        if let Ok(facts) = self.ports.env.facts(&request.workspace).await {
+        if let Ok(facts) = self.ports.info.facts(&request.workspace).await {
             if missing(instructions::SOURCE) {
                 let files = self.load_rule_files(request, &facts).await;
                 out.extend(
@@ -32,9 +32,9 @@ impl PromptAssembler {
                 );
             }
             if missing(session_context::SOURCE) {
-                let env = self.ports.env.as_ref();
+                let git = self.ports.git.as_ref();
                 out.extend(
-                    session_context::announce(env, &request.workspace, &facts, window)
+                    session_context::announce(git, &request.workspace, &facts, window)
                         .await
                         .map(|found| self.attachment(session_context::SOURCE, found)),
                 );

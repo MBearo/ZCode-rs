@@ -21,7 +21,8 @@ use rust_cli_kernel_api::session_api::{
 };
 use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, SessionStore};
 use rust_cli_kernel_api::testing::{
-    MemoryStore, NeverCompact, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
+    MemoryStore, NeverCompact, ScriptedModel, SequentialIds, UnusedEnvironment, local_services,
+    machine, selection,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -76,7 +77,8 @@ impl Compactor for FakeCompactor {
         }
         assert_eq!(request.trigger, CompactTrigger::Manual);
         assert_eq!(request.instructions.as_deref(), Some("focus"));
-        assert_eq!(request.messages.len(), 1);
+        // 冷加载的历史以没有回答的输入结束：补了一条 assistant（session-lifecycle.md §6.3.1）。
+        assert_eq!(request.messages.len(), 2);
         Ok(CompactResult {
             boundary: CompactBoundary {
                 id: MessageId::new("msg_b"),
@@ -84,6 +86,7 @@ impl Compactor for FakeCompactor {
                 pre_tokens: 5,
                 summary: MessageId::new("msg_s"),
                 preserved: None,
+                discovered_tools: Vec::new(),
             },
             summary: UserMessage {
                 id: MessageId::new("msg_s"),
@@ -116,6 +119,7 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
     let scope = TaskScope::root("test", |_| {});
     let store = Arc::new(MemoryStore::default());
     store.create(meta()).await.unwrap();
+    let env = Arc::new(UnusedEnvironment);
     let runner = Arc::new(rust_cli_query::QueryLoop::new(rust_cli_query::QueryParts {
         model: Arc::new(ScriptedModel::new(Vec::new())),
         context: Arc::new(rust_cli_kernel_api::testing::FixedContext(Vec::new())),
@@ -125,7 +129,8 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
         hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
         ids: Arc::new(SequentialIds::default()),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: store.clone(),
         generation: rust_cli_kernel_api::ids::Generation::new("g"),
         non_interactive: false,
@@ -138,6 +143,7 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
         }],
         origin: UserOrigin::Human,
     })];
+    let env = Arc::new(UnusedEnvironment);
     let session = Session::spawn(
         SessionDeps {
             agents: Arc::new(rust_cli_kernel_api::agents::NoAgentSignals),
@@ -148,7 +154,8 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
             compactor: Arc::new(FakeCompactor {
                 fail: fail.map(str::to_owned),
             }),
-            env: Arc::new(UnusedEnvironment),
+            machine: machine(env.clone()),
+            local: local_services(env),
             max_turns: None,
             hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
@@ -163,6 +170,7 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
             released: Arc::new(crate::NothingToRelease),
             directory_rules: Arc::new(rust_cli_kernel_api::orchestration::NoDirectoryRules),
             peers: crate::PeerDeps::off(),
+            detached: None,
         },
         SessionState {
             meta: meta(),
@@ -172,6 +180,7 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
             checkpoints: Vec::new(),
             start: rust_cli_kernel_api::session_api::StartSource::Startup,
             turn: None,
+            last_turn_failed: false,
         },
         Opened::Loaded,
     );
@@ -238,9 +247,9 @@ async fn compact_runs_as_a_turn_and_commits_one_batch() {
     assert!(events.contains(&KernelEvent::ContextNotice {
         notice: ContextNotice::Hidden
     }));
-    // F27：footer 的 ctx 同一处重算，用的是提交之后的历史（原有的 1 条加边界与摘要）。
+    // F27：footer 的 ctx 同一处重算，用的是提交之后的历史（原有的 1 条、冷加载补上的 assistant，加边界与摘要）。
     assert!(events.contains(&KernelEvent::ContextUsage {
-        used_tokens: 3,
+        used_tokens: 4,
         max_tokens: 100
     }));
     assert!(matches!(
@@ -258,9 +267,10 @@ async fn compact_runs_as_a_turn_and_commits_one_batch() {
             _ => None,
         })
         .collect();
-    assert_eq!(appended, ["msg_b", "msg_s"]);
+    // 冷加载补的 assistant（msg_1）随这一批落库，排在最前面（工作线 F77，session-lifecycle.md §6.3.1）。
+    assert_eq!(appended, ["msg_1", "msg_b", "msg_s"]);
     let view = session.view().await.unwrap();
-    assert_eq!(view.messages.len(), 3);
+    assert_eq!(view.messages.len(), 4);
 }
 
 #[tokio::test]
@@ -291,10 +301,11 @@ async fn a_failed_compaction_finishes_the_turn_with_the_reason() {
 async fn the_view_carries_the_context_usage_and_notice() {
     let (_scope, _store, session) = session(None).await;
     let view = session.view().await.unwrap();
+    // 消息数：冷加载的一条输入与补上的 assistant（session-lifecycle.md §6.3.1）。
     assert_eq!(
         view.context_usage,
         Some(rust_cli_kernel_api::compaction::ContextOccupancy {
-            used_tokens: 1,
+            used_tokens: 2,
             max_tokens: 100
         })
     );
@@ -344,7 +355,7 @@ async fn changing_the_model_recomputes_the_context() {
                 notice: ContextNotice::UntilAutoCompact { percent: 1 }
             },
             KernelEvent::ContextUsage {
-                used_tokens: 1,
+                used_tokens: 2,
                 max_tokens: 1_000
             }
         ]

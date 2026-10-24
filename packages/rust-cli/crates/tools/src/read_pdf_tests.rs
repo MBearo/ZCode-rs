@@ -9,13 +9,17 @@ use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext, Outcome,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{DirEntry, FileStat, ListDir, PathFacts, StatFile};
 use rust_cli_kernel_api::env_pdf::{PdfPageCount, PdfRender, RenderPdfPages};
 use rust_cli_kernel_api::env_shell::ShellState;
 use rust_cli_kernel_api::ids::OperationId;
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
 use rust_cli_kernel_api::message::ImageSource;
 use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection};
 use rust_cli_kernel_api::orchestration::PermissionGate;
@@ -88,10 +92,18 @@ fn unsupported(what: &str) -> EnvError {
 }
 
 #[async_trait]
-impl Environment for PdfEnv {
+impl EnvInfo for PdfEnv {
     async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         self.inner.facts(workspace).await
     }
+
+    async fn path_facts(&self, workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
+        self.inner.path_facts(workspace).await
+    }
+}
+
+#[async_trait]
+impl Files for PdfEnv {
     async fn read_file(
         &self,
         workspace: &WorkspaceRef,
@@ -99,6 +111,7 @@ impl Environment for PdfEnv {
     ) -> Result<FileContent, EnvError> {
         self.inner.read_file(workspace, request).await
     }
+
     async fn write_file(
         &self,
         workspace: &WorkspaceRef,
@@ -107,6 +120,34 @@ impl Environment for PdfEnv {
     ) -> Result<WriteReceipt, EnvError> {
         self.inner.write_file(workspace, context, request).await
     }
+
+    async fn stat(
+        &self,
+        workspace: &WorkspaceRef,
+        request: StatFile,
+    ) -> Result<Option<FileStat>, EnvError> {
+        self.inner.stat(workspace, request).await
+    }
+
+    async fn list_dir(
+        &self,
+        workspace: &WorkspaceRef,
+        request: ListDir,
+    ) -> Result<Vec<DirEntry>, EnvError> {
+        self.inner.list_dir(workspace, request).await
+    }
+
+    async fn read_text(
+        &self,
+        workspace: &WorkspaceRef,
+        request: rust_cli_kernel_api::env_files::ReadText,
+    ) -> Result<rust_cli_kernel_api::env_files::TextRead, EnvError> {
+        self.inner.read_text(workspace, request).await
+    }
+}
+
+#[async_trait]
+impl Commands for PdfEnv {
     async fn start_command(
         &self,
         workspace: &WorkspaceRef,
@@ -115,6 +156,7 @@ impl Environment for PdfEnv {
     ) -> Result<(), EnvError> {
         self.inner.start_command(workspace, context, request).await
     }
+
     fn watch_command(
         &self,
         operation: OperationId,
@@ -122,39 +164,22 @@ impl Environment for PdfEnv {
     ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
         self.inner.watch_command(operation, cursor)
     }
+
     async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
         self.inner.cancel(operation).await
     }
+
     async fn operation_status(&self, operation: OperationId) -> Result<Outcome, EnvError> {
         self.inner.operation_status(operation).await
     }
+
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
         self.inner.close_session(session, forget).await
     }
-    async fn path_facts(&self, workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
-        self.inner.path_facts(workspace).await
-    }
-    async fn stat(
-        &self,
-        workspace: &WorkspaceRef,
-        request: StatFile,
-    ) -> Result<Option<FileStat>, EnvError> {
-        self.inner.stat(workspace, request).await
-    }
-    async fn list_dir(
-        &self,
-        workspace: &WorkspaceRef,
-        request: ListDir,
-    ) -> Result<Vec<DirEntry>, EnvError> {
-        self.inner.list_dir(workspace, request).await
-    }
-    async fn read_text(
-        &self,
-        workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env_files::ReadText,
-    ) -> Result<rust_cli_kernel_api::env_files::TextRead, EnvError> {
-        self.inner.read_text(workspace, request).await
-    }
+}
+
+#[async_trait]
+impl Shell for PdfEnv {
     async fn shell_state(
         &self,
         workspace: &WorkspaceRef,
@@ -162,6 +187,10 @@ impl Environment for PdfEnv {
     ) -> Result<ShellState, EnvError> {
         self.inner.shell_state(workspace, session).await
     }
+}
+
+#[async_trait]
+impl Pdf for PdfEnv {
     async fn pdf_page_count(
         &self,
         _workspace: &WorkspaceRef,
@@ -170,6 +199,7 @@ impl Environment for PdfEnv {
         self.counted.lock().unwrap().push(request);
         self.pages.ok_or_else(|| unsupported("pdf_page_count"))
     }
+
     async fn render_pdf_pages(
         &self,
         _workspace: &WorkspaceRef,
@@ -181,6 +211,12 @@ impl Environment for PdfEnv {
             .ok_or_else(|| unsupported("render_pdf_pages"))
     }
 }
+
+impl Search for PdfEnv {}
+impl Background for PdfEnv {}
+impl Checkpoints for PdfEnv {}
+impl Git for PdfEnv {}
+impl Fetch for PdfEnv {}
 
 struct AllowAll;
 
@@ -234,7 +270,7 @@ fn tool_on(pdf: Option<bool>) -> ReadTool {
 
 fn context(env: &Arc<PdfEnv>) -> ToolUseContext {
     let mut ctx = Ctx::new(Arc::new(ScriptedInteractions::default()));
-    ctx.env = env.clone();
+    ctx.set_env(env.clone());
     ctx.build()
 }
 

@@ -15,12 +15,13 @@ use std::path::{Path, PathBuf};
 use futures_util::StreamExt;
 use rust_cli_env_local::{EmbeddedSearch, LocalEnvironment, ShellConfig};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvPath, Environment, OperationContext, Origin, StartCommand, WorkspaceRef,
+    CommandEvent, EnvPath, OperationContext, Origin, StartCommand, WorkspaceRef,
 };
 use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{
     EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ShellTaskId,
 };
+use rust_cli_kernel_api::machine::Commands;
 
 const ZCODE: &str = env!("CARGO_BIN_EXE_zcode-rs");
 
@@ -95,6 +96,7 @@ async fn bash(harness: &Harness, index: usize, command: &str) -> String {
         sandbox: None,
         hook: None,
         on_timeout: None,
+        socket: None,
     };
     harness
         .env

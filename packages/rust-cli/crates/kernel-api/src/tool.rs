@@ -14,8 +14,10 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::env::{EnvError, Environment, OperationContext, WorkspaceRef};
+use crate::env::{EnvError, OperationContext, WorkspaceRef};
 use crate::ids::{AgentId, RunId, SessionId, ToolUseId};
+use crate::local_services::LocalServices;
+use crate::machine::MachineEnv;
 use crate::mcp::McpToolInfo;
 use crate::message::{Message, ToolResultContent};
 use crate::orchestration::Interactions;
@@ -66,7 +68,10 @@ pub struct ToolUseContext {
     pub workspace: WorkspaceRef,
     pub mode: PermissionMode,
     pub cancel: CancellationToken,
-    pub env: Arc<dyn Environment>,
+    /// 这次调用在哪台机器上执行（R0 只有本机；R3 起按调用的 `machine` 换，remote-exec.md §15.8.1）。
+    pub machine: MachineEnv,
+    /// 只在本机的服务（Git、worktree、WebFetch）。
+    pub local: LocalServices,
     pub artifacts: Arc<dyn ArtifactStore>,
     /// 需要用户回答时（权限、提问、计划审批）经这里；会话 actor 先持久化再通知前端。
     pub interactions: Arc<dyn Interactions>,
@@ -178,7 +183,7 @@ pub trait Tool: Send + Sync {
         false
     }
 
-    /// 总是内联给出完整 schema，不延迟（MCP 服务器的 `alwaysLoad` 或工具的 `_meta['zcode/alwaysLoad']`）。
+    /// 总是内联给出完整 schema，不延迟（MCP 服务器的 `alwaysLoad` 或工具 `_meta` 里的不延迟标记，docs/specs/rust-cli/ext.md §3.1）。
     fn always_load(&self) -> bool {
         false
     }
@@ -252,4 +257,24 @@ pub trait Tool: Send + Sync {
 /// 用复制品选压缩后要重读的文件）：清空这个会话记着的文件，返回清空前的路径，最近用过的在前。
 pub trait ReadFileStates: Send + Sync {
     fn clear(&self, session: &SessionId) -> Vec<String>;
+}
+
+/// 读过的文件在磁盘上被改动（docs/specs/rust-cli/tools-files.md §4.1）：每一步的当步 attachment 之前查一次。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangedFile {
+    /// 执行环境里的路径（readFileState 的键）。
+    pub path: String,
+    /// 改动片段（带行号）；空表示只说改了，不给片段。
+    pub snippet: String,
+}
+
+/// 查一个会话读过的文件有没有在磁盘上被改动：改了的重新读入 readFileState，返回改动片段。由工具实现
+/// （readFileState 的 owner）、runtime 组装，context 在当步 attachment 里渲染。
+#[async_trait]
+pub trait ChangedFiles: Send + Sync {
+    async fn changed_files(
+        &self,
+        session: &SessionId,
+        workspace: &WorkspaceRef,
+    ) -> Vec<ChangedFile>;
 }

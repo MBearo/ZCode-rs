@@ -124,6 +124,9 @@ pub enum Fact {
     },
     /// 一次模型请求的计时与结果（Node `model_usage`，docs/specs/rust-cli/usage.md §2.2）：与这次响应的
     /// assistant 消息同批提交；没有提交消息（失败、丢弃的响应）时单独一批。
+    ///
+    /// 用量事实（这一个、`ToolCalled` 与 `TurnEnded` 的用量部分）是观测：存储写不进去时只放弃这一行并记日志，同批的
+    /// 其他事实照常提交（usage.md §2.5，工作线 F77）。
     ModelCalled {
         call: crate::metering::ModelCall,
     },
@@ -237,6 +240,10 @@ pub struct LoadedSession {
     /// 库里的当前轮（最后一条真实用户输入）：会话 actor 打开会话时以它为起点（[`FactBatch::turn`]）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<TurnAnchor>,
+    /// 当前轮已经结束、结果是错误（API 错误、轮数用尽等，Node `turn_usage.status = error`）。续写时据此判断最后一条
+    /// 没有回答的 user 消息要不要补一条 assistant（docs/specs/rust-cli/session-lifecycle.md §6.3.1）。serde 缺省 false。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub last_turn_failed: bool,
 }
 
 /// 有意图、没有结果的操作（[`Fact::OperationIntent`] 原样）。
@@ -253,20 +260,15 @@ pub struct PendingInteraction {
     pub request: InteractionRequest,
 }
 
-/// Node `/fork` 的新会话（docs/specs/rust-cli/session-lifecycle.md §6.5.2）：存储在一个事务里写完会话行、
+/// `/fork` 的新会话（docs/specs/rust-cli/session-lifecycle.md §6.5.2，Node 分叉对话的形状）：存储在一个事务里写完会话行、
 /// 模型与模式、复制的消息、目标状态、时间线与分叉提示。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionFork {
     pub parent: SessionId,
     pub child: SessionId,
     pub created_at_ms: u64,
-    /// 复制到这条消息为止（含）：checkpoint 的回合输入。
+    /// 复制到这条消息为止（含）：按用户输入分叉（F75）是这一轮最后一条 assistant。
     pub through: MessageId,
-    /// 文件已经恢复到这个 checkpoint 写入前（`ForkFiles::Restore`）时有值：分叉提示写 checkpoint 与文件。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub checkpoint: Option<WorkspaceCheckpoint>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub restored: Vec<crate::env_rewind::RestoredFile>,
     pub selection: ModelSelection,
     pub mode: PermissionMode,
     /// plan 开关（修复线 F20；serde 缺省 false）。

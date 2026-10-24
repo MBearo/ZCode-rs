@@ -31,4 +31,8 @@ texts! {
     truncated_head => "truncated_head",
     tool_call => "tool_call",
     tool_result => "tool_result",
+    // 压缩后带回调用过的 skill（compact.md §3.4，工作线 F70）。
+    invoked_skills => "invoked_skills",
+    invoked_skill => "invoked_skill",
+    invoked_skill_truncated => "invoked_skill_truncated",
 }

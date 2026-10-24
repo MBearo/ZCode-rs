@@ -129,10 +129,14 @@ pub(crate) fn env_failure(error: EnvError) -> ToolError {
 /// 缺陷修复（F19）：以前这里是工作区根，判决链用的是 shell cwd——Bash `cd sub` 之后 `Write x.txt` 判的是
 /// `sub/x.txt`、写的是 `x.txt`（可能正是 deny 规则保护的文件）。
 pub(crate) async fn cwd(context: &ToolUseContext) -> String {
-    env_shell::current_dir(context.env.as_ref(), &context.workspace, &context.session)
-        .await
-        .as_str()
-        .to_owned()
+    env_shell::current_dir(
+        context.machine.shell().as_ref(),
+        &context.workspace,
+        &context.session,
+    )
+    .await
+    .as_str()
+    .to_owned()
 }
 
 /// 工作区的路径风格：按工作区根的写法推断（kernel-api `env_path`，tools-files.md §3.1）。当前目录与根同一种写法。
@@ -156,7 +160,8 @@ pub(crate) async fn resolve(
     let style = style(context);
     let home = if style.needs_home(raw) {
         context
-            .env
+            .machine
+            .info()
             .path_facts(&context.workspace)
             .await
             .map_err(env_failure)?
@@ -173,7 +178,8 @@ async fn input_home(context: &ToolUseContext, raw: &str) -> Result<Option<EnvPat
         return Ok(None);
     }
     Ok(context
-        .env
+        .machine
+        .info()
         .path_facts(&context.workspace)
         .await
         .map_err(env_failure)?
@@ -242,7 +248,8 @@ pub(crate) async fn stat(
     path: &str,
 ) -> Result<Option<FileStat>, ToolError> {
     context
-        .env
+        .machine
+        .files()
         .stat(
             &context.workspace,
             StatFile {
@@ -260,7 +267,8 @@ async fn similar_file(context: &ToolUseContext, path: &str) -> Option<String> {
     let name = style.file_name(path);
     let stem = &name[..name.len() - env_path::extension(&name).len()];
     let entries = context
-        .env
+        .machine
+        .files()
         .list_dir(
             &context.workspace,
             ListDir {

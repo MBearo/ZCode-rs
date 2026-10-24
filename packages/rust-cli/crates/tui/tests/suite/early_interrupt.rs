@@ -1,6 +1,6 @@
 //! 输入还没提交时被中断（修复线 F37，docs/specs/rust-cli/session-lifecycle.md §3.1）：UserPromptSubmit hook 还在跑时
 //! 按 esc 或收到退出信号，输入照常留在对话里，接着是中断标记；下一条输入的请求带着它们。
-//! hook 的命令在执行环境里一直不结束，只有回合被中止（hook 的取消令牌经 `Environment::cancel` 结束它）
+//! hook 的命令在执行环境里一直不结束，只有回合被中止（hook 的取消令牌经 `Commands::cancel` 结束它）
 //! 才往下走，所以中断一定落在空档里。旧代码以 `Aborted` 结束、什么都不提交：对话里没有这条输入，下一条请求也没有。
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -9,11 +9,15 @@ use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment, text_response};
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
+use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment, environments, text_response};
 use rust_cli_runtime::{HookSource, HooksConfig, HooksSettings};
 use tokio::sync::{Notify, watch};
 use tokio_util::sync::CancellationToken;
@@ -60,11 +64,14 @@ fn finished(outcome: Outcome, exit_code: Option<i32>) -> Result<CommandEvent, En
 }
 
 #[async_trait]
-impl Environment for HeldHook {
+impl EnvInfo for HeldHook {
     async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         UnusedEnvironment.facts(workspace).await
     }
+}
 
+#[async_trait]
+impl Files for HeldHook {
     async fn read_file(
         &self,
         workspace: &WorkspaceRef,
@@ -83,7 +90,10 @@ impl Environment for HeldHook {
             .write_file(workspace, context, request)
             .await
     }
+}
 
+#[async_trait]
+impl Commands for HeldHook {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
@@ -133,6 +143,14 @@ impl Environment for HeldHook {
     }
 }
 
+impl Search for HeldHook {}
+impl Shell for HeldHook {}
+impl Background for HeldHook {}
+impl Checkpoints for HeldHook {}
+impl Pdf for HeldHook {}
+impl Git for HeldHook {}
+impl Fetch for HeldHook {}
+
 /// 一个 UserPromptSubmit command hook（命令本身由 `HeldHook` 扮演）。
 fn prompt_hook() -> HooksConfig {
     let settings = serde_json::json!({"hooks": {
@@ -154,7 +172,7 @@ async fn esc_while_the_prompt_hook_runs_keeps_the_input_with_the_marker() {
     let env = HeldHook::new();
     let model = GatedModel::scripted(vec![text_response(&["second reply"])]);
     let setup = Setup {
-        env: env.clone(),
+        environments: environments(env.clone()),
         hooks: Some(prompt_hook()),
         ..Setup::default()
     };
@@ -198,7 +216,7 @@ async fn a_stop_signal_while_the_prompt_hook_runs_records_nothing() {
     let stop = CancellationToken::new();
     let store = Arc::new(MemoryStore::default());
     let setup = Setup {
-        env: env.clone(),
+        environments: environments(env.clone()),
         hooks: Some(prompt_hook()),
         stop: Some(stop.clone()),
         store: store.clone(),

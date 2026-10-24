@@ -5,11 +5,12 @@
 
 use std::path::Path;
 
-use rust_cli_kernel_api::env::{EnvPath, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_git::{
     GitDiff, GitDiffRequest, GitSnapshot, GitStatus, GitStatusRequest,
 };
 use rust_cli_kernel_api::ids::EnvironmentId;
+use rust_cli_kernel_api::local_services::Git;
 
 use crate::{LocalEnvironment, ShellConfig};
 

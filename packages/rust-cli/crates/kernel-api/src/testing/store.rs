@@ -196,6 +196,7 @@ impl SessionStore for MemoryStore {
             turn: lock(&self.turns)
                 .get(session)
                 .and_then(|turns| turns.iter().rev().find_map(Clone::clone)),
+            last_turn_failed: last_turn_failed(facts),
         })
     }
 
@@ -611,6 +612,23 @@ impl ArtifactStore for MemoryArtifacts {
             .filter(|(stored, _)| &stored.session == session)
             .map(|(stored, _)| stored.clone()))
     }
+}
+
+/// 最后一条开启新一轮的输入之后，最后一次回合结束是错误（node-store 按 `turn_usage` 的同一口径）。
+fn last_turn_failed(facts: &[Fact]) -> bool {
+    let mut failed = false;
+    for fact in facts {
+        match fact {
+            Fact::MessageAppended {
+                message: Message::User(user),
+            } if crate::user_input::opens_turn(user) => failed = false,
+            Fact::TurnEnded { status } => {
+                failed = *status == crate::metering::CallStatus::Error;
+            }
+            _ => {}
+        }
+    }
+    failed
 }
 
 /// 最后一次写入的标题（用户改名与生成的标题）。

@@ -103,8 +103,6 @@ pub enum Action {
     Rename(String),
     /// 不带名字的 `/rename`：会话 actor 用模型起名（titles.md §8）。
     GenerateName,
-    /// `/branch`：fork 当前会话并切过去。
-    Branch,
     /// `/context [all]`：内核算出上下文用量后打开独立页面（context-usage.md §5.2、tui-panels.md §4）。
     Context {
         all: bool,
@@ -123,12 +121,11 @@ pub enum Action {
     Logout,
     /// `/goal` 不带参数：取会话的目标后打开面板（goal.md §6.2）。
     ShowGoal,
-    /// `/fork` 不带参数：取 checkpoint 清单后打开选择器（session-lifecycle.md §6.5.4）。
+    /// `/fork`：取可选的用户输入后打开选择器（session-lifecycle.md §6.5.3）。
     OpenFork,
-    /// Node 的 `/fork`：从 checkpoint 分出新会话，成功后切过去。
-    ForkCheckpoint {
-        checkpoint: Option<String>,
-        files: rust_cli_kernel_api::session_api::ForkFiles,
+    /// 选择器选中一条输入：新会话带到这一轮为止，成功后切过去。
+    Fork {
+        input: MessageId,
     },
     Quit,
     /// L28 的管理命令（docs/specs/rust-cli/tui-display.md）。
@@ -205,6 +202,8 @@ pub enum Overlay {
     Background(super::background::BackgroundView),
     /// `/usage` 的 Usage / Stats 页面（usage.md §4、§5）。装箱：统计数据比其他变体大得多。
     Usage(Box<super::usage::UsageView>),
+    /// 切到完全访问的确认框（tui.md §7.8，工作线 F87）：替换底部区域，不是全屏视图。
+    YoloConfirm(super::yolo_confirm::YoloConfirm),
 }
 
 pub struct App {
@@ -226,8 +225,10 @@ pub struct App {
     /// skill 清单第一次到之前提交、当时判定不了的命令（tui.md §6）：清单到了（`commands_arrived`）再提交一次。
     pub held_command: bool,
     pub overlay: Option<Overlay>,
-    /// 当前待处理交互的选择状态；交互本身在视图里。
+    /// 当前待处理交互的选择状态；交互本身在视图里（旧会话的询问在 `detached` 里）。
     pub interaction: Option<Interaction>,
+    /// 父会话关闭之后旧会话的询问（按到达顺序，agents.md §4.1.2，工作线 F72）：内核的 `detached_asks` 的投影。
+    pub detached: Vec<rust_cli_kernel_api::orchestration::DetachedAsk>,
     /// 同伴消息批准框的焦点（0 拒绝，1 投递）；扣住的消息本身在视图里（cross-session.md §2.6）。
     pub peer_choice: usize,
     pub local: Vec<LocalCell>,
@@ -286,6 +287,8 @@ pub struct App {
     pub terminal_background: Option<super::palette::Rgb>,
     /// 终端通知的计时（tui-manage.md §5）。
     pub notify: super::notify::Notify,
+    /// 提问框的空闲计时（tools-more.md §1.1，工作线 F72）。
+    pub afk: super::afk::Afk,
     /// 子代理的最后一份快照（与 `background` 同一份快照，runner 按请求序号写入，tui-panels.md §0、§1）。
     pub agents: super::agents::AgentList,
     /// 正在查看的子代理（只读）。
@@ -302,6 +305,22 @@ pub struct App {
     pub releases: super::keyboard::Releases,
     pub burst: Option<super::paste_burst::PasteBurst>,
     pub quit: bool,
+}
+
+/// 待处理交互：（ID，请求）。
+pub type Pending<'a> = (
+    &'a rust_cli_kernel_api::ids::InteractionId,
+    &'a rust_cli_kernel_api::orchestration::InteractionRequest,
+);
+
+/// [`App::pending`] 的实现：只借视图与旧会话的询问两个字段（调用方同时要改 `App` 的别的字段）。
+pub fn pending_of<'a>(
+    view: &'a Transcript,
+    detached: &'a [rust_cli_kernel_api::orchestration::DetachedAsk],
+) -> Option<Pending<'a>> {
+    view.pending()
+        .map(|(id, request)| (id, request))
+        .or_else(|| detached.first().map(|ask| (&ask.interaction, &ask.request)))
 }
 
 impl App {
@@ -324,6 +343,7 @@ impl App {
             composer: Composer::default(),
             overlay: None,
             interaction: None,
+            detached: Vec::new(),
             peer_choice: 0,
             local: Vec::new(),
             scroll: 0,
@@ -359,6 +379,7 @@ impl App {
             theme: crate::services::UiTheme::Auto,
             terminal_background: palette.background,
             notify: super::notify::Notify::default(),
+            afk: super::afk::Afk::default(),
             agents: super::agents::AgentList::default(),
             viewing: None,
             focus: None,
@@ -415,20 +436,53 @@ impl App {
             && self.composer.is_empty()
             && self.overlay.is_none()
             && self.viewing.is_none()
-            && self.view.pending().is_none()
+            && self.pending().is_none()
+    }
+
+    /// 要显示的待处理交互：当前会话的在前，之后是旧会话的询问（按到达顺序，agents.md §4.1.2）。
+    pub fn pending(&self) -> Option<Pending<'_>> {
+        pending_of(&self.view, &self.detached)
+    }
+
+    /// 这个交互是旧会话的询问时，那个会话的标题。
+    pub fn detached_title(&self, id: &rust_cli_kernel_api::ids::InteractionId) -> Option<&str> {
+        self.detached
+            .iter()
+            .find(|ask| ask.interaction == *id)
+            .map(|ask| ask.title.as_str())
+    }
+
+    /// 旧会话询问的变化（工作线 F72）。
+    pub fn detached_changed(&mut self, event: rust_cli_kernel_api::orchestration::DetachedEvent) {
+        use rust_cli_kernel_api::orchestration::DetachedEvent;
+        match event {
+            DetachedEvent::Asked { ask } => self.detached.push(*ask),
+            DetachedEvent::Resolved { interaction } => {
+                self.detached.retain(|ask| ask.interaction != interaction);
+            }
+        }
     }
 
     /// 视图变化后调用：交互换了就重置选择状态，交互结束就关闭视图。
     pub fn sync_interaction(&mut self, now: Instant) {
-        match self.view.pending() {
-            None => self.interaction = None,
-            Some((id, request)) => {
-                if self.interaction.as_ref().is_none_or(|ui| ui.id != *id) {
-                    let mut ui = Interaction::new(id.clone(), request, now);
-                    ui.mode = self.view.mode();
-                    self.interaction = Some(ui);
-                }
-            }
+        let Some((id, request)) = self.pending() else {
+            self.interaction = None;
+            return;
+        };
+        if self.interaction.as_ref().is_none_or(|ui| ui.id != *id) {
+            let mut ui = Interaction::new(id.clone(), request, now);
+            ui.mode = self.view.mode();
+            ui.workspace = self.workspace().to_owned();
+            ui.origin = self.detached_title(id).map(str::to_owned);
+            self.interaction = Some(ui);
+        }
+    }
+
+    /// 把空闲计时的倒计时交给提问框显示（工作线 F72）。
+    pub fn show_countdown(&mut self) {
+        let countdown = self.afk.countdown();
+        if let Some(ui) = self.interaction.as_mut() {
+            ui.countdown = countdown;
         }
     }
 
@@ -514,6 +568,10 @@ impl App {
         self.agents = super::agents::AgentList::default();
         self.viewing = None;
         self.focus = None;
+        // 切到完全访问的确认框属于离开的会话：作废，不发命令（tui.md §7.8；App 在目标换代时同样作废）。
+        if matches!(self.overlay, Some(Overlay::YoloConfirm(_))) {
+            self.overlay = None;
+        }
     }
 }
 

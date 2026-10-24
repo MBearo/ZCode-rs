@@ -74,7 +74,7 @@ impl Server {
         }
     }
 
-    /// 主请求（带 tools 的那些；count_tokens 等不算）。
+    /// 主请求（带 tools 的那些）。
     fn requests(&self) -> Vec<Value> {
         self.bodies
             .lock()

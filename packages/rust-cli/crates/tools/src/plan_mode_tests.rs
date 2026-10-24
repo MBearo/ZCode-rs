@@ -19,7 +19,7 @@ fn approve(mode: PermissionMode) -> serde_json::Value {
 
 fn plan_context(interactions: Arc<ScriptedInteractions>, files: &[(&str, &str)]) -> Ctx {
     let mut context = Ctx::new(interactions);
-    context.env = Arc::new(TextEnv::new(files));
+    context.set_env(Arc::new(TextEnv::new(files)));
     context.mode = PermissionMode::Plan;
     context
 }

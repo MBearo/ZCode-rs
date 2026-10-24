@@ -24,6 +24,14 @@ pub(crate) enum Waiting {
     Shell(ShellNotice),
     Agent(AgentNotice),
     Peer(PeerItem),
+    /// Monitor 的事件或说明（工作线 F83，tools-more.md §19.6）：actor 自己产生，全文已包装；不 ack，也不按文字去重
+    /// （同样的一行可以出现多次）。
+    MonitorEvent(String),
+    /// Monitor 的终态通知（带剩下的行），提交后 ack 它的 `ShellNotice`。
+    MonitorEnd {
+        notice: Box<ShellNotice>,
+        text: String,
+    },
 }
 
 impl Waiting {
@@ -33,6 +41,7 @@ impl Waiting {
             Self::Shell(notice) => task_notification(notice),
             Self::Agent(notice) => notice.text.clone(),
             Self::Peer(item) => item.text(),
+            Self::MonitorEvent(text) | Self::MonitorEnd { text, .. } => text.clone(),
         }
     }
 
@@ -62,6 +71,9 @@ impl Waiting {
             (Self::Shell(a), Self::Shell(b)) => a.seq == b.seq,
             (Self::Agent(a), Self::Agent(b)) => a.seq == b.seq,
             (Self::Peer(a), Self::Peer(b)) => a.key() == b.key(),
+            (Self::MonitorEnd { notice: a, .. }, Self::MonitorEnd { notice: b, .. }) => {
+                a.seq == b.seq
+            }
             _ => false,
         }
     }
@@ -120,8 +132,9 @@ impl Actor {
     pub(crate) async fn ack_notice(&self, notice: &Waiting) {
         match notice {
             Waiting::Shell(notice) => self.ack(notice.seq).await,
+            Waiting::MonitorEnd { notice, .. } => self.ack(notice.seq).await,
             Waiting::Agent(notice) => self.ack_agent(notice.seq).await,
-            Waiting::Peer(_) => {}
+            Waiting::Peer(_) | Waiting::MonitorEvent(_) => {}
         }
     }
 

@@ -36,7 +36,7 @@ impl Fixture {
 
     fn context(&self) -> ToolUseContext {
         let mut ctx = Ctx::new(self.session.clone());
-        ctx.env = self.env.clone();
+        ctx.set_env(self.env.clone());
         let mut context = ctx.build();
         if let Some(root) = self.root {
             context.workspace.root = EnvPath::new(root);

@@ -16,7 +16,7 @@ use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
 };
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment};
+use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment, local_services, machine};
 use rust_cli_kernel_api::tool::PromptContext;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -128,6 +128,7 @@ impl Interactions for Asked {
 }
 
 fn context(asked: Arc<Asked>) -> ToolUseContext {
+    let env = Arc::new(UnusedEnvironment);
     ToolUseContext {
         session: SessionId::new("sess_1"),
         run: RunId::new("run_1"),
@@ -139,7 +140,8 @@ fn context(asked: Arc<Asked>) -> ToolUseContext {
         },
         mode: PermissionMode::AcceptEdits,
         cancel: CancellationToken::new(),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: asked,
         operation: OperationContext {

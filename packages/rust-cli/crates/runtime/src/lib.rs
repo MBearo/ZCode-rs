@@ -32,8 +32,10 @@ use rust_cli_ext::{Ext, ExtPorts};
 use rust_cli_hooks::{HookEngine, HookPorts};
 use rust_cli_kernel_api::agents::{AgentSignals, TaskListStore};
 use rust_cli_kernel_api::clock::{Clock, Ids};
-use rust_cli_kernel_api::env::Environment;
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::{Generation, OwnerEpoch, SessionId, TraceId};
+use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
 use rust_cli_kernel_api::orchestration::{Compactor, QueryRunner};
 use rust_cli_kernel_api::peers::ModeClass;
@@ -53,7 +55,10 @@ use rust_cli_tools::Pipeline;
 use table::{Closer, OpenSessions};
 
 pub use ext::{ExtConfig, Extensions};
-pub use permissions::{format_rule as format_permission_rule, parse_rule as parse_permission_rule};
+pub use permissions::{
+    bash_rule_label, bash_rule_seed, format_rule as format_permission_rule,
+    parse_rule as parse_permission_rule,
+};
 pub use rust_cli_compact::{CompactConfig, Thresholds as CompactThresholds};
 pub use rust_cli_context::{Attribution, ContextConfig, OutputStyle, Surface};
 // hooks 快照（`LocalKernel::replace_hooks` 的参数）：前端的测试组装它不必依赖 hooks crate（修复线 F37 的 TUI 测试）。
@@ -66,7 +71,8 @@ pub use rust_cli_tools::BashTimeouts;
 #[derive(Clone)]
 pub struct Ports {
     pub model: Arc<dyn ModelPort>,
-    pub env: Arc<dyn Environment>,
+    /// 执行环境的注册表（R0 只有本机，remote-exec.md §15.8.1）：内核建好时取本机的机器与本机服务分给各能力。
+    pub environments: Arc<dyn EnvironmentRegistry>,
     pub store: Arc<dyn SessionStore>,
     pub artifacts: Arc<dyn ArtifactStore>,
     pub clock: Arc<dyn Clock>,
@@ -90,10 +96,12 @@ pub struct Defaults {
     pub limits: Limits,
 }
 
-/// 跑分用的开关（cli-args.md §9.1–§9.3，修复线 F42）：主循环的输出上限与 thinking、Bash 的超时。缺省是都没设。
+/// 入口按环境变量给的开关（cli-args.md §9.1–§9.3，修复线 F42）：主循环的输出上限与 thinking、Bash 的超时；工作线 F89 加
+/// `ENABLE_TOOL_SEARCH`（`request.tool_search`：ToolSearch 工具启用与否、主循环与 `/context` 每一步开不开，tools-more.md
+/// §3.2.1）。缺省是都没设。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Limits {
-    /// 主循环、子代理与压缩摘要的 `max_tokens` 与 thinking（query.md §1.4）。
+    /// 主循环、子代理与压缩摘要的 `max_tokens` 与 thinking（query.md §1.4），ToolSearch 的设置（工作线 F89）。
     pub request: RequestLimits,
     /// Bash 工具（模型的调用与 bash 模式）的缺省与最大超时。
     pub bash: BashTimeouts,
@@ -101,6 +109,10 @@ pub struct Limits {
 
 pub struct LocalKernel {
     ports: Ports,
+    /// 本机（注册表的 `local_machine()`）：会话、`/cd`、导出、项目清单、`@` 清单都在本机。
+    machine: MachineEnv,
+    /// 只在本机的服务（`/diff`）。
+    local: LocalServices,
     defaults: Defaults,
     runner: Arc<dyn QueryRunner>,
     /// 子代理的信号来源（后台子代理的通知、任务清单变化），交给每个会话 actor。
@@ -129,6 +141,8 @@ pub struct LocalKernel {
     closer: Arc<Closer>,
     /// 本机跨会话通信（cross-session.md §2.4）：每个会话 actor 共用这一份端口。
     peers: rust_cli_session::PeerDeps,
+    /// 父会话关闭之后旧会话的询问入口（进程级，agents.md §4.1.2，工作线 F72）：每个会话 actor 共用这一份。
+    detached: Arc<rust_cli_session::DetachedAsks>,
 }
 
 impl LocalKernel {
@@ -193,9 +207,13 @@ impl LocalKernel {
         // 本地执行环境的实例随进程变化（spec §6 规则 3）；hook 命令与工具共用同一个实例。ID 经注入的 Ids
         // （F7，审查 R2-11：以前直接调用 `Uuid::new_v4`）。
         let generation = ports.ids.generation();
+        // 各能力拿本机的端口：R0 只有本机；规则文件、记忆、插件与 skills 本来就只在本机读（remote-exec.md §3）。
+        let machine = ports.environments.local_machine();
+        let local = ports.environments.local();
         // hooks 的配置快照由入口层组装后经 `HookEngine::replace` 交进来（hooks.md §2.2）。
         let hooks = Arc::new(HookEngine::new(HookPorts {
-            env: ports.env.clone(),
+            commands: machine.commands().clone(),
+            shell: machine.shell().clone(),
             ids: ports.ids.clone(),
             model: Some(ports.model.clone()),
             http: None,
@@ -208,8 +226,11 @@ impl LocalKernel {
         // 一个判决链实例：工具注册（Edit / Write 的先读规则）与执行管线共用，会话内“总是允许”的
         // 规则因此对两边都生效。规则快照由入口层接入配置后替换（shell-permissions.md §5）。
         let gate = Arc::new(PolicyGate::default());
-        // ToolSearch 与延迟工具清单看同一个主线程注册表，建好注册表后绑定（tools-more.md §3.4）。
-        let catalog = Arc::new(rust_cli_tools::ToolCatalog::default());
+        // ToolSearch 与延迟工具清单看同一个主线程注册表，建好注册表后绑定（tools-more.md §3.4）；`ENABLE_TOOL_SEARCH` 为关时
+        // ToolSearch 不启用（工作线 F89，§3.2.1）。
+        let catalog = Arc::new(rust_cli_tools::ToolCatalog::new(
+            defaults.limits.request.tool_search,
+        ));
         // 会话内定时任务（L11b）：任务表在这里，触发由会话 actor 在空闲时取走。
         let cron =
             rust_cli_tools::CronBoard::new(ports.clock.clone(), extensions.cron_store.clone());
@@ -236,8 +257,12 @@ impl LocalKernel {
                     // 去掉“不要用 cat”一行（修复线 F43，shell-permissions.md §4.9）。
                     let bash = rust_cli_tools::BashTool::new()
                         .with_timeouts(defaults.limits.bash)
+                        // 读文件的命令记进文件工具的同一份 readFileState（tools-files.md §4.2）。
+                        .with_file_state(read_files.clone())
                         .with_background_deadline(non_interactive)
-                        .with_bash_first_trimmed(ModeClass::of(defaults.mode) == ModeClass::Bypass);
+                        .with_bash_first_trimmed(ModeClass::of(defaults.mode) == ModeClass::Bypass)
+                        // Monitor 开着时描述多一句、前台长 `sleep` 拦下（tools-more.md §19.9）。
+                        .with_monitor(extensions.monitor);
                     // stream-json 输入：后台命令的缺省期限 max(1800000, 前台缺省)（headless.md §6.1）。
                     if extensions.streaming_input {
                         bash.with_streaming_input()
@@ -256,11 +281,20 @@ impl LocalKernel {
                     },
                     ports.clock.clone(),
                 ))
-                .with_tools(rust_cli_tools::cron_tools(&cron))
+                .with_tools(rust_cli_tools::cron_tools(&cron, extensions.monitor))
                 // `/loop` 动态模式的自定节奏（L17，tools-more.md §17.2）：默认注册、不延迟。
                 .with_tools(vec![Arc::new(rust_cli_tools::ScheduleWakeupTool::new(
                     &cron,
                 ))])
+                // Monitor（工作线 F83，tools-more.md §19）：单次的 `-p` 上限 10 分钟，其余 30 分钟。
+                .with_tools(if extensions.monitor {
+                    let session = !non_interactive || extensions.streaming_input;
+                    vec![Arc::new(
+                        rust_cli_tools::MonitorTool::new().with_session_cap(session),
+                    )]
+                } else {
+                    Vec::new()
+                })
                 .with_tools(vec![Arc::new(rust_cli_tools::ReportFindingsTool::new())])
                 .with_tools(rust_cli_tools::worktree_tools(&worktrees)),
         );
@@ -271,10 +305,11 @@ impl LocalKernel {
         );
         let ext = Arc::new(Ext::new(
             ExtPorts {
-                env: ports.env.clone(),
+                info: machine.info().clone(),
+                files: machine.files().clone(),
                 ids: ports.ids.clone(),
                 gate: gate.clone(),
-                mcp: extensions.mcp,
+                mcp: machine.mcp().clone(),
                 spawner: scope.spawner(),
                 clock: ports.clock.clone(),
             },
@@ -283,10 +318,16 @@ impl LocalKernel {
         ));
         ext.set_print_session(non_interactive);
         // agent 清单（context）与 Agent 工具共用一个目录：插件 agent 设置一次，两处同时看到（L12）。
-        let agent_catalog = Arc::new(AgentCatalog::new(ports.env.clone()));
+        let agent_catalog = Arc::new(AgentCatalog::new(
+            machine.info().clone(),
+            machine.files().clone(),
+        ));
         let context = PromptAssembler::new(
             ContextPorts {
-                env: ports.env.clone(),
+                info: machine.info().clone(),
+                files: machine.files().clone(),
+                shell: machine.shell().clone(),
+                git: local.git().clone(),
                 clock: ports.clock.clone(),
                 ids: ports.ids.clone(),
                 // agent 清单由 agents 给出（L7），延迟工具由 ToolCatalog 给出（L11a），skill 清单与 MCP
@@ -298,7 +339,12 @@ impl LocalKernel {
                 ])),
             },
             context,
-        );
+        )
+        // 读过的文件在磁盘上被改动（tools-files.md §4.1）：与文件工具同一份 readFileState。
+        .with_changed_files(Arc::new(rust_cli_tools::FileChanges::new(
+            read_files.clone(),
+            machine.files().clone(),
+        )));
         let context = Arc::new(context);
         let assembler = context.clone();
         let sessions = OpenSessions::default();
@@ -331,7 +377,8 @@ impl LocalKernel {
             hooks: hooks.clone(),
             ids: ports.ids.clone(),
             clock: ports.clock.clone(),
-            env: ports.env.clone(),
+            machine: machine.clone(),
+            local: local.clone(),
             artifacts: ports.artifacts.clone(),
             generation,
             non_interactive,
@@ -344,7 +391,7 @@ impl LocalKernel {
                 store: ports.store.clone(),
                 ids: ports.ids.clone(),
                 clock: ports.clock.clone(),
-                env: ports.env.clone(),
+                machine: machine.clone(),
                 tasks,
                 queries: Arc::new(agents::LoopFactory {
                     parts: parts.clone(),
@@ -353,6 +400,10 @@ impl LocalKernel {
                 catalog: agent_catalog.clone(),
                 spawner: scope.spawner(),
                 shell_notice: agents::shell_notice,
+                monitor: rust_cli_agents::MonitorTexts {
+                    notice: rust_cli_query::monitor_notice_text,
+                    end: agents::monitor_end,
+                },
                 peers: extensions.peers.port.clone(),
             },
             parts.tools.clone(),
@@ -368,6 +419,8 @@ impl LocalKernel {
         );
         let tools = agents.registry();
         catalog.bind(&tools);
+        // 任务提醒读的清单（agents.md §7.4）：agents 要用上下文，所以建好之后再接给它。
+        assembler.bind_tasks(agents.task_reader());
         let usage = Arc::new(usage::UsageAnalyzer {
             model: ports.model.clone(),
             context: assembler,
@@ -375,7 +428,7 @@ impl LocalKernel {
             agents: agent_catalog.clone(),
             skills: ext.skills().clone(),
             compact: compact.clone(),
-            cache: usage::Cache::default(),
+            tool_search: defaults.limits.request.tool_search,
         });
         // 摘要请求的子循环：同一个上下文与主线程的工具清单（共享缓存前缀），工具一律拒绝，自己不再压缩
         // （compact.md §3.2）。
@@ -393,7 +446,8 @@ impl LocalKernel {
                 context,
                 hooks: hooks.clone(),
                 ids: ports.ids.clone(),
-                env: ports.env.clone(),
+                machine: machine.clone(),
+                local: local.clone(),
                 artifacts: ports.artifacts.clone(),
                 generation: parts.generation.clone(),
             },
@@ -403,8 +457,14 @@ impl LocalKernel {
         let generation = parts.generation.clone();
         let parts = QueryParts { tools, ..parts };
         let runner = agents.track(Arc::new(QueryLoop::new(parts)));
+        let detached = Arc::new(rust_cli_session::DetachedAsks::new(
+            ports.store.clone(),
+            ports.ids.clone(),
+        ));
         Self {
             ports,
+            machine,
+            local,
             defaults,
             runner,
             agents: agents.signals(),
@@ -426,6 +486,7 @@ impl LocalKernel {
             sessions,
             closer,
             peers: extensions.peers,
+            detached,
         }
     }
 

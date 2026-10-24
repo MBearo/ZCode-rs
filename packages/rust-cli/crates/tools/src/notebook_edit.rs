@@ -122,7 +122,12 @@ impl Tool for NotebookEditTool {
         let request = ReadFile {
             path: EnvPath::new(path.clone()),
         };
-        let file = match context.env.read_file(&context.workspace, request).await {
+        let file = match context
+            .machine
+            .files()
+            .read_file(&context.workspace, request)
+            .await
+        {
             Ok(file) => file,
             Err(EnvError::NotFound { .. }) => return invalid(texts::NOTEBOOK_MISSING.to_owned()),
             Err(_) => return Validation::Ok,
@@ -173,7 +178,12 @@ impl Tool for NotebookEditTool {
         let request = ReadFile {
             path: EnvPath::new(path.clone()),
         };
-        let file = match context.env.read_file(&context.workspace, request).await {
+        let file = match context
+            .machine
+            .files()
+            .read_file(&context.workspace, request)
+            .await
+        {
             Ok(file) => file,
             Err(EnvError::NotFound { .. }) => {
                 return Err(failed(texts::NOTEBOOK_MISSING.to_owned()));
@@ -261,7 +271,8 @@ impl Tool for NotebookEditTool {
             create_parents: false,
         };
         let written = context
-            .env
+            .machine
+            .files()
             .put_file(&context.workspace, context.operation.clone(), request)
             .await
             .map_err(env_failure)?;

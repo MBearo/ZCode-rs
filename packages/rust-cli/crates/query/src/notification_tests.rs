@@ -17,6 +17,8 @@ fn notifications_have_the_status_and_summary() {
         output: EnvPath::new("/t/bxwig2fjb.output"),
         outcome,
         exit_code,
+        kind: Default::default(),
+        output_bytes: 0,
     };
     let done = task_notification(&notice(Outcome::Completed, Some(0)));
     assert!(done.starts_with("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n"));

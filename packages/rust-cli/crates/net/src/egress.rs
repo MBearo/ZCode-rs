@@ -136,6 +136,19 @@ impl Egress {
     }
 }
 
+impl Egress {
+    /// 开一个 WebSocket（Monitor 的 ws 来源，docs/specs/rust-cli/tools-more.md §19.7）：升级请求经当前快照的客户端，
+    /// 带策略的 header。
+    pub async fn websocket(
+        &self,
+        url: &str,
+        protocols: &[String],
+    ) -> Result<crate::websocket::WebSocket, crate::websocket::WsError> {
+        let snapshot = self.current.load_full();
+        crate::websocket::connect(&snapshot.client, snapshot.headers.clone(), url, protocols).await
+    }
+}
+
 /// 代理与直连规则：每个请求按目标判断（`Proxy::custom`），命中直连规则时不经代理。代理 URL 可能带用户名与
 /// 密码（用作代理的 Basic 认证），错误文本里不回显它。
 fn route(proxy: &str, no_proxy: NoProxy) -> Result<reqwest::Proxy, NetError> {

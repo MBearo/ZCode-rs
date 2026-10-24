@@ -134,9 +134,9 @@ pub(crate) async fn create(
 /// `cd` 传不过去，tools-files.md §3.3）。缺陷修复（F19）：以前子会话没有自己的 shell cwd，文件工具、判决链与 Bash 都
 /// 落回工作区根——父会话 `cd sub` 之后，子代理的 `x.txt` 是根下的 x.txt。执行环境不支持时照旧（工作区根）。
 async fn inherit_directory(core: &Core, agent: &LiveAgent) {
-    let env = core.ports.env.as_ref();
-    let cwd = env_shell::current_dir(env, &agent.workspace, &agent.parent).await;
-    if let Err(error) = env.set_shell_cwd(&agent.child, cwd).await {
+    let shell = core.ports.machine.shell().as_ref();
+    let cwd = env_shell::current_dir(shell, &agent.workspace, &agent.parent).await;
+    if let Err(error) = shell.set_shell_cwd(&agent.child, cwd).await {
         tracing::debug!(%error, "the subagent starts in the workspace root");
     }
 }
@@ -216,7 +216,8 @@ pub(crate) async fn drive(
             parent,
         )
         .with_turn(turn)
-        .asking(&agent.definition.agent_type, agent.asks.clone()),
+        .asking(&agent.definition.agent_type, agent.asks.clone())
+        .with_core(core.clone()),
     );
     let result = match core.registry() {
         Some(registry) => {

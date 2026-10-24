@@ -152,7 +152,7 @@ impl HookEngine {
             return cwd.as_str().to_owned();
         }
         self.ports
-            .env
+            .shell
             .shell_state(&event.workspace, &event.session)
             .await
             .map_or_else(

@@ -76,7 +76,7 @@ impl Compaction {
         self.reactive_tried = false;
     }
 
-    /// 发请求前的自动压缩；rapid refill 熔断时返回结束原因。
+    /// 发请求前的自动压缩与阻塞线；rapid refill 熔断、到了阻塞线时返回结束原因。
     pub(crate) async fn before_request(
         &mut self,
         scope: &RunScope,
@@ -85,31 +85,42 @@ impl Compaction {
         source: &QuerySource,
     ) -> Result<Option<QueryStop>, QueryError> {
         let compactor: &dyn Compactor = scope.parts.compactor.as_ref();
+        let mut failure = None;
         // 先用便宜的同步判定把关：每一步都构造压缩请求要复制整个历史（README §8）。
-        if !eligible(source) || !compactor.should_auto_compact(history, selection) {
-            return Ok(None);
-        }
-        let outcome = compactor
-            .auto_compact(
-                request(scope, history, selection, CompactTrigger::Auto),
-                &mut self.tracking,
-                scope.abort.token().clone(),
-            )
-            .await
-            .map_err(|error| QueryError::Unsupported {
-                what: error.to_string(),
-            })?;
-        match outcome {
-            // 失败已计入熔断次数（只记调试日志），照常发请求。
-            AutoCompactOutcome::NotNeeded | AutoCompactOutcome::Failed { .. } => Ok(None),
-            AutoCompactOutcome::Thrashing { message } => Ok(Some(QueryStop::ApiError { message })),
-            AutoCompactOutcome::Compacted { result } => {
-                // kernel-api 没有压缩进度回调：自动压缩的开始事件在摘要完成后才发（spec §8）。
-                scope.sink.compact_started(CompactTrigger::Auto).await;
-                commit(scope, history, *result).await?;
-                Ok(None)
+        if eligible(source) && compactor.should_auto_compact(history, selection) {
+            let outcome = compactor
+                .auto_compact(
+                    request(scope, history, selection, CompactTrigger::Auto),
+                    &mut self.tracking,
+                    scope.abort.token().clone(),
+                )
+                .await
+                .map_err(|error| QueryError::Unsupported {
+                    what: error.to_string(),
+                })?;
+            match outcome {
+                AutoCompactOutcome::NotNeeded => {}
+                // 失败已计入熔断次数，再看阻塞线（错误文字带上失败的原因）。
+                AutoCompactOutcome::Failed { message } => failure = Some(message),
+                AutoCompactOutcome::Thrashing { message } => {
+                    return Ok(Some(QueryStop::ApiError { message }));
+                }
+                // 刚压缩过：这一步不看阻塞线。
+                AutoCompactOutcome::Compacted { result } => {
+                    // kernel-api 没有压缩进度回调：自动压缩的开始事件在摘要完成后才发（spec §8）。
+                    scope.sink.compact_started(CompactTrigger::Auto).await;
+                    commit(scope, history, *result).await?;
+                    return Ok(None);
+                }
             }
         }
+        // 阻塞线（compact.md §2.2）：到了就不发请求，回合以错误结束；摘要请求不看。
+        if *source != QuerySource::Compact
+            && let Some(message) = compactor.blocking_limit(history, selection, failure.as_deref())
+        {
+            return Ok(Some(QueryStop::ApiError { message }));
+        }
+        Ok(None)
     }
 
     /// 上下文超限后的反应式压缩；压缩成功返回真，主循环重发请求。

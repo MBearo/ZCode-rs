@@ -1,0 +1,1 @@
+[Monitor stopped — too much output ({{count}} events suppressed over {{seconds}}s). Restart with a more selective source.]

@@ -28,15 +28,27 @@ pub(crate) fn watch(core: &Arc<Core>, agent: &LiveAgent) {
         .spawner
         .clone()
         .spawn("subagent-shell-notices", async move {
-            let mut notices = core.ports.env.shell_notices(&child, 0);
+            let mut notices = core.ports.machine.shell().shell_notices(&child, 0);
             while let Some(next) = notices.next().await {
                 let Ok(notice) = next else {
                     // 执行环境不提供后台通知：以后也不会有。
                     return;
                 };
                 let seq = notice.seq;
+                // 在看的 monitor 的终态交给它的任务：合成带剩下的行的终态、送出之后由它 ack（agents.md §5.3）。
+                if notice.kind == rust_cli_kernel_api::env_shell::BackgroundKind::Monitor
+                    && core.monitors.take(&notice)
+                {
+                    continue;
+                }
                 forward(&core, &id, &root, notice).await;
-                if let Err(error) = core.ports.env.ack_shell_notice(&child, seq).await {
+                if let Err(error) = core
+                    .ports
+                    .machine
+                    .shell()
+                    .ack_shell_notice(&child, seq)
+                    .await
+                {
                     tracing::warn!(%error, seq, "a subagent command notice was not acknowledged");
                 }
             }
@@ -71,7 +83,8 @@ pub(crate) async fn background_commands(core: &Core, root: &SessionId) -> Vec<Ag
     for agent in children {
         if let Ok(state) = core
             .ports
-            .env
+            .machine
+            .shell()
             .shell_state(&agent.workspace, &agent.child)
             .await
         {

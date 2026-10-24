@@ -56,9 +56,13 @@ fn assembler() -> PromptAssembler {
         additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
     };
+    let env = Arc::new(MemoryEnvironment::new(facts));
     PromptAssembler::new(
         ContextPorts {
-            env: Arc::new(MemoryEnvironment::new(facts)),
+            info: env.clone(),
+            files: env.clone(),
+            shell: env.clone(),
+            git: env,
             clock: Arc::new(FixedClock(1_792_224_000_000)),
             ids: Arc::new(SequentialIds::default()),
             listings: Arc::new(Fixed),
@@ -119,6 +123,7 @@ async fn compacted(assembler: &PromptAssembler) -> Vec<Message> {
             pre_tokens: 1,
             summary: MessageId::new("msg_summary"),
             preserved: None,
+            discovered_tools: Vec::new(),
         },
     )));
     history.push(Message::User(UserMessage {

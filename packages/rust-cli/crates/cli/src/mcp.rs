@@ -7,8 +7,9 @@ use rust_cli_ext::mcp::{
     DEFAULT_CONNECT_WAIT_MS, McpScope, McpServer, McpSettings, McpStartup, parse_servers,
     prewait_ms, required_servers, wait_for_deferrable,
 };
-use rust_cli_kernel_api::env::{EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
+use rust_cli_kernel_api::machine::Files;
 use serde_json::Value;
 
 /// 命令行的 MCP 参数。
@@ -20,7 +21,7 @@ pub(crate) struct McpFlags {
     pub(crate) strict: bool,
     /// `--input-format stream-json`（headless.md §6）。
     pub(crate) streaming_input: bool,
-    /// 会话的模型能用工具搜索（模型卡片 `tool_search`）：入口在选好模型后设置。
+    /// 能用工具搜索（`ENABLE_TOOL_SEARCH` 不是关，乐观判断，工作线 F89；tools-more.md §3.2.1）：入口按设置填。
     pub(crate) tool_search: bool,
 }
 
@@ -159,7 +160,7 @@ fn startup(
 }
 
 struct Reader<'a> {
-    env: &'a dyn Environment,
+    files: &'a dyn Files,
     workspace: &'a WorkspaceRef,
     snapshot: &'a [(String, String)],
 }
@@ -169,7 +170,7 @@ impl Reader<'_> {
         let request = ReadFile {
             path: EnvPath::new(path),
         };
-        let content = self.env.read_file(self.workspace, request).await.ok()?;
+        let content = self.files.read_file(self.workspace, request).await.ok()?;
         match serde_json::from_slice(&content.bytes) {
             Ok(value) => Some(value),
             Err(error) => {
@@ -219,7 +220,7 @@ impl Reader<'_> {
 /// `--mcp-config`（按名覆盖；`--strict-mcp-config` 时只用它）。`enabled` 为 false（`features.mcp`）时
 /// 没有服务器。`allowed` 是 `--allowedTools` 的规则（`-p` 启动等待里点名的服务器）。
 pub(crate) async fn settings(
-    env: &dyn Environment,
+    files: &dyn Files,
     workspace: &WorkspaceRef,
     (flags, allowed): (&McpFlags, &[String]),
     snapshot: &[(String, String)],
@@ -227,7 +228,7 @@ pub(crate) async fn settings(
     enabled: bool,
 ) -> McpSettings {
     let reader = Reader {
-        env,
+        files,
         workspace,
         snapshot,
     };

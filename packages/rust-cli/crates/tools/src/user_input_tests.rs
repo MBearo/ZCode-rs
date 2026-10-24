@@ -100,7 +100,7 @@ fn tools(read: Arc<FakeRead>) -> UserInputTools {
 
 fn context() -> ToolUseContext {
     let mut ctx = Ctx::new(Arc::new(ScriptedInteractions::new([])));
-    ctx.env = Arc::new(environment());
+    ctx.set_env(Arc::new(environment()));
     ctx.build()
 }
 

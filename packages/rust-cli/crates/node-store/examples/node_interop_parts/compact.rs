@@ -65,6 +65,8 @@ pub(super) async fn compacted(store: &NodeStore) -> Result<SessionId> {
                     anchor: summary.clone(),
                     tail: r2,
                 }),
+                // 压缩前已加载的工具（compact.md §3.5，node-interop 第二十段）。
+                discovered_tools: vec!["WebFetch".to_owned(), "mcp__fixture__lookup".to_owned()],
             })),
         },
         Fact::MessageAppended {

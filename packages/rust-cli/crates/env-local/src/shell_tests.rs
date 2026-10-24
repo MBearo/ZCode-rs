@@ -1,16 +1,15 @@
-//! 本机 shell：输出合流、退出码、超时、取消、cwd 延续与重置、幂等、后台通知、环境投影、进程树回收。
+//! 本机 shell 的内部：脚本的拼法、输出所在的私有目录、配置的 Debug；以及其他 shell 测试共用的夹具。经端口可见的行为
+//! （输出合流、退出码、超时、取消、cwd 延续与重置、幂等、后台通知、环境投影、进程树回收）在 executor-host 的合同测试里，
+//! 对本机与 loopback 远端各跑一遍（docs/specs/rust-cli/remote-exec.md §18.7）。
 //! 需要 `/bin/bash`，Windows 上跳过（那里的 Bash 工具要 Git Bash）。
 #![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvPath, OperationContext, Origin, Outcome, StartCommand, WorkspaceRef,
-};
-use rust_cli_kernel_api::env_shell::{BackgroundCommand, CwdScope};
+use rust_cli_kernel_api::env::{CommandEvent, EnvPath, OperationContext, Origin, StartCommand};
+use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{
     EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ShellTaskId,
 };
@@ -72,6 +71,7 @@ pub(super) fn request(command: &str, root: &Path, scope: CwdScope) -> StartComma
         sandbox: None,
         hook: None,
         on_timeout: None,
+        socket: None,
     }
 }
 
@@ -113,219 +113,6 @@ pub(super) async fn collect(fixture: &Fixture, operation: &str) -> Ran {
         }
     }
     panic!("no terminal event");
-}
-
-pub(super) fn exit_of(event: &CommandEvent) -> (Outcome, Option<i32>, bool) {
-    let CommandEvent::Finished {
-        outcome,
-        exit_code,
-        timed_out,
-        ..
-    } = event
-    else {
-        panic!("not finished");
-    };
-    (outcome.clone(), *exit_code, *timed_out)
-}
-
-#[tokio::test]
-async fn stdout_and_stderr_share_one_stream_in_order() {
-    let fixture = fixture(Vec::new());
-    let start = request(
-        "echo out; echo err >&2; exit 3",
-        &fixture.root,
-        CwdScope::Pinned,
-    );
-    let ran = run(&fixture, "op1", start).await;
-    assert_eq!(ran.output, "out\nerr\n");
-    assert_eq!(exit_of(&ran.finished), (Outcome::Completed, Some(3), false));
-    let CommandEvent::Finished { output_bytes, .. } = ran.finished else {
-        unreachable!()
-    };
-    assert_eq!(output_bytes, 8);
-}
-
-#[tokio::test]
-async fn timeout_kills_the_tree_with_exit_143() {
-    let fixture = fixture(Vec::new());
-    let mut start = request("sleep 5; echo late", &fixture.root, CwdScope::Pinned);
-    start.timeout_ms = Some(300);
-    let began = Instant::now();
-    let ran = run(&fixture, "op1", start).await;
-    assert!(began.elapsed() < Duration::from_secs(4));
-    assert_eq!(ran.output, "");
-    let (outcome, code, timed_out) = exit_of(&ran.finished);
-    assert!(matches!(outcome, Outcome::Failed { code: Some(ref c), .. } if c == "timeout"));
-    assert_eq!((code, timed_out), (Some(143), true));
-}
-
-#[tokio::test]
-async fn cancel_is_a_message_and_the_terminal_state_follows() {
-    let fixture = fixture(Vec::new());
-    let start = request("sleep 5", &fixture.root, CwdScope::Pinned);
-    fixture.shells.start(context("op1"), start).await.unwrap();
-    assert_eq!(
-        fixture.shells.status(&OperationId::new("op1")),
-        Some(Outcome::Running)
-    );
-    assert!(fixture.shells.cancel(&OperationId::new("op1")));
-    let ran = collect(&fixture, "op1").await;
-    assert_eq!(
-        exit_of(&ran.finished),
-        (Outcome::Cancelled, Some(137), false)
-    );
-    assert_eq!(
-        fixture.shells.status(&OperationId::new("op1")),
-        Some(Outcome::Cancelled)
-    );
-}
-
-#[tokio::test]
-async fn session_cwd_persists_inside_the_roots_and_resets_outside() {
-    let fixture = fixture(Vec::new());
-    let root = EnvPath::new(fixture.root.to_string_lossy());
-    let scope = CwdScope::Session {
-        roots: vec![root.clone()],
-    };
-    let workspace = WorkspaceRef {
-        environment: EnvironmentId::new("local"),
-        root: root.clone(),
-    };
-    let session = SessionId::new("s1");
-    run(
-        &fixture,
-        "op1",
-        request("mkdir -p sub && cd sub", &fixture.root, scope.clone()),
-    )
-    .await;
-    let sub = fixture.root.join("sub");
-    assert_eq!(
-        fixture
-            .shells
-            .shell_state(&workspace, &session)
-            .cwd
-            .as_str(),
-        sub.to_string_lossy()
-    );
-    let ran = run(
-        &fixture,
-        "op2",
-        request("pwd", &fixture.root, scope.clone()),
-    )
-    .await;
-    assert_eq!(ran.output.trim_end(), sub.to_string_lossy());
-    let ran = run(
-        &fixture,
-        "op3",
-        request("cd / && pwd", &fixture.root, scope.clone()),
-    )
-    .await;
-    assert_eq!(ran.output, "/\n");
-    let CommandEvent::Finished { cwd_reset, .. } = &ran.finished else {
-        unreachable!()
-    };
-    assert_eq!(cwd_reset.as_ref(), Some(&root));
-    let ran = run(&fixture, "op4", request("pwd", &fixture.root, scope)).await;
-    assert_eq!(ran.output.trim_end(), fixture.root.to_string_lossy());
-}
-
-#[tokio::test]
-async fn the_same_operation_runs_once_and_other_arguments_are_rejected() {
-    let fixture = fixture(Vec::new());
-    let marker = fixture.root.join("count");
-    let command = format!("echo x >> '{}'", marker.display());
-    let start = request(&command, &fixture.root, CwdScope::Pinned);
-    run(&fixture, "op1", start.clone()).await;
-    fixture.shells.start(context("op1"), start).await.unwrap();
-    let other = request("echo other", &fixture.root, CwdScope::Pinned);
-    let conflict = fixture.shells.start(context("op1"), other).await;
-    assert!(matches!(conflict, Err(EnvError::OperationConflict { .. })));
-    #[expect(clippy::disallowed_methods, reason = "测试读回标记文件")]
-    let written = std::fs::read_to_string(&marker).unwrap();
-    assert_eq!(written, "x\n");
-}
-
-#[tokio::test]
-async fn background_commands_report_once_acked() {
-    let fixture = fixture(Vec::new());
-    let mut start = request("echo bg", &fixture.root, CwdScope::Pinned);
-    start.background = Some(BackgroundCommand {
-        description: "Echo".to_owned(),
-        tool_use: None,
-    });
-    let task = start.task.clone();
-    fixture.shells.start(context("op1"), start).await.unwrap();
-    let session = SessionId::new("s1");
-    let workspace = WorkspaceRef {
-        environment: EnvironmentId::new("local"),
-        root: EnvPath::new(fixture.root.to_string_lossy()),
-    };
-    let background = || fixture.shells.shell_state(&workspace, &session).background;
-    // 启动后就在后台列表里（不论是否已经跑完）。
-    assert_eq!(background(), std::slice::from_ref(&task));
-    let notice = fixture
-        .shells
-        .notices(&session, 0)
-        .next()
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!((notice.seq, notice.exit_code), (1, Some(0)));
-    assert_eq!(notice.description, "Echo");
-    // 输出文件末尾记下终态。
-    #[expect(clippy::disallowed_methods, reason = "测试读回后台命令的输出文件")]
-    let written = std::fs::read_to_string(notice.output.as_str()).unwrap();
-    assert_eq!(written, "bg\n\n[exited with code 0]\n");
-    // 没有 ack：重新订阅仍会送达。
-    let again = fixture
-        .shells
-        .notices(&session, 0)
-        .next()
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(again.seq, 1);
-    // 已结束但没有 ack：仍算后台工作。
-    assert_eq!(background(), [task]);
-    fixture.shells.ack(&session, 1);
-    assert!(background().is_empty());
-    let pending = tokio::time::timeout(
-        Duration::from_millis(100),
-        fixture.shells.notices(&session, 0).next(),
-    )
-    .await;
-    assert!(pending.is_err(), "acked notices are not delivered again");
-}
-
-#[tokio::test]
-async fn only_whitelisted_variables_reach_the_command() {
-    let fixture = fixture(vec![
-        ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
-        ("ZCODE_API_KEY".to_owned(), "secret".to_owned()),
-        ("LC_ALL".to_owned(), "C".to_owned()),
-    ]);
-    let start = request(
-        "echo \"${ZCODE_API_KEY:-none} $LC_ALL $GIT_EDITOR $ZCODE\"",
-        &fixture.root,
-        CwdScope::Pinned,
-    );
-    let ran = run(&fixture, "op1", start).await;
-    assert_eq!(ran.output, "none C true 1\n");
-}
-
-#[tokio::test]
-async fn leftover_processes_are_reaped_when_the_command_exits() {
-    let fixture = fixture(Vec::new());
-    let start = request("sleep 30 & echo $!", &fixture.root, CwdScope::Pinned);
-    let ran = run(&fixture, "op1", start).await;
-    let pid = ran.output.trim().to_owned();
-    let probe = request(
-        &format!("kill -0 {pid} 2>/dev/null; echo $?"),
-        &fixture.root,
-        CwdScope::Pinned,
-    );
-    let alive = run(&fixture, "op2", probe).await;
-    assert_eq!(alive.output, "1\n");
 }
 
 #[test]

@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { appSchemaRejections, nodeShape, rustShape, rustText } from "./node-interop-history.mjs";
 import { conversation, replyItems } from "./node-interop-runtime-harness.mjs";
+import { nodeKilled } from "./node-interop-node-killed.mjs";
+import { toolSearchSession } from "./node-interop-tool-search.mjs";
 
 /** 一条会话线（含分支出的会话）上模型应当看到的历史。 */
 class Thread {
@@ -127,7 +129,14 @@ async function userMessage(ctx, sessionID, marker) {
 const nodeReminder = ({ info, parts }) =>
   info.role === "user" && info.synthetic === true && !parts.some((part) => part.metadata?.rustCli);
 
-/** 场景结束：两边冷读取相同、App schema 接受每条消息；`shape` 为 true 时再比消息结构（没有回退与压缩的会话）。 */
+/** rust-cli 冷读取里的分叉提示（`/fork` 的新会话，session-lifecycle.md §6.5.2）。 */
+const isForkNotice = (message) => message.type === "attachment" && message.source === "fork";
+
+/**
+ * 场景结束：两边冷读取相同、App schema 接受每条消息；`shape` 为 true 时再比消息结构（没有回退与压缩的会话）。
+ * 分叉提示在 Node 的 hydrator 里是 attachment 条目、不在归一的消息里，比历史时 rust-cli 一侧同样去掉它（第七段
+ * 另比提示的正文）。
+ */
 async function settle(ctx, name, sessionIDs, { shape = false } = {}) {
   const { check, store, artifactStore, nodeHistory, rust, nodeRoot } = ctx;
   for (const sessionID of sessionIDs) {
@@ -136,7 +145,7 @@ async function settle(ctx, name, sessionIDs, { shape = false } = {}) {
     check(
       `${name} ${sessionID}: cold history (Node hydrator, rust-cli load)`,
       await nodeHistory(store, artifactStore, session, sessionID),
-      rustText(loaded.messages),
+      rustText(loaded.messages.filter((message) => !isForkNotice(message))),
     );
     // Node 自己写的运行时提醒（合成消息、part 没有 `metadata.rustCli`，例如 Node 的 `agent_listing_delta`）
     // rust-cli 冷读取跳过（node-store.md §5 第 4 步、§7），结构比较也不比它们。
@@ -294,7 +303,7 @@ async function fileRewinds(ctx) {
   await settle(ctx, "files", [session]);
 }
 
-/** 4. rust-cli `/branch` 出的会话由 Node 续写；原会话不受影响。 */
+/** 4. rust-cli `Fork{at: None}`（`--fork-session` 的命令；F75 之前是 `/branch`）分出的会话由 Node 续写；原会话不受影响。 */
 async function branches(ctx) {
   const { node, rust } = ctx;
   const thread = new Thread(ctx, "branch");
@@ -306,7 +315,7 @@ async function branches(ctx) {
   const branched = await rust.branch(parent);
   const child = branched.session;
   ctx.check(
-    "branch: rust-cli /branch makes a new session",
+    "branch: rust-cli Fork makes a new session",
     typeof child === "string" && child !== parent,
     true,
   );
@@ -322,7 +331,52 @@ async function branches(ctx) {
   await settle(ctx, "branch", [parent, child]);
 }
 
-/** 5. 压缩后 Node 续写，再由 Node 压缩、rust-cli 续写，rust-cli 再压缩、Node 续写。 */
+/**
+ * 5. rust-cli `/fork`（F75）：三轮之后从第二轮分叉，分叉里模型看到前两轮、看不到第三轮；Node 与 rust-cli 在分叉里
+ * 续写；Node 续写原会话，第三轮还在、分叉里的不在。
+ */
+async function forks(ctx) {
+  const { node, rust, check } = ctx;
+  const thread = new Thread(ctx, "fork");
+  await rust.turn(null, "K1 one");
+  const parent = await newest(ctx);
+  thread.after("rust K1", "K1 one");
+  await node.turn(parent, "K2 two");
+  thread.after("node K2", "K2 two");
+  const throughTwo = thread.expected;
+  await rust.turn(parent, "K3 three");
+  thread.after("rust K3", "K3 three");
+  const forked = await rust.fork(parent, await userMessage(ctx, parent, "K2 two"));
+  const child = forked.session;
+  check(
+    "fork: rust-cli /fork makes a new session from the chosen input",
+    [
+      typeof child === "string" && child !== parent,
+      forked.response?.startsWith(`Forked session ${child} from message `),
+    ],
+    [true, true],
+  );
+  const branch = new Thread(ctx, "fork-child");
+  branch.expected = throughTwo;
+  await node.turn(child, "K4 four");
+  branch.after("node K4 in the fork", "K4 four");
+  await rust.turn(child, "K5 five");
+  branch.after("rust K5 in the fork", "K5 five");
+  const original = new Thread(ctx, "fork-parent");
+  original.expected = thread.expected;
+  await node.turn(parent, "K6 six");
+  original.after("node K6 in the original", "K6 six");
+  const notices = async (sessionID) =>
+    (await rust.read(sessionID)).messages.filter(isForkNotice).length;
+  check(
+    "fork: one fork notice in the fork, none in the original",
+    [await notices(child), await notices(parent)],
+    [1, 0],
+  );
+  await settle(ctx, "fork", [parent, child]);
+}
+
+/** 6. 压缩后 Node 续写，再由 Node 压缩、rust-cli 续写，rust-cli 再压缩、Node 续写。 */
 async function compactions(ctx) {
   const { node, rust, layout } = ctx;
   const notes = join(layout.work, "notes.txt");
@@ -360,7 +414,22 @@ async function compactions(ctx) {
   await settle(ctx, "compact", [session]);
 }
 
-export const SCENARIOS = { continuations, reverts, fileRewinds, branches, compactions };
+// `nodeKilled` 是第二十一段（Node 写的被杀会话，工作线 F86、F88，node-interop-node-killed.mjs）：要这里的模型替身与临时
+// HOME。
+
+/** 8. 第二十二段（工作线 F84，node-interop-tool-search.mjs）：用过本地 ToolSearch 的会话由 Node 续写、rust-cli 再续写。 */
+const toolSearch = (ctx) => toolSearchSession(ctx, { Thread, newest, settle });
+
+export const SCENARIOS = {
+  continuations,
+  reverts,
+  fileRewinds,
+  branches,
+  forks,
+  compactions,
+  nodeKilled,
+  toolSearch,
+};
 
 /** 跑全部场景（或 `only` 里的），返回每个场景的耗时（毫秒）。 */
 export async function runScenarios(ctx, only = []) {

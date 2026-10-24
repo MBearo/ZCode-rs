@@ -15,6 +15,8 @@ mod parts;
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) use nodes::{Complex, Loop, Shape};
+
 /// Node `MAX_BASH_PARSE_LENGTH`，按 UTF-16 码元计数。
 const MAX_BASH_PARSE_LENGTH: usize = 10_000;
 
@@ -72,6 +74,17 @@ pub struct Invocation {
     /// shell-permissions.md §4.5.2；不进 JSON，Node 的分析结果不变）。
     #[serde(skip)]
     pub substitutions: Vec<Substitution>,
+    /// 命令在原文里的起点（字节偏移；工作线 F76 的结构化分析按它排先后，不进 JSON）。
+    #[serde(skip)]
+    pub pos: usize,
+    /// 原文截到命令名之后第一个重定向之前（规则比较用的“去掉重定向”，工作线 F85，shell-permissions.md §4.5.6；
+    /// 不进 JSON）。没有这样的重定向时同 `command_text`。
+    #[serde(skip)]
+    pub plain_text: String,
+    /// 有前缀赋值，而且赋值的值里没有参数展开（`$NAME`、`${…}`、`$((…))`；整个值是命令替换的照算）。deny / ask 规则的
+    /// 候选按它判断这一段“有解析树而且有前缀赋值”（§4.5.6；不进 JSON）。
+    #[serde(skip)]
+    pub static_assignments: bool,
 }
 
 /// 替换的种类。
@@ -113,6 +126,12 @@ pub struct Analysis {
     pub has_redirects: bool,
     pub has_unsupported_syntax: bool,
     pub unsupported_node_types: Vec<String>,
+    /// 管道符在原文里的范围，任意层（工作线 F80，shell-permissions.md §4.5.5；不进 JSON，Node 的分析结果不变）。
+    #[serde(skip)]
+    pub pipes: Vec<std::ops::Range<usize>>,
+    /// `>` / `>>` 重定向在原文里的范围（同上）。
+    #[serde(skip)]
+    pub outputs: Vec<std::ops::Range<usize>>,
 }
 
 /// 与 Node `analyzeBashCommand` 等价。
@@ -128,6 +147,25 @@ pub fn analyze(command: &str) -> Analysis {
     }
     let source = command.as_bytes();
     analysis::collect(source, parser::parse(source))
+}
+
+/// 结构化的分析结果（工作线 F76，shell-permissions.md §4.5.4）：复合结构里面的简单命令（`[[ … ]]` 是名字为 `[[`
+/// 的一条）与结构的事实。只给 Bash 的规则检查用。
+pub(crate) struct Structured {
+    pub analysis: Analysis,
+    pub shape: Shape,
+}
+
+/// 复合结构不停下的分析；解析出错（缺 `fi` / `done` / `)`、多出的 token、嵌套过深等）时 None。
+pub(crate) fn analyze_structured(command: &str) -> Option<Structured> {
+    if command.chars().all(js::is_space) || js::utf16_len(command) > MAX_BASH_PARSE_LENGTH {
+        return None;
+    }
+    let source = command.as_bytes();
+    let mut script = parser::parse_structured(source);
+    let shape = std::mem::take(&mut script.shape);
+    let analysis = analysis::collect(source, script);
+    (!analysis.has_parse_errors).then_some(Structured { analysis, shape })
 }
 
 /// 与 Node `isBashCommandPermissionSafe` 等价。

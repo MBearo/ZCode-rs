@@ -127,12 +127,6 @@ pub(crate) fn anthropic_messages_url(base_url: &str) -> String {
     format!("{}/messages?beta=true", anthropic_v1_base_url(base_url))
 }
 
-/// `{base}/v1/messages/count_tokens?beta=true`（SDK `beta.messages.countTokens`，context-usage.md §3）。
-pub(crate) fn anthropic_count_url(base_url: &str) -> String {
-    anthropic_messages_url(base_url)
-        .replace("/messages?beta=true", "/messages/count_tokens?beta=true")
-}
-
 /// `{base}/chat/completions`（OpenAI SDK 的 `baseURL` 已含 `/v1`）。
 pub(crate) fn chat_completions_url(base_url: &str) -> String {
     format!("{}/chat/completions", trimmed(base_url))

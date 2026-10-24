@@ -1,157 +1,74 @@
-//! `/fork` 的 checkpoint 选择器（docs/specs/rust-cli/session-lifecycle.md §6.5.4）：文字取 Node `buildCheckpointSelection`
-//! 的原文（中文是本工程的翻译）；两步都复用列表视图：checkpoint 列表 → 文件的处理。
-use rust_cli_kernel_api::session_api::ForkFiles;
-use rust_cli_kernel_api::store::WorkspaceCheckpoint;
+//! `/fork` 的选择器（docs/specs/rust-cli/session-lifecycle.md §6.5.3，工作线 F75）：列出会话里可选的用户输入
+//! （与 `/rewind` 同一份，内核给出），每条一行、带序号，旧的在上、焦点在最新的一条；选中即分叉，没有第二步。
+//! 选择器与分叉后的提示都随界面语言（工作线 F78）。
+use rust_cli_kernel_api::ids::MessageId;
+use serde_json::Value;
 
 use super::app::{Action, App, Overlay};
 use super::i18n::Lang;
-use super::list::{Item, ListView, Purpose, SEP};
+use super::list::{Item, ListView, Purpose};
 
-/// 选择器最多列出的条数（Node `listCheckpoints({limit: 50})`）。
-const LIMIT: usize = 50;
-
-/// 一个 checkpoint：内核清单里的一项 + 回合输入的文字。
+/// 一条可选的输入：消息 ID 与它的文字。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
-    pub checkpoint: WorkspaceCheckpoint,
+    pub message: MessageId,
     pub text: String,
 }
 
-/// Node `shortId`：前 8 个字符。
-fn short(id: &str) -> String {
-    let id = id.strip_prefix("checkpoint_").unwrap_or(id);
-    id.chars().take(8).collect()
-}
-
-/// 写入时间（assistant 消息 ID 里的毫秒）离现在多久。
-fn ago(lang: Lang, created_ms: Option<u64>, now_ms: u64) -> String {
-    let Some(created) = created_ms else {
-        return String::new();
-    };
-    let minutes = now_ms.saturating_sub(created) / 60_000;
-    match (lang, minutes) {
-        (Lang::Zh, 0) => "刚刚".to_owned(),
-        (Lang::Zh, m) if m < 60 => format!("{m} 分钟前"),
-        (Lang::Zh, m) if m < 60 * 24 => format!("{} 小时前", m / 60),
-        (Lang::Zh, m) => format!("{} 天前", m / (60 * 24)),
-        (Lang::En, 0) => "just now".to_owned(),
-        (Lang::En, m) if m < 60 => format!("{m}m ago"),
-        (Lang::En, m) if m < 60 * 24 => format!("{}h ago", m / 60),
-        (Lang::En, m) => format!("{}d ago", m / (60 * 24)),
+/// 分叉完成后的提示（§6.5.3）：英文是内核的回执（Node 原文）加 Node 的 `Switched to forked session <ID>.`；
+/// Node 只有英文，中文另配（工作线 F78），消息 ID 与条数取回执的 `message`、`copied`。
+pub fn forked_notice(lang: Lang, session: &str, result: &Value) -> String {
+    match lang {
+        Lang::En => format!(
+            "{}\nSwitched to forked session {session}.",
+            result["response"].as_str().unwrap_or_default()
+        ),
+        Lang::Zh => format!(
+            "已从消息 {} 分出会话 {session}：复制了 {} 条消息。\n已切换到分出的会话 {session}。",
+            result["message"].as_str().unwrap_or_default(),
+            result["copied"].as_u64().unwrap_or_default()
+        ),
     }
 }
 
 impl App {
-    /// 打开 checkpoint 列表（新的在前）。
-    pub fn open_fork(&mut self, entries: Vec<Entry>, now_ms: u64) {
-        let zh = self.lang == Lang::Zh;
-        let items = entries
+    /// 打开选择器（条目按会话里的顺序，旧的在前）。
+    pub fn open_fork(&mut self, entries: Vec<Entry>) {
+        let items: Vec<Item> = entries
             .into_iter()
-            .take(LIMIT)
-            .map(|entry| {
-                let preview = entry.text.split_whitespace().collect::<Vec<_>>().join(" ");
-                let created = entry.checkpoint.assistant.created_ms();
-                let files = if zh { "1 个文件" } else { "1 file" };
-                Item {
-                    label: if preview.is_empty() {
-                        format!("message {}", short(entry.checkpoint.prompt.as_str()))
-                    } else {
-                        preview
-                    },
-                    description: format!(
-                        "{} · {files} · {}",
-                        short(&entry.checkpoint.id),
-                        ago(self.lang, created, now_ms)
-                    ),
-                    value: entry.checkpoint.id,
-                    ..Item::default()
-                }
+            .map(|entry| Item {
+                label: entry.text.split_whitespace().collect::<Vec<_>>().join(" "),
+                value: entry.message.as_str().to_owned(),
+                ..Item::default()
             })
             .collect();
-        let (title, empty) = if zh {
-            ("从 checkpoint 分叉", "还没有可用的工作区 checkpoint。")
-        } else {
-            (
-                "Fork From Checkpoint",
-                "No workspace checkpoints are available yet.",
-            )
+        let (title, subtitle, empty) = match self.lang {
+            Lang::En => (
+                "Fork",
+                "Fork the conversation after one of your messages. Files are not changed; use /rewind to restore them.",
+                "Nothing to fork from yet.",
+            ),
+            Lang::Zh => (
+                "分叉",
+                "从某条输入之后分出新会话。文件不动；要回退文件用 /rewind。",
+                "还没有可以分叉的输入。",
+            ),
         };
-        let subtitle = if zh {
-            "选择要分叉的 checkpoint。"
-        } else {
-            "Choose a checkpoint to fork from."
-        };
-        let list = ListView::new(Purpose::Fork, title.to_owned(), items, empty.to_owned())
-            .with_subtitle(subtitle.to_owned())
-            .filterable();
+        let mut list = ListView::new(Purpose::Fork, title.to_owned(), items, empty.to_owned())
+            .with_subtitle(subtitle.to_owned());
+        // 焦点在最新的一条（最后一项）。
+        list.selected = list.items.len().saturating_sub(1);
         self.overlay = Some(Overlay::List(list));
     }
 
-    /// 选中 checkpoint 后：文件怎么处理。值是 `restore|keep SEP checkpoint`，`Never mind` 为空。
-    pub(super) fn fork_chosen(&mut self, checkpoint: &str) -> Option<Action> {
-        let zh = self.lang == Lang::Zh;
-        let option = |label: &str, description: &str, value: String| Item {
-            label: label.to_owned(),
-            description: description.to_owned(),
-            value,
-            ..Item::default()
-        };
-        let items = if zh {
-            vec![
-                option(
-                    "分叉并恢复文件",
-                    "把这个 checkpoint 改过的文件恢复成改动前的内容",
-                    format!("restore{SEP}{checkpoint}"),
-                ),
-                option(
-                    "只分叉对话",
-                    "文件保持现状",
-                    format!("keep{SEP}{checkpoint}"),
-                ),
-                option("算了", "", String::new()),
-            ]
-        } else {
-            vec![
-                option(
-                    "Fork and restore files",
-                    "Restore the files this checkpoint changed to their content before the change",
-                    format!("restore{SEP}{checkpoint}"),
-                ),
-                option(
-                    "Fork conversation only",
-                    "Leave the files as they are",
-                    format!("keep{SEP}{checkpoint}"),
-                ),
-                option("Never mind", "", String::new()),
-            ]
-        };
-        let title = if zh {
-            "从 checkpoint 分叉"
-        } else {
-            "Fork From Checkpoint"
-        };
-        self.overlay = Some(Overlay::List(ListView::new(
-            Purpose::ForkConfirm,
-            title.to_owned(),
-            items,
-            String::new(),
-        )));
-        None
-    }
-
-    pub(super) fn fork_confirmed(&mut self, value: &str) -> Option<Action> {
-        // 列表给含 SEP 的值再接一个 SEP（档位位置，list.rs `chosen`）：按段取。
-        let mut parts = value.split(SEP);
-        let files = parts.next()?;
-        let checkpoint = parts.next().filter(|id| !id.is_empty())?;
-        let files = match files {
-            "restore" => ForkFiles::Restore,
-            "keep" => ForkFiles::Keep,
-            _ => return None,
-        };
-        Some(Action::ForkCheckpoint {
-            checkpoint: Some(checkpoint.to_owned()),
-            files,
+    /// 选中一条输入：分叉到这一轮为止。
+    pub(super) fn fork_chosen(&mut self, value: &str) -> Option<Action> {
+        (!value.is_empty()).then(|| Action::Fork {
+            input: MessageId::new(value),
         })
     }
 }
+
+#[cfg(test)]
+#[path = "fork_tests.rs"]
+mod tests;

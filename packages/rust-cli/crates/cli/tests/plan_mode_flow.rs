@@ -29,8 +29,8 @@ use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent, TurnOutcome,
 };
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryStore, RoundTripEnv, ScriptedModel, SequentialIds, selection, text_response,
-    tool_use_response,
+    FixedClock, MemoryStore, RoundTripEnv, ScriptedModel, SequentialIds, environments, selection,
+    text_response, tool_use_response,
 };
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 use serde_json::json;
@@ -97,7 +97,7 @@ async fn run(dir: &Path) -> (Arc<ScriptedModel>, String) {
     let kernel = LocalKernel::new(
         Ports {
             model: model.clone(),
-            env: Arc::new(RoundTripEnv(Arc::new(env))),
+            environments: environments(Arc::new(RoundTripEnv(Arc::new(env)))),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(1_000)),

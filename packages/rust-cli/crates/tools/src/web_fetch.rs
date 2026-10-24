@@ -143,7 +143,8 @@ async fn fetch(context: &ToolUseContext, start: Url) -> Result<Fetched, ToolErro
             max_bytes: MAX_BYTES,
         };
         let reply = context
-            .env
+            .local
+            .fetch()
             .fetch_url(&context.workspace, request)
             .await
             .map_err(|error| failed(error.to_string()))?;

@@ -15,8 +15,6 @@ const AUTOCOMPACT_BUFFER: u64 = 13_000;
 const WARNING_BUFFER: u64 = 20_000;
 /// 阻塞线离窗口的距离。
 const BLOCKING_BUFFER: u64 = 3_000;
-/// 不认识的模型、目录也没给出窗口时的上下文窗口（默认窗口）。
-pub(crate) const DEFAULT_WINDOW: u64 = 200_000;
 /// 原生 1M 窗口。
 const NATIVE_1M: u64 = 1_000_000;
 /// 窗口覆盖的上下限。
@@ -59,10 +57,9 @@ impl ModelFacts {
                 limits.context_window,
                 limits.max_output_tokens.or(card_output),
             ),
-            None => (
-                card.map_or(DEFAULT_WINDOW, |card| card.context_window),
-                card_output,
-            ),
+            // 不认识的模型、目录也没给出窗口时是默认窗口（200,000）：与 ToolSearch 的自动门槛同一个回退（工作线 F89，
+            // 定义只在 prompts 一处）。
+            None => (models::context_window(&selection.model, None), card_output),
         };
         Self {
             context_window,
@@ -153,13 +150,27 @@ pub enum Level {
     Blocked,
 }
 
+/// 阻塞线：模型的上下文窗口（不看窗口覆盖）减去摘要输出的预留，再减 [`BLOCKING_BUFFER`]。
+fn blocking_line(facts: &ModelFacts, thresholds: &Thresholds) -> u64 {
+    facts
+        .context_window
+        .saturating_sub(reserve(facts, thresholds))
+        .saturating_sub(BLOCKING_BUFFER)
+}
+
+/// 发请求前到了阻塞线、这一步不发请求（compact.md §2.2）。自动压缩打开（`auto`）且窗口来源是 `auto` 时交给上下文超限
+/// 之后的压缩，不拦。
+pub fn blocks(tokens: u64, facts: &ModelFacts, thresholds: &Thresholds, auto: bool) -> bool {
+    if auto && window(facts, thresholds).source == WindowSource::Auto {
+        return false;
+    }
+    tokens >= blocking_line(facts, thresholds)
+}
+
 /// 容量级别（自动压缩打开时）。
 pub fn level(tokens: u64, facts: &ModelFacts, thresholds: &Thresholds) -> Level {
     let threshold = threshold(facts, thresholds);
-    let blocking = facts
-        .context_window
-        .saturating_sub(reserve(facts, thresholds))
-        .saturating_sub(BLOCKING_BUFFER);
+    let blocking = blocking_line(facts, thresholds);
     if tokens >= blocking {
         Level::Blocked
     } else if tokens >= threshold {
@@ -187,10 +198,7 @@ pub fn notice(
     let threshold = threshold(facts, thresholds);
     // 级别的基准：自动压缩打开时是阈值、关闭时是有效窗口；阻塞线按模型的上下文窗口（不看窗口覆盖）。
     let base = if auto { threshold } else { effective };
-    let blocking = facts
-        .context_window
-        .saturating_sub(reserve(facts, thresholds))
-        .saturating_sub(BLOCKING_BUFFER);
+    let blocking = blocking_line(facts, thresholds);
     let level_ok = tokens < blocking
         && !(auto && tokens >= threshold)
         && tokens < base.saturating_sub(WARNING_BUFFER);

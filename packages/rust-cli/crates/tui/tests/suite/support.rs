@@ -15,13 +15,15 @@ use futures_util::stream::{self, BoxStream, StreamExt};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use rust_cli_kernel_api::env::{EnvPath, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::EnvironmentId;
 use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, ModelRequest};
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::provider::{CatalogModel, ModelCatalog, ModelDirectory, WireProtocol};
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryArtifacts, MemoryStore, SequentialIds, UnusedEnvironment, selection,
+    FixedClock, MemoryArtifacts, MemoryStore, SequentialIds, UnusedEnvironment, environments,
+    selection,
 };
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 use rust_cli_tui::ui::palette::{ColorLevel, Palette};
@@ -129,8 +131,8 @@ pub struct Setup {
     pub palette: Palette,
     /// 入口注入的服务（界面语言的配置值与写回，tui.md §7.1）。
     pub services: rust_cli_tui::Services,
-    /// 执行环境；缺省是不能用的替身（没有 skill，skills.rs 换成内存文件系统）。
-    pub env: Arc<dyn Environment>,
+    /// 执行环境的注册表；缺省本机是不能用的替身（没有 skill，skills.rs 换成内存文件系统）。
+    pub environments: Arc<dyn EnvironmentRegistry>,
     /// Artifact 存储；缺省是不支持 artifact 的会话存储（`/fork` 的测试换成内存 artifact，记 checkpoint）。
     pub artifacts: Option<Arc<dyn rust_cli_kernel_api::store::ArtifactStore>>,
     /// 会话存储；测试要查提交的事实时自己传入（manage.rs）。
@@ -155,6 +157,8 @@ pub struct Setup {
     pub startup: rust_cli_tui::Startup,
     /// 运行的平台（修复线 F65）：注入 Windows 时按 Windows 的按键规则（tui-input.md §9）；缺省 Unix。
     pub os: rust_cli_tui::Os,
+    /// 启动时的权限模式（`--permission-mode`、项目持久模式）；缺省 default（mode_picker.rs 用 acceptEdits）。
+    pub mode: PermissionMode,
 }
 
 impl Default for Setup {
@@ -165,7 +169,7 @@ impl Default for Setup {
             lang: "en_US.UTF-8",
             palette: Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
             services: rust_cli_tui::Services::default(),
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             artifacts: None,
             store: Arc::new(MemoryStore::default()),
             vars: Vec::new(),
@@ -178,6 +182,7 @@ impl Default for Setup {
             hooks: None,
             startup: rust_cli_tui::Startup::New,
             os: rust_cli_tui::Os::Unix,
+            mode: PermissionMode::Default,
         }
     }
 }
@@ -361,6 +366,28 @@ impl Ui {
             .await
     }
 
+    /// 切到完全访问的确认框（tui.md §7.8，工作线 F87）：等框出现，勾上“我已了解风险”再确认，等框关掉。
+    pub async fn confirm_full_access(&mut self) {
+        const TITLES: [&str; 2] = ["⚠ Enable full access?", "⚠ 要启用完全访问吗？"];
+        self.wait("the full access confirmation", |s| {
+            TITLES.iter().any(|title| s.contains(title))
+        })
+        .await;
+        for code in [
+            KeyCode::Up,
+            KeyCode::Char(' '),
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Enter,
+        ] {
+            self.key(code);
+        }
+        self.wait("the confirmation to close", |s| {
+            !TITLES.iter().any(|title| s.contains(title))
+        })
+        .await;
+    }
+
     /// 审批与提问弹出后 150 ms 内的按键不生效：等过这段时间。
     pub async fn settle(&self) {
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -369,7 +396,7 @@ impl Ui {
 
 fn kernel(
     model: Arc<dyn ModelPort>,
-    env: Arc<dyn Environment>,
+    environments: Arc<dyn EnvironmentRegistry>,
     store: Arc<dyn rust_cli_kernel_api::store::SessionStore>,
     artifacts: Option<Arc<dyn rust_cli_kernel_api::store::ArtifactStore>>,
     peers: rust_cli_runtime::PeerDeps,
@@ -378,7 +405,7 @@ fn kernel(
     Arc::new(LocalKernel::with_context_and_extensions(
         Ports {
             model,
-            env,
+            environments,
             store,
             // 文件工具的 checkpoint 要能落 artifact（`FileChanges`，tui-manage.md §4 的回合改动）。
             artifacts: artifacts.unwrap_or_else(|| Arc::new(MemoryArtifacts::default())),
@@ -458,7 +485,7 @@ where
         },
         home: Some("/Users/dev".into()),
         selection: selection(),
-        mode: PermissionMode::Default,
+        mode: setup.mode,
         version: "0.1.0".into(),
         vars: std::iter::once(("LANG".to_owned(), setup.lang.to_owned()))
             .chain(
@@ -488,7 +515,7 @@ where
     };
     let kernel = kernel(
         model,
-        setup.env,
+        setup.environments,
         setup.session_store.unwrap_or(setup.store),
         setup.artifacts,
         setup.peers,

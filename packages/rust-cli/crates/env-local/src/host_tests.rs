@@ -2,8 +2,9 @@
 
 use std::path::Path;
 
-use rust_cli_kernel_api::env::{EnvPath, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::EnvironmentId;
+use rust_cli_kernel_api::machine::{EnvInfo, Files};
 
 use super::*;
 use crate::git::tests::git;

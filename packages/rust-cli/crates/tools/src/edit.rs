@@ -64,7 +64,12 @@ impl EditTool {
         let request = ReadFile {
             path: EnvPath::new(path),
         };
-        match context.env.read_file(&context.workspace, request).await {
+        match context
+            .machine
+            .files()
+            .read_file(&context.workspace, request)
+            .await
+        {
             Ok(file) => Ok(Some((
                 crate::encoding::decode(&file.bytes),
                 file.version,
@@ -257,7 +262,8 @@ impl Tool for EditTool {
             create_parents: input.old_string.is_empty(),
         };
         let written = context
-            .env
+            .machine
+            .files()
             .put_file(&context.workspace, context.operation.clone(), request)
             .await
             .map_err(env_failure)?;

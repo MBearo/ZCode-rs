@@ -192,7 +192,7 @@ impl App {
     /// 按键会到输入框（与 [`App::dispatch`] 的分派相同的条件）。
     fn composer_takes_keys(&self) -> bool {
         self.overlay.is_none()
-            && self.view.pending().is_none()
+            && self.pending().is_none()
             && self.view.peer_held().is_none()
             && self.focus.is_none()
             && self.viewing.is_none()

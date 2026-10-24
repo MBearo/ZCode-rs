@@ -76,6 +76,7 @@ pub fn run_in<T>(
         root,
         dangerous: false,
         hook_check: false,
+        full_access: mode == PermissionMode::BypassPermissions,
     };
     check(&inputs)
 }

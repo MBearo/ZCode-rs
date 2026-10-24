@@ -127,16 +127,23 @@ fn loaded_sessions_round_trip_with_open_work() {
         }],
         checkpoints: vec![checkpoint()],
         turn: None,
+        last_turn_failed: true,
     };
     round_trip(&loaded);
     // 没有这些字段的旧结果也能读，读出来是空清单。
     let mut old = serde_json::to_value(&loaded).unwrap();
-    for key in ["open_operations", "pending_interactions", "checkpoints"] {
+    for key in [
+        "open_operations",
+        "pending_interactions",
+        "checkpoints",
+        "last_turn_failed",
+    ] {
         old.as_object_mut().unwrap().remove(key);
     }
     let old: LoadedSession = serde_json::from_value(old).unwrap();
     assert!(old.open_operations.is_empty() && old.pending_interactions.is_empty());
     assert!(old.checkpoints.is_empty());
+    assert!(!old.last_turn_failed);
 }
 
 #[test]
@@ -402,13 +409,67 @@ fn question_and_plan_answers_have_a_stable_shape() {
 
     let answered = QuestionAnswer::Answered {
         answers: [("Which database?".to_owned(), "SQLite".to_owned())].into(),
+        annotations: Default::default(),
+        response: None,
+        follow_up: false,
+        afk_timeout_ms: None,
     };
     round_trip(&answered);
     assert_eq!(
         serde_json::to_value(&answered).unwrap(),
         json!({"decision": "answered", "answers": {"Which database?": "SQLite"}})
     );
+    // 只有 `answers` 的旧回答照读（新字段缺省）。
+    assert_eq!(
+        serde_json::from_value::<QuestionAnswer>(
+            json!({"decision": "answered", "answers": {"Which database?": "SQLite"}})
+        )
+        .unwrap(),
+        answered
+    );
+    let annotated = QuestionAnswer::Answered {
+        answers: [("Layout?".to_owned(), "Top".to_owned())].into(),
+        annotations: [(
+            "Layout?".to_owned(),
+            crate::orchestration::QuestionAnnotation {
+                preview: Some("## Top".to_owned()),
+                notes: Some("wider".to_owned()),
+            },
+        )]
+        .into(),
+        response: Some("later".to_owned()),
+        follow_up: true,
+        afk_timeout_ms: Some(60_000),
+    };
+    round_trip(&annotated);
+    assert_eq!(
+        serde_json::to_value(&annotated).unwrap(),
+        json!({"decision": "answered", "answers": {"Layout?": "Top"},
+               "annotations": {"Layout?": {"preview": "## Top", "notes": "wider"}},
+               "response": "later", "follow_up": true, "afk_timeout_ms": 60000})
+    );
     round_trip(&QuestionAnswer::Declined);
+    // 旧会话的询问（工作线 F72，agents.md §4.1.2）：标题为空时不写出。
+    let asked = crate::orchestration::DetachedEvent::Asked {
+        ask: Box::new(crate::orchestration::DetachedAsk {
+            interaction: InteractionId::new("i1"),
+            session: SessionId::new("s1"),
+            title: String::new(),
+            request: InteractionRequest::Question {
+                tool_use: ToolUseId::new("tu1"),
+                questions: json!([]),
+            },
+        }),
+    };
+    round_trip(&asked);
+    assert_eq!(
+        serde_json::to_value(&asked).unwrap(),
+        json!({"type": "asked", "ask": {"interaction": "i1", "session": "s1",
+               "request": {"kind": "question", "tool_use": "tu1", "questions": []}}})
+    );
+    round_trip(&crate::orchestration::DetachedEvent::Resolved {
+        interaction: InteractionId::new("i1"),
+    });
     let approve = PlanApprovalAnswer::Approve {
         mode: PermissionMode::AcceptEdits,
     };

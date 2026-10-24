@@ -24,6 +24,8 @@ const MAIN: &[&str] = &[
     "Write",
     "CronCreate",
     "EnterWorktree",
+    // 工作线 F83：前台与后台子代理都有 Monitor（agents.md §4.2）。
+    "Monitor",
     "NotebookEdit",
     "SendMessage",
     "TaskStop",
@@ -71,6 +73,7 @@ fn general_purpose_drops_only_the_main_thread_tools() {
             "Write",
             "CronCreate",
             "EnterWorktree",
+            "Monitor",
             "NotebookEdit",
             "SendMessage",
             "TaskStop",
@@ -93,6 +96,7 @@ fn explore_is_read_only_and_background_keeps_the_async_set() {
             "ToolSearch",
             "CronCreate",
             "EnterWorktree",
+            "Monitor",
             "SendMessage",
             "TaskStop",
             "WebFetch",
@@ -100,7 +104,7 @@ fn explore_is_read_only_and_background_keeps_the_async_set() {
         ]
     );
     // A2：后台 Explore 只有 Bash、Read、Skill、ToolSearch 与延迟的 EnterWorktree、SendMessage、
-    // TaskStop、WebFetch。
+    // TaskStop、WebFetch；F83 起另有 Monitor（后台白名单里有它）。
     assert_eq!(
         names(EXPLORE, true),
         [
@@ -109,6 +113,7 @@ fn explore_is_read_only_and_background_keeps_the_async_set() {
             "Skill",
             "ToolSearch",
             "EnterWorktree",
+            "Monitor",
             "SendMessage",
             "TaskStop",
             "WebFetch",

@@ -2,7 +2,8 @@
 //! 由 `scripts/zcode-cli-rust-node-cold-fixtures.mjs` 用 Node 仓储写入并记录 Node
 //! `hydrateMessageHistoryFromSession` 的结果）。比较文本、推理、工具调用与工具结果；去掉本 crate
 //! 不读的部分：attachment 条目、只有合成 part 的提醒消息、没有任何内容的 assistant、文件 / agent
-//! part 的占位文本，以及 Node 给未结束调用补的中断结果（docs/specs/rust-cli/node-store.md §5、§7）。
+//! part 的占位文本（docs/specs/rust-cli/node-store.md §5、§7）。Node 给未结束调用补的中断结果，本工程在同一位置补同样的
+//! 结果（Node 的文字，§4.6，工作线 F86、F88），直接比。
 use rusqlite::Connection;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{
@@ -58,9 +59,6 @@ fn placeholder(text: &str) -> bool {
     text.starts_with("[Attached ") || text.starts_with("[Selected agent: ")
 }
 
-/// Node 给没有结果的调用补的结果（`INTERRUPTED_TOOL_RESULT`）；本工程不补（§7）。
-const INTERRUPTED: &str = "[Tool execution was interrupted before resume]";
-
 /// Node 工具结果的内容：字符串是一个文本块；图片取媒体类型与 data URL。
 fn node_content(content: &Value) -> Value {
     match content {
@@ -82,9 +80,6 @@ fn node_text(entry: &Value) -> Option<Value> {
     let message = entry.get("message")?;
     let role = message["role"].as_str()?;
     if role == "tool" {
-        if message["content"] == INTERRUPTED {
-            return None;
-        }
         return Some(json!({"role": "tool", "id": message["toolCallId"],
             "error": message["isError"], "content": node_content(&message["content"])}));
     }

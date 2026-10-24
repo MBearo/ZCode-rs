@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use rust_cli_kernel_api::env::EnvFacts;
 use rust_cli_kernel_api::env_shell;
 use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::machine::Shell;
 use rust_cli_kernel_api::message::{ContentBlock, Message};
 use serde_json::{Value, json};
 
@@ -114,7 +115,7 @@ impl<'a> Scope<'a> {
     /// 同样的端口与事实，相对路径换成以 `cwd` 为基准。
     fn at(&self, cwd: String) -> Scope<'a> {
         Scope {
-            env: self.env,
+            files: self.files,
             workspace: self.workspace,
             style: self.style,
             cwd,
@@ -126,7 +127,7 @@ impl<'a> Scope<'a> {
 /// 这一步的 `nested_memory`，每个一条：`(text, data)`。`files` 是本会话当前的规则文件：已宣布且
 /// 仍在其中的不再随 nested memory 发。
 pub(crate) async fn announce(
-    (scope, seen, session): (&Scope<'_>, &Seen, &SessionId),
+    (scope, seen, session, shell): (&Scope<'_>, &Seen, &SessionId, &dyn Shell),
     facts: &EnvFacts,
     history: &[Message],
     files: &[RuleFile],
@@ -139,7 +140,7 @@ pub(crate) async fn announce(
     // 触发路径按会话的当前目录解析（工具调用时当前目录下的绝对路径）；范围与目录层仍按工作区根
     // （tools-files.md §3.3）。缺陷修复（F19）：以前按工作区根解析，Bash `cd` 之后的相对路径
     // 落到另一个文件上，工具读的是 A、这里找的是 B 的规则。
-    let cwd = env_shell::current_dir(scope.env, scope.workspace, session).await;
+    let cwd = env_shell::current_dir(shell, scope.workspace, session).await;
     let based = scope.at(cwd.as_str().to_owned());
     let current = instructions::current(files);
     let announced: Vec<Announced> = instructions::announced(history)

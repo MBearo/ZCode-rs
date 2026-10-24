@@ -35,7 +35,7 @@ fn env() -> Arc<MemoryEnvironment> {
 }
 
 fn commands(env: Arc<MemoryEnvironment>) -> SkillCommands {
-    let catalog = Arc::new(SkillCatalog::new(env));
+    let catalog = Arc::new(SkillCatalog::new(env.clone(), env));
     let ids: Arc<dyn Ids> = Arc::new(SequentialIds::default());
     let bash = Arc::new(EchoBash::default());
     SkillCommands::new(
@@ -269,8 +269,13 @@ async fn k9_print_sessions_add_the_unknown_command_note() {
     // 路径（`/` 开头、执行环境里存在）与不像命令名的输入不加提醒。
     for text in ["/tmp/notes.md", "/Users rest"] {
         let env_with_dir = Arc::new(MemoryEnvironment::new(facts()).with_file("/Users/dev/x", "x"));
-        let commands =
-            super::SkillCommands::new(Arc::new(SkillCatalog::new(env_with_dir.clone())), None);
+        let commands = super::SkillCommands::new(
+            Arc::new(SkillCatalog::new(
+                env_with_dir.clone(),
+                env_with_dir.clone(),
+            )),
+            None,
+        );
         commands.catalog.set_print_session(true);
         assert_eq!(
             commands

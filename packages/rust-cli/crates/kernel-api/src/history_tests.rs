@@ -42,6 +42,7 @@ fn boundary(id: &str, preserved: Option<(&str, &str, &str)>) -> Message {
             anchor: MessageId::new(anchor),
             tail: MessageId::new(tail),
         }),
+        discovered_tools: Vec::new(),
     }))
 }
 

@@ -19,8 +19,8 @@ use rust_cli_kernel_api::store::{
     CommitReceipt, FactBatch, LoadedSession, SessionFilter, SessionStore, SessionSummary,
 };
 use rust_cli_kernel_api::testing::{
-    ClosingEnvironment, FixedClock, MemoryStore, ScriptedModel, SequentialIds, selection,
-    text_response,
+    ClosingEnvironment, FixedClock, MemoryStore, ScriptedModel, SequentialIds, environments,
+    selection, text_response,
 };
 use rust_cli_tools::file_state::{Baseline, FileState};
 use tokio::sync::watch;
@@ -37,7 +37,7 @@ fn kernel(
     let kernel = LocalKernel::new(
         Ports {
             model,
-            env,
+            environments: environments(env),
             store,
             artifacts: Arc::new(MemoryStore::default()),
             clock: Arc::new(FixedClock(1_000)),

@@ -5,33 +5,16 @@
 //! 一行是 `Other` 输入。确认页列出每题的答案。
 //!
 //! 选项不用选择列表组件的底色条（F74 以前用）：底色条盖在“其他”行的输入上，看不到光标。焦点行只有强调色的 `❯ `
-//! 与名字，序号 dim；多选勾上的 `[✔]` 与单选的已选项是成功色。焦点在“其他”行时 [`Interaction::cursor`] 给出
-//! 终端光标的位置。
+//! 与名字，序号 dim（行首与输入行的画法在 `interaction_view.rs`，工作线 F76 起权限询问与计划审批共用）；多选勾上的
+//! `[✔]` 与单选的已选项是成功色。焦点在“其他”行时 [`Interaction::cursor`] 给出终端光标的位置。
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::orchestration::InteractionRequest;
 
-use super::{View, bold, dim, frame, input};
+use super::{At, Rows, View, bold, checkbox, dim, frame, input, input_row, prefix};
 use crate::ui::i18n::Lang;
 use crate::ui::interaction::{Draft, Interaction, Question, questions};
-use crate::ui::text::{truncate_line, width, wrap, wrap_text};
-
-/// 焦点行的指针。
-const POINTER: &str = "❯ ";
-
-/// 一行选项的开头：缩进、指针（焦点行是强调色的 `❯ `，其余两个空格）与 dim 的序号。
-fn prefix(focused: bool, number: usize, view: &View<'_>) -> Vec<Span<'static>> {
-    let pointer = if focused {
-        Span::styled(POINTER, Style::default().fg(view.palette.accent))
-    } else {
-        Span::raw("  ")
-    };
-    vec![
-        Span::raw("  "),
-        pointer,
-        Span::styled(format!("{number}. "), dim()),
-    ]
-}
+use crate::ui::text::{truncate_line, wrap_text};
 
 /// 名字的样式：单选的已选项是成功色，焦点行是强调色，其余不上色。
 fn name_style(focused: bool, chosen: bool, view: &View<'_>) -> Style {
@@ -42,16 +25,6 @@ fn name_style(focused: bool, chosen: bool, view: &View<'_>) -> Style {
     } else {
         Style::default()
     }
-}
-
-/// 多选的方框：勾上是成功色的 `[✔]`，后面一个空格。
-fn checkbox(checked: bool, view: &View<'_>) -> [Span<'static>; 2] {
-    let mark = if checked {
-        Span::styled("[✔]", view.palette.success())
-    } else {
-        Span::raw("[ ]")
-    };
-    [mark, Span::raw(" ")]
 }
 
 /// 已选项后面的 ` ✔`。
@@ -71,31 +44,18 @@ fn choice(
     truncate_line(Line::from(spans), view.width)
 }
 
-/// 选项所在的行：（行号，选项下标）。
-type Rows = Vec<(usize, usize)>;
-/// 终端光标：（行号，列）。
-type At = Option<(usize, usize)>;
+/// 一道题的答案：预览题只有选中的值（它的输入是备注，工作线 F72），其余题是选中的值加 `Other`。
+fn answers_of(question: &Question, draft: &crate::ui::interaction::Draft) -> Vec<String> {
+    if question.preview_mode() {
+        draft.values.clone()
+    } else {
+        draft.answers()
+    }
+}
 
 impl Interaction {
-    pub(super) fn question_lines(
-        &self,
-        request: &InteractionRequest,
-        view: &View<'_>,
-    ) -> (Vec<Line<'static>>, Rows) {
-        let (lines, options, _) = self.question_layout(request, view);
-        (lines, options)
-    }
-
-    /// 终端光标在视图里的（行号，列）：只有提问的焦点在“其他”行时有（tui.md §7.6），其余时候隐藏光标。
-    pub fn cursor(&self, request: &InteractionRequest, view: &View<'_>) -> At {
-        match request {
-            InteractionRequest::Question { .. } => self.question_layout(request, view).2,
-            _ => None,
-        }
-    }
-
     /// 排好的提问：行、选项所在的行与终端光标。
-    fn question_layout(
+    pub(super) fn question_layout(
         &self,
         request: &InteractionRequest,
         view: &View<'_>,
@@ -104,26 +64,54 @@ impl Interaction {
         let zh = view.lang == Lang::Zh;
         let mut lines = frame("", view);
         lines.pop();
-        if list.len() > 1 {
-            lines.push(self.tabs(&list, view));
-        } else {
-            lines.push(Line::default());
+        // 单选且有预览的题（工作线 F72，tools-more.md §1.1）：只有一题时也有标签行。
+        let preview = list.get(self.question).is_some_and(Question::preview_mode);
+        match list.as_slice() {
+            [_, _, ..] => lines.push(self.tabs(&list, view)),
+            [only] if preview => lines.push(self.single_tab(only)),
+            _ => lines.push(Line::default()),
         }
         lines.push(Line::default());
+        // 预览题不放终端光标：备注一行在预览框下面，写备注时光标的位置没有做（tools-more.md §1.2）。
         let (options, cursor) = match list.get(self.question) {
+            Some(question) if preview => (self.preview_body(question, &mut lines, view), None),
             Some(question) => self.question_body(question, &mut lines, view),
             None => (self.review(&list, &mut lines, view), None),
         };
         lines.push(Line::default());
-        let text = match (zh, list.len() > 1) {
-            (false, true) => {
+        let text = match (zh, list.len() > 1, preview) {
+            (false, true, true) => {
+                "{Enter} to select · {↑/↓} to navigate · {n} to add notes · {Tab} to switch questions · {Esc} to cancel"
+            }
+            (false, false, true) => {
+                "{Enter} to select · {↑/↓} to navigate · {n} to add notes · {Esc} to cancel"
+            }
+            (false, true, false) => {
                 "{Enter} to select · {↑/↓} to navigate · {Tab} to switch questions · {Esc} to cancel"
             }
-            (false, false) => "{Enter} to select · {↑/↓} to navigate · {Esc} to cancel",
-            (true, true) => "{enter} 选择 · {↑/↓} 移动 · {tab} 切换问题 · {esc} 取消",
-            (true, false) => "{enter} 选择 · {↑/↓} 移动 · {esc} 取消",
+            (false, false, false) => "{Enter} to select · {↑/↓} to navigate · {Esc} to cancel",
+            (true, true, true) => {
+                "{enter} 选择 · {↑/↓} 移动 · {n} 写备注 · {tab} 切换问题 · {esc} 取消"
+            }
+            (true, false, true) => "{enter} 选择 · {↑/↓} 移动 · {n} 写备注 · {esc} 取消",
+            (true, true, false) => "{enter} 选择 · {↑/↓} 移动 · {tab} 切换问题 · {esc} 取消",
+            (true, false, false) => "{enter} 选择 · {↑/↓} 移动 · {esc} 取消",
         };
         lines.push(crate::ui::interaction_view::hint(text, view));
+        // 空闲倒计时（tools-more.md §1.1）：右对齐的一行 dim 文字。
+        if let Some(seconds) = self.countdown {
+            let text = match view.lang {
+                Lang::En => format!("auto-continue in {seconds}s \u{b7} any key to stay"),
+                Lang::Zh => format!("{seconds} 秒后自动继续 \u{b7} 按任意键留下"),
+            };
+            let pad = view
+                .width
+                .saturating_sub(unicode_width::UnicodeWidthStr::width(text.as_str()));
+            lines.push(Line::from(vec![
+                Span::raw(" ".repeat(pad)),
+                Span::styled(text, dim()),
+            ]));
+        }
         (lines, options, cursor)
     }
 
@@ -131,7 +119,7 @@ impl Interaction {
     fn tabs(&self, list: &[Question], view: &View<'_>) -> Line<'static> {
         let mut spans = vec![Span::styled("  ← ", dim())];
         for (index, question) in list.iter().enumerate() {
-            let answered = !self.drafts[index].answers().is_empty();
+            let answered = !answers_of(question, &self.drafts[index]).is_empty();
             let mark = if answered { "☒" } else { "☐" };
             let header = if question.header.is_empty() {
                 format!("Q{}", index + 1)
@@ -238,7 +226,6 @@ impl Interaction {
         if question.multi {
             first.extend(checkbox(typed, view));
         }
-        let indent = [Span::raw(" ".repeat(width(&first)))];
         let placeholder = match view.lang {
             Lang::En => "Type something.",
             Lang::Zh => "输入其他回答。",
@@ -247,15 +234,9 @@ impl Interaction {
         if !question.multi && typed && draft.values.is_empty() && !focused {
             content.push(tick(view));
         }
-        let rows = wrap(&content, view.width, &first, &indent);
-        let start = lines.len();
-        let (row, column) = if draft.notes.is_empty() {
-            (start, width(&first))
-        } else {
-            (start + rows.len() - 1, rows.last().map_or(0, Line::width))
-        };
+        let (rows, at) = input_row(first, content, draft.notes.is_empty(), lines.len(), view);
         lines.extend(rows);
-        focused.then_some((row, column.min(view.width.saturating_sub(1))))
+        focused.then_some(at)
     }
 
     /// 确认页：每题一行 `· 问题 → 答案`（绿色），有未答的题时黄色提示，然后提交或取消。
@@ -276,7 +257,7 @@ impl Interaction {
         let green = view.palette.success();
         let mut missing = false;
         for (question, draft) in list.iter().zip(&self.drafts) {
-            let answers = draft.answers();
+            let answers = answers_of(question, draft);
             if answers.is_empty() {
                 missing = true;
                 continue;

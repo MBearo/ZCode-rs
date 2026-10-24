@@ -29,9 +29,9 @@ fn attachment(id: &str, source: &str) -> AttachmentMessage {
     }
 }
 
-/// 记下收到的请求与保留段，回一条延迟工具清单。
+/// 记下收到的请求与保留段（另记带历史的入口收到的历史条数），回一条延迟工具清单。
 #[derive(Default)]
-struct Listings(Mutex<Vec<(ContextRequest, usize)>>);
+struct Listings(Mutex<Vec<(ContextRequest, usize)>>, Mutex<Vec<usize>>);
 
 #[async_trait]
 impl PostCompactContext for Listings {
@@ -45,6 +45,19 @@ impl PostCompactContext for Listings {
             .unwrap_or_else(PoisonError::into_inner)
             .push((request, kept.len()));
         Ok(vec![attachment("msg_deferred", "deferred_tools_delta")])
+    }
+
+    async fn post_compact_with_history(
+        &self,
+        request: ContextRequest,
+        history: &[Message],
+        kept: &[Message],
+    ) -> Result<Vec<AttachmentMessage>, OrchestrationError> {
+        self.1
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(history.len());
+        self.post_compact(request, kept).await
     }
 }
 
@@ -107,6 +120,8 @@ async fn listing_deltas_follow_the_files_and_precede_the_hook_messages() {
     assert_eq!(request.source, QuerySource::MainThread);
     assert_eq!(request.tool_names, ["Read"]);
     assert_eq!(*kept, 1);
+    // 调用过的 skill 从压缩前的全部历史取（spec §3.4）：交给附件的是整段历史。
+    assert_eq!(*listings.1.lock().unwrap(), [4]);
 }
 
 /// 子代理里的压缩不生成清单增量（compact.md §8）。

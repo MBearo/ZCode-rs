@@ -103,7 +103,7 @@ async fn run(
     // 后台任务跨 `/clear`、`/resume` 保留（只停前台任务）：这两种关闭
     // 不让执行环境忘掉会话（后台命令继续跑、通知留着）；退出程序时全部释放。
     let forget = !matches!(reason, EndReason::Clear | EndReason::Resume);
-    if let Err(error) = deps.env.close_session(&id, forget).await {
+    if let Err(error) = deps.machine.commands().close_session(&id, forget).await {
         tracing::warn!(%error, session = %id, "the environment could not close the session");
     }
     // 停止这个会话的持久定时任务调度、释放调度锁（tools-more.md §16.4）。

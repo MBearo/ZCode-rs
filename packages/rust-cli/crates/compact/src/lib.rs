@@ -7,6 +7,7 @@
 //! 摘要请求经 [`QueryRunner`] 跑 `QuerySource::Compact` 的子循环；它的执行器是 [`DenyTools`]、
 //! 压缩器是 [`Disabled`]（由 runtime 组装）。本 crate 不做 IO。
 
+mod blocking;
 mod engine;
 mod fallback;
 mod groups;
@@ -22,7 +23,7 @@ pub mod window;
 mod test_support;
 
 pub use request::DenyTools;
-pub use tokens::{IMAGE_TOKENS, estimate, measured};
+pub use tokens::{IMAGE_TOKENS, measured};
 pub use window::Thresholds;
 
 use std::sync::Arc;
@@ -30,9 +31,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::compaction::{ContextNotice, PostCompactContext};
-use rust_cli_kernel_api::env::Environment;
 use rust_cli_kernel_api::history;
 use rust_cli_kernel_api::ids::Generation;
+use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::{CompactTrigger, Message};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::orchestration::{
@@ -69,7 +71,10 @@ pub struct CompactPorts {
     pub context: Arc<dyn PostCompactContext>,
     pub hooks: Arc<dyn HookRunner>,
     pub ids: Arc<dyn Ids>,
-    pub env: Arc<dyn Environment>,
+    /// 压缩后重读文件的那台机器（经 Read 工具；R0 只有本机，remote-exec.md §15.8.1）。
+    pub machine: MachineEnv,
+    /// Read 工具的上下文要带本机服务（重读用不到）。
+    pub local: LocalServices,
     pub artifacts: Arc<dyn ArtifactStore>,
     pub generation: Generation,
 }
@@ -235,6 +240,25 @@ impl Compactor for Compaction {
                 })
             }
         }
+    }
+
+    /// 发请求前的阻塞线（compact.md §2.2）：与自动压缩同一套窗口、token 与开关。
+    fn blocking_limit(
+        &self,
+        history: &[Message],
+        selection: &ModelSelection,
+        failure: Option<&str>,
+    ) -> Option<String> {
+        let facts = self.config.facts(selection);
+        let thresholds = &self.config.thresholds;
+        // 不拦的情形先判断，不为它数 token。
+        if self.config.auto
+            && window::window(&facts, thresholds).source == window::WindowSource::Auto
+        {
+            return None;
+        }
+        window::blocks(Self::tokens(history), &facts, thresholds, self.config.auto)
+            .then(|| blocking::text(failure))
     }
 
     async fn compact(

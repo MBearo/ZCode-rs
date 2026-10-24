@@ -28,7 +28,7 @@ fn context(operation: &str, mode: PermissionMode) -> ToolUseContext {
 }
 
 fn tool(board: &CronBoard, name: &str) -> Arc<dyn Tool> {
-    cron_tools(board)
+    cron_tools(board, false)
         .into_iter()
         .find(|tool| tool.name() == name)
         .unwrap_or_else(|| panic!("{name}"))
@@ -60,7 +60,7 @@ fn definitions_are_deferred_with_search_hints() {
         tool_names: Vec::new(),
         mode: PermissionMode::Default,
     };
-    for (tool, hint) in cron_tools(&board).iter().zip([
+    for (tool, hint) in cron_tools(&board, false).iter().zip([
         "schedule a recurring or one-shot prompt",
         "cancel a scheduled cron job",
         "list active cron jobs",

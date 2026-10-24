@@ -1,8 +1,9 @@
 //! 入口按环境变量给的请求覆盖（docs/specs/rust-cli/query.md §1.5、cli-args.md §9.1、§9.2，修复线 F42）：输出 token
-//! 上限（`ZCODE_MAX_OUTPUT_TOKENS`）与 thinking 开关（`MAX_THINKING_TOKENS`）。
+//! 上限（`ZCODE_MAX_OUTPUT_TOKENS`）、thinking 开关（`MAX_THINKING_TOKENS`）与 ToolSearch 开不开（`ENABLE_TOOL_SEARCH`，
+//! 工作线 F89，tools-more.md §3.2.1）。
 //! 值的读法在入口（cli `limits.rs`），这里只按这一步的模型算请求参数。
 
-use rust_cli_prompts::models::ModelCard;
+use rust_cli_prompts::models::{ModelCard, ToolSearchSetting};
 
 /// 没有卡片的模型的输出上限的缺省与上限。
 pub(crate) const UNKNOWN_DEFAULT: u32 = rust_cli_prompts::models::UNKNOWN_MAX_OUTPUT_TOKENS;
@@ -27,6 +28,8 @@ pub struct RequestLimits {
     /// `ZCODE_MAX_OUTPUT_TOKENS` 的有效值（正整数）；None 是没设或无效（用缺省）。
     pub max_output_tokens: Option<u32>,
     pub thinking: ThinkingTokens,
+    /// `ENABLE_TOOL_SEARCH`：主循环与子代理的每一步按它判断 ToolSearch 开不开（[`crate::step_tool_search`]）。
+    pub tool_search: ToolSearchSetting,
 }
 
 impl RequestLimits {

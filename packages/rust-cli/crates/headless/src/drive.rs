@@ -384,6 +384,13 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
             ),
             TurnOutcome::Failed { message } => match turn.max_turns {
                 Some((_, max)) => (ResultKind::MaxTurns { max }, Some(message.clone())),
+                // 阻塞线的错误文字只由发请求前的拦截产生（服务端的上下文超限带着服务端的原文）。
+                None if is_blocking_limit(message) => (
+                    ResultKind::Blocked {
+                        result: message.clone(),
+                    },
+                    Some(message.clone()),
+                ),
                 None => (
                     ResultKind::Success {
                         is_error: true,
@@ -399,8 +406,14 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
             _ => 1 + turn.user_events,
         };
         let text = match &kind {
-            ResultKind::Success { result, .. } if result.ends_with('\n') => result.clone(),
-            ResultKind::Success { result, .. } => format!("{result}\n"),
+            ResultKind::Success { result, .. } | ResultKind::Blocked { result }
+                if result.ends_with('\n') =>
+            {
+                result.clone()
+            }
+            ResultKind::Success { result, .. } | ResultKind::Blocked { result } => {
+                format!("{result}\n")
+            }
             ResultKind::MaxTurns { max } => format!("Error: Reached max turns ({max})"),
             ResultKind::Interrupted => "Execution error".to_owned(),
         };
@@ -418,9 +431,16 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
                     .iter()
                     .any(|agent| agent.background && agent.status == SubagentStatus::Running)
             });
+        // 阻塞线拦下的回合最后是一条合成的错误消息（停在 stop_sequence），不是上一条回复。
+        let stop_reason = match kind {
+            ResultKind::Blocked { .. } => {
+                Some(rust_cli_kernel_api::message::StopReason::StopSequence)
+            }
+            _ => turn.stop_reason,
+        };
         let value = events::turn_result(TurnResult {
             duration_api_ms,
-            stop_reason: turn.stop_reason,
+            stop_reason,
             session_id: &session_id,
             usage: turn.usage,
             model_usage: &self.printer.model_usage,
@@ -437,4 +457,10 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
         }
         Ok(failure)
     }
+}
+
+/// 发请求前的阻塞线拦下的回合（compact.md §2.2）：`Prompt is too long`，或接着压缩失败原因的写法。
+fn is_blocking_limit(message: &str) -> bool {
+    use rust_cli_kernel_api::compaction::PROMPT_TOO_LONG;
+    message == PROMPT_TOO_LONG || message.starts_with(&format!("{PROMPT_TOO_LONG} \u{b7} "))
 }

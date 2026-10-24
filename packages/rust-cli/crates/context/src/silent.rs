@@ -13,8 +13,8 @@ const TURNS: usize = 5;
 const MAX_REMINDERS: usize = 3;
 /// 让用户看到内容的工具（本工程目前有其中的 AskUserQuestion 与 ExitPlanMode）。
 const VISIBLE_TOOLS: [&str; 2] = ["AskUserQuestion", "ExitPlanMode"];
-/// 不算可见文本的占位。
-const NO_CONTENT: &str = "(no content)";
+/// 不算可见文本的占位（kernel-api 的定义）。
+const NO_CONTENT: &str = rust_cli_kernel_api::message::NO_CONTENT;
 
 fn visible(assistant: &AssistantMessage) -> bool {
     assistant.content.iter().any(|block| match block {

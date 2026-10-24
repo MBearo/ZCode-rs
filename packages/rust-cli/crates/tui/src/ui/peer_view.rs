@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::peers::HeldPeerMessage;
 
 use super::i18n_peers as words;
-use super::interaction_view::{View, bold, dashed, dim, hint, option};
+use super::interaction_view::{View, bold, dashed, dim, hint, named, option};
 use super::text::{truncate_line, wrap_text};
 
 /// 预览最多几行、每行多少列。
@@ -77,10 +77,11 @@ pub fn lines(
     let mut options = Vec::new();
     for (index, label) in words::options(view.lang).into_iter().enumerate() {
         options.push((lines.len(), index));
+        let focused = index == choice;
         lines.push(option(
-            index == choice,
+            focused,
             index + 1,
-            vec![Span::raw(label.to_owned())],
+            vec![named(label, focused, view)],
             view,
         ));
     }

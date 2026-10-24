@@ -104,3 +104,36 @@ fn bash_timeouts_read_both_variables() {
     assert_eq!(all.request.thinking, ThinkingTokens::Disabled);
     assert_eq!(all.bash.default_ms, 5_000);
 }
+
+/// `ENABLE_TOOL_SEARCH`（工作线 F89，tools-more.md §3.2.1）：没设、真值与不认识的值是开；假值是关；`auto` / `auto:N` 按原值
+/// 比较，N 夹到 0–100（0 开、100 关），读不出时是 10%。
+#[test]
+fn enable_tool_search_maps_to_the_setting() {
+    use rust_cli_prompts::models::ToolSearchSetting::{Auto, Off, On};
+    let read = |value: &str| tool_search(&env(&[("ENABLE_TOOL_SEARCH", value)]));
+    assert_eq!(tool_search(&env(&[])), On);
+    for value in [
+        "", "1", "true", " TRUE ", "yes", "on", "force", "AUTO", " auto", "maybe",
+    ] {
+        assert_eq!(read(value), On, "{value:?}");
+    }
+    for value in ["0", "false", " False\n", "no", "OFF"] {
+        assert_eq!(read(value), Off, "{value:?}");
+    }
+    assert_eq!(read("auto"), Auto { percent: 10 });
+    assert_eq!(read("auto:25"), Auto { percent: 25 });
+    assert_eq!(read("auto: 5 "), Auto { percent: 5 });
+    assert_eq!(read("auto:7.9"), Auto { percent: 7 });
+    assert_eq!(read("auto:1e1"), Auto { percent: 10 });
+    assert_eq!(read("auto:99"), Auto { percent: 99 });
+    assert_eq!(read("auto:"), Auto { percent: 10 });
+    assert_eq!(read("auto:x"), Auto { percent: 10 });
+    assert_eq!(read("auto:0"), On);
+    assert_eq!(read("auto:-3"), On);
+    assert_eq!(read("auto:0.5"), On);
+    assert_eq!(read("auto:100"), Off);
+    assert_eq!(read("auto:150"), Off);
+    // 交给内核的开关里带着它。
+    let limits = limits(&env(&[("ENABLE_TOOL_SEARCH", "false")]), None);
+    assert_eq!(limits.request.tool_search, Off);
+}

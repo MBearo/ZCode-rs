@@ -1,6 +1,6 @@
 //! shell 执行的 DTO（docs/specs/rust-cli/shell-permissions.md §3）。
 //!
-//! Bash 工具经 [`crate::env::Environment::start_command`] 起命令，这里是它需要的附加类型：
+//! Bash 工具经 [`crate::machine::Commands::start_command`] 起命令，这里是它需要的附加类型：
 //! - 选哪种 shell（[`ShellKind`]）、命令的任务 ID（[`ShellTaskId`]，也是输出文件名）；
 //! - cwd 是否在调用之间延续（[`CwdScope`]），延续时执行侧按会话保存 shell cwd（[`ShellState`]）；
 //! - sandbox 的读写与网络规则（[`SandboxPolicy`]），由执行环境翻译成平台后端的参数；
@@ -13,19 +13,21 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::env::{EnvPath, Environment, Outcome, WorkspaceRef};
+use crate::env::{EnvPath, Outcome, WorkspaceRef};
 use crate::ids::{OperationId, SessionId, ShellTaskId, ToolUseId};
+use crate::machine::Shell;
 
 /// 会话的当前目录（docs/specs/rust-cli/tools-files.md §3.3）。唯一来源是执行环境
 /// 里这个会话的 shell cwd（[`ShellState::cwd`]：Bash `cd` 改它，越出工作目录时执行侧改回起点；EnterWorktree /
 /// ExitWorktree / `/cd` 由会话 actor 经 `set_shell_cwd` 设置）；执行环境答不出时是工作区根。文件工具的相对路径、
 /// 权限判定、nested memory 与 readFileState 的冷恢复都经这里取，不各存一份（修复线 F19）。
 pub async fn current_dir(
-    env: &dyn Environment,
+    shell: &dyn Shell,
     workspace: &WorkspaceRef,
     session: &SessionId,
 ) -> EnvPath {
-    env.shell_state(workspace, session)
+    shell
+        .shell_state(workspace, session)
         .await
         .map_or_else(|_| workspace.root.clone(), |state| state.cwd)
 }
@@ -73,6 +75,56 @@ pub struct BackgroundCommand {
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_use: Option<ToolUseId>,
+    /// 后台命令的种类（工作线 F83 新增，缺省 Bash）。
+    #[serde(default, skip_serializing_if = "BackgroundKind::is_bash")]
+    pub kind: BackgroundKind,
+}
+
+/// 后台命令的种类（工作线 F83 新增，docs/specs/rust-cli/tools-more.md §19.5）。
+///
+/// `Monitor`：stdout 是事件流（写进输出文件，按游标读），stderr 写进旁边的 `<任务>.stderr`、不进事件流；
+/// 终态通知同样记，带上种类（会话 actor 据此写 monitor 的终态文字）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundKind {
+    #[default]
+    Bash,
+    Monitor,
+}
+
+impl BackgroundKind {
+    pub fn is_bash(&self) -> bool {
+        *self == Self::Bash
+    }
+}
+
+/// Monitor 的 WebSocket 来源（工作线 F83 新增，tools-more.md §19.7）：[`crate::env::StartCommand::socket`] 有值时
+/// 执行环境开这个 WebSocket，不跑命令。每个文本帧加换行写进输出文件，二进制帧写成 `[binary frame, <N> bytes]`；
+/// 生命周期按行写成 [`SocketEvent`] 的 JSON，进 `<任务>.stderr`（事件流里是 `Stderr` 的输出）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorSocket {
+    /// `ws://` 或 `wss://`。
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protocols: Vec<String>,
+}
+
+/// WebSocket 的生命周期（工作线 F83 新增）：执行环境按行写成 JSON，会话 actor 按它送说明。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SocketEvent {
+    /// 出错（连不上、读写失败）；之后还有 `Closed`。
+    Error { message: String },
+    /// 升级请求的响应不是 101。
+    Rejected { status: u16 },
+    /// 一帧超过上限（字节数），随即关闭。
+    Dropped { bytes: u64 },
+    /// 连接关闭：close 帧的代码与原因（没有 close 帧时是 1006 与错误说明）。
+    Closed {
+        code: u16,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
+    },
 }
 
 /// 前台命令到了超时不结束，转到后台继续跑（docs/specs/rust-cli/shell-permissions.md §1.2.1，工作线 F69 新增）。
@@ -144,7 +196,7 @@ pub struct HookIo {
 }
 
 /// 后台命令的终态通知。`seq` 在会话内单调递增；内核把通知写进会话后调用
-/// [`crate::env::Environment::ack_shell_notice`]，没有 ack 的通知在重连后再次送达。
+/// [`crate::machine::Shell::ack_shell_notice`]，没有 ack 的通知在重连后再次送达。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShellNotice {
     pub seq: u64,
@@ -158,6 +210,20 @@ pub struct ShellNotice {
     pub outcome: Outcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
+    /// 后台命令的种类（工作线 F83 新增，缺省 Bash）。
+    #[serde(default, skip_serializing_if = "BackgroundKind::is_bash")]
+    pub kind: BackgroundKind,
+    /// 输出文件的字节数（工作线 F83 新增：monitor 的终态文字分“有没有输出”）。
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub output_bytes: u64,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde 的 skip_serializing_if 按引用传字段"
+)]
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// 会话里的一条后台命令（TaskStop 按它查与停，docs/specs/rust-cli/shell-permissions.md §2.6）。

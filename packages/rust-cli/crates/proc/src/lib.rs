@@ -9,6 +9,7 @@
 //! - [`ledger`]：runtime 的工具进程树（Bash、hooks、MCP stdio）的唯一启动入口：自成会话或进程组，
 //!   Unix 上写账本记录，所在进程被强杀后由下一个 runtime 实例清扫；Windows 上放进随本进程结束的 Job。
 //! - [`tree`]：Unix 上按身份追踪并结束整棵进程树。
+//! - [`daemon`]：常驻执行器的拉起（自成会话、不写进程账本，remote-exec.md §19.5）。
 //! - [`private`]：本用户私有的临时目录（`<tmp>/zcode-<uid>`），进程账本与 Bash 输出都在这里。
 //! - `job`（Windows）：Job Object，整棵树随 Job 一起结束。
 //! - [`process_started`]：进程的启动时间（与 PID 一起区分 PID 复用）。
@@ -18,6 +19,7 @@
 
 use std::ffi::OsStr;
 
+pub mod daemon;
 #[cfg(unix)]
 mod group;
 mod identity;

@@ -12,10 +12,13 @@ mod analysis;
 mod announce;
 mod auto_mode;
 mod auxiliary;
+mod changed;
 mod config;
 mod directory;
 mod environment;
+mod input_reminders;
 mod instructions;
+mod invoked;
 mod listings;
 mod mcp;
 mod nested;
@@ -30,20 +33,25 @@ mod session_context;
 mod silent;
 mod subagent;
 mod system;
+mod task_reminder;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rust_cli_kernel_api::agents::TaskReader;
 use rust_cli_kernel_api::clock::{Clock, Ids};
-use rust_cli_kernel_api::env::{EnvFacts, Environment};
+use rust_cli_kernel_api::env::EnvFacts;
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::listing::{ListingEntry, ListingSource, Listings};
+use rust_cli_kernel_api::local_services::Git;
+use rust_cli_kernel_api::machine::{EnvInfo, Files, Shell};
 use rust_cli_kernel_api::message::{AttachmentMessage, Message, SystemMessage};
 use rust_cli_kernel_api::model::QuerySource;
 use rust_cli_kernel_api::orchestration::{
     BuiltContext, ContextBuilder, ContextRequest, OrchestrationError,
 };
+use rust_cli_kernel_api::tool::ChangedFiles;
 use rust_cli_prompts::{models, reminder};
 use serde_json::Value;
 
@@ -55,10 +63,18 @@ use crate::render::since_boundary;
 use crate::rules::{RuleFile, Scope};
 use crate::system::{AGENT_TOOL, BASH_TOOL, PromptFacts, SKILL_TOOL, system_blocks};
 
-/// 组装上下文需要的端口。
+/// 组装上下文需要的端口。上下文都在本机：会话的工作区、规则文件、自动记忆与 git 状态都经本机的端口读
+/// （runtime 从注册表的本机取，remote-exec.md §3、§15.8.1）。
 #[derive(Clone)]
 pub struct ContextPorts {
-    pub env: Arc<dyn Environment>,
+    /// 环境事实（环境段、规则文件的层级）与路径事实（计划文件）。
+    pub info: Arc<dyn EnvInfo>,
+    /// 规则文件、自动记忆的 MEMORY.md、计划文件是否存在。
+    pub files: Arc<dyn Files>,
+    /// 会话的 shell 当前目录（环境段、nested memory）。
+    pub shell: Arc<dyn Shell>,
+    /// 会话上下文的 git 状态。
+    pub git: Arc<dyn Git>,
     pub clock: Arc<dyn Clock>,
     pub ids: Arc<dyn Ids>,
     pub listings: Arc<dyn ListingSource>,
@@ -81,6 +97,10 @@ pub struct PromptAssembler {
     rules: Memo,
     /// nested memory 去重的增量计算（context.md §11.6，修复线 F6）。
     nested: nested::Seen,
+    /// 读过的文件在磁盘上被改动（tools-files.md §4.1）：readFileState 的 owner 给出；没有时不查。
+    changed: Option<Arc<dyn ChangedFiles>>,
+    /// 任务提醒读的任务清单（agents.md §7.4）：agents 建好之后由 runtime 接上一次；没有时不提醒。
+    tasks: std::sync::OnceLock<Arc<dyn TaskReader>>,
 }
 
 /// 当步 attachment 属于哪个循环（docs/specs/rust-cli/agents.md §4.3）。
@@ -119,12 +139,28 @@ impl PromptAssembler {
             config,
             rules: Memo::default(),
             nested: nested::Seen::default(),
+            changed: None,
+            tasks: std::sync::OnceLock::new(),
         }
+    }
+
+    /// 接上任务提醒读的任务清单（agents 依赖 context，所以建好 agents 之后再接；只接一次）。
+    pub fn bind_tasks(&self, tasks: Arc<dyn TaskReader>) {
+        if self.tasks.set(tasks).is_err() {
+            tracing::error!("the task list reader was bound twice; keeping the first");
+        }
+    }
+
+    /// 接上“读过的文件被改动”的查询（runtime 给 readFileState 的 owner）。
+    #[must_use]
+    pub fn with_changed_files(mut self, changed: Arc<dyn ChangedFiles>) -> Self {
+        self.changed = Some(changed);
+        self
     }
 
     fn scope<'a>(&'a self, request: &'a ContextRequest, facts: &EnvFacts) -> Scope<'a> {
         Scope {
-            env: self.ports.env.as_ref(),
+            files: self.ports.files.as_ref(),
             workspace: &request.workspace,
             style: PathStyle::of_platform(&facts.platform),
             cwd: request.workspace.root.as_str().to_owned(),
@@ -173,7 +209,7 @@ impl PromptAssembler {
     /// 执行环境的事实（规则文件与会话上下文按项目根）。暂时给不出（例如还没实现、远端断开）时为 None：
     /// 环境段、规则文件与会话上下文都按增量发，下一次拿到事实后会补上。
     async fn facts(&self, request: &ContextRequest) -> Option<EnvFacts> {
-        match self.ports.env.facts(&request.workspace).await {
+        match self.ports.info.facts(&request.workspace).await {
             Ok(facts) => Some(facts),
             Err(error) => {
                 tracing::warn!(%error, "environment facts unavailable; skipping the environment, instructions and session context");
@@ -192,7 +228,7 @@ impl PromptAssembler {
     ) -> Option<EnvFacts> {
         let shell_cwd = self
             .ports
-            .env
+            .shell
             .shell_state(&request.workspace, &request.session)
             .await
             .ok()
@@ -225,6 +261,27 @@ impl PromptAssembler {
         }
         let has_tool = |name: &str| request.tool_names.iter().any(|tool| tool == name);
         let mut out = Vec::new();
+        // 这一步的输入（context.md §4.4）：只在主线程的输入那一步有。
+        let input = (thread == Thread::Main)
+            .then(|| input_reminders::turn_input(history))
+            .flatten();
+        // 输入中间的 skill 提及（工作线 F82）：TUI 里键入的输入、有 Skill 工具时，排在最前面（提及那一组在
+        // `environment` 之前，context.md §4.4）。
+        if let Some(typed) = input.as_ref().and_then(input_reminders::typed)
+            && self.config.surface == Surface::Interactive
+            && has_tool(SKILL_TOOL)
+        {
+            let names = self
+                .ports
+                .listings
+                .skill_mentions(request, typed)
+                .await
+                .unwrap_or_default();
+            for name in names {
+                let found = input_reminders::skill_mention(&name);
+                out.push(self.attachment(input_reminders::SKILL_MENTION, found));
+            }
+        }
         let facts = self.facts(request).await;
         // 主工作目录是这个会话的当前目录：子代理的子会话在派生时取父会话当时的目录（F19，tools-files.md §3.3），
         // 与运行开始那一组（`subagent_start`）同一来源。
@@ -238,6 +295,13 @@ impl PromptAssembler {
         out.extend(
             announce::model(history, &request.selection)
                 .map(|found| self.attachment(announce::MODEL, found)),
+        );
+        // `ultrathink`（工作线 F82）：生产者顺序在模型身份之后、延迟工具清单之前。
+        out.extend(
+            input
+                .as_ref()
+                .and_then(input_reminders::ultrathink)
+                .map(|found| self.attachment(input_reminders::ULTRATHINK, found)),
         );
         out.extend(
             listings::deferred_tools(
@@ -258,10 +322,24 @@ impl PromptAssembler {
             mcp::announce(history, mcp_instructions)
                 .map(|found| self.attachment(mcp::SOURCE, found)),
         );
+        // 读过的文件在磁盘上被改动（tools-files.md §4.1）：在 nested memory 之前；子代理查自己的记录。
+        if let Some(changed) = &self.changed {
+            for change in changed
+                .changed_files(&request.session, &request.workspace)
+                .await
+            {
+                out.push(self.attachment(changed::SOURCE, changed::render(&change)));
+            }
+        }
         if let Some(facts) = facts.as_ref().filter(|_| !thread.omits_context()) {
             let (files, _) = self.rule_files(request, facts, boundary).await;
             let scope = self.scope(request, facts);
-            let seen = (&scope, &self.nested, &request.session);
+            let seen = (
+                &scope,
+                &self.nested,
+                &request.session,
+                self.ports.shell.as_ref(),
+            );
             for found in nested::announce(seen, facts, history, &files).await {
                 out.push(self.attachment(nested::SOURCE, found));
             }
@@ -280,6 +358,14 @@ impl PromptAssembler {
             auto_mode::announce(history, request.mode, &request.tool_names)
                 .map(|found| self.attachment(auto_mode::SOURCE, found)),
         );
+        // 任务工具很久没用时的提醒（agents.md §7.4）：在 bypass 模式的宣布之后；子代理同样（读顶层会话的清单）。
+        if has_tool(task_reminder::REQUIRED_TOOL)
+            && let Some(tasks) = self.tasks.get()
+            && task_reminder::due(history)
+        {
+            let listed = tasks.tasks(&request.session).await;
+            out.push(self.attachment(task_reminder::SOURCE, task_reminder::render(&listed)));
+        }
         // 静默提醒只给主线程。
         let silent_turns = thread == Thread::Main
             && models::card(&request.selection.model).is_some_and(|card| card.silent_turn_reminder);
@@ -288,7 +374,9 @@ impl PromptAssembler {
         }
         if announce::tokens_due(history) {
             let tokens = match thread {
-                Thread::Main => announce::tokens(history),
+                // 修 bug（F82）：以前只看边界之后的历史，压缩之后剩余 token 回到满额；计数应跨压缩延续（压缩前用掉的
+                // 不归还），所以按全部历史从这次输入算起。
+                Thread::Main => announce::tokens(session),
                 Thread::Subagent(_) => announce::subagent_tokens(history),
             };
             out.push(self.attachment(announce::TOTAL_TOKENS, tokens));
@@ -318,9 +406,9 @@ impl PromptAssembler {
             );
             // `--system-prompt` 时 systemContext 为空：不发 git 状态（cli-args.md §4.2）。
             if self.config.custom_system_prompt.is_none() {
-                let env = self.ports.env.as_ref();
+                let git = self.ports.git.as_ref();
                 out.extend(
-                    session_context::announce(env, &request.workspace, facts, history)
+                    session_context::announce(git, &request.workspace, facts, history)
                         .await
                         .map(|found| self.attachment(session_context::SOURCE, found)),
                 );

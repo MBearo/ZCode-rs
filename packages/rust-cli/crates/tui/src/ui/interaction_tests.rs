@@ -150,6 +150,7 @@ fn views_show_the_request() {
         strings: &EN,
         lang: Lang::En,
         width: 60,
+        height: 40,
         now_ms: 0,
     };
     let text = |request: &InteractionRequest| -> Vec<String> {
@@ -163,7 +164,8 @@ fn views_show_the_request() {
     );
     assert!(shown.iter().any(|l| l.contains("│ rm -rf build")));
     assert!(shown.iter().any(|l| l.contains("rm needs approval")));
-    assert!(shown.iter().any(|l| l.contains("› 1. Yes")));
+    // 工作线 F76：焦点行同提问视图的 `❯`（以前是选择列表组件的 `›` 与底色条）。
+    assert!(shown.iter().any(|l| l.contains("❯ 1. Yes")));
     let shown = text(&plan());
     assert!(shown.iter().any(|l| l.contains("Ready to code?")));
     assert!(shown.iter().any(|l| l.contains("1. Yes, exit plan mode")));
@@ -187,34 +189,56 @@ fn views_show_the_request() {
     assert!(shown.iter().any(|l| l.contains("make this edit to a.rs")));
 }
 
-fn suggested() -> InteractionRequest {
+fn bash_ask(command: &str, suggestions: &[&str]) -> InteractionRequest {
     InteractionRequest::Permission {
         tool_use: ToolUseId::new("tu5"),
         tool: "Bash".into(),
-        input: json!({"command": "npm test"}),
-        message: "npm test needs approval".into(),
-        suggestions: vec![rust_cli_kernel_api::permission::PermissionRule {
-            tool: "Bash".into(),
-            content: Some("npm test:*".into()),
-        }],
+        input: json!({ "command": command }),
+        message: "This command requires approval".into(),
+        suggestions: suggestions
+            .iter()
+            .map(|content| rust_cli_kernel_api::permission::PermissionRule {
+                tool: "Bash".into(),
+                content: Some((*content).into()),
+            })
+            .collect(),
         asked_by: None,
     }
 }
 
-/// 判决链给了建议规则：多一行"不再询问"，选它时把规则带回（Host TUI 的 allowAlways）。
+fn suggested() -> InteractionRequest {
+    bash_ask("npm test", &["npm test *"])
+}
+
+fn shown(request: &InteractionRequest, lang: Lang) -> Vec<String> {
+    let palette = Palette::new(ColorLevel::Ansi16, None);
+    let view = View {
+        palette: &palette,
+        strings: &EN,
+        lang,
+        width: 120,
+        height: 40,
+        now_ms: 0,
+    };
+    let mut ui = Interaction::new(InteractionId::new("i1"), request, Instant::now());
+    ui.workspace = "/w".to_owned();
+    ui.lines(request, &view).0.iter().map(plain).collect()
+}
+
+fn remember(content: &str) -> Value {
+    json!({"decision": "allow", "remember": [{"tool": "Bash", "content": content}]})
+}
+
+/// 判决链给了建议规则：多一行"不再询问"；Bash 的这一行是种子（工作线 F72，shell-permissions.md §4.10）。
 #[test]
 fn a_suggested_rule_adds_the_dont_ask_again_row() {
-    let remember = json!({
-        "decision": "allow",
-        "remember": [{"tool": "Bash", "content": "npm test:*"}],
-    });
     assert_eq!(
         answer(&suggested(), &[KeyCode::Char('2')]),
-        Some(remember.clone())
+        Some(remember("npm test *"))
     );
     assert_eq!(
         answer(&suggested(), &[KeyCode::Down, KeyCode::Enter]),
-        Some(remember)
+        Some(remember("npm test *"))
     );
     assert_eq!(
         answer(
@@ -227,22 +251,117 @@ fn a_suggested_rule_adds_the_dont_ask_again_row() {
         answer(&suggested(), &[KeyCode::Char('3')]),
         Some(json!({"decision": "deny"}))
     );
-    let palette = Palette::new(ColorLevel::Ansi16, None);
-    let view = View {
-        palette: &palette,
-        strings: &EN,
-        lang: Lang::En,
-        width: 60,
-        now_ms: 0,
-    };
-    let request = suggested();
-    let ui = Interaction::new(InteractionId::new("i1"), &request, Instant::now());
-    let shown: Vec<String> = ui.lines(&request, &view).0.iter().map(plain).collect();
+    let lines = shown(&suggested(), Lang::En);
     assert!(
-        shown
+        lines
             .iter()
-            .any(|l| l.contains("2. Yes, and don't ask again for this command")),
-        "{shown:?}"
+            .any(|l| l.contains("2. Yes, and don\u{2019}t ask again for: npm test *")),
+        "{lines:?}"
     );
-    assert!(shown.iter().any(|l| l.contains("3. No")), "{shown:?}");
+    assert!(lines.iter().any(|l| l.contains("3. No")), "{lines:?}");
+    let lines = shown(&suggested(), Lang::Zh);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("2. 是，以后不再询问：npm test *")),
+        "{lines:?}"
+    );
+}
+
+/// 种子按询问框的规则算：第二个词不像子命令时只取命令名，不用判决链的精确规则。
+#[test]
+fn the_seed_is_not_the_exact_suggestion() {
+    let request = bash_ask("git -C /repo status", &["git -C /repo status"]);
+    assert_eq!(
+        answer(&request, &[KeyCode::Down, KeyCode::Enter]),
+        Some(remember("git *"))
+    );
+    let request = bash_ask("docker compose up -d", &["docker compose *"]);
+    assert_eq!(
+        answer(&request, &[KeyCode::Char('2')]),
+        Some(remember("docker compose up *"))
+    );
+}
+
+/// 焦点在种子这一行时键入的字改种子（数字也是字），退格删字；`*` 是整个 Bash，空的只允许这一次。
+#[test]
+fn the_seed_row_is_editable() {
+    let request = bash_ask("npm test", &["npm test *"]);
+    let mut keys = vec![KeyCode::Down];
+    keys.extend([KeyCode::Backspace; 6]);
+    keys.extend(chars("run 2 *"));
+    keys.push(KeyCode::Enter);
+    assert_eq!(answer(&request, &keys), Some(remember("npm run 2 *")));
+    let mut keys = vec![KeyCode::Down];
+    keys.extend([KeyCode::Backspace; 10]);
+    keys.push(KeyCode::Char('*'));
+    keys.push(KeyCode::Enter);
+    assert_eq!(
+        answer(&request, &keys),
+        Some(json!({"decision": "allow", "remember": [{"tool": "Bash"}]}))
+    );
+    let mut keys = vec![KeyCode::Down];
+    keys.extend([KeyCode::Backspace; 10]);
+    keys.push(KeyCode::Enter);
+    assert_eq!(answer(&request, &keys), Some(json!({"decision": "allow"})));
+}
+
+/// 复合命令有多条建议：没有种子，这一行列出全部建议规则与工作目录，选它记住全部。
+#[test]
+fn several_suggestions_are_listed() {
+    let request = bash_ask(
+        "mytool a && othertool b c",
+        &["mytool a *", "othertool b *"],
+    );
+    let lines = shown(&request, Lang::En);
+    assert!(
+        lines.iter().any(|l| l
+            .contains("2. Yes, and don't ask again for mytool a and othertool b commands in /w")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        answer(&request, &[KeyCode::Char('2')]),
+        Some(json!({"decision": "allow", "remember": [
+            {"tool": "Bash", "content": "mytool a *"},
+            {"tool": "Bash", "content": "othertool b *"},
+        ]}))
+    );
+}
+
+/// 旧会话的询问（agents.md §4.1.2，工作线 F72）：标题后标出会话与子代理；会话没有标题时写“之前的会话”。
+#[test]
+fn asks_of_closed_sessions_name_the_session() {
+    let request = InteractionRequest::Permission {
+        tool_use: ToolUseId::new("tu9"),
+        tool: "Bash".into(),
+        input: json!({"command": "mytool build"}),
+        message: "This command requires approval".into(),
+        suggestions: Vec::new(),
+        asked_by: Some("Explore".into()),
+    };
+    let palette = Palette::new(ColorLevel::Ansi16, None);
+    let title = |origin: &str, lang: Lang| {
+        let view = View {
+            palette: &palette,
+            strings: &EN,
+            lang,
+            width: 120,
+            height: 40,
+            now_ms: 0,
+        };
+        let mut ui = Interaction::new(InteractionId::new("i1"), &request, Instant::now());
+        ui.origin = Some(origin.to_owned());
+        plain(&ui.lines(&request, &view).0[1])
+    };
+    assert!(
+        title("Fix the build", Lang::En)
+            .ends_with("Bash command · from the Explore agent in session \"Fix the build\""),
+        "{}",
+        title("Fix the build", Lang::En)
+    );
+    assert!(title("", Lang::En).ends_with("· from the Explore agent in an earlier session"));
+    assert!(
+        title("Fix the build", Lang::Zh).ends_with("· 来自会话「Fix the build」的 Explore 子代理")
+    );
+    assert!(title(" ", Lang::Zh).ends_with("· 来自之前的会话的 Explore 子代理"));
 }

@@ -22,8 +22,8 @@ mod agents {
     };
     use rust_cli_kernel_api::store::SessionStore;
     use rust_cli_kernel_api::testing::{
-        FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
-        text_response, tool_use_response,
+        FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
+        selection, text_response, tool_use_response,
     };
     use rust_cli_runtime::{Defaults, LocalKernel, Ports};
     use serde_json::json;
@@ -83,7 +83,7 @@ mod agents {
         let kernel = LocalKernel::new(
             Ports {
                 model,
-                env: Arc::new(UnusedEnvironment),
+                environments: environments(Arc::new(UnusedEnvironment)),
                 store: store.clone(),
                 artifacts: store,
                 clock: Arc::new(FixedClock(1_000)),

@@ -149,14 +149,20 @@ function needles(cargoHome) {
 }
 
 /** 检查一个产物并打印结果，返回不通过的项。 */
-async function report({ triple, targetDir, cargoHome, version }) {
+async function report({ triple, targetDir, cargoHome, version, debug }) {
   // 产物是 Linux 的 ELF，没有 .exe 后缀（主机是 Windows 时也一样）。
-  const path = join(targetDir, triple, "release", BINARY_NAME);
+  const path = join(targetDir, triple, debug ? "debug" : "release", BINARY_NAME);
   const bytes = await readFile(path);
   const elf = inspectElf(bytes);
   const hits = hostPathHits(bytes, needles(cargoHome), LITERALS);
   const allocator = hasAllocator(bytes);
-  const problems = checkArtifact({ elf, hits, machine: TARGETS[triple].machine, allocator });
+  // debug 构建带调试信息（里面有源码的本机路径），只给本机的测试用，不发布：不查本机路径。
+  const problems = checkArtifact({
+    elf,
+    hits: debug ? [] : hits,
+    machine: TARGETS[triple].machine,
+    allocator,
+  });
   const size = (await stat(path)).size;
   const lines = [
     `== ${triple} ==`,
@@ -169,14 +175,16 @@ async function report({ triple, targetDir, cargoHome, version }) {
     `分配器：${allocator ? "mimalloc" : "没有 mimalloc"}`,
     problems.length
       ? `检查：不通过\n  - ${problems.join("\n  - ")}`
-      : "检查：通过（静态链接、架构正确、没有本机路径、mimalloc）",
+      : debug
+        ? "检查：通过（静态链接、架构正确、mimalloc；debug 构建只给本机测试，不查本机路径）"
+        : "检查：通过（静态链接、架构正确、没有本机路径、mimalloc）",
   ];
   process.stdout.write(`${lines.join("\n")}\n`);
   return problems;
 }
 
 async function main() {
-  const { targets, clippy } = parseCli(process.argv.slice(2));
+  const { targets, clippy, debug } = parseCli(process.argv.slice(2));
   const { zig, zigVersion, commit, sysroot, targetDir } = await preflight(targets);
   const cargoHome = process.env.CARGO_HOME || join(homedir(), ".cargo");
   const config = (triple) => rustflagsConfig(triple, remapFlags({ cargoHome, sysroot, commit }));
@@ -188,14 +196,15 @@ async function main() {
       ...process.env,
       ...cargoEnv({ triple, cc, cxx, ar, cache: join(targetDir, "zig", "cache") }),
     };
-    await runCargo(cargoArgs({ triple, clippy, manifest, config: config(triple) }), env);
-    // 计数文件在仓库里（F54，version.md §2）：按顺序构建时每个 triple 各加 1，构建完马上读这一次的号。
-    if (!clippy) versions.set(triple, await currentVersion());
+    await runCargo(cargoArgs({ triple, clippy, debug, manifest, config: config(triple) }), env);
+    // 计数文件在仓库里（F54，version.md §2）：按顺序构建时每个 triple 各加 1，构建完马上读这一次的号。debug 构建不计数，
+    // 版本是 Cargo.toml 的版本。
+    if (!clippy) versions.set(triple, debug ? "（debug：Cargo.toml 的版本）" : await currentVersion());
   }
   if (clippy) return 0;
   let failed = 0;
   for (const triple of targets) {
-    if ((await report({ triple, targetDir, cargoHome, version: versions.get(triple) })).length)
+    if ((await report({ triple, targetDir, cargoHome, version: versions.get(triple), debug })).length)
       failed += 1;
   }
   return failed ? 1 : 0;

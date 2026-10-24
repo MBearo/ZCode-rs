@@ -1,3 +1,4 @@
+use rust_cli_kernel_api::message::ToolResultContent;
 use serde_json::json;
 
 use super::*;
@@ -313,4 +314,81 @@ fn protocol_violations_are_errors() {
             "case {case}: {error:?}"
         );
     }
+}
+
+/// 工作线 F90（model.md §4.1）：端点在 assistant 一侧用非标准的 `tool_result` 块返回服务端调用的结果（GLM）。
+/// `tool_use_id` 是这次响应里已开始的 `server_tool_use` 时解成那次调用的结果：字符串与块数组都按 tool_result 的
+/// 内容解，解不了的项写成 JSON 文本，增量不输出。对不上的照旧跳过。修 bug 前所有 `tool_result` 块都被跳过，
+/// 跳过的序号在组装时留下空槽（query.md §1.9）。
+#[test]
+fn a_bare_tool_result_for_a_server_call_is_that_call_result() {
+    let (events, error) = decode(vec![
+        start(),
+        typed(json!({"type": "content_block_start", "index": 1,
+                     "content_block": {"type": "server_tool_use", "id": "srvtoolu_g", "name": "web_search",
+                                       "input": {"query": "q"}}})),
+        typed(json!({"type": "content_block_stop", "index": 1})),
+        // 乱序：index 3 先开始。
+        typed(json!({"type": "content_block_start", "index": 3,
+                     "content_block": {"type": "tool_result", "tool_use_id": "srvtoolu_g", "is_error": true,
+                                       "content": "plain"}})),
+        typed(json!({"type": "content_block_stop", "index": 3})),
+        typed(json!({"type": "content_block_start", "index": 2,
+                     "content_block": {"type": "tool_result", "tool_use_id": "srvtoolu_g",
+                                       "content": [{"type": "text", "text": "found"},
+                                                   {"type": "tool_reference", "tool_name": "WebFetch"},
+                                                   {"type": "web_search_result", "url": "https://example.com"}]}})),
+        typed(json!({"type": "content_block_delta", "index": 2,
+                     "delta": {"type": "text_delta", "text": "ignored"}})),
+        typed(json!({"type": "content_block_stop", "index": 2})),
+        // 引用的不是这次响应里的服务端调用：跳过，增量与结束也不输出。
+        typed(json!({"type": "content_block_start", "index": 4,
+                     "content_block": {"type": "tool_result", "tool_use_id": "toolu_other", "content": "x"}})),
+        typed(json!({"type": "content_block_stop", "index": 4})),
+    ]);
+    assert_eq!(error, None);
+    let result = |tool_use_id: &str, content: Vec<ToolResultContent>, is_error: bool| {
+        ContentBlock::ToolResult {
+            tool_use_id: ToolUseId::new(tool_use_id),
+            content,
+            is_error,
+        }
+    };
+    let text = |text: &str| ToolResultContent::Text {
+        text: text.to_owned(),
+    };
+    assert_eq!(
+        events[1..],
+        [
+            ModelEvent::BlockStart {
+                index: 1,
+                block: ContentBlock::ServerToolUse {
+                    id: "srvtoolu_g".to_owned(),
+                    name: "web_search".to_owned(),
+                    input: json!({"query": "q"}),
+                },
+            },
+            ModelEvent::BlockStop { index: 1 },
+            ModelEvent::BlockStart {
+                index: 3,
+                block: result("srvtoolu_g", vec![text("plain")], true),
+            },
+            ModelEvent::BlockStop { index: 3 },
+            ModelEvent::BlockStart {
+                index: 2,
+                block: result(
+                    "srvtoolu_g",
+                    vec![
+                        text("found"),
+                        ToolResultContent::ToolReference {
+                            tool_name: "WebFetch".to_owned(),
+                        },
+                        text(r#"{"type":"web_search_result","url":"https://example.com"}"#),
+                    ],
+                    false,
+                ),
+            },
+            ModelEvent::BlockStop { index: 2 },
+        ]
+    );
 }

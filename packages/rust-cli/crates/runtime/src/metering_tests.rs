@@ -8,7 +8,8 @@ use rust_cli_kernel_api::model::QuerySource;
 use rust_cli_kernel_api::session_api::{CreateSession, Kernel, KernelError};
 use rust_cli_kernel_api::store::{Fact, FactBatch, SessionStore};
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
+    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
+    selection,
 };
 
 use super::*;
@@ -17,7 +18,7 @@ fn kernel(store: Arc<MemoryStore>) -> LocalKernel {
     LocalKernel::new(
         Ports {
             model: Arc::new(ScriptedModel::new(Vec::new())),
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(1_000)),

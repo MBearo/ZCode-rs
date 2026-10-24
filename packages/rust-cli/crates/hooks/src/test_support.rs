@@ -7,7 +7,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext, Outcome,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
     OutputStream, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_shell::ShellState;
@@ -16,6 +16,10 @@ use rust_cli_kernel_api::hooks::{
     HookHttpResponse,
 };
 use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, SessionId};
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
 use rust_cli_kernel_api::testing::{MemoryArtifacts, SequentialIds};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -100,11 +104,14 @@ fn unused() -> EnvError {
 }
 
 #[async_trait]
-impl Environment for ScriptedEnv {
+impl EnvInfo for ScriptedEnv {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Files for ScriptedEnv {
     async fn read_file(&self, _w: &WorkspaceRef, _r: ReadFile) -> Result<FileContent, EnvError> {
         Err(unused())
     }
@@ -117,7 +124,10 @@ impl Environment for ScriptedEnv {
     ) -> Result<WriteReceipt, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Commands for ScriptedEnv {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
@@ -228,7 +238,10 @@ impl Environment for ScriptedEnv {
     async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {
         Ok(())
     }
+}
 
+#[async_trait]
+impl Shell for ScriptedEnv {
     async fn shell_state(
         &self,
         _workspace: &WorkspaceRef,
@@ -244,6 +257,13 @@ impl Environment for ScriptedEnv {
         }
     }
 }
+
+impl Search for ScriptedEnv {}
+impl Background for ScriptedEnv {}
+impl Checkpoints for ScriptedEnv {}
+impl Pdf for ScriptedEnv {}
+impl Git for ScriptedEnv {}
+impl Fetch for ScriptedEnv {}
 
 /// 记录请求、按脚本回答的 HTTP 出口。
 #[derive(Default)]
@@ -287,9 +307,10 @@ pub fn workspace() -> WorkspaceRef {
     }
 }
 
-pub fn ports(env: Arc<dyn Environment>) -> HookPorts {
+pub fn ports<E: Commands + Shell + 'static>(env: Arc<E>) -> HookPorts {
     HookPorts {
-        env,
+        commands: env.clone(),
+        shell: env,
         ids: Arc::new(SequentialIds::default()),
         model: None,
         http: None,
@@ -309,7 +330,7 @@ pub fn config(settings: &Value) -> HooksConfig {
     }
 }
 
-pub fn engine(env: Arc<dyn Environment>, settings: &Value) -> HookEngine {
+pub fn engine<E: Commands + Shell + 'static>(env: Arc<E>, settings: &Value) -> HookEngine {
     HookEngine::with_config(ports(env), config(settings))
 }
 

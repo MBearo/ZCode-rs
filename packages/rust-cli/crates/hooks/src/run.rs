@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::env::{Environment, OperationContext, Origin, WorkspaceRef};
+use rust_cli_kernel_api::env::{OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::hooks::{HookContext, HookEventName, HookHttp};
 use rust_cli_kernel_api::ids::{Generation, OwnerEpoch, SessionId};
+use rust_cli_kernel_api::machine::{Commands, Shell};
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection, small_fast_model};
 use rust_cli_kernel_api::store::ArtifactStore;
 use tokio_util::sync::CancellationToken;
@@ -22,7 +23,10 @@ use crate::result::{Executed, HookResult};
 /// 执行 hook 需要的端口。
 #[derive(Clone)]
 pub struct HookPorts {
-    pub env: Arc<dyn Environment>,
+    /// 命令 hook 在本机跑（hooks 都在本机，remote-exec.md §2）。
+    pub commands: Arc<dyn Commands>,
+    /// hook 输入的 `cwd`：会话的 shell cwd。
+    pub shell: Arc<dyn Shell>,
     pub ids: Arc<dyn Ids>,
     /// prompt hook 的模型；没有时 prompt hook 报非阻塞错误。
     pub model: Option<Arc<dyn ModelPort>>,
@@ -87,7 +91,7 @@ async fn execute(
     match hook {
         HookCommand::Command(command) => {
             let run = CommandRun {
-                env: ports.env.as_ref(),
+                commands: ports.commands.as_ref(),
                 workspace: batch.workspace,
                 operation: operation(ports, batch),
                 hook: command,

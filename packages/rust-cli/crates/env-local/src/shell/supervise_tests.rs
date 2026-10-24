@@ -15,6 +15,7 @@ fn plan(dir: &Path) -> Plan {
         dir: dir.to_path_buf(),
         output: dir.join("b1.output"),
         errors: None,
+        events: None,
         cwd_file: dir.join("b1.cwd"),
         cwd: dir.to_path_buf(),
         origin: dir.to_path_buf(),

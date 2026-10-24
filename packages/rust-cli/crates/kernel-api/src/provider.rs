@@ -121,10 +121,15 @@ pub struct ModelCapabilities {
     pub supports_pdf: bool,
     pub supports_video: bool,
     pub supports_audio: bool,
-    /// 端点支持延迟加载工具（`defer_loading` 与 `tool_reference`），ToolSearch 因此启用（工作线 F52，用户决定：只有
-    /// z.ai / bigmodel.cn 域名下的 Anthropic 端点为真，docs/specs/rust-cli/tools-more.md §3.2）。不是 Node 配置里的
-    /// 字段：平台层与显式覆盖的能力规则按端点地址算。
+    /// 端点支持延迟加载工具（`defer_loading` 与 `tool_reference`），ToolSearch 因此用原生形式；为假时是本地形式（工作线
+    /// F84，docs/specs/rust-cli/tools-more.md §3.2.2；F52 时为假就不开）。工作线 F89（用户决定：暂时不用原生）起平台层与
+    /// 显式覆盖的能力规则总给假，只有 debug 构建读的测试声明把显式覆盖的端点设为真；F52 到 F84 是 z.ai / bigmodel.cn 域名下
+    /// 的 Anthropic 端点为真。不是 Node 配置里的字段。
     pub supports_tool_search: bool,
+    /// `optionSpecs.maxOutputTokens.max`：生效配置的输出上限（工作线 F93，docs/specs/rust-cli/model.md §11）；配置没给时为
+    /// None。WebSearch 的旁路请求按它取 `min(4096, 输出上限)`（Node `model.optionSpecs.maxOutputTokens.max`）。与压缩用的
+    /// [`TokenLimits::max_output_tokens`] 由平台层同一次解析写出，是同一个值。
+    pub max_output_tokens: Option<u64>,
 }
 
 impl Default for ModelCapabilities {
@@ -141,6 +146,7 @@ impl Default for ModelCapabilities {
             supports_video: false,
             supports_audio: false,
             supports_tool_search: false,
+            max_output_tokens: None,
         }
     }
 }

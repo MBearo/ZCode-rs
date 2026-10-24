@@ -5,7 +5,7 @@
 //! `<task-notification>`、ListAgents、SendMessage、TaskStop；Task v2 四个工具（库外文件，变化后
 //! 投影到 Node 的 `todo` 表）。
 //!
-//! 不做 IO：会话经 [`SessionStore`]，工作区文件经 [`Environment`]，任务清单经 [`TaskListStore`]。
+//! 不做 IO：会话经 [`SessionStore`]，工作区文件经执行端口（kernel-api `machine`），任务清单经 [`TaskListStore`]。
 //! runtime 组装：[`Agents::registry`] 是主线程的工具注册表，[`Agents::track`] 包住主循环，
 //! [`Agents::signals`] 交给会话 actor，[`AgentCatalog`] 交给 context 作 agent 清单。
 
@@ -18,6 +18,7 @@ mod doing;
 mod frontmatter;
 mod live;
 mod messaging;
+mod monitors;
 mod peer_send;
 mod plugin;
 mod report;
@@ -38,9 +39,9 @@ use futures_util::stream::BoxStream;
 use rust_cli_base::Spawner;
 use rust_cli_kernel_api::agents::{AgentSignal, AgentSignals, SubagentQueries, TaskListStore};
 use rust_cli_kernel_api::clock::{Clock, Ids};
-use rust_cli_kernel_api::env::Environment;
 use rust_cli_kernel_api::env_shell::ShellNotice;
 use rust_cli_kernel_api::ids::{AgentId, SessionId};
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::mcp_state::McpConnections;
 use rust_cli_kernel_api::orchestration::{ContextBuilder, QueryRunner, ToolRegistry, ToolSnapshot};
 use rust_cli_kernel_api::store::SessionStore;
@@ -49,6 +50,7 @@ use rust_cli_kernel_api::tool::Tool;
 pub use agent_tool::AgentTool;
 pub use context::AgentCatalog;
 pub use definitions::{AgentDefinition, AgentSource, builtins};
+pub use monitors::MonitorTexts;
 pub use plugin::PluginAgentFile;
 pub use tasks::{MemoryTaskLists, task_tools_enabled};
 
@@ -63,7 +65,8 @@ pub struct AgentsPorts {
     pub store: Arc<dyn SessionStore>,
     pub ids: Arc<dyn Ids>,
     pub clock: Arc<dyn Clock>,
-    pub env: Arc<dyn Environment>,
+    /// 子会话所在的机器：后台命令的通知、monitor、shell 当前目录、TaskStop（R0 只有本机，remote-exec.md §15.8.1）。
+    pub machine: MachineEnv,
     pub tasks: Arc<dyn TaskListStore>,
     pub queries: Arc<dyn SubagentQueries>,
     /// 主线程的上下文组装；子代理的 attachment 也由它按 `QuerySource::Subagent` 产生。
@@ -75,6 +78,8 @@ pub struct AgentsPorts {
     /// 后台命令通知的 `(<status>, <task-notification> 信封)`（runtime 给 `rust_cli_query` 的实现；agents
     /// 不依赖 query）：子代理里的命令通知送给它（agents.md §5.2，L18）。
     pub shell_notice: fn(&ShellNotice) -> (&'static str, String),
+    /// 子代理里 Monitor 的文字（同上，runtime 给 `rust_cli_query` 的实现，agents.md §5.3，工作线 F83）。
+    pub monitor: MonitorTexts,
     /// 本机的同伴会话（ListAgents 的同伴段、SendMessage 发给同伴；docs/specs/rust-cli/cross-session.md）。
     pub peers: Arc<dyn rust_cli_kernel_api::peers::PeerMessaging>,
 }
@@ -98,6 +103,8 @@ pub(crate) struct Core {
     pub(crate) live: Arc<Live>,
     pub(crate) hub: Hub,
     pub(crate) board: TaskBoard,
+    /// 子代理里的 Monitor（agents.md §5.3，工作线 F83）。
+    pub(crate) monitors: monitors::MonitorBoard,
     pub(crate) keep_alive: bool,
     pub(crate) background_prompts: bool,
     /// 主线程的完整注册表（基础工具 + 本 crate 的工具）；子代理从它过滤。弱引用：注册表里的工具持有 Core，
@@ -190,6 +197,7 @@ impl Agents {
                 runs: Arc::default(),
                 live,
                 hub: Hub::default(),
+                monitors: monitors::MonitorBoard::default(),
                 keep_alive: config.keep_alive,
                 background_prompts: config.background_prompts,
                 registry: registry.clone(),
@@ -223,6 +231,30 @@ impl Agents {
     /// 交给会话 actor 的信号来源。
     pub fn signals(&self) -> Arc<dyn AgentSignals> {
         Arc::new(Signals(self.core.clone()))
+    }
+
+    /// 任务提醒读的任务清单（agents.md §7.4）：子会话读顶层会话的清单。
+    pub fn task_reader(&self) -> Arc<dyn rust_cli_kernel_api::agents::TaskReader> {
+        Arc::new(TaskLists(self.core.clone()))
+    }
+}
+
+struct TaskLists(Arc<Core>);
+
+#[async_trait]
+impl rust_cli_kernel_api::agents::TaskReader for TaskLists {
+    async fn tasks(&self, session: &SessionId) -> Vec<rust_cli_kernel_api::agents::TaskRecord> {
+        let list = self.0.live.root_of(session);
+        let mut tasks = match self.0.board.read(&list).await {
+            Ok(list) => list.tasks,
+            Err(error) => {
+                tracing::warn!(%error, "the task list could not be read for the reminder");
+                Vec::new()
+            }
+        };
+        // 按数字 ID 升序（ID 是递增的十进制数）。
+        tasks.sort_by_key(|task| task.id.parse::<u64>().unwrap_or(u64::MAX));
+        tasks
     }
 }
 
@@ -290,7 +322,7 @@ impl AgentSignals for Signals {
         let caller = task_stop::Caller {
             session,
             agent: None,
-            env: &self.0.ports.env,
+            machine: &self.0.ports.machine,
             operation: &operation,
         };
         tool.stop(task, &caller)

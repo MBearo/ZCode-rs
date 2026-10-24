@@ -42,7 +42,8 @@ impl Tool for Writing {
             path: EnvPath::new(&path),
         };
         let before = context
-            .env
+            .machine
+            .files()
             .read_file(&context.workspace, read)
             .await
             .ok()
@@ -54,7 +55,8 @@ impl Tool for Writing {
             create_parents: true,
         };
         context
-            .env
+            .machine
+            .files()
             .put_file(&context.workspace, context.operation.clone(), put)
             .await?;
         let artifact = json!({"files": [{"path": path, "existedBefore": before.is_some(),
@@ -95,7 +97,7 @@ pub(crate) async fn wrote() -> (Built, Arc<MemoryEnvironment>, MessageId) {
     let env = crate::test_support::env();
     env.set_file("/work/a.txt", "old\n");
     let mut setup = Setup::new(model);
-    setup.env = env.clone();
+    setup.set_env(env.clone());
     setup.tools = vec![Arc::new(Writing)];
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
@@ -119,7 +121,7 @@ async fn env_read(
     workspace: rust_cli_kernel_api::env::WorkspaceRef,
     path: &str,
 ) -> Option<String> {
-    use rust_cli_kernel_api::env::Environment;
+    use rust_cli_kernel_api::machine::Files;
     let read = ReadFile {
         path: EnvPath::new(path),
     };

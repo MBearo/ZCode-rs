@@ -191,7 +191,7 @@ impl Tool for GlobTool {
         };
         // R5-13：同 Grep，遍历时被取消立即结束，丢下的遍历由执行环境停掉。
         let found = tokio::select! {
-            found = context.env.glob(&context.workspace, request) => found.map_err(env_failure)?,
+            found = context.machine.search().glob(&context.workspace, request) => found.map_err(env_failure)?,
             () = context.cancel.cancelled() => return Err(ToolError::Cancelled),
         };
         let names: Vec<String> = found

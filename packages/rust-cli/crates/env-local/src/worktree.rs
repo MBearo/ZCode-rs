@@ -1,4 +1,4 @@
-//! git worktree 操作（`Environment::worktree_*`，docs/specs/rust-cli/tools-more.md §11.2、§11.3）。
+//! git worktree 操作（`Git::worktree_*`，docs/specs/rust-cli/tools-more.md §11.2、§11.3）。
 //!
 //! 命令见 tools-more.md §11.2、§11.3（新建或续用、`git worktree list --porcelain`、未保存的工作、删除）；目录与
 //! 分支名在 zcode 的 `.zcode/worktrees/`。git 经

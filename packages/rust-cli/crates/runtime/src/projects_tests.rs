@@ -11,16 +11,19 @@ use rust_cli_kernel_api::session_api::{
 use rust_cli_kernel_api::store::{SessionOrder, SessionQuery};
 use rust_cli_kernel_api::testing::{
     FixedClock, MemoryEnvironment, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment,
-    selection, text_response,
+    environments, selection, text_response,
 };
 
 use super::*;
 
-fn kernel(store: Arc<MemoryStore>, env: Arc<dyn Environment>) -> LocalKernel {
+fn kernel<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
+    store: Arc<MemoryStore>,
+    env: Arc<E>,
+) -> LocalKernel {
     LocalKernel::new(
         Ports {
             model: Arc::new(ScriptedModel::new(vec![text_response(&["done"])])),
-            env,
+            environments: environments(env),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(1_000)),

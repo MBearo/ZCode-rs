@@ -126,7 +126,7 @@ async fn directory_rules_are_announced_once_per_file() {
         .with_file("/w/src/ui/AGENTS.md", "ui rules");
     let ws = workspace();
     let scope = Scope {
-        env: &env,
+        files: &env,
         workspace: &ws,
         style: PathStyle::Posix,
         cwd: "/w".to_owned(),
@@ -150,7 +150,7 @@ async fn directory_rules_are_announced_once_per_file() {
     ];
     let seen = Seen::default();
     let session = SessionId::new("sess_1");
-    let found = announce((&scope, &seen, &session), &facts(), &history, &files).await;
+    let found = announce((&scope, &seen, &session, &env), &facts(), &history, &files).await;
     assert_eq!(found.len(), 1);
     let (text, data) = &found[0];
     // 内容不 trim，没有 label。
@@ -170,7 +170,7 @@ async fn directory_rules_are_announced_once_per_file() {
     history.push(results(&[("t3", false)]));
     let seen = Seen::default();
     let session = SessionId::new("sess_1");
-    let found = announce((&scope, &seen, &session), &facts(), &history, &files).await;
+    let found = announce((&scope, &seen, &session, &env), &facts(), &history, &files).await;
     assert_eq!(
         found
             .iter()
@@ -190,7 +190,7 @@ async fn directory_rules_are_announced_once_per_file() {
     ];
     let seen = Seen::default();
     let session = SessionId::new("sess_1");
-    let found = announce((&scope, &seen, &session), &facts(), &history, &files).await;
+    let found = announce((&scope, &seen, &session, &env), &facts(), &history, &files).await;
     assert_eq!(
         found
             .iter()
@@ -208,7 +208,7 @@ async fn trigger_paths_are_resolved_like_the_tools_resolve_them() {
     let env = MemoryEnvironment::new(facts()).with_file("/w/src/AGENTS.md", "src rules\n");
     let ws = workspace();
     let scope = Scope {
-        env: &env,
+        files: &env,
         workspace: &ws,
         style: PathStyle::Posix,
         cwd: "/w".to_owned(),
@@ -219,7 +219,7 @@ async fn trigger_paths_are_resolved_like_the_tools_resolve_them() {
         results(&[("t1", false)]),
     ];
     let found = announce(
-        (&scope, &Seen::default(), &SessionId::new("sess_1")),
+        (&scope, &Seen::default(), &SessionId::new("sess_1"), &env),
         &facts(),
         &history,
         &[],
@@ -245,7 +245,7 @@ async fn relative_triggers_follow_the_session_directory() {
     env.set_shell_cwd("/w/src");
     let ws = workspace();
     let scope = Scope {
-        env: &env,
+        files: &env,
         workspace: &ws,
         style: PathStyle::Posix,
         cwd: "/w".to_owned(),
@@ -257,7 +257,7 @@ async fn relative_triggers_follow_the_session_directory() {
     ];
     let session = SessionId::new("sess_1");
     let found = announce(
-        (&scope, &Seen::default(), &session),
+        (&scope, &Seen::default(), &session, &env),
         &facts(),
         &history,
         &[],
@@ -273,7 +273,7 @@ async fn relative_triggers_follow_the_session_directory() {
     );
     env.set_shell_cwd("/x");
     let found = announce(
-        (&scope, &Seen::default(), &session),
+        (&scope, &Seen::default(), &session, &env),
         &facts(),
         &history,
         &[],
@@ -300,7 +300,7 @@ fn the_incremental_known_set_matches_a_full_scan_at_every_step() {
     let env = MemoryEnvironment::new(facts());
     let ws = workspace();
     let scope = |cwd: &str| Scope {
-        env: &env,
+        files: &env,
         workspace: &ws,
         style: PathStyle::Posix,
         cwd: cwd.to_owned(),

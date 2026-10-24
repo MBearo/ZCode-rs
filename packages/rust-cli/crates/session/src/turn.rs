@@ -188,6 +188,9 @@ impl Actor {
                 let _ = reply.send(self.intent(operation, fingerprint).await);
             }
             SinkRequest::Event(event) => self.forward(event),
+            SinkRequest::ArmMonitor { monitor, reply } => {
+                let _ = reply.send(self.arm_monitor(monitor));
+            }
             SinkRequest::Ask { request, reply } => {
                 self.ask(request, reply, crate::actor::AskScope::Turn).await
             }
@@ -262,11 +265,14 @@ impl Actor {
     }
 
     /// 提交失败：记下原因并中止本回合，之后的提交一律拒绝。
+    ///
+    /// 工作线 F77：记一条 warn。以前原因只进回合的结局（界面上的 `storage error: …`），日志里没有一行。
     fn fail(&mut self, reason: &str) -> StoreError {
         if let Some(running) = &mut self.running {
             running.abort.abort(AbortReason::User);
             running.failure.get_or_insert_with(|| reason.to_owned());
         }
+        tracing::warn!(event = "session.write.failed", session = %self.meta.id, %reason, "a turn write could not be stored; the turn stops");
         store_error(reason.to_owned())
     }
 
@@ -462,3 +468,7 @@ impl Actor {
 
 #[path = "turn_interact.rs"]
 mod interact;
+
+#[cfg(test)]
+#[path = "write_failure_tests.rs"]
+mod write_failure_tests;

@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
-use rust_cli_kernel_api::testing::{MemoryEnvironment, text_response, tool_use_response};
+use rust_cli_kernel_api::testing::{
+    MemoryEnvironment, environments, text_response, tool_use_response,
+};
 use serde_json::json;
 
 use super::support::{GatedModel, Setup, request_text, with_ui};
@@ -36,6 +38,8 @@ async fn shift_tab_cycles_build_guarded_and_yolo() {
         ui.press(KeyCode::BackTab, KeyModifiers::SHIFT);
         ui.wait_for("⏵⏵ Autonomous mode").await;
         ui.press(KeyCode::BackTab, KeyModifiers::SHIFT);
+        // 工作线 F87：进完全访问先确认（yolo_confirm.rs）。
+        ui.confirm_full_access().await;
         ui.wait_for("⏵⏵ Full access").await;
         ui.press(KeyCode::BackTab, KeyModifiers::SHIFT);
         let screen = ui.wait_for("⏸ Ask before changes").await;
@@ -45,12 +49,7 @@ async fn shift_tab_cycles_build_guarded_and_yolo() {
         ui.wait("the reply", |s| idle(s, "⏺ hello")).await;
         ui.press(KeyCode::BackTab, KeyModifiers::SHIFT);
         ui.wait_for("⏵⏵ Autonomous mode").await;
-        // edit 不在循环里：`/mode edit` 进入，shift+tab 回到 build。
-        ui.submit("/mode edit");
-        ui.wait_for("⏵⏵ Edit automatically").await;
-        ui.press(KeyCode::BackTab, KeyModifiers::SHIFT);
-        let screen = ui.wait_for("⏸ Ask before changes").await;
-        assert!(!screen.contains("Edit automatically"), "{screen}");
+        // edit 不在循环里、工作线 F76 起 `/mode` 也不再能选（shift+tab 从 edit 回到 build 见 mode_picker.rs）。
     })
     .await;
 }
@@ -66,6 +65,7 @@ async fn plan_is_a_switch_next_to_the_mode() {
         ui.wait_for("⏸ Ask before changes").await;
         ui.press(KeyCode::BackTab, KeyModifiers::SHIFT);
         ui.press(KeyCode::BackTab, KeyModifiers::SHIFT);
+        ui.confirm_full_access().await;
         ui.wait_for("⏵⏵ Full access").await;
         // `/plan` 打开 plan：footer 同时显示 plan 与权限模式。
         ui.submit("/plan");
@@ -110,7 +110,7 @@ async fn approving_the_plan_returns_to_the_mode_from_before() {
     ]);
     // 对话框连同计划与选项要放得下。
     let setup = Setup {
-        env: env(),
+        environments: environments(env()),
         height: 48,
         ..Setup::default()
     };

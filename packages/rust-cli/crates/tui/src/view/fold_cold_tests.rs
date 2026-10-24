@@ -133,3 +133,23 @@ fn a_cold_view_rebuilds_rows_with_tool_results() {
     );
     assert!(busy.running());
 }
+
+/// 续写时补的 assistant（session-lifecycle.md §6.3.1）只在内核的历史里，界面不显示。
+#[test]
+fn the_resume_reply_is_not_shown() {
+    let mut feed = Feed::new();
+    let sentinel = Message::Assistant(rust_cli_kernel_api::message::AssistantMessage {
+        id: rust_cli_kernel_api::ids::MessageId::new("a0"),
+        content: vec![ContentBlock::Text {
+            text: rust_cli_kernel_api::message::NO_RESPONSE_REQUESTED.into(),
+        }],
+        model: rust_cli_kernel_api::message::SYNTHETIC_MODEL.into(),
+        stop_reason: None,
+        usage: None,
+    });
+    for message in [user("u1", "hi"), sentinel, user("u2", "again")] {
+        feed.push(KernelEvent::MessageDone { message });
+    }
+    let shown: Vec<&Body> = feed.view.rows().iter().map(|row| &row.body).collect();
+    assert_eq!(shown.len(), 2, "{shown:?}");
+}

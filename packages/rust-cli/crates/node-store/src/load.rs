@@ -38,6 +38,13 @@ pub fn load(
         .map(|selection| with_connection(conn, session, selection))
         .transpose()?;
     let execution = execution_state(conn, &row)?;
+    // 库里的当前轮：会话 actor 打开会话时的起点（node-store.md §4，修复线 F6）。
+    let turn = state::current_user(conn, session.as_str())
+        .storage()?
+        .map(|(prompt, turn)| TurnAnchor {
+            prompt: MessageId::new(prompt),
+            turn: turn.map(TurnId::new),
+        });
     let loaded = LoadedSession {
         messages: crate::hydrate::hydrate(&active),
         model,
@@ -47,13 +54,15 @@ pub fn load(
         open_operations: operations::open_operations(conn, session.as_str())?,
         pending_interactions: operations::pending_interactions(conn, session.as_str())?,
         checkpoints: Vec::new(),
-        // 库里的当前轮：会话 actor 打开会话时的起点（node-store.md §4，修复线 F6）。
-        turn: state::current_user(conn, session.as_str())
-            .storage()?
-            .map(|(prompt, turn)| TurnAnchor {
-                prompt: MessageId::new(prompt),
-                turn: turn.map(TurnId::new),
-            }),
+        turn: turn.clone(),
+        // 续写时补 assistant 的判断（session-lifecycle.md §6.3.1）：当前轮的 `turn_usage` 是错误。
+        last_turn_failed: match &turn {
+            Some(anchor) => {
+                crate::repo::usage::turn_failed(conn, session.as_str(), anchor.prompt.as_str())
+                    .storage()?
+            }
+            None => false,
+        },
     };
     Ok((loaded, crate::rewind::active_checkpoints(conn, session)?))
 }
@@ -157,3 +166,7 @@ fn execution_state(
         .and_then(|data| data["mode"].as_str().and_then(mode::from_entry_name));
     Ok(Some(mode::read(&execution, named)))
 }
+
+#[cfg(test)]
+#[path = "load_turn_tests.rs"]
+mod turn_tests;

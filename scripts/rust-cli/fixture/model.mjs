@@ -187,7 +187,7 @@ function blockDeltas(block) {
 
 /**
  * Anthropic Messages 响应：stream:true 时按 SSE 事件序列，否则一次性 JSON。回复可带 `usage` 覆盖固定用量
- * （例如压缩场景让下一步的估算越过阈值）。
+ * （例如压缩场景让下一步的估算越过阈值），可带 `holdMs`（流式时最后的 message_delta / message_stop 晚这么久写）。
  */
 function sendMessage(response, requestId, model, messageId, reply) {
   const message = { id: messageId, type: "message", role: "assistant", model };
@@ -234,11 +234,18 @@ function sendMessage(response, requestId, model, messageId, reply) {
     "Cache-Control": "no-cache",
     "request-id": requestId,
   });
-  response.end(
-    events
-      .map(([type, data]) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`)
-      .join(""),
+  const frames = events.map(
+    ([type, data]) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`,
   );
+  // `holdMs`：写到最后一个 content_block_stop 先发出去，等一会儿再收尾，造出“流还开着、工具已经完成”的时刻
+  // （工作线 F81）。
+  if (reply.holdMs > 0) {
+    const tail = frames.splice(-2);
+    response.write(frames.join(""));
+    setTimeout(() => response.end(tail.join("")), reply.holdMs);
+    return;
+  }
+  response.end(frames.join(""));
 }
 
 /**

@@ -12,7 +12,9 @@ use rust_cli_kernel_api::message::{
     AttachmentMessage, ContentBlock, Message, UserMessage, UserOrigin,
 };
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::{MemoryStore, RecordingSink, UnusedEnvironment};
+use rust_cli_kernel_api::testing::{
+    MemoryStore, RecordingSink, UnusedEnvironment, local_services, machine,
+};
 use rust_cli_kernel_api::tool::PromptContext;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -111,6 +113,7 @@ impl HookRunner for PostNote {
 fn context() -> ToolUseContext {
     let session = SessionId::new("sess_1");
     let run = RunId::new("run_1");
+    let env = Arc::new(UnusedEnvironment);
     ToolUseContext {
         session: session.clone(),
         run: run.clone(),
@@ -122,7 +125,8 @@ fn context() -> ToolUseContext {
         },
         mode: PermissionMode::Default,
         cancel: CancellationToken::new(),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: Arc::new(RecordingSink::default()),
         operation: OperationContext {

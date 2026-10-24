@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::env::{EnvPath, Outcome};
 use crate::env_shell::{
-    BackgroundCommand, CwdScope, HookIo, SandboxPolicy, ShellKind, TimeoutBackground,
+    BackgroundCommand, CwdScope, HookIo, MonitorSocket, SandboxPolicy, ShellKind, TimeoutBackground,
 };
 use crate::ids::ShellTaskId;
 
-/// 启动一条 shell 命令。前台、后台都经这里；输出用 [`crate::env::Environment::watch_command`] 按游标读。
+/// 启动一条 shell 命令。前台、后台都经这里；输出用 [`crate::machine::Commands::watch_command`] 按游标读。
 ///
 /// stdout 与 stderr 写进同一个输出文件（合并的 fd），事件流里都标为 stdout。
 /// `task` 之后的字段是 Bash 工具加的（docs/specs/rust-cli/shell-permissions.md §3）。
@@ -23,7 +23,7 @@ pub struct StartCommand {
     pub shell: ShellKind,
     #[serde(default)]
     pub cwd_scope: CwdScope,
-    /// 有值时是后台命令：不随本次工具调用结束，终态经 [`crate::env::Environment::shell_notices`] 送达。
+    /// 有值时是后台命令：不随本次工具调用结束，终态经 [`crate::machine::Shell::shell_notices`] 送达。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<BackgroundCommand>,
     /// 有值时在 sandbox 里执行。
@@ -36,6 +36,10 @@ pub struct StartCommand {
     /// 工作线 F69 新增）。没有时照旧按超时结束。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_timeout: Option<TimeoutBackground>,
+    /// 有值时不跑 `command`，开这个 WebSocket（Monitor 的 ws 来源，工作线 F83 新增，tools-more.md §19.7）：
+    /// 只和后台的 `Monitor` 种类一起用；`command` 记 URL（TaskStop 的结果用它）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket: Option<MonitorSocket>,
 }
 
 /// 命令输出事件。`cursor` 是已送达的字节位置，断线后从这里续读。

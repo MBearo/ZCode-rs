@@ -4,7 +4,7 @@
 //! Provider 配置的 `inputFormat.supportsImage` 为假（[`ModelEndpoint::supports_image`]）时，发送前把 user 内容与
 //! 工具结果里的图片换成 Node 的占位文字；`supportsPdf` 为假（[`ModelEndpoint::supports_pdf`]）时同样换掉工具结果里的
 //! document 块（Read 整读 PDF 的结果，修复线 F24：在支持 PDF 的模型上读过、之后换了模型）。只改这次请求：会话历史
-//! 不变，换回支持的模型后照常发送。三种协议共用，在按协议编码之前调用（transport 的 `resolve` 与 count_tokens）。
+//! 不变，换回支持的模型后照常发送。三种协议共用，在按协议编码之前调用（transport 的 `resolve`；工作线 F93 删掉计数请求之前 count_tokens 另调一次）。
 
 use rust_cli_kernel_api::message::{ContentBlock, ImageSource, ToolResultContent};
 use rust_cli_kernel_api::model::ApiMessage;

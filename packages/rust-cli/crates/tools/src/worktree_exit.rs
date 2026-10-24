@@ -127,7 +127,8 @@ impl Tool for ExitWorktreeTool {
                 branch: session.branch.clone(),
             };
             let removed = context
-                .env
+                .local
+                .git()
                 .worktree_remove(context.operation.clone(), request)
                 .await
                 .unwrap_or(false);
@@ -147,6 +148,6 @@ async fn inspect(context: &ToolUseContext, session: &WorktreeSession) -> Option<
         path: session.path.clone(),
         base: session.head_commit.clone(),
     };
-    let found = context.env.worktree_changes(request).await.ok()??;
+    let found = context.local.git().worktree_changes(request).await.ok()??;
     Some((found.changed_files, found.commits))
 }

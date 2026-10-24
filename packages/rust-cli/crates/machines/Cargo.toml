@@ -1,0 +1,30 @@
+[package]
+name = "rust-cli-machines"
+description = "Connection state machine of a remote executor machine: provisioning, handshake, ready, reconnecting"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+# 订阅连接状态的任务经 base 的 TaskScope 启动（README §3.1）。
+rust-cli-base.workspace = true
+rust-cli-exec-client.workspace = true
+# 只认 Connector / Provisioner（remote-exec.md §15.3、§19.10）：具体的 SSH 实现由组装根注入。
+rust-cli-exec-transport.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+# 测试里的假执行器：收 hello、回 welcome（帧的编解码）。
+rust-cli-exec-wire.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

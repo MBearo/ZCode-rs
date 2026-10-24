@@ -3,14 +3,13 @@ use serde_json::json;
 
 use super::*;
 use crate::env::{EnvPath, WorkspaceRef};
-use crate::env_rewind::{RestoreAction, RestoredFile};
 use crate::hooks::{HookContext, HookEvent, HookEventName, StopCondition, StopVerdict};
-use crate::ids::{ArtifactId, EnvironmentId, MessageId, SessionId, ToolUseId};
+use crate::ids::{EnvironmentId, MessageId, SessionId};
 use crate::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use crate::model::ModelSelection;
 use crate::permission::PermissionMode;
-use crate::session_api::{Command, ForkFiles};
-use crate::store::{ArtifactPurpose, ArtifactRef, ForkReceipt, SessionFork, WorkspaceCheckpoint};
+use crate::session_api::Command;
+use crate::store::{ForkReceipt, SessionFork};
 
 fn round_trip<T>(value: &T) -> serde_json::Value
 where
@@ -114,39 +113,28 @@ fn stop_conditions_and_verdicts_round_trip() {
     }
 }
 
+/// 从 checkpoint 分叉的命令已删掉（session-lifecycle.md §6.6）：旧的写法不再是命令。
+#[test]
+fn the_checkpoint_fork_is_not_a_command() {
+    let old = json!({"type": "fork_checkpoint", "files": "restore"});
+    assert!(serde_json::from_value::<Command>(old).is_err());
+}
+
 #[test]
 fn forks_round_trip() {
-    let command = Command::ForkCheckpoint {
-        checkpoint: None,
-        files: ForkFiles::Restore,
+    // 按用户输入分叉（session-lifecycle.md §6.5.1，F75）。
+    let command = Command::ForkFromInput {
+        input: MessageId::new("msg_3"),
     };
     assert_eq!(
         round_trip(&command),
-        json!({"type": "fork_checkpoint", "files": "restore"})
+        json!({"type": "fork_from_input", "input": "msg_3"})
     );
-    let checkpoint = WorkspaceCheckpoint {
-        id: "checkpoint_1".to_owned(),
-        prompt: MessageId::new("msg_1"),
-        assistant: MessageId::new("msg_2"),
-        tool_use: ToolUseId::new("toolu_1"),
-        snapshot: ArtifactRef {
-            session: SessionId::new("sess_1"),
-            id: ArtifactId::new("tool-result-1"),
-            purpose: ArtifactPurpose::Checkpoint,
-            media_type: "application/json".to_owned(),
-            size: 10,
-        },
-    };
     round_trip(&SessionFork {
         parent: SessionId::new("sess_1"),
         child: SessionId::new("sess_2"),
         created_at_ms: 5,
         through: MessageId::new("msg_1"),
-        checkpoint: Some(checkpoint),
-        restored: vec![RestoredFile {
-            path: EnvPath::new("/Users/dev/project/a.txt"),
-            action: RestoreAction::Restore,
-        }],
         selection: ModelSelection {
             provider: "anthropic".to_owned(),
             model: "claude-opus-5-5".to_owned(),
@@ -157,4 +145,13 @@ fn forks_round_trip() {
         plan: true,
     });
     round_trip(&ForkReceipt { copied: 3 });
+}
+
+/// 写下续写占位的命令（session-lifecycle.md §6.3.1，F79）：没有字段。
+#[test]
+fn the_store_command_round_trips() {
+    assert_eq!(
+        round_trip(&Command::StoreResumeSentinel),
+        json!({"type": "store_resume_sentinel"})
+    );
 }

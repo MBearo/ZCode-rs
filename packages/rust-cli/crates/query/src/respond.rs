@@ -17,7 +17,7 @@ use rust_cli_kernel_api::orchestration::{QueryError, QueryEvent};
 use crate::RunScope;
 use crate::assembler::Assembler;
 use crate::defaults;
-use crate::executor::ToolBatch;
+use crate::executor::{Ready, ToolBatch};
 use crate::texts;
 
 pub(crate) enum Responded {
@@ -60,6 +60,25 @@ pub(crate) async fn commit_metered(
         .await?;
     history.push(message);
     Ok(())
+}
+
+/// 提交一个交出的结果：tool_result 带这次调用的计量，同批提交（usage.md §2.3）。
+async fn commit_ready(
+    scope: &RunScope,
+    history: &mut Vec<Message>,
+    ready: Ready,
+) -> Result<(), QueryError> {
+    match ready.call {
+        Some(call) => commit_metered(scope, history, ready.message, Metered::Tool(call)).await,
+        None => commit(scope, history, ready.message).await,
+    }
+}
+
+/// 流还开着时把已经能交出的结果取出来暂存（query.md §1.6）。中止之后不取：结果在流结束后按规则交出。
+fn hand_out(scope: &RunScope, batch: &mut ToolBatch, handed: &mut Vec<Ready>) {
+    if !scope.abort.is_aborted() {
+        handed.extend(batch.take_ready());
+    }
 }
 
 /// 一次请求的计时（usage.md §1）：请求前、第一个非空的文本或推理增量、流结束各读一次注入的时钟。
@@ -172,6 +191,10 @@ pub(crate) async fn respond(
         .stream_with_notices(request, scope.abort.token().clone());
     let mut assembler = Assembler::default();
     let mut batch = ToolBatch::new(scope.clone());
+    // 修 bug（工作线 F81 R1）：以前流式中只记下工具完成，流结束、assistant 提交之后才开始交出，两个并发安全的调用都在
+    // 流结束前完成时按加入顺序给出。现在一完成就按交出规则取出、先暂存（assistant 还没落库），提交 assistant 之后
+    // 按暂存的顺序提交。
+    let mut handed: Vec<Ready> = Vec::new();
     let mut failure = None;
     loop {
         tokio::select! {
@@ -233,6 +256,8 @@ pub(crate) async fn respond(
                             defaults::apply(scope.parts.tools.as_ref(), &mut block);
                             if let ContentBlock::ToolUse { id, name, input } = block {
                                 batch.add(id, name, input, assistant_id.clone());
+                                // 找不到的工具加入时就有结果。
+                                hand_out(scope, &mut batch, &mut handed);
                             }
                         }
                         Ok(None) => {}
@@ -245,6 +270,7 @@ pub(crate) async fn respond(
             },
             Some((index, output)) = batch.next_done(), if batch.has_running() => {
                 batch.complete(index, output).await;
+                hand_out(scope, &mut batch, &mut handed);
             }
         }
     }
@@ -402,14 +428,12 @@ pub(crate) async fn respond(
         let message = Message::Assistant(assistant);
         commit_metered(scope, history, message, Metered::Model(call)).await?;
     }
+    for ready in handed {
+        commit_ready(scope, history, ready).await?;
+    }
     loop {
         for ready in batch.take_ready() {
-            match ready.call {
-                Some(call) => {
-                    commit_metered(scope, history, ready.message, Metered::Tool(call)).await?;
-                }
-                None => commit(scope, history, ready.message).await?,
-            }
+            commit_ready(scope, history, ready).await?;
         }
         if !batch.has_unfinished() || !batch.next_completion().await {
             break;
@@ -431,3 +455,11 @@ mod metering_tests;
 #[cfg(test)]
 #[path = "respond_bad_input_tests.rs"]
 mod bad_input_tests;
+
+#[cfg(test)]
+#[path = "respond_order_tests.rs"]
+mod order_tests;
+
+#[cfg(test)]
+#[path = "respond_server_tests.rs"]
+mod server_tests;

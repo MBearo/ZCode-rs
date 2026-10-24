@@ -153,7 +153,7 @@ pub struct McpToolInfo {
     pub server: String,
     /// 服务器给出的工具原名。
     pub tool: String,
-    /// 服务器配置的 `alwaysLoad` 或工具的 `_meta["zcode/alwaysLoad"]` 为 true：不延迟加载。
+    /// 服务器配置的 `alwaysLoad` 或工具 `_meta` 里的不延迟标记为 true（docs/specs/rust-cli/ext.md §3.1）：不延迟加载。
     #[serde(default)]
     pub always_load: bool,
 }

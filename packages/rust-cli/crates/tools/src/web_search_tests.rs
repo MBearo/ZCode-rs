@@ -91,17 +91,27 @@ async fn a_side_request_with_the_server_tool_becomes_the_result() {
     );
     // 工作线 F64：工具所在的回合（每请求头的 `x-query-id`，model.md §2.4）。
     assert!(request.options.run.is_some());
-    // 请求形状：身份句在前、`tool_choice: auto`、不带 thinking、max_tokens 与 effort
-    // 取模型卡片（脚本模型没有卡片：32000、没有 effort）。
+    // 请求形状照 Node（工作线 F90，tools-more.md §5）：system 只有 Node 的一句（带句号，没有身份句）、不写
+    // `tool_choice`、max_tokens 4096、不带 thinking；effort 取模型卡片（脚本模型没有卡片：没有 effort）。
+    // 修改：L17 到 F90 之间是身份句加不带句号的一句、`tool_choice: auto`、max_tokens 取卡片（没有卡片 32000）。
     let system: Vec<&str> = request
         .system
         .iter()
         .map(|block| block.text.as_str())
         .collect();
-    assert_eq!(system, [rust_cli_prompts::texts::identity(), SYSTEM]);
-    assert_eq!(request.tool_choice, Some(ToolChoice::Auto));
+    assert_eq!(
+        system,
+        ["You are an assistant for performing a web search tool use."]
+    );
+    assert_eq!(
+        request.messages[0].content[0].block,
+        ContentBlock::Text {
+            text: "Perform a web search for the query: rust lang".to_owned()
+        }
+    );
+    assert_eq!(request.tool_choice, None);
     assert_eq!(request.thinking, None);
-    assert_eq!(request.max_tokens, 32_000);
+    assert_eq!(request.max_tokens, 4096);
     assert_eq!(request.options.effort, None);
     assert_eq!(
         request.options.server_tools,
@@ -219,9 +229,10 @@ async fn the_side_request_uses_the_current_main_model() {
     assert_eq!(model.requests()[0].selection, current);
 }
 
-/// 有模型卡片时 max_tokens 与 effort 取卡片（`claude-opus-5-5` 是 128000 与 medium）。
+/// 有模型卡片时 effort 取卡片（`claude-opus-5-5` 是 medium）；max_tokens 不取卡片，照 Node 是 4096（工作线 F90，
+/// 修改：以前取卡片的 128000）。
 #[tokio::test]
-async fn the_side_request_follows_the_model_card() {
+async fn the_side_request_takes_the_effort_from_the_model_card() {
     let model = Arc::new(ScriptedModel::new(vec![search_response()]));
     let tool = WebSearchTool::new(SideModel {
         model: model.clone(),
@@ -238,7 +249,7 @@ async fn the_side_request_follows_the_model_card() {
         .await
         .unwrap();
     let request = &model.requests()[0];
-    assert_eq!(request.max_tokens, 128_000);
+    assert_eq!(request.max_tokens, 4096);
     assert_eq!(request.options.effort.as_deref(), Some("medium"));
 }
 
@@ -269,4 +280,107 @@ async fn web_search_needs_the_native_web_search_capability() {
         .await
         .unwrap();
     assert_eq!(model.requests()[0].options.effort, None);
+}
+
+/// 模型端口替身：流交给脚本模型，能力只回答 `supportsNativeWebSearch` 与输出上限（`web_search` 为 None 是答不出）。
+struct Capable {
+    scripted: Arc<ScriptedModel>,
+    web_search: Option<bool>,
+    max_output_tokens: Option<u64>,
+}
+
+impl rust_cli_kernel_api::model::ModelPort for Capable {
+    fn stream(
+        &self,
+        request: ModelRequest,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<ModelEvent, rust_cli_kernel_api::model::ModelError>,
+    > {
+        self.scripted.stream(request, cancel)
+    }
+
+    fn capabilities(
+        &self,
+        _selection: &rust_cli_kernel_api::model::ModelSelection,
+    ) -> futures_util::future::BoxFuture<
+        'static,
+        Option<rust_cli_kernel_api::provider::ModelCapabilities>,
+    > {
+        let (web_search, max_output_tokens) = (self.web_search, self.max_output_tokens);
+        Box::pin(async move {
+            web_search.map(|supports_native_web_search| {
+                rust_cli_kernel_api::provider::ModelCapabilities {
+                    supports_native_web_search,
+                    max_output_tokens,
+                    ..Default::default()
+                }
+            })
+        })
+    }
+}
+
+/// 工作线 F90（tools-more.md §5 的“能力检查”，照 Node `websearch.ts`）：调用时当前模型的生效配置
+/// `supportsNativeWebSearch` 为假，不发旁路请求，结果是 Node 的可恢复错误；为真或答不出时照常请求。修改前不检查，
+/// 模型从历史里看到 WebSearch 时会对不支持的模型发带服务端工具的请求。
+#[tokio::test]
+async fn a_model_without_native_web_search_gets_the_recoverable_error() {
+    let run = |web_search: Option<bool>| async move {
+        let scripted = Arc::new(ScriptedModel::new(vec![search_response()]));
+        let tool = WebSearchTool::new(SideModel {
+            model: Arc::new(Capable {
+                scripted: scripted.clone(),
+                web_search,
+                max_output_tokens: None,
+            }),
+            selection: selection(),
+        });
+        let (progress, _) = mpsc::channel(1);
+        let context = Ctx::new(Arc::new(ScriptedInteractions::default())).build();
+        let outcome = tool.call(json!({"query": "q"}), context, progress).await;
+        (outcome, scripted.requests().len())
+    };
+    let (outcome, requests) = run(Some(false)).await;
+    assert_eq!(requests, 0);
+    match outcome {
+        Err(ToolError::Failed { message }) => {
+            assert_eq!(message, "Current model does not support native WebSearch");
+        }
+        other => panic!("{other:?}"),
+    }
+    for web_search in [Some(true), None] {
+        let (outcome, requests) = run(web_search).await;
+        assert!(outcome.is_ok(), "{web_search:?}");
+        assert_eq!(requests, 1);
+    }
+}
+
+/// 工作线 F93（tools-more.md §5，照 Node `Math.min(4096, model.optionSpecs.maxOutputTokens.max)`）：旁路请求的
+/// `max_tokens` 是 4096 与当前模型生效配置的输出上限的较小值；答不出能力或配置没给上限时是 4096。修改前固定 4096，
+/// 上限 1024 的模型（glm-4v-flash）也发 4096。
+#[tokio::test]
+async fn the_side_request_caps_max_tokens_at_the_configured_output_limit() {
+    let run = |web_search: Option<bool>, max_output_tokens: Option<u64>| async move {
+        let scripted = Arc::new(ScriptedModel::new(vec![search_response()]));
+        let tool = WebSearchTool::new(SideModel {
+            model: Arc::new(Capable {
+                scripted: scripted.clone(),
+                web_search,
+                max_output_tokens,
+            }),
+            selection: selection(),
+        });
+        let (progress, _) = mpsc::channel(1);
+        let context = Ctx::new(Arc::new(ScriptedInteractions::default())).build();
+        tool.call(json!({"query": "q"}), context, progress)
+            .await
+            .unwrap();
+        scripted.requests()[0].max_tokens
+    };
+    assert_eq!(run(Some(true), Some(1024)).await, 1024);
+    assert_eq!(run(Some(true), Some(128_000)).await, 4096);
+    assert_eq!(run(Some(true), Some(4096)).await, 4096);
+    assert_eq!(run(Some(true), None).await, 4096);
+    assert_eq!(run(None, None).await, 4096);
 }

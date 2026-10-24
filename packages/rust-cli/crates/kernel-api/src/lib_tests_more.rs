@@ -491,3 +491,49 @@ fn pdf_documents_and_dtos_round_trip() {
         pages: vec![vec![0xff, 0xd8, 0xff]],
     });
 }
+
+/// 读过的文件被改动的结果与调用过的 skill：字段名与序列化往返。
+#[test]
+fn changed_files_and_invoked_skills_round_trip() {
+    let changed = crate::tool::ChangedFile {
+        path: "/w/a.txt".to_owned(),
+        snippet: "1\tnew".to_owned(),
+    };
+    let value = serde_json::to_value(&changed).expect("json");
+    assert_eq!(
+        value,
+        serde_json::json!({"path": "/w/a.txt", "snippet": "1\tnew"})
+    );
+    assert_eq!(
+        serde_json::from_value::<crate::tool::ChangedFile>(value).expect("back"),
+        changed
+    );
+    let skill = crate::listing::InvokedSkill {
+        name: "deploy".to_owned(),
+        path: "projectSettings:deploy".to_owned(),
+        content: "Deploy it.".to_owned(),
+    };
+    let value = serde_json::to_value(&skill).expect("json");
+    assert_eq!(
+        serde_json::from_value::<crate::listing::InvokedSkill>(value).expect("back"),
+        skill
+    );
+}
+
+/// 续写时补的 assistant：模型名与文字都对上才算。
+#[test]
+fn the_resume_sentinel_is_recognized() {
+    use crate::message::{AssistantMessage, ContentBlock, NO_RESPONSE_REQUESTED, SYNTHETIC_MODEL};
+    let sentinel = |model: &str, text: &str| AssistantMessage {
+        id: crate::ids::MessageId::new("a"),
+        content: vec![ContentBlock::Text {
+            text: text.to_owned(),
+        }],
+        model: model.to_owned(),
+        stop_reason: None,
+        usage: None,
+    };
+    assert!(sentinel(SYNTHETIC_MODEL, NO_RESPONSE_REQUESTED).is_resume_sentinel());
+    assert!(!sentinel("glm-5", NO_RESPONSE_REQUESTED).is_resume_sentinel());
+    assert!(!sentinel(SYNTHETIC_MODEL, "Prompt is too long").is_resume_sentinel());
+}

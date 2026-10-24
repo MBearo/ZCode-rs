@@ -1,0 +1,51 @@
+[package]
+name = "rust-cli-executor-host"
+description = "Assembly of the zcode executor mode: serves the executor protocol over stdio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+async-trait.workspace = true
+# 文件版账本的回复（编码好的帧）在日志里写成 base64（remote-exec.md §19.7）。
+base64.workspace = true
+bytes.workspace = true
+# 任务经 base 的 TaskScope；账本身份的随机串经 base 的 random。
+rust-cli-base.workspace = true
+# 常驻执行器的执行环境（空闲判断要它的 busy()，remote-exec.md §19.5）。
+rust-cli-env-local.workspace = true
+rust-cli-exec-server.workspace = true
+rust-cli-exec-transport.workspace = true
+rust-cli-exec-wire.workspace = true
+# 单实例锁、私有目录、账本日志（README §4：本机存储经 fs）。
+rust-cli-fs.workspace = true
+rust-cli-kernel-api.workspace = true
+# 常驻执行器的 socket（README §4：套接字经 net）。
+rust-cli-net.workspace = true
+# 执行器目录的位置（remote-exec.md §19.4）。
+rust-cli-paths.workspace = true
+# 拉起常驻进程（自成会话，remote-exec.md §19.5）。
+rust-cli-proc.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "sync", "time"] }
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# 合同测试：同一套端口测试对本机的 env-local 与“env-remote + 内存 loopback + 同进程 exec-server”各跑一遍
+# （docs/specs/rust-cli/remote-exec.md §18.7）。
+futures-util.workspace = true
+rust-cli-env-remote.workspace = true
+rust-cli-exec-client.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

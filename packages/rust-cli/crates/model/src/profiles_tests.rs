@@ -437,3 +437,37 @@ fn a_gateway_sends_the_betas_node_sends() {
         Some("pdfs-2024-09-25,code-execution-web-tools-2026-02-09")
     );
 }
+
+/// 工作线 F93（用户决定 2026-10-24，推翻 F23；model.md §3.2）：Anthropic 官方地址上的 WebSearch 旁路请求也用 Node 的
+/// `web_search_20260209`，并按特性带 `code-execution-web-tools-2026-02-09`。F23 到 F93 之间是 `web_search_20250305`、
+/// 不带这个 beta。
+#[test]
+fn the_official_endpoint_sends_the_node_web_search_tool() {
+    use rust_cli_kernel_api::model::ServerTool;
+    let mut request = main_request("claude-opus-5-5", true);
+    request.tools.clear();
+    request.options.tool_flags.clear();
+    request.options.server_tools = vec![ServerTool::WebSearch {
+        allowed_domains: Some(vec!["example.com".to_owned()]),
+        blocked_domains: None,
+        max_uses: 8,
+    }];
+    let official = endpoint(
+        WireProtocol::AnthropicMessages,
+        "https://api.anthropic.com",
+        "claude-opus-5-5",
+        Vec::new(),
+    );
+    let (profile, body, beta) = encode(&official, request);
+    assert_eq!(profile, "anthropic-official");
+    assert!(
+        body.contains(r#""tools":[{"type":"web_search_20260209","name":"web_search","max_uses":8,"allowed_domains":["example.com"]}]"#),
+        "{body}"
+    );
+    let beta = beta.unwrap_or_default();
+    assert!(
+        beta.split(',')
+            .any(|name| name == "code-execution-web-tools-2026-02-09"),
+        "{beta}"
+    );
+}

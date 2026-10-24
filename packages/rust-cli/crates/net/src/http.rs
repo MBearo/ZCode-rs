@@ -128,6 +128,20 @@ impl ResponseHeaders {
     pub fn get(&self, name: &str) -> Option<&str> {
         self.0.get(name).and_then(|value| value.to_str().ok())
     }
+
+    /// 全部 header（名字小写，值按 UTF-8 宽松解码），同名的相邻：模型轨迹记回复头用
+    /// （docs/specs/rust-cli/model-io.md §4.2）。
+    pub fn pairs(&self) -> Vec<(String, String)> {
+        self.0
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_owned(),
+                    String::from_utf8_lossy(value.as_bytes()).into_owned(),
+                )
+            })
+            .collect()
+    }
 }
 
 /// 收到响应头之后的响应；响应体按块读取。丢弃它即关闭连接。

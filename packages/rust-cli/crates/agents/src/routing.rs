@@ -130,7 +130,9 @@ pub(crate) fn settle(core: &Core, id: &AgentId, finished: &Finished) -> Settle {
         if stopped {
             stranded.clear();
         }
-        if !stopped && core.keep_alive && has_live_children(agents, id) && stranded.is_empty() {
+        // 工作线 F83：在跑的 monitor 同样让子代理停放（agents.md §5.3）。
+        let live_work = has_live_children(agents, id) || core.monitors.owns(id);
+        if !stopped && core.keep_alive && live_work && stranded.is_empty() {
             let mut wakes = Vec::new();
             if let Some(slot) = agents.get_mut(id) {
                 // 前台子代理转成后台，之后的续跑按后台工具集。
@@ -197,6 +199,32 @@ pub(crate) fn settle(core: &Core, id: &AgentId, finished: &Finished) -> Settle {
             parked: false,
             wakes,
         }
+    })
+}
+
+/// 最后一个 monitor 结束（agents.md §5.3 第 3 条）：停放着、没有别的后台子代理与 monitor 的子代理就此结束，以最后一次
+/// 运行的报告送出自己的通知。没有要结束的时候为空。
+pub(crate) fn release(core: &Core, id: &AgentId) -> Vec<Wake> {
+    if core.monitors.owns(id) {
+        return Vec::new();
+    }
+    core.live.with(|agents| {
+        let Some(entry) = agents.get(id).cloned() else {
+            return Vec::new();
+        };
+        let AgentState::Parked(report) = &entry.state else {
+            return Vec::new();
+        };
+        if has_live_children(agents, id) {
+            return Vec::new();
+        }
+        let notice = notice_of(&entry, Ending::Completed, report, None);
+        if let Some(slot) = agents.get_mut(id) {
+            slot.state = AgentState::Finished(Ending::Completed);
+        }
+        deliver(agents, &core.hub, entry.owner.as_ref(), &entry.root, notice)
+            .into_iter()
+            .collect()
     })
 }
 

@@ -122,7 +122,12 @@ impl ReadTool {
         let request = ReadFile {
             path: EnvPath::new(path),
         };
-        let file = match context.env.read_file(&context.workspace, request).await {
+        let file = match context
+            .machine
+            .files()
+            .read_file(&context.workspace, request)
+            .await
+        {
             Ok(file) => file,
             Err(EnvError::NotFound { .. }) => {
                 return Err(failed(
@@ -175,7 +180,12 @@ impl ReadTool {
         let request = ReadFile {
             path: EnvPath::new(path),
         };
-        let file = match context.env.read_file(&context.workspace, request).await {
+        let file = match context
+            .machine
+            .files()
+            .read_file(&context.workspace, request)
+            .await
+        {
             Ok(file) => file,
             Err(EnvError::NotFound { .. }) => {
                 return Err(failed(
@@ -325,7 +335,12 @@ impl Tool for ReadTool {
             max_lines: input.limit,
             max_bytes: input.limit.is_none().then_some(MAX_BYTES),
         };
-        let slice = match context.env.read_text(&context.workspace, request).await {
+        let slice = match context
+            .machine
+            .files()
+            .read_text(&context.workspace, request)
+            .await
+        {
             Ok(TextRead::Text(slice)) => slice,
             Ok(TextRead::Directory) => return Err(failed(texts::is_directory(&path))),
             Ok(TextRead::TooLarge { size }) => {

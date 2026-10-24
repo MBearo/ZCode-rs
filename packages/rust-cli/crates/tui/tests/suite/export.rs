@@ -2,9 +2,10 @@
 use std::sync::Arc;
 
 use crossterm::event::KeyCode;
-use rust_cli_kernel_api::env::{EnvFacts, EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvFacts, EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::ids::EnvironmentId;
-use rust_cli_kernel_api::testing::{MemoryEnvironment, text_response};
+use rust_cli_kernel_api::machine::Files;
+use rust_cli_kernel_api::testing::{MemoryEnvironment, environments, text_response};
 
 use super::support::{GatedModel, Setup, with_ui};
 
@@ -46,7 +47,7 @@ async fn the_conversation_goes_to_a_file_or_the_clipboard() {
     let model = GatedModel::scripted(vec![text_response(&["world"])]);
     let env = env();
     let setup = Setup {
-        env: env.clone(),
+        environments: environments(env.clone()),
         ..Setup::default()
     };
     let check = env.clone();

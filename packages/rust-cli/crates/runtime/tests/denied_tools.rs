@@ -21,8 +21,8 @@ mod denied_tools {
         Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent, TurnOutcome,
     };
     use rust_cli_kernel_api::testing::{
-        FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
-        text_response, tool_use_response,
+        FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
+        selection, text_response, tool_use_response,
     };
     use rust_cli_policy::rules::parse_rule;
     use rust_cli_runtime::{Defaults, LocalKernel, Ports};
@@ -85,7 +85,7 @@ mod denied_tools {
         let kernel = LocalKernel::new(
             Ports {
                 model: model.clone(),
-                env: Arc::new(UnusedEnvironment),
+                environments: environments(Arc::new(UnusedEnvironment)),
                 store: store.clone(),
                 artifacts: store,
                 clock: Arc::new(FixedClock(1_000)),

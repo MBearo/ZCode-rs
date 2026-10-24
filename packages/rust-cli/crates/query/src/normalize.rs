@@ -12,7 +12,8 @@
 //! 5. 每轮 effort：人类输入之后的 effort 与上次说过的不同时，挂在
 //!    紧跟其后的 system 消息上（没有就插一条只带 `output_config` 的 system 消息）；
 //! 6. 最后一条有内容的消息的最后一个块打缓存断点（默认计划）；摘要请求
-//!    （不写缓存）往前挪一条。
+//!    （不写缓存）往前挪一条；
+//! 7. 每条 assistant 里 tool_use 移到末尾（context.md §3 第 11 条），合并之后做配对兜底（第 12 条，`pairing`）。
 //!
 //! 其余规则（tool_reference 剥离、thinking 清理、错误结果去图等）属于工作线 L1。
 
@@ -213,6 +214,42 @@ impl Builder {
     }
 }
 
+fn is_thinking(block: &ContentBlock) -> bool {
+    matches!(
+        block,
+        ContentBlock::Thinking { .. } | ContentBlock::RedactedThinking { .. }
+    )
+}
+
+/// 回复里 tool_use 之后还有别的块时，tool_use 移到末尾，其余块保持相对顺序、各自分开；有 tool_use 段夹在两个
+/// thinking 块之间时整条不动（query.md §1.7）。
+///
+/// 修 bug（工作线 F81）：以前实时路径按 API 的块顺序发，冷读取却是文字在前、tool_use 在后，同一段历史续写前后
+/// 请求不同。
+fn tool_uses_last(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
+    let is_call = |block: &ContentBlock| matches!(block, ContentBlock::ToolUse { .. });
+    let (mut seen_call, mut after_call, mut splits_thinking) = (false, false, false);
+    let (mut previous_thinking, mut in_calls) = (false, false);
+    for block in &blocks {
+        if is_call(block) {
+            seen_call = true;
+            in_calls = true;
+            continue;
+        }
+        after_call |= seen_call;
+        let thinking = is_thinking(block);
+        splits_thinking |= thinking && previous_thinking && in_calls;
+        previous_thinking = thinking;
+        in_calls = false;
+    }
+    if !after_call || splits_thinking {
+        return blocks;
+    }
+    let (calls, mut rest): (Vec<_>, Vec<_>) = blocks.into_iter().partition(is_call);
+    rest.extend(calls);
+    rest
+}
+
 /// 每轮 effort。assistant 消息还没有记录当时的 effort
 /// （工作线 L1），所以每轮都按这次请求的 effort 算：只有第一条人类输入之后会带上它。
 fn turn_effort(messages: Vec<ApiMessage>, effort: &str) -> Vec<ApiMessage> {
@@ -292,7 +329,7 @@ pub(crate) fn normalize<'a>(
                         builder.tool_names.insert(id.clone(), name.clone());
                     }
                 }
-                let content = plain(assistant.content.clone());
+                let content = plain(tool_uses_last(assistant.content.clone()));
                 match builder.out.last_mut() {
                     Some(last) if last.role == ApiRole::Assistant => last.content.extend(content),
                     _ => builder.out.push(message(ApiRole::Assistant, content)),
@@ -302,9 +339,10 @@ pub(crate) fn normalize<'a>(
         }
     }
     builder.flush();
+    let paired = crate::pairing::ensure_pairing(builder.out);
     let mut out = match &options.turn_effort {
-        Some(effort) => turn_effort(builder.out, effort),
-        None => builder.out,
+        Some(effort) => turn_effort(paired, effort),
+        None => paired,
     };
     let marker = if options.skip_cache_write {
         skip_write_marker(&mut out)
@@ -354,3 +392,7 @@ fn skip_write_marker(messages: &mut [ApiMessage]) -> Option<&mut ApiContent> {
 #[cfg(test)]
 #[path = "normalize_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "normalize_order_tests.rs"]
+mod order_tests;

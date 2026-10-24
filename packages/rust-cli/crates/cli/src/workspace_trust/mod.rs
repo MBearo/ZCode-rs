@@ -20,8 +20,9 @@ mod key;
 use std::path::Path;
 
 use anyhow::Result;
-use rust_cli_kernel_api::env::{Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::env_files::PathStyle;
+use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::workspace_trust::TrustKey;
 use rust_cli_tui::trust::{Grants, TrustAnswer, TrustPrompt};
@@ -32,7 +33,9 @@ use self::key::Key;
 
 /// 判定需要的端口与配置。
 pub(crate) struct Inputs<'a> {
-    pub env: &'a dyn Environment,
+    /// 路径事实（home、路径风格）与工作区的 `.git`：都在本机（cli 从注册表的本机取）。
+    pub info: &'a dyn EnvInfo,
+    pub files: &'a dyn Files,
     pub store: &'a dyn SessionStore,
     pub workspace: &'a WorkspaceRef,
     /// 项目级配置文件里会生效的 allow 规则（`config` 组装时得出）。
@@ -71,7 +74,7 @@ pub(crate) enum Decision {
 
 /// 判定（§2.1）：读记录失败当作没有信任（记 warn）。启动时与应用内切换项目（§2.8）用同一段。
 pub(crate) async fn decide(inputs: Inputs<'_>) -> Decision {
-    let facts = inputs.env.path_facts(inputs.workspace).await.ok();
+    let facts = inputs.info.path_facts(inputs.workspace).await.ok();
     let style = facts.as_ref().map_or(
         if cfg!(windows) {
             PathStyle::Windows
@@ -86,7 +89,7 @@ pub(crate) async fn decide(inputs: Inputs<'_>) -> Decision {
         .and_then(|facts| facts.home)
         .is_some_and(|home| Key::parse(home.as_str(), style) == cwd);
     let probe = git::Probe {
-        env: inputs.env,
+        files: inputs.files,
         workspace: inputs.workspace,
         style,
     };

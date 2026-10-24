@@ -1,5 +1,5 @@
 //! 工作线 F52（docs/specs/rust-cli/model.md §3.3，用户决定）：每个 messages 请求都带 `metadata.user_id`。
-//! 值是设备身份（入口注入）加请求的会话；文本照 Node `createAnthropicRequestMetadataUserId`。计数请求不带。
+//! 值是设备身份（入口注入）加请求的会话；文本照 Node `createAnthropicRequestMetadataUserId`。
 //! 工作线 F52b（用户决定 2026-10-22）：只有 Anthropic 协议带，OpenAI 两种协议不写、也不读设备身份（Node 相同）。
 
 #![allow(
@@ -13,12 +13,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use futures_util::FutureExt;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::model::{CountTokensRequest, ModelPort, QuerySource};
+use rust_cli_kernel_api::model::QuerySource;
 use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
 use rust_cli_model::{DeviceIdSource, FixedEndpoint, ProviderModel};
 use rust_cli_net::{Egress, NetworkPolicy};
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
 
 use super::common::{clock, collect, fast_retry, request, text_response};
 use super::fixture::{Fixture, Reply};
@@ -189,30 +188,4 @@ fn request_with_session() -> rust_cli_kernel_api::model::ModelRequest {
     let mut request = request("hi", QuerySource::Side("title".to_owned()));
     request.options.session_id = Some(SessionId::new(SESSION));
     request
-}
-
-/// 计数请求不带 metadata（计数接口没有这个字段）。
-#[tokio::test]
-async fn count_tokens_has_no_metadata() {
-    let server = Fixture::start(vec![Reply::new(200).send(r#"{"input_tokens":5}"#)]).await;
-    let egress = Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap());
-    let fixed = FixedEndpoint::new(endpoint(WireProtocol::AnthropicMessages, server.url()));
-    let calls = Arc::new(AtomicUsize::new(0));
-    let model = ProviderModel::new(egress, Arc::new(fixed), clock())
-        .with_retry(fast_retry(0))
-        .with_device_id(device(calls.clone()));
-    let counted = model
-        .count_tokens(
-            CountTokensRequest {
-                selection: request("hi", QuerySource::MainThread).selection,
-                messages: Vec::new(),
-                tools: Vec::new(),
-            },
-            CancellationToken::new(),
-        )
-        .await;
-    assert_eq!(counted.unwrap(), 5);
-    let body: Value = serde_json::from_str(&server.requests()[0].body).unwrap();
-    assert_eq!(body.get("metadata"), None);
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }

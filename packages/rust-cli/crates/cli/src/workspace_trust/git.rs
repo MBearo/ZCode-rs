@@ -5,15 +5,16 @@ use std::path::{Path, PathBuf};
 // 按段化简 `.` 与 `..`（纯词法）：唯一定义在 base（F58：以前这里、cli 的插件目录与 platform 各写一份）。
 use rust_cli_base::path::normalize;
 
-use rust_cli_kernel_api::env::{EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{PathStyle, StatFile};
 use rust_cli_kernel_api::env_git::{gitdir_pointer, has_git_marker};
+use rust_cli_kernel_api::machine::Files;
 
 use super::key::Key;
 
 /// 读 `.git` 等小文件时的路径操作都在本机路径上做（cli 只组装本机执行环境）。
 pub(super) struct Probe<'a> {
-    pub env: &'a dyn Environment,
+    pub files: &'a dyn Files,
     pub workspace: &'a WorkspaceRef,
     pub style: PathStyle,
 }
@@ -32,7 +33,7 @@ impl Probe<'_> {
         let request = StatFile {
             path: Self::env_path(path),
         };
-        matches!(self.env.stat(self.workspace, request).await, Ok(Some(_)))
+        matches!(self.files.stat(self.workspace, request).await, Ok(Some(_)))
     }
 
     /// 文件的文字（去掉首尾空白）；读不到（包括它是目录）时为 None。
@@ -40,7 +41,7 @@ impl Probe<'_> {
         let request = ReadFile {
             path: Self::env_path(path),
         };
-        let content = self.env.read_file(self.workspace, request).await.ok()?;
+        let content = self.files.read_file(self.workspace, request).await.ok()?;
         Some(String::from_utf8_lossy(&content.bytes).trim().to_owned())
     }
 
@@ -56,7 +57,7 @@ impl Probe<'_> {
     pub(super) async fn git_root(&self, start: &Path) -> Option<PathBuf> {
         for dir in start.ancestors() {
             let dot_git = dir.join(".git");
-            if has_git_marker(self.env, self.workspace, &dot_git.to_string_lossy()).await {
+            if has_git_marker(self.files, self.workspace, &dot_git.to_string_lossy()).await {
                 return Some(dir.to_path_buf());
             }
         }

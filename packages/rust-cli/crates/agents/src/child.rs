@@ -64,6 +64,8 @@ pub(crate) struct ChildSink {
     record: Mutex<Record>,
     /// 子会话的当前轮：随每个批次交给存储（node-store.md §4，修复线 F6）。
     turn: Mutex<Option<TurnAnchor>>,
+    /// 子代理里的 Monitor 交给 agents（agents.md §5.3，工作线 F83）；没有时（测试）不支持。
+    core: Option<Arc<crate::Core>>,
 }
 
 impl ChildSink {
@@ -88,6 +90,15 @@ impl ChildSink {
             name: String::new(),
             record: Mutex::default(),
             turn: Mutex::default(),
+            core: None,
+        }
+    }
+
+    /// 子代理里的 Monitor 经 agents 起转发任务（`spawn::drive` 给出）。
+    pub(crate) fn with_core(self, core: Arc<crate::Core>) -> Self {
+        Self {
+            core: Some(core),
+            ..self
         }
     }
 
@@ -225,6 +236,20 @@ impl Interactions for ChildSink {
     ) {
         if let Some((session, asker)) = self.asker() {
             asker.cancel_ask(session, tool_use).await;
+        }
+    }
+
+    /// 子代理里的 Monitor：状态与送达在 agents（agents.md §5.3，工作线 F83）。
+    async fn arm_monitor(
+        &self,
+        _session: &SessionId,
+        monitor: rust_cli_kernel_api::monitor::MonitorArmed,
+    ) -> Result<(), OrchestrationError> {
+        match &self.core {
+            Some(core) => crate::monitors::arm(core, &self.agent, monitor),
+            None => Err(OrchestrationError::Unsupported {
+                what: "monitors".to_owned(),
+            }),
         }
     }
 

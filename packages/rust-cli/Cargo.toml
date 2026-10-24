@@ -13,6 +13,14 @@ members = [
   "crates/node-store",
   "crates/model",
   "crates/env-local",
+  "crates/exec-wire",
+  "crates/exec-transport",
+  "crates/exec-client",
+  "crates/exec-server",
+  "crates/env-remote",
+  "crates/executor-host",
+  "crates/ssh-connect",
+  "crates/machines",
   "crates/peers",
   "crates/policy",
   "crates/hooks",
@@ -182,6 +190,14 @@ rust-cli-kernel-api = { path = "crates/kernel-api" }
 rust-cli-node-store = { path = "crates/node-store" }
 rust-cli-model = { path = "crates/model" }
 rust-cli-env-local = { path = "crates/env-local" }
+rust-cli-exec-wire = { path = "crates/exec-wire" }
+rust-cli-exec-transport = { path = "crates/exec-transport" }
+rust-cli-exec-client = { path = "crates/exec-client" }
+rust-cli-exec-server = { path = "crates/exec-server" }
+rust-cli-env-remote = { path = "crates/env-remote" }
+rust-cli-executor-host = { path = "crates/executor-host" }
+rust-cli-machines = { path = "crates/machines" }
+rust-cli-ssh-connect = { path = "crates/ssh-connect" }
 rust-cli-peers = { path = "crates/peers" }
 rust-cli-policy = { path = "crates/policy" }
 rust-cli-hooks = { path = "crates/hooks" }

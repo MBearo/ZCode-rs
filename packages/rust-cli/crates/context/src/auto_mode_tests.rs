@@ -87,6 +87,7 @@ fn boundary() -> Message {
         pre_tokens: 1,
         summary: MessageId::new("s"),
         preserved: None,
+        discovered_tools: Vec::new(),
     }))
 }
 
@@ -172,9 +173,13 @@ fn assembler() -> PromptAssembler {
         additional_directories: Vec::new(),
         home: None,
     };
+    let env = Arc::new(MemoryEnvironment::new(facts));
     PromptAssembler::new(
         ContextPorts {
-            env: Arc::new(MemoryEnvironment::new(facts)),
+            info: env.clone(),
+            files: env.clone(),
+            shell: env.clone(),
+            git: env,
             clock: Arc::new(FixedClock(1_792_224_000_000)),
             ids: Arc::new(SequentialIds::default()),
             listings: Arc::new(Skills),

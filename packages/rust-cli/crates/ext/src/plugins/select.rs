@@ -6,8 +6,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use rust_cli_kernel_api::env::{EnvPath, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_files::FileKind;
+use rust_cli_kernel_api::machine::Files;
 use serde_json::Value;
 
 use super::{Manifest, Plugin, Plugins, Reader};
@@ -275,12 +276,12 @@ fn log(skipped: &Skipped) {
 
 /// 加载 `--plugin-dir` 的插件与入口层给出的候选目录（ext.md §4.3）；跳过的候选目录记日志并一起返回。
 pub async fn load_all(
-    env: &dyn Environment,
+    files: &dyn Files,
     workspace: &WorkspaceRef,
     session_dirs: &[EnvPath],
     sources: &PluginSources,
 ) -> Loaded {
-    let reader = Reader { env, workspace };
+    let reader = Reader { files, workspace };
     let mut plugins = Vec::new();
     for dir in session_dirs {
         plugins.extend(reader.session_plugin(dir.as_str()).await);

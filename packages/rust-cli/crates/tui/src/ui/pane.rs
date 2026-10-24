@@ -20,8 +20,14 @@ pub(super) type RowTarget = (usize, usize, Option<usize>, Target);
 type ViewLines = (Vec<Line<'static>>, Vec<RowTarget>, Option<(u16, u16)>);
 
 /// 替换输入区的视图（列表、审批与提问）；没有视图时返回 None。光标只有提问的“其他”行聚焦时有
-/// （tui.md §7.6），别的视图隐藏光标。
-fn view_lines(app: &App, width: usize, height: usize, now_ms: u64) -> Option<ViewLines> {
+/// （tui.md §7.6），别的视图隐藏光标。`rows` 是终端的行数（带预览的题按它限制预览框，工作线 F72）。
+fn view_lines(
+    app: &App,
+    width: usize,
+    height: usize,
+    rows: usize,
+    now_ms: u64,
+) -> Option<ViewLines> {
     if let Some(Overlay::Login(view)) = &app.overlay {
         let lines = super::login::lines(view, app.strings, &app.palette, width);
         return Some((lines, Vec::new(), None));
@@ -46,6 +52,19 @@ fn view_lines(app: &App, width: usize, height: usize, now_ms: u64) -> Option<Vie
             .collect();
         return Some((lines, targets, None));
     }
+    // 切到完全访问的确认框（tui.md §7.8）：局部的框，上面的对话照常显示。
+    if let Some(Overlay::YoloConfirm(confirm)) = &app.overlay {
+        let view = View {
+            palette: &app.palette,
+            strings: app.strings,
+            lang: app.lang,
+            width,
+            height: rows,
+            now_ms,
+        };
+        let lines = super::yolo_confirm::lines(confirm, &view, height);
+        return Some((lines, Vec::new(), None));
+    }
     if let Some(Overlay::List(list)) = &app.overlay {
         let (lines, items) = list.lines(width, height, app.lang, &app.palette);
         let targets = items
@@ -55,7 +74,7 @@ fn view_lines(app: &App, width: usize, height: usize, now_ms: u64) -> Option<Vie
         return Some((lines, targets, None));
     }
     // 扣住的同伴消息（cross-session.md §2.6）：没有待回答的交互时显示批准框，替换输入区。
-    if app.view.pending().is_none()
+    if app.pending().is_none()
         && let Some(held) = app.view.peer_held()
     {
         let view = View {
@@ -63,19 +82,21 @@ fn view_lines(app: &App, width: usize, height: usize, now_ms: u64) -> Option<Vie
             strings: app.strings,
             lang: app.lang,
             width,
+            height: rows,
             now_ms,
         };
         let (lines, _) =
             super::peer_view::lines(held, app.view.peer_held_count(), app.peer_choice, &view);
         return Some((lines, Vec::new(), None));
     }
-    let (_, request) = app.view.pending()?;
+    let (_, request) = app.pending()?;
     let interaction = app.interaction.as_ref()?;
     let view = View {
         palette: &app.palette,
         strings: app.strings,
         lang: app.lang,
         width,
+        height: rows,
         now_ms,
     };
     let (lines, options) = interaction.lines(request, &view);
@@ -105,7 +126,7 @@ pub(super) fn bottom_lines(
     now: Instant,
     now_ms: u64,
 ) -> Bottom {
-    if let Some((lines, targets, cursor)) = view_lines(app, width, max_bottom, now_ms) {
+    if let Some((lines, targets, cursor)) = view_lines(app, width, max_bottom, height, now_ms) {
         return Bottom {
             lines,
             cursor,

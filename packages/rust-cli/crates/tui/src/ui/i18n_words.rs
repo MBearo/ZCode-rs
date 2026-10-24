@@ -6,7 +6,8 @@ use rust_cli_kernel_api::permission::PermissionMode;
 
 use super::Lang;
 
-/// 权限模式的显示名称。
+/// 权限模式的显示名称。变更前确认、自主模式、完全访问、自动编辑、计划模式是 App 的 `mode.label.glm.*` 原文（工作线
+/// F76 核对过）。
 pub fn mode_label(lang: Lang, mode: PermissionMode) -> &'static str {
     match (mode, lang) {
         (PermissionMode::Default, Lang::En) => "Ask before changes",
@@ -24,6 +25,20 @@ pub fn mode_label(lang: Lang, mode: PermissionMode) -> &'static str {
         (PermissionMode::DontAsk, Lang::Zh) => "不询问",
         (PermissionMode::BypassPermissions, Lang::En) => "Full access",
         (PermissionMode::BypassPermissions, Lang::Zh) => "完全访问",
+    }
+}
+
+/// `/mode` 选择器里模式的说明（工作线 F76）：App 的 `mode.description.glm.{build,guarded,yolo}` 原文
+/// （`packages/ui/src/i18n/locales/en-US.ts` / `zh-CN.ts`；自主模式那句没有句点，照原文）。只有选择器里的三个模式有。
+pub fn mode_description(lang: Lang, mode: PermissionMode) -> &'static str {
+    match (mode, lang) {
+        (PermissionMode::Default, Lang::En) => "Ask before file changes.",
+        (PermissionMode::Default, Lang::Zh) => "改文件前先问我。",
+        (PermissionMode::Guarded, Lang::En) => "Ask when there’s risk",
+        (PermissionMode::Guarded, Lang::Zh) => "在有风险时询问",
+        (PermissionMode::BypassPermissions, Lang::En) => "Run with fewer confirmations.",
+        (PermissionMode::BypassPermissions, Lang::Zh) => "减少确认次数。",
+        _ => "",
     }
 }
 
@@ -217,5 +232,21 @@ pub fn asked_by(lang: Lang, name: &str) -> String {
         (Lang::Zh, "") => "来自子代理".to_owned(),
         (Lang::En, name) => format!("from the {name} agent"),
         (Lang::Zh, name) => format!("来自 {name} 子代理"),
+    }
+}
+
+/// 已关闭的会话里后台子代理的询问（docs/specs/rust-cli/agents.md §4.1.2，工作线 F72）：另标出会话的标题。
+pub fn asked_by_session(lang: Lang, name: &str, session: &str) -> String {
+    let agent = match (lang, name.trim()) {
+        (Lang::En, "") => "a subagent".to_owned(),
+        (Lang::En, name) => format!("the {name} agent"),
+        (Lang::Zh, "") => "子代理".to_owned(),
+        (Lang::Zh, name) => format!("{name} 子代理"),
+    };
+    match (lang, session.trim()) {
+        (Lang::En, "") => format!("from {agent} in an earlier session"),
+        (Lang::En, title) => format!("from {agent} in session \"{title}\""),
+        (Lang::Zh, "") => format!("来自之前的会话的 {agent}"),
+        (Lang::Zh, title) => format!("来自会话「{title}」的 {agent}"),
     }
 }

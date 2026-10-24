@@ -32,6 +32,34 @@ pub fn prune(ctx: &Commit<'_>) -> Result<(), StoreError> {
     usage::prune(ctx.conn, now.saturating_sub(usage::RETENTION_MS)).storage()
 }
 
+/// 用量是观测（usage.md §2.5，工作线 F77）：`write` 在一个 savepoint 里执行；失败时只回退这个 savepoint、记 warn
+/// （`event` 用 Node 的名字），返回 Ok，这一批其余的事实照常提交（Node 的用量写入失败也只记日志）。
+///
+/// 缺陷修复：以前用量行失败时整批回滚——主请求的回复不落库、回合以存储错误结束，日志里没有一行（库里的
+/// `model_usage` 缺 `variant` 列时每个回合都这样）。SQLite 已经自己回滚了整个事务（磁盘满、IO 错误等）时 savepoint
+/// 不在了，`rollback to` 失败，返回原来的错误，整批照旧失败。
+pub fn observe(
+    ctx: &Commit<'_>,
+    event: &'static str,
+    write: impl FnOnce() -> Result<(), StoreError>,
+) -> Result<(), StoreError> {
+    ctx.conn
+        .execute_batch("savepoint rust_cli_usage")
+        .storage()?;
+    let Err(error) = write() else {
+        return ctx.conn.execute_batch("release rust_cli_usage").storage();
+    };
+    if ctx
+        .conn
+        .execute_batch("rollback to rust_cli_usage; release rust_cli_usage")
+        .is_err()
+    {
+        return Err(error);
+    }
+    tracing::warn!(event, session = %ctx.session, reason = %error, "the usage was not stored");
+    Ok(())
+}
+
 fn status(status: CallStatus) -> &'static str {
     match status {
         CallStatus::Completed => "completed",
@@ -284,3 +312,7 @@ pub fn turn_ended(ctx: &Commit<'_>, ended: CallStatus) -> Result<(), StoreError>
 #[cfg(test)]
 #[path = "usage_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "usage_observe_tests.rs"]
+mod observe_tests;

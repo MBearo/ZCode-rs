@@ -17,11 +17,13 @@ mod anthropic_shape;
 mod anthropic_stream;
 mod anthropic_write;
 mod attribution;
-mod count;
 mod endpoint;
 mod idle;
 mod media;
 mod metadata;
+mod model_io;
+mod model_io_reply;
+mod model_io_tape;
 mod openai_blocks;
 mod openai_chat;
 mod openai_chat_stream;
@@ -43,8 +45,7 @@ use futures_util::future::{BoxFuture, FutureExt};
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::model::{
-    CountTokensRequest, ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection,
-    ModelStreamItem,
+    ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection, ModelStreamItem,
 };
 use rust_cli_kernel_api::provider::{ModelCapabilities, ModelEndpoints};
 use rust_cli_net::Egress;
@@ -55,6 +56,7 @@ pub use idle::{
     BYTE_IDLE_MAX, BYTE_IDLE_MIN, ByteIdle, EVENT_IDLE_FLOOR, STALL_NOTICE, StreamIdle,
 };
 pub use metadata::DeviceIdSource;
+pub use model_io::{ModelIoRecord, ModelIoSink};
 pub use profiles::ANTHROPIC_OFFICIAL_BASE_URL;
 pub use request_headers::{RequestHeaders, RequestIdSource, SourceFacts, source_headers};
 pub use rust_cli_net::retry::RetryPolicy;
@@ -85,6 +87,7 @@ impl ProviderModel {
                 max_output_tokens: None,
                 device: None,
                 headers: None,
+                model_io: None,
             }),
         }
     }
@@ -167,6 +170,16 @@ impl ProviderModel {
         self
     }
 
+    /// 模型轨迹的记录方（工作线 F91，docs/specs/rust-cli/model-io.md §6）：每次 HTTP 发送交一条记录。入口按模式给；
+    /// 没有时不记（测试、测试环境）。
+    #[must_use]
+    pub fn with_model_io(mut self, sink: Arc<dyn ModelIoSink>) -> Self {
+        if let Ok(route) = &mut self.route {
+            route.model_io = Some(sink);
+        }
+        self
+    }
+
     pub fn with_stream_idle(mut self, idle: StreamIdle) -> Self {
         if let Ok(route) = &mut self.route {
             route.idle = idle;
@@ -224,23 +237,6 @@ impl ModelPort for ProviderModel {
                 async move { endpoints.capabilities(&selection).await }.boxed()
             }
             Err(_) => async { None }.boxed(),
-        }
-    }
-
-    /// `/context` 的计数（docs/specs/rust-cli/context-usage.md §3）。
-    fn count_tokens(
-        &self,
-        request: CountTokensRequest,
-        cancel: CancellationToken,
-    ) -> BoxFuture<'static, Result<u64, ModelError>> {
-        match &self.route {
-            Ok(route) => count::count(route.clone(), request, cancel).boxed(),
-            Err(reason) => {
-                let error = ModelError::Authentication {
-                    message: reason.clone(),
-                };
-                async move { Err(error) }.boxed()
-            }
         }
     }
 }

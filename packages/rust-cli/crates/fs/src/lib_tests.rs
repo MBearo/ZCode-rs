@@ -187,7 +187,7 @@ async fn subdirectories_lists_child_directories_by_name() {
 }
 
 #[tokio::test]
-async fn file_len_and_file_names_tolerate_missing_paths() {
+async fn file_len_modified_and_names_tolerate_missing_paths() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("sub")).unwrap();
     std::fs::write(dir.path().join("b.jsonl"), b"12345").unwrap();
@@ -197,6 +197,22 @@ async fn file_len_and_file_names_tolerate_missing_paths() {
         Some(5)
     );
     assert_eq!(file_len(&dir.path().join("missing")).await.unwrap(), None);
+    // 修改时间（F91）：文件不存在时为空。
+    let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    std::fs::File::options()
+        .write(true)
+        .open(dir.path().join("b.jsonl"))
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
+    assert_eq!(
+        file_modified(&dir.path().join("b.jsonl")).await.unwrap(),
+        Some(when)
+    );
+    assert_eq!(
+        file_modified(&dir.path().join("missing")).await.unwrap(),
+        None
+    );
     // 只列普通文件，按名字排序；目录不存在时为空。
     assert_eq!(
         file_names(dir.path()).await.unwrap(),

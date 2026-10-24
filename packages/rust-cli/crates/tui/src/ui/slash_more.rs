@@ -15,20 +15,23 @@ pub fn is_exit_word(text: &str) -> bool {
     EXIT_WORDS.contains(&text.trim())
 }
 
-/// Node 的模式名（`/mode`，README §5 的映射；修复线 F20：guarded 是 guarded，`plan` 只打开 plan 开关）。
-/// 名字表在 kernel-api（F58）；`/mode` 照 Node 不收 `auto`（Node `/mode` 只有 plan / build / edit / guarded / yolo）。
+/// `/mode` 收的 Node 模式名（README §5 的映射）。工作线 F76（用户决定 2026-10-23）：照 App 只有 build / guarded / yolo
+/// 三个（以前还收 edit；`auto` 一直不收）；`plan` 照旧打开 plan 开关（不列在选项里，同 `/plan`）。
 fn node_mode(name: &str) -> Option<PermissionMode> {
-    PermissionMode::from_node_name(name).filter(|mode| *mode != PermissionMode::Auto)
+    match name {
+        "build" | "guarded" | "yolo" | "plan" => PermissionMode::from_node_name(name),
+        _ => None,
+    }
 }
 
-fn node_name(mode: PermissionMode) -> &'static str {
-    mode.node_name()
-}
-
-/// Node `formatAvailableCommandCenterModes`：菜单里不再列 edit。
-const NODE_MODES: &str = "plan, build, guarded, yolo";
-/// `/mode` 选择器的条目（与 [`NODE_MODES`] 同序）。
-const NODE_MENU: [&str; 4] = ["plan", "build", "guarded", "yolo"];
+/// 可用模式的说法（“不支持的模式”提示与命令表的参数提示同一组）。
+const NODE_MODES: &str = "build, guarded, yolo";
+/// `/mode` 选择器的三个模式，照 App 菜单的顺序（`packages/shared/src/zcode-agent-model-state.ts` 去掉 plan）。
+const MENU: [PermissionMode; 3] = [
+    PermissionMode::Default,
+    PermissionMode::Guarded,
+    PermissionMode::BypassPermissions,
+];
 
 impl App {
     /// L28 的命令；不是 L28 的命令返回 None（由 `slash` 继续处理）。
@@ -102,29 +105,30 @@ impl App {
     }
 
     /// Node `/mode`：不带参数时打开选择器（修复线 F26，用户决定：与 `/model` 同一种列表，当前值打 ✔），带参数时
-    /// 直接切换（以 `ModeChanged` / `PlanChanged` 为准）。当前模式是权限模式（同 Node `getMode()`）。
+    /// 直接切换（以 `ModeChanged` / `PlanChanged` 为准）。工作线 F76：选择器照 App 的菜单只列三个模式，名称与说明是
+    /// App 的原文（名称一行、说明在下一行）；提示里的模式名也用 App 的名称。Node 写的 edit 会话不在选择器里，没有打勾。
     pub(super) fn mode_command(&mut self, args: &str) -> Option<Action> {
-        let current = node_name(self.view.mode());
         let zh = self.lang == Lang::Zh;
         if args.is_empty() {
-            let items = NODE_MENU
+            let current = self.view.mode();
+            let items = MENU
                 .iter()
-                .map(|name| Item {
-                    label: (*name).to_owned(),
-                    description: node_mode(name)
-                        .map(|mode| super::i18n::mode_label(self.lang, mode).to_owned())
-                        .unwrap_or_default(),
-                    current: *name == current,
-                    value: (*name).to_owned(),
+                .map(|mode| Item {
+                    label: super::i18n::mode_label(self.lang, *mode).to_owned(),
+                    description: super::i18n::mode_description(self.lang, *mode).to_owned(),
+                    current: *mode == current,
+                    value: mode.node_name().to_owned(),
                     ..Item::default()
                 })
                 .collect();
+            // 副标题写当前模式（App 的名称；Node 写的 edit 会话不在选项里，靠这一行看出来）。
+            let label = super::i18n::mode_label(self.lang, current);
             let (title, subtitle) = if zh {
-                ("模式", format!("当前模式：{current}。选择要切换的模式。"))
+                ("模式", format!("当前模式：{label}。选择要切换的模式。"))
             } else {
                 (
                     "Mode",
-                    format!("Current mode: {current}. Choose a mode to switch to."),
+                    format!("Current mode: {label}. Choose a mode to switch to."),
                 )
             };
             self.overlay = Some(Overlay::List(
@@ -133,8 +137,7 @@ impl App {
             ));
             return None;
         }
-        let requested = args.to_ascii_lowercase();
-        let Some(mode) = node_mode(&requested) else {
+        let Some(mode) = node_mode(&args.to_ascii_lowercase()) else {
             self.info(if zh {
                 format!("不支持的模式：{args}。可用模式：{NODE_MODES}。")
             } else {
@@ -142,12 +145,18 @@ impl App {
             });
             return None;
         };
-        self.info(if zh {
-            format!("模式已切换为 {requested}。")
+        // 切到完全访问先弹确认框，确认后才提示与切换（tui.md §7.8，工作线 F87）。
+        self.switch_mode(mode, true)
+    }
+
+    /// `/mode` 切换时的提示（模式名是 App 的名称）。
+    pub(super) fn mode_switched(&mut self, mode: PermissionMode) {
+        let label = super::i18n::mode_label(self.lang, mode);
+        self.info(if self.lang == Lang::Zh {
+            format!("模式已切换为 {label}。")
         } else {
-            format!("Mode switched to {requested}.")
+            format!("Mode switched to {label}.")
         });
-        Some(Action::SetMode(mode))
     }
 
     /// `/copy [N]`：第 N 新的回复（1 是最后一条）。

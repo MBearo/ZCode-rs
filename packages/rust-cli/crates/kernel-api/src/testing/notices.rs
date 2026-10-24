@@ -9,11 +9,13 @@ use tokio::sync::mpsc;
 
 use super::lock;
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::env_shell::{ShellNotice, ShellState};
 use crate::ids::{OperationId, SessionId, ShellTaskId};
+use crate::local_services::{Fetch, Git};
+use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
 
 pub struct NoticeEnvironment {
     sender: mpsc::UnboundedSender<ShellNotice>,
@@ -73,6 +75,8 @@ pub fn shell_notice(seq: u64, task: &str) -> ShellNotice {
         output: EnvPath::new(format!("/tmp/{task}.output")),
         outcome: Outcome::Completed,
         exit_code: Some(0),
+        kind: Default::default(),
+        output_bytes: 0,
     }
 }
 
@@ -83,11 +87,14 @@ fn unused() -> EnvError {
 }
 
 #[async_trait]
-impl Environment for NoticeEnvironment {
+impl EnvInfo for NoticeEnvironment {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Files for NoticeEnvironment {
     async fn read_file(
         &self,
         _workspace: &WorkspaceRef,
@@ -104,7 +111,10 @@ impl Environment for NoticeEnvironment {
     ) -> Result<WriteReceipt, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Commands for NoticeEnvironment {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
@@ -134,7 +144,10 @@ impl Environment for NoticeEnvironment {
         lock(&self.closed).push((session.clone(), forget));
         Ok(())
     }
+}
 
+#[async_trait]
+impl Shell for NoticeEnvironment {
     async fn shell_state(
         &self,
         workspace: &WorkspaceRef,
@@ -189,3 +202,10 @@ impl Environment for NoticeEnvironment {
         Ok(())
     }
 }
+
+impl Search for NoticeEnvironment {}
+impl Background for NoticeEnvironment {}
+impl Checkpoints for NoticeEnvironment {}
+impl Pdf for NoticeEnvironment {}
+impl Git for NoticeEnvironment {}
+impl Fetch for NoticeEnvironment {}

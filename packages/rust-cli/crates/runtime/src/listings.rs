@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::listing::{ListingEntry, ListingSource, Listings};
+use rust_cli_kernel_api::listing::{InvokedSkill, ListingEntry, ListingSource, Listings};
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::orchestration::{ContextRequest, OrchestrationError};
 
@@ -41,4 +41,33 @@ impl ListingSource for CombinedListings {
         }
         Ok(out)
     }
+
+    /// 输入中间的 skill 提及（ext.md §2.8）：各来源的名字按来源的顺序接起来（只有 ext 给出）。
+    async fn skill_mentions(
+        &self,
+        request: &ContextRequest,
+        input: &str,
+    ) -> Result<Vec<String>, OrchestrationError> {
+        let mut out = Vec::new();
+        for source in &self.0 {
+            out.extend(source.skill_mentions(request, input).await?);
+        }
+        Ok(out)
+    }
+
+    async fn invoked_skills(
+        &self,
+        request: &ContextRequest,
+        history: &[Message],
+    ) -> Result<Vec<InvokedSkill>, OrchestrationError> {
+        let mut out = Vec::new();
+        for source in &self.0 {
+            out.extend(source.invoked_skills(request, history).await?);
+        }
+        Ok(out)
+    }
 }
+
+#[cfg(test)]
+#[path = "listings_tests.rs"]
+mod tests;

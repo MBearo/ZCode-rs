@@ -12,8 +12,8 @@
 //    tui-manage.md §1.1、config.md §2.2），
 //    Node 读出生成的标题（titles.md）；
 //    rust-cli 再冷读取，结果与 Node 一致。
-// 7. Node 的 `/fork`（session-lifecycle.md §6.5，`node-interop-fork.mjs`）：rust-cli 分出的会话 Node 能读、能续写，
-//    Node 分出的会话 rust-cli 能读。
+// 7. `/fork`（session-lifecycle.md §6.5，`node-interop-fork.mjs`）：rust-cli 从一条用户输入分出的会话（F75，不带
+//    checkpoint）Node 能读、能续写，Node 分出的会话 rust-cli 能读。
 // 8. 新会话的默认模型（workspace-trust.md §3，`node-interop-model.mjs`）：五种缺省下两边解析出同一个初始模型，
 //    一边写、另一边解析，同一份输入写出的文本逐字节相同。
 // 9. 用量表（usage.md §9，`node-interop-usage.mjs`）：rust-cli 写的三张表与 Node 同样输入写的行逐列相同、Node 的
@@ -24,7 +24,7 @@
 //    存储位置（真实的 `zcode -p`）；提交前被中断的输入（修复线 F37）与 esc 撤回的会话（修复线 F38，只有
 //    `session.revert`）Node 能读、能续写。
 // 11. Node 的真实运行时（修复线 F12，`node-interop-runtime.mjs`）：bootstrap 的 `createZCodeApp` 跑真实回合、回退、
-//    文件回退与压缩，与真实的 `zcode -p` 和 `node_kernel`（`/compact`、`/rewind`、`/branch`）轮流写同一个会话，
+//    文件回退与压缩，与真实的 `zcode -p` 和 `node_kernel`（`/compact`、`/rewind`、`/fork`、`--fork-session` 的 `Fork`）轮流写同一个会话，
 //    比模型请求里的历史、冷读取、消息结构、App 协议 schema 与两边的改动摘要。
 // 12. 双进程并发写与迁移竞争（修复线 F12，`node-interop-race.mjs`）：不同会话、同一会话、锁与等待、迁移竞争。
 // 13. 会话的改名与删除（修复线 F29，`node-interop-manage.mjs`）：两边改名、软删除后另一边读到的标题、来源与列表一致，
@@ -40,6 +40,24 @@
 //    rust-cli 的请求用同一个值、`metadata.user_id` 与 Node 算出的逐字节相同；rust-cli 先生成，Node 读到同一个值。
 // 17. 模型请求头（工作线 F64，`node-interop-headers.mjs`，model.md §2.4）：Node 生成的对照夹具没有过时；真实的 `zcode -p`
 //    发出的来源头与每请求头与 Node 的组装函数在同一组事实下给出的相同。
+// 18. 续写占位（工作线 F77、F79，`node-interop-sentinel.mjs`，node-store.md §4.2.1）：rust-cli 落库的
+//    `No response requested.`（与新输入同一批、会话里切过去时单独一批两种写入时机）Node 读得出、进模型上下文，过 App
+//    的 strict schema，App 的投影不显示。
+// 19. 工具结果的位置键（工作线 F81，`node-interop-tool-order.mjs`，node-store.md §4.6）：Node 读得出带位置键的 tool part
+//    与续写时补的中断结果，过 App 的 strict schema；Node 续写之后 rust-cli 冷读取的顺序不变。
+// 20. 压缩前已加载的工具（工作线 F82，`node-interop-compact.mjs`，compact.md §3.5）：存在 `compaction` part 的
+//    `metadata.rustCli`，Node 读得出、strict 的 `compactBoundary` 不变、App 的 schema 通过，rust-cli 读回。
+// 21. Node 写的被杀会话（工作线 F86、F88，`node-interop-node-killed.mjs`，node-store.md §4.6、session-lifecycle.md
+//    §6.3.2）：Node 写一个被杀的步骤（running、completed、pending 三个没有 rust-cli 标记的 tool part），真实的
+//    `zcode -p -r` 续写两轮，请求里有只在内存补的中断结果（Node 的文字，按声明顺序夹在 Node 写的结果中间）、两轮的前段
+//    相同，库里的 tool part 不变；Node 续写时自己补的结果与 rust-cli 的相同。要模型替身与临时 HOME，作为第十一段的场景跑。
+// 22. 用过本地 ToolSearch 的会话（工作线 F84，`node-interop-tool-search.mjs`，tools-more.md §3.2.2、§3.6；在第十一段的
+//    子进程里跑）：rust-cli 在不支持 `tool_reference` 的端点上用 ToolSearch 加载一个工具并调用它，Node 真实回合续写时
+//    看到的结果是同一句文字，rust-cli 再续写时那个工具仍以普通定义发出；两边冷读取相同、App 的 schema 通过。
+// 23. 模型轨迹（工作线 F91，`node-interop-model-io.mjs`，model-io.md §2.3、§8）：真实的 `zcode -p`（一次 500 重发、一次调用
+//    工具、一次文字）写的 `cli/debug/model-io-<会话>.jsonl`，App 的 `readModelTrajectory` 读出三条记录、不抛异常：来源分类、
+//    模型、回复的汇总与失败那次的错误按 App 的映射读出；文件里的压缩是 Node 的 `full` 与 `delta`。工作线 F93：回复字段是
+//    Node 的形状，App 读出回复文字、工具调用（名字与参数）、停止原因与用量。
 // 4. 界面语言（tui.md §7.1）：rust-cli 写 `~/.zcode/cli/config.json` 的 `ui.locale`（crates/platform/examples/
 //    ui_locale.rs），Node 的 `loadFileConfig` 读出同一个值、其余字段不变；Node 的 `updateUiLocaleInFileConfig`
 //    改写后 rust-cli 读出；同一份输入两边写出的文本逐字节相同。
@@ -54,8 +72,11 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { checkCompat, checkProviderImport, checkStoragePaths } from "./node-interop-compat.mjs";
+import { checkCompactCarried } from "./node-interop-compact.mjs";
 import { checkFork } from "./node-interop-fork.mjs";
 import { checkManage } from "./node-interop-manage.mjs";
+import { checkSentinel } from "./node-interop-sentinel.mjs";
+import { checkToolOrder } from "./node-interop-tool-order.mjs";
 import { nodeHistoryReader, rustText } from "./node-interop-history.mjs";
 import {
   checkDefaultModel,
@@ -68,6 +89,7 @@ import { checkRace } from "./node-interop-race.mjs";
 import { checkAppLogin } from "./node-interop-app-login.mjs";
 import { checkDevice } from "./node-interop-device.mjs";
 import { checkHeaders } from "./node-interop-headers.mjs";
+import { checkModelIo } from "./node-interop-model-io.mjs";
 import { checkTeam } from "./node-interop-team.mjs";
 import { buildRuntimeBinaries, checkRuntime } from "./node-interop-runtime.mjs";
 import { checkUsage } from "./node-interop-usage.mjs";
@@ -181,6 +203,7 @@ async function executionState(store, sessionID) {
 }
 
 const dir = await mkdtemp(join(tmpdir(), "rust-cli-node-interop-"));
+let sentinel;
 try {
   const written = rust("write", dir);
   const dbPath = join(dir, "cli/db/db.sqlite");
@@ -441,6 +464,8 @@ try {
       rustText(compactedLoaded.messages).map((item) => item.role),
       ["user", "assistant", "tool", "user", "user", "assistant"],
     );
+    // 第二十段：压缩前已加载的工具（工作线 F82，`node-interop-compact.mjs`）。
+    await checkCompactCarried({ nodeRoot, store, dir, rust, sessionID: compactedID, expectEqual });
 
     // 第五段：checkpoint 过 Node 的 strict schema，artifact 能读回，App 的冷改动摘要算得出；
     // 回退游标是 Node 的行（工具结果没有行），活动分支与本工程冷读取一致（session-lifecycle.md §4、§5）。
@@ -687,7 +712,7 @@ try {
     );
     expectEqual("open work after Node continued", openWork(toolsLoaded), expectedWork);
 
-    // 第七段：Node 的 `/fork`。
+    // 第七段：`/fork`（按用户输入分叉）。
     await checkFork({
       nodeRoot,
       store,
@@ -743,6 +768,29 @@ try {
     });
     // 第十三段：会话的改名与删除（修复线 F29，node-interop-manage.mjs）。
     await checkManage({ store, dir, rust, binary, expectEqual });
+    // 第十八段：续写占位（工作线 F77、F79，node-interop-sentinel.mjs）。
+    sentinel = await checkSentinel({
+      nodeRoot,
+      store,
+      artifactStore,
+      dir,
+      rust,
+      nodeHistory,
+      rustText,
+      expectEqual,
+    });
+    // 第十九段：工具结果的位置键（工作线 F81，node-interop-tool-order.mjs）。
+    await checkToolOrder({
+      nodeRoot,
+      store,
+      artifactStore,
+      dir,
+      rust,
+      nodeHistory,
+      rustText,
+      expectEqual,
+      node: { nodeRuntime, persistence, createMessageId, createPartId, createTurnId },
+    });
   } finally {
     store.close();
   }
@@ -761,7 +809,8 @@ try {
     expectEqual,
   });
   await checkMcpEnabled({ ...settings, home: join(dir, "mcp-home") });
-  // 第十一段：Node 的真实运行时（子进程，临时 HOME）。
+  // 第十一段：Node 的真实运行时（子进程，临时 HOME）；第二十一段（Node 写的被杀会话，F86）与第二十二段（本地
+  // ToolSearch 的会话，F84）是它的场景。
   const runtimeBinaries = buildRuntimeBinaries();
   await checkRuntime({
     nodeRoot,
@@ -803,6 +852,13 @@ try {
     expectEqual,
     zcode: runtimeBinaries.zcode,
   });
+  // 第二十三段：模型轨迹（工作线 F91）。
+  const modelIo = await checkModelIo({
+    nodeRoot,
+    base: join(dir, "model-io"),
+    expectEqual,
+    zcode: runtimeBinaries.zcode,
+  });
   if (failures.length) {
     console.error(`node-interop: ${failures.length} mismatch(es)\n${failures.join("\n")}`);
     process.exitCode = 1;
@@ -816,7 +872,7 @@ try {
         "with the same file text; the /effort and /model default model selection round-trips " +
         "both ways with the same file text, and both sides resolve the same initial model for " +
         "new sessions (Node resolveInitialModelSelection); /mcp enable and disable write the enabled field Node reads; " +
-        "a rust-cli fork is read and continued by Node, and a Node fork is read by rust-cli; " +
+        "a rust-cli fork from a user input keeps that turn and is read and continued by Node, and a Node fork is read by rust-cli; " +
         "the usage rows rust-cli writes (the session title row under the Node name session_title, " +
         "outside turn_usage as Node's recordModelUsageFact and recordTurnUsageFact write it) match " +
         "Node's rows column by column and Node's usage " +
@@ -844,7 +900,17 @@ try {
         `(${device.rustFirst}); the model request headers follow Node: the golden fixtures Node's header ` +
         "builders generate are up to date, and a real `zcode -p` sends the same source headers " +
         `(ZCode/${headers.version}, ${headers.locale}, ${headers.zone}) and per-request headers as Node builds ` +
-        "for the same facts.",
+        "for the same facts; the tools loaded before a compaction ride on the compaction part's metadata, " +
+        "which Node reads while its strict compactBoundary and the App schema stay unchanged, and rust-cli reads them back; " +
+        "the resume placeholder rust-cli stores (with the next input, or alone when the " +
+        "session is resumed from inside the TUI) is read by Node into the model context, " +
+        "passes the App schema and is not shown by the App's projections (Node's standalone CLI /resume " +
+        `replay shows it: ${sentinel.nodeCliReplayShowsIt}); ` +
+        "a session Node left mid-tool is continued twice by `zcode -p -r` with Node's own interrupted results, " +
+        "text and position, only in the model requests, while Node's tool parts stay as Node wrote them; " +
+        `the App's readModelTrajectory reads the ${modelIo.records} model-io records a real \`zcode -p\` wrote ` +
+        "(a retried 500, a tool call and a reply) with Node's compaction and without errors, " +
+        "including the reply text and the tool calls in Node's shape.",
     );
   }
 } finally {

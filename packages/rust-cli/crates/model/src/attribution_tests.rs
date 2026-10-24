@@ -105,7 +105,7 @@ fn session_types_and_missing_parts() {
     assert_eq!(headers.last(), Some(&(SESSION_ID, "a1".to_owned())));
     assert!(!names(&headers).contains(&QUERY_ID));
 
-    let none = headers_of(&Origin::none(), "http://127.0.0.1:9");
+    let none = headers_of(&Origin::default(), "http://127.0.0.1:9");
     assert_eq!(names(&none), [REQUEST_ID, SESSION_TYPE, TRACE_ID]);
     assert_eq!(none[1].1, "other");
 

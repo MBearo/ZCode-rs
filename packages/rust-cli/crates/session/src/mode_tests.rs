@@ -16,8 +16,8 @@ use rust_cli_kernel_api::session_api::{
 use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, SessionStore};
 use rust_cli_kernel_api::testing::{
     DirectExecutor, FixedClock, FixedContext, ListTools, MemoryArtifacts, MemoryStore,
-    NeverCompact, NoHooks, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
-    text_response, tool_use_response,
+    NeverCompact, NoHooks, ScriptedModel, SequentialIds, UnusedEnvironment, local_services,
+    machine, selection, text_response, tool_use_response,
 };
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
@@ -91,6 +91,7 @@ fn spawn(
     mode: PermissionMode,
 ) -> Session {
     let ids = Arc::new(SequentialIds::default());
+    let env = Arc::new(UnusedEnvironment);
     let runner = Arc::new(QueryLoop::new(QueryParts {
         model: model.clone(),
         context: Arc::new(FixedContext(Vec::new())),
@@ -100,12 +101,14 @@ fn spawn(
         hooks: Arc::new(NoHooks),
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: store.clone(),
         generation: Generation::new("g1"),
         non_interactive: false,
         limits: rust_cli_query::RequestLimits::default(),
     }));
+    let env = Arc::new(UnusedEnvironment);
     Session::spawn(
         SessionDeps {
             agents: Arc::new(rust_cli_kernel_api::agents::NoAgentSignals),
@@ -114,7 +117,8 @@ fn spawn(
             ids,
             runner,
             compactor: Arc::new(NeverCompact),
-            env: Arc::new(UnusedEnvironment),
+            machine: machine(env.clone()),
+            local: local_services(env),
             max_turns: None,
             hooks: Arc::new(NoHooks),
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
@@ -129,6 +133,7 @@ fn spawn(
             released: Arc::new(crate::NothingToRelease),
             directory_rules: Arc::new(rust_cli_kernel_api::orchestration::NoDirectoryRules),
             peers: crate::PeerDeps::off(),
+            detached: None,
         },
         SessionState {
             meta: meta(),
@@ -138,6 +143,7 @@ fn spawn(
             checkpoints: Vec::new(),
             start: StartSource::Startup,
             turn: None,
+            last_turn_failed: false,
         },
         Opened::Created,
     )

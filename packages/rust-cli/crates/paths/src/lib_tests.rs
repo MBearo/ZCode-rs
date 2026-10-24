@@ -171,6 +171,51 @@ fn the_update_cache_lives_under_the_storage_root() {
     );
 }
 
+/// 执行器的目录（remote-exec.md §19.4）：在用户根下，不随 `storage.dir`。
+#[test]
+fn the_executor_lives_under_the_user_root() {
+    for executor in [
+        resolve(None, None).executor(),
+        resolve(None, Some("data")).executor(),
+    ] {
+        let at = |path: StoragePath| path.as_path().to_path_buf();
+        assert_eq!(
+            executor.dir().as_path(),
+            Path::new("/home/dev/.zcode/rust-cli/exec")
+        );
+        assert_eq!(
+            at(executor.socket()),
+            Path::new("/home/dev/.zcode/rust-cli/exec/executor.sock")
+        );
+        assert_eq!(
+            at(executor.lock()),
+            Path::new("/home/dev/.zcode/rust-cli/exec/executor.lock")
+        );
+        assert_eq!(
+            at(executor.spawn_lock()),
+            Path::new("/home/dev/.zcode/rust-cli/exec/spawn.lock")
+        );
+        assert_eq!(
+            at(executor.ledger()),
+            Path::new("/home/dev/.zcode/rust-cli/exec/ledger")
+        );
+        assert_eq!(
+            at(executor.logs()),
+            Path::new("/home/dev/.zcode/rust-cli/exec/log")
+        );
+        assert_eq!(
+            at(executor.binary("0.1.0")),
+            Path::new("/home/dev/.zcode/rust-cli/exec/bin/0.1.0/zcode-rs")
+        );
+        assert_eq!(
+            at(executor.artifact("0.1.0", "x86_64-unknown-linux-musl")),
+            Path::new(
+                "/home/dev/.zcode/rust-cli/exec/dist/0.1.0/x86_64-unknown-linux-musl/zcode-rs"
+            )
+        );
+    }
+}
+
 #[test]
 fn the_cli_config_and_the_hook_trust_store_follow_the_node_cli() {
     let paths = resolve(None, Some("data"));
@@ -226,6 +271,30 @@ fn the_plugin_storage_follows_the_node_cli() {
     assert_eq!(
         paths.plugin_storage(Some(" "), base).as_path(),
         Path::new("/home/dev/.zcode/cli/plugins")
+    );
+}
+
+/// 模型轨迹的目录（工作线 F91，model-io.md §3.2）：Node `getModelIoDir(getCliStorageRoot(resolvePath(storage.dir)))`，
+/// 开发态 `debug`、其余 `rollout`。
+#[test]
+fn the_model_io_directory_follows_the_node_cli() {
+    let paths = resolve(None, None);
+    let base = Path::new("/work/repo");
+    assert_eq!(
+        paths.model_io(None, base, false).as_path(),
+        Path::new("/home/dev/.zcode/cli/rollout")
+    );
+    assert_eq!(
+        paths.model_io(None, base, true).as_path(),
+        Path::new("/home/dev/.zcode/cli/debug")
+    );
+    assert_eq!(
+        paths.model_io(Some("data"), base, false).as_path(),
+        Path::new("/work/repo/data/cli/rollout")
+    );
+    assert_eq!(
+        paths.model_io(Some("/srv/z/cli"), base, true).as_path(),
+        Path::new("/srv/z/cli/debug")
     );
 }
 

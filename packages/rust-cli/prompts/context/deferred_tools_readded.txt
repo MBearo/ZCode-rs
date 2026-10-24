@@ -1,0 +1,1 @@
+{{count}} deferred tool{{verb}} available again in this session (announced earlier in this conversation): {{names}}. Load via ToolSearch as before.

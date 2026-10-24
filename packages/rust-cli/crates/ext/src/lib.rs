@@ -23,9 +23,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rust_cli_base::Spawner;
 use rust_cli_kernel_api::clock::{Clock, Ids};
-use rust_cli_kernel_api::env::{EnvPath, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::listing::{ListingEntry, ListingSource, Listings};
+use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::mcp::McpTransport;
 use rust_cli_kernel_api::mcp_state::{McpConnections, WAIT_FOR_MCP_SERVERS};
 use rust_cli_kernel_api::message::Message;
@@ -42,7 +43,10 @@ pub use skills::{Skill, SkillCatalog, SkillCommands, SkillSource, SkillTool};
 /// ext 用到的端口，由 runtime 注入。
 #[derive(Clone)]
 pub struct ExtPorts {
-    pub env: Arc<dyn Environment>,
+    /// skill、插件都是本机的文件（工作区、用户目录、插件缓存），经本机的端口读（runtime 从注册表的本机取，
+    /// remote-exec.md §3、§15.8.1）。
+    pub info: Arc<dyn EnvInfo>,
+    pub files: Arc<dyn Files>,
     pub ids: Arc<dyn Ids>,
     /// Skill 的 `!` 命令用判决链（带 skill 的 `allowed-tools`，ext.md §2.5）。
     pub gate: Arc<PolicyGate>,
@@ -74,14 +78,15 @@ pub struct Ext {
     commands: Arc<SkillCommands>,
     mcp: Arc<McpManager>,
     registry: Arc<ExtRegistry>,
-    env: Arc<dyn Environment>,
+    /// 插件目录（`--plugin-dir` 与入口给的候选，都在本机）。
+    files: Arc<dyn Files>,
     config: ExtConfig,
 }
 
 impl Ext {
     /// `base` 是基础工具注册表（文件、Bash 等）；Skill 的 `!` 命令用其中的 `Bash`。
     pub fn new(ports: ExtPorts, base: Arc<dyn ToolRegistry>, config: ExtConfig) -> Self {
-        let skills = Arc::new(SkillCatalog::new(ports.env.clone()));
+        let skills = Arc::new(SkillCatalog::new(ports.info.clone(), ports.files.clone()));
         let runner = base
             .find("Bash")
             .map(|bash| skills::runner(bash, ports.gate.clone(), ports.ids.clone()));
@@ -106,7 +111,7 @@ impl Ext {
             commands,
             mcp,
             registry,
-            env: ports.env,
+            files: ports.files,
             config,
         }
     }
@@ -115,6 +120,7 @@ impl Ext {
     /// 单次的 `-p`：内置 `/loop` 的 Monitor 超时随它（tools-more.md §17.1）。
     pub fn set_print_session(&self, print: bool) {
         self.skills.set_print_session(print);
+        self.mcp.set_print_session(print);
     }
 
     pub fn registry(&self) -> Arc<dyn ToolRegistry> {
@@ -149,7 +155,7 @@ impl Ext {
             return Plugins::default();
         };
         let loaded = plugins::load_all(
-            self.env.as_ref(),
+            self.files.as_ref(),
             &workspace,
             &self.config.plugin_dirs,
             &self.config.plugins,
@@ -252,6 +258,24 @@ impl ListingSource for ExtListings {
             skills,
             ..Listings::default()
         })
+    }
+
+    /// 调用过的 skill（compact.md §3.4）。
+    async fn invoked_skills(
+        &self,
+        request: &ContextRequest,
+        history: &[Message],
+    ) -> Result<Vec<rust_cli_kernel_api::listing::InvokedSkill>, OrchestrationError> {
+        Ok(self.skills.invoked(&request.workspace, history).await)
+    }
+
+    /// 输入中间的 skill 提及（ext.md §2.8）。
+    async fn skill_mentions(
+        &self,
+        request: &ContextRequest,
+        input: &str,
+    ) -> Result<Vec<String>, OrchestrationError> {
+        Ok(self.skills.mentions(&request.workspace, input).await)
     }
 
     /// 有工具快照时用快照里的（与工具同一时点，query.md §1.3）；否则取现在的。

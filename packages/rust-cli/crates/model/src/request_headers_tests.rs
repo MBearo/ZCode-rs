@@ -189,7 +189,7 @@ fn provider_headers_sit_between_the_source_and_the_request_headers() {
             ("X-Request-Id", "static"),
         ],
     );
-    let origin = crate::attribution::Origin::none();
+    let origin = crate::attribution::Origin::default();
     let http = outbound(
         &Anthropic,
         &encoded(None),
@@ -221,7 +221,7 @@ fn without_request_headers_only_the_adapter_and_provider_layers_remain() {
         &encoded(None),
         &plain,
         None,
-        &crate::attribution::Origin::none(),
+        &crate::attribution::Origin::default(),
     );
     let names: Vec<_> = wire(&http).into_iter().map(|(name, _)| name).collect();
     assert_eq!(
@@ -244,7 +244,7 @@ fn openrouter_gets_the_attribution_headers() {
             &encoded(None),
             &chat,
             Some(&ids()),
-            &crate::attribution::Origin::none(),
+            &crate::attribution::Origin::default(),
         );
         let headers = wire(&http);
         assert_eq!(find(&headers, "x-openrouter-title"), expected, "{base_url}");
@@ -263,7 +263,7 @@ fn openrouter_gets_the_attribution_headers() {
         &encoded(None),
         &configured,
         Some(&ids()),
-        &crate::attribution::Origin::none(),
+        &crate::attribution::Origin::default(),
     );
     assert_eq!(find(&wire(&http), "x-openrouter-title"), Some("Mine"));
 }
@@ -289,7 +289,7 @@ fn configured_betas_are_merged() {
             &encoded(computed),
             &beta,
             None,
-            &crate::attribution::Origin::none(),
+            &crate::attribution::Origin::default(),
         );
         assert_eq!(
             find(&wire(&http), "anthropic-beta"),
@@ -307,7 +307,7 @@ fn configured_betas_are_merged() {
         &encoded(None),
         &chat,
         None,
-        &crate::attribution::Origin::none(),
+        &crate::attribution::Origin::default(),
     );
     assert_eq!(find(&wire(&http), "anthropic-beta"), Some("C-3"));
 }

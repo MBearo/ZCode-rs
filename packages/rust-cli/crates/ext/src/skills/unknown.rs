@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
-use rust_cli_kernel_api::env::{EnvPath, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_files::StatFile;
+use rust_cli_kernel_api::machine::Files;
 
 use super::Skill;
 use super::closest::closest;
@@ -88,14 +89,14 @@ pub(crate) fn text(name: &str, skills: &[Arc<Skill>]) -> String {
 }
 
 /// 要不要加提醒：像命令名，且 `/<名字>` 不是执行环境里已有的路径（先 `stat` 它）。
-pub(crate) async fn applies(env: &dyn Environment, workspace: &WorkspaceRef, name: &str) -> bool {
+pub(crate) async fn applies(files: &dyn Files, workspace: &WorkspaceRef, name: &str) -> bool {
     if !looks_like_command(name) {
         return false;
     }
     let request = StatFile {
         path: EnvPath::new(format!("/{name}")),
     };
-    !matches!(env.stat(workspace, request).await, Ok(Some(_)))
+    !matches!(files.stat(workspace, request).await, Ok(Some(_)))
 }
 
 #[cfg(test)]

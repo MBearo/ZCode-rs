@@ -54,6 +54,7 @@ async fn a_timed_out_foreground_command_moves_to_the_background() {
             command: BackgroundCommand {
                 description: "npm test".to_owned(),
                 tool_use: Some(ToolUseId::new("toolu_1")),
+                kind: Default::default(),
             },
             deadline_ms: Some(600_000),
         })

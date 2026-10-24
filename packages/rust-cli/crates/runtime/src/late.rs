@@ -57,6 +57,21 @@ impl Compactor for LateCompactor {
         }
     }
 
+    fn blocking_limit(
+        &self,
+        history: &[Message],
+        selection: &ModelSelection,
+        failure: Option<&str>,
+    ) -> Option<String> {
+        match self.inner() {
+            Ok(inner) => inner.blocking_limit(history, selection, failure),
+            Err(error) => {
+                tracing::error!(%error, "the blocking limit was checked before assembly");
+                None
+            }
+        }
+    }
+
     async fn auto_compact(
         &self,
         request: CompactRequest,

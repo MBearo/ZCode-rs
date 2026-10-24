@@ -1,5 +1,6 @@
 //! 终端界面的组件层（docs/specs/rust-cli/tui.md §3）：复制自 `apps/zcode-host/crates/tui/src/ui`，
 //! 只持有草稿、滚动、视图等界面状态；会话内容来自 `view::Transcript`，每一帧按当前宽度重新排版。
+pub mod afk;
 pub mod agents;
 pub mod agents_tree;
 pub mod app;
@@ -33,6 +34,7 @@ pub mod i18n_projects;
 pub mod i18n_trust;
 pub mod i18n_update;
 pub mod i18n_usage;
+pub mod i18n_yolo;
 pub mod input_box;
 pub mod interaction;
 pub mod interaction_view;
@@ -94,5 +96,6 @@ pub mod update_view;
 pub mod usage;
 pub mod usage_stats;
 pub mod wheel;
+pub mod yolo_confirm;
 
 pub use slash::resolve_model;

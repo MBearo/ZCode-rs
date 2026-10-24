@@ -1,9 +1,10 @@
 //! `session_context` attachment（context.md §12）：会话开始时的 git 状态。
 //!
-//! git 的原始值由执行环境给（`Environment::git_status`），文本在这里渲染。
+//! git 的原始值由执行环境给（`Git::git_status`），文本在这里渲染。
 
-use rust_cli_kernel_api::env::{EnvFacts, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvFacts, WorkspaceRef};
 use rust_cli_kernel_api::env_git::{GitSnapshot, GitStatus, GitStatusRequest};
+use rust_cli_kernel_api::local_services::Git;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_prompts::texts::{self, render};
 use serde_json::{Value, json};
@@ -74,7 +75,7 @@ fn wrap(sections: &[(&str, &str)]) -> String {
 /// 压缩边界之后已经宣布过时沿用它（gitStatus 取已宣布的，内容不变就不重发），
 /// 所以一个边界窗口只发一次；没有宣布过且工作区是 git 仓库时才向执行环境取 git 状态。
 pub(crate) async fn announce(
-    env: &dyn Environment,
+    git: &dyn Git,
     workspace: &WorkspaceRef,
     facts: &EnvFacts,
     history: &[Message],
@@ -85,7 +86,7 @@ pub(crate) async fn announce(
     let request = GitStatusRequest {
         cwd: workspace.root.clone(),
     };
-    let snapshot = match env.git_status(workspace, request).await {
+    let snapshot = match git.git_status(workspace, request).await {
         Ok(GitStatus::Repository(snapshot)) => snapshot,
         Ok(GitStatus::NotRepository) => return None,
         Err(error) => {
@@ -103,7 +104,7 @@ pub(crate) async fn announce(
 /// `/context` 的 gitStatus 段（context-usage.md §3）：边界之后已经宣布过的沿用它的文本，否则是
 /// git 仓库时向执行环境取一次。
 pub(crate) async fn git_section(
-    env: &dyn Environment,
+    git: &dyn Git,
     workspace: &WorkspaceRef,
     facts: &EnvFacts,
     history: &[Message],
@@ -113,7 +114,7 @@ pub(crate) async fn git_section(
             .as_str()
             .map(str::to_owned);
     }
-    announce(env, workspace, facts, history)
+    announce(git, workspace, facts, history)
         .await
         .and_then(|(_, data)| data["context"]["gitStatus"].as_str().map(str::to_owned))
 }

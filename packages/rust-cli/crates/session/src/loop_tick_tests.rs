@@ -132,7 +132,7 @@ async fn a_fired_sentinel_becomes_the_loop_md_tasks() {
     );
     let mut setup = Setup::new(model);
     setup.cron = cron.clone();
-    setup.env = environment;
+    setup.set_env(environment);
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
     until(&mut events, finished).await;

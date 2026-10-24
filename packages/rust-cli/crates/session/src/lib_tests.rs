@@ -13,7 +13,8 @@ use rust_cli_kernel_api::session_api::{Command, Delivery, KernelEvent, StartSour
 use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, SessionStore};
 use rust_cli_kernel_api::testing::{
     FailingExecutor, FixedClock, FixedContext, MemoryArtifacts, MemoryStore, NeverCompact, NoHooks,
-    NoTools, ScriptedModel, SequentialIds, UnusedEnvironment, selection, text_response,
+    NoTools, ScriptedModel, SequentialIds, UnusedEnvironment, local_services, machine, selection,
+    text_response,
 };
 use rust_cli_query::{QueryLoop, QueryParts};
 use tokio::sync::Notify;
@@ -39,7 +40,7 @@ fn meta() -> SessionMeta {
 /// 没有工具、执行环境不可用的会话（test_support 的组装）。
 async fn fixture(model: Arc<dyn ModelPort>, create: bool) -> crate::test_support::Built {
     let mut setup = crate::test_support::Setup::new(model);
-    setup.env = Arc::new(UnusedEnvironment);
+    setup.set_env(Arc::new(UnusedEnvironment));
     setup.stored = create;
     setup.build().await
 }
@@ -244,6 +245,7 @@ async fn asking_session_with(
         ),
         text_response(&["thanks"]),
     ]));
+    let env = Arc::new(UnusedEnvironment);
     let runner = Arc::new(QueryLoop::new(QueryParts {
         model: model.clone(),
         context: Arc::new(FixedContext(Vec::new())),
@@ -255,12 +257,14 @@ async fn asking_session_with(
         hooks: Arc::new(NoHooks),
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: store.clone(),
         generation: Generation::new("g1"),
         non_interactive: false,
         limits: rust_cli_query::RequestLimits::default(),
     }));
+    let env = Arc::new(UnusedEnvironment);
     let session = Session::spawn(
         SessionDeps {
             agents: Arc::new(rust_cli_kernel_api::agents::NoAgentSignals),
@@ -269,7 +273,8 @@ async fn asking_session_with(
             ids,
             runner,
             compactor: Arc::new(NeverCompact),
-            env: Arc::new(UnusedEnvironment),
+            machine: machine(env.clone()),
+            local: local_services(env),
             max_turns: None,
             hooks,
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
@@ -284,6 +289,7 @@ async fn asking_session_with(
             released: Arc::new(crate::NothingToRelease),
             directory_rules: Arc::new(rust_cli_kernel_api::orchestration::NoDirectoryRules),
             peers: crate::PeerDeps::off(),
+            detached: None,
         },
         SessionState {
             meta: meta(),
@@ -293,6 +299,7 @@ async fn asking_session_with(
             checkpoints: Vec::new(),
             start: StartSource::Startup,
             turn: None,
+            last_turn_failed: false,
         },
         Opened::Created,
     );
@@ -363,6 +370,9 @@ mod steer;
 
 #[path = "notice_tests.rs"]
 mod notice;
+
+#[path = "monitors_tests.rs"]
+mod monitors;
 
 #[path = "agent_signals_tests.rs"]
 mod agent_signals;

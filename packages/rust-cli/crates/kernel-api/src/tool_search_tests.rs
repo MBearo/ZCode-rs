@@ -116,3 +116,59 @@ fn names_sort_like_locale_compare() {
         ["agent_x", "Bash", "taskA", "TaskStop", "WebFetch", "Write"]
     );
 }
+
+fn boundary(carried: &[&str]) -> Message {
+    use crate::message::{CompactBoundary, CompactTrigger, SystemMessage};
+    Message::System(SystemMessage::CompactBoundary(CompactBoundary {
+        id: MessageId::new("b1"),
+        trigger: CompactTrigger::Auto,
+        pre_tokens: 0,
+        summary: MessageId::new("s1"),
+        preserved: None,
+        discovered_tools: carried.iter().map(|name| (*name).to_owned()).collect(),
+    }))
+}
+
+#[test]
+fn loaded_names_include_the_tools_a_boundary_carries() {
+    let history = vec![
+        boundary(&["mcp__fixture__lookup", "WebFetch"]),
+        Message::User(UserMessage {
+            id: MessageId::new("m1"),
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: ToolUseId::new("t1"),
+                content: vec![ToolResultContent::ToolReference {
+                    tool_name: "NotebookEdit".to_owned(),
+                }],
+                is_error: false,
+            }],
+            origin: UserOrigin::ToolResult {
+                assistant: MessageId::new("a1"),
+            },
+        }),
+    ];
+    let names: Vec<String> = loaded(&history).into_iter().collect();
+    assert_eq!(names, ["NotebookEdit", "WebFetch", "mcp__fixture__lookup"]);
+    // 只看引用的旧函数不变。
+    let names: Vec<String> = referenced(&history).into_iter().collect();
+    assert_eq!(names, ["NotebookEdit"]);
+}
+
+#[test]
+fn the_carried_tools_are_optional_in_the_boundary_json() {
+    let Message::System(crate::message::SystemMessage::CompactBoundary(empty)) = boundary(&[])
+    else {
+        unreachable!()
+    };
+    let json = serde_json::to_value(&empty).unwrap();
+    assert!(json.get("discovered_tools").is_none());
+    let read: crate::message::CompactBoundary = serde_json::from_value(json).unwrap();
+    assert!(read.discovered_tools.is_empty());
+    let Message::System(crate::message::SystemMessage::CompactBoundary(carried)) =
+        boundary(&["WebFetch"])
+    else {
+        unreachable!()
+    };
+    let json = serde_json::to_value(&carried).unwrap();
+    assert_eq!(json["discovered_tools"], json!(["WebFetch"]));
+}

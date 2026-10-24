@@ -21,10 +21,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod exclusive;
 mod lock;
 mod lock_pid;
 mod lock_single;
 mod stamp;
+pub use exclusive::{ExclusiveLock, lock_exclusive, try_lock_exclusive};
 pub use lock::{FILE_LOCK_TIMEOUT_CODE, FileLock, LockOptions, acquire_file_lock, with_file_lock};
 pub use lock_pid::{PidLockOptions, with_pid_lock};
 pub use lock_single::{SingleLockOptions, with_single_file_lock};
@@ -92,6 +94,11 @@ pub async fn read_optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// 打开一个文件只读，按块读（上传到远端的执行器与它的 sha256，docs/specs/rust-cli/remote-exec.md §19.9）。
+pub async fn open_read(path: &Path) -> io::Result<tokio::fs::File> {
+    tokio::fs::File::open(path).await
 }
 
 /// 删掉一个文件；文件不存在时不算错（外部编辑器的临时文件，tui-input.md §4.1）。
@@ -302,6 +309,15 @@ pub async fn restrict_to_owner(path: &Path) -> io::Result<()> {
 pub async fn file_len(path: &Path) -> io::Result<Option<u64>> {
     match tokio::fs::metadata(path).await {
         Ok(metadata) => Ok(Some(metadata.len())),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// 文件的修改时间；不存在时为 `None`（模型轨迹按修改时间从旧到新淘汰文件，docs/specs/rust-cli/model-io.md §3.3）。
+pub async fn file_modified(path: &Path) -> io::Result<Option<SystemTime>> {
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) => metadata.modified().map(Some),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }

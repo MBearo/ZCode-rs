@@ -9,8 +9,12 @@
 //! 输出目录都从执行环境的端口取。Bash 解析与只读判定复制自 `apps/zcode-cli-rust/crates/{bash-parse,bash}`。
 
 mod bash;
+mod bash_cd;
+mod bash_compound;
+mod bash_inline;
 mod bash_paths;
 mod bash_subst;
+mod bash_suggest;
 mod bfs_args;
 pub mod chain;
 pub mod check;
@@ -23,8 +27,13 @@ pub mod readonly;
 mod removal;
 pub mod rules;
 mod safe_env;
+mod shell_argv;
 pub mod shell_rules;
+mod shell_strip;
 mod skill;
+mod suggest;
+mod suggest_seed;
+mod suggest_spec;
 pub mod texts;
 pub mod web_preapproved;
 
@@ -45,8 +54,9 @@ use rust_cli_kernel_api::plan::PlanFiles;
 use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
 use serde_json::Value;
 
-pub use bash::suggestion as bash_suggestion;
 pub use parse::{Analysis, Invocation, analyze, is_permission_safe};
+pub use suggest::suggestion as bash_suggestion;
+pub use suggest_seed::{rule_label as bash_rule_label, rule_seed as bash_rule_seed};
 
 use crate::chain::{Call, Outer};
 use crate::check::Inputs;
@@ -172,11 +182,12 @@ impl PolicyGate {
     async fn path_context(&self, base: &PermissionRules, context: &ToolUseContext) -> PathContext {
         let workspace = &context.workspace;
         let shell = context
-            .env
+            .machine
+            .shell()
             .shell_state(workspace, &context.session)
             .await
             .ok();
-        let facts = context.env.path_facts(workspace).await.ok();
+        let facts = context.machine.info().path_facts(workspace).await.ok();
         // 计划文件与 ExitPlanMode、计划模式 attachment 同一来源（kernel-api `PlanFiles`）：
         // `<工作区>/.zcode/plans/plan-<会话>.md`（tools-more.md §2.2）。
         let plans = facts
@@ -236,6 +247,7 @@ impl PolicyGate {
                 root,
                 dangerous: guarded::applies(mode, name, input, paths.style),
                 hook_check: false,
+                full_access: mode == PermissionMode::BypassPermissions,
             };
             let (check, updated) = chain::own(name, own.clone(), input, &inputs);
             chain::inner(name, check, updated, &inputs)
@@ -300,6 +312,8 @@ impl PermissionGate for PolicyGate {
             root: context.workspace.root.as_str(),
             dangerous: guarded::applies(mode, tool.name(), input, paths.style),
             hook_check: true,
+            // 会话本身是 yolo 时 hook 放行后也不再询问（工作线 F76）；别的模式这里按 bypass 跑，但不算完全访问。
+            full_access: context.mode == PermissionMode::BypassPermissions,
         };
         let own = tool.check_permissions(input, context).await;
         let (check, updated) = chain::own(tool.name(), own, input, &inputs);
@@ -324,7 +338,8 @@ impl PermissionGate for PolicyGate {
             return false;
         }
         let style = context
-            .env
+            .machine
+            .info()
             .path_facts(&context.workspace)
             .await
             .map_or(PathStyle::Posix, |facts| facts.style);

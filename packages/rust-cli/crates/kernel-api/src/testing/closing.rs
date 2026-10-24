@@ -8,10 +8,12 @@ use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::watch;
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, Environment, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::ids::{OperationId, SessionId};
+use crate::local_services::{Fetch, Git};
+use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
 use crate::testing::lock;
 
 /// `close_session` 停在闸门上，直到 [`ClosingEnvironment::release`]（成功返回）或 [`ClosingEnvironment::fail`]
@@ -73,11 +75,14 @@ fn unused() -> EnvError {
 }
 
 #[async_trait]
-impl Environment for ClosingEnvironment {
+impl EnvInfo for ClosingEnvironment {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Files for ClosingEnvironment {
     async fn read_file(
         &self,
         _workspace: &WorkspaceRef,
@@ -94,7 +99,10 @@ impl Environment for ClosingEnvironment {
     ) -> Result<WriteReceipt, EnvError> {
         Err(unused())
     }
+}
 
+#[async_trait]
+impl Commands for ClosingEnvironment {
     async fn start_command(
         &self,
         _workspace: &WorkspaceRef,
@@ -138,3 +146,11 @@ impl Environment for ClosingEnvironment {
         }
     }
 }
+
+impl Search for ClosingEnvironment {}
+impl Shell for ClosingEnvironment {}
+impl Background for ClosingEnvironment {}
+impl Checkpoints for ClosingEnvironment {}
+impl Pdf for ClosingEnvironment {}
+impl Git for ClosingEnvironment {}
+impl Fetch for ClosingEnvironment {}

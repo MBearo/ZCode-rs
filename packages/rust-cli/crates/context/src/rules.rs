@@ -6,9 +6,10 @@
 
 use std::collections::HashSet;
 
-use rust_cli_kernel_api::env::{EnvError, EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvError, EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{FileKind, ListDir, PathStyle, StatFile};
 use rust_cli_kernel_api::env_path::{extension, is_unc};
+use rust_cli_kernel_api::machine::Files;
 
 use crate::rules_frontmatter;
 use crate::rules_markdown;
@@ -165,9 +166,9 @@ pub(crate) struct RuleFile {
     pub parent: Option<String>,
 }
 
-/// 一次加载用到的端口与事实。`cwd` 是工作区根（original cwd）。
+/// 一次加载用到的端口与事实。`cwd` 是工作区根（original cwd）。规则文件与自动记忆都是本机的文件（remote-exec.md §3）。
 pub(crate) struct Scope<'a> {
-    pub env: &'a dyn Environment,
+    pub files: &'a dyn Files,
     pub workspace: &'a WorkspaceRef,
     pub style: PathStyle,
     pub cwd: String,
@@ -186,7 +187,7 @@ impl Scope<'_> {
         let request = StatFile {
             path: EnvPath::new(path),
         };
-        match self.env.stat(self.workspace, request).await {
+        match self.files.stat(self.workspace, request).await {
             Ok(found) => found.map(|stat| (stat.kind, stat.size)),
             Err(error) => {
                 skipped(path, &error);
@@ -200,7 +201,7 @@ impl Scope<'_> {
         let request = ReadFile {
             path: EnvPath::new(path),
         };
-        match self.env.read_file(self.workspace, request).await {
+        match self.files.read_file(self.workspace, request).await {
             Ok(content) => Some(String::from_utf8_lossy(&content.bytes).into_owned()),
             Err(error) => {
                 skipped(path, &error);
@@ -213,7 +214,7 @@ impl Scope<'_> {
         let request = ListDir {
             path: EnvPath::new(dir),
         };
-        match self.env.list_dir(self.workspace, request).await {
+        match self.files.list_dir(self.workspace, request).await {
             Ok(entries) => entries
                 .into_iter()
                 .map(|entry| (entry.name, entry.kind))

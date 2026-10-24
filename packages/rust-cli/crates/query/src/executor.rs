@@ -456,7 +456,8 @@ async fn execute(
         workspace: scope.current_workspace().await,
         mode: scope.current_mode().await,
         cancel,
-        env: scope.parts.env.clone(),
+        machine: scope.parts.machine.clone(),
+        local: scope.parts.local.clone(),
         artifacts: scope.parts.artifacts.clone(),
         interactions: scope.sink.clone(),
         operation: OperationContext {
@@ -490,7 +491,7 @@ async fn execute(
 
 #[cfg(test)]
 #[path = "executor_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 #[path = "executor_message_tests.rs"]

@@ -1,0 +1,215 @@
+//! 注册表与机器的组装（remote-exec.md §15.8.1）：R0 只有本机；一台机器的端口都落到同一个对象。
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use async_trait::async_trait;
+use futures_util::StreamExt;
+use futures_util::stream::{self, BoxStream};
+
+use super::{EnvironmentRegistry, LOCAL_MACHINE, LocalRegistry};
+use crate::env::{
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+};
+use crate::env_git::GitStatusRequest;
+use crate::env_shell::BackgroundTask;
+use crate::ids::{EnvironmentId, OperationId, SessionId, ShellTaskId};
+use crate::local_services::{Fetch, Git, LocalServices};
+use crate::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, MachineEnv, Pdf, Search, Shell,
+};
+use crate::mcp::NoMcpTransport;
+
+/// 每个端口的调用都记到同一个计数上：看得出各端口是不是同一个对象。
+#[derive(Default)]
+struct Counting(AtomicUsize);
+
+impl Counting {
+    fn hit(&self) -> EnvError {
+        self.0.fetch_add(1, Ordering::Relaxed);
+        EnvError::Unsupported {
+            what: "counting".to_owned(),
+        }
+    }
+}
+
+#[async_trait]
+impl EnvInfo for Counting {
+    async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
+        Err(self.hit())
+    }
+}
+
+#[async_trait]
+impl Files for Counting {
+    async fn read_file(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: ReadFile,
+    ) -> Result<FileContent, EnvError> {
+        Err(self.hit())
+    }
+
+    async fn write_file(
+        &self,
+        _workspace: &WorkspaceRef,
+        _context: OperationContext,
+        _request: WriteFile,
+    ) -> Result<WriteReceipt, EnvError> {
+        Err(self.hit())
+    }
+}
+
+#[async_trait]
+impl Commands for Counting {
+    async fn start_command(
+        &self,
+        _workspace: &WorkspaceRef,
+        _context: OperationContext,
+        _request: StartCommand,
+    ) -> Result<(), EnvError> {
+        Err(self.hit())
+    }
+
+    fn watch_command(
+        &self,
+        _operation: OperationId,
+        _cursor: u64,
+    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
+        stream::iter([Err(self.hit())]).boxed()
+    }
+
+    async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
+        Err(self.hit())
+    }
+
+    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
+        Err(self.hit())
+    }
+
+    async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {
+        Err(self.hit())
+    }
+}
+
+#[async_trait]
+impl Shell for Counting {
+    async fn ack_shell_notice(&self, _session: &SessionId, _seq: u64) -> Result<(), EnvError> {
+        Err(self.hit())
+    }
+}
+
+#[async_trait]
+impl Background for Counting {
+    async fn background_elapsed(&self, _request: BackgroundTask) -> Result<Option<u64>, EnvError> {
+        Err(self.hit())
+    }
+}
+
+#[async_trait]
+impl Checkpoints for Counting {
+    async fn rewind_finish(&self, _token: &OperationId) -> Result<(), EnvError> {
+        Err(self.hit())
+    }
+}
+
+impl Search for Counting {}
+impl Pdf for Counting {}
+
+#[async_trait]
+impl Git for Counting {
+    async fn worktree_list(
+        &self,
+        _cwd: EnvPath,
+    ) -> Result<crate::env_worktree::WorktreeList, EnvError> {
+        Err(self.hit())
+    }
+}
+
+impl Fetch for Counting {}
+
+fn workspace() -> WorkspaceRef {
+    WorkspaceRef {
+        environment: EnvironmentId::new("local"),
+        root: EnvPath::new("/Users/dev/repo"),
+    }
+}
+
+fn registry(env: &Arc<Counting>) -> LocalRegistry {
+    LocalRegistry::new(
+        MachineEnv::new(env.clone(), Arc::new(NoMcpTransport)),
+        LocalServices::new(env.clone()),
+    )
+}
+
+#[test]
+fn the_registry_only_knows_the_local_machine() {
+    let registry = registry(&Arc::new(Counting::default()));
+    assert_eq!(LOCAL_MACHINE, "local");
+    assert!(registry.machine(LOCAL_MACHINE).is_some());
+    assert!(registry.machine("dev-a").is_none());
+    assert!(registry.machine("").is_none());
+}
+
+#[tokio::test]
+async fn every_port_of_a_machine_reaches_the_same_object() {
+    let env = Arc::new(Counting::default());
+    let registry = registry(&env);
+    let Some(machine) = registry.machine(LOCAL_MACHINE) else {
+        panic!("the local machine is always there");
+    };
+    let session = SessionId::new("sess_1");
+    let token = OperationId::new("op_1");
+    let task = BackgroundTask {
+        session: session.clone(),
+        task: ShellTaskId::new("t1"),
+    };
+    let _ = machine.info().facts(&workspace()).await;
+    let request = ReadFile {
+        path: EnvPath::new("/Users/dev/repo/a.txt"),
+    };
+    let _ = machine.files().read_file(&workspace(), request).await;
+    let _ = machine.commands().cancel(token.clone()).await;
+    let _ = machine.shell().ack_shell_notice(&session, 1).await;
+    let _ = machine.background().background_elapsed(task).await;
+    let _ = machine.checkpoints().rewind_finish(&token).await;
+    let _ = registry
+        .local()
+        .git()
+        .worktree_list(EnvPath::new("/Users/dev/repo"))
+        .await;
+    let _ = registry
+        .local_machine()
+        .commands()
+        .close_session(&session, false)
+        .await;
+    assert_eq!(env.0.load(Ordering::Relaxed), 8);
+}
+
+#[tokio::test]
+async fn ports_without_an_override_keep_the_unsupported_default() {
+    let env = Arc::new(Counting::default());
+    let registry = registry(&env);
+    let machine = registry.local_machine();
+    let request = GitStatusRequest {
+        cwd: EnvPath::new("/Users/dev/repo"),
+    };
+    let status = registry
+        .local()
+        .git()
+        .git_status(&workspace(), request)
+        .await;
+    assert_eq!(
+        status,
+        Err(EnvError::Unsupported {
+            what: "git_status".to_owned()
+        })
+    );
+    let request = crate::env_pdf::PdfPageCount {
+        path: EnvPath::new("/Users/dev/repo/a.pdf"),
+    };
+    let page = machine.pdf().pdf_page_count(&workspace(), request).await;
+    assert!(matches!(page, Err(EnvError::Unsupported { what }) if what == "pdf_page_count"));
+    assert_eq!(env.0.load(Ordering::Relaxed), 0);
+}

@@ -55,6 +55,16 @@ pub fn tools_reply_with_usage(blocks: &[String], input_tokens: u64) -> String {
     start_with(input_tokens) + &blocks.concat() + &end("tool_use")
 }
 
+/// 一个 SSE 事件（`type` 取 `kind`），用来拼端点自己产生的块（工作线 F90）。
+pub fn raw_event(kind: &str, data: Value) -> String {
+    event(kind, data)
+}
+
+/// 由任意事件组成的响应：`message_start`、`events`、按 `stop` 收尾。
+pub fn reply_of(events: &[String], stop: &str) -> String {
+    start() + &events.concat() + &end(stop)
+}
+
 /// 一段文字的响应。
 pub fn text_reply(text: &str) -> String {
     start()
@@ -81,6 +91,8 @@ pub struct Fixture {
     pub betas: Arc<Mutex<Vec<Option<String>>>>,
     /// 主请求的全部 header（名字小写），与 `requests` 同序（工作线 F64）。
     pub headers: Arc<Mutex<Vec<Headers>>>,
+    /// 全部请求（不只主请求）的请求行的路径，按到达顺序（工作线 F93：`/context` 不发 count_tokens）。
+    pub paths: Arc<Mutex<Vec<String>>>,
 }
 
 impl Fixture {
@@ -94,6 +106,10 @@ impl Fixture {
 
     pub fn main_headers(&self) -> Vec<Headers> {
         self.headers.lock().unwrap().clone()
+    }
+
+    pub fn paths(&self) -> Vec<String> {
+        self.paths.lock().unwrap().clone()
     }
 }
 
@@ -118,6 +134,8 @@ pub fn serve_with(script: Vec<Reply>) -> Fixture {
     let recorded_betas = betas.clone();
     let headers = Arc::new(Mutex::new(Vec::new()));
     let recorded_headers = headers.clone();
+    let paths = Arc::new(Mutex::new(Vec::new()));
+    let recorded_paths = paths.clone();
     std::thread::spawn(move || {
         let mut script = script.into_iter();
         for stream in listener.incoming() {
@@ -126,6 +144,11 @@ pub fn serve_with(script: Vec<Reply>) -> Fixture {
             let mut length = 0;
             let mut beta = None;
             let mut lines = Vec::new();
+            let mut request_line = String::new();
+            let _ = reader.read_line(&mut request_line);
+            if let Some(path) = request_line.split_whitespace().nth(1) {
+                recorded_paths.lock().unwrap().push(path.to_owned());
+            }
             loop {
                 let mut line = String::new();
                 if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
@@ -173,5 +196,6 @@ pub fn serve_with(script: Vec<Reply>) -> Fixture {
         requests,
         betas,
         headers,
+        paths,
     }
 }

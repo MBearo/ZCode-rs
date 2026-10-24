@@ -156,6 +156,30 @@ pub fn runtime_target(command: &str) -> String {
     )
 }
 
+/// 复合命令里有 cd，又按相对路径读，而且配置了 Read deny 规则（§4.5.7，工作线 F85；前面接命令名）。
+pub const CD_RELATIVE_READ: &str = "reads a file by a relative path after a cd in a compound command; which file that is cannot be resolved statically while a Read() deny rule is configured, so this needs approval.";
+
+/// 不能解析的 cd 之后读的相对路径落在 deny 规则的目录下（§4.5.7，工作线 F85）。
+pub fn unresolved_cd_denied(command: &str, path: &str, rule: &str) -> String {
+    format!(
+        "{command} reads '{path}' after a cd whose target cannot be resolved, and a deny rule ({rule}) names that file under a directory it may run in"
+    )
+}
+
+/// 输入重定向的目标有 glob，或在 cd 之后是相对路径（§4.5.8，工作线 F85）。
+pub fn input_unresolved(target: &str) -> String {
+    format!(
+        "Input redirection from '{target}' requires manual approval: the file it names depends on glob expansion or a directory change in the same command."
+    )
+}
+
+/// 输入重定向读工作目录以外的文件（§4.5.8，工作线 F85）。
+pub fn input_outside(path: &str, dirs: &str) -> String {
+    format!(
+        "Input redirection from '{path}' was blocked. For security, ZCode may only read files in the allowed working directories for this session: {dirs}."
+    )
+}
+
 /// 复合命令里有 cd 又有写入。
 pub const CD_WITH_WRITE: &str = "Commands that change directories and perform write operations require explicit approval to ensure paths are evaluated correctly. For security, ZCode cannot automatically determine the final working directory when 'cd' is used in compound commands.";
 

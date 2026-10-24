@@ -1,5 +1,5 @@
 //! 会话生命周期的界面操作（docs/specs/rust-cli/session-lifecycle.md §5.4、§6.2）：rewind 选择器、
-//! `/resume`、`/branch`、启动时打开会话、离开会话时的 SessionEnd。每个操作是一个 future，结果作为
+//! `/resume`、启动时打开会话、离开会话时的 SessionEnd。每个操作是一个 future，结果作为
 //! [`Done`] 回到事件循环；状态只在事件循环里改。
 use std::sync::Arc;
 
@@ -39,12 +39,14 @@ pub(super) struct Switched {
 }
 
 /// 打开会话并取快照；给了 `fork`（`Command::Fork` 的命令）时先在它的末尾 fork，再打开 fork 出的会话
-/// （`--fork-session`）。命令由调用方经注入的 Ids 建好（F7）。
+/// （`--fork-session`）。给了 `store`（`Command::StoreResumeSentinel`）时取快照之前先发它。命令由调用方经注入的 Ids
+/// 建好（F7）。
 async fn open(
     kernel: Arc<dyn Kernel>,
     id: SessionId,
     source: StartSource,
     fork: Option<CommandEnvelope>,
+    store: Option<CommandEnvelope>,
 ) -> Result<(Arc<dyn SessionHandle>, SessionView), KernelError> {
     let mut handle = kernel.open_session_as(&id, source).await?;
     if let Some(command) = fork {
@@ -56,6 +58,11 @@ async fn open(
         };
         let child = SessionId::new(result.as_str().unwrap_or_default());
         handle = kernel.open_session_as(&child, StartSource::Fork).await?;
+    }
+    // 会话里切过去（`/resume`、`/fork`）：对话已经换了，续写时补的占位马上落库（session-lifecycle.md §6.3.1，工作线
+    // F79）。回执不看：提交失败时它留在会话里，随下一批带消息的提交写。
+    if let Some(command) = store {
+        let _ = handle.send(command).await;
     }
     let view = handle.view().await?;
     Ok((handle, view))
@@ -90,7 +97,8 @@ impl<B: Backend> Loop<'_, B> {
                             }
                         },
                     };
-                    open(kernel, id, StartSource::Resume, fork).await
+                    // 启动时打开（`--resume <id>`、`-c`）不发续写占位的命令：等第一处改动再写（§6.3.1）。
+                    open(kernel, id, StartSource::Resume, fork, None).await
                 };
                 Done::Switched(Box::new(opened.await.map(|(handle, view)| Switched {
                     handle,
@@ -120,10 +128,18 @@ impl<B: Backend> Loop<'_, B> {
             .push(async move { Done::Notices(session.close(reason).await) }.boxed());
     }
 
-    /// 切到另一个会话（`/resume`、`/branch`）：旧会话 SessionEnd(resume)，新会话从快照重建。先关旧会话再开新会话
+    /// 切到另一个会话（`/resume`、`/fork`）：旧会话 SessionEnd(resume)，新会话从快照重建。先关旧会话再开新会话
     /// （R1-1）：旧会话的 SessionEnd 在新会话的 SessionStart 之前。切回正在关闭的会话由内核的会话表保证：打开等它
-    /// 关完再冷加载（session-lifecycle.md §3.3.1，F33；`leave` 在后台关的会话也一样）。
-    pub(super) fn switch(&mut self, id: SessionId, source: StartSource, notice: Option<String>) {
+    /// 关完再冷加载（session-lifecycle.md §3.3.1，F33；`leave` 在后台关的会话也一样）。`store`：会话里切过去时为真，
+    /// 打开后让会话马上写下续写占位；启动形态的 `/resume` 页选中的会话为假，同 `--resume <id>`（§6.3.1，工作线 F79）。
+    pub(super) fn switch(
+        &mut self,
+        id: SessionId,
+        source: StartSource,
+        notice: Option<String>,
+        store: bool,
+    ) {
+        let store = store.then(|| self.envelope(Command::StoreResumeSentinel));
         let closing = self.detach();
         let kernel = self.kernel.clone();
         self.pending.push(
@@ -132,7 +148,7 @@ impl<B: Backend> Loop<'_, B> {
                     Some(session) => session.close(EndReason::Resume).await,
                     None => Vec::new(),
                 };
-                let opened = open(kernel, id, source, None).await;
+                let opened = open(kernel, id, source, None, store).await;
                 Done::Switched(Box::new(opened.map(|(handle, view)| Switched {
                     handle,
                     view,
@@ -241,24 +257,6 @@ impl<B: Backend> Loop<'_, B> {
         if let Some((command, label)) = self.deferred.take() {
             self.send(Sent::Rewind, command, label);
         }
-    }
-
-    /// `/branch`：fork 当前会话；回执里的新会话 ID 到达后切过去（[`Self::branched`]）。
-    pub(super) fn branch(&mut self) {
-        if self.session.is_none() {
-            self.app.info("Nothing to branch yet.");
-            return;
-        }
-        self.send(Sent::Branch, Command::Fork { at: None }, String::new());
-    }
-
-    pub(super) fn branched(&mut self, id: &str) {
-        let original = self.app.session.clone().unwrap_or_default();
-        // `/branch` 的提示原文（产品名替换）。
-        let notice = format!(
-            "Branched conversation. You are now in the new branch (session {id}). Use /resume {original} to return to the original, or run `zcode -r {original}` in a new terminal."
-        );
-        self.switch(SessionId::new(id), StartSource::Fork, Some(notice));
     }
 
     /// 入口收到退出信号（session-lifecycle.md §3.5）：中止在跑的回合，问 actor 回合是否还在跑——它在处理完

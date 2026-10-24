@@ -1,4 +1,4 @@
-//! git 状态（`Environment::git_status`，docs/specs/rust-cli/context.md §12）。
+//! git 状态（`Git::git_status`，docs/specs/rust-cli/context.md §12）。
 //!
 //! 命令见 context.md §12：
 //! 各命令并发执行，非零退出时该项输出为空（`preserveOutputOnError: false`），stdout 去掉首尾空白。
@@ -166,7 +166,7 @@ pub(crate) async fn status(
     }))
 }
 
-/// 未提交改动（`Environment::git_diff`，docs/specs/rust-cli/tui-manage.md §4.1）：diff、hunk 与未跟踪文件
+/// 未提交改动（`Git::git_diff`，docs/specs/rust-cli/tui-manage.md §4.1）：diff、hunk 与未跟踪文件
 /// 三组命令并发执行，原始输出交给前端解析。
 pub(crate) async fn diff(
     cwd: &Path,

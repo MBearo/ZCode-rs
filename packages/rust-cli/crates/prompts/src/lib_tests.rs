@@ -58,17 +58,54 @@ fn model_cards_strip_the_context_suffix() {
     assert!(models::card("glm-5").is_none());
 }
 
-/// R1-16：ToolSearch 是否启用只有这一个判定（卡片的 `tool_search`；没有卡片的模型不支持）。
+/// ToolSearch 的形式只有这一个判定（tools-more.md §3.2.2）：端点的能力为真（只有 debug 构建的测试声明这样设）时原生，
+/// 其余本地；不看模型。修改（工作线 F89）：F84 时禁用表里的模型不开，端点答不出能力时按卡片回退成原生。
 #[test]
-fn tool_search_support_comes_from_the_card() {
-    assert!(models::supports_tool_search("claude-opus-5-5[1m]", None));
-    assert!(!models::supports_tool_search("glm-5", None));
-    // 端点的能力答得出时只看它（工作线 F52）。
-    assert!(!models::supports_tool_search(
-        "claude-opus-5-5",
-        Some(false)
-    ));
-    assert!(models::supports_tool_search("glm-5", Some(true)));
+fn tool_search_mode_is_local_unless_the_endpoint_is_native() {
+    use models::ToolSearchMode::{Local, Native, Off};
+    assert_eq!(models::tool_search_mode(Some(true)), Native);
+    assert_eq!(models::tool_search_mode(Some(false)), Local);
+    assert_eq!(models::tool_search_mode(None), Local);
+    assert!(Local.is_on() && Native.is_on() && !Off.is_on());
+}
+
+/// `ENABLE_TOOL_SEARCH` 的设置（tools-more.md §3.2.1，工作线 F89）：关以外都乐观地算开；这一步开不开，自动时按延迟工具的
+/// 字符数对 `floor(floor(窗口 × N / 100) × 2.5)`，只在自动时才算字符数。
+#[test]
+fn the_setting_decides_on_off_and_the_auto_threshold() {
+    use models::ToolSearchSetting::{Auto, Off, On};
+    assert!(On.allows() && Auto { percent: 10 }.allows() && !Off.allows());
+    assert_eq!(models::ToolSearchSetting::default(), On);
+    let unused = || -> u64 { panic!("only the automatic setting measures the tools") };
+    assert!(On.reached(200_000, unused));
+    assert!(!Off.reached(200_000, unused));
+    // 200,000 的 10% 是 20,000 token，门槛 50,000 个字符。
+    let auto = Auto { percent: 10 };
+    assert!(!auto.reached(200_000, || 49_999));
+    assert!(auto.reached(200_000, || 50_000));
+    // 1,000,000 的 1% 是 10,000 token，门槛 25,000；向下取整：101 的 10% 是 10 token，门槛 25。
+    assert!(Auto { percent: 1 }.reached(1_000_000, || 25_000));
+    assert!(!Auto { percent: 1 }.reached(1_000_000, || 24_999));
+    assert!(auto.reached(101, || 25) && !auto.reached(101, || 24));
+}
+
+/// 上下文窗口（自动门槛用）：配置的窗口大于 0 时用它，否则卡片，再没有时 200,000（与压缩的回退同一个缺省）。
+#[test]
+fn the_context_window_comes_from_the_configuration_then_the_card() {
+    assert_eq!(models::context_window("glm-5", Some(128_000)), 128_000);
+    assert_eq!(
+        models::context_window("claude-opus-5-5", Some(0)),
+        1_000_000
+    );
+    assert_eq!(
+        models::context_window("claude-opus-5-5[1m]", None),
+        1_000_000
+    );
+    assert_eq!(
+        models::context_window("glm-5", None),
+        models::DEFAULT_CONTEXT_WINDOW
+    );
+    assert_eq!(models::DEFAULT_CONTEXT_WINDOW, 200_000);
 }
 
 #[test]

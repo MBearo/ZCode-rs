@@ -14,8 +14,9 @@ mod checkpoints;
 mod closing;
 mod compact;
 mod cron;
+mod detached;
 mod fork;
-mod fork_checkpoint;
+mod fork_input;
 mod goal;
 mod hooks;
 #[cfg(test)]
@@ -27,6 +28,7 @@ mod loop_tick;
 #[cfg(test)]
 mod metering_tests;
 mod mode;
+mod monitors;
 mod notices;
 mod peer_receipts;
 mod peer_restore;
@@ -34,6 +36,7 @@ mod peers;
 mod rename;
 mod rename_text;
 mod resume;
+mod resume_sentinel;
 mod rewind;
 mod rewind_plan;
 mod rules;
@@ -57,8 +60,9 @@ use futures_util::stream::BoxStream;
 use rust_cli_base::{Spawner, Task};
 use rust_cli_kernel_api::agents::AgentSignals;
 use rust_cli_kernel_api::clock::{Clock, Ids};
-use rust_cli_kernel_api::env::Environment;
 use rust_cli_kernel_api::ids::{Generation, SessionId};
+use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
 use rust_cli_kernel_api::orchestration::{Compactor, HookRunner, QueryRunner};
@@ -71,6 +75,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::actor::{Actor, Request};
+pub use crate::detached::DetachedAsks;
 use crate::log::EventLog;
 pub use crate::peers::PeerDeps;
 pub use crate::title_model::TitleModel;
@@ -86,8 +91,11 @@ pub struct SessionDeps {
     pub runner: Arc<dyn QueryRunner>,
     /// 手动压缩（`Command::Compact`，docs/specs/rust-cli/compact.md §4.2）。
     pub compactor: Arc<dyn Compactor>,
-    /// 执行环境：订阅后台命令的终态通知、查询后台工作（docs/specs/rust-cli/query.md §5）。
-    pub env: Arc<dyn Environment>,
+    /// 会话的机器：订阅后台命令的终态通知、查询后台工作（docs/specs/rust-cli/query.md §5）、shell 当前目录、代码回退
+    /// （R0 只有本机；R3 起按机器分开，remote-exec.md §15.8.1）。
+    pub machine: MachineEnv,
+    /// 只在本机的服务：斜杠命令的工具上下文要带它。
+    pub local: LocalServices,
     /// 每次提问最多几轮（`--max-turns`）。
     pub max_turns: Option<u32>,
     /// 子代理的信号：后台子代理的终态通知、任务清单变化（docs/specs/rust-cli/agents.md §5）。
@@ -121,6 +129,8 @@ pub struct SessionDeps {
     pub directory_rules: Arc<dyn rust_cli_kernel_api::orchestration::DirectoryRules>,
     /// 本机跨会话通信（docs/specs/rust-cli/cross-session.md §2.4）。
     pub peers: PeerDeps,
+    /// 父会话关闭之后旧会话的询问入口（进程级，agents.md §4.1.2，工作线 F72）；没有时那些询问按会话已关闭失败。
+    pub detached: Option<Arc<DetachedAsks>>,
 }
 
 /// 会话关闭的收尾（docs/specs/rust-cli/session-lifecycle.md §3.3、§3.3.1）：每个会话的关闭任务各调用一次。
@@ -153,6 +163,9 @@ pub struct SessionState {
     pub start: StartSource,
     /// 当前轮（冷加载的 `LoadedSession.turn`；新建的会话没有）。
     pub turn: Option<rust_cli_kernel_api::store::TurnAnchor>,
+    /// 当前轮以错误结束（冷加载的 `LoadedSession.last_turn_failed`）：续写时不补 assistant（session-lifecycle.md
+    /// §6.3.1）。
+    pub last_turn_failed: bool,
 }
 
 /// 会话是新建的还是从存储加载的；新建时发出 `SessionCreated`。
@@ -176,14 +189,28 @@ impl Session {
     pub fn spawn(deps: SessionDeps, mut state: SessionState, opened: Opened) -> Self {
         let id = state.meta.id.clone();
         let log = Arc::new(EventLog::new());
+        let mut pending = Vec::new();
         match opened {
             Opened::Created => {
                 log.append(KernelEvent::SessionCreated {
                     meta: state.meta.clone(),
                 });
             }
-            // 中断后续跑：去掉所有调用都没有结果的 assistant。
-            Opened::Loaded => state.messages = resume::filter_unresolved(state.messages),
+            // 中断后续跑：末尾没有结果的调用补中断结果、更早的去掉 tool_use 块（session-lifecycle.md §6.3，工作线
+            // F81）；最后一条 user 消息没有回答时补一条 assistant（§6.3.1）。补的消息由 actor 随第一批带消息的提交
+            // 落库（工作线 F77），会话里切过去时由 `Command::StoreResumeSentinel` 马上落库（F79）。
+            Opened::Loaded => {
+                let ids = deps.ids.clone();
+                let (messages, results) =
+                    resume::settle(std::mem::take(&mut state.messages), || ids.message());
+                state.messages = messages;
+                pending = results;
+                pending.extend(resume_sentinel::insert(
+                    &mut state.messages,
+                    state.last_turn_failed,
+                    || ids.message(),
+                ));
+            }
         }
         let (requests, receiver) = mpsc::channel(REQUESTS);
         let spawner = deps.spawner.clone();
@@ -192,7 +219,13 @@ impl Session {
         let resume = (opened == Opened::Loaded).then(|| state.messages.clone());
         let cron = deps.cron.clone();
         let session = id.clone();
-        let actor = Actor::new(deps.clone(), log.clone(), state, requests.downgrade());
+        let actor = Actor::new(
+            deps.clone(),
+            log.clone(),
+            state,
+            requests.downgrade(),
+            pending,
+        );
         let task = spawner.spawn_resident("session-actor", async move {
             if let Some(history) = resume {
                 cron.resume(&session, &history).await;
@@ -259,7 +292,7 @@ impl SessionHandle for Session {
     ///
     /// 修复（R1-1）：以前这里只跑 SessionEnd 与 `cron.session_closed`，actor 一直活着（内核的会话表持有句柄）：
     /// `/clear`、`/resume`、fork 之后旧会话收到后台通知就在用户看不到的地方自己开回合，按会话的表与 EventLog 不释放，
-    /// `Environment::close_session` 没有调用方，再打开同一会话拿到旧 actor、不跑 SessionStart。现在：前台工作
+    /// `Commands::close_session` 没有调用方，再打开同一会话拿到旧 actor、不跑 SessionStart。现在：前台工作
     /// 中止，后台工作保留（`/clear`、`/resume` 不 `forget`），actor 退出，组装方把会话移出会话表。
     async fn close(&self, reason: EndReason) -> Vec<String> {
         closing::close(self, reason).await
@@ -273,12 +306,6 @@ impl SessionHandle for Session {
 
     async fn goal(&self) -> Result<rust_cli_kernel_api::goal::GoalView, KernelError> {
         self.ask(|reply| Request::Goal { reply }).await
-    }
-
-    async fn checkpoints(
-        &self,
-    ) -> Result<Vec<rust_cli_kernel_api::store::WorkspaceCheckpoint>, KernelError> {
-        self.ask(|reply| Request::Checkpoints { reply }).await
     }
 
     /// 后台任务的事实不在 actor 里（执行环境的账本与 agents）：取 meta 后在调用方的任务里汇总

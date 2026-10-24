@@ -55,14 +55,14 @@ impl PromptAssembler {
             ..Analysis::default()
         };
         // 执行环境给不出事实时没有规则文件与 gitStatus（与 `build` 相同）。
-        let Ok(env_facts) = self.ports.env.facts(&request.workspace).await else {
+        let Ok(env_facts) = self.ports.info.facts(&request.workspace).await else {
             return Ok(analysis);
         };
-        let env = self.ports.env.as_ref();
+        let git = self.ports.git.as_ref();
         // `--system-prompt` 时没有 git 状态（与 `build` 相同，cli-args.md §4.2）。
         if self.config.custom_system_prompt.is_none()
             && let Some(git) =
-                session_context::git_section(env, &request.workspace, &env_facts, window).await
+                session_context::git_section(git, &request.workspace, &env_facts, window).await
         {
             analysis.sections.push(git);
         }

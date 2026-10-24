@@ -1,14 +1,14 @@
 use rust_cli_kernel_api::ids::{ArtifactId, SessionId, ToolUseId};
 use rust_cli_kernel_api::message::{ContentBlock, ImageSource, ToolResultContent};
 use rust_cli_kernel_api::model::{
-    ApiContent, ApiRole, ModelSelection, QuerySource, RequestOptions,
+    ApiContent, ApiMessage, ApiRole, ModelSelection, QuerySource, RequestOptions,
 };
 use rust_cli_kernel_api::store::{ArtifactPurpose, ArtifactRef};
 use serde_json::json;
 
 use super::*;
 
-/// 编码层的方案：真是 Anthropic 官方，假是“其他 Anthropic 兼容”（这一层只差 `diagnostics` 与服务端工具的版本）。
+/// 编码层的方案：真是 Anthropic 官方，假是“其他 Anthropic 兼容”（这一层只差 `diagnostics`；服务端工具的版本 F93 起相同）。
 pub(crate) fn profile(first_party: bool) -> &'static crate::profiles::Profile {
     let base_url = if first_party {
         "https://api.anthropic.com"
@@ -407,17 +407,14 @@ fn server_tools_follow_the_tool_list_and_their_blocks_replay() {
         blocked_domains: Some(vec!["example.org".to_owned()]),
         max_uses: 8,
     }];
-    // Anthropic 官方是 `web_search_20250305`；其他 Anthropic 协议方案是 Node 发的版本（键序随 AI SDK，修复线 F23）。
+    // 工作线 F93（用户决定 2026-10-24，推翻 F23）：Anthropic 官方与其他 Anthropic 协议方案一律是 Node 发的版本（键序随
+    // AI SDK）。F23 到 F93 之间官方是 `web_search_20250305`（域名在 `max_uses` 之前）。
     let node = super::body(request.clone(), false, &[]).unwrap();
-    assert!(
-        node.contains(r#""tools":[{"type":"web_search_20260209","name":"web_search","max_uses":8,"blocked_domains":["example.org"]}]"#),
-        "{node}"
-    );
+    let tool = r#""tools":[{"type":"web_search_20260209","name":"web_search","max_uses":8,"blocked_domains":["example.org"]}]"#;
+    assert!(node.contains(tool), "{node}");
     let body = super::body(request, true, &[]).unwrap();
-    assert!(
-        body.contains(r#""tools":[{"type":"web_search_20250305","name":"web_search","blocked_domains":["example.org"],"max_uses":8}]"#),
-        "{body}"
-    );
+    assert!(body.contains(tool), "{body}");
+    assert!(!body.contains("web_search_20250305"), "{body}");
     assert!(body.contains(r#"{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{"query":"rust"}}"#));
     assert!(body.contains(r#"{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","title":"T","url":"https://example.com"}]}"#));
 }

@@ -10,7 +10,9 @@ use rust_cli_kernel_api::orchestration::{
     Interactions, OrchestrationError, PermissionAnswer, PermissionGate,
 };
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode};
-use rust_cli_kernel_api::testing::{FakeTool, MemoryStore, UnusedEnvironment};
+use rust_cli_kernel_api::testing::{
+    FakeTool, MemoryStore, UnusedEnvironment, local_services, machine,
+};
 use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -60,6 +62,7 @@ impl Interactions for Answer {
 }
 
 fn context(answer: PermissionAnswer) -> ToolUseContext {
+    let env = Arc::new(UnusedEnvironment);
     ToolUseContext {
         session: SessionId::new("sess_1"),
         run: RunId::new("run_1"),
@@ -71,7 +74,8 @@ fn context(answer: PermissionAnswer) -> ToolUseContext {
         },
         mode: PermissionMode::Default,
         cancel: CancellationToken::new(),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(env.clone()),
+        local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: Arc::new(Answer(answer)),
         operation: OperationContext {

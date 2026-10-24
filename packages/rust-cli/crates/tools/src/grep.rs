@@ -161,7 +161,7 @@ impl Tool for GrepTool {
         // R5-13：遍历时被取消（esc）立即结束；丢下的遍历由执行环境停掉（tools-files.md §3）。原来只等遍历，
         // 很大的目录树要跑完才结束这个回合。
         let outcome = tokio::select! {
-            outcome = context.env.grep(&context.workspace, request) => outcome.map_err(env_failure)?,
+            outcome = context.machine.search().grep(&context.workspace, request) => outcome.map_err(env_failure)?,
             () = context.cancel.cancelled() => return Err(ToolError::Cancelled),
         };
         let head_limit = input.head_limit.map(|value| value as usize);

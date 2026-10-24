@@ -80,6 +80,7 @@ async fn a_background_command_past_the_limit_ends_as_killed() {
     start.background = Some(BackgroundCommand {
         description: "Flood".to_owned(),
         tool_use: None,
+        kind: Default::default(),
     });
     fixture.shells.start(context("op1"), start).await.unwrap();
     let notice = fixture

@@ -1,9 +1,10 @@
 //! `/cd <path>`（docs/specs/rust-cli/tui-manage.md §7.1）：解析与检查路径，有会话时经会话 actor
 //! 判定、换工作目录并提交说明（`Command::ChangeDirectory`，工作目录的唯一 owner 是 actor）。
 
-use rust_cli_kernel_api::env::{EnvError, EnvPath, Environment};
+use rust_cli_kernel_api::env::{EnvError, EnvPath};
 use rust_cli_kernel_api::env_files::{FileKind, PathStyle, StatFile};
 use rust_cli_kernel_api::ids::CommandId;
+use rust_cli_kernel_api::machine::{EnvInfo, Files, Shell};
 use rust_cli_kernel_api::manage::{ChangeDirectory, DirectoryChanged, DirectoryOutcome};
 use rust_cli_kernel_api::session_api::{Ack, Command, CommandEnvelope, KernelError};
 
@@ -27,14 +28,14 @@ pub(crate) fn display(path: &str, home: Option<&EnvPath>) -> String {
 
 /// 解析并检查目标目录：返回绝对路径；不存在、不是目录时给出固定的文字。
 async fn target(
-    env: &dyn Environment,
+    (shell, files): (&dyn Shell, &dyn Files),
     request: &ChangeDirectory,
     home: Option<&EnvPath>,
 ) -> Result<String, KernelError> {
     let workspace = &request.workspace;
     // 起点是会话 shell 的当前目录（Bash 的 cd 会改它）；没有会话时是工作区根。
     let base = match &request.session {
-        Some(session) => env
+        Some(session) => shell
             .shell_state(workspace, session)
             .await
             .map_or_else(|_| workspace.root.clone(), |state| state.cwd),
@@ -49,7 +50,7 @@ async fn target(
     let stat = StatFile {
         path: EnvPath::new(target.as_str()),
     };
-    match env.stat(workspace, stat).await {
+    match files.stat(workspace, stat).await {
         Ok(Some(found)) if found.kind == FileKind::Directory => Ok(target),
         Ok(Some(_)) => Err(failed(format!(
             "{target} is not a directory. Did you mean {}?",
@@ -71,13 +72,15 @@ pub(crate) async fn change(
     kernel: &LocalKernel,
     request: ChangeDirectory,
 ) -> Result<DirectoryChanged, KernelError> {
-    let env = kernel.ports.env.as_ref();
-    let home = env
+    let machine = &kernel.machine;
+    let home = machine
+        .info()
         .path_facts(&request.workspace)
         .await
         .ok()
         .and_then(|facts| facts.home);
-    let target = target(env, &request, home.as_ref()).await?;
+    let ports = (machine.shell().as_ref(), machine.files().as_ref());
+    let target = target(ports, &request, home.as_ref()).await?;
     let shown = display(&target, home.as_ref());
     let root = EnvPath::new(target.as_str());
     let Some(session) = &request.session else {
@@ -119,10 +122,11 @@ pub(crate) async fn change(
 
 /// `/plan open` 的计划文件（tui-manage.md §8）：`PlanFiles::in_workspace` 的位置；存在且不为空才算有计划。
 pub(crate) async fn plan_file(
-    env: &dyn Environment,
+    info: &dyn EnvInfo,
+    files: &dyn Files,
     query: &rust_cli_kernel_api::manage::PlanFileQuery,
 ) -> Result<rust_cli_kernel_api::manage::PlanFile, KernelError> {
-    let facts = env
+    let facts = info
         .path_facts(&query.workspace)
         .await
         .map_err(|error| failed(error.to_string()))?;
@@ -134,7 +138,7 @@ pub(crate) async fn plan_file(
     .ok_or_else(|| failed("the plan file has no location in this workspace".to_owned()))?;
     let path = plans.path(None);
     let exists = matches!(
-        env.stat(&query.workspace, StatFile { path: path.clone() }).await,
+        files.stat(&query.workspace, StatFile { path: path.clone() }).await,
         Ok(Some(stat)) if stat.kind == FileKind::File && stat.size > 0
     );
     Ok(rust_cli_kernel_api::manage::PlanFile {

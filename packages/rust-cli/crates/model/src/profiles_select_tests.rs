@@ -167,7 +167,6 @@ fn the_profiles_carry_the_table_values() {
     assert_eq!(official.system, SystemShape::FirstParty);
     assert!(official.first_party_extras);
     assert_eq!(official.byte_idle, Duration::from_secs(180));
-    assert_eq!(official.web_search, WebSearchTool::V20250305);
     let zhipu = select(
         WireProtocol::AnthropicMessages,
         "https://api.z.ai/api/anthropic",
@@ -176,7 +175,6 @@ fn the_profiles_carry_the_table_values() {
     assert_eq!(zhipu.system, SystemShape::FirstParty);
     assert!(zhipu.first_party_extras);
     assert_eq!(zhipu.byte_idle, Duration::from_secs(300));
-    assert_eq!(zhipu.web_search, WebSearchTool::V20260209);
     let gateway = select(
         WireProtocol::AnthropicMessages,
         "https://gw.example.com",
@@ -185,13 +183,13 @@ fn the_profiles_carry_the_table_values() {
     assert_eq!(gateway.system, SystemShape::ThirdParty);
     assert!(!gateway.first_party_extras);
     assert_eq!(gateway.byte_idle, Duration::from_secs(300));
-    assert_eq!(gateway.web_search, WebSearchTool::V20260209);
     let chat = select(
         WireProtocol::OpenAiChatCompletions,
         "https://api.openai.com/v1",
         "gpt-5",
     );
-    assert_eq!(chat.web_search, WebSearchTool::Unsupported);
+    assert_eq!(chat.system, SystemShape::ThirdParty);
+    assert!(!chat.first_party_extras);
 }
 
 /// Anthropic 官方地址的两种写法（F58）：SDK 的缺省（不带 `/v1`）与 Node 配置的写法（带 `/v1`）出自同一个 origin，补

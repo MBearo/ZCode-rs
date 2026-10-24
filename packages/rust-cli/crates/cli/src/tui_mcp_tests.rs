@@ -24,7 +24,7 @@ fn files(origins: &[(&str, &str, bool)], env: Arc<MemoryEnvironment>) -> McpConf
                 )
             })
             .collect(),
-        env,
+        files: env,
         ids: Arc::new(SequentialIds::default()),
         workspace: WorkspaceRef {
             environment: EnvironmentId::new("local"),

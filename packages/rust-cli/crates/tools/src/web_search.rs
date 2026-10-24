@@ -1,14 +1,15 @@
 //! WebSearch（docs/specs/rust-cli/tools-more.md §5）。
 //!
 //! 客户端工具：`call` 发一次旁路请求，请求里带 Anthropic 的服务端工具 `web_search`，从响应的
-//! `server_tool_use` / `web_search_tool_result` / 文本块整理出结果。
-//! 非 Anthropic 协议由模型适配器报 `Unsupported`，工具把它作为错误交给模型。
+//! `server_tool_use` / `web_search_tool_result` / 文本块整理出结果。给不给、调用时的能力检查与旁路请求的形状照 Node
+//! （工作线 F90）；结果文本的写法见 spec（tools-more.md §5、D53）。非 Anthropic 协议由模型适配器报 `Unsupported`，工具把它
+//! 作为错误交给模型。
 
 use futures_util::StreamExt;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{
     ApiContent, ApiMessage, ApiRole, BlockDelta, ModelEvent, ModelRequest, QuerySource,
-    RequestOptions, ServerTool, SystemBlock, ToolChoice,
+    RequestOptions, ServerTool, SystemBlock,
 };
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionRule};
 use rust_cli_kernel_api::tool::{
@@ -24,9 +25,12 @@ pub const NAME: &str = "WebSearch";
 
 /// 每次请求最多搜索的次数。
 const MAX_USES: u32 = 8;
-/// 没有模型卡片时的输出上限（同主循环的缺省，prompts 的一个常量，F58）。
-const DEFAULT_MAX_TOKENS: u32 = rust_cli_prompts::models::UNKNOWN_MAX_OUTPUT_TOKENS;
-const SYSTEM: &str = "You are an assistant for performing a web search tool use";
+/// 旁路请求输出上限的上界（Node `websearch.ts` 的 `min(4096, 模型上限)`；tools-more.md §5、D53）。
+const MAX_TOKENS: u32 = 4096;
+/// Node 的 system 原文（带句号；工作线 F90，以前不带句号，前面还有 CLI 身份句）。
+const SYSTEM: &str = "You are an assistant for performing a web search tool use.";
+/// 当前模型的生效配置不支持原生搜索时的错误（Node 的原文，可恢复）。
+const UNSUPPORTED: &str = "Current model does not support native WebSearch";
 const REMINDER: &str = "REMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks.";
 
 pub struct WebSearchTool {
@@ -127,21 +131,32 @@ impl WebSearchTool {
             .current_selection(&context.session)
             .await
             .unwrap_or_else(|| self.side.selection.clone());
-        // 请求形状（L17 修正）：system 先是 CLI 的身份句、
-        // `tool_choice: auto`、不带 thinking，max_tokens 与 effort 取模型卡片。以前是旧的写法
-        // （只有一段 system、强制 `web_search`、thinking disabled、max_tokens 8192）。
-        let card = rust_cli_prompts::models::card(&selection.model);
-        // 修 bug（F23）：没有卡片的模型以前也写选择的档位（`card_effort` 的注释）。
+        // 能力检查（工作线 F90，照 Node）：当前模型的生效配置不支持原生搜索时不发请求，给模型可恢复的错误。主循环已按同一个
+        // 能力去掉这个工具；这里挡住模型从历史里看到它、或换模型后仍然调用的情况。答不出能力时不检查（同主循环）。
+        let capabilities = self.side.model.capabilities(&selection).await;
+        if capabilities.is_some_and(|found| !found.supports_native_web_search) {
+            return Err(failed(UNSUPPORTED.to_owned()));
+        }
+        // 修改（工作线 F93，用户决定 2026-10-24，照 Node）：max_tokens 是 4096 与当前模型生效配置的输出上限
+        // （`optionSpecs.maxOutputTokens.max`）的较小值；F90 时固定 4096，上限低于它的模型（glm-4v-flash 是 1024）也发
+        // 4096。答不出能力或配置没给上限时按 4096。
+        let max_tokens = capabilities
+            .and_then(|found| found.max_output_tokens)
+            .map_or(MAX_TOKENS, |limit| {
+                u32::try_from(limit).map_or(MAX_TOKENS, |limit| limit.min(MAX_TOKENS))
+            });
+        // 请求形状照 Node（工作线 F90，tools-more.md §5、D53）：system 只有 Node 的一句、不写 `tool_choice`（BigModel 的
+        // Anthropic 兼容端点拒绝强制 web_search 的 tool_choice）、max_tokens 见上、不带 thinking。L17 到 F90 之间是：CLI
+        // 身份句在前、`tool_choice: auto`、max_tokens 取模型卡片。effort 照旧取卡片（F23 修正：没有卡片的模型不写选择的
+        // 档位，`card_effort` 的注释）。
         let effort =
             rust_cli_prompts::models::card_effort(&selection.model, selection.reasoning.as_deref());
-        let max_tokens = card.map_or(DEFAULT_MAX_TOKENS, |card| card.max_output_tokens);
-        let block = |text: &str| SystemBlock {
-            text: text.to_owned(),
-            cache_control: None,
-        };
         let request = ModelRequest {
             selection,
-            system: vec![block(rust_cli_prompts::texts::identity()), block(SYSTEM)],
+            system: vec![SystemBlock {
+                text: SYSTEM.to_owned(),
+                cache_control: None,
+            }],
             messages: vec![ApiMessage {
                 role: ApiRole::User,
                 content: vec![ApiContent {
@@ -153,7 +168,7 @@ impl WebSearchTool {
                 output_config: None,
             }],
             tools: Vec::new(),
-            tool_choice: Some(ToolChoice::Auto),
+            tool_choice: None,
             max_tokens,
             thinking: None,
             temperature: None,

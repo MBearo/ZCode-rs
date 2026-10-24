@@ -110,7 +110,8 @@ impl Scope<'_> {
     }
 
     /// 自动记忆的 MEMORY.md（`AutoMem`，排在全部规则之后；memory.md §4）：内容按
-    /// 行数与长度上限截断，空的不宣布。`dir` 是记忆目录（本地执行环境与本机存储是同一文件系统）。
+    /// 行数与长度上限截断，空的不宣布。`dir` 是本机存储里的记忆目录，经本机的 `Files` 读：`Scope` 的端口由 runtime
+    /// 从注册表的本机（`local_machine()`）取，不跟着工具调用的机器走（remote-exec.md §3、§15.8.1）。
     pub(crate) async fn auto_memory(&self, dir: &str) -> Option<RuleFile> {
         let style = self.style;
         let path = style.join(dir.trim_end_matches(['/', '\\']), &[ENTRYPOINT]);

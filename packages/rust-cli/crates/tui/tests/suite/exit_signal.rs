@@ -7,7 +7,7 @@ use std::time::Duration;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
-use rust_cli_kernel_api::testing::{MemoryStore, NoticeEnvironment};
+use rust_cli_kernel_api::testing::{MemoryStore, NoticeEnvironment, environments};
 use tokio_util::sync::CancellationToken;
 
 use super::support::{GatedModel, Setup, send, with_ui, with_ui_exit};
@@ -86,7 +86,7 @@ async fn the_session_ends_only_after_the_loop_hands_the_exit_back() {
     let env = Arc::new(NoticeEnvironment::default());
     let setup = Setup {
         stop: Some(stop.clone()),
-        env: env.clone(),
+        environments: environments(env.clone()),
         ..Setup::default()
     };
     let run = with_ui_exit(model, setup, |mut ui| async move {

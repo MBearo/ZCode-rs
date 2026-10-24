@@ -113,3 +113,21 @@ fn agent_output_with_a_child_links_the_tool_call() {
     };
     assert_eq!(super::subagent_link(&tool_use, &other), None);
 }
+
+/// 任务提醒读清单的端口是对象安全的，可以装进 `Arc<dyn …>`。
+#[test]
+fn the_task_reader_is_object_safe() {
+    struct Fixed;
+    #[async_trait::async_trait]
+    impl super::TaskReader for Fixed {
+        async fn tasks(&self, _session: &SessionId) -> Vec<TaskRecord> {
+            vec![task()]
+        }
+    }
+    let reader: std::sync::Arc<dyn super::TaskReader> = std::sync::Arc::new(Fixed);
+    let tasks = reader
+        .tasks(&SessionId::new("s"))
+        .now_or_never()
+        .expect("ready");
+    assert_eq!(tasks[0].subject, "Fix parser");
+}

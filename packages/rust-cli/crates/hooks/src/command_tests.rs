@@ -41,7 +41,7 @@ async fn run_with(
     let workspace = workspace();
     run(
         CommandRun {
-            env,
+            commands: env,
             workspace: &workspace,
             operation: context("op_1"),
             hook,

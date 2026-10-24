@@ -68,3 +68,29 @@ test("剧本按序回复，用完回 400；count_tokens 用给出的计数；sin
   assert.equal(proxied.status, 502);
   assert.equal(await proxied.text(), "fixture sink: not forwarded");
 });
+
+test("holdMs：块都结束之后先发出去，等一会儿才写 message_delta / message_stop", async (t) => {
+  const fixture = await startModelFixture({ main: [{ ...text("held"), holdMs: 300 }] });
+  t.after(() => fixture.close());
+  const body = { model: "m", stream: true, tools: [{ name: "Read" }], messages: [] };
+  const response = await fetch(`${fixture.baseUrl}/v1/messages`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let seen = "";
+  const started = Date.now();
+  let blockStoppedAt;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    seen += decoder.decode(value, { stream: true });
+    if (blockStoppedAt === undefined && seen.includes("content_block_stop")) {
+      blockStoppedAt = Date.now() - started;
+      assert.ok(!seen.includes("message_stop"), seen);
+    }
+  }
+  assert.ok(seen.includes("message_delta") && seen.includes("message_stop"), seen);
+  assert.ok(Date.now() - started - blockStoppedAt >= 250, `${blockStoppedAt}`);
+});

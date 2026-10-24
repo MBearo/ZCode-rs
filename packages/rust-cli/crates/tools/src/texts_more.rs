@@ -32,6 +32,40 @@ pub(crate) fn user_answered(answers: &str) -> String {
 /// AskUserQuestion 结果：没有任何答案。
 pub(crate) const NO_ANSWER: &str = "The user did not answer the questions.";
 
+/// AskUserQuestion 结果：空闲到期自动提交（工作线 F72，tools-more.md §1.1）。秒数四舍五入。
+pub(crate) fn idle_timeout(timeout_ms: u64) -> String {
+    let seconds = (timeout_ms + 500) / 1000;
+    format!(
+        "No response after {seconds}s \u{2014} the user may be away from keyboard. Proceed using your best judgment based on the context so far; you can re-ask this question later if it's still relevant."
+    )
+}
+
+/// AskUserQuestion 结果：空闲到期时已经选了的。
+pub(crate) fn idle_selected(timeout_ms: u64, selected: &str) -> String {
+    format!(
+        "{}\n\nBefore going idle the user had selected: {selected}.",
+        idle_timeout(timeout_ms)
+    )
+}
+
+/// AskUserQuestion 结果：用户要再多问几个（`also` 是 ` They also wrote: "…".` 或空）。
+pub(crate) fn more_questions(answered: Option<&str>, also: &str) -> String {
+    const MORE: &str = "The user asked for more questions";
+    match answered {
+        Some(answered) => format!(
+            "{MORE} before you proceed. So far they answered: {answered}.{also} Call AskUserQuestion again with follow-up questions that build on these answers (do not repeat these); do not start the task yet."
+        ),
+        None => format!(
+            "{MORE} before answering.{also} Call AskUserQuestion again now with further questions about this decision (do not repeat these); do not proceed with the task yet."
+        ),
+    }
+}
+
+/// AskUserQuestion 结果：用户直接写的回复。
+pub(crate) fn user_responded(response: &str) -> String {
+    format!("The user responded: {response}")
+}
+
 /// EnterPlanMode 的 validateInput。
 pub(crate) const PLAN_MODE_MAIN_ONLY: &str = "Only the main session can enter plan mode.";
 

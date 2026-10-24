@@ -40,16 +40,6 @@ pub enum RewindScope {
     Both,
 }
 
-/// `/fork` 时工作区文件怎么处理（docs/specs/rust-cli/session-lifecycle.md §6.5.1）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ForkFiles {
-    /// 把 checkpoint 写过的文件恢复成写入前的内容（Node `/fork`）；恢复前校验，有冲突就整体拒绝。
-    Restore,
-    /// 文件不动，只分出对话。
-    Keep,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Command {
@@ -117,13 +107,11 @@ pub enum Command {
         command: String,
         delivery: Delivery,
     },
-    /// Node 的 `/fork [latest|checkpointId]`（docs/specs/rust-cli/session-lifecycle.md §6.5）：从 checkpoint
-    /// 分出新会话；`checkpoint` 为空时取最后一个。回执等文件恢复与记录都完成：`Accepted.result` 是
-    /// `{session, response, copied, restored: [{path, action}]}`。
-    ForkCheckpoint {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        checkpoint: Option<String>,
-        files: ForkFiles,
+    /// `/fork`（docs/specs/rust-cli/session-lifecycle.md §6.5，工作线 F75）：从一条可选的用户输入分出新会话，
+    /// 新会话带到这一轮为止（这一轮最后一条 assistant），文件不动。只在空闲时接受；`Accepted.result` 是
+    /// `{session, response, copied, message}`（`message` 是复制到的那条消息，F78）。`input` 不是可选的输入时 `Rejected`。
+    ForkFromInput {
+        input: MessageId,
     },
     /// 批准或拒绝一条扣住的同伴消息（docs/specs/rust-cli/cross-session.md §2.4，F28）：`message` 是
     /// [`crate::peers::HeldPeerMessage::msg_id`]。已经解决（过期、改模式放行）时 `Rejected`。
@@ -150,6 +138,11 @@ pub enum Command {
     ChangeDirectory {
         root: crate::env::EnvPath,
     },
+    /// 把续写时补在内存里、还没落库的 assistant（`No response requested.`，docs/specs/rust-cli/session-lifecycle.md
+    /// §6.3.1，工作线 F79；有补给未结调用的中断结果时一起，§6.3，工作线 F81）现在单独提交一批。交互界面在会话里切到这个会话（`/resume`、`/fork`）之后发：切过去就算换了
+    /// 对话。没有要写的（没有补、已经写过、被回退掉）时什么都不做，回执是 `Accepted`；提交失败时 `Rejected`，它留到下一批
+    /// 带消息的提交。
+    StoreResumeSentinel,
 }
 
 /// 带 ID 的命令；同一个 ID 重复提交时返回 [`Ack::Duplicate`]，不重复执行。
@@ -441,13 +434,6 @@ pub trait SessionHandle: Send + Sync {
         })
     }
 
-    /// `/fork` 选择器的条目：会话 actor 的 checkpoint 清单，新的在前（session-lifecycle.md §6.5.4）。
-    async fn checkpoints(&self) -> Result<Vec<crate::store::WorkspaceCheckpoint>, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "checkpoints".to_owned(),
-        })
-    }
-
     /// 会话里还在跑的后台命令与后台子代理（`/tasks` 与 footer 的计数，tui-display.md §2.3、§3.1）。
     async fn background_tasks(&self) -> Result<Vec<crate::manage::BackgroundEntry>, KernelError> {
         Err(KernelError::Unsupported {
@@ -713,6 +699,23 @@ pub trait Kernel: Send + Sync {
     ) -> Result<crate::catalog::SessionCatalog, KernelError> {
         Err(KernelError::Unsupported {
             what: "session catalog".to_owned(),
+        })
+    }
+
+    /// 旧会话的询问（docs/specs/rust-cli/agents.md §4.1.2，工作线 F72）：先给出还没回答的，再给出之后的变化。缺省
+    /// 没有（流不结束）。
+    fn detached_asks(&self) -> BoxStream<'static, crate::interaction::DetachedEvent> {
+        futures_util::stream::pending().boxed()
+    }
+
+    /// 回答旧会话的询问（回答的形状同 [`Command::ResolveInteraction`]）。缺省 `Unsupported`。
+    async fn resolve_detached(
+        &self,
+        _interaction: &InteractionId,
+        _answer: Value,
+    ) -> Result<(), KernelError> {
+        Err(KernelError::Unsupported {
+            what: "answering questions of closed sessions".to_owned(),
         })
     }
 

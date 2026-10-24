@@ -85,6 +85,8 @@ pub(crate) fn collect(source: &[u8], script: Script) -> Analysis {
         has_redirects: collector.has_redirects,
         has_unsupported_syntax: !collector.unsupported.is_empty(),
         unsupported_node_types: collector.unsupported,
+        pipes: script.pipes,
+        outputs: script.outputs,
     }
 }
 
@@ -171,10 +173,35 @@ impl Collector<'_> {
                 structured: resolved.structured,
             })
             .collect();
+        let command_text = lossy(slice(self.source, node.pos, node.end));
+        let plain_text = node
+            .name
+            .as_ref()
+            .and_then(|name| {
+                redirects
+                    .iter()
+                    .map(|redirect| redirect.start)
+                    .filter(|start| *start > name.pos)
+                    .min()
+            })
+            .map_or_else(
+                || command_text.clone(),
+                |cut| {
+                    lossy(slice(self.source, node.pos, cut))
+                        .trim_end()
+                        .to_owned()
+                },
+            );
+        let static_assignments = !node.prefix.is_empty()
+            && node.prefix.iter().all(|assignment| {
+                assignment.value.as_ref().is_none_or(|value| {
+                    !parameter_expansion(slice(self.source, value.pos, value.end))
+                })
+            });
         Invocation {
             words: texts,
             argv: words.iter().map(|word| lossy(&word.value)).collect(),
-            command_text: lossy(slice(self.source, node.pos, node.end)),
+            command_text,
             env_assignments: node
                 .prefix
                 .iter()
@@ -199,6 +226,9 @@ impl Collector<'_> {
                 })
                 .collect(),
             substitutions,
+            pos: node.pos,
+            plain_text,
+            static_assignments,
         }
     }
 
@@ -246,6 +276,33 @@ impl Collector<'_> {
         }
         found
     }
+}
+
+/// 赋值的值里有参数展开（变量、花括号形式、算术展开、位置参数等）；单引号里的、转义的与命令替换不算。
+fn parameter_expansion(value: &[u8]) -> bool {
+    let mut index = 0;
+    let mut single = false;
+    let mut double = false;
+    while index < value.len() {
+        let byte = value[index];
+        if single {
+            single = byte != b'\'';
+        } else if byte == b'\\' {
+            index += 1;
+        } else if byte == b'"' {
+            double = !double;
+        } else if byte == b'\'' && !double {
+            single = true;
+        } else if byte == b'$' {
+            let next = value.get(index + 1).copied();
+            let arithmetic = next == Some(b'(') && value.get(index + 2) == Some(&b'(');
+            if next.is_some_and(|next| next != b'(') || arithmetic {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    false
 }
 
 /// 不加引号的 heredoc 正文里有没有被转义的 `$(` 或反引号。

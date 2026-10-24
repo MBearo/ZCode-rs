@@ -1,7 +1,7 @@
 //! 计划文件的位置（docs/specs/rust-cli/tools-more.md §2.2）。
 //!
 //! 唯一来源：ExitPlanMode 读计划、context 的计划模式 attachment、policy 的计划文件放行都从这里取，
-//! 不各算各的。纯字符串运算，不做 IO：路径风格（与旧布局的 home）由调用方经 `Environment::path_facts`
+//! 不各算各的。纯字符串运算，不做 IO：路径风格（与旧布局的 home）由调用方经 `EnvInfo::path_facts`
 //! 取，工作区根取调用方手里的 `WorkspaceRef.root`。
 
 use rust_cli_base::names::DOT_DIR;

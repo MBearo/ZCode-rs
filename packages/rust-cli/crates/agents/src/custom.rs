@@ -2,16 +2,17 @@
 //! （项目），经执行环境读取（docs/specs/rust-cli/agents.md §3）。
 
 use rust_cli_base::names::{AGENTS_DIR, DOT_DIR};
-use rust_cli_kernel_api::env::{EnvFacts, EnvPath, Environment, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvFacts, EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{FileKind, ListDir, PathStyle, StatFile};
 use rust_cli_kernel_api::env_git::project_levels;
+use rust_cli_kernel_api::machine::Files;
 use rust_cli_kernel_api::permission::PermissionMode;
 
 use crate::definitions::{AgentDefinition, AgentSource};
 use crate::frontmatter::{self, Value};
 
 struct Reader<'a> {
-    env: &'a dyn Environment,
+    files: &'a dyn Files,
     workspace: &'a WorkspaceRef,
     /// 路径规则按执行环境的 platform（kernel-api `env_path`）。修复（R1-9）：以前按“路径含不含 `\`”
     /// 猜风格，`C:\a` 的上一层算成 `C:`。
@@ -23,7 +24,7 @@ impl Reader<'_> {
         let request = StatFile {
             path: EnvPath::new(path),
         };
-        match self.env.stat(self.workspace, request).await {
+        match self.files.stat(self.workspace, request).await {
             Ok(found) => found.map(|stat| stat.kind),
             Err(error) => {
                 tracing::debug!(%error, path, "agent directory not readable");
@@ -37,7 +38,7 @@ impl Reader<'_> {
         let request = ListDir {
             path: EnvPath::new(dir),
         };
-        let Ok(mut entries) = self.env.list_dir(self.workspace, request).await else {
+        let Ok(mut entries) = self.files.list_dir(self.workspace, request).await else {
             return Vec::new();
         };
         entries.sort_by(|left, right| left.name.cmp(&right.name));
@@ -52,7 +53,7 @@ impl Reader<'_> {
         let request = ReadFile {
             path: EnvPath::new(path),
         };
-        let content = self.env.read_file(self.workspace, request).await.ok()?;
+        let content = self.files.read_file(self.workspace, request).await.ok()?;
         Some(String::from_utf8_lossy(&content.bytes).into_owned())
     }
 
@@ -73,7 +74,7 @@ impl Reader<'_> {
     async fn project_dirs(&self, facts: &EnvFacts) -> Vec<String> {
         let home = facts.home.as_ref().map(EnvPath::as_str);
         let levels = project_levels(
-            self.env,
+            self.files,
             self.workspace,
             self.style,
             facts.cwd.as_str(),
@@ -132,12 +133,12 @@ pub(crate) fn parse(raw: &str, source: AgentSource) -> Option<AgentDefinition> {
 
 /// 用户级与项目级的自定义 agent（用户在前，项目在后；同名时后者覆盖）。
 pub(crate) async fn load(
-    env: &dyn Environment,
+    files: &dyn Files,
     workspace: &WorkspaceRef,
     facts: &EnvFacts,
 ) -> Vec<Vec<AgentDefinition>> {
     let reader = Reader {
-        env,
+        files,
         workspace,
         style: PathStyle::of_platform(&facts.platform),
     };

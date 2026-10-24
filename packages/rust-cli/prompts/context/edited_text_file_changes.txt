@@ -1,0 +1,2 @@
+{{note}} Here are the relevant changes (shown with line numbers):
+{{snippet}}

@@ -275,7 +275,8 @@ async fn a_loaded_session_hands_its_history_to_the_task_table_first() {
             origin: UserOrigin::Human,
         })
     };
-    for (opened, expected) in [(Opened::Loaded, vec![2]), (Opened::Created, vec![])] {
+    // 冷加载的两条输入之后补了一条 assistant（session-lifecycle.md §6.3.1），任务表拿到的是补过之后的历史。
+    for (opened, expected) in [(Opened::Loaded, vec![3]), (Opened::Created, vec![])] {
         let (cron, _wake) = ScriptedCron::new();
         let mut setup = Setup::new(Arc::new(ScriptedModel::new(Vec::new())));
         setup.cron = cron.clone();

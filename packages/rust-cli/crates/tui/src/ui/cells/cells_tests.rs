@@ -252,3 +252,24 @@ fn fire_rows_use_the_fixed_text_in_both_languages() {
         ["✻ Running scheduled task (Oct 18 3:04pm)"]
     );
 }
+
+/// 到了阻塞线（compact.md §2.2）：错误行是“上下文满了”的提示；带压缩失败原因的接上 `/clear`；其余错误原样。
+#[test]
+fn the_blocking_line_error_reads_as_a_full_context() {
+    assert_eq!(
+        text(&[row(1, Body::Error("Prompt is too long".into()))], false).join(""),
+        "⏺ Context limit reached · /compact or /clear to   continue"
+    );
+    assert_eq!(
+        words::turn_error(
+            Lang::En,
+            "Prompt is too long \u{b7} automatic compaction failed: boom"
+        ),
+        "Prompt is too long \u{b7} automatic compaction failed: boom \u{b7} /clear to start fresh"
+    );
+    assert_eq!(
+        words::turn_error(Lang::Zh, "Prompt is too long"),
+        "上下文已满 \u{b7} 用 /compact 或 /clear 继续"
+    );
+    assert_eq!(words::turn_error(Lang::En, "busy"), "busy");
+}

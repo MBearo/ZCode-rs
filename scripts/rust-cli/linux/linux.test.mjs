@@ -165,18 +165,33 @@ test("包装脚本：Unix 是 sh，路径按单引号转义；Windows 是 .cmd",
   );
 });
 
-test("命令行：缺省两个 target；--target 可以写多次；--clippy；不认识的参数报错", () => {
-  assert.deepEqual(parseCli([]), { targets: Object.keys(TARGETS), clippy: false });
+test("命令行：缺省两个 target；--target 可以写多次；--clippy；--debug；不认识的参数报错", () => {
+  assert.deepEqual(parseCli([]), { targets: Object.keys(TARGETS), clippy: false, debug: false });
   assert.deepEqual(parseCli(["--target", "aarch64-unknown-linux-musl", "--clippy"]), {
     targets: ["aarch64-unknown-linux-musl"],
     clippy: true,
+    debug: false,
   });
+  assert.deepEqual(parseCli(["--debug", "--target", "aarch64-unknown-linux-musl"]), {
+    targets: ["aarch64-unknown-linux-musl"],
+    clippy: false,
+    debug: true,
+  });
+  assert.throws(() => parseCli(["--debug", "--clippy"]), /--debug/);
   assert.throws(
     () => parseCli(["--target", "x86_64-unknown-linux-gnu"]),
     /x86_64-unknown-linux-gnu/,
   );
   assert.throws(() => parseCli(["--target"]), /--target/);
   assert.throws(() => parseCli(["--release"]), /--release/);
+});
+
+test("cargo 参数：debug 构建没有 --release（remote-exec.md §19.12）", () => {
+  const config = "target.x.rustflags=[]";
+  const args = cargoArgs({ triple: "x", clippy: false, debug: true, manifest: "m/Cargo.toml", config });
+  assert.equal(args.includes("--release"), false);
+  assert.deepEqual(args.slice(0, 2), ["build", "--locked"]);
+  assert.deepEqual(args.slice(-2), ["--config", "profile.dev.debug=0"]);
 });
 
 test("cargo 参数：release 只构建 zcode-rs；clippy 查整个 workspace 与全部目标", () => {

@@ -9,8 +9,10 @@ mod builtin;
 mod closest;
 mod frontmatter;
 mod inline;
+mod invoked;
 mod listing;
 mod load;
+mod mentions;
 mod names;
 mod paths;
 mod tool;
@@ -21,10 +23,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use rust_cli_kernel_api::env::{EnvFacts, Environment, FileVersion, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvFacts, FileVersion, WorkspaceRef};
 use rust_cli_kernel_api::listing::ListingEntry;
+use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::message::Message;
 
+pub use invoked::INVOKED_SKILLS_SOURCE;
 pub use tool::{SKILL_MESSAGE_SOURCE, SkillTool};
 pub use user::SkillCommands;
 
@@ -116,7 +120,9 @@ struct Cache {
 
 /// skill 目录的发现与缓存。
 pub struct SkillCatalog {
-    env: Arc<dyn Environment>,
+    /// 环境事实（skill 目录的层级、路径风格）与 skill 文件；都是本机的。
+    info: Arc<dyn EnvInfo>,
+    files: Arc<dyn Files>,
     plugins: Mutex<Vec<PluginSkillRoot>>,
     cache: Mutex<Cache>,
     /// 单次的 `-p`（`singleShotPrintSession`）：内置 `/loop` 的 Monitor 超时随它（tools-more.md §17.1）。
@@ -124,9 +130,10 @@ pub struct SkillCatalog {
 }
 
 impl SkillCatalog {
-    pub fn new(env: Arc<dyn Environment>) -> Self {
+    pub fn new(info: Arc<dyn EnvInfo>, files: Arc<dyn Files>) -> Self {
         Self {
-            env,
+            info,
+            files,
             plugins: Mutex::default(),
             cache: Mutex::default(),
             print: AtomicBool::new(false),
@@ -170,7 +177,7 @@ impl SkillCatalog {
 
     /// 这一步发现的全部 skill，按优先级排好、同名只留第一个（ext.md §2.1）。
     pub async fn skills(&self, workspace: &WorkspaceRef) -> Vec<Arc<Skill>> {
-        let facts = match self.env.facts(workspace).await {
+        let facts = match self.info.facts(workspace).await {
             Ok(facts) => facts,
             Err(error) => {
                 tracing::debug!(%error, "skills are not available without environment facts");
@@ -191,6 +198,15 @@ impl SkillCatalog {
             .collect()
     }
 
+    /// 这次会话调用过的 skill（compact.md §3.4）：`history` 是全部历史，最近的在前。
+    pub async fn invoked(
+        &self,
+        workspace: &WorkspaceRef,
+        history: &[Message],
+    ) -> Vec<rust_cli_kernel_api::listing::InvokedSkill> {
+        invoked::invoked(self, workspace, history).await
+    }
+
     /// 按名字找（Skill 工具用）。
     pub async fn find(&self, workspace: &WorkspaceRef, name: &str) -> Option<Arc<Skill>> {
         self.skills(workspace)
@@ -207,7 +223,7 @@ impl SkillCatalog {
         history: &[Message],
         model: &str,
     ) -> Vec<ListingEntry> {
-        let Ok(facts) = self.env.facts(workspace).await else {
+        let Ok(facts) = self.info.facts(workspace).await else {
             return Vec::new();
         };
         let skills = self.skills_with(workspace, &facts).await;

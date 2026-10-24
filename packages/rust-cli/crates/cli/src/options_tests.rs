@@ -195,3 +195,73 @@ fn the_two_sandbox_readings_differ_by_site() {
     }
     assert!(!is_sandbox_one(&[]));
 }
+
+/// 工作线 F83：Monitor 产品缺省开；只给测试用的声明关掉（只在接受声明时读），Windows 上还要找到 Git Bash。
+#[test]
+fn monitor_is_on_unless_declared_off() {
+    let read = |pairs: &[(&str, &str)], declarations| {
+        let snapshot = env(pairs);
+        assumptions(declarations, |name| var(&snapshot, name).map(str::to_owned))
+    };
+    let plain = read(&[], TestDeclarations::Accepted);
+    assert!(monitor(plain, true));
+    assert_eq!(monitor(plain, false), !cfg!(windows));
+    let off = read(
+        &[("_ZCODE_ASSUME_MONITOR_OFF", "1")],
+        TestDeclarations::Accepted,
+    );
+    assert!(off.monitor_off && !monitor(off, true));
+    let release = read(
+        &[("_ZCODE_ASSUME_MONITOR_OFF", "1")],
+        TestDeclarations::Ignored,
+    );
+    assert!(monitor(release, true));
+}
+
+/// 远端执行 R1（remote-exec.md §18.6）：loopback 的声明只在接受声明时读（release 构建不认），缺省是本机的执行环境。
+#[test]
+fn the_loopback_declaration_is_read_only_when_declarations_are_accepted() {
+    let read = |pairs: &[(&str, &str)], declarations| {
+        let snapshot = env(pairs);
+        assumptions(declarations, |name| var(&snapshot, name).map(str::to_owned))
+    };
+    assert!(!read(&[], TestDeclarations::Accepted).loopback);
+    let declared = [("_ZCODE_ASSUME_LOOPBACK_EXECUTOR", "1")];
+    assert!(read(&declared, TestDeclarations::Accepted).loopback);
+    assert!(!read(&declared, TestDeclarations::Ignored).loopback);
+    let off = [("_ZCODE_ASSUME_LOOPBACK_EXECUTOR", "0")];
+    assert!(!read(&off, TestDeclarations::Accepted).loopback);
+}
+
+/// 远端执行 R2（remote-exec.md §19.11）：SSH 的测试入口只在接受声明时读，要有目标；release 构建不读任何一个变量。
+#[test]
+fn the_ssh_entry_is_read_only_when_declarations_are_accepted() {
+    let vars = [
+        ("_ZCODE_ASSUME_SSH_EXECUTOR", "test-host"),
+        ("_ZCODE_ASSUME_SSH_CONFIG", "/tmp/ssh_config"),
+        ("_ZCODE_ASSUME_SSH_ARTIFACT", ""),
+    ];
+    let lookup = |name: &str| {
+        vars.iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| (*value).to_owned())
+    };
+    assert_eq!(
+        ssh_assumption(TestDeclarations::Accepted, lookup),
+        Some(SshAssumption {
+            destination: "test-host".to_owned(),
+            config: Some("/tmp/ssh_config".to_owned()),
+            artifact: None,
+        })
+    );
+    assert_eq!(
+        ssh_assumption(TestDeclarations::Ignored, |_: &str| -> Option<String> {
+            panic!("release builds do not read the variables")
+        }),
+        None
+    );
+    assert_eq!(
+        ssh_assumption(TestDeclarations::Accepted, |_: &str| None),
+        None
+    );
+}

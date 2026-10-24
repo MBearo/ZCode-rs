@@ -1,11 +1,12 @@
 //! rewind（docs/specs/rust-cli/session-lifecycle.md §5）：对话回退是一次存储提交；代码回退是
 //! 执行环境的 token 事务，在后台工作里跑，结果回到 actor 后才提交事实、发事件、回复命令。
 
-use rust_cli_kernel_api::env::{Environment, OperationContext, Origin, WorkspaceRef};
+use rust_cli_kernel_api::env::{OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::env_rewind::{
     RestoreAction, RestoreFile, RestoredFile, RewindPlan, RewindPrepare, RewindStatus,
 };
 use rust_cli_kernel_api::ids::{CommandId, MessageId, OperationId, OwnerEpoch};
+use rust_cli_kernel_api::machine::Checkpoints;
 use rust_cli_kernel_api::session_api::{Ack, KernelEvent, RewindOption, RewindScope};
 use rust_cli_kernel_api::store::{ArtifactStore, Fact, RevertCursor, WorkspaceCheckpoint};
 use serde_json::{Value, json};
@@ -30,7 +31,7 @@ pub(crate) struct Finished {
     result: Result<Value, String>,
 }
 
-pub(crate) async fn read(
+async fn read(
     store: &dyn ArtifactStore,
     checkpoint: &WorkspaceCheckpoint,
 ) -> Result<Artifact, String> {
@@ -61,15 +62,15 @@ pub(crate) async fn options(store: &dyn ArtifactStore, snapshot: Snapshot) -> Ve
 }
 
 /// 执行环境的回退事务（spec §5.2）：prepare（逐个核对 hash）→ apply（写前再核对，失败已补偿）。token 是
-/// `context.operation`，调用方在提交事实之后 `rewind_finish`。`/fork` 恢复文件也用它（§6.5.3）。
-pub(crate) async fn restore(
-    env: &dyn Environment,
+/// `context.operation`，调用方在提交事实之后 `rewind_finish`。
+async fn restore(
+    checkpoints: &dyn Checkpoints,
     workspace: &WorkspaceRef,
     context: OperationContext,
     files: Vec<RestoreFile>,
 ) -> Result<Vec<RestoredFile>, String> {
     let token = context.operation.clone();
-    let plan = env
+    let plan = checkpoints
         .rewind_prepare(workspace, context, RewindPrepare { files })
         .await
         .map_err(|error| error.to_string())?;
@@ -80,7 +81,11 @@ pub(crate) async fn restore(
             .collect();
         return Err(lines.join("\n"));
     }
-    match env.rewind_apply(&token).await.map_err(|e| e.to_string())? {
+    match checkpoints
+        .rewind_apply(&token)
+        .await
+        .map_err(|e| e.to_string())?
+    {
         RewindStatus::Applied { files } => Ok(files),
         RewindStatus::Failed { message, conflicts } if !conflicts.is_empty() => {
             let lines: Vec<String> = conflicts
@@ -95,7 +100,7 @@ pub(crate) async fn restore(
 }
 
 /// 回执里的文件：`[{path, action}]`。
-pub(crate) fn restored_json(files: &[RestoredFile]) -> Value {
+fn restored_json(files: &[RestoredFile]) -> Value {
     json!(
         files
             .iter()
@@ -182,7 +187,10 @@ impl Actor {
             },
         };
         let workspace = self.meta.workspace.clone();
-        let (env, store) = (self.deps.env.clone(), self.deps.artifacts.clone());
+        let (port, store) = (
+            self.deps.machine.checkpoints().clone(),
+            self.deps.artifacts.clone(),
+        );
         let checkpoints = undo.iter().map(|c| c.id.clone()).collect();
         let task = self.deps.spawner.spawn("rewind-code", async move {
             let result = async {
@@ -191,7 +199,7 @@ impl Actor {
                     artifacts.push(read(store.as_ref(), checkpoint).await?);
                 }
                 let files = rewind_plan::plan(&artifacts)?;
-                let restored = restore(env.as_ref(), &workspace, context, files).await?;
+                let restored = restore(port.as_ref(), &workspace, context, files).await?;
                 Ok(restored_json(&restored))
             }
             .await;
@@ -243,9 +251,9 @@ impl Actor {
             }
         };
         let _ = reply.send(ack);
-        let env = self.deps.env.clone();
+        let checkpoints = self.deps.machine.checkpoints().clone();
         drop(self.deps.spawner.spawn("rewind-finish", async move {
-            if let Err(error) = env.rewind_finish(&token).await {
+            if let Err(error) = checkpoints.rewind_finish(&token).await {
                 tracing::warn!(%error, "rewind token was not released");
             }
         }));

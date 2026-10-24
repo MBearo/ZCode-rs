@@ -145,3 +145,30 @@ fn windows_deny_and_ask_rules_fold_the_root() {
     assert!(home(r"C:\USERS\DEV\.ssh\id_rsa", Deny));
     assert!(!home(r"C:\USERS\DEV\.ssh\id_rsa", Allow));
 }
+
+/// 修复（工作线 F85）：`x/**` 也匹配 `x` 目录本身（deny、ask、allow 都这样）。以前只匹配它下面的，
+/// `Read(//etc/**)` 下 `ls /etc`、`cd /etc` 只按工作目录外询问。
+#[test]
+fn a_double_star_rule_also_matches_the_directory_itself() {
+    let context = paths();
+    for behavior in [Deny, Ask, Allow] {
+        assert!(rule_matches("//etc/**", "/etc", "/w", &context, behavior));
+        assert!(rule_matches(
+            "//etc/**",
+            "/etc/hosts",
+            "/w",
+            &context,
+            behavior
+        ));
+        assert!(rule_matches(
+            "secret/**",
+            "/w/secret",
+            "/w",
+            &context,
+            behavior
+        ));
+        assert!(rule_matches("/a/b/**", "/w/a/b", "/w", &context, behavior));
+    }
+    assert!(!rule_matches("//etc/**", "/etcetera", "/w", &context, Deny));
+    assert!(!rule_matches("//etc/**", "/", "/w", &context, Deny));
+}

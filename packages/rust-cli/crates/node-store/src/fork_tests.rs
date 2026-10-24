@@ -1,14 +1,9 @@
 //! Node `/fork` 的新会话（session-lifecycle.md §6.5.2、node-store.md §4.8）：会话行、复制的范围、提示与时间线、
 //! 冷读取、找不到目标时整批回滚。
-use rust_cli_kernel_api::env::EnvPath;
-use rust_cli_kernel_api::env_rewind::{RestoreAction, RestoredFile};
-use rust_cli_kernel_api::ids::{ArtifactId, MessageId, SessionId, ToolUseId};
+use rust_cli_kernel_api::ids::{MessageId, SessionId, ToolUseId};
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::store::{
-    ArtifactPurpose, ArtifactRef, Fact, RevertCursor, SessionFork, SessionStore,
-    WorkspaceCheckpoint,
-};
+use rust_cli_kernel_api::store::{Fact, RevertCursor, SessionFork, SessionStore};
 use serde_json::{Value, json};
 
 use crate::tests::{TestStore, assistant, batch, selection, started, text, user};
@@ -17,37 +12,12 @@ fn sid(id: &str) -> SessionId {
     SessionId::new(id)
 }
 
-fn checkpoint() -> WorkspaceCheckpoint {
-    WorkspaceCheckpoint {
-        id: "checkpoint_1".into(),
-        prompt: MessageId::new("msg_3_u2"),
-        assistant: MessageId::new("msg_4_a2"),
-        tool_use: ToolUseId::new("toolu_1"),
-        snapshot: ArtifactRef {
-            session: sid("sess_1"),
-            id: ArtifactId::new("tool-result-cp"),
-            purpose: ArtifactPurpose::Checkpoint,
-            media_type: "application/json".into(),
-            size: 12,
-        },
-    }
-}
-
-fn request(through: &str, restored: bool) -> SessionFork {
+fn request(through: &str) -> SessionFork {
     SessionFork {
         parent: sid("sess_1"),
         child: sid("sess_2"),
         created_at_ms: 36_000,
         through: MessageId::new(through),
-        checkpoint: restored.then(checkpoint),
-        restored: if restored {
-            vec![RestoredFile {
-                path: EnvPath::new("/w/a.txt"),
-                action: RestoreAction::Restore,
-            }]
-        } else {
-            Vec::new()
-        },
         selection: selection(),
         mode: PermissionMode::AcceptEdits,
         plan: false,
@@ -80,10 +50,10 @@ fn data(t: &TestStore, table: &str, session: &str) -> Vec<Value> {
 }
 
 #[tokio::test]
-async fn the_fork_copies_up_to_the_checkpoint_turn_and_adds_the_notice() {
+async fn the_fork_copies_up_to_the_target_and_adds_the_notice() {
     let t = TestStore::new();
     three_turns(&t).await;
-    let receipt = t.store.fork(request("msg_3_u2", true)).await.unwrap();
+    let receipt = t.store.fork(request("msg_3_u2")).await.unwrap();
     assert_eq!(receipt.copied, 3);
     // 会话行：Node `buildForkedSessionInput`。
     let row = &t.rows(
@@ -122,8 +92,17 @@ async fn the_fork_copies_up_to_the_checkpoint_turn_and_adds_the_notice() {
     let timeline = parts.iter().find(|p| p["type"] == "timeline").unwrap();
     assert_eq!(timeline["timelineType"], "session_fork");
     assert_eq!(timeline["anchorMessageId"], json!(ids[2]));
-    assert_eq!(timeline["targetCheckpointId"], "checkpoint_1");
-    assert_eq!(timeline["restoredFileCount"], 1);
+    assert_eq!(timeline["targetMessageId"], "msg_3_u2");
+    // 分叉对话不恢复文件（Node 同样写 0），没有 checkpoint 的字段。
+    assert_eq!(timeline["restoredFileCount"], 0);
+    assert!(timeline.get("targetCheckpointId").is_none());
+    assert_eq!(
+        t.rows(
+            "select id from part where session_id = 'sess_2'
+               and json_extract(data, '$.type') = 'timeline'"
+        ),
+        [[json!("part_fork_sess_1_msg_3_u2_timeline")]]
+    );
     let notice = parts
         .iter()
         .find(|p| p["metadata"]["source"] == "fork")
@@ -131,9 +110,14 @@ async fn the_fork_copies_up_to_the_checkpoint_turn_and_adds_the_notice() {
     assert_eq!(
         notice["text"],
         format!(
-            "This session was forked from a previous session checkpoint.\nparentSessionId: sess_1\ncheckpointId: checkpoint_1\ntargetMessageId: msg_3_u2\nrestoredSnapshotRef: zcode-artifact://sess_1/tool-result-cp\nrestoredFiles: 1\nrestore /w/a.txt\n{}",
+            "This session was forked from a previous session message.\nparentSessionId: sess_1\ntargetMessageId: msg_3_u2\nNo workspace checkpoint was restored for this fork.\n{}",
             super::CONTINUE
         )
+    );
+    assert_eq!(
+        notice["metadata"]["forkContext"],
+        json!({"kind": "session_fork", "parentSessionId": "sess_1",
+            "targetMessageId": "msg_3_u2", "restoredFileCount": 0})
     );
     assert_eq!(
         notice["metadata"]["runtimeMessage"],
@@ -166,7 +150,7 @@ async fn the_fork_copies_up_to_the_checkpoint_turn_and_adds_the_notice() {
 }
 
 #[tokio::test]
-async fn a_conversation_only_fork_follows_the_revert_cursor() {
+async fn the_fork_follows_the_revert_cursor() {
     let t = TestStore::new();
     three_turns(&t).await;
     // 回退到第二条输入之前：fork 源分支里没有它。
@@ -182,7 +166,7 @@ async fn a_conversation_only_fork_follows_the_revert_cursor() {
         .commit(&sid("sess_1"), batch(None, vec![cursor]))
         .await
         .unwrap();
-    let error = t.store.fork(request("msg_3_u2", false)).await.unwrap_err();
+    let error = t.store.fork(request("msg_3_u2")).await.unwrap_err();
     assert!(
         error
             .to_string()
@@ -194,7 +178,7 @@ async fn a_conversation_only_fork_follows_the_revert_cursor() {
         t.rows("select id from session where id = 'sess_2'")
             .is_empty()
     );
-    let receipt = t.store.fork(request("msg_2_a1", false)).await.unwrap();
+    let receipt = t.store.fork(request("msg_2_a1")).await.unwrap();
     assert_eq!(receipt.copied, 2);
     let parts = data(&t, "part", "sess_2");
     let notice = parts
@@ -240,7 +224,7 @@ async fn the_goal_state_is_copied_with_its_verifications() {
             .unwrap();
         }
     }
-    t.store.fork(request("msg_3_u2", false)).await.unwrap();
+    t.store.fork(request("msg_3_u2")).await.unwrap();
     let target = &t.rows(
         "select target_id, objective, status, tokens_used, active_input_id from session_target
          where session_id = 'sess_2'",
@@ -266,4 +250,86 @@ async fn the_goal_state_is_copied_with_its_verifications() {
     assert_eq!(payload["payload"]["originAnchorTurnId"], "turn_1");
     assert!(payload["payload"].get("anchorTurnId").is_none());
     assert_ne!(payload["payload"]["anchorAssistantMessageId"], "msg_2_a1");
+}
+
+/// 按用户输入分叉（session-lifecycle.md §6.5.2，F75）：复制到工具轮最后一条回答。Node 的 assistant 行带着自己的
+/// 工具调用与结果，所以结果都在；排在回答之后的中断标记不复制；提示是分叉对话的正文。
+#[tokio::test]
+async fn a_fork_through_the_last_answer_of_a_tool_turn_keeps_its_tool_results() {
+    use rust_cli_kernel_api::message::{
+        AssistantMessage, ContentBlock, StopReason, ToolResultContent, UserMessage, UserOrigin,
+    };
+    let t = TestStore::new();
+    started(&t, "sess_1").await;
+    let calls = Fact::MessageAppended {
+        message: Message::Assistant(AssistantMessage {
+            id: MessageId::new("msg_2_a1"),
+            content: vec![ContentBlock::ToolUse {
+                id: ToolUseId::new("toolu_1"),
+                name: "Read".into(),
+                input: json!({"file_path": "/w/a.txt"}),
+            }],
+            model: "m".into(),
+            stop_reason: Some(StopReason::ToolUse),
+            usage: None,
+        }),
+    };
+    let result = Fact::MessageAppended {
+        message: Message::User(UserMessage {
+            id: MessageId::new("msg_3_r1"),
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: ToolUseId::new("toolu_1"),
+                content: vec![ToolResultContent::Text {
+                    text: "contents".into(),
+                }],
+                is_error: false,
+            }],
+            origin: UserOrigin::ToolResult {
+                assistant: MessageId::new("msg_2_a1"),
+            },
+        }),
+    };
+    for fact in [
+        user("msg_1_u1", "first"),
+        calls,
+        result,
+        assistant("msg_4_a2", vec![text("read it")], None),
+        user(
+            "msg_5_i1",
+            rust_cli_kernel_api::user_input::INTERRUPT_TEXTS[0],
+        ),
+        user("msg_6_u2", "second"),
+    ] {
+        t.store
+            .commit(&sid("sess_1"), batch(None, vec![fact]))
+            .await
+            .unwrap();
+    }
+    let receipt = t.store.fork(request("msg_4_a2")).await.unwrap();
+    assert_eq!(receipt.copied, 3);
+    let loaded = t.store.load(&sid("sess_2")).await.unwrap();
+    let shapes: Vec<String> = loaded
+        .messages
+        .iter()
+        .map(|message| match message {
+            Message::User(user) => match &user.origin {
+                UserOrigin::ToolResult { .. } => "result".to_owned(),
+                _ => "user".to_owned(),
+            },
+            Message::Assistant(_) => "assistant".to_owned(),
+            Message::Attachment(attachment) => attachment.source.clone(),
+            Message::System(_) => "system".to_owned(),
+        })
+        .collect();
+    assert_eq!(shapes, ["user", "assistant", "result", "assistant", "fork"]);
+    let Message::Attachment(notice) = &loaded.messages[4] else {
+        unreachable!()
+    };
+    assert!(
+        notice.text.starts_with(
+            "<system-reminder>\nThis session was forked from a previous session message.\nparentSessionId: sess_1\ntargetMessageId: msg_4_a2\n"
+        ),
+        "{}",
+        notice.text
+    );
 }

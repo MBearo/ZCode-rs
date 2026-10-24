@@ -16,6 +16,7 @@ use rust_cli_kernel_api::provider::ModelDirectory;
 use rust_cli_node_store::{NodeIds, SystemClock};
 use rust_cli_paths::StoragePaths;
 use rust_cli_platform::{Recorder, UiLocale, UiTheme};
+use rust_cli_tui::ui::afk::QuestionTimeout;
 use rust_cli_tui::{LocaleStore, MemoryFile, Options, Preferences, Services, Startup};
 
 /// TUI 用到的环境变量：色深、语言、终端种类（自动复制与键盘增强）。
@@ -96,6 +97,8 @@ pub(crate) struct Inputs<'a> {
     pub update: Option<rust_cli_tui::update::UpdateInfo>,
     /// 运行的平台（修复线 F65，tui-input.md §9）。
     pub os: rust_cli_tui::Os,
+    /// 配置的 `askUserQuestionTimeout`（毫秒，tools-more.md §1.1，工作线 F72）。
+    pub question_timeout: Option<u64>,
 }
 
 /// 界面语言写回用户级配置文件（tui.md §7.1，platform `write_ui_locale`）。
@@ -190,6 +193,27 @@ pub(crate) fn startup(target: &SessionTarget, pick: bool) -> Startup {
     }
 }
 
+/// 提问框的空闲超时（tools-more.md §1.1，工作线 F72）：配置的 `askUserQuestionTimeout` 与两个环境变量
+/// `ZCODE_AFK_TIMEOUT_MS` / `ZCODE_AFK_COUNTDOWN_MS`（JS 的整数读法，读不出整数时没设；环境变量压过配置）。
+///
+/// 负数（工作线 F78，用户决定）：超时是负数时不超时，门槛是负数时不显示倒计时。以前两者都按 0：负的超时
+/// 一弹出就到期，与“不超时”的意图相反。
+fn question_timeout(setting_ms: Option<u64>, env: &[(String, String)]) -> Option<QuestionTimeout> {
+    let timeout = afk_ms(env, "ZCODE_AFK_TIMEOUT_MS");
+    if timeout.is_some_and(|ms| ms < 0.0) {
+        return None;
+    }
+    // 门槛 0 不显示倒计时：剩下的秒数在到期之前总不小于 1。
+    let countdown = afk_ms(env, "ZCODE_AFK_COUNTDOWN_MS").map(|ms| ms.max(0.0) as u64);
+    QuestionTimeout::new(setting_ms, timeout.map(|ms| ms as u64), countdown)
+}
+
+/// 一个环境变量的毫秒数（JS 的整数读法，带符号）；没设或读不出整数时 None。
+fn afk_ms(env: &[(String, String)], name: &str) -> Option<f64> {
+    let (_, value) = env.iter().find(|(key, _)| key == name)?;
+    crate::limits::js_int(value)
+}
+
 pub(crate) fn options(inputs: Inputs<'_>, version: &str) -> Options {
     Options {
         history: inputs.history,
@@ -233,6 +257,7 @@ pub(crate) fn options(inputs: Inputs<'_>, version: &str) -> Options {
             })),
             trust: Some(inputs.trust),
             update: inputs.update,
+            question_timeout: question_timeout(inputs.question_timeout, inputs.env),
         },
         clock: inputs.clock,
         ids: inputs.ids,
@@ -261,5 +286,38 @@ mod tests {
             vars.get("ZCODE_SCROLL_SPEED").map(String::as_str),
             Some("5")
         );
+    }
+
+    /// 提问框空闲超时的环境变量（tools-more.md §1.1，工作线 F72）：JS 的整数读法，读不出整数时没设。
+    #[test]
+    fn idle_timeout_variables_read_like_integers() {
+        let env = |value: &str| vec![("ZCODE_AFK_TIMEOUT_MS".to_owned(), value.to_owned())];
+        let timeout = |value: &str| question_timeout(None, &env(value)).map(|t| t.timeout_ms);
+        assert_eq!(timeout("4000"), Some(4000));
+        assert_eq!(timeout(" 1500ms"), Some(1500));
+        assert_eq!(timeout("0"), Some(0));
+        assert_eq!(timeout("soon"), None);
+        assert_eq!(timeout(""), None);
+        // 读不出整数时用配置。
+        let setting = question_timeout(Some(60_000), &env("soon")).map(|t| t.timeout_ms);
+        assert_eq!(setting, Some(60_000));
+    }
+
+    /// 负数（工作线 F78，用户决定；以前按 0，一弹出就到期）：超时是负数时不超时，也压过配置；倒计时门槛是负数时
+    /// 不显示倒计时（门槛 0），超时照常。
+    #[test]
+    fn a_negative_idle_timeout_turns_the_timer_off() {
+        let env = |name: &str, value: &str| vec![(name.to_owned(), value.to_owned())];
+        assert_eq!(
+            question_timeout(None, &env("ZCODE_AFK_TIMEOUT_MS", "-5")),
+            None
+        );
+        assert_eq!(
+            question_timeout(Some(300_000), &env("ZCODE_AFK_TIMEOUT_MS", "-1")),
+            None
+        );
+        let countdown = question_timeout(Some(60_000), &env("ZCODE_AFK_COUNTDOWN_MS", "-1"))
+            .expect("the setting still applies");
+        assert_eq!((countdown.timeout_ms, countdown.countdown_ms), (60_000, 0));
     }
 }

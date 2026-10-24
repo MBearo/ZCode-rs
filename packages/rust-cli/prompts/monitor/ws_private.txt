@@ -1,0 +1,1 @@
+Monitor cannot open a WebSocket to {{host}}: the address is in a private, link-local, or cloud-metadata range.

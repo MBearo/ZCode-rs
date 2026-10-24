@@ -55,7 +55,8 @@ async fn run(
     let asked = Mutex::new(None);
     let outcome = ensure(
         Inputs {
-            env,
+            info: env,
+            files: env,
             store,
             workspace: &workspace(root),
             grants,

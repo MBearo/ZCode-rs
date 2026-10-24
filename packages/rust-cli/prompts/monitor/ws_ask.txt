@@ -1,0 +1,1 @@
+Monitor will open a WebSocket to {{url}}{{protocols}}

@@ -67,13 +67,7 @@ mod reference {
                 tool(item, flags)
             })
             .collect();
-        let version = crate::anthropic_request::tests::profile(first_party).web_search;
-        tools.extend(
-            options
-                .server_tools
-                .into_iter()
-                .map(|item| server_tool(item, version)),
-        );
+        tools.extend(options.server_tools.into_iter().map(server_tool));
         body.insert("tools".into(), Value::Array(tools));
         if let Some(choice) = tool_choice {
             body.insert("tool_choice".into(), self::tool_choice(choice));
@@ -559,19 +553,6 @@ fn the_body_and_betas_match_the_value_encoder_byte_for_byte() {
     }
     // 8 个请求（两种整体形状加 6 种单条消息）× 7 组补丁。
     assert_eq!(compared, 8 * 7);
-}
-
-/// count_tokens 的消息值与旧写法的值相同（数字按 JS 写出再读回，字节相同）。
-#[test]
-fn count_tokens_messages_match_the_value_encoder() {
-    for shape in shapes() {
-        let old = reference::message(shape.clone()).unwrap();
-        let new = super::message(shape).unwrap();
-        assert_eq!(
-            rust_cli_base::js::json::stringify(&new),
-            rust_cli_base::js::json::stringify(&old)
-        );
-    }
 }
 
 /// Artifact 图片在两种写法里都报同一个错。

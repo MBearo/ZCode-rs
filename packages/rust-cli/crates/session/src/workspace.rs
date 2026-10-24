@@ -25,7 +25,8 @@ impl Actor {
         root: EnvPath,
     ) -> Result<(), OrchestrationError> {
         self.deps
-            .env
+            .machine
+            .shell()
             .set_shell_cwd(&self.meta.id, root.clone())
             .await
             .map_err(|error| OrchestrationError::Failed {

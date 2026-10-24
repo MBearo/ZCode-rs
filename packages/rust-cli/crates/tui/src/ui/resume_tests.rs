@@ -244,7 +244,8 @@ fn another_directory_asks_first_and_the_current_session_is_already_viewed() {
         Some(Action::Projects(Request::Open {
             id: "far".into(),
             root: "/Users/dev/other".into(),
-            cd: Some(HERE.into())
+            cd: Some(HERE.into()),
+            startup: false
         }))
     );
     assert!(app.overlay.is_none());
@@ -256,7 +257,8 @@ fn another_directory_asks_first_and_the_current_session_is_already_viewed() {
         Some(Action::Projects(Request::Open {
             id: "far".into(),
             root: "/Users/dev/other".into(),
-            cd: None
+            cd: None,
+            startup: false
         }))
     );
     let mut current = row("cur", HERE, "Current");
@@ -264,6 +266,43 @@ fn another_directory_asks_first_and_the_current_session_is_already_viewed() {
     with_rows(&mut app, vec![current]);
     assert_eq!(app.resume_key(key(KeyCode::Enter)), None);
     assert!(app.overlay.is_none());
+}
+
+/// 启动形态选中的会话带上 `startup`（打开时不写续写占位，session-lifecycle.md §6.3.1，工作线 F79）：当前目录的会话也
+/// 交给 runner 的打开请求；应用内的页面照旧直接切过去。
+#[test]
+fn the_startup_page_marks_what_it_opens() {
+    let mut app = app();
+    with_rows(&mut app, vec![row("near", HERE, "Near")]);
+    assert_eq!(
+        app.resume_key(key(KeyCode::Enter)),
+        Some(Action::Resume("near".into()))
+    );
+    app.open_resume_page(true, 0);
+    page(&mut app).rows = Some(vec![row("near", HERE, "Near")]);
+    assert_eq!(
+        app.resume_key(key(KeyCode::Enter)),
+        Some(Action::Projects(Request::Open {
+            id: "near".into(),
+            root: HERE.into(),
+            cd: None,
+            startup: true
+        }))
+    );
+    assert!(app.overlay.is_none());
+    // 别的目录：目录选择之后同样带上。
+    app.open_resume_page(true, 0);
+    page(&mut app).rows = Some(vec![row("far", "/Users/dev/other", "Far")]);
+    assert_eq!(app.resume_key(key(KeyCode::Enter)), None);
+    assert_eq!(
+        app.resume_key(key(KeyCode::Esc)),
+        Some(Action::Projects(Request::Open {
+            id: "far".into(),
+            root: "/Users/dev/other".into(),
+            cd: None,
+            startup: true
+        }))
+    );
 }
 
 #[test]

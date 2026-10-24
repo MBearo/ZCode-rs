@@ -26,16 +26,14 @@ pub(super) enum Sent {
     Compact,
     /// rewind；回执的 `label` 是要放回输入框的文字（只回退代码时为空）。
     Rewind,
-    /// `/branch`：回执的 `result` 是新会话 ID。
-    Branch,
     /// `/rename`：回执后提示新名字（`label`）。
     Rename,
     /// 空闲时 esc / ctrl+c 取消 loop 唤醒（tools-more.md §18.1）：回执不提示。
     CancelLoops,
     /// 不带名字的 `/rename`：回执的文本（`result.message` 或 `reason`）原样显示（titles.md §8.6）。
     GenerateName,
-    /// Node 的 `/fork`：回执的 `result` 是 `{session, response, …}`，到达后切到新会话。
-    ForkCheckpoint,
+    /// `/fork`：回执的 `result` 是 `{session, response, …}`，到达后切到新会话。
+    Fork,
     /// `/clear 名字` 给旧会话改名（tui-display.md §4.6）：成功不提示，失败照常报错。
     ClearRename,
     /// esc 撤回（修复线 F38）：回执的 `result.message` 放回输入框；条件不满足被拒绝时不提示。
@@ -288,12 +286,7 @@ impl<B: Backend> Loop<'_, B> {
                 Ack::Accepted { .. } if sent == Sent::Rename => {
                     self.app.info(format!("Session renamed to: {label}"));
                 }
-                Ack::Accepted { result } if sent == Sent::ForkCheckpoint => self.forked(&result),
-                Ack::Accepted { result } if sent == Sent::Branch => {
-                    if let Some(id) = result.as_str() {
-                        self.branched(id);
-                    }
-                }
+                Ack::Accepted { result } if sent == Sent::Fork => self.forked(&result),
                 Ack::Accepted { .. } | Ack::Duplicate => {}
             },
             Done::Rewinds(entries) => match entries {

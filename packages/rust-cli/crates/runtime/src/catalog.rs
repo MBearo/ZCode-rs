@@ -9,8 +9,11 @@ use rust_cli_kernel_api::tool_search::{TOOL_SEARCH, compare_names, is_deferred};
 use crate::usage::UsageAnalyzer;
 
 pub(crate) async fn catalog(usage: &UsageAnalyzer, query: &CatalogQuery) -> SessionCatalog {
-    let capabilities = usage.model.capabilities(&query.selection).await;
-    let web_search = capabilities.is_none_or(|found| found.supports_native_web_search);
+    let web_search = usage
+        .model
+        .capabilities(&query.selection)
+        .await
+        .is_none_or(|found| found.supports_native_web_search);
     let mut tools: Vec<_> = usage
         .tools
         .snapshot(&query.session)
@@ -18,17 +21,13 @@ pub(crate) async fn catalog(usage: &UsageAnalyzer, query: &CatalogQuery) -> Sess
         .into_iter()
         .filter(|tool| tool.is_enabled() && (web_search || !tool.needs_native_web_search()))
         .collect();
-    // 同主循环：能用工具搜索时没有 WaitForMcpServers（`step.rs`）；工具搜索没有生效（模型不支持，或没有延迟的工具）时
-    // 没有 ToolSearch（query `deferred.rs` 的 `wire_tools`）。
-    let supported = rust_cli_prompts::models::supports_tool_search(
-        &query.selection.model,
-        capabilities.map(|found| found.supports_tool_search),
-    );
-    if supported && tools.iter().any(|tool| tool.name() == TOOL_SEARCH) {
+    // 同主循环的工具快照：有 ToolSearch 时没有 WaitForMcpServers（`step.rs`）；没有延迟的工具时没有 ToolSearch（query
+    // `deferred.rs` 的 `wire_tools`）。只看乐观判断（tools-more.md §3.2.1）：`ENABLE_TOOL_SEARCH` 为关时 ToolSearch 不启用、
+    // 不在这里；自动的门槛不看（工具池里照样有 ToolSearch）。修改（工作线 F89）：不再看模型（F84 时禁用表里的模型没有）。
+    if tools.iter().any(|tool| tool.name() == TOOL_SEARCH) {
         tools.retain(|tool| tool.name() != WAIT_FOR_MCP_SERVERS);
     }
-    let active = supported
-        && tools.iter().any(|tool| tool.name() == TOOL_SEARCH)
+    let active = tools.iter().any(|tool| tool.name() == TOOL_SEARCH)
         && tools.iter().any(|tool| is_deferred(tool.as_ref()));
     if !active {
         tools.retain(|tool| tool.name() != TOOL_SEARCH);

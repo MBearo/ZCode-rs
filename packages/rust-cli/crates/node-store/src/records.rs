@@ -138,6 +138,16 @@ const ASSISTANT_SEMANTICS: [(&str, &str); 5] = [
     ("transcriptVisibility", "visible"),
 ];
 
+/// 只给模型看的 assistant（续写占位，node-store.md §4.2.1，工作线 F77）：Node 的写法，App 的投影不显示，Node 续写时
+/// 照常进模型上下文。
+pub const MODEL_ONLY_ASSISTANT_SEMANTICS: [(&str, &str); 5] = [
+    ("origin", "agent_runtime"),
+    ("kind", "assistant_response"),
+    ("uiVisibility", "hidden"),
+    ("providerVisibility", "visible"),
+    ("transcriptVisibility", "hidden"),
+];
+
 fn semantics(fields: [(&str, &str); 5]) -> Value {
     Value::Object(
         fields
@@ -246,6 +256,8 @@ pub struct Assistant<'a> {
     pub tokens: Value,
     pub finish: &'a str,
     pub turn: Option<&'a str>,
+    /// 只给模型看（续写占位，§4.2.1）：`semantics` 用 [`MODEL_ONLY_ASSISTANT_SEMANTICS`]。
+    pub model_only: bool,
 }
 
 /// Node `persistAssistantMessage` 的已完成消息（`cwd` 与 `root` 都是会话目录）。
@@ -265,7 +277,11 @@ pub fn assistant_message(a: &Assistant) -> Value {
     out["cost"] = 0.into();
     out["tokens"] = a.tokens.clone();
     out["finish"] = a.finish.into();
-    out["semantics"] = semantics(ASSISTANT_SEMANTICS);
+    out["semantics"] = semantics(if a.model_only {
+        MODEL_ONLY_ASSISTANT_SEMANTICS
+    } else {
+        ASSISTANT_SEMANTICS
+    });
     if let Some(anchor) = anchor(a.turn, None, None) {
         out["anchor"] = anchor;
     }

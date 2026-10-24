@@ -2226,11 +2226,18 @@ dependencies = [
  "rust-cli-base",
  "rust-cli-context",
  "rust-cli-env-local",
+ "rust-cli-env-remote",
+ "rust-cli-exec-client",
+ "rust-cli-exec-server",
+ "rust-cli-exec-transport",
+ "rust-cli-exec-wire",
+ "rust-cli-executor-host",
  "rust-cli-ext",
  "rust-cli-fs",
  "rust-cli-headless",
  "rust-cli-hooks",
  "rust-cli-kernel-api",
+ "rust-cli-machines",
  "rust-cli-memory",
  "rust-cli-model",
  "rust-cli-net",
@@ -2243,6 +2250,7 @@ dependencies = [
  "rust-cli-prompts",
  "rust-cli-query",
  "rust-cli-runtime",
+ "rust-cli-ssh-connect",
  "rust-cli-tools",
  "rust-cli-tui",
  "rust-cli-vendor-bfs",
@@ -2298,6 +2306,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "unicode-width",
 ]
 
 [[package]]
@@ -2338,6 +2347,109 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "rust-cli-env-remote"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "rust-cli-exec-client",
+ "rust-cli-exec-wire",
+ "rust-cli-kernel-api",
+ "serde_json",
+]
+
+[[package]]
+name = "rust-cli-exec-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "rust-cli-base",
+ "rust-cli-exec-transport",
+ "rust-cli-exec-wire",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "rust-cli-exec-server"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "rust-cli-base",
+ "rust-cli-exec-transport",
+ "rust-cli-exec-wire",
+ "rust-cli-kernel-api",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "rust-cli-exec-transport"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "rust-cli-base",
+ "rust-cli-proc",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "rust-cli-exec-wire"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "rust-cli-base",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rust-cli-executor-host"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "futures-util",
+ "rust-cli-base",
+ "rust-cli-env-local",
+ "rust-cli-env-remote",
+ "rust-cli-exec-client",
+ "rust-cli-exec-server",
+ "rust-cli-exec-transport",
+ "rust-cli-exec-wire",
+ "rust-cli-fs",
+ "rust-cli-kernel-api",
+ "rust-cli-net",
+ "rust-cli-paths",
+ "rust-cli-proc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -2419,6 +2531,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-cli-machines"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "rust-cli-base",
+ "rust-cli-exec-client",
+ "rust-cli-exec-transport",
+ "rust-cli-exec-wire",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "rust-cli-memory"
 version = "0.1.0"
 dependencies = [
@@ -2447,6 +2573,7 @@ name = "rust-cli-net"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "base64 0.23.1",
  "bytes",
  "httpdate",
  "rcgen",
@@ -2475,6 +2602,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -2618,6 +2746,24 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "rust-cli-ssh-connect"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "rust-cli-base",
+ "rust-cli-exec-transport",
+ "rust-cli-fs",
+ "rust-cli-proc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
  "tracing",
 ]
 

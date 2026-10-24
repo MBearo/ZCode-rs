@@ -50,7 +50,7 @@ async fn assemble_with(user: Option<Value>, files: &[(&str, Value)]) -> ConfigSn
         root: EnvPath::new(ROOT),
     };
     assemble(&ConfigInputs {
-        env: &env,
+        files: &env,
         workspace: &workspace,
         paths: &paths,
         process_env: &[],

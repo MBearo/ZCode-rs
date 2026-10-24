@@ -74,7 +74,12 @@ impl WriteTool {
         let request = ReadFile {
             path: EnvPath::new(path),
         };
-        match context.env.read_file(&context.workspace, request).await {
+        match context
+            .machine
+            .files()
+            .read_file(&context.workspace, request)
+            .await
+        {
             Ok(file) => Ok(Some((decode(&file.bytes), file.version, file.bytes))),
             Err(EnvError::NotFound { .. }) => Ok(None),
             Err(error) => Err(env_failure(error)),
@@ -185,7 +190,8 @@ impl Tool for WriteTool {
             create_parents: true,
         };
         let written = context
-            .env
+            .machine
+            .files()
             .put_file(&context.workspace, context.operation.clone(), request)
             .await
             .map_err(env_failure)?;

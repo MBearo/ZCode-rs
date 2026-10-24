@@ -6,10 +6,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
 use rust_cli_kernel_api::message::{ContentBlock, Message, ToolResultContent};
 use rust_cli_kernel_api::session_api::SessionHandle;
 use rust_cli_kernel_api::testing::{
@@ -31,11 +35,14 @@ struct CwdEnv {
 }
 
 #[async_trait]
-impl Environment for CwdEnv {
+impl EnvInfo for CwdEnv {
     async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         self.inner.facts(workspace).await
     }
+}
 
+#[async_trait]
+impl Files for CwdEnv {
     async fn read_file(
         &self,
         workspace: &WorkspaceRef,
@@ -52,7 +59,10 @@ impl Environment for CwdEnv {
     ) -> Result<WriteReceipt, EnvError> {
         self.inner.write_file(workspace, context, request).await
     }
+}
 
+#[async_trait]
+impl Commands for CwdEnv {
     async fn start_command(
         &self,
         workspace: &WorkspaceRef,
@@ -81,7 +91,10 @@ impl Environment for CwdEnv {
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
         self.inner.close_session(session, forget).await
     }
+}
 
+#[async_trait]
+impl Shell for CwdEnv {
     async fn set_shell_cwd(&self, _session: &SessionId, cwd: EnvPath) -> Result<(), EnvError> {
         if self.refuse {
             return Err(EnvError::Unsupported {
@@ -95,6 +108,13 @@ impl Environment for CwdEnv {
         Ok(())
     }
 }
+
+impl Search for CwdEnv {}
+impl Background for CwdEnv {}
+impl Checkpoints for CwdEnv {}
+impl Pdf for CwdEnv {}
+impl Git for CwdEnv {}
+impl Fetch for CwdEnv {}
 
 /// `Switch` 请求改目录；`Where` 报告自己的工具上下文里的目录。
 struct DirTool(&'static str);
@@ -151,7 +171,7 @@ async fn run(refuse: bool) -> (Vec<String>, Vec<String>, String) {
         refuse,
     });
     let mut setup = Setup::new(model);
-    setup.env = cwd_env.clone();
+    setup.set_env(cwd_env.clone());
     setup.tools = vec![Arc::new(DirTool("Switch")), Arc::new(DirTool("Where"))];
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
@@ -234,7 +254,7 @@ async fn set_workspace_moves_an_idle_session_and_commits_the_note() {
         refuse: false,
     });
     let mut setup = Setup::new(Arc::new(Held(gate.clone())));
-    setup.env = cwd_env.clone();
+    setup.set_env(cwd_env.clone());
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
     let set = |id: &str| {
@@ -296,7 +316,7 @@ async fn a_workspace_change_is_announced_to_the_front_end() {
         refuse: false,
     });
     let mut setup = Setup::new(model);
-    setup.env = cwd_env;
+    setup.set_env(cwd_env);
     setup.tools = vec![Arc::new(DirTool("Switch"))];
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
@@ -346,7 +366,7 @@ async fn change_directory_is_judged_by_the_actor() {
         refuse: false,
     });
     let mut setup = Setup::new(Arc::new(Held(gate.clone())));
-    setup.env = cwd_env.clone();
+    setup.set_env(cwd_env.clone());
     setup.directory_rules = Arc::new(OneRule);
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
@@ -426,11 +446,11 @@ async fn the_same_directory_is_judged_by_its_path_key() {
 
     let unchanged = |root: &'static str, target: &'static str| async move {
         let mut setup = Setup::new(Arc::new(ScriptedModel::new(Vec::new())));
-        setup.env = Arc::new(CwdEnv {
+        setup.set_env(Arc::new(CwdEnv {
             inner: env(),
             cwd: Mutex::default(),
             refuse: false,
-        });
+        }));
         setup.root = root;
         let built = setup.build().await;
         let command = Command::ChangeDirectory {

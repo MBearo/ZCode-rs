@@ -18,6 +18,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::idle::{Limits, Wake, Watch};
+use crate::model_io_tape::{End, Tape, end};
 use crate::protocol::{Failure, StreamDecoder};
 use crate::transport::Connect;
 
@@ -50,6 +51,8 @@ pub(crate) struct Read {
     events: Events<HttpResponse>,
     /// 这次请求（取消令牌；看门狗静默重发时回到发送）。
     connect: Box<Connect>,
+    /// 这次发送的模型轨迹（model-io.md §6）：流结束、出错或被取消时交出记录；丢弃时由它自己按丢弃记。
+    tape: Option<Tape>,
 }
 
 impl Read {
@@ -59,10 +62,12 @@ impl Read {
         limits: Limits,
         resumed: bool,
         connect: Box<Connect>,
+        tape: Option<Tape>,
     ) -> Self {
         Self {
             events: Events::new(response, decoder, limits, resumed),
             connect,
+            tape,
         }
     }
 
@@ -70,15 +75,22 @@ impl Read {
         self.events.delivered()
     }
 
-    /// 丢掉响应（关闭连接），交回这次请求。
-    pub(crate) fn into_connect(self: Box<Self>) -> Box<Connect> {
-        self.connect
+    /// 丢掉响应（关闭连接），交回这次请求与还没结束的录音（看门狗的结局由调用方按重发与否记）。
+    pub(crate) fn into_parts(self: Box<Self>) -> (Box<Connect>, Option<Tape>) {
+        let Self { connect, tape, .. } = *self;
+        (connect, tape)
     }
 
-    /// 下一项；流正常结束时为 `None`。
+    /// 下一项；流正常结束时为 `None`。流结束或出错时结束这次发送的录音。
     pub(crate) async fn next(&mut self) -> Option<Next> {
         let cancel = self.connect.cancel().clone();
-        self.events.next(&cancel).await
+        let next = self.events.next(&cancel).await;
+        match &next {
+            None => end(self.tape.take(), End::Completed),
+            Some(Next::Item(Err(error))) => end(self.tape.take(), End::of_error(error)),
+            Some(_) => {}
+        }
+        next
     }
 }
 

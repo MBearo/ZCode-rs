@@ -7,9 +7,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::stream::{BoxStream, StreamExt};
 use rust_cli_base::TaskScope;
-use rust_cli_kernel_api::env::{EnvFacts, EnvPath, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvFacts, EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::hooks::{HookEvent, HookEventName, HookOutcome, HookRunner};
 use rust_cli_kernel_api::ids::{CommandId, EnvironmentId, Generation, SessionId, TraceId};
+use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::model::{ModelPort, SystemBlock};
 use rust_cli_kernel_api::permission::PermissionMode;
@@ -18,8 +20,9 @@ use rust_cli_kernel_api::session_api::{
 };
 use rust_cli_kernel_api::store::{SessionKind, SessionMeta, SessionStore, WorkspaceCheckpoint};
 use rust_cli_kernel_api::testing::{
-    DirectExecutor, FixedClock, FixedContext, ListTools, MemoryArtifacts, MemoryEnvironment,
-    MemoryStore, NeverCompact, SequentialIds, selection,
+    AllPorts, DirectExecutor, FixedClock, FixedContext, ListTools, MemoryArtifacts,
+    MemoryEnvironment, MemoryStore, NeverCompact, SequentialIds, local_services, machine,
+    selection,
 };
 use rust_cli_kernel_api::tool::Tool;
 use rust_cli_query::{QueryLoop, QueryParts};
@@ -129,7 +132,8 @@ pub(crate) struct Built {
 pub(crate) struct Setup {
     pub model: Arc<dyn ModelPort>,
     pub hooks: Arc<dyn HookRunner>,
-    pub env: Arc<dyn Environment>,
+    pub machine: MachineEnv,
+    pub local: LocalServices,
     pub artifacts: Arc<MemoryArtifacts>,
     pub tools: Vec<Arc<dyn Tool>>,
     pub messages: Vec<Message>,
@@ -155,8 +159,12 @@ pub(crate) struct Setup {
     pub directory_rules: Arc<dyn rust_cli_kernel_api::orchestration::DirectoryRules>,
     /// 冷加载时的当前轮（turn_anchor_tests.rs）；缺省没有。
     pub turn: Option<rust_cli_kernel_api::store::TurnAnchor>,
+    /// 冷加载时当前轮以错误结束（resume_sentinel_tests.rs）；缺省否。
+    pub last_turn_failed: bool,
     /// 跨会话（peers_tests.rs）；缺省关闭。
     pub peers: crate::PeerDeps,
+    /// 父会话关闭之后的询问入口（detached_tests.rs）；缺省没有。
+    pub detached: Option<Arc<crate::DetachedAsks>>,
     /// 共用的存储（重开会话的测试）；缺省每次新建。
     pub store: Option<Arc<MemoryStore>>,
     /// 会话的工作目录；缺省是 [`meta`] 的 `/work`（workspace_tests.rs 的 Windows 用例改它，F57）。
@@ -165,10 +173,12 @@ pub(crate) struct Setup {
 
 impl Setup {
     pub(crate) fn new(model: Arc<dyn ModelPort>) -> Self {
+        let env = env();
         Self {
             model,
             hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
-            env: env(),
+            machine: machine(env.clone()),
+            local: local_services(env),
             artifacts: Arc::new(MemoryArtifacts::default()),
             tools: Vec::new(),
             messages: Vec::new(),
@@ -185,10 +195,18 @@ impl Setup {
             agents: Arc::new(rust_cli_kernel_api::agents::NoAgentSignals),
             directory_rules: Arc::new(rust_cli_kernel_api::orchestration::NoDirectoryRules),
             turn: None,
+            last_turn_failed: false,
             peers: crate::PeerDeps::off(),
+            detached: None,
             store: None,
             root: "/work",
         }
+    }
+
+    /// 会话的机器与本机服务都换成 `env`（一个替身实现全部端口）。
+    pub(crate) fn set_env<E: AllPorts + 'static>(&mut self, env: Arc<E>) {
+        self.machine = machine(env.clone());
+        self.local = local_services(env);
     }
 
     pub(crate) async fn build(self) -> Built {
@@ -216,7 +234,8 @@ impl Setup {
             hooks: self.hooks.clone(),
             ids: ids.clone(),
             clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-            env: self.env.clone(),
+            machine: self.machine.clone(),
+            local: self.local.clone(),
             artifacts: self.artifacts.clone(),
             generation: Generation::new("g1"),
             non_interactive: false,
@@ -228,7 +247,8 @@ impl Setup {
                 ids,
                 runner,
                 compactor: Arc::new(NeverCompact),
-                env: self.env,
+                machine: self.machine,
+                local: self.local,
                 max_turns: None,
                 agents: self.agents,
                 cron: self.cron,
@@ -245,6 +265,7 @@ impl Setup {
                 released: Arc::new(crate::NothingToRelease),
                 directory_rules: self.directory_rules,
                 peers: self.peers,
+                detached: self.detached,
             },
             SessionState {
                 meta,
@@ -254,6 +275,7 @@ impl Setup {
                 checkpoints: self.checkpoints,
                 start: self.start,
                 turn: self.turn,
+                last_turn_failed: self.last_turn_failed,
             },
             self.opened,
         );

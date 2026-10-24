@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
-use rust_cli_kernel_api::env::{Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::WorkspaceRef;
+use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::workspace_trust::TrustKey;
 use rust_cli_tui::trust::TrustPrompt;
@@ -12,7 +13,8 @@ use rust_cli_tui::trust::TrustPrompt;
 use super::{Decision, Inputs, decide, record};
 
 pub(crate) struct InAppTrust {
-    pub env: Arc<dyn Environment>,
+    pub info: Arc<dyn EnvInfo>,
+    pub files: Arc<dyn Files>,
     pub store: Arc<dyn SessionStore>,
     /// 本进程里同意过的键（home 不写记录；写失败时本次仍算信任）。
     pub accepted: Arc<Mutex<Vec<TrustKey>>>,
@@ -21,7 +23,8 @@ pub(crate) struct InAppTrust {
 impl InAppTrust {
     async fn decide(&self, workspace: &WorkspaceRef) -> Decision {
         decide(Inputs {
-            env: self.env.as_ref(),
+            info: self.info.as_ref(),
+            files: self.files.as_ref(),
             store: self.store.as_ref(),
             workspace,
             grants: None,
@@ -37,7 +40,8 @@ impl InAppTrust {
 impl rust_cli_tui::services::WorkspaceTrust for InAppTrust {
     fn check(&self, workspace: WorkspaceRef) -> BoxFuture<'static, Option<TrustPrompt>> {
         let this = Self {
-            env: self.env.clone(),
+            info: self.info.clone(),
+            files: self.files.clone(),
             store: self.store.clone(),
             accepted: self.accepted.clone(),
         };
@@ -53,7 +57,8 @@ impl rust_cli_tui::services::WorkspaceTrust for InAppTrust {
 
     fn accept(&self, workspace: WorkspaceRef) -> BoxFuture<'static, ()> {
         let this = Self {
-            env: self.env.clone(),
+            info: self.info.clone(),
+            files: self.files.clone(),
             store: self.store.clone(),
             accepted: self.accepted.clone(),
         };

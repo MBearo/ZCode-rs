@@ -23,7 +23,7 @@ fn interval_only_inputs_are_recognized() {
 
 async fn launch(env: MemoryEnvironment, args: &str) -> String {
     let env = Arc::new(env);
-    let catalog = Arc::new(SkillCatalog::new(env.clone()));
+    let catalog = Arc::new(SkillCatalog::new(env.clone(), env.clone()));
     let tool = SkillTool::new(catalog, Arc::new(SequentialIds::default()), None);
     let (progress, _rx) = mpsc::channel(1);
     let context = tool_context(env, PermissionMode::Default);
@@ -101,7 +101,8 @@ async fn the_builtin_comes_after_file_skills() {
         &format!("{CWD}/.zcode/skills/greet/SKILL.md"),
         "---\ndescription: Greet\n---\n",
     );
-    let catalog = SkillCatalog::new(Arc::new(env));
+    let env = Arc::new(env);
+    let catalog = SkillCatalog::new(env.clone(), env);
     let lines: Vec<String> = catalog
         .listing(&workspace(), &[], "")
         .await
@@ -115,7 +116,8 @@ async fn the_builtin_comes_after_file_skills() {
         &format!("{CWD}/.zcode/skills/loop/SKILL.md"),
         "---\ndescription: Mine\n---\n",
     );
-    let catalog = SkillCatalog::new(Arc::new(shadow));
+    let shadow = Arc::new(shadow);
+    let catalog = SkillCatalog::new(shadow.clone(), shadow);
     let skill = catalog.find(&workspace(), "loop").await.unwrap();
     assert_eq!(skill.description, "Mine");
 }
@@ -124,7 +126,7 @@ async fn the_builtin_comes_after_file_skills() {
 #[tokio::test]
 async fn the_builtin_needs_permission() {
     let env = Arc::new(MemoryEnvironment::new(facts()));
-    let catalog = Arc::new(SkillCatalog::new(env.clone()));
+    let catalog = Arc::new(SkillCatalog::new(env.clone(), env.clone()));
     let tool = SkillTool::new(catalog, Arc::new(SequentialIds::default()), None);
     let context = tool_context(env, PermissionMode::Default);
     assert_eq!(
@@ -141,7 +143,7 @@ async fn the_monitor_timeout_follows_the_surface() {
     assert!(tui.contains("arm one now with `timeout_ms: 1800000`"));
     assert!(tui.contains("A monitor expires after at most 30 minutes"));
     let env = Arc::new(MemoryEnvironment::new(facts()));
-    let catalog = Arc::new(SkillCatalog::new(env.clone()));
+    let catalog = Arc::new(SkillCatalog::new(env.clone(), env.clone()));
     catalog.set_print_session(true);
     let tool = SkillTool::new(catalog, Arc::new(SequentialIds::default()), None);
     let (progress, _rx) = mpsc::channel(1);

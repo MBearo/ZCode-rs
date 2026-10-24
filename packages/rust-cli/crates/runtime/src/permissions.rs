@@ -19,6 +19,8 @@ use rust_cli_policy::PolicyGate;
 use serde_json::Value;
 
 pub use rust_cli_policy::rules::{format_rule, parse_rule};
+// Bash 询问框“不再询问”一行的种子与文字（shell-permissions.md §4.10，工作线 F72）：tui 不依赖 policy。
+pub use rust_cli_policy::{bash_rule_label, bash_rule_seed};
 
 fn kernel_error(error: StoreError) -> KernelError {
     match error {

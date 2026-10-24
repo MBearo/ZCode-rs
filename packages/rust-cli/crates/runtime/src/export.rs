@@ -2,10 +2,11 @@
 //! （没有扩展名时加 `.txt`，相对路径相对工作区根，`~` 展开到 home），经执行环境写文件。
 
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::env::{EnvPath, Environment, OperationContext, Origin, WritePrecondition};
+use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WritePrecondition};
 use rust_cli_kernel_api::env_files::{PathStyle, PutFile};
 use rust_cli_kernel_api::env_path;
 use rust_cli_kernel_api::ids::{Generation, OwnerEpoch};
+use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::manage::ExportFile;
 use rust_cli_kernel_api::session_api::KernelError;
 
@@ -21,7 +22,8 @@ pub(crate) fn target(input: &str, root: &EnvPath, home: Option<&EnvPath>) -> Str
 }
 
 pub(crate) async fn write(
-    env: &dyn Environment,
+    info: &dyn EnvInfo,
+    files: &dyn Files,
     ids: &dyn Ids,
     generation: &Generation,
     file: ExportFile,
@@ -29,7 +31,7 @@ pub(crate) async fn write(
     let workspace = &file.workspace;
     let style = PathStyle::infer(workspace.root.as_str());
     let home = if style.needs_home(file.path.trim()) {
-        env.path_facts(workspace)
+        info.path_facts(workspace)
             .await
             .ok()
             .and_then(|facts| facts.home)
@@ -50,7 +52,8 @@ pub(crate) async fn write(
         precondition: WritePrecondition::Any,
         create_parents: true,
     };
-    env.put_file(workspace, context, request)
+    files
+        .put_file(workspace, context, request)
         .await
         .map_err(|error| KernelError::Failed {
             message: error.to_string(),

@@ -62,7 +62,7 @@ async fn a_notice_turn_of_a_loaded_session_keeps_the_stored_turn() {
     let env = Arc::new(NoticeEnvironment::default());
     let model = Arc::new(ScriptedModel::new(vec![text_response(&["seen"])]));
     let mut setup = Setup::new(model);
-    setup.env = env.clone();
+    setup.set_env(env.clone());
     setup.opened = Opened::Loaded;
     let stored = TurnAnchor {
         prompt: MessageId::new("msg_stored"),

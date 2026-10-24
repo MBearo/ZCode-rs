@@ -1,6 +1,8 @@
-//! 跑分用的三个开关（docs/specs/rust-cli/cli-args.md §9，修复线 F42）：`ZCODE_MAX_OUTPUT_TOKENS`、`MAX_THINKING_TOKENS`、
-//! `BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS`。值按 JS 风格的整数读法（`js_int`）。
+//! 交给内核的开关（docs/specs/rust-cli/cli-args.md §9，修复线 F42）：`ZCODE_MAX_OUTPUT_TOKENS`、`MAX_THINKING_TOKENS`、
+//! `BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS`，工作线 F89 加 `ENABLE_TOOL_SEARCH`（tools-more.md §3.2.1）。值按 JS 风格
+//! 的整数读法（`js_int`）。
 
+use rust_cli_prompts::models::ToolSearchSetting;
 use rust_cli_runtime::{BashTimeouts, Limits, RequestLimits, ThinkingTokens};
 
 /// 科学计数法只认 32 个 UTF-16 码元以内的值。
@@ -116,6 +118,50 @@ pub(crate) fn thinking(env: &[(String, String)]) -> ThinkingTokens {
     }
 }
 
+/// `auto` 与读不出数的 `auto:N` 的门槛（上下文窗口的百分之几）。
+const AUTO_PERCENT: u8 = 10;
+
+/// `ENABLE_TOOL_SEARCH`（工作线 F89，tools-more.md §3.2.1）：只决定 ToolSearch 开不开，开时一律本地。没设、空串、真值与
+/// 不认识的值是开；`0` / `false` / `no` / `off`（去首尾空白、不分大小写）是关；`auto` 与 `auto:N` 按原值比较（不去空白、
+/// 区分大小写），N 按 `js_int` 读、夹到 0–100：0 是开，100 是关，其余自动；读不出时自动、门槛 10%。
+pub(crate) fn tool_search(env: &[(String, String)]) -> ToolSearchSetting {
+    let Some(value) = raw(env, "ENABLE_TOOL_SEARCH") else {
+        return ToolSearchSetting::On;
+    };
+    if let Some(rest) = value.strip_prefix("auto:") {
+        let Some(percent) = js_int(rest) else {
+            tracing::warn!(
+                event = "env.invalid",
+                name = "ENABLE_TOOL_SEARCH",
+                value,
+                "expected auto:N where N is a number, using auto"
+            );
+            return ToolSearchSetting::Auto {
+                percent: AUTO_PERCENT,
+            };
+        };
+        return match percent {
+            percent if percent <= 0.0 => ToolSearchSetting::On,
+            percent if percent >= 100.0 => ToolSearchSetting::Off,
+            percent => ToolSearchSetting::Auto {
+                percent: percent as u8,
+            },
+        };
+    }
+    if value == "auto" {
+        return ToolSearchSetting::Auto {
+            percent: AUTO_PERCENT,
+        };
+    }
+    match rust_cli_base::js::string::trim(value)
+        .to_lowercase()
+        .as_str()
+    {
+        "0" | "false" | "no" | "off" => ToolSearchSetting::Off,
+        _ => ToolSearchSetting::On,
+    }
+}
+
 /// `BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS`：`js_int` 大于 0 才算设了。
 pub(crate) fn bash(env: &[(String, String)]) -> BashTimeouts {
     let millis = |name: &str| positive(raw(env, name).and_then(js_int));
@@ -132,6 +178,7 @@ pub(crate) fn limits(env: &[(String, String)], max_output_tokens: Option<u32>) -
         request: RequestLimits {
             max_output_tokens,
             thinking: thinking(env),
+            tool_search: tool_search(env),
         },
         bash: bash(env),
     }

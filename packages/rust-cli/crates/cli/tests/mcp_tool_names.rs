@@ -66,8 +66,11 @@ fn a_tool_whose_name_is_too_long_is_not_sent_to_the_model() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert!(names.contains(&"mcp__names__lookup"), "{names:?}");
-    assert!(!request.to_string().contains(&long), "{names:?}");
+    // 夹具是本地 ToolSearch（工作线 F84，tools-more.md §3.2）：MCP 工具在延迟工具清单里，不在 tools 里。
+    let text = request.to_string();
+    assert!(text.contains("\\nmcp__names__lookup"), "{names:?}");
+    assert!(!names.contains(&"mcp__names__lookup"), "{names:?}");
+    assert!(!text.contains(&long), "{names:?}");
     // 运行日志（开发构建写 warn）：每个名字一行，带服务器、工具名与长度。
     let log = home.join(".zcode/rust-cli/log");
     let file = std::fs::read_dir(&log)

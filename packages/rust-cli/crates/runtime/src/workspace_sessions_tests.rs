@@ -10,8 +10,8 @@ use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent,
 };
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
-    text_response,
+    FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
+    selection, text_response,
 };
 
 use super::*;
@@ -20,7 +20,7 @@ fn kernel(store: Arc<MemoryStore>, model: Arc<ScriptedModel>) -> LocalKernel {
     LocalKernel::new(
         Ports {
             model,
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(1_000)),

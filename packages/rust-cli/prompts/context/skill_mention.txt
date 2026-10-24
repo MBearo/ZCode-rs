@@ -1,0 +1,1 @@
+The user's message contains /{{name}}, which is the name of a skill. If they are asking you to run it, call the Skill tool with skill: "{{name}}", passing any arguments they gave as args. If they only mention it, do not run it.

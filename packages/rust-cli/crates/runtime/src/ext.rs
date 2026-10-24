@@ -7,14 +7,13 @@ use rust_cli_agents::PluginAgentFile;
 use rust_cli_ext::Plugins;
 use rust_cli_hooks::PluginHooks;
 use rust_cli_kernel_api::cron_store::CronStore;
-use rust_cli_kernel_api::mcp::{McpTransport, NoMcpTransport};
 
 pub use rust_cli_ext::ExtConfig;
 
-/// 入口层给内核的扩展配置：MCP 传输（本地是 env-local 的实现）、配置快照与持久定时任务的存储。
+/// 入口层给内核的扩展配置：配置快照与持久定时任务的存储。MCP 传输在机器上（`MachineEnv::mcp()`，经 `Ports` 的注册表，
+/// remote-exec.md §15.8.1）。
 #[derive(Clone)]
 pub struct Extensions {
-    pub mcp: Arc<dyn McpTransport>,
     pub config: ExtConfig,
     /// 持久定时任务的存储（入口给本地的 `LocalCronStore`，第二阶段在 App 下换成 App 的实现；tools-more.md
     /// §16.2）。随任务表一起建好（F11，审查 R1-13：原来内核建好后再经 `with_cron_store` 装上）；None 时没有
@@ -25,17 +24,20 @@ pub struct Extensions {
     /// `-p` 的输入是 stream-json（不是单次的 print 会话，headless.md §6.1，修复线 F39）：Bash 后台命令的
     /// 缺省期限是 1800000。
     pub streaming_input: bool,
+    /// Monitor 开着（工作线 F83，tools-more.md §19.1）：注册 Monitor，Bash 与 CronCreate 的描述随之变，Bash 拦前台的
+    /// 长 `sleep`。产品缺省开，由入口给（只给测试用的变量关掉，Windows 上要有 Git Bash）；这里缺省关（测试与嵌入）。
+    pub monitor: bool,
 }
 
 impl Extensions {
     /// 没有 MCP、没有插件；skill 照常从执行环境发现。
     pub fn none() -> Self {
         Self {
-            mcp: Arc::new(NoMcpTransport),
             config: ExtConfig::default(),
             cron_store: None,
             peers: rust_cli_session::PeerDeps::off(),
             streaming_input: false,
+            monitor: false,
         }
     }
 }

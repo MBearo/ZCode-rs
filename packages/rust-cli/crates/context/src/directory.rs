@@ -40,9 +40,9 @@ impl PromptAssembler {
         workspace: &WorkspaceRef,
         history: &[Message],
     ) -> Option<String> {
-        let facts = self.ports.env.facts(workspace).await.ok()?;
+        let facts = self.ports.info.facts(workspace).await.ok()?;
         let scope = Scope {
-            env: self.ports.env.as_ref(),
+            files: self.ports.files.as_ref(),
             workspace,
             style: PathStyle::of_platform(&facts.platform),
             cwd: workspace.root.as_str().to_owned(),

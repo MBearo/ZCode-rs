@@ -1,0 +1,1 @@
+{{count}} deferred tool{{verb}} available again (MCP server reconnected — names announced earlier in this conversation): {{servers}}. Load via ToolSearch as before.

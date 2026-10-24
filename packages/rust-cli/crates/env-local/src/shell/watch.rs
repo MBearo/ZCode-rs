@@ -1,4 +1,4 @@
-//! 按游标读命令输出（[`rust_cli_kernel_api::env::Environment::watch_command`]）。
+//! 按游标读命令输出（[`rust_cli_kernel_api::machine::Commands::watch_command`]）。
 //!
 //! 先发 `Started`（输出文件），再从 `cursor` 起读文件：有新字节就发 `Output`；命令结束后把剩下的
 //! 读完再发 `Finished`。命令还在跑、文件暂时没有新内容时，等终态变化或 50 ms 后再读——输出由
@@ -71,7 +71,13 @@ async fn next(mut cursor: Cursor) -> Option<(Result<CommandEvent, EnvError>, Cur
         let ended = finished.borrow_and_update().clone();
         let mut moved = cursor.running.backgrounded.subscribe();
         let backgrounded = *moved.borrow_and_update();
-        let data = match read_from(&cursor.running.output, cursor.position).await {
+        // 命令来源的 monitor 从只有 stdout 的那一份读（工作线 F83）。
+        let source = cursor
+            .running
+            .events
+            .as_ref()
+            .unwrap_or(&cursor.running.output);
+        let data = match read_from(source, cursor.position).await {
             Ok(data) => data,
             Err(error) => {
                 cursor.phase = Phase::Done;

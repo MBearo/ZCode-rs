@@ -1,10 +1,10 @@
 //! `/context`（docs/specs/rust-cli/context-usage.md §5.2、tui-panels.md §4）：内核算出用量后打开独立页面：标题、
-//! 方格图、类别说明、折叠的明细；`/context all` 展开；esc 关闭。替身模型没有 count_tokens，各部分按本地估算。
+//! 方格图、类别说明、折叠的明细；`/context all` 展开；esc 关闭。各部分按本地估算（工作线 F93 起不发 count_tokens）。
 use std::sync::Arc;
 
 use crossterm::event::KeyCode;
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
-use rust_cli_kernel_api::testing::{MemoryEnvironment, text_response};
+use rust_cli_kernel_api::testing::{MemoryEnvironment, environments, text_response};
 
 use super::support::{GatedModel, Setup, with_ui};
 
@@ -31,7 +31,7 @@ fn with_skills() -> Setup {
     Setup {
         width: 100,
         height: 50,
-        env: Arc::new(env),
+        environments: environments(Arc::new(env)),
         ..Setup::default()
     }
 }

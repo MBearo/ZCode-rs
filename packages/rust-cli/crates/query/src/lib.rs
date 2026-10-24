@@ -22,6 +22,7 @@ mod mcp_support_tests;
 mod mcp_wait;
 mod normalize;
 mod notification;
+mod pairing;
 mod recovery;
 mod respond;
 mod run;
@@ -29,11 +30,17 @@ mod step;
 mod stop_hooks;
 mod texts;
 
+pub use deferred::step_tool_search;
 pub use limits::{RequestLimits, ThinkingTokens};
-pub use notification::{task_envelope, task_notification, task_status};
+pub use notification::{
+    monitor_envelope, monitor_notice_text, task_envelope, task_notification, task_status,
+};
 
-/// `/context` 的消息计数（docs/specs/rust-cli/context-usage.md §3 i）：与主循环相同的规范化（对话中间的
+/// `/context` 的消息估算（docs/specs/rust-cli/context-usage.md §3 i）：与主循环相同的规范化（对话中间的
 /// system 消息按生效配置保留或降级，`configured` 答不出时按模型卡片，model.md §11），不带每轮 effort。
+///
+/// 修改（工作线 F93，用户决定 2026-10-24）：`/context` 只用本地估算、不发 count_tokens，F89 为计数请求加的 ToolSearch
+/// 参数（历史里的 `tool_reference` 先经主请求的降级函数，端点才认）随之删掉。
 pub fn api_messages<'a>(
     messages: impl IntoIterator<Item = &'a rust_cli_kernel_api::message::Message>,
     model: &str,
@@ -53,8 +60,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::env::{Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::ids::{AgentId, Generation, RunId, SessionId};
+use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::model::ModelPort;
 use rust_cli_kernel_api::orchestration::{
     Compactor, ContextBuilder, HookRunner, QueryError, QueryRequest, QueryRunner, QueryStop,
@@ -76,7 +85,10 @@ pub struct QueryParts {
     pub ids: Arc<dyn Ids>,
     /// 模型请求与工具调用的计时（docs/specs/rust-cli/usage.md §1）：计时只在这里读时钟。
     pub clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
-    pub env: Arc<dyn Environment>,
+    /// 工具调用执行所在的机器（R0 只有本机；R3 起按调用的 `machine` 换，remote-exec.md §15.8.1）。
+    pub machine: MachineEnv,
+    /// 只在本机的服务（Git、worktree、WebFetch）。
+    pub local: LocalServices,
     pub artifacts: Arc<dyn ArtifactStore>,
     /// 执行环境的当前实例（本地是进程 uuid）。
     pub generation: Generation,

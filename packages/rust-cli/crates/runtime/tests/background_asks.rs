@@ -21,8 +21,8 @@ mod background_asks {
         SequencedEvent, SessionHandle,
     };
     use rust_cli_kernel_api::testing::{
-        FixedClock, MemoryStore, SequentialIds, UnusedEnvironment, selection, text_response,
-        tool_use_response,
+        FixedClock, MemoryStore, SequentialIds, UnusedEnvironment, environments, selection,
+        text_response, tool_use_response,
     };
     use rust_cli_runtime::{ContextConfig, Defaults, LocalKernel, Ports, Surface};
     use serde_json::{Value, json};
@@ -119,7 +119,7 @@ mod background_asks {
         let kernel = LocalKernel::with_context(
             Ports {
                 model: model.clone(),
-                env: Arc::new(UnusedEnvironment),
+                environments: environments(Arc::new(UnusedEnvironment)),
                 store: store.clone(),
                 artifacts: store,
                 clock: Arc::new(FixedClock(1_000)),

@@ -8,14 +8,20 @@ export const TARGETS = {
   "aarch64-unknown-linux-musl": { zig: "aarch64-linux-musl", machine: 183 },
 };
 
-/** `build-linux.mjs [--target <triple>]… [--clippy]`；没有 `--target` 时是全部 target。 */
+/**
+ * `build-linux.mjs [--target <triple>]… [--clippy] [--debug]`；没有 `--target` 时是全部 target。`--debug`：dev 构建（不动
+ * `build-number`，版本同本机的 debug 构建），给 SSH 的 Docker 测试上传（docs/specs/rust-cli/remote-exec.md §19.12）。
+ */
 export function parseCli(argv) {
   const targets = [];
   let clippy = false;
+  let debug = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--clippy") {
       clippy = true;
+    } else if (arg === "--debug") {
+      debug = true;
     } else if (arg === "--target") {
       const triple = argv[i + 1];
       if (!triple) throw new Error("--target 后面要写 target");
@@ -25,10 +31,13 @@ export function parseCli(argv) {
       if (!targets.includes(triple)) targets.push(triple);
       i += 1;
     } else {
-      throw new Error(`不认识的参数 ${arg}；用法：build-linux.mjs [--target <triple>]… [--clippy]`);
+      throw new Error(
+        `不认识的参数 ${arg}；用法：build-linux.mjs [--target <triple>]… [--clippy] [--debug]`,
+      );
     }
   }
-  return { targets: targets.length ? targets : Object.keys(TARGETS), clippy };
+  if (clippy && debug) throw new Error("--debug 不能和 --clippy 一起用");
+  return { targets: targets.length ? targets : Object.keys(TARGETS), clippy, debug };
 }
 
 /**
@@ -68,8 +77,15 @@ export function rustflagsConfig(triple, flags) {
   return `target.${triple}.rustflags=[${flags.map((flag) => JSON.stringify(flag)).join(", ")}]`;
 }
 
-export function cargoArgs({ triple, clippy, manifest, config }) {
-  const common = ["--target", triple, "--config", config];
+export function cargoArgs({ triple, clippy, debug = false, manifest, config }) {
+  // debug 构建不带调试信息：只用来上传到测试容器，几百 MiB 的调试信息只会拖慢上传（remote-exec.md §19.12）。
+  const common = [
+    "--target",
+    triple,
+    "--config",
+    config,
+    ...(debug ? ["--config", "profile.dev.debug=0"] : []),
+  ];
   return clippy
     ? [
         "clippy",
@@ -86,7 +102,7 @@ export function cargoArgs({ triple, clippy, manifest, config }) {
     : [
         "build",
         "--locked",
-        "--release",
+        ...(debug ? [] : ["--release"]),
         "--manifest-path",
         manifest,
         "-p",

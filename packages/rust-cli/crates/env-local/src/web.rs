@@ -1,4 +1,4 @@
-//! WebFetch 的出口（docs/specs/rust-cli/tools-more.md §4）：`Environment::fetch_url` 的本地实现，请求经
+//! WebFetch 的出口（docs/specs/rust-cli/tools-more.md §4）：`Fetch::fetch_url` 的本地实现，请求经
 //! `rust-cli-net` 的 [`Egress`] 发出。只做一次 GET：重定向与错误状态原样交回，由内核的工具判断。
 //! 时限覆盖整个请求（含读正文）。
 

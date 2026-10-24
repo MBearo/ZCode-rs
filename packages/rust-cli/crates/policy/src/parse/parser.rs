@@ -6,6 +6,9 @@
 //!
 //! 复合命令（子 shell、花括号组、if/for/while/case/select、函数、coproc、`[[`、`((`）一经识别
 //! 即中止解析并记录节点类型：Node 在这些节点上必然判定为不支持的语法，其余字段不再被使用。
+//!
+//! 结构化模式（工作线 F76，docs/specs/rust-cli/shell-permissions.md §4.5.4，`parse_structured`）：复合命令不停下，
+//! 里面的简单命令照常收集，结构的事实记在 `Script::shape`（见 `structure.rs`）。只给 Bash 的规则检查用。
 
 use crate::parse::Operator;
 use crate::parse::js::slice;
@@ -20,16 +23,41 @@ struct Parser<'a> {
     source: &'a [u8],
     lexer: Lexer<'a>,
     script: Script,
+    /// 结构化模式（工作线 F76）：复合命令不停下。
+    structured: bool,
+    /// 复合命令的嵌套层数（结构化模式）。
+    depth: usize,
+}
+
+/// `command()` 的结果：简单命令、已经解析完的复合命令（结构化模式），或者这里没有命令。
+enum Cmd {
+    Simple(CommandNode),
+    Compound,
+    None,
 }
 
 pub(crate) fn parse(source: &[u8]) -> Script {
+    parse_with(source, false)
+}
+
+/// 结构化模式的解析（工作线 F76，shell-permissions.md §4.5.4）。
+pub(crate) fn parse_structured(source: &[u8]) -> Script {
+    parse_with(source, true)
+}
+
+fn parse_with(source: &[u8], structured: bool) -> Script {
     let mut parser = Parser {
         source,
         lexer: Lexer::new(source),
         script: Script::default(),
+        structured,
+        depth: 0,
     };
     if let Err(Bail(kind)) = parser.list() {
         parser.script.bail = Some(kind);
+    } else if structured && parser.peek_kind(Ctx::Normal) != Tk::Eof {
+        // 结构化模式下列表之后还有 token（多出的 `fi`、`)`、`;;` 等）：按解析出错，不静默丢掉后面的命令。
+        parser.script.lexer_errors += 1;
     }
     let Parser {
         lexer, mut script, ..
@@ -39,7 +67,8 @@ pub(crate) fn parse(source: &[u8]) -> Script {
             redirect.body = Some(*body);
         }
     }
-    script.lexer_errors = lexer.errors;
+    // 结构化模式的语法错误先记在 `script.lexer_errors`（`Parser::syntax`），这里加上词法错误。
+    script.lexer_errors += lexer.errors;
     script.hung |= lexer.hung;
     script.overflow |= lexer.overflow;
     script
@@ -97,6 +126,7 @@ impl Parser<'_> {
                 && let Some(last) = self.script.backgrounds.last_mut()
             {
                 *last = true;
+                self.script.shape.background = true;
             }
             self.skip_newlines(Ctx::CommandStart);
             if !self.starts_statement() {
@@ -140,29 +170,40 @@ impl Parser<'_> {
         if negated {
             self.lexer.next(Ctx::CommandStart);
         }
-        let Some(first) = self.command()? else {
-            return Ok(timed || negated);
-        };
-        self.emit(first_op, first);
-        // 修复线 F20：unbash 把 `time` 关键字提成 `Pipeline.time`，Node 的 guarded 把它补回第一条命令的词
-        // （`time -o file rm -rf x` 要按 `time` 包装剥开）；这里只记一个标记，分析时补词。
-        if timed && let Some(last) = self.script.commands.last_mut() {
-            last.timed = true;
+        match self.command()? {
+            Cmd::None => return Ok(timed || negated),
+            Cmd::Compound => {}
+            Cmd::Simple(first) => {
+                self.emit(first_op, first);
+                // 修复线 F20：unbash 把 `time` 关键字提成 `Pipeline.time`，Node 的 guarded 把它补回第一条命令的词
+                // （`time -o file rm -rf x` 要按 `time` 包装剥开）；这里只记一个标记，分析时补词。
+                if timed && let Some(last) = self.script.commands.last_mut() {
+                    last.timed = true;
+                }
+            }
         }
         // JS 在命令缺失时也会压入 operator，之后的命令按下标取 `operators[i - 1]`，这里照搬错位。
         let mut operators = Vec::new();
         let mut count = 1;
         while self.peek_kind(Ctx::Normal) == Tk::Pipe {
-            let all = self.lexer.next(Ctx::Normal).value == b"|&";
+            let token = self.lexer.next(Ctx::Normal);
+            let all = token.value == b"|&";
+            let span = token.pos..token.end;
+            self.script.pipes.push(span);
             operators.push(if all {
                 Operator::PipeAll
             } else {
                 Operator::Pipe
             });
             self.skip_newlines(Ctx::CommandStart);
-            if let Some(command) = self.command()? {
-                self.emit(OpBefore::Op(operators[count - 1]), command);
-                count += 1;
+            match self.command()? {
+                Cmd::Simple(command) => {
+                    self.emit(OpBefore::Op(operators[count - 1]), command);
+                    count += 1;
+                }
+                // 结构化模式：复合命令占一个位置，后面的命令取后面的 operator。
+                Cmd::Compound => count += 1,
+                Cmd::None => {}
             }
         }
         Ok(true)
@@ -183,7 +224,12 @@ impl Parser<'_> {
         });
     }
 
-    fn command(&mut self) -> Result<Option<CommandNode>, Bail> {
+    fn command(&mut self) -> Result<Cmd, Bail> {
+        if self.structured
+            && let Some(compound) = self.compound()?
+        {
+            return Ok(compound);
+        }
         let kind = match self.peek_kind(Ctx::CommandStart) {
             Tk::Word | Tk::Assignment | Tk::Redirect => return self.simple_command(),
             Tk::LParen => "Subshell",
@@ -204,13 +250,13 @@ impl Parser<'_> {
             Tk::DblLBracket => "TestCommand",
             Tk::ArithCmd => "ArithmeticCommand",
             Tk::Coproc => "Coproc",
-            _ => return Ok(None),
+            _ => return Ok(Cmd::None),
         };
         Err(Bail(kind))
     }
 
     /// `simpleCommandOrFunction()`。
-    fn simple_command(&mut self) -> Result<Option<CommandNode>, Bail> {
+    fn simple_command(&mut self) -> Result<Cmd, Bail> {
         let pos = self.lexer.peek(Ctx::CommandStart).pos;
         let mut end = pos;
         let mut prefix = Vec::new();
@@ -237,13 +283,17 @@ impl Parser<'_> {
                 suffix: Vec::new(),
                 redirects,
             };
-            return Ok(Some(node));
+            return Ok(Cmd::Simple(node));
         }
         let name = self.read_word(Ctx::Normal);
         end = name.end;
         if self.peek_kind(Ctx::Normal) == Tk::LParen {
             self.lexer.next(Ctx::Normal);
             if self.peek_kind(Ctx::Normal) == Tk::RParen {
+                if self.structured {
+                    self.lexer.next(Ctx::Normal);
+                    return self.function_body(pos);
+                }
                 return Err(Bail("Function"));
             }
         }
@@ -267,7 +317,7 @@ impl Parser<'_> {
             suffix,
             redirects,
         };
-        Ok(Some(node))
+        Ok(Cmd::Simple(node))
     }
 
     fn read_word(&mut self, ctx: Ctx) -> WordRef {
@@ -289,9 +339,13 @@ impl Parser<'_> {
             pos: token.target_pos,
             end: token.target_end,
         };
-        let (fd, end) = (token.fd, token.end);
+        let (fd, start, end) = (token.fd, token.pos, token.end);
+        if matches!(operator, ">" | ">>") {
+            self.script.outputs.push(start..end);
+        }
         let index = self.script.redirects.len();
         self.script.redirects.push(RedirectNode {
+            start,
             operator,
             fd,
             target,
@@ -346,6 +400,12 @@ impl Parser<'_> {
         }
     }
 
+    /// 结构化模式下的语法错误：记为解析出错并停下。
+    fn syntax<T>(&mut self) -> Result<T, Bail> {
+        self.script.lexer_errors += 1;
+        Err(Bail("Syntax"))
+    }
+
     /// `parseArrayElements()`：用独立 lexer 扫描数组内部。元素不参与分析，但扫描本身可能触发
     /// unbash 的死循环（`a=($'\)`），必须照做以便识别。
     fn scan_array_elements(&mut self, inner: &[u8]) {
@@ -357,3 +417,6 @@ impl Parser<'_> {
         self.script.overflow |= lexer.overflow;
     }
 }
+
+#[path = "structure.rs"]
+mod structure;

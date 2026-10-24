@@ -1,7 +1,7 @@
 //! 本机存储位置的唯一解析（docs/specs/rust-cli/README.md §4）。
 //!
 //! db、artifacts 等本机存储的位置只在这里决定；以后改存储路径只改这一处。工作区里的文件不是
-//! 本机存储，它们经 Environment 端口访问，类型是 `EnvPath`，不能用 [`StoragePath`] 表示。
+//! 本机存储，它们经执行端口（kernel-api `machine`）访问，类型是 `EnvPath`，不能用 [`StoragePath`] 表示。
 //!
 //! 规则与 Node CLI 相同（docs/specs/rust-m11-node-storage.md §2.1）：
 //! - 会话库默认 `~/.zcode/cli/db/db.sqlite`，`storage.sessionDbPath` 覆盖；
@@ -75,6 +75,9 @@ const HOOK_TRUST_STORE: &str = "security/workspace-hook-trust-v1.json";
 /// Node `getCliStorageRoot` 的子目录与 `getPluginStorageRoot` 的子目录。
 const CLI_DIR: &str = cli_dir!();
 const PLUGINS_DIR: &str = "plugins";
+/// 模型轨迹的目录（Node `getModelIoDir`：开发态 `debug`，其余 `rollout`，docs/specs/rust-cli/model-io.md §3.2）。
+const MODEL_IO_DEBUG_DIR: &str = "debug";
+const MODEL_IO_ROLLOUT_DIR: &str = "rollout";
 
 /// 用户根（`<home>/.zcode`）下的位置；`rest` 为空时是用户根本身（Node `DEFAULT_BASE_DIR`、Host 的 `~/.zcode`）。
 ///
@@ -247,16 +250,38 @@ impl StoragePaths {
     /// `storage_dir` 是合并后的 `storage.dir`（空白视为没有，缺省 `~/.zcode`），`~/` 展开到 home，其余相对
     /// 路径相对 `base`（Node `resolve` 相对进程 cwd）；末段已是 `cli` 时不再加一层。
     pub fn plugin_storage(&self, storage_dir: Option<&str>, base: &Path) -> StoragePath {
+        StoragePath(self.cli_storage_root(storage_dir, base).join(PLUGINS_DIR))
+    }
+
+    /// 模型轨迹的目录（工作线 F91，docs/specs/rust-cli/model-io.md §3.2）：Node 的 `getModelIoDir(getCliStorageRoot(
+    /// resolvePath(storage.dir)), isDevelopment)`，cli 存储根的规则同 [`Self::plugin_storage`]；开发态 `debug`，其余
+    /// `rollout`。与 Node 共用这个目录。
+    pub fn model_io(
+        &self,
+        storage_dir: Option<&str>,
+        base: &Path,
+        development: bool,
+    ) -> StoragePath {
+        let dir = if development {
+            MODEL_IO_DEBUG_DIR
+        } else {
+            MODEL_IO_ROLLOUT_DIR
+        };
+        StoragePath(self.cli_storage_root(storage_dir, base).join(dir))
+    }
+
+    /// Node `getCliStorageRoot(resolvePath(storage.dir))`：`storage_dir` 空白视为没有（缺省 `~/.zcode`），`~/` 展开到
+    /// home，其余相对路径相对 `base`；末段已是 `cli` 时不再加一层。
+    fn cli_storage_root(&self, storage_dir: Option<&str>, base: &Path) -> PathBuf {
         let root = match storage_dir.map(str::trim).filter(|dir| !dir.is_empty()) {
             Some(dir) => base.join(expand_home(dir, &self.home)),
             None => base.join(user_path(&self.home, "")),
         };
-        let cli = if root.file_name().is_some_and(|name| name == CLI_DIR) {
+        if root.file_name().is_some_and(|name| name == CLI_DIR) {
             root
         } else {
             root.join(CLI_DIR)
-        };
-        StoragePath(cli.join(PLUGINS_DIR))
+        }
     }
 
     /// 顶层会话的任务清单文件 `<storage.dir>/tasks/<session>.json`（一份清单一个文件）。`session` 是会话 ID，
@@ -276,10 +301,73 @@ impl StoragePaths {
         self.root.join(PEERS_DIR)
     }
 
+    /// 执行器的目录 `~/.zcode/rust-cli/exec/`（docs/specs/rust-cli/remote-exec.md §19.4）：在用户根下，不跟
+    /// `storage.dir` 走（执行器模式不读配置；远端也按同一个位置找）。
+    pub fn executor(&self) -> ExecutorPaths {
+        ExecutorPaths {
+            dir: StoragePath(user_path(&self.home, rust_cli_base::names::EXECUTOR_HOME)),
+        }
+    }
+
     /// 自动更新的缓存 `<storage.dir>/rust-cli/version.json`：最近一次核对的最新版本、核对时刻与不再提醒的版本
     /// （docs/specs/rust-cli/update.md §4，F48）。
     pub fn update_cache(&self) -> StoragePath {
         self.root.join(UPDATE_CACHE)
+    }
+}
+
+/// 执行器目录下的位置（docs/specs/rust-cli/remote-exec.md §19.4）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutorPaths {
+    dir: StoragePath,
+}
+
+impl ExecutorPaths {
+    /// 目录本身（0700）。
+    pub fn dir(&self) -> &StoragePath {
+        &self.dir
+    }
+
+    /// 常驻执行器的 socket。
+    pub fn socket(&self) -> StoragePath {
+        self.dir.join("executor.sock")
+    }
+
+    /// 单实例锁（操作系统的文件锁）。
+    pub fn lock(&self) -> StoragePath {
+        self.dir.join("executor.lock")
+    }
+
+    /// 代理之间的拉起锁。
+    pub fn spawn_lock(&self) -> StoragePath {
+        self.dir.join("spawn.lock")
+    }
+
+    /// 文件版账本的目录。
+    pub fn ledger(&self) -> StoragePath {
+        self.dir.join("ledger")
+    }
+
+    /// 常驻执行器与代理的运行日志目录。
+    pub fn logs(&self) -> StoragePath {
+        self.dir.join("log")
+    }
+
+    /// 上传的执行器 `bin/<版本>/zcode-rs`。
+    pub fn binary(&self, version: &str) -> StoragePath {
+        self.dir
+            .join("bin")
+            .join(version)
+            .join(rust_cli_base::names::UNIX_EXECUTABLE)
+    }
+
+    /// 本机侧缓存的 Linux 产物 `dist/<版本>/<target>/zcode-rs`（上传用）。
+    pub fn artifact(&self, version: &str, target: &str) -> StoragePath {
+        self.dir
+            .join("dist")
+            .join(version)
+            .join(target)
+            .join(rust_cli_base::names::UNIX_EXECUTABLE)
     }
 }
 

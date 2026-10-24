@@ -12,6 +12,7 @@ use serde_json::{Map, Value, json};
 use crate::OrStorage;
 use crate::facts::Commit;
 use crate::ids::{message_id, part_id};
+use crate::notices::RUST_CLI;
 use crate::repo::entries::{self, Entry};
 use crate::repo::messages::{self, WithParts};
 
@@ -202,6 +203,8 @@ pub(crate) fn copy_messages(
     records: &[&WithParts],
 ) -> Result<Mapping, StoreError> {
     let mut map = Mapping::new();
+    // 带位置键的 tool part（node-store.md §4.6，工作线 F81）：键指向 assistant 之后的行，逐条映射时还没有新 ID。
+    let mut keyed = Vec::new();
     for record in records {
         let next = message_id(ctx.now, &(ctx.uuid)());
         map.insert(record.id().to_owned(), next.clone());
@@ -209,6 +212,18 @@ pub(crate) fn copy_messages(
         messages::save_message(ctx.conn, &info, ctx.now as i64).storage()?;
         for source in &record.parts {
             let cloned = part(ctx, source, &map, &next);
+            messages::save_part(ctx.conn, &cloned, ctx.now as i64).storage()?;
+            if cloned["metadata"][RUST_CLI]["afterMessageId"].is_string() {
+                keyed.push(cloned);
+            }
+        }
+    }
+    // 修 bug（工作线 F81）：位置键不换时还指向原会话的行，分出的会话冷读取找不到，结果又都排回 assistant 之后。复制完
+    // 之后按整张映射换成新 ID，再存一次这个 part。
+    for mut cloned in keyed {
+        let key = &mut cloned["metadata"][RUST_CLI]["afterMessageId"];
+        if let Some(next) = key.as_str().and_then(|id| map.get(id)) {
+            *key = Value::from(next.as_str());
             messages::save_part(ctx.conn, &cloned, ctx.now as i64).storage()?;
         }
     }

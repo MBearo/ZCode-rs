@@ -35,7 +35,7 @@ const HOOKS: &str = r#"{"enabled": true, "events": {"PreToolUse": [{"matcher": "
 async fn run_with(env: &MemoryEnvironment, paths: &StoragePaths, line: &str) -> Output {
     let command = parse(&args(line)).unwrap().unwrap();
     let context = TrustContext {
-        env,
+        files: env,
         paths,
         cwd: ROOT,
         version: "0.1.0",

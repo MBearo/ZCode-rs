@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
-use rust_cli_kernel_api::testing::{MemoryEnvironment, text_response};
+use rust_cli_kernel_api::testing::{MemoryEnvironment, environments, text_response};
 
 use super::support::{GatedModel, Setup, request_text, with_ui};
 
@@ -25,7 +25,7 @@ fn setup() -> Setup {
     .with_file("/Users/dev/project/.zcode/skills/greet/SKILL.md", GREET)
     .with_file("/Users/dev/project/.zcode/skills/inner/SKILL.md", INNER);
     Setup {
-        env: Arc::new(env),
+        environments: environments(Arc::new(env)),
         ..Setup::default()
     }
 }

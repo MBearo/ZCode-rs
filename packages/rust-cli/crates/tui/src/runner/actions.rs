@@ -22,7 +22,16 @@ use crate::ui::i18n;
 impl<B: Backend> Loop<'_, B> {
     pub(super) fn on_input(&mut self, event: Event) -> Result<()> {
         let now = Instant::now();
-        self.app.notify.input(tokio::time::Instant::now());
+        let tick = tokio::time::Instant::now();
+        self.app.notify.input(tick);
+        // 提问框的空闲计时（工作线 F72）：按键、粘贴与鼠标点击重新计时，焦点变化照终端的报告。
+        match &event {
+            Event::Key(_) | Event::Paste(_) => self.app.afk.input(tick),
+            Event::Mouse(mouse) if mouse.kind != MouseEventKind::Moved => self.app.afk.input(tick),
+            Event::FocusGained => self.app.afk.focus(true),
+            Event::FocusLost => self.app.afk.focus(false),
+            _ => {}
+        }
         // Windows 的 paste burst（tui-input.md §9.2）：鼠标操作（移动除外）与粘贴之前先交出缓存的文字。
         let mut actions = match &event {
             Event::Mouse(mouse) if mouse.kind == MouseEventKind::Moved => Vec::new(),
@@ -147,6 +156,31 @@ impl<B: Backend> Loop<'_, B> {
                 Command::ResolvePeerMessage { message, approve },
                 String::new(),
             ),
+            // 旧会话的询问（agents.md §4.1.2，工作线 F72）经内核的进程级入口回答，回执同会话的回答。
+            Action::Resolve {
+                interaction,
+                answer,
+            } if self.app.detached_title(&interaction).is_some() => {
+                let kernel = self.kernel.clone();
+                self.pending.push(
+                    async move {
+                        let ack = match kernel.resolve_detached(&interaction, answer).await {
+                            Ok(()) => rust_cli_kernel_api::session_api::Ack::Accepted {
+                                result: serde_json::Value::Null,
+                            },
+                            Err(error) => rust_cli_kernel_api::session_api::Ack::Rejected {
+                                reason: error.to_string(),
+                            },
+                        };
+                        super::session::Done::Ack {
+                            sent: Sent::Resolve,
+                            label: String::new(),
+                            ack,
+                        }
+                    }
+                    .boxed(),
+                );
+            }
             Action::Resolve {
                 interaction,
                 answer,
@@ -196,8 +230,8 @@ impl<B: Backend> Loop<'_, B> {
                 rust_cli_kernel_api::ids::SessionId::new(id),
                 rust_cli_kernel_api::session_api::StartSource::Resume,
                 None,
+                true,
             ),
-            Action::Branch => self.branch(),
             Action::Rename(title) => {
                 if self.session.is_some() {
                     let command = Command::Rename {
@@ -224,7 +258,7 @@ impl<B: Backend> Loop<'_, B> {
             Action::Logout => self.logout(),
             Action::ShowGoal => self.show_goal(),
             Action::OpenFork => self.open_fork(),
-            Action::ForkCheckpoint { checkpoint, files } => self.fork_checkpoint(checkpoint, files),
+            Action::Fork { input } => self.fork(input),
             Action::Quit => self.app.quit = true,
             Action::Manage(manage) => self.manage(manage)?,
             Action::Panel(panel) => self.panel(panel),

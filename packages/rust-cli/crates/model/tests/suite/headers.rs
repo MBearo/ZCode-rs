@@ -10,11 +10,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::ids::{AgentId, RunId, SessionId};
-use rust_cli_kernel_api::model::{CountTokensRequest, ModelPort, QuerySource};
+use rust_cli_kernel_api::model::QuerySource;
 use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
 use rust_cli_model::{FixedEndpoint, ProviderModel, RequestHeaders, SourceFacts, source_headers};
 use rust_cli_net::{Egress, NetworkPolicy};
-use tokio_util::sync::CancellationToken;
 
 use super::common::{clock, collect, fast_retry, request, text_response};
 use super::fixture::{Captured, Fixture, Reply};
@@ -181,25 +180,16 @@ async fn each_attempt_gets_a_new_request_id() {
     }
 }
 
-/// 旁路请求用 Node 的用途名；计数没有会话、回合与来源：只有 ID 与 `other`，来源头照发。
+/// 旁路请求用 Node 的用途名。工作线 F93 删掉计数请求之前，这里还核对计数只有 ID 与 `other`。
 #[tokio::test]
-async fn side_requests_and_counts() {
-    let server = Fixture::start(vec![ok(), Reply::new(200).send(r#"{"input_tokens":7}"#)]).await;
+async fn side_requests_use_the_node_query_source() {
+    let server = Fixture::start(vec![ok()]).await;
     let model = model(endpoint(server.url(), &[]), 0).await;
     let mut title = request("hi", QuerySource::Side("generate_session_title".to_owned()));
     title.options.session_id = Some(SessionId::new("sess_s1"));
     title.options.run = Some(RunId::new("run_r2"));
     let events = collect(&model, title).await;
     assert!(events.iter().all(Result::is_ok), "{events:?}");
-    let count = CountTokensRequest {
-        selection: request("x", QuerySource::MainThread).selection,
-        messages: Vec::new(),
-        tools: Vec::new(),
-    };
-    model
-        .count_tokens(count, CancellationToken::new())
-        .await
-        .unwrap();
     let requests = server.requests();
     assert_eq!(
         single(&requests[0], "x-zcode-query-source"),
@@ -207,12 +197,4 @@ async fn side_requests_and_counts() {
     );
     assert_eq!(single(&requests[0], "x-zcode-session-type"), Some("main"));
     assert_eq!(single(&requests[0], "x-query-id"), Some("r2"));
-    let counted = &requests[1];
-    assert_eq!(single(counted, "x-request-id"), Some("req-2"));
-    assert_eq!(single(counted, "x-zcode-session-type"), Some("other"));
-    assert_eq!(single(counted, "x-zcode-trace-id"), Some("trace-1"));
-    assert_eq!(single(counted, "user-agent"), Some("ZCode/0.1.52"));
-    for name in ["x-session-id", "x-query-id", "x-zcode-query-source"] {
-        assert_eq!(single(counted, name), None, "{name}");
-    }
 }

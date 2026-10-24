@@ -32,7 +32,7 @@ fn workspace() -> WorkspaceRef {
 
 fn place<'a>(env: &'a MemoryEnvironment, workspace: &'a WorkspaceRef) -> Place<'a> {
     Place {
-        env,
+        files: env,
         workspace,
         cwd: CWD,
         home: Some("/Users/dev"),

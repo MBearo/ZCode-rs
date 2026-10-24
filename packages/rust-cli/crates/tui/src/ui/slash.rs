@@ -45,13 +45,8 @@ impl App {
             "rewind" => Some(Action::OpenRewind),
             "resume" if args.is_empty() => Some(Action::OpenResume),
             "resume" => Some(Action::Resume(args.to_owned())),
-            "branch" => Some(Action::Branch),
-            // Node 的 `/fork [latest|checkpointId]`：带参数时直接分叉并恢复文件（session-lifecycle.md §6.5.4）。
-            "fork" if args.is_empty() => Some(Action::OpenFork),
-            "fork" => Some(Action::ForkCheckpoint {
-                checkpoint: (args != "latest").then(|| args.to_owned()),
-                files: rust_cli_kernel_api::session_api::ForkFiles::Restore,
-            }),
+            // 按用户输入分叉（session-lifecycle.md §6.5.3，F75）。参数忽略、照样打开选择器（用户决定，F78；F75 时报错）。
+            "fork" => Some(Action::OpenFork),
             // 不带名字时用模型起名（titles.md §8）。
             "rename" if args.is_empty() => Some(Action::GenerateName),
             "rename" => Some(Action::Rename(args.to_owned())),

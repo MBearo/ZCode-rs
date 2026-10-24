@@ -11,7 +11,7 @@ use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
 };
 use rust_cli_kernel_api::permission::RuleBehavior;
-use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment};
+use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment, local_services, machine};
 use rust_cli_kernel_api::tool::{ToolError, ToolOutput, ToolProgress};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -83,7 +83,8 @@ fn context(mode: PermissionMode) -> ToolUseContext {
         },
         mode,
         cancel: CancellationToken::new(),
-        env: Arc::new(UnusedEnvironment),
+        machine: machine(Arc::new(UnusedEnvironment)),
+        local: local_services(Arc::new(UnusedEnvironment)),
         artifacts: Arc::new(MemoryStore::default()),
         interactions: Arc::new(NoAnswers),
         operation: OperationContext {
@@ -152,7 +153,8 @@ async fn default_mode_allows_read_only_and_asks_for_the_rest() {
     else {
         panic!("ask");
     };
-    assert_eq!(suggestions[0].content.as_deref(), Some("npm:*"));
+    // 第二个词不像子命令：精确规则（§4.10；以前是 `npm:*`）。
+    assert_eq!(suggestions[0].content.as_deref(), Some("npm --version"));
 }
 
 #[tokio::test]
@@ -174,8 +176,13 @@ async fn whole_tool_rules_come_first_and_last() {
     );
     let asked = PolicyGate::new(rules(&[(RuleBehavior::Ask, "Bash")]));
     assert_eq!(
-        ask_message(&bash(&asked, PermissionMode::BypassPermissions, "echo hi").await),
+        ask_message(&bash(&asked, PermissionMode::Guarded, "echo hi").await),
         "ZCode requested permissions to use Bash, but you haven't granted it yet."
+    );
+    // 工作线 F76（用户决定）：yolo 下 ask 规则也放行（以前询问）。
+    assert_eq!(
+        bash(&asked, PermissionMode::BypassPermissions, "echo hi").await,
+        allow()
     );
     let allowed = PolicyGate::new(rules(&[(RuleBehavior::Allow, "Bash")]));
     assert_eq!(
@@ -188,8 +195,9 @@ async fn whole_tool_rules_come_first_and_last() {
     );
 }
 
+/// 工作线 F76（用户决定 2026-10-23“如果是 yolo 啥也不问”）：yolo 下只有 deny 规则生效，ask 规则放行（以前询问）。
 #[tokio::test]
-async fn bypass_still_respects_deny_and_ask_rules() {
+async fn yolo_keeps_only_deny_rules() {
     let gate = PolicyGate::new(rules(&[
         (RuleBehavior::Deny, "Bash(rm:*)"),
         (RuleBehavior::Ask, "Bash(git push:*)"),
@@ -200,8 +208,9 @@ async fn bypass_still_respects_deny_and_ask_rules() {
         bash(&gate, mode, "rm -f a").await,
         deny(texts::bash_command_denied("rm -f a"))
     );
+    assert_eq!(bash(&gate, mode, "git push").await, allow());
     assert!(matches!(
-        bash(&gate, mode, "git push").await,
+        bash(&gate, PermissionMode::Guarded, "git push").await,
         PermissionDecision::Ask { .. }
     ));
 }
@@ -276,3 +285,9 @@ mod find_paths;
 
 #[path = "lib_tests_safety.rs"]
 mod safety;
+
+#[path = "lib_tests_deny_forms.rs"]
+mod deny_forms;
+
+#[path = "lib_tests_monitor.rs"]
+mod monitor_chain;

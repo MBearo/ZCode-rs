@@ -90,6 +90,11 @@ pub(crate) enum SinkRequest {
     Selection {
         reply: oneshot::Sender<ModelSelection>,
     },
+    /// Monitor 工具起好的 monitor 交给 actor（工作线 F83，tools-more.md §19.6）。
+    ArmMonitor {
+        monitor: rust_cli_kernel_api::monitor::MonitorArmed,
+        reply: oneshot::Sender<Result<(), OrchestrationError>>,
+    },
     /// 主循环读会话的目标条件（docs/specs/rust-cli/goal.md §4）。
     Goal {
         reply: oneshot::Sender<Option<String>>,
@@ -106,6 +111,9 @@ pub(crate) struct ActorSink {
     pub(crate) sender: mpsc::Sender<SinkRequest>,
     /// 会话的请求通道（弱引用）：会话级的询问入口经它（`Interactions::lasting`），不让 actor 因此不退出。
     pub(crate) asks: mpsc::WeakSender<crate::actor::Request>,
+    /// 会话自己的 ID 与会话关闭之后的询问入口（agents.md §4.1.2，工作线 F72）：会话级的询问入口带上它们。
+    pub(crate) session: rust_cli_kernel_api::ids::SessionId,
+    pub(crate) detached: Option<Arc<crate::detached::DetachedAsks>>,
 }
 
 fn closed() -> StoreError {
@@ -211,6 +219,23 @@ impl Interactions for ActorSink {
         answer.await.map_err(|_| gone())?
     }
 
+    /// monitor 的 owner 是会话 actor（工作线 F83）。
+    async fn arm_monitor(
+        &self,
+        _session: &SessionId,
+        monitor: rust_cli_kernel_api::monitor::MonitorArmed,
+    ) -> Result<(), OrchestrationError> {
+        let gone = || OrchestrationError::Failed {
+            message: "the session is closed".to_owned(),
+        };
+        let (reply, answer) = oneshot::channel();
+        self.sender
+            .send(SinkRequest::ArmMonitor { monitor, reply })
+            .await
+            .map_err(|_| gone())?;
+        answer.await.map_err(|_| gone())?
+    }
+
     /// 选择的 owner 是会话 actor：按请求时的值回答，不另存副本。
     async fn current_selection(&self, _session: &SessionId) -> Option<ModelSelection> {
         let (reply, answer) = oneshot::channel();
@@ -225,13 +250,36 @@ impl Interactions for ActorSink {
     fn lasting(&self, _session: &SessionId) -> Option<Arc<dyn Interactions>> {
         Some(Arc::new(SessionAsks {
             requests: self.asks.clone(),
+            session: self.session.clone(),
+            detached: self.detached.clone(),
         }))
     }
 }
 
-/// 会话级的询问入口：询问经会话的请求通道交给 actor，登记为不属于回合的交互，只随会话关闭取消。
+/// 会话级的询问入口：询问经会话的请求通道交给 actor，登记为不属于回合的交互，只随会话关闭取消。actor 收不下时
+/// （已经退出、正在关闭，或关闭时取消了这条询问）改走进程级的入口（agents.md §4.1.2）。
 pub(crate) struct SessionAsks {
     requests: mpsc::WeakSender<crate::actor::Request>,
+    session: SessionId,
+    detached: Option<Arc<crate::detached::DetachedAsks>>,
+}
+
+impl SessionAsks {
+    /// 交给会话 actor；actor 收不下（发不出去或回复被丢下）时为 None。
+    async fn to_actor(
+        &self,
+        request: InteractionRequest,
+    ) -> Option<Result<InteractionAnswer, OrchestrationError>> {
+        let (reply, answer) = oneshot::channel();
+        // 只在发送时持有强引用：等回答的这段时间不拖住会话的请求通道。
+        let requests = self.requests.upgrade()?;
+        requests
+            .send(crate::actor::Request::Ask { request, reply })
+            .await
+            .ok()?;
+        drop(requests);
+        answer.await.ok()
+    }
 }
 
 #[async_trait]
@@ -241,18 +289,16 @@ impl Interactions for SessionAsks {
         _session: &SessionId,
         request: InteractionRequest,
     ) -> Result<InteractionAnswer, OrchestrationError> {
-        let gone = || OrchestrationError::Failed {
-            message: "the session is closed".to_owned(),
-        };
-        let (reply, answer) = oneshot::channel();
-        // 只在发送时持有强引用：等回答的这段时间不拖住会话的请求通道。
-        let requests = self.requests.upgrade().ok_or_else(gone)?;
-        requests
-            .send(crate::actor::Request::Ask { request, reply })
-            .await
-            .map_err(|_| gone())?;
-        drop(requests);
-        answer.await.map_err(|_| gone())?
+        if let Some(answered) = self.to_actor(request.clone()).await {
+            return answered;
+        }
+        // 修复（工作线 F72）：以前父会话关闭之后这里直接按会话已关闭失败，后台子代理按拒绝处理。
+        match &self.detached {
+            Some(detached) => detached.ask(&self.session, request).await,
+            None => Err(OrchestrationError::Failed {
+                message: "the session is closed".to_owned(),
+            }),
+        }
     }
 
     async fn cancel_ask(
@@ -260,18 +306,23 @@ impl Interactions for SessionAsks {
         _session: &SessionId,
         tool_use: &rust_cli_kernel_api::ids::ToolUseId,
     ) {
-        // 会话已关闭时，关闭已经取消了全部待回答的交互。
+        // 会话已关闭时，关闭已经取消了全部待回答的交互；询问可能已转到进程级的入口。
         if let Some(requests) = self.requests.upgrade() {
             let request = crate::actor::Request::CancelAsk {
                 tool_use: tool_use.clone(),
             };
             let _ = requests.send(request).await;
         }
+        if let Some(detached) = &self.detached {
+            detached.cancel(&self.session, tool_use);
+        }
     }
 
     fn lasting(&self, _session: &SessionId) -> Option<Arc<dyn Interactions>> {
         Some(Arc::new(Self {
             requests: self.requests.clone(),
+            session: self.session.clone(),
+            detached: self.detached.clone(),
         }))
     }
 }
@@ -370,3 +421,7 @@ impl RunSink for ActorSink {
         .await
     }
 }
+
+#[cfg(test)]
+#[path = "sink_tests.rs"]
+mod tests;

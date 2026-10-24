@@ -28,6 +28,7 @@ fn boundary(preserved: Option<(&str, &str)>) -> Message {
             anchor: MessageId::new("msg_s"),
             tail: MessageId::new(tail),
         }),
+        discovered_tools: Vec::new(),
     }))
 }
 
@@ -187,4 +188,45 @@ async fn a_summary_without_its_boundary_is_rejected() {
         t.rows("select id from message where id = 'msg_s'")
             .is_empty()
     );
+}
+
+/// 压缩前已加载的工具（compact.md §3.5）：存在 `compaction` part 的 `metadata.rustCli`，不进 strict 的
+/// `compactBoundary`；冷读取还原到边界上。
+#[tokio::test]
+async fn the_tools_loaded_before_compaction_are_stored_beside_the_strict_payload() {
+    let t = TestStore::new();
+    started(&t, "sess_1").await;
+    for fact in [
+        user("msg_u1", "first"),
+        assistant("msg_a1", vec![text("one")], None),
+    ] {
+        t.store
+            .commit(&sid(), batch(None, vec![fact]))
+            .await
+            .unwrap();
+    }
+    let carried = vec!["WebFetch".to_owned(), "mcp__fixture__lookup".to_owned()];
+    let mut with_tools = boundary(None);
+    if let Message::System(SystemMessage::CompactBoundary(inner)) = &mut with_tools {
+        inner.discovered_tools.clone_from(&carried);
+    }
+    let facts = vec![appended(with_tools.clone()), appended(summary())];
+    t.store.commit(&sid(), batch(None, facts)).await.unwrap();
+
+    let parts = json_rows(
+        &t,
+        "select data from part where message_id = 'msg_s' and json_extract(data, '$.type') = 'compaction'",
+    );
+    assert_eq!(
+        parts[0]["metadata"]["rustCli"]["preCompactDiscoveredTools"],
+        json!(carried)
+    );
+    assert!(
+        parts[0]["compactBoundary"]
+            .get("preCompactDiscoveredTools")
+            .is_none()
+    );
+
+    let loaded = t.store.load(&sid()).await.unwrap();
+    assert_eq!(loaded.messages[0], with_tools);
 }

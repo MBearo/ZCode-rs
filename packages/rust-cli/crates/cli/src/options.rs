@@ -7,7 +7,8 @@ use std::path::MAIN_SEPARATOR;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rust_cli_kernel_api::env::{Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::WorkspaceRef;
+use rust_cli_kernel_api::machine::Files;
 use rust_cli_kernel_api::provider::ModelLimits;
 use rust_cli_model::{
     BYTE_IDLE_MAX, BYTE_IDLE_MIN, ByteIdle, EVENT_IDLE_FLOOR, STALL_NOTICE, StreamIdle,
@@ -80,7 +81,7 @@ pub(crate) fn task_tools(snapshot: &[(String, String)]) -> Option<bool> {
 
 /// 自动记忆目录：建好后返回给提示词的展示文本（末尾带分隔符）；关闭或建不了时为 None。
 pub(crate) async fn memory_dir(
-    env: &dyn Environment,
+    files: &dyn Files,
     paths: &StoragePaths,
     workspace: &WorkspaceRef,
     snapshot: &[(String, String)],
@@ -88,7 +89,7 @@ pub(crate) async fn memory_dir(
     if truthy(snapshot, "ZCODE_DISABLE_AUTO_MEMORY") {
         return None;
     }
-    let project = rust_cli_memory::project_root(env, workspace).await;
+    let project = rust_cli_memory::project_root(files, workspace).await;
     let dir = paths.memory_dir(project.as_str());
     // 建不了目录时不打开记忆段（提示词会说目录已存在）。
     rust_cli_fs::create_dir_all(dir.as_path()).await.ok()?;
@@ -182,13 +183,53 @@ pub(crate) struct Assumptions {
     /// `_ZCODE_ASSUME_FIRST_PARTY_BASE_URL`：按 Anthropic 官方
     /// 端点查方案表与能力规则。测试连本地 fixture 时用它发第一方形状。
     pub first_party: bool,
-    /// `_ZCODE_ASSUME_TOOL_SEARCH`（工作线 F52）：当作支持延迟加载工具的端点。ToolSearch 只在 z.ai / bigmodel 的端点开
-    /// （tools-more.md §3.2），测试的 fixture 在 127.0.0.1，靠它打开 ToolSearch；
-    /// 不是给用户的开关。
+    /// `_ZCODE_ASSUME_TOOL_SEARCH`（工作线 F52）：当作支持延迟加载工具（`tool_reference`）的端点，用原生 ToolSearch。
+    /// 工作线 F89 起产品路径一律本地（tools-more.md §3.2.2），这是选到原生的唯一途径，原生的实现靠它保留测试；不声明时
+    /// 是本地 ToolSearch（F84 时原生只给 z.ai / bigmodel 的端点；F84 以前不声明是不开）。不是给用户的开关。
     pub tool_search: bool,
+    /// `_ZCODE_ASSUME_MONITOR_OFF`（工作线 F83）：关掉 Monitor 与它带动的文字，等于对齐基准的开关关着
+    /// （tools-more.md §19.1）。不是给用户的开关。
+    pub monitor_off: bool,
+    /// `_ZCODE_ASSUME_LOOPBACK_EXECUTOR`（远端执行 R1，remote-exec.md §18.6）：本机的执行端口经 loopback 走子进程
+    /// `zcode executor --stdio`，验证远端实现与本机结果相同。不是给用户的开关。
+    pub loopback: bool,
 }
 
-/// 读两个测试声明（取值是 `1` / `true` / `yes` / `on`，不区分大小写）。`Ignored` 时不调用 `var`。
+/// 只给测试的 SSH 入口（远端执行 R2，remote-exec.md §19.11）：本机的执行端口换成经 SSH 连到 `destination` 的远端环境。
+/// 只在 debug 构建读（同 `_ZCODE_ASSUME_*`）；不是给用户的开关（机器清单与 `/machines` 在 R3 / R4）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SshAssumption {
+    /// `_ZCODE_ASSUME_SSH_EXECUTOR`：SSH 目标。
+    pub destination: String,
+    /// `_ZCODE_ASSUME_SSH_CONFIG`：给 ssh 的 `-F <文件>`。
+    pub config: Option<String>,
+    /// `_ZCODE_ASSUME_SSH_ARTIFACT`：上传用的 Linux 产物（架构从 ELF 头读）。
+    pub artifact: Option<String>,
+}
+
+/// 读 SSH 测试入口；没设目标或 `Ignored` 时 None（`Ignored` 时不调用 `var`）。
+pub(crate) fn ssh_assumption(
+    declarations: TestDeclarations,
+    var: impl Fn(&str) -> Option<String>,
+) -> Option<SshAssumption> {
+    if declarations == TestDeclarations::Ignored {
+        return None;
+    }
+    let value = |name: &str| var(name).filter(|value| !value.trim().is_empty());
+    Some(SshAssumption {
+        destination: value("_ZCODE_ASSUME_SSH_EXECUTOR")?,
+        config: value("_ZCODE_ASSUME_SSH_CONFIG"),
+        artifact: value("_ZCODE_ASSUME_SSH_ARTIFACT"),
+    })
+}
+
+/// Monitor 开不开（工作线 F83，用户决定 2026-10-24 产品缺省开）：同 Bash 的条件——Windows 上要找到 Git Bash；只给测试用的
+/// 声明关掉。
+pub(crate) fn monitor(assume: Assumptions, bash_found: bool) -> bool {
+    !assume.monitor_off && (!cfg!(windows) || bash_found)
+}
+
+/// 读测试声明（取值是 `1` / `true` / `yes` / `on`，不区分大小写）。`Ignored` 时不调用 `var`。
 pub(crate) fn assumptions(
     declarations: TestDeclarations,
     var: impl Fn(&str) -> Option<String>,
@@ -200,6 +241,8 @@ pub(crate) fn assumptions(
         TestDeclarations::Accepted => Assumptions {
             first_party: declared("_ZCODE_ASSUME_FIRST_PARTY_BASE_URL"),
             tool_search: declared("_ZCODE_ASSUME_TOOL_SEARCH"),
+            monitor_off: declared("_ZCODE_ASSUME_MONITOR_OFF"),
+            loopback: declared("_ZCODE_ASSUME_LOOPBACK_EXECUTOR"),
         },
     }
 }

@@ -7,17 +7,19 @@ use std::sync::Arc;
 
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::env::{
-    EnvPath, Environment, OperationContext, Origin, ReadFile, WorkspaceRef, WritePrecondition,
+    EnvPath, OperationContext, Origin, ReadFile, WorkspaceRef, WritePrecondition,
 };
 use rust_cli_kernel_api::env_files::PutFile;
 use rust_cli_kernel_api::ids::{Generation, OwnerEpoch};
+use rust_cli_kernel_api::machine::Files;
 use rust_cli_paths::StoragePaths;
 
 use crate::config::merge::McpOrigin;
 
 pub(crate) struct McpConfigFiles {
     pub(crate) origins: BTreeMap<String, McpOrigin>,
-    pub(crate) env: Arc<dyn Environment>,
+    /// 项目级配置文件（本机）。
+    pub(crate) files: Arc<dyn Files>,
     pub(crate) ids: Arc<dyn Ids>,
     pub(crate) workspace: WorkspaceRef,
 }
@@ -41,7 +43,7 @@ impl McpConfigFiles {
         }
         let path = EnvPath::new(origin.path.as_str());
         let read = self
-            .env
+            .files
             .read_file(&self.workspace, ReadFile { path: path.clone() })
             .await
             .map_err(|error| error.to_string())?;
@@ -61,7 +63,7 @@ impl McpConfigFiles {
             precondition: WritePrecondition::Version(read.version),
             create_parents: false,
         };
-        self.env
+        self.files
             .put_file(&self.workspace, context, request)
             .await
             .map(|_| Some(origin.path.clone()))

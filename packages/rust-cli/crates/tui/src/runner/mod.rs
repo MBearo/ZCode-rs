@@ -138,6 +138,8 @@ struct Loop<'a, B: Backend> {
     screen: &'a mut dyn Screen,
     session: Option<Arc<dyn SessionHandle>>,
     events: BoxStream<'static, SequencedEvent>,
+    /// 父会话关闭之后旧会话的询问（内核进程级的入口，agents.md §4.1.2，工作线 F72）。
+    detached: BoxStream<'static, rust_cli_kernel_api::orchestration::DetachedEvent>,
     pending: FuturesUnordered<futures_util::future::BoxFuture<'static, Done>>,
     dirty: bool,
     /// 画完下一帧后复制选区（`true` 时复制后清掉选区）。
@@ -208,6 +210,7 @@ pub async fn drive<B: Backend>(
     app.terminal_background = detected;
     app.composer.load_history(options.history.clone());
     app.memory_files = options.services.memory_files.clone();
+    app.afk = crate::ui::afk::Afk::new(options.services.question_timeout);
     // npm 上有更新的版本（docs/specs/rust-cli/update.md §7，F48）：会话头下面插一个提示；启动时要打开已有会话时，
     // 第一次切换清掉旧视图后再插到新视图的顶上。
     if let Some(info) = options.services.update.clone() {
@@ -216,8 +219,10 @@ pub async fn drive<B: Backend>(
             app.update_carry = Some(info);
         }
     }
+    let detached = kernel.detached_asks();
     let mut state = Loop {
         kernel,
+        detached,
         options,
         app,
         cache: Cache::default(),
@@ -252,6 +257,7 @@ pub async fn drive<B: Backend>(
         }
         let animating = state.app.animating();
         let notify_at = state.app.notify.next_due();
+        let afk_at = state.app.afk.next_due(tokio::time::Instant::now());
         let burst_at = state.app.burst_deadline();
         tokio::select! {
             event = input.next() => match event {
@@ -267,6 +273,7 @@ pub async fn drive<B: Backend>(
                 state.on_event(event);
                 state.ready_events();
             }
+            event = state.detached.next() => state.on_detached(event),
             done = state.pending.next(), if !state.pending.is_empty() => {
                 if let Some(done) = done {
                     state.on_done(done);
@@ -282,6 +289,9 @@ pub async fn drive<B: Backend>(
             // 终端通知的计时（只是界面提示，tui-manage.md §5.1）。
             () = tokio::time::sleep_until(notify_at.unwrap_or_else(tokio::time::Instant::now)),
                 if notify_at.is_some() => state.notify(),
+            // 提问框的空闲计时（tools-more.md §1.1，工作线 F72）：每秒检查一次。
+            () = tokio::time::sleep_until(afk_at.unwrap_or_else(tokio::time::Instant::now)),
+                if afk_at.is_some() => state.afk()?,
             // 子代理有变化：重取子代理列表与后台任务的同一份快照（修复线 F34，tui-panels.md §0）。
             () = state.panels.changed() => state.refresh_tasks(),
             // 缺陷修复（R5-2）：原来入口不处理退出信号，SIGTERM / SIGHUP 直接结束进程，终端停在备用屏、
@@ -453,11 +463,8 @@ impl<B: Backend> Loop<'_, B> {
             self.refresh_stats();
         }
         self.app.last_frame = now;
-        self.app.sync_interaction(now);
-        let lang = self.app.lang;
+        self.sync_pending(now);
         let tick = tokio::time::Instant::now();
-        let pending = self.app.view.pending().map(|(id, request)| (id, request));
-        self.app.notify.dialog(pending, lang, tick);
         if finished {
             self.app.notify.turn_finished(tick);
             // 退出信号之后在等的回合结束了：离开。
@@ -483,11 +490,54 @@ impl<B: Backend> Loop<'_, B> {
 }
 
 impl<B: Backend> Loop<'_, B> {
+    /// 待处理交互可能变了：对话框的选择状态、终端通知与空闲计时跟着换。
+    fn sync_pending(&mut self, now: Instant) {
+        self.app.sync_interaction(now);
+        let lang = self.app.lang;
+        let tick = tokio::time::Instant::now();
+        let pending = crate::ui::app::pending_of(&self.app.view, &self.app.detached);
+        self.app.notify.dialog(pending, lang, tick);
+        self.app.afk.dialog(pending, tick);
+        self.app.show_countdown();
+    }
+
+    /// 旧会话询问的变化（工作线 F72）；流结束（内核没有这个入口）之后不再等它。
+    fn on_detached(&mut self, event: Option<rust_cli_kernel_api::orchestration::DetachedEvent>) {
+        let Some(event) = event else {
+            self.detached = stream::pending().boxed();
+            return;
+        };
+        self.app.detached_changed(event);
+        self.sync_pending(Instant::now());
+        self.dirty = true;
+    }
+
+    /// 到了提问框的空闲检查时刻：更新倒计时；到期时按当时已选的答案提交（tools-more.md §1.1）。
+    fn afk(&mut self) -> Result<()> {
+        let tick = self.app.afk.tick(tokio::time::Instant::now());
+        self.app.show_countdown();
+        self.dirty = true;
+        let Some(crate::ui::afk::Tick::Expired(timeout_ms)) = tick else {
+            return Ok(());
+        };
+        let answer = self.app.pending().and_then(|(id, request)| {
+            let ui = self.app.interaction.as_ref().filter(|ui| ui.id == *id)?;
+            Some((id.clone(), ui.idle_answer(request, timeout_ms)?))
+        });
+        if let Some((interaction, answer)) = answer {
+            self.act(crate::ui::app::Action::Resolve {
+                interaction,
+                answer,
+            })?;
+        }
+        Ok(())
+    }
+
     /// 到了通知的检查时刻：条件满足且终端有渠道时写出转义序列（tui-manage.md §5）。
     fn notify(&mut self) {
         use crate::ui::notify;
         let quiet = !self.app.running()
-            && self.app.view.pending().is_none()
+            && self.app.pending().is_none()
             && self.app.overlay.is_none()
             && !self.app.background.iter().any(|entry| {
                 entry.kind == rust_cli_kernel_api::manage::BackgroundKind::Agent

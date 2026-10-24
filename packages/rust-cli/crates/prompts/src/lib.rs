@@ -18,6 +18,7 @@
 //! | [`loops`] | `/loop` 的提示、触发时的短提醒与自主说明（`prompts/loop/`） |
 //! | [`goal`] | `/goal` 的说明与 prompt hook 评估的提示词（`prompts/goal/`） |
 //! | [`peers`] | 跨会话通信的包装、回执与工具结果的固定句子（`prompts/peers/`） |
+//! | [`monitor`] | Monitor 的结果、事件、说明与随开关多出的句子（`prompts/monitor/`，F83） |
 
 pub mod agents;
 pub mod commands;
@@ -25,6 +26,7 @@ pub mod compact;
 pub mod goal;
 pub mod loops;
 pub mod models;
+pub mod monitor;
 pub mod peers;
 pub mod reminder;
 pub mod texts;
@@ -78,6 +80,8 @@ const TOOL_FILES: &[&str] = &[
     include_lf!("../../../prompts/tools/ExitPlanMode.json"),
     include_lf!("../../../prompts/tools/ToolSearch.json"),
     include_lf!("../../../prompts/tools/WebFetch.json"),
+    // Monitor（docs/specs/rust-cli/tools-more.md §19，F83）。
+    include_lf!("../../../prompts/tools/Monitor.json"),
     include_lf!("../../../prompts/tools/WebSearch.json"),
     // Cron、Worktree、ReportFindings（docs/specs/rust-cli/tools-more.md §10–§12）。
     include_lf!("../../../prompts/tools/CronCreate.json"),

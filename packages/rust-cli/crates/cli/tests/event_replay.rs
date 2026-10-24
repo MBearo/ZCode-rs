@@ -30,7 +30,7 @@ use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{
     Ack, Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent, SequencedEvent,
 };
-use rust_cli_kernel_api::testing::{ScriptedModel, selection, text_response};
+use rust_cli_kernel_api::testing::{ScriptedModel, environments, selection, text_response};
 use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
@@ -224,7 +224,9 @@ fn kernel(home: PathBuf, scratch: PathBuf, release: oneshot::Receiver<()>) -> Lo
     };
     let ports = Ports {
         model,
-        env: Arc::new(LocalEnvironment::new(Some(home)).with_shell(shell)),
+        environments: environments(Arc::new(
+            LocalEnvironment::new(Some(home)).with_shell(shell),
+        )),
         store: store.clone(),
         artifacts: store,
         clock,

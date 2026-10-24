@@ -15,8 +15,10 @@ use crate::test_support::{CWD, EchoBash, FakeMcp, facts, server, workspace};
 
 fn ext(env: MemoryEnvironment, fake: Arc<FakeMcp>, scope: &TaskScope, servers: McpServers) -> Ext {
     let base: Arc<dyn ToolRegistry> = Arc::new(ListTools(vec![Arc::new(EchoBash::default())]));
+    let env = Arc::new(env);
     let ports = ExtPorts {
-        env: Arc::new(env),
+        info: env.clone(),
+        files: env,
         ids: Arc::new(SequentialIds::default()),
         gate: Arc::new(PolicyGate::default()),
         mcp: fake,

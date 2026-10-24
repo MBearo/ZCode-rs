@@ -9,13 +9,17 @@ use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::agents::AgentSignal;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, Environment, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundStatus, BackgroundStop, BackgroundTask,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::{
+    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+};
 use serde_json::json;
 use tokio::sync::Notify;
 
@@ -50,11 +54,14 @@ impl Shells {
 }
 
 #[async_trait]
-impl Environment for Shells {
+impl EnvInfo for Shells {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Err(unsupported())
     }
+}
 
+#[async_trait]
+impl Files for Shells {
     async fn read_file(&self, _: &WorkspaceRef, _: ReadFile) -> Result<FileContent, EnvError> {
         Err(unsupported())
     }
@@ -67,7 +74,10 @@ impl Environment for Shells {
     ) -> Result<WriteReceipt, EnvError> {
         Err(unsupported())
     }
+}
 
+#[async_trait]
+impl Commands for Shells {
     async fn start_command(
         &self,
         _: &WorkspaceRef,
@@ -96,7 +106,10 @@ impl Environment for Shells {
     async fn close_session(&self, _: &SessionId, _: bool) -> Result<(), EnvError> {
         Ok(())
     }
+}
 
+#[async_trait]
+impl Shell for Shells {
     async fn shell_state(
         &self,
         workspace: &WorkspaceRef,
@@ -113,7 +126,10 @@ impl Environment for Shells {
                 .collect(),
         })
     }
+}
 
+#[async_trait]
+impl Background for Shells {
     async fn background_command(
         &self,
         request: BackgroundTask,
@@ -145,15 +161,21 @@ impl Environment for Shells {
     }
 }
 
+impl Search for Shells {}
+impl Checkpoints for Shells {}
+impl Pdf for Shells {}
+impl Git for Shells {}
+impl Fetch for Shells {}
+
 #[tokio::test]
 async fn an_ended_command_is_not_running() {
     let mut harness = harness(None);
-    harness.env = Arc::new(Shells::with(
+    harness.set_env(Arc::new(Shells::with(
         "sess_parent",
         "b1",
         "exit 3",
         BackgroundStatus::Failed,
-    ));
+    )));
     let output = harness
         .call("sess_parent", "KillShell", json!({"shell_id": "b1"}))
         .await;
@@ -203,7 +225,7 @@ async fn the_main_thread_stops_a_command_of_its_subagent() {
         "sleep 30",
         BackgroundStatus::Running,
     ));
-    harness.env = shells.clone();
+    harness.set_env(shells.clone());
     let stopped = harness
         .call("sess_parent", "TaskStop", json!({"task_id": "b1"}))
         .await;
@@ -214,12 +236,12 @@ async fn the_main_thread_stops_a_command_of_its_subagent() {
     );
     assert!(shells.commands.lock().unwrap().is_empty());
     // 另一个会话（不在这个顶层会话里）看不到它。
-    harness.env = Arc::new(Shells::with(
+    harness.set_env(Arc::new(Shells::with(
         "sess_subagent_agent_1",
         "b2",
         "sleep 30",
         BackgroundStatus::Running,
-    ));
+    )));
     let other = harness
         .call("sess_other", "TaskStop", json!({"task_id": "b2"}))
         .await;
@@ -279,7 +301,7 @@ async fn stopping_a_parked_agent_stops_its_commands_but_not_its_children() {
         "sleep 30",
         BackgroundStatus::Running,
     ));
-    harness.env = shells.clone();
+    harness.set_env(shells.clone());
     let stopped = harness
         .call("sess_parent", "TaskStop", json!({"task_id": outer}))
         .await;

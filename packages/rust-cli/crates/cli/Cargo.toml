@@ -30,12 +30,22 @@ base64.workspace = true
 futures-util.workspace = true
 rust-cli-base.workspace = true
 rust-cli-env-local.workspace = true
+# 远端执行（docs/specs/rust-cli/remote-exec.md §18）：执行器模式与只给测试的 loopback。
+rust-cli-env-remote.workspace = true
+rust-cli-exec-client.workspace = true
+rust-cli-exec-server.workspace = true
+rust-cli-exec-transport.workspace = true
+# 执行器的状态（管理帧）与协议主版本（remote-exec.md §19.3、§19.6）。
+rust-cli-exec-wire.workspace = true
+rust-cli-executor-host.workspace = true
 rust-cli-ext.workspace = true
 rust-cli-fs.workspace = true
 rust-cli-headless.workspace = true
 # 配置文件的 hooks 段与快照（docs/specs/rust-cli/config.md）。
 rust-cli-hooks.workspace = true
 rust-cli-kernel-api.workspace = true
+# 只给测试的 SSH 入口（remote-exec.md §19.11）：连接状态机与 SSH 的连接、部署。
+rust-cli-machines.workspace = true
 rust-cli-memory.workspace = true
 rust-cli-model.workspace = true
 rust-cli-net.workspace = true
@@ -50,6 +60,7 @@ rust-cli-proc.workspace = true
 # stream-json 输入的 MCP prewait 按模型卡片判断能不能用工具搜索（headless.md §6）。
 rust-cli-prompts.workspace = true
 rust-cli-runtime.workspace = true
+rust-cli-ssh-connect.workspace = true
 rust-cli-tui.workspace = true
 # 内嵌的 ripgrep：zcode 以 `rg` 的名字启动时直接跑它（docs/specs/rust-cli/embedded-search.md §3、§5，F53）。
 rust-cli-vendor-rg = { path = "../../vendor/rg" }

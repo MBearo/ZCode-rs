@@ -4,7 +4,9 @@ use std::sync::Arc;
 use crossterm::event::KeyCode;
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
 use rust_cli_kernel_api::env_git::GitDiff;
-use rust_cli_kernel_api::testing::{MemoryEnvironment, text_response, tool_use_response};
+use rust_cli_kernel_api::testing::{
+    MemoryEnvironment, environments, text_response, tool_use_response,
+};
 use serde_json::json;
 
 use super::support::{GatedModel, Setup, with_ui};
@@ -43,12 +45,14 @@ async fn uncommitted_changes_and_turns_are_listed() {
     let setup = Setup {
         width: 100,
         height: 30,
-        env: Arc::new(env),
+        environments: environments(Arc::new(env)),
         ..Setup::default()
     };
     with_ui(model, setup, |mut ui| async move {
         ui.submit("/mode yolo");
-        ui.wait_for("Full access").await;
+        // 工作线 F87：切到完全访问先确认。
+        ui.confirm_full_access().await;
+        ui.wait_for("⏵⏵ Full access").await;
         ui.submit("write the notes");
         ui.wait("the reply", |s| idle(s, "⏺ done")).await;
         ui.submit("/diff");
@@ -107,7 +111,9 @@ async fn outside_a_repository_and_without_changes() {
         let model = GatedModel::scripted(Vec::new());
         let setup = Setup {
             width: 100,
-            env: Arc::new(MemoryEnvironment::new(facts()).with_git_diff(diff)),
+            environments: environments(Arc::new(
+                MemoryEnvironment::new(facts()).with_git_diff(diff),
+            )),
             ..Setup::default()
         };
         with_ui(model, setup, |mut ui| async move {

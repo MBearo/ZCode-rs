@@ -63,9 +63,13 @@ fn assembler_in(shell_cwd: Option<&str>) -> PromptAssembler {
     if let Some(cwd) = shell_cwd {
         env.set_shell_cwd(cwd);
     }
+    let env = Arc::new(env);
     PromptAssembler::new(
         ContextPorts {
-            env: Arc::new(env),
+            info: env.clone(),
+            files: env.clone(),
+            shell: env.clone(),
+            git: env,
             clock: Arc::new(FixedClock(1_792_224_000_000)),
             ids: Arc::new(SequentialIds::default()),
             listings: Arc::new(Fixed),

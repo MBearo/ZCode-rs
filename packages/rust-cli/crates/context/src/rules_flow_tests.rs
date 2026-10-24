@@ -46,7 +46,10 @@ fn environment() -> MemoryEnvironment {
 fn assembler(env: Arc<MemoryEnvironment>) -> PromptAssembler {
     PromptAssembler::new(
         ContextPorts {
-            env,
+            info: env.clone(),
+            files: env.clone(),
+            shell: env.clone(),
+            git: env,
             clock: Arc::new(FixedClock(1_792_224_000_000)),
             ids: Arc::new(SequentialIds::default()),
             listings: Arc::new(NoListings),
@@ -190,6 +193,7 @@ async fn a_compaction_boundary_re_reads_and_announces_everything_again() {
             pre_tokens: 1,
             summary: MessageId::new("summary"),
             preserved: None,
+            discovered_tools: Vec::new(),
         },
     )));
     let reads = env.reads();

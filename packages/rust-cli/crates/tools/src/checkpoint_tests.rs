@@ -35,14 +35,17 @@ mod tools {
     use std::sync::Arc;
 
     use rust_cli_kernel_api::env::{
-        EnvFacts, EnvPath, Environment, OperationContext, Origin, ReadFile, WorkspaceRef,
+        EnvFacts, EnvPath, OperationContext, Origin, ReadFile, WorkspaceRef,
     };
     use rust_cli_kernel_api::ids::{
         EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
     };
+    use rust_cli_kernel_api::machine::Files;
     use rust_cli_kernel_api::permission::PermissionMode;
     use rust_cli_kernel_api::store::{ArtifactRef, ArtifactStore};
-    use rust_cli_kernel_api::testing::{MemoryArtifacts, MemoryEnvironment, RecordingSink};
+    use rust_cli_kernel_api::testing::{
+        MemoryArtifacts, MemoryEnvironment, RecordingSink, local_services, machine,
+    };
     use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
     use serde_json::{Value, json};
     use tokio::sync::mpsc;
@@ -68,6 +71,7 @@ mod tools {
         call: &str,
     ) -> ToolUseContext {
         let session = SessionId::new("sess_1");
+        let env = env.clone();
         ToolUseContext {
             session: session.clone(),
             run: RunId::new("run_1"),
@@ -79,7 +83,8 @@ mod tools {
             },
             mode: PermissionMode::AcceptEdits,
             cancel: CancellationToken::new(),
-            env: env.clone(),
+            machine: machine(env.clone()),
+            local: local_services(env),
             artifacts: artifacts.clone(),
             interactions: Arc::new(RecordingSink::default()),
             operation: OperationContext {

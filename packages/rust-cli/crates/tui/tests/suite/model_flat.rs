@@ -107,7 +107,15 @@ async fn pick_second_team(
         record.lock().unwrap().0 = list_lines(&screen, title, "Fixture");
         ui.key(KeyCode::Up);
         ui.key(KeyCode::Enter);
-        ui.wait("the list to close", |s| !s.contains(title)).await;
+        // 等 footer 换成新模型（会话的 `ModelChanged` 到了）再重开：列表的 ✔ 取打开时视图里的选择，模型以内核为准
+        // （tui.md §4.1）。缺陷修复（工作线 F87）：以前列表一关就重开，事件还没到时 ✔ 仍在 scripted 上，偶发失败。
+        ui.wait("the session to switch the model", |s| {
+            !s.contains(title)
+                && s.lines()
+                    .last()
+                    .is_some_and(|footer| footer.contains("GLM-5.3"))
+        })
+        .await;
         // 再打开：✔ 只在团队 B（同一 provider 与模型的团队 A 不算当前）。
         ui.submit("/model");
         let screen = ui.wait_for(title).await;

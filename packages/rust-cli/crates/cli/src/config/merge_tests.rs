@@ -180,6 +180,44 @@ fn the_update_check_switch_is_taken_from_the_last_layer_with_a_boolean() {
     assert!(warnings.is_empty());
 }
 
+/// 提问框的空闲超时（tools-more.md §1.1，工作线 F72）：顶层 `askUserQuestionTimeout` 按键覆盖，只认四个值，缺省不计时。
+#[test]
+fn the_question_timeout_is_taken_from_the_last_layer_with_a_known_value() {
+    let user = object(json!({"askUserQuestionTimeout": "5m"}));
+    let projects = [
+        object(json!({"askUserQuestionTimeout": "60s"})),
+        object(json!({"askUserQuestionTimeout": "30s"})),
+    ];
+    let mut warnings = Vec::new();
+    assert_eq!(
+        question_timeout(&layers(&user, &projects), &mut warnings),
+        Some(60_000)
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("askUserQuestionTimeout"),
+        "{warnings:?}"
+    );
+    let mut warnings = Vec::new();
+    assert_eq!(
+        question_timeout(&layers(&user, &[]), &mut warnings),
+        Some(300_000)
+    );
+    let never = [object(json!({"askUserQuestionTimeout": "never"}))];
+    assert_eq!(
+        question_timeout(&layers(&user, &never), &mut warnings),
+        None
+    );
+    let ten = object(json!({"askUserQuestionTimeout": "10m"}));
+    assert_eq!(
+        question_timeout(&layers(&ten, &[]), &mut warnings),
+        Some(600_000)
+    );
+    let empty = object(json!({}));
+    assert_eq!(question_timeout(&layers(&empty, &[]), &mut warnings), None);
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
 /// 停用的服务器与来源文件（`/mcp enable/disable`，tui-manage.md §6.1）。
 #[test]
 fn disabled_servers_and_origins_follow_the_shadowing() {

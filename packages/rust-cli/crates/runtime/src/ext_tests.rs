@@ -12,8 +12,8 @@ use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent,
 };
 use rust_cli_kernel_api::testing::{
-    FixedClock, MemoryEnvironment, MemoryStore, ScriptedModel, SequentialIds, selection,
-    text_response,
+    FixedClock, MemoryEnvironment, MemoryStore, ScriptedModel, SequentialIds, environments,
+    selection, text_response,
 };
 use serde_json::json;
 
@@ -82,7 +82,7 @@ async fn plugin_agents_reach_the_agent_listing() {
     let kernel = LocalKernel::with_extensions(
         Ports {
             model,
-            env: Arc::new(env),
+            environments: environments(Arc::new(env)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(1_000)),
@@ -100,7 +100,6 @@ async fn plugin_agents_reach_the_agent_listing() {
         CompactConfig::default(),
         Arc::new(MemoryTaskLists::default()),
         Extensions {
-            mcp: Arc::new(rust_cli_kernel_api::mcp::NoMcpTransport),
             config: ExtConfig {
                 plugin_dirs: vec![EnvPath::new(KIT)],
                 workspace: Some(workspace()),
@@ -109,6 +108,7 @@ async fn plugin_agents_reach_the_agent_listing() {
             cron_store: None,
             peers: rust_cli_session::PeerDeps::off(),
             streaming_input: false,
+            monitor: false,
         },
     );
     kernel.start_extensions().await;

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
-use rust_cli_kernel_api::testing::{MemoryEnvironment, text_response};
+use rust_cli_kernel_api::testing::{MemoryEnvironment, environments, text_response};
 
 use super::support::{GatedModel, Setup, Ui, with_ui};
 
@@ -105,7 +105,7 @@ async fn the_skills_page_scrolls() {
         );
     }
     let setup = Setup {
-        env: Arc::new(env),
+        environments: environments(Arc::new(env)),
         ..short()
     };
     with_ui(

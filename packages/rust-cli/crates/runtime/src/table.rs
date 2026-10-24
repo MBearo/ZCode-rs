@@ -215,7 +215,8 @@ impl LocalKernel {
             ids: self.ports.ids.clone(),
             runner: self.runner.clone(),
             compactor: self.compactor.clone(),
-            env: self.ports.env.clone(),
+            machine: self.machine.clone(),
+            local: self.local.clone(),
             max_turns: self.defaults.max_turns,
             agents: self.agents.clone(),
             cron: self.cron.clone(),
@@ -232,6 +233,7 @@ impl LocalKernel {
             released: self.closer.clone(),
             directory_rules: self.usage.context.clone(),
             peers: self.peers.clone(),
+            detached: Some(self.detached.clone()),
         };
         let session = Arc::new(Session::spawn(deps, state, opened));
         tracing::info!(event = "session.open", session = %id, opened = ?opened, "session opened");

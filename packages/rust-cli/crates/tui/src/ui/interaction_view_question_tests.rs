@@ -64,6 +64,7 @@ fn a_chosen_single_option_is_green_with_a_tick() {
         strings: &EN,
         lang: Lang::En,
         width: 60,
+        height: 40,
         now_ms: 0,
     };
     let request = two_questions();
@@ -112,6 +113,7 @@ fn the_review_page_has_green_answers_and_plain_choices() {
         strings: &EN,
         lang: Lang::En,
         width: 60,
+        height: 40,
         now_ms: 0,
     };
     let request = two_questions();
@@ -150,6 +152,7 @@ fn the_cursor_follows_the_other_row_and_stays_on_screen() {
         strings: &ZH,
         lang: Lang::Zh,
         width: 30,
+        height: 40,
         now_ms: 0,
     };
     let ui = pressed(&request, &[KeyCode::Char('3')]);

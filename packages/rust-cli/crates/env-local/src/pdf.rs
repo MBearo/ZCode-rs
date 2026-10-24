@@ -1,4 +1,4 @@
-//! PDF 的页数与取页（`Environment::pdf_page_count` / `render_pdf_pages`；docs/specs/rust-cli/tools-files.md §1.5，
+//! PDF 的页数与取页（`Pdf::pdf_page_count` / `render_pdf_pages`；docs/specs/rust-cli/tools-files.md §1.5，
 //! 修复线 F24）。
 //!
 //! 外部程序是 poppler-utils 的 `pdfinfo` 与 `pdftoppm`（命令见 tools-files.md §1.5）：文件内容经 stdin 交给它们
@@ -276,7 +276,3 @@ impl Poppler {
         rendered
     }
 }
-
-#[cfg(test)]
-#[path = "pdf_tests.rs"]
-mod tests;

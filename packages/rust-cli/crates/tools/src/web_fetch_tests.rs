@@ -55,7 +55,7 @@ fn setup(pages: Vec<(&str, FetchedUrl)>, replies: &[&str]) -> Run {
 
 async fn call(run: &Run, input: Value) -> Result<String, ToolError> {
     let mut context = Ctx::new(Arc::new(ScriptedInteractions::default()));
-    context.env = run.env.clone();
+    context.set_env(run.env.clone());
     let (progress, _) = mpsc::channel(1);
     run.tool
         .call(input, context.build(), progress)

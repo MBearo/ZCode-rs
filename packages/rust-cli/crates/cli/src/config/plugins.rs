@@ -122,8 +122,9 @@ pub(crate) fn resolve_dir(root: &str, dir: &str) -> String {
         .into_owned()
 }
 
-/// 插件候选（ext.md §4.1 的来源 2–4，按 Node `resolveCandidates` 的顺序）。本机的插件目录与执行环境
-/// 是同一个文件系统，路径直接用作 `EnvPath`。
+/// 插件候选（ext.md §4.1 的来源 2–4，按 Node `resolveCandidates` 的顺序）。插件目录在本机存储里，路径直接用作
+/// `EnvPath`：ext 经本机的 `Files` 读它们（runtime 从注册表的 `local_machine()` 取，不跟着工具调用的机器走，
+/// remote-exec.md §3、§15.8.1）。
 pub(crate) async fn sources(
     section: PluginSection,
     root: &str,

@@ -9,7 +9,7 @@ use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::store::SessionFilter;
 use rust_cli_kernel_api::testing::{
     FixedClock, MemoryStore, NoticeEnvironment, ScriptedModel, SequentialIds, UnusedEnvironment,
-    selection, shell_notice, text_response, tool_use_response,
+    environments, selection, shell_notice, text_response, tool_use_response,
 };
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 use tokio_util::sync::CancellationToken;
@@ -21,7 +21,7 @@ fn kernel(model: ScriptedModel) -> Arc<dyn Kernel> {
     Arc::new(LocalKernel::new(
         Ports {
             model: Arc::new(model),
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(0)),
@@ -103,7 +103,7 @@ async fn max_turns_writes_the_error_line() {
                 "Read",
                 &serde_json::json!({"file_path": "a"}),
             )])),
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(0)),
@@ -141,7 +141,7 @@ async fn print_mode_waits_for_background_commands_and_their_notices() {
                 text_response(&["started"]),
                 text_response(&["b1 is done"]),
             ])),
-            env: env.clone(),
+            environments: environments(env.clone()),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(0)),
@@ -178,7 +178,7 @@ async fn print_mode_answers_permission_asks_as_unavailable() {
     let kernel = Arc::new(LocalKernel::new(
         Ports {
             model: model.clone(),
-            env: Arc::new(UnusedEnvironment),
+            environments: environments(Arc::new(UnusedEnvironment)),
             store: store.clone(),
             artifacts: store,
             clock: Arc::new(FixedClock(0)),
@@ -472,7 +472,7 @@ async fn a_stop_signal_interrupts_the_turn_and_prints_nothing() {
         let kernel = Arc::new(LocalKernel::new(
             Ports {
                 model: Arc::new(Stalled(requested.clone())),
-                env: Arc::new(UnusedEnvironment),
+                environments: environments(Arc::new(UnusedEnvironment)),
                 store: store.clone(),
                 artifacts: store.clone(),
                 clock: Arc::new(FixedClock(0)),

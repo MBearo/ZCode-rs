@@ -175,7 +175,3 @@ pub(crate) fn apply(files: &[RestoreFile]) -> RewindStatus {
     }
     RewindStatus::Failed { message, conflicts }
 }
-
-#[cfg(test)]
-#[path = "rewind_tests.rs"]
-mod tests;

@@ -188,7 +188,8 @@ impl App {
                 self.new_activity = false;
                 None
             }
-            KeyCode::BackTab => return Some(Action::SetMode(next_mode(self.view.mode()))),
+            // 循环到完全访问时先弹确认框（tui.md §7.8，工作线 F87）。
+            KeyCode::BackTab => return self.switch_mode(next_mode(self.view.mode()), false),
             KeyCode::Char('?') if area.is_empty() => {
                 self.overlay = Some(Overlay::Shortcuts);
                 return None;

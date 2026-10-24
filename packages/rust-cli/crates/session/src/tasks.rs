@@ -54,7 +54,7 @@ async fn running_shells(
     tail: bool,
 ) -> Vec<BackgroundEntry> {
     let mut entries = Vec::new();
-    let Ok(state) = deps.env.shell_state(workspace, session).await else {
+    let Ok(state) = deps.machine.shell().shell_state(workspace, session).await else {
         return entries;
     };
     for task in state.background {
@@ -62,7 +62,7 @@ async fn running_shells(
             session: session.clone(),
             task: task.clone(),
         };
-        let Ok(Some(info)) = deps.env.background_command(key).await else {
+        let Ok(Some(info)) = deps.machine.background().background_command(key).await else {
             continue;
         };
         if info.status != BackgroundStatus::Running {
@@ -107,14 +107,22 @@ pub(crate) async fn shell_detail(
         task: rust_cli_kernel_api::ids::ShellTaskId::new(task),
     };
     let info = deps
-        .env
+        .machine
+        .background()
         .background_command(key.clone())
         .await
         .ok()
         .flatten()?;
-    let elapsed_ms = deps.env.background_elapsed(key).await.ok().flatten();
+    let elapsed_ms = deps
+        .machine
+        .background()
+        .background_elapsed(key)
+        .await
+        .ok()
+        .flatten();
     let outputs = deps
-        .env
+        .machine
+        .shell()
         .shell_state(workspace, session)
         .await
         .ok()
@@ -144,7 +152,7 @@ async fn output_preview(
         max_lines: None,
         max_bytes: Some(OUTPUT_MAX_BYTES),
     };
-    match deps.env.read_text(workspace, request).await {
+    match deps.machine.files().read_text(workspace, request).await {
         Ok(TextRead::Text(slice)) => {
             let lines: Vec<&str> = slice.content.lines().collect();
             let tail = &lines[lines.len().saturating_sub(SHELL_DETAIL_LINES)..];
@@ -173,7 +181,13 @@ async fn output_tail(
         max_lines: None,
         max_bytes: Some(OUTPUT_MAX_BYTES),
     };
-    let TextRead::Text(slice) = deps.env.read_text(workspace, request).await.ok()? else {
+    let TextRead::Text(slice) = deps
+        .machine
+        .files()
+        .read_text(workspace, request)
+        .await
+        .ok()?
+    else {
         return None;
     };
     let lines: Vec<&str> = slice.content.lines().collect();

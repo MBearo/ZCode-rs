@@ -1,7 +1,8 @@
 //! 请求方案表（docs/specs/rust-cli/model.md §3.2，修复线 F23，用户决定 A6）。
 //!
-//! 本工程自己的一张小表，只管 Node 配置里没有的请求形状项：system 形状、一方专有项、流空闲的字节级缺省上限与
-//! WebSearch 服务端工具的版本。能力（是否有 WebSearch、对话中间的 system、媒体）只看生效配置（§11），不在这里。
+//! 本工程自己的一张小表，只管 Node 配置里没有的请求形状项：system 形状、一方专有项与流空闲的字节级缺省上限。能力（是否
+//! 有 WebSearch、对话中间的 system、媒体）只看生效配置（§11），不在这里。WebSearch 服务端工具的版本 F93 起一律是 Node 的
+//! `web_search_20260209`（用户决定 2026-10-24，推翻 F23 给官方地址用 `web_search_20250305`），不再在表里。
 //! 写法同 Node 的 providerSiteRules：协议、baseUrl 正则（匹配规范化后的完整 URL，`^(?:…)$`）、模型 ID 正则（不区分
 //! 大小写），按顺序取第一个命中。最后两条按协议兜底，所以总有一条命中。
 
@@ -21,17 +22,6 @@ pub(crate) enum SystemShape {
     FirstParty,
     /// 不走全局缓存时的缺省分段：身份句 `ephemeral`，其余合成一段 `ephemeral`，不带 `scope`。
     ThirdParty,
-}
-
-/// WebSearch 服务端工具的版本。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WebSearchTool {
-    /// `web_search_20250305`。
-    V20250305,
-    /// Node（`@ai-sdk/anthropic` 3.0.81 的 `webSearch_20260209`）：`web_search_20260209`。
-    V20260209,
-    /// OpenAI 两种协议：不支持。
-    Unsupported,
 }
 
 /// 方案命中的端点。
@@ -58,7 +48,6 @@ pub(crate) struct Profile {
     pub(crate) first_party_extras: bool,
     /// 字节级看门狗的缺省上限（官方 Anthropic 端点 180 s，其他 300 s）。
     pub(crate) byte_idle: Duration,
-    pub(crate) web_search: WebSearchTool,
 }
 
 const OFFICIAL_IDLE: Duration = Duration::from_secs(180);
@@ -71,7 +60,6 @@ const fn official(
     endpoint: Endpoint,
     model: &'static str,
     byte_idle: Duration,
-    web_search: WebSearchTool,
 ) -> Profile {
     Profile {
         name,
@@ -81,12 +69,11 @@ const fn official(
         system: SystemShape::FirstParty,
         first_party_extras: true,
         byte_idle,
-        web_search,
     }
 }
 
 /// 不发一方专有项的方案（其他 Anthropic 兼容与 OpenAI 两种）。
-const fn other(name: &'static str, protocol: WireProtocol, web_search: WebSearchTool) -> Profile {
+const fn other(name: &'static str, protocol: WireProtocol) -> Profile {
     Profile {
         name,
         protocol,
@@ -95,7 +82,6 @@ const fn other(name: &'static str, protocol: WireProtocol, web_search: WebSearch
         system: SystemShape::ThirdParty,
         first_party_extras: false,
         byte_idle: OTHER_IDLE,
-        web_search,
     }
 }
 
@@ -109,37 +95,17 @@ pub(crate) static PROFILES: [Profile; 6] = [
         Endpoint::Pattern(r"https://api\.anthropic\.com(?:/v1)?"),
         ".*claude-.*",
         OFFICIAL_IDLE,
-        WebSearchTool::V20250305,
     ),
-    official(
-        "zhipu-official",
-        Endpoint::Zhipu,
-        ".*glm.*",
-        OTHER_IDLE,
-        WebSearchTool::V20260209,
-    ),
+    official("zhipu-official", Endpoint::Zhipu, ".*glm.*", OTHER_IDLE),
     official(
         "deepseek-official",
         Endpoint::Pattern(r"https://api\.deepseek\.com/anthropic"),
         ".*deepseek.*",
         OTHER_IDLE,
-        WebSearchTool::V20260209,
     ),
-    other(
-        "anthropic-compatible",
-        WireProtocol::AnthropicMessages,
-        WebSearchTool::V20260209,
-    ),
-    other(
-        "openai-chat",
-        WireProtocol::OpenAiChatCompletions,
-        WebSearchTool::Unsupported,
-    ),
-    other(
-        "openai-responses",
-        WireProtocol::OpenAiResponses,
-        WebSearchTool::Unsupported,
-    ),
+    other("anthropic-compatible", WireProtocol::AnthropicMessages),
+    other("openai-chat", WireProtocol::OpenAiChatCompletions),
+    other("openai-responses", WireProtocol::OpenAiResponses),
 ];
 
 /// 每个方案编译好的两个正则（与 [`PROFILES`] 同序）。

@@ -195,3 +195,84 @@ fn sel(provider: &str, model: &str) -> rust_cli_kernel_api::model::ModelSelectio
         connection: None,
     }
 }
+
+/// 工作线 F90（tools-more.md §5 的“是否提供”）：GLM-5.3-Flash 在账号 provider 上的生效配置与 Node 的规则解析
+/// （`packages/provider` 的 `ModelConfigRules.resolve`，同一份内置配置）相同——bigmodel / z.ai 的团队版与个人版、
+/// start plan 有原生 WebSearch，off-peak 没有；输出上限 128000，推理档位 low / high / max。期望值取自 Node 的解析。
+#[test]
+fn glm_5_3_flash_follows_the_node_rules() {
+    let resolved = resolve(&builtin(), &json!({}), None);
+    let effective = |provider_id: &str| {
+        let provider = resolved
+            .providers
+            .iter()
+            .find(|provider| provider.provider_id == provider_id)
+            .unwrap_or_else(|| panic!("{provider_id}"));
+        provider
+            .models
+            .iter()
+            .find(|model| model.model_id == "GLM-5.3-Flash")
+            .unwrap_or_else(|| panic!("{provider_id}"))
+            .effective_config
+            .clone()
+    };
+    for (provider_id, web_search) in [
+        ("account:bigmodel-team-coding-plan", true),
+        ("account:bigmodel-individual-coding-plan", true),
+        ("account:zai-team-coding-plan", true),
+        ("account:zai-individual-coding-plan", true),
+        ("account:zai-start-plan", true),
+        ("account:zai-offpeak-idle-plan", false),
+    ] {
+        let config = effective(provider_id);
+        let capabilities = crate::providers::catalog::capabilities(&config);
+        assert_eq!(
+            capabilities.supports_native_web_search, web_search,
+            "{provider_id}"
+        );
+        let specs = &config["optionSpecs"];
+        assert_eq!(specs["maxOutputTokens"]["max"], 128_000, "{provider_id}");
+        // 工作线 F93：能力里的输出上限就是这个字段（WebSearch 旁路请求的 `min(4096, 输出上限)`）。
+        assert_eq!(
+            capabilities.max_output_tokens,
+            Some(128_000),
+            "{provider_id}"
+        );
+        assert_eq!(
+            specs["reasoningLevel"]["values"],
+            json!(["low", "high", "max"]),
+            "{provider_id}"
+        );
+    }
+}
+
+/// 工作线 F93（docs/specs/rust-cli/model.md §11）：显式覆盖的内置规则给出的能力带配置的输出上限，与压缩的上限同值；
+/// 配置的上限低于 4096 的模型（glm-4v-flash）照样给出。
+#[test]
+fn the_capabilities_carry_the_configured_output_limit() {
+    let rules = SiteRules::new(&builtin());
+    let anthropic = WireProtocol::AnthropicMessages;
+    for (base_url, model) in [
+        ("https://api.anthropic.com/v1", "claude-opus-5-5"),
+        ("https://open.bigmodel.cn/api/anthropic", "glm-4v-flash"),
+        ("https://open.bigmodel.cn/api/anthropic", "glm-5.3"),
+    ] {
+        let capabilities = rules.capabilities(anthropic, base_url, model);
+        let limits = rules.limits(anthropic, base_url, model).unwrap();
+        assert!(capabilities.max_output_tokens.is_some(), "{model}");
+        assert_eq!(
+            capabilities.max_output_tokens, limits.max_output_tokens,
+            "{model}"
+        );
+    }
+    assert_eq!(
+        rules
+            .capabilities(
+                anthropic,
+                "https://open.bigmodel.cn/api/anthropic",
+                "glm-4v-flash"
+            )
+            .max_output_tokens,
+        Some(1024)
+    );
+}

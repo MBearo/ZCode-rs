@@ -90,7 +90,3 @@ impl Shells {
         Ok(result)
     }
 }
-
-#[cfg(test)]
-#[path = "../shell_stop_tests.rs"]
-mod tests;

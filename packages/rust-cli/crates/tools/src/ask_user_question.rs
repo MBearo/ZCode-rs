@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::orchestration::{InteractionRequest, QuestionAnswer};
+use rust_cli_kernel_api::orchestration::{InteractionRequest, QuestionAnnotation, QuestionAnswer};
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
@@ -153,8 +153,11 @@ fn join(items: &[String]) -> String {
         .join(SEPARATOR)
 }
 
-/// 这道题的答案是否完全落在选项里（结果文本二选一的判断）。
-fn within_options(question: &Value, answer: Option<&String>) -> bool {
+/// 这道题的答案是否完全落在选项里（结果文本二选一的判断）；有备注的题不算。
+fn within_options(question: &Value, answer: Option<&String>, notes: bool) -> bool {
+    if notes {
+        return false;
+    }
     let Some(answer) = answer.filter(|answer| !answer.is_empty() && *answer != NOTES_ONLY) else {
         return true;
     };
@@ -172,27 +175,88 @@ fn within_options(question: &Value, answer: Option<&String>) -> bool {
     })
 }
 
-/// 结果文本（没有 annotations / response / followUp 的路径）。
-pub(crate) fn result_text(input: &Value, answers: &BTreeMap<String, String>) -> String {
+/// 用户的回答（`QuestionAnswer::Answered` 的各项，docs/specs/rust-cli/tools-more.md §1.1）。
+pub(crate) struct Answers<'a> {
+    pub answers: &'a BTreeMap<String, String>,
+    pub annotations: &'a BTreeMap<String, QuestionAnnotation>,
+    pub response: Option<&'a str>,
+    pub follow_up: bool,
+    pub afk_timeout_ms: Option<u64>,
+}
+
+/// 一道题在结果里的写法：有答案或备注时 `"<问题>"="<答案>"`（没有答案时 `=(no option selected)`），后接预览与备注。
+fn described(question: &Value, given: &Answers<'_>) -> Option<String> {
+    let text = question_text(question);
+    let answer = given
+        .answers
+        .get(text)
+        .filter(|answer| !answer.is_empty() && *answer != NOTES_ONLY);
+    let annotation = given.annotations.get(text);
+    let notes = annotation
+        .and_then(|annotation| annotation.notes.as_deref())
+        .filter(|notes| !notes.is_empty());
+    if answer.is_none() && notes.is_none() {
+        return None;
+    }
+    let mut parts = vec![match answer {
+        Some(answer) => format!("\"{text}\"=\"{answer}\""),
+        None => format!("\"{text}\"=(no option selected)"),
+    }];
+    if let Some(preview) = annotation
+        .and_then(|annotation| annotation.preview.as_deref())
+        .filter(|preview| !preview.is_empty())
+    {
+        parts.push(format!("selected preview:\n{preview}"));
+    }
+    if let Some(notes) = notes {
+        parts.push(format!("notes: {notes}"));
+    }
+    Some(parts.join(" "))
+}
+
+/// 结果文本：空闲超时、再多问几个、直接回复、逐题的答案，都没有时“没有回答”（修复线 F72 以前只有后两种）。
+pub(crate) fn result_text(input: &Value, given: &Answers<'_>) -> String {
     let questions = questions(input);
     let joined: Vec<String> = questions
         .iter()
-        .filter_map(|question| {
-            let text = question_text(question);
-            answers
-                .get(text)
-                .filter(|answer| !answer.is_empty() && *answer != NOTES_ONLY)
-                .map(|answer| format!("\"{text}\"=\"{answer}\""))
-        })
+        .filter_map(|question| described(question, given))
         .collect();
-    if joined.is_empty() {
-        return texts::NO_ANSWER.to_owned();
+    let joined = (!joined.is_empty()).then(|| joined.join(", "));
+    let response = given
+        .response
+        .filter(|response| !response.trim().is_empty());
+    if let Some(timeout) = given.afk_timeout_ms.filter(|timeout| *timeout > 0) {
+        return match &joined {
+            Some(joined) => texts::idle_selected(timeout, joined),
+            None => texts::idle_timeout(timeout),
+        };
     }
-    let joined = joined.join(", ");
-    if questions
-        .iter()
-        .all(|question| within_options(question, answers.get(question_text(question))))
-    {
+    if given.follow_up {
+        let also = response.map_or_else(String::new, |response| {
+            format!(" They also wrote: \"{response}\".")
+        });
+        return texts::more_questions(joined.as_deref(), &also);
+    }
+    if let Some(response) = response {
+        return texts::user_responded(response);
+    }
+    let Some(joined) = joined else {
+        return texts::NO_ANSWER.to_owned();
+    };
+    let has_notes = |question: &Value| {
+        given
+            .annotations
+            .get(question_text(question))
+            .and_then(|annotation| annotation.notes.as_deref())
+            .is_some_and(|notes| !notes.is_empty())
+    };
+    if questions.iter().all(|question| {
+        within_options(
+            question,
+            given.answers.get(question_text(question)),
+            has_notes(question),
+        )
+    }) {
         texts::questions_answered(&joined)
     } else {
         texts::user_answered(&joined)
@@ -259,7 +323,22 @@ impl Tool for AskUserQuestionTool {
             return Err(ToolError::Cancelled);
         };
         Ok(match answer {
-            Some(QuestionAnswer::Answered { answers }) => text(result_text(&input, &answers)),
+            Some(QuestionAnswer::Answered {
+                answers,
+                annotations,
+                response,
+                follow_up,
+                afk_timeout_ms,
+            }) => text(result_text(
+                &input,
+                &Answers {
+                    answers: &answers,
+                    annotations: &annotations,
+                    response: response.as_deref(),
+                    follow_up,
+                    afk_timeout_ms,
+                },
+            )),
             // esc 或交互没有回答：按权限对话框的拒绝处理。
             Some(QuestionAnswer::Declined) | None => rejected(REJECT_MESSAGE.to_owned()),
         })

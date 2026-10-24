@@ -21,6 +21,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "macros"] }
 tokio-util.workspace = true
+# 阻塞线错误文字里的失败原因按显示宽度截断（compact.md §2.2）。
+unicode-width.workspace = true
 
 [dev-dependencies]
 rust-cli-kernel-api = { workspace = true, features = ["testing"] }

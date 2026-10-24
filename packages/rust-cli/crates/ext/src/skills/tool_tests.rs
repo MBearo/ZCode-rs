@@ -31,7 +31,7 @@ fn env() -> Arc<MemoryEnvironment> {
 }
 
 fn tool(env: Arc<MemoryEnvironment>) -> SkillTool {
-    let catalog = Arc::new(SkillCatalog::new(env));
+    let catalog = Arc::new(SkillCatalog::new(env.clone(), env));
     let ids: Arc<dyn Ids> = Arc::new(SequentialIds::default());
     let bash = Arc::new(EchoBash::default());
     SkillTool::new(

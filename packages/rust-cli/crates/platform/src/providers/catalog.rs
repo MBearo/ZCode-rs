@@ -153,13 +153,9 @@ impl Snapshot {
 }
 
 /// 生效配置 `properties` 里的能力（Node 的字段名，docs/specs/rust-cli/model.md §11）。可执行的模型属性齐全
-/// （`model_complete`）；缺的布尔按假、窗口按 0（与原来逐项读取相同）。`supports_tool_search` 不是配置字段，按端点的
-/// 协议与地址算（工作线 F52，[`super::tool_search::endpoint`]）。
-pub(crate) fn capabilities(
-    effective: &Value,
-    protocol: WireProtocol,
-    base_url: &str,
-) -> ModelCapabilities {
+/// （`model_complete`）；缺的布尔按假、窗口按 0（与原来逐项读取相同）。`supports_tool_search` 不是配置字段：工作线 F89
+/// 起总为假（docs/specs/rust-cli/tools-more.md §3.2.2：所有端点都用本地 ToolSearch，暂时不用原生）。
+pub(crate) fn capabilities(effective: &Value) -> ModelCapabilities {
     let properties = &effective["properties"];
     let input = &properties["inputFormat"];
     ModelCapabilities {
@@ -173,7 +169,11 @@ pub(crate) fn capabilities(
         supports_pdf: input["supportsPdf"] == true,
         supports_video: input["supportsVideo"] == true,
         supports_audio: input["supportsAudio"] == true,
-        supports_tool_search: super::tool_search::endpoint(protocol, base_url),
+        // 修改（工作线 F89，用户决定：暂时不用服务器原生的 ToolSearch，含 z.ai / bigmodel）：以前按端点算（F52：协议是
+        // anthropic-messages 且 `rule_url::is_zhipu_endpoint`），这些端点用原生。恢复原生时在这里按端点重新算。
+        supports_tool_search: false,
+        // 工作线 F93：输出上限与模板的 `max_output_tokens`、压缩的 `TokenLimits` 读同一个字段（docs/specs/rust-cli/model.md §11）。
+        max_output_tokens: effective["optionSpecs"]["maxOutputTokens"]["max"].as_u64(),
     }
 }
 
@@ -238,7 +238,7 @@ pub(crate) fn snapshot(
                 reasoning_map: text(&specs["reasoningLevel"], "map").to_owned(),
                 max_map: text(&specs["maxOutputTokens"], "map").to_owned(),
                 max_output_tokens: specs["maxOutputTokens"]["max"].as_u64().unwrap_or(0),
-                capabilities: capabilities(effective, protocol, base_url),
+                capabilities: capabilities(effective),
                 hidden: provider.hidden,
                 provider_name: provider
                     .provider_name
@@ -312,3 +312,7 @@ fn default_selection(templates: &[Template], configured: &Value) -> Option<Model
 #[cfg(test)]
 #[path = "catalog_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tool_search_tests.rs"]
+mod tool_search_tests;

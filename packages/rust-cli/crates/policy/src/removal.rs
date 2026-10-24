@@ -91,7 +91,7 @@ fn patterns() -> Option<&'static Patterns> {
 }
 
 /// 去掉执行别的命令的包装（`command`、`time`、`nohup`、`timeout N`、`nice`、`stdbuf`、`env`），得到真正执行的命令。
-fn strip_runners(argv: &[String]) -> &[String] {
+pub(crate) fn strip_runners(argv: &[String]) -> &[String] {
     let mut words = strip_wrappers(argv);
     loop {
         let name = words.first().map(|word| basename(word));
@@ -159,7 +159,7 @@ fn strip_runners(argv: &[String]) -> &[String] {
     }
 }
 
-fn basename(word: &str) -> &str {
+pub(crate) fn basename(word: &str) -> &str {
     word.rsplit(['/', '\\']).next().unwrap_or(word)
 }
 
@@ -495,7 +495,7 @@ fn may_be_unset(name: &str) -> bool {
 }
 
 /// `$HOME` 开头（单独或在双引号里，不带花括号）时后面的部分；后面还有展开或引号时为 None。
-fn bare_home(raw: &str) -> Option<&str> {
+pub(crate) fn bare_home(raw: &str) -> Option<&str> {
     let quoted = raw
         .strip_prefix('"')
         .and_then(|inner| inner.strip_suffix('"'))

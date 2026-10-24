@@ -121,7 +121,7 @@ fn context() -> ToolUseContext {
     .with_file("/Users/dev/work/big.zip", &"z".repeat(300_000))
     .with_file("/Users/dev/work/big.txt", &"x".repeat(300_000));
     let mut ctx = Ctx::new(Arc::new(ScriptedInteractions::new([])));
-    ctx.env = Arc::new(environment);
+    ctx.set_env(Arc::new(environment));
     ctx.build()
 }
 

@@ -29,9 +29,13 @@ fn facts() -> EnvFacts {
 async fn instructions(env: MemoryEnvironment) -> Option<String> {
     let mut config = ContextConfig::new(Surface::Print);
     config.memory_dir = Some(format!("{MEMORY}/"));
+    let env = Arc::new(env);
     let context = PromptAssembler::new(
         ContextPorts {
-            env: Arc::new(env),
+            info: env.clone(),
+            files: env.clone(),
+            shell: env.clone(),
+            git: env,
             clock: Arc::new(FixedClock(1_792_224_000_000)),
             ids: Arc::new(SequentialIds::default()),
             listings: Arc::new(NoListings),

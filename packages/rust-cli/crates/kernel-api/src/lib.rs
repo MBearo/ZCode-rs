@@ -12,7 +12,10 @@
 //! | [`message`] | 会话消息与内容块 |
 //! | [`metering`] | 用量的计量事实（模型请求、工具调用、回合）与 `/usage` 的查询 |
 //! | [`model`] | 模型端口，canonical 请求是 Anthropic Messages |
-//! | [`env`] | 执行环境端口（工作区文件、进程、环境事实） |
+//! | [`env`] | 执行环境的公共类型（路径、工作区、操作上下文、终态、文件读写、错误） |
+//! | [`machine`] | 一台机器上的执行端口（环境事实、文件、搜索、命令、shell、后台命令、回退、PDF）与 `MachineEnv` |
+//! | [`local_services`] | 只在本机的服务（Git 与 worktree、取网页）与 `LocalServices` |
+//! | [`env_registry`] | 执行环境的注册表（机器名 → `MachineEnv`，本机的 `LocalServices`） |
 //! | [`env_shell`] | shell 执行的 DTO（shell 选择、cwd 延续、sandbox、后台通知） |
 //! | [`env_command`] | 执行环境里跑命令的 DTO（`env` 重新导出） |
 //! | [`env_files`] | 执行环境端口里文件与搜索操作的 DTO |
@@ -27,6 +30,8 @@
 //! | [`listing`] | 上下文清单（延迟工具、agent、skill、MCP instructions）的来源 |
 //! | [`mcp`] | MCP 的传输端口与工具来源 |
 //! | [`mcp_state`] | MCP 连接状态的视图与等待（连接中的服务器，F36） |
+//! | [`monitor`] | Monitor 交给会话 actor 的登记（F83） |
+//! | [`monitor_watch`] | 一个 monitor 的切行、批与限流（纯状态，会话 actor 与 agents 共用，F83） |
 //! | [`store`] | 会话存储与 Artifact 端口 |
 //! | [`permission`] | 权限模式、规则与判定 |
 //! | [`peers`] | 本机跨会话通信的端口、地址、ref 与信封（docs/specs/rust-cli/cross-session.md） |
@@ -62,6 +67,7 @@ pub mod env_files;
 pub mod env_git;
 pub mod env_path;
 pub mod env_pdf;
+pub mod env_registry;
 pub mod env_rewind;
 pub mod env_shell;
 pub mod env_web;
@@ -73,12 +79,16 @@ pub mod ids;
 pub mod image;
 pub mod interaction;
 pub mod listing;
+pub mod local_services;
+pub mod machine;
 pub mod manage;
 pub mod mcp;
 pub mod mcp_state;
 pub mod message;
 pub mod metering;
 pub mod model;
+pub mod monitor;
+pub mod monitor_watch;
 pub mod orchestration;
 pub mod panels;
 pub mod peers;

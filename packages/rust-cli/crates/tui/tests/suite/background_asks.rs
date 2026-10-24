@@ -226,3 +226,85 @@ async fn chinese_names_the_agent_in_the_title() {
     })
     .await;
 }
+
+/// 等子代理发出第 `count` 个请求（它的通知留在旧会话，画面上没有可等的文字）。
+async fn child_requests(model: &Routed, count: usize) {
+    let wait = async {
+        while model.child_requests().len() < count {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    };
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(10), wait).await;
+    assert!(
+        waited.is_ok(),
+        "timed out waiting for the subagent's next request"
+    );
+}
+
+/// `/clear` 之后旧会话的后台子代理照样询问（agents.md §4.1.2，工作线 F72）：对话框标出会话与子代理，允许后子代理
+/// 执行。修复前父会话关闭后询问发不出去，子代理按拒绝处理。
+#[tokio::test(flavor = "multi_thread")]
+async fn a_background_agent_of_a_cleared_session_still_asks() {
+    let model = background_model();
+    let script = model.clone();
+    let wide = Setup {
+        width: 120,
+        ..Setup::default()
+    };
+    with_ui(model.clone(), wide, |mut ui| async move {
+        ui.submit("make the file in the background");
+        ui.wait("the main turn to end", |s| {
+            s.contains("Launched.") && !s.contains("esc to interrupt")
+        })
+        .await;
+        ui.submit("/clear");
+        ui.wait("the cleared conversation", |s| !s.contains("Launched."))
+            .await;
+        script.release();
+        let screen = ui.wait_for("Bash command").await;
+        assert!(screen.contains("touch made-by-child.txt"), "{screen}");
+        assert!(
+            screen.lines().any(|l| l.contains(
+                "Bash command · from the general-purpose agent in session \"make the file in the background\""
+            )),
+            "{screen}"
+        );
+        ui.settle().await;
+        ui.key(KeyCode::Enter);
+        ui.wait("the dialog to close", |s| !s.contains("Bash command"))
+            .await;
+        child_requests(&script, 2).await;
+    })
+    .await;
+    let second = request_text(&model.child_requests()[1]);
+    assert!(second.contains("toolu_child_bash"), "{second}");
+    assert!(
+        !second.contains("Permission for this tool use was denied"),
+        "{second}"
+    );
+}
+
+/// 旧会话的询问按 esc：子代理拿到子代理的拒绝文字。
+#[tokio::test(flavor = "multi_thread")]
+async fn esc_on_an_ask_of_a_cleared_session_denies_it() {
+    let model = background_model();
+    let script = model.clone();
+    with_ui(model.clone(), Setup::default(), |mut ui| async move {
+        ui.submit("make the file in the background");
+        ui.wait("the main turn to end", |s| {
+            s.contains("Launched.") && !s.contains("esc to interrupt")
+        })
+        .await;
+        ui.submit("/clear");
+        ui.wait("the cleared conversation", |s| !s.contains("Launched."))
+            .await;
+        script.release();
+        ui.wait_for("Bash command").await;
+        ui.settle().await;
+        ui.key(KeyCode::Esc);
+        child_requests(&script, 2).await;
+    })
+    .await;
+    let second = request_text(&model.child_requests()[1]);
+    assert!(second.contains(SUBAGENT_DENIED), "{second}");
+}

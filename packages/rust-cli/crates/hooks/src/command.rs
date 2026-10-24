@@ -9,11 +9,12 @@ use std::collections::BTreeMap;
 
 use futures_util::StreamExt;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvPath, Environment, OperationContext, Origin, Outcome, OutputStream,
-    StartCommand, WorkspaceRef,
+    CommandEvent, EnvPath, OperationContext, Origin, Outcome, OutputStream, StartCommand,
+    WorkspaceRef,
 };
 use rust_cli_kernel_api::env_shell::{CwdScope, HookIo, ShellKind};
 use rust_cli_kernel_api::ids::{OperationId, ShellTaskId};
+use rust_cli_kernel_api::machine::Commands;
 use tokio_util::sync::CancellationToken;
 
 use rust_cli_base::names::vars;
@@ -141,7 +142,7 @@ fn hook_env(
 }
 
 pub(crate) struct CommandRun<'a> {
-    pub env: &'a dyn Environment,
+    pub commands: &'a dyn Commands,
     pub workspace: &'a WorkspaceRef,
     pub operation: OperationContext,
     pub hook: &'a CommandHook,
@@ -174,9 +175,10 @@ pub(crate) async fn run(run: CommandRun<'_>, cancel: CancellationToken) -> Raw {
         }),
         // hook 命令到了超时照旧结束（不转后台）。
         on_timeout: None,
+        socket: None,
     };
     if let Err(error) = run
-        .env
+        .commands
         .start_command(run.workspace, run.operation, request)
         .await
     {
@@ -186,7 +188,7 @@ pub(crate) async fn run(run: CommandRun<'_>, cancel: CancellationToken) -> Raw {
         // async：不等待，结果不回送（D6）。
         return Raw::Backgrounded;
     }
-    let mut events = run.env.watch_command(operation.clone(), 0);
+    let mut events = run.commands.watch_command(operation.clone(), 0);
     let mut captured = Captured::default();
     let mut cancel_sent = false;
     loop {
@@ -194,7 +196,7 @@ pub(crate) async fn run(run: CommandRun<'_>, cancel: CancellationToken) -> Raw {
             event = events.next() => event,
             () = cancel.cancelled(), if !cancel_sent => {
                 cancel_sent = true;
-                let _ = run.env.cancel(operation.clone()).await;
+                let _ = run.commands.cancel(operation.clone()).await;
                 continue;
             }
         };

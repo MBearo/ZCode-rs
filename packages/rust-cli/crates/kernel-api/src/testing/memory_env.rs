@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, Environment, FileContent, FileVersion,
-    OperationContext, Outcome, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext, Outcome,
+    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::env_files::{
     DirEntry, FileKind, FileList, FileStat, FileWritten, ListDir, ListFiles, PathFacts, PathStyle,
@@ -19,6 +19,8 @@ use crate::env_git::{GitStatus, GitStatusRequest};
 use crate::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
 use crate::env_shell::ShellState;
 use crate::ids::{OperationId, SessionId};
+use crate::local_services::{Fetch, Git};
+use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
 use crate::testing::lock;
 use crate::testing::memory_rewind::{self, Transactions};
 
@@ -128,11 +130,27 @@ impl MemoryEnvironment {
 }
 
 #[async_trait]
-impl Environment for MemoryEnvironment {
+impl EnvInfo for MemoryEnvironment {
     async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
         Ok(self.facts.clone())
     }
 
+    /// home 取自环境事实，路径风格按 platform（`win32` 为 Windows）。
+    async fn path_facts(&self, _workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
+        let style = if self.facts.platform == "win32" {
+            PathStyle::Windows
+        } else {
+            PathStyle::Posix
+        };
+        Ok(PathFacts {
+            home: self.facts.home.clone(),
+            style,
+        })
+    }
+}
+
+#[async_trait]
+impl Files for MemoryEnvironment {
     async fn read_file(
         &self,
         _workspace: &WorkspaceRef,
@@ -165,48 +183,6 @@ impl Environment for MemoryEnvironment {
         _request: WriteFile,
     ) -> Result<WriteReceipt, EnvError> {
         Err(unused())
-    }
-
-    async fn start_command(
-        &self,
-        _workspace: &WorkspaceRef,
-        _context: OperationContext,
-        _request: StartCommand,
-    ) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    fn watch_command(
-        &self,
-        _operation: OperationId,
-        _cursor: u64,
-    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        stream::iter([Err(unused())]).boxed()
-    }
-
-    async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
-        Err(unused())
-    }
-
-    async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {
-        Ok(())
-    }
-
-    /// home 取自环境事实，路径风格按 platform（`win32` 为 Windows）。
-    async fn path_facts(&self, _workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
-        let style = if self.facts.platform == "win32" {
-            PathStyle::Windows
-        } else {
-            PathStyle::Posix
-        };
-        Ok(PathFacts {
-            home: self.facts.home.clone(),
-            style,
-        })
     }
 
     async fn stat(
@@ -301,6 +277,18 @@ impl Environment for MemoryEnvironment {
         }))
     }
 
+    async fn put_file(
+        &self,
+        _workspace: &WorkspaceRef,
+        _context: OperationContext,
+        request: PutFile,
+    ) -> Result<FileWritten, EnvError> {
+        memory_rewind::put(&mut lock(&self.files), request)
+    }
+}
+
+#[async_trait]
+impl Search for MemoryEnvironment {
     /// 工作区文件清单（`@` 补全）：`cwd` 下的全部文件，相对路径，按路径排序。
     async fn list_files(
         &self,
@@ -314,7 +302,42 @@ impl Environment for MemoryEnvironment {
             .collect();
         Ok(FileList { files })
     }
+}
 
+#[async_trait]
+impl Commands for MemoryEnvironment {
+    async fn start_command(
+        &self,
+        _workspace: &WorkspaceRef,
+        _context: OperationContext,
+        _request: StartCommand,
+    ) -> Result<(), EnvError> {
+        Err(unused())
+    }
+
+    fn watch_command(
+        &self,
+        _operation: OperationId,
+        _cursor: u64,
+    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
+        stream::iter([Err(unused())]).boxed()
+    }
+
+    async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
+        Err(unused())
+    }
+
+    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
+        Err(unused())
+    }
+
+    async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Shell for MemoryEnvironment {
     async fn shell_state(
         &self,
         workspace: &WorkspaceRef,
@@ -329,37 +352,15 @@ impl Environment for MemoryEnvironment {
         })
     }
 
-    async fn git_status(
-        &self,
-        _workspace: &WorkspaceRef,
-        _request: GitStatusRequest,
-    ) -> Result<GitStatus, EnvError> {
-        self.git.clone().ok_or_else(unused)
-    }
-
-    async fn put_file(
-        &self,
-        _workspace: &WorkspaceRef,
-        _context: OperationContext,
-        request: PutFile,
-    ) -> Result<FileWritten, EnvError> {
-        memory_rewind::put(&mut lock(&self.files), request)
-    }
-
-    async fn git_diff(
-        &self,
-        _workspace: &WorkspaceRef,
-        _request: crate::env_git::GitDiffRequest,
-    ) -> Result<crate::env_git::GitDiff, EnvError> {
-        self.diff.clone().ok_or_else(unused)
-    }
-
     /// 会话换工作目录（EnterWorktree、`/cd`）：之后的 `shell_state` 给出新目录。
     async fn set_shell_cwd(&self, _session: &SessionId, cwd: EnvPath) -> Result<(), EnvError> {
         *lock(&self.shell_cwd) = Some(cwd);
         Ok(())
     }
+}
 
+#[async_trait]
+impl Checkpoints for MemoryEnvironment {
     async fn rewind_prepare(
         &self,
         _workspace: &WorkspaceRef,
@@ -384,3 +385,26 @@ impl Environment for MemoryEnvironment {
         Ok(())
     }
 }
+
+#[async_trait]
+impl Git for MemoryEnvironment {
+    async fn git_status(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: GitStatusRequest,
+    ) -> Result<GitStatus, EnvError> {
+        self.git.clone().ok_or_else(unused)
+    }
+
+    async fn git_diff(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: crate::env_git::GitDiffRequest,
+    ) -> Result<crate::env_git::GitDiff, EnvError> {
+        self.diff.clone().ok_or_else(unused)
+    }
+}
+
+impl Background for MemoryEnvironment {}
+impl Pdf for MemoryEnvironment {}
+impl Fetch for MemoryEnvironment {}

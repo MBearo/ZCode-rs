@@ -78,7 +78,7 @@ fn interval_only(input: &str) -> Option<String> {
 async fn read_loop_file(catalog: &SkillCatalog, context: &ToolUseContext) -> Option<LoopFile> {
     let workspace = &context.workspace;
     // home 与路径拼法都取执行环境的路径事实（F58：与规则文件、子代理、skill 同一个 `PathStyle::join`）。
-    let facts = catalog.env.path_facts(workspace).await.ok()?;
+    let facts = catalog.info.path_facts(workspace).await.ok()?;
     let paths = loops::loop_file_paths(
         workspace.root.as_str(),
         facts.home.as_ref().map(EnvPath::as_str),
@@ -88,7 +88,7 @@ async fn read_loop_file(catalog: &SkillCatalog, context: &ToolUseContext) -> Opt
         let request = ReadFile {
             path: EnvPath::new(path.clone()),
         };
-        if let Ok(content) = catalog.env.read_file(workspace, request).await
+        if let Ok(content) = catalog.files.read_file(workspace, request).await
             && let Some(file) = loops::loop_file(&path, &String::from_utf8_lossy(&content.bytes))
         {
             return Some(file);

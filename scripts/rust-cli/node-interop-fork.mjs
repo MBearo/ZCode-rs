@@ -1,8 +1,9 @@
-// rust-cli 与 Node CLI 的会话互操作检查的第七段：Node 的 `/fork`（docs/specs/rust-cli/session-lifecycle.md §6.5）。
+// rust-cli 与 Node CLI 的会话互操作检查的第七段：`/fork`（docs/specs/rust-cli/session-lifecycle.md §6.5）。
 //
-// 1. rust-cli 从带 checkpoint 的会话分出新会话（node_interop `fork`）：Node 读出会话行（parent、fork、标题），
-//    history hydrator 重建的上下文与 rust-cli 的冷读取一致，分叉提示是 Node 的 `rewind_notice` 系统提醒；Node 用自己的
-//    写入代码续写这个会话，rust-cli 读回；
+// 1. rust-cli 从一条用户输入分出新会话（node_interop `fork`，工作线 F75：复制到这一轮最后一条 assistant、不带
+//    checkpoint，F75 之前从 checkpoint 分出并恢复文件）：Node 读出会话行（parent、fork、标题），新会话的历史正好
+//    到这一轮的回答，history hydrator 重建的上下文与 rust-cli 的冷读取一致，分叉提示是 Node 的 `rewind_notice`
+//    系统提醒、正文是分叉对话的那一段；Node 用自己的写入代码续写这个会话，rust-cli 读回；
 // 2. Node 用自己的 `forkConversationFromMessage` 分出 rust-cli 写的会话：rust-cli 读出 fork 会话、Node 的标题、
 //    复制的历史与 `fork` 来源的分叉提示。
 import { importNode } from "./node-root.mjs";
@@ -10,6 +11,18 @@ import { importNode } from "./node-root.mjs";
 /** 去掉 `<system-reminder>` 包装（rust-cli 的 attachment 文本自带包装）。 */
 const unwrap = (text) =>
   text.replace(/^<system-reminder>\n/, "").replace(/\n<\/system-reminder>$/, "");
+
+/** 人类输入（rust-cli 冷读取的形状）。 */
+const isInput = (message) => message.type === "user" && message.origin?.kind === "human";
+
+/** 第一条输入那一轮最后一条 assistant 的 ID（到下一条输入之前）。 */
+function firstTurnAnswer(messages) {
+  const start = messages.findIndex(isInput);
+  const next = messages.findIndex((message, index) => index > start && isInput(message));
+  return messages
+    .slice(start, next < 0 ? undefined : next)
+    .findLast((message) => message.type === "assistant")?.id;
+}
 
 /** rust-cli 冷读取里的分叉提示与其余消息。 */
 function splitNotice(messages) {
@@ -36,10 +49,12 @@ export async function checkFork(ctx) {
     createMessageHistory,
     hydrateMessageHistoryFromSession,
   } = ctx;
-  // 1. rust-cli 分出、Node 读与续写。
+  // 1. rust-cli 从第一条输入分出（第五段会话：第一轮写文件、有工具轮），Node 读与续写。
   const parentID = written.sessions[4];
   const parent = await store.getSession(parentID);
-  const forked = rust("fork", dir, parentID);
+  const parentLoaded = rust("read", dir, parentID);
+  const through = firstTurnAnswer(parentLoaded.messages);
+  const forked = rust("fork", dir, parentID, through);
   const child = await store.getSession(forked.session);
   expectEqual(
     "Node reads the rust-cli fork row",
@@ -63,6 +78,19 @@ export async function checkFork(ctx) {
   const loaded = rust("read", dir, forked.session);
   const { notices, rest } = splitNotice(loaded.messages);
   expectEqual("rust-cli reads one fork notice", notices.length, 1);
+  const end = parentLoaded.messages.findIndex((message) => message.id === through) + 1;
+  expectEqual(
+    "the fork keeps the conversation through the chosen turn's answer",
+    rustText(rest),
+    rustText(parentLoaded.messages.slice(0, end)),
+  );
+  expectEqual(
+    "the fork notice is the conversation fork text",
+    unwrap(notices[0]?.text ?? "")
+      .split("\n")
+      .slice(0, 2),
+    ["This session was forked from a previous session message.", `parentSessionId: ${parentID}`],
+  );
   expectEqual(
     "both sides see the same fork notice",
     unwrap(notices[0]?.text ?? ""),

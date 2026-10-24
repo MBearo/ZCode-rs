@@ -57,7 +57,8 @@ async fn the_listing_hides_model_disabled_and_inactive_conditional_skills() {
             &format!("{dir}/ts/SKILL.md"),
             "---\ndescription: TS\npaths: src/**/*.ts\n---\n",
         );
-    let catalog = SkillCatalog::new(Arc::new(env));
+    let env = Arc::new(env);
+    let catalog = SkillCatalog::new(env.clone(), env);
     // 内置的 `loop` 排在最后（builtin_tests.rs 里测），这里只看文件 skill。
     let lines = |entries: Vec<ListingEntry>| -> Vec<String> {
         let mut lines: Vec<String> = entries.into_iter().map(|entry| entry.line).collect();

@@ -26,7 +26,7 @@ fn workspace(cwd: &str) -> WorkspaceRef {
 
 fn scope<'a>(env: &'a MemoryEnvironment, workspace: &'a WorkspaceRef) -> Scope<'a> {
     Scope {
-        env,
+        files: env,
         workspace,
         style: PathStyle::Posix,
         cwd: workspace.root.as_str().to_owned(),

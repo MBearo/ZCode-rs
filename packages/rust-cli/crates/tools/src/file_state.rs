@@ -188,6 +188,56 @@ impl ReadFileState {
         }
     }
 
+    /// 没有 offset、也没有 limit 的记录（读过的文件在磁盘上被改动时要查的那些，tools-files.md §4.1），最近用过的在前。
+    /// 不算一次使用。
+    pub fn whole_files(&self, session: &SessionId) -> Vec<(String, FileState)> {
+        let sessions = self.sessions();
+        let Some(files) = sessions.files.get(session) else {
+            return Vec::new();
+        };
+        files
+            .order
+            .iter()
+            .rev()
+            .filter_map(|path| {
+                let state = files.entries.get(path)?;
+                (state.offset.is_none() && state.limit.is_none())
+                    .then(|| (path.clone(), state.clone()))
+            })
+            .collect()
+    }
+
+    /// 去掉一条记录（文件已经不在了）。
+    pub fn remove(&self, session: &SessionId, path: &str) {
+        if let Some(files) = self.sessions().files.get_mut(session) {
+            files.remove(path);
+        }
+    }
+
+    /// 内容就是记录的内容，记下执行侧现在的版本；不改顺序与形状。
+    pub fn rebase(&self, session: &SessionId, path: &str, version: FileVersion) {
+        if let Some(state) = self
+            .sessions()
+            .files
+            .get_mut(session)
+            .and_then(|files| files.entries.get_mut(path))
+        {
+            state.baseline = Baseline::Version(version);
+        }
+    }
+
+    /// 记录的内容不在模型的上下文里（只告诉了模型文件改了，没给内容）。不改顺序。
+    pub fn mark_not_in_context(&self, session: &SessionId, path: &str) {
+        if let Some(state) = self
+            .sessions()
+            .files
+            .get_mut(session)
+            .and_then(|files| files.entries.get_mut(path))
+        {
+            state.not_in_context = true;
+        }
+    }
+
     /// 冷恢复：用重建出的记录替换这个会话的状态（见 [`crate::file_state_restore`]）。
     pub fn replace(&self, session: &SessionId, entries: Vec<(String, FileState)>) {
         let mut sessions = self.sessions();

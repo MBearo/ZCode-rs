@@ -1,7 +1,7 @@
 //! 模型身份、日期、剩余 token 与署名 attachment。
 
 use rust_cli_kernel_api::goal;
-use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
+use rust_cli_kernel_api::message::{ContentBlock, Message, SystemMessage, UserOrigin};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::{user_command, user_input};
 use rust_cli_prompts::models;
@@ -61,23 +61,6 @@ pub(crate) fn date(history: &[Message], today: &str) -> Option<(String, Value)> 
     }
 }
 
-/// 最近一次模型响应占用的上下文。
-fn context_tokens(messages: &[Message]) -> u64 {
-    messages
-        .iter()
-        .rev()
-        .find_map(|message| match message {
-            Message::Assistant(assistant) => assistant.usage,
-            _ => None,
-        })
-        .map_or(0, |usage| {
-            usage.input_tokens
-                + usage.cache_creation_input_tokens
-                + usage.cache_read_input_tokens
-                + usage.output_tokens
-        })
-}
-
 /// 剩余 token（padded-countdown）：每条人类输入重新锚定，之后按上下文的增长扣减，只减不增。
 /// 不用会话内的计数器，从历史重算：resume 后结果相同。
 pub(crate) fn tokens_left(history: &[Message]) -> u64 {
@@ -91,12 +74,37 @@ pub(crate) fn tokens_left(history: &[Message]) -> u64 {
 }
 
 /// 从 `anchor_at` 起按上下文的增长扣减，只减不增。
+///
+/// 跨压缩（工作线 F82，context.md 的 `total_tokens_reminder`）：压缩边界把它之前那段最后一次响应占用的上下文
+/// “滚进”累计，之后的上下文是累计加边界之后最近一次响应的。以前只看边界之后的历史，压缩之后剩余 token 回到满额。
 fn tokens_left_since(history: &[Message], anchor_at: usize) -> u64 {
-    let anchor = context_tokens(&history[..anchor_at]);
+    let total = |usage: &rust_cli_kernel_api::message::Usage| {
+        usage.input_tokens
+            + usage.cache_creation_input_tokens
+            + usage.cache_read_input_tokens
+            + usage.output_tokens
+    };
+    let (mut rolled, mut last) = (0u64, 0u64);
+    let mut anchor = None;
     let mut used = 0u64;
-    for (index, message) in history.iter().enumerate().skip(anchor_at) {
-        if matches!(message, Message::Assistant(_)) {
-            used = used.max(context_tokens(&history[..=index]).saturating_sub(anchor));
+    for (index, message) in history.iter().enumerate() {
+        if index == anchor_at {
+            anchor = Some(rolled + last);
+        }
+        match message {
+            Message::System(SystemMessage::CompactBoundary(_)) => {
+                rolled += last;
+                last = 0;
+            }
+            Message::Assistant(assistant) => {
+                if let Some(usage) = &assistant.usage {
+                    last = total(usage);
+                }
+                if let Some(anchor) = anchor {
+                    used = used.max((rolled + last).saturating_sub(anchor));
+                }
+            }
+            _ => {}
         }
     }
     TOTAL_TOKENS_BUDGET.saturating_sub(used)

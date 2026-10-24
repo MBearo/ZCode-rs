@@ -11,8 +11,7 @@ use rust_cli_kernel_api::listing::ListingEntry;
 use rust_cli_kernel_api::mcp_state::PENDING_LISTED;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::orchestration::ContextRequest;
-use rust_cli_kernel_api::tool_search::TOOL_SEARCH;
-use rust_cli_prompts::models;
+use rust_cli_kernel_api::tool_search::{TOOL_SEARCH, compare_names};
 use rust_cli_prompts::texts::{self, render};
 use serde_json::{Value, json};
 
@@ -67,15 +66,12 @@ fn removed(known: &BTreeSet<String>, current: &[ListingEntry]) -> Vec<String> {
         .collect()
 }
 
-/// 延迟工具清单里要宣布的连接中 MCP 服务器（context.md §4.2，修复线 F36）：这一步的工具快照有 MCP 状态、启用了
-/// ToolSearch 时是 Pending 的服务器名（排序）；否则 None（不带这一项）。
+/// 延迟工具清单里要宣布的连接中 MCP 服务器（context.md §4.2，修复线 F36）：这一步的工具快照有 MCP 状态、工具里有
+/// ToolSearch（乐观判断，tools-more.md §3.2.1）时是 Pending 的服务器名（排序）；否则 None（不带这一项）。修改（工作线
+/// F89）：不再看模型（F84 时禁用表里的模型不带）。
 pub(crate) fn pending_servers(request: &ContextRequest) -> Option<Vec<String>> {
     let view = request.mcp.as_ref()?;
-    let tool_search = request.tool_names.iter().any(|name| name == TOOL_SEARCH)
-        && models::supports_tool_search(
-            &request.selection.model,
-            request.capabilities.map(|found| found.supports_tool_search),
-        );
+    let tool_search = request.tool_names.iter().any(|name| name == TOOL_SEARCH);
     tool_search.then(|| view.pending())
 }
 
@@ -109,45 +105,181 @@ fn pending_section(pending: &[String]) -> String {
     render(texts::deferred_tools_pending(), &[("lines", &lines)])
 }
 
-/// 延迟工具：新增的按清单顺序列出（经 ToolSearch 加载）；不再可用的列出并附环境说明。`pending` 是这一步连接中的
-/// MCP 服务器（[`pending_servers`]）：与上次宣布的不同也算变化；不为空时排在最后加一段（修复线 F36）。
+/// 延迟工具里列过行的名字：每条的 `addedNames` 里不在本条 `readdedNames` 的；撤回不去掉（context.md §4.3）。
+/// 旧记录没有 `readdedNames`，全部算列过。
+fn listed(history: &[Message]) -> BTreeSet<String> {
+    let mut set = BTreeSet::new();
+    for attachment in attachments(history, DEFERRED_TOOLS) {
+        let readded = names(&attachment.data, READDED_KEY);
+        set.extend(
+            names(&attachment.data, "addedNames")
+                .into_iter()
+                .filter(|name| !readded.contains(name)),
+        );
+    }
+    set
+}
+
+const READDED_KEY: &str = "readdedNames";
+/// 多于这么多个撤回的 MCP 工具时按服务器归组。
+const MCP_LISTED: usize = 30;
+
+fn is_mcp(name: &str) -> bool {
+    name.starts_with("mcp__")
+}
+
+/// 服务器摘要：`mcp__<server>__x` 归成 `mcp__<server>__*`，同组多于一个时写个数，按名字排序。
+fn servers(names: &[&String]) -> String {
+    let mut groups: Vec<(String, usize)> = Vec::new();
+    for name in names {
+        let key = if is_mcp(name) {
+            let mut parts = name.splitn(3, "__");
+            let (first, second) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+            format!("{first}__{second}__*")
+        } else {
+            (*name).clone()
+        };
+        match groups.iter_mut().find(|(group, _)| *group == key) {
+            Some((_, count)) => *count += 1,
+            None => groups.push((key, 1)),
+        }
+    }
+    groups.sort_by(|left, right| compare_names(&left.0, &right.0));
+    groups
+        .into_iter()
+        .map(|(key, count)| {
+            if count > 1 {
+                format!("{key} ({count})")
+            } else {
+                key
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `<n> deferred tool is` / `<n> deferred tools are` 的后半（按个数选单复数）。
+fn verb(count: usize) -> &'static str {
+    if count == 1 { " is" } else { "s are" }
+}
+
+/// 重新可用的工具（`readdedNames` 的两段）：MCP 的按服务器归组，其余逐个列名。
+fn readded_sections(readded: &[String]) -> Vec<String> {
+    let (mcp, other): (Vec<&String>, Vec<&String>) = readded.iter().partition(|name| is_mcp(name));
+    let mut sections = Vec::new();
+    if !mcp.is_empty() {
+        let count = mcp.len().to_string();
+        sections.push(render(
+            texts::deferred_tools_readded_mcp(),
+            &[
+                ("count", &count),
+                ("verb", verb(mcp.len())),
+                ("servers", &servers(&mcp)),
+            ],
+        ));
+    }
+    if !other.is_empty() {
+        let count = other.len().to_string();
+        let listed: Vec<&str> = other.iter().map(|name| name.as_str()).collect();
+        sections.push(render(
+            texts::deferred_tools_readded(),
+            &[
+                ("count", &count),
+                ("verb", verb(other.len())),
+                ("names", &listed.join(", ")),
+            ],
+        ));
+    }
+    sections
+}
+
+/// 撤回的工具：MCP 的用“服务器断开”的模板（多于 30 个时按服务器归组），其余用原来的模板。
+fn removed_sections(removed: &[String]) -> Vec<String> {
+    let (mcp, other): (Vec<&String>, Vec<&String>) = removed.iter().partition(|name| is_mcp(name));
+    let mut sections = Vec::new();
+    if mcp.len() > MCP_LISTED {
+        let count = mcp.len().to_string();
+        sections.push(render(
+            texts::deferred_tools_removed_mcp_many(),
+            &[("count", &count), ("servers", &servers(&mcp))],
+        ));
+    } else if !mcp.is_empty() {
+        let lines: Vec<&str> = mcp.iter().map(|name| name.as_str()).collect();
+        sections.push(render(
+            texts::deferred_tools_removed_mcp(),
+            &[("lines", &lines.join("\n"))],
+        ));
+    }
+    if !other.is_empty() {
+        let lines: Vec<&str> = other.iter().map(|name| name.as_str()).collect();
+        sections.push(render(
+            texts::deferred_tools_removed(),
+            &[("lines", &lines.join("\n"))],
+        ));
+    }
+    sections
+}
+
+/// 延迟工具（context.md §4.3）：没列过的按清单顺序列行（经 ToolSearch 加载）；列过、撤回后又回来的只说重新可用；
+/// 不再可用的按 MCP 与其余分开说明，附环境说明。`pending` 是这一步连接中的 MCP 服务器（[`pending_servers`]）：
+/// 与上次宣布的不同也算变化；不为空时排在最后加一段（修复线 F36）。
+///
+/// 修 bug（F82）：以前撤回只有一个模板（不说服务器断开），重连后的工具按新增再列一遍行。
 pub(crate) fn deferred_tools(
     history: &[Message],
     current: &[ListingEntry],
     pending: Option<&[String]>,
 ) -> Option<(String, Value)> {
     let (known, _) = announced(history, DEFERRED_TOOLS, "addedNames");
+    let listed = listed(history);
     let added: Vec<&ListingEntry> = current
         .iter()
         .filter(|entry| !known.contains(&entry.name))
         .collect();
+    let lines: Vec<&ListingEntry> = current
+        .iter()
+        .filter(|entry| !listed.contains(&entry.name))
+        .collect();
+    let mut readded: Vec<String> = added
+        .iter()
+        .filter(|entry| listed.contains(&entry.name))
+        .map(|entry| entry.name.clone())
+        .collect();
+    readded.sort();
     let removed = removed(&known, current);
     let pending_changed = pending.is_some_and(|now| now != announced_pending(history).as_slice());
+    if added.is_empty() && lines.is_empty() && removed.is_empty() && !pending_changed {
+        return None;
+    }
     let mut sections = Vec::new();
-    if !added.is_empty() {
+    if !lines.is_empty() {
         sections.push(render(
             texts::deferred_tools(),
-            &[("lines", &lines(&added))],
+            &[("lines", &self::lines(&lines))],
         ));
     }
+    sections.extend(readded_sections(&readded));
+    sections.extend(removed_sections(&removed));
     if !removed.is_empty() {
-        sections.push(render(
-            texts::deferred_tools_removed(),
-            &[("lines", &removed.join("\n"))],
-        ));
         sections.push(texts::ambient().to_owned());
-    }
-    if added.is_empty() && removed.is_empty() && !pending_changed {
-        return None;
     }
     if let Some(now) = pending.filter(|now| !now.is_empty()) {
         sections.push(pending_section(now));
     }
+    let mut added_names: Vec<&str> = added.iter().map(|entry| entry.name.as_str()).collect();
+    for entry in &lines {
+        if !added_names.contains(&entry.name.as_str()) {
+            added_names.push(entry.name.as_str());
+        }
+    }
     let mut data = json!({
-        "addedNames": added.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(),
-        "addedLines": added.iter().map(|entry| entry.line.as_str()).collect::<Vec<_>>(),
+        "addedNames": added_names,
+        "addedLines": lines.iter().map(|entry| entry.line.as_str()).collect::<Vec<_>>(),
         "removedNames": removed,
     });
+    if !readded.is_empty() {
+        data[READDED_KEY] = json!(readded);
+    }
     // 有 MCP 客户端表时总带这一项（可以是空数组），下一步据此判断有没有变化。
     if let Some(now) = pending {
         data[PENDING_KEY] = json!(now);
@@ -221,3 +353,7 @@ pub(crate) fn skills(history: &[Message], current: &[ListingEntry]) -> Option<(S
 #[cfg(test)]
 #[path = "listings_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "listings_reconnect_tests.rs"]
+mod reconnect_tests;

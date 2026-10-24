@@ -31,7 +31,7 @@ pub struct McpServer {
 pub struct McpServerOptions {
     /// 这个服务器的连接（握手与清单）、工具调用与资源读取的期限；None 时用 [`McpSettings`] 的缺省值。
     pub timeout_ms: Option<u64>,
-    /// 这个服务器的工具都不延迟（工具自己的 `_meta["zcode/alwaysLoad"]` 也不延迟）。
+    /// 这个服务器的工具都不延迟（工具自己的 `_meta` 标记也不延迟，`tool.rs` 的 `ALWAYS_LOAD_KEYS`）。
     pub always_load: bool,
 }
 

@@ -2,9 +2,10 @@
 //! （`apps/zcode-cli/packages/cli/src/hooks-trust-command.ts`、`bootstrap/src/workspace-hook-trust-cli.ts`），
 //! 文本与错误逐字取 Node。信任记录与 Node CLI、App 共用。
 
-use rust_cli_kernel_api::env::{EnvPath, Environment, WorkspaceRef};
+use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::ids::EnvironmentId;
+use rust_cli_kernel_api::machine::Files;
 use rust_cli_paths::StoragePaths;
 use rust_cli_platform::{TrustLoad, TrustRecord};
 use serde_json::json;
@@ -127,7 +128,7 @@ pub(crate) fn parse(args: &[String]) -> Option<Result<TrustCommand, String>> {
 
 /// 运行需要的事实与端口。
 pub(crate) struct TrustContext<'a> {
-    pub(crate) env: &'a dyn Environment,
+    pub(crate) files: &'a dyn Files,
     pub(crate) paths: &'a StoragePaths,
     pub(crate) cwd: &'a str,
     pub(crate) version: &'a str,
@@ -173,7 +174,7 @@ async fn inspect_workspace(context: &TrustContext<'_>, options: &Options) -> Wor
         root: EnvPath::new(path.clone()),
     };
     let inputs = ConfigInputs {
-        env: context.env,
+        files: context.files,
         workspace: &workspace,
         paths: context.paths,
         process_env: &[],

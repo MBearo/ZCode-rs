@@ -73,9 +73,10 @@ async fn pickers_and_popups_share_the_selection_bar_in_both_themes() {
             setup(background, foreground, "en_US.UTF-8"),
             |mut ui| async move {
                 ui.wait_for("Ask before changes").await;
-                // `/mode` 的选择器（通用列表）。
+                // `/mode` 的选择器（通用列表；工作线 F76 起是 App 的三个模式，当前的变更前确认在第 1 行）。
                 ui.submit("/mode");
-                assert_selected_bar(&mut ui, "2. build", "build", bar).await;
+                assert_selected_bar(&mut ui, "1. Ask before changes", "Ask before changes", bar)
+                    .await;
                 ui.key(crossterm::event::KeyCode::Esc);
                 // 斜杠命令的弹出列表。
                 ui.type_text("/he");

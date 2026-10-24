@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use crate::message::{ContentBlock, Message, ToolResultContent};
+use crate::message::{ContentBlock, Message, SystemMessage, ToolResultContent};
 use crate::tool::Tool;
 
 /// ToolSearch 工具的名字。
@@ -54,6 +54,19 @@ pub fn referenced<'a>(history: impl IntoIterator<Item = &'a Message>) -> BTreeSe
                     names.insert(tool_name.clone());
                 }
             }
+        }
+    }
+    names
+}
+
+/// 已加载的工具：[`referenced`] 加上历史里压缩边界带着的（压缩前已加载的，docs/specs/rust-cli/compact.md §3.5）。
+/// 调用方传活动历史（从最后一个边界开始，含边界）。发给模型的工具清单、`/context` 的计数与压缩都用它。
+pub fn loaded<'a>(history: impl IntoIterator<Item = &'a Message>) -> BTreeSet<String> {
+    let history: Vec<&Message> = history.into_iter().collect();
+    let mut names = referenced(history.iter().copied());
+    for message in history {
+        if let Message::System(SystemMessage::CompactBoundary(boundary)) = message {
+            names.extend(boundary.discovered_tools.iter().cloned());
         }
     }
     names
