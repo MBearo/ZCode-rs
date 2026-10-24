@@ -370,3 +370,25 @@ async fn the_user_stops_a_background_agent_through_the_same_path() {
 #[rustfmt::skip]
 #[path = "task_stop_parity_tests.rs"]
 mod parity_tests;
+
+/// 远端机器上的后台命令（R3，remote-exec.md §20.7.2）：TaskStop 依次问本机与连上的机器，在任务所在的那台上停。
+#[tokio::test]
+async fn a_command_on_a_remote_machine_is_stopped_there() {
+    let remote = Arc::new(Shells::with(
+        "sess_1",
+        "b0000000r",
+        "sleep 100",
+        BackgroundStatus::Running,
+    ));
+    let registry = rust_cli_kernel_api::testing::TestMachines::new(Arc::new(
+        rust_cli_kernel_api::testing::UnusedEnvironment,
+    ));
+    registry.connect("dev-a", remote.clone(), "/home/dev/proj");
+    let harness = crate::test_support::with_machines(registry);
+    let output = harness
+        .call("sess_1", "TaskStop", json!({"task_id": "b0000000r"}))
+        .await;
+    assert!(!output.is_error, "{}", text(&output));
+    assert!(text(&output).contains("Successfully stopped task: b0000000r (sleep 100)"));
+    assert_eq!(remote.stops.lock().unwrap().len(), 1);
+}

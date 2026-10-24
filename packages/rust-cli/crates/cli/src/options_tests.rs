@@ -233,6 +233,40 @@ fn the_loopback_declaration_is_read_only_when_declarations_are_accepted() {
     assert!(!read(&off, TestDeclarations::Accepted).loopback);
 }
 
+/// 远端执行 R3（remote-exec.md §20.10）：loopback 机器的声明只在接受声明时读（release 构建不认）。
+#[test]
+fn the_loopback_machines_declaration_is_read_only_when_declarations_are_accepted() {
+    let read = |pairs: &[(&str, &str)], declarations| {
+        let snapshot = env(pairs);
+        assumptions(declarations, |name| var(&snapshot, name).map(str::to_owned))
+    };
+    assert!(!read(&[], TestDeclarations::Accepted).loopback_machines);
+    let declared = [("_ZCODE_ASSUME_LOOPBACK_MACHINES", "1")];
+    assert!(read(&declared, TestDeclarations::Accepted).loopback_machines);
+    assert!(!read(&declared, TestDeclarations::Ignored).loopback_machines);
+    // 两个 loopback 声明互不影响。
+    assert!(!read(&declared, TestDeclarations::Accepted).loopback);
+    let ssh = [("_ZCODE_ASSUME_SSH_MACHINES", "1")];
+    assert!(read(&ssh, TestDeclarations::Accepted).ssh_machines);
+    assert!(!read(&ssh, TestDeclarations::Ignored).ssh_machines);
+    // 机器经 SSH 时的测试配置：不要求 `_ZCODE_ASSUME_SSH_EXECUTOR`；release 构建什么都不读。
+    let vars = env(&[("_ZCODE_ASSUME_SSH_CONFIG", "/tmp/ssh_config")]);
+    assert_eq!(
+        machine_ssh(TestDeclarations::Accepted, |name| var(&vars, name)
+            .map(str::to_owned)),
+        MachineSsh {
+            config: Some("/tmp/ssh_config".to_owned()),
+            artifact: None,
+        }
+    );
+    assert_eq!(
+        machine_ssh(TestDeclarations::Ignored, |_: &str| -> Option<String> {
+            panic!("release builds do not read the variables")
+        }),
+        MachineSsh::default()
+    );
+}
+
 /// 远端执行 R2（remote-exec.md §19.11）：SSH 的测试入口只在接受声明时读，要有目标；release 构建不读任何一个变量。
 #[test]
 fn the_ssh_entry_is_read_only_when_declarations_are_accepted() {

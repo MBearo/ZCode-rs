@@ -20,6 +20,7 @@ mod input_reminders;
 mod instructions;
 mod invoked;
 mod listings;
+mod machines;
 mod mcp;
 mod nested;
 mod plan_mode;
@@ -42,6 +43,7 @@ use rust_cli_kernel_api::agents::TaskReader;
 use rust_cli_kernel_api::clock::{Clock, Ids};
 use rust_cli_kernel_api::env::EnvFacts;
 use rust_cli_kernel_api::env_files::PathStyle;
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::listing::{ListingEntry, ListingSource, Listings};
 use rust_cli_kernel_api::local_services::Git;
@@ -101,6 +103,8 @@ pub struct PromptAssembler {
     changed: Option<Arc<dyn ChangedFiles>>,
     /// 任务提醒读的任务清单（agents.md §7.4）：agents 建好之后由 runtime 接上一次；没有时不提醒。
     tasks: std::sync::OnceLock<Arc<dyn TaskReader>>,
+    /// 连上的远端机器（R3，remote-exec.md §20.5.3）：机器清单提醒读它的快照；没有时不提醒。
+    machines: Option<Arc<dyn EnvironmentRegistry>>,
 }
 
 /// 当步 attachment 属于哪个循环（docs/specs/rust-cli/agents.md §4.3）。
@@ -141,7 +145,15 @@ impl PromptAssembler {
             nested: nested::Seen::default(),
             changed: None,
             tasks: std::sync::OnceLock::new(),
+            machines: None,
         }
+    }
+
+    /// 接上执行环境的注册表：连上、断开远端机器时发机器清单提醒（remote-exec.md §20.5.3）。
+    #[must_use]
+    pub fn with_machines(mut self, registry: Arc<dyn EnvironmentRegistry>) -> Self {
+        self.machines = Some(registry);
+        self
     }
 
     /// 接上任务提醒读的任务清单（agents 依赖 context，所以建好 agents 之后再接；只接一次）。
@@ -291,6 +303,13 @@ impl PromptAssembler {
             .and_then(|shown| environment::announce(history, shown))
         {
             out.push(self.attachment(environment::SOURCE, found));
+        }
+        // 机器清单（R3，remote-exec.md §20.5.3）：紧跟环境段；只在有变化时发。
+        if let Some(registry) = &self.machines {
+            out.extend(
+                machines::announce(history, &registry.machines())
+                    .map(|found| self.attachment(machines::SOURCE, found)),
+            );
         }
         out.extend(
             announce::model(history, &request.selection)

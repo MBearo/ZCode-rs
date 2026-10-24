@@ -4,6 +4,9 @@
 //! （`workspaceCheckpointArtifactSchema`，Node `stringifyWorkspaceCheckpointArtifact` 的键序与缩进），
 //! 引用放进 `ToolOutput.display.checkpoint`；会话 actor 把它与工具结果在一个事务里落库。
 //! checkpoint 失败只记日志，不影响工具结果（Node `emitFileMutationCheckpoint` 相同）。
+//!
+//! 远端机器上的写入（R3，remote-exec.md §20.7.5、§20.9）：artifact 与 `display.checkpoint` 多一个 `machine`；会话 actor 把它
+//! 存成本工程的记录（Node / App 看不到，不会把远端文件的内容写到本机的同名路径）。
 
 use rust_cli_base::js::iso_timestamp;
 use rust_cli_kernel_api::store::ArtifactPurpose;
@@ -31,7 +34,7 @@ pub(crate) async fn record(context: &ToolUseContext, change: Change<'_>) -> Opti
     let after = std::str::from_utf8(change.after).ok()?;
     let (hunks, additions, deletions) = structured_patch(before.unwrap_or(""), after);
     // 键序同 Node 的对象字面量（JSON.stringify(artifact, null, 2)）。
-    let artifact = json!({
+    let mut artifact = json!({
         "createdAt": iso_timestamp(change.mtime_ms),
         "files": [{
             "afterContent": after,
@@ -46,6 +49,10 @@ pub(crate) async fn record(context: &ToolUseContext, change: Change<'_>) -> Opti
         "toolName": change.tool,
         "version": 1,
     });
+    let machine = (!context.machine.is_local()).then(|| context.machine.name().to_owned());
+    if let Some(name) = &machine {
+        artifact["machine"] = Value::from(name.as_str());
+    }
     let bytes = serde_json::to_string_pretty(&artifact).ok()?.into_bytes();
     match context
         .artifacts
@@ -57,12 +64,18 @@ pub(crate) async fn record(context: &ToolUseContext, change: Change<'_>) -> Opti
         )
         .await
     {
-        Ok(reference) => Some(json!({
-            "artifact": reference,
-            "path": change.path,
-            "additions": additions,
-            "deletions": deletions,
-        })),
+        Ok(reference) => {
+            let mut display = json!({
+                "artifact": reference,
+                "path": change.path,
+                "additions": additions,
+                "deletions": deletions,
+            });
+            if let Some(name) = machine {
+                display["machine"] = Value::from(name);
+            }
+            Some(display)
+        }
         Err(error) => {
             tracing::warn!(%error, path = change.path, "workspace checkpoint creation failed");
             None

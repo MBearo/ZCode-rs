@@ -67,6 +67,8 @@ pub struct AgentsPorts {
     pub clock: Arc<dyn Clock>,
     /// 子会话所在的机器：后台命令的通知、monitor、shell 当前目录、TaskStop（R0 只有本机，remote-exec.md §15.8.1）。
     pub machine: MachineEnv,
+    /// 执行环境的注册表（R3，remote-exec.md §20.6、§20.7.2）：远端机器上的后台通知、monitor 与 TaskStop 经它找到那台机器。
+    pub machines: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
     pub tasks: Arc<dyn TaskListStore>,
     pub queries: Arc<dyn SubagentQueries>,
     /// 主线程的上下文组装；子代理的 attachment 也由它按 `QuerySource::Subagent` 产生。
@@ -94,6 +96,19 @@ pub struct AgentsConfig {
     pub keep_alive: bool,
     /// 后台子代理能询问用户（交互界面；`-p` 与 stream-json 不询问，agents.md §4.1.1）。
     pub background_prompts: bool,
+}
+
+impl AgentsPorts {
+    /// 一台机器：本机（None），或注册表里那台；没连上时是“没连上”的机器（调用报错）。
+    pub(crate) fn machine_named(&self, name: Option<&str>) -> MachineEnv {
+        match name {
+            None => self.machine.clone(),
+            Some(name) => self
+                .machines
+                .machine(name)
+                .unwrap_or_else(|| MachineEnv::unavailable(name)),
+        }
+    }
 }
 
 pub(crate) struct Core {
@@ -370,3 +385,7 @@ mod test_support;
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "machines_tests.rs"]
+mod machines_tests;

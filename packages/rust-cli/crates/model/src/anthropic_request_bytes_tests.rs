@@ -285,7 +285,7 @@ mod reference {
             .unwrap_or(&[]);
         let per_turn = messages.iter().any(|m| m.get("output_config").is_some());
         let rules: [(&str, bool); 11] = [
-            // 模型表（jN）：交错思考与思考 token 计数都跟着 thinking 走。
+            // 模型表：交错思考与思考 token 计数都跟着 thinking 走。
             (INTERLEAVED_THINKING, thinking),
             (CONTEXT_MANAGEMENT, body.get("context_management").is_some()),
             (PROMPT_CACHING_SCOPE, uses_cache_scope(body)),
@@ -294,7 +294,7 @@ mod reference {
                 messages.iter().any(|m| m["role"] == "system"),
             ),
             (THINKING_TOKEN_COUNT, thinking),
-            // 每轮表（zN）：消息级的 output_config。
+            // 每轮表：消息级的 output_config。
             (PER_TURN_CONTROL, per_turn),
             // 请求期追加：effort、工具搜索、思考展示、缓存诊断。
             (

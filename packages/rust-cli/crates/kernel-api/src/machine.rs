@@ -27,9 +27,10 @@ use crate::env::{
 };
 use crate::env_files::{
     DirEntry, FileList, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome, GrepSearch,
-    ListDir, ListFiles, PathFacts, PutFile, ReadText, StatFile, TextRead,
+    ListDir, ListFiles, PathFacts, PutFile, ReadText, StatFile, StatMany, TextRead,
 };
 use crate::env_pdf::{PdfPageCount, PdfRender, RenderPdfPages};
+use crate::env_registry::LOCAL_MACHINE;
 use crate::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
 use crate::env_shell::{BackgroundInfo, BackgroundStop, BackgroundTask, ShellNotice, ShellState};
 use crate::ids::{OperationId, SessionId};
@@ -93,6 +94,20 @@ pub trait Files: Send + Sync {
         _request: ReadText,
     ) -> Result<TextRead, EnvError> {
         Err(not_provided("read_text"))
+    }
+
+    /// 一次取多个路径的元数据（read，remote-exec.md §20.7.4）：每个路径一项，顺序同请求；路径不存在时那一项是
+    /// `Ok(None)`。远端机器把它合成一次请求；缺省逐个 [`Files::stat`]。
+    async fn stat_many(
+        &self,
+        workspace: &WorkspaceRef,
+        request: StatMany,
+    ) -> Result<Vec<Result<Option<FileStat>, EnvError>>, EnvError> {
+        let mut out = Vec::with_capacity(request.paths.len());
+        for path in request.paths {
+            out.push(self.stat(workspace, StatFile { path }).await);
+        }
+        Ok(out)
     }
 
     /// 条件写整份文件（mutate）；前置条件不满足时返回 [`EnvError::PreconditionFailed`]。
@@ -277,6 +292,8 @@ pub trait Pdf: Send + Sync {
 /// 代码只看得到这个端口的方法（端口 trait 不继承 `std::any::Any`，不能向下转型）。
 #[derive(Clone)]
 pub struct MachineEnv {
+    /// 机器名（R3，remote-exec.md §20.4）：本机是 [`LOCAL_MACHINE`]，远端是 `machines.json` 里的名字。
+    name: Arc<str>,
     info: Arc<dyn EnvInfo>,
     files: Arc<dyn Files>,
     search: Arc<dyn Search>,
@@ -296,6 +313,7 @@ impl MachineEnv {
         E: EnvInfo + Files + Search + Commands + Shell + Background + Checkpoints + Pdf + 'static,
     {
         Self {
+            name: Arc::from(LOCAL_MACHINE),
             info: env.clone(),
             files: env.clone(),
             search: env.clone(),
@@ -306,6 +324,23 @@ impl MachineEnv {
             pdf: env,
             mcp,
         }
+    }
+
+    /// 换上机器名（远端机器由组装根命名；缺省是本机）。
+    #[must_use]
+    pub fn named(mut self, name: impl Into<Arc<str>>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// 机器名：本机是 [`LOCAL_MACHINE`]。
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// 是不是本机。
+    pub fn is_local(&self) -> bool {
+        &*self.name == LOCAL_MACHINE
     }
 
     pub fn info(&self) -> &Arc<dyn EnvInfo> {
@@ -344,3 +379,8 @@ impl MachineEnv {
         &self.mcp
     }
 }
+
+#[path = "machine_unavailable.rs"]
+mod unavailable;
+
+pub use unavailable::not_connected;

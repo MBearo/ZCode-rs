@@ -1,0 +1,1 @@
+- {{name}}: {{system}}, shell {{shell}}, working directory {{cwd}}

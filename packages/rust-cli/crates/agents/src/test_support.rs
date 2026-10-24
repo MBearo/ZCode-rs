@@ -38,6 +38,8 @@ pub(crate) struct Seen {
     pub(crate) tools: Vec<String>,
     pub(crate) system: Vec<SystemBlock>,
     pub(crate) request: QueryRequest,
+    /// 子代理运行的缺省机器（`RunSink::default_machine`，R3）。
+    pub(crate) default_machine: Option<String>,
 }
 
 /// 子循环在哪里等（后台场景）；中止时提前返回。
@@ -146,6 +148,7 @@ impl QueryRunner for FakeRunner {
             .map(|tool| tool.name().to_owned())
             .collect();
         let session = request.session.clone();
+        let default_machine = sink.default_machine().await;
         self.seen
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -153,6 +156,7 @@ impl QueryRunner for FakeRunner {
                 tools,
                 system,
                 request,
+                default_machine,
             });
         let gate = match &self.gate {
             Some(Gate::Shared(gate)) => Some(gate.clone()),
@@ -374,6 +378,22 @@ pub(crate) fn held_with_clock<E: AllPorts + 'static>(
     )
 }
 
+/// 同 [`harness`]，另给执行环境的注册表（R3：远端机器上的 TaskStop、子代理的缺省机器）。
+pub(crate) fn with_machines(
+    machines: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
+) -> Harness {
+    let local = machines.local_machine();
+    built_full(
+        None,
+        false,
+        local,
+        no_peers(),
+        &[],
+        Arc::new(FixedClock(1_000)),
+        Some(machines),
+    )
+}
+
 fn built_with(
     gate: Option<Gate>,
     keep_alive: bool,
@@ -381,6 +401,18 @@ fn built_with(
     peers: Arc<dyn rust_cli_kernel_api::peers::PeerMessaging>,
     hidden: &'static [&'static str],
     clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
+) -> Harness {
+    built_full(gate, keep_alive, machine_env, peers, hidden, clock, None)
+}
+
+fn built_full(
+    gate: Option<Gate>,
+    keep_alive: bool,
+    machine_env: MachineEnv,
+    peers: Arc<dyn rust_cli_kernel_api::peers::PeerMessaging>,
+    hidden: &'static [&'static str],
+    clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
+    machines: Option<Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>>,
 ) -> Harness {
     let scope = TaskScope::root("agents-test", |_| {});
     let store = Arc::new(MemoryStore::default());
@@ -399,6 +431,12 @@ fn built_with(
         store: store.clone(),
         ids: Arc::new(SequentialIds::default()),
         clock,
+        machines: machines.unwrap_or_else(|| {
+            Arc::new(rust_cli_kernel_api::env_registry::LocalRegistry::new(
+                machine_env.clone(),
+                rust_cli_kernel_api::testing::local_services(Arc::new(UnusedEnvironment)),
+            ))
+        }),
         machine: machine_env,
         catalog: Arc::new(crate::AgentCatalog::new(
             Arc::new(UnusedEnvironment),

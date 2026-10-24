@@ -559,3 +559,103 @@ async fn an_ssh_machine_is_provisioned_used_and_survives_a_dropped_link() {
     let (ok, out, err) = sshd.ssh(&format!("{installed} executor stop"));
     assert!(ok, "{out}{err}");
 }
+
+/// 远端执行 R3（remote-exec.md §20.11）：机器清单里的 dev-a 经 SSH 连上（R2 的状态机与 ssh-connect）；脚本模型调用
+/// `Bash{machine}` 在容器里跑命令，结果回到本机；`Read{machine}` 用相对路径读容器里 dev-a 工作目录下的文件。
+#[tokio::test(flavor = "multi_thread")]
+async fn a_listed_machine_runs_bash_and_read_in_the_container() {
+    let Some(artifact) = artifact_or_skip() else {
+        return;
+    };
+    let sshd = Sshd::start();
+    sshd.wait_ready().await;
+    let (ok, _, err) =
+        sshd.ssh("mkdir -p /srv/proj && printf 'from the container\\n' > /srv/proj/notes.txt");
+    assert!(ok, "{err}");
+    let work = tempfile::tempdir().unwrap();
+    let work_path = std::fs::canonicalize(work.path()).unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let list = home.path().join(".zcode/rust-cli/machines.json");
+    std::fs::create_dir_all(list.parent().unwrap()).unwrap();
+    std::fs::write(
+        &list,
+        serde_json::json!({"version": 1, "machines": [
+            {"name": "dev-a", "ssh": HOST, "workingDirectory": "/srv/proj", "connected": true}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let bash = serde_json::json!({
+        "command": "uname -s; pwd; echo marker-$((6*7))",
+        "description": "Where am I",
+        "machine": "dev-a"
+    })
+    .to_string();
+    let read = serde_json::json!({"file_path": "notes.txt", "machine": "dev-a"}).to_string();
+    let fixture = sse::serve(vec![
+        sse::tools_reply(&[sse::tool_block(0, "toolu_1", "Bash", &bash)]),
+        sse::tools_reply(&[sse::tool_block(0, "toolu_2", "Read", &read)]),
+        sse::text_reply("done"),
+    ]);
+    let output = Command::new(BIN)
+        .args([
+            "-p",
+            "check dev-a",
+            "--permission-mode",
+            "bypassPermissions",
+        ])
+        .current_dir(&work_path)
+        .env_clear()
+        .env("HOME", home.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env("SHELL", "/bin/bash")
+        .env("ZCODE_DATA_BASE_DIR", home.path())
+        .env("ZCODE_MODEL_BASE_URL", &fixture.url)
+        .env("ZCODE_API_KEY", "test-key")
+        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_RUNTIME_ENV", "test")
+        .env("_ZCODE_ASSUME_SSH_MACHINES", "1")
+        .env("_ZCODE_ASSUME_SSH_CONFIG", sshd.config())
+        .env("_ZCODE_ASSUME_SSH_ARTIFACT", &artifact)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let requests = fixture.main_requests();
+    assert_eq!(requests.len(), 3);
+    // 工具定义带 `machine`，提醒写容器的系统与工作目录。
+    let bash_schema = requests[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "Bash")
+        .map(|tool| tool["input_schema"]["properties"]["machine"]["enum"].clone())
+        .unwrap();
+    assert_eq!(bash_schema, serde_json::json!(["local", "dev-a"]));
+    let first = requests[0]["messages"].to_string();
+    assert!(first.contains("- dev-a: Linux "), "{first}");
+    assert!(first.contains("working directory /srv/proj"), "{first}");
+    // 结果回到本机：命令在容器里、在 dev-a 的工作目录跑；相对路径的 Read 读容器里的文件。
+    let last = |request: &Value| {
+        request["messages"]
+            .as_array()
+            .and_then(|messages| messages.last())
+            .map(Value::to_string)
+            .unwrap_or_default()
+    };
+    let ran = last(&requests[1]);
+    assert!(ran.contains("Linux"), "{ran}");
+    assert!(ran.contains("/srv/proj"), "{ran}");
+    assert!(ran.contains("marker-42"), "{ran}");
+    let read = last(&requests[2]);
+    assert!(read.contains("from the container"), "{read}");
+
+    // 收尾：停掉容器里的常驻执行器（容器随后删掉）。
+    let installed = format!("/root/.zcode/rust-cli/exec/bin/{VERSION}/zcode-rs");
+    let (ok, out, err) = sshd.ssh(&format!("{installed} executor stop"));
+    assert!(ok, "{out}{err}");
+}

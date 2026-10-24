@@ -15,7 +15,7 @@ use crate::bash_suggest;
 use crate::check::{AskKind, Check, Inputs};
 use crate::parse::{Analysis, Invocation, analyze};
 use crate::paths::PathContext;
-use crate::readonly::is_read_only;
+use crate::readonly::is_read_only_on;
 use crate::rules::Found;
 use crate::shell_rules::{self, Mode, Subject};
 use crate::texts::{self, Reason};
@@ -142,7 +142,7 @@ fn check_subcommand(
     let stripped = shell_rules::strip_safe_wrappers(text);
     let name = stripped.split_whitespace().next().unwrap_or_default();
     if (inputs.mode == PermissionMode::AcceptEdits && ACCEPT_EDITS.contains(&name))
-        || is_read_only(text, false)
+        || is_read_only_on(text, false, inputs.paths.style)
         || invocation.is_some_and(bash_compound::test_is_read_only)
     {
         return Check::Allow.into();

@@ -91,6 +91,20 @@ fn kind(kind: FileKind) -> wf::FileKind {
     }
 }
 
+/// `files.stat_many` 的一项（R3）。
+pub(crate) fn stat_entry(found: Result<Option<FileStat>, EnvError>) -> wf::StatEntry {
+    match found {
+        Ok(stat) => wf::StatEntry {
+            stat: stat.map(file_stat),
+            error: None,
+        },
+        Err(failure) => wf::StatEntry {
+            stat: None,
+            error: Some(error(failure)),
+        },
+    }
+}
+
 pub(crate) fn file_stat(stat: FileStat) -> wf::FileStat {
     wf::FileStat {
         kind: kind(stat.kind),

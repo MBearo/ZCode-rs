@@ -24,6 +24,7 @@ use tokio::sync::mpsc;
 
 use crate::budget;
 use crate::pipeline_hooks::{self as hooks, HookMessages};
+use crate::pipeline_machine::{Machines, Routed, tag};
 use crate::texts;
 use crate::validate::{strip_unknown, validate};
 
@@ -35,10 +36,12 @@ const NO_OUTPUT: &str = "Command failed with no output";
 /// `formatError` 超过这个长度（UTF-16 单元）时保留首尾各一半。
 const ERROR_LIMIT: usize = 10_000;
 
-/// 执行管线；权限判决链与 hooks 由 runtime 注入。
+/// 执行管线；权限判决链、hooks 与执行环境的注册表由 runtime 注入。
 pub struct Pipeline {
     gate: Arc<dyn PermissionGate>,
     hooks: Arc<dyn HookRunner>,
+    /// 按调用的 `machine` 选机器（R3，remote-exec.md §20.6）；没有时不路由。
+    machines: Machines,
 }
 
 /// 子代理里的询问被拒时的结果文字（主线程是 [`REJECT_MESSAGE`]，docs/specs/rust-cli/agents.md §4.1.1）。
@@ -103,7 +106,21 @@ fn format_error(message: &str) -> String {
 
 impl Pipeline {
     pub fn new(gate: Arc<dyn PermissionGate>, hooks: Arc<dyn HookRunner>) -> Self {
-        Self { gate, hooks }
+        Self {
+            gate,
+            hooks,
+            machines: Machines::default(),
+        }
+    }
+
+    /// 接上执行环境的注册表：带 `machine` 参数的工具按调用选机器（remote-exec.md §20.6）。
+    #[must_use]
+    pub fn with_machines(
+        mut self,
+        registry: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
+    ) -> Self {
+        self.machines = Machines::new(registry);
+        self
     }
 
     /// 判决链或 hook 改过的输入要重新通过 schema。
@@ -122,13 +139,17 @@ impl Pipeline {
         input: &Value,
         message: String,
         suggestions: &[PermissionRule],
-        context: &ToolUseContext,
+        call: &Routed,
     ) -> Result<Option<Value>, ToolOutput> {
+        let context = &call.context;
         // 修复线 F20：guarded 的危险命令只批准这一次（Node `approvalMode: "user-once"` 时 `runHooks: false`）：
         // 不跑 PermissionRequest hooks，hook 不能替用户批准；没有“总是允许”（判决链不给建议规则）。
         if !self.gate.ask_once(tool, input, context).await {
-            let payload = hooks::permission_request(tool.name(), input, suggestions);
-            let event = hooks::event(HookEventName::PermissionRequest, context, payload).await;
+            let payload = tag(
+                hooks::permission_request(tool.name(), input, suggestions),
+                call.machine.as_deref(),
+            );
+            let event = hooks::event(HookEventName::PermissionRequest, &call.hooks, payload).await;
             let request = self.hooks.run(event, context.cancel.clone()).await;
             match request.decision {
                 Some(PermissionDecision::Allow { .. }) => return Ok(request.updated_input),
@@ -143,6 +164,8 @@ impl Pipeline {
             message: message.clone(),
             suggestions: suggestions.to_vec(),
             asked_by: None,
+            // 远端调用的询问带机器名（R3，remote-exec.md §20.8）。
+            machine: call.machine.clone(),
         };
         let Ok(answer) = crate::asking::ask::<PermissionAnswer>(context, request).await else {
             return Err(error(rejection(context, None)));
@@ -152,8 +175,9 @@ impl Pipeline {
                 // “总是允许”：会话 actor 已把规则与交互的解决同一批落库；判决链按 `/permissions` 的路径读回库值、换上
                 // LocalSettings 层（shell-permissions.md §5）。修复（R1-2）：以前这里交给判决链另存一份按会话的规则，
                 // 子代理与 `/clear` 之后的新会话看不到，又问一次。
+                // 规则只有一套，存在本机的项目里：用会话的工作区（远端调用的上下文换了工作区，R3）。
                 if !remember.is_empty() {
-                    self.gate.local_rules_committed(&context.workspace).await;
+                    self.gate.local_rules_committed(&call.hooks.workspace).await;
                 }
                 Ok(None)
             }
@@ -179,12 +203,9 @@ impl Pipeline {
         input: Value,
         message: String,
         suggestions: &[PermissionRule],
-        context: &ToolUseContext,
+        call: &Routed,
     ) -> Result<Value, ToolOutput> {
-        match self
-            .ask(tool, &input, message, suggestions, context)
-            .await?
-        {
+        match self.ask(tool, &input, message, suggestions, call).await? {
             Some(updated) => Self::revalidate(tool, schema, updated),
             None => Ok(input),
         }
@@ -196,9 +217,9 @@ impl Pipeline {
         tool: &dyn Tool,
         schema: &Value,
         input: Value,
-        context: &ToolUseContext,
+        call: &Routed,
     ) -> Result<Value, ToolOutput> {
-        match self.gate.decide(tool, &input, context).await {
+        match self.gate.decide(tool, &input, &call.context).await {
             PermissionDecision::Allow {
                 updated_input: Some(updated),
             } => Self::revalidate(tool, schema, updated),
@@ -210,7 +231,7 @@ impl Pipeline {
                 message,
                 suggestions,
             } => {
-                self.ask_for(tool, schema, input, message, &suggestions, context)
+                self.ask_for(tool, schema, input, message, &suggestions, call)
                     .await
             }
             PermissionDecision::Passthrough => {
@@ -218,20 +239,19 @@ impl Pipeline {
                     "ZCode requested permissions to use {}, but you haven't granted it yet.",
                     tool.name()
                 );
-                self.ask_for(tool, schema, input, message, &[], context)
-                    .await
+                self.ask_for(tool, schema, input, message, &[], call).await
             }
         }
     }
 
-    /// 校验、PreToolUse hooks 与权限；通过时返回最终输入。
+    /// 校验、机器路由、PreToolUse hooks 与权限；通过时返回最终输入与路由后的上下文。
     async fn admit(
         &self,
         tool: &dyn Tool,
         mut input: Value,
-        context: &ToolUseContext,
+        context: ToolUseContext,
         messages: &mut HookMessages,
-    ) -> Result<Value, Rejection> {
+    ) -> Result<(Value, Routed), Rejection> {
         // R5-1：输入在组装时不是合法 JSON（标记对象，kernel-api `unparsed_input`）：先于 schema 校验
         // 给出 JSON 解析失败的说明，不跑 hooks 与权限。
         if let Some(unparsed) = unparsed_input::parse(&input) {
@@ -241,22 +261,33 @@ impl Pipeline {
             ))));
         }
         let schema = tool.input_schema();
+        // R3（remote-exec.md §20.6）：有远端机器时，去键与校验用加了 `machine` 的 schema（发给模型的同一组取值）。
+        let plan = self.machines.plan(tool.name(), &context);
+        let checked = Machines::schema(schema.clone(), &plan);
         // 修复线 F51（agents.md §2）：宽松对象的工具（Agent）丢掉 schema 外的键、不报错，之后的 hook、
         // `validate_input` 与 `call` 都用丢掉之后的输入。以前一律按严格对象，
         // 模型给 Agent 传了 schema 外的键（例如 F51 删掉的 `model`）就报 InputValidationError。
         if tool.strips_unknown_keys() {
-            input = strip_unknown(&schema, input);
+            input = strip_unknown(&checked, input);
         }
-        if let Some(message) = validate(tool.name(), &schema, &input) {
+        if let Some(message) = validate(tool.name(), &checked, &input) {
             return Err(Rejection::Other(wrapped(&format!(
                 "InputValidationError: {message}"
             ))));
         }
+        let call = self
+            .machines
+            .route(tool.name(), &mut input, context, &plan)
+            .map_err(|message| Rejection::Other(wrapped(&message)))?;
+        let context = &call.context;
         if let Validation::Invalid { message, .. } = tool.validate_input(&input, context).await {
             return Err(Rejection::Other(wrapped(&message)));
         }
-        let payload = hooks::pre_tool_use(tool.name(), &input, context);
-        let event = hooks::event(HookEventName::PreToolUse, context, payload).await;
+        let payload = tag(
+            hooks::pre_tool_use(tool.name(), &input, context),
+            call.machine.as_deref(),
+        );
+        let event = hooks::event(HookEventName::PreToolUse, &call.hooks, payload).await;
         let mut pre = self.hooks.run(event, context.cancel.clone()).await;
         hooks::take_pre(messages, &mut pre);
         if let Some(updated) = pre.updated_input.take() {
@@ -269,14 +300,14 @@ impl Pipeline {
             input = updated;
         }
         let other = Rejection::Other;
-        match pre.decision {
+        let input = match pre.decision {
             Some(PermissionDecision::Deny { message }) => Err(Rejection::ByHook(error(message))),
             // hook 放行：deny / ask 规则与安全路径仍然生效（不可绕过的权限关卡）。
             Some(PermissionDecision::Allow { .. }) => {
                 match self.gate.check_rules(tool, &input, context).await {
                     Some(PermissionDecision::Deny { message }) => Err(other(error(message))),
                     Some(PermissionDecision::Ask { .. }) => self
-                        .decide(tool, &schema, input, context)
+                        .decide(tool, &schema, input, &call)
                         .await
                         .map_err(other),
                     Some(PermissionDecision::Allow { .. } | PermissionDecision::Passthrough)
@@ -290,20 +321,21 @@ impl Pipeline {
             }) => match self.gate.check_rules(tool, &input, context).await {
                 Some(PermissionDecision::Deny { message }) => Err(other(error(message))),
                 Some(PermissionDecision::Ask { .. }) => self
-                    .decide(tool, &schema, input, context)
+                    .decide(tool, &schema, input, &call)
                     .await
                     .map_err(other),
                 Some(PermissionDecision::Allow { .. } | PermissionDecision::Passthrough) | None => {
-                    self.ask_for(tool, &schema, input, message, &suggestions, context)
+                    self.ask_for(tool, &schema, input, message, &suggestions, &call)
                         .await
                         .map_err(other)
                 }
             },
             Some(PermissionDecision::Passthrough) | None => self
-                .decide(tool, &schema, input, context)
+                .decide(tool, &schema, input, &call)
                 .await
                 .map_err(other),
-        }
+        }?;
+        Ok((input, call))
     }
 
     /// 执行并跑 PostToolUse / PostToolUseFailure hooks。
@@ -311,10 +343,16 @@ impl Pipeline {
         &self,
         tool: &dyn Tool,
         input: Value,
-        context: ToolUseContext,
+        call: Routed,
         progress: mpsc::Sender<ToolProgress>,
         messages: &mut HookMessages,
     ) -> ToolOutput {
+        let Routed {
+            context,
+            hooks: session,
+            machine,
+        } = call;
+        let machine = machine.as_deref();
         match tool
             .call_with_messages(input.clone(), context.clone(), progress)
             .await
@@ -323,8 +361,11 @@ impl Pipeline {
                 mut output,
                 mut new_messages,
             }) => {
-                let payload = hooks::post_tool_use(tool.name(), &input, &output, &context);
-                let event = hooks::event(HookEventName::PostToolUse, &context, payload).await;
+                let payload = tag(
+                    hooks::post_tool_use(tool.name(), &input, &output, &context),
+                    machine,
+                );
+                let event = hooks::event(HookEventName::PostToolUse, &session, payload).await;
                 let mut post = self.hooks.run(event, context.cancel.clone()).await;
                 messages.after.append(&mut post.messages);
                 // 工具自己的后续消息（Skill 的正文）排在 PostToolUse 的消息之后
@@ -350,10 +391,12 @@ impl Pipeline {
                 } else {
                     format_error(&failure.to_string())
                 };
-                let payload =
-                    hooks::post_tool_use_failure(tool.name(), &input, &text, interrupted, &context);
+                let payload = tag(
+                    hooks::post_tool_use_failure(tool.name(), &input, &text, interrupted, &context),
+                    machine,
+                );
                 let event =
-                    hooks::event(HookEventName::PostToolUseFailure, &context, payload).await;
+                    hooks::event(HookEventName::PostToolUseFailure, &session, payload).await;
                 let mut post = self.hooks.run(event, context.cancel.clone()).await;
                 messages.after.append(&mut post.messages);
                 error(text)
@@ -384,16 +427,16 @@ impl ToolExecutor for Pipeline {
         progress: mpsc::Sender<ToolProgress>,
     ) -> ToolExecution {
         let mut messages = HookMessages::default();
-        let input = match self
-            .admit(tool.as_ref(), input, &context, &mut messages)
+        let (input, call) = match self
+            .admit(tool.as_ref(), input, context, &mut messages)
             .await
         {
-            Ok(input) => input,
+            Ok(admitted) => admitted,
             Err(Rejection::ByHook(output)) => return messages.finish(output, true),
             Err(Rejection::Other(output)) => return messages.finish(output, false),
         };
         let output = self
-            .call(tool.as_ref(), input, context, progress, &mut messages)
+            .call(tool.as_ref(), input, call, progress, &mut messages)
             .await;
         messages.finish(output, true)
     }
@@ -410,3 +453,7 @@ mod hook_tests;
 #[cfg(test)]
 #[path = "pipeline_message_tests.rs"]
 mod message_tests;
+
+#[cfg(test)]
+#[path = "pipeline_machine_tests.rs"]
+mod machine_tests;

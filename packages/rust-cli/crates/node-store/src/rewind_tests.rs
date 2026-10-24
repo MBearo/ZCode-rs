@@ -48,6 +48,7 @@ fn result(id: &str, owner: &str, call: &str) -> Fact {
 
 fn checkpoint(id: &str, prompt: &str, assistant: &str, call: &str) -> WorkspaceCheckpoint {
     WorkspaceCheckpoint {
+        machine: None,
         id: id.into(),
         prompt: MessageId::new(prompt),
         assistant: MessageId::new(assistant),
@@ -238,4 +239,62 @@ async fn checkpoint_sequences_follow_the_stored_node_events() {
         t.rows("select json_extract(data, '$.sequenceNumber') from session_entry where type = 'runtime/workspace_checkpoint' order by json_extract(data, '$.sequenceNumber')"),
         vec![vec![json!(57)], vec![json!(58)], vec![json!(59)]]
     );
+}
+
+/// 远端机器上的 checkpoint（R3，remote-exec.md §20.9）：写成本工程的 `rust-cli/remote_checkpoint`（Node 的类型里没有它），
+/// 冷读取带回机器名；它的回退写 `rust-cli/remote_file_rewind`，不动 Node 的记录，本机同一回合的 checkpoint 仍可回退。
+#[tokio::test]
+async fn remote_checkpoints_use_rust_cli_entries() {
+    let t = TestStore::new();
+    two_turns_with_a_write(&t).await;
+    let local = checkpoint("checkpoint_l", "msg_1_u1", "msg_2_a1", "toolu_1");
+    let remote = WorkspaceCheckpoint {
+        machine: Some("dev-a".into()),
+        ..checkpoint("checkpoint_r", "msg_1_u1", "msg_2_a1", "toolu_1")
+    };
+    for one in [&local, &remote] {
+        let fact = Fact::CheckpointCreated {
+            checkpoint: one.clone(),
+        };
+        t.store
+            .commit(&sid(), batch(None, vec![fact]))
+            .await
+            .unwrap();
+    }
+    let count = |kind: &str| {
+        t.rows(&format!(
+            "select count(*) from session_entry where type = '{kind}'"
+        ))[0][0]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(count("runtime/workspace_checkpoint"), 1);
+    assert_eq!(count("rust-cli/remote_checkpoint"), 1);
+    let rows =
+        t.rows("select id, data from session_entry where type = 'rust-cli/remote_checkpoint'");
+    let data: Value = serde_json::from_str(rows[0][1].as_str().unwrap()).unwrap();
+    assert_eq!(data["rustCli"]["machine"], "dev-a");
+    // 序号在本工程的记录之间单独算。
+    assert_eq!(data["sequenceNumber"], 1);
+    assert!(
+        rows[0][0]
+            .as_str()
+            .unwrap()
+            .starts_with("rust-cli-remote-checkpoint:")
+    );
+    let loaded = t.store.load(&sid()).await.unwrap();
+    assert_eq!(loaded.checkpoints, [local.clone(), remote.clone()]);
+
+    // 只回退远端那个：写本工程的回退记录，本机的 checkpoint 还在。
+    let fact = Fact::CheckpointsRestored {
+        checkpoints: vec!["checkpoint_r".into()],
+    };
+    t.store
+        .commit(&sid(), batch(None, vec![fact]))
+        .await
+        .unwrap();
+    assert_eq!(count("runtime/workspace_file_rewind"), 0);
+    assert_eq!(count("rust-cli/remote_file_rewind"), 1);
+    let loaded = t.store.load(&sid()).await.unwrap();
+    assert_eq!(loaded.checkpoints, [local]);
 }

@@ -2,7 +2,7 @@
 
 use crate::handshake::Capability;
 
-/// `MachineEnv` 的 29 个方法，每个一种消息。
+/// `MachineEnv` 的 30 个方法，每个一种消息（R3 加了 `files.stat_many`，remote-exec.md §20.4）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Op {
     Facts,
@@ -10,6 +10,7 @@ pub enum Op {
     ReadFile,
     WriteFile,
     Stat,
+    StatMany,
     ListDir,
     ReadText,
     PutFile,
@@ -37,12 +38,13 @@ pub enum Op {
 }
 
 impl Op {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::Facts,
         Self::PathFacts,
         Self::ReadFile,
         Self::WriteFile,
         Self::Stat,
+        Self::StatMany,
         Self::ListDir,
         Self::ReadText,
         Self::PutFile,
@@ -77,6 +79,7 @@ impl Op {
             Self::ReadFile => "files.read_file",
             Self::WriteFile => "files.write_file",
             Self::Stat => "files.stat",
+            Self::StatMany => "files.stat_many",
             Self::ListDir => "files.list_dir",
             Self::ReadText => "files.read_text",
             Self::PutFile => "files.put_file",
@@ -115,6 +118,7 @@ impl Op {
             Self::ReadFile
             | Self::WriteFile
             | Self::Stat
+            | Self::StatMany
             | Self::ListDir
             | Self::ReadText
             | Self::PutFile => Capability::Files,

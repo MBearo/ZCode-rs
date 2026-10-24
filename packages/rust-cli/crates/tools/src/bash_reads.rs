@@ -365,7 +365,10 @@ pub(crate) async fn record(
         let Ok(Some(path)) = resolve_input_stable(context, &base, &read.path).await else {
             continue;
         };
-        if state.get(&context.session, &path).is_some() {
+        if state
+            .get_at(&context.session, context.machine.name(), &path)
+            .is_some()
+        {
             continue;
         }
         match stat(context, &path).await {
@@ -392,8 +395,9 @@ pub(crate) async fn record(
         let Some((content, offset, limit)) = shape(&slice.content, &read.range) else {
             continue;
         };
-        state.set(
+        state.set_at(
             &context.session,
+            context.machine.name(),
             &path,
             FileState {
                 content,

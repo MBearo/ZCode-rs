@@ -38,6 +38,7 @@ mod rename_text;
 mod resume;
 mod resume_sentinel;
 mod rewind;
+mod rewind_machines;
 mod rewind_plan;
 mod rules;
 mod sink;
@@ -96,6 +97,8 @@ pub struct SessionDeps {
     pub machine: MachineEnv,
     /// 只在本机的服务：斜杠命令的工具上下文要带它。
     pub local: LocalServices,
+    /// 执行环境的注册表（R3，remote-exec.md §20.7）：远端机器上的后台通知、Monitor、代码回退与会话关闭经它找到那台机器。
+    pub machines: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
     /// 每次提问最多几轮（`--max-turns`）。
     pub max_turns: Option<u32>,
     /// 子代理的信号：后台子代理的终态通知、任务清单变化（docs/specs/rust-cli/agents.md §5）。
@@ -357,3 +360,7 @@ impl SessionHandle for Session {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "machines_tests.rs"]
+mod machines_tests;

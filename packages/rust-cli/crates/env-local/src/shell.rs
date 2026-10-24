@@ -255,7 +255,9 @@ impl Shells {
         self.shared.state().commands.get(operation).cloned()
     }
 
-    #[cfg(test)]
+    /// 不带网络出口的 [`Shells::start_with`]。只有 Unix 的测试用（F94：调用它的 shell 测试都只在 Unix 上编译，
+    /// Windows 上是死代码，同 `set_output_limit`）。
+    #[cfg(all(test, unix))]
     pub(crate) async fn start(
         &self,
         context: OperationContext,
@@ -264,7 +266,7 @@ impl Shells {
         self.start_with(context, request, None).await
     }
 
-    /// 同 [`Shells::start`]；`web` 是 ws 来源的 monitor 用的网络出口（工作线 F83）。
+    /// 起一条命令；`web` 是 ws 来源的 monitor 用的网络出口（工作线 F83）。
     pub(crate) async fn start_with(
         &self,
         context: OperationContext,

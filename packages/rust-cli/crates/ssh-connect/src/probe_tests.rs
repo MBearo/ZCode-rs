@@ -1,7 +1,7 @@
 //! 探测：输出的解析；脚本在本机的 `sh` 上跑（临时 HOME 里放假的候选），只执行名字是 `zcode-rs` 的文件。
 #![allow(clippy::disallowed_methods, reason = "测试直接准备文件系统夹具与进程")]
 
-use crate::probe::{Probe, Report, Resident, script};
+use crate::probe::{Probe, Report, Resident};
 use crate::target::{SshTarget, quote};
 
 #[test]
@@ -75,6 +75,8 @@ fn ssh_arguments_and_quoting() {
 #[tokio::test]
 async fn the_script_finds_ours_and_the_npm_one_and_never_runs_zcode() {
     use std::os::unix::fs::PermissionsExt;
+    // F94：`script` 只有这个 Unix 的测试用（在本机的 `sh` 上跑），放在文件头时 Windows 上是没用到的导入。
+    use crate::probe::script;
     let home = tempfile::tempdir().unwrap();
     let write = |path: &std::path::Path, text: &str| {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();

@@ -198,6 +198,11 @@ pub trait RunSink: Interactions {
         None
     }
 
+    /// 这次运行的工具缺省在哪台机器上跑（R3，remote-exec.md §20.6）：子代理派生时 Agent 的 `machine`；None 是本机。
+    async fn default_machine(&self) -> Option<String> {
+        None
+    }
+
     /// 会话现在的目标条件（`/goal`，docs/specs/rust-cli/goal.md §4）：主循环要正常结束时读一次。
     /// owner 是会话 actor；子代理与没有会话 owner 的输出端返回 None（不检查）。
     async fn current_goal(&self) -> Option<String> {
@@ -491,6 +496,9 @@ pub enum InteractionRequest {
         /// agents.md §4.1.1）。最里层的子代理写入，外层转发时不改。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         asked_by: Option<String>,
+        /// 调用在哪台远端机器上执行（R3，remote-exec.md §20.8）；本机为 None。界面的标记在 R4。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine: Option<String>,
     },
     Question {
         tool_use: ToolUseId,

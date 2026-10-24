@@ -9,6 +9,7 @@ use super::*;
 fn watch(timeout_ms: u64, start: u64) -> Watch {
     Watch::new(
         MonitorArmed {
+            machine: None,
             operation: OperationId::new("op_1"),
             task: ShellTaskId::new("b1"),
             tool_use: ToolUseId::new("toolu_1"),

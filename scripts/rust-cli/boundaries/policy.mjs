@@ -35,7 +35,8 @@ export const LAYERS = {
   "exec-server": "adapter",
   // SSH 的连接与部署（remote-exec.md §15.4、§19.9）：只认 exec-transport 的 Connector / Provisioner。
   "ssh-connect": "adapter",
-  // 一台远端机器的连接状态机（remote-exec.md §15.4、§19.10）：只认 Connector / Provisioner 与 exec-client。
+  // 远端机器（remote-exec.md §15.4、§19.10、§20.3）：机器清单 machines.json（R3）与一台机器的连接状态机（R2），只认
+  // Connector / Provisioner 与 exec-client。
   machines: "adapter",
   peers: "adapter",
   platform: "platform",
@@ -83,9 +84,9 @@ export const ALLOWED = {
   // SSH 的 Connector 与 Provisioner（remote-exec.md §19.9）：ssh 进程经 proc；本机产物（ELF 头、sha256、上传的内容）经 fs；
   // 远端目录与可执行文件的名字、任务取 base。不认识 exec-wire：要的版本与协议由组装根给。
   "ssh-connect": ["base", "exec-transport", "fs", "proc"],
-  // 状态机与驱动（remote-exec.md §19.10）：任务经 base 的 TaskScope；exec-wire 只在测试里（假执行器的帧）。§15.4 的表多写了
-  // paths、fs（机器清单 machines.json 在 R3），R2 没有用到，不列。
-  machines: ["base", "exec-client", "exec-transport", "exec-wire"],
+  // 状态机与驱动（remote-exec.md §19.10）：任务经 base 的 TaskScope；exec-wire 只在测试里（假执行器的帧）。机器清单
+  // machines.json（R3，§20.3.1）：文件经 fs，位置由 paths 给。
+  machines: ["base", "exec-client", "exec-transport", "exec-wire", "fs", "paths"],
   // base：`include_lf!`（F56）与产品目录与文件的名字（README §4.1，F55）。
   policy: ["base", "kernel-api"],
   hooks: ["base", "kernel-api", "prompts"],

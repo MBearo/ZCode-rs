@@ -276,6 +276,7 @@ fn monitor_payloads_round_trip_and_older_ones_still_parse() {
         "{text}"
     );
     round_trip(&crate::monitor::MonitorArmed {
+        machine: None,
         operation: crate::ids::OperationId::new("op_1"),
         task: crate::ids::ShellTaskId::new("b1"),
         tool_use: ToolUseId::new("toolu_1"),

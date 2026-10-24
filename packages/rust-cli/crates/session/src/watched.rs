@@ -17,7 +17,7 @@ impl<T> Watched<T> {
         Self(Some(Mutex::new(stream)))
     }
 
-    /// 下一项；流结束或经 [`Watched::stop`] 停用后永远等待（`select!` 里这一支不再就绪）。
+    /// 下一项；流结束后永远等待（`select!` 里这一支不再就绪）。
     pub(crate) async fn next(&mut self) -> T {
         if let Some(stream) = &mut self.0 {
             let stream = stream.get_mut().unwrap_or_else(PoisonError::into_inner);
@@ -27,11 +27,6 @@ impl<T> Watched<T> {
             self.0 = None;
         }
         std::future::pending().await
-    }
-
-    /// 以后不再等这个流（例如执行环境不提供通知）。
-    pub(crate) fn stop(&mut self) {
-        self.0 = None;
     }
 }
 

@@ -216,6 +216,7 @@ impl LocalKernel {
             runner: self.runner.clone(),
             compactor: self.compactor.clone(),
             machine: self.machine.clone(),
+            machines: self.ports.environments.clone(),
             local: self.local.clone(),
             max_turns: self.defaults.max_turns,
             agents: self.agents.clone(),

@@ -49,6 +49,8 @@ mod compact;
 mod compat;
 #[path = "node_interop_parts/fork.rs"]
 mod fork;
+#[path = "node_interop_parts/machines.rs"]
+mod machines;
 #[path = "node_interop_parts/manage.rs"]
 mod manage;
 #[path = "node_interop_parts/sentinel.rs"]
@@ -471,6 +473,7 @@ async fn run(args: &[String]) -> Result<()> {
         [command, dir] if command == "manage-write" => manage::write(dir).await,
         [command, dir, timing] if command == "sentinel-write" => sentinel::write(dir, timing).await,
         [command, dir] if command == "tool-order-write" => tool_order::write(dir).await,
+        [command, dir] if command == "machines-write" => machines::write(dir).await,
         [command, dir, session, title] if command == "rename" => {
             manage::rename(dir, session, title).await
         }

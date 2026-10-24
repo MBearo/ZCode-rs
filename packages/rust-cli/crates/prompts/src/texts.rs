@@ -122,6 +122,15 @@ texts! {
     edited_text_file => "context/edited_text_file",
     edited_text_file_changes => "context/edited_text_file_changes",
     edited_text_file_hidden => "context/edited_text_file_hidden",
+    // 远端机器：工具的 `machine` 参数与机器清单提醒（remote-exec.md §20.5，R3）。
+    machine_param => "context/machine_param",
+    machine_param_default => "context/machine_param_default",
+    machine_param_agent => "context/machine_param_agent",
+    machine_param_agent_default => "context/machine_param_agent_default",
+    machines => "context/machines",
+    machines_none => "context/machines_none",
+    machine_line => "context/machine_line",
+    machine_gone => "context/machine_gone",
     // 任务工具的周期提醒（agents.md §7.4，工作线 F70）。
     task_reminder => "context/task_reminder",
     task_reminder_tasks => "context/task_reminder_tasks",

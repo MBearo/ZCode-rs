@@ -213,3 +213,81 @@ async fn ports_without_an_override_keep_the_unsupported_default() {
     assert!(matches!(page, Err(EnvError::Unsupported { what }) if what == "pdf_page_count"));
     assert_eq!(env.0.load(Ordering::Relaxed), 0);
 }
+
+#[test]
+fn a_machine_carries_its_name() {
+    let env = Arc::new(Counting::default());
+    let local = MachineEnv::new(env, Arc::new(NoMcpTransport));
+    assert_eq!(local.name(), LOCAL_MACHINE);
+    assert!(local.is_local());
+    let remote = local.named("dev-a");
+    assert_eq!(remote.name(), "dev-a");
+    assert!(!remote.is_local());
+}
+
+#[tokio::test]
+async fn an_unavailable_machine_says_it_is_not_connected() {
+    let machine = MachineEnv::unavailable("dev-a");
+    assert_eq!(machine.name(), "dev-a");
+    let error = machine.info().facts(&workspace()).await.unwrap_err();
+    assert_eq!(
+        error,
+        EnvError::Io {
+            message: "Machine \"dev-a\" is not connected.".to_owned()
+        }
+    );
+    let session = SessionId::new("sess_1");
+    assert!(
+        machine
+            .commands()
+            .close_session(&session, false)
+            .await
+            .is_err()
+    );
+}
+
+#[test]
+fn the_default_lookup_goes_through_remote() {
+    let env = Arc::new(Counting::default());
+    let registry = crate::testing::TestMachines::new(Arc::new(crate::testing::UnusedEnvironment));
+    assert!(registry.machine("dev-a").is_none());
+    assert!(registry.machines().is_empty());
+    registry.connect("dev-a", env, "/home/dev/proj");
+    let found = registry.machine("dev-a").unwrap();
+    assert_eq!(found.name(), "dev-a");
+    let set = registry.machines();
+    assert_eq!(set.version, 1);
+    assert_eq!(set.names(), ["dev-a"]);
+    assert_eq!(
+        set.get("dev-a").unwrap().workspace.root.as_str(),
+        "/home/dev/proj"
+    );
+    assert_eq!(
+        registry.remote("dev-a").unwrap().1.environment.as_str(),
+        "dev-a"
+    );
+    registry.disconnect("dev-a");
+    assert!(registry.machine("dev-a").is_none());
+    assert_eq!(registry.machines().version, 2);
+}
+
+#[tokio::test]
+async fn stat_many_defaults_to_one_stat_per_path() {
+    let env = Arc::new(Counting::default());
+    let machine = MachineEnv::new(env, Arc::new(NoMcpTransport));
+    let request = crate::env_files::StatMany {
+        paths: vec![EnvPath::new("/a"), EnvPath::new("/b")],
+    };
+    let found = machine
+        .files()
+        .stat_many(&workspace(), request)
+        .await
+        .unwrap();
+    // Counting 没有覆盖 stat：每项都是缺省的 Unsupported。
+    assert_eq!(found.len(), 2);
+    assert!(
+        found
+            .iter()
+            .all(|item| matches!(item, Err(EnvError::Unsupported { what }) if what == "stat"))
+    );
+}

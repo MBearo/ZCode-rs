@@ -49,6 +49,7 @@ mod notebook;
 mod notebook_edit;
 mod pipeline;
 mod pipeline_hooks;
+mod pipeline_machine;
 mod plan_mode;
 mod policy_filter;
 mod read;

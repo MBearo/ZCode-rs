@@ -167,6 +167,8 @@ pub(crate) struct Setup {
     pub detached: Option<Arc<crate::DetachedAsks>>,
     /// 共用的存储（重开会话的测试）；缺省每次新建。
     pub store: Option<Arc<MemoryStore>>,
+    /// 执行环境的注册表（R3）；缺省只有本机（[`Setup::machine`] 与 [`Setup::local`]）。
+    pub machines: Option<Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>>,
     /// 会话的工作目录；缺省是 [`meta`] 的 `/work`（workspace_tests.rs 的 Windows 用例改它，F57）。
     pub root: &'static str,
 }
@@ -199,6 +201,7 @@ impl Setup {
             peers: crate::PeerDeps::off(),
             detached: None,
             store: None,
+            machines: None,
             root: "/work",
         }
     }
@@ -220,6 +223,12 @@ impl Setup {
         }
         let ids = Arc::new(SequentialIds::default());
         let side_model = self.side_model.unwrap_or_else(|| self.model.clone());
+        let machines = self.machines.unwrap_or_else(|| {
+            Arc::new(rust_cli_kernel_api::env_registry::LocalRegistry::new(
+                self.machine.clone(),
+                self.local.clone(),
+            ))
+        });
         let runner = Arc::new(QueryLoop::new(QueryParts {
             model: self.model,
             context: self.context.unwrap_or_else(|| {
@@ -235,6 +244,7 @@ impl Setup {
             ids: ids.clone(),
             clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
             machine: self.machine.clone(),
+            machines: machines.clone(),
             local: self.local.clone(),
             artifacts: self.artifacts.clone(),
             generation: Generation::new("g1"),
@@ -248,6 +258,7 @@ impl Setup {
                 runner,
                 compactor: Arc::new(NeverCompact),
                 machine: self.machine,
+                machines,
                 local: self.local,
                 max_turns: None,
                 agents: self.agents,

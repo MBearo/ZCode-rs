@@ -3,6 +3,7 @@
 //! (`bash-readonly-policy-argv*.ts`).
 use super::{callbacks, callbacks_net, flags::argv_allowed, js, tables::tables};
 use crate::parse::Invocation;
+use rust_cli_kernel_api::env_files::PathStyle;
 
 /// find 的写操作表。工作线 F53：Node 的表
 /// 少 bfs 的 `-rm`（等同 `-delete`）；find 换成内嵌的 bfs 之后 `find . -rm` 会删文件，以前却算只读。
@@ -177,7 +178,8 @@ pub(crate) fn has_known_write_option(part: &Invocation) -> bool {
 }
 
 /// Node `evaluateBashReadonlyPolicy`: `Some(true)` read-only, anything else not.
-pub(crate) fn evaluate(part: &Invocation) -> Option<bool> {
+/// `style` 是命令所在机器的路径风格（R3，remote-exec.md §20.8：以前是本机的 `cfg!(windows)`）。
+pub(crate) fn evaluate(part: &Invocation, style: PathStyle) -> Option<bool> {
     if !env_allowed(part) || !redirects_allowed(part) {
         return Some(false);
     }
@@ -201,7 +203,7 @@ pub(crate) fn evaluate(part: &Invocation) -> Option<bool> {
     if tables.allow_any.contains(name) {
         return Some(true);
     }
-    if cfg!(windows) && name == "xargs" {
+    if style == PathStyle::Windows && name == "xargs" {
         return None;
     }
     let policy = tables.commands.get(name)?;

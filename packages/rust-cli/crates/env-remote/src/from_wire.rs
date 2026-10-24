@@ -109,6 +109,14 @@ fn kind(kind: wf::FileKind) -> FileKind {
     }
 }
 
+/// `files.stat_many` 的一项（R3）。
+pub(crate) fn stat_entry(entry: wf::StatEntry) -> Result<Option<FileStat>, EnvError> {
+    match entry.error {
+        Some(wire) => Err(error(wire)),
+        None => Ok(entry.stat.map(file_stat)),
+    }
+}
+
 pub(crate) fn file_stat(stat: wf::FileStat) -> FileStat {
     FileStat {
         kind: kind(stat.kind),

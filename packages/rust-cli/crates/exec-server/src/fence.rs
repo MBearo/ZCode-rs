@@ -75,6 +75,9 @@ fn paths(request: &Request) -> Vec<&str> {
         }
         | Request::PdfPageCount { workspace, path } => vec![&workspace.root, path],
         Request::ReadText { workspace, request } => vec![&workspace.root, &request.path],
+        Request::StatMany { workspace, paths } => std::iter::once(workspace.root.as_str())
+            .chain(paths.iter().map(String::as_str))
+            .collect(),
         Request::PutFile {
             workspace, request, ..
         } => vec![&workspace.root, &request.path],

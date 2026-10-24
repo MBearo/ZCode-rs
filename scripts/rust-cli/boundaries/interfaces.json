@@ -44,6 +44,11 @@
           "default": true
         },
         {
+          "name": "stat_many",
+          "signature": "async fn stat_many(&self,workspace:&WorkspaceRef,request:StatMany,) -> Result<Vec<Result<Option<FileStat>,EnvError>>,EnvError>",
+          "default": true
+        },
+        {
           "name": "put_file",
           "signature": "async fn put_file(&self,_workspace:&WorkspaceRef,_context:OperationContext,_request:PutFile,) -> Result<FileWritten,EnvError>",
           "default": true
@@ -272,6 +277,21 @@
           "name": "local",
           "signature": "fn local(&self) -> LocalServices",
           "default": false
+        },
+        {
+          "name": "machines",
+          "signature": "fn machines(&self) -> MachineSet",
+          "default": true
+        },
+        {
+          "name": "remote",
+          "signature": "fn remote(&self,_name:&str) -> Option<(MachineEnv,WorkspaceRef)>",
+          "default": true
+        },
+        {
+          "name": "changes",
+          "signature": "fn changes(&self) -> BoxStream<'static,u64>",
+          "default": true
         }
       ]
     },
@@ -994,6 +1014,23 @@
           },
           {
             "item": "version:String"
+          }
+        ]
+      },
+      "StatEntry": {
+        "kind": "struct",
+        "fields": [
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "stat:Option<FileStat>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "error:Option<crate::envelope::WireError>"
           }
         ]
       },
@@ -2055,6 +2092,9 @@
             "item": "Stat"
           },
           {
+            "item": "StatMany"
+          },
+          {
             "item": "ListDir"
           },
           {
@@ -2169,6 +2209,12 @@
               "rename = \"files.stat\""
             ],
             "item": "Stat(Option<FileStat>)"
+          },
+          {
+            "attributes": [
+              "rename = \"files.stat_many\""
+            ],
+            "item": "StatMany(Vec<StatEntry>)"
           },
           {
             "attributes": [
@@ -2341,6 +2387,12 @@
               "rename = \"files.stat\""
             ],
             "item": "Stat{workspace:Workspace,path:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"files.stat_many\""
+            ],
+            "item": "StatMany{workspace:Workspace,paths:Vec<String>,}"
           },
           {
             "attributes": [

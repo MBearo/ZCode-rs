@@ -58,6 +58,9 @@
 //    工具、一次文字）写的 `cli/debug/model-io-<会话>.jsonl`，App 的 `readModelTrajectory` 读出三条记录、不抛异常：来源分类、
 //    模型、回复的汇总与失败那次的错误按 App 的映射读出；文件里的压缩是 Node 的 `full` 与 `delta`。工作线 F93：回复字段是
 //    Node 的形状，App 读出回复文字、工具调用（名字与参数）、停止原因与用量。
+// 24. 远端机器上的工具调用（R3，`node-interop-machines.mjs`，remote-exec.md §20.9）：工具输入里的 `machine` 与机器清单提醒
+//    Node 读得出、进模型上下文，过 App 的 strict schema；远端 checkpoint 是本工程的记录（Node 看不到），rust-cli 读回；
+//    Node 续写之后 rust-cli 冷读取不变。
 // 4. 界面语言（tui.md §7.1）：rust-cli 写 `~/.zcode/cli/config.json` 的 `ui.locale`（crates/platform/examples/
 //    ui_locale.rs），Node 的 `loadFileConfig` 读出同一个值、其余字段不变；Node 的 `updateUiLocaleInFileConfig`
 //    改写后 rust-cli 读出；同一份输入两边写出的文本逐字节相同。
@@ -74,6 +77,7 @@ import { isDeepStrictEqual } from "node:util";
 import { checkCompat, checkProviderImport, checkStoragePaths } from "./node-interop-compat.mjs";
 import { checkCompactCarried } from "./node-interop-compact.mjs";
 import { checkFork } from "./node-interop-fork.mjs";
+import { checkMachines } from "./node-interop-machines.mjs";
 import { checkManage } from "./node-interop-manage.mjs";
 import { checkSentinel } from "./node-interop-sentinel.mjs";
 import { checkToolOrder } from "./node-interop-tool-order.mjs";
@@ -779,8 +783,9 @@ try {
       rustText,
       expectEqual,
     });
-    // 第十九段：工具结果的位置键（工作线 F81，node-interop-tool-order.mjs）。
-    await checkToolOrder({
+    // 第十九段：工具结果的位置键（工作线 F81，node-interop-tool-order.mjs）；第二十四段：远端机器上的工具调用（R3，
+    // node-interop-machines.mjs），同一组参数。
+    const continuing = {
       nodeRoot,
       store,
       artifactStore,
@@ -790,7 +795,9 @@ try {
       rustText,
       expectEqual,
       node: { nodeRuntime, persistence, createMessageId, createPartId, createTurnId },
-    });
+    };
+    await checkToolOrder(continuing);
+    await checkMachines(continuing);
   } finally {
     store.close();
   }
@@ -910,7 +917,10 @@ try {
         "text and position, only in the model requests, while Node's tool parts stay as Node wrote them; " +
         `the App's readModelTrajectory reads the ${modelIo.records} model-io records a real \`zcode -p\` wrote ` +
         "(a retried 500, a tool call and a reply) with Node's compaction and without errors, " +
-        "including the reply text and the tool calls in Node's shape.",
+        "including the reply text and the tool calls in Node's shape; " +
+        "tool calls on a remote machine keep their machine field in the inputs Node reads and the App schema accepts, " +
+        "the machine list reminder reaches Node's model context, and remote checkpoints are rust-cli entries Node " +
+        "does not see while rust-cli reads them back.",
     );
   }
 } finally {

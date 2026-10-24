@@ -12,6 +12,7 @@ use crate::ui::text::plain;
 
 fn permission() -> InteractionRequest {
     InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("tu1"),
         tool: "Bash".into(),
         input: json!({"command": "rm -rf build", "description": "clean the build"}),
@@ -176,6 +177,7 @@ fn views_show_the_request() {
     assert!(shown.iter().any(|l| l.contains("2. SQLite")));
     // Edit 的审批带 diff 预览。
     let edit = InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("tu4"),
         tool: "Edit".into(),
         input: json!({"file_path": "/w/a.rs", "old_string": "a", "new_string": "b"}),
@@ -191,6 +193,7 @@ fn views_show_the_request() {
 
 fn bash_ask(command: &str, suggestions: &[&str]) -> InteractionRequest {
     InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("tu5"),
         tool: "Bash".into(),
         input: json!({ "command": command }),
@@ -332,6 +335,7 @@ fn several_suggestions_are_listed() {
 #[test]
 fn asks_of_closed_sessions_name_the_session() {
     let request = InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("tu9"),
         tool: "Bash".into(),
         input: json!({"command": "mytool build"}),

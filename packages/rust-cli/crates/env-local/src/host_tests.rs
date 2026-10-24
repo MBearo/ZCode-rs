@@ -4,7 +4,7 @@ use std::path::Path;
 
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::EnvironmentId;
-use rust_cli_kernel_api::machine::{EnvInfo, Files};
+use rust_cli_kernel_api::machine::EnvInfo;
 
 use super::*;
 use crate::git::tests::git;
@@ -62,6 +62,8 @@ fn git_root_is_the_nearest_ancestor_with_dot_git() {
 async fn a_dot_git_that_is_neither_file_nor_directory_is_not_a_git_root() {
     use rust_cli_kernel_api::env_files::{FileKind, StatFile};
     use rust_cli_kernel_api::env_git::has_git_marker;
+    // F94：`Files` 只有这个 Unix 的测试用（经端口 `stat`），放在文件头时 Windows 上是没用到的导入。
+    use rust_cli_kernel_api::machine::Files;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join("repo/a/b")).unwrap();

@@ -23,6 +23,7 @@ mod log;
 mod log_writer;
 mod login;
 mod loopback;
+mod machines;
 mod mcp;
 mod model_io;
 mod model_io_files;
@@ -350,6 +351,9 @@ async fn session(
     } else {
         setup::environments(env, mcp_transport)
     };
+    // 远端机器（R3，remote-exec.md §20.2）：本机的注册表外面包一层，连上的远端机器放进来、断开时拿走。
+    let machines = machines::Machines::new(environments);
+    let environments = machines.registry();
     let local_machine = environments.local_machine();
     // hooks、权限规则与 MCP 读 Node 的配置文件（docs/specs/rust-cli/config.md）；模式按 Node 的顺序
     //（命令行 → 本机项目的持久模式 → 配置 → default，config.md §2.2）。
@@ -364,6 +368,9 @@ async fn session(
     // 会话库与产物目录按 Node 的 `storage.sessionDbPath` / `storage.dir`（用户级 → 项目级 → 环境变量，
     // config.md §2.3）：先读配置再开库。修复线 F2：以前总在缺省位置，Node 设了这些值时两边各用一个库。
     let paths = setup::storage_paths(&startup, &config.storage.settings());
+    // 远端机器的启动输入在这里取（之后 `startup.explicit` 会被移走，§20.3.2）。
+    let surface = (matches!(mode, Mode::Tui), matches!(mode, Mode::Print));
+    let machine_start = machines::Start::new(&paths, surface, &startup);
     // 自动更新（docs/specs/rust-cli/update.md §3，F48，照 Codex）：只在 TUI、工作区信任之前；没有启动器标记时什么都
     // 不做。`updates` 留到返回：它持有后台刷新的任务作用域。选了 Update now 时不建会话，安装后以它的结果退出。
     let vars = tui::vars(&startup.env);
@@ -540,6 +547,8 @@ async fn session(
     // 开始连接 MCP 服务器、加载插件。`-p` 只短等（alwaysLoad 的服务器与第一条命令前的 prewait，ext.md §3.3.1），
     // 没连上的在后台继续连；TUI 不等。
     kernel.start_extensions().await;
+    // 自动连上次连着的机器（§20.3.2）：TUI 在后台；`-p` 只在测试变量下、同步连完（§20.10）。
+    machines.start(machine_start).await?;
     if matches!(mode, Mode::Print) {
         // 等 MCP 连接期间收到退出信号：不再等（headless 看到令牌已取消就不开回合）。
         tokio::select! {

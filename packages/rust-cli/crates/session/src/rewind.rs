@@ -1,18 +1,19 @@
 //! rewind（docs/specs/rust-cli/session-lifecycle.md §5）：对话回退是一次存储提交；代码回退是
 //! 执行环境的 token 事务，在后台工作里跑，结果回到 actor 后才提交事实、发事件、回复命令。
 
-use rust_cli_kernel_api::env::{OperationContext, Origin, WorkspaceRef};
-use rust_cli_kernel_api::env_rewind::{
-    RestoreAction, RestoreFile, RestoredFile, RewindPlan, RewindPrepare, RewindStatus,
-};
+use std::sync::Arc;
+
+use rust_cli_kernel_api::env::{OperationContext, Origin};
+use rust_cli_kernel_api::env_rewind::RestoreAction;
 use rust_cli_kernel_api::ids::{CommandId, MessageId, OperationId, OwnerEpoch};
-use rust_cli_kernel_api::machine::Checkpoints;
+use rust_cli_kernel_api::machine::{Checkpoints, not_connected};
 use rust_cli_kernel_api::session_api::{Ack, KernelEvent, RewindOption, RewindScope};
 use rust_cli_kernel_api::store::{ArtifactStore, Fact, RevertCursor, WorkspaceCheckpoint};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use crate::actor::{Actor, Job, JobDone, rejected};
+use crate::rewind_machines::{self, Group};
 use crate::rewind_plan::{self, Artifact};
 
 /// 选择器的快照：可选的 user 消息与每一回合的 checkpoint（读 artifact 在调用方做）。
@@ -26,8 +27,10 @@ pub(crate) struct Finished {
     target: MessageId,
     scope: RewindScope,
     reply: oneshot::Sender<Ack>,
-    token: OperationId,
-    checkpoints: Vec<String>,
+    /// 每台机器的 token（提交之后释放）。
+    tokens: Vec<(Arc<dyn Checkpoints>, OperationId)>,
+    /// 撤销成功的 checkpoint（R3：跨机器时一台 apply 失败，成功的那几台也要记下）。
+    restored: Vec<String>,
     result: Result<Value, String>,
 }
 
@@ -61,55 +64,22 @@ pub(crate) async fn options(store: &dyn ArtifactStore, snapshot: Snapshot) -> Ve
     out
 }
 
-/// 执行环境的回退事务（spec §5.2）：prepare（逐个核对 hash）→ apply（写前再核对，失败已补偿）。token 是
-/// `context.operation`，调用方在提交事实之后 `rewind_finish`。
-async fn restore(
-    checkpoints: &dyn Checkpoints,
-    workspace: &WorkspaceRef,
-    context: OperationContext,
-    files: Vec<RestoreFile>,
-) -> Result<Vec<RestoredFile>, String> {
-    let token = context.operation.clone();
-    let plan = checkpoints
-        .rewind_prepare(workspace, context, RewindPrepare { files })
-        .await
-        .map_err(|error| error.to_string())?;
-    if let RewindPlan::Conflicts { files } = plan {
-        let lines: Vec<String> = files
-            .iter()
-            .map(|f| rewind_plan::conflict(f.path.as_str()))
-            .collect();
-        return Err(lines.join("\n"));
-    }
-    match checkpoints
-        .rewind_apply(&token)
-        .await
-        .map_err(|e| e.to_string())?
-    {
-        RewindStatus::Applied { files } => Ok(files),
-        RewindStatus::Failed { message, conflicts } if !conflicts.is_empty() => {
-            let lines: Vec<String> = conflicts
-                .iter()
-                .map(|f| rewind_plan::conflict(f.path.as_str()))
-                .collect();
-            Err(format!("{message}\n{}", lines.join("\n")))
-        }
-        RewindStatus::Failed { message, .. } => Err(message),
-        other => Err(format!("unexpected rewind status: {other:?}")),
-    }
-}
-
-/// 回执里的文件：`[{path, action}]`。
-fn restored_json(files: &[RestoredFile]) -> Value {
-    json!(
-        files
-            .iter()
-            .map(|f| json!({"path": f.path, "action": match f.action {
+/// 回执里的文件：`[{path, action}]`；远端机器上的另有 `machine`（R3）。
+fn restored_json(groups: &[rewind_machines::Restored]) -> Value {
+    let mut out = Vec::new();
+    for (machine, files) in groups {
+        for f in files {
+            let mut item = json!({"path": f.path, "action": match f.action {
                 RestoreAction::Restore => "restore",
                 RestoreAction::Delete => "delete",
-            }}))
-            .collect::<Vec<_>>()
-    )
+            }});
+            if let Some(name) = machine {
+                item["machine"] = Value::from(name.as_str());
+            }
+            out.push(item);
+        }
+    }
+    Value::Array(out)
 }
 
 impl Actor {
@@ -176,41 +146,29 @@ impl Actor {
             let _ = reply.send(rejected("there are no code changes to restore"));
             return;
         }
-        let token = self.deps.ids.operation();
-        let context = OperationContext {
-            environment: self.meta.workspace.environment.clone(),
-            generation: self.deps.generation.clone(),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: token.clone(),
-            origin: Origin::User {
-                session: Some(self.meta.id.clone()),
-            },
-        };
-        let workspace = self.meta.workspace.clone();
-        let (port, store) = (
-            self.deps.machine.checkpoints().clone(),
-            self.deps.artifacts.clone(),
-        );
-        let checkpoints = undo.iter().map(|c| c.id.clone()).collect();
-        let task = self.deps.spawner.spawn("rewind-code", async move {
-            let result = async {
-                let mut artifacts = Vec::new();
-                for checkpoint in &undo {
-                    artifacts.push(read(store.as_ref(), checkpoint).await?);
-                }
-                let files = rewind_plan::plan(&artifacts)?;
-                let restored = restore(port.as_ref(), &workspace, context, files).await?;
-                Ok(restored_json(&restored))
+        // 按机器分组（R3，remote-exec.md §20.7.5）：本机在前，远端按名字；远端没连上就整体拒绝。
+        let groups = match self.rewind_groups(undo) {
+            Ok(groups) => groups,
+            Err(reason) => {
+                let _ = reply.send(rejected(reason));
+                return;
             }
-            .await;
+        };
+        let tokens = groups
+            .iter()
+            .map(|group| (group.port.clone(), group.token().clone()))
+            .collect();
+        let store = self.deps.artifacts.clone();
+        let task = self.deps.spawner.spawn("rewind-code", async move {
+            let outcome = rewind_machines::restore(store.as_ref(), &groups).await;
             JobDone::Rewind(Box::new(Finished {
                 command,
                 target,
                 scope,
                 reply,
-                token,
-                checkpoints,
-                result,
+                tokens,
+                restored: outcome.restored,
+                result: outcome.result.map(|done| restored_json(&done)),
             }))
         });
         self.job = Some(Job { task, cancel: None });
@@ -223,11 +181,21 @@ impl Actor {
             target,
             scope,
             reply,
-            token,
-            checkpoints,
+            tokens,
+            restored: checkpoints,
             result,
         } = finished;
         let ack = match result {
+            // 跨机器时一台 apply 失败：成功的那几台已经改回，记下它们（不动对话），再拒绝（R3）。
+            Err(reason) if !checkpoints.is_empty() => {
+                let fact = Fact::CheckpointsRestored {
+                    checkpoints: checkpoints.clone(),
+                };
+                if self.commit(Some(command), vec![fact]).await.is_ok() {
+                    self.checkpoints.retain(|c| !checkpoints.contains(&c.id));
+                }
+                rejected(reason)
+            }
             Err(reason) => rejected(reason),
             Ok(restored) => {
                 let fact = Fact::CheckpointsRestored {
@@ -251,10 +219,11 @@ impl Actor {
             }
         };
         let _ = reply.send(ack);
-        let checkpoints = self.deps.machine.checkpoints().clone();
         drop(self.deps.spawner.spawn("rewind-finish", async move {
-            if let Err(error) = checkpoints.rewind_finish(&token).await {
-                tracing::warn!(%error, "rewind token was not released");
+            for (port, token) in tokens {
+                if let Err(error) = port.rewind_finish(&token).await {
+                    tracing::warn!(%error, "rewind token was not released");
+                }
             }
         }));
         self.start_next().await;
@@ -290,6 +259,54 @@ impl Actor {
             },
             Err(reason) => rejected(reason),
         }
+    }
+
+    /// 要撤销的 checkpoint 按机器分组：本机在前，远端按名字；每组一个 token、那台机器的端口与工作区。
+    fn rewind_groups(&self, undo: Vec<WorkspaceCheckpoint>) -> Result<Vec<Group>, String> {
+        let mut names: Vec<Option<String>> = Vec::new();
+        for checkpoint in &undo {
+            if !names.contains(&checkpoint.machine) {
+                names.push(checkpoint.machine.clone());
+            }
+        }
+        names.sort();
+        let mut groups = Vec::new();
+        for machine in names {
+            let (port, workspace) = match &machine {
+                None => (
+                    self.deps.machine.checkpoints().clone(),
+                    self.meta.workspace.clone(),
+                ),
+                Some(name) => match self.deps.machines.remote(name) {
+                    Some((env, workspace)) => (env.checkpoints().clone(), workspace),
+                    None => {
+                        return Err(format!("Cannot restore code: {}", not_connected(name)));
+                    }
+                },
+            };
+            let context = OperationContext {
+                environment: workspace.environment.clone(),
+                generation: self.deps.generation.clone(),
+                owner_epoch: OwnerEpoch::LOCAL,
+                operation: self.deps.ids.operation(),
+                origin: Origin::User {
+                    session: Some(self.meta.id.clone()),
+                },
+            };
+            let checkpoints = undo
+                .iter()
+                .filter(|c| c.machine == machine)
+                .cloned()
+                .collect();
+            groups.push(Group {
+                machine,
+                checkpoints,
+                port,
+                workspace,
+                context,
+            });
+        }
+        Ok(groups)
     }
 
     /// 历史截到 target 之前（`session.revert` 单游标）；`extra` 与游标在同一批提交。返回去掉的消息数。

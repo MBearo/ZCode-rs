@@ -340,11 +340,14 @@ impl LocalKernel {
             },
             context,
         )
-        // 读过的文件在磁盘上被改动（tools-files.md §4.1）：与文件工具同一份 readFileState。
-        .with_changed_files(Arc::new(rust_cli_tools::FileChanges::new(
-            read_files.clone(),
-            machine.files().clone(),
-        )));
+        // 读过的文件在磁盘上被改动（tools-files.md §4.1）：与文件工具同一份 readFileState；远端机器上读过的文件每台每步
+        // 一次批量 stat（R3，remote-exec.md §20.7.4）。
+        .with_changed_files(Arc::new(
+            rust_cli_tools::FileChanges::new(read_files.clone(), machine.files().clone())
+                .with_machines(ports.environments.clone()),
+        ))
+        // 机器清单提醒（R3，remote-exec.md §20.5.3）。
+        .with_machines(ports.environments.clone());
         let context = Arc::new(context);
         let assembler = context.clone();
         let sessions = OpenSessions::default();
@@ -365,19 +368,24 @@ impl LocalKernel {
                 ext.registry(),
                 gate.clone(),
             )),
-            executor: Arc::new(Pipeline::new(
-                Arc::new(permissions::SharedRules {
-                    gate: gate.clone(),
-                    store: ports.store.clone(),
-                }),
-                hooks.clone(),
-            )),
+            // 按调用的 `machine` 选机器（R3，remote-exec.md §20.6）。
+            executor: Arc::new(
+                Pipeline::new(
+                    Arc::new(permissions::SharedRules {
+                        gate: gate.clone(),
+                        store: ports.store.clone(),
+                    }),
+                    hooks.clone(),
+                )
+                .with_machines(ports.environments.clone()),
+            ),
             // 先交出“稍后接上”的句柄：子循环（agents）与主循环共用，压缩器建好后再设置（late.rs）。
             compactor: late.clone(),
             hooks: hooks.clone(),
             ids: ports.ids.clone(),
             clock: ports.clock.clone(),
             machine: machine.clone(),
+            machines: ports.environments.clone(),
             local: local.clone(),
             artifacts: ports.artifacts.clone(),
             generation,
@@ -392,6 +400,7 @@ impl LocalKernel {
                 ids: ports.ids.clone(),
                 clock: ports.clock.clone(),
                 machine: machine.clone(),
+                machines: ports.environments.clone(),
                 tasks,
                 queries: Arc::new(agents::LoopFactory {
                     parts: parts.clone(),

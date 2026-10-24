@@ -456,7 +456,8 @@ async fn execute(
         workspace: scope.current_workspace().await,
         mode: scope.current_mode().await,
         cancel,
-        machine: scope.parts.machine.clone(),
+        // 缺省机器（R3，remote-exec.md §20.6）：主线程是本机，子代理是派生时给的机器；执行管线再按调用的 `machine` 换。
+        machine: scope.default_machine().await,
         local: scope.parts.local.clone(),
         artifacts: scope.parts.artifacts.clone(),
         interactions: scope.sink.clone(),

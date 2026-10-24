@@ -217,6 +217,7 @@ impl Fetch for MonitorEnv {}
 
 fn armed(task: &str) -> MonitorArmed {
     MonitorArmed {
+        machine: None,
         operation: OperationId::new("op_m"),
         task: ShellTaskId::new(task),
         tool_use: ToolUseId::new("toolu_m"),

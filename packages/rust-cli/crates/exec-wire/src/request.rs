@@ -33,6 +33,12 @@ pub enum Request {
     },
     #[serde(rename = "files.stat")]
     Stat { workspace: Workspace, path: String },
+    /// 一次取多个路径的元数据（R3，remote-exec.md §20.7.4）。老执行器回 `unsupported`，客户端改成逐个 `files.stat`。
+    #[serde(rename = "files.stat_many")]
+    StatMany {
+        workspace: Workspace,
+        paths: Vec<String>,
+    },
     #[serde(rename = "files.list_dir")]
     ListDir { workspace: Workspace, path: String },
     #[serde(rename = "files.read_text")]
@@ -121,6 +127,7 @@ impl Request {
             Self::ReadFile { .. } => Op::ReadFile,
             Self::WriteFile { .. } => Op::WriteFile,
             Self::Stat { .. } => Op::Stat,
+            Self::StatMany { .. } => Op::StatMany,
             Self::ListDir { .. } => Op::ListDir,
             Self::ReadText { .. } => Op::ReadText,
             Self::PutFile { .. } => Op::PutFile,

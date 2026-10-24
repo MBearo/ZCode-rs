@@ -34,6 +34,7 @@ pub(crate) fn parts(model: Arc<dyn ModelPort>, tools: Vec<Arc<dyn Tool>>) -> Que
         ids: Arc::new(SequentialIds::default()),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
         machine: machine(env.clone()),
+        machines: rust_cli_kernel_api::testing::environments(env.clone()),
         local: local_services(env),
         artifacts: Arc::new(MemoryStore::default()),
         generation: Generation::new("g1"),

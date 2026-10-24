@@ -48,7 +48,7 @@ impl Input {
     }
 }
 
-/// zod 的 `sM` 不许的字符：C0 控制字符（制表符与换行除外）、DEL 与 C1 控制字符。
+/// 审批框里看不见、所以 `command` 与 `ws.url` 不许的字符：C0 控制字符（制表符、换行、回车除外）、DEL 与 C1 控制字符。
 fn has_hidden_controls(text: &str) -> bool {
     text.chars().any(|c| {
         let code = u32::from(c);

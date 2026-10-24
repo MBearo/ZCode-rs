@@ -106,6 +106,15 @@ async fn run(
     if let Err(error) = deps.machine.commands().close_session(&id, forget).await {
         tracing::warn!(%error, session = %id, "the environment could not close the session");
     }
+    // 连上的远端机器同样关闭（R3，remote-exec.md §20.7.2）：没连上的那台以后重连时不会再送这个会话的通知给它。
+    for remote in deps.machines.machines().machines {
+        let Some(machine) = deps.machines.machine(&remote.name) else {
+            continue;
+        };
+        if let Err(error) = machine.commands().close_session(&id, forget).await {
+            tracing::warn!(%error, session = %id, machine = %remote.name, "a remote machine could not close the session");
+        }
+    }
     // 停止这个会话的持久定时任务调度、释放调度锁（tools-more.md §16.4）。
     deps.cron.session_closed(&id).await;
     // 最后一步：组装方清按会话的表、把会话移出会话表（等它的打开在这之后醒来）。

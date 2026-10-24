@@ -291,3 +291,6 @@ mod deny_forms;
 
 #[path = "lib_tests_monitor.rs"]
 mod monitor_chain;
+
+#[path = "lib_tests_machine.rs"]
+mod machine;

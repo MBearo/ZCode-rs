@@ -8,7 +8,6 @@ use rust_cli_base::Task;
 use rust_cli_kernel_api::abort::{Abort, AbortReason};
 use rust_cli_kernel_api::agents::AgentSignal;
 use rust_cli_kernel_api::checkpoint::PendingCheckpoints;
-use rust_cli_kernel_api::env_shell::ShellNotice;
 use rust_cli_kernel_api::hooks::HookOutcome;
 use rust_cli_kernel_api::ids::{
     CommandId, InteractionId, MessageId, OwnerEpoch, RunId, ToolUseId, TurnId,
@@ -115,7 +114,7 @@ pub(crate) struct Running {
 enum Next {
     Request(Request),
     Sink(Option<SinkRequest>),
-    Notice(ShellNotice),
+    Notice(rust_cli_kernel_api::machine_notices::MachineNotice),
     Agent(AgentSignal),
     Cron,
     Job(Result<JobDone, rust_cli_base::TaskError>),
@@ -233,7 +232,11 @@ impl Actor {
         asks: mpsc::WeakSender<Request>,
         resume_pending: Vec<MessageId>,
     ) -> Self {
-        let stream = Notices::new(deps.machine.shell().shell_notices(&state.meta.id, 0));
+        // 本机与连上的远端机器的通知（R3，remote-exec.md §20.7.2）。
+        let stream = Notices::new(rust_cli_kernel_api::machine_notices::all_shell_notices(
+            deps.machines.clone(),
+            state.meta.id.clone(),
+        ));
         let agent_stream = AgentStream::new(deps.agents.signals(&state.meta.id));
         let cron_stream = CronStream::new(deps.cron.wakeups(&state.meta.id));
         let peer_stream = crate::watched::Watched::new(deps.peers.port.signals(&state.meta.id));

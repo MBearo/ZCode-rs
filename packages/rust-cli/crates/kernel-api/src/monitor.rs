@@ -33,4 +33,7 @@ pub struct MonitorArmed {
     pub source: MonitorSource,
     /// 输出文件（终态通知的 `<output-file>`）。
     pub output: EnvPath,
+    /// 命令在哪台远端机器上（R3，remote-exec.md §20.7.2）：输出流与停止都发给它；本机为 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }

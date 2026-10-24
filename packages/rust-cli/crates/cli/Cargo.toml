@@ -24,6 +24,8 @@ parity = []
 
 [dependencies]
 anyhow.workspace = true
+# 远端机器的连接器包一层（R3，remote-exec.md §20.3.2）：`Connector` / `FrameSource` 是 async trait，帧是 `Bytes`。
+async-trait.workspace = true
 # Windows 剪贴板图片的 base64（tui-input.md §3.1）。
 base64.workspace = true
 # TUI 的服务端口（界面语言的写回、登录）返回 BoxFuture（docs/specs/rust-cli/tui.md §7.1）。
@@ -35,6 +37,7 @@ rust-cli-env-remote.workspace = true
 rust-cli-exec-client.workspace = true
 rust-cli-exec-server.workspace = true
 rust-cli-exec-transport.workspace = true
+# 握手结果（系统、架构、路径风格）换成注册表里的机器事实（R3）。
 # 执行器的状态（管理帧）与协议主版本（remote-exec.md §19.3、§19.6）。
 rust-cli-exec-wire.workspace = true
 rust-cli-executor-host.workspace = true
@@ -44,6 +47,7 @@ rust-cli-headless.workspace = true
 # 配置文件的 hooks 段与快照（docs/specs/rust-cli/config.md）。
 rust-cli-hooks.workspace = true
 rust-cli-kernel-api.workspace = true
+# 远端机器的清单 machines.json（R3，remote-exec.md §20.3）。
 # 只给测试的 SSH 入口（remote-exec.md §19.11）：连接状态机与 SSH 的连接、部署。
 rust-cli-machines.workspace = true
 rust-cli-memory.workspace = true
@@ -70,6 +74,7 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std", "signal", "sync"] }
 # 退出信号交给前端的取消令牌（session-lifecycle.md §3.5）。
 tokio-util.workspace = true
+bytes.workspace = true
 # 账号服务地址的环境变量取 origin（Node `normalizeZCodeEndpointOrigin`）。
 url.workspace = true
 tracing.workspace = true
@@ -90,7 +95,6 @@ mimalloc.workspace = true
 windows-sys.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
 futures-util.workspace = true
 rust-cli-context.workspace = true
 rust-cli-kernel-api = { workspace = true, features = ["testing"] }

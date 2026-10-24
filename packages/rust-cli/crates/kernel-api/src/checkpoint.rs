@@ -66,6 +66,7 @@ impl PendingCheckpoints {
                 assistant: assistant.clone(),
                 tool_use: tool_use_id.clone(),
                 snapshot,
+                machine: display["machine"].as_str().map(str::to_owned),
             };
             let change = FileChange {
                 path: display["path"].as_str().unwrap_or_default().to_owned(),

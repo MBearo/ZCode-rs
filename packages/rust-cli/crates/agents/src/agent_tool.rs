@@ -200,6 +200,8 @@ impl Tool for AgentTool {
             mode: spawn::mode(parent.mode, definition.permission_mode),
             definition: Arc::new(definition),
             workspace: context.workspace.clone(),
+            // 执行管线已按 Agent 的 `machine` 换好了机器（R3）：远端时记下它，子代理的工具缺省在那里跑。
+            machine: (!context.machine.is_local()).then(|| context.machine.name().to_owned()),
             background,
             // 前台的条目也记：停放后转成后台、之后的续跑都按后台运行（agents.md §4.1.1）。
             asks: core

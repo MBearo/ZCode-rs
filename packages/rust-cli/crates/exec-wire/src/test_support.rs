@@ -117,6 +117,10 @@ pub(crate) fn requests() -> Vec<Request> {
             workspace: ws(),
             path: "/w/a".to_owned(),
         },
+        Request::StatMany {
+            workspace: ws(),
+            paths: vec!["/w/a".to_owned(), "/w/b".to_owned()],
+        },
         Request::ListDir {
             workspace: ws(),
             path: "/w".to_owned(),
@@ -285,6 +289,27 @@ pub(crate) fn replies() -> Vec<Reply> {
             mtime_ms: 9,
             version: "v1".to_owned(),
         })),
+        Reply::StatMany(vec![
+            crate::dto::files::StatEntry {
+                stat: Some(FileStat {
+                    kind: FileKind::File,
+                    size: 1,
+                    mtime_ms: 2,
+                    version: "v3".to_owned(),
+                }),
+                error: None,
+            },
+            crate::dto::files::StatEntry {
+                stat: None,
+                error: None,
+            },
+            crate::dto::files::StatEntry {
+                stat: None,
+                error: Some(crate::envelope::WireError::PermissionDenied {
+                    message: "no".to_owned(),
+                }),
+            },
+        ]),
         Reply::ListDir(vec![DirEntry {
             name: "a".to_owned(),
             kind: FileKind::Directory,

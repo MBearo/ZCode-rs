@@ -6,7 +6,9 @@ use rust_cli_env_local::{LocalEnvironment, ShellConfig};
 use rust_cli_kernel_api::env::{
     EnvError, EnvPath, FileVersion, ReadFile, WriteFile, WritePrecondition,
 };
-use rust_cli_kernel_api::env_files::{FileKind, ListDir, PutFile, ReadText, StatFile, TextRead};
+use rust_cli_kernel_api::env_files::{
+    FileKind, ListDir, PutFile, ReadText, StatFile, StatMany, TextRead,
+};
 
 use crate::contract;
 use crate::support::{Kind, context, env_path, machine, workspace};
@@ -194,7 +196,30 @@ async fn facts_describe_the_machine_and_its_workspace(kind: Kind) {
     );
 }
 
+/// 一次取多个路径的元数据（R3，remote-exec.md §20.7.4）：顺序同请求，不存在的是 None；远端是一条消息。
+async fn stat_many_answers_each_path_in_order(kind: Kind) {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = workspace(dir.path());
+    let env = machine(kind, LocalEnvironment::new(None)).await;
+    std::fs::write(dir.path().join("a.txt"), "abc").unwrap();
+    std::fs::create_dir(dir.path().join("d")).unwrap();
+    let request = StatMany {
+        paths: ["a.txt", "missing", "d"]
+            .iter()
+            .map(|name| env_path(&dir.path().join(name)))
+            .collect(),
+    };
+    let found = env.files().stat_many(&ws, request).await.unwrap();
+    assert_eq!(found.len(), 3);
+    let first = found[0].as_ref().unwrap().as_ref().unwrap();
+    assert_eq!((first.kind, first.size), (FileKind::File, 3));
+    assert_eq!(found[1], Ok(None));
+    let third = found[2].as_ref().unwrap().as_ref().unwrap();
+    assert_eq!(third.kind, FileKind::Directory);
+}
+
 contract!(
+    stat_many_answers_each_path_in_order,
     conditional_writes_check_versions_and_replay_by_operation,
     reads_report_directories_missing_files_and_size_limits,
     whole_files_round_trip_with_binary_content,

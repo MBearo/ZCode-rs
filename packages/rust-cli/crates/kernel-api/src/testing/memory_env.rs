@@ -13,7 +13,7 @@ use crate::env::{
 };
 use crate::env_files::{
     DirEntry, FileKind, FileList, FileStat, FileWritten, ListDir, ListFiles, PathFacts, PathStyle,
-    PutFile, ReadText, StatFile, TextRead, TextSlice,
+    PutFile, ReadText, StatFile, StatMany, TextRead, TextSlice,
 };
 use crate::env_git::{GitStatus, GitStatusRequest};
 use crate::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
@@ -35,10 +35,17 @@ pub struct MemoryEnvironment {
     /// `git_diff` 的结果（`/diff`）；None 时返回 `Unsupported`。
     diff: Option<crate::env_git::GitDiff>,
     reads: AtomicUsize,
+    /// `stat` 与 `stat_many` 的调用次数（R3：远端每步只发一次批量 stat，remote-exec.md §20.7.4）。
+    stats: AtomicUsize,
+    stat_batches: AtomicUsize,
     /// shell 的当前目录（`shell_state`）；没有设置时是工作区根。
     shell_cwd: Mutex<Option<EnvPath>>,
     /// 代码回退事务（与文件表分开加锁，不跨 await 持有）。
     rewinds: Mutex<Transactions>,
+    /// 下一次 `rewind_apply` 失败（R3：跨机器回退时一台 apply 中途失败）。
+    fail_apply: std::sync::atomic::AtomicBool,
+    /// `rewind_finish` 收到的 token，按顺序。
+    finished: Mutex<Vec<OperationId>>,
 }
 
 fn separator(path: &str) -> char {
@@ -72,6 +79,10 @@ impl MemoryEnvironment {
             git: None,
             diff: None,
             reads: AtomicUsize::new(0),
+            stats: AtomicUsize::new(0),
+            stat_batches: AtomicUsize::new(0),
+            fail_apply: std::sync::atomic::AtomicBool::new(false),
+            finished: Mutex::default(),
             shell_cwd: Mutex::default(),
             rewinds: Mutex::default(),
         }
@@ -110,6 +121,24 @@ impl MemoryEnvironment {
     }
 
     /// 会话中途改写或新建文件。
+    /// 下一次 `rewind_apply` 返回失败（不改任何文件）。
+    pub fn fail_next_rewind_apply(&self) {
+        self.fail_apply.store(true, Ordering::Relaxed);
+    }
+
+    /// `rewind_finish` 收到的 token，按顺序。
+    pub fn rewinds_finished(&self) -> Vec<OperationId> {
+        lock(&self.finished).clone()
+    }
+
+    /// `stat` 与 `stat_many` 各被调用了几次（`stat_many` 里的逐项不算进 `stat`）。
+    pub fn stat_calls(&self) -> (usize, usize) {
+        (
+            self.stats.load(Ordering::Relaxed),
+            self.stat_batches.load(Ordering::Relaxed),
+        )
+    }
+
     pub fn set_file(&self, path: &str, text: &str) {
         lock(&self.files).insert(path.to_owned(), text.as_bytes().to_vec());
     }
@@ -185,32 +214,27 @@ impl Files for MemoryEnvironment {
         Err(unused())
     }
 
-    async fn stat(
+    async fn stat_many(
         &self,
-        _workspace: &WorkspaceRef,
-        request: StatFile,
-    ) -> Result<Option<FileStat>, EnvError> {
-        let path = request.path.as_str();
-        let file = lock(&self.files)
-            .get(path)
-            .map(|bytes| (bytes.len(), memory_rewind::version(bytes)));
-        let stat = |kind, size: usize, version| FileStat {
-            kind,
-            size: size as u64,
-            mtime_ms: 0,
-            version,
-        };
-        let special = lock(&self.specials).contains(path);
-        Ok(match file {
-            None if special => Some(stat(FileKind::Other, 0, FileVersion::new("special"))),
-            Some((size, version)) => Some(stat(FileKind::File, size, version)),
-            None if self.is_dir(path) => {
-                Some(stat(FileKind::Directory, 0, FileVersion::new("dir")))
-            }
-            None => None,
-        })
+        workspace: &WorkspaceRef,
+        request: StatMany,
+    ) -> Result<Vec<Result<Option<FileStat>, EnvError>>, EnvError> {
+        self.stat_batches.fetch_add(1, Ordering::Relaxed);
+        let mut out = Vec::new();
+        for path in request.paths {
+            out.push(self.stat_one(workspace, StatFile { path }));
+        }
+        Ok(out)
     }
 
+    async fn stat(
+        &self,
+        workspace: &WorkspaceRef,
+        request: StatFile,
+    ) -> Result<Option<FileStat>, EnvError> {
+        self.stats.fetch_add(1, Ordering::Relaxed);
+        self.stat_one(workspace, request)
+    }
     async fn list_dir(
         &self,
         _workspace: &WorkspaceRef,
@@ -372,6 +396,12 @@ impl Checkpoints for MemoryEnvironment {
     }
 
     async fn rewind_apply(&self, token: &OperationId) -> Result<RewindStatus, EnvError> {
+        if self.fail_apply.swap(false, Ordering::Relaxed) {
+            return Ok(RewindStatus::Failed {
+                message: "disk full".to_owned(),
+                conflicts: Vec::new(),
+            });
+        }
         let mut files = lock(&self.files);
         Ok(lock(&self.rewinds).apply(&mut files, token))
     }
@@ -381,6 +411,7 @@ impl Checkpoints for MemoryEnvironment {
     }
 
     async fn rewind_finish(&self, token: &OperationId) -> Result<(), EnvError> {
+        lock(&self.finished).push(token.clone());
         lock(&self.rewinds).finish(token);
         Ok(())
     }
@@ -408,3 +439,31 @@ impl Git for MemoryEnvironment {
 impl Background for MemoryEnvironment {}
 impl Pdf for MemoryEnvironment {}
 impl Fetch for MemoryEnvironment {}
+
+impl MemoryEnvironment {
+    fn stat_one(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: StatFile,
+    ) -> Result<Option<FileStat>, EnvError> {
+        let path = request.path.as_str();
+        let file = lock(&self.files)
+            .get(path)
+            .map(|bytes| (bytes.len(), memory_rewind::version(bytes)));
+        let stat = |kind, size: usize, version| FileStat {
+            kind,
+            size: size as u64,
+            mtime_ms: 0,
+            version,
+        };
+        let special = lock(&self.specials).contains(path);
+        Ok(match file {
+            None if special => Some(stat(FileKind::Other, 0, FileVersion::new("special"))),
+            Some((size, version)) => Some(stat(FileKind::File, size, version)),
+            None if self.is_dir(path) => {
+                Some(stat(FileKind::Directory, 0, FileVersion::new("dir")))
+            }
+            None => None,
+        })
+    }
+}

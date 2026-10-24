@@ -58,6 +58,7 @@ async fn node_checkpoint(
         .split_once(&format!("-{}", node.artifact.as_str()))
         .map_or("", |(tool, _)| tool);
     Some(WorkspaceCheckpoint {
+        machine: None,
         id: node.id.clone(),
         prompt: node.prompt.clone(),
         assistant: node.assistant.clone(),

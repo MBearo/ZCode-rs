@@ -116,7 +116,11 @@ impl Tool for NotebookEditTool {
         if mode(&input) == "insert" && input.cell_type.is_none() {
             return invalid(texts::NOTEBOOK_INSERT_TYPE.to_owned());
         }
-        let Some(prior) = self.files.state.get(&context.session, &path) else {
+        let Some(prior) = self
+            .files
+            .state
+            .get_at(&context.session, context.machine.name(), &path)
+        else {
             return invalid(texts::NOT_READ.to_owned());
         };
         let request = ReadFile {
@@ -263,7 +267,10 @@ impl Tool for NotebookEditTool {
         if bytes.len() > MAX_NOTEBOOK_BYTES {
             return Err(failed("Edit rejected: the updated notebook would exceed the maximum size this tool can read (100MB). The file was left unchanged.".to_owned()));
         }
-        let prior = self.files.state.get(&context.session, &path);
+        let prior = self
+            .files
+            .state
+            .get_at(&context.session, context.machine.name(), &path);
         let request = PutFile {
             path: EnvPath::new(path.clone()),
             bytes: bytes.clone(),
@@ -287,8 +294,9 @@ impl Tool for NotebookEditTool {
         let unchanged_since_read = prior
             .as_ref()
             .is_some_and(|prior| prior.baseline == Baseline::Version(file.version.clone()));
-        self.files.state.set(
+        self.files.state.set_at(
             &context.session,
+            context.machine.name(),
             &path,
             FileState {
                 content: updated,

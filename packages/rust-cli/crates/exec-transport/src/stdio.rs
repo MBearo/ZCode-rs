@@ -4,11 +4,11 @@
 //! 子进程的 stderr 逐行写进日志，留最后几行，子进程异常退出时随日志给出。关闭发送方向（或丢掉连接）时子进程
 //! 读到 stdin 结束、自己退出；loopback 的执行器不强杀——强杀会留下它起的命令的进程树（§18.6）。ssh 进程在连接被
 //! 丢掉时结束（`kill_on_drop`，§19.2）：远端的代理读到结束自己退出，常驻执行器不受影响；不结束的话，网络卡住时
-//! 旧的 ssh 进程会一直留着。接收方向读到结束时先等子进程退出，再报告结束，所以读到结束就说明子进程已经收尾。
+//! 旧的 ssh 进程会一直留着。接收方向读到结束时先等子进程退出、再等 stderr 读到结束，然后才报告（§18.6 的收尾
+//! 顺序），所以读到结束就说明子进程已经收尾，stderr 也已读完。
 
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -71,16 +71,13 @@ impl Connector for StdioConnector {
         else {
             return Err(LinkError::Connect("child pipes are missing".to_owned()));
         };
-        let tail = Arc::new(Mutex::new(String::new()));
-        let forwarder = rust_cli_base::owned(forward_stderr(stderr, tail.clone()));
+        let stderr = rust_cli_base::owned(forward_stderr(stderr));
         let inner = stream_link(stdout, stdin, self.describe(), self.max_frame);
         Ok(Box::new(ChildLink {
             sink: inner.sink,
             source: Box::new(ChildSource {
                 inner: inner.source,
-                child: Some(child),
-                tail,
-                _forwarder: forwarder,
+                child: Some((child, stderr)),
             }),
             peer: inner.peer,
         }))
@@ -91,22 +88,23 @@ impl Connector for StdioConnector {
     }
 }
 
-async fn forward_stderr(stderr: tokio::process::ChildStderr, tail: Arc<Mutex<String>>) {
+/// 逐行写进日志，读到 stderr 结束时交出最后几行（[`TAIL`] 字节以内）。最后几行只经这个返回值交出（F94）。
+async fn forward_stderr(stderr: tokio::process::ChildStderr) -> String {
+    let mut tail = String::new();
     let mut lines = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         tracing::warn!(target: "exec_transport::stdio", line = %line, "executor stderr");
-        if let Ok(mut tail) = tail.lock() {
-            tail.push_str(&line);
-            tail.push('\n');
-            if tail.len() > TAIL {
-                let cut = tail.len() - TAIL;
-                let cut = (cut..tail.len())
-                    .find(|index| tail.is_char_boundary(*index))
-                    .unwrap_or(tail.len());
-                tail.drain(..cut);
-            }
+        tail.push_str(&line);
+        tail.push('\n');
+        if tail.len() > TAIL {
+            let cut = tail.len() - TAIL;
+            let cut = (cut..tail.len())
+                .find(|index| tail.is_char_boundary(*index))
+                .unwrap_or(tail.len());
+            tail.drain(..cut);
         }
     }
+    tail
 }
 
 struct ChildLink {
@@ -127,9 +125,8 @@ impl Link for ChildLink {
 
 struct ChildSource {
     inner: Box<dyn FrameSource>,
-    child: Option<tokio::process::Child>,
-    tail: Arc<Mutex<String>>,
-    _forwarder: rust_cli_base::OwnedTask<()>,
+    /// 子进程与转发它 stderr 的任务；收尾时取走。
+    child: Option<(tokio::process::Child, rust_cli_base::OwnedTask<String>)>,
 }
 
 #[async_trait]
@@ -140,13 +137,13 @@ impl FrameSource for ChildSource {
             return received;
         }
         // 结束或出错：等子进程退出（收尾），异常退出时把 stderr 的最后几行写进日志与错误。
-        if let Some(mut child) = self.child.take() {
+        if let Some((mut child, stderr)) = self.child.take() {
             let status = child.wait().await;
-            let tail = self
-                .tail
-                .lock()
-                .map(|tail| tail.clone())
-                .unwrap_or_default();
+            // 缺陷修复 F94：子进程退出之后还要等 stderr 读到结束，才拿最后几行。原来子进程一退出就读转发任务
+            // 攒下的尾巴，可子进程退出前写的那一行可能还在管道里、转发任务还没被调度去读，尾巴是空的，异常退出
+            // 就被报告成正常结束（负载下 `a_failing_child_reports_its_stderr` 不稳定）。子进程写的都在管道里，
+            // 读到结束才算读完；最后几行只由转发任务交出，不再共用一份带锁的尾巴。
+            let tail = stderr.await.unwrap_or_default();
             match status {
                 Ok(status) if status.success() => {}
                 Ok(status) => {

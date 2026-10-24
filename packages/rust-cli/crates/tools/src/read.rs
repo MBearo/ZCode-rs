@@ -153,8 +153,9 @@ impl ReadTool {
             )));
         }
         check_tokens(&content, ".ipynb")?;
-        self.files.state.set(
+        self.files.state.set_at(
             &context.session,
+            context.machine.name(),
             path,
             FileState {
                 content,
@@ -215,7 +216,11 @@ impl ReadTool {
 
     /// 同样的 offset / limit 再读一次、文件版本没变：不再返回内容。
     async fn unchanged(&self, context: &ToolUseContext, path: &str, input: &Input) -> bool {
-        let Some(prior) = self.files.state.get(&context.session, path) else {
+        let Some(prior) = self
+            .files
+            .state
+            .get_at(&context.session, context.machine.name(), path)
+        else {
             return false;
         };
         let offset = input.offset.unwrap_or(1);
@@ -368,8 +373,9 @@ impl Tool for ReadTool {
             "filePath": input.file_path, "numLines": slice.line_count,
             "startLine": offset, "totalLines": slice.total_lines,
         }});
-        self.files.state.set(
+        self.files.state.set_at(
             &context.session,
+            context.machine.name(),
             &path,
             FileState {
                 content: slice.content,

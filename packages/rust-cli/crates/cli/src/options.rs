@@ -193,6 +193,36 @@ pub(crate) struct Assumptions {
     /// `_ZCODE_ASSUME_LOOPBACK_EXECUTOR`（远端执行 R1，remote-exec.md §18.6）：本机的执行端口经 loopback 走子进程
     /// `zcode executor --stdio`，验证远端实现与本机结果相同。不是给用户的开关。
     pub loopback: bool,
+    /// `_ZCODE_ASSUME_LOOPBACK_MACHINES`（远端执行 R3，remote-exec.md §20.10）：`machines.json` 里连着的机器经 loopback
+    /// 连接（每台一个执行器子进程，工作目录是那台机器的工作目录），`-p` 也连。不是给用户的开关。
+    pub loopback_machines: bool,
+    /// `_ZCODE_ASSUME_SSH_MACHINES`（远端执行 R3，remote-exec.md §20.10）：`-p` 也经 SSH 连 `machines.json` 里连着的机器
+    /// （同步连完再开始），`_ZCODE_ASSUME_SSH_CONFIG` / `_ZCODE_ASSUME_SSH_ARTIFACT` 用于这些机器。不是给用户的开关。
+    pub ssh_machines: bool,
+}
+
+/// 机器清单里的机器经 SSH 时，只给测试的 ssh 配置文件与上传用的产物（R3，remote-exec.md §20.10；只在 debug 构建读）。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MachineSsh {
+    /// `_ZCODE_ASSUME_SSH_CONFIG`。
+    pub config: Option<String>,
+    /// `_ZCODE_ASSUME_SSH_ARTIFACT`。
+    pub artifact: Option<String>,
+}
+
+/// 读 [`MachineSsh`]；`Ignored` 时什么都不读。
+pub(crate) fn machine_ssh(
+    declarations: TestDeclarations,
+    var: impl Fn(&str) -> Option<String>,
+) -> MachineSsh {
+    if declarations == TestDeclarations::Ignored {
+        return MachineSsh::default();
+    }
+    let value = |name: &str| var(name).filter(|value| !value.trim().is_empty());
+    MachineSsh {
+        config: value("_ZCODE_ASSUME_SSH_CONFIG"),
+        artifact: value("_ZCODE_ASSUME_SSH_ARTIFACT"),
+    }
 }
 
 /// 只给测试的 SSH 入口（远端执行 R2，remote-exec.md §19.11）：本机的执行端口换成经 SSH 连到 `destination` 的远端环境。
@@ -243,6 +273,8 @@ pub(crate) fn assumptions(
             tool_search: declared("_ZCODE_ASSUME_TOOL_SEARCH"),
             monitor_off: declared("_ZCODE_ASSUME_MONITOR_OFF"),
             loopback: declared("_ZCODE_ASSUME_LOOPBACK_EXECUTOR"),
+            loopback_machines: declared("_ZCODE_ASSUME_LOOPBACK_MACHINES"),
+            ssh_machines: declared("_ZCODE_ASSUME_SSH_MACHINES"),
         },
     }
 }

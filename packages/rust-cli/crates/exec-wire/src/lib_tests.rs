@@ -22,7 +22,7 @@ fn every_method_has_one_request_whose_json_op_is_its_name() {
         .collect();
     let all: BTreeSet<&str> = Op::ALL.iter().map(|op| op.as_str()).collect();
     assert_eq!(ops, all);
-    assert_eq!(Op::ALL.len(), 29);
+    assert_eq!(Op::ALL.len(), 30);
     for request in requests {
         let value = serde_json::to_value(&request).unwrap();
         assert_eq!(value["op"], request.op().as_str());

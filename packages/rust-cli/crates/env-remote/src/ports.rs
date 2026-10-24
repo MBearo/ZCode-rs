@@ -12,7 +12,7 @@ use rust_cli_kernel_api::env::{
 };
 use rust_cli_kernel_api::env_files::{
     DirEntry, FileList, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome, GrepSearch,
-    ListDir, ListFiles, PathFacts, PutFile, ReadText, StatFile, TextRead,
+    ListDir, ListFiles, PathFacts, PutFile, ReadText, StatFile, StatMany, TextRead,
 };
 use rust_cli_kernel_api::env_pdf::{PdfPageCount, PdfRender, RenderPdfPages};
 use rust_cli_kernel_api::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
@@ -120,6 +120,38 @@ impl Files for RemoteEnvironment {
         };
         let (reply, _) = self.call(request, empty()).await?;
         Ok(expect!(reply, "files.stat", Reply::Stat(stat) => stat).map(from::file_stat))
+    }
+
+    /// 一次请求（R3，remote-exec.md §20.7.4）；老执行器不认这条消息（`unsupported`）时改成逐个 `files.stat`。
+    async fn stat_many(
+        &self,
+        ws: &WorkspaceRef,
+        request: StatMany,
+    ) -> Result<Vec<Result<Option<FileStat>, EnvError>>, EnvError> {
+        let wire = Request::StatMany {
+            workspace: workspace(ws),
+            paths: request
+                .paths
+                .iter()
+                .map(|path| path.as_str().to_owned())
+                .collect(),
+        };
+        match self.call(wire, empty()).await {
+            Ok((reply, _)) => Ok(
+                expect!(reply, "files.stat_many", Reply::StatMany(found) => found)
+                    .into_iter()
+                    .map(from::stat_entry)
+                    .collect(),
+            ),
+            Err(EnvError::Unsupported { .. }) => {
+                let mut out = Vec::with_capacity(request.paths.len());
+                for path in request.paths {
+                    out.push(self.stat(ws, StatFile { path }).await);
+                }
+                Ok(out)
+            }
+            Err(other) => Err(other),
+        }
     }
 
     async fn list_dir(

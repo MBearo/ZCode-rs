@@ -258,7 +258,10 @@ impl Resident {
             shared,
             ..
         } = self;
-        drop(listener);
+        // 先关监听（不再接受连接），再删 socket 文件，锁最后放开。F94：原来写 `drop(listener)`，Windows 上
+        // net 的 `UdsListener` 是不持有资源的占位（那里拿不到监听），clippy 的 `drop_non_drop` 报错；
+        // 改用 `close` 写明“关闭监听”这个原意，两个平台一样。
+        listener.close();
         if let Err(error) = rust_cli_fs::remove_optional(&socket).await {
             tracing::warn!(target: "executor_host", %error, "removing the socket failed");
         }

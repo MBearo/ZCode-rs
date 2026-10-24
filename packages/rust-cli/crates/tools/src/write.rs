@@ -52,7 +52,10 @@ impl WriteTool {
         current: &FileVersion,
         content: impl FnOnce() -> Option<String>,
     ) -> Option<String> {
-        let prior = self.files.state.get(&context.session, path);
+        let prior = self
+            .files
+            .state
+            .get_at(&context.session, context.machine.name(), path);
         match prior {
             Some(prior) if !prior.partial => prior
                 .changed(current, content)
@@ -203,8 +206,9 @@ impl Tool for WriteTool {
             mtime_ms: written.mtime_ms,
         };
         let checkpoint = checkpoint::record(&context, change).await;
-        self.files.state.set(
+        self.files.state.set_at(
             &context.session,
+            context.machine.name(),
             &path,
             FileState {
                 content: normalize(&input.content),

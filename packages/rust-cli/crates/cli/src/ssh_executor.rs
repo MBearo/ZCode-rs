@@ -19,19 +19,19 @@ use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, LocalRegistry};
 use rust_cli_kernel_api::local_services::LocalServices;
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_machines::{Endpoint, Machine};
-use rust_cli_paths::StorageSettings;
+use rust_cli_paths::{ExecutorPaths, StorageSettings};
 use rust_cli_ssh_connect::{Arch, SshConnector, SshProvisioner, SshTarget, Wanted};
 
 use crate::options::SshAssumption;
 
-/// SSH 下的重连（remote-exec.md §19.8）：0.5 s 起翻倍、最多 15 s，12 次（合计约 2 分钟）。
-const RECONNECT: Reconnect = Reconnect {
+/// SSH 下的重连（remote-exec.md §19.8）：0.5 s 起翻倍、最多 15 s，12 次（合计约 2 分钟）。机器清单里的机器同样用它（R3）。
+pub(super) const RECONNECT: Reconnect = Reconnect {
     attempts: 12,
     delay: Duration::from_millis(500),
     max_delay: Duration::from_secs(15),
 };
 
-struct SshEndpoint {
+pub(super) struct SshEndpoint {
     target: SshTarget,
     provisioner: SshProvisioner,
 }
@@ -53,11 +53,15 @@ impl Endpoint for SshEndpoint {
     }
 }
 
+/// 本机执行器目录（上传用的产物缓存在它下面，§19.4）：在用户根下，不随 `storage.dir`。
+pub(super) fn executor_paths(startup: &super::Startup) -> ExecutorPaths {
+    super::setup::storage_paths(startup, &StorageSettings::default()).executor()
+}
+
 /// 上传用的产物：测试变量给的文件，再加本机缓存里同版本的两种架构（§19.4 的 `dist/`）。
-fn artifacts(startup: &super::Startup, ssh: &SshAssumption) -> Vec<PathBuf> {
-    let executor = super::setup::storage_paths(startup, &StorageSettings::default()).executor();
-    ssh.artifact
-        .iter()
+fn artifacts(executor: &ExecutorPaths, artifact: Option<&str>) -> Vec<PathBuf> {
+    artifact
+        .into_iter()
         .map(PathBuf::from)
         .chain([Arch::X86_64, Arch::Aarch64].map(|arch| {
             executor
@@ -75,22 +79,11 @@ pub(super) async fn environments(
     env: Arc<LocalEnvironment>,
     mcp: Arc<LocalMcpTransport>,
 ) -> Result<Arc<dyn EnvironmentRegistry>> {
-    let target = SshTarget {
-        destination: ssh.destination.clone(),
-        program: PathBuf::from("ssh"),
-        config: ssh.config.as_ref().map(PathBuf::from),
-        options: Vec::new(),
-        env: startup.env.to_vec(),
-    };
-    let wanted = Wanted {
-        version: super::VERSION.to_owned(),
-        protocol: PROTOCOL,
-    };
-    let provisioner = SshProvisioner::new(target.clone(), wanted, artifacts(startup, ssh));
-    let endpoint = Arc::new(SshEndpoint {
-        target,
-        provisioner,
-    });
+    let endpoint = endpoint(
+        (&startup.env, &executor_paths(startup)),
+        &ssh.destination,
+        (ssh.config.as_deref(), ssh.artifact.as_deref()),
+    );
     let instance = format!("{:016x}", rust_cli_base::random::u64());
     let mut options = ClientOptions::new(super::VERSION, instance);
     options.reconnect = RECONNECT;
@@ -104,6 +97,30 @@ pub(super) async fn environments(
         inner: LocalRegistry::new(MachineEnv::new(remote, mcp), LocalServices::new(env)),
         _machine: machine,
     }))
+}
+
+/// 到 `destination` 的 SSH 端点（R2 的测试入口与 R3 的机器清单共用）：`extra` 是测试变量给的 ssh 配置文件与上传用的产物。
+pub(super) fn endpoint(
+    (env, executor): (&[(String, String)], &ExecutorPaths),
+    destination: &str,
+    (config, artifact): (Option<&str>, Option<&str>),
+) -> Arc<SshEndpoint> {
+    let target = SshTarget {
+        destination: destination.to_owned(),
+        program: PathBuf::from("ssh"),
+        config: config.map(PathBuf::from),
+        options: Vec::new(),
+        env: env.to_vec(),
+    };
+    let wanted = Wanted {
+        version: super::VERSION.to_owned(),
+        protocol: PROTOCOL,
+    };
+    let provisioner = SshProvisioner::new(target.clone(), wanted, artifacts(executor, artifact));
+    Arc::new(SshEndpoint {
+        target,
+        provisioner,
+    })
 }
 
 /// 本机的注册表加上它的连接状态机（状态机订阅连接状态，要和注册表活得一样久）。

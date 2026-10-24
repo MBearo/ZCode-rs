@@ -171,6 +171,7 @@ async fn unanswered_interactions_are_pending_after_a_cold_load() {
     let t = TestStore::new();
     started(&t, "sess_1").await;
     let permission = InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("toolu_1"),
         tool: "Bash".into(),
         input: json!({"command": "rm -rf build"}),

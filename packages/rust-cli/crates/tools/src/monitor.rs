@@ -247,6 +247,8 @@ impl Tool for MonitorTool {
             .map_err(env_failure)?;
         let output = started(&context).await?;
         let armed = MonitorArmed {
+            // 在远端机器上起的命令：输出流与停止都发给那台机器（R3，remote-exec.md §20.7.2）。
+            machine: (!context.machine.is_local()).then(|| context.machine.name().to_owned()),
             operation: context.operation.operation.clone(),
             task: task.clone(),
             tool_use: context.tool_use.clone(),

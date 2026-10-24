@@ -59,6 +59,10 @@ pub struct WorkspaceCheckpoint {
     pub assistant: MessageId,
     pub tool_use: ToolUseId,
     pub snapshot: ArtifactRef,
+    /// 改的是哪台远端机器上的文件（R3，remote-exec.md §20.7.5、§20.9）；本机为 None。远端的存成本工程的记录，
+    /// Node / App 看不到。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 /// 内核提交给存储的一条事实。新增变体时同步更新各存储适配器的映射与 spec §5。

@@ -5,6 +5,9 @@
 //! - `CheckpointCreated` → `runtime/workspace_checkpoint`（Node `persistWorkspaceCheckpointEntry`）。
 //! - `CheckpointsRestored` → 每个受影响的回合一条 `runtime/workspace_file_rewind`
 //!   （Node `persistWorkspaceFileRewindEntry`，`reason = file_summary_rewind`）。
+//! - 远端机器上的 checkpoint（R3，docs/specs/rust-cli/remote-exec.md §17.1、§20.9）：同样的形状，类型换成本工程的
+//!   `rust-cli/remote_checkpoint` 与 `rust-cli/remote_file_rewind`，`rustCli` 里多 `machine`。Node / App 按类型查询，看不到
+//!   它们，App 回退不会把远端文件的内容写到本机的同名路径；序号在这两种记录之间单独算。
 use std::borrow::Cow;
 
 use rusqlite::Connection;
@@ -22,6 +25,40 @@ use crate::{OrStorage, records, storage};
 
 pub const CHECKPOINT_ENTRY: &str = "runtime/workspace_checkpoint";
 pub const FILE_REWIND_ENTRY: &str = "runtime/workspace_file_rewind";
+/// 远端机器上的 checkpoint 与文件回退（R3）。
+pub const REMOTE_CHECKPOINT_ENTRY: &str = "rust-cli/remote_checkpoint";
+pub const REMOTE_FILE_REWIND_ENTRY: &str = "rust-cli/remote_file_rewind";
+
+/// 一种记录：Node 的（本机）或本工程的（远端机器）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Node,
+    Remote,
+}
+
+impl Kind {
+    fn of(machine: Option<&str>) -> Self {
+        if machine.is_some() {
+            Self::Remote
+        } else {
+            Self::Node
+        }
+    }
+
+    fn checkpoint(self) -> &'static str {
+        match self {
+            Self::Node => CHECKPOINT_ENTRY,
+            Self::Remote => REMOTE_CHECKPOINT_ENTRY,
+        }
+    }
+
+    fn file_rewind(self) -> &'static str {
+        match self {
+            Self::Node => FILE_REWIND_ENTRY,
+            Self::Remote => REMOTE_FILE_REWIND_ENTRY,
+        }
+    }
+}
 
 /// Node `setRevert` 的值（键序同 Node）。
 pub fn revert(ctx: &Commit<'_>, cursor: &RevertCursor) -> Result<Value, StoreError> {
@@ -66,7 +103,7 @@ pub fn revert(ctx: &Commit<'_>, cursor: &RevertCursor) -> Result<Value, StoreErr
 /// checkpoint 与文件回退记录（Node 与本工程写的）里的最大值加一。同一事务里先写的记录立刻可见，所以同一批的
 /// 几个 checkpoint 依次加一。修复线 F2：以前用本工程的提交序号（`rust-cli/commit`），与 Node 的事件序号不是一个
 /// 空间：混写时顺序错、会重复，同一批的几个 checkpoint 序号也相同。
-fn sequence(ctx: &Commit<'_>) -> Result<u64, StoreError> {
+fn sequence(ctx: &Commit<'_>, kind: Kind) -> Result<u64, StoreError> {
     let max: Option<i64> = ctx
         .conn
         .prepare_cached(
@@ -75,7 +112,7 @@ fn sequence(ctx: &Commit<'_>) -> Result<u64, StoreError> {
         )
         .storage()?
         .query_row(
-            rusqlite::params![ctx.session, CHECKPOINT_ENTRY, FILE_REWIND_ENTRY],
+            rusqlite::params![ctx.session, kind.checkpoint(), kind.file_rewind()],
             |row| row.get(0),
         )
         .storage()?;
@@ -90,11 +127,16 @@ fn trace(ctx: &Commit<'_>) -> Result<String, StoreError> {
 }
 
 /// Node 的事件包装（`PersistedWorkspaceEvent`）；`turnId` 取 user 消息的 `anchor.turnId`。
-fn persisted(ctx: &Commit<'_>, payload: Value, prompt: &str) -> Result<Value, StoreError> {
+fn persisted(
+    ctx: &Commit<'_>,
+    payload: Value,
+    prompt: &str,
+    kind: Kind,
+) -> Result<Value, StoreError> {
     let mut data = json!({
         "eventId": (ctx.uuid)(),
         "payload": payload,
-        "sequenceNumber": sequence(ctx)?,
+        "sequenceNumber": sequence(ctx, kind)?,
         "traceId": trace(ctx)?,
     });
     if let Some(turn) = state::message(ctx.conn, ctx.session, prompt)
@@ -118,27 +160,36 @@ pub fn checkpoint(ctx: &Commit<'_>, checkpoint: &WorkspaceCheckpoint) -> Result<
         "diffRef": uri,
         "fileCount": 1,
     });
-    let mut data = persisted(ctx, payload, checkpoint.prompt.as_str())?;
+    let kind = Kind::of(checkpoint.machine.as_deref());
+    let mut data = persisted(ctx, payload, checkpoint.prompt.as_str(), kind)?;
     // payload 是 Node 的 strict schema；内核读回要的 Artifact 引用与调用 id 放在 payload 之外。
     data["rustCli"] = json!({
         "snapshot": checkpoint.snapshot,
         "toolUse": checkpoint.tool_use.as_str(),
     });
+    if let Some(machine) = &checkpoint.machine {
+        data["rustCli"]["machine"] = Value::from(machine.as_str());
+    }
     let event = data["eventId"].as_str().unwrap_or_default().to_owned();
-    let entry = records::entry(
-        format!("workspace-checkpoint:{event}"),
-        ctx.session,
-        CHECKPOINT_ENTRY,
-        ctx.now,
-        data,
-        true,
-    );
+    let id = match kind {
+        Kind::Node => format!("workspace-checkpoint:{event}"),
+        Kind::Remote => format!("rust-cli-remote-checkpoint:{event}"),
+    };
+    let entry = records::entry(id, ctx.session, kind.checkpoint(), ctx.now, data, true);
     save_entry(ctx, &entry)
 }
 
-/// 每个受影响的回合（同一 `messageId`）一条文件回退记录，指向该回合最后一个被撤销的 checkpoint。
+/// 每个受影响的回合（同一 `messageId`）一条文件回退记录，指向该回合最后一个被撤销的 checkpoint。本机与远端的分开写
+/// （各自的记录类型）。
 pub fn restored(ctx: &Commit<'_>, ids: &[String]) -> Result<(), StoreError> {
-    let all = stored(ctx.conn, ctx.session)?;
+    for kind in [Kind::Node, Kind::Remote] {
+        restored_of(ctx, ids, kind)?;
+    }
+    Ok(())
+}
+
+fn restored_of(ctx: &Commit<'_>, ids: &[String], kind: Kind) -> Result<(), StoreError> {
+    let all = stored(ctx.conn, ctx.session, kind)?;
     let mut turns: Vec<(&str, &Stored)> = Vec::new();
     for checkpoint in all.iter().filter(|c| ids.contains(&c.id)) {
         match turns
@@ -160,15 +211,12 @@ pub fn restored(ctx: &Commit<'_>, ids: &[String]) -> Result<(), StoreError> {
             "restoredSnapshotRef": last.uri,
             "reason": "file_summary_rewind",
         });
-        let data = persisted(ctx, payload, prompt)?;
-        let entry = records::entry(
-            format!("workspace-file-rewind:{rewind}"),
-            ctx.session,
-            FILE_REWIND_ENTRY,
-            ctx.now,
-            data,
-            true,
-        );
+        let data = persisted(ctx, payload, prompt, kind)?;
+        let id = match kind {
+            Kind::Node => format!("workspace-file-rewind:{rewind}"),
+            Kind::Remote => format!("rust-cli-remote-file-rewind:{rewind}"),
+        };
+        let entry = records::entry(id, ctx.session, kind.file_rewind(), ctx.now, data, true);
         save_entry(ctx, &entry)?;
     }
     Ok(())
@@ -199,8 +247,8 @@ pub struct NodeCheckpoint {
     pub artifact: ArtifactId,
 }
 
-fn stored(conn: &Connection, session: &str) -> Result<Vec<Stored>, StoreError> {
-    let entries = entries::list(conn, session, Some(CHECKPOINT_ENTRY)).storage()?;
+fn stored(conn: &Connection, session: &str, kind: Kind) -> Result<Vec<Stored>, StoreError> {
+    let entries = entries::list(conn, session, Some(kind.checkpoint())).storage()?;
     let mut out: Vec<Stored> = entries
         .into_iter()
         .filter_map(|entry| {
@@ -215,6 +263,7 @@ fn stored(conn: &Connection, session: &str) -> Result<Vec<Stored>, StoreError> {
             let snapshot: Option<ArtifactRef> =
                 serde_json::from_value(data["rustCli"]["snapshot"].clone()).ok();
             let tool_use = data["rustCli"]["toolUse"].as_str().map(ToolUseId::new);
+            let machine = data["rustCli"]["machine"].as_str().map(str::to_owned);
             let uri = payload["snapshotRef"]
                 .as_str()
                 .unwrap_or_default()
@@ -222,6 +271,7 @@ fn stored(conn: &Connection, session: &str) -> Result<Vec<Stored>, StoreError> {
             let kernel = match (assistant, snapshot, tool_use) {
                 (Some(assistant), Some(snapshot), Some(tool_use)) => {
                     Some(Active::Rust(WorkspaceCheckpoint {
+                        machine,
                         id: id.clone(),
                         prompt: MessageId::new(prompt.as_str()),
                         assistant,
@@ -282,26 +332,32 @@ fn decode(value: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// 冷读取：没有被文件回退撤销的回合里的 checkpoint（两边写的），按 `sequenceNumber`。
+/// 冷读取：没有被文件回退撤销的回合里的 checkpoint（两边写的），按 `sequenceNumber`；本机的在前，再是远端机器上的
+/// （R3：各自按自己的回退记录排除）。
 pub fn active_checkpoints(
     conn: &Connection,
     session: &SessionId,
 ) -> Result<Vec<Active>, StoreError> {
-    let rewound: Vec<String> = entries::list(conn, session.as_str(), Some(FILE_REWIND_ENTRY))
-        .storage()?
-        .into_iter()
-        .filter(|entry| entry.data["payload"]["reason"] == "file_summary_rewind")
-        .filter_map(|entry| {
-            entry.data["payload"]["targetMessageId"]
-                .as_str()
-                .map(str::to_owned)
-        })
-        .collect();
-    Ok(stored(conn, session.as_str())?
-        .into_iter()
-        .filter(|stored| !rewound.contains(&stored.prompt))
-        .filter_map(|stored| stored.kernel)
-        .collect())
+    let mut out = Vec::new();
+    for kind in [Kind::Node, Kind::Remote] {
+        let rewound: Vec<String> = entries::list(conn, session.as_str(), Some(kind.file_rewind()))
+            .storage()?
+            .into_iter()
+            .filter(|entry| entry.data["payload"]["reason"] == "file_summary_rewind")
+            .filter_map(|entry| {
+                entry.data["payload"]["targetMessageId"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .collect();
+        out.extend(
+            stored(conn, session.as_str(), kind)?
+                .into_iter()
+                .filter(|stored| !rewound.contains(&stored.prompt))
+                .filter_map(|stored| stored.kernel),
+        );
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

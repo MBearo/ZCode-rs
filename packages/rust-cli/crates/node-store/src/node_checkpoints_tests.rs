@@ -45,6 +45,7 @@ fn node_checkpoint(t: &TestStore, sequence: u64, file: Option<&str>) {
 
 fn expected(size: u64) -> WorkspaceCheckpoint {
     WorkspaceCheckpoint {
+        machine: None,
         id: "checkpoint_node".into(),
         prompt: MessageId::new("msg_u1"),
         assistant: MessageId::new("msg_a1"),

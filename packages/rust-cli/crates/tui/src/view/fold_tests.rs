@@ -256,6 +256,7 @@ fn a_failed_turn_shows_its_reason() {
 fn permission_asks_mark_the_tool_and_resolve() {
     let mut feed = Feed::new();
     let ask = InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("tu1"),
         tool: "Bash".into(),
         input: json!({"command": "rm x"}),

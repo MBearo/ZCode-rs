@@ -213,7 +213,9 @@ impl Interactions for ChildSink {
                 message,
                 suggestions,
                 asked_by: None,
+                machine,
             } => InteractionRequest::Permission {
+                machine,
                 tool_use,
                 tool,
                 input,
@@ -386,6 +388,11 @@ impl RunSink for ChildSink {
 
     async fn take_steering(&self) -> Vec<String> {
         self.live.take_mailbox(&self.agent)
+    }
+
+    /// 子代理的缺省机器（R3，remote-exec.md §20.6）：派生时 Agent 的 `machine`。
+    async fn default_machine(&self) -> Option<String> {
+        self.live.get(&self.agent).and_then(|agent| agent.machine)
     }
 
     /// 它派生的后台子代理的通知（agents.md §5.1）：全文，在工具边界作为 `task-notification` 并入。

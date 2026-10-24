@@ -1,0 +1,2 @@
+No remote machines are connected now; every tool runs on the local machine.
+{{lines}}

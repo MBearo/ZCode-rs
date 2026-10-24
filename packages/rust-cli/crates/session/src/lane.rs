@@ -8,8 +8,8 @@
 //! 理解），排在全部排队输入之后；通知应是 `next`，在下一个工具边界并入。
 
 use rust_cli_kernel_api::agents::AgentNotice;
-use rust_cli_kernel_api::env_shell::ShellNotice;
 use rust_cli_kernel_api::ids::CommandId;
+use rust_cli_kernel_api::machine_notices::MachineNotice;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
 use rust_cli_query::task_notification;
 
@@ -21,7 +21,8 @@ use crate::turn::TurnInput;
 /// 一条等候中的后台通知，或跨会话的消息与回执（同伴消息同样是优先级 `next`，cross-session.md §1.7）。
 #[derive(Debug, Clone)]
 pub(crate) enum Waiting {
-    Shell(ShellNotice),
+    /// 后台命令的终态通知，带它所在的机器（R3：ack 发给那台机器）。
+    Shell(MachineNotice),
     Agent(AgentNotice),
     Peer(PeerItem),
     /// Monitor 的事件或说明（工作线 F83，tools-more.md §19.6）：actor 自己产生，全文已包装；不 ack，也不按文字去重
@@ -29,7 +30,7 @@ pub(crate) enum Waiting {
     MonitorEvent(String),
     /// Monitor 的终态通知（带剩下的行），提交后 ack 它的 `ShellNotice`。
     MonitorEnd {
-        notice: Box<ShellNotice>,
+        notice: Box<MachineNotice>,
         text: String,
     },
 }
@@ -38,7 +39,7 @@ impl Waiting {
     /// 通知全文（`<system-reminder>` 包装）：工具边界并入用它；后台通知开回合也用它。
     pub(crate) fn text(&self) -> String {
         match self {
-            Self::Shell(notice) => task_notification(notice),
+            Self::Shell(notice) => task_notification(&notice.notice),
             Self::Agent(notice) => notice.text.clone(),
             Self::Peer(item) => item.text(),
             Self::MonitorEvent(text) | Self::MonitorEnd { text, .. } => text.clone(),
@@ -68,11 +69,13 @@ impl Waiting {
 
     fn same(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Shell(a), Self::Shell(b)) => a.seq == b.seq,
+            (Self::Shell(a), Self::Shell(b)) => {
+                a.machine == b.machine && a.notice.seq == b.notice.seq
+            }
             (Self::Agent(a), Self::Agent(b)) => a.seq == b.seq,
             (Self::Peer(a), Self::Peer(b)) => a.key() == b.key(),
             (Self::MonitorEnd { notice: a, .. }, Self::MonitorEnd { notice: b, .. }) => {
-                a.seq == b.seq
+                a.machine == b.machine && a.notice.seq == b.notice.seq
             }
             _ => false,
         }
@@ -131,8 +134,8 @@ impl Actor {
     /// 提交之后才 ack（至少一次）。同伴的消息与回执在收到时已经提交并 ack（peers.rs）。
     pub(crate) async fn ack_notice(&self, notice: &Waiting) {
         match notice {
-            Waiting::Shell(notice) => self.ack(notice.seq).await,
-            Waiting::MonitorEnd { notice, .. } => self.ack(notice.seq).await,
+            Waiting::Shell(notice) => self.ack(notice).await,
+            Waiting::MonitorEnd { notice, .. } => self.ack(notice).await,
             Waiting::Agent(notice) => self.ack_agent(notice.seq).await,
             Waiting::Peer(_) | Waiting::MonitorEvent(_) => {}
         }

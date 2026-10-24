@@ -66,6 +66,8 @@ pub(crate) struct LiveAgent {
     /// 定义（含 system prompt 正文）共享一份：条目每次被查询、快照都要复制（修复线 F6，审查 R5-11）。
     pub(crate) definition: Arc<AgentDefinition>,
     pub(crate) workspace: WorkspaceRef,
+    /// 子代理的工具缺省在哪台远端机器上跑（Agent 的 `machine`，R3，remote-exec.md §20.6）；本机为 None。
+    pub(crate) machine: Option<String>,
     pub(crate) selection: ModelSelection,
     pub(crate) mode: PermissionMode,
     pub(crate) background: bool,

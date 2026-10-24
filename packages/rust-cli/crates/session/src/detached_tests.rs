@@ -14,6 +14,7 @@ use crate::test_support::meta;
 
 fn permission(tool_use: &str) -> InteractionRequest {
     InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new(tool_use),
         tool: "Bash".to_owned(),
         input: json!({"command": "mytool build"}),

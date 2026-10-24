@@ -64,6 +64,8 @@ const LOG_DIR: &str = concat!(rust_cli_dir!(), "/log");
 const PEERS_DIR: &str = concat!(rust_cli_dir!(), "/peers");
 /// 自动更新的缓存（docs/specs/rust-cli/update.md §4，F48；Codex `version.json`）。
 const UPDATE_CACHE: &str = concat!(rust_cli_dir!(), "/version.json");
+/// 远端机器的清单（docs/specs/rust-cli/remote-exec.md §20.3.1）。
+const MACHINES_FILE: &str = concat!(rust_cli_dir!(), "/machines.json");
 /// 规整后目录名的上限（UTF-16 码元）。
 const MAX_SANITIZED_LENGTH: usize = 200;
 /// `<dataBaseDir>` 的用户根下的配置根（`.zcode/v2`）。
@@ -313,6 +315,12 @@ impl StoragePaths {
     /// （docs/specs/rust-cli/update.md §4，F48）。
     pub fn update_cache(&self) -> StoragePath {
         self.root.join(UPDATE_CACHE)
+    }
+
+    /// 远端机器的清单 `~/.zcode/rust-cli/machines.json`（docs/specs/rust-cli/remote-exec.md §20.3.1）：用户根下，不随
+    /// `storage.dir`（机器是用户级的配置，不是会话数据）。
+    pub fn machines(&self) -> StoragePath {
+        StoragePath(user_path(&self.home, MACHINES_FILE))
     }
 }
 

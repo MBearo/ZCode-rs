@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::dto::core::{EnvFacts, Outcome, PathFacts};
 use crate::dto::files::{
-    DirEntry, FileContent, FileStat, FileWritten, GlobMatches, GrepOutcome, PdfRender, TextRead,
+    DirEntry, FileContent, FileStat, FileWritten, GlobMatches, GrepOutcome, PdfRender, StatEntry,
+    TextRead,
 };
 use crate::dto::rewind::{RewindPlan, RewindStatus};
 use crate::dto::shell::{BackgroundInfo, BackgroundStop, ShellState};
@@ -25,6 +26,9 @@ pub enum Reply {
     WriteFile { version: String },
     #[serde(rename = "files.stat")]
     Stat(Option<FileStat>),
+    /// 每个路径一项，顺序同请求（R3）。
+    #[serde(rename = "files.stat_many")]
+    StatMany(Vec<StatEntry>),
     #[serde(rename = "files.list_dir")]
     ListDir(Vec<DirEntry>),
     #[serde(rename = "files.read_text")]
@@ -81,6 +85,7 @@ impl Reply {
             Self::ReadFile(_) => Op::ReadFile,
             Self::WriteFile { .. } => Op::WriteFile,
             Self::Stat(_) => Op::Stat,
+            Self::StatMany(_) => Op::StatMany,
             Self::ListDir(_) => Op::ListDir,
             Self::ReadText(_) => Op::ReadText,
             Self::PutFile(_) => Op::PutFile,

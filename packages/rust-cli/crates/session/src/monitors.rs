@@ -12,8 +12,10 @@ use std::sync::{Mutex, PoisonError};
 use futures_util::StreamExt;
 use futures_util::stream::{BoxStream, SelectAll};
 use rust_cli_kernel_api::env::{CommandEvent, EnvError, OperationContext, Origin, OutputStream};
-use rust_cli_kernel_api::env_shell::{BackgroundTask, ShellNotice};
+use rust_cli_kernel_api::env_shell::BackgroundTask;
 use rust_cli_kernel_api::ids::{OwnerEpoch, ShellTaskId};
+use rust_cli_kernel_api::machine::MachineEnv;
+use rust_cli_kernel_api::machine_notices::MachineNotice;
 use rust_cli_kernel_api::monitor::{MonitorArmed, MonitorSource};
 use rust_cli_kernel_api::monitor_watch::{Emit, Step, Watch};
 use rust_cli_kernel_api::orchestration::OrchestrationError;
@@ -32,8 +34,8 @@ struct Entry {
     watch: Watch,
     /// 事件流到了 `Finished`：剩下的行（可能没有）。
     ended: Option<Option<String>>,
-    /// 执行环境的终态通知先到了。
-    notice: Option<ShellNotice>,
+    /// 执行环境的终态通知先到了（带机器名）。
+    notice: Option<MachineNotice>,
     errors: u8,
 }
 
@@ -105,8 +107,7 @@ fn emit_text(armed: &MonitorArmed, emit: &Emit) -> String {
 fn watched_stream(actor: &Actor, armed: &MonitorArmed, cursor: u64) -> Tagged {
     let task = armed.task.clone();
     actor
-        .deps
-        .machine
+        .monitor_machine(armed)
         .commands()
         .watch_command(armed.operation.clone(), cursor)
         .map(move |event| (task.clone(), event))
@@ -114,6 +115,18 @@ fn watched_stream(actor: &Actor, armed: &MonitorArmed, cursor: u64) -> Tagged {
 }
 
 impl Actor {
+    /// monitor 所在的机器（R3）：本机，或 `armed.machine` 那台；没连上时是“没连上”的机器（流报错，按重订阅的规则放弃）。
+    fn monitor_machine(&self, armed: &MonitorArmed) -> MachineEnv {
+        match &armed.machine {
+            None => self.deps.machine.clone(),
+            Some(name) => self
+                .deps
+                .machines
+                .machine(name)
+                .unwrap_or_else(|| MachineEnv::unavailable(name)),
+        }
+    }
+
     /// Monitor 工具起好的 monitor（[`rust_cli_kernel_api::orchestration::Interactions::arm_monitor`]）。
     pub(crate) fn arm_monitor(&mut self, armed: MonitorArmed) -> Result<(), OrchestrationError> {
         if self.closing.is_some() {
@@ -238,8 +251,7 @@ impl Actor {
             task: armed.task.clone(),
         };
         if let Err(error) = self
-            .deps
-            .machine
+            .monitor_machine(armed)
             .background()
             .stop_background_command(context, request)
             .await
@@ -254,12 +266,14 @@ impl Actor {
             return;
         };
         let rest = entry.watch.finish();
+        let armed = entry.watch.armed.clone();
+        let machine = self.monitor_machine(&armed);
         let key = BackgroundTask {
             session: self.meta.id.clone(),
             task: task.clone(),
         };
         let pending = matches!(
-            self.deps.machine.background().background_command(key).await,
+            machine.background().background_command(key).await,
             Ok(Some(_))
         );
         let now = self.deps.clock.now_ms();
@@ -280,13 +294,13 @@ impl Actor {
     }
 
     /// 终态通知到了：属于在看的 monitor 时返回 true（流已结束就合成，否则记下等它）。
-    pub(crate) async fn monitor_notice(&mut self, notice: &ShellNotice) -> bool {
-        let Some(entry) = self.monitors.entries.get_mut(&notice.task) else {
+    pub(crate) async fn monitor_notice(&mut self, notice: &MachineNotice) -> bool {
+        let Some(entry) = self.monitors.entries.get_mut(&notice.notice.task) else {
             return false;
         };
         entry.notice = Some(notice.clone());
         if entry.ended.is_some() {
-            self.monitor_settled(notice.task.clone()).await;
+            self.monitor_settled(notice.notice.task.clone()).await;
         }
         true
     }
@@ -301,7 +315,7 @@ impl Actor {
             return;
         };
         if entry.watch.armed.source == MonitorSource::Socket {
-            self.ack(notice.seq).await;
+            self.ack(&notice).await;
             return;
         }
         let mut step = Step::default();
@@ -317,11 +331,11 @@ impl Actor {
                 ))));
         }
         let text = rust_cli_prompts::agents::notification_wrap(&rust_cli_query::monitor_envelope(
-            &notice,
+            &notice.notice,
             events.as_deref(),
         ));
-        let work = notice.task.to_string();
-        let status = rust_cli_query::task_status(&notice).to_owned();
+        let work = notice.notice.task.to_string();
+        let status = rust_cli_query::task_status(&notice.notice).to_owned();
         if self
             .enqueue_notice(Waiting::MonitorEnd {
                 notice: Box::new(notice),

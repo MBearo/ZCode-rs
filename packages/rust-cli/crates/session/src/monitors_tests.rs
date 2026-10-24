@@ -237,6 +237,7 @@ impl Tool for ArmTool {
         _progress: mpsc::Sender<ToolProgress>,
     ) -> Result<ToolOutput, ToolError> {
         let armed = MonitorArmed {
+            machine: input["machine"].as_str().map(str::to_owned),
             operation: OperationId::new(input["operation"].as_str().unwrap()),
             task: ShellTaskId::new(input["task"].as_str().unwrap()),
             tool_use: context.tool_use.clone(),
@@ -502,4 +503,44 @@ async fn a_stopped_socket_reports_monitor_stopped() {
     output_events.send(finished(0)).unwrap();
     turns(&mut events, 1).await;
     assert!(last_user(&model).contains("<event>[Monitor stopped]</event>"));
+}
+
+/// 远端机器上的 monitor（R3，remote-exec.md §20.7.2）：输出流读那台机器的，终态通知 ack 给那台机器，本机不碰。
+#[tokio::test]
+async fn a_monitor_on_a_remote_machine_reads_and_acks_there() {
+    let scope = TaskScope::root("test", |_| {});
+    let local = Arc::new(MonitorEnv::default());
+    let remote = Arc::new(MonitorEnv::default());
+    let output_events = remote.command("op_m", "b1");
+    let registry = rust_cli_kernel_api::testing::TestMachines::new(local.clone());
+    registry.connect("dev-a", remote.clone(), "/home/dev/proj");
+    let model = Arc::new(ScriptedModel::new(vec![
+        tool_use_response(
+            "toolu_1",
+            "Arm",
+            &json!({"operation": "op_m", "task": "b1", "description": "errors <log>", "timeout_ms": 60_000, "machine": "dev-a"}),
+        ),
+        text_response(&["armed"]),
+        text_response(&["ended"]),
+    ]));
+    let session = super::notice::session_on_machines(
+        &scope,
+        (local.clone(), registry),
+        model.clone(),
+        vec![Arc::new(ArmTool)],
+        Vec::new(),
+        Arc::new(Ticking(tokio::time::Instant::now())),
+    )
+    .await;
+    let mut events = session.subscribe(Some(0));
+    session.send(submit("c1", "watch")).await;
+    turns(&mut events, 1).await;
+    remote.end(monitor_notice(8));
+    output_events.send(output("one\ntwo", 7)).unwrap();
+    output_events.send(finished(0)).unwrap();
+    turns(&mut events, 1).await;
+    let text = last_user(&model);
+    assert!(text.contains("<event>one\\ntwo</event>"), "{text}");
+    assert_eq!(remote.notices.acked(), [1]);
+    assert!(local.notices.acked().is_empty());
 }

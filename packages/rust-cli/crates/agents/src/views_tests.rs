@@ -33,6 +33,7 @@ impl Clock for Dial {
 
 fn running(agent: &str, root: &str) -> crate::live::LiveAgent {
     crate::live::LiveAgent {
+        machine: None,
         agent: AgentId::new(agent),
         child: SessionId::new(format!("sess_subagent_{agent}")),
         parent: SessionId::new(root),

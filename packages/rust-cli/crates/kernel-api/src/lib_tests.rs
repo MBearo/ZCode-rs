@@ -501,6 +501,7 @@ fn compaction_types_round_trip() {
 
 fn checkpoint() -> crate::store::WorkspaceCheckpoint {
     crate::store::WorkspaceCheckpoint {
+        machine: None,
         id: "checkpoint_1".to_owned(),
         prompt: crate::ids::MessageId::new("msg_u"),
         assistant: crate::ids::MessageId::new("msg_a"),

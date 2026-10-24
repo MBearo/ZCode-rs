@@ -171,6 +171,17 @@ fn the_update_cache_lives_under_the_storage_root() {
     );
 }
 
+/// 远端机器的清单（remote-exec.md §20.3.1）：用户根下，不随 `storage.dir`。
+#[test]
+fn the_machine_list_lives_under_the_user_root() {
+    for storage in [None, Some("data")] {
+        assert_eq!(
+            resolve(None, storage).machines().as_path(),
+            Path::new("/home/dev/.zcode/rust-cli/machines.json")
+        );
+    }
+}
+
 /// 执行器的目录（remote-exec.md §19.4）：在用户根下，不随 `storage.dir`。
 #[test]
 fn the_executor_lives_under_the_user_root() {

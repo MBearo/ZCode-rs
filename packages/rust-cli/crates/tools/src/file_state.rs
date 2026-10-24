@@ -16,6 +16,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use rust_cli_kernel_api::env::FileVersion;
+use rust_cli_kernel_api::env_registry::LOCAL_MACHINE;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::tool::ReadFileStates;
 
@@ -79,35 +80,60 @@ impl FileState {
     }
 }
 
+/// 一条记录的键（R3，remote-exec.md §20.7.3）：哪台机器上的哪个路径。远端读过的文件不能拿去改本机的同名文件。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileKey {
+    pub machine: String,
+    pub path: String,
+}
+
+impl FileKey {
+    pub fn new(machine: &str, path: &str) -> Self {
+        Self {
+            machine: machine.to_owned(),
+            path: path.to_owned(),
+        }
+    }
+
+    fn local(path: &str) -> Self {
+        Self::new(LOCAL_MACHINE, path)
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.machine == LOCAL_MACHINE
+    }
+}
+
 #[derive(Default)]
 struct SessionFiles {
-    entries: HashMap<String, FileState>,
+    entries: HashMap<FileKey, FileState>,
     /// 最久未用的在前。
-    order: VecDeque<String>,
+    order: VecDeque<FileKey>,
     bytes: usize,
 }
 
 impl SessionFiles {
-    fn touch(&mut self, path: &str) {
-        if let Some(index) = self.order.iter().position(|item| item == path)
+    fn touch(&mut self, key: &FileKey) {
+        if let Some(index) = self.order.iter().position(|item| item == key)
             && let Some(item) = self.order.remove(index)
         {
             self.order.push_back(item);
         }
     }
 
-    fn remove(&mut self, path: &str) {
-        if let Some(old) = self.entries.remove(path) {
+    fn remove(&mut self, key: &FileKey) {
+        if let Some(old) = self.entries.remove(key) {
             self.bytes -= old.content.len();
-            self.order.retain(|item| item != path);
+            self.order.retain(|item| item != key);
         }
     }
 
-    fn insert(&mut self, path: String, state: FileState) {
-        self.remove(&path);
+    /// 上限按会话合计（全部机器一起，暂定，remote-exec.md §20.7.3）。
+    fn insert(&mut self, key: FileKey, state: FileState) {
+        self.remove(&key);
         self.bytes += state.content.len();
-        self.order.push_back(path.clone());
-        self.entries.insert(path, state);
+        self.order.push_back(key.clone());
+        self.entries.insert(key, state);
         while self.entries.len() > MAX_ENTRIES || (self.bytes > MAX_BYTES && self.order.len() > 1) {
             match self.order.front().cloned() {
                 Some(oldest) => self.remove(&oldest),
@@ -134,9 +160,15 @@ impl Sessions {
         }
         self.files.entry(session.clone()).or_default()
     }
+
+    fn entry(&mut self, session: &SessionId, key: &FileKey) -> Option<&mut FileState> {
+        self.files
+            .get_mut(session)
+            .and_then(|files| files.entries.get_mut(key))
+    }
 }
 
-/// 全部会话的 readFileState。方法都是同步的，锁不跨 await。
+/// 全部会话的 readFileState。方法都是同步的，锁不跨 await。`*_at` 带机器名（R3）；不带的是本机。
 #[derive(Default)]
 pub struct ReadFileState(Mutex<Sessions>);
 
@@ -146,19 +178,28 @@ impl ReadFileState {
     }
 
     pub fn get(&self, session: &SessionId, path: &str) -> Option<FileState> {
+        self.get_at(session, LOCAL_MACHINE, path)
+    }
+
+    pub fn get_at(&self, session: &SessionId, machine: &str, path: &str) -> Option<FileState> {
+        let key = FileKey::new(machine, path);
         let mut sessions = self.sessions();
         let files = sessions.session(session);
-        let found = files.entries.get(path).cloned();
+        let found = files.entries.get(&key).cloned();
         if found.is_some() {
-            files.touch(path);
+            files.touch(&key);
         }
         found
     }
 
     pub fn set(&self, session: &SessionId, path: &str, state: FileState) {
+        self.set_at(session, LOCAL_MACHINE, path, state);
+    }
+
+    pub fn set_at(&self, session: &SessionId, machine: &str, path: &str, state: FileState) {
         self.sessions()
             .session(session)
-            .insert(path.to_owned(), state);
+            .insert(FileKey::new(machine, path), state);
     }
 
     /// 会话关闭：释放它的全部记录。
@@ -171,26 +212,35 @@ impl ReadFileState {
     /// fork 出的会话继承父会话读过的文件。
     pub fn fork(&self, from: &SessionId, to: &SessionId) {
         let mut sessions = self.sessions();
-        let copied: Vec<(String, FileState)> = sessions
+        let copied: Vec<(FileKey, FileState)> = sessions
             .files
             .get(from)
             .map(|files| {
                 files
                     .order
                     .iter()
-                    .filter_map(|path| Some((path.clone(), files.entries.get(path)?.clone())))
+                    .filter_map(|key| Some((key.clone(), files.entries.get(key)?.clone())))
                     .collect()
             })
             .unwrap_or_default();
         let target = sessions.session(to);
-        for (path, state) in copied {
-            target.insert(path, state);
+        for (key, state) in copied {
+            target.insert(key, state);
         }
     }
 
-    /// 没有 offset、也没有 limit 的记录（读过的文件在磁盘上被改动时要查的那些，tools-files.md §4.1），最近用过的在前。
-    /// 不算一次使用。
+    /// 本机上没有 offset、也没有 limit 的记录（读过的文件在磁盘上被改动时要查的那些，tools-files.md §4.1），最近用过的
+    /// 在前。不算一次使用。
     pub fn whole_files(&self, session: &SessionId) -> Vec<(String, FileState)> {
+        self.whole_files_everywhere(session)
+            .into_iter()
+            .filter(|(key, _)| key.is_local())
+            .map(|(key, state)| (key.path, state))
+            .collect()
+    }
+
+    /// 同 [`ReadFileState::whole_files`]，全部机器（R3，remote-exec.md §20.7.4）。
+    pub fn whole_files_everywhere(&self, session: &SessionId) -> Vec<(FileKey, FileState)> {
         let sessions = self.sessions();
         let Some(files) = sessions.files.get(session) else {
             return Vec::new();
@@ -199,65 +249,76 @@ impl ReadFileState {
             .order
             .iter()
             .rev()
-            .filter_map(|path| {
-                let state = files.entries.get(path)?;
+            .filter_map(|key| {
+                let state = files.entries.get(key)?;
                 (state.offset.is_none() && state.limit.is_none())
-                    .then(|| (path.clone(), state.clone()))
+                    .then(|| (key.clone(), state.clone()))
             })
             .collect()
     }
 
     /// 去掉一条记录（文件已经不在了）。
     pub fn remove(&self, session: &SessionId, path: &str) {
+        self.remove_at(session, &FileKey::local(path));
+    }
+
+    pub fn remove_at(&self, session: &SessionId, key: &FileKey) {
         if let Some(files) = self.sessions().files.get_mut(session) {
-            files.remove(path);
+            files.remove(key);
         }
     }
 
     /// 内容就是记录的内容，记下执行侧现在的版本；不改顺序与形状。
     pub fn rebase(&self, session: &SessionId, path: &str, version: FileVersion) {
-        if let Some(state) = self
-            .sessions()
-            .files
-            .get_mut(session)
-            .and_then(|files| files.entries.get_mut(path))
-        {
+        self.rebase_at(session, &FileKey::local(path), version);
+    }
+
+    pub fn rebase_at(&self, session: &SessionId, key: &FileKey, version: FileVersion) {
+        if let Some(state) = self.sessions().entry(session, key) {
             state.baseline = Baseline::Version(version);
         }
     }
 
     /// 记录的内容不在模型的上下文里（只告诉了模型文件改了，没给内容）。不改顺序。
     pub fn mark_not_in_context(&self, session: &SessionId, path: &str) {
-        if let Some(state) = self
-            .sessions()
-            .files
-            .get_mut(session)
-            .and_then(|files| files.entries.get_mut(path))
-        {
+        self.mark_not_in_context_at(session, &FileKey::local(path));
+    }
+
+    pub fn mark_not_in_context_at(&self, session: &SessionId, key: &FileKey) {
+        if let Some(state) = self.sessions().entry(session, key) {
             state.not_in_context = true;
         }
     }
 
     /// 冷恢复：用重建出的记录替换这个会话的状态（见 [`crate::file_state_restore`]）。
-    pub fn replace(&self, session: &SessionId, entries: Vec<(String, FileState)>) {
+    pub fn replace(&self, session: &SessionId, entries: Vec<(FileKey, FileState)>) {
         let mut sessions = self.sessions();
         let files = sessions.session(session);
         *files = SessionFiles::default();
-        for (path, state) in entries {
-            files.insert(path, state);
+        for (key, state) in entries {
+            files.insert(key, state);
         }
     }
 }
 
 /// 压缩时清空（kernel-api [`ReadFileStates`]，先取出再清空）：一次锁内取走这个会话的
-/// 记录，返回路径，最近用过的在前。
+/// 记录，返回本机的路径，最近用过的在前。远端的记录一起清掉，但压缩后不重读（暂定，remote-exec.md §20.7.3：compact 的
+/// 重读用本机的 Read）。
 impl ReadFileStates for ReadFileState {
     fn clear(&self, session: &SessionId) -> Vec<String> {
         let mut sessions = self.sessions();
         let taken = sessions.files.remove(session);
         sessions.order.retain(|item| item != session);
         taken
-            .map(|files| files.order.into_iter().rev().collect())
+            .map(|files| {
+                files
+                    .order
+                    .into_iter()
+                    .rev()
+                    .filter(FileKey::is_local)
+                    .map(|key| key.path)
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }

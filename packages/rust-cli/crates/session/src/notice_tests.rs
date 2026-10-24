@@ -39,6 +39,22 @@ pub(crate) async fn session_on<E: rust_cli_kernel_api::testing::AllPorts + 'stat
     messages: Vec<Message>,
     clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
 ) -> Session {
+    let registry = rust_cli_kernel_api::testing::environments(env.clone());
+    session_on_machines(scope, (env, registry), model, tools, messages, clock).await
+}
+
+/// 同 [`session_on`]，另给执行环境的注册表（R3：远端机器上的 monitor 与通知）。
+pub(crate) async fn session_on_machines<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
+    scope: &TaskScope,
+    (env, registry): (
+        Arc<E>,
+        Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
+    ),
+    model: Arc<dyn ModelPort>,
+    tools: Vec<Arc<dyn Tool>>,
+    messages: Vec<Message>,
+    clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
+) -> Session {
     let store = Arc::new(MemoryStore::default());
     store.create(meta()).await.unwrap();
     let ids = Arc::new(SequentialIds::default());
@@ -51,6 +67,7 @@ pub(crate) async fn session_on<E: rust_cli_kernel_api::testing::AllPorts + 'stat
         hooks: Arc::new(NoHooks),
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
+        machines: registry.clone(),
         machine: machine(env.clone()),
         local: local_services(env.clone()),
         artifacts: store.clone(),
@@ -66,6 +83,7 @@ pub(crate) async fn session_on<E: rust_cli_kernel_api::testing::AllPorts + 'stat
             ids,
             runner,
             compactor: Arc::new(NeverCompact),
+            machines: registry,
             machine: machine(env.clone()),
             local: local_services(env),
             max_turns: None,

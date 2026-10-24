@@ -17,10 +17,21 @@ pub(crate) use argv::strip_wrappers;
 pub use git::invokes_git;
 
 use crate::parse::{Analysis, analyze, is_permission_safe};
+use rust_cli_kernel_api::env_files::PathStyle;
 
 /// Node `isRuntimeReadOnlyBashCommand`：每个子命令都只读，且没有改目录的 git、没有动态内容。
-/// `git_unsafe` 为 true 时（工作目录里的 git 配置不可信）含 git 的命令一律不算只读。
+/// `git_unsafe` 为 true 时（工作目录里的 git 配置不可信）含 git 的命令一律不算只读。按本机构建平台的路径风格。
 pub fn is_read_only_analysis(analysis: &Analysis, git_unsafe: bool) -> bool {
+    let style = if cfg!(windows) {
+        PathStyle::Windows
+    } else {
+        PathStyle::Posix
+    };
+    is_read_only_analysis_on(analysis, git_unsafe, style)
+}
+
+/// 同 [`is_read_only_analysis`]，按命令所在机器的路径风格（R3，remote-exec.md §20.8）。
+pub fn is_read_only_analysis_on(analysis: &Analysis, git_unsafe: bool, style: PathStyle) -> bool {
     if !is_permission_safe(analysis) || analysis.commands.is_empty() {
         return false;
     }
@@ -30,15 +41,19 @@ pub fn is_read_only_analysis(analysis: &Analysis, git_unsafe: bool) -> bool {
     if git_unsafe && invokes_git(&analysis.commands) {
         return false;
     }
-    analysis
-        .commands
-        .iter()
-        .all(|part| !argv::has_known_write_option(part) && argv::evaluate(part) == Some(true))
+    analysis.commands.iter().all(|part| {
+        !argv::has_known_write_option(part) && argv::evaluate(part, style) == Some(true)
+    })
 }
 
 /// [`is_read_only_analysis`] 的字符串版本。
 pub fn is_read_only(command: &str, git_unsafe: bool) -> bool {
     is_read_only_analysis(&analyze(command), git_unsafe)
+}
+
+/// [`is_read_only_analysis_on`] 的字符串版本。
+pub fn is_read_only_on(command: &str, git_unsafe: bool, style: PathStyle) -> bool {
+    is_read_only_analysis_on(&analyze(command), git_unsafe, style)
 }
 
 #[cfg(test)]

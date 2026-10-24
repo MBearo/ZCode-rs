@@ -54,6 +54,9 @@ mod imp {
             let (stream, _) = self.inner.accept().await?;
             Ok(halves(stream))
         }
+
+        /// 关闭监听：之后不再接受连接（socket 文件由调用方删）。
+        pub fn close(self) {}
     }
 
     fn halves(stream: tokio::net::UnixStream) -> super::UdsHalves {
@@ -190,6 +193,9 @@ mod imp {
         pub async fn accept_raw(&self) -> io::Result<super::UdsHalves> {
             Err(unsupported())
         }
+
+        /// 这里的监听拿不到（`bind` 总是失败），没有要关的。
+        pub fn close(self) {}
     }
 }
 

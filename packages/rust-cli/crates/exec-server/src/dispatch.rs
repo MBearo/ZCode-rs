@@ -6,7 +6,7 @@ use rust_cli_exec_wire::reply::Reply;
 use rust_cli_exec_wire::request::Request;
 use rust_cli_exec_wire::{Body, BodyBuilder};
 use rust_cli_kernel_api::env::{ReadFile, WriteFile};
-use rust_cli_kernel_api::env_files::{ListDir, ListFiles, StatFile};
+use rust_cli_kernel_api::env_files::{ListDir, ListFiles, StatFile, StatMany};
 use rust_cli_kernel_api::env_pdf::PdfPageCount;
 use rust_cli_kernel_api::machine::MachineEnv;
 
@@ -91,6 +91,17 @@ async fn run(
                 .await
                 .map_err(err)?;
             Reply::Stat(found.map(output::file_stat))
+        }
+        Request::StatMany { workspace, paths } => {
+            let request = StatMany {
+                paths: paths.into_iter().map(input::path).collect(),
+            };
+            let found = machine
+                .files()
+                .stat_many(&input::workspace(workspace), request)
+                .await
+                .map_err(err)?;
+            Reply::StatMany(found.into_iter().map(output::stat_entry).collect())
         }
         Request::ListDir { workspace, path } => {
             let list = ListDir {

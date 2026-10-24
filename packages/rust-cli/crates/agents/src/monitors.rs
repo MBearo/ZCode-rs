@@ -151,7 +151,7 @@ async fn stop(core: &Core, live: &LiveAgent, armed: &MonitorArmed) {
     };
     if let Err(error) = core
         .ports
-        .machine
+        .machine_named(armed.machine.as_deref())
         .background()
         .stop_background_command(context, request)
         .await
@@ -174,11 +174,9 @@ async fn run(
     notice: oneshot::Receiver<ShellNotice>,
 ) {
     let mut watch = Watch::new(armed.clone(), core.ports.clock.now_ms());
-    let mut events = core
-        .ports
-        .machine
-        .commands()
-        .watch_command(armed.operation.clone(), 0);
+    // monitor 所在的机器（R3）：输出流、查询、停止与 ack 都发给它。
+    let machine = core.ports.machine_named(armed.machine.as_deref());
+    let mut events = machine.commands().watch_command(armed.operation.clone(), 0);
     let socket = armed.source == MonitorSource::Socket;
     loop {
         let now = core.ports.clock.now_ms();
@@ -202,7 +200,7 @@ async fn run(
                     Some(Err(error)) => {
                         // 从记下的游标重新订阅（读过的不再送）。
                         tracing::warn!(%error, task = %armed.task, "a subagent monitor stream failed");
-                        events = core.ports.machine.commands().watch_command(armed.operation.clone(), watch.cursor);
+                        events = machine.commands().watch_command(armed.operation.clone(), watch.cursor);
                     }
                     None => break,
                 }
@@ -219,11 +217,7 @@ async fn run(
         task: armed.task.clone(),
     };
     let pending = matches!(
-        core.ports
-            .machine
-            .background()
-            .background_command(key)
-            .await,
+        machine.background().background_command(key).await,
         Ok(Some(_))
     );
     let now = core.ports.clock.now_ms();
@@ -236,9 +230,7 @@ async fn run(
             let (status, envelope) = (core.ports.monitor.end)(&notice, events.as_deref());
             deliver(core, &live, &armed.task, status, envelope).await;
         }
-        if let Err(error) = core
-            .ports
-            .machine
+        if let Err(error) = machine
             .shell()
             .ack_shell_notice(&live.child, notice.seq)
             .await

@@ -89,7 +89,10 @@ impl EditTool {
         content: &str,
         version: &FileVersion,
     ) -> Freshness {
-        let prior = self.files.state.get(&context.session, path);
+        let prior = self
+            .files
+            .state
+            .get_at(&context.session, context.machine.name(), path);
         let recoverable = || async {
             applies(content, &input.old_string, input.replace_all)
                 && self.files.auto_allowed(self, raw, context).await
@@ -217,7 +220,10 @@ impl Tool for EditTool {
         let cwd = cwd(&context).await;
         let path = stable_path(&context, &cwd, NAME, "file_path", &input.file_path).await?;
         let current = self.current(&context, &path).await?;
-        let lastly = self.files.state.get(&context.session, &path);
+        let lastly = self
+            .files
+            .state
+            .get_at(&context.session, context.machine.name(), &path);
         let (content, encoding, endings, precondition, exists) = match &current {
             Some((decoded, version, _)) => (
                 decoded.content.clone(),
@@ -275,8 +281,9 @@ impl Tool for EditTool {
             mtime_ms: written.mtime_ms,
         };
         let checkpoint = checkpoint::record(&context, change).await;
-        self.files.state.set(
+        self.files.state.set_at(
             &context.session,
+            context.machine.name(),
             &path,
             FileState {
                 content: updated

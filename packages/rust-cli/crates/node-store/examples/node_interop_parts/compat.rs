@@ -300,6 +300,7 @@ pub(super) async fn checkpoints(dir: &str, session: &str) -> Result<()> {
         facts.push(result(&a1, call, vec![said("written")], false));
         facts.push(Fact::CheckpointCreated {
             checkpoint: WorkspaceCheckpoint {
+                machine: None,
                 id: format!("checkpoint_{call}"),
                 prompt: u1.clone(),
                 assistant: a1.clone(),

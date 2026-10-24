@@ -194,11 +194,14 @@ impl PolicyGate {
             .as_ref()
             .and_then(|facts| PlanFiles::in_workspace(facts, &workspace.root, &context.session));
         let mut roots = vec![workspace.root.as_str().to_owned()];
-        roots.extend(
-            base.additional_directories
-                .iter()
-                .map(|dir| dir.as_str().to_owned()),
-        );
+        // 远端机器的允许范围只有它的工作目录：本机的附加目录不带过去（R3，暂定，remote-exec.md §20.8）。
+        if context.machine.is_local() {
+            roots.extend(
+                base.additional_directories
+                    .iter()
+                    .map(|dir| dir.as_str().to_owned()),
+            );
+        }
         PathContext {
             cwd: shell.as_ref().map_or_else(
                 || workspace.root.as_str().to_owned(),

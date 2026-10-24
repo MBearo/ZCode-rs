@@ -17,6 +17,7 @@ mod deferred;
 mod executor;
 mod goal;
 mod limits;
+mod machines;
 #[cfg(test)]
 mod mcp_support_tests;
 mod mcp_wait;
@@ -61,6 +62,7 @@ use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::env::WorkspaceRef;
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::{AgentId, Generation, RunId, SessionId};
 use rust_cli_kernel_api::local_services::LocalServices;
 use rust_cli_kernel_api::machine::MachineEnv;
@@ -87,6 +89,9 @@ pub struct QueryParts {
     pub clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
     /// 工具调用执行所在的机器（R0 只有本机；R3 起按调用的 `machine` 换，remote-exec.md §15.8.1）。
     pub machine: MachineEnv,
+    /// 执行环境的注册表（R3，remote-exec.md §20.5、§20.6）：连上的远端机器决定工具定义里的 `machine` 参数；子代理的
+    /// 缺省机器从这里取。
+    pub machines: Arc<dyn EnvironmentRegistry>,
     /// 只在本机的服务（Git、worktree、WebFetch）。
     pub local: LocalServices,
     pub artifacts: Arc<dyn ArtifactStore>,

@@ -36,6 +36,15 @@ pub struct FileStat {
     pub version: String,
 }
 
+/// `files.stat_many` 的一项（R3）：路径不存在时两项都没有；这一项出错时是 `error`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stat: Option<FileStat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<crate::envelope::WireError>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DirEntry {
     pub name: String,

@@ -27,7 +27,7 @@ tokio = { workspace = true, features = ["sync"] }
 tokio-util.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 
 [features]
 # 测试用的假端口（testing 模块）；只在其他 crate 的 dev-dependencies 里打开。

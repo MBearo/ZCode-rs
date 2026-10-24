@@ -37,8 +37,8 @@ struct Input {
 enum Target {
     /// 子代理的 ID 与 description。
     Agent(AgentId, String),
-    /// 执行环境里还在跑的后台命令，带它所在的会话（主线程可能停子代理的命令）。
-    Command(SessionId),
+    /// 执行环境里还在跑的后台命令，带它所在的会话（主线程可能停子代理的命令）与机器（R3）。
+    Command(Found),
 }
 
 /// 结果（`JSON.stringify` 输出对象，键序固定）。
@@ -81,6 +81,12 @@ pub(crate) struct Caller<'a> {
     pub(crate) agent: Option<&'a AgentId>,
     pub(crate) machine: &'a MachineEnv,
     pub(crate) operation: &'a OperationContext,
+}
+
+/// 后台命令所在的会话与机器（R3：TaskStop 按任务所在的机器停，remote-exec.md §20.7.2）。
+struct Found {
+    session: SessionId,
+    machine: MachineEnv,
 }
 
 impl<'a> Caller<'a> {
@@ -161,21 +167,38 @@ impl TaskStopTool {
                 }
             };
         }
-        for session in self.command_sessions(context) {
-            let key = BackgroundTask {
-                session: session.clone(),
-                task: ShellTaskId::new(id),
-            };
-            match context.machine.background().background_command(key).await {
-                Ok(Some(info)) if info.status == BackgroundStatus::Running => {
-                    return Ok(Target::Command(session));
+        // 依次问本机与连上的远端机器（暂定，remote-exec.md §20.7.2）：任务 ID 由 operationId 派生，跨机器不重复。
+        for machine in self.machines(context) {
+            for session in self.command_sessions(context) {
+                let key = BackgroundTask {
+                    session: session.clone(),
+                    task: ShellTaskId::new(id),
+                };
+                match machine.background().background_command(key).await {
+                    Ok(Some(info)) if info.status == BackgroundStatus::Running => {
+                        return Ok(Target::Command(Found { session, machine }));
+                    }
+                    Ok(Some(info)) => return Err(not_running(info.status.as_str())),
+                    // 执行环境不支持后台命令时同“不认识”。
+                    Ok(None) | Err(_) => {}
                 }
-                Ok(Some(info)) => return Err(not_running(info.status.as_str())),
-                // 执行环境不支持后台命令时同“不认识”。
-                Ok(None) | Err(_) => {}
             }
         }
         Err(self.not_found(id, context))
+    }
+
+    /// 要问的机器：调用方的（本机），再是连上的远端机器（按名字）。
+    fn machines(&self, context: &Caller<'_>) -> Vec<MachineEnv> {
+        let registry = &self.core.ports.machines;
+        let mut machines = vec![context.machine.clone()];
+        machines.extend(
+            registry
+                .machines()
+                .machines
+                .iter()
+                .filter_map(|remote| registry.machine(&remote.name)),
+        );
+        machines
     }
 
     /// 停止停放的子代理时，停掉它子会话里还在跑的后台命令（L18：
@@ -251,13 +274,12 @@ impl TaskStopTool {
                     command: description,
                 })
             }
-            Ok(Target::Command(session)) => {
+            Ok(Target::Command(Found { session, machine })) => {
                 let key = BackgroundTask {
                     session,
                     task: ShellTaskId::new(id),
                 };
-                match context
-                    .machine
+                match machine
                     .background()
                     .stop_background_command(context.operation.clone(), key)
                     .await?

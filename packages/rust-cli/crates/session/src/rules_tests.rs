@@ -7,6 +7,7 @@ use super::*;
 
 fn permission() -> InteractionRequest {
     InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("toolu_1"),
         tool: "Bash".to_owned(),
         input: json!({"command": "git status"}),

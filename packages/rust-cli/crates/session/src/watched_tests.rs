@@ -12,11 +12,3 @@ async fn items_arrive_then_an_ended_stream_waits_forever() {
     let ended = tokio::time::timeout(Duration::from_millis(20), watched.next()).await;
     assert!(ended.is_err());
 }
-
-#[tokio::test]
-async fn a_stopped_stream_is_not_polled_again() {
-    let mut watched = Watched::new(stream::iter([1]).boxed());
-    watched.stop();
-    let stopped = tokio::time::timeout(Duration::from_millis(20), watched.next()).await;
-    assert!(stopped.is_err());
-}

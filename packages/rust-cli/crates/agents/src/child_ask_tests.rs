@@ -59,6 +59,7 @@ fn sink(parent: Option<Parent>, asks: Option<Asks>) -> ChildSink {
 
 fn permission(asked_by: Option<&str>) -> InteractionRequest {
     InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("toolu_1"),
         tool: "Bash".to_owned(),
         input: json!({"command": "touch a"}),

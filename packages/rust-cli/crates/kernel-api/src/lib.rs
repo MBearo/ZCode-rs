@@ -16,6 +16,8 @@
 //! | [`machine`] | 一台机器上的执行端口（环境事实、文件、搜索、命令、shell、后台命令、回退、PDF）与 `MachineEnv` |
 //! | [`local_services`] | 只在本机的服务（Git 与 worktree、取网页）与 `LocalServices` |
 //! | [`env_registry`] | 执行环境的注册表（机器名 → `MachineEnv`，本机的 `LocalServices`） |
+//! | [`machine_param`] | 工具的 `machine` 参数：哪些工具带它、发出时的 schema、从输入里取出（R3） |
+//! | [`machine_notices`] | 本机与连上的远端机器的后台命令通知合成一个流（R3） |
 //! | [`env_shell`] | shell 执行的 DTO（shell 选择、cwd 延续、sandbox、后台通知） |
 //! | [`env_command`] | 执行环境里跑命令的 DTO（`env` 重新导出） |
 //! | [`env_files`] | 执行环境端口里文件与搜索操作的 DTO |
@@ -81,6 +83,8 @@ pub mod interaction;
 pub mod listing;
 pub mod local_services;
 pub mod machine;
+pub mod machine_notices;
+pub mod machine_param;
 pub mod manage;
 pub mod mcp;
 pub mod mcp_state;
@@ -107,7 +111,7 @@ pub mod user_command;
 pub mod user_input;
 pub mod workspace_trust;
 
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
 #[cfg(test)]

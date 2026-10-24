@@ -92,6 +92,7 @@ fn only_questions_are_timed() {
     assert_eq!(off.next_due(start), None);
     let mut afk = afk(4_000, None);
     let permission = InteractionRequest::Permission {
+        machine: None,
         tool_use: ToolUseId::new("tu1"),
         tool: "Bash".to_owned(),
         input: json!({}),

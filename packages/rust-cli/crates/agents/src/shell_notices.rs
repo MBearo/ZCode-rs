@@ -12,6 +12,7 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use rust_cli_kernel_api::env_shell::ShellNotice;
 use rust_cli_kernel_api::ids::{AgentId, SessionId};
+use rust_cli_kernel_api::machine_notices::{self, all_shell_notices};
 
 use crate::Core;
 use crate::live::{LiveAgent, Notice};
@@ -28,28 +29,21 @@ pub(crate) fn watch(core: &Arc<Core>, agent: &LiveAgent) {
         .spawner
         .clone()
         .spawn("subagent-shell-notices", async move {
-            let mut notices = core.ports.machine.shell().shell_notices(&child, 0);
-            while let Some(next) = notices.next().await {
-                let Ok(notice) = next else {
-                    // 执行环境不提供后台通知：以后也不会有。
-                    return;
-                };
-                let seq = notice.seq;
+            // 本机与连上的远端机器的通知（R3，remote-exec.md §20.7.2）：ack 发给通知所在的机器。合成流不结束，
+            // 任务随进程（作用域）结束。
+            let mut notices = all_shell_notices(core.ports.machines.clone(), child.clone());
+            while let Some(tagged) = notices.next().await {
                 // 在看的 monitor 的终态交给它的任务：合成带剩下的行的终态、送出之后由它 ack（agents.md §5.3）。
-                if notice.kind == rust_cli_kernel_api::env_shell::BackgroundKind::Monitor
-                    && core.monitors.take(&notice)
+                if tagged.notice.kind == rust_cli_kernel_api::env_shell::BackgroundKind::Monitor
+                    && core.monitors.take(&tagged.notice)
                 {
                     continue;
                 }
-                forward(&core, &id, &root, notice).await;
-                if let Err(error) = core
-                    .ports
-                    .machine
-                    .shell()
-                    .ack_shell_notice(&child, seq)
-                    .await
+                forward(&core, &id, &root, tagged.notice.clone()).await;
+                if let Err(error) =
+                    machine_notices::ack(core.ports.machines.as_ref(), &tagged, &child).await
                 {
-                    tracing::warn!(%error, seq, "a subagent command notice was not acknowledged");
+                    tracing::warn!(%error, seq = tagged.notice.seq, "a subagent command notice was not acknowledged");
                 }
             }
         });

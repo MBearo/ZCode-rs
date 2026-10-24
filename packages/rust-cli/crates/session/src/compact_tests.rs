@@ -129,6 +129,7 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
         hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
         ids: Arc::new(SequentialIds::default()),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
+        machines: rust_cli_kernel_api::testing::environments(env.clone()),
         machine: machine(env.clone()),
         local: local_services(env),
         artifacts: store.clone(),
@@ -154,6 +155,7 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
             compactor: Arc::new(FakeCompactor {
                 fail: fail.map(str::to_owned),
             }),
+            machines: rust_cli_kernel_api::testing::environments(env.clone()),
             machine: machine(env.clone()),
             local: local_services(env),
             max_turns: None,

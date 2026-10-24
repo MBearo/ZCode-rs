@@ -360,7 +360,14 @@ pub(crate) async fn run(
             ToolOrder::ByName
         };
         let history_iter = active.iter().map(AsRef::as_ref);
-        let wired = wire_tools(tools, history_iter, &prompt, (tool_search, order));
+        let mut wired = wire_tools(tools, history_iter, &prompt, (tool_search, order));
+        // 有远端机器连上时带 `machine` 参数的工具多这一项（R3，remote-exec.md §20.5.1）；没有时不变。
+        let default_machine = scope.default_machine_name().await;
+        crate::machines::add_machine_param(
+            &mut wired.definitions,
+            &scope.parts.machines.machines(),
+            default_machine.as_deref(),
+        );
         step.declare(&scope, &source);
         let active: Vec<_> = active
             .iter()
