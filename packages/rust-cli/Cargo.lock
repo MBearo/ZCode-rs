@@ -2359,6 +2359,7 @@ dependencies = [
  "rust-cli-exec-client",
  "rust-cli-exec-wire",
  "rust-cli-kernel-api",
+ "rust-cli-prompts",
  "serde_json",
 ]
 
@@ -2760,6 +2761,7 @@ name = "rust-cli-ssh-connect"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "rust-cli-base",
  "rust-cli-exec-transport",
  "rust-cli-fs",

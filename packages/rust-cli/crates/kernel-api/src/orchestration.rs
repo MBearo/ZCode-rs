@@ -255,6 +255,10 @@ pub struct ContextRequest {
     /// 清单里的连接中服务器与 `mcp_instructions_delta` 看它（context.md §4.2）。没有快照的调用方为 None。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<McpView>,
+    /// 这次运行的缺省机器（远端执行 F98，docs/specs/rust-cli/remote-exec.md §25.2.1）：子代理派生时 Agent 的 `machine`
+    /// （`RunSink::default_machine`）；本机为 None。机器清单提醒按它写“不写 `machine` 时在哪台机器上”。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_machine: Option<String>,
 }
 
 /// system prompt 段落、user / system context，以及这一步要追加的 attachment。

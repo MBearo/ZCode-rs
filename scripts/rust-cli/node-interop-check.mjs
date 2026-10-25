@@ -61,6 +61,9 @@
 // 24. 远端机器上的工具调用（R3，`node-interop-machines.mjs`，remote-exec.md §20.9）：工具输入里的 `machine` 与机器清单提醒
 //    Node 读得出、进模型上下文，过 App 的 strict schema；远端 checkpoint 是本工程的记录（Node 看不到），rust-cli 读回；
 //    Node 续写之后 rust-cli 冷读取不变。
+// 25. MCP 服务器绑定到远端机器（R5，`node-interop-mcp-machines.mjs`，remote-exec.md §22.2）：绑定在 rust-cli 的旁路文件里，
+//    Node 读共用的配置文件没有诊断、服务器照常；对照：服务器里直接写 `machine` 时 Node 报 `config_mcp_server_invalid`
+//    并跳过它。
 // 4. 界面语言（tui.md §7.1）：rust-cli 写 `~/.zcode/cli/config.json` 的 `ui.locale`（crates/platform/examples/
 //    ui_locale.rs），Node 的 `loadFileConfig` 读出同一个值、其余字段不变；Node 的 `updateUiLocaleInFileConfig`
 //    改写后 rust-cli 读出；同一份输入两边写出的文本逐字节相同。
@@ -78,6 +81,7 @@ import { checkCompat, checkProviderImport, checkStoragePaths } from "./node-inte
 import { checkCompactCarried } from "./node-interop-compact.mjs";
 import { checkFork } from "./node-interop-fork.mjs";
 import { checkMachines } from "./node-interop-machines.mjs";
+import { checkMcpMachines } from "./node-interop-mcp-machines.mjs";
 import { checkManage } from "./node-interop-manage.mjs";
 import { checkSentinel } from "./node-interop-sentinel.mjs";
 import { checkToolOrder } from "./node-interop-tool-order.mjs";
@@ -816,6 +820,8 @@ try {
     expectEqual,
   });
   await checkMcpEnabled({ ...settings, home: join(dir, "mcp-home") });
+  // 第二十五段：MCP 服务器绑定到远端机器（R5）。
+  await checkMcpMachines({ nodeRoot, expectEqual, home: join(dir, "mcp-machines-home") });
   // 第十一段：Node 的真实运行时（子进程，临时 HOME）；第二十一段（Node 写的被杀会话，F86）与第二十二段（本地
   // ToolSearch 的会话，F84）是它的场景。
   const runtimeBinaries = buildRuntimeBinaries();
@@ -879,6 +885,7 @@ try {
         "with the same file text; the /effort and /model default model selection round-trips " +
         "both ways with the same file text, and both sides resolve the same initial model for " +
         "new sessions (Node resolveInitialModelSelection); /mcp enable and disable write the enabled field Node reads; " +
+        "Node reads a config whose MCP servers rust-cli binds to remote machines (in its own side file) without diagnostics; " +
         "a rust-cli fork from a user input keeps that turn and is read and continued by Node, and a Node fork is read by rust-cli; " +
         "the usage rows rust-cli writes (the session title row under the Node name session_title, " +
         "outside turn_usage as Node's recordModelUsageFact and recordTurnUsageFact write it) match " +

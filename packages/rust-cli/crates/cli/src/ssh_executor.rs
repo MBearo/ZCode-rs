@@ -24,11 +24,12 @@ use rust_cli_ssh_connect::{Arch, SshConnector, SshProvisioner, SshTarget, Wanted
 
 use crate::options::SshAssumption;
 
-/// SSH 下的重连（remote-exec.md §19.8）：0.5 s 起翻倍、最多 15 s，12 次（合计约 2 分钟）。机器清单里的机器同样用它（R3）。
+/// SSH 下的重连：0.5 s 起翻倍、最多 60 s、次数不限，直到连上、被拒绝（ssh 认证失败等，ssh-connect 标成 `Rejected`）或
+/// 用户断开（远端执行 F96，remote-exec.md §23.4；R2 原来是最多 15 s、12 次）。机器清单里的机器同样用它（R3）。
 pub(super) const RECONNECT: Reconnect = Reconnect {
-    attempts: 12,
+    attempts: None,
     delay: Duration::from_millis(500),
-    max_delay: Duration::from_secs(15),
+    max_delay: Duration::from_secs(60),
 };
 
 pub(super) struct SshEndpoint {
@@ -92,7 +93,7 @@ pub(super) async fn environments(
         .connect()
         .await
         .with_context(|| format!("connecting to the ssh executor at {}", ssh.destination))?;
-    let remote = Arc::new(RemoteEnvironment::new(client));
+    let remote = Arc::new(RemoteEnvironment::new(client).with_name(ssh.destination.as_str()));
     Ok(Arc::new(SshRegistry {
         inner: LocalRegistry::new(MachineEnv::new(remote, mcp), LocalServices::new(env)),
         _machine: machine,

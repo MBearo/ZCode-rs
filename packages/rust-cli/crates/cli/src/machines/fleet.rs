@@ -9,14 +9,16 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use rust_cli_base::{Spawner, Task};
+use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::ExecClient;
 use rust_cli_exec_wire::handshake::Welcome;
+use rust_cli_kernel_api::mcp::McpConnect;
 use rust_cli_machines::{
     Machine, MachineEntry, MachineError, MachineList, MachineState, MachinesError,
 };
 use tokio::sync::watch;
 
-use super::{MachineRegistry, attach};
+use super::{MachineRegistry, attach, remote_of};
 
 /// 按清单的条目建一台机器的状态机（端点由组装根选：SSH 或只给测试的 loopback；单测里是内存的）。
 pub(crate) type MakeMachine = Box<dyn Fn(&MachineEntry) -> anyhow::Result<Machine> + Send + Sync>;
@@ -96,8 +98,11 @@ pub(crate) struct Fleet {
     make: MakeMachine,
     registry: Arc<MachineRegistry>,
     spawner: Spawner,
-    state: Mutex<State>,
+    /// 注册表的 `listed` 也读这里的清单（F98），所以拿 Arc。
+    state: Arc<Mutex<State>>,
     changes: watch::Sender<u64>,
+    /// 每台机器上期望的 MCP 服务器（R5，remote-exec.md §22.5）：机器名 → 绑定到它的服务器（配置的原文）。
+    mcp: BTreeMap<String, Vec<McpConnect>>,
 }
 
 /// 占着“正在连”的凭证：丢掉时（连完、出错或请求被取消）放开。
@@ -118,6 +123,10 @@ impl Drop for Turn {
     }
 }
 
+fn lock_state(state: &Mutex<State>) -> MutexGuard<'_, State> {
+    state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// 唤醒订阅方（版本加一）。
 fn bump(changes: &watch::Sender<u64>) {
     changes.send_modify(|version| *version += 1);
@@ -130,21 +139,65 @@ impl Fleet {
         registry: Arc<MachineRegistry>,
         spawner: Spawner,
     ) -> Self {
+        let state = Arc::new(Mutex::new(State {
+            entries,
+            slots: BTreeMap::new(),
+        }));
+        // 注册表答“这台在不在清单里”时读同一份清单（F98，remote-exec.md §25.2.2）。
+        let listing = Arc::downgrade(&state);
+        registry.set_listing(Box::new(move |name| {
+            listing.upgrade().is_some_and(|state| {
+                lock_state(&state)
+                    .entries
+                    .iter()
+                    .any(|entry| entry.name == name)
+            })
+        }));
         Self {
             list,
             make,
             registry,
             spawner,
-            state: Mutex::new(State {
-                entries,
-                slots: BTreeMap::new(),
-            }),
+            state,
             changes: watch::channel(0).0,
+            mcp: BTreeMap::new(),
+        }
+    }
+
+    /// 每台机器上期望的 MCP 服务器（连上时发给执行器，§22.5）。
+    #[must_use]
+    pub(crate) fn with_mcp(mut self, mcp: BTreeMap<String, Vec<McpConnect>>) -> Self {
+        self.mcp = mcp;
+        self
+    }
+
+    /// 期望集合（§22.5）：执行器结束这台机器上多出来的 MCP 服务器（配置删了、改了的），相同的不动。失败只记日志：
+    /// 多出来的服务器留到执行器按 §19.7 清掉。
+    async fn declare_mcp(&self, entry: &MachineEntry, client: &ExecClient) {
+        let servers = self.mcp.get(&entry.name).cloned().unwrap_or_default();
+        let workspace = match remote_of(entry, client) {
+            Ok(remote) => remote.workspace,
+            Err(error) => {
+                tracing::warn!(machine = %entry.name, error = %format!("{error:#}"), "MCP servers not declared");
+                return;
+            }
+        };
+        match RemoteEnvironment::new(client.clone())
+            .declare_mcp(&workspace, servers)
+            .await
+        {
+            Ok(closed) if closed.is_empty() => {}
+            Ok(closed) => {
+                tracing::info!(machine = %entry.name, ?closed, "MCP servers that are not configured any more were closed");
+            }
+            Err(error) => {
+                tracing::warn!(machine = %entry.name, %error, "MCP servers not declared");
+            }
         }
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        lock_state(&self.state)
     }
 
     /// 订阅变化：清单、状态或延迟（按毫秒）变了就出一个新的版本号。
@@ -240,6 +293,8 @@ impl Fleet {
 
     /// 连上（失败过的重新部署、握手），成功后放进注册表、清单记 `connected=true`（§20.3.1）。
     pub(crate) async fn connect(&self, name: &str) -> Result<Changed, FleetError> {
+        // 正在连（R5，§22.6）：绑定到这台机器的 MCP 服务器等它连完。
+        let _connecting = self.registry.connecting(name);
         let entry = self.entry(name).await?;
         let (machine, connecting) = self.slot(&entry).map_err(|error| {
             FleetError::Connection(MachineError::Unreachable(format!("{error:#}")))
@@ -265,6 +320,8 @@ impl Fleet {
             .slots
             .get(name)
             .map_or_else(|| entry.clone(), |slot| slot.entry.clone());
+        // 放进注册表之前先发期望集合：ext 的 `mcp.connect` 都在它之后（§22.5）。
+        self.declare_mcp(&slot_entry, &client).await;
         attach(&self.registry, &slot_entry, client.clone())
             .map_err(|error| FleetError::Connection(MachineError::Lost(format!("{error:#}"))))?;
         // 延迟：这个客户端的心跳往返（重连时是同一个客户端；失败后再连换新客户端，这里换掉旧的跟随）。
@@ -310,6 +367,22 @@ impl Fleet {
         self.list.set_connected(name, false).await?;
         bump(&self.changes);
         Ok(changed)
+    }
+
+    /// 立即重试（F98，remote-exec.md §25.4.1）：这台机器在等下一次重连时马上试一次，不等退避；没在等（正在连、连着、
+    /// 没断开）时是 `Already`。重试的结果照常经状态机与 `changes` 显示。
+    pub(crate) async fn retry(&self, name: &str) -> Result<Changed, FleetError> {
+        self.entry(name).await?;
+        let machine = self
+            .state()
+            .slots
+            .get(name)
+            .map(|slot| slot.machine.clone());
+        Ok(if machine.is_some_and(|machine| machine.retry_now()) {
+            Changed::Done
+        } else {
+            Changed::Already
+        })
     }
 
     /// 连着时先断开，再从清单删掉。
@@ -361,6 +434,7 @@ async fn follow(
                 tracing::info!(event = "machine.disconnected", machine = %entry.name, state = ?state, "machine disconnected");
             }
             MachineState::Provisioning
+            | MachineState::Uploading { .. }
             | MachineState::Handshaking
             | MachineState::Reconnecting { .. } => {}
         }
@@ -383,3 +457,7 @@ async fn latency(mut latencies: watch::Receiver<Option<Duration>>, changes: watc
 #[cfg(test)]
 #[path = "fleet_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "fleet_mcp_tests.rs"]
+mod mcp_tests;

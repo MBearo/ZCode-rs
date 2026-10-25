@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use serde_json::Value;
 
 use super::words;
-use super::{Ctx, DETAIL, INDENT, bold, dim, more_lines, relative};
+use super::{Ctx, DETAIL, INDENT, bold, dim, more_lines};
 use crate::ui::palette::ColorLevel;
 use crate::ui::text::truncate_line;
 use crate::view::ToolRow;
@@ -238,7 +238,7 @@ pub fn details(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     let path = ["file_path", "notebook_path", "path"]
         .iter()
         .find_map(|key| tool.input[*key].as_str())
-        .map(|path| relative(path, ctx.workspace))
+        .map(|path| super::shown_path(path, tool, ctx))
         .unwrap_or_default();
     let additions = rows.iter().filter(|row| row.sign == '+').count() as u64;
     let deletions = rows.iter().filter(|row| row.sign == '-').count() as u64;

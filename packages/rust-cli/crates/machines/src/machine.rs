@@ -1,14 +1,15 @@
 //! 连接状态机的驱动（remote-exec.md §19.10）：跑部署与握手，订阅 exec-client 的连接状态，把状态发到一个 `watch`。
 //! 状态只由这里改（[`Machine::apply`]）：每次都经纯函数 [`transition`]。
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rust_cli_base::{Task, TaskScope};
 use rust_cli_exec_client::{ClientError, ClientOptions, ConnectionState, ExecClient};
-use rust_cli_exec_transport::{Connector, LinkError, Provisioned, Provisioner};
+use rust_cli_exec_transport::{Connector, LinkError, ProvisionStep, Provisioned, Provisioner};
 use tokio::sync::watch;
 
-use crate::state::{MachineError, MachineEvent, MachineState, Welcomed, transition};
+use crate::state::{MachineError, MachineEvent, MachineState, Retry, Welcomed, transition};
 
 /// 一台机器怎么到达（组装根注入；SSH 的实现在 cli，用 ssh-connect）。
 pub trait Endpoint: Send + Sync {
@@ -30,6 +31,8 @@ pub struct Machine {
     client: Mutex<Option<ExecClient>>,
     watcher: Mutex<Option<Task<()>>>,
     scope: TaskScope,
+    /// 建过几个客户端：每个新的客户端一个实例（见 `connect`）。
+    clients: AtomicU64,
 }
 
 fn welcomed(client: &ExecClient) -> Option<Welcomed> {
@@ -70,7 +73,22 @@ impl Machine {
             client: Mutex::new(None),
             watcher: Mutex::new(None),
             scope,
+            clients: AtomicU64::new(0),
         }
+    }
+
+    /// 新客户端的参数：第一个用组装根给的实例，之后每个加一个序号。
+    ///
+    /// 缺陷修复（R5 发现）：以前断开或失败之后再连，新的 ExecClient 沿用同一个实例，调用 ID 又从 1 起；执行器那边还
+    /// 留着旧客户端没 ack 的调用与流（账本的键是（实例，调用 ID）），新的调用撞上它们，回 `operation_conflict` 或接上
+    /// 一个无关的旧流。同一个客户端之内的重连（Reconnecting）不经这里，实例不变（§18.5 的补发靠它）。
+    fn next_options(&self) -> ClientOptions {
+        let mut options = self.options.clone();
+        let count = self.clients.fetch_add(1, Ordering::Relaxed);
+        if count > 0 {
+            options.client_instance = format!("{}.{count}", options.client_instance);
+        }
+        options
     }
 
     /// 订阅状态。
@@ -110,7 +128,18 @@ impl Machine {
                 self.state()
             )));
         }
-        let provisioned = match self.endpoint.provisioner().provision().await {
+        // 上传是单独的一步（F98，remote-exec.md §25.4.2）：部署器开始上传时报大小。
+        let uploading = |step: ProvisionStep| match step {
+            ProvisionStep::Uploading { bytes } => {
+                self.apply(MachineEvent::Uploading { bytes });
+            }
+        };
+        let provisioned = match self
+            .endpoint
+            .provisioner()
+            .provision_reporting(&uploading)
+            .await
+        {
             Ok(provisioned) => provisioned,
             Err(error) => return Err(self.fail(MachineEvent::ProvisionFailed, error.into())),
         };
@@ -121,7 +150,7 @@ impl Machine {
                 MachineError::Unreachable(error.to_string()),
             )
         })?;
-        let client = ExecClient::connect(connector, self.options.clone())
+        let client = ExecClient::connect(connector, self.next_options())
             .await
             .map_err(|error| self.fail(MachineEvent::HandshakeFailed, error.into()))?;
         let Some(first) = welcomed(&client) else {
@@ -143,6 +172,11 @@ impl Machine {
     /// 现在的客户端（没连着时 None）。
     pub fn client(&self) -> Option<ExecClient> {
         lock(&self.client).clone()
+    }
+
+    /// 立即重试（F98，remote-exec.md §25.4.1）：连接断了、在等下一次重连时马上开始下一次；没在等时不做事、回 false。
+    pub fn retry_now(&self) -> bool {
+        self.client().is_some_and(|client| client.retry_now())
     }
 
     /// 断开：关掉客户端，回到 Unconnected。
@@ -171,13 +205,18 @@ async fn follow(client: ExecClient, state: Arc<watch::Sender<MachineState>>, nam
     while states.changed().await.is_ok() {
         let current = states.borrow_and_update().clone();
         let event = match current {
-            // watch 只留最新值：先补上“断开”（已经在重连时不变），再记第几次。
-            ConnectionState::Reconnecting { attempt, .. } => {
+            // watch 只留最新值：先补上“断开”（已经在重连时不变），再记进度（第几次、下一次的时刻、原因，F96）。
+            ConnectionState::Reconnecting {
+                attempt,
+                reason,
+                retry_at,
+            } => {
                 apply(&state, &name, MachineEvent::LinkLost);
-                if attempt == 0 {
-                    continue;
-                }
-                MachineEvent::Retrying(attempt)
+                MachineEvent::Retrying(Retry {
+                    attempt,
+                    retry_at,
+                    reason,
+                })
             }
             ConnectionState::Connected { .. } => match welcomed(&client) {
                 Some(welcomed) => MachineEvent::Reattached(welcomed),

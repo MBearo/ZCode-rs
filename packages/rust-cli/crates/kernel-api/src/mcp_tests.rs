@@ -27,6 +27,7 @@ fn transport_types_round_trip() {
             env: BTreeMap::from([("TOKEN".to_owned(), "x".to_owned())]),
             cwd: Some("tools/mcp".to_owned()),
         },
+        env: Default::default(),
     });
     round_trip(&McpTransportConfig::Http {
         url: "https://mcp.example.com/mcp".to_owned(),
@@ -85,6 +86,7 @@ fn no_transport_refuses_to_connect() {
             url: "https://mcp.example.com".to_owned(),
             headers: BTreeMap::new(),
         },
+        env: Default::default(),
     };
     // 空实现不等待任何东西：立即完成。
     let connected = NoMcpTransport.connect(&workspace, request).now_or_never();

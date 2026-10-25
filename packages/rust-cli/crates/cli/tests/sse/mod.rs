@@ -93,6 +93,8 @@ pub struct Fixture {
     pub headers: Arc<Mutex<Vec<Headers>>>,
     /// 全部请求（不只主请求）的请求行的路径，按到达顺序（工作线 F93：`/context` 不发 count_tokens）。
     pub paths: Arc<Mutex<Vec<String>>>,
+    /// 旁路请求（不带工具定义的）的请求体，按到达顺序（工作线 F97：标题请求）。
+    pub side: Arc<Mutex<Vec<Value>>>,
 }
 
 impl Fixture {
@@ -110,6 +112,10 @@ impl Fixture {
 
     pub fn paths(&self) -> Vec<String> {
         self.paths.lock().unwrap().clone()
+    }
+
+    pub fn side_requests(&self) -> Vec<Value> {
+        self.side.lock().unwrap().clone()
     }
 }
 
@@ -136,6 +142,8 @@ pub fn serve_with(script: Vec<Reply>) -> Fixture {
     let recorded_headers = headers.clone();
     let paths = Arc::new(Mutex::new(Vec::new()));
     let recorded_paths = paths.clone();
+    let side = Arc::new(Mutex::new(Vec::new()));
+    let recorded_side = side.clone();
     std::thread::spawn(move || {
         let mut script = script.into_iter();
         for stream in listener.incoming() {
@@ -181,6 +189,7 @@ pub fn serve_with(script: Vec<Reply>) -> Fixture {
                 recorded_headers.lock().unwrap().push(lines);
                 reply
             } else {
+                recorded_side.lock().unwrap().push(body);
                 text_reply("Side")
             };
             let head = format!(
@@ -197,5 +206,6 @@ pub fn serve_with(script: Vec<Reply>) -> Fixture {
         betas,
         headers,
         paths,
+        side,
     }
 }

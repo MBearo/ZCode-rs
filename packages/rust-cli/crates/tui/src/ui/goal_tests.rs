@@ -43,6 +43,8 @@ fn with_ctx<T>(lang: Lang, run: impl FnOnce(&Ctx<'_>) -> T) -> T {
         workspace: "/Users/dev/project",
         workspace_label: "~/project",
         version: "0.1.0",
+        mcp_machines: &[],
+        machines: &[],
         markdown: None,
     };
     run(&ctx)

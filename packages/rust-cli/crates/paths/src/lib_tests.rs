@@ -179,6 +179,11 @@ fn the_machine_list_lives_under_the_user_root() {
             resolve(None, storage).machines().as_path(),
             Path::new("/home/dev/.zcode/rust-cli/machines.json")
         );
+        // MCP 服务器的机器绑定（R5，remote-exec.md §22.2）：同样在用户根下。
+        assert_eq!(
+            resolve(None, storage).mcp_machines().as_path(),
+            Path::new("/home/dev/.zcode/rust-cli/mcp-machines.json")
+        );
     }
 }
 

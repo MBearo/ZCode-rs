@@ -1,0 +1,15 @@
+{
+  "default": "the request",
+  "files.write_file": "the file write",
+  "files.put_file": "the file write",
+  "commands.start_command": "the command",
+  "commands.watch_command": "the command",
+  "commands.cancel": "stopping the command",
+  "commands.close_session": "closing the session",
+  "shell.ack_shell_notice": "acknowledging the background task notification",
+  "shell.set_shell_cwd": "changing the working directory",
+  "background.stop_background_command": "stopping the background task",
+  "checkpoints.rewind_prepare": "restoring the files",
+  "checkpoints.rewind_apply": "restoring the files",
+  "checkpoints.rewind_finish": "restoring the files"
+}

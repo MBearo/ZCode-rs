@@ -2,7 +2,8 @@
 
 use crate::handshake::Capability;
 
-/// `MachineEnv` 的 30 个方法，每个一种消息（R3 加了 `files.stat_many`，remote-exec.md §20.4）。
+/// 每种消息对应 `MachineEnv` 的一个方法（R3 加了 `files.stat_many`，remote-exec.md §20.4；R5 加了 MCP 管道的四种与
+/// 期望集合 `mcp.declare`，§22.4、§22.5）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Op {
     Facts,
@@ -35,10 +36,17 @@ pub enum Op {
     RewindFinish,
     PdfPageCount,
     RenderPdfPages,
+    McpConnect,
+    McpSend,
+    McpEvents,
+    McpClose,
+    McpDeclare,
+    /// 按客户端实例推一组环境变量（F96，remote-exec.md §23.5）。
+    EnvUpdate,
 }
 
 impl Op {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 36] = [
         Self::Facts,
         Self::PathFacts,
         Self::ReadFile,
@@ -69,6 +77,12 @@ impl Op {
         Self::RewindFinish,
         Self::PdfPageCount,
         Self::RenderPdfPages,
+        Self::McpConnect,
+        Self::McpSend,
+        Self::McpEvents,
+        Self::McpClose,
+        Self::McpDeclare,
+        Self::EnvUpdate,
     ];
 
     /// 线上的名字（“端口.方法”），与请求、回复里的 `op` 相同。
@@ -104,6 +118,12 @@ impl Op {
             Self::RewindFinish => "checkpoints.rewind_finish",
             Self::PdfPageCount => "pdf.pdf_page_count",
             Self::RenderPdfPages => "pdf.render_pdf_pages",
+            Self::McpConnect => "mcp.connect",
+            Self::McpSend => "mcp.send",
+            Self::McpEvents => "mcp.events",
+            Self::McpClose => "mcp.close",
+            Self::McpDeclare => "mcp.declare",
+            Self::EnvUpdate => "env.update",
         }
     }
 
@@ -138,15 +158,25 @@ impl Op {
                 Capability::Checkpoints
             }
             Self::PdfPageCount | Self::RenderPdfPages => Capability::Pdf,
+            Self::McpConnect
+            | Self::McpSend
+            | Self::McpEvents
+            | Self::McpClose
+            | Self::McpDeclare => Capability::Mcp,
+            Self::EnvUpdate => Capability::Env,
         }
     }
 
-    /// 结果是带 `seq` 的事件流（`watch_command`、`shell_notices`），不是一条回复。
+    /// 结果是带 `seq` 的事件流（`watch_command`、`shell_notices`、`mcp.events`），不是一条回复。
     pub fn is_stream(self) -> bool {
-        matches!(self, Self::WatchCommand | Self::ShellNotices)
+        matches!(
+            self,
+            Self::WatchCommand | Self::ShellNotices | Self::McpEvents
+        )
     }
 
-    /// 有副作用：执行器换了实例时不补发，返回 `interrupted`（§18.5）。
+    /// 有副作用：执行器换了实例时不补发，返回 `interrupted`（§18.5）。`env.update` 不算（幂等：再做一次结果相同，换了
+    /// 实例照常补发，F96）。
     pub fn is_mutation(self) -> bool {
         matches!(
             self,
@@ -161,6 +191,10 @@ impl Op {
                 | Self::RewindPrepare
                 | Self::RewindApply
                 | Self::RewindFinish
+                | Self::McpConnect
+                | Self::McpSend
+                | Self::McpClose
+                | Self::McpDeclare
         )
     }
 }

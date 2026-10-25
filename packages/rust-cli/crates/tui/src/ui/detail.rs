@@ -161,6 +161,8 @@ pub fn draw(
         workspace: &workspace,
         workspace_label: &label,
         version: &version,
+        mcp_machines: &app.mcp_machines,
+        machines: &app.machines,
         markdown: None,
     };
     let layout = transcript::lines(app, cache, &ctx);

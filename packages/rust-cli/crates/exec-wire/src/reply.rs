@@ -74,10 +74,23 @@ pub enum Reply {
     PdfPageCount(Option<u64>),
     #[serde(rename = "pdf.render_pdf_pages")]
     RenderPdfPages(PdfRender),
+    /// 执行器给的连接 ID（R5，remote-exec.md §22.4）。
+    #[serde(rename = "mcp.connect")]
+    McpConnect { connection: String },
+    #[serde(rename = "mcp.send")]
+    McpSend,
+    #[serde(rename = "mcp.close")]
+    McpClose,
+    /// 结束了的服务器名（不在期望集合里的）。
+    #[serde(rename = "mcp.declare")]
+    McpDeclare { closed: Vec<String> },
+    /// 环境变量推送生效了（F96，remote-exec.md §23.5）。
+    #[serde(rename = "env.update")]
+    EnvUpdate,
 }
 
 impl Reply {
-    /// 这个回复属于哪种消息；流（`watch_command`、`shell_notices`）没有回复。
+    /// 这个回复属于哪种消息；流（`watch_command`、`shell_notices`、`mcp.events`）没有回复。
     pub fn op(&self) -> Op {
         match self {
             Self::Facts(_) => Op::Facts,
@@ -108,6 +121,11 @@ impl Reply {
             Self::RewindFinish => Op::RewindFinish,
             Self::PdfPageCount(_) => Op::PdfPageCount,
             Self::RenderPdfPages(_) => Op::RenderPdfPages,
+            Self::McpConnect { .. } => Op::McpConnect,
+            Self::McpSend => Op::McpSend,
+            Self::McpClose => Op::McpClose,
+            Self::McpDeclare { .. } => Op::McpDeclare,
+            Self::EnvUpdate => Op::EnvUpdate,
         }
     }
 }

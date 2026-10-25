@@ -320,6 +320,8 @@ impl Shells {
         let dir = self.task_outputs(&session);
         let shell_name = bash.to_string_lossy().into_owned();
         let mut env = environ::project(&self.config.env, Some(&shell_name));
+        // 执行器的服务端按客户端实例填的变量（远端执行 F96，remote-exec.md §23.5）：加在投影之后，`None` 是去掉。
+        environ::apply(&mut env, &request.env);
         if let Some(hook) = &request.hook {
             env.extend(hook.env.clone());
         }

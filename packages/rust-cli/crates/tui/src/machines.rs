@@ -27,6 +27,21 @@ pub struct ExecutorInfo {
     pub os: String,
     pub arch: String,
     pub version: String,
+    /// 执行器报告了 `env` 能力位：每条连接会刷新 ssh 会话的 `SSH_AUTH_SOCK`（远端执行 F96，remote-exec.md §23.5）。
+    pub refreshes_env: bool,
+    /// 握手报告的远端 home（F98：清单没写工作目录时，询问框的“不再询问”写它，remote-exec.md §25.4.3）。
+    pub home: Option<String>,
+}
+
+/// 第一次连接的哪一步（F98，remote-exec.md §25.4.2）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectStep {
+    /// 探测（还不知道要不要上传）。
+    Checking,
+    /// 上传执行器：字节数。
+    Uploading { bytes: u64 },
+    /// 握手：拉起执行器、hello / welcome。
+    Handshaking,
 }
 
 /// 连接状态（R2 的状态机，§19.10，合并成界面要分的几种）。
@@ -34,12 +49,15 @@ pub struct ExecutorInfo {
 pub enum MachineStatus {
     /// 没连（清单里有，没连或已断开）。
     Disconnected,
-    /// 部署中、握手中。
-    Connecting,
+    /// 部署中、握手中（F98 起分步）。
+    Connecting(ConnectStep),
     Ready,
-    /// 连接断了，正在重连。
+    /// 连接断了，正在重连（F96，remote-exec.md §23.4）：`attempt` 是下一次（等着时）或正在进行的是第几次；
+    /// `retry_at_ms` 是下一次开始的时刻（墙上时间，同界面的时钟；正在连时没有）；`reason` 是最近一次的原因。
     Reconnecting {
         attempt: u32,
+        retry_at_ms: Option<u64>,
+        reason: String,
     },
     Failed(MachineFailure),
 }
@@ -49,7 +67,18 @@ impl MachineStatus {
     pub fn is_live(&self) -> bool {
         matches!(
             self,
-            Self::Ready | Self::Connecting | Self::Reconnecting { .. }
+            Self::Ready | Self::Connecting(_) | Self::Reconnecting { .. }
+        )
+    }
+
+    /// 在等下一次重连（倒计时中）：可以“立即重试”（F98，remote-exec.md §25.4.1）。
+    pub fn awaits_retry(&self) -> bool {
+        matches!(
+            self,
+            Self::Reconnecting {
+                retry_at_ms: Some(_),
+                ..
+            }
         )
     }
 }
@@ -116,6 +145,9 @@ pub trait Machines: Send + Sync {
     fn connect(&self, name: String) -> BoxFuture<'static, Result<Changed, MachineProblem>>;
 
     fn disconnect(&self, name: String) -> BoxFuture<'static, Result<Changed, MachineProblem>>;
+
+    /// 立即重试（F98，remote-exec.md §25.4.1）：重连中、在等退避的机器马上试一次。`Already` 是没在等（正在连、没断）。
+    fn retry(&self, name: String) -> BoxFuture<'static, Result<Changed, MachineProblem>>;
 
     /// 连着时先断开，再从清单删掉。
     fn remove(&self, name: String) -> BoxFuture<'static, Result<(), MachineProblem>>;

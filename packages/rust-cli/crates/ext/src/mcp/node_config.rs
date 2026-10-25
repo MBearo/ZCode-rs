@@ -235,6 +235,7 @@ pub fn parse_node_servers(servers: &Value, scope: McpScope) -> (Vec<NodeMcpServe
                         scope,
                         transport: parsed.transport,
                         options: parsed.options,
+                        machine: None,
                     },
                     enabled: parsed.enabled,
                 });

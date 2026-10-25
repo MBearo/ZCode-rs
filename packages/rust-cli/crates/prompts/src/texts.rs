@@ -129,8 +129,21 @@ texts! {
     machine_param_agent_default => "context/machine_param_agent_default",
     machines => "context/machines",
     machines_none => "context/machines_none",
+    // 子代理的缺省机器在远端时的提醒（F98，remote-exec.md §25.2.1）。
+    machines_default => "context/machines_default",
+    machines_none_default => "context/machines_none_default",
     machine_line => "context/machine_line",
     machine_gone => "context/machine_gone",
+    // 远端调用失败的说明：有没有执行、能不能重试、下一步做什么（remote-exec.md §23.6，F96）。
+    remote_not_connected => "remote/not_connected",
+    remote_ended_unsent => "remote/ended_unsent",
+    remote_ended_read => "remote/ended_read",
+    remote_ended_unknown => "remote/ended_unknown",
+    remote_ended_command => "remote/ended_command",
+    remote_restarted => "remote/restarted",
+    remote_restarted_command => "remote/restarted_command",
+    // 远端命令的输出文件在那台机器上（F98，remote-exec.md §25.2.3）。
+    remote_output_file => "remote/output_file",
     // 任务工具的周期提醒（agents.md §7.4，工作线 F70）。
     task_reminder => "context/task_reminder",
     task_reminder_tasks => "context/task_reminder_tasks",

@@ -1,7 +1,7 @@
 //! 远端机器的文字（docs/specs/rust-cli/remote-exec.md §21.3、§21.4、§21.5）：`/machines` 的列表与回执、连接错误的说明、
 //! 状态行的状态词。中英文同一张表（照 `i18n_*` 的写法）。
 use super::i18n::Lang;
-use crate::machines::{MachineFailure, MachineProblem, MachineStatus};
+use crate::machines::{ConnectStep, MachineFailure, MachineProblem, MachineStatus};
 
 fn pick(lang: Lang, en: &'static str, zh: &'static str) -> &'static str {
     match lang {
@@ -63,19 +63,207 @@ pub fn status_word(lang: Lang, status: &MachineStatus) -> &'static str {
     }
 }
 
+/// “重连中”：状态行的词；Background 面板里重连中的机器上一份的条目也用它（F96，remote-exec.md §23.3）。
+pub fn reconnecting(lang: Lang) -> &'static str {
+    pick(lang, "reconnecting", "重连中")
+}
+
 /// 状态行里名字后面的词；就绪时没有（写延迟）。
 pub fn short_word(lang: Lang, status: &MachineStatus) -> Option<&'static str> {
     Some(match status {
         MachineStatus::Ready => return None,
-        MachineStatus::Connecting => pick(lang, "connecting", "连接中"),
-        MachineStatus::Reconnecting { .. } => pick(lang, "reconnecting", "重连中"),
+        MachineStatus::Connecting(_) => pick(lang, "connecting", "连接中"),
+        MachineStatus::Reconnecting { .. } => reconnecting(lang),
         MachineStatus::Failed(_) => pick(lang, "failed", "连接失败"),
         MachineStatus::Disconnected => pick(lang, "disconnected", "未连接"),
     })
 }
 
-/// 提示行：enter 随焦点的机器写连接或断开（§21.3）。
-pub fn hint(lang: Lang, focused_live: Option<bool>) -> String {
+/// 第一次连接的哪一步（F98，remote-exec.md §25.4.2）：上传与握手接在“连接中”后面；探测时没有。
+pub fn connect_step(lang: Lang, step: ConnectStep) -> Option<String> {
+    match (lang, step) {
+        (_, ConnectStep::Checking) => None,
+        (Lang::En, ConnectStep::Uploading { bytes }) => Some(format!(
+            " · uploading the executor ({} MB)",
+            megabytes(bytes)
+        )),
+        (Lang::Zh, ConnectStep::Uploading { bytes }) => {
+            Some(format!(" · 上传执行器（{} MB）", megabytes(bytes)))
+        }
+        (Lang::En, ConnectStep::Handshaking) => Some(" · handshaking".to_owned()),
+        (Lang::Zh, ConnectStep::Handshaking) => Some(" · 握手".to_owned()),
+    }
+}
+
+/// 字节数按 MiB 四舍五入、至少 1。
+fn megabytes(bytes: u64) -> u64 {
+    ((bytes + (1 << 19)) >> 20).max(1)
+}
+
+/// 工具行：调用在重连中的机器上等（F98，remote-exec.md §25.4.1）。
+pub fn waiting_reconnect(lang: Lang, name: &str) -> String {
+    match lang {
+        Lang::En => format!("Waiting for {name} to reconnect…"),
+        Lang::Zh => format!("等待 {name} 重连…"),
+    }
+}
+
+/// “立即重试”的回执（F98）。
+pub fn retrying(lang: Lang, name: &str) -> String {
+    match lang {
+        Lang::En => format!("Retrying {name} now."),
+        Lang::Zh => format!("马上重试 {name}。"),
+    }
+}
+
+/// 没在等重连（正在连、没断开），立即重试不做事（F98）。
+pub fn not_waiting(lang: Lang, name: &str) -> String {
+    match lang {
+        Lang::En => format!("{name} isn't waiting to reconnect."),
+        Lang::Zh => format!("{name} 没有在等重连。"),
+    }
+}
+
+/// 错误链里内部的前缀（可以叠着出现）：去掉它们，留下最里面的原因（F98，remote-exec.md §25.4.4）。
+const INTERNAL: [&str; 5] = [
+    "cannot reach the executor: ",
+    "the executor connection was lost: ",
+    "link io error: ",
+    "cannot connect: ",
+    "executor exited (",
+];
+
+/// 去掉内部的前缀，取最后一行非空的。
+fn innermost(reason: &str) -> &str {
+    let mut rest = reason.trim();
+    while let Some(prefix) = INTERNAL.iter().find(|prefix| rest.starts_with(**prefix)) {
+        let after = &rest[prefix.len()..];
+        // `executor exited (exit status: 255): …`：去到右括号与冒号之后。
+        rest = if *prefix == "executor exited (" {
+            match after.split_once("): ") {
+                Some((_, tail)) => tail,
+                None => break,
+            }
+        } else {
+            after
+        }
+        .trim_start();
+    }
+    rest.lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(rest)
+}
+
+/// 连接错误的原因写成人话（F98，remote-exec.md §25.4.4，Docker 试用 L7）。
+///
+/// 缺陷修复：以前原样显示内部的错误链（`cannot reach the executor: link io error: executor exited (exit status: 255):
+/// ssh: …`），把 ssh 进程叫成 executor，中文界面里夹着一串英文。现在去掉内部的链，认得的几种写成人话，其余留下最里面
+/// 的原文（多是 ssh 的输出）。英文原文照旧在日志里（machines 的状态转移日志）。
+pub fn explain(lang: Lang, reason: &str) -> String {
+    let inner = innermost(reason);
+    let words = |rest: &str| -> Option<(String, String)> {
+        let (host, port, why) = {
+            let rest = rest.strip_prefix("ssh: connect to host ")?;
+            let (host, rest) = rest.split_once(" port ")?;
+            let (port, why) = rest.split_once(": ")?;
+            (host, port, why)
+        };
+        Some((
+            format!("ssh can't reach {host}:{port} ({why})"),
+            format!("ssh 连不上 {host}:{port}（{why}）"),
+        ))
+    };
+    let resolve = |rest: &str| -> Option<(String, String)> {
+        let rest = rest.strip_prefix("ssh: Could not resolve hostname ")?;
+        let (host, why) = rest.split_once(": ")?;
+        Some((
+            format!("ssh can't find the host {host} ({why})"),
+            format!("ssh 找不到主机 {host}（{why}）"),
+        ))
+    };
+    let closed = |rest: &str| -> Option<(String, String)> {
+        let rest = rest.strip_prefix("Connection closed by ")?;
+        let (host, port) = rest.split_once(" port ")?;
+        let port = port.trim();
+        Some((
+            format!("{host}:{port} closed the ssh connection"),
+            format!("{host}:{port} 关掉了 ssh 连接"),
+        ))
+    };
+    let silent = |rest: &str| -> Option<(String, String)> {
+        let ms = rest
+            .strip_prefix("no frame from the executor for ")?
+            .strip_suffix(" ms")?;
+        Some((
+            format!("no reply from the executor for {ms} ms"),
+            format!("执行器 {ms} ms 没有回应"),
+        ))
+    };
+    let fixed = |rest: &str| -> Option<(String, String)> {
+        let zh = match rest {
+            "the executor closed the connection" => "执行器关掉了连接",
+            "the executor did not answer the handshake" => "执行器没有回应握手",
+            _ => return None,
+        };
+        Some((rest.to_owned(), zh.to_owned()))
+    };
+    match [words, resolve, closed, silent, fixed]
+        .iter()
+        .find_map(|known| known(inner))
+    {
+        Some((en, zh)) => match lang {
+            Lang::En => en,
+            Lang::Zh => zh,
+        },
+        None => inner.to_owned(),
+    }
+}
+
+/// `/mcp` 列表里失败的原因（F98，§25.4.4）：机器没连上的那一种中文写成中文，其余原样。
+pub fn mcp_reason(lang: Lang, reason: &str) -> String {
+    let machine = reason
+        .strip_prefix("Machine \"")
+        .and_then(|rest| rest.strip_suffix("\" is not connected."));
+    match (lang, machine) {
+        (Lang::Zh, Some(name)) => format!("机器 {name} 没有连上。"),
+        _ => reason.to_owned(),
+    }
+}
+
+/// 重连中的进度（F96，remote-exec.md §23.4，写法照模型重试的状态行）：` · retrying in 12s · attempt 3` /
+/// ` · 12s后重试 · 第 3 次`；正在连时没有倒计时。
+pub fn reconnect_progress(lang: Lang, attempt: u32, left_ms: Option<u64>) -> String {
+    let left = left_ms.map(super::retry_status::countdown);
+    match (lang, left) {
+        (Lang::En, Some(left)) => format!(" · retrying in {left} · attempt {attempt}"),
+        (Lang::En, None) => format!(" · attempt {attempt}"),
+        (Lang::Zh, Some(left)) => format!(" · {left}后重试 · 第 {attempt} 次"),
+        (Lang::Zh, None) => format!(" · 第 {attempt} 次"),
+    }
+}
+
+/// 列表里重连中的机器的第三行：最近一次的原因（F96）。
+pub fn last_error(lang: Lang, reason: &str) -> String {
+    let reason = explain(lang, reason);
+    match lang {
+        Lang::En => format!("Last error: {reason}"),
+        Lang::Zh => format!("最近一次的错误：{reason}"),
+    }
+}
+
+/// 执行器没有 `env` 能力位（F96，§23.5）：重连后不刷新 ssh 会话的 `SSH_AUTH_SOCK`。
+pub fn env_not_refreshed(lang: Lang) -> &'static str {
+    pick(
+        lang,
+        "env not refreshed (older executor)",
+        "不能刷新环境（执行器较旧）",
+    )
+}
+
+/// 提示行：enter 随焦点的机器写连接或断开（§21.3）；焦点在等重连的机器上时多“立即重试”（F98，§25.4.1）。
+pub fn hint(lang: Lang, focused_live: Option<bool>, retry: bool) -> String {
     let enter = match (lang, focused_live) {
         (_, None) => None,
         (Lang::En, Some(true)) => Some("{enter} to disconnect"),
@@ -87,12 +275,14 @@ pub fn hint(lang: Lang, focused_live: Option<bool>) -> String {
         Lang::En => [
             focused_live.map(|_| "{↑/↓} to select"),
             enter,
+            retry.then_some("{r} to retry now"),
             focused_live.map(|_| "{x} to remove"),
             Some("{esc} to close"),
         ],
         Lang::Zh => [
             focused_live.map(|_| "{↑/↓} 选择"),
             enter,
+            retry.then_some("{r} 立即重试"),
             focused_live.map(|_| "{x} 删除"),
             Some("{esc} 关闭"),
         ],
@@ -192,9 +382,11 @@ pub fn problem(lang: Lang, name: &str, problem: &MachineProblem) -> String {
 pub fn failure_text(lang: Lang, name: &str, failure: &MachineFailure) -> String {
     match (lang, failure) {
         (Lang::En, MachineFailure::Unreachable(m)) => {
-            format!("Couldn't reach {name} over SSH: {m}")
+            format!("Couldn't reach {name} over SSH: {}", explain(lang, m))
         }
-        (Lang::Zh, MachineFailure::Unreachable(m)) => format!("无法经 SSH 连到 {name}：{m}"),
+        (Lang::Zh, MachineFailure::Unreachable(m)) => {
+            format!("无法经 SSH 连到 {name}：{}", explain(lang, m))
+        }
         (Lang::En, MachineFailure::Unsupported { os, arch }) => {
             format!("{name} runs {os} {arch}; remote machines must be Linux x86_64 or aarch64.")
         }
@@ -255,8 +447,12 @@ pub fn failure_text(lang: Lang, name: &str, failure: &MachineFailure) -> String 
             format!("The executor on {name} refused the connection: {m}")
         }
         (Lang::Zh, MachineFailure::Refused(m)) => format!("{name} 上的执行器拒绝了连接：{m}"),
-        (Lang::En, MachineFailure::Lost(m)) => format!("Lost the connection to {name}: {m}"),
-        (Lang::Zh, MachineFailure::Lost(m)) => format!("与 {name} 的连接断了：{m}"),
+        (Lang::En, MachineFailure::Lost(m)) => {
+            format!("Lost the connection to {name}: {}", explain(lang, m))
+        }
+        (Lang::Zh, MachineFailure::Lost(m)) => {
+            format!("与 {name} 的连接断了：{}", explain(lang, m))
+        }
     }
 }
 
@@ -280,3 +476,7 @@ fn pick2(
         Lang::Zh => zh,
     }
 }
+
+#[cfg(test)]
+#[path = "i18n_machines_tests.rs"]
+mod tests;

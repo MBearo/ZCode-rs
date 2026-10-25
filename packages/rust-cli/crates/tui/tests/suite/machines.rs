@@ -36,6 +36,8 @@ pub fn row(name: &str, status: MachineStatus) -> MachineRow {
             os: "linux".to_owned(),
             arch: "aarch64".to_owned(),
             version: "0.1.58".to_owned(),
+            refreshes_env: true,
+            home: Some("/home/dev".to_owned()),
         }),
     }
 }
@@ -78,7 +80,7 @@ impl FakeMachines {
             .map(|row| row.status.clone())
     }
 
-    fn set(&self, name: &str, status: MachineStatus) {
+    pub fn set(&self, name: &str, status: MachineStatus) {
         let fresh = row(name, status);
         self.update(|rows| {
             if let Some(found) = rows.iter_mut().find(|row| row.name == name) {
@@ -159,6 +161,20 @@ impl Machines for FakeMachines {
         Box::pin(async move { result })
     }
 
+    /// 立即重试（F98）：在等重连的机器马上连上；别的状态“没在等”。
+    fn retry(&self, name: String) -> BoxFuture<'static, Result<Changed, MachineProblem>> {
+        self.record(format!("retry {name}"));
+        let result = match self.status(&name) {
+            None => Err(MachineProblem::Missing(name)),
+            Some(status) if status.awaits_retry() => {
+                self.set(&name, MachineStatus::Ready);
+                Ok(Changed::Done)
+            }
+            Some(_) => Ok(Changed::Already),
+        };
+        Box::pin(async move { result })
+    }
+
     fn remove(&self, name: String) -> BoxFuture<'static, Result<(), MachineProblem>> {
         self.record(format!("remove {name}"));
         let result = if self.has(&name) {
@@ -175,7 +191,14 @@ impl Machines for FakeMachines {
 pub fn four() -> Vec<MachineRow> {
     vec![
         row("dev-a", MachineStatus::Ready),
-        row("gpu-1", MachineStatus::Reconnecting { attempt: 2 }),
+        row(
+            "gpu-1",
+            MachineStatus::Reconnecting {
+                attempt: 2,
+                retry_at_ms: None,
+                reason: "connection refused".to_owned(),
+            },
+        ),
         row(
             "ci-3",
             MachineStatus::Failed(MachineFailure::Unreachable("connection refused".to_owned())),
@@ -195,14 +218,14 @@ pub fn setup_with(fake: Option<Arc<FakeMachines>>, lang: &'static str) -> Setup 
     setup
 }
 
-async fn ready(ui: &mut Ui) -> String {
+pub async fn ready(ui: &mut Ui) -> String {
     ui.wait("the composer", |s| {
         s.contains("? for shortcuts") || s.contains("? 查看快捷键")
     })
     .await
 }
 
-fn idle() -> Arc<GatedModel> {
+pub fn idle() -> Arc<GatedModel> {
     GatedModel::scripted(Vec::new())
 }
 
@@ -237,8 +260,7 @@ async fn the_status_line_lists_every_machine_and_follows_changes() {
         idle(),
         setup_with(Some(fake), "en_US.UTF-8"),
         |mut ui| async move {
-            let line =
-                "● local  ● dev-a 12ms  ○ gpu-1 reconnecting  ○ ci-3 failed  ○ old disconnected";
+            let line = "● local  ● dev-a 12ms  ○ gpu-1 reconnecting · attempt 2  ○ ci-3 failed  ○ old disconnected";
             let screen = ui.wait_for(line).await;
             assert_eq!(
                 row_of(&screen, line),
@@ -262,8 +284,10 @@ async fn the_status_line_in_chinese() {
         idle(),
         setup_with(Some(FakeMachines::with(four())), "zh_CN.UTF-8"),
         |mut ui| async move {
-            ui.wait_for("● local  ● dev-a 12ms  ○ gpu-1 重连中  ○ ci-3 连接失败  ○ old 未连接")
-                .await;
+            ui.wait_for(
+                "● local  ● dev-a 12ms  ○ gpu-1 重连中 · 第 2 次  ○ ci-3 连接失败  ○ old 未连接",
+            )
+            .await;
         },
     )
     .await;
@@ -510,4 +534,112 @@ async fn a_busy_incompatible_executor_says_how_to_upgrade() {
         )
         .await;
     }
+}
+
+/// 真实时间（毫秒）：界面的时钟（`WallClock`）同它。
+fn wall_ms() -> u64 {
+    use rust_cli_kernel_api::clock::Clock;
+    super::support::WallClock.now_ms()
+}
+
+/// 等下一次重连的机器（F96，remote-exec.md §23.4）：12 s 之后第 3 次，最近一次的原因。
+pub fn waiting(name: &str, lead_ms: u64) -> MachineRow {
+    row(
+        name,
+        MachineStatus::Reconnecting {
+            attempt: 3,
+            retry_at_ms: Some(wall_ms() + lead_ms),
+            reason: "ssh: connect to host gpu-1 port 22: Connection refused".to_owned(),
+        },
+    )
+}
+
+/// F96（remote-exec.md §23.4）：一直重连时状态行写倒计时与第几次，照模型重试的写法；每秒重画，倒计时往下走。
+#[tokio::test(flavor = "multi_thread")]
+async fn the_status_line_counts_down_to_the_next_reconnect() {
+    let fake = FakeMachines::with(vec![
+        row("dev-a", MachineStatus::Ready),
+        waiting("gpu-1", 12_400),
+    ]);
+    with_ui(
+        idle(),
+        setup_with(Some(fake), "en_US.UTF-8"),
+        |mut ui| async move {
+            ui.wait_for(
+                "● local  ● dev-a 12ms  ○ gpu-1 reconnecting · retrying in 12s · attempt 3",
+            )
+            .await;
+            // 没有别的事件，倒计时也往下走（每秒重画）。
+            ui.wait_for("○ gpu-1 reconnecting · retrying in 10s · attempt 3")
+                .await;
+        },
+    )
+    .await;
+    with_ui(
+        idle(),
+        setup_with(
+            Some(FakeMachines::with(vec![waiting("gpu-1", 12_400)])),
+            "zh_CN.UTF-8",
+        ),
+        |mut ui| async move {
+            ui.wait_for("● local  ○ gpu-1 重连中 · 12s后重试 · 第 3 次")
+                .await;
+        },
+    )
+    .await;
+}
+
+/// F96：列表里重连中的机器写同样的状态，第三行是最近一次的原因；执行器太旧、不能刷新环境时第二行写明（§23.5）。
+#[tokio::test(flavor = "multi_thread")]
+async fn the_list_shows_the_reconnect_reason_and_old_executors() {
+    let mut old = row("dev-a", MachineStatus::Ready);
+    if let Some(executor) = &mut old.executor {
+        executor.refreshes_env = false;
+    }
+    let fake = FakeMachines::with(vec![old, waiting("gpu-1", 30_400)]);
+    with_ui(
+        idle(),
+        setup_with(Some(fake), "en_US.UTF-8"),
+        |mut ui| async move {
+            ready(&mut ui).await;
+            ui.submit("/machines");
+            // 倒计时每秒往下走：等它走到 30s。
+            let screen = ui
+                .wait_for("  ○ gpu-1  reconnecting · retrying in 30s · attempt 3")
+                .await;
+            for text in [
+                "2 machines · 1 connected",
+                "    ssh dev-a · Linux aarch64 · executor 0.1.58 · env not refreshed (older executor) · remote home",
+                // F98（remote-exec.md §25.4.4）：ssh 的这一种写成人话。
+                "    Last error: ssh can't reach gpu-1:22 (Connection refused)",
+            ] {
+                assert!(screen.contains(text), "{text}\n{screen}");
+            }
+        },
+    )
+    .await;
+    let mut old = row("dev-a", MachineStatus::Ready);
+    if let Some(executor) = &mut old.executor {
+        executor.refreshes_env = false;
+    }
+    with_ui(
+        idle(),
+        setup_with(
+            Some(FakeMachines::with(vec![old, waiting("gpu-1", 30_400)])),
+            "zh_CN.UTF-8",
+        ),
+        |mut ui| async move {
+            ready(&mut ui).await;
+            ui.submit("/machines");
+            let screen = ui.wait_for("  ○ gpu-1  重连中 · 30s后重试 · 第 3 次").await;
+            for text in [
+                "2 台机器 · 1 台已连接",
+                "    ssh dev-a · Linux aarch64 · 执行器 0.1.58 · 不能刷新环境（执行器较旧） · 远端 home",
+                "    最近一次的错误：ssh 连不上 gpu-1:22（Connection refused）",
+            ] {
+                assert!(screen.contains(text), "{text}\n{screen}");
+            }
+        },
+    )
+    .await;
 }

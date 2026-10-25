@@ -15,6 +15,7 @@ async fn connected(fake: &Arc<FakeMcp>, scope: &TaskScope) -> (Arc<Client>, Noti
             url: "https://mcp.example.com".to_owned(),
             headers: Default::default(),
         },
+        env: Default::default(),
     };
     let transport: Arc<dyn McpTransport> = fake.clone();
     let id = transport.connect(&workspace(), request).await.unwrap();

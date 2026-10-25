@@ -1,0 +1,2 @@
+Remote machines connected to this session. Tools with a `machine` parameter run on the machine you name; omit it to run on the default machine "{{name}}". Paths on a remote machine are that machine's own paths; relative paths resolve against its working directory.
+{{lines}}

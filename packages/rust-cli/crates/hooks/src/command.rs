@@ -176,6 +176,7 @@ pub(crate) async fn run(run: CommandRun<'_>, cancel: CancellationToken) -> Raw {
         // hook 命令到了超时照旧结束（不转后台）。
         on_timeout: None,
         socket: None,
+        env: Default::default(),
     };
     if let Err(error) = run
         .commands

@@ -82,9 +82,34 @@ fn checkpoint_facts_round_trip() {
             path: "/work/a.txt".to_owned(),
             additions: 1,
             deletions: 2,
+            machine: None,
         }],
         code: true,
     });
+}
+
+/// F98（remote-exec.md §25.4.5、§25.7）：远端的文件改动带机器；本机的不写这个字段，旧形状照常能读。
+#[test]
+fn file_changes_carry_their_machine_only_when_remote() {
+    let remote = crate::session_api::FileChange {
+        path: "/srv/proj/README.md".to_owned(),
+        additions: 1,
+        deletions: 1,
+        machine: Some("dev-a".to_owned()),
+    };
+    round_trip(&remote);
+    assert_eq!(serde_json::to_value(&remote).unwrap()["machine"], "dev-a");
+    let local: crate::session_api::FileChange = serde_json::from_value(
+        serde_json::json!({"path": "/work/a.txt", "additions": 1, "deletions": 0}),
+    )
+    .unwrap();
+    assert_eq!(local.machine, None);
+    assert!(
+        serde_json::to_value(&local)
+            .unwrap()
+            .get("machine")
+            .is_none()
+    );
 }
 
 /// L11b：定时任务与 worktree 的 DTO（docs/specs/rust-cli/tools-more.md §10.5、§11.5）。
@@ -439,6 +464,7 @@ async fn turn_attachments_default_to_empty() {
     use crate::permission::PermissionMode;
     let context = crate::testing::FixedContext(Vec::new());
     let request = ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("sess_1"),
         workspace: WorkspaceRef {

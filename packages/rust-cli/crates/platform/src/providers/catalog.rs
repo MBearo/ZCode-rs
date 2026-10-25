@@ -54,8 +54,9 @@ pub(crate) struct Template {
 
 impl Template {
     /// 选择的档位（没指定时用最后一个）对应的请求补丁。`max_output` 是入口读到的 `ZCODE_MAX_OUTPUT_TOKENS`
-    /// （cli-args.md §9.1，修复线 F42）：`maxOutputTokens.map` 用它与配置的 max 的较小值（模型目录的上限是模型能力的
-    /// 上限，两者取小）；没设时用配置的 max（Node 的语义）。
+    /// （cli-args.md §9.1，修复线 F42）与请求交来的上限（`RequestOptions.provider_max_output_tokens`，工作线 F95）的
+    /// 较小值：`maxOutputTokens.map` 用它与配置的 max 的较小值（模型目录的上限是模型能力的上限，两者取小）；都没有时用
+    /// 配置的 max（Node 主循环的基线）。
     pub fn patches(
         &self,
         reasoning: Option<&str>,

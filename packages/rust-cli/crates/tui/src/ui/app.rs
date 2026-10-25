@@ -312,6 +312,8 @@ pub struct App {
     pub machines: Vec<crate::machines::MachineRow>,
     /// 入口注入了机器服务（没有时 `/machines` 提示不可用）。
     pub machines_enabled: bool,
+    /// 绑定到远端机器的 MCP 服务器（规范化的服务器名，机器名；R5，remote-exec.md §22.8）：runner 启动时从服务取。
+    pub mcp_machines: Vec<(String, String)>,
     pub quit: bool,
 }
 
@@ -398,6 +400,7 @@ impl App {
             burst: None,
             machines: Vec::new(),
             machines_enabled: false,
+            mcp_machines: Vec::new(),
             quit: false,
         }
     }
@@ -483,6 +486,25 @@ impl App {
             let mut ui = Interaction::new(id.clone(), request, now);
             ui.mode = self.view.mode();
             ui.workspace = self.workspace().to_owned();
+            // 远端执行 F98（remote-exec.md §25.4.3，Docker 试用 L4、L5）：远端的调用，“不再询问”写那台机器的工作目录（以前
+            // 写本机的工作区）；MCP 工具的机器来自服务器的绑定（以前询问框不写机器）。
+            if let rust_cli_kernel_api::orchestration::InteractionRequest::Permission {
+                tool,
+                input,
+                machine,
+                ..
+            } = request
+            {
+                if machine.is_none() {
+                    ui.bound_machine = super::machines::remote_of(tool, input, &self.mcp_machines)
+                        .map(str::to_owned);
+                }
+                if let Some(remote) = machine.as_deref().or(ui.bound_machine.as_deref()) {
+                    ui.workspace = self
+                        .remote_root(remote)
+                        .unwrap_or_else(|| remote.to_owned());
+                }
+            }
             ui.origin = self.detached_title(id).map(str::to_owned);
             self.interaction = Some(ui);
         }

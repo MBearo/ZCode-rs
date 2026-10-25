@@ -32,12 +32,24 @@ fn git_children_get_shell_only_when_it_is_set() {
 #[test]
 fn mcp_servers_get_shell_only_when_it_is_set() {
     let none = BTreeMap::new();
-    let unset = crate::mcp::stdio::child_env(&snapshot(&[("PATH", "/usr/bin")]), &none);
+    let unset = crate::mcp::stdio::child_env(
+        &snapshot(&[("PATH", "/usr/bin")]),
+        &Default::default(),
+        &none,
+    );
     assert_eq!(unset.get("SHELL"), None, "{unset:?}");
-    let set = crate::mcp::stdio::child_env(&snapshot(&[("SHELL", "/bin/zsh")]), &none);
+    let set = crate::mcp::stdio::child_env(
+        &snapshot(&[("SHELL", "/bin/zsh")]),
+        &Default::default(),
+        &none,
+    );
     assert_eq!(set.get("SHELL").map(String::as_str), Some("/bin/zsh"));
     let configured = BTreeMap::from([("SHELL".to_owned(), "/bin/fish".to_owned())]);
-    let overridden = crate::mcp::stdio::child_env(&snapshot(&[("SHELL", "/bin/zsh")]), &configured);
+    let overridden = crate::mcp::stdio::child_env(
+        &snapshot(&[("SHELL", "/bin/zsh")]),
+        &Default::default(),
+        &configured,
+    );
     assert_eq!(
         overridden.get("SHELL").map(String::as_str),
         Some("/bin/fish")

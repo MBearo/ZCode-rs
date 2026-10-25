@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::dto::command::CommandEvent;
+use crate::dto::mcp::McpEvent;
 use crate::dto::shell::ShellNotice;
 use crate::frame::Frame;
 use crate::op::Op;
@@ -109,9 +110,19 @@ pub struct EventHeader {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamItem {
-    Command { event: CommandEvent },
-    Notice { notice: ShellNotice },
-    Error { error: WireError },
+    Command {
+        event: CommandEvent,
+    },
+    Notice {
+        notice: ShellNotice,
+    },
+    /// MCP 连接上的一个事件（R5，remote-exec.md §22.4）。
+    Mcp {
+        event: McpEvent,
+    },
+    Error {
+        error: WireError,
+    },
     End,
 }
 

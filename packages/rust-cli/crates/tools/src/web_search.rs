@@ -186,6 +186,10 @@ impl WebSearchTool {
                 // 工作线 F64：每请求头的回合与子代理（model.md §2.4）。
                 run: Some(context.run.clone()),
                 agent: context.agent.clone(),
+                // 修 bug（工作线 F95，tools-more.md §5 表后）：目录模型的 Provider 补丁以配置的上限改写 max_tokens，
+                // 这次请求自己的上限在那里不生效（GLM-5.3-Flash 发 128000）。Node 的补丁以请求自己的上限为输入，
+                // 发 4096；这里把同一个上限交给补丁。
+                provider_max_output_tokens: Some(max_tokens),
                 ..RequestOptions::default()
             },
         };

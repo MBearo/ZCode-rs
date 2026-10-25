@@ -15,6 +15,8 @@ doctest = false
 
 [dependencies]
 async-trait.workspace = true
+# 包住 ssh 连接的接收方向（远端执行 F96，把再连也一样的失败标成 Rejected）。
+bytes.workspace = true
 # 远端目录与可执行文件的名字（docs/specs/rust-cli/remote-exec.md §19.4）；任务经 base 的 owned。
 rust-cli-base.workspace = true
 # 上传前读本机的 Linux 产物（ELF 头、sha256、内容）：本机文件经 fs（README §4）。

@@ -58,6 +58,8 @@ pub(crate) struct FakeMcp {
     refuse: Mutex<Vec<String>>,
     /// [`FakeMcp::release`] 过的服务器的 `initialize` 结果：之后（含重连）的握手直接回它。
     released: Mutex<HashMap<String, Value>>,
+    /// 每次连接的（服务器名，工作区根）。
+    roots: Mutex<Vec<(String, String)>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -137,6 +139,11 @@ impl FakeMcp {
         lock(&self.received).clone()
     }
 
+    /// 每次连接的（服务器名，工作区根）。
+    pub(crate) fn roots(&self) -> Vec<(String, String)> {
+        lock(&self.roots).clone()
+    }
+
     /// 服务器主动发一条消息（通知或请求）。
     pub(crate) fn push(&self, server: &str, message: Value) {
         for connection in lock(&self.connections).values() {
@@ -165,9 +172,10 @@ impl FakeMcp {
 impl McpTransport for FakeMcp {
     async fn connect(
         &self,
-        _workspace: &WorkspaceRef,
+        workspace: &WorkspaceRef,
         request: McpConnect,
     ) -> Result<McpConnectionId, McpError> {
+        lock(&self.roots).push((request.server.clone(), workspace.root.as_str().to_owned()));
         if lock(&self.refuse).contains(&request.server) {
             return Err(McpError::Connect {
                 message: "spawn failed".to_owned(),

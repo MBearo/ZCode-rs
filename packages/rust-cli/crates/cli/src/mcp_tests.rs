@@ -55,8 +55,82 @@ fn configured() -> Vec<McpServer> {
                 cwd: None,
             },
             options: Default::default(),
+            machine: None,
         })
         .collect()
+}
+
+/// 没有机器绑定时的组装（R5 之前的形状）。
+async fn settings(
+    files: &dyn Files,
+    workspace: &WorkspaceRef,
+    flags: (&McpFlags, &[String]),
+    snapshot: &[(String, String)],
+    configured: Vec<McpServer>,
+    enabled: bool,
+) -> McpSettings {
+    super::settings(
+        files,
+        workspace,
+        flags,
+        (snapshot, &McpBindings::default()),
+        configured,
+        enabled,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn bindings_put_servers_on_their_machines_and_keep_their_variables() {
+    // R5（remote-exec.md §22.2、§22.7）：绑定作用到配置文件与 `--mcp-config` 合并之后的服务器；绑定的 `--mcp-config`
+    // 服务器按原文解析（本机的 TOOL 不进请求），没绑定的照旧展开。
+    let flags = McpFlags {
+        configs: vec!["flags.json".to_owned()],
+        ..McpFlags::default()
+    };
+    let snapshot = vec![("TOOL".to_owned(), "local-tool".to_owned())];
+    let (bindings, _) = McpBindings::parse(
+        br#"{"servers": {"shared": {"machine": "dev-a"}, "user": {"machine": "gpu-1"}}}"#,
+    );
+    let bound = super::settings(
+        &env(),
+        &workspace(),
+        (&flags, &[]),
+        (&snapshot, &bindings),
+        configured(),
+        true,
+    )
+    .await;
+    let machines: Vec<(String, Option<String>)> = bound
+        .servers
+        .iter()
+        .map(|server| (server.name.clone(), server.machine.clone()))
+        .collect();
+    assert_eq!(
+        machines,
+        [
+            ("cli".to_owned(), None),
+            ("shared".to_owned(), Some("dev-a".to_owned())),
+            ("user".to_owned(), Some("gpu-1".to_owned())),
+        ]
+    );
+    assert!(matches!(
+        &bound.servers[1].transport,
+        McpTransportConfig::Stdio { command, .. } if command == "${TOOL:-flag}"
+    ));
+    let unbound = settings(
+        &env(),
+        &workspace(),
+        (&flags, &[]),
+        &snapshot,
+        configured(),
+        true,
+    )
+    .await;
+    assert!(matches!(
+        &unbound.servers[1].transport,
+        McpTransportConfig::Stdio { command, .. } if command == "local-tool"
+    ));
 }
 
 fn names(settings: &McpSettings) -> Vec<String> {

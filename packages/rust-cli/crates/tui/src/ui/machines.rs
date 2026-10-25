@@ -24,6 +24,8 @@ pub enum MachineRequest {
     Connect(String),
     Disconnect(String),
     Remove(String),
+    /// 立即重试（重连中的机器，F98，remote-exec.md §25.4.1）。
+    Retry(String),
 }
 
 /// `/machines` 列表的界面状态：焦点按名字保持（快照变了也跟着那台机器），找不到时按原下标。
@@ -40,6 +42,28 @@ pub fn machine_of(input: &Value) -> Option<&str> {
     })
 }
 
+/// 一次工具调用在哪台远端机器上：输入里的 `machine`（不是 `local`）；MCP 工具看它的服务器绑定的机器（R5，§22.8）。
+/// `mcp` 是（规范化的服务器名，机器名）；工具名 `mcp__<服务器>__<工具>` 按最长的服务器名前缀找。
+pub fn remote_of<'a>(name: &str, input: &'a Value, mcp: &'a [(String, String)]) -> Option<&'a str> {
+    machine_of(input).or_else(|| {
+        let rest = name.strip_prefix("mcp__")?;
+        mcp.iter()
+            .filter(|(server, _)| {
+                rest.strip_prefix(server.as_str())
+                    .is_some_and(|tail| tail.starts_with("__"))
+            })
+            .max_by_key(|(server, _)| server.len())
+            .map(|(_, machine)| machine.as_str())
+    })
+}
+
+/// 这台机器在重连中（快照里的状态）：远端的调用在等它（F98，§25.4.1）。
+pub fn reconnecting(machines: &[MachineRow], name: &str) -> bool {
+    machines
+        .iter()
+        .any(|row| row.name == name && matches!(row.status, MachineStatus::Reconnecting { .. }))
+}
+
 /// `@机器名`（强调色，§21.6）。
 pub fn tag(palette: &Palette, name: &str) -> Span<'static> {
     Span::styled(format!("@{name}"), Style::default().fg(palette.accent))
@@ -49,7 +73,7 @@ pub fn tag(palette: &Palette, name: &str) -> Span<'static> {
 fn dot(status: &MachineStatus, palette: &Palette) -> Span<'static> {
     match status {
         MachineStatus::Ready => Span::styled("●", palette.success()),
-        MachineStatus::Connecting | MachineStatus::Reconnecting { .. } => {
+        MachineStatus::Connecting(_) | MachineStatus::Reconnecting { .. } => {
             Span::styled("○", palette.warning())
         }
         MachineStatus::Failed(_) => Span::styled("○", palette.destructive()),
@@ -85,7 +109,14 @@ impl App {
                     working_directory: (!directory.is_empty()).then(|| directory.to_owned()),
                 })
             }
-            "connect" => one().map(MachineRequest::Connect),
+            // 对重连中的机器是立即重试（F98，§25.4.1；以前回“已经连着”）。
+            "connect" => one().map(|name| {
+                if reconnecting(&self.machines, &name) {
+                    MachineRequest::Retry(name)
+                } else {
+                    MachineRequest::Connect(name)
+                }
+            }),
             "disconnect" => one().map(MachineRequest::Disconnect),
             "remove" => one().map(MachineRequest::Remove),
             _ => None,
@@ -171,6 +202,10 @@ impl App {
             KeyCode::Char('c') => focused.map(|row| MachineRequest::Connect(row.name)),
             KeyCode::Char('d') => focused.map(|row| MachineRequest::Disconnect(row.name)),
             KeyCode::Char('x') => focused.map(|row| MachineRequest::Remove(row.name)),
+            // 立即重试（F98）：只对重连中的机器。
+            KeyCode::Char('r') => focused
+                .filter(|row| matches!(row.status, MachineStatus::Reconnecting { .. }))
+                .map(|row| MachineRequest::Retry(row.name)),
             _ => None,
         };
         // 先记下焦点的名字：删掉之后按原下标落到相邻的一台。
@@ -178,8 +213,55 @@ impl App {
         request.map(Action::Machines)
     }
 
+    /// 状态词与重连的进度（F96：重连中的机器接倒计时与第几次）；就绪时写延迟（列表里另写 `connected`）。
+    fn status_note(
+        &self,
+        status: &MachineStatus,
+        latency_ms: Option<u64>,
+        now_ms: u64,
+    ) -> Option<String> {
+        match (status, latency_ms) {
+            (MachineStatus::Ready, Some(ms)) => Some(format!("{ms}ms")),
+            // 第一次连接的哪一步（F98，§25.4.2）。
+            (MachineStatus::Connecting(step), _) => Some(format!(
+                "{}{}",
+                words::short_word(self.lang, status).unwrap_or_default(),
+                words::connect_step(self.lang, *step).unwrap_or_default()
+            )),
+            (
+                MachineStatus::Reconnecting {
+                    attempt,
+                    retry_at_ms,
+                    ..
+                },
+                _,
+            ) => {
+                let word = words::short_word(self.lang, status).unwrap_or_default();
+                let left = retry_at_ms.map(|at| at.saturating_sub(now_ms));
+                Some(format!(
+                    "{word}{}",
+                    words::reconnect_progress(self.lang, *attempt, left)
+                ))
+            }
+            (status, _) => words::short_word(self.lang, status).map(str::to_owned),
+        }
+    }
+
+    /// 有机器在等下一次重连（状态行写倒计时）：没有动画时每秒重画一次（只是显示，F96）。
+    pub fn machines_counting(&self) -> bool {
+        self.machines.iter().any(|row| {
+            matches!(
+                row.status,
+                MachineStatus::Reconnecting {
+                    retry_at_ms: Some(_),
+                    ..
+                }
+            )
+        })
+    }
+
     /// 列表的行（替换底部区域，照 Background 面板的样式，§21.3）。
-    pub fn machines_lines(&self, width: usize, height: usize) -> Vec<Line<'static>> {
+    pub fn machines_lines(&self, width: usize, height: usize, now_ms: u64) -> Vec<Line<'static>> {
         let lang = self.lang;
         let palette = &self.palette;
         let accent = Style::default().fg(palette.accent);
@@ -222,10 +304,15 @@ impl App {
         let mut body: Vec<(Line<'static>, bool)> = Vec::new();
         for (index, row) in self.machines.iter().enumerate() {
             let focused = index == focus;
-            let mut status = words::status_word(lang, &row.status).to_owned();
-            if let (MachineStatus::Ready, Some(ms)) = (&row.status, row.latency_ms) {
-                status.push_str(&format!(" · {ms}ms"));
-            }
+            let status = match (&row.status, row.latency_ms) {
+                (MachineStatus::Ready, Some(ms)) => {
+                    format!("{} · {ms}ms", words::status_word(lang, &row.status))
+                }
+                (MachineStatus::Reconnecting { .. } | MachineStatus::Connecting(_), _) => self
+                    .status_note(&row.status, None, now_ms)
+                    .unwrap_or_default(),
+                (status, _) => words::status_word(lang, status).to_owned(),
+            };
             let head = Line::from(vec![
                 super::pick::pointer(focused),
                 dot(&row.status, palette),
@@ -248,11 +335,21 @@ impl App {
                 ),
                 focused,
             ));
-            if let MachineStatus::Failed(failure) = &row.status {
-                let text = words::failure_text(lang, &row.name, failure);
+            let note = match &row.status {
+                MachineStatus::Failed(failure) => Some((
+                    words::failure_text(lang, &row.name, failure),
+                    palette.destructive(),
+                )),
+                // 重连中（F96）：最近一次的原因。
+                MachineStatus::Reconnecting { reason, .. } if !reason.is_empty() => {
+                    Some((words::last_error(lang, reason), palette.secondary()))
+                }
+                _ => None,
+            };
+            if let Some((text, style)) = note {
                 for line in wrap_text(
                     &text,
-                    palette.destructive(),
+                    style,
                     width,
                     &[Span::raw("    ")],
                     &[Span::raw("    ")],
@@ -275,11 +372,23 @@ impl App {
         );
         lines.push(Line::default());
         let live = self.machines.get(focus).map(|row| row.status.is_live());
+        let retry = self
+            .machines
+            .get(focus)
+            .is_some_and(|row| row.status.awaits_retry());
         lines.push(truncate_line(
-            super::key_hint::line(2, &words::hint(lang, live), palette),
+            super::key_hint::line(2, &words::hint(lang, live, retry), palette),
             width,
         ));
         lines
+    }
+
+    /// 远端机器的工作目录：清单里写的，没写时是握手报告的 home；都不知道时 None（F98，§25.4.3）。
+    pub fn remote_root(&self, name: &str) -> Option<String> {
+        let row = self.machines.iter().find(|row| row.name == name)?;
+        row.working_directory
+            .clone()
+            .or_else(|| row.executor.as_ref().and_then(|e| e.home.clone()))
     }
 
     /// 第二行：ssh 目标、系统与架构、执行器版本、工作目录（工作目录可能很长，放在最后，放不下时截它）。
@@ -293,6 +402,9 @@ impl App {
                 executor.arch
             ));
             parts.push(words::executor(lang, &executor.version));
+            if !executor.refreshes_env {
+                parts.push(words::env_not_refreshed(lang).to_owned());
+            }
         }
         parts.push(
             row.working_directory
@@ -303,7 +415,7 @@ impl App {
     }
 
     /// footer 下面的机器状态行（§21.5）：清单里有机器时才有。
-    pub fn machine_status_line(&self, width: usize) -> Option<Line<'static>> {
+    pub fn machine_status_line(&self, width: usize, now_ms: u64) -> Option<Line<'static>> {
         if self.machines.is_empty() {
             return None;
         }
@@ -317,14 +429,14 @@ impl App {
             spans.push(Span::raw("  "));
             spans.push(dot(&row.status, palette));
             spans.push(Span::raw(format!(" {}", row.name)));
-            let note = match (&row.status, row.latency_ms) {
-                (MachineStatus::Ready, Some(ms)) => Some(format!("{ms}ms")),
-                (status, _) => words::short_word(self.lang, status).map(str::to_owned),
-            };
-            if let Some(note) = note {
+            if let Some(note) = self.status_note(&row.status, row.latency_ms, now_ms) {
                 spans.push(Span::styled(format!(" {note}"), palette.secondary()));
             }
         }
         Some(truncate_line(Line::from(spans), width))
     }
 }
+
+#[cfg(test)]
+#[path = "machines_tests.rs"]
+mod tests;

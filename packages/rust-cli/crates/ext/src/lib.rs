@@ -51,6 +51,9 @@ pub struct ExtPorts {
     /// Skill 的 `!` 命令用判决链（带 skill 的 `allowed-tools`，ext.md §2.5）。
     pub gate: Arc<PolicyGate>,
     pub mcp: Arc<dyn McpTransport>,
+    /// 远端机器的注册表（R5，remote-exec.md §22.6）：绑定到远端机器的 MCP 服务器从这里取那台机器的管道；None 时
+    /// （只给测试的组装）它们都连不上。
+    pub machines: Option<Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>>,
     /// MCP 的连接任务在这里启动。
     pub spawner: Spawner,
     /// MCP 等待的截止时刻（ext.md §3.3.1、§3.8）。
@@ -100,6 +103,9 @@ impl Ext {
             config.mcp.clone(),
             ports.clock.clone(),
         ));
+        if let Some(machines) = ports.machines.clone() {
+            mcp.set_machines(machines);
+        }
         let registry = Arc::new(ExtRegistry {
             base,
             skill: skill_tool,

@@ -6,6 +6,8 @@
 
 pub mod command;
 pub mod core;
+pub mod env;
 pub mod files;
+pub mod mcp;
 pub mod rewind;
 pub mod shell;

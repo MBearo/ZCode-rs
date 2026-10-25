@@ -111,8 +111,20 @@ async fn run(
         let Some(machine) = deps.machines.machine(&remote.name) else {
             continue;
         };
+        let name = remote.name;
+        // 远端执行 F96（§23.3）：重连中的机器不等（SSH 一直重连，等它会挡住关闭）；请求交给关闭任务的作用域在后台发，
+        // 连回来时送达，进程退出时随作用域结束。
+        if deps.machines.reconnecting(&name) {
+            let session = id.clone();
+            drop(deps.closing.spawn("close-remote-session", async move {
+                if let Err(error) = machine.commands().close_session(&session, forget).await {
+                    tracing::warn!(%error, %session, machine = %name, "a remote machine could not close the session");
+                }
+            }));
+            continue;
+        }
         if let Err(error) = machine.commands().close_session(&id, forget).await {
-            tracing::warn!(%error, session = %id, machine = %remote.name, "a remote machine could not close the session");
+            tracing::warn!(%error, session = %id, machine = %name, "a remote machine could not close the session");
         }
     }
     // 停止这个会话的持久定时任务调度、释放调度锁（tools-more.md §16.4）。

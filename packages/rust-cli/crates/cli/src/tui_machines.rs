@@ -6,7 +6,8 @@ use futures_util::future::BoxFuture;
 use futures_util::stream::{BoxStream, StreamExt};
 use rust_cli_machines::{MachineEntry, MachineError, MachineState, MachinesError};
 use rust_cli_tui::machines::{
-    Changed, ExecutorInfo, MachineFailure, MachineProblem, MachineRow, MachineStatus, Machines,
+    Changed, ConnectStep, ExecutorInfo, MachineFailure, MachineProblem, MachineRow, MachineStatus,
+    Machines,
 };
 
 use crate::machines::{Fleet, FleetError, Seen};
@@ -40,26 +41,59 @@ fn failure(error: &MachineError) -> MachineFailure {
     }
 }
 
-fn status(state: &MachineState) -> MachineStatus {
+/// 墙上时间（毫秒），与界面的时钟相同：把状态机里下一次重连的时刻换成界面能比的时间（F96）。
+fn wall_ms() -> u64 {
+    use rust_cli_kernel_api::clock::Clock;
+    rust_cli_node_store::SystemClock::utc().now_ms()
+}
+
+/// `now` 是（单调时钟，墙上时间）的同一时刻。
+fn status(state: &MachineState, now: (tokio::time::Instant, u64)) -> MachineStatus {
     match state {
         MachineState::Unconnected => MachineStatus::Disconnected,
-        MachineState::Provisioning | MachineState::Handshaking => MachineStatus::Connecting,
+        // 第一次连接分步（F98，remote-exec.md §25.4.2）。
+        MachineState::Provisioning => MachineStatus::Connecting(ConnectStep::Checking),
+        MachineState::Uploading { bytes } => {
+            MachineStatus::Connecting(ConnectStep::Uploading { bytes: *bytes })
+        }
+        MachineState::Handshaking => MachineStatus::Connecting(ConnectStep::Handshaking),
         MachineState::Ready(_) => MachineStatus::Ready,
-        MachineState::Reconnecting { attempt } => MachineStatus::Reconnecting { attempt: *attempt },
+        // 状态机记的是“已经开始了几次”；界面写下一次（等着时）或正在进行的是第几次（remote-exec.md §23.4）。
+        MachineState::Reconnecting {
+            attempt,
+            retry_at,
+            reason,
+        } => MachineStatus::Reconnecting {
+            attempt: if retry_at.is_some() {
+                attempt.saturating_add(1)
+            } else {
+                *attempt
+            },
+            retry_at_ms: retry_at.map(|at| {
+                let left = at.saturating_duration_since(now.0);
+                now.1
+                    .saturating_add(u64::try_from(left.as_millis()).unwrap_or(u64::MAX))
+            }),
+            reason: reason.clone(),
+        },
         MachineState::Failed { error } => MachineStatus::Failed(failure(error)),
     }
 }
 
-fn row(seen: Seen) -> MachineRow {
+fn row(seen: Seen, now: (tokio::time::Instant, u64)) -> MachineRow {
     MachineRow {
-        status: status(&seen.state),
+        status: status(&seen.state, now),
         latency_ms: seen
             .latency
             .map(|latency| u64::try_from(latency.as_millis()).unwrap_or(u64::MAX)),
         executor: seen.welcome.map(|welcome| ExecutorInfo {
+            refreshes_env: welcome
+                .capabilities
+                .contains(rust_cli_exec_wire::handshake::Capability::Env),
             os: welcome.os,
             arch: welcome.arch,
             version: welcome.server_version,
+            home: welcome.home,
         }),
         name: seen.entry.name,
         ssh: seen.entry.ssh,
@@ -86,7 +120,12 @@ fn changed(changed: crate::machines::Changed) -> Changed {
 
 impl Machines for TuiMachines {
     fn snapshot(&self) -> Vec<MachineRow> {
-        self.0.snapshot().into_iter().map(row).collect()
+        let now = (tokio::time::Instant::now(), wall_ms());
+        self.0
+            .snapshot()
+            .into_iter()
+            .map(|seen| row(seen, now))
+            .collect()
     }
 
     fn changes(&self) -> BoxStream<'static, ()> {
@@ -119,6 +158,11 @@ impl Machines for TuiMachines {
     fn disconnect(&self, name: String) -> BoxFuture<'static, Result<Changed, MachineProblem>> {
         let fleet = self.0.clone();
         Box::pin(async move { fleet.disconnect(&name).await.map(changed).map_err(problem) })
+    }
+
+    fn retry(&self, name: String) -> BoxFuture<'static, Result<Changed, MachineProblem>> {
+        let fleet = self.0.clone();
+        Box::pin(async move { fleet.retry(&name).await.map(changed).map_err(problem) })
     }
 
     fn remove(&self, name: String) -> BoxFuture<'static, Result<(), MachineProblem>> {

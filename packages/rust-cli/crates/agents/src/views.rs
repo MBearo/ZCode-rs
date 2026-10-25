@@ -72,6 +72,7 @@ pub(crate) fn background_entry(agent: &LiveAgent) -> BackgroundEntry {
         status: BackgroundStatus::Running,
         output: None,
         machine: agent.machine.clone(),
+        reconnecting: false,
     }
 }
 

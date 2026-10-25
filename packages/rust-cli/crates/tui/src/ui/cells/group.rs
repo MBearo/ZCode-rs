@@ -51,8 +51,14 @@ fn member(row: &Row) -> Option<Member> {
     }
 }
 
-/// 行能不能并进工作段（文字为空的推理由调用方跳过）。
-pub(super) fn joins(row: &Row) -> bool {
+/// 行能不能并进工作段（文字为空的推理由调用方跳过）。`mcp` 是绑定到远端机器的 MCP 服务器：它们的调用同远端的调用，
+/// 不并进工作段（R5，remote-exec.md §22.8）。
+pub(super) fn joins(row: &Row, mcp: &[(String, String)]) -> bool {
+    if let Body::Tool(tool) = &row.body
+        && crate::ui::machines::remote_of(&tool.name, &tool.input, mcp).is_some()
+    {
+        return false;
+    }
     member(row).is_some()
 }
 

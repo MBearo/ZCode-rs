@@ -27,8 +27,10 @@ pub enum Capability {
     Background,
     Checkpoints,
     Pdf,
-    /// MCP 的管道（R5，§15.9）：R1 只定名字，执行器不报告。
+    /// MCP 的管道（R5，§15.9、§22.4）：R5 的执行器（常驻与 `--standalone`）报告它，老执行器不报告。
     Mcp,
+    /// 按客户端实例推送环境变量（F96，remote-exec.md §23.5）：`env.update` 与 `hello.session_env`。F96 的执行器报告它。
+    Env,
 }
 
 impl Capability {
@@ -55,6 +57,7 @@ impl Capability {
             Self::Checkpoints => "checkpoints",
             Self::Pdf => "pdf",
             Self::Mcp => "mcp",
+            Self::Env => "env",
         }
     }
 }
@@ -77,6 +80,20 @@ impl Capabilities {
     /// `MachineEnv` 的全部端口。
     pub fn ports() -> Self {
         Self::of(Capability::PORTS)
+    }
+
+    /// 全部端口加上 MCP 的管道（R5 的执行器，§22.4）。
+    pub fn ports_and_mcp() -> Self {
+        Self::of(Capability::PORTS.into_iter().chain([Capability::Mcp]))
+    }
+
+    /// 现在的执行器报告的全部能力位：端口、MCP 的管道与环境变量推送（F96，§23.5）。
+    pub fn executor() -> Self {
+        Self::of(
+            Capability::PORTS
+                .into_iter()
+                .chain([Capability::Mcp, Capability::Env]),
+        )
     }
 
     pub fn contains(&self, capability: Capability) -> bool {
@@ -104,6 +121,10 @@ pub struct Hello {
     /// 不透明的凭据（云端的令牌；SSH 与 loopback 下没有）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credentials: Option<RedactedString>,
+    /// 这条连接所在的 ssh 会话的环境（白名单里的名字；这条会话没有时是 null）：SSH 的代理在转发 hello 时加上，客户端
+    /// 自己不写。执行器按 `env.update` 的合并处理，先于这条连接上的任何请求（F96，remote-exec.md §23.5）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_env: Option<crate::dto::env::EnvVars>,
 }
 
 /// 服务端接受握手。

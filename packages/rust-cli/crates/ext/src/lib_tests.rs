@@ -22,6 +22,7 @@ fn ext(env: MemoryEnvironment, fake: Arc<FakeMcp>, scope: &TaskScope, servers: M
         ids: Arc::new(SequentialIds::default()),
         gate: Arc::new(PolicyGate::default()),
         mcp: fake,
+        machines: None,
         spawner: scope.spawner(),
         clock: crate::clock_tests::TokioClock::new(),
     };
@@ -38,6 +39,7 @@ fn ext(env: MemoryEnvironment, fake: Arc<FakeMcp>, scope: &TaskScope, servers: M
 
 fn request() -> ContextRequest {
     ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("sess_1"),
         workspace: workspace(),
@@ -81,6 +83,7 @@ async fn the_registry_adds_skill_and_mcp_tools_after_the_base() {
             cwd: None,
         },
         options: Default::default(),
+        machine: None,
     }];
     let ext = ext(env, fake, &scope, servers);
     let registry = ext.registry();
@@ -127,6 +130,7 @@ async fn the_wait_tool_follows_pending_servers_and_the_declared_session() {
             cwd: None,
         },
         options: Default::default(),
+        machine: None,
     }];
     let ext = ext(
         MemoryEnvironment::new(facts()),

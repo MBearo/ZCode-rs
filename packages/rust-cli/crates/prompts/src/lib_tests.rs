@@ -165,3 +165,20 @@ fn data_files_lose_exactly_one_trailing_newline() {
     assert_eq!(trim("a"), "a");
     assert_eq!(trim(""), "");
 }
+
+/// 远端失败说明的动作名（remote-exec.md §23.6，F96）：数据文件能解析、有缺省；内部的方法名不出现在说法里。
+#[test]
+fn remote_actions_have_a_default_and_read_like_tools() {
+    assert_eq!(crate::remote::action("files.write_file"), "the file write");
+    assert_eq!(
+        crate::remote::action("commands.start_command"),
+        "the command"
+    );
+    assert_eq!(crate::remote::action("no.such_op"), "the request");
+    let actions: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(include_str!("../../../prompts/remote/actions.json")).unwrap();
+    assert!(actions.contains_key("default"));
+    for text in actions.values() {
+        assert!(!text.contains('.') && !text.contains('_'), "{text}");
+    }
+}

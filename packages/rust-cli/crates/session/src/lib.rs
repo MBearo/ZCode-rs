@@ -183,6 +183,8 @@ pub struct Session {
     requests: mpsc::Sender<Request>,
     log: Arc<EventLog>,
     deps: SessionDeps,
+    /// 每台远端机器上一份的后台命令（远端执行 F96，remote-exec.md §23.3）：快照的唯一 owner 是会话；重连中的机器用它。
+    last_remote: tasks::LastSeen,
     /// 关闭的进度（[`closing`]）：None 还没关；Some 关闭任务已经起了，令牌在它结束时取消。
     closing: Mutex<Option<CancellationToken>>,
     _actor: Task<Option<()>>,
@@ -240,6 +242,7 @@ impl Session {
             requests,
             log,
             deps,
+            last_remote: tasks::LastSeen::default(),
             closing: Mutex::default(),
             _actor: task,
         }
@@ -317,7 +320,10 @@ impl SessionHandle for Session {
         &self,
     ) -> Result<Vec<rust_cli_kernel_api::manage::BackgroundEntry>, KernelError> {
         let meta = self.ask(|reply| Request::Meta { reply }).await?;
-        Ok(tasks::background_entries(&self.deps, &meta.workspace, &meta.id).await)
+        Ok(
+            tasks::background_entries(&self.deps, &self.last_remote, &meta.workspace, &meta.id)
+                .await,
+        )
     }
 
     /// 子代理的事实在 agents 里（tui-panels.md §1）：不经 actor，直接转给它，按这个顶层会话过滤。
@@ -337,7 +343,7 @@ impl SessionHandle for Session {
         &self,
     ) -> Result<rust_cli_kernel_api::panels::TasksSnapshot, KernelError> {
         let meta = self.ask(|reply| Request::Meta { reply }).await?;
-        Ok(tasks::snapshot(&self.deps, &meta.workspace, &meta.id).await)
+        Ok(tasks::snapshot(&self.deps, &self.last_remote, &meta.workspace, &meta.id).await)
     }
 
     async fn subagent_view(

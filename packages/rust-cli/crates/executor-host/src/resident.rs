@@ -23,7 +23,6 @@ use rust_cli_exec_wire::frame::{Decoded, Frame, Kind, decode};
 use rust_cli_exec_wire::handshake::PROTOCOL;
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::machine::MachineEnv;
-use rust_cli_kernel_api::mcp::NoMcpTransport;
 use rust_cli_paths::ExecutorPaths;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -43,6 +42,9 @@ pub struct ResidentConfig {
     pub retention: Retention,
     /// 账本多久清理一次（§19.7：10 分钟）。
     pub ledger_sweep: Duration,
+    /// MCP 服务器的管道（R5，remote-exec.md §22.5）：env-local 的 `LocalMcpTransport`（打开 `${VAR}` 展开），与 Bash
+    /// 同一份进程树账本与环境。
+    pub mcp: Arc<dyn rust_cli_kernel_api::mcp::McpTransport>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -185,7 +187,7 @@ impl Resident {
             .await
             .map_err(|e| failed("opening the ledger", &e))?,
         );
-        let machine = MachineEnv::new(env.clone(), Arc::new(NoMcpTransport));
+        let machine = MachineEnv::new(env.clone(), config.mcp.clone());
         let server = ExecServer::start(machine, ledger.clone(), Arc::new(AllowAll), server)
             .await
             .map_err(|e| failed("starting the executor", &e))?;

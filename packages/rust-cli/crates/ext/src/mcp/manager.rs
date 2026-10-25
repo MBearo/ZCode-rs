@@ -3,12 +3,13 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use rust_cli_base::Spawner;
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::env::WorkspaceRef;
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::listing::ListingEntry;
 use rust_cli_kernel_api::mcp::{McpTransport, McpTransportConfig};
@@ -84,6 +85,8 @@ impl Server {
 
 pub(crate) struct Inner {
     transport: Arc<dyn McpTransport>,
+    /// 远端机器的注册表（R5）：绑定到远端的服务器从这里取那台机器的 `mcp()`（remote-exec.md §22.6）。
+    machines: OnceLock<Arc<dyn EnvironmentRegistry>>,
     spawner: Spawner,
     settings: McpSettings,
     servers: Mutex<BTreeMap<String, Server>>,
@@ -314,10 +317,14 @@ impl Inner {
         let mut connected_once = false;
         let mut attempts = 0;
         loop {
+            let pipe = connection::Pipe {
+                local: &self.transport,
+                machines: self.machines.get(),
+                workspace: &workspace,
+            };
             let reason = match connection::open(
-                &self.transport,
+                &pipe,
                 &self.spawner,
-                &workspace,
                 &config,
                 timeout,
                 &self.settings.client_version,
@@ -397,6 +404,7 @@ impl McpManager {
         let (changed, _) = watch::channel(0);
         Self(Arc::new(Inner {
             transport,
+            machines: OnceLock::new(),
             spawner,
             settings,
             servers: Mutex::default(),
@@ -408,6 +416,18 @@ impl McpManager {
             print: AtomicBool::new(false),
             resources_seen: AtomicBool::new(false),
         }))
+    }
+
+    /// 远端机器的注册表（R5，remote-exec.md §22.6）：`start` 之前给一次；绑定到远端机器的服务器从它取管道。F98（§25.5）：
+    /// 同时跟着它的连接变化，机器进注册表时重连绑定到它的失败的服务器。
+    pub fn set_machines(&self, machines: Arc<dyn EnvironmentRegistry>) {
+        if self.0.machines.set(machines.clone()).is_err() {
+            return;
+        }
+        let manager = McpManager(self.0.clone());
+        self.0.spawner.spawn_resident("mcp-machines", async move {
+            manager.follow_machines(machines).await;
+        });
     }
 
     /// print 会话（`-p`、stream-json）：连上过的 stdio 服务器断开时不记失败，等下次调用再连（ext.md §3.3.3）。
@@ -483,6 +503,7 @@ impl McpManager {
                     state,
                     reason,
                     tools: server.tools.len(),
+                    machine: remote_machine(&server.config),
                 }
             })
             .collect()
@@ -539,6 +560,14 @@ fn tools_of(inner: &Arc<Inner>, servers: &BTreeMap<String, Server>) -> Vec<Arc<d
     tools
 }
 
+/// 服务器绑定的远端机器（`local` 与空串是本机）。
+fn remote_machine(config: &McpServer) -> Option<String> {
+    config
+        .machine
+        .clone()
+        .filter(|name| !name.is_empty() && name != rust_cli_kernel_api::env_registry::LOCAL_MACHINE)
+}
+
 /// 已连接、有 instructions 的服务器，按名字排序：`## <server>\n<instructions>`（ext.md §3.6）。
 fn instructions_of(servers: &BTreeMap<String, Server>) -> Vec<ListingEntry> {
     servers
@@ -591,3 +620,7 @@ mod names_tests;
 #[cfg(test)]
 #[path = "manager_dormant_tests.rs"]
 mod dormant_tests;
+
+#[cfg(test)]
+#[path = "manager_machines_tests.rs"]
+mod machines_tests;

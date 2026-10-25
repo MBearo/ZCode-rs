@@ -64,8 +64,17 @@ fn line(entry: &Entry) -> String {
     )
 }
 
-/// 这一步的机器清单提醒：`(text, data)`，text 未包 `<system-reminder>`。`history` 是最近一次压缩边界之后的部分。
-pub(crate) fn announce(history: &[Message], set: &MachineSet) -> Option<(String, Value)> {
+/// 这一步的机器清单提醒：`(text, data)`，text 未包 `<system-reminder>`。`history` 是最近一次压缩边界之后的部分；
+/// `default` 是这次运行的缺省机器（本机为 None）。
+///
+/// 缺陷修复（F98，remote-exec.md §25.2.1）：以前只有一种写法（“不写 `machine` 就在本机”），缺省机器在 dev-a 的子代理
+/// 读到的提醒与它的工具说明（`omit to use the default machine "dev-a"`）、实际的路由都不一致。现在按缺省机器选文字；
+/// 快照（`data`）不变：子代理的缺省机器在它的一生里不变，不必存。
+pub(crate) fn announce(
+    history: &[Message],
+    set: &MachineSet,
+    default: Option<&str>,
+) -> Option<(String, Value)> {
     let current = snapshot(set);
     let latest: Option<Vec<Entry>> = attachments(history, SOURCE)
         .next_back()
@@ -83,15 +92,16 @@ pub(crate) fn announce(history: &[Message], set: &MachineSet) -> Option<(String,
             .filter(|entry| !current.iter().any(|now| now.name == entry.name))
             .map(|entry| render(texts::machine_gone(), &[("name", &entry.name)])),
     );
-    let template = if current.is_empty() {
-        texts::machines_none()
-    } else {
-        texts::machines()
+    let template = match (current.is_empty(), default) {
+        (true, None) => texts::machines_none(),
+        (false, None) => texts::machines(),
+        (true, Some(_)) => texts::machines_none_default(),
+        (false, Some(_)) => texts::machines_default(),
     };
-    Some((
-        render(template, &[("lines", &lines.join("\n"))]),
-        json!({"machines": current}),
-    ))
+    let lines = lines.join("\n");
+    let mut vars = vec![("lines", lines.as_str())];
+    vars.extend(default.map(|name| ("name", name)));
+    Some((render(template, &vars), json!({"machines": current})))
 }
 
 #[cfg(test)]

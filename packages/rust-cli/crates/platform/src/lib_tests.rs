@@ -114,6 +114,35 @@ async fn api_key_providers_resolve_with_headers_and_patches() {
     assert!(matches!(missing, Err(ModelError::InvalidRequest { .. })));
 }
 
+/// 请求交来的输出上限进 `maxOutputTokens` 补丁的输入（工作线 F95，platform.md §3.3）：取配置的 max、
+/// `ZCODE_MAX_OUTPUT_TOKENS` 与它三者的最小值；不给时照旧是配置的 max（custom-chat 是 8192）。
+#[tokio::test]
+async fn the_request_output_limit_feeds_the_max_output_tokens_patch() {
+    let dir = tempfile::tempdir().unwrap();
+    let (platform, _paths) = platform(dir.path()).await;
+    let chat = selection("personal:gateway", "custom-chat", Some("high"));
+    let patch = |endpoint: ModelEndpoint| endpoint.body_patches[1].clone();
+    let limited = |limit| platform.endpoint_with_output_limit(&chat, None, limit);
+    assert_eq!(
+        patch(limited(Some(4096)).await.unwrap()),
+        json!({"max_completion_tokens": 4096})
+    );
+    assert_eq!(
+        patch(limited(Some(500_000)).await.unwrap()),
+        json!({"max_completion_tokens": 8192})
+    );
+    assert_eq!(
+        patch(limited(None).await.unwrap()),
+        patch(platform.endpoint(&chat, None).await.unwrap())
+    );
+    let capped = platform.with_max_output_tokens(Some(2000));
+    let both = capped
+        .endpoint_with_output_limit(&chat, None, Some(4096))
+        .await
+        .unwrap();
+    assert_eq!(patch(both), json!({"max_completion_tokens": 2000}));
+}
+
 #[tokio::test]
 async fn account_models_take_the_credential_on_every_request() {
     let dir = tempfile::tempdir().unwrap();

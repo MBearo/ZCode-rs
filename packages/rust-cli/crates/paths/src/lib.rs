@@ -66,6 +66,8 @@ const PEERS_DIR: &str = concat!(rust_cli_dir!(), "/peers");
 const UPDATE_CACHE: &str = concat!(rust_cli_dir!(), "/version.json");
 /// 远端机器的清单（docs/specs/rust-cli/remote-exec.md §20.3.1）。
 const MACHINES_FILE: &str = concat!(rust_cli_dir!(), "/machines.json");
+/// MCP 服务器绑定到哪台机器（docs/specs/rust-cli/remote-exec.md §22.2）。
+const MCP_MACHINES_FILE: &str = concat!(rust_cli_dir!(), "/mcp-machines.json");
 /// 规整后目录名的上限（UTF-16 码元）。
 const MAX_SANITIZED_LENGTH: usize = 200;
 /// `<dataBaseDir>` 的用户根下的配置根（`.zcode/v2`）。
@@ -321,6 +323,12 @@ impl StoragePaths {
     /// `storage.dir`（机器是用户级的配置，不是会话数据）。
     pub fn machines(&self) -> StoragePath {
         StoragePath(user_path(&self.home, MACHINES_FILE))
+    }
+
+    /// MCP 服务器绑定到远端机器的旁路文件 `~/.zcode/rust-cli/mcp-machines.json`（docs/specs/rust-cli/remote-exec.md
+    /// §22.2）：用户根下，不随 `storage.dir`（同 [`StoragePaths::machines`]）。
+    pub fn mcp_machines(&self) -> StoragePath {
+        StoragePath(user_path(&self.home, MCP_MACHINES_FILE))
     }
 }
 

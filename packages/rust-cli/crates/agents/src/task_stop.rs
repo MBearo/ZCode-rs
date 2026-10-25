@@ -48,6 +48,9 @@ struct Stopped<'a> {
     task_id: &'a str,
     task_type: &'a str,
     command: &'a str,
+    /// 远端机器上的命令所在的机器（F98，remote-exec.md §25.2.4）；本机不写。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    machine: Option<&'a str>,
 }
 
 /// 显示用的命令：去掉控制字符、空白合成一个空格、首尾去空、超过 160 个字符时截断加 `…`。
@@ -100,11 +103,13 @@ impl<'a> Caller<'a> {
     }
 }
 
-/// 成功停止：（任务 ID、`local_agent` / `local_bash`、描述或命令）。
+/// 成功停止：（任务 ID、`local_agent` / `local_bash`、描述或命令、远端的机器）。
 pub(crate) struct StoppedTask {
     pub(crate) id: String,
     pub(crate) task_type: &'static str,
     pub(crate) command: String,
+    /// 命令在远端机器上时是那台机器的名字（F98）；本机与子代理为 None。
+    pub(crate) machine: Option<String>,
 }
 
 impl StoppedTask {
@@ -272,6 +277,7 @@ impl TaskStopTool {
                     id: id.to_owned(),
                     task_type: "local_agent",
                     command: description,
+                    machine: None,
                 })
             }
             Ok(Target::Command(Found { session, machine })) => {
@@ -288,6 +294,7 @@ impl TaskStopTool {
                         id: id.to_owned(),
                         task_type: "local_bash",
                         command,
+                        machine: (!machine.is_local()).then(|| machine.name().to_owned()),
                     }),
                     BackgroundStop::NotRunning { status } => Err(ToolError::Failed {
                         message: format!("Task {id} is not running (status: {})", status.as_str()),
@@ -302,16 +309,23 @@ impl TaskStopTool {
     }
 }
 
+/// 回执。缺陷修复（Docker 试用 L10，F98）：停远端机器上的命令时，回执与工具行都看不出停的是哪台上的；现在回执多
+/// `machine`，display 带它给 TUI 的工具行（本机不变，参照版本的形状）。
 fn json(stopped: &StoppedTask) -> ToolOutput {
     let message = stopped.message();
-    let stopped = Stopped {
+    let receipt = Stopped {
         message,
         task_id: &stopped.id,
         task_type: stopped.task_type,
         command: &stopped.command,
+        machine: stopped.machine.as_deref(),
     };
-    let text = serde_json::to_string(&stopped).unwrap_or_default();
-    text_output(text, false)
+    let text = serde_json::to_string(&receipt).unwrap_or_default();
+    let mut output = text_output(text, false);
+    if let Some(machine) = &stopped.machine {
+        output.display = serde_json::json!({ "machine": machine });
+    }
+    output
 }
 
 #[async_trait]

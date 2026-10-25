@@ -32,6 +32,7 @@ fn change(path: &str, additions: u64, deletions: u64) -> FileChange {
         path: path.into(),
         additions,
         deletions,
+        machine: None,
     }
 }
 

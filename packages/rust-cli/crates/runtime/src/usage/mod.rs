@@ -188,6 +188,7 @@ impl UsageAnalyzer {
         );
         let per_token = models::chars_per_token(&model);
         let request = ContextRequest {
+            default_machine: None,
             capabilities,
             // 没有会话时规则缓存不参与（analysis 不缓存），会话 ID 只是占位。
             session: query

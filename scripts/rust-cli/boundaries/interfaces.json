@@ -292,6 +292,21 @@
           "name": "changes",
           "signature": "fn changes(&self) -> BoxStream<'static,u64>",
           "default": true
+        },
+        {
+          "name": "wait_remote",
+          "signature": "fn wait_remote(&self,name:&str) -> BoxFuture<'static,Option<(MachineEnv,WorkspaceRef)>>",
+          "default": true
+        },
+        {
+          "name": "reconnecting",
+          "signature": "fn reconnecting(&self,_name:&str) -> bool",
+          "default": true
+        },
+        {
+          "name": "listed",
+          "signature": "fn listed(&self,_name:&str) -> bool",
+          "default": true
         }
       ]
     },
@@ -367,6 +382,11 @@
           "name": "provision",
           "signature": "async fn provision(&self) -> Result<Provisioned,ProvisionError>",
           "default": false
+        },
+        {
+          "name": "provision_reporting",
+          "signature": "async fn provision_reporting(&self,progress:&(dyn Fn(ProvisionStep)+ Send + Sync),) -> Result<Provisioned,ProvisionError>",
+          "default": true
         }
       ]
     },
@@ -954,6 +974,22 @@
         ]
       }
     },
+    "dto/env.rs": {
+      "EnvMode": {
+        "kind": "enum",
+        "attributes": [
+          "rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Replace"
+          },
+          {
+            "item": "Merge"
+          }
+        ]
+      }
+    },
     "dto/files.rs": {
       "FileKind": {
         "kind": "enum",
@@ -1376,6 +1412,50 @@
         ]
       }
     },
+    "dto/mcp.rs": {
+      "McpTransport": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"type\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Stdio{command:String,#[serde(default,skip_serializing_if = \"Vec::is_empty\")]args:Vec<String>,#[serde(default,skip_serializing_if = \"BTreeMap::is_empty\")]env:BTreeMap<String,String>,#[serde(default,skip_serializing_if = \"Option::is_none\")]cwd:Option<String>,}"
+          },
+          {
+            "item": "Sse{url:String,#[serde(default,skip_serializing_if = \"BTreeMap::is_empty\")]headers:BTreeMap<String,String>,}"
+          },
+          {
+            "item": "Http{url:String,#[serde(default,skip_serializing_if = \"BTreeMap::is_empty\")]headers:BTreeMap<String,String>,}"
+          }
+        ]
+      },
+      "McpEvent": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"type\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Message{message:Value,}"
+          },
+          {
+            "item": "Closed{#[serde(default,skip_serializing_if = \"Option::is_none\")]reason:Option<String>,#[serde(default)]session_expired:bool,}"
+          }
+        ]
+      },
+      "McpDeclared": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "server:String"
+          },
+          {
+            "item": "transport:McpTransport"
+          }
+        ]
+      }
+    },
     "dto/rewind.rs": {
       "RestoreFile": {
         "kind": "struct",
@@ -1715,13 +1795,16 @@
         ],
         "variants": [
           {
-            "item": "Command{event:CommandEvent}"
+            "item": "Command{event:CommandEvent,}"
           },
           {
-            "item": "Notice{notice:ShellNotice}"
+            "item": "Notice{notice:ShellNotice,}"
           },
           {
-            "item": "Error{error:WireError}"
+            "item": "Mcp{event:McpEvent,}"
+          },
+          {
+            "item": "Error{error:WireError,}"
           },
           {
             "item": "End"
@@ -1944,6 +2027,9 @@
           },
           {
             "item": "Mcp"
+          },
+          {
+            "item": "Env"
           }
         ]
       },
@@ -1987,6 +2073,12 @@
               "default,skip_serializing_if = \"Option::is_none\""
             ],
             "item": "credentials:Option<RedactedString>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "session_env:Option<crate::dto::env::EnvVars>"
           }
         ]
       },
@@ -2165,6 +2257,24 @@
           },
           {
             "item": "RenderPdfPages"
+          },
+          {
+            "item": "McpConnect"
+          },
+          {
+            "item": "McpSend"
+          },
+          {
+            "item": "McpEvents"
+          },
+          {
+            "item": "McpClose"
+          },
+          {
+            "item": "McpDeclare"
+          },
+          {
+            "item": "EnvUpdate"
           }
         ]
       },
@@ -2347,6 +2457,36 @@
               "rename = \"pdf.render_pdf_pages\""
             ],
             "item": "RenderPdfPages(PdfRender)"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.connect\""
+            ],
+            "item": "McpConnect{connection:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.send\""
+            ],
+            "item": "McpSend"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.close\""
+            ],
+            "item": "McpClose"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.declare\""
+            ],
+            "item": "McpDeclare{closed:Vec<String>}"
+          },
+          {
+            "attributes": [
+              "rename = \"env.update\""
+            ],
+            "item": "EnvUpdate"
           }
         ]
       }
@@ -2537,6 +2677,42 @@
               "rename = \"pdf.render_pdf_pages\""
             ],
             "item": "RenderPdfPages{workspace:Workspace,request:RenderPdfPages,}"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.connect\""
+            ],
+            "item": "McpConnect{workspace:Workspace,server:String,transport:McpTransport,}"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.send\""
+            ],
+            "item": "McpSend{connection:String,message:serde_json::Value,}"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.events\""
+            ],
+            "item": "McpEvents{connection:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.close\""
+            ],
+            "item": "McpClose{connection:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"mcp.declare\""
+            ],
+            "item": "McpDeclare{workspace:Workspace,servers:Vec<McpDeclared>,}"
+          },
+          {
+            "attributes": [
+              "rename = \"env.update\""
+            ],
+            "item": "EnvUpdate{mode:EnvMode,vars:EnvVars,#[serde(default,skip_serializing_if = \"Vec::is_empty\")]injected:Vec<String>,}"
           }
         ]
       }

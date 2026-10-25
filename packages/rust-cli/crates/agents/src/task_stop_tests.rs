@@ -392,3 +392,44 @@ async fn a_command_on_a_remote_machine_is_stopped_there() {
     assert!(text(&output).contains("Successfully stopped task: b0000000r (sleep 100)"));
     assert_eq!(remote.stops.lock().unwrap().len(), 1);
 }
+
+/// F98（remote-exec.md §25.2.4）：停的是远端机器上的命令时，回执在 `command` 之后带 `machine`，display 也带（TUI 的工具行
+/// 接 `@dev-a`）；`task_type` 照旧。本机的不变。旧代码的回执与 display 都没有机器。
+#[tokio::test]
+async fn stopping_a_remote_command_names_its_machine() {
+    let remote = Arc::new(Shells::with(
+        "sess_1",
+        "b0000000r",
+        "sleep 100",
+        BackgroundStatus::Running,
+    ));
+    let registry = rust_cli_kernel_api::testing::TestMachines::new(Arc::new(
+        rust_cli_kernel_api::testing::UnusedEnvironment,
+    ));
+    registry.connect("dev-a", remote, "/home/dev/proj");
+    let on_dev_a = crate::test_support::with_machines(registry);
+    let output = on_dev_a
+        .call("sess_1", "TaskStop", json!({"task_id": "b0000000r"}))
+        .await;
+    assert_eq!(
+        text(&output),
+        r#"{"message":"Successfully stopped task: b0000000r (sleep 100)","task_id":"b0000000r","task_type":"local_bash","command":"sleep 100","machine":"dev-a"}"#
+    );
+    assert_eq!(output.display, json!({"machine": "dev-a"}));
+
+    let mut local = harness(None);
+    local.set_env(Arc::new(Shells::with(
+        "sess_1",
+        "b0000000l",
+        "sleep 100",
+        BackgroundStatus::Running,
+    )));
+    let output = local
+        .call("sess_1", "TaskStop", json!({"task_id": "b0000000l"}))
+        .await;
+    assert_eq!(
+        text(&output),
+        r#"{"message":"Successfully stopped task: b0000000l (sleep 100)","task_id":"b0000000l","task_type":"local_bash","command":"sleep 100"}"#
+    );
+    assert_eq!(output.display, serde_json::Value::Null);
+}

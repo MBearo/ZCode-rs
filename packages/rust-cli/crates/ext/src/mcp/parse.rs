@@ -8,38 +8,8 @@ use serde_json::Value;
 
 use super::config::{McpScope, McpServer};
 
-/// `${VAR}` 与 `${VAR:-默认}` 展开；没有值也没有默认值的变量原样保留，名字记进 `missing`。
-pub fn expand_vars(
-    text: &str,
-    lookup: &dyn Fn(&str) -> Option<String>,
-    missing: &mut Vec<String>,
-) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(start) = rest.find("${") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        let Some(end) = after.find('}') else {
-            out.push_str(&rest[start..]);
-            return out;
-        };
-        let inner = &after[..end];
-        let (name, default) = match inner.split_once(":-") {
-            Some((name, default)) => (name, Some(default)),
-            None => (inner, None),
-        };
-        match lookup(name).or_else(|| default.map(str::to_owned)) {
-            Some(value) => out.push_str(&value),
-            None => {
-                missing.push(name.to_owned());
-                out.push_str(&rest[start..start + 2 + end + 1]);
-            }
-        }
-        rest = &after[end + 1..];
-    }
-    out.push_str(rest);
-    out
-}
+/// `${VAR}` 与 `${VAR:-默认}` 展开：规则只有一份，在 kernel-api（远端的执行器也用它，remote-exec.md §22.7）。
+pub use rust_cli_kernel_api::mcp_vars::expand_vars;
 
 fn strings(value: Option<&Value>) -> Vec<String> {
     value
@@ -121,6 +91,16 @@ pub fn parse_servers(
     scope: McpScope,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> (Vec<McpServer>, Vec<String>) {
+    parse_servers_keeping(servers, scope, lookup, &|_| false)
+}
+
+/// 同 [`parse_servers`]；`keep(名字)` 为真的服务器按原文、不展开 `${VAR}`（绑定到远端机器的，本机的值不进请求）。
+pub fn parse_servers_keeping(
+    servers: &Value,
+    scope: McpScope,
+    lookup: &dyn Fn(&str) -> Option<String>,
+    keep: &dyn Fn(&str) -> bool,
+) -> (Vec<McpServer>, Vec<String>) {
     let mut found = Vec::new();
     let mut warnings = Vec::new();
     let Some(entries) = servers.as_object() else {
@@ -134,7 +114,11 @@ pub fn parse_servers(
     for name in names {
         let mut missing = Vec::new();
         let parsed = {
-            let mut expand = |text: &str| expand_vars(text, lookup, &mut missing);
+            let mut expand = |text: &str| match keep(name) {
+                // 绑定到远端机器的服务器（R5，remote-exec.md §22.7）：按原文，`${VAR}` 留给那台机器的执行器展开。
+                true => text.to_owned(),
+                false => expand_vars(text, lookup, &mut missing),
+            };
             transport(&entries[name], &mut expand)
         };
         match parsed {
@@ -150,6 +134,7 @@ pub fn parse_servers(
                     scope,
                     transport,
                     options: Default::default(),
+                    machine: None,
                 });
             }
             Err(reason) => warnings.push(format!("MCP server \"{name}\" skipped: {reason}")),

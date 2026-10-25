@@ -29,6 +29,7 @@ pub mod models;
 pub mod monitor;
 pub mod peers;
 pub mod reminder;
+pub mod remote;
 pub mod texts;
 pub mod title;
 mod words;

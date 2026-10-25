@@ -19,4 +19,6 @@ futures-util.workspace = true
 rust-cli-exec-client.workspace = true
 rust-cli-exec-wire.workspace = true
 rust-cli-kernel-api.workspace = true
+# 远端调用失败时给模型的说明（F96，remote-exec.md §23.6）：文字在 prompts/remote/。
+rust-cli-prompts.workspace = true
 serde_json.workspace = true

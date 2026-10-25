@@ -64,6 +64,8 @@ pub fn page(frame: &mut Frame<'_>, app: &mut App, local: &Local, scroll: usize, 
         workspace: app.view.workspace().root.as_str(),
         workspace_label: &label,
         version: &app.version,
+        mcp_machines: &app.mcp_machines,
+        machines: &app.machines,
         markdown: None,
     };
     let (title, mut lines) = match local {

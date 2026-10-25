@@ -116,8 +116,10 @@ pub struct Interaction {
     pub mode: PermissionMode,
     /// Bash 询问“不再询问”一行的可编辑前缀（工作线 F72，shell-permissions.md §4.10）；没有时这一行列出建议规则。
     pub seed: Option<String>,
-    /// 当前工作目录：没有种子时“不再询问”一行里显示。
+    /// 当前工作目录：没有种子时“不再询问”一行里显示（远端的调用是那台机器的工作目录，F98）。
     pub workspace: String,
+    /// MCP 工具绑定的远端机器（F98，remote-exec.md §25.4.3）：询问里没有 `machine` 时标题照它写“在 dev-a 上执行”。
+    pub bound_machine: Option<String>,
     /// 旧会话的询问（父会话已关闭，agents.md §4.1.2，工作线 F72）：那个会话的标题（可能为空）；当前会话的询问为 None。
     pub origin: Option<String>,
     /// 预览题的焦点在这道题上动过（写完备注按 enter 时选焦点所在的选项，工作线 F72）。
@@ -144,6 +146,7 @@ impl Interaction {
             mode: PermissionMode::Default,
             seed: remember::seed(request),
             workspace: String::new(),
+            bound_machine: None,
             origin: None,
             moved: false,
             countdown: None,

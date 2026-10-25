@@ -238,6 +238,7 @@ impl Tool for MonitorTool {
             hook: None,
             on_timeout: None,
             socket: socket.clone(),
+            env: Default::default(),
         };
         context
             .machine

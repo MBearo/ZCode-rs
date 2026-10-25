@@ -487,6 +487,7 @@ impl BashTool {
             hook: None,
             on_timeout,
             socket: None,
+            env: Default::default(),
         };
         context
             .machine
@@ -501,15 +502,13 @@ impl BashTool {
                 text.push('\n');
                 text.push_str(&output::background_cwd_hint(cwd.as_str()));
             }
-            return Ok(Ran::Text(text));
+            return Ok(Ran::Text(file_on_machine(text, &context)));
         }
         let collected = collect(&context, &progress, task.as_str(), timeout_ms).await?;
         if collected.finished == CommandEvent::Backgrounded {
-            return Ok(Ran::Text(output::moved_to_background(
-                timeout_ms,
-                &task,
-                &collected.output_file,
-                deadline_ms,
+            return Ok(Ran::Text(file_on_machine(
+                output::moved_to_background(timeout_ms, &task, &collected.output_file, deadline_ms),
+                &context,
             )));
         }
         let CommandEvent::Finished {
@@ -560,13 +559,29 @@ impl BashTool {
             let truncated = total > INLINE_LIMIT as u64;
             crate::bash_reads::record(files, &context, &input.command, (code, truncated)).await;
         }
-        Ok(Ran::Text(output::success(
-            &head,
-            total,
-            &collected.output_file,
-            reset,
-        )))
+        let text = output::success(&head, total, &collected.output_file, reset);
+        // 输出太长时结果给的是输出文件（`<persisted-output>`），远端时同样写明机器。
+        Ok(Ran::Text(if total > INLINE_LIMIT as u64 {
+            file_on_machine(text, &context)
+        } else {
+            text
+        }))
     }
+}
+
+/// 结果写了输出文件的路径、调用又在远端机器上时，加一句文件在哪台机器（远端执行 F98，remote-exec.md §25.2.3）。
+///
+/// 缺陷修复（Docker 试用 L1）：以前只写路径与“use Read on that file path”，模型照做（不写 `machine`）在本机读，得到
+/// “File does not exist”；文件在执行命令的那台机器上。本机的调用不变（逐字照参照版本）。
+fn file_on_machine(text: String, context: &ToolUseContext) -> String {
+    if context.machine.is_local() {
+        return text;
+    }
+    let note = rust_cli_prompts::texts::render(
+        rust_cli_prompts::texts::remote_output_file(),
+        &[("machine", context.machine.name())],
+    );
+    format!("{text}\n{note}")
 }
 
 /// 命令的任一子命令去掉包装（`timeout`、`nohup`、安全的环境变量等）后第一个词是 `cd`、`pushd`、`popd` 或 `chdir`。

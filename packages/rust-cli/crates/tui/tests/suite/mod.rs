@@ -31,6 +31,7 @@ mod login;
 mod logo;
 mod machines;
 mod machines_marks;
+mod machines_more;
 mod manage;
 mod mode_picker;
 mod model_default;

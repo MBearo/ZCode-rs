@@ -2,8 +2,11 @@
 //! [`McpManager`]。重连与停用时代号加一、发取消消息并关闭旧客户端，旧任务之后的更新因代号不符被丢弃；
 //! 等待用状态变化的 watch，不用超时。
 
-use std::sync::PoisonError;
+use std::collections::BTreeSet;
+use std::sync::{Arc, PoisonError};
 
+use futures_util::StreamExt;
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::manage::{McpAction, McpServerInfo};
 use tokio_util::sync::CancellationToken;
 
@@ -76,6 +79,40 @@ impl McpManager {
         };
         let task = self.0.clone().run(workspace, config, generation, cancel);
         self.0.spawner.spawn_resident("mcp-connection", task);
+    }
+
+    /// 跟着注册表的连接变化（F98，remote-exec.md §25.5）：一台机器进注册表时（`/machines add` / `connect` 连上、失败之后
+    /// 再连上），绑定到它、现在是失败状态的服务器重连一次（同 `/mcp reconnect`）。ssh 抖动时机器一直在注册表里，不触发。
+    ///
+    /// 缺陷修复（Docker 试用 L6）：以前机器后来连上时，启动时因为它不在清单里而失败的服务器一直是“未连接”，要手动
+    /// `/mcp reconnect`。
+    pub(super) async fn follow_machines(&self, registry: Arc<dyn EnvironmentRegistry>) {
+        let names = |registry: &dyn EnvironmentRegistry| -> BTreeSet<String> {
+            registry.machines().names().into_iter().collect()
+        };
+        let mut seen = names(registry.as_ref());
+        let mut changes = registry.changes();
+        while changes.next().await.is_some() {
+            let now = names(registry.as_ref());
+            let arrived: Vec<String> = now.difference(&seen).cloned().collect();
+            seen = now;
+            for machine in arrived {
+                let failed: Vec<String> = self
+                    .0
+                    .servers()
+                    .iter()
+                    .filter(|(_, server)| {
+                        server.config.machine.as_deref() == Some(machine.as_str())
+                            && matches!(server.status, McpStatus::Failed { .. })
+                    })
+                    .map(|(name, _)| name.clone())
+                    .collect();
+                for name in failed {
+                    tracing::info!(server = %name, %machine, "reconnecting an MCP server whose machine connected");
+                    self.restart(&name).await;
+                }
+            }
+        }
     }
 
     async fn stop(&self, name: &str) {

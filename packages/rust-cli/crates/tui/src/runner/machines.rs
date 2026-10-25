@@ -29,6 +29,11 @@ pub(super) enum MachinesDone {
         name: String,
         result: Result<(), MachineProblem>,
     },
+    /// 立即重试（F98，remote-exec.md §25.4.1）。
+    Retried {
+        name: String,
+        result: Result<Changed, MachineProblem>,
+    },
 }
 
 /// 机器服务的变化通知；没有服务时永远不出项。
@@ -43,14 +48,43 @@ impl<B: Backend> Loop<'_, B> {
     /// 启动时：记下有没有服务，取第一份快照。
     pub(super) fn start_machines(&mut self) {
         self.app.machines_enabled = self.options.services.machines.is_some();
+        // MCP 工具行的 `@机器`（R5，§22.8）：按工具名的前缀找，服务器名先规范化。
+        self.app.mcp_machines = self
+            .options
+            .services
+            .mcp_machines
+            .iter()
+            .map(|(server, machine)| {
+                (
+                    rust_cli_kernel_api::mcp_state::normalize_name(server),
+                    machine.clone(),
+                )
+            })
+            .collect();
         self.refresh_machines();
     }
 
     /// 服务的快照变了（状态、延迟、清单）：重取（状态行与列表都画它）。
+    ///
+    /// 远端执行 F96（remote-exec.md §23.3）：某台机器的状态种类变了（就绪、连接中、重连中、失败、未连接；不算延迟与
+    /// 重连的倒计时）时，后台任务的快照也重取——重连中的机器在快照里是上一份，连回来之后马上换成新问的。
     pub(super) fn refresh_machines(&mut self) {
         if let Some(machines) = &self.options.services.machines {
-            self.app.machines = machines.snapshot();
+            let fresh = machines.snapshot();
+            let kinds = |rows: &[crate::machines::MachineRow]| -> Vec<(
+                String,
+                std::mem::Discriminant<crate::machines::MachineStatus>,
+            )> {
+                rows.iter()
+                    .map(|row| (row.name.clone(), std::mem::discriminant(&row.status)))
+                    .collect()
+            };
+            let changed = kinds(&self.app.machines) != kinds(&fresh);
+            self.app.machines = fresh;
             self.dirty = true;
+            if changed {
+                self.refresh_tasks();
+            }
         }
     }
 
@@ -101,6 +135,14 @@ impl<B: Backend> Loop<'_, B> {
                 }
                 .boxed()
             }
+            MachineRequest::Retry(name) => {
+                let retrying = machines.retry(name.clone());
+                async move {
+                    let result = retrying.await;
+                    MachinesDone::Retried { name, result }
+                }
+                .boxed()
+            }
         };
         self.pending.push(future.map(Done::Machines).boxed());
     }
@@ -137,6 +179,14 @@ impl<B: Backend> Loop<'_, B> {
                 name,
                 result: Ok(()),
             } => self.app.info(words::removed(lang, &name)),
+            MachinesDone::Retried {
+                name,
+                result: Ok(Changed::Done),
+            } => self.app.info(words::retrying(lang, &name)),
+            MachinesDone::Retried {
+                name,
+                result: Ok(Changed::Already),
+            } => self.app.info(words::not_waiting(lang, &name)),
             MachinesDone::Added {
                 name,
                 result: Err(problem),
@@ -151,6 +201,10 @@ impl<B: Backend> Loop<'_, B> {
                 result: Err(problem),
             }
             | MachinesDone::Removed {
+                name,
+                result: Err(problem),
+            }
+            | MachinesDone::Retried {
                 name,
                 result: Err(problem),
             } => self.app.error(words::problem(lang, &name, &problem)),

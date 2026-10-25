@@ -276,6 +276,7 @@ impl Engine<'_> {
             return Vec::new();
         }
         let context = ContextRequest {
+            default_machine: None,
             capabilities: None,
             session: request.session.clone(),
             workspace: request.workspace.clone(),

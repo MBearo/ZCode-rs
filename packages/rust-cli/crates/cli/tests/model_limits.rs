@@ -7,6 +7,8 @@
 //!
 //! 修前：显式覆盖没有目录，压缩与 `/context` 都按默认窗口 200,000——glm-5.3 在约 167k 就自动压缩；平台层的目录只在
 //! `auto_compact` 里用，同步的把关 `should_auto_compact` 按 200,000，窗口小于它的模型到了配置的阈值也不压缩。
+//!
+//! 工作线 F95（tools-more.md §5 表后）：目录模型上 WebSearch 旁路请求的输出上限经 Provider 补丁发出。
 #![allow(
     clippy::disallowed_methods,
     clippy::unwrap_used,
@@ -49,6 +51,19 @@ impl Sandbox {
 
     /// 个人 Provider 配置：一个 anthropic-messages 的自定义 provider，地址是夹具。
     fn provider(&self, url: &str, model: &str) {
+        self.provider_with_rules(url, model, &[]);
+    }
+
+    /// 同 [`Self::provider`]，另给这个 provider 的模型配置规则（`providerModelRules`，每项是 `{modelId, config}`）。
+    fn provider_with_rules(&self, url: &str, model: &str, rules: &[Value]) {
+        let rules: Vec<Value> = rules
+            .iter()
+            .map(|rule| {
+                let mut rule = rule.clone();
+                rule["providerId"] = json!("personal:gateway");
+                rule
+            })
+            .collect();
         let config = json!({
             "schemaVersion": 1,
             "config": {
@@ -62,7 +77,8 @@ impl Sandbox {
                         "api": {"type": "anthropic-messages", "baseUrl": url},
                         "personalModelIds": [model]
                     }
-                }]}
+                }]},
+                "modelConfigRules": {"providerModelRules": rules, "manualProviderModelRules": []}
             }
         });
         std::fs::write(
@@ -243,4 +259,42 @@ async fn a_configured_1m_window_does_not_compact_at_300k() {
     assert!(!requests.iter().any(is_summary), "{}", requests.len());
     let output = sandbox.run("/context", &[], &["--model", "personal:gateway/glm-5.3"]);
     assert_eq!(context_window(&output.stdout), "1m");
+}
+
+/// 工作线 F95（tools-more.md §5 表后）：目录模型上 WebSearch 的旁路请求发 `min(4096, 配置的上限)`，同 Node（Node 的 option
+/// map 以请求自己的上限为输入）；主请求照旧发配置的上限（补丁的输入不变）。修前补丁的输入只是配置的上限，旁路请求也
+/// 发 128000。
+#[tokio::test]
+async fn a_catalog_web_search_sends_the_node_output_limit() {
+    let sandbox = Sandbox::new();
+    let search = sse::tool_block(0, "toolu_search", "WebSearch", r#"{"query":"rust"}"#);
+    let fixture = sse::serve(vec![
+        sse::tools_reply(&[search]),
+        sse::text_reply("Found it."),
+        sse::text_reply("done"),
+    ]);
+    let web_search =
+        json!({"modelId": "glm-5.3", "config": {"properties": {"supportsNativeWebSearch": true}}});
+    sandbox.provider_with_rules(&fixture.url, "glm-5.3", &[web_search]);
+    sandbox.run(
+        "search",
+        &[("ENABLE_TOOL_SEARCH", "false")],
+        &[
+            "--model",
+            "personal:gateway/glm-5.3",
+            "--allowedTools",
+            "WebSearch",
+        ],
+    );
+    let requests = fixture.main_requests();
+    let (side, main): (Vec<&Value>, Vec<&Value>) = requests
+        .iter()
+        .partition(|body| body["tools"][0]["type"] == "web_search_20260209");
+    assert_eq!(side.len(), 1, "{requests:#?}");
+    assert_eq!(side[0]["max_tokens"], 4096);
+    assert_eq!(main.len(), 2, "{requests:#?}");
+    assert!(main[0].to_string().contains("\"name\":\"WebSearch\""));
+    for body in main {
+        assert_eq!(body["max_tokens"], 128_000);
+    }
 }

@@ -22,6 +22,7 @@ fn config(name: &str) -> McpServer {
             cwd: None,
         },
         options: Default::default(),
+        machine: None,
     }
 }
 

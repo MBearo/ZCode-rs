@@ -199,6 +199,7 @@ fn request(mode: PermissionMode, subagent: bool) -> ContextRequest {
         ("sess_1", QuerySource::MainThread, None)
     };
     ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new(session),
         workspace: WorkspaceRef {

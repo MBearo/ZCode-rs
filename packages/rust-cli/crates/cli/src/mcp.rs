@@ -4,9 +4,11 @@
 //! `--mcp-config` 是 `mcpServers` 的形状（`${VAR}` 展开）；文件经执行环境端口读。
 
 use rust_cli_ext::mcp::{
-    DEFAULT_CONNECT_WAIT_MS, McpScope, McpServer, McpSettings, McpStartup, parse_servers,
+    DEFAULT_CONNECT_WAIT_MS, McpScope, McpServer, McpSettings, McpStartup, parse_servers_keeping,
     prewait_ms, required_servers, wait_for_deferrable,
 };
+
+use crate::mcp_machines::McpBindings;
 use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::machine::Files;
@@ -163,6 +165,8 @@ struct Reader<'a> {
     files: &'a dyn Files,
     workspace: &'a WorkspaceRef,
     snapshot: &'a [(String, String)],
+    /// 绑定到远端机器的服务器按原文解析（R5，remote-exec.md §22.7）。
+    bindings: &'a McpBindings,
 }
 
 impl Reader<'_> {
@@ -185,7 +189,8 @@ impl Reader<'_> {
             return Vec::new();
         };
         let lookup = |name: &str| var(self.snapshot, name).map(str::to_owned);
-        let (servers, warnings) = parse_servers(table, scope, &lookup);
+        let keep = |name: &str| self.bindings.machine(name).is_some();
+        let (servers, warnings) = parse_servers_keeping(table, scope, &lookup, &keep);
         for warning in warnings {
             tracing::warn!(warning, "MCP configuration");
         }
@@ -218,12 +223,13 @@ impl Reader<'_> {
 
 /// 组装 MCP 设置：配置文件的服务器（`configured`，已按 Node 规则合并，config.md §2）加上
 /// `--mcp-config`（按名覆盖；`--strict-mcp-config` 时只用它）。`enabled` 为 false（`features.mcp`）时
-/// 没有服务器。`allowed` 是 `--allowedTools` 的规则（`-p` 启动等待里点名的服务器）。
+/// 没有服务器。`allowed` 是 `--allowedTools` 的规则（`-p` 启动等待里点名的服务器）。合并之后按 `bindings`
+/// 设上服务器所在的远端机器（R5，remote-exec.md §22.2）。
 pub(crate) async fn settings(
     files: &dyn Files,
     workspace: &WorkspaceRef,
     (flags, allowed): (&McpFlags, &[String]),
-    snapshot: &[(String, String)],
+    (snapshot, bindings): (&[(String, String)], &McpBindings),
     configured: Vec<McpServer>,
     enabled: bool,
 ) -> McpSettings {
@@ -231,6 +237,7 @@ pub(crate) async fn settings(
         files,
         workspace,
         snapshot,
+        bindings,
     };
     // 显式给了 `--mcp-config` 的服务器：`-p` 的 prewait 缺省等到 `MCP_TIMEOUT`（ext.md §3.3.1）。
     let mut explicit = false;
@@ -244,7 +251,9 @@ pub(crate) async fn settings(
         for server in base.into_iter().chain(dynamic) {
             merged.insert(server.name.clone(), server);
         }
-        merged.into_values().collect()
+        let mut servers: Vec<McpServer> = merged.into_values().collect();
+        bindings.bind(&mut servers);
+        servers
     };
     let defaults = McpSettings::default();
     let connect_timeout_ms = positive_ms(snapshot, "MCP_TIMEOUT", defaults.connect_timeout_ms);

@@ -48,11 +48,13 @@ impl Input {
     }
 }
 
-/// 审批框里看不见、所以 `command` 与 `ws.url` 不许的字符：C0 控制字符（制表符、换行、回车除外）、DEL 与 C1 控制字符。
+/// 审批框里看不见、所以 `command` 与 `ws.url` 不许的字符：C0 控制字符（只有制表符与换行除外）、DEL 与 C1 控制字符
+/// （tools-more.md §19.3）。修 bug（工作线 F95）：以前回车（0x0D）也放过；回车在终端里回到行首，后面的字盖住前面的字，
+/// 对齐对象只放过制表符与换行，这里照它把回车算作控制字符。
 fn has_hidden_controls(text: &str) -> bool {
     text.chars().any(|c| {
         let code = u32::from(c);
-        (code < 0x20 && !matches!(c, '\t' | '\n' | '\r')) || (0x7f..=0x9f).contains(&code)
+        (code < 0x20 && !matches!(c, '\t' | '\n')) || (0x7f..=0x9f).contains(&code)
     })
 }
 

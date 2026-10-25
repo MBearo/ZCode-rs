@@ -72,7 +72,19 @@ pub fn running(entries: &[BackgroundEntry]) -> usize {
         .count()
 }
 
+/// 在跑的子代理里有缺省机器在远端的（F98，remote-exec.md §25.4.5）：这时不写“本地”。
+pub fn remote_agents(entries: &[BackgroundEntry]) -> bool {
+    entries.iter().any(|entry| {
+        entry.kind == BackgroundKind::Agent
+            && entry.status == BackgroundStatus::Running
+            && entry.machine.is_some()
+    })
+}
+
 /// footer 的 pill：都是命令 `N shell(s)`，都是子代理 `N local agent(s)`，混合 `N background task(s)`。
+///
+/// 缺陷修复（Docker 试用 L9，F98）：缺省机器在 dev-a 的子代理也写成“本地代理”，与子代理列表的 `@dev-a` 冲突；有这样的
+/// 子代理时写 `N agent(s)` / `N 个代理`。
 pub fn pill(entries: &[BackgroundEntry], lang: Lang) -> Option<String> {
     let live: Vec<&BackgroundEntry> = entries
         .iter()
@@ -81,6 +93,13 @@ pub fn pill(entries: &[BackgroundEntry], lang: Lang) -> Option<String> {
     let first = live.first()?;
     let n = live.len();
     let same = live.iter().all(|entry| entry.kind == first.kind);
+    if same && first.kind == BackgroundKind::Agent && remote_agents(entries) {
+        return Some(match (lang, n) {
+            (Lang::En, 1) => "1 agent".to_owned(),
+            (Lang::En, n) => format!("{n} agents"),
+            (Lang::Zh, n) => format!("{n} 个代理"),
+        });
+    }
     Some(match (lang, same.then_some(first.kind)) {
         (Lang::En, Some(BackgroundKind::Shell)) if n == 1 => "1 shell".to_owned(),
         (Lang::En, Some(BackgroundKind::Shell)) => format!("{n} shells"),
@@ -239,14 +258,13 @@ impl App {
         let rows = servers
             .iter()
             .map(|server| {
-                let state = match server.state {
-                    McpServerState::Connected => "connected",
-                    McpServerState::Pending => "connecting",
-                    McpServerState::Failed => "not connected",
-                    McpServerState::Disabled => "disabled",
-                };
+                // 状态词与 `/mcp` 的子命令同一张表（tui-manage.md §6）：中文界面用中文（远端执行 F98，remote-exec.md
+                // §25.4.4，Docker 试用 L7：以前这一页写死英文）。
+                let state = super::mcp_control::state_word(server.state, lang);
                 let extra = match (server.state, &server.reason) {
-                    (McpServerState::Failed, Some(reason)) => reason.clone(),
+                    (McpServerState::Failed, Some(reason)) => {
+                        super::i18n_machines::mcp_reason(lang, reason)
+                    }
                     (McpServerState::Connected, _) => match lang {
                         Lang::En if server.tools == 1 => "1 tool".to_owned(),
                         Lang::En => format!("{} tools", server.tools),
@@ -254,7 +272,12 @@ impl App {
                     },
                     _ => String::new(),
                 };
-                (server.name.clone(), state.to_owned(), extra)
+                // 绑定到远端机器的服务器名后面接 ` @机器`（R5，remote-exec.md §22.8；表格的单元格不分颜色）。
+                let name = match &server.machine {
+                    Some(machine) => format!("{} @{machine}", server.name),
+                    None => server.name.clone(),
+                };
+                (name, state.to_owned(), extra)
             })
             .collect();
         let (title, empty) = match lang {

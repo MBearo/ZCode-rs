@@ -92,6 +92,19 @@ pub trait ModelEndpoints: Send + Sync {
         rejected: Option<&ModelEndpoint>,
     ) -> Result<ModelEndpoint, ModelError>;
 
+    /// 同 [`Self::endpoint`]，另带这次请求交给 Provider 补丁的输出上限（工作线 F95，docs/specs/rust-cli/model.md §9、
+    /// platform.md §4）：有值时 `maxOutputTokens` map 的输入再与它取小。缺省实现忽略它、调 `endpoint`（固定端点与测试
+    /// 替身没有补丁）。
+    async fn endpoint_with_output_limit(
+        &self,
+        selection: &ModelSelection,
+        rejected: Option<&ModelEndpoint>,
+        output_limit: Option<u64>,
+    ) -> Result<ModelEndpoint, ModelError> {
+        let _ = output_limit;
+        self.endpoint(selection, rejected).await
+    }
+
     /// 这个选择的模型能力（Node 的生效模型配置，docs/specs/rust-cli/model.md §11，修复线 F23）。不取凭据；
     /// 答不出（没有这个模型、测试替身）时为 None。
     async fn capabilities(&self, _selection: &ModelSelection) -> Option<ModelCapabilities> {
@@ -212,3 +225,7 @@ pub struct TokenLimits {
 pub trait ModelLimits: Send + Sync {
     fn limits(&self, selection: &ModelSelection) -> Option<TokenLimits>;
 }
+
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod tests;

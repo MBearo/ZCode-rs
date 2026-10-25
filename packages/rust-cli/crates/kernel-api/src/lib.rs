@@ -88,6 +88,7 @@ pub mod machine_param;
 pub mod manage;
 pub mod mcp;
 pub mod mcp_state;
+pub mod mcp_vars;
 pub mod message;
 pub mod metering;
 pub mod model;

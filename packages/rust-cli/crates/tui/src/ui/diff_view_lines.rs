@@ -323,6 +323,8 @@ fn rendered(
         workspace: app.view.workspace().root.as_str(),
         workspace_label: &label,
         version: &app.version,
+        mcp_machines: &app.mcp_machines,
+        machines: &app.machines,
         markdown: None,
     };
     diff_lines(rows, &ctx, usize::MAX).0

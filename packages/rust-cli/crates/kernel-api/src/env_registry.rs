@@ -5,8 +5,9 @@
 //! `machine` 查它（[`EnvironmentRegistry::remote`]），各能力每次用时读 [`EnvironmentRegistry::machines`] 的快照，连接
 //! 变化经 [`EnvironmentRegistry::changes`] 推给要订阅的地方。注册表是“哪些机器连着”的唯一来源。
 
-use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
+use futures_util::{FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use crate::env::{EnvPath, WorkspaceRef};
@@ -94,6 +95,26 @@ pub trait EnvironmentRegistry: Send + Sync {
     /// 订阅方醒来后自己读快照。缺省永不出项。
     fn changes(&self) -> BoxStream<'static, u64> {
         futures_util::stream::pending().boxed()
+    }
+
+    /// 同 [`EnvironmentRegistry::remote`]，但这台机器正在连（`/machines connect`、启动时的自动连接）时等它连完
+    /// （R5：绑定到它的 MCP 服务器在握手的期限之内等，remote-exec.md §22.6）。不认识、没在连或连不上时 None。
+    /// 缺省不等：立即返回 `remote(name)`。取消由调用方负责（丢掉这个 future）。
+    fn wait_remote(&self, name: &str) -> BoxFuture<'static, Option<(MachineEnv, WorkspaceRef)>> {
+        let found = self.remote(name);
+        async move { found }.boxed()
+    }
+
+    /// 这台连上的远端机器的连接断了、正在重连（远端执行 F96，remote-exec.md §23.3）：它还在 [`Self::remote`] 里（显式的
+    /// 调用等重连），隐式访问它的地方（后台任务的快照、每步的文件变化检查、会话关闭）不等它。不做 IO。缺省 false。
+    fn reconnecting(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// 这台机器在机器清单里（连着或没连着，远端执行 F98，remote-exec.md §25.2.2）：模型点名一台清单里有、现在没连上
+    /// 的机器时，执行管线回“没有执行”的说明，不报 schema 错误。读内存里的清单副本，不做 IO。缺省 false。
+    fn listed(&self, _name: &str) -> bool {
+        false
     }
 }
 

@@ -72,6 +72,7 @@ pub(super) fn request(command: &str, root: &Path, scope: CwdScope) -> StartComma
         hook: None,
         on_timeout: None,
         socket: None,
+        env: Default::default(),
     }
 }
 
@@ -157,4 +158,41 @@ fn shell_config_debug_hides_the_environment_values() {
     let shown = format!("{config:?}");
     assert!(shown.contains("ZCODE_API_KEY"), "{shown}");
     assert!(!shown.contains("sk-secret-value"), "{shown}");
+}
+
+/// 远端执行 F96（remote-exec.md §23.5）：执行器的服务端按客户端实例填的 `StartCommand.env` 加在投影之后（`None` 是去掉
+/// 这个变量）；它不进去重的指纹：同一个操作重放时变量不同也是同一次（不报参数不同）。
+#[tokio::test]
+async fn command_overrides_are_added_after_the_projection_and_not_fingerprinted() {
+    let fixture = fixture(vec![
+        ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+        (
+            "SSH_AUTH_SOCK".to_owned(),
+            "/tmp/ssh-old/agent.1".to_owned(),
+        ),
+        ("DISPLAY".to_owned(), "localhost:10.0".to_owned()),
+    ]);
+    let mut start = request(
+        r#"printf '%s|%s|%s' "$SSH_AUTH_SOCK" "${DISPLAY-unset}" "$F96_TOKEN""#,
+        &fixture.root,
+        CwdScope::Pinned,
+    );
+    start.env = [
+        (
+            "SSH_AUTH_SOCK".to_owned(),
+            Some("/tmp/ssh-new/agent.2".to_owned()),
+        ),
+        ("DISPLAY".to_owned(), None),
+        ("F96_TOKEN".to_owned(), Some("t".to_owned())),
+    ]
+    .into();
+    let ran = run(&fixture, "op_env", start.clone()).await;
+    assert_eq!(ran.output, "/tmp/ssh-new/agent.2|unset|t");
+    // 重放：变量变了也认出是同一个操作。
+    start.env.clear();
+    fixture
+        .shells
+        .start(context("op_env"), start)
+        .await
+        .unwrap();
 }

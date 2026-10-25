@@ -34,6 +34,27 @@ fn servers_parse_with_variables_expanded() {
     assert!(warnings.iter().any(|warning| warning.contains("MISSING")));
 }
 
+#[test]
+fn servers_bound_to_a_remote_machine_keep_their_variables() {
+    // R5（remote-exec.md §22.7）：绑定到远端机器的服务器按原文解析，本机的值（这里的 TOKEN）不进请求。
+    let table = json!({
+        "remote": {"command": "server", "args": ["${TOKEN}"], "env": {"KEY": "${TOKEN:-none}"}},
+        "here": {"command": "server", "args": ["${TOKEN}"]}
+    });
+    let (servers, warnings) =
+        parse_servers_keeping(&table, McpScope::Dynamic, &lookup, &|name| name == "remote");
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let McpTransportConfig::Stdio { args, .. } = &servers[0].transport else {
+        panic!("here is stdio");
+    };
+    assert_eq!(args, &["secret"]);
+    let McpTransportConfig::Stdio { args, env, .. } = &servers[1].transport else {
+        panic!("remote is stdio");
+    };
+    assert_eq!(args, &["${TOKEN}"]);
+    assert_eq!(env["KEY"], "${TOKEN:-none}");
+}
+
 fn server(name: &str, scope: McpScope, command: &str) -> McpServer {
     McpServer {
         name: name.to_owned(),
@@ -45,6 +66,7 @@ fn server(name: &str, scope: McpScope, command: &str) -> McpServer {
             cwd: None,
         },
         options: Default::default(),
+        machine: None,
     }
 }
 

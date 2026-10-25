@@ -1,6 +1,5 @@
 //! 线上的结果 → kernel-api 的类型（客户端的换算）。字节字段从二进制段取；越界是 `io` 错误。
 
-use rust_cli_exec_client::ClientError;
 use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::dto::command as wc;
 use rust_cli_exec_wire::dto::core as w;
@@ -37,16 +36,6 @@ pub(crate) fn error(error: WireError) -> EnvError {
         WireError::Io { message } => EnvError::Io { message },
         WireError::Unsupported { what } => EnvError::Unsupported { what },
         other @ (WireError::BadRequest { .. } | WireError::Interrupted { .. }) => EnvError::Io {
-            message: other.to_string(),
-        },
-    }
-}
-
-/// 连接层的错误 → `EnvError`：执行器没有这个端口是 `Unsupported`，其余是 `Io`。
-pub(crate) fn client_error(error: ClientError) -> EnvError {
-    match error {
-        ClientError::Unsupported { what } => EnvError::Unsupported { what },
-        other => EnvError::Io {
             message: other.to_string(),
         },
     }

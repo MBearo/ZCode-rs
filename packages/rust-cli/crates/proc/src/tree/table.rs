@@ -1,6 +1,8 @@
 // 复制自 rust/crates/proc/src/tree/table.rs（feat/rs 79b6691c55）。
 //! 进程表快照与按身份追踪的进程树（自 apps/zcode-cli-rust/crates/tools/src/process_tree.rs 移入，行为不变）。
 //! 没有全局进程注册表，也没有后台轮询。
+//!
+//! 远端执行 F98（docs/specs/rust-cli/remote-exec.md §25.3）：Linux 上进程表读 `/proc`，不依赖 `ps`。
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::process::Stdio;
@@ -11,7 +13,7 @@ use tokio::io::AsyncReadExt;
 
 use super::posix::{alive, send};
 
-/// 一次快照中进程的身份：启动时间（`lstart`）与 pid 一起区分 pid 复用。
+/// 一次快照中进程的身份：启动时间（`ps` 的 `lstart`，Linux 上是 `/proc` 的 starttime）与 pid 一起区分 pid 复用。
 #[derive(Clone)]
 pub(super) struct Process {
     parent: i32,
@@ -47,8 +49,123 @@ fn parse(text: &str) -> Table {
         .collect()
 }
 
-/// `/bin/ps` 给出的进程表。
+/// `/proc/<pid>/stat` 的一行：（pid，进程）。comm 可能有空格与括号，从最后一个 `)` 之后数：第 1 个字段是状态，
+/// 第 2 个 ppid，第 3 个 pgrp，第 20 个 starttime（开机以来的 tick）。
+#[cfg(any(target_os = "linux", test))]
+pub(super) fn parse_stat(line: &str) -> Option<(i32, Process)> {
+    let (head, rest) = line.rsplit_once(')')?;
+    let pid = head.split_once('(')?.0.trim().parse().ok()?;
+    let mut fields = rest.split_whitespace();
+    let state = fields.next()?;
+    let parent = fields.next()?.parse().ok()?;
+    let group = fields.next()?.parse().ok()?;
+    let started = fields.nth(16)?;
+    started.parse::<u64>().ok()?;
+    Some((
+        pid,
+        Process {
+            parent,
+            group,
+            started: started.to_owned(),
+            zombie: matches!(state, "Z" | "X" | "x"),
+        },
+    ))
+}
+
+/// 进程表的来源：本进程第一次取快照时选定，之后不换（两种来源的身份写法不同，混用会把同一个进程当成两个）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Source {
+    #[cfg(target_os = "linux")]
+    Proc,
+    Ps,
+}
+
+#[cfg(target_os = "linux")]
+async fn source() -> Source {
+    static SOURCE: tokio::sync::OnceCell<Source> = tokio::sync::OnceCell::const_new();
+    *SOURCE
+        .get_or_init(|| async {
+            if proc_readable().await {
+                Source::Proc
+            } else {
+                tracing::warn!("/proc is not readable; the process table comes from /bin/ps");
+                Source::Ps
+            }
+        })
+        .await
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn source() -> Source {
+    Source::Ps
+}
+
+/// 进程表快照（Linux 读 `/proc`，其余用 `/bin/ps`）。
+///
+/// 缺陷修复（Docker 试用 L2）：以前只用 `/bin/ps -A -o …,lstart=`。alpine 的 busybox `ps` 不认 `lstart`（退出码 1），
+/// debian-slim 没有 `/bin/ps`：远端执行器每次结束进程树都取不到快照，退回只对根进程组发信号，自己另起进程组的后代
+/// 留下来。Linux 的执行器常跑在这类精简的系统上，所以 Linux 上直接读 `/proc`。
 pub(super) async fn snapshot() -> Result<Table> {
+    match source().await {
+        #[cfg(target_os = "linux")]
+        Source::Proc => tokio::time::timeout(SNAPSHOT_TIMEOUT, proc_table())
+            .await
+            .context("Process lookup timed out")?,
+        Source::Ps => ps_table().await,
+    }
+}
+
+/// `/proc` 能读（没挂载或被挡住时退回 `/bin/ps`）。
+#[cfg(target_os = "linux")]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "/proc 是进程信息伪文件，不是本机存储（README §3.2 的 proc 函数级豁免）"
+)]
+async fn proc_readable() -> bool {
+    tokio::fs::read_to_string("/proc/self/stat")
+        .await
+        .is_ok_and(|stat| parse_stat(&stat).is_some())
+}
+
+/// 进程数的上限（同 `ps` 的输出预算，只防异常的系统）。
+#[cfg(target_os = "linux")]
+const PROC_MAX_PROCESSES: usize = 65_536;
+
+/// 读 `/proc` 的进程表：每个数字目录的 `stat`；读的时候进程退出了就跳过。快照里没有本进程时算失败（`hidepid` 等）。
+#[cfg(target_os = "linux")]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "/proc 是进程信息伪文件，不是本机存储（README §3.2 的 proc 函数级豁免）"
+)]
+pub(super) async fn proc_table() -> Result<Table> {
+    let mut entries = tokio::fs::read_dir("/proc").await?;
+    let mut table = Table::new();
+    while let Some(entry) = entries.next_entry().await? {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        ensure!(
+            table.len() < PROC_MAX_PROCESSES,
+            "Process table exceeds budget"
+        );
+        let Ok(stat) = tokio::fs::read_to_string(format!("/proc/{pid}/stat")).await else {
+            continue;
+        };
+        if let Some((_, process)) = parse_stat(&stat) {
+            table.insert(pid, process);
+        }
+    }
+    let me = i32::try_from(std::process::id()).context("Invalid process id")?;
+    ensure!(table.contains_key(&me), "/proc does not show this process");
+    Ok(table)
+}
+
+/// `/bin/ps` 给出的进程表。
+async fn ps_table() -> Result<Table> {
     // 只在终止路径探测；限制大小和查表时间，ps 自身由 kill_on_drop 回收。
     tokio::time::timeout(SNAPSHOT_TIMEOUT, async {
         let mut child = crate::command("/bin/ps")

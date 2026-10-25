@@ -41,7 +41,7 @@ fn each_tool_is_one_block_named_with_its_arguments() {
         ),
     ];
     // 每个工具单独成块，不合并。
-    assert_eq!(build(&rows, false).len(), 4);
+    assert_eq!(build(&rows, false, &[]).len(), 4);
     assert_eq!(
         text(&rows, false),
         [
@@ -174,7 +174,7 @@ fn paired_lines_highlight_the_changed_words() {
     let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
     let ctx = ctx(&palette, false);
     let row = edit("let a = 1;", "let a = 2;");
-    let lines = render(&build(std::slice::from_ref(&row), false)[0], &ctx);
+    let lines = render(&build(std::slice::from_ref(&row), false, &[])[0], &ctx);
     let added = lines
         .iter()
         .find(|l| plain(l).ends_with("+ let a = 2;"))
@@ -193,7 +193,7 @@ fn paired_lines_highlight_the_changed_words() {
     );
     // 改动超过一行的 40%：不按词高亮。
     let row = edit("abc", "xyz");
-    let lines = render(&build(std::slice::from_ref(&row), false)[0], &ctx);
+    let lines = render(&build(std::slice::from_ref(&row), false, &[])[0], &ctx);
     let added = lines.iter().find(|l| plain(l).ends_with("+ xyz")).unwrap();
     assert!(
         added
@@ -294,7 +294,7 @@ fn chinese_details() {
         ..ctx(&palette, false)
     };
     let row = done(1, "Read", json!({"file_path": "/w/a.rs"}), "1\ta\n2\tb");
-    let lines: Vec<String> = render(&build(std::slice::from_ref(&row), false)[0], &ctx)
+    let lines: Vec<String> = render(&build(std::slice::from_ref(&row), false, &[])[0], &ctx)
         .iter()
         .map(plain)
         .collect();
@@ -386,8 +386,173 @@ fn remote_calls_end_with_their_machine() {
         ]
     );
     let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
-    let lines = render(&build(&rows, false)[0], &ctx(&palette, false));
+    let lines = render(&build(&rows, false, &[])[0], &ctx(&palette, false));
     let tag = lines[0].spans.last().unwrap();
     assert_eq!(tag.content, "@dev-a");
     assert_eq!(tag.style.fg, Some(palette.accent));
+}
+
+/// 远端 MCP（R5，remote-exec.md §22.8）：绑定到远端机器的 MCP 服务器的工具行在行尾接 `  @机器`（强调色），不并进工作段；
+/// 本机的服务器不标、照常并进。
+#[test]
+fn tools_of_a_server_on_a_remote_machine_end_with_its_machine() {
+    let rows = [
+        done(
+            1,
+            "mcp__browser-a__navigate",
+            json!({"url": "https://example.com"}),
+            "ok",
+        ),
+        done(2, "mcp__docs__search", json!({"q": "x"}), "ok"),
+    ];
+    let marks = [("browser-a".to_owned(), "dev-a".to_owned())];
+    let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
+    let base = ctx(&palette, false);
+    let ctx = Ctx {
+        width: 80,
+        mcp_machines: &marks,
+        machines: &[],
+        ..base
+    };
+    let cells = build(&rows, true, &marks);
+    // 远端的调用单独一块；本机的 MCP 调用照常进工作段。
+    assert_eq!(cells.len(), 2);
+    let head = render(&cells[0], &ctx);
+    assert_eq!(
+        plain(&head[0]),
+        "⏺ browser-a.navigate(url: \"https://example.com\") (MCP)  @dev-a"
+    );
+    let tag = head[0].spans.last().unwrap();
+    assert_eq!(tag.content, "@dev-a");
+    assert_eq!(tag.style.fg, Some(palette.accent));
+    let local = render(&build(&rows[1..], false, &marks)[0], &ctx);
+    assert!(!plain(&local[0]).contains('@'), "{}", plain(&local[0]));
+}
+
+/// 机器服务的快照里的一台（F98 的工具行测试用）。
+fn machine(status: crate::machines::MachineStatus) -> crate::machines::MachineRow {
+    crate::machines::MachineRow {
+        name: "dev-a".into(),
+        ssh: "dev-a".into(),
+        working_directory: Some("/srv/proj".into()),
+        status,
+        latency_ms: None,
+        executor: None,
+    }
+}
+
+fn lines_with(rows: &[Row], machines: &[crate::machines::MachineRow], lang: Lang) -> Vec<String> {
+    let palette = Palette::new(ColorLevel::Ansi16, None);
+    let base = ctx(&palette, false);
+    let ctx = Ctx {
+        machines,
+        lang,
+        strings: if lang == Lang::Zh { &ZH } else { base.strings },
+        ..base
+    };
+    build(rows, false, &[])
+        .iter()
+        .flat_map(|cell| render(cell, &ctx))
+        .map(|line| plain(&line))
+        .collect()
+}
+
+/// F98（remote-exec.md §25.4.1，Docker 试用 L3）：远端的调用还没结束、那台机器在重连时，细节行写明在等它重连（Bash 换掉
+/// “运行中…”，别的工具加这一行）；机器就绪时照旧。旧代码只写“运行中…”。
+#[test]
+fn a_remote_call_waiting_for_its_machine_says_so() {
+    let rows = [
+        tool(
+            1,
+            "Bash",
+            ToolStatus::Running,
+            json!({"command": "uptime", "machine": "dev-a"}),
+        ),
+        tool(
+            2,
+            "Read",
+            ToolStatus::Pending,
+            json!({"file_path": "/srv/proj/a.txt", "machine": "dev-a"}),
+        ),
+    ];
+    let reconnecting = [machine(crate::machines::MachineStatus::Reconnecting {
+        attempt: 6,
+        retry_at_ms: Some(11_000),
+        reason: "Connection refused".into(),
+    })];
+    assert_eq!(
+        lines_with(&rows, &reconnecting, Lang::En),
+        [
+            format!("{}  @dev-a", b("Bash(uptime)")),
+            "  ⎿  Waiting for dev-a to reconnect…".into(),
+            format!("{}  @dev-a", b("Read(/srv/proj/a.txt)")),
+            "  ⎿  Waiting for dev-a to reconnect…".into(),
+        ]
+    );
+    assert_eq!(
+        lines_with(&rows[..1], &reconnecting, Lang::Zh)[1],
+        "  ⎿  等待 dev-a 重连…"
+    );
+    let ready = [machine(crate::machines::MachineStatus::Ready)];
+    assert_eq!(
+        lines_with(&rows, &ready, Lang::En),
+        [
+            format!("{}  @dev-a", b("Bash(uptime)")),
+            "  ⎿  Running…".into(),
+            format!("{}  @dev-a", b("Read(/srv/proj/a.txt)")),
+        ]
+    );
+}
+
+/// F98（remote-exec.md §25.4.5，Docker 试用 L10）：TaskStop 停的是远端的命令时，结果的 `display.machine` 让工具行接
+/// `@dev-a`；本机的不标。旧代码的 TaskStop 行没有机器。
+#[test]
+fn a_stopped_remote_task_ends_with_its_machine() {
+    let stopped = |display| {
+        with(
+            done(1, "TaskStop", json!({"task_id": "bux6rbkue"}), "{}"),
+            |tool| tool.display = display,
+        )
+    };
+    assert_eq!(
+        text(&[stopped(json!({"machine": "dev-a"}))], false)[0],
+        format!("{}  @dev-a", b("TaskStop(task_id: \"bux6rbkue\")"))
+    );
+    assert_eq!(
+        text(&[stopped(serde_json::Value::Null)], false)[0],
+        b("TaskStop(task_id: \"bux6rbkue\")")
+    );
+}
+
+/// F98（remote-exec.md §25.4.6，Docker 试用 L12）：远端调用的路径原样显示，不按本机工作区（`/w`）缩写；本机的照旧写相对
+/// 路径。旧代码把 dev-a 上恰好在 `/w` 下的路径写成相对的。
+#[test]
+fn remote_paths_are_not_shortened_by_the_local_workspace() {
+    let rows = [
+        done(
+            1,
+            "Read",
+            json!({"file_path": "/w/same.txt", "machine": "dev-a"}),
+            "1\tremote",
+        ),
+        done(2, "Read", json!({"file_path": "/w/same.txt"}), "1\tlocal"),
+        with(
+            done(
+                3,
+                "Write",
+                json!({"file_path": "/w/notes/plan.md", "content": "a\nb\n", "machine": "dev-a"}),
+                "",
+            ),
+            |tool| tool.display = json!({"type": "create"}),
+        ),
+    ];
+    let lines = text(&rows, false);
+    assert_eq!(lines[0], format!("{}  @dev-a", b("Read(/w/same.txt)")));
+    assert!(lines.contains(&b("Read(same.txt)")), "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.ends_with("to /w/notes/plan.md")),
+        "{lines:?}"
+    );
 }

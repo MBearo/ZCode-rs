@@ -214,6 +214,8 @@ async fn context_request(
         selection: selection.clone(),
         plan_flags,
         mcp: step.mcp.clone(),
+        // 远端执行 F98（remote-exec.md §25.2.1）：机器清单提醒按这次运行的缺省机器写（子代理可能缺省在远端）。
+        default_machine: scope.default_machine_name().await,
     }
 }
 

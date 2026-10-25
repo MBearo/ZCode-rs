@@ -260,6 +260,10 @@ impl Pipeline {
                 "InputValidationError: {message}"
             ))));
         }
+        // F98（remote-exec.md §25.2.2）：点名清单里有、没连上的机器时回“没有执行”，先于 schema 校验与去键。
+        if let Some(message) = self.machines.not_connected(tool.name(), &input) {
+            return Err(Rejection::Other(wrapped(&message)));
+        }
         let schema = tool.input_schema();
         // R3（remote-exec.md §20.6）：有远端机器时，去键与校验用加了 `machine` 的 schema（发给模型的同一组取值）。
         let plan = self.machines.plan(tool.name(), &context);

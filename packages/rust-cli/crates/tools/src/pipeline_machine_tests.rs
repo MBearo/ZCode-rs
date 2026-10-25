@@ -304,7 +304,8 @@ async fn a_disconnected_default_machine_is_reported() {
     assert!(ran.is_error);
     assert_eq!(
         ran.text,
-        "<tool_use_error>Machine \"dev-a\" is not connected.</tool_use_error>"
+        // F96（remote-exec.md §23.6）：写明没有执行、下一步做什么。
+        "<tool_use_error>Machine \"dev-a\" is not connected, so this call did not run. Retry once it is connected again, or run it on the local machine instead.</tool_use_error>"
     );
 }
 
@@ -365,4 +366,52 @@ async fn the_permission_question_names_the_machine() {
     )
     .await;
     assert_eq!(ran.asked, [None]);
+}
+
+/// F96 的“没有执行”说明（remote-exec.md §23.6）。
+const NOT_CONNECTED: &str = "<tool_use_error>Machine \"dev-a\" is not connected, so this call did not run. Retry once it is connected again, or run it on the local machine instead.</tool_use_error>";
+
+#[tokio::test]
+async fn a_listed_machine_that_is_not_connected_did_not_run() {
+    // F98（remote-exec.md §25.2.2）：dev-a 在清单里、断开了。没有别的机器时工具定义里没有 `machine`（旧代码报“多了参数”；
+    // Agent 丢掉它、在本机起子代理），有别的机器连着时 `enum` 里没有 dev-a（旧代码报 enum 错误）。现在都回“没有执行”，
+    // 不跑 hooks 与判决链。
+    let alone = TestMachines::new(Arc::new(UnusedEnvironment));
+    alone.connect("dev-a", Arc::new(UnusedEnvironment), "/home/dev/proj");
+    alone.disconnect("dev-a");
+    let beside = TestMachines::new(Arc::new(UnusedEnvironment));
+    beside.list("dev-a");
+    beside.connect("gpu-1", Arc::new(UnusedEnvironment), "/data");
+    for registry in [alone, beside] {
+        for tool in ["Bash", "Agent"] {
+            let ran = run(
+                Some(registry.clone()),
+                tool,
+                json!({"command": "pwd", "machine": "dev-a"}),
+                None,
+                false,
+            )
+            .await;
+            assert!(ran.is_error, "{tool}: {}", ran.text);
+            assert_eq!(ran.text, NOT_CONNECTED, "{tool}");
+            assert!(ran.judged.is_empty() && ran.events.is_empty(), "{tool}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_machine_that_is_not_listed_still_fails_the_schema() {
+    // 不在清单里的名字照旧：schema 报错（有远端机器时是 enum），不说“没连上”。
+    let registry = TestMachines::new(Arc::new(UnusedEnvironment));
+    registry.list("dev-a");
+    let ran = run(
+        Some(registry),
+        "Bash",
+        json!({"command": "pwd", "machine": "gpu-1"}),
+        None,
+        false,
+    )
+    .await;
+    assert!(ran.is_error);
+    assert!(ran.text.contains("InputValidationError"), "{}", ran.text);
 }

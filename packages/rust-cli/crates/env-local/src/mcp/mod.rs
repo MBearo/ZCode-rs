@@ -60,6 +60,9 @@ pub struct LocalMcpTransport {
     env: EnvSnapshot,
     connections: Mutex<HashMap<String, Connection>>,
     next: AtomicU64,
+    /// 连接前用 `env` 展开配置里的 `${VAR}`（远端的执行器打开，remote-exec.md §22.7；控制面的不打开：本机的服务器
+    /// 由入口按来源的规则处理）。
+    expand_vars: bool,
 }
 
 impl LocalMcpTransport {
@@ -71,6 +74,36 @@ impl LocalMcpTransport {
             env,
             connections: Mutex::default(),
             next: AtomicU64::new(0),
+            expand_vars: false,
+        }
+    }
+
+    /// 执行器用：连接前用这个传输自己的环境展开配置里的 `${VAR}` 与 `${VAR:-默认}`（R5，remote-exec.md §22.7）。
+    #[must_use]
+    pub fn expanding_vars(mut self) -> Self {
+        self.expand_vars = true;
+        self
+    }
+
+    /// 执行器一侧的展开：没有值的变量原样保留，只记名字（不记值）。先查客户端实例推来的变量（F96：推来的 `None` 是
+    /// 去掉了，按没有值处理），再查传输自己的环境。
+    fn expanded(&self, request: McpConnect) -> McpConnect {
+        if !self.expand_vars {
+            return request;
+        }
+        let lookup = |name: &str| match request.env.get(name) {
+            Some(pushed) => pushed.clone(),
+            None => rust_cli_base::secret::env_var(&self.env, name).map(str::to_owned),
+        };
+        let (transport, missing) =
+            rust_cli_kernel_api::mcp_vars::expand_transport_vars(&request.transport, &lookup);
+        if !missing.is_empty() {
+            tracing::warn!(server = %request.server, ?missing, "MCP server: missing environment variables");
+        }
+        McpConnect {
+            server: request.server,
+            transport,
+            env: request.env,
         }
     }
 
@@ -94,6 +127,7 @@ impl McpTransport for LocalMcpTransport {
         workspace: &WorkspaceRef,
         request: McpConnect,
     ) -> Result<McpConnectionId, McpError> {
+        let request = self.expanded(request);
         let (sender, events) = mpsc::channel(EVENTS_CAPACITY);
         let (outbox, task) = match &request.transport {
             McpTransportConfig::Stdio {
@@ -112,6 +146,7 @@ impl McpTransport for LocalMcpTransport {
                     command,
                     args,
                     env,
+                    overrides: &request.env,
                     cwd: &cwd.to_string_lossy(),
                     snapshot: &self.env,
                 };
@@ -201,3 +236,7 @@ mod tests;
 #[cfg(test)]
 #[path = "bounds_tests.rs"]
 mod bounds_tests;
+
+#[cfg(test)]
+#[path = "expand_tests.rs"]
+mod expand_tests;

@@ -129,6 +129,7 @@ fn request(
     use rust_cli_kernel_api::ids::{EnvironmentId, SessionId};
     use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
     ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("sess_1"),
         workspace: WorkspaceRef {

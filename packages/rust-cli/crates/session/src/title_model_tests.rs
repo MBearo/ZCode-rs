@@ -5,7 +5,8 @@ use rust_cli_kernel_api::testing::{FixedClock, ScriptedModel, selection, text_re
 
 use super::*;
 
-struct Directory;
+/// 只有会话模型一项的目录；字段是这个模型配置的输出上限。
+struct Directory(u64);
 
 #[async_trait]
 impl ModelDirectory for Directory {
@@ -21,7 +22,7 @@ impl ModelDirectory for Directory {
                 protocol: WireProtocol::AnthropicMessages,
                 reasoning_levels: vec!["off".to_owned(), "high".to_owned()],
                 context_window: 200_000,
-                max_output_tokens: 4_096,
+                max_output_tokens: self.0,
                 connection: None,
             }],
             default: None,
@@ -37,7 +38,7 @@ async fn the_request_uses_the_title_prompt_and_node_auxiliary_options() {
     ])]));
     let titles = TitleModel {
         model: model.clone(),
-        directory: Some(Arc::new(Directory)),
+        directory: Some(Arc::new(Directory(4_096))),
     };
     let generated = titles
         .generate(
@@ -82,6 +83,8 @@ async fn the_request_uses_the_title_prompt_and_node_auxiliary_options() {
     assert!(request.tools.is_empty());
     assert_eq!(request.thinking, None);
     assert_eq!(request.max_tokens, 4_096);
+    // 工作线 F97（titles.md §3）：同一个上限交给 Provider 补丁。
+    assert_eq!(request.options.provider_max_output_tokens, Some(4_096));
     assert_eq!(request.selection.reasoning.as_deref(), Some("off"));
     assert_eq!(request.selection.model, selection().model);
     assert_eq!(
@@ -108,6 +111,34 @@ async fn without_a_directory_the_output_cap_is_5000() {
         .await;
     assert_eq!(generated.title.as_deref(), Some("Hook trust"));
     assert_eq!(model.requests()[0].max_tokens, 5_000);
+    // 显式覆盖的端点没有补丁，这个值不起作用；声明的仍是这次请求自己的上限（同 WebSearch）。
+    assert_eq!(
+        model.requests()[0].options.provider_max_output_tokens,
+        Some(5_000)
+    );
     assert!(long_enough("0123456789"));
     assert!(!long_enough("  short  "));
+}
+
+/// 工作线 F97（titles.md §3）：目录模型的上限高于 5000 时，请求自己的上限是 5000，并把它交给 Provider 补丁
+/// （`provider_max_output_tokens`），目录模型上发出的才是 Node 的 `min(5000, 上限)`。修改前不交，补丁写配置的上限。
+#[tokio::test]
+async fn a_catalog_cap_above_5000_hands_5000_to_the_provider_patch() {
+    let model = Arc::new(ScriptedModel::new(vec![text_response(&["Hook trust"])]));
+    let titles = TitleModel {
+        model: model.clone(),
+        directory: Some(Arc::new(Directory(128_000))),
+    };
+    titles
+        .generate(
+            &selection(),
+            (&SessionId::new("sess_title"), None),
+            "trust the project hooks",
+            (&FixedClock(0), MessageId::new("msg_title")),
+            CancellationToken::new(),
+        )
+        .await;
+    let request = &model.requests()[0];
+    assert_eq!(request.max_tokens, 5_000);
+    assert_eq!(request.options.provider_max_output_tokens, Some(5_000));
 }

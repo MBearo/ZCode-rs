@@ -23,10 +23,12 @@ pub fn lines(app: &App, shown: &Shown, width: usize, now_ms: u64) -> Vec<Line<'s
         workspace: &workspace,
         workspace_label: &label,
         version: &app.version,
+        mcp_machines: &app.mcp_machines,
+        machines: &app.machines,
         markdown: None,
     };
     let mut out: Vec<Line<'static>> = Vec::new();
-    for cell in cells::build(shown.view.rows(), true) {
+    for cell in cells::build(shown.view.rows(), true, &app.mcp_machines) {
         let rendered = cells::render(&cell, &ctx);
         if rendered.is_empty() {
             continue;

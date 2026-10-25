@@ -1,0 +1,1 @@
+Machine "{{machine}}" disconnected before this call was sent ({{reason}}), so it did not run. Retry once the machine is connected again, or run it on the local machine instead.

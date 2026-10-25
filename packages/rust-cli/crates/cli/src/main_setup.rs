@@ -158,30 +158,33 @@ pub(super) async fn trust(command: hooks_trust::TrustCommand) -> Result<u8> {
 }
 
 /// skill、MCP 与插件的配置（docs/specs/rust-cli/ext.md §1）：MCP 服务器来自配置文件（`config`）与
-/// `--mcp-config`；`--plugin-dir` 相对 cwd，其余插件候选来自配置快照（ext.md §4.1）。`startup` 是（环境
-/// 快照、cwd、home）。
+/// `--mcp-config`，按 MCP 的机器绑定（旁路文件，remote-exec.md §22.2）设上所在的机器；`--plugin-dir` 相对 cwd，其余
+/// 插件候选来自配置快照（ext.md §4.1）。`startup` 是（环境快照、cwd、home）。
 pub(super) async fn extensions(
     files: &dyn Files,
     workspace: &WorkspaceRef,
     startup: (&[(String, String)], &std::path::Path, &std::path::Path),
     (flags, allowed): (&mcp::McpFlags, &[String]),
-    plugin_dirs: &[String],
+    (plugin_dirs, bindings): (&[String], &rust_cli_paths::StoragePath),
     config: &config::ConfigSnapshot,
 ) -> Extensions {
     let mut extensions = Extensions::none();
     let (env, cwd, home) = startup;
+    // MCP 服务器绑定到哪台机器（R5，remote-exec.md §22.2）：rust-cli 自己的旁路文件，经本机的端口读。
+    let path = bindings.as_path().to_string_lossy();
+    let bindings = &crate::mcp_machines::McpBindings::load(files, workspace, &path).await;
     let settings = mcp::settings(
         files,
         workspace,
         (flags, allowed),
-        env,
+        (env, bindings),
         config.mcp_servers.clone(),
         config.mcp_enabled,
     )
     .await;
     // 配置里停用的服务器（tui-manage.md §6.1）：MCP 关闭或 `--strict-mcp-config` 时没有；同名的
     // `--mcp-config` 服务器遮住它。
-    let mcp_disabled = if config.mcp_enabled && !flags.strict {
+    let mut mcp_disabled: Vec<_> = if config.mcp_enabled && !flags.strict {
         config
             .mcp_disabled
             .iter()
@@ -191,6 +194,8 @@ pub(super) async fn extensions(
     } else {
         Vec::new()
     };
+    // `/mcp enable` 之后它也连在绑定的机器上（R5，remote-exec.md §22.2）。
+    bindings.bind(&mut mcp_disabled);
     extensions.config = ExtConfig {
         mcp_disabled,
         mcp: settings,

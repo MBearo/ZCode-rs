@@ -307,8 +307,12 @@ impl PromptAssembler {
         // 机器清单（R3，remote-exec.md §20.5.3）：紧跟环境段；只在有变化时发。
         if let Some(registry) = &self.machines {
             out.extend(
-                machines::announce(history, &registry.machines())
-                    .map(|found| self.attachment(machines::SOURCE, found)),
+                machines::announce(
+                    history,
+                    &registry.machines(),
+                    request.default_machine.as_deref(),
+                )
+                .map(|found| self.attachment(machines::SOURCE, found)),
             );
         }
         out.extend(

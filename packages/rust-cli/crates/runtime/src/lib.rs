@@ -310,6 +310,8 @@ impl LocalKernel {
                 ids: ports.ids.clone(),
                 gate: gate.clone(),
                 mcp: machine.mcp().clone(),
+                // 绑定到远端机器的 MCP 服务器经注册表取那台机器的管道（R5，remote-exec.md §22.6）。
+                machines: Some(ports.environments.clone()),
                 spawner: scope.spawner(),
                 clock: ports.clock.clone(),
             },

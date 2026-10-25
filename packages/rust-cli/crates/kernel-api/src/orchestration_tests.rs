@@ -87,7 +87,27 @@ fn request() -> ContextRequest {
         },
         plan_flags: Default::default(),
         mcp: None,
+        default_machine: None,
     }
+}
+
+/// F98（remote-exec.md §25.2.1、§25.7）：这次运行的缺省机器只在不是本机时写出；旧形状照常能读。
+#[test]
+fn the_default_machine_is_written_only_when_remote() {
+    let plain = serde_json::to_value(request()).unwrap();
+    assert!(plain.get("default_machine").is_none());
+    let back: ContextRequest = serde_json::from_value(plain).unwrap();
+    assert_eq!(back.default_machine, None);
+    let remote = ContextRequest {
+        default_machine: Some("dev-a".to_owned()),
+        ..request()
+    };
+    let value = serde_json::to_value(&remote).unwrap();
+    assert_eq!(value["default_machine"], "dev-a");
+    assert_eq!(
+        serde_json::from_value::<ContextRequest>(value).unwrap(),
+        remote
+    );
 }
 
 #[tokio::test]

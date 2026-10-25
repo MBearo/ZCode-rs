@@ -25,6 +25,7 @@ mod login;
 mod loopback;
 mod machines;
 mod mcp;
+mod mcp_machines;
 mod model_io;
 mod model_io_files;
 mod models;
@@ -371,7 +372,7 @@ async fn session(
     let paths = setup::storage_paths(&startup, &config.storage.settings());
     // 远端机器的启动输入在这里取（之后 `startup.explicit` 会被移走，§20.3.2）。
     let surface = (matches!(mode, Mode::Tui), matches!(mode, Mode::Print));
-    let machine_start = machines::Start::new(&paths, surface, &startup);
+    let mut machine_start = machines::Start::new(&paths, surface, &startup);
     // 自动更新（docs/specs/rust-cli/update.md §3，F48，照 Codex）：只在 TUI、工作区信任之前；没有启动器标记时什么都
     // 不做。`updates` 留到返回：它持有后台刷新的任务作用域。选了 Update now 时不建会话，安装后以它的结果退出。
     let vars = tui::vars(&startup.env);
@@ -504,11 +505,14 @@ async fn session(
         &workspace,
         (&startup.env, &startup.cwd, &startup.home),
         (&mcp_flags, &allowed),
-        &plugin_dirs,
+        (&plugin_dirs, &paths.mcp_machines()),
         &config,
     )
     .await;
     extensions.monitor = monitor;
+    // 绑定到远端机器的 MCP 服务器（R5，remote-exec.md §22.5、§22.8）：连上机器时的期望集合，TUI 的标记。
+    machine_start = machine_start.with_mcp(&extensions.config);
+    let mcp_machines = machine_start.mcp_marks.clone();
     // 本机跨会话通信（cross-session.md §2）：进程启动时绑定收件箱、写登记；退出时删除。
     let peers = peers::start(
         peers::Startup {
@@ -545,11 +549,12 @@ async fn session(
     kernel.replace_permission_rules(
         config.permission_rules(local, cli_rules(&allowed, &disallowed, additional)),
     );
+    // 自动连上次连着的机器（§20.3.2）：TUI 在后台；`-p` 只在测试变量下、同步连完（§20.10）。R5（remote-exec.md
+    // §22.6）：先于 MCP 启动，绑定到远端机器的服务器看得到“正在连”、等它连完。没有清单里的机器时两者都不做事。
+    machines.start(machine_start).await?;
     // 开始连接 MCP 服务器、加载插件。`-p` 只短等（alwaysLoad 的服务器与第一条命令前的 prewait，ext.md §3.3.1），
     // 没连上的在后台继续连；TUI 不等。
     kernel.start_extensions().await;
-    // 自动连上次连着的机器（§20.3.2）：TUI 在后台；`-p` 只在测试变量下、同步连完（§20.10）。
-    machines.start(machine_start).await?;
     if matches!(mode, Mode::Print) {
         // 等 MCP 连接期间收到退出信号：不再等（headless 看到令牌已取消就不开回合）。
         tokio::select! {
@@ -642,7 +647,7 @@ async fn session(
                 }),
                 os,
                 question_timeout: config.question_timeout,
-                machines: machines.service(),
+                machines: (machines.service(), mcp_machines),
             };
             let exit = rust_cli_tui::run(kernel, tui::options(inputs, VERSION)).await;
             // TUI 退出后入口全部释放：等写者写完剩下的；跨会话的登记与 socket 删掉。

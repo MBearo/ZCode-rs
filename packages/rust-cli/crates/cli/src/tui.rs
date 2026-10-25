@@ -63,6 +63,12 @@ pub(crate) fn vars(env: &[(String, String)]) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// TUI 的机器服务与 MCP 服务器的机器标记（remote-exec.md §21.2、§22.8）。
+pub(crate) type MachineInputs = (
+    Option<Arc<dyn rust_cli_tui::machines::Machines>>,
+    Vec<(String, String)>,
+);
+
 pub(crate) struct Inputs<'a> {
     pub workspace: WorkspaceRef,
     pub cwd: &'a Path,
@@ -99,8 +105,9 @@ pub(crate) struct Inputs<'a> {
     pub os: rust_cli_tui::Os,
     /// 配置的 `askUserQuestionTimeout`（毫秒，tools-more.md §1.1，工作线 F72）。
     pub question_timeout: Option<u64>,
-    /// 远端机器（remote-exec.md §21.2）：`/machines` 与机器状态行。
-    pub machines: Option<Arc<dyn rust_cli_tui::machines::Machines>>,
+    /// 远端机器（remote-exec.md §21.2）：`/machines` 与机器状态行；绑定到远端机器的 MCP 服务器（服务器名，机器名；
+    /// R5，§22.8）。
+    pub machines: MachineInputs,
 }
 
 /// 界面语言写回用户级配置文件（tui.md §7.1，platform `write_ui_locale`）。
@@ -260,7 +267,8 @@ pub(crate) fn options(inputs: Inputs<'_>, version: &str) -> Options {
             trust: Some(inputs.trust),
             update: inputs.update,
             question_timeout: question_timeout(inputs.question_timeout, inputs.env),
-            machines: inputs.machines,
+            machines: inputs.machines.0,
+            mcp_machines: inputs.machines.1,
         },
         clock: inputs.clock,
         ids: inputs.ids,

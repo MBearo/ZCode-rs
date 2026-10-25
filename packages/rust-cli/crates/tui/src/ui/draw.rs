@@ -121,6 +121,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         workspace: app.view.workspace().root.as_str(),
         workspace_label: &label,
         version: &app.version,
+        mcp_machines: &app.mcp_machines,
+        machines: &app.machines,
         markdown: None,
     };
     let layout = transcript::lines(app, cache, &ctx);

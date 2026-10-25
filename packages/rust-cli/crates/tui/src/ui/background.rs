@@ -394,12 +394,22 @@ impl App {
             Entry::Shell(_) => shell_status(BackgroundStatus::Running, lang),
             Entry::Agent(agent) => agent_status(agent, lang),
         };
-        // 远端的后台命令与缺省在远端的子代理：名称后面接 ` @机器`（远端执行 R4，remote-exec.md §21.6）。
+        // 远端的后台命令与缺省在远端的子代理：名称后面接 ` @机器`（远端执行 R4，remote-exec.md §21.6）。重连中的机器上
+        // 一份的条目再接 dim 的 ` · reconnecting`（F96，§23.3）。
         let machine_of = |entry: &Entry| match entry {
             Entry::Shell(shell) => shell.machine.clone(),
             Entry::Agent(agent) => agent.machine.clone(),
         };
-        let tag_width = |entry: &Entry| machine_of(entry).map_or(0, |machine| 2 + machine.width());
+        let stale_note = |entry: &Entry| match entry {
+            Entry::Shell(shell) if shell.reconnecting => {
+                Some(format!(" · {}", super::i18n_machines::reconnecting(lang)))
+            }
+            _ => None,
+        };
+        let tag_width = |entry: &Entry| {
+            machine_of(entry).map_or(0, |machine| 2 + machine.width())
+                + stale_note(entry).map_or(0, |note| note.width())
+        };
         let status_width = entries
             .iter()
             .map(|e| status_of(e).width())
@@ -419,7 +429,10 @@ impl App {
             if index == 0 || first_agent {
                 body.push((Line::default(), None));
                 if headers {
-                    let (name, n) = if first_agent {
+                    // 有缺省机器在远端的子代理时不写“本地”（F98，remote-exec.md §25.4.5）。
+                    let (name, n) = if first_agent && agents.iter().any(|e| e.machine.is_some()) {
+                        (pick(lang, "Agents", "代理"), agents.len())
+                    } else if first_agent {
                         (pick(lang, "Local agents", "本地代理"), agents.len())
                     } else {
                         (pick(lang, "Shells", "Shell"), shells.len())
@@ -447,6 +460,9 @@ impl App {
             if let Some(machine) = &tag {
                 named.push(Span::raw(" "));
                 named.push(super::machines::tag(&self.palette, machine));
+            }
+            if let Some(note) = stale_note(entry) {
+                named.push(Span::styled(note, dim()));
             }
             // 选择列表组件（`› ` 加底色条，tui.md §7.4，修复线 F26；原来是强调色的 `❯ `）。
             body.push((

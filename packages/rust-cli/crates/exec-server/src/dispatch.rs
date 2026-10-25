@@ -18,19 +18,22 @@ pub(crate) async fn unary(
     machine: &MachineEnv,
     request: Request,
     body: &Body,
+    env: rust_cli_kernel_api::env_command::EnvOverrides,
 ) -> (ReplyResult, Body) {
     let mut out = BodyBuilder::new();
-    let result = match run(machine, request, body, &mut out).await {
+    let result = match run(machine, request, body, env, &mut out).await {
         Ok(reply) => ReplyResult::Ok(reply),
         Err(error) => ReplyResult::Err(error),
     };
     (result, out.finish())
 }
 
+/// `env` 是这个客户端实例推来的环境变量（F96）：只交给起进程的请求。
 async fn run(
     machine: &MachineEnv,
     request: Request,
     body: &Body,
+    env: rust_cli_kernel_api::env_command::EnvOverrides,
     out: &mut BodyBuilder,
 ) -> Result<Reply, WireError> {
     let err = output::error;
@@ -165,7 +168,8 @@ async fn run(
             context,
             request,
         } => {
-            let start = input::start_command(*request, body)?;
+            let mut start = input::start_command(*request, body)?;
+            start.env = env;
             machine
                 .commands()
                 .start_command(&input::workspace(workspace), input::context(context), start)
@@ -306,9 +310,24 @@ async fn run(
                 .map_err(err)?;
             Reply::RenderPdfPages(output::pdf_render(render, out))
         }
-        Request::WatchCommand { .. } | Request::ShellNotices { .. } => {
+        Request::WatchCommand { .. } | Request::ShellNotices { .. } | Request::McpEvents { .. } => {
             return Err(WireError::BadRequest {
                 message: "a stream was sent as a call".to_owned(),
+            });
+        }
+        // MCP 的管道在 mcp.rs（要连接表与客户端实例，calls.rs 先分出去）。
+        Request::McpConnect { .. }
+        | Request::McpSend { .. }
+        | Request::McpClose { .. }
+        | Request::McpDeclare { .. } => {
+            return Err(WireError::BadRequest {
+                message: "an MCP call reached the port dispatch".to_owned(),
+            });
+        }
+        // 环境变量推送在 calls.rs 当场生效，不经端口。
+        Request::EnvUpdate { .. } => {
+            return Err(WireError::BadRequest {
+                message: "env.update reached the port dispatch".to_owned(),
             });
         }
     })

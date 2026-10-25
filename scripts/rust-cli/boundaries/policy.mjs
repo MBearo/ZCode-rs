@@ -78,7 +78,8 @@ export const ALLOWED = {
   "env-local": ["base", "fs", "kernel-api", "net", "proc"],
   peers: ["base", "fs", "kernel-api", "net"],
   // MachineEnv 的 8 个端口经 exec-client 发请求（remote-exec.md §18）。§15.4 的表多写了 base：没有用到，不列。
-  "env-remote": ["exec-client", "exec-wire", "kernel-api"],
+  // F96（§23.6）：远端调用失败时给模型的说明在 prompts（模型看的文字）。
+  "env-remote": ["exec-client", "exec-wire", "kernel-api", "prompts"],
   // 派发到注入的 MachineEnv；任务经 base 的 TaskScope，执行器实例名经 base 的 random（remote-exec.md §18）。
   "exec-server": ["base", "exec-transport", "exec-wire", "kernel-api"],
   // SSH 的 Connector 与 Provisioner（remote-exec.md §19.9）：ssh 进程经 proc；本机产物（ELF 头、sha256、上传的内容）经 fs；

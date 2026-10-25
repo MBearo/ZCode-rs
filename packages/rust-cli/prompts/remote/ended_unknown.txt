@@ -1,0 +1,1 @@
+Machine "{{machine}}" disconnected before {{action}} finished ({{reason}}), so the outcome is unknown: it may already have run. Once the machine is connected again, check the state on that machine before deciding whether to do it again.

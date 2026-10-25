@@ -135,3 +135,35 @@ async fn a_disconnected_machine_is_skipped_and_its_records_kept() {
             .is_some()
     );
 }
+
+/// 远端执行 F96（remote-exec.md §23.3）：重连中的机器同没连上，每步的检查不问它（它的调用要等重连，会挡住这一步），
+/// 记录留着，连回来之后照常查。
+#[tokio::test]
+async fn a_reconnecting_machine_is_not_asked_and_its_records_kept() {
+    let local = env("/w");
+    let remote = env("/home/dev/proj");
+    let registry = TestMachines::new(local.clone());
+    registry.connect("dev-a", remote.clone(), "/home/dev/proj");
+    let state = Arc::new(ReadFileState::default());
+    let session = SessionId::new("s");
+    state.set_at(&session, "dev-a", "/home/dev/proj/a.txt", written("a\n"));
+    remote.set_file("/home/dev/proj/a.txt", "A\n");
+    let changes = FileChanges::new(state.clone(), local.clone()).with_machines(registry.clone());
+    registry.set_reconnecting("dev-a", true);
+    assert!(
+        changes
+            .changed_files(&session, &local_workspace())
+            .await
+            .is_empty()
+    );
+    assert_eq!(remote.stat_calls(), (0, 0));
+    assert!(
+        state
+            .get_at(&session, "dev-a", "/home/dev/proj/a.txt")
+            .is_some()
+    );
+    registry.set_reconnecting("dev-a", false);
+    let found = changes.changed_files(&session, &local_workspace()).await;
+    assert_eq!(found.len(), 1);
+    assert_eq!(remote.stat_calls(), (0, 1));
+}

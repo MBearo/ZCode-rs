@@ -32,6 +32,7 @@ fn config(name: &str, remote: bool) -> McpServer {
             }
         },
         options: Default::default(),
+        machine: None,
     }
 }
 
@@ -365,6 +366,7 @@ async fn node_options_apply_per_server() {
             timeout_ms,
             always_load,
         },
+        machine: None,
         ..config(name, false)
     };
     manager.start(

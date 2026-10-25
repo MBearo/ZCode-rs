@@ -168,3 +168,99 @@ async fn the_request_follows_the_registry_at_each_step() {
         }
     }
 }
+
+/// 记下每一步上下文请求的缺省机器。
+#[derive(Default)]
+struct SeenDefaults(std::sync::Mutex<Vec<Option<String>>>);
+
+#[async_trait::async_trait]
+impl rust_cli_kernel_api::orchestration::ContextBuilder for SeenDefaults {
+    async fn build(
+        &self,
+        request: rust_cli_kernel_api::orchestration::ContextRequest,
+        _history: &[rust_cli_kernel_api::message::Message],
+    ) -> Result<
+        rust_cli_kernel_api::orchestration::BuiltContext,
+        rust_cli_kernel_api::orchestration::OrchestrationError,
+    > {
+        self.0.lock().unwrap().push(request.default_machine);
+        Ok(rust_cli_kernel_api::orchestration::BuiltContext {
+            system: Vec::new(),
+            user_context: Vec::new(),
+            attachments: Vec::new(),
+        })
+    }
+}
+
+/// 缺省机器在 `machine` 上的输出端（子代理派生时 Agent 的 `machine`）；其余交给记录的输出端。
+struct OnMachine(
+    Arc<rust_cli_kernel_api::testing::RecordingSink>,
+    &'static str,
+);
+
+#[async_trait::async_trait]
+impl rust_cli_kernel_api::orchestration::Interactions for OnMachine {
+    async fn ask(
+        &self,
+        session: &rust_cli_kernel_api::ids::SessionId,
+        request: rust_cli_kernel_api::orchestration::InteractionRequest,
+    ) -> Result<
+        rust_cli_kernel_api::orchestration::InteractionAnswer,
+        rust_cli_kernel_api::orchestration::OrchestrationError,
+    > {
+        self.0.ask(session, request).await
+    }
+}
+
+#[async_trait::async_trait]
+impl rust_cli_kernel_api::orchestration::RunSink for OnMachine {
+    async fn commit_message(
+        &self,
+        message: rust_cli_kernel_api::message::Message,
+    ) -> Result<(), rust_cli_kernel_api::store::StoreError> {
+        self.0.commit_message(message).await
+    }
+
+    async fn commit_intent(
+        &self,
+        operation: rust_cli_kernel_api::ids::OperationId,
+        fingerprint: String,
+    ) -> Result<(), rust_cli_kernel_api::store::StoreError> {
+        self.0.commit_intent(operation, fingerprint).await
+    }
+
+    async fn emit(&self, event: rust_cli_kernel_api::orchestration::QueryEvent) -> bool {
+        self.0.emit(event).await
+    }
+
+    async fn default_machine(&self) -> Option<String> {
+        Some(self.1.to_owned())
+    }
+}
+
+/// F98（remote-exec.md §25.2.1）：子代理的缺省机器经上下文请求交给 context（机器清单提醒按它写）；主线程是 None。
+/// 旧代码的上下文请求没有这一项，提醒总说“不写就在本机”。
+#[tokio::test]
+async fn the_context_hears_the_default_machine_of_the_run() {
+    let registry = TestMachines::new(Arc::new(UnusedEnvironment));
+    registry.connect("dev-a", Arc::new(UnusedEnvironment), "/srv/proj");
+    for remote in [false, true] {
+        let model = Arc::new(ScriptedModel::new(vec![text_response(&["done"])]));
+        let seen = Arc::new(SeenDefaults::default());
+        let mut parts = parts(model, Vec::new());
+        parts.machines = registry.clone();
+        parts.context = seen.clone();
+        let request = request("hi");
+        let (scope, sink) = scope(parts, &request, Abort::new());
+        let scope = if remote {
+            let mut scope = Arc::into_inner(scope).unwrap();
+            scope.sink = Arc::new(OnMachine(sink, "dev-a"));
+            Arc::new(scope)
+        } else {
+            scope
+        };
+        crate::run::run(scope, request).await.unwrap();
+        let expected = remote.then(|| "dev-a".to_owned());
+        assert_eq!(seen.0.lock().unwrap().first(), Some(&expected), "{remote}");
+    }
+}

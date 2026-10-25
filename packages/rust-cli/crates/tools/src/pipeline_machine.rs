@@ -11,9 +11,8 @@
 use std::sync::Arc;
 
 use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, LOCAL_MACHINE, MachineSet};
-use rust_cli_kernel_api::machine::not_connected;
 use rust_cli_kernel_api::machine_param::{
-    AGENT_TOOL, MACHINE, choices, take, takes_machine, with_machine,
+    AGENT_TOOL, MACHINE, choices, named_in, take, takes_machine, with_machine,
 };
 use rust_cli_kernel_api::tool::ToolUseContext;
 use rust_cli_prompts::texts;
@@ -75,6 +74,18 @@ impl Machines {
         Plan::Route { machines }
     }
 
+    /// 输入点名的是清单里有、现在没连上的机器：给模型的“没有执行”说明（远端执行 F98，remote-exec.md §25.2.2）。
+    ///
+    /// 缺陷修复（Docker 试用 M2）：schema 校验在路由之前，没连上的机器不在工具定义里（没有远端机器时没有 `machine`，
+    /// 有别的机器时 `enum` 里没有它），模型拿到的是 schema 错误，F96 的“没有执行”说明到不了；宽松对象的 Agent 甚至丢掉
+    /// `machine`、在本机起子代理。现在先于 schema 校验认出它。不在清单里的名字照旧交给 schema 校验。
+    pub(crate) fn not_connected(&self, tool: &str, input: &Value) -> Option<String> {
+        let registry = self.0.as_ref()?;
+        let name = named_in(input).filter(|_| takes_machine(tool))?;
+        (registry.remote(name).is_none() && registry.listed(name))
+            .then(|| texts::render(texts::remote_not_connected(), &[("machine", name)]))
+    }
+
     /// 校验用的 schema：有远端机器连上时加上 `machine`（与发给模型的相同的取值）；否则是工具自己的。
     pub(crate) fn schema(base: Value, plan: &Plan) -> Value {
         match plan {
@@ -131,8 +142,12 @@ impl Machines {
                         machine: None,
                     });
                 }
+                // 没连上的机器：写明没有执行、下一步做什么（远端执行 F96，remote-exec.md §23.6）。
                 let Some((machine, workspace)) = registry.remote(&target) else {
-                    return Err(not_connected(&target));
+                    return Err(texts::render(
+                        texts::remote_not_connected(),
+                        &[("machine", target.as_str())],
+                    ));
                 };
                 routed.machine = machine;
                 if tool != AGENT_TOOL {

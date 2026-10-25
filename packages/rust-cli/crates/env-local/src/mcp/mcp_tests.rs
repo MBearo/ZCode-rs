@@ -44,6 +44,7 @@ fn stdio(command: &str, args: &[&str], env: &[(&str, &str)]) -> McpConnect {
                 .collect(),
             cwd: None,
         },
+        env: Default::default(),
     }
 }
 
@@ -273,6 +274,7 @@ async fn streamable_http_posts_json_and_keeps_the_session() {
             url: format!("{base}/mcp"),
             headers: BTreeMap::from([("x-token".to_owned(), "t".to_owned())]),
         },
+        env: Default::default(),
     };
     let id = transport
         .connect(&workspace(dir.path().to_str().unwrap()), connect)
@@ -360,6 +362,7 @@ async fn sse_waits_for_the_endpoint_and_reads_messages_from_the_stream() {
             url: format!("{base}/sse"),
             headers: BTreeMap::new(),
         },
+        env: Default::default(),
     };
     let id = transport
         .connect(&workspace(dir.path().to_str().unwrap()), connect)
@@ -409,6 +412,7 @@ async fn an_sse_endpoint_on_another_origin_fails_to_connect() {
             url: format!("{base}/sse"),
             headers: BTreeMap::from([("authorization".to_owned(), "Bearer t".to_owned())]),
         },
+        env: Default::default(),
     };
     let error = transport
         .connect(&workspace(dir.path().to_str().unwrap()), connect)

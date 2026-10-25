@@ -50,6 +50,7 @@ fn assembler() -> PromptAssembler {
 
 fn request(source: QuerySource) -> ContextRequest {
     ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("s"),
         workspace: WorkspaceRef {

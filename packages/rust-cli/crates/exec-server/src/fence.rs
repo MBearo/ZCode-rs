@@ -94,6 +94,21 @@ fn paths(request: &Request) -> Vec<&str> {
             .chain(files.iter().map(|file| file.path.as_str()))
             .collect(),
         Request::RenderPdfPages { workspace, request } => vec![&workspace.root, &request.path],
+        // MCP 服务器的工作区；stdio 的 cwd 是绝对路径时也查（相对的落在工作区里）。
+        Request::McpConnect {
+            workspace,
+            transport,
+            ..
+        } => {
+            let mut paths = vec![workspace.root.as_str()];
+            if let rust_cli_exec_wire::dto::mcp::McpTransport::Stdio { cwd: Some(cwd), .. } =
+                transport
+                && normalize(cwd).is_some()
+            {
+                paths.push(cwd);
+            }
+            paths
+        }
         Request::WatchCommand { .. }
         | Request::Cancel { .. }
         | Request::OperationStatus { .. }
@@ -105,6 +120,11 @@ fn paths(request: &Request) -> Vec<&str> {
         | Request::StopBackgroundCommand { .. }
         | Request::RewindApply { .. }
         | Request::RewindStatus { .. }
-        | Request::RewindFinish { .. } => Vec::new(),
+        | Request::RewindFinish { .. }
+        | Request::McpSend { .. }
+        | Request::McpEvents { .. }
+        | Request::McpClose { .. }
+        | Request::EnvUpdate { .. } => Vec::new(),
+        Request::McpDeclare { workspace, .. } => vec![&workspace.root],
     }
 }

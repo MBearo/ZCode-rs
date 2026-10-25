@@ -242,7 +242,8 @@ impl Interaction {
                 if let Some(name) = asked_by {
                     layout.0[1] = asked_from(&layout.0[1], name, self.origin.as_deref(), view);
                 }
-                if let Some(machine) = machine {
+                // 机器来自询问（工具输入的 `machine`，R3）或 MCP 服务器的绑定（F98），前者优先。
+                if let Some(machine) = machine.as_deref().or(self.bound_machine.as_deref()) {
                     layout.0[1] = runs_on(&layout.0[1], machine, view);
                 }
                 layout
@@ -449,6 +450,8 @@ impl Interaction {
             workspace: "",
             workspace_label: "",
             version: "",
+            mcp_machines: &[],
+            machines: &[],
             markdown: None,
         };
         let rows = cells::patch_rows(tool, input);

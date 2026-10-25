@@ -14,6 +14,8 @@ mod background;
 mod checkpoints;
 mod commands;
 mod files;
+#[cfg(unix)]
+mod mcp;
 mod pdf;
 mod search;
 #[cfg(unix)]

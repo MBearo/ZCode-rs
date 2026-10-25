@@ -84,7 +84,10 @@ impl FileChanges {
             .await
     }
 
-    /// 一台远端机器上的文件：一次 `stat_many`，版本变了的再逐个读。那台机器没连上或批量 stat 失败时都不查。
+    /// 一台远端机器上的文件：一次 `stat_many`，版本变了的再逐个读。那台机器没连上、正在重连或批量 stat 失败时都不查。
+    ///
+    /// 重连中的机器（远端执行 F96，remote-exec.md §23.3）：它的调用要等重连，SSH 又一直重连，问它会挡住这一步；同没
+    /// 连上一样跳过，记录留着，连回来之后再查。
     async fn check_remote(
         &self,
         session: &SessionId,
@@ -94,6 +97,7 @@ impl FileChanges {
         let Some((machine, workspace)) = self
             .machines
             .as_ref()
+            .filter(|registry| !registry.reconnecting(name))
             .and_then(|registry| registry.remote(name))
         else {
             return Vec::new();

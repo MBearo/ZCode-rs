@@ -43,6 +43,7 @@ async fn instructions(env: MemoryEnvironment) -> Option<String> {
         config,
     );
     let request = ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("sess_1"),
         workspace: WorkspaceRef {

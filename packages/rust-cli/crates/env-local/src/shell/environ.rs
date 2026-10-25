@@ -103,6 +103,24 @@ pub(crate) fn project(
     env
 }
 
+/// 加上（或去掉）执行器的服务端按客户端实例推来的变量（远端执行 F96，remote-exec.md §23.5）。保护的名字已经在服务端
+/// 拒绝，这里不再查。
+pub(crate) fn apply(
+    env: &mut BTreeMap<String, String>,
+    overrides: &rust_cli_kernel_api::env_command::EnvOverrides,
+) {
+    for (name, value) in overrides {
+        match value {
+            Some(value) => {
+                env.insert(name.clone(), value.clone());
+            }
+            None => {
+                env.remove(name);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "environ_tests.rs"]
 mod tests;

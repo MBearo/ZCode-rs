@@ -37,6 +37,7 @@ fn config(name: &str, always_load: bool, remote: bool) -> McpServer {
             timeout_ms: None,
             always_load,
         },
+        machine: None,
     }
 }
 

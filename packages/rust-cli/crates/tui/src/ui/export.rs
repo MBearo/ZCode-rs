@@ -38,6 +38,8 @@ pub fn conversation_text(app: &App, now_ms: u64) -> (String, Option<String>) {
         workspace: app.view.workspace().root.as_str(),
         workspace_label: &label,
         version: &app.version,
+        mcp_machines: &app.mcp_machines,
+        machines: &app.machines,
         markdown: None,
     };
     let layout = transcript::lines(app, &mut Cache::default(), &ctx);

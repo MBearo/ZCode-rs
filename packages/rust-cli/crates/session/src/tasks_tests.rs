@@ -37,17 +37,35 @@ fn unused() -> EnvError {
 struct Shells {
     prefix: &'static str,
     outputs: &'static str,
+    /// 远端执行 F96：为真时 `shell_state` 与 `close_session` 一直不回（连接断了、调用在等重连）。
+    hang: Option<&'static std::sync::atomic::AtomicBool>,
+    /// 远端执行 F98：`b1` 的输出是 `tick-1` … `tick-12`、以换行结尾（命令的输出一般都是），`total_lines` 照 env-local 的
+    /// 读法（`\n` 的个数加一）。
+    ticks: bool,
 }
 
 impl Shells {
     const LOCAL: Self = Self {
         prefix: "b",
         outputs: "/tmp/tasks",
+        hang: None,
+        ticks: false,
     };
     const REMOTE: Self = Self {
         prefix: "r",
         outputs: "/srv/tasks",
+        hang: None,
+        ticks: false,
     };
+
+    async fn wait_if_hanging(&self) {
+        if self
+            .hang
+            .is_some_and(|hang| hang.load(std::sync::atomic::Ordering::SeqCst))
+        {
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 #[async_trait]
@@ -85,6 +103,19 @@ impl Files for Shells {
             });
         }
         assert_eq!(path, format!("{outputs}/{prefix}1.output"));
+        if self.ticks {
+            let content: String = (1..=12).map(|n| format!("tick-{n}\n")).collect();
+            let lines = content.matches('\n').count() as u64 + 1;
+            return Ok(TextRead::Text(TextSlice {
+                content,
+                line_count: lines,
+                total_lines: lines,
+                total_bytes: 0,
+                read_bytes: 0,
+                mtime_ms: 0,
+                version: rust_cli_kernel_api::env::FileVersion::new("v1"),
+            }));
+        }
         let content = (1..=45)
             .map(|n| format!("line {n}"))
             .collect::<Vec<_>>()
@@ -129,6 +160,7 @@ impl Commands for Shells {
     }
 
     async fn close_session(&self, _s: &SessionId, _forget: bool) -> Result<(), EnvError> {
+        self.wait_if_hanging().await;
         Ok(())
     }
 }
@@ -136,6 +168,7 @@ impl Commands for Shells {
 #[async_trait]
 impl Shell for Shells {
     async fn shell_state(&self, _w: &WorkspaceRef, _s: &SessionId) -> Result<ShellState, EnvError> {
+        self.wait_if_hanging().await;
         let prefix = self.prefix;
         Ok(ShellState {
             cwd: EnvPath::new("/Users/dev/project"),
@@ -202,6 +235,7 @@ impl AgentSignals for OneAgent {
             status: BackgroundStatus::Running,
             output: None,
             machine: None,
+            reconnecting: false,
         }]
     }
     async fn stop_task(
@@ -355,6 +389,31 @@ async fn shell_details_show_the_last_ten_lines_and_the_runtime() {
     );
 }
 
+/// 远端执行 F98（remote-exec.md §25.4.6，Docker 试用 L11）：输出文件以换行结尾时，总行数不把最后的换行算一行，与框里
+/// 的行对得上。旧代码按 `\n` 的个数加一，框里是 `tick-3 … tick-12`、下面写 13 行。
+#[tokio::test]
+async fn the_line_count_of_an_output_that_ends_with_a_newline_matches_the_lines() {
+    let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
+    setup.set_env(std::sync::Arc::new(Shells {
+        ticks: true,
+        ..Shells::LOCAL
+    }));
+    let built = setup.build().await;
+    let detail = built.session.shell_detail("b1").await.unwrap().unwrap();
+    let ShellOutput::Tail { lines, total } = &detail.output else {
+        panic!("{detail:?}");
+    };
+    assert_eq!(
+        (
+            lines.first().map(String::as_str),
+            lines.last().map(String::as_str),
+            lines.len()
+        ),
+        (Some("tick-3"), Some("tick-12"), 10)
+    );
+    assert_eq!(*total, 12);
+}
+
 /// 远端执行 R4（remote-exec.md §21.6）：后台任务的快照也列连上的远端机器上在跑的命令（带 `machine`）；Shell 详情按
 /// 任务 ID 依次问本机与远端，在哪台找到就读那台的输出文件。
 #[tokio::test]
@@ -398,4 +457,112 @@ async fn remote_background_commands_are_listed_with_their_machine() {
     assert_eq!(detail.elapsed_ms, Some(65_000));
     assert!(matches!(detail.output, ShellOutput::Tail { total: 45, .. }));
     assert!(built.session.shell_detail("x9").await.unwrap().is_none());
+}
+
+/// 远端执行 F96（remote-exec.md §23.3）：重连中的机器不问（它的调用要等重连），快照马上回来，用那台机器上一份的条目
+/// 并标“重连中”；连回来之后照常问；机器离开注册表之后它的条目也没了。旧代码在第二份快照上一直等。
+#[tokio::test]
+async fn a_reconnecting_machine_shows_its_last_entries_without_waiting() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use rust_cli_kernel_api::testing::TestMachines;
+    static HANG: AtomicBool = AtomicBool::new(false);
+    let machines = TestMachines::new(std::sync::Arc::new(Shells::LOCAL));
+    let remote = Shells {
+        hang: Some(&HANG),
+        ..Shells::REMOTE
+    };
+    machines.connect("dev-a", std::sync::Arc::new(remote), "/srv/proj");
+    let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
+    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.machines = Some(machines.clone());
+    setup.agents = std::sync::Arc::new(OneAgent::default());
+    let built = setup.build().await;
+    let rows = |snapshot: &TasksSnapshot| -> Vec<(String, Option<String>, bool)> {
+        snapshot
+            .background
+            .iter()
+            .map(|e| (e.id.clone(), e.machine.clone(), e.reconnecting))
+            .collect()
+    };
+    let row = |id: &str, machine: Option<&str>, reconnecting: bool| {
+        (id.to_owned(), machine.map(str::to_owned), reconnecting)
+    };
+    let fresh = built.session.tasks_snapshot().await.unwrap();
+    assert_eq!(
+        rows(&fresh),
+        [
+            row("b1", None, false),
+            row("r1", Some("dev-a"), false),
+            row("agent_1", None, false)
+        ]
+    );
+    // 连接断了：调用一直不回，注册表说它在重连。
+    HANG.store(true, Ordering::SeqCst);
+    machines.set_reconnecting("dev-a", true);
+    let stale = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        built.session.tasks_snapshot(),
+    )
+    .await
+    .expect("the snapshot does not wait for a reconnecting machine")
+    .unwrap();
+    assert_eq!(
+        rows(&stale),
+        [
+            row("b1", None, false),
+            row("r1", Some("dev-a"), true),
+            row("agent_1", None, false)
+        ]
+    );
+    // `/tasks` 的列表（带输出末尾）同样不等。
+    let listed = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        built.session.background_tasks(),
+    )
+    .await
+    .expect("the list does not wait either")
+    .unwrap();
+    assert!(listed.iter().any(|e| e.id == "r1" && e.reconnecting));
+    // 连回来了：照常问。
+    HANG.store(false, Ordering::SeqCst);
+    machines.set_reconnecting("dev-a", false);
+    let back = built.session.tasks_snapshot().await.unwrap();
+    assert_eq!(rows(&back), rows(&fresh));
+    // 离开注册表：它的条目没了。
+    machines.disconnect("dev-a");
+    let gone = built.session.tasks_snapshot().await.unwrap();
+    assert_eq!(
+        rows(&gone),
+        [row("b1", None, false), row("agent_1", None, false)]
+    );
+}
+
+/// 远端执行 F96（remote-exec.md §23.3）：会话关闭不等重连中的机器（它的 `close_session` 放到后台发）。旧代码在关闭里一直等。
+#[tokio::test]
+async fn closing_does_not_wait_for_a_reconnecting_machine() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use rust_cli_kernel_api::testing::TestMachines;
+    static HANG: AtomicBool = AtomicBool::new(false);
+    let machines = TestMachines::new(std::sync::Arc::new(Shells::LOCAL));
+    let remote = Shells {
+        hang: Some(&HANG),
+        ..Shells::REMOTE
+    };
+    machines.connect("dev-a", std::sync::Arc::new(remote), "/srv/proj");
+    let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
+    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.machines = Some(machines.clone());
+    let built = setup.build().await;
+    HANG.store(true, Ordering::SeqCst);
+    machines.set_reconnecting("dev-a", true);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        built
+            .session
+            .close(rust_cli_kernel_api::session_api::EndReason::Other),
+    )
+    .await
+    .expect("closing does not wait for a reconnecting machine");
 }

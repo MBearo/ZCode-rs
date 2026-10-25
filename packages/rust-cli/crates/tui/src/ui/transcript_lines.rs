@@ -200,7 +200,7 @@ pub fn lines(app: &App, cache: &mut Cache, ctx: &Ctx<'_>) -> Layout {
         ..*ctx
     };
     // 普通视图并工作段，详细视图不并。
-    let built = cells::build(rows, !ctx.expanded);
+    let built = cells::build(rows, !ctx.expanded, ctx.mcp_machines);
     let mut pending_locals: Vec<&LocalCell> = locals.collect();
     for cell in &built {
         let versions = || cell.rows.iter().map(|row| (row.id, row.version));

@@ -682,3 +682,6 @@ fn streaming_input_keeps_the_configured_timeouts() {
 
 #[path = "bash_timeout_tests.rs"]
 mod timeout;
+
+#[path = "bash_remote_tests.rs"]
+mod remote;

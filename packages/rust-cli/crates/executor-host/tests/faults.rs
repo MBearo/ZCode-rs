@@ -119,7 +119,7 @@ async fn setup(server_faults: Vec<Faults>, client_faults: Faults) -> Setup {
     let mut options = ClientOptions::new("faults", "client-1");
     options.heartbeat = Duration::from_millis(500);
     options.reconnect = Reconnect {
-        attempts: 3,
+        attempts: Some(3),
         delay: Duration::from_millis(10),
         max_delay: Duration::from_millis(10),
     };
@@ -173,6 +173,7 @@ fn command(root: &std::path::Path, text: &str) -> StartCommand {
         hook: None,
         on_timeout: None,
         socket: None,
+        env: Default::default(),
     }
 }
 

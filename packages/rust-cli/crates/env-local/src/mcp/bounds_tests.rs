@@ -37,6 +37,7 @@ fn shell(script: &str) -> McpConnect {
             env: BTreeMap::new(),
             cwd: None,
         },
+        env: Default::default(),
     }
 }
 

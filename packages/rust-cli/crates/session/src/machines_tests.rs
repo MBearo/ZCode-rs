@@ -287,3 +287,23 @@ async fn a_notice_from_a_remote_machine_is_acknowledged_there() {
     assert_eq!(remote.closed().len(), 1);
     assert_eq!(local.closed().len(), 1);
 }
+
+/// F98（remote-exec.md §25.4.5，Docker 试用 L8）：`/rewind` 列表里远端的文件带机器（TUI 写成 `dev-a:b.txt`）；本机的不带。
+/// 旧代码的改动统计不分机器。
+#[tokio::test]
+async fn rewind_options_name_the_machine_of_remote_files() {
+    let (two, _) = wrote_on_two_machines().await;
+    let options = two.built.session.rewind_options().await.unwrap();
+    let files: Vec<(&str, Option<&str>)> = options[0]
+        .files
+        .iter()
+        .map(|change| (change.path.as_str(), change.machine.as_deref()))
+        .collect();
+    assert_eq!(
+        files,
+        [
+            ("/home/dev/proj/b.txt", Some("dev-a")),
+            ("/work/a.txt", None)
+        ]
+    );
+}

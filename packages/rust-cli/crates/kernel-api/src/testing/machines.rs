@@ -1,7 +1,7 @@
 //! 有远端机器的注册表替身（remote-exec.md §20.4）：本机加几台“远端”（各是一个替身，带名字与工作区），测试中途可以
 //! 连上、断开；`changes()` 随之出项。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use futures_util::stream::{BoxStream, StreamExt};
@@ -28,6 +28,10 @@ pub struct TestMachines {
     services: LocalServices,
     connected: Mutex<(u64, BTreeMap<String, Connected>)>,
     changes: watch::Sender<u64>,
+    /// 正在重连的机器（F96，remote-exec.md §23.3）：还在 `remote()` 里。
+    reconnecting: Mutex<BTreeSet<String>>,
+    /// 机器清单里的机器（F98，remote-exec.md §25.2.2）：连上过的与 [`TestMachines::list`] 登记的；断开后仍在。
+    listed: Mutex<BTreeSet<String>>,
 }
 
 impl TestMachines {
@@ -37,6 +41,8 @@ impl TestMachines {
             services: LocalServices::new(local),
             connected: Mutex::new((0, BTreeMap::new())),
             changes: watch::channel(0).0,
+            reconnecting: Mutex::default(),
+            listed: Mutex::default(),
         })
     }
 
@@ -71,7 +77,13 @@ impl TestMachines {
             );
             connected.0
         };
+        self.list(name);
         self.changes.send_replace(version);
+    }
+
+    /// 只登记到机器清单、不连（F98：清单里有、没连上的机器）。
+    pub fn list(&self, name: &str) {
+        lock(&self.listed).insert(name.to_owned());
     }
 
     /// 断开一台机器。
@@ -82,7 +94,18 @@ impl TestMachines {
             connected.1.remove(name);
             connected.0
         };
+        lock(&self.reconnecting).remove(name);
         self.changes.send_replace(version);
+    }
+
+    /// 这台机器开始或结束重连（F96）：快照的 version 不变（同 cli 的注册表）。
+    pub fn set_reconnecting(&self, name: &str, reconnecting: bool) {
+        let mut set = lock(&self.reconnecting);
+        if reconnecting {
+            set.insert(name.to_owned());
+        } else {
+            set.remove(name);
+        }
     }
 }
 
@@ -109,6 +132,14 @@ impl EnvironmentRegistry for TestMachines {
             .1
             .get(name)
             .map(|c| (c.machine.clone(), c.info.workspace.clone()))
+    }
+
+    fn reconnecting(&self, name: &str) -> bool {
+        lock(&self.reconnecting).contains(name)
+    }
+
+    fn listed(&self, name: &str) -> bool {
+        lock(&self.listed).contains(name)
     }
 
     fn changes(&self) -> BoxStream<'static, u64> {

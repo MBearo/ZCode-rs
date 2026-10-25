@@ -30,7 +30,7 @@ pub(crate) fn reconnecting(heartbeat_ms: u64) -> ClientOptions {
     let mut options = options();
     options.heartbeat = Duration::from_millis(heartbeat_ms);
     options.reconnect = Reconnect {
-        attempts: 2,
+        attempts: Some(2),
         delay: Duration::from_millis(5),
         max_delay: Duration::from_millis(5),
     };

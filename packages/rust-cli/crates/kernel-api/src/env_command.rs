@@ -1,5 +1,7 @@
 //! 执行环境端口里跑命令的 DTO（从 `env` 拆出，路径经 `crate::env` 重新导出）。
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::env::{EnvPath, Outcome};
@@ -7,6 +9,11 @@ use crate::env_shell::{
     BackgroundCommand, CwdScope, HookIo, MonitorSocket, SandboxPolicy, ShellKind, TimeoutBackground,
 };
 use crate::ids::ShellTaskId;
+
+/// 加在子进程环境之后的变量（远端执行 F96，docs/specs/rust-cli/remote-exec.md §23.5）：值为 `None` 时去掉这个变量。
+/// 只由执行器的服务端按请求所属的客户端实例填（`env.update` 与 SSH 代理带来的 `hello.session_env`）；工具与本机的组装
+/// 都不写，缺省是空的。保护的名字已经在服务端拒绝。
+pub type EnvOverrides = BTreeMap<String, Option<String>>;
 
 /// 启动一条 shell 命令。前台、后台都经这里；输出用 [`crate::machine::Commands::watch_command`] 按游标读。
 ///
@@ -40,6 +47,10 @@ pub struct StartCommand {
     /// 只和后台的 `Monitor` 种类一起用；`command` 记 URL（TaskStop 的结果用它）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub socket: Option<MonitorSocket>,
+    /// 投影之后再加上（或去掉）的环境变量（[`EnvOverrides`]，F96）：只在执行器里由服务端填；不进序列化，所以也不进
+    /// env-local 的去重指纹（同一个操作重放时不因它算作参数不同）。
+    #[serde(skip)]
+    pub env: EnvOverrides,
 }
 
 /// 命令输出事件。`cursor` 是已送达的字节位置，断线后从这里续读。

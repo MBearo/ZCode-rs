@@ -46,18 +46,37 @@ async fn read(
 }
 
 /// 每条可选消息这一回合的改动（列表每行的摘要）；artifact 读不出的回合按没有改动显示。
+///
+/// 远端执行 F98（remote-exec.md §25.4.5，Docker 试用 L8）：改动按 checkpoint 的机器分开算（两台机器上的同名文件不合在
+/// 一起），远端的带机器名；再按路径排（只有本机时与原来相同）。
 pub(crate) async fn options(store: &dyn ArtifactStore, snapshot: Snapshot) -> Vec<RewindOption> {
     let mut out = Vec::new();
     for (message, turn, code) in snapshot.options {
-        let mut artifacts = Vec::new();
+        let mut machines: Vec<(Option<String>, Vec<Artifact>)> = Vec::new();
         for checkpoint in &turn {
-            if let Ok(artifact) = read(store, checkpoint).await {
-                artifacts.push(artifact);
+            let Ok(artifact) = read(store, checkpoint).await else {
+                continue;
+            };
+            match machines.iter_mut().find(|(m, _)| *m == checkpoint.machine) {
+                Some((_, artifacts)) => artifacts.push(artifact),
+                None => machines.push((checkpoint.machine.clone(), vec![artifact])),
             }
         }
+        let mut files: Vec<_> = machines
+            .into_iter()
+            .flat_map(|(machine, artifacts)| {
+                rewind_plan::changes(&artifacts)
+                    .into_iter()
+                    .map(move |change| rust_cli_kernel_api::session_api::FileChange {
+                        machine: machine.clone(),
+                        ..change
+                    })
+            })
+            .collect();
+        files.sort_by(|a, b| (&a.path, &a.machine).cmp(&(&b.path, &b.machine)));
         out.push(RewindOption {
             message,
-            files: rewind_plan::changes(&artifacts),
+            files,
             code,
         });
     }

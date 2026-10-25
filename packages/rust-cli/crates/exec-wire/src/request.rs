@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::Blob;
 use crate::dto::command::StartCommand;
 use crate::dto::core::{OperationContext, Workspace};
+use crate::dto::env::{EnvMode, EnvVars};
 use crate::dto::files::{
     GlobFiles, GrepSearch, PutFile, ReadText, RenderPdfPages, WritePrecondition,
 };
+use crate::dto::mcp::{McpDeclared, McpTransport};
 use crate::dto::rewind::RestoreFile;
 use crate::dto::shell::BackgroundTask;
 use crate::op::Op;
@@ -117,6 +119,39 @@ pub enum Request {
         workspace: Workspace,
         request: RenderPdfPages,
     },
+    /// 起一个 MCP 服务器的管道（R5，remote-exec.md §22.4）：`transport` 是配置的原文，执行器展开 `${VAR}`。
+    #[serde(rename = "mcp.connect")]
+    McpConnect {
+        workspace: Workspace,
+        server: String,
+        transport: McpTransport,
+    },
+    /// 发一条 JSON-RPC 消息。
+    #[serde(rename = "mcp.send")]
+    McpSend {
+        connection: String,
+        message: serde_json::Value,
+    },
+    /// 这条连接上的事件（流）。
+    #[serde(rename = "mcp.events")]
+    McpEvents { connection: String },
+    #[serde(rename = "mcp.close")]
+    McpClose { connection: String },
+    /// 这台机器上期望的全部服务器（控制面连上机器时发，remote-exec.md §22.5）：执行器结束不在里面的。
+    #[serde(rename = "mcp.declare")]
+    McpDeclare {
+        workspace: Workspace,
+        servers: Vec<McpDeclared>,
+    },
+    /// 按客户端实例推一组环境变量，只影响之后启动的进程（F96，remote-exec.md §23.5）。`injected` 是被注入的名字（以后
+    /// 遮蔽输出用）。
+    #[serde(rename = "env.update")]
+    EnvUpdate {
+        mode: EnvMode,
+        vars: EnvVars,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        injected: Vec<String>,
+    },
 }
 
 impl Request {
@@ -152,6 +187,12 @@ impl Request {
             Self::RewindFinish { .. } => Op::RewindFinish,
             Self::PdfPageCount { .. } => Op::PdfPageCount,
             Self::RenderPdfPages { .. } => Op::RenderPdfPages,
+            Self::McpConnect { .. } => Op::McpConnect,
+            Self::McpSend { .. } => Op::McpSend,
+            Self::McpEvents { .. } => Op::McpEvents,
+            Self::McpClose { .. } => Op::McpClose,
+            Self::McpDeclare { .. } => Op::McpDeclare,
+            Self::EnvUpdate { .. } => Op::EnvUpdate,
         }
     }
 }

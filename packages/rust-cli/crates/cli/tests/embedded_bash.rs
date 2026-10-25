@@ -97,6 +97,7 @@ async fn bash(harness: &Harness, index: usize, command: &str) -> String {
         hook: None,
         on_timeout: None,
         socket: None,
+        env: Default::default(),
     };
     harness
         .env

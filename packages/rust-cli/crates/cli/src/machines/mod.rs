@@ -65,6 +65,10 @@ pub(crate) struct Start {
     pub env: Vec<(String, String)>,
     /// 本机执行器目录（上传用的产物缓存，R2 §19.4）。
     pub executor: rust_cli_paths::ExecutorPaths,
+    /// 每台机器上期望的 MCP 服务器（R5，remote-exec.md §22.5）：入口在组装好 MCP 设置之后填。
+    pub mcp: std::collections::BTreeMap<String, Vec<rust_cli_kernel_api::mcp::McpConnect>>,
+    /// 绑定到远端机器的全部 MCP 服务器（服务器名，机器名；含停用的）：TUI 的工具行标出机器（§22.8）。
+    pub mcp_marks: Vec<(String, String)>,
 }
 
 impl Start {
@@ -101,7 +105,30 @@ impl Start {
             },
             env: startup.env.to_vec(),
             executor: crate::ssh_executor::executor_paths(startup),
+            mcp: std::collections::BTreeMap::new(),
+            mcp_marks: Vec::new(),
         }
+    }
+
+    /// 绑定到远端机器的 MCP 服务器：启用的按机器分组成期望集合（§22.5；停用的不算，执行器里还在跑的会被结束）；
+    /// 启用的与停用的都给 TUI 标出机器（§22.8）。
+    pub(crate) fn with_mcp(mut self, config: &rust_cli_ext::ExtConfig) -> Self {
+        let all = config.mcp.servers.iter().chain(&config.mcp_disabled);
+        self.mcp_marks = all
+            .filter_map(|server| Some((server.name.clone(), server.machine.clone()?)))
+            .collect();
+        for server in &config.mcp.servers {
+            if let Some(machine) = &server.machine {
+                self.mcp.entry(machine.clone()).or_default().push(
+                    rust_cli_kernel_api::mcp::McpConnect {
+                        server: server.name.clone(),
+                        transport: server.transport.clone(),
+                        env: Default::default(),
+                    },
+                );
+            }
+        }
+        self
     }
 }
 
@@ -129,7 +156,7 @@ impl Machines {
 
     /// 读清单、建 Fleet，自动连上次连着的机器（§20.3.2）：TUI 在后台连（不挡启动，连不上只记 warn）；测试变量下的
     /// `-p` 同步连完，连不上就报错。
-    pub(crate) async fn start(&self, start: Start) -> Result<()> {
+    pub(crate) async fn start(&self, mut start: Start) -> Result<()> {
         let when = start.when;
         if when == When::Never {
             return Ok(());
@@ -143,13 +170,17 @@ impl Machines {
             }
         };
         let list = start.list.clone();
+        let mcp = std::mem::take(&mut start.mcp);
         let make = move |entry: &MachineEntry| endpoint::machine(&start, entry);
-        let fleet = Arc::new(Fleet::new(
-            (list, Box::new(make)),
-            entries,
-            self.registry.clone(),
-            self.scope.spawner(),
-        ));
+        let fleet = Arc::new(
+            Fleet::new(
+                (list, Box::new(make)),
+                entries,
+                self.registry.clone(),
+                self.scope.spawner(),
+            )
+            .with_mcp(mcp),
+        );
         let fleet = self.fleet.get_or_init(|| fleet).clone();
         for name in fleet.remembered() {
             match when {
@@ -161,7 +192,10 @@ impl Machines {
                     .map(drop)?,
                 When::Background => {
                     let fleet = fleet.clone();
+                    // 返回之前就记上“正在连”（R5，§22.6）：之后启动的 MCP 连接任务看得到，等它连完。
+                    let connecting = self.registry.connecting(&name);
                     drop(self.scope.spawner().spawn("machine-connect", async move {
+                        let _connecting = connecting;
                         if let Err(error) = fleet.connect(&name).await {
                             tracing::warn!(machine = %name, %error, "machine not connected");
                         }
@@ -182,7 +216,7 @@ fn path_style(style: WirePathStyle) -> PathStyle {
 }
 
 /// 握手的结果 → 注册表里的一台机器（工作目录没写时是远端的 home）。
-fn remote_of(entry: &MachineEntry, client: &ExecClient) -> Result<RemoteMachine> {
+pub(super) fn remote_of(entry: &MachineEntry, client: &ExecClient) -> Result<RemoteMachine> {
     let welcome = client
         .welcome()
         .ok_or_else(|| anyhow!("the executor did not finish the handshake"))?;
@@ -213,8 +247,10 @@ fn attach(registry: &MachineRegistry, entry: &MachineEntry, client: ExecClient) 
         return Ok(());
     }
     let info = remote_of(entry, &client)?;
-    let remote = Arc::new(RemoteEnvironment::new(client)).machine();
-    registry.connected(remote.named(entry.name.as_str()), info);
+    let link = client.states();
+    // 机器名也交给远端环境：失败时给模型的说明写它（F96，remote-exec.md §23.6）。
+    let remote = Arc::new(RemoteEnvironment::new(client).with_name(entry.name.as_str())).machine();
+    registry.connected(remote.named(entry.name.as_str()), info, link);
     tracing::info!(event = "machine.connected", machine = %entry.name, "machine connected");
     Ok(())
 }

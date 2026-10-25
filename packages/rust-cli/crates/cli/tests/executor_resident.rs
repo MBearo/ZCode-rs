@@ -10,19 +10,14 @@
 )]
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use futures_util::StreamExt;
 use rust_cli_env_remote::RemoteEnvironment;
-use rust_cli_exec_client::{ClientOptions, ExecClient, Reconnect};
-use rust_cli_exec_transport::stream::stream_link;
-use rust_cli_exec_transport::{Connector, Link, LinkError, MAX_FRAME};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvPath, OperationContext, Origin, StartCommand, WorkspaceRef,
-    WriteFile, WritePrecondition,
+    CommandEvent, EnvError, EnvPath, OperationContext, Origin, StartCommand, WriteFile,
+    WritePrecondition,
 };
 use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{
@@ -30,154 +25,9 @@ use rust_cli_kernel_api::ids::{
 };
 use serde_json::Value;
 
-const BIN: &str = env!("CARGO_BIN_EXE_zcode-rs");
+mod resident;
 
-/// 一个临时的用户环境；丢掉时停掉它的常驻执行器。
-struct Home {
-    home: tempfile::TempDir,
-    work: PathBuf,
-    _work: tempfile::TempDir,
-}
-
-impl Home {
-    fn new() -> Self {
-        let home = tempfile::tempdir().unwrap();
-        let work = tempfile::tempdir().unwrap();
-        Self {
-            work: std::fs::canonicalize(work.path()).unwrap(),
-            home,
-            _work: work,
-        }
-    }
-
-    fn env(&self) -> Vec<(String, String)> {
-        let home = self.home.path().to_string_lossy().into_owned();
-        vec![
-            ("HOME".to_owned(), home.clone()),
-            ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
-            ("SHELL".to_owned(), "/bin/bash".to_owned()),
-            ("TMPDIR".to_owned(), home),
-        ]
-    }
-
-    fn command(&self, args: &[&str]) -> std::process::Command {
-        let mut command = std::process::Command::new(BIN);
-        command
-            .args(args)
-            .env_clear()
-            .envs(self.env())
-            .current_dir(&self.work);
-        command
-    }
-
-    fn run(&self, args: &[&str]) -> (i32, String, String) {
-        let output = self.command(args).output().unwrap();
-        (
-            output.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&output.stdout).into_owned(),
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        )
-    }
-
-    fn status(&self) -> Value {
-        let (_, stdout, _) = self.run(&["executor", "status", "--json"]);
-        serde_json::from_str(stdout.trim()).unwrap()
-    }
-
-    fn exec_dir(&self) -> PathBuf {
-        self.home.path().join(".zcode/rust-cli/exec")
-    }
-
-    fn workspace(&self) -> WorkspaceRef {
-        WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new(self.work.to_string_lossy()),
-        }
-    }
-
-    /// 等常驻进程的状态满足条件（测试里的等待；产品代码不轮询）。
-    async fn wait_for(&self, what: &str, check: impl Fn(&Value) -> bool) -> Value {
-        for _ in 0..400 {
-            let status = self.status();
-            if check(&status) {
-                return status;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        panic!("timed out waiting for {what}: {}", self.status());
-    }
-}
-
-impl Drop for Home {
-    fn drop(&mut self) {
-        let _ = self.command(&["executor", "stop"]).output();
-    }
-}
-
-/// 每次连接拉起一个 `zcode executor --stdio` 代理，记下它的 pid（测试要杀它）。
-struct Proxies {
-    home_env: Vec<(String, String)>,
-    cwd: PathBuf,
-    pids: Mutex<Vec<u32>>,
-    children: Mutex<Vec<tokio::process::Child>>,
-}
-
-impl Proxies {
-    fn new(home: &Home) -> Arc<Self> {
-        Arc::new(Self {
-            home_env: home.env(),
-            cwd: home.work.clone(),
-            pids: Mutex::default(),
-            children: Mutex::default(),
-        })
-    }
-    fn last(&self) -> u32 {
-        *self.pids.lock().unwrap().last().unwrap()
-    }
-
-    fn count(&self) -> usize {
-        self.pids.lock().unwrap().len()
-    }
-}
-
-#[async_trait]
-impl Connector for Proxies {
-    async fn connect(&self) -> Result<Box<dyn Link>, LinkError> {
-        let mut child = tokio::process::Command::new(BIN)
-            .args(["executor", "--stdio"])
-            .env_clear()
-            .envs(self.home_env.clone())
-            .current_dir(&self.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|error| LinkError::Connect(error.to_string()))?;
-        self.pids.lock().unwrap().push(child.id().unwrap());
-        let link = stream_link(
-            child.stdout.take().unwrap(),
-            child.stdin.take().unwrap(),
-            "proxy",
-            MAX_FRAME,
-        );
-        self.children.lock().unwrap().push(child);
-        Ok(Box::new(link))
-    }
-
-    fn describe(&self) -> String {
-        "test proxy".to_owned()
-    }
-}
-
-async fn client(proxies: &Arc<Proxies>, instance: &str) -> ExecClient {
-    let mut options = ClientOptions::new("test", instance);
-    options.reconnect = Reconnect {
-        attempts: 20,
-        delay: Duration::from_millis(100),
-        max_delay: Duration::from_millis(100),
-    };
-    ExecClient::connect(proxies.clone(), options).await.unwrap()
-}
+use resident::{BIN, Home, Proxies, client, kill};
 
 fn context(operation: &str) -> OperationContext {
     OperationContext {
@@ -204,15 +54,8 @@ fn command(root: &Path, task: &str, text: &str) -> StartCommand {
         hook: None,
         on_timeout: None,
         socket: None,
+        env: Default::default(),
     }
-}
-
-fn kill(pid: u32) {
-    let status = std::process::Command::new("/bin/kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .unwrap();
-    assert!(status.success());
 }
 
 #[tokio::test(flavor = "multi_thread")]

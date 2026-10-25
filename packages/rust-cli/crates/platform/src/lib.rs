@@ -242,6 +242,19 @@ impl ModelEndpoints for Platform {
         selection: &ModelSelection,
         rejected: Option<&ModelEndpoint>,
     ) -> Result<ModelEndpoint, ModelError> {
+        self.endpoint_with_output_limit(selection, rejected, None)
+            .await
+    }
+
+    /// 修 bug（工作线 F95，platform.md §3.3、tools-more.md §5 表后）：以前 `maxOutputTokens` 补丁的输入只是配置的上限
+    /// （与 `ZCODE_MAX_OUTPUT_TOKENS` 取小），目录模型上 WebSearch 旁路请求自己的 `min(4096, 上限)` 被改写成配置的上限
+    /// （GLM-5.3-Flash 发 128000）；Node 的 option map 以请求自己的上限为输入，发 4096。现在请求交来的上限也参与取小。
+    async fn endpoint_with_output_limit(
+        &self,
+        selection: &ModelSelection,
+        rejected: Option<&ModelEndpoint>,
+        output_limit: Option<u64>,
+    ) -> Result<ModelEndpoint, ModelError> {
         let current = self.registry.current().await;
         let Some(template) = current.snapshot.find(selection) else {
             // 这个团队项目已过期 / 未分配：照 App 的文案提示（platform.md §9.2）。
@@ -260,8 +273,11 @@ impl ModelEndpoints for Platform {
                 ),
             });
         };
-        let body_patches =
-            template.patches(selection.reasoning.as_deref(), self.max_output_tokens)?;
+        let max_output = [self.max_output_tokens, output_limit]
+            .into_iter()
+            .flatten()
+            .min();
+        let body_patches = template.patches(selection.reasoning.as_deref(), max_output)?;
         let previous = match rejected.map(|endpoint| &endpoint.credential) {
             Some(Credential::ApiKey(previous)) => Some(previous),
             Some(Credential::None) | None => None,

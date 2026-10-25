@@ -28,12 +28,14 @@ use tokio::sync::{Notify, mpsc};
 
 use crate::{AllowAll, ExecLedger, ExecServer, MemoryLedger, ServerConfig};
 
-/// 执行环境的替身：写文件计数（看有没有重跑）、可以卡住等测试放行；`watch_command` 的事件由测试推入。
+/// 执行环境的替身：写文件计数（看有没有重跑）、可以卡住等测试放行；`watch_command` 的事件由测试推入；记下每条起的命令
+/// 带的环境覆盖（F96）。
 #[derive(Default)]
 pub(crate) struct TestMachine {
     pub writes: AtomicUsize,
     pub gate: Option<Arc<Notify>>,
     pub events: Mutex<Option<mpsc::UnboundedReceiver<Result<CommandEvent, EnvError>>>>,
+    pub started: Mutex<Vec<rust_cli_kernel_api::env_command::EnvOverrides>>,
 }
 
 #[async_trait]
@@ -89,8 +91,9 @@ impl Commands for TestMachine {
         &self,
         _: &WorkspaceRef,
         _: Ctx,
-        _: StartCommand,
+        request: StartCommand,
     ) -> Result<(), EnvError> {
+        self.started.lock().unwrap().push(request.env);
         Ok(())
     }
 
@@ -138,7 +141,17 @@ pub(crate) async fn server_with(
     ledger: Arc<dyn ExecLedger>,
     config: ServerConfig,
 ) -> ExecServer {
-    let machine = MachineEnv::new(machine, Arc::new(NoMcpTransport));
+    server_with_mcp(machine, Arc::new(NoMcpTransport), ledger, config).await
+}
+
+/// 同 [`server_with`]，MCP 的管道用给的传输（R5）。
+pub(crate) async fn server_with_mcp(
+    machine: Arc<TestMachine>,
+    mcp: Arc<dyn rust_cli_kernel_api::mcp::McpTransport>,
+    ledger: Arc<dyn ExecLedger>,
+    config: ServerConfig,
+) -> ExecServer {
+    let machine = MachineEnv::new(machine, mcp);
     ExecServer::start(machine, ledger, Arc::new(AllowAll), config)
         .await
         .unwrap()
@@ -176,6 +189,7 @@ pub(crate) fn hello(epoch: u64) -> Hello {
         capabilities: Capabilities::ports(),
         heartbeat_ms: None,
         credentials: None,
+        session_env: None,
     }
 }
 

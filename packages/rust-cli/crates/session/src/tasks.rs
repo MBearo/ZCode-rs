@@ -3,6 +3,12 @@
 //! 后台命令的事实在执行环境的账本里，后台子代理在 agents 里；这里只汇总给前端看，停止交给 agents 的
 //! 同一条 TaskStop 路径，会话 actor 不另记任务表。远端执行 R4（docs/specs/rust-cli/remote-exec.md §21.6）：连上的远端
 //! 机器上的后台命令也列出来（各台机器的执行器有自己的账本），条目带机器名；Shell 详情按任务 ID 依次问各台机器。
+//!
+//! F96（remote-exec.md §23.3）：重连中的机器不问（它的调用要等重连，SSH 又一直重连）；用它上一份的条目，标
+//! `reconnecting`。“上一份”由快照的唯一 owner——会话（[`LastSeen`]，`Session` 持有）——记着，不靠超时。
+
+use std::collections::BTreeMap;
+use std::sync::{Mutex, PoisonError};
 
 use rust_cli_kernel_api::env::{OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{ReadText, TextRead};
@@ -20,13 +26,38 @@ use crate::actor::Actor;
 /// 输出文件超过这个大小时不读（详情页只显示末尾）。
 const OUTPUT_MAX_BYTES: u64 = 1 << 20;
 
+/// 每台远端机器最后一次问到的后台命令（F96）：机器名 → 条目。锁只在取放时拿着，不跨 await。
+#[derive(Default)]
+pub(crate) struct LastSeen(Mutex<BTreeMap<String, Vec<BackgroundEntry>>>);
+
+impl LastSeen {
+    fn map(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Vec<BackgroundEntry>>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// 重连中的这台机器上一份的条目，每条标 `reconnecting`；没问到过时是空的。
+    fn stale(&self, machine: &str) -> Vec<BackgroundEntry> {
+        self.map()
+            .get(machine)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .map(|entry| BackgroundEntry {
+                reconnecting: true,
+                ..entry
+            })
+            .collect()
+    }
+}
+
 /// 会话里还在跑的后台命令（带输出末尾）与后台子代理。在调用方的任务里跑，不占用 actor。
 pub(crate) async fn background_entries(
     deps: &SessionDeps,
+    last: &LastSeen,
     workspace: &WorkspaceRef,
     session: &SessionId,
 ) -> Vec<BackgroundEntry> {
-    let mut entries = running_shells(deps, workspace, session, true).await;
+    let mut entries = running_shells(deps, last, workspace, session, true).await;
     entries.extend(deps.agents.background_entries(session).await);
     entries
 }
@@ -36,10 +67,11 @@ pub(crate) async fn background_entries(
 /// 后台任务的顺序同 [`background_entries`]：命令在前、子代理在后。在调用方的任务里跑，不占用 actor。
 pub(crate) async fn snapshot(
     deps: &SessionDeps,
+    last: &LastSeen,
     workspace: &WorkspaceRef,
     session: &SessionId,
 ) -> TasksSnapshot {
-    let mut background = running_shells(deps, workspace, session, false).await;
+    let mut background = running_shells(deps, last, workspace, session, false).await;
     let agents = deps.agents.tasks_snapshot(session).await;
     background.extend(agents.background);
     TasksSnapshot {
@@ -74,19 +106,56 @@ fn places(deps: &SessionDeps, workspace: &WorkspaceRef) -> Vec<Place> {
     places
 }
 
-/// 本机与连上的远端机器的账本里还在跑的后台命令；`tail` 为真时带输出文件的末尾。
+/// 本机与连上的远端机器的账本里还在跑的后台命令；`tail` 为真时带输出文件的末尾。重连中的机器不问，用 `last` 里它
+/// 上一份的条目（F96）；问到的远端机器记成新的上一份，离开注册表的机器的上一份丢掉。
 async fn running_shells(
     deps: &SessionDeps,
+    last: &LastSeen,
     workspace: &WorkspaceRef,
     session: &SessionId,
     tail: bool,
 ) -> Vec<BackgroundEntry> {
-    // 各台机器同时问（一台慢不拖住别的台；结果仍按本机在前、远端按名字的顺序）。
     let places = places(deps, workspace);
-    let lists =
-        futures_util::future::join_all(places.iter().map(|place| running_on(place, session, tail)))
-            .await;
-    lists.into_iter().flatten().collect()
+    // 每台机器在不在重连只看一次：下面“问哪些”与“结果归哪台”都按这一次的答案，不会因为中途状态变了而错位。
+    let reconnecting: Vec<bool> = places
+        .iter()
+        .map(|place| {
+            place
+                .name
+                .as_deref()
+                .is_some_and(|name| deps.machines.reconnecting(name))
+        })
+        .collect();
+    // 各台机器同时问（一台慢不拖住别的台；结果仍按本机在前、远端按名字的顺序）。
+    let asked = futures_util::future::join_all(
+        places
+            .iter()
+            .zip(&reconnecting)
+            .filter(|(_, reconnecting)| !**reconnecting)
+            .map(|(place, _)| running_on(place, session, tail)),
+    )
+    .await;
+    let mut asked = asked.into_iter();
+    let mut entries = Vec::new();
+    for (place, reconnecting) in places.iter().zip(reconnecting) {
+        let found = if reconnecting {
+            place
+                .name
+                .as_deref()
+                .map(|name| last.stale(name))
+                .unwrap_or_default()
+        } else {
+            let found = asked.next().unwrap_or_default();
+            if let Some(name) = &place.name {
+                last.map().insert(name.clone(), found.clone());
+            }
+            found
+        };
+        entries.extend(found);
+    }
+    last.map()
+        .retain(|name, _| places.iter().any(|place| place.name.as_ref() == Some(name)));
+    entries
 }
 
 /// 一台机器的账本里还在跑的后台命令。
@@ -122,6 +191,7 @@ async fn running_on(place: &Place, session: &SessionId, tail: bool) -> Vec<Backg
             status: info.status,
             output,
             machine: place.name.clone(),
+            reconnecting: false,
         });
     }
     entries
@@ -208,9 +278,17 @@ async fn output_preview(place: &Place, path: &rust_cli_kernel_api::env::EnvPath)
         Ok(TextRead::Text(slice)) => {
             let lines: Vec<&str> = slice.content.lines().collect();
             let tail = &lines[lines.len().saturating_sub(SHELL_DETAIL_LINES)..];
+            // 缺陷修复（Docker 试用 L11，remote-exec.md §25.4.6）：`total_lines` 是 `\n` 的个数加一（Read 的读法），框里的行
+            // 用 `lines()` 切；输出以换行结尾时（命令的输出一般都是）总数比切出的行多一。不是两次读之间多了一行的竞态：
+            // 本机也一样。
+            let total = if slice.content.ends_with('\n') {
+                slice.total_lines.saturating_sub(1)
+            } else {
+                slice.total_lines
+            };
             ShellOutput::Tail {
                 lines: tail.iter().map(|line| (*line).to_owned()).collect(),
-                total: slice.total_lines,
+                total,
             }
         }
         Ok(TextRead::TooLarge { size }) => ShellOutput::TooLarge { bytes: size },

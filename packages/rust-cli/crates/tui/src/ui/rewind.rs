@@ -23,6 +23,15 @@ fn basename(path: &str) -> String {
     )
 }
 
+/// 列表与确认页里的文件名：远端的写 `dev-a:README.md`（F98，remote-exec.md §25.4.5，Docker 试用 L8：以前看不出文件在哪
+/// 台机器上）。
+fn shown(change: &FileChange) -> String {
+    match &change.machine {
+        Some(machine) => format!("{machine}:{}", basename(&change.path)),
+        None => basename(&change.path),
+    }
+}
+
 fn totals(files: &[FileChange]) -> (u64, u64) {
     files
         .iter()
@@ -34,7 +43,7 @@ fn summary(files: &[FileChange]) -> String {
     let (additions, deletions) = totals(files);
     match files {
         [] => "No code changes".to_owned(),
-        [one] => format!("{} +{additions} -{deletions}", basename(&one.path)),
+        [one] => format!("{} +{additions} -{deletions}", shown(one)),
         many => format!("{} files changed +{additions} -{deletions}", many.len()),
     }
 }
@@ -52,7 +61,11 @@ fn changes_from(entries: &[Entry], message: &MessageId) -> Vec<FileChange> {
         .unwrap_or(entries.len());
     let mut out: Vec<FileChange> = Vec::new();
     for change in entries[start..].iter().flat_map(|e| e.option.files.iter()) {
-        match out.iter_mut().find(|c| c.path == change.path) {
+        // 按（机器，路径）合计：两台机器上的同名文件分开算。
+        match out
+            .iter_mut()
+            .find(|c| c.path == change.path && c.machine == change.machine)
+        {
             Some(seen) => {
                 seen.additions += change.additions;
                 seen.deletions += change.deletions;
@@ -68,9 +81,9 @@ fn code_text(files: &[FileChange]) -> String {
     let (additions, deletions) = totals(files);
     let label = match files {
         [] => return "The code has not changed (nothing will be restored).".to_owned(),
-        [one] => basename(&one.path),
-        [a, b] => format!("{} and {}", basename(&a.path), basename(&b.path)),
-        [first, rest @ ..] => format!("{} and {} other files", basename(&first.path), rest.len()),
+        [one] => shown(one),
+        [a, b] => format!("{} and {}", shown(a), shown(b)),
+        [first, rest @ ..] => format!("{} and {} other files", shown(first), rest.len()),
     };
     format!("The code will be restored +{additions} -{deletions} in {label}.")
 }

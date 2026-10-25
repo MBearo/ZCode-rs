@@ -164,6 +164,7 @@ pub(crate) fn changes(artifacts: &[Artifact]) -> Vec<FileChange> {
                 path,
                 additions,
                 deletions,
+                machine: None,
             }
         })
         .collect();

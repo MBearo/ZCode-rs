@@ -176,6 +176,7 @@ fn version_one_frames_still_decode() {
             ]),
             heartbeat_ms: None,
             credentials: None,
+            session_env: None,
         },
         &Body::empty(),
     )

@@ -358,7 +358,8 @@ async fn a_model_without_native_web_search_gets_the_recoverable_error() {
 
 /// 工作线 F93（tools-more.md §5，照 Node `Math.min(4096, model.optionSpecs.maxOutputTokens.max)`）：旁路请求的
 /// `max_tokens` 是 4096 与当前模型生效配置的输出上限的较小值；答不出能力或配置没给上限时是 4096。修改前固定 4096，
-/// 上限 1024 的模型（glm-4v-flash）也发 4096。
+/// 上限 1024 的模型（glm-4v-flash）也发 4096。工作线 F95（tools-more.md §5 表后）：同一个值也交给 Provider 补丁
+/// （`provider_max_output_tokens`），目录模型上发出的也是它；修改前不交，补丁写配置的上限。
 #[tokio::test]
 async fn the_side_request_caps_max_tokens_at_the_configured_output_limit() {
     let run = |web_search: Option<bool>, max_output_tokens: Option<u64>| async move {
@@ -376,7 +377,12 @@ async fn the_side_request_caps_max_tokens_at_the_configured_output_limit() {
         tool.call(json!({"query": "q"}), context, progress)
             .await
             .unwrap();
-        scripted.requests()[0].max_tokens
+        let request = scripted.requests().remove(0);
+        assert_eq!(
+            request.options.provider_max_output_tokens,
+            Some(request.max_tokens)
+        );
+        request.max_tokens
     };
     assert_eq!(run(Some(true), Some(1024)).await, 1024);
     assert_eq!(run(Some(true), Some(128_000)).await, 4096);

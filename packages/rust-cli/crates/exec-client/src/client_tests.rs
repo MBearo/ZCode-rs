@@ -90,9 +90,10 @@ async fn a_call_is_answered_and_its_reply_is_acked() {
     ));
     server.await.unwrap();
     client.close().await;
+    // 关闭之后的调用不会发出去（F96，remote-exec.md §23.6）。
     assert_eq!(
         client.call(stat(), Body::empty()).await,
-        Err(ClientError::Closed)
+        Err(ClientError::NotSent(Box::new(ClientError::Closed)))
     );
 }
 

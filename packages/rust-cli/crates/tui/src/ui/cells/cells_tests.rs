@@ -23,6 +23,8 @@ pub(crate) fn ctx<'a>(palette: &'a Palette, expanded: bool) -> Ctx<'a> {
         workspace: "/w",
         workspace_label: "~/w",
         version: "1.0.0",
+        mcp_machines: &[],
+        machines: &[],
         markdown: None,
     }
 }
@@ -40,7 +42,7 @@ pub(crate) fn row(id: u64, body: Body) -> Row {
 pub(crate) fn text(rows: &[Row], expanded: bool) -> Vec<String> {
     let palette = Palette::new(ColorLevel::Ansi16, None);
     let ctx = ctx(&palette, expanded);
-    build(rows, false)
+    build(rows, false, &[])
         .iter()
         .flat_map(|cell| render(cell, &ctx))
         .map(|line| plain(&line))
@@ -183,16 +185,16 @@ fn the_startup_header_names_the_model_and_directory() {
 #[test]
 fn live_cells_are_the_ones_still_changing() {
     let rows = [row(1, agent("x", true))];
-    assert!(build(&rows, false)[0].live());
+    assert!(build(&rows, false, &[])[0].live());
     let rows = [row(1, agent("x", false))];
-    assert!(!build(&rows, false)[0].live());
+    assert!(!build(&rows, false, &[])[0].live());
 }
 
 #[test]
 fn running_dots_blink_every_600_ms() {
     let palette = Palette::new(ColorLevel::Ansi16, None);
     let row = tool(1, "Bash", ToolStatus::Running, json!({"command": "x"}));
-    let cell = &build(std::slice::from_ref(&row), false)[0];
+    let cell = &build(std::slice::from_ref(&row), false, &[])[0];
     let at = |ms| {
         let ctx = Ctx {
             elapsed: Duration::from_millis(ms),

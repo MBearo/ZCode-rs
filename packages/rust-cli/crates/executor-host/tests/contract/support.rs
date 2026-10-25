@@ -38,15 +38,25 @@ impl std::ops::Deref for Machine {
 
 /// 把一个 `LocalEnvironment` 装成被测的机器。
 pub async fn machine(kind: Kind, local: LocalEnvironment) -> Machine {
-    let local = MachineEnv::new(Arc::new(local), Arc::new(NoMcpTransport));
+    machine_with_mcp(kind, local, Arc::new(NoMcpTransport)).await
+}
+
+/// 同 [`machine`]，MCP 的管道用给的传输（R5，remote-exec.md §22）；loopback 时执行器报告 `mcp` 能力位。
+pub async fn machine_with_mcp(
+    kind: Kind,
+    local: LocalEnvironment,
+    mcp: Arc<dyn rust_cli_kernel_api::mcp::McpTransport>,
+) -> Machine {
+    let local = MachineEnv::new(Arc::new(local), mcp);
     match kind {
         Kind::Local => Machine {
             env: local,
             _loopback: None,
         },
         Kind::Loopback => {
-            let config =
+            let mut config =
                 ServerConfig::new("contract", std::env::consts::OS, std::env::consts::ARCH);
+            config.capabilities = rust_cli_exec_wire::handshake::Capabilities::executor();
             let server = ExecServer::start(
                 local,
                 Arc::new(MemoryLedger::default()),

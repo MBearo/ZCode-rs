@@ -59,6 +59,7 @@ fn start_command_round_trips_with_every_option() {
             deadline_ms: Some(600_000),
         }),
         socket: None,
+        env: Default::default(),
     });
 }
 
@@ -285,4 +286,23 @@ fn monitor_payloads_round_trip_and_older_ones_still_parse() {
         source: crate::monitor::MonitorSource::Socket,
         output: crate::env::EnvPath::new("/t/b1.output"),
     });
+}
+
+#[test]
+fn start_command_overrides_are_not_serialized() {
+    // F96（remote-exec.md §23.5）：环境的覆盖只在执行器里由服务端填，不进序列化（也就不进 env-local 的去重指纹）。
+    let mut start: StartCommand = serde_json::from_value(json!({
+        "command": "true",
+        "cwd": "/w",
+        "timeout_ms": null,
+        "task": "b1",
+    }))
+    .unwrap();
+    assert!(start.env.is_empty());
+    let plain = serde_json::to_string(&start).unwrap();
+    start
+        .env
+        .insert("SSH_AUTH_SOCK".to_owned(), Some("/tmp/a".to_owned()));
+    start.env.insert("DISPLAY".to_owned(), None);
+    assert_eq!(serde_json::to_string(&start).unwrap(), plain);
 }

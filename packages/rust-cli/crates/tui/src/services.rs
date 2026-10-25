@@ -185,4 +185,7 @@ pub struct Services {
     pub question_timeout: Option<crate::ui::afk::QuestionTimeout>,
     /// 远端机器（remote-exec.md §21.2）：`/machines` 与机器状态行；没有时 `/machines` 提示不可用、状态行不出现。
     pub machines: Option<Arc<dyn crate::machines::Machines>>,
+    /// 绑定到远端机器的 MCP 服务器（服务器名，机器名；R5，remote-exec.md §22.8）：MCP 工具行标出机器。入口从同一份
+    /// MCP 设置给出（启动时定了，之后不变）。
+    pub mcp_machines: Vec<(String, String)>,
 }

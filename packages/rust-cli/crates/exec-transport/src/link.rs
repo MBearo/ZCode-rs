@@ -15,6 +15,10 @@ pub enum LinkError {
     /// 连不上（起不了进程、对方不在）。
     #[error("cannot connect: {0}")]
     Connect(String),
+    /// 目标拒绝了这次连接，再连也一样（ssh 认证失败、主机密钥不对、远端的执行器程序不在了）：由知道传输的连接器判断
+    /// （ssh-connect），客户端看到它就不再重连（远端执行 F96，remote-exec.md §23.4）。内容是原因原文。
+    #[error("{0}")]
+    Rejected(String),
 }
 
 /// 一条连接的发送方向。
@@ -58,10 +62,26 @@ pub trait Connector: Send + Sync {
     fn describe(&self) -> String;
 }
 
+/// 部署的进度（远端执行 F98，remote-exec.md §25.4.2）：第一次连接时状态行分出“上传执行器”一步。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProvisionStep {
+    /// 开始上传执行器：要上传的字节数。
+    Uploading { bytes: u64 },
+}
+
 /// 让目标上有可用的执行器（SSH：探测、上传、校验；以后的云：建执行器）。结果是在目标上启动执行器的命令。
 #[async_trait]
 pub trait Provisioner: Send + Sync {
     async fn provision(&self) -> Result<Provisioned, ProvisionError>;
+
+    /// 同 [`Provisioner::provision`]，进度交给 `progress`（F98）。缺省不报告进度。
+    async fn provision_reporting(
+        &self,
+        progress: &(dyn Fn(ProvisionStep) + Send + Sync),
+    ) -> Result<Provisioned, ProvisionError> {
+        let _ = progress;
+        self.provision().await
+    }
 }
 
 /// 部署失败的原因（remote-exec.md §19.9）：连接状态机按它显示（R4 的 `/machines` 与状态行）。

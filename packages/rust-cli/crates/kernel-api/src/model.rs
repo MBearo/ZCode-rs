@@ -169,6 +169,12 @@ pub struct RequestOptions {
     /// 子代理的主循环、压缩，以及子代理里的工具与 hook 发的旁路请求都带。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<crate::ids::AgentId>,
+    /// 交给 Provider 补丁的输出上限（工作线 F95，docs/specs/rust-cli/model.md §9）：目录模型的 `maxOutputTokens` map 以
+    /// `min(配置的上限, 这个值)` 为输入（Node 的 option map 以请求自己的 `maxOutputTokens` 为输入）。None 时补丁的输入是
+    /// 配置的上限。只有请求自己的上限就是 Node 的值的请求才给（现在是 WebSearch 的旁路请求与自动标题，tools-more.md §5、
+    /// titles.md §3）；没有补丁的端点（显式覆盖）不看它。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_max_output_tokens: Option<u32>,
 }
 
 /// 模型输出的格式约束（Anthropic `output_config.format`）。

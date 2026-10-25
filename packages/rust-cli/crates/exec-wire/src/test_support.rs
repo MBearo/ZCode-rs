@@ -15,6 +15,7 @@ use crate::dto::files::{
     GrepLine, GrepLineKind, GrepMode, GrepOutcome, GrepSearch, GrepSubmatch, PdfRender, PutFile,
     ReadText, RenderPdfPages, TextRead, TextSlice, WritePrecondition,
 };
+use crate::dto::mcp::{McpDeclared, McpTransport};
 use crate::dto::rewind::{RestoreFile, RewindConflict, RewindPlan, RewindStatus};
 use crate::dto::shell::{
     BackgroundInfo, BackgroundStatus, BackgroundStop, BackgroundTask, ShellState,
@@ -96,7 +97,7 @@ pub(crate) fn start_command() -> StartCommand {
     }
 }
 
-/// 29 种请求各一个。
+/// 35 种请求各一个（R5 加了 MCP 管道的四种与期望集合）。
 pub(crate) fn requests() -> Vec<Request> {
     let ws = workspace;
     vec![
@@ -252,10 +253,54 @@ pub(crate) fn requests() -> Vec<Request> {
                 last_page: Some(2),
             },
         },
+        Request::McpConnect {
+            workspace: ws(),
+            server: "browser-a".to_owned(),
+            transport: McpTransport::Stdio {
+                command: "npx".to_owned(),
+                args: vec!["@playwright/mcp".to_owned()],
+                env: BTreeMap::from([("TOKEN".to_owned(), "${TOKEN}".to_owned())]),
+                cwd: Some("tools".to_owned()),
+            },
+        },
+        Request::McpSend {
+            connection: "e1-mcp-0".to_owned(),
+            message: serde_json::json!({"jsonrpc": "2.0", "id": 0, "method": "initialize"}),
+        },
+        Request::McpEvents {
+            connection: "e1-mcp-0".to_owned(),
+        },
+        Request::McpClose {
+            connection: "e1-mcp-0".to_owned(),
+        },
+        Request::McpDeclare {
+            workspace: ws(),
+            servers: vec![McpDeclared {
+                server: "docs".to_owned(),
+                transport: McpTransport::Http {
+                    url: "https://mcp.example.com/mcp".to_owned(),
+                    headers: BTreeMap::from([(
+                        "Authorization".to_owned(),
+                        "Bearer ${TOKEN}".to_owned(),
+                    )]),
+                },
+            }],
+        },
+        Request::EnvUpdate {
+            mode: crate::dto::env::EnvMode::Merge,
+            vars: BTreeMap::from([
+                (
+                    "SSH_AUTH_SOCK".to_owned(),
+                    Some("/tmp/ssh-x/agent.1".to_owned()),
+                ),
+                ("DISPLAY".to_owned(), None),
+            ]),
+            injected: vec!["TOKEN".to_owned()],
+        },
     ]
 }
 
-/// 27 种回复各一个（两个流没有回复）。
+/// 31 种回复各一个（三个流没有回复）。
 pub(crate) fn replies() -> Vec<Reply> {
     let conflict = RewindConflict {
         path: "/w/a".to_owned(),
@@ -387,5 +432,14 @@ pub(crate) fn replies() -> Vec<Reply> {
         Reply::RenderPdfPages(PdfRender::Rendered {
             pages: vec![blob(0, 1), blob(1, 1)],
         }),
+        Reply::McpConnect {
+            connection: "e1-mcp-0".to_owned(),
+        },
+        Reply::McpSend,
+        Reply::McpClose,
+        Reply::McpDeclare {
+            closed: vec!["old".to_owned()],
+        },
+        Reply::EnvUpdate,
     ]
 }

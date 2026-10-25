@@ -2,8 +2,8 @@
 //!
 //! ```text
 //! 连上 → hello / welcome → 补发还没结束的调用 → 读、写、心跳三个任务 → 任一个结束（断线）
-//!   └─ 还能重连：按退避等一会（0.5 s 起翻倍、有上限），再连上、握手（epoch + 1）、补发 …
-//!   └─ 不能：还没结束的调用都以 Disconnected 结束
+//!   └─ 还能重连：按退避等一会（0.5 s 起翻倍、有上限），再连上、握手（epoch + 1）、补发 …；次数不限时一直重连（F96）
+//!   └─ 不能（次数用完、被拒绝、协议不对）：还没结束的调用都以它结束（没发出去的是 NotSent）
 //! ```
 //!
 //! 每一步都发到连接的状态（`ConnectionState`，§19.8）：只有这个任务改它。
@@ -30,6 +30,14 @@ use tokio_util::sync::CancellationToken;
 use crate::state::{Control, Pending, Shared, Waiter, fail};
 use crate::{Answer, ClientError, ConnectionState, Reconnect, StreamEvent};
 
+/// 传输的错误 → 客户端的错误：目标拒绝（`Rejected`，再连也一样）单独一种，其余都是连不上（F96，remote-exec.md §23.4）。
+fn link_error(error: rust_cli_exec_transport::LinkError) -> ClientError {
+    match error {
+        rust_cli_exec_transport::LinkError::Rejected(message) => ClientError::Rejected(message),
+        other => ClientError::Connect(other.to_string()),
+    }
+}
+
 /// 一条握手完成的连接。
 pub(crate) struct Live {
     sink: Box<dyn FrameSink>,
@@ -53,11 +61,10 @@ async fn next_frame(
     reassembler: &mut Reassembler,
 ) -> Result<Frame, ClientError> {
     loop {
-        let bytes = source
-            .recv()
-            .await
-            .map_err(|error| ClientError::Connect(error.to_string()))?
-            .ok_or_else(|| ClientError::Connect("the executor closed the connection".to_owned()))?;
+        let bytes =
+            source.recv().await.map_err(link_error)?.ok_or_else(|| {
+                ClientError::Connect("the executor closed the connection".to_owned())
+            })?;
         match reassembler.push(bytes)? {
             Received::Frame(frame) => return Ok(frame),
             Received::Pending | Received::Unknown(_) => {}
@@ -70,10 +77,7 @@ pub(crate) async fn connect_once(
     connector: &dyn Connector,
     shared: &Shared,
 ) -> Result<Live, ClientError> {
-    let link = connector
-        .connect()
-        .await
-        .map_err(|error| ClientError::Connect(error.to_string()))?;
+    let link = connector.connect().await.map_err(link_error)?;
     let (mut sink, mut source) = link.split();
     let epoch = {
         let mut state = shared.state();
@@ -89,10 +93,11 @@ pub(crate) async fn connect_once(
         capabilities: Capabilities::ports(),
         heartbeat_ms: Some(u64::try_from(options.heartbeat.as_millis()).unwrap_or(u64::MAX)),
         credentials: options.credentials.clone(),
+        session_env: None,
     };
     sink.send(Frame::encode(Kind::Hello, &hello, &Body::empty())?)
         .await
-        .map_err(|error| ClientError::Connect(error.to_string()))?;
+        .map_err(link_error)?;
     let mut reassembler = Reassembler::default();
     let first = tokio::time::timeout(
         liveness(shared),
@@ -154,6 +159,7 @@ pub(crate) async fn supervise(
             .send_replace(ConnectionState::Reconnecting {
                 attempt: 0,
                 reason: reason.clone(),
+                retry_at: None,
             });
         tracing::warn!(target: "exec_client", reason = %reason, "executor connection lost");
         match reconnect(&shared, connector.as_ref(), &reason).await {
@@ -161,7 +167,7 @@ pub(crate) async fn supervise(
             Err(error) => {
                 let error = match error {
                     ClientError::Closed => ClientError::Closed,
-                    refused @ ClientError::Refused { .. } => refused,
+                    final_ @ (ClientError::Refused { .. } | ClientError::Rejected(_)) => final_,
                     other => ClientError::Disconnected(format!("{reason}; {other}")),
                 };
                 let mut state = shared.state();
@@ -189,6 +195,8 @@ pub fn backoff(policy: Reconnect, attempt: u32) -> std::time::Duration {
         .min(policy.max_delay.max(policy.delay))
 }
 
+/// 重连，直到连上、次数用完、被拒绝或客户端关闭。每次等之前把“下一次的时刻”写进连接的状态（F96，remote-exec.md
+/// §23.4：状态行的倒计时读它），开始连时写“第几次正在连”；失败时把这次的原因记下，作为下一次等待时的原因。
 async fn reconnect(
     shared: &Shared,
     connector: &dyn Connector,
@@ -196,24 +204,51 @@ async fn reconnect(
 ) -> Result<Live, ClientError> {
     let policy = shared.options.reconnect;
     let mut last = ClientError::Connect("reconnecting is off".to_owned());
-    for attempt in 1..=policy.attempts {
+    let mut reason = reason.to_owned();
+    let mut attempt: u32 = 0;
+    while policy.attempts.is_none_or(|limit| attempt < limit) {
+        attempt = attempt.saturating_add(1);
+        let retry_at = Instant::now() + backoff(policy, attempt);
+        // “立即重试”（F98）：先登记等待、再把状态写成“在等”，之后的 `retry_now` 一定叫得醒这一次。
+        let retry = shared.retry.notified();
+        tokio::pin!(retry);
+        retry.as_mut().enable();
+        shared
+            .connection
+            .send_replace(ConnectionState::Reconnecting {
+                attempt: attempt - 1,
+                reason: reason.clone(),
+                retry_at: Some(retry_at),
+            });
         tokio::select! {
-            () = tokio::time::sleep(backoff(policy, attempt)) => {}
+            () = tokio::time::sleep_until(retry_at) => {}
+            () = &mut retry => {
+                tracing::info!(target: "exec_client", attempt, "retrying the connection now");
+            }
             () = shared.shutdown.cancelled() => return Err(ClientError::Closed),
         }
         shared
             .connection
             .send_replace(ConnectionState::Reconnecting {
                 attempt,
-                reason: reason.to_owned(),
+                reason: reason.clone(),
+                retry_at: None,
             });
         match connect_once(connector, shared).await {
             Ok(live) => return Ok(live),
-            // 被拒绝、协议不对：再连也一样。
-            Err(error @ (ClientError::Refused { .. } | ClientError::Protocol(_))) => {
+            // 被拒绝、协议不对、目标拒绝（ssh 认证失败等）：再连也一样。
+            Err(
+                error @ (ClientError::Refused { .. }
+                | ClientError::Protocol(_)
+                | ClientError::Rejected(_)),
+            ) => {
                 return Err(error);
             }
-            Err(error) => last = error,
+            Err(error) => {
+                tracing::debug!(target: "exec_client", attempt, %error, "reconnect attempt failed");
+                reason = error.to_string();
+                last = error;
+            }
         }
     }
     Err(last)

@@ -113,6 +113,22 @@ pub(crate) async fn serve(inner: Arc<Inner>, link: Box<dyn Link>) -> Result<(), 
         refuse(sink.as_mut(), RefuseCode::Stale, message).await;
         return Ok(());
     }
+    // SSH 的代理加在 hello 里的这条 ssh 会话的环境（F96，remote-exec.md §23.5）：先于这条连接上的任何请求生效（请求在
+    // welcome 之后才读）。不合规则时记 warn、忽略，连接照常。没报告 `env` 的执行器不认它。
+    if let Some(session) = hello.session_env.clone()
+        && inner
+            .config
+            .capabilities
+            .contains(rust_cli_exec_wire::handshake::Capability::Env)
+        && let Err(error) = inner.env.update(
+            &instance,
+            rust_cli_exec_wire::dto::env::EnvMode::Merge,
+            session,
+            Vec::new(),
+        )
+    {
+        tracing::warn!(target: "exec_server", client = %instance, %error, "the session environment was ignored");
+    }
     let config = &inner.config;
     let welcome = Welcome {
         protocol: PROTOCOL,

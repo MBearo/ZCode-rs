@@ -7,7 +7,7 @@ use serde_json::Value;
 use super::words::{self, Counted};
 use super::{
     Ctx, DETAIL, Dot, INDENT, bold, detail_line, detail_text, dim, dot, more_lines, output_lines,
-    patch, red, relative,
+    patch, red, shown_path,
 };
 use crate::ui::markdown;
 use crate::ui::text::{truncate, truncate_line, wrap};
@@ -64,7 +64,7 @@ pub(super) fn head_parts(tool: &ToolRow, ctx: &Ctx<'_>) -> (String, Option<Strin
     let path = |keys: &[&str]| {
         keys.iter()
             .find_map(|key| args[*key].as_str())
-            .map(|path| relative(path, ctx.workspace))
+            .map(|path| shown_path(path, tool, ctx))
     };
     // R5-1：输入不是合法 JSON（标记对象）时参数位置写固定的说明，不按工具解析参数。
     if let Some(unparsed) = rust_cli_kernel_api::unparsed_input::parse(args) {
@@ -121,14 +121,18 @@ pub(super) fn head_parts(tool: &ToolRow, ctx: &Ctx<'_>) -> (String, Option<Strin
     (name.to_owned(), args_text, "")
 }
 
+/// 这次调用在哪台远端机器上：输入的 `machine`、MCP 服务器的绑定，或结果的 `display.machine`（TaskStop 停的远端命令，
+/// F98，remote-exec.md §25.4.5）。
+fn remote_machine<'a>(tool: &'a ToolRow, ctx: &'a Ctx<'_>) -> Option<&'a str> {
+    crate::ui::machines::remote_of(&tool.name, &tool.input, ctx.mcp_machines)
+        .or_else(|| tool.display["machine"].as_str())
+}
+
 /// 第一行：圆点、粗体的名称、`(参数)`。紧凑模式截断参数；详细模式完整显示，续行缩进 2 列。远端的调用在行尾接
-/// `  @机器`（remote-exec.md §21.6）。
+/// `  @机器`（remote-exec.md §21.6；绑定到远端机器的 MCP 服务器的工具也是，§22.8）。
 fn head(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     let mut lines = head_without_machine(tool, ctx);
-    if let (Some(machine), Some(last)) = (
-        crate::ui::machines::machine_of(&tool.input),
-        lines.last_mut(),
-    ) {
+    if let (Some(machine), Some(last)) = (remote_machine(tool, ctx), lines.last_mut()) {
         let tag = crate::ui::machines::tag(ctx.palette, machine);
         let tag_width = unicode_width::UnicodeWidthStr::width(tag.content.as_ref());
         let room = ctx.width.saturating_sub(last.width());
@@ -333,6 +337,26 @@ pub(super) fn plain(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     }
     let mut lines = head(tool, ctx);
     let output = output_lines(tool);
+    // 远端的调用在等重连中的机器（F98，remote-exec.md §25.4.1，Docker 试用 L3）：写明在等什么，不只写“运行中…”。
+    let waiting = remote_machine(tool, ctx)
+        .filter(|machine| {
+            tool.status.is_live()
+                && tool.status != ToolStatus::Approval
+                && crate::ui::machines::reconnecting(ctx.machines, machine)
+        })
+        .map(|machine| crate::ui::i18n_machines::waiting_reconnect(ctx.lang, machine));
+    if let Some(waiting) = waiting {
+        if !output.is_empty() {
+            let tail = &output[output.len().saturating_sub(HEAD)..];
+            let compact = Ctx {
+                expanded: false,
+                ..*ctx
+            };
+            lines.extend(output_block(tail, dim(), &compact));
+        }
+        lines.push(detail_line(waiting, dim()));
+        return lines;
+    }
     match tool.status {
         ToolStatus::Approval => lines.push(detail_line(words::waiting(ctx.lang).into(), dim())),
         ToolStatus::Cancelled => lines.push(detail_line(words::interrupted(ctx.lang), dim())),

@@ -178,6 +178,10 @@ pub struct FileChange {
     pub path: String,
     pub additions: u64,
     pub deletions: u64,
+    /// 文件所在的远端机器（远端执行 F98，docs/specs/rust-cli/remote-exec.md §25.4.5：`/rewind` 写成 `dev-a:README.md`）；
+    /// 本机为 None，不写出。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

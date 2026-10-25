@@ -24,6 +24,8 @@ fn ctx_at<'a>(palette: &'a Palette, lang: Lang, expanded: bool, now_ms: u64) -> 
         workspace: "/w",
         workspace_label: "~/w",
         version: "1.0.0",
+        mcp_machines: &[],
+        machines: &[],
         markdown: None,
     }
 }
@@ -31,7 +33,7 @@ fn ctx_at<'a>(palette: &'a Palette, lang: Lang, expanded: bool, now_ms: u64) -> 
 fn lines_of(rows: &[Row], lang: Lang, now_ms: u64) -> Vec<String> {
     let palette = Palette::new(ColorLevel::Ansi16, None);
     let ctx = ctx_at(&palette, lang, false, now_ms);
-    build(rows, true)
+    build(rows, true, &[])
         .iter()
         .flat_map(|cell| render(cell, &ctx))
         .map(|line| plain(&line))
@@ -189,7 +191,7 @@ fn the_summary_is_dim_with_bold_numbers() {
     ];
     let palette = Palette::new(ColorLevel::Ansi16, None);
     let ctx = ctx_at(&palette, Lang::En, false, 0);
-    let cells = build(&rows, true);
+    let cells = build(&rows, true, &[]);
     let lines = render(&cells[0], &ctx);
     let spans = &lines[0].spans;
     assert!(

@@ -100,7 +100,8 @@ fn a_noted_checkpoint_settles_with_its_tool_result_once() {
         &FileChange {
             path: "/w/a.txt".to_owned(),
             additions: 2,
-            deletions: 1
+            deletions: 1,
+            machine: None,
         }
     );
     // 已落库的不再给出。

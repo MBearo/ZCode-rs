@@ -24,7 +24,7 @@ mod state;
 
 pub use list::{MachineEntry, MachineList, MachinesError};
 pub use machine::{Endpoint, Machine};
-pub use state::{MachineError, MachineEvent, MachineState, Welcomed, transition};
+pub use state::{MachineError, MachineEvent, MachineState, Retry, Welcomed, transition};
 
 #[cfg(test)]
 #[path = "machine_tests.rs"]

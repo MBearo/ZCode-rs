@@ -60,18 +60,21 @@ impl PendingCheckpoints {
             else {
                 continue;
             };
+            let machine = display["machine"].as_str().map(str::to_owned);
             let checkpoint = WorkspaceCheckpoint {
                 id: format!("checkpoint_{}", ids.operation()),
                 prompt: prompt.clone(),
                 assistant: assistant.clone(),
                 tool_use: tool_use_id.clone(),
                 snapshot,
-                machine: display["machine"].as_str().map(str::to_owned),
+                machine: machine.clone(),
             };
+            // 远端的改动带机器（F98，remote-exec.md §25.4.5）。
             let change = FileChange {
                 path: display["path"].as_str().unwrap_or_default().to_owned(),
                 additions: display["additions"].as_u64().unwrap_or(0),
                 deletions: display["deletions"].as_u64().unwrap_or(0),
+                machine,
             };
             settled.push((checkpoint, change));
         }

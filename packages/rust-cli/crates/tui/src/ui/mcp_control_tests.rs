@@ -7,6 +7,7 @@ fn info(name: &str, state: McpServerState) -> McpServerInfo {
         state,
         reason: None,
         tools: 0,
+        machine: None,
     }
 }
 

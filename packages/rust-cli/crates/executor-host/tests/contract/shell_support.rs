@@ -58,6 +58,7 @@ impl Shell {
             hook: None,
             on_timeout: None,
             socket: None,
+            env: Default::default(),
         }
     }
 

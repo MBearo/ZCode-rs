@@ -31,6 +31,10 @@ pub struct BackgroundEntry {
     /// docs/specs/rust-cli/remote-exec.md §21.7）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// 远端的后台命令所在的机器正在重连：这一条是那台机器上一份的内容（远端执行 F96，remote-exec.md §23.3）；本机与
+    /// 连着的机器为 false（serde 缺省 false、不写出）。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reconnecting: bool,
 }
 
 /// `BackgroundEntry.output` 最多保留的行数。
@@ -74,6 +78,9 @@ pub struct McpServerInfo {
     /// 已连接时提供的工具数。
     #[serde(default)]
     pub tools: usize,
+    /// 服务器绑定的远端机器（R5，remote-exec.md §22.2）；本机为 None，不写出。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 /// 一条已配置的 hook（`/hooks` 只读查看，docs/specs/rust-cli/tui-display.md §3.5）。

@@ -33,6 +33,7 @@ impl ListingSource for Names {
 async fn skill_mentions_are_passed_through() {
     let combined = CombinedListings(vec![Arc::new(Names(&[])), Arc::new(Names(&["greet"]))]);
     let request = ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("s"),
         workspace: WorkspaceRef {

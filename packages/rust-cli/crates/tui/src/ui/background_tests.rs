@@ -33,6 +33,7 @@ fn shell(id: &str, command: &str) -> BackgroundEntry {
         status: BackgroundStatus::Running,
         output: None,
         machine: None,
+        reconnecting: false,
     }
 }
 
@@ -279,4 +280,67 @@ fn remote_entries_name_their_machine() {
     let text = plain(&app.background_lines(80, 30, now).0);
     assert_eq!(text[3], "  Machine: dev-a");
     assert!(text[4].starts_with("  Status: "), "{text:?}");
+}
+
+/// 远端执行 F96（remote-exec.md §23.3）：重连中的机器上的条目是那台机器上一份的内容，`@机器` 后面接 dim 的
+/// `· reconnecting` / `· 重连中`。
+#[test]
+fn entries_of_a_reconnecting_machine_are_marked() {
+    let mut app = app();
+    let now = Instant::now();
+    let mut stale = shell("b2", "make data");
+    stale.machine = Some("dev-a".into());
+    stale.reconnecting = true;
+    app.background = vec![shell("b1", "npm test"), stale];
+    app.open_background();
+    let (lines, _) = app.background_lines(80, 30, now);
+    let text = plain(&lines);
+    assert!(
+        text.iter()
+            .any(|row| row.contains(" make data @dev-a · reconnecting ")),
+        "{text:?}"
+    );
+    assert!(
+        text.iter()
+            .any(|row| row.contains(" npm test ") && !row.contains("reconnecting")),
+        "{text:?}"
+    );
+    let note = lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .find(|span| span.content == " · reconnecting")
+        .unwrap();
+    assert!(
+        note.style
+            .add_modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
+    app.lang = Lang::Zh;
+    let text = plain(&app.background_lines(80, 30, now).0);
+    assert!(
+        text.iter()
+            .any(|row| row.contains(" make data @dev-a · 重连中 ")),
+        "{text:?}"
+    );
+}
+
+/// F98（remote-exec.md §25.4.5，Docker 试用 L9）：有缺省机器在远端的子代理时，分组名不写“本地”。
+#[test]
+fn the_agent_group_drops_local_for_an_agent_on_a_remote_machine() {
+    for (lang, header) in [(Lang::En, "  Agents (1)"), (Lang::Zh, "  代理 (1)")] {
+        let mut app = app();
+        app.lang = lang;
+        let now = Instant::now();
+        app.background = vec![shell("b1", "npm test")];
+        let mut remote = agent("agent_a");
+        remote.machine = Some("dev-a".into());
+        app.agents = AgentList {
+            entries: vec![remote],
+            at: Some(now),
+        };
+        app.open_background();
+        let (lines, _) = app.background_lines(80, 30, now);
+        let text = plain(&lines);
+        assert!(text.iter().any(|line| line == header), "{text:#?}");
+    }
 }

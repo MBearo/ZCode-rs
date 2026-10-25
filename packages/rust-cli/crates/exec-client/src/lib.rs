@@ -39,10 +39,11 @@ pub struct ClientOptions {
     pub part_size: usize,
 }
 
-/// 重连的次数与退避（§19.8）：第一次等 `delay`，之后每次翻倍，最多等 `max_delay`。
+/// 重连的次数与退避（§19.8）：第一次等 `delay`，之后每次翻倍，最多等 `max_delay`。`attempts` 为 None 时次数不限，
+/// 一直重连到连上、被拒绝或客户端关闭（SSH，远端执行 F96，remote-exec.md §23.4）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reconnect {
-    pub attempts: u32,
+    pub attempts: Option<u32>,
     pub delay: Duration,
     pub max_delay: Duration,
 }
@@ -52,8 +53,13 @@ pub struct Reconnect {
 pub enum ConnectionState {
     /// 握手完成：第几次连接、执行器的实例。
     Connected { epoch: u64, server_instance: String },
-    /// 连接断了，正在重连：第几次尝试（0：刚断，还没开始等）、断开的原因。
-    Reconnecting { attempt: u32, reason: String },
+    /// 连接断了，正在重连：已经开始了几次尝试（0：刚断）、最近一次的原因（断开的原因，或上一次重连失败的原因）。
+    /// `retry_at` 是下一次尝试开始的时刻：等着的时候有，第 `attempt` 次正在连时为 None（F96，§23.4）。
+    Reconnecting {
+        attempt: u32,
+        reason: String,
+        retry_at: Option<tokio::time::Instant>,
+    },
     /// 不再工作（关闭、重连次数用完、被拒绝、协议不对）。
     Closed { error: ClientError },
 }
@@ -66,7 +72,7 @@ impl ClientOptions {
             credentials: None,
             heartbeat: Duration::from_secs(10),
             reconnect: Reconnect {
-                attempts: 0,
+                attempts: Some(0),
                 delay: Duration::from_millis(500),
                 max_delay: Duration::from_secs(15),
             },
@@ -89,6 +95,12 @@ pub enum ClientError {
     /// 连接断了、不再重连；还没结束的调用都以它结束。
     #[error("the executor connection was lost: {0}")]
     Disconnected(String),
+    /// 目标拒绝了重连，再连也一样（`LinkError::Rejected`：ssh 认证失败等，F96，§23.4）。内容是原因原文。
+    #[error("{0}")]
+    Rejected(String),
+    /// 连接结束时这个调用还没在任何一次连接上发出去：执行器没收到它，没有执行（F96，§23.6）。里面是连接结束的原因。
+    #[error("the call was not sent: {0}")]
+    NotSent(Box<ClientError>),
     /// 执行器换了实例：有副作用的调用结果不明，不重跑（remote-exec.md §18.5）。
     #[error("the executor restarted before {op} finished; its outcome is unknown")]
     Interrupted { op: String },

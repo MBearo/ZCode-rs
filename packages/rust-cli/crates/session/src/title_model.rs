@@ -86,7 +86,8 @@ pub(crate) fn long_enough(input: &str) -> bool {
 }
 
 impl TitleModel {
-    /// Node `auxiliaryModelOptions`：推理档位取目录里的第一个，输出上限 `min(5000, 模型上限)`。
+    /// Node `auxiliaryModelOptions`：推理档位取目录里的第一个，输出上限 `min(5000, 模型上限)`（这个上限也交给 Provider
+    /// 补丁，工作线 F97）。
     async fn auxiliary(&self, selection: ModelSelection) -> (ModelSelection, u32) {
         let mut max_tokens = AUXILIARY_MAX_OUTPUT_TOKENS;
         let mut selection = selection;
@@ -154,6 +155,10 @@ impl TitleModel {
             options: RequestOptions {
                 session_id: Some(session.clone()),
                 run: run.cloned(),
+                // 修 bug（工作线 F97，titles.md §3）：目录模型的 Provider 补丁以配置的上限改写 max_tokens，这次请求自己的
+                // `min(5000, 上限)` 在那里不生效（glm-5.3 发 128000）。Node 的补丁以请求自己的上限为输入，发 5000；
+                // 这里把同一个上限交给补丁（同 WebSearch，F95）。显式覆盖的端点没有补丁，不看它。
+                provider_max_output_tokens: Some(max_tokens),
                 ..RequestOptions::default()
             },
         };

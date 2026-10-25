@@ -115,6 +115,7 @@ fn tasks_snapshots_round_trip() {
             status: BackgroundStatus::Running,
             output: None,
             machine: None,
+            reconnecting: false,
         }],
     };
     let json = serde_json::to_value(&snapshot).unwrap();

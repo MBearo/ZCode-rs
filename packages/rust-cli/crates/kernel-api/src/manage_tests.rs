@@ -10,6 +10,7 @@ fn entries_round_trip() {
         status: BackgroundStatus::Running,
         output: Some("tick".to_owned()),
         machine: None,
+        reconnecting: false,
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["kind"], "shell");
@@ -26,9 +27,21 @@ fn entries_round_trip() {
     };
     let json = serde_json::to_value(&remote).unwrap();
     assert_eq!(json["machine"], "dev-a");
+    // 为假时不写出，R4 写出的条目照常能读；为真时写出（远端执行 F96，remote-exec.md §23.3）。
+    assert!(json.get("reconnecting").is_none());
     assert_eq!(
         serde_json::from_value::<BackgroundEntry>(json).unwrap(),
         remote
+    );
+    let stale = BackgroundEntry {
+        reconnecting: true,
+        ..remote
+    };
+    let json = serde_json::to_value(&stale).unwrap();
+    assert_eq!(json["reconnecting"], true);
+    assert_eq!(
+        serde_json::from_value::<BackgroundEntry>(json).unwrap(),
+        stale
     );
 
     let server = McpServerInfo {
@@ -36,12 +49,25 @@ fn entries_round_trip() {
         state: McpServerState::Failed,
         reason: Some("spawn failed".to_owned()),
         tools: 0,
+        machine: None,
     };
     let json = serde_json::to_value(&server).unwrap();
     assert_eq!(json["state"], "failed");
+    assert!(json.get("machine").is_none());
     assert_eq!(
         serde_json::from_value::<McpServerInfo>(json).unwrap(),
         server
+    );
+    // 绑定到远端机器的服务器（R5，remote-exec.md §22.2）。
+    let remote = McpServerInfo {
+        machine: Some("dev-a".to_owned()),
+        ..server
+    };
+    let json = serde_json::to_value(&remote).unwrap();
+    assert_eq!(json["machine"], "dev-a");
+    assert_eq!(
+        serde_json::from_value::<McpServerInfo>(json).unwrap(),
+        remote
     );
 }
 

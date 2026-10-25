@@ -310,7 +310,8 @@ pub async fn drive<B: Backend>(
             () = stop.cancelled(), if !state.stopping => state.stop(),
             // 子代理列表的用时与消失：没有动画时每秒重画一次（只是显示，状态仍来自快照）。
             () = tokio::time::sleep(std::time::Duration::from_secs(1)),
-                if !animating && state.app.agents_ticking(Instant::now()) => {
+                if !animating
+                    && (state.app.agents_ticking(Instant::now()) || state.app.machines_counting()) => {
                 state.dirty = true;
             }
         }

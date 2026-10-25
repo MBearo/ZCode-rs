@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use rust_cli_base::names::UNIX_EXECUTABLE;
-use rust_cli_exec_transport::{ProvisionError, Provisioned, Provisioner};
+use rust_cli_exec_transport::{ProvisionError, ProvisionStep, Provisioned, Provisioner};
 
 use crate::artifact::{Arch, locate, sha256};
 use crate::choose::{Plan, Wanted, choose};
@@ -77,7 +77,12 @@ impl SshProvisioner {
         Probe::parse(&output.stdout).map_err(ProvisionError::Probe)
     }
 
-    async fn upload(&self, probe: &Probe, arch: Arch) -> Result<String, ProvisionError> {
+    async fn upload(
+        &self,
+        probe: &Probe,
+        arch: Arch,
+        progress: &(dyn Fn(ProvisionStep) + Send + Sync),
+    ) -> Result<String, ProvisionError> {
         let artifact =
             locate(&self.artifacts, arch)
                 .await
@@ -102,6 +107,13 @@ impl SshProvisioner {
         let file = rust_cli_fs::open_read(&artifact)
             .await
             .map_err(|error| ProvisionError::Upload(format!("{}: {error}", artifact.display())))?;
+        // 上传之前报大小（F98，remote-exec.md §25.4.2：状态行写“上传执行器（N MB）”）。
+        let bytes = rust_cli_fs::file_len(&artifact)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        progress(ProvisionStep::Uploading { bytes });
         tracing::info!(target: "ssh_connect", target_host = %self.target.destination, artifact = %artifact.display(), remote = %path, "uploading the executor");
         let output = remote::run(&self.target, &command, Box::new(file), None)
             .await
@@ -116,6 +128,13 @@ impl SshProvisioner {
 #[async_trait]
 impl Provisioner for SshProvisioner {
     async fn provision(&self) -> Result<Provisioned, ProvisionError> {
+        self.provision_reporting(&|_| {}).await
+    }
+
+    async fn provision_reporting(
+        &self,
+        progress: &(dyn Fn(ProvisionStep) + Send + Sync),
+    ) -> Result<Provisioned, ProvisionError> {
         let probe = self.probe().await?;
         let artifact = match Arch::of(&probe.os, &probe.arch) {
             Some(arch) => locate(&self.artifacts, arch).await.is_some(),
@@ -123,7 +142,7 @@ impl Provisioner for SshProvisioner {
         };
         let program = match choose(&probe, &self.wanted, artifact)? {
             Plan::Use(path) => path,
-            Plan::Upload(arch) => self.upload(&probe, arch).await?,
+            Plan::Upload(arch) => self.upload(&probe, arch, progress).await?,
         };
         tracing::info!(target: "ssh_connect", target_host = %self.target.destination, %program, "executor provisioned");
         Ok(Provisioned {

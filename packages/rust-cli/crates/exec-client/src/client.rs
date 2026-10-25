@@ -12,7 +12,7 @@ use rust_cli_exec_wire::request::Request;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::connection::{Queues, connect_once, connected, supervise};
-use crate::state::{Control, Pending, Shared, Waiter};
+use crate::state::{Control, Pending, Shared, Waiter, not_sent};
 use crate::stream::ClientStream;
 use crate::{Answer, ClientError, ClientOptions, ConnectionState};
 
@@ -85,6 +85,22 @@ impl ExecClient {
         *self.inner.shared.latency.borrow()
     }
 
+    /// 立即重试（F98，remote-exec.md §25.4.1）：连接断了、正在等下一次重连的时刻时，马上开始下一次，不等退避。没在等（连着、
+    /// 正在连、已经关闭）时不做事，回 false。
+    pub fn retry_now(&self) -> bool {
+        let waiting = matches!(
+            *self.inner.shared.connection.borrow(),
+            ConnectionState::Reconnecting {
+                retry_at: Some(_),
+                ..
+            }
+        );
+        if waiting {
+            self.inner.shared.retry.notify_waiters();
+        }
+        waiting
+    }
+
     /// 订阅往返时间：每次量到一个新值出一项。
     pub fn latencies(&self) -> watch::Receiver<Option<std::time::Duration>> {
         self.inner.shared.latency.subscribe()
@@ -138,8 +154,9 @@ impl ExecClient {
             )));
         }
         let mut state = self.inner.shared.state();
+        // 客户端已经不工作了：这个调用不会发出去（F96，remote-exec.md §23.6）。
         if let Some(closed) = &state.closed {
-            return Err(closed.clone());
+            return Err(not_sent(closed));
         }
         let supported = state
             .welcome
@@ -168,7 +185,9 @@ impl ExecClient {
         if self.inner.shared.requests.send(call).await.is_err() {
             let mut state = self.inner.shared.state();
             state.pending.remove(&call);
-            return Err(state.closed.clone().unwrap_or(ClientError::Closed));
+            return Err(not_sent(
+                state.closed.as_ref().unwrap_or(&ClientError::Closed),
+            ));
         }
         Ok(())
     }

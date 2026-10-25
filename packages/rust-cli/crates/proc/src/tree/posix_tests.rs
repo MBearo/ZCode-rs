@@ -98,3 +98,22 @@ async fn terminates_the_tree_found_in_the_process_table() {
     assert!(child.try_wait().unwrap().is_some());
     assert!(gone(background).await);
 }
+
+/// F98（remote-exec.md §25.3）：自己另起会话（进程组）的后代只能经进程表找到：对根进程组发信号够不着它。没有终端时
+/// `set -m` 不起作用，所以用 `setsid`（busybox、util-linux 都有；macOS 没有，用 perl 的 `setpgrp`）。旧代码在 alpine（busybox
+/// 的 `ps` 不认 `lstart`）与 debian-slim（没有 `/bin/ps`）上取不到进程表，退回对根进程组发信号，这个后代留下来；这台
+/// macOS 上 `ps` 可用，旧代码也通过（Docker 里的验证见 remote-exec.md §25.10）。
+#[tokio::test]
+async fn a_descendant_in_its_own_session_is_terminated_too() {
+    let (mut child, pid, background) = spawn(
+        "if command -v setsid >/dev/null 2>&1; then setsid sleep 30 & else perl -e 'setpgrp(0, 0); exec @ARGV' sleep 30 & fi; echo $!; wait",
+    )
+    .await;
+    let _cleanup = Cleanup(pid as i32);
+    let _escaped = Cleanup(background);
+    terminate(&mut child, pid, Shutdown::Graceful)
+        .await
+        .unwrap();
+    assert!(child.try_wait().unwrap().is_some());
+    assert!(gone(background).await, "the escaped background job is left");
+}

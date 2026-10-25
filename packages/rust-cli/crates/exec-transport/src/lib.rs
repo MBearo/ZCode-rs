@@ -15,8 +15,8 @@ pub mod stdio;
 pub mod stream;
 
 pub use link::{
-    Connector, FrameSink, FrameSource, Link, LinkError, Listener, ProvisionError, Provisioned,
-    Provisioner, Ready,
+    Connector, FrameSink, FrameSource, Link, LinkError, Listener, ProvisionError, ProvisionStep,
+    Provisioned, Provisioner, Ready,
 };
 
 /// 单帧的缺省上限（§18.2）：超过就断开。exec-wire 的分片保证正常的帧远小于它。

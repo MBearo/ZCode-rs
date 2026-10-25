@@ -151,7 +151,14 @@ async fn machine_states_use_the_tokens_in_both_themes_and_16_colors() {
     for colors in colors() {
         let rows = vec![
             row("dev-a", MachineStatus::Ready),
-            row("gpu-1", MachineStatus::Reconnecting { attempt: 1 }),
+            row(
+                "gpu-1",
+                MachineStatus::Reconnecting {
+                    attempt: 1,
+                    retry_at_ms: None,
+                    reason: String::new(),
+                },
+            ),
             row(
                 "ci-3",
                 MachineStatus::Failed(MachineFailure::Lost("gone".to_owned())),

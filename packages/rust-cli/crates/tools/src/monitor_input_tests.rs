@@ -55,6 +55,42 @@ fn urls_protocols_and_controls_are_checked() {
     assert!(issues(&json!({"description": "d", "command": "a\tb\nc"})).is_none());
 }
 
+/// 只有制表符与换行放过（tools-more.md §19.3，工作线 F95）：回车、其余 C0、DEL 与 C1 都算看不见的控制字符，
+/// `command` 与 `ws.url` 都查。修前回车也放过，`echo a\rb` 没有报错。
+#[test]
+fn only_tabs_and_newlines_pass_the_control_check() {
+    let command = |text: &str| issues(&json!({"description": "d", "command": text}));
+    assert_eq!(
+        command("echo a\rb").unwrap(),
+        vec![custom(
+            json!(["command"]),
+            "command contains control characters that would be hidden in the approval dialog"
+        )]
+    );
+    for hidden in [
+        "a\r\nb", "a\u{0}b", "a\u{1f}b", "a\u{7f}b", "a\u{80}b", "a\u{9f}b",
+    ] {
+        assert!(command(hidden).is_some(), "{hidden:?}");
+    }
+    for shown in ["a\tb\nc", "a\u{a0}b", "a\u{1f600}b"] {
+        assert!(command(shown).is_none(), "{shown:?}");
+    }
+    // 地址带回车：控制字符与地址格式两条都报（zod 的 refine 不中断）。
+    let url =
+        issues(&json!({"description": "d", "ws": {"url": "wss://e.example.com/a\rb"}})).unwrap();
+    assert_eq!(
+        url.iter()
+            .map(|issue| issue["message"].clone())
+            .collect::<Vec<_>>(),
+        [
+            "url contains control characters that would be hidden in the approval dialog",
+            "url must be a valid ASCII ws:// or wss:// URL with no userinfo or whitespace",
+        ]
+    );
+    // description 不查控制字符。
+    assert!(issues(&json!({"description": "a\rb", "command": "echo x"})).is_none());
+}
+
 #[test]
 fn private_hosts_follow_the_ranges() {
     assert_eq!(

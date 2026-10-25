@@ -61,6 +61,7 @@ impl ContextBuilder for Inner {
 
 fn request() -> ContextRequest {
     ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("sess_subagent_agent_1"),
         workspace: WorkspaceRef {

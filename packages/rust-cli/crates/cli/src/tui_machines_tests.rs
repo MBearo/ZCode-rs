@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use rust_cli_machines::{MachineEntry, MachineError, MachineState, MachinesError, Welcomed};
-use rust_cli_tui::machines::{MachineFailure, MachineProblem, MachineStatus};
+use rust_cli_tui::machines::{ConnectStep, MachineFailure, MachineProblem, MachineStatus};
 
 use super::{problem, row};
 use crate::machines::{FleetError, Seen};
@@ -21,12 +21,32 @@ fn welcomed() -> Welcomed {
 fn states_map_to_the_statuses_the_tui_shows() {
     let cases = [
         (MachineState::Unconnected, MachineStatus::Disconnected),
-        (MachineState::Provisioning, MachineStatus::Connecting),
-        (MachineState::Handshaking, MachineStatus::Connecting),
+        // 第一次连接分步（F98，remote-exec.md §25.4.2）。
+        (
+            MachineState::Provisioning,
+            MachineStatus::Connecting(ConnectStep::Checking),
+        ),
+        (
+            MachineState::Uploading { bytes: 93_323_264 },
+            MachineStatus::Connecting(ConnectStep::Uploading { bytes: 93_323_264 }),
+        ),
+        (
+            MachineState::Handshaking,
+            MachineStatus::Connecting(ConnectStep::Handshaking),
+        ),
         (MachineState::Ready(welcomed()), MachineStatus::Ready),
         (
-            MachineState::Reconnecting { attempt: 3 },
-            MachineStatus::Reconnecting { attempt: 3 },
+            // 第 3 次正在连（F96，remote-exec.md §23.4）。
+            MachineState::Reconnecting {
+                attempt: 3,
+                retry_at: None,
+                reason: "link closed".to_owned(),
+            },
+            MachineStatus::Reconnecting {
+                attempt: 3,
+                retry_at_ms: None,
+                reason: "link closed".to_owned(),
+            },
         ),
         (
             MachineState::Failed {
@@ -50,7 +70,7 @@ fn states_map_to_the_statuses_the_tui_shows() {
             latency: Some(Duration::from_micros(12_400)),
             welcome: None,
         };
-        let shown = row(seen);
+        let shown = row(seen, (tokio::time::Instant::now(), 1_000_000));
         assert_eq!(shown.status, status);
         assert_eq!(shown.latency_ms, Some(12));
         assert_eq!(shown.ssh, "user@dev-a");
@@ -89,5 +109,60 @@ fn problems_keep_their_kind() {
     assert!(
         matches!(&file, MachineProblem::File(text) if text.contains("read-only")),
         "{file:?}"
+    );
+}
+
+/// F96（remote-exec.md §23.4）：等下一次重连时，界面写下一次是第几次（状态机记的是已经开始了几次），下一次的时刻换成
+/// 墙上时间（与界面的时钟同一个）。
+#[test]
+fn a_waiting_reconnect_shows_the_next_attempt_and_its_wall_time() {
+    let now = tokio::time::Instant::now();
+    let seen = Seen {
+        entry: MachineEntry::new("gpu-1", "gpu-1", None),
+        state: MachineState::Reconnecting {
+            attempt: 2,
+            retry_at: Some(now + Duration::from_millis(12_000)),
+            reason: "ssh: connect to host gpu-1 port 22: Connection refused".to_owned(),
+        },
+        latency: None,
+        welcome: None,
+    };
+    assert_eq!(
+        row(seen, (now, 1_000_000)).status,
+        MachineStatus::Reconnecting {
+            attempt: 3,
+            retry_at_ms: Some(1_012_000),
+            reason: "ssh: connect to host gpu-1 port 22: Connection refused".to_owned(),
+        }
+    );
+}
+
+/// F98（remote-exec.md §25.4.3）：握手报告的 home 交给 TUI（清单没写工作目录时，询问框的“不再询问”写它）。
+#[test]
+fn the_remote_home_reaches_the_tui() {
+    use rust_cli_exec_wire::dto::core::PathStyle;
+    use rust_cli_exec_wire::handshake::{Capabilities, PROTOCOL, Welcome};
+    let seen = Seen {
+        entry: MachineEntry::new("dev-a", "dev-a", None),
+        state: MachineState::Ready(welcomed()),
+        latency: None,
+        welcome: Some(Welcome {
+            protocol: PROTOCOL,
+            server_version: "0.1.61".to_owned(),
+            server_instance: "exec-1".to_owned(),
+            os: "linux".to_owned(),
+            arch: "aarch64".to_owned(),
+            path_style: PathStyle::Posix,
+            home: Some("/home/dev".to_owned()),
+            shell: None,
+            capabilities: Capabilities::ports(),
+            max_message: rust_cli_exec_wire::frame::MAX_MESSAGE,
+            ledger: None,
+        }),
+    };
+    let shown = row(seen, (tokio::time::Instant::now(), 0));
+    assert_eq!(
+        shown.executor.and_then(|executor| executor.home).as_deref(),
+        Some("/home/dev")
     );
 }

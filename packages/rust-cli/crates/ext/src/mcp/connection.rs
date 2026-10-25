@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use rust_cli_base::Spawner;
 use rust_cli_kernel_api::env::WorkspaceRef;
+use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, LOCAL_MACHINE};
 use rust_cli_kernel_api::mcp::{McpConnect, McpTransport};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -38,11 +39,39 @@ pub(crate) fn truncate_description(text: &str) -> String {
     }
 }
 
-/// 连接并握手；整个过程受 `MCP_TIMEOUT` 限制。`client_version` 是入口给的本工程版本（`clientInfo`）。
+/// 服务器的管道开在哪里（R5，remote-exec.md §22.6）：本机的传输与会话的工作区，或者服务器绑定的那台机器的。
+pub(crate) struct Pipe<'a> {
+    pub local: &'a Arc<dyn McpTransport>,
+    /// 远端机器的注册表；没有时（只给测试的组装）绑定到远端的服务器都连不上。
+    pub machines: Option<&'a Arc<dyn EnvironmentRegistry>>,
+    pub workspace: &'a WorkspaceRef,
+}
+
+impl Pipe<'_> {
+    /// 这个服务器的传输与工作区：本机；或者那台机器的 `mcp()` 与它的工作区（stdio 的相对 `cwd`、`roots/list` 都按它）。
+    /// 那台机器正在连时等它连完（调用方的握手期限之内）；不在清单里、没在连或连不上时是 R3 的“没连上”。
+    async fn resolve(
+        &self,
+        machine: Option<&str>,
+    ) -> Result<(Arc<dyn McpTransport>, WorkspaceRef), String> {
+        let Some(name) = machine.filter(|name| !name.is_empty() && *name != LOCAL_MACHINE) else {
+            return Ok((self.local.clone(), self.workspace.clone()));
+        };
+        let found = match self.machines {
+            Some(registry) => registry.wait_remote(name).await,
+            None => None,
+        };
+        found
+            .map(|(machine, workspace)| (machine.mcp().clone(), workspace))
+            .ok_or_else(|| rust_cli_kernel_api::machine::not_connected(name))
+    }
+}
+
+/// 连接并握手；整个过程受 `MCP_TIMEOUT` 限制（绑定到远端的服务器等它的机器连上也算在里面）。`client_version` 是入口
+/// 给的本工程版本（`clientInfo`）。
 pub(crate) async fn open(
-    transport: &Arc<dyn McpTransport>,
+    pipe: &Pipe<'_>,
     spawner: &Spawner,
-    workspace: &WorkspaceRef,
     server: &McpServer,
     timeout: Duration,
     client_version: &str,
@@ -55,12 +84,16 @@ pub(crate) async fn open(
         )
     };
     let handshake = async {
+        let (transport, workspace) = pipe.resolve(server.machine.as_deref()).await?;
+        let transport = &transport;
+        let workspace = &workspace;
         let connection = transport
             .connect(
                 workspace,
                 McpConnect {
                     server: server.name.clone(),
                     transport: server.transport.clone(),
+                    env: Default::default(),
                 },
             )
             .await

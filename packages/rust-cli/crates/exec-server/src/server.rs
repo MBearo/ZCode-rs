@@ -29,7 +29,7 @@ pub struct ServerConfig {
     pub path_style: PathStyle,
     pub home: Option<String>,
     pub shell: Option<String>,
-    /// 报告的能力位（R1：`MachineEnv` 的 8 个端口）。
+    /// 报告的能力位（R1：`MachineEnv` 的 8 个端口；R5 的执行器另报告 `mcp`，§22.4）。
     pub capabilities: Capabilities,
     pub fence: Fence,
     pub part_size: usize,
@@ -81,7 +81,7 @@ pub struct Activity {
     pub clients: u64,
     /// 正在执行的调用数。
     pub calls: u64,
-    /// 开着的流数（断线的实例的流也算）。
+    /// 开着的流数（断线的实例的流也算；MCP 连接的事件流也在这里，所以有 MCP 服务器在跑时不算空闲，§22.5）。
     pub streams: u64,
 }
 
@@ -119,6 +119,10 @@ pub(crate) struct Inner {
     running: Arc<AtomicU64>,
     /// 断开的客户端实例与断开的时刻（重新连上时删掉）。
     away: Mutex<HashMap<String, Instant>>,
+    /// MCP 的连接表（R5，remote-exec.md §22.5）。
+    pub mcp: crate::mcp::McpTable,
+    /// 按客户端实例推来的环境变量（F96，remote-exec.md §23.5）。
+    pub env: crate::env::EnvTable,
     pub spawner: Spawner,
 }
 
@@ -177,6 +181,9 @@ impl Inner {
                 keys.iter().filter_map(|key| streams.remove(key)).collect()
             };
             drop(streams);
+            // 它的 MCP 服务器一起结束（R5，§22.5）；它推来的环境变量一起忘掉（F96）。
+            crate::mcp::forget(self, instance).await;
+            self.env.forget(instance);
             if let Err(error) = self.ledger.forget_client(instance).await {
                 tracing::warn!(target: "exec_server", %error, "forgetting an abandoned client failed");
             }
@@ -226,6 +233,8 @@ impl ExecServer {
             streams: Mutex::new(HashMap::new()),
             running: Arc::new(AtomicU64::new(0)),
             away: Mutex::new(HashMap::new()),
+            mcp: crate::mcp::McpTable::default(),
+            env: crate::env::EnvTable::default(),
             spawner: scope.spawner(),
         });
         // 回收断开太久的实例（只回收，不同步状态）；任务属于服务端的作用域，服务端释放时结束。

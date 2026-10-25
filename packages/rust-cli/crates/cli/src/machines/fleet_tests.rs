@@ -300,3 +300,52 @@ async fn concurrent_connects_share_one_attempt() {
     results.sort_by_key(|changed| *changed == Changed::Already);
     assert_eq!(results, [Changed::Done, Changed::Already]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_registry_knows_the_listed_machines() {
+    // F98（remote-exec.md §25.2.2）：注册表的 `listed` 读 Fleet 内存里的清单（不另存一份）：加进清单就有，没连也算；
+    // 删掉就没有。旧代码的注册表不认识清单（缺省 false）。
+    let dir = tempfile::tempdir().unwrap();
+    let Built {
+        fleet,
+        registry,
+        _scope,
+        _remote,
+        ..
+    } = built(dir.path()).await;
+    assert!(!registry.listed("dev-a"));
+    fleet
+        .add(MachineEntry::new("dev-a", "dev-a", None))
+        .await
+        .unwrap();
+    assert!(registry.listed("dev-a"));
+    assert!(registry.remote("dev-a").is_none(), "listed, not connected");
+    assert!(!registry.listed("gpu-1"));
+    fleet.remove("dev-a").await.unwrap();
+    assert!(!registry.listed("dev-a"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_now_only_acts_on_a_machine_waiting_to_reconnect() {
+    // F98（remote-exec.md §25.4.1）：没连过、连着时“立即重试”什么都不做（`Already`）；不在清单里时是“没有这台”。
+    // 叫醒退避的那一步在 exec-client 的测试里（`retrying_now_skips_the_rest_of_the_backoff`）。
+    let dir = tempfile::tempdir().unwrap();
+    let Built {
+        fleet,
+        _scope,
+        _remote,
+        ..
+    } = built(dir.path()).await;
+    assert!(matches!(
+        fleet.retry("dev-a").await,
+        Err(FleetError::List(MachinesError::Missing(name))) if name == "dev-a"
+    ));
+    fleet
+        .add(MachineEntry::new("dev-a", "dev-a", None))
+        .await
+        .unwrap();
+    assert_eq!(fleet.retry("dev-a").await.unwrap(), Changed::Already);
+    assert_eq!(fleet.connect("dev-a").await.unwrap(), Changed::Done);
+    assert_eq!(fleet.retry("dev-a").await.unwrap(), Changed::Already);
+    fleet.disconnect("dev-a").await.unwrap();
+}

@@ -228,8 +228,15 @@ impl Start {
         if cancel.is_cancelled() {
             return Err(ModelError::Cancelled);
         }
+        // 工作线 F95（model.md §9）：请求交给 Provider 补丁的输出上限随取端点交给平台层（目录模型的 `maxOutputTokens`
+        // 补丁以它与配置的上限的较小值为输入）；没有时同 `endpoint`。
+        let output_limit = request.options.provider_max_output_tokens.map(u64::from);
         let endpoint = cancel
-            .run_until_cancelled(route.endpoints.endpoint(&request.selection, None))
+            .run_until_cancelled(route.endpoints.endpoint_with_output_limit(
+                &request.selection,
+                None,
+                output_limit,
+            ))
             .await
             .ok_or(ModelError::Cancelled)??;
         // 工作线 F52（model.md §3.3）：每个请求都带 `metadata.user_id`。修 bug：以前只在调用方给了 user_id 时写，没有调用方

@@ -85,11 +85,25 @@ impl State {
         })
     }
 
-    /// 结束全部还没结束的调用。
+    /// 结束全部还没结束的调用。还没在任何一次连接上发出去的以 `NotSent` 结束（执行器没收到，没有执行；F96，
+    /// remote-exec.md §23.6），发出过的以 `error` 结束（结果不明）。
     pub fn fail_all(&mut self, error: &ClientError) {
         for (_, pending) in std::mem::take(&mut self.pending) {
-            fail(pending.waiter, error.clone());
+            let error = if pending.sent_epoch == 0 {
+                not_sent(error)
+            } else {
+                error.clone()
+            };
+            fail(pending.waiter, error);
         }
+    }
+}
+
+/// 没发出去的调用的错误（已经是 `NotSent` 时不再包一层）。
+pub(crate) fn not_sent(error: &ClientError) -> ClientError {
+    match error {
+        ClientError::NotSent(_) => error.clone(),
+        other => ClientError::NotSent(Box::new(other.clone())),
     }
 }
 
@@ -119,6 +133,8 @@ pub(crate) struct Shared {
     pub connection: watch::Sender<ConnectionState>,
     /// 最近一次心跳的往返时间（R4，§21.2）；还没量到时 None。只由读任务改。
     pub latency: watch::Sender<Option<std::time::Duration>>,
+    /// 叫醒在等退避的重连（F98，remote-exec.md §25.4.1：用户的“立即重试”）。
+    pub retry: Notify,
 }
 
 impl Shared {
@@ -143,6 +159,7 @@ impl Shared {
             })
             .0,
             latency: watch::channel(None).0,
+            retry: Notify::new(),
         }
     }
 

@@ -36,6 +36,10 @@ pub struct Ctx<'a> {
     /// 显示用的工作区路径（家目录写成 `~`）。
     pub workspace_label: &'a str,
     pub version: &'a str,
+    /// 绑定到远端机器的 MCP 服务器（规范化的服务器名，机器名）：MCP 工具行标出机器（R5，remote-exec.md §22.8）。
+    pub mcp_machines: &'a [(String, String)],
+    /// 机器服务的快照（F98：远端的调用在等重连中的机器时，工具行写“等待重连”，remote-exec.md §25.4.1）。
+    pub machines: &'a [crate::machines::MachineRow],
     /// 流式回复的 markdown 排版缓存（只在 transcript 排流式中的块时给，tui.md §4.1，修复线 F6）。
     pub markdown: Option<&'a crate::ui::markdown::Memo>,
 }
@@ -91,8 +95,12 @@ impl<'a> Cell<'a> {
 }
 
 /// 行 → 块。每个工具调用单独成块；中断的回合在末尾加提示。`group` 为真时（普通视图）连续的推理与
-/// 读取类工具并成工作段，详细视图不并。
-pub fn build<'a>(rows: impl IntoIterator<Item = &'a Row>, group: bool) -> Vec<Cell<'a>> {
+/// 读取类工具并成工作段，详细视图不并；`mcp`（绑定到远端机器的 MCP 服务器）的调用不并（R5，remote-exec.md §22.8）。
+pub fn build<'a>(
+    rows: impl IntoIterator<Item = &'a Row>,
+    group: bool,
+    mcp: &[(String, String)],
+) -> Vec<Cell<'a>> {
     /// 回合结束：运行中的回合以工作段结尾时，工作段算进行中；中断的回合加提示。
     fn close<'a>(cells: &mut Vec<Cell<'a>>, turn: Option<&'a Row>, open: &mut Option<usize>) {
         let state = turn.and_then(|turn| match turn.body {
@@ -122,7 +130,7 @@ pub fn build<'a>(rows: impl IntoIterator<Item = &'a Row>, group: bool) -> Vec<Ce
             }
             // 空的推理不显示，也不打断工作段。
             Body::Reasoning { text, .. } if group && text.trim().is_empty() => continue,
-            _ if group && group::joins(row) => {
+            _ if group && group::joins(row, mcp) => {
                 let at = *open.get_or_insert_with(|| {
                     cells.push(Cell::new(Kind::Group, Vec::new()));
                     cells.len() - 1
@@ -310,6 +318,16 @@ pub(crate) fn more_lines(hidden: usize, ctx: &Ctx<'_>) -> Line<'static> {
         format!("{INDENT}{}", words::more_lines(ctx.lang, hidden)),
         dim(),
     ))
+}
+
+/// 工具行显示的路径：本机的工作区内写相对路径；远端的调用原样（F98，remote-exec.md §25.4.6：远端的路径与本机的工作区
+/// 没有关系。缺陷修复，Docker 试用 L12：以前按本机工作区缩写，远端恰好同名的路径被写成相对的）。
+pub(crate) fn shown_path(path: &str, tool: &ToolRow, ctx: &Ctx<'_>) -> String {
+    if crate::ui::machines::machine_of(&tool.input).is_some() {
+        path.to_owned()
+    } else {
+        relative(path, ctx.workspace)
+    }
 }
 
 /// 工作区内的路径显示为相对路径。

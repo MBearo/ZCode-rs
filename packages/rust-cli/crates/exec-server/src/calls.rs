@@ -12,7 +12,7 @@ use rust_cli_exec_wire::envelope::{
     Ack, EventHeader, ReplyHeader, ReplyResult, RequestHeader, StreamItem, WireError,
 };
 use rust_cli_exec_wire::frame::{Frame, Kind};
-use rust_cli_exec_wire::handshake::STREAM_WINDOW;
+use rust_cli_exec_wire::handshake::{Capability, STREAM_WINDOW};
 use rust_cli_exec_wire::request::Request;
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
@@ -110,13 +110,53 @@ pub(crate) async fn request(inner: &Arc<Inner>, instance: &str, header: RequestH
     };
     match begun {
         Begun::New if op.is_stream() => open_stream(inner, key, request),
+        // 环境变量推送（F96，remote-exec.md §23.5）：在读循环里当场生效，之后读到的请求都看得到它。
+        Begun::New if op == rust_cli_exec_wire::op::Op::EnvUpdate => {
+            let result = match request {
+                Request::EnvUpdate {
+                    mode,
+                    vars,
+                    injected,
+                } => match inner.env.update(instance, mode, vars, injected) {
+                    Ok(()) => ReplyResult::Ok(rust_cli_exec_wire::reply::Reply::EnvUpdate),
+                    Err(message) => ReplyResult::Err(WireError::BadRequest { message }),
+                },
+                _ => ReplyResult::Err(WireError::BadRequest {
+                    message: "not an env.update".to_owned(),
+                }),
+            };
+            let payload = encode_reply(call, result, &Body::empty());
+            if let Err(error) = inner.ledger.finish(&key, payload.clone()).await {
+                tracing::warn!(target: "exec_server", %error, "ledger finish failed");
+            }
+            inner.send_to(instance, payload).await;
+        }
         Begun::New => {
+            // 起进程的请求带上这个客户端实例推来的环境变量：在读到请求的这一刻取（F96，与 `env.update` 的先后一致）。
+            let env = if matches!(
+                op,
+                rust_cli_exec_wire::op::Op::StartCommand | rust_cli_exec_wire::op::Op::McpConnect
+            ) {
+                inner.env.overrides(instance)
+            } else {
+                Default::default()
+            };
             let inner_task = inner.clone();
             // 正在执行的调用数（常驻执行器的“空闲”判断，§19.5）：任务开始前加一，结束（含被中止）时减一。
             let running = crate::server::Running::start(inner);
             drop(inner.spawner.spawn("call", async move {
                 let _running = running;
-                let (result, body) = dispatch::unary(&inner_task.machine, request, &body).await;
+                let (result, body) = if request.op().capability() == Capability::Mcp {
+                    // MCP 的管道要连接表与客户端实例（R5，§22.5）。
+                    let result =
+                        match crate::mcp::unary(&inner_task, &key.instance, request, env).await {
+                            Ok(reply) => ReplyResult::Ok(reply),
+                            Err(error) => ReplyResult::Err(error),
+                        };
+                    (result, Body::empty())
+                } else {
+                    dispatch::unary(&inner_task.machine, request, &body, env).await
+                };
                 let payload = encode_reply(key.call, result, &body);
                 if let Err(error) = inner_task.ledger.finish(&key, payload.clone()).await {
                     tracing::warn!(target: "exec_server", %error, "ledger finish failed");
@@ -201,7 +241,11 @@ fn step(inner: &Inner, key: &CallKey, seq: u64) -> Step {
 /// 流的生产者：从端口取一项、编号、记账、发出；窗口满了就等 ack；收到补发请求就从账本重发。补发与新项都经这个任务，
 /// 所以客户端收到的 `seq` 总是递增的（按 `seq` 去重不会丢项）。
 async fn produce(inner: Arc<Inner>, key: CallKey, request: Request, notify: Arc<Notify>) {
-    let mut items = dispatch::stream(&inner.machine, request);
+    let mut items = if request.op().capability() == Capability::Mcp {
+        crate::mcp::events(&inner, &key, request).await
+    } else {
+        dispatch::stream(&inner.machine, request)
+    };
     let mut seq = 0u64;
     loop {
         let mut notified = pin!(notify.notified());

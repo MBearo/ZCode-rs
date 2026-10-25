@@ -170,13 +170,18 @@ async fn when_reconnecting_fails_pending_and_later_calls_end_disconnected() {
     let result = tokio::time::timeout(Duration::from_secs(5), client.call(stat(), Body::empty()))
         .await
         .unwrap();
+    // F96：这个调用在被切断的连接上可能发出去了（Disconnected），也可能还没发（NotSent，里面是同一个原因）。
     assert!(
-        matches!(result, Err(ClientError::Disconnected(_))),
+        matches!(
+            &result,
+            Err(ClientError::Disconnected(_)) | Err(ClientError::NotSent(_))
+        ),
         "{result:?}"
     );
+    // 客户端不工作之后的调用不会发出去。
     assert!(matches!(
         client.call(stat(), Body::empty()).await,
-        Err(ClientError::Disconnected(_))
+        Err(ClientError::NotSent(inner)) if matches!(*inner, ClientError::Disconnected(_))
     ));
     assert!(!client.is_connected());
     server.await.unwrap();
@@ -186,7 +191,7 @@ async fn when_reconnecting_fails_pending_and_later_calls_end_disconnected() {
 #[test]
 fn the_backoff_doubles_up_to_the_cap() {
     let policy = Reconnect {
-        attempts: 12,
+        attempts: Some(12),
         delay: Duration::from_millis(500),
         max_delay: Duration::from_secs(15),
     };
@@ -305,4 +310,296 @@ async fn after_a_restart_with_the_same_ledger_mutations_are_resent() {
         "{answer:?}"
     );
     server.await.unwrap();
+}
+
+/// F96 的连接器（remote-exec.md §23.4）：包住内存网络，测试可以让之后的连接失败几次（可恢复）或被拒绝（不可恢复），
+/// 并数连接了几次。
+struct Flaky {
+    inner: std::sync::Arc<crate::test_support::FaultyConnector>,
+    fails: std::sync::atomic::AtomicU32,
+    reject: std::sync::Mutex<Option<String>>,
+    connects: std::sync::atomic::AtomicU32,
+}
+
+impl Flaky {
+    fn new(inner: std::sync::Arc<crate::test_support::FaultyConnector>) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            inner,
+            fails: std::sync::atomic::AtomicU32::new(0),
+            reject: std::sync::Mutex::new(None),
+            connects: std::sync::atomic::AtomicU32::new(0),
+        })
+    }
+
+    fn connects(&self) -> u32 {
+        self.connects.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl rust_cli_exec_transport::Connector for Flaky {
+    async fn connect(
+        &self,
+    ) -> Result<Box<dyn rust_cli_exec_transport::Link>, rust_cli_exec_transport::LinkError> {
+        use std::sync::atomic::Ordering;
+        self.connects.fetch_add(1, Ordering::SeqCst);
+        if let Some(message) = self.reject.lock().unwrap().clone() {
+            return Err(rust_cli_exec_transport::LinkError::Rejected(message));
+        }
+        let failing = self
+            .fails
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            });
+        if failing.is_ok() {
+            // 像真的连接那样花一点时间（“正在连”的状态看得到）。
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            return Err(rust_cli_exec_transport::LinkError::Connect(
+                "the network is down".to_owned(),
+            ));
+        }
+        self.inner.connect().await
+    }
+
+    fn describe(&self) -> String {
+        "flaky".to_owned()
+    }
+}
+
+fn endless(delay_ms: u64) -> crate::ClientOptions {
+    let mut options = reconnecting(1000);
+    options.reconnect = Reconnect {
+        attempts: None,
+        delay: Duration::from_millis(delay_ms),
+        max_delay: Duration::from_millis(delay_ms),
+    };
+    options
+}
+
+/// F96（remote-exec.md §23.4）：次数不限时一直重连，超过 R2 的 12 次也不停；连上之后同一个客户端照常工作。
+#[tokio::test]
+async fn endless_reconnecting_keeps_trying_past_twelve_attempts() {
+    let (connector, listener) = network_with(Vec::new());
+    let switches = connector.clone();
+    let flaky = Flaky::new(connector);
+    let server = rust_cli_base::owned(async move {
+        let mut first = Peer::accept(&listener).await;
+        first.handshake("exec-1", Capabilities::ports()).await;
+        let mut second = Peer::accept(&listener).await;
+        second.handshake("exec-1", Capabilities::ports()).await;
+        let (again, _) = second.request().await;
+        second
+            .reply(again.call, Reply::Stat(None), &Body::empty())
+            .await;
+        while second.try_frame().await.is_some() {}
+        drop(first);
+    });
+    let client = ExecClient::connect(flaky.clone(), endless(1))
+        .await
+        .unwrap();
+    flaky.fails.store(15, std::sync::atomic::Ordering::SeqCst);
+    switches.switch(0).cut();
+    let answer = tokio::time::timeout(Duration::from_secs(10), client.call(stat(), Body::empty()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(answer.result, ReplyResult::Ok(Reply::Stat(None)));
+    // 第一次连接 + 15 次失败 + 连上的那一次。
+    assert_eq!(flaky.connects(), 17);
+    assert!(matches!(
+        &*client.states().borrow(),
+        ConnectionState::Connected { epoch: 2, .. }
+    ));
+    client.close().await;
+    drop(server);
+}
+
+/// F96：重连中的状态带下一次的时刻与最近一次的原因；正在连的那一次没有下一次的时刻。
+#[tokio::test]
+async fn reconnecting_states_carry_the_next_retry_and_the_last_reason() {
+    let (connector, listener) = network_with(Vec::new());
+    let switches = connector.clone();
+    let flaky = Flaky::new(connector);
+    let _server = rust_cli_base::owned(async move {
+        let mut first = Peer::accept(&listener).await;
+        first.handshake("exec-1", Capabilities::ports()).await;
+        while first.try_frame().await.is_some() {}
+    });
+    let client = ExecClient::connect(flaky.clone(), endless(40))
+        .await
+        .unwrap();
+    let mut states = client.states();
+    flaky
+        .fails
+        .store(u32::MAX, std::sync::atomic::Ordering::SeqCst);
+    switches.switch(0).cut();
+    let mut seen = Vec::new();
+    while seen.len() < 6 {
+        tokio::time::timeout(Duration::from_secs(5), states.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        seen.push(states.borrow_and_update().clone());
+    }
+    assert!(
+        seen.iter().any(|state| matches!(
+            state,
+            ConnectionState::Reconnecting {
+                attempt: 0,
+                retry_at: Some(_),
+                ..
+            }
+        )),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|state| matches!(
+            state,
+            ConnectionState::Reconnecting { attempt, retry_at: None, .. } if *attempt >= 1
+        )),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|state| matches!(
+            state,
+            ConnectionState::Reconnecting { attempt, retry_at: Some(_), reason } if *attempt >= 1 && reason.contains("the network is down")
+        )),
+        "{seen:?}"
+    );
+    client.close().await;
+}
+
+/// F96：重连被目标拒绝（ssh 认证失败、主机密钥不对、执行器程序不在了，由连接器标成 `Rejected`）时不再重试，马上关闭。
+#[tokio::test]
+async fn a_rejected_reconnect_closes_the_client_at_once() {
+    let (connector, listener) = network_with(Vec::new());
+    let switches = connector.clone();
+    let flaky = Flaky::new(connector);
+    let _server = rust_cli_base::owned(async move {
+        let mut first = Peer::accept(&listener).await;
+        first.handshake("exec-1", Capabilities::ports()).await;
+        while first.try_frame().await.is_some() {}
+    });
+    let client = ExecClient::connect(flaky.clone(), endless(1))
+        .await
+        .unwrap();
+    let mut states = client.states();
+    *flaky.reject.lock().unwrap() = Some("Permission denied (publickey).".to_owned());
+    switches.switch(0).cut();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        states.wait_for(|state| matches!(state, ConnectionState::Closed { .. })),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        matches!(
+            &*client.states().borrow(),
+            ConnectionState::Closed { error: ClientError::Rejected(message) } if message.contains("Permission denied")
+        ),
+        "{:?}",
+        client.states().borrow()
+    );
+    assert_eq!(flaky.connects(), 2, "one reconnect attempt only");
+}
+
+/// F96（remote-exec.md §23.6）：关闭时还没发出去的调用是 `NotSent`（没有执行），发出过的是 `Closed`（结果不明）。
+#[tokio::test]
+async fn closing_tells_unsent_calls_from_sent_ones() {
+    let (connector, listener) = network_with(Vec::new());
+    let switches = connector.clone();
+    let flaky = Flaky::new(connector);
+    let (sent, sent_rx) = tokio::sync::oneshot::channel::<()>();
+    let _server = rust_cli_base::owned(async move {
+        let mut first = Peer::accept(&listener).await;
+        first.handshake("exec-1", Capabilities::ports()).await;
+        let _ = first.request().await;
+        let _ = sent.send(());
+        while first.try_frame().await.is_some() {}
+    });
+    let client = ExecClient::connect(flaky.clone(), endless(5))
+        .await
+        .unwrap();
+    let written = {
+        let client = client.clone();
+        rust_cli_base::owned(async move { client.call(put(), Body::empty()).await })
+    };
+    sent_rx.await.unwrap();
+    // 执行器那头收到了第一个调用；之后断开、再也连不上。
+    flaky
+        .fails
+        .store(u32::MAX, std::sync::atomic::Ordering::SeqCst);
+    switches.switch(0).cut();
+    let mut states = client.states();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        states.wait_for(|state| matches!(state, ConnectionState::Reconnecting { .. })),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let unsent = {
+        let client = client.clone();
+        rust_cli_base::owned(async move { client.call(stat(), Body::empty()).await })
+    };
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    client.close().await;
+    assert_eq!(written.await.unwrap(), Err(ClientError::Closed));
+    assert!(
+        matches!(unsent.await.unwrap(), Err(ClientError::NotSent(_))),
+        "a call made while reconnecting was never sent"
+    );
+    assert!(matches!(
+        client.call(stat(), Body::empty()).await,
+        Err(ClientError::NotSent(_))
+    ));
+}
+
+/// F98（remote-exec.md §25.4.1）：等退避的时候“立即重试”马上开始下一次，不等倒计时（这里是 60 s）；连着时不做事、回 false。
+/// 旧代码没有这个口子，只能等到下一次的时刻。
+#[tokio::test]
+async fn retrying_now_skips_the_rest_of_the_backoff() {
+    let (connector, listener) = network_with(Vec::new());
+    let switches = connector.clone();
+    let flaky = Flaky::new(connector);
+    let _server = rust_cli_base::owned(async move {
+        let mut first = Peer::accept(&listener).await;
+        first.handshake("exec-1", Capabilities::ports()).await;
+        let mut second = Peer::accept(&listener).await;
+        second.handshake("exec-1", Capabilities::ports()).await;
+        while second.try_frame().await.is_some() {}
+        drop(first);
+    });
+    let client = ExecClient::connect(flaky.clone(), endless(60_000))
+        .await
+        .unwrap();
+    assert!(!client.retry_now(), "nothing to retry while connected");
+    let mut states = client.states();
+    switches.switch(0).cut();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        states.wait_for(|state| {
+            matches!(
+                state,
+                ConnectionState::Reconnecting {
+                    retry_at: Some(_),
+                    ..
+                }
+            )
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(client.retry_now());
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        states.wait_for(|state| matches!(state, ConnectionState::Connected { epoch: 2, .. })),
+    )
+    .await
+    .expect("reconnected without waiting for the backoff")
+    .unwrap();
+    assert_eq!(flaky.connects(), 2);
+    client.close().await;
 }

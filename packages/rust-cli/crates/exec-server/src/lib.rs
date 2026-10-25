@@ -9,8 +9,10 @@ mod connection;
 mod convert_in;
 mod convert_out;
 mod dispatch;
+mod env;
 mod fence;
 mod ledger;
+mod mcp;
 mod server;
 
 pub use auth::{AllowAll, Authenticator, Principal};
@@ -18,6 +20,12 @@ pub use fence::Fence;
 pub use ledger::{Begun, CallKey, CallKind, ExecLedger, LedgerError, MemoryLedger};
 pub use server::{Activity, ExecServer, ServerConfig, ServerError};
 
+#[cfg(test)]
+#[path = "env_tests.rs"]
+mod env_tests;
+#[cfg(test)]
+#[path = "mcp_tests.rs"]
+mod mcp_tests;
 #[cfg(test)]
 #[path = "resident_tests.rs"]
 mod resident_tests;

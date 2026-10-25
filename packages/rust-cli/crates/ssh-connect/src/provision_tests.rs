@@ -9,7 +9,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use rust_cli_exec_transport::{Connector, ProvisionError, Provisioned, Provisioner};
+use rust_cli_exec_transport::{Connector, LinkError, ProvisionError, Provisioned, Provisioner};
 
 use crate::{SshConnector, SshProvisioner, SshTarget, Wanted};
 
@@ -37,6 +37,7 @@ impl Remote {
             "ssh",
             "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in -F|-o) shift 2;; -T) shift;; *) break;; esac; done\n\
              [ \"$1\" = unreachable ] && { echo 'Permission denied (publickey).' >&2; exit 255; }\n\
+             [ \"$1\" = down ] && { echo 'ssh: connect to host down port 22: Connection refused' >&2; exit 255; }\n\
              shift\ncd \"$HOME\" && exec /bin/sh -c \"$*\"\n",
         );
         Self { root }
@@ -198,4 +199,104 @@ async fn the_connector_runs_the_provisioned_command_over_ssh() {
     assert_eq!(rx.recv().await.unwrap().unwrap().as_ref(), b"frame");
     tx.close().await.unwrap();
     assert_eq!(rx.recv().await.unwrap(), None);
+}
+
+/// 连一次，读到连接结束时的结果（ssh 起来了、远端失败时错误在接收方向，§18.6 的收尾顺序）。
+async fn ended(
+    remote: &Remote,
+    destination: &str,
+    program: &str,
+) -> Result<Option<usize>, LinkError> {
+    let provisioned = Provisioned {
+        program: program.to_owned(),
+        args: vec!["executor".to_owned(), "--stdio".to_owned()],
+    };
+    let connector = SshConnector::new(remote.target(destination), &provisioned).unwrap();
+    let link = connector.connect().await.unwrap();
+    let (_tx, mut rx) = link.split();
+    rx.recv().await.map(|frame| frame.map(|bytes| bytes.len()))
+}
+
+/// F96（remote-exec.md §23.4）：认证失败与远端的执行器程序不在了，再连也一样：连接器标成 `Rejected`（exec-client 不再
+/// 重连）；连不上之类可恢复的照旧是普通的错误。
+#[tokio::test]
+async fn ssh_failures_that_retrying_cannot_fix_are_rejected() {
+    let remote = Remote::new();
+    let denied = ended(&remote, "unreachable", "/bin/true").await;
+    assert!(
+        matches!(&denied, Err(LinkError::Rejected(message)) if message.contains("Permission denied")),
+        "{denied:?}"
+    );
+    let missing = ended(&remote, "dev-a", "/nowhere/zcode-rs").await;
+    assert!(
+        matches!(&missing, Err(LinkError::Rejected(message)) if message.contains("/nowhere/zcode-rs")),
+        "{missing:?}"
+    );
+    let down = ended(&remote, "down", "/bin/true").await;
+    assert!(
+        matches!(&down, Err(LinkError::Io(message)) if message.contains("Connection refused")),
+        "{down:?}"
+    );
+}
+
+#[test]
+fn the_rejection_rules_follow_the_ssh_messages() {
+    use crate::connector::rejected;
+    for message in [
+        "executor exited (exit status: 255): Permission denied (publickey).\n",
+        "executor exited (exit status: 255): Received disconnect from 10.0.0.2 port 22:2: Too many authentication failures\n",
+        "executor exited (exit status: 255): Host key verification failed.\n",
+        "executor exited (exit status: 255): @@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\n",
+        "executor exited (exit status: 127): sh: /root/.zcode/rust-cli/exec/bin/x/zcode-rs: not found\n",
+        "executor exited (exit status: 126): sh: /root/x/zcode-rs: Permission denied\n",
+    ] {
+        assert!(rejected(message), "{message}");
+    }
+    for message in [
+        "executor exited (exit status: 255): ssh: connect to host dev-a port 22: Connection refused\n",
+        "executor exited (exit status: 255): ssh: connect to host dev-a port 22: Operation timed out\n",
+        "executor exited (exit status: 255): ssh: Could not resolve hostname dev-a: nodename nor servname provided\n",
+        "executor exited (exit status: 255): Connection closed by 10.0.0.2 port 22\n",
+        "executor exited (exit status: 1): zcode executor: cannot start the resident executor: busy\n",
+        "link closed",
+    ] {
+        assert!(!rejected(message), "{message}");
+    }
+}
+
+/// F98（remote-exec.md §25.4.2）：要上传时，上传之前报一次大小（状态行写“上传执行器（N MB）”）；远端已经有兼容的执行器时
+/// 不报。旧代码没有部署的进度。
+#[tokio::test]
+async fn uploading_reports_its_size_first() {
+    use rust_cli_exec_transport::ProvisionStep;
+    let seen = std::sync::Mutex::new(Vec::new());
+    let record = |step: ProvisionStep| seen.lock().unwrap().push(step);
+    let remote = Remote::new();
+    let (artifact, bytes) = remote.artifact();
+    let provisioner = SshProvisioner::new(remote.target("dev-a"), wanted(), vec![artifact]);
+    provisioner.provision_reporting(&record).await.unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [ProvisionStep::Uploading {
+            bytes: bytes.len() as u64
+        }]
+    );
+    // 远端已经有同一版本的执行器：不上传、不报。
+    seen.lock().unwrap().clear();
+    let remote = Remote::new();
+    let installed = remote
+        .home()
+        .join(".zcode/rust-cli/exec/bin/0.2.0/zcode-rs");
+    std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+    std::fs::write(
+        &installed,
+        "#!/bin/sh\necho '{\"version\":\"0.2.0\",\"protocol\":1,\"resident\":null}'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o700)).unwrap();
+    SshProvisioner::new(remote.target("dev-a"), wanted(), Vec::new())
+        .provision_reporting(&record)
+        .await
+        .unwrap();
+    assert!(seen.lock().unwrap().is_empty());
 }

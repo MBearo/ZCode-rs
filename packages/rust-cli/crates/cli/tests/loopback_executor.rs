@@ -51,6 +51,7 @@ fn command(root: &std::path::Path, task: &str, text: &str) -> StartCommand {
         hook: None,
         on_timeout: None,
         socket: None,
+        env: Default::default(),
     }
 }
 
@@ -115,9 +116,11 @@ async fn the_executor_serves_the_ports_over_stdio_and_exits_when_closed() {
     .unwrap();
     let welcome = client.welcome().unwrap();
     assert_eq!(welcome.os, std::env::consts::OS);
-    assert_eq!(welcome.capabilities, Capabilities::ports());
+    // R5（remote-exec.md §22.4）：执行器也报告 MCP 的管道；F96（§23.5）：还有环境变量推送。
+    assert_eq!(welcome.capabilities, Capabilities::executor());
     assert_eq!(welcome.shell.as_deref(), Some("bash"));
-    let machine = Arc::new(RemoteEnvironment::new(client.clone())).machine();
+    let remote = Arc::new(RemoteEnvironment::new(client.clone()));
+    let machine = remote.clone().machine();
     let ws = WorkspaceRef {
         environment: EnvironmentId::new("local"),
         root: EnvPath::new(root.to_string_lossy()),
@@ -194,7 +197,47 @@ async fn the_executor_serves_the_ports_over_stdio_and_exits_when_closed() {
     }
     assert_eq!(output, b"hi\n");
 
+    // F96（remote-exec.md §23.5）：推一组变量，之后起的命令看得到；保护的名字被拒绝。
+    remote
+        .update_env(
+            rust_cli_exec_wire::dto::env::EnvMode::Merge,
+            [("F96_MARK".to_owned(), Some("pushed".to_owned()))].into(),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+    let refused = remote
+        .update_env(
+            rust_cli_exec_wire::dto::env::EnvMode::Merge,
+            [("PATH".to_owned(), Some("/evil".to_owned()))].into(),
+            Vec::new(),
+        )
+        .await;
+    assert!(
+        matches!(&refused, Err(rust_cli_kernel_api::env::EnvError::Io { message }) if message.contains("PATH")),
+        "{refused:?}"
+    );
+    let marked = command(&root, "bloop3", r#"printf '%s' "$F96_MARK""#);
+    machine
+        .commands()
+        .start_command(&ws, context("op_env"), marked)
+        .await
+        .unwrap();
+    let mut events = machine
+        .commands()
+        .watch_command(OperationId::new("op_env"), 0);
+    let mut output = Vec::new();
+    while let Some(event) = events.next().await {
+        match event.unwrap() {
+            CommandEvent::Output { data, .. } => output.extend(data),
+            CommandEvent::Finished { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(output, b"pushed");
+
     drop(machine);
+    drop(remote);
     client.close().await;
     // 执行器不发模型请求，也不建模型轨迹的写者（remote-exec.md §18.6）：home 下没有 model-io 记录。
     assert!(model_io_files(home.path()).is_empty());

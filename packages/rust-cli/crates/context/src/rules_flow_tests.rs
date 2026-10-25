@@ -60,6 +60,7 @@ fn assembler(env: Arc<MemoryEnvironment>) -> PromptAssembler {
 
 fn request() -> ContextRequest {
     ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("s"),
         workspace: WorkspaceRef {

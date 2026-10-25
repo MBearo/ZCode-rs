@@ -22,7 +22,7 @@ fn every_method_has_one_request_whose_json_op_is_its_name() {
         .collect();
     let all: BTreeSet<&str> = Op::ALL.iter().map(|op| op.as_str()).collect();
     assert_eq!(ops, all);
-    assert_eq!(Op::ALL.len(), 30);
+    assert_eq!(Op::ALL.len(), 36);
     for request in requests {
         let value = serde_json::to_value(&request).unwrap();
         assert_eq!(value["op"], request.op().as_str());
@@ -51,16 +51,65 @@ fn every_unary_method_has_one_reply_with_the_same_name() {
 }
 
 #[test]
-fn ports_group_the_methods_and_only_the_two_streams_are_streams() {
+fn ports_group_the_methods_and_only_the_three_streams_are_streams() {
     let streams: Vec<Op> = Op::ALL.into_iter().filter(|op| op.is_stream()).collect();
-    assert_eq!(streams, [Op::WatchCommand, Op::ShellNotices]);
+    assert_eq!(streams, [Op::WatchCommand, Op::ShellNotices, Op::McpEvents]);
     for op in Op::ALL {
         let port = op.as_str().split('.').next().unwrap();
         assert_eq!(port, op.capability().as_str(), "{op:?}");
-        assert!(Capability::PORTS.contains(&op.capability()));
+        assert!(
+            Capability::PORTS.contains(&op.capability())
+                || [Capability::Mcp, Capability::Env].contains(&op.capability())
+        );
     }
     let mutations = Op::ALL.into_iter().filter(|op| op.is_mutation()).count();
-    assert_eq!(mutations, 11);
+    assert_eq!(mutations, 15);
+}
+
+#[test]
+fn the_mcp_pipe_is_its_own_capability() {
+    // R5（remote-exec.md §22.4、§22.5）：五种消息都属于 `mcp`；connect、send、close、declare 有副作用，events 是流。
+    let mcp: Vec<Op> = Op::ALL
+        .into_iter()
+        .filter(|op| op.capability() == Capability::Mcp)
+        .collect();
+    assert_eq!(
+        mcp,
+        [
+            Op::McpConnect,
+            Op::McpSend,
+            Op::McpEvents,
+            Op::McpClose,
+            Op::McpDeclare
+        ]
+    );
+    assert!(Op::McpEvents.is_stream() && !Op::McpEvents.is_mutation());
+    assert!(
+        [Op::McpConnect, Op::McpSend, Op::McpClose, Op::McpDeclare]
+            .iter()
+            .all(|op| op.is_mutation() && !op.is_stream())
+    );
+    let both = Capabilities::ports_and_mcp();
+    assert!(both.contains(Capability::Mcp) && both.contains(Capability::Files));
+    assert_eq!(both.names().count(), 9);
+    // 线上的形状：配置是原文（`${VAR}` 没展开），消息是原样的 JSON。
+    let connect = requests()
+        .into_iter()
+        .find(|request| request.op() == Op::McpConnect)
+        .unwrap();
+    let value = serde_json::to_value(&connect).unwrap();
+    assert_eq!(value["args"]["transport"]["type"], "stdio");
+    assert_eq!(value["args"]["transport"]["env"]["TOKEN"], "${TOKEN}");
+    let event = crate::envelope::StreamItem::Mcp {
+        event: crate::dto::mcp::McpEvent::Closed {
+            reason: Some("exited".to_owned()),
+            session_expired: false,
+        },
+    };
+    assert_eq!(
+        serde_json::to_value(&event).unwrap(),
+        json!({"kind": "mcp", "event": {"type": "closed", "reason": "exited", "session_expired": false}})
+    );
 }
 
 #[test]
@@ -192,4 +241,66 @@ fn blobs_point_into_the_body_and_bad_blobs_are_rejected() {
     let mut not_text = not_text;
     let blob = not_text.push(&[0xff, 0xfe]);
     assert!(not_text.finish().text(&blob).is_err());
+}
+
+/// F96（remote-exec.md §23.5）：`env.update` 属于能力位 `env`，不是变更、不是流（幂等，换了实例照常补发）；变量的值可以是
+/// null（去掉这个变量）；hello 另有可选的 `session_env`（SSH 的代理加上），老的 hello 没有它。
+#[test]
+fn the_env_update_is_its_own_capability() {
+    let env: Vec<Op> = Op::ALL
+        .into_iter()
+        .filter(|op| op.capability() == Capability::Env)
+        .collect();
+    assert_eq!(env, [Op::EnvUpdate]);
+    assert!(!Op::EnvUpdate.is_stream() && !Op::EnvUpdate.is_mutation());
+    let update = requests()
+        .into_iter()
+        .find(|request| request.op() == Op::EnvUpdate)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&update).unwrap(),
+        json!({"op": "env.update", "args": {
+            "mode": "merge",
+            "vars": {"DISPLAY": null, "SSH_AUTH_SOCK": "/tmp/ssh-x/agent.1"},
+            "injected": ["TOKEN"]
+        }})
+    );
+    let replace: Request = serde_json::from_value(
+        json!({"op": "env.update", "args": {"mode": "replace", "vars": {}}}),
+    )
+    .unwrap();
+    assert!(
+        matches!(&replace, Request::EnvUpdate { mode: crate::dto::env::EnvMode::Replace, vars, injected } if vars.is_empty() && injected.is_empty())
+    );
+    let executor = Capabilities::executor();
+    assert!(executor.contains(Capability::Env) && executor.contains(Capability::Mcp));
+    assert_eq!(executor.names().count(), 10);
+    assert!(!Capabilities::ports_and_mcp().contains(Capability::Env));
+    let hello = Hello {
+        protocol: PROTOCOL,
+        client_version: "0.1.0".to_owned(),
+        client_instance: "c1".to_owned(),
+        epoch: 1,
+        capabilities: Capabilities::ports(),
+        heartbeat_ms: None,
+        credentials: None,
+        session_env: Some(std::collections::BTreeMap::from([(
+            "SSH_AUTH_SOCK".to_owned(),
+            None,
+        )])),
+    };
+    let value = serde_json::to_value(&hello).unwrap();
+    assert_eq!(value["session_env"], json!({"SSH_AUTH_SOCK": null}));
+    assert_eq!(serde_json::from_value::<Hello>(value).unwrap(), hello);
+    let older: Hello = serde_json::from_value(json!({
+        "protocol": 1, "client_version": "0.1.0", "client_instance": "c1", "epoch": 1, "capabilities": []
+    }))
+    .unwrap();
+    assert!(older.session_env.is_none());
+    assert!(
+        serde_json::to_value(&older)
+            .unwrap()
+            .get("session_env")
+            .is_none()
+    );
 }

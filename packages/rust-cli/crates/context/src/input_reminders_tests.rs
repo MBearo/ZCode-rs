@@ -44,6 +44,7 @@ impl ListingSource for Skills {
 
 fn request(source: QuerySource, tools: &[&str]) -> ContextRequest {
     ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("s"),
         workspace: WorkspaceRef {

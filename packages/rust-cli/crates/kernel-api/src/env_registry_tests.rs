@@ -291,3 +291,56 @@ async fn stat_many_defaults_to_one_stat_per_path() {
             .all(|item| matches!(item, Err(EnvError::Unsupported { what }) if what == "stat"))
     );
 }
+
+#[tokio::test]
+async fn waiting_for_a_remote_machine_does_not_wait_by_default() {
+    // R5（remote-exec.md §22.9）：缺省的 wait_remote 立即给出 remote(name) 的结果，没在连的机器不等。
+    let registry = crate::testing::TestMachines::new(Arc::new(crate::testing::UnusedEnvironment));
+    assert!(registry.wait_remote("dev-a").await.is_none());
+    registry.connect("dev-a", Arc::new(Counting::default()), "/home/dev/proj");
+    let (machine, workspace) = registry.wait_remote("dev-a").await.unwrap();
+    assert_eq!(machine.name(), "dev-a");
+    assert_eq!(workspace.root.as_str(), "/home/dev/proj");
+}
+
+#[test]
+fn reconnecting_is_false_unless_the_registry_says_so() {
+    // F96（remote-exec.md §23.3）：只有本机的注册表没有重连中的机器；替身按测试的设置答，机器断开时一起忘掉。
+    let env = Arc::new(Counting::default());
+    assert!(!registry(&env).reconnecting("dev-a"));
+    let machines = crate::testing::TestMachines::new(Arc::new(crate::testing::UnusedEnvironment));
+    machines.connect("dev-a", env, "/home/dev/proj");
+    assert!(!machines.reconnecting("dev-a"));
+    machines.set_reconnecting("dev-a", true);
+    assert!(machines.reconnecting("dev-a"));
+    assert!(
+        machines.remote("dev-a").is_some(),
+        "a reconnecting machine stays"
+    );
+    machines.disconnect("dev-a");
+    assert!(!machines.reconnecting("dev-a"));
+}
+
+#[test]
+fn listed_machines_are_known_even_when_they_are_not_connected() {
+    // F98（remote-exec.md §25.2.2）：只有本机的注册表不认识任何清单里的机器；替身连上的与登记的都算，断开之后仍算。
+    let env = Arc::new(Counting::default());
+    assert!(!registry(&env).listed("dev-a"));
+    let machines = crate::testing::TestMachines::new(Arc::new(crate::testing::UnusedEnvironment));
+    assert!(!machines.listed("dev-a"));
+    machines.connect("dev-a", env, "/home/dev/proj");
+    assert!(machines.listed("dev-a"));
+    machines.disconnect("dev-a");
+    assert!(
+        machines.listed("dev-a"),
+        "a disconnected machine stays listed"
+    );
+    assert!(machines.remote("dev-a").is_none());
+    machines.list("gpu-1");
+    assert!(machines.listed("gpu-1"));
+    assert!(
+        machines.remote("gpu-1").is_none(),
+        "listing does not connect"
+    );
+    assert!(!machines.listed("ci-3"));
+}

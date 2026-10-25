@@ -73,6 +73,8 @@ fn text(usage: &ContextUsage, all: bool, lang: Lang) -> Vec<String> {
         workspace: "/Users/dev/project",
         workspace_label: "~/project",
         version: "0.1.0",
+        mcp_machines: &[],
+        machines: &[],
         markdown: None,
     };
     page_lines(usage, all, &ctx)

@@ -59,6 +59,7 @@ async fn select_returns_tool_references() {
 
 fn request(model: &str, names: &[&str]) -> ContextRequest {
     ContextRequest {
+        default_machine: None,
         capabilities: None,
         session: SessionId::new("sess_1"),
         workspace: WorkspaceRef {

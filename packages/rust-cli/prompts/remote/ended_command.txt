@@ -1,0 +1,1 @@
+Machine "{{machine}}" disconnected while the command was running ({{reason}}). The command may still be running there, but its result is not available here. Once the machine is connected again, check the state on that machine before running the command again.

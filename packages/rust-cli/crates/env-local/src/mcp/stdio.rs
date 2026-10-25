@@ -54,18 +54,22 @@ pub(crate) struct Launch<'a> {
     pub command: &'a str,
     pub args: &'a [String],
     pub env: &'a BTreeMap<String, String>,
+    /// 执行器的服务端按客户端实例推来的变量（F96）：投影之后、配置的 `env` 之前。
+    pub overrides: &'a rust_cli_kernel_api::env_command::EnvOverrides,
     pub cwd: &'a str,
     /// 入口捕获的进程环境（按白名单投影）。
     pub snapshot: &'a [(String, String)],
 }
 
-/// 服务器进程的环境：快照的白名单投影，再加配置的 `env`。
+/// 服务器进程的环境：快照的白名单投影，再加推来的变量（F96），最后是配置的 `env`（配置写明的优先）。
 pub(crate) fn child_env(
     snapshot: &[(String, String)],
+    overrides: &rust_cli_kernel_api::env_command::EnvOverrides,
     configured: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
     // 修复线 F58：`SHELL` 照快照继承（以前没设时写 `/bin/sh`，不该有这个缺省）。
     let mut env = environ::project(snapshot, None);
+    environ::apply(&mut env, overrides);
     env.extend(
         configured
             .iter()
@@ -86,7 +90,7 @@ pub(crate) async fn start(
     launch: Launch<'_>,
     events: EventSender,
 ) -> Result<(std::sync::Arc<StdioLink>, rust_cli_base::OwnedTask<()>), McpError> {
-    let env = child_env(launch.snapshot, launch.env);
+    let env = child_env(launch.snapshot, launch.overrides, launch.env);
     let mut command = rust_cli_proc::command(launch.command);
     command
         .args(launch.args)

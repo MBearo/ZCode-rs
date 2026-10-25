@@ -1,7 +1,7 @@
 //! 8 个端口与 MCP 的实现：每个方法换成一条请求（remote-exec.md §18.3 的消息表）。
 
 use async_trait::async_trait;
-use futures_util::stream::{BoxStream, StreamExt};
+use futures_util::stream::BoxStream;
 use rust_cli_exec_wire::BodyBuilder;
 use rust_cli_exec_wire::envelope::StreamItem;
 use rust_cli_exec_wire::reply::Reply;
@@ -22,9 +22,6 @@ use rust_cli_kernel_api::env_shell::{
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
 use rust_cli_kernel_api::machine::{
     Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
-use rust_cli_kernel_api::mcp::{
-    McpConnect, McpConnectionId, McpError, McpTransport, McpTransportEvent,
 };
 
 use crate::{RemoteEnvironment, from_wire as from, mismatch, to_wire as to};
@@ -484,31 +481,5 @@ impl Pdf for RemoteEnvironment {
             expect!(reply, "pdf.render_pdf_pages", Reply::RenderPdfPages(render) => render),
             &body,
         )
-    }
-}
-
-/// 远端机器上的 MCP 管道在 R5 才做（remote-exec.md §15.9）。
-fn mcp_unsupported() -> McpError {
-    McpError::Unsupported {
-        what: "MCP servers on a remote machine".to_owned(),
-    }
-}
-
-#[async_trait]
-impl McpTransport for RemoteEnvironment {
-    async fn connect(&self, _: &WorkspaceRef, _: McpConnect) -> Result<McpConnectionId, McpError> {
-        Err(mcp_unsupported())
-    }
-
-    async fn send(&self, _: &McpConnectionId, _: serde_json::Value) -> Result<(), McpError> {
-        Err(mcp_unsupported())
-    }
-
-    fn events(&self, _: &McpConnectionId) -> BoxStream<'static, McpTransportEvent> {
-        futures_util::stream::empty().boxed()
-    }
-
-    async fn close(&self, _: &McpConnectionId) -> Result<(), McpError> {
-        Ok(())
     }
 }

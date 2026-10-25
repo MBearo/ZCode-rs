@@ -181,6 +181,7 @@ pub(crate) fn start_command(
             url: socket.url,
             protocols: socket.protocols,
         }),
+        env: Default::default(),
     })
 }
 

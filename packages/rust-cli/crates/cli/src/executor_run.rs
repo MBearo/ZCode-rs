@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use rust_cli_env_local::LocalEnvironment;
+use rust_cli_env_local::{LocalEnvironment, LocalMcpTransport};
 use rust_cli_exec_server::ServerConfig;
 use rust_cli_exec_wire::admin::ExecutorStatus;
 use rust_cli_exec_wire::handshake::PROTOCOL;
@@ -14,7 +14,6 @@ use rust_cli_executor_host::proxy::{self, DaemonCommand, ProxyConfig};
 use rust_cli_executor_host::resident::{Resident, ResidentConfig, StartError};
 use rust_cli_kernel_api::env::EnvPath;
 use rust_cli_kernel_api::machine::MachineEnv;
-use rust_cli_kernel_api::mcp::NoMcpTransport;
 use rust_cli_node_store::SystemClock;
 use rust_cli_paths::{ExecutorPaths, StorageSettings};
 
@@ -59,12 +58,21 @@ fn executor_paths(startup: &super::Startup) -> ExecutorPaths {
     super::setup::storage_paths(startup, &StorageSettings::default()).executor()
 }
 
-/// 按与 TUI / `-p` 相同的规则建本机的执行环境（shell、出口、内嵌的搜索工具）；返回它与 shell 的名字。
+/// 执行器这台机器的执行环境与 MCP 的管道。
+struct Executing {
+    env: LocalEnvironment,
+    /// MCP 服务器的管道（R5，remote-exec.md §22.5）：与 Bash 同一份进程树账本、环境快照与网络出口，打开 `${VAR}` 展开
+    /// （用执行器自己的环境，§22.7）。
+    mcp: Arc<LocalMcpTransport>,
+    shell: Option<String>,
+}
+
+/// 按与 TUI / `-p` 相同的规则建本机的执行环境（shell、出口、内嵌的搜索工具）与 MCP 的管道；另给 shell 的名字。
 async fn local_environment(
     startup: &super::Startup,
     add_dirs: &[String],
     find_and_grep: bool,
-) -> Result<(LocalEnvironment, Option<String>)> {
+) -> Result<Executing> {
     let shell = crate::shell::config(startup.env.clone(), &startup.temp, find_and_grep).await;
     let shell_name = shell
         .bash
@@ -72,12 +80,24 @@ async fn local_environment(
         .and_then(|path| path.file_name())
         .map(|name| name.to_string_lossy().into_owned());
     let egress = super::setup::egress(startup).await?;
+    let mcp = Arc::new(
+        LocalMcpTransport::new(
+            shell.ledger.clone(),
+            shell.env.clone(),
+            Some(egress.clone()),
+        )
+        .expanding_vars(),
+    );
     let additional = add_dirs.iter().map(EnvPath::new).collect();
     let env = LocalEnvironment::new(Some(startup.home.clone()))
         .with_shell(shell)
         .with_web(egress)
         .with_additional_directories(additional);
-    Ok((env, shell_name))
+    Ok(Executing {
+        env,
+        mcp,
+        shell: shell_name,
+    })
 }
 
 fn server_config(startup: &super::Startup, shell: Option<String>) -> ServerConfig {
@@ -85,6 +105,8 @@ fn server_config(startup: &super::Startup, shell: Option<String>) -> ServerConfi
         ServerConfig::new(super::VERSION, std::env::consts::OS, std::env::consts::ARCH);
     config.home = Some(startup.home.to_string_lossy().into_owned());
     config.shell = shell;
+    // R5 的执行器也提供 MCP 的管道（remote-exec.md §22.4）；F96 起另有环境变量推送（§23.5）。
+    config.capabilities = rust_cli_exec_wire::handshake::Capabilities::executor();
     config
 }
 
@@ -180,7 +202,7 @@ async fn start_resident(
     startup: &super::Startup,
     paths: ExecutorPaths,
 ) -> Result<Result<Resident, StartError>> {
-    let (env, shell) = local_environment(startup, &[], true).await?;
+    let Executing { env, mcp, shell } = local_environment(startup, &[], true).await?;
     let config = ResidentConfig {
         paths,
         version: super::VERSION.to_owned(),
@@ -190,6 +212,7 @@ async fn start_resident(
         clock: Arc::new(SystemClock::new(startup.zone.clone())),
         retention: Retention::default(),
         ledger_sweep: LEDGER_SWEEP,
+        mcp,
     };
     Ok(Resident::start(config, Arc::new(env), server_config(startup, shell)).await)
 }
@@ -209,6 +232,10 @@ async fn proxy() -> Result<()> {
             env: startup.env.to_vec(),
             cwd: Some(startup.cwd.clone()),
         },
+        // 这条 ssh 会话的环境（远端执行 F96，remote-exec.md §23.5）：代理自己的环境就是这条会话在远端的环境。
+        session_env: proxy::session_env(|name| {
+            rust_cli_base::secret::env_var(&startup.env, name).map(str::to_owned)
+        }),
     };
     let result = proxy::proxy(tokio::io::stdin(), tokio::io::stdout(), config)
         .await
@@ -224,9 +251,9 @@ async fn standalone(add_dirs: Vec<String>, find_and_grep: bool) -> Result<()> {
     let paths = super::setup::storage_paths(&startup, &StorageSettings::default());
     let log = start_log(paths.logs().as_path(), &startup, "executor");
     let result = async {
-        let (env, shell) = local_environment(&startup, &add_dirs, find_and_grep).await?;
-        // MCP 的管道在 R5 才经执行器（remote-exec.md §15.9）：这里不提供。
-        let machine = MachineEnv::new(Arc::new(env), Arc::new(NoMcpTransport));
+        let Executing { env, mcp, shell } =
+            local_environment(&startup, &add_dirs, find_and_grep).await?;
+        let machine = MachineEnv::new(Arc::new(env), mcp);
         rust_cli_executor_host::serve_stdio(
             tokio::io::stdin(),
             tokio::io::stdout(),

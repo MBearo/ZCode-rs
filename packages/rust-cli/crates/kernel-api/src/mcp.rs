@@ -15,7 +15,8 @@ use serde_json::Value;
 use crate::env::WorkspaceRef;
 
 /// 一个服务器的传输配置（stdio / sse / http 三种）。
-/// `${VAR}` 已由入口层展开。
+/// 本机的服务器：`${VAR}` 已由入口层按来源的规则处理（`--mcp-config` 展开，配置文件原样）。绑定到远端机器的
+/// 服务器：值是配置的原文，由那台机器的执行器用它自己的环境展开（[`crate::mcp_vars`]，remote-exec.md §22.7）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum McpTransportConfig {
@@ -48,6 +49,10 @@ pub enum McpTransportConfig {
 pub struct McpConnect {
     pub server: String,
     pub transport: McpTransportConfig,
+    /// stdio 服务器的进程环境在投影之后、配置的 `env` 之前加上（或去掉）的变量（远端执行 F96，remote-exec.md §23.5）；
+    /// `${VAR}` 展开也先查它。只在执行器里由服务端按客户端实例填；不进序列化。
+    #[serde(skip)]
+    pub env: crate::env_command::EnvOverrides,
 }
 
 /// 执行侧给出的连接 ID。

@@ -24,6 +24,9 @@ pub struct McpServer {
     pub scope: McpScope,
     pub transport: McpTransportConfig,
     pub options: McpServerOptions,
+    /// 服务器绑定的远端机器（R5，remote-exec.md §22.2：入口按 rust-cli 的旁路文件设）；None 或 `local` 是本机。绑定到
+    /// 远端时 `transport` 是配置的原文（`${VAR}` 由那台机器的执行器展开，§22.7）。
+    pub machine: Option<String>,
 }
 
 /// 按服务器的选项（Node 配置的 `timeoutMs`、`alwaysLoad`，ext.md §3.1）；`--mcp-config` 与插件的服务器用缺省值。
