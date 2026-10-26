@@ -79,6 +79,14 @@ pub struct ModelEndpoint {
     pub renewable: bool,
 }
 
+/// 一次取端点的上下文（缺口 G8，docs/specs/rust-cli/app-protocol.md §5.2）：发请求的会话。前端提供的请求头来源
+/// （例如经宿主取账号凭据）按它找到会话与工作区；平台层自己算凭据时不用它。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EndpointContext {
+    /// 发这次请求的会话（[`crate::model::RequestOptions::session_id`]；子代理是子会话）。
+    pub session: Option<crate::ids::SessionId>,
+}
+
 /// 按选择解析端点。实现方是平台层；测试与显式覆盖（`ZCODE_MODEL_BASE_URL` / `ZCODE_API_KEY`）
 /// 用固定端点。
 #[async_trait]
@@ -103,6 +111,20 @@ pub trait ModelEndpoints: Send + Sync {
     ) -> Result<ModelEndpoint, ModelError> {
         let _ = output_limit;
         self.endpoint(selection, rejected).await
+    }
+
+    /// 同 [`Self::endpoint_with_output_limit`]，另带这次请求的上下文（缺口 G8）。模型适配器取端点只经它；缺省实现
+    /// 忽略上下文，行为与以前相同。
+    async fn endpoint_in(
+        &self,
+        selection: &ModelSelection,
+        rejected: Option<&ModelEndpoint>,
+        output_limit: Option<u64>,
+        context: &EndpointContext,
+    ) -> Result<ModelEndpoint, ModelError> {
+        let _ = context;
+        self.endpoint_with_output_limit(selection, rejected, output_limit)
+            .await
     }
 
     /// 这个选择的模型能力（Node 的生效模型配置，docs/specs/rust-cli/model.md §11，修复线 F23）。不取凭据；

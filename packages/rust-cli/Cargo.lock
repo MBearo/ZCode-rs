@@ -2220,6 +2220,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bytes",
+ "flate2",
  "futures-util",
  "libc",
  "mimalloc",
@@ -2249,6 +2250,8 @@ dependencies = [
  "rust-cli-policy",
  "rust-cli-proc",
  "rust-cli-prompts",
+ "rust-cli-protocol-core",
+ "rust-cli-protocol-zcode",
  "rust-cli-query",
  "rust-cli-runtime",
  "rust-cli-ssh-connect",
@@ -2259,6 +2262,7 @@ dependencies = [
  "rust-cli-vendor-ugrep",
  "rustls",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -2701,6 +2705,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-cli-protocol-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "regex",
+ "rust-cli-base",
+ "rust-cli-kernel-api",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "rust-cli-protocol-zcode"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "futures-util",
+ "rust-cli-base",
+ "rust-cli-kernel-api",
+ "rust-cli-platform",
+ "rust-cli-protocol-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "rust-cli-query"
 version = "0.1.0"
 dependencies = [
@@ -2809,6 +2846,7 @@ dependencies = [
  "rust-cli-base",
  "rust-cli-kernel-api",
  "rust-cli-platform",
+ "rust-cli-prompts",
  "rust-cli-runtime",
  "rustix",
  "serde",

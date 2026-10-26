@@ -153,6 +153,9 @@ pub(crate) struct Actor {
     pub(crate) log: Arc<EventLog>,
     pub(crate) meta: SessionMeta,
     pub(crate) messages: Vec<Message>,
+    /// 冷读取时只供显示的、最后一个压缩点之前的消息（工作线 F102，compact.md §5.1）：打开后不变，只进 `view()`。
+    /// 模型侧的一切（主循环、压缩、token、标题、rewind、fork、goal 与任务的恢复）只看 `messages`。
+    pub(crate) earlier: Vec<Message>,
     pub(crate) selection: ModelSelection,
     /// 执行状态：权限模式 × plan 开关（修复线 F20，shell-permissions.md §4.6）。判决用的模式是 [`Self::mode`]。
     pub(crate) execution: rust_cli_kernel_api::permission::ExecutionState,
@@ -186,6 +189,8 @@ pub(crate) struct Actor {
     pub(crate) naming: Option<crate::rename::NameJob>,
     /// `/goal` 的目标（goal.rs）：提交 `goal_status` 后才改，冷加载从活动历史恢复。
     pub(crate) goal: crate::goal::Goals,
+    /// 回合或压缩在跑时到达的本地命令记录（修复线 L-A，local_record.rs）：收尾后按到达顺序提交。
+    pub(crate) held_records: Vec<rust_cli_kernel_api::user_command::LocalCommandRecord>,
     seen: HashSet<CommandId>,
     /// 当前轮（开启它的真实用户输入与轮次 ID）：随每个批次交给存储（node-store.md §4，修复线 F6）；冷加载时取
     /// `LoadedSession.turn`。只在 `commit` 里改，锁不跨 await。
@@ -247,6 +252,7 @@ impl Actor {
             log,
             meta: state.meta,
             messages: state.messages,
+            earlier: state.earlier,
             selection: state.selection,
             execution: state.mode,
             plan_flags: Default::default(),
@@ -266,6 +272,7 @@ impl Actor {
             loop_ticks: Default::default(),
             naming: None,
             goal,
+            held_records: Vec::new(),
             seen: HashSet::new(),
             turn: std::sync::Mutex::new(state.turn),
             resume_pending: std::sync::Mutex::new(resume_pending),
@@ -442,6 +449,7 @@ impl Actor {
                         command: id,
                         text,
                         screened: None,
+                        more: Vec::new(),
                     })
                     .await
                 {
@@ -492,7 +500,12 @@ impl Actor {
                 }
             }
             Command::SetWorkspace { root, note } => self.set_workspace(id, root, note).await,
-            Command::ChangeDirectory { root } => self.change_directory(id, root).await,
+            Command::ChangeDirectory { root } => self.change_directory(id, root, None).await,
+            Command::ChangeDirectoryRecorded { root, record } => {
+                self.change_directory(id, root, Some(record)).await
+            }
+            Command::RecordLocalCommand { record } => self.record_local_command(id, record).await,
+            Command::BackgroundForeground { reason } => self.background_foreground(reason).await,
             Command::StoreResumeSentinel => self.store_resume_sentinel(id).await,
             // 在 `handle` 里处理（回执要等事务结束或名字）。
             Command::Rewind { .. } | Command::GenerateName => {
@@ -660,7 +673,7 @@ impl Actor {
     async fn view(&self) -> SessionView {
         SessionView {
             meta: self.meta.clone(),
-            messages: self.messages.clone(),
+            messages: [self.earlier.as_slice(), self.messages.as_slice()].concat(),
             selection: self.selection.clone(),
             mode: self.execution.mode,
             plan: self.execution.plan,
@@ -671,6 +684,7 @@ impl Actor {
                 .collect(),
             queue: self.queue.iter().cloned().collect(),
             last_seq: self.log.last_seq(),
+            revision: self.log.revision(),
             running: self.running.is_some(),
             background: [self.background().await, self.background_agents().await].concat(),
             peer_held: self.peers.views(),

@@ -28,7 +28,8 @@ async fn help_lists_the_commands_and_marks_the_missing_ones() {
             page.contains("Rename the current conversation  /name"),
             "{page}"
         );
-        // L27 实现了 `/memory`、L29 实现了 `/diff` 等：剩下的 `/init`、`/btw` 说明较长，往下滚并看末尾的标记。
+        // L27 实现了 `/memory`、L29 实现了 `/diff` 等：剩下的 `/btw` 说明较长，往下滚并看末尾的标记（修复线 L-A 起
+        // `/init` 是内核给出的 skill 命令）。
         for _ in 0..12 {
             ui.key(KeyCode::Down);
             if ui.screen().contains("(not implemented)") {
@@ -48,8 +49,8 @@ async fn missing_and_unknown_commands_only_explain() {
     let model = GatedModel::scripted(Vec::new());
     with_ui(model.clone(), Setup::default(), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
-        ui.submit("/init");
-        ui.wait_for("/init is not implemented yet.").await;
+        ui.submit("/btw");
+        ui.wait_for("/btw is not implemented yet.").await;
         // 没有会话时 rewind 选择器只说明没有可回退的消息（原文）。
         ui.submit("/rewind");
         ui.wait_for("Nothing to rewind to yet.").await;

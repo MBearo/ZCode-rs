@@ -111,22 +111,38 @@ pub(crate) async fn create(
     core.ports.store.create(meta).await?;
     inherit_directory(core, &agent).await;
     let first = user(core, prompt, UserOrigin::Human);
-    let facts = vec![
+    let mut facts = vec![
         Fact::ModelSelected {
             selection: agent.selection.clone(),
         },
         Fact::ModeChanged { mode: agent.mode },
-        Fact::MessageAppended {
-            message: first.clone(),
-        },
     ];
+    // fork：子会话记下父会话与切点（溯源用，node-store.md §4.8.1）；继承的前缀不落库。
+    if let Some(prefix) = &agent.fork_prefix {
+        facts.push(Fact::Entry {
+            kind: crate::fork::PARENT_ENTRY.to_owned(),
+            id: agent.agent.as_str().to_owned(),
+            data: serde_json::json!({
+                "parentSession": parent.session.as_str(),
+                "throughMessageId": prefix
+                    .iter()
+                    .rev()
+                    .nth(2)
+                    .map(|message| message.id().as_str().to_owned()),
+                "toolUseId": agent.tool_use.as_ref().map(|id| id.as_str().to_owned()),
+            }),
+        });
+    }
+    facts.push(Fact::MessageAppended {
+        message: first.clone(),
+    });
     let turn = commit(core, &agent.child, facts, None).await?;
     agent.state = AgentState::Running {
         abort: Abort::new(),
         mailbox: Vec::new(),
     };
     core.live.insert(agent.clone());
-    let messages = vec![first];
+    let messages = with_prefix(&agent, vec![first]);
     Ok((agent, Opening { messages, turn }))
 }
 
@@ -150,7 +166,7 @@ pub(crate) async fn resume(
     origin: UserOrigin,
 ) -> Result<Opening, StoreError> {
     let loaded = core.ports.store.load(&agent.child).await?;
-    let mut messages = loaded.messages;
+    let mut messages = with_prefix(agent, loaded.messages);
     let next = user(core, message, origin);
     let turn = commit(
         core,
@@ -163,6 +179,14 @@ pub(crate) async fn resume(
     .await?;
     messages.push(next);
     Ok(Opening { messages, turn })
+}
+
+/// fork 的子会话只存自己的消息：前面拼上内存里继承的前缀（修复线 L-A，agents.md §8.1.3）。
+fn with_prefix(agent: &LiveAgent, own: Vec<Message>) -> Vec<Message> {
+    match &agent.fork_prefix {
+        Some(prefix) => prefix.iter().cloned().chain(own).collect(),
+        None => own,
+    }
 }
 
 /// 一次子循环的结果。
@@ -291,14 +315,29 @@ async fn run_loop(
     abort: Abort,
     cancel: Option<CancellationToken>,
 ) -> Result<QueryStop, QueryError> {
-    let tools = Arc::new(FilteredTools {
-        inner: registry,
-        rule: ToolRule::new(&agent.definition, agent.background, agent.depth),
-    });
-    let context = Arc::new(SubagentContext {
-        inner: core.ports.context.clone(),
-        system: report::system(&agent.definition.prompt),
-    });
+    // fork：主线程的整份注册表与主线程的 system（同对照实现，修复线 L-A，agents.md §8.1.2）。
+    let (tools, context): (
+        Arc<dyn ToolRegistry>,
+        Arc<dyn rust_cli_kernel_api::orchestration::ContextBuilder>,
+    ) = if agent.fork_prefix.is_some() {
+        (
+            registry,
+            Arc::new(crate::fork::ForkContext {
+                inner: core.ports.context.clone(),
+            }),
+        )
+    } else {
+        (
+            Arc::new(FilteredTools {
+                inner: registry,
+                rule: ToolRule::new(&agent.definition, agent.background, agent.depth),
+            }),
+            Arc::new(SubagentContext {
+                inner: core.ports.context.clone(),
+                system: report::system(&agent.definition.prompt),
+            }),
+        )
+    };
     let runner = Tracked {
         inner: core.ports.queries.runner(tools, context),
         book: core.runs.clone(),

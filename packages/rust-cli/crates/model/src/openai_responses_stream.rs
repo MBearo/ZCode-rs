@@ -4,8 +4,9 @@
 //! 函数调用一项一个 tool_use 块；正文（`output_text` / `refusal`）与推理摘要（`reasoning_summary_text`、
 //! `reasoning_text`）的增量进当前流；`response.completed` / `response.incomplete` 写出停止原因与用量后结束。
 //! `error` 与 `response.failed` 按错误结束。不认识的事件与输出项（服务端工具等）忽略。
+//! 函数调用的参数以 `output_item.done` 的完整参数为准，见 [`ResponsesStream::done`]。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use rust_cli_kernel_api::message::{StopReason, Usage};
 use rust_cli_kernel_api::model::{ModelError, ModelEvent};
@@ -29,6 +30,8 @@ struct Output {
     kind: Kind,
     /// 收到过增量；没有增量的项在 `.done` 时从完整内容补出。
     streamed: bool,
+    /// 函数调用攒下的参数（`added` 里的与增量），还没写出。
+    arguments: String,
 }
 
 #[derive(Debug, Default)]
@@ -36,7 +39,8 @@ pub(crate) struct ResponsesStream {
     started: bool,
     finished: bool,
     blocks: Blocks,
-    outputs: HashMap<u64, Output>,
+    /// 按 `output_index` 排序：结束时写出攒下的参数按输出项的先后。
+    outputs: BTreeMap<u64, Output>,
 }
 
 fn output_index(event: &Value) -> Result<u64, ModelError> {
@@ -87,6 +91,7 @@ impl ResponsesStream {
             return Err(protocol(format!("output item {key} added twice")));
         }
         let mut item = event.get_mut("item").map(Value::take).unwrap_or_default();
+        let mut arguments = String::new();
         let kind = match item.get("type").and_then(Value::as_str) {
             Some("message") => Kind::Message,
             Some("reasoning") => Kind::Reasoning,
@@ -94,8 +99,7 @@ impl ResponsesStream {
                 let id = take_str(&mut item, "call_id").unwrap_or_default();
                 let name = take_str(&mut item, "name").unwrap_or_default();
                 self.blocks.tool_start(key, id, name, out)?;
-                let arguments = take_str(&mut item, "arguments").unwrap_or_default();
-                self.blocks.tool_arguments(key, arguments, out)?;
+                arguments = take_str(&mut item, "arguments").unwrap_or_default();
                 Kind::Call
             }
             other => {
@@ -108,6 +112,7 @@ impl ResponsesStream {
             Output {
                 kind,
                 streamed: false,
+                arguments,
             },
         );
         Ok(())
@@ -135,7 +140,7 @@ impl ResponsesStream {
         match expected {
             Kind::Message => self.blocks.flow(Flow::Text, delta, out),
             Kind::Reasoning => self.blocks.flow(Flow::Thinking, delta, out),
-            Kind::Call => self.blocks.tool_arguments(key, delta, out)?,
+            Kind::Call => output.arguments.push_str(&delta),
             Kind::Skipped => {}
         }
         Ok(())
@@ -145,11 +150,20 @@ impl ResponsesStream {
         let key = output_index(&event)?;
         let output = self
             .outputs
-            .get(&key)
+            .get_mut(&key)
             .ok_or_else(|| protocol(format!("unknown output item {key} done")))?;
         let item = &event["item"];
         match output.kind {
-            Kind::Call => self.blocks.tool_stop(key, out),
+            // 修 bug（修复线 F101，model.md §10.3）：以前参数只来自 `added` 与 `function_call_arguments.delta`，这里只结束块；
+            // 有的供应商不发增量，完整参数只在 done 里，调用的 input 全是 `{}`，工具报必填参数缺失。现在参数以 done 的
+            // `item.arguments` 为准（Node 用的 SDK 同样如此，增量只给预览），没有时才用攒下的；`function_call_arguments.done`
+            // 与它重复，不处理。参数的增量没有消费方显示，攒到这里一次写出没有可见的差别。
+            Kind::Call => {
+                let pending = std::mem::take(&mut output.arguments);
+                let arguments = item["arguments"].as_str().map_or(pending, str::to_owned);
+                self.blocks.tool_arguments(key, arguments, out)?;
+                self.blocks.tool_stop(key, out);
+            }
             Kind::Message | Kind::Reasoning => {
                 let (flow, field) = if output.kind == Kind::Message {
                     (Flow::Text, "content")
@@ -166,7 +180,18 @@ impl ResponsesStream {
         Ok(())
     }
 
-    fn completed(&mut self, event: &Value, out: &mut VecDeque<ModelEvent>) {
+    fn completed(
+        &mut self,
+        event: &Value,
+        out: &mut VecDeque<ModelEvent>,
+    ) -> Result<(), ModelError> {
+        // 到这里还没有 done 的调用（不合规的流）：写出攒下的参数再随消息结束（修复线 F101 之前增量是逐段写出的，结果相同）。
+        for (key, output) in &mut self.outputs {
+            if !output.arguments.is_empty() {
+                self.blocks
+                    .tool_arguments(*key, std::mem::take(&mut output.arguments), out)?;
+            }
+        }
         let response = &event["response"];
         let reported = &response["usage"];
         let cached = number(&reported["input_tokens_details"], "cached_tokens");
@@ -184,6 +209,7 @@ impl ResponsesStream {
         };
         self.finished = true;
         self.blocks.finish(Some(stop), usage, out);
+        Ok(())
     }
 }
 
@@ -222,7 +248,7 @@ impl StreamDecoder for ResponsesStream {
             }
             "response.function_call_arguments.delta" => self.delta(value, Kind::Call, out)?,
             "response.output_item.done" => self.done(value, out)?,
-            "response.completed" | "response.incomplete" => self.completed(&value, out),
+            "response.completed" | "response.incomplete" => self.completed(&value, out)?,
             _ => {}
         }
         Ok(())

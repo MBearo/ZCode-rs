@@ -25,19 +25,25 @@ impl<B: Backend> Loop<'_, B> {
         }
     }
 
-    /// ctrl+enter（`chat:sendNow`，tui-input.md §5）：运行中先入队（插话），等回执后再中断当前回合，排队的
-    /// 输入在回合结束后立即开下一回合。两条命令在同一个 future 里按顺序发，入队一定先于中断。
+    /// ctrl+enter（`chat:sendNow`，tui-input.md §11.1）：运行中是低延迟投递：先入队（插话，下一个工具边界并入），
+    /// 再把前台 Bash 转到后台（工具边界随之到来），不中断当前回合。两条命令在同一个 future 里按顺序发，入队一定先于
+    /// 转后台（转后台之后的工具边界一定看得到这条插话）。
+    ///
+    /// 修复线 L-A（用户决定 2026-10-25：照对照实现）：以前入队后中断当前回合，等着的请求被丢掉、对话里多一条中断标记。
     pub(super) fn send_now(&mut self, command: Command) {
         let session = match &self.session {
             Some(session) if self.app.running() => session.clone(),
             _ => return self.submit(command),
         };
-        let (queued, interrupt) = (self.envelope(command), self.envelope(Command::Interrupt));
+        let moved = Command::BackgroundForeground {
+            reason: rust_cli_kernel_api::env::BackgroundReason::DeliverMessage,
+        };
+        let (queued, moved) = (self.envelope(command), self.envelope(moved));
         self.pending.push(
             async move {
                 let ack = session.send(queued).await;
                 if matches!(ack, rust_cli_kernel_api::session_api::Ack::Accepted { .. }) {
-                    let _ = session.send(interrupt).await;
+                    let _ = session.send(moved).await;
                 }
                 Done::Ack {
                     sent: Sent::Submit,

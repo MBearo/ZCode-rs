@@ -65,6 +65,8 @@ pub trait Connector: Send + Sync {
 /// 部署的进度（远端执行 F98，remote-exec.md §25.4.2）：第一次连接时状态行分出“上传执行器”一步。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProvisionStep {
+    /// 开始下载执行器（F100，remote-exec.md §26.6：本机缓存里没有，从 npm 下载）。
+    Downloading,
     /// 开始上传执行器：要上传的字节数。
     Uploading { bytes: u64 },
 }
@@ -111,6 +113,27 @@ pub enum ProvisionError {
     /// 看不懂目标的回答。
     #[error("cannot understand the remote: {0}")]
     Probe(String),
+    /// 目标上没有协议兼容的执行器，本机没有产物，下载也失败了（F100，remote-exec.md §26.2）：`reason` 是简短的原因。
+    #[error(
+        "the remote has no compatible zcode executor and downloading the Linux {target} build of zcode {version} failed: {reason}"
+    )]
+    DownloadFailed {
+        version: String,
+        target: String,
+        reason: String,
+    },
+    /// 目标用 musl libc（例如 Alpine），也没有协议兼容的执行器：npm 的 Linux 包都要 glibc（F100，§26.5）。
+    #[error(
+        "the remote uses musl libc (for example Alpine); there is no zcode executor package for it"
+    )]
+    Musl,
+    /// 下载的执行器在目标上跑不起来：它要的 glibc 比目标的新（F100，§26.5）。`glibc`：目标的 glibc 版本（探测不到时
+    /// None）；`needs`：加载器报缺的最高版本，例如 `GLIBC_2.34`。
+    #[error("the zcode executor needs {needs}, but the remote has {}", glibc.as_ref().map_or_else(|| "an older glibc".to_owned(), |version| format!("glibc {version}")))]
+    OldGlibc {
+        glibc: Option<String>,
+        needs: String,
+    },
 }
 
 /// 目标上启动执行器的命令。

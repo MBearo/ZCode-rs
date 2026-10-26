@@ -53,6 +53,17 @@ impl App {
                     Lang::En => "Usage: /cd <path>",
                     Lang::Zh => "用法：/cd <路径>",
                 });
+                // 对照实现记这一句（缺省显示，加固定说明；修复线 L-A，tui-manage.md §11.2）。
+                self.records
+                    .push(rust_cli_kernel_api::user_command::LocalCommandRecord {
+                        name: "cd".to_owned(),
+                        args: String::new(),
+                        output: rust_cli_kernel_api::user_command::LocalCommandOutput::Stdout(
+                            "Usage: /cd <path>".to_owned(),
+                        ),
+                        caveat: true,
+                        meta: Vec::new(),
+                    });
                 None
             }
             "cd" => Some(Action::Manage(Manage::ChangeDirectory(args.to_owned()))),

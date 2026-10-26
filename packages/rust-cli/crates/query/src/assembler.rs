@@ -117,7 +117,10 @@ impl Assembler {
             }
             ModelEvent::MessageDelta { stop_reason, usage } => {
                 self.stop_reason = stop_reason.or(self.stop_reason);
-                self.usage.output_tokens = usage.output_tokens;
+                // 修 bug（修复线 F99，query.md §1.10）：以前只取输出，输入与缓存停在 `message_start` 的值；GLM 在那里给 0、
+                // 只在 `message_delta` 里给真实的输入与缓存，OpenAI 的用量只在结束时给，于是存储与上下文用量的输入都是 0。
+                // 这里的用量是适配器合并好的累计值，整体采用。
+                self.usage = usage;
             }
             ModelEvent::MessageStop => self.stopped = true,
         }

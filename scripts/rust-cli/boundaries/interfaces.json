@@ -147,6 +147,11 @@
           "name": "stop_background_command",
           "signature": "async fn stop_background_command(&self,_context:OperationContext,_request:BackgroundTask,) -> Result<BackgroundStop,EnvError>",
           "default": true
+        },
+        {
+          "name": "background_foreground",
+          "signature": "async fn background_foreground(&self,_session:&crate::ids::SessionId,_reason:crate::env_command::BackgroundReason,) -> Result<Vec<crate::ids::ShellTaskId>,EnvError>",
+          "default": true
         }
       ]
     },
@@ -387,6 +392,21 @@
           "name": "provision_reporting",
           "signature": "async fn provision_reporting(&self,progress:&(dyn Fn(ProvisionStep)+ Send + Sync),) -> Result<Provisioned,ProvisionError>",
           "default": true
+        }
+      ]
+    },
+    "ArtifactSource": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "cached",
+          "signature": "async fn cached(&self,version:&str,arch:Arch) -> Option<PathBuf>",
+          "default": false
+        },
+        {
+          "name": "download",
+          "signature": "async fn download(&self,version:&str,arch:Arch) -> Result<PathBuf,String>",
+          "default": false
         }
       ]
     },

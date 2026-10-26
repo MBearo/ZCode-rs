@@ -352,6 +352,14 @@ impl Background for LocalEnvironment {
     ) -> Result<BackgroundStop, EnvError> {
         self.shells()?.stop(&context, &request)
     }
+
+    async fn background_foreground(
+        &self,
+        session: &rust_cli_kernel_api::ids::SessionId,
+        reason: rust_cli_kernel_api::env::BackgroundReason,
+    ) -> Result<Vec<rust_cli_kernel_api::ids::ShellTaskId>, EnvError> {
+        Ok(self.shells()?.background_foreground(session, reason))
+    }
 }
 
 #[async_trait]

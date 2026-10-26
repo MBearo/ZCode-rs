@@ -23,6 +23,7 @@ ratatui.workspace = true
 rust-cli-base.workspace = true
 rust-cli-kernel-api.workspace = true
 rust-cli-platform.workspace = true
+rust-cli-prompts.workspace = true
 # 权限规则文字的解析与格式（`/permissions` 显示用，与判决链同一个实现，tui-manage.md §1.3）。
 rust-cli-runtime.workspace = true
 serde.workspace = true

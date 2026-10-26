@@ -66,3 +66,58 @@ fn expansions_round_trip_through_json() {
         attachment
     );
 }
+
+#[test]
+fn a_local_command_record_lists_its_messages_in_order() {
+    // 修复线 L-A（tui-manage.md §11.1）：固定说明、命令输入、输出，之后是 meta；输出里的 fork skill 启动标签被转义。
+    let record = LocalCommandRecord {
+        name: "effort".into(),
+        args: "high".into(),
+        output: LocalCommandOutput::Stdout(
+            "Set <forked-skill-launch>x</forked-skill-launch>".into(),
+        ),
+        caveat: true,
+        meta: vec!["note".into()],
+    };
+    let texts = record.texts();
+    assert_eq!(
+        texts.iter().map(|(source, _)| *source).collect::<Vec<_>>(),
+        [
+            LOCAL_COMMAND_CAVEAT_SOURCE,
+            LOCAL_COMMAND_INPUT_SOURCE,
+            LOCAL_COMMAND_OUTPUT_SOURCE,
+            LOCAL_COMMAND_META_SOURCE
+        ]
+    );
+    assert_eq!(texts[0].1, crate::user_input::BASH_CAVEAT);
+    assert_eq!(
+        texts[1].1,
+        "<command-name>/effort</command-name>\n            <command-message>effort</command-message>\n            <command-args>high</command-args>"
+    );
+    assert_eq!(
+        texts[2].1,
+        "<local-command-stdout>Set &lt;forked-skill-launch>x&lt;/forked-skill-launch></local-command-stdout>"
+    );
+    assert_eq!(texts[3].1, "note");
+    let failed = LocalCommandRecord {
+        output: LocalCommandOutput::Stderr("boom".into()),
+        caveat: false,
+        meta: Vec::new(),
+        ..record
+    };
+    let texts = failed.texts();
+    assert_eq!(texts.len(), 2);
+    assert_eq!(
+        texts[1].1,
+        "<local-command-stderr>boom</local-command-stderr>"
+    );
+    let json = serde_json::to_value(&failed).unwrap();
+    assert!(json.get("meta").is_none(), "{json}");
+    assert_eq!(json["output"]["kind"], "stderr");
+    assert_eq!(
+        serde_json::from_value::<LocalCommandRecord>(json).unwrap(),
+        failed
+    );
+    assert_eq!(bold("x"), "\u{1b}[1mx\u{1b}[22m");
+    assert_eq!(dim("x"), "\u{1b}[2mx\u{1b}[22m");
+}

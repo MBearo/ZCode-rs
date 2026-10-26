@@ -8,7 +8,8 @@ mod action;
 mod cache;
 mod handoff;
 mod install;
-mod registry;
+// 执行器的 npm 来源（F100，remote-exec.md §26.4）也用它取 packument。
+pub(crate) mod registry;
 mod versions;
 
 #[cfg(test)]

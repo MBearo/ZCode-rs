@@ -55,6 +55,7 @@ pub(super) fn machine(start: &Start, entry: &MachineEntry) -> Result<Machine> {
             (&start.env, &start.executor),
             &entry.ssh,
             (config.as_deref(), artifact.as_deref()),
+            start.source.clone(),
         ),
         Connect::Loopback => {
             let dir = entry

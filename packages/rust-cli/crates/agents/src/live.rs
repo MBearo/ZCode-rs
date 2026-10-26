@@ -76,6 +76,8 @@ pub(crate) struct LiveAgent {
     pub(crate) state: AgentState,
     /// 列表显示用的记录（tui-panels.md §1.1）；由 `live::Live` 在每次改动后统一维护。
     pub(crate) shown: Shown,
+    /// fork 子代理继承的前缀（修复线 L-A，agents.md §8.1.3）：不落库，续跑时拼在子会话的冷读取之前；别的子代理为 None。
+    pub(crate) fork_prefix: Option<Arc<Vec<rust_cli_kernel_api::message::Message>>>,
 }
 
 /// 列表显示用的记录：启动顺序、这次运行的开始与结束时刻、等待中的交互、子会话的提交次数、当前活动。

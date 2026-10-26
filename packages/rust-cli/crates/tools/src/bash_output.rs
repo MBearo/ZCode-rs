@@ -117,6 +117,23 @@ pub fn backgrounded(task: &ShellTaskId, output_file: &str) -> String {
     )
 }
 
+/// 前台命令被要求转到后台时的结果（修复线 L-A，tui-input.md §11.1、§11.2；对照实现的
+/// 两种说法）：用户按键时只有一句；低延迟投递时说明为什么转、怎样看输出。
+pub fn backgrounded_by(
+    reason: rust_cli_kernel_api::env::BackgroundReason,
+    task: &ShellTaskId,
+    output_file: &str,
+) -> String {
+    match reason {
+        rust_cli_kernel_api::env::BackgroundReason::User => format!(
+            "Command was manually backgrounded by user with ID: {task}. Output is being written to: {output_file}."
+        ),
+        rust_cli_kernel_api::env::BackgroundReason::DeliverMessage => format!(
+            "Command was moved to the background (ID: {task}) so that a message that arrived while it was running can reach you; it was not interrupted. Output is being written to: {output_file}. You will be notified when it completes. To check interim output, use Read on that file path."
+        ),
+    }
+}
+
 /// 前台命令到了超时、转到后台时的结果（shell-permissions.md §1.2.1）。超时按秒四舍五入、至少 1 s；`deadline_ms` 是
 /// 转后台之后的期限，没有时（交互会话）没有期限一句。转后台之前的输出不放进结果（在输出文件里）。
 pub fn moved_to_background(

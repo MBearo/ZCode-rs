@@ -114,6 +114,8 @@ struct Run {
     block: Block,
     text: String,
     pieces: Vec<(u64, usize)>,
+    /// 最后一片时的状态 revision（增量不改 revision，整段同一个值）。
+    revision: u64,
 }
 
 impl Run {
@@ -128,6 +130,7 @@ impl Run {
         Some(SequencedEvent {
             seq: last,
             event: self.block.event(self.text[start..].to_owned()),
+            revision: self.revision,
         })
     }
 }
@@ -137,6 +140,22 @@ enum Entry {
     Run(Run),
     /// 被同一个工具后来的进度取代；整理时去掉。
     Superseded,
+}
+
+/// 这个事件是否改变会话的可见状态（缺口 G1，[`SequencedEvent::revision`] 的规则）：会话 actor 是 revision 的唯一
+/// owner，前端（例如 App 协议的条件命令）只读它。新加的事件默认算状态变化。
+fn changes_state(event: &KernelEvent) -> bool {
+    !matches!(
+        event,
+        KernelEvent::SessionCreated { .. }
+            | KernelEvent::StreamDelta { .. }
+            | KernelEvent::ToolProgress { .. }
+            | KernelEvent::ContextUsage { .. }
+            | KernelEvent::ContextNotice { .. }
+            | KernelEvent::ScheduledFire { .. }
+            | KernelEvent::SystemNotice { .. }
+            | KernelEvent::ModelNotice { .. }
+    )
 }
 
 /// 一个事件怎么存。
@@ -221,6 +240,8 @@ struct Inner {
     outputs: HashMap<ToolUseId, usize>,
     superseded: usize,
     next: u64,
+    /// 当前的状态 revision（缺口 G1）。
+    revision: u64,
 }
 
 impl Inner {
@@ -232,12 +253,14 @@ impl Inner {
                 {
                     run.text.push_str(text);
                     run.pieces.push((sequenced.seq, run.text.len()));
+                    run.revision = sequenced.revision;
                     return;
                 }
                 self.entries.push(Entry::Run(Run {
                     block,
                     text: text.to_owned(),
                     pieces: vec![(sequenced.seq, text.len())],
+                    revision: sequenced.revision,
                 }));
             }
             Shape::Output(tool_use) => {
@@ -267,6 +290,7 @@ impl Inner {
                     previous
                         .pieces
                         .extend(run.pieces.into_iter().map(|(seq, end)| (seq, offset + end)));
+                    previous.revision = run.revision;
                 }
                 (entry, _) => kept.push(entry),
             }
@@ -311,6 +335,7 @@ impl EventLog {
                 outputs: HashMap::new(),
                 superseded: 0,
                 next: 1,
+                revision: 0,
             }),
             live: broadcast::channel(LIVE_CAPACITY).0,
         }
@@ -318,9 +343,13 @@ impl EventLog {
 
     pub(crate) fn append(&self, event: KernelEvent) -> u64 {
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        if changes_state(&event) {
+            inner.revision += 1;
+        }
         let sequenced = SequencedEvent {
             seq: inner.next,
             event,
+            revision: inner.revision,
         };
         inner.next += 1;
         inner.store(&sequenced);
@@ -328,6 +357,14 @@ impl EventLog {
         // 没有订阅方时发送失败，不影响日志。
         let _ = self.live.send(sequenced);
         seq
+    }
+
+    /// 当前的状态 revision（缺口 G1）：与 `last_seq` 同一时刻（视图在 actor 里取，二者之间没有追加）。
+    pub(crate) fn revision(&self) -> u64 {
+        self.inner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .revision
     }
 
     pub(crate) fn last_seq(&self) -> u64 {

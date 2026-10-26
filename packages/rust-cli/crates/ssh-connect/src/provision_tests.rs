@@ -13,12 +13,13 @@ use rust_cli_exec_transport::{Connector, LinkError, ProvisionError, Provisioned,
 
 use crate::{SshConnector, SshProvisioner, SshTarget, Wanted};
 
-struct Remote {
-    root: tempfile::TempDir,
+/// 假的远端（F100 的测试也用：`provision_source_tests.rs`）。
+pub(crate) struct Remote {
+    pub(crate) root: tempfile::TempDir,
 }
 
 impl Remote {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let fake = root.path().join("fake");
         std::fs::create_dir_all(&fake).unwrap();
@@ -32,22 +33,29 @@ impl Remote {
             "uname",
             "#!/bin/sh\ncase \"$1\" in -s) echo Linux;; -m) echo x86_64;; esac\n",
         );
+        // F100：glibc 2.31；目标 alpine 是 musl（没有 glibc，探测多一行 `libc musl`：本机没有 /lib/ld-musl-*）。
+        write(
+            "getconf",
+            "#!/bin/sh\n[ \"$FAKE_LIBC\" = musl ] && exit 1\n[ \"$1\" = GNU_LIBC_VERSION ] && echo 'glibc 2.31'\n",
+        );
         // 假的 ssh：跳过选项与目标，在本机用 sh 跑远端命令（同真实 ssh：命令串交给远端的登录 shell）。
         write(
             "ssh",
             "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in -F|-o) shift 2;; -T) shift;; *) break;; esac; done\n\
              [ \"$1\" = unreachable ] && { echo 'Permission denied (publickey).' >&2; exit 255; }\n\
              [ \"$1\" = down ] && { echo 'ssh: connect to host down port 22: Connection refused' >&2; exit 255; }\n\
+             if [ \"$1\" = alpine ]; then export FAKE_LIBC=musl; shift; cd \"$HOME\" || exit 1\n\
+             /bin/sh -c \"$*\"; code=$?; [ \"$*\" = 'sh -s' ] && echo 'libc musl'; exit $code; fi\n\
              shift\ncd \"$HOME\" && exec /bin/sh -c \"$*\"\n",
         );
         Self { root }
     }
 
-    fn home(&self) -> PathBuf {
+    pub(crate) fn home(&self) -> PathBuf {
         self.root.path().join("home")
     }
 
-    fn target(&self, destination: &str) -> SshTarget {
+    pub(crate) fn target(&self, destination: &str) -> SshTarget {
         let fake = self.root.path().join("fake");
         SshTarget {
             destination: destination.to_owned(),
@@ -68,7 +76,7 @@ impl Remote {
     }
 
     /// 一个 x86_64 的 Linux ELF 头加一些内容。
-    fn artifact(&self) -> (PathBuf, Vec<u8>) {
+    pub(crate) fn artifact(&self) -> (PathBuf, Vec<u8>) {
         let mut bytes = vec![0u8; 64];
         bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
         bytes[16] = 2;
@@ -80,14 +88,14 @@ impl Remote {
     }
 }
 
-fn wanted() -> Wanted {
+pub(crate) fn wanted() -> Wanted {
     Wanted {
         version: "0.2.0".to_owned(),
         protocol: 1,
     }
 }
 
-fn mode(path: &Path) -> u32 {
+pub(crate) fn mode(path: &Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
 

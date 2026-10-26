@@ -79,10 +79,12 @@ pub fn short_word(lang: Lang, status: &MachineStatus) -> Option<&'static str> {
     })
 }
 
-/// 第一次连接的哪一步（F98，remote-exec.md §25.4.2）：上传与握手接在“连接中”后面；探测时没有。
+/// 第一次连接的哪一步（F98，remote-exec.md §25.4.2；F100 加下载，§26.6）：下载、上传与握手接在“连接中”后面；探测时没有。
 pub fn connect_step(lang: Lang, step: ConnectStep) -> Option<String> {
     match (lang, step) {
         (_, ConnectStep::Checking) => None,
+        (Lang::En, ConnectStep::Downloading) => Some(" · downloading the executor".to_owned()),
+        (Lang::Zh, ConnectStep::Downloading) => Some(" · 下载执行器".to_owned()),
         (Lang::En, ConnectStep::Uploading { bytes }) => Some(format!(
             " · uploading the executor ({} MB)",
             megabytes(bytes)
@@ -443,6 +445,51 @@ pub fn failure_text(lang: Lang, name: &str, failure: &MachineFailure) -> String 
             format!("Couldn't understand {name}'s reply while checking it: {m}")
         }
         (Lang::Zh, MachineFailure::Probe(m)) => format!("检查 {name} 时看不懂它的回复：{m}"),
+        // F100（remote-exec.md §26.6）：下载、musl 与 glibc 太旧。
+        (
+            Lang::En,
+            MachineFailure::DownloadFailed {
+                version,
+                target,
+                reason,
+            },
+        ) => format!(
+            "Couldn't download the zcode {version} executor ({target}) to upload to {name}: {reason}. No compatible executor is installed there either."
+        ),
+        (
+            Lang::Zh,
+            MachineFailure::DownloadFailed {
+                version,
+                target,
+                reason,
+            },
+        ) => format!(
+            "无法下载要上传到 {name} 的 zcode {version} 执行器（{target}）：{reason}。那台机器上也没有兼容的执行器。"
+        ),
+        (Lang::En, MachineFailure::Musl) => format!(
+            "{name} uses musl libc (for example Alpine), and there's no zcode executor package for musl. Use a glibc-based Linux such as Debian or Ubuntu."
+        ),
+        (Lang::Zh, MachineFailure::Musl) => format!(
+            "{name} 用的是 musl libc（例如 Alpine），没有对应的 zcode 执行器包。请换用基于 glibc 的 Linux（例如 Debian、Ubuntu）。"
+        ),
+        (Lang::En, MachineFailure::OldGlibc { glibc, needs }) => {
+            let has = glibc.as_ref().map_or_else(
+                || format!("{name}'s glibc is older"),
+                |version| format!("{name} has glibc {version}"),
+            );
+            format!(
+                "The zcode executor can't run on {name}: it needs {needs}, but {has}. Upgrade that machine's system or use a newer Linux."
+            )
+        }
+        (Lang::Zh, MachineFailure::OldGlibc { glibc, needs }) => {
+            let has = glibc.as_ref().map_or_else(
+                || format!("{name} 的 glibc 更旧"),
+                |version| format!("{name} 的 glibc 是 {version}"),
+            );
+            format!(
+                "zcode 执行器在 {name} 上跑不起来：它要 {needs}，{has}。请升级那台机器的系统或换用更新的 Linux。"
+            )
+        }
         (Lang::En, MachineFailure::Refused(m)) => {
             format!("The executor on {name} refused the connection: {m}")
         }

@@ -52,7 +52,11 @@ pub(super) enum ManageDone {
         result: Result<(), String>,
     },
     /// `/cd` 的回执（tui-manage.md §7）。
-    DirectoryChanged(Result<rust_cli_kernel_api::manage::DirectoryChanged, KernelError>),
+    /// `/cd` 的结果与命令的参数（命令记录用，修复线 L-A）。
+    DirectoryChanged {
+        path: String,
+        result: Result<rust_cli_kernel_api::manage::DirectoryChanged, KernelError>,
+    },
     /// `/mcp` 控制的前置快照（tui-manage.md §6.2）。
     McpPlanned {
         args: String,
@@ -77,6 +81,7 @@ pub(super) enum ManageDone {
     EffortSaved {
         level: Option<String>,
         result: Result<String, String>,
+        args: String,
     },
 }
 
@@ -144,12 +149,13 @@ impl<B: Backend> Loop<'_, B> {
             }
             // 先改名，再离开（tui-display.md §4.6）。改名的命令先进 actor 的队列。
             Manage::ClearNamed(name) => {
+                let name_args = name.clone();
                 self.send(
                     Sent::ClearRename,
                     Command::Rename { title: name },
                     String::new(),
                 );
-                self.clear()?;
+                self.clear_as(&name_args)?;
             }
             Manage::PlanPrompt(text) => match self.session.clone() {
                 Some(session) => {
@@ -243,13 +249,14 @@ impl<B: Backend> Loop<'_, B> {
                 let request = rust_cli_kernel_api::manage::ChangeDirectory {
                     workspace: self.app.view.workspace().clone(),
                     session: self.session.as_ref().map(|session| session.id().clone()),
-                    path,
+                    path: path.clone(),
                 };
                 self.pending.push(
                     async move {
-                        Done::Manage(ManageDone::DirectoryChanged(
-                            kernel.change_directory(request).await,
-                        ))
+                        Done::Manage(ManageDone::DirectoryChanged {
+                            path,
+                            result: kernel.change_directory(request).await,
+                        })
                     }
                     .boxed(),
                 );
@@ -324,7 +331,12 @@ impl<B: Backend> Loop<'_, B> {
                 }
             },
             // 本会话先换档位（以 `ModelChanged` 为准），再存成新会话的缺省（与 Node 的顺序相同）。
-            Manage::EffortChosen { selection, level } => {
+            Manage::EffortChosen {
+                selection,
+                level,
+                args,
+            } => {
+                // 档位的切换不是 `/model`：不写 `/model` 的记录（`/effort` 的记录在 `effort_done`）。
                 self.act(crate::ui::app::Action::SetModel(selection.clone()))?;
                 match self.options.services.preferences.clone() {
                     Some(store) => {
@@ -332,12 +344,16 @@ impl<B: Backend> Loop<'_, B> {
                         self.pending.push(
                             async move {
                                 let result = saving.await;
-                                Done::Manage(ManageDone::EffortSaved { level, result })
+                                Done::Manage(ManageDone::EffortSaved {
+                                    level,
+                                    result,
+                                    args,
+                                })
                             }
                             .boxed(),
                         );
                     }
-                    None => self.app.effort_done(level.as_deref(), None),
+                    None => self.app.effort_done(level.as_deref(), None, &args),
                 }
             }
             Manage::Repaint => {
@@ -446,12 +462,22 @@ impl<B: Backend> Loop<'_, B> {
             }
             // 有会话时工作区随 `WorkspaceChanged` 换（actor 在回执之前发出）；没有会话时换新会话的草稿。修复（R1-3）：
             // 以前这里改 TUI 自存的工作区副本，EnterWorktree / ExitWorktree 不经这里，副本就过时了。
-            ManageDone::DirectoryChanged(result) => match result {
+            ManageDone::DirectoryChanged { path, result } => match result {
                 Ok(moved) => {
                     if self.session.is_none() {
                         let mut workspace = self.app.view.workspace().clone();
                         workspace.root = moved.root.clone();
                         self.app.view.set_draft_workspace(workspace);
+                        // 有会话时 runtime 与说明文字一起记；还没有会话时记在新会话的草稿里（修复线 L-A）。
+                        self.record_command(super::records::record(
+                            "cd",
+                            &path,
+                            format!(
+                                "Moved to {}",
+                                rust_cli_kernel_api::user_command::bold(&moved.display)
+                            ),
+                            false,
+                        ));
                     }
                     self.app.info(match lang {
                         i18n::Lang::En => format!("Moved to {}", moved.display),
@@ -498,8 +524,12 @@ impl<B: Backend> Loop<'_, B> {
                     self.manage(Manage::SetTheme(next))?;
                 }
             }
-            ManageDone::EffortSaved { level, result } => {
-                self.app.effort_done(level.as_deref(), Some(result));
+            ManageDone::EffortSaved {
+                level,
+                result,
+                args,
+            } => {
+                self.app.effort_done(level.as_deref(), Some(result), &args);
             }
             ManageDone::RuleChanged { change, result } => self
                 .app

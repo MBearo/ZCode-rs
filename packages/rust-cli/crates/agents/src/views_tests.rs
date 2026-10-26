@@ -58,6 +58,7 @@ fn running(agent: &str, root: &str) -> crate::live::LiveAgent {
             mailbox: Vec::new(),
         },
         shown: crate::live::Shown::default(),
+        fork_prefix: None,
     }
 }
 

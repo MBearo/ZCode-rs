@@ -90,6 +90,6 @@ pub fn choose(probe: &Probe, wanted: &Wanted, artifact: bool) -> Result<Plan, Pr
 fn no_artifact(wanted: &Wanted, arch: Arch) -> ProvisionError {
     ProvisionError::NoArtifact {
         version: wanted.version.clone(),
-        target: arch.triple().to_owned(),
+        target: arch.musl_triple().to_owned(),
     }
 }

@@ -6,6 +6,7 @@
 //! 工作目录。TUI 在后台连（不挡启动）；`-p` 只在测试变量下连，而且同步连完。
 
 mod endpoint;
+mod executor_dist;
 mod fleet;
 mod registry;
 
@@ -65,6 +66,8 @@ pub(crate) struct Start {
     pub env: Vec<(String, String)>,
     /// 本机执行器目录（上传用的产物缓存，R2 §19.4）。
     pub executor: rust_cli_paths::ExecutorPaths,
+    /// 执行器的 npm 来源（F100，remote-exec.md §26.7）：所有机器共用一个（单飞靠它）；debug 构建没给假注册表时没有。
+    pub source: Option<Arc<dyn rust_cli_ssh_connect::ArtifactSource>>,
     /// 每台机器上期望的 MCP 服务器（R5，remote-exec.md §22.5）：入口在组装好 MCP 设置之后填。
     pub mcp: std::collections::BTreeMap<String, Vec<rust_cli_kernel_api::mcp::McpConnect>>,
     /// 绑定到远端机器的全部 MCP 服务器（服务器名，机器名；含停用的）：TUI 的工具行标出机器（§22.8）。
@@ -72,11 +75,11 @@ pub(crate) struct Start {
 }
 
 impl Start {
-    /// 按形态与测试变量选：`surface` 是（TUI，`-p`）。
+    /// 按形态与测试变量选：`surface` 是（TUI，`-p`）；`egress` 给执行器的 npm 来源（F100）。
     pub(crate) fn new(
         paths: &rust_cli_paths::StoragePaths,
         (tui, print): (bool, bool),
-        startup: &super::Startup,
+        (startup, egress): (&super::Startup, &Arc<rust_cli_net::Egress>),
     ) -> Self {
         let assume = startup.explicit.assume;
         let ssh = crate::options::machine_ssh(crate::options::TestDeclarations::BUILD, |name| {
@@ -86,7 +89,11 @@ impl Start {
                 .find(|(key, _)| key == name)
                 .map(|(_, value)| value.clone())
         });
+        let executor = crate::ssh_executor::executor_paths(startup);
+        let registry =
+            executor_dist::registry(crate::options::TestDeclarations::BUILD, ssh.npm_registry);
         Self {
+            source: executor_dist::source(registry, egress, &executor),
             list: MachineList::new(&paths.machines()),
             connect: if assume.loopback_machines {
                 Connect::Loopback
@@ -104,7 +111,7 @@ impl Start {
                 When::Never
             },
             env: startup.env.to_vec(),
-            executor: crate::ssh_executor::executor_paths(startup),
+            executor,
             mcp: std::collections::BTreeMap::new(),
             mcp_marks: Vec::new(),
         }

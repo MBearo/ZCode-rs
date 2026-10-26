@@ -3,6 +3,7 @@
 //! 只有这里读取进程环境与 cwd，读到的值显式传给下层。这里构造平台层（Provider registry、账号）与适配器
 //! （存储、执行环境、模型），交给 runtime 组装成内核，再按命令行进入 TUI 或 `-p`。
 
+mod app_server;
 mod args;
 // build.rs 的计数与版本规则（读写计数文件、拼接与校验版本），只在单测里引入（docs/specs/rust-cli/version.md §3）。
 #[cfg(test)]
@@ -372,7 +373,7 @@ async fn session(
     let paths = setup::storage_paths(&startup, &config.storage.settings());
     // 远端机器的启动输入在这里取（之后 `startup.explicit` 会被移走，§20.3.2）。
     let surface = (matches!(mode, Mode::Tui), matches!(mode, Mode::Print));
-    let mut machine_start = machines::Start::new(&paths, surface, &startup);
+    let mut machine_start = machines::Start::new(&paths, surface, (&startup, &egress));
     // 自动更新（docs/specs/rust-cli/update.md §3，F48，照 Codex）：只在 TUI、工作区信任之前；没有启动器标记时什么都
     // 不做。`updates` 留到返回：它持有后台刷新的任务作用域。选了 Update now 时不建会话，安装后以它的结果退出。
     let vars = tui::vars(&startup.env);
@@ -691,9 +692,8 @@ fn main() -> ExitCode {
         return code;
     }
     let args = args();
-    // `zcode executor`（远端执行 R1 / R2，remote-exec.md §12、§18.6、§19.3）：执行器模式，不读凭据、不开会话库。
-    if let Some(parsed) = executor::parse(&args) {
-        return executor::main(parsed);
+    if let Some(code) = app_server::dispatch(&args) {
+        return code;
     }
     // 登录与退出（Node：用法错误也是 `Error: …`、退出码 1）。
     let job = match login::parse(&args) {

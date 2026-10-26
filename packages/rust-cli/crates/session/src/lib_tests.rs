@@ -296,6 +296,7 @@ async fn asking_session_with(
         SessionState {
             meta: meta(),
             messages: Vec::new(),
+            earlier: Vec::new(),
             selection: selection(),
             mode: PermissionMode::Default.into(),
             checkpoints: Vec::new(),

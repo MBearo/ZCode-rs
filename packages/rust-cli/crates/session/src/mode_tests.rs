@@ -140,6 +140,7 @@ fn spawn(
         SessionState {
             meta: meta(),
             messages: Vec::new(),
+            earlier: Vec::new(),
             selection: selection(),
             mode: mode.into(),
             checkpoints: Vec::new(),

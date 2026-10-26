@@ -193,14 +193,95 @@ async fn already_there_is_judged_by_the_session_not_the_front_end_copy() {
         .await
         .unwrap();
     let handle = kernel.open_session(&session).await.unwrap();
-    let notes = handle.view().await.unwrap().messages.len();
+    let notes = cd_notes(&handle.view().await.unwrap().messages);
     // 前端还拿着旧工作区（/Users/dev/project）。
     let again = kernel
         .change_directory(request("/Users/dev/other", Some(session.clone())))
         .await
         .unwrap_err();
     assert_eq!(again.to_string(), "Already in ~/other.");
-    assert_eq!(handle.view().await.unwrap().messages.len(), notes);
+    // 没有再移动：说明文字没有多出一条（修复线 L-A 起这次 `/cd` 本身记进对话，见下一个测试）。
+    assert_eq!(cd_notes(&handle.view().await.unwrap().messages), notes);
+}
+
+/// `/cd` 的说明文字的条数。
+fn cd_notes(messages: &[Message]) -> usize {
+    messages
+        .iter()
+        .filter(|message| {
+            matches!(message, Message::User(user) if user.origin == UserOrigin::Meta { source: "rust-cli/cd".to_owned() })
+        })
+        .count()
+}
+
+/// 每条 meta 消息的来源与文字。
+fn metas(messages: &[Message]) -> Vec<(String, String)> {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::User(user) => match (&user.origin, user.content.as_slice()) {
+                (UserOrigin::Meta { source }, [ContentBlock::Text { text }]) => {
+                    Some((source.clone(), text.clone()))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// 修复线 L-A（tui-manage.md §11.2）：有会话时 `/cd` 记进对话。成功是命令输入与 `Moved to <粗体目录>`，排在说明文字之前、
+/// 不加固定说明；失败与已在这里加固定说明，路径是粗体。
+#[tokio::test]
+async fn the_session_records_each_cd_like_the_reference() {
+    use rust_cli_kernel_api::user_command::{
+        LOCAL_COMMAND_CAVEAT_SOURCE, LOCAL_COMMAND_INPUT_SOURCE, LOCAL_COMMAND_OUTPUT_SOURCE,
+    };
+    let (kernel, _env) = kernel();
+    let session = kernel
+        .create_session(CreateSession {
+            id: None,
+            workspace: workspace(),
+            selection: selection(),
+            mode: PermissionMode::Default,
+            plan: false,
+        })
+        .await
+        .unwrap();
+    kernel
+        .change_directory(request("../other", Some(session.clone())))
+        .await
+        .unwrap();
+    kernel
+        .change_directory(request("../missing", Some(session.clone())))
+        .await
+        .unwrap_err();
+    let handle = kernel.open_session(&session).await.unwrap();
+    let metas = metas(&handle.view().await.unwrap().messages);
+    let sources: Vec<&str> = metas.iter().map(|(source, _)| source.as_str()).collect();
+    assert_eq!(
+        sources,
+        [
+            LOCAL_COMMAND_INPUT_SOURCE,
+            LOCAL_COMMAND_OUTPUT_SOURCE,
+            "rust-cli/cd",
+            LOCAL_COMMAND_CAVEAT_SOURCE,
+            LOCAL_COMMAND_INPUT_SOURCE,
+            LOCAL_COMMAND_OUTPUT_SOURCE,
+        ]
+    );
+    assert_eq!(
+        metas[0].1,
+        "<command-name>/cd</command-name>\n            <command-message>cd</command-message>\n            <command-args>../other</command-args>"
+    );
+    assert_eq!(
+        metas[1].1,
+        "<local-command-stdout>Moved to \u{1b}[1m~/other\u{1b}[22m</local-command-stdout>"
+    );
+    assert_eq!(
+        metas[5].1,
+        "<local-command-stdout>Couldn't find a directory at \u{1b}[1m/Users/dev/missing\u{1b}[22m.</local-command-stdout>"
+    );
 }
 
 /// `/plan open` 的计划文件（tui-manage.md §8）：与 ExitPlanMode 同一个位置，空文件不算有计划。

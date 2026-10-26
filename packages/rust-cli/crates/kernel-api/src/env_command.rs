@@ -53,6 +53,14 @@ pub struct StartCommand {
     pub env: EnvOverrides,
 }
 
+/// 前台命令为什么被转到后台（修复线 L-A，tui-input.md §11）：用户按了转后台的键，或运行中来了一条低延迟投递的输入。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundReason {
+    User,
+    DeliverMessage,
+}
+
 /// 命令输出事件。`cursor` 是已送达的字节位置，断线后从这里续读。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -67,6 +75,9 @@ pub enum CommandEvent {
     /// 前台命令到了超时、转到了后台（[`StartCommand::on_timeout`]，工作线 F69 新增）：只发一次，之后照常有输出
     /// 与终态（命令真正结束时）。
     Backgrounded,
+    /// 前台命令被要求转到了后台（[`crate::machine::Background::background_foreground`]，修复线 L-A，
+    /// docs/specs/rust-cli/tui-input.md §11）：只发一次，之后同 [`CommandEvent::Backgrounded`]。
+    BackgroundedBy { reason: BackgroundReason },
     /// 终态。超时：`outcome` 为 `Failed { code: "timeout" }`，`timed_out` 为 true，退出码 143；
     /// 取消：`Cancelled`。`cwd_reset` 是 [`CwdScope::Session`] 下结束目录越界、被重置到的目录。
     /// 输出文件超过执行环境的上限被结束时：`Cancelled`、退出码 137，`output_limit` 是说明文字。

@@ -137,6 +137,8 @@ pub(crate) struct Setup {
     pub artifacts: Arc<MemoryArtifacts>,
     pub tools: Vec<Arc<dyn Tool>>,
     pub messages: Vec<Message>,
+    /// 冷加载时只供显示的压缩点之前的消息（工作线 F102）；缺省为空。
+    pub earlier: Vec<Message>,
     pub checkpoints: Vec<WorkspaceCheckpoint>,
     pub opened: Opened,
     pub start: StartSource,
@@ -184,6 +186,7 @@ impl Setup {
             artifacts: Arc::new(MemoryArtifacts::default()),
             tools: Vec::new(),
             messages: Vec::new(),
+            earlier: Vec::new(),
             checkpoints: Vec::new(),
             opened: Opened::Created,
             start: StartSource::Startup,
@@ -281,6 +284,7 @@ impl Setup {
             SessionState {
                 meta,
                 messages: self.messages,
+                earlier: self.earlier,
                 selection: selection(),
                 mode: PermissionMode::Default.into(),
                 checkpoints: self.checkpoints,
@@ -337,4 +341,38 @@ pub(crate) async fn until(
 
 pub(crate) fn finished(event: &KernelEvent) -> bool {
     matches!(event, KernelEvent::TurnFinished { .. })
+}
+
+/// 每次请求都等到被放行（或取消）才回一句 `ok` 的模型（修复线 L-A 的 local_record_tests 等）。
+pub(crate) struct GatedModel {
+    gate: Arc<tokio::sync::Notify>,
+}
+
+impl GatedModel {
+    pub(crate) fn new(gate: Arc<tokio::sync::Notify>) -> Self {
+        Self { gate }
+    }
+}
+
+impl ModelPort for GatedModel {
+    fn stream(
+        &self,
+        _request: rust_cli_kernel_api::model::ModelRequest,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> BoxStream<
+        'static,
+        Result<rust_cli_kernel_api::model::ModelEvent, rust_cli_kernel_api::model::ModelError>,
+    > {
+        use futures_util::stream;
+        let gate = self.gate.clone();
+        stream::once(async move {
+            tokio::select! {
+                () = gate.notified() => None,
+                () = cancel.cancelled() => Some(Err(rust_cli_kernel_api::model::ModelError::Cancelled)),
+            }
+        })
+        .filter_map(|item| async move { item })
+        .chain(stream::iter(rust_cli_kernel_api::testing::text_response(&["ok"])))
+        .boxed()
+    }
 }

@@ -54,6 +54,30 @@ async fn the_default_output_limit_endpoint_is_the_plain_endpoint() {
     assert_eq!(*endpoints.0.lock().unwrap(), ["m", "m"]);
 }
 
+/// 带上下文的取端点（G8）：缺省实现忽略上下文，与 `endpoint_with_output_limit` 相同。
+#[tokio::test]
+async fn the_default_endpoint_with_context_ignores_the_context() {
+    let endpoints = Recording(Mutex::new(Vec::new()));
+    let selection = ModelSelection {
+        provider: "p".to_owned(),
+        model: "m".to_owned(),
+        reasoning: None,
+        connection: None,
+    };
+    let context = EndpointContext {
+        session: Some(crate::ids::SessionId::new("sess_1")),
+    };
+    let with_context = endpoints
+        .endpoint_in(&selection, None, Some(4096), &context)
+        .await
+        .unwrap();
+    assert_eq!(
+        with_context,
+        endpoints.endpoint(&selection, None).await.unwrap()
+    );
+    assert_eq!(*endpoints.0.lock().unwrap(), ["m", "m"]);
+}
+
 /// 交给补丁的上限：没有时不写出，有时原样往返。
 #[test]
 fn the_provider_output_limit_is_optional_on_the_wire() {

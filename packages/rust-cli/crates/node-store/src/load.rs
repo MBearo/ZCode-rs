@@ -11,7 +11,7 @@ use rust_cli_kernel_api::store::{
 use rust_cli_kernel_api::store::{SessionFilter, StoreError};
 use serde_json::Value;
 
-use crate::branch::{Branch, active_messages};
+use crate::branch::{Branch, active_messages, earlier_messages};
 use crate::facts::{live_session, unsupported};
 use crate::mode;
 use crate::operations;
@@ -31,6 +31,8 @@ pub fn load(
     let records = messages::messages(conn, session.as_str()).storage()?;
     let branch = Branch::from_revert(row.revert.as_ref());
     let active = active_messages(&records, &branch, true);
+    // 压缩点之前的历史只供显示（工作线 F102，compact.md §5.1）；模型侧的历史仍是 `active`，单独转换，结果不变。
+    let earlier = earlier_messages(&records, &branch, &active);
     let model = state::selection(conn, session.as_str())
         .storage()?
         .as_ref()
@@ -47,6 +49,7 @@ pub fn load(
         });
     let loaded = LoadedSession {
         messages: crate::hydrate::hydrate(&active),
+        earlier: crate::hydrate::hydrate(&earlier),
         model,
         mode: execution.map(|state| state.mode),
         plan: execution.is_some_and(|state| state.plan),

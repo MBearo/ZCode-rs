@@ -24,6 +24,11 @@ impl App {
                 KeyCode::Enter if !ctrl && !alt => return Some(self.submit()),
                 KeyCode::Char('s') if ctrl => return Some(self.send_now()),
                 KeyCode::Char('e') if ctrl => return Some(Some(Action::ExternalEditor)),
+                // ctrl+x ctrl+b：在跑的前台 Bash 转到后台（修复线 L-A，tui-input.md §11.2；对照实现是 ctrl+b，本工程 ctrl+b
+                // 是光标左移；键位暂定）。空闲时什么都不做。
+                KeyCode::Char('b') if ctrl => {
+                    return Some(self.running().then_some(Action::BackgroundForeground));
+                }
                 _ => {}
             }
         }
@@ -80,7 +85,8 @@ impl App {
         }
     }
 
-    /// 立即发送：运行中发出后中断当前回合（runner 先入队再中断）；空闲时同 enter。
+    /// 立即发送：运行中是低延迟投递（修复线 L-A，tui-input.md §11.1）：runner 先入队（插话），再把前台 Bash 转到后台，
+    /// 不中断当前回合；空闲时同 enter。
     fn send_now(&mut self) -> Option<Action> {
         let running = self.running();
         match self.submit()? {

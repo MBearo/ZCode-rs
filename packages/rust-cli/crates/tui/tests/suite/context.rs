@@ -53,8 +53,8 @@ async fn context_opens_a_page_with_the_grid_and_the_categories() {
         assert!(screen.contains("\u{26F6} \u{26F6} \u{26F6}"), "{screen}");
         // 明细默认折叠。
         assert!(screen.contains("Skills · /skills"), "{screen}");
-        // 两个工作区 skill 加内置的 `loop`。
-        assert!(screen.contains("└ 3 skills · "), "{screen}");
+        // 两个工作区 skill 加内置的 `loop`、`init`、`security-review`（修复线 L-A）。
+        assert!(screen.contains("└ 5 skills · "), "{screen}");
         assert!(screen.contains("/context all to expand"), "{screen}");
         ui.key(KeyCode::Esc);
         let closed = ui

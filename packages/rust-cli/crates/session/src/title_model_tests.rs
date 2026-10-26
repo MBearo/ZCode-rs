@@ -142,3 +142,63 @@ async fn a_catalog_cap_above_5000_hands_5000_to_the_provider_patch() {
     assert_eq!(request.max_tokens, 5_000);
     assert_eq!(request.options.provider_max_output_tokens, Some(5_000));
 }
+
+/// 一次标题请求的用量：脚本模型的文字回复，`message_start` 的用量是 `started`，`message_delta` 带适配器合并好的累计
+/// 用量 `reported`。
+async fn title_usage(started: Usage, reported: Usage) -> Option<Usage> {
+    let mut events = text_response(&["Hook trust"]);
+    for event in &mut events {
+        match event {
+            Ok(ModelEvent::MessageStart { usage, .. }) => *usage = started,
+            Ok(ModelEvent::MessageDelta { usage, .. }) => *usage = reported,
+            _ => {}
+        }
+    }
+    let titles = TitleModel {
+        model: Arc::new(ScriptedModel::new(vec![events])),
+        directory: None,
+    };
+    titles
+        .generate(
+            &selection(),
+            (&SessionId::new("sess_title"), None),
+            "trust the project hooks",
+            (&FixedClock(0), MessageId::new("msg_title")),
+            CancellationToken::new(),
+        )
+        .await
+        .call
+        .usage
+}
+
+/// 修复线 F99（query.md §1.10、titles.md §4）：输入与缓存只在 `message_delta` 里的端点，标题请求的用量行带上它们。
+/// 修 bug 前只取输出，输入与缓存是 0。
+#[tokio::test]
+async fn usage_reported_only_in_the_message_delta_is_kept() {
+    let reported = Usage {
+        input_tokens: 11_922,
+        output_tokens: 514,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 448,
+    };
+    assert_eq!(
+        title_usage(Usage::default(), reported).await,
+        Some(reported)
+    );
+}
+
+/// 修复线 F99：输入在 `message_start` 里的端点，累计用量带着同样的输入与缓存，结果与以前相同。
+#[tokio::test]
+async fn usage_with_the_input_in_the_message_start_is_unchanged() {
+    let started = Usage {
+        input_tokens: 20,
+        output_tokens: 1,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 4,
+    };
+    let reported = Usage {
+        output_tokens: 6,
+        ..started
+    };
+    assert_eq!(title_usage(started, reported).await, Some(reported));
+}

@@ -13,6 +13,89 @@ use crate::tool::ToolUseContext;
 pub const LOCAL_COMMAND_SOURCE: &str = "local-command";
 /// 本地命令之前的 caveat 消息的来源（meta，不显示）。
 pub const LOCAL_COMMAND_CAVEAT_SOURCE: &str = "local-command-caveat";
+/// 本地命令记录的命令输入（meta，不显示；修复线 L-A，docs/specs/rust-cli/tui-manage.md §11.3）。
+pub const LOCAL_COMMAND_INPUT_SOURCE: &str = "local-command-input";
+/// 本地命令记录的输出（`<local-command-stdout>` / `<local-command-stderr>`，meta，不显示）。
+pub const LOCAL_COMMAND_OUTPUT_SOURCE: &str = "local-command-output";
+/// 本地命令记录带的 meta 消息（`/rename` 的提醒等，不显示）。
+pub const LOCAL_COMMAND_META_SOURCE: &str = "local-command-meta";
+
+/// 本地命令的输出：成功写 stdout，失败写 stderr。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "text", rename_all = "snake_case")]
+pub enum LocalCommandOutput {
+    Stdout(String),
+    Stderr(String),
+}
+
+/// 一条本地命令写进对话的记录（修复线 L-A，tui-manage.md §11.1）：可选的固定说明、命令输入、输出，之后是 meta 消息。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalCommandRecord {
+    /// 命令名（不带 `/`）。
+    pub name: String,
+    /// 用户给的参数（原样）。
+    pub args: String,
+    pub output: LocalCommandOutput,
+    /// 前面加固定说明（对照实现的 user 显示与 local 类型）；system 显示的不加。
+    pub caveat: bool,
+    /// 输出之后的 meta 消息（文字原样）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub meta: Vec<String>,
+}
+
+impl LocalCommandRecord {
+    /// 按提交顺序给出每条消息的来源与文字。
+    pub fn texts(&self) -> Vec<(&'static str, String)> {
+        let mut texts = Vec::with_capacity(3 + self.meta.len());
+        if self.caveat {
+            texts.push((
+                LOCAL_COMMAND_CAVEAT_SOURCE,
+                crate::user_input::BASH_CAVEAT.to_owned(),
+            ));
+        }
+        texts.push((
+            LOCAL_COMMAND_INPUT_SOURCE,
+            command_input(&self.name, &self.args),
+        ));
+        let output = match &self.output {
+            LocalCommandOutput::Stdout(text) => {
+                format!(
+                    "<local-command-stdout>{}</local-command-stdout>",
+                    escape_tags(text)
+                )
+            }
+            LocalCommandOutput::Stderr(text) => {
+                format!(
+                    "<local-command-stderr>{}</local-command-stderr>",
+                    escape_tags(text)
+                )
+            }
+        };
+        texts.push((LOCAL_COMMAND_OUTPUT_SOURCE, output));
+        texts.extend(
+            self.meta
+                .iter()
+                .map(|text| (LOCAL_COMMAND_META_SOURCE, text.clone())),
+        );
+        texts
+    }
+}
+
+/// 输出里的 `<forked-skill-launch>` 标签换成 `&lt;`（同对照实现：免得模型把它当成 fork skill 的启动标记），其余文字原样。
+fn escape_tags(text: &str) -> String {
+    text.replace("<forked-skill-launch>", "&lt;forked-skill-launch>")
+        .replace("</forked-skill-launch>", "&lt;/forked-skill-launch>")
+}
+
+/// 终端的粗体（ANSI 的 bold）：本地命令记录里的路径用它（tui-manage.md §11.1）。
+pub fn bold(text: &str) -> String {
+    format!("\u{1b}[1m{text}\u{1b}[22m")
+}
+
+/// 终端的暗色（ANSI 的 dim）。
+pub fn dim(text: &str) -> String {
+    format!("\u{1b}[2m{text}\u{1b}[22m")
+}
 
 /// 用户可调用的命令（TUI 的斜杠补全）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

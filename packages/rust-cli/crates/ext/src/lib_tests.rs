@@ -106,10 +106,12 @@ async fn the_registry_adds_skill_and_mcp_tools_after_the_base() {
         .iter()
         .map(|entry| entry.line.as_str())
         .collect();
-    // 文件 skill 在前，内置的 `loop` 在后（tools-more.md §17.1）。
+    // 文件 skill 在前，内置的 `loop` 在后（tools-more.md §17.1），再是内置提示词命令（修复线 L-A）。
     assert_eq!(lines[0], "- greet: Greet");
     assert!(lines[1].starts_with("- loop: "));
-    assert_eq!(lines.len(), 2);
+    assert!(lines[2].starts_with("- init: "));
+    assert!(lines[3].starts_with("- security-review: "));
+    assert_eq!(lines.len(), 4);
     let instructions = listings.mcp_instructions(&request()).await.unwrap();
     assert_eq!(instructions[0].line, "## files\nRead files.");
 }

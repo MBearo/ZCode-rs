@@ -59,10 +59,14 @@ async fn the_listing_hides_model_disabled_and_inactive_conditional_skills() {
         );
     let env = Arc::new(env);
     let catalog = SkillCatalog::new(env.clone(), env);
-    // 内置的 `loop` 排在最后（builtin_tests.rs 里测），这里只看文件 skill。
+    // 内置的 `loop`、`init`、`security-review` 排在最后（builtin_tests.rs 里测），这里只看文件 skill。
     let lines = |entries: Vec<ListingEntry>| -> Vec<String> {
         let mut lines: Vec<String> = entries.into_iter().map(|entry| entry.line).collect();
-        lines.retain(|line| !line.starts_with("- loop: "));
+        lines.retain(|line| {
+            !["- loop: ", "- init: ", "- security-review: "]
+                .iter()
+                .any(|builtin| line.starts_with(builtin))
+        });
         lines
     };
     assert_eq!(

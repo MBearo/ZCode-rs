@@ -48,6 +48,11 @@ pub fn shortcuts() -> Vec<(&'static str, &'static str, &'static str)> {
             "用 $EDITOR 编辑（ctrl+x ctrl+e 也可以）",
         ),
         (image_paste_chord(), "Paste images", "粘贴图片"),
+        (
+            "ctrl+x ctrl+b",
+            "Move running commands to the background",
+            "把在跑的命令转到后台",
+        ),
         ("meta+p", "Switch model", "切换模型"),
         ("!", "Shell mode", "shell 模式"),
         ("@", "File paths", "文件路径"),

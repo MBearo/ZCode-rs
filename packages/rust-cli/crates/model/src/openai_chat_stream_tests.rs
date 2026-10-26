@@ -189,3 +189,78 @@ fn missing_call_ids_get_a_placeholder_and_bad_streams_fail() {
         Err(ModelError::Protocol { .. })
     ));
 }
+
+/// 每个 tool_use 块的 (id, 名字, 拼好的参数)。
+fn calls(events: &[ModelEvent]) -> Vec<(String, String, String)> {
+    let mut calls: Vec<(usize, String, String, String)> = Vec::new();
+    for event in events {
+        match event {
+            ModelEvent::BlockStart {
+                index,
+                block: ContentBlock::ToolUse { id, name, .. },
+            } => calls.push((*index, id.as_str().to_owned(), name.clone(), String::new())),
+            ModelEvent::BlockDelta {
+                index,
+                delta: BlockDelta::InputJson(more),
+            } => calls
+                .iter_mut()
+                .find(|call| call.0 == *index)
+                .unwrap()
+                .3
+                .push_str(more),
+            _ => {}
+        }
+    }
+    calls
+        .into_iter()
+        .map(|(_, id, name, arguments)| (id, name, arguments))
+        .collect()
+}
+
+#[test]
+fn arguments_given_whole_in_the_last_chunk_are_kept() {
+    let events = decode(vec![
+        chunk(json!({"tool_calls": [{"index": 0, "id": "call_a", "type": "function",
+            "function": {"name": "Write", "arguments": ""}}]})),
+        data(json!({"choices": [{"index": 0, "finish_reason": "tool_calls", "delta": {"tool_calls": [{"index": 0,
+            "function": {"arguments": "{\"file_path\":\"/Users/dev/笔记.md\",\"content\":\"中文\"}"}}]}}]})),
+        done(),
+    ])
+    .unwrap();
+    assert_eq!(
+        calls(&events),
+        [(
+            "call_a".to_owned(),
+            "Write".to_owned(),
+            "{\"file_path\":\"/Users/dev/笔记.md\",\"content\":\"中文\"}".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn calls_without_an_index_are_new_calls() {
+    let events = decode(vec![
+        chunk(json!({"tool_calls": [{"id": "call_a", "type": "function",
+            "function": {"name": "Bash", "arguments": "{\"command\":\"ls\"}"}}]})),
+        chunk(json!({"tool_calls": [{"id": "call_b", "type": "function",
+            "function": {"name": "Read", "arguments": "{\"file_path\":\"a.txt\"}"}}]})),
+        data(json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})),
+        done(),
+    ])
+    .unwrap();
+    assert_eq!(
+        calls(&events),
+        [
+            (
+                "call_a".to_owned(),
+                "Bash".to_owned(),
+                "{\"command\":\"ls\"}".to_owned()
+            ),
+            (
+                "call_b".to_owned(),
+                "Read".to_owned(),
+                "{\"file_path\":\"a.txt\"}".to_owned()
+            ),
+        ]
+    );
+}

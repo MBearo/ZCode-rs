@@ -18,6 +18,8 @@ pub enum MachineState {
     Unconnected,
     /// 部署中：探测、上传、校验。
     Provisioning,
+    /// 部署中的下载（F100，remote-exec.md §26.6）：本机缓存里没有执行器，从 npm 下载。
+    Downloading,
     /// 部署中的上传（F98，remote-exec.md §25.4.2：第一次连接时状态行分出这一步）：要上传的字节数。
     Uploading {
         bytes: u64,
@@ -49,6 +51,8 @@ pub struct Retry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MachineEvent {
     Connect,
+    /// 部署开始下载执行器（F100）。
+    Downloading,
     /// 部署开始上传执行器（F98）。
     Uploading {
         bytes: u64,
@@ -83,6 +87,22 @@ pub enum MachineError {
     Upload(String),
     #[error("cannot understand the remote: {0}")]
     Probe(String),
+    /// 下载执行器失败，远端也没有兼容的（F100，remote-exec.md §26.6）。
+    #[error("downloading the Linux {target} build of zcode {version} failed: {reason}")]
+    DownloadFailed {
+        version: String,
+        target: String,
+        reason: String,
+    },
+    /// 远端是 musl，没有执行器包（F100）。
+    #[error("the remote uses musl libc; there is no zcode executor package for it")]
+    Musl,
+    /// 执行器在远端跑不起来：远端的 glibc 太旧（F100）。
+    #[error("the executor needs {needs}, but the remote has {}", glibc.as_ref().map_or_else(|| "an older glibc".to_owned(), |version| format!("glibc {version}")))]
+    OldGlibc {
+        glibc: Option<String>,
+        needs: String,
+    },
     /// 执行器拒绝了握手（协议、鉴权、旧连接）。
     #[error("refused: {0}")]
     Refused(String),
@@ -108,6 +128,17 @@ impl From<ProvisionError> for MachineError {
             },
             ProvisionError::Upload(message) => Self::Upload(message),
             ProvisionError::Probe(message) => Self::Probe(message),
+            ProvisionError::DownloadFailed {
+                version,
+                target,
+                reason,
+            } => Self::DownloadFailed {
+                version,
+                target,
+                reason,
+            },
+            ProvisionError::Musl => Self::Musl,
+            ProvisionError::OldGlibc { glibc, needs } => Self::OldGlibc { glibc, needs },
         }
     }
 }
@@ -133,9 +164,12 @@ pub fn transition(state: &MachineState, event: MachineEvent) -> Option<MachineSt
     Some(match (state, event) {
         (_, E::Disconnect) => S::Unconnected,
         (S::Unconnected | S::Failed { .. }, E::Connect) => S::Provisioning,
-        (S::Provisioning, E::Uploading { bytes }) => S::Uploading { bytes },
-        (S::Provisioning | S::Uploading { .. }, E::Provisioned) => S::Handshaking,
-        (S::Provisioning | S::Uploading { .. }, E::ProvisionFailed(error))
+        // 部署的分步（F98 上传、F100 下载）：探测 → [下载] → [上传] → 握手；下载失败、改用协议相同的候选时从下载直接
+        // 进握手。
+        (S::Provisioning, E::Downloading) => S::Downloading,
+        (S::Provisioning | S::Downloading, E::Uploading { bytes }) => S::Uploading { bytes },
+        (S::Provisioning | S::Downloading | S::Uploading { .. }, E::Provisioned) => S::Handshaking,
+        (S::Provisioning | S::Downloading | S::Uploading { .. }, E::ProvisionFailed(error))
         | (S::Handshaking, E::HandshakeFailed(error)) => S::Failed { error },
         (S::Handshaking, E::Welcomed(welcomed)) => S::Ready(welcomed),
         (S::Ready(_), E::LinkLost) => S::Reconnecting {

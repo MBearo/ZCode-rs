@@ -41,6 +41,17 @@ pub(crate) async fn render(
     context: &ToolUseContext,
 ) -> Result<String, String> {
     if skill.source == SkillSource::Builtin {
+        if let Some(body) = builtin::prompt_command(catalog, skill, context).await {
+            return body;
+        }
+        // 在 git 仓库里的 `/security-review`：正文的 `!` 命令照 skill 的规则执行。
+        if skill.name == builtin::SECURITY_REVIEW {
+            let content = rust_cli_prompts::commands::security_review().to_owned();
+            return match runner {
+                Some(runner) => runner.expand(content, &skill.allowed_tools, context).await,
+                None => Ok(content),
+            };
+        }
         return Ok(builtin::prompt(catalog, context, args).await);
     }
     let content = format!(

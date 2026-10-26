@@ -138,6 +138,23 @@ pub enum Command {
     ChangeDirectory {
         root: crate::env::EnvPath,
     },
+    /// 同 [`Command::ChangeDirectory`]，移动成功时 `record` 与说明文字同一批、排在它之前提交（修复线 L-A，
+    /// docs/specs/rust-cli/tui-manage.md §11.2：对照实现的 `/cd` 先记命令输入与输出，说明文字是之后的 meta 消息）。
+    ChangeDirectoryRecorded {
+        root: crate::env::EnvPath,
+        record: crate::user_command::LocalCommandRecord,
+    },
+    /// 本地命令写进对话的记录（修复线 L-A，docs/specs/rust-cli/tui-manage.md §11）：空闲时马上提交一批；回合或压缩在跑时
+    /// 留到它收尾、开下一个回合之前提交。总是 `Accepted`（提交失败只记日志）。
+    RecordLocalCommand {
+        record: crate::user_command::LocalCommandRecord,
+    },
+    /// 把这个会话在跑的前台 Bash 转到后台（修复线 L-A，docs/specs/rust-cli/tui-input.md §11）：用户的转后台键
+    /// （`User`），或低延迟投递的输入（`DeliverMessage`）。会话 actor 交给本机的执行环境；总是 `Accepted`，`result`
+    /// 是转了的个数。
+    BackgroundForeground {
+        reason: crate::env_command::BackgroundReason,
+    },
     /// 把续写时补在内存里、还没落库的 assistant（`No response requested.`，docs/specs/rust-cli/session-lifecycle.md
     /// §6.3.1，工作线 F79；有补给未结调用的中断结果时一起，§6.3，工作线 F81）现在单独提交一批。交互界面在会话里切到这个会话（`/resume`、`/fork`）之后发：切过去就算换了
     /// 对话。没有要写的（没有补、已经写过、被回退掉）时什么都不做，回执是 `Accepted`；提交失败时 `Rejected`，它留到下一批
@@ -343,6 +360,12 @@ pub enum KernelEvent {
 pub struct SequencedEvent {
     pub seq: u64,
     pub event: KernelEvent,
+    /// 会话的状态 revision（缺口 G1，docs/specs/rust-cli/app-protocol.md §6.4）：会话 actor 在可见状态变化时加一
+    /// （回合开始与结束、消息落定、工具开始与结束、询问、队列、模式、模型、plan、标题、历史改写、压缩、工作区、子代理与
+    /// 后台任务）；流式增量、进度、用量与只供显示的提示不加。新会话从 0 开始，只在 actor 的寿命内单调（进程重启后从 0
+    /// 重来）。这条事件之后的值；serde 缺省 0。
+    #[serde(default)]
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -363,6 +386,8 @@ pub struct CreateSession {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionView {
     pub meta: SessionMeta,
+    /// 显示用的历史：冷读取时是只供显示的压缩点之前的消息（[`crate::store::LoadedSession::earlier`]）接上会话 actor 的
+    /// 历史（工作线 F102，docs/specs/rust-cli/compact.md §5.1）。要模型侧的那一段时取 [`crate::history::active`]。
     pub messages: Vec<Message>,
     pub selection: ModelSelection,
     /// 权限模式（修复线 F20 起不会是 `Plan`）。
@@ -373,6 +398,9 @@ pub struct SessionView {
     pub pending: Vec<(InteractionId, InteractionRequest)>,
     pub queue: Vec<QueuedInput>,
     pub last_seq: u64,
+    /// `last_seq` 时的状态 revision（缺口 G1，同 [`SequencedEvent::revision`]；serde 缺省 0）。
+    #[serde(default)]
+    pub revision: u64,
     /// 有回合正在运行。
     #[serde(default)]
     pub running: bool,
@@ -721,6 +749,27 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported {
             what: "answering questions of closed sessions".to_owned(),
         })
+    }
+
+    /// 写一条前端记录（缺口 G2，docs/specs/rust-cli/app-protocol.md §5.2）：内核不解释它，经存储端口原样落库（同 key
+    /// 覆盖）；会话不存在时 `NotFound`。缺省 `Unsupported`。
+    async fn put_session_record(
+        &self,
+        _session: &SessionId,
+        _record: crate::store::FrontendRecord,
+    ) -> Result<(), KernelError> {
+        Err(KernelError::Unsupported {
+            what: "frontend records".to_owned(),
+        })
+    }
+
+    /// 这个会话里某一种前端记录，按写入顺序（缺口 G2）。缺省没有。
+    async fn session_records(
+        &self,
+        _session: &SessionId,
+        _kind: &str,
+    ) -> Result<Vec<crate::store::FrontendRecord>, KernelError> {
+        Ok(Vec::new())
     }
 
     /// 工作区的会话（与 [`Kernel::list_sessions`] 同一个来源），合并本进程里打开着的会话的实时状态

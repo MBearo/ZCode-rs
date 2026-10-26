@@ -93,10 +93,12 @@ impl ChatStream {
         mut call: Value,
         out: &mut VecDeque<ModelEvent>,
     ) -> Result<(), ModelError> {
+        // 修 bug（修复线 F101，model.md §10.3）：以前没有 `index` 的调用让整个请求报协议错误；有的兼容端点不给
+        // `index`，每个 chunk 带一个完整的调用。现在当成一个新调用（Node 用的 SDK 同样如此）。
         let key = call
             .get("index")
             .and_then(Value::as_u64)
-            .ok_or_else(|| protocol("tool call delta without an index"))?;
+            .unwrap_or_else(|| self.blocks.next_tool_key());
         let mut function = call
             .get_mut("function")
             .map(Value::take)

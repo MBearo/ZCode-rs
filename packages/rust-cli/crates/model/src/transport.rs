@@ -24,7 +24,7 @@ use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::model::{
     ModelError, ModelNotice, ModelRequest, ModelSelection, ModelStreamItem, QuerySource,
 };
-use rust_cli_kernel_api::provider::{ModelEndpoint, ModelEndpoints, WireProtocol};
+use rust_cli_kernel_api::provider::{EndpointContext, ModelEndpoint, ModelEndpoints, WireProtocol};
 use rust_cli_net::retry::{RetryPolicy, jitter};
 use rust_cli_net::{Egress, HttpRequest};
 use tokio_util::sync::CancellationToken;
@@ -231,11 +231,16 @@ impl Start {
         // 工作线 F95（model.md §9）：请求交给 Provider 补丁的输出上限随取端点交给平台层（目录模型的 `maxOutputTokens`
         // 补丁以它与配置的上限的较小值为输入）；没有时同 `endpoint`。
         let output_limit = request.options.provider_max_output_tokens.map(u64::from);
+        // 缺口 G8（app-protocol.md §5.2）：取端点时带上发请求的会话，前端提供的请求头来源按它找会话。
+        let context = EndpointContext {
+            session: request.options.session_id.clone(),
+        };
         let endpoint = cancel
-            .run_until_cancelled(route.endpoints.endpoint_with_output_limit(
+            .run_until_cancelled(route.endpoints.endpoint_in(
                 &request.selection,
                 None,
                 output_limit,
+                &context,
             ))
             .await
             .ok_or(ModelError::Cancelled)??;
@@ -286,6 +291,8 @@ impl Start {
             endpoint,
             origin,
             selection,
+            context,
+            output_limit,
             fallback,
             overload_retry,
             attempt: 1,
@@ -308,6 +315,10 @@ pub(crate) struct Connect {
     /// 发请求的一方（每请求头）。
     origin: Origin,
     selection: ModelSelection,
+    /// 取端点的上下文（G8）：401 后重取凭据时同样带上。
+    context: EndpointContext,
+    /// 交给 Provider 补丁的输出上限（与第一次取端点相同）。
+    output_limit: Option<u64>,
     fallback: Option<String>,
     overload_retry: bool,
     attempt: u32,
@@ -408,10 +419,12 @@ impl Connect {
         if matches!(failure.error, ModelError::Authentication { .. }) && self.endpoint.renewable {
             // 每请求取的凭据被拒：带上被拒的端点再取一次（401 时刷新凭据再重试）。
             // 只换凭据与 Provider header；请求体已按原端点编码，不再改。
-            let renewed = self
-                .route
-                .endpoints
-                .endpoint(&self.selection, Some(&self.endpoint));
+            let renewed = self.route.endpoints.endpoint_in(
+                &self.selection,
+                Some(&self.endpoint),
+                self.output_limit,
+                &self.context,
+            );
             match self.cancel.run_until_cancelled(renewed).await {
                 None => return Outcome::Failed(ModelError::Cancelled),
                 Some(Err(error)) => return Outcome::Failed(error),

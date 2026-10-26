@@ -234,6 +234,16 @@ pub trait Background: Send + Sync {
     ) -> Result<BackgroundStop, EnvError> {
         Err(not_provided("stop_background_command"))
     }
+
+    /// 把这个会话在跑的前台命令转到后台（mutate，修复线 L-A，docs/specs/rust-cli/tui-input.md §11）：看输出的一方收到
+    /// [`crate::env_command::CommandEvent::BackgroundedBy`]，之后照后台命令处理。返回转了的命令；缺省什么都不转。
+    async fn background_foreground(
+        &self,
+        _session: &crate::ids::SessionId,
+        _reason: crate::env_command::BackgroundReason,
+    ) -> Result<Vec<crate::ids::ShellTaskId>, EnvError> {
+        Ok(Vec::new())
+    }
 }
 
 /// 代码回退事务（session-lifecycle.md §5.2）。

@@ -38,6 +38,10 @@ pub(super) enum Sent {
     ClearRename,
     /// esc 撤回（修复线 F38）：回执的 `result.message` 放回输入框；条件不满足被拒绝时不提示。
     RestoreCancelled,
+    /// 本地命令的记录（修复线 L-A）：回执不提示。
+    Record,
+    /// 没有模型目录时的 `/model <名字>`：`label` 是参数，也是新模型；回执后提示并写命令记录（修复线 L-A）。
+    PickModel,
 }
 
 /// 异步操作的结果。
@@ -194,12 +198,19 @@ impl<B: Backend> Loop<'_, B> {
             match pick {
                 Some(model) => {
                     let provider = self.app.view.selection().provider.clone();
-                    self.set_model(rust_cli_kernel_api::model::ModelSelection {
+                    let selection = rust_cli_kernel_api::model::ModelSelection {
                         provider,
-                        model,
+                        model: model.clone(),
                         reasoning: None,
                         connection: None,
-                    });
+                    };
+                    // 直接换、不存成缺省；有会话时回执里记（`Sent::PickModel`）。
+                    if self.session.is_some() {
+                        self.send(Sent::PickModel, Command::SetModel { selection }, model);
+                    } else {
+                        self.set_model(selection);
+                        self.record_model(&model, &model, false);
+                    }
                 }
                 None => self.app.info(self.app.strings.no_models),
             }
@@ -247,6 +258,8 @@ impl<B: Backend> Loop<'_, B> {
                 self.events = handle.subscribe(Some(0));
                 self.session = Some(handle);
                 self.attach_panels();
+                // 还没有会话时完成的本地命令的记录排在第一条输入之前（修复线 L-A，tui-manage.md §11.3）。
+                self.send_pending_records();
                 self.send(Sent::Submit, command, String::new());
                 // 创建期间留下的输入：按顺序发出（发送 future 按加入顺序首次轮询，命令按这个顺序进 actor）。
                 for held in std::mem::take(&mut self.app.held) {
@@ -262,7 +275,7 @@ impl<B: Backend> Loop<'_, B> {
                 // 中断与取消唤醒的回执不提示：内核只在没有东西可中断时拒绝（空闲时没有唤醒；内核已经结束回合、
                 // `TurnFinished` 还没画出来时按 esc）。缺陷修复（F45）：以前运行中的中断被拒绝时显示 `Not done: no turn
                 // is running`（tui-input.md §8）。
-                _ if matches!(sent, Sent::CancelLoops | Sent::Interrupt) => {}
+                _ if matches!(sent, Sent::CancelLoops | Sent::Interrupt | Sent::Record) => {}
                 Ack::Accepted { result } if sent == Sent::RestoreCancelled => {
                     self.restored(&result)
                 }
@@ -280,6 +293,10 @@ impl<B: Backend> Loop<'_, B> {
                 Ack::Accepted { .. } if sent == Sent::SetModel => {
                     self.app.info(i18n::model_set(lang, &label));
                 }
+                Ack::Accepted { .. } if sent == Sent::PickModel => {
+                    self.app.info(i18n::model_set(lang, &label));
+                    self.record_model(&label, &label, false);
+                }
                 // 对话被回退：把那条消息放回输入框。
                 Ack::Accepted { .. } if sent == Sent::Rewind && !label.is_empty() => {
                     self.app.composer.set_text(&label);
@@ -287,6 +304,15 @@ impl<B: Backend> Loop<'_, B> {
                 Ack::Accepted { .. } if sent == Sent::ClearRename => {}
                 Ack::Accepted { .. } if sent == Sent::Rename => {
                     self.app.info(format!("Session renamed to: {label}"));
+                    // 对照实现的 system 显示：命令输入、结果与给模型的提醒（修复线 L-A，tui-manage.md §11.2）。
+                    let mut record = super::records::record(
+                        "rename",
+                        &label,
+                        format!("Session renamed to: {label}"),
+                        false,
+                    );
+                    record.meta = vec![rust_cli_prompts::commands::rename_named(&label)];
+                    self.record_command(record);
                 }
                 Ack::Accepted { result } if sent == Sent::Fork => self.forked(&result),
                 Ack::Accepted { .. } | Ack::Duplicate => {}
@@ -350,7 +376,7 @@ impl<B: Backend> Loop<'_, B> {
             Done::Catalog { catalog, pick } => match pick {
                 None => self.app.open_models(&catalog.models),
                 Some(name) => match crate::ui::resolve_model(&catalog.models, &name) {
-                    Ok(selection) => self.choose_model(selection),
+                    Ok(selection) => self.choose_model(selection, Some(name)),
                     Err(rust_cli_platform::model_name::LookupError::Missing) => {
                         self.app.info(i18n::unknown_model(lang, &name))
                     }

@@ -7,6 +7,7 @@
 use crate::repo::messages::WithParts as Record;
 use serde_json::{Value, json};
 use std::borrow::Cow;
+use std::collections::HashSet;
 
 /// `session.revert` 的回退游标。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -216,4 +217,35 @@ pub fn active_messages<'a>(
         Some(index) => compact_active(&active, index, include_preserved),
         None => active,
     }
+}
+
+/// 只供显示的、最后一个压缩点之前的行（工作线 F102，docs/specs/rust-cli/compact.md §5.1）：应用回退之后的完整链（Node
+/// `selectActiveConversationBranch`，同 App 的冷读取）里排在活动历史第一行之前、不在活动历史里、也不是那个压缩点保留段
+/// 首尾的行。保留段在活动历史里接在摘要之后；首尾不留在这里，内核的 `history::active` 在“这些 + 活动历史”上找不到它们，
+/// 结果与只对活动历史取相同。活动历史的第一行不是压缩点时为空。
+pub fn earlier_messages<'a>(
+    messages: &'a [Record],
+    branch: &Branch,
+    active: &[Cow<'a, Record>],
+) -> Vec<Cow<'a, Record>> {
+    let Some(boundary) = active.first().filter(|first| has_boundary(first)) else {
+        return Vec::new();
+    };
+    let all = select_branch(messages.iter().map(Cow::Borrowed).collect(), branch);
+    let Some(start) = position(&all, boundary.id()) else {
+        return Vec::new();
+    };
+    let mut skip: HashSet<&str> = active.iter().map(|m| m.id()).collect();
+    if let Some(segment) = boundary_of(boundary).map(|b| &b["preservedSegment"]) {
+        skip.extend(
+            ["headMessageId", "tailMessageId"]
+                .iter()
+                .filter_map(|key| segment[*key].as_str()),
+        );
+    }
+    all[..start]
+        .iter()
+        .filter(|m| !skip.contains(m.id()))
+        .cloned()
+        .collect()
 }

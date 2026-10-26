@@ -1,0 +1,204 @@
+[
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\nSUMMARY-3"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "looking 9"
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_00009",
+        "name": "Read",
+        "input": {
+          "file_path": "/w/f9.txt"
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_00009",
+        "type": "tool_result",
+        "content": [
+          {
+            "type": "text",
+            "text": "     1\tcontent 9"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "answer 9"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "<system-reminder>Called the Read tool with the following input: {\"file_path\":\"/w/f3.txt\"}"
+      },
+      {
+        "type": "text",
+        "text": "question 10"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "looking 10"
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_00010",
+        "name": "Read",
+        "input": {
+          "file_path": "/w/f10.txt"
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_00010",
+        "type": "tool_result",
+        "content": [
+          {
+            "type": "text",
+            "text": "     1\tcontent 10"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "answer 10"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "question 11"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "looking 11"
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_00011",
+        "name": "Read",
+        "input": {
+          "file_path": "/w/f11.txt"
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_00011",
+        "type": "tool_result",
+        "content": [
+          {
+            "type": "text",
+            "text": "     1\tcontent 11"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "answer 11"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "<system-reminder># Environment"
+      },
+      {
+        "type": "text",
+        "text": "<system-reminder>You are powered by the model m."
+      },
+      {
+        "type": "text",
+        "text": "<system-reminder>The following deferred tools are now available via ToolSearch. Their schemas are NOT loaded — calling them directly will fail with InputValidationError. Use ToolSearch with query \"select:<name>[,<name>...]\" to load tool schemas before calling them:"
+      },
+      {
+        "type": "text",
+        "text": "<system-reminder>Available agent types for the Agent tool:"
+      },
+      {
+        "type": "text",
+        "text": "<system-reminder>The following skills are available for use with the Skill tool:"
+      },
+      {
+        "type": "text",
+        "text": "<system-reminder><total_tokens>15000000 tokens left</total_tokens>"
+      },
+      {
+        "type": "text",
+        "text": "<system-reminder>As you answer the user's questions, you can use the following context:"
+      },
+      {
+        "type": "text",
+        "text": "<system-reminder>Today's date is <DATE>."
+      },
+      {
+        "type": "text",
+        "text": "<system-reminder>Attribution for git commits and pull requests you create from here on (this replaces ZCode's own earlier attribution guidance, such as a previous copy of this reminder; the user's own instructions about these lines, such as a AGENTS.md or memory rule, take precedence over this reminder, but do not add attribution lines this reminder leaves out):"
+      },
+      {
+        "type": "text",
+        "text": "next question",
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
+    ]
+  }
+]

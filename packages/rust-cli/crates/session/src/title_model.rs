@@ -45,8 +45,8 @@ pub(crate) struct Generated {
     pub(crate) call: ModelCall,
 }
 
-/// 读流时收集的回复：文本、用量（`message_start` 的用量，`message_delta` 的输出覆盖，同主循环）、停止原因、
-/// tool_use 块数、重试次数。
+/// 读流时收集的回复：文本、用量（`message_start` 的用量，之后由 `message_delta` 合并好的累计用量整体替换，同主循环）、
+/// 停止原因、tool_use 块数、重试次数。
 #[derive(Default)]
 struct Reply {
     text: String,
@@ -72,7 +72,9 @@ impl Reply {
             }) => self.text.push_str(&delta),
             ModelStreamItem::Event(ModelEvent::MessageDelta { stop_reason, usage }) => {
                 self.stop_reason = stop_reason.or(self.stop_reason);
-                self.usage.output_tokens = usage.output_tokens;
+                // 修 bug（修复线 F99，query.md §1.10）：以前只取输出，只在 `message_delta` 里给输入与缓存的端点（GLM）用量行
+                // 的输入是 0。这里的用量是适配器合并好的累计值，整体采用（同主循环的组装器）。
+                self.usage = usage;
             }
             ModelStreamItem::Notice(_) | ModelStreamItem::Event(_) => {}
         }

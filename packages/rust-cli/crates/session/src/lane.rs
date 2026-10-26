@@ -90,6 +90,11 @@ pub(crate) enum Lane {
     Notice(Waiting),
 }
 
+/// 斜杠命令：trim 之后以 `/` 开头（与插话的跳过规则相同，query.md §4）。
+fn is_slash(text: &str) -> bool {
+    text.trim().starts_with('/')
+}
+
 /// 消息里的通知全文：开回合的 meta user 消息，或工具边界并入的 `task-notification` attachment。
 fn notice_text(message: &Message) -> Option<&str> {
     match message {
@@ -158,6 +163,62 @@ impl Actor {
         }
     }
 
+    /// 回合结束后与头一条输入成批的后续输入（修复线 L-A，query.md §4.3，同对照实现）：头一条是
+    /// 普通文字、不是斜杠命令时，往后连着取通道里的插话、再取队列里的 `Queue` 输入；遇到通知、斜杠命令、bash、
+    /// 带图片的输入、含 `@` 的文字就停（留在原处）。
+    ///
+    /// 配置了 UserPromptSubmit 时不成批（暂定）：对照实现在入队时就逐条筛查，本工程在开回合的任务里只筛查头一条，头一条被
+    /// 阻塞时成批的后续输入会跟着丢掉。
+    ///
+    /// SessionStart 给的首条输入单独一个回合（同对照实现的启动命令）。
+    fn take_batch(&mut self, command: &CommandId, head: &str) -> Vec<crate::turn::MorePrompt> {
+        let screening = self
+            .deps
+            .hooks
+            .has_hooks(rust_cli_kernel_api::hooks::HookEventName::UserPromptSubmit);
+        let startup = command
+            .as_str()
+            .starts_with(crate::hooks::SESSION_START_INPUT);
+        if is_slash(head) || screening || startup {
+            return Vec::new();
+        }
+        let mut more = Vec::new();
+        loop {
+            let command = match self.lane.front() {
+                Some(Lane::Input(command)) => command.clone(),
+                Some(Lane::Notice(_)) => break,
+                // 通道空了：队列头（通道里的插话都已取走，剩下的是 `Queue` 输入）。
+                None => match self.queue.front() {
+                    Some(input) => input.command.clone(),
+                    None => break,
+                },
+            };
+            let Some(input) = self
+                .queue
+                .iter()
+                .find(|input| input.command == command)
+                .cloned()
+            else {
+                break;
+            };
+            let plain = !self.queued_kinds.contains_key(&command)
+                && !is_slash(&input.text)
+                && !input.text.contains('@');
+            if !plain {
+                break;
+            }
+            self.remove_input(&command);
+            more.push(crate::turn::MorePrompt {
+                screened: self.screened.remove(&command).flatten(),
+                text: input.text,
+            });
+        }
+        if !more.is_empty() {
+            self.emit_queue();
+        }
+        more
+    }
+
     /// 从队列与通道去掉一条输入。
     pub(crate) fn remove_input(&mut self, command: &CommandId) {
         self.queue.retain(|input| input.command != *command);
@@ -205,10 +266,13 @@ impl Actor {
                     self.emit_queue();
                     // 通道里的输入总在队列里（两处同时增删）；万一不在就看下一项。
                     let Some(input) = input else { continue };
+                    let screened = self.screened.remove(&input.command).flatten();
+                    let more = self.take_batch(&input.command, &input.text);
                     return Some(TurnInput::Human {
-                        screened: self.screened.remove(&input.command).flatten(),
+                        screened,
                         command: input.command,
                         text: input.text,
+                        more,
                     });
                 }
                 Some(Lane::Notice(_)) => {
@@ -241,13 +305,20 @@ impl Actor {
                         }
                         None => {}
                     }
+                    let screened = self.screened.remove(&next.command).flatten();
+                    let more = self.take_batch(&next.command, &next.text);
                     return Some(TurnInput::Human {
-                        screened: self.screened.remove(&next.command).flatten(),
+                        screened,
                         command: next.command,
                         text: next.text,
+                        more,
                     });
                 }
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "batch_tests.rs"]
+mod batch_tests;

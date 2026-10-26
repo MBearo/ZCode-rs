@@ -155,6 +155,56 @@ fn errors_are_converted() {
     );
 }
 
+/// F100（remote-exec.md §26.6）：下载是上传之前的一步；下载失败、改用协议相同的候选时直接进握手；失败同部署失败。
+#[test]
+fn downloading_is_a_step_before_the_upload() {
+    assert_eq!(
+        transition(&S::Provisioning, E::Downloading),
+        Some(S::Downloading)
+    );
+    assert_eq!(
+        transition(&S::Downloading, E::Uploading { bytes: 7 }),
+        Some(S::Uploading { bytes: 7 })
+    );
+    assert_eq!(
+        transition(&S::Downloading, E::Provisioned),
+        Some(S::Handshaking)
+    );
+    let failed = MachineError::DownloadFailed {
+        version: "0.2.0".to_owned(),
+        target: "x86_64-unknown-linux-gnu".to_owned(),
+        reason: "HTTP 404".to_owned(),
+    };
+    assert_eq!(
+        transition(&S::Downloading, E::ProvisionFailed(failed.clone())),
+        Some(S::Failed { error: failed })
+    );
+    assert_eq!(
+        transition(&S::Downloading, E::Disconnect),
+        Some(S::Unconnected)
+    );
+    for (state, event) in [
+        (S::Uploading { bytes: 1 }, E::Downloading),
+        (S::Handshaking, E::Downloading),
+        (S::Ready(welcomed("a")), E::Downloading),
+        (S::Downloading, E::Welcomed(welcomed("a"))),
+    ] {
+        assert_eq!(transition(&state, event), None);
+    }
+    // 部署的三种新错误照样换算。
+    assert_eq!(MachineError::from(ProvisionError::Musl), MachineError::Musl);
+    assert_eq!(
+        MachineError::from(ProvisionError::OldGlibc {
+            glibc: Some("2.31".to_owned()),
+            needs: "GLIBC_2.34".to_owned()
+        }),
+        MachineError::OldGlibc {
+            glibc: Some("2.31".to_owned()),
+            needs: "GLIBC_2.34".to_owned()
+        }
+    );
+}
+
 /// F98（remote-exec.md §25.4.2）：部署时的上传是单独一步：探测之后、握手之前；上传失败同部署失败，断开随时回到未连。
 #[test]
 fn uploading_is_a_step_between_probing_and_the_handshake() {

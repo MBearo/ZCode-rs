@@ -70,15 +70,15 @@ fn head(text: &str, input: Usage) -> Vec<Item> {
     ]
 }
 
-/// 回复的结尾：输出用量与停止。
-fn tail(output: u64) -> Vec<Item> {
+/// 回复的结尾：合并好的累计用量（开头的输入、这里的输出，query.md §1.10）与停止。
+fn tail(input: Usage, output: u64) -> Vec<Item> {
     vec![
         Ok(ModelEvent::BlockStop { index: 0 }),
         Ok(ModelEvent::MessageDelta {
             stop_reason: Some(StopReason::EndTurn),
             usage: Usage {
                 output_tokens: output,
-                ..Usage::default()
+                ..input
             },
         }),
         Ok(ModelEvent::MessageStop),
@@ -86,7 +86,7 @@ fn tail(output: u64) -> Vec<Item> {
 }
 
 fn reply(text: &str, input: Usage, output: u64) -> Vec<Item> {
-    [head(text, input), tail(output)].concat()
+    [head(text, input), tail(input, output)].concat()
 }
 
 fn idle(screen: &str, text: &str) -> bool {
@@ -133,7 +133,7 @@ async fn a_finished_request_shows_tps_context_and_cache() {
         );
         // 流结束（发送端释放）时读结束时刻。
         clock.set(6_000);
-        finish(senders.remove(0), tail(120));
+        finish(senders.remove(0), tail(usage(200, 800, 0), 120));
         let screen = ui
             .wait("the stats", |s| {
                 idle(s, "streaming line") && s.contains("cache")

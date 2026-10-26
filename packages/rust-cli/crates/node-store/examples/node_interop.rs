@@ -12,7 +12,9 @@
 //! - `manage-write`、`rename`、`delete`、`query`：会话的改名、删除与项目页的查询（修复线 F29，`node_interop_parts/manage.rs`）；
 //! - `sentinel-write <storage-dir> <timing>`：续写占位落库的会话，`continue` 与新输入同一批、`open` 单独一批（工作线
 //!   F77、F79，`node_interop_parts/sentinel.rs`）；
-//! - `tool-order-write`：结果之间夹着附加上下文、补了中断结果的会话（工作线 F81，`node_interop_parts/tool_order.rs`）。
+//! - `tool-order-write`：结果之间夹着附加上下文、补了中断结果的会话（工作线 F81，`node_interop_parts/tool_order.rs`）；
+//! - `records-write`：本地命令的记录夹在两轮问答之间的会话（修复线 L-A，`node_interop_parts/records.rs`）；
+//! - `fork-agent-write`：带 fork 子代理调用的父会话与 fork 的子会话（修复线 L-A，`node_interop_parts/fork_agent.rs`）。
 //!
 //! 会话库是 `<storage-dir>/cli/db/db.sqlite`，artifacts 在 `<storage-dir>/cli/artifacts`。
 use std::path::Path;
@@ -49,10 +51,14 @@ mod compact;
 mod compat;
 #[path = "node_interop_parts/fork.rs"]
 mod fork;
+#[path = "node_interop_parts/fork_agent.rs"]
+mod fork_agent;
 #[path = "node_interop_parts/machines.rs"]
 mod machines;
 #[path = "node_interop_parts/manage.rs"]
 mod manage;
+#[path = "node_interop_parts/records.rs"]
+mod records;
 #[path = "node_interop_parts/sentinel.rs"]
 mod sentinel;
 #[path = "node_interop_parts/settings.rs"]
@@ -473,6 +479,8 @@ async fn run(args: &[String]) -> Result<()> {
         [command, dir] if command == "manage-write" => manage::write(dir).await,
         [command, dir, timing] if command == "sentinel-write" => sentinel::write(dir, timing).await,
         [command, dir] if command == "tool-order-write" => tool_order::write(dir).await,
+        [command, dir] if command == "records-write" => records::write(dir).await,
+        [command, dir] if command == "fork-agent-write" => fork_agent::write(dir).await,
         [command, dir] if command == "machines-write" => machines::write(dir).await,
         [command, dir, session, title] if command == "rename" => {
             manage::rename(dir, session, title).await

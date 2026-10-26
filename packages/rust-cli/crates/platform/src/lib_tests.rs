@@ -187,6 +187,99 @@ async fn account_models_take_the_credential_on_every_request() {
     );
 }
 
+/// 缺口 G8（app-protocol.md §5.2）：注入的来源记下每次请求，给固定的 key 与一个请求头。
+struct Supplied(std::sync::Mutex<Vec<header_source::HeaderRequest>>);
+
+#[async_trait]
+impl header_source::HeaderSource for Supplied {
+    async fn request_auth(
+        &self,
+        request: header_source::HeaderRequest,
+    ) -> Result<header_source::SuppliedAuth, ModelError> {
+        let count = {
+            let mut seen = self.0.lock().unwrap();
+            seen.push(request);
+            seen.len()
+        };
+        Ok(header_source::SuppliedAuth {
+            api_key: Some(RedactedString::new(format!("sk-host-{count}"))),
+            headers: vec![("x-host-sign".to_owned(), RedactedString::new("signed"))],
+        })
+    }
+}
+
+/// 有注入的来源时，账号模型的凭据与请求头都向它要（带上会话与被拒凭据的指纹）；API key 的 provider 不问它。
+#[tokio::test]
+async fn an_injected_header_source_supplies_account_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let (platform, paths) = platform(dir.path()).await;
+    let source = Arc::new(Supplied(std::sync::Mutex::new(Vec::new())));
+    let platform = platform.with_header_source(source.clone());
+    write(
+        paths.credentials().as_path(),
+        json!({
+            account::identity_key(ZAI): IDENTITY,
+            account::source_key(ZAI): "manual",
+            account::manual_key(ZAI, IDENTITY): "sk-own",
+        })
+        .to_string(),
+    )
+    .await;
+    let select = selection(ZAI, "GLM-5.3", Some("high"));
+    let context = EndpointContext {
+        session: Some(rust_cli_kernel_api::ids::SessionId::new("session_1")),
+    };
+    let first = platform
+        .endpoint_in(&select, None, None, &context)
+        .await
+        .unwrap();
+    assert_eq!(
+        first.credential,
+        Credential::ApiKey(RedactedString::new("sk-host-1"))
+    );
+    let header = |endpoint: &ModelEndpoint, name: &str| {
+        endpoint
+            .headers
+            .iter()
+            .find(|(known, _)| known == name)
+            .map(|(_, value)| value.expose().to_owned())
+    };
+    assert_eq!(header(&first, "x-host-sign").as_deref(), Some("signed"));
+    assert_eq!(
+        header(&first, "authorization").as_deref(),
+        Some("Bearer sk-host-1")
+    );
+    let renewed = platform
+        .endpoint_in(&select, Some(&first), None, &context)
+        .await
+        .unwrap();
+    assert_eq!(
+        renewed.credential,
+        Credential::ApiKey(RedactedString::new("sk-host-2"))
+    );
+    let seen = source.0.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0].session, context.session);
+    assert_eq!(seen[0].rejected_fingerprint, None);
+    assert_eq!(
+        seen[1].rejected_fingerprint.as_deref(),
+        Some(token::fingerprint("sk-host-1").as_str())
+    );
+    assert!(!seen[0].account_type.is_empty() && !seen[0].mode.is_empty());
+    // API key 的 provider 照旧用配置里的 key，不问来源。
+    let personal = platform
+        .endpoint_in(
+            &selection("personal:gateway", "custom-chat", Some("high")),
+            None,
+            None,
+            &context,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(personal.credential, Credential::ApiKey(_)));
+    assert_eq!(source.0.lock().unwrap().len(), 2);
+}
+
 /// 修复线 F61（platform.md §4）：压缩的上限同步读已发布的快照——还没取过目录时答不出；取过之后是配置的
 /// `contextWindow` 与 `maxOutputTokens.max`，不看团队项目；改了配置不重读，下一次取目录或端点之后才是新值。
 #[tokio::test]

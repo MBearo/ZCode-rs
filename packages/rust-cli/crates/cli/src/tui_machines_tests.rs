@@ -26,9 +26,46 @@ fn states_map_to_the_statuses_the_tui_shows() {
             MachineState::Provisioning,
             MachineStatus::Connecting(ConnectStep::Checking),
         ),
+        // F100（remote-exec.md §26.6）：下载执行器。
+        (
+            MachineState::Downloading,
+            MachineStatus::Connecting(ConnectStep::Downloading),
+        ),
         (
             MachineState::Uploading { bytes: 93_323_264 },
             MachineStatus::Connecting(ConnectStep::Uploading { bytes: 93_323_264 }),
+        ),
+        (
+            MachineState::Failed {
+                error: MachineError::DownloadFailed {
+                    version: "0.1.61".to_owned(),
+                    target: "x86_64-unknown-linux-gnu".to_owned(),
+                    reason: "HTTP 404".to_owned(),
+                },
+            },
+            MachineStatus::Failed(MachineFailure::DownloadFailed {
+                version: "0.1.61".to_owned(),
+                target: "x86_64-unknown-linux-gnu".to_owned(),
+                reason: "HTTP 404".to_owned(),
+            }),
+        ),
+        (
+            MachineState::Failed {
+                error: MachineError::Musl,
+            },
+            MachineStatus::Failed(MachineFailure::Musl),
+        ),
+        (
+            MachineState::Failed {
+                error: MachineError::OldGlibc {
+                    glibc: Some("2.31".to_owned()),
+                    needs: "GLIBC_2.34".to_owned(),
+                },
+            },
+            MachineStatus::Failed(MachineFailure::OldGlibc {
+                glibc: Some("2.31".to_owned()),
+                needs: "GLIBC_2.34".to_owned(),
+            }),
         ),
         (
             MachineState::Handshaking,

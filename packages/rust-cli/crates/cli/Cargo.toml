@@ -28,7 +28,10 @@ anyhow.workspace = true
 async-trait.workspace = true
 # Windows 剪贴板图片的 base64（tui-input.md §3.1）。
 base64.workspace = true
-# TUI 的服务端口（界面语言的写回、登录）返回 BoxFuture（docs/specs/rust-cli/tui.md §7.1）。
+# 执行器的 npm 平台包：解 gzip、核对 sha512 / sha256（F100，remote-exec.md §26.4）。
+flate2.workspace = true
+sha2.workspace = true
+# TUI 的服务端口（界面语言的写回、登录）返回 BoxFuture（docs/specs/rust-cli/tui.md §7.1）；执行器下载的单飞（Shared）。
 futures-util.workspace = true
 rust-cli-base.workspace = true
 rust-cli-env-local.workspace = true
@@ -44,6 +47,9 @@ rust-cli-executor-host.workspace = true
 rust-cli-ext.workspace = true
 rust-cli-fs.workspace = true
 rust-cli-headless.workspace = true
+# `app-server --stdio`：App 协议的前端（app-protocol.md §3.7）。
+rust-cli-protocol-core.workspace = true
+rust-cli-protocol-zcode.workspace = true
 # 配置文件的 hooks 段与快照（docs/specs/rust-cli/config.md）。
 rust-cli-hooks.workspace = true
 rust-cli-kernel-api.workspace = true

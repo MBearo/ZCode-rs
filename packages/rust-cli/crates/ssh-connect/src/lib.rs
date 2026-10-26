@@ -3,7 +3,7 @@
 //!
 //! - [`SshConnector`]：`ssh -T … <目标> '<执行器>' executor --stdio`，得到 stdio Link（exec-transport 的 `StdioConnector`）；
 //! - [`SshProvisioner`]：探测远端的系统、架构与已有的执行器（含 npm 装的），按 §19.9 的表选用，或上传本机同版本的
-//!   静态 Linux 产物并校验 sha256。
+//!   静态 Linux 产物并校验 sha256；没有时经注入的 [`ArtifactSource`] 拿 npm 的 glibc 产物（F100，§26）。
 //!
 //! 只认识 exec-transport 的 `Connector` / `Provisioner`，不认识协议（exec-wire）与状态机（machines）：要的版本与协议
 //! 主版本由组装根给（[`Wanted`]）。
@@ -14,13 +14,15 @@ mod connector;
 mod probe;
 mod provision;
 mod remote;
+mod source;
 mod target;
 
 pub use artifact::Arch;
 pub use choose::{Plan, Wanted, choose};
 pub use connector::SshConnector;
-pub use probe::{Candidate, Probe, Report, Resident};
+pub use probe::{Candidate, Libc, Probe, Report, Resident};
 pub use provision::SshProvisioner;
+pub use source::ArtifactSource;
 pub use target::{SshTarget, quote};
 
 #[cfg(test)]
@@ -29,6 +31,9 @@ mod choose_tests;
 #[cfg(test)]
 #[path = "probe_tests.rs"]
 mod probe_tests;
+#[cfg(all(test, unix))]
+#[path = "provision_source_tests.rs"]
+mod provision_source_tests;
 #[cfg(all(test, unix))]
 #[path = "provision_tests.rs"]
 mod provision_tests;

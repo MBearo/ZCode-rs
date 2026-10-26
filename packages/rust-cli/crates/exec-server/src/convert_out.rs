@@ -324,7 +324,10 @@ pub(crate) fn command_event(event: CommandEvent, body: &mut BodyBuilder) -> wc::
             data: body.push(&data),
             cursor,
         },
-        CommandEvent::Backgrounded => wc::CommandEvent::Backgrounded,
+        // 线上没有原因（远端不支持按要求转后台，tui-input.md D31）：照超时转后台发。
+        CommandEvent::Backgrounded | CommandEvent::BackgroundedBy { .. } => {
+            wc::CommandEvent::Backgrounded
+        }
         CommandEvent::Finished {
             outcome: ended,
             exit_code,

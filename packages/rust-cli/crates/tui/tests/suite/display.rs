@@ -24,7 +24,12 @@ async fn a_foreground_agent_shows_its_progress_and_then_done() {
         senders.next().unwrap(),
         senders.next().unwrap(),
     );
-    with_ui(model.clone(), Setup::default(), |mut ui| async move {
+    // 前台子代理只在 fork 关着时有（`ZCODE_FORK_SUBAGENT=0`，修复线 L-A，agents.md §8.1.1）。
+    let setup = Setup {
+        fork_subagent: Some(false),
+        ..Setup::default()
+    };
+    with_ui(model.clone(), setup, |mut ui| async move {
         ui.submit("find the callers");
         finish(
             main,

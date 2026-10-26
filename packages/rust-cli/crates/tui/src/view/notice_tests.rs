@@ -10,7 +10,14 @@ use serde_json::json;
 use super::*;
 
 fn feed(view: &mut Transcript, seq: u64, now_ms: u64, event: KernelEvent) {
-    view.apply(SequencedEvent { seq, event }, now_ms);
+    view.apply(
+        SequencedEvent {
+            seq,
+            event,
+            revision: 0,
+        },
+        now_ms,
+    );
 }
 
 fn empty() -> Transcript {

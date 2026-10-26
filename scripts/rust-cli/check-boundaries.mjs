@@ -5,7 +5,9 @@
 // 违规一个用例）。这里只收集输入：
 // - 依赖图取自 `cargo metadata`（Cargo 自己解析，表格写法、`package =` 改名、按平台的依赖都按真实包名）；
 // - 每个 crate 的 .rs 文件、根与 crate 自己的 clippy.toml；
-// - 接口快照的源码与已提交的 interfaces.json（boundaries/interfaces.mjs）。
+// - 接口快照的源码与已提交的 interfaces.json（boundaries/interfaces.mjs）；
+// - 解耦检查（docs/specs/rust-cli/app-protocol.md §9）：协议适配层的依赖、词汇、按前端分支、feature（boundaries/decoupling.mjs）
+//   与 kernel-api 只加不改（boundaries/kernel-surface.mjs 与已提交的 kernel-surface.json）。
 // README 表格与规则表的一致性只在本仓库检查（scripts/rust-cli/repo-only/check.mjs，工作线 F60）。
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
@@ -22,7 +24,19 @@ import {
   internalGraph,
   parseClippy,
 } from "./boundaries/check.mjs";
+import {
+  checkFeatures,
+  checkFrontendBranching,
+  checkProtocolLayering,
+  checkVocabulary,
+} from "./boundaries/decoupling.mjs";
 import { SNAPSHOT, checkInterfaces, readSources } from "./boundaries/interfaces.mjs";
+import {
+  checkSurface,
+  readSnapshot,
+  readSurfaceSources,
+  surfaceOf,
+} from "./boundaries/kernel-surface.mjs";
 import * as policy from "./boundaries/policy.mjs";
 
 const root = resolve(import.meta.dirname, "../../packages/rust-cli");
@@ -69,6 +83,7 @@ const packages = metadata.packages
     crate: crateOf(entry.manifest_path),
     manifest: relative(root, entry.manifest_path).replaceAll("\\", "/"),
     dependencies: entry.dependencies,
+    features: Object.keys(entry.features ?? {}),
   }));
 const internal = new Map(
   metadata.packages
@@ -108,6 +123,16 @@ const failures = [
   ...checkClippy(policy, rootClippy, crateClippy),
   ...checkSources(policy, parseClippy(rootClippy).entries, sources),
   ...checkDefinitions(policy, sources),
+  // 解耦（app-protocol.md §9）：协议适配层不入侵内核。
+  ...checkProtocolLayering(policy, graph),
+  ...checkVocabulary(policy, sources),
+  ...checkFrontendBranching(policy, sources),
+  ...checkFeatures(policy, packages),
+  ...checkSurface(
+    surfaceOf(await readSurfaceSources(root)),
+    await readSnapshot(),
+    policy.KERNEL_API_CHANGES,
+  ),
 ];
 
 if (failures.length) {

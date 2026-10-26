@@ -15,6 +15,7 @@ mod compaction;
 mod facts;
 mod fork;
 mod fork_clone;
+mod frontend_records;
 mod hydrate;
 mod ids;
 mod load;
@@ -345,6 +346,27 @@ impl SessionStore for NodeStore {
             .await
     }
 
+    /// 前端记录（缺口 G2）：原样写成 `session_entry`，不在会话事务里（记录不是会话状态）。
+    async fn put_record(
+        &self,
+        session: &SessionId,
+        record: &rust_cli_kernel_api::store::FrontendRecord,
+    ) -> Result<(), StoreError> {
+        let (session, record) = (session.as_str().to_owned(), record.clone());
+        self.with_db(move |conn, ids| frontend_records::put(conn, &session, &record, ids.now_ms()))
+            .await
+    }
+
+    async fn records(
+        &self,
+        session: &SessionId,
+        kind: &str,
+    ) -> Result<Vec<rust_cli_kernel_api::store::FrontendRecord>, StoreError> {
+        let (session, kind) = (session.as_str().to_owned(), kind.to_owned());
+        self.with_db(move |conn, _| frontend_records::list(conn, &session, &kind))
+            .await
+    }
+
     /// 记下工作区已信任（upsert；不在会话事务里）。
     async fn trust_workspace(&self, key: &TrustKey) -> Result<(), StoreError> {
         let key = key.clone();
@@ -459,3 +481,7 @@ mod model_connection_tests;
 #[cfg(test)]
 #[path = "resume_sentinel_tests.rs"]
 mod resume_sentinel_tests;
+
+#[cfg(test)]
+#[path = "frontend_records_tests.rs"]
+mod frontend_records_tests;

@@ -47,6 +47,7 @@ impl Feed {
         self.view.apply(
             SequencedEvent {
                 seq: self.seq,
+                revision: 0,
                 event,
             },
             self.seq * 1000,

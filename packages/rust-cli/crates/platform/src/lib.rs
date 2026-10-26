@@ -20,6 +20,7 @@ mod credentials;
 mod device;
 #[cfg(test)]
 mod fake_server_tests;
+pub mod header_source;
 mod history;
 mod hook_trust;
 mod login;
@@ -41,8 +42,8 @@ use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::model::{ModelError, ModelSelection};
 use rust_cli_kernel_api::provider::{
-    Credential, ModelCapabilities, ModelCatalog, ModelDirectory, ModelEndpoint, ModelEndpoints,
-    ModelLimits, TokenLimits, WireProtocol,
+    Credential, EndpointContext, ModelCapabilities, ModelCatalog, ModelDirectory, ModelEndpoint,
+    ModelEndpoints, ModelLimits, TokenLimits, WireProtocol,
 };
 use rust_cli_net::Egress;
 use rust_cli_net::header;
@@ -98,6 +99,8 @@ pub struct Platform {
     legacy_config: StoragePath,
     /// `ZCODE_MAX_OUTPUT_TOKENS`（cli-args.md §9.1，修复线 F42）：`maxOutputTokens.map` 取它与配置的较小值。
     max_output_tokens: Option<u64>,
+    /// 注入的账号凭据来源（缺口 G8）：有时账号模型的凭据向它要，没有时自己算（TUI、`-p`）。
+    header_source: Option<Arc<dyn header_source::HeaderSource>>,
 }
 
 impl Platform {
@@ -138,7 +141,16 @@ impl Platform {
             personal_config: paths.provider_config(),
             legacy_config: paths.cli_config(),
             max_output_tokens: None,
+            header_source: None,
         }
+    }
+
+    /// 注入账号模型每请求鉴权的来源（缺口 G8，app-protocol.md §5.2）：之后账号模型的凭据与请求头都向它要；
+    /// API key 的 provider 不变。
+    #[must_use]
+    pub fn with_header_source(mut self, source: Arc<dyn header_source::HeaderSource>) -> Self {
+        self.header_source = Some(source);
+        self
     }
 
     /// 入口读到的 `ZCODE_MAX_OUTPUT_TOKENS`（cli-args.md §9.1，修复线 F42）：每个模型的 `maxOutputTokens.map` 用
@@ -193,6 +205,31 @@ impl Platform {
     /// 新会话默认使用的模型；没有可用 Provider 时为空。
     pub async fn default_selection(&self) -> Option<ModelSelection> {
         self.registry.current().await.snapshot.default.clone()
+    }
+
+    /// 这次请求的凭据与附加的请求头：账号模型有注入的来源时向它要（G8），否则自己算（没有附加的请求头）。
+    async fn request_auth(
+        &self,
+        template: &Template,
+        selection: &ModelSelection,
+        rejected: Option<&RedactedString>,
+        context: &EndpointContext,
+    ) -> Result<(Option<RedactedString>, Vec<(String, RedactedString)>), ModelError> {
+        if let (Access::Account { account_type, mode }, Some(source)) =
+            (&template.access, &self.header_source)
+        {
+            let supplied = source
+                .request_auth(header_source::HeaderRequest {
+                    selection: selection.clone(),
+                    account_type: account_type.clone(),
+                    mode: mode.clone(),
+                    session: context.session.clone(),
+                    rejected_fingerprint: rejected.map(|key| token::fingerprint(key.expose())),
+                })
+                .await?;
+            return Ok((supplied.api_key, supplied.headers));
+        }
+        Ok((Some(self.credential(template, rejected).await?), Vec::new()))
     }
 
     async fn credential(
@@ -255,6 +292,23 @@ impl ModelEndpoints for Platform {
         rejected: Option<&ModelEndpoint>,
         output_limit: Option<u64>,
     ) -> Result<ModelEndpoint, ModelError> {
+        self.endpoint_in(
+            selection,
+            rejected,
+            output_limit,
+            &EndpointContext::default(),
+        )
+        .await
+    }
+
+    /// 缺口 G8：上下文只给注入的凭据来源用（发请求的会话）；没有来源时与 `endpoint_with_output_limit` 相同。
+    async fn endpoint_in(
+        &self,
+        selection: &ModelSelection,
+        rejected: Option<&ModelEndpoint>,
+        output_limit: Option<u64>,
+        context: &EndpointContext,
+    ) -> Result<ModelEndpoint, ModelError> {
         let current = self.registry.current().await;
         let Some(template) = current.snapshot.find(selection) else {
             // 这个团队项目已过期 / 未分配：照 App 的文案提示（platform.md §9.2）。
@@ -282,9 +336,11 @@ impl ModelEndpoints for Platform {
             Some(Credential::ApiKey(previous)) => Some(previous),
             Some(Credential::None) | None => None,
         };
-        let key = self.credential(template, previous).await?;
+        let (key, supplied) = self
+            .request_auth(template, selection, previous, context)
+            .await?;
         // 被拒的凭据重新读到的还是同一个（手工 key 不会自己变）：不再重试，直接报鉴权失败。
-        if let Some(previous) = previous
+        if let (Some(previous), Some(key)) = (previous, &key)
             && previous.expose() == key.expose()
         {
             return Err(ModelError::Authentication {
@@ -298,7 +354,13 @@ impl ModelEndpoints for Platform {
             without_auth_headers(&mut headers);
         }
         // Node 的 Provider 适配器对 Anthropic 兼容网关同时发 Bearer；配置里显式给了 Authorization 时以配置为准。
-        if template.protocol == WireProtocol::AnthropicMessages
+        // 注入的来源给的请求头（G8）：同名时覆盖配置里的。
+        for (name, value) in supplied {
+            headers.retain(|(known, _)| !known.eq_ignore_ascii_case(&name));
+            headers.push((name, value));
+        }
+        if let Some(key) = &key
+            && template.protocol == WireProtocol::AnthropicMessages
             && !headers
                 .iter()
                 .any(|(name, _)| name.eq_ignore_ascii_case(header::AUTHORIZATION))
@@ -316,7 +378,7 @@ impl ModelEndpoints for Platform {
             protocol: template.protocol,
             base_url: template.base_url.clone(),
             model: template.model.clone(),
-            credential: Credential::ApiKey(key),
+            credential: key.map_or(Credential::None, Credential::ApiKey),
             headers,
             body_patches,
             mid_conversation_system: capabilities.supports_mid_conversation_system,

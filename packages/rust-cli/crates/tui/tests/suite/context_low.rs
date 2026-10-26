@@ -29,9 +29,11 @@ fn reply(text: &str, input: u64) -> Vec<Item> {
             delta: BlockDelta::Text(text.to_owned()),
         }),
         Ok(ModelEvent::BlockStop { index: 0 }),
+        // 合并好的累计用量：带着开头的输入（query.md §1.10）。
         Ok(ModelEvent::MessageDelta {
             stop_reason: Some(StopReason::EndTurn),
             usage: Usage {
+                input_tokens: input,
                 output_tokens: 1,
                 ..Usage::default()
             },

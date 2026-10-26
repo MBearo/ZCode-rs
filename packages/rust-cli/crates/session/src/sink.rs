@@ -90,6 +90,10 @@ pub(crate) enum SinkRequest {
     Selection {
         reply: oneshot::Sender<ModelSelection>,
     },
+    /// fork 子代理读已提交的对话（修复线 L-A，agents.md §8.1.2）。
+    Conversation {
+        reply: oneshot::Sender<Vec<Message>>,
+    },
     /// Monitor 工具起好的 monitor 交给 actor（工作线 F83，tools-more.md §19.6）。
     ArmMonitor {
         monitor: rust_cli_kernel_api::monitor::MonitorArmed,
@@ -241,6 +245,16 @@ impl Interactions for ActorSink {
         let (reply, answer) = oneshot::channel();
         self.sender
             .send(SinkRequest::Selection { reply })
+            .await
+            .ok()?;
+        answer.await.ok()
+    }
+
+    /// 对话的 owner 是会话 actor：按请求时已提交的消息回答（fork 子代理继承它，修复线 L-A）。
+    async fn conversation(&self, _session: &SessionId) -> Option<Vec<Message>> {
+        let (reply, answer) = oneshot::channel();
+        self.sender
+            .send(SinkRequest::Conversation { reply })
             .await
             .ok()?;
         answer.await.ok()

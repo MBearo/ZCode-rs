@@ -38,6 +38,14 @@ fn metered_fact(metered: Metered) -> Fact {
     }
 }
 
+/// 成批进同一个回合的一条后续输入（修复线 L-A，query.md §4.3）。
+#[derive(Debug)]
+pub(crate) struct MorePrompt {
+    pub(crate) text: String,
+    /// 在工具边界已跑过的 UserPromptSubmit 结果。
+    pub(crate) screened: Option<Box<HookOutcome>>,
+}
+
 /// 开启一个回合的输入。
 pub(crate) enum TurnInput {
     Human {
@@ -45,6 +53,8 @@ pub(crate) enum TurnInput {
         text: String,
         /// 插话在并入点已跑过的 UserPromptSubmit 结果（query.md §4.1）；有值时不再跑 hook。
         screened: Option<Box<HookOutcome>>,
+        /// 与它成批进这个回合的后续排队输入（修复线 L-A，query.md §4.3），按队列顺序。
+        more: Vec<MorePrompt>,
     },
     /// 回合结束后还没并入的后台通知（命令与子代理，到达顺序）：连续的几条合成一个回合，每条一条
     /// meta user 消息、只调一次模型（docs/specs/rust-cli/query.md §5，通知合并）。
@@ -73,12 +83,13 @@ impl Actor {
                 command,
                 text,
                 screened,
+                more,
             } => {
-                self.start_human_turn(command, vec![ContentBlock::Text { text }], screened);
+                self.start_human_turn(command, vec![ContentBlock::Text { text }], screened, more);
                 return Ok(());
             }
             TurnInput::Content { command, content } => {
-                self.start_human_turn(command, content, None);
+                self.start_human_turn(command, content, None, Vec::new());
                 return Ok(());
             }
             TurnInput::Bash { command, line } => {
@@ -241,6 +252,9 @@ impl Actor {
             SinkRequest::Workspace { reply } => {
                 let _ = reply.send(self.meta.workspace.clone());
             }
+            SinkRequest::Conversation { reply } => {
+                let _ = reply.send(self.messages.clone());
+            }
             SinkRequest::Selection { reply } => {
                 let _ = reply.send(self.selection.clone());
             }
@@ -296,7 +310,11 @@ impl Actor {
             .running
             .as_ref()
             .is_some_and(|running| running.prompt.as_ref() == Some(message.id()));
-        let first = !self.messages.iter().any(|m| matches!(m, Message::User(_)));
+        // 本地命令的记录不算（修复线 L-A：`/clear` 之后的新会话以 `/clear` 的记录开头，第一条输入照样起标题）。
+        let first = !self
+            .messages
+            .iter()
+            .any(|m| matches!(m, Message::User(user) if !crate::local_record::is_record(user)));
         if let Err(reason) = self
             .commit(command, [vec![fact], extra, usage].concat())
             .await
@@ -451,6 +469,8 @@ impl Actor {
         if self.closing.is_some() || self.shutting_down {
             return;
         }
+        // 这次工作期间到达的本地命令记录先进对话，再开下一个回合（修复线 L-A，tui-manage.md §11.3）。
+        self.flush_held_records().await;
         let input = if let Some(input) = self.next_turn_input() {
             input
         } else if let Some(fire) = self.next_cron().await {

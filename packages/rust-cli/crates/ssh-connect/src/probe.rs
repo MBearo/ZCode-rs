@@ -5,6 +5,8 @@
 //! arch x86_64
 //! home /home/u
 //! hash sha256sum
+//! libc glibc 2.36          （F100：`getconf GNU_LIBC_VERSION`，有 glibc 时）
+//! libc musl                （F100：有 `/lib/ld-musl-*` 时）
 //! candidate <路径>\t<`<路径> executor status --json` 的第一行，可以为空>
 //! ```
 //!
@@ -22,6 +24,8 @@ printf 'os %s\n' "$(uname -s 2>/dev/null)"
 printf 'arch %s\n' "$(uname -m 2>/dev/null)"
 printf 'home %s\n' "$HOME"
 for h in sha256sum shasum openssl; do command -v "$h" >/dev/null 2>&1 && printf 'hash %s\n' "$h"; done
+g=$(getconf GNU_LIBC_VERSION 2>/dev/null) && printf 'libc %s\n' "$g"
+for m in /lib/ld-musl-*; do [ -e "$m" ] && {{ printf 'libc musl\n'; break; }}; done
 probe() {{
   [ -f "$1" ] && [ -x "$1" ] || return 0
   r=$("$1" executor status --json </dev/null 2>/dev/null | head -n 1)
@@ -67,6 +71,18 @@ pub struct Candidate {
     pub report: Option<Report>,
 }
 
+/// 远端的 C 库（F100，remote-exec.md §26.5）：npm 的 Linux 包要 glibc。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Libc {
+    /// 探测不出来（没有 `getconf`、也没有 musl 的加载器）：照常下载。
+    #[default]
+    Unknown,
+    /// glibc 与它的版本（`getconf GNU_LIBC_VERSION` 的第二段，例如 `2.36`）。
+    Glibc(String),
+    /// musl（例如 Alpine）。
+    Musl,
+}
+
 /// 探测的结果。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Probe {
@@ -75,6 +91,8 @@ pub struct Probe {
     pub home: String,
     /// 远端有的 sha256 程序。
     pub hashes: Vec<String>,
+    /// 远端的 C 库（F100）。
+    pub libc: Libc,
     pub candidates: Vec<Candidate>,
 }
 
@@ -82,6 +100,7 @@ impl Probe {
     /// 解析探测的输出。少了 `os` / `arch` / `home` 时报错（多半不是 POSIX shell 在回答）。
     pub fn parse(output: &str) -> Result<Self, String> {
         let mut probe = Self::default();
+        let mut musl = false;
         for line in output.lines() {
             let Some((key, value)) = line.split_once(' ') else {
                 continue;
@@ -91,6 +110,11 @@ impl Probe {
                 "arch" => probe.arch = value.trim().to_owned(),
                 "home" => probe.home = value.to_owned(),
                 "hash" => probe.hashes.push(value.trim().to_owned()),
+                // 两种都有时算 glibc（glibc 的系统上装了 musl 包）。
+                "libc" => match value.trim().split_once(' ') {
+                    Some(("glibc", version)) => probe.libc = Libc::Glibc(version.trim().to_owned()),
+                    _ => musl |= value.trim() == "musl",
+                },
                 "candidate" => {
                     let (path, json) = value.split_once('\t').unwrap_or((value, ""));
                     if probe.candidates.iter().any(|known| known.path == path) {
@@ -103,6 +127,9 @@ impl Probe {
                 }
                 _ => {}
             }
+        }
+        if musl && probe.libc == Libc::Unknown {
+            probe.libc = Libc::Musl;
         }
         if probe.os.is_empty() || probe.arch.is_empty() || probe.home.is_empty() {
             return Err(format!(

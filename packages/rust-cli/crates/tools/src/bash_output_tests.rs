@@ -81,3 +81,18 @@ fn background_texts_are_verbatim() {
         "Command running in background with ID: bxwig2fjb. Output is being written to: /t/bxwig2fjb.output. You will be notified when it completes. To check interim output, use Read on that file path."
     );
 }
+
+/// 修复线 L-A（tui-input.md §11）：被要求转后台时的两种说法（对照实现的原文）。
+#[test]
+fn a_requested_move_explains_why() {
+    use rust_cli_kernel_api::env::BackgroundReason;
+    let task = ShellTaskId::new("b1");
+    assert_eq!(
+        backgrounded_by(BackgroundReason::User, &task, "/tmp/b1.output"),
+        "Command was manually backgrounded by user with ID: b1. Output is being written to: /tmp/b1.output."
+    );
+    assert_eq!(
+        backgrounded_by(BackgroundReason::DeliverMessage, &task, "/tmp/b1.output"),
+        "Command was moved to the background (ID: b1) so that a message that arrived while it was running can reach you; it was not interrupted. Output is being written to: /tmp/b1.output. You will be notified when it completes. To check interim output, use Read on that file path."
+    );
+}

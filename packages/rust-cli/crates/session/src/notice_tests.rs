@@ -105,6 +105,7 @@ pub(crate) async fn session_on_machines<E: rust_cli_kernel_api::testing::AllPort
         SessionState {
             meta: meta(),
             messages,
+            earlier: Vec::new(),
             selection: selection(),
             mode: PermissionMode::Default.into(),
             checkpoints: Vec::new(),

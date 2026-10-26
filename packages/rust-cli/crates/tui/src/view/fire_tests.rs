@@ -23,6 +23,7 @@ fn view_with(events: Vec<KernelEvent>) -> Transcript {
         view.apply(
             SequencedEvent {
                 seq: index as u64 + 1,
+                revision: 0,
                 event,
             },
             0,

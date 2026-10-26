@@ -113,6 +113,9 @@ pub(crate) async fn session_end(
         .notices
 }
 
+/// SessionStart 给的首条输入的命令 ID 前缀。
+pub(crate) const SESSION_START_INPUT: &str = "session-start-";
+
 impl Actor {
     /// actor 启动时：有 SessionStart hook 才进入"启动"后台工作（没有时不改变行为，无竞态）。
     pub(crate) fn start_session(&mut self, source: StartSource) {
@@ -132,7 +135,8 @@ impl Actor {
         });
     }
 
-    /// SessionStart 的结果：一个事务提交 hook 消息，改标题，`initial_user_message` 排到队首。
+    /// SessionStart 的结果：一个事务提交 hook 消息，改标题，`initial_user_message` 排到队首（命令 ID 以
+    /// [`SESSION_START_INPUT`] 开头：回合结束后单独一个回合，不与排队输入成批，lane.rs）。
     pub(crate) async fn finish_startup(&mut self, outcome: HookOutcome) {
         let facts: Vec<Fact> = outcome
             .messages
@@ -158,7 +162,10 @@ impl Actor {
             self.retitle(title).await;
         }
         if let Some(text) = outcome.initial_user_message {
-            let command = CommandId::new(format!("session-start-{}", self.deps.ids.operation()));
+            let command = CommandId::new(format!(
+                "{SESSION_START_INPUT}{}",
+                self.deps.ids.operation()
+            ));
             // 排在最前（通道与队列都放到头部），回合结束后先开它。
             self.lane
                 .push_front(crate::lane::Lane::Input(command.clone()));
@@ -210,11 +217,15 @@ impl Actor {
     /// 人类输入开的回合：UserPromptSubmit → 提交输入 → 主循环（当步 attachment 之后提交 hook 消息），都在回合
     /// 任务里（spec §3.1 的时序图）。`screened` 是插话在并入点已跑过的结果，有值时不再跑 hook。`content` 是输入的
     /// 内容块（文字，加粘贴的图片，tui-input.md §3.2）；UPS 与 `@` 提及只看文字块。
+    ///
+    /// `more` 是成批进这个回合的后续输入（修复线 L-A，query.md §4.3）：第一条之后按顺序各提交一条人类消息，它们在
+    /// 工具边界筛查过的 hook 消息随第一条的一起交给主循环。
     pub(crate) fn start_human_turn(
         &mut self,
         command: CommandId,
         content: Vec<ContentBlock>,
         screened: Option<Box<HookOutcome>>,
+        more: Vec<crate::turn::MorePrompt>,
     ) {
         let prompt = self.deps.ids.message();
         let text = content
@@ -313,6 +324,19 @@ impl Actor {
             for message in &inputs.messages {
                 sink.commit_message(message.clone()).await?;
             }
+            let mut hook_messages = outcome.messages.clone();
+            for extra in more {
+                let message = Message::User(UserMessage {
+                    id: ids.message(),
+                    content: vec![ContentBlock::Text { text: extra.text }],
+                    origin: UserOrigin::Human,
+                });
+                sink.commit_message(message.clone()).await?;
+                inputs.messages.push(message);
+                if let Some(screened) = extra.screened {
+                    hook_messages.extend(screened.messages);
+                }
+            }
             if let Some(title) = outcome.session_title {
                 sink.title(title).await;
             }
@@ -327,7 +351,7 @@ impl Actor {
             // 之后提交（query.md §1.1）。
             let mut request = request;
             request.messages.extend(inputs.messages);
-            request.prompt_hook_messages = outcome.messages;
+            request.prompt_hook_messages = hook_messages;
             runner.run(request, sink, signal).await
         });
         self.running = Some(Running {

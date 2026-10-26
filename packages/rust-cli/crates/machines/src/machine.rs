@@ -128,16 +128,17 @@ impl Machine {
                 self.state()
             )));
         }
-        // 上传是单独的一步（F98，remote-exec.md §25.4.2）：部署器开始上传时报大小。
-        let uploading = |step: ProvisionStep| match step {
-            ProvisionStep::Uploading { bytes } => {
-                self.apply(MachineEvent::Uploading { bytes });
-            }
+        // 下载与上传是单独的步（F98 上传、F100 下载，remote-exec.md §25.4.2、§26.6）：部署器开始时报告。
+        let steps = |step: ProvisionStep| {
+            self.apply(match step {
+                ProvisionStep::Downloading => MachineEvent::Downloading,
+                ProvisionStep::Uploading { bytes } => MachineEvent::Uploading { bytes },
+            });
         };
         let provisioned = match self
             .endpoint
             .provisioner()
-            .provision_reporting(&uploading)
+            .provision_reporting(&steps)
             .await
         {
             Ok(provisioned) => provisioned,

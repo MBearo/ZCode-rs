@@ -15,6 +15,7 @@ mod context;
 mod custom;
 mod definitions;
 mod doing;
+mod fork;
 mod frontmatter;
 mod live;
 mod messaging;
@@ -96,6 +97,8 @@ pub struct AgentsConfig {
     pub keep_alive: bool,
     /// 后台子代理能询问用户（交互界面；`-p` 与 stream-json 不询问，agents.md §4.1.1）。
     pub background_prompts: bool,
+    /// fork 子代理（修复线 L-A，agents.md §8.1）：交互会话打开，`-p` 关。打开时 Agent 用 fork 写法、全部在后台。
+    pub fork: bool,
 }
 
 impl AgentsPorts {
@@ -122,6 +125,7 @@ pub(crate) struct Core {
     pub(crate) monitors: monitors::MonitorBoard,
     pub(crate) keep_alive: bool,
     pub(crate) background_prompts: bool,
+    pub(crate) fork: bool,
     /// 主线程的完整注册表（基础工具 + 本 crate 的工具）；子代理从它过滤。弱引用：注册表里的工具持有 Core，
     /// 两者在 [`Agents::new`] 里用 `Arc::new_cyclic` 一次建好，没有“先建后接”的空档。
     registry: Weak<AgentRegistry>,
@@ -215,6 +219,7 @@ impl Agents {
                 monitors: monitors::MonitorBoard::default(),
                 keep_alive: config.keep_alive,
                 background_prompts: config.background_prompts,
+                fork: config.fork,
                 registry: registry.clone(),
             });
             let mut own: Vec<Arc<dyn Tool>> = vec![Arc::new(AgentTool { core: core.clone() })];

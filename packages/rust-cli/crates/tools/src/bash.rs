@@ -276,14 +276,16 @@ async fn collect(
                 });
             }
             // 到了超时、转到了后台：结果是转后台的说明，之后的输出与终态不再等（取消已发出时照旧等终态）。
-            moved @ CommandEvent::Backgrounded if !cancelled => {
+            moved @ (CommandEvent::Backgrounded | CommandEvent::BackgroundedBy { .. })
+                if !cancelled =>
+            {
                 return Ok(Collected {
                     output_file,
                     head,
                     finished: moved,
                 });
             }
-            CommandEvent::Backgrounded => {}
+            CommandEvent::Backgrounded | CommandEvent::BackgroundedBy { .. } => {}
             finished @ CommandEvent::Finished { .. } => {
                 if cancelled {
                     return Err(ToolError::Cancelled);
@@ -508,6 +510,13 @@ impl BashTool {
         if collected.finished == CommandEvent::Backgrounded {
             return Ok(Ran::Text(file_on_machine(
                 output::moved_to_background(timeout_ms, &task, &collected.output_file, deadline_ms),
+                &context,
+            )));
+        }
+        // 用户的转后台键或低延迟投递（修复线 L-A，tui-input.md §11）：对照实现的两种说法。
+        if let CommandEvent::BackgroundedBy { reason } = collected.finished {
+            return Ok(Ran::Text(file_on_machine(
+                output::backgrounded_by(reason, &task, &collected.output_file),
                 &context,
             )));
         }

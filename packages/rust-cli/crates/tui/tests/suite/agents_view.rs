@@ -24,6 +24,8 @@ fn input_rows(screen: &str, placeholder: &str) -> (u16, u16) {
 fn tall() -> Setup {
     Setup {
         height: 32,
+        // 前台子代理只在 fork 关着时有（`ZCODE_FORK_SUBAGENT=0`，修复线 L-A，agents.md §8.1.1）。
+        fork_subagent: Some(false),
         ..Setup::default()
     }
 }

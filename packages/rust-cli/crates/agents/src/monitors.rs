@@ -195,7 +195,11 @@ async fn run(
                             send(core, &live, &armed, &step).await;
                         }
                     }
-                    Some(Ok(CommandEvent::Started { .. } | CommandEvent::Backgrounded)) => {}
+                    Some(Ok(
+                        CommandEvent::Started { .. }
+                        | CommandEvent::Backgrounded
+                        | CommandEvent::BackgroundedBy { .. },
+                    )) => {}
                     Some(Ok(CommandEvent::Finished { .. })) => break,
                     Some(Err(error)) => {
                         // 从记下的游标重新订阅（读过的不再送）。

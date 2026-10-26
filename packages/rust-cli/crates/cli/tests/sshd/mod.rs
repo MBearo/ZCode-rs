@@ -18,6 +18,29 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const BASE_IMAGE: &str = "alpine:3.20";
 pub const HOST: &str = "zcode-test";
 
+/// 容器的系统（F100，remote-exec.md §26.9 的测试）：alpine 是 musl；debian 是 glibc。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Image {
+    Alpine,
+    Debian,
+}
+
+impl Image {
+    fn base(self) -> &'static str {
+        match self {
+            Self::Alpine => BASE_IMAGE,
+            Self::Debian => "debian:bookworm-slim",
+        }
+    }
+
+    fn dockerfile(self) -> &'static str {
+        match self {
+            Self::Alpine => DOCKERFILE,
+            Self::Debian => DEBIAN_DOCKERFILE,
+        }
+    }
+}
+
 pub fn run(program: &str, args: &[&str]) -> (bool, String, String) {
     let output = Command::new(program)
         .args(args)
@@ -38,6 +61,7 @@ pub fn docker(args: &[&str]) -> (bool, String, String) {
 /// 容器与它的镜像；丢掉时删掉（镜像的基础层是这次拉的才删）。
 pub struct Sshd {
     pub name: String,
+    image: Image,
     pulled_base: bool,
     pub port: u16,
     dir: tempfile::TempDir,
@@ -48,7 +72,7 @@ impl Drop for Sshd {
         let _ = docker(&["rm", "-f", &self.name]);
         let _ = docker(&["rmi", "-f", &self.name]);
         if self.pulled_base {
-            let _ = docker(&["rmi", BASE_IMAGE]);
+            let _ = docker(&["rmi", self.image.base()]);
         }
     }
 }
@@ -58,6 +82,21 @@ RUN apk add --no-cache openssh-server bash \
  && sed -i 's#^root:x:0:0:root:/root:/bin/ash$#root:x:0:0:root:/root:/bin/bash#' /etc/passwd \
  && sed -i 's#^root:[^:]*:#root:*:#' /etc/shadow \
  && mkdir -p /root/.ssh && chmod 700 /root/.ssh
+COPY sshd_config /etc/ssh/sshd_config
+COPY ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
+COPY authorized_keys /root/.ssh/authorized_keys
+RUN chown root:root /etc/ssh/ssh_host_ed25519_key /root/.ssh/authorized_keys \
+ && chmod 600 /etc/ssh/ssh_host_ed25519_key /root/.ssh/authorized_keys
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]
+"#;
+
+/// glibc 的容器（F100）：debian 的 sshd 要 `/run/sshd`；root 的口令本来就是锁住的。
+pub const DEBIAN_DOCKERFILE: &str = r#"FROM debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssh-server bash procps \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh
 COPY sshd_config /etc/ssh/sshd_config
 COPY ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
 COPY authorized_keys /root/.ssh/authorized_keys
@@ -80,6 +119,11 @@ UseDNS no
 
 impl Sshd {
     pub fn start() -> Self {
+        Self::start_with(Image::Alpine, "zcode-rs-test-sshd")
+    }
+
+    /// `prefix`：容器与镜像名字的前缀（每个测试线自己的，不和别的容器撞名）。
+    pub fn start_with(image: Image, prefix: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = |name: &str| dir.path().join(name);
         for key in ["id_ed25519", "ssh_host_ed25519_key"] {
@@ -96,7 +140,7 @@ impl Sshd {
         }
         let context = path("context");
         std::fs::create_dir_all(&context).unwrap();
-        std::fs::write(context.join("Dockerfile"), DOCKERFILE).unwrap();
+        std::fs::write(context.join("Dockerfile"), image.dockerfile()).unwrap();
         std::fs::write(context.join("sshd_config"), SSHD_CONFIG).unwrap();
         std::fs::copy(
             path("ssh_host_ed25519_key"),
@@ -104,14 +148,15 @@ impl Sshd {
         )
         .unwrap();
         std::fs::copy(path("id_ed25519.pub"), context.join("authorized_keys")).unwrap();
-        let pulled_base = !docker(&["image", "inspect", BASE_IMAGE]).0;
+        let pulled_base = !docker(&["image", "inspect", image.base()]).0;
         let name = format!(
-            "zcode-rs-test-sshd-{}-{:x}",
+            "{prefix}-{}-{:x}",
             std::process::id(),
             rust_cli_base::random::u64() & 0xffff_ffff
         );
         let mut sshd = Self {
             name,
+            image,
             pulled_base,
             port: 0,
             dir,

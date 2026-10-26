@@ -247,7 +247,7 @@ async fn watch_moved(
         match event.unwrap() {
             CommandEvent::Started { .. } => {}
             CommandEvent::Output { data, .. } => output.push_str(&String::from_utf8_lossy(&data)),
-            CommandEvent::Backgrounded => {
+            CommandEvent::Backgrounded | CommandEvent::BackgroundedBy { .. } => {
                 assert!(before.is_none(), "backgrounded twice");
                 assert!(shell.background().await.contains(task));
                 before = Some(output.clone());

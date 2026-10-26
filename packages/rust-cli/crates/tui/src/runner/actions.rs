@@ -146,6 +146,13 @@ impl<B: Backend> Loop<'_, B> {
                     delivery,
                 });
             }
+            Action::BackgroundForeground => self.send(
+                Sent::Record,
+                Command::BackgroundForeground {
+                    reason: rust_cli_kernel_api::env::BackgroundReason::User,
+                },
+                String::new(),
+            ),
             // esc / ctrl+c 的中断：回合结束时据此判断要不要撤回（修复线 F38，restore.rs）。
             Action::Interrupt => {
                 self.user_cancel = true;
@@ -193,7 +200,7 @@ impl<B: Backend> Loop<'_, B> {
                 String::new(),
             ),
             Action::SetModel(selection) => self.set_model(selection),
-            Action::ChooseModel(selection) => self.choose_model(selection),
+            Action::ChooseModel(selection) => self.choose_model(selection, None),
             Action::SetMode(mode) => self.set_mode(mode),
             Action::SetPlan(enabled) => self.set_plan(enabled),
             Action::Compact(instructions) => {
@@ -208,6 +215,7 @@ impl<B: Backend> Loop<'_, B> {
                 }
             }
             Action::OpenModels => self.catalog(None),
+            // 完成时写命令记录（修复线 L-A）；选择器的选择与取消不记（tui-manage.md D27）。
             Action::PickModel(name) => self.catalog(Some(name)),
             Action::Clear => self.clear()?,
             Action::Copy(text) => {
@@ -302,7 +310,17 @@ impl<B: Backend> Loop<'_, B> {
 
     /// `/clear`：运行中先中断；离开当前会话，清屏，下一次发送建新会话（会话还留在存储里）。
     pub(super) fn clear(&mut self) -> Result<()> {
-        self.clear_into(None)
+        self.clear_as("")
+    }
+
+    /// 同 `/clear`；`args` 是命令的参数（`/clear 名字`）。新会话的对话从这次 `/clear` 的记录开始（对照实现：固定说明、命令输入
+    /// 与空的输出，修复线 L-A，tui-manage.md §11.2）；之前留在草稿里的记录随旧对话一起清掉。
+    pub(super) fn clear_as(&mut self, args: &str) -> Result<()> {
+        self.clear_into(None)?;
+        self.pending_records.clear();
+        self.pending_records
+            .push(super::records::record("clear", args, String::new(), true));
+        Ok(())
     }
 
     /// 同 `/clear`；给了工作区（← 项目页的 `n`，tui-panels.md §2.4）时新会话的草稿换到那里，提示写上路径。

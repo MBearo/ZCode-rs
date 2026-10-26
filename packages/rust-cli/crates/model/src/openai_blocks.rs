@@ -94,6 +94,15 @@ impl Blocks {
         !self.tools.is_empty()
     }
 
+    /// 没有给键的调用用的新键：已有的最大键 + 1，没有调用时是 0。
+    pub fn next_tool_key(&self) -> u64 {
+        self.tools
+            .iter()
+            .map(|tool| tool.key + 1)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// 打开一个函数调用块；同一个键只能打开一次。
     pub fn tool_start(
         &mut self,

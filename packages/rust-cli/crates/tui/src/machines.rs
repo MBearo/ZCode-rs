@@ -38,6 +38,8 @@ pub struct ExecutorInfo {
 pub enum ConnectStep {
     /// 探测（还不知道要不要上传）。
     Checking,
+    /// 下载执行器（F100，remote-exec.md §26.6：本机缓存里没有）。
+    Downloading,
     /// 上传执行器：字节数。
     Uploading { bytes: u64 },
     /// 握手：拉起执行器、hello / welcome。
@@ -102,6 +104,19 @@ pub enum MachineFailure {
     },
     Upload(String),
     Probe(String),
+    /// 下载执行器失败，远端也没有兼容的（F100，remote-exec.md §26.6）。
+    DownloadFailed {
+        version: String,
+        target: String,
+        reason: String,
+    },
+    /// 远端是 musl，没有执行器包（F100）。
+    Musl,
+    /// 执行器在远端跑不起来：要 `needs`，远端的 glibc 是 `glibc`（不知道时 None，F100）。
+    OldGlibc {
+        glibc: Option<String>,
+        needs: String,
+    },
     Refused(String),
     Lost(String),
 }

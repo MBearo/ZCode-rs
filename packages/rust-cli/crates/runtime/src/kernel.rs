@@ -86,6 +86,7 @@ impl Kernel for LocalKernel {
             SessionState {
                 meta,
                 messages: Vec::new(),
+                earlier: Vec::new(),
                 selection: request.selection,
                 mode: execution,
                 checkpoints: Vec::new(),
@@ -131,6 +132,7 @@ impl Kernel for LocalKernel {
         let state = SessionState {
             meta: loaded.meta,
             messages: loaded.messages,
+            earlier: loaded.earlier,
             selection: loaded
                 .model
                 .unwrap_or_else(|| self.defaults.selection.clone()),
@@ -310,6 +312,37 @@ impl Kernel for LocalKernel {
         session: &SessionId,
     ) -> Result<rust_cli_kernel_api::session_api::SessionView, KernelError> {
         self.snapshot(session).await
+    }
+
+    /// 前端记录（缺口 G2）：经存储端口原样落库，不经会话 actor（记录不是会话状态）。
+    async fn put_session_record(
+        &self,
+        session: &SessionId,
+        record: rust_cli_kernel_api::store::FrontendRecord,
+    ) -> Result<(), KernelError> {
+        self.ports
+            .store
+            .put_record(session, &record)
+            .await
+            .map_err(|error| match error {
+                StoreError::Unsupported { what } => KernelError::Unsupported { what },
+                other => failed(&other),
+            })
+    }
+
+    async fn session_records(
+        &self,
+        session: &SessionId,
+        kind: &str,
+    ) -> Result<Vec<rust_cli_kernel_api::store::FrontendRecord>, KernelError> {
+        self.ports
+            .store
+            .records(session, kind)
+            .await
+            .map_err(|error| match error {
+                StoreError::Unsupported { what } => KernelError::Unsupported { what },
+                other => failed(&other),
+            })
     }
 
     /// `/hooks`：hooks 引擎当前快照里的配置（tui-display.md §3.5）。

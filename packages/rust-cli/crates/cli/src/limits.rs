@@ -181,6 +181,21 @@ pub(crate) fn limits(env: &[(String, String)], max_output_tokens: Option<u32>) -
             tool_search: tool_search(env),
         },
         bash: bash(env),
+        fork_subagent: fork_subagent(env),
+    }
+}
+
+/// `ZCODE_FORK_SUBAGENT`（修复线 L-A，agents.md §8.1.1；真假值的写法同对照实现）：真值打开，假值关掉，
+/// 别的值与没设都按形态。
+pub(crate) fn fork_subagent(env: &[(String, String)]) -> Option<bool> {
+    let value = raw(env, "ZCODE_FORK_SUBAGENT")?;
+    match rust_cli_base::js::string::trim(value)
+        .to_lowercase()
+        .as_str()
+    {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }
 

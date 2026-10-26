@@ -99,7 +99,12 @@ async fn next(mut cursor: Cursor) -> Option<(Result<CommandEvent, EnvError>, Cur
         // 已经写出的输出读完之后再说转到了后台（shell-permissions.md §1.2.1）；之后照常读输出、发终态。
         if backgrounded && !cursor.announced {
             cursor.announced = true;
-            return Some((Ok(CommandEvent::Backgrounded), cursor));
+            // 被要求转的说明原因（修复线 L-A，tui-input.md §11）；超时转的照旧。
+            let event = match *cursor.running.moved_by.borrow() {
+                Some(reason) => CommandEvent::BackgroundedBy { reason },
+                None => CommandEvent::Backgrounded,
+            };
+            return Some((Ok(event), cursor));
         }
         if let Some(finish) = ended {
             if let Some(errors) = cursor.running.errors.clone() {

@@ -36,6 +36,17 @@ fn failure(error: &MachineError) -> MachineFailure {
         },
         MachineError::Upload(message) => MachineFailure::Upload(message),
         MachineError::Probe(message) => MachineFailure::Probe(message),
+        MachineError::DownloadFailed {
+            version,
+            target,
+            reason,
+        } => MachineFailure::DownloadFailed {
+            version,
+            target,
+            reason,
+        },
+        MachineError::Musl => MachineFailure::Musl,
+        MachineError::OldGlibc { glibc, needs } => MachineFailure::OldGlibc { glibc, needs },
         MachineError::Refused(message) => MachineFailure::Refused(message),
         MachineError::Lost(message) => MachineFailure::Lost(message),
     }
@@ -53,6 +64,8 @@ fn status(state: &MachineState, now: (tokio::time::Instant, u64)) -> MachineStat
         MachineState::Unconnected => MachineStatus::Disconnected,
         // 第一次连接分步（F98，remote-exec.md §25.4.2）。
         MachineState::Provisioning => MachineStatus::Connecting(ConnectStep::Checking),
+        // F100（remote-exec.md §26.6）：下载执行器。
+        MachineState::Downloading => MachineStatus::Connecting(ConnectStep::Downloading),
         MachineState::Uploading { bytes } => {
             MachineStatus::Connecting(ConnectStep::Uploading { bytes: *bytes })
         }

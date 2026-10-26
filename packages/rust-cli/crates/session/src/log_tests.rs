@@ -197,3 +197,37 @@ fn the_log_does_not_grow_with_deltas_and_progress() {
     assert!(small.entries <= 300, "{small:?}");
     assert!(large.entries <= 300, "{large:?}");
 }
+
+/// 缺口 G1（app-protocol.md §6.4）：revision 只在可见状态变化时加一；流式增量不加，补发的合并增量带最后一片时的值。
+#[tokio::test]
+async fn the_revision_counts_state_changes_only() {
+    let log = EventLog::new();
+    let delta = |text: &str| KernelEvent::StreamDelta {
+        turn: TurnId::new("turn_1"),
+        response: 0,
+        index: 0,
+        delta: BlockDelta::Text(text.to_owned()),
+    };
+    assert_eq!(log.revision(), 0);
+    log.append(KernelEvent::TurnStarted {
+        turn: TurnId::new("turn_1"),
+        command: None,
+    });
+    log.append(delta("a"));
+    log.append(delta("b"));
+    assert_eq!(log.revision(), 1);
+    log.append(title("t"));
+    log.append(KernelEvent::ContextUsage {
+        used_tokens: 1,
+        max_tokens: 2,
+    });
+    assert_eq!(log.revision(), 2);
+    let replay: Vec<(u64, u64)> = log
+        .subscribe(Some(0))
+        .take(4)
+        .map(|event| (event.seq, event.revision))
+        .collect()
+        .await;
+    // TurnStarted、两片合成一段的增量、标题、用量。
+    assert_eq!(replay, vec![(1, 1), (3, 1), (4, 2), (5, 2)]);
+}

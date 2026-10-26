@@ -470,6 +470,8 @@ fn built_full(
             keep_alive,
             // 交互模式（停放）时后台子代理也能询问（agents.md §4.1.1）；测试的交互替身不给会话级入口。
             background_prompts: keep_alive,
+            // fork 子代理由 TUI 的集成测试与 fork_tests.rs 覆盖（agents.md §8.1）。
+            fork: false,
         },
     );
     Harness {

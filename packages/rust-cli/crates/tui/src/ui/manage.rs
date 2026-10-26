@@ -61,6 +61,8 @@ pub enum Manage {
     EffortChosen {
         selection: rust_cli_kernel_api::model::ModelSelection,
         level: Option<String>,
+        /// 命令的参数（命令记录用，修复线 L-A）。
+        args: String,
     },
 }
 
@@ -165,12 +167,14 @@ impl App {
             return Some(Action::Manage(Manage::EffortChosen {
                 selection: selection(None),
                 level: None,
+                args: args.to_owned(),
             }));
         }
         if let Some(level) = levels.iter().find(|l| l.eq_ignore_ascii_case(args)) {
             return Some(Action::Manage(Manage::EffortChosen {
                 selection: selection(Some(level.clone())),
                 level: Some(level.clone()),
+                args: args.to_owned(),
             }));
         }
         let mut options = levels.clone();
@@ -232,7 +236,14 @@ impl App {
     }
 
     /// `/effort` 的提示：`saved` 为 None 时没有存储（只对本会话有效），否则是保存的结果。
-    pub fn effort_done(&mut self, level: Option<&str>, saved: Option<Result<String, String>>) {
+    ///
+    /// 修复线 L-A（tui-manage.md §11.2）：成功时同一句（英文原文）记进对话，前面加固定说明（对照实现的缺省显示）。
+    pub fn effort_done(
+        &mut self,
+        level: Option<&str>,
+        saved: Option<Result<String, String>>,
+        args: &str,
+    ) {
         let suffix = match &saved {
             None => " (this session only)",
             Some(Ok(_)) => " (saved as your default for new sessions)",
@@ -249,6 +260,14 @@ impl App {
                 None => format!("Set effort level to {level}{suffix}"),
             },
         };
+        self.records
+            .push(rust_cli_kernel_api::user_command::LocalCommandRecord {
+                name: "effort".to_owned(),
+                args: args.to_owned(),
+                output: rust_cli_kernel_api::user_command::LocalCommandOutput::Stdout(text.clone()),
+                caveat: true,
+                meta: Vec::new(),
+            });
         self.info(text);
     }
 

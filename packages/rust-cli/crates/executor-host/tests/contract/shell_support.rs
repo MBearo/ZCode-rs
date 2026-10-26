@@ -96,7 +96,9 @@ impl Shell {
                     };
                 }
                 CommandEvent::Started { .. } => panic!("started twice"),
-                CommandEvent::Backgrounded => panic!("moved to the background"),
+                CommandEvent::Backgrounded | CommandEvent::BackgroundedBy { .. } => {
+                    panic!("moved to the background")
+                }
             }
         }
         panic!("no terminal event");

@@ -105,6 +105,9 @@ pub struct Limits {
     pub request: RequestLimits,
     /// Bash 工具（模型的调用与 bash 模式）的缺省与最大超时。
     pub bash: BashTimeouts,
+    /// `ZCODE_FORK_SUBAGENT`（对照实现有同义的开关，修复线 L-A，agents.md §8.1.1）：Some(true) 打开 fork
+    /// 子代理（`-p` 也开），Some(false) 关掉，None 按形态（交互会话开，`-p` 关）。
+    pub fork_subagent: Option<bool>,
 }
 
 pub struct LocalKernel {
@@ -426,6 +429,8 @@ impl LocalKernel {
                 keep_alive: !non_interactive,
                 // 修复线 F67：交互界面里后台子代理也能询问（agents.md §4.1.1）。
                 background_prompts: !non_interactive,
+                // 修复线 L-A：交互会话缺省打开 fork 子代理，`-p` 关；环境变量可以改（agents.md §8.1.1）。
+                fork: defaults.limits.fork_subagent.unwrap_or(!non_interactive),
             },
         );
         let tools = agents.registry();

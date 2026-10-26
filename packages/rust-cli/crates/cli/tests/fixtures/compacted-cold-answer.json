@@ -1,0 +1,246 @@
+[
+  {
+    "type": "system",
+    "subtype": "compact_boundary",
+    "id": "msg_b00003",
+    "trigger": "manual",
+    "pre_tokens": 5003,
+    "summary": "msg_s00003",
+    "preserved": {
+      "head": "msg_t00009",
+      "anchor": "msg_s00003",
+      "tail": "msg_a00009"
+    }
+  },
+  {
+    "type": "user",
+    "id": "msg_s00003",
+    "content": [
+      {
+        "type": "text",
+        "text": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\nSUMMARY-3"
+      }
+    ],
+    "origin": {
+      "kind": "compact_summary"
+    }
+  },
+  {
+    "type": "assistant",
+    "id": "msg_t00009",
+    "content": [
+      {
+        "type": "text",
+        "text": "looking 9"
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_00009",
+        "name": "Read",
+        "input": {
+          "file_path": "/w/f9.txt"
+        }
+      }
+    ],
+    "model": "m",
+    "stop_reason": "tool_use"
+  },
+  {
+    "type": "user",
+    "id": "msg_r00009",
+    "content": [
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_00009",
+        "content": [
+          {
+            "type": "text",
+            "text": "     1\tcontent 9"
+          }
+        ],
+        "is_error": false
+      }
+    ],
+    "origin": {
+      "kind": "tool_result",
+      "assistant": "msg_t00009"
+    }
+  },
+  {
+    "type": "assistant",
+    "id": "msg_a00009",
+    "content": [
+      {
+        "type": "text",
+        "text": "answer 9"
+      }
+    ],
+    "model": "m",
+    "stop_reason": "end_turn"
+  },
+  {
+    "type": "attachment",
+    "id": "msg_f00003",
+    "source": "file",
+    "text": "<system-reminder>\nCalled the Read tool with the following input: {\"file_path\":\"/w/f3.txt\"}\n</system-reminder>",
+    "data": {
+      "filename": "/w/f3.txt"
+    }
+  },
+  {
+    "type": "user",
+    "id": "msg_u00010",
+    "content": [
+      {
+        "type": "text",
+        "text": "question 10"
+      }
+    ],
+    "origin": {
+      "kind": "human"
+    }
+  },
+  {
+    "type": "assistant",
+    "id": "msg_t00010",
+    "content": [
+      {
+        "type": "text",
+        "text": "looking 10"
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_00010",
+        "name": "Read",
+        "input": {
+          "file_path": "/w/f10.txt"
+        }
+      }
+    ],
+    "model": "m",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 1010,
+      "output_tokens": 20,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  },
+  {
+    "type": "user",
+    "id": "msg_r00010",
+    "content": [
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_00010",
+        "content": [
+          {
+            "type": "text",
+            "text": "     1\tcontent 10"
+          }
+        ],
+        "is_error": false
+      }
+    ],
+    "origin": {
+      "kind": "tool_result",
+      "assistant": "msg_t00010"
+    }
+  },
+  {
+    "type": "assistant",
+    "id": "msg_a00010",
+    "content": [
+      {
+        "type": "text",
+        "text": "answer 10"
+      }
+    ],
+    "model": "m",
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 1010,
+      "output_tokens": 20,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  },
+  {
+    "type": "user",
+    "id": "msg_u00011",
+    "content": [
+      {
+        "type": "text",
+        "text": "question 11"
+      }
+    ],
+    "origin": {
+      "kind": "human"
+    }
+  },
+  {
+    "type": "assistant",
+    "id": "msg_t00011",
+    "content": [
+      {
+        "type": "text",
+        "text": "looking 11"
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_00011",
+        "name": "Read",
+        "input": {
+          "file_path": "/w/f11.txt"
+        }
+      }
+    ],
+    "model": "m",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 1011,
+      "output_tokens": 20,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  },
+  {
+    "type": "user",
+    "id": "msg_r00011",
+    "content": [
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_00011",
+        "content": [
+          {
+            "type": "text",
+            "text": "     1\tcontent 11"
+          }
+        ],
+        "is_error": false
+      }
+    ],
+    "origin": {
+      "kind": "tool_result",
+      "assistant": "msg_t00011"
+    }
+  },
+  {
+    "type": "assistant",
+    "id": "msg_a00011",
+    "content": [
+      {
+        "type": "text",
+        "text": "answer 11"
+      }
+    ],
+    "model": "m",
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 1011,
+      "output_tokens": 20,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  }
+]

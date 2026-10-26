@@ -354,8 +354,11 @@ async fn every_new_client_has_its_own_instance() {
     assert_ne!(seen[1], seen[0]);
 }
 
-/// 部署时报告上传、等测试放行（F98）。
-struct Uploads(Arc<tokio::sync::Notify>);
+/// 部署时依次报告这些步（F98 上传、F100 下载），每步之后等测试放行。
+struct Uploads(
+    Arc<tokio::sync::Notify>,
+    Vec<rust_cli_exec_transport::ProvisionStep>,
+);
 
 #[async_trait]
 impl Provisioner for Uploads {
@@ -367,8 +370,10 @@ impl Provisioner for Uploads {
         &self,
         progress: &(dyn Fn(rust_cli_exec_transport::ProvisionStep) + Send + Sync),
     ) -> Result<Provisioned, ProvisionError> {
-        progress(rust_cli_exec_transport::ProvisionStep::Uploading { bytes: 93_323_264 });
-        self.0.notified().await;
+        for step in &self.1 {
+            progress(step.clone());
+            self.0.notified().await;
+        }
         Ok(provisioned())
     }
 }
@@ -400,7 +405,10 @@ async fn the_upload_shows_as_its_own_state() {
     let _server = serve(listener, false);
     let release = Arc::new(tokio::sync::Notify::new());
     let endpoint = Arc::new(UploadingEndpoint {
-        uploads: Uploads(release.clone()),
+        uploads: Uploads(
+            release.clone(),
+            vec![rust_cli_exec_transport::ProvisionStep::Uploading { bytes: 93_323_264 }],
+        ),
         connector: Arc::new(Cuttable {
             inner: Mutex::new(Arc::new(connector)),
             switches: Mutex::default(),
@@ -428,5 +436,53 @@ async fn the_upload_shows_as_its_own_state() {
     connecting.await.unwrap().unwrap();
     assert!(matches!(machine.state(), MachineState::Ready(_)));
     assert!(!machine.retry_now(), "nothing to retry while ready");
+    machine.disconnect().await;
+}
+
+/// F100（remote-exec.md §26.6）：本机缓存里没有执行器时，第一次连接先是“下载”，再是“上传”，之后握手、就绪。
+#[tokio::test]
+async fn the_download_shows_as_its_own_state_before_the_upload() {
+    use rust_cli_exec_transport::ProvisionStep;
+    let (connector, listener) = network("machine");
+    let _server = serve(listener, false);
+    let release = Arc::new(tokio::sync::Notify::new());
+    let endpoint = Arc::new(UploadingEndpoint {
+        uploads: Uploads(
+            release.clone(),
+            vec![
+                ProvisionStep::Downloading,
+                ProvisionStep::Uploading { bytes: 42 },
+            ],
+        ),
+        connector: Arc::new(Cuttable {
+            inner: Mutex::new(Arc::new(connector)),
+            switches: Mutex::default(),
+            reject: Mutex::default(),
+        }),
+    });
+    let machine = Arc::new(Machine::new(
+        endpoint,
+        ClientOptions::new("test", "client-1"),
+    ));
+    let mut states = machine.states();
+    let connecting = rust_cli_base::owned({
+        let machine = machine.clone();
+        async move { machine.connect().await.map(drop) }
+    });
+    for wanted in [
+        MachineState::Downloading,
+        MachineState::Uploading { bytes: 42 },
+    ] {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            states.wait_for(|state| *state == wanted),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        release.notify_one();
+    }
+    connecting.await.unwrap().unwrap();
+    assert!(matches!(machine.state(), MachineState::Ready(_)));
     machine.disconnect().await;
 }

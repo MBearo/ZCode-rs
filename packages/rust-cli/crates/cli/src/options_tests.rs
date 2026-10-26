@@ -250,13 +250,18 @@ fn the_loopback_machines_declaration_is_read_only_when_declarations_are_accepted
     assert!(read(&ssh, TestDeclarations::Accepted).ssh_machines);
     assert!(!read(&ssh, TestDeclarations::Ignored).ssh_machines);
     // 机器经 SSH 时的测试配置：不要求 `_ZCODE_ASSUME_SSH_EXECUTOR`；release 构建什么都不读。
-    let vars = env(&[("_ZCODE_ASSUME_SSH_CONFIG", "/tmp/ssh_config")]);
+    // F100（remote-exec.md §26.7）：执行器的假注册表也只在 debug 构建读。
+    let vars = env(&[
+        ("_ZCODE_ASSUME_SSH_CONFIG", "/tmp/ssh_config"),
+        ("_ZCODE_ASSUME_NPM_REGISTRY", "http://127.0.0.1:9"),
+    ]);
     assert_eq!(
         machine_ssh(TestDeclarations::Accepted, |name| var(&vars, name)
             .map(str::to_owned)),
         MachineSsh {
             config: Some("/tmp/ssh_config".to_owned()),
             artifact: None,
+            npm_registry: Some("http://127.0.0.1:9".to_owned()),
         }
     );
     assert_eq!(

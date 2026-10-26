@@ -10,6 +10,7 @@ mod manage;
 mod model_default;
 mod panels;
 mod projects;
+mod records;
 mod restore;
 mod services;
 mod session;
@@ -168,6 +169,9 @@ struct Loop<'a, B: Backend> {
     user_cancel: bool,
     /// 机器服务的变化通知（远端执行 R4，remote-exec.md §21.2）：出项时重取快照；没有服务时永远不出项。
     machine_changes: BoxStream<'static, ()>,
+    /// 还没有会话时（启动后、`/clear` 之后）完成的本地命令的记录：建会话后、第一条输入之前按顺序发出（修复线 L-A，
+    /// tui-manage.md §11.3；新会话草稿的一部分）。
+    pending_records: Vec<rust_cli_kernel_api::user_command::LocalCommandRecord>,
 }
 
 /// 跑事件循环直到退出；返回退出时的会话与还没跑的 SessionEnd（[`Exit`]）。真实终端与测试（`TestBackend`）走同一个循环。
@@ -248,6 +252,7 @@ pub async fn drive<B: Backend>(
         stopping: false,
         user_cancel: false,
         machine_changes,
+        pending_records: Vec::new(),
     };
     let (startup, fork) = (state.options.startup.clone(), state.options.fork);
     state.startup(startup, fork);
@@ -258,6 +263,8 @@ pub async fn drive<B: Backend>(
         // 缺陷修复（F14）：终端关掉时（关窗口、SSH 断开）写终端先失败（EIO），SIGHUP 随后才到；以前 `draw()?`
         // 直接返回错误，回合不中止、SessionEnd 不跑、退出码不是 129。画不出来就是终端没了：按收到退出信号收尾
         // （不再画帧、中止在跑的回合、离开时 SessionEnd 的原因是 `other`，session-lifecycle.md §3.5）。
+        // 这一轮界面层完成的本地命令记录（修复线 L-A）：画帧之前交给内核或新会话的草稿。
+        state.flush_records();
         if state.draw().is_err() && !state.stopping {
             state.stop();
         }

@@ -151,6 +151,11 @@ pub(crate) struct Running {
     pub finished: signal::Sender<Option<Finish>>,
     /// 前台命令到了超时、已转到后台（`StartCommand::on_timeout`，shell-permissions.md §1.2.1）。
     pub backgrounded: signal::Sender<bool>,
+    /// 前台命令被要求转到后台的原因（修复线 L-A，tui-input.md §11）：监督任务据此转、看输出的一方据此说明原因。
+    pub moved_by: signal::Sender<Option<rust_cli_kernel_api::env::BackgroundReason>>,
+    /// 这条命令的任务 ID（转后台的回答）与它能不能转（只有给了 `on_timeout` 的前台 Bash 能转，hook 命令不能）。
+    pub task: rust_cli_kernel_api::ids::ShellTaskId,
+    pub movable: bool,
     /// 开始的时刻（Shell 详情的 Runtime，docs/specs/rust-cli/tui-panels.md §3.3）。
     pub started: std::time::Instant,
 }
@@ -368,6 +373,9 @@ impl Shells {
             cancel: CancellationToken::new(),
             finished: signal::channel(None).0,
             backgrounded: signal::channel(false).0,
+            moved_by: signal::channel(None).0,
+            task: request.task.clone(),
+            movable: request.on_timeout.is_some() && request.background.is_none(),
             started: std::time::Instant::now(),
         });
         {
@@ -425,6 +433,9 @@ impl Shells {
             cancel: CancellationToken::new(),
             finished: signal::channel(None).0,
             backgrounded: signal::channel(false).0,
+            moved_by: signal::channel(None).0,
+            task: request.task.clone(),
+            movable: request.on_timeout.is_some() && request.background.is_none(),
             started: std::time::Instant::now(),
         });
         {
@@ -578,3 +589,7 @@ mod choice_tests;
 #[cfg(test)]
 #[path = "shell_embedded_tests.rs"]
 mod embedded_tests;
+
+#[cfg(test)]
+#[path = "shell_moved_tests.rs"]
+mod moved_tests;

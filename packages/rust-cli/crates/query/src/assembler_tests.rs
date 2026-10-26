@@ -69,9 +69,11 @@ fn text_thinking_and_tool_use_blocks_assemble_in_order() {
             delta: BlockDelta::InputJson("\"a.rs\"}".to_owned()),
         },
         ModelEvent::BlockStop { index: 2 },
+        // `MessageDelta` 的用量是适配器合并好的累计值（query.md §1.10）：带着 `message_start` 的输入。
         ModelEvent::MessageDelta {
             stop_reason: Some(StopReason::ToolUse),
             usage: Usage {
+                input_tokens: 10,
                 output_tokens: 5,
                 ..Usage::default()
             },
@@ -422,4 +424,70 @@ fn server_blocks_are_not_part_of_the_reply() {
             },
         ]
     );
+}
+
+/// 一段文字回复：`message_start` 的用量是 `started`，`message_delta` 带适配器合并好的累计用量 `reported`。
+fn reply_with_usage(started: Usage, reported: Usage) -> Assembler {
+    let mut events = vec![ModelEvent::MessageStart {
+        id: "msg_api".to_owned(),
+        model: "m".to_owned(),
+        usage: started,
+    }];
+    events.extend(text_block(0, "ok"));
+    events.extend([
+        ModelEvent::MessageDelta {
+            stop_reason: Some(StopReason::EndTurn),
+            usage: reported,
+        },
+        ModelEvent::MessageStop,
+    ]);
+    assembled(events)
+}
+
+/// 修复线 F99（query.md §1.10）：有的端点在 `message_start` 里给 0，输入与缓存只在 `message_delta` 里；OpenAI 协议的
+/// 用量只在结束时给。`MessageDelta` 的用量是累计值，组装器整体采用。修 bug 前只取输出，输入与缓存停在 0。
+#[test]
+fn usage_reported_only_in_the_message_delta_is_kept() {
+    let reported = Usage {
+        input_tokens: 11_922,
+        output_tokens: 514,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 448,
+    };
+    let assembler = reply_with_usage(Usage::default(), reported);
+    assert_eq!(assembler.incomplete(), None);
+    assert_eq!(assembler.finish().usage, reported);
+}
+
+/// 修复线 F99：输入在 `message_start` 里、`message_delta` 只给输出的端点，适配器合并后的累计用量带着同样的输入与缓存，
+/// 结果与以前相同。
+#[test]
+fn usage_with_the_input_in_the_message_start_is_unchanged() {
+    let started = Usage {
+        input_tokens: 10,
+        output_tokens: 1,
+        cache_creation_input_tokens: 7,
+        cache_read_input_tokens: 3,
+    };
+    let reported = Usage {
+        output_tokens: 5,
+        ..started
+    };
+    assert_eq!(reply_with_usage(started, reported).finish().usage, reported);
+}
+
+/// 一直没有 `MessageDelta`（流中途断开）时留下 `message_start` 的用量。
+#[test]
+fn without_a_message_delta_the_start_usage_stays() {
+    let started = Usage {
+        input_tokens: 10,
+        ..Usage::default()
+    };
+    let mut events = vec![ModelEvent::MessageStart {
+        id: "msg_api".to_owned(),
+        model: "m".to_owned(),
+        usage: started,
+    }];
+    events.extend(text_block(0, "partial"));
+    assert_eq!(assembled(events).finish_aborted().usage, started);
 }

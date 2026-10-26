@@ -89,4 +89,31 @@ impl Shells {
             .insert(context.operation.clone(), (request.clone(), result.clone()));
         Ok(result)
     }
+
+    /// 这个会话在跑、能转的前台命令都转到后台（修复线 L-A，tui-input.md §11）：记下原因，监督任务看到后转、看输出的
+    /// 一方说明原因。已经在后台的、已结束的、不能转的（hook 命令）不动。同一把锁里判断，与命令自己结束只按先后。
+    pub(crate) fn background_foreground(
+        &self,
+        session: &rust_cli_kernel_api::ids::SessionId,
+        reason: rust_cli_kernel_api::env::BackgroundReason,
+    ) -> Vec<rust_cli_kernel_api::ids::ShellTaskId> {
+        let state = self.shared.state();
+        let background = state.sessions.get(session).map(|shell| &shell.background);
+        state
+            .commands
+            .values()
+            .filter(|running| {
+                running.session == *session
+                    && running.movable
+                    && running.finished.borrow().is_none()
+                    && !*running.backgrounded.borrow()
+                    && running.moved_by.borrow().is_none()
+                    && !background.is_some_and(|tasks| tasks.contains_key(&running.task))
+            })
+            .map(|running| {
+                running.moved_by.send_replace(Some(reason));
+                running.task.clone()
+            })
+            .collect()
+    }
 }

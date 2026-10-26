@@ -280,7 +280,8 @@ impl LocalKernel {
         );
         Ok(SessionView {
             meta: loaded.meta,
-            messages: loaded.messages,
+            // 显示用的历史：压缩点之前只供显示的消息接上模型侧的历史（工作线 F102，compact.md §5.1）。
+            messages: [loaded.earlier, loaded.messages].concat(),
             selection: loaded
                 .model
                 .unwrap_or_else(|| self.defaults.selection.clone()),
@@ -289,6 +290,7 @@ impl LocalKernel {
             pending: Vec::new(),
             queue: Vec::new(),
             last_seq: 0,
+            revision: 0,
             running: false,
             background: Vec::new(),
             peer_held: Vec::new(),

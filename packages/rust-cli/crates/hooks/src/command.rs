@@ -203,7 +203,11 @@ pub(crate) async fn run(run: CommandRun<'_>, cancel: CancellationToken) -> Raw {
         };
         match event {
             // hook 命令不设 `on_timeout`，不会转到后台。
-            Some(Ok(CommandEvent::Started { .. } | CommandEvent::Backgrounded)) => {}
+            Some(Ok(
+                CommandEvent::Started { .. }
+                | CommandEvent::Backgrounded
+                | CommandEvent::BackgroundedBy { .. },
+            )) => {}
             Some(Ok(CommandEvent::Output { stream, data, .. })) => captured.push(stream, &data),
             Some(Ok(CommandEvent::Finished {
                 outcome, exit_code, ..

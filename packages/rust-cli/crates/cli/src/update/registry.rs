@@ -67,7 +67,8 @@ pub(crate) fn ensure_dist(document: &Value, package: &str, version: &str) -> Res
     Ok(())
 }
 
-async fn fetch(egress: &Egress, url: &str) -> Result<Value> {
+/// 取一个包的元数据（缩略的 install-v1 文档）。
+pub(crate) async fn fetch(egress: &Egress, url: &str) -> Result<Value> {
     let mut request = HttpRequest::get(url).header(rust_cli_net::header::ACCEPT, ACCEPT);
     // 修复线 F58：每个请求最多等 5 s 的响应头（net `timeout::NPM_REGISTRY`）；以前没有单次超时，后台检查可能一直挂着。
     request.timeout = Some(rust_cli_net::timeout::NPM_REGISTRY);

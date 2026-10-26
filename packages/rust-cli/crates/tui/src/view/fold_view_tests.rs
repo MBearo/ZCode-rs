@@ -30,6 +30,7 @@ fn snapshot(messages: Vec<Message>, running: bool) -> SessionView {
         pending: Vec::new(),
         queue: Vec::new(),
         last_seq: 0,
+        revision: 0,
         running,
         background: Vec::new(),
         peer_held: Vec::new(),

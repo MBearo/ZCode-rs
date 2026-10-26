@@ -39,6 +39,7 @@ fn app(level: ColorLevel, background: Rgb, lang: Lang) -> App {
     app.view.apply(
         SequencedEvent {
             seq: 1,
+            revision: 0,
             event: KernelEvent::TitleChanged {
                 title: "Fix lint".into(),
             },

@@ -111,6 +111,7 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
         SessionState {
             meta: meta(),
             messages: Vec::new(),
+            earlier: Vec::new(),
             selection: selection(),
             mode: PermissionMode::Default.into(),
             checkpoints: Vec::new(),

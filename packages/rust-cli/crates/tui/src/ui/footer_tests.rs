@@ -24,6 +24,7 @@ fn app(lang: Lang, notice: ContextNotice) -> App {
     app.view.apply(
         SequencedEvent {
             seq: 1,
+            revision: 0,
             event: KernelEvent::ContextNotice { notice },
         },
         0,
@@ -115,6 +116,7 @@ fn stats_app(lang: Lang, light: bool, stats: Option<RequestStats>) -> App {
     app.view.apply(
         SequencedEvent {
             seq: 1,
+            revision: 0,
             event: KernelEvent::ContextUsage {
                 used_tokens: 66_600,
                 max_tokens: 180_000,
@@ -237,6 +239,7 @@ fn narrow_terminals_drop_cache_then_tps_then_context() {
     app.view.apply(
         SequencedEvent {
             seq: 2,
+            revision: 0,
             event: KernelEvent::ContextNotice {
                 notice: ContextNotice::UntilAutoCompact { percent: 10 },
             },

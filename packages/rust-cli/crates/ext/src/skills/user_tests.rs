@@ -202,8 +202,19 @@ async fn completion_lists_user_invocable_skills_in_catalog_order() {
         .map(|command| command.name.as_str())
         .collect();
     // user-invocable: false 的 inner 标为 hidden（不进补全，输入时仍是命令）；禁止模型调用的 helper 照列；
-    // 内置 loop 在文件 skill 之后。
-    assert_eq!(names, ["denied", "greet", "helper", "plain", "loop"]);
+    // 内置 loop 与内置提示词命令（修复线 L-A）在文件 skill 之后。
+    assert_eq!(
+        names,
+        [
+            "denied",
+            "greet",
+            "helper",
+            "plain",
+            "loop",
+            "init",
+            "security-review"
+        ]
+    );
     assert!(
         listed
             .iter()
@@ -252,7 +263,7 @@ async fn k9_print_sessions_add_the_unknown_command_note() {
     // 列出模型能用的 skill（helper 禁止模型调用、inner 不可由用户调用，都不列）；总数是可输入的 skill。
     assert_eq!(
         messages[1].text,
-        "<system-reminder>\nThe user's message starts with the slash command /nope, but no command with that name is available in this session, so it did not run. Slash commands available in this session: /denied, /greet, /plain, /loop, and 1 more. Treat the message as a plain request and do the task with the tools you have. If the task needs that command, tell the user it is not installed in this session. The user can add it as an organization plugin or a project skill. Do not give installation steps you are not sure of. Do not say the command ran.\n</system-reminder>"
+        "<system-reminder>\nThe user's message starts with the slash command /nope, but no command with that name is available in this session, so it did not run. Slash commands available in this session: /denied, /greet, /plain, /loop, /init, /security-review, and 1 more. Treat the message as a plain request and do the task with the tools you have. If the task needs that command, tell the user it is not installed in this session. The user can add it as an organization plugin or a project skill. Do not give installation steps you are not sure of. Do not say the command ran.\n</system-reminder>"
     );
     // 近似的名字给出候选。
     let Expansion::Messages { messages, .. } = commands

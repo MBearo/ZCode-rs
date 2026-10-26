@@ -149,8 +149,24 @@ impl App {
 
     /// `/plan`：打开或关掉 plan 开关，权限模式不变（修复线 F20：以前切到 plan 模式、记下之前的模式，再执行一次
     /// 切回去；进入前的模式现在一直在会话 actor 里）。
+    ///
+    /// 修复线 L-A（tui-manage.md §11.2）：打开时照对照实现记 `Enabled plan mode`（加固定说明）；关掉时对照实现没有对应的结果
+    /// （它的 `/plan` 不关），不记。
     fn toggle_plan(&mut self) -> Option<Action> {
-        Some(Action::SetPlan(!self.view.plan()))
+        let enabling = !self.view.plan();
+        if enabling {
+            self.records
+                .push(rust_cli_kernel_api::user_command::LocalCommandRecord {
+                    name: "plan".to_owned(),
+                    args: String::new(),
+                    output: rust_cli_kernel_api::user_command::LocalCommandOutput::Stdout(
+                        "Enabled plan mode".to_owned(),
+                    ),
+                    caveat: true,
+                    meta: Vec::new(),
+                });
+        }
+        Some(Action::SetPlan(enabling))
     }
 
     /// `/status` 的权限一行：权限模式；plan 开着时前面加 `Plan mode · `（修复线 F20，tui.md §7）。

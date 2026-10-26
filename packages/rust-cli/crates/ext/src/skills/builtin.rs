@@ -1,7 +1,8 @@
-//! 内置 skill（bundled skill）：只有 `/loop`（docs/specs/rust-cli/tools-more.md §17.1）。
+//! 内置 skill：`/loop`（bundled skill，docs/specs/rust-cli/tools-more.md §17.1）与内置提示词命令 `/init`、
+//! `/security-review`（修复线 L-A，ext.md §2.9）。
 //!
-//! 正文是按参数生成的提示，没有 `Base directory for this skill:` 前缀，不做参数替换、变量与 `!` 命令。
-//! 参数为空或只有间隔时先找 loop.md。
+//! 正文是生成的提示，没有 `Base directory for this skill:` 前缀，不做参数替换与变量。`/loop` 参数为空或只有间隔时先找
+//! loop.md；`/security-review` 在 git 仓库里时正文的 `!` 命令照 skill 的规则执行（只放行它自己的 allowed-tools）。
 
 use std::sync::{Arc, OnceLock};
 
@@ -15,19 +16,42 @@ use super::{Skill, SkillCatalog, SkillShell, SkillSource};
 
 /// 内置 skill 的名字。
 pub(crate) const LOOP: &str = "loop";
+/// 内置提示词命令（对照实现里内置的 prompt 命令，排在 bundled skill 之后）。
+pub(crate) const INIT: &str = "init";
+pub(crate) const SECURITY_REVIEW: &str = "security-review";
+const INIT_DESCRIPTION: &str = "Initialize a new AGENTS.md file with codebase documentation";
+const SECURITY_REVIEW_DESCRIPTION: &str =
+    "Complete a security review of the pending changes on the current branch";
+/// `/security-review` 的 `!` 命令与它要的工具（对照实现 frontmatter 的 `allowed-tools`，`Task` 是 Agent 的旧名）。
+const SECURITY_REVIEW_TOOLS: [&str; 15] = [
+    "Bash(git diff *)",
+    "PowerShell(git diff *)",
+    "Bash(git status *)",
+    "PowerShell(git status *)",
+    "Bash(git log *)",
+    "PowerShell(git log *)",
+    "Bash(git show *)",
+    "PowerShell(git show *)",
+    "Bash(git remote show *)",
+    "PowerShell(git remote show *)",
+    "Read",
+    "Glob",
+    "Grep",
+    "LS",
+    "Task",
+];
 const DESCRIPTION: &str = "Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace.";
 const WHEN_TO_USE: &str = "When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. \"check the deploy every 5 minutes\", \"keep running /babysit-prs\"). Do NOT invoke for one-off tasks.";
 /// 没有给间隔时的缺省。
 const DEFAULT_INTERVAL: &str = "10m";
 
-/// 内置 skill 的清单，排在文件与插件 skill 之后。
-pub(crate) fn skills() -> Vec<Arc<Skill>> {
-    vec![Arc::new(Skill {
-        name: LOOP.to_owned(),
+fn builtin(name: &str, description: &str) -> Skill {
+    Skill {
+        name: name.to_owned(),
         display: None,
-        description: DESCRIPTION.to_owned(),
-        when_to_use: Some(WHEN_TO_USE.to_owned()),
-        argument_hint: Some("[interval] [prompt]".to_owned()),
+        description: description.to_owned(),
+        when_to_use: None,
+        argument_hint: None,
         arg_names: Vec::new(),
         allowed_tools: Vec::new(),
         disallowed_tools: Vec::new(),
@@ -43,7 +67,55 @@ pub(crate) fn skills() -> Vec<Arc<Skill>> {
         dir: String::new(),
         body: String::new(),
         source: SkillSource::Builtin,
-    })]
+    }
+}
+
+/// 内置 skill 的清单，排在文件与插件 skill 之后：`loop`，再是内置提示词命令（对照实现的清单里它们排在 bundled skill 之后）。
+pub(crate) fn skills() -> Vec<Arc<Skill>> {
+    let looping = Skill {
+        when_to_use: Some(WHEN_TO_USE.to_owned()),
+        argument_hint: Some("[interval] [prompt]".to_owned()),
+        ..builtin(LOOP, DESCRIPTION)
+    };
+    let review = Skill {
+        allowed_tools: SECURITY_REVIEW_TOOLS
+            .iter()
+            .map(|tool| (*tool).to_owned())
+            .collect(),
+        ..builtin(SECURITY_REVIEW, SECURITY_REVIEW_DESCRIPTION)
+    };
+    vec![
+        Arc::new(looping),
+        Arc::new(builtin(INIT, INIT_DESCRIPTION)),
+        Arc::new(review),
+    ]
+}
+
+/// 内置提示词命令的正文（修复线 L-A）；不是它们时为 None。`/security-review` 要知道工作目录是不是 git 仓库：
+/// 不是时给对照实现的说明；是时正文里的 `!` 命令交给 `expand`（skill 的展开，放行它的 allowed-tools）。
+pub(crate) async fn prompt_command(
+    catalog: &SkillCatalog,
+    skill: &Skill,
+    context: &ToolUseContext,
+) -> Option<Result<String, String>> {
+    match skill.name.as_str() {
+        INIT => Some(Ok(rust_cli_prompts::commands::init().to_owned())),
+        SECURITY_REVIEW => {
+            let workspace = &context.workspace;
+            let git = catalog
+                .info
+                .facts(workspace)
+                .await
+                .is_ok_and(|facts| facts.is_git_repo);
+            if git {
+                return None;
+            }
+            Some(Ok(rust_cli_prompts::commands::security_review_not_git(
+                workspace.root.as_str(),
+            )))
+        }
+        _ => None,
+    }
 }
 
 /// 整段参数是一个 `<N><s|m|h|d>`。

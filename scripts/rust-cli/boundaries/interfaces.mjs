@@ -31,6 +31,8 @@ export const PORT_TRAITS = {
     "Connector",
     "Provisioner",
   ],
+  // F100（remote-exec.md §26.7）：执行器产物的来源，cli 实现、ssh-connect 用。
+  "crates/ssh-connect/src/source.rs": ["ArtifactSource"],
   "crates/exec-server/src/ledger.rs": ["ExecLedger"],
   "crates/exec-server/src/auth.rs": ["Authenticator"],
 };

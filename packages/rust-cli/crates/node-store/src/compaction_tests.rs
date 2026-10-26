@@ -42,6 +42,16 @@ fn summary() -> Message {
     })
 }
 
+fn summary_message(id: &str) -> Message {
+    Message::User(UserMessage {
+        id: MessageId::new(id),
+        content: vec![ContentBlock::Text {
+            text: format!("summary {id}"),
+        }],
+        origin: UserOrigin::CompactSummary,
+    })
+}
+
 fn file_attachment() -> Message {
     Message::Attachment(AttachmentMessage {
         id: MessageId::new("msg_f"),
@@ -109,6 +119,9 @@ async fn boundary_and_summary_become_one_node_summary_message() {
     let loaded = t.store.load(&sid()).await.unwrap();
     let ids: Vec<&str> = loaded.messages.iter().map(|m| m.id().as_str()).collect();
     assert_eq!(ids, ["msg_b", "msg_s", "msg_a2", "msg_f"]);
+    // 压缩点之前只供显示的（F102，compact.md §5.1）：保留段已在活动历史里，不重复。
+    let earlier: Vec<&str> = loaded.earlier.iter().map(|m| m.id().as_str()).collect();
+    assert_eq!(earlier, ["msg_u1", "msg_a1", "msg_u2"]);
     assert_eq!(loaded.messages[0], boundary(Some(("msg_a2", "msg_a2"))));
     assert_eq!(loaded.messages[1], summary());
     // 保留段的用量属于被替换的前缀。
@@ -168,6 +181,64 @@ async fn a_tool_result_tail_maps_to_its_assistant_row() {
     let loaded = t.store.load(&sid()).await.unwrap();
     let ids: Vec<&str> = loaded.messages.iter().map(|m| m.id().as_str()).collect();
     assert_eq!(ids, ["msg_b", "msg_s", "msg_a1", "msg_r1"]);
+    let earlier: Vec<&str> = loaded.earlier.iter().map(|m| m.id().as_str()).collect();
+    assert_eq!(earlier, ["msg_u1"]);
+}
+
+/// 压缩过两次（F102，compact.md §5.1）：更早的压缩点在只供显示的部分里还原成边界与摘要；模型侧的历史从最后一个
+/// 压缩点开始。回退到最后一个压缩点之前的输入后没有压缩点，模型侧就是整条链，只供显示的部分为空。
+#[tokio::test]
+async fn an_earlier_compaction_is_shown_and_a_rewind_past_the_last_one_clears_it() {
+    let t = TestStore::new();
+    started(&t, "sess_1").await;
+    let second = |id: &str, summary: &str| {
+        let mut messages = vec![boundary(None), summary_message(summary)];
+        if let Message::System(SystemMessage::CompactBoundary(b)) = &mut messages[0] {
+            b.id = MessageId::new(id);
+            b.summary = MessageId::new(summary);
+        }
+        messages.into_iter().map(appended).collect::<Vec<_>>()
+    };
+    let session = sid();
+    let commit = |facts: Vec<Fact>| t.store.commit(&session, batch(None, facts));
+    commit(vec![
+        user("msg_u1", "one"),
+        assistant("msg_a1", vec![text("a1")], None),
+    ])
+    .await
+    .unwrap();
+    commit(second("msg_b1", "msg_s1")).await.unwrap();
+    commit(vec![
+        user("msg_u2", "two"),
+        assistant("msg_a2", vec![text("a2")], None),
+    ])
+    .await
+    .unwrap();
+    commit(second("msg_b2", "msg_s2")).await.unwrap();
+    commit(vec![user("msg_u3", "three")]).await.unwrap();
+    let loaded = t.store.load(&sid()).await.unwrap();
+    let ids = |messages: &[Message]| -> Vec<String> {
+        messages
+            .iter()
+            .map(|m| m.id().as_str().to_owned())
+            .collect()
+    };
+    assert_eq!(ids(&loaded.messages), ["msg_b2", "msg_s2", "msg_u3"]);
+    assert_eq!(
+        ids(&loaded.earlier),
+        ["msg_u1", "msg_a1", "msg_b1", "msg_s1", "msg_u2", "msg_a2"]
+    );
+    // 回退到 u2（第二次压缩之前）：kept 由存储按库算，内核给的只是游标。
+    let cursor = rust_cli_kernel_api::store::RevertCursor {
+        target: MessageId::new("msg_u2"),
+        kept: Vec::new(),
+        cut_after: MessageId::new("msg_u3"),
+        generation: 1,
+    };
+    commit(vec![Fact::RevertSet { cursor }]).await.unwrap();
+    let loaded = t.store.load(&sid()).await.unwrap();
+    assert_eq!(ids(&loaded.messages), ["msg_b1", "msg_s1"]);
+    assert_eq!(ids(&loaded.earlier), ["msg_u1", "msg_a1"]);
 }
 
 #[tokio::test]

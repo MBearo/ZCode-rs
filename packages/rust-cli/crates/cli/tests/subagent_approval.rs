@@ -223,7 +223,11 @@ fn harness(workspace_parent: Option<&Path>, a_stall_at: Option<usize>) -> Harnes
             max_turns: None,
             search_tools: false,
             task_tools: None,
-            limits: Default::default(),
+            // 前台子代理只在 fork 关着时有（`ZCODE_FORK_SUBAGENT=0`，修复线 L-A，agents.md §8.1.1）。
+            limits: rust_cli_runtime::Limits {
+                fork_subagent: Some(false),
+                ..Default::default()
+            },
         },
     );
     Harness {

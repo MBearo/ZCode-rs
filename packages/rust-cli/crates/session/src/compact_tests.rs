@@ -177,6 +177,7 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
         SessionState {
             meta: meta(),
             messages: history,
+            earlier: Vec::new(),
             selection: selection(),
             mode: PermissionMode::Default.into(),
             checkpoints: Vec::new(),
@@ -239,6 +240,10 @@ async fn compact_runs_as_a_turn_and_commits_one_batch() {
             "compact_started",
             "message_done",
             "message_done",
+            // 修复线 L-A：`/compact` 的命令记录（固定说明、命令输入、输出）同一批，排在摘要之后（tui-manage.md §11.2）。
+            "message_done",
+            "message_done",
+            "message_done",
             "compact_done",
             "context_notice",
             "context_usage",
@@ -249,9 +254,10 @@ async fn compact_runs_as_a_turn_and_commits_one_batch() {
     assert!(events.contains(&KernelEvent::ContextNotice {
         notice: ContextNotice::Hidden
     }));
-    // F27：footer 的 ctx 同一处重算，用的是提交之后的历史（原有的 1 条、冷加载补上的 assistant，加边界与摘要）。
+    // F27：footer 的 ctx 同一处重算，用的是提交之后的历史（原有的 1 条、冷加载补上的 assistant，加边界与摘要；
+    // 修复线 L-A 起另有 `/compact` 记录的 3 条）。
     assert!(events.contains(&KernelEvent::ContextUsage {
-        used_tokens: 4,
+        used_tokens: 7,
         max_tokens: 100
     }));
     assert!(matches!(
@@ -270,9 +276,35 @@ async fn compact_runs_as_a_turn_and_commits_one_batch() {
         })
         .collect();
     // 冷加载补的 assistant（msg_1）随这一批落库，排在最前面（工作线 F77，session-lifecycle.md §6.3.1）。
-    assert_eq!(appended, ["msg_1", "msg_b", "msg_s"]);
+    assert_eq!(appended[..3], ["msg_1", "msg_b", "msg_s"]);
     let view = session.view().await.unwrap();
-    assert_eq!(view.messages.len(), 4);
+    assert_eq!(view.messages.len(), 7);
+    assert_eq!(
+        record_texts(&view.messages),
+        [
+            rust_cli_kernel_api::user_input::BASH_CAVEAT.to_owned(),
+            "<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args>focus</command-args>".to_owned(),
+            "<local-command-stdout>\u{1b}[2mCompacted (ctrl+o to see full summary)\u{1b}[22m</local-command-stdout>".to_owned(),
+        ]
+    );
+}
+
+/// 本地命令记录的文字（来源以 `local-command` 开头的 meta 消息）。
+fn record_texts(messages: &[Message]) -> Vec<String> {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::User(user)
+                if matches!(&user.origin, rust_cli_kernel_api::message::UserOrigin::Meta { source } if source.starts_with("local-command")) =>
+            {
+                match user.content.as_slice() {
+                    [rust_cli_kernel_api::message::ContentBlock::Text { text }] => Some(text.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -295,6 +327,12 @@ async fn a_failed_compaction_finishes_the_turn_with_the_reason() {
             },
             usage: None,
         })
+    );
+    // 修复线 L-A：失败也记，输出是 stderr（对照实现的 local 命令抛错时同样）。
+    let view = session.view().await.unwrap();
+    assert_eq!(
+        record_texts(&view.messages)[2],
+        "<local-command-stderr>Not enough messages to compact.</local-command-stderr>"
     );
 }
 

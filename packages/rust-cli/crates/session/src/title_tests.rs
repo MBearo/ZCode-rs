@@ -63,21 +63,25 @@ async fn until_title_call(store: &MemoryStore) -> ModelCall {
     panic!("no usage row for the title request");
 }
 
-/// 带用量的文本响应：开头的输入用量与结尾的输出用量。
+/// 带用量的文本响应：开头的输入用量，结尾是合并好的累计用量（输入不变、输出 6，query.md §1.10）。
 fn with_usage(
     mut events: Vec<Result<ModelEvent, ModelError>>,
 ) -> Vec<Result<ModelEvent, ModelError>> {
+    let started = Usage {
+        input_tokens: 20,
+        output_tokens: 1,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 4,
+    };
     for event in &mut events {
         match event {
-            Ok(ModelEvent::MessageStart { usage, .. }) => {
+            Ok(ModelEvent::MessageStart { usage, .. }) => *usage = started,
+            Ok(ModelEvent::MessageDelta { usage, .. }) => {
                 *usage = Usage {
-                    input_tokens: 20,
-                    output_tokens: 1,
-                    cache_creation_input_tokens: 0,
-                    cache_read_input_tokens: 4,
+                    output_tokens: 6,
+                    ..started
                 };
             }
-            Ok(ModelEvent::MessageDelta { usage, .. }) => usage.output_tokens = 6,
             _ => {}
         }
     }

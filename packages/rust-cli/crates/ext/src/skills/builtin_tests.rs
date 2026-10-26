@@ -109,9 +109,18 @@ async fn the_builtin_comes_after_file_skills() {
         .into_iter()
         .map(|entry| entry.line)
         .collect();
-    assert_eq!(lines.len(), 2);
+    // 修复线 L-A：`loop` 之后是内置提示词命令 `/init`、`/security-review`（对照实现的清单里它们排在 bundled skill 之后）。
+    assert_eq!(lines.len(), 4);
     assert_eq!(lines[0], "- greet: Greet");
     assert_eq!(lines[1], format!("- loop: {DESCRIPTION} - {WHEN_TO_USE}"));
+    assert_eq!(
+        lines[2],
+        "- init: Initialize a new AGENTS.md file with codebase documentation"
+    );
+    assert_eq!(
+        lines[3],
+        "- security-review: Complete a security review of the pending changes on the current branch"
+    );
     let shadow = MemoryEnvironment::new(facts()).with_file(
         &format!("{CWD}/.zcode/skills/loop/SKILL.md"),
         "---\ndescription: Mine\n---\n",
@@ -160,4 +169,51 @@ async fn the_monitor_timeout_follows_the_surface() {
     };
     assert!(text.contains("arm one now with `timeout_ms: 600000`"));
     assert!(text.contains("A monitor expires after at most 10 minutes"));
+}
+
+/// 修复线 L-A（ext.md §2.9）：`/init` 的正文是对照实现的提示（文件名是 AGENTS.md）；`/security-review` 在不是 git 仓库的
+/// 工作目录里给对照实现的说明，在 git 仓库里是带 `!` 命令的审查提示（只放行它自己的 allowed-tools）。
+#[tokio::test]
+async fn the_prompt_commands_render_their_bodies() {
+    let env = Arc::new(MemoryEnvironment::new(facts()));
+    let catalog = SkillCatalog::new(env.clone(), env.clone());
+    let context = tool_context(env.clone(), PermissionMode::Default);
+    let init = catalog.find(&workspace(), "init").await.unwrap();
+    let body = super::super::body::render(&catalog, None, &init, "", &context)
+        .await
+        .unwrap();
+    assert!(
+        body.starts_with("Please analyze this codebase and create a AGENTS.md file"),
+        "{body}"
+    );
+    assert!(!body.contains("Base directory for this skill"), "{body}");
+    let review = catalog.find(&workspace(), "security-review").await.unwrap();
+    let body = super::super::body::render(&catalog, None, &review, "", &context)
+        .await
+        .unwrap();
+    assert!(
+        body.starts_with(&format!(
+            "Tell the user: /security-review needs to run inside a git repository, but the current working directory (`{CWD}`) is not one."
+        )),
+        "{body}"
+    );
+    let mut git = facts();
+    git.is_git_repo = true;
+    let env = Arc::new(MemoryEnvironment::new(git));
+    let catalog = SkillCatalog::new(env.clone(), env.clone());
+    let context = tool_context(env, PermissionMode::Default);
+    let review = catalog.find(&workspace(), "security-review").await.unwrap();
+    assert!(
+        review
+            .allowed_tools
+            .contains(&"Bash(git diff *)".to_owned())
+    );
+    let body = super::super::body::render(&catalog, None, &review, "", &context)
+        .await
+        .unwrap();
+    assert!(
+        body.starts_with("You are a senior security engineer"),
+        "{body}"
+    );
+    assert!(body.contains("!`git status`"), "{body}");
 }

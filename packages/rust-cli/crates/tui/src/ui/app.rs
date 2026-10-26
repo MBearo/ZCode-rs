@@ -51,11 +51,13 @@ pub enum Action {
         command: String,
         delivery: Delivery,
     },
-    /// ctrl+enter（运行中）：发出后中断当前回合（tui-input.md §5）。
+    /// ctrl+enter（运行中）：低延迟投递，入队后把前台 Bash 转到后台、不中断（修复线 L-A，tui-input.md §11.1）。
     SendNow {
         text: String,
         delivery: Delivery,
     },
+    /// ctrl+x ctrl+b（运行中）：前台 Bash 转到后台（修复线 L-A，tui-input.md §11.2）。
+    BackgroundForeground,
     Interrupt,
     Resolve {
         interaction: InteractionId,
@@ -222,6 +224,8 @@ pub struct App {
     pub creating: bool,
     /// 创建期间的发送（tui.md §4.1）：会话打开、第一条发出后按顺序发给内核；显示在排队的输入后面。
     pub held: Vec<rust_cli_kernel_api::session_api::Command>,
+    /// 界面层完成的本地命令的记录（`/effort`、`/plan` 等，修复线 L-A，tui-manage.md §11）：runner 每轮取走。
+    pub records: Vec<rust_cli_kernel_api::user_command::LocalCommandRecord>,
     /// 运行中的 `/clear`、`/resume`（修复线 F38，tui.md §6；排进队列、不中断）：（显示的文字，动作），回合结束、
     /// 内核队列空了之后按顺序执行；显示在排队的输入后面。
     pub after_turn: Vec<(String, Action)>,
@@ -349,6 +353,7 @@ impl App {
             session: None,
             creating: false,
             held: Vec::new(),
+            records: Vec::new(),
             after_turn: Vec::new(),
             composer: Composer::default(),
             overlay: None,

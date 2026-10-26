@@ -434,6 +434,7 @@ async fn follow(
                 tracing::info!(event = "machine.disconnected", machine = %entry.name, state = ?state, "machine disconnected");
             }
             MachineState::Provisioning
+            | MachineState::Downloading
             | MachineState::Uploading { .. }
             | MachineState::Handshaking
             | MachineState::Reconnecting { .. } => {}

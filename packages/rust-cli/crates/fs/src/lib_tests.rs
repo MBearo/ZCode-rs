@@ -63,6 +63,26 @@ async fn private_files_are_exactly_owner_only() {
     assert_eq!(std::fs::read(&target).unwrap(), b"{\"k\":1}");
 }
 
+/// 下载的执行器（remote-exec.md §26.4）：不论 umask，恰好 0755，内容完整。
+#[cfg(unix)]
+#[tokio::test]
+async fn executable_files_are_exactly_0755() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("zcode-rs");
+    atomic_write(
+        &target,
+        b"\x7fELF",
+        options(FileMode::Executable, TempName::Hidden, ParentDir::Existing),
+    )
+    .await
+    .unwrap();
+    let mode = std::fs::metadata(&target).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o755);
+    assert_eq!(std::fs::read(&target).unwrap(), b"\x7fELF");
+    assert_eq!(entries(directory.path()), ["zcode-rs"]);
+}
+
 #[tokio::test]
 async fn creates_missing_parents_only_when_asked() {
     let directory = tempfile::tempdir().unwrap();

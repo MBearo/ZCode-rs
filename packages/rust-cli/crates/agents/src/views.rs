@@ -132,13 +132,15 @@ pub(crate) async fn view(
     };
     Ok(SessionView {
         meta: loaded.meta,
-        messages: loaded.messages,
+        // 显示用的历史：压缩点之前只供显示的消息接上模型侧的历史（工作线 F102，compact.md §5.1）。
+        messages: [loaded.earlier, loaded.messages].concat(),
         selection: loaded.model.unwrap_or(found.selection),
         mode: execution.mode,
         plan: execution.plan,
         pending: Vec::new(),
         queue: Vec::new(),
         last_seq: 0,
+        revision: 0,
         running: matches!(found.state, AgentState::Running { .. }),
         background: Vec::new(),
         peer_held: Vec::new(),

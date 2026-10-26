@@ -208,6 +208,9 @@ pub(crate) struct MachineSsh {
     pub config: Option<String>,
     /// `_ZCODE_ASSUME_SSH_ARTIFACT`。
     pub artifact: Option<String>,
+    /// `_ZCODE_ASSUME_NPM_REGISTRY`（F100，remote-exec.md §26.7）：执行器的 npm 来源换成这个假注册表的根（debug 构建的版本
+    /// npm 上没有，不给就不下载）。不是给用户的开关。
+    pub npm_registry: Option<String>,
 }
 
 /// 读 [`MachineSsh`]；`Ignored` 时什么都不读。
@@ -222,6 +225,7 @@ pub(crate) fn machine_ssh(
     MachineSsh {
         config: value("_ZCODE_ASSUME_SSH_CONFIG"),
         artifact: value("_ZCODE_ASSUME_SSH_ARTIFACT"),
+        npm_registry: value("_ZCODE_ASSUME_NPM_REGISTRY"),
     }
 }
 

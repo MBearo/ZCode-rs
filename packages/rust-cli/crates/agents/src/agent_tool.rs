@@ -78,6 +78,10 @@ impl AgentTool {
         context: &ToolUseContext,
     ) -> Result<AgentDefinition, String> {
         let wanted = input.subagent_type.as_deref().unwrap_or(GENERAL_PURPOSE);
+        // fork 不在 agent 清单里，只在 fork 打开时认（修复线 L-A，agents.md §8.1.1）。
+        if self.core.fork && wanted == crate::fork::FORK {
+            return Ok(crate::fork::definition());
+        }
         let definitions = self.core.catalog.definitions(&context.workspace).await;
         if let Some(found) = definitions.iter().find(|agent| agent.agent_type == wanted) {
             return Ok(found.clone());
@@ -105,6 +109,12 @@ impl Tool for AgentTool {
     }
 
     fn input_schema(&self) -> Value {
+        // fork 打开时用对照实现的 fork 写法：没有 `run_in_background`（修复线 L-A，agents.md §8.1.1）。
+        if self.core.fork
+            && let Some(fork) = rust_cli_prompts::agents::fork_tool()
+        {
+            return fork.input_schema.clone();
+        }
         rust_cli_prompts::tool(NAME).map_or(Value::Null, |prompt| prompt.input_schema.clone())
     }
 
@@ -115,6 +125,11 @@ impl Tool for AgentTool {
     }
 
     fn description(&self, _context: &PromptContext) -> String {
+        if self.core.fork
+            && let Some(fork) = rust_cli_prompts::agents::fork_tool()
+        {
+            return fork.description.clone();
+        }
         rust_cli_prompts::tool(NAME).map_or_else(String::new, |prompt| prompt.description.clone())
     }
 
@@ -163,6 +178,7 @@ impl Tool for AgentTool {
         context: ToolUseContext,
         progress: mpsc::Sender<ToolProgress>,
     ) -> Result<ToolOutput, ToolError> {
+        let raw = input.clone();
         let input = parse(&input).map_err(|message| ToolError::InvalidInput { message })?;
         let definition = self
             .definition(&input, &context)
@@ -175,8 +191,30 @@ impl Tool for AgentTool {
             });
         };
         // 子代理里派生时同样按参数（以前总在前台：子会话没有 actor 接收通知）。嵌套的后台子代理的
-        // 通知送给派生它的子代理（owner），由 `routing` 投递（agents.md §5.1）。
-        let background = input.run_in_background.unwrap_or(true) || definition.background;
+        // 通知送给派生它的子代理（owner），由 `routing` 投递（agents.md §5.1）。fork 打开时一律在后台（对照实现
+        // 同样，修复线 L-A）。
+        let background =
+            self.core.fork || input.run_in_background.unwrap_or(true) || definition.background;
+        let fork = definition.agent_type == crate::fork::FORK && self.core.fork;
+        // fork 继承父会话已提交的对话（agents.md §8.1.2）；会话 actor 是它的 owner。
+        let inherited = if fork {
+            match context.interactions.conversation(&context.session).await {
+                Some(history) => Some(crate::fork::prefix(
+                    core.ports.ids.as_ref(),
+                    history,
+                    &context.tool_use,
+                    raw,
+                    &parent.selection.model,
+                )),
+                None => {
+                    return Err(ToolError::Failed {
+                        message: "fork is only available in the main conversation".to_owned(),
+                    });
+                }
+            }
+        } else {
+            None
+        };
         let owner = context.agent.clone();
         let depth = owner
             .as_ref()
@@ -192,11 +230,16 @@ impl Tool for AgentTool {
             depth,
             tool_use: Some(context.tool_use.clone()),
             description: input.description.clone(),
-            selection: spawn::selection(
-                &parent.selection,
-                definition.model.as_deref(),
-                input.effort.clone().or_else(|| definition.effort.clone()),
-            ),
+            // fork 总用父运行的模型与档位（`effort` 参数忽略）。
+            selection: if fork {
+                parent.selection.clone()
+            } else {
+                spawn::selection(
+                    &parent.selection,
+                    definition.model.as_deref(),
+                    input.effort.clone().or_else(|| definition.effort.clone()),
+                )
+            },
             mode: spawn::mode(parent.mode, definition.permission_mode),
             definition: Arc::new(definition),
             workspace: context.workspace.clone(),
@@ -211,12 +254,19 @@ impl Tool for AgentTool {
                 .map(crate::child::Asks),
             state: AgentState::Finished(Ending::Completed),
             shown: crate::live::Shown::default(),
+            fork_prefix: inherited.map(Arc::new),
         };
-        let (entry, opening) = spawn::create(core, entry, &parent, &input.prompt)
-            .await
-            .map_err(|error| ToolError::Failed {
-                message: error.to_string(),
-            })?;
+        let first = if fork {
+            rust_cli_prompts::agents::fork_directive(&input.prompt)
+        } else {
+            input.prompt.clone()
+        };
+        let (entry, opening) =
+            spawn::create(core, entry, &parent, &first)
+                .await
+                .map_err(|error| ToolError::Failed {
+                    message: error.to_string(),
+                })?;
         // 子会话里后台命令的通知送给这个子代理（agents.md §5.2）。
         crate::shell_notices::watch(core, &entry);
         if background {

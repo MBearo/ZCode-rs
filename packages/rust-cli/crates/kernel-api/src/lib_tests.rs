@@ -87,6 +87,7 @@ fn facts_and_events_round_trip() {
         event: KernelEvent::MessageDone {
             message: assistant(),
         },
+        revision: 3,
     });
     round_trip(&ModelEvent::BlockDelta {
         index: 0,
@@ -128,6 +129,7 @@ fn loaded_sessions_round_trip_with_open_work() {
         checkpoints: vec![checkpoint()],
         turn: None,
         last_turn_failed: true,
+        earlier: vec![assistant()],
     };
     round_trip(&loaded);
     // 没有这些字段的旧结果也能读，读出来是空清单。
@@ -137,6 +139,7 @@ fn loaded_sessions_round_trip_with_open_work() {
         "pending_interactions",
         "checkpoints",
         "last_turn_failed",
+        "earlier",
     ] {
         old.as_object_mut().unwrap().remove(key);
     }
@@ -144,6 +147,7 @@ fn loaded_sessions_round_trip_with_open_work() {
     assert!(old.open_operations.is_empty() && old.pending_interactions.is_empty());
     assert!(old.checkpoints.is_empty());
     assert!(!old.last_turn_failed);
+    assert!(old.earlier.is_empty());
 }
 
 #[test]

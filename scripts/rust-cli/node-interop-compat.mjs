@@ -20,6 +20,7 @@ import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { binaryPath } from "./binary.mjs";
+import { checkAppInterop } from "./node-interop-app.mjs";
 import { appSchemaRejections, nodeShape, rustShape } from "./node-interop-history.mjs";
 import { importNode, withHome } from "./node-root.mjs";
 
@@ -184,6 +185,10 @@ export async function checkCompat(ctx) {
       { content: "Rust task", status: "pending", priority: "medium" },
     ],
   );
+
+  // App 协议的会话互读（node-interop-app.mjs，app-protocol.md §10.4 第 3 条；只在本仓库）。
+  const app = checkAppInterop();
+  if (!app.skipped) expectEqual(app.label, app.output, app.expected);
 }
 
 /** Node 先写一个序号较大的 checkpoint（它的事件计数器），rust-cli 再写两个；Node 恢复的顺序与写入顺序相同。 */

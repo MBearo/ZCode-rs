@@ -10,12 +10,27 @@ use rust_cli_kernel_api::message::{CompactTrigger, Message, SystemMessage};
 use rust_cli_kernel_api::orchestration::{CompactRequest, QueryStop, RunSink};
 use rust_cli_kernel_api::session_api::KernelEvent;
 use rust_cli_kernel_api::store::{Fact, StoreError};
+use rust_cli_kernel_api::user_command::{LocalCommandOutput, LocalCommandRecord, dim};
 use tokio::sync::mpsc;
 
 use crate::actor::{Actor, Running};
 
 /// 压缩任务提交请求的缓冲。
 const SINK_REQUESTS: usize = 16;
+
+/// `/compact` 成功时的输出（对照实现的原文，带终端的暗色）。
+const COMPACTED: &str = "Compacted (ctrl+o to see full summary)";
+
+/// `/compact` 的命令记录：前面加固定说明（对照实现的 local 类型）。
+fn compact_record(args: &str, output: LocalCommandOutput) -> LocalCommandRecord {
+    LocalCommandRecord {
+        name: "compact".to_owned(),
+        args: args.to_owned(),
+        output,
+        caveat: true,
+        meta: Vec::new(),
+    }
+}
 
 impl Actor {
     pub(crate) fn start_compaction(
@@ -34,6 +49,10 @@ impl Actor {
         self.log.append(KernelEvent::CompactStarted {
             trigger: CompactTrigger::Manual,
         });
+        // `/compact` 的命令记录（修复线 L-A，tui-manage.md §11.2）：照对照实现排在压缩结果之后、同一批（保留的消息
+        // 之后接固定说明、命令输入与输出）；失败时记失败原因。
+        let args = instructions.clone().unwrap_or_default();
+        let ids = self.deps.ids.clone();
         let request = CompactRequest {
             session: self.meta.id.clone(),
             workspace: self.meta.workspace.clone(),
@@ -60,14 +79,25 @@ impl Actor {
                         Message::User(result.summary),
                     ];
                     messages.extend(result.restored);
+                    messages.extend(crate::local_record::record_messages(
+                        ids.as_ref(),
+                        &compact_record(&args, LocalCommandOutput::Stdout(dim(COMPACTED))),
+                    ));
                     sink.commit_messages(messages).await?;
                     Ok(QueryStop::Completed)
                 }
                 Err(_) if signal.is_aborted() => Ok(QueryStop::Aborted),
                 // 失败原因是给用户的原文（例如 `Not enough messages to compact.`）。
-                Err(error) => Ok(QueryStop::ApiError {
-                    message: error.to_string(),
-                }),
+                Err(error) => {
+                    let message = error.to_string();
+                    let record = compact_record(&args, LocalCommandOutput::Stderr(message.clone()));
+                    sink.commit_messages(crate::local_record::record_messages(
+                        ids.as_ref(),
+                        &record,
+                    ))
+                    .await?;
+                    Ok(QueryStop::ApiError { message })
+                }
             }
         });
         self.running = Some(Running {
@@ -168,3 +198,7 @@ pub(crate) fn compact_started(actor: &Actor, trigger: CompactTrigger) {
 #[cfg(test)]
 #[path = "compact_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "compacted_view_tests.rs"]
+mod compacted_view_tests;

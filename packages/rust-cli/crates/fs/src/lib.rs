@@ -45,6 +45,8 @@ pub enum FileMode {
     Default,
     /// Unix 上恰好 `0o600`（不受 umask 影响）；Windows 上与 `Default` 相同。
     Private,
+    /// Unix 上恰好 `0o755`（可执行文件：下载的执行器，remote-exec.md §26.4）；Windows 上与 `Default` 相同。
+    Executable,
 }
 
 /// 临时文件名：`<name>.<pid>.<ms>.<rand>.tmp` 或在前面加 `.`。
@@ -193,6 +195,7 @@ fn restrict(file: &std::fs::File, mode: FileMode) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     match mode {
         FileMode::Private => file.set_permissions(std::fs::Permissions::from_mode(0o600)),
+        FileMode::Executable => file.set_permissions(std::fs::Permissions::from_mode(0o755)),
         FileMode::Default => Ok(()),
     }
 }
@@ -200,7 +203,7 @@ fn restrict(file: &std::fs::File, mode: FileMode) -> io::Result<()> {
 #[cfg(not(unix))]
 fn restrict(_file: &std::fs::File, mode: FileMode) -> io::Result<()> {
     match mode {
-        FileMode::Private | FileMode::Default => Ok(()),
+        FileMode::Private | FileMode::Executable | FileMode::Default => Ok(()),
     }
 }
 

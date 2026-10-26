@@ -22,6 +22,7 @@ mod hooks;
 #[cfg(test)]
 mod input_tests;
 mod lane;
+mod local_record;
 mod log;
 mod loop_fold;
 mod loop_tick;
@@ -157,6 +158,8 @@ impl Released for NothingToRelease {
 pub struct SessionState {
     pub meta: SessionMeta,
     pub messages: Vec<Message>,
+    /// 只供显示的、最后一个压缩点之前的消息（冷加载的 `LoadedSession.earlier`，工作线 F102）；新建的会话为空。
+    pub earlier: Vec<Message>,
     pub selection: ModelSelection,
     /// 执行状态（权限模式 × plan 开关，修复线 F20）；旧的单值模式经 `From<PermissionMode>`（`Plan` 是 plan 开）。
     pub mode: rust_cli_kernel_api::permission::ExecutionState,

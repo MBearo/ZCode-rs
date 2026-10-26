@@ -27,11 +27,31 @@ impl Arch {
     }
 
     /// 静态 musl 产物的 target（linux.md §1）。
-    pub fn triple(self) -> &'static str {
+    pub fn musl_triple(self) -> &'static str {
         match self {
             Self::X86_64 => "x86_64-unknown-linux-musl",
             Self::Aarch64 => "aarch64-unknown-linux-musl",
         }
+    }
+
+    /// npm 平台包（glibc）的 target，也是本机缓存的键（F100，remote-exec.md §26.3）。
+    pub fn gnu_triple(self) -> &'static str {
+        match self {
+            Self::X86_64 => "x86_64-unknown-linux-gnu",
+            Self::Aarch64 => "aarch64-unknown-linux-gnu",
+        }
+    }
+
+    /// ELF 头（前 20 字节）：64 位、小端、`e_machine` 是哪种架构。不是 Linux 能跑的 ELF 时 None。
+    pub fn from_elf(head: &[u8]) -> Option<Self> {
+        let head = head.get(..20)?;
+        if &head[..4] != b"\x7fELF" || head[4] != 2 || head[5] != 1 {
+            return None;
+        }
+        let machine = u16::from_le_bytes([head[18], head[19]]);
+        [Self::X86_64, Self::Aarch64]
+            .into_iter()
+            .find(|arch| arch.elf_machine() == machine)
     }
 
     /// ELF 头的 `e_machine`。
@@ -43,18 +63,12 @@ impl Arch {
     }
 }
 
-/// 读 ELF 头：64 位、小端、可执行或位置无关、`e_machine` 是哪种架构。不是 Linux 能跑的 ELF 时 None。
+/// 读文件的 ELF 头（[`Arch::from_elf`]）。
 pub(crate) async fn elf_arch(path: &Path) -> Option<Arch> {
     let mut file = rust_cli_fs::open_read(path).await.ok()?;
     let mut head = [0u8; 20];
     file.read_exact(&mut head).await.ok()?;
-    if &head[..4] != b"\x7fELF" || head[4] != 2 || head[5] != 1 {
-        return None;
-    }
-    let machine = u16::from_le_bytes([head[18], head[19]]);
-    [Arch::X86_64, Arch::Aarch64]
-        .into_iter()
-        .find(|arch| arch.elf_machine() == machine)
+    Arch::from_elf(&head)
 }
 
 /// 在候选文件里找这种架构的产物（第一个存在且 ELF 头对得上的）。

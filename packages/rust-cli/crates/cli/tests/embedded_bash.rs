@@ -110,7 +110,9 @@ async fn bash(harness: &Harness, index: usize, command: &str) -> String {
         match event.unwrap() {
             CommandEvent::Output { data, .. } => output.extend(data),
             CommandEvent::Finished { .. } => break,
-            CommandEvent::Started { .. } | CommandEvent::Backgrounded => {}
+            CommandEvent::Started { .. }
+            | CommandEvent::Backgrounded
+            | CommandEvent::BackgroundedBy { .. } => {}
         }
     }
     String::from_utf8(output).unwrap()

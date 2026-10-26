@@ -180,7 +180,9 @@ async fn run_hook(
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
     while let Some(event) = events.next().await {
         match event.unwrap() {
-            CommandEvent::Started { .. } | CommandEvent::Backgrounded => {}
+            CommandEvent::Started { .. }
+            | CommandEvent::Backgrounded
+            | CommandEvent::BackgroundedBy { .. } => {}
             CommandEvent::Output {
                 stream: OutputStream::Stdout,
                 data,

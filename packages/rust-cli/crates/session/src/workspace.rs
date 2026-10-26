@@ -13,7 +13,7 @@ use rust_cli_kernel_api::manage::DirectoryOutcome;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::orchestration::OrchestrationError;
 use rust_cli_kernel_api::session_api::{Ack, KernelEvent};
-use rust_cli_kernel_api::store::Fact;
+use rust_cli_kernel_api::user_command::LocalCommandRecord;
 
 use crate::actor::{Actor, accepted, rejected};
 
@@ -45,7 +45,15 @@ impl Actor {
     /// 修复（R1-3）：以前 runtime 按前端给的工作区（可能过时的副本）判断“已经在这里”，复制整份 `view().messages`
     /// 去算新目录的规则文件，再按回执文字的前缀分辨“运行中”。现在判定、说明与规则文件都在 actor 里，规则文件经
     /// `DirectoryRules` 用 actor 自己的历史算（不复制）。
-    pub(crate) async fn change_directory(&mut self, command: CommandId, root: EnvPath) -> Ack {
+    ///
+    /// 修复线 L-A（tui-manage.md §11.2）：带 `record` 时，移动成功后命令记录与说明文字同一批提交、记录在前（对照实现的
+    /// `/cd` 先记命令输入与输出，说明文字是之后的 meta 消息）。
+    pub(crate) async fn change_directory(
+        &mut self,
+        command: CommandId,
+        root: EnvPath,
+        record: Option<LocalCommandRecord>,
+    ) -> Ack {
         if self.busy() {
             return rejected(BUSY);
         }
@@ -75,7 +83,7 @@ impl Actor {
                     current: self.meta.workspace.root.clone(),
                 }
             } else {
-                if let Err(reason) = self.commit_note(command, note).await {
+                if let Err(reason) = self.commit_note(command, note, record).await {
                     return rejected(reason);
                 }
                 DirectoryOutcome::Moved
@@ -100,29 +108,60 @@ impl Actor {
             return rejected(error.to_string());
         }
         if let Some(note) = note
-            && let Err(reason) = self.commit_note(command, note).await
+            && let Err(reason) = self.commit_note(command, note, None).await
         {
             return rejected(reason);
         }
         accepted()
     }
 
-    /// 给模型的说明（来源 `rust-cli/cd` 的 meta 用户消息），先提交再进历史、发事件。
-    async fn commit_note(&mut self, command: CommandId, note: String) -> Result<(), String> {
-        let message = Message::User(UserMessage {
+    /// 给模型的说明（来源 `rust-cli/cd` 的 meta 用户消息），先提交再进历史、发事件；`record` 的消息排在它前面、同一批。
+    async fn commit_note(
+        &mut self,
+        command: CommandId,
+        note: String,
+        record: Option<LocalCommandRecord>,
+    ) -> Result<(), String> {
+        let mut messages = record
+            .map(|record| crate::local_record::record_messages(self.deps.ids.as_ref(), &record))
+            .unwrap_or_default();
+        messages.push(Message::User(UserMessage {
             id: self.deps.ids.message(),
             content: vec![ContentBlock::Text { text: note }],
             origin: UserOrigin::Meta {
                 source: NOTE_SOURCE.to_owned(),
             },
-        });
-        let fact = Fact::MessageAppended {
-            message: message.clone(),
+        }));
+        self.commit_record_messages(Some(command), messages).await
+    }
+}
+
+impl Actor {
+    /// `Command::BackgroundForeground`（修复线 L-A，tui-input.md §11）：本机执行环境里这个会话在跑的前台命令转到后台；
+    /// 前台 Bash 的工具调用随之返回转后台的说明，工具边界随之到来。没有在跑的回合时什么都不转。
+    pub(crate) async fn background_foreground(
+        &self,
+        reason: rust_cli_kernel_api::env::BackgroundReason,
+    ) -> Ack {
+        if self.running.is_none() {
+            return accepted();
+        }
+        let moved = match self
+            .deps
+            .machine
+            .background()
+            .background_foreground(&self.meta.id, reason)
+            .await
+        {
+            Ok(moved) => moved.len(),
+            Err(error) => {
+                tracing::warn!(%error, "the foreground commands were not moved to the background");
+                0
+            }
         };
-        self.commit(Some(command), vec![fact]).await?;
-        self.messages.push(message.clone());
-        self.log.append(KernelEvent::MessageDone { message });
-        Ok(())
+        Ack::Accepted {
+            result: serde_json::json!(moved),
+        }
     }
 }
 

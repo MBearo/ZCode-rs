@@ -83,6 +83,8 @@ import { checkFork } from "./node-interop-fork.mjs";
 import { checkMachines } from "./node-interop-machines.mjs";
 import { checkMcpMachines } from "./node-interop-mcp-machines.mjs";
 import { checkManage } from "./node-interop-manage.mjs";
+import { checkForkAgent } from "./node-interop-fork-agent.mjs";
+import { checkRecords } from "./node-interop-records.mjs";
 import { checkSentinel } from "./node-interop-sentinel.mjs";
 import { checkToolOrder } from "./node-interop-tool-order.mjs";
 import { nodeHistoryReader, rustText } from "./node-interop-history.mjs";
@@ -802,6 +804,10 @@ try {
     };
     await checkToolOrder(continuing);
     await checkMachines(continuing);
+    // 第二十六段：本地命令的记录（修复线 L-A，node-interop-records.mjs）。
+    await checkRecords(continuing);
+    // 第二十七段：fork 子代理的子会话（修复线 L-A，node-interop-fork-agent.mjs）。
+    await checkForkAgent(continuing);
   } finally {
     store.close();
   }

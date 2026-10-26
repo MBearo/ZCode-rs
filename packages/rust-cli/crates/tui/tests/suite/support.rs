@@ -159,6 +159,8 @@ pub struct Setup {
     pub os: rust_cli_tui::Os,
     /// 启动时的权限模式（`--permission-mode`、项目持久模式）；缺省 default（mode_picker.rs 用 acceptEdits）。
     pub mode: PermissionMode,
+    /// `ZCODE_FORK_SUBAGENT`（修复线 L-A）：缺省按交互会话打开 fork（Agent 全部在后台）；前台子代理的测试设 Some(false)。
+    pub fork_subagent: Option<bool>,
 }
 
 impl Default for Setup {
@@ -183,6 +185,7 @@ impl Default for Setup {
             startup: rust_cli_tui::Startup::New,
             os: rust_cli_tui::Os::Unix,
             mode: PermissionMode::Default,
+            fork_subagent: None,
         }
     }
 }
@@ -401,6 +404,7 @@ fn kernel(
     artifacts: Option<Arc<dyn rust_cli_kernel_api::store::ArtifactStore>>,
     peers: rust_cli_runtime::PeerDeps,
     clock: Option<Arc<dyn rust_cli_kernel_api::clock::Clock>>,
+    fork_subagent: Option<bool>,
 ) -> Arc<LocalKernel> {
     Arc::new(LocalKernel::with_context_and_extensions(
         Ports {
@@ -418,7 +422,10 @@ fn kernel(
             max_turns: None,
             search_tools: false,
             task_tools: None,
-            limits: Default::default(),
+            limits: rust_cli_runtime::Limits {
+                fork_subagent,
+                ..Default::default()
+            },
         },
         rust_cli_runtime::ContextConfig::new(rust_cli_runtime::Surface::Interactive),
         rust_cli_runtime::Extensions {
@@ -520,6 +527,7 @@ where
         setup.artifacts,
         setup.peers,
         setup.clock,
+        setup.fork_subagent,
     );
     if let Some(hooks) = setup.hooks {
         kernel.replace_hooks(hooks);

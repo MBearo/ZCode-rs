@@ -11,7 +11,14 @@ use super::*;
 use crate::view::Body;
 
 fn feed(view: &mut Transcript, seq: u64, event: KernelEvent) {
-    view.apply(SequencedEvent { seq, event }, seq * 1000);
+    view.apply(
+        SequencedEvent {
+            seq,
+            event,
+            revision: 0,
+        },
+        seq * 1000,
+    );
 }
 
 fn empty() -> Transcript {

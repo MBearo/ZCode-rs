@@ -164,3 +164,55 @@ async fn the_script_finds_ours_and_the_npm_one_and_never_runs_zcode() {
         "zcode itself is never run"
     );
 }
+
+/// F100（remote-exec.md §26.5）：探测的 libc 一行。两种都有时算 glibc（glibc 的系统上装了 musl 包），都没有时不知道。
+#[test]
+fn the_remote_libc_is_parsed() {
+    use crate::probe::Libc;
+    let base = "os Linux\narch x86_64\nhome /home/u\n";
+    let libc = |extra: &str| Probe::parse(&format!("{base}{extra}")).unwrap().libc;
+    assert_eq!(libc("libc glibc 2.36\n"), Libc::Glibc("2.36".to_owned()));
+    assert_eq!(libc("libc musl\n"), Libc::Musl);
+    assert_eq!(
+        libc("libc musl\nlibc glibc 2.31\n"),
+        Libc::Glibc("2.31".to_owned())
+    );
+    assert_eq!(libc(""), Libc::Unknown);
+    // 脚本里有这两项探测（本机跑不出 Linux 的结果，只核对脚本）。
+    let script = crate::probe::script();
+    assert!(script.contains("getconf GNU_LIBC_VERSION"), "{script}");
+    assert!(script.contains("/lib/ld-musl-*"), "{script}");
+}
+
+/// F100（§26.3）：两种 target 与 ELF 头的架构。
+#[test]
+fn architectures_map_to_both_targets_and_elf_machines() {
+    use crate::artifact::Arch;
+    assert_eq!(Arch::of("Linux", "x86_64"), Some(Arch::X86_64));
+    assert_eq!(Arch::of("Linux", "aarch64"), Some(Arch::Aarch64));
+    assert_eq!(Arch::of("Linux", "arm64"), Some(Arch::Aarch64));
+    assert_eq!(Arch::X86_64.gnu_triple(), "x86_64-unknown-linux-gnu");
+    assert_eq!(Arch::Aarch64.gnu_triple(), "aarch64-unknown-linux-gnu");
+    assert_eq!(Arch::Aarch64.musl_triple(), "aarch64-unknown-linux-musl");
+    let mut head = vec![0u8; 20];
+    head[..6].copy_from_slice(b"\x7fELF\x02\x01");
+    head[18] = 183;
+    assert_eq!(Arch::from_elf(&head), Some(Arch::Aarch64));
+    head[18] = 62;
+    assert_eq!(Arch::from_elf(&head), Some(Arch::X86_64));
+    head[4] = 1;
+    assert_eq!(Arch::from_elf(&head), None, "32-bit");
+    assert_eq!(Arch::from_elf(b"\x7fELF"), None, "too short");
+}
+
+/// F100（§26.5）：加载器报缺的 glibc 版本取最高的一个。
+#[test]
+fn the_missing_glibc_version_is_read_from_the_loader_message() {
+    use crate::provision::missing_glibc;
+    let stderr = "/root/x/.zcode-rs.upload.7: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.32' not found (required by /root/x/.zcode-rs.upload.7)\n\
+/root/x/.zcode-rs.upload.7: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /root/x/.zcode-rs.upload.7)\n\
+the executor did not run on the remote (exit 1)\n";
+    assert_eq!(missing_glibc(stderr).as_deref(), Some("GLIBC_2.34"));
+    assert_eq!(missing_glibc("sh: zcode-rs: not found\n"), None);
+    assert_eq!(missing_glibc("uses GLIBC_2.34 happily\n"), None);
+}

@@ -50,6 +50,29 @@ fn replay(facts: &[Fact]) -> (Vec<Message>, Vec<crate::store::WorkspaceCheckpoin
     )
 }
 
+/// 冷读取按 node-store 的形状切分（工作线 F102，docs/specs/rust-cli/compact.md §5.1）：活动历史（最后一个压缩点起，
+/// 保留段接在摘要之后）是模型侧的历史；之前的、不在活动历史里、也不是保留段首尾的消息只供显示。返回（只供显示，模型侧）。
+fn split_cold(messages: Vec<Message>) -> (Vec<Message>, Vec<Message>) {
+    let Some((start, boundary)) = crate::history::last_boundary(&messages) else {
+        return (Vec::new(), messages);
+    };
+    let mut skip: HashSet<MessageId> = HashSet::new();
+    if let Some(segment) = &boundary.preserved {
+        skip.extend([segment.head.clone(), segment.tail.clone()]);
+    }
+    let active: Vec<Message> = crate::history::active(&messages)
+        .into_iter()
+        .map(std::borrow::Cow::into_owned)
+        .collect();
+    skip.extend(active.iter().map(|message| message.id().clone()));
+    let earlier = messages[..start]
+        .iter()
+        .filter(|message| !skip.contains(message.id()))
+        .cloned()
+        .collect();
+    (earlier, active)
+}
+
 /// 内存里的会话存储：记录每次提交的事实，`load` 重放消息、回退游标与 checkpoint。
 #[derive(Default)]
 pub struct MemoryStore {
@@ -67,9 +90,19 @@ pub struct MemoryStore {
     deleted: Mutex<HashSet<SessionId>>,
     /// 测试给的活动时间（`set_updated`）；没有时取创建时间。
     updated: Mutex<HashMap<SessionId, u64>>,
+    /// 前端记录（缺口 G2）：按写入顺序，同 key 覆盖。
+    records: Mutex<HashMap<SessionId, Vec<crate::store::FrontendRecord>>>,
+    /// 冷读取按 node-store 的形状切分压缩过的会话（[`Self::split_at_compaction`]，工作线 F102）。
+    split: std::sync::atomic::AtomicBool,
 }
 
 impl MemoryStore {
+    /// 之后的 `load` 按 node-store 的形状给出压缩过的会话（工作线 F102，compact.md §5.1）：`messages` 从最后一个压缩点开始
+    /// （保留段接在摘要之后），之前的放进 `earlier`。缺省不切分（`messages` 是重放出的全部消息）。
+    pub fn split_at_compaction(&self) {
+        self.split.store(true, Ordering::SeqCst);
+    }
+
     /// 已写下的信任记录（按写入顺序，重复写只留一条）。
     pub fn trusted_keys(&self) -> Vec<crate::workspace_trust::TrustKey> {
         lock(&self.trusted).clone()
@@ -183,9 +216,15 @@ impl SessionStore for MemoryStore {
         if let Some(title) = title {
             meta.title = title;
         }
+        let (earlier, messages) = if self.split.load(Ordering::SeqCst) {
+            split_cold(messages)
+        } else {
+            (Vec::new(), messages)
+        };
         Ok(LoadedSession {
             meta,
             messages,
+            earlier,
             model: None,
             mode: None,
             plan: false,
@@ -198,6 +237,42 @@ impl SessionStore for MemoryStore {
                 .and_then(|turns| turns.iter().rev().find_map(Clone::clone)),
             last_turn_failed: last_turn_failed(facts),
         })
+    }
+
+    /// 前端记录（缺口 G2）：会话要存在；同 key 覆盖原位置。
+    async fn put_record(
+        &self,
+        session: &SessionId,
+        record: &crate::store::FrontendRecord,
+    ) -> Result<(), StoreError> {
+        if !lock(&self.sessions).contains_key(session) {
+            return Err(StoreError::NotFound {
+                session: session.clone(),
+            });
+        }
+        let mut records = lock(&self.records);
+        let list = records.entry(session.clone()).or_default();
+        match list.iter_mut().find(|known| known.key == record.key) {
+            Some(known) => *known = record.clone(),
+            None => list.push(record.clone()),
+        }
+        Ok(())
+    }
+
+    async fn records(
+        &self,
+        session: &SessionId,
+        kind: &str,
+    ) -> Result<Vec<crate::store::FrontendRecord>, StoreError> {
+        Ok(lock(&self.records)
+            .get(session)
+            .map(|list| {
+                list.iter()
+                    .filter(|record| record.kind == kind)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
     /// `Fact::Entry` 按写入顺序（node-store 的同一口径，cross-session.md §2.2）。

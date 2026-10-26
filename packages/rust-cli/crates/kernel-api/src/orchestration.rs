@@ -573,6 +573,12 @@ pub trait Interactions: Send + Sync {
         session.clone()
     }
 
+    /// 会话已提交的消息（这次回复之前的历史）：fork 子代理继承它（修复线 L-A，docs/specs/rust-cli/agents.md §8.1.2）。
+    /// 对话的 owner 是会话 actor；不持有会话对话的实现（子代理、测试替身）缺省 None。
+    async fn conversation(&self, _session: &SessionId) -> Option<Vec<crate::message::Message>> {
+        None
+    }
+
     /// 改会话的工作目录（EnterWorktree / ExitWorktree）；owner 是会话 actor，它同时设执行环境的
     /// shell cwd（tools-more.md §11.4）。不持有会话的实现返回 `Unsupported`。
     async fn set_workspace(

@@ -179,7 +179,12 @@ async fn a_foreground_agent_ask_names_the_agent() {
         text_response(&["Main done."]),
     ]);
     model.release();
-    with_ui(model.clone(), Setup::default(), |mut ui| async move {
+    // 前台子代理只在 fork 关着时有（`ZCODE_FORK_SUBAGENT=0`，修复线 L-A，agents.md §8.1.1）。
+    let setup = Setup {
+        fork_subagent: Some(false),
+        ..Setup::default()
+    };
+    with_ui(model.clone(), setup, |mut ui| async move {
         ui.submit("make the file");
         let screen = ui.wait_for("Bash command").await;
         assert!(

@@ -53,6 +53,7 @@ fn replayed_events_are_ignored() {
     );
     let event = SequencedEvent {
         seq: 3,
+        revision: 0,
         event: KernelEvent::MessageDone {
             message: user("u1", "hi"),
         },
@@ -98,6 +99,7 @@ fn a_cold_view_rebuilds_rows_with_tool_results() {
         pending: Vec::new(),
         queue: Vec::new(),
         last_seq: 7,
+        revision: 0,
         running: false,
         background: Vec::new(),
         peer_held: Vec::new(),

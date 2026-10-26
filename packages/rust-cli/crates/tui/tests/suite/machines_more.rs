@@ -50,17 +50,23 @@ async fn connecting_a_reconnecting_machine_retries_it_now() {
     assert_eq!(*calls.calls.lock().unwrap(), ["retry gpu-1"]);
 }
 
+/// F98 上传与握手；F100（remote-exec.md §26.6）下载在上传之前。
 #[tokio::test(flavor = "multi_thread")]
 async fn the_first_connection_shows_the_upload_and_the_handshake() {
     let fake = FakeMachines::with(vec![row(
         "dev-a",
-        MachineStatus::Connecting(ConnectStep::Uploading { bytes: 93_323_264 }),
+        MachineStatus::Connecting(ConnectStep::Downloading),
     )]);
     let control = fake.clone();
     with_ui(
         idle(),
         setup_with(Some(fake), "zh_CN.UTF-8"),
         |mut ui| async move {
+            ui.wait_for("● local  ○ dev-a 连接中 · 下载执行器").await;
+            control.set(
+                "dev-a",
+                MachineStatus::Connecting(ConnectStep::Uploading { bytes: 93_323_264 }),
+            );
             ui.wait_for("● local  ○ dev-a 连接中 · 上传执行器（89 MB）")
                 .await;
             control.set("dev-a", MachineStatus::Connecting(ConnectStep::Handshaking));

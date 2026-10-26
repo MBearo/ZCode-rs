@@ -198,7 +198,9 @@ impl Actor {
                     self.emit(&task, step).await;
                 }
             }
-            CommandEvent::Started { .. } | CommandEvent::Backgrounded => {}
+            CommandEvent::Started { .. }
+            | CommandEvent::Backgrounded
+            | CommandEvent::BackgroundedBy { .. } => {}
             CommandEvent::Finished { .. } => self.monitor_ended(task).await,
         }
     }

@@ -36,6 +36,8 @@ members = [
   "crates/platform",
   "crates/tui",
   "crates/headless",
+  "crates/protocol-core",
+  "crates/protocol-zcode",
   "crates/cli",
 ]
 # 第三方源码（rg、bfs、ugrep，docs/specs/rust-cli/embedded-search.md）：cli 的 path 依赖，不是成员——不受本工程的
@@ -100,6 +102,9 @@ bytes = "1"
 # rust-cli-tui：终端输入流（event-stream）；与 ratatui 0.30 的 crossterm 后端同版本。
 crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# rust-cli（cli）：解开执行器的 npm 平台包（gzip，remote-exec.md §26.4）。Cargo.lock 里本来就有（syntect 用它，同样的
+# 缺省特性 rust_backend），不引入新包。
+flate2 = "1"
 # Retry-After 的 HTTP-date 形式。
 httpdate = "1"
 # rust-cli-tui：markdown 解析（复制来的组件层，docs/specs/rust-cli/tui.md §3）。
@@ -212,6 +217,8 @@ rust-cli-session = { path = "crates/session" }
 rust-cli-runtime = { path = "crates/runtime" }
 rust-cli-tui = { path = "crates/tui" }
 rust-cli-headless = { path = "crates/headless" }
+rust-cli-protocol-core = { path = "crates/protocol-core" }
+rust-cli-protocol-zcode = { path = "crates/protocol-zcode" }
 
 [profile.release]
 lto = "thin"

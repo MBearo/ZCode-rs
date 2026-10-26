@@ -37,6 +37,7 @@ fn probe(candidates: Vec<(&str, Option<Report>)>) -> Probe {
         arch: "x86_64".to_owned(),
         home: "/home/u".to_owned(),
         hashes: vec!["sha256sum".to_owned()],
+        libc: Default::default(),
         candidates: candidates
             .into_iter()
             .map(|(path, report)| Candidate {

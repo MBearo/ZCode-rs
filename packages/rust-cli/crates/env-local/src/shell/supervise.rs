@@ -227,6 +227,8 @@ enum Ended {
     Cancelled,
     /// 输出文件超过上限。
     OutputLimit,
+    /// 被要求转到后台（修复线 L-A，tui-input.md §11）。
+    Requested,
 }
 
 /// 本机执行环境的路径风格（cwd 文件的写法与读回按它）。
@@ -390,11 +392,20 @@ async fn wait_for(tracked: &mut Tracked, timeout: Option<Duration>, job: &Job) -
             None => std::future::pending().await,
         }
     };
+    // 被要求转后台（修复线 L-A）：已经转过的不再等这个信号。
+    let mut moved_by = job.running.moved_by.subscribe();
+    let requested = async {
+        if *job.running.backgrounded.borrow() {
+            return std::future::pending().await;
+        }
+        let _ = moved_by.wait_for(Option::is_some).await;
+    };
     tokio::select! {
         status = wait => Ended::Exited(status),
         () = deadline => Ended::TimedOut,
         () = job.running.cancel.cancelled() => Ended::Cancelled,
         () = exceeds(&job.plan, job.limit) => Ended::OutputLimit,
+        () = requested => Ended::Requested,
     }
 }
 
@@ -495,8 +506,11 @@ async fn supervise(
     // 修 bug（工作线 F69）：以前前台命令到了超时一律结束，长编译、长测试被杀，模型只能重跑。`on_timeout` 有值时
     // 不结束，转到后台继续跑，之后的期限是后台命令的期限（从这时算起）；结束时照后台命令处理。
     // 取消已经发出（调用被中断）时不转，照旧结束。
+    // 修复线 L-A：用户按转后台的键或来了低延迟投递的输入时同样转（tui-input.md §11），之后的期限同超时转后台。
     let moved = match (&ended, &job.request.on_timeout) {
-        (Ended::TimedOut, Some(moved)) if !job.running.cancel.is_cancelled() => Some(moved),
+        (Ended::TimedOut | Ended::Requested, Some(moved)) if !job.running.cancel.is_cancelled() => {
+            Some(moved)
+        }
         _ => None,
     };
     let ended = match moved {
@@ -545,7 +559,8 @@ async fn supervise(
                 true,
             )
         }
-        Ended::Cancelled => {
+        // 被要求转后台却没有转（取消已经发出）：照取消结束。
+        Ended::Cancelled | Ended::Requested => {
             let _ = tracked.terminate(Shutdown::Graceful).await;
             (Outcome::Cancelled, Some(CANCEL_EXIT), false)
         }

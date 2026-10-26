@@ -248,6 +248,11 @@ pub struct LoadedSession {
     /// 没有回答的 user 消息要不要补一条 assistant（docs/specs/rust-cli/session-lifecycle.md §6.3.1）。serde 缺省 false。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub last_turn_failed: bool,
+    /// 只供显示的、最后一个压缩点之前的消息（工作线 F102，docs/specs/rust-cli/compact.md §5.1）：应用回退之后的完整链里
+    /// 排在 `messages` 之前、不在 `messages` 里的那些，按存储顺序；不含最后一个压缩点的保留段（它们在 `messages` 里）。
+    /// 模型侧的历史只是 `messages`；界面显示 `earlier ++ messages`。没有压缩点时为空（serde 缺省为空、为空时不写出）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub earlier: Vec<Message>,
 }
 
 /// 有意图、没有结果的操作（[`Fact::OperationIntent`] 原样）。
@@ -359,6 +364,15 @@ pub enum StoreError {
     Storage { message: String },
     #[error("not implemented: {what}")]
     Unsupported { what: String },
+}
+
+/// 前端记录（缺口 G2，docs/specs/rust-cli/app-protocol.md §5.2）：前端给出的不透明记录，挂在一个会话上。内核与存储
+/// 不解释 `kind` 与 `data`：node-store 原样写成 `session_entry`（`type = kind`、`id = key`，同 key 覆盖）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FrontendRecord {
+    pub kind: String,
+    pub key: String,
+    pub data: Value,
 }
 
 #[async_trait]
@@ -477,6 +491,27 @@ pub trait SessionStore: Send + Sync {
         _session: &SessionId,
         _kind: &str,
     ) -> Result<Vec<(String, Value)>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    /// 写一条前端记录（缺口 G2）：同 key 覆盖，不推进会话的活动时间。会话不存在时 `NotFound`；不支持的实现返回
+    /// `Unsupported`。
+    async fn put_record(
+        &self,
+        _session: &SessionId,
+        _record: &FrontendRecord,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unsupported {
+            what: "frontend records".to_owned(),
+        })
+    }
+
+    /// 这个会话里某一种前端记录，按写入顺序（缺口 G2）。不支持的实现返回空。
+    async fn records(
+        &self,
+        _session: &SessionId,
+        _kind: &str,
+    ) -> Result<Vec<FrontendRecord>, StoreError> {
         Ok(Vec::new())
     }
 
