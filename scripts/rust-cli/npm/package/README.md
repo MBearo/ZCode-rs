@@ -10,7 +10,8 @@ zcode
 Or run `npx @mbearo/zcode`.
 
 Requires Node.js 22.16 or newer. Prebuilt binaries are provided for macOS,
-Linux with glibc 2.35 or newer, and Windows. macOS supports ARM64; Linux and Windows support x64.
+Linux with glibc 2.35 or newer, and Windows. macOS supports ARM64; Linux supports x64 and ARM64;
+Windows supports x64.
 Alpine/musl is not supported by this package.
 
 npm installs the matching platform package automatically. Keep optional

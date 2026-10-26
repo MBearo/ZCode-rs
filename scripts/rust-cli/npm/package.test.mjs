@@ -109,6 +109,20 @@ test("every supported platform is detected and validated", async () => {
   );
 });
 
+// Linux 两个架构都发 glibc 的平台包；远端执行也按远端的架构下载这两个包里的执行器。
+test("Linux ships glibc packages for x64 and arm64", () => {
+  const linux = platforms.filter((item) => item.os === "linux");
+  assert.deepEqual(
+    linux.map(({ id, cpu, libc, target }) => ({ id, cpu, libc, target })),
+    [
+      { id: "linux-x64-gnu", cpu: "x64", libc: "glibc", target: "x86_64-unknown-linux-gnu" },
+      { id: "linux-arm64-gnu", cpu: "arm64", libc: "glibc", target: "aarch64-unknown-linux-gnu" },
+    ],
+  );
+  assert.equal(selectPlatform("linux", "arm64", "2.35").id, "linux-arm64-gnu");
+  assert.throws(() => selectPlatform("linux", "arm64", undefined), /Unsupported/u);
+});
+
 // Windows 上叫 zcode.exe（docs/specs/rust-cli/cli-args.md §13，工作线 F71）：任务管理器与 tasklist 只显示 exe 的文件名，
 // 进程名就叫命令名；macOS / Linux 仍是 zcode-rs。
 test("the command is zcode and the native executable is zcode-rs, or zcode.exe on Windows", async () => {
