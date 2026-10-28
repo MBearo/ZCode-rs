@@ -67,6 +67,25 @@ fn states_map_to_the_statuses_the_tui_shows() {
                 needs: "GLIBC_2.34".to_owned(),
             }),
         ),
+        // F103（remote-exec.md §27.7）：npm 的 latest 说别的协议。
+        (
+            MachineState::Failed {
+                error: MachineError::LatestIncompatible {
+                    version: "0.1.64".to_owned(),
+                    protocol: 1,
+                    latest: "0.1.63".to_owned(),
+                    latest_protocol: 2,
+                    target: "x86_64-unknown-linux-gnu".to_owned(),
+                },
+            },
+            MachineStatus::Failed(MachineFailure::LatestIncompatible {
+                version: "0.1.64".to_owned(),
+                protocol: 1,
+                latest: "0.1.63".to_owned(),
+                latest_protocol: 2,
+                target: "x86_64-unknown-linux-gnu".to_owned(),
+            }),
+        ),
         (
             MachineState::Handshaking,
             MachineStatus::Connecting(ConnectStep::Handshaking),

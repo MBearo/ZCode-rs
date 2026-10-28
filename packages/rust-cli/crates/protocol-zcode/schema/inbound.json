@@ -1153,7 +1153,18 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "workspace"
+                    ]
+                  },
                   "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cwd": {
                     "type": "string",
                     "minLength": 1
                   },
@@ -1221,6 +1232,13 @@
                   "name": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "workspace"
+                    ]
                   },
                   "type": {
                     "type": "string",

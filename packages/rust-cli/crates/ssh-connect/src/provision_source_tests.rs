@@ -15,51 +15,51 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use rust_cli_exec_transport::{ProvisionError, ProvisionStep, Provisioner};
 
-use crate::artifact::Arch;
+use crate::artifact::Platform;
 use crate::provision_tests::{Remote, mode, wanted};
-use crate::{ArtifactSource, SshProvisioner};
+use crate::{ArtifactSource, DownloadError, SshProvisioner};
 
-/// 假的来源：缓存里有没有、下载的结果；记下每次调用的架构。
-struct FakeSource {
+/// 假的来源：缓存里有没有、下载的结果；记下每次调用的平台。F107 的 `provision_macos_tests.rs` 也用它。
+pub(crate) struct FakeSource {
     cached: Option<PathBuf>,
-    downloaded: Result<PathBuf, String>,
-    cached_calls: AtomicUsize,
-    downloads: Mutex<Vec<(String, Arch)>>,
+    downloaded: Result<PathBuf, DownloadError>,
+    pub(crate) cached_calls: AtomicUsize,
+    downloads: Mutex<Vec<(String, Platform)>>,
 }
 
 impl FakeSource {
-    fn new(cached: Option<PathBuf>, downloaded: Result<PathBuf, String>) -> Arc<Self> {
+    pub(crate) fn new(cached: Option<PathBuf>, downloaded: Result<PathBuf, &str>) -> Arc<Self> {
         Arc::new(Self {
             cached,
-            downloaded,
+            downloaded: downloaded.map_err(|reason| DownloadError::Failed(reason.to_owned())),
             cached_calls: AtomicUsize::new(0),
             downloads: Mutex::new(Vec::new()),
         })
     }
 
-    fn downloads(&self) -> Vec<(String, Arch)> {
+    pub(crate) fn downloads(&self) -> Vec<(String, Platform)> {
         self.downloads.lock().unwrap().clone()
     }
 }
 
 #[async_trait]
 impl ArtifactSource for FakeSource {
-    async fn cached(&self, _version: &str, _arch: Arch) -> Option<PathBuf> {
+    async fn cached(&self, _version: &str, _platform: Platform) -> Option<PathBuf> {
         self.cached_calls.fetch_add(1, Ordering::SeqCst);
         self.cached.clone()
     }
 
-    async fn download(&self, version: &str, arch: Arch) -> Result<PathBuf, String> {
+    async fn download(&self, version: &str, platform: Platform) -> Result<PathBuf, DownloadError> {
         self.downloads
             .lock()
             .unwrap()
-            .push((version.to_owned(), arch));
+            .push((version.to_owned(), platform));
         self.downloaded.clone()
     }
 }
 
 /// 下载来的“执行器”：一个 shell 脚本（试跑的 `executor status --json` 按 `body` 回答）。
-fn executor(remote: &Remote, name: &str, body: &str) -> PathBuf {
+pub(crate) fn executor(remote: &Remote, name: &str, body: &str) -> PathBuf {
     let path = remote.root.path().join(name);
     std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -67,16 +67,16 @@ fn executor(remote: &Remote, name: &str, body: &str) -> PathBuf {
 }
 
 /// 试跑时说“常驻执行器没在跑”（退出码 3）。
-const RUNS: &str = "[ \"$1 $2\" = 'executor status' ] && exit 3\nexit 9";
+pub(crate) const RUNS: &str = "[ \"$1 $2\" = 'executor status' ] && exit 3\nexit 9";
 
-fn installed(remote: &Remote) -> PathBuf {
+pub(crate) fn installed(remote: &Remote) -> PathBuf {
     remote
         .home()
         .join(".zcode/rust-cli/exec/bin/0.2.0/zcode-rs")
 }
 
 /// 远端已有一个协议相同的旧版本（例如 npm 装的）。
-fn older_candidate(remote: &Remote) -> PathBuf {
+pub(crate) fn older_candidate(remote: &Remote) -> PathBuf {
     let older = remote
         .home()
         .join(".zcode/rust-cli/exec/bin/0.1.9/zcode-rs");
@@ -90,7 +90,7 @@ fn older_candidate(remote: &Remote) -> PathBuf {
     older
 }
 
-async fn provision(
+pub(crate) async fn provision(
     provisioner: &SshProvisioner,
 ) -> (Result<String, ProvisionError>, Vec<ProvisionStep>) {
     let seen = Mutex::new(Vec::new());
@@ -121,7 +121,10 @@ async fn a_downloaded_executor_is_uploaded_after_a_trial_run() {
             }
         ]
     );
-    assert_eq!(source.downloads(), [("0.2.0".to_owned(), Arch::X86_64)]);
+    assert_eq!(
+        source.downloads(),
+        [("0.2.0".to_owned(), Platform::LinuxX86_64)]
+    );
     assert_eq!(std::fs::read(installed(&remote)).unwrap(), bytes);
     assert_eq!(mode(&installed(&remote)), 0o700);
     // 试跑的临时文件与错误输出都不留。
@@ -136,7 +139,7 @@ async fn a_downloaded_executor_is_uploaded_after_a_trial_run() {
 async fn a_cached_executor_is_uploaded_without_downloading() {
     let remote = Remote::new();
     let file = executor(&remote, "cached", RUNS);
-    let source = FakeSource::new(Some(file), Err("must not download".to_owned()));
+    let source = FakeSource::new(Some(file), Err("must not download"));
     let provisioner = SshProvisioner::new(remote.target("dev-a"), wanted(), Vec::new())
         .with_source(source.clone());
     let (program, steps) = provision(&provisioner).await;
@@ -152,10 +155,7 @@ async fn a_cached_executor_is_uploaded_without_downloading() {
 async fn a_failed_download_falls_back_to_a_compatible_executor() {
     let remote = Remote::new();
     let older = older_candidate(&remote);
-    let source = FakeSource::new(
-        None,
-        Err("GET https://registry.example.com/x: HTTP 404".to_owned()),
-    );
+    let source = FakeSource::new(None, Err("GET https://registry.example.com/x: HTTP 404"));
     let provisioner = SshProvisioner::new(remote.target("dev-a"), wanted(), Vec::new())
         .with_source(source.clone());
     let (program, steps) = provision(&provisioner).await;
@@ -168,10 +168,7 @@ async fn a_failed_download_falls_back_to_a_compatible_executor() {
 #[tokio::test]
 async fn a_failed_download_without_a_compatible_executor_says_why() {
     let remote = Remote::new();
-    let source = FakeSource::new(
-        None,
-        Err("GET https://registry.example.com/x: HTTP 404".to_owned()),
-    );
+    let source = FakeSource::new(None, Err("GET https://registry.example.com/x: HTTP 404"));
     let provisioner =
         SshProvisioner::new(remote.target("dev-a"), wanted(), Vec::new()).with_source(source);
     let (program, _) = provision(&provisioner).await;
@@ -251,7 +248,7 @@ async fn a_local_static_artifact_wins_over_the_source_and_is_not_trial_run() {
     let remote = Remote::new();
     // ELF 头加填充：在本机试跑一定失败，所以上传成功就说明没有试跑。
     let (artifact, bytes) = remote.artifact();
-    let source = FakeSource::new(None, Err("must not download".to_owned()));
+    let source = FakeSource::new(None, Err("must not download"));
     let provisioner = SshProvisioner::new(remote.target("dev-a"), wanted(), vec![artifact])
         .with_source(source.clone());
     let (program, steps) = provision(&provisioner).await;

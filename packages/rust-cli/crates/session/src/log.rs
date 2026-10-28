@@ -152,6 +152,7 @@ fn changes_state(event: &KernelEvent) -> bool {
             | KernelEvent::ToolProgress { .. }
             | KernelEvent::ContextUsage { .. }
             | KernelEvent::ContextNotice { .. }
+            | KernelEvent::OutputSpeed { .. }
             | KernelEvent::ScheduledFire { .. }
             | KernelEvent::SystemNotice { .. }
             | KernelEvent::ModelNotice { .. }

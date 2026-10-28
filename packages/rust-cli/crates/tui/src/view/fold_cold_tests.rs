@@ -105,6 +105,7 @@ fn a_cold_view_rebuilds_rows_with_tool_results() {
         peer_held: Vec::new(),
         context_usage: None,
         context_notice: Default::default(),
+        output_speed: None,
     };
     let view = Transcript::from_view(snapshot.clone(), 0);
     assert_eq!(view.last_seq(), 7);

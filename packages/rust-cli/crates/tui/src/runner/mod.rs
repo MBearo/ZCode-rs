@@ -116,6 +116,11 @@ pub trait Screen {
     fn drawn(&mut self, _buffer: &Buffer) {}
     /// 终端通知的转义序列（tui-manage.md §5.2）：真实终端原样写到 stdout。
     fn notify(&mut self, _sequence: &str) {}
+    /// 终端分辨得出增强按键吗（修复线 F104，tui-input.md §11.1.1）：真实终端是进界面时键盘增强的查询结论
+    /// （`ui::terminal::enter`）。决定立即发送的提示写哪个键；缺省否。
+    fn keyboard_enhanced(&self) -> bool {
+        false
+    }
     /// 把终端交给子进程（外部编辑器，tui-input.md §4.1）：暂停读输入、离开 alternate screen 与 raw mode。
     /// 交出期间不画帧；测试里不做事。
     fn suspend(&mut self) {}
@@ -213,6 +218,8 @@ pub async fn drive<B: Backend>(
     // 滚轮每格的行数按终端（tui-select.md §4.2）；原来按终端决定要不要松开即复制，F25 起所有终端都复制。
     app.wheel = crate::ui::wheel::Accel::new(&options.vars, cfg!(windows));
     app.set_os(options.os);
+    // 终端分辨得出 ctrl+enter 吗（修复线 F104）：立即发送的提示按它选键。
+    app.keyboard_enhanced = screen.keyboard_enhanced();
     app.theme = theme;
     app.terminal_background = detected;
     app.composer.load_history(options.history.clone());

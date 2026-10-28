@@ -163,6 +163,82 @@ async fn the_script_finds_ours_and_the_npm_one_and_never_runs_zcode() {
         !home.path().join("ran-zcode").exists(),
         "zcode itself is never run"
     );
+    // F107（§28.2、§28.3）：本机就是 macOS 时，同一个脚本的输出要认成 macOS 的平台（候选的解析在 macOS 上成立——
+    // 上面的 npm 候选是经符号链接找到的）。
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        use crate::artifact::Platform;
+        assert_eq!(probe.os, "Darwin");
+        assert_eq!(probe.platform(), Some(Platform::MacosAarch64));
+        assert_eq!(probe.libc, crate::probe::Libc::Unknown);
+    }
+}
+
+/// F107（§28.3）：`PATH` 上的 `zcode` 是 npm 全局目录里的相对符号链接（npm 就是这样建的），而远端的 `readlink` 不认
+/// `-f`（macOS 12.3 之前）时，探测照样解析出包目录、找到平台包里的执行器。
+#[cfg(unix)]
+#[tokio::test]
+async fn the_npm_package_is_found_through_a_relative_link_without_readlink_f() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use crate::probe::script;
+    let home = tempfile::tempdir().unwrap();
+    let write = |path: &std::path::Path, text: &str| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    // Homebrew 的 node 的布局：`<prefix>/bin/zcode -> ../lib/node_modules/@scope/zcode/bin/zcode.js`。
+    let package = home.path().join("prefix/lib/node_modules/@scope/zcode");
+    write(&package.join("bin/zcode.js"), "#!/bin/sh\nexit 0\n");
+    write(
+        &package.join("node_modules/@scope/zcode-darwin-arm64/bin/zcode-rs"),
+        "#!/bin/sh\necho '{\"version\":\"0.1.7\",\"protocol\":1}'\n",
+    );
+    let bin = home.path().join("prefix/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(
+        "../lib/node_modules/@scope/zcode/bin/zcode.js",
+        bin.join("zcode"),
+    )
+    .unwrap();
+    // 不认 `-f` 的 readlink（旧版本的 macOS）：其余照常。
+    let tools = home.path().join("tools");
+    write(
+        &tools.join("readlink"),
+        "#!/bin/sh\n[ \"$1\" = -f ] && { echo 'readlink: illegal option -- f' >&2; exit 1; }\nexec /usr/bin/readlink \"$@\"\n",
+    );
+    let mut child = tokio::process::Command::new("/bin/sh")
+        .arg("-s")
+        .env_clear()
+        .env("HOME", home.path())
+        .env(
+            "PATH",
+            format!("{}:{}:/usr/bin:/bin", tools.display(), bin.display()),
+        )
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(script().as_bytes()).await.unwrap();
+    }
+    let output = child.wait_with_output().await.unwrap();
+    let probe = Probe::parse(&String::from_utf8_lossy(&output.stdout)).unwrap();
+    assert!(
+        probe.candidates.iter().any(|candidate| candidate
+            .path
+            .ends_with("zcode-darwin-arm64/bin/zcode-rs")
+            && candidate
+                .report
+                .as_ref()
+                .map(|report| report.version.as_str())
+                == Some("0.1.7")),
+        "{:?}",
+        probe.candidates
+    );
 }
 
 /// F100（remote-exec.md §26.5）：探测的 libc 一行。两种都有时算 glibc（glibc 的系统上装了 musl 包），都没有时不知道。
@@ -178,31 +254,22 @@ fn the_remote_libc_is_parsed() {
         Libc::Glibc("2.31".to_owned())
     );
     assert_eq!(libc(""), Libc::Unknown);
-    // 脚本里有这两项探测（本机跑不出 Linux 的结果，只核对脚本）。
+    // macOS 的远端不问 libc（§28.3）：这两行不会出现，解析的结果是“不知道”。
+    let macos = Probe::parse("os Darwin\narch arm64\nhome /Users/dev\nhash shasum\n").unwrap();
+    assert_eq!(macos.libc, Libc::Unknown);
+    assert_eq!(macos.hashes, ["shasum"]);
+    // 脚本里有这两项探测，而且只在 Linux 上问（F107，§28.3：macOS 上没有意义；本机跑不出 Linux 的结果，只核对脚本）。
     let script = crate::probe::script();
-    assert!(script.contains("getconf GNU_LIBC_VERSION"), "{script}");
-    assert!(script.contains("/lib/ld-musl-*"), "{script}");
-}
-
-/// F100（§26.3）：两种 target 与 ELF 头的架构。
-#[test]
-fn architectures_map_to_both_targets_and_elf_machines() {
-    use crate::artifact::Arch;
-    assert_eq!(Arch::of("Linux", "x86_64"), Some(Arch::X86_64));
-    assert_eq!(Arch::of("Linux", "aarch64"), Some(Arch::Aarch64));
-    assert_eq!(Arch::of("Linux", "arm64"), Some(Arch::Aarch64));
-    assert_eq!(Arch::X86_64.gnu_triple(), "x86_64-unknown-linux-gnu");
-    assert_eq!(Arch::Aarch64.gnu_triple(), "aarch64-unknown-linux-gnu");
-    assert_eq!(Arch::Aarch64.musl_triple(), "aarch64-unknown-linux-musl");
-    let mut head = vec![0u8; 20];
-    head[..6].copy_from_slice(b"\x7fELF\x02\x01");
-    head[18] = 183;
-    assert_eq!(Arch::from_elf(&head), Some(Arch::Aarch64));
-    head[18] = 62;
-    assert_eq!(Arch::from_elf(&head), Some(Arch::X86_64));
-    head[4] = 1;
-    assert_eq!(Arch::from_elf(&head), None, "32-bit");
-    assert_eq!(Arch::from_elf(b"\x7fELF"), None, "too short");
+    let linux_only = script
+        .split_once("if [ \"$os\" = Linux ]; then")
+        .and_then(|(_, rest)| rest.split_once("\nfi\n"))
+        .map(|(branch, _)| branch.to_owned())
+        .unwrap_or_default();
+    assert!(linux_only.contains("getconf GNU_LIBC_VERSION"), "{script}");
+    assert!(linux_only.contains("/lib/ld-musl-*"), "{script}");
+    // `readlink -f` 换成可移植的解析（macOS 自带的 readlink 旧版本不认 -f，§28.3）。
+    assert!(!script.contains("readlink -f"), "{script}");
+    assert!(script.contains("resolve() {"), "{script}");
 }
 
 /// F100（§26.5）：加载器报缺的 glibc 版本取最高的一个。

@@ -79,3 +79,99 @@ fn a_held_command_that_is_not_a_skill_is_unrecognized_once_the_list_arrives() {
         "{lines:?}"
     );
 }
+
+/// 立即发送的键（tui.md §5.1.1、tui-input.md §11.1）的测试用事件：开回合、排一条插话。
+mod send_now {
+    use std::time::Instant;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use rust_cli_kernel_api::ids::{CommandId, TurnId};
+    use rust_cli_kernel_api::session_api::{Delivery, KernelEvent, QueuedInput, SequencedEvent};
+
+    use super::{Action, App, app};
+
+    fn feed(app: &mut App, events: Vec<KernelEvent>) {
+        for (index, event) in events.into_iter().enumerate() {
+            let seq = index as u64 + 1;
+            let event = SequencedEvent {
+                seq,
+                revision: 0,
+                event,
+            };
+            app.view.apply(event, seq * 1000);
+        }
+    }
+
+    fn started() -> KernelEvent {
+        KernelEvent::TurnStarted {
+            turn: TurnId::new("t1"),
+            command: None,
+        }
+    }
+
+    fn queued() -> KernelEvent {
+        KernelEvent::QueueChanged {
+            items: vec![QueuedInput {
+                command: CommandId::new("c2"),
+                text: "also check the date".into(),
+                delivery: Delivery::Steer,
+            }],
+        }
+    }
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    /// ctrl+x ctrl+s 与 ctrl+enter 两种按法的结果。
+    fn both_keys(app: &mut App) -> [Option<Action>; 2] {
+        let now = Instant::now();
+        assert!(app.on_key(ctrl(KeyCode::Char('x')), now).is_none());
+        let chord = app.on_key(ctrl(KeyCode::Char('s')), now);
+        let enter = app.on_key(ctrl(KeyCode::Enter), now);
+        [chord, enter]
+    }
+
+    /// 修复线 F105：输入框为空、回合在跑、队列里有插话时，立即发送的键只投递排着的插话（不入队新文字、不中断）。
+    /// 旧代码什么都不做（`submit` 在输入框为空时返回 None）。
+    #[test]
+    fn an_empty_input_delivers_the_queued_input() {
+        let mut app = app();
+        feed(&mut app, vec![started(), queued()]);
+        assert!(app.send_now_hint().is_some(), "the hint asks for this key");
+        for action in both_keys(&mut app) {
+            assert!(matches!(action, Some(Action::DeliverQueued)), "{action:?}");
+        }
+    }
+
+    /// 队列为空、或回合没在跑（提示那一行也不显示）：什么都不做，也不中断。
+    #[test]
+    fn nothing_happens_without_a_queued_input_or_a_running_turn() {
+        let mut running = app();
+        feed(&mut running, vec![started()]);
+        for action in both_keys(&mut running) {
+            assert!(action.is_none(), "{action:?}");
+        }
+        let mut idle = app();
+        feed(&mut idle, vec![queued()]);
+        for action in both_keys(&mut idle) {
+            assert!(action.is_none(), "{action:?}");
+        }
+    }
+
+    /// 输入框里有文字时照旧：入队这段文字再做低延迟投递。
+    #[test]
+    fn text_in_the_input_is_still_sent_now() {
+        let mut app = app();
+        feed(&mut app, vec![started(), queued()]);
+        app.composer.area.insert_str("stop here");
+        let action = app.on_key(ctrl(KeyCode::Enter), Instant::now());
+        match action {
+            Some(Action::SendNow { text, delivery }) => {
+                assert_eq!(text, "stop here");
+                assert_eq!(delivery, Delivery::Steer);
+            }
+            other => panic!("expected send now: {other:?}"),
+        }
+    }
+}

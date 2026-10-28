@@ -1,12 +1,12 @@
-//! 探测远端（remote-exec.md §19.9）：一次 ssh，脚本经 stdin 交给远端的 `sh -s`。输出逐行：
+//! 探测远端（remote-exec.md §19.9、§28.3）：一次 ssh，脚本经 stdin 交给远端的 `sh -s`。输出逐行：
 //!
 //! ```text
-//! os Linux
+//! os Linux                 （F107：`Darwin` 是 macOS）
 //! arch x86_64
 //! home /home/u
-//! hash sha256sum
-//! libc glibc 2.36          （F100：`getconf GNU_LIBC_VERSION`，有 glibc 时）
-//! libc musl                （F100：有 `/lib/ld-musl-*` 时）
+//! hash sha256sum           （macOS 一般只有 `shasum`）
+//! libc glibc 2.36          （F100：`getconf GNU_LIBC_VERSION`，有 glibc 时；F107：只在 Linux 上问）
+//! libc musl                （F100：有 `/lib/ld-musl-*` 时；F107：只在 Linux 上问）
 //! candidate <路径>\t<`<路径> executor status --json` 的第一行，可以为空>
 //! ```
 //!
@@ -16,16 +16,33 @@
 use rust_cli_base::names::{DOT_DIR, EXECUTOR_HOME, UNIX_EXECUTABLE};
 use serde::Deserialize;
 
+use crate::artifact::Platform;
+
 /// 探测脚本（POSIX sh）。
+///
+/// F107（§28.3）：libc 两行只在 Linux 上问（macOS 上 `getconf GNU_LIBC_VERSION` 没有意义）；`readlink -f` 换成
+/// `resolve()`（macOS 12.3 之前自带的 `readlink` 不认 `-f`，解析不出 npm 的包目录就找不到平台包里的执行器）。
 pub(crate) fn script() -> String {
     format!(
         r#"d="$HOME/{DOT_DIR}/{EXECUTOR_HOME}"
-printf 'os %s\n' "$(uname -s 2>/dev/null)"
+os=$(uname -s 2>/dev/null)
+printf 'os %s\n' "$os"
 printf 'arch %s\n' "$(uname -m 2>/dev/null)"
 printf 'home %s\n' "$HOME"
 for h in sha256sum shasum openssl; do command -v "$h" >/dev/null 2>&1 && printf 'hash %s\n' "$h"; done
-g=$(getconf GNU_LIBC_VERSION 2>/dev/null) && printf 'libc %s\n' "$g"
-for m in /lib/ld-musl-*; do [ -e "$m" ] && {{ printf 'libc musl\n'; break; }}; done
+if [ "$os" = Linux ]; then
+  g=$(getconf GNU_LIBC_VERSION 2>/dev/null) && printf 'libc %s\n' "$g"
+  for m in /lib/ld-musl-*; do [ -e "$m" ] && {{ printf 'libc musl\n'; break; }}; done
+fi
+resolve() {{
+  p=$1; n=0
+  while [ -L "$p" ] && [ "$n" -lt 16 ]; do
+    l=$(readlink "$p") || break
+    case $l in /*) p=$l ;; *) p=$(dirname "$p")/$l ;; esac
+    n=$((n+1))
+  done
+  printf '%s' "$p"
+}}
 probe() {{
   [ -f "$1" ] && [ -x "$1" ] || return 0
   r=$("$1" executor status --json </dev/null 2>/dev/null | head -n 1)
@@ -34,7 +51,7 @@ probe() {{
 for f in "$d"/bin/*/{UNIX_EXECUTABLE}; do probe "$f"; done
 p=$(command -v {UNIX_EXECUTABLE} 2>/dev/null) && probe "$p"
 z=$(command -v zcode 2>/dev/null) && {{
-  r=$(readlink -f "$z" 2>/dev/null || printf '%s' "$z")
+  r=$(resolve "$z")
   pkg=$(dirname "$(dirname "$r")")
   for f in "$pkg"/node_modules/*/bin/{UNIX_EXECUTABLE} "$pkg"/node_modules/@*/*/bin/{UNIX_EXECUTABLE}; do probe "$f"; done
 }}
@@ -71,7 +88,7 @@ pub struct Candidate {
     pub report: Option<Report>,
 }
 
-/// 远端的 C 库（F100，remote-exec.md §26.5）：npm 的 Linux 包要 glibc。
+/// 远端的 C 库（F100，remote-exec.md §26.5）：npm 的 Linux 包要 glibc。F107：macOS 的远端不问这个，一律 `Unknown`。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Libc {
     /// 探测不出来（没有 `getconf`、也没有 musl 的加载器）：照常下载。
@@ -138,6 +155,11 @@ impl Probe {
             ));
         }
         Ok(probe)
+    }
+
+    /// 远端的目标平台（F107，§28.2）：`uname -s` 与 `uname -m` 一起定；认不出来时 None（报 `Unsupported`）。
+    pub fn platform(&self) -> Option<Platform> {
+        Platform::of(&self.os, &self.arch)
     }
 
     /// 在跑的常驻执行器（任何一个候选报告的都一样：一个用户一个）。

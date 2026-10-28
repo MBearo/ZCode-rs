@@ -161,6 +161,8 @@ pub struct Setup {
     pub mode: PermissionMode,
     /// `ZCODE_FORK_SUBAGENT`（修复线 L-A）：缺省按交互会话打开 fork（Agent 全部在后台）；前台子代理的测试设 Some(false)。
     pub fork_subagent: Option<bool>,
+    /// 终端分辨得出增强按键（修复线 F104，tui-input.md §11.1.1）：真实终端取键盘增强的查询结论；缺省否。
+    pub keyboard_enhanced: bool,
 }
 
 impl Default for Setup {
@@ -186,6 +188,7 @@ impl Default for Setup {
             os: rust_cli_tui::Os::Unix,
             mode: PermissionMode::Default,
             fork_subagent: None,
+            keyboard_enhanced: false,
         }
     }
 }
@@ -224,6 +227,8 @@ pub fn squash(text: &str) -> String {
 /// 记录每一帧、复制的文字与终端的交出 / 收回。
 struct Recorder {
     screen: watch::Sender<String>,
+    /// 终端分辨得出增强按键（修复线 F104）。
+    enhanced: bool,
     buffer: Arc<Mutex<Option<Buffer>>>,
     copies: Arc<Mutex<Vec<String>>>,
     notifications: Arc<Mutex<Vec<String>>>,
@@ -231,6 +236,10 @@ struct Recorder {
 }
 
 impl Screen for Recorder {
+    fn keyboard_enhanced(&self) -> bool {
+        self.enhanced
+    }
+
     fn copy(&mut self, text: &str) {
         self.copies.lock().unwrap().push(text.to_owned());
     }
@@ -464,6 +473,7 @@ where
     let handovers = Arc::new(Mutex::new(Vec::new()));
     let mut recorder = Recorder {
         screen,
+        enhanced: setup.keyboard_enhanced,
         buffer: buffer.clone(),
         copies: copies.clone(),
         notifications: notifications.clone(),

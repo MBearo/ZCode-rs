@@ -147,6 +147,44 @@ fn tps_is_absent_without_a_generation_time() {
     assert_eq!(output_tps(Some(120), Some(0)), None);
 }
 
+/// 会话 actor 在内存里记的输出速度（修复线 F105，tui-display.md §2.6）：与 Node 调试面板同一个式子
+/// （5000 / 2000 / 120 → 40）；首个内容缺失、等于或晚于结束时没有值，不用总时长代替；输出未知时没有值。
+#[test]
+fn the_output_speed_uses_the_first_content() {
+    let speed = OutputSpeed {
+        output_tokens: Some(120),
+        duration_ms: 5_000,
+        first_content_ms: Some(2_000),
+    };
+    assert_eq!(speed.generation_ms(), Some(3_000));
+    assert_eq!(speed.tokens_per_second(), Some(40.0));
+    for first in [None, Some(5_000), Some(6_000)] {
+        let late = OutputSpeed {
+            first_content_ms: first,
+            ..speed
+        };
+        assert_eq!(late.tokens_per_second(), None, "{first:?}");
+    }
+    let unknown = OutputSpeed {
+        output_tokens: None,
+        ..speed
+    };
+    assert_eq!(unknown.tokens_per_second(), None);
+    // 往返：空的项不写出。
+    let json = serde_json::to_value(OutputSpeed {
+        first_content_ms: None,
+        ..unknown
+    })
+    .unwrap();
+    assert_eq!(json, serde_json::json!({"duration_ms": 5_000}));
+    assert_eq!(
+        serde_json::from_value::<OutputSpeed>(json)
+            .unwrap()
+            .duration_ms,
+        5_000
+    );
+}
+
 /// Node `keeps zero output but never adds reasoning to the TPS numerator`：输出 0 是 0；用量未知时没有值。
 #[test]
 fn zero_output_is_zero_and_unknown_output_is_absent() {

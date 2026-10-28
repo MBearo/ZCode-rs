@@ -3,7 +3,7 @@
 //! 模型按请求来源与子代理的 prompt 回复，每个子代理挂在自己的闸门上，测试决定谁先结束。
 //! 修复线 F34：列表的行与 footer 的 pill 出自同一份快照（tui-panels.md §0、§3.1），同一帧画出。
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,8 +14,10 @@ use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
-use rust_cli_kernel_api::env_shell::ShellState;
-use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::env_shell::{
+    BackgroundInfo, BackgroundStatus, BackgroundTask, ShellState,
+};
+use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId};
 use rust_cli_kernel_api::local_services::{Fetch, Git};
 use rust_cli_kernel_api::machine::{
     Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
@@ -152,10 +154,8 @@ async fn nested_subagents_form_a_focused_tree() {
     let gates = model.clone();
     with_ui(model, wide(), |mut ui| async move {
         ui.submit("run the agents");
-        // 看 main：只列顶层；A 的后代 A1、A1a 算进 `(+2)`。下面的 ↓ 先选中后台任务的 pill：只等行就够，画出行的那一帧
-        // 一定也有 pill。修复线 F34：行与 pill 出自同一份快照（一次查询、一次重画）。F32 时两者是两次查询、先后不定，
-        // 测试只能两样都等（只等行时负载下 400 次里 11 次 pill 晚到，↓ 直接进了列表）；现在改回只等行，并断言同一画面上
-        // 已有 pill。
+        // 看 main：只列顶层；A 的后代 A1、A1a 算进 `(+2)`。修复线 F105：在跑的全是子代理，footer 没有 pill（列表已经
+        // 列出它们），↓ 直接进入列表。
         let screen = ui
             .wait("the top-level rows", |s| {
                 list(s)
@@ -166,11 +166,10 @@ async fn nested_subagents_form_a_focused_tree() {
                         .any(|l| l == "  ◯ general-purpose       Beta task")
             })
             .await;
-        assert!(screen.contains("· 4 local agents"), "{screen}");
+        assert!(!screen.contains("local agent"), "{screen}");
+        assert!(!screen.contains("· ↓ to manage"), "{screen}");
         assert_eq!(list(&screen).len(), 3, "{screen}");
-        // ↓ 先选中后台任务的 pill，再进入列表，往下到 A 再到 A1 也得先看 A。
-        ui.key(KeyCode::Down);
-        ui.wait_for("Enter to view tasks").await;
+        // ↓ 进入列表，往下到 A 再到 A1 也得先看 A。
         ui.key(KeyCode::Down);
         ui.wait_for("↑/↓ to select").await;
         ui.key(KeyCode::Down);
@@ -212,9 +211,8 @@ async fn nested_subagents_form_a_focused_tree() {
         })
         .await;
         gates.release("A1");
-        ui.key(KeyCode::Down);
-        ui.wait_for("Enter to view tasks").await;
-        ui.key(KeyCode::Enter);
+        // 全是子代理时没有 pill（F105），Background 面板从 `/tasks` 打开。
+        ui.submit("/tasks");
         ui.wait("A1 is done in the panel", |s| {
             s.lines().any(|l| {
                 l.contains("Alpha one ") && !l.contains("deep") && l.trim_end().ends_with("done")
@@ -272,13 +270,16 @@ async fn the_tree_speaks_chinese() {
 }
 
 /// 推迟一部分操作的执行环境（修复线 F34 的确定性复现），其余操作同 [`UnusedEnvironment`]：
-/// - `shell_state` 先等 `shells`：后台任务快照里的命令来自它；修复前 pill 是单独的一次查询，推迟它就推迟了 pill，
-///   子代理的行照常先到；
+/// - `shell_state` 先等 `shells`：后台任务快照里的命令来自它，推迟它就推迟了整份快照里命令的那一半。它第 k 次被问
+///   时报 k 个在跑的后台命令（`bash_dev_1`…），所以 footer 的 pill 写 `k shells`——这个数就是“第几次问命令”，
+///   一份快照用掉一个。修复线 F105 起子代理不进 pill，pill 只数这些命令；
 /// - `close_session` 等 `close` 打开：只有关闭顶层会话时调用（切换会话时旧会话的收尾），停在这里时界面已经离开旧会话、
 ///   新会话还没打开。
 struct SlowEnv {
     shells: Duration,
     close: watch::Receiver<bool>,
+    /// `shell_state` 被问过几次。
+    asked: AtomicUsize,
 }
 
 impl SlowEnv {
@@ -286,6 +287,7 @@ impl SlowEnv {
         Arc::new(Self {
             shells,
             close: watch::channel(true).1,
+            asked: AtomicUsize::new(0),
         })
     }
 }
@@ -359,15 +361,34 @@ impl Shell for SlowEnv {
     async fn shell_state(
         &self,
         workspace: &WorkspaceRef,
-        session: &SessionId,
+        _session: &SessionId,
     ) -> Result<ShellState, EnvError> {
+        let asked = self.asked.fetch_add(1, Ordering::Relaxed) + 1;
         tokio::time::sleep(self.shells).await;
-        UnusedEnvironment.shell_state(workspace, session).await
+        Ok(ShellState {
+            cwd: workspace.root.clone(),
+            outputs: None,
+            background: (1..=asked)
+                .map(|i| ShellTaskId::new(format!("bash_dev_{i}")))
+                .collect(),
+        })
+    }
+}
+
+#[async_trait]
+impl Background for SlowEnv {
+    async fn background_command(
+        &self,
+        _request: BackgroundTask,
+    ) -> Result<Option<BackgroundInfo>, EnvError> {
+        Ok(Some(BackgroundInfo {
+            command: "npm run dev".into(),
+            status: BackgroundStatus::Running,
+        }))
     }
 }
 
 impl Search for SlowEnv {}
-impl Background for SlowEnv {}
 impl Checkpoints for SlowEnv {}
 impl Pdf for SlowEnv {}
 impl Git for SlowEnv {}
@@ -378,9 +399,40 @@ fn rows(screen: &str) -> bool {
     list(screen).iter().any(|l| l.contains(" general-purpose"))
 }
 
-/// 修复线 F34（tui-panels.md §0、§3.1）：子代理的行与 footer 的 pill 同一帧出现。shell 查询推迟 500 ms 时，修复前的
-/// 实现先画出子代理的行（agents 的变化通知之后的列表查询），500 ms 后 pill 才到（主会话事件之后的后台任务查询）；修复后
-/// 两者是同一次查询，一起等这 500 ms。画面上不许出现“有子代理的行、没有 pill”或反过来的帧。
+/// 列表里子代理的构形：顶层行数与各行 `(+N)` 的合计（= 这份快照里可见的子代理总数）。只随快照变——用时、活动的
+/// 文字与截断都不算进来，所以同一份快照画出的每一帧构形相同。
+fn shape(screen: &str) -> (usize, usize) {
+    let rows: Vec<String> = list(screen)
+        .into_iter()
+        .filter(|l| l.contains(" general-purpose"))
+        .collect();
+    let nested: usize = rows
+        .iter()
+        .filter_map(|line| {
+            let at = line.find("(+")?;
+            line[at + 2..].split(')').next()?.parse::<usize>().ok()
+        })
+        .sum();
+    (rows.len(), nested)
+}
+
+/// footer 的 pill 里在跑的命令数（`N shells`）；没有 pill 时为 None。
+fn shells(screen: &str) -> Option<usize> {
+    let at = screen.find(" shell")?;
+    let digits: String = screen[..at]
+        .chars()
+        .rev()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.chars().rev().collect::<String>().parse().ok()
+}
+
+/// 修复线 F34（tui-panels.md §0、§3.1）：子代理的行与 footer 的 pill 出自同一份快照，同一帧画出。替身环境让问命令
+/// 这一步等 500 ms，并且第 k 次报 k 个在跑的命令，所以每份快照都有 pill，pill 的数就是“这是第几份快照”。每一帧查
+/// 两条不变量：
+/// - 有子代理的行就一定有 pill：修复后行只跟着一份快照到达，而那份快照里命令那一半先等了 500 ms；修复前行另走一次
+///   快查询（不问命令），在第一个 pill 到达前 500 ms 就画出来了；
+/// - 一个 pill 的数只配一种构形：一份快照的两半不会一新一旧。
 #[tokio::test(flavor = "multi_thread")]
 async fn the_rows_and_the_pill_arrive_in_one_frame() {
     let model = Routed::new();
@@ -391,19 +443,34 @@ async fn the_rows_and_the_pill_arrive_in_one_frame() {
     };
     with_ui(model, setup, |mut ui| async move {
         ui.submit("run the agents");
-        let split = AtomicBool::new(false);
+        let split: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let paired: Mutex<HashMap<usize, (usize, usize)>> = Mutex::new(HashMap::new());
         let screen = ui
             .wait("the rows of A and B with the pill", |s| {
-                let pill = s.contains(" local agent");
-                if rows(s) != pill {
-                    split.store(true, Ordering::Relaxed);
+                let shape = shape(s);
+                if let Some(n) = shells(s) {
+                    let before = paired.lock().unwrap().insert(n, shape);
+                    if let Some(before) = before
+                        && before != shape
+                    {
+                        split
+                            .lock()
+                            .unwrap()
+                            .push(format!("`{n} shells` went with {before:?} and {shape:?}"));
+                    }
+                } else if shape != (0, 0) {
+                    split
+                        .lock()
+                        .unwrap()
+                        .push(format!("the rows {shape:?} arrived without a pill"));
                 }
-                rows(s) && pill && list(s).iter().any(|l| l.contains("Beta task"))
+                shape == (2, 2) && shells(s).is_some()
             })
             .await;
+        let split = split.lock().unwrap();
         assert!(
-            !split.load(Ordering::Relaxed),
-            "a frame showed the subagent rows and the pill apart; last screen:\n{screen}"
+            split.is_empty(),
+            "the subagent rows and the running commands came from different snapshots: {split:?}\nlast screen:\n{screen}"
         );
         for gate in ["A1a", "A1", "A", "B"] {
             gates.release(gate);
@@ -414,7 +481,8 @@ async fn the_rows_and_the_pill_arrive_in_one_frame() {
 
 /// 修复线 F34：切换会话时列表与 pill 一起清掉。`/resume` 先离开旧会话（不再订阅、清掉列表），新会话打开之后才整体
 /// 重置；修复前 pill 留到新会话打开，中间是“列表没了、pill 还在”的帧。旧会话的收尾（执行环境的 `close_session`）停在
-/// 闸门上，让这段时间看得见。
+/// 闸门上，让这段时间看得见：这时没有会话，也就没有快照，画面上不该有任何 pill（替身环境总报在跑的命令，所以旧会话
+/// 有 pill，新会话打开后又有，中间这段必须没有）。
 #[tokio::test(flavor = "multi_thread")]
 async fn switching_sessions_clears_the_rows_and_the_pill_together() {
     let model = Routed::new();
@@ -438,6 +506,7 @@ async fn switching_sessions_clears_the_rows_and_the_pill_together() {
         environments: environments(Arc::new(SlowEnv {
             shells: Duration::ZERO,
             close: closing,
+            asked: AtomicUsize::new(0),
         })),
         store,
         ..wide()
@@ -446,7 +515,7 @@ async fn switching_sessions_clears_the_rows_and_the_pill_together() {
         ui.submit("run the agents");
         ui.wait("the rows and the pill after the turn", |s| {
             rows(s)
-                && s.contains(" local agent")
+                && shells(s).is_some()
                 && s.contains("Launched.")
                 && !s.contains("esc to interrupt")
         })
@@ -454,12 +523,13 @@ async fn switching_sessions_clears_the_rows_and_the_pill_together() {
         ui.submit("/resume sess_other");
         let screen = ui.wait("the rows to leave", |s| !rows(s)).await;
         assert!(
-            !screen.contains(" local agent"),
+            shells(&screen).is_none(),
             "the rows left but the pill of the old session stayed:\n{screen}"
         );
         close.send_replace(true);
         let screen = ui.wait_for("earlier answer").await;
-        assert!(!screen.contains(" local agent"), "{screen}");
+        // 新会话有自己的 pill（替身环境照旧报在跑的命令），但旧会话的行没有跟过来。
+        assert!(!rows(&screen), "{screen}");
         for gate in ["A1a", "A1", "A", "B"] {
             gates.release(gate);
         }

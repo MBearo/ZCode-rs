@@ -40,6 +40,7 @@ fn view(messages: Vec<Message>) -> SessionView {
         peer_held: Vec::new(),
         context_usage: None,
         context_notice: Default::default(),
+        output_speed: None,
     }
 }
 

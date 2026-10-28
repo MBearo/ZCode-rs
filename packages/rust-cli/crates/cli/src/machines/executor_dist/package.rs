@@ -1,10 +1,10 @@
 //! npm 平台包的纯计算部分（docs/specs/rust-cli/remote-exec.md §26.3、§26.4）：包名、`dist.integrity` 的校验、从 tarball
-//! 解出执行器并核对 `build.json` 与 ELF 头。不做 IO。
+//! 解出执行器并核对 `build.json` 与产物的头（ELF 或 Mach-O，F107 §28.4）。不做 IO。
 
 use std::io::Read;
 
 use base64::Engine;
-use rust_cli_ssh_connect::Arch;
+use rust_cli_ssh_connect::Platform;
 use serde_json::Value;
 use sha2::{Digest, Sha256, Sha512};
 
@@ -17,13 +17,9 @@ const BUILD_ENTRY: &str = "package/build.json";
 const MAX_ENTRY: u64 = 512 * 1024 * 1024;
 const BLOCK: usize = 512;
 
-/// 远端架构对应的平台包（§26.3：只有 glibc 的包）。
-pub(super) fn package_name(arch: Arch) -> String {
-    let id = match arch {
-        Arch::X86_64 => "linux-x64-gnu",
-        Arch::Aarch64 => "linux-arm64-gnu",
-    };
-    format!("{PACKAGE_PREFIX}{id}")
+/// 远端平台对应的平台包（§26.3、§28.2；id 由 ssh-connect 的 `Platform` 给）。
+pub(super) fn package_name(platform: Platform) -> String {
+    format!("{PACKAGE_PREFIX}{}", platform.package_id())
 }
 
 /// `dist.integrity`（SRI，空白分隔的几项）里有一项 `sha512-<base64>` 与 `bytes` 的 sha512 相同。没有 sha512 的一项算不对。
@@ -41,12 +37,26 @@ pub(super) fn integrity_matches(bytes: &[u8], integrity: &str) -> bool {
         .any(|expected| expected.as_slice() == digest.as_slice())
 }
 
+/// 能放进路径的版本号（F103，remote-exec.md §27.3：注册表的 latest 进本机缓存与远端的路径）：以数字开头、只含
+/// `[0-9A-Za-z.+-]`、不含 `..`。
+pub(super) fn plain_version(text: &str) -> bool {
+    text.starts_with(|c: char| c.is_ascii_digit())
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
+        && !text.contains("..")
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// 从 tarball（gzip + tar）解出执行器，核对 `build.json`（版本、target、sha256）与 ELF 头。错误是一句简短的原因。
-pub(super) fn extract(tarball: &[u8], version: &str, arch: Arch) -> Result<Vec<u8>, String> {
+/// 从 tarball（gzip + tar）解出执行器，核对 `build.json`（版本、target、sha256）与产物的头。错误是一句简短的原因。
+pub(super) fn extract(
+    tarball: &[u8],
+    version: &str,
+    platform: Platform,
+) -> Result<Vec<u8>, String> {
     let found = entries(flate2::read::GzDecoder::new(tarball))
         .map_err(|error| format!("cannot read the package: {error}"))?;
     let binary = found.binary.ok_or("the package has no bin/zcode-rs")?;
@@ -60,7 +70,7 @@ pub(super) fn extract(tarball: &[u8], version: &str, arch: Arch) -> Result<Vec<u
             field("version")
         ));
     }
-    let target = arch.gnu_triple();
+    let target = platform.triple();
     if field("target") != target {
         return Err(format!(
             "build.json's target is {:?}, expected {target}",
@@ -70,8 +80,8 @@ pub(super) fn extract(tarball: &[u8], version: &str, arch: Arch) -> Result<Vec<u
     if !field("sha256").eq_ignore_ascii_case(&hex(&Sha256::digest(&binary))) {
         return Err("build.json's sha256 does not match bin/zcode-rs".to_owned());
     }
-    if Arch::from_elf(&binary) != Some(arch) {
-        return Err(format!("bin/zcode-rs is not a Linux {target} executable"));
+    if !platform.runs_image(&binary) {
+        return Err(format!("bin/zcode-rs is not a {target} executable"));
     }
     Ok(binary)
 }

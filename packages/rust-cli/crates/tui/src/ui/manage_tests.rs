@@ -17,7 +17,7 @@ fn entry(id: &str, kind: BackgroundKind, status: BackgroundStatus) -> Background
 }
 
 #[test]
-fn the_pill_counts_running_tasks_by_kind() {
+fn the_pill_counts_only_the_running_shells() {
     use BackgroundKind::{Agent, Shell};
     use BackgroundStatus::{Completed, Running};
     assert_eq!(pill(&[], Lang::En), None);
@@ -28,14 +28,10 @@ fn the_pill_counts_running_tasks_by_kind() {
     );
     let shells = [entry("b1", Shell, Running), entry("b2", Shell, Running)];
     assert_eq!(pill(&shells, Lang::En).as_deref(), Some("2 shells"));
-    let agents = [entry("a1", Agent, Running)];
-    assert_eq!(pill(&agents, Lang::En).as_deref(), Some("1 local agent"));
+    // 混合时只数命令（用户决定 2026-10-27）；`running` 仍数全部在跑的条目。
     let mixed = [entry("b1", Shell, Running), entry("a1", Agent, Running)];
-    assert_eq!(
-        pill(&mixed, Lang::En).as_deref(),
-        Some("2 background tasks")
-    );
-    assert_eq!(pill(&mixed, Lang::Zh).as_deref(), Some("2 个后台任务"));
+    assert_eq!(pill(&mixed, Lang::En).as_deref(), Some("1 shell"));
+    assert_eq!(pill(&mixed, Lang::Zh).as_deref(), Some("1 个 shell"));
     assert_eq!(running(&mixed), 2);
 }
 
@@ -102,28 +98,48 @@ fn the_mcp_list_names_the_machine_of_a_remote_server() {
     assert_eq!(names, ["browser-a @dev-a", "docs"]);
 }
 
-/// F98（remote-exec.md §25.4.5，Docker 试用 L9）：在跑的子代理里有缺省机器在远端的，pill 不写“本地”；都在本机时照旧。
+/// 用户决定（tui-display.md §2.3、D25）：子代理不进 pill——子代理列表已经逐行列出。全是子代理时没有 pill（缺省机器
+/// 在远端的子代理也一样，原来写 `N agents`）；混合时只数在跑的命令（原来写 `N background tasks`）。
 #[test]
-fn the_pill_drops_local_for_agents_on_a_remote_machine() {
-    use BackgroundKind::Agent;
-    use BackgroundStatus::Running;
+fn there_is_no_pill_when_only_subagents_run() {
+    use BackgroundKind::{Agent, Shell};
+    use BackgroundStatus::{Completed, Running};
+    let local = [entry("a1", Agent, Running), entry("a2", Agent, Running)];
     let remote = BackgroundEntry {
         machine: Some("dev-a".into()),
-        ..entry("a1", Agent, Running)
+        ..entry("a3", Agent, Running)
     };
+    for lang in [Lang::En, Lang::Zh] {
+        assert_eq!(pill(&local, lang), None);
+        assert_eq!(pill(std::slice::from_ref(&remote), lang), None);
+        assert_eq!(pill(&[remote.clone(), local[0].clone()], lang), None);
+    }
+    // 一个子代理加一个已结束的命令：只数在跑的，仍然全是子代理。
     assert_eq!(
-        pill(std::slice::from_ref(&remote), Lang::En).as_deref(),
-        Some("1 agent")
+        pill(
+            &[entry("b1", Shell, Completed), entry("a1", Agent, Running)],
+            Lang::En
+        ),
+        None
     );
+    // 混合（含远端的子代理）：只数命令。
+    let mixed = [
+        entry("b1", Shell, Running),
+        remote,
+        entry("a1", Agent, Running),
+        entry("b2", Shell, Running),
+    ];
+    assert_eq!(pill(&mixed, Lang::En).as_deref(), Some("2 shells"));
+    assert_eq!(pill(&mixed, Lang::Zh).as_deref(), Some("2 个 shell"));
+    // 一个在跑的命令、一个已结束的子代理：全是命令。
     assert_eq!(
-        pill(std::slice::from_ref(&remote), Lang::Zh).as_deref(),
-        Some("1 个代理")
+        pill(
+            &[entry("b1", Shell, Running), entry("a1", Agent, Completed)],
+            Lang::Zh
+        )
+        .as_deref(),
+        Some("1 个 shell")
     );
-    let both = [remote, entry("a2", Agent, Running)];
-    assert_eq!(pill(&both, Lang::En).as_deref(), Some("2 agents"));
-    let local = [entry("a2", Agent, Running)];
-    assert_eq!(pill(&local, Lang::En).as_deref(), Some("1 local agent"));
-    assert_eq!(pill(&local, Lang::Zh).as_deref(), Some("1 个本地代理"));
 }
 
 /// F98（remote-exec.md §25.4.4，Docker 试用 L7）：`/mcp` 列表在中文界面用中文的状态词，机器没连上的原因写中文；英文不变。

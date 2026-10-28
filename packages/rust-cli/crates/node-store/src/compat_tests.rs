@@ -35,6 +35,7 @@ fn called(id: &str, provider: &str, model: &str) -> Fact {
             },
             started_at_ms: 1000,
             first_token_at_ms: None,
+            first_content_at_ms: None,
             completed_at_ms: 1000,
             status: CallStatus::Cancelled,
             stop_reason: None,

@@ -1,12 +1,13 @@
 //! footer 右侧的请求统计（docs/specs/rust-cli/tui-display.md §2.6，修复线 F27，用户决定）：真实的内核组装（会话
 //! actor、压缩模块与用量表的查询）。完成一次请求后显示 TPS、ctx、cache；`/resume` 之后命中率从用量行重建；压缩后
-//! ctx 立即更新。替身模型不在模型卡片里：窗口 200,000、预留 20,000，有效窗口 180,000。
+//! ctx 立即更新。替身模型不在模型卡片里：窗口 200,000、预留 20,000，有效窗口 180,000。修复线 F105：TPS 来自会话
+//! actor 的内存（只有工具调用的请求也有，换会话之后没有）。
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crossterm::event::KeyCode;
-use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::ids::{SessionId, ToolUseId};
 use rust_cli_kernel_api::message::{ContentBlock, StopReason, Usage};
 use rust_cli_kernel_api::metering::RequestStats;
 use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
@@ -303,6 +304,112 @@ async fn chinese_and_light_themes_show_the_same_items() {
             .find(|cell| cell.symbol() == "缓")
             .expect("the cache item");
         assert_eq!(cell.fg, palette.secondary().fg.unwrap(), "secondary text");
+    })
+    .await;
+}
+
+/// 每读一次前进 1 ms 的内核时钟（修复线 F105）：只有工具调用的请求，块开始（首个内容）一定早于流结束，生成时长大于 0；
+/// 速度的具体数值随读时钟的次数变，这里只看有没有。
+struct TickClock(AtomicU64);
+
+impl rust_cli_kernel_api::clock::Clock for TickClock {
+    fn now_ms(&self) -> u64 {
+        self.0.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn time_zone(&self) -> String {
+        "UTC".to_owned()
+    }
+}
+
+/// 只有一个 Read 调用、没有文字的回复，带输出 token。
+fn tool_call(output: u64) -> Vec<Item> {
+    let input = usage(10, 0, 0);
+    vec![
+        Ok(ModelEvent::MessageStart {
+            id: "msg_api".to_owned(),
+            model: "scripted".to_owned(),
+            usage: input,
+        }),
+        Ok(ModelEvent::BlockStart {
+            index: 0,
+            block: ContentBlock::ToolUse {
+                id: ToolUseId::new("toolu_1"),
+                name: "Read".to_owned(),
+                input: serde_json::json!({}),
+            },
+        }),
+        Ok(ModelEvent::BlockDelta {
+            index: 0,
+            delta: BlockDelta::InputJson(
+                r#"{"file_path":"/Users/dev/project/notes.txt"}"#.to_owned(),
+            ),
+        }),
+        Ok(ModelEvent::BlockStop { index: 0 }),
+        Ok(ModelEvent::MessageDelta {
+            stop_reason: Some(StopReason::ToolUse),
+            usage: Usage {
+                output_tokens: output,
+                ..input
+            },
+        }),
+        Ok(ModelEvent::MessageStop),
+    ]
+}
+
+/// 修复线 F105（tui-display.md §2.6、D20、D26，用户决定）：只有工具调用的请求也有 TPS（首个内容是 tool_use 块开始）。
+/// TPS 只在会话 actor 的内存里：`/clear` 之后没有，`/resume` 回来（冷打开）也没有，下一个请求完成之后才有；命中率照旧
+/// 从用量行重建。旧代码：只有工具调用的请求没有首字，第一步就等不到 TPS。
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tool_only_request_has_tps_until_the_session_changes() {
+    let (model, senders) = GatedModel::new(3);
+    let mut senders = senders.into_iter();
+    let (tool, after, again) = (
+        senders.next().unwrap(),
+        senders.next().unwrap(),
+        senders.next().unwrap(),
+    );
+    let setup = Setup {
+        width: 120,
+        clock: Some(Arc::new(TickClock(AtomicU64::new(1_000)))),
+        ..Setup::default()
+    };
+    with_ui(model, setup, |mut ui| async move {
+        ui.submit("read my notes");
+        finish(tool, tool_call(50));
+        // 工具（替身环境里读失败）之后的第二个请求还扣着：footer 已经有第一个请求的 TPS。
+        let screen = ui
+            .wait("the speed of the tool call", |s| s.contains(" tok/s"))
+            .await;
+        assert!(screen.contains("esc to interrupt"), "{screen}");
+        finish(after, reply("noted", usage(200, 800, 0), 30));
+        let screen = ui.wait("the reply", |s| idle(s, "noted")).await;
+        assert!(screen.contains(" tok/s · ctx "), "{screen}");
+        ui.submit("/clear");
+        let screen = ui
+            .wait("the cleared screen", |s| !s.contains("noted"))
+            .await;
+        assert!(!screen.contains("tok/s"), "{screen}");
+        ui.submit("/resume");
+        ui.wait("the session row", |s| {
+            s.lines()
+                .any(|line| line.starts_with("  › ") && line.ends_with("  read my notes"))
+        })
+        .await;
+        ui.key(KeyCode::Enter);
+        // 冷打开：命中率从用量行重建，TPS 要等下一个完成的请求。
+        let screen = ui
+            .wait("the resumed session", |s| {
+                !s.contains("Type to search") && s.contains("noted") && s.contains("cache ")
+            })
+            .await;
+        assert!(!screen.contains("tok/s"), "{screen}");
+        ui.submit("once more");
+        finish(again, reply("done", usage(200, 800, 0), 20));
+        ui.wait("the speed again", |s| {
+            idle(s, "done") && s.contains(" tok/s")
+        })
+        .await;
     })
     .await;
 }

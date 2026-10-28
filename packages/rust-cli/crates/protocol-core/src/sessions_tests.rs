@@ -141,6 +141,7 @@ fn view(last_seq: u64) -> SessionView {
         peer_held: Vec::new(),
         context_usage: None,
         context_notice: Default::default(),
+        output_speed: None,
     }
 }
 

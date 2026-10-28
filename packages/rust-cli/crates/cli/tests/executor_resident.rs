@@ -1,5 +1,6 @@
 //! 常驻执行器，真实进程（docs/specs/rust-cli/remote-exec.md §19.3、§19.5、§19.7、§19.12）：起停、`status` / `stop`、
-//! 两个代理共用一个常驻进程、杀掉代理后命令继续跑并经重连取到输出、杀掉常驻进程后重启并把没有终态的调用记成中断。
+//! 两个代理共用一个常驻进程、杀掉代理后命令继续跑并经重连取到输出、杀掉常驻进程后重启并把没有终态的调用记成中断、版本
+//! 不同而协议相同的代理与客户端照常工作。
 //!
 //! 每个测试用自己的临时 HOME（socket 与账本都在里面）；结束时 `zcode executor stop`，不留常驻进程。
 #![cfg(unix)]
@@ -13,8 +14,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use futures_util::StreamExt;
 use rust_cli_env_remote::RemoteEnvironment;
+use rust_cli_exec_client::{ClientOptions, ExecClient};
+use rust_cli_exec_transport::stream::stream_link;
+use rust_cli_exec_transport::{Connector, Link, LinkError, MAX_FRAME};
+use rust_cli_executor_host::proxy::{self, DaemonCommand, ProxyConfig};
 use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvPath, OperationContext, Origin, StartCommand, WriteFile,
     WritePrecondition,
@@ -250,4 +256,124 @@ async fn the_status_report_is_what_the_probe_reads() {
     assert_eq!(resident.executable.as_deref(), Some(BIN));
     home.run(&["executor", "stop"]);
     assert!(foreground.wait().unwrap().success());
+}
+
+/// 进程内的代理：版本是 `version`（与常驻进程不同），协议相同。拉起常驻进程时用这个二进制（版本与它不同）。
+struct OtherVersion {
+    env: Vec<(String, String)>,
+    work: PathBuf,
+    paths: rust_cli_paths::ExecutorPaths,
+    version: String,
+}
+
+impl OtherVersion {
+    fn new(home: &Home, version: &str) -> Arc<Self> {
+        let root = home.home();
+        Arc::new(Self {
+            env: home.env(),
+            work: home.work.clone(),
+            paths: rust_cli_paths::StoragePaths::resolve(&Default::default(), root, root)
+                .executor(),
+            version: version.to_owned(),
+        })
+    }
+}
+
+#[async_trait]
+impl Connector for OtherVersion {
+    async fn connect(&self) -> Result<Box<dyn Link>, LinkError> {
+        let (near, far) = tokio::io::duplex(1 << 16);
+        let (far_read, far_write) = tokio::io::split(far);
+        let config = ProxyConfig {
+            paths: self.paths.clone(),
+            version: self.version.clone(),
+            protocol: rust_cli_exec_wire::handshake::PROTOCOL,
+            daemon: DaemonCommand {
+                program: PathBuf::from(BIN),
+                args: vec!["executor".to_owned(), "--daemon".to_owned()],
+                env: self.env.clone(),
+                cwd: Some(self.work.clone()),
+            },
+            session_env: Default::default(),
+        };
+        tokio::spawn(async move {
+            let _ = proxy::proxy(far_read, far_write, config).await;
+        });
+        let (read, write) = tokio::io::split(near);
+        Ok(Box::new(stream_link(
+            read,
+            write,
+            "in-process proxy",
+            MAX_FRAME,
+        )))
+    }
+
+    fn describe(&self) -> String {
+        "in-process proxy".to_owned()
+    }
+}
+
+/// F103（remote-exec.md §27.6）：本机的版本不在 npm 上时，远端跑的是别的版本。版本不同、协议相同：版本不同的代理连到正忙的
+/// 常驻进程（照 §19.5 继续用它，不换掉），版本不同的客户端经它握手、跑命令。
+#[tokio::test(flavor = "multi_thread")]
+async fn a_different_version_with_the_same_protocol_still_works() {
+    let home = Home::new();
+    let proxies = Proxies::new(&home);
+    let first = client(&proxies, "c1").await;
+    let status = home
+        .wait_for("a busy resident", |status| {
+            status["resident"]["idle"] == false
+        })
+        .await;
+    let resident = status["resident"].clone();
+    assert_ne!(resident["version"], "9.9.9");
+
+    let second = ExecClient::connect(
+        OtherVersion::new(&home, "9.9.9"),
+        ClientOptions::new("9.9.9", "c2"),
+    )
+    .await
+    .unwrap();
+    let welcome = second.welcome().unwrap();
+    assert_eq!(
+        welcome.server_instance,
+        first.welcome().unwrap().server_instance
+    );
+    assert_eq!(
+        welcome.server_version,
+        resident["version"].as_str().unwrap()
+    );
+    let machine = Arc::new(RemoteEnvironment::new(second.clone())).machine();
+    machine
+        .commands()
+        .start_command(
+            &home.workspace(),
+            context("op_other"),
+            command(&home.work, "t2", "echo from-$((6*7))"),
+        )
+        .await
+        .unwrap();
+    let mut events = machine
+        .commands()
+        .watch_command(OperationId::new("op_other"), 0);
+    let mut output = String::new();
+    let mut exit = None;
+    while let Some(event) = events.next().await {
+        match event.unwrap() {
+            CommandEvent::Output { data, .. } => output.push_str(&String::from_utf8_lossy(&data)),
+            CommandEvent::Finished { exit_code, .. } => {
+                exit = exit_code;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!((exit, output.as_str()), (Some(0), "from-42\n"));
+    // 还是原来那个常驻进程：没有被换掉，两个客户端都在。
+    let status = home
+        .wait_for("two clients", |status| status["resident"]["clients"] == 2)
+        .await;
+    assert_eq!(status["resident"]["pid"], resident["pid"]);
+    second.close().await;
+    first.close().await;
 }

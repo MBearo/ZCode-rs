@@ -1,6 +1,7 @@
 //! footer 右侧的请求统计（docs/specs/rust-cli/tui-display.md §2.6，修复线 F27，用户决定）：TPS、ctx、缓存命中率。
-//! 值只来自内核——TPS 与命中率是用量表的查询结果（runner 按序号写入 [`FooterStats`]），ctx 是会话 actor 给的上下文
-//! 用量（`view::Transcript::context_usage`）；这里只排文字，没有值的项不出现。
+//! 值只来自内核——命中率是用量表的查询结果（runner 按序号写入 [`FooterStats`]），ctx 与 TPS 是会话 actor 给的上下文
+//! 用量与输出速度（`view::Transcript::context_usage`、`output_speed`）；这里只排文字，没有值的项不出现。
+//! 修复线 F105：TPS 原来也取用量表（最近一行），只有工具调用的请求没有值；现在取 actor 在内存里记的速度。
 use ratatui::text::Span;
 use rust_cli_kernel_api::metering::RequestStats;
 
@@ -59,8 +60,10 @@ pub fn items(app: &App) -> Items {
     let style = app.palette.secondary();
     let span = |text: String| Span::styled(text, style);
     // `tok/s` 是单位，中英文相同。
-    let tps = stats
-        .tokens_per_second()
+    let tps = app
+        .view
+        .output_speed()
+        .and_then(|speed| speed.tokens_per_second())
         .map(|tps| span(format!("{} tok/s", whole(tps))));
     let ctx = app.view.context_usage().map(|usage| {
         span(match app.lang {

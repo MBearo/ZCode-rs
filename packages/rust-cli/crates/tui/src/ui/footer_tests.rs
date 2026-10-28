@@ -1,6 +1,6 @@
 use ratatui::style::{Color, Modifier};
 use rust_cli_kernel_api::compaction::ContextNotice;
-use rust_cli_kernel_api::metering::RequestStats;
+use rust_cli_kernel_api::metering::{OutputSpeed, RequestStats};
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{KernelEvent, SequencedEvent};
 use rust_cli_kernel_api::testing::selection;
@@ -94,8 +94,19 @@ fn the_context_notice_has_four_wordings() {
     );
 }
 
-/// F27 的 App：深色或浅色背景（前景色已知，次要文字是真彩色）、内核的上下文用量与一份请求统计的回执。
+/// F27 的 App：深色或浅色背景（前景色已知，次要文字是真彩色）、内核的上下文用量与一份请求统计的回执；
+/// 有回执时另有会话 actor 给的输出速度（F105 起 TPS 的来源，[`node_speed`]）。
 fn stats_app(lang: Lang, light: bool, stats: Option<RequestStats>) -> App {
+    let speed = stats.is_some().then(node_speed);
+    speed_app(lang, light, stats, speed)
+}
+
+fn speed_app(
+    lang: Lang,
+    light: bool,
+    stats: Option<RequestStats>,
+    speed: Option<OutputSpeed>,
+) -> App {
     let (background, foreground) = if light {
         ((255, 255, 255), (0, 0, 0))
     } else {
@@ -124,6 +135,16 @@ fn stats_app(lang: Lang, light: bool, stats: Option<RequestStats>) -> App {
         },
         0,
     );
+    if let Some(speed) = speed {
+        app.view.apply(
+            SequencedEvent {
+                seq: 2,
+                revision: 0,
+                event: KernelEvent::OutputSpeed { speed },
+            },
+            0,
+        );
+    }
     if let Some(stats) = stats {
         let seq = app.request_stats.begin();
         assert!(app.request_stats.arrived(seq, Some(stats)));
@@ -131,18 +152,23 @@ fn stats_app(lang: Lang, light: bool, stats: Option<RequestStats>) -> App {
     app
 }
 
-/// Node 调试面板的一轮（kernel-api `metering_tests` 同一组数）：40 tok/s，累计命中率 0.91。
+/// Node 调试面板的一轮（kernel-api `metering_tests` 同一组数）：累计命中率 0.91。F105 起回执里的 `last` 不再给 TPS。
 fn node_stats() -> RequestStats {
     RequestStats {
         requests: 2,
         input_tokens: 2_000,
         cache_read_tokens: 1_820,
         unknown_cache_usage: false,
-        last: Some(rust_cli_kernel_api::metering::LastRequest {
-            output_tokens: Some(120),
-            duration_ms: Some(5_000),
-            first_token_ms: Some(2_000),
-        }),
+        last: None,
+    }
+}
+
+/// 同一轮的输出速度：120 个输出 token、总时长 5000 ms、首个内容 2000 ms → 40 tok/s。
+fn node_speed() -> OutputSpeed {
+    OutputSpeed {
+        output_tokens: Some(120),
+        duration_ms: 5_000,
+        first_content_ms: Some(2_000),
     }
 }
 
@@ -184,12 +210,11 @@ fn items_without_values_are_left_out() {
     let none = stats_app(Lang::En, false, None);
     let text = plain(&footer(&none, 160).0);
     assert!(text.ends_with("scripted \u{b7} ctx 37%"), "{text}");
-    let mut stats = node_stats();
-    stats.last = Some(rust_cli_kernel_api::metering::LastRequest {
-        first_token_ms: None,
-        ..stats.last.unwrap()
-    });
-    let no_tps = stats_app(Lang::En, false, Some(stats));
+    let no_content = OutputSpeed {
+        first_content_ms: None,
+        ..node_speed()
+    };
+    let no_tps = speed_app(Lang::En, false, Some(node_stats()), Some(no_content));
     let text = plain(&footer(&no_tps, 160).0);
     assert!(
         text.ends_with("scripted \u{b7} ctx 37% \u{b7} cache 91%"),
@@ -216,6 +241,29 @@ fn items_without_values_are_left_out() {
     assert!(!text.contains("ctx") && !text.contains("tok/s"), "{text}");
 }
 
+/// 修复线 F105（tui-display.md §2.6、D26）：TPS 只取会话 actor 给的输出速度，不取用量表回执里的最近一行；没有速度
+/// （冷打开、切换会话之后）时不显示，即使回执里有最近一行。旧代码按回执的 `last` 显示 40 tok/s。
+#[test]
+fn the_speed_comes_from_the_session_not_the_usage_rows() {
+    let stored = RequestStats {
+        last: Some(rust_cli_kernel_api::metering::LastRequest {
+            output_tokens: Some(120),
+            duration_ms: Some(5_000),
+            first_token_ms: Some(2_000),
+        }),
+        ..node_stats()
+    };
+    let cold = speed_app(Lang::En, false, Some(stored), None);
+    let text = plain(&footer(&cold, 160).0);
+    assert!(
+        text.ends_with("scripted \u{b7} ctx 37% \u{b7} cache 91%"),
+        "{text}"
+    );
+    let live = speed_app(Lang::En, false, Some(node_stats()), Some(node_speed()));
+    let text = plain(&footer(&live, 160).0);
+    assert!(text.contains("\u{b7} 40 tok/s \u{b7}"), "{text}");
+}
+
 /// 切换会话与 `/clear` 之后，晚到的旧回执不覆盖（回执带序号，tui-display.md §2.6）。
 #[test]
 fn a_late_receipt_from_the_old_session_is_dropped() {
@@ -238,7 +286,7 @@ fn narrow_terminals_drop_cache_then_tps_then_context() {
     let mut app = stats_app(Lang::En, false, Some(node_stats()));
     app.view.apply(
         SequencedEvent {
-            seq: 2,
+            seq: 3,
             revision: 0,
             event: KernelEvent::ContextNotice {
                 notice: ContextNotice::UntilAutoCompact { percent: 10 },

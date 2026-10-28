@@ -10,7 +10,8 @@ path = "junit.xml"
 
 # SSH 的 Docker 测试（docs/specs/rust-cli/remote-exec.md §19.12）：建镜像、上传执行器、断线重连，一次要一分钟左右。
 # 三个测试文件都算（ssh_docker、ssh_docker_env、F100 的 ssh_docker_dist：第一次建 debian 镜像要 apt 装包，§26）。
+# F107（§28.10）：本机是 macOS 时的真实 SSH 测试 ssh_macos（打一百多 MB 的包、下载、上传、试跑，约 40 s）同样算。
 [[profile.default.overrides]]
-filter = "binary(/^ssh_docker/)"
+filter = "binary(/^ssh_(docker|macos)/)"
 slow-timeout = { period = "60s", terminate-after = 5 }
 retries = 0

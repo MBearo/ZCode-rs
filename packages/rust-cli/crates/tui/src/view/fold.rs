@@ -37,6 +37,7 @@ impl Transcript {
         // 冷加载的上下文提示与用量来自快照（F27：以前要等下一条回复）。
         transcript.context = view.context_notice;
         transcript.occupancy = view.context_usage;
+        transcript.speed = view.output_speed;
         for message in view.messages {
             transcript.message(message, now_ms);
         }
@@ -183,6 +184,8 @@ impl Transcript {
                     max_tokens,
                 });
             }
+            // footer 的 TPS（F105）：只取最新的一份。
+            KernelEvent::OutputSpeed { speed } => self.speed = Some(speed),
             KernelEvent::CompactStarted { .. } => {
                 self.push(Body::Marker(Marker::Compacting), now_ms);
             }

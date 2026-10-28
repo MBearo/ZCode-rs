@@ -34,6 +34,7 @@ fn call(message: &str, model: &str, started: u64, duration: u64, status: CallSta
             },
             started_at_ms: started,
             first_token_at_ms: None,
+            first_content_at_ms: None,
             completed_at_ms: started + duration,
             status,
             stop_reason: None,

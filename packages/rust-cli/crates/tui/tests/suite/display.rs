@@ -58,8 +58,10 @@ async fn a_foreground_agent_shows_its_progress_and_then_done() {
     assert!(is_subagent(&model.requests()[1]));
 }
 
+/// 修复线 F105（tui-display.md §2.3、D25，用户决定）：在跑的只有后台子代理时 footer 没有 pill（子代理列表已经列出它），
+/// ↓ 直接进入列表；Background 面板从 `/tasks` 打开，在那里停止。旧代码的 footer 写 `· 1 local agent` 与 `↓ to manage`。
 #[tokio::test(flavor = "multi_thread")]
-async fn a_background_agent_shows_in_the_footer_and_stops_from_tasks() {
+async fn a_background_agent_has_no_pill_and_stops_from_tasks() {
     let (model, senders) = GatedModel::new(4);
     let mut senders: Vec<_> = senders.into_iter().map(Some).collect();
     let probe = model.clone();
@@ -88,17 +90,23 @@ async fn a_background_agent_shows_in_the_footer_and_stops_from_tasks() {
             senders[main].take().unwrap(),
             text_response(&["started a review"]),
         );
+        // 子代理的行在 footer 下面；footer 里没有 pill，也没有 `↓ to manage`。
         let screen = ui
-            .wait("the pill", |s| {
-                s.contains("· 1 local agent") && !s.contains("esc to interrupt")
+            .wait("the subagent row", |s| {
+                s.lines()
+                    .any(|l| l.contains("◯ general-purpose") && l.contains("Review code"))
+                    && !s.contains("esc to interrupt")
             })
             .await;
-        assert!(screen.contains("↓ to manage"), "{screen}");
-        // ↓ 先选中 pill，enter 打开 Background 面板（tui-panels.md §3.1）。
+        assert!(!screen.contains("local agent"), "{screen}");
+        assert!(!screen.contains("· ↓ to manage"), "{screen}");
+        // ↓ 直接进入子代理列表。
         ui.key(KeyCode::Down);
-        // 80 列时提示放不下会被截断（`Enter to view tas…`）。
-        ui.wait_for("· 1 local agent · Enter to view").await;
-        ui.key(KeyCode::Enter);
+        ui.wait_for("↑/↓ to select").await;
+        ui.key(KeyCode::Esc);
+        ui.wait("the list to lose focus", |s| !s.contains("↑/↓ to select"))
+            .await;
+        ui.submit("/tasks");
         let list = ui.wait_for("1 active agent").await;
         assert!(list.contains("  Background"), "{list}");
         assert!(
@@ -108,14 +116,14 @@ async fn a_background_agent_shows_in_the_footer_and_stops_from_tasks() {
         );
         ui.key(KeyCode::Char('x'));
         ui.wait_for("Stopped Review code").await;
-        // 停止的通知开了一个回合（task-notification），pill 随之消失。
+        // 停止的通知开了一个回合（task-notification）。
         finish(
             senders[3].take().unwrap(),
             text_response(&["review stopped"]),
         );
         ui.key(KeyCode::Esc);
-        ui.wait("the pill to go away", |s| {
-            s.contains("review stopped") && !s.contains("1 local agent")
+        ui.wait("the turn of the notification", |s| {
+            s.contains("review stopped") && !s.contains("esc to interrupt")
         })
         .await;
         drop(senders);

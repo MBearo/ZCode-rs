@@ -400,12 +400,12 @@
       "methods": [
         {
           "name": "cached",
-          "signature": "async fn cached(&self,version:&str,arch:Arch) -> Option<PathBuf>",
+          "signature": "async fn cached(&self,version:&str,platform:Platform) -> Option<PathBuf>",
           "default": false
         },
         {
           "name": "download",
-          "signature": "async fn download(&self,version:&str,arch:Arch) -> Result<PathBuf,String>",
+          "signature": "async fn download(&self,version:&str,platform:Platform) -> Result<PathBuf,DownloadError>",
           "default": false
         }
       ]

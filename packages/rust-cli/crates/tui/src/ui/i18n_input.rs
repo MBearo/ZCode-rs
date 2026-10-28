@@ -17,6 +17,15 @@ pub fn stashed(lang: Lang) -> &'static str {
     )
 }
 
+/// 排队的插话下面那一行立即发送的提示（修复线 F104，tui.md §5.1.1）：`key` 是当前终端按得出来的键。整行同一种样式
+/// （F105），不再用按键提示组件的 `{键}` 标记。
+pub fn send_now_hint(lang: Lang, key: &str) -> String {
+    match lang {
+        Lang::En => format!("{key} to send now"),
+        Lang::Zh => format!("{key} 立即发送"),
+    }
+}
+
 /// 发送后放回暂存的提示。
 pub fn draft_restored(lang: Lang) -> &'static str {
     pick(lang, "Draft restored", "已放回暂存的输入")

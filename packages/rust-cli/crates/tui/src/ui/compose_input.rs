@@ -1,5 +1,6 @@
 //! 输入能力的按键（docs/specs/rust-cli/tui-input.md §5，Chat 段的按键）：
 //! ctrl+x 和弦、立即发送、排队、清空、暂存、模型选择。处理了的键返回 `Some`，其余交给 `compose_key`。
+//! 另有排队的插话下面那一行立即发送提示的键与条件（tui.md §5.1.1，修复线 F104）。
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -85,9 +86,37 @@ impl App {
         }
     }
 
+    /// 立即发送的提示里写哪个键（修复线 F104，tui-input.md §11.1.1）：终端分辨得出增强按键时 ctrl+enter
+    /// （经 `CSI u` 到达，与回车分得开），分辨不出时 ctrl+x ctrl+s（和弦，任何终端都按得出来）。
+    pub(super) fn send_now_key(&self) -> &'static str {
+        if self.keyboard_enhanced {
+            "ctrl+enter"
+        } else {
+            "ctrl+x ctrl+s"
+        }
+    }
+
+    /// 排队的插话下面那一行提示的模板（tui.md §5.1.1）：回合在跑、队列里有用户插话时才有。只读查看子代理时
+    /// 没有（按键不交给输入框，这个键按了也不起作用）。
+    pub(super) fn send_now_hint(&self) -> Option<String> {
+        if !self.running() || self.viewing.is_some() || self.view.queue().is_empty() {
+            return None;
+        }
+        Some(super::i18n_input::send_now_hint(
+            self.lang,
+            self.send_now_key(),
+        ))
+    }
+
     /// 立即发送：运行中是低延迟投递（修复线 L-A，tui-input.md §11.1）：runner 先入队（插话），再把前台 Bash 转到后台，
     /// 不中断当前回合；空闲时同 enter。
+    ///
+    /// 修复线 F105（用户决定 2026-10-27）：以前输入框为空时什么都不做，可提示那一行正让用户按这个键。现在输入框为空时
+    /// 只投递排着的插话（不入队新文字）；条件就是提示那一行的条件，两者同一个来源。队列为空时仍什么都不做，不中断。
     fn send_now(&mut self) -> Option<Action> {
+        if self.composer.is_empty() {
+            return self.send_now_hint().map(|_| Action::DeliverQueued);
+        }
         let running = self.running();
         match self.submit()? {
             Action::Submit { text, delivery } if running => {

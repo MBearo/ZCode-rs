@@ -467,3 +467,56 @@ async fn the_same_directory_is_judged_by_its_path_key() {
     // POSIX 区分大小写：是另一个目录。
     assert!(!unchanged("/work", "/WORK").await);
 }
+
+/// 修复线 F105（tui-input.md §11.1）：为投递插话而转后台（`DeliverMessage`）只在 next 通道里还有排着的插话时转——界面的
+/// 队列可能落后一个事件，是否还有插话只看 actor 自己的通道；用户按的转后台（`User`）照旧。旧代码不看通道，没有插话时
+/// 也转。
+#[tokio::test]
+async fn delivering_moves_the_foreground_only_while_an_input_waits() {
+    use rust_cli_kernel_api::env::BackgroundReason;
+    use rust_cli_kernel_api::session_api::{Command, Delivery, KernelEvent};
+
+    use crate::test_support::{GatedModel, envelope};
+
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let mut setup = Setup::new(Arc::new(GatedModel::new(gate.clone())));
+    let memory = env();
+    setup.set_env(memory.clone());
+    let built = setup.build().await;
+    let mut events = built.session.subscribe(None);
+    built.session.send(submit("c1", "hi")).await;
+    until(&mut events, |event| {
+        matches!(event, KernelEvent::TurnStarted { .. })
+    })
+    .await;
+    let deliver = |id| {
+        envelope(
+            id,
+            Command::BackgroundForeground {
+                reason: BackgroundReason::DeliverMessage,
+            },
+        )
+    };
+    built.session.send(deliver("c2")).await;
+    assert!(memory.moved().is_empty(), "no input waits yet");
+    let steer = Command::Submit {
+        text: "also this".to_owned(),
+        attachments: Vec::new(),
+        delivery: Delivery::Steer,
+    };
+    built.session.send(envelope("c3", steer)).await;
+    built.session.send(deliver("c4")).await;
+    let by_user = Command::BackgroundForeground {
+        reason: BackgroundReason::User,
+    };
+    built.session.send(envelope("c5", by_user)).await;
+    assert_eq!(
+        memory.moved(),
+        [BackgroundReason::DeliverMessage, BackgroundReason::User]
+    );
+    // 第一个请求放行后插话开下一个回合（没有工具边界），再放行一次。
+    gate.notify_one();
+    until(&mut events, finished).await;
+    gate.notify_one();
+    until(&mut events, finished).await;
+}

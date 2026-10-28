@@ -84,6 +84,10 @@ struct Stdout {
 }
 
 impl Screen for Stdout {
+    fn keyboard_enhanced(&self) -> bool {
+        self.guard.enhanced()
+    }
+
     fn notify(&mut self, sequence: &str) {
         let mut out = std::io::stdout().lock();
         // 通知失败只影响这一次提醒。

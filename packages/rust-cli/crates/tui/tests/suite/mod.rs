@@ -48,6 +48,7 @@ mod projects;
 mod question_results;
 mod questions;
 mod queue;
+mod queue_send_now;
 mod resume_page;
 mod resume_store;
 mod sessions_seed;

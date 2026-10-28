@@ -20,6 +20,16 @@ pub(crate) struct Remote {
 
 impl Remote {
     pub(crate) fn new() -> Self {
+        Self::saying("Linux", "x86_64")
+    }
+
+    /// F107（§28.2）：假的 macOS 远端（`uname` 说 Darwin；脚本不会在 macOS 上问 libc）。
+    pub(crate) fn macos(arch: &str) -> Self {
+        Self::saying("Darwin", arch)
+    }
+
+    /// `uname -s` / `uname -m` 说什么的假远端。
+    pub(crate) fn saying(os: &str, machine: &str) -> Self {
         let root = tempfile::tempdir().unwrap();
         let fake = root.path().join("fake");
         std::fs::create_dir_all(&fake).unwrap();
@@ -31,7 +41,7 @@ impl Remote {
         };
         write(
             "uname",
-            "#!/bin/sh\ncase \"$1\" in -s) echo Linux;; -m) echo x86_64;; esac\n",
+            &format!("#!/bin/sh\ncase \"$1\" in -s) echo {os};; -m) echo {machine};; esac\n"),
         );
         // F100：glibc 2.31；目标 alpine 是 musl（没有 glibc，探测多一行 `libc musl`：本机没有 /lib/ld-musl-*）。
         write(
@@ -73,6 +83,17 @@ impl Remote {
                 ),
             ],
         }
+    }
+
+    /// 一个 arm64 的 Mach-O 头加一些内容（F107，§28.4：macOS 的远端认这种产物）。
+    pub(crate) fn macho_artifact(&self) -> (PathBuf, Vec<u8>) {
+        let mut bytes = vec![0u8; 64];
+        bytes[..4].copy_from_slice(&0xfeed_facfu32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&0x0100_000cu32.to_le_bytes());
+        bytes.extend_from_slice(&[7u8; 5000]);
+        let path = self.root.path().join("zcode-rs-darwin");
+        std::fs::write(&path, &bytes).unwrap();
+        (path, bytes)
     }
 
     /// 一个 x86_64 的 Linux ELF 头加一些内容。

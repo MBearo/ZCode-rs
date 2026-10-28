@@ -46,6 +46,8 @@ pub struct MemoryEnvironment {
     fail_apply: std::sync::atomic::AtomicBool,
     /// `rewind_finish` 收到的 token，按顺序。
     finished: Mutex<Vec<OperationId>>,
+    /// `background_foreground` 收到的原因，按顺序（修复线 F105：低延迟投递转不转后台）。没有前台命令，转了 0 个。
+    moved: Mutex<Vec<crate::env_command::BackgroundReason>>,
 }
 
 fn separator(path: &str) -> char {
@@ -85,7 +87,13 @@ impl MemoryEnvironment {
             finished: Mutex::default(),
             shell_cwd: Mutex::default(),
             rewinds: Mutex::default(),
+            moved: Mutex::default(),
         }
+    }
+
+    /// `background_foreground` 收到的原因，按顺序。
+    pub fn moved(&self) -> Vec<crate::env_command::BackgroundReason> {
+        lock(&self.moved).clone()
     }
 
     #[must_use]
@@ -436,7 +444,17 @@ impl Git for MemoryEnvironment {
     }
 }
 
-impl Background for MemoryEnvironment {}
+#[async_trait]
+impl Background for MemoryEnvironment {
+    async fn background_foreground(
+        &self,
+        _session: &SessionId,
+        reason: crate::env_command::BackgroundReason,
+    ) -> Result<Vec<crate::ids::ShellTaskId>, EnvError> {
+        lock(&self.moved).push(reason);
+        Ok(Vec::new())
+    }
+}
 impl Pdf for MemoryEnvironment {}
 impl Fetch for MemoryEnvironment {}
 

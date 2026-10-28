@@ -47,6 +47,21 @@ fn failure(error: &MachineError) -> MachineFailure {
         },
         MachineError::Musl => MachineFailure::Musl,
         MachineError::OldGlibc { glibc, needs } => MachineFailure::OldGlibc { glibc, needs },
+        MachineError::LatestIncompatible {
+            version,
+            protocol,
+            latest,
+            latest_protocol,
+            target,
+        } => MachineFailure::LatestIncompatible {
+            version,
+            protocol,
+            latest,
+            latest_protocol,
+            target,
+        },
+        MachineError::NoPackage { package } => MachineFailure::NoPackage { package },
+        MachineError::Unsigned => MachineFailure::Unsigned,
         MachineError::Refused(message) => MachineFailure::Refused(message),
         MachineError::Lost(message) => MachineFailure::Lost(message),
     }

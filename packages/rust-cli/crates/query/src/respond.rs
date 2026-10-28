@@ -89,10 +89,54 @@ struct Timing {
     selection: rust_cli_kernel_api::model::ModelSelection,
     started: u64,
     first_token: Option<u64>,
+    /// 首个内容（footer 的 TPS，修复线 F105，tui-display.md §2.6）：只在内存，不写进用量表。
+    first_content: Option<u64>,
     retries: u32,
 }
 
+/// 用量表那一列的首字（Node `firstModelTokenAt`）：第一个非空的文本或推理增量。
+fn token_starts(event: &ModelEvent) -> bool {
+    matches!(
+        event,
+        ModelEvent::BlockDelta {
+            delta: BlockDelta::Text(text) | BlockDelta::Thinking(text),
+            ..
+        } if !text.is_empty()
+    )
+}
+
+/// 首个内容：首字之外，工具参数的增量与 tool_use 块的开始也算（修复线 F105，用户决定 2026-10-27）。以前只认首字，只有
+/// 工具调用的响应没有 TPS。
+pub(crate) fn content_starts(event: &ModelEvent) -> bool {
+    token_starts(event)
+        || matches!(
+            event,
+            ModelEvent::BlockDelta {
+                delta: BlockDelta::InputJson(_),
+                ..
+            } | ModelEvent::BlockStart {
+                block: ContentBlock::ToolUse { .. },
+                ..
+            }
+        )
+}
+
 impl Timing {
+    /// 记下首字与首个内容；两者落在同一个事件上时只读一次时钟。
+    fn observe(&mut self, event: &ModelEvent, clock: &dyn rust_cli_kernel_api::clock::Clock) {
+        let token = self.first_token.is_none() && token_starts(event);
+        let content = self.first_content.is_none() && content_starts(event);
+        if token || content {
+            let now = clock.now_ms();
+            if token {
+                self.first_token = Some(now);
+            }
+            if content {
+                self.first_content = Some(now);
+            }
+        }
+    }
+
     fn call(
         self,
         completed_at_ms: u64,
@@ -107,6 +151,7 @@ impl Timing {
             selection: self.selection,
             started_at_ms: self.started,
             first_token_at_ms: self.first_token,
+            first_content_at_ms: self.first_content,
             completed_at_ms,
             status,
             stop_reason,
@@ -169,6 +214,7 @@ pub(crate) async fn respond(
         selection: request.selection.clone(),
         started: scope.parts.clock.now_ms(),
         first_token: None,
+        first_content: None,
         retries: 0,
     };
     // 运行日志（logging.md §4）：请求的开始与结束、失败。计时与重试数和用量行同一份（`Timing`，usage.md §1），
@@ -230,16 +276,8 @@ pub(crate) async fn respond(
                     let _ = scope.sink.emit(QueryEvent::ModelNotice { notice }).await;
                 }
                 Some(Ok(ModelStreamItem::Event(event))) => {
-                    // Node `firstModelTokenAt`：第一个非空的文本或推理增量。
-                    if timing.first_token.is_none()
-                        && let ModelEvent::BlockDelta {
-                            delta: BlockDelta::Text(text) | BlockDelta::Thinking(text),
-                            ..
-                        } = &event
-                        && !text.is_empty()
-                    {
-                        timing.first_token = Some(scope.parts.clock.now_ms());
-                    }
+                    // 首字（Node `firstModelTokenAt`）与首个内容（F105）。
+                    timing.observe(&event, scope.parts.clock.as_ref());
                     if let ModelEvent::BlockDelta { index, delta } = &event {
                         deltas += 1;
                         let delta = QueryEvent::Delta {

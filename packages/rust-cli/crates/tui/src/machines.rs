@@ -117,6 +117,21 @@ pub enum MachineFailure {
         glibc: Option<String>,
         needs: String,
     },
+    /// 本机的版本不在 npm 上，npm 的 latest 说别的协议（F103，remote-exec.md §27.7）：两边的版本与协议，`target` 是本机
+    /// 缓存的 gnu 目录名。
+    LatestIncompatible {
+        version: String,
+        protocol: u32,
+        latest: String,
+        latest_protocol: u32,
+        target: String,
+    },
+    /// 远端的平台没有执行器包（F107，remote-exec.md §28.6）：`package` 是应该有的 npm 平台包 id。
+    NoPackage {
+        package: String,
+    },
+    /// 上传的执行器被远端的系统杀掉：签名无效（F107，remote-exec.md §28.5）。
+    Unsigned,
     Refused(String),
     Lost(String),
 }

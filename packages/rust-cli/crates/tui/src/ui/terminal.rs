@@ -102,6 +102,12 @@ fn install_panic_restore(enhanced: bool) {
 }
 
 impl Guard {
+    /// 终端分辨得出增强按键吗（进入时键盘增强的查询结论，修复线 F104，tui-input.md §11.1.1）：为真时推过
+    /// `DISAMBIGUATE_ESCAPE_CODES`，ctrl+enter 才与回车分得开。
+    pub fn enhanced(&self) -> bool {
+        self.enhanced
+    }
+
     /// 临时交还终端（外部编辑器）；返回后重新进入并要求整屏重绘。
     pub fn suspend(&self) {
         restore(self.enhanced);

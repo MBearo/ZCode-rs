@@ -89,14 +89,16 @@ async fn a_text_reply_is_timed_and_committed_with_its_assistant_message() {
     assert_eq!(call.message, assistant.id);
     assert_eq!(call.source, QuerySource::MainThread);
     assert_eq!(call.selection, selection());
-    // 请求前、第一个非空的文本增量（空串不算）、流结束各读一次时钟。
+    // 请求前、第一个非空的文本增量（空串不算）、流结束各读一次时钟。首个内容与首字是同一个增量、同一次读时钟
+    // （修复线 F105）。
     assert_eq!(
         (
             call.started_at_ms,
             call.first_token_at_ms,
+            call.first_content_at_ms,
             call.completed_at_ms
         ),
-        (10, Some(20), 30)
+        (10, Some(20), Some(20), 30)
     );
     assert_eq!(call.status, CallStatus::Completed);
     assert_eq!(call.stop_reason, Some(StopReason::EndTurn));
@@ -134,6 +136,59 @@ async fn a_tool_round_commits_the_tool_call_with_its_result() {
     assert_eq!(call.output_bytes, 6);
     assert!(call.started_at_ms <= call.completed_at_ms);
     assert!(calls[0].1.started_at_ms < call.started_at_ms);
+}
+
+/// 修复线 F105（tui-display.md §2.6）：只有工具调用的响应没有首字（用量表那一列照旧为空），但有首个内容：tool_use 块
+/// 开始那一刻。旧代码没有这个时刻，footer 因此没有 TPS。
+#[tokio::test]
+async fn a_tool_only_reply_has_a_first_content_time() {
+    let model = Arc::new(ScriptedModel::new(vec![
+        tool_use_response("toolu_1", "Echo", &json!({"text": "hi"})),
+        text_response(&["done"]),
+    ]));
+    let tool: Arc<dyn rust_cli_kernel_api::tool::Tool> =
+        Arc::new(FakeTool::new("Echo", true, "ok"));
+    let (stop, sink) = run(model, vec![tool]).await;
+    stop.unwrap();
+    let calls = models(&sink);
+    let call = &calls[0].1;
+    assert_eq!(call.first_token_at_ms, None);
+    // 请求前读一次（10），块开始读一次（20）；参数增量不再读。
+    assert_eq!(
+        (call.started_at_ms, call.first_content_at_ms),
+        (10, Some(20))
+    );
+    assert!(call.completed_at_ms > 20);
+    // 文字回复的请求两者相同。
+    let text = &calls[1].1;
+    assert!(text.first_token_at_ms.is_some());
+    assert_eq!(text.first_content_at_ms, text.first_token_at_ms);
+}
+
+/// 推理在前、文字在后：首个内容与首字都是推理的第一个非空增量；工具参数增量先到时只有首个内容。
+#[test]
+fn the_first_content_is_text_reasoning_or_tool_input() {
+    use rust_cli_kernel_api::message::ContentBlock;
+    use rust_cli_kernel_api::model::BlockDelta;
+
+    use crate::respond::content_starts;
+
+    let delta = |delta| ModelEvent::BlockDelta { index: 0, delta };
+    assert!(content_starts(&delta(BlockDelta::Text("a".into()))));
+    assert!(content_starts(&delta(BlockDelta::Thinking("b".into()))));
+    assert!(content_starts(&delta(BlockDelta::InputJson("{".into()))));
+    assert!(!content_starts(&delta(BlockDelta::Text(String::new()))));
+    assert!(!content_starts(&delta(BlockDelta::Signature("s".into()))));
+    let block = |block| ModelEvent::BlockStart { index: 0, block };
+    assert!(content_starts(&block(ContentBlock::ToolUse {
+        id: rust_cli_kernel_api::ids::ToolUseId::new("toolu_1"),
+        name: "Echo".into(),
+        input: json!({}),
+    })));
+    assert!(!content_starts(&block(ContentBlock::Text {
+        text: String::new()
+    })));
+    assert!(!content_starts(&ModelEvent::MessageStop));
 }
 
 #[tokio::test]

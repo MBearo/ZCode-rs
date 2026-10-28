@@ -205,6 +205,62 @@ fn downloading_is_a_step_before_the_upload() {
     );
 }
 
+/// F107（remote-exec.md §28.6）：平台没有包、签名无效这两种错误照样换算，文字写明平台与原因。
+#[test]
+fn the_platform_errors_are_converted() {
+    let no_package = MachineError::from(ProvisionError::NoPackage {
+        package: "darwin-x64".to_owned(),
+    });
+    assert_eq!(
+        no_package,
+        MachineError::NoPackage {
+            package: "darwin-x64".to_owned()
+        }
+    );
+    assert!(
+        no_package.to_string().contains("darwin-x64"),
+        "{no_package}"
+    );
+    let unsigned = MachineError::from(ProvisionError::Unsigned);
+    assert_eq!(unsigned, MachineError::Unsigned);
+    assert!(unsigned.to_string().contains("signature"), "{unsigned}");
+}
+
+/// F103（remote-exec.md §27.2、§27.7）：退到 latest 时只报一次下载（再报一次不是合法的转移）；latest 协议不同的错误照样
+/// 换算，文字写明两边的版本与协议。
+#[test]
+fn falling_back_to_the_latest_downloads_once_and_names_both_protocols() {
+    assert_eq!(transition(&S::Downloading, E::Downloading), None);
+    let error = MachineError::from(ProvisionError::LatestIncompatible {
+        version: "0.1.64".to_owned(),
+        protocol: 1,
+        latest: "0.1.63".to_owned(),
+        latest_protocol: 2,
+        target: "aarch64-unknown-linux-gnu".to_owned(),
+    });
+    assert_eq!(
+        error,
+        MachineError::LatestIncompatible {
+            version: "0.1.64".to_owned(),
+            protocol: 1,
+            latest: "0.1.63".to_owned(),
+            latest_protocol: 2,
+            target: "aarch64-unknown-linux-gnu".to_owned(),
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "zcode 0.1.64 (protocol 1) is not on npm, and the latest executor there, 0.1.63, speaks protocol 2"
+    );
+    assert_eq!(
+        transition(
+            &S::Uploading { bytes: 1 },
+            E::ProvisionFailed(error.clone())
+        ),
+        Some(S::Failed { error })
+    );
+}
+
 /// F98（remote-exec.md §25.4.2）：部署时的上传是单独一步：探测之后、握手之前；上传失败同部署失败，断开随时回到未连。
 #[test]
 fn uploading_is_a_step_between_probing_and_the_handshake() {

@@ -31,6 +31,7 @@ fn model_call(message: &str) -> Fact {
             selection: selection(),
             started_at_ms: 2_000,
             first_token_at_ms: Some(2_100),
+            first_content_at_ms: None,
             completed_at_ms: 2_500,
             status: CallStatus::Completed,
             stop_reason: Some(StopReason::EndTurn),

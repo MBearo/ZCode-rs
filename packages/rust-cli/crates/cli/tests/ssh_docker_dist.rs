@@ -3,11 +3,13 @@
 //!
 //! 1. debian（glibc）：下载 → integrity / build.json / ELF 校验 → 原子写进本机缓存 → 上传（试跑）→ 握手 → `Bash{machine}`
 //!    在容器里跑；再连一次（远端的执行器删掉）用缓存，不再下载；
-//! 2. alpine（musl）：下载之前报清楚的错误，注册表一次请求都没收到。
+//! 2. alpine（musl）：下载之前报清楚的错误，注册表一次请求都没收到；
+//! 3. F103（§27）：本机的版本不在注册表里，注册表只有 latest `0.0.9`：debian 里走完 404 → latest → 上传到 `bin/0.0.9/` →
+//!    试跑核对协议 → 握手 → `Bash{machine}`。
 //!
 //! 包是把 `test:rust-cli` 交叉编译的 musl 静态 debug 产物（`ZCODE_TEST_SSH_ARTIFACT`）照 npm 平台包的样子打成
-//! `@mbearo/zcode-linux-<arch>-gnu@<debug 版本>`（静态产物在 glibc 的系统上照样能跑）。没有 Docker 或没有产物时跳过并
-//! 写明原因。容器与镜像用完删掉（名字带 f100 前缀）。
+//! `@mbearo/zcode-linux-<arch>-gnu@<版本>`（静态产物在 glibc 的系统上照样能跑）。没有 Docker 或没有产物时跳过并写明
+//! 原因。容器与镜像用完删掉（名字带各自修复线的前缀）。
 #![cfg(unix)]
 #![allow(
     clippy::disallowed_methods,
@@ -99,8 +101,8 @@ fn platform(artifact: &Path) -> (&'static str, &'static str) {
     }
 }
 
-/// 照 npm 平台包的样子打包（`package/bin/zcode-rs` 0755、`package/build.json`），返回 tarball 的字节。
-fn pack(artifact: &Path, target: &str, dir: &Path) -> Vec<u8> {
+/// 照 npm 平台包的样子打包（`package/bin/zcode-rs` 0755、`package/build.json` 写 `version`），返回 tarball 的字节。
+fn pack(artifact: &Path, target: &str, version: &str, dir: &Path) -> Vec<u8> {
     let package = dir.join("package");
     std::fs::create_dir_all(package.join("bin")).unwrap();
     let binary = package.join("bin/zcode-rs");
@@ -108,7 +110,7 @@ fn pack(artifact: &Path, target: &str, dir: &Path) -> Vec<u8> {
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
     let bytes = std::fs::read(&binary).unwrap();
     let build = serde_json::json!({
-        "version": VERSION,
+        "version": version,
         "sourceCommit": "0".repeat(40),
         "target": target,
         "sha256": hex(&Sha256::digest(&bytes)),
@@ -133,20 +135,21 @@ fn pack(artifact: &Path, target: &str, dir: &Path) -> Vec<u8> {
     std::fs::read(tgz).unwrap()
 }
 
-/// 起一个假注册表并发布这个包（packument 与 tarball 两条路由）。返回（注册表，packument 的路径，tarball 的路径）。
-fn registry_for(id: &str, tarball: Vec<u8>) -> (Registry, String, String) {
+/// 起一个假注册表并发布这个包的 `version`（packument 与 tarball 两条路由；latest 就是它）。返回（注册表，packument 的
+/// 路径，tarball 的路径）。
+fn registry_for(id: &str, version: &str, tarball: Vec<u8>) -> (Registry, String, String) {
     let registry = Registry::start();
     let name = format!("@mbearo/zcode-{id}");
     let packument = format!("/@mbearo%2fzcode-{id}");
-    let tarball_path = format!("/{name}/-/zcode-{id}-{VERSION}.tgz");
+    let tarball_path = format!("/{name}/-/zcode-{id}-{version}.tgz");
     let integrity = format!(
         "sha512-{}",
         base64::engine::general_purpose::STANDARD.encode(Sha512::digest(&tarball))
     );
     let document = serde_json::json!({
         "name": name,
-        "dist-tags": {"latest": VERSION},
-        "versions": {VERSION: {"name": name, "version": VERSION, "dist": {
+        "dist-tags": {"latest": version},
+        "versions": {version: {"name": name, "version": version, "dist": {
             "tarball": format!("{}{tarball_path}", registry.url),
             "integrity": integrity,
         }}},
@@ -230,8 +233,8 @@ async fn a_glibc_machine_downloads_the_executor_from_the_registry() {
     };
     let (id, target) = platform(&artifact);
     let packing = tempfile::tempdir().unwrap();
-    let tarball = pack(&artifact, target, packing.path());
-    let (registry, packument, tarball_path) = registry_for(id, tarball);
+    let tarball = pack(&artifact, target, VERSION, packing.path());
+    let (registry, packument, tarball_path) = registry_for(id, VERSION, tarball);
     let sshd = Sshd::start_with(Image::Debian, "f100-zcode-rs-test-sshd");
     sshd.wait_ready().await;
     let (ok, _, err) = sshd.ssh("mkdir -p /srv/proj && ldd --version | head -n 1");
@@ -303,8 +306,8 @@ async fn a_musl_machine_is_refused_before_downloading() {
     };
     let (id, target) = platform(&artifact);
     let packing = tempfile::tempdir().unwrap();
-    let tarball = pack(&artifact, target, packing.path());
-    let (registry, _, _) = registry_for(id, tarball);
+    let tarball = pack(&artifact, target, VERSION, packing.path());
+    let (registry, _, _) = registry_for(id, VERSION, tarball);
     let sshd = Sshd::start_with(Image::Alpine, "f100-zcode-rs-test-sshd");
     sshd.wait_ready().await;
     let (ok, _, err) = sshd.ssh("mkdir -p /srv/proj");
@@ -326,4 +329,96 @@ async fn a_musl_machine_is_refused_before_downloading() {
     );
     assert!(registry.seen().is_empty(), "{:?}", registry.seen());
     assert!(!home.path().join(".zcode/rust-cli/exec/dist").exists());
+}
+
+/// 注册表的 latest（F103）：比本机的 debug 版本旧，本机的版本不在注册表里。
+const LATEST: &str = "0.0.9";
+
+/// 本机的运行日志里有没有这一句（日志在临时 HOME 下）。
+fn logged(home: &Path, text: &str) -> bool {
+    fn walk(dir: &Path, text: &str) -> bool {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        entries.flatten().any(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, text)
+            } else {
+                std::fs::read_to_string(&path).is_ok_and(|content| content.contains(text))
+            }
+        })
+    }
+    walk(&home.join(".zcode"), text)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_local_build_falls_back_to_the_latest_on_the_registry() {
+    let Some(artifact) = artifact_or_skip() else {
+        return;
+    };
+    assert_ne!(VERSION, LATEST);
+    let (id, target) = platform(&artifact);
+    let packing = tempfile::tempdir().unwrap();
+    let tarball = pack(&artifact, target, LATEST, packing.path());
+    let (registry, packument, tarball_path) = registry_for(id, LATEST, tarball);
+    let sshd = Sshd::start_with(Image::Debian, "f103-zcode-rs-test-sshd");
+    sshd.wait_ready().await;
+    let (ok, _, err) = sshd.ssh("mkdir -p /srv/proj");
+    assert!(ok, "{err}");
+    let work = tempfile::tempdir().unwrap();
+    let work_path = std::fs::canonicalize(work.path()).unwrap();
+    let home = tempfile::tempdir().unwrap();
+    machine_list(home.path());
+
+    let (output, requests) = print_run(&sshd, home.path(), &work_path, &registry.url);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result = last_result(&requests);
+    assert!(result.contains("Linux"), "{result}");
+    assert!(result.contains("marker-42"), "{result}");
+    // 本机的版本：packument 里没有；latest：再取 packument、下载 tarball 一次。
+    assert_eq!(
+        registry.seen(),
+        [packument.clone(), packument, tarball_path]
+    );
+    // 按实际版本缓存与上传。
+    let dist = home.path().join(".zcode/rust-cli/exec/dist");
+    assert_eq!(
+        std::fs::read(dist.join(format!("{LATEST}/{target}/zcode-rs"))).unwrap(),
+        std::fs::read(&artifact).unwrap()
+    );
+    assert!(!dist.join(VERSION).exists());
+    let installed = format!("/root/.zcode/rust-cli/exec/bin/{LATEST}/zcode-rs");
+    let (ok, listing, err) =
+        sshd.ssh("ls -A /root/.zcode/rust-cli/exec/bin /root/.zcode/rust-cli/exec/bin/*");
+    assert!(ok, "{err}");
+    assert_eq!(
+        listing
+            .split_whitespace()
+            .filter(|word| !word.ends_with(':'))
+            .collect::<Vec<_>>(),
+        [LATEST, "zcode-rs"],
+        "only bin/{LATEST}/zcode-rs, no trial leftovers: {listing}"
+    );
+    let (_, remote_sum, _) = sshd.ssh(&format!("sha256sum {installed}"));
+    let (_, local_sum, _) = run("shasum", &["-a", "256", &artifact.to_string_lossy()]);
+    assert_eq!(
+        remote_sum.split_whitespace().next(),
+        local_sum.split_whitespace().next()
+    );
+    assert!(
+        logged(
+            home.path(),
+            "this zcode version is not on npm; using the latest published executor"
+        ),
+        "the fallback is in the run log"
+    );
+
+    // 收尾：停掉容器里的常驻执行器（容器随后删掉）。
+    let (ok, out, err) = sshd.ssh(&format!("{installed} executor stop"));
+    assert!(ok, "{out}{err}");
 }

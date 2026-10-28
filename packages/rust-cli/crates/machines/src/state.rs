@@ -73,9 +73,9 @@ pub enum MachineEvent {
 pub enum MachineError {
     #[error("unreachable: {0}")]
     Unreachable(String),
-    #[error("{os} {arch} is not supported (only Linux x86_64 and aarch64)")]
+    #[error("{os} {arch} is not supported (only Linux x86_64 / aarch64 and macOS arm64)")]
     Unsupported { os: String, arch: String },
-    #[error("no Linux {target} build of zcode {version} to upload")]
+    #[error("no {target} build of zcode {version} to upload")]
     NoArtifact { version: String, target: String },
     #[error("the remote executor {version} speaks protocol {protocol}{}", if *busy { " and is busy" } else { "" })]
     Incompatible {
@@ -88,7 +88,7 @@ pub enum MachineError {
     #[error("cannot understand the remote: {0}")]
     Probe(String),
     /// 下载执行器失败，远端也没有兼容的（F100，remote-exec.md §26.6）。
-    #[error("downloading the Linux {target} build of zcode {version} failed: {reason}")]
+    #[error("downloading the {target} build of zcode {version} failed: {reason}")]
     DownloadFailed {
         version: String,
         target: String,
@@ -103,6 +103,23 @@ pub enum MachineError {
         glibc: Option<String>,
         needs: String,
     },
+    /// 本机的版本不在 npm 上，npm 的 latest 说别的协议（F103，remote-exec.md §27.7）。
+    #[error(
+        "zcode {version} (protocol {protocol}) is not on npm, and the latest executor there, {latest}, speaks protocol {latest_protocol}"
+    )]
+    LatestIncompatible {
+        version: String,
+        protocol: u32,
+        latest: String,
+        latest_protocol: u32,
+        target: String,
+    },
+    /// 这个平台没有发布的执行器包（F107，remote-exec.md §28.2：Intel Mac）。
+    #[error("there is no zcode executor package for the remote's platform ({package})")]
+    NoPackage { package: String },
+    /// 上传的执行器在远端被系统杀掉：签名无效（F107，remote-exec.md §28.5）。
+    #[error("the uploaded executor was killed on the remote: its signature is not valid")]
+    Unsigned,
     /// 执行器拒绝了握手（协议、鉴权、旧连接）。
     #[error("refused: {0}")]
     Refused(String),
@@ -139,6 +156,21 @@ impl From<ProvisionError> for MachineError {
             },
             ProvisionError::Musl => Self::Musl,
             ProvisionError::OldGlibc { glibc, needs } => Self::OldGlibc { glibc, needs },
+            ProvisionError::LatestIncompatible {
+                version,
+                protocol,
+                latest,
+                latest_protocol,
+                target,
+            } => Self::LatestIncompatible {
+                version,
+                protocol,
+                latest,
+                latest_protocol,
+                target,
+            },
+            ProvisionError::NoPackage { package } => Self::NoPackage { package },
+            ProvisionError::Unsigned => Self::Unsigned,
         }
     }
 }

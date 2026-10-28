@@ -38,6 +38,8 @@ fn call(message: &str, status: CallStatus) -> ModelCall {
         selection: requested(),
         started_at_ms: 2_000,
         first_token_at_ms: Some(2_300),
+        // 只在内存里的首个内容（早于首字）：用量表不写它，下面的列照旧按首字（修复线 F105）。
+        first_content_at_ms: Some(2_200),
         completed_at_ms: 2_900,
         status,
         stop_reason: Some(StopReason::ToolUse),

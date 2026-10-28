@@ -153,6 +153,14 @@ impl<B: Backend> Loop<'_, B> {
                 },
                 String::new(),
             ),
+            // 只投递排着的插话（F105）：与有文字时的立即发送同一个原因，只是不先入队。
+            Action::DeliverQueued => self.send(
+                Sent::Record,
+                Command::BackgroundForeground {
+                    reason: rust_cli_kernel_api::env::BackgroundReason::DeliverMessage,
+                },
+                String::new(),
+            ),
             // esc / ctrl+c 的中断：回合结束时据此判断要不要撤回（修复线 F38，restore.rs）。
             Action::Interrupt => {
                 self.user_cancel = true;

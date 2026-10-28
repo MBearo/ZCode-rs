@@ -7,8 +7,8 @@
 import { access, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { git, run } from "./affected-unit-tests/process.mjs";
-import { resolveScope } from "./affected-unit-tests/scope.mjs";
+import { git, run } from "./engineering-tests/process.mjs";
+import { resolveScope } from "./engineering-tests/scope.mjs";
 
 // clippy 与 rustfmt 的版本由 packages/rust-cli/rust-toolchain.toml 固定，按前缀算在里面（工作线 F46 把它
 // 从仓库根移到这里）。

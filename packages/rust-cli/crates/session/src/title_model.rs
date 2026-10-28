@@ -196,6 +196,7 @@ impl TitleModel {
             started_at_ms: started,
             // Node 的标题请求是非流式的 `generateText`，没有首字时间（usage.md §2.1.1）。
             first_token_at_ms: None,
+            first_content_at_ms: None,
             completed_at_ms: completed,
             status,
             stop_reason: reply.stop_reason,

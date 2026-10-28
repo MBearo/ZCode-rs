@@ -211,6 +211,8 @@ pub(crate) struct Actor {
     pub(crate) peers: crate::peers::PeerState,
     /// Monitor 的切行、批、限流与终态的合成（工作线 F83，monitors.rs）：只在 actor 里。
     pub(crate) monitors: crate::monitors::Monitors,
+    /// 最近一个完成的主回合请求的输出速度（footer 的 TPS，修复线 F105）：只在内存，冷打开时为空。
+    pub(crate) output_speed: Option<rust_cli_kernel_api::metering::OutputSpeed>,
     /// 自己的请求通道（弱引用）：交给回合的输出端，给出会话级的询问入口；不让 actor 因此不退出。
     asks: mpsc::WeakSender<Request>,
 }
@@ -284,6 +286,7 @@ impl Actor {
             peer_stream,
             peers: crate::peers::PeerState::default(),
             monitors: crate::monitors::Monitors::default(),
+            output_speed: None,
             asks,
         };
         actor.start_session(start);
@@ -691,6 +694,7 @@ impl Actor {
             // 冷加载后不用等下一条回复（F27）：与 `context_changed` 同样两个函数。
             context_usage: self.context_occupancy(),
             context_notice: self.context_notice().unwrap_or_default(),
+            output_speed: self.output_speed,
         }
     }
 }

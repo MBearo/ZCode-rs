@@ -103,6 +103,25 @@ fn down_selects_the_pill_then_the_agent_list() {
     assert!(matches!(app.overlay, Some(Overlay::Background(_))));
 }
 
+/// 修复线 F105（tui-display.md §2.3、tui-panels.md §3.1）：在跑的全是子代理时没有 pill，↓ 直接进子代理列表。
+/// 旧代码先选中写着 `1 local agent` 的 pill。
+#[test]
+fn down_goes_straight_to_the_list_when_only_subagents_run() {
+    let mut app = app();
+    let now = Instant::now();
+    app.background = vec![BackgroundEntry {
+        kind: BackgroundKind::Agent,
+        description: "Review code".into(),
+        ..shell("agent_a", "")
+    }];
+    app.agents = AgentList {
+        entries: vec![agent("agent_a")],
+        at: Some(now),
+    };
+    app.on_key(key(KeyCode::Down), now);
+    assert_eq!(app.focus, Some(Focus::Agents(0)));
+}
+
 #[test]
 fn the_panel_groups_shells_and_agents() {
     let mut app = app();

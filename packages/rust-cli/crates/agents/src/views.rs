@@ -147,6 +147,7 @@ pub(crate) async fn view(
         // 子代理的只读快照不显示 footer 的上下文（F27）。
         context_usage: None,
         context_notice: Default::default(),
+        output_speed: None,
     })
 }
 

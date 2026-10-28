@@ -32,6 +32,7 @@ fn call(
             },
             started_at_ms,
             first_token_at_ms,
+            first_content_at_ms: None,
             completed_at_ms,
             status,
             stop_reason: None,

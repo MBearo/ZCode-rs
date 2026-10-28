@@ -33,6 +33,10 @@ pub struct ModelCall {
     /// 第一个非空的文本或推理增量。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_token_at_ms: Option<u64>,
+    /// 首个内容：第一个非空的文本或推理增量、第一个工具参数增量、第一个 tool_use 块开始里最早的一个（footer 的 TPS，
+    /// docs/specs/rust-cli/tui-display.md §2.6，修复线 F105）。只在内存里交给会话 actor，存储不写它。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_content_at_ms: Option<u64>,
     pub completed_at_ms: u64,
     pub status: CallStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -64,6 +68,9 @@ pub struct ToolCall {
 }
 
 /// [`crate::orchestration::RunSink::commit_metered`] 的计量部分。
+// 修复线 F105 给 `ModelCall` 加了 `first_content_at_ms`，两个变体的大小差过了 clippy 的门槛。`Metered` 每次请求只传一次、
+// 不成批存放；把变体改成 `Box` 要改已有的项（kernel-api 只加不改），所以这里放开这条 lint。
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "call", rename_all = "snake_case")]
 pub enum Metered {
@@ -131,6 +138,33 @@ impl RequestStats {
     pub fn cache_hit_rate(&self) -> Option<f64> {
         (!self.unknown_cache_usage && self.input_tokens > 0)
             .then(|| self.cache_read_tokens as f64 / self.input_tokens as f64)
+    }
+}
+
+/// 一个完成的主回合请求的输出速度（footer 的 TPS，docs/specs/rust-cli/tui-display.md §2.6，修复线 F105）：会话 actor
+/// 在内存里记最近的一个（`KernelEvent::OutputSpeed`、`SessionView.output_speed`），不落库，冷打开的会话没有。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputSpeed {
+    /// 输出 token；用量未知时为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    /// 请求总时长。
+    pub duration_ms: u64,
+    /// 首个内容的时间（相对请求开始，[`ModelCall::first_content_at_ms`]）；没有内容时为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_content_ms: Option<u64>,
+}
+
+impl OutputSpeed {
+    /// 生成时长：总时长大于首个内容的时间时是两者之差，否则没有。
+    pub fn generation_ms(&self) -> Option<u64> {
+        let first = self.first_content_ms?;
+        (self.duration_ms > first).then(|| self.duration_ms - first)
+    }
+
+    /// 输出速度（[`output_tps`]，口径同 Node 调试面板）。
+    pub fn tokens_per_second(&self) -> Option<f64> {
+        output_tps(self.output_tokens, self.generation_ms())
     }
 }
 

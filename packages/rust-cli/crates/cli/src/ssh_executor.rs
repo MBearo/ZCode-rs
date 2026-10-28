@@ -20,7 +20,9 @@ use rust_cli_kernel_api::local_services::LocalServices;
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_machines::{Endpoint, Machine};
 use rust_cli_paths::{ExecutorPaths, StorageSettings};
-use rust_cli_ssh_connect::{Arch, ArtifactSource, SshConnector, SshProvisioner, SshTarget, Wanted};
+use rust_cli_ssh_connect::{
+    ArtifactSource, Platform, SshConnector, SshProvisioner, SshTarget, Wanted,
+};
 
 use crate::options::SshAssumption;
 
@@ -59,17 +61,19 @@ pub(super) fn executor_paths(startup: &super::Startup) -> ExecutorPaths {
     super::setup::storage_paths(startup, &StorageSettings::default()).executor()
 }
 
-/// 上传用的静态产物：测试变量给的文件，再加本机缓存里同版本的两种架构（§19.4 的 `dist/` 的 musl 目录）。下载的 glibc
-/// 产物在 gnu 目录，归下载来源管（F100，§26.3），两种互不覆盖。
+/// 上传用的静态产物：测试变量给的文件，再加本机缓存里同版本的两种 Linux 架构（§19.4 的 `dist/` 的 musl 目录）。下载
+/// 的产物在各自平台的 target 目录，归下载来源管（F100、F107，§26.3、§28.8），互不覆盖；macOS 没有静态产物的目录。
 fn artifacts(executor: &ExecutorPaths, artifact: Option<&str>) -> Vec<PathBuf> {
     artifact
         .into_iter()
         .map(PathBuf::from)
-        .chain([Arch::X86_64, Arch::Aarch64].map(|arch| {
-            executor
-                .artifact(super::VERSION, arch.musl_triple())
-                .as_path()
-                .to_path_buf()
+        .chain(Platform::LINUX.into_iter().filter_map(|platform| {
+            Some(
+                executor
+                    .artifact(super::VERSION, platform.static_triple()?)
+                    .as_path()
+                    .to_path_buf(),
+            )
         }))
         .collect()
 }

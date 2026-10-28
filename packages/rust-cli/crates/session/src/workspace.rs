@@ -139,11 +139,22 @@ impl Actor {
 impl Actor {
     /// `Command::BackgroundForeground`（修复线 L-A，tui-input.md §11）：本机执行环境里这个会话在跑的前台命令转到后台；
     /// 前台 Bash 的工具调用随之返回转后台的说明，工具边界随之到来。没有在跑的回合时什么都不转。
+    ///
+    /// 修复线 F105（tui-input.md §11.1）：为投递插话而转（`DeliverMessage`）时，只在 next 通道里还有排着的插话时转。
+    /// 输入框为空时的立即发送按界面看到的队列发出，界面的队列可能落后一个事件：插话刚在工具边界并入，再转的就是之后
+    /// 才开始的命令。是否还有插话只看 actor 自己的通道（唯一来源）。
     pub(crate) async fn background_foreground(
         &self,
         reason: rust_cli_kernel_api::env::BackgroundReason,
     ) -> Ack {
         if self.running.is_none() {
+            return accepted();
+        }
+        let waiting = self
+            .lane
+            .iter()
+            .any(|lane| matches!(lane, crate::lane::Lane::Input(_)));
+        if reason == rust_cli_kernel_api::env::BackgroundReason::DeliverMessage && !waiting {
             return accepted();
         }
         let moved = match self

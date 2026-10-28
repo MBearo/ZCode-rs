@@ -66,7 +66,7 @@ pub enum Manage {
     },
 }
 
-/// 还在跑的后台任务数（footer 的 pill 只数这些）。
+/// 还在跑的后台任务数（命令与子代理都算；footer 的 pill 只数其中的命令，见 [`pill`]）。
 pub fn running(entries: &[BackgroundEntry]) -> usize {
     entries
         .iter()
@@ -74,44 +74,25 @@ pub fn running(entries: &[BackgroundEntry]) -> usize {
         .count()
 }
 
-/// 在跑的子代理里有缺省机器在远端的（F98，remote-exec.md §25.4.5）：这时不写“本地”。
-pub fn remote_agents(entries: &[BackgroundEntry]) -> bool {
-    entries.iter().any(|entry| {
-        entry.kind == BackgroundKind::Agent
-            && entry.status == BackgroundStatus::Running
-            && entry.machine.is_some()
-    })
-}
-
-/// footer 的 pill：都是命令 `N shell(s)`，都是子代理 `N local agent(s)`，混合 `N background task(s)`。
+/// footer 的 pill：只数在跑的命令，`N shell(s)`；没有在跑的命令时没有 pill。
 ///
-/// 缺陷修复（Docker 试用 L9，F98）：缺省机器在 dev-a 的子代理也写成“本地代理”，与子代理列表的 `@dev-a` 冲突；有这样的
-/// 子代理时写 `N agent(s)` / `N 个代理`。
+/// 用户决定（修复线 F105 与 F106，tui-display.md §2.3、D25）：子代理不进 pill——输入框下面的子代理列表已经逐行列出。
+/// 原来全是子代理时写 `N local agent(s)`（缺省机器在远端时 `N agent(s)`，F98），混合时写 `N background task(s)`
+/// 把子代理也算进去；两种写法都去掉了。
 pub fn pill(entries: &[BackgroundEntry], lang: Lang) -> Option<String> {
-    let live: Vec<&BackgroundEntry> = entries
+    let n = entries
         .iter()
-        .filter(|entry| entry.status == BackgroundStatus::Running)
-        .collect();
-    let first = live.first()?;
-    let n = live.len();
-    let same = live.iter().all(|entry| entry.kind == first.kind);
-    if same && first.kind == BackgroundKind::Agent && remote_agents(entries) {
-        return Some(match (lang, n) {
-            (Lang::En, 1) => "1 agent".to_owned(),
-            (Lang::En, n) => format!("{n} agents"),
-            (Lang::Zh, n) => format!("{n} 个代理"),
-        });
+        .filter(|entry| {
+            entry.status == BackgroundStatus::Running && entry.kind == BackgroundKind::Shell
+        })
+        .count();
+    if n == 0 {
+        return None;
     }
-    Some(match (lang, same.then_some(first.kind)) {
-        (Lang::En, Some(BackgroundKind::Shell)) if n == 1 => "1 shell".to_owned(),
-        (Lang::En, Some(BackgroundKind::Shell)) => format!("{n} shells"),
-        (Lang::En, Some(BackgroundKind::Agent)) if n == 1 => "1 local agent".to_owned(),
-        (Lang::En, Some(BackgroundKind::Agent)) => format!("{n} local agents"),
-        (Lang::En, None) if n == 1 => "1 background task".to_owned(),
-        (Lang::En, None) => format!("{n} background tasks"),
-        (Lang::Zh, Some(BackgroundKind::Shell)) => format!("{n} 个 shell"),
-        (Lang::Zh, Some(BackgroundKind::Agent)) => format!("{n} 个本地代理"),
-        (Lang::Zh, None) => format!("{n} 个后台任务"),
+    Some(match lang {
+        Lang::En if n == 1 => "1 shell".to_owned(),
+        Lang::En => format!("{n} shells"),
+        Lang::Zh => format!("{n} 个 shell"),
     })
 }
 

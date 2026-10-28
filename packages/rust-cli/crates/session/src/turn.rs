@@ -6,7 +6,7 @@ use rust_cli_kernel_api::abort::{Abort, AbortReason};
 use rust_cli_kernel_api::hooks::HookOutcome;
 use rust_cli_kernel_api::ids::{CommandId, InteractionId, OperationId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
-use rust_cli_kernel_api::metering::{CallStatus, Metered};
+use rust_cli_kernel_api::metering::{CallStatus, Metered, ModelCall, OutputSpeed};
 use rust_cli_kernel_api::model::QuerySource;
 use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, OrchestrationError, QueryEvent, QueryRequest, QueryStop,
@@ -36,6 +36,20 @@ fn metered_fact(metered: Metered) -> Fact {
         Metered::Model(call) => Fact::ModelCalled { call },
         Metered::Tool(call) => Fact::ToolCalled { call },
     }
+}
+
+/// footer 的 TPS（修复线 F105，docs/specs/rust-cli/tui-display.md §2.6）：只有完成的主回合请求才有；子代理、旁路与压缩
+/// 请求、中断与失败的请求不更新。时刻都相对请求开始。
+pub(crate) fn output_speed(call: &ModelCall) -> Option<OutputSpeed> {
+    (call.source == QuerySource::MainThread && call.status == CallStatus::Completed).then(|| {
+        OutputSpeed {
+            output_tokens: call.usage.as_ref().map(|usage| usage.output_tokens),
+            duration_ms: call.completed_at_ms.saturating_sub(call.started_at_ms),
+            first_content_ms: call
+                .first_content_at_ms
+                .map(|at| at.saturating_sub(call.started_at_ms)),
+        }
+    })
 }
 
 /// 成批进同一个回合的一条后续输入（修复线 L-A，query.md §4.3）。
@@ -218,11 +232,20 @@ impl Actor {
                 metered,
                 reply,
             } => {
+                let speed = match metered.as_ref() {
+                    Metered::Model(call) => output_speed(call),
+                    Metered::Tool(_) => None,
+                };
                 let usage = vec![metered_fact(*metered)];
                 let result = match message {
                     Some(message) => self.record_with(message, usage).await,
                     None => self.record_facts(usage).await,
                 };
+                // 先落库，再记下并发出（只在内存，F105）。
+                if let (Ok(()), Some(speed)) = (&result, speed) {
+                    self.output_speed = Some(speed);
+                    self.log.append(KernelEvent::OutputSpeed { speed });
+                }
                 let _ = reply.send(result);
             }
             SinkRequest::Messages { messages, reply } => {

@@ -390,10 +390,12 @@ pub fn failure_text(lang: Lang, name: &str, failure: &MachineFailure) -> String 
             format!("无法经 SSH 连到 {name}：{}", explain(lang, m))
         }
         (Lang::En, MachineFailure::Unsupported { os, arch }) => {
-            format!("{name} runs {os} {arch}; remote machines must be Linux x86_64 or aarch64.")
+            format!(
+                "{name} runs {os} {arch}; remote machines must be Linux x86_64 / aarch64 or macOS arm64."
+            )
         }
         (Lang::Zh, MachineFailure::Unsupported { os, arch }) => {
-            format!("{name} 是 {os} {arch}；远端机器只支持 Linux x86_64 与 aarch64。")
+            format!("{name} 是 {os} {arch}；远端机器只支持 Linux x86_64 / aarch64 与 macOS arm64。")
         }
         (Lang::En, MachineFailure::NoArtifact { version, target }) => format!(
             "There's no zcode {version} build for {target} to upload to {name}, and no compatible executor is installed there."
@@ -490,6 +492,46 @@ pub fn failure_text(lang: Lang, name: &str, failure: &MachineFailure) -> String 
                 "zcode 执行器在 {name} 上跑不起来：它要 {needs}，{has}。请升级那台机器的系统或换用更新的 Linux。"
             )
         }
+        // F103（remote-exec.md §27.7）：本机的版本不在 npm 上，npm 的 latest 说别的协议。
+        (
+            Lang::En,
+            MachineFailure::LatestIncompatible {
+                version,
+                protocol,
+                latest,
+                latest_protocol,
+                target,
+            },
+        ) => format!(
+            "This zcode ({version}, protocol {protocol}) isn't on npm, and the latest executor on npm, zcode {latest}, speaks protocol {latest_protocol}, so there's no executor for {name}. Connect again after a new version is published, or put a zcode {version} executor at {} on this computer.",
+            cached_executor(version, target)
+        ),
+        (
+            Lang::Zh,
+            MachineFailure::LatestIncompatible {
+                version,
+                protocol,
+                latest,
+                latest_protocol,
+                target,
+            },
+        ) => format!(
+            "本机的 zcode {version}（协议 {protocol}）不在 npm 上，npm 上最新的执行器 zcode {latest} 是协议 {latest_protocol}，{name} 没有能用的执行器。请在发布新版之后再连，或者把 zcode {version} 的执行器放到本机的 {}。",
+            cached_executor(version, target)
+        ),
+        // F107（remote-exec.md §28.6）：这个平台没有包（Intel Mac）、上传的执行器被系统杀掉（签名无效）。
+        (Lang::En, MachineFailure::NoPackage { package }) => format!(
+            "There's no zcode executor package for {name} (it would be {package}), and no compatible executor is installed there. Install zcode on that machine with `npm i -g @mbearo/zcode`, then connect again."
+        ),
+        (Lang::Zh, MachineFailure::NoPackage { package }) => format!(
+            "没有 {name} 这种平台的 zcode 执行器包（应该是 {package}），那台机器上也没有兼容的执行器。请在那台机器上用 `npm i -g @mbearo/zcode` 装好 zcode，然后再连。"
+        ),
+        (Lang::En, MachineFailure::Unsigned) => format!(
+            "The uploaded zcode executor was killed on {name}: macOS refuses to run it because its signature is not valid. Install zcode on that machine with `npm i -g @mbearo/zcode`, or sign the file there with `codesign -s -`."
+        ),
+        (Lang::Zh, MachineFailure::Unsigned) => format!(
+            "上传到 {name} 的 zcode 执行器被系统杀掉了：macOS 认为它的签名无效，不让它运行。请在那台机器上用 `npm i -g @mbearo/zcode` 装好 zcode，或者在那台机器上用 `codesign -s -` 给它签名。"
+        ),
         (Lang::En, MachineFailure::Refused(m)) => {
             format!("The executor on {name} refused the connection: {m}")
         }
@@ -501,6 +543,12 @@ pub fn failure_text(lang: Lang, name: &str, failure: &MachineFailure) -> String 
             format!("与 {name} 的连接断了：{}", explain(lang, m))
         }
     }
+}
+
+/// 本机缓存里放执行器的位置（F103，remote-exec.md §27.7）：`~/.zcode/rust-cli/exec/dist/<版本>/<target>/zcode-rs`。
+fn cached_executor(version: &str, target: &str) -> String {
+    use rust_cli_base::names::{DOT_DIR, EXECUTOR_HOME, UNIX_EXECUTABLE};
+    format!("~/{DOT_DIR}/{EXECUTOR_HOME}/dist/{version}/{target}/{UNIX_EXECUTABLE}")
 }
 
 /// 询问框标题后面的机器（§21.6）：`runs on dev-a` / `在 dev-a 上执行`（前缀、机器名、后缀，机器名用强调色）。

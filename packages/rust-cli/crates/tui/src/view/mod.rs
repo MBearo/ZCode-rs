@@ -197,6 +197,9 @@ pub struct Transcript {
     context: ContextNotice,
     /// 内核给出的上下文用量（`ContextUsage` 事件与快照的 `context_usage`）：footer 的 ctx（tui-display.md §2.6，F27）。
     occupancy: Option<ContextOccupancy>,
+    /// 内核给出的最近一个完成的主回合请求的输出速度（`OutputSpeed` 事件与快照的 `output_speed`）：footer 的 TPS
+    /// （tui-display.md §2.6，修复线 F105）。
+    speed: Option<rust_cli_kernel_api::metering::OutputSpeed>,
     last_seq: u64,
     segment: Option<Segment>,
     /// 本回合流出的回复与推理字数（状态行的 `↓ N tokens`）。
@@ -226,6 +229,7 @@ impl Transcript {
             title: String::new(),
             context: ContextNotice::Hidden,
             occupancy: None,
+            speed: None,
             last_seq: 0,
             segment: None,
             streamed_chars: 0,
@@ -313,6 +317,12 @@ impl Transcript {
     /// 没有会话或压缩模块不知道时为空。
     pub fn context_usage(&self) -> Option<ContextOccupancy> {
         self.occupancy
+    }
+
+    /// footer 的 TPS（tui-display.md §2.6，修复线 F105）：会话 actor 记的最近一个完成的主回合请求的速度；本进程还没有
+    /// 这样的请求（冷打开、切换会话之后）时为空。
+    pub fn output_speed(&self) -> Option<rust_cli_kernel_api::metering::OutputSpeed> {
+        self.speed
     }
 
     /// 最后一个回合行：运行状态与开始时间。

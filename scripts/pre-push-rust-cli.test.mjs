@@ -137,11 +137,12 @@ describe("pre-push 的 rust-cli 检查", () => {
     // 复制入口与它导入的模块到一个不是 Git 仓库的目录：问 git 要根目录会失败（exit 2）。
     const copy = await mkdtemp(join(tmpdir(), "pre-push-rust-cli-copy-"));
     roots.push(copy);
-    await mkdir(join(copy, "scripts/affected-unit-tests"), { recursive: true });
+    await mkdir(join(copy, "scripts/engineering-tests"), { recursive: true });
     for (const file of [
       "pre-push-rust-cli.mjs",
-      "affected-unit-tests/process.mjs",
-      "affected-unit-tests/scope.mjs",
+      "check-push-worktree.mjs",
+      "engineering-tests/process.mjs",
+      "engineering-tests/scope.mjs",
     ])
       await copyFile(join(import.meta.dirname, file), join(copy, "scripts", file));
     const result = await exec(process.execPath, [join(copy, "scripts/pre-push-rust-cli.mjs")], {

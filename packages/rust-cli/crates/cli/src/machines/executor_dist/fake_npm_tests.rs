@@ -12,7 +12,7 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
-use rust_cli_ssh_connect::Arch;
+use rust_cli_ssh_connect::Platform;
 use sha2::{Digest, Sha256, Sha512};
 
 type Routes = Arc<Mutex<Vec<(String, u16, Vec<u8>)>>>;
@@ -121,14 +121,28 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// 一个这种架构的 Linux ELF 头加一些内容。
-pub(crate) fn elf(arch: Arch) -> Vec<u8> {
+/// 一个这个平台的产物：Linux 是 ELF 头，macOS 是 Mach-O 头（F107，remote-exec.md §28.4），后面加一些内容。
+pub(crate) fn image(platform: Platform) -> Vec<u8> {
     let mut bytes = vec![0u8; 64];
-    bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
-    bytes[18] = match arch {
-        Arch::X86_64 => 62,
-        Arch::Aarch64 => 183,
-    };
+    match platform {
+        Platform::LinuxX86_64 | Platform::LinuxAarch64 => {
+            bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
+            bytes[18] = if platform == Platform::LinuxX86_64 {
+                62
+            } else {
+                183
+            };
+        }
+        Platform::MacosAarch64 | Platform::MacosX86_64 => {
+            bytes[..4].copy_from_slice(&0xfeed_facfu32.to_le_bytes());
+            let cpu: u32 = if platform == Platform::MacosAarch64 {
+                0x0100_000c
+            } else {
+                0x0100_0007
+            };
+            bytes[4..8].copy_from_slice(&cpu.to_le_bytes());
+        }
+    }
     bytes.extend_from_slice(&[7u8; 3000]);
     bytes
 }

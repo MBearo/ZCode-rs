@@ -1,6 +1,7 @@
 // 改写自 apps/zcode-host/crates/tui/src/ui/bottom.rs（feat/rs 79b6691c55）：排队的消息来自视图；`@` 文件列表按
 // tui-input.md §1.2 重写。
-//! 底部区域的两部分（docs/specs/rust-tui.md §8.3、§8.4）：排队的消息、斜杠命令与 `@` 文件的弹出列表。
+//! 底部区域的两部分（docs/specs/rust-tui.md §8.3、§8.4）：排队的消息（含下面那一行立即发送的键，
+//! docs/specs/rust-cli/tui.md §5.1.1）、斜杠命令与 `@` 文件的弹出列表。
 //! 状态行见 `status_line.rs`，输入框见 `input_box.rs`，footer 与快捷键帮助见 `footer.rs`。
 use std::time::Duration;
 
@@ -44,6 +45,14 @@ pub fn queue(app: &App, width: usize) -> Vec<Line<'static>> {
             }
         }
         lines.extend(item);
+    }
+    // 立即发送的键（修复线 F104，tui.md §5.1.1）：队列里有插话、回合在跑时紧跟在全部队列项之后（暂存的提示之前）。
+    // 整行一种次要色、键不加粗（修复线 F105，用户要求整行灰；原来按按键提示组件把键画成 `key` 样式）。
+    if let Some(hint) = app.send_now_hint() {
+        lines.push(Line::from(Span::styled(
+            format!("  {hint}"),
+            app.palette.secondary(),
+        )));
     }
     // ctrl+s 暂存后的提示（tui-input.md §5）。
     if app.composer.has_stash() {
@@ -190,3 +199,7 @@ pub fn popup(app: &App, width: usize, height: usize) -> (Vec<Line<'static>>, Opt
 
 /// 动画的刷新间隔：扫光约 30 fps。
 pub const ANIMATION: Duration = Duration::from_millis(33);
+
+#[cfg(test)]
+#[path = "bottom_tests.rs"]
+mod tests;

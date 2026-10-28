@@ -35,6 +35,7 @@ fn called(message: &MessageId, status: CallStatus, stop: Option<StopReason>) -> 
             },
             started_at_ms: now,
             first_token_at_ms: Some(now),
+            first_content_at_ms: None,
             completed_at_ms: now,
             status,
             stop_reason: stop,

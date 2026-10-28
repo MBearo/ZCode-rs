@@ -69,6 +69,11 @@ impl Home {
         serde_json::from_str(stdout.trim()).unwrap()
     }
 
+    /// 这个用户环境的 HOME。
+    pub fn home(&self) -> &std::path::Path {
+        self.home.path()
+    }
+
     pub fn exec_dir(&self) -> PathBuf {
         self.home.path().join(".zcode/rust-cli/exec")
     }

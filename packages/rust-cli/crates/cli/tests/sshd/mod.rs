@@ -13,6 +13,10 @@ use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, OwnerEpoc
 use rust_cli_machines::Endpoint;
 use rust_cli_ssh_connect::{SshConnector, SshProvisioner, SshTarget, Wanted};
 
+/// F107（remote-exec.md §28.10）：本机就是 macOS 时的真实 SSH 夹具（不用 Docker）。
+#[cfg(unix)]
+pub mod local;
+
 pub const BIN: &str = env!("CARGO_BIN_EXE_zcode-rs");
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const BASE_IMAGE: &str = "alpine:3.20";

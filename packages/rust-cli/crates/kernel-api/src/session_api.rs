@@ -299,6 +299,10 @@ pub enum KernelEvent {
     ContextNotice {
         notice: crate::compaction::ContextNotice,
     },
+    /// 完成的主回合请求的输出速度（footer 的 TPS，tui-display.md §2.6，F105）：计量提交之后发，不落库。
+    OutputSpeed {
+        speed: crate::metering::OutputSpeed,
+    },
     TasksChanged {
         tasks: Value,
     },
@@ -417,6 +421,9 @@ pub struct SessionView {
     /// 上下文快满的提示（同一处算，F27）：冷加载后不用等下一条回复。
     #[serde(default)]
     pub context_notice: crate::compaction::ContextNotice,
+    /// 本进程里最近一个完成的主回合请求的输出速度（修复线 F105）：只在 actor 的内存里，冷打开的会话为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_speed: Option<crate::metering::OutputSpeed>,
 }
 
 // 会话生命周期的类型（SessionStart / SessionEnd 的来源、rewind 选择器的条目）放在分出的文件里（400 行上限，

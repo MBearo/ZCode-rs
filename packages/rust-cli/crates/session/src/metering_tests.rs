@@ -94,3 +94,137 @@ async fn a_text_turn_ends_with_one_turn_fact() {
         })
     ));
 }
+
+/// 把响应的 `MessageDelta` 换成带输出 token 的用量。
+fn with_output(
+    mut events: Vec<
+        Result<rust_cli_kernel_api::model::ModelEvent, rust_cli_kernel_api::model::ModelError>,
+    >,
+    output: u64,
+) -> Vec<Result<rust_cli_kernel_api::model::ModelEvent, rust_cli_kernel_api::model::ModelError>> {
+    use rust_cli_kernel_api::model::ModelEvent;
+    for event in &mut events {
+        if let Ok(ModelEvent::MessageDelta { usage, .. }) = event {
+            usage.output_tokens = output;
+        }
+    }
+    events
+}
+
+/// 修复线 F105（tui-display.md §2.6）：每个完成的主回合请求提交之后，actor 发 `OutputSpeed` 并记下最近一个，会话的
+/// 快照（`SessionView.output_speed`）带它；只有工具调用的请求也有（首个内容是 tool_use 块开始）。旧代码没有这个事件。
+#[tokio::test]
+async fn completed_main_requests_report_their_output_speed() {
+    use rust_cli_kernel_api::metering::OutputSpeed;
+    use rust_cli_kernel_api::session_api::KernelEvent;
+
+    let model = Arc::new(ScriptedModel::new(vec![
+        with_output(tool_use_response("toolu_1", "Echo", &json!({})), 7),
+        with_output(text_response(&["done"]), 3),
+    ]));
+    let mut setup = Setup::new(model);
+    setup.tools = vec![Arc::new(FakeTool::new("Echo", true, "ok"))];
+    let built = setup.build().await;
+    assert_eq!(built.session.view().await.unwrap().output_speed, None);
+    let mut events = built.session.subscribe(None);
+    built.session.send(submit("c1", "hi")).await;
+    let seen = until(&mut events, finished).await;
+    let speeds: Vec<OutputSpeed> = seen
+        .iter()
+        .filter_map(|event| match event {
+            KernelEvent::OutputSpeed { speed } => Some(*speed),
+            _ => None,
+        })
+        .collect();
+    // 测试的时钟固定在 0：时长与首个内容都是 0（速度本身的算法见 kernel-api 的测试）。
+    let speed = |output| OutputSpeed {
+        output_tokens: Some(output),
+        duration_ms: 0,
+        first_content_ms: Some(0),
+    };
+    assert_eq!(speeds, [speed(7), speed(3)]);
+    assert_eq!(
+        built.session.view().await.unwrap().output_speed,
+        Some(speed(3))
+    );
+    // 用量表的首字照旧：只有工具调用的那次请求没有首字。
+    let facts = built.store.facts(&SessionId::new("sess_1"));
+    let firsts: Vec<_> = facts
+        .iter()
+        .filter_map(|fact| match fact {
+            Fact::ModelCalled { call } => Some(call.first_token_at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(firsts, [None, Some(0)]);
+}
+
+/// 只有完成的主回合请求更新速度：中断、失败、子代理、旁路与压缩请求都不更新。
+#[test]
+fn only_completed_main_requests_have_an_output_speed() {
+    use rust_cli_kernel_api::ids::MessageId;
+    use rust_cli_kernel_api::message::Usage;
+    use rust_cli_kernel_api::metering::{ModelCall, OutputSpeed};
+    use rust_cli_kernel_api::model::QuerySource;
+    use rust_cli_kernel_api::testing::selection;
+
+    use crate::turn::output_speed;
+
+    let call = ModelCall {
+        message: MessageId::new("msg_1"),
+        source: QuerySource::MainThread,
+        selection: selection(),
+        started_at_ms: 1_000,
+        first_token_at_ms: None,
+        first_content_at_ms: Some(1_400),
+        completed_at_ms: 3_000,
+        status: CallStatus::Completed,
+        stop_reason: None,
+        tool_calls: 1,
+        usage: Some(Usage {
+            output_tokens: 80,
+            ..Usage::default()
+        }),
+        retries: 0,
+        error: None,
+    };
+    let speed = output_speed(&call).expect("a completed main request");
+    assert_eq!(
+        speed,
+        OutputSpeed {
+            output_tokens: Some(80),
+            duration_ms: 2_000,
+            first_content_ms: Some(400),
+        }
+    );
+    assert_eq!(speed.tokens_per_second(), Some(50.0));
+    for status in [CallStatus::Cancelled, CallStatus::Error] {
+        assert_eq!(
+            output_speed(&ModelCall {
+                status,
+                ..call.clone()
+            }),
+            None
+        );
+    }
+    for source in [
+        QuerySource::Subagent("general-purpose".into()),
+        QuerySource::Compact,
+        QuerySource::Side("generate_session_title".into()),
+    ] {
+        assert_eq!(
+            output_speed(&ModelCall {
+                source,
+                ..call.clone()
+            }),
+            None
+        );
+    }
+    // 用量未知：有速度的记录，但算不出 TPS。
+    let unknown = output_speed(&ModelCall {
+        usage: None,
+        ..call
+    })
+    .unwrap();
+    assert_eq!(unknown.tokens_per_second(), None);
+}

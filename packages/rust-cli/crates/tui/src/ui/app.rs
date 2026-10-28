@@ -58,6 +58,8 @@ pub enum Action {
     },
     /// ctrl+x ctrl+b（运行中）：前台 Bash 转到后台（修复线 L-A，tui-input.md §11.2）。
     BackgroundForeground,
+    /// 输入框为空时的立即发送（修复线 F105，tui.md §5.1.1）：只把前台 Bash 转到后台，排着的插话在工具边界并入。
+    DeliverQueued,
     Interrupt,
     Resolve {
         interaction: InteractionId,
@@ -318,6 +320,9 @@ pub struct App {
     pub machines_enabled: bool,
     /// 绑定到远端机器的 MCP 服务器（规范化的服务器名，机器名；R5，remote-exec.md §22.8）：runner 启动时从服务取。
     pub mcp_machines: Vec<(String, String)>,
+    /// 终端分辨得出增强按键（修复线 F104，tui-input.md §11.1.1）：进界面时键盘增强的查询结论，由 `Screen` 带进来；
+    /// 决定立即发送的提示写 ctrl+enter 还是 ctrl+x ctrl+s。
+    pub keyboard_enhanced: bool,
     pub quit: bool,
 }
 
@@ -406,6 +411,7 @@ impl App {
             machines: Vec::new(),
             machines_enabled: false,
             mcp_machines: Vec::new(),
+            keyboard_enhanced: false,
             quit: false,
         }
     }

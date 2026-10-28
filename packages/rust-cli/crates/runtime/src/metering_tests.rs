@@ -43,6 +43,7 @@ fn call(message: &str, duration: u64, status: CallStatus) -> Fact {
             selection: selection(),
             started_at_ms: 10,
             first_token_at_ms: None,
+            first_content_at_ms: None,
             completed_at_ms: 10 + duration,
             status,
             stop_reason: None,

@@ -14,6 +14,31 @@ const ACCEPT: &str = "application/vnd.npm.install-v1+json; q=1.0, application/js
 /// 响应体最多读这么多。
 const MAX_BODY: usize = 32 * 1024 * 1024;
 
+/// 注册表回了不成功的 HTTP 状态（文字同以前的 `GET <地址>: HTTP <状态>`）。执行器的 npm 来源（F103，remote-exec.md
+/// §27.3）按 404 判定“这个版本不在注册表里”，所以给出类型、不只是文字。
+#[derive(Debug)]
+pub(crate) struct HttpStatus {
+    pub(crate) url: String,
+    pub(crate) status: u16,
+}
+
+impl std::fmt::Display for HttpStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GET {}: HTTP {}", self.url, self.status)
+    }
+}
+
+impl std::error::Error for HttpStatus {}
+
+impl HttpStatus {
+    /// `error` 是不是注册表回的 404（没有这个包或文件）。
+    pub(crate) fn is_not_found(error: &anyhow::Error) -> bool {
+        error
+            .downcast_ref::<Self>()
+            .is_some_and(|status| status.status == 404)
+    }
+}
+
 /// 包元数据的地址：作用域包的 `/` 写成 `%2f`（Codex `@openai%2fcodex`）。
 pub(crate) fn package_url(registry: &str, package: &str) -> String {
     format!(
@@ -77,7 +102,11 @@ pub(crate) async fn fetch(egress: &Egress, url: &str) -> Result<Value> {
         .await
         .with_context(|| format!("GET {url}"))?;
     if !response.is_success() {
-        bail!("GET {url}: HTTP {}", response.status());
+        return Err(HttpStatus {
+            url: url.to_owned(),
+            status: response.status(),
+        }
+        .into());
     }
     let mut body = Vec::new();
     while let Some(chunk) = response
