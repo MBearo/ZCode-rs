@@ -41,6 +41,8 @@ mod model_default;
 mod model_flat;
 mod modes;
 mod notify;
+#[cfg(unix)]
+mod panic_terminal;
 mod peers;
 mod permissions;
 mod plan_open;

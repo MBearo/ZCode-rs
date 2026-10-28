@@ -31,6 +31,7 @@ mod openai_error;
 mod openai_lower;
 mod openai_responses;
 mod openai_responses_stream;
+mod overflow;
 mod patch;
 mod profiles;
 mod protocol;

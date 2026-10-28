@@ -29,6 +29,8 @@ rust-cli-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 syntect.workspace = true
+# panic hook 记日志（修复线 F109，tui.md §7.9）。
+tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time"] }
 # 登录的取消令牌（取消是一条消息，tui.md §7.2）。
 tokio-util.workspace = true
@@ -49,3 +51,7 @@ rust-cli-kernel-api = { workspace = true, features = ["testing"] }
 # test-util：终端通知的计时用暂停的时钟推进（tui-manage.md §5.3）。
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "test-util", "time"] }
 tokio-util.workspace = true
+
+# 伪终端里的 panic 测试（修复线 F109，tests/suite/panic_terminal.rs）。
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { workspace = true, features = ["fs", "pty", "termios"] }

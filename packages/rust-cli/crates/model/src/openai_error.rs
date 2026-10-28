@@ -1,7 +1,7 @@
 //! OpenAI 两种协议的错误分类（docs/specs/rust-cli/model.md §10.4）。
 //!
 //! 正文是 `{"error":{"message","type","code"}}`。分类沿用 Anthropic 的表（model.md §5.1），只换识别条件：
-//! 上下文超长认 `code: context_length_exceeded` 与常见的消息文本；过载认 529 与 `server_is_overloaded`。
+//! 上下文超长认与 Anthropic 一侧共用的词表（model.md §5.1.1，修复线 F108）；过载认 529 与 `server_is_overloaded`。
 //! 能否重试与 Anthropic 一侧相同：`x-should-retry` → 408 / 409 / 429 / 401 / 5xx。
 
 use std::time::SystemTime;
@@ -13,15 +13,8 @@ use rust_cli_net::retry::{retry_after, should_retry};
 use serde_json::Value;
 
 // 消息的长度上限两种协议的错误共用（F55）。
+use crate::overflow;
 use crate::protocol::{ERROR_MESSAGE_LIMIT as MESSAGE_LIMIT, Failure, Retry};
-
-/// 上下文超长时各家服务常见的提示（不区分大小写）。
-const TOO_LONG: [&str; 4] = [
-    "context_length_exceeded",
-    "maximum context length",
-    "prompt is too long",
-    "context window",
-];
 
 struct ApiError {
     kind: Option<String>,
@@ -45,12 +38,6 @@ impl ApiError {
             code: field("code"),
             message: field("message"),
         }
-    }
-
-    fn too_long(&self, raw: &str) -> bool {
-        let raw = raw.to_lowercase();
-        self.code.as_deref() == Some("context_length_exceeded")
-            || TOO_LONG.iter().any(|needle| raw.contains(needle))
     }
 
     fn overloaded(&self, status: u16) -> bool {
@@ -107,7 +94,8 @@ pub(crate) fn from_stream(value: &Value) -> ModelError {
 
 fn classify(status: u16, api: &ApiError, raw: &str, retry_after_ms: Option<u64>) -> ModelError {
     let message = message(status, api, raw);
-    if api.too_long(raw) {
+    // 修改（F108）：以前是这里自己的四项，现在与 Anthropic 一侧共用词表（码在正文里，按子串一样认得出）。
+    if overflow::context_exceeded(raw) {
         return ModelError::PromptTooLong { message };
     }
     if api.overloaded(status) {
@@ -200,5 +188,28 @@ mod tests {
         assert!(matches!(error, ModelError::RateLimited { .. }));
         let error = from_stream(&json!({"type": "error", "message": "boom"}));
         assert!(matches!(error, ModelError::Server { status: 500, .. }));
+    }
+
+    /// 与 Anthropic 一侧共用的词表（修复线 F108，model.md §5.1.1）：别家的说法与错误码也是上下文超限。
+    #[test]
+    fn the_shared_overflow_vocabulary_applies() {
+        for body in [
+            json!({"error": {"message": "The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).", "code": 400}}),
+            json!({"error": {"message": "Range of input length should be [1, 129024]", "code": "InvalidParameter"}}),
+            json!({"error": {"message": "too many tokens", "code": "context_window_exceeded"}}),
+            json!({"error": {"message": "This model's maximum context length is 1048576 tokens. However, you requested 1055008 tokens (671008 in the messages, 384000 in the completion).", "type": "invalid_request_error"}}),
+        ] {
+            let got = failure(400, &body.to_string());
+            assert!(
+                matches!(got.error, ModelError::PromptTooLong { .. }),
+                "{body}: {:?}",
+                got.error
+            );
+        }
+        let image = failure(
+            400,
+            r#"{"error":{"message":"image exceeds 5 MB maximum","type":"invalid_request_error"}}"#,
+        );
+        assert!(matches!(image.error, ModelError::InvalidRequest { .. }));
     }
 }

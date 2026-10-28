@@ -73,11 +73,15 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    match tokio::task::spawn_blocking(move || std::panic::catch_unwind(AssertUnwindSafe(work)))
-        .await
+    // 修复线 F109：载荷在阻塞线程里转换（`from_payload` 清的是 panic 那个线程的 panic 记录，tui.md §7.9）；以前在
+    // 等待方的线程上转换，复用的阻塞线程留着旧记录。
+    match tokio::task::spawn_blocking(move || {
+        std::panic::catch_unwind(AssertUnwindSafe(work)).map_err(Panicked::from_payload)
+    })
+    .await
     {
         Ok(Ok(output)) => Ok(output),
-        Ok(Err(payload)) => Err(TaskError::Panicked(Panicked::from_payload(payload))),
+        Ok(Err(panicked)) => Err(TaskError::Panicked(panicked)),
         // 运行时关闭时尚未开始的阻塞工作被取消。
         Err(_) => Err(TaskError::Aborted),
     }

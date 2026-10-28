@@ -98,3 +98,28 @@ async fn blocking_work_returns_its_result_or_its_panic() {
     };
     assert_eq!(panicked.message, "blocking boom");
 }
+
+/// 修复线 F109：阻塞调用的 panic 在阻塞线程里转换并清掉那个线程的 panic 记录；以前在等待方的线程上转换，阻塞线程
+/// 被复用时记录还在，下一次 panic 会被当成展开中的第二次。
+#[test]
+fn a_blocking_panic_clears_the_note_of_the_blocking_thread() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let failed = blocking(|| -> u8 {
+            crate::note_panic("blocking".to_owned());
+            panic!("blocking boom")
+        })
+        .await;
+        assert!(matches!(failed, Err(TaskError::Panicked(_))), "{failed:?}");
+        let first = blocking(|| std::thread::current().id()).await.unwrap();
+        // 阻塞线程池只有一个线程：两次调用都在它上面。
+        let (left, second) = blocking(|| (crate::take_panic_note(), std::thread::current().id()))
+            .await
+            .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(left, None);
+    });
+}

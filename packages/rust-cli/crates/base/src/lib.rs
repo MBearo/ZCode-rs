@@ -19,6 +19,7 @@
 //! 句柄拥有（[`owned`]），阻塞调用用 [`blocking`]。
 
 use std::any::Any;
+use std::cell::RefCell;
 use std::fmt;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
@@ -60,7 +61,9 @@ pub struct Panicked {
 }
 
 impl Panicked {
+    /// 在 panic 的线程上调用（所有捕获点都是）：panic 不再展开，同时清掉 [`note_panic`] 记下的文字。
     pub(crate) fn from_payload(payload: Box<dyn Any + Send>) -> Self {
+        take_panic_note();
         let message = payload
             .downcast_ref::<&str>()
             .map(|text| (*text).to_owned())
@@ -77,6 +80,35 @@ impl fmt::Display for Panicked {
 }
 
 impl std::error::Error for Panicked {}
+
+thread_local! {
+    /// 本线程正在展开的 panic 的文字（TUI 的 panic hook 记下，docs/specs/rust-cli/tui.md §7.9）。
+    static PANIC_NOTE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// 在 panic hook 里记下本线程这次 panic 的文字。本线程已经记着一条（它还在展开，这次是展开中又 panic）时不记，
+/// 取走并返回那一条。只用 `try_with` / `try_borrow_mut`：不等待、不 panic，线程正在销毁或借用冲突时不记。
+pub fn note_panic(text: String) -> Option<String> {
+    PANIC_NOTE
+        .try_with(|note| {
+            let mut note = note.try_borrow_mut().ok()?;
+            let first = note.take();
+            if first.is_none() {
+                *note = Some(text);
+            }
+            first
+        })
+        .ok()
+        .flatten()
+}
+
+/// 取走本线程记下的 panic 文字（栈展开到 TUI 的终端守卫时写到 stderr；被捕获时清掉）。
+pub fn take_panic_note() -> Option<String> {
+    PANIC_NOTE
+        .try_with(|note| note.try_borrow_mut().ok()?.take())
+        .ok()
+        .flatten()
+}
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]

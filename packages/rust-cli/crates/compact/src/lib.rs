@@ -138,7 +138,7 @@ impl Compaction {
     fn tokens(history: &[Message]) -> u64 {
         let active = history::active(history);
         let refs: Vec<&Message> = active.iter().map(AsRef::as_ref).collect();
-        tokens::count(&refs)
+        rust_cli_kernel_api::compaction::context_tokens(&refs)
     }
 
     async fn run(

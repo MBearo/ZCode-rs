@@ -7,7 +7,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::env::WorkspaceRef;
 use crate::ids::{AgentId, SessionId};
-use crate::message::{AttachmentMessage, CompactBoundary, CompactTrigger, Message, UserMessage};
+use crate::message::{
+    AttachmentMessage, CompactBoundary, CompactTrigger, ContentBlock, ImageSource, Message,
+    SystemMessage, ToolResultContent, Usage, UserMessage,
+};
 use crate::model::ModelSelection;
 use crate::orchestration::{ContextRequest, OrchestrationError};
 use crate::permission::PermissionMode;
@@ -35,10 +38,20 @@ pub struct CompactRequest {
     pub initial_token_gap: Option<u64>,
 }
 
-/// 上下文超限错误文本里的 token 差（按正则
-/// `/prompt is too long[^0-9]*(\d+)\s*tokens?\s*>\s*(\d+)/i` 取两个数，差不大于 0
-/// 时为 None）。例：`prompt is too long: 1000500 tokens > 1000000 maximum` → 500。
+/// 上下文超限错误文本里的 token 差，认两种句式（docs/specs/rust-cli/compact.md §3.1）：
+///
+/// - `prompt is too long … N tokens > M`（按正则 `/prompt is too long[^0-9]*(\d+)\s*tokens?\s*>\s*(\d+)/i` 取两个数），
+///   差是 N − M。例：`prompt is too long: 1000500 tokens > 1000000 maximum` → 500。
+/// - `maximum context length is N tokens … (A in the messages, …)`（OpenAI 的句式，兼容端点也回它，修复线 F108），
+///   差是输入 A − 上限 N。
+///
+/// 差不大于 0 时为 None（OpenAI 句式里输入没超、是加上输出上限才超的情形）。
 pub fn prompt_too_long_gap(message: &str) -> Option<u64> {
+    anthropic_gap(message).or_else(|| openai_gap(message))
+}
+
+/// `prompt is too long … N tokens > M`：N − M。
+fn anthropic_gap(message: &str) -> Option<u64> {
     const PHRASE: &str = "prompt is too long";
     // ASCII 小写不改变字节长度，下标可以直接用在原文上。
     let start = message.to_ascii_lowercase().find(PHRASE)? + PHRASE.len();
@@ -64,6 +77,26 @@ pub fn prompt_too_long_gap(message: &str) -> Option<u64> {
         .trim_start();
     let (limit, _) = number(rest)?;
     actual.checked_sub(limit).filter(|gap| *gap > 0)
+}
+
+/// `maximum context length is N tokens … (A in the messages, …)`：A − N。修 bug（F108）：以前只认上面那种句式，兼容端点回
+/// 这一句时没有差，压缩摘要请求再超长时裁不出该裁的量。
+fn openai_gap(message: &str) -> Option<u64> {
+    const LIMIT: &str = "maximum context length is";
+    const INPUT: &str = " in the messages";
+    let lower = message.to_ascii_lowercase();
+    let rest = lower[lower.find(LIMIT)? + LIMIT.len()..].trim_start();
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    let limit: u64 = rest[..digits].parse().ok()?;
+    let rest = &rest[digits..];
+    if !rest.trim_start().starts_with("token") {
+        return None;
+    }
+    // 输入是 ` in the messages` 前面紧挨着的那个数（只有 ASCII 数字，切在字节上不会落在字符中间）。
+    let before = &rest[..rest.find(INPUT)?];
+    let start = before.len() - before.bytes().rev().take_while(u8::is_ascii_digit).count();
+    let input: u64 = before[start..].parse().ok()?;
+    input.checked_sub(limit).filter(|gap| *gap > 0)
 }
 
 /// 输入框下方“上下文快满”的提示（docs/specs/rust-cli/compact.md
@@ -191,6 +224,81 @@ pub trait Compactor: Send + Sync {
 pub fn rough_tokens(text: &str) -> u64 {
     let units = text.encode_utf16().count() as u64;
     (units + 2) / 4
+}
+
+/// 图片与文档的估算 token（压缩的估算、`/context` 与目录模型的输出预算共用）。
+pub const IMAGE_TOKENS: u64 = 2_000;
+
+fn result_tokens(content: &[ToolResultContent]) -> u64 {
+    content
+        .iter()
+        .map(|item| match item {
+            ToolResultContent::Text { text } => rough_tokens(text),
+            ToolResultContent::Image { .. } | ToolResultContent::Document { .. } => IMAGE_TOKENS,
+            ToolResultContent::ToolReference { tool_name } => rough_tokens(tool_name),
+        })
+        .sum()
+}
+
+fn block_tokens(block: &ContentBlock) -> u64 {
+    match block {
+        ContentBlock::Text { text } => rough_tokens(text),
+        ContentBlock::Image {
+            source: ImageSource::Base64 { .. } | ImageSource::Artifact { .. },
+        } => IMAGE_TOKENS,
+        ContentBlock::Thinking { thinking, .. } => rough_tokens(thinking),
+        ContentBlock::RedactedThinking { data } => rough_tokens(data),
+        ContentBlock::ToolUse { name, input, .. } => rough_tokens(&format!("{name}{input}")),
+        ContentBlock::ToolResult { content, .. } => result_tokens(content),
+        ContentBlock::ServerToolUse { name, input, .. } => rough_tokens(&format!("{name}{input}")),
+        ContentBlock::WebSearchToolResult { content, .. } => rough_tokens(&content.to_string()),
+    }
+}
+
+/// 一条消息的粗估 token（docs/specs/rust-cli/compact.md §2）：文字按 [`rough_tokens`]，图片与文档按 [`IMAGE_TOKENS`]，
+/// 工具调用按名字加输入的 JSON；attachment 的内容块（`@` 提及的图片等）与消息里的块同样估算；system 消息不算。
+pub fn message_tokens(message: &Message) -> u64 {
+    match message {
+        Message::User(user) => user.content.iter().map(block_tokens).sum(),
+        Message::Assistant(assistant) => assistant.content.iter().map(block_tokens).sum(),
+        Message::Attachment(attachment) => {
+            rough_tokens(&attachment.text)
+                + attachment.blocks().iter().map(block_tokens).sum::<u64>()
+        }
+        Message::System(_) => 0,
+    }
+}
+
+/// 一次响应的上下文大小（输入 + 缓存读写 + 输出）。
+fn usage_total(usage: &Usage) -> u64 {
+    usage.input_tokens
+        + usage.cache_creation_input_tokens
+        + usage.cache_read_input_tokens
+        + usage.output_tokens
+}
+
+/// 活动历史的上下文 token（docs/specs/rust-cli/compact.md §2）：最近一次带用量的响应（输入 + 缓存读写 + 输出）加之后
+/// 消息的粗估；遇到压缩边界时锚点是 0；都没有时是全部消息的粗估。压缩的判定、footer 的 ctx 与目录模型请求的输出预算
+/// （docs/specs/rust-cli/query.md §1.11）只用这一个算法。
+pub fn context_tokens(active: &[&Message]) -> u64 {
+    let after = |index: usize| -> u64 {
+        active[index + 1..]
+            .iter()
+            .copied()
+            .map(message_tokens)
+            .sum()
+    };
+    for (index, item) in active.iter().enumerate().rev() {
+        let anchor = match item {
+            Message::System(SystemMessage::CompactBoundary(_)) => Some(0),
+            Message::Assistant(assistant) => assistant.usage.as_ref().map(usage_total),
+            _ => None,
+        };
+        if let Some(tokens) = anchor {
+            return tokens + after(index);
+        }
+    }
+    active.iter().copied().map(message_tokens).sum()
 }
 
 /// 到了阻塞线时结束回合的错误文字（docs/specs/rust-cli/compact.md §2.2）；压缩失败、带着原因时在它后面接

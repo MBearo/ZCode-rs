@@ -1,7 +1,7 @@
-//! Anthropic 错误分类（docs/specs/rust-cli/model.md §4）。
+//! Anthropic 错误分类（docs/specs/rust-cli/model.md §5.1）。
 //!
-//! 先认 "prompt is too long"（直连 API 回 400，
-//! Vertex 回 413，大小写不一），再认过载（529，或正文里有 `"type":"overloaded_error"`——SDK 在
+//! 先认上下文超长："prompt is too long"（直连 API 回 400，Vertex 回 413，大小写不一），4xx 另认共用词表里的说法
+//! （§5.1.1，修复线 F108），再认过载（529，或正文里有 `"type":"overloaded_error"`——SDK 在
 //! 流式请求里有时拿不到 529 状态码），再按状态码分类。
 
 use std::time::SystemTime;
@@ -13,6 +13,7 @@ use rust_cli_net::retry::{retry_after, should_retry};
 use serde_json::Value;
 
 // 消息的长度上限两种协议的错误共用（F55）。
+use crate::overflow;
 use crate::protocol::{ERROR_MESSAGE_LIMIT as MESSAGE_LIMIT, Failure, Retry};
 
 /// 非 2xx 响应。
@@ -77,7 +78,12 @@ fn is_overloaded(status: u16, api: &ApiError, raw: &str) -> bool {
 
 fn classify(status: u16, api: &ApiError, raw: &str, retry_after_ms: Option<u64>) -> ModelError {
     let message = message(status, api, raw);
-    if raw.to_lowercase().contains("prompt is too long") {
+    // 修 bug（F108）：兼容端点用 OpenAI 的句式报超长（例如 400 `This model's maximum context length is …`），以前归成
+    // `InvalidRequest`、不触发反应式压缩。共用词表只在 4xx 上看（5xx 的正文不是对这次请求的判定）；`prompt is too long`
+    // 照旧不看状态码。
+    let too_long = raw.to_lowercase().contains("prompt is too long")
+        || ((400..500).contains(&status) && overflow::context_exceeded(raw));
+    if too_long {
         return ModelError::PromptTooLong { message };
     }
     if is_overloaded(status, api, raw) {

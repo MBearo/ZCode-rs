@@ -2854,6 +2854,7 @@ dependencies = [
  "syntect",
  "tokio",
  "tokio-util",
+ "tracing",
  "two-face",
  "unicode-width",
  "windows-sys 0.61.2",

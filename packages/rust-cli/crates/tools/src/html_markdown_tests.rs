@@ -28,3 +28,28 @@ fn entities_comments_and_removed_elements() {
         "> quoted\n\n* * *\n\n![pic](a.png)"
     );
 }
+
+/// 修复线 F109：`&` 之后 12 个字节以内有多字节字符时，以前先按字节切出这 12 个字节，切点落在字符中间就 panic。
+/// 现在认得出的实体照常解码，认不出的保留原文。
+#[test]
+fn entities_next_to_multibyte_text_decode_without_panicking() {
+    // 用户页面里的原文：`&nbsp;` 加 4 个 ASCII 字节之后，“显”占第 10..13 个字节。
+    let page = "&nbsp;Max 显示屏采用曲线优美的圆角设计，四个圆角位于一个标准矩形内。";
+    assert_eq!(
+        decode_entities(page),
+        " Max 显示屏采用曲线优美的圆角设计，四个圆角位于一个标准矩形内。"
+    );
+    // `&` 后面直接是中文、没有分号；分号在 12 个字节之外：都保留原文。
+    assert_eq!(decode_entities("&中文实体没有分号"), "&中文实体没有分号");
+    assert_eq!(decode_entities("a & 中文说明文字"), "a & 中文说明文字");
+    assert_eq!(decode_entities("&中文中文;"), "&中文中文;");
+    // 实体之后紧跟中文：照常解码。
+    assert_eq!(decode_entities("&amp;中文内容"), "&中文内容");
+    assert_eq!(decode_entities("&#x4E2D;文字"), "中文字");
+    // `&` 在末尾。
+    assert_eq!(decode_entities("结尾&"), "结尾&");
+    assert_eq!(
+        to_markdown("<p>&nbsp;Max 显示屏采用曲线优美的圆角设计</p>"),
+        "Max 显示屏采用曲线优美的圆角设计"
+    );
+}

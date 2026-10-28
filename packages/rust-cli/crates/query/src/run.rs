@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use rust_cli_kernel_api::abort::AbortReason;
+use rust_cli_kernel_api::compaction::context_tokens;
 use rust_cli_kernel_api::history;
 use rust_cli_kernel_api::message::{
     AssistantMessage, AttachmentMessage, ContentBlock, Message, UserMessage, UserOrigin,
@@ -343,6 +344,15 @@ pub(crate) async fn run(
         let prompt = PromptContext { tool_names, mode };
         // 只发活动历史：最后一个压缩边界之后，保留段接回摘要之后（compact.md §5）。
         let active = history::active(&history);
+        // 目录模型的输出预算（修复线 F108，query.md §1.11）：按这一步的活动历史估算输入（与压缩的判定同一个函数），
+        // 交给补丁的上限按窗口余量压低。
+        let estimate = context_tokens(&active.iter().map(AsRef::as_ref).collect::<Vec<_>>());
+        let provider_max_output_tokens = crate::output_budget::provider_output_limit(
+            capabilities.as_ref(),
+            scope.parts.limits.max_output_tokens,
+            &source,
+            estimate,
+        );
         // 延迟工具与 ToolSearch（tools-more.md §3.3）：排序、按需加载、占位工具与 `defer_loading`。这一步开不开看工具里有没有
         // ToolSearch 与 `ENABLE_TOOL_SEARCH`（自动时按门槛，工作线 F89，§3.2.1）；开着时的形式按端点的能力（§3.2.2：产品
         // 路径一律本地，F89；F84 时 z.ai / bigmodel 原生）。
@@ -405,6 +415,7 @@ pub(crate) async fn run(
                 // 工作线 F64（model.md §2.4）：这次运行（回合）与子代理，模型适配器据此写每请求头。
                 run: Some(scope.run.clone()),
                 agent: scope.agent.clone(),
+                provider_max_output_tokens,
                 ..shape.options
             },
         };
@@ -516,3 +527,7 @@ mod order_tests;
 #[cfg(test)]
 #[path = "run_limits_tests.rs"]
 mod limits_tests;
+
+#[cfg(test)]
+#[path = "run_budget_tests.rs"]
+mod budget_tests;

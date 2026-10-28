@@ -406,7 +406,8 @@ impl Ui {
     }
 }
 
-fn kernel(
+/// 测试用的 LocalKernel（伪终端里的端到端也用，panic_terminal.rs）。
+pub fn kernel(
     model: Arc<dyn ModelPort>,
     environments: Arc<dyn EnvironmentRegistry>,
     store: Arc<dyn rust_cli_kernel_api::store::SessionStore>,

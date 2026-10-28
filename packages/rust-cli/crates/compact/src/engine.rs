@@ -84,7 +84,7 @@ impl Engine<'_> {
     ) -> Result<CompactResult, Failure> {
         let active = history::active(&request.messages);
         let refs: Vec<&Message> = active.iter().map(AsRef::as_ref).collect();
-        let pre_tokens = tokens::count(&refs);
+        let pre_tokens = rust_cli_kernel_api::compaction::context_tokens(&refs);
         let messages: Vec<&Message> = refs
             .iter()
             .copied()

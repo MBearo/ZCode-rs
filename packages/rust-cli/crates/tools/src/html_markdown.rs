@@ -67,7 +67,9 @@ pub(crate) fn decode_entities(text: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
-        let Some(end) = rest[..rest.len().min(12)].find(';') else {
+        // 修复线 F109：以前先按字节切出前 12 个字节再找 `;`，切点落在多字节字符（中文）中间就 panic。
+        // 现在在字节里找：`;` 是 ASCII，找到的位置一定在字符边界上。
+        let Some(end) = rest.bytes().take(12).position(|byte| byte == b';') else {
             out.push('&');
             rest = &rest[1..];
             continue;

@@ -23,6 +23,7 @@ mod mcp_support_tests;
 mod mcp_wait;
 mod normalize;
 mod notification;
+mod output_budget;
 mod pairing;
 mod recovery;
 mod respond;

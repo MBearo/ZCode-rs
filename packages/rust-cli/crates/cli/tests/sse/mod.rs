@@ -119,10 +119,12 @@ impl Fixture {
     }
 }
 
-/// 剧本的一步：固定的回复，或按这一次主请求的请求体生成（要用只有请求里才有的值，例如落盘位置）。
+/// 剧本的一步：固定的回复，或按这一次主请求的请求体生成（要用只有请求里才有的值，例如落盘位置）；`Status` 是一个
+/// 非 2xx 的 JSON 回复（修复线 F108：端点报上下文超长）。
 pub enum Reply {
     Fixed(String),
     From(Box<dyn Fn(&Value) -> String + Send>),
+    Status { status: u16, body: String },
 }
 
 /// 起夹具：第 n 个主请求回 `script[n]`，剧本用完后回一段文字。
@@ -178,10 +180,15 @@ pub fn serve_with(script: Vec<Reply>) -> Fixture {
             let main = body["tools"]
                 .as_array()
                 .is_some_and(|tools| !tools.is_empty());
+            let mut status = (200, "OK", "text/event-stream");
             let reply = if main {
                 let reply = match script.next() {
                     Some(Reply::Fixed(reply)) => reply,
                     Some(Reply::From(make)) => make(&body),
+                    Some(Reply::Status { status: code, body }) => {
+                        status = (code, "Error", "application/json");
+                        body
+                    }
                     None => text_reply("done"),
                 };
                 recorded.lock().unwrap().push(body);
@@ -192,8 +199,9 @@ pub fn serve_with(script: Vec<Reply>) -> Fixture {
                 recorded_side.lock().unwrap().push(body);
                 text_reply("Side")
             };
+            let (code, reason, kind) = status;
             let head = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                "HTTP/1.1 {code} {reason}\r\ncontent-type: {kind}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
                 reply.len()
             );
             let _ = stream.write_all(head.as_bytes());

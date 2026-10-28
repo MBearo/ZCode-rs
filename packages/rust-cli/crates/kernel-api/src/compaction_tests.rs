@@ -18,6 +18,37 @@ fn the_gap_is_actual_minus_limit() {
     );
 }
 
+/// OpenAI 的句式（兼容端点也回它，修复线 F108，compact.md §3.1）：差是消息里的输入减上限。
+#[test]
+fn the_openai_wording_gives_input_minus_limit() {
+    assert_eq!(
+        prompt_too_long_gap(
+            "This model's maximum context length is 1048576 tokens. However, you requested 1484576 tokens (1100000 in the messages, 384576 in the completion)."
+        ),
+        Some(1_100_000 - 1_048_576)
+    );
+    assert_eq!(
+        prompt_too_long_gap(
+            "this model's Maximum Context Length is 8192 tokens. However, your messages resulted in 9000 tokens (9000 in the messages, 0 in the completion)."
+        ),
+        Some(808)
+    );
+    // 输入没超、是加上输出上限才超（用户遇到的那句）：没有差。
+    assert_eq!(
+        prompt_too_long_gap(
+            "This model's maximum context length is 1048576 tokens. However, you requested 1055008 tokens (671008 in the messages, 384000 in the completion)."
+        ),
+        None
+    );
+    // 没有输入的数：没有差。
+    assert_eq!(
+        prompt_too_long_gap(
+            "This model's maximum context length is 8192 tokens. However, your messages resulted in 9000 tokens."
+        ),
+        None
+    );
+}
+
 /// 按错误文本的正则：没有这句话、不是 `N tokens > M`、差不大于 0 时都没有差。
 #[test]
 fn other_texts_have_no_gap() {
@@ -151,4 +182,80 @@ fn rough_tokens_round_the_utf16_length() {
     assert_eq!(rough_tokens("ab"), 1);
     assert_eq!(rough_tokens("abcdef"), 2);
     assert_eq!(rough_tokens("😀😀"), 1);
+}
+
+fn user(text: &str) -> crate::message::Message {
+    crate::message::Message::User(crate::message::UserMessage {
+        id: crate::ids::MessageId::new("u"),
+        content: vec![crate::message::ContentBlock::Text {
+            text: text.to_owned(),
+        }],
+        origin: crate::message::UserOrigin::Human,
+    })
+}
+
+/// 上下文 token 以最近一次带用量的响应为锚点（输入 + 缓存读写 + 输出），加之后消息的粗估；没有锚点时全部粗估。
+#[test]
+fn context_tokens_anchor_on_the_last_usage() {
+    use crate::message::{AssistantMessage, ContentBlock, Message, Usage};
+    let assistant = Message::Assistant(AssistantMessage {
+        id: crate::ids::MessageId::new("a"),
+        content: vec![ContentBlock::Text {
+            text: "x".repeat(400),
+        }],
+        model: "m".to_owned(),
+        stop_reason: None,
+        usage: Some(Usage {
+            input_tokens: 100,
+            output_tokens: 10,
+            cache_creation_input_tokens: 5,
+            cache_read_input_tokens: 5,
+        }),
+    });
+    let before = user(&"y".repeat(4000));
+    let after = user(&"z".repeat(40));
+    assert_eq!(
+        super::context_tokens(&[&before, &assistant, &after]),
+        120 + 10
+    );
+    assert_eq!(super::context_tokens(&[&before]), 1000);
+    assert_eq!(super::context_tokens(&[]), 0);
+}
+
+/// 压缩边界是锚点 0：边界之前的用量不算。
+#[test]
+fn a_compact_boundary_anchors_at_zero() {
+    use crate::ids::MessageId;
+    use crate::message::{CompactBoundary, CompactTrigger, Message, SystemMessage};
+    let boundary = Message::System(SystemMessage::CompactBoundary(CompactBoundary {
+        id: MessageId::new("b"),
+        trigger: CompactTrigger::Auto,
+        pre_tokens: 900_000,
+        summary: MessageId::new("s"),
+        preserved: None,
+        discovered_tools: Vec::new(),
+    }));
+    let after = user(&"z".repeat(40));
+    assert_eq!(super::context_tokens(&[&boundary, &after]), 10);
+}
+
+/// 带内容块的 attachment（`@` 提及的图片）：图片按估算值计入；system 消息不算。
+#[test]
+fn attachment_blocks_count_like_message_blocks() {
+    use crate::message::{ATTACHMENT_BLOCKS, AttachmentMessage, Message};
+    let attachment = Message::Attachment(AttachmentMessage {
+        id: crate::ids::MessageId::new("a"),
+        source: "file".to_owned(),
+        text: "abcdefgh".to_owned(),
+        data: serde_json::json!({
+            ATTACHMENT_BLOCKS: [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "x"}},
+                {"type": "text", "text": "abcd"},
+            ],
+        }),
+    });
+    assert_eq!(
+        super::message_tokens(&attachment),
+        2 + super::IMAGE_TOKENS + 1
+    );
 }

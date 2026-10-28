@@ -115,6 +115,34 @@ async fn html_is_converted_and_answered_by_the_side_model() {
     assert_eq!(run.env.fetched().len(), 1);
 }
 
+/// 修复线 F109：中文页面里实体后面紧跟中文时，以前解码实体 panic、整个回合失败。现在照常转换并交给旁路模型。
+#[tokio::test]
+async fn a_chinese_page_with_entities_converts_without_panicking() {
+    let run = setup(
+        vec![(
+            "https://example.com/zh",
+            page(
+                200,
+                "text/html; charset=utf-8",
+                "<h2>尺寸</h2><p>&nbsp;Max 显示屏采用曲线优美的圆角设计，屏幕的对角线长度是 6.86 英寸&nbsp;(实际可视区域较小)。</p><p>&amp;中文内容 &中文实体没有分号</p>",
+            ),
+        )],
+        &["6.86 英寸"],
+    );
+    let answer = call(
+        &run,
+        json!({"url": "https://example.com/zh", "prompt": "屏幕多大？"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(answer, "6.86 英寸");
+    let sent = format!("{:?}", run.model.requests()[0].messages[0].content);
+    assert!(
+        sent.contains("尺寸\\n--\\n\\nMax 显示屏采用曲线优美的圆角设计，屏幕的对角线长度是 6.86 英寸 (实际可视区域较小)。\\n\\n&中文内容 &中文实体没有分号"),
+        "{sent}"
+    );
+}
+
 #[tokio::test]
 async fn same_site_redirects_follow_and_cross_site_redirects_return() {
     let run = setup(
