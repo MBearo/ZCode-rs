@@ -31,7 +31,7 @@ test("/arch:AVX512 needs cl 19.23 (VS 2019 16.3) or newer", () => {
   assert.equal(supportsAvx512([20, 0, 0]), true);
 });
 
-// Windows ARM64（工作线 F110）：ugrep 不编 AVX 的文件，用 ARM64 原生的 cl；x64 不变。
+// Windows ARM64（工作线 F111）：ugrep 不编 AVX 的文件，用 ARM64 原生的 cl；x64 不变。
 test("vswhere looks for the native MSVC compiler of the runner's architecture", () => {
   assert.deepEqual(msvcCompiler("x64"), {
     component: "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",

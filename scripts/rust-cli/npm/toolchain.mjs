@@ -2,7 +2,7 @@
 // cargo 之前跑一次，缺了就在这里报错，不等 build.rs 编到一半才失败。
 // - linux-gnu：ugrep 静态链接 libstdc++，C++ 编译器（cc 的缺省 `c++`，或 `CXX`）要能给出 `libstdc++.a` 的绝对路径；
 // - win32 x64（MSVC）：ugrep 的 AVX512BW 文件用 `/arch:AVX512`，要 cl 19.23（VS 2019 16.3）或更新；
-// - win32 arm64（MSVC，工作线 F110）：ugrep 走 NEON、不编 AVX 的文件，只要 ARM64 原生的 cl；ring 在这个 target 上用
+// - win32 arm64（MSVC，工作线 F111）：ugrep 走 NEON、不编 AVX 的文件，只要 ARM64 原生的 cl；ring 在这个 target 上用
 //   `clang` 编 C 与汇编，要 `clang` 在 PATH 里；
 // - darwin：Xcode 的 clang++。
 import { execFile } from "node:child_process";

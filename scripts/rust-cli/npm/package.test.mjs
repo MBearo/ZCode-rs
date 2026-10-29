@@ -123,7 +123,7 @@ test("Linux ships glibc packages for x64 and arm64", () => {
   assert.throws(() => selectPlatform("linux", "arm64", undefined), /Unsupported/u);
 });
 
-// Windows 两个架构都发平台包（docs/specs/rust-cli/embedded-search.md §9.3，工作线 F110）：ARM64 在 GitHub 的 Windows 11 ARM64
+// Windows 两个架构都发平台包（docs/specs/rust-cli/embedded-search.md §9.3，工作线 F111）：ARM64 在 GitHub 的 Windows 11 ARM64
 // runner 上原生编，冒烟在同一台机器上运行装好的包。
 test("Windows ships packages for x64 and arm64", () => {
   const windows = platforms.filter((item) => item.os === "win32");
