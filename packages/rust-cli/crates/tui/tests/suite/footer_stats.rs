@@ -110,7 +110,7 @@ async fn requested(model: &GatedModel, count: usize) {
 }
 
 /// 一次请求：开始 1000、首字 3000、结束 6000，输出 120 → 120 × 1000 / 3000 = 40 tok/s；输入 200、缓存读 800（Node
-/// 的输入是 1000）→ 80%；上下文 1120 / 180,000 → ctx 1%。流式中三项都还没有（还没有完成的请求）。
+/// 的输入是 1000）→ 80%；上下文 1120 / 180,000 → ctx 0.6%。流式中三项都还没有（还没有完成的请求）。
 #[tokio::test(flavor = "multi_thread")]
 async fn a_finished_request_shows_tps_context_and_cache() {
     let (model, mut senders) = GatedModel::new(1);
@@ -141,7 +141,7 @@ async fn a_finished_request_shows_tps_context_and_cache() {
             })
             .await;
         assert!(
-            screen.contains("scripted · 40 tok/s · ctx 1% · cache 80%"),
+            screen.contains("scripted · 40 tok/s · ctx 0.6% · cache 80.0%"),
             "{screen}"
         );
     })
@@ -216,14 +216,16 @@ async fn the_hit_rate_is_rebuilt_from_the_usage_rows_after_resume() {
     };
     with_ui(model, setup, |mut ui| async move {
         ui.submit("first");
-        ui.wait("the first reply", |s| idle(s, "cache 0%")).await;
+        ui.wait("the first reply", |s| idle(s, "cache 0.0%")).await;
         ui.submit("second");
-        let screen = ui.wait("the second reply", |s| idle(s, "cache 40%")).await;
-        assert!(screen.contains("ctx 1%"), "{screen}");
+        let screen = ui
+            .wait("the second reply", |s| idle(s, "cache 40.0%"))
+            .await;
+        assert!(screen.contains("ctx 0.6%"), "{screen}");
         assert!(!screen.contains("tok/s"), "{screen}");
         ui.submit("/clear");
         let screen = ui
-            .wait("the cleared screen", |s| !s.contains("cache 40%"))
+            .wait("the cleared screen", |s| !s.contains("cache 40.0%"))
             .await;
         assert!(!screen.contains("ctx "), "{screen}");
         // 页面框架（标题、工具栏、`Type to search`）先于会话列表画出；列表还扣着时写 `Loading sessions…`。
@@ -241,15 +243,18 @@ async fn the_hit_rate_is_rebuilt_from_the_usage_rows_after_resume() {
         ui.key(KeyCode::Enter);
         let screen = ui
             .wait("the resumed session", |s| {
-                !s.contains("Type to search") && s.contains("cache 40%")
+                !s.contains("Type to search") && s.contains("cache 40.0%")
             })
             .await;
-        assert!(screen.contains("scripted · ctx 1% · cache 40%"), "{screen}");
+        assert!(
+            screen.contains("scripted · ctx 0.6% · cache 40.0%"),
+            "{screen}"
+        );
     })
     .await;
 }
 
-/// 压缩结果提交后 ctx 立即按压缩后的历史更新（不等下一条回复）：150,001 / 180,000 → 83%，压缩后只剩摘要 → 0%。
+/// 压缩结果提交后 ctx 立即按压缩后的历史更新（不等下一条回复）：150,001 / 180,000 → 83.3%，压缩后只剩摘要 → 不到 1%。
 #[tokio::test(flavor = "multi_thread")]
 async fn the_context_share_updates_once_the_conversation_is_compacted() {
     let model = GatedModel::scripted(vec![
@@ -262,12 +267,13 @@ async fn the_context_share_updates_once_the_conversation_is_compacted() {
     };
     with_ui(model, setup, |mut ui| async move {
         ui.submit("first");
-        ui.wait("the big reply", |s| idle(s, "ctx 83%")).await;
+        ui.wait("the big reply", |s| idle(s, "ctx 83.3%")).await;
         ui.submit("/compact");
         ui.wait_for("Conversation compacted").await;
-        let screen = ui.wait("the new share", |s| s.contains("ctx 0%")).await;
+        // 一位小数（F115）：压缩后的历史只剩摘要的续写消息，约 700 个 token，不到 1%（以前的整数式子写 0%）。
+        let screen = ui.wait("the new share", |s| s.contains("ctx 0.")).await;
         // 摘要请求不是主回合请求：命中率仍是第一次请求的值。
-        assert!(screen.contains("ctx 0% · cache 0%"), "{screen}");
+        assert!(screen.contains("% · cache 0.0%"), "{screen}");
     })
     .await;
 }
@@ -288,11 +294,11 @@ async fn chinese_and_light_themes_show_the_same_items() {
         ui.submit("你好");
         let screen = ui
             .wait("the reply", |s| {
-                s.contains("缓存 80%") && !s.contains("esc 中断")
+                s.contains("缓存 80.0%") && !s.contains("esc 中断")
             })
             .await;
         assert!(
-            screen.contains("scripted · 上下文 1% · 缓存 80%"),
+            screen.contains("scripted · 上下文 0.6% · 缓存 80.0%"),
             "{screen}"
         );
         // footer 那一行里“缓”字的格子（宽字符占两格，按格子找）。

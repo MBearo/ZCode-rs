@@ -1,4 +1,5 @@
 use rust_cli_kernel_api::message::ToolResultContent;
+use rust_cli_kernel_api::model::ModelError;
 use serde_json::json;
 
 use super::*;
@@ -24,11 +25,16 @@ fn start() -> SseEvent {
 }
 
 fn decode(events: Vec<SseEvent>) -> (Vec<ModelEvent>, Option<ModelError>) {
-    let mut decoder = AnthropicStream::default();
+    decode_for(Vendor::Generic, events)
+}
+
+/// 按某个厂商的分类器解码（错误块与结束原因先经厂商层，provider-errors.md §2.2）。
+fn decode_for(vendor: Vendor, events: Vec<SseEvent>) -> (Vec<ModelEvent>, Option<ModelError>) {
+    let mut decoder = AnthropicStream::new(vendor);
     let mut out = VecDeque::new();
     for event in events {
-        if let Err(error) = decoder.decode(event, &mut out) {
-            return (out.into(), Some(error));
+        if let Err(verdict) = decoder.decode(event, &mut out) {
+            return (out.into(), Some(verdict.error));
         }
     }
     (out.into(), None)
@@ -153,12 +159,89 @@ fn usage_merges_into_the_running_total() {
                 stop_reason: None,
                 usage: usage(20, 0, 5, 100),
             },
+            // 修改（F113，provider-errors.md D7 暂定）：以前不认识这个值，是 `Unknown`。
             ModelEvent::MessageDelta {
-                stop_reason: Some(StopReason::Unknown),
+                stop_reason: Some(StopReason::ModelContextWindowExceeded),
                 usage: usage(20, 0, 5, 100),
             },
         ]
     );
+}
+
+/// 修 bug（F113，D20）：不带事件名、正文是错误形状的块以前被忽略，流读完时只剩 `stream ended before message_stop`。
+#[test]
+fn unnamed_error_frames_end_the_stream() {
+    let (events, error) = decode(vec![
+        start(),
+        SseEvent {
+            event: None,
+            data:
+                json!({"type": "error", "error": {"type": "overloaded_error", "message": "busy"}})
+                    .to_string(),
+        },
+    ]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        error,
+        Some(ModelError::Overloaded {
+            message: "busy".to_owned()
+        })
+    );
+    // 不带事件名的普通块照旧忽略。
+    let (_, none) = decode(vec![
+        start(),
+        SseEvent {
+            event: None,
+            data: json!({"type": "keepalive"}).to_string(),
+        },
+    ]);
+    assert_eq!(none, None);
+}
+
+/// 智谱的端点：业务码在流里（带不带事件名）按码表；`sensitive` 是内容拦截；`network_error` 是流内的网络失败。
+#[test]
+fn vendor_codes_and_finish_reasons_on_the_zhipu_endpoint() {
+    let (_, limited) = decode_for(
+        zhipu(),
+        vec![
+            start(),
+            SseEvent {
+                event: None,
+                data: json!({"error": {"code": "1302", "message": "并发数过高"}}).to_string(),
+            },
+        ],
+    );
+    assert!(
+        matches!(limited, Some(ModelError::RateLimited { .. })),
+        "{limited:?}"
+    );
+    let delta = |reason: &str| {
+        typed(json!({"type": "message_delta", "delta": {"stop_reason": reason}, "usage": {}}))
+    };
+    let (events, error) = decode_for(zhipu(), vec![start(), delta("sensitive")]);
+    assert_eq!(error, None);
+    assert!(matches!(
+        events[1],
+        ModelEvent::MessageDelta {
+            stop_reason: Some(StopReason::Refusal),
+            ..
+        }
+    ));
+    let (events, error) = decode_for(zhipu(), vec![start(), delta("network_error")]);
+    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(error, Some(ModelError::Network { .. })),
+        "{error:?}"
+    );
+    // 别的端点不认这两个值（照旧 `Unknown`）。
+    let (events, _) = decode(vec![start(), delta("sensitive")]);
+    assert!(matches!(
+        events[1],
+        ModelEvent::MessageDelta {
+            stop_reason: Some(StopReason::Unknown),
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -391,4 +474,9 @@ fn a_bare_tool_result_for_a_server_call_is_that_call_result() {
             ModelEvent::BlockStop { index: 2 },
         ]
     );
+}
+
+/// 智谱的端点按方案表选出的厂商（测试不直接写厂商名，同产品代码只经 `profiles::vendor`）。
+fn zhipu() -> Vendor {
+    crate::profiles::vendor("https://open.bigmodel.cn/api/anthropic")
 }

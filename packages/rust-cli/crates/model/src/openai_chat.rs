@@ -10,20 +10,19 @@
 //! 之后合并 Provider 的 option map 补丁（推理参数、`max_completion_tokens` 等）。补丁给出
 //! `max_completion_tokens` 时去掉默认的 `max_tokens`，两者不同时发送（同一预算只发一次）。
 
-use std::time::SystemTime;
-
 use rust_cli_base::js::json::stringify;
 use rust_cli_kernel_api::model::{ModelError, ModelRequest, ToolChoice, ToolDefinition};
 use rust_cli_kernel_api::provider::{Credential, ModelEndpoint};
-use rust_cli_net::{HeaderValue, HttpRequest, ResponseHeaders, header};
+use rust_cli_net::{HeaderValue, HttpRequest, header};
 use serde_json::{Map, Value, json};
 
 use crate::anthropic::HEADER_TIMEOUT;
 use crate::endpoint::chat_completions_url;
+use crate::errors::Vendor;
 use crate::openai_chat_stream::ChatStream;
 use crate::openai_lower::{Item, Part, items};
-use crate::protocol::{Failure, Protocol, StreamDecoder, bearer};
-use crate::{openai_error, patch};
+use crate::patch;
+use crate::protocol::{Protocol, StreamDecoder, bearer};
 
 pub(crate) struct OpenAiChat;
 
@@ -46,18 +45,8 @@ impl Protocol for OpenAiChat {
         bearer(credential)
     }
 
-    fn decoder(&self) -> Box<dyn StreamDecoder> {
-        Box::new(ChatStream::default())
-    }
-
-    fn classify(
-        &self,
-        status: u16,
-        headers: &ResponseHeaders,
-        body: &str,
-        now: SystemTime,
-    ) -> Failure {
-        openai_error::from_response(status, headers, body, now)
+    fn decoder(&self, vendor: Vendor) -> Box<dyn StreamDecoder> {
+        Box::new(ChatStream::new(vendor))
     }
 }
 

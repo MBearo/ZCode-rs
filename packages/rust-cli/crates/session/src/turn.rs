@@ -41,15 +41,10 @@ fn metered_fact(metered: Metered) -> Fact {
 /// footer 的 TPS（修复线 F105，docs/specs/rust-cli/tui-display.md §2.6）：只有完成的主回合请求才有；子代理、旁路与压缩
 /// 请求、中断与失败的请求不更新。时刻都相对请求开始。
 pub(crate) fn output_speed(call: &ModelCall) -> Option<OutputSpeed> {
-    (call.source == QuerySource::MainThread && call.status == CallStatus::Completed).then(|| {
-        OutputSpeed {
-            output_tokens: call.usage.as_ref().map(|usage| usage.output_tokens),
-            duration_ms: call.completed_at_ms.saturating_sub(call.started_at_ms),
-            first_content_ms: call
-                .first_content_at_ms
-                .map(|at| at.saturating_sub(call.started_at_ms)),
-        }
-    })
+    // 写法与子代理共用（kernel-api `OutputSpeed::of`，F112），这里只筛主回合。
+    (call.source == QuerySource::MainThread)
+        .then(|| OutputSpeed::of(call))
+        .flatten()
 }
 
 /// 成批进同一个回合的一条后续输入（修复线 L-A，query.md §4.3）。

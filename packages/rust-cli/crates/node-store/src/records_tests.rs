@@ -177,3 +177,16 @@ async fn the_node_records_read_back_as_kernel_messages() {
     );
     assert_eq!(loaded.meta.title, "Renamed");
 }
+
+/// 窗口用满按 Node 的 AI SDK（`mapAnthropicStopReason`）存成 `length`，读回是输出上限（provider-errors.md §2.5，F113）。
+#[test]
+fn a_full_context_window_is_stored_as_length() {
+    assert_eq!(
+        crate::append::finish_reason(StopReason::ModelContextWindowExceeded),
+        "length"
+    );
+    assert_eq!(
+        crate::append::finish_reason(StopReason::MaxTokens),
+        "length"
+    );
+}

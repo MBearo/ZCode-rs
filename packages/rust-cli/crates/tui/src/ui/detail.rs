@@ -125,7 +125,8 @@ fn hint(lang: Lang) -> &'static str {
     }
 }
 
-fn no_matches(lang: Lang) -> &'static str {
+/// 没有匹配（主界面的搜索模式也用这句，tui-input.md §2.3.5）。
+pub(super) fn no_matches(lang: Lang) -> &'static str {
     match lang {
         Lang::En => "no matches",
         Lang::Zh => "没有匹配",
@@ -189,11 +190,12 @@ pub fn draw(
     detail.scroll = detail.scroll.min(detail.max());
     let end = total - detail.scroll;
     let start = end.saturating_sub(height);
-    // 只复制可见行，匹配处在可见行上反色。
+    // 只复制可见行，匹配处画 `find_match`（反色，与主界面的搜索模式同一个记号，tui.md §7.4）。
     let mut visible: Vec<Line<'static>> = layout.lines(start, end);
+    let matched = app.palette.find_match();
     for (line, from, to) in &matches {
         if (start..end).contains(line) {
-            super::selection::reverse(&mut visible[line - start], *from, *to);
+            super::selection::paint(&mut visible[line - start], *from, *to, matched);
         }
     }
     super::draw::fill_rows(&mut visible, area.width as usize);

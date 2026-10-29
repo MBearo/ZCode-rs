@@ -147,6 +147,34 @@ fn accepted_declarations_are_truthy_test_variables() {
     );
 }
 
+/// 按另一个地址查方案表与错误码表的测试声明（provider-errors.md D13）：取值是地址，空白当没设；不接受时不读。
+#[test]
+fn the_assumed_base_url_is_a_test_declaration() {
+    let snapshot = env(&[(
+        "_ZCODE_ASSUME_BASE_URL",
+        "https://open.bigmodel.cn/api/anthropic",
+    )]);
+    assert_eq!(
+        assumed_base_url(TestDeclarations::Accepted, |name| {
+            var(&snapshot, name).map(str::to_owned)
+        }),
+        Some("https://open.bigmodel.cn/api/anthropic".to_owned())
+    );
+    let blank = env(&[("_ZCODE_ASSUME_BASE_URL", "  ")]);
+    assert_eq!(
+        assumed_base_url(TestDeclarations::Accepted, |name| {
+            var(&blank, name).map(str::to_owned)
+        }),
+        None
+    );
+    let reads = std::cell::Cell::new(0);
+    let ignored = assumed_base_url(TestDeclarations::Ignored, |_| {
+        reads.set(reads.get() + 1);
+        Some("https://open.bigmodel.cn/api/anthropic".to_owned())
+    });
+    assert_eq!((ignored, reads.get()), (None, 0));
+}
+
 /// 工作线 F52b（用户决定 2026-10-22）：不接受测试声明（release 构建）时设了也不生效，变量一个都不读。
 #[test]
 fn ignored_declarations_are_not_read() {

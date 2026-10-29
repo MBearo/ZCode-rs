@@ -16,8 +16,12 @@ mod early_interrupt;
 mod esc_windows;
 mod exit_signal;
 mod export;
+mod find;
+#[cfg(unix)]
+mod find_pty;
 mod flow;
 mod footer_stats;
+mod footer_viewing;
 mod fork;
 mod fork_agent;
 mod goal;
@@ -47,6 +51,8 @@ mod peers;
 mod permissions;
 mod plan_open;
 mod projects;
+#[cfg(unix)]
+mod pty;
 mod question_results;
 mod questions;
 mod queue;

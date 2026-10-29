@@ -2,7 +2,7 @@
 
 use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::message::ContentBlock;
-use rust_cli_kernel_api::model::BlockDelta;
+use rust_cli_kernel_api::model::{BlockDelta, ModelError};
 use serde_json::{Map, json};
 
 use super::*;
@@ -25,7 +25,9 @@ fn decode(events: Vec<SseEvent>) -> Result<Vec<ModelEvent>, ModelError> {
     let mut stream = ChatStream::default();
     let mut out = VecDeque::new();
     for event in events {
-        stream.decode(event, &mut out)?;
+        stream
+            .decode(event, &mut out)
+            .map_err(|verdict| verdict.error)?;
     }
     assert!(stream.finished(), "stream did not finish");
     Ok(out.into_iter().collect())
@@ -166,18 +168,26 @@ fn missing_call_ids_get_a_placeholder_and_bad_streams_fail() {
 
     let mut stream = ChatStream::default();
     let mut out = VecDeque::new();
-    let error = stream.decode(
-        data(json!({"error": {"message": "quota", "code": "insufficient_quota"}})),
-        &mut out,
+    let error = stream
+        .decode(
+            data(json!({"error": {"message": "quota", "code": "insufficient_quota"}})),
+            &mut out,
+        )
+        .map_err(|verdict| verdict.error);
+    // 修改（F113，provider-errors.md D4 暂定）：以前按 429 算（`RateLimited`，会重试十次）。
+    assert!(
+        matches!(error, Err(ModelError::QuotaExhausted { .. })),
+        "{error:?}"
     );
-    assert!(matches!(error, Err(ModelError::RateLimited { .. })));
-    let invalid = ChatStream::default().decode(
-        SseEvent {
-            event: None,
-            data: "{not json".to_owned(),
-        },
-        &mut out,
-    );
+    let invalid = ChatStream::default()
+        .decode(
+            SseEvent {
+                event: None,
+                data: "{not json".to_owned(),
+            },
+            &mut out,
+        )
+        .map_err(|verdict| verdict.error);
     assert!(matches!(invalid, Err(ModelError::Protocol { .. })));
     let unknown = decode(vec![
         chunk(json!({"content": "x"})),
@@ -263,4 +273,55 @@ fn calls_without_an_index_are_new_calls() {
             ),
         ]
     );
+}
+
+/// 智谱的端点（OpenAI 协议，D2 暂定）：`sensitive` 是内容拦截；`network_error` 先交出同一个 chunk 的增量，再报网络失败
+/// （以前两个都是 `Unknown`，截断的内容按正常完成）。
+#[test]
+fn vendor_finish_reasons_on_the_zhipu_endpoint() {
+    let finish = |reason: &str| {
+        data(json!({"id": "chatcmpl-1", "model": "glm-5",
+            "choices": [{"index": 0, "delta": {"content": "tail"}, "finish_reason": reason}]}))
+    };
+    let mut stream = ChatStream::new(zhipu());
+    let mut out = VecDeque::new();
+    for event in [chunk(json!({"content": "Hi"})), finish("sensitive"), done()] {
+        stream.decode(event, &mut out).unwrap();
+    }
+    assert!(out.iter().any(|event| matches!(
+        event,
+        ModelEvent::MessageDelta {
+            stop_reason: Some(StopReason::Refusal),
+            ..
+        }
+    )));
+    let mut stream = ChatStream::new(zhipu());
+    let mut out = VecDeque::new();
+    stream
+        .decode(chunk(json!({"content": "Hi"})), &mut out)
+        .unwrap();
+    let failed = stream
+        .decode(finish("network_error"), &mut out)
+        .unwrap_err();
+    assert!(
+        matches!(failed.error, ModelError::Network { .. }),
+        "{failed:?}"
+    );
+    assert!(out.iter().any(|event| matches!(
+        event,
+        ModelEvent::BlockDelta { delta: BlockDelta::Text(text), .. } if text == "tail"
+    )));
+    // 智谱的业务码在流里按码表。
+    let coded = ChatStream::new(zhipu())
+        .decode(
+            data(json!({"error": {"code": "1308", "message": "已达到套餐用量上限"}})),
+            &mut VecDeque::new(),
+        )
+        .unwrap_err();
+    assert!(matches!(coded.error, ModelError::QuotaExhausted { .. }));
+}
+
+/// 智谱的端点按方案表选出的厂商（测试不直接写厂商名，同产品代码只经 `profiles::vendor`）。
+fn zhipu() -> Vendor {
+    crate::profiles::vendor("https://open.bigmodel.cn/api/anthropic")
 }

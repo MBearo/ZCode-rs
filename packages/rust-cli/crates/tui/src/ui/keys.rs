@@ -1,6 +1,6 @@
 // 改写自 apps/zcode-host/crates/tui/src/ui/keys.rs（feat/rs 79b6691c55）：去掉启动失败页、登录、任务面板、
 // 后台任务、子代理与回退浏览；交互的回答换成 `Action::Resolve`。
-//! 按键处理：视图（列表、页面、详细视图、快捷键面板）→ 选区 → 待处理交互 → 历史搜索 → 弹出列表 →
+//! 按键处理：视图（列表、页面、详细视图、快捷键面板）→ 选区 → 待处理交互 → 搜索模式 → 历史搜索 → 弹出列表 →
 //! 输入框与全局键。
 use std::time::Instant;
 
@@ -41,6 +41,11 @@ impl App {
             && let super::permissions::Stage::Input(typed) = &mut view.stage
         {
             typed.push_str(text.lines().next().unwrap_or_default());
+            return None;
+        }
+        // 搜索模式：粘贴进查询（修复线 F114，tui-input.md §2.3.1）。
+        if self.find.is_some() && self.overlay.is_none() {
+            self.find_paste(text);
             return None;
         }
         // 只读查看子代理时输入框不能输入。
@@ -144,6 +149,10 @@ impl App {
             Some(super::agents::Focus::Agents(index)) => return self.agents_key(index, key, now),
             Some(super::agents::Focus::Pill) => return self.pill_key(key, now),
             None => {}
+        }
+        // 搜索模式（修复线 F114，tui-input.md §2.3.1）：查看子代理时也在这里，先于查看的按键。
+        if self.find.is_some() {
+            return self.find_key(key);
         }
         if self.viewing.is_some() {
             return self.viewing_key(key, now);

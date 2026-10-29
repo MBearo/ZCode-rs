@@ -59,11 +59,13 @@ fn placeholder(app: &App) -> String {
     }
 }
 
-/// 边线的样式：查看子代理时用子代理色（修复线 F62，tui-panels.md §1.6；bash 模式的颜色让位），bash 模式
-/// 用 bash 色（tui-input.md §2.1），否则 dim。
+/// 边线的样式：查看子代理时用子代理色（修复线 F62，tui-panels.md §1.6；bash 模式与搜索模式的颜色让位），搜索模式用
+/// 强调色（修复线 F114，tui-input.md §2.3.5），bash 模式用 bash 色（tui-input.md §2.1），否则 dim。
 fn rule(app: &App) -> Style {
     if app.viewing.is_some() {
         app.palette.subagent_rule()
+    } else if app.find.is_some() {
+        Style::default().fg(app.palette.accent)
     } else if app.composer.mode == super::composer::InputMode::Bash {
         Style::default().fg(app.palette.bash())
     } else {
@@ -166,7 +168,12 @@ pub fn input_box(
     };
     let mut cursor = None;
     let mut first_row = 0;
-    if let Some((query, _)) = &app.composer.search {
+    if let Some(find) = &app.find {
+        // 搜索模式（修复线 F114）：`⌕ ` 加查询，右侧是计数；光标在查询末尾。
+        let (line, column) = super::find::input_line(app, find, width);
+        lines.push(line);
+        cursor = Some((1, column));
+    } else if let Some((query, _)) = &app.composer.search {
         // 搜索历史：显示匹配到的那条，查询出现的地方用黄色。
         let shown = app.composer.search_match().unwrap_or(area.text());
         let mut line = vec![prompt];

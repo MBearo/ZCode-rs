@@ -415,13 +415,13 @@ pub struct SessionView {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub peer_held: Vec<crate::peers::HeldPeerMessage>,
     /// 上下文用量（token、有效窗口）：会话 actor 按当前历史与模型经 `Compactor::context_usage` 算（compact.md §2.1、
-    /// tui-display.md §2.6，修复线 F27）；压缩模块不知道时为空。
+    /// tui-display.md §2.6，修复线 F27；子代理的快照由 agents 按子会话同样算，F112）；压缩模块不知道时为空。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<crate::compaction::ContextOccupancy>,
     /// 上下文快满的提示（同一处算，F27）：冷加载后不用等下一条回复。
     #[serde(default)]
     pub context_notice: crate::compaction::ContextNotice,
-    /// 本进程里最近一个完成的主回合请求的输出速度（修复线 F105）：只在 actor 的内存里，冷打开的会话为空。
+    /// 本进程里最近一个完成的主回合请求（子代理的快照是子代理请求，F112）的输出速度（F105）：只在内存里，冷打开的为空。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_speed: Option<crate::metering::OutputSpeed>,
 }

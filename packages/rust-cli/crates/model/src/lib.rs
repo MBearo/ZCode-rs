@@ -10,7 +10,6 @@
 
 mod anthropic;
 mod anthropic_betas;
-mod anthropic_error;
 mod anthropic_output;
 mod anthropic_request;
 mod anthropic_shape;
@@ -18,6 +17,7 @@ mod anthropic_stream;
 mod anthropic_write;
 mod attribution;
 mod endpoint;
+mod errors;
 mod idle;
 mod media;
 mod metadata;
@@ -27,11 +27,9 @@ mod model_io_tape;
 mod openai_blocks;
 mod openai_chat;
 mod openai_chat_stream;
-mod openai_error;
 mod openai_lower;
 mod openai_responses;
 mod openai_responses_stream;
-mod overflow;
 mod patch;
 mod profiles;
 mod protocol;
@@ -84,6 +82,7 @@ impl ProviderModel {
                 idle: StreamIdle::default(),
                 clock,
                 assume_first_party: false,
+                assume_base_url: None,
                 sandbox: false,
                 max_output_tokens: None,
                 device: None,
@@ -133,6 +132,17 @@ impl ProviderModel {
     pub fn with_assumed_first_party(mut self) -> Self {
         if let Ok(route) = &mut self.route {
             route.assume_first_party = true;
+        }
+        self
+    }
+
+    /// 查请求方案与厂商（错误码表）时把端点的 base URL 当成 `base_url`，请求仍发到真实地址。只给测试用：入口在
+    /// `_ZCODE_ASSUME_BASE_URL` 有值时打开（model.md §6，docs/specs/rust-cli/provider-errors.md D13），让本地夹具走到
+    /// 智谱的方案与码表。[`with_assumed_first_party`](Self::with_assumed_first_party) 优先。
+    #[must_use]
+    pub fn with_assumed_base_url(mut self, base_url: impl Into<String>) -> Self {
+        if let Ok(route) = &mut self.route {
+            route.assume_base_url = Some(base_url.into());
         }
         self
     }

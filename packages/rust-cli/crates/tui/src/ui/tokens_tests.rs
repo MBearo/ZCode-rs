@@ -176,3 +176,37 @@ fn success_is_green_in_both_themes() {
     let p = palette(ColorLevel::Ansi16, LIGHT, None);
     assert_eq!(p.success(), Style::default().fg(Color::Green));
 }
+
+/// 修复线 F114（tui.md §7.4）：搜索的匹配是反色；当前匹配是警告色的底（深浅背景各一种）、黑字、粗体加下划线，叠在
+/// 反色上时去掉反色；16 色黄底黑字。
+#[test]
+fn search_highlights_in_both_themes() {
+    let bold_underlined = Modifier::BOLD | Modifier::UNDERLINED;
+    let p = palette(ColorLevel::TrueColor, DARK, None);
+    assert_eq!(
+        p.find_match(),
+        Style::default().add_modifier(Modifier::REVERSED)
+    );
+    let current = p.find_current();
+    assert_eq!(
+        (current.fg, current.bg),
+        (Some(Color::Rgb(0, 0, 0)), Some(Color::Rgb(240, 177, 0)))
+    );
+    assert_eq!(current.add_modifier, bold_underlined);
+    assert_eq!(current.sub_modifier, Modifier::REVERSED);
+    let p = palette(ColorLevel::TrueColor, LIGHT, None);
+    assert_eq!(p.find_current().bg, Some(Color::Rgb(208, 135, 0)));
+    // 叠在匹配上：去掉反色。
+    let stacked = p.find_match().patch(p.find_current());
+    assert!(!stacked.add_modifier.contains(Modifier::REVERSED));
+    let p = palette(ColorLevel::Ansi16, DARK, None);
+    assert_eq!(
+        p.find_match(),
+        Style::default().add_modifier(Modifier::REVERSED)
+    );
+    let current = p.find_current();
+    assert_eq!(
+        (current.fg, current.bg),
+        (Some(Color::Black), Some(Color::Yellow))
+    );
+}

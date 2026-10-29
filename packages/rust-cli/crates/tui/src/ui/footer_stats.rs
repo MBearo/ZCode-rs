@@ -3,6 +3,7 @@
 //! 用量与输出速度（`view::Transcript::context_usage`、`output_speed`）；这里只排文字，没有值的项不出现。
 //! 修复线 F105：TPS 原来也取用量表（最近一行），只有工具调用的请求没有值；现在取 actor 在内存里记的速度。
 use ratatui::text::Span;
+use rust_cli_kernel_api::compaction::ContextOccupancy;
 use rust_cli_kernel_api::metering::RequestStats;
 
 use super::app::App;
@@ -55,24 +56,42 @@ fn whole(value: f64) -> u64 {
     value.round().max(0.0) as u64
 }
 
+/// ctx 与 cache 的百分比：四舍五入到一位小数，整数也写 `.0`（工作线 F115，用户决定 2026-10-29，tui-display.md §2.6）。
+fn tenths(percent: f64) -> String {
+    format!("{:.1}", (percent * 10.0).round().max(0.0) / 10.0)
+}
+
+/// 上下文占有效窗口的百分比 `min(100, token / W · 100)`；窗口为 0 时是 100。kernel-api 的 `percent()` 是整数的
+/// 式子，留给 `N% context used` 的提示用。
+#[allow(clippy::cast_precision_loss)]
+fn context_percent(usage: ContextOccupancy) -> f64 {
+    if usage.max_tokens == 0 {
+        return 100.0;
+    }
+    (usage.used_tokens as f64 / usage.max_tokens as f64 * 100.0).min(100.0)
+}
+
+/// 查看子代理时 TPS 与 ctx 取它的只读视图，命中率的回执由 runner 查它的子会话（修复线 F112，tui-panels.md §1.7）；子代理
+/// 没有的项不出现，不用主会话的值顶替。
 pub fn items(app: &App) -> Items {
     let stats = app.request_stats.stats();
+    let shown = app.shown();
     let style = app.palette.secondary();
     let span = |text: String| Span::styled(text, style);
     // `tok/s` 是单位，中英文相同。
-    let tps = app
-        .view
+    let tps = shown
         .output_speed()
         .and_then(|speed| speed.tokens_per_second())
         .map(|tps| span(format!("{} tok/s", whole(tps))));
-    let ctx = app.view.context_usage().map(|usage| {
+    let ctx = shown.context_usage().map(|usage| {
+        let percent = tenths(context_percent(usage));
         span(match app.lang {
-            Lang::En => format!("ctx {}%", usage.percent()),
-            Lang::Zh => format!("上下文 {}%", usage.percent()),
+            Lang::En => format!("ctx {percent}%"),
+            Lang::Zh => format!("上下文 {percent}%"),
         })
     });
     let cache = stats.cache_hit_rate().map(|rate| {
-        let percent = whole(rate * 100.0);
+        let percent = tenths(rate * 100.0);
         span(match app.lang {
             Lang::En => format!("cache {percent}%"),
             Lang::Zh => format!("缓存 {percent}%"),

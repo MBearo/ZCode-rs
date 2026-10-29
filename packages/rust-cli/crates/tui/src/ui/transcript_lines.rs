@@ -28,14 +28,17 @@ struct Entry {
     frame: u64,
 }
 
-/// 排版缓存，按块（第一个行 id）查找。普通视图与详细视图各一份，切换不互相淘汰。
+/// 排版缓存，按（块的第一个行 id，展开没有）查找。普通视图与详细视图各一份，切换不互相淘汰；搜索模式里普通视图的
+/// 折叠块同时要两种形式（显示的与完整的，tui-input.md §2.3.2），各占一项。
 #[derive(Default)]
 pub struct Cache {
-    normal: HashMap<u64, Entry>,
-    detail: HashMap<u64, Entry>,
+    normal: HashMap<(u64, bool), Entry>,
+    detail: HashMap<(u64, bool), Entry>,
     frame: u64,
     /// 流式中的回复按块缓存的 markdown 排版（每帧都要重排的块用它，修复线 F6）。
     markdown: crate::ui::markdown::Memo,
+    /// 清空的次数：行 id 从头分配过几次。按块的键记的界面状态（搜索的当前匹配）据此判断键还作不作数。
+    epoch: u64,
 }
 
 impl Cache {
@@ -44,6 +47,11 @@ impl Cache {
         self.normal.clear();
         self.detail.clear();
         self.markdown = crate::ui::markdown::Memo::default();
+        self.epoch += 1;
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 }
 
@@ -202,55 +210,19 @@ pub fn lines(app: &App, cache: &mut Cache, ctx: &Ctx<'_>) -> Layout {
     // 普通视图并工作段，详细视图不并。
     let built = cells::build(rows, !ctx.expanded, ctx.mcp_machines);
     let mut pending_locals: Vec<&LocalCell> = locals.collect();
+    // 搜索模式（修复线 F114，tui-input.md §2.3.2）：当前匹配所在的块按展开的样子排（临时展开）；折叠着的块另排一份完整
+    // 形式供搜索。详细视图本来就是完整形式。
+    let find = app.find.as_ref().filter(|_| !ctx.expanded);
+    let peek = find.and_then(|find| find.current).map(|hit| hit.key);
     for cell in &built {
-        let versions = || cell.rows.iter().map(|row| (row.id, row.version));
         let cell_key = cell.ids().next().unwrap_or(0);
         // 点击只展开这一个块；详细视图本来就是详细形式，不看单独展开。
-        let opened = !ctx.expanded && app.expanded_cells.contains(&cell_key);
-        // 流式中的回复每个增量都改版本，但显示只到最后一个换行：显示的文字没变就用上一帧排好的行（修复线 F6，审查
-        // R5-5；以前每个增量都整篇重排）。
-        let shown = cells::streaming_reply(cell);
-        let rendered = if cell.live() && shown.is_none() {
-            render(cell, &live_ctx, opened)
-        } else {
-            let hit = entries.get_mut(&cell_key).filter(|e| {
-                e.width == ctx.width
-                    && e.expanded == opened
-                    && e.light == ctx.palette.light
-                    && e.kind == cell.kind
-                    && e.thought_ms == cell.thought_ms
-                    && match shown {
-                        Some(shown) => e.shown.as_deref() == Some(shown),
-                        None => e.shown.is_none() && versions().eq(e.versions.iter().copied()),
-                    }
-            });
-            match hit {
-                Some(entry) => {
-                    entry.frame = frame;
-                    entry.rendered.clone()
-                }
-                None => {
-                    let rendered =
-                        render(cell, if shown.is_some() { &live_ctx } else { ctx }, opened);
-                    entries.insert(
-                        cell_key,
-                        Entry {
-                            versions: versions().collect(),
-                            shown: shown.map(str::to_owned),
-                            width: ctx.width,
-                            expanded: opened,
-                            light: ctx.palette.light,
-                            kind: cell.kind,
-                            thought_ms: cell.thought_ms,
-                            rendered: rendered.clone(),
-                            frame,
-                        },
-                    );
-                    rendered
-                }
-            }
-        };
-        let start = out.push(cell_key, rendered);
+        let opened =
+            !ctx.expanded && (app.expanded_cells.contains(&cell_key) || peek == Some(cell_key));
+        let rendered = cached(entries, cell, ctx, &live_ctx, opened, frame);
+        let full = (find.is_some() && !opened && rendered.expandable)
+            .then(|| cached(entries, cell, ctx, &live_ctx, true, frame));
+        let start = out.push_full(cell_key, rendered, full);
         if cell.kind == Kind::User
             && let Some(start) = start
             && let Body::User { text } = &cell.rows[0].body
@@ -278,6 +250,56 @@ pub fn lines(app: &App, cache: &mut Cache, ctx: &Ctx<'_>) -> Layout {
     }
     entries.retain(|_, entry| entry.frame == frame);
     out
+}
+
+/// 一个块排好的行：排版参数与内容都没变时用缓存里的（`opened` 是按展开的样子排）。
+fn cached(
+    entries: &mut HashMap<(u64, bool), Entry>,
+    cell: &cells::Cell<'_>,
+    ctx: &Ctx<'_>,
+    live_ctx: &Ctx<'_>,
+    opened: bool,
+    frame: u64,
+) -> Rc<Rendered> {
+    let versions = || cell.rows.iter().map(|row| (row.id, row.version));
+    let cell_key = cell.ids().next().unwrap_or(0);
+    // 流式中的回复每个增量都改版本，但显示只到最后一个换行：显示的文字没变就用上一帧排好的行（修复线 F6，审查
+    // R5-5；以前每个增量都整篇重排）。
+    let shown = cells::streaming_reply(cell);
+    if cell.live() && shown.is_none() {
+        return render(cell, live_ctx, opened);
+    }
+    let hit = entries.get_mut(&(cell_key, opened)).filter(|e| {
+        e.width == ctx.width
+            && e.expanded == opened
+            && e.light == ctx.palette.light
+            && e.kind == cell.kind
+            && e.thought_ms == cell.thought_ms
+            && match shown {
+                Some(shown) => e.shown.as_deref() == Some(shown),
+                None => e.shown.is_none() && versions().eq(e.versions.iter().copied()),
+            }
+    });
+    if let Some(entry) = hit {
+        entry.frame = frame;
+        return entry.rendered.clone();
+    }
+    let rendered = render(cell, if shown.is_some() { live_ctx } else { ctx }, opened);
+    entries.insert(
+        (cell_key, opened),
+        Entry {
+            versions: versions().collect(),
+            shown: shown.map(str::to_owned),
+            width: ctx.width,
+            expanded: opened,
+            light: ctx.palette.light,
+            kind: cell.kind,
+            thought_ms: cell.thought_ms,
+            rendered: rendered.clone(),
+            frame,
+        },
+    );
+    rendered
 }
 
 /// 固定在第一行的提问：最近一条已完全滚出顶部的用户消息，折成一行（`❯ ` 加文字，用户消息底色）。

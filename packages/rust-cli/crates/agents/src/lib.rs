@@ -74,6 +74,8 @@ pub struct AgentsPorts {
     pub queries: Arc<dyn SubagentQueries>,
     /// 主线程的上下文组装；子代理的 attachment 也由它按 `QuerySource::Subagent` 产生。
     pub context: Arc<dyn ContextBuilder>,
+    /// 主循环与子循环共用的压缩器（修复线 F112）：只读查看的快照用它算子代理的 ctx 与上下文提示（tui-panels.md §1.7）。
+    pub compactor: Arc<dyn rust_cli_kernel_api::compaction::Compactor>,
     /// agent 类型的来源；与 context 的 agent 清单是同一个实例（插件 agent 由 runtime 设置）。
     pub catalog: Arc<AgentCatalog>,
     /// 后台子代理在这里启动。

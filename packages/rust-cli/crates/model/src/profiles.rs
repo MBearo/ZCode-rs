@@ -11,6 +11,8 @@ use std::time::Duration;
 
 use rust_cli_kernel_api::provider::WireProtocol;
 
+use crate::errors::Vendor;
+
 /// Anthropic 官方 API 在 Node 配置里的写法（只给测试用的声明按它查表，§6；入口查能力规则也用它，F55）。与显式覆盖的
 /// 缺省 `AnthropicEndpoint::DEFAULT_BASE_URL`（SDK 的写法）由同一个 origin 拼出（F58）；方案表的正则两种都命中（测试）。
 pub const ANTHROPIC_OFFICIAL_BASE_URL: &str = concat!(crate::endpoint::anthropic_origin!(), "/v1");
@@ -172,6 +174,21 @@ pub(crate) fn is_gateway(base_url: &str) -> bool {
         (official, url.as_deref()),
         (Some(regex), Some(url)) if regex.find(url).is_some()
     )
+}
+
+/// 错误码表的厂商（docs/specs/rust-cli/provider-errors.md §2.2，修复线 F113）：只看方案表的端点列，写法同
+/// [`is_gateway`]，不看模型与协议（错误码是服务方给的；智谱 OpenAI 协议的端点与 z.ai 上的非 GLM 模型也用智谱的码表，
+/// D2 暂定）。
+pub(crate) fn vendor(base_url: &str) -> Vendor {
+    let zhipu = PROFILES
+        .iter()
+        .any(|profile| matches!(profile.endpoint, Endpoint::Zhipu))
+        && rust_cli_base::rule_url::is_zhipu_endpoint(base_url);
+    if zhipu {
+        Vendor::Zhipu
+    } else {
+        Vendor::Generic
+    }
 }
 
 #[cfg(test)]

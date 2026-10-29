@@ -367,7 +367,7 @@ impl StreamDecoder for Recording {
         &mut self,
         event: SseEvent,
         out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), crate::errors::Verdict> {
         let start = block_start(&event.data);
         let data = event.data.clone();
         let before = out.len();

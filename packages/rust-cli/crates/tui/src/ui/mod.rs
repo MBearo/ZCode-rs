@@ -21,6 +21,8 @@ pub mod diff_view_lines;
 pub mod draw;
 pub mod export;
 pub mod file_index;
+pub mod find;
+pub mod find_text;
 pub mod footer;
 pub mod footer_stats;
 pub mod fork;

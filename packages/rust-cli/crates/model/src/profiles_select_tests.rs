@@ -217,3 +217,31 @@ fn both_spellings_of_the_official_address_agree() {
         );
     }
 }
+
+/// 错误码表的厂商只看端点（provider-errors.md §2.2，D2 暂定）：智谱两种协议的端点、z.ai 上的非 GLM 模型与 ZCode 套餐网关
+/// 都是智谱；DeepSeek、网关、OpenAI、Anthropic 官方没有厂商层。
+#[test]
+fn the_vendor_follows_the_endpoint_only() {
+    for base_url in [
+        "https://open.bigmodel.cn/api/anthropic",
+        "https://open.bigmodel.cn/api/paas/v4",
+        "https://api.z.ai/api/paas/v4",
+        "https://api.z.ai/api/anthropic",
+        "https://zcode.z.ai/api/v1",
+    ] {
+        assert_eq!(vendor(base_url), crate::errors::Vendor::Zhipu, "{base_url}");
+    }
+    for base_url in [
+        "https://api.deepseek.com/anthropic",
+        "https://gw.example.com",
+        "https://api.openai.com/v1",
+        ANTHROPIC_OFFICIAL_BASE_URL,
+        "not a url",
+    ] {
+        assert_eq!(
+            vendor(base_url),
+            crate::errors::Vendor::Generic,
+            "{base_url}"
+        );
+    }
+}

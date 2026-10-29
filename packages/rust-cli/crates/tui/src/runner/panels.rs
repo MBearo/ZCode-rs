@@ -87,6 +87,8 @@ impl<B: Backend> Loop<'_, B> {
         self.app.focus = None;
         if self.app.viewing.take().is_some() {
             self.cache.clear();
+            self.app.find = None;
+            self.app.restore_bottom = None;
         }
     }
 
@@ -172,20 +174,27 @@ impl<B: Backend> Loop<'_, B> {
         );
     }
 
-    /// 回到主会话：两个视图的行 id 会重复，清掉排版缓存、滚动、选区与单独展开的块。
+    /// 回到主会话：两个视图的行 id 会重复，清掉排版缓存、滚动、选区与单独展开的块。footer 的命中率换回主会话的：清空
+    /// 回执（序号加一，在途的子会话回执作废）再查主会话（修复线 F112，tui-panels.md §1.7）。
     fn stop_viewing(&mut self) {
         self.panels.view_seq += 1;
         if self.app.viewing.take().is_some() {
             self.reset_transcript_view();
+            self.app.request_stats.clear();
+            self.refresh_stats();
         }
     }
 
+    /// 显示的 transcript 换了（开始查看、换一个、返回主会话）：滚动、选区、单独展开与搜索模式都属于原来那份（搜索：修复线
+    /// F114，tui-input.md §2.3.4）。
     fn reset_transcript_view(&mut self) {
         self.cache.clear();
         self.app.scroll = 0;
         self.app.new_activity = false;
         self.app.selection = None;
         self.app.expanded_cells.clear();
+        self.app.find = None;
+        self.app.restore_bottom = None;
     }
 
     pub(super) fn on_panel(&mut self, done: PanelDone) {
@@ -230,6 +239,8 @@ impl<B: Backend> Loop<'_, B> {
                             viewing.version = entry.version;
                             viewing.status = entry.status;
                             viewing.messages = ids;
+                            // 同一个子代理有了新提交（可能多了用量行）：重查它的命中率（F112）。
+                            self.refresh_stats();
                             return;
                         }
                         let fresh = self
@@ -249,9 +260,12 @@ impl<B: Backend> Loop<'_, B> {
                         });
                         if fresh {
                             self.reset_transcript_view();
+                            // 查看对象换了（F112）：命中率的回执清空、在途的作废，再查新对象的子会话。
+                            self.app.request_stats.clear();
                         } else {
                             self.cache.clear();
                         }
+                        self.refresh_stats();
                     }
                     Err(error) => self.app.error(i18n::rejected(lang, &error.to_string())),
                 }

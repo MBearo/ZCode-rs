@@ -13,11 +13,13 @@ use crate::view::Body;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// 绘制用的时间：墙上时钟、动画时间、离上一个会话帧多久。
+/// 绘制用的时间：墙上时钟、动画时间、离上一个会话帧多久，以及单调时钟的此刻（查看子代理时的用时与倒计时按列表快照
+/// 到达后经过的时间算，F112）。
 pub struct Clock {
     pub now_ms: u64,
     pub animation: Duration,
     pub since_frame: Duration,
+    pub now: std::time::Instant,
 }
 
 /// 加载动画的帧（用户决定 2026-10-22，tui-display.md §2.1.2 / D24）：点阵 spinner 顺序循环。以前在
@@ -101,9 +103,9 @@ pub fn glyph(animation: Duration) -> &'static str {
     FRAMES[index as usize]
 }
 
-/// 每个回合固定的动词：按回合开始的时间选。
-fn verb(lang: Lang, started_ms: u64) -> &'static str {
-    let index = (started_ms / 1000) as usize % VERBS_EN.len();
+/// 固定的动词：主会话按回合开始的时间（秒）选，被查看的子代理按它的 ID 选（F112）。
+fn verb(lang: Lang, seed: usize) -> &'static str {
+    let index = seed % VERBS_EN.len();
     match lang {
         Lang::En => VERBS_EN[index],
         Lang::Zh => VERBS_ZH[index],
@@ -183,8 +185,11 @@ fn color(app: &App, since_frame: Duration) -> Color {
 }
 
 /// 状态行（运行中）；其余时候为空。主线程的模型请求在等重试或停住时，整行换成重试行
-/// （docs/specs/rust-cli/stall-visibility.md §3）。
+/// （docs/specs/rust-cli/stall-visibility.md §3）。查看子代理时见 [`viewed`]。
 pub fn status(app: &App, width: usize, clock: &Clock) -> Vec<Line<'static>> {
+    if app.viewing.is_some() {
+        return viewed(app, width, clock);
+    }
     let Some(started) = app.view.turn_started_ms() else {
         return Vec::new();
     };
@@ -202,7 +207,7 @@ pub fn status(app: &App, width: usize, clock: &Clock) -> Vec<Line<'static>> {
         Span::styled(glyph(clock.animation), Style::default().fg(color)),
         Span::raw(" "),
     ];
-    let title = format!("{}…", verb(app.lang, started));
+    let title = format!("{}…", verb(app.lang, (started / 1000) as usize));
     spans.extend(super::shimmer::spans(
         &title,
         clock.animation,
@@ -219,6 +224,48 @@ pub fn status(app: &App, width: usize, clock: &Clock) -> Vec<Line<'static>> {
     vec![truncate_line(Line::from(spans), width)]
 }
 
+/// 查看子代理时的状态行（修复线 F112，tui-panels.md §1.7、stall-visibility.md §4.3）：跟着被查看的子代理（列表快照的
+/// 条目），主会话的状态行与重试行不画。它在跑时 `<spinner> <动词>… (用时)`，用时与列表行同一个算法；它的请求在等重试或
+/// 停住时换成重试行；不在跑时没有。没有 token 数与思考状态：查看按提交粒度，子代理没有流式数据（tui-panels.md D23）。
+/// 修前查看时画的是主会话的状态行。
+fn viewed(app: &App, width: usize, clock: &Clock) -> Vec<Line<'static>> {
+    let Some(entry) = app
+        .viewed_entry()
+        .filter(|entry| entry.status == rust_cli_kernel_api::panels::SubagentStatus::Running)
+    else {
+        return Vec::new();
+    };
+    if let Some(line) = entry.activity.as_ref().and_then(|activity| {
+        let left = super::agents::left_ms(&app.agents, activity, clock.now);
+        super::retry_status::activity_line(activity, left, app.lang, width)
+    }) {
+        return vec![line];
+    }
+    let color = app.palette.accent;
+    let mut spans = vec![
+        Span::styled(glyph(clock.animation), Style::default().fg(color)),
+        Span::raw(" "),
+    ];
+    let seed = entry.agent.as_str().bytes().map(usize::from).sum();
+    let title = format!("{}…", verb(app.lang, seed));
+    spans.extend(super::shimmer::spans(
+        &title,
+        clock.animation,
+        &app.palette,
+        color,
+    ));
+    let elapsed = super::agents::elapsed_ms(&app.agents, entry, clock.now);
+    spans.push(Span::styled(
+        format!(" ({})", i18n::elapsed_plain(elapsed / 1000)),
+        Style::default().add_modifier(Modifier::DIM),
+    ));
+    vec![truncate_line(Line::from(spans), width)]
+}
+
 #[cfg(test)]
 #[path = "status_line_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "status_line_viewing_tests.rs"]
+mod viewing_tests;

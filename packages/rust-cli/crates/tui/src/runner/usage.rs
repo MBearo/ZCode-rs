@@ -64,16 +64,20 @@ impl<B: Backend> Loop<'_, B> {
         );
     }
 
-    /// footer 的请求统计（tui-display.md §2.6）：存储是唯一来源，每次都重查，不在界面里累加；没有会话时不查。
+    /// footer 的请求统计（tui-display.md §2.6）：存储是唯一来源，每次都重查，不在界面里累加；没有会话时不查。查的是现在
+    /// 看的那一个（修复线 F112，tui-panels.md §1.7）：主会话，或正在查看的子代理的子会话（`App::stats_session`）。
     pub(super) fn refresh_stats(&mut self) {
-        let Some(session) = self.session.clone() else {
+        if self.session.is_none() {
+            return;
+        }
+        let Some(session) = self.app.stats_session() else {
             return;
         };
         let seq = self.app.request_stats.begin();
         let kernel = self.kernel.clone();
         self.pending.push(
             async move {
-                let stats = kernel.request_stats(session.id()).await;
+                let stats = kernel.request_stats(&session).await;
                 Done::Usage(UsageDone::Footer { seq, stats })
             }
             .boxed(),

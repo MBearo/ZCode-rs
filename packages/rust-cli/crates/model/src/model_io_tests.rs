@@ -176,6 +176,7 @@ fn stop_reasons_and_usage_take_the_node_names() {
         (StopReason::PauseTurn, "stop"),
         (StopReason::ToolUse, "tool-calls"),
         (StopReason::MaxTokens, "length"),
+        (StopReason::ModelContextWindowExceeded, "length"),
         (StopReason::Refusal, "content-filter"),
         (StopReason::Unknown, "other"),
     ];

@@ -12,8 +12,10 @@ use std::collections::VecDeque;
 
 use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::message::{ContentBlock, StopReason, Usage};
-use rust_cli_kernel_api::model::{BlockDelta, ModelError, ModelEvent};
+use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
 use serde_json::{Map, Value};
+
+use crate::errors::Verdict;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Flow {
@@ -35,10 +37,8 @@ pub(crate) struct Blocks {
     tools: Vec<Tool>,
 }
 
-pub(crate) fn protocol(message: impl Into<String>) -> ModelError {
-    ModelError::Protocol {
-        message: message.into(),
-    }
+pub(crate) fn protocol(message: impl Into<String>) -> Verdict {
+    Verdict::malformed(message)
 }
 
 impl Blocks {
@@ -110,7 +110,7 @@ impl Blocks {
         id: String,
         name: String,
         out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Verdict> {
         if self.has_tool(key) {
             return Err(protocol(format!("function call {key} started twice")));
         }
@@ -138,7 +138,7 @@ impl Blocks {
         key: u64,
         arguments: String,
         out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Verdict> {
         let tool = self
             .tools
             .iter()

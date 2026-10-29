@@ -9,20 +9,19 @@
 //! `store: false`（不在服务端留存）；`include: ["reasoning.encrypted_content"]` 与 Node 一致。system 提示是
 //! `input` 的第一项，推理模型（o1 / o3 / o4-mini / gpt-5，`gpt-5-chat` 除外）用 `developer` 角色。
 
-use std::time::SystemTime;
-
 use rust_cli_base::js::json::stringify;
 use rust_cli_kernel_api::model::{ModelError, ModelRequest, ToolChoice, ToolDefinition};
 use rust_cli_kernel_api::provider::{Credential, ModelEndpoint};
-use rust_cli_net::{HeaderValue, HttpRequest, ResponseHeaders, header};
+use rust_cli_net::{HeaderValue, HttpRequest, header};
 use serde_json::{Map, Value, json};
 
 use crate::anthropic::HEADER_TIMEOUT;
 use crate::endpoint::responses_url;
+use crate::errors::Vendor;
 use crate::openai_lower::{Item, Part, items};
 use crate::openai_responses_stream::ResponsesStream;
-use crate::protocol::{Failure, Protocol, StreamDecoder, bearer};
-use crate::{openai_error, patch};
+use crate::patch;
+use crate::protocol::{Protocol, StreamDecoder, bearer};
 
 pub(crate) struct OpenAiResponses;
 
@@ -45,18 +44,8 @@ impl Protocol for OpenAiResponses {
         bearer(credential)
     }
 
-    fn decoder(&self) -> Box<dyn StreamDecoder> {
-        Box::new(ResponsesStream::default())
-    }
-
-    fn classify(
-        &self,
-        status: u16,
-        headers: &ResponseHeaders,
-        body: &str,
-        now: SystemTime,
-    ) -> Failure {
-        openai_error::from_response(status, headers, body, now)
+    fn decoder(&self, vendor: Vendor) -> Box<dyn StreamDecoder> {
+        Box::new(ResponsesStream::new(vendor))
     }
 }
 

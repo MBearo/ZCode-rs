@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::common::{
     API_KEY, block_start, block_stop, collect, delta, event, fast_retry, message_end,
-    message_start, model_at, request, text_response,
+    message_start, model_at, request, started_text, text_response,
 };
 use super::fixture::{Fixture, Reply};
 
@@ -290,9 +290,9 @@ async fn each_attempt_is_a_record_and_a_failed_one_keeps_the_error_body() {
 #[tokio::test]
 async fn cancelling_dropping_and_a_short_stream_have_their_outcomes() {
     let server = Fixture::start(vec![
-        stream_reply(message_start()).hang(),
-        stream_reply(message_start()).hang(),
-        stream_reply(message_start()),
+        stream_reply(started_text("par")).hang(),
+        stream_reply(started_text("par")).hang(),
+        stream_reply(started_text("par")),
     ])
     .await;
     let (model, sink) = recorded(&server, 0).await;

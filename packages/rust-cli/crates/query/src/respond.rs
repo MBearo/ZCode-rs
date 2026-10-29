@@ -31,6 +31,14 @@ pub(crate) enum Responded {
         error: ModelError,
         call: ModelCall,
     },
+    /// 流内出错时只交出了 thinking（没有 text 与 tool_use），错误可以重发（docs/specs/rust-cli/provider-errors.md §3.3，
+    /// 修复线 F113）。还没有提交：主循环按次数决定不提交、重发，还是照 `Truncated` 部分收尾。`assistant` 只含结束的
+    /// thinking 块（可能为空）。
+    ThinkingOnly {
+        assistant: AssistantMessage,
+        error: ModelError,
+        call: ModelCall,
+    },
     /// 工具都已执行完，结果已提交：发下一次请求。
     ToolsFinished,
     Aborted,
@@ -366,6 +374,29 @@ pub(crate) async fn respond(
         None if keep_partial => assembler.finish_aborted(),
         None => assembler.finish(),
         Some(error) => {
+            // 只交出了 thinking：交给主循环决定重发（F113，provider-errors.md §3.3）。以前同下面的部分收尾，只结束了
+            // thinking 时提交它、以错误结束，thinking 没结束时直接以模型错误结束。
+            if assembler.thinking_only() && crate::recovery::resends_after_thinking(&error) {
+                let partial = assembler.finish();
+                let call = timing.call(
+                    completed,
+                    CallStatus::Error,
+                    (None, 0, partial.usage),
+                    Some(error.clone()),
+                );
+                let assistant = AssistantMessage {
+                    id: assistant_id,
+                    content: partial.content,
+                    model: partial.model,
+                    stop_reason: Some(StopReason::EndTurn),
+                    usage: Some(partial.usage),
+                };
+                return Ok(Responded::ThinkingOnly {
+                    assistant,
+                    error,
+                    call,
+                });
+            }
             // 流在中途出错（部分收尾）：只留结束的块。一个都没有时照旧报错，已经开工的
             // 调用先等它们结束。
             let mut partial = assembler.finish();

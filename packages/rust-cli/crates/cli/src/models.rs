@@ -35,6 +35,9 @@ pub(crate) struct Override {
     pub assume: Assumptions,
     /// 只给测试的 SSH 入口（remote-exec.md §19.11，只在 debug 构建读）。
     pub ssh: Option<crate::options::SshAssumption>,
+    /// `_ZCODE_ASSUME_BASE_URL`（修复线 F113，provider-errors.md D13，只在 debug 构建读）：查请求方案与厂商的错误码表时
+    /// 把端点当成这个地址；显式覆盖与平台层的端点都生效。
+    pub assumed_base_url: Option<String>,
 }
 
 /// Node 配置里 Anthropic 官方 API 的写法（能力规则按它匹配，model.md §6；与请求方案共用 model 的定义，F55）。
@@ -197,8 +200,12 @@ pub(crate) async fn assemble(
     (flag, effort): (Option<String>, Option<&str>),
     (clock, device): (Arc<dyn Clock>, DeviceIdSource),
 ) -> Assembled {
+    let assumed_base_url = explicit.assumed_base_url.clone();
     let mut assembled = assemble_model(egress, platform, explicit, (flag, effort), clock).await;
     assembled.model = assembled.model.with_device_id(device);
+    if let Some(base_url) = assumed_base_url {
+        assembled.model = assembled.model.with_assumed_base_url(base_url);
+    }
     assembled
 }
 

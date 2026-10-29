@@ -10,8 +10,11 @@ import {
   classifyRequest,
   countKey,
   countTokens,
+  disconnect,
   startModelFixture,
   startSink,
+  stopped,
+  streamError,
   text,
 } from "./model.mjs";
 
@@ -93,4 +96,46 @@ test("holdMs：块都结束之后先发出去，等一会儿才写 message_delta
   }
   assert.ok(seen.includes("message_delta") && seen.includes("message_stop"), seen);
   assert.ok(Date.now() - started - blockStoppedAt >= 250, `${blockStoppedAt}`);
+});
+
+/** 发一个流式主请求，读到连接结束；返回读到的文字与读流是否出错。 */
+async function streamed(fixture) {
+  const body = { model: "m", stream: true, tools: [{ name: "Read" }], messages: [] };
+  const response = await fetch(`${fixture.baseUrl}/v1/messages`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let seen = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return { seen, failed: false };
+      seen += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    return { seen, failed: true };
+  }
+}
+
+test("流内失败：前几个事件之后来错误事件，或者断开；停止原因可以换", async (t) => {
+  const fixture = await startModelFixture({
+    main: [
+      streamError(text("never"), 1, "overloaded_error", "Overloaded"),
+      disconnect(text("never"), 1),
+      stopped(text("blocked"), "refusal"),
+    ],
+  });
+  t.after(() => fixture.close());
+  const first = await streamed(fixture);
+  assert.ok(first.seen.includes("event: message_start"), first.seen);
+  assert.ok(!first.seen.includes("content_block_start"), first.seen);
+  assert.ok(first.seen.includes("event: error") && first.seen.includes("overloaded_error"));
+  const second = await streamed(fixture);
+  assert.ok(second.seen.includes("event: message_start"), second.seen);
+  assert.ok(!second.seen.includes("message_stop"), second.seen);
+  assert.equal(second.failed, true);
+  const third = await streamed(fixture);
+  assert.ok(third.seen.includes('"stop_reason":"refusal"'), third.seen);
 });

@@ -196,6 +196,7 @@ impl App {
             && self.view.peer_held().is_none()
             && self.focus.is_none()
             && self.viewing.is_none()
+            && self.find.is_none()
             && self.composer.search.is_none()
     }
 

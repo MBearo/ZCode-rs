@@ -270,7 +270,70 @@ pub(crate) struct Harness {
     /// 父运行里工具调用看到的机器与本机服务（缺省什么都不支持）。
     pub(crate) machine: MachineEnv,
     pub(crate) local: LocalServices,
+    /// 只读快照问过的压缩器（F112）：每次问的模型与档位。
+    pub(crate) compactor: Arc<ContextFake>,
     pub(crate) _scope: TaskScope,
+}
+
+/// 只读快照用的压缩器替身（修复线 F112，tui-panels.md §1.7）：上下文用量是“历史条数 × 1000 / 10000”，提示是
+/// `Used{历史条数}`；记下每次问的（模型，档位），好核对用的是子代理的选择。
+#[derive(Default)]
+pub(crate) struct ContextFake {
+    pub(crate) asked: Mutex<Vec<(String, Option<String>)>>,
+}
+
+impl ContextFake {
+    fn ask(&self, selection: &rust_cli_kernel_api::model::ModelSelection) {
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((selection.model.clone(), selection.reasoning.clone()));
+    }
+}
+
+#[async_trait]
+impl rust_cli_kernel_api::compaction::Compactor for ContextFake {
+    fn should_auto_compact(
+        &self,
+        _history: &[Message],
+        _selection: &rust_cli_kernel_api::model::ModelSelection,
+    ) -> bool {
+        false
+    }
+
+    fn context_usage(
+        &self,
+        history: &[Message],
+        selection: &rust_cli_kernel_api::model::ModelSelection,
+    ) -> Option<(u64, u64)> {
+        self.ask(selection);
+        Some((history.len() as u64 * 1_000, 10_000))
+    }
+
+    fn context_notice(
+        &self,
+        history: &[Message],
+        _selection: &rust_cli_kernel_api::model::ModelSelection,
+    ) -> Option<rust_cli_kernel_api::compaction::ContextNotice> {
+        Some(rust_cli_kernel_api::compaction::ContextNotice::Used {
+            percent: history.len() as u64,
+        })
+    }
+
+    async fn compact(
+        &self,
+        _request: rust_cli_kernel_api::compaction::CompactRequest,
+        _cancel: CancellationToken,
+    ) -> Result<
+        rust_cli_kernel_api::compaction::CompactResult,
+        rust_cli_kernel_api::orchestration::OrchestrationError,
+    > {
+        Err(
+            rust_cli_kernel_api::orchestration::OrchestrationError::Unsupported {
+                what: "compact".to_owned(),
+            },
+        )
+    }
 }
 
 pub(crate) fn harness(gate: Option<Arc<Notify>>) -> Harness {
@@ -428,10 +491,12 @@ fn built_full(
         .into_iter()
         .map(|name| Arc::new(FakeTool::new(name, true, "")) as Arc<dyn Tool>)
         .collect();
+    let compactor = Arc::new(ContextFake::default());
     let ports = AgentsPorts {
         store: store.clone(),
         ids: Arc::new(SequentialIds::default()),
         clock,
+        compactor: compactor.clone(),
         machines: machines.unwrap_or_else(|| {
             Arc::new(rust_cli_kernel_api::env_registry::LocalRegistry::new(
                 machine_env.clone(),
@@ -482,6 +547,7 @@ fn built_full(
         absorbed,
         machine: machine(Arc::new(UnusedEnvironment)),
         local: local_services(Arc::new(UnusedEnvironment)),
+        compactor,
         _scope: scope,
     }
 }

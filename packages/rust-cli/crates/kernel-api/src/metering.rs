@@ -156,6 +156,18 @@ pub struct OutputSpeed {
 }
 
 impl OutputSpeed {
+    /// 一个完成的请求的输出速度（修复线 F112）：时刻都相对请求开始；失败与中断的请求没有。会话 actor（只取主回合）与
+    /// agents（只取子代理）共用这一个写法，各自再按来源筛。
+    pub fn of(call: &ModelCall) -> Option<Self> {
+        (call.status == CallStatus::Completed).then(|| Self {
+            output_tokens: call.usage.as_ref().map(|usage| usage.output_tokens),
+            duration_ms: call.completed_at_ms.saturating_sub(call.started_at_ms),
+            first_content_ms: call
+                .first_content_at_ms
+                .map(|at| at.saturating_sub(call.started_at_ms)),
+        })
+    }
+
     /// 生成时长：总时长大于首个内容的时间时是两者之差，否则没有。
     pub fn generation_ms(&self) -> Option<u64> {
         let first = self.first_content_ms?;

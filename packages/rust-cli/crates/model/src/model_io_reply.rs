@@ -154,7 +154,8 @@ pub(crate) fn finish_reason(reason: StopReason) -> &'static str {
     match reason {
         StopReason::EndTurn | StopReason::StopSequence | StopReason::PauseTurn => "stop",
         StopReason::ToolUse => "tool-calls",
-        StopReason::MaxTokens => "length",
+        // 窗口用满：AI SDK 同 `max_tokens` 写 `length`（provider-errors.md §2.5，F113）。
+        StopReason::MaxTokens | StopReason::ModelContextWindowExceeded => "length",
         StopReason::Refusal => "content-filter",
         StopReason::Unknown => "other",
     }

@@ -113,11 +113,7 @@ fn compaction_and_quiet_side_queries_are_not_nudged() {
 
 #[test]
 fn other_stop_reasons_end_the_turn() {
-    for stop in [
-        StopReason::Refusal,
-        StopReason::PauseTurn,
-        StopReason::Unknown,
-    ] {
+    for stop in [StopReason::PauseTurn, StopReason::Unknown] {
         let silent = reply(stop, Vec::new());
         assert_eq!(
             Guards::default().decide(&silent, &QuerySource::MainThread, 1),
@@ -213,5 +209,93 @@ fn cut_streams_share_the_output_limit_count() {
     assert!(matches!(
         guards.truncated(&half, &QuerySource::MainThread, true, &network),
         Outcome::Failed { .. }
+    ));
+}
+
+/// 修 bug（provider-errors.md，用户决定 2026-10-29“内容拦截要显示给用户”）：内容拦截的结束原因以前落到 `Completed`，静默
+/// 按成功结束。现在以错误结束，给原因文字；不重试（D6 暂定）。
+#[test]
+fn a_refusal_ends_the_turn_with_the_reason() {
+    let blocked = reply(StopReason::Refusal, vec![text("partial")]);
+    assert_eq!(
+        Guards::default().decide(&blocked, &QuerySource::MainThread, 1),
+        Outcome::Failed {
+            message: "API Error: Model output was blocked by the provider's content safety filter."
+                .to_owned()
+        }
+    );
+}
+
+/// 修 bug（D7 暂定）：窗口用满以前静默结束；照输出上限续写，与它共用 3 次，用尽时另有文字。
+#[test]
+fn a_full_context_window_is_resumed_like_the_output_limit() {
+    let mut guards = Guards::default();
+    let full = reply(StopReason::ModelContextWindowExceeded, vec![text("half")]);
+    let cut = reply(StopReason::MaxTokens, vec![text("half")]);
+    assert_eq!(
+        retried(&guards.decide(&full, &QuerySource::MainThread, 1)),
+        Some((Fate::Keep, "max_output_tokens_recovery"))
+    );
+    assert!(retried(&guards.decide(&cut, &QuerySource::MainThread, 1)).is_some());
+    assert!(retried(&guards.decide(&full, &QuerySource::MainThread, 1)).is_some());
+    assert_eq!(
+        guards.decide(&full, &QuerySource::MainThread, 1),
+        Outcome::Failed {
+            message: "API Error: The model has reached its context window limit.".to_owned()
+        }
+    );
+}
+
+/// 部分收尾时，配额用尽、内容拦截、请求太大不续写（子代理与 `-p` 也不），以它们自己的说明结束（provider-errors.md §2.4）。
+#[test]
+fn terminal_errors_end_a_cut_stream_with_their_own_text() {
+    let half = cut(vec![text("half")]);
+    for error in [
+        ModelError::ContentBlocked {
+            message: "blocked".to_owned(),
+        },
+        ModelError::QuotaExhausted {
+            message: "余额不足".to_owned(),
+        },
+        ModelError::RequestTooLarge {
+            message: "too big".to_owned(),
+        },
+    ] {
+        let outcome = Guards::default().truncated(
+            &half,
+            &QuerySource::Subagent("Explore".to_owned()),
+            true,
+            &error,
+        );
+        assert_eq!(
+            outcome,
+            Outcome::Failed {
+                message: error.to_string()
+            }
+        );
+    }
+}
+
+/// 只交出了 thinking 之后的重发（provider-errors.md §3.3）：别的错误最多 2 次，停顿另计 1 次；工具轮之后清零。
+#[test]
+fn resends_after_thinking_are_counted() {
+    let server = ModelError::Server {
+        status: 500,
+        message: "x".to_owned(),
+    };
+    let idle = ModelError::StreamIdle { idle_ms: 1 };
+    let mut guards = Guards::default();
+    assert!(guards.resend_after_thinking(&server));
+    assert!(guards.resend_after_thinking(&idle));
+    assert!(guards.resend_after_thinking(&server));
+    assert!(!guards.resend_after_thinking(&server));
+    assert!(!guards.resend_after_thinking(&idle));
+    guards.next_turn();
+    assert!(guards.resend_after_thinking(&idle));
+    assert!(super::resends_after_thinking(&server));
+    assert!(!super::resends_after_thinking(
+        &ModelError::QuotaExhausted {
+            message: "x".to_owned()
+        }
     ));
 }

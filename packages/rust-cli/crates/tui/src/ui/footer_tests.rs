@@ -123,7 +123,7 @@ fn speed_app(
         Some("/Users/dev".into()),
         "0.1.0".into(),
     );
-    // 66,600 / 180,000：ctx 37%。
+    // 66,600 / 180,000：ctx 37.0%。
     app.view.apply(
         SequencedEvent {
             seq: 1,
@@ -187,10 +187,10 @@ fn the_request_stats_follow_the_model_name() {
         let (line, _) = footer(&app, 160);
         let text = plain(&line);
         assert!(
-            text.ends_with("scripted \u{b7} 40 tok/s \u{b7} ctx 37% \u{b7} cache 91%"),
+            text.ends_with("scripted \u{b7} 40 tok/s \u{b7} ctx 37.0% \u{b7} cache 91.0%"),
             "{text}"
         );
-        for item in ["40 tok/s", "ctx 37%", "cache 91%"] {
+        for item in ["40 tok/s", "ctx 37.0%", "cache 91.0%"] {
             let span = line.spans.iter().find(|s| s.content == item).unwrap();
             assert_eq!(span.style, app.palette.secondary(), "{item} light={light}");
             assert!(span.style.fg.is_some(), "{item}: 真彩色的次要文字");
@@ -198,10 +198,54 @@ fn the_request_stats_follow_the_model_name() {
         let zh = stats_app(Lang::Zh, light, Some(node_stats()));
         let text = plain(&footer(&zh, 160).0);
         assert!(
-            text.ends_with("scripted \u{b7} 40 tok/s \u{b7} 上下文 37% \u{b7} 缓存 91%"),
+            text.ends_with("scripted \u{b7} 40 tok/s \u{b7} 上下文 37.0% \u{b7} 缓存 91.0%"),
             "{text}"
         );
     }
+}
+
+/// ctx 与 cache 保留一位小数、四舍五入到 0.1，整数也写 `.0`；TPS 仍是整数（工作线 F115，用户决定 2026-10-29，
+/// tui-display.md §2.6）。
+#[test]
+fn ctx_and_cache_show_one_decimal() {
+    let ctx = |used_tokens, max_tokens, lang| {
+        let stats = RequestStats {
+            requests: 3,
+            input_tokens: 3_000,
+            cache_read_tokens: 2_000,
+            unknown_cache_usage: false,
+            last: None,
+        };
+        let mut app = stats_app(lang, false, Some(stats));
+        app.view.apply(
+            SequencedEvent {
+                seq: 10,
+                revision: 0,
+                event: KernelEvent::ContextUsage {
+                    used_tokens,
+                    max_tokens,
+                },
+            },
+            0,
+        );
+        plain(&footer(&app, 160).0)
+    };
+    // 1,120 / 180,000 = 0.62%：整数时写 1%；2,000 / 3,000 的命中率 66.67%。
+    let text = ctx(1_120, 180_000, Lang::En);
+    assert!(
+        text.ends_with("40 tok/s \u{b7} ctx 0.6% \u{b7} cache 66.7%"),
+        "{text}"
+    );
+    let text = ctx(1_120, 180_000, Lang::Zh);
+    assert!(text.ends_with("上下文 0.6% \u{b7} 缓存 66.7%"), "{text}");
+    // 第二位小数四舍五入：9,108 / 180,000 = 5.06%，9,072 / 180,000 = 5.04%。
+    assert!(ctx(9_108, 180_000, Lang::En).contains("ctx 5.1%"));
+    assert!(ctx(9_072, 180_000, Lang::En).contains("ctx 5.0%"));
+    // 用满与超出窗口都是 100.0%；窗口为 0 时也是 100.0%。
+    assert!(ctx(180_000, 180_000, Lang::En).contains("ctx 100.0%"));
+    assert!(ctx(200_000, 180_000, Lang::En).contains("ctx 100.0%"));
+    assert!(ctx(5, 0, Lang::En).contains("ctx 100.0%"));
+    assert!(ctx(0, 180_000, Lang::En).contains("ctx 0.0%"));
 }
 
 /// 没有值的项连同它前面的分隔点一起不显示：没有回执、TPS 没有值、命中率未知、内核没给上下文用量。
@@ -209,7 +253,7 @@ fn the_request_stats_follow_the_model_name() {
 fn items_without_values_are_left_out() {
     let none = stats_app(Lang::En, false, None);
     let text = plain(&footer(&none, 160).0);
-    assert!(text.ends_with("scripted \u{b7} ctx 37%"), "{text}");
+    assert!(text.ends_with("scripted \u{b7} ctx 37.0%"), "{text}");
     let no_content = OutputSpeed {
         first_content_ms: None,
         ..node_speed()
@@ -217,7 +261,7 @@ fn items_without_values_are_left_out() {
     let no_tps = speed_app(Lang::En, false, Some(node_stats()), Some(no_content));
     let text = plain(&footer(&no_tps, 160).0);
     assert!(
-        text.ends_with("scripted \u{b7} ctx 37% \u{b7} cache 91%"),
+        text.ends_with("scripted \u{b7} ctx 37.0% \u{b7} cache 91.0%"),
         "{text}"
     );
     let unknown = stats_app(
@@ -230,7 +274,7 @@ fn items_without_values_are_left_out() {
     );
     let text = plain(&footer(&unknown, 160).0);
     assert!(
-        text.ends_with("scripted \u{b7} 40 tok/s \u{b7} ctx 37%"),
+        text.ends_with("scripted \u{b7} 40 tok/s \u{b7} ctx 37.0%"),
         "{text}"
     );
     // 新会话的草稿：没有上下文用量、也没有回执，只有模型名。
@@ -256,7 +300,7 @@ fn the_speed_comes_from_the_session_not_the_usage_rows() {
     let cold = speed_app(Lang::En, false, Some(stored), None);
     let text = plain(&footer(&cold, 160).0);
     assert!(
-        text.ends_with("scripted \u{b7} ctx 37% \u{b7} cache 91%"),
+        text.ends_with("scripted \u{b7} ctx 37.0% \u{b7} cache 91.0%"),
         "{text}"
     );
     let live = speed_app(Lang::En, false, Some(node_stats()), Some(node_speed()));
@@ -301,8 +345,8 @@ fn narrow_terminals_drop_cache_then_tps_then_context() {
         let right: Vec<&str> = [
             "scripted",
             "40 tok/s",
-            "ctx 37%",
-            "cache 91%",
+            "ctx 37.0%",
+            "cache 91.0%",
             "10% until auto-compact",
         ]
         .into_iter()
@@ -319,17 +363,17 @@ fn narrow_terminals_drop_cache_then_tps_then_context() {
         [
             (
                 true,
-                "scripted | 40 tok/s | ctx 37% | cache 91% | 10% until auto-compact"
+                "scripted | 40 tok/s | ctx 37.0% | cache 91.0% | 10% until auto-compact"
             ),
             (
                 false,
-                "scripted | 40 tok/s | ctx 37% | cache 91% | 10% until auto-compact"
+                "scripted | 40 tok/s | ctx 37.0% | cache 91.0% | 10% until auto-compact"
             ),
             (
                 false,
-                "scripted | 40 tok/s | ctx 37% | 10% until auto-compact"
+                "scripted | 40 tok/s | ctx 37.0% | 10% until auto-compact"
             ),
-            (false, "scripted | ctx 37% | 10% until auto-compact"),
+            (false, "scripted | ctx 37.0% | 10% until auto-compact"),
             (false, "scripted | 10% until auto-compact"),
             (false, "scripted"),
             (false, ""),

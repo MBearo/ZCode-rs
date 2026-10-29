@@ -48,6 +48,11 @@ pub(crate) fn output_limit_exhausted(max_tokens: u32) -> String {
     )
 }
 
+/// 窗口用满（`stop_reason: model_context_window_exceeded`）续写用尽时的错误消息（docs/specs/rust-cli/provider-errors.md §6，
+/// D7 暂定，修复线 F113）。
+pub(crate) const CONTEXT_WINDOW_EXHAUSTED: &str =
+    "API Error: The model has reached its context window limit.";
+
 /// 工具边界并入的插话（human 来源的格式，
 /// 工作中收到消息的前缀在前；产品名按替换表换成 ZCode），外面包 `<system-reminder>`。
 pub(crate) fn queued_prompt(prompt: &str) -> String {

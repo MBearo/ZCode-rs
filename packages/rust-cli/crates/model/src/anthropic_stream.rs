@@ -9,11 +9,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::message::{ContentBlock, StopReason, ToolResultContent, Usage};
-use rust_cli_kernel_api::model::{BlockDelta, ModelError, ModelEvent};
+use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
+use rust_cli_kernel_api::provider::WireProtocol;
 use rust_cli_net::sse::SseEvent;
 use serde_json::{Map, Value};
 
-use crate::anthropic_error;
+use crate::errors::{self, Finish, Vendor, Verdict};
 use crate::protocol::StreamDecoder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,8 @@ enum Kind {
 
 #[derive(Debug, Default)]
 pub(crate) struct AnthropicStream {
+    /// 错误块与结束原因经这个厂商的分类器（provider-errors.md §2.2，修复线 F113）。
+    vendor: Vendor,
     started: bool,
     finished: bool,
     usage: Usage,
@@ -39,10 +42,8 @@ pub(crate) struct AnthropicStream {
     server_calls: HashSet<String>,
 }
 
-fn protocol(message: impl Into<String>) -> ModelError {
-    ModelError::Protocol {
-        message: message.into(),
-    }
+fn protocol(message: impl Into<String>) -> Verdict {
+    Verdict::malformed(message)
 }
 
 /// 取出字符串字段（移出，不复制）。
@@ -53,7 +54,7 @@ fn take_str(object: &mut Value, name: &str) -> Option<String> {
     }
 }
 
-fn index(event: &Value) -> Result<usize, ModelError> {
+fn index(event: &Value) -> Result<usize, Verdict> {
     event
         .get("index")
         .and_then(Value::as_u64)
@@ -87,6 +88,13 @@ fn count(usage: &Value, name: &str) -> Option<u64> {
 }
 
 impl AnthropicStream {
+    pub(crate) fn new(vendor: Vendor) -> Self {
+        Self {
+            vendor,
+            ..Self::default()
+        }
+    }
+
     fn message_start(&mut self, mut event: Value, out: &mut VecDeque<ModelEvent>) {
         let mut message = event
             .get_mut("message")
@@ -111,7 +119,7 @@ impl AnthropicStream {
         &mut self,
         mut event: Value,
         out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Verdict> {
         let index = index(&event)?;
         if self.blocks.contains_key(&index) {
             return Err(protocol(format!("content block {index} started twice")));
@@ -229,7 +237,7 @@ impl AnthropicStream {
         &mut self,
         mut event: Value,
         out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Verdict> {
         let index = index(&event)?;
         let kind = *self
             .blocks
@@ -263,11 +271,7 @@ impl AnthropicStream {
         Ok(())
     }
 
-    fn block_stop(
-        &mut self,
-        event: &Value,
-        out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    fn block_stop(&mut self, event: &Value, out: &mut VecDeque<ModelEvent>) -> Result<(), Verdict> {
         let index = index(event)?;
         match self.blocks.get(&index) {
             None => Err(protocol(format!("stop for unknown content block {index}"))),
@@ -279,8 +283,13 @@ impl AnthropicStream {
         }
     }
 
-    /// 用量合并：输入与缓存 token 只在大于 0 时覆盖，输出 token 只要给出就覆盖。
-    fn message_delta(&mut self, mut event: Value, out: &mut VecDeque<ModelEvent>) {
+    /// 用量合并：输入与缓存 token 只在大于 0 时覆盖，输出 token 只要给出就覆盖。停止原因经厂商的分类器换算
+    /// （修复线 F113：以前按 serde 解，不认识的值是 `Unknown`；以“结束原因”报的失败现在是流里的错误）。
+    fn message_delta(
+        &mut self,
+        mut event: Value,
+        out: &mut VecDeque<ModelEvent>,
+    ) -> Result<(), Verdict> {
         let usage = event.get("usage").cloned().unwrap_or_default();
         let positive = |name: &str, current: u64| {
             count(&usage, name)
@@ -299,16 +308,23 @@ impl AnthropicStream {
             ),
             output_tokens: count(&usage, "output_tokens").unwrap_or(self.usage.output_tokens),
         };
-        let stop_reason = event
+        let stop_reason = match event
             .get_mut("delta")
             .and_then(|delta| delta.get_mut("stop_reason"))
             .map(Value::take)
-            .filter(|value| !value.is_null())
-            .map(|value| serde_json::from_value(value).unwrap_or(StopReason::Unknown));
+        {
+            None | Some(Value::Null) => None,
+            Some(Value::String(raw)) => match errors::classify_finish(self.vendor, &raw) {
+                Finish::Stop(reason) => Some(reason),
+                Finish::Failed(verdict) => return Err(verdict),
+            },
+            Some(_) => Some(StopReason::Unknown),
+        };
         out.push_back(ModelEvent::MessageDelta {
             stop_reason,
             usage: self.usage,
         });
+        Ok(())
     }
 }
 
@@ -324,14 +340,30 @@ const MESSAGE_EVENTS: [&str; 7] = [
 ];
 
 impl StreamDecoder for AnthropicStream {
-    fn decode(
-        &mut self,
-        event: SseEvent,
-        out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    fn decode(&mut self, event: SseEvent, out: &mut VecDeque<ModelEvent>) -> Result<(), Verdict> {
         let name = event.event.as_deref().unwrap_or_default();
         if name == "error" {
-            return Err(anthropic_error::from_stream(&event.data));
+            let value = serde_json::from_str(&event.data).unwrap_or(Value::Null);
+            return Err(errors::classify_stream_error(
+                self.vendor,
+                WireProtocol::AnthropicMessages,
+                &value,
+                &event.data,
+            ));
+        }
+        // 修 bug（F113，provider-errors.md D20）：不带事件名、正文是错误形状的块以前被忽略，流读完时报
+        // `stream ended before message_stop`，端点的原文与码都丢了（智谱的业务码就这样到达）。现在按错误块分类。
+        if name.is_empty()
+            && !self.finished
+            && let Ok(value) = serde_json::from_str::<Value>(&event.data)
+            && let Some(verdict) = errors::unnamed_frame(
+                self.vendor,
+                WireProtocol::AnthropicMessages,
+                &value,
+                &event.data,
+            )
+        {
+            return Err(verdict);
         }
         if self.finished || !MESSAGE_EVENTS.contains(&name) {
             // ping 与未知事件：SDK 跳过。
@@ -353,7 +385,7 @@ impl StreamDecoder for AnthropicStream {
             "content_block_start" => self.block_start(value, out)?,
             "content_block_delta" => self.block_delta(value, out)?,
             "content_block_stop" => self.block_stop(&value, out)?,
-            "message_delta" => self.message_delta(value, out),
+            "message_delta" => self.message_delta(value, out)?,
             "message_stop" => {
                 self.finished = true;
                 out.push_back(ModelEvent::MessageStop);

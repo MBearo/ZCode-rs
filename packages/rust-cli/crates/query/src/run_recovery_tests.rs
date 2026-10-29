@@ -295,3 +295,97 @@ async fn a_stream_cut_before_any_block_is_still_a_model_error() {
     assert!(super::run(scope, request).await.is_err());
     assert!(sink.messages().is_empty());
 }
+
+/// 只有 thinking 的半截回复：去掉 `MessageDelta` 之后的事件，换成流内的错误。
+fn thinking_then(error: ModelError) -> Response {
+    let mut events = thinking_only();
+    let end = events
+        .iter()
+        .position(|event| matches!(event, Ok(ModelEvent::MessageDelta { .. })))
+        .unwrap();
+    events.truncate(end);
+    events.push(Err(error));
+    events
+}
+
+/// 修 bug（provider-errors.md §3.3，D11 暂定）：只交出了 thinking 之后流内出错，以前提交 thinking、以错误结束；现在不提交
+/// 这次回复，重发同一个请求，回合照常完成。
+#[tokio::test]
+async fn a_failure_after_only_thinking_resends_the_request() {
+    let server = || ModelError::Server {
+        status: 500,
+        message: "boom".to_owned(),
+    };
+    let (stop, messages, requests) = run(
+        vec![thinking_then(server()), text_response(&["Hello"])],
+        QuerySource::MainThread,
+    )
+    .await;
+    assert_eq!(stop, QueryStop::Completed);
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].messages, requests[1].messages);
+    let assistants: Vec<_> = messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Assistant(assistant) => Some(&assistant.content),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        assistants,
+        [&vec![ContentBlock::Text {
+            text: "Hello".to_owned()
+        }]]
+    );
+    // 用尽之后（2 次）照部分收尾：以错误结束，第三次的 thinking 提交。
+    let (stop, messages, requests) = run(
+        vec![
+            thinking_then(server()),
+            thinking_then(server()),
+            thinking_then(server()),
+        ],
+        QuerySource::MainThread,
+    )
+    .await;
+    assert_eq!(requests.len(), 3);
+    assert!(matches!(stop, QueryStop::ApiError { .. }), "{stop:?}");
+    assert!(matches!(messages.last(), Some(Message::Assistant(_))));
+}
+
+/// 内容拦截的结束原因：已流出的文字照常提交，回合以错误结束、给原因文字（已定），不重试。
+#[tokio::test]
+async fn a_refusal_keeps_the_text_and_ends_with_the_reason() {
+    let (stop, messages, requests) = run(
+        vec![stopped(text_response(&["Some"]), StopReason::Refusal)],
+        QuerySource::MainThread,
+    )
+    .await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        stop,
+        QueryStop::ApiError {
+            message: "API Error: Model output was blocked by the provider's content safety filter."
+                .to_owned()
+        }
+    );
+    assert!(matches!(messages.last(), Some(Message::Assistant(_))));
+}
+
+/// 窗口用满：同输出上限续写（D7 暂定）。
+#[tokio::test]
+async fn a_full_context_window_is_resumed() {
+    let (stop, messages, requests) = run(
+        vec![
+            stopped(
+                text_response(&["half"]),
+                StopReason::ModelContextWindowExceeded,
+            ),
+            text_response(&["rest"]),
+        ],
+        QuerySource::MainThread,
+    )
+    .await;
+    assert_eq!(stop, QueryStop::Completed);
+    assert_eq!(requests.len(), 2);
+    assert_eq!(meta_sources(&messages), ["max_output_tokens_recovery"]);
+}

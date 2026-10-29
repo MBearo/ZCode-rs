@@ -129,7 +129,8 @@ const UNKNOWN_FINISH: &str = "unknown";
 pub fn finish_reason(reason: StopReason) -> &'static str {
     match reason {
         StopReason::EndTurn | StopReason::StopSequence | StopReason::PauseTurn => "stop",
-        StopReason::MaxTokens => "length",
+        // 窗口用满照 AI SDK 的 `mapAnthropicStopReason` 写 `length`（provider-errors.md §2.5，F113）。
+        StopReason::MaxTokens | StopReason::ModelContextWindowExceeded => "length",
         StopReason::ToolUse => "tool-calls",
         StopReason::Refusal => "content-filter",
         StopReason::Unknown => "other",

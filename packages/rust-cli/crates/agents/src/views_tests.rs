@@ -220,8 +220,8 @@ async fn every_change_wakes_the_subscribers_and_versions_count_commits() {
     let root = SessionId::new("sess_root");
     assert!(entries(&live, &root)[0].waiting);
     live.waiting(&AgentId::new("agent_a"), false);
-    live.committed(&AgentId::new("agent_a"));
-    live.committed(&AgentId::new("agent_a"));
+    live.committed(&AgentId::new("agent_a"), None);
+    live.committed(&AgentId::new("agent_a"), None);
     // 多次改动合并成一次通知；查询看到的是最后的状态。
     changes.next().await.unwrap();
     let entry = &entries(&live, &root)[0];
@@ -404,4 +404,167 @@ fn a_snapshot_takes_only_its_root_and_shares_definitions() {
     assert_eq!(agents.len(), 1);
     let stored = live.get(&AgentId::new("agent_a")).unwrap();
     assert!(Arc::ptr_eq(&agents[0].definition, &stored.definition));
+}
+
+/// 修复线 F112（tui-panels.md §1.7）：子代理提交一个完成的子代理请求之后，`Live` 在加版本的同一次改动里记下它的输出速度
+/// （查看时 footer 的 TPS）；失败的请求与子循环里的压缩请求不更新速度。修前 agents 不记速度，快照写死空。
+#[tokio::test]
+async fn a_completed_subagent_request_records_its_speed() {
+    use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
+    use rust_cli_kernel_api::ids::{EnvironmentId, MessageId, TraceId};
+    use rust_cli_kernel_api::message::{AssistantMessage, ContentBlock, StopReason, Usage};
+    use rust_cli_kernel_api::metering::{CallStatus, Metered, ModelCall, OutputSpeed};
+    use rust_cli_kernel_api::model::QuerySource;
+    use rust_cli_kernel_api::orchestration::RunSink;
+    use rust_cli_kernel_api::store::{SessionKind, SessionMeta, SessionStore};
+    use rust_cli_kernel_api::testing::{MemoryStore, SequentialIds, selection};
+
+    let live = Arc::new(Live::default());
+    let agent = AgentId::new("agent_a");
+    live.insert(running("agent_a", "sess_root"));
+    let store = Arc::new(MemoryStore::default());
+    let child = SessionId::new("sess_subagent_agent_a");
+    store
+        .create(SessionMeta {
+            id: child.clone(),
+            kind: SessionKind::Subagent,
+            parent: Some(SessionId::new("sess_root")),
+            workspace: WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/work"),
+            },
+            title: "work of agent_a".to_owned(),
+            trace: TraceId::new("trace"),
+            created_at_ms: 1,
+        })
+        .await
+        .unwrap();
+    let sink = crate::child::ChildSink::new(
+        store,
+        Arc::new(SequentialIds::default()),
+        live.clone(),
+        agent.clone(),
+        child,
+        MessageId::new("prompt_1"),
+        None,
+    );
+    let reply = |id: &str| {
+        Message::Assistant(AssistantMessage {
+            id: MessageId::new(id),
+            content: vec![ContentBlock::Text {
+                text: "Found it.".to_owned(),
+            }],
+            model: "scripted".to_owned(),
+            stop_reason: Some(StopReason::EndTurn),
+            usage: None,
+        })
+    };
+    let call = |id: &str, status: CallStatus, source: QuerySource, output: u64| ModelCall {
+        message: MessageId::new(id),
+        source,
+        selection: selection(),
+        started_at_ms: 1_000,
+        first_token_at_ms: Some(2_000),
+        first_content_at_ms: Some(2_000),
+        completed_at_ms: 4_000,
+        status,
+        stop_reason: None,
+        tool_calls: 0,
+        usage: Some(Usage {
+            input_tokens: 10,
+            output_tokens: output,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        }),
+        retries: 0,
+        error: None,
+    };
+    let explore = || QuerySource::Subagent("Explore".to_owned());
+    let shown = |live: &Live| {
+        let found = live.get(&agent).unwrap();
+        (found.shown.version, found.shown.speed)
+    };
+    // 完成的子代理请求：90 个输出、生成 2000 ms → 45 tok/s；版本加一。
+    sink.commit_metered(
+        Some(reply("msg_1")),
+        Metered::Model(call("msg_1", CallStatus::Completed, explore(), 90)),
+    )
+    .await
+    .unwrap();
+    let first = OutputSpeed {
+        output_tokens: Some(90),
+        duration_ms: 3_000,
+        first_content_ms: Some(1_000),
+    };
+    assert_eq!(shown(&live), (1, Some(first)));
+    // 失败的请求：消息照样提交（版本加一），速度不变。
+    sink.commit_metered(
+        Some(reply("msg_2")),
+        Metered::Model(call("msg_2", CallStatus::Error, explore(), 5)),
+    )
+    .await
+    .unwrap();
+    assert_eq!(shown(&live), (2, Some(first)));
+    // 子循环里的压缩请求：不是子代理的主循环请求，速度不变。
+    sink.commit_metered(
+        Some(reply("msg_3")),
+        Metered::Model(call(
+            "msg_3",
+            CallStatus::Completed,
+            QuerySource::Compact,
+            400,
+        )),
+    )
+    .await
+    .unwrap();
+    assert_eq!(shown(&live), (3, Some(first)));
+}
+
+/// 修复线 F112：只读快照带子代理的 ctx 与上下文提示（runtime 注入的压缩器按子会话的历史与子代理的选择算），以及 `Live`
+/// 记的最近一个请求的速度。修前三项都写死空。
+#[tokio::test]
+async fn the_view_carries_the_subagents_context_and_speed() {
+    use rust_cli_kernel_api::compaction::{ContextNotice, ContextOccupancy};
+    use rust_cli_kernel_api::metering::OutputSpeed;
+    let gate = Arc::new(Notify::new());
+    let harness = harness(Some(gate.clone()));
+    let parent = SessionId::new("sess_parent");
+    let signals = harness.agents.signals();
+    let output = harness
+        .call(
+            "sess_parent",
+            "Agent",
+            json!({"description": "Find files", "prompt": "List the files.",
+                   "subagent_type": "Explore", "effort": "high"}),
+        )
+        .await;
+    assert!(text(&output).starts_with("Async agent launched successfully."));
+    let agent = signals.subagents(&parent).await[0].agent.clone();
+    let view = signals.subagent_view(&parent, &agent).await.unwrap();
+    // 子代理自己的档位（Agent 的 `effort` 参数），父会话没有档位。
+    assert_eq!(view.selection.reasoning.as_deref(), Some("high"));
+    // 子会话里只有 prompt 一条：1000 / 10000；提示同一处算。
+    assert_eq!(
+        view.context_usage,
+        Some(ContextOccupancy {
+            used_tokens: 1_000,
+            max_tokens: 10_000,
+        })
+    );
+    assert_eq!(view.context_notice, ContextNotice::Used { percent: 1 });
+    assert_eq!(
+        harness.compactor.asked.lock().unwrap().last().cloned(),
+        Some((view.selection.model.clone(), Some("high".to_owned())))
+    );
+    // 还没有完成的请求：没有速度。
+    assert_eq!(view.output_speed, None);
+    let speed = OutputSpeed {
+        output_tokens: Some(90),
+        duration_ms: 3_000,
+        first_content_ms: Some(1_000),
+    };
+    harness.agents.core.live.committed(&agent, Some(speed));
+    let view = signals.subagent_view(&parent, &agent).await.unwrap();
+    assert_eq!(view.output_speed, Some(speed));
+    gate.notify_one();
 }

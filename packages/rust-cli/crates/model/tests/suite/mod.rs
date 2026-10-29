@@ -9,3 +9,5 @@ mod model_io;
 mod openai;
 mod scenarios;
 mod stall;
+mod stream_retry;
+mod zhipu;

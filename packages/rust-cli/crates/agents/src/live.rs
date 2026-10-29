@@ -90,6 +90,9 @@ pub(crate) struct Shown {
     pub(crate) version: u64,
     /// 当前活动与记下它的时刻（L35，stall-visibility.md §4.3）；离开运行时清掉。
     pub(crate) doing: Option<(Doing, u64)>,
+    /// 最近一个完成的子代理请求的输出速度（修复线 F112，tui-panels.md §1.7：查看它时 footer 的 TPS）：只在内存里，
+    /// 与主会话的速度同一个口径（tui-display.md §2.6）。续跑与结束都不清掉。
+    pub(crate) speed: Option<rust_cli_kernel_api::metering::OutputSpeed>,
 }
 
 impl LiveAgent {
@@ -206,11 +209,19 @@ impl Live {
         });
     }
 
-    /// 子会话提交了一条消息（只读查看据此重取）。
-    pub(crate) fn committed(&self, agent: &AgentId) {
+    /// 子会话提交了一条消息（只读查看据此重取）；这条消息是一个完成的子代理请求的回复时同时记下它的速度（F112）。
+    /// 速度与版本在同一次改动里：看到新版本去取快照时，速度一定已经是这个请求的。
+    pub(crate) fn committed(
+        &self,
+        agent: &AgentId,
+        speed: Option<rust_cli_kernel_api::metering::OutputSpeed>,
+    ) {
         self.change(|agents| {
             if let Some(entry) = agents.get_mut(agent) {
                 entry.shown.version += 1;
+                if speed.is_some() {
+                    entry.shown.speed = speed;
+                }
             }
         });
     }

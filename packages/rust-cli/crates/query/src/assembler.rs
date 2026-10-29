@@ -171,6 +171,23 @@ impl Assembler {
 }
 
 impl Assembler {
+    /// 开始过的块全是 thinking（结束了或没结束），没有 text、tool_use 等别的块（docs/specs/rust-cli/provider-errors.md
+    /// §3.3 的 P2t，修复线 F113）：这时流内失败由主循环丢掉这次回复、重发。一个块都没开始时为假。
+    pub(crate) fn thinking_only(&self) -> bool {
+        let mut started = self.blocks.iter().flatten().peekable();
+        started.peek().is_some()
+            && started.all(|block| {
+                matches!(
+                    block,
+                    Partial::Thinking { .. }
+                        | Partial::Done(
+                            ContentBlock::Thinking { .. } | ContentBlock::RedactedThinking { .. }
+                        )
+                        | Partial::Other(ContentBlock::RedactedThinking { .. })
+                )
+            })
+    }
+
     /// 主线程被中止时的结果（修复线 F38，query.md §1.4）：已经结束的块，
     /// 再加第一个没结束的块——只在它是文字、`trim` 后不为空时（thinking、tool_use 等没结束的块不留）。
     pub(crate) fn finish_aborted(mut self) -> Assembled {

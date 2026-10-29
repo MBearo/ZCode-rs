@@ -362,7 +362,26 @@ pub enum ModelError {
     /// docs/specs/rust-cli/stall-visibility.md §2）。`idle_ms` 是触发的那个上限。文字固定。
     #[error("Stream idle timeout - no chunks received")]
     StreamIdle { idle_ms: u64 },
+    /// 余额、配额或套餐额度用尽，等也不会好：不重试（docs/specs/rust-cli/provider-errors.md §2.3、D4，修复线 F113）。
+    /// 文字就是给用户的说明（§6）。
+    #[error("API Error: Credit balance or quota exhausted · {message}")]
+    QuotaExhausted { message: String },
+    /// 端点的内容安全拦截（输入侧或输出侧的错误）：不重试，回合以错误结束并显示原因（provider-errors.md §2.3，已定）。
+    #[error(
+        "API Error: Model output was blocked by the provider's content safety filter. · {message}"
+    )]
+    ContentBlocked { message: String },
+    /// 请求体或媒体太大（413、图片过大）：不重试，提示用户去掉图片或回退（provider-errors.md §2.3、D9）。
+    #[error(
+        "API Error: Request too large. Remove large images or files from the conversation, or use /rewind to go back to before they were added. · {message}"
+    )]
+    RequestTooLarge { message: String },
 }
+
+/// 内容拦截的说明（[`ModelError::ContentBlocked`] 的前一句；结束原因是 refusal 时主循环用它结束回合，
+/// docs/specs/rust-cli/provider-errors.md §6，修复线 F113）。
+pub const CONTENT_BLOCKED: &str =
+    "API Error: Model output was blocked by the provider's content safety filter.";
 
 /// 模型请求过程中的通知：不是响应内容，主循环可以展示或忽略。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

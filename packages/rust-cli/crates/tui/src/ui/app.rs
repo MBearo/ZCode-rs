@@ -251,6 +251,10 @@ pub struct App {
     pub viewport: usize,
     /// 点击展开行单独展开的 cell（第一个行 id）。
     pub expanded_cells: HashSet<u64>,
+    /// 主界面的搜索模式（`//`，修复线 F114，tui-input.md §2.3）。
+    pub find: Option<super::find::Find>,
+    /// 下一帧把这一行（块的键，块内行）放回视口的最后一行：退出搜索模式时回到进入前的位置。
+    pub restore_bottom: Option<(u64, usize)>,
     /// footer 的临时提示与等待第二次按下的按键。
     pub notice: Option<super::notice::Notice>,
     /// 最后一个会话事件到达的时间；状态行据此判断卡住。
@@ -371,6 +375,8 @@ impl App {
             transcript_lines: 0,
             viewport: 0,
             expanded_cells: HashSet::new(),
+            find: None,
+            restore_bottom: None,
             notice: None,
             last_frame: Instant::now(),
             hover: None,
@@ -443,8 +449,13 @@ impl App {
             .copied
             .as_ref()
             .is_some_and(|(notice, at)| at.elapsed() < notice.duration);
-        // 背景标志只在点击后的约 2 秒里按动画节拍重画，停住后不再定时重画（tui.md §7.3）。
+        // 背景标志只在点击后的约 2 秒里按动画节拍重画，停住后不再定时重画（tui.md §7.3）。查看在跑的子代理时状态行的
+        // spinner 是它的（F112），主会话空闲时也按动画节拍重画。
+        let viewed_running = self.viewed_entry().is_some_and(|entry| {
+            entry.status == rust_cli_kernel_api::panels::SubagentStatus::Running
+        });
         self.running()
+            || viewed_running
             || self.creating
             || self.notice_text().is_some()
             || dragging_at_edge
@@ -544,13 +555,29 @@ impl App {
         self.push_local(Local::Error(text.into()));
     }
 
-    /// footer 与启动头写的模型名。
+    /// 启动头写的主会话的模型名（footer 写 [`Self::shown`] 的，见 [`selection_label`]）。
     pub fn model_label(&self) -> Option<String> {
-        let model = &self.view.selection().model;
-        (!model.is_empty()).then(|| match &self.view.selection().reasoning {
-            Some(reasoning) => format!("{model} {reasoning}"),
-            None => model.clone(),
-        })
+        selection_label(self.view.selection())
+    }
+
+    /// 现在看的是谁的视图（修复线 F112，tui-panels.md §1.7）：查看子代理时是它的只读视图，否则是主会话的。footer 的模型、
+    /// 档位、TPS、ctx、上下文提示与权限模式，以及 transcript 的工作区都从这里取，不把子代理的值复制进主会话的状态。
+    pub fn shown(&self) -> &Transcript {
+        self.viewing
+            .as_ref()
+            .map_or(&self.view, |viewing| &viewing.view)
+    }
+
+    /// footer 的命中率查谁（F112）：查看时是被查看的子代理的子会话（取自列表快照的条目），否则是主会话；没有会话、或
+    /// 被查看的条目不在快照里时不查。
+    pub fn stats_session(&self) -> Option<rust_cli_kernel_api::ids::SessionId> {
+        match &self.viewing {
+            Some(_) => self.viewed_entry().map(|entry| entry.child.clone()),
+            None => self
+                .session
+                .as_deref()
+                .map(rust_cli_kernel_api::ids::SessionId::new),
+        }
     }
 
     /// 内容变长时保持用户正在看的位置（已上滚时）。
@@ -600,6 +627,9 @@ impl App {
         self.interaction = None;
         self.local.clear();
         self.expanded_cells.clear();
+        // 搜索属于离开的那份 transcript（F114）。
+        self.find = None;
+        self.restore_bottom = None;
         self.scroll = 0;
         self.new_activity = false;
         self.selection = None;
@@ -616,6 +646,15 @@ impl App {
             self.overlay = None;
         }
     }
+}
+
+/// footer 与启动头写的模型名：`模型 档位`，没有档位时只有模型；模型为空时没有。
+pub fn selection_label(selection: &ModelSelection) -> Option<String> {
+    let model = &selection.model;
+    (!model.is_empty()).then(|| match &selection.reasoning {
+        Some(reasoning) => format!("{model} {reasoning}"),
+        None => model.clone(),
+    })
 }
 
 /// 显示路径：家目录写成 `~`，两种分隔符都认。

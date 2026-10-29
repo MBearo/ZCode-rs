@@ -51,6 +51,17 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         app.selection = None;
     }
     app.composer_width = composer_width;
+    // transcript 先排：搜索模式（修复线 F114，tui-input.md §2.3）要在画输入框之前定当前匹配与计数；当前匹配换了块时
+    // 那一块要按展开的样子再排一次（其余的块都是缓存）。
+    let mut layout = transcript_layout(app, cache, width, now, now_ms);
+    let mut settled = None;
+    if app.find.is_some() {
+        let before = super::find::peek(app);
+        settled = super::find::settle(app, &layout, cache.epoch(), width);
+        if super::find::peek(app) != before {
+            layout = transcript_layout(app, cache, width, now, now_ms);
+        }
+    }
     // 底部区域贴底，最高 max(8, 2/3 屏)；上方留 1 行 gap 给 transcript 与它隔开。
     let max_bottom = (area.height as usize * 2 / 3)
         .max(8)
@@ -109,27 +120,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         u16::from(bottom_area.y > area.y),
     );
     let transcript_area = Rect::new(area.x, area.y, area.width, gap.y - area.y);
-    let label = crate::ui::app::label(app.view.workspace().root.as_str(), app.home.as_deref());
-    let ctx = Ctx {
-        palette: &app.palette,
-        lang: app.lang,
-        strings: app.strings,
-        width,
-        expanded: false,
-        elapsed: now.duration_since(app.started),
-        now_ms,
-        workspace: app.view.workspace().root.as_str(),
-        workspace_label: &label,
-        version: &app.version,
-        mcp_machines: &app.mcp_machines,
-        machines: &app.machines,
-        markdown: None,
-    };
-    let layout = transcript::lines(app, cache, &ctx);
     let total = layout.len();
     let height = transcript_area.height as usize;
     app.viewport = height;
     app.content_resized(total);
+    // 搜索模式：把当前匹配滚进视口、没有匹配时回到原处；esc 之后回到进入前的位置（tui-input.md §2.3.5）。
+    super::find::scroll(app, &layout, settled.as_ref(), height);
     // 拖选到第一行 / 最后一行：每帧滚动 1 行。
     if let Some(selection) = app.selection
         && selection.dragging
@@ -143,6 +139,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
     let range = mouse::select(app, &layout, start, end);
     // 只复制可见行（布局与缓存共享其余的行）。
     let mut visible: Vec<Line<'static>> = layout.lines(start, end);
+    if let Some(settled) = &settled {
+        super::find::paint(app, &layout, &mut visible, start, settled);
+    }
     for (index, line) in visible.iter_mut().enumerate() {
         let l = start + index;
         if let Some((l1, c1, l2, c2)) = range
@@ -221,6 +220,34 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
     }
     // 悬停的反馈放在最后：这一帧的可点击区域都已记下。
     mouse::paint_hover(frame, app);
+}
+
+/// 普通视图的 transcript 排版。相对路径按现在看的会话的工作区（查看子代理时是子会话的，修复线 F112，tui-panels.md §1.7）。
+fn transcript_layout(
+    app: &App,
+    cache: &mut Cache,
+    width: usize,
+    now: Instant,
+    now_ms: u64,
+) -> transcript::Layout {
+    let workspace = app.shown().workspace().root.as_str();
+    let label = crate::ui::app::label(workspace, app.home.as_deref());
+    let ctx = Ctx {
+        palette: &app.palette,
+        lang: app.lang,
+        strings: app.strings,
+        width,
+        expanded: false,
+        elapsed: now.duration_since(app.started),
+        now_ms,
+        workspace,
+        workspace_label: &label,
+        version: &app.version,
+        mcp_machines: &app.mcp_machines,
+        machines: &app.machines,
+        markdown: None,
+    };
+    transcript::lines(app, cache, &ctx)
 }
 
 /// 全屏视图（`mouse::full_screen`）的绘制。

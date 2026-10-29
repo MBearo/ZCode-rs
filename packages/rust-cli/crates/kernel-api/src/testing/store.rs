@@ -337,8 +337,8 @@ impl SessionStore for MemoryStore {
         Ok(crate::metering::SessionMetering { api_duration_ms })
     }
 
-    /// 会话里 `ModelCalled{source: 主线程, status: completed}` 的聚合（node-store 的同一口径，usage.md §4.1）：用量
-    /// 缺失时输入与缓存读都算未知；“最近一个”是最后提交的那个。
+    /// 会话里 `ModelCalled{source: 主线程或子代理, status: completed}` 的聚合（node-store 的同一口径，usage.md §4.1；
+    /// 子代理的请求只在子会话里，F112）：用量缺失时输入与缓存读都算未知；“最近一个”是最后提交的那个。
     async fn request_stats(
         &self,
         session: &SessionId,
@@ -352,9 +352,11 @@ impl SessionStore for MemoryStore {
             let Fact::ModelCalled { call } = fact else {
                 continue;
             };
-            if call.source != crate::model::QuerySource::MainThread
-                || call.status != crate::metering::CallStatus::Completed
-            {
+            let own_loop = matches!(
+                call.source,
+                crate::model::QuerySource::MainThread | crate::model::QuerySource::Subagent(_)
+            );
+            if !own_loop || call.status != crate::metering::CallStatus::Completed {
                 continue;
             }
             stats.requests += 1;

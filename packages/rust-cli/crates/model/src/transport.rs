@@ -7,11 +7,14 @@
 //!                                          │ 失败且可重试：产出 Retrying 通知 ─▶ Wait（Retry-After / 退避）─▶ Connect
 //!                                          │ 连续过载 3 次且有 fallback 模型 ─▶ Err(FallbackTriggered)
 //!                                          └ 失败且不可重试 ──▶ Err ──▶ 结束      任一处取消 ──▶ Err(Cancelled)
+//!   Read 在交出边界之前失败（P1）：同样按处置表决定重发（丢掉扣住的事件）还是交给调用方
 //! ```
 //!
-//! 只重试拿到响应头之前的失败（重试只包住发请求）；
-//! 流已经开始之后的错误直接交给调用方，由主循环决定怎么处理。唯一的例外是流空闲看门狗
-//! （docs/specs/rust-cli/stall-visibility.md §2.3）：响应头之后一个事件都还没交给调用方就停住时，静默重发一次。
+//! 失败先经厂商分类器（`errors`）得到中性分类，再按处置表（`errors::dispose`）决定动作；计数都在 [`Connect`]
+//! （docs/specs/rust-cli/provider-errors.md §2.4、§4，修复线 F113）。修改（F113）：以前只重试拿到响应头之前的失败，
+//! 流开始之后的错误直接交给调用方（唯一的例外是看门狗的静默重发）；现在交出边界之前的流内失败也在这里重发
+//! （§3.2：边界之前的事件扣在 `Events` 里，调用方一个内容事件都没收到），越过边界之后才交给主循环。
+//! 流空闲看门狗见 docs/specs/rust-cli/stall-visibility.md §2.3。
 //!
 //! 通知：等待重试前产出 `Retrying`；重发拿到 2xx、或停顿之后又收到事件时产出 `Resumed`；读流时 20 s 没有
 //! 字节产出 `Stalled`（读流与看门狗在 `transport_read.rs`）。
@@ -25,16 +28,18 @@ use rust_cli_kernel_api::model::{
     ModelError, ModelNotice, ModelRequest, ModelSelection, ModelStreamItem, QuerySource,
 };
 use rust_cli_kernel_api::provider::{EndpointContext, ModelEndpoint, ModelEndpoints, WireProtocol};
-use rust_cli_net::retry::{RetryPolicy, jitter};
+use rust_cli_net::retry::RetryPolicy;
 use rust_cli_net::{Egress, HttpRequest};
 use tokio_util::sync::CancellationToken;
 
 use crate::attribution::Origin;
+use crate::errors::dispose::Phase;
+use crate::errors::{self, Vendor};
 use crate::idle::{Limits, StreamIdle};
 use crate::model_io::ModelIoSink;
 use crate::model_io_tape::{End, Trail, end};
 use crate::profiles::{self, ANTHROPIC_OFFICIAL_BASE_URL, Profile};
-use crate::protocol::{self, Failure, Protocol, Retry};
+use crate::protocol::{self, Protocol};
 use crate::transport_read::{Next, Read};
 
 /// 错误响应正文最多读这么多字节（只用于分类与提示）。
@@ -57,12 +62,21 @@ fn stops_on_repeated_overload(model: &str) -> bool {
 }
 
 /// 前台的旁路请求：用户在等结果，过载时也重试。
-const FOREGROUND_SIDE_SOURCES: [&str; 5] = [
-    "side_question",
-    "auto_mode",
+///
+/// 修改（F113，provider-errors.md D10 暂定）：集合照对齐目标换过（出处见 spec）。以前是 5 项，含 `verification_agent`、没有
+/// `web_search_tool` 与 `web_fetch_apply`，本工程的 WebSearch、WebFetch 旁路请求遇过载立即失败。
+const FOREGROUND_SIDE_SOURCES: [&str; 11] = [
     "hook_agent",
     "hook_prompt",
-    "verification_agent",
+    "side_question",
+    "web_search_tool",
+    "web_fetch_apply",
+    "auto_mode",
+    "compact_fab_check",
+    "auto_mode_critique",
+    "auto_mode_setup_propose",
+    "chrome_mcp",
+    "artifact_comment_reply",
 ];
 
 /// 网络出口、端点来源、重试策略、流空闲看门狗与时钟（Retry-After 的日期，F7）。
@@ -75,6 +89,8 @@ pub(crate) struct Route {
     pub clock: Arc<dyn Clock>,
     /// 入口声明“按 Anthropic 官方端点处理”（只给测试用，model.md §6）：按 Node 配置里官方 API 的地址查方案表。
     pub assume_first_party: bool,
+    /// 入口声明“按这个地址查方案表与厂商”（只给测试用，provider-errors.md D13）；`assume_first_party` 优先。
+    pub assume_base_url: Option<String>,
     /// 设了 `IS_SANDBOX`（cli-args.md §9）：连续过载时不报 `Repeated 529 Overloaded errors`，照常重试。
     pub sandbox: bool,
     /// `ZCODE_MAX_OUTPUT_TOKENS`（cli-args.md §9.1，修复线 F42）：每个请求的 `max_tokens` 不超过它。
@@ -88,14 +104,29 @@ pub(crate) struct Route {
 }
 
 impl Route {
-    /// 这个端点的请求方案（model.md §3.2）。修复线 F23：原来按 `is_first_party`（只看主机名）分两种。
-    pub(crate) fn profile(&self, endpoint: &ModelEndpoint) -> &'static Profile {
-        let base_url = if self.assume_first_party {
+    /// 查方案表与厂商用的 base URL：入口的测试声明优先，否则是端点自己的。
+    fn table_base_url<'a>(&'a self, endpoint: &'a ModelEndpoint) -> &'a str {
+        if self.assume_first_party {
             ANTHROPIC_OFFICIAL_BASE_URL
+        } else if let Some(base_url) = &self.assume_base_url {
+            base_url
         } else {
             &endpoint.base_url
-        };
-        profiles::select(endpoint.protocol, base_url, &endpoint.model)
+        }
+    }
+
+    /// 这个端点的请求方案（model.md §3.2）。修复线 F23：原来按 `is_first_party`（只看主机名）分两种。
+    pub(crate) fn profile(&self, endpoint: &ModelEndpoint) -> &'static Profile {
+        profiles::select(
+            endpoint.protocol,
+            self.table_base_url(endpoint),
+            &endpoint.model,
+        )
+    }
+
+    /// 这个端点的错误码表（provider-errors.md §2.2）：只看端点。
+    pub(crate) fn vendor(&self, endpoint: &ModelEndpoint) -> Vendor {
+        profiles::vendor(self.table_base_url(endpoint))
     }
 
     /// 记录方与时钟（没有记录方时 None）。
@@ -187,14 +218,25 @@ async fn step(mut state: State) -> Option<(Result<ModelStreamItem, ModelError>, 
                     };
                     return Some((item, next));
                 }
+                // 交出边界之前失败（P1，provider-errors.md §3.2）：扣住的事件随响应丢掉，按处置表重发或交给调用方。
+                Next::Early(verdict) => {
+                    let (connect, tape) = read.into_parts();
+                    return Some(match connect.fail(verdict, Phase::Stream, tape).await {
+                        Ok((notice, connect, delay)) => (
+                            Ok(ModelStreamItem::Notice(notice)),
+                            State::Wait(connect, delay),
+                        ),
+                        Err(error) => (Err(error), State::Done),
+                    });
+                }
                 Next::Idle(limit) => {
-                    // 丢掉这次响应（关闭连接），按进度决定静默重发还是报错（stall-visibility.md §2.3）。
-                    let delivered = read.delivered();
+                    // 丢掉这次响应（关闭连接），按进度决定静默重发、G 还是报错（stall-visibility.md §2.3）。
+                    let progress = read.progress();
                     let (connect, tape) = read.into_parts();
                     let idle = ModelError::StreamIdle {
                         idle_ms: millis(limit),
                     };
-                    return Some(match connect.idle(limit, delivered) {
+                    return Some(match connect.idle(limit, progress) {
                         Ok((notice, connect)) => {
                             end(tape, End::Idle(idle, Some(0)));
                             (Ok(ModelStreamItem::Notice(notice)), State::Connect(connect))
@@ -272,10 +314,12 @@ impl Start {
         // 模型不接受图片时换成占位文字（model.md §10.5），三种协议共用。
         crate::media::project(&mut request.messages, &endpoint);
         let profile = route.profile(&endpoint);
+        let vendor = route.vendor(&endpoint);
         tracing::debug!(
             event = "model.profile",
             model = %endpoint.model,
             profile = profile.name,
+            vendor = ?vendor,
             "request profile selected"
         );
         // 模型轨迹（model-io.md §6）：请求的共用信息在编码之前取（编码会消费请求）。
@@ -295,9 +339,13 @@ impl Start {
             output_limit,
             fallback,
             overload_retry,
+            vendor,
             attempt: 1,
             overloaded: 0,
             stalls: 0,
+            capacity: 0,
+            truncations: 0,
+            resent: false,
             notified: false,
             limits,
             cancel,
@@ -321,11 +369,19 @@ pub(crate) struct Connect {
     output_limit: Option<u64>,
     fallback: Option<String>,
     overload_retry: bool,
+    /// 错误码表的厂商（provider-errors.md §2.2）：分类 HTTP 失败、给解码器。
+    vendor: Vendor,
     attempt: u32,
-    /// 这次请求累计的过载次数（一次重试循环内只增不减）。
+    /// 这次请求累计的过载次数（一次重试循环内只增不减；响应头之前与流内共用，F113）。
     overloaded: u32,
     /// 看门狗静默重发过几次（上限 1）。
     stalls: u32,
+    /// 账号或套餐的并发上限重试过几次（上限 2，provider-errors.md D5，F113）。
+    capacity: u32,
+    /// 交出边界之前的截断重试过几次（上限 1，D17，F113）。
+    truncations: u32,
+    /// 用过 G 没有（一次流式重发代替非流式重发，D3 (b)，F113）。
+    resent: bool,
     /// 发过 `Retrying` 通知、还没有产出 `Resumed`。
     notified: bool,
     /// 这个端点上的看门狗上限。
@@ -364,11 +420,11 @@ impl Connect {
             end(tape, End::Cancelled);
             return Outcome::Failed(ModelError::Cancelled);
         };
-        let failure = match sent {
+        let verdict = match sent {
             Ok(response) if response.is_success() => {
                 // 前面发过重试通知：拿到响应头就清掉它（重试循环结束时清掉重试状态）。
                 let resumed = std::mem::replace(&mut self.notified, false);
-                let mut decoder = self.protocol.decoder();
+                let mut decoder = self.protocol.decoder(self.vendor);
                 if let Some(tape) = &mut tape {
                     decoder = tape.stream(response.status(), response.headers(), decoder);
                 }
@@ -391,127 +447,49 @@ impl Connect {
                         if let Some(tape) = &mut tape {
                             tape.text(status, &headers, &body);
                         }
-                        self.protocol.classify(
-                            status,
-                            &headers,
+                        errors::classify_response(
+                            self.vendor,
+                            self.endpoint.protocol,
+                            (status, &headers),
                             &body,
                             now(self.route.clock.as_ref()),
                         )
                     }
-                    Some(Err(error)) => Failure::network(&error),
+                    Some(Err(error)) => errors::classify_transport(&error),
                 }
             }
-            Err(error) => Failure::network(&error),
+            Err(error) => errors::classify_transport(&error),
         };
-        let delay = match self.retry_delay(&failure) {
-            Ok(delay) => {
-                end(
-                    tape,
-                    End::Failed(failure.error.clone(), Some(millis(delay))),
-                );
-                delay
-            }
-            Err(error) => {
-                end(tape, End::Failed(failure.error, None));
-                return Outcome::Failed(error);
-            }
-        };
-        if matches!(failure.error, ModelError::Authentication { .. }) && self.endpoint.renewable {
-            // 每请求取的凭据被拒：带上被拒的端点再取一次（401 时刷新凭据再重试）。
-            // 只换凭据与 Provider header；请求体已按原端点编码，不再改。
-            let renewed = self.route.endpoints.endpoint_in(
-                &self.selection,
-                Some(&self.endpoint),
-                self.output_limit,
-                &self.context,
-            );
-            match self.cancel.run_until_cancelled(renewed).await {
-                None => return Outcome::Failed(ModelError::Cancelled),
-                Some(Err(error)) => return Outcome::Failed(error),
-                Some(Ok(endpoint)) => {
-                    self.endpoint.credential = endpoint.credential;
-                    self.endpoint.headers = endpoint.headers;
-                }
-            }
+        match self.fail(verdict, Phase::Head, tape).await {
+            Ok((notice, connect, delay)) => Outcome::Retry(notice, connect, delay),
+            Err(error) => Outcome::Failed(error),
         }
-        let delay_ms = millis(delay);
-        let max_retries = self.route.retry.max_retries;
-        // 带会话的 `model.retry`（warn）由 query 从重试通知记；这里是所有调用方的细节（logging.md §4）。
-        tracing::debug!(
-            event = "model.attempt.failed",
-            model = %self.selection.model,
-            attempt = self.attempt,
-            max_retries,
-            delay_ms,
-            error = %failure.error,
-            "model request failed; retrying"
-        );
-        let notice = ModelNotice::Retrying {
-            attempt: self.attempt,
-            max_retries,
-            delay_ms,
-            error: failure.error,
-        };
-        self.attempt += 1;
-        self.notified = true;
-        Outcome::Retry(notice, self, delay)
-    }
-
-    /// 失败之后：要重发时返回等待时长；否则返回给调用方的错误（换 fallback、连续过载、不可重试或到了上限）。
-    fn retry_delay(&mut self, failure: &Failure) -> Result<Duration, ModelError> {
-        let retryable = match failure.retry {
-            Retry::Never => false,
-            Retry::Transient => true,
-            // 旁路请求过载时直接失败（后台请求不在容量紧张时放大重试）。
-            Retry::Overloaded if !self.overload_retry => false,
-            Retry::Overloaded => {
-                self.overloaded += 1;
-                if self.overloaded >= MAX_OVERLOADED_BEFORE_FALLBACK {
-                    if let Some(fallback) = self.fallback.take() {
-                        return Err(ModelError::FallbackTriggered {
-                            original_model: self.selection.model.clone(),
-                            fallback_model: fallback,
-                        });
-                    }
-                    // 修 bug（F10）：以前没有 fallback 时一律重试到上限（11 次请求、约 2.5 分钟）；应对
-                    // opus 系列在第 3 次过载后报 `Repeated 529 Overloaded errors`。
-                    if !self.route.sandbox && stops_on_repeated_overload(&self.selection.model) {
-                        return Err(ModelError::Overloaded {
-                            message: REPEATED_OVERLOAD.to_owned(),
-                        });
-                    }
-                }
-                true
-            }
-        };
-        let retry = &self.route.retry;
-        let delay = if retryable && self.attempt <= retry.max_retries {
-            retry.delay(self.attempt, failure.retry_after, jitter())
-        } else {
-            None
-        };
-        delay.ok_or_else(|| failure.error.clone())
     }
 
     pub(crate) fn cancel(&self) -> &CancellationToken {
         &self.cancel
     }
 
-    /// 看门狗中止了这次流。调用方还没收到这次响应的任何事件、也还没静默重发过时，回到发送
-    /// （计入重试次数，不等待）；否则报 `StreamIdle`，由主循环按进度收尾（stall-visibility.md §2.3）。
+    /// 看门狗中止了这次流（stall-visibility.md §2.3）。`progress` 是（解码出过事件，越过了交出边界）。越过了边界：报
+    /// `StreamIdle`，由主循环按进度收尾。没有越过时：一个事件都没收到、也还没静默重发过时回到发送（计入重试次数，不等待）；
+    /// 否则走 G（修复线 F113，provider-errors.md D3 暂定 (b)：以前直接报 `StreamIdle`），G 用过之后才报错。
     fn idle(
         mut self: Box<Self>,
         limit: Duration,
-        delivered: bool,
+        (received, crossed): (bool, bool),
     ) -> Result<(ModelNotice, Box<Self>), ModelError> {
         let error = ModelError::StreamIdle {
             idle_ms: millis(limit),
         };
-        let max_retries = self.route.retry.max_retries;
-        if delivered || self.stalls > 0 || self.attempt > max_retries {
+        if crossed {
             return Err(error);
         }
-        self.stalls += 1;
+        let max_retries = self.route.retry.max_retries;
+        if !received && self.stalls == 0 && self.attempt <= max_retries {
+            self.stalls += 1;
+        } else if self.resend().is_none() {
+            return Err(error);
+        }
         tracing::debug!(
             event = "model.attempt.failed",
             model = %self.selection.model,
@@ -532,3 +510,6 @@ impl Connect {
         Ok((notice, self))
     }
 }
+
+#[path = "transport_retry.rs"]
+mod retry;

@@ -33,6 +33,18 @@ impl App {
                 _ => {}
             }
         }
+        // 搜索模式（修复线 F114，tui-input.md §2.3.1）：输入框里只有 `/`（斜杠列表开着）、光标在末尾时手打第二个 `/`。
+        // 粘贴进来的 `//` 不走这里（不切模式）。
+        if key.code == KeyCode::Char('/')
+            && self.typing.is_plain_text(&key)
+            && self.composer.mode == InputMode::Prompt
+            && self.composer.area.text() == "/"
+            && self.composer.area.cursor() == 1
+        {
+            self.composer.clear();
+            self.open_find(false);
+            return Some(None);
+        }
         // bash 模式（tui-input.md §2.1）：开头输入 `!` 进入；开头按 backspace / delete / ctrl+u / esc 退出
         // （esc 退出后照常处理）。
         let at_start = self.composer.area.cursor() == 0;

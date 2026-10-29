@@ -180,6 +180,34 @@ async fn a_foreground_agent_shows_its_retry_under_the_agent_row() {
 }
 
 /// 推理块的开头与一段推理增量。
+/// 接在 [`thinking`] 之后：结束 thinking 块，再给一段文字并结束这次回复。
+fn finish_with_text(sender: &mpsc::UnboundedSender<Item>, text: &str) {
+    use rust_cli_kernel_api::message::{ContentBlock, StopReason, Usage};
+    use rust_cli_kernel_api::model::BlockDelta;
+    events(
+        sender,
+        vec![
+            Ok(ModelEvent::BlockStop { index: 0 }),
+            Ok(ModelEvent::BlockStart {
+                index: 1,
+                block: ContentBlock::Text {
+                    text: String::new(),
+                },
+            }),
+            Ok(ModelEvent::BlockDelta {
+                index: 1,
+                delta: BlockDelta::Text(text.to_owned()),
+            }),
+            Ok(ModelEvent::BlockStop { index: 1 }),
+            Ok(ModelEvent::MessageDelta {
+                stop_reason: Some(StopReason::EndTurn),
+                usage: Usage::default(),
+            }),
+            Ok(ModelEvent::MessageStop),
+        ],
+    );
+}
+
 fn thinking(sender: &mpsc::UnboundedSender<Item>, text: &str) {
     use rust_cli_kernel_api::message::ContentBlock;
     use rust_cli_kernel_api::model::BlockDelta;
@@ -262,6 +290,9 @@ async fn a_foreground_agent_shows_its_thinking_in_the_row_only() {
                 && screen.contains("· Waiting for API response")
         })
         .await;
+        // 子代理的回复正常收尾（修复线 F113：流在只有 thinking 时断开，主循环会重发同一个请求，provider-errors.md §3.3；
+        // 这里测的是行与列表，不测断流）。
+        finish_with_text(&child, "Found them.");
         drop(child);
         events(&last, text_response(&["callers found"]));
         drop(last);

@@ -96,11 +96,16 @@ pub fn url_at(text: &str, col: usize) -> Option<String> {
     (token.starts_with("http://") || token.starts_with("https://")).then(|| token.to_owned())
 }
 
-/// 把行的 `[from, to)` 列反色（按需拆开片段）。详细视图的搜索匹配与输入框的选区用。
+/// 把行的 `[from, to)` 列反色（按需拆开片段）。输入框的选区用。
 pub fn reverse(line: &mut Line<'static>, from: usize, to: usize) {
     restyle(line, from, to, |style| {
         style.add_modifier(Modifier::REVERSED)
     });
+}
+
+/// 把行的 `[from, to)` 列叠上 `style`（搜索的高亮，tui-input.md §2.3.5）：`style` 里设了的颜色与修饰键盖过原来的。
+pub fn paint(line: &mut Line<'static>, from: usize, to: usize, style: Style) {
+    restyle(line, from, to, |base| base.patch(style));
 }
 
 /// 把行的 `[from, to)` 列换成选区底色（只换底色，前景不变，tui-select.md §2.2）。

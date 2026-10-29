@@ -1,16 +1,17 @@
 //! Anthropic Messages 协议（docs/specs/rust-cli/model.md §3）：URL、header 与四个部件的组装。
 
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use rust_cli_kernel_api::model::{ModelError, ModelRequest};
 use rust_cli_kernel_api::provider::{Credential, ModelEndpoint};
-use rust_cli_net::{HeaderValue, HttpRequest, ResponseHeaders, header};
+use rust_cli_net::{HeaderValue, HttpRequest, header};
 
 use crate::anthropic_stream::AnthropicStream;
 use crate::endpoint::anthropic_messages_url;
+use crate::errors::Vendor;
 use crate::profiles::Profile;
-use crate::protocol::{Failure, Protocol, StreamDecoder};
-use crate::{anthropic_error, anthropic_request, anthropic_shape, system_fold};
+use crate::protocol::{Protocol, StreamDecoder};
+use crate::{anthropic_request, anthropic_shape, system_fold};
 
 /// SDK 的 `anthropic-version`。
 pub(crate) const API_VERSION: &str = "2023-06-01";
@@ -74,18 +75,8 @@ impl Protocol for Anthropic {
         }
     }
 
-    fn decoder(&self) -> Box<dyn StreamDecoder> {
-        Box::new(AnthropicStream::default())
-    }
-
-    fn classify(
-        &self,
-        status: u16,
-        headers: &ResponseHeaders,
-        body: &str,
-        now: SystemTime,
-    ) -> Failure {
-        anthropic_error::from_response(status, headers, body, now)
+    fn decoder(&self, vendor: Vendor) -> Box<dyn StreamDecoder> {
+        Box::new(AnthropicStream::new(vendor))
     }
 }
 

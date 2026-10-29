@@ -82,7 +82,8 @@ fn node_row(
         .unwrap();
 }
 
-/// 本工程写的行：Node 归一化的输入（含缓存读写）累加；失败、子代理与旁路请求不算；最近一个按完成时刻。
+/// 本工程写的行：Node 归一化的输入（含缓存读写）累加；失败与旁路请求不算；最近一个按完成时刻。子代理的行在子会话
+/// （见 [`a_child_session_counts_its_subagent_requests`]），不进主会话的统计。
 #[tokio::test]
 async fn rust_rows_add_up_the_completed_main_turn_requests() {
     let t = TestStore::new();
@@ -108,13 +109,6 @@ async fn rust_rows_add_up_the_completed_main_turn_requests() {
             call(
                 "msg_t1",
                 QuerySource::Side("session_title".into()),
-                (4_000, Some(4_100), 9_900),
-                CallStatus::Completed,
-                usage(7, 0, 0, 7),
-            ),
-            call(
-                "msg_s1",
-                QuerySource::Subagent("Explore".into()),
                 (4_000, Some(4_100), 9_900),
                 CallStatus::Completed,
                 usage(7, 0, 0, 7),
@@ -272,4 +266,69 @@ fn both_queries_search_by_session() {
             "{sql}\n{text}"
         );
     }
+}
+
+/// 修复线 F112（usage.md §4.1、tui-panels.md §1.7）：查看子代理时 footer 查它的子会话。子会话里完成的子代理请求算进
+/// 统计，同一个子会话里失败的与旁路的不算；主会话不受子会话的行影响。修前只认 `main_turn`，子会话没有统计。
+#[tokio::test]
+async fn a_child_session_counts_its_subagent_requests() {
+    let t = TestStore::new();
+    started(&t, "sess_a").await;
+    started(&t, "sess_subagent_agent_1").await;
+    commit(
+        &t,
+        "sess_a",
+        vec![call(
+            "msg_r1",
+            QuerySource::MainThread,
+            (1_000, Some(1_500), 3_500),
+            CallStatus::Completed,
+            usage(100, 0, 100, 20),
+        )],
+    )
+    .await;
+    let explore = || QuerySource::Subagent("Explore".into());
+    commit(
+        &t,
+        "sess_subagent_agent_1",
+        vec![
+            call(
+                "msg_s1",
+                explore(),
+                (4_000, Some(4_100), 9_900),
+                CallStatus::Completed,
+                usage(10, 0, 30, 7),
+            ),
+            call(
+                "msg_s2",
+                explore(),
+                (10_000, Some(10_100), 10_200),
+                CallStatus::Error,
+                usage(999, 0, 0, 9),
+            ),
+            call(
+                "msg_s3",
+                QuerySource::Side("web_fetch_apply".into()),
+                (11_000, Some(11_100), 11_900),
+                CallStatus::Completed,
+                usage(50, 0, 0, 5),
+            ),
+        ],
+    )
+    .await;
+    let child = t
+        .store
+        .request_stats(&sid("sess_subagent_agent_1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        (child.requests, child.input_tokens, child.cache_read_tokens),
+        (1, 40, 30)
+    );
+    assert_eq!(child.cache_hit_rate(), Some(0.75));
+    let main = t.store.request_stats(&sid("sess_a")).await.unwrap();
+    assert_eq!(
+        (main.requests, main.input_tokens, main.cache_read_tokens),
+        (1, 200, 100)
+    );
 }

@@ -2,7 +2,7 @@
 
 use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::message::ContentBlock;
-use rust_cli_kernel_api::model::BlockDelta;
+use rust_cli_kernel_api::model::{BlockDelta, ModelError};
 use serde_json::{Map, json};
 
 use super::*;
@@ -18,7 +18,9 @@ fn decode(events: Vec<Value>) -> Result<Vec<ModelEvent>, ModelError> {
     let mut stream = ResponsesStream::default();
     let mut out = VecDeque::new();
     for value in events {
-        stream.decode(event(value), &mut out)?;
+        stream
+            .decode(event(value), &mut out)
+            .map_err(|verdict| verdict.error)?;
     }
     Ok(out.into_iter().collect())
 }

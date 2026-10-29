@@ -496,6 +496,34 @@ pub(crate) async fn run(
                     return Ok(stop);
                 }
             }
+            // 只交出了 thinking 之后的流内失败（provider-errors.md §3.3，D11 暂定，修复线 F113）：次数没满时不提交这次
+            // 回复（计量单独提交）、回复序号已加 1、重发同一个请求；满了照部分收尾。
+            Responded::ThinkingOnly {
+                assistant,
+                error,
+                call,
+            } => {
+                if guards.resend_after_thinking(&error) {
+                    scope
+                        .sink
+                        .commit_metered(None, Metered::Model(call))
+                        .await?;
+                    continue;
+                }
+                if assistant.content.is_empty() {
+                    scope
+                        .sink
+                        .commit_metered(None, Metered::Model(call))
+                        .await?;
+                    return Err(error.into());
+                }
+                let non_interactive = scope.parts.non_interactive;
+                let outcome = guards.truncated(&assistant, &source, non_interactive, &error);
+                if let Some(stop) = conclude(&scope, &mut history, outcome, assistant, call).await?
+                {
+                    return Ok(stop);
+                }
+            }
         }
     }
 }

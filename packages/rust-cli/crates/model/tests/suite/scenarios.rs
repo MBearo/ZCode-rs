@@ -9,7 +9,8 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use super::common::{
-    collect, delta, event, fast_retry, message_start, model_at, request, text_response,
+    collect, delta, event, fast_retry, message_start, model_at, request, started_text,
+    text_response,
 };
 use super::fixture::{Fixture, Reply};
 
@@ -176,22 +177,25 @@ async fn an_error_event_ends_the_stream_after_the_events_before_it() {
     assert_eq!(server.requests().len(), 1);
 }
 
+/// 已有正文之后流在 `message_stop` 之前断开：是协议错误，交给调用方（还没有正文时由模型适配器重发，见
+/// `stream_retry.rs`）。
 #[tokio::test]
 async fn a_stream_cut_before_message_stop_is_a_protocol_error() {
-    let server = Fixture::start(vec![Reply::new(200).send(message_start())]).await;
+    let server = Fixture::start(vec![Reply::new(200).send(started_text("par"))]).await;
     let model = model_at(server.url(), fast_retry(0)).await;
     let events = collect(&model, request("hi", QuerySource::MainThread)).await;
     assert!(matches!(events[0], Ok(ModelEvent::MessageStart { .. })));
     assert!(
-        matches!(&events[1..], [Err(ModelError::Protocol { .. })]),
+        matches!(&events[3..], [Err(ModelError::Protocol { .. })]),
         "{events:?}"
     );
+    assert_eq!(server.requests().len(), 1);
 }
 
 /// 取消立即结束流：读到一半、等响应头、退避等待时都一样，之后流不再产出任何项。
 #[tokio::test]
 async fn cancellation_ends_the_stream_at_once() {
-    let stalled = Reply::new(200).send(message_start()).hang();
+    let stalled = Reply::new(200).send(started_text("par")).hang();
     let slow_head = Reply::new(200).delay_head(10_000);
     let backoff = error_reply(503, "api_error", "busy").header("retry-after", "30");
     let server = Fixture::start(vec![stalled, slow_head, backoff]).await;
@@ -203,6 +207,10 @@ async fn cancellation_ends_the_stream_at_once() {
         stream.next().await,
         Some(Ok(ModelEvent::MessageStart { .. }))
     ));
+    // 文本块的开始与正文（越过交出边界时一起交出）。
+    for _ in 0..2 {
+        assert!(matches!(stream.next().await, Some(Ok(_))));
+    }
     assert_cancelled_soon(stream, cancel).await;
 
     for _ in 0..2 {

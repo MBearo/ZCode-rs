@@ -71,6 +71,11 @@ pub const WARNING_NAMED: Color = Color::Yellow;
 pub const DESTRUCTIVE_LIGHT: Rgb = (231, 0, 11);
 pub const DESTRUCTIVE_DARK: Rgb = (251, 44, 54);
 pub const DESTRUCTIVE_NAMED: Color = Color::Red;
+/// 搜索模式的当前匹配（修复线 F114，tui.md §7.4）：底色复用 [`WARNING_DARK`] / [`WARNING_LIGHT`]，字黑色，粗体加下划线；
+/// 16 色终端黄底黑字。
+pub const FIND_CURRENT_TEXT: Rgb = (0, 0, 0);
+pub const FIND_CURRENT_NAMED: Color = Color::Yellow;
+pub const FIND_CURRENT_TEXT_NAMED: Color = Color::Black;
 
 fn luminance((r, g, b): Rgb) -> f64 {
     let channel = |value: u8| {
@@ -246,6 +251,27 @@ impl Palette {
     /// 确认框里可用的“确认启用”（[`DESTRUCTIVE_LIGHT`] / [`DESTRUCTIVE_DARK`]），16 色终端是红。
     pub fn destructive(&self) -> Style {
         self.theme_color(DESTRUCTIVE_LIGHT, DESTRUCTIVE_DARK, DESTRUCTIVE_NAMED)
+    }
+
+    /// 搜索的匹配（主界面的搜索模式与详细视图的 `/`，修复线 F114）：反色，深浅背景、各颜色级别相同。
+    pub fn find_match(&self) -> Style {
+        Style::default().add_modifier(Modifier::REVERSED)
+    }
+
+    /// 搜索模式的当前匹配：警告色的底、黑字，粗体加下划线；叠在 [`Self::find_match`] 上时去掉反色。
+    pub fn find_current(&self) -> Style {
+        let fill = if self.light {
+            WARNING_LIGHT
+        } else {
+            WARNING_DARK
+        };
+        Style::default()
+            .fg(self
+                .tint(FIND_CURRENT_TEXT)
+                .unwrap_or(FIND_CURRENT_TEXT_NAMED))
+            .bg(self.tint(fill).unwrap_or(FIND_CURRENT_NAMED))
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            .remove_modifier(Modifier::REVERSED)
     }
 
     /// 按背景的明暗取 App 主题里的一种颜色，原样用（不柔化、不调对比度）。

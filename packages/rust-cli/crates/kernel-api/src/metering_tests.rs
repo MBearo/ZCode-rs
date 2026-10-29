@@ -246,3 +246,66 @@ fn query_sources_use_the_node_names() {
     assert_eq!(SIDE_SESSION_TITLE, "generate_session_title");
     assert_eq!(SIDE_WEB_FETCH, "web_fetch_apply");
 }
+
+/// 修复线 F112（tui-panels.md §1.7）：一个完成的请求的输出速度，时刻都相对请求开始；主回合与子代理共用这一个写法
+/// （各自再按来源筛）。失败与中断的请求没有。
+#[test]
+fn the_speed_of_a_completed_call() {
+    use crate::ids::MessageId;
+    use crate::model::{ModelSelection, QuerySource};
+    let call = ModelCall {
+        message: MessageId::new("msg_1"),
+        source: QuerySource::Subagent("Explore".to_owned()),
+        selection: ModelSelection {
+            provider: "p".to_owned(),
+            model: "m".to_owned(),
+            reasoning: None,
+            connection: None,
+        },
+        started_at_ms: 1_000,
+        first_token_at_ms: Some(3_500),
+        first_content_at_ms: Some(3_000),
+        completed_at_ms: 6_000,
+        status: CallStatus::Completed,
+        stop_reason: None,
+        tool_calls: 0,
+        usage: Some(crate::message::Usage {
+            input_tokens: 10,
+            output_tokens: 120,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        }),
+        retries: 0,
+        error: None,
+    };
+    let speed = OutputSpeed::of(&call).unwrap();
+    assert_eq!(
+        speed,
+        OutputSpeed {
+            output_tokens: Some(120),
+            duration_ms: 5_000,
+            first_content_ms: Some(2_000),
+        }
+    );
+    assert_eq!(speed.tokens_per_second(), Some(40.0));
+    let unknown = ModelCall {
+        usage: None,
+        first_content_at_ms: None,
+        ..call.clone()
+    };
+    assert_eq!(
+        OutputSpeed::of(&unknown),
+        Some(OutputSpeed {
+            output_tokens: None,
+            duration_ms: 5_000,
+            first_content_ms: None,
+        })
+    );
+    for status in [CallStatus::Error, CallStatus::Cancelled] {
+        let ended = ModelCall {
+            status,
+            ..call.clone()
+        };
+        assert_eq!(OutputSpeed::of(&ended), None, "{status:?}");
+    }
+}

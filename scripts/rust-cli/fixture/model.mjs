@@ -50,6 +50,21 @@ export const apiError = (status, type, message, headers = {}) => ({
  */
 export const stall = () => ({ stall: true });
 
+/** 同一个回复，换一个停止原因（`refusal`、`model_context_window_exceeded` 等，provider-errors.md §8.4）。 */
+export const stopped = (reply, stopReason) => ({ ...reply, stop_reason: stopReason });
+
+/**
+ * 流式时只写前 `afterEvents` 个 SSE 事件，再写一个 `event: error`（`type` / `message`）后结束（流内失败的场景，
+ * provider-errors.md §8.4）。
+ */
+export const streamError = (reply, afterEvents, type, message) => ({
+  ...reply,
+  streamError: { afterEvents, type, message },
+});
+
+/** 流式时只写前 `afterEvents` 个 SSE 事件，再直接断开连接（不发 `message_stop`）。 */
+export const disconnect = (reply, afterEvents) => ({ ...reply, disconnect: { afterEvents } });
+
 /** 压缩摘要提示的开头（rust-cli 的 `prompts/compact/` 逐字相同）。 */
 export const COMPACT_PROMPT = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.";
 
@@ -237,6 +252,21 @@ function sendMessage(response, requestId, model, messageId, reply) {
   const frames = events.map(
     ([type, data]) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`,
   );
+  // 流内失败：前几个事件之后来一个错误事件，或者直接断开（provider-errors.md §8.4）。
+  if (reply.streamError) {
+    const { afterEvents, type, message: text } = reply.streamError;
+    const error = { type: "error", error: { type, message: text } };
+    response.end(
+      frames.slice(0, afterEvents).join("") + `event: error\ndata: ${JSON.stringify(error)}\n\n`,
+    );
+    return;
+  }
+  if (reply.disconnect) {
+    response.write(frames.slice(0, reply.disconnect.afterEvents).join(""), () =>
+      response.socket?.destroy(),
+    );
+    return;
+  }
   // `holdMs`：写到最后一个 content_block_stop 先发出去，等一会儿再收尾，造出“流还开着、工具已经完成”的时刻
   // （工作线 F81）。
   if (reply.holdMs > 0) {

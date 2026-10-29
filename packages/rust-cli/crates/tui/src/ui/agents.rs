@@ -82,7 +82,7 @@ pub fn elapsed_ms(list: &AgentList, entry: &SubagentEntry, now: Instant) -> u64 
 }
 
 /// 重试或停顿还要等多久：快照里的剩余时长减去快照到达后经过的时间。
-fn left_ms(list: &AgentList, activity: &SubagentActivity, now: Instant) -> u64 {
+pub fn left_ms(list: &AgentList, activity: &SubagentActivity, now: Instant) -> u64 {
     let left = match activity {
         SubagentActivity::Retrying { retry_in_ms, .. }
         | SubagentActivity::Stalled { retry_in_ms } => *retry_in_ms,
@@ -160,6 +160,15 @@ impl App {
         self.agent_rows(now).iter().any(|row| {
             row.status == SubagentStatus::Running || (!row.parked && viewing != Some(&row.agent))
         })
+    }
+
+    /// 正在查看的子代理在列表快照里的条目（修复线 F112：查看时的状态行与命中率的查询对象都取自它）。
+    pub fn viewed_entry(&self) -> Option<&SubagentEntry> {
+        let viewing = self.viewing.as_ref()?;
+        self.agents
+            .entries
+            .iter()
+            .find(|entry| entry.agent == viewing.agent)
     }
 
     /// 被查看的子代理不在快照里了（tui-panels.md §1.6）：它的 owner 还在且没驱逐时改看 owner（`Some(owner)`），
@@ -460,6 +469,12 @@ impl App {
             KeyCode::PageDown => self.scroll_by(-page),
             KeyCode::Char('o') if ctrl => {
                 self.open_detail();
+                None
+            }
+            // 搜索模式（修复线 F114，tui-input.md §2.3.1）：输入框只读、没有斜杠列表，单个 `/` 就进入；紧跟的第二个 `/`
+            // 丢掉，手打 `//` 与主会话的结果相同。搜的是被查看的子会话。
+            KeyCode::Char('/') if !ctrl => {
+                self.open_find(true);
                 None
             }
             // 中断与退出照常（审批、运行状态仍属于主会话）。

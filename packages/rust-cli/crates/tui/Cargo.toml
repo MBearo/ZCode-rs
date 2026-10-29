@@ -35,6 +35,8 @@ tokio = { workspace = true, features = ["macros", "sync", "time"] }
 # 登录的取消令牌（取消是一条消息，tui.md §7.2）。
 tokio-util.workspace = true
 two-face.workspace = true
+# 搜索按字素匹配（修复线 F114，docs/specs/rust-cli/tui-input.md §2.3.3）。
+unicode-segmentation.workspace = true
 unicode-width.workspace = true
 
 [target.'cfg(unix)'.dependencies]

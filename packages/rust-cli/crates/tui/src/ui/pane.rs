@@ -144,6 +144,7 @@ pub(super) fn bottom_lines(
         now_ms,
         animation: now.duration_since(app.started),
         since_frame: now.saturating_duration_since(app.last_frame),
+        now,
     };
     // 运行中：状态行，前面空 1 行。
     let status = status_line::status(app, width, &clock);

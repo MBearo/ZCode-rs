@@ -7,7 +7,9 @@
 // - 每个 crate 的 .rs 文件、根与 crate 自己的 clippy.toml；
 // - 接口快照的源码与已提交的 interfaces.json（boundaries/interfaces.mjs）；
 // - 解耦检查（docs/specs/rust-cli/app-protocol.md §9）：协议适配层的依赖、词汇、按前端分支、feature（boundaries/decoupling.mjs）
-//   与 kernel-api 只加不改（boundaries/kernel-surface.mjs 与已提交的 kernel-surface.json）。
+//   与 kernel-api 只加不改（boundaries/kernel-surface.mjs 与已提交的 kernel-surface.json）；
+// - 厂商错误的解耦（docs/specs/rust-cli/provider-errors.md §2.5）：厂商码与厂商专有的字符串只在 model 的 errors/
+//   （boundaries/vendor.mjs）。
 // README 表格与规则表的一致性只在本仓库检查（scripts/rust-cli/repo-only/check.mjs，工作线 F60）。
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
@@ -38,6 +40,7 @@ import {
   surfaceOf,
 } from "./boundaries/kernel-surface.mjs";
 import * as policy from "./boundaries/policy.mjs";
+import { checkVendorTerms } from "./boundaries/vendor.mjs";
 
 const root = resolve(import.meta.dirname, "../../packages/rust-cli");
 const crates = resolve(root, "crates");
@@ -133,6 +136,8 @@ const failures = [
     await readSnapshot(),
     policy.KERNEL_API_CHANGES,
   ),
+  // 厂商错误（provider-errors.md §2.5）：第 2 层与 query 等只认中性分类。
+  ...checkVendorTerms(policy, sources),
 ];
 
 if (failures.length) {

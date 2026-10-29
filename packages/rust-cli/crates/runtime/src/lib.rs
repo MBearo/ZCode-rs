@@ -411,6 +411,8 @@ impl LocalKernel {
                     parts: parts.clone(),
                 }),
                 context: context.clone(),
+                // 只读查看的子代理快照算 ctx 与上下文提示（修复线 F112）：与主循环、子循环同一个压缩器。
+                compactor: late.clone(),
                 catalog: agent_catalog.clone(),
                 spawner: scope.spawner(),
                 shell_notice: agents::shell_notice,

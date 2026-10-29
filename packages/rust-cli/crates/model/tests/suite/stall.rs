@@ -18,7 +18,7 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use super::common::{
-    block_start, delta, fast_retry, message_start, model_at, request, text_response,
+    block_start, delta, fast_retry, message_start, model_at, request, started_text, text_response,
 };
 use super::fixture::{Fixture, Reply};
 
@@ -100,9 +100,16 @@ async fn a_stream_that_never_starts_is_resent_once_without_waiting() {
     assert_eq!(requests[0].body, requests[1].body);
 }
 
+/// 第二次停顿：静默重发已经用过，走一次流式重发（provider-errors.md D3 暂定 (b)，修复线 F113：以前直接报
+/// `StreamIdle`）；第三次才报错。
 #[tokio::test]
-async fn a_second_stall_before_any_event_ends_with_stream_idle() {
-    let server = Fixture::start(vec![stream_reply().hang(), stream_reply().hang()]).await;
+async fn a_second_stall_before_any_event_is_resent_once_more() {
+    let server = Fixture::start(vec![
+        stream_reply().hang(),
+        stream_reply().hang(),
+        stream_reply().hang(),
+    ])
+    .await;
     let items = items(&model(&server, idle(150, 10_000)).await).await;
     assert_eq!(
         shape(&items),
@@ -111,9 +118,35 @@ async fn a_second_stall_before_any_event_ends_with_stream_idle() {
             "retrying(Stream idle timeout - no chunks received, 0)",
             "resumed",
             "stalled",
+            "retrying(Stream idle timeout - no chunks received, 0)",
+            "resumed",
+            "stalled",
             "error(StreamIdle { idle_ms: 150 })"
         ]
     );
+    assert_eq!(server.requests().len(), 3);
+}
+
+/// 收到过事件、还没越过交出边界时停住：不静默重发，走一次流式重发（F113：以前报 `StreamIdle`）。
+#[tokio::test]
+async fn a_stall_before_any_content_is_resent_once() {
+    let server = Fixture::start(vec![
+        stream_reply().send(message_start()).hang(),
+        stream_reply().send(text_response(&["ok"])),
+    ])
+    .await;
+    let items = items(&model(&server, idle(150, 10_000)).await).await;
+    let shape = shape(&items);
+    assert_eq!(
+        shape[..3],
+        [
+            "stalled",
+            "retrying(Stream idle timeout - no chunks received, 0)",
+            "resumed"
+        ],
+        "{shape:?}"
+    );
+    assert!(shape[3..].iter().all(|item| item == "event"), "{shape:?}");
     assert_eq!(server.requests().len(), 2);
 }
 
@@ -156,7 +189,7 @@ async fn a_response_after_an_http_retry_resumes() {
 
 #[tokio::test]
 async fn cancelling_while_stalled_ends_at_once() {
-    let server = Fixture::start(vec![stream_reply().send(message_start()).hang()]).await;
+    let server = Fixture::start(vec![stream_reply().send(started_text("par")).hang()]).await;
     let model = model(&server, idle(10_000, 10_000)).await;
     let cancel = CancellationToken::new();
     let mut stream =
@@ -165,6 +198,13 @@ async fn cancelling_while_stalled_ends_at_once() {
         stream.next().await,
         Some(Ok(ModelStreamItem::Event(ModelEvent::MessageStart { .. })))
     ));
+    // 文本块的开始与正文。
+    for _ in 0..2 {
+        assert!(matches!(
+            stream.next().await,
+            Some(Ok(ModelStreamItem::Event(_)))
+        ));
+    }
     assert!(matches!(
         stream.next().await,
         Some(Ok(ModelStreamItem::Notice(ModelNotice::Stalled { .. })))

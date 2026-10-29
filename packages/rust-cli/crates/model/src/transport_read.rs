@@ -6,20 +6,27 @@
 //! 分两层（修复线 F17）：[`Events`] 只经 [`Body`] 取响应体，看门狗的时刻都在这里定；[`Read`] 是
 //! `Events<HttpResponse>` 加这次请求（取消令牌、静默重发）。单测把响应体换成按 tokio 时钟发块的脚本，
 //! 在暂停的时钟上验证时刻（真实套接字加真实时钟的测试在负载下会多出停顿通知）。
+//!
+//! 交出边界（docs/specs/rust-cli/provider-errors.md §3.2，修复线 F113）：第一个非空的正文或思考增量、第一个块结束、
+//! `MessageDelta`、`MessageStop` 越过边界，或解码器收到了终止事件。之前的事件（`MessageStart`、块的开始、工具参数、空增量）
+//! 扣在这里，越过时按原序一起交出。边界之前失败时返回 [`Next::Early`]，扣住的事件随这次响应丢掉，由 transport 决定重发。
 
 use std::collections::VecDeque;
 use std::future::Future;
 use std::time::Duration;
 
-use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelNotice, ModelStreamItem};
+use rust_cli_kernel_api::model::{
+    BlockDelta, ModelError, ModelEvent, ModelNotice, ModelStreamItem,
+};
 use rust_cli_net::sse::SseDecoder;
 use rust_cli_net::{Bytes, HttpResponse, NetError};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use crate::errors::{self, Verdict};
 use crate::idle::{Limits, Wake, Watch};
 use crate::model_io_tape::{End, Tape, end};
-use crate::protocol::{Failure, StreamDecoder};
+use crate::protocol::StreamDecoder;
 use crate::transport::Connect;
 
 /// 读流的下一步。
@@ -27,6 +34,24 @@ pub(crate) enum Next {
     Item(Result<ModelStreamItem, ModelError>),
     /// 超过了这个空闲上限：这次响应作废。
     Idle(Duration),
+    /// 越过交出边界之前就失败了（P1）：扣住的事件不交出，这次响应作废，由 transport 按处置表决定。
+    Early(Verdict),
+}
+
+/// 这个事件越过交出边界（provider-errors.md §3.2）。
+fn crosses(event: &ModelEvent) -> bool {
+    match event {
+        ModelEvent::BlockDelta {
+            delta: BlockDelta::Text(text) | BlockDelta::Thinking(text),
+            ..
+        } => !text.is_empty(),
+        ModelEvent::BlockStop { .. }
+        | ModelEvent::MessageDelta { .. }
+        | ModelEvent::MessageStop => true,
+        ModelEvent::MessageStart { .. }
+        | ModelEvent::BlockStart { .. }
+        | ModelEvent::BlockDelta { .. } => false,
+    }
 }
 
 /// 等一块字节的结果。
@@ -71,8 +96,9 @@ impl Read {
         }
     }
 
-    pub(crate) fn delivered(&self) -> bool {
-        self.events.delivered()
+    /// （解码出过事件，越过了交出边界）：看门狗按它决定静默重发、G 还是报错。
+    pub(crate) fn progress(&self) -> (bool, bool) {
+        (self.events.received, self.events.crossed)
     }
 
     /// 丢掉响应（关闭连接），交回这次请求与还没结束的录音（看门狗的结局由调用方按重发与否记）。
@@ -81,7 +107,8 @@ impl Read {
         (connect, tape)
     }
 
-    /// 下一项；流正常结束时为 `None`。流结束或出错时结束这次发送的录音。
+    /// 下一项；流正常结束时为 `None`。流结束或交给调用方的出错时结束这次发送的录音（交出边界之前的失败由 transport
+    /// 按重发与否记）。
     pub(crate) async fn next(&mut self) -> Option<Next> {
         let cancel = self.connect.cancel().clone();
         let next = self.events.next(&cancel).await;
@@ -103,11 +130,13 @@ pub(crate) struct Events<B> {
     pending: VecDeque<ModelEvent>,
     /// 先于事件交付的通知（`Resumed`）。
     notices: VecDeque<ModelNotice>,
-    /// 解码出错时，先交付它之前的事件，再交付错误。
-    failed: Option<ModelError>,
+    /// 解码出错时，越过了交出边界就先交付它之前的事件，再交付错误；没越过时这次响应作废。
+    failed: Option<Verdict>,
     watch: Watch,
-    /// 已经把这次响应的事件交给过调用方（看门狗中止后不能再静默重发）。
-    delivered: bool,
+    /// 解码出过事件（看门狗的静默重发只在一个事件都没收到时做，stall-visibility.md §2.3）。
+    received: bool,
+    /// 越过了交出边界：`pending` 里的事件可以交出（provider-errors.md §3.2，修复线 F113）。
+    crossed: bool,
 }
 
 fn item(result: Result<ModelStreamItem, ModelError>) -> Option<Next> {
@@ -134,12 +163,18 @@ impl<B: Body> Events<B> {
             notices,
             failed: None,
             watch: Watch::new(limits, Instant::now()),
-            delivered: false,
+            received: false,
+            crossed: false,
         }
     }
 
-    pub(crate) fn delivered(&self) -> bool {
-        self.delivered
+    /// 一个失败：越过了交出边界交给调用方，没越过时作废这次响应（P1）。
+    fn failure(&self, verdict: Verdict) -> Option<Next> {
+        if self.crossed {
+            item(Err(verdict.error))
+        } else {
+            Some(Next::Early(verdict))
+        }
     }
 
     /// 下一项；流正常结束时为 `None`。等待随 `cancel` 结束。
@@ -154,12 +189,13 @@ impl<B: Body> Events<B> {
             if cancel.is_cancelled() {
                 return item(Err(ModelError::Cancelled));
             }
-            if let Some(event) = self.pending.pop_front() {
-                self.delivered = true;
+            if self.crossed
+                && let Some(event) = self.pending.pop_front()
+            {
                 return item(Ok(ModelStreamItem::Event(event)));
             }
-            if let Some(error) = self.failed.take() {
-                return item(Err(error));
+            if let Some(verdict) = self.failed.take() {
+                return self.failure(verdict);
             }
             let wake = self.watch.next();
             let chunk = self.response.chunk();
@@ -185,12 +221,10 @@ impl<B: Body> Events<B> {
                 }
                 Some(Waited::Timer(Wake::Idle(limit))) => return Some(Next::Idle(limit)),
                 Some(Waited::Chunk(Err(error))) => {
-                    return item(Err(Failure::network(&error).error));
+                    return self.failure(errors::classify_transport(&error));
                 }
                 Some(Waited::Chunk(Ok(None))) => {
-                    return item(Err(ModelError::Protocol {
-                        message: "stream ended before message_stop".to_owned(),
-                    }));
+                    return self.failure(Verdict::truncated());
                 }
                 Some(Waited::Chunk(Ok(Some(chunk)))) => chunk,
             };
@@ -199,22 +233,26 @@ impl<B: Body> Events<B> {
             let events = match self.sse.push(&chunk) {
                 Ok(events) => events,
                 Err(error) => {
-                    self.failed = Some(ModelError::Protocol {
-                        message: error.to_string(),
-                    });
+                    self.failed = Some(Verdict::malformed(error.to_string()));
                     continue;
                 }
             };
+            let before = self.pending.len();
             for event in events {
                 let ping = event.event.as_deref() == Some("ping");
                 if self.watch.event(ping, now) {
                     self.notices.push_back(ModelNotice::Resumed);
                 }
-                if let Err(error) = self.decoder.decode(event, &mut self.pending) {
-                    self.failed = Some(error);
+                if let Err(verdict) = self.decoder.decode(event, &mut self.pending) {
+                    self.failed = Some(verdict);
                     break;
                 }
             }
+            self.received |= self.pending.len() > before;
+            // 流的终止事件之后没有别的内容：之前扣住的一起交出。
+            self.crossed = self.crossed
+                || self.decoder.finished()
+                || self.pending.iter().skip(before).any(crosses);
         }
     }
 }

@@ -1,14 +1,18 @@
-//! footer 的请求统计（docs/specs/rust-cli/usage.md §4.1，修复线 F27）：本会话完成的主回合请求在 `model_usage` 里的
-//! 聚合。每次都从行聚合，不缓存；两条查询都按 `session_id` 走 `model_usage_session_turn_idx`。
+//! footer 的请求统计（docs/specs/rust-cli/usage.md §4.1，修复线 F27）：本会话自己的主循环完成的请求在 `model_usage` 里的
+//! 聚合（主会话的主回合、子会话的子代理请求，F112）。每次都从行聚合，不缓存；两条查询都按 `session_id` 走
+//! `model_usage_session_turn_idx`。
 use rusqlite::{Connection, OptionalExtension};
 use rust_cli_kernel_api::metering::{LastRequest, RequestStats};
 use rust_cli_kernel_api::store::StoreError;
 
 use crate::OrStorage;
 
-/// 只算 Node 调试面板会算的行：本会话、主回合、完成（`model_request_completed`）。`+` 让来源与状态不参与选索引：
+/// 只算 Node 调试面板会算的行：本会话、主循环、完成（`model_request_completed`）。`+` 让来源与状态不参与选索引：
 /// 没有统计信息时 SQLite 会选 `model_usage_query_source_idx`，扫遍所有会话的主回合行；按会话找只有本会话的行。
-const COUNTED: &str = "session_id = ?1 and +query_source = 'main_turn' and +status = 'completed'";
+/// 修复线 F112（查看子代理时 footer 查它的子会话，tui-panels.md §1.7）：来源加上 `subagent`。子代理的行只写在子会话
+/// （Node 按会话的 taskType 写来源），主会话里没有，所以主会话的结果不变；修前子会话一行都不算，查看时没有命中率。
+const COUNTED: &str =
+    "session_id = ?1 and +query_source in ('main_turn', 'subagent') and +status = 'completed'";
 
 /// `raw_usage_json` 里这个键是非负数（Node `token(value)` 不是 undefined）。外层先判 `json_valid`：CASE 按顺序求值，
 /// 不是 JSON 的行不会走到 `json_extract`（否则整条查询报错）。

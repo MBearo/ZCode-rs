@@ -56,6 +56,15 @@ pub fn message_end(stop_reason: &str, output_tokens: u64) -> String {
     format!("{delta}{}", event(json!({"type": "message_stop"})))
 }
 
+/// 已越过交出边界的开头：`message_start`、文本块开始与一段非空的正文（provider-errors.md §3.2：之后的失败交给调用方，
+/// 不在模型适配器里重发）。
+pub fn started_text(text: &str) -> String {
+    let mut stream = message_start();
+    stream.push_str(&block_start(0, json!({"type": "text", "text": ""})));
+    stream.push_str(&delta(0, json!({"type": "text_delta", "text": text})));
+    stream
+}
+
 /// 一段完整的纯文本响应。
 pub fn text_response(parts: &[&str]) -> String {
     let mut stream = message_start();

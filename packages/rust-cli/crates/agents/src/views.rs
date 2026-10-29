@@ -130,11 +130,27 @@ pub(crate) async fn view(
         }
         None => found.mode.into(),
     };
+    let selection = loaded.model.unwrap_or(found.selection);
+    // 查看时 footer 的 ctx 与上下文提示（修复线 F112，tui-panels.md §1.7）：同一个压缩器按子会话的模型侧历史与子代理的
+    // 模型算，与会话 actor 的 `context_changed` 同一套规则；子循环的自动压缩也按它。
+    let compactor = &core.ports.compactor;
+    let context_usage =
+        compactor
+            .context_usage(&loaded.messages, &selection)
+            .map(
+                |(used_tokens, max_tokens)| rust_cli_kernel_api::compaction::ContextOccupancy {
+                    used_tokens,
+                    max_tokens,
+                },
+            );
+    let context_notice = compactor
+        .context_notice(&loaded.messages, &selection)
+        .unwrap_or_default();
     Ok(SessionView {
         meta: loaded.meta,
         // 显示用的历史：压缩点之前只供显示的消息接上模型侧的历史（工作线 F102，compact.md §5.1）。
         messages: [loaded.earlier, loaded.messages].concat(),
-        selection: loaded.model.unwrap_or(found.selection),
+        selection,
         mode: execution.mode,
         plan: execution.plan,
         pending: Vec::new(),
@@ -144,10 +160,10 @@ pub(crate) async fn view(
         running: matches!(found.state, AgentState::Running { .. }),
         background: Vec::new(),
         peer_held: Vec::new(),
-        // 子代理的只读快照不显示 footer 的上下文（F27）。
-        context_usage: None,
-        context_notice: Default::default(),
-        output_speed: None,
+        context_usage,
+        context_notice,
+        // 最近一个完成的子代理请求的速度（F112；修前子代理的快照不带 footer 的统计，写死空）。
+        output_speed: found.shown.speed,
     })
 }
 

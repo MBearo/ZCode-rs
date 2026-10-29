@@ -74,6 +74,11 @@ impl Transcript {
         if !same {
             return false;
         }
+        // 子代理的快照带它的 ctx、上下文提示与最近一个请求的速度（修复线 F112，tui-panels.md §1.7）：它们随每次提交变，
+        // 不算“视图字段变了”，取新快照的值（修前追加只折消息，三项停在第一份快照的值）。
+        self.occupancy = view.context_usage;
+        self.context = view.context_notice;
+        self.speed = view.output_speed;
         if matches!(
             self.rows.last(),
             Some(Row {

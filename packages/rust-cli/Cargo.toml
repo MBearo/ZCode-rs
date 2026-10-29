@@ -116,6 +116,8 @@ rustix = { version = "1", features = ["event"] }
 # rust-cli-tui：代码块、diff 与命令的高亮（主题来自 two-face）。
 syntect = { version = "5.3", default-features = false, features = ["parsing", "default-syntaxes", "default-themes", "regex-fancy"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+# rust-cli-tui：搜索按字素匹配（docs/specs/rust-cli/tui-input.md §2.3.3，F114）；Cargo.lock 里本来就有（ratatui 用它）。
+unicode-segmentation = "1.13"
 unicode-width = "0.2"
 # kernel-api `env_path::nfc`：工具路径参数的 NFC（docs/specs/rust-cli/tools-files.md §3.2）。
 # Cargo.lock 里本来就有（url → idna → idna_adapter），只打开内置数据，不引入新包。

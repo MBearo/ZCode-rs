@@ -9,12 +9,13 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use rust_cli_kernel_api::message::{StopReason, Usage};
-use rust_cli_kernel_api::model::{ModelError, ModelEvent};
+use rust_cli_kernel_api::model::ModelEvent;
+use rust_cli_kernel_api::provider::WireProtocol;
 use rust_cli_net::sse::SseEvent;
 use serde_json::{Value, json};
 
+use crate::errors::{self, Finish, Vendor, Verdict};
 use crate::openai_blocks::{Blocks, Flow, number, protocol, take_str, usage};
-use crate::openai_error;
 use crate::protocol::StreamDecoder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +37,8 @@ struct Output {
 
 #[derive(Debug, Default)]
 pub(crate) struct ResponsesStream {
+    /// 错误与结束原因经这个厂商的分类器（provider-errors.md §2.2，修复线 F113）。
+    vendor: Vendor,
     started: bool,
     finished: bool,
     blocks: Blocks,
@@ -43,7 +46,7 @@ pub(crate) struct ResponsesStream {
     outputs: BTreeMap<u64, Output>,
 }
 
-fn output_index(event: &Value) -> Result<u64, ModelError> {
+fn output_index(event: &Value) -> Result<u64, Verdict> {
     event
         .get("output_index")
         .and_then(Value::as_u64)
@@ -65,6 +68,23 @@ fn item_text(item: &Value, field: &str) -> String {
 }
 
 impl ResponsesStream {
+    pub(crate) fn new(vendor: Vendor) -> Self {
+        Self {
+            vendor,
+            ..Self::default()
+        }
+    }
+
+    /// 流里的错误对象经厂商的分类器（修复线 F113）。
+    fn error(&self, value: &Value) -> Verdict {
+        errors::classify_stream_error(
+            self.vendor,
+            WireProtocol::OpenAiResponses,
+            value,
+            &value.to_string(),
+        )
+    }
+
     fn start(&mut self, event: &mut Value, out: &mut VecDeque<ModelEvent>) {
         if self.started {
             return;
@@ -81,11 +101,7 @@ impl ResponsesStream {
         });
     }
 
-    fn added(
-        &mut self,
-        mut event: Value,
-        out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    fn added(&mut self, mut event: Value, out: &mut VecDeque<ModelEvent>) -> Result<(), Verdict> {
         let key = output_index(&event)?;
         if self.outputs.contains_key(&key) {
             return Err(protocol(format!("output item {key} added twice")));
@@ -123,7 +139,7 @@ impl ResponsesStream {
         mut event: Value,
         expected: Kind,
         out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Verdict> {
         let key = output_index(&event)?;
         let output = self
             .outputs
@@ -146,7 +162,7 @@ impl ResponsesStream {
         Ok(())
     }
 
-    fn done(&mut self, event: Value, out: &mut VecDeque<ModelEvent>) -> Result<(), ModelError> {
+    fn done(&mut self, event: Value, out: &mut VecDeque<ModelEvent>) -> Result<(), Verdict> {
         let key = output_index(&event)?;
         let output = self
             .outputs
@@ -180,11 +196,7 @@ impl ResponsesStream {
         Ok(())
     }
 
-    fn completed(
-        &mut self,
-        event: &Value,
-        out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    fn completed(&mut self, event: &Value, out: &mut VecDeque<ModelEvent>) -> Result<(), Verdict> {
         // 到这里还没有 done 的调用（不合规的流）：写出攒下的参数再随消息结束（修复线 F101 之前增量是逐段写出的，结果相同）。
         for (key, output) in &mut self.outputs {
             if !output.arguments.is_empty() {
@@ -200,10 +212,12 @@ impl ResponsesStream {
             cached,
             number(reported, "output_tokens"),
         );
+        // 不完整的原因经厂商的分类器换算（修复线 F113：以前是这里自己的两项）。
         let stop = match response["incomplete_details"]["reason"].as_str() {
-            Some("max_output_tokens") => StopReason::MaxTokens,
-            Some("content_filter") => StopReason::Refusal,
-            Some(_) => StopReason::Unknown,
+            Some(reason) => match errors::classify_finish(self.vendor, reason) {
+                Finish::Stop(reason) => reason,
+                Finish::Failed(verdict) => return Err(verdict),
+            },
             None if self.blocks.has_tools() => StopReason::ToolUse,
             None => StopReason::EndTurn,
         };
@@ -214,11 +228,7 @@ impl ResponsesStream {
 }
 
 impl StreamDecoder for ResponsesStream {
-    fn decode(
-        &mut self,
-        event: SseEvent,
-        out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    fn decode(&mut self, event: SseEvent, out: &mut VecDeque<ModelEvent>) -> Result<(), Verdict> {
         if self.finished {
             return Ok(());
         }
@@ -230,10 +240,10 @@ impl StreamDecoder for ResponsesStream {
             .unwrap_or_default()
             .to_owned();
         match kind.as_str() {
-            "error" => return Err(openai_error::from_stream(&value)),
+            "error" => return Err(self.error(&value)),
             "response.failed" => {
                 let error = value["response"]["error"].take();
-                return Err(openai_error::from_stream(&json!({ "error": error })));
+                return Err(self.error(&json!({ "error": error })));
             }
             "response.created" | "response.in_progress" => self.start(&mut value, out),
             _ if !self.started => {

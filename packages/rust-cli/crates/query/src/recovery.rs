@@ -11,6 +11,11 @@ use crate::texts;
 /// 输出上限续写的次数上限。
 const OUTPUT_RECOVERY_LIMIT: u8 = 3;
 
+/// 只交出了 thinking 之后的流内失败最多重发这么多次；停顿（`StreamIdle`）另计，最多 1 次
+/// （docs/specs/rust-cli/provider-errors.md §3.3，D11 暂定，修复线 F113）。
+const THINKING_RESEND_LIMIT: u8 = 2;
+const THINKING_STALL_LIMIT: u8 = 1;
+
 /// 不做 thinking-only 提示的旁路来源。
 pub(crate) const QUIET_SIDE_SOURCES: [&str; 4] = [
     "prompt_suggestion",
@@ -50,6 +55,33 @@ pub(crate) struct Guards {
     output_recovery: u8,
     malformed_retried: bool,
     thinking_nudged: bool,
+    /// 只交出了 thinking 之后的重发次数（`StreamIdle` 之外的错误）。
+    thinking_resends: u8,
+    /// 只交出了 thinking 之后、因为停顿的重发次数。
+    thinking_stalls: u8,
+}
+
+/// 只交出了 thinking 之后可以重发的错误（处置表 P2t 列是“重发”的分类交给 query 的形状，provider-errors.md §2.4）。
+pub(crate) fn resends_after_thinking(error: &ModelError) -> bool {
+    matches!(
+        error,
+        ModelError::Server { .. }
+            | ModelError::Network { .. }
+            | ModelError::Protocol { .. }
+            | ModelError::Overloaded { .. }
+            | ModelError::RateLimited { .. }
+            | ModelError::StreamIdle { .. }
+    )
+}
+
+/// 部分收尾时直接终止、给错误自己的说明的错误（provider-errors.md §2.4 的 P2 列）：等也不会好，续写没有用。
+fn ends_partial_output(error: &ModelError) -> bool {
+    matches!(
+        error,
+        ModelError::QuotaExhausted { .. }
+            | ModelError::ContentBlocked { .. }
+            | ModelError::RequestTooLarge { .. }
+    )
 }
 
 fn has_visible_text(assistant: &AssistantMessage) -> bool {
@@ -80,8 +112,24 @@ impl Guards {
         self.malformed_retried = false;
     }
 
+    /// 只交出了 thinking 之后的流内失败（provider-errors.md §3.3，修复线 F113）：次数没满时记一次、返回真，主循环
+    /// 不提交这次回复、重发同一个请求；满了返回假，照部分收尾。以前一律部分收尾（stall-visibility.md D3）。
+    pub(crate) fn resend_after_thinking(&mut self, error: &ModelError) -> bool {
+        let (count, limit) = if matches!(error, ModelError::StreamIdle { .. }) {
+            (&mut self.thinking_stalls, THINKING_STALL_LIMIT)
+        } else {
+            (&mut self.thinking_resends, THINKING_RESEND_LIMIT)
+        };
+        if *count >= limit {
+            return false;
+        }
+        *count += 1;
+        true
+    }
+
     /// 流在已有结束的块、没有 tool_use 时断开（续写来源 `truncated_response_recovery`，只对子代理与
     /// 非交互的主线程续写；与输出上限续写共用次数）。`assistant` 是只含结束的块的半截响应。
+    /// 修改（F113）：配额用尽、内容拦截、请求太大不续写，以它们自己的说明结束（provider-errors.md §2.4 的 P2 列）。
     pub(crate) fn truncated(
         &mut self,
         assistant: &AssistantMessage,
@@ -89,6 +137,11 @@ impl Guards {
         non_interactive: bool,
         error: &ModelError,
     ) -> Outcome {
+        if ends_partial_output(error) {
+            return Outcome::Failed {
+                message: error.to_string(),
+            };
+        }
         let nudge = match source {
             QuerySource::Subagent(_) => Some(texts::TRUNCATED_NUDGE_SUBAGENT),
             QuerySource::MainThread if non_interactive => Some(texts::TRUNCATED_NUDGE),
@@ -120,7 +173,9 @@ impl Guards {
         max_tokens: u32,
     ) -> Outcome {
         match assistant.stop_reason {
-            Some(StopReason::MaxTokens) => {
+            // 修 bug（F113，provider-errors.md D7 暂定）：窗口用满以前是 `Unknown`，回合静默结束；照输出上限续写，共用
+            // 次数，用尽时另有文字。
+            Some(reason @ (StopReason::MaxTokens | StopReason::ModelContextWindowExceeded)) => {
                 if self.output_recovery < OUTPUT_RECOVERY_LIMIT {
                     self.output_recovery += 1;
                     return Outcome::Retry {
@@ -129,10 +184,18 @@ impl Guards {
                         source: "max_output_tokens_recovery",
                     };
                 }
-                Outcome::Failed {
-                    message: texts::output_limit_exhausted(max_tokens),
-                }
+                let message = if reason == StopReason::MaxTokens {
+                    texts::output_limit_exhausted(max_tokens)
+                } else {
+                    texts::CONTEXT_WINDOW_EXHAUSTED.to_owned()
+                };
+                Outcome::Failed { message }
             }
+            // 修 bug（F113，用户决定 2026-10-29“内容拦截要显示给用户”）：以前落到下面的 `Completed`，静默按成功结束。
+            // 响应照常提交，以错误结束，给原因文字；不重试（provider-errors.md D6 暂定）。
+            Some(StopReason::Refusal) => Outcome::Failed {
+                message: rust_cli_kernel_api::model::CONTENT_BLOCKED.to_owned(),
+            },
             // 能走到这里说明没有完整的 tool_use 块。
             Some(StopReason::ToolUse) => {
                 if self.malformed_retried {

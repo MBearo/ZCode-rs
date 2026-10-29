@@ -182,3 +182,69 @@ async fn request_stats_come_from_the_stored_calls() {
         Err(KernelError::NotFound { .. })
     ));
 }
+
+/// 修复线 F112（usage.md §4.1、tui-panels.md §1.7）：查看子代理时 footer 查它的子会话。子会话里完成的子代理请求算进命中率
+/// （子代理的行只写在子会话）；同一个子会话里的旁路请求与失败的请求照旧不算。修前只认主回合，子会话没有值。
+#[tokio::test]
+async fn a_child_session_counts_its_subagent_requests() {
+    use rust_cli_kernel_api::ids::TraceId;
+    use rust_cli_kernel_api::message::Usage;
+    use rust_cli_kernel_api::store::{SessionKind, SessionMeta};
+    let store = Arc::new(MemoryStore::default());
+    let kernel = kernel(store.clone());
+    let child = SessionId::new("sess_subagent_agent_1");
+    store
+        .create(SessionMeta {
+            id: child.clone(),
+            kind: SessionKind::Subagent,
+            parent: Some(SessionId::new("sess_parent")),
+            workspace: WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/work"),
+            },
+            title: "Find callers".to_owned(),
+            trace: TraceId::new("trace"),
+            created_at_ms: 1,
+        })
+        .await
+        .unwrap();
+    let with = |fact: Fact, source: QuerySource, read: u64| match fact {
+        Fact::ModelCalled { mut call } => {
+            call.source = source;
+            call.usage = Some(Usage {
+                input_tokens: 100,
+                output_tokens: 20,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: read,
+            });
+            Fact::ModelCalled { call }
+        }
+        other => other,
+    };
+    let explore = || QuerySource::Subagent("Explore".to_owned());
+    let facts = vec![
+        with(call("msg_1", 500, CallStatus::Completed), explore(), 300),
+        with(call("msg_2", 500, CallStatus::Error), explore(), 0),
+        with(
+            call("msg_3", 500, CallStatus::Completed),
+            QuerySource::Side("web_fetch_apply".to_owned()),
+            0,
+        ),
+    ];
+    store
+        .commit(
+            &child,
+            FactBatch {
+                owner_epoch: OwnerEpoch::LOCAL,
+                command: None,
+                facts,
+                turn: None,
+            },
+        )
+        .await
+        .unwrap();
+    let stats = kernel.request_stats(&child).await.unwrap();
+    assert_eq!(stats.requests, 1);
+    // 输入含缓存读：300 ÷ 400。
+    assert_eq!(stats.cache_hit_rate(), Some(0.75));
+}

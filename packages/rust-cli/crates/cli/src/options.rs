@@ -229,6 +229,18 @@ pub(crate) fn machine_ssh(
     }
 }
 
+/// `_ZCODE_ASSUME_BASE_URL`（修复线 F113，docs/specs/rust-cli/provider-errors.md D13）：查请求方案与厂商的错误码表时
+/// 把端点当成这个地址，请求仍发到真实地址（本地夹具走到智谱的方案与码表）。不是给用户的开关；`Ignored` 时不读。
+pub(crate) fn assumed_base_url(
+    declarations: TestDeclarations,
+    var: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if declarations == TestDeclarations::Ignored {
+        return None;
+    }
+    var("_ZCODE_ASSUME_BASE_URL").filter(|value| !value.trim().is_empty())
+}
+
 /// 只给测试的 SSH 入口（远端执行 R2，remote-exec.md §19.11）：本机的执行端口换成经 SSH 连到 `destination` 的远端环境。
 /// 只在 debug 构建读（同 `_ZCODE_ASSUME_*`）；不是给用户的开关（机器清单与 `/machines` 在 R3 / R4）。
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -127,6 +127,9 @@ pub enum StopReason {
     ToolUse,
     PauseTurn,
     Refusal,
+    /// 模型的上下文窗口用满（线上的 `model_context_window_exceeded`）：主循环同输出上限续写，用尽时另有文字
+    /// （docs/specs/rust-cli/provider-errors.md §2.3、D7，修复线 F113）。以前是 `Unknown`，回合静默结束。
+    ModelContextWindowExceeded,
     #[serde(other)]
     Unknown,
 }

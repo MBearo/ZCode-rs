@@ -279,6 +279,8 @@ export const PURE = [
   "tokio-util",
   "tracing",
   "two-face",
+  // tui：搜索按字素匹配（docs/specs/rust-cli/tui-input.md §2.3.3，F114）。
+  "unicode-segmentation",
   "unicode-width",
   "url",
 ];
@@ -547,3 +549,130 @@ export const NEUTRAL_FEATURES = {
 /// kernel-api 只加不改（boundaries/kernel-surface.json，app-protocol.md §9.4）：快照只追加；已有项的改动或删除逐项登记在这里，
 /// `was` 是快照里的值，`now` 是现在的值（删除写 null），`reason` 写用户的决定。
 export const KERNEL_API_CHANGES = [];
+
+// ── 厂商错误的解耦（docs/specs/rust-cli/provider-errors.md §2.1、§2.5、§11）。厂商码与厂商专有的字符串只在第 1 层（model 的
+// `errors/` 目录，厂商分类器）；第 2 层（`errors/dispose.rs`、transport）、query、session 与前端只认中性分类。检查在
+// boundaries/vendor.mjs。──
+
+/// 厂商与协议的错误词。`owners` 是能出现的位置：以 `/` 结尾的是目录（含其中的测试文件）；`.rs` 文件连同它的测试文件
+/// （同名加 `_` 开头、只在测试里编译的文件，如 `zhipu_tests.rs`）。
+/// 测试文件（isTestFile 与 `_tests_*.rs`、`test_support.rs`、`test_more.rs`，含 crate 的 `tests/` 目录）不查 `values`、`codes`
+/// 与 `protocol`：测试要把厂商的原始正文端到端喂进去。`selector` 连测试文件也查。
+export const VENDOR_ERROR_TERMS = {
+  vendors: [
+    {
+      // 智谱（z.ai、bigmodel.cn，含 ZCode 套餐网关）：码表与结束原因只在它自己的分类器（provider-errors.md §5.3）。
+      id: "zhipu",
+      owners: ["crates/model/src/errors/zhipu.rs"],
+      // 智谱专有的结束原因（字符串字面量与之完全相同才算）：`sensitive` 是内容拦截，`network_error` 是流内的网络失败。
+      values: ["sensitive", "network_error"],
+      // 业务码（字符串字面量与之完全相同才算）。与 errors/zhipu.rs 的 CODES 相同，只去掉 `500`（与 HTTP 状态同名，太常见）；
+      // vendor.test.mjs 比对两边，防止漂移。
+      codes: [
+        "1005",
+        "1006",
+        "1008",
+        "1113",
+        "1120",
+        "1210",
+        "1211",
+        "1213",
+        "1214",
+        "1230",
+        "1234",
+        "1261",
+        "1301",
+        "1302",
+        "1303",
+        "1304",
+        "1305",
+        "1308",
+        "1309",
+        "1310",
+        "1311",
+        "1312",
+        "1313",
+        "1314",
+        "1315",
+        "1316",
+        "1317",
+        "1318",
+        "1319",
+        "1320",
+        "1321",
+        "2007",
+        "2056",
+        "20097",
+        "3001",
+        "3002",
+        "3006",
+        "3007",
+        "3008",
+        "3009",
+        "3010",
+      ],
+      // 代码里的数字字面量（去掉注释与字符串之后的 `1302`、`1302u16`、`1_302`）也算码的 crate：处理模型错误的 crate。
+      // net、env-local 里 WebSocket 的关闭码 1005 / 1006 是另一回事，不在其中。
+      numericCrates: [
+        "model",
+        "query",
+        "session",
+        "compact",
+        "agents",
+        "headless",
+        "tui",
+        "runtime",
+        "kernel-api",
+        "protocol-zcode",
+      ],
+      // 选厂商的写法 `Vendor::Zhipu`（含 `Vendor::{…, Zhipu}`，只看代码）：只在分类器目录与按端点选厂商的 profiles.rs
+      // （provider-errors.md §2.2，方案表是唯一来源）。测试文件也查。
+      selector: {
+        re: /\bVendor\s*::\s*(?:Zhipu\b|\{[^}]*\bZhipu\b)/,
+        owners: ["crates/model/src/errors/", "crates/model/src/profiles.rs"],
+      },
+    },
+  ],
+  // Anthropic / OpenAI 协议的错误类型、错误码与结束原因（字符串字面量与之完全相同才算；`content-filter` 这类带连字符的
+  // 别的写法不算）：只在分类器目录（provider-errors.md §5.1、§5.2、§5.4）。
+  protocol: {
+    owners: ["crates/model/src/errors/"],
+    groups: [
+      // 配额与账单用尽（中性分类 QuotaExhausted）。
+      {
+        id: "quota",
+        values: [
+          "insufficient_quota",
+          "billing_error",
+          "credit_balance_exhausted",
+          "organization_spend_limit_exceeded",
+          "project_spend_limit_exceeded",
+          "organization_usage_limit_exceeded",
+          "exceeded_current_quota_error",
+        ],
+      },
+      // 内容拦截（ContentBlocked；OpenAI 的结束原因）。
+      { id: "content-filter", values: ["content_filter"] },
+      // 过载（Overloaded）。
+      {
+        id: "overloaded",
+        values: ["overloaded_error", "server_is_overloaded", "engine_overloaded_error"],
+      },
+      // 限流（RateLimited）。
+      {
+        id: "rate-limit",
+        values: ["rate_limit_error", "rate_limit_exceeded", "rate_limit_reached_error"],
+      },
+      // 请求过大（TooLarge）。
+      { id: "too-large", values: ["request_too_large"] },
+      // 上下文超长（ContextOverflow；Anthropic 的结束原因与 OpenAI 的错误码）。
+      {
+        id: "context-overflow",
+        values: ["model_context_window_exceeded", "context_length_exceeded"],
+      },
+    ],
+  },
+};
+
+/// 厂商错误词的例外：只按文件与精确片段（同 PROTOCOL_TERM_EXCEPTIONS），没用到的是死项。值 `why` 写理由。
+export const VENDOR_ERROR_TERM_EXCEPTIONS = [];

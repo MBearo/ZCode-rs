@@ -102,3 +102,37 @@ fn a_changed_view_field_needs_a_rebuild() {
     renamed.meta.title = "Other".into();
     assert!(!view.append_view(&renamed, 2, 2));
 }
+
+/// 修复线 F112（tui-panels.md §1.7）：子代理的快照带它的 ctx、上下文提示与最近一个请求的速度；追加刷新时这三项换成新快照里
+/// 的值（它们随每次提交变，不算“视图字段变了”，不整体重建）。修前追加只折消息，三项停在第一份快照的值。
+#[test]
+fn appending_takes_the_new_context_and_speed() {
+    use rust_cli_kernel_api::compaction::{ContextNotice, ContextOccupancy};
+    use rust_cli_kernel_api::metering::OutputSpeed;
+    let all = history();
+    let mut view = Transcript::from_view(snapshot(all[..2].to_vec(), true), 1);
+    assert_eq!(view.context_usage(), None);
+    assert_eq!(view.output_speed(), None);
+    let mut next = snapshot(all, true);
+    next.context_usage = Some(ContextOccupancy {
+        used_tokens: 4_500,
+        max_tokens: 9_000,
+    });
+    next.context_notice = ContextNotice::UntilAutoCompact { percent: 12 };
+    let speed = OutputSpeed {
+        output_tokens: Some(90),
+        duration_ms: 4_000,
+        first_content_ms: Some(1_000),
+    };
+    next.output_speed = Some(speed);
+    assert!(view.append_view(&next, 2, 2));
+    assert_eq!(view.context_usage().map(|usage| usage.percent()), Some(50));
+    assert_eq!(
+        view.context_notice(),
+        ContextNotice::UntilAutoCompact { percent: 12 }
+    );
+    assert_eq!(view.output_speed(), Some(speed));
+    let rebuilt = Transcript::from_view(next, 2);
+    assert_eq!(view.context_usage(), rebuilt.context_usage());
+    assert_eq!(view.output_speed(), rebuilt.output_speed());
+}

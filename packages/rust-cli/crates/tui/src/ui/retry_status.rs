@@ -43,6 +43,43 @@ pub fn countdown(ms: u64) -> String {
     }
 }
 
+/// 重试中的两半：前两次只写 `API error`，之后写具体的错误；后半是倒计时与第几次。
+fn retrying(
+    attempt: u32,
+    max_retries: u32,
+    error: String,
+    left: &str,
+    lang: Lang,
+) -> (String, String) {
+    let what = if attempt >= max_retries.min(3) {
+        error
+    } else {
+        match lang {
+            Lang::En => "API error".to_owned(),
+            Lang::Zh => "API 错误".to_owned(),
+        }
+    };
+    let tail = match lang {
+        Lang::En => format!(" · Retrying in {left} · attempt {attempt}/{max_retries}"),
+        Lang::Zh => format!(" · {left}后重试 · 第 {attempt}/{max_retries} 次"),
+    };
+    (what, tail)
+}
+
+/// 停住时的两半。
+fn stalled(left: &str, lang: Lang) -> (String, String) {
+    match lang {
+        Lang::En => (
+            "Waiting for API response".to_owned(),
+            format!(" · will retry in {left} · check your network"),
+        ),
+        Lang::Zh => (
+            "等待 API 响应".to_owned(),
+            format!(" · {left}后重试 · 请检查网络"),
+        ),
+    }
+}
+
 /// 状态行的两半：error 色的说明与 dim 的倒计时。`Resumed` 没有状态行。
 pub fn parts(notice: &Notice, now_ms: u64, lang: Lang) -> Option<(String, String)> {
     let left = countdown(notice.remaining_ms(now_ms));
@@ -52,47 +89,57 @@ pub fn parts(notice: &Notice, now_ms: u64, lang: Lang) -> Option<(String, String
             max_retries,
             error,
             ..
-        } => {
-            // 前两次只写 `API error`，之后写具体的错误。
-            let what = if *attempt >= (*max_retries).min(3) {
-                error.to_string()
-            } else {
-                match lang {
-                    Lang::En => "API error".to_owned(),
-                    Lang::Zh => "API 错误".to_owned(),
-                }
-            };
-            let tail = match lang {
-                Lang::En => format!(" · Retrying in {left} · attempt {attempt}/{max_retries}"),
-                Lang::Zh => format!(" · {left}后重试 · 第 {attempt}/{max_retries} 次"),
-            };
-            Some((what, tail))
-        }
-        ModelNotice::Stalled { .. } => Some(match lang {
-            Lang::En => (
-                "Waiting for API response".to_owned(),
-                format!(" · will retry in {left} · check your network"),
-            ),
-            Lang::Zh => (
-                "等待 API 响应".to_owned(),
-                format!(" · {left}后重试 · 请检查网络"),
-            ),
-        }),
+        } => Some(retrying(
+            *attempt,
+            *max_retries,
+            error.to_string(),
+            &left,
+            lang,
+        )),
+        ModelNotice::Stalled { .. } => Some(stalled(&left, lang)),
         ModelNotice::Resumed => None,
     }
 }
 
-/// 整行（宽 `width`）：说明截断到 `max(10, 宽 − 2 − 后半宽 − 2)`，让倒计时放得下。
-pub fn spans(notice: &Notice, now_ms: u64, lang: Lang, width: usize) -> Vec<Span<'static>> {
-    let Some((what, tail)) = parts(notice, now_ms, lang) else {
-        return Vec::new();
-    };
+/// 两半排成一行（宽 `width`）：说明截断到 `max(10, 宽 − 2 − 后半宽 − 2)`，让倒计时放得下。
+fn laid_out((what, tail): (String, String), width: usize) -> Vec<Span<'static>> {
     let room = width.saturating_sub(2 + tail.width() + 2).max(10);
     vec![
         Span::styled(format!("{GLYPH} "), error()),
         Span::styled(truncate(&what, room), error()),
         Span::styled(tail, dim()),
     ]
+}
+
+/// 整行（宽 `width`）。
+pub fn spans(notice: &Notice, now_ms: u64, lang: Lang, width: usize) -> Vec<Span<'static>> {
+    parts(notice, now_ms, lang).map_or_else(Vec::new, |parts| laid_out(parts, width))
+}
+
+/// 被查看的子代理的重试与停顿（列表快照的 `activity`，修复线 F112，stall-visibility.md §4.3）：与主线程的重试行同一套
+/// 文字；`left_ms` 是快照里的剩余时长减去收到快照后经过的时间。别的活动没有重试行。
+pub fn activity_line(
+    activity: &rust_cli_kernel_api::panels::SubagentActivity,
+    left_ms: u64,
+    lang: Lang,
+    width: usize,
+) -> Option<Line<'static>> {
+    use rust_cli_kernel_api::panels::SubagentActivity;
+    let left = countdown(left_ms);
+    let parts = match activity {
+        SubagentActivity::Retrying {
+            attempt,
+            max_retries,
+            error,
+            ..
+        } => retrying(*attempt, *max_retries, error.clone(), &left, lang),
+        SubagentActivity::Stalled { .. } => stalled(&left, lang),
+        SubagentActivity::Thinking | SubagentActivity::Tool { .. } => return None,
+    };
+    Some(super::text::truncate_line(
+        Line::from(laid_out(parts, width)),
+        width,
+    ))
 }
 
 /// 主线程的状态行（整行换掉 spinner）。

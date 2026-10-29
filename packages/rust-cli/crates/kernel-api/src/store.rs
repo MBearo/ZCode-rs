@@ -452,7 +452,8 @@ pub trait SessionStore: Send + Sync {
         })
     }
 
-    /// footer 的请求统计（docs/specs/rust-cli/usage.md §4.1，修复线 F27）：本会话完成的主回合请求在用量表里的聚合。
+    /// footer 的请求统计（docs/specs/rust-cli/usage.md §4.1，修复线 F27）：本会话完成的主回合请求在用量表里的聚合；
+    /// 修复线 F112 起子会话给出它完成的子代理请求（子代理的行只在子会话，主会话的结果不变）。
     /// 只读；每次都从行聚合，不缓存。不支持的实现返回 `Unsupported`。
     async fn request_stats(
         &self,

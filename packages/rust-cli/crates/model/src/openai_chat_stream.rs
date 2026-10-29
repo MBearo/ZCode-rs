@@ -8,16 +8,19 @@
 use std::collections::VecDeque;
 
 use rust_cli_kernel_api::message::{StopReason, Usage};
-use rust_cli_kernel_api::model::{ModelError, ModelEvent};
+use rust_cli_kernel_api::model::ModelEvent;
+use rust_cli_kernel_api::provider::WireProtocol;
 use rust_cli_net::sse::SseEvent;
 use serde_json::Value;
 
+use crate::errors::{self, Finish, Vendor, Verdict};
 use crate::openai_blocks::{Blocks, Flow, number, protocol, take_str, usage};
-use crate::openai_error;
 use crate::protocol::StreamDecoder;
 
 #[derive(Debug, Default)]
 pub(crate) struct ChatStream {
+    /// 错误与结束原因经这个厂商的分类器（provider-errors.md §2.2，修复线 F113）。
+    vendor: Vendor,
     started: bool,
     finished: bool,
     blocks: Blocks,
@@ -25,25 +28,23 @@ pub(crate) struct ChatStream {
     usage: Usage,
 }
 
-/// Chat 的 `finish_reason` 换成 Anthropic 的停止原因。
-fn stop_reason(reason: &str) -> StopReason {
-    match reason {
-        "stop" => StopReason::EndTurn,
-        "length" | "max_tokens" => StopReason::MaxTokens,
-        "tool_calls" | "function_call" => StopReason::ToolUse,
-        "content_filter" => StopReason::Refusal,
-        _ => StopReason::Unknown,
-    }
-}
-
 impl ChatStream {
-    fn chunk(
-        &mut self,
-        mut chunk: Value,
-        out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    pub(crate) fn new(vendor: Vendor) -> Self {
+        Self {
+            vendor,
+            ..Self::default()
+        }
+    }
+
+    fn chunk(&mut self, mut chunk: Value, out: &mut VecDeque<ModelEvent>) -> Result<(), Verdict> {
         if chunk.get("error").is_some_and(|error| !error.is_null()) {
-            return Err(openai_error::from_stream(&chunk));
+            let raw = chunk.to_string();
+            return Err(errors::classify_stream_error(
+                self.vendor,
+                WireProtocol::OpenAiChatCompletions,
+                &chunk,
+                &raw,
+            ));
         }
         if !self.started {
             self.started = true;
@@ -70,8 +71,14 @@ impl ChatStream {
         else {
             return Ok(());
         };
+        // `finish_reason` 经厂商的分类器换算（修复线 F113：以前是这里自己的表；智谱的 `sensitive` 与 `network_error`
+        // 都是 `Unknown`，前者静默结束，后者把截断的内容当正常完成）。以结束原因报的失败按流里的错误返回。
+        let mut failed = None;
         if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
-            self.stop_reason = Some(stop_reason(reason));
+            match errors::classify_finish(self.vendor, reason) {
+                Finish::Stop(reason) => self.stop_reason = Some(reason),
+                Finish::Failed(verdict) => failed = Some(verdict),
+            }
         }
         let mut delta = choice.get_mut("delta").map(Value::take).unwrap_or_default();
         let reasoning = take_str(&mut delta, "reasoning_content")
@@ -85,14 +92,15 @@ impl ChatStream {
                 self.tool_call(call, out)?;
             }
         }
-        Ok(())
+        // 同一个 chunk 里的增量先交出，再报以结束原因报的失败。
+        failed.map_or(Ok(()), Err)
     }
 
     fn tool_call(
         &mut self,
         mut call: Value,
         out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Verdict> {
         // 修 bug（修复线 F101，model.md §10.3）：以前没有 `index` 的调用让整个请求报协议错误；有的兼容端点不给
         // `index`，每个 chunk 带一个完整的调用。现在当成一个新调用（Node 用的 SDK 同样如此）。
         let key = call
@@ -117,11 +125,7 @@ impl ChatStream {
 }
 
 impl StreamDecoder for ChatStream {
-    fn decode(
-        &mut self,
-        event: SseEvent,
-        out: &mut VecDeque<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    fn decode(&mut self, event: SseEvent, out: &mut VecDeque<ModelEvent>) -> Result<(), Verdict> {
         if self.finished {
             return Ok(());
         }

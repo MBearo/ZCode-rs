@@ -302,8 +302,14 @@ impl Interactions for ChildSink {
 }
 
 impl ChildSink {
-    /// 一条消息、它的 checkpoint 与计量在一个事务里（`usage` 排在最后，usage.md §2.5）。
-    async fn commit_with(&self, message: Message, usage: Vec<Fact>) -> Result<(), StoreError> {
+    /// 一条消息、它的 checkpoint 与计量在一个事务里（`usage` 排在最后，usage.md §2.5）。`speed` 是这条回复所属的完成的
+    /// 子代理请求的输出速度（F112），提交成功后与版本一起记进 `Live`。
+    async fn commit_with(
+        &self,
+        message: Message,
+        usage: Vec<Fact>,
+        speed: Option<rust_cli_kernel_api::metering::OutputSpeed>,
+    ) -> Result<(), StoreError> {
         // 工具结果与它的 checkpoint 在一个事务里提交（session-lifecycle.md §4.2）。子代理的提交不经
         // 会话 actor，所以在这里按同一份规则配对；以前这里不配对，子会话里的写入没有 checkpoint。
         let settled = self
@@ -321,7 +327,7 @@ impl ChildSink {
         facts.extend(usage);
         self.commit(facts).await?;
         // 提交之后才加版本：只读查看看到新版本时去取，存储里一定已有这条消息（tui-panels.md §1.4）。
-        self.live.committed(&self.agent);
+        self.live.committed(&self.agent, speed);
         if let Message::Assistant(assistant) = message {
             let mut record = self.record();
             record.tool_uses += assistant
@@ -338,21 +344,30 @@ impl ChildSink {
 #[async_trait]
 impl RunSink for ChildSink {
     async fn commit_message(&self, message: Message) -> Result<(), StoreError> {
-        self.commit_with(message, Vec::new()).await
+        self.commit_with(message, Vec::new(), None).await
     }
 
-    /// 子代理的请求与工具调用写在子会话（Node `query_source = subagent`，usage.md §2.1）。
+    /// 子代理的请求与工具调用写在子会话（Node `query_source = subagent`，usage.md §2.1）。完成的子代理请求另把输出速度
+    /// 记进 `Live`（F112，查看时 footer 的 TPS）；失败、中断的请求与子循环里的压缩、旁路请求不记。
     async fn commit_metered(
         &self,
         message: Option<Message>,
         metered: rust_cli_kernel_api::metering::Metered,
     ) -> Result<(), StoreError> {
-        let fact = match metered {
-            rust_cli_kernel_api::metering::Metered::Model(call) => Fact::ModelCalled { call },
-            rust_cli_kernel_api::metering::Metered::Tool(call) => Fact::ToolCalled { call },
+        let (fact, speed) = match metered {
+            rust_cli_kernel_api::metering::Metered::Model(call) => {
+                let speed = matches!(
+                    call.source,
+                    rust_cli_kernel_api::model::QuerySource::Subagent(_)
+                )
+                .then(|| rust_cli_kernel_api::metering::OutputSpeed::of(&call))
+                .flatten();
+                (Fact::ModelCalled { call }, speed)
+            }
+            rust_cli_kernel_api::metering::Metered::Tool(call) => (Fact::ToolCalled { call }, None),
         };
         match message {
-            Some(message) => self.commit_with(message, vec![fact]).await,
+            Some(message) => self.commit_with(message, vec![fact], speed).await,
             None => self.commit(vec![fact]).await,
         }
     }

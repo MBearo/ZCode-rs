@@ -2856,6 +2856,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "two-face",
+ "unicode-segmentation",
  "unicode-width",
  "windows-sys 0.61.2",
 ]

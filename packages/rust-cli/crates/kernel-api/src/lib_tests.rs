@@ -15,8 +15,8 @@ use crate::message::{
     AssistantMessage, AttachmentMessage, AttachmentRole, ContentBlock, Message, StopReason, Usage,
 };
 use crate::model::{
-    ApiContent, ApiMessage, ApiRole, BlockDelta, ModelError, ModelEvent, ModelNotice,
-    ModelSelection, ModelStreamItem, RequestOptions, ToolFlags, TurnOutputConfig,
+    ApiContent, ApiMessage, ApiRole, BlockDelta, CONTENT_BLOCKED, ModelError, ModelEvent,
+    ModelNotice, ModelSelection, ModelStreamItem, RequestOptions, ToolFlags, TurnOutputConfig,
 };
 use crate::orchestration::{InteractionRequest, QueryError};
 use crate::provider::{CatalogModel, ModelCatalog, WireProtocol};
@@ -166,8 +166,12 @@ fn operation_context_round_trips() {
 
 #[test]
 fn unknown_stop_reasons_do_not_fail() {
-    let reason: StopReason = serde_json::from_str("\"model_context_window_exceeded\"").unwrap();
+    let reason: StopReason = serde_json::from_str("\"compaction\"").unwrap();
     assert_eq!(reason, StopReason::Unknown);
+    // 窗口用满有自己的变体，serde 名就是线上的值（provider-errors.md D7）；以前落到 Unknown。
+    let reason: StopReason = serde_json::from_str("\"model_context_window_exceeded\"").unwrap();
+    assert_eq!(reason, StopReason::ModelContextWindowExceeded);
+    round_trip(&StopReason::ModelContextWindowExceeded);
 }
 
 #[test]
@@ -293,6 +297,41 @@ fn provider_and_failover_types_round_trip() {
     assert_eq!(
         ModelError::StreamIdle { idle_ms: 300_000 }.to_string(),
         "Stream idle timeout - no chunks received"
+    );
+    // 三个新错误的文字就是给用户的说明（provider-errors.md §6）；内容拦截与结束原因共用一句。
+    for error in [
+        ModelError::QuotaExhausted {
+            message: "余额不足".to_owned(),
+        },
+        ModelError::ContentBlocked {
+            message: "blocked".to_owned(),
+        },
+        ModelError::RequestTooLarge {
+            message: "too big".to_owned(),
+        },
+    ] {
+        round_trip(&error);
+    }
+    assert_eq!(
+        ModelError::QuotaExhausted {
+            message: "余额不足".to_owned()
+        }
+        .to_string(),
+        "API Error: Credit balance or quota exhausted · 余额不足"
+    );
+    assert_eq!(
+        ModelError::ContentBlocked {
+            message: "blocked".to_owned()
+        }
+        .to_string(),
+        format!("{CONTENT_BLOCKED} · blocked")
+    );
+    assert!(
+        ModelError::RequestTooLarge {
+            message: "too big".to_owned()
+        }
+        .to_string()
+        .ends_with("/rewind to go back to before they were added. · too big")
     );
     let mut options = RequestOptions {
         fallback_model: Some("b".to_owned()),

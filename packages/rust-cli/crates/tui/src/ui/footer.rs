@@ -52,15 +52,16 @@ pub fn mode_indicator(
 }
 
 /// plan 开着时在权限模式前面加 `⏸ Plan mode · `（修复线 F20，tui.md §7）：plan 是独立开关，shift+tab 改的是
-/// 后面的权限模式。
+/// 后面的权限模式。查看子代理时写它的模式与 plan（修复线 F112，tui-panels.md §1.7；只是显示，查看时 shift+tab 不生效）。
 fn mode_spans(app: &App) -> Vec<Span<'static>> {
+    let shown = app.shown();
     let mut spans = Vec::new();
-    if app.view.plan() {
+    if shown.plan() {
         let (label, style) = mode_indicator(app.lang, PermissionMode::Plan, &app.palette);
         spans.push(Span::styled(label, style));
         spans.push(super::key_hint::separator(&app.palette));
     }
-    let (label, style) = mode_indicator(app.lang, app.view.mode(), &app.palette);
+    let (label, style) = mode_indicator(app.lang, shown.mode(), &app.palette);
     spans.push(Span::styled(label, style));
     // 用户决定（2026-10-20）：不显示 `(shift+tab to cycle)` / `（shift+tab 切换）`（tui.md §7 登记）。
     spans
@@ -80,6 +81,10 @@ enum Left {
 fn footer_left(app: &App, left: Left) -> Vec<Span<'static>> {
     let compact = left >= Left::NoShortcuts;
     let strings = app.strings;
+    // 搜索模式（修复线 F114，tui-input.md §2.3.5）：整段换成搜索的按键提示。
+    if app.find.is_some() {
+        return hint(super::find::hint(app.lang), &app.palette);
+    }
     if let Some((query, _)) = &app.composer.search {
         let missing = !query.is_empty() && app.composer.search_match().is_none();
         let label = match (app.lang, missing) {
@@ -121,10 +126,15 @@ fn footer_left(app: &App, left: Left) -> Vec<Span<'static>> {
     // 后台任务的 pill 与任务清单的提示（tui-display.md §2.2、§2.3）。
     let pill = super::manage::pill(&app.background, app.lang);
     let pill_focused = app.focus == Some(super::agents::Focus::Pill);
+    let viewing = app.viewing.is_some();
     let tip = if pill_focused {
         hint(super::i18n_panels::pill_hint(app.lang), palette)
     } else if app.scroll > 0 {
         hint(strings.esc_latest, palette)
+    } else if viewing {
+        // 查看子代理时（修复线 F112，tui-panels.md §1.7）：esc 是返回主会话、不中断；↓ 进子代理列表，ctrl+t、←、`?` 不生效。
+        // 修前照主会话的条件写 `esc to interrupt`、`↓ to manage` 等，与查看时按键的实际作用不符。
+        Vec::new()
     } else if app.running() {
         hint(strings.interrupt_hint, palette)
     } else if pill.is_some() {
@@ -156,7 +166,8 @@ fn footer_left(app: &App, left: Left) -> Vec<Span<'static>> {
     }
     // 有隐藏的已完成后台代理时指向 `/tasks`（修复线 F30，tui-panels.md §1.4）；放不下时在
     // `? for shortcuts` 之后、右侧的统计之前省掉。
-    if left < Left::Compact && app.hidden_agents(std::time::Instant::now()) {
+    // 查看子代理时输入框不能输入 `/tasks`，不写（F112）。
+    if left < Left::Compact && !viewing && app.hidden_agents(std::time::Instant::now()) {
         spans.push(super::key_hint::separator(palette));
         spans.extend(hint(super::i18n_panels::tasks_hint(app.lang), palette));
     }
@@ -167,9 +178,10 @@ fn footer_left(app: &App, left: Left) -> Vec<Span<'static>> {
     spans
 }
 
-/// 右侧“上下文快满”的提示（compact.md §2.1）：自动压缩关闭时是红色的 `Context low …`，其余 dim。
+/// 右侧“上下文快满”的提示（compact.md §2.1）：自动压缩关闭时是红色的 `Context low …`，其余 dim。查看子代理时是它的
+/// （与 ctx 同一处算，修复线 F112）。
 fn context_span(app: &App) -> Option<Span<'static>> {
-    let notice = app.view.context_notice();
+    let notice = app.shown().context_notice();
     let text = i18n::context_notice(app.lang, notice)?;
     // 颜色用命名的记号（tui.md §7.4）：快满时红色，其余是次要文字（原来是 dim）。
     let style = app
@@ -180,12 +192,12 @@ fn context_span(app: &App) -> Option<Span<'static>> {
 
 /// footer：左侧见 [`footer_left`]；右侧 `模型 档位 · N tok/s · ctx N% · cache N% · <上下文提示>`（请求统计见
 /// [`super::footer_stats`]，tui-display.md §2.6）。放不下时依次省掉 `? for shortcuts`、cache、TPS、ctx、上下文提示、
-/// 模型，最后截断左侧。返回行与可点击的提示：（起始列，宽度，目标）。
+/// 模型，最后截断左侧。返回行与可点击的提示：（起始列，宽度，目标）。右侧各项按 [`App::shown`] 取：查看子代理时是它的
+/// （修复线 F112，tui-panels.md §1.7）。
 pub fn footer(app: &App, width: usize) -> (Line<'static>, Vec<(usize, usize, Target)>) {
     let context = context_span(app);
     // 模型名用 `model` 的颜色（Codex 状态栏的 Model，tui.md §7.4）。
-    let model: Vec<Span<'static>> = app
-        .model_label()
+    let model: Vec<Span<'static>> = super::app::selection_label(app.shown().selection())
         .into_iter()
         .map(|m| Span::styled(m, app.palette.model()))
         .collect();
@@ -313,6 +325,7 @@ pub fn help(app: &App, width: usize) -> Vec<Line<'static>> {
             pick("Transcript", "记录"),
             vec![
                 ("ctrl+o", pick("details", "查看详细")),
+                ("//", pick("search", "搜索对话")),
                 ("ctrl+r", pick("history", "搜索历史")),
                 ("ctrl+t", pick("tasks", "任务清单")),
                 ("pgup/pgdn", pick("scroll", "滚动")),
@@ -381,3 +394,7 @@ pub fn help(app: &App, width: usize) -> Vec<Line<'static>> {
 #[cfg(test)]
 #[path = "footer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "footer_viewing_tests.rs"]
+mod viewing_tests;
