@@ -123,6 +123,26 @@ test("Linux ships glibc packages for x64 and arm64", () => {
   assert.throws(() => selectPlatform("linux", "arm64", undefined), /Unsupported/u);
 });
 
+// Windows 两个架构都发平台包（docs/specs/rust-cli/embedded-search.md §9.3，工作线 F110）：ARM64 在 GitHub 的 Windows 11 ARM64
+// runner 上原生编，冒烟在同一台机器上运行装好的包。
+test("Windows ships packages for x64 and arm64", () => {
+  const windows = platforms.filter((item) => item.os === "win32");
+  assert.deepEqual(
+    windows.map(({ id, cpu, target, runner }) => ({ id, cpu, target, runner })),
+    [
+      { id: "win32-x64", cpu: "x64", target: "x86_64-pc-windows-msvc", runner: "windows-2022" },
+      {
+        id: "win32-arm64",
+        cpu: "arm64",
+        target: "aarch64-pc-windows-msvc",
+        runner: "windows-11-arm",
+      },
+    ],
+  );
+  assert.equal(selectPlatform("win32", "arm64").id, "win32-arm64");
+  assert.equal(selectPlatform("win32", "x64").id, "win32-x64");
+});
+
 // Windows 上叫 zcode.exe（docs/specs/rust-cli/cli-args.md §13，工作线 F71）：任务管理器与 tasklist 只显示 exe 的文件名，
 // 进程名就叫命令名；macOS / Linux 仍是 zcode-rs。
 test("the command is zcode and the native executable is zcode-rs, or zcode.exe on Windows", async () => {

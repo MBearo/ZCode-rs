@@ -2,7 +2,13 @@
 // 本机只跑本平台的那一项。
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkToolchain, clVersion, libstdcxxPath, supportsAvx512 } from "./toolchain.mjs";
+import {
+  checkToolchain,
+  clVersion,
+  libstdcxxPath,
+  msvcCompiler,
+  supportsAvx512,
+} from "./toolchain.mjs";
 
 test("libstdc++.a is found only when the compiler prints an absolute path", () => {
   assert.equal(
@@ -23,6 +29,21 @@ test("/arch:AVX512 needs cl 19.23 (VS 2019 16.3) or newer", () => {
   assert.equal(supportsAvx512([19, 23, 28105]), true);
   assert.equal(supportsAvx512([19, 22, 27905]), false);
   assert.equal(supportsAvx512([20, 0, 0]), true);
+});
+
+// Windows ARM64（工作线 F110）：ugrep 不编 AVX 的文件，用 ARM64 原生的 cl；x64 不变。
+test("vswhere looks for the native MSVC compiler of the runner's architecture", () => {
+  assert.deepEqual(msvcCompiler("x64"), {
+    component: "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+    path: "VC\\Tools\\MSVC\\**\\bin\\Hostx64\\x64\\cl.exe",
+    avx512: true,
+  });
+  assert.deepEqual(msvcCompiler("arm64"), {
+    component: "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
+    path: "VC\\Tools\\MSVC\\**\\bin\\Hostarm64\\arm64\\cl.exe",
+    avx512: false,
+  });
+  assert.throws(() => msvcCompiler("ia32"), /No MSVC release toolchain for ia32/u);
 });
 
 test("an unknown platform has no release toolchain", async () => {
