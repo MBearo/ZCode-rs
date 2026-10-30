@@ -22,7 +22,7 @@ impl App {
     /// runner 的按键入口。返回要执行的动作：先交出缓存的粘贴、再处理这个键时有两个。
     pub fn on_terminal_key(&mut self, key: KeyEvent, now: Instant) -> Vec<Action> {
         let mut actions = Vec::new();
-        let Some(key) = self.releases.admit(key) else {
+        let Some(key) = self.releases.admit(key, now) else {
             return actions;
         };
         if self.burst.is_none() {
