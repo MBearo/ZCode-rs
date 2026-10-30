@@ -90,7 +90,7 @@ impl App {
     /// 一个按键（测试与不经 paste burst 的入口；runner 用 `on_terminal_key`，tui-input.md §9）：松开事件丢掉，Windows
     /// 的 alt 码当作按下（`Releases::admit`），再交给 [`Self::dispatch`]。
     pub fn on_key(&mut self, key: KeyEvent, now: Instant) -> Option<Action> {
-        let key = self.releases.admit(key)?;
+        let key = self.releases.admit(key, now)?;
         self.dispatch(key, now)
     }
 
