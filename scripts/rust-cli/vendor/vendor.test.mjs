@@ -15,7 +15,7 @@ import {
   unsafePath,
   validateComponent,
 } from "./rules.mjs";
-import { render } from "./notice.mjs";
+import { readCopied, render } from "./notice.mjs";
 
 const vendor = resolve(import.meta.dirname, "../../../packages/rust-cli/vendor");
 
@@ -170,20 +170,58 @@ test("许可证声明：vendor 组件与依赖图里 crates.io 的包，-sys cra
     [join(vendor, "bfs/bfs/LICENSE")]: "BSD Zero Clause License",
     "/r/libz-sys/src/zlib/LICENSE": "zlib license text",
     "/r/libz-sys/LICENSE-MIT": "MIT text",
+    [join(vendor, "copied/up/LICENSE")]: "Apache text",
+    [join(vendor, "copied/up/NOTICE")]: "Upstream notice",
   };
+  // 复制进源码树的上游文件（工作线 F124）：许可证原文与 copied.json 放在 vendor/copied/<id>/。
+  const copied = [
+    {
+      dir: "copied/up",
+      id: "up",
+      version: "abc1234",
+      url: "https://example.com/up",
+      license: "Apache-2.0",
+      licenseFiles: ["LICENSE", "NOTICE"],
+      files: ["packages/rust-cli/crates/x/src/a.rs"],
+    },
+  ];
   const text = await render({
     sources,
     metadata,
+    copied,
     read: async (path) => files[path] ?? assert.fail(`没有 ${path}`),
     list: async (dir) => (dir === "/r/libz-sys" ? ["LICENSE-MIT", "build.rs"] : []),
   });
   assert.match(text, /bfs 4\.1\.4 \(0BSD\)/);
   assert.match(text, /BSD Zero Clause License/);
+  assert.match(text, /up abc1234 \(Apache-2\.0\) — https:\/\/example\.com\/up/);
+  assert.match(text, /Copied into packages\/rust-cli\/crates\/x\/src\/a\.rs/);
+  assert.match(text, /--- LICENSE\n\nApache text/);
+  assert.match(text, /--- NOTICE\n\nUpstream notice/);
   assert.match(text, /libz-sys 1\.1\.30 \(MIT OR Apache-2\.0\)/);
   assert.match(text, /--- zlib: src\/zlib\/LICENSE\n\nzlib license text/);
   assert.match(text, /MIT text/);
   // 构建依赖不进二进制，不列。
   assert.doesNotMatch(text, /\bcc 1\b/);
+});
+
+// 复制进源码树的上游文件也要随发行附上上游的许可证与 NOTICE（Apache-2.0 第 4 条，工作线 F124）；copied.json 列的
+// 文件都要存在，且文件头写着许可证。
+test("仓库里的许可证声明包含每份复制来源的许可证与 NOTICE", async () => {
+  const notice = await readFile(join(vendor, "THIRD-PARTY-NOTICES.txt"), "utf8");
+  const entries = await readCopied(vendor);
+  assert.ok(entries.length > 0);
+  for (const entry of entries) {
+    assert.ok(notice.includes(`${entry.id} ${entry.version} (${entry.license})`), entry.id);
+    for (const file of entry.licenseFiles) {
+      const text = await readFile(join(vendor, entry.dir, file), "utf8");
+      assert.ok(notice.includes(text.trimEnd()), `${entry.id} ${file}`);
+    }
+    for (const file of entry.files) {
+      const source = await readFile(resolve(vendor, "../../..", file), "utf8");
+      assert.match(source.slice(0, 400), /Apache License/, file);
+    }
+  }
 });
 
 test("仓库里的许可证声明包含每个 vendor 组件的许可证文件", async () => {

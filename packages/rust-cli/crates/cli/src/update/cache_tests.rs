@@ -17,7 +17,7 @@ fn info(latest: &str, at_ms: i64, dismissed: Option<&str>) -> VersionInfo {
 }
 
 #[test]
-fn the_file_is_one_json_line_with_the_codex_fields() {
+fn the_file_is_one_json_line_with_three_fields() {
     let text = info("0.1.47", NOW_MS as i64, None).render();
     assert_eq!(
         text,
@@ -45,7 +45,7 @@ fn bad_files_are_treated_as_missing() {
     ] {
         assert_eq!(VersionInfo::parse(bad.as_bytes()), None, "{bad}");
     }
-    // `dismissed_version` 缺失或不是字符串：当作没有（Codex `#[serde(default)]`）。
+    // `dismissed_version` 缺失或不是字符串：当作没有。
     let missing = "{\"latest_version\":\"0.1.47\",\"last_checked_at\":\"2026-10-20T08:00:00Z\"}";
     assert_eq!(
         VersionInfo::parse(missing.as_bytes()),
@@ -60,7 +60,7 @@ fn timestamps_are_rfc3339() {
         parse_rfc3339("2026-10-20T08:00:00.000Z"),
         Some(NOW_MS as i64)
     );
-    // chrono 写的纳秒与带偏移的写法也认（Codex 的 `DateTime<Utc>`）。
+    // chrono 写的纳秒与带偏移的写法也认（别的写入方用 chrono 的 `DateTime<Utc>`）。
     assert_eq!(
         parse_rfc3339("2026-10-20T08:00:00.123456789Z"),
         Some(NOW_MS as i64 + 123)
@@ -103,12 +103,12 @@ fn the_cache_is_refreshed_after_twenty_hours() {
     assert!(VersionInfo::stale(None, NOW_MS));
     let checked = |hours_ago: u64| info("0.1.47", (NOW_MS - hours_ago * HOUR_MS) as i64, None);
     assert!(!VersionInfo::stale(Some(&checked(1)), NOW_MS));
-    // 正好 20 小时不刷新（Codex：`last_checked_at < now - 20h`），多 1 毫秒就刷新。
+    // 正好 20 小时不刷新（条件是 `last_checked_at < now - 20h`），多 1 毫秒就刷新。
     assert!(!VersionInfo::stale(Some(&checked(20)), NOW_MS));
     let older = info("0.1.47", (NOW_MS - 20 * HOUR_MS) as i64 - 1, None);
     assert!(VersionInfo::stale(Some(&older), NOW_MS));
     assert!(VersionInfo::stale(Some(&info("0.1.47", 0, None)), NOW_MS));
-    // 时钟回拨（缓存在未来）：不刷新，与 Codex 相同。
+    // 时钟回拨（缓存在未来）：不刷新。
     assert!(!VersionInfo::stale(
         Some(&info("0.1.47", NOW_MS as i64 + HOUR_MS as i64, None)),
         NOW_MS

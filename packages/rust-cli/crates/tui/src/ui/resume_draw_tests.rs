@@ -99,7 +99,7 @@ fn page(app: &mut App) -> &mut ResumePage {
 }
 
 #[test]
-fn the_layout_follows_codex_and_gaps_collapse() {
+fn the_layout_has_its_regions_and_gaps_collapse() {
     let mut app = shared::app();
     shared::with_rows(&mut app, rows());
     let (lines, _) = render(&mut app, 130, 24);

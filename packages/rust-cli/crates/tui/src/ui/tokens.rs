@@ -1,6 +1,5 @@
 //! 配色记号（docs/specs/rust-cli/tui.md §7.4，修复线 F26，用户决定）：次要文字、按键、选中行、模型名与工作区路径。
-//! 取值与规则参照 Codex TUI（`codex-rs/tui/src`，c3d3b142d）的 `style.rs`、`style/contrast.rs`、`key_hint.rs`、
-//! `bottom_pane/status_line_style.rs`；代码自己写，没有复制。颜色只取决于启动时探测到的终端事实（`Palette`）。
+//! 颜色只取决于启动时探测到的终端事实（`Palette`）：前景、背景、色深与明暗。
 use ratatui::style::{Color, Modifier, Style};
 
 use super::palette::{BLACK, ColorLevel, Palette, Rgb, WHITE, blend, is_light};
@@ -8,31 +7,31 @@ use super::palette::{BLACK, ColorLevel, Palette, Rgb, WHITE, blend, is_light};
 // 配色的命名常量（tui.md §7.4）：别处要同样的颜色时用这里的常量与 `Palette` 的方法，不另写字面量（F27 的 footer
 // 右侧统计复用它们）。
 
-/// 文字与背景的最低对比度（Codex `MIN_TEXT_CONTRAST`）。
+/// 文字与背景的最低对比度（WCAG AA 的 4.5:1）。
 pub const MIN_TEXT_CONTRAST: f64 = 4.5;
-/// 次要文字：前景在背景上的比例（Codex `secondary_text_style` 的 0.6）。
+/// 次要文字：前景在背景上的比例。
 pub const SECONDARY_ALPHA: f64 = 0.6;
-/// 浅色背景上按键的前景比例（Codex `key_hint_style` 的 0.85）。
+/// 浅色背景上按键的前景比例。
 pub const KEY_ALPHA_LIGHT: f64 = 0.85;
-/// 选中行的底色：深色背景用 BLUE_200，浅色背景用 BLUE_100（Codex `CHATGPT_BLUE_*`）。
+/// 选中行的底色：深色背景用较深的蓝（BLUE_200），浅色背景用较浅的蓝（BLUE_100）。
 pub const SELECTION_FILL_DARK: Rgb = (99, 168, 248);
 pub const SELECTION_FILL_LIGHT: Rgb = (164, 205, 251);
-/// 强调色（Codex `UI_ACCENT` / `LIGHT_BG_ACCENT_RGB`）：深色背景就是选中行的深色底色，浅色背景另取深一些的蓝；
+/// 强调色：深色背景就是选中行的深色底色，浅色背景另取深一些的蓝；
 /// 16 色终端用 `ACCENT_NAMED`。列表与面板顶上的线和标题、工作区信任对话框（F26 起不再用黄色）都用它。
 pub const ACCENT_DARK: Rgb = SELECTION_FILL_DARK;
 pub const ACCENT_LIGHT: Rgb = (28, 100, 200);
 pub const ACCENT_NAMED: Color = Color::Cyan;
-/// 选中行的文字（Codex `selection_style` 的 `(0, 0, 46)`）。
+/// 选中行的文字：接近黑色的深蓝，在蓝色底色上读得清。
 pub const SELECTION_TEXT: Rgb = (0, 0, 46);
-/// 底色与背景的对比度低于这个值时换另一种蓝（Codex `selection_style`）。
+/// 底色与背景的对比度低于这个值时换另一种蓝（底色与背景分不开时）。
 pub const SELECTION_MIN_RATIO: f64 = 1.25;
-/// 状态栏颜色的柔化：原色占的百分比（Codex `STATUS_LINE_COLOR_SATURATION_PERCENT`）。
+/// 状态栏颜色的柔化：原色占的百分比。
 pub const STATUS_SATURATION_PERCENT: u32 = 85;
-/// 模型名：Codex 状态栏 Model 的缺省主题色（catppuccin mocha / latte 的类型色）；16 色终端用 `MODEL_NAMED`。
+/// 模型名：catppuccin mocha / latte 的类型色；16 色终端用 `MODEL_NAMED`。
 pub const MODEL_DARK: Rgb = (249, 226, 175);
 pub const MODEL_LIGHT: Rgb = (223, 142, 29);
 pub const MODEL_NAMED: Color = Color::Cyan;
-/// 工作区路径：Codex 状态栏 Path 的缺省主题色（catppuccin 的字符串色）；16 色终端用 `PATH_NAMED`。
+/// 工作区路径：catppuccin 的字符串色；16 色终端用 `PATH_NAMED`。
 pub const PATH_DARK: Rgb = (166, 227, 161);
 pub const PATH_LIGHT: Rgb = (64, 160, 43);
 pub const PATH_NAMED: Color = Color::Green;
@@ -111,7 +110,7 @@ pub fn ratio(a: Rgb, b: Rgb) -> f64 {
     (a.max(b) + CONTRAST_FLARE) / (a.min(b) + CONTRAST_FLARE)
 }
 
-/// 在 `background` 上读得清的 `preferred`（Codex `contrast::foreground` 的真彩色分支）：对比度够就用原色，
+/// 在 `background` 上读得清的 `preferred`（真彩色）：对比度够就用原色，
 /// 否则向黑或白（对比度大的那个）靠，取第一个够 4.5:1 的颜色。
 pub fn readable(preferred: Rgb, background: Rgb) -> Rgb {
     if ratio(preferred, background) >= MIN_TEXT_CONTRAST {
@@ -128,7 +127,7 @@ pub fn readable(preferred: Rgb, background: Rgb) -> Rgb {
         .unwrap_or(endpoint)
 }
 
-/// Codex `soften_status_line_color`：85% 原色加 15% 亮度。
+/// 状态栏颜色的柔化：85% 原色加 15% 亮度。
 fn soften((r, g, b): Rgb) -> Rgb {
     let [wr, wg, wb] = STATUS_LUMA_WEIGHTS;
     let luma = (wr * u32::from(r) + wg * u32::from(g) + wb * u32::from(b)) / STATUS_LUMA_SCALE;
@@ -143,14 +142,14 @@ fn soften((r, g, b): Rgb) -> Rgb {
 }
 
 impl Palette {
-    /// 前景与背景都知道、并且前景与背景的明暗相反时的（前景，背景）；Codex 两个都要知道。
+    /// 前景与背景都知道、并且前景与背景的明暗相反时的（前景，背景）；只知道一个时不算。
     fn pair(&self) -> Option<(Rgb, Rgb)> {
         let background = self.background?;
         let foreground = self.foreground?;
         (is_light(foreground) != self.light).then_some((foreground, background))
     }
 
-    /// 次要文字（Codex `secondary_text_style`）：`blend(前景, 背景, 0.6)`，调到 4.5:1；颜色不知道或 16 色时 dim。
+    /// 次要文字：`blend(前景, 背景, 0.6)`，调到 4.5:1；颜色不知道或 16 色时 dim。
     pub fn secondary(&self) -> Style {
         let color = self
             .pair()
@@ -163,7 +162,7 @@ impl Palette {
         }
     }
 
-    /// 按键（Codex `key_hint_style`）：粗体、不 dim；浅色背景上前景是 `blend(前景, 背景, 0.85)`，否则终端的前景色。
+    /// 按键：粗体、不 dim；浅色背景上前景是 `blend(前景, 背景, 0.85)`，否则终端的前景色。
     pub fn key(&self) -> Style {
         let style = Style::default()
             .add_modifier(Modifier::BOLD)
@@ -176,7 +175,7 @@ impl Palette {
         }
     }
 
-    /// 选中行（Codex `contrast::selection_style`）：整行铺蓝色底色，文字 (0,0,46) 按底色调对比度、粗体；
+    /// 选中行：整行铺蓝色底色，文字 (0,0,46) 按底色调对比度、粗体；
     /// 背景不知道或 16 色时反色加粗。
     pub fn selection(&self) -> Style {
         let fallback = Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED);
@@ -203,12 +202,12 @@ impl Palette {
         }
     }
 
-    /// 模型名（Codex 状态栏的 Model）：主题的类型色，柔化后调对比度；16 色终端是青色。
+    /// 模型名：主题的类型色，柔化后调对比度；16 色终端是青色。
     pub fn model(&self) -> Style {
         self.status_line(MODEL_DARK, MODEL_LIGHT, MODEL_NAMED)
     }
 
-    /// 工作区路径（Codex 状态栏的 Path）：主题的字符串色，柔化后调对比度；16 色终端是绿色。
+    /// 工作区路径：主题的字符串色，柔化后调对比度；16 色终端是绿色。
     pub fn path(&self) -> Style {
         self.status_line(PATH_DARK, PATH_LIGHT, PATH_NAMED)
     }
@@ -300,7 +299,7 @@ impl Palette {
         Style::default().fg(self.tint(rgb).unwrap_or(named))
     }
 
-    /// 状态栏一类的颜色（Codex `status_line_style.rs`）：深 / 浅背景各一种主题色，柔化后按背景调对比度；
+    /// 状态栏一类的颜色：深 / 浅背景各一种主题色，柔化后按背景调对比度；
     /// 16 色终端用 `named`。模型名与路径用它；别的 footer 统计要同一套规则时也用它。
     pub fn status_line(&self, dark: Rgb, light: Rgb, named: Color) -> Style {
         if self.level == ColorLevel::Ansi16 {

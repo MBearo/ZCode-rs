@@ -3,7 +3,9 @@
 //   node scripts/rust-cli/vendor/notice.mjs [--check]
 // 生成 packages/rust-cli/vendor/THIRD-PARTY-NOTICES.txt（随平台包分发；--check 只比较）。内容：
 //   1. vendor/sources.json 里每个组件的许可证文件（rg 的命令行、bfs、Oniguruma、ugrep、PCRE2、brotli）；
-//   2. 三个 vendor crate 经 crates.io 引入的包（`cargo metadata` 的依赖图）：-sys crate 自带的 C 库许可证（zlib、bzip2、
+//   2. 复制进源码树的上游文件（`vendor/copied/<id>/copied.json`，工作线 F124）：上游的许可证与 NOTICE 原文，
+//      以及复制进来的文件；
+//   3. 三个 vendor crate 经 crates.io 引入的包（`cargo metadata` 的依赖图）：-sys crate 自带的 C 库许可证（zlib、bzip2、
 //      zstd）与每个包自己的许可证文件。
 // 只读本地文件（vendor 目录与 cargo 的 registry 源码）；cargo 在 packages/rust-cli 下执行（工具链文件，README §9）。
 import { execFile } from "node:child_process";
@@ -16,6 +18,9 @@ const root = resolve(import.meta.dirname, "../../..");
 const workspace = join(root, "packages/rust-cli");
 const vendor = join(workspace, "vendor");
 const output = join(vendor, "THIRD-PARTY-NOTICES.txt");
+/** 复制来源的目录（每份一个子目录：`copied.json` 与上游的许可证文件）。 */
+const COPIED_DIR = "copied";
+const COPIED_MANIFEST = "copied.json";
 
 /** 三个 vendor crate（它们的依赖都是内嵌工具带进来的）。 */
 const ROOTS = ["rust-cli-vendor-rg", "rust-cli-vendor-bfs", "rust-cli-vendor-ugrep"];
@@ -36,9 +41,24 @@ function section(title, texts) {
   return [rule, title, rule, "", ...texts.map((text) => text.trimEnd() + "\n")].join("\n");
 }
 
-export async function render({ sources, metadata, read, list }) {
+/** 每个 `vendor/copied/<id>/copied.json`，带上相对 vendor 的目录（`dir`）；按目录名排序。 */
+export async function readCopied(vendorDir) {
+  const root = join(vendorDir, COPIED_DIR);
+  const dirs = (await readdir(root, { withFileTypes: true }).catch(() => []))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  const entries = [];
+  for (const name of dirs) {
+    const meta = JSON.parse(await readFile(join(root, name, COPIED_MANIFEST), "utf8"));
+    entries.push({ ...meta, dir: join(COPIED_DIR, name) });
+  }
+  return entries;
+}
+
+export async function render({ sources, metadata, copied = [], read, list }) {
   const parts = [
-    "Third-party software embedded in zcode (rg, bfs, ugrep).",
+    "Third-party software embedded in zcode (rg, bfs, ugrep), and source files copied from other projects.",
     "zcode 内嵌的第三方软件（docs/specs/rust-cli/embedded-search.md §9）。由 scripts/rust-cli/vendor/notice.mjs 生成。",
     "",
   ];
@@ -49,6 +69,14 @@ export async function render({ sources, metadata, read, list }) {
     }
     if (!texts.length) throw new Error(`${component.id}: sources.json 没有 licenseFiles`);
     parts.push(section(`${component.id} ${component.version} (${component.license})`, texts));
+  }
+  for (const entry of copied) {
+    const texts = [`Copied into ${entry.files.join(", ")}\n`];
+    for (const file of entry.licenseFiles ?? []) {
+      texts.push(`--- ${file}\n\n${await read(join(vendor, entry.dir, file))}`);
+    }
+    if (texts.length === 1) throw new Error(`${entry.id}: copied.json 没有 licenseFiles`);
+    parts.push(section(`${entry.id} ${entry.version} (${entry.license}) — ${entry.url}`, texts));
   }
   // 依赖图：从三个 vendor crate 出发的普通依赖（构建依赖 cc 不进二进制）。
   const byId = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
@@ -106,6 +134,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const text = await render({
     sources,
     metadata: JSON.parse(stdout),
+    copied: await readCopied(vendor),
     read: (path) => readFile(path, "utf8"),
     list: async (dir) =>
       (await readdir(dir, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name),

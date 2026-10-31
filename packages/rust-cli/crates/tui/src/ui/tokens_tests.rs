@@ -14,7 +14,7 @@ const BLACK: Option<Rgb> = Some((0, 0, 0));
 
 #[test]
 fn secondary_text_blends_the_foreground_into_the_background() {
-    // Codex：白字黑底 → (153,153,153)，黑字白底 → (102,102,102)。
+    // 白字黑底 → (153,153,153)，黑字白底 → (102,102,102)。
     let dark = palette(ColorLevel::TrueColor, DARK, WHITE).secondary();
     assert_eq!(dark.fg, Some(Color::Rgb(153, 153, 153)));
     assert!(!dark.add_modifier.contains(Modifier::DIM));
@@ -80,7 +80,7 @@ fn the_selection_is_a_blue_bar_with_dark_bold_text() {
 }
 
 #[test]
-fn model_and_path_follow_the_codex_status_line() {
+fn model_and_path_use_the_status_line_colors() {
     let dark = palette(ColorLevel::TrueColor, Some((30, 30, 46)), None);
     assert_eq!(dark.model().fg, Some(Color::Rgb(246, 226, 183)));
     assert_eq!(dark.path().fg, Some(Color::Rgb(171, 223, 167)));

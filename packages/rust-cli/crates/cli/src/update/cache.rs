@@ -1,4 +1,4 @@
-//! `version.json`（docs/specs/rust-cli/update.md §4，Codex `updates_cache.rs`）：最近一次核对的最新版本、核对时刻与
+//! `version.json`（docs/specs/rust-cli/update.md §4）：最近一次核对的最新版本、核对时刻与
 //! 不再提醒的版本。读经 fs 的 `read_optional`，写经 fs 的原子写；位置由 paths 给出（`StoragePaths::update_cache`）。
 
 use std::io;
@@ -17,7 +17,7 @@ const MILLIS_DIGITS: usize = 3;
 /// 时区偏移 `±HH:MM` 的十进制两位数。
 const DECIMAL: i64 = units::DECIMAL_RADIX as i64;
 
-/// 文件的内容（字段同 Codex `VersionInfo`）。
+/// 文件的内容：`latest_version`、`last_checked_at`、`dismissed_version`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct VersionInfo {
     pub(crate) latest_version: String,
@@ -27,13 +27,13 @@ pub(crate) struct VersionInfo {
 }
 
 impl VersionInfo {
-    /// 缓存缺失或早于“现在 − 20 小时”时要刷新（Codex `get_upgrade_version`）。
+    /// 缓存缺失或早于“现在 − 20 小时”时要刷新。
     pub(crate) fn stale(info: Option<&Self>, now_ms: u64) -> bool {
         let now = i64::try_from(now_ms).unwrap_or(i64::MAX);
         info.is_none_or(|info| info.last_checked_at_ms < now.saturating_sub(REFRESH_AFTER_MS))
     }
 
-    /// 一行 JSON 加换行（字段顺序同 Codex）。
+    /// 一行 JSON 加换行（字段顺序固定，同 `VersionInfo`）。
     pub(crate) fn render(&self) -> String {
         let at = u64::try_from(self.last_checked_at_ms).unwrap_or(0);
         let value = json!({
@@ -45,7 +45,7 @@ impl VersionInfo {
     }
 
     /// 解析文件内容；前两个字段缺失、类型不对或时刻不是 RFC 3339 时为 None。`dismissed_version` 缺失或不是字符串
-    /// 时当作没有（Codex `#[serde(default)]`）。
+    /// 时当作没有（缺省值）。
     pub(crate) fn parse(bytes: &[u8]) -> Option<Self> {
         let value: Value = serde_json::from_slice(bytes).ok()?;
         let latest_version = value.get("latest_version")?.as_str()?.to_owned();
@@ -87,7 +87,7 @@ async fn write(path: &Path, info: &VersionInfo) -> io::Result<()> {
     rust_cli_fs::atomic_write(path, info.render().as_bytes(), options()).await
 }
 
-/// 刷新得到的最新版本：先重读文件，保留其中的 `dismissed_version`（Codex `check_for_update`）。
+/// 刷新得到的最新版本：先重读文件，保留其中的 `dismissed_version`（不冲掉用户选过的“不再提醒”）。
 pub(crate) async fn record_latest(path: &Path, latest: &str, now_ms: u64) -> io::Result<()> {
     let previous = read(path).await;
     let info = VersionInfo {
@@ -98,7 +98,7 @@ pub(crate) async fn record_latest(path: &Path, latest: &str, now_ms: u64) -> io:
     write(path, &info).await
 }
 
-/// 不再提醒这个版本（Codex `dismiss_version`）：没有文件或坏文件时以 1970 年为核对时刻新建，下次启动会重新检查。
+/// 不再提醒这个版本：没有文件或坏文件时以 1970 年为核对时刻新建，下次启动会重新检查。
 pub(crate) async fn dismiss(path: &Path, version: &str) -> io::Result<()> {
     let mut info = read(path).await.unwrap_or_else(|| VersionInfo {
         latest_version: version.to_owned(),

@@ -43,7 +43,7 @@ fn env(pairs: &[(&str, String)]) -> Vec<(String, String)> {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn the_package_manager_gets_the_codex_arguments_and_the_result_is_printed() {
+async fn the_package_manager_gets_the_install_arguments_and_the_result_is_printed() {
     let dir = tempfile::tempdir().unwrap();
     let bin = dir.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();

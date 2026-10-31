@@ -153,7 +153,7 @@ fn keys_move_with_wraparound_and_r_edits_the_name() {
         }
     }
     app.overlay = Some(Overlay::Projects(Box::new(page)));
-    // 焦点从第一个可见的会话开始；↑ 绕回到最后一个（Codex）。
+    // 焦点从第一个可见的会话开始；↑ 绕回到最后一个。
     assert_eq!(open(&mut app).focused_row(&root).unwrap().id, "d");
     app.projects_key(key(KeyCode::Up));
     assert_eq!(open(&mut app).focused_row(&root).unwrap().id, "a");

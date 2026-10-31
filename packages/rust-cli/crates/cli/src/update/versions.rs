@@ -1,4 +1,4 @@
-//! 版本比较（docs/specs/rust-cli/update.md §5.1，Codex `update_versions.rs`）。
+//! 版本比较（docs/specs/rust-cli/update.md §5.1）。
 
 /// `latest` 是否比 `current` 新；任何一边不能解析时为 None（调用方当作不新）。
 pub(crate) fn is_newer(latest: &str, current: &str) -> Option<bool> {
@@ -8,7 +8,7 @@ pub(crate) fn is_newer(latest: &str, current: &str) -> Option<bool> {
     }
 }
 
-/// 源码构建的版本（Codex：`0.0.0` 不检查）。
+/// 源码构建的版本（`0.0.0`，不检查更新）。
 pub(crate) fn is_source_build(version: &str) -> bool {
     parse(version) == Some((0, 0, 0))
 }

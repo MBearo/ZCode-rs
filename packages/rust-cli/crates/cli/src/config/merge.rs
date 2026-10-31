@@ -106,8 +106,8 @@ pub(crate) fn theme(
     merged
 }
 
-/// 顶层 `checkForUpdateOnStartup` 按键覆盖（自动更新的开关，docs/specs/rust-cli/update.md §10，F48；Codex
-/// `check_for_update_on_startup`）：只认布尔，坏值记警告、跳过这一层；没有时开。
+/// 顶层 `checkForUpdateOnStartup` 按键覆盖（自动更新的开关，docs/specs/rust-cli/update.md §10，F48）：只认布尔，
+/// 坏值记警告、跳过这一层；没有时开。
 pub(crate) fn check_for_update(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> bool {
     let mut merged = true;
     for layer in layers {

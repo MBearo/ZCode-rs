@@ -18,7 +18,7 @@ fn no_marker_is_an_unknown_install() {
 }
 
 #[test]
-fn the_markers_follow_the_codex_precedence() {
+fn the_markers_follow_the_pnpm_npm_bun_precedence() {
     let with = |markers: &[&str]| {
         let mut pairs: Vec<(&str, &str)> = markers.iter().map(|name| (*name, "1")).collect();
         pairs.push(("ZCODE_MANAGED_PACKAGE", "@scope/zcode"));
@@ -27,7 +27,7 @@ fn the_markers_follow_the_codex_precedence() {
     assert_eq!(with(&["ZCODE_MANAGED_BY_NPM"]), Some(Manager::Npm));
     assert_eq!(with(&["ZCODE_MANAGED_BY_PNPM"]), Some(Manager::Pnpm));
     assert_eq!(with(&["ZCODE_MANAGED_BY_BUN"]), Some(Manager::Bun));
-    // Codex：pnpm 先于 npm，npm 先于 bun；只看有没有设，值可以是空串。
+    // pnpm 先于 npm，npm 先于 bun；只看有没有设，值可以是空串。
     assert_eq!(
         with(&["ZCODE_MANAGED_BY_NPM", "ZCODE_MANAGED_BY_PNPM"]),
         Some(Manager::Pnpm)
@@ -119,7 +119,7 @@ fn package_names_follow_the_npm_rules() {
 }
 
 #[test]
-fn each_manager_has_the_codex_command() {
+fn each_manager_has_its_install_command() {
     let install = |manager| Install {
         manager,
         package: "@scope/zcode".to_owned(),

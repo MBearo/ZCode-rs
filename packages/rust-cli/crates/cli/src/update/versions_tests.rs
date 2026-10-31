@@ -1,4 +1,4 @@
-// Codex `update_versions.rs` 的测试用例（c3d3b142d）。
+// 版本比较：预发布、普通的三段、源码构建、空白与坏写法。
 use super::*;
 
 #[test]

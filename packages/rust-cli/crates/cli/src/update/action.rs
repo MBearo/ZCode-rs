@@ -1,6 +1,7 @@
-//! 执行更新（docs/specs/rust-cli/update.md §8，Codex `run_update_action`）：TUI 退出、终端恢复之后，按交接变量与平台
-//! 选做法（[`handoff::route`]）。Unix 经 proc 起包管理器，stdio 继承，打印 Codex 的文字；Windows 写交接文件由启动器
-//! 在本进程退出后执行（§8.1，工作线 F66），直接运行时只打印命令。失败是 `flags::Fatal`（入口原样写 stderr，退出码 1）。
+//! 执行更新（docs/specs/rust-cli/update.md §8）：TUI 退出、终端恢复之后，按交接变量与平台选做法
+//! （[`handoff::route`]）。Unix 经 proc 起包管理器，stdio 继承，打印 update.md §8 的文字；Windows 写交接文件由
+//! 启动器在本进程退出后执行（§8.1，工作线 F66），直接运行时只打印命令。失败是 `flags::Fatal`（入口原样写 stderr，
+//! 退出码 1）。
 
 use std::io::Write;
 

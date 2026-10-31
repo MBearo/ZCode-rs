@@ -523,7 +523,7 @@ impl App {
                 self.view_agent(index, now)
             }
             Target::Agents => self.open_projects(),
-            // 项目页：点击一行等于选中再按 enter；`/resume` 页：选中（Codex 的选择器不认鼠标，这里只移焦点）。
+            // 项目页：点击一行等于选中再按 enter；`/resume` 页：只移焦点（打开要按 enter）。
             Target::Session(index) => match self.overlay {
                 Some(Overlay::Resume(_)) => {
                     self.resume_clicked(index);

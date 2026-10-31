@@ -93,7 +93,7 @@ pub struct Palette {
     pub level: ColorLevel,
     pub background: Option<Rgb>,
     /// 终端的前景色（OSC 10，修复线 F26）；与背景的明暗相同时（`/theme` 换了背景）不用。次要文字与按键提示的颜色
-    /// 要前景与背景两个都知道（docs/specs/rust-cli/tui.md §7.4，Codex 的规则）。
+    /// 要前景与背景两个都知道（docs/specs/rust-cli/tui.md §7.4）。
     pub foreground: Option<Rgb>,
     pub light: bool,
     /// 输入框的底色；16 色终端没有底色。
@@ -277,7 +277,7 @@ pub fn parse_probe(reply: &str) -> Probed {
     }
 }
 
-/// 查询终端默认前景色与背景色（OSC 10、OSC 11；Codex 同一次探测查两者），后跟 DA1 作哨兵：所有终端都回应
+/// 查询终端默认前景色与背景色（OSC 10、OSC 11，同一次探测查两者），后跟 DA1 作哨兵：所有终端都回应
 /// DA1，收到它就不再等。调用方已打开 raw mode，且 crossterm 还没开始读输入。
 #[cfg(unix)]
 pub fn probe_colors(timeout: Duration) -> Probed {

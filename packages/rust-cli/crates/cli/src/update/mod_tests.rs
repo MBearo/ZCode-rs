@@ -128,7 +128,7 @@ async fn the_switch_and_source_builds_turn_the_check_off() {
     assert!(!cache.exists());
 }
 
-/// 没有缓存：本次不弹（只用已有的缓存），后台刷新写下最新版本，下次启动才弹（Codex 相同）。
+/// 没有缓存：本次不弹（只用已有的缓存），后台刷新写下最新版本，下次启动才弹。
 #[tokio::test]
 async fn a_missing_cache_is_refreshed_in_the_background_for_the_next_start() {
     let dir = tempfile::tempdir().unwrap();
@@ -211,7 +211,7 @@ async fn a_failed_check_keeps_the_old_cache() {
     assert_eq!(kept.last_checked_at_ms, (NOW_MS - 21 * HOUR_MS) as i64);
 }
 
-/// 选过“不再提醒”的版本不弹，会话里仍提示（Codex `get_upgrade_version` 不看 dismissed）；有更新的版本时又弹。
+/// 选过“不再提醒”的版本不弹，会话里仍提示（会话提示不看 dismissed）；有更新的版本时又弹。
 #[tokio::test]
 async fn skip_until_next_version_hides_only_the_prompt_for_that_version() {
     let dir = tempfile::tempdir().unwrap();
@@ -236,7 +236,7 @@ async fn skip_until_next_version_hides_only_the_prompt_for_that_version() {
 }
 
 #[tokio::test]
-async fn the_choices_map_to_the_codex_outcomes() {
+async fn each_choice_maps_to_its_outcome() {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("version.json");
     write_cache(&cache, "0.1.47", NOW_MS - HOUR_MS, None);

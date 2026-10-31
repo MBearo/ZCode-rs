@@ -42,7 +42,7 @@ fn search_is_a_case_insensitive_substring_match() {
     for query in ["login", "help", "work/app", ""] {
         assert!(row.matches(query, false), "{query}");
     }
-    // 会话 ID 与分支只在 `/resume` 页比（Codex `matches_query`）。
+    // 会话 ID 与分支只在 `/resume` 页比。
     assert!(!row.matches("abc", false));
     assert!(row.matches("abc", true));
     assert!(row.matches("feature/x", true));
@@ -50,7 +50,7 @@ fn search_is_a_case_insensitive_substring_match() {
 }
 
 #[test]
-fn times_follow_codex() {
+fn relative_times_short_and_long() {
     let now = 10 * 86_400_000;
     let at = |seconds: u64| now - seconds * 1000;
     let cases = [

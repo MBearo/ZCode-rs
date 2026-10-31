@@ -1,5 +1,4 @@
-//! 选择列表的一行（docs/specs/rust-cli/tui.md §7.4，修复线 F26，用户决定；规则参照 Codex
-//! `bottom_pane/selection_popup_common.rs` 与 `style/contrast.rs`，c3d3b142d）：当前行前面 `› `，整行铺 `selection`
+//! 选择列表的一行（docs/specs/rust-cli/tui.md §7.4，修复线 F26，用户决定）：当前行前面 `› `，整行铺 `selection`
 //! 底色条，名字粗体，说明不 dim；其余行前面两个空格，说明用 `secondary`。所有上下选择的列表都用它画当前行
 //! （提问视图的选项除外：不铺底色条，tui.md §7.6，工作线 F74），选中的样式只在这里与 `Palette::selection`。
 use ratatui::style::{Modifier, Style};
@@ -7,7 +6,7 @@ use ratatui::text::{Line, Span};
 
 use super::palette::Palette;
 
-/// 当前行的指针（Codex 的 U+203A）。
+/// 当前行的指针（U+203A）。
 pub const POINTER: &str = "› ";
 /// 其余行的占位。
 pub const BLANK: &str = "  ";

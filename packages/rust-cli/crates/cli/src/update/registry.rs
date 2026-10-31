@@ -1,4 +1,4 @@
-//! 取最新版本（docs/specs/rust-cli/update.md §5，Codex `npm_registry.rs`）：入口包的 `dist-tags.latest`，核对入口包与
+//! 取最新版本（docs/specs/rust-cli/update.md §5）：入口包的 `dist-tags.latest`，核对入口包与
 //! 平台包的这个版本在 npm 上能装（`dist.tarball` 与 `dist.integrity` 都有）。HTTP 只经 net 的 `Egress`。
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -41,7 +41,7 @@ impl HttpStatus {
     }
 }
 
-/// 包元数据的地址：作用域包的 `/` 写成 `%2f`（Codex `@openai%2fcodex`）。
+/// 包元数据的地址：作用域包的 `/` 写成 `%2f`（`@scope%2fname`）。
 pub(crate) fn package_url(registry: &str, package: &str) -> String {
     format!(
         "{}/{}",
@@ -73,7 +73,7 @@ pub(crate) fn latest_tag(document: &Value) -> Result<&str> {
         .ok_or_else(|| anyhow!("npm package is missing latest dist-tag"))
 }
 
-/// `versions[version].dist` 的 `tarball` 与 `integrity` 都是非空字符串（Codex `version_info_with_dist`）。
+/// `versions[version].dist` 的 `tarball` 与 `integrity` 都是非空字符串（这个版本在 npm 上能装）。
 pub(crate) fn ensure_dist(document: &Value, package: &str, version: &str) -> Result<()> {
     let info = document
         .get("versions")

@@ -18,11 +18,11 @@ use super::text::{truncate, truncate_line, wrap_text};
 
 /// 右侧详情的宽度与它前面的分隔（`│ `）。
 const DETAILS: usize = 38;
-/// 宽度不小于这个值时画右侧详情（Codex `body.width >= 90`）。
+/// 宽度不小于这个值时画右侧详情（更窄时只有列表）。
 const DETAILS_FROM: usize = 90;
-/// 组头里路径最多占的列数（Codex 64）。
+/// 组头里路径最多占的列数（更长时中间截断）。
 const GROUP_PATH: usize = 64;
-/// 状态列的宽度（Codex 11）。
+/// 状态列的宽度。
 const STATUS: usize = 11;
 /// 右侧详情前面的分隔。
 const SEPARATOR: &str = "│ ";
@@ -110,7 +110,7 @@ impl App {
             truncate_line(Line::from(tabs), width),
             Line::from(Span::styled("─".repeat(width), dim())),
         ];
-        // 搜索行（搜索、改名或出错时才有，Codex `Search › ` / `Rename › `）。
+        // 搜索行（搜索、改名或出错时才有，`Search › ` / `Rename › `）。
         let accent = Style::default()
             .fg(self.palette.accent)
             .add_modifier(Modifier::BOLD);
@@ -154,7 +154,7 @@ impl App {
             .iter()
             .position(|e| matches!(e, Entry::Session(i) if Some(*i) == focused))
             .unwrap_or(0);
-        // 焦点保持可见；焦点上一行是组头时连组头一起露出来（Codex `render_center_rows`）。
+        // 焦点保持可见；焦点上一行是组头时连组头一起露出来（看得到焦点属于哪一组）。
         if at < page.scroll {
             page.scroll = if at > 0 && matches!(entries[at - 1], Entry::Group { .. }) {
                 at - 1
@@ -256,7 +256,7 @@ impl App {
         (lines, targets)
     }
 
-    /// 右侧详情（Codex `render_details`）：标题、状态、项目、分支、首条输入（最多 2 行）、最近一条回复。
+    /// 右侧详情：标题、状态、项目、分支、首条输入（最多 2 行）、最近一条回复。
     fn project_details(&self, row: &SessionRow, width: usize, room: usize) -> Vec<Line<'static>> {
         let lang = self.lang;
         let bold = Style::default().add_modifier(Modifier::BOLD);

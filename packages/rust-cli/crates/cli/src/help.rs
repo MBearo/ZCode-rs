@@ -112,7 +112,7 @@ pub(crate) const OPTIONS: &[HelpItem] = &[
 ];
 
 /// 本工程的命令（cli-args.md §3.2）：`hooks`、`login`、`logout` 是 Node 版 zcode 的；`update|upgrade` 的名字固定，
-/// 本工程照 Codex 不先检查，说明用 Codex 的（工作线 F48，update.md §9）。
+/// 不先检查版本，说明见 update.md §9（工作线 F48）。
 pub(crate) const COMMANDS: &[HelpItem] = &[
     item(
         "hooks",

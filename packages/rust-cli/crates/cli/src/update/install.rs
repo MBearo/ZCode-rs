@@ -1,7 +1,7 @@
-//! 安装方式（docs/specs/rust-cli/update.md §2，Codex `install-context` 与 `update_action.rs`）：npm 启动器设的
+//! 安装方式（docs/specs/rust-cli/update.md §2）：npm 启动器设的
 //! 标记与包名。二进制只认这些变量，不看自己的路径；没有标记就是未知安装。
 
-/// 包管理器的标记，按 Codex `InstallContext::current` 的先后（没有 Vite+）。
+/// 包管理器的标记，按判定的先后：pnpm 先于 npm，npm 先于 bun（不认 Vite+）。
 const MARKERS: [(&str, Manager); 3] = [
     (
         rust_cli_base::names::env::ZCODE_MANAGED_BY_PNPM,
@@ -80,7 +80,7 @@ impl Install {
         }
     }
 
-    /// 安装命令的参数（Codex `UpdateAction::command_args`）。
+    /// 安装命令的参数：npm 与 bun 是 `install -g <包>`，pnpm 是 `add -g <包>`。
     pub(crate) fn args(&self) -> Vec<String> {
         let verb: &[&str] = match self.manager {
             Manager::Npm | Manager::Bun => &["install", "-g"],

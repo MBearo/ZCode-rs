@@ -1,5 +1,5 @@
-//! ← 项目页与 `/resume` 页的界面文字（修复线 F29，docs/specs/rust-cli/tui-panels.md §2、tui-manage.md §10）：中文与
-//! 英文。英文取 Codex 的原文（项目页的组织照 Codex 命令中心，`/resume` 页照 Codex 的 resume 选择器）。
+//! ← 项目页与 `/resume` 页的界面文字（修复线 F29，docs/specs/rust-cli/tui-panels.md §2、tui-manage.md §10）：
+//! 中文与英文。
 use super::i18n::Lang;
 
 fn pick(lang: Lang, en: &'static str, zh: &'static str) -> &'static str {
@@ -9,7 +9,7 @@ fn pick(lang: Lang, en: &'static str, zh: &'static str) -> &'static str {
     }
 }
 
-/// 应用内的 ctrl 键（Codex 在提示里写 `⌃`）。
+/// 应用内的 ctrl 键（提示里写 `⌃`）。
 pub const CTRL: &str = "⌃";
 
 pub fn projects_title(lang: Lang) -> &'static str {
@@ -79,7 +79,7 @@ pub fn projects_more(lang: Lang, limit: usize) -> String {
     }
 }
 
-/// 选中当前会话（Codex `ignore_same_thread_resume`）。
+/// 选中当前会话：不重新打开，只提示。
 pub fn already_viewing(lang: Lang, title: &str) -> String {
     match lang {
         Lang::En => format!("Already viewing {title}."),
@@ -193,7 +193,7 @@ pub enum PreviewLabel {
     Conversation,
 }
 
-/// 展开的预览里的标签（Codex 的 10 宽标签）。
+/// 展开的预览里的标签（10 列宽）。
 pub fn preview_label(lang: Lang, which: PreviewLabel) -> &'static str {
     let which = which as usize;
     const EN: [&str; 6] = [

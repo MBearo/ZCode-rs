@@ -1,7 +1,6 @@
-//! 按键提示组件（docs/specs/rust-cli/tui.md §7.4，修复线 F26，用户决定；规则参照 Codex `key_hint.rs` 与
-//! `footer_hint.rs`，c3d3b142d）：提示写成模板，`{键}` 标出按键（中英文的词序都能放）；按键用 `key` 样式，
-//! 其余文字（说明、` · ` 分隔）用 `secondary` 样式。所有按键引导（footer、列表与弹窗底部、页面与面板、对话框、
-//! 快捷键面板）都经这里画，样式只在 `Palette` 的记号里。
+//! 按键提示组件（docs/specs/rust-cli/tui.md §7.4，修复线 F26，用户决定）：提示写成模板，`{键}` 标出按键
+//! （中英文的词序都能放）；按键用 `key` 样式，其余文字（说明、` · ` 分隔）用 `secondary` 样式。所有按键引导
+//! （footer、列表与弹窗底部、页面与面板、对话框、快捷键面板）都经这里画，样式只在 `Palette` 的记号里。
 use ratatui::text::{Line, Span};
 
 use super::palette::Palette;

@@ -1,6 +1,6 @@
-//! `/resume` 页的排版（修复线 F29，docs/specs/rust-cli/tui-manage.md §10.2、§10.3；照 Codex `resume_picker.rs` 与
-//! `resume_picker/layout.rs` 的规则，代码自己写）：标题、工具栏、搜索行、列表（Dense / Comfortable、展开的预览）、
-//! footer（进度与两行按键提示），以及删除确认、目录选择与全屏对话。颜色只经 `Palette` 的记号，选中行用选择列表组件。
+//! `/resume` 页的排版（修复线 F29，docs/specs/rust-cli/tui-manage.md §10.2、§10.3）：标题、工具栏、搜索行、
+//! 列表（Dense / Comfortable、展开的预览）、footer（进度与两行按键提示），以及删除确认、目录选择与全屏对话。
+//! 颜色只经 `Palette` 的记号，选中行用选择列表组件。
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -19,7 +19,7 @@ use super::resume_footer::{footer_hints, hint_row, progress};
 use super::session_rows::{SessionRow, center_truncate, relative, relative_long, timestamp};
 use super::text::{truncate, truncate_line, wrap_text};
 
-/// 日期列的宽度（Codex `SESSION_META_DATE_WIDTH`）。
+/// 日期列的宽度。
 const DATE: usize = 12;
 /// 预览里每条对话最多几行（tui-manage.md D-R6）。
 const ITEM_LINES: usize = 3;
@@ -43,7 +43,7 @@ const SCROLLED_ALL: u8 = 100;
 const LOADING_PADDING: u16 = 10;
 const LOADING_ROWS: u16 = 3;
 
-/// 纵向的区域（Codex `layout::areas`）：三个间隙在高度不够时依次收起。
+/// 纵向的区域：三个间隙在高度不够时依次收起。
 struct Areas {
     header: u16,
     toolbar: u16,
@@ -74,7 +74,7 @@ fn italic(style: Style) -> Style {
     style.add_modifier(Modifier::ITALIC)
 }
 
-/// 工具栏的一个值（Codex `toolbar_value`）：焦点控件的选中值反色，选中值粗体，其余次要色。
+/// 工具栏的一个值：焦点控件的选中值反色，选中值粗体，其余次要色。
 fn value(label: &str, active: bool, focused: bool, palette: &Palette) -> Span<'static> {
     let text = format!(" {label} ");
     match (active, focused) {
@@ -120,7 +120,7 @@ fn control(
     ]
 }
 
-/// 工具栏（Codex `toolbar_for_width`）：放不下时每个控件只写选中值，再放不下只画焦点所在的控件。
+/// 工具栏：放不下时每个控件只写选中值，再放不下只画焦点所在的控件。
 fn toolbar(lang: Lang, palette: &Palette, page: &ResumePage, width: usize) -> Line<'static> {
     for compact in [false, true] {
         let mut spans = control(lang, palette, false, page, compact);
@@ -234,7 +234,7 @@ impl App {
         ]
     }
 
-    /// 展开的预览（Codex `render_transcript_preview_lines`）。
+    /// 展开的预览：最近几条对话。
     fn resume_preview(
         &self,
         page: &ResumePage,
@@ -460,7 +460,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, page: &mut ResumePage, now_ms:
     }
 }
 
-/// 列表；返回滚动的百分比（Codex `picker_footer_scroll_percent`）。
+/// 列表；返回滚动的百分比（footer 的进度用）。
 fn draw_list(
     frame: &mut Frame<'_>,
     app: &mut App,
@@ -571,7 +571,7 @@ fn draw_list(
     ((skipped as f64 / max_scroll as f64) * super::quantities::PERCENT_F64).round() as u8
 }
 
-/// 删除确认（列表区域的下方，文字照 Codex 命令中心）。
+/// 删除确认（列表区域的下方）：标题、说明、取消与删除两个选项。
 fn draw_confirm(frame: &mut Frame<'_>, app: &App, page: &ResumePage, list: Rect) {
     let Some(confirm) = &page.confirm else {
         return;
@@ -608,7 +608,7 @@ fn draw_confirm(frame: &mut Frame<'_>, app: &App, page: &ResumePage, list: Rect)
     frame.render_widget(Paragraph::new(lines), box_area);
 }
 
-/// ⌃t 的加载浮层（Codex `render_transcript_loading_overlay`）：列表中间 3 行，底色用用户消息块的底色。
+/// ⌃t 的加载浮层：列表中间 3 行，底色用用户消息块的底色。
 fn draw_loading(frame: &mut Frame<'_>, app: &App, list: Rect) {
     let message = words::loading_transcript(app.lang);
     let message_width = message.width() as u16;
@@ -639,7 +639,7 @@ fn draw_loading(frame: &mut Frame<'_>, app: &App, list: Rect) {
     frame.render_widget(Paragraph::new(lines), overlay);
 }
 
-/// 目录选择（Codex `cwd_prompt.rs`）：标题、两行说明、两个选项、按键提示，纵向居中。
+/// 目录选择：标题、两行说明、两个选项、按键提示，纵向居中。
 fn draw_cwd(frame: &mut Frame<'_>, app: &App, page: &ResumePage) {
     let Some(prompt) = &page.cwd else {
         return;

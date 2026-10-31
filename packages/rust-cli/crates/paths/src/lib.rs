@@ -62,7 +62,7 @@ const TASKS_DIR: &str = "tasks";
 const LOG_DIR: &str = concat!(rust_cli_dir!(), "/log");
 /// 跨会话的登记处与收件箱 socket（docs/specs/rust-cli/cross-session.md §2.2）。
 const PEERS_DIR: &str = concat!(rust_cli_dir!(), "/peers");
-/// 自动更新的缓存（docs/specs/rust-cli/update.md §4，F48；Codex `version.json`）。
+/// 自动更新的缓存（docs/specs/rust-cli/update.md §4，F48）。
 const UPDATE_CACHE: &str = concat!(rust_cli_dir!(), "/version.json");
 /// 远端机器的清单（docs/specs/rust-cli/remote-exec.md §20.3.1）。
 const MACHINES_FILE: &str = concat!(rust_cli_dir!(), "/machines.json");

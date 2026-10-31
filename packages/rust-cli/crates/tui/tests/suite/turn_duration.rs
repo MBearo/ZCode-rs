@@ -4,11 +4,12 @@
 use std::sync::Arc;
 
 use crossterm::event::KeyCode;
-use rust_cli_kernel_api::model::ModelError;
+use rust_cli_kernel_api::message::ContentBlock;
+use rust_cli_kernel_api::model::{BlockDelta, ModelError, ModelEvent};
 use rust_cli_kernel_api::testing::{environments, text_response};
 
 use super::ledger::Ledger;
-use super::support::{GatedModel, Setup, row_of, with_ui};
+use super::support::{GatedModel, Setup, row_of, send, with_ui};
 
 const LINE: &str = " for 0s · done 12:00 AM";
 
@@ -82,10 +83,35 @@ async fn a_failed_turn_also_ends_with_the_line_below_the_error() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_interrupted_turn_has_no_line() {
+    // 修 bug（工作线 F124 顺带，2026-10-31）：以前模型一个字没吐就按 esc，回合以中断结束后 esc 撤回（F38）随即把这条
+    // 输入删掉、放回输入框，屏幕上的 `Interrupted` 只是撤回之前的一帧；撤回快、那一帧没画出来时这里等不到（ZCode-rs 的
+    // 验证链里 10 秒超时一次）。先流出半句：输入算回答过，不撤回，中断的标记一直留在屏幕上。
     let (model, senders) = GatedModel::new(1);
+    let first = senders.into_iter().next().unwrap();
     with_ui(model, Setup::default(), |mut ui| async move {
         ui.submit("hi");
-        ui.wait_for("esc to interrupt").await;
+        send(
+            &first,
+            vec![
+                Ok(ModelEvent::MessageStart {
+                    id: "msg_api".to_owned(),
+                    model: "scripted".to_owned(),
+                    usage: Default::default(),
+                }),
+                Ok(ModelEvent::BlockStart {
+                    index: 0,
+                    block: ContentBlock::Text {
+                        text: String::new(),
+                    },
+                }),
+                // 带换行：流式中没写完的最后一行不显示。
+                Ok(ModelEvent::BlockDelta {
+                    index: 0,
+                    delta: BlockDelta::Text("partial reply\n".to_owned()),
+                }),
+            ],
+        );
+        ui.wait_for("partial reply").await;
         ui.key(KeyCode::Esc);
         let screen = ui
             .wait("the interrupted turn", |s| {
@@ -94,7 +120,7 @@ async fn an_interrupted_turn_has_no_line() {
             .await;
         assert!(turn_line(&screen).is_none(), "{screen}");
         assert!(!screen.contains(" for 0s"), "{screen}");
-        drop(senders);
+        drop(first);
     })
     .await;
 }

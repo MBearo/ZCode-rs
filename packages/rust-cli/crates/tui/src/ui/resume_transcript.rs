@@ -1,4 +1,4 @@
-//! `/resume` 页的全屏只读对话（修复线 F29，docs/specs/rust-cli/tui-manage.md §10.3；Codex 的 transcript overlay）：
+//! `/resume` 页的全屏只读对话（修复线 F29，docs/specs/rust-cli/tui-manage.md §10.3）：
 //! 会话的 transcript 用主界面同一套块的排版（`cells::build` + `cells::render`，普通形式），独立页面的框架，可滚动。
 use ratatui::Frame;
 use ratatui::text::Line;

@@ -1,4 +1,4 @@
-//! ← 项目页（修复线 F29，docs/specs/rust-cli/tui-panels.md §2；照 Codex 命令中心的 `Group: Project`）：所有项目的
+//! ← 项目页（修复线 F29，docs/specs/rust-cli/tui-panels.md §2；分组方式 `Group: Project`）：所有项目的
 //! 会话按工作目录分组。数据是内核 `project_sessions` 的快照（打开时取一次）；这里只有分组、筛选、搜索、改名输入与焦点，
 //! 排版在 `projects_draw.rs`。打开、新建、改名经 [`Request`] 交给 runner。
 use crossterm::event::{KeyCode, KeyEvent};
@@ -128,7 +128,7 @@ impl ProjectsPage {
         order
     }
 
-    /// 筛选与搜索之后可见的会话（改名中的那一个总可见，Codex 相同）。
+    /// 筛选与搜索之后可见的会话（改名中的那一个总可见，改名时不会消失）。
     pub fn visible(&self, current_root: &str) -> Vec<usize> {
         let rows = self.rows.as_deref().unwrap_or_default();
         let filter = FILTERS[self.filter % FILTERS.len()];
@@ -188,7 +188,7 @@ impl ProjectsPage {
         self.rows.as_deref()?.get(index)
     }
 
-    /// 移动焦点：`step` 个会话（跨组）；`wrap` 时到头绕回（按键，Codex），否则停住（滚轮）。
+    /// 移动焦点：`step` 个会话（跨组）；`wrap` 时到头绕回（按键），否则停住（滚轮）。
     fn step(&mut self, current_root: &str, step: isize, wrap: bool) {
         let visible = self.visible(current_root);
         let Some(rows) = self.rows.as_deref() else {
@@ -298,7 +298,7 @@ impl App {
                 }
                 KeyCode::Char(c) if plain => {
                     query.push(c);
-                    // 查询变了：焦点回到第一个匹配（Codex 搜索时选第一个可见的）。
+                    // 查询变了：焦点回到第一个匹配（搜索时选第一个可见的）。
                     page.selected = None;
                     let first = page.visible(&root).first().copied();
                     page.selected = first.and_then(|i| page.rows.as_ref().map(|r| r[i].id.clone()));
@@ -308,7 +308,7 @@ impl App {
             }
         }
         let height = page.height.max(1) as isize;
-        // 搜索中 ← / → 不关页面、不打开（Codex：编辑时左右键不动列表）。
+        // 搜索中 ← / → 不关页面、不打开（编辑时左右键不动列表）。
         if page.search.is_some() && matches!(key.code, KeyCode::Left | KeyCode::Right) {
             return None;
         }

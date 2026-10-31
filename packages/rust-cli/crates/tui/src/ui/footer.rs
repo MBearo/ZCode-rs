@@ -203,7 +203,7 @@ fn context_span(app: &App) -> Option<Span<'static>> {
 /// （修复线 F112，tui-panels.md §1.7）。
 pub fn footer(app: &App, width: usize) -> (Line<'static>, Vec<(usize, usize, Target)>) {
     let context = context_span(app);
-    // 模型名用 `model` 的颜色（Codex 状态栏的 Model，tui.md §7.4）。
+    // 模型名用 `model` 的颜色（tui.md §7.4）。
     let model: Vec<Span<'static>> = super::app::selection_label(app.shown().selection())
         .into_iter()
         .map(|m| Span::styled(m, app.palette.model()))
@@ -301,7 +301,7 @@ pub fn search_cursor(app: &App) -> Option<u16> {
     Some((layout::INDENT + label.width() + query.width()) as u16)
 }
 
-/// `?` 快捷键面板（tui.md §7.4，修复线 F26，用户决定；排版参照 Codex `shortcut_overlay.rs` / `shortcut_help.rs`）：
+/// `?` 快捷键面板（tui.md §7.4，修复线 F26，用户决定）：
 /// 画在输入框上面。粗体标题、空一行，三组（Compose / Session / Transcript）并排，组间 4 列；放不下时两组一排，
 /// 再放不下一组一排。每行按键（`key` 样式，补到本组最长的按键 + 2 列）加说明（`secondary`）。原来是输入框下面
 /// 三栏 dim 的文字。

@@ -1,0 +1,11 @@
+{
+  "id": "openai-codex",
+  "version": "c3d3b142d",
+  "url": "https://github.com/openai/codex",
+  "license": "Apache-2.0",
+  "licenseFiles": ["LICENSE", "NOTICE"],
+  "files": [
+    "packages/rust-cli/crates/tui/src/ui/paste_burst.rs",
+    "packages/rust-cli/crates/tui/src/ui/paste_burst_tests.rs"
+  ]
+}

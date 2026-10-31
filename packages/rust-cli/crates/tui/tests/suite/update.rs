@@ -1,6 +1,6 @@
-// 自动更新的选择屏与会话里的提示（docs/specs/rust-cli/update.md §6、§7，工作线 F48，照 Codex `update_prompt.rs` 与
-// `UpdateAvailableHistoryCell`）：画面、焦点与回绕、按键、中文、深浅背景的强调色；会话头下面的提示框，启动时打开
-// 已有会话后仍在顶上。终端是 `TestBackend`，按键经 stream 送进选择屏的循环。
+// 自动更新的选择屏与会话里的提示（docs/specs/rust-cli/update.md §6、§7，工作线 F48）：画面、焦点与回绕、按键、
+// 中文、深浅背景的强调色；会话头下面的提示框，启动时打开已有会话后仍在顶上。终端是 `TestBackend`，按键经 stream
+// 送进选择屏的循环。
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use futures_util::stream;
 use ratatui::Terminal;
@@ -58,7 +58,7 @@ fn line_of(screen: &str, needle: &str) -> usize {
 }
 
 #[tokio::test]
-async fn the_prompt_shows_the_codex_text_and_options() {
+async fn the_prompt_shows_its_text_and_options() {
     let (choice, screen, terminal) = run(Lang::En, (80, 12), dark(), vec![key(KeyCode::Esc)]).await;
     assert_eq!(choice, UpdateChoice::Skip);
     let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
@@ -120,9 +120,9 @@ async fn the_prompt_has_chinese_text() {
     }
 }
 
-/// Codex `handle_key`：↑↓ 与 j / k 回绕，1 / 2 / 3 直接选，enter 选焦点，esc 与 ctrl+c / ctrl+d 跳过。
+/// 按键：↑↓ 与 j / k 回绕，1 / 2 / 3 直接选，enter 选焦点，esc 与 ctrl+c / ctrl+d 跳过。
 #[tokio::test]
-async fn the_keys_follow_codex() {
+async fn the_keys_wrap_pick_and_skip() {
     let cases: Vec<(Vec<Event>, UpdateChoice)> = vec![
         (vec![key(KeyCode::Enter)], UpdateChoice::UpdateNow),
         (
@@ -188,7 +188,7 @@ async fn the_keys_follow_codex() {
     }
 }
 
-/// 焦点移到第三项时它带 `›` 与底色条；窄终端里长的命令折行，三个选项与按键提示都还在（Codex 的 28 列快照）。
+/// 焦点移到第三项时它带 `›` 与底色条；窄终端（32 列）里长的命令折行，三个选项与按键提示都还在。
 #[tokio::test]
 async fn focus_moves_and_long_lines_wrap() {
     let mut terminal = Terminal::new(TestBackend::new(32, 16)).unwrap();
@@ -223,7 +223,7 @@ fn update_setup(lang: &'static str, store: Option<MemoryStore>) -> Setup {
     setup
 }
 
-/// 会话里的提示（Codex `UpdateAvailableHistoryCell`）：会话头下面一个圆角框。
+/// 会话里的提示：会话头下面一个圆角框。
 #[tokio::test(flavor = "multi_thread")]
 async fn the_notice_box_sits_under_the_session_header() {
     let model = GatedModel::scripted(Vec::new());
@@ -262,7 +262,7 @@ async fn the_notice_box_has_chinese_text() {
         |mut ui| async move {
             let screen = ui.wait_for("有新版本！").await;
             for text in [
-                // ✨ 后面是 Codex 的细空格（U+200A）。
+                // ✨ 后面是细空格（U+200A）。
                 "✨\u{200A}有新版本！ 0.1.46 -> 0.1.47",
                 "运行 npm install -g @scope/zcode 更新。",
                 "完整的更新说明：",

@@ -17,8 +17,7 @@ pub const ACCOUNT: Duration = Duration::from_secs(15);
 /// 以前没有单次超时，请求挂住时一直等。
 pub const OAUTH: Duration = Duration::from_secs(180);
 
-/// npm registry 的版本查询（update.md）：5 s。Node / App 不查 npm，本机没有 Codex 的源码；取常见的版本检查超时
-/// 5 s。以前没有单次超时。
+/// npm registry 的版本查询（update.md）：5 s。Node / App 不查 npm；取常见的版本检查超时 5 s。以前没有单次超时。
 pub const NPM_REGISTRY: Duration = Duration::from_secs(5);
 
 #[cfg(test)]

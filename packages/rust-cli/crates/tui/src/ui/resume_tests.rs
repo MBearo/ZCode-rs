@@ -177,7 +177,7 @@ fn delete_needs_confirmation_and_the_current_session_is_refused() {
             .map(|c| (c.name.as_str(), c.focus)),
         Some(("Old", 0))
     );
-    // 数字 2 只移到删除（Codex `require_explicit_confirmation`），enter 才删。
+    // 数字 2 只移到删除（删除要明确确认），enter 才删。
     assert_eq!(app.resume_key(key(KeyCode::Char('2'))), None);
     assert_eq!(
         app.resume_key(key(KeyCode::Enter)),

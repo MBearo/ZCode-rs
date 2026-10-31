@@ -52,8 +52,7 @@ impl SessionRow {
         }
     }
 
-    /// 不分大小写的子串匹配：项目页比标题、首条输入、路径（Codex 命令中心），`/resume` 页另比会话 ID 与分支
-    /// （Codex `matches_query`）。`query` 已转成小写。
+    /// 不分大小写的子串匹配：项目页比标题、首条输入、路径，`/resume` 页另比会话 ID 与分支。`query` 已转成小写。
     pub fn matches(&self, query: &str, more: bool) -> bool {
         if query.is_empty() {
             return true;
@@ -88,7 +87,7 @@ pub fn user_text(message: &Message) -> Option<String> {
     Some(rust_cli_kernel_api::user_command::display(&text).unwrap_or(text))
 }
 
-/// 相对时间（Codex `format_relative_time`）：`now`、`42s ago`、`35m ago`、`2h ago`、`1d ago`。
+/// 相对时间（短）：`now`、`42s ago`、`35m ago`、`2h ago`、`1d ago`。
 pub fn relative(lang: Lang, now_ms: u64, at_ms: u64) -> String {
     let seconds = now_ms.saturating_sub(at_ms) / units::MS_PER_SECOND;
     if seconds == 0 {
@@ -112,7 +111,7 @@ pub fn relative(lang: Lang, now_ms: u64, at_ms: u64) -> String {
     }
 }
 
-/// 长的相对时间（Codex `format_relative_time_long`）：`1 minute ago`、`5 minutes ago`。
+/// 长的相对时间：`1 minute ago`、`5 minutes ago`。
 pub fn relative_long(lang: Lang, now_ms: u64, at_ms: u64) -> String {
     let seconds = now_ms.saturating_sub(at_ms) / units::MS_PER_SECOND;
     if seconds == 0 || lang == Lang::Zh {
@@ -135,7 +134,7 @@ pub fn timestamp(at_ms: u64, offset_minutes: i32) -> String {
     )
 }
 
-/// 中间截断到 `width` 列（路径用，Codex `center_truncate_path`）：前后各留一半，中间是 `…`。
+/// 中间截断到 `width` 列（路径用，开头与末尾都有用）：前后各留一半，中间是 `…`。
 pub fn center_truncate(text: &str, width: usize) -> String {
     if text.width() <= width {
         return text.to_owned();

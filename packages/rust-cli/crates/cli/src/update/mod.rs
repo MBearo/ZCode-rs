@@ -1,8 +1,8 @@
-//! 自动更新（docs/specs/rust-cli/update.md，工作线 F48；用户决定照 Codex 的做法）。
+//! 自动更新（docs/specs/rust-cli/update.md，工作线 F48，用户决定）。
 //!
 //! 启动时（只在 TUI）：读启动器标记（[`install`]）→ 读缓存（[`cache`]）→ 决定弹不弹选择屏、要不要在会话里提示 →
 //! 缓存缺失或过期时在后台刷新（[`registry`]），本次只用读到的那一份。选 Update now 时入口不建会话，执行安装
-//! （[`action`]）后退出。`zcode update` 不看缓存，直接执行（Codex `run_update_command`）。没有标记时什么都不做。
+//! （[`action`]）后退出。`zcode update` 不看缓存，直接执行。没有标记时什么都不做。
 
 mod action;
 mod cache;
@@ -28,7 +28,7 @@ use rust_cli_tui::update::{UpdateChoice, UpdateInfo};
 use crate::flags::Fatal;
 pub(crate) use install::Install;
 
-/// `zcode update` 的帮助（commander 12 的子命令形式；说明是 Codex 的，update.md §9）。
+/// `zcode update` 的帮助（commander 12 的子命令形式；说明文字见 update.md §9）。
 const HELP: &str = "Usage: zcode update|upgrade [options]
 
 Update ZCode to the latest version
@@ -129,7 +129,7 @@ impl Updates {
         (!found.dismissed).then(|| found.info.clone()).flatten()
     }
 
-    /// 会话里的提示：有新版本时（不论是否不再提醒，Codex 相同）。
+    /// 会话里的提示：有新版本时（不论是否不再提醒）。
     pub(crate) fn notice(&self) -> Option<UpdateInfo> {
         self.found.as_ref()?.info.clone()
     }

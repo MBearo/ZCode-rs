@@ -1,5 +1,4 @@
-//! 自动更新的文字（docs/specs/rust-cli/update.md §6.1、§7）：英文是 Codex 的原文（`update_prompt.rs`、
-//! `history_cell/notices.rs`，产品名换成 ZCode），另配中文。
+//! 自动更新的文字（docs/specs/rust-cli/update.md §6.1、§7）：英文与中文。
 use super::i18n::Lang;
 
 pub fn title(lang: Lang) -> &'static str {
@@ -16,7 +15,7 @@ pub fn release_notes(lang: Lang) -> &'static str {
     }
 }
 
-/// 三个选项（Codex 的顺序）。
+/// 三个选项：立即更新、跳过、跳过直到下一个版本。
 pub fn options(lang: Lang, command: &str) -> [String; 3] {
     match lang {
         Lang::En => [
@@ -40,7 +39,7 @@ pub fn keys_hint(lang: Lang) -> &'static str {
     }
 }
 
-/// 会话里的提示：标题（Codex `Update available!`）。
+/// 会话里的提示：标题。
 pub fn notice_title(lang: Lang) -> &'static str {
     match lang {
         Lang::En => "Update available!",

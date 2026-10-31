@@ -159,7 +159,7 @@ pub(super) fn bottom_lines(
     lines.extend(super::tasks::lines(app, width, height, now));
     // 排队的消息紧贴在输入框上方。
     lines.extend(bottom::queue(app, width));
-    // `?` 快捷键面板在输入框上面（tui.md §7.4，修复线 F26，Codex 的位置；原来替换输入框下面的 footer）。
+    // `?` 快捷键面板在输入框上面（tui.md §7.4，修复线 F26；原来替换输入框下面的 footer）。
     if matches!(app.overlay, Some(Overlay::Shortcuts)) {
         lines.extend(footer::help(app, width));
     }

@@ -100,7 +100,7 @@ fn without_a_marker_the_update_command_asks_for_a_manual_update() {
     assert_eq!(names, ["bin"]);
 }
 
-/// 有标记：不检查版本，直接按安装方式执行（Codex `run_update_command`），stdio 继承，打印 Codex 的文字。
+/// 有标记：不检查版本，直接按安装方式执行，stdio 继承，打印 update.md §8 的文字。
 #[cfg(unix)]
 #[test]
 fn the_update_command_runs_the_package_manager_of_the_launcher() {

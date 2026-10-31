@@ -1,8 +1,8 @@
 // 复制自 rust/crates/kit/src/redact.rs（feat/rs 79b6691c55）。
 //! 按值脱敏（docs/specs/rust-u0-foundation.md §3.2）。
 //!
-//! 规则移植自 Codex `codex-rs/secrets/src/sanitizer.rs`（Bearer、OpenAI 风格 key、AWS access key id、
-//! `api_key=…` 一类赋值），并补充 GitHub token 与带连字符的 `sk-` key（`sk-proj-…`、`sk-ant-…`）。
+//! 规则：Bearer、OpenAI 风格 key、AWS access key id、`api_key=…` 一类赋值、GitHub token 与带连字符的 `sk-` key
+//! （`sk-proj-…`、`sk-ant-…`）。
 //! 尽力而为：只覆盖形态明确的秘密值；按字段名脱敏仍由各日志出口负责。
 
 use std::borrow::Cow;

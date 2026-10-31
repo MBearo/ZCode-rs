@@ -1,4 +1,4 @@
-//! 会话里的“有新版本”提示（docs/specs/rust-cli/update.md §7；Codex `UpdateAvailableHistoryCell`）：一个圆角框，
+//! 会话里的“有新版本”提示（docs/specs/rust-cli/update.md §7）：一个圆角框，
 //! 框内宽度取内容最宽一行与（终端宽度 − 4）的小者，超出时折行。只显示，不进会话、不落库。
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};

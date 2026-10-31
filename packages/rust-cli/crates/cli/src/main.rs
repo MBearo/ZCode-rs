@@ -374,7 +374,7 @@ async fn session(
     // 远端机器的启动输入在这里取（之后 `startup.explicit` 会被移走，§20.3.2）。
     let surface = (matches!(mode, Mode::Tui), matches!(mode, Mode::Print));
     let mut machine_start = machines::Start::new(&paths, surface, (&startup, &egress));
-    // 自动更新（docs/specs/rust-cli/update.md §3，F48，照 Codex）：只在 TUI、工作区信任之前；没有启动器标记时什么都
+    // 自动更新（docs/specs/rust-cli/update.md §3，F48）：只在 TUI、工作区信任之前；没有启动器标记时什么都
     // 不做。`updates` 留到返回：它持有后台刷新的任务作用域。选了 Update now 时不建会话，安装后以它的结果退出。
     let vars = tui::vars(&startup.env);
     let tui_mode = matches!(mode, Mode::Tui);

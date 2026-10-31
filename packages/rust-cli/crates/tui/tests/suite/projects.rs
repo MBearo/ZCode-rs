@@ -131,7 +131,7 @@ async fn left_opens_the_projects_grouped_with_the_current_one_first() {
         assert!(screen.contains("│ Session details"), "{screen}");
         assert!(screen.contains("│ ~/project"), "{screen}");
         assert!(screen.contains("│ first reply"), "{screen}");
-        // 当前会话按 enter：只关闭页面并提示（Codex）。
+        // 当前会话按 enter：只关闭页面并提示（不重新打开）。
         ui.key(KeyCode::Enter);
         ui.wait_for("Already viewing first question.").await;
         ui.key(KeyCode::Left);

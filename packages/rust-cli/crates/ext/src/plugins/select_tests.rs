@@ -131,8 +131,8 @@ async fn sources_other_than_the_command_line_need_a_valid_manifest() {
         ),
         manifest("/Users/dev/bad", r#"{"name": "Bad Name"}"#),
         (
-            "/Users/dev/codex/.codex-plugin/plugin.json".to_owned(),
-            r#"{"name": "codex-kit"}"#.to_owned(),
+            "/Users/dev/other/.codex-plugin/plugin.json".to_owned(),
+            r#"{"name": "other-kit"}"#.to_owned(),
         ),
         (
             "/Users/dev/session/skills/y/SKILL.md".to_owned(),
@@ -143,7 +143,7 @@ async fn sources_other_than_the_command_line_need_a_valid_manifest() {
         candidates: vec![
             candidate("/Users/dev/bare", "inline", PluginOrigin::ConfigDir),
             candidate("/Users/dev/bad", "inline", PluginOrigin::ConfigDir),
-            candidate("/Users/dev/codex", "inline", PluginOrigin::ConfigDir),
+            candidate("/Users/dev/other", "inline", PluginOrigin::ConfigDir),
             candidate("/Users/dev/missing", "inline", PluginOrigin::ConfigDir),
         ],
         ..PluginSources::default()
@@ -151,7 +151,7 @@ async fn sources_other_than_the_command_line_need_a_valid_manifest() {
     let session = [EnvPath::new("/Users/dev/session")];
     let loaded = load_all(&env(&files), &workspace(), &session, &sources).await;
     // `--plugin-dir` 没有 manifest 时取目录名；其余来源按 Node 必须有合法的 manifest。
-    assert_eq!(names(&loaded), ["session", "codex-kit"]);
+    assert_eq!(names(&loaded), ["session", "other-kit"]);
     let reasons: Vec<&SkipReason> = loaded.skipped.iter().map(|s| &s.reason).collect();
     assert!(matches!(
         reasons.as_slice(),

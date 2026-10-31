@@ -1,7 +1,7 @@
-//! 自动更新选择屏的状态与排版（docs/specs/rust-cli/update.md §6；Codex `UpdatePromptScreen`）。
+//! 自动更新选择屏的状态与排版（docs/specs/rust-cli/update.md §6）。
 //!
 //! 排版用本工程的组件（tui.md §7.4）：顶上整行 `─` 与粗体标题用强调色，正文缩进两格，选项由选择列表组件画（`› ` 加
-//! 底色条）并带序号（Codex `picker_option_list`），最后一行是按键提示组件。只有界面状态（焦点）；选择交给调用方。
+//! 底色条）并带序号，最后一行是按键提示组件。只有界面状态（焦点）；选择交给调用方。
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -31,7 +31,7 @@ impl Screen {
         CHOICES[self.focus]
     }
 
-    /// 一个按键（松开的事件由调用方先滤掉）；选出一项时返回它（Codex `handle_key`）。
+    /// 一个按键（松开的事件由调用方先滤掉）；选出一项时返回它（按键见 update.md §6.2）。
     pub fn key(&mut self, key: KeyEvent) -> Option<UpdateChoice> {
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('c' | 'd'))

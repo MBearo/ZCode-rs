@@ -1,4 +1,4 @@
-//! 自动更新的选择屏（docs/specs/rust-cli/update.md §6，工作线 F48；照 Codex `update_prompt.rs`）。
+//! 自动更新的选择屏（docs/specs/rust-cli/update.md §6，工作线 F48）。
 //!
 //! 入口在工作区信任之前调用 [`ask`]：独立进入、离开一次 alternate screen，阻塞到用户选择。要不要弹、读写缓存、执行
 //! 安装都在入口；这里只显示与收按键。真实终端与测试（`TestBackend`）走同一个 [`drive`]。会话里的“有新版本”提示用
@@ -31,7 +31,7 @@ pub struct UpdateInfo {
     pub notes_url: String,
 }
 
-/// 用户的选择（Codex `UpdateSelection`）。
+/// 用户的选择。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateChoice {
     UpdateNow,
@@ -39,7 +39,7 @@ pub enum UpdateChoice {
     SkipUntilNext,
 }
 
-/// 画选择屏、收按键，直到选出一项。选出之后不再重画；输入结束（终端关掉）当作 Skip（Codex：`None => Continue`）。
+/// 画选择屏、收按键，直到选出一项。选出之后不再重画；输入结束（终端关掉）当作 Skip（照常进入）。
 pub async fn drive<B: Backend>(
     info: &UpdateInfo,
     palette: Palette,
@@ -87,7 +87,7 @@ pub async fn ask(
         crate::ui::slash_theme::background(theme.unwrap_or(UiTheme::Auto), probed.background),
     )
     .with_foreground(probed.foreground);
-    // Codex `discard_pending_input_before_interactive_screen`：选择屏出现之前敲下的键不算选择。
+    // 丢掉选择屏出现之前敲下的键：它们不算选择。
     discard_pending_input();
     // 读失败的事件跳过（与 TUI 的输入相同）；选择屏结束时丢掉事件流，之后的界面重建自己的。
     let input = EventStream::new().filter_map(|event| std::future::ready(event.ok()));

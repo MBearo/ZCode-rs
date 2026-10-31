@@ -1,4 +1,4 @@
-//! `/resume` 独立页面的状态与按键（修复线 F29，docs/specs/rust-cli/tui-manage.md §10；照 Codex 的 resume 选择器）：
+//! `/resume` 独立页面（会话选择页）的状态与按键（修复线 F29，docs/specs/rust-cli/tui-manage.md §10）：
 //! 筛选、排序、查询、焦点、展开的预览、全屏对话、改名输入、删除确认与目录选择。数据是内核 `project_sessions` 的快照，
 //! 改名、删除、预览经 [`Request`] 交给 runner；排版在 `resume_draw.rs`。
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ use super::projects::Request;
 use super::session_rows::SessionRow;
 use crate::view::Transcript;
 
-/// 预览最多几条对话（Codex `MAX_TRANSCRIPT_PREVIEW_LINES`）。
+/// 预览最多几条对话。
 pub const PREVIEW_ITEMS: usize = 6;
 
 /// 一个会话的预览（⌃e）：读取中、读到的最近几条（是不是用户的话，文字）、失败。
@@ -48,7 +48,7 @@ pub enum TranscriptState {
     Shown(Shown),
 }
 
-/// 删除确认（焦点 0 是取消，Codex 的确认框缺省焦点在取消上）。
+/// 删除确认（焦点 0 是取消：缺省焦点在取消上，误按 enter 不删）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Confirm {
     pub id: String,
@@ -95,7 +95,7 @@ pub struct ResumePage {
 }
 
 impl ResumePage {
-    /// 查询过滤后的行（Codex `apply_filter`：标题、首条输入、会话 ID、分支、路径）。
+    /// 查询过滤后的行（比标题、首条输入、会话 ID、分支、路径）。
     pub fn filtered(&self) -> Vec<&SessionRow> {
         let query = self.query.to_lowercase();
         self.rows
@@ -276,7 +276,7 @@ impl App {
         // 文字输入不带 ctrl 与 alt（Windows 的 AltGr 算文字，修复线 F65，tui-input.md §9.1）。
         let ctrl = self.typing.ctrl(&key);
         let plain = self.typing.is_plain_text(&key);
-        // 全屏对话：只读，滚动与关闭（Codex 的 transcript overlay：q / esc / ctrl+c / ctrl+t）。
+        // 全屏对话：只读，滚动与关闭（q / esc / ctrl+c / ctrl+t）。
         if let Some(transcript) = page.transcript.as_mut() {
             let close = matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
                 || (ctrl && matches!(key.code, KeyCode::Char('c' | 't')));
@@ -300,7 +300,7 @@ impl App {
             }
             return None;
         }
-        // 目录选择（Codex `cwd_prompt`）：↑/↓ 选，enter 继续，esc 用会话目录，ctrl+c 关闭页面。
+        // 目录选择：↑/↓ 选，enter 继续，esc 用会话目录，ctrl+c 关闭页面。
         if let Some(prompt) = page.cwd.as_mut() {
             match key.code {
                 KeyCode::Up | KeyCode::Char('1') => prompt.focus = 0,
@@ -324,7 +324,7 @@ impl App {
         if let Some(confirm) = page.confirm.as_mut() {
             match key.code {
                 KeyCode::Up | KeyCode::Char('1') => confirm.focus = 0,
-                // Codex `require_explicit_confirmation`：数字只移到删除，要再按 enter。
+                // 删除要明确确认：数字只移到删除，要再按 enter。
                 KeyCode::Down | KeyCode::Char('2') => confirm.focus = 1,
                 KeyCode::Esc => page.confirm = None,
                 KeyCode::Char('c') if ctrl => page.confirm = None,
@@ -359,7 +359,7 @@ impl App {
         let count = page.filtered().len();
         let step = page.height.max(1);
         match key.code {
-            // 应用内的 ctrl+c 关闭页面；启动形态退出 zcode（Codex：启动时的选择器 ⌃c 是 quit）。
+            // 应用内的 ctrl+c 关闭页面；启动形态退出 zcode（启动时的选择页没有可回去的界面，⌃c 是退出）。
             KeyCode::Char('c') if ctrl => {
                 let startup = page.startup;
                 self.overlay = None;
@@ -452,7 +452,7 @@ impl App {
         None
     }
 
-    /// ←/→：切换焦点控件的值，从头重取（Codex `change_focused_toolbar_value`）。
+    /// ←/→：切换焦点控件的值，从头重取。
     fn resume_toggle(&mut self) -> Option<Action> {
         let Some(Overlay::Resume(page)) = self.overlay.as_mut() else {
             return None;
@@ -469,7 +469,7 @@ impl App {
         Some(self.resume_request())
     }
 
-    /// 粘贴进查询（换行压成空格，Codex `normalize_pasted_search_query`）。
+    /// 粘贴进查询（换行压成空格，查询只有一行）。
     pub(super) fn resume_paste(&mut self, text: &str) {
         let Some(Overlay::Resume(page)) = self.overlay.as_mut() else {
             return;
