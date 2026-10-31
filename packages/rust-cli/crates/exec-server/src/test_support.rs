@@ -15,8 +15,8 @@ use rust_cli_exec_wire::frame::{Frame, Kind, Reassembler, Received};
 use rust_cli_exec_wire::handshake::{Capabilities, Hello, PROTOCOL};
 use rust_cli_exec_wire::request::Request;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, FileVersion, OperationContext as Ctx, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, FileVersion, OperationContext as Ctx, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
 use rust_cli_kernel_api::machine::{
@@ -90,11 +90,12 @@ impl Commands for TestMachine {
     async fn start_command(
         &self,
         _: &WorkspaceRef,
-        _: Ctx,
+        context: Ctx,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
+        let operation = context.operation;
         self.started.lock().unwrap().push(request.env);
-        Ok(())
+        Ok(self.watch_command(operation, 0))
     }
 
     fn watch_command(
@@ -110,10 +111,6 @@ impl Commands for TestMachine {
 
     async fn cancel(&self, _: OperationId) -> Result<(), EnvError> {
         Ok(())
-    }
-
-    async fn operation_status(&self, _: OperationId) -> Result<Outcome, EnvError> {
-        Ok(Outcome::Running)
     }
 
     async fn close_session(&self, _: &SessionId, _: bool) -> Result<(), EnvError> {

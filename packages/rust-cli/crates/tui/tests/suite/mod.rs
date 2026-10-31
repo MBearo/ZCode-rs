@@ -3,6 +3,8 @@ mod agents_view;
 mod auto_restore;
 mod background;
 mod background_asks;
+#[cfg(unix)]
+mod background_pty;
 mod cd;
 mod compacted_resume;
 mod context;
@@ -31,6 +33,7 @@ mod input_files;
 mod input_images;
 mod input_keys;
 mod interactions;
+mod ledger;
 mod lifecycle;
 mod local_records;
 mod locale;
@@ -68,6 +71,9 @@ mod styles;
 mod support;
 mod themes;
 mod trust;
+mod turn_duration;
+#[cfg(unix)]
+mod turn_duration_pty;
 mod update;
 mod usage_stats;
 mod wheel;

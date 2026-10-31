@@ -13,6 +13,7 @@ mod sse;
 use std::process::Stdio;
 use std::sync::Arc;
 
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
 use rust_cli_paths::{StoragePaths, StorageSettings};
@@ -34,7 +35,10 @@ fn tool_results(request: &Value) -> Vec<(String, String)> {
                     .collect(),
                 _ => String::new(),
             };
-            found.push((block["tool_use_id"].as_str().unwrap().to_owned(), text));
+            found.push((
+                block["tool_use_id"].as_str().unwrap().to_owned(),
+                sse::tool_output(&text).to_owned(),
+            ));
         }
     }
     found
@@ -71,7 +75,7 @@ async fn a_tool_input_that_is_not_json_becomes_an_input_validation_error() {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -125,11 +129,6 @@ async fn a_tool_input_that_is_not_json_becomes_an_input_validation_error() {
         .await
         .unwrap();
     let loaded = store.load(&listed[0].id).await.unwrap();
-    assert!(
-        loaded.open_operations.is_empty(),
-        "{:?}",
-        loaded.open_operations
-    );
     let text = serde_json::to_string(&loaded.messages).unwrap();
     assert!(text.contains("toolu_bash") && text.contains("InputValidationError"));
 }

@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, FileVersion, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, FileVersion, OperationContext, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::ids::{OperationId, SessionId};
 use crate::local_services::{Fetch, Git};
@@ -65,7 +65,7 @@ impl Commands for FactsEnvironment {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         _request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -78,10 +78,6 @@ impl Commands for FactsEnvironment {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 
@@ -138,7 +134,7 @@ impl Commands for UnusedEnvironment {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         _request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -151,10 +147,6 @@ impl Commands for UnusedEnvironment {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 

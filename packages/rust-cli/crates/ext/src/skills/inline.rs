@@ -11,7 +11,7 @@ use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::env::OperationContext;
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionRule};
-use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
+use rust_cli_kernel_api::tool::{DISCARDED_PROGRESS_CAPACITY, Tool, ToolUseContext};
 use rust_cli_policy::PolicyGate;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -54,7 +54,8 @@ fn mask_code_spans(code_span: &Regex, text: &str) -> String {
         if matches!(previous, Some('!' | '`')) {
             out.push_str(found.as_str());
         } else {
-            let inner = found.as_str().len() - 2;
+            // 去掉两边的反引号。
+            let inner = found.as_str().len() - "``".len();
             out.push('`');
             out.push_str(&" ".repeat(inner));
             out.push('`');
@@ -160,7 +161,7 @@ impl Runner {
                 inline.raw
             ));
         }
-        let (progress, _ignored) = mpsc::channel(16);
+        let (progress, _ignored) = mpsc::channel(DISCARDED_PROGRESS_CAPACITY);
         match self.bash.call(input, context, progress).await {
             Ok(output) if !output.is_error => Ok(text_of(&output.content)),
             Ok(output) => Err(format!(

@@ -71,7 +71,6 @@
 // 用法：node scripts/rust-cli/node-interop-check.mjs [--node-root <装好依赖的检出>]
 // 没有装依赖的检出时给出提示并以 2 退出；比对失败以 1 退出。
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -598,22 +597,12 @@ try {
     );
     expectEqual("mode after Node switched to yolo", loaded.mode, "bypassPermissions");
 
-    // 工具会话：rust-cli 冷读取出未结的操作（op_4 没有 assistant）与没回答的计划审批。
+    // 工具会话：rust-cli 冷读取出没回答的计划审批（工作线 F119 起不再记操作意图）。
     const toolsID = written.sessions[2];
     const openWork = (read) => ({
-      operations: read.open_operations ?? [],
       interactions: read.pending_interactions ?? [],
     });
     const expectedWork = {
-      operations: [
-        {
-          operation: "op_4",
-          // 意图存 fingerprint 的摘要（node-store.md §4.7，修复线 F6）。
-          fingerprint: `sha256:${createHash("sha256")
-            .update(JSON.stringify({ tool: "Bash", input: { command: "make" } }))
-            .digest("hex")}`,
-        },
-      ],
       interactions: [
         {
           interaction: "ia_1",
@@ -908,7 +897,7 @@ try {
         "Team Plan: the connection chosen through the App's settingService does not switch rust-cli " +
         "`zcode -p`, `--model <team>[<project>]` uses that team project's token, Node reads (App protocol " +
         "schema) and continues a team-model session and rust-cli reads the team project back; rust-cli stores the " +
-        `z.ai business JWT, which Node's standalone CLI exchanges again (${team.nodeReExchangesTheBusinessJwt}), ` +
+        `Z.AI business JWT, which Node's standalone CLI exchanges again (${team.nodeReExchangesTheBusinessJwt}), ` +
         `and rust-cli sends the raw OAuth token stored by Node as the business JWT (${team.rustUsesTheRawTokenDirectly}; ` +
         "rejected, log in again); the individual plan follows the App login: with only the App's " +
         "credentials rust-cli uses it after the App's subscription check, the App and rust-cli share one " +

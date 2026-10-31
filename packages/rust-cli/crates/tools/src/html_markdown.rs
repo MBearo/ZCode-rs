@@ -13,6 +13,13 @@ const BLOCKS: &[&str] = &[
 ];
 /// 只换行的元素。
 const LINES: &[&str] = &["tr", "dt", "dd", "figcaption", "caption"];
+/// 段落之间的换行数（一个空行）。
+const PARAGRAPH: usize = 2;
+/// h1、h2 用下划线（`=`、`-`），更深的标题写 `#`。
+const UNDERLINED_LEVELS: usize = 2;
+/// `&…;` 实体最多这么多个字节（含 `&` 与 `;`）。
+const MAX_ENTITY_LEN: usize = 12;
+const HEX_RADIX: u32 = rust_cli_base::units::HEX_RADIX;
 
 struct Tag<'a> {
     name: String,
@@ -69,7 +76,11 @@ pub(crate) fn decode_entities(text: &str) -> String {
         rest = &rest[at..];
         // 修复线 F109：以前先按字节切出前 12 个字节再找 `;`，切点落在多字节字符（中文）中间就 panic。
         // 现在在字节里找：`;` 是 ASCII，找到的位置一定在字符边界上。
-        let Some(end) = rest.bytes().take(12).position(|byte| byte == b';') else {
+        let Some(end) = rest
+            .bytes()
+            .take(MAX_ENTITY_LEN)
+            .position(|byte| byte == b';')
+        else {
             out.push('&');
             rest = &rest[1..];
             continue;
@@ -85,7 +96,7 @@ pub(crate) fn decode_entities(text: &str) -> String {
             _ => entity
                 .strip_prefix("#x")
                 .or_else(|| entity.strip_prefix("#X"))
-                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                .and_then(|hex| u32::from_str_radix(hex, HEX_RADIX).ok())
                 .or_else(|| entity.strip_prefix('#').and_then(|dec| dec.parse().ok()))
                 .and_then(char::from_u32),
         };
@@ -166,21 +177,21 @@ impl Writer {
         let name = tag.name.as_str();
         match name {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-                self.blank_lines(2);
+                self.blank_lines(PARAGRAPH);
                 let level = usize::from(name.as_bytes()[1] - b'0');
-                if level > 2 {
+                if level > UNDERLINED_LEVELS {
                     self.out.push_str(&"#".repeat(level));
                     self.out.push(' ');
                 }
             }
             "br" => self.out.push_str("  \n"),
             "hr" => {
-                self.blank_lines(2);
+                self.blank_lines(PARAGRAPH);
                 self.out.push_str("* * *");
-                self.blank_lines(2);
+                self.blank_lines(PARAGRAPH);
             }
             "pre" => {
-                self.blank_lines(2);
+                self.blank_lines(PARAGRAPH);
                 self.pre += 1;
                 self.out.push_str("    ");
             }
@@ -188,11 +199,11 @@ impl Writer {
             "strong" | "b" => self.out.push_str("**"),
             "em" | "i" => self.out.push('_'),
             "blockquote" => {
-                self.blank_lines(2);
+                self.blank_lines(PARAGRAPH);
                 self.quotes.push(self.out.len());
             }
             "ul" | "ol" => {
-                self.blank_lines(if self.lists.is_empty() { 2 } else { 1 });
+                self.blank_lines(if self.lists.is_empty() { PARAGRAPH } else { 1 });
                 self.lists.push((name == "ol").then_some(1));
             }
             "li" => {
@@ -220,7 +231,7 @@ impl Writer {
                     self.out.push_str(&format!("![{alt}]({src})"));
                 }
             }
-            _ if BLOCKS.contains(&name) => self.blank_lines(2),
+            _ if BLOCKS.contains(&name) => self.blank_lines(PARAGRAPH),
             _ if LINES.contains(&name) => self.blank_lines(1),
             "td" | "th" => self.out.push(' '),
             _ => {}
@@ -235,12 +246,12 @@ impl Writer {
                 let width = title.chars().count().max(1);
                 self.out.push('\n');
                 self.out.push_str(&underline.to_string().repeat(width));
-                self.blank_lines(2);
+                self.blank_lines(PARAGRAPH);
             }
-            "h3" | "h4" | "h5" | "h6" => self.blank_lines(2),
+            "h3" | "h4" | "h5" | "h6" => self.blank_lines(PARAGRAPH),
             "pre" => {
                 self.pre = self.pre.saturating_sub(1);
-                self.blank_lines(2);
+                self.blank_lines(PARAGRAPH);
             }
             "code" if self.pre == 0 => self.out.push('`'),
             "strong" | "b" => self.out.push_str("**"),
@@ -264,18 +275,18 @@ impl Writer {
                     })
                     .collect();
                 self.out.push_str(&quoted.join("\n"));
-                self.blank_lines(2);
+                self.blank_lines(PARAGRAPH);
             }
             "ul" | "ol" => {
                 self.lists.pop();
-                self.blank_lines(if self.lists.is_empty() { 2 } else { 1 });
+                self.blank_lines(if self.lists.is_empty() { PARAGRAPH } else { 1 });
             }
             "a" => {
                 if let Some(Some(href)) = self.links.pop() {
                     self.out.push_str(&format!("]({href})"));
                 }
             }
-            _ if BLOCKS.contains(&name) => self.blank_lines(2),
+            _ if BLOCKS.contains(&name) => self.blank_lines(PARAGRAPH),
             _ if LINES.contains(&name) => self.blank_lines(1),
             _ => {}
         }

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use rust_cli_base::units;
 use rust_cli_env_local::{LocalEnvironment, LocalMcpTransport};
 use rust_cli_exec_server::ServerConfig;
 use rust_cli_exec_wire::admin::ExecutorStatus;
@@ -23,7 +24,7 @@ use crate::output::{eprint_line, print_line, write_lossy};
 /// `status` 在常驻进程没在跑时的退出码（LSB 的“程序没在运行”）。
 const NOT_RUNNING: u8 = 3;
 /// 账本多久清理一次（§19.7）。
-const LEDGER_SWEEP: Duration = Duration::from_secs(10 * 60);
+const LEDGER_SWEEP: Duration = Duration::from_secs(10 * units::SECONDS_PER_MINUTE);
 
 #[expect(
     clippy::disallowed_methods,
@@ -291,7 +292,7 @@ fn status_lines(status: &ExecutorStatus, socket: &std::path::Path) -> Vec<String
         format!("  pid       {}", status.pid),
         format!("  instance  {}", status.instance),
         format!("  socket    {}", socket.display()),
-        format!("  uptime    {}s", status.uptime_ms / 1000),
+        format!("  uptime    {}s", status.uptime_ms / units::MS_PER_SECOND),
         format!("  clients   {}", status.clients),
         format!("  calls     {}", status.calls),
         format!("  streams   {}", status.streams),

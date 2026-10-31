@@ -8,6 +8,7 @@
 
 use ring::rand::{SecureRandom, SystemRandom};
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::units;
 use serde_json::{Value, json};
 
 use super::http::{Auth, Fault, Reply, success_code};
@@ -289,7 +290,8 @@ fn parse(value: &Value, started: u64, now: u64) -> Result<Issued, TokenError> {
     }
     let (expires_in, expires_at) = (positive("expiresIn")?, positive("expiresAt")?);
     // expiresIn 从发出签发请求时保守起算，网络耗时不变成额外有效期。
-    let expires_at = (expires_at * 1000.0).min(started as f64 + expires_in * 1000.0);
+    let expires_at = (expires_at * units::MS_PER_SECOND_F64)
+        .min(started as f64 + expires_in * units::MS_PER_SECOND_F64);
     if !expires_at.is_finite() || expires_at <= now as f64 {
         return Err(invalid);
     }

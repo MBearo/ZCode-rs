@@ -32,18 +32,23 @@ pub fn resolve(preference: Option<&str>, vars: &BTreeMap<String, String>) -> Lan
 /// 系统语言（Node `detectLocale`）：依次看 `LC_ALL`、`LC_MESSAGES`、`LANG`、`LANGUAGE`（冒号分隔的列表），
 /// 第一个认得出的值生效；`C`、`POSIX` 与不支持的语言跳过。
 fn detect(vars: &BTreeMap<String, String>) -> Option<Lang> {
-    ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"]
-        .into_iter()
-        .filter_map(|key| Some((key, vars.get(key)?.trim())))
-        .flat_map(|(key, value)| {
-            let candidates: Vec<&str> = if key == "LANGUAGE" {
-                value.split(':').map(str::trim).collect()
-            } else {
-                vec![value]
-            };
-            candidates
-        })
-        .find_map(normalize)
+    [
+        rust_cli_base::names::env::LC_ALL,
+        rust_cli_base::names::env::LC_MESSAGES,
+        rust_cli_base::names::env::LANG,
+        rust_cli_base::names::env::LANGUAGE,
+    ]
+    .into_iter()
+    .filter_map(|key| Some((key, vars.get(key)?.trim())))
+    .flat_map(|(key, value)| {
+        let candidates: Vec<&str> = if key == rust_cli_base::names::env::LANGUAGE {
+            value.split(':').map(str::trim).collect()
+        } else {
+            vec![value]
+        };
+        candidates
+    })
+    .find_map(normalize)
 }
 
 /// Node `normalizeLocale`：去掉 `.编码` 与 `@修饰`，`_` 换成 `-`，`en` / `en-*` 是英文，`zh` / `zh-*` 是中文。
@@ -168,7 +173,7 @@ mod tests {
 
     #[test]
     fn the_setting_wins_and_system_follows_the_locale() {
-        let zh_env = vars(&[("LANG", "zh_CN.UTF-8")]);
+        let zh_env = vars(&[(rust_cli_base::names::env::LANG, "zh_CN.UTF-8")]);
         assert_eq!(resolve(Some("en-US"), &zh_env), Lang::En);
         assert_eq!(resolve(Some("zh-CN"), &vars(&[])), Lang::Zh);
         assert_eq!(resolve(Some("auto"), &zh_env), Lang::Zh);
@@ -180,18 +185,45 @@ mod tests {
     #[test]
     fn the_system_locale_follows_node_detection() {
         let detect = |pairs: &[(&str, &str)]| resolve(None, &vars(pairs));
-        assert_eq!(detect(&[("LC_ALL", "C"), ("LANG", "zh_CN")]), Lang::Zh);
         assert_eq!(
-            detect(&[("LC_ALL", "POSIX"), ("LANG", "en_US.UTF-8")]),
-            Lang::En
-        );
-        assert_eq!(detect(&[("LC_MESSAGES", "zh_TW.Big5@stroke")]), Lang::Zh);
-        assert_eq!(
-            detect(&[("LANG", "fr_FR.UTF-8"), ("LANGUAGE", "fr:zh_CN:en")]),
+            detect(&[
+                (rust_cli_base::names::env::LC_ALL, "C"),
+                (rust_cli_base::names::env::LANG, "zh_CN")
+            ]),
             Lang::Zh
         );
-        assert_eq!(detect(&[("LANG", "en"), ("LANGUAGE", "zh")]), Lang::En);
-        assert_eq!(detect(&[("LANG", "de_DE"), ("LANGUAGE", " ")]), Lang::En);
+        assert_eq!(
+            detect(&[
+                (rust_cli_base::names::env::LC_ALL, "POSIX"),
+                (rust_cli_base::names::env::LANG, "en_US.UTF-8")
+            ]),
+            Lang::En
+        );
+        assert_eq!(
+            detect(&[(rust_cli_base::names::env::LC_MESSAGES, "zh_TW.Big5@stroke")]),
+            Lang::Zh
+        );
+        assert_eq!(
+            detect(&[
+                (rust_cli_base::names::env::LANG, "fr_FR.UTF-8"),
+                (rust_cli_base::names::env::LANGUAGE, "fr:zh_CN:en")
+            ]),
+            Lang::Zh
+        );
+        assert_eq!(
+            detect(&[
+                (rust_cli_base::names::env::LANG, "en"),
+                (rust_cli_base::names::env::LANGUAGE, "zh")
+            ]),
+            Lang::En
+        );
+        assert_eq!(
+            detect(&[
+                (rust_cli_base::names::env::LANG, "de_DE"),
+                (rust_cli_base::names::env::LANGUAGE, " ")
+            ]),
+            Lang::En
+        );
         assert_eq!(Lang::Zh.code(), "zh-CN");
     }
 

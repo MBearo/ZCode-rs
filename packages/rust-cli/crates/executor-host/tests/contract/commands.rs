@@ -1,5 +1,5 @@
 //! `Commands` 与 `Shell` 的当前目录：输出合流与退出码、超时结束进程树、取消是一条消息、会话 cwd 的延续与重置、
-//! 同一个 operationId 只跑一次、环境变量白名单、残留进程回收、hook 的 stdin 与分开的 stderr、会话关闭。
+//! 结束的命令不留登记（工作线 F119）、环境变量白名单、残留进程回收、hook 的 stdin 与分开的 stderr、会话关闭。
 //! 需要 `/bin/bash`，Windows 上跳过。
 #![cfg(unix)]
 
@@ -13,7 +13,7 @@ use rust_cli_kernel_api::ids::{OperationId, SessionId};
 
 use crate::contract;
 use crate::shell_support::{exit_of, shell};
-use crate::support::{Kind, context};
+use crate::support::Kind;
 
 async fn stdout_and_stderr_share_one_stream_in_order(kind: Kind) {
     let shell = shell(kind, Vec::new()).await;
@@ -46,21 +46,32 @@ async fn cancel_is_a_message_and_the_terminal_state_follows(kind: Kind) {
     shell
         .start("op1", shell.request("sleep 5", CwdScope::Pinned))
         .await;
-    let op = OperationId::new("op1");
-    assert_eq!(
-        commands.operation_status(op.clone()).await.unwrap(),
-        Outcome::Running
-    );
-    commands.cancel(op.clone()).await.unwrap();
+    commands.cancel(OperationId::new("op1")).await.unwrap();
     let ran = shell.collect("op1").await;
     assert_eq!(
         exit_of(&ran.finished),
         (Outcome::Cancelled, Some(137), false)
     );
-    assert_eq!(
-        commands.operation_status(op).await.unwrap(),
-        Outcome::Cancelled
-    );
+}
+
+/// 结束的命令不留登记（工作线 F119）：不能再按 ID 接回、取消。很快结束的命令照样经 `start_command` 的流读到全部输出
+/// （远端：执行器拿着端口给的流，等线上的第一个 `watch_command` 接走）。
+async fn a_finished_command_is_forgotten(kind: Kind) {
+    let shell = shell(kind, Vec::new()).await;
+    let ran = shell
+        .run("op1", shell.request("echo done", CwdScope::Pinned))
+        .await;
+    assert_eq!(ran.output, "done\n");
+    let commands = shell.machine.commands();
+    let mut again = commands.watch_command(OperationId::new("op1"), 0);
+    assert!(matches!(
+        again.next().await,
+        Some(Err(EnvError::NotFound { .. }))
+    ));
+    assert!(matches!(
+        commands.cancel(OperationId::new("op1")).await,
+        Err(EnvError::NotFound { .. })
+    ));
 }
 
 async fn session_cwd_persists_inside_the_roots_and_resets_outside(kind: Kind) {
@@ -106,23 +117,6 @@ async fn session_cwd_persists_inside_the_roots_and_resets_outside(kind: Kind) {
     let scope = CwdScope::Session { roots: vec![root] };
     let ran = shell.run("op5", shell.request("pwd", scope)).await;
     assert_eq!(ran.output.trim_end(), sub.to_string_lossy());
-}
-
-async fn the_same_operation_runs_once_and_other_arguments_are_rejected(kind: Kind) {
-    let shell = shell(kind, Vec::new()).await;
-    let marker = shell.root.join("count");
-    let command = format!("echo x >> '{}'", marker.display());
-    let start = shell.request(&command, CwdScope::Pinned);
-    shell.run("op1", start.clone()).await;
-    shell.start("op1", start).await;
-    let other = shell.request("echo other", CwdScope::Pinned);
-    let conflict = shell
-        .machine
-        .commands()
-        .start_command(&shell.workspace(), context("op1"), other)
-        .await;
-    assert!(matches!(conflict, Err(EnvError::OperationConflict { .. })));
-    assert_eq!(std::fs::read_to_string(&marker).unwrap(), "x\n");
 }
 
 async fn only_whitelisted_variables_reach_the_command(kind: Kind) {
@@ -173,10 +167,7 @@ async fn run_hook(
         )]),
     });
     shell.start(operation, start).await;
-    let mut events = shell
-        .machine
-        .commands()
-        .watch_command(OperationId::new(operation), 0);
+    let mut events = shell.events(operation);
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
     while let Some(event) = events.next().await {
         match event.unwrap() {
@@ -247,8 +238,8 @@ contract!(
     stdout_and_stderr_share_one_stream_in_order,
     timeout_kills_the_tree_with_exit_143,
     cancel_is_a_message_and_the_terminal_state_follows,
+    a_finished_command_is_forgotten,
     session_cwd_persists_inside_the_roots_and_resets_outside,
-    the_same_operation_runs_once_and_other_arguments_are_rejected,
     only_whitelisted_variables_reach_the_command,
     leftover_processes_are_reaped_when_the_command_exits,
     hook_reads_stdin_and_separates_stderr,

@@ -7,6 +7,7 @@
     reason = "辅助函数不在 #[test] 函数里，clippy 的测试放行不覆盖它；失败即测试失败"
 )]
 
+use rust_cli_base::models;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -111,7 +112,7 @@ async fn a_reply_is_recorded_with_the_request_as_sent_and_the_raw_events() {
     assert_eq!(record["querySource"], "main_turn");
     assert_eq!(
         record["model"],
-        json!({"modelId": "claude-sonnet-4-5", "providerId": "anthropic",
+        json!({"modelId": models::GLM_5_3, "providerId": "anthropic",
                "protocol": "anthropic-messages", "profile": "anthropic-compatible"})
     );
     let request = &record["request"];
@@ -136,7 +137,7 @@ async fn a_reply_is_recorded_with_the_request_as_sent_and_the_raw_events() {
     assert_eq!(chunks[4]["content_block"]["type"], "tool_result");
     assert_eq!(chunks[7]["type"], "message_stop");
     assert_eq!(response["responseId"], "msg_01");
-    assert_eq!(response["modelId"], "claude-sonnet-4-5");
+    assert_eq!(response["modelId"], models::GLM_5_3);
     // 工作线 F93（model-io.md §4.2）：App 读的回复字段照 Node 的形状——停止原因是 AI SDK 的统一值，用量是 Node 的键名，
     // 文字由事件拼出；F91 时是 `end_turn` 与 Anthropic 的键名。原值在 `chunks` 里。
     assert_eq!(response["finishReason"], "stop");
@@ -159,7 +160,7 @@ async fn a_reply_is_recorded_with_the_request_as_sent_and_the_raw_events() {
 /// 推理、两段文字、一个本地调用（参数分两段）与一个服务端调用（参数在原始事件的增量里，解码器不输出），停在 tool_use。
 fn reply_with_calls() -> String {
     let mut stream = event(json!({"type": "message_start", "message": {
-        "id": "msg_calls", "type": "message", "role": "assistant", "model": "claude-sonnet-4-5",
+        "id": "msg_calls", "type": "message", "role": "assistant", "model": models::GLM_5_3,
         "content": [], "stop_reason": null, "stop_sequence": null,
         "usage": {"input_tokens": 20, "cache_creation_input_tokens": 3,
                   "cache_read_input_tokens": 5, "output_tokens": 1}}}));

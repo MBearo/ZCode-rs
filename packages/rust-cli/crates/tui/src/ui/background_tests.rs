@@ -363,3 +363,84 @@ fn the_agent_group_drops_local_for_an_agent_on_a_remote_machine() {
         assert!(text.iter().any(|line| line == header), "{text:#?}");
     }
 }
+
+/// 修复线 F117（tui-panels.md §3.2、§3.3）：monitor 与 shell 同组，名称是它的 description（快照条目的 `description`），
+/// 副标题与组名的数都算上它；详情是 `Monitor details`，命令一行写 `Script:`（第一次读到之前不写）。修前 monitor 的
+/// 名称是命令原文、详情写 `Shell details` 与 `Command:`。
+#[test]
+fn monitors_are_listed_with_shells_under_their_description() {
+    let mut app = app();
+    let now = Instant::now();
+    let monitor = |id: &str, description: &str| BackgroundEntry {
+        kind: BackgroundKind::Monitor,
+        ..shell(id, description)
+    };
+    app.background = vec![
+        shell("b1", "npm test"),
+        monitor("b2", "build log"),
+        monitor("s3", "deploy feed"),
+    ];
+    app.agents = AgentList {
+        entries: vec![agent("agent_a")],
+        at: Some(now),
+    };
+    app.open_background();
+    let (lines, rows) = app.background_lines(80, 30, now);
+    let text = plain(&lines);
+    assert_eq!(text[2], "  3 active shells · 1 active agent");
+    assert_eq!(text[4], "  Shells (3)");
+    assert!(
+        text[6].contains(" build log ") && text[6].ends_with("running"),
+        "{text:?}"
+    );
+    assert!(text[7].contains(" deploy feed "), "{text:?}");
+    assert_eq!(rows[..3], [(5, 0), (6, 1), (7, 2)]);
+    // x 停止：名称是 description。
+    app.on_key(key(KeyCode::Down), now);
+    assert_eq!(
+        app.on_key(key(KeyCode::Char('x')), now),
+        Some(Action::Manage(Manage::StopTask {
+            id: "b2".into(),
+            label: "build log".into(),
+        }))
+    );
+    assert_eq!(
+        app.on_key(key(KeyCode::Enter), now),
+        Some(Action::Panel(Panel::ReadShell("b2".into())))
+    );
+    app.shell_reading("b2", 1);
+    // 第一次读到之前：标题已是 monitor 的，命令还不知道，不写 `Script:`。
+    let text = plain(&app.background_lines(80, 30, now).0);
+    assert_eq!(text[1], "  Monitor details");
+    assert!(!text.iter().any(|l| l.contains("Script:")), "{text:?}");
+    let reply = ShellDetail {
+        id: "b2".into(),
+        command: "tail -f build.log | grep --line-buffered ERROR".into(),
+        ..detail(BackgroundStatus::Running, &["ERROR one"], 1)
+    };
+    assert!(app.on_shell_detail("b2", 1, Some(reply)));
+    let text = plain(&app.background_lines(80, 30, now).0);
+    assert_eq!(text[1], "  Monitor details");
+    assert_eq!(text[3], "  Status: running");
+    assert_eq!(
+        text[5],
+        "  Script: tail -f build.log | grep --line-buffered ERROR"
+    );
+    assert!(!text.iter().any(|l| l.contains("Command:")), "{text:?}");
+    assert_eq!(
+        text.last().unwrap(),
+        "  ← to go back · x to stop · Esc to close"
+    );
+    app.lang = Lang::Zh;
+    let text = plain(&app.background_lines(80, 30, now).0);
+    assert_eq!(text[1], "  Monitor 详情");
+    assert!(text[5].starts_with("  脚本：tail -f build.log"), "{text:?}");
+    // shell 的详情不变。
+    app.lang = Lang::En;
+    app.on_key(key(KeyCode::Left), now);
+    app.on_key(key(KeyCode::Up), now);
+    app.on_key(key(KeyCode::Enter), now);
+    let text = plain(&app.background_lines(80, 30, now).0);
+    assert_eq!(text[1], "  Shell details");
+    assert!(text.iter().any(|l| l == "  Command: npm test"), "{text:?}");
+}

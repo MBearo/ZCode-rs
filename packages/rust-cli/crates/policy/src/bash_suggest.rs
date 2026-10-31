@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use rust_cli_kernel_api::permission::PermissionRule;
 
 use crate::check::{AskKind, Check};
+use crate::consts::DOUBLE_OPERATOR_LEN;
 use crate::parse::{Analysis, Operator};
 use crate::suggest::suggestion;
 
@@ -18,10 +19,10 @@ fn heredoc_quoted(text: &str) -> Option<bool> {
     let at = (0..bytes.len().saturating_sub(1)).find(|&index| {
         bytes[index] == b'<'
             && bytes[index + 1] == b'<'
-            && bytes.get(index + 2) != Some(&b'<')
+            && bytes.get(index + DOUBLE_OPERATOR_LEN) != Some(&b'<')
             && (index == 0 || bytes[index - 1] != b'<')
     })?;
-    let rest = text[at + 2..].trim_start_matches('-');
+    let rest = text[at + DOUBLE_OPERATOR_LEN..].trim_start_matches('-');
     let word = rest
         .trim_start_matches([' ', '\t'])
         .split([' ', '\t', '\n', ';', '&', '|'])

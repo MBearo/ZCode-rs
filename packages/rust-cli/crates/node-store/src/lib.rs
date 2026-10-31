@@ -22,13 +22,13 @@ mod load;
 mod mode;
 mod node_checkpoints;
 mod notices;
-mod operations;
 mod project_mode;
 mod project_rules;
 mod query;
 mod records;
 mod repo;
 mod rewind;
+mod rust_entries;
 mod state;
 mod task_lists;
 mod tool_content;
@@ -342,7 +342,7 @@ impl SessionStore for NodeStore {
         kind: &str,
     ) -> Result<Vec<(String, serde_json::Value)>, StoreError> {
         let (session, kind) = (session.as_str().to_owned(), kind.to_owned());
-        self.with_db(move |conn, _| operations::kind_entries(conn, &session, &kind))
+        self.with_db(move |conn, _| rust_entries::kind_entries(conn, &session, &kind))
             .await
     }
 

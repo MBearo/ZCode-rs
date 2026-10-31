@@ -8,6 +8,25 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { EventEmitter, once } from "node:events";
 
+// ── 脚本一侧的模型 ID 与主机（工作线 F121，docs/specs/rust-cli/README.md §4.1 第 6 条）：与 Rust 的 base `models`、
+// `hosts` 同值；边界检查只许它们出现在这里。──
+
+/** 第一方的缺省模型（同 base `models::GLM_5_3`）：GLM 按 opus 的卡片形状发请求（model.md §11.1）。 */
+export const GLM_5_3 = "glm-5.3";
+/** 有卡片的模型（同 base `models::OPUS_5_5`）：只有测这张卡片自己的值（身份、上限）时用它。 */
+export const OPUS_5_5 = "claude-opus-5-5";
+/** 同 base `models` 里的同名常量：GLM 的别的 ID、账号 provider 里大写的写法、Provider 夹具里的模型。 */
+export const GLM_5 = "glm-5";
+export const GLM_5_3_ACCOUNT = "GLM-5.3";
+export const GLM_5_3_FLASH_ACCOUNT = "GLM-5.3-Flash";
+export const OPUS_5 = "claude-opus-5";
+export const GPT_5_4 = "gpt-5.4";
+/** 同 base `hosts` 里的同名常量。 */
+export const ZAI_ANTHROPIC = "https://api.z.ai/api/anthropic";
+export const OPENCODE_GO = "https://opencode.ai/zen/go/v1";
+/** npm 注册表（同 base `hosts::NPM_REGISTRY`）：发布仓库的 `npm/publish.mjs` 发包与查版本时用它。 */
+export const NPM_REGISTRY = "https://registry.npmjs.org";
+
 /** 纯文本响应。 */
 export const text = (value) => ({
   content: [{ type: "text", text: value }],

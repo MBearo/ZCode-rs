@@ -20,6 +20,9 @@ use crate::{Answer, ClientError, ClientOptions, ConnectionState};
 const QUEUE: usize = 64;
 /// 关闭时等任务收尾的时间。
 const CLOSE_GRACE: Duration = Duration::from_secs(5);
+/// 一个流的通道容量：一个窗口的事件（没有 ack 的最多 [`STREAM_WINDOW`] 项），再留一格给结束它的错误
+/// （`STREAM_WINDOW` 很小，转成 usize 不会截断）。
+const STREAM_CAPACITY: usize = STREAM_WINDOW as usize + 1;
 
 /// 到一个执行器的客户端。可以克隆；最后一份被丢掉时连接关闭。
 #[derive(Clone)]
@@ -116,8 +119,7 @@ impl ExecClient {
 
     /// 开一个流（`watch_command`、`shell_notices`）。
     pub async fn stream(&self, request: Request, body: Body) -> Result<ClientStream, ClientError> {
-        let capacity = usize::try_from(STREAM_WINDOW).unwrap_or(64) + 1;
-        let (tx, rx) = mpsc::channel(capacity);
+        let (tx, rx) = mpsc::channel(STREAM_CAPACITY);
         let call = self.register(request, body, Waiter::Stream { tx, received: 0 }, true)?;
         self.enqueue(call).await?;
         Ok(ClientStream::new(rx, call, self.inner.shared.clone()))

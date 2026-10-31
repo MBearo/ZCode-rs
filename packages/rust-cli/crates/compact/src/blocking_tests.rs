@@ -80,7 +80,7 @@ fn history(input_tokens: u64) -> Vec<rust_cli_kernel_api::message::Message> {
 fn the_compactor_blocks_at_the_line() {
     let runner = ScriptedRunner::new(Vec::new());
     let compaction = Compaction::new(ports(runner.clone(), no_tools()), CompactConfig::default());
-    let model = selection("glm-5");
+    let model = selection(rust_cli_base::models::GLM_5);
     assert_eq!(
         compaction.blocking_limit(&history(176_000), &model, None),
         None

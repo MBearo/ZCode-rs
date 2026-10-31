@@ -177,6 +177,8 @@ fn subagent_deltas_merge_like_stream_deltas() {
 fn the_log_does_not_grow_with_deltas_and_progress() {
     let retained = |blocks: usize| {
         let log = EventLog::new();
+        // 一个停在 0 的订阅流拿着下限，什么都不去掉：这里只看存的形状（保留范围另见 F120 的用例）。
+        let _held = log.subscribe(Some(0));
         let tail = "o".repeat(2_000);
         for block in 0..blocks {
             for piece in 0..1_000 {
@@ -230,4 +232,72 @@ async fn the_revision_counts_state_changes_only() {
         .await;
     // TurnStarted、两片合成一段的增量、标题、用量。
     assert_eq!(replay, vec![(1, 1), (3, 1), (4, 2), (5, 2)]);
+}
+
+/// 工作线 F120：没有订阅方落后时，条目封顶在 `RETAIN` 附近，最近的照常补发；以前会话开多久就留多久。
+#[test]
+fn the_log_keeps_a_bounded_window_when_nobody_lags() {
+    let log = EventLog::new();
+    for n in 0..20_000 {
+        log.append(title(&n.to_string()));
+    }
+    let kept = log.retained().entries as u64;
+    assert!(kept <= RETAIN + RETAIN / 4, "{kept}");
+    assert_eq!(replay(&log, log.last_seq() - 10).len(), 10);
+}
+
+/// 落后的订阅方拿着自己的位置：日志不去掉它还没读的；按读到的位置重新订阅（旧流先留着）时补发完整。它丢掉之后，下一次
+/// 整理照常收回。
+#[tokio::test]
+async fn a_lagging_subscriber_keeps_what_it_has_not_read() {
+    let log = EventLog::new();
+    let mut stream = log.subscribe(Some(0));
+    log.append(title("first"));
+    assert_eq!(stream.next().await.unwrap().seq, 1);
+    for n in 0..20_000 {
+        log.append(title(&n.to_string()));
+    }
+    // 广播缓冲满了：流结束，读到的位置仍是 1。
+    assert!(stream.next().await.is_none());
+    let mut again = log.subscribe(Some(1));
+    drop(stream);
+    let seqs: Vec<u64> = (&mut again)
+        .take(20_000)
+        .map(|event| event.seq)
+        .collect()
+        .await;
+    assert_eq!(seqs, (2..=20_001).collect::<Vec<_>>());
+    drop(again);
+    for n in 0..RETAIN * 2 {
+        log.append(title(&n.to_string()));
+    }
+    assert!(log.retained().entries as u64 <= RETAIN + RETAIN / 4);
+}
+
+/// 去掉旧条目之后，工具进度的位置照样对：同一个工具后来的进度只取代它自己的上一条，下限之后的别的事件一条不少。
+#[test]
+fn outputs_still_supersede_their_own_after_old_entries_are_dropped() {
+    let log = EventLog::new();
+    log.append(output("b1", "one"));
+    for n in 0..RETAIN * 2 {
+        log.append(title(&n.to_string()));
+    }
+    log.append(output("b1", "two"));
+    log.append(title("x"));
+    log.append(output("b1", "three"));
+    let floor = log.retained().floor;
+    assert!(floor > 1, "{floor}");
+    let replayed = replay(&log, floor);
+    let titles = replayed
+        .iter()
+        .filter(|event| matches!(event.event, KernelEvent::TitleChanged { .. }))
+        .count() as u64;
+    // 标题的 seq 是 2..=2·RETAIN+1，另有 x。
+    assert_eq!(titles, (2 * RETAIN + 1).saturating_sub(floor) + 1);
+    let outputs: Vec<&KernelEvent> = replayed
+        .iter()
+        .map(|event| &event.event)
+        .filter(|event| matches!(event, KernelEvent::ToolProgress { .. }))
+        .collect();
+    assert_eq!(outputs, vec![&output("b1", "three")]);
 }

@@ -172,7 +172,7 @@ pub(crate) fn request(messages: Vec<Message>, trigger: CompactTrigger) -> Compac
         trigger,
         selection: ModelSelection {
             provider: "anthropic".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },

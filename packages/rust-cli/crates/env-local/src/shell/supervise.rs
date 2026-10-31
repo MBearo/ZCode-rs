@@ -7,6 +7,8 @@ use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
+use rust_cli_base::proto::exit;
+use rust_cli_base::units;
 use rust_cli_kernel_api::env::{EnvError, EnvPath, Outcome, StartCommand};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::env_path::git_bash_spelling;
@@ -17,12 +19,20 @@ use rust_cli_proc::shell::single_quote;
 use rust_cli_proc::tree::Shutdown;
 
 use super::sandbox::{self, Backend};
-use super::{Finish, OutputLimit, Running, Shared};
+use super::{Finish, OutputLimit, Pending, Running, Shared};
 
 /// 超时被结束的退出码（143，SIGTERM）。
-const TIMEOUT_EXIT: i32 = 143;
+const TIMEOUT_EXIT: i32 = exit::signal_exit(exit::SIGTERM);
 /// 被取消的退出码（137，SIGKILL）。
-const CANCEL_EXIT: i32 = 137;
+const CANCEL_EXIT: i32 = exit::signal_exit(exit::SIGKILL);
+/// 根进程被 SIGTERM 结束、没有退出码时记的退出码（shell-permissions.md §2.2）。产品取的值，不是 shell 的
+/// 128 + 15 = 143，不要改成 [`exit::signal_exit`]。
+#[cfg(unix)]
+const TERMINATED_EXIT_CODE: i32 = 144;
+/// Git Bash 的盘符前缀 `/c` 的字节数（斜杠与盘符）。
+const DRIVE_PREFIX_BYTES: usize = rust_cli_base::path::DRIVE_PREFIX_LEN;
+/// 转存 monitor 的 stdout、stderr 时每次读的字节数。
+const MONITOR_READ_BUFFER_BYTES: usize = 64 * units::KIB;
 
 /// 启动前算好的位置与环境。
 pub(crate) struct Plan {
@@ -113,7 +123,7 @@ async fn open_output(plan: &Plan, path: &Path) -> std::io::Result<std::fs::File>
     options.create(true).append(true);
     // 缺陷修复 R2-1：输出只给本用户读（原来按默认权限建，常见是 0644）。
     #[cfg(unix)]
-    options.mode(0o600);
+    options.mode(rust_cli_base::proto::mode::PRIVATE_FILE);
     let file = options.open(path).await?;
     Ok(file.into_std().await)
 }
@@ -214,8 +224,8 @@ fn exit_code(status: ExitStatus) -> i32 {
     {
         use std::os::unix::process::ExitStatusExt;
         // SIGTERM 在 Linux 与 macOS 上都是 15。
-        if status.signal() == Some(15) {
-            return 144;
+        if status.signal() == Some(exit::SIGTERM) {
+            return TERMINATED_EXIT_CODE;
         }
     }
     1
@@ -265,10 +275,10 @@ fn native_cwd(text: &str, style: PathStyle) -> PathBuf {
     }
     let drive = |text: &str| {
         let bytes = text.as_bytes();
-        (bytes.len() >= 2
+        (bytes.len() >= DRIVE_PREFIX_BYTES
             && bytes[0] == b'/'
             && bytes[1].is_ascii_alphabetic()
-            && (bytes.len() == 2 || bytes[2] == b'/'))
+            && (bytes.len() == DRIVE_PREFIX_BYTES || bytes[DRIVE_PREFIX_BYTES] == b'/'))
             .then(|| char::from(bytes[1]).to_ascii_uppercase())
     };
     let windows = |letter: char, rest: &str| {
@@ -441,7 +451,7 @@ async fn tee(
         let mut options = tokio::fs::OpenOptions::new();
         options.create(true).append(true);
         #[cfg(unix)]
-        options.mode(0o600);
+        options.mode(rust_cli_base::proto::mode::PRIVATE_FILE);
         options.open(path).await
     };
     let (Ok(mut events), Ok(mut merged), Ok(mut errors)) = (
@@ -454,7 +464,7 @@ async fn tee(
     };
     let out = async {
         let Some(mut stdout) = stdout else { return };
-        let mut buffer = vec![0_u8; 64 * 1024];
+        let mut buffer = vec![0_u8; MONITOR_READ_BUFFER_BYTES];
         while let Ok(read) = stdout.read(&mut buffer).await {
             if read == 0 {
                 break;
@@ -466,7 +476,7 @@ async fn tee(
     };
     let err = async {
         let Some(mut stderr) = stderr else { return };
-        let mut buffer = vec![0_u8; 64 * 1024];
+        let mut buffer = vec![0_u8; MONITOR_READ_BUFFER_BYTES];
         while let Ok(read) = stderr.read(&mut buffer).await {
             if read == 0 {
                 break;
@@ -614,15 +624,20 @@ async fn supervise(
         output_bytes,
         output_limit,
     };
+    // 登记只放还在跑的命令（工作线 F119）：以前结束的登记按 operationId 一直留着，为的是“同 ID 再来时直接返回”，
+    // 可重连的去重本来在执行协议的账本里、本机没有重连，留下的只是一份重复的状态——远端跑了 23 小时的 TUI 留着约
+    // 2 万条（每条约 3.6 KB）。先在同一把锁里删登记（后台命令同时移出后台登记、记通知），再写终态：表里的命令都还
+    // 没有终态；已经拿到流的一方照常读完（流自己拿着这条命令）。
+    let mut state = shared.state();
+    state.commands.remove(&job.operation);
     if let Some(background) = background {
-        let mut state = shared.state();
         let shell = state.sessions.entry(job.session.clone()).or_default();
         shell.background.remove(&job.request.task);
         // TaskStop 停掉的命令不记通知：停止时任务已标成已通知，结束时不再发 task-notification
         // （docs/specs/rust-cli/shell-permissions.md §2.6）。终态仍照常写进回执。
         if !shell.stopped.remove(&job.request.task) {
             shell.next_seq = shell.next_seq.max(shell.acked) + 1;
-            shell.notices.push(ShellNotice {
+            let notice = ShellNotice {
                 seq: shell.next_seq,
                 operation: job.operation.clone(),
                 task: job.request.task.clone(),
@@ -633,9 +648,14 @@ async fn supervise(
                 exit_code: finish.exit_code,
                 kind: background.kind,
                 output_bytes: finish.output_bytes,
+            };
+            shell.notices.push(Pending {
+                notice,
+                command: job.request.command.clone(),
             });
         }
     }
+    drop(state);
     job.running.finished.send_replace(Some(finish));
     shared.notices.send_modify(|count| *count += 1);
 }

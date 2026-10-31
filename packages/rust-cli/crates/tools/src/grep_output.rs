@@ -31,8 +31,11 @@ pub(crate) fn globs(glob: Option<&str>) -> Vec<String> {
 }
 
 /// 超过 500 个字符的行不展示。
+const MAX_SHOWN_LINE: usize = 500;
+
+/// 超过 500 个字符的行不展示。
 fn clip(line: &str, kind: GrepLineKind) -> String {
-    if utf16_len(line) <= 500 {
+    if utf16_len(line) <= MAX_SHOWN_LINE {
         return line.to_owned();
     }
     match kind {

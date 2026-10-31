@@ -14,10 +14,6 @@ pub(crate) fn no_such_tool(name: &str) -> String {
     format!("<tool_use_error>Error: No such tool available: {name}</tool_use_error>")
 }
 
-pub(crate) fn tool_error(message: &str) -> String {
-    format!("<tool_use_error>{message}</tool_use_error>")
-}
-
 /// 请求前配对兜底（query.md §1.8）的几段文字。
 pub(crate) const MISSING_TOOL_RESULT: &str = "[Tool result missing due to internal error]";
 pub(crate) const ORPHANED_TOOL_RESULT: &str =

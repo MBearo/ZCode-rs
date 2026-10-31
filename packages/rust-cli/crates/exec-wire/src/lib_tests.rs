@@ -22,7 +22,7 @@ fn every_method_has_one_request_whose_json_op_is_its_name() {
         .collect();
     let all: BTreeSet<&str> = Op::ALL.iter().map(|op| op.as_str()).collect();
     assert_eq!(ops, all);
-    assert_eq!(Op::ALL.len(), 36);
+    assert_eq!(Op::ALL.len(), 34);
     for request in requests {
         let value = serde_json::to_value(&request).unwrap();
         assert_eq!(value["op"], request.op().as_str());
@@ -302,5 +302,49 @@ fn the_env_update_is_its_own_capability() {
             .unwrap()
             .get("session_env")
             .is_none()
+    );
+}
+
+/// 修复线 F117（docs/specs/rust-cli/remote-exec.md §18.4）：`background.background_command` 的回复加了可选的 `kind` 与
+/// `description`。旧执行器的回复没有它们，解成 Bash 与空；Bash 与空不写出（旧客户端看到的回复不变）；monitor 写出、往返
+/// 不变，旧客户端忽略不认识的字段。
+#[test]
+fn an_older_background_reply_decodes_as_a_bash_command() {
+    use crate::dto::command::BackgroundKind;
+    use crate::dto::shell::{BackgroundInfo, BackgroundStatus};
+    let plain = json!({"command": "sleep 9", "status": "running"});
+    let old: ReplyHeader = serde_json::from_value(json!({
+        "call": 5,
+        "result": {"ok": {"op": "background.background_command", "value": plain}}
+    }))
+    .unwrap();
+    let ReplyResult::Ok(Reply::BackgroundCommand(Some(info))) = &old.result else {
+        panic!("{old:?}");
+    };
+    assert_eq!(
+        (info.kind, info.description.as_str()),
+        (BackgroundKind::Bash, "")
+    );
+    assert_eq!(
+        serde_json::to_value(&old).unwrap()["result"]["ok"]["value"],
+        plain
+    );
+    let monitor = BackgroundInfo {
+        command: "tail -f build.log".to_owned(),
+        status: BackgroundStatus::Running,
+        kind: BackgroundKind::Monitor,
+        description: "build log".to_owned(),
+    };
+    let value = serde_json::to_value(&monitor).unwrap();
+    assert_eq!(
+        value,
+        json!({
+            "command": "tail -f build.log", "status": "running", "kind": "monitor",
+            "description": "build log"
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<BackgroundInfo>(value).unwrap(),
+        monitor
     );
 }

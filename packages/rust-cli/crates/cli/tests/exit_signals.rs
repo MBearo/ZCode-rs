@@ -13,6 +13,7 @@
 
 mod sse;
 
+use rust_cli_base::models::GLM_5_3;
 use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 
@@ -78,7 +79,7 @@ fn run_and_signal(signal: &str) -> Option<i32> {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -159,7 +160,7 @@ fn signal_during_the_prompt_hook(signal: &str) -> (Option<i32>, String) {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -281,7 +282,7 @@ fn stream_json_and_signal(signal: &str) -> (Option<i32>, String) {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

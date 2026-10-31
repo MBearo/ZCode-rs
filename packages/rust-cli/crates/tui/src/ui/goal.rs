@@ -11,22 +11,12 @@ use super::text::{truncate_line, wrap_text};
 
 /// 时长只写最高的一个单位。
 pub fn duration(ms: u64) -> String {
-    let seconds = ms / 1000;
-    match seconds {
-        0..60 => format!("{seconds}s"),
-        60..3600 => format!("{}m", seconds / 60),
-        3600..86_400 => format!("{}h", seconds / 3600),
-        _ => format!("{}d", seconds / 86_400),
-    }
+    super::quantities::largest_unit_text(ms)
 }
 
 /// token 数：一千以上写成 `1.2k`。
 pub fn tokens(count: u64) -> String {
-    if count >= 1000 {
-        format!("{:.1}k", count as f64 / 1000.0)
-    } else {
-        count.to_string()
-    }
+    super::quantities::thousands(count)
 }
 
 fn turns(lang: Lang, count: u32) -> String {

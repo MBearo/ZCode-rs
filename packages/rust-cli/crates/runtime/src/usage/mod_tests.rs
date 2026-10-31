@@ -5,6 +5,7 @@ use std::sync::Arc;
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
+use rust_cli_base::models::OPUS_5_5;
 use rust_cli_kernel_api::context_usage::{ContextUsageQuery, UsageCategory};
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{CommandId, EnvironmentId};
@@ -46,10 +47,11 @@ impl ModelPort for Counting {
     }
 }
 
-fn opus() -> ModelSelection {
+/// Anthropic 的有卡片的模型：窗口按卡片是 1,000,000（下面的窗口与缓冲按它算；卡片的窗口只给有卡片的模型）。
+fn carded() -> ModelSelection {
     ModelSelection {
         provider: "anthropic".to_owned(),
-        model: "claude-opus-5-5".to_owned(),
+        model: OPUS_5_5.to_owned(),
         reasoning: None,
         connection: None,
     }
@@ -74,7 +76,7 @@ fn setup(model: Arc<Counting>) -> LocalKernel {
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: opus(),
+            selection: carded(),
             mode: PermissionMode::Default,
             max_turns: None,
             search_tools: false,
@@ -95,7 +97,7 @@ fn query(session: Option<rust_cli_kernel_api::ids::SessionId>) -> ContextUsageQu
     ContextUsageQuery {
         session,
         workspace: workspace(),
-        selection: opus(),
+        selection: carded(),
         mode: PermissionMode::Default,
     }
 }
@@ -138,7 +140,7 @@ async fn a_session_with_usage_measures_messages_from_the_anchor() {
         .create_session(CreateSession {
             id: None,
             workspace: workspace(),
-            selection: opus(),
+            selection: carded(),
             mode: PermissionMode::Default,
             plan: false,
         })

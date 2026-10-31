@@ -19,6 +19,7 @@ mod bfs_args;
 pub mod chain;
 pub mod check;
 pub mod classifier;
+mod consts;
 mod files;
 pub mod guarded;
 mod parse;

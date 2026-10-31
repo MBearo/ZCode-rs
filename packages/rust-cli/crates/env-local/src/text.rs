@@ -1,5 +1,8 @@
 //! 按行选取文本（读文件的内存路径）。纯函数，没有 IO。
 
+/// 开头的 BOM（U+FEFF）在 UTF-8 里的字节数。
+const BOM_BYTES: u64 = '\u{feff}'.len_utf8() as u64;
+
 /// 选取结果；字段与 `readFileInRange` 的返回值同名。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Selected {
@@ -22,7 +25,7 @@ pub(crate) fn select(
     max_lines: Option<u64>,
 ) -> Selected {
     let (text, total_bytes) = match text.strip_prefix('\u{feff}') {
-        Some(rest) => (rest, total_bytes.saturating_sub(3)),
+        Some(rest) => (rest, total_bytes.saturating_sub(BOM_BYTES)),
         None => (text, total_bytes),
     };
     if start_line == 0 && max_lines.is_none() {

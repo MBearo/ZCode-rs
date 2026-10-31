@@ -7,9 +7,14 @@
 //! 时刻是注入的时钟给的毫秒数（README §4：内核不用单调时钟的类型），由调用方传入，所以测试不用等。
 
 use rust_cli_base::js::string::{trim, utf16_len, utf16_prefix};
+use rust_cli_base::units;
 
 use crate::env_shell::SocketEvent;
 use crate::monitor::MonitorArmed;
+
+/// 输出流连续出错这么多次就不再按游标重新订阅（这个 monitor 之后只等终态通知）。命令结束后 `watch_command` 给
+/// `NotFound`（工作线 F119），所以会话 actor 与 agents 的转发任务都要有这个上限，不然一直重新订阅。
+pub const STREAM_RETRIES: u8 = 3;
 
 /// 一行最多这么多 UTF-16 单位。
 const LINE_LIMIT: usize = 500;
@@ -24,6 +29,8 @@ const BUCKET: u32 = 10;
 const REFILL: u64 = 2_000;
 /// 连续压下超过这么久就停掉（毫秒）。
 const SUPPRESS_LIMIT: u64 = 30_000;
+/// 最后一次压下之后安静这么多个补充周期，压下的计时重新开始。
+const QUIET_REFILLS: u64 = 3;
 
 /// 交给通道的一条通知（`<event>` 里的内容，未转义）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,7 +224,7 @@ impl Watch {
             self.suppressed = 0;
             if self
                 .last_suppressed
-                .is_some_and(|last| now.saturating_sub(last) > REFILL * 3)
+                .is_some_and(|last| now.saturating_sub(last) > REFILL * QUIET_REFILLS)
             {
                 self.suppress_start = None;
             }
@@ -242,7 +249,7 @@ impl Watch {
             self.stopped = true;
             step.stop = true;
             // Math.round(毫秒 / 1000)。
-            let seconds = (now.saturating_sub(start) + 500) / 1000;
+            let seconds = units::round_ms_to_seconds(now.saturating_sub(start));
             step.emits.push(Emit::Notice(Housekeeping::TooMuchOutput {
                 suppressed: self.suppressed,
                 seconds,

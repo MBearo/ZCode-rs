@@ -1,6 +1,9 @@
 //! 不带参数的 `/rename` 的文本处理与请求（docs/specs/rust-cli/titles.md §8.3–§8.5）：对话文本、JSON 解析与
 //! 名字的清理。
 
+use std::ops::RangeInclusive;
+
+use rust_cli_base::chars;
 use rust_cli_kernel_api::history;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
@@ -73,7 +76,7 @@ pub(crate) fn clean_name(name: &str) -> Option<String> {
     let mut spaced = String::with_capacity(name.len());
     let mut in_run = false;
     for c in name.trim().chars() {
-        let invisible = c.is_control() || is_format(c) || c == '\u{2028}' || c == '\u{2029}';
+        let invisible = c.is_control() || is_format(c) || chars::is_line_break_separator(c);
         if invisible {
             if !in_run {
                 spaced.push(' ');
@@ -88,42 +91,43 @@ pub(crate) fn clean_name(name: &str) -> Option<String> {
     (!cleaned.is_empty()).then(|| cleaned.to_owned())
 }
 
+/// Unicode 的格式字符（General_Category = Cf）里双向与零宽之外的部分；双向控制符与零宽字符（U+061C、
+/// U+200B–U+200F、U+202A–U+202E、U+2066–U+206F、U+FEFF）用 base 的同一张表（constants.md §5.1.4）。
+const OTHER_FORMAT: [RangeInclusive<u32>; 16] = [
+    0xAD..=0xAD,
+    0x600..=0x605,
+    0x6DD..=0x6DD,
+    0x70F..=0x70F,
+    0x890..=0x891,
+    0x8E2..=0x8E2,
+    0x180E..=0x180E,
+    0x2060..=0x2064,
+    0xFFF9..=0xFFFB,
+    0x110BD..=0x110BD,
+    0x110CD..=0x110CD,
+    0x13430..=0x1343F,
+    0x1BCA0..=0x1BCA3,
+    0x1D173..=0x1D17A,
+    0xE0001..=0xE0001,
+    0xE0020..=0xE007F,
+];
+
 /// Unicode 的格式字符（General_Category = Cf）。
 fn is_format(c: char) -> bool {
-    matches!(
-        u32::from(c),
-        0xAD | 0x600..=0x605
-            | 0x61C
-            | 0x6DD
-            | 0x70F
-            | 0x890..=0x891
-            | 0x8E2
-            | 0x180E
-            | 0x200B..=0x200F
-            | 0x202A..=0x202E
-            | 0x2060..=0x2064
-            | 0x2066..=0x206F
-            | 0xFEFF
-            | 0xFFF9..=0xFFFB
-            | 0x110BD
-            | 0x110CD
-            | 0x13430..=0x1343F
-            | 0x1BCA0..=0x1BCA3
-            | 0x1D173..=0x1D17A
-            | 0xE0001
-            | 0xE0020..=0xE007F
-    )
+    let code = u32::from(c);
+    chars::is_bidi_or_zero_width(c) || OTHER_FORMAT.iter().any(|range| range.contains(&code))
 }
 
 /// 起名请求（titles.md §8.4）：身份句与起名提示、一条 user，没有工具与 thinking；输出上限与 effort 按模型
-/// 卡片（与主循环相同），structured output 用起名的 JSON schema。
-/// `session`：发请求的会话（工作线 F52：`metadata.user_id` 的 `session_id`，model.md §3.3）。
+/// 卡片（与主循环相同；借卡片形状的 GLM 的上限按目录 `configured_output`，工作线 F121），structured output 用起名的
+/// JSON schema。`session`：发请求的会话（工作线 F52：`metadata.user_id` 的 `session_id`，model.md §3.3）。
 pub(crate) fn request(
     selection: &ModelSelection,
     session: &SessionId,
-    conversation: &str,
+    (conversation, configured_output): (&str, Option<u64>),
 ) -> ModelRequest {
-    let card = models::card(&selection.model);
+    let max_tokens = models::card_output_limit(&selection.model, configured_output)
+        .unwrap_or(DEFAULT_MAX_TOKENS);
     let block = |text: &str| SystemBlock {
         text: text.to_owned(),
         cache_control: None,
@@ -142,7 +146,7 @@ pub(crate) fn request(
         }],
         tools: Vec::new(),
         tool_choice: None,
-        max_tokens: card.map_or(DEFAULT_MAX_TOKENS, |card| card.max_output_tokens),
+        max_tokens,
         thinking: None,
         temperature: None,
         betas: Vec::new(),

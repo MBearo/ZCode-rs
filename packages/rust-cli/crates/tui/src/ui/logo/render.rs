@@ -16,6 +16,43 @@ const BEVEL: f64 = 0.07;
 const DOME: f64 = 0.22;
 /// 透视的观察距离。
 const VIEW: f64 = 4.0;
+/// 一个盲文字符的点：2 列、4 行。
+const DOT_COLUMNS: usize = DOT_BITS.len();
+const DOT_ROWS: usize = DOT_BITS[0].len();
+/// 按短边缩放时留给透视放大的余量（只占短边的 95%）。
+const FIT: f64 = 0.95;
+/// 反射里的两条灯条：沿对角线的位置（偏移）、宽度；副灯条的亮度。
+const MAIN_STRIP_OFFSET: f64 = 0.31;
+const MAIN_STRIP_WIDTH: f64 = 0.15;
+const SECOND_STRIP_OFFSET: f64 = 0.36;
+const SECOND_STRIP_WIDTH: f64 = 0.07;
+const SECOND_STRIP_GAIN: f64 = 0.4;
+/// 菲涅耳：正面的反射率、掠射时加上的部分与它随角度变化的幂。
+const FRESNEL_BASE: f64 = 0.8;
+const FRESNEL_GAIN: f64 = 0.2;
+const FRESNEL_POWER: i32 = 3;
+/// 拉丝的细纹：横纹的频率与深浅，颗粒的两个频率与深浅。
+const GRAIN_LINES: f64 = 160.0;
+const GRAIN_LINE_DEPTH: f64 = 0.025;
+const GRAIN_SPECKLE_X: f64 = 37.0;
+const GRAIN_SPECKLE_Y: f64 = 91.0;
+const GRAIN_SPECKLE_DEPTH: f64 = 0.012;
+/// 侧面：距离场的值在 `STEP × 这个比例` 以内的格画侧面。
+const SIDE_BAND: f64 = 0.8;
+
+/// 两套金属与环境的颜色：浅色背景、深色背景。
+const METAL_LIGHT: Metal = Metal {
+    base: (58, 64, 76),
+    sky_top: (150, 158, 172),
+    sky_bottom: (70, 76, 88),
+    strip: (250, 252, 255),
+};
+const METAL_DARK: Metal = Metal {
+    base: (40, 46, 60),
+    sky_top: (150, 162, 186),
+    sky_bottom: (38, 44, 58),
+    strip: (248, 251, 255),
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Cell {
@@ -47,52 +84,44 @@ pub struct Metal {
 
 impl Metal {
     pub fn new(light: bool) -> Self {
-        if light {
-            Self {
-                base: (58, 64, 76),
-                sky_top: (150, 158, 172),
-                sky_bottom: (70, 76, 88),
-                strip: (250, 252, 255),
-            }
-        } else {
-            Self {
-                base: (40, 46, 60),
-                sky_top: (150, 162, 186),
-                sky_bottom: (38, 44, 58),
-                strip: (248, 251, 255),
-            }
-        }
+        if light { METAL_LIGHT } else { METAL_DARK }
     }
 
     /// `normal` 与 `view`（指向观察者）都是单位向量；`grain` 是拉丝纹理的明暗（±几个百分点）。
     fn shade(&self, normal: [f64; 3], view: [f64; 3], grain: f64) -> Rgb {
-        let facing = (0..3).map(|i| normal[i] * view[i]).sum::<f64>();
+        let facing = normal.iter().zip(view).map(|(n, v)| n * v).sum::<f64>();
         let reflect: [f64; 3] = std::array::from_fn(|i| 2.0 * facing * normal[i] - view[i]);
         // 灯条沿左上—右下的对角线排布：主灯条在左上，副灯条在右下；天光上亮下暗（y 向下）。
         let along = (reflect[0] + reflect[1]) * FRAC_1_SQRT_2;
-        let main = (-((along + 0.31) / 0.15).powi(2)).exp();
-        let second = 0.4 * (-((along - 0.36) / 0.07).powi(2)).exp();
-        let sky = (0.5 - reflect[1] * 0.5).clamp(0.0, 1.0);
+        let main = (-((along + MAIN_STRIP_OFFSET) / MAIN_STRIP_WIDTH).powi(2)).exp();
+        let second = SECOND_STRIP_GAIN
+            * (-((along - SECOND_STRIP_OFFSET) / SECOND_STRIP_WIDTH).powi(2)).exp();
+        let sky = ((1.0 - reflect[1]) / 2.0).clamp(0.0, 1.0);
         let environment = blend(self.sky_bottom, self.sky_top, sky);
         let environment = blend(environment, self.strip, (main + second).min(1.0));
         // 金属正面就有很强的反射；掠射角越大越强，倒角边缘因此是亮边。
-        let fresnel = 0.8 + 0.2 * (1.0 - facing.clamp(0.0, 1.0)).powi(3);
+        let fresnel =
+            FRESNEL_BASE + FRESNEL_GAIN * (1.0 - facing.clamp(0.0, 1.0)).powi(FRESNEL_POWER);
         let metal = blend(self.base, environment, fresnel);
-        let scale = |v: u8| (f64::from(v) * (1.0 + grain)).clamp(0.0, 255.0).round() as u8;
+        let scale = |v: u8| {
+            (f64::from(v) * (1.0 + grain))
+                .clamp(0.0, f64::from(u8::MAX))
+                .round() as u8
+        };
         (scale(metal.0), scale(metal.1), scale(metal.2))
     }
 }
 
 /// 一帧的点阵：`columns × rows` 个字符，按行排列。
 pub fn frame(columns: usize, rows: usize, pose: Pose, metal: &Metal) -> Vec<Cell> {
-    let (width, height) = (columns * 2, rows * 4);
+    let (width, height) = (columns * DOT_COLUMNS, rows * DOT_ROWS);
     let mut depth = vec![f64::NEG_INFINITY; width * height];
     let mut color = vec![(0, 0, 0); width * height];
     let shape = &*FIELD;
     let (yaw_sin, yaw_cos) = pose.yaw.sin_cos();
     let (pitch_sin, pitch_cos) = pose.pitch.sin_cos();
     // 盲文的点在屏幕上接近正方形：按短边缩放，留出透视放大的余量。
-    let scale = width.min(height) as f64 * 0.5 / 0.95 / EXTENT;
+    let scale = width.min(height) as f64 / 2.0 / FIT / EXTENT;
     let (center_x, center_y) = (width as f64 / 2.0, height as f64 / 2.0);
     let turn = |[x, y, z]: [f64; 3]| {
         let (x1, z1) = (x * yaw_cos + z * yaw_sin, z * yaw_cos - x * yaw_sin);
@@ -121,8 +150,8 @@ pub fn frame(columns: usize, rows: usize, pose: Pose, metal: &Metal) -> Vec<Cell
         let length = to_eye.iter().map(|v| v * v).sum::<f64>().sqrt();
         let view = to_eye.map(|v| v / length);
         // 拉丝：沿横向的细纹，再叠一点不规则的颗粒。
-        let grain =
-            (point[1] * 160.0).sin() * 0.025 + (point[0] * 37.0 + point[1] * 91.0).sin() * 0.012;
+        let grain = (point[1] * GRAIN_LINES).sin() * GRAIN_LINE_DEPTH
+            + (point[0] * GRAIN_SPECKLE_X + point[1] * GRAIN_SPECKLE_Y).sin() * GRAIN_SPECKLE_DEPTH;
         color[i] = metal.shade(normal, view, grain);
     };
     for row in 1..GRID - 1 {
@@ -147,7 +176,7 @@ pub fn frame(columns: usize, rows: usize, pose: Pose, metal: &Metal) -> Vec<Cell
                 plot([x, y, z], [nx / length, ny / length, nz / length]);
                 plot([x, y, -z], [nx / length, ny / length, -nz / length]);
             }
-            if d.abs() < STEP * 0.8 {
+            if d.abs() < STEP * SIDE_BAND {
                 let side = HALF_DEPTH - BEVEL;
                 let layers = (side * 2.0 / STEP).ceil() as usize;
                 for layer in 0..=layers {
@@ -163,7 +192,7 @@ pub fn frame(columns: usize, rows: usize, pose: Pose, metal: &Metal) -> Vec<Cell
         let (mut sum, mut count) = ([0u32; 3], 0u32);
         for (dx, bits) in DOT_BITS.iter().enumerate() {
             for (dy, bit) in bits.iter().enumerate() {
-                let i = (row * 4 + dy) * width + column * 2 + dx;
+                let i = (row * DOT_ROWS + dy) * width + column * DOT_COLUMNS + dx;
                 if depth[i].is_finite() {
                     cell.dots |= bit;
                     let (r, g, b) = color[i];
@@ -186,11 +215,11 @@ pub fn frame(columns: usize, rows: usize, pose: Pose, metal: &Metal) -> Vec<Cell
 
 /// 舞台上的字符格 → 徽章上的位置（-1..1，徽章边缘为 ±1）：与 [`frame`] 的投影相同的缩放。
 pub fn badge_point(columns: usize, rows: usize, column: f64, row: f64) -> [f64; 2] {
-    let (width, height) = ((columns * 2) as f64, (rows * 4) as f64);
-    let scale = width.min(height) * 0.5 / 0.95 / EXTENT;
+    let (width, height) = ((columns * DOT_COLUMNS) as f64, (rows * DOT_ROWS) as f64);
+    let scale = width.min(height) / 2.0 / FIT / EXTENT;
     let half = super::shape::BADGE_HALF;
     [
-        ((column * 2.0 - width / 2.0) / scale / half).clamp(-1.0, 1.0),
-        ((row * 4.0 - height / 2.0) / scale / half).clamp(-1.0, 1.0),
+        ((column * DOT_COLUMNS as f64 - width / 2.0) / scale / half).clamp(-1.0, 1.0),
+        ((row * DOT_ROWS as f64 - height / 2.0) / scale / half).clamp(-1.0, 1.0),
     ]
 }

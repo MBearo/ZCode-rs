@@ -2,6 +2,7 @@
 //! docs/specs/rust-cli/memory.md §2）：从工作区根往上找 `.git`，经执行环境的 `stat`。
 
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::env_git::has_git_marker;
 use rust_cli_kernel_api::machine::Files;
@@ -16,7 +17,7 @@ pub async fn project_root(files: &dyn Files, workspace: &WorkspaceRef) -> EnvPat
     let style = PathStyle::infer(workspace.root.as_str());
     let mut current = Some(style.normalize(workspace.root.as_str()));
     while let Some(dir) = current {
-        if has_git_marker(files, workspace, &style.join(&dir, &[".git"])).await {
+        if has_git_marker(files, workspace, &style.join(&dir, &[GIT_DIR])).await {
             return EnvPath::new(dir);
         }
         current = style.parent(&dir);

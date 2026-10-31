@@ -5,6 +5,7 @@ use super::{
     js,
     tables::{Kind, Policy},
 };
+use crate::consts::{OPTION_WITH_VALUE_WORDS, SHORT_OPTION_LEN};
 use std::collections::HashMap;
 
 /// `OPTION_PATTERN` (`/^-[a-zA-Z0-9_-]/`); also implies length > 1.
@@ -109,7 +110,11 @@ fn scan(
                     if !kind_matches(value, kind) {
                         return false;
                     }
-                    index += if inline.is_some() { 1 } else { 2 };
+                    index += if inline.is_some() {
+                        1
+                    } else {
+                        OPTION_WITH_VALUE_WORDS
+                    };
                 }
             }
             continue;
@@ -124,7 +129,7 @@ fn short_attached<'a>(
     word: &'a str,
     flags: &HashMap<String, Kind>,
 ) -> Option<(&'a str, Kind, &'a str)> {
-    if !word.starts_with('-') || word.starts_with("--") || js::utf16_len(word) <= 2 {
+    if !word.starts_with('-') || word.starts_with("--") || js::utf16_len(word) <= SHORT_OPTION_LEN {
         return None;
     }
     let split = word.char_indices().nth(2).map_or(word.len(), |(i, _)| i);
@@ -135,7 +140,7 @@ fn short_attached<'a>(
 
 /// `-abc` where every `-a`, `-b`, `-c` takes no value.
 fn short_cluster_allowed(flag: &str, flags: &HashMap<String, Kind>) -> bool {
-    if !flag.starts_with('-') || flag.starts_with("--") || js::utf16_len(flag) <= 2 {
+    if !flag.starts_with('-') || flag.starts_with("--") || js::utf16_len(flag) <= SHORT_OPTION_LEN {
         return false;
     }
     flag[1..]

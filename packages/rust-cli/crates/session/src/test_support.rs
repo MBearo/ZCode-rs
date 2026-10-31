@@ -173,6 +173,8 @@ pub(crate) struct Setup {
     pub machines: Option<Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>>,
     /// 会话的工作目录；缺省是 [`meta`] 的 `/work`（workspace_tests.rs 的 Windows 用例改它，F57）。
     pub root: &'static str,
+    /// 会话 actor 的时钟（回合结束那一行的用时，duration_tests.rs 拨动它）；缺省固定在 1000。
+    pub clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
 }
 
 impl Setup {
@@ -206,6 +208,7 @@ impl Setup {
             store: None,
             machines: None,
             root: "/work",
+            clock: Arc::new(FixedClock(1_000)),
         }
     }
 
@@ -270,7 +273,7 @@ impl Setup {
                 commands: self.commands,
                 inputs: self.inputs,
                 artifacts: self.artifacts.clone(),
-                clock: Arc::new(FixedClock(1_000)),
+                clock: self.clock,
                 generation: Generation::new("g1"),
                 spawner: scope.spawner(),
                 closing: scope.spawner(),

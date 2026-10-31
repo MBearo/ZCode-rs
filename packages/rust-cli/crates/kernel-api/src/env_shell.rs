@@ -270,6 +270,12 @@ pub struct BackgroundInfo {
     /// 命令原文（TaskStop 结果的 `command`）。
     pub command: String,
     pub status: BackgroundStatus,
+    /// 启动时的种类（`BackgroundCommand.kind`；修复线 F117 新增，缺省 Bash）：界面据此把 monitor 与 shell 分开数。
+    #[serde(default, skip_serializing_if = "BackgroundKind::is_bash")]
+    pub kind: BackgroundKind,
+    /// 启动时的说明（`BackgroundCommand.description`：Bash 的说明、Monitor 的 description；修复线 F117 新增，缺省空）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 /// 停止后台命令的结果（mutate）。终态不在这里：照常经 `watch_command` / `operation_status` 给出。

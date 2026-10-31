@@ -6,6 +6,44 @@
 //! ECMAScript `Number::toString` form (`1.0` → `1`, `1e21` → `1e+21`).
 use serde_json::{Map, Number, Value};
 
+// ── 字节的分类（`str_utf16_len`）──
+
+/// 有短转义的控制字符 `\b` 与 `\f`（`\t`、`\n`、`\r` 写字节字面量）。
+const BACKSPACE: u8 = 0x08;
+const FORM_FEED: u8 = 0x0c;
+/// C0 控制字符的最后一个（U+001F）；没有短转义的写成 `\u00xx`。
+const C0_LAST: u8 = 0x1f;
+/// ASCII 的最后一个（U+007F）。
+const ASCII_LAST: u8 = 0x7f;
+/// UTF-8 的续字节（`10xxxxxx`）。
+const CONTINUATION_FIRST: u8 = 0x80;
+const CONTINUATION_LAST: u8 = 0xbf;
+/// UTF-8 两字节序列首字节的第一个与三字节序列首字节的最后一个；再往后是四字节序列的首字节。
+const LEAD_2_FIRST: u8 = 0xc0;
+const LEAD_3_LAST: u8 = 0xef;
+
+// ── `JSON.stringify` 结果里的长度（UTF-16 码元）──
+
+/// 短转义（`\"`、`\\`、`\n` 等）。
+const SHORT_ESCAPE_LEN: u8 = 2;
+/// `\u00xx`。
+const UNICODE_ESCAPE_LEN: u8 = 6;
+/// 四字节的 UTF-8 序列在 UTF-16 里是代理对。
+const SURROGATE_PAIR_LEN: u8 = 2;
+/// 字符串两侧的引号。
+const QUOTES_LEN: usize = 2;
+/// 数组的 `[]`、对象的 `{}`。
+const BRACKETS_LEN: usize = 2;
+
+// ── 数字 ──
+
+/// 数组下标键最多的位数（最大的下标 2^32 − 2 = 4294967294 是 10 位）。
+const ARRAY_INDEX_MAX_DIGITS: usize = 10;
+/// `Number::toString`：小数点位置 n 不超过它时写定点形式，更大时写指数形式。
+const FIXED_MAX_POINT: i32 = 21;
+/// `Number::toString`：小数点位置 n 大于它（且不大于 0）时写 `0.00ddd`，再小时写指数形式。
+const FIXED_MIN_POINT: i32 = -6;
+
 /// `JSON.stringify(value)`.
 pub fn stringify(value: &Value) -> String {
     let mut out = String::new();
@@ -21,22 +59,25 @@ pub fn encode(value: &Value) -> Option<String> {
 /// `JSON.stringify(value).length`（UTF-16 码元数），不生成字符串。属性顺序不影响长度。
 pub fn utf16_len(value: &Value) -> usize {
     match value {
-        Value::Null => 4,
+        Value::Null => "null".len(),
         Value::Bool(b) => {
             if *b {
-                4
+                "true".len()
             } else {
-                5
+                "false".len()
             }
         }
         // 数字只含 ASCII。
         Value::Number(n) => number(n).len(),
         Value::String(s) => str_utf16_len(s),
         Value::Array(items) => {
-            2 + items.len().saturating_sub(1) + items.iter().map(utf16_len).sum::<usize>()
+            BRACKETS_LEN
+                + items.len().saturating_sub(1)
+                + items.iter().map(utf16_len).sum::<usize>()
         }
         Value::Object(map) => {
-            2 + map.len().saturating_sub(1)
+            BRACKETS_LEN
+                + map.len().saturating_sub(1)
                 + map
                     .iter()
                     .map(|(key, value)| str_utf16_len(key) + 1 + utf16_len(value))
@@ -51,12 +92,12 @@ pub fn str_utf16_len(text: &str) -> usize {
     //（代理对）；ASCII 按转义后的长度。
     const fn units(b: u8) -> u8 {
         match b {
-            b'"' | b'\\' | 0x08 | 0x09 | 0x0a | 0x0c | 0x0d => 2,
-            0x00..=0x1f => 6,
-            0x20..=0x7f => 1,
-            0x80..=0xbf => 0,
-            0xc0..=0xef => 1,
-            _ => 2,
+            b'"' | b'\\' | BACKSPACE | b'\t' | b'\n' | FORM_FEED | b'\r' => SHORT_ESCAPE_LEN,
+            0x00..=C0_LAST => UNICODE_ESCAPE_LEN,
+            b' '..=ASCII_LAST => 1,
+            CONTINUATION_FIRST..=CONTINUATION_LAST => 0,
+            LEAD_2_FIRST..=LEAD_3_LAST => 1,
+            _ => SURROGATE_PAIR_LEN,
         }
     }
     const TABLE: [u8; 256] = {
@@ -68,10 +109,11 @@ pub fn str_utf16_len(text: &str) -> usize {
         }
         table
     };
-    2 + text
-        .bytes()
-        .map(|b| usize::from(TABLE[usize::from(b)]))
-        .sum::<usize>()
+    QUOTES_LEN
+        + text
+            .bytes()
+            .map(|b| usize::from(TABLE[usize::from(b)]))
+            .sum::<usize>()
 }
 
 /// 把 `value` 按 `JSON.stringify` 写到 `out` 末尾（[`stringify`] 的写法，调用方可以接着写别的）。
@@ -126,8 +168,10 @@ pub fn properties(map: &Map<String, Value>) -> impl Iterator<Item = (&String, &V
 /// 请求体与落库的 JSON 都要为每个字符串多分配一次；现在直接转义写进 `out`，输出逐字节不变（`json_tests.rs`）。
 pub fn write_str(out: &mut String, value: &str) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
+    // 一个字节的低 4 位。
+    const LOW_NIBBLE: u8 = 0x0f;
     let bytes = value.as_bytes();
-    out.reserve(bytes.len() + 2);
+    out.reserve(bytes.len() + QUOTES_LEN);
     out.push('"');
     let mut start = 0;
     for (at, &byte) in bytes.iter().enumerate() {
@@ -140,7 +184,7 @@ pub fn write_str(out: &mut String, value: &str) {
         if escape == b'u' {
             out.push_str("\\u00");
             out.push(char::from(HEX[usize::from(byte >> 4)]));
-            out.push(char::from(HEX[usize::from(byte & 0xf)]));
+            out.push(char::from(HEX[usize::from(byte & LOW_NIBBLE)]));
         } else {
             out.push('\\');
             out.push(char::from(escape));
@@ -155,15 +199,15 @@ pub fn write_str(out: &mut String, value: &str) {
 static ESCAPE: [u8; 256] = {
     let mut table = [0u8; 256];
     let mut byte = 0;
-    while byte < 0x20 {
+    while byte <= C0_LAST as usize {
         table[byte] = b'u';
         byte += 1;
     }
-    table[0x08] = b'b';
-    table[0x09] = b't';
-    table[0x0a] = b'n';
-    table[0x0c] = b'f';
-    table[0x0d] = b'r';
+    table[BACKSPACE as usize] = b'b';
+    table[b'\t' as usize] = b't';
+    table[b'\n' as usize] = b'n';
+    table[FORM_FEED as usize] = b'f';
+    table[b'\r' as usize] = b'r';
     table[b'"' as usize] = b'"';
     table[b'\\' as usize] = b'\\';
     table
@@ -171,7 +215,10 @@ static ESCAPE: [u8; 256] = {
 
 /// A canonical array index: `0` or no leading zero, below 2^32 − 1.
 fn array_index(key: &str) -> Option<u32> {
-    if key.is_empty() || key.len() > 10 || (key.len() > 1 && key.starts_with('0')) {
+    if key.is_empty()
+        || key.len() > ARRAY_INDEX_MAX_DIGITS
+        || (key.len() > 1 && key.starts_with('0'))
+    {
         return None;
     }
     if !key.bytes().all(|b| b.is_ascii_digit()) {
@@ -211,11 +258,11 @@ pub fn js_double(x: f64) -> String {
     let exponent: i32 = exponent.parse().unwrap_or(0);
     let k = digits.len() as i32;
     let n = exponent + 1;
-    let body = if k <= n && n <= 21 {
+    let body = if k <= n && n <= FIXED_MAX_POINT {
         format!("{digits}{}", "0".repeat((n - k) as usize))
-    } else if 0 < n && n <= 21 {
+    } else if 0 < n && n <= FIXED_MAX_POINT {
         format!("{}.{}", &digits[..n as usize], &digits[n as usize..])
-    } else if -6 < n && n <= 0 {
+    } else if FIXED_MIN_POINT < n && n <= 0 {
         format!("0.{}{digits}", "0".repeat((-n) as usize))
     } else {
         let sign = if n > 0 { '+' } else { '-' };

@@ -382,7 +382,7 @@ impl Parser<'_> {
         }
         let name = Some(text[..name_end].to_vec());
         let value_text = &text[eq + 1..];
-        if value_text.len() >= 2
+        if value_text.len() >= b"()".len()
             && value_text[0] == b'('
             && value_text[value_text.len() - 1] == b')'
         {

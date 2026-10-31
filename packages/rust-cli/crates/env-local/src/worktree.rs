@@ -4,6 +4,7 @@
 //! 分支名在 zcode 的 `.zcode/worktrees/`。git 经
 //! `rust-cli-proc` 启动，环境是白名单投影加 `GIT_TERMINAL_PROMPT=0`。
 
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -33,8 +34,11 @@ impl Git {
         let mut env = projected;
         let (name, value) = crate::git::NO_TERMINAL_PROMPT;
         env.insert(name.to_owned(), value.to_owned());
-        env.insert("GIT_ASKPASS".to_owned(), String::new());
-        env.insert("LC_ALL".to_owned(), "C".to_owned());
+        env.insert(
+            rust_cli_base::names::env::GIT_ASKPASS.to_owned(),
+            String::new(),
+        );
+        env.insert(rust_cli_base::names::env::LC_ALL.to_owned(), "C".to_owned());
         Self { env }
     }
 
@@ -76,7 +80,7 @@ impl Git {
             )
             .await?;
         let common = PathBuf::from(common);
-        if common.file_name().is_some_and(|name| name == ".git") {
+        if common.file_name().is_some_and(|name| name == GIT_DIR) {
             return common.parent().map(Path::to_path_buf);
         }
         self.stdout(cwd, &["rev-parse", "--show-toplevel"])

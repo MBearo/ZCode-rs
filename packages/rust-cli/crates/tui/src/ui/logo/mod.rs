@@ -29,10 +29,25 @@ const RATIO_ROWS: u16 = 21;
 const MIN_ROWS: u16 = 14;
 /// 查不到终端背景色时按这个深色背景混合。
 const DARK: Rgb = (0x1e, 0x1e, 0x2e);
+/// smootherstep `t³(t(6t − 15) + 10)` 的三个系数。
+const SMOOTHERSTEP: [f64; 3] = [6.0, 15.0, 10.0];
+/// 按下的弹簧：振幅、衰减的时间常数（秒）、频率（次 / 秒）。
+const SPRING_AMPLITUDE: f64 = 1.6;
+const SPRING_DECAY: f64 = 0.32;
+const SPRING_FREQUENCY: f64 = 1.5;
+/// 标志左右合计留出的列数。
+const SIDE_MARGIN: u16 = 4;
+/// 字符格的中心（相对左上角）。
+const CELL_CENTER: f64 = 0.5;
+/// 盲文点阵字符的起点（U+2800，没有点）。
+const BRAILLE_BLANK: u32 = 0x2800;
+/// 16 色终端不透明度低于它时用 dim。
+const DIM_BELOW: f64 = 0.5;
 
 fn smooth(t: f64) -> f64 {
     let t = t.clamp(0.0, 1.0);
-    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+    let [a, b, c] = SMOOTHERSTEP;
+    t * t * t * (t * (t * a - b) + c)
 }
 
 /// 按下深度：衰减的弹簧，约 0.14 秒按到最深（≈1），回弹时轻微过冲，1.2 秒内停住。
@@ -40,7 +55,7 @@ pub fn depth(t: f64) -> f64 {
     if t <= 0.0 {
         return 0.0;
     }
-    1.6 * (-t / 0.32).exp() * (TAU * 1.5 * t).sin()
+    SPRING_AMPLITUDE * (-t / SPRING_DECAY).exp() * (TAU * SPRING_FREQUENCY * t).sin()
 }
 
 /// 点击 `point`（徽章上的位置，-1..1）后 `t` 秒的姿态：点到的一侧往里，整体下沉，越靠中间沉得越多。
@@ -50,7 +65,8 @@ pub fn pose_at(point: [f64; 2], t: f64) -> Pose {
     Pose {
         yaw: MAX_TILT * point[0] * d,
         pitch: -MAX_TILT * point[1] * d,
-        push: -MAX_PUSH * d * (1.0 - 0.5 * offset),
+        // 按在边缘时只沉一半。
+        push: -MAX_PUSH * d * (1.0 - offset / 2.0),
     }
 }
 
@@ -71,7 +87,7 @@ pub fn opacity_at(t: f64) -> f64 {
 pub fn stage_in(free: Rect) -> Option<Rect> {
     let width = free
         .width
-        .saturating_sub(4)
+        .saturating_sub(SIDE_MARGIN)
         .min(MAX_COLUMNS)
         .min(free.height.saturating_mul(MAX_COLUMNS) / RATIO_ROWS);
     let height = width * RATIO_ROWS / MAX_COLUMNS;
@@ -90,8 +106,8 @@ pub fn to_badge(stage: Rect, column: u16, row: u16) -> [f64; 2] {
     render::badge_point(
         stage.width.into(),
         stage.height.into(),
-        f64::from(column.saturating_sub(stage.x)) + 0.5,
-        f64::from(row.saturating_sub(stage.y)) + 0.5,
+        f64::from(column.saturating_sub(stage.x)) + CELL_CENTER,
+        f64::from(row.saturating_sub(stage.y)) + CELL_CENTER,
     )
 }
 
@@ -149,13 +165,13 @@ impl Logo {
             let x = stage.x + (index % width) as u16;
             let y = stage.y + (index / width) as u16;
             let target = &mut buffer[(x, y)];
-            target.set_char(char::from_u32(0x2800 + u32::from(cell.dots)).unwrap_or(' '));
+            target.set_char(char::from_u32(BRAILLE_BLANK + u32::from(cell.dots)).unwrap_or(' '));
             match palette.tint(blend(background, cell.rgb, opacity)) {
                 Some(color) => {
                     target.set_fg(color);
                 }
                 // 16 色终端不上色：淡的时候用 dim。
-                None if opacity < 0.5 => target.modifier.insert(Modifier::DIM),
+                None if opacity < DIM_BELOW => target.modifier.insert(Modifier::DIM),
                 None => {}
             }
         }

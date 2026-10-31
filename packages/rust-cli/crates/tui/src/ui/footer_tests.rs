@@ -33,10 +33,11 @@ fn app(lang: Lang, notice: ContextNotice) -> App {
 }
 
 /// 右侧最后一段：上下文提示的文字与样式。
+/// 上下文提示：模型名贴最右（F116），它前面是分隔点，再前面是提示。
 fn context(app: &App) -> (String, Style) {
     let (line, _) = footer(app, 160);
-    let last = line.spans.last().unwrap();
-    (last.content.to_string(), last.style)
+    let notice = line.spans.iter().rev().nth(2).unwrap();
+    (notice.content.to_string(), notice.style)
 }
 
 /// F14：上下文快满的四种显示（compact.md §2.1）。真实内核的显示见 tests/suite/context_low.rs；`N% context used`
@@ -179,15 +180,16 @@ fn plain(line: &Line<'_>) -> String {
         .collect()
 }
 
-/// footer 右侧：模型名之后依次是 TPS、ctx、cache（tui-display.md §2.6）；文字用次要文字的颜色，中文用中文短词。
+/// footer 右侧：依次是 TPS、ctx、cache，模型名贴最右（工作线 F116，tui-display.md §2.6）；文字用次要文字的颜色，
+/// 中文用中文短词。
 #[test]
-fn the_request_stats_follow_the_model_name() {
+fn the_request_stats_come_before_the_model_name() {
     for light in [false, true] {
         let app = stats_app(Lang::En, light, Some(node_stats()));
         let (line, _) = footer(&app, 160);
         let text = plain(&line);
         assert!(
-            text.ends_with("scripted \u{b7} 40 tok/s \u{b7} ctx 37.0% \u{b7} cache 91.0%"),
+            text.ends_with("40 tok/s \u{b7} ctx 37.0% \u{b7} cache 91.0% \u{b7} scripted"),
             "{text}"
         );
         for item in ["40 tok/s", "ctx 37.0%", "cache 91.0%"] {
@@ -198,7 +200,7 @@ fn the_request_stats_follow_the_model_name() {
         let zh = stats_app(Lang::Zh, light, Some(node_stats()));
         let text = plain(&footer(&zh, 160).0);
         assert!(
-            text.ends_with("scripted \u{b7} 40 tok/s \u{b7} 上下文 37.0% \u{b7} 缓存 91.0%"),
+            text.ends_with("40 tok/s \u{b7} 上下文 37.0% \u{b7} 缓存 91.0% \u{b7} scripted"),
             "{text}"
         );
     }
@@ -233,11 +235,14 @@ fn ctx_and_cache_show_one_decimal() {
     // 1,120 / 180,000 = 0.62%：整数时写 1%；2,000 / 3,000 的命中率 66.67%。
     let text = ctx(1_120, 180_000, Lang::En);
     assert!(
-        text.ends_with("40 tok/s \u{b7} ctx 0.6% \u{b7} cache 66.7%"),
+        text.ends_with("40 tok/s \u{b7} ctx 0.6% \u{b7} cache 66.7% \u{b7} scripted"),
         "{text}"
     );
     let text = ctx(1_120, 180_000, Lang::Zh);
-    assert!(text.ends_with("上下文 0.6% \u{b7} 缓存 66.7%"), "{text}");
+    assert!(
+        text.ends_with("上下文 0.6% \u{b7} 缓存 66.7% \u{b7} scripted"),
+        "{text}"
+    );
     // 第二位小数四舍五入：9,108 / 180,000 = 5.06%，9,072 / 180,000 = 5.04%。
     assert!(ctx(9_108, 180_000, Lang::En).contains("ctx 5.1%"));
     assert!(ctx(9_072, 180_000, Lang::En).contains("ctx 5.0%"));
@@ -253,7 +258,7 @@ fn ctx_and_cache_show_one_decimal() {
 fn items_without_values_are_left_out() {
     let none = stats_app(Lang::En, false, None);
     let text = plain(&footer(&none, 160).0);
-    assert!(text.ends_with("scripted \u{b7} ctx 37.0%"), "{text}");
+    assert!(text.ends_with("ctx 37.0% \u{b7} scripted"), "{text}");
     let no_content = OutputSpeed {
         first_content_ms: None,
         ..node_speed()
@@ -261,7 +266,7 @@ fn items_without_values_are_left_out() {
     let no_tps = speed_app(Lang::En, false, Some(node_stats()), Some(no_content));
     let text = plain(&footer(&no_tps, 160).0);
     assert!(
-        text.ends_with("scripted \u{b7} ctx 37.0% \u{b7} cache 91.0%"),
+        text.ends_with("ctx 37.0% \u{b7} cache 91.0% \u{b7} scripted"),
         "{text}"
     );
     let unknown = stats_app(
@@ -274,7 +279,7 @@ fn items_without_values_are_left_out() {
     );
     let text = plain(&footer(&unknown, 160).0);
     assert!(
-        text.ends_with("scripted \u{b7} 40 tok/s \u{b7} ctx 37.0%"),
+        text.ends_with("40 tok/s \u{b7} ctx 37.0% \u{b7} scripted"),
         "{text}"
     );
     // 新会话的草稿：没有上下文用量、也没有回执，只有模型名。
@@ -300,12 +305,13 @@ fn the_speed_comes_from_the_session_not_the_usage_rows() {
     let cold = speed_app(Lang::En, false, Some(stored), None);
     let text = plain(&footer(&cold, 160).0);
     assert!(
-        text.ends_with("scripted \u{b7} ctx 37.0% \u{b7} cache 91.0%"),
+        text.ends_with("ctx 37.0% \u{b7} cache 91.0% \u{b7} scripted"),
         "{text}"
     );
     let live = speed_app(Lang::En, false, Some(node_stats()), Some(node_speed()));
     let text = plain(&footer(&live, 160).0);
-    assert!(text.contains("\u{b7} 40 tok/s \u{b7}"), "{text}");
+    // TPS 是右侧第一项（F116），后面接 ctx。
+    assert!(text.contains(" 40 tok/s \u{b7} ctx 37.0%"), "{text}");
 }
 
 /// 切换会话与 `/clear` 之后，晚到的旧回执不覆盖（回执带序号，tui-display.md §2.6）。
@@ -342,12 +348,13 @@ fn narrow_terminals_drop_cache_then_tps_then_context() {
     for width in (20..=160).rev() {
         let text = plain(&footer(&app, width).0);
         let shortcuts = text.contains("? for shortcuts");
+        // 按显示的先后列：统计、提示，模型名贴最右（F116）。
         let right: Vec<&str> = [
-            "scripted",
             "40 tok/s",
             "ctx 37.0%",
             "cache 91.0%",
             "10% until auto-compact",
+            "scripted",
         ]
         .into_iter()
         .filter(|item| text.contains(item))
@@ -363,20 +370,66 @@ fn narrow_terminals_drop_cache_then_tps_then_context() {
         [
             (
                 true,
-                "scripted | 40 tok/s | ctx 37.0% | cache 91.0% | 10% until auto-compact"
+                "40 tok/s | ctx 37.0% | cache 91.0% | 10% until auto-compact | scripted"
             ),
             (
                 false,
-                "scripted | 40 tok/s | ctx 37.0% | cache 91.0% | 10% until auto-compact"
+                "40 tok/s | ctx 37.0% | cache 91.0% | 10% until auto-compact | scripted"
             ),
             (
                 false,
-                "scripted | 40 tok/s | ctx 37.0% | 10% until auto-compact"
+                "40 tok/s | ctx 37.0% | 10% until auto-compact | scripted"
             ),
-            (false, "scripted | ctx 37.0% | 10% until auto-compact"),
-            (false, "scripted | 10% until auto-compact"),
+            (false, "ctx 37.0% | 10% until auto-compact | scripted"),
+            (false, "10% until auto-compact | scripted"),
             (false, "scripted"),
             (false, ""),
         ]
     );
+}
+
+/// 修复线 F117（tui-display.md §2.3）：pill 写 `1 shell, 2 monitors`；终端变窄时先省右侧，pill 的文字不拆开、不缩写，
+/// 放不下时整行从末尾截断。
+#[test]
+fn a_narrow_footer_keeps_the_monitor_count_whole_until_the_line_is_cut() {
+    use rust_cli_kernel_api::env_shell::BackgroundStatus;
+    use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind};
+    let mut app = app(Lang::En, ContextNotice::Hidden);
+    let entry = |id: &str, kind| BackgroundEntry {
+        id: id.into(),
+        kind,
+        description: id.into(),
+        status: BackgroundStatus::Running,
+        output: None,
+        machine: None,
+        reconnecting: false,
+    };
+    app.background = vec![
+        entry("b1", BackgroundKind::Shell),
+        entry("b2", BackgroundKind::Monitor),
+        entry("s3", BackgroundKind::Monitor),
+    ];
+    let pill = "1 shell, 2 monitors";
+    let wide = plain(&footer(&app, 160).0);
+    assert!(wide.contains(&format!(" · {pill} · ↓ to manage")), "{wide}");
+    assert!(wide.ends_with("scripted"), "{wide}");
+    let tip = "↓ to manage";
+    let left = &wide[..wide.find(tip).unwrap() + tip.len()];
+    let mut cut = false;
+    for width in (12..=160).rev() {
+        let text = plain(&footer(&app, width).0);
+        assert!(text.width() <= width, "{width}: {text}");
+        if text.contains(pill) {
+            assert!(!cut, "the pill came back at {width}: {text}");
+            continue;
+        }
+        // 整行截断之前右侧已经省光；截断时只从末尾切掉一段，前面（含 pill 的前半）原样。
+        cut = true;
+        assert!(!text.contains("scripted"), "{width}: {text}");
+        assert!(
+            left.starts_with(text.trim_end_matches('…')),
+            "{width}: {text}"
+        );
+    }
+    assert!(cut);
 }

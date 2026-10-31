@@ -21,12 +21,12 @@ fn with_shell(shell: Option<&str>) -> Fixture {
 }
 
 async fn output(fixture: &Fixture, operation: &str, start: StartCommand) -> String {
-    fixture
+    let events = fixture
         .shells
         .start(context(operation), start)
         .await
         .unwrap();
-    collect(fixture, operation).await.output
+    collect(events).await.output
 }
 
 #[test]
@@ -111,11 +111,9 @@ async fn hooks_keep_bin_bash_when_the_tool_shell_is_zsh() {
 async fn without_a_shell_commands_fail_with_the_fixed_text() {
     let fixture = with_shell(None);
     let start = request("echo hi", &fixture.root, CwdScope::Pinned);
-    let error = fixture
-        .shells
-        .start(context("op1"), start)
-        .await
-        .unwrap_err();
+    let Err(error) = fixture.shells.start(context("op1"), start).await else {
+        panic!("the command started without a shell");
+    };
     assert_eq!(
         error,
         EnvError::Io {

@@ -4,14 +4,14 @@ use super::app::{Action, App};
 use super::i18n::Lang;
 use super::list::{Item, ListView, Purpose};
 use super::manage::Manage;
-use super::palette::{Palette, Rgb};
+use super::palette::{BLACK, Palette, Rgb, WHITE};
 use crate::services::UiTheme;
 
 /// 主题对应的终端背景：dark 黑底、light 白底，auto 用启动时探测到的背景。
 pub fn background(theme: UiTheme, detected: Option<Rgb>) -> Option<Rgb> {
     match theme {
-        UiTheme::Dark => Some((0, 0, 0)),
-        UiTheme::Light => Some((255, 255, 255)),
+        UiTheme::Dark => Some(BLACK),
+        UiTheme::Light => Some(WHITE),
         UiTheme::Auto => detected,
     }
 }

@@ -20,6 +20,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use futures_util::FutureExt;
 use futures_util::future::{BoxFuture, Shared};
+use rust_cli_base::units;
 use rust_cli_fs::{FileMode, ParentDir, TempName, WriteOptions};
 use rust_cli_net::{Egress, HttpRequest};
 use rust_cli_paths::ExecutorPaths;
@@ -29,7 +30,7 @@ use crate::options::TestDeclarations;
 use crate::update::registry as npm;
 
 /// tarball 最多这么大（执行器的包压缩后几十 MB）。
-const MAX_TARBALL: usize = 256 * 1024 * 1024;
+const MAX_TARBALL: usize = 256 * units::MIB;
 /// 下载 tarball 时两块数据之间最多等这么久（存活的上限，不用来同步状态）。
 const CHUNK_IDLE: Duration = Duration::from_secs(30);
 

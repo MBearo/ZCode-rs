@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use rust_cli_base::civil::iso;
 use rust_cli_kernel_api::hooks::NODE_EVENTS;
 use rust_cli_paths::StoragePath;
 use serde_json::{Map, Value, json};
@@ -18,6 +19,13 @@ fn node_event(name: &str) -> bool {
 
 /// Node `DEFAULT_RENAME_RETRY_DELAYS_MS`（定义在 fs，F55）。
 const RENAME_RETRY: &[Duration] = rust_cli_fs::NODE_RENAME_RETRY;
+
+/// sha256 摘要的十六进制长度。
+const SHA256_HEX_LEN: usize = 64;
+/// 最短的 datetime：`YYYY-MM-DDTHH:MM:SS` 加结尾的 `Z`。
+const MIN_DATETIME_LEN: usize = iso::DATETIME_LEN + "Z".len();
+/// 文件顶层的键数：只有 `schemaVersion` 与 `records`（strict，多一个键就作废）。
+const STORE_KEY_COUNT: usize = 2;
 
 /// 一条信任记录（Node `WorkspaceHookTrustRecord`，字段顺序即 schema 顺序）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +85,7 @@ fn non_empty(text: &str) -> bool {
 }
 
 fn sha256_hex(text: &str) -> bool {
-    text.len() == 64
+    text.len() == SHA256_HEX_LEN
         && text
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
@@ -91,19 +99,19 @@ fn datetime(text: &str) -> bool {
             .get(range)
             .is_some_and(|part| part.iter().all(u8::is_ascii_digit))
     };
-    let fixed = bytes.len() >= 20
-        && digits(0..4)
-        && bytes[4] == b'-'
-        && digits(5..7)
-        && bytes[7] == b'-'
-        && digits(8..10)
-        && bytes[10] == b'T'
-        && digits(11..13)
-        && bytes[13] == b':'
-        && digits(14..16)
-        && bytes[16] == b':'
-        && digits(17..19);
-    let rest = &text.get(19..).unwrap_or("");
+    let fixed = bytes.len() >= MIN_DATETIME_LEN
+        && digits(iso::YEAR)
+        && bytes[iso::DATE_DASHES[0]] == b'-'
+        && digits(iso::MONTH)
+        && bytes[iso::DATE_DASHES[1]] == b'-'
+        && digits(iso::DAY)
+        && bytes[iso::TIME_MARKER] == b'T'
+        && digits(iso::HOUR)
+        && bytes[iso::TIME_COLONS[0]] == b':'
+        && digits(iso::MINUTE)
+        && bytes[iso::TIME_COLONS[1]] == b':'
+        && digits(iso::SECOND);
+    let rest = &text.get(iso::DATETIME_LEN..).unwrap_or("");
     fixed
         && match rest.strip_suffix('Z') {
             Some("") => true,
@@ -233,7 +241,7 @@ impl TrustRecord {
 fn parse_store(bytes: &[u8]) -> Option<Vec<TrustRecord>> {
     let value: Value = serde_json::from_slice(bytes).ok()?;
     let object = value.as_object()?;
-    if object.len() != 2 || object.get("schemaVersion") != Some(&json!(1)) {
+    if object.len() != STORE_KEY_COUNT || object.get("schemaVersion") != Some(&json!(1)) {
         return None;
     }
     let records: Vec<TrustRecord> = object
@@ -244,7 +252,8 @@ fn parse_store(bytes: &[u8]) -> Option<Vec<TrustRecord>> {
         .collect::<Option<_>>()?;
     let mut keys: Vec<_> = records.iter().map(TrustRecord::key).collect();
     keys.sort_unstable();
-    let unique = keys.windows(2).all(|pair| pair[0] != pair[1]);
+    // 排好序后相邻两项都不相同。
+    let unique = keys.iter().zip(keys.iter().skip(1)).all(|(a, b)| a != b);
     unique.then_some(records)
 }
 

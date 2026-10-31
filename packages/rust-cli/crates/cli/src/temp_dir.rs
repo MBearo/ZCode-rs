@@ -19,18 +19,34 @@ pub(crate) fn node_tmpdir(env: &EnvSnapshot, windows: bool) -> PathBuf {
             .map(str::to_owned)
     };
     if windows {
-        let path = first(&["TEMP", "TMP"]).unwrap_or_else(|| {
+        let path = first(&[
+            rust_cli_base::names::env::TEMP,
+            rust_cli_base::names::env::TMP,
+        ])
+        .unwrap_or_else(|| {
             // Node 写的是 `(process.env.SystemRoot || process.env.windir) + '\\temp'`，两个都没有时是 `undefined\temp`。
-            let root = first(&["SystemRoot", "windir"]).unwrap_or_else(|| "undefined".to_owned());
+            let root = first(&[
+                rust_cli_base::names::env::SystemRoot,
+                rust_cli_base::names::env::windir,
+            ])
+            .unwrap_or_else(|| "undefined".to_owned());
             format!(r"{root}\temp")
         });
         let bytes = path.as_bytes();
-        if bytes.len() > 1 && bytes.ends_with(b"\\") && bytes[bytes.len() - 2] != b':' {
+        // 末尾是 `\`、前一个字节不是 `:`（`C:\` 不去）。
+        if let [.., before, b'\\'] = bytes
+            && *before != b':'
+        {
             return PathBuf::from(&path[..path.len() - 1]);
         }
         return PathBuf::from(path);
     }
-    let path = first(&["TMPDIR", "TMP", "TEMP"]).unwrap_or_else(|| "/tmp".to_owned());
+    let path = first(&[
+        rust_cli_base::names::env::TMPDIR,
+        rust_cli_base::names::env::TMP,
+        rust_cli_base::names::env::TEMP,
+    ])
+    .unwrap_or_else(|| "/tmp".to_owned());
     match path.strip_suffix('/') {
         Some(trimmed) if path.len() > 1 => PathBuf::from(trimmed),
         _ => PathBuf::from(path),

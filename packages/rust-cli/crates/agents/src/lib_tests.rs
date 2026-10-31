@@ -338,13 +338,13 @@ async fn the_main_registry_is_wired_at_construction() {
 
 /// 修复线 F51（用户决定 2026-10-22，agents.md §2）：Agent 没有 `model` 参数（不提供模型别名的枚举）；
 /// 输入是宽松对象：schema 外的键由执行管线丢掉、不报错（`strips_unknown_keys`）。子代理总是继承父会话模型。
+/// 描述与 schema 里没有模型的系列名由导出扫描保证（工作线 F121，export.md §4.1），这里不再反向断言。
 #[tokio::test]
 async fn the_agent_tool_has_no_model_parameter_and_drops_unknown_keys() {
     let harness = harness(None);
     let tool = harness.agents.registry().find("Agent").unwrap();
     let schema = tool.input_schema();
     assert!(schema["properties"].get("model").is_none(), "{schema}");
-    assert!(!schema.to_string().contains("sonnet"), "{schema}");
     assert_eq!(schema["additionalProperties"], false);
     assert!(tool.strips_unknown_keys());
     // 别的子代理工具仍按严格对象校验。

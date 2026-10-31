@@ -10,6 +10,8 @@ use super::palette::{ColorLevel, Palette, blend};
 
 const SWEEP: Duration = Duration::from_secs(2);
 const BAND: f64 = 5.0;
+/// 亮带外的不透明度（偏暗）；亮带中心是 1（标题颜色）。
+const DIM_ALPHA: f64 = 0.6;
 
 pub fn spans(text: &str, elapsed: Duration, palette: &Palette, color: Color) -> Vec<Span<'static>> {
     let bold = Style::default().add_modifier(Modifier::BOLD);
@@ -29,11 +31,11 @@ pub fn spans(text: &str, elapsed: Duration, palette: &Palette, color: Color) -> 
             let distance = (index as f64 - center).abs();
             // 亮带外为 0.6（偏暗），亮带中心为 1（标题颜色）。
             let glow = if distance < BAND {
-                0.5 * (1.0 + (std::f64::consts::PI * distance / BAND).cos())
+                (1.0 + (std::f64::consts::PI * distance / BAND).cos()) / 2.0
             } else {
                 0.0
             };
-            let alpha = 0.6 + 0.4 * glow;
+            let alpha = DIM_ALPHA + (1.0 - DIM_ALPHA) * glow;
             let (r, g, b) = blend(background, (r, g, b), alpha);
             Span::styled(c.to_string(), bold.fg(Color::Rgb(r, g, b)))
         })

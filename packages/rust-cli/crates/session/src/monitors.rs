@@ -14,18 +14,16 @@ use futures_util::stream::{BoxStream, SelectAll};
 use rust_cli_kernel_api::env::{CommandEvent, EnvError, OperationContext, Origin, OutputStream};
 use rust_cli_kernel_api::env_shell::BackgroundTask;
 use rust_cli_kernel_api::ids::{OwnerEpoch, ShellTaskId};
+use rust_cli_kernel_api::machine::CommandEvents;
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::machine_notices::MachineNotice;
 use rust_cli_kernel_api::monitor::{MonitorArmed, MonitorSource};
-use rust_cli_kernel_api::monitor_watch::{Emit, Step, Watch};
+use rust_cli_kernel_api::monitor_watch::{Emit, STREAM_RETRIES, Step, Watch};
 use rust_cli_kernel_api::orchestration::OrchestrationError;
 use rust_cli_kernel_api::session_api::KernelEvent;
 
 use crate::actor::Actor;
 use crate::lane::{Lane, Waiting};
-
-/// 流连续出错这么多次就不再重新订阅（这个 monitor 之后只等终态通知）。
-const STREAM_RETRIES: u8 = 3;
 
 type Tagged = BoxStream<'static, (ShellTaskId, Result<CommandEvent, EnvError>)>;
 
@@ -104,14 +102,18 @@ fn emit_text(armed: &MonitorArmed, emit: &Emit) -> String {
     ))
 }
 
-fn watched_stream(actor: &Actor, armed: &MonitorArmed, cursor: u64) -> Tagged {
+fn tagged(armed: &MonitorArmed, events: CommandEvents) -> Tagged {
     let task = armed.task.clone();
-    actor
+    events.map(move |event| (task.clone(), event)).boxed()
+}
+
+/// 流出错后按游标接回还在跑的命令；已结束的给 `NotFound`，按 [`STREAM_RETRIES`] 放弃。
+fn watched_stream(actor: &Actor, armed: &MonitorArmed, cursor: u64) -> Tagged {
+    let events = actor
         .monitor_machine(armed)
         .commands()
-        .watch_command(armed.operation.clone(), cursor)
-        .map(move |event| (task.clone(), event))
-        .boxed()
+        .watch_command(armed.operation.clone(), cursor);
+    tagged(armed, events)
 }
 
 impl Actor {
@@ -127,15 +129,19 @@ impl Actor {
         }
     }
 
-    /// Monitor 工具起好的 monitor（[`rust_cli_kernel_api::orchestration::Interactions::arm_monitor`]）。
-    pub(crate) fn arm_monitor(&mut self, armed: MonitorArmed) -> Result<(), OrchestrationError> {
+    /// Monitor 工具起好的 monitor（[`rust_cli_kernel_api::orchestration::Interactions::arm_monitor`]）：读工具交来的
+    /// 那条流（工作线 F119：命令结束后不能再按 ID 从 0 读）。
+    pub(crate) fn arm_monitor(
+        &mut self,
+        armed: MonitorArmed,
+        events: CommandEvents,
+    ) -> Result<(), OrchestrationError> {
         if self.closing.is_some() {
             return Err(OrchestrationError::Failed {
                 message: "the session is closing".to_owned(),
             });
         }
-        let stream = watched_stream(self, &armed, 0);
-        self.monitors.subscribe(stream);
+        self.monitors.subscribe(tagged(&armed, events));
         self.monitors.entries.insert(
             armed.task.clone(),
             Entry {

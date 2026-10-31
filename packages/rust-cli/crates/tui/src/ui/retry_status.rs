@@ -3,11 +3,13 @@
 //! check your network`。图标与前半用 error 色，后半 dim。主线程的状态行与前台子代理的 Agent 行共用。
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use rust_cli_base::units;
 use rust_cli_kernel_api::model::ModelNotice;
 use unicode_width::UnicodeWidthStr;
 
 use super::cells::duration;
 use super::i18n::Lang;
+use super::layout;
 use super::text::truncate;
 use crate::view::Notice;
 
@@ -22,25 +24,20 @@ fn dim() -> Style {
     Style::default().add_modifier(Modifier::DIM)
 }
 
-/// 倒计时：向上取整到秒；不少于 5 分钟时只写最大的单位。
+/// 倒计时从这么长起只写最大的单位。
+const LARGEST_UNIT_FROM_MS: u64 = 5 * units::MS_PER_MINUTE;
+/// 前几次重试只写 `API error`，从这一次起写具体的错误（重试次数更少时从最后一次起）。
+const NAMED_ERROR_FROM_ATTEMPT: u32 = 3;
+/// 说明至少留这么宽。
+const MIN_WHAT_WIDTH: usize = 10;
+
+/// 倒计时：向上取整到秒；不少于 5 分钟时只写最大的单位（这里已是整秒，秒不会进位）。
 pub fn countdown(ms: u64) -> String {
-    let ms = ms.div_ceil(1000) * 1000;
-    if ms < 300_000 {
+    let ms = ms.div_ceil(units::MS_PER_SECOND) * units::MS_PER_SECOND;
+    if ms < LARGEST_UNIT_FROM_MS {
         return duration(ms);
     }
-    // 天、时、分取整（这里已是整秒，秒不会进位）；只写最大的非零单位。
-    let (days, hours, minutes) = (
-        ms / 86_400_000,
-        (ms % 86_400_000) / 3_600_000,
-        (ms % 3_600_000) / 60_000,
-    );
-    if days > 0 {
-        format!("{days}d")
-    } else if hours > 0 {
-        format!("{hours}h")
-    } else {
-        format!("{minutes}m")
-    }
+    super::quantities::largest_unit_text(ms)
 }
 
 /// 重试中的两半：前两次只写 `API error`，之后写具体的错误；后半是倒计时与第几次。
@@ -51,7 +48,7 @@ fn retrying(
     left: &str,
     lang: Lang,
 ) -> (String, String) {
-    let what = if attempt >= max_retries.min(3) {
+    let what = if attempt >= max_retries.min(NAMED_ERROR_FROM_ATTEMPT) {
         error
     } else {
         match lang {
@@ -101,11 +98,14 @@ pub fn parts(notice: &Notice, now_ms: u64, lang: Lang) -> Option<(String, String
     }
 }
 
-/// 两半排成一行（宽 `width`）：说明截断到 `max(10, 宽 − 2 − 后半宽 − 2)`，让倒计时放得下。
+/// 两半排成一行（宽 `width`）：说明截断到 `max(10, 宽 − 图标宽 − 后半宽 − 2)`，让倒计时放得下。
 fn laid_out((what, tail): (String, String), width: usize) -> Vec<Span<'static>> {
-    let room = width.saturating_sub(2 + tail.width() + 2).max(10);
+    let glyph = format!("{GLYPH} ");
+    let room = width
+        .saturating_sub(glyph.width() + tail.width() + layout::RIGHT_MARGIN)
+        .max(MIN_WHAT_WIDTH);
     vec![
-        Span::styled(format!("{GLYPH} "), error()),
+        Span::styled(glyph, error()),
         Span::styled(truncate(&what, room), error()),
         Span::styled(tail, dim()),
     ]

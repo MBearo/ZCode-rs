@@ -6,8 +6,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::env::{
-    BackgroundReason, CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    BackgroundReason, CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile,
+    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId};
 use rust_cli_kernel_api::local_services::{Fetch, Git};
@@ -94,7 +94,7 @@ impl Commands for MovesEnv {
         workspace: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         UnusedEnvironment
             .start_command(workspace, context, request)
             .await
@@ -110,10 +110,6 @@ impl Commands for MovesEnv {
 
     async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
         UnusedEnvironment.cancel(operation).await
-    }
-
-    async fn operation_status(&self, operation: OperationId) -> Result<Outcome, EnvError> {
-        UnusedEnvironment.operation_status(operation).await
     }
 
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {

@@ -12,8 +12,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
+    WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::env_files::{
     DirEntry, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome, GrepSearch, ListDir,
@@ -133,11 +133,12 @@ impl<E: Commands> Commands for RoundTripEnv<E> {
         workspace: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
-        let result = self
-            .0
-            .start_command(workspace, wire(context), wire(request));
-        back(result.await)
+    ) -> Result<crate::machine::CommandEvents, EnvError> {
+        // 流不经编解码（同 watch_command）；请求与错误照旧往返一次。
+        self.0
+            .start_command(workspace, wire(context), wire(request))
+            .await
+            .map_err(wire)
     }
 
     fn watch_command(
@@ -150,10 +151,6 @@ impl<E: Commands> Commands for RoundTripEnv<E> {
 
     async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
         back(self.0.cancel(wire(operation)).await)
-    }
-
-    async fn operation_status(&self, operation: OperationId) -> Result<Outcome, EnvError> {
-        back(self.0.operation_status(wire(operation)).await)
     }
 
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
@@ -238,10 +235,6 @@ impl<E: Checkpoints> Checkpoints for RoundTripEnv<E> {
 
     async fn rewind_apply(&self, token: &OperationId) -> Result<RewindStatus, EnvError> {
         back(self.0.rewind_apply(&wire(token.clone())).await)
-    }
-
-    async fn rewind_status(&self, token: &OperationId) -> Result<RewindStatus, EnvError> {
-        back(self.0.rewind_status(&wire(token.clone())).await)
     }
 
     async fn rewind_finish(&self, token: &OperationId) -> Result<(), EnvError> {

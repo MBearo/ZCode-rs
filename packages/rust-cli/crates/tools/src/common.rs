@@ -214,6 +214,9 @@ pub(crate) async fn resolve_input_stable(
         .ok())
 }
 
+/// 校验错误码：路径解析后以空白结尾。
+const UNSTABLE_PATH_CODE: i32 = 20;
+
 /// validateInput 最先做的检查（errorCode 20）：路径解析后以空白结尾时拒绝。
 pub(crate) async fn unstable_input(
     context: &ToolUseContext,
@@ -224,7 +227,7 @@ pub(crate) async fn unstable_input(
 ) -> Option<Validation> {
     matches!(resolve_input_stable(context, cwd, raw).await, Ok(None)).then(|| Validation::Invalid {
         message: texts::unstable_path(tool, field),
-        error_code: Some(20),
+        error_code: Some(UNSTABLE_PATH_CODE),
     })
 }
 
@@ -262,6 +265,8 @@ pub(crate) async fn stat(
 
 /// 同目录下同名、不同扩展名的文件名。
 async fn similar_file(context: &ToolUseContext, path: &str) -> Option<String> {
+    // 看起来像扩展名的最长字符数（含点）。
+    const MAX_EXTENSION_CHARS: usize = 33;
     let style = style(context);
     let dir = style.dirname(path);
     let name = style.file_name(path);
@@ -283,7 +288,7 @@ async fn similar_file(context: &ToolUseContext, path: &str) -> Option<String> {
         .find(|candidate| {
             let extension = &candidate[candidate.len() - env_path::extension(candidate).len()..];
             let plausible = extension.is_empty()
-                || (extension.chars().count() <= 33
+                || (extension.chars().count() <= MAX_EXTENSION_CHARS
                     && extension
                         .chars()
                         .skip(1)
@@ -339,19 +344,8 @@ pub(crate) async fn suggestion_under_cwd(
         .unwrap_or_default()
 }
 
-/// 控制字符换成 `&#N;`。
-pub(crate) fn escape_control(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for c in text.chars() {
-        let code = u32::from(c);
-        if code <= 0x1f || (0x7f..=0x9f).contains(&code) || code == 0x2028 || code == 0x2029 {
-            escaped.push_str(&format!("&#{code};"));
-        } else {
-            escaped.push(c);
-        }
-    }
-    escaped
-}
+/// 控制字符换成 `&#N;`（唯一实现在 base 的 `chars`，F122）。
+pub(crate) use rust_cli_base::chars::escape_entities as escape_control;
 
 /// JS 字符串长度（UTF-16 码元数）：唯一定义在 base（F58：以前这里、kernel-api 与 policy 各写一份）。
 pub(crate) use rust_cli_base::js::string::utf16_len;

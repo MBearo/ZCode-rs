@@ -149,7 +149,7 @@ impl ProviderModel {
 
     /// 替换流空闲看门狗的配置（默认见 [`StreamIdle::default`]；入口按环境变量给出，
     /// docs/specs/rust-cli/stall-visibility.md §2.2）。
-    /// 入口读到 `IS_SANDBOX`（非空）时：opus 系列连续过载后照常重试，不报 `Repeated 529 Overloaded errors`
+    /// 入口读到 `IS_SANDBOX`（非空）时：按系列连续过载后不再重试的模型照常重试，不报 `Repeated 529 Overloaded errors`
     /// （docs/specs/rust-cli/cli-args.md §9）。
     #[must_use]
     pub fn with_overload_retries_in_sandbox(mut self, sandbox: bool) -> Self {

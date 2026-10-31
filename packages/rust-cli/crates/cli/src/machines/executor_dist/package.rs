@@ -2,11 +2,15 @@
 //! 解出执行器并核对 `build.json` 与产物的头（ELF 或 Mach-O，F107 §28.4）。不做 IO。
 
 use std::io::Read;
+use std::ops::Range;
 
 use base64::Engine;
+use rust_cli_base::units;
 use rust_cli_ssh_connect::Platform;
 use serde_json::Value;
 use sha2::{Digest, Sha256, Sha512};
+
+use crate::consts;
 
 /// 平台包名的前缀（ZCode-rs 的发布脚本 `scripts/rust-cli/npm/package.mjs`：`@mbearo/zcode-<id>`）。
 const PACKAGE_PREFIX: &str = "@mbearo/zcode-";
@@ -14,8 +18,23 @@ const PACKAGE_PREFIX: &str = "@mbearo/zcode-";
 const BINARY_ENTRY: &str = "package/bin/zcode-rs";
 const BUILD_ENTRY: &str = "package/build.json";
 /// 包里一项最多读这么多（执行器几十 MB；防止坏的 tar 头让内存失控）。
-const MAX_ENTRY: u64 = 512 * 1024 * 1024;
+const MAX_ENTRY: u64 = 512 * units::MIB as u64;
 const BLOCK: usize = 512;
+
+// ── ustar 头的布局（POSIX pax / ustar：各字段在 512 字节的头里的字节范围）──
+
+/// 文件名。
+const NAME_FIELD: Range<usize> = 0..100;
+/// 大小（八进制文本，或最高位置 1 的大端二进制）。
+const SIZE_FIELD: Range<usize> = 124..136;
+/// 类型标志（`0` 或 NUL 是普通文件，`x` 是 pax 扩展头）。
+const TYPEFLAG: usize = 156;
+/// 魔数 `ustar`（不含后面的 NUL 与版本号）。
+const MAGIC_FIELD: Range<usize> = 257..262;
+/// 文件名的前缀（`prefix/name`）。
+const PREFIX_FIELD: Range<usize> = 345..500;
+/// 大小字段的首字节最高位置 1 时，其余字节是大端的二进制（GNU 的 base-256 写法）。
+const BINARY_SIZE_FLAG: u8 = 0x80;
 
 /// 远端平台对应的平台包（§26.3、§28.2；id 由 ssh-connect 的 `Platform` 给）。
 pub(super) fn package_name(platform: Platform) -> String {
@@ -106,8 +125,8 @@ fn entries(mut reader: impl Read) -> std::io::Result<Entries> {
         let padding = (BLOCK as u64 - size % BLOCK as u64) % BLOCK as u64;
         let name = pax_path.take().unwrap_or_else(|| name(&header));
         let wanted =
-            matches!(header[156], b'0' | 0) && (name == BINARY_ENTRY || name == BUILD_ENTRY);
-        if header[156] == b'x' || wanted {
+            matches!(header[TYPEFLAG], b'0' | 0) && (name == BINARY_ENTRY || name == BUILD_ENTRY);
+        if header[TYPEFLAG] == b'x' || wanted {
             if size > MAX_ENTRY {
                 return Err(invalid(format!("{name} is too large")));
             }
@@ -117,7 +136,7 @@ fn entries(mut reader: impl Read) -> std::io::Result<Entries> {
                 return Err(invalid(format!("{name} is cut short")));
             }
             skip(&mut reader, padding)?;
-            match header[156] {
+            match header[TYPEFLAG] {
                 b'x' => pax_path = pax_value(&data, "path"),
                 _ if name == BINARY_ENTRY => found.binary = Some(data),
                 _ => found.build = Some(data),
@@ -157,8 +176,8 @@ fn skip(reader: &mut impl Read, bytes: u64) -> std::io::Result<()> {
 
 /// 头里的大小：八进制文本，或（最高位置 1 时）大端的二进制。
 fn size(header: &[u8; BLOCK]) -> std::io::Result<u64> {
-    let field = &header[124..136];
-    if field[0] & 0x80 != 0 {
+    let field = &header[SIZE_FIELD];
+    if field[0] & BINARY_SIZE_FLAG != 0 {
         return Ok(field[1..]
             .iter()
             .fold(0u64, |value, byte| (value << 8) | u64::from(*byte)));
@@ -168,7 +187,8 @@ fn size(header: &[u8; BLOCK]) -> std::io::Result<u64> {
     if text.is_empty() {
         return Ok(0);
     }
-    u64::from_str_radix(text, 8).map_err(|_| invalid(format!("bad tar size {text:?}")))
+    u64::from_str_radix(text, consts::OCTAL_RADIX)
+        .map_err(|_| invalid(format!("bad tar size {text:?}")))
 }
 
 /// 头里的名字：ustar 的 `prefix/name`。
@@ -180,9 +200,9 @@ fn name(header: &[u8; BLOCK]) -> String {
             .unwrap_or(bytes.len());
         String::from_utf8_lossy(&bytes[..end]).into_owned()
     };
-    let name = text(&header[..100]);
-    let prefix = if &header[257..262] == b"ustar" {
-        text(&header[345..500])
+    let name = text(&header[NAME_FIELD]);
+    let prefix = if &header[MAGIC_FIELD] == b"ustar" {
+        text(&header[PREFIX_FIELD])
     } else {
         String::new()
     };

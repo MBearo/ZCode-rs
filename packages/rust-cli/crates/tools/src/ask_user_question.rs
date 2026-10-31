@@ -24,6 +24,10 @@ pub const NAME: &str = "AskUserQuestion";
 const SEPARATOR: &str = ", ";
 /// 只有备注、没有选项时的占位答案。
 const NOTES_ONLY: &str = "(notes only)";
+/// 每个问题的选项数与问题数的范围（tools-more.md 的 AskUserQuestion）。
+const MIN_OPTIONS: usize = 2;
+const MAX_OPTIONS: usize = 4;
+const MAX_QUESTIONS: usize = 4;
 
 pub struct AskUserQuestionTool {
     definition: Definition,
@@ -70,17 +74,23 @@ fn question_text(question: &Value) -> &str {
 /// schema 里校验器覆盖不到的约束：数量范围与唯一性。
 fn check(input: &Value) -> Option<String> {
     let questions = questions(input);
-    if questions.iter().any(|question| labels(question).len() < 2) {
+    if questions
+        .iter()
+        .any(|question| labels(question).len() < MIN_OPTIONS)
+    {
         // 引导语排在校验错误之前。
         return Some(format!(
             "InputValidationError: {}\n\nquestions: every question needs 2-4 options",
             texts::SINGLE_OPTION_STEER
         ));
     }
-    if questions.is_empty() || questions.len() > 4 {
+    if questions.is_empty() || questions.len() > MAX_QUESTIONS {
         return Some("InputValidationError: questions: expected 1-4 questions".to_owned());
     }
-    if questions.iter().any(|question| labels(question).len() > 4) {
+    if questions
+        .iter()
+        .any(|question| labels(question).len() > MAX_OPTIONS)
+    {
         return Some("InputValidationError: options: expected 2-4 options".to_owned());
     }
     let mut texts_seen = HashSet::new();
@@ -294,7 +304,7 @@ impl Tool for AskUserQuestionTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(100_000)
+        Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
     }
 
     async fn validate_input(&self, input: &Value, _context: &ToolUseContext) -> Validation {

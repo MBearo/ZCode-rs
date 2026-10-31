@@ -2,6 +2,7 @@
 //! 范围、Usage 标签页，深浅主题与中英文。
 use crossterm::event::KeyCode;
 use ratatui::style::Color;
+use rust_cli_base::models::{GLM_4_6, GLM_5_3};
 use rust_cli_kernel_api::metering::{ActivityDay, ActivityRange, ActivityStats, ModelTokens};
 use rust_cli_tui::ui::palette::{ColorLevel, Palette};
 
@@ -18,14 +19,14 @@ fn all_time() -> ActivityStats {
         }],
         models: vec![
             ModelTokens {
-                model: "opus".into(),
+                model: GLM_5_3.into(),
                 input: 900,
                 output: 100,
                 cache_read: 0,
                 cache_write: 0,
             },
             ModelTokens {
-                model: "haiku".into(),
+                model: GLM_4_6.into(),
                 input: 40,
                 output: 10,
                 cache_read: 0,
@@ -67,7 +68,7 @@ async fn stats_shows_the_overview_cycles_dates_and_lists_models() {
         |mut ui| async move {
             ui.wait_for("Ask before changes").await;
             ui.submit("/stats");
-            let page = ui.wait_for("Favorite model: opus").await;
+            let page = ui.wait_for(&format!("Favorite model: {GLM_5_3}")).await;
             assert!(page.contains("Overview"), "{page}");
             assert!(page.contains("Total tokens: 1.1k"), "{page}");
             assert!(page.contains("Sessions: 3"), "{page}");
@@ -89,8 +90,11 @@ async fn stats_shows_the_overview_cycles_dates_and_lists_models() {
             ui.key(KeyCode::Char('r'));
             ui.wait_for("Sessions: 3").await;
             ui.key(KeyCode::Right);
-            let models = ui.wait_for("\u{2022} opus (").await;
-            assert!(models.contains("\u{2022} haiku ("), "{models}");
+            let models = ui.wait_for(&format!("\u{2022} {GLM_5_3} (")).await;
+            assert!(
+                models.contains(&format!("\u{2022} {GLM_4_6} (")),
+                "{models}"
+            );
             assert!(models.contains("In: 900 \u{b7} Out: 100"), "{models}");
             ui.key(KeyCode::Tab);
             let usage = ui.wait_for("Total duration (API):").await;
@@ -124,7 +128,7 @@ async fn chinese_and_light_backgrounds_keep_the_page() {
             assert!(page.contains("Esc 取消"), "{page}");
             assert!(page.contains("tab 切换标签页"), "{page}");
             ui.key(KeyCode::Tab);
-            let stats = ui.wait_for("最常用的模型： opus").await;
+            let stats = ui.wait_for(&format!("最常用的模型： {GLM_5_3}")).await;
             assert!(stats.contains("概览"), "{stats}");
             assert!(stats.contains("当前连续： 1 天"), "{stats}");
             *seen.lock().unwrap() = ui.buffer.lock().unwrap().clone();

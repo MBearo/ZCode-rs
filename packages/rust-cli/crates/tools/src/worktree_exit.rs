@@ -16,6 +16,11 @@ use crate::common::{Definition, definition, failed, parse, text};
 use crate::worktree::{WorktreeBoard, WorktreeSession, invalid, owner, switch};
 use crate::worktree_texts as texts;
 
+/// 校验错误码（删除时）：有未提交的改动或提交、查不了状态、不是本会话建的 worktree。
+const HAS_WORK_CODE: i32 = 2;
+const UNVERIFIED_CODE: i32 = 3;
+const NOT_OWNER_CODE: i32 = 4;
+
 pub const EXIT: &str = "ExitWorktree";
 
 #[derive(Deserialize)]
@@ -62,7 +67,7 @@ impl Tool for ExitWorktreeTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(100_000)
+        Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
     }
 
     async fn validate_input(&self, input: &Value, context: &ToolUseContext) -> Validation {
@@ -77,16 +82,19 @@ impl Tool for ExitWorktreeTool {
         }
         if session.entered_existing {
             let message = texts::not_owner(session.path.as_str(), session.original.as_str());
-            return invalid(message, Some(4));
+            return invalid(message, Some(NOT_OWNER_CODE));
         }
         if input.discard_changes == Some(true) {
             return Validation::Ok;
         }
         match inspect(context, &session).await {
-            None => invalid(texts::unverified(session.path.as_str()), Some(3)),
+            None => invalid(
+                texts::unverified(session.path.as_str()),
+                Some(UNVERIFIED_CODE),
+            ),
             Some((files, commits)) if files > 0 || commits > 0 => invalid(
                 texts::has_work(files, commits, session.branch.as_deref()),
-                Some(2),
+                Some(HAS_WORK_CODE),
             ),
             Some(_) => Validation::Ok,
         }

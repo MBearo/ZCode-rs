@@ -15,7 +15,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
+use rust_cli_base::units;
+
 use super::lock::alive;
+
+/// 缺省：锁被占着时多久重试一次。
+const DEFAULT_RETRY: Duration = Duration::from_millis(10);
+/// 缺省：一共试几次。
+const DEFAULT_ATTEMPTS: u32 = 200;
+/// 缺省：锁文件的 mtime 满这么久就当作没人持有（5 分钟）。
+const DEFAULT_STALE: Duration = Duration::from_secs(5 * units::SECONDS_PER_MINUTE);
 
 /// 等待与回收的参数（默认值同 Node：10 ms、200 次、5 分钟）。
 #[derive(Debug, Clone)]
@@ -28,9 +37,9 @@ pub struct PidLockOptions {
 impl Default for PidLockOptions {
     fn default() -> Self {
         Self {
-            retry: Duration::from_millis(10),
-            attempts: 200,
-            stale: Duration::from_secs(5 * 60),
+            retry: DEFAULT_RETRY,
+            attempts: DEFAULT_ATTEMPTS,
+            stale: DEFAULT_STALE,
         }
     }
 }

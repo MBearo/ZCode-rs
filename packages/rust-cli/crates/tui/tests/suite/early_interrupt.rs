@@ -99,13 +99,17 @@ impl Commands for HeldHook {
         _workspace: &WorkspaceRef,
         context: OperationContext,
         _request: StartCommand,
-    ) -> Result<(), EnvError> {
-        let mut first = self.first.lock().unwrap_or_else(PoisonError::into_inner);
-        if first.is_none() {
-            *first = Some(context.operation);
-            self.started.notify_one();
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
+        let operation = context.operation.clone();
+        {
+            // 先放掉锁：watch_command 里的 is_first 也要拿它。
+            let mut first = self.first.lock().unwrap_or_else(PoisonError::into_inner);
+            if first.is_none() {
+                *first = Some(context.operation);
+                self.started.notify_one();
+            }
         }
-        Ok(())
+        Ok(self.watch_command(operation, 0))
     }
 
     fn watch_command(
@@ -132,10 +136,6 @@ impl Commands for HeldHook {
             self.cancelled.send_replace(true);
         }
         Ok(())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
-        Ok(Outcome::Unknown)
     }
 
     async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {

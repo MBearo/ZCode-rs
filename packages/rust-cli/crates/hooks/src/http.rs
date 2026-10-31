@@ -1,11 +1,15 @@
 //! http hook（docs/specs/rust-cli/hooks.md §5.2）：执行的语义部分，网络经
 //! [`HookHttp`] 端口。
 
+use rust_cli_base::proto::{http, mime};
 use rust_cli_kernel_api::hooks::{HookHttp, HookHttpError, HookHttpRequest};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::HttpHook;
 use crate::result::Raw;
+
+/// 带花括号的变量引用的开头（`${NAME}`；不带花括号是 `$NAME`）。
+const BRACED_OPEN: &str = "${";
 
 /// URL 允许表的通配（`*` 任意串，其余按字面）。
 fn url_matches(url: &str, pattern: &str) -> bool {
@@ -54,7 +58,7 @@ pub(crate) fn interpolate(value: &str, allowed: &[String], env: &[(String, Strin
     while index < chars.len() {
         if chars[index] == '$' {
             let braced = chars.get(index + 1) == Some(&'{');
-            let start = index + if braced { 2 } else { 1 };
+            let start = index + if braced { BRACED_OPEN.len() } else { 1 };
             if chars.get(start).copied().is_some_and(is_name_start) {
                 let mut end = start;
                 while chars.get(end).copied().is_some_and(is_name) {
@@ -112,9 +116,9 @@ pub(crate) async fn run(
             .collect(),
         None => hook.allowed_env_vars.clone(),
     };
-    // header 名写小写（net 的写法；HTTP 不分大小写，发送时本来就规范化成小写，F58）。同名（不分大小写）的配置值盖掉
-    // 缺省值（例如 `Content-Type`）。
-    let mut headers = vec![("content-type".to_owned(), "application/json".to_owned())];
+    // header 名写小写（base 的 `proto` 的写法；HTTP 不分大小写，发送时本来就规范化成小写，F58）。同名（不分大小写）的
+    // 配置值盖掉缺省值（例如 `Content-Type`）。
+    let mut headers = vec![(http::header::CONTENT_TYPE.to_owned(), mime::JSON.to_owned())];
     for (name, value) in &hook.headers {
         let value = interpolate(value, &allowed, policy.env);
         match headers

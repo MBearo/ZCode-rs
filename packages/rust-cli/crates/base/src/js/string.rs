@@ -56,7 +56,7 @@ pub fn utf16_prefix(s: &str, units: usize) -> &str {
 }
 
 const MESSAGE_LIMIT: usize = 500;
-const MESSAGE_KEEP: usize = 497;
+const MESSAGE_KEEP: usize = MESSAGE_LIMIT - crate::text::ELLIPSIS.len();
 
 /// Node `sanitizeText` of error payloads: whitespace runs collapse to one
 /// space, the result is trimmed and capped at 500 UTF-16 units; `None` when empty.
@@ -70,6 +70,13 @@ pub fn sanitize_message(message: &str) -> Option<String> {
     }
     Some(format!("{}...", utf16_prefix(&compact, MESSAGE_KEEP)))
 }
+
+/// `$` 加一个字节的替换写法的长度：`$$`、`$&`、`` $` ``、`$'` 与一位组号 `$n`。
+const DOLLAR_PAIR_LEN: usize = 2;
+/// 两位组号 `$nn` 的长度。
+const TWO_DIGIT_GROUP_LEN: usize = 3;
+/// 组号是十进制。
+const DECIMAL: usize = 10;
 
 /// ECMAScript `GetSubstitution`: `String.prototype.replace` with a string
 /// replacement expands `$$`, `$&`, `` $` ``, `$'` and `$n` / `$nn` (unnamed
@@ -104,11 +111,11 @@ pub fn substitute(
             b'`' => out.push_str(before),
             b'\'' => out.push_str(after),
             _ => {
-                let group = match (digit(i + 1), digit(i + 2)) {
-                    (Some(a), Some(b)) if (1..=captures.len()).contains(&(a * 10 + b)) => {
-                        Some((a * 10 + b, 3))
+                let group = match (digit(i + 1), digit(i + DOLLAR_PAIR_LEN)) {
+                    (Some(a), Some(b)) if (1..=captures.len()).contains(&(a * DECIMAL + b)) => {
+                        Some((a * DECIMAL + b, TWO_DIGIT_GROUP_LEN))
                     }
-                    (Some(a), _) if (1..=captures.len()).contains(&a) => Some((a, 2)),
+                    (Some(a), _) if (1..=captures.len()).contains(&a) => Some((a, DOLLAR_PAIR_LEN)),
                     _ => None,
                 };
                 match group {
@@ -124,7 +131,7 @@ pub fn substitute(
                 continue;
             }
         }
-        i += 2;
+        i += DOLLAR_PAIR_LEN;
     }
     out
 }

@@ -14,6 +14,7 @@ mod sse;
 use std::io::Write;
 use std::process::{Output, Stdio};
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::Value;
 
 /// 在临时 HOME 与工作区里跑 zcode；`stdin` 有值时写进去再关上。
@@ -35,7 +36,7 @@ fn zcode(fixture: &sse::Fixture, args: &[&str], stdin: Option<&str>) -> Output {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -125,7 +126,7 @@ fn terminal_bench_command_line_streams_events() {
     );
     let init = &events[0];
     assert!(init["session_id"].as_str().unwrap().starts_with("sess_"));
-    assert_eq!(init["model"], "claude-opus-5-5");
+    assert_eq!(init["model"], GLM_5_3);
     // key 来自 `ZCODE_API_KEY`（修复线 F42，config.md §2.5）。
     assert_eq!(init["apiKeySource"], "ZCODE_API_KEY");
     assert!(
@@ -158,7 +159,7 @@ fn aws_swe_json_command_line_prints_one_result_object() {
             "-p",
             "Fix the bug.",
             "--model",
-            "claude-opus-5-5",
+            GLM_5_3,
             "--output-format",
             "json",
             "--permission-mode",
@@ -180,7 +181,7 @@ fn aws_swe_json_command_line_prints_one_result_object() {
     assert_eq!(result["result"], "All done.");
     assert_eq!(result["num_turns"], 2);
     assert_eq!(result["total_cost_usd"], 0);
-    let usage = &result["modelUsage"]["claude-opus-5-5"];
+    let usage = &result["modelUsage"][GLM_5_3];
     // 夹具的每次回复：输入 1、输出 1。
     assert_eq!(usage["inputTokens"], 2);
     assert_eq!(usage["outputTokens"], 2);
@@ -365,7 +366,7 @@ fn harbor_and_inspect_swe_pass_the_task_after_double_dash() {
         line.extend_from_slice(permission);
         line.extend([
             "--model",
-            "claude-opus-5-5",
+            GLM_5_3,
             "--print",
             "--output-format",
             "stream-json",

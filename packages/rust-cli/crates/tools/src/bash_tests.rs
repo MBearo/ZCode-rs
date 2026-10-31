@@ -76,11 +76,12 @@ impl Commands for Scripted {
     async fn start_command(
         &self,
         _w: &WorkspaceRef,
-        _c: OperationContext,
+        c: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
+        let operation = c.operation;
         self.started.lock().unwrap().push(request);
-        Ok(())
+        Ok(self.watch_command(operation, 0))
     }
 
     fn watch_command(
@@ -129,10 +130,6 @@ impl Commands for Scripted {
         self.cancelled.lock().unwrap().push(operation);
         self.released.notify_one();
         Ok(())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
-        Ok(Outcome::Unknown)
     }
 
     async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {

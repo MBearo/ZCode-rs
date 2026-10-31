@@ -7,7 +7,7 @@ use rust_cli_exec_wire::envelope::StreamItem;
 use rust_cli_exec_wire::reply::Reply;
 use rust_cli_exec_wire::request::Request;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext, Outcome,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext,
     ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{
@@ -21,7 +21,7 @@ use rust_cli_kernel_api::env_shell::{
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
 use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
+    Background, Checkpoints, CommandEvents, Commands, EnvInfo, Files, Pdf, Search, Shell,
 };
 
 use crate::{RemoteEnvironment, from_wire as from, mismatch, to_wire as to};
@@ -242,7 +242,10 @@ impl Commands for RemoteEnvironment {
         ws: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<CommandEvents, EnvError> {
+        // 线上仍是两步（wire 不随内部 API 变）：执行器拿着端口给的流，第一个 watch_command(op, 0) 接走它
+        // （remote-exec.md §18.5，工作线 F119）。
+        let operation = context.operation.clone();
         let mut body = empty();
         let request = Request::StartCommand {
             workspace: workspace(ws),
@@ -250,7 +253,8 @@ impl Commands for RemoteEnvironment {
             request: Box::new(to::start_command(request, &mut body)),
         };
         let (reply, _) = self.call(request, body).await?;
-        expect!(reply, "commands.start_command", Reply::StartCommand => Ok(()))
+        expect!(reply, "commands.start_command", Reply::StartCommand => Ok(()))?;
+        Ok(self.watch_command(operation, 0))
     }
 
     fn watch_command(
@@ -274,16 +278,6 @@ impl Commands for RemoteEnvironment {
         };
         let (reply, _) = self.call(request, empty()).await?;
         expect!(reply, "commands.cancel", Reply::Cancel => Ok(()))
-    }
-
-    async fn operation_status(&self, operation: OperationId) -> Result<Outcome, EnvError> {
-        let request = Request::OperationStatus {
-            operation: operation.as_str().to_owned(),
-        };
-        let (reply, _) = self.call(request, empty()).await?;
-        Ok(from::outcome(
-            expect!(reply, "commands.operation_status", Reply::OperationStatus(outcome) => outcome),
-        ))
     }
 
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
@@ -430,16 +424,6 @@ impl Checkpoints for RemoteEnvironment {
         let (reply, _) = self.call(request, empty()).await?;
         Ok(from::rewind_status(
             expect!(reply, "checkpoints.rewind_apply", Reply::RewindApply(status) => status),
-        ))
-    }
-
-    async fn rewind_status(&self, token: &OperationId) -> Result<RewindStatus, EnvError> {
-        let request = Request::RewindStatus {
-            token: token.as_str().to_owned(),
-        };
-        let (reply, _) = self.call(request, empty()).await?;
-        Ok(from::rewind_status(
-            expect!(reply, "checkpoints.rewind_status", Reply::RewindStatus(status) => status),
         ))
     }
 

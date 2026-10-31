@@ -19,6 +19,10 @@ const Z_SIZE: (f64, f64) = (256.0, 218.0);
 pub(super) const BADGE_HALF: f64 = 0.86;
 const BADGE_RADIUS: f64 = 0.24;
 const BADGE_Z_WIDTH: f64 = BADGE_HALF * 2.0 * 0.62;
+/// 三次贝塞尔曲线分成这么多段折线。
+const CURVE_SEGMENTS: u32 = 16;
+/// 三次 Bernstein 多项式中间两项的系数。
+const BERNSTEIN_MIDDLE: f64 = 3.0;
 
 /// Z 镂空的徽章。
 pub(super) static FIELD: LazyLock<Vec<f32>> = LazyLock::new(|| {
@@ -69,10 +73,15 @@ fn polyline(path: &str) -> Vec<Point> {
             'C' => {
                 let (a, b, end) = ([next(), next()], [next(), next()], [next(), next()]);
                 let from = at;
-                for step in 1..16 {
-                    let t = f64::from(step) / 16.0;
+                for step in 1..CURVE_SEGMENTS {
+                    let t = f64::from(step) / f64::from(CURVE_SEGMENTS);
                     let u = 1.0 - t;
-                    let k = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+                    let k = [
+                        u * u * u,
+                        BERNSTEIN_MIDDLE * u * u * t,
+                        BERNSTEIN_MIDDLE * u * t * t,
+                        t * t * t,
+                    ];
                     points.push(std::array::from_fn(|i| {
                         k[0] * from[i] + k[1] * a[i] + k[2] * b[i] + k[3] * end[i]
                     }));

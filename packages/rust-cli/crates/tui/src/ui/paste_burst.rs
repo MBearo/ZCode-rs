@@ -214,8 +214,10 @@ impl PasteBurst {
     ) -> Option<RetroGrab> {
         let start_byte = retro_start_index(before, retro_chars);
         let grabbed = before[start_byte..].to_owned();
+        /// 收回的一段至少这么多个字符才像粘贴（不含空白时）。
+        const PASTEY_CHARS: usize = 16;
         let looks_pastey =
-            grabbed.chars().any(char::is_whitespace) || grabbed.chars().count() >= 16;
+            grabbed.chars().any(char::is_whitespace) || grabbed.chars().count() >= PASTEY_CHARS;
         if !looks_pastey {
             return None;
         }

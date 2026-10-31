@@ -19,7 +19,7 @@ fn open(path: &Path) -> io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options.mode(rust_cli_base::proto::mode::PRIVATE_FILE);
     }
     options.open(path)
 }

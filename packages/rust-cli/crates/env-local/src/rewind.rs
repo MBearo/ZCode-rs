@@ -1,6 +1,7 @@
 //! 代码回退的 token 事务（docs/specs/rust-cli/session-lifecycle.md §5.2）。
 //!
-//! prepare 核对每个文件的内容 hash，全部通过才登记 token；apply 对每个文件写之前再核对一次
+//! prepare 核对每个文件的内容 hash，全部通过才登记 token；apply 取走登记（token 用过一次就作废，工作线 F119：
+//! 不按 token 重放，重连的去重在执行协议的账本里），对每个文件写之前再核对一次
 //! （prepare 与 apply 之间不持锁，文件可能又被改），先记下当前内容再写 / 删，任一步失败就按
 //! 记录逆序补偿。登记表的锁只保护内存操作，文件 IO 在锁外的阻塞线程里做。
 
@@ -21,45 +22,23 @@ use crate::files;
 use crate::meta::{display, io_error};
 
 #[derive(Default)]
-pub(crate) struct Rewinds(Mutex<HashMap<OperationId, (Vec<RestoreFile>, RewindStatus)>>);
+pub(crate) struct Rewinds(Mutex<HashMap<OperationId, Vec<RestoreFile>>>);
 
 impl Rewinds {
-    fn table(&self) -> MutexGuard<'_, HashMap<OperationId, (Vec<RestoreFile>, RewindStatus)>> {
+    fn table(&self) -> MutexGuard<'_, HashMap<OperationId, Vec<RestoreFile>>> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// 登记（同一个 token 再次 prepare 时保留第一次的记录）。
     pub(crate) fn register(&self, token: OperationId, files: Vec<RestoreFile>) {
-        self.table()
-            .entry(token)
-            .or_insert((files, RewindStatus::Prepared));
+        self.table().insert(token, files);
     }
 
-    /// 取出要执行的文件并标为 Applying；不是 Prepared 时返回已有的状态。
-    pub(crate) fn begin(&self, token: &OperationId) -> Result<Vec<RestoreFile>, RewindStatus> {
-        let mut table = self.table();
-        let Some((files, status)) = table.get_mut(token) else {
-            return Err(RewindStatus::Unknown);
-        };
-        if *status != RewindStatus::Prepared {
-            return Err(status.clone());
-        }
-        *status = RewindStatus::Applying;
-        Ok(files.clone())
+    /// 取走要执行的文件：token 用过一次就作废（以前留着状态，再 apply 时返回第一次的结果）。
+    pub(crate) fn take(&self, token: &OperationId) -> Option<Vec<RestoreFile>> {
+        self.table().remove(token)
     }
 
-    pub(crate) fn end(&self, token: &OperationId, result: RewindStatus) {
-        if let Some((_, status)) = self.table().get_mut(token) {
-            *status = result;
-        }
-    }
-
-    pub(crate) fn status(&self, token: &OperationId) -> RewindStatus {
-        self.table()
-            .get(token)
-            .map_or(RewindStatus::Unknown, |(_, status)| status.clone())
-    }
-
+    /// 只 prepare、没有 apply 的 token 在这里释放。
     pub(crate) fn finish(&self, token: &OperationId) {
         self.table().remove(token);
     }

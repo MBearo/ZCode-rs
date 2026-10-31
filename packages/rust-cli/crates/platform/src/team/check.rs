@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use super::list::Customer;
 use super::{Availability, Reason};
+use crate::consts;
 use crate::token::Family;
 use crate::token::http::{Auth, Fault, Http, ORGANIZATION_HEADER, PROJECT_HEADER, Reply};
 
@@ -75,7 +76,9 @@ pub(crate) async fn detail(http: &Http, input: Detail<'_>) -> Availability {
 fn business_success(payload: &Value) -> bool {
     let code_ok = match payload.get("code") {
         None => true,
-        Some(Value::Number(number)) => matches!(number.as_f64(), Some(n) if n == 0.0 || n == 200.0),
+        Some(Value::Number(number)) => {
+            matches!(number.as_f64(), Some(n) if consts::BUSINESS_SUCCESS_CODES.contains(&n))
+        }
         Some(_) => false,
     };
     payload.get("success") != Some(&Value::Bool(false)) && code_ok
@@ -187,7 +190,9 @@ pub(crate) fn successful_data(payload: &Value) -> Option<&Value> {
         Some(Value::Bool(flag)) => Some(*flag),
         Some(_) => return None,
     };
-    if success == Some(false) || code.is_some_and(|code| code != 0.0 && code != 200.0) {
+    if success == Some(false)
+        || code.is_some_and(|code| !consts::BUSINESS_SUCCESS_CODES.contains(&code))
+    {
         return None;
     }
     object.get("data")

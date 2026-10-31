@@ -9,6 +9,8 @@
 
 mod sse;
 
+use rust_cli_base::hosts::{ZCODE_ORIGIN, ZCODE_ORIGIN_TEST};
+use rust_cli_base::models::GLM_5_3;
 use std::process::Stdio;
 
 const SESSION: &str = "2d480878-38af-4bae-a54f-096e2fb0f4d7";
@@ -54,7 +56,7 @@ fn run(vars: &[(&str, &str)]) -> Vec<sse::Headers> {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -102,7 +104,7 @@ fn a_real_request_carries_the_node_headers() {
     };
     for headers in &requests {
         for (name, value) in [
-            ("http-referer", "https://zcode.z.ai"),
+            ("http-referer", ZCODE_ORIGIN_TEST),
             ("user-agent", format!("ZCode/{version}").as_str()),
             ("x-zcode-app-version", version.as_str()),
             ("x-title", "Z Code@cli"),
@@ -144,7 +146,7 @@ fn the_app_version_variable_comes_first() {
     assert_eq!(get(headers, "x-zcode-app-version"), Some("9.9.9"));
     assert_eq!(get(headers, "x-client-language"), Some("en-US"));
     assert_eq!(get(headers, "x-client-timezone"), Some("UTC"));
-    assert_eq!(get(headers, "http-referer"), Some("https://zcode.z.ai"));
+    assert_eq!(get(headers, "http-referer"), Some(ZCODE_ORIGIN));
     assert_eq!(get(headers, "x-release-channel"), Some("production"));
     let requests = run(&[("ZCODE_APP_VERSION", "")]);
     assert_eq!(get(&requests[0], "user-agent"), Some("ZCode/unknown"));

@@ -51,11 +51,19 @@ pub struct BackgroundCommand {
     pub kind: BackgroundKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackgroundKind {
+    #[default]
     Bash,
     Monitor,
+}
+
+impl BackgroundKind {
+    /// serde 的跳过条件（`BackgroundInfo.kind` 是 Bash 时不写出，修复线 F117）。
+    pub fn is_bash(&self) -> bool {
+        *self == Self::Bash
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

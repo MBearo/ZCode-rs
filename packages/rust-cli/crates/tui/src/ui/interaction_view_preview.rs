@@ -6,6 +6,7 @@ use ratatui::text::{Line, Span};
 use super::{View, bold, dim, input};
 use crate::ui::i18n::Lang;
 use crate::ui::interaction::{Interaction, Question};
+use crate::ui::layout;
 use crate::ui::markdown;
 use crate::ui::text::{truncate_line, width};
 
@@ -20,7 +21,9 @@ const RESERVED_ROWS: usize = 26;
 
 /// 预览框的最大内宽：屏宽减选项列与间隔，再减框线与两侧的空格。
 fn max_inner(view: &View<'_>) -> usize {
-    view.width.saturating_sub(RESERVED + 4).max(1)
+    view.width
+        .saturating_sub(RESERVED + layout::BOX_BORDERS + layout::BOX_PADDING)
+        .max(1)
 }
 
 fn rendered(preview: &str, view: &View<'_>) -> Vec<Line<'static>> {
@@ -46,7 +49,10 @@ fn boxed(preview: Option<&str>, inner: usize, view: &View<'_>) -> Vec<Line<'stat
     let limit = view.height.saturating_sub(RESERVED_ROWS).max(1);
     let hidden = body.len().saturating_sub(limit);
     body.truncate(limit);
-    let mut out = vec![Line::from(format!("┌{}┐", "─".repeat(inner + 2)))];
+    let mut out = vec![Line::from(format!(
+        "┌{}┐",
+        "─".repeat(inner + layout::BOX_PADDING)
+    ))];
     for line in body {
         let line = truncate_line(line, inner);
         let pad = inner.saturating_sub(width(&line.spans));
@@ -57,10 +63,13 @@ fn boxed(preview: Option<&str>, inner: usize, view: &View<'_>) -> Vec<Line<'stat
     }
     if hidden > 0 {
         let label = format!("─── ✂ ─── {hidden} lines hidden ");
-        let fill = (inner + 2).saturating_sub(label.chars().count());
+        let fill = (inner + layout::BOX_PADDING).saturating_sub(label.chars().count());
         out.push(Line::from(format!("├{label}{}┤", "─".repeat(fill))));
     }
-    out.push(Line::from(format!("└{}┘", "─".repeat(inner + 2))));
+    out.push(Line::from(format!(
+        "└{}┘",
+        "─".repeat(inner + layout::BOX_PADDING)
+    )));
     out
 }
 

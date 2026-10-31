@@ -35,7 +35,10 @@ function wire(record, name) {
   };
 }
 
-/** 最后一条带工具结果的 user 消息里，`id` 这个调用的结果与同一条消息里的文本块。 */
+/**
+ * 最后一条带工具结果的 user 消息里，`id` 这个调用的结果与同一条消息里的文本块。提醒不算：没有对话中间 system 的模型
+ * 把这一步的提醒（`<total_tokens>` 等）接在这条消息后面（context.md §3），与 ToolSearch 的结果无关（工作线 F121）。
+ */
 function resultOf(record, id) {
   for (const message of [...(record.parsed?.messages ?? [])].reverse()) {
     if (message.role !== "user" || !Array.isArray(message.content)) continue;
@@ -43,7 +46,9 @@ function resultOf(record, id) {
       (block) => block.type === "tool_result" && block.tool_use_id === id,
     );
     if (!result) continue;
-    const texts = message.content.filter((block) => block.type === "text").map((b) => b.text);
+    const texts = message.content
+      .filter((block) => block.type === "text" && !block.text.startsWith("<system-reminder>"))
+      .map((b) => b.text);
     return { content: result.content, texts };
   }
   return null;

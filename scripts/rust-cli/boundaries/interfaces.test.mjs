@@ -90,6 +90,31 @@ test("线上结构：字段、变体、serde 属性、元组结构体与常量�
   assert.equal(stripComments('let a = "// 不是注释"; // 是注释'), 'let a = "// 不是注释"; ');
 });
 
+test("帧的编号：判别值是命名常量的 `#[repr(u8)]` 枚举（F122），与 `match` 的写法得到同一张表", () => {
+  const source = `
+const HELLO: u8 = 0x01;
+/// 不是 Kind 的常量。
+const PART: u8 = 0x30;
+const REPLY: u8 = 0x11;
+#[repr(u8)]
+pub enum Kind {
+    Hello = HELLO,
+    /// 注释不算。
+    Reply = REPLY,
+}
+impl Kind {
+    pub fn code(self) -> u8 {
+        self as u8
+    }
+}
+`;
+  assert.deepEqual(extractFrameCodes(source), { Hello: "0x01", Reply: "0x11" });
+  // 判别值直接写数字也认；常量找不到时不猜。
+  assert.deepEqual(extractFrameCodes("pub enum Kind {\n    Ping = 0x20,\n    Pong = PONG,\n}"), {
+    Ping: "0x20",
+  });
+});
+
 test("快照：没变时通过；端口或线上结构变了、端口不见了都报出", () => {
   const sources = {
     "crates/kernel-api/src/machine.rs": PORT,

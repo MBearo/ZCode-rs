@@ -23,6 +23,7 @@ import { binaryPath } from "./binary.mjs";
 import { checkAppInterop } from "./node-interop-app.mjs";
 import { appSchemaRejections, nodeShape, rustShape } from "./node-interop-history.mjs";
 import { importNode, withHome } from "./node-root.mjs";
+import { GLM_5_3, GLM_5_3_ACCOUNT } from "./fixture/model.mjs";
 
 export async function checkCompat(ctx) {
   const { nodeRoot, store, dir, rust, expectEqual, nodeHistory, rustText, artifactStore, written } =
@@ -501,7 +502,7 @@ export async function checkProviderImport({ nodeRoot, example, home, expectEqual
   );
   let refused = false;
   try {
-    uiPrefs("model-write", home, "zai", "GLM-5.3", "high");
+    uiPrefs("model-write", home, "zai", GLM_5_3_ACCOUNT, "high");
   } catch {
     refused = true;
   }
@@ -521,7 +522,7 @@ export async function checkProviderImport({ nodeRoot, example, home, expectEqual
   // 旧文件没有要导入的内容：rust-cli 写，Node 读出同一个默认选择。
   await rm(file, { force: true });
   await writeFile(legacy, `${JSON.stringify({ ui: { locale: "en-US" } }, null, 2)}\n`);
-  uiPrefs("model-write", home, "zai", "GLM-5.3", "high");
+  uiPrefs("model-write", home, "zai", GLM_5_3_ACCOUNT, "high");
   const fresh = new NodePersonalProviderConfigRepository({
     filePath: file,
     pollingIntervalMs: false,
@@ -529,7 +530,7 @@ export async function checkProviderImport({ nodeRoot, example, home, expectEqual
   });
   expectEqual("Node reads the default rust-cli wrote", (await fresh.read()).defaultModelSelection, {
     providerId: "zai",
-    modelId: "GLM-5.3",
+    modelId: GLM_5_3_ACCOUNT,
     options: { reasoningLevel: "high" },
   });
   fresh.dispose();
@@ -596,7 +597,7 @@ export async function checkStoragePaths({ nodeRoot, repoRoot, base, expectEqual 
           // rust-cli 只读 ZCODE_* 的名字（修复线 F42，config.md §2.5）。
           ZCODE_MODEL_BASE_URL: `http://127.0.0.1:${port}`,
           ZCODE_API_KEY: "test-key",
-          ZCODE_MODEL: "claude-opus-5-5",
+          ZCODE_MODEL: GLM_5_3,
         },
         stdio: ["ignore", "ignore", "inherit"],
       });

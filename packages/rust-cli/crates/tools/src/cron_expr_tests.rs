@@ -160,3 +160,33 @@ fn local_time_follows_the_clock_offset() {
         Some(1_792_285_200_000)
     );
 }
+
+/// 公历日期与天数互转、星期（F122：换成 base 的 `civil` 前后逐日相同）：1600-01-01 到 2400-12-31 按闰年规则逐日走。
+#[test]
+fn calendar_conversions_match_a_day_by_day_walk_from_1600_to_2400() {
+    let (mut year, mut month, mut day) = (1600_i64, 1_u32, 1_u32);
+    let mut days = days_from(1600, 1, 1);
+    // 1600-01-01 是星期六。
+    let mut weekday = 6_u32;
+    while year <= 2400 {
+        assert_eq!(days_from(year, month, day), days, "{year}-{month}-{day}");
+        assert_eq!(civil(days), (year, month, day));
+        assert_eq!(weekday_of(days), weekday, "{year}-{month}-{day}");
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let length = match month {
+            2 if leap => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        if day < length {
+            day += 1;
+        } else if month < 12 {
+            (month, day) = (month + 1, 1);
+        } else {
+            (year, month, day) = (year + 1, 1, 1);
+        }
+        days += 1;
+        weekday = (weekday + 1) % 7;
+    }
+}

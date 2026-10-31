@@ -21,6 +21,10 @@ use tokio::sync::mpsc;
 use crate::common::{Definition, definition, failed, text};
 use crate::web_fetch::SideModel;
 
+/// 校验错误码：没有查询词、同时给了允许与屏蔽的域名。
+const MISSING_QUERY_CODE: i32 = 1;
+const BOTH_DOMAIN_LISTS_CODE: i32 = 2;
+
 pub const NAME: &str = "WebSearch";
 
 /// 每次请求最多搜索的次数。
@@ -254,7 +258,7 @@ impl Tool for WebSearchTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(100_000)
+        Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
     }
 
     async fn validate_input(&self, input: &Value, _context: &ToolUseContext) -> Validation {
@@ -267,13 +271,13 @@ impl Tool for WebSearchTool {
             error_code: Some(code),
         };
         if query.is_empty() {
-            return invalid("Error: Missing query", 1);
+            return invalid("Error: Missing query", MISSING_QUERY_CODE);
         }
         let given = |key: &str| domains(input, key).is_some_and(|list| !list.is_empty());
         if given("allowed_domains") && given("blocked_domains") {
             return invalid(
                 "Error: Cannot specify both allowed_domains and blocked_domains in the same request",
-                2,
+                BOTH_DOMAIN_LISTS_CODE,
             );
         }
         Validation::Ok

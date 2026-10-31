@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::PathFacts;
@@ -118,7 +118,7 @@ impl Commands for Git {
         workspace: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         self.inner.start_command(workspace, context, request).await
     }
 
@@ -132,10 +132,6 @@ impl Commands for Git {
 
     async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
         self.inner.cancel(operation).await
-    }
-
-    async fn operation_status(&self, operation: OperationId) -> Result<Outcome, EnvError> {
-        self.inner.operation_status(operation).await
     }
 
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {

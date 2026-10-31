@@ -1,5 +1,6 @@
 //! OpenAI Chat Completions 请求体（model.md §10.1）。
 
+use rust_cli_base::models;
 use rust_cli_kernel_api::model::{ApiRole, SystemBlock, ThinkingConfig};
 use serde_json::json;
 
@@ -31,11 +32,11 @@ fn a_conversation_encodes_in_the_node_order() {
     });
     request.options.effort = Some("medium".to_owned());
     request.betas = vec!["effort-2025-11-24".to_owned()];
-    let body = body("glm-5", request, &[]).unwrap();
+    let body = body(models::GLM_5, request, &[]).unwrap();
     assert_eq!(
         body,
         concat!(
-            r#"{"model":"glm-5","messages":["#,
+            r#"{"model":"<model>","messages":["#,
             r#"{"role":"system","content":"You are ZCode."},"#,
             r#"{"role":"user","content":[{"type":"text","text":"<system-reminder>ctx</system-reminder>"},{"type":"text","text":"read a.png"},{"type":"text","text":"<system-reminder>\n# Environment\n</system-reminder>"}]},"#,
             r#"{"role":"assistant","content":null,"reasoning_content":"need the file","tool_calls":[{"id":"toolu_1","type":"function","function":{"name":"Read","arguments":"{\"file_path\":\"a.png\"}"}}]},"#,
@@ -45,6 +46,7 @@ fn a_conversation_encodes_in_the_node_order() {
             r#""tools":[{"type":"function","function":{"name":"Read","description":"Read a file","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}}],"#,
             r#""tool_choice":"auto","stream":true,"stream_options":{"include_usage":true},"max_tokens":32000,"temperature":0.7}"#,
         )
+        .replace("<model>", models::GLM_5)
     );
 }
 
@@ -112,7 +114,7 @@ fn server_tools_are_unsupported_on_openai() {
 #[test]
 fn documents_are_file_parts_with_the_ai_sdk_name() {
     let request = request(crate::openai_lower::tests::pdf_result());
-    let body = body("gpt-5.6", request, &[]).unwrap();
+    let body = body(models::GPT_5_6, request, &[]).unwrap();
     assert!(
         body.contains(r#"{"role":"user","content":[{"type":"file","file":{"filename":"document.pdf","file_data":"data:application/pdf;base64,JVBERi0="}}]}"#),
         "{body}"

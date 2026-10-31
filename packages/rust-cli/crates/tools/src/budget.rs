@@ -8,6 +8,7 @@
 //! 落盘位置不是本机路径，而是 `zcode-artifact://<会话>/<artifact>`
 //! （云端也能用）；Read 能读这种地址（tools-files.md §5）。
 
+use rust_cli_base::proto::mime;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::persisted_output;
@@ -64,14 +65,14 @@ pub async fn apply(
     }
     // 单段文本存原文；多段存 JSON（`JSON.stringify(blocks, null, 2)` 的写法）。
     let (body, media_type) = match parts.as_slice() {
-        [only] => ((*only).to_owned(), "text/plain"),
+        [only] => ((*only).to_owned(), mime::TEXT_PLAIN),
         many => {
             let blocks: Vec<Value> = many
                 .iter()
                 .map(|text| json!({"type": "text", "text": text}))
                 .collect();
             let text = serde_json::to_string_pretty(&blocks).unwrap_or_default();
-            (text, "application/json")
+            (text, mime::JSON)
         }
     };
     let Ok(text) = persisted_output::persist(artifacts, session, &body, media_type).await else {

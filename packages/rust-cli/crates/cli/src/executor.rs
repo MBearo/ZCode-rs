@@ -18,6 +18,8 @@ use crate::output::eprint_line;
 
 /// 子命令的名字。
 const NAME: &str = "executor";
+/// 常驻进程停下后等卡住的阻塞线程的上限。
+const RESIDENT_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ExecutorCommand {
@@ -164,9 +166,7 @@ pub(crate) fn main(parsed: Result<ExecutorCommand, String>) -> ExitCode {
         // 客户端尽快重连（不然要等到客户端的下一个心跳写进 stdin）。
         ExecutorCommand::Proxy => runtime.shutdown_background(),
         // 常驻进程停下时，卡在阻塞调用里的线程（例如写一个没有读者的 FIFO）不挡退出。
-        ExecutorCommand::Resident { .. } => {
-            runtime.shutdown_timeout(std::time::Duration::from_secs(5))
-        }
+        ExecutorCommand::Resident { .. } => runtime.shutdown_timeout(RESIDENT_SHUTDOWN_TIMEOUT),
         ExecutorCommand::Standalone { .. }
         | ExecutorCommand::Status { .. }
         | ExecutorCommand::Stop { .. } => drop(runtime),

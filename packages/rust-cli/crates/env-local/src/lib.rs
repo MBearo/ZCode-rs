@@ -19,7 +19,6 @@ mod files;
 mod git;
 mod hook_http;
 mod host;
-mod ledger;
 mod mcp;
 mod meta;
 mod pdf;
@@ -40,7 +39,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{
@@ -62,7 +61,6 @@ use rust_cli_kernel_api::machine::{
 };
 
 use crate::helpers::{on_path, path, run, run_walk, unknown_operation, unsupported};
-use crate::ledger::Ledger;
 use crate::shell::{Shells, environ};
 
 pub use crate::cron_store::LocalCronStore;
@@ -82,7 +80,6 @@ pub struct Busy {
 /// 本机执行环境。`home` 由入口 crate 传入（只有它读进程环境），用于 `~` 展开。
 pub struct LocalEnvironment {
     home: Option<PathBuf>,
-    writes: Ledger,
     /// 代码回退事务（session-lifecycle.md §5.2）。
     rewinds: rewind::Rewinds,
     /// shell 命令；没有配置时命令类操作返回 `Unsupported`。
@@ -197,19 +194,12 @@ impl Files for LocalEnvironment {
     async fn put_file(
         &self,
         _workspace: &WorkspaceRef,
-        context: OperationContext,
+        _context: OperationContext,
         request: PutFile,
     ) -> Result<FileWritten, EnvError> {
-        // 同一个 operationId 只执行一次（spec §6 规则 3）：重放返回第一次的回执，参数不同则拒绝。
-        let fingerprint = Ledger::fingerprint(&request);
-        if let Some(done) = self.writes.replay(&context.operation, fingerprint)? {
-            return Ok(done);
-        }
+        // 不按 operationId 重放（工作线 F119，README §6 规则 3）：重连的去重在执行协议的账本里，本机没有重连。
         let target = path(&request.path);
-        let written = run(move || files::put_file(&target, &request)).await?;
-        self.writes
-            .record(context.operation, fingerprint, written.clone());
-        Ok(written)
+        run(move || files::put_file(&target, &request)).await
     }
 }
 
@@ -247,7 +237,7 @@ impl Commands for LocalEnvironment {
         _workspace: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         self.shells()?
             .start_with(context, request, self.web.clone())
             .await
@@ -275,21 +265,6 @@ impl Commands for LocalEnvironment {
         } else {
             Err(unknown_operation(&operation))
         }
-    }
-
-    async fn operation_status(&self, operation: OperationId) -> Result<Outcome, EnvError> {
-        if let Some(outcome) = self
-            .shells
-            .as_ref()
-            .and_then(|shells| shells.status(&operation))
-        {
-            return Ok(outcome);
-        }
-        Ok(if self.writes.contains(&operation) {
-            Outcome::Completed
-        } else {
-            Outcome::Unknown
-        })
     }
 
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
@@ -347,10 +322,10 @@ impl Background for LocalEnvironment {
 
     async fn stop_background_command(
         &self,
-        context: OperationContext,
+        _context: OperationContext,
         request: BackgroundTask,
     ) -> Result<BackgroundStop, EnvError> {
-        self.shells()?.stop(&context, &request)
+        Ok(self.shells()?.stop(&request))
     }
 
     async fn background_foreground(
@@ -380,23 +355,16 @@ impl Checkpoints for LocalEnvironment {
     }
 
     async fn rewind_apply(&self, token: &OperationId) -> Result<RewindStatus, EnvError> {
-        let files = match self.rewinds.begin(token) {
-            Ok(files) => files,
-            Err(status) => return Ok(status),
+        let Some(files) = self.rewinds.take(token) else {
+            return Ok(RewindStatus::Unknown);
         };
-        // 阻塞线程本身失败时也要落一个终态，不让 token 停在 Applying。
-        let status = run(move || Ok(rewind::apply(&files)))
+        // 阻塞线程本身失败时也给一个终态。
+        Ok(run(move || Ok(rewind::apply(&files)))
             .await
             .unwrap_or_else(|error| RewindStatus::Failed {
                 message: error.to_string(),
                 conflicts: Vec::new(),
-            });
-        self.rewinds.end(token, status.clone());
-        Ok(status)
-    }
-
-    async fn rewind_status(&self, token: &OperationId) -> Result<RewindStatus, EnvError> {
-        Ok(self.rewinds.status(token))
+            }))
     }
 
     async fn rewind_finish(&self, token: &OperationId) -> Result<(), EnvError> {

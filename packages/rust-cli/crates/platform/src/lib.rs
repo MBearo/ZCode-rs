@@ -16,6 +16,7 @@
 mod account;
 mod auth;
 mod cli_config;
+mod consts;
 mod credentials;
 mod device;
 #[cfg(test)]
@@ -403,7 +404,8 @@ impl ModelEndpoints for Platform {
 /// 去掉 `authorization` 与 `x-api-key`（名字不分大小写，Node `MODEL_AUTH_HEADER_NAMES`）。
 fn without_auth_headers(headers: &mut Vec<(String, RedactedString)>) {
     headers.retain(|(name, _)| {
-        !name.eq_ignore_ascii_case(header::AUTHORIZATION) && !name.eq_ignore_ascii_case("x-api-key")
+        !name.eq_ignore_ascii_case(header::AUTHORIZATION)
+            && !name.eq_ignore_ascii_case(header::X_API_KEY)
     });
 }
 

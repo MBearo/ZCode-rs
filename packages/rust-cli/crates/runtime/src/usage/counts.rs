@@ -3,6 +3,7 @@
 //! 修改（工作线 F93，用户决定 2026-10-24）：以前经模型端口的 count_tokens 计数，失败或不支持时才本地估算，成功的
 //! 结果按请求内容缓存；现在一律本地估算（计数失败时的同一套，D13），计数、缓存与只为计数服务的会话字段一起删掉。
 
+use rust_cli_base::tokens;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{ApiContent, ApiMessage, ApiRole, ToolDefinition};
 
@@ -28,10 +29,9 @@ pub(crate) fn user_text(text: &str) -> Vec<ApiMessage> {
     }]
 }
 
-/// JS `Math.round(text.length / per)`，长度按 UTF-16。
+/// JS `Math.round(text.length / per)`，长度按 UTF-16（估算只定义在 base 的 `tokens`）。
 pub(crate) fn rough(text: &str, per: u64) -> u64 {
-    let units = text.encode_utf16().count() as u64;
-    (units * 2 + per) / (per * 2)
+    tokens::estimate(text.encode_utf16().count() as u64, per)
 }
 
 /// 本地估算（context-usage.md §3）：消息按内容块（字符数 / 每 token 字符数，图片 2000，其他块按 JSON 长度），有工具时加
@@ -50,7 +50,7 @@ fn estimate(messages: &[ApiMessage], tools: &[ToolDefinition], per: u64) -> u64 
         .sum();
     if !tools.is_empty() {
         let json = serde_json::to_string(tools).unwrap_or_default();
-        total += rough(&json, 2) + TOOL_OVERHEAD;
+        total += rough(&json, tokens::JSON_CHARS_PER_TOKEN) + TOOL_OVERHEAD;
     }
     total
 }

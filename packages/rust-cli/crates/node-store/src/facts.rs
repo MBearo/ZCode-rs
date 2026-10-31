@@ -193,10 +193,6 @@ pub(crate) fn apply(ctx: &Commit<'_>, fact: &Fact) -> Result<(), StoreError> {
             sessions::update(ctx.conn, &update, ctx.now as i64).storage()?;
             Ok(())
         }
-        Fact::OperationIntent {
-            operation,
-            fingerprint,
-        } => crate::operations::record_intent(ctx, operation, fingerprint),
         Fact::Entry { kind, id, data } => {
             if kind.is_empty() || data.is_null() {
                 return Err(storage("a rust-cli entry needs a kind and non-null data"));

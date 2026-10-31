@@ -27,6 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::models::GLM_5;
 use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, Reconnect};
 use rust_cli_exec_transport::Provisioner;
@@ -35,7 +36,7 @@ use rust_cli_kernel_api::env::{
 };
 use rust_cli_kernel_api::env_files::{GrepMode, GrepOutcome, GrepSearch, PutFile};
 use rust_cli_kernel_api::env_shell::CwdScope;
-use rust_cli_kernel_api::ids::{EnvironmentId, OperationId, ShellTaskId};
+use rust_cli_kernel_api::ids::{EnvironmentId, ShellTaskId};
 use rust_cli_machines::{Machine, MachineState};
 use rust_cli_ssh_connect::SshProvisioner;
 use serde_json::Value;
@@ -158,7 +159,7 @@ async fn an_ssh_machine_is_provisioned_used_and_survives_a_dropped_link() {
         })
     };
     let text = "for i in 1 2 3 4; do echo line$i; sleep 0.4; done; uname -s";
-    remote
+    let mut events = remote
         .commands()
         .start_command(
             &ws,
@@ -180,9 +181,6 @@ async fn an_ssh_machine_is_provisioned_used_and_survives_a_dropped_link() {
         )
         .await
         .unwrap();
-    let mut events = remote
-        .commands()
-        .watch_command(OperationId::new("op_loop"), 0);
     let mut output = String::new();
     let mut killed = 0;
     let mut exit = None;
@@ -250,7 +248,7 @@ async fn an_ssh_machine_is_provisioned_used_and_survives_a_dropped_link() {
         .env("ZCODE_DATA_BASE_DIR", home.path())
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .env("_ZCODE_ASSUME_SSH_EXECUTOR", HOST)
         .env("_ZCODE_ASSUME_SSH_CONFIG", sshd.config())
         .env("_ZCODE_ASSUME_SSH_ARTIFACT", &artifact)
@@ -266,7 +264,13 @@ async fn an_ssh_machine_is_provisioned_used_and_survives_a_dropped_link() {
     let result = requests
         .get(1)
         .and_then(|request| request["messages"].as_array())
-        .and_then(|messages| messages.last())
+        // 最后一条 user 消息（有卡片形状的模型把提醒放在其后的 system 消息里）。
+        .and_then(|messages| {
+            messages
+                .iter()
+                .rev()
+                .find(|message| message["role"] == "user")
+        })
         .map(Value::to_string)
         .unwrap_or_default();
     assert!(result.contains("Linux"), "{result}");
@@ -329,7 +333,7 @@ async fn a_listed_machine_runs_bash_and_read_in_the_container() {
         .env("ZCODE_DATA_BASE_DIR", home.path())
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .env("ZCODE_RUNTIME_ENV", "test")
         .env("_ZCODE_ASSUME_SSH_MACHINES", "1")
         .env("_ZCODE_ASSUME_SSH_CONFIG", sshd.config())
@@ -360,7 +364,13 @@ async fn a_listed_machine_runs_bash_and_read_in_the_container() {
     let last = |request: &Value| {
         request["messages"]
             .as_array()
-            .and_then(|messages| messages.last())
+            // 最后一条 user 消息（有卡片形状的模型把提醒放在其后的 system 消息里）。
+            .and_then(|messages| {
+                messages
+                    .iter()
+                    .rev()
+                    .find(|message| message["role"] == "user")
+            })
             .map(Value::to_string)
             .unwrap_or_default()
     };
@@ -440,7 +450,7 @@ async fn a_bound_mcp_server_runs_in_the_container() {
         .env("ZCODE_DATA_BASE_DIR", home.path())
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .env("ZCODE_RUNTIME_ENV", "test")
         .env("_ZCODE_ASSUME_SSH_MACHINES", "1")
         .env("_ZCODE_ASSUME_SSH_CONFIG", sshd.config())
@@ -457,7 +467,13 @@ async fn a_bound_mcp_server_runs_in_the_container() {
     assert_eq!(requests.len(), 2);
     let result = requests[1]["messages"]
         .as_array()
-        .and_then(|messages| messages.last())
+        // 最后一条 user 消息（有卡片形状的模型把提醒放在其后的 system 消息里）。
+        .and_then(|messages| {
+            messages
+                .iter()
+                .rev()
+                .find(|message| message["role"] == "user")
+        })
         .map(Value::to_string)
         .unwrap_or_default();
     assert!(result.contains("os=Linux"), "{result}");

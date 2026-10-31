@@ -109,6 +109,8 @@ pub(crate) struct Running {
     pub(crate) prompt: Option<MessageId>,
     /// 开启本回合的命令；提交 `prompt` 时写进批次（Node `anchor.sourceCommandId`）。
     pub(crate) command: Option<CommandId>,
+    /// 回合结束那一行的计时（修复线 F118，duration.rs）。
+    pub(crate) timing: crate::duration::TurnTiming,
 }
 
 enum Next {
@@ -213,6 +215,8 @@ pub(crate) struct Actor {
     pub(crate) monitors: crate::monitors::Monitors,
     /// 最近一个完成的主回合请求的输出速度（footer 的 TPS，修复线 F105）：只在内存，冷打开时为空。
     pub(crate) output_speed: Option<rust_cli_kernel_api::metering::OutputSpeed>,
+    /// 等后台子代理的起点（回合结束那一行，修复线 F118，duration.rs）：只在内存。
+    pub(crate) wait_started: Option<u64>,
     /// 自己的请求通道（弱引用）：交给回合的输出端，给出会话级的询问入口；不让 actor 因此不退出。
     asks: mpsc::WeakSender<Request>,
 }
@@ -287,6 +291,7 @@ impl Actor {
             peers: crate::peers::PeerState::default(),
             monitors: crate::monitors::Monitors::default(),
             output_speed: None,
+            wait_started: None,
             asks,
         };
         actor.start_session(start);

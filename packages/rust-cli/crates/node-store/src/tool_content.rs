@@ -7,6 +7,7 @@
 //!
 //! 读取：有合法 layout 时按它重建块；否则 completed 读 `output`，error 读 `metadata.modelContent`
 //! （没有时读 `error`），与 Node `hydrateMessageHistoryFromSession` 相同。
+use rust_cli_base::proto::mime;
 use rust_cli_kernel_api::message::{ImageSource, ToolResultContent, tool_reference_text};
 use rust_cli_kernel_api::store::ArtifactRef;
 use serde_json::{Value, json};
@@ -118,7 +119,7 @@ fn media_type(source: &ImageSource) -> &str {
 fn is_pdf(mime: &str) -> bool {
     mime.split(';')
         .next()
-        .is_some_and(|base| base.trim().eq_ignore_ascii_case("application/pdf"))
+        .is_some_and(|base| base.trim().eq_ignore_ascii_case(mime::PDF))
 }
 
 /// Node `filePartToContentBlock` 的图片与 PDF 分支，加上本工程的 Artifact 引用。读不出时是 Node 的
@@ -153,7 +154,7 @@ pub(crate) fn from_file_part(part: &Value) -> ToolResultContent {
         && is_pdf(mime)
     {
         return media(ImageSource::Base64 {
-            media_type: "application/pdf".to_owned(),
+            media_type: mime::PDF.to_owned(),
             data: data.to_owned(),
         });
     }

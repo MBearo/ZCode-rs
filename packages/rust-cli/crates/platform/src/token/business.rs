@@ -7,6 +7,7 @@
 
 use base64::Engine;
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::units;
 use serde_json::{Value, json};
 
 use super::http::{Auth, Fault, Reply, success_code};
@@ -143,7 +144,7 @@ fn parse(reply: &Reply, started: u64, now: u64) -> Option<BusinessToken> {
         .filter(|ttl| ttl.is_finite());
     let deadlines = [
         jwt_expiry(&token),
-        ttl.map(|ttl| (started as f64 + ttl * 1000.0) as u64),
+        ttl.map(|ttl| (started as f64 + ttl * units::MS_PER_SECOND_F64) as u64),
     ];
     let expires_at = deadlines.into_iter().flatten().min();
     let cache_until = expires_at.unwrap_or(started + UNKNOWN_TTL_MS);
@@ -169,7 +170,8 @@ fn jwt_expiry(token: &str) -> Option<u64> {
     let bytes = engine.decode(payload).ok()?;
     let exp = serde_json::from_slice::<Value>(&bytes).ok()?["exp"].as_f64()?;
     // 负数（早已过期）落到 0：随后按“已过期”拒绝，与 Node 相同。
-    exp.is_finite().then(|| (exp * 1000.0).max(0.0) as u64)
+    exp.is_finite()
+        .then(|| (exp * units::MS_PER_SECOND_F64).max(0.0) as u64)
 }
 
 #[cfg(test)]

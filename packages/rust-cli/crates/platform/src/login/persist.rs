@@ -14,6 +14,9 @@ use crate::account::{self, CodingPlanProvider};
 use crate::credentials::{CredentialError, CredentialStore, Credentials, PRIVATE_WRITE};
 use crate::token::Family;
 
+/// 没有账号 Profile 的连接身份取 sha256 十六进制摘要的前几位。
+const IDENTITY_DIGEST_HEX_CHARS: usize = 24;
+
 /// `SHARED_ZCODE_CREDENTIAL_KEYS`：退出时全部删除。
 const SHARED_KEYS: [&str; 8] = [
     "oauth:active_provider",
@@ -45,7 +48,7 @@ pub(crate) fn identity_from_secret(secret: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    format!("key-{}", &digest[..24])
+    format!("key-{}", &digest[..IDENTITY_DIGEST_HEX_CHARS])
 }
 
 /// OAuth 登录（platform.md §5.6，工作线 F50）：一次读改写写入 App 轮询登录写的键（`None` 是删除），并删掉这个

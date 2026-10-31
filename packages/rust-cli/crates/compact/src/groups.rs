@@ -6,6 +6,11 @@ use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
 
 use crate::tokens;
 
+/// 少于这么多组时没有可压缩的部分。
+pub(crate) const MIN_GROUPS: usize = 2;
+/// 没有初始差时先去掉这么多分之一的组（至少一组）。
+const DEFAULT_DROP_SHARE: usize = 5;
+
 /// 人类输入达到这个估算值时，没有 assistant 也算有实质内容。
 const SUBSTANTIVE_HUMAN_TOKENS: u64 = 1_000;
 
@@ -99,7 +104,7 @@ pub(crate) fn truncate_head<'a>(
     gap: Option<u64>,
 ) -> Option<(Vec<&'a Message>, bool)> {
     let groups = group(messages);
-    if groups.len() < 2 {
+    if groups.len() < MIN_GROUPS {
         return None;
     }
     let mut start = match gap {
@@ -115,7 +120,7 @@ pub(crate) fn truncate_head<'a>(
             }
             count
         }
-        None => (groups.len() / 5).max(1),
+        None => (groups.len() / DEFAULT_DROP_SHARE).max(1),
     };
     start = start.min(groups.len() - 1);
     if start < 1 {

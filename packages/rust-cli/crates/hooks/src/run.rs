@@ -58,7 +58,7 @@ pub(crate) fn timeout_ms(hook: &HookCommand, default: u64) -> u64 {
             clippy::cast_sign_loss,
             reason = "timeout 已校验为正数"
         )]
-        Some(seconds) => (seconds * 1000.0) as u64,
+        Some(seconds) => (seconds * rust_cli_base::units::MS_PER_SECOND_F64) as u64,
         None => default,
     }
 }

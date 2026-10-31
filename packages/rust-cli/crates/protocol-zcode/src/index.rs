@@ -16,6 +16,9 @@ use crate::context::Context;
 use crate::projection::state::Phase;
 use crate::wire::Purpose;
 
+/// 会话列表的行里最后一条回复的预览最多这么多个字符。
+const REPLY_PREVIEW_CHARS: usize = 200;
+
 pub const INDEX_PREFIX: &str = "sessions-index/";
 pub const CONFIG_PREFIX: &str = "workspace-config/";
 
@@ -54,7 +57,7 @@ impl Summary<'_> {
             row["lastOutcome"] = json!(outcome);
         }
         if let Some(reply) = self.last_reply.filter(|reply| !reply.is_empty()) {
-            let preview: String = reply.chars().take(200).collect();
+            let preview: String = reply.chars().take(REPLY_PREVIEW_CHARS).collect();
             row["lastAssistantPreview"] = json!(preview);
         }
         if self.permissions > 0 {

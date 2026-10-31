@@ -11,6 +11,7 @@ mod sse;
 
 use std::process::Stdio;
 
+use rust_cli_base::models::GLM_5;
 use serde_json::json;
 
 #[tokio::test]
@@ -48,7 +49,7 @@ async fn an_invoked_skill_comes_back_after_compaction() {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

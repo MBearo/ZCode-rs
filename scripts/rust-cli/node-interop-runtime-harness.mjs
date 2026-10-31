@@ -11,12 +11,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { importNode } from "./node-root.mjs";
-import { startModelFixture, text, toolUse } from "./fixture/model.mjs";
+import { GLM_5_3, startModelFixture, text, toolUse } from "./fixture/model.mjs";
 
 /** 压缩摘要提示的开头：rust-cli 与 Node 的提示同一句（compact.md §3）。 */
 const COMPACT_PROMPT = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.";
 export const PROVIDER = "personal:fake";
-export const MODEL = "claude-opus-5";
+export const MODEL = GLM_5_3;
 
 const blocksOf = (content) =>
   typeof content === "string" ? [{ type: "text", text: content }] : (content ?? []);

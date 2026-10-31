@@ -8,6 +8,43 @@ use ratatui::style::{Color, Modifier, Style};
 
 pub type Rgb = (u8, u8, u8);
 
+// 调色板的常量表（docs/specs/rust-cli/constants.md §5.3）。
+
+/// 纯白与纯黑。
+pub const WHITE: Rgb = (255, 255, 255);
+pub const BLACK: Rgb = (0, 0, 0);
+/// Rec. 601 的亮度权重（红、绿、蓝）；加权和大于 128 算浅色。
+pub const LUMA_WEIGHTS: [f64; 3] = [0.299, 0.587, 0.114];
+const LIGHT_LUMA_ABOVE: f64 = 128.0;
+/// Windows 10 起按版本号取颜色级别：build 14931 起真彩色，10586 起 256 色（tui.md §7.4）。
+const WINDOWS_COLOR_MAJOR: u32 = 10;
+const WINDOWS_TRUECOLOR_BUILD: u32 = 14931;
+const WINDOWS_ANSI256_BUILD: u32 = 10586;
+/// 背景色上叠白（深色背景）或叠黑（浅色背景）的比例：（深色, 浅色）。
+const USER_BG_TINT: (f64, f64) = (0.12, 0.04);
+const PROMPT_BG_TINT: (f64, f64) = (0.16, 0.02);
+const HOVER_BG_TINT: (f64, f64) = (0.20, 0.07);
+/// 鼠标选区的底色（主题的 `selectionBg`）。
+const SELECTION_BG_DARK: Rgb = (38, 79, 120);
+const SELECTION_BG_LIGHT: Rgb = (180, 213, 255);
+/// bash 模式的提示符与边线（`bashBorder`）。
+const BASH_DARK: Rgb = (253, 93, 177);
+const BASH_LIGHT: Rgb = (255, 0, 135);
+/// xterm 256 色：6×6×6 色块从 16 号起，每个分量取这 6 级；24 级灰度从 232 号起，从 8 起每级加 10。
+const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+const CUBE_START: u8 = 16;
+const CUBE_SIDE: u8 = CUBE_LEVELS.len() as u8;
+const GRAY_START: u8 = 232;
+const GRAY_STEPS: u8 = 24;
+const GRAY_FIRST_LEVEL: u32 = 8;
+const GRAY_STEP: u32 = 10;
+const GRAY_LAST_LEVEL: u32 = GRAY_FIRST_LEVEL + GRAY_STEP * (GRAY_STEPS as u32 - 1);
+/// 一个颜色的分量数（红、绿、蓝）。
+const CHANNELS: u32 = 3;
+/// OSC 颜色回复的每段是十六进制，每位 4 比特。
+const HEX_RADIX: u32 = 16;
+const BITS_PER_HEX_DIGIT: u32 = 4;
+
 /// 终端能显示的颜色数。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorLevel {
@@ -23,16 +60,25 @@ impl ColorLevel {
         // 上按系统版本取（Windows 10 build 14931 起真彩色，10586 起 256 色），不看这两个变量。
         if let crate::os::Os::Windows(release) = os {
             return match release {
-                Some(r) if r.major >= 10 && r.build >= 14931 => Self::TrueColor,
-                Some(r) if r.major >= 10 && r.build >= 10586 => Self::Ansi256,
+                Some(r) if r.major >= WINDOWS_COLOR_MAJOR && r.build >= WINDOWS_TRUECOLOR_BUILD => {
+                    Self::TrueColor
+                }
+                Some(r) if r.major >= WINDOWS_COLOR_MAJOR && r.build >= WINDOWS_ANSI256_BUILD => {
+                    Self::Ansi256
+                }
                 _ => Self::Ansi16,
             };
         }
-        let colorterm = vars.get("COLORTERM").map(|v| v.to_ascii_lowercase());
+        let colorterm = vars
+            .get(rust_cli_base::names::env::COLORTERM)
+            .map(|v| v.to_ascii_lowercase());
         if colorterm.is_some_and(|v| v == "truecolor" || v == "24bit") {
             return Self::TrueColor;
         }
-        let term = vars.get("TERM").map(String::as_str).unwrap_or_default();
+        let term = vars
+            .get(rust_cli_base::names::env::TERM)
+            .map(String::as_str)
+            .unwrap_or_default();
         if term.contains("256") || term.contains("direct") {
             return Self::Ansi256;
         }
@@ -64,7 +110,13 @@ pub struct Palette {
 
 pub fn is_light((r, g, b): Rgb) -> bool {
     // 与 Rec. 601 亮度近似：大于一半即浅色背景。
-    0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b) > 128.0
+    luma((r, g, b)) > LIGHT_LUMA_ABOVE
+}
+
+/// Rec. 601 的亮度（0–255）。
+pub fn luma((r, g, b): Rgb) -> f64 {
+    let [wr, wg, wb] = LUMA_WEIGHTS;
+    wr * f64::from(r) + wg * f64::from(g) + wb * f64::from(b)
 }
 
 pub fn blend(base: Rgb, top: Rgb, alpha: f64) -> Rgb {
@@ -82,7 +134,7 @@ fn to_color(rgb: Rgb, level: ColorLevel) -> Option<Color> {
 
 /// xterm 256 色里与 `rgb` 最近的一格（6×6×6 色块与 24 级灰度）。
 pub fn nearest_256((r, g, b): Rgb) -> u8 {
-    let steps = [0u8, 95, 135, 175, 215, 255];
+    let steps = CUBE_LEVELS;
     let index = |v: u8| {
         steps
             .iter()
@@ -91,11 +143,12 @@ pub fn nearest_256((r, g, b): Rgb) -> u8 {
             .map_or(0, |(i, _)| i as u8)
     };
     let (ri, gi, bi) = (index(r), index(g), index(b));
-    let cube = 16 + 36 * ri + 6 * gi + bi;
+    let cube = CUBE_START + CUBE_SIDE * CUBE_SIDE * ri + CUBE_SIDE * gi + bi;
     let cube_rgb = (steps[ri as usize], steps[gi as usize], steps[bi as usize]);
-    let gray_level = ((u32::from(r) + u32::from(g) + u32::from(b)) / 3).min(238);
-    let gray_index = (gray_level.saturating_sub(8) / 10).min(23) as u8;
-    let gray = 8 + 10 * gray_index;
+    let gray_level = ((u32::from(r) + u32::from(g) + u32::from(b)) / CHANNELS).min(GRAY_LAST_LEVEL);
+    let gray_index = (gray_level.saturating_sub(GRAY_FIRST_LEVEL) / GRAY_STEP)
+        .min(u32::from(GRAY_STEPS) - 1) as u8;
+    let gray = (GRAY_FIRST_LEVEL + GRAY_STEP * u32::from(gray_index)) as u8;
     // 缺陷修复（修复线 F26）：原来参数也叫 `b`，遮住了目标颜色的蓝色分量，比较的是候选色自己的蓝与绿，偏蓝的颜色
     // 会落到灰阶上（(99,168,248) 成了灰色 248）。
     let distance = |(cr, cg, cb): Rgb| {
@@ -103,7 +156,7 @@ pub fn nearest_256((r, g, b): Rgb) -> u8 {
         d(cr, r) + d(cg, g) + d(cb, b)
     };
     if distance((gray, gray, gray)) < distance(cube_rgb) {
-        232 + gray_index
+        GRAY_START + gray_index
     } else {
         cube
     }
@@ -112,19 +165,19 @@ pub fn nearest_256((r, g, b): Rgb) -> u8 {
 impl Palette {
     pub fn new(level: ColorLevel, background: Option<Rgb>) -> Self {
         let light = background.is_some_and(is_light);
-        let tint = |dark: f64, bright: f64| {
+        let tint = |(dark, bright): (f64, f64)| {
             background.and_then(|bg| {
                 let mixed = if light {
-                    blend(bg, (0, 0, 0), bright)
+                    blend(bg, BLACK, bright)
                 } else {
-                    blend(bg, (255, 255, 255), dark)
+                    blend(bg, WHITE, dark)
                 };
                 to_color(mixed, level)
             })
         };
-        let user_bg = tint(0.12, 0.04);
-        let prompt_bg = tint(0.16, 0.02);
-        let hover_bg = tint(0.20, 0.07);
+        let user_bg = tint(USER_BG_TINT);
+        let prompt_bg = tint(PROMPT_BG_TINT);
+        let hover_bg = tint(HOVER_BG_TINT);
         // 强调色取 `tokens` 的命名常量（F26，取值不变：真彩色 (99,168,248) / (28,100,200)，256 色 75 / 26，16 色青色）。
         use super::tokens::{ACCENT_DARK, ACCENT_LIGHT, ACCENT_NAMED};
         let accent =
@@ -140,9 +193,9 @@ impl Palette {
             accent,
             selection_bg: {
                 let rgb = if light {
-                    (180, 213, 255)
+                    SELECTION_BG_LIGHT
                 } else {
-                    (38, 79, 120)
+                    SELECTION_BG_DARK
                 };
                 to_color(rgb, level).unwrap_or(if light { Color::Cyan } else { Color::Blue })
             },
@@ -158,11 +211,7 @@ impl Palette {
     /// bash 模式的提示符与边线（`bashBorder`：深色 `rgb(253,93,177)`、浅色 `rgb(255,0,135)`，
     /// 16 色终端是品红，tui-input.md §2.1）。
     pub fn bash(&self) -> Color {
-        let rgb = if self.light {
-            (255, 0, 135)
-        } else {
-            (253, 93, 177)
-        };
+        let rgb = if self.light { BASH_LIGHT } else { BASH_DARK };
         to_color(rgb, self.level).unwrap_or(if self.light {
             Color::Magenta
         } else {
@@ -202,9 +251,9 @@ pub fn parse_osc_color(reply: &str) -> Option<Rgb> {
             .chars()
             .take_while(char::is_ascii_hexdigit)
             .collect();
-        let value = u32::from_str_radix(&hex, 16).ok()?;
-        let max = (1u32 << (4 * hex.len() as u32)) - 1;
-        Some((value * 255 / max.max(1)) as u8)
+        let value = u32::from_str_radix(&hex, HEX_RADIX).ok()?;
+        let max = (1u32 << (BITS_PER_HEX_DIGIT * hex.len() as u32)) - 1;
+        Some((value * u32::from(u8::MAX) / max.max(1)) as u8)
     };
     Some((channel()?, channel()?, channel()?))
 }
@@ -378,15 +427,21 @@ mod tests {
         };
         let unix = crate::os::Os::Unix;
         assert_eq!(
-            ColorLevel::detect(&vars(&[("COLORTERM", "truecolor")]), unix),
+            ColorLevel::detect(
+                &vars(&[(rust_cli_base::names::env::COLORTERM, "truecolor")]),
+                unix
+            ),
             ColorLevel::TrueColor
         );
         assert_eq!(
-            ColorLevel::detect(&vars(&[("TERM", "xterm-256color")]), unix),
+            ColorLevel::detect(
+                &vars(&[(rust_cli_base::names::env::TERM, "xterm-256color")]),
+                unix
+            ),
             ColorLevel::Ansi256
         );
         assert_eq!(
-            ColorLevel::detect(&vars(&[("TERM", "xterm")]), unix),
+            ColorLevel::detect(&vars(&[(rust_cli_base::names::env::TERM, "xterm")]), unix),
             ColorLevel::Ansi16
         );
     }
@@ -427,7 +482,10 @@ mod tests {
             ColorLevel::Ansi16
         );
         let mut colorterm = BTreeMap::new();
-        colorterm.insert("COLORTERM".to_owned(), "truecolor".to_owned());
+        colorterm.insert(
+            rust_cli_base::names::env::COLORTERM.to_owned(),
+            "truecolor".to_owned(),
+        );
         assert_eq!(
             ColorLevel::detect(&colorterm, windows(10, 10586)),
             ColorLevel::Ansi256

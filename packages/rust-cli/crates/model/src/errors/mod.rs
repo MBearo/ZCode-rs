@@ -15,6 +15,7 @@ mod zhipu;
 
 use std::time::{Duration, SystemTime};
 
+use rust_cli_base::proto::http;
 use rust_cli_base::redact::redact_secrets;
 use rust_cli_kernel_api::message::StopReason;
 use rust_cli_kernel_api::model::ModelError;
@@ -25,6 +26,8 @@ use serde_json::Value;
 
 /// 错误正文里给出的消息最多保留这么多字符（各协议与厂商相同，F55：以前各写一份）。
 pub(crate) const ERROR_MESSAGE_LIMIT: usize = 2000;
+/// 服务过载的状态码（非标准的 529，Anthropic 与兼容端点用它）。
+const OVERLOADED_STATUS: u16 = 529;
 
 /// 错误码表的厂商（provider-errors.md §2.2）：只看端点，不看模型。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -241,7 +244,7 @@ fn by_status(status: u16, codes: &[Option<&str>], raw: &str, error: Shape) -> Ve
         retry_after_ms,
     } = error;
     let has = |table: &[&str]| codes.iter().flatten().any(|code| table.contains(code));
-    if status == 402 || has(&vocab::QUOTA_CODES) {
+    if status == http::PAYMENT_REQUIRED || has(&vocab::QUOTA_CODES) {
         return Verdict::new(
             Class::QuotaExhausted,
             ModelError::QuotaExhausted { message },
@@ -253,11 +256,14 @@ fn by_status(status: u16, codes: &[Option<&str>], raw: &str, error: Shape) -> Ve
             ModelError::ContentBlocked { message },
         );
     }
-    let client = (400..500).contains(&status);
-    if status == 413 || has(&vocab::TOO_LARGE_CODES) || (client && vocab::media_too_large(raw)) {
+    let client = http::is_client_error(status);
+    if status == http::PAYLOAD_TOO_LARGE
+        || has(&vocab::TOO_LARGE_CODES)
+        || (client && vocab::media_too_large(raw))
+    {
         return Verdict::new(Class::TooLarge, ModelError::RequestTooLarge { message });
     }
-    if status == 429 || has(&vocab::RATE_LIMIT_CODES) {
+    if status == http::TOO_MANY_REQUESTS || has(&vocab::RATE_LIMIT_CODES) {
         return Verdict::new(
             Class::RateLimited,
             ModelError::RateLimited {
@@ -267,12 +273,20 @@ fn by_status(status: u16, codes: &[Option<&str>], raw: &str, error: Shape) -> Ve
         );
     }
     match status {
-        401 => Verdict::new(Class::AuthRejected, ModelError::Authentication { message }),
-        403 => Verdict::new(Class::AccessDenied, ModelError::Authentication { message }),
-        404 => Verdict::new(Class::AccessDenied, ModelError::InvalidRequest { message }),
+        http::UNAUTHORIZED => {
+            Verdict::new(Class::AuthRejected, ModelError::Authentication { message })
+        }
+        http::FORBIDDEN => {
+            Verdict::new(Class::AccessDenied, ModelError::Authentication { message })
+        }
+        http::NOT_FOUND => {
+            Verdict::new(Class::AccessDenied, ModelError::InvalidRequest { message })
+        }
         // 408、409 照旧是 `InvalidRequest` 的形状，处置按服务端临时错误重试（只改处置，不改形状）。
-        408 | 409 => Verdict::new(Class::ServerError, ModelError::InvalidRequest { message }),
-        400..=499 => Verdict::new(
+        http::REQUEST_TIMEOUT | http::CONFLICT => {
+            Verdict::new(Class::ServerError, ModelError::InvalidRequest { message })
+        }
+        http::BAD_REQUEST..http::INTERNAL_SERVER_ERROR => Verdict::new(
             Class::InvalidRequest,
             ModelError::InvalidRequest { message },
         ),
@@ -299,12 +313,14 @@ fn error_of(class: Class, status: Option<u16>, error: Shape) -> ModelError {
             retry_after_ms,
         },
         Class::ServerError => ModelError::Server {
-            status: status.filter(|status| *status >= 500).unwrap_or(500),
+            status: status
+                .filter(|status| *status >= http::SERVER_ERROR_MIN)
+                .unwrap_or(http::INTERNAL_SERVER_ERROR),
             message,
         },
         Class::Network | Class::TlsFailure => ModelError::Network { message },
         Class::AuthRejected => ModelError::Authentication { message },
-        Class::AccessDenied if matches!(status, Some(401 | 403)) => {
+        Class::AccessDenied if matches!(status, Some(http::UNAUTHORIZED | http::FORBIDDEN)) => {
             ModelError::Authentication { message }
         }
         Class::AccessDenied | Class::InvalidRequest => ModelError::InvalidRequest { message },

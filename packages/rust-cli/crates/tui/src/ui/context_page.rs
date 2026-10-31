@@ -6,6 +6,16 @@ use rust_cli_kernel_api::context_usage::{ContextUsage, format_estimate, format_t
 
 use super::cells::{self, Ctx};
 use super::i18n::Lang;
+use super::layout;
+use super::quantities::PERCENT;
+
+/// “接近满”的建议从这个百分比起。
+const NEARLY_FULL_PERCENT: u64 = 80;
+/// 规则文件的建议：合计不少于这么多 token、且占窗口不少于这个百分比时出现；列出最大的几个；估计能省下的百分比。
+const MEMORY_MIN_TOKENS: u64 = 5_000;
+const MEMORY_MIN_PERCENT: u64 = 5;
+const MEMORY_LARGEST_FILES: usize = 3;
+const MEMORY_SAVING_PERCENT: u64 = 30;
 
 /// 明细的一段：标题、条目与合计。
 struct Section {
@@ -146,14 +156,14 @@ fn share(tokens: u64, window: u64) -> u64 {
     if window == 0 {
         return 0;
     }
-    (tokens * 100 + window / 2) / window
+    (tokens * PERCENT + window / 2) / window
 }
 
 /// 能从 `ContextUsage` 算出的建议（Host §4.4 的“接近满”与“规则文件”；按工具的结果用量内核没有，D6）。
 fn suggestions(usage: &ContextUsage, lang: Lang) -> Vec<Suggestion> {
     let window = usage.raw_max_tokens;
     let mut out = Vec::new();
-    if usage.total_tokens <= window && usage.percentage >= 80 {
+    if usage.total_tokens <= window && usage.percentage >= NEARLY_FULL_PERCENT {
         let detail = match (lang, usage.auto_compact) {
             (Lang::En, true) => {
                 "Autocompact will trigger soon, which discards older messages. Use /compact now to control what gets kept."
@@ -175,12 +185,12 @@ fn suggestions(usage: &ContextUsage, lang: Lang) -> Vec<Suggestion> {
         });
     }
     let memory: u64 = usage.memory_files.iter().map(|file| file.tokens).sum();
-    if memory >= 5_000 && memory * 100 >= window * 5 {
+    if memory >= MEMORY_MIN_TOKENS && memory * PERCENT >= window * MEMORY_MIN_PERCENT {
         let mut largest: Vec<_> = usage.memory_files.iter().collect();
         largest.sort_by_key(|file| std::cmp::Reverse(file.tokens));
         let names: Vec<String> = largest
             .iter()
-            .take(3)
+            .take(MEMORY_LARGEST_FILES)
             .map(|file| format!("{} ({})", file.path, format_tokens(file.tokens)))
             .collect();
         let (tokens, percent) = (format_tokens(memory), share(memory, window));
@@ -190,7 +200,7 @@ fn suggestions(usage: &ContextUsage, lang: Lang) -> Vec<Suggestion> {
                 Lang::En => format!("Memory files using {tokens} tokens ({percent}%)"),
                 Lang::Zh => format!("规则文件占用 {tokens} tokens（{percent}%）"),
             },
-            save: Some(memory * 3 / 10),
+            save: Some(memory * MEMORY_SAVING_PERCENT / PERCENT),
             detail: match lang {
                 Lang::En => format!(
                     "Largest: {}. Review and prune stale entries.",
@@ -255,7 +265,7 @@ fn suggestion_lines(usage: &ContextUsage, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
 /// 页面的正文：方格图与说明、明细（`all` 时展开）、建议；与页面标题对齐，左边空 2 列。
 pub fn page_lines(usage: &ContextUsage, all: bool, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     let narrower = Ctx {
-        width: ctx.width.saturating_sub(2),
+        width: ctx.width.saturating_sub(layout::INDENT),
         ..*ctx
     };
     let mut lines = super::context::chart(usage, &narrower);

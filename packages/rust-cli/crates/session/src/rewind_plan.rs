@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use rust_cli_base::text;
 use rust_cli_kernel_api::env::EnvPath;
 use rust_cli_kernel_api::env_rewind::{RestoreFile, content_hash};
 use rust_cli_kernel_api::ids::MessageId;
@@ -172,8 +173,10 @@ pub(crate) fn changes(artifacts: &[Artifact]) -> Vec<FileChange> {
     out
 }
 
-/// 编辑距离超过它时不再求最小 diff，按去掉公共前后缀后的行数算。
-const MAX_EDITS: usize = 10_000;
+/// 编辑距离超过它时不再求最小 diff，按去掉公共前后缀后的行数算（上限只定义在 base 的 `text`）。
+const MAX_EDITS: usize = text::MAX_DIFF_EDITS;
+/// Myers 每一步只走同奇偶的对角线。
+const DIAGONAL_STEP: isize = 2;
 
 /// 增删行数：先去掉公共前后缀，再用 Myers 求最小编辑距离 D（与 jsdiff 的统计相同）；
 /// LCS = (N + M - D) / 2，新增 = M - LCS，删除 = N - LCS。
@@ -206,7 +209,8 @@ fn myers(a: &[String], b: &[String]) -> Option<usize> {
     let (n, m) = (a.len() as isize, b.len() as isize);
     let max = (n + m).min(MAX_EDITS as isize);
     let offset = max + 1;
-    let mut v = vec![0_isize; (2 * max + 3) as usize];
+    // 对角线 −offset..=offset。
+    let mut v = vec![0_isize; (2 * offset + 1) as usize];
     for d in 0..=max {
         let mut k = -d;
         while k <= d {
@@ -225,7 +229,7 @@ fn myers(a: &[String], b: &[String]) -> Option<usize> {
             if x >= n && y >= m {
                 return Some(d as usize);
             }
-            k += 2;
+            k += DIAGONAL_STEP;
         }
     }
     None

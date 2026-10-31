@@ -207,7 +207,7 @@ pub fn follow_labels(lang: Lang, unseen: bool) -> [&'static str; 5] {
 
 /// 不补零的用时：`11s`、`1m 5s`、`1h 2m 3s`。
 pub fn elapsed_plain(seconds: u64) -> String {
-    let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+    let (h, m, s) = crate::ui::quantities::hours_minutes_seconds(seconds);
     match (h, m) {
         (0, 0) => format!("{s}s"),
         (0, _) => format!("{m}m {s}s"),
@@ -217,7 +217,7 @@ pub fn elapsed_plain(seconds: u64) -> String {
 
 /// `0s`、`1m 05s`、`1h 02m 03s`。
 pub fn elapsed(seconds: u64) -> String {
-    let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+    let (h, m, s) = crate::ui::quantities::hours_minutes_seconds(seconds);
     match (h, m) {
         (0, 0) => format!("{s}s"),
         (0, _) => format!("{m}m {s:02}s"),

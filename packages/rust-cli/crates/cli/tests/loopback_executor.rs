@@ -154,14 +154,11 @@ async fn the_executor_serves_the_ports_over_stdio_and_exits_when_closed() {
         tool_use: None,
         kind: Default::default(),
     });
-    machine
+    let mut events = machine
         .commands()
         .start_command(&ws, context("op_bg"), background)
         .await
         .unwrap();
-    let mut events = machine
-        .commands()
-        .watch_command(OperationId::new("op_bg"), 0);
     let mut pid = String::new();
     while let Some(event) = events.next().await {
         if let CommandEvent::Output { data, .. } = event.unwrap() {
@@ -176,14 +173,11 @@ async fn the_executor_serves_the_ports_over_stdio_and_exits_when_closed() {
     assert!(alive(&pid), "the background command runs");
 
     let ran = command(&root, "bloop2", "echo hi");
-    machine
+    let mut events = machine
         .commands()
         .start_command(&ws, context("op_fg"), ran)
         .await
         .unwrap();
-    let mut events = machine
-        .commands()
-        .watch_command(OperationId::new("op_fg"), 0);
     let mut output = Vec::new();
     while let Some(event) = events.next().await {
         match event.unwrap() {
@@ -218,14 +212,11 @@ async fn the_executor_serves_the_ports_over_stdio_and_exits_when_closed() {
         "{refused:?}"
     );
     let marked = command(&root, "bloop3", r#"printf '%s' "$F96_MARK""#);
-    machine
+    let mut events = machine
         .commands()
         .start_command(&ws, context("op_env"), marked)
         .await
         .unwrap();
-    let mut events = machine
-        .commands()
-        .watch_command(OperationId::new("op_env"), 0);
     let mut output = Vec::new();
     while let Some(event) = events.next().await {
         match event.unwrap() {

@@ -99,12 +99,11 @@ async fn bash(harness: &Harness, index: usize, command: &str) -> String {
         socket: None,
         env: Default::default(),
     };
-    harness
+    let mut events = harness
         .env
         .start_command(&workspace, context, request)
         .await
         .unwrap();
-    let mut events = harness.env.watch_command(operation, 0);
     let mut output = Vec::new();
     while let Some(event) = events.next().await {
         match event.unwrap() {

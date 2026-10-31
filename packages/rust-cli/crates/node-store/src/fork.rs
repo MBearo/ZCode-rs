@@ -18,6 +18,8 @@ use crate::{OrStorage, records, state, storage};
 
 /// 分叉提示的来源（Node `SyntheticUserMessageSource` 的 `fork`）。
 pub(crate) const NOTICE_SOURCE: &str = "fork";
+/// fork 出的会话的 slug 最多这么多个字符。
+const MAX_FORK_SLUG_LEN: usize = 120;
 const CONTINUE: &str = "Continue from this fork. Do not assume messages after the fork point happened in this session.";
 
 /// 新会话行要从原会话行取的列（Node `buildForkedSessionInput`）。
@@ -189,7 +191,7 @@ pub(crate) fn fork(
                 slugify(&parent.slug),
                 rust_cli_base::js::base36(fork.created_at_ms)
             ),
-            120,
+            MAX_FORK_SLUG_LEN,
         ),
         directory: parent.directory.clone(),
         path: parent.path.clone(),

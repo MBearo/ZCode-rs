@@ -21,23 +21,26 @@ fn starts_mention(content: &str, at: usize) -> bool {
             .is_some_and(char::is_whitespace)
 }
 
+/// 带引号的提及的开头。
+const QUOTED_OPEN: &str = "@\"";
+
 /// `(^|\s)@"([^"]+)"`：带引号的提及；以 ` (agent)` 结尾的是 agent 提及，跳过。
 fn quoted(content: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut from = 0;
-    while let Some(offset) = content[from..].find("@\"") {
+    while let Some(offset) = content[from..].find(QUOTED_OPEN) {
         let at = from + offset;
         from = at + 1;
         if !starts_mention(content, at) {
             continue;
         }
-        let body = &content[at + 2..];
+        let body = &content[at + QUOTED_OPEN.len()..];
         let Some(end) = body.find('"') else { break };
         if end == 0 {
             continue;
         }
         let name = &body[..end];
-        from = at + 2 + end + 1;
+        from = at + QUOTED_OPEN.len() + end + 1;
         if !name.ends_with(" (agent)") {
             out.push(name.to_owned());
         }

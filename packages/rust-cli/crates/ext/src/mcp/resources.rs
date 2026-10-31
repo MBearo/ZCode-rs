@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use super::connection;
 use super::manager::{Inner, resource_servers};
-use super::rpc::RpcError;
+use super::rpc::{self, RpcError};
 
 pub(crate) const LIST: &str = "ListMcpResourcesTool";
 pub(crate) const READ: &str = "ReadMcpResourceTool";
@@ -31,7 +31,8 @@ const RESOURCE_KEYS: &[&str] = &[
     "size",
     "_meta",
 ];
-const MAX_RESULT_CHARS: usize = 100_000;
+/// 结果的字符上限（通用值只定义在 kernel-api）。
+const MAX_RESULT_CHARS: usize = rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS;
 
 /// 三个资源工具，按名字排序（和其他内置工具一起按名字排）。
 pub(crate) fn tools(manager: Weak<Inner>) -> Vec<Arc<dyn Tool>> {
@@ -322,7 +323,10 @@ impl Tool for ReadResource {
         let result = match read {
             Ok(result) => result,
             Err(RpcError::Cancelled) => return Err(ToolError::Cancelled),
-            Err(RpcError::Server { code: -32601, .. }) => {
+            Err(RpcError::Server {
+                code: rpc::METHOD_NOT_FOUND,
+                ..
+            }) => {
                 return Ok(text_output(format!(
                     "Server \"{server}\" advertises resource support but does not implement resource reads."
                 )));

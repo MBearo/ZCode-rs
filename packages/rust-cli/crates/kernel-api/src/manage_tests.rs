@@ -1,6 +1,26 @@
 //! 管理查询 DTO 的序列化往返（spec §6 规则 8）。
 use super::*;
 
+/// 修复线 F117：Monitor 起的后台命令是 `monitor`。
+#[test]
+fn a_monitor_entry_is_named_monitor() {
+    let entry = BackgroundEntry {
+        id: "b2".to_owned(),
+        kind: BackgroundKind::Monitor,
+        description: "build log".to_owned(),
+        status: BackgroundStatus::Running,
+        output: None,
+        machine: None,
+        reconnecting: false,
+    };
+    let json = serde_json::to_value(&entry).unwrap();
+    assert_eq!(json["kind"], "monitor");
+    assert_eq!(
+        serde_json::from_value::<BackgroundEntry>(json).unwrap(),
+        entry
+    );
+}
+
 #[test]
 fn entries_round_trip() {
     let entry = BackgroundEntry {

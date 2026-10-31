@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use rust_cli_base::models::{GLM_4_5, GLM_5_3, OPUS_5_5};
 use rust_cli_kernel_api::compaction::ContextNotice;
 use rust_cli_kernel_api::message::{CompactTrigger, Message, Usage};
 use rust_cli_kernel_api::model::ModelSelection;
@@ -18,7 +19,7 @@ use super::{CompactConfig, Compaction, Thresholds};
 use crate::test_support::{Reply, ScriptedRunner, human, no_tools, ports, reply, request};
 
 /// 按模型 ID 答的查询（没有的模型答不出）。
-struct Limits(HashMap<&'static str, TokenLimits>);
+struct Limits(HashMap<String, TokenLimits>);
 
 impl ModelLimits for Limits {
     fn limits(&self, selection: &ModelSelection) -> Option<TokenLimits> {
@@ -26,12 +27,12 @@ impl ModelLimits for Limits {
     }
 }
 
-fn limits(entries: &[(&'static str, u64, Option<u64>)]) -> Option<Arc<dyn ModelLimits>> {
+fn limits(entries: &[(&str, u64, Option<u64>)]) -> Option<Arc<dyn ModelLimits>> {
     let map = entries
         .iter()
         .map(|(model, context_window, max_output_tokens)| {
             (
-                *model,
+                (*model).to_owned(),
                 TokenLimits {
                     context_window: *context_window,
                     max_output_tokens: *max_output_tokens,
@@ -44,7 +45,7 @@ fn limits(entries: &[(&'static str, u64, Option<u64>)]) -> Option<Arc<dyn ModelL
 
 /// 内置配置里的 glm-5.3：`contextWindow: 1000000`、`maxOutputTokens.max: 128000`（没有卡片）。
 fn glm() -> Option<Arc<dyn ModelLimits>> {
-    limits(&[("glm-5.3", 1_000_000, Some(128_000))])
+    limits(&[(GLM_5_3, 1_000_000, Some(128_000))])
 }
 
 fn history(input_tokens: u64) -> Vec<Message> {
@@ -88,7 +89,7 @@ async fn a_configured_1m_window_holds_at_300k_in_all_four_checks() {
         },
     );
     let mut request = request(history(300_000), CompactTrigger::Auto);
-    request.selection = selection("glm-5.3");
+    request.selection = selection(GLM_5_3);
     let (messages, model) = (&request.messages, &request.selection);
     assert!(!compaction.should_auto_compact(messages, model));
     assert_eq!(
@@ -119,12 +120,12 @@ async fn a_configured_small_window_compacts_at_its_own_threshold() {
     let compaction = compaction(
         runner.clone(),
         CompactConfig {
-            limits: limits(&[("glm-4.5", 131_072, Some(98_304))]),
+            limits: limits(&[(GLM_4_5, 131_072, Some(98_304))]),
             ..CompactConfig::default()
         },
     );
     let mut request = request(history(100_000), CompactTrigger::Auto);
-    request.selection = selection("glm-4.5");
+    request.selection = selection(GLM_4_5);
     assert!(compaction.should_auto_compact(&request.messages, &request.selection));
     assert_eq!(
         compaction.context_usage(&request.messages, &request.selection),
@@ -158,18 +159,19 @@ fn the_configured_output_limit_sets_the_summary_reserve() {
     assert_eq!(usage, Some((10, 992_000)));
 }
 
-/// 回归：查询答不出时按卡片（claude-opus-5-5：1M、输出 128000），什么都没有时 200,000；查询没给输出上限时按卡片，
+/// 回归：查询答不出时按卡片（有卡片的模型的卡片自己的上限：1M、输出 128000，只有 Anthropic 的卡片模型有），什么都没有时 200,000；查询没给输出上限时按卡片，
 /// 再没有时不限（预留取 20000）。
 #[test]
 fn without_a_configured_entry_the_card_and_the_default_apply() {
+    let card_1m = format!("{OPUS_5_5}[1m]");
     let config = CompactConfig {
         limits: limits(&[
-            ("claude-opus-5-5[1m]", 500_000, None),
+            (card_1m.as_str(), 500_000, None),
             ("open-model", 300_000, None),
         ]),
         ..CompactConfig::default()
     };
-    let card = config.facts(&selection("claude-opus-5-5"));
+    let card = config.facts(&selection(OPUS_5_5));
     assert_eq!(
         (card.context_window, card.max_output_tokens),
         (1_000_000, 128_000)
@@ -182,7 +184,7 @@ fn without_a_configured_entry_the_card_and_the_default_apply() {
     );
     assert!(!unknown.recognized);
     // 查询给了窗口、没给输出上限：输出上限按卡片。
-    let partial = config.facts(&selection("claude-opus-5-5[1m]"));
+    let partial = config.facts(&selection(&card_1m));
     assert_eq!(
         (partial.context_window, partial.max_output_tokens),
         (500_000, 128_000)
@@ -194,7 +196,7 @@ fn without_a_configured_entry_the_card_and_the_default_apply() {
     );
     // 没有查询（测试替身）：同样按卡片与默认窗口。
     let none = CompactConfig::default();
-    assert_eq!(none.facts(&selection("claude-opus-5-5")), card);
+    assert_eq!(none.facts(&selection(OPUS_5_5)), card);
     assert_eq!(none.facts(&selection("other")), unknown);
 }
 
@@ -212,6 +214,6 @@ fn the_window_override_still_caps_the_configured_window() {
             ..CompactConfig::default()
         },
     );
-    let usage = compaction.context_usage(&history(10), &selection("glm-5.3"));
+    let usage = compaction.context_usage(&history(10), &selection(GLM_5_3));
     assert_eq!(usage, Some((10, 280_000)));
 }

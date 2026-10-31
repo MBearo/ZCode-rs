@@ -3,6 +3,8 @@
 //! 它们的值）、`is_flag_group`（`-HLf` 这样的单字母标志组）、`parse_f`（`-f PATH`）、`parse_depth_n` / `parse_exit`。
 //! 路径检查不用这里：find 的路径参数另有规则（`bash_paths.rs`，用户决定 2026-10-22）。
 
+use crate::consts::{NEWER_XY_LETTERS, SHORT_OPTION_LEN};
+
 /// 一个以 `-` 开头的词在 bfs 里的意思。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Arg {
@@ -19,6 +21,9 @@ pub(crate) enum Arg {
     /// `-depth` / `-exit`：后面是数字时它是值（`parse_depth_n` 的 `looks_like_icmp`、`parse_exit` 的整数）。
     OptionalNumber,
 }
+
+/// `-fprintf FILE FORMAT` 后面的值的个数。
+const FPRINTF_VALUES: usize = 2;
 
 /// 不带值的谓词。
 const NULLARY: [&str; 40] = [
@@ -169,20 +174,21 @@ fn letter(byte: u8) -> Option<&'static Letter> {
 
 /// `-newerXY`（`parse_newerxy`，前缀匹配）。
 fn newer_xy(word: &str) -> bool {
-    word.strip_prefix("-newer")
-        .is_some_and(|rest| rest.len() == 2 && rest.bytes().all(|b| b"aBcmt".contains(&b)))
+    word.strip_prefix("-newer").is_some_and(|rest| {
+        rest.len() == NEWER_XY_LETTERS && rest.bytes().all(|b| b"aBcmt".contains(&b))
+    })
 }
 
 /// 单字母标志与标志组（`-H`、`-Sdfs`、`-HLf`；`is_flag_group` 要求组里至少一个大写字母，单个字母的标志直接
 /// 查表）。不是标志时返回 None。
 fn flag(word: &str) -> Option<Arg> {
     let bytes = word.as_bytes();
-    if bytes.len() < 2 || bytes[0] != b'-' {
+    if bytes.len() < SHORT_OPTION_LEN || bytes[0] != b'-' {
         return None;
     }
     // `table_lookup` 先按前缀匹配 `-D`、`-O`、`-S`、`-j`（`-Sdfs`、`-j4`、`-O3`），再看标志组。
     if let Some(entry) = letter(bytes[1]).filter(|entry| entry.prefix) {
-        return match (bytes.len() > 2, entry.separate) {
+        return match (bytes.len() > SHORT_OPTION_LEN, entry.separate) {
             (true, _) => Some(Arg::Flag { values: 0 }),
             (false, true) => Some(Arg::Flag { values: 1 }),
             (false, false) => None,
@@ -217,7 +223,11 @@ pub(crate) fn classify(word: &str) -> Option<Arg> {
         "-a" | "-and" | "-o" | "-or" | "-not" | "-exclude" => return Some(Arg::Operator),
         "-exec" | "-execdir" | "-ok" | "-okdir" => return Some(Arg::Exec),
         "-depth" | "-exit" => return Some(Arg::OptionalNumber),
-        "-fprintf" => return Some(Arg::Primary { values: 2 }),
+        "-fprintf" => {
+            return Some(Arg::Primary {
+                values: FPRINTF_VALUES,
+            });
+        }
         _ => {}
     }
     if NULLARY.contains(&word) {

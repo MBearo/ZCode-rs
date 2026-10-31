@@ -7,6 +7,7 @@
 use std::future::Future;
 
 use rust_cli_base::js::string::is_space;
+use rust_cli_base::proto::mime;
 use rust_cli_kernel_api::env::{EnvError, EnvPath, ReadFile};
 use rust_cli_kernel_api::env_files::{FileKind, FileStat};
 use rust_cli_kernel_api::env_pdf::{PdfPageCount, PdfRender, RenderPdfPages};
@@ -44,11 +45,17 @@ fn digits(text: &str) -> usize {
     text.len() - text.trim_start_matches(|c: char| c.is_ascii_digit()).len()
 }
 
+/// 页码最多这么多位数字。
+const MAX_PAGE_DIGITS: usize = 9;
+/// 校验错误码：页码写法不对、页数太多。
+const INVALID_PAGES_CODE: i32 = 7;
+const TOO_MANY_PAGES_CODE: i32 = 8;
+
 /// 页码：trim 后匹配 `^(\d{1,9})(?:\s*(-)\s*(\d{1,9})?)?$`，起始页 ≥ 1，结束页 ≥ 起始页。
 fn parse(pages: &str) -> Option<PageRange> {
     let text = rust_cli_base::js::string::trim(pages);
     let head = digits(text);
-    if head == 0 || head > 9 {
+    if head == 0 || head > MAX_PAGE_DIGITS {
         return None;
     }
     let first: u64 = text[..head].parse().ok()?;
@@ -61,7 +68,7 @@ fn parse(pages: &str) -> Option<PageRange> {
         let tail = digits(after);
         match after.len() {
             0 => None,
-            _ if tail == after.len() && tail <= 9 => Some(after.parse().ok()?),
+            _ if tail == after.len() && tail <= MAX_PAGE_DIGITS => Some(after.parse().ok()?),
             _ => return None,
         }
     };
@@ -79,7 +86,7 @@ pub(crate) fn check(pages: &str) -> Result<PageRange, Validation> {
             format!(
                 "Invalid pages parameter: \"{pages}\". Give one page (\"3\") or one range (\"1-5\"), not a list. To read several pages or ranges, read each one separately. Pages are 1-indexed."
             ),
-            7,
+            INVALID_PAGES_CODE,
         ));
     };
     let count = range
@@ -90,7 +97,7 @@ pub(crate) fn check(pages: &str) -> Result<PageRange, Validation> {
             format!(
                 "Page range \"{pages}\" exceeds maximum of {MAX_PAGES} pages per request. Please use a smaller range."
             ),
-            8,
+            TOO_MANY_PAGES_CODE,
         ));
     }
     Ok(range)
@@ -207,7 +214,7 @@ async fn whole(
             },
             ToolResultContent::Document {
                 source: ImageSource::Base64 {
-                    media_type: "application/pdf".to_owned(),
+                    media_type: mime::PDF.to_owned(),
                     data: base64::encode(&file.bytes),
                 },
             },
@@ -275,7 +282,7 @@ async fn extract(
     // 页面原样内联，不缩放、不压缩（tools-files.md D4）。
     content.extend(pages.iter().map(|page| ToolResultContent::Image {
         source: ImageSource::Base64 {
-            media_type: image_type(page).unwrap_or("image/jpeg").to_owned(),
+            media_type: image_type(page).unwrap_or(mime::JPEG).to_owned(),
             data: base64::encode(page),
         },
     }));

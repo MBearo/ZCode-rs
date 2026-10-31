@@ -20,6 +20,10 @@ pub const PENDING_LISTED: usize = 30;
 /// WaitForMcpServers 工具名。
 pub const WAIT_FOR_MCP_SERVERS: &str = "WaitForMcpServers";
 
+/// 等连接中的服务器离开 Pending 的上限（毫秒）：WaitForMcpServers 工具与 ToolSearch 搜不到时的等待共用
+/// （工作线 F122：以前 ext 与 tools 各写一份 5000）。`-p` 的启动等待是另一个设置（ext 的 `startup`）。
+pub const MCP_WAIT_MS: u64 = 5_000;
+
 /// 一个服务器在某一时点的状态。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerView {

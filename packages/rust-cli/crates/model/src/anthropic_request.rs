@@ -12,6 +12,7 @@
 //! 走 `anthropic-beta` header（`anthropic_betas`）。Provider 的 option map 补丁最后合并（`patch`）。
 
 use rust_cli_base::js::json::{self, stringify};
+use rust_cli_base::units;
 use rust_cli_kernel_api::model::{
     CacheControl, ContextEdit, ModelError, ModelRequest, ServerTool, SystemBlock, ThinkingConfig,
     ToolChoice, ToolDefinition, ToolFlags,
@@ -152,12 +153,15 @@ pub(crate) fn encode(
     })
 }
 
+/// 写请求体时消息之外预留的容量（system、工具定义等）。
+const BODY_RESERVE: usize = 64 * units::KIB;
+
 /// 按 `JSON.stringify` 写出请求体，`messages` 的占位换成写好的消息文本。
 fn write_body(body: &Value, messages: &str) -> String {
     let Value::Object(fields) = body else {
         return stringify(body);
     };
-    let mut out = String::with_capacity(messages.len() + 64 * 1024);
+    let mut out = String::with_capacity(messages.len() + BODY_RESERVE);
     out.push('{');
     for (index, (key, value)) in json::properties(fields).enumerate() {
         if index > 0 {

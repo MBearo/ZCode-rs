@@ -144,12 +144,15 @@ pub struct Loaded {
     pub skipped: Vec<Skipped>,
 }
 
+/// 插件名最多这么多个字节。
+const MAX_NAME_LEN: usize = 128;
+
 /// Node `PLUGIN_NAME_PATTERN`：`^[a-z0-9][a-z0-9._-]{0,127}$`。
 fn valid_name(name: &str) -> bool {
     let lower_or_digit = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
     let mut chars = name.chars();
     chars.next().is_some_and(lower_or_digit)
-        && name.len() <= 128
+        && name.len() <= MAX_NAME_LEN
         && chars.all(|c| lower_or_digit(c) || matches!(c, '.' | '_' | '-'))
 }
 

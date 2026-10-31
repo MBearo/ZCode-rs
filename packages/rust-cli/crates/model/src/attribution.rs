@@ -66,9 +66,12 @@ impl Origin {
     }
 }
 
+/// 来源头的值最多这么多个字符。
+const MAX_SOURCE_LEN: usize = 128;
+
 /// Node `QUERY_SOURCE_HEADER_VALUE_PATTERN`：`^[A-Za-z0-9_.:-]{1,128}$`（值是观测标识，不合格时省略）。
 fn valid_source(value: &str) -> bool {
-    (1..=128).contains(&value.len())
+    (1..=MAX_SOURCE_LEN).contains(&value.len())
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte))

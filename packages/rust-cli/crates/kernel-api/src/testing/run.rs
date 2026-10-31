@@ -7,7 +7,7 @@ use serde_json::Value;
 use tokio::sync::{Notify, mpsc};
 
 use super::lock;
-use crate::ids::{InteractionId, OperationId, SessionId};
+use crate::ids::{InteractionId, SessionId};
 use crate::message::{Message, ToolResultContent};
 use crate::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, QueryEvent, RunSink,
@@ -18,11 +18,10 @@ use crate::tool::{
     InterruptBehavior, PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
 
-/// 记录提交的消息、意图与事件；`ask` 一律拒绝。
+/// 记录提交的消息与事件；`ask` 一律拒绝。
 #[derive(Default)]
 pub struct RecordingSink {
     messages: Mutex<Vec<Message>>,
-    intents: Mutex<Vec<(OperationId, String)>>,
     events: Mutex<Vec<QueryEvent>>,
     steering: Mutex<Vec<String>>,
     /// `commit_metered` 的计量，按提交顺序，带同批消息的 id（usage.md §2.5）。
@@ -37,10 +36,6 @@ impl RecordingSink {
 
     pub fn messages(&self) -> Vec<Message> {
         lock(&self.messages).clone()
-    }
-
-    pub fn intents(&self) -> Vec<(OperationId, String)> {
-        lock(&self.intents).clone()
     }
 
     pub fn events(&self) -> Vec<QueryEvent> {
@@ -70,15 +65,6 @@ impl Interactions for RecordingSink {
 impl RunSink for RecordingSink {
     async fn commit_message(&self, message: Message) -> Result<(), StoreError> {
         lock(&self.messages).push(message);
-        Ok(())
-    }
-
-    async fn commit_intent(
-        &self,
-        operation: OperationId,
-        fingerprint: String,
-    ) -> Result<(), StoreError> {
-        lock(&self.intents).push((operation, fingerprint));
         Ok(())
     }
 

@@ -56,7 +56,7 @@ pub(crate) fn rule_base_url(base_url: &str) -> String {
 fn explicit_rules(
     rules: SiteRules,
     base_url: &str,
-    assume: Assumptions,
+    assume: &Assumptions,
 ) -> (CapabilityRules, Arc<dyn ModelLimits>) {
     let url = if assume.first_party {
         OFFICIAL_RULE_URL.to_owned()
@@ -66,14 +66,17 @@ fn explicit_rules(
     let limits = Arc::new(ExplicitLimits {
         rules: Arc::new(rules),
         url,
+        rule_model: assume.rule_model.clone(),
     });
     let shared = limits.clone();
+    let tool_search = assume.tool_search;
     let capabilities: CapabilityRules = Arc::new(move |model: &str| {
-        let mut capabilities =
-            shared
-                .rules
-                .capabilities(WireProtocol::AnthropicMessages, &shared.url, model);
-        capabilities.supports_tool_search |= assume.tool_search;
+        let mut capabilities = shared.rules.capabilities(
+            WireProtocol::AnthropicMessages,
+            &shared.url,
+            shared.rule_model.as_deref().unwrap_or(model),
+        );
+        capabilities.supports_tool_search |= tool_search;
         capabilities
     });
     (capabilities, limits)
@@ -85,12 +88,15 @@ fn explicit_rules(
 struct ExplicitLimits {
     rules: Arc<SiteRules>,
     url: String,
+    /// 只给测试用的 `_ZCODE_ASSUME_RULE_MODEL`（工作线 F121）：按这个模型 ID 查规则。
+    rule_model: Option<String>,
 }
 
 impl ModelLimits for ExplicitLimits {
     fn limits(&self, selection: &ModelSelection) -> Option<TokenLimits> {
+        let model = self.rule_model.as_deref().unwrap_or(&selection.model);
         self.rules
-            .limits(WireProtocol::AnthropicMessages, &self.url, &selection.model)
+            .limits(WireProtocol::AnthropicMessages, &self.url, model)
     }
 }
 
@@ -230,7 +236,7 @@ async fn assemble_model(
     if let Some(endpoint) = anthropic_endpoint(explicit.base_url, explicit.api_key) {
         // 规则先算：没选出模型时 `/model` 还能换（tui.md §6），压缩的上限照样按规则。
         let (capabilities, limits) =
-            explicit_rules(platform.site_rules().await, &endpoint.base_url, assume);
+            explicit_rules(platform.site_rules().await, &endpoint.base_url, &assume);
         let configured = match (&flag, &explicit.model) {
             (None, None) => platform.configured_default_model().await,
             _ => None,

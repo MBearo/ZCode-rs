@@ -4,6 +4,8 @@
 // push 范围沿用 affected 的 resolveScope，不另算一套；开源树没有 packages/rust-cli，这一步不跑。
 // 有 scripts/rust-cli/export/scan.mjs 时（只在闭源仓库），先全量扫描会导出的文件（docs/specs/rust-cli/export.md §4；
 // P5 注释中性化之后不再只扫新增的行）。
+// 有散写数字的棘轮时（boundaries/numbers.mjs），numbers.json 与推送基线比，不许升高（docs/specs/rust-cli/constants.md §4.4，
+// 工作线 F122）：check:rust-cli 只看得到“源码与基线相等”，手改基线升高要在这里拦。
 import { access, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,6 +17,9 @@ import { resolveScope } from "./engineering-tests/scope.mjs";
 const PREFIXES = ["packages/rust-cli/", "scripts/rust-cli/"];
 const SKIP = "ZCODE_PRE_PUSH_SKIP_RUST_CLI";
 const SCAN = "scripts/rust-cli/export/scan.mjs";
+const NUMBERS = "scripts/rust-cli/boundaries/numbers.json";
+const NUMBERS_SCRIPT = "scripts/rust-cli/boundaries/numbers.mjs";
+const POLICY = "scripts/rust-cli/boundaries/policy.mjs";
 const SHOWN = 20;
 
 const isRustCli = (file) => PREFIXES.some((p) => file.startsWith(p));
@@ -45,6 +50,39 @@ export async function scanExported(root, env) {
   if (!(await exists(path))) return null;
   const { scanAll } = await import(pathToFileURL(path).href);
   return scanAll(root, { env });
+}
+
+/**
+ * 散写数字的基线不许升高（constants.md §4.4）：HEAD 的 numbers.json 与每个推送基线的比，变大的文件要在 policy.mjs 的
+ * NUMBER_RAISES 逐项登记。没有棘轮脚本（开源树）或 HEAD 没有基线时返回 null；推送基线里还没有 numbers.json 时那个基线不比。
+ */
+export async function numberRaises(root, bases) {
+  const script = join(root, NUMBERS_SCRIPT);
+  if (!(await exists(script))) return null;
+  const after = await baselineAt(root, "HEAD");
+  if (!after) return null;
+  const { checkRaises } = await import(pathToFileURL(script).href);
+  // 登记表每次重新读（查询串绕过模块缓存）：同一个进程里可能先后检查改过登记表的提交（测试就是这样）。
+  policyLoads += 1;
+  const policy = `${pathToFileURL(join(root, POLICY)).href}?load=${policyLoads}`;
+  const { NUMBER_RAISES = [] } = await import(policy);
+  const failures = new Set();
+  for (const base of bases) {
+    const before = await baselineAt(root, base);
+    if (before)
+      for (const failure of checkRaises(before, after, NUMBER_RAISES)) failures.add(failure);
+  }
+  return [...failures];
+}
+
+let policyLoads = 0;
+
+async function baselineAt(root, rev) {
+  const { code, stdout } = await run("git", ["show", `${rev}:${NUMBERS}`], {
+    cwd: root,
+    allowFailure: true,
+  });
+  return code === 0 ? JSON.parse(stdout.toString()) : null;
 }
 
 export async function cargoAvailable(root, env) {
@@ -87,13 +125,14 @@ export async function main({
   hasCargo = cargoAvailable,
   check = runCheck,
   scan = scanExported,
+  raises = numberRaises,
 } = {}) {
   try {
     // 根目录按脚本位置取，不问 git：开源导出排除 packages/rust-cli（opensource/export.config.json），
     // 那时这一步不调用 git 与 cargo，也不读 push 范围。
     root ??= resolve(import.meta.dirname, "..");
     if (!(await exists(join(root, "packages/rust-cli/Cargo.toml")))) return 0;
-    const { files } = await rustCliScope(root, env);
+    const { bases, files } = await rustCliScope(root, env);
     if (!files.length) {
       log.log("[rust-cli] push 范围没有改 rust-cli，不跑 check:rust-cli");
       return 0;
@@ -122,6 +161,18 @@ export async function main({
         return 1;
       }
       log.log(`[rust-cli] 导出文件的扫描：没有硬失败，告警 ${scanned.warn.length} 处`);
+    }
+    const raised = await raises(root, bases);
+    if (raised?.length) {
+      log.error(
+        [
+          `[rust-cli] ${NUMBERS} 比推送基线高（docs/specs/rust-cli/constants.md §4.4）：`,
+          ...raised.slice(0, SHOWN).map((line) => `  ${line}`),
+          ...(raised.length > SHOWN ? [`  …另有 ${raised.length - SHOWN} 处`] : []),
+          "  把新写的数字改成命名常量；确实要升高（用户决定、拆文件）时在 NUMBER_RAISES 逐项登记。",
+        ].join("\n"),
+      );
+      return 1;
     }
     if (!(await hasCargo(root, env))) {
       log.error(

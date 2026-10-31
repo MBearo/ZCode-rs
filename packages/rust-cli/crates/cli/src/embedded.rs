@@ -81,6 +81,9 @@ pub(crate) fn executable() -> Option<PathBuf> {
     Some(without_verbatim_prefix(real))
 }
 
+/// 带盘符的 verbatim 路径最短的写法 `\\?\C:\` 的长度。
+const MIN_VERBATIM_DRIVE_LEN: usize = 7;
+
 /// 去掉 Windows 的 `\\?\` 前缀：`\\?\UNC\server\x` → `\\server\x`；
 /// `\\?\C:\x` → `C:\x`（长度至少 7、第 6 个字符是 `:`）；其余原样。
 ///
@@ -93,7 +96,10 @@ fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
     if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
         return PathBuf::from(format!(r"\\{rest}"));
     }
-    if text.starts_with(r"\\?\") && text.len() >= 7 && text.as_bytes()[5] == b':' {
+    if text.starts_with(r"\\?\")
+        && text.len() >= MIN_VERBATIM_DRIVE_LEN
+        && text.as_bytes()[5] == b':'
+    {
         return PathBuf::from(&text[4..]);
     }
     path

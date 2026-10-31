@@ -18,11 +18,18 @@ use rust_cli_base::secret::RedactedString;
 use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::envelope::{ReplyResult, StreamItem, WireError};
 use rust_cli_exec_wire::frame::FrameError;
-use rust_cli_exec_wire::handshake::RefuseCode;
+use rust_cli_exec_wire::handshake::{HEARTBEAT_MS, RefuseCode};
 
 pub use client::ExecClient;
 pub use connection::backoff;
 pub use stream::ClientStream;
+
+/// 缺省的心跳间隔（与服务端没收到 `heartbeat_ms` 时用的同一个值）。
+const DEFAULT_HEARTBEAT: Duration = Duration::from_millis(HEARTBEAT_MS);
+/// 缺省的重连：第一次重连前等多久。
+const DEFAULT_RECONNECT_DELAY: Duration = Duration::from_millis(500);
+/// 缺省的重连：最多等多久。
+const DEFAULT_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(15);
 
 /// 客户端的参数（由组装根给）。
 #[derive(Debug, Clone)]
@@ -70,11 +77,11 @@ impl ClientOptions {
             client_version: client_version.into(),
             client_instance: client_instance.into(),
             credentials: None,
-            heartbeat: Duration::from_secs(10),
+            heartbeat: DEFAULT_HEARTBEAT,
             reconnect: Reconnect {
                 attempts: Some(0),
-                delay: Duration::from_millis(500),
-                max_delay: Duration::from_secs(15),
+                delay: DEFAULT_RECONNECT_DELAY,
+                max_delay: DEFAULT_RECONNECT_MAX_DELAY,
             },
             part_size: rust_cli_exec_wire::frame::PART_SIZE,
         }

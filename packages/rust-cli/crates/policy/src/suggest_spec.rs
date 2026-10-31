@@ -118,6 +118,10 @@ const DEPTHS: [(&str, usize); 11] = [
 
 /// 包装最多套 3 层。
 const MAX_DEPTH: usize = 2;
+/// 前缀的缺省词数：命令名与第一个参数（没有规格、参数必填、参数是命令时）。
+const DEFAULT_DEPTH: usize = 2;
+/// 一组参数里有命令时前缀词数的上限。
+const MAX_COMMAND_DEPTH: usize = 3;
 
 /// `^\d+$`。
 fn is_digits(text: &str) -> bool {
@@ -165,20 +169,20 @@ fn depth(name: &str, args: &[String], spec: Option<&Spec>) -> usize {
         return depth;
     }
     let Some(spec) = spec else {
-        return 2;
+        return DEFAULT_DEPTH;
     };
     let list = spec.args.list();
     if let Some(at) = list.iter().position(|arg| arg.command) {
         return match spec.args {
-            Args::One(_) => 2,
-            Args::Many(_) => (2 + at).min(3),
+            Args::One(_) => DEFAULT_DEPTH,
+            Args::Many(_) => (DEFAULT_DEPTH + at).min(MAX_COMMAND_DEPTH),
         };
     }
     // 没有子命令时：参数可变 1，其余 2（第一个参数必填 2、参数危险 3，内置规格里没有危险的参数）。
     if list.iter().any(|arg| arg.variadic) {
         1
     } else {
-        2
+        DEFAULT_DEPTH
     }
 }
 

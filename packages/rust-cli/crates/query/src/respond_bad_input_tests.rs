@@ -153,7 +153,6 @@ async fn bad_tool_input_with_a_running_sibling_commits_everything_and_continues(
             ("toolu_read".to_owned(), "read ran".to_owned()),
         ]
     );
-    assert_eq!(sink.intents().len(), 2);
     // 回合继续：第二次请求带着两个结果，最后的回复也提交了。
     assert_eq!(model.requests().len(), 2);
     assert!(matches!(

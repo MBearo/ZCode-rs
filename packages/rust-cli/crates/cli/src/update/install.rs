@@ -3,14 +3,23 @@
 
 /// 包管理器的标记，按 Codex `InstallContext::current` 的先后（没有 Vite+）。
 const MARKERS: [(&str, Manager); 3] = [
-    ("ZCODE_MANAGED_BY_PNPM", Manager::Pnpm),
-    ("ZCODE_MANAGED_BY_NPM", Manager::Npm),
-    ("ZCODE_MANAGED_BY_BUN", Manager::Bun),
+    (
+        rust_cli_base::names::env::ZCODE_MANAGED_BY_PNPM,
+        Manager::Pnpm,
+    ),
+    (
+        rust_cli_base::names::env::ZCODE_MANAGED_BY_NPM,
+        Manager::Npm,
+    ),
+    (
+        rust_cli_base::names::env::ZCODE_MANAGED_BY_BUN,
+        Manager::Bun,
+    ),
 ];
 /// 入口包名（启动器自己的 `package.json` 的 `name`）。
-const PACKAGE: &str = "ZCODE_MANAGED_PACKAGE";
+const PACKAGE: &str = rust_cli_base::names::env::ZCODE_MANAGED_PACKAGE;
 /// 启动器选中的本机平台包名。
-const PLATFORM_PACKAGE: &str = "ZCODE_MANAGED_PLATFORM_PACKAGE";
+const PLATFORM_PACKAGE: &str = rust_cli_base::names::env::ZCODE_MANAGED_PLATFORM_PACKAGE;
 /// npm 包名的长度上限。
 const MAX_NAME: usize = 214;
 /// npm 包页面（选择屏与会话提示里的 release notes 链接，update.md §6.1）。

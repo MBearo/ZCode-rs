@@ -21,7 +21,6 @@ pub enum Op {
     StartCommand,
     WatchCommand,
     Cancel,
-    OperationStatus,
     CloseSession,
     ShellState,
     ShellNotices,
@@ -32,7 +31,6 @@ pub enum Op {
     StopBackgroundCommand,
     RewindPrepare,
     RewindApply,
-    RewindStatus,
     RewindFinish,
     PdfPageCount,
     RenderPdfPages,
@@ -46,7 +44,7 @@ pub enum Op {
 }
 
 impl Op {
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 34] = [
         Self::Facts,
         Self::PathFacts,
         Self::ReadFile,
@@ -62,7 +60,6 @@ impl Op {
         Self::StartCommand,
         Self::WatchCommand,
         Self::Cancel,
-        Self::OperationStatus,
         Self::CloseSession,
         Self::ShellState,
         Self::ShellNotices,
@@ -73,7 +70,6 @@ impl Op {
         Self::StopBackgroundCommand,
         Self::RewindPrepare,
         Self::RewindApply,
-        Self::RewindStatus,
         Self::RewindFinish,
         Self::PdfPageCount,
         Self::RenderPdfPages,
@@ -103,7 +99,6 @@ impl Op {
             Self::StartCommand => "commands.start_command",
             Self::WatchCommand => "commands.watch_command",
             Self::Cancel => "commands.cancel",
-            Self::OperationStatus => "commands.operation_status",
             Self::CloseSession => "commands.close_session",
             Self::ShellState => "shell.shell_state",
             Self::ShellNotices => "shell.shell_notices",
@@ -114,7 +109,6 @@ impl Op {
             Self::StopBackgroundCommand => "background.stop_background_command",
             Self::RewindPrepare => "checkpoints.rewind_prepare",
             Self::RewindApply => "checkpoints.rewind_apply",
-            Self::RewindStatus => "checkpoints.rewind_status",
             Self::RewindFinish => "checkpoints.rewind_finish",
             Self::PdfPageCount => "pdf.pdf_page_count",
             Self::RenderPdfPages => "pdf.render_pdf_pages",
@@ -143,20 +137,16 @@ impl Op {
             | Self::ReadText
             | Self::PutFile => Capability::Files,
             Self::Glob | Self::ListFiles | Self::Grep => Capability::Search,
-            Self::StartCommand
-            | Self::WatchCommand
-            | Self::Cancel
-            | Self::OperationStatus
-            | Self::CloseSession => Capability::Commands,
+            Self::StartCommand | Self::WatchCommand | Self::Cancel | Self::CloseSession => {
+                Capability::Commands
+            }
             Self::ShellState | Self::ShellNotices | Self::AckShellNotice | Self::SetShellCwd => {
                 Capability::Shell
             }
             Self::BackgroundCommand | Self::BackgroundElapsed | Self::StopBackgroundCommand => {
                 Capability::Background
             }
-            Self::RewindPrepare | Self::RewindApply | Self::RewindStatus | Self::RewindFinish => {
-                Capability::Checkpoints
-            }
+            Self::RewindPrepare | Self::RewindApply | Self::RewindFinish => Capability::Checkpoints,
             Self::PdfPageCount | Self::RenderPdfPages => Capability::Pdf,
             Self::McpConnect
             | Self::McpSend

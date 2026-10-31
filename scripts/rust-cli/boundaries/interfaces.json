@@ -80,7 +80,7 @@
       "methods": [
         {
           "name": "start_command",
-          "signature": "async fn start_command(&self,workspace:&WorkspaceRef,context:OperationContext,request:StartCommand,) -> Result<(),EnvError>",
+          "signature": "async fn start_command(&self,workspace:&WorkspaceRef,context:OperationContext,request:StartCommand,) -> Result<CommandEvents,EnvError>",
           "default": false
         },
         {
@@ -91,11 +91,6 @@
         {
           "name": "cancel",
           "signature": "async fn cancel(&self,operation:OperationId) -> Result<(),EnvError>",
-          "default": false
-        },
-        {
-          "name": "operation_status",
-          "signature": "async fn operation_status(&self,operation:OperationId) -> Result<Outcome,EnvError>",
           "default": false
         },
         {
@@ -166,11 +161,6 @@
         {
           "name": "rewind_apply",
           "signature": "async fn rewind_apply(&self,_token:&OperationId) -> Result<RewindStatus,EnvError>",
-          "default": true
-        },
-        {
-          "name": "rewind_status",
-          "signature": "async fn rewind_status(&self,_token:&OperationId) -> Result<RewindStatus,EnvError>",
           "default": true
         },
         {
@@ -1684,6 +1674,18 @@
           },
           {
             "item": "status:BackgroundStatus"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"BackgroundKind::is_bash\""
+            ],
+            "item": "kind:BackgroundKind"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"String::is_empty\""
+            ],
+            "item": "description:String"
           }
         ]
       },
@@ -1879,50 +1881,50 @@
     "frame.rs": {
       "PART_SIZE": {
         "kind": "const",
-        "value": ":usize = 256 * 1024"
+        "value": ":usize = 256 * units::KIB"
       },
       "MAX_MESSAGE": {
         "kind": "const",
-        "value": ":u64 = 512 * 1024 * 1024"
+        "value": ":u64 = 512 * units::MIB as u64"
       },
       "Kind": {
         "kind": "enum",
         "variants": [
           {
-            "item": "Hello"
+            "item": "Hello = HELLO"
           },
           {
-            "item": "Welcome"
+            "item": "Welcome = WELCOME"
           },
           {
-            "item": "Refuse"
+            "item": "Refuse = REFUSE"
           },
           {
-            "item": "Request"
+            "item": "Request = REQUEST"
           },
           {
-            "item": "Reply"
+            "item": "Reply = REPLY"
           },
           {
-            "item": "Event"
+            "item": "Event = EVENT"
           },
           {
-            "item": "Ack"
+            "item": "Ack = ACK"
           },
           {
-            "item": "Close"
+            "item": "Close = CLOSE"
           },
           {
-            "item": "Ping"
+            "item": "Ping = PING"
           },
           {
-            "item": "Pong"
+            "item": "Pong = PONG"
           },
           {
-            "item": "Admin"
+            "item": "Admin = ADMIN"
           },
           {
-            "item": "AdminReply"
+            "item": "AdminReply = ADMIN_REPLY"
           }
         ]
       },
@@ -2013,6 +2015,10 @@
       "HEARTBEAT_MS": {
         "kind": "const",
         "value": ":u64 = 10_000"
+      },
+      "HEARTBEAT_MISSES": {
+        "kind": "const",
+        "value": ":u32 = 3"
       },
       "STREAM_WINDOW": {
         "kind": "const",
@@ -2234,9 +2240,6 @@
             "item": "Cancel"
           },
           {
-            "item": "OperationStatus"
-          },
-          {
             "item": "CloseSession"
           },
           {
@@ -2265,9 +2268,6 @@
           },
           {
             "item": "RewindApply"
-          },
-          {
-            "item": "RewindStatus"
           },
           {
             "item": "RewindFinish"
@@ -2396,12 +2396,6 @@
           },
           {
             "attributes": [
-              "rename = \"commands.operation_status\""
-            ],
-            "item": "OperationStatus(Outcome)"
-          },
-          {
-            "attributes": [
               "rename = \"commands.close_session\""
             ],
             "item": "CloseSession"
@@ -2453,12 +2447,6 @@
               "rename = \"checkpoints.rewind_apply\""
             ],
             "item": "RewindApply(RewindStatus)"
-          },
-          {
-            "attributes": [
-              "rename = \"checkpoints.rewind_status\""
-            ],
-            "item": "RewindStatus(RewindStatus)"
           },
           {
             "attributes": [
@@ -2610,12 +2598,6 @@
           },
           {
             "attributes": [
-              "rename = \"commands.operation_status\""
-            ],
-            "item": "OperationStatus{operation:String}"
-          },
-          {
-            "attributes": [
               "rename = \"commands.close_session\""
             ],
             "item": "CloseSession{session:String,forget:bool}"
@@ -2673,12 +2655,6 @@
               "rename = \"checkpoints.rewind_apply\""
             ],
             "item": "RewindApply{token:String}"
-          },
-          {
-            "attributes": [
-              "rename = \"checkpoints.rewind_status\""
-            ],
-            "item": "RewindStatus{token:String}"
           },
           {
             "attributes": [

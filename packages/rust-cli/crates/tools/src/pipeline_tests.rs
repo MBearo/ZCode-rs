@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use rust_cli_base::models::GLM_4_6;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
     EnvironmentId, Generation, InteractionId, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
@@ -438,7 +439,7 @@ impl Tool for KeyedTool {
 /// 之后的输入；严格对象的工具（缺省）照旧报多出的参数。
 #[tokio::test]
 async fn object_tools_drop_unknown_keys_and_strict_tools_reject_them() {
-    let input = json!({"prompt": "x", "model": "sonnet"});
+    let input = json!({"prompt": "x", "model": GLM_4_6});
     let pipeline = Pipeline::new(
         Arc::new(FixedGate(PermissionDecision::Passthrough)),
         Arc::new(RecordingHooks::default()),

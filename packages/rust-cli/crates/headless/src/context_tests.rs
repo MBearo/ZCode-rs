@@ -1,5 +1,6 @@
 //! `-p "/context"` 的 markdown（context-usage.md §5.1）：逐字核对整张表（skill
 //! 只留本工程有的 `loop`）。
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::context_usage::{
     CategoryKind, ContextUsage, MemoryFileUsage, SkillUsage, UsageCategory, WindowSource,
 };
@@ -16,7 +17,7 @@ fn category(name: &str, tokens: u64, kind: CategoryKind) -> UsageCategory {
 
 fn c1() -> ContextUsage {
     ContextUsage {
-        model: "claude-opus-5-5".into(),
+        model: GLM_5_3.into(),
         total_tokens: 8357,
         raw_max_tokens: 1_000_000,
         percentage: 1,
@@ -47,7 +48,8 @@ fn c1() -> ContextUsage {
 fn the_markdown_table_is_written_word_for_word() {
     assert_eq!(
         markdown(&c1()),
-        "## Context Usage\n\n**Model:** claude-opus-5-5  \n**Tokens:** 8.4k / 1m (1%)\n\n### Estimated usage by category\n\n| Category | Tokens | Percentage |\n|----------|--------|------------|\n| System prompt | 1.6k | 0.2% |\n| System tools | 4.7k | 0.5% |\n| System tools (deferred) | 2.1k | 0.2% |\n| Skills | 2k | 0.2% |\n| Messages | 21 | 0.0% |\n| Free space | 958.6k | 95.9% |\n| Autocompact buffer | 33k | 3.3% |\n\n### Skills\n\n| Skill | Source | Tokens |\n|-------|--------|--------|\n| loop | Built-in | ~120 |\n\n"
+        "## Context Usage\n\n**Model:** <model>  \n**Tokens:** 8.4k / 1m (1%)\n\n### Estimated usage by category\n\n| Category | Tokens | Percentage |\n|----------|--------|------------|\n| System prompt | 1.6k | 0.2% |\n| System tools | 4.7k | 0.5% |\n| System tools (deferred) | 2.1k | 0.2% |\n| Skills | 2k | 0.2% |\n| Messages | 21 | 0.0% |\n| Free space | 958.6k | 95.9% |\n| Autocompact buffer | 33k | 3.3% |\n\n### Skills\n\n| Skill | Source | Tokens |\n|-------|--------|--------|\n| loop | Built-in | ~120 |\n\n"
+            .replace("<model>", GLM_5_3)
     );
 }
 

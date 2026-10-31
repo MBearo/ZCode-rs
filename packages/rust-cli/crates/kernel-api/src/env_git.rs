@@ -107,7 +107,12 @@ pub async fn project_levels(
         if home.is_some_and(|home| style.same(&dir, home)) {
             break;
         }
-        let root = has_git_marker(files, workspace, &style.join(&dir, &[".git"])).await;
+        let root = has_git_marker(
+            files,
+            workspace,
+            &style.join(&dir, &[crate::env_files::GIT_DIR]),
+        )
+        .await;
         current = if root { None } else { style.parent(&dir) };
         levels.push(dir);
     }

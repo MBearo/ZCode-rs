@@ -100,7 +100,7 @@ pub(super) async fn probe(pid: i32) -> Probe {
     }
     let micros = info
         .pbi_start_tvsec
-        .checked_mul(1_000_000)
+        .checked_mul(rust_cli_base::units::MICROS_PER_SECOND)
         .and_then(|micros| micros.checked_add(info.pbi_start_tvusec));
     match micros {
         Some(micros) => Probe::Running(Start(format!("{micros:x}"))),
@@ -121,20 +121,21 @@ pub(super) async fn probe(pid: i32) -> Probe {
     if pid <= 0 {
         return Probe::Gone;
     }
-    let stat = match tokio::fs::read_to_string(format!("/proc/{pid}/stat")).await {
+    use rust_cli_base::proto::procfs;
+
+    let stat = match tokio::fs::read_to_string(procfs::stat_path(pid)).await {
         Ok(stat) => stat,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Probe::Gone,
         Err(_) => return Probe::Unknown,
     };
-    // comm 可能含空格与括号：从最后一个 ')' 之后数字段：第 1 个是状态，第 20 个是 starttime。
-    let Some(rest) = stat.rfind(')').and_then(|at| stat.get(at + 2..)) else {
+    // comm 可能含空格与括号：base 的 `procfs::field` 从最后一个 ')' 之后数字段。
+    let Some(state) = procfs::field(&stat, procfs::STATE) else {
         return Probe::Unknown;
     };
-    let mut fields = rest.split(' ');
-    if matches!(fields.next(), Some("Z" | "X" | "x")) {
+    if matches!(state, "Z" | "X" | "x") {
         return Probe::Gone;
     }
-    match fields.nth(18).and_then(|ticks| ticks.parse::<u64>().ok()) {
+    match procfs::field(&stat, procfs::STARTTIME).and_then(|ticks| ticks.parse::<u64>().ok()) {
         Some(ticks) => Probe::Running(Start(format!("{}.{ticks:x}", boot().await))),
         None => Probe::Unknown,
     }

@@ -6,8 +6,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
+    WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{
     FileStat, GlobFiles, GlobMatches, GrepOutcome, GrepSearch, StatFile,
@@ -94,7 +94,7 @@ impl Commands for Endless {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         _request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -107,10 +107,6 @@ impl Commands for Endless {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 

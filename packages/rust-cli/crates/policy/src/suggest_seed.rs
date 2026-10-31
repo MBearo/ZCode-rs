@@ -3,19 +3,24 @@
 //! 修复（D9）：以前这一行直接记住判决链的建议（取前两个词，`git -C /repo status` 记成 `git:*`）；现在按询问框
 //! 自己的规则：复合命令用唯一的那条建议，否则简单前缀、第一个词或整条命令，再按规格细化。
 
+use rust_cli_base::chars;
 use rust_cli_kernel_api::permission::PermissionRule;
 
 use crate::suggest::{first_word_prefix, simple_prefix, starts_with_wrapper};
 
-/// 种子里不能有的字符：换行、制表符、行与段分隔符、控制字符、双向控制符与变体选择符。
+/// 变体选择符（文字与 emoji 的呈现方式）：看不见，也不许进种子。
+const PRESENTATION_SELECTORS: [char; 2] = ['\u{fe0e}', '\u{fe0f}'];
+
+/// 种子里不能有的字符：换行、制表符、行与段分隔符、控制字符、双向控制符与零宽字符、变体选择符。
+/// 修复（F122）：双向与零宽字符以前只拒绝 U+061C、U+202A–U+202E、U+2066–U+2069，零宽空格、LRM / RLM、
+/// U+206A–U+206F、BOM 放过了；三处各写一份范围，现在用 base 的同一张表（constants.md §5.1.4）。
 fn printable(seed: &str) -> bool {
     !seed.chars().any(|c| {
-        let code = u32::from(c);
-        code < 0x20
-            || (0x7f..=0x9f).contains(&code)
-            || matches!(code, 0x2028 | 0x2029 | 0x061c | 0xfe0e | 0xfe0f)
-            || (0x202a..=0x202e).contains(&code)
-            || (0x2066..=0x2069).contains(&code)
+        chars::is_c0(c)
+            || chars::is_del_or_c1(c)
+            || chars::is_line_break_separator(c)
+            || chars::is_bidi_or_zero_width(c)
+            || PRESENTATION_SELECTORS.contains(&c)
     })
 }
 

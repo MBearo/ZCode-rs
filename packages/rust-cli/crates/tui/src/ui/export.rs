@@ -3,10 +3,12 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use rust_cli_base::units;
 
 use super::app::{Action, App, Overlay};
 use super::cells::Ctx;
 use super::i18n::Lang;
+use super::layout;
 use super::manage::Manage;
 use super::palette::Palette;
 use super::text::{plain, truncate_line};
@@ -23,7 +25,7 @@ pub enum ExportView {
 /// transcript 的宽度，没有画过时 80 列。
 pub fn conversation_text(app: &App, now_ms: u64) -> (String, Option<String>) {
     let width = match app.hits.transcript.width {
-        0 => 80,
+        0 => layout::DEFAULT_WIDTH,
         width => usize::from(width),
     };
     let label = crate::ui::app::label(app.view.workspace().root.as_str(), app.home.as_deref());
@@ -57,22 +59,26 @@ pub fn conversation_text(app: &App, now_ms: u64) -> (String, Option<String>) {
 /// 修复（R2-6）：以前按 UTC（tui-manage.md D9）；现在用本地时间。
 fn timestamp(now_ms: u64, offset_minutes: i32) -> String {
     let utc = i64::try_from(now_ms).unwrap_or(i64::MAX);
-    let local = u64::try_from(utc.saturating_add(i64::from(offset_minutes) * 60_000)).unwrap_or(0);
+    let offset_ms = i64::from(offset_minutes) * units::MS_PER_MINUTE as i64;
+    let local = u64::try_from(utc.saturating_add(offset_ms)).unwrap_or(0);
     let date = rust_cli_kernel_api::clock::civil_date(local);
-    let seconds = (local / 1000) % 86_400;
-    format!(
-        "{date}-{:02}{:02}{:02}",
-        seconds / 3600,
-        seconds / 60 % 60,
-        seconds % 60
-    )
+    let (hours, minutes, seconds) = super::quantities::time_of_day(local);
+    format!("{date}-{hours:02}{minutes:02}{seconds:02}")
 }
+
+/// 文件名里第一条输入最多取这么多个字符（超出时截到少一个字符再加 `…`）。
+const SLUG_SOURCE_CHARS: usize = 50;
 
 /// 缺省文件名：`<时间>-<第一条输入的 slug>.txt`，没有 slug 时 `conversation-<时间>.txt`。
 pub fn default_name(first_prompt: Option<&str>, now_ms: u64, offset_minutes: i32) -> String {
     let mut text = first_prompt.unwrap_or_default().trim().to_owned();
-    if text.chars().count() > 50 {
-        text = text.chars().take(49).chain(['…']).collect();
+    if text.chars().count() > SLUG_SOURCE_CHARS {
+        // 留一个字符给 `…`。
+        text = text
+            .chars()
+            .take(SLUG_SOURCE_CHARS - 1)
+            .chain(['…'])
+            .collect();
     }
     let mut slug = String::new();
     for c in text.to_lowercase().chars() {
@@ -195,7 +201,7 @@ pub fn lines(view: &ExportView, lang: Lang, palette: &Palette, width: usize) -> 
                 Lang::En => "{Enter} to select · {Esc} to cancel",
                 Lang::Zh => "{enter} 选择 · {esc} 取消",
             };
-            lines.push(super::key_hint::line(2, hint, palette));
+            lines.push(super::key_hint::line(layout::INDENT, hint, palette));
         }
         ExportView::Name(name) => {
             lines.push(Line::from(Span::raw(format!("  {enter}"))));
@@ -207,7 +213,7 @@ pub fn lines(view: &ExportView, lang: Lang, palette: &Palette, width: usize) -> 
                 width,
             ));
             lines.push(Line::default());
-            lines.push(super::key_hint::line(2, back, palette));
+            lines.push(super::key_hint::line(layout::INDENT, back, palette));
         }
     }
     lines

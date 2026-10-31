@@ -120,7 +120,7 @@ impl Tool for TaskTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(100_000)
+        Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
     }
 
     async fn check_permissions(

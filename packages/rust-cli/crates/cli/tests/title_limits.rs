@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_kernel_api::clock::Clock;
@@ -206,7 +207,7 @@ fn title_requests(fixture: &sse::Fixture) -> Vec<Value> {
 async fn a_catalog_title_request_sends_the_node_output_limit() {
     let sandbox = Sandbox::new();
     let fixture = sse::serve(vec![sse::text_reply("done")]);
-    sandbox.provider(&fixture.url, "glm-5.3");
+    sandbox.provider(&fixture.url, GLM_5_3);
     let clock = Arc::new(SystemClock::utc());
     let (egress, services) = services(clock.clone()).await;
     let secret = CredentialSecret {
@@ -220,7 +221,7 @@ async fn a_catalog_title_request_sends_the_node_output_limit() {
     let model: Arc<dyn ModelPort> = Arc::new(ProviderModel::new(egress, endpoints, clock.clone()));
     let selection = ModelSelection {
         provider: "personal:gateway".to_owned(),
-        model: "glm-5.3".to_owned(),
+        model: GLM_5_3.to_owned(),
         reasoning: None,
         connection: None,
     };
@@ -253,7 +254,7 @@ async fn an_explicit_title_request_still_sends_5000() {
     ));
     let selection = ModelSelection {
         provider: "anthropic".to_owned(),
-        model: "glm-5.3".to_owned(),
+        model: GLM_5_3.to_owned(),
         reasoning: None,
         connection: None,
     };

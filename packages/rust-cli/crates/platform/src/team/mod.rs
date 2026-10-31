@@ -337,7 +337,7 @@ impl TeamPlans {
     /// 修复线 F58：BigModel 以前从账号地址拼，设了 `BIGMODEL_*` 覆盖变量时跟着变，App 不跟。
     pub fn manage_url(&self, family: Family) -> String {
         match family {
-            Family::Zai => "https://z.ai/manage-apikey/subscription".to_owned(),
+            Family::Zai => rust_cli_base::hosts::ZAI_SUBSCRIPTION.to_owned(),
             Family::Bigmodel => self.origins.bigmodel_team_plans.clone(),
         }
     }

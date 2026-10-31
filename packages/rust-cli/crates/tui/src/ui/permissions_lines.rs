@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::permission::{PermissionRule, RuleBehavior, RuleSource};
 
 use super::i18n::Lang;
+use super::layout;
 use super::palette::Palette;
 use super::permissions::{
     PermissionsView, Stage, TABS, Tab, behavior_name, deletable, rule_text, source_name,
@@ -68,7 +69,7 @@ fn description(rule: &PermissionRule, lang: Lang) -> Option<(&'static str, Strin
                 } else {
                     "Any Bash command starting with "
                 },
-                content[..content.len() - 2].to_owned(),
+                content[..content.len() - ":*".len()].to_owned(),
                 "",
             ),
             Some(content) => (
@@ -113,14 +114,14 @@ fn rule_block(rule: &PermissionRule, lang: Lang, width: usize) -> Vec<Line<'stat
 
 /// 底部的按键提示（`{键}` 模板，按键提示组件画，tui.md §7.4）。
 fn hint(text: &str, palette: &Palette) -> Line<'static> {
-    super::key_hint::line(2, text, palette)
+    super::key_hint::line(layout::INDENT, text, palette)
 }
 
 fn wrapped(text: &str, style: Style, width: usize) -> Vec<Line<'static>> {
     wrap_text(
         text,
         style,
-        width.saturating_sub(2),
+        width.saturating_sub(layout::INDENT),
         &[Span::raw("  ")],
         &[Span::raw("  ")],
     )
@@ -443,7 +444,9 @@ fn list(
     if items.is_empty() {
         lines.push(hint(if zh { "没有匹配" } else { "No matches" }, palette));
     }
-    let room = height.saturating_sub(lines.len() + 2).max(3);
+    let room = height
+        .saturating_sub(lines.len() + layout::FOOTER_ROWS)
+        .max(layout::MIN_LIST_ROWS);
     let start = view.selected.saturating_sub(room.saturating_sub(1));
     for (index, item) in items.iter().enumerate().skip(start).take(room) {
         let chosen = index == view.selected;

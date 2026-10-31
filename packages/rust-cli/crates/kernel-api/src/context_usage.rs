@@ -132,21 +132,28 @@ impl ContextUsage {
     }
 }
 
+/// compact 写法每一级是上一级的这么多倍（`k`、`m`、`b`、`t`）。
+pub(crate) const COMPACT_STEP: u64 = 1_000;
+/// 保留一位小数：乘它、取整、再除以它。
+pub(crate) const TENTHS: f64 = rust_cli_base::units::TENTHS_F64;
+
 /// token 数的简写：小于 1000 时最多一位小数；否则 Intl 的 compact 写法（一位小数，
 /// `k` / `m` / `b` / `t` 小写），再去掉第一个 `.0`。
 pub fn format_tokens(value: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
     let mut scaled = value as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let step = COMPACT_STEP as f64;
     let suffixes = ["", "k", "m", "b", "t"];
     let mut unit = 0;
-    while scaled >= 1000.0 && unit + 1 < suffixes.len() {
-        scaled /= 1000.0;
+    while scaled >= step && unit + 1 < suffixes.len() {
+        scaled /= step;
         unit += 1;
     }
     // Intl 的 halfExpand 舍入；进位到 1000 时换下一个单位。
-    let mut rounded = (scaled * 10.0).round() / 10.0;
-    if unit > 0 && rounded >= 1000.0 && unit + 1 < suffixes.len() {
-        rounded = ((rounded / 1000.0) * 10.0).round() / 10.0;
+    let mut rounded = (scaled * TENTHS).round() / TENTHS;
+    if unit > 0 && rounded >= step && unit + 1 < suffixes.len() {
+        rounded = ((rounded / step) * TENTHS).round() / TENTHS;
         unit += 1;
     }
     let text = if unit == 0 {
@@ -163,10 +170,13 @@ pub fn format_tokens(value: u64) -> String {
 
 /// token 估计值的写法：小于 20 为 `< 20`，否则 `~` 加按 10 取整的数字。
 pub fn format_estimate(tokens: u64) -> String {
-    if tokens < 20 {
-        return "< 20".to_owned();
+    // 小于它时只写 `< 20`；取整的步长。
+    const FLOOR: u64 = 20;
+    const STEP: u64 = 10;
+    if tokens < FLOOR {
+        return format!("< {FLOOR}");
     }
-    format!("~{}", format_tokens((tokens + 5) / 10 * 10))
+    format!("~{}", format_tokens((tokens + STEP / 2) / STEP * STEP))
 }
 
 #[cfg(test)]

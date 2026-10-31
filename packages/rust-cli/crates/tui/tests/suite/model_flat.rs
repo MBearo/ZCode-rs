@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use crossterm::event::KeyCode;
+use rust_cli_base::models::GLM_5_3_ACCOUNT;
 use rust_cli_kernel_api::model::{ModelConnection, ModelSelection};
 use rust_cli_kernel_api::provider::{
     CatalogConnection, CatalogModel, ModelCatalog, ModelDirectory, WireProtocol,
@@ -51,14 +52,14 @@ impl ModelDirectory for Plans {
         ModelCatalog {
             revision: 1,
             models: vec![
-                model(PERSONAL, "GLM-5.3", None),
-                model(TEAM, "GLM-5.3", Some(("p-a", "团队 A"))),
-                model(TEAM, "GLM-5.3", Some(("p-b", "团队 B"))),
+                model(PERSONAL, GLM_5_3_ACCOUNT, None),
+                model(TEAM, GLM_5_3_ACCOUNT, Some(("p-a", "团队 A"))),
+                model(TEAM, GLM_5_3_ACCOUNT, Some(("p-b", "团队 B"))),
                 model("fixture", "scripted", None),
             ],
             default: Some(ModelSelection {
                 provider: PERSONAL.into(),
-                model: "GLM-5.3".into(),
+                model: GLM_5_3_ACCOUNT.into(),
                 reasoning: Some("high".into()),
                 connection: None,
             }),
@@ -113,7 +114,7 @@ async fn pick_second_team(
             !s.contains(title)
                 && s.lines()
                     .last()
-                    .is_some_and(|footer| footer.contains("GLM-5.3"))
+                    .is_some_and(|footer| footer.contains(GLM_5_3_ACCOUNT))
         })
         .await;
         // 再打开：✔ 只在团队 B（同一 provider 与模型的团队 A 不算当前）。
@@ -158,9 +159,10 @@ async fn team_plans_follow_the_interface_language() {
     );
 }
 
-/// 渲染快照：列表区域逐行比较。
+/// 渲染快照：列表区域逐行比较。快照里的 `<model>` 是账号 provider 的模型 ID（同样 7 个字符，对齐不变）。
 fn snapshot(lines: &[String], expected: &str) {
     let got = lines.join("\n");
+    let expected = expected.replace("<model>", GLM_5_3_ACCOUNT);
     assert_eq!(got, expected.trim_matches('\n'), "\n{got}");
 }
 
@@ -169,9 +171,9 @@ const EN_FIRST: &str = "
   Applies to this session and new sessions started here.
   ⌕ Search…
 
-    GLM-5.3      BigModel Individual Coding Plan
-    GLM-5.3      BigModel Team Plan · 团队 A
-    GLM-5.3      BigModel Team Plan · 团队 B
+    <model>      BigModel Individual Coding Plan
+    <model>      BigModel Team Plan · 团队 A
+    <model>      BigModel Team Plan · 团队 B
   › scripted ✔   Fixture
 ";
 
@@ -180,9 +182,9 @@ const EN_CHOSEN: &str = "
   Applies to this session and new sessions started here.
   ⌕ Search…
 
-    GLM-5.3     BigModel Individual Coding Plan
-    GLM-5.3     BigModel Team Plan · 团队 A
-  › GLM-5.3 ✔   BigModel Team Plan · 团队 B
+    <model>     BigModel Individual Coding Plan
+    <model>     BigModel Team Plan · 团队 A
+  › <model> ✔   BigModel Team Plan · 团队 B
     scripted    Fixture
 ";
 
@@ -191,9 +193,9 @@ const ZH_FIRST: &str = "
   用于本会话与之后在这里开始的新会话。
   ⌕ 搜索…
 
-    GLM-5.3      BigModel Individual Coding Plan
-    GLM-5.3      BigModel 团队套餐 · 团队 A
-    GLM-5.3      BigModel 团队套餐 · 团队 B
+    <model>      BigModel Individual Coding Plan
+    <model>      BigModel 团队套餐 · 团队 A
+    <model>      BigModel 团队套餐 · 团队 B
   › scripted ✔   Fixture
 ";
 
@@ -202,8 +204,8 @@ const ZH_CHOSEN: &str = "
   用于本会话与之后在这里开始的新会话。
   ⌕ 搜索…
 
-    GLM-5.3     BigModel Individual Coding Plan
-    GLM-5.3     BigModel 团队套餐 · 团队 A
-  › GLM-5.3 ✔   BigModel 团队套餐 · 团队 B
+    <model>     BigModel Individual Coding Plan
+    <model>     BigModel 团队套餐 · 团队 A
+  › <model> ✔   BigModel 团队套餐 · 团队 B
     scripted    Fixture
 ";

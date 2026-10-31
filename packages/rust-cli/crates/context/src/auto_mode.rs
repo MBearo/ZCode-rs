@@ -4,7 +4,7 @@
 //! 分三步：决定产生、找上一条、渲染。本工程只做 bypass 类别（bypassPermissions 与 guarded，同跨会话的
 //! [`ModeClass`]）；auto 下的宣布与离开 auto 的 `auto_mode_exit` 没有做（shell-permissions.md §7）。
 //!
-//! 两个模型条件按常量处理：本工程总用 lean 提示词与 opus 5.5 的写法，bashFirst 的开关为真，steer 是
+//! 两个模型条件按常量处理：本工程总用 lean 提示词与有卡片的模型那一版的写法，bashFirst 的开关为真，steer 是
 //! `relaxed`。
 
 use rust_cli_kernel_api::message::Message;

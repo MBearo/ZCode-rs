@@ -5,10 +5,11 @@
 //! `"type":"overloaded_error"`——SDK 在流式请求里有时拿不到 529 状态码）；其余交给通用规则（配额、拦截、太大、状态码）。
 //! 能否重试不在这里定（`dispose`，修复线 F113）。
 
+use rust_cli_base::proto::http;
 use rust_cli_kernel_api::model::ModelError;
 use serde_json::Value;
 
-use super::{Class, Shape, Verdict, by_status, message_text, vocab};
+use super::{Class, OVERLOADED_STATUS, Shape, Verdict, by_status, message_text, vocab};
 
 /// 非 2xx 响应。
 pub(super) fn response(
@@ -57,7 +58,7 @@ impl ApiError {
 }
 
 fn is_overloaded(status: u16, api: &ApiError, raw: &str) -> bool {
-    status == 529
+    status == OVERLOADED_STATUS
         || api
             .codes()
             .iter()
@@ -72,7 +73,7 @@ fn classify(status: u16, api: &ApiError, raw: &str, retry_after_ms: Option<u64>)
     // `InvalidRequest`、不触发反应式压缩。共用词表只在 4xx 上看（5xx 的正文不是对这次请求的判定）；`prompt is too long`
     // 照旧不看状态码。
     let too_long = raw.to_lowercase().contains("prompt is too long")
-        || ((400..500).contains(&status) && vocab::context_exceeded(raw));
+        || (http::is_client_error(status) && vocab::context_exceeded(raw));
     if too_long {
         return Verdict::new(
             Class::ContextOverflow,
@@ -98,22 +99,22 @@ fn status_of(api: &ApiError) -> u16 {
             .any(|code| table.contains(code))
     };
     if has(&vocab::OVERLOADED_CODES) {
-        return 529;
+        return OVERLOADED_STATUS;
     }
     if has(&vocab::QUOTA_CODES) {
-        return 402;
+        return http::PAYMENT_REQUIRED;
     }
     if has(&vocab::RATE_LIMIT_CODES) {
-        return 429;
+        return http::TOO_MANY_REQUESTS;
     }
     match api.kind.as_deref() {
-        Some("invalid_request_error") => 400,
-        Some("authentication_error") => 401,
-        Some("permission_error") => 403,
-        Some("not_found_error") => 404,
-        Some("request_too_large") => 413,
-        Some("timeout_error") => 504,
-        _ => 500,
+        Some("invalid_request_error") => http::BAD_REQUEST,
+        Some("authentication_error") => http::UNAUTHORIZED,
+        Some("permission_error") => http::FORBIDDEN,
+        Some("not_found_error") => http::NOT_FOUND,
+        Some("request_too_large") => http::PAYLOAD_TOO_LARGE,
+        Some("timeout_error") => http::GATEWAY_TIMEOUT,
+        _ => http::INTERNAL_SERVER_ERROR,
     }
 }
 

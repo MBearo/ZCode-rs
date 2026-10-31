@@ -13,6 +13,7 @@ use rust_cli_kernel_api::env_shell::{
     SandboxPolicy, ShellKind,
 };
 use rust_cli_kernel_api::ids::{OperationId, ShellTaskId};
+use rust_cli_kernel_api::machine::CommandEvents;
 use rust_cli_kernel_api::monitor::{MonitorArmed, MonitorSource};
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
@@ -23,6 +24,9 @@ use tokio::sync::mpsc;
 
 use crate::common::{Definition, definition, env_failure, text};
 use crate::monitor_input::{self, Input};
+
+/// Monitor 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
+const MAX_RESULT_CHARS: usize = 10_000;
 
 pub const NAME: &str = "Monitor";
 
@@ -35,7 +39,10 @@ const SEARCH_HINT: &str = "watch, monitor, or keep an eye on a process/log/comma
 /// 期限的两处写法：描述里的 “at most N minutes” 与 schema 里的 “Deadlines above Nms are capped to Nms.”。
 fn cap_texts(cap_ms: u64) -> (String, String) {
     (
-        format!("at most {} minutes", cap_ms / 60_000),
+        format!(
+            "at most {} minutes",
+            cap_ms / rust_cli_base::units::MS_PER_MINUTE
+        ),
         format!("Deadlines above {cap_ms}ms are capped to {cap_ms}ms."),
     )
 }
@@ -104,12 +111,8 @@ impl MonitorTool {
     }
 }
 
-/// 等到 `Started`，拿到输出文件。
-async fn started(context: &ToolUseContext) -> Result<String, ToolError> {
-    let mut events = context
-        .machine
-        .commands()
-        .watch_command(context.operation.operation.clone(), 0);
+/// 等到 `Started`，拿到输出文件；同一条流之后交给 monitor（工作线 F119）。
+async fn started(events: &mut CommandEvents) -> Result<String, ToolError> {
     while let Some(event) = events.next().await {
         if let CommandEvent::Started { output } = event.map_err(env_failure)? {
             return Ok(output.as_str().to_owned());
@@ -147,7 +150,7 @@ impl Tool for MonitorTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(10_000)
+        Some(MAX_RESULT_CHARS)
     }
 
     async fn validate_input(&self, input: &Value, _context: &ToolUseContext) -> Validation {
@@ -240,13 +243,13 @@ impl Tool for MonitorTool {
             socket: socket.clone(),
             env: Default::default(),
         };
-        context
+        let mut events = context
             .machine
             .commands()
             .start_command(&context.workspace, context.operation.clone(), start)
             .await
             .map_err(env_failure)?;
-        let output = started(&context).await?;
+        let output = started(&mut events).await?;
         let armed = MonitorArmed {
             // 在远端机器上起的命令：输出流与停止都发给那台机器（R3，remote-exec.md §20.7.2）。
             machine: (!context.machine.is_local()).then(|| context.machine.name().to_owned()),
@@ -264,7 +267,7 @@ impl Tool for MonitorTool {
         };
         if let Err(error) = context
             .interactions
-            .arm_monitor(&context.session, armed)
+            .arm_monitor(&context.session, armed, events)
             .await
         {
             // 没有会话 owner 接手（不该发生：子代理没有 Monitor）：停掉已经起的命令。

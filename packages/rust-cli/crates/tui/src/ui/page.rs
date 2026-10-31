@@ -39,9 +39,12 @@ pub fn frame(
     );
 }
 
+/// 正文以外的行：标题、空行与提示。
+const CHROME_ROWS: u16 = 3;
+
 /// 正文可见的行数：去掉标题、空行与提示。
 pub fn body_height(height: u16) -> usize {
-    height.saturating_sub(3) as usize
+    height.saturating_sub(CHROME_ROWS) as usize
 }
 
 /// 正文的第一行在屏幕上的行号（点击区域用）。

@@ -66,15 +66,20 @@ impl std::fmt::Display for Key {
     }
 }
 
+/// 盘符 `c:` 的长度。
+const DRIVE_LEN: usize = rust_cli_base::path::DRIVE_PREFIX_LEN;
+/// UNC 路径去掉 `//` 之后切成的段数：服务器、共享名与其余部分。
+const UNC_PARTS: usize = 3;
+
 /// 根与其余部分：Posix 的 `/`；Windows 的盘符（`c:/`）或 UNC 的 `//server/share`。
 fn split_root(text: &str, style: PathStyle) -> (String, &str) {
     if style == PathStyle::Windows {
         let bytes = text.as_bytes();
-        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-            return (format!("{}/", &text[..2]), &text[2..]);
+        if bytes.len() >= DRIVE_LEN && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            return (format!("{}/", &text[..DRIVE_LEN]), &text[DRIVE_LEN..]);
         }
         if let Some(rest) = text.strip_prefix("//") {
-            let mut parts = rest.splitn(3, '/');
+            let mut parts = rest.splitn(UNC_PARTS, '/');
             let server = parts.next().unwrap_or_default();
             let share = parts.next().unwrap_or_default();
             return (

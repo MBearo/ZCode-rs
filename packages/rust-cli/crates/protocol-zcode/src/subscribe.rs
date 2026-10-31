@@ -17,11 +17,14 @@ use crate::server::{Server, kernel_error};
 use crate::wire::Purpose;
 use rust_cli_protocol_core::sessions::Bridged;
 
+/// 会话列表的快照最多从存储里取这么多个会话。
+const STORED_SESSIONS_LIMIT: usize = 200;
+
 /// 存储里一个工作区的会话 → 会话列表的行。
 async fn stored_rows(server: &Server, workspace: &str) -> Vec<Value> {
     let filter = SessionFilter {
         workspace: server.workspace(workspace),
-        limit: 200,
+        limit: STORED_SESSIONS_LIMIT,
     };
     match server.kernel.workspace_sessions(filter).await {
         Ok(sessions) => sessions

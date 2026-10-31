@@ -57,7 +57,7 @@ fn request(source: QuerySource, tools: &[&str]) -> ContextRequest {
         tool_names: tools.iter().map(|name| (*name).to_owned()).collect(),
         selection: ModelSelection {
             provider: "p".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },

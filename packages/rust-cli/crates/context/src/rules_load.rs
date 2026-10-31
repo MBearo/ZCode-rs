@@ -4,6 +4,7 @@
 use rust_cli_base::glob::Globs;
 use rust_cli_base::names::{DOT_DIR, LOCAL_RULES_FILE, RULES_FILE, managed_dir};
 use rust_cli_kernel_api::env_files::FileKind;
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use rust_cli_kernel_api::env_git::{gitdir_pointer, marks_git_root};
 use rust_cli_memory::entrypoint::ENTRYPOINT;
 
@@ -34,7 +35,7 @@ impl Scope<'_> {
         let mut dir = Some(self.cwd.clone());
         let (root, kind) = loop {
             let current = dir?;
-            let dot_git = style.join(&current, &[".git"]);
+            let dot_git = style.join(&current, &[GIT_DIR]);
             match self.stat_kind(&dot_git).await {
                 Some((kind, _)) if marks_git_root(kind) => break (current, kind),
                 _ => dir = style.parent(&current),
@@ -43,7 +44,7 @@ impl Scope<'_> {
         if kind != FileKind::File {
             return None;
         }
-        let dot_git = style.join(&root, &[".git"]);
+        let dot_git = style.join(&root, &[GIT_DIR]);
         let pointer = self.read(&dot_git).await?;
         // 缺陷修复（F58）：以前这里自己去掉 `gitdir:`，指针是 UNC（`\\…`、`//…`）时照读、可能认成 worktree；
         // 跨根的不安全路径应拒绝，cli 与 runtime 也拒绝。改用 kernel-api 的 `gitdir_pointer`（唯一定义）。
@@ -59,10 +60,10 @@ impl Scope<'_> {
         if style.key(&style.resolve(&gitdir, back.trim(), None)) != style.key(&dot_git) {
             return None;
         }
-        let main = if style.file_name(&common) == ".git" {
+        let main = if style.file_name(&common) == GIT_DIR {
             style.parent(&common)?
         } else if self
-            .stat_kind(&style.join(&common, &[".git"]))
+            .stat_kind(&style.join(&common, &[GIT_DIR]))
             .await
             .is_some()
         {

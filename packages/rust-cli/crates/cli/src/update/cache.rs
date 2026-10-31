@@ -4,12 +4,18 @@
 use std::io;
 use std::path::Path;
 
+use rust_cli_base::civil::{self, iso};
 use rust_cli_base::js::iso_timestamp;
+use rust_cli_base::units;
 use rust_cli_fs::{FileMode, ParentDir, TempName, WriteOptions};
 use serde_json::{Value, json};
 
-/// 缓存过了多久要刷新（Codex：20 小时）。
-pub(crate) const REFRESH_AFTER_MS: i64 = 20 * 60 * 60 * 1000;
+/// 缓存过了多久要刷新（20 小时，update.md §4）。
+pub(crate) const REFRESH_AFTER_MS: i64 = 20 * units::MS_PER_HOUR as i64;
+/// 秒的小数只取到毫秒：最多三位。
+const MILLIS_DIGITS: usize = 3;
+/// 时区偏移 `±HH:MM` 的十进制两位数。
+const DECIMAL: i64 = units::DECIMAL_RADIX as i64;
 
 /// 文件的内容（字段同 Codex `VersionInfo`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,33 +118,48 @@ pub(crate) fn parse_rfc3339(text: &str) -> Option<i64> {
             .all(|b| b.is_ascii_digit())
             .then(|| part.parse().ok())?
     };
-    if bytes.len() < 20
-        || bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || !matches!(bytes[10], b'T' | b't')
-        || bytes[13] != b':'
-        || bytes[16] != b':'
+    // 定长部分的布局、月长与公历换算只定义在 base 的 `civil`。
+    let [first_dash, second_dash] = iso::DATE_DASHES;
+    let [first_colon, second_colon] = iso::TIME_COLONS;
+    if bytes.len() <= iso::DATETIME_LEN
+        || bytes[first_dash] != b'-'
+        || bytes[second_dash] != b'-'
+        || !matches!(bytes[iso::TIME_MARKER], b'T' | b't')
+        || bytes[first_colon] != b':'
+        || bytes[second_colon] != b':'
     {
         return None;
     }
-    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
-    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
-    if !(1..=12).contains(&month)
-        || !(1..=days_in_month(year, month)).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 60
+    let (year, month, day) = (number(iso::YEAR)?, number(iso::MONTH)?, number(iso::DAY)?);
+    let (hour, minute, second) = (
+        number(iso::HOUR)?,
+        number(iso::MINUTE)?,
+        number(iso::SECOND)?,
+    );
+    let (hours_per_day, minutes_per_hour, seconds_per_minute) = (
+        units::HOURS_PER_DAY as i64,
+        units::MINUTES_PER_HOUR as i64,
+        units::SECONDS_PER_MINUTE as i64,
+    );
+    let month = u32::try_from(month)
+        .ok()
+        .filter(|month| (civil::JANUARY..=civil::DECEMBER).contains(month))?;
+    // 秒可以是 60（闰秒）。
+    if !(1..=i64::from(civil::days_in_month(year, month))).contains(&day)
+        || hour >= hours_per_day
+        || minute >= minutes_per_hour
+        || second > seconds_per_minute
     {
         return None;
     }
-    let mut rest = &text[19..];
+    let mut rest = &text[iso::DATETIME_LEN..];
     let mut millis = 0;
     if let Some(fraction) = rest.strip_prefix('.') {
         let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
         if digits == 0 {
             return None;
         }
-        let padded = format!("{:0<3}", &fraction[..digits.min(3)]);
+        let padded = format!("{:0<3}", &fraction[..digits.min(MILLIS_DIGITS)]);
         millis = padded.parse::<i64>().ok()?;
         rest = &fraction[digits..];
     }
@@ -146,39 +167,23 @@ pub(crate) fn parse_rfc3339(text: &str) -> Option<i64> {
         [b'Z' | b'z'] => 0,
         [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] => {
             let digit = |b: &u8| b.is_ascii_digit().then(|| i64::from(b - b'0'));
-            let hours = digit(h1)? * 10 + digit(h2)?;
-            let minutes = digit(m1)? * 10 + digit(m2)?;
-            if hours > 23 || minutes > 59 {
+            let hours = digit(h1)? * DECIMAL + digit(h2)?;
+            let minutes = digit(m1)? * DECIMAL + digit(m2)?;
+            if hours >= hours_per_day || minutes >= minutes_per_hour {
                 return None;
             }
-            let total = hours * 60 + minutes;
+            let total = hours * minutes_per_hour + minutes;
             if *sign == b'-' { -total } else { total }
         }
         _ => return None,
     };
-    let days = days_from_civil(year, month, day);
-    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second - offset_minutes * 60;
-    Some(seconds * 1000 + millis)
-}
-
-fn days_in_month(year: i64, month: i64) -> i64 {
-    match month {
-        2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    }
-}
-
-/// 公历日期 → 自 1970-01-01 起的天数（Howard Hinnant 的 days_from_civil）。
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let yoe = year - era * 400;
-    let mp = (month + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
+    let days = civil::days_from_civil(year, month, 1) + day - 1;
+    let seconds = days * units::SECONDS_PER_DAY as i64
+        + hour * units::SECONDS_PER_HOUR as i64
+        + minute * seconds_per_minute
+        + second
+        - offset_minutes * seconds_per_minute;
+    Some(seconds * units::MS_PER_SECOND as i64 + millis)
 }
 
 #[cfg(test)]

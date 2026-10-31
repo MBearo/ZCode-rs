@@ -3,6 +3,7 @@
 //! 最近一项），详细形式是每个成员的详细形式。
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use rust_cli_base::units;
 
 use super::words::{self, Segment};
 use super::{Cell, Ctx, DETAIL, Dot, INDENT, dim, dot, messages, relative, tools};
@@ -132,7 +133,7 @@ fn segments(cell: &Cell<'_>, now_ms: u64) -> Vec<Segment> {
     let mut out = Vec::new();
     if let Some(ms) = thought {
         out.push(Segment::Thought(crate::ui::i18n::elapsed_plain(
-            ms.max(1000).div_ceil(1000),
+            ms.max(units::MS_PER_SECOND).div_ceil(units::MS_PER_SECOND),
         )));
     }
     if searches > 0 {

@@ -13,6 +13,9 @@ use tokio::sync::mpsc;
 use unicode_width::UnicodeWidthStr;
 
 use crate::cron_expr;
+
+/// 列表里每个任务的 prompt 最多显示这么宽。
+const MAX_PROMPT_WIDTH: usize = 80;
 use crate::cron_tools::{LIST, Shared, output, owner, shared_tool_methods};
 
 pub struct CronListTool(pub(crate) Shared);
@@ -91,7 +94,7 @@ impl Tool for CronListTool {
                     ""
                 };
                 let human = cron_expr::human(&row.cron);
-                let prompt = truncate_display(&row.prompt, 80);
+                let prompt = truncate_display(&row.prompt, MAX_PROMPT_WIDTH);
                 format!("{} \u{2014} {human}{kind}{only}: {prompt}", row.id)
             })
             .collect();

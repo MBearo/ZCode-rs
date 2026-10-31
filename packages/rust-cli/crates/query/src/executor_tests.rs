@@ -108,8 +108,6 @@ async fn safe_tools_run_together_and_unsafe_tools_run_alone_in_order() {
     // 并发安全的调用按完成先后：b 先于 a；Write 最后。
     let order: Vec<_> = results.iter().map(|(id, _, _)| id.as_str()).collect();
     assert_eq!(order, vec!["t2", "t1", "t3"]);
-    // 三次执行都先登记了意图。
-    assert_eq!(sink.intents().len(), 3);
 }
 
 /// Bash 出错不取消排在后面的调用（执行器的中止原因只有中断、权限停止与结束对话，没有 sibling error：

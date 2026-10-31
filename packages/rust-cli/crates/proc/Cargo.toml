@@ -15,6 +15,8 @@ doctest = false
 
 [dependencies]
 anyhow.workspace = true
+# 文件权限位、`/proc/<pid>/stat` 的字段与单位（docs/specs/rust-cli/constants.md §2，F122）。
+rust-cli-base.workspace = true
 # 子进程与私有临时目录、进程账本（README §4 的 tokio 特性表：process 只在这里）。
 tokio = { workspace = true, features = ["fs", "process"] }
 tracing.workspace = true

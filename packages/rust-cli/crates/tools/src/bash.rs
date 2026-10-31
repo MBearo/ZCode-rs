@@ -8,10 +8,12 @@
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use rust_cli_base::proto::exit;
 use rust_cli_kernel_api::env::{CommandEvent, EnvPath, Outcome, StartCommand};
 use rust_cli_kernel_api::env_shell::{
     self, BackgroundCommand, CwdScope, SandboxPolicy, ShellKind, TimeoutBackground,
 };
+use rust_cli_kernel_api::machine::CommandEvents;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
@@ -36,6 +38,10 @@ const WITH_SEARCH_TOOLS: &str = "`find`, `grep`, `cat`, `head`, `tail`, `sed`, `
 // `deadline_sentence` / `deadline_parameter`），后台命令不设超时。
 /// “不要用 cat”一行的开头（只在没有去掉这一行时出现；两种点名写法开头相同）。
 const AVOID_LINE: &str = "\n- IMPORTANT: Avoid using this tool to run ";
+/// 进度里带上这一块输出的最后这么多个字节。
+const PROGRESS_TAIL_BYTES: usize = 2_000;
+/// 校验错误码：命令是被拦下的 sleep 一类。
+const SLEEP_BLOCKED_CODE: i32 = 10;
 
 /// 去掉以 `start`（含前面的换行）开头的那一行；没有这一行时原样返回。
 fn without_line(text: &str, start: &str) -> String {
@@ -230,15 +236,12 @@ struct Collected {
 
 async fn collect(
     context: &ToolUseContext,
+    mut events: CommandEvents,
     progress: &mpsc::Sender<ToolProgress>,
     task: &str,
     timeout_ms: u64,
 ) -> Result<Collected, ToolError> {
     let operation = context.operation.operation.clone();
-    let mut events = context
-        .machine
-        .commands()
-        .watch_command(operation.clone(), 0);
     let mut output_file = String::new();
     let mut head = Vec::new();
     let mut total: u64 = 0;
@@ -263,8 +266,10 @@ async fn collect(
                 total += data.len() as u64;
                 let room = INLINE_LIMIT.saturating_sub(head.len());
                 head.extend_from_slice(&data[..data.len().min(room)]);
-                let tail =
-                    String::from_utf8_lossy(&data[data.len().saturating_sub(2_000)..]).into_owned();
+                let tail = String::from_utf8_lossy(
+                    &data[data.len().saturating_sub(PROGRESS_TAIL_BYTES)..],
+                )
+                .into_owned();
                 let _ = progress.try_send(ToolProgress {
                     data: json!({
                         "type": "bash_progress",
@@ -301,11 +306,7 @@ async fn collect(
 }
 
 /// 后台命令：只等 `Started` 拿到输出文件。
-async fn started(context: &ToolUseContext) -> Result<String, ToolError> {
-    let mut events = context
-        .machine
-        .commands()
-        .watch_command(context.operation.operation.clone(), 0);
+async fn started(mut events: CommandEvents) -> Result<String, ToolError> {
     while let Some(event) = events.next().await {
         if let CommandEvent::Started { output } = event.map_err(env_failure)? {
             return Ok(output.as_str().to_owned());
@@ -371,7 +372,7 @@ impl Tool for BashTool {
         match crate::bash_sleep::blocked(command) {
             Some(what) => Validation::Invalid {
                 message: rust_cli_prompts::monitor::bash_blocked(&what),
-                error_code: Some(10),
+                error_code: Some(SLEEP_BLOCKED_CODE),
             },
             None => Validation::Ok,
         }
@@ -491,14 +492,14 @@ impl BashTool {
             socket: None,
             env: Default::default(),
         };
-        context
+        let events = context
             .machine
             .commands()
             .start_command(workspace, context.operation.clone(), start)
             .await
             .map_err(env_failure)?;
         if background {
-            let file = started(&context).await?;
+            let file = started(events).await?;
             let mut text = output::backgrounded(&task, &file);
             if changes_directory(&input.command) {
                 text.push('\n');
@@ -506,7 +507,7 @@ impl BashTool {
             }
             return Ok(Ran::Text(file_on_machine(text, &context)));
         }
-        let collected = collect(&context, &progress, task.as_str(), timeout_ms).await?;
+        let collected = collect(&context, events, &progress, task.as_str(), timeout_ms).await?;
         if collected.finished == CommandEvent::Backgrounded {
             return Ok(Ran::Text(file_on_machine(
                 output::moved_to_background(timeout_ms, &task, &collected.output_file, deadline_ms),
@@ -545,7 +546,7 @@ impl BashTool {
         // 说明放在输出前、退出码 137 按错误报告（shell-permissions.md §1.3、§2.2）。
         if let Some(note) = output_limit {
             return Ok(Ran::Failed {
-                code: exit_code.unwrap_or(137),
+                code: exit_code.unwrap_or(exit::signal_exit(exit::SIGKILL)),
                 output: output::killed_for_size(&note, &head),
             });
         }

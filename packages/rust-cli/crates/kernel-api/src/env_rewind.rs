@@ -1,7 +1,7 @@
 //! 代码回退的 token 事务（docs/specs/rust-cli/session-lifecycle.md §5.2）。
 //!
 //! 计划由内核从 checkpoint 算出；执行环境只按文件核对内容 hash 并写入 / 删除。token 是
-//! prepare 时的 `OperationContext.operation`：同一个 token 的 apply 重放返回第一次的结果。
+//! prepare 时的 `OperationContext.operation`，apply 用过一次就作废（工作线 F119：不按 token 重放）。
 //! 执行侧不跨调用持锁：prepare 与 apply 之间文件可能变化，apply 写每个文件前再核对一次。
 
 use serde::{Deserialize, Serialize};

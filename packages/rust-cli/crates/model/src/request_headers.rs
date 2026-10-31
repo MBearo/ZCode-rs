@@ -55,10 +55,13 @@ pub struct SourceFacts {
 
 const UNKNOWN: &str = "unknown";
 
+/// 可打印的 ASCII（空格到 `~`）。
+const PRINTABLE_ASCII: std::ops::RangeInclusive<u8> = b' '..=b'~';
+
 /// Node `normalizePrintableHeaderValue`：去掉首尾空白后非空、只含 0x20–0x7e 的字符时是它，否则 None。
 pub(crate) fn printable(value: &str) -> Option<&str> {
     let trimmed = value.trim();
-    (!trimmed.is_empty() && trimmed.bytes().all(|byte| (0x20..=0x7e).contains(&byte)))
+    (!trimmed.is_empty() && trimmed.bytes().all(|byte| PRINTABLE_ASCII.contains(&byte)))
         .then_some(trimmed)
 }
 

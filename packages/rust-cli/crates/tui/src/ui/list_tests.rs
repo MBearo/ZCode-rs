@@ -1,5 +1,6 @@
 // 复制自 apps/zcode-host/crates/tui/src/ui/list_tests.rs（feat/rs 79b6691c55）。
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use rust_cli_base::models::{GLM_4_6_ACCOUNT, GLM_4_ACCOUNT, GLM_5_ACCOUNT};
 
 use super::*;
 use crate::ui::text::plain;
@@ -125,7 +126,10 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
     let mut list = ListView::new(
         Purpose::Model,
         "Select model".into(),
-        vec![model("GLM-5", true, 2), model("GLM-4", false, 0)],
+        vec![
+            model(GLM_5_ACCOUNT, true, 2),
+            model(GLM_4_ACCOUNT, false, 0),
+        ],
         "none".into(),
     );
     let lines = text(&list, 60);
@@ -142,11 +146,11 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
         "{lines:?}"
     );
     assert!(
-        matches!(list.on_key(key(KeyCode::Enter), Typing::default()), Outcome::Chosen(v) if v == format!("zai{SEP}GLM-5{SEP}medium"))
+        matches!(list.on_key(key(KeyCode::Enter), Typing::default()), Outcome::Chosen(v) if v == format!("zai{SEP}{GLM_5_ACCOUNT}{SEP}medium"))
     );
     // 数字选中别的模型，用它自己的档位。
     assert!(
-        matches!(list.on_key(key(KeyCode::Char('2')), Typing::default()), Outcome::Chosen(v) if v == format!("zai{SEP}GLM-4{SEP}low"))
+        matches!(list.on_key(key(KeyCode::Char('2')), Typing::default()), Outcome::Chosen(v) if v == format!("zai{SEP}{GLM_4_ACCOUNT}{SEP}low"))
     );
 }
 
@@ -218,8 +222,8 @@ fn models_are_searchable_and_digits_go_into_the_search() {
         Purpose::Model,
         "Select model".into(),
         vec![
-            model("GLM-5", "Z.ai", false),
-            model("GLM-4.6", "Z.ai", true),
+            model(GLM_5_ACCOUNT, "Z.ai", false),
+            model(GLM_4_6_ACCOUNT, "Z.ai", true),
             model("Kimi K2", "Moonshot", false),
         ],
         "none".into(),
@@ -231,7 +235,9 @@ fn models_are_searchable_and_digits_go_into_the_search() {
     let lines = text(&list, 60);
     assert_eq!(lines[3], "  ⌕ Search…");
     assert!(
-        lines.iter().any(|l| l.starts_with("  › GLM-4.6 ✔")),
+        lines
+            .iter()
+            .any(|l| l.starts_with(&format!("  › {GLM_4_6_ACCOUNT} ✔"))),
         "{lines:?}"
     );
     // 数字输入到搜索里，不直接选中。
@@ -241,7 +247,7 @@ fn models_are_searchable_and_digits_go_into_the_search() {
     ));
     assert_eq!(list.visible().len(), 1);
     assert!(
-        matches!(list.on_key(key(KeyCode::Enter), Typing::default()), Outcome::Chosen(v) if v == format!("p{SEP}GLM-4.6{SEP}high"))
+        matches!(list.on_key(key(KeyCode::Enter), Typing::default()), Outcome::Chosen(v) if v == format!("p{SEP}{GLM_4_6_ACCOUNT}{SEP}high"))
     );
     // 也按 provider 过滤，不区分大小写。
     list.on_key(key(KeyCode::Backspace), Typing::default());

@@ -102,7 +102,7 @@ impl Commands for MonitorEnv {
         _w: &WorkspaceRef,
         _c: OperationContext,
         _r: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -118,10 +118,6 @@ impl Commands for MonitorEnv {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 
@@ -182,6 +178,8 @@ impl Background for MonitorEnv {
         Ok(Some(BackgroundInfo {
             command: "watch".to_owned(),
             status,
+            kind: Default::default(),
+            description: String::new(),
         }))
     }
 
@@ -217,7 +215,11 @@ impl rust_cli_kernel_api::clock::Clock for Ticking {
 }
 
 /// 交出 monitor 的工具（替 Monitor 工具调用 `arm_monitor`）。
-struct ArmTool;
+/// `remote`：`machine` 有值时命令在那台机器上（产品里 Monitor 工具在命令所在的机器上起命令，交出那台给的流）。
+#[derive(Default)]
+struct ArmTool {
+    remote: Option<Arc<MonitorEnv>>,
+}
 
 #[async_trait]
 impl Tool for ArmTool {
@@ -250,9 +252,17 @@ impl Tool for ArmTool {
             },
             output: EnvPath::new("/t/b1.output"),
         };
+        // 测试替身的 watch_command 给脚本里的事件；产品里是 start_command 返回的那条流（工作线 F119）。
+        let events = match (&armed.machine, &self.remote) {
+            (Some(_), Some(remote)) => remote.watch_command(armed.operation.clone(), 0),
+            _ => context
+                .machine
+                .commands()
+                .watch_command(armed.operation.clone(), 0),
+        };
         context
             .interactions
-            .arm_monitor(&context.session, armed)
+            .arm_monitor(&context.session, armed, events)
             .await
             .map_err(|error| ToolError::Failed {
                 message: error.to_string(),
@@ -314,7 +324,7 @@ async fn session_with(
         scope,
         env,
         model,
-        vec![Arc::new(ArmTool)],
+        vec![Arc::new(ArmTool::default())],
         Vec::new(),
         Arc::new(Ticking(tokio::time::Instant::now())),
     )
@@ -527,7 +537,9 @@ async fn a_monitor_on_a_remote_machine_reads_and_acks_there() {
         &scope,
         (local.clone(), registry),
         model.clone(),
-        vec![Arc::new(ArmTool)],
+        vec![Arc::new(ArmTool {
+            remote: Some(remote.clone()),
+        })],
         Vec::new(),
         Arc::new(Ticking(tokio::time::Instant::now())),
     )

@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { binaryPath } from "./binary.mjs";
+import { GLM_5_3_ACCOUNT } from "./fixture/model.mjs";
 import {
   ensureTypeScript,
   importNode,
@@ -114,7 +115,7 @@ try {
   personal.dispose();
   check(
     "Node reads the default selection",
-    selection?.providerId === ZAI && selection?.modelId === "GLM-5.3",
+    selection?.providerId === ZAI && selection?.modelId === GLM_5_3_ACCOUNT,
     JSON.stringify(selection),
   );
 

@@ -363,6 +363,10 @@ impl Actor {
             failure: None,
             prompt: Some(prompt),
             command: Some(command),
+            timing: crate::duration::TurnTiming::start(
+                self.deps.clock.now_ms(),
+                !self.pending.is_empty(),
+            ),
         });
     }
 

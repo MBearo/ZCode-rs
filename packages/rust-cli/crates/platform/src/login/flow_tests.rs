@@ -1,5 +1,6 @@
 //! 登录与退出（platform.md §5.6），对本地假服务；个人配置的写入与 Node 生成的夹具逐字节相同。
 
+use rust_cli_base::models;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -82,7 +83,13 @@ async fn zai_login_polls_exchanges_and_writes_both_files() {
         "https://chat.example.com/oauth?flow=1"
     );
     let outcome = login.complete().await.unwrap();
-    assert_eq!(outcome.model, "account:zai-individual-coding-plan/GLM-5.3");
+    assert_eq!(
+        outcome.model,
+        format!(
+            "account:zai-individual-coding-plan/{}",
+            models::GLM_5_3_ACCOUNT
+        )
+    );
     assert_eq!(outcome.user_label(), Some("Dev"));
     assert_eq!(
         outcome.credentials.as_path(),
@@ -179,7 +186,10 @@ async fn bigmodel_login_writes_the_app_profile() {
         .unwrap();
     assert_eq!(
         outcome.model,
-        "account:bigmodel-individual-coding-plan/GLM-5.3"
+        format!(
+            "account:bigmodel-individual-coding-plan/{}",
+            models::GLM_5_3_ACCOUNT
+        )
     );
     let credentials = harness.credentials().await;
     // 工作线 F50：照 App 的轮询登录，profile id 是去空白的 `user_id`，rawProfile 是原始用户对象加 App 的版本号；
@@ -394,7 +404,13 @@ async fn api_keys_and_logout_follow_node() {
         .configure_api_key(Family::Zai, &RedactedString::new(" sk-manual "))
         .await
         .unwrap();
-    assert_eq!(outcome.model, "account:zai-individual-coding-plan/GLM-5.3");
+    assert_eq!(
+        outcome.model,
+        format!(
+            "account:zai-individual-coding-plan/{}",
+            models::GLM_5_3_ACCOUNT
+        )
+    );
     let credentials = harness.credentials().await;
     // Node：key- + sha256("sk-manual") 的前 24 个 hex。
     let identity = "key-1e5d18ec8e47b2df74173352";
@@ -658,7 +674,13 @@ async fn an_oversized_poll_reply_is_rejected_and_retried() {
     let harness = Harness::new(&server.url()).await;
     let login = harness.platform.begin_login(Family::Zai).await.unwrap();
     let outcome = login.complete().await.unwrap();
-    assert_eq!(outcome.model, "account:zai-individual-coding-plan/GLM-5.3");
+    assert_eq!(
+        outcome.model,
+        format!(
+            "account:zai-individual-coding-plan/{}",
+            models::GLM_5_3_ACCOUNT
+        )
+    );
     let polls = server
         .requests()
         .iter()

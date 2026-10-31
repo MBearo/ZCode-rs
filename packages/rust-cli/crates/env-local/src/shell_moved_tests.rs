@@ -5,7 +5,7 @@
 use futures_util::StreamExt;
 use rust_cli_kernel_api::env::{BackgroundReason, CommandEvent};
 use rust_cli_kernel_api::env_shell::{BackgroundCommand, CwdScope, TimeoutBackground};
-use rust_cli_kernel_api::ids::{OperationId, SessionId, ToolUseId};
+use rust_cli_kernel_api::ids::{SessionId, ToolUseId};
 
 use super::tests::{context, fixture, request};
 
@@ -28,9 +28,8 @@ async fn a_requested_move_backgrounds_the_foreground_command_with_its_reason() {
     let task = start.task.clone();
     let mut hook = request("sleep 1", &fixture.root, CwdScope::Pinned);
     hook.timeout_ms = Some(10_000);
-    fixture.shells.start(context("op1"), start).await.unwrap();
-    fixture.shells.start(context("op2"), hook).await.unwrap();
-    let mut events = fixture.shells.watch(&OperationId::new("op1"), 0).unwrap();
+    let mut events = fixture.shells.start(context("op1"), start).await.unwrap();
+    let _hook = fixture.shells.start(context("op2"), hook).await.unwrap();
     // 先等命令开始输出，再要求转。
     loop {
         if let Some(Ok(CommandEvent::Output { .. })) = events.next().await {

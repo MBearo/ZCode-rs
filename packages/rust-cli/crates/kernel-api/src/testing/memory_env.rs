@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext, Outcome,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext,
     ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::env_files::{
@@ -343,7 +343,7 @@ impl Commands for MemoryEnvironment {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         _request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -356,10 +356,6 @@ impl Commands for MemoryEnvironment {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 
@@ -412,10 +408,6 @@ impl Checkpoints for MemoryEnvironment {
         }
         let mut files = lock(&self.files);
         Ok(lock(&self.rewinds).apply(&mut files, token))
-    }
-
-    async fn rewind_status(&self, token: &OperationId) -> Result<RewindStatus, EnvError> {
-        Ok(lock(&self.rewinds).status(token))
     }
 
     async fn rewind_finish(&self, token: &OperationId) -> Result<(), EnvError> {

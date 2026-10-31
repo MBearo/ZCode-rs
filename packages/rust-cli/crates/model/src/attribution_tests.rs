@@ -1,5 +1,6 @@
 //! 每请求头的取值（工作线 F64，model.md §2.4 的第二张表与用途表）。
 
+use rust_cli_base::hosts;
 use rust_cli_kernel_api::ids::{AgentId, RunId, SessionId};
 use rust_cli_kernel_api::model::{ModelRequest, QuerySource, RequestOptions};
 
@@ -68,12 +69,7 @@ fn a_main_turn_has_every_header() {
         ..RequestOptions::default()
     };
     let origin = Origin::of(&request(QuerySource::MainThread, options));
-    let headers = headers(
-        &origin,
-        "https://api.z.ai/api/anthropic",
-        "t",
-        "q".to_owned(),
-    );
+    let headers = headers(&origin, hosts::ZAI_ANTHROPIC, "t", "q".to_owned());
     assert_eq!(
         headers,
         [
@@ -150,9 +146,15 @@ fn invalid_sources_are_dropped_and_opencode_gets_the_session() {
         ..RequestOptions::default()
     };
     let origin = Origin::of(&request(QuerySource::MainThread, options));
-    let headers = headers_of(&origin, "https://opencode.ai/zen/go/v1");
+    let headers = headers_of(&origin, hosts::OPENCODE_GO);
     assert_eq!(headers.last(), Some(&(OPENCODE_SESSION, "s1".to_owned())));
-    assert!(!names(&headers_of(&origin, "https://opencode.ai/zen/v1")).contains(&OPENCODE_SESSION));
+    assert!(
+        !names(&headers_of(
+            &origin,
+            &format!("https://{}/zen/v1", hosts::OPENCODE_DOMAIN)
+        ))
+        .contains(&OPENCODE_SESSION)
+    );
 }
 
 fn golden() -> serde_json::Value {

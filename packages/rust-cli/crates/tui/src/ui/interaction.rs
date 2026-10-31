@@ -19,9 +19,17 @@ pub use super::interaction_view::View;
 
 /// 弹出后忽略按键的时长。
 const GUARD: Duration = Duration::from_millis(150);
+/// 权限询问：Yes、No 两行；有建议规则时中间多一行“不再询问”。
+const YES_NO_ROWS: usize = 2;
+const WITH_SEED_ROWS: usize = YES_NO_ROWS + 1;
+
 /// 权限询问的行数：Yes、No；有建议规则时中间多一行"不再询问"。
 pub(super) fn permission_rows(suggestions: &[PermissionRule]) -> usize {
-    if suggestions.is_empty() { 2 } else { 3 }
+    if suggestions.is_empty() {
+        YES_NO_ROWS
+    } else {
+        WITH_SEED_ROWS
+    }
 }
 /// 计划审批的选项：自动编辑、手动审批、继续计划（输入）。
 /// 计划审批的行数（修复线 F20：批准 / 继续计划；原来是三行，两种批准各换一个模式）。
@@ -156,7 +164,10 @@ impl Interaction {
 
     /// 焦点在可编辑的前缀上（“不再询问”一行，没有在输入意见）。
     pub(super) fn editing_seed(&self, suggestions: &[PermissionRule]) -> bool {
-        !self.typing && self.seed.is_some() && permission_rows(suggestions) == 3 && self.cursor == 1
+        !self.typing
+            && self.seed.is_some()
+            && permission_rows(suggestions) == WITH_SEED_ROWS
+            && self.cursor == 1
     }
 
     /// 粘贴进正在输入的那一行：审批的意见、计划的反馈或提问的 `Other`。

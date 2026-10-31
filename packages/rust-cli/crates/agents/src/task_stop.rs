@@ -53,6 +53,9 @@ struct Stopped<'a> {
     machine: Option<&'a str>,
 }
 
+/// 显示用的命令最多这么多个字符。
+const MAX_SHOWN_CHARS: usize = 160;
+
 /// 显示用的命令：去掉控制字符、空白合成一个空格、首尾去空、超过 160 个字符时截断加 `…`。
 fn shown(text: &str) -> String {
     let clean: String = text
@@ -60,8 +63,8 @@ fn shown(text: &str) -> String {
         .filter(|c| c.is_whitespace() || !c.is_control())
         .collect();
     let joined = clean.split_whitespace().collect::<Vec<_>>().join(" ");
-    if joined.chars().count() > 160 {
-        let head: String = joined.chars().take(160).collect();
+    if joined.chars().count() > MAX_SHOWN_CHARS {
+        let head: String = joined.chars().take(MAX_SHOWN_CHARS).collect();
         format!("{head}\u{2026}")
     } else {
         joined

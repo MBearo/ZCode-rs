@@ -89,8 +89,8 @@ impl PathStyle {
             },
             Self::Windows if sep(0) => (Root::Slash, &path[1..]),
             Self::Windows => match drive_letter(path) {
-                Some(letter) if sep(2) => (Root::Drive(letter), &path[3..]),
-                Some(letter) => (Root::DriveRelative(letter), &path[2..]),
+                Some(letter) if sep(DRIVE_LEN) => (Root::Drive(letter), &path[DRIVE_LEN + 1..]),
+                Some(letter) => (Root::DriveRelative(letter), &path[DRIVE_LEN..]),
                 None => (Root::None, path),
             },
         }
@@ -180,7 +180,8 @@ impl PathStyle {
             return None;
         }
         let bytes = input.as_bytes();
-        let shaped = bytes.len() >= 3
+        // `/c/`：斜杠、盘符、斜杠。
+        let shaped = bytes.len() > DRIVE_LEN
             && bytes[0] == b'/'
             && bytes[1].is_ascii_alphabetic()
             && bytes[2] == b'/';
@@ -262,10 +263,13 @@ impl PathStyle {
     }
 }
 
+/// 盘符前缀 `C:` 的长度。
+const DRIVE_LEN: usize = rust_cli_base::path::DRIVE_PREFIX_LEN;
+
 /// `C:` 开头时的盘符。
 fn drive_letter(path: &str) -> Option<char> {
     let bytes = path.as_bytes();
-    (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+    (bytes.len() >= DRIVE_LEN && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
         .then(|| char::from(bytes[0]))
 }
 
@@ -305,7 +309,7 @@ pub fn git_bash_spelling(path: &str) -> String {
         return path.replace('\\', "/");
     }
     let bytes = path.as_bytes();
-    if bytes.len() >= 3
+    if bytes.len() > DRIVE_LEN
         && bytes[0].is_ascii_alphabetic()
         && bytes[1] == b':'
         && (bytes[2] == b'\\' || bytes[2] == b'/')

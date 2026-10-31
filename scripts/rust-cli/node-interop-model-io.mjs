@@ -14,6 +14,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { GLM_5_3 } from "./fixture/model.mjs";
 import { withHome } from "./node-root.mjs";
 
 const SESSION = "6c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
@@ -105,7 +106,10 @@ export async function checkModelIo({ nodeRoot, base, expectEqual, zcode }) {
       ZCODE_DATA_BASE_DIR: home,
       ZCODE_MODEL_BASE_URL: url,
       ZCODE_API_KEY: "sk-interop-model-io",
-      ZCODE_MODEL: "claude-opus-5-5",
+      // GLM 按 opus 的卡片形状（支持对话中间的 system，工作线 F121）：环境与日期在 system 消息里，缓存断点落在它上面，第一条
+      // user 消息到下一步不变，重发与下一步都是增量（最长公共前缀 ≥ 1，model-io.md §3.3）。没有这个形状的模型只有一条
+      // user 消息、断点在它的最后一块，下一步断点移走、没有公共前缀，那一条是全文（F121 实测）。
+      ZCODE_MODEL: GLM_5_3,
     };
     result = await run(zcode, ["-p", "list the docs", "--session-id", SESSION], env, work);
   } finally {
@@ -148,7 +152,7 @@ export async function checkModelIo({ nodeRoot, base, expectEqual, zcode }) {
   }));
   const common = {
     callSource: { kind: "main", querySource: "main_turn" },
-    model: "claude-opus-5-5",
+    model: GLM_5_3,
     provider: "anthropic",
     messages: 0,
     tools: 0,

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
+use rust_cli_base::models::{DEEPSEEK_V4_PRO, GLM_5_3, HAIKU_3_5_DATED};
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection};
 use rust_cli_kernel_api::provider::ModelCapabilities;
@@ -134,31 +135,43 @@ async fn first_request_set(
 fn glm() -> ModelSelection {
     ModelSelection {
         provider: "zai".to_owned(),
-        model: "glm-5.1".to_owned(),
+        model: GLM_5_3.to_owned(),
         reasoning: Some("enabled".to_owned()),
         connection: None,
     }
 }
 
+/// 没有卡片形状的模型（DeepSeek）。
+fn deepseek() -> ModelSelection {
+    ModelSelection {
+        provider: "deepseek".to_owned(),
+        model: DEEPSEEK_V4_PRO.to_owned(),
+        reasoning: Some("max".to_owned()),
+        connection: None,
+    }
+}
+
 /// 修 bug：没有卡片的模型以前把选择的档位写进 `output_config.effort`（GLM-5.1 的 `"effort":"enabled"`）；
-/// 推理字段只由配置的 option map 写（同 Node）。
+/// 推理字段只由配置的 option map 写（同 Node）。工作线 F121：GLM 借 opus 的卡片形状，带卡片字段；目录的档位
+/// `enabled` 不是 effort，用卡片的缺省。
 #[tokio::test]
 async fn a_model_without_a_card_gets_no_card_fields() {
-    let request = first_request(glm(), None).await;
+    let request = first_request(deepseek(), None).await;
     assert_eq!(request.options.effort, None);
     assert_eq!(request.thinking, None);
     assert!(request.options.context_edits.is_empty());
     assert_eq!(request.max_tokens, 32_000);
-    // 卡片模型照旧带卡片字段。
-    let opus = ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: "claude-opus-5-5".to_owned(),
-        reasoning: Some("high".to_owned()),
-        connection: None,
-    };
-    let request = first_request(opus, None).await;
-    assert_eq!(request.options.effort.as_deref(), Some("high"));
+    // 借形状的 GLM 带卡片字段。
+    let request = first_request(glm(), None).await;
+    assert_eq!(request.options.effort.as_deref(), Some("medium"));
     assert!(request.thinking.is_some());
+    assert_eq!(request.options.context_edits.len(), 1);
+    let chosen = ModelSelection {
+        reasoning: Some("high".to_owned()),
+        ..glm()
+    };
+    let request = first_request(chosen, None).await;
+    assert_eq!(request.options.effort.as_deref(), Some("high"));
 }
 
 fn names(request: &ModelRequest) -> Vec<&str> {
@@ -191,10 +204,11 @@ async fn web_search_follows_the_native_web_search_capability() {
     );
 }
 
-fn gateway_opus() -> ModelSelection {
+/// 网关上的有卡片形状的模型（用户报的场景：anthropic 协议的网关，后面是 Bedrock；GLM 借 opus 的形状，F121）。
+fn gateway_carded() -> ModelSelection {
     ModelSelection {
         provider: "gateway".to_owned(),
-        model: "claude-opus-5-5".to_owned(),
+        model: GLM_5_3.to_owned(),
         reasoning: None,
         connection: None,
     }
@@ -222,10 +236,10 @@ fn endpoint(tool_search: bool) -> Option<ModelCapabilities> {
 
 /// 工作线 F84（tools-more.md §3.2，用户决定，推翻 F52 的“其他的不开”）：端点不支持 `tool_reference` 时是本地
 /// ToolSearch——ToolSearch 照常发、延迟工具等加载，没有占位工具与 `defer_loading`。用户的场景（anthropic 协议的网关上的
-/// claude-opus-5-5，网关后面是 Bedrock，F52 起因）因此仍然不带 `advanced-tool-use`。修改：F52 到 F84 之间这里全部内联。
+/// 有卡片的模型，网关后面是 Bedrock，F52 起因）因此仍然不带 `advanced-tool-use`。修改：F52 到 F84 之间这里全部内联。
 #[tokio::test]
 async fn tool_search_follows_the_endpoint_not_the_model_card() {
-    let request = first_request_with(gateway_opus(), endpoint(false), search_tools()).await;
+    let request = first_request_with(gateway_carded(), endpoint(false), search_tools()).await;
     assert_eq!(names(&request), ["Read", "ToolSearch"]);
     assert!(
         request
@@ -250,22 +264,22 @@ async fn tool_search_follows_the_endpoint_not_the_model_card() {
 /// 模型不开、全部内联。
 #[tokio::test]
 async fn every_model_gets_local_tool_search() {
-    let haiku = ModelSelection {
-        model: "claude-3-5-haiku-20241022".to_owned(),
-        ..gateway_opus()
+    let legacy = ModelSelection {
+        model: HAIKU_3_5_DATED.to_owned(),
+        ..gateway_carded()
     };
     for capabilities in [endpoint(false), None] {
-        let request = first_request_with(haiku.clone(), capabilities, search_tools()).await;
+        let request = first_request_with(legacy.clone(), capabilities, search_tools()).await;
         assert_eq!(names(&request), ["Read", "ToolSearch"]);
         assert!(request.options.tool_flags.is_empty());
     }
 }
 
 /// 工作线 F89（tools-more.md §3.2.2）：模型端口答不出能力（测试替身）时也是本地，原生只能由端点的能力选到。修改：F84
-/// 时按卡片回退，claude-opus-5-5 是原生（带占位工具）。
+/// 时按卡片回退，有卡片的模型是原生（带占位工具）。
 #[tokio::test]
 async fn without_capabilities_tool_search_is_local() {
-    for selection in [gateway_opus(), glm()] {
+    for selection in [gateway_carded(), glm()] {
         let request = first_request_with(selection, None, search_tools()).await;
         assert_eq!(names(&request), ["Read", "ToolSearch"]);
         assert!(request.options.tool_flags.is_empty());
@@ -290,7 +304,7 @@ async fn the_request_names_the_session_that_sends_it() {
 #[tokio::test]
 async fn the_off_setting_sends_every_tool_inline() {
     let request = first_request_set(
-        gateway_opus(),
+        gateway_carded(),
         endpoint(false),
         search_tools(),
         ToolSearchSetting::Off,
@@ -311,8 +325,8 @@ async fn the_auto_setting_waits_for_enough_deferred_tools() {
         })
     };
     let auto = ToolSearchSetting::Auto { percent: 10 };
-    let request = first_request_set(gateway_opus(), window(100), search_tools(), auto).await;
+    let request = first_request_set(gateway_carded(), window(100), search_tools(), auto).await;
     assert_eq!(names(&request), ["Read", "ToolSearch"]);
-    let request = first_request_set(gateway_opus(), window(1000), search_tools(), auto).await;
+    let request = first_request_set(gateway_carded(), window(1000), search_tools(), auto).await;
     assert_eq!(names(&request), ["Read", "TaskStop"]);
 }

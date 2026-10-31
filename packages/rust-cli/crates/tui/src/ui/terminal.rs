@@ -30,6 +30,8 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// 有没有 [`Guard`]：0 没有，1 有，2 有且推过键盘增强。panic hook 只读它（tui.md §7.9）。
 static ACTIVE: AtomicU8 = AtomicU8::new(0);
+/// [`ACTIVE`] 的“有且推过键盘增强”。
+const ACTIVE_ENHANCED: u8 = 2;
 
 /// 持有期间终端处于 TUI 状态；释放时恢复。
 pub struct Guard {
@@ -123,7 +125,7 @@ fn install_panic_log() {
             // 本线程已经记着一条：它还在展开，这次是展开中又 panic，std 随后 abort、等不到 `Guard`，照以前恢复再写。
             if let Some(first) = rust_cli_base::note_panic(format!("panicked at {at}:\n{message}\n{trace}")) {
                 ACTIVE.store(0, Ordering::Release);
-                restore(active == 2);
+                restore(active == ACTIVE_ENHANCED);
                 let _ = std::io::stderr().write_all(first.as_bytes());
                 previous(info);
             }

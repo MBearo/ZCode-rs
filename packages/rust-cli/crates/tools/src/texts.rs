@@ -151,7 +151,9 @@ pub fn notebook_index_missing(index: usize) -> String {
 /// 输入不是合法 JSON 时的 InputValidationError 正文（JSON 解析失败的分支）：原文取前 200 个 UTF-16 单元，
 /// `len` 是组装时记下的原文长度。
 pub fn unparsed_input(tool: &str, raw: &str, len: u64) -> String {
-    let sent = rust_cli_base::js::string::utf16_prefix(raw, 200);
+    // 原文最多给出这么多个 UTF-16 单元。
+    const SENT_UNITS: usize = 200;
+    let sent = rust_cli_base::js::string::utf16_prefix(raw, SENT_UNITS);
     format!(
         "{tool} was called with input that could not be parsed as JSON.\nYou sent (first {} of {len} bytes): {sent}\nCommon causes: unescaped backslashes in file paths (use / or \\\\), unescaped control characters, or truncated output. Retry with valid JSON.",
         sent.encode_utf16().count()

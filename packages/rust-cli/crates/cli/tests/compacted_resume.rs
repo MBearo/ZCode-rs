@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use compacted::{Keep, SESSION};
+use rust_cli_base::models::GLM_5;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::store::SessionStore;
 use serde_json::Value;
@@ -160,7 +161,7 @@ async fn the_first_request_after_resuming_is_unchanged() {
             .env("ZCODE_DATA_BASE_DIR", &sandbox.home)
             .env("ZCODE_MODEL_BASE_URL", &fixture.url)
             .env("ZCODE_API_KEY", "test-key")
-            .env("ZCODE_MODEL", "glm-5")
+            .env("ZCODE_MODEL", GLM_5)
             .stdin(Stdio::null())
             .output()
             .unwrap();

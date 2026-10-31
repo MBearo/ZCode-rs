@@ -1,6 +1,10 @@
 // 复制自 apps/zcode-cli-rust/crates/bash/src/callbacks_net.rs（07ab266d4b）；不 panic，失败时按不放行处理。
 //! `ss`, `gh` and `docker` callbacks (`bash-readonly-policy-callbacks.ts`).
 use super::js;
+use crate::consts::SHORT_OPTION_LEN;
+
+/// `gh` 的值里有两个以上 `/` 时像 `HOST/OWNER/REPO`（指向别的主机）。
+const HOST_REPO_MIN_SLASHES: usize = 2;
 
 pub(crate) fn ss(args: &[String]) -> bool {
     let mut positional: Vec<&str> = vec![];
@@ -90,7 +94,7 @@ pub(crate) fn gh(args: &[String]) -> bool {
         if value.contains("://") || value.contains('@') {
             return true;
         }
-        if value.matches('/').count() >= 2 {
+        if value.matches('/').count() >= HOST_REPO_MIN_SLASHES {
             return true;
         }
     }
@@ -117,13 +121,15 @@ pub(crate) fn has_dangerous_docker_option(args: &[String]) -> bool {
         let flag_hit = DOCKER_DANGEROUS.iter().any(|flag| {
             arg == flag
                 || arg.strip_prefix(flag).is_some_and(|r| r.starts_with('='))
-                || (flag.len() == 2 && js::utf16_len(arg) > 2 && arg.starts_with(flag))
+                || (flag.len() == SHORT_OPTION_LEN
+                    && js::utf16_len(arg) > SHORT_OPTION_LEN
+                    && arg.starts_with(flag))
         });
         // `/^-([A-Za-z]+)/` 捕获的短参数簇长度 ≥ 2 时逐字母检查。
         let cluster = arg
             .strip_prefix('-')
             .map(|rest| &rest[..rest.bytes().take_while(u8::is_ascii_alphabetic).count()])
             .unwrap_or("");
-        flag_hit || (cluster.len() >= 2 && cluster.contains(['H', 'c']))
+        flag_hit || (cluster.len() > 1 && cluster.contains(['H', 'c']))
     })
 }

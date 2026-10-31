@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::models::DEEPSEEK_V4_PRO;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_kernel_api::compaction::context_tokens;
@@ -98,13 +99,13 @@ impl Sandbox {
                         "group": "standard-personal",
                         "access": {"type": "api-key", "apiKey": "sk-test"},
                         "api": {"type": "anthropic-messages", "baseUrl": url},
-                        "personalModelIds": ["deepseek-v4-pro"]
+                        "personalModelIds": [DEEPSEEK_V4_PRO]
                     }
                 }]},
                 "modelConfigRules": {
                     "providerModelRules": [{
                         "providerId": "personal:gateway",
-                        "modelId": "deepseek-v4-pro",
+                        "modelId": DEEPSEEK_V4_PRO,
                         "config": {
                             "properties": {"contextWindow": WINDOW},
                             "optionSpecs": {"maxOutputTokens": {"max": CONFIGURED_MAX}}
@@ -223,7 +224,7 @@ impl Sandbox {
 fn selection() -> ModelSelection {
     ModelSelection {
         provider: "personal:gateway".to_owned(),
-        model: "deepseek-v4-pro".to_owned(),
+        model: DEEPSEEK_V4_PRO.to_owned(),
         reasoning: None,
         connection: None,
     }

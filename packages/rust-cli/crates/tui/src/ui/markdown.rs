@@ -139,10 +139,12 @@ impl<'a> Renderer<'a> {
                 self.flush();
                 self.blank();
                 let (first, _) = self.prefixes();
+                /// 分隔线最长 40 列。
+                const MAX_RULE_WIDTH: usize = 40;
                 let room = self
                     .width
                     .saturating_sub(super::text::width(&first))
-                    .min(40);
+                    .min(MAX_RULE_WIDTH);
                 let mut line = first;
                 line.push(styled(
                     &"─".repeat(room),

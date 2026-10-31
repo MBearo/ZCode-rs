@@ -1,5 +1,6 @@
 //! OpenAI Chat Completions 流解码（model.md §10.3）。
 
+use rust_cli_base::{hosts, models};
 use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelError};
@@ -34,7 +35,9 @@ fn decode(events: Vec<SseEvent>) -> Result<Vec<ModelEvent>, ModelError> {
 }
 
 fn chunk(delta: Value) -> SseEvent {
-    data(json!({"id": "chatcmpl-1", "model": "glm-5", "choices": [{"index": 0, "delta": delta}]}))
+    data(
+        json!({"id": "chatcmpl-1", "model": models::GLM_5, "choices": [{"index": 0, "delta": delta}]}),
+    )
 }
 
 #[test]
@@ -63,7 +66,7 @@ fn reasoning_text_and_tool_calls_become_blocks() {
         vec![
             ModelEvent::MessageStart {
                 id: "chatcmpl-1".to_owned(),
-                model: "glm-5".to_owned(),
+                model: models::GLM_5.to_owned(),
                 usage: Usage::default(),
             },
             ModelEvent::BlockStart {
@@ -280,7 +283,7 @@ fn calls_without_an_index_are_new_calls() {
 #[test]
 fn vendor_finish_reasons_on_the_zhipu_endpoint() {
     let finish = |reason: &str| {
-        data(json!({"id": "chatcmpl-1", "model": "glm-5",
+        data(json!({"id": "chatcmpl-1", "model": models::GLM_5,
             "choices": [{"index": 0, "delta": {"content": "tail"}, "finish_reason": reason}]}))
     };
     let mut stream = ChatStream::new(zhipu());
@@ -323,5 +326,5 @@ fn vendor_finish_reasons_on_the_zhipu_endpoint() {
 
 /// 智谱的端点按方案表选出的厂商（测试不直接写厂商名，同产品代码只经 `profiles::vendor`）。
 fn zhipu() -> Vendor {
-    crate::profiles::vendor("https://open.bigmodel.cn/api/anthropic")
+    crate::profiles::vendor(hosts::BIGMODEL_ANTHROPIC)
 }

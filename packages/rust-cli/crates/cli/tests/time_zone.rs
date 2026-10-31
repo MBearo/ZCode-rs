@@ -17,6 +17,7 @@ use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::clock::civil_date;
 
 const REPLY: &str = concat!(
@@ -89,7 +90,7 @@ fn run(tz: &str, offset_minutes: i64) -> (String, String, [String; 2]) {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &server)
         .env("ZCODE_API_KEY", "test-key-time-zone")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

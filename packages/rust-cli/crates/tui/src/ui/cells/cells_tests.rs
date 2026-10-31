@@ -1,6 +1,7 @@
 // 改写自 apps/zcode-host/crates/tui/src/ui/cells/cells_tests.rs（feat/rs 79b6691c55）：行换成 `view::Row`。
 use std::time::Duration;
 
+use rust_cli_base::models::GLM_5;
 use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::permission::PermissionMode;
 use serde_json::{Value, json};
@@ -172,8 +173,8 @@ fn the_startup_header_names_the_model_and_directory() {
             .collect()
     };
     assert_eq!(
-        lines(PermissionMode::Default, "glm-5"),
-        ["ZCode v1.0.0", "glm-5 · ~/w"]
+        lines(PermissionMode::Default, GLM_5),
+        ["ZCode v1.0.0".to_owned(), format!("{GLM_5} · ~/w")]
     );
     assert_eq!(lines(PermissionMode::Default, ""), ["ZCode v1.0.0", "~/w"]);
     assert_eq!(

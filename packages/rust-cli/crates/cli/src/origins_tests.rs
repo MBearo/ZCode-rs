@@ -1,6 +1,9 @@
 //! 账号服务地址的解析与 Node 相同（`resolveRuntimeZCodeEndpointOrigin`、`resolveBigModelApiOrigin`）。
 
 use super::*;
+use rust_cli_base::hosts::{
+    BIGMODEL_ORIGIN, BIGMODEL_ORIGIN_TEST, ZAI_API, ZAI_API_TEST, ZCODE_ORIGIN, ZCODE_ORIGIN_TEST,
+};
 
 fn origins(pairs: &[(&str, &str)]) -> Result<AccountOrigins, String> {
     account_origins(
@@ -17,19 +20,19 @@ fn origins(pairs: &[(&str, &str)]) -> Result<AccountOrigins, String> {
 #[test]
 fn production_defaults() {
     let origins = origins(&[]).unwrap();
-    assert_eq!(origins.zcode_api, "https://zcode.z.ai/api/v1");
-    assert_eq!(origins.zai_api, "https://api.z.ai");
-    assert_eq!(origins.bigmodel_api, "https://bigmodel.cn");
+    assert_eq!(origins.zcode_api, format!("{ZCODE_ORIGIN}/api/v1"));
+    assert_eq!(origins.zai_api, ZAI_API);
+    assert_eq!(origins.bigmodel_api, BIGMODEL_ORIGIN);
     assert_eq!(origins.client_version, "0.1.0");
 }
 
 #[test]
 fn environment_overrides_follow_node() {
     let test = origins(&[("ZCODE_ENV", "TEST")]).unwrap();
-    assert_eq!(test.zcode_api, "https://zcode.z.ai/api/v1");
-    assert_eq!(test.bigmodel_api, "https://bigmodel.cn");
+    assert_eq!(test.zcode_api, format!("{ZCODE_ORIGIN_TEST}/api/v1"));
+    assert_eq!(test.bigmodel_api, BIGMODEL_ORIGIN_TEST);
     // Z.ai 业务地址按 App 的 resolveZaiBusinessBaseUrl（工作线 F47）。
-    assert_eq!(test.zai_api, "https://api.z.ai");
+    assert_eq!(test.zai_api, ZAI_API_TEST);
     let zai = origins(&[
         (
             "ZAI_PRODUCTION_BUSINESS_BASE_URL",
@@ -66,7 +69,7 @@ fn environment_overrides_follow_node() {
         ("BIGMODEL_TEST_API_BASE_URL", "https://dev.example.com"),
     ])
     .unwrap();
-    assert_eq!(scoped.zcode_api, "https://zcode.z.ai/api/v1");
+    assert_eq!(scoped.zcode_api, format!("{ZCODE_ORIGIN_TEST}/api/v1"));
     assert_eq!(scoped.bigmodel_api, "https://dev.example.com");
     assert!(origins(&[("ZCODE_BASE_URL", "ftp://example.com")]).is_err());
 }
@@ -79,7 +82,7 @@ fn team_manage_pages_follow_the_app() {
     let production = origins(&[("BIGMODEL_API_BASE_URL", "https://big.example.com")]).unwrap();
     assert_eq!(
         production.bigmodel_team_plans,
-        "https://bigmodel.cn/coding-plan/team/plans"
+        format!("{BIGMODEL_ORIGIN}/coding-plan/team/plans")
     );
     let test = origins(&[
         ("ZCODE_ENV", "test"),
@@ -88,6 +91,6 @@ fn team_manage_pages_follow_the_app() {
     .unwrap();
     assert_eq!(
         test.bigmodel_team_plans,
-        "https://bigmodel.cn/coding-plan/team/plans"
+        format!("{BIGMODEL_ORIGIN_TEST}/coding-plan/team/plans")
     );
 }

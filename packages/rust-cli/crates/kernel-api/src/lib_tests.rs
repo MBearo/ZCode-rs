@@ -21,9 +21,7 @@ use crate::model::{
 use crate::orchestration::{InteractionRequest, QueryError};
 use crate::provider::{CatalogModel, ModelCatalog, WireProtocol};
 use crate::session_api::{KernelEvent, SequencedEvent};
-use crate::store::{
-    Fact, FactBatch, LoadedSession, OpenOperation, PendingInteraction, SessionKind, SessionMeta,
-};
+use crate::store::{Fact, FactBatch, LoadedSession, PendingInteraction, SessionKind, SessionMeta};
 use crate::tool::ToolError;
 
 fn round_trip<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(value: &T) {
@@ -68,15 +66,9 @@ fn facts_and_events_round_trip() {
     round_trip(&FactBatch {
         owner_epoch: OwnerEpoch::LOCAL,
         command: None,
-        facts: vec![
-            Fact::MessageAppended {
-                message: assistant(),
-            },
-            Fact::OperationIntent {
-                operation: OperationId::new("op_1"),
-                fingerprint: "f".to_owned(),
-            },
-        ],
+        facts: vec![Fact::MessageAppended {
+            message: assistant(),
+        }],
         turn: Some(crate::store::TurnAnchor {
             prompt: crate::ids::MessageId::new("msg_u1"),
             turn: Some(crate::ids::TurnId::new("turn_1")),
@@ -115,10 +107,6 @@ fn loaded_sessions_round_trip_with_open_work() {
         model: None,
         mode: None,
         plan: false,
-        open_operations: vec![OpenOperation {
-            operation: OperationId::new("op_1"),
-            fingerprint: "f".to_owned(),
-        }],
         pending_interactions: vec![PendingInteraction {
             interaction: InteractionId::new("ia_1"),
             request: InteractionRequest::PlanApproval {
@@ -135,7 +123,6 @@ fn loaded_sessions_round_trip_with_open_work() {
     // 没有这些字段的旧结果也能读，读出来是空清单。
     let mut old = serde_json::to_value(&loaded).unwrap();
     for key in [
-        "open_operations",
         "pending_interactions",
         "checkpoints",
         "last_turn_failed",
@@ -144,7 +131,7 @@ fn loaded_sessions_round_trip_with_open_work() {
         old.as_object_mut().unwrap().remove(key);
     }
     let old: LoadedSession = serde_json::from_value(old).unwrap();
-    assert!(old.open_operations.is_empty() && old.pending_interactions.is_empty());
+    assert!(old.pending_interactions.is_empty());
     assert!(old.checkpoints.is_empty());
     assert!(!old.last_turn_failed);
     assert!(old.earlier.is_empty());
@@ -400,7 +387,7 @@ fn model_connections_round_trip_and_default_to_absent() {
     };
     let selection = ModelSelection {
         provider: "account:bigmodel-team-coding-plan".to_owned(),
-        model: "GLM-5.3".to_owned(),
+        model: rust_cli_base::models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: None,
         connection: Some(Box::new(id.clone())),
     };

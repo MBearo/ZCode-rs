@@ -11,6 +11,7 @@
 )]
 
 mod system_env;
+use rust_cli_base::models::GLM_5_3;
 use system_env::KeepSystem as _;
 mod egress;
 mod sse;
@@ -63,7 +64,7 @@ impl Sandbox {
             .env("ZCODE_DATA_BASE_DIR", &self.home)
             .env("ZCODE_MODEL_BASE_URL", base_url)
             .env("ZCODE_API_KEY", "test-key-network-egress")
-            .env("ZCODE_MODEL", "claude-opus-5-5");
+            .env("ZCODE_MODEL", GLM_5_3);
         for (name, value) in vars {
             command.env(name, value);
         }

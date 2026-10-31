@@ -1,6 +1,7 @@
 //! 会话的团队项目（node-store.md §4 的 `ModelSelected`、§5 第 5 条，工作线 F49）：Node 的选择 schema 是 strict，
 //! 团队项目另存在 `rust-cli/model_connection`，冷读取时与 `runtime/model_selection` 对得上才用。
 
+use rust_cli_base::models::{GLM_5_3_ACCOUNT, GLM_5_3_FLASH_ACCOUNT};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::model::{ModelConnection, ModelSelection};
 use rust_cli_kernel_api::store::{Fact, SessionStore};
@@ -14,7 +15,7 @@ const TEAM: &str = "account:bigmodel-team-coding-plan";
 fn team_selection(project: &str) -> ModelSelection {
     ModelSelection {
         provider: TEAM.to_owned(),
-        model: "GLM-5.3".to_owned(),
+        model: GLM_5_3_ACCOUNT.to_owned(),
         reasoning: Some("high".to_owned()),
         connection: Some(Box::new(ModelConnection {
             product_id: "prod-1".to_owned(),
@@ -57,14 +58,14 @@ async fn the_team_project_is_kept_beside_the_node_selection() {
     let data: Value = serde_json::from_str(node[0][1].as_str().unwrap()).unwrap();
     assert_eq!(
         data,
-        json!({"modelSelection": {"providerId": TEAM, "modelId": "GLM-5.3", "options": {"reasoningLevel": "high"}}})
+        json!({"modelSelection": {"providerId": TEAM, "modelId": GLM_5_3_ACCOUNT, "options": {"reasoningLevel": "high"}}})
     );
     let side = entry_rows(&t, "rust-cli/model_connection");
     assert_eq!(side[0][0], json!("ses_team:rust-cli/model_connection"));
     let data: Value = serde_json::from_str(side[0][1].as_str().unwrap()).unwrap();
     assert_eq!(
         data,
-        json!({"providerId": TEAM, "modelId": "GLM-5.3",
+        json!({"providerId": TEAM, "modelId": GLM_5_3_ACCOUNT,
                "connection": {"productId": "prod-1", "organizationId": "org-t", "projectId": "p-t"}})
     );
     assert_eq!(loaded(&t, "ses_team").await, team_selection("p-t"));
@@ -102,14 +103,14 @@ async fn a_model_changed_by_node_drops_the_team_project() {
         touch_session: false,
     };
     let conn = t.connection();
-    entries::save(&conn, &node_write("GLM-5.3-Flash")).unwrap();
+    entries::save(&conn, &node_write(GLM_5_3_FLASH_ACCOUNT)).unwrap();
     let selection = loaded(&t, "ses_node").await;
     assert_eq!(
         (selection.model.as_str(), selection.connection),
-        ("GLM-5.3-Flash", None)
+        (GLM_5_3_FLASH_ACCOUNT, None)
     );
     // Node 换回同一个模型：记下的团队项目又对得上（Node 与 App 按它们的当前连接取团队，platform.md §9.4）。
-    entries::save(&conn, &node_write("GLM-5.3")).unwrap();
+    entries::save(&conn, &node_write(GLM_5_3_ACCOUNT)).unwrap();
     let selection = loaded(&t, "ses_node").await;
     assert_eq!(selection.connection.unwrap().project_id, "p-t");
 }
@@ -121,8 +122,8 @@ async fn a_broken_record_is_ignored() {
     select(&t, "ses_bad", team_selection("p-t")).await;
     let conn = t.connection();
     for data in [
-        json!({"providerId": TEAM, "modelId": "GLM-5.3", "connection": {"productId": "prod-1", "organizationId": " ", "projectId": "p-t"}}),
-        json!({"providerId": TEAM, "modelId": "GLM-5.3", "connection": "p-t"}),
+        json!({"providerId": TEAM, "modelId": GLM_5_3_ACCOUNT, "connection": {"productId": "prod-1", "organizationId": " ", "projectId": "p-t"}}),
+        json!({"providerId": TEAM, "modelId": GLM_5_3_ACCOUNT, "connection": "p-t"}),
     ] {
         let entry = Entry {
             id: "ses_bad:rust-cli/model_connection".to_owned(),

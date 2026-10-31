@@ -12,6 +12,7 @@ use rust_cli_kernel_api::permission::{
 use rust_cli_policy::rules::parse_rule;
 
 use crate::commander::{Arity, OptionSpec, split, suggestion};
+use crate::consts;
 use crate::mcp::McpFlags;
 use crate::print_format::{self, FormatFlags};
 use crate::{effort, help};
@@ -413,12 +414,12 @@ pub(crate) fn js_number(text: &str) -> Option<f64> {
         return Some(0.0);
     }
     for (prefix, radix) in [
-        ("0x", 16),
-        ("0X", 16),
-        ("0o", 8),
-        ("0O", 8),
-        ("0b", 2),
-        ("0B", 2),
+        ("0x", consts::HEX_RADIX),
+        ("0X", consts::HEX_RADIX),
+        ("0o", consts::OCTAL_RADIX),
+        ("0O", consts::OCTAL_RADIX),
+        ("0b", consts::BINARY_RADIX),
+        ("0B", consts::BINARY_RADIX),
     ] {
         if let Some(digits) = trimmed.strip_prefix(prefix) {
             #[expect(
@@ -473,13 +474,16 @@ fn invalid(spec: &OptionSpec<Key>, value: &str, reason: &str) -> Stop {
     ))
 }
 
+/// UUID 各段的十六进制位数（8-4-4-4-12）。
+const UUID_GROUP_LENS: [usize; 5] = [8, 4, 4, 4, 12];
+
 /// UUID 校验（`--session-id`，cli-args.md §7）：8-4-4-4-12 的十六进制。
 pub(crate) fn is_uuid(value: &str) -> bool {
     let groups: Vec<&str> = value.split('-').collect();
-    groups.len() == 5
+    groups.len() == UUID_GROUP_LENS.len()
         && groups
             .iter()
-            .zip([8, 4, 4, 4, 12])
+            .zip(UUID_GROUP_LENS)
             .all(|(group, len)| group.len() == len && group.chars().all(|c| c.is_ascii_hexdigit()))
 }
 

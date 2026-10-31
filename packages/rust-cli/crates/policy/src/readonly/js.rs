@@ -15,13 +15,16 @@ pub(crate) fn is_dash_digits(s: &str) -> bool {
     s.strip_prefix('-').is_some_and(is_digits)
 }
 
+/// 改写转义后正则变长的预留字节。
+const CAPACITY_HEADROOM: usize = 16;
+
 const SPACE_CLASS: &str = r"\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
 
 /// Compiles an ECMAScript regex source without flags. `\s`, `\S`, `\d`, `\D`,
 /// `\w` and `\W` are rewritten to their ASCII / JS meanings; every other escape
 /// used by the exported tables means the same in the `regex` crate.
 pub(crate) fn regex(source: &str) -> Option<regex::Regex> {
-    let mut out = String::with_capacity(source.len() + 16);
+    let mut out = String::with_capacity(source.len() + CAPACITY_HEADROOM);
     let mut chars = source.chars().peekable();
     let mut in_class = false;
     while let Some(c) = chars.next() {

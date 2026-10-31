@@ -7,7 +7,20 @@
 
 use std::time::{Duration, SystemTime};
 
+use rust_cli_base::units;
+
 use crate::ResponseHeaders;
+
+/// 默认：首次请求之外最多再试几次。
+const DEFAULT_MAX_RETRIES: u32 = 10;
+/// 默认：第一次重试前的基础等待。
+const DEFAULT_BASE_DELAY: Duration = Duration::from_millis(500);
+/// 默认：指数退避的上限（不含抖动）。
+const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(32);
+/// 默认：抖动最多加上等待时长的这个比例。
+const DEFAULT_JITTER_RATIO: f64 = 0.25;
+/// 默认：单次等待的上限，超过时不再重试。
+const DEFAULT_MAX_WAIT: Duration = Duration::from_secs(units::SECONDS_PER_MINUTE);
 
 /// 重试策略。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,11 +40,11 @@ pub struct RetryPolicy {
 impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
-            max_retries: 10,
-            base_delay: Duration::from_millis(500),
-            max_backoff: Duration::from_secs(32),
-            jitter_ratio: 0.25,
-            max_wait: Duration::from_secs(60),
+            max_retries: DEFAULT_MAX_RETRIES,
+            base_delay: DEFAULT_BASE_DELAY,
+            max_backoff: DEFAULT_MAX_BACKOFF,
+            jitter_ratio: DEFAULT_JITTER_RATIO,
+            max_wait: DEFAULT_MAX_WAIT,
         }
     }
 }
@@ -50,7 +63,7 @@ impl RetryPolicy {
             .min(self.max_backoff.as_secs_f64());
         let jittered = backoff * (1.0 + random.clamp(0.0, 1.0) * self.jitter_ratio);
         // 毫秒取整。
-        let computed = Duration::from_millis((jittered * 1000.0).round() as u64);
+        let computed = Duration::from_millis((jittered * units::MS_PER_SECOND_F64).round() as u64);
         let delay = retry_after.map_or(computed, |after| after.max(computed));
         (delay <= self.max_wait).then_some(delay)
     }
@@ -72,7 +85,7 @@ pub fn retry_after(headers: &ResponseHeaders, now: SystemTime) -> Option<Duratio
         return Some(delay);
     }
     let value = header(crate::header::RETRY_AFTER)?;
-    numeric(value, 1000.0).or_else(|| {
+    numeric(value, units::MS_PER_SECOND_F64).or_else(|| {
         httpdate::parse_http_date(value)
             .ok()
             .map(|date| date.duration_since(now).unwrap_or_default())

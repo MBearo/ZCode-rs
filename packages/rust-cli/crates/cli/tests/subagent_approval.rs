@@ -626,11 +626,6 @@ async fn a_stalled_request_after_the_approval_leaves_the_incident_trail() {
             .any(|text| text.starts_with("assistant")),
         "no assistant message after the Bash result: {trail:#?}"
     );
-    assert!(
-        loaded.open_operations.is_empty(),
-        "{:?}",
-        loaded.open_operations
-    );
     assert!(loaded.pending_interactions.is_empty());
     let parent = harness.store.load(&id).await.unwrap();
     let handback = parent

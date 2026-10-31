@@ -7,11 +7,11 @@
 //!
 //! 规则（与拆分前相同）：
 //! - 类型化操作，分 read 与 mutate，不提供万能 invoke；
-//! - 每个 mutate 操作带 [`OperationContext`]，operationId 幂等；
+//! - 每个 mutate 操作带 [`OperationContext`]（operationId 由内核生成，不重复；执行侧不按它重放，工作线 F119）；
 //! - 只传可序列化的 DTO，不传回调、句柄、PID 或本机路径；
 //! - 取消是一条消息，发出后继续等终态。
 //!
-//! 实现方必须保证：同一个 operationId 只执行一次；连接断开不等于取消；结果无法确定时返回
+//! 实现方必须保证：连接断开不等于取消（重连的去重与补发在执行协议的账本里）；结果无法确定时返回
 //! [`crate::env::Outcome::Unknown`]，不重跑。后加的方法默认返回 `Unsupported`，实现方按需覆盖
 //! （docs/specs/rust-cli/tools-files.md §3、context.md §12）。
 
@@ -22,7 +22,7 @@ use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::env_files::{
@@ -152,17 +152,23 @@ pub trait Search: Send + Sync {
     }
 }
 
-/// 跑命令：启动、按游标读输出、取消、查终态，会话关闭时释放。
+/// 一条命令的事件：`Started`、输出、转后台，最后是终态。
+pub type CommandEvents = BoxStream<'static, Result<CommandEvent, EnvError>>;
+
+/// 跑命令：启动并读输出、接回还在跑的命令、取消，会话关闭时释放。
 #[async_trait]
 pub trait Commands: Send + Sync {
+    /// 启动并返回这条命令从游标 0 起的事件（工作线 F119）。执行侧只登记还在跑的命令：结束后不能再按 ID 查，
+    /// 所以调用方直接读这条流，不再 `watch_command(op, 0)`。
     async fn start_command(
         &self,
         workspace: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError>;
+    ) -> Result<CommandEvents, EnvError>;
 
-    /// 从 `cursor` 起读命令输出，直到终态。
+    /// 接回还在跑的命令，从 `cursor` 起读到终态（monitor 的流出错后续读）。已结束或不认识的命令：一个
+    /// `NotFound` 错误后结束。
     fn watch_command(
         &self,
         operation: OperationId,
@@ -170,8 +176,6 @@ pub trait Commands: Send + Sync {
     ) -> BoxStream<'static, Result<CommandEvent, EnvError>>;
 
     async fn cancel(&self, operation: OperationId) -> Result<(), EnvError>;
-
-    async fn operation_status(&self, operation: OperationId) -> Result<Outcome, EnvError>;
 
     /// 会话关闭：`forget` 为 true 时释放执行侧为这个会话保存的全部状态。
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError>;
@@ -259,16 +263,12 @@ pub trait Checkpoints: Send + Sync {
         Err(not_provided("rewind_prepare"))
     }
 
-    /// 执行登记过的事务（mutate，按 token 幂等）；失败时已补偿。
+    /// 执行登记过的事务（mutate）；失败时已补偿。token 用过一次就作废，再 apply 返回 `Unknown`（工作线 F119）。
     async fn rewind_apply(&self, _token: &OperationId) -> Result<RewindStatus, EnvError> {
         Err(not_provided("rewind_apply"))
     }
 
-    async fn rewind_status(&self, _token: &OperationId) -> Result<RewindStatus, EnvError> {
-        Err(not_provided("rewind_status"))
-    }
-
-    /// 释放 token 的记录（幂等）。
+    /// 释放只 prepare、没有 apply 的 token。
     async fn rewind_finish(&self, _token: &OperationId) -> Result<(), EnvError> {
         Err(not_provided("rewind_finish"))
     }

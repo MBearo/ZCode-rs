@@ -391,7 +391,8 @@ impl PromptAssembler {
         }
         // 静默提醒只给主线程。
         let silent_turns = thread == Thread::Main
-            && models::card(&request.selection.model).is_some_and(|card| card.silent_turn_reminder);
+            && models::shape(&request.selection.model)
+                .is_some_and(|shape| shape.silent_turn_reminder);
         if let Some(found) = silent::announce(history, silent_turns) {
             out.push(self.attachment(silent::SOURCE, found));
         }

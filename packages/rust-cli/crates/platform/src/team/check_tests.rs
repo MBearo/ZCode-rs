@@ -2,6 +2,7 @@
 //! `validateZaiAccountProviderAvailability` / `validateBigModelAccountProviderAvailability` 的结论、请求路径与
 //! 鉴权头逐项相同（golden 由 `scripts/rust-cli/team-plan-golden.mts` 生成）。
 
+use rust_cli_base::hosts;
 use std::sync::Arc;
 
 use rust_cli_net::{Egress, NetworkPolicy};
@@ -168,22 +169,18 @@ async fn expired_and_unassigned_keep_their_reason() {
         assert_eq!(&ours, expected, "{name}");
     }
     assert_eq!(
-        super::notice_text(Reason::Expired, "https://z.ai/manage-apikey/subscription").as_deref(),
-        Some(
-            "Team plan expired. Contact your team administrator. Manage team plan: \
-             https://z.ai/manage-apikey/subscription"
-        )
+        super::notice_text(Reason::Expired, hosts::ZAI_SUBSCRIPTION),
+        Some(format!(
+            "Team plan expired. Contact your team administrator. Manage team plan: {}",
+            hosts::ZAI_SUBSCRIPTION
+        ))
     );
+    let plans = format!("{}/coding-plan/team/plans", hosts::BIGMODEL_ORIGIN);
     assert_eq!(
-        super::notice_text(
-            Reason::Unassigned,
-            "https://bigmodel.cn/coding-plan/team/plans"
-        )
-        .as_deref(),
-        Some(
-            "Team plan not assigned. Contact your team admin. Manage team plan: \
-             https://bigmodel.cn/coding-plan/team/plans"
-        )
+        super::notice_text(Reason::Unassigned, &plans),
+        Some(format!(
+            "Team plan not assigned. Contact your team admin. Manage team plan: {plans}"
+        ))
     );
     assert_eq!(super::notice_text(Reason::NotEntitled, "x"), None);
 }

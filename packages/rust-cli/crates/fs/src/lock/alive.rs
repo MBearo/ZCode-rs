@@ -19,12 +19,14 @@ pub(crate) fn is_alive(pid: u32) -> bool {
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
+    /// Windows 的 `ERROR_ACCESS_DENIED`（系统错误码）。
+    const ERROR_ACCESS_DENIED: i32 = 5;
     // SAFETY: 只在本函数内打开、查询并关闭同一个进程句柄，指针参数指向栈上变量。
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
             // ERROR_ACCESS_DENIED：无权打开同样说明进程存在（Node 的 EPERM 语义）。
-            return std::io::Error::last_os_error().raw_os_error() == Some(5);
+            return std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ACCESS_DENIED);
         }
         let mut code = 0;
         let alive = GetExitCodeProcess(handle, &mut code) != 0 && code == STILL_ACTIVE as u32;
@@ -48,12 +50,14 @@ pub(crate) fn is_alive(_pid: u32) -> bool {
     reason = "进程启动时间 = 现在 - 开机时长 + 启动滴答，与 Node 的锁回收同一算法；fs 在 kernel-api 之下，拿不到注入的 Clock"
 )]
 pub(crate) async fn start_time_ms(pid: u32) -> Option<u64> {
-    let stat = tokio::fs::read_to_string(format!("/proc/{pid}/stat"))
+    use rust_cli_base::proto::procfs;
+    use rust_cli_base::units::MS_PER_SECOND_F64;
+
+    let stat = tokio::fs::read_to_string(procfs::stat_path(pid))
         .await
         .ok()?;
-    let fields = stat.get(stat.rfind(')')? + 2..)?;
-    let ticks: f64 = fields.split(' ').nth(19)?.parse().ok()?;
-    let uptime: f64 = tokio::fs::read_to_string("/proc/uptime")
+    let ticks: f64 = procfs::field(&stat, procfs::STARTTIME)?.parse().ok()?;
+    let uptime: f64 = tokio::fs::read_to_string(procfs::UPTIME_PATH)
         .await
         .ok()?
         .split_whitespace()
@@ -64,14 +68,17 @@ pub(crate) async fn start_time_ms(pid: u32) -> Option<u64> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
         .as_secs_f64()
-        * 1_000.0;
-    let started = now - uptime * 1_000.0 + ticks * 10.0;
+        * MS_PER_SECOND_F64;
+    let started =
+        now - uptime * MS_PER_SECOND_F64 + ticks * (MS_PER_SECOND_F64 / procfs::USER_HZ as f64);
     (started.is_finite() && started > 0.0).then(|| started.round() as u64)
 }
 
 #[cfg(target_os = "macos")]
 #[expect(unsafe_code, reason = "sysctl 没有安全封装")]
 pub(crate) async fn start_time_ms(pid: u32) -> Option<u64> {
+    /// `kp_proc.p_starttime`（`timeval`）在 `kinfo_proc` 开头占的字节数：8 字节秒、4 字节微秒与对齐。
+    const TIMEVAL_BYTES: usize = 16;
     // `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID, pid)` 的 `kinfo_proc`（`ps` 同一来源，别的用户的进程也读得到；
     // `proc_pidinfo` 读不了）。`kp_proc.p_starttime` 是结构开头的 `timeval`：8 字节秒、4 字节微秒。libc 没有
     // 这个结构，按字节读开头 16 字节；缓冲区比 `kinfo_proc`（64 位 648 字节）大，按 8 字节对齐。
@@ -87,7 +94,7 @@ pub(crate) async fn start_time_ms(pid: u32) -> Option<u64> {
     let status = unsafe {
         libc::sysctl(
             mib.as_mut_ptr(),
-            4,
+            mib.len() as libc::c_uint,
             buffer.as_mut_ptr().cast(),
             &raw mut size,
             std::ptr::null_mut(),
@@ -95,13 +102,16 @@ pub(crate) async fn start_time_ms(pid: u32) -> Option<u64> {
         )
     };
     // 进程不存在时成功但长度为 0。
-    if status != 0 || size < 16 {
+    if status != 0 || size < TIMEVAL_BYTES {
         return None;
     }
     let seconds = i64::from_ne_bytes(buffer[0].to_ne_bytes());
     let micros = u32::from_ne_bytes(buffer[1].to_ne_bytes()[..4].try_into().ok()?);
     let seconds = u64::try_from(seconds).ok().filter(|seconds| *seconds > 0)?;
-    Some(seconds * 1_000 + u64::from(micros) / 1_000)
+    Some(
+        seconds * rust_cli_base::units::MS_PER_SECOND
+            + u64::from(micros) / rust_cli_base::units::MICROS_PER_MS,
+    )
 }
 
 #[cfg(windows)]
@@ -129,7 +139,10 @@ pub(crate) async fn start_time_ms(pid: u32) -> Option<u64> {
     // FILETIME 是 1601-01-01 起的 100 ns 数；与 Unix 纪元差 11644473600 秒。
     let ticks = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
     queried
-        .then(|| (ticks / 10_000).checked_sub(11_644_473_600_000))
+        .then(|| {
+            (ticks / rust_cli_base::units::FILETIME_TICKS_PER_MS)
+                .checked_sub(rust_cli_base::units::FILETIME_EPOCH_OFFSET_MS)
+        })
         .flatten()
 }
 

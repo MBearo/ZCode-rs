@@ -1,4 +1,5 @@
 //! 用量事实 → Node 用量表（usage.md §2）：逐列的取值、同批提交、轮次聚合、保留期。
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::ids::{MessageId, SessionId, ToolUseId};
 use rust_cli_kernel_api::message::{StopReason, Usage};
 use rust_cli_kernel_api::metering::{CallStatus, ModelCall, ToolCall};
@@ -25,7 +26,7 @@ fn usage() -> Usage {
 fn requested() -> ModelSelection {
     ModelSelection {
         provider: "anthropic".into(),
-        model: "claude-opus-5-5".into(),
+        model: GLM_5_3.into(),
         reasoning: Some("max".into()),
         connection: None,
     }
@@ -119,7 +120,7 @@ async fn a_model_call_is_a_node_model_usage_row_in_the_assistant_batch() {
             "parent_user_message_id": "msg_u1",
             "query_source": "main_turn",
             "provider_id": "anthropic",
-            "model_id": "claude-opus-5-5",
+            "model_id": GLM_5_3,
             "variant": "max",
             "agent": "zcode-agent",
             "mode": "build",

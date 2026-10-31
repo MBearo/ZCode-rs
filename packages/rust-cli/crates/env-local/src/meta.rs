@@ -8,6 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rust_cli_kernel_api::env::{EnvError, FileVersion};
 use rust_cli_kernel_api::env_files::FileKind;
 
+/// 一毫秒的纳秒数。
+const NANOS_PER_MS: u128 = 1_000_000;
+
 pub(crate) fn kind(metadata: &Metadata) -> FileKind {
     if metadata.is_file() {
         FileKind::File
@@ -26,7 +29,7 @@ fn since_epoch(time: io::Result<SystemTime>) -> u128 {
 
 /// 修改时间，毫秒向下取整（`Math.floor(stat.mtimeMs)`）。
 pub(crate) fn mtime_ms(metadata: &Metadata) -> u64 {
-    u64::try_from(since_epoch(metadata.modified()) / 1_000_000).unwrap_or(u64::MAX)
+    u64::try_from(since_epoch(metadata.modified()) / NANOS_PER_MS).unwrap_or(u64::MAX)
 }
 
 /// 文件版本：修改时间（纳秒）+ 大小，Unix 上再加设备号与 inode。

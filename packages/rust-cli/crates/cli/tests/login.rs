@@ -16,6 +16,7 @@ use std::path::Path;
 use std::process::{Output, Stdio};
 use system_env::KeepSystem as _;
 
+use rust_cli_base::models::GLM_5_3_ACCOUNT;
 use serde_json::{Value, json};
 
 /// 在临时 home 里运行 `zcode <args>`，标准输入给 `stdin`。
@@ -65,7 +66,7 @@ fn api_key_login_and_logout() {
     assert_eq!(
         text(&output.stdout),
         format!(
-            "Configured Z.AI Coding Plan.\nModel: account:zai-individual-coding-plan/GLM-5.3\nModel selection: {}\n",
+            "Configured Z.AI Coding Plan.\nModel: account:zai-individual-coding-plan/{GLM_5_3_ACCOUNT}\nModel selection: {}\n",
             config.join("provider_config.json").display()
         )
     );
@@ -185,7 +186,7 @@ fn oauth_login_without_a_browser() {
         format!(
             "Open this URL to sign in:\nhttps://open.example.com/authorize?flow=f1\n\
              Login successful as dev@example.com.\n\
-             Model: account:bigmodel-individual-coding-plan/GLM-5.3\n\
+             Model: account:bigmodel-individual-coding-plan/{GLM_5_3_ACCOUNT}\n\
              Credentials: {}\nModel selection: {}\n",
             config.join("credentials.json").display(),
             config.join("provider_config.json").display()
@@ -217,7 +218,7 @@ fn json_output_follows_node() {
         "status": "ready",
         "provider": "bigmodel",
         "user": {"user_id": "u-1", "email": "dev@example.com"},
-        "model": "account:bigmodel-individual-coding-plan/GLM-5.3",
+        "model": format!("account:bigmodel-individual-coding-plan/{GLM_5_3_ACCOUNT}"),
         "credentialsPath": config.join("credentials.json").display().to_string(),
         "configPath": config.join("provider_config.json").display().to_string(),
         "browserOpened": false,

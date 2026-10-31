@@ -77,8 +77,17 @@ impl Template {
         let invalid = |error: anyhow::Error| ModelError::InvalidRequest {
             message: format!("provider option map failed: {error:#}"),
         };
-        let reasoning = evaluate(&self.reasoning_map, "reasoningLevel", &Value::from(level))
-            .map_err(invalid)?;
+        // GLM 的推理字段由卡片的形状写（工作线 F121，model.md §11.1）：Anthropic 协议上不合并 reasoningLevel 的补丁，否则
+        // `thinking` 会被改回配置的写法。输出上限的补丁照常（上限按目录）。
+        // 修 bug（F121 的测试查出）：以前不看协议，OpenAI 两种协议的 GLM 也去掉了这个补丁；那两种协议不写卡片的字段
+        // （model.md §10），推理只靠这个补丁，去掉后档位不起作用。
+        let reasoning = if self.protocol == WireProtocol::AnthropicMessages
+            && rust_cli_base::models::is_glm(&self.model)
+        {
+            Value::Object(serde_json::Map::new())
+        } else {
+            evaluate(&self.reasoning_map, "reasoningLevel", &Value::from(level)).map_err(invalid)?
+        };
         let max_output_tokens = max_output.map_or(self.max_output_tokens, |cap| {
             cap.min(self.max_output_tokens)
         });
@@ -156,14 +165,18 @@ impl Snapshot {
 /// 生效配置 `properties` 里的能力（Node 的字段名，docs/specs/rust-cli/model.md §11）。可执行的模型属性齐全
 /// （`model_complete`）；缺的布尔按假、窗口按 0（与原来逐项读取相同）。`supports_tool_search` 不是配置字段：工作线 F89
 /// 起总为假（docs/specs/rust-cli/tools-more.md §3.2.2：所有端点都用本地 ToolSearch，暂时不用原生）。
-pub(crate) fn capabilities(effective: &Value) -> ModelCapabilities {
+///
+/// GLM 按 opus 的卡片形状发请求（工作线 F121，用户决定 2026-10-30，model.md §11.1）：对话中间的 system 是形状的一部分，
+/// 所以 GLM 的 `supports_mid_conversation_system` 总为真（内置配置给的是假，配置不改）；别的能力照配置。
+pub(crate) fn capabilities(model: &str, effective: &Value) -> ModelCapabilities {
     let properties = &effective["properties"];
     let input = &properties["inputFormat"];
     ModelCapabilities {
         context_window: properties["contextWindow"].as_u64().unwrap_or(0),
         supports_tool_call: properties["supportsToolCall"] == true,
         supports_native_web_search: properties["supportsNativeWebSearch"] == true,
-        supports_mid_conversation_system: properties["supportsMidConversationSystem"] == true,
+        supports_mid_conversation_system: properties["supportsMidConversationSystem"] == true
+            || rust_cli_base::models::is_glm(model),
         supports_json_schema_output: properties["supportsJsonSchemaOutput"] == true,
         requires_mfjs_tool_schema: properties["requiresMfjsToolSchema"] == true,
         supports_image: input["supportsImage"] == true,
@@ -239,7 +252,7 @@ pub(crate) fn snapshot(
                 reasoning_map: text(&specs["reasoningLevel"], "map").to_owned(),
                 max_map: text(&specs["maxOutputTokens"], "map").to_owned(),
                 max_output_tokens: specs["maxOutputTokens"]["max"].as_u64().unwrap_or(0),
-                capabilities: capabilities(effective),
+                capabilities: capabilities(&model.model_id, effective),
                 hidden: provider.hidden,
                 provider_name: provider
                     .provider_name

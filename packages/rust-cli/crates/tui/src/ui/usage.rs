@@ -17,6 +17,9 @@ use super::manage::Manage;
 use super::palette::Palette;
 use super::usage_stats::{self as stats, MODELS_PER_PAGE};
 
+/// Stats 的 Models 视图每次（一格滚轮、一次 ↑ / ↓）滚两个模型。
+const MODELS_STEP: usize = 2;
+
 /// 标签页（Usage 与 Stats，usage.md D11）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageTab {
@@ -54,7 +57,11 @@ impl UsageView {
     pub fn wheel(&mut self, lines: isize) {
         if self.tab == UsageTab::Stats && self.view == StatsView::Models {
             let count = self.shown().0.as_ref().map_or(0, |s| s.models.len());
-            let step = if lines > 0 { 2 } else { -2 };
+            let step = if lines > 0 {
+                MODELS_STEP as isize
+            } else {
+                -(MODELS_STEP as isize)
+            };
             self.models_offset = (self.models_offset as isize + step)
                 .clamp(0, count.saturating_sub(MODELS_PER_PAGE) as isize)
                 as usize;
@@ -170,15 +177,15 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => {
                 if view.tab == UsageTab::Stats && view.view == StatsView::Models {
                     let count = view.shown().0.as_ref().map_or(0, |s| s.models.len());
-                    view.models_offset =
-                        (view.models_offset + 2).min(count.saturating_sub(MODELS_PER_PAGE));
+                    view.models_offset = (view.models_offset + MODELS_STEP)
+                        .min(count.saturating_sub(MODELS_PER_PAGE));
                 } else {
                     view.scroll += 1;
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 if view.tab == UsageTab::Stats && view.view == StatsView::Models {
-                    view.models_offset = view.models_offset.saturating_sub(2);
+                    view.models_offset = view.models_offset.saturating_sub(MODELS_STEP);
                 } else {
                     view.scroll = view.scroll.saturating_sub(1);
                 }
@@ -290,7 +297,7 @@ fn stats_body(view: &UsageView, width: usize, app: &App) -> Vec<Line<'static>> {
 pub fn draw(frame: &mut Frame<'_>, app: &mut App, view: &UsageView) {
     let area = frame.area();
     let strings = text::strings(app.lang);
-    let width = usize::from(area.width).saturating_sub(2);
+    let width = usize::from(area.width).saturating_sub(super::layout::INDENT);
     let height = super::page::body_height(area.height);
     app.viewport = height;
     let mut header = vec![Span::raw("  ")];

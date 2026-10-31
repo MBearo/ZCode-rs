@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use rust_cli_base::units;
 use rust_cli_kernel_api::mcp::McpToolInfo;
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::permission::PermissionDecision;
@@ -21,8 +22,8 @@ use super::manager::Inner;
 use super::result;
 use super::rpc::RpcError;
 
-/// 结果的字符上限。
-const MAX_RESULT_CHARS: usize = 100_000;
+/// 结果的字符上限（通用值只定义在 kernel-api）。
+const MAX_RESULT_CHARS: usize = rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS;
 
 /// 发给模型的工具名最长 128 个 UTF-16 码元：API 拒绝更长的名字，整个请求失败（ext.md §3.4）。
 pub(crate) const MAX_TOOL_NAME_UNITS: usize = 128;
@@ -207,7 +208,7 @@ impl Tool for McpTool {
                     return Err(failed(format!(
                         "MCP server \"{server}\" tool \"{}\" timed out after {}s",
                         self.info.tool,
-                        timeout_ms / 1000
+                        timeout_ms / units::MS_PER_SECOND
                     )));
                 }
                 // 会话过期（HTTP 404）：等连接任务重连后重试一次。

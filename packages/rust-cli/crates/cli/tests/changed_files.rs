@@ -12,6 +12,7 @@ mod sse;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 
+use rust_cli_base::models::GLM_5;
 use serde_json::{Value, json};
 
 const NOTE: &str = "changed on disk since you last read it. That's usually deliberate, so take it as the current state rather than reverting it; if the change looks wrong, say so rather than undoing it yourself \u{2014} otherwise no need to call it out.";
@@ -94,7 +95,7 @@ fn run(sandbox: &Sandbox, fixture: &sse::Fixture) -> Output {
         .env("ZCODE_DATA_BASE_DIR", &sandbox.home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

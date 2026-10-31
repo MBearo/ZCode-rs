@@ -24,10 +24,16 @@ pub(crate) struct Decoded {
     pub line_endings: LineEndings,
 }
 
+/// 判断换行风格只看前这么多个字符。
+const LINE_ENDING_SAMPLE: usize = 4096;
+/// UTF-16 LE 的 BOM 与每个码元的字节数。
+const UTF16_LE_BOM: [u8; 2] = [0xff, 0xfe];
+const UTF16_UNIT_BYTES: usize = 2;
+
 fn line_endings(text: &str) -> LineEndings {
     let (mut crlf, mut lf) = (0, 0);
     let mut previous = None;
-    for c in text.chars().take(4096) {
+    for c in text.chars().take(LINE_ENDING_SAMPLE) {
         if c == '\n' {
             if previous == Some('\r') {
                 crlf += 1;
@@ -52,9 +58,9 @@ pub(crate) fn normalize(text: &str) -> String {
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> Decoded {
-    let (text, encoding) = if bytes.starts_with(&[0xff, 0xfe]) {
+    let (text, encoding) = if bytes.starts_with(&UTF16_LE_BOM) {
         let units: Vec<u16> = bytes
-            .chunks(2)
+            .chunks(UTF16_UNIT_BYTES)
             .map(|pair| u16::from_le_bytes([pair[0], pair.get(1).copied().unwrap_or(0)]))
             .collect();
         (String::from_utf16_lossy(&units), Encoding::Utf16Le)

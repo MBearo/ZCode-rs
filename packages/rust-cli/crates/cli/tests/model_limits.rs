@@ -22,6 +22,7 @@ mod sse;
 use std::path::PathBuf;
 use std::process::{Output, Stdio};
 
+use rust_cli_base::models::{GLM_4_5, GLM_4_FLASH, GLM_5_3, OPUS_5_5};
 use serde_json::{Value, json};
 
 /// 摘要请求的开头（`prompts/compact/control.txt`，压缩提示词）。
@@ -174,7 +175,7 @@ fn autocompact_buffer(stdout: &[u8]) -> String {
 async fn explicit_glm_5_3_does_not_compact_at_300k() {
     let sandbox = Sandbox::new();
     let fixture = sse::serve(sandbox.script(300_000, &["done"]));
-    let vars = explicit(&fixture.url, "glm-5.3");
+    let vars = explicit(&fixture.url, GLM_5_3);
     sandbox.run("go", &borrowed(&vars), &[]);
     let requests = fixture.main_requests();
     assert!(
@@ -191,7 +192,7 @@ async fn explicit_glm_5_3_does_not_compact_at_300k() {
 async fn explicit_glm_5_3_context_shows_the_configured_window() {
     let sandbox = Sandbox::new();
     let fixture = sse::serve(Vec::new());
-    let vars = explicit(&fixture.url, "glm-5.3");
+    let vars = explicit(&fixture.url, GLM_5_3);
     let output = sandbox.run("/context", &borrowed(&vars), &[]);
     assert_eq!(context_window(&output.stdout), "1m");
     // 预留 min(128000, 20000) + 13000。
@@ -204,18 +205,19 @@ async fn explicit_glm_5_3_context_shows_the_configured_window() {
 async fn explicit_output_limit_sets_the_summary_reserve() {
     let sandbox = Sandbox::new();
     let fixture = sse::serve(Vec::new());
-    let vars = explicit(&fixture.url, "glm-4-flash-250414");
+    let vars = explicit(&fixture.url, GLM_4_FLASH);
     let output = sandbox.run("/context", &borrowed(&vars), &[]);
     assert_eq!(context_window(&output.stdout), "131.1k");
     assert_eq!(autocompact_buffer(&output.stdout), "29.4k");
 }
 
-/// 回归：显式覆盖的 claude-opus-5-5（卡片 1M、内置规则 1M）照旧。
+/// 回归：显式覆盖的有卡片的模型（卡片 1M、内置规则 1M）照旧。窗口来源“认识这个模型”只给有卡片的模型，所以用 Anthropic
+/// 的有卡片的模型。
 #[tokio::test]
 async fn an_explicit_carded_model_keeps_its_window() {
     let sandbox = Sandbox::new();
     let fixture = sse::serve(Vec::new());
-    let vars = explicit(&fixture.url, "claude-opus-5-5");
+    let vars = explicit(&fixture.url, OPUS_5_5);
     let output = sandbox.run("/context", &borrowed(&vars), &[]);
     assert_eq!(context_window(&output.stdout), "1m");
     assert_eq!(autocompact_buffer(&output.stdout), "33k");
@@ -226,7 +228,7 @@ async fn an_explicit_carded_model_keeps_its_window() {
 async fn the_window_override_still_applies() {
     let sandbox = Sandbox::new();
     let fixture = sse::serve(Vec::new());
-    let mut vars = explicit(&fixture.url, "glm-5.3");
+    let mut vars = explicit(&fixture.url, GLM_5_3);
     vars.push(("ZCODE_AUTO_COMPACT_WINDOW".to_owned(), "300000".to_owned()));
     let output = sandbox.run("/context", &borrowed(&vars), &[]);
     assert_eq!(context_window(&output.stdout), "300k");
@@ -238,8 +240,12 @@ async fn the_window_override_still_applies() {
 async fn a_configured_small_window_compacts_at_its_threshold() {
     let sandbox = Sandbox::new();
     let fixture = sse::serve(sandbox.script(100_000, &["<summary>S</summary>", "done"]));
-    sandbox.provider(&fixture.url, "glm-4.5");
-    sandbox.run("go", &[], &["--model", "personal:gateway/glm-4.5"]);
+    sandbox.provider(&fixture.url, GLM_4_5);
+    sandbox.run(
+        "go",
+        &[],
+        &["--model", &format!("personal:gateway/{GLM_4_5}")],
+    );
     let requests = fixture.main_requests();
     assert!(
         requests.iter().any(is_summary),
@@ -253,11 +259,19 @@ async fn a_configured_small_window_compacts_at_its_threshold() {
 async fn a_configured_1m_window_does_not_compact_at_300k() {
     let sandbox = Sandbox::new();
     let fixture = sse::serve(sandbox.script(300_000, &["done"]));
-    sandbox.provider(&fixture.url, "glm-5.3");
-    sandbox.run("go", &[], &["--model", "personal:gateway/glm-5.3"]);
+    sandbox.provider(&fixture.url, GLM_5_3);
+    sandbox.run(
+        "go",
+        &[],
+        &["--model", &format!("personal:gateway/{GLM_5_3}")],
+    );
     let requests = fixture.main_requests();
     assert!(!requests.iter().any(is_summary), "{}", requests.len());
-    let output = sandbox.run("/context", &[], &["--model", "personal:gateway/glm-5.3"]);
+    let output = sandbox.run(
+        "/context",
+        &[],
+        &["--model", &format!("personal:gateway/{GLM_5_3}")],
+    );
     assert_eq!(context_window(&output.stdout), "1m");
 }
 
@@ -274,14 +288,14 @@ async fn a_catalog_web_search_sends_the_node_output_limit() {
         sse::text_reply("done"),
     ]);
     let web_search =
-        json!({"modelId": "glm-5.3", "config": {"properties": {"supportsNativeWebSearch": true}}});
-    sandbox.provider_with_rules(&fixture.url, "glm-5.3", &[web_search]);
+        json!({"modelId": GLM_5_3, "config": {"properties": {"supportsNativeWebSearch": true}}});
+    sandbox.provider_with_rules(&fixture.url, GLM_5_3, &[web_search]);
     sandbox.run(
         "search",
         &[("ENABLE_TOOL_SEARCH", "false")],
         &[
             "--model",
-            "personal:gateway/glm-5.3",
+            &format!("personal:gateway/{GLM_5_3}"),
             "--allowedTools",
             "WebSearch",
         ],

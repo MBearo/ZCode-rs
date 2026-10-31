@@ -12,6 +12,7 @@
 // 5. 会话标题的行（usage.md §2.1.1，工作线 F71、F73）：rust-cli 按产品的写法写，Node 用自己的 `recordModelUsageFact` /
 //    `recordTurnUsageFact` 写同样的输入，两边的行除身份列外相同，回合用量都不数标题行。
 import { importNode } from "./node-root.mjs";
+import { GLM_5_3 } from "./fixture/model.mjs";
 
 /** 行里与身份有关的列（会话、消息、轮次、trace、id）；其余列两边必须相同。 */
 const IDENTITY = new Set([
@@ -80,7 +81,7 @@ export async function checkUsage(ctx) {
     getTools: () => [],
     getSessionModelSelection: () => ({
       providerId: "anthropic",
-      modelId: "claude-opus-5-5",
+      modelId: GLM_5_3,
       options: { reasoningLevel: "max" },
     }),
     getPlanEnabled: () => false,
@@ -119,7 +120,7 @@ export async function checkUsage(ctx) {
     parentUserMessageID: userID,
     querySource: "main_turn",
     providerId: "anthropic",
-    modelId: "claude-opus-5-5",
+    modelId: GLM_5_3,
     reasoningLevel: "max",
     agent: "zcode-agent",
     mode: "edit",
@@ -296,7 +297,7 @@ export async function checkUsage(ctx) {
   );
   // 五次请求（rust-cli 三次、Node 两次），每次不含缓存的输入 16 − 4 = 12。
   expectEqual("rust-cli activity tokens from both writers", after.models, [
-    { model: "claude-opus-5-5", input: 60, output: 35, cache_read: 20, cache_write: 0 },
+    { model: GLM_5_3, input: 60, output: 35, cache_read: 20, cache_write: 0 },
   ]);
   expectEqual("rust-cli metering of the Node session", rust("metering", dir, nodeSession), {
     api_duration_ms: 900 + 600,
@@ -398,7 +399,7 @@ export async function checkUsage(ctx) {
       ],
       model: {
         providerId: "anthropic",
-        modelId: "claude-opus-5-5",
+        modelId: GLM_5_3,
         options: { reasoningLevel: "max" },
       },
       networkEventStartIndex: 1,

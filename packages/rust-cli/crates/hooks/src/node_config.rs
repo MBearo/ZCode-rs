@@ -57,7 +57,7 @@ impl NodeHook {
             NodeHookKind::Command {
                 timeout: Some(seconds),
                 ..
-            } => seconds * 1000.0,
+            } => seconds * rust_cli_base::units::MS_PER_SECOND_F64,
             NodeHookKind::Command { timeout: None, .. } | NodeHookKind::Process { .. } => {
                 default_timeout_ms
             }
@@ -77,7 +77,9 @@ impl NodeHook {
 
     /// 转成 hooks crate 的 command hook；超时总是显式给出（秒）。
     pub fn to_command(&self, default_timeout_ms: f64, warnings: &mut Vec<String>) -> HookCommand {
-        let timeout = Some(self.resolved_timeout_ms(default_timeout_ms) / 1000.0);
+        let timeout = Some(
+            self.resolved_timeout_ms(default_timeout_ms) / rust_cli_base::units::MS_PER_SECOND_F64,
+        );
         let hook = match &self.kind {
             NodeHookKind::Command {
                 shell, background, ..

@@ -119,13 +119,9 @@ pub fn turn_id(uuid: &str) -> String {
     format!("turn_{uuid}")
 }
 
-/// `msg_<毫秒的 36 进制>_<uuid>`（Node `createMessageId`）里的毫秒；格式不符时为 `None`。
+/// `msg_<毫秒的 36 进制>_<uuid>`（Node `createMessageId`）里的毫秒；格式不符时为 `None`。解析只定义在 kernel-api。
 pub fn message_time(id: &str) -> Option<u64> {
-    let digits = id.strip_prefix("msg_")?.split_once('_')?.0;
-    if digits.is_empty() || digits.len() > 11 {
-        return None;
-    }
-    u64::from_str_radix(digits, 36).ok()
+    rust_cli_kernel_api::ids::message_created_ms(id)
 }
 
 /// 消息的创建时间：内核的消息 id 是 `msg_<创建毫秒>_<uuid>`（与 Node 相同），取其中的毫秒；
@@ -160,11 +156,14 @@ pub fn slugify(value: &str) -> String {
     }
 }
 
+/// 项目 ID 里 slug 的最多字符数。
+const MAX_PROJECT_SLUG_LEN: usize = 80;
+
 /// Node core `projectIdFromDirectory`：`proj_` 加 slug 的前 80 个字符（slug 只有 ASCII，按字节截取
 /// 等于 JS `slice`）。
 pub fn project_id(directory: &str) -> String {
     let slug = slugify(directory);
-    format!("proj_{}", &slug[..slug.len().min(80)])
+    format!("proj_{}", &slug[..slug.len().min(MAX_PROJECT_SLUG_LEN)])
 }
 
 #[cfg(test)]

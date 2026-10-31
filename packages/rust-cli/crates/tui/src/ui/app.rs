@@ -383,7 +383,7 @@ impl App {
             home,
             version,
             started: Instant::now(),
-            composer_width: 80,
+            composer_width: super::layout::DEFAULT_WIDTH,
             hits: Hits::default(),
             selection: None,
             composer_drag: None,

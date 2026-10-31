@@ -2,8 +2,13 @@
 //! Node `evaluateBashReadonlyPolicy` and `hasKnownBashWriteOption`
 //! (`bash-readonly-policy-argv*.ts`).
 use super::{callbacks, callbacks_net, flags::argv_allowed, js, tables::tables};
+use crate::consts::NEWER_XY_LETTERS;
 use crate::parse::Invocation;
+use rust_cli_base::path::DEV_NULL;
 use rust_cli_kernel_api::env_files::PathStyle;
+
+/// 命令名加一个参数时 argv 的长度（`cd DIR`、`history 5`）。
+const WITH_ONE_ARG: usize = 2;
 
 /// find 的写操作表。工作线 F53：Node 的表
 /// 少 bfs 的 `-rm`（等同 `-delete`）；find 换成内嵌的 bfs 之后 `find . -rm` 会删文件，以前却算只读。
@@ -98,11 +103,10 @@ pub(crate) fn strip_wrappers(argv: &[String]) -> &[String] {
                 words = &words[index..];
             }
             Some("builtin") => {
-                let index = if words.get(1).is_some_and(|w| w == "--") {
-                    2
-                } else {
-                    1
-                };
+                let mut index = 1;
+                if words.get(index).is_some_and(|w| w == "--") {
+                    index += 1;
+                }
                 if index >= words.len() {
                     return words;
                 }
@@ -138,7 +142,7 @@ fn redirects_allowed(part: &Invocation) -> bool {
         if r.operator == ">&" && js::is_digits(target) {
             return true;
         }
-        if target == "/dev/null" {
+        if target == DEV_NULL {
             return true;
         }
         if matches!(r.operator.as_str(), "<" | "<<" | "<&" | "<<<") {
@@ -207,7 +211,7 @@ pub(crate) fn evaluate(part: &Invocation, style: PathStyle) -> Option<bool> {
         return None;
     }
     let policy = tables.commands.get(name)?;
-    if name == "cd" && argv.len() > 2 {
+    if name == "cd" && argv.len() > WITH_ONE_ARG {
         return Some(false);
     }
     if policy.callback.is_some_and(|cb| cb(&argv[1..])) {
@@ -246,15 +250,16 @@ fn direct(argv: &[String]) -> Option<bool> {
     match name {
         "printf" => Some(super::printf::safe(argv)),
         "find" => Some(find_safe(argv)),
-        "history" => {
-            Some(argv.len() == 1 || (argv.len() == 2 && second.is_some_and(js::is_digits)))
-        }
-        "arch" => {
-            Some(argv.len() == 1 || (argv.len() == 2 && matches!(second, Some("-h" | "--help"))))
-        }
+        "history" => Some(
+            argv.len() == 1 || (argv.len() == WITH_ONE_ARG && second.is_some_and(js::is_digits)),
+        ),
+        "arch" => Some(
+            argv.len() == 1
+                || (argv.len() == WITH_ONE_ARG && matches!(second, Some("-h" | "--help"))),
+        ),
         "ifconfig" => Some(
             argv.len() == 1
-                || (argv.len() == 2
+                || (argv.len() == WITH_ONE_ARG
                     && second.is_some_and(|s| {
                         s.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
                     })),
@@ -289,7 +294,7 @@ fn find_safe(argv: &[String]) -> bool {
 fn newer_xy(word: &str) -> bool {
     word.strip_prefix("-newer").is_some_and(|r| {
         let r = r.as_bytes();
-        r.len() == 2 && b"aBcm".contains(&r[0]) && b"aBcmt".contains(&r[1])
+        r.len() == NEWER_XY_LETTERS && b"aBcm".contains(&r[0]) && b"aBcmt".contains(&r[1])
     })
 }
 

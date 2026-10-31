@@ -77,7 +77,9 @@ pub fn parse(numstat: &str, patch: &str, untracked: &str) -> Current {
     let mut files = Vec::new();
     let (mut count, mut added, mut removed) = (0, 0, 0);
     for line in numstat.lines().filter(|line| !line.is_empty()) {
-        let mut parts = line.splitn(3, '\t');
+        // `git diff --numstat`：新增、删除、路径三段。
+        const NUMSTAT_FIELDS: usize = 3;
+        let mut parts = line.splitn(NUMSTAT_FIELDS, '\t');
         let (Some(a), Some(d), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
             continue;
         };

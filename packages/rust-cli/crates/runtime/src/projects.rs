@@ -1,6 +1,7 @@
 //! ← 项目页与 `/resume` 页的内核部分（修复线 F29，docs/specs/rust-cli/tui-panels.md §2、tui-manage.md §10）：存储的
 //! 查询合并本进程里打开着的会话的状态与每个目录的分支；改名、删除与只读快照按“打开着的会话由 actor 管”分派。
 
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use std::collections::HashMap;
 
 use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
@@ -14,6 +15,9 @@ use rust_cli_kernel_api::store::{SessionQuery, SessionRecord};
 
 use super::workspace_sessions::{activity, last_reply};
 use super::*;
+
+/// 盘符 `C:` 的长度。
+const DRIVE_LEN: usize = rust_cli_base::path::DRIVE_PREFIX_LEN;
 
 /// 打开着的会话拒绝删除时的文字（tui-manage.md §10.6）。
 const OPEN_SESSION: &str = "The session is open in this window.";
@@ -77,7 +81,7 @@ fn normalize(path: &str) -> String {
 fn absolute(path: &str) -> bool {
     let bytes = path.as_bytes();
     path.starts_with(['/', '\\'])
-        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        || (bytes.len() >= DRIVE_LEN && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
 }
 
 /// 目录现在的 git 分支（tui-panels.md §2.1、D11）：从目录向上找 `.git`；是文件时按 `gitdir:` 找；读 `HEAD` 的
@@ -104,7 +108,7 @@ async fn branch(files: &dyn Files, environment: &EnvironmentId, root: &EnvPath) 
     };
     let mut dir = Some(root.as_str());
     while let Some(current) = dir {
-        let dot_git = join(current, ".git");
+        let dot_git = join(current, GIT_DIR);
         let stat = files
             .stat(
                 &workspace,

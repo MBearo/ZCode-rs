@@ -62,7 +62,7 @@ pub async fn ensure(dir: &Path) -> io::Result<()> {
 
     tokio::fs::DirBuilder::new()
         .recursive(true)
-        .mode(0o700)
+        .mode(rust_cli_base::proto::mode::PRIVATE_DIR)
         .create(dir)
         .await?;
     // O_NOFOLLOW：目录本身是符号链接时打开失败（ELOOP），不跟到别人指定的位置。
@@ -93,9 +93,13 @@ pub async fn ensure(dir: &Path) -> io::Result<()> {
     if metadata.uid() != uid() {
         return Err(owned_by(dir, metadata.uid()));
     }
-    if metadata.permissions().mode() & 0o777 != 0o700 {
-        file.set_permissions(std::fs::Permissions::from_mode(0o700))
-            .await?;
+    if metadata.permissions().mode() & rust_cli_base::proto::mode::PERMISSION_BITS
+        != rust_cli_base::proto::mode::PRIVATE_DIR
+    {
+        file.set_permissions(std::fs::Permissions::from_mode(
+            rust_cli_base::proto::mode::PRIVATE_DIR,
+        ))
+        .await?;
     }
     Ok(())
 }

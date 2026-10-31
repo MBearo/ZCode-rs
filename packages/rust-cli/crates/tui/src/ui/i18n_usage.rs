@@ -103,18 +103,22 @@ pub fn days(lang: Lang, n: u64) -> String {
     }
 }
 
+/// 英文月份的缩写（1 月到 12 月）。
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// 月份（1–12；超出时取最近的一端）的英文缩写：日期与 `/stats` 热力图的月份行共用。
+pub fn month_abbreviation(month: u32) -> &'static str {
+    MONTHS[usize::try_from(month.saturating_sub(1))
+        .unwrap_or(0)
+        .min(MONTHS.len() - 1)]
+}
+
 /// `toLocaleDateString("en-US", {month: "short", day: "numeric"})`；中文 `10月3日`。
 pub fn short_date(lang: Lang, month: u32, day: u32) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
     match lang {
-        Lang::En => format!(
-            "{} {day}",
-            MONTHS[usize::try_from(month.saturating_sub(1))
-                .unwrap_or(0)
-                .min(11)]
-        ),
+        Lang::En => format!("{} {day}", month_abbreviation(month)),
         Lang::Zh => format!("{month}月{day}日"),
     }
 }

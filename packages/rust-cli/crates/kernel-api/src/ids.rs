@@ -99,14 +99,25 @@ impl OwnerEpoch {
     pub const LOCAL: Self = Self(1);
 }
 
+/// 消息 ID 里创建毫秒的 36 进制位数上限（11 位够到公元 5 千年以后；更长的不是本格式）。
+const MAX_CREATED_MS_DIGITS: usize = 11;
+/// 消息 ID 里创建毫秒的进制。
+const CREATED_MS_RADIX: u32 = 36;
+
+/// Node 格式的消息 ID `msg_<36 进制毫秒>_<uuid>` 里的创建毫秒；格式不符时为 None。[`MessageId::created_ms`] 与
+/// node-store 的 `message_time` 共用（工作线 F122：以前两边各写一份）。
+pub fn message_created_ms(id: &str) -> Option<u64> {
+    let digits = id.strip_prefix("msg_")?.split_once('_')?.0;
+    if digits.is_empty() || digits.len() > MAX_CREATED_MS_DIGITS {
+        return None;
+    }
+    u64::from_str_radix(digits, CREATED_MS_RADIX).ok()
+}
+
 impl MessageId {
     /// Node 格式 `msg_<36 进制毫秒>_<uuid>` 里的创建毫秒（node-store 写进 `time_created` 的同一个值）；
     /// 格式不符时为 None。resume 复原会话任务时取 CronCreate 所在 assistant 消息的时间（tools-more.md §18.2）。
     pub fn created_ms(&self) -> Option<u64> {
-        let digits = self.0.strip_prefix("msg_")?.split_once('_')?.0;
-        if digits.is_empty() || digits.len() > 11 {
-            return None;
-        }
-        u64::from_str_radix(digits, 36).ok()
+        message_created_ms(&self.0)
     }
 }

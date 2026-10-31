@@ -221,14 +221,6 @@ impl rust_cli_kernel_api::orchestration::RunSink for OnMachine {
         self.0.commit_message(message).await
     }
 
-    async fn commit_intent(
-        &self,
-        operation: rust_cli_kernel_api::ids::OperationId,
-        fingerprint: String,
-    ) -> Result<(), rust_cli_kernel_api::store::StoreError> {
-        self.0.commit_intent(operation, fingerprint).await
-    }
-
     async fn emit(&self, event: rust_cli_kernel_api::orchestration::QueryEvent) -> bool {
         self.0.emit(event).await
     }

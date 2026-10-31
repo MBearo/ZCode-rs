@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 
+use rust_cli_base::{civil, units};
 use rust_cli_kernel_api::cron::{CronFireKind, LoopFold};
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::message::{ContentBlock, Message, SystemMessage, UserMessage, UserOrigin};
@@ -149,34 +150,22 @@ pub(crate) fn note(streak: u32) -> String {
     )
 }
 
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-/// 天数 → 公历的（年、月、日）（Howard Hinnant 的 `civil_from_days`）。
-fn civil(days: i64) -> (i64, usize, i64) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (year, usize::try_from(month - 1).unwrap_or(0), day)
-}
-
 /// 时刻的写法：`toLocaleString("en-US", {month: short, day, hour, minute: 2-digit})` 去掉逗号、`AM` 变成
 /// 紧接的小写 `am`（`Oct 18 3:04pm`）；本地时间 = UTC + 偏移分钟。
 pub(crate) fn label(at_ms: u64, offset_minutes: i32) -> String {
-    let minutes = i64::try_from(at_ms / 60_000).unwrap_or(0) + i64::from(offset_minutes);
-    let (_, month, day) = civil(minutes.div_euclid(1_440));
-    let of_day = minutes.rem_euclid(1_440);
-    let (hour, minute) = (of_day / 60, of_day % 60);
-    let twelve = if hour % 12 == 0 { 12 } else { hour % 12 };
-    let half = if hour < 12 { "am" } else { "pm" };
-    format!("{} {day} {twelve}:{minute:02}{half}", MONTHS[month])
+    // 公历、月份缩写与 12 小时制只定义在 base 的 `civil`。
+    let minutes =
+        i64::try_from(at_ms / units::MS_PER_MINUTE).unwrap_or(0) + i64::from(offset_minutes);
+    let (_, month, day) = civil::civil_from_days(minutes.div_euclid(units::MINUTES_PER_DAY as i64));
+    let of_day = minutes.rem_euclid(units::MINUTES_PER_DAY as i64);
+    let minutes_per_hour = units::MINUTES_PER_HOUR as i64;
+    let (hour, minute) = (of_day / minutes_per_hour, of_day % minutes_per_hour);
+    let (twelve, half) = civil::twelve_hour(u32::try_from(hour).unwrap_or(0));
+    let month = civil::MONTH_ABBREVIATIONS[month as usize - 1];
+    format!(
+        "{month} {day} {twelve}:{minute:02}{}",
+        half.to_ascii_lowercase()
+    )
 }
 
 /// 内核事件里的折叠（开始时间写成同样的格式）。

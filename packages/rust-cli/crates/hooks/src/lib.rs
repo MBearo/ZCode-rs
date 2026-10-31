@@ -26,6 +26,7 @@
 
 mod command;
 pub mod config;
+mod consts;
 mod effective;
 mod fold;
 mod fold_session;
@@ -51,6 +52,7 @@ mod test_support;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use async_trait::async_trait;
+use rust_cli_base::units;
 use rust_cli_kernel_api::hooks::{
     HookEvent, HookEventName, HookOutcome, HookRunner, StopCondition, StopVerdict,
 };
@@ -66,14 +68,19 @@ use crate::fold::Fold;
 use crate::http::HttpPolicy;
 use crate::run::Batch;
 
+/// 默认超时：UserPromptSubmit 与模型切换 30 秒、SessionEnd 1.5 秒、其他事件 10 分钟。
+const PROMPT_TIMEOUT_MS: u64 = 30 * units::MS_PER_SECOND;
+const SESSION_END_TIMEOUT_MS: u64 = 1_500;
+const DEFAULT_TIMEOUT_MS: u64 = 10 * units::MS_PER_MINUTE;
+
 /// 默认超时（其他事件 10 分钟；UserPromptSubmit 30 秒；SessionEnd 1.5 秒；模型切换 30 秒）。
 fn default_timeout_ms(event: HookEventName) -> u64 {
     match event {
         HookEventName::UserPromptSubmit
         | HookEventName::PreModelSwitch
-        | HookEventName::PostModelSwitch => 30_000,
-        HookEventName::SessionEnd => 1_500,
-        _ => 600_000,
+        | HookEventName::PostModelSwitch => PROMPT_TIMEOUT_MS,
+        HookEventName::SessionEnd => SESSION_END_TIMEOUT_MS,
+        _ => DEFAULT_TIMEOUT_MS,
     }
 }
 

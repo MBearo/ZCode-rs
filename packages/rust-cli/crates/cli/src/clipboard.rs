@@ -2,6 +2,7 @@
 //! 子进程只经 proc，读文件只经 fs。
 //! 读图片的命令把图片写到标准输出，不落临时文件：macOS `osascript` 打印 `«data PNGf…»`（十六进制），Linux `wl-paste` /
 //! `xclip` 打印字节，Windows PowerShell 打印 base64。写文字的命令从标准输入读。
+use rust_cli_base::proto::mime;
 use std::path::PathBuf;
 use std::process::Stdio;
 
@@ -10,6 +11,8 @@ use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use rust_cli_tui::{Clipboard, CopyRoute, ImageBytes};
 use tokio::io::AsyncWriteExt;
+
+use crate::consts;
 
 /// PowerShell：剪贴板里有图片时打印 PNG 的 base64，没有时退出码 1（`Get-Clipboard -Format Image`）。
 const POWERSHELL: &str = "$i = Get-Clipboard -Format Image; if ($i) { $m = New-Object System.IO.MemoryStream; $i.Save($m, [System.Drawing.Imaging.ImageFormat]::Png); [Convert]::ToBase64String($m.ToArray()) } else { exit 1 }";
@@ -148,25 +151,28 @@ pub(crate) fn readers(wayland: bool) -> Vec<Reader> {
     }
     let mut out = Vec::new();
     if wayland {
-        out.push(Reader::Bytes("wl-paste", &["--type", "image/png"]));
+        out.push(Reader::Bytes("wl-paste", &["--type", mime::PNG]));
     }
     out.push(Reader::Bytes(
         "xclip",
-        &["-selection", "clipboard", "-t", "image/png", "-o"],
+        &["-selection", "clipboard", "-t", mime::PNG, "-o"],
     ));
     out
 }
+
+/// 一个字节的十六进制位数。
+const HEX_DIGITS_PER_BYTE: usize = 2;
 
 /// `«data PNGf89504E47…»` → 字节；不是这个形状时为 None。
 pub(crate) fn parse_osascript(output: &[u8]) -> Option<Vec<u8>> {
     let text = String::from_utf8_lossy(output);
     let hex = text.trim().strip_prefix("«data PNGf")?.strip_suffix('»')?;
-    if hex.len() % 2 != 0 {
+    if hex.len() % HEX_DIGITS_PER_BYTE != 0 {
         return None;
     }
     (0..hex.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).ok())
+        .step_by(HEX_DIGITS_PER_BYTE)
+        .map(|at| u8::from_str_radix(&hex[at..at + HEX_DIGITS_PER_BYTE], consts::HEX_RADIX).ok())
         .collect()
 }
 
@@ -191,7 +197,7 @@ async fn read(reader: &Reader) -> Option<Vec<u8>> {
         Reader::Bytes(program, args) => {
             let out = run(program, args).await?;
             // 文件头判断（kernel-api `image::media_type`，与 Read、TUI 的粘贴同一个判断，F58）。
-            (rust_cli_kernel_api::image::media_type(&out) == Some("image/png")).then_some(out)
+            (rust_cli_kernel_api::image::media_type(&out) == Some(mime::PNG)).then_some(out)
         }
         Reader::PowerShell => {
             let out = run("powershell", &["-NoProfile", "-Command", POWERSHELL]).await?;

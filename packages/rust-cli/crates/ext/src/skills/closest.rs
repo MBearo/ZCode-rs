@@ -21,13 +21,16 @@ pub(super) fn distance(left: &str, right: &str) -> usize {
     row[right.len()]
 }
 
+/// 编辑距离不超过它时才给出“你是不是想用”。
+const MAX_DISTANCE: usize = 2;
+
 /// 不分大小写、编辑距离不超过 2 的最近的名字；距离相同时取先出现的。
 pub(super) fn closest<'a>(name: &str, names: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
     let wanted = name.to_lowercase();
     names
         .into_iter()
         .map(|candidate| (distance(&wanted, &candidate.to_lowercase()), candidate))
-        .filter(|(distance, _)| *distance <= 2)
+        .filter(|(distance, _)| *distance <= MAX_DISTANCE)
         .min_by_key(|(distance, _)| *distance)
         .map(|(_, candidate)| candidate)
 }

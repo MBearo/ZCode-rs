@@ -18,6 +18,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OPENCODE_GO, ZAI_ANTHROPIC } from "./fixture/model.mjs";
 import { ensureTypeScript, importNode, nodeRootFromArgs, repoRoot, withHome } from "./node-root.mjs";
 
 const { nodeRoot, args } = nodeRootFromArgs(process.argv.slice(2));
@@ -250,7 +251,7 @@ function attributionCases() {
   const cases = [];
   for (const owner of owners)
     for (const [source, querySource] of SOURCES)
-      for (const baseUrl of ["https://api.z.ai/api/anthropic", "https://opencode.ai/zen/go/v1/"])
+      for (const baseUrl of [ZAI_ANTHROPIC, `${OPENCODE_GO}/`])
         cases.push({ ...owner, source, querySource, baseUrl });
   return cases;
 }

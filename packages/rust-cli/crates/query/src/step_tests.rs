@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use rust_cli_base::models::{DEEPSEEK_V4_PRO, GLM_5_3};
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::manage::McpServerState;
 use rust_cli_kernel_api::mcp_state::McpView;
@@ -162,8 +163,7 @@ async fn run_with(
 #[tokio::test]
 async fn wait_for_mcp_servers_is_dropped_when_tool_search_is_on() {
     let registry = mcp_registry();
-    let (requests, turns) =
-        run_with(registry.clone(), "claude-opus-5-5", QuerySource::MainThread).await;
+    let (requests, turns) = run_with(registry.clone(), GLM_5_3, QuerySource::MainThread).await;
     assert!(!wire_names(&requests[0]).contains(&"WaitForMcpServers".to_owned()));
     assert!(!turns[0].0.contains(&"WaitForMcpServers".to_owned()));
     assert!(registry.mcp.declared.lock().unwrap().is_empty());
@@ -177,7 +177,8 @@ async fn wait_for_mcp_servers_is_dropped_when_tool_search_is_on() {
 #[tokio::test]
 async fn wait_for_mcp_servers_is_dropped_with_local_tool_search() {
     let registry = mcp_registry();
-    let (requests, turns) = run_with(registry.clone(), "glm-4.6", QuerySource::MainThread).await;
+    let (requests, turns) =
+        run_with(registry.clone(), DEEPSEEK_V4_PRO, QuerySource::MainThread).await;
     // 没有延迟工具，ToolSearch 不发（§3.3 第 3 条）；WaitForMcpServers 看的是“开着且工具里有 ToolSearch”，同样去掉。
     assert_eq!(wire_names(&requests[0]), ["Echo"]);
     assert!(!turns[0].0.contains(&"WaitForMcpServers".to_owned()));
@@ -187,7 +188,7 @@ async fn wait_for_mcp_servers_is_dropped_with_local_tool_search() {
 #[tokio::test]
 async fn wait_for_mcp_servers_is_sent_and_declared_without_tool_search() {
     let registry = mcp_registry_without_search();
-    let (requests, _) = run_with(registry.clone(), "glm-4.6", QuerySource::MainThread).await;
+    let (requests, _) = run_with(registry.clone(), GLM_5_3, QuerySource::MainThread).await;
     assert!(wire_names(&requests[0]).contains(&"WaitForMcpServers".to_owned()));
     let declared: Vec<String> = registry
         .mcp
@@ -202,7 +203,7 @@ async fn wait_for_mcp_servers_is_sent_and_declared_without_tool_search() {
     let registry = mcp_registry_without_search();
     let (requests, _) = run_with(
         registry.clone(),
-        "glm-4.6",
+        GLM_5_3,
         QuerySource::Subagent("general-purpose".to_owned()),
     )
     .await;

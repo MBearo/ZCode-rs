@@ -18,6 +18,11 @@ use serde_json::{Value, json};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+/// JSON-RPC 的“方法不存在”错误码。
+pub(super) const METHOD_NOT_FOUND: i64 = -32_601;
+/// DEL：文件 URL 里要百分号编码（它与更大的字节）。
+const DEL: u8 = 0x7f;
+
 /// 一次请求的失败。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum RpcError {
@@ -74,7 +79,7 @@ fn answer(method: &str, roots: &[String]) -> Result<Value, (i64, String)> {
                 .collect();
             Ok(json!({ "roots": roots }))
         }
-        other => Err((-32601, format!("Method not found: {other}"))),
+        other => Err((METHOD_NOT_FOUND, format!("Method not found: {other}"))),
     }
 }
 
@@ -114,7 +119,7 @@ fn file_url(encoded: &str) -> String {
 fn encode_file_path(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
     for byte in path.bytes() {
-        let escape = byte <= b' ' || byte >= 0x7f || b"\"#%<>?[\\]^`{|}~".contains(&byte);
+        let escape = byte <= b' ' || byte >= DEL || b"\"#%<>?[\\]^`{|}~".contains(&byte);
         if escape {
             out.push_str(&format!("%{byte:02X}"));
         } else {

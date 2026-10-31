@@ -25,5 +25,7 @@ tokio-util.workspace = true
 unicode-width.workspace = true
 
 [dev-dependencies]
+# 测试的模型常量（base 的 `models`，工作线 F121）。
+rust-cli-base.workspace = true
 rust-cli-kernel-api = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

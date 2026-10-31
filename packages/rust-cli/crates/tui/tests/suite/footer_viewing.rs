@@ -124,11 +124,12 @@ async fn requested(model: &GatedModel, count: usize) {
     }
 }
 
-/// footer 那一行（有 ctx 的那一行；transcript 顶上的启动头也写模型名，不能按模型名找）。
+/// footer 那一行（有 ctx 的那一行；transcript 顶上的启动头也写模型名，不能按模型名找）。没有 TPS 时 ctx 是右侧
+/// 第一项、前面是空白（F116 起模型名在最右），所以不按 ` · ctx ` 找。
 fn footer_line(screen: &str) -> String {
     screen
         .lines()
-        .find(|line| line.contains(" · ctx "))
+        .find(|line| line.contains(" ctx ") && line.contains('%'))
         .unwrap_or_default()
         .to_owned()
 }
@@ -190,7 +191,7 @@ async fn viewing_a_subagent_switches_the_footer_stats() {
             .await;
         let viewed = footer_line(&screen);
         assert!(
-            viewed.contains("scripted · 90 tok/s · ctx 2.3% · cache 75.0%"),
+            viewed.contains("90 tok/s · ctx 2.3% · cache 75.0% · scripted"),
             "{viewed}"
         );
         for main in ["cache 80.0%", "ctx 0.6%", "esc to interrupt"] {

@@ -277,7 +277,7 @@ pub fn lines(
     width: usize,
 ) -> Vec<Line<'static>> {
     let accent = palette.accent;
-    let keys = |template: &str| super::key_hint::line(2, template, palette);
+    let keys = |template: &str| super::key_hint::line(super::layout::INDENT, template, palette);
     let rule = Line::from(Span::styled("─".repeat(width), Style::default().fg(accent)));
     let mut lines = vec![rule];
     match view {

@@ -13,6 +13,7 @@ use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{
     EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ShellTaskId,
 };
+use rust_cli_kernel_api::machine::CommandEvents;
 
 use super::*;
 
@@ -82,19 +83,16 @@ pub(super) struct Ran {
 }
 
 async fn run(fixture: &Fixture, operation: &str, start: StartCommand) -> Ran {
-    fixture
+    let events = fixture
         .shells
         .start(context(operation), start)
         .await
         .unwrap();
-    collect(fixture, operation).await
+    collect(events).await
 }
 
-pub(super) async fn collect(fixture: &Fixture, operation: &str) -> Ran {
-    let mut events = fixture
-        .shells
-        .watch(&OperationId::new(operation), 0)
-        .unwrap();
+/// 读完 `start` 返回的流（工作线 F119：结束的命令不留登记，不能再按 ID 查）。
+pub(super) async fn collect(mut events: CommandEvents) -> Ran {
     assert!(matches!(
         events.next().await,
         Some(Ok(CommandEvent::Started { .. }))
@@ -165,7 +163,7 @@ fn shell_config_debug_hides_the_environment_values() {
 /// 远端执行 F96（remote-exec.md §23.5）：执行器的服务端按客户端实例填的 `StartCommand.env` 加在投影之后（`None` 是去掉
 /// 这个变量）；它不进去重的指纹：同一个操作重放时变量不同也是同一次（不报参数不同）。
 #[tokio::test]
-async fn command_overrides_are_added_after_the_projection_and_not_fingerprinted() {
+async fn command_overrides_are_added_after_the_projection() {
     let fixture = fixture(vec![
         ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
         (
@@ -188,13 +186,6 @@ async fn command_overrides_are_added_after_the_projection_and_not_fingerprinted(
         ("F96_TOKEN".to_owned(), Some("t".to_owned())),
     ]
     .into();
-    let ran = run(&fixture, "op_env", start.clone()).await;
+    let ran = run(&fixture, "op_env", start).await;
     assert_eq!(ran.output, "/tmp/ssh-new/agent.2|unset|t");
-    // 重放：变量变了也认出是同一个操作。
-    start.env.clear();
-    fixture
-        .shells
-        .start(context("op_env"), start)
-        .await
-        .unwrap();
 }

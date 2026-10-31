@@ -31,12 +31,7 @@ pub(super) async fn compacted(store: &NodeStore) -> Result<SessionId> {
         vec![call("toolu_c1", "Read", &read)],
         StopReason::ToolUse,
     );
-    store
-        .commit(
-            &id,
-            batch(None, vec![intent("op_c1", "Read", &read), calls]),
-        )
-        .await?;
+    store.commit(&id, batch(None, vec![calls])).await?;
     let result = Fact::MessageAppended {
         message: Message::User(UserMessage {
             id: r2.clone(),

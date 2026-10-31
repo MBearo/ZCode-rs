@@ -214,7 +214,8 @@ impl Commands for TextEnv {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         _request: rust_cli_kernel_api::env::StartCommand,
-    ) -> Result<(), rust_cli_kernel_api::env::EnvError> {
+    ) -> Result<rust_cli_kernel_api::machine::CommandEvents, rust_cli_kernel_api::env::EnvError>
+    {
         Err(unsupported())
     }
 
@@ -234,13 +235,6 @@ impl Commands for TextEnv {
         &self,
         _operation: OperationId,
     ) -> Result<(), rust_cli_kernel_api::env::EnvError> {
-        Err(unsupported())
-    }
-
-    async fn operation_status(
-        &self,
-        _operation: OperationId,
-    ) -> Result<rust_cli_kernel_api::env::Outcome, rust_cli_kernel_api::env::EnvError> {
         Err(unsupported())
     }
 

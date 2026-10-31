@@ -1,5 +1,6 @@
 //! Stats 标签页的派生值与排版（usage.md §5）。
 use ratatui::text::Line;
+use rust_cli_base::models::{GLM_4_6, GLM_5_3};
 use rust_cli_kernel_api::metering::{ActivityDay, ActivityRange, ActivityStats, ModelTokens};
 
 use super::*;
@@ -54,8 +55,8 @@ fn stats() -> ActivityStats {
             day("2026-10-18", 2),
         ],
         models: vec![
-            model("opus", 1_000_000, 200_000),
-            model("haiku", 1_000, 500),
+            model(GLM_5_3, 1_000_000, 200_000),
+            model(GLM_4_6, 1_000, 500),
         ],
         sessions: 2,
         longest_session_ms: Some(2 * DAY + 60_000),
@@ -128,7 +129,10 @@ fn the_overview_uses_fixed_labels_and_columns() {
     assert_eq!(body[0], "All time \u{b7} Last 7 days \u{b7} Last 30 days");
     // 两列各宽 28、间隔 4：右列从第 32 列开始。
     let two = |left: &str, right: &str| format!("{left:<32}{right}");
-    assert_eq!(body[2], two("Favorite model: opus", "Total tokens: 1.2m"));
+    assert_eq!(
+        body[2],
+        two(&format!("Favorite model: {GLM_5_3}"), "Total tokens: 1.2m")
+    );
     assert_eq!(body[4], two("Sessions: 2", "Longest session: 2d 0h 1m"));
     assert_eq!(body[5], two("Active days: 4/11", "Longest streak: 2 days"));
     assert_eq!(
@@ -179,7 +183,10 @@ fn chinese_labels_keep_the_layout() {
         Lang::Zh,
     ));
     let text = lines.join("\n");
-    assert!(text.contains("最常用的模型： opus"), "{text}");
+    assert!(
+        text.contains(&format!("最常用的模型： {GLM_5_3}")),
+        "{text}"
+    );
     assert!(text.contains("最活跃的一天： 10月12日"), "{text}");
     assert!(text.contains("当前连续： 2 天"), "{text}");
     assert!(lines[0].contains("10月"), "{text}");

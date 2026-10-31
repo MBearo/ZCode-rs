@@ -27,20 +27,12 @@ pub(crate) const PDFS: &str = "pdfs-2024-09-25";
 pub(crate) const NODE_STRUCTURED_OUTPUTS: &str = "structured-outputs-2025-11-13";
 
 /// AI SDK 3.0.81 的 `getModelCapabilities` 里支持 structured output 的模型（按子串认）：带普通工具时它发
-/// `structured-outputs-2025-11-13`。表里其他 `claude-sonnet-4-` / `claude-opus-4-` 的版本不支持。
-const NODE_STRUCTURED_OUTPUT_MODELS: [&str; 8] = [
-    "claude-opus-4-8",
-    "claude-opus-4-7",
-    "claude-sonnet-4-6",
-    "claude-opus-4-6",
-    "claude-sonnet-4-5",
-    "claude-opus-4-5",
-    "claude-haiku-4-5",
-    "claude-opus-4-1",
-];
+/// `structured-outputs-2025-11-13`。清单在 base 的 `models`（工作线 F121）。
+const NODE_STRUCTURED_OUTPUT_MODELS: [&str; 8] =
+    rust_cli_base::models::ANTHROPIC_STRUCTURED_OUTPUT_MODELS;
 
 /// PDF 的 media type。
-const PDF: &str = "application/pdf";
+const PDF: &str = rust_cli_base::proto::mime::PDF;
 
 /// 请求体的 `messages` 里与 beta 有关的三项（修复线 F6：消息直接写成文本，不再有值可看，改从类型化消息判断）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

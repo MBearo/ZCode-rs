@@ -15,6 +15,7 @@ mod closing;
 mod compact;
 mod cron;
 mod detached;
+mod duration;
 mod fork;
 mod fork_input;
 mod goal;

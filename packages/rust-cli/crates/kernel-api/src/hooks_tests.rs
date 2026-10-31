@@ -42,7 +42,7 @@ fn hook_event_round_trips_and_old_payloads_get_defaults() {
             run: Some(RunId::new("run_1")),
             selection: Some(crate::model::ModelSelection {
                 provider: "anthropic".to_owned(),
-                model: "claude-opus-5-5".to_owned(),
+                model: rust_cli_base::models::GLM_5_3.to_owned(),
                 reasoning: None,
                 connection: None,
             }),

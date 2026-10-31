@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::check::{AskKind, Check, Inputs};
+use crate::consts::SHORT_OPTION_LEN;
 use crate::parse::Invocation;
 use crate::removal::{basename, strip_runners};
 use crate::shell_argv;
@@ -240,7 +241,7 @@ fn substitute(script: &str, values: &[String], patterns: &Patterns) -> Option<St
         let body = &rest[1..];
         let (name, width) = if let Some(inner) = body.strip_prefix('{') {
             let end = inner.find('}')?;
-            (&inner[..end], end + 2)
+            (&inner[..end], end + "{}".len())
         } else {
             match body.chars().next() {
                 Some(c @ ('@' | '*' | '#')) => (&body[..c.len_utf8()], c.len_utf8()),
@@ -255,7 +256,8 @@ fn substitute(script: &str, values: &[String], patterns: &Patterns) -> Option<St
         let value = match name {
             "#" => (shown.len().saturating_sub(1)).to_string(),
             "@" | "*" => {
-                if shown.len() > 2 {
+                // 有第二个位置参数时 `$@` 不止一个词，不代入。
+                if shown.get(2).is_some() {
                     return None;
                 }
                 shown.get(1).copied().unwrap_or_default().to_owned()
@@ -301,7 +303,7 @@ fn script_of(argv: &[String], patterns: &Patterns) -> Option<Script> {
             at += 1;
             break;
         }
-        if word.chars().count() < 2 || !word.starts_with(['-', '+']) {
+        if word.chars().count() < SHORT_OPTION_LEN || !word.starts_with(['-', '+']) {
             break;
         }
         let known = sh_family
@@ -366,12 +368,14 @@ fn script_of(argv: &[String], patterns: &Patterns) -> Option<Script> {
             judged: Some(script.clone()),
         });
     }
+    // 脚本之后是 `$0`，再之后是 `$1` 起的位置参数。
+    let dollar_zero = at + 1;
     let mut values = vec![
-        rest.get(at + 1)
+        rest.get(dollar_zero)
             .cloned()
             .unwrap_or_else(|| words[0].clone()),
     ];
-    values.extend(rest.iter().skip(at + 2).cloned());
+    values.extend(rest.iter().skip(dollar_zero + 1).cloned());
     Some(Script {
         text: script.clone(),
         judged: substitute(script, &values, patterns),

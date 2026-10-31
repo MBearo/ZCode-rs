@@ -13,6 +13,8 @@ pub const MAX_LINES: usize = 200;
 pub const MAX_CHARS: usize = 25_000;
 
 const NEWLINE: u16 = b'\n' as u16;
+/// 截断说明里引用的下一行最多的长度（UTF-16 码元）。
+const NEXT_LINE_PREVIEW_CHARS: usize = 80;
 
 /// 超长时截到最后一个完整的词（太短就硬截，上限 80），加省略号。
 fn shorten(text: &[u16], max: usize) -> String {
@@ -92,7 +94,7 @@ pub fn truncate(raw: &str) -> String {
         let next = if next_line.is_empty() {
             String::new()
         } else {
-            format!(" (\"{}\")", shorten(&next_line, 80))
+            format!(" (\"{}\")", shorten(&next_line, NEXT_LINE_PREVIEW_CHARS))
         };
         format!(
             "{} of {line_count} lines were cut off, starting at line {}{next}",

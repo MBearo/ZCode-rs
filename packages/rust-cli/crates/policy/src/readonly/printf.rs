@@ -35,7 +35,10 @@ pub(crate) fn safe(argv: &[String]) -> bool {
     if first.is_some_and(|f| f.starts_with('-') && f != "--") {
         return false;
     }
-    let format_index = if first == Some("--") { 2 } else { 1 };
+    let mut format_index = 1;
+    if first == Some("--") {
+        format_index += 1;
+    }
     let format = argv.get(format_index).map_or("", String::as_str);
     if format.contains('$') {
         return false;

@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::{Value, json};
 use sse::Reply;
 
@@ -48,7 +49,7 @@ fn texts(request: &Value) -> String {
     out
 }
 
-/// 最后一条 tool_result 的文本。
+/// 最后一条 tool_result 的文本（去掉并进来的提醒，[`sse::tool_output`]）。
 fn last_result(request: &Value) -> String {
     let mut found = String::new();
     for message in request["messages"].as_array().into_iter().flatten() {
@@ -66,7 +67,7 @@ fn last_result(request: &Value) -> String {
             };
         }
     }
-    found
+    sse::tool_output(&found).to_owned()
 }
 
 fn call(id: &str, name: &str, input: &Value) -> String {
@@ -120,7 +121,7 @@ fn zcode(sandbox: &Sandbox, cwd: &Path, url: &str, args: &[&str], extra: &[(&str
         .env("ZCODE_DATA_BASE_DIR", &sandbox.home)
         .env("ZCODE_MODEL_BASE_URL", url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Origin, Outcome,
-    ReadFile, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Origin, ReadFile,
+    WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_shell::{BackgroundStop, ShellState};
 use rust_cli_kernel_api::ids::{
@@ -67,11 +67,12 @@ impl Commands for Env {
     async fn start_command(
         &self,
         _w: &WorkspaceRef,
-        _c: OperationContext,
+        c: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
+        let operation = c.operation;
         self.started.lock().unwrap().push(request);
-        Ok(())
+        Ok(self.watch_command(operation, 0))
     }
 
     fn watch_command(
@@ -87,10 +88,6 @@ impl Commands for Env {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 
@@ -150,6 +147,7 @@ impl Interactions for Owner {
         &self,
         _session: &SessionId,
         monitor: MonitorArmed,
+        _events: rust_cli_kernel_api::machine::CommandEvents,
     ) -> Result<(), OrchestrationError> {
         if self.refuse {
             return Err(OrchestrationError::Unsupported {

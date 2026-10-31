@@ -10,6 +10,13 @@ use bytes::Bytes;
 use rust_cli_exec_server::CallKey;
 use serde::{Deserialize, Serialize};
 
+/// base64 每这么多字节写成 [`BASE64_CHARS`] 个字符（估算回复在日志里的长度）。
+const BASE64_BYTES: u64 = 3;
+/// base64 每 [`BASE64_BYTES`] 个字节写成的字符数。
+const BASE64_CHARS: u64 = 4;
+/// 一条记录除了指纹与回复之外大约占的字节数（键、调用 ID、时刻与 JSON 的结构）。
+const ENTRY_OVERHEAD_BYTES: u64 = 96;
+
 /// 一条记录。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Record {
@@ -58,10 +65,10 @@ impl Entry {
     /// 这一项在日志里大约占多少字节（压缩与大小上限按它估）。
     pub fn weight(&self) -> u64 {
         let reply = match &self.state {
-            State::Done(reply) => reply.len() as u64 * 4 / 3,
+            State::Done(reply) => reply.len() as u64 * BASE64_CHARS / BASE64_BYTES,
             State::Running | State::Tomb => 0,
         };
-        96 + self.fingerprint.len() as u64 + reply
+        ENTRY_OVERHEAD_BYTES + self.fingerprint.len() as u64 + reply
     }
 }
 

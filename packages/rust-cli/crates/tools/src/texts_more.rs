@@ -34,7 +34,7 @@ pub(crate) const NO_ANSWER: &str = "The user did not answer the questions.";
 
 /// AskUserQuestion 结果：空闲到期自动提交（工作线 F72，tools-more.md §1.1）。秒数四舍五入。
 pub(crate) fn idle_timeout(timeout_ms: u64) -> String {
-    let seconds = (timeout_ms + 500) / 1000;
+    let seconds = rust_cli_base::units::round_ms_to_seconds(timeout_ms);
     format!(
         "No response after {seconds}s \u{2014} the user may be away from keyboard. Proceed using your best judgment based on the context so far; you can re-ask this question later if it's still relevant."
     )

@@ -40,6 +40,10 @@ const TOP: &[(&str, Kind)] = &[
 ];
 
 const CONTEXT: &[(&str, Kind)] = &[("additionalContext", Kind::Str)];
+/// 至少这么多行、每行都是 JSON 时算 JSON lines。
+const MIN_JSON_LINES: usize = 2;
+/// HTTP hook 的正文不是 JSON 时，说明里最多给出这么多个字符。
+const MAX_SHOWN_BODY_CHARS: usize = 200;
 
 /// 各事件的 `hookSpecificOutput` 字段。
 fn specific(event: &str) -> Option<&'static [(&'static str, Kind)]> {
@@ -162,7 +166,7 @@ fn json_lines(text: &str) -> bool {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .collect();
-    lines.len() >= 2
+    lines.len() >= MIN_JSON_LINES
         && lines.iter().all(|line| {
             serde_json::from_str::<Value>(line.trim()).is_ok_and(|value| {
                 value
@@ -199,8 +203,14 @@ pub(crate) fn parse_http(body: &str) -> Parsed {
         return Parsed::Json(Map::new());
     }
     if !trimmed.starts_with('{') {
-        let shown: String = if trimmed.chars().count() > 200 {
-            format!("{}\u{2026}", trimmed.chars().take(200).collect::<String>())
+        let shown: String = if trimmed.chars().count() > MAX_SHOWN_BODY_CHARS {
+            format!(
+                "{}\u{2026}",
+                trimmed
+                    .chars()
+                    .take(MAX_SHOWN_BODY_CHARS)
+                    .collect::<String>()
+            )
         } else {
             trimmed.to_owned()
         };

@@ -7,6 +7,7 @@
 )]
 
 use futures_util::StreamExt;
+use rust_cli_base::models;
 use rust_cli_kernel_api::model::{
     ModelError, ModelEvent, ModelNotice, ModelPort, ModelStreamItem, QuerySource,
 };
@@ -192,7 +193,7 @@ async fn overloads_in_the_head_and_the_stream_share_the_count() {
     .await;
     let model = model_at(server.url(), fast_retry(5)).await;
     let mut with_fallback = request("hi", QuerySource::MainThread);
-    with_fallback.options.fallback_model = Some("claude-haiku-4-5".to_owned());
+    with_fallback.options.fallback_model = Some(models::GLM_5_3_FLASH.to_owned());
     let events: Vec<_> = model
         .stream(with_fallback, CancellationToken::new())
         .collect()
@@ -200,8 +201,8 @@ async fn overloads_in_the_head_and_the_stream_share_the_count() {
     assert_eq!(
         events,
         vec![Err(ModelError::FallbackTriggered {
-            original_model: "claude-sonnet-4-5".to_owned(),
-            fallback_model: "claude-haiku-4-5".to_owned(),
+            original_model: models::GLM_5_3.to_owned(),
+            fallback_model: models::GLM_5_3_FLASH.to_owned(),
         })]
     );
     assert_eq!(server.requests().len(), 3);

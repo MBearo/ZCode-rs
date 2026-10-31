@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use rust_cli_fs::{FileMode, ParentDir, TempName, WriteOptions};
 
 /// 交接变量：启动器给的交接文件的路径（只在 Windows 上设，每次启动一个新路径）。
-pub(crate) const VARIABLE: &str = "ZCODE_MANAGED_UPDATE_HANDOFF";
+pub(crate) const VARIABLE: &str = rust_cli_base::names::env::ZCODE_MANAGED_UPDATE_HANDOFF;
 /// `zcode update` 的目标：npm 的 dist-tag（不查版本，与 Unix 的 `npm install -g <包>` 一样装 latest）。
 pub(crate) const LATEST: &str = "latest";
 

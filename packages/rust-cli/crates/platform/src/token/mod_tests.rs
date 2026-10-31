@@ -1,6 +1,7 @@
 //! 项目令牌的键与归一（platform.md §5.4）：与 Node 的写法逐字相同。
 
 use super::*;
+use rust_cli_base::hosts;
 
 #[test]
 fn login_tokens_drop_a_bearer_prefix() {
@@ -23,8 +24,11 @@ fn location_keys_match_the_app() {
     // App：encodeURIComponent(JSON.stringify(["https://api.z.ai","zai","user 1/é",null,1,"non-team"]))。修复线 F47
     // 以前按 Node 独立 CLI 写 "default"（不排除团队项目）。
     assert_eq!(
-        location::storage_key("https://api.z.ai", Family::Zai, "user 1/é", None),
-        "project-key-location:v1:%5B%22https%3A%2F%2Fapi.z.ai%22%2C%22zai%22%2C%22user%201%2F%C3%A9%22%2Cnull%2C1%2C%22non-team%22%5D"
+        location::storage_key(hosts::ZAI_API, Family::Zai, "user 1/é", None),
+        format!(
+            "project-key-location:v1:%5B%22https%3A%2F%2F{}%22%2C%22zai%22%2C%22user%201%2F%C3%A9%22%2Cnull%2C1%2C%22non-team%22%5D",
+            hosts::ZAI_API.trim_start_matches("https://")
+        )
     );
     // 团队：[…, {organizationId, projectId}, 1, null]。
     let team = TeamProject {
@@ -32,7 +36,7 @@ fn location_keys_match_the_app() {
         project_id: "p/t".to_owned(),
     };
     assert_eq!(
-        location::storage_key("https://bigmodel.cn", Family::Bigmodel, "u-1", Some(&team)),
+        location::storage_key(hosts::BIGMODEL_ORIGIN, Family::Bigmodel, "u-1", Some(&team)),
         "project-key-location:v1:%5B%22https%3A%2F%2Fbigmodel.cn%22%2C%22bigmodel%22%2C%22u-1%22%2C%7B%22organizationId%22%3A%22org%20t%22%2C%22projectId%22%3A%22p%2Ft%22%7D%2C1%2Cnull%5D"
     );
     assert_eq!(
@@ -58,7 +62,10 @@ fn location_keys_match_the_app() {
         None
     );
     assert_eq!(
-        location.issue_url("https://bigmodel.cn"),
-        "https://bigmodel.cn/api/biz/v1/organization/org%2F1/projects/p%201/api_keys/k1/access_tokens"
+        location.issue_url(hosts::BIGMODEL_ORIGIN),
+        format!(
+            "{}/api/biz/v1/organization/org%2F1/projects/p%201/api_keys/k1/access_tokens",
+            hosts::BIGMODEL_ORIGIN
+        )
     );
 }

@@ -32,6 +32,9 @@ use crate::texts_more as texts;
 use crate::tool_search_keywords::{self as keywords, Candidate};
 use crate::tool_search_mcp;
 
+/// 没有给 `max_results` 时最多返回几个。
+const DEFAULT_MAX_RESULTS: usize = 5;
+
 /// 主线程注册表的弱引用（避免 注册表 → 工具 → 目录 → 注册表 的 `Arc` 环）与 `ENABLE_TOOL_SEARCH` 的设置（缺省开）。
 #[derive(Default)]
 pub struct ToolCatalog {
@@ -259,7 +262,7 @@ impl Tool for ToolSearchTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(100_000)
+        Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
     }
 
     /// 没有专属的权限检查，默认放行。
@@ -287,7 +290,7 @@ impl Tool for ToolSearchTool {
             .get("max_results")
             .and_then(Value::as_f64)
             .filter(|max| max.is_finite() && *max >= 0.0)
-            .map_or(5, |max| max as usize);
+            .map_or(DEFAULT_MAX_RESULTS, |max| max as usize);
         let all = self
             .catalog
             .tools()

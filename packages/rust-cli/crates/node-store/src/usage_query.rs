@@ -1,6 +1,7 @@
 //! `/usage` 的两个只读查询（docs/specs/rust-cli/usage.md §4、§5.2）：都是聚合 SQL，不把消息或用量行整表读进
 //! 内存。会话的开始与时长、按天的消息数只扫 `message_session_time_created_id_idx`。
 use rusqlite::Connection;
+use rust_cli_base::{civil, units};
 use rust_cli_kernel_api::clock::civil_date;
 use rust_cli_kernel_api::metering::{
     ActivityDay, ActivityQuery, ActivityRange, ActivityStats, ModelTokens, SessionMetering,
@@ -82,21 +83,18 @@ pub(crate) const MODELS: &str = "select model_id,
     where query_source in ('main_turn', 'subagent', 'workflow_child') and started_at >= ?1
     group by model_id";
 
-/// `YYYY-MM-DD` → 自 1970-01-01 的天数（Howard Hinnant 的 days_from_civil）。
+/// `YYYY-MM-DD` → 自 1970-01-01 的天数（宽松：三段都按整数读，不查位数与范围；公历换算只定义在 base 的 `civil`）。
+/// 日数在换算里是线性的（`+ 日 − 1`），所以按 1 日换算再加上去，超出 1–31 的日数与以前一样往后（前）数。
 pub(crate) fn day_index(date: &str) -> Option<i64> {
-    let mut parts = date.splitn(3, '-').map(str::parse::<i64>);
+    // 年、月、日三段。
+    const FIELDS: usize = 3;
+    let mut parts = date.splitn(FIELDS, '-').map(str::parse::<i64>);
     let (year, month, day) = (
         parts.next()?.ok()?,
         parts.next()?.ok()?,
         parts.next()?.ok()?,
     );
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let shifted = (month + 9) % 12;
-    let day_of_year = (153 * shifted + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    Some(era * 146_097 + day_of_era - 719_468)
+    Some(civil::days_from_civil(year, u32::try_from(month).ok()?, 1) + day - 1)
 }
 
 fn to_u64(value: i64) -> u64 {
@@ -104,7 +102,7 @@ fn to_u64(value: i64) -> u64 {
 }
 
 pub fn activity(conn: &Connection, query: &ActivityQuery) -> Result<ActivityStats, StoreError> {
-    let offset = i64::from(query.utc_offset_minutes) * 60_000;
+    let offset = i64::from(query.utc_offset_minutes) * units::MS_PER_MINUTE as i64;
     let today =
         day_index(&query.today).ok_or_else(|| storage(format!("not a date: {}", query.today)))?;
     // 7 天与 30 天从 today − (N − 1) 的本地日开始；本地日 d 从 UTC 毫秒 d·DAY − 偏移开始。

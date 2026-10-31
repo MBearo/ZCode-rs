@@ -2,6 +2,7 @@
 //!
 //! 入口层读配置文件、展开 `${VAR}`、按作用域合并，交给 ext 的只是这份快照。
 
+use rust_cli_base::units;
 use rust_cli_kernel_api::mcp::McpTransportConfig;
 
 /// 配置作用域。
@@ -69,13 +70,20 @@ impl McpSettings {
     }
 }
 
+/// 连接一个服务器的缺省超时（`MCP_TIMEOUT`）。
+const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 30 * units::MS_PER_SECOND;
+/// 一次工具调用的缺省超时（`MCP_TOOL_TIMEOUT`，约 27.8 小时，实际不限）。
+const DEFAULT_TOOL_TIMEOUT_MS: u64 = 100_000_000;
+/// 工具结果的缺省 token 上限（`MAX_MCP_OUTPUT_TOKENS`）。
+const DEFAULT_MAX_OUTPUT_TOKENS: u64 = 25_000;
+
 impl Default for McpSettings {
     fn default() -> Self {
         Self {
             servers: Vec::new(),
-            connect_timeout_ms: 30_000,
-            tool_timeout_ms: 100_000_000,
-            max_output_tokens: 25_000,
+            connect_timeout_ms: DEFAULT_CONNECT_TIMEOUT_MS,
+            tool_timeout_ms: DEFAULT_TOOL_TIMEOUT_MS,
+            max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
             client_version: String::new(),
             startup: super::startup::McpStartup::default(),
         }

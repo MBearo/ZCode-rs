@@ -20,7 +20,7 @@ pub struct EmbeddedSearch {
 }
 
 /// 每条命令的环境里本进程二进制的变量名（本工程的 `ZCODE_*` 名字，F42）。
-pub(crate) const EXECPATH: &str = "ZCODE_EXECPATH";
+pub(crate) const EXECPATH: &str = rust_cli_base::names::env::ZCODE_EXECPATH;
 
 /// grep 的缺省参数（`-G --ignore-files --hidden -I` 加版本控制目录）。
 const GREP_DEFAULTS: [&str; 10] = [

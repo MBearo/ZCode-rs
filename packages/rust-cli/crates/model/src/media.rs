@@ -56,6 +56,7 @@ pub(crate) fn project(messages: &mut [ApiMessage], endpoint: &ModelEndpoint) {
 
 #[cfg(test)]
 mod tests {
+    use rust_cli_base::proto::mime;
     use rust_cli_base::secret::RedactedString;
     use rust_cli_kernel_api::ids::ToolUseId;
     use rust_cli_kernel_api::model::{
@@ -84,7 +85,7 @@ mod tests {
 
     fn image() -> ImageSource {
         ImageSource::Base64 {
-            media_type: "image/png".to_owned(),
+            media_type: mime::PNG.to_owned(),
             data: "iVBORw0KGgo=".to_owned(),
         }
     }
@@ -141,7 +142,7 @@ mod tests {
     fn documents_become_node_placeholders_for_models_without_pdf_input() {
         let document = ToolResultContent::Document {
             source: ImageSource::Base64 {
-                media_type: "application/pdf".to_owned(),
+                media_type: mime::PDF.to_owned(),
                 data: "JVBERi0=".to_owned(),
             },
         };

@@ -56,12 +56,17 @@ fn model_shape(
     capabilities: Option<&ModelCapabilities>,
     limits: &RequestLimits,
 ) -> ModelShape {
-    let card = models::card(&selection.model);
-    let adaptive = card.is_some_and(|card| card.adaptive_thinking) && limits.thinking_allowed();
+    // 行为形状：有卡片的模型用自己的卡片，GLM 借 opus 的（工作线 F121，model.md §11.1）；上限只按卡片或目录。
+    let shape = models::shape(&selection.model);
+    let adaptive = shape.is_some_and(|shape| shape.adaptive_thinking) && limits.thinking_allowed();
     // 修 bug（F23）：没有卡片的模型以前也写选择的档位（`models::card_effort` 的注释）。
     let effort = models::card_effort(&selection.model, selection.reasoning.as_deref());
+    let output_limit = models::card_output_limit(
+        &selection.model,
+        capabilities.and_then(|found| found.max_output_tokens),
+    );
     ModelShape {
-        max_tokens: limits.max_tokens(card),
+        max_tokens: limits.max_tokens(output_limit),
         thinking: adaptive.then(|| ThinkingConfig::Adaptive {
             display: Some("updates".to_owned()),
         }),
@@ -84,7 +89,7 @@ fn model_shape(
                 &selection.model,
                 capabilities.map(|found| found.supports_mid_conversation_system),
             ),
-            turn_effort: effort.filter(|_| card.is_some_and(|card| card.per_turn_effort)),
+            turn_effort: effort.filter(|_| shape.is_some_and(|shape| shape.per_turn_effort)),
             skip_cache_write: false,
         },
     }

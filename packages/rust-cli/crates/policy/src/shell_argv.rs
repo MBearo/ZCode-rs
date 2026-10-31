@@ -8,6 +8,8 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use crate::consts::{NICE_DASH_N_WORDS, OPTION_WITH_VALUE_WORDS, SHORT_OPTION_LEN};
+
 /// 包装命令与它们带值的选项（值跟在后面一个词里）。
 const WITH_VALUES: &[(&str, &[&str])] = &[
     ("env", &["-u", "-C", "--unset", "--chdir"]),
@@ -247,7 +249,7 @@ fn timeout_duration(argv: &[String], patterns: &Patterns) -> Option<usize> {
         {
             at += 1;
         } else if matches!(word, "--kill-after" | "--signal") && value(argv.get(at + 1)) {
-            at += 2;
+            at += OPTION_WITH_VALUE_WORDS;
         } else if word == "--" {
             at += 1;
             break;
@@ -256,7 +258,7 @@ fn timeout_duration(argv: &[String], patterns: &Patterns) -> Option<usize> {
         } else if word == "-v" {
             at += 1;
         } else if matches!(word, "-k" | "-s") && value(argv.get(at + 1)) {
-            at += 2;
+            at += OPTION_WITH_VALUE_WORDS;
         } else if patterns.fused_flag.is_match(word) {
             at += 1;
         } else if word.starts_with('-') {
@@ -268,18 +270,21 @@ fn timeout_duration(argv: &[String], patterns: &Patterns) -> Option<usize> {
     Some(at)
 }
 
+/// 前缀占到 `at` 为止；`at` 处是单独的 `--` 时它也算前缀。
+fn skip_dashes(at: usize, argv: &[String]) -> usize {
+    if argv.get(at).is_some_and(|word| word == "--") {
+        at + 1
+    } else {
+        at
+    }
+}
+
 /// `time`、`nohup`、`timeout <选项> <时长>`、`nice -n N`。
 fn strip_runners(mut argv: Vec<String>, patterns: &Patterns) -> Vec<String> {
     loop {
         let first = argv.first().map(String::as_str);
         let next = match first {
-            Some("time" | "nohup") => {
-                if argv.get(1).is_some_and(|word| word == "--") {
-                    2
-                } else {
-                    1
-                }
-            }
+            Some("time" | "nohup") => skip_dashes(1, &argv),
             Some("timeout") => {
                 let Some(at) = timeout_duration(&argv, patterns) else {
                     return argv;
@@ -298,11 +303,7 @@ fn strip_runners(mut argv: Vec<String>, patterns: &Patterns) -> Vec<String> {
                         !word.is_empty() && patterns.niceness.is_match(word)
                     }) =>
             {
-                if argv.get(3).is_some_and(|word| word == "--") {
-                    4
-                } else {
-                    3
-                }
+                skip_dashes(NICE_DASH_N_WORDS, &argv)
             }
             _ => return argv,
         };
@@ -362,7 +363,7 @@ pub(crate) fn strip_wrappers(argv: &[String]) -> Vec<String> {
                         inline = Some(value.to_owned());
                         break;
                     }
-                    index += 2;
+                    index += OPTION_WITH_VALUE_WORDS;
                     continue;
                 }
                 if let Some(eq) = word.find('=').filter(|eq| *eq > 0)
@@ -376,12 +377,12 @@ pub(crate) fn strip_wrappers(argv: &[String]) -> Vec<String> {
                     index += 1;
                     continue;
                 }
-                if word.len() > 2
+                if word.len() > SHORT_OPTION_LEN
                     && word.as_bytes()[1] != b'-'
-                    && word.is_char_boundary(2)
-                    && commands.contains(&&word[..2])
+                    && word.is_char_boundary(SHORT_OPTION_LEN)
+                    && commands.contains(&&word[..SHORT_OPTION_LEN])
                 {
-                    let value = word[2..].trim();
+                    let value = word[SHORT_OPTION_LEN..].trim();
                     if !value.is_empty() {
                         inline = Some(value.to_owned());
                         break;
@@ -395,7 +396,7 @@ pub(crate) fn strip_wrappers(argv: &[String]) -> Vec<String> {
                     return words;
                 }
                 index += if valued.contains(&word) && index + 1 < words.len() {
-                    2
+                    OPTION_WITH_VALUE_WORDS
                 } else {
                     1
                 };

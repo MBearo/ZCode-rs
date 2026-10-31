@@ -120,7 +120,7 @@ impl Commands for NoticeEnvironment {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         _request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -133,10 +133,6 @@ impl Commands for NoticeEnvironment {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 

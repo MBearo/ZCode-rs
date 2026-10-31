@@ -20,8 +20,10 @@ use tokio::sync::mpsc;
 
 use super::McpManager;
 
-/// 最多等多久。
-const WAIT_MS: u64 = 5_000;
+/// 最多等多久（与 ToolSearch 共用，只定义在 kernel-api）。
+const WAIT_MS: u64 = rust_cli_kernel_api::mcp_state::MCP_WAIT_MS;
+/// 结果的字符上限。
+const MAX_RESULT_CHARS: usize = 10_000;
 
 pub(crate) struct WaitForMcpServers {
     manager: Weak<McpManager>,
@@ -164,7 +166,7 @@ impl Tool for WaitForMcpServers {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(10_000)
+        Some(MAX_RESULT_CHARS)
     }
 
     /// 没有自己的权限检查，默认放行。

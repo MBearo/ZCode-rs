@@ -6,6 +6,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
+use rust_cli_base::proto::{http, mime};
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::env_web::FetchUrl;
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
@@ -21,6 +22,14 @@ use crate::common::{Definition, definition, failed, text};
 use crate::web_cache::{Page, PageCache};
 use crate::web_side::apply_prompt;
 use crate::web_texts as texts;
+
+/// 主机名至少有这么多段（`a.b`）。
+const MIN_HOST_LABELS: usize = 2;
+/// 只认这么多位以内的数字 Retry-After（秒）。
+const MAX_RETRY_AFTER_DIGITS: usize = 6;
+
+/// WebFetch 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
+const MAX_RESULT_CHARS: usize = 50_000;
 
 pub const NAME: &str = "WebFetch";
 
@@ -99,7 +108,7 @@ fn check_url(raw: &str) -> Result<Url, ToolError> {
         return Err(failed(texts::DOTLESS_HOST.to_owned()));
     }
     let credentials = !parsed.username().is_empty() || parsed.password().is_some();
-    if raw.chars().count() > MAX_URL || credentials || host.split('.').count() < 2 {
+    if raw.chars().count() > MAX_URL || credentials || host.split('.').count() < MIN_HOST_LABELS {
         return Err(failed(texts::INVALID_URL.to_owned()));
     }
     Ok(parsed)
@@ -136,7 +145,7 @@ async fn fetch(context: &ToolUseContext, start: Url) -> Result<Fetched, ToolErro
             url: url.to_string(),
             headers: vec![(
                 // 小写，同 net 的写法（HTTP 不分大小写，线上字节不变，F58）。
-                "accept".to_owned(),
+                http::header::ACCEPT.to_owned(),
                 "text/markdown, text/html, */*".to_owned(),
             )],
             timeout_ms: TIMEOUT_MS,
@@ -149,9 +158,9 @@ async fn fetch(context: &ToolUseContext, start: Url) -> Result<Fetched, ToolErro
             .await
             .map_err(|error| failed(error.to_string()))?;
         let code = reply.status;
-        if (200..300).contains(&code) {
+        if http::is_success(code) {
             let raw = String::from_utf8_lossy(&reply.body).into_owned();
-            let content = if reply.content_type.contains("text/html") {
+            let content = if reply.content_type.contains(mime::TEXT_HTML) {
                 let truncated = raw.chars().count() > HTML_LIMIT;
                 let head: String = raw.chars().take(HTML_LIMIT).collect();
                 let mut markdown = crate::html_markdown::to_markdown(&head);
@@ -168,7 +177,7 @@ async fn fetch(context: &ToolUseContext, start: Url) -> Result<Fetched, ToolErro
                 content_type: reply.content_type,
             }));
         }
-        if matches!(code, 301 | 302 | 303 | 307 | 308) {
+        if http::is_redirect(code) {
             let target = reply
                 .location
                 .filter(|location| !location.trim().is_empty())
@@ -190,7 +199,8 @@ async fn fetch(context: &ToolUseContext, start: Url) -> Result<Fetched, ToolErro
             continue;
         }
         let retry_after = reply.retry_after.filter(|value| {
-            (1..=6).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit())
+            (1..=MAX_RETRY_AFTER_DIGITS).contains(&value.len())
+                && value.bytes().all(|b| b.is_ascii_digit())
         });
         return Ok(Fetched::HttpError { code, retry_after });
     }
@@ -229,7 +239,7 @@ impl Tool for WebFetchTool {
 
     /// 工具结果的缺省上限。
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(50_000)
+        Some(MAX_RESULT_CHARS)
     }
 
     async fn validate_input(&self, input: &Value, _context: &ToolUseContext) -> Validation {
@@ -290,7 +300,8 @@ impl Tool for WebFetchTool {
         }
         let approved = preapproved(raw);
         let rest_length = content.len() - skip;
-        if approved && page.content_type.contains("text/markdown") && rest_length < APPLY_LIMIT {
+        if approved && page.content_type.contains(mime::TEXT_MARKDOWN) && rest_length < APPLY_LIMIT
+        {
             return Ok(text(rest));
         }
         let lead = if offset > 0 {

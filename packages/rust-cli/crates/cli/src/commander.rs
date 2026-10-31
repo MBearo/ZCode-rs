@@ -5,6 +5,15 @@
 //! （`args.rs`）在每个选项出现时处理（commander 的 `option:<name>` 事件），出错就立即停下，与 commander
 //! 在切分过程中抛错的时机相同。
 
+use crate::consts;
+
+/// 长选项的前缀 `--` 的长度（字节）。
+const LONG_PREFIX_LEN: usize = 2;
+/// 建议相近选项时编辑距离的上限（长度差超过它时不算距离）。
+const MAX_EDIT_DISTANCE: usize = 3;
+/// 建议相近选项时相似度的下限（`(长度 - 距离) / 长度` 要大于它）。
+const MIN_SIMILARITY: f64 = 0.4;
+
 /// 选项带不带值（commander 的 `<value>`、`[value]`、`<value...>` 与布尔选项）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Arity {
@@ -112,13 +121,13 @@ pub(crate) fn split<K, E>(
             continue;
         }
         // 单个 `-` 后跟多个字符：先认第一个短选项（`-pc`、`-r<值>`）。
-        if arg.len() > 2
+        if arg.len() > consts::SHORT_OPTION_LEN
             && arg.starts_with('-')
             && !arg.starts_with("--")
-            && let Some(first) = arg.get(..2)
+            && let Some(first) = arg.get(..consts::SHORT_OPTION_LEN)
             && let Some(spec) = find(first)
         {
-            let tail = &arg[2..];
+            let tail = &arg[consts::SHORT_OPTION_LEN..];
             if spec.takes_value() {
                 // commander 的 `_combineFlagAndOptionalValue` 缺省为真：可选值也接在同一个参数里。
                 on_option(spec, Some(tail))?;
@@ -131,7 +140,7 @@ pub(crate) fn split<K, E>(
         // `--name=value`。
         if arg.starts_with("--")
             && let Some(index) = arg.find('=')
-            && index > 2
+            && index > LONG_PREFIX_LEN
             && let Some(spec) = find(&arg[..index])
             && spec.takes_value()
         {
@@ -157,7 +166,7 @@ pub(crate) fn suggestion(word: &str, candidates: &[&str]) -> String {
         return String::new();
     };
     let mut seen = std::collections::BTreeSet::new();
-    let mut best = 3usize;
+    let mut best = MAX_EDIT_DISTANCE;
     let mut similar: Vec<&str> = Vec::new();
     for candidate in candidates {
         let Some(candidate) = candidate.strip_prefix("--") else {
@@ -173,7 +182,7 @@ pub(crate) fn suggestion(word: &str, candidates: &[&str]) -> String {
             reason = "参数名很短，与 commander 的浮点比较相同"
         )]
         let similarity = (length as f64 - distance as f64) / length as f64;
-        if similarity > 0.4 {
+        if similarity > MIN_SIMILARITY {
             if distance < best {
                 best = distance;
                 similar = vec![candidate];
@@ -209,7 +218,7 @@ pub(crate) fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
 fn edit_distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
-    if a.len().abs_diff(b.len()) > 3 {
+    if a.len().abs_diff(b.len()) > MAX_EDIT_DISTANCE {
         return a.len().max(b.len());
     }
     let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];

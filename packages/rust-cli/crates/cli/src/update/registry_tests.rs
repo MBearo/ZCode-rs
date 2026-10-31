@@ -19,7 +19,7 @@ const PLATFORM: &str = "/@scope%2fzcode-darwin-arm64";
 fn scoped_packages_escape_the_slash() {
     assert_eq!(
         package_url(REGISTRY, "@scope/zcode"),
-        "https://registry.npmjs.org/@scope%2fzcode"
+        format!("{REGISTRY}{ENTRY}")
     );
     assert_eq!(
         package_url("http://127.0.0.1:1/", "zcode"),

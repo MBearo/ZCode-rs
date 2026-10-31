@@ -2,6 +2,7 @@
 //! 由 [`crate::orchestration`] 重新导出。
 
 use async_trait::async_trait;
+use rust_cli_base::tokens;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -53,6 +54,8 @@ pub fn prompt_too_long_gap(message: &str) -> Option<u64> {
 /// `prompt is too long … N tokens > M`：N − M。
 fn anthropic_gap(message: &str) -> Option<u64> {
     const PHRASE: &str = "prompt is too long";
+    // 数字后面的单位词（之后可以有 `s`）。
+    const TOKEN_WORD: &str = "token";
     // ASCII 小写不改变字节长度，下标可以直接用在原文上。
     let start = message.to_ascii_lowercase().find(PHRASE)? + PHRASE.len();
     let number = |text: &str| -> Option<(u64, usize)> {
@@ -65,8 +68,8 @@ fn anthropic_gap(message: &str) -> Option<u64> {
     let rest = &rest[rest.find(|c: char| c.is_ascii_digit())?..];
     let (actual, used) = number(rest)?;
     let rest = rest[used..].trim_start();
-    let rest = match rest.get(..5) {
-        Some(word) if word.eq_ignore_ascii_case("token") => &rest[5..],
+    let rest = match rest.get(..TOKEN_WORD.len()) {
+        Some(word) if word.eq_ignore_ascii_case(TOKEN_WORD) => &rest[TOKEN_WORD.len()..],
         _ => return None,
     };
     let rest = rest
@@ -140,11 +143,13 @@ impl ContextOccupancy {
     clippy::cast_precision_loss
 )]
 pub fn used_percent(used_tokens: u64, window: u64) -> u64 {
+    // 百分比的满值。
+    const FULL: u64 = rust_cli_base::units::PERCENT;
     if window == 0 {
-        return 100;
+        return FULL;
     }
-    let left = (window as f64 - used_tokens as f64) / window as f64 * 100.0;
-    100 - (left.round().max(0.0) as u64).min(100)
+    let left = (window as f64 - used_tokens as f64) / window as f64 * FULL as f64;
+    FULL - (left.round().max(0.0) as u64).min(FULL)
 }
 
 #[async_trait]
@@ -223,7 +228,8 @@ pub trait Compactor: Send + Sync {
 /// 文字的粗估 token：字符数（UTF-16 码元，JS 的 `length`）/ 4，四舍五入。压缩的预算与压缩后附件的上限都用它。
 pub fn rough_tokens(text: &str) -> u64 {
     let units = text.encode_utf16().count() as u64;
-    (units + 2) / 4
+    // 每 token 的字符数与 Math.round 只定义在 base 的 `tokens`。
+    tokens::estimate(units, tokens::CHARS_PER_TOKEN)
 }
 
 /// 图片与文档的估算 token（压缩的估算、`/context` 与目录模型的输出预算共用）。

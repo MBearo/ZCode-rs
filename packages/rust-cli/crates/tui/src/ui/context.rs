@@ -8,8 +8,20 @@ use rust_cli_kernel_api::context_usage::{
 
 use super::cells::{self, Ctx};
 use super::i18n::Lang;
+use super::quantities::{PERCENT_F64, tenths};
 
 const FREE: &str = "Free space";
+/// 方格图的大小：窗口不小于 1M 时 20 × 10，否则 10 × 10；终端窄于 80 列时 5 × 5。
+const LARGE_WINDOW_TOKENS: u64 = 1_000_000;
+const NARROW_BELOW: usize = 80;
+const GRID: (usize, usize) = (10, 10);
+const LARGE_GRID: (usize, usize) = (20, 10);
+const NARROW_GRID: (usize, usize) = (5, 5);
+/// 一格满到这个程度画实心。
+const FULL_SQUARE: f64 = 0.7;
+/// 方格图与类别说明之间的空白；说明至少要这么宽才并排。
+const LEGEND_GAP: usize = 2;
+const MIN_LEGEND_WIDTH: usize = 40;
 
 /// 类别的颜色：按主题名映射到终端的基本色（深浅主题下都由终端配色决定）。
 fn color(name: &str, ctx: &Ctx<'_>) -> Color {
@@ -31,9 +43,9 @@ fn percent(tokens: u64, window: u64) -> String {
     let value = if window == 0 {
         0.0
     } else {
-        tokens as f64 / window as f64 * 100.0
+        tokens as f64 / window as f64 * PERCENT_F64
     };
-    format!("{:.1}", (value * 10.0).round() / 10.0)
+    tenths(value)
 }
 
 /// 一格：类别、颜色与满的程度。
@@ -45,21 +57,21 @@ struct Square {
 
 /// 方格图：窗口 ≥ 1M 时 20 × 10，否则 10 × 10；终端窄于 80 列时 5 × 5。
 fn grid(usage: &ContextUsage, width: usize) -> (Vec<Vec<Square>>, usize) {
-    let narrow = width < 80;
-    let large = usage.raw_max_tokens >= 1_000_000;
+    let narrow = width < NARROW_BELOW;
+    let large = usage.raw_max_tokens >= LARGE_WINDOW_TOKENS;
     let columns = if narrow {
-        5
+        NARROW_GRID.0
     } else if large {
-        20
+        LARGE_GRID.0
     } else {
-        10
+        GRID.0
     };
     let rows = if large {
-        10
+        LARGE_GRID.1
     } else if narrow {
-        5
+        NARROW_GRID.1
     } else {
-        10
+        GRID.1
     };
     let total = columns * rows;
     #[allow(clippy::cast_precision_loss)]
@@ -132,7 +144,7 @@ fn square_span(square: &Square, usage: &ContextUsage, ctx: &Ctx<'_>) -> Span<'st
     }
     let symbol = if buffer {
         "\u{26DD} "
-    } else if square.fullness >= 0.7 {
+    } else if square.fullness >= FULL_SQUARE {
         "\u{26C1} "
     } else {
         "\u{26C0} "
@@ -216,7 +228,7 @@ pub fn chart(usage: &ContextUsage, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     let (rows, columns) = grid(usage, ctx.width);
     let legend = legend(usage, ctx);
     let grid_width = columns * 2 + 1;
-    let side_by_side = ctx.width >= grid_width + 2 + 40;
+    let side_by_side = ctx.width >= grid_width + LEGEND_GAP + MIN_LEGEND_WIDTH;
     let mut grid_lines: Vec<Line<'static>> = rows
         .iter()
         .map(|row| {
@@ -230,8 +242,9 @@ pub fn chart(usage: &ContextUsage, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
         grid_lines.resize(height, Line::default());
         for (index, mut line) in grid_lines.into_iter().enumerate() {
             let used = line.width();
-            line.spans
-                .push(Span::raw(" ".repeat(grid_width.saturating_sub(used) + 2)));
+            line.spans.push(Span::raw(
+                " ".repeat(grid_width.saturating_sub(used) + LEGEND_GAP),
+            ));
             if let Some(right) = legend.get(index) {
                 line.spans.extend(right.spans.clone());
             }

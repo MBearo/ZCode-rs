@@ -7,6 +7,7 @@
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use rust_cli_base::proto::exit;
 use rust_cli_exec_transport::stdio::{ChildCommand, StdioConnector};
 use rust_cli_exec_transport::{Connector, FrameSink, FrameSource, Link, LinkError, Provisioned};
 
@@ -58,16 +59,17 @@ const REJECTIONS: &[&str] = &[
 ];
 
 /// 子进程以 `code` 退出（stdio 传输写成 `executor exited (exit status: N)`；Windows 上是 `exit code: N`）。
-fn exited_with(message: &str, code: u8) -> bool {
+fn exited_with(message: &str, code: i32) -> bool {
     message.contains(&format!("(exit status: {code})"))
         || message.contains(&format!("(exit code: {code})"))
 }
 
 /// 这次失败再连也一样：ssh 认证失败或主机密钥不对；远端的执行器程序不在了（127）或不能执行（126）。
 pub(crate) fn rejected(message: &str) -> bool {
-    (exited_with(message, 255) && REJECTIONS.iter().any(|known| message.contains(known)))
-        || exited_with(message, 126)
-        || exited_with(message, 127)
+    (exited_with(message, exit::SSH_ERROR)
+        && REJECTIONS.iter().any(|known| message.contains(known)))
+        || exited_with(message, exit::NOT_EXECUTABLE)
+        || exited_with(message, exit::NOT_FOUND)
 }
 
 fn classify(error: LinkError) -> LinkError {

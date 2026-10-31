@@ -4,6 +4,7 @@
 //! 时是参数错误、不重试。码只认纯数字（`"code":"success"` 之类不算）。含义标“未核实”的码先按表收，以真实样本为准。
 //! 厂商专有的码与字符串只在这个文件（`check:rust-cli` 的解耦检测）。
 
+use rust_cli_base::proto::http;
 use rust_cli_kernel_api::message::StopReason;
 use rust_cli_kernel_api::model::ModelError;
 use serde_json::Value;
@@ -108,7 +109,7 @@ fn verdict(
     raw: &str,
     retry_after_ms: Option<u64>,
 ) -> Verdict {
-    let message = message_text(status.unwrap_or(200), message_of(value), raw);
+    let message = message_text(status.unwrap_or(http::OK), message_of(value), raw);
     let shape = Shape {
         message,
         retry_after_ms,

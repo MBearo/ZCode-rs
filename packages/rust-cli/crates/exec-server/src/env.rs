@@ -12,22 +12,22 @@ use rust_cli_kernel_api::env_command::EnvOverrides;
 
 /// 不能改的名字：登录与 shell 的基本变量，以及 env-local 自己设的。
 const PROTECTED: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "TERM",
-    "PWD",
-    "OLDPWD",
-    "SHLVL",
-    "TMPDIR",
+    rust_cli_base::names::env::PATH,
+    rust_cli_base::names::env::HOME,
+    rust_cli_base::names::env::USER,
+    rust_cli_base::names::env::LOGNAME,
+    rust_cli_base::names::env::SHELL,
+    rust_cli_base::names::env::TERM,
+    rust_cli_base::names::env::PWD,
+    rust_cli_base::names::env::OLDPWD,
+    rust_cli_base::names::env::SHLVL,
+    rust_cli_base::names::env::TMPDIR,
     "IFS",
     "ENV",
-    "BASH_ENV",
+    rust_cli_base::names::env::BASH_ENV,
     "_",
     "ZCODE",
-    "GIT_EDITOR",
+    rust_cli_base::names::env::GIT_EDITOR,
 ];
 
 /// 保留的前缀：本产品的变量与改变进程加载方式的变量。

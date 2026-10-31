@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::{Value, json};
 use system_env::KeepSystem as _;
 
@@ -80,7 +81,7 @@ impl Sandbox {
             command
                 .env("ZCODE_MODEL_BASE_URL", url)
                 .env("ZCODE_API_KEY", "test-key")
-                .env("ZCODE_MODEL", "claude-opus-5-5");
+                .env("ZCODE_MODEL", GLM_5_3);
         }
         command
     }

@@ -16,6 +16,13 @@ use super::cells::Ctx;
 use super::mouse::{self, Target};
 use super::transcript::{self, Cache};
 
+/// 底部区域最高占屏幕的 2/3，至少 8 行。
+const BOTTOM_SHARE: (usize, usize) = (2, 3);
+const MIN_BOTTOM_ROWS: usize = 8;
+/// 已滚出顶部的提问固定在第一行：区域至少这么高、这么宽时才固定。
+const PIN_MIN_HEIGHT: usize = 4;
+const PIN_MIN_WIDTH: usize = 16;
+
 /// 带底色的行补到整行宽度（底色铺满整行）。
 pub(super) fn fill_rows(lines: &mut [Line<'static>], width: usize) {
     for line in lines {
@@ -63,8 +70,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         }
     }
     // 底部区域贴底，最高 max(8, 2/3 屏)；上方留 1 行 gap 给 transcript 与它隔开。
-    let max_bottom = (area.height as usize * 2 / 3)
-        .max(8)
+    let max_bottom = (area.height as usize * BOTTOM_SHARE.0 / BOTTOM_SHARE.1)
+        .max(MIN_BOTTOM_ROWS)
         .min((area.height as usize).saturating_sub(1));
     let super::pane::Bottom {
         lines: mut bottom,
@@ -105,7 +112,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         && let Some(y) = row_y(row)
     {
         app.hits.composer = Some((
-            Rect::new(area.x + 2, y, composer_width as u16, rows as u16),
+            Rect::new(
+                area.x + super::input_box::PROMPT_WIDTH as u16,
+                y,
+                composer_width as u16,
+                rows as u16,
+            ),
             first,
         ));
     }
@@ -161,8 +173,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
     // 提问已滚出顶部时固定在第一行（区域太小时不固定）；点击跳到这条消息。
     let prompts = &layout.prompts;
     let mut pinned = false;
-    if height >= 4
-        && width >= 16
+    if height >= PIN_MIN_HEIGHT
+        && width >= PIN_MIN_WIDTH
         && let Some(pin) = transcript::pinned(prompts, start, width, app.palette.prompt_block())
         && let Some(first) = visible.first_mut()
     {

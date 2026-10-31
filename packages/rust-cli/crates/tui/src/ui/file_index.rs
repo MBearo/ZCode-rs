@@ -14,6 +14,8 @@ const PENALTY_GAP_START: i64 = 3;
 const PENALTY_GAP_EXTENSION: i64 = 1;
 const MAX_QUERY_LEN: usize = 64;
 const TOP_LEVEL_LIMIT: usize = 100;
+/// 短路径的加分：`32 − 路径长 / 4`，不小于 0。
+const SHORT_PATH_BONUS: i64 = 32;
 
 pub struct FileIndex {
     paths: Vec<String>,
@@ -169,7 +171,7 @@ impl FileIndex {
             for (step, at) in positions.iter().enumerate() {
                 score += bonus(bytes, *at, step == 0);
             }
-            score += (32 - (path.len() as i64 >> 2)).max(0);
+            score += (SHORT_PATH_BONUS - (path.len() as i64 >> 2)).max(0);
             found.push((score, index));
         }
         found.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));

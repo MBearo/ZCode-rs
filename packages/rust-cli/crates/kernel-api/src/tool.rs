@@ -28,6 +28,14 @@ use crate::store::ArtifactStore;
 /// 共用（F55：以前两边各写一份）。
 pub const REJECT_MESSAGE: &str = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
 
+/// 工具结果落盘的通用上限（字符）：结果超过它就落盘为 Artifact，只把预览交给模型（[`Tool::max_result_size_chars`]）。
+/// 多数工具用这个值；值不同的工具在自己那里命名（工作线 F122，用户决定 2026-10-30，docs/specs/rust-cli/constants.md §5.1）。
+pub const DEFAULT_MAX_RESULT_CHARS: usize = 100_000;
+
+/// 内核内部调用一个工具、不看它的进度时，进度通道的容量（满了的进度丢掉，不阻塞工具）：compact 的恢复与 skill 的
+/// 内联调用共用（工作线 F122：以前各写一份 16）。
+pub const DISCARDED_PROGRESS_CAPACITY: usize = 16;
+
 /// 旧工具名 → 现在的名字：hook 的 matcher 与权限规则用同一张表（F58：以前 hooks 一份 8 项、policy 一份旧版本的
 /// 4 项）。
 pub const LEGACY_TOOL_NAMES: [(&str, &str); 8] = [

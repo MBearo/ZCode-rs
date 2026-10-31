@@ -1,5 +1,6 @@
 //! Jupyter notebook 的解析、给模型看的渲染与单元格编辑（tools-files.md §1）。
 
+use rust_cli_base::proto::mime;
 use rust_cli_kernel_api::message::{ImageSource, ToolResultContent};
 use serde_json::{Map, Value, json};
 
@@ -64,7 +65,7 @@ fn joined_text(value: Option<&Value>) -> String {
 }
 
 fn image(data: &Map<String, Value>) -> Option<Value> {
-    ["image/png", "image/jpeg"].iter().find_map(|media| {
+    [mime::PNG, mime::JPEG].iter().find_map(|media| {
         let raw = data.get(*media)?.as_str()?;
         let compact: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
         Some(json!({"image_data": compact, "media_type": media}))
@@ -79,7 +80,7 @@ fn output(raw: &Value) -> Value {
             let data = raw.get("data").and_then(Value::as_object);
             let mut out = json!({
                 "output_type": kind,
-                "text": joined_text(data.and_then(|data| data.get("text/plain"))),
+                "text": joined_text(data.and_then(|data| data.get(mime::TEXT_PLAIN))),
             });
             if let Some(image) = data.and_then(image) {
                 out["image"] = image;
@@ -215,11 +216,14 @@ pub(crate) fn index_from_id(id: &str) -> Option<usize> {
         .and_then(|digits| digits.parse().ok())
 }
 
+/// 单元格开始带 ID 的 nbformat 版本（4.5）。
+const CELL_IDS_SINCE: (u64, u64) = (4, 5);
+
 /// nbformat ≥ 4.5 的单元格带 ID。
 pub(crate) fn has_cell_ids(notebook: &Value) -> bool {
     let major = notebook["nbformat"].as_u64().unwrap_or(0);
     let minor = notebook["nbformat_minor"].as_u64().unwrap_or(0);
-    major > 4 || (major == 4 && minor >= 5)
+    (major, minor) >= CELL_IDS_SINCE
 }
 
 /// `JSON.stringify(notebook, null, 1)`。

@@ -79,14 +79,14 @@ pub fn keys_hint(lang: Lang) -> &'static str {
 pub fn list(lang: Lang, items: &[String], limit: Option<usize>) -> String {
     let shown = limit.filter(|limit| items.len() > *limit);
     let head = &items[..shown.unwrap_or(items.len())];
-    match (lang, shown) {
-        (_, None) if items.len() == 1 => items[0].clone(),
-        (Lang::En, None) if items.len() == 2 => format!("{} and {}", items[0], items[1]),
-        (Lang::En, None) => match items.split_last() {
+    match (lang, shown, items) {
+        (_, None, [only]) => only.clone(),
+        (Lang::En, None, [first, second]) => format!("{first} and {second}"),
+        (Lang::En, None, _) => match items.split_last() {
             Some((last, rest)) => format!("{}, and {last}", rest.join(", ")),
             None => String::new(),
         },
-        (Lang::En, Some(_)) => {
+        (Lang::En, Some(_), _) => {
             let more = items.len() - head.len();
             if head.len() == 1 {
                 format!("{} and {more} more", head[0])
@@ -94,11 +94,11 @@ pub fn list(lang: Lang, items: &[String], limit: Option<usize>) -> String {
                 format!("{}, and {more} more", head.join(", "))
             }
         }
-        (Lang::Zh, None) => match items.split_last() {
+        (Lang::Zh, None, _) => match items.split_last() {
             Some((last, rest)) if !rest.is_empty() => format!("{} 和 {last}", rest.join("、")),
             _ => String::new(),
         },
-        (Lang::Zh, Some(_)) => format!(
+        (Lang::Zh, Some(_), _) => format!(
             "{} 以及另外 {} 项",
             head.join("、"),
             items.len() - head.len()

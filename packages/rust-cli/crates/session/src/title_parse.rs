@@ -3,6 +3,7 @@
 
 // 压空白只定义在 base（F58：以前这里写了一份 `collapse`）。
 use rust_cli_base::js::string::{collapse_spaces as collapse, is_space, trim, utf16_prefix};
+use rust_cli_base::text;
 use serde_json::Value;
 
 /// Node `MAX_TITLE_INPUT_CHARS`（UTF-16 码元）。
@@ -40,13 +41,16 @@ fn without_thinking(raw: &str) -> String {
     trim(&out).to_owned()
 }
 
+/// 代码块开头可选的语言标记。
+const JSON_TAG: &str = "json";
+
 /// `` ^```[ \t]*(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n?```$ ``（不分大小写）的内容，去首尾空白。
 fn fenced_json(text: &str) -> Option<String> {
     let text = trim(text);
     let after = text.strip_prefix("```")?;
     let after = after.trim_start_matches([' ', '\t']);
-    let after = match after.get(..4) {
-        Some(tag) if tag.eq_ignore_ascii_case("json") => &after[4..],
+    let after = match after.get(..JSON_TAG.len()) {
+        Some(tag) if tag.eq_ignore_ascii_case(JSON_TAG) => &after[JSON_TAG.len()..],
         _ => after,
     };
     let after = after.trim_start_matches([' ', '\t']);
@@ -95,8 +99,12 @@ pub(crate) fn clean_title(raw: &str) -> Option<String> {
         return None;
     }
     if cleaned.encode_utf16().count() > MAX_TITLE_CHARS {
-        let head = trim(utf16_prefix(&cleaned, MAX_TITLE_CHARS - 3));
-        return Some(format!("{head}..."));
+        // 截断后去掉尾部空白再加省略号（与 base `text::truncate_utf16` 不同，只共用省略号）。
+        let head = trim(utf16_prefix(
+            &cleaned,
+            MAX_TITLE_CHARS - text::ELLIPSIS.len(),
+        ));
+        return Some(format!("{head}{}", text::ELLIPSIS));
     }
     Some(cleaned)
 }

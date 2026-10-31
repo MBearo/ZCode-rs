@@ -12,8 +12,8 @@ mod interactions {
     use futures_util::StreamExt;
     use futures_util::stream::BoxStream;
     use rust_cli_kernel_api::env::{
-        CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
-        ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+        CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
+        StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
     };
     use rust_cli_kernel_api::ids::{
         CommandId, EnvironmentId, InteractionId, OperationId, SessionId,
@@ -160,7 +160,7 @@ mod interactions {
             _workspace: &WorkspaceRef,
             _context: OperationContext,
             _request: StartCommand,
-        ) -> Result<(), EnvError> {
+        ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
             self.gate.notified().await;
             Err(unsupported())
         }
@@ -175,10 +175,6 @@ mod interactions {
 
         async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
             Err(unsupported())
-        }
-
-        async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
-            Ok(Outcome::Unknown)
         }
 
         async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {

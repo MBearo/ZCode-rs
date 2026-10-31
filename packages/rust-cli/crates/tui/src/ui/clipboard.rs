@@ -17,11 +17,11 @@ fn var<'a>(vars: &'a Vars, name: &str) -> Option<&'a str> {
 
 /// 终端复用器。
 fn multiplexer(vars: &Vars) -> Option<&'static str> {
-    if var(vars, "TMUX").is_some() {
+    if var(vars, rust_cli_base::names::env::TMUX).is_some() {
         Some("tmux")
-    } else if var(vars, "STY").is_some() {
+    } else if var(vars, rust_cli_base::names::env::STY).is_some() {
         Some("screen")
-    } else if var(vars, "ZELLIJ").is_some() {
+    } else if var(vars, rust_cli_base::names::env::ZELLIJ).is_some() {
         Some("zellij")
     } else {
         None
@@ -30,31 +30,34 @@ fn multiplexer(vars: &Vars) -> Option<&'static str> {
 
 /// 在 SSH 里（只看 `SSH_CONNECTION`）。
 pub fn ssh(vars: &Vars) -> bool {
-    var(vars, "SSH_CONNECTION").is_some()
+    var(vars, rust_cli_base::names::env::SSH_CONNECTION).is_some()
 }
 
 /// 终端名（能从入口给的变量判断的部分，按判断的顺序）。
 pub fn terminal(vars: &Vars) -> Option<String> {
-    let term = var(vars, "TERM");
+    let term = var(vars, rust_cli_base::names::env::TERM);
     if term == Some("xterm-ghostty") {
         return Some("ghostty".into());
     }
     if term.is_some_and(|t| t.contains("kitty")) {
         return Some("kitty".into());
     }
-    if let Some(program) = var(vars, "TERM_PROGRAM") {
+    if let Some(program) = var(vars, rust_cli_base::names::env::TERM_PROGRAM) {
         return Some(program.into());
     }
     let by_var = [
-        ("TMUX", "tmux"),
-        ("STY", "screen"),
-        ("KONSOLE_VERSION", "konsole"),
-        ("GNOME_TERMINAL_SERVICE", "gnome-terminal"),
-        ("XTERM_VERSION", "xterm"),
-        ("VTE_VERSION", "vte-based"),
-        ("KITTY_WINDOW_ID", "kitty"),
-        ("ALACRITTY_LOG", "alacritty"),
-        ("WT_SESSION", "windows-terminal"),
+        (rust_cli_base::names::env::TMUX, "tmux"),
+        (rust_cli_base::names::env::STY, "screen"),
+        (rust_cli_base::names::env::KONSOLE_VERSION, "konsole"),
+        (
+            rust_cli_base::names::env::GNOME_TERMINAL_SERVICE,
+            "gnome-terminal",
+        ),
+        (rust_cli_base::names::env::XTERM_VERSION, "xterm"),
+        (rust_cli_base::names::env::VTE_VERSION, "vte-based"),
+        (rust_cli_base::names::env::KITTY_WINDOW_ID, "kitty"),
+        (rust_cli_base::names::env::ALACRITTY_LOG, "alacritty"),
+        (rust_cli_base::names::env::WT_SESSION, "windows-terminal"),
     ];
     if let Some((_, name)) = by_var.iter().find(|(key, _)| var(vars, key).is_some()) {
         return Some((*name).into());
@@ -81,7 +84,7 @@ pub fn osc52(text: &str, vars: &Vars) -> String {
         Some("screen") => {
             let chunks: Vec<&str> = encoded
                 .as_bytes()
-                .chunks(76)
+                .chunks(SCREEN_CHUNK)
                 .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
                 .collect();
             format!("\x1bP\x1b]52;c;{}\x07\x1b\\", chunks.join("\x1b\\\x1bP"))
@@ -95,6 +98,16 @@ pub fn osc52(text: &str, vars: &Vars) -> String {
 
 /// 没有注入剪贴板服务时的途径（测试）：只有 OSC 52。
 pub const NO_SERVICE: CopyRoute = CopyRoute::Osc52;
+
+/// screen 里 OSC 52 的 base64 按这么多个字节分段（每段包进一个 DCS）。
+const SCREEN_CHUNK: usize = 76;
+/// 版本号只看前三段（主、次、修订）；VS Code 1.123、1.124 的 OSC 52 会弄乱非 ASCII。
+const VERSION_PARTS: usize = 3;
+const VSCODE_BROKEN_MINORS: std::ops::Range<u64> = 123..125;
+/// 复制提示的显示时长：有警告时、经本机剪贴板时、其余。
+const WARNING_FOR: Duration = Duration::from_secs(6);
+const NATIVE_FOR: Duration = Duration::from_secs(2);
+const NOTICE_FOR: Duration = Duration::from_secs(4);
 
 /// 提示里按住的键。
 pub fn native_key(vars: &Vars, macos: bool) -> &'static str {
@@ -119,7 +132,7 @@ pub fn native_key(vars: &Vars, macos: bool) -> &'static str {
         Some(n) if vscode_like.contains(&n) && macos => "Option",
         Some(n) if vscode_like.contains(&n) => "Shift",
         Some(n) if shift_terminals.contains(&n) => "Shift",
-        _ if var(vars, "LC_TERMINAL") == Some("iTerm2") => "Option",
+        _ if var(vars, rust_cli_base::names::env::LC_TERMINAL) == Some("iTerm2") => "Option",
         _ if ssh(vars) || multiplexer(vars).is_some() || macos => {
             "Shift (Option in iTerm2, Fn in Terminal.app)"
         }
@@ -129,16 +142,16 @@ pub fn native_key(vars: &Vars, macos: bool) -> &'static str {
 
 /// VS Code 1.123、1.124 的 OSC 52 会弄乱非 ASCII。
 fn mojibake(text: &str, vars: &Vars) -> bool {
-    if var(vars, "TERM_PROGRAM") != Some("vscode") || text.is_ascii() {
+    if var(vars, rust_cli_base::names::env::TERM_PROGRAM) != Some("vscode") || text.is_ascii() {
         return false;
     }
-    let version: Vec<u64> = var(vars, "TERM_PROGRAM_VERSION")
+    let version: Vec<u64> = var(vars, rust_cli_base::names::env::TERM_PROGRAM_VERSION)
         .unwrap_or_default()
         .split(['.', '-'])
-        .take(3)
+        .take(VERSION_PARTS)
         .map_while(|part| part.parse().ok())
         .collect();
-    matches!(version.as_slice(), [1, minor, _] if (123..125).contains(minor))
+    matches!(version.as_slice(), [1, minor, _] if VSCODE_BROKEN_MINORS.contains(minor))
 }
 
 /// 复制后显示的提示：文字与显示时长。
@@ -185,9 +198,9 @@ pub fn notice(route: CopyRoute, text: &str, vars: &Vars, lang: Lang) -> Notice {
         body
     };
     let duration = match (warn, route) {
-        (true, _) => Duration::from_secs(6),
-        (false, CopyRoute::Native) => Duration::from_secs(2),
-        (false, _) => Duration::from_secs(4),
+        (true, _) => WARNING_FOR,
+        (false, CopyRoute::Native) => NATIVE_FOR,
+        (false, _) => NOTICE_FOR,
     };
     Notice { text, duration }
 }

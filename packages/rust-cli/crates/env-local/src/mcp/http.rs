@@ -16,21 +16,21 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rust_cli_base::OwnedTask;
+use rust_cli_base::proto::http;
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::units;
 use rust_cli_kernel_api::mcp::{McpError, McpTransportEvent};
 use rust_cli_net::header::{ACCEPT, CONTENT_TYPE, EVENT_STREAM, JSON};
 use rust_cli_net::sse::SseDecoder;
-use rust_cli_net::{Egress, HeaderValue, HttpRequest, HttpResponse};
+use rust_cli_net::{ERROR_BODY_LIMIT, Egress, HeaderValue, HttpRequest, HttpResponse};
 use serde_json::Value;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 /// Streamable HTTP 的会话头（MCP 规范；请求带上、响应里读，F55：以前写了两次）。
 const SESSION_HEADER: &str = "mcp-session-id";
-/// 错误响应体最多读这么多字节（只用于错误文本）。
-const ERROR_BODY_LIMIT: usize = 64 * 1024;
 /// JSON 响应体的上限。
-const BODY_LIMIT: usize = 64 * 1024 * 1024;
+const BODY_LIMIT: usize = 64 * units::MIB;
 
 type Events = super::EventSender;
 
@@ -189,7 +189,7 @@ impl HttpLink {
         if let Some(session) = response.headers().get(SESSION_HEADER) {
             *lock(&self.session) = Some(session.to_owned());
         }
-        if status == 404 && self.streamable && lock(&self.session).is_some() {
+        if status == http::NOT_FOUND && self.streamable && lock(&self.session).is_some() {
             self.deliver(vec![McpTransportEvent::Closed {
                 reason: Some("MCP session expired".to_owned()),
                 session_expired: true,
@@ -205,7 +205,7 @@ impl HttpLink {
         if initialized && self.streamable {
             self.open_listener().await;
         }
-        if !self.streamable || status == 202 {
+        if !self.streamable || status == http::ACCEPTED {
             return Ok(());
         }
         let content_type = response

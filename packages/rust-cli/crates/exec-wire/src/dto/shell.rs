@@ -53,6 +53,12 @@ pub enum BackgroundStatus {
 pub struct BackgroundInfo {
     pub command: String,
     pub status: BackgroundStatus,
+    /// 修复线 F117 新增的可选字段：旧执行器不写，按 Bash（docs/specs/rust-cli/remote-exec.md §18.4）。
+    #[serde(default, skip_serializing_if = "BackgroundKind::is_bash")]
+    pub kind: BackgroundKind,
+    /// 修复线 F117 新增的可选字段：启动时的说明；旧执行器不写，按空。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

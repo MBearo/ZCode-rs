@@ -19,6 +19,13 @@ use super::lock::alive;
 // `<file>.lock`，与目录锁同一个命名（F55）。
 use super::lock::lock_dir_of as lock_path;
 
+/// 缺省：锁被占着时多久重试一次。
+const DEFAULT_RETRY: Duration = Duration::from_millis(10);
+/// 缺省：最长等待。
+const DEFAULT_TIMEOUT: Duration = Duration::from_millis(5_000);
+/// 缺省：锁文件的 mtime 超过这么久才考虑回收。
+const DEFAULT_STALE: Duration = Duration::from_millis(30_000);
+
 /// 等待与回收的参数（默认值同 Node）。
 #[derive(Debug, Clone)]
 pub struct SingleLockOptions {
@@ -30,9 +37,9 @@ pub struct SingleLockOptions {
 impl Default for SingleLockOptions {
     fn default() -> Self {
         Self {
-            retry: Duration::from_millis(10),
-            timeout: Duration::from_millis(5_000),
-            stale: Duration::from_millis(30_000),
+            retry: DEFAULT_RETRY,
+            timeout: DEFAULT_TIMEOUT,
+            stale: DEFAULT_STALE,
         }
     }
 }
@@ -78,7 +85,7 @@ async fn create(path: &Path, content: &str) -> io::Result<()> {
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
-    options.mode(0o600);
+    options.mode(rust_cli_base::proto::mode::PRIVATE_FILE);
     let mut file = options.open(path).await?;
     let written = async {
         tokio::io::AsyncWriteExt::write_all(&mut file, content.as_bytes()).await?;

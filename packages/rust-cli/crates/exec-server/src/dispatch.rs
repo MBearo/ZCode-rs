@@ -8,7 +8,7 @@ use rust_cli_exec_wire::{Body, BodyBuilder};
 use rust_cli_kernel_api::env::{ReadFile, WriteFile};
 use rust_cli_kernel_api::env_files::{ListDir, ListFiles, StatFile, StatMany};
 use rust_cli_kernel_api::env_pdf::PdfPageCount;
-use rust_cli_kernel_api::machine::MachineEnv;
+use rust_cli_kernel_api::machine::{CommandEvents, MachineEnv};
 
 use crate::convert_in as input;
 use crate::convert_out as output;
@@ -18,22 +18,19 @@ pub(crate) async fn unary(
     machine: &MachineEnv,
     request: Request,
     body: &Body,
-    env: rust_cli_kernel_api::env_command::EnvOverrides,
 ) -> (ReplyResult, Body) {
     let mut out = BodyBuilder::new();
-    let result = match run(machine, request, body, env, &mut out).await {
+    let result = match run(machine, request, body, &mut out).await {
         Ok(reply) => ReplyResult::Ok(reply),
         Err(error) => ReplyResult::Err(error),
     };
     (result, out.finish())
 }
 
-/// `env` 是这个客户端实例推来的环境变量（F96）：只交给起进程的请求。
 async fn run(
     machine: &MachineEnv,
     request: Request,
     body: &Body,
-    env: rust_cli_kernel_api::env_command::EnvOverrides,
     out: &mut BodyBuilder,
 ) -> Result<Reply, WireError> {
     let err = output::error;
@@ -163,20 +160,6 @@ async fn run(
                 .await
                 .map_err(err)?,
         )),
-        Request::StartCommand {
-            workspace,
-            context,
-            request,
-        } => {
-            let mut start = input::start_command(*request, body)?;
-            start.env = env;
-            machine
-                .commands()
-                .start_command(&input::workspace(workspace), input::context(context), start)
-                .await
-                .map_err(err)?;
-            Reply::StartCommand
-        }
         Request::Cancel { operation } => {
             machine
                 .commands()
@@ -185,13 +168,6 @@ async fn run(
                 .map_err(err)?;
             Reply::Cancel
         }
-        Request::OperationStatus { operation } => Reply::OperationStatus(output::outcome(
-            machine
-                .commands()
-                .operation_status(input::operation(operation))
-                .await
-                .map_err(err)?,
-        )),
         Request::CloseSession { session, forget } => {
             machine
                 .commands()
@@ -272,13 +248,6 @@ async fn run(
                 .await
                 .map_err(err)?,
         )),
-        Request::RewindStatus { token } => Reply::RewindStatus(output::rewind_status(
-            machine
-                .checkpoints()
-                .rewind_status(&input::operation(token))
-                .await
-                .map_err(err)?,
-        )),
         Request::RewindFinish { token } => {
             machine
                 .checkpoints()
@@ -324,6 +293,12 @@ async fn run(
                 message: "an MCP call reached the port dispatch".to_owned(),
             });
         }
+        // 起命令在 started.rs：执行器要拿着端口给的流，等线上的 watch_command 接走（工作线 F119）。
+        Request::StartCommand { .. } => {
+            return Err(WireError::BadRequest {
+                message: "start_command reached the port dispatch".to_owned(),
+            });
+        }
         // 环境变量推送在 calls.rs 当场生效，不经端口。
         Request::EnvUpdate { .. } => {
             return Err(WireError::BadRequest {
@@ -333,29 +308,36 @@ async fn run(
     })
 }
 
+/// 命令的事件换成线上的项（`watch_command`，或 `start_command` 留下的流，工作线 F119）。
+pub(crate) fn command_items(events: CommandEvents) -> BoxStream<'static, (StreamItem, Body)> {
+    events
+        .map(|item| match item {
+            Ok(event) => {
+                let mut body = BodyBuilder::new();
+                let event = output::command_event(event, &mut body);
+                (StreamItem::Command { event }, body.finish())
+            }
+            Err(error) => (
+                StreamItem::Error {
+                    error: output::error(error),
+                },
+                Body::empty(),
+            ),
+        })
+        .boxed()
+}
+
 /// 打开一个流：每项换成线上的一项与它的二进制段；端口的流结束时结束（`end` 由调用方加）。
 pub(crate) fn stream(
     machine: &MachineEnv,
     request: Request,
 ) -> BoxStream<'static, (StreamItem, Body)> {
     match request {
-        Request::WatchCommand { operation, cursor } => machine
-            .commands()
-            .watch_command(input::operation(operation), cursor)
-            .map(|item| match item {
-                Ok(event) => {
-                    let mut body = BodyBuilder::new();
-                    let event = output::command_event(event, &mut body);
-                    (StreamItem::Command { event }, body.finish())
-                }
-                Err(error) => (
-                    StreamItem::Error {
-                        error: output::error(error),
-                    },
-                    Body::empty(),
-                ),
-            })
-            .boxed(),
+        Request::WatchCommand { operation, cursor } => command_items(
+            machine
+                .commands()
+                .watch_command(input::operation(operation), cursor),
+        ),
         Request::ShellNotices { session, after } => machine
             .shell()
             .shell_notices(&input::session(session), after)

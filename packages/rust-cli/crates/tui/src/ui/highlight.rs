@@ -46,7 +46,9 @@ fn color(c: syntect::highlighting::Color, level: ColorLevel) -> Option<Color> {
 pub type Highlighted = Rc<Vec<Vec<Span<'static>>>>;
 
 /// 记住的代码原文总字节数上限；超过时整体清空。
-const MEMO_BYTES: usize = 4 * 1024 * 1024;
+const MEMO_BYTES: usize = 4 * rust_cli_base::units::MIB;
+/// 单独取一个作用域的颜色时保留的饱和度（向亮度靠 15%）。
+const SATURATION: f64 = 0.85;
 
 /// 高亮结果按（代码、语言、明暗、色彩级别）记忆。流式中的回复每帧重排，原来每帧把已闭合的代码块
 /// 重新高亮，占流式 CPU 的 85%，总成本随回复长度平方增长（docs/specs/rust-tui.md §8.1）。高亮是这几项的
@@ -161,11 +163,11 @@ pub fn scope_color(scopes: &[&str], palette: &Palette) -> Option<Color> {
         let style = highlighter.style_mod_for_stack(stack.as_slice());
         style.foreground
     })?;
-    let luma = 0.299 * f64::from(c.r) + 0.587 * f64::from(c.g) + 0.114 * f64::from(c.b);
+    let luma = super::palette::luma((c.r, c.g, c.b));
     let soften = |v: u8| {
-        (luma + (f64::from(v) - luma) * 0.85)
+        (luma + (f64::from(v) - luma) * SATURATION)
             .round()
-            .clamp(0.0, 255.0) as u8
+            .clamp(0.0, f64::from(u8::MAX)) as u8
     };
     color(
         syntect::highlighting::Color {

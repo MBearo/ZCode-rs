@@ -265,7 +265,7 @@ export function checkSources(policy, clippyEntries, sources) {
 
 /// 只在测试里编译的文件：isTestFile 之外，`#[path]` 引进测试模块的 `*_tests_*.rs` 与 `#[cfg(test)]` 的
 /// `test_support.rs` / `test_more.rs`（同一个名字只定义一处的检查不看测试）。
-function isTestOnly(file) {
+export function isTestOnly(file) {
   return isTestFile(file) || /(_tests_\w+|\/test_support|\/test_more)\.rs$/.test(file);
 }
 

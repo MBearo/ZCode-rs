@@ -34,6 +34,6 @@ pub mod websocket;
 pub use bytes::Bytes;
 pub use egress::{Egress, NetworkPolicy};
 pub use error::NetError;
-pub use http::{HeaderValue, HttpRequest, HttpResponse, Method, ResponseHeaders};
+pub use http::{ERROR_BODY_LIMIT, HeaderValue, HttpRequest, HttpResponse, Method, ResponseHeaders};
 pub use no_proxy::NoProxy;
 pub use roots::{CaBundle, TrustRoots};

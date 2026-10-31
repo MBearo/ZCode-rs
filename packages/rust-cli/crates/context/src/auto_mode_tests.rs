@@ -60,7 +60,7 @@ fn tool_round() -> Vec<Message> {
                 name: "Bash".to_owned(),
                 input: json!({"command": "echo hi"}),
             }],
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             stop_reason: None,
             usage: None,
         }),
@@ -212,7 +212,7 @@ fn request(mode: PermissionMode, subagent: bool) -> ContextRequest {
         tool_names: names(TOOLS),
         selection: ModelSelection {
             provider: "p".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },

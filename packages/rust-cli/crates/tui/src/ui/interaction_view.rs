@@ -16,6 +16,7 @@ use super::cells::{self, Ctx};
 use super::highlight;
 use super::i18n::{Lang, Strings};
 use super::interaction::Interaction;
+use super::layout;
 use super::palette::Palette;
 use super::text::{truncate_line, width, wrap, wrap_text};
 
@@ -60,7 +61,7 @@ pub(super) fn frame(title: &str, view: &View<'_>) -> Vec<Line<'static>> {
 
 pub(super) fn dashed(width: usize) -> Line<'static> {
     Line::from(Span::styled(
-        format!("  {}", "╌".repeat(width.saturating_sub(4))),
+        format!("  {}", "╌".repeat(width.saturating_sub(2 * layout::INDENT))),
         dim(),
     ))
 }
@@ -140,7 +141,10 @@ pub(super) fn input_row(
 
 /// 底部的按键提示（`{键}` 模板，按键提示组件画，tui.md §7.4）。
 pub(super) fn hint(template: &str, view: &View<'_>) -> Line<'static> {
-    truncate_line(super::key_hint::line(2, template, view.palette), view.width)
+    truncate_line(
+        super::key_hint::line(layout::INDENT, template, view.palette),
+        view.width,
+    )
 }
 
 fn file_name(path: &str) -> &str {
@@ -413,8 +417,13 @@ impl Interaction {
             } else if focused && editing && index == 1 {
                 // 焦点在“不再询问”的可编辑前缀上（工作线 F72）：键入改前缀，光标停在末尾。
                 let content = vec![named(text, true, view)];
-                let (rows, at) =
-                    input_row(prefix(true, 2, view), content, false, lines.len(), view);
+                let (rows, at) = input_row(
+                    prefix(true, index + 1, view),
+                    content,
+                    false,
+                    lines.len(),
+                    view,
+                );
                 lines.extend(rows);
                 cursor = Some(at);
             } else {

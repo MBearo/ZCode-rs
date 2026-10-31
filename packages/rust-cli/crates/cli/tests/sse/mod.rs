@@ -80,6 +80,14 @@ pub fn text_reply(text: &str) -> String {
         + &end("end_turn")
 }
 
+/// 工具自己的输出：没有对话中间 system 的模型（例如没有卡片的 DeepSeek）把这一步的提醒（`<total_tokens>` 等）并进最后
+/// 一个工具结果（context.md §3 第 9 条；字符串结果空一行接上，数组结果另起一块）。比工具的输出时先去掉，断言与模型无关
+/// （工作线 F121）。
+pub fn tool_output(text: &str) -> &str {
+    text.split_once("\n<system-reminder>")
+        .map_or(text, |(output, _)| output.trim_end_matches('\n'))
+}
+
 /// 一个请求的 header（名字小写，值去掉首尾空白）。
 pub type Headers = Vec<(String, String)>;
 

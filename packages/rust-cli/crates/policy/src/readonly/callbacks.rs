@@ -2,6 +2,7 @@
 //! Dangerous-argument callbacks (`bash-readonly-policy-callbacks.ts`), bound by
 //! the names the exported tables use.
 use super::{git_callbacks, js};
+use crate::consts::{OPTION_WITH_VALUE_WORDS, SHORT_OPTION_LEN};
 
 pub(crate) const XARGS_TARGETS: [&str; 8] = [
     "echo", "printf", "wc", "grep", "egrep", "fgrep", "head", "tail",
@@ -163,7 +164,7 @@ fn date(args: &[String]) -> bool {
         }
         if arg.starts_with('-') {
             let value = matches!(arg, "-d" | "--date" | "-r" | "--reference" | "--rfc-3339");
-            index += if value { 2 } else { 1 };
+            index += if value { OPTION_WITH_VALUE_WORDS } else { 1 };
             continue;
         }
         if !arg.starts_with('+') {
@@ -263,11 +264,17 @@ fn tput(args: &[String]) -> bool {
         }
         if !after_double_dash && arg.starts_with('-') {
             if arg == "-S"
-                || (!arg.starts_with("--") && js::utf16_len(arg) > 2 && arg.contains('S'))
+                || (!arg.starts_with("--")
+                    && js::utf16_len(arg) > SHORT_OPTION_LEN
+                    && arg.contains('S'))
             {
                 return true;
             }
-            index += if arg == "-T" { 2 } else { 1 };
+            index += if arg == "-T" {
+                OPTION_WITH_VALUE_WORDS
+            } else {
+                1
+            };
             continue;
         }
         if TPUT_DANGEROUS.contains(&arg) {

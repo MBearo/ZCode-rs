@@ -249,3 +249,7 @@ fn local_key(index: usize) -> u64 {
 mod compose;
 
 pub use compose::{Cache, lines, local_lines, pinned};
+
+#[cfg(test)]
+#[path = "transcript_duration_tests.rs"]
+mod duration_tests;

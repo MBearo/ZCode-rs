@@ -1,5 +1,6 @@
 //! 看门狗的上限与醒来时刻（stall-visibility.md §2.2、§2.4）。
 use super::*;
+use rust_cli_base::{hosts, models};
 
 fn limits(events: u64, bytes: u64) -> Limits {
     StreamIdle {
@@ -18,10 +19,11 @@ fn the_default_byte_limit_depends_on_the_endpoint() {
     let profile = |base_url: &str, model: &str| {
         select(WireProtocol::AnthropicMessages, base_url, model).byte_idle
     };
-    let official = idle.limits(profile("https://api.anthropic.com", "claude-opus-5-5"));
-    let other = idle.limits(profile("http://127.0.0.1:9", "claude-opus-5-5"));
+    // 官方方案只认 Anthropic 的模型 ID。
+    let official = idle.limits(profile(hosts::ANTHROPIC_API, models::OPUS_5_5));
+    let other = idle.limits(profile("http://127.0.0.1:9", models::GLM_5_3));
     // 智谱、DeepSeek 的官方端点不算第一方：只有 Anthropic 官方端点是第一方。
-    let zhipu = idle.limits(profile("https://api.z.ai/api/anthropic", "glm-5.1"));
+    let zhipu = idle.limits(profile(hosts::ZAI_ANTHROPIC, models::GLM_5_1));
     assert_eq!(zhipu.bytes, Some(Duration::from_secs(300)));
     assert_eq!(official.bytes, Some(Duration::from_secs(180)));
     assert_eq!(other.bytes, Some(Duration::from_secs(300)));

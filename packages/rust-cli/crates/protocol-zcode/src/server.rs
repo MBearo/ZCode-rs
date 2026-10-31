@@ -25,6 +25,9 @@ use crate::projection::state::Followup;
 /// 会话不可用（`zcodeProtocolErrorCodes.sessionUnavailable`）。
 pub const SESSION_UNAVAILABLE: i64 = -32004;
 
+/// 会话事件攒成一批再发的窗口。
+const EVENT_BATCH_WINDOW: std::time::Duration = std::time::Duration::from_millis(30);
+
 /// 新会话的缺省（入口给出）。
 #[derive(Debug, Clone)]
 pub struct Defaults {
@@ -73,11 +76,7 @@ impl Server {
         let topics = Arc::new(Topics::new(context.clone(), &spawner));
         Self {
             instance: context.fresh("instance"),
-            bridge: SessionBridge::new(
-                kernel.clone(),
-                spawner,
-                std::time::Duration::from_millis(30),
-            ),
+            bridge: SessionBridge::new(kernel.clone(), spawner, EVENT_BATCH_WINDOW),
             context,
             kernel,
             topics,

@@ -7,6 +7,7 @@
 
 use base64::Engine;
 use reqwest::header::HeaderMap;
+use rust_cli_base::proto::http;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 
 use crate::http::header_pair;
@@ -17,13 +18,50 @@ pub const MAX_PAYLOAD: u64 = 1_048_576;
 
 const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+/// 关闭码（RFC 6455 §7.4.1）：正常关闭。
+pub const CLOSE_NORMAL: u16 = 1000;
+/// 关闭码：close 帧里没有状态码（只在本地报告，不上线）。
+pub const CLOSE_NO_STATUS: u16 = 1005;
+/// 关闭码：没有 close 帧就断开（只在本地报告，不上线）。
+pub const CLOSE_ABNORMAL: u16 = 1006;
+
+/// 帧的 opcode（RFC 6455 §5.2）。
+mod opcode {
+    /// 续帧（分片消息的后续部分）。
+    pub(super) const CONTINUATION: u8 = 0x0;
+    pub(super) const TEXT: u8 = 0x1;
+    pub(super) const BINARY: u8 = 0x2;
+    pub(super) const CLOSE: u8 = 0x8;
+    pub(super) const PING: u8 = 0x9;
+    pub(super) const PONG: u8 = 0xa;
+}
+
+/// 帧头第一个字节的 FIN 位（消息的最后一帧）。
+const FIN_BIT: u8 = 0x80;
+/// 帧头第一个字节里 opcode 占的位。
+const OPCODE_BITS: u8 = 0x0f;
+/// 帧头第二个字节的 MASK 位（内容加了掩码）。
+const MASK_BIT: u8 = 0x80;
+/// 帧头第二个字节里长度占的位。
+const LENGTH_BITS: u8 = 0x7f;
+/// 长度标记：真正的长度在后面的 2 字节（大端）。
+const LENGTH_16: u8 = 126;
+/// 长度标记：真正的长度在后面的 8 字节（大端）。
+const LENGTH_64: u8 = 127;
+/// 掩码键的字节数。
+const MASK_KEY_BYTES: usize = 4;
+/// 握手的 `Sec-WebSocket-Key` 是这么多随机字节的 base64（RFC 6455 §4.1）。
+const HANDSHAKE_KEY_BYTES: usize = 16;
+/// close 帧内容开头的状态码的字节数（大端），后面是原因。
+const CLOSE_CODE_BYTES: usize = 2;
+
 /// 读到的一帧。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WsFrame {
     Text(String),
     /// 二进制帧（只报告字节数）。
     Binary(usize),
-    /// 关闭：close 帧的代码与原因；没有 close 帧就断开时是 1006、原因为空。
+    /// 关闭：close 帧的代码与原因；没有 close 帧就断开时是 [`CLOSE_ABNORMAL`]、原因为空。
     Close {
         code: u16,
         reason: String,
@@ -74,7 +112,7 @@ fn http_url(url: &str) -> Result<String, WsError> {
 
 fn random_bytes<const N: usize>() -> [u8; N] {
     let mut bytes = [0_u8; N];
-    for chunk in bytes.chunks_mut(8) {
+    for chunk in bytes.chunks_mut(size_of::<u64>()) {
         let value = rust_cli_base::random::u64().to_le_bytes();
         chunk.copy_from_slice(&value[..chunk.len()]);
     }
@@ -101,7 +139,8 @@ pub(crate) async fn connect(
     protocols: &[String],
 ) -> Result<WebSocket, WsError> {
     let target = http_url(url)?;
-    let key = base64::engine::general_purpose::STANDARD.encode(random_bytes::<16>());
+    let key =
+        base64::engine::general_purpose::STANDARD.encode(random_bytes::<HANDSHAKE_KEY_BYTES>());
     let mut headers = base;
     let mut set = |name: &str, value: String| -> Result<(), WsError> {
         let (name, value) =
@@ -123,7 +162,7 @@ pub(crate) async fn connect(
         .await
         .map_err(|error| NetError::from_reqwest(&error))?;
     let status = response.status().as_u16();
-    if status != 101 {
+    if status != http::SWITCHING_PROTOCOLS {
         return Err(WsError::Rejected { status });
     }
     let accept = response
@@ -149,16 +188,16 @@ pub(crate) async fn connect(
 }
 
 /// 一个客户端帧（FIN、掩码）。
-pub(crate) fn client_frame(opcode: u8, payload: &[u8], mask: [u8; 4]) -> Vec<u8> {
-    let mut frame = vec![0x80 | opcode];
+pub(crate) fn client_frame(opcode: u8, payload: &[u8], mask: [u8; MASK_KEY_BYTES]) -> Vec<u8> {
+    let mut frame = vec![FIN_BIT | opcode];
     let length = payload.len();
-    if length < 126 {
-        frame.push(0x80 | u8::try_from(length).unwrap_or(0));
+    if length < usize::from(LENGTH_16) {
+        frame.push(MASK_BIT | u8::try_from(length).unwrap_or(0));
     } else if let Ok(short) = u16::try_from(length) {
-        frame.push(0x80 | 126);
+        frame.push(MASK_BIT | LENGTH_16);
         frame.extend_from_slice(&short.to_be_bytes());
     } else {
-        frame.push(0x80 | 127);
+        frame.push(MASK_BIT | LENGTH_64);
         frame.extend_from_slice(&(length as u64).to_be_bytes());
     }
     frame.extend_from_slice(&mask);
@@ -166,7 +205,7 @@ pub(crate) fn client_frame(opcode: u8, payload: &[u8], mask: [u8; 4]) -> Vec<u8>
         payload
             .iter()
             .enumerate()
-            .map(|(index, byte)| byte ^ mask[index % 4]),
+            .map(|(index, byte)| byte ^ mask[index % MASK_KEY_BYTES]),
     );
     frame
 }
@@ -181,7 +220,7 @@ fn io(error: &std::io::Error) -> WsError {
 
 impl WebSocket {
     async fn send(&mut self, opcode: u8, payload: &[u8]) -> Result<(), WsError> {
-        let frame = client_frame(opcode, payload, random_bytes::<4>());
+        let frame = client_frame(opcode, payload, random_bytes::<MASK_KEY_BYTES>());
         self.writer
             .write_all(&frame)
             .await
@@ -193,19 +232,19 @@ impl WebSocket {
     async fn frame(&mut self) -> Result<(bool, u8, Vec<u8>), std::io::Error> {
         let mut head = [0_u8; 2];
         self.reader.read_exact(&mut head).await?;
-        let fin = head[0] & 0x80 != 0;
-        let opcode = head[0] & 0x0f;
-        let masked = head[1] & 0x80 != 0;
-        let mut length = u64::from(head[1] & 0x7f);
-        if length == 126 {
+        let fin = head[0] & FIN_BIT != 0;
+        let opcode = head[0] & OPCODE_BITS;
+        let masked = head[1] & MASK_BIT != 0;
+        let mut length = u64::from(head[1] & LENGTH_BITS);
+        if length == u64::from(LENGTH_16) {
             length = u64::from(self.reader.read_u16().await?);
-        } else if length == 127 {
+        } else if length == u64::from(LENGTH_64) {
             length = self.reader.read_u64().await?;
         }
         if length > MAX_PAYLOAD {
             return Err(std::io::Error::other(TooBig(length)));
         }
-        let mut mask = [0_u8; 4];
+        let mut mask = [0_u8; MASK_KEY_BYTES];
         if masked {
             self.reader.read_exact(&mut mask).await?;
         }
@@ -213,7 +252,7 @@ impl WebSocket {
         self.reader.read_exact(&mut payload).await?;
         if masked {
             for (index, byte) in payload.iter_mut().enumerate() {
-                *byte ^= mask[index % 4];
+                *byte ^= mask[index % MASK_KEY_BYTES];
             }
         }
         Ok((fin, opcode, payload))
@@ -228,7 +267,7 @@ impl WebSocket {
                 Ok(frame) => frame,
                 Err(error) if eof(&error) => {
                     return Ok(WsFrame::Close {
-                        code: 1006,
+                        code: CLOSE_ABNORMAL,
                         reason: String::new(),
                     });
                 }
@@ -244,7 +283,7 @@ impl WebSocket {
             };
             // 控制帧可以夹在分片之间，它们的 FIN 不结束消息；只有数据帧与续帧的 FIN 结束。
             let data = match opcode {
-                0x0 => {
+                opcode::CONTINUATION => {
                     let Some((_, body)) = message.as_mut() else {
                         return Err(WsError::Protocol(
                             "unexpected continuation frame".to_owned(),
@@ -256,33 +295,36 @@ impl WebSocket {
                     }
                     true
                 }
-                0x1 | 0x2 if message.is_some() => {
+                opcode::TEXT | opcode::BINARY if message.is_some() => {
                     return Err(WsError::Protocol(
                         "expected a continuation frame".to_owned(),
                     ));
                 }
-                0x1 | 0x2 => {
-                    message = Some((opcode == 0x1, payload));
+                opcode::TEXT | opcode::BINARY => {
+                    message = Some((opcode == opcode::TEXT, payload));
                     true
                 }
-                0x8 => {
+                opcode::CLOSE => {
                     let code = match payload.as_slice() {
                         [high, low, ..] => u16::from_be_bytes([*high, *low]),
-                        _ => 1005,
+                        _ => CLOSE_NO_STATUS,
                     };
-                    let reason =
-                        String::from_utf8_lossy(payload.get(2..).unwrap_or_default()).into_owned();
+                    let reason = String::from_utf8_lossy(
+                        payload.get(CLOSE_CODE_BYTES..).unwrap_or_default(),
+                    )
+                    .into_owned();
                     if !self.closing {
                         self.closing = true;
-                        let _ = self.send(0x8, &payload[..payload.len().min(2)]).await;
+                        let echo = &payload[..payload.len().min(CLOSE_CODE_BYTES)];
+                        let _ = self.send(opcode::CLOSE, echo).await;
                     }
                     return Ok(WsFrame::Close { code, reason });
                 }
-                0x9 => {
-                    self.send(0xa, &payload).await?;
+                opcode::PING => {
+                    self.send(opcode::PONG, &payload).await?;
                     false
                 }
-                0xa => false,
+                opcode::PONG => false,
                 other => return Err(WsError::Protocol(format!("unknown opcode {other}"))),
             };
             if data
@@ -298,11 +340,11 @@ impl WebSocket {
         }
     }
 
-    /// 发 close 帧（正常关闭 1000）。
+    /// 发 close 帧（正常关闭 [`CLOSE_NORMAL`]）。
     pub async fn close(&mut self) {
         if !self.closing {
             self.closing = true;
-            let _ = self.send(0x8, &1000_u16.to_be_bytes()).await;
+            let _ = self.send(opcode::CLOSE, &CLOSE_NORMAL.to_be_bytes()).await;
         }
     }
 }

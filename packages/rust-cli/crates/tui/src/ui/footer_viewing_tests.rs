@@ -198,7 +198,7 @@ fn viewing_shows_the_subagents_model_effort_and_stats() {
     let before = plain(&app, 160);
     assert!(
         before.ends_with(
-            "scripted \u{b7} 40 tok/s \u{b7} ctx 37.0% \u{b7} cache 91.0% \u{b7} 10% until auto-compact"
+            "40 tok/s \u{b7} ctx 37.0% \u{b7} cache 91.0% \u{b7} 10% until auto-compact \u{b7} scripted"
         ),
         "{before}"
     );
@@ -209,7 +209,7 @@ fn viewing_shows_the_subagents_model_effort_and_stats() {
     receipt(&mut app, 400, 200);
     let text = plain(&app, 160);
     assert!(
-        text.ends_with("child-model high \u{b7} 30 tok/s \u{b7} ctx 20.0% \u{b7} cache 50.0%"),
+        text.ends_with("30 tok/s \u{b7} ctx 20.0% \u{b7} cache 50.0% \u{b7} child-model high"),
         "{text}"
     );
     for main in [
@@ -266,7 +266,10 @@ fn the_context_notice_is_the_subagents() {
     sub.running = false;
     view(&mut app, Transcript::from_view(sub, 0));
     let text = plain(&app, 160);
-    assert!(text.ends_with("Context low (8% remaining)"), "{text}");
+    assert!(
+        text.ends_with("Context low (8% remaining) \u{b7} child-model high"),
+        "{text}"
+    );
     assert!(!text.contains("until auto-compact"), "{text}");
 }
 
@@ -353,7 +356,7 @@ fn returning_to_main_restores_it() {
     app.request_stats.clear();
     let text = plain(&app, 160);
     assert!(
-        text.ends_with("scripted \u{b7} 40 tok/s \u{b7} ctx 37.0% \u{b7} 10% until auto-compact"),
+        text.ends_with("40 tok/s \u{b7} ctx 37.0% \u{b7} 10% until auto-compact \u{b7} scripted"),
         "{text}"
     );
     assert!(text.contains("Ask before changes"), "{text}");
@@ -415,7 +418,7 @@ fn chinese_uses_the_chinese_words() {
     receipt(&mut app, 400, 200);
     let text = plain(&app, 160);
     assert!(
-        text.ends_with("child-model high \u{b7} 30 tok/s \u{b7} 上下文 20.0% \u{b7} 缓存 50.0%"),
+        text.ends_with("30 tok/s \u{b7} 上下文 20.0% \u{b7} 缓存 50.0% \u{b7} child-model high"),
         "{text}"
     );
     assert!(text.contains("自动编辑"), "{text}");
@@ -433,12 +436,13 @@ fn narrow_terminals_keep_the_order_while_viewing() {
     let mut seen: Vec<String> = Vec::new();
     for width in (20..=160).rev() {
         let text = plain(&app, width);
+        // 按显示的先后列：统计、提示，模型名贴最右（F116）。
         let right: Vec<&str> = [
-            "child-model high",
             "30 tok/s",
             "ctx 20.0%",
             "cache 50.0%",
             "7% until auto-compact",
+            "child-model high",
         ]
         .into_iter()
         .filter(|item| text.contains(item))
@@ -451,10 +455,10 @@ fn narrow_terminals_keep_the_order_while_viewing() {
     assert_eq!(
         seen,
         [
-            "child-model high | 30 tok/s | ctx 20.0% | cache 50.0% | 7% until auto-compact",
-            "child-model high | 30 tok/s | ctx 20.0% | 7% until auto-compact",
-            "child-model high | ctx 20.0% | 7% until auto-compact",
-            "child-model high | 7% until auto-compact",
+            "30 tok/s | ctx 20.0% | cache 50.0% | 7% until auto-compact | child-model high",
+            "30 tok/s | ctx 20.0% | 7% until auto-compact | child-model high",
+            "ctx 20.0% | 7% until auto-compact | child-model high",
+            "7% until auto-compact | child-model high",
             "child-model high",
             "",
         ]

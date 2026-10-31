@@ -13,6 +13,9 @@ use super::interaction::View;
 use super::mouse::Target;
 use super::status_line::{self, Clock};
 
+/// 输入框上下两条边线。
+const INPUT_BORDERS: usize = 2;
+
 /// 底部区域的一行可点击区域：（行，起始列，宽度，目标）；宽度为 None 时占整行。
 pub(super) type RowTarget = (usize, usize, Option<usize>, Target);
 
@@ -162,11 +165,11 @@ pub(super) fn bottom_lines(
     }
     // 输入框（上下两条边线）；文字区最多 max(3, 高度 / 2 − 5) 行，也不超过底部区域剩下的高度。
     let max_rows = super::input_box::max_rows(height)
-        .min(max_bottom.saturating_sub(lines.len() + 3))
+        .min(max_bottom.saturating_sub(lines.len() + INPUT_BORDERS + 1))
         .max(1);
     let (input, position, first) = super::input_box::input_box(app, width, max_rows);
     let top = lines.len();
-    let text_rows = input.len().saturating_sub(2);
+    let text_rows = input.len().saturating_sub(INPUT_BORDERS);
     lines.extend(input);
     let mut cursor = position.map(|(row, col)| (top as u16 + row, col));
     // 输入框下面：弹出列表或 footer（两者替换同一个位置；快捷键面板打开时 footer 写关闭的提示）。

@@ -8,6 +8,7 @@
 //! - `activity <storage-dir> <all|week|month> <today> <offset-minutes>`：`SessionStore::activity` 的结果；
 //! - `request-stats <storage-dir> <session>`：`SessionStore::request_stats` 的结果与它给出的 TPS、命中率（footer 的
 //!   请求统计，usage.md §4.1，修复线 F27）。
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::metering::{
     ActivityQuery, ActivityRange, CallStatus, ModelCall, ToolCall,
 };
@@ -28,7 +29,7 @@ fn usage() -> Usage {
 fn requested() -> ModelSelection {
     ModelSelection {
         provider: "anthropic".into(),
-        model: "claude-opus-5-5".into(),
+        model: GLM_5_3.into(),
         reasoning: Some("max".into()),
         connection: None,
     }

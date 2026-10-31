@@ -4,6 +4,7 @@
 //! 各命令并发执行，非零退出时该项输出为空（`preserveOutputOnError: false`），stdout 去掉首尾空白。
 //! 进程经 `rust-cli-proc` 启动，环境是白名单投影加上受限的 git 变量。
 
+use rust_cli_base::path::DEV_NULL;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -25,32 +26,33 @@ const GUARD: &str = "'alias.remote-none=version' 'alias.remote-none.command=vers
                      'alias.remote-/.command=version' 'fetch.bundleURI=' 'help.autocorrect=0'";
 
 /// git 不交互地要凭据（git 的安全环境里有；worktree 也用，F55：以前写了两次）。
-pub(crate) const NO_TERMINAL_PROMPT: (&str, &str) = ("GIT_TERMINAL_PROMPT", "0");
+pub(crate) const NO_TERMINAL_PROMPT: (&str, &str) =
+    (rust_cli_base::names::env::GIT_TERMINAL_PROMPT, "0");
 
 /// 白名单投影后再加受限的变量：不提示输入、不走网络取对象、不用 ssh、
 /// PATH 只留绝对路径。
 fn restricted(projected: BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut env = projected;
     for (name, value) in [
-        ("GIT_ALLOW_PROTOCOL", "/"),
-        ("GIT_CONFIG_PARAMETERS", GUARD),
-        ("GIT_NO_LAZY_FETCH", "1"),
-        ("GIT_NO_REPLACE_OBJECTS", "1"),
+        (rust_cli_base::names::env::GIT_ALLOW_PROTOCOL, "/"),
+        (rust_cli_base::names::env::GIT_CONFIG_PARAMETERS, GUARD),
+        (rust_cli_base::names::env::GIT_NO_LAZY_FETCH, "1"),
+        (rust_cli_base::names::env::GIT_NO_REPLACE_OBJECTS, "1"),
         NO_TERMINAL_PROMPT,
-        ("GIT_LFS_SKIP_SMUDGE", "1"),
-        ("GIT_SSH_COMMAND", "false"),
+        (rust_cli_base::names::env::GIT_LFS_SKIP_SMUDGE, "1"),
+        (rust_cli_base::names::env::GIT_SSH_COMMAND, "false"),
     ] {
         env.insert(name.to_owned(), value.to_owned());
     }
     if cfg!(unix)
-        && let Some(path) = env.get_mut("PATH")
+        && let Some(path) = env.get_mut(rust_cli_base::names::env::PATH)
     {
         let kept: Vec<&str> = path
             .split(':')
             .filter(|entry| entry.starts_with('/'))
             .collect();
         *path = if kept.is_empty() {
-            "/dev/null".to_owned()
+            DEV_NULL.to_owned()
         } else {
             kept.join(":")
         };

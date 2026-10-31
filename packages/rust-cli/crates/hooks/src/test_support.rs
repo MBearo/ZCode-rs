@@ -133,7 +133,8 @@ impl Commands for ScriptedEnv {
         _workspace: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
+        let operation = context.operation.clone();
         if self.fail_start {
             return Err(EnvError::Io {
                 message: "spawn failed".to_owned(),
@@ -152,7 +153,7 @@ impl Commands for ScriptedEnv {
             },
         );
         lock(&self.started).push((context, request));
-        Ok(())
+        Ok(self.watch_command(operation, 0))
     }
 
     fn watch_command(
@@ -229,10 +230,6 @@ impl Commands for ScriptedEnv {
             started.cancel.cancel();
         }
         Ok(())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
-        Err(unused())
     }
 
     async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {

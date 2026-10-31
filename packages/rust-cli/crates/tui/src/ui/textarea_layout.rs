@@ -3,6 +3,7 @@
 use unicode_width::UnicodeWidthChar;
 
 use super::{Row, TextArea};
+use crate::ui::mouse::{DOUBLE_CLICK, TRIPLE_CLICK};
 
 impl TextArea {
     /// 按宽度折行：优先在空白处断开，单词比一行宽时硬断；换行符各起一行。
@@ -113,7 +114,7 @@ impl TextArea {
     pub fn unit_range(&self, at: usize, clicks: u8) -> (usize, usize) {
         let text = &self.text;
         match clicks {
-            2 => {
+            DOUBLE_CLICK => {
                 let word = |c: char| c.is_alphanumeric() || c == '_';
                 match text[at..].chars().next() {
                     Some(c) if word(c) => {
@@ -131,7 +132,7 @@ impl TextArea {
                     None => (at, at),
                 }
             }
-            3 => {
+            TRIPLE_CLICK => {
                 let start = text[..at].rfind('\n').map_or(0, |i| i + 1);
                 let end = text[at..].find('\n').map_or(text.len(), |i| at + i + 1);
                 (start, end)

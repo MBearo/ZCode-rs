@@ -5,6 +5,7 @@
 //!
 //! 修复线 F68（审计 C1）：以前不解析这个字段，守卫 hook 出错时工具照常执行（fail-open），而 Node 与 App 会拦下。
 
+use crate::consts::BLOCKING_EXIT;
 use crate::output::{self, Parsed};
 use crate::result::{Executed, HookResult, Outcome, Raw};
 
@@ -20,7 +21,10 @@ fn failure(executed: &Executed, interpreted: &HookResult, timeout_ms: u64) -> Op
             stdout,
             stderr,
             exit,
-        }) if *exit != 0 && *exit != 2 && matches!(output::parse(stdout), Parsed::Plain) => {
+        }) if *exit != 0
+            && *exit != BLOCKING_EXIT
+            && matches!(output::parse(stdout), Parsed::Plain) =>
+        {
             let stderr = stderr.trim();
             Some(if stderr.is_empty() {
                 "Hook process exited with status failed".to_owned()

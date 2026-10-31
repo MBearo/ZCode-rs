@@ -25,7 +25,14 @@ async fn output(
     if text.encode_utf16().count() <= THRESHOLD {
         return text;
     }
-    match persisted_output::persist(artifacts, session, &text, "text/plain").await {
+    match persisted_output::persist(
+        artifacts,
+        session,
+        &text,
+        rust_cli_base::proto::mime::TEXT_PLAIN,
+    )
+    .await
+    {
         Ok(preview) => preview,
         Err(error) => {
             tracing::warn!(source, %error, "hook output could not be persisted");

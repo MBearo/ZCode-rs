@@ -35,6 +35,12 @@ pub enum FileKind {
 /// 版本库目录（Grep 的排除表；文件索引 `rg --files` 的排除表同值
 /// 同序）：Grep 总是排除它们，`@` 补全的文件清单跳过它们（tui-input.md §1.2）。F58：以前 tools 与 env-local 各写一份。
 pub const VCS_DIRS: &[&str] = &[".git", ".svn", ".hg", ".bzr", ".jj", ".sl"];
+/// git 的版本库目录名（[`VCS_DIRS`] 的第一项；工作区根或 worktree 里的 `.git`，目录或 `gitdir:` 文件）。路径用途的
+/// `.git` 只定义在这里（工作线 F122，README §4.1 的 `SINGLE_DEFINITIONS`）。
+pub const GIT_DIR: &str = VCS_DIRS[0];
+/// 版本库里的 hooks 目录与配置文件（相对工作区根；沙箱的写保护清单）。
+pub const GIT_HOOKS_DIR: &str = ".git/hooks";
+pub const GIT_CONFIG_FILE: &str = ".git/config";
 
 /// 查询一个路径的元数据；不存在时端口返回 `Ok(None)`。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -3,6 +3,7 @@
 //! 文字已套产品名替换表。
 //! 发送经 kernel-api 的 [`PeerMessaging`] 端口，本 crate 不做 IO。
 
+use rust_cli_base::units;
 use rust_cli_kernel_api::peers::{
     ModeClass, PeerAddress, PeerOutbound, PeerRecord, PeerSendError, envelope, name_key,
     shortest_refs, split_reference,
@@ -15,27 +16,20 @@ use crate::Core;
 
 /// 每段最多几行。
 const ROWS: usize = 100;
+/// 没有 summary 时取消息的前这么多个字。
+const SUMMARY_CHARS: usize = 50;
 
-/// 时长只取最大的单位：不到 1 分钟是秒。
+/// 时长只取最大的单位：不到 1 分钟是秒。拆分与进位只定义在 base 的 `units::split_ms`。
 pub(crate) fn ago(ms: u64) -> String {
-    if ms < 60_000 {
-        return format!("{}s", ms / 1000);
+    if ms < units::MS_PER_MINUTE {
+        return format!("{}s", ms / units::MS_PER_SECOND);
     }
-    let mut days = ms / 86_400_000;
-    let mut hours = (ms % 86_400_000) / 3_600_000;
-    let mut minutes = (ms % 3_600_000) / 60_000;
-    let seconds = ((ms % 60_000) as f64 / 1000.0).round() as u64;
-    if seconds == 60 {
-        minutes += 1;
-    }
-    if minutes == 60 {
-        minutes = 0;
-        hours += 1;
-    }
-    if hours == 24 {
-        hours = 0;
-        days += 1;
-    }
+    let units::DurationParts {
+        days,
+        hours,
+        minutes,
+        seconds,
+    } = units::split_ms(ms);
     if days > 0 {
         format!("{days}d")
     } else if hours > 0 {
@@ -206,7 +200,7 @@ pub(crate) async fn send(
             // summary 缺省时取 message 的前 50 字。
             let summary = summary
                 .filter(|summary| !summary.is_empty())
-                .map_or_else(|| first_chars(message, 50), str::to_owned);
+                .map_or_else(|| first_chars(message, SUMMARY_CHARS), str::to_owned);
             let mut text = render(
                 texts::send_ok(),
                 &[("summary", summary.as_str()), ("name", name.as_str())],

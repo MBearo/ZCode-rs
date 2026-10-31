@@ -22,6 +22,8 @@ use sha2::{Digest, Sha256};
 
 const ENCRYPTED_VALUE_PREFIX: &str = "enc:v1:";
 const TAG_BYTES: usize = 16;
+/// 密文 `iv.tag.data` 的段数。
+const ENCRYPTED_PARTS: usize = 3;
 
 /// Node `atomicWritePrivateTextFile`：隐藏临时文件、0600、rename 被占用时的重试间隔。
 pub(crate) const PRIVATE_WRITE: WriteOptions = WriteOptions {
@@ -137,7 +139,7 @@ impl Cipher {
             return Ok(value.to_owned());
         };
         let parts: Vec<&str> = payload.split('.').collect();
-        if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
+        if parts.len() != ENCRYPTED_PARTS || parts.iter().any(|part| part.is_empty()) {
             return Err(CredentialError::Decrypt("密文格式非法"));
         }
         let decode = |raw: &str| BASE64URL.decode(raw).unwrap_or_default();

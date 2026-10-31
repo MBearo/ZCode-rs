@@ -83,7 +83,8 @@ fn provider_patches_are_merged_last() {
     let body = super::body(request, false, &patches).unwrap();
     assert_eq!(
         body,
-        r#"{"model":"claude-sonnet-4-5","messages":[],"system":[],"tools":[],"max_tokens":128000,"thinking":{"type":"enabled"},"stream":true,"output_config":{"effort":"high"}}"#
+        r#"{"model":"<model>","messages":[],"system":[],"tools":[],"max_tokens":128000,"thinking":{"type":"enabled"},"stream":true,"output_config":{"effort":"high"}}"#
+            .replace("<model>", rust_cli_base::models::GLM_5_3)
     );
 }
 

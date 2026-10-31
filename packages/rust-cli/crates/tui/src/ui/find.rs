@@ -339,22 +339,25 @@ pub(super) fn paint(
 /// 搜索模式的输入框一行（tui-input.md §2.3.5）与光标所在的列：`⌕ ` 加查询，右侧是 `序号/总数` 或 `no matches`；
 /// 放不下时先省右侧，查询太长时只显示末尾。
 pub fn input_line(app: &App, find: &Find, width: usize) -> (Line<'static>, u16) {
+    /// 提示符 `⌕ ` 占 2 列；查询与右侧的序号之间至少空 2 列（其中一列留给光标）。
+    const PROMPT_WIDTH: usize = 2;
+    const STATUS_GAP: usize = 2;
     let prompt = Span::styled("⌕ ", Style::default().fg(app.palette.accent));
     if find.query.is_empty() {
         let dim = Style::default().add_modifier(Modifier::DIM);
         let line = Line::from(vec![prompt, Span::styled(placeholder(app.lang), dim)]);
-        return (super::text::truncate_line(line, width), 2);
+        return (super::text::truncate_line(line, width), PROMPT_WIDTH as u16);
     }
     // 留 1 列给行尾的光标。
-    let room = width.saturating_sub(3);
+    let room = width.saturating_sub(PROMPT_WIDTH + 1);
     let shown = tail(&find.query, room);
-    let used = 2 + shown.width();
+    let used = PROMPT_WIDTH + shown.width();
     let status = match find.index {
         Some(index) => format!("{}/{}", index + 1, find.count),
         None => super::detail::no_matches(app.lang).to_owned(),
     };
     let mut spans = vec![prompt, Span::raw(shown)];
-    if used + 2 + status.width() <= width {
+    if used + STATUS_GAP + status.width() <= width {
         spans.push(Span::raw(" ".repeat(width - used - status.width() - 1)));
         spans.push(Span::styled(status, app.palette.secondary()));
     }

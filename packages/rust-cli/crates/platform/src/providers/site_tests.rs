@@ -1,5 +1,6 @@
 //! 修复线 F23：URL 规范化后命中 providerSiteRules；各官方站点得到的能力（platform.md §3.2 第 7 条、§3.3）。
 
+use rust_cli_base::{hosts, models};
 use rust_cli_kernel_api::provider::{ModelCapabilities, WireProtocol};
 use serde_json::{Value, json};
 
@@ -44,11 +45,11 @@ fn effective(api_type: &str, base_url: &str, model: &str) -> Value {
 #[test]
 fn site_rules_match_after_the_url_is_normalized() {
     for base_url in [
-        "https://api.z.ai/api/anthropic",
+        hosts::ZAI_ANTHROPIC,
         "https://API.Z.AI/api/anthropic",
-        "https://api.z.ai:443/api/anthropic//",
+        &format!("{}:443/api/anthropic//", hosts::ZAI_API),
     ] {
-        let config = effective("anthropic-messages", base_url, "glm-5.1");
+        let config = effective("anthropic-messages", base_url, models::GLM_5_1);
         let properties = &config["properties"];
         assert_eq!(properties["supportsNativeWebSearch"], true, "{base_url}");
         assert_eq!(
@@ -63,8 +64,8 @@ fn site_rules_match_after_the_url_is_normalized() {
     // path 的大小写不改：`/API/anthropic` 不是 z.ai 的站点。
     let other = effective(
         "anthropic-messages",
-        "https://api.z.ai/API/anthropic",
-        "glm-5.1",
+        &format!("{}/API/anthropic", hosts::ZAI_API),
+        models::GLM_5_1,
     );
     assert_eq!(other["properties"]["supportsNativeWebSearch"], false);
 }
@@ -77,13 +78,13 @@ fn the_catalog_entry_carries_the_capabilities() {
         &personal(
             "anthropic-messages",
             "https://API.deepseek.com/anthropic/",
-            "deepseek-v4-pro",
+            models::DEEPSEEK_V4_PRO,
         ),
         None,
     );
     let snapshot = snapshot(&resolved, &Default::default());
     let template = snapshot
-        .find(&sel("personal:site", "deepseek-v4-pro"))
+        .find(&sel("personal:site", models::DEEPSEEK_V4_PRO))
         .unwrap();
     let entry = template.catalog_entry();
     assert_eq!(entry.capabilities, template.capabilities);
@@ -100,51 +101,51 @@ fn site(protocol: WireProtocol, base_url: &str, model: &str) -> ModelCapabilitie
 #[test]
 fn official_sites_get_their_capabilities() {
     let anthropic = WireProtocol::AnthropicMessages;
-    let opus = site(anthropic, "https://api.anthropic.com/v1", "claude-opus-5-5");
-    assert!(opus.supports_native_web_search);
-    assert!(opus.supports_mid_conversation_system);
-    assert!(opus.supports_image && opus.supports_pdf);
-    assert!(opus.supports_json_schema_output);
-    assert_eq!(opus.context_window, 1_000_000);
+    let official = site(anthropic, hosts::ANTHROPIC_API_V1, models::OPUS_5_5);
+    assert!(official.supports_native_web_search);
+    assert!(official.supports_mid_conversation_system);
+    assert!(official.supports_image && official.supports_pdf);
+    assert!(official.supports_json_schema_output);
+    assert_eq!(official.context_window, 1_000_000);
     // 同一个模型在别的网关上：没有 WebSearch，其余照模型规则。
-    let gateway = site(anthropic, "https://gw.example.com", "claude-opus-5-5");
+    let gateway = site(anthropic, "https://gw.example.com", models::OPUS_5_5);
     assert!(!gateway.supports_native_web_search);
     assert!(gateway.supports_mid_conversation_system);
     for base_url in [
-        "https://api.z.ai/api/anthropic",
-        "https://open.bigmodel.cn/api/anthropic",
-        "https://zcode.z.ai/api/v1/zcode-plan/anthropic",
-        "https://zcode.z.ai/api/v1/highspeed/anthropic",
+        hosts::ZAI_ANTHROPIC,
+        hosts::BIGMODEL_ANTHROPIC,
+        hosts::ZCODE_PLAN_ANTHROPIC,
+        hosts::ZCODE_HIGHSPEED_ANTHROPIC,
     ] {
-        let glm = site(anthropic, base_url, "glm-5.1");
+        let glm = site(anthropic, base_url, models::GLM_5_1);
         assert!(glm.supports_native_web_search, "{base_url}");
         assert!(glm.supports_mid_conversation_system, "{base_url}");
         assert!(glm.supports_image && glm.supports_video, "{base_url}");
     }
-    let off_peak = site(
-        anthropic,
-        "https://zcode.z.ai/api/v1/off-peak/anthropic",
-        "glm-5.1",
-    );
+    let off_peak = site(anthropic, hosts::ZCODE_OFF_PEAK_ANTHROPIC, models::GLM_5_1);
     assert!(!off_peak.supports_native_web_search);
     assert!(off_peak.supports_mid_conversation_system);
     let deepseek = site(
         anthropic,
-        "https://api.deepseek.com/anthropic",
-        "deepseek-v4-pro",
+        hosts::DEEPSEEK_ANTHROPIC,
+        models::DEEPSEEK_V4_PRO,
     );
     assert!(deepseek.supports_native_web_search && deepseek.supports_mid_conversation_system);
-    let kimi = site(anthropic, "https://api.moonshot.cn/anthropic", "kimi-k3");
+    let kimi = site(
+        anthropic,
+        "https://api.moonshot.cn/anthropic",
+        models::KIMI_K3,
+    );
     assert!(kimi.requires_mfjs_tool_schema);
-    // OpenAI 协议的同一站点不套 Anthropic 端点的规则。
+    // OpenAI 协议的同一站点不套 Anthropic 端点的规则（用没有卡片形状的模型：GLM 的对话中间 system 另由形状给，F121）。
     let chat = site(
         WireProtocol::OpenAiChatCompletions,
-        "https://api.z.ai/api/paas/v4",
-        "glm-5.1",
+        hosts::ZAI_OPENAI,
+        models::DEEPSEEK_V4_PRO,
     );
     assert!(!chat.supports_native_web_search && !chat.supports_mid_conversation_system);
     // 解析不了的 URL：站点规则都不命中。
-    let broken = site(anthropic, "not a url", "claude-opus-5-5");
+    let broken = site(anthropic, "not a url", models::OPUS_5_5);
     assert!(!broken.supports_native_web_search);
 }
 
@@ -155,33 +156,40 @@ fn site_rules_give_the_compaction_limits() {
     let rules = SiteRules::new(&builtin());
     let anthropic = WireProtocol::AnthropicMessages;
     let limits = |model: &str| rules.limits(anthropic, "http://127.0.0.1:9/v1", model);
-    let glm = limits("glm-5.3").unwrap();
+    let glm = limits(models::GLM_5_3).unwrap();
     assert_eq!(
         (glm.context_window, glm.max_output_tokens),
         (1_000_000, Some(128_000))
     );
-    let flash = limits("glm-4-flash-250414").unwrap();
+    let flash = limits(models::GLM_4_FLASH).unwrap();
     assert_eq!(
         (flash.context_window, flash.max_output_tokens),
         (131_072, Some(16_384))
     );
     // 第一条规则（`.*`）对任何模型都给窗口与输出上限。
-    let opus = limits("claude-opus-5-5").unwrap();
+    let card = limits(models::OPUS_5_5).unwrap();
     assert_eq!(
-        (opus.context_window, opus.max_output_tokens),
+        (card.context_window, card.max_output_tokens),
         (1_000_000, Some(128_000))
     );
     // 与目录里同一个模型的值相同。
     let resolved = resolve(
         &builtin(),
-        &personal("anthropic-messages", "http://127.0.0.1:9/v1", "glm-5.3"),
+        &personal(
+            "anthropic-messages",
+            "http://127.0.0.1:9/v1",
+            models::GLM_5_3,
+        ),
         None,
     );
     let snapshot = snapshot(&resolved, &Default::default());
-    assert_eq!(snapshot.limits(&sel("personal:site", "glm-5.3")), Some(glm));
+    assert_eq!(
+        snapshot.limits(&sel("personal:site", models::GLM_5_3)),
+        Some(glm)
+    );
     // 规则为空（内置配置读不了）：答不出，压缩按卡片与默认窗口。
     assert_eq!(
-        SiteRules::default().limits(anthropic, "http://127.0.0.1:9/v1", "glm-5.3"),
+        SiteRules::default().limits(anthropic, "http://127.0.0.1:9/v1", models::GLM_5_3),
         None
     );
 }
@@ -211,7 +219,7 @@ fn glm_5_3_flash_follows_the_node_rules() {
         provider
             .models
             .iter()
-            .find(|model| model.model_id == "GLM-5.3-Flash")
+            .find(|model| model.model_id == models::GLM_5_3_FLASH_ACCOUNT)
             .unwrap_or_else(|| panic!("{provider_id}"))
             .effective_config
             .clone()
@@ -225,7 +233,8 @@ fn glm_5_3_flash_follows_the_node_rules() {
         ("account:zai-offpeak-idle-plan", false),
     ] {
         let config = effective(provider_id);
-        let capabilities = crate::providers::catalog::capabilities(&config);
+        let capabilities =
+            crate::providers::catalog::capabilities(models::GLM_5_3_FLASH_ACCOUNT, &config);
         assert_eq!(
             capabilities.supports_native_web_search, web_search,
             "{provider_id}"
@@ -253,9 +262,9 @@ fn the_capabilities_carry_the_configured_output_limit() {
     let rules = SiteRules::new(&builtin());
     let anthropic = WireProtocol::AnthropicMessages;
     for (base_url, model) in [
-        ("https://api.anthropic.com/v1", "claude-opus-5-5"),
-        ("https://open.bigmodel.cn/api/anthropic", "glm-4v-flash"),
-        ("https://open.bigmodel.cn/api/anthropic", "glm-5.3"),
+        (hosts::ANTHROPIC_API_V1, models::OPUS_5_5),
+        (hosts::BIGMODEL_ANTHROPIC, models::GLM_4V_FLASH),
+        (hosts::BIGMODEL_ANTHROPIC, models::GLM_5_3),
     ] {
         let capabilities = rules.capabilities(anthropic, base_url, model);
         let limits = rules.limits(anthropic, base_url, model).unwrap();
@@ -267,12 +276,20 @@ fn the_capabilities_carry_the_configured_output_limit() {
     }
     assert_eq!(
         rules
-            .capabilities(
-                anthropic,
-                "https://open.bigmodel.cn/api/anthropic",
-                "glm-4v-flash"
-            )
+            .capabilities(anthropic, hosts::BIGMODEL_ANTHROPIC, models::GLM_4V_FLASH)
             .max_output_tokens,
         Some(1024)
     );
+}
+
+/// 工作线 F121（model.md §11.1）：GLM 按 opus 的卡片形状，对话中间的 system 是形状的一部分——内置配置给假的站点上 GLM
+/// 也为真；别的能力照配置（这里 WebSearch 照配置是假）；不是 GLM 的模型照配置。
+#[test]
+fn glm_always_takes_mid_conversation_system() {
+    let anthropic = WireProtocol::AnthropicMessages;
+    let glm = site(anthropic, "https://gw.example.com", models::GLM_5_3);
+    assert!(glm.supports_mid_conversation_system);
+    assert!(!glm.supports_native_web_search);
+    let plain = site(anthropic, "https://gw.example.com", models::DEEPSEEK_V4_PRO);
+    assert!(!plain.supports_mid_conversation_system);
 }

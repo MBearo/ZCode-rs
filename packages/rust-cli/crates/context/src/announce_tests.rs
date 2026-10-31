@@ -1,3 +1,4 @@
+use rust_cli_base::models::{GLM_5, GLM_5_3, OPUS_5_5};
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::message::{
     AssistantMessage, AttachmentMessage, ContentBlock, Message, Usage, UserMessage, UserOrigin,
@@ -50,17 +51,36 @@ fn answer(input: u64, output: u64) -> Message {
     })
 }
 
+/// 有卡片的模型说营销名、ID 与知识截止时间（卡片本身的值在 prompts 的测试里核对，营销名与截止只有 Anthropic 的卡片模型
+/// 有），没有卡片的只说 ID。
 #[test]
 fn the_model_identity_is_announced_when_it_changes() {
-    let (text, data) = model(&[], &selection("claude-opus-5-5")).unwrap();
+    let card = rust_cli_prompts::models::card(OPUS_5_5).unwrap();
+    let (name, cutoff) = (
+        card.marketing_name.as_deref().unwrap(),
+        card.knowledge_cutoff.as_deref().unwrap(),
+    );
+    let (text, data) = model(&[], &selection(OPUS_5_5)).unwrap();
     assert_eq!(
         text,
-        "You are powered by the model named Opus 5.5. The exact model ID is claude-opus-5-5. Assistant knowledge cutoff is June 2026."
+        format!(
+            "You are powered by the model named {name}. The exact model ID is {OPUS_5_5}. Assistant knowledge cutoff is {cutoff}."
+        )
     );
     let history = [recorded(MODEL, (text, data))];
-    assert!(model(&history, &selection("claude-opus-5-5")).is_none());
-    let (text, _) = model(&history, &selection("glm-5")).unwrap();
-    assert_eq!(text, "You are powered by the model glm-5.");
+    assert!(model(&history, &selection(OPUS_5_5)).is_none());
+    let (text, _) = model(&history, &selection(GLM_5)).unwrap();
+    assert_eq!(text, format!("You are powered by the model {GLM_5}."));
+}
+
+/// 工作线 F121（model.md §11.1）：GLM 借 opus 的卡片形状，不借身份——身份段只写 ID，没有营销名与截止日期。
+#[test]
+fn glm_is_announced_by_its_id_only() {
+    let (text, data) = model(&[], &selection(GLM_5_3)).unwrap();
+    assert_eq!(text, format!("You are powered by the model {GLM_5_3}."));
+    assert!(!text.contains("Opus") && !text.contains("cutoff"), "{text}");
+    assert_eq!(data["identity"]["marketingName"], Value::Null);
+    assert_eq!(data["identity"]["knowledgeCutoff"], Value::Null);
 }
 
 #[test]
@@ -92,7 +112,9 @@ fn attribution_is_announced_once_and_when_it_is_turned_off() {
     let (text, data) = attribution(&[], &signed, true).unwrap();
     assert_eq!(
         text,
-        "Attribution for git commits and pull requests you create from here on (this replaces ZCode's own earlier attribution guidance, such as a previous copy of this reminder; the user's own instructions about these lines, such as a AGENTS.md or memory rule, take precedence over this reminder, but do not add attribution lines this reminder leaves out):\n- End git commit messages with:\nCo-Authored-By: ZCode <noreply@z.ai>\n- End pull request descriptions with:\n🤖 Generated with [ZCode](https://zcode.z.ai)"
+        "Attribution for git commits and pull requests you create from here on (this replaces ZCode's own earlier attribution guidance, such as a previous copy of this reminder; the user's own instructions about these lines, such as a AGENTS.md or memory rule, take precedence over this reminder, but do not add attribution lines this reminder leaves out):\n- End git commit messages with:\nCo-Authored-By: ZCode <noreply@<zai>>\n- End pull request descriptions with:\n🤖 Generated with [ZCode](<zcode>)"
+            .replace("<zai>", rust_cli_base::hosts::ZAI_DOMAIN)
+            .replace("<zcode>", rust_cli_base::hosts::ZCODE_ORIGIN)
     );
     let history = [recorded(ATTRIBUTION, (text, data))];
     assert!(attribution(&history, &signed, true).is_none());

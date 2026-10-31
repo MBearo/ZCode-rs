@@ -141,7 +141,7 @@ async fn a_finished_request_shows_tps_context_and_cache() {
             })
             .await;
         assert!(
-            screen.contains("scripted · 40 tok/s · ctx 0.6% · cache 80.0%"),
+            screen.contains("40 tok/s · ctx 0.6% · cache 80.0% · scripted"),
             "{screen}"
         );
     })
@@ -247,7 +247,7 @@ async fn the_hit_rate_is_rebuilt_from_the_usage_rows_after_resume() {
             })
             .await;
         assert!(
-            screen.contains("scripted · ctx 0.6% · cache 40.0%"),
+            screen.contains("ctx 0.6% · cache 40.0% · scripted"),
             "{screen}"
         );
     })
@@ -298,7 +298,7 @@ async fn chinese_and_light_themes_show_the_same_items() {
             })
             .await;
         assert!(
-            screen.contains("scripted · 上下文 0.6% · 缓存 80.0%"),
+            screen.contains("上下文 0.6% · 缓存 80.0% · scripted"),
             "{screen}"
         );
         // footer 那一行里“缓”字的格子（宽字符占两格，按格子找）。

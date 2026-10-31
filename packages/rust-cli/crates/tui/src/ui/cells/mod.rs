@@ -4,6 +4,7 @@
 //! 缓存键由所含行的 id 与版本组成。
 mod agent;
 mod diff;
+mod duration;
 mod group;
 mod messages;
 pub(crate) mod patch;
@@ -62,6 +63,8 @@ pub enum Kind {
     Interrupted,
     /// 跨会话的同伴消息与回执（cross-session.md §2.6）。
     Peer,
+    /// 回合结束那一行（修复线 F118，tui-display.md §2.7）。
+    Duration,
 }
 
 pub struct Cell<'a> {
@@ -121,6 +124,8 @@ pub fn build<'a>(
     let mut turn: Option<&'a Row> = None;
     // 正在累积的工作段（cells 里的下标）；别的块出现时结束。
     let mut open: Option<usize> = None;
+    // 上一个回合结束那一行在等几个后台子代理（用户的输入之后清零）：普通视图里相同的等待行只显示第一行（F118）。
+    let mut waiting = 0;
     for (index, &row) in rows.iter().enumerate() {
         let kind = match &row.body {
             Body::Turn(_) => {
@@ -142,7 +147,18 @@ pub fn build<'a>(
                 cells[at].rows.push(row);
                 continue;
             }
-            Body::User { .. } | Body::Shell { .. } => Kind::User,
+            Body::User { .. } | Body::Shell { .. } => {
+                waiting = 0;
+                Kind::User
+            }
+            Body::Duration(line) => {
+                let repeated = group && line.waiting_agents > 0 && line.waiting_agents == waiting;
+                waiting = line.waiting_agents;
+                if repeated {
+                    continue;
+                }
+                Kind::Duration
+            }
             Body::Agent { .. } => Kind::Agent,
             Body::Reasoning { .. } => Kind::Reasoning,
             Body::Tool(_) => Kind::Tool,
@@ -179,6 +195,7 @@ pub fn render(cell: &Cell<'_>, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
         (Kind::Interrupted, _) => vec![detail_line(words::interrupted(ctx.lang), dim())],
         (Kind::Tool, Body::Tool(tool)) => tools::tool(tool, ctx),
         (Kind::Peer, Body::Peer(peer)) => messages::peer(peer, ctx),
+        (Kind::Duration, _) => duration_cell(cell, None, ctx),
         _ => Vec::new(),
     }
 }
@@ -210,6 +227,18 @@ pub fn lay_out(cell: &Cell<'_>, ctx: &Ctx<'_>, opened: bool) -> (Vec<Line<'stati
 }
 
 pub(crate) use agent::duration;
+
+/// 回合结束那一行的块（修复线 F118）：`still_running` 是调用方每次画时现取的 footer pill（transcript 给，别处为 None）。
+pub(crate) fn duration_cell(
+    cell: &Cell<'_>,
+    still_running: Option<&str>,
+    ctx: &Ctx<'_>,
+) -> Vec<Line<'static>> {
+    match &cell.rows[0].body {
+        Body::Duration(line) => duration::lines(line, still_running, ctx),
+        _ => Vec::new(),
+    }
+}
 pub use messages::{error_lines, header};
 
 /// 流式中的回复块显示的文字（只有这一行的回复块；别的块为 None）。排版只取决于它与排版参数，transcript 的缓存据此

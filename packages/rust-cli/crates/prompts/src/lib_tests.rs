@@ -1,3 +1,5 @@
+use rust_cli_base::models::{GLM_5, OPUS_5_5};
+
 use super::*;
 
 #[test]
@@ -52,10 +54,10 @@ fn the_identity_is_the_zcode_sentence() {
 
 #[test]
 fn model_cards_strip_the_context_suffix() {
-    let card = models::card("claude-opus-5-5[1m]").unwrap();
+    let card = models::card(&format!("{OPUS_5_5}[1m]")).unwrap();
     assert_eq!(card.marketing_name.as_deref(), Some("Opus 5.5"));
     assert_eq!(card.max_output_tokens, 128_000);
-    assert!(models::card("glm-5").is_none());
+    assert!(models::card(GLM_5).is_none());
 }
 
 /// ToolSearch 的形式只有这一个判定（tools-more.md §3.2.2）：端点的能力为真（只有 debug 构建的测试声明这样设）时原生，
@@ -92,17 +94,15 @@ fn the_setting_decides_on_off_and_the_auto_threshold() {
 /// 上下文窗口（自动门槛用）：配置的窗口大于 0 时用它，否则卡片，再没有时 200,000（与压缩的回退同一个缺省）。
 #[test]
 fn the_context_window_comes_from_the_configuration_then_the_card() {
-    assert_eq!(models::context_window("glm-5", Some(128_000)), 128_000);
+    assert_eq!(models::context_window(GLM_5, Some(128_000)), 128_000);
+    assert_eq!(models::context_window(OPUS_5_5, Some(0)), 1_000_000);
     assert_eq!(
-        models::context_window("claude-opus-5-5", Some(0)),
+        models::context_window(&format!("{OPUS_5_5}[1m]"), None),
         1_000_000
     );
+    // GLM 借形状不借窗口（工作线 F121）：配置没给时是缺省窗口。
     assert_eq!(
-        models::context_window("claude-opus-5-5[1m]", None),
-        1_000_000
-    );
-    assert_eq!(
-        models::context_window("glm-5", None),
+        models::context_window(GLM_5, None),
         models::DEFAULT_CONTEXT_WINDOW
     );
     assert_eq!(models::DEFAULT_CONTEXT_WINDOW, 200_000);

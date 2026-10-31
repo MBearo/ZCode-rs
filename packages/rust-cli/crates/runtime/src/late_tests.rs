@@ -1,5 +1,6 @@
 //! 先建后接的压缩器（R1-13）：没接上时报错，接上后每个方法都转发。
 
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{EnvironmentId, SessionId};
 use rust_cli_kernel_api::message::CompactTrigger;
@@ -46,7 +47,7 @@ impl Compactor for Fixed {
 fn selection() -> ModelSelection {
     ModelSelection {
         provider: "anthropic".to_owned(),
-        model: "claude-opus-4-8".to_owned(),
+        model: GLM_5_3.to_owned(),
         reasoning: None,
         connection: None,
     }

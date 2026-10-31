@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
+    WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundStatus, BackgroundTask, ShellState,
@@ -328,7 +328,7 @@ impl Commands for SlowEnv {
         workspace: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         UnusedEnvironment
             .start_command(workspace, context, request)
             .await
@@ -344,10 +344,6 @@ impl Commands for SlowEnv {
 
     async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
         UnusedEnvironment.cancel(operation).await
-    }
-
-    async fn operation_status(&self, operation: OperationId) -> Result<Outcome, EnvError> {
-        UnusedEnvironment.operation_status(operation).await
     }
 
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
@@ -384,6 +380,8 @@ impl Background for SlowEnv {
         Ok(Some(BackgroundInfo {
             command: "npm run dev".into(),
             status: BackgroundStatus::Running,
+            kind: Default::default(),
+            description: String::new(),
         }))
     }
 }

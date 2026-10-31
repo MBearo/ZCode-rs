@@ -1,8 +1,9 @@
 //! Team Plan 经平台层（platform.md §9.1–§9.7，工作线 F49）：团队列表 → 每个项目的权益 → 目录平铺（带团队项目）→
 //! 每请求鉴权 → 团队项目令牌，对本地假服务与临时 HOME。App 的连接选择（`setting.json`）不影响任何结果。
 
+use rust_cli_base::models;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -12,7 +13,7 @@ use rust_cli_kernel_api::provider::{
 };
 use serde_json::{Value, json};
 
-use crate::fake_server_tests::{Captured, Harness, NOW_MS, Reply, Server};
+use crate::fake_server_tests::{Captured, Gate, Harness, NOW_MS, Reply, Server};
 use crate::test_support::write;
 
 const TEAM: &str = "account:bigmodel-team-coding-plan";
@@ -195,7 +196,7 @@ fn team(project: &str) -> ModelConnection {
 fn model(provider: &str, project: Option<&str>) -> ModelSelection {
     ModelSelection {
         provider: provider.to_owned(),
-        model: "GLM-5.3".to_owned(),
+        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: None,
         connection: project.map(|project| Box::new(team(project))),
     }
@@ -206,7 +207,9 @@ async fn rows(harness: &Harness) -> Vec<(String, Option<String>)> {
     let models: Vec<CatalogModel> = harness.platform.catalog().await.models;
     models
         .into_iter()
-        .filter(|entry| entry.provider.starts_with("account:") && entry.model == "GLM-5.3")
+        .filter(|entry| {
+            entry.provider.starts_with("account:") && entry.model == models::GLM_5_3_ACCOUNT
+        })
         .map(|entry| {
             let project = entry.connection.map(|c| c.id.project_id);
             (entry.provider, project)
@@ -490,15 +493,25 @@ async fn a_list_failure_keeps_the_last_list() {
 
 #[tokio::test]
 async fn an_account_change_during_the_query_discards_the_round() {
+    // 登录之后的第一个按旧 token 的 detail 请求停在闸门上，换完账号再放行（F123：以前固定停 300 毫秒）。
     let arrived = Arc::new(tokio::sync::Notify::new());
+    let (gate, armed) = (Gate::default(), Arc::new(AtomicBool::new(false)));
     let service = Service::new(&[]);
     let server = Server::start({
-        let (service, arrived) = (service.clone(), arrived.clone());
+        let (service, arrived, gate, armed) = (
+            service.clone(),
+            arrived.clone(),
+            gate.clone(),
+            armed.clone(),
+        );
         move |request| {
             let reply = service.reply(request);
-            if request.path == DETAIL && request.header("authorization") == Some("at-1") {
+            if request.path == DETAIL
+                && request.header("authorization") == Some("at-1")
+                && armed.swap(false, Ordering::SeqCst)
+            {
                 arrived.notify_one();
-                reply.after(300)
+                reply.until(&gate)
             } else {
                 reply
             }
@@ -507,12 +520,14 @@ async fn an_account_change_during_the_query_discards_the_round() {
     .await;
     let harness = Arc::new(Harness::new(&server.url()).await);
     login(&harness, "at-1").await;
+    armed.store(true, Ordering::SeqCst);
     let pending = tokio::spawn({
         let harness = harness.clone();
         async move { harness.platform.catalog().await }
     });
     arrived.notified().await;
     login(&harness, "at-2").await;
+    gate.open();
     // 这一轮丢弃：没有发布任何快照。
     let first = pending.await.unwrap();
     assert_eq!(first.revision, 0);
@@ -530,16 +545,23 @@ async fn an_account_change_during_the_query_discards_the_round() {
 
 #[tokio::test]
 async fn a_login_change_during_the_exchange_invalidates_the_token() {
+    // 布置之后的第一个换取请求停在闸门上，换完登录再放行（F123：以前固定停 300 毫秒）。
     let arrived = Arc::new(tokio::sync::Notify::new());
     let delay = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let gate = Gate::default();
     let service = Service::new(&[]);
     let server = Server::start({
-        let (service, arrived, delay) = (service.clone(), arrived.clone(), delay.clone());
+        let (service, arrived, delay, gate) = (
+            service.clone(),
+            arrived.clone(),
+            delay.clone(),
+            gate.clone(),
+        );
         move |request| {
             let reply = service.reply(request);
-            if request.path.ends_with("/access_tokens") && delay.load(Ordering::SeqCst) {
+            if request.path.ends_with("/access_tokens") && delay.swap(false, Ordering::SeqCst) {
                 arrived.notify_one();
-                reply.after(300)
+                reply.until(&gate)
             } else {
                 reply
             }
@@ -561,6 +583,7 @@ async fn a_login_change_during_the_exchange_invalidates_the_token() {
     });
     arrived.notified().await;
     login(&harness, "at-big-2").await;
+    gate.open();
     let message = match pending.await.unwrap() {
         Err(ModelError::Authentication { message }) => message,
         other => panic!("expected scope invalidation, got {other:?}"),

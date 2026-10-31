@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use rust_cli_base::TaskScope;
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::agents::{SubagentQueries, TaskListStore};
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
@@ -104,7 +105,7 @@ pub(crate) fn report_message(text: &str) -> Message {
         content: vec![ContentBlock::Text {
             text: text.to_owned(),
         }],
-        model: "claude-opus-5-5".to_owned(),
+        model: GLM_5_3.to_owned(),
         stop_reason: Some(StopReason::EndTurn),
         usage: Some(Usage {
             input_tokens: 10,

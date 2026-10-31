@@ -11,6 +11,7 @@ mod sse;
 
 use std::process::Stdio;
 
+use rust_cli_base::models::GLM_5;
 use serde_json::{Value, json};
 
 const REMINDER: &str = "The task tools haven't been used recently.";
@@ -54,7 +55,9 @@ async fn ten_rounds_without_task_tools_bring_the_reminder() {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
+        // 有卡片形状的模型（GLM 按 opus）缺省不开任务工具（agents.md §7.1），这里显式打开。
+        .env("ZCODE_ENABLE_TODO_TOOLS", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -2,6 +2,7 @@
 //!
 //! 输入是按优先级排好的层（用户级在前，项目级自根向工作区根），都已是 JSON 对象；这里不做 IO。
 
+use rust_cli_base::units;
 use rust_cli_ext::mcp::{McpScope, McpServer, parse_node_servers};
 use rust_cli_kernel_api::permission::{PermissionMode, RuleSource};
 use rust_cli_platform::UiLocale;
@@ -124,6 +125,11 @@ pub(crate) fn check_for_update(layers: &[Layer<'_>], warnings: &mut Vec<String>)
     merged
 }
 
+/// `askUserQuestionTimeout` 的三个取值 `60s`、`5m`、`10m` 的毫秒数。
+const QUESTION_TIMEOUT_60S_MS: u64 = 60 * units::MS_PER_SECOND;
+const QUESTION_TIMEOUT_5M_MS: u64 = 5 * units::MS_PER_MINUTE;
+const QUESTION_TIMEOUT_10M_MS: u64 = 10 * units::MS_PER_MINUTE;
+
 /// 顶层 `askUserQuestionTimeout` 按键覆盖（提问框的空闲超时，docs/specs/rust-cli/tools-more.md §1.1，工作线 F72）：只认
 /// `60s`、`5m`、`10m`、`never`，坏值记警告、跳过这一层；没有或 `never` 时不计时（None）。返回毫秒。
 pub(crate) fn question_timeout(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> Option<u64> {
@@ -133,9 +139,9 @@ pub(crate) fn question_timeout(layers: &[Layer<'_>], warnings: &mut Vec<String>)
             continue;
         };
         match value.as_str() {
-            Some("60s") => merged = Some(60_000),
-            Some("5m") => merged = Some(300_000),
-            Some("10m") => merged = Some(600_000),
+            Some("60s") => merged = Some(QUESTION_TIMEOUT_60S_MS),
+            Some("5m") => merged = Some(QUESTION_TIMEOUT_5M_MS),
+            Some("10m") => merged = Some(QUESTION_TIMEOUT_10M_MS),
             Some("never") => merged = None,
             _ => warnings.push(format!(
                 "{}: unknown askUserQuestionTimeout {value}",

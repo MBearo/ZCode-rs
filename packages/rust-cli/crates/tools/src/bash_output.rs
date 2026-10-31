@@ -10,28 +10,22 @@ use crate::budget::{persisted_message, preview};
 /// 成功结果里内联的输出上限（`BASH_MAX_OUTPUT_LENGTH` 默认 30000，按字节读文件头）。
 pub const INLINE_LIMIT: usize = 30_000;
 
-/// 任务 ID：`b` 加 8 位 36 进制，从 operationId 派生，重放时不变。
+/// 任务 ID：`b` 加 8 位 36 进制，从 operationId 派生，重放时不变（FNV-1a，base 的 `hash::short_id`）。
 pub fn task_id(operation: &OperationId) -> ShellTaskId {
-    const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    // FNV-1a 64 位。
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in operation.as_str().bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    let mut id = String::from("b");
-    for _ in 0..8 {
-        id.push(char::from(ALPHABET[(hash % 36) as usize]));
-        hash /= 36;
-    }
-    ShellTaskId::new(id)
+    ShellTaskId::new(format!(
+        "b{}",
+        rust_cli_base::hash::short_id(operation.as_str())
+    ))
 }
+
+/// 这几个命令的退出码 1 是“没找到 / 不相同 / 假”，从它起才是出错。
+const SEARCH_TROUBLE_EXIT: i32 = 2;
 
 /// 按最后一个子命令的命令名解释退出码。grep / rg / find / diff / test / `[`
 /// 的退出码 1 不算错误。
 pub fn is_error(last_command: &str, exit_code: i32) -> bool {
     match last_command {
-        "grep" | "rg" | "find" | "diff" | "test" | "[" => exit_code >= 2,
+        "grep" | "rg" | "find" | "diff" | "test" | "[" => exit_code >= SEARCH_TROUBLE_EXIT,
         _ => exit_code != 0,
     }
 }
@@ -142,7 +136,7 @@ pub fn moved_to_background(
     output_file: &str,
     deadline_ms: Option<u64>,
 ) -> String {
-    let seconds = (timeout_ms.saturating_add(500) / 1000).max(1);
+    let seconds = rust_cli_base::units::round_ms_to_seconds(timeout_ms).max(1);
     let deadline = deadline_ms
         .map(|ms| {
             format!(

@@ -11,7 +11,7 @@ use rust_cli_kernel_api::env::{EnvPath, Outcome};
 use rust_cli_kernel_api::env_shell::{MonitorSocket, ShellNotice, SocketEvent};
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
 use rust_cli_net::Egress;
-use rust_cli_net::websocket::{WsError, WsFrame};
+use rust_cli_net::websocket::{self, WsError, WsFrame};
 use tokio::io::AsyncWriteExt;
 
 use super::supervise::Plan;
@@ -37,7 +37,7 @@ async fn open(dir: &Path, path: &Path) -> std::io::Result<tokio::fs::File> {
     let mut options = tokio::fs::OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
-    options.mode(0o600);
+    options.mode(rust_cli_base::proto::mode::PRIVATE_FILE);
     options.open(path).await
 }
 
@@ -55,7 +55,7 @@ async fn failed(errors: &mut Option<tokio::fs::File>, url: &str, error: &WsError
     let message = format!("WebSocket connection to '{url}' failed: {cause}");
     lifecycle(errors, &SocketEvent::Error { message }).await;
     let closed = SocketEvent::Closed {
-        code: 1006,
+        code: websocket::CLOSE_ABNORMAL,
         reason: cause,
     };
     lifecycle(errors, &closed).await;
@@ -83,7 +83,7 @@ async fn pump(
         Err(WsError::Rejected { status }) => {
             lifecycle(errors, &SocketEvent::Rejected { status }).await;
             let closed = SocketEvent::Closed {
-                code: 1006,
+                code: websocket::CLOSE_ABNORMAL,
                 reason: String::new(),
             };
             lifecycle(errors, &closed).await;
@@ -131,7 +131,7 @@ async fn pump(
                 )
                 .await;
                 let closed = SocketEvent::Closed {
-                    code: 1006,
+                    code: websocket::CLOSE_ABNORMAL,
                     reason: message,
                 };
                 lifecycle(errors, &closed).await;
@@ -165,7 +165,7 @@ pub(crate) async fn run(shared: Arc<Shared>, job: SocketJob) {
             lifecycle(
                 &mut errors,
                 &SocketEvent::Closed {
-                    code: 1006,
+                    code: websocket::CLOSE_ABNORMAL,
                     reason: message,
                 },
             )
@@ -188,14 +188,16 @@ pub(crate) async fn run(shared: Arc<Shared>, job: SocketJob) {
         output_bytes,
         output_limit: None,
     };
+    // 结束时删登记，再写终态（同命令的监督任务，工作线 F119）。
+    let mut state = shared.state();
+    state.commands.remove(&job.operation);
     if let Some(background) = &job.request.background {
-        let mut state = shared.state();
         let shell = state.sessions.entry(job.session.clone()).or_default();
         shell.background.remove(&job.request.task);
         // 被停掉的不记通知（同命令，shell-permissions.md §2.6）。
         if !shell.stopped.remove(&job.request.task) {
             shell.next_seq = shell.next_seq.max(shell.acked) + 1;
-            shell.notices.push(ShellNotice {
+            let notice = ShellNotice {
                 seq: shell.next_seq,
                 operation: job.operation.clone(),
                 task: job.request.task.clone(),
@@ -206,9 +208,14 @@ pub(crate) async fn run(shared: Arc<Shared>, job: SocketJob) {
                 exit_code: None,
                 kind: background.kind,
                 output_bytes,
+            };
+            shell.notices.push(super::Pending {
+                notice,
+                command: job.request.command.clone(),
             });
         }
     }
+    drop(state);
     job.running.finished.send_replace(Some(finish));
     shared.notices.send_modify(|count| *count += 1);
 }

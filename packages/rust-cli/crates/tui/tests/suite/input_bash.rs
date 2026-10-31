@@ -69,12 +69,13 @@ impl Commands for ShellEnv {
         _w: &WorkspaceRef,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
+        let operation = context.operation.clone();
         self.commands
             .lock()
             .unwrap()
             .push((context.operation, request));
-        Ok(())
+        Ok(self.watch_command(operation, 0))
     }
 
     fn watch_command(
@@ -115,10 +116,6 @@ impl Commands for ShellEnv {
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
         Ok(())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
-        Ok(Outcome::Unknown)
     }
 
     async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {

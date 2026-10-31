@@ -477,6 +477,8 @@ pub struct TurnTotals {
 /// （usage.md §2.1.1），以前按轮聚合会把它算进回合用量；Node 的回合用量只数回合自己的请求事件，标题有自己的事件列表。
 /// `+query_source` 不让 SQLite 改用来源的索引。
 pub fn turn_totals(conn: &Connection, session: &str, turn: &str) -> Result<TurnTotals> {
+    // 查询里 `max(context_exceeded)` 那一列的序号（从 0 数）。
+    const CONTEXT_EXCEEDED_COLUMN: usize = 10;
     let mut totals = conn
         .prepare_cached(
             "select count(*), coalesce(sum(retry_count), 0), coalesce(sum(input_tokens), 0),
@@ -499,7 +501,7 @@ pub fn turn_totals(conn: &Connection, session: &str, turn: &str) -> Result<TurnT
                 total: r.get(7)?,
                 first_start: r.get(8)?,
                 first_token: r.get(9)?,
-                context_exceeded: r.get::<_, i64>(10)? != 0,
+                context_exceeded: r.get::<_, i64>(CONTEXT_EXCEEDED_COLUMN)? != 0,
                 ..TurnTotals::default()
             })
         })?;

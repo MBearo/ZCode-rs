@@ -114,7 +114,7 @@ impl Tool for WriteTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(100_000)
+        Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
     }
 
     async fn validate_input(&self, raw: &Value, context: &ToolUseContext) -> Validation {

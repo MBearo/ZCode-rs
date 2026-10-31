@@ -18,16 +18,21 @@ pub(crate) fn is_context(prompt: &str) -> bool {
     prompt == "/context" || prompt.starts_with("/context ")
 }
 
+/// 比例换成百分数。
+const PERCENT_SCALE: f64 = rust_cli_base::units::PERCENT_F64;
+/// 保留一位小数：乘上它取整再除回去。
+const TENTHS_SCALE: f64 = rust_cli_base::units::TENTHS_F64;
+
 /// JS `((tokens / window) * 100).toFixed(1)`。
 fn percent(tokens: u64, window: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
     let value = if window == 0 {
         0.0
     } else {
-        tokens as f64 / window as f64 * 100.0
+        tokens as f64 / window as f64 * PERCENT_SCALE
     };
-    let tenths = (value * 10.0).round();
-    format!("{:.1}", tenths / 10.0)
+    let tenths = (value * TENTHS_SCALE).round();
+    format!("{:.1}", tenths / TENTHS_SCALE)
 }
 
 /// 非交互的 markdown（外部版本：没有 ant-only 的段落）。

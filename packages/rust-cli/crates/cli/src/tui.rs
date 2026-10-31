@@ -21,34 +21,34 @@ use rust_cli_tui::{LocaleStore, MemoryFile, Options, Preferences, Services, Star
 
 /// TUI 用到的环境变量：色深、语言、终端种类（自动复制与键盘增强）。
 const VARS: &[&str] = &[
-    "TERM",
-    "COLORTERM",
-    "TERM_PROGRAM",
-    "TERM_PROGRAM_VERSION",
-    "KITTY_WINDOW_ID",
-    "WT_SESSION",
-    "LANG",
-    "LC_ALL",
-    "LC_MESSAGES",
+    rust_cli_base::names::env::TERM,
+    rust_cli_base::names::env::COLORTERM,
+    rust_cli_base::names::env::TERM_PROGRAM,
+    rust_cli_base::names::env::TERM_PROGRAM_VERSION,
+    rust_cli_base::names::env::KITTY_WINDOW_ID,
+    rust_cli_base::names::env::WT_SESSION,
+    rust_cli_base::names::env::LANG,
+    rust_cli_base::names::env::LC_ALL,
+    rust_cli_base::names::env::LC_MESSAGES,
     // 系统语言按 Node `detectLocale` 也看 LANGUAGE（tui.md §7.1）。
-    "LANGUAGE",
+    rust_cli_base::names::env::LANGUAGE,
     // 终端通知在 tmux / screen 里要包一层（tui-manage.md §5.2）。
-    "TMUX",
-    "STY",
+    rust_cli_base::names::env::TMUX,
+    rust_cli_base::names::env::STY,
     // 复制的提示与 OSC 52（tui-select.md §3）：SSH、复用器、终端名。
-    "SSH_CONNECTION",
-    "ZELLIJ",
-    "LC_TERMINAL",
-    "KONSOLE_VERSION",
-    "GNOME_TERMINAL_SERVICE",
-    "XTERM_VERSION",
-    "VTE_VERSION",
-    "ALACRITTY_LOG",
+    rust_cli_base::names::env::SSH_CONNECTION,
+    rust_cli_base::names::env::ZELLIJ,
+    rust_cli_base::names::env::LC_TERMINAL,
+    rust_cli_base::names::env::KONSOLE_VERSION,
+    rust_cli_base::names::env::GNOME_TERMINAL_SERVICE,
+    rust_cli_base::names::env::XTERM_VERSION,
+    rust_cli_base::names::env::VTE_VERSION,
+    rust_cli_base::names::env::ALACRITTY_LOG,
     // 滚轮每格的行数（tui-select.md §4.2）；速度是 `ZCODE_SCROLL_SPEED`。
-    "CURSOR_TRACE_ID",
-    "VSCODE_GIT_ASKPASS_MAIN",
-    "TERMINAL_EMULATOR",
-    "ZCODE_SCROLL_SPEED",
+    rust_cli_base::names::env::CURSOR_TRACE_ID,
+    rust_cli_base::names::env::VSCODE_GIT_ASKPASS_MAIN,
+    rust_cli_base::names::env::TERMINAL_EMULATOR,
+    rust_cli_base::names::env::ZCODE_SCROLL_SPEED,
 ];
 
 /// 环境变量有非空的值。
@@ -208,12 +208,13 @@ pub(crate) fn startup(target: &SessionTarget, pick: bool) -> Startup {
 /// 负数（工作线 F78，用户决定）：超时是负数时不超时，门槛是负数时不显示倒计时。以前两者都按 0：负的超时
 /// 一弹出就到期，与“不超时”的意图相反。
 fn question_timeout(setting_ms: Option<u64>, env: &[(String, String)]) -> Option<QuestionTimeout> {
-    let timeout = afk_ms(env, "ZCODE_AFK_TIMEOUT_MS");
+    let timeout = afk_ms(env, rust_cli_base::names::env::ZCODE_AFK_TIMEOUT_MS);
     if timeout.is_some_and(|ms| ms < 0.0) {
         return None;
     }
     // 门槛 0 不显示倒计时：剩下的秒数在到期之前总不小于 1。
-    let countdown = afk_ms(env, "ZCODE_AFK_COUNTDOWN_MS").map(|ms| ms.max(0.0) as u64);
+    let countdown =
+        afk_ms(env, rust_cli_base::names::env::ZCODE_AFK_COUNTDOWN_MS).map(|ms| ms.max(0.0) as u64);
     QuestionTimeout::new(setting_ms, timeout.map(|ms| ms as u64), countdown)
 }
 
@@ -258,11 +259,12 @@ pub(crate) fn options(inputs: Inputs<'_>, version: &str) -> Options {
             ))),
             memory_files: memory_files(inputs.cwd, inputs.home),
             clipboard: Some(Arc::new(crate::clipboard::SystemClipboard {
-                wayland: has(inputs.env, "WAYLAND_DISPLAY"),
-                display: has(inputs.env, "DISPLAY"),
-                ssh: has(inputs.env, "SSH_CONNECTION"),
-                tmux: has(inputs.env, "TMUX"),
-                wsl: cfg!(target_os = "linux") && has(inputs.env, "WSL_DISTRO_NAME"),
+                wayland: has(inputs.env, rust_cli_base::names::env::WAYLAND_DISPLAY),
+                display: has(inputs.env, rust_cli_base::names::env::DISPLAY),
+                ssh: has(inputs.env, rust_cli_base::names::env::SSH_CONNECTION),
+                tmux: has(inputs.env, rust_cli_base::names::env::TMUX),
+                wsl: cfg!(target_os = "linux")
+                    && has(inputs.env, rust_cli_base::names::env::WSL_DISTRO_NAME),
             })),
             trust: Some(inputs.trust),
             update: inputs.update,
@@ -283,18 +285,34 @@ mod tests {
     #[test]
     fn only_terminal_and_locale_variables_reach_the_interface() {
         let env = [
-            ("LANG".to_owned(), "zh_CN.UTF-8".to_owned()),
-            ("ZCODE_API_KEY".to_owned(), "sk-test".to_owned()),
-            ("TERM".to_owned(), "xterm-256color".to_owned()),
-            ("TMUX".to_owned(), "/tmp/tmux-501/default,1,0".to_owned()),
+            (
+                rust_cli_base::names::env::LANG.to_owned(),
+                "zh_CN.UTF-8".to_owned(),
+            ),
+            (
+                rust_cli_base::names::env::ZCODE_API_KEY.to_owned(),
+                "sk-test".to_owned(),
+            ),
+            (
+                rust_cli_base::names::env::TERM.to_owned(),
+                "xterm-256color".to_owned(),
+            ),
+            (
+                rust_cli_base::names::env::TMUX.to_owned(),
+                "/tmp/tmux-501/default,1,0".to_owned(),
+            ),
             // 滚轮的速度。
-            ("ZCODE_SCROLL_SPEED".to_owned(), "5".to_owned()),
+            (
+                rust_cli_base::names::env::ZCODE_SCROLL_SPEED.to_owned(),
+                "5".to_owned(),
+            ),
         ];
         let vars = vars(&env);
         assert_eq!(vars.len(), 4);
-        assert!(!vars.contains_key("ZCODE_API_KEY"));
+        assert!(!vars.contains_key(rust_cli_base::names::env::ZCODE_API_KEY));
         assert_eq!(
-            vars.get("ZCODE_SCROLL_SPEED").map(String::as_str),
+            vars.get(rust_cli_base::names::env::ZCODE_SCROLL_SPEED)
+                .map(String::as_str),
             Some("5")
         );
     }
@@ -302,7 +320,12 @@ mod tests {
     /// 提问框空闲超时的环境变量（tools-more.md §1.1，工作线 F72）：JS 的整数读法，读不出整数时没设。
     #[test]
     fn idle_timeout_variables_read_like_integers() {
-        let env = |value: &str| vec![("ZCODE_AFK_TIMEOUT_MS".to_owned(), value.to_owned())];
+        let env = |value: &str| {
+            vec![(
+                rust_cli_base::names::env::ZCODE_AFK_TIMEOUT_MS.to_owned(),
+                value.to_owned(),
+            )]
+        };
         let timeout = |value: &str| question_timeout(None, &env(value)).map(|t| t.timeout_ms);
         assert_eq!(timeout("4000"), Some(4000));
         assert_eq!(timeout(" 1500ms"), Some(1500));
@@ -320,15 +343,24 @@ mod tests {
     fn a_negative_idle_timeout_turns_the_timer_off() {
         let env = |name: &str, value: &str| vec![(name.to_owned(), value.to_owned())];
         assert_eq!(
-            question_timeout(None, &env("ZCODE_AFK_TIMEOUT_MS", "-5")),
+            question_timeout(
+                None,
+                &env(rust_cli_base::names::env::ZCODE_AFK_TIMEOUT_MS, "-5")
+            ),
             None
         );
         assert_eq!(
-            question_timeout(Some(300_000), &env("ZCODE_AFK_TIMEOUT_MS", "-1")),
+            question_timeout(
+                Some(300_000),
+                &env(rust_cli_base::names::env::ZCODE_AFK_TIMEOUT_MS, "-1")
+            ),
             None
         );
-        let countdown = question_timeout(Some(60_000), &env("ZCODE_AFK_COUNTDOWN_MS", "-1"))
-            .expect("the setting still applies");
+        let countdown = question_timeout(
+            Some(60_000),
+            &env(rust_cli_base::names::env::ZCODE_AFK_COUNTDOWN_MS, "-1"),
+        )
+        .expect("the setting still applies");
         assert_eq!((countdown.timeout_ms, countdown.countdown_ms), (60_000, 0));
     }
 }

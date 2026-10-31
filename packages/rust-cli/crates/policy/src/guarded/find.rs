@@ -5,6 +5,7 @@
 use super::options::Hit;
 use super::word::Word;
 use crate::bfs_args::{Arg, classify, number_like};
+use crate::consts::MIN_COPY_OPERANDS;
 
 fn listed(list: &str, value: &str) -> bool {
     list.split(' ').any(|item| item == value)
@@ -104,15 +105,21 @@ pub(crate) fn find_delete(args: &[Word]) -> Hit {
 const ROBOCOPY_FLAGS: &str = "/MIR /PURGE /L /S /E /Z /B /ZB /J /EFSRAW /SEC /COPYALL /NOCOPY /SECFIX /TIMFIX /CREATE /FAT /256 /PF /SJ /SL /NODCOPY /NOOFFLOAD /COMPRESS /A /M /XC /XN /XO /XX /XL /IM /IS /IT /XJ /FFT /DST /XJD /XJF /TBD /LFSM /X /V /TS /FP /BYTES /NS /NC /NFL /NDL /NP /ETA /TEE /NJH /NJS /UNICODE /NP /?";
 const ROBOCOPY_VALUES: &str = "/LEV /COPY /DCOPY /A+ /A- /MON /MOT /RH /IPG /MT /IOMAXSIZE /IORATE /THRESHOLD /IA /XA /MAX /MIN /MAXAGE /MINAGE /MAXLAD /MINLAD /R /W /LFSM /LOG /LOG+ /UNILOG /UNILOG+";
 
+/// Git Bash 的盘符路径 `/c/` 的字节数。
+const GIT_BASH_DRIVE_LEN: usize = 3;
+
 /// Git Bash 把 `/c/...` 转成盘符路径：盘符后要有 `/`，免得把 `/L` 这样的开关当成路径。
 fn drive_path(value: &str) -> bool {
     let bytes = value.as_bytes();
-    bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b'/'
+    bytes.len() >= GIT_BASH_DRIVE_LEN
+        && bytes[0] == b'/'
+        && bytes[1].is_ascii_alphabetic()
+        && bytes[2] == b'/'
 }
 
 /// Node `matchRobocopyDelete`（Git Bash 方言）：值选项用冒号绑定；/XF、/XD 的列表遇到下一个开关结束。
 pub(crate) fn robocopy_delete(args: &[Word]) -> Hit {
-    if args.len() < 2 {
+    if args.len() < MIN_COPY_OPERANDS {
         return Hit::No;
     }
     let mut deletion = false;
@@ -154,7 +161,7 @@ pub(crate) fn robocopy_delete(args: &[Word]) -> Hit {
             return stop(deletion);
         }
     }
-    if paths >= 2 && deletion && !list_only {
+    if paths >= MIN_COPY_OPERANDS && deletion && !list_only {
         Hit::Rule("robocopy-delete")
     } else {
         Hit::No

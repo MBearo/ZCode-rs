@@ -128,7 +128,7 @@ impl Commands for MonitorEnv {
         _w: &WorkspaceRef,
         _c: OperationContext,
         _r: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -144,10 +144,6 @@ impl Commands for MonitorEnv {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 
@@ -196,6 +192,8 @@ impl Background for MonitorEnv {
         Ok(Some(BackgroundInfo {
             command: "watch".to_owned(),
             status,
+            kind: Default::default(),
+            description: String::new(),
         }))
     }
 
@@ -266,7 +264,8 @@ async fn events_reach_the_running_subagent_and_the_end_carries_the_rest() {
     let harness = held_ticking(&gates, false, env.clone());
     let (agent, session) = launched(&harness).await;
     let output = env.command("op_m", "b1");
-    arm(&harness.agents.core, &agent, armed("b1")).unwrap();
+    let events = env.watch_command(OperationId::new("op_m"), 0);
+    arm(&harness.agents.core, &agent, armed("b1"), events).unwrap();
     output
         .send(Ok(CommandEvent::Output {
             stream: OutputStream::Stdout,
@@ -329,7 +328,8 @@ async fn a_live_monitor_parks_the_subagent_until_it_ends() {
     let mut root = signals.signals(&SessionId::new(ROOT));
     let (agent, session) = launched(&harness).await;
     let output = env.command("op_m", "b1");
-    arm(&harness.agents.core, &agent, armed("b1")).unwrap();
+    let events = env.watch_command(OperationId::new("op_m"), 0);
+    arm(&harness.agents.core, &agent, armed("b1"), events).unwrap();
     gates.release(&session);
     let core = harness.agents.core.clone();
     let agent_id = agent.clone();

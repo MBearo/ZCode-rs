@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext, Outcome,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext,
     ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{ReadText, TextRead, TextSlice};
@@ -82,7 +82,7 @@ impl Commands for OneShell {
         _w: &WorkspaceRef,
         _c: OperationContext,
         _r: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -95,10 +95,6 @@ impl Commands for OneShell {
     }
 
     async fn cancel(&self, _o: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _o: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 
@@ -133,6 +129,8 @@ impl Background for OneShell {
         Ok(known.then(|| BackgroundInfo {
             command: "npm test".to_owned(),
             status: BackgroundStatus::Running,
+            kind: Default::default(),
+            description: String::new(),
         }))
     }
 

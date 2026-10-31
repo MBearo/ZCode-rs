@@ -5,7 +5,7 @@
 
 pub mod date;
 pub mod json;
-mod radix;
+pub(crate) mod radix;
 pub mod string;
 
 pub use date::iso_timestamp;

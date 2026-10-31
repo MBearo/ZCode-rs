@@ -1,6 +1,7 @@
 //! 来源头的事实（工作线 F64，model.md §2.4）：与 Node 的对照夹具逐项相同（`scripts/rust-cli/headers-golden.mjs` 用 Node 的
 //! `buildCliZCodeSourceHeaders` 与 `Intl.DateTimeFormat` 生成 `tests/source-headers-golden.json`），以及 Windows 以外的两项读法。
 
+use rust_cli_base::hosts::ZCODE_ORIGIN;
 use serde_json::Value;
 
 use super::*;
@@ -112,7 +113,7 @@ fn the_version_and_the_service_address() {
     let host = Host::default();
     let facts = facts(&none, "0.1.52", &host).unwrap();
     assert_eq!(facts.version, "0.1.52");
-    assert_eq!(facts.endpoint_origin, "https://zcode.z.ai");
+    assert_eq!(facts.endpoint_origin, ZCODE_ORIGIN);
     assert_eq!(facts.release_channel, "production");
     assert_eq!(facts.platform, node_platform());
     assert_eq!(facts.arch, node_arch());

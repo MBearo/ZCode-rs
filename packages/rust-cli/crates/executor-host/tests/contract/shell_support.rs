@@ -1,6 +1,8 @@
 //! shell 命令的夹具（只在 Unix：要 `/bin/bash`）。
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::StreamExt;
@@ -8,6 +10,7 @@ use rust_cli_env_local::{LocalEnvironment, ShellConfig};
 use rust_cli_kernel_api::env::{CommandEvent, Outcome, StartCommand, WorkspaceRef};
 use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId};
+use rust_cli_kernel_api::machine::CommandEvents;
 
 use crate::support::{Kind, Machine, context, env_path, machine, workspace};
 
@@ -16,6 +19,8 @@ pub struct Shell {
     _dir: tempfile::TempDir,
     pub root: PathBuf,
     pub machine: Machine,
+    /// `start` 返回、还没读的流（工作线 F119：结束的命令不留登记，不能再按 ID 从 0 读）。
+    started: Mutex<HashMap<String, CommandEvents>>,
 }
 
 pub async fn shell(kind: Kind, env: Vec<(String, String)>) -> Shell {
@@ -35,6 +40,7 @@ pub async fn shell(kind: Kind, env: Vec<(String, String)>) -> Shell {
         _dir: dir,
         root,
         machine: machine(kind, local).await,
+        started: Mutex::default(),
     }
 }
 
@@ -63,11 +69,26 @@ impl Shell {
     }
 
     pub async fn start(&self, operation: &str, start: StartCommand) {
-        self.machine
+        let events = self
+            .machine
             .commands()
             .start_command(&self.workspace(), context(operation), start)
             .await
             .unwrap();
+        self.started
+            .lock()
+            .unwrap()
+            .insert(operation.to_owned(), events);
+    }
+
+    /// 这条命令从 0 起的事件：`start` 返回的那条；没有时接回还在跑的命令。
+    pub fn events(&self, operation: &str) -> CommandEvents {
+        let started = self.started.lock().unwrap().remove(operation);
+        started.unwrap_or_else(|| {
+            self.machine
+                .commands()
+                .watch_command(OperationId::new(operation), 0)
+        })
     }
 
     /// 跑到终态：合并的输出与终态事件。
@@ -77,10 +98,7 @@ impl Shell {
     }
 
     pub async fn collect(&self, operation: &str) -> Ran {
-        let mut events = self
-            .machine
-            .commands()
-            .watch_command(OperationId::new(operation), 0);
+        let mut events = self.events(operation);
         assert!(matches!(
             events.next().await,
             Some(Ok(CommandEvent::Started { .. }))

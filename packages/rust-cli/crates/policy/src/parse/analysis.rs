@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use crate::consts::SIGIL_PAIR_LEN;
 use crate::parse::js::{lossy, slice};
 use crate::parse::lexer::RawSub;
 use crate::parse::nodes::{CommandNode, OpBefore, RedirectNode, Script, WordRef};
@@ -295,7 +296,7 @@ fn parameter_expansion(value: &[u8]) -> bool {
             single = true;
         } else if byte == b'$' {
             let next = value.get(index + 1).copied();
-            let arithmetic = next == Some(b'(') && value.get(index + 2) == Some(&b'(');
+            let arithmetic = next == Some(b'(') && value.get(index + SIGIL_PAIR_LEN) == Some(&b'(');
             if next.is_some_and(|next| next != b'(') || arithmetic {
                 return true;
             }

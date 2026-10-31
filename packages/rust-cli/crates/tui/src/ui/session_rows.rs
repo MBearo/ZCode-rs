@@ -1,10 +1,12 @@
 //! ← 项目页与 `/resume` 页共用的会话行（修复线 F29，docs/specs/rust-cli/tui-panels.md §2、tui-manage.md §10）：
 //! 内核快照（`ProjectSession`）到界面行的换算、标题、搜索匹配、时间与路径的写法。只有纯计算。
+use rust_cli_base::units;
 use rust_cli_kernel_api::message::{ContentBlock, Message};
 use rust_cli_kernel_api::panels::{ProjectSession, SessionActivity};
 use unicode_width::UnicodeWidthStr;
 
 use super::i18n::Lang;
+use super::quantities::{self, Unit};
 
 /// 一个会话（打开页面时的快照）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,49 +90,48 @@ pub fn user_text(message: &Message) -> Option<String> {
 
 /// 相对时间（Codex `format_relative_time`）：`now`、`42s ago`、`35m ago`、`2h ago`、`1d ago`。
 pub fn relative(lang: Lang, now_ms: u64, at_ms: u64) -> String {
-    let seconds = now_ms.saturating_sub(at_ms) / 1000;
-    match (lang, seconds) {
-        (Lang::En, 0) => "now".to_owned(),
-        (Lang::En, 1..60) => format!("{seconds}s ago"),
-        (Lang::En, 60..3600) => format!("{}m ago", seconds / 60),
-        (Lang::En, 3600..86_400) => format!("{}h ago", seconds / 3600),
-        (Lang::En, _) => format!("{}d ago", seconds / 86_400),
-        (Lang::Zh, 0) => "刚刚".to_owned(),
-        (Lang::Zh, 1..60) => format!("{seconds} 秒前"),
-        (Lang::Zh, 60..3600) => format!("{} 分钟前", seconds / 60),
-        (Lang::Zh, 3600..86_400) => format!("{} 小时前", seconds / 3600),
-        (Lang::Zh, _) => format!("{} 天前", seconds / 86_400),
+    let seconds = now_ms.saturating_sub(at_ms) / units::MS_PER_SECOND;
+    if seconds == 0 {
+        return match lang {
+            Lang::En => "now".to_owned(),
+            Lang::Zh => "刚刚".to_owned(),
+        };
+    }
+    let (value, unit) = quantities::largest_unit(seconds);
+    match lang {
+        Lang::En => format!("{value}{} ago", unit.short()),
+        Lang::Zh => format!(
+            "{value} {}前",
+            match unit {
+                Unit::Second => "秒",
+                Unit::Minute => "分钟",
+                Unit::Hour => "小时",
+                Unit::Day => "天",
+            }
+        ),
     }
 }
 
 /// 长的相对时间（Codex `format_relative_time_long`）：`1 minute ago`、`5 minutes ago`。
 pub fn relative_long(lang: Lang, now_ms: u64, at_ms: u64) -> String {
-    let seconds = now_ms.saturating_sub(at_ms) / 1000;
-    let (value, unit) = match seconds {
-        0 => return relative(lang, now_ms, at_ms),
-        1..60 => (seconds, "second"),
-        60..3600 => (seconds / 60, "minute"),
-        3600..86_400 => (seconds / 3600, "hour"),
-        _ => (seconds / 86_400, "day"),
-    };
-    match lang {
-        Lang::En if value == 1 => format!("1 {unit} ago"),
-        Lang::En => format!("{value} {unit}s ago"),
-        Lang::Zh => relative(lang, now_ms, at_ms),
+    let seconds = now_ms.saturating_sub(at_ms) / units::MS_PER_SECOND;
+    if seconds == 0 || lang == Lang::Zh {
+        return relative(lang, now_ms, at_ms);
+    }
+    match quantities::largest_unit(seconds) {
+        (1, unit) => format!("1 {} ago", unit.english()),
+        (value, unit) => format!("{value} {}s ago", unit.english()),
     }
 }
 
 /// 本地时间 `YYYY-MM-DD HH:MM:SS`（`offset_minutes` 是注入时钟给的时区偏移）。
 pub fn timestamp(at_ms: u64, offset_minutes: i32) -> String {
-    let local = at_ms as i64 + i64::from(offset_minutes) * 60_000;
+    let local = at_ms as i64 + i64::from(offset_minutes) * units::MS_PER_MINUTE as i64;
     let local = u64::try_from(local).unwrap_or(0);
-    let seconds = (local / 1000) % 86_400;
+    let (hours, minutes, seconds) = quantities::time_of_day(local);
     format!(
-        "{} {:02}:{:02}:{:02}",
+        "{} {hours:02}:{minutes:02}:{seconds:02}",
         rust_cli_kernel_api::clock::civil_date(local),
-        seconds / 3600,
-        seconds / 60 % 60,
-        seconds % 60
     )
 }
 
@@ -143,7 +144,8 @@ pub fn center_truncate(text: &str, width: usize) -> String {
         return "…".chars().take(width).collect();
     }
     let keep = width - 1;
-    let (front, back) = (keep.div_ceil(2), keep / 2);
+    // 后面取一半（向下取整），前面取其余。
+    let (front, back) = (keep - keep / 2, keep / 2);
     let mut head = String::new();
     for c in text.chars() {
         if (head.clone() + &c.to_string()).width() > front {

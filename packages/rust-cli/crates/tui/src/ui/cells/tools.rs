@@ -131,22 +131,24 @@ fn remote_machine<'a>(tool: &'a ToolRow, ctx: &'a Ctx<'_>) -> Option<&'a str> {
 /// 第一行：圆点、粗体的名称、`(参数)`。紧凑模式截断参数；详细模式完整显示，续行缩进 2 列。远端的调用在行尾接
 /// `  @机器`（remote-exec.md §21.6；绑定到远端机器的 MCP 服务器的工具也是，§22.8）。
 fn head(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
+    /// 机器标记前面空两列。
+    const TAG_GAP: &str = "  ";
     let mut lines = head_without_machine(tool, ctx);
     if let (Some(machine), Some(last)) = (remote_machine(tool, ctx), lines.last_mut()) {
         let tag = crate::ui::machines::tag(ctx.palette, machine);
         let tag_width = unicode_width::UnicodeWidthStr::width(tag.content.as_ref());
         let room = ctx.width.saturating_sub(last.width());
-        if room >= 2 + tag_width {
-            last.spans.push(Span::raw("  "));
+        if room >= TAG_GAP.len() + tag_width {
+            last.spans.push(Span::raw(TAG_GAP));
             last.spans.push(tag);
         } else if !ctx.expanded {
             // 紧凑模式放不下：截掉参数的末尾给标记让位。
-            let keep = ctx.width.saturating_sub(2 + tag_width);
+            let keep = ctx.width.saturating_sub(TAG_GAP.len() + tag_width);
             *last = truncate_line(std::mem::take(last), keep);
-            last.spans.push(Span::raw("  "));
+            last.spans.push(Span::raw(TAG_GAP));
             last.spans.push(tag);
         } else {
-            lines.push(Line::from(vec![Span::raw("  "), tag]));
+            lines.push(Line::from(vec![Span::raw(TAG_GAP), tag]));
         }
     }
     lines
@@ -165,7 +167,10 @@ fn head_without_machine(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
         return vec![truncate_line(Line::from(spans), ctx.width)];
     };
     if !ctx.expanded {
-        let used = 2 + unicode_width::UnicodeWidthStr::width(name.as_str()) + 2 + note.len();
+        // 圆点与空格 2 列、名称、括号 2 列、说明。
+        const LEAD: usize = 2;
+        let used =
+            LEAD + unicode_width::UnicodeWidthStr::width(name.as_str()) + "()".len() + note.len();
         let mut spans = lead;
         spans.push(Span::raw(format!(
             "({})",
@@ -291,7 +296,8 @@ fn answers(tool: &ToolRow) -> Vec<(String, String)> {
         .flatten()
         .filter_map(|q| {
             let question = q["question"].as_str()?;
-            let start = output.find(&format!("\"{question}\"=\""))? + question.len() + 4;
+            let pattern = format!("\"{question}\"=\"");
+            let start = output.find(&pattern)? + pattern.len();
             let answer = &output[start..];
             let answer = &answer[..answer.find('"').unwrap_or(answer.len())];
             Some((question.to_owned(), answer.to_owned()))

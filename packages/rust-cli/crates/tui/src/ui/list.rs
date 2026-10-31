@@ -14,12 +14,25 @@ use rust_cli_kernel_api::permission::PermissionMode;
 use super::i18n::Lang;
 use super::key_hint;
 use super::keyboard::Typing;
+use super::layout;
 use super::palette::Palette;
 use super::pick;
 use super::text::truncate_line;
 
 /// 分隔选择值里的 provider / model / 档位（不会出现在 id 里）。
 pub const SEP: char = '\u{1f}';
+/// 两行的条目（rewind、`/mode`）每条占的行。
+const TWO_LINE_ROWS: usize = 2;
+/// 模型的档位：档位行与下面的空行。
+const EFFORT_ROWS: usize = 2;
+/// 当前项的勾。
+const TICK: &str = " ✔";
+/// 名字列最宽 40；终端至少 24 列时名字后面写说明，中间空 3 列。
+const MAX_LABEL_WIDTH: usize = 40;
+const DESCRIPTION_FROM_WIDTH: usize = 24;
+const DESCRIPTION_GAP: usize = 3;
+/// 序号 `N. ` 的宽。
+const NUMBER_WIDTH: usize = 3;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Item {
@@ -80,7 +93,7 @@ fn effort_glyph(level: usize, count: usize) -> &'static str {
     if count <= 1 {
         return GLYPHS[2];
     }
-    GLYPHS[((level * 3) as f64 / (count - 1) as f64).round() as usize]
+    GLYPHS[((level * (GLYPHS.len() - 1)) as f64 / (count - 1) as f64).round() as usize]
 }
 
 impl ListView {
@@ -189,8 +202,8 @@ impl ListView {
                 if let Some(filter) = self.filter.as_mut() {
                     filter.push(c);
                     self.selected = 0;
-                } else if let Some(digit) = c.to_digit(10).filter(|d| (1..=9).contains(d)) {
-                    let index = digit as usize - 1;
+                } else if ('1'..='9').contains(&c) {
+                    let index = usize::from(c as u8 - b'1');
                     if let Some(item) = self.visible().get(index)
                         && self.purpose != Purpose::Info
                     {
@@ -256,20 +269,21 @@ impl ListView {
         let modes = self.purpose == Purpose::Permissions;
         let two_lines = self.purpose == Purpose::Rewind || modes;
         let ticked = |item: &Item| item.current && (!two_lines || modes);
-        let per_item = if two_lines { 2 } else { 1 };
+        let per_item = if two_lines { TWO_LINE_ROWS } else { 1 };
         let focused = visible.get(self.selected).copied();
         let effort = focused.filter(|item| !item.levels.is_empty());
         // 列表之外还有：空行、档位行与空行（模型）、提示。
-        let below = 2 + if effort.is_some() { 2 } else { 0 };
-        let room = (height.saturating_sub(lines.len() + below) / per_item).max(3);
+        let below = layout::FOOTER_ROWS + if effort.is_some() { EFFORT_ROWS } else { 0 };
+        let room =
+            (height.saturating_sub(lines.len() + below) / per_item).max(layout::MIN_LIST_ROWS);
         let start = self.selected.saturating_sub(room.saturating_sub(1));
         let end = (start + room).min(visible.len());
         let label_width = visible
             .iter()
-            .map(|item| item.label.width() + if ticked(item) { 2 } else { 0 })
+            .map(|item| item.label.width() + if ticked(item) { TICK.width() } else { 0 })
             .max()
             .unwrap_or(0)
-            .min(40);
+            .min(MAX_LABEL_WIDTH);
         let green = Style::default().fg(Color::Green);
         for (index, item) in visible.iter().enumerate().take(end).skip(start) {
             let chosen = index == self.selected;
@@ -297,11 +311,13 @@ impl ListView {
             spans.push(Span::styled(item.label.clone(), label));
             let mut used = item.label.width();
             if ticked(item) {
-                spans.push(Span::styled(" ✔", green));
-                used += 2;
+                spans.push(Span::styled(TICK, green));
+                used += TICK.width();
             }
-            if !two_lines && width >= 24 && !item.description.is_empty() {
-                spans.push(Span::raw(" ".repeat(label_width.saturating_sub(used) + 3)));
+            if !two_lines && width >= DESCRIPTION_FROM_WIDTH && !item.description.is_empty() {
+                spans.push(Span::raw(
+                    " ".repeat(label_width.saturating_sub(used) + DESCRIPTION_GAP),
+                ));
                 spans.push(Span::styled(item.description.clone(), secondary));
             }
             rows.push((lines.len(), index));
@@ -319,7 +335,14 @@ impl ListView {
                         Lang::Zh => " · 当前",
                     });
                 }
-                let indent = if self.filter.is_none() { 7 } else { 4 };
+                // 与名字对齐：缩进、指针，有序号时再加序号的宽。
+                let indent = layout::INDENT
+                    + pick::POINTER.width()
+                    + if self.filter.is_none() {
+                        NUMBER_WIDTH
+                    } else {
+                        0
+                    };
                 lines.push(pick::paint(
                     truncate_line(
                         Line::from(Span::styled(
@@ -353,7 +376,7 @@ impl ListView {
             Lang::En => "{Enter} to select · {Esc} to cancel",
             Lang::Zh => "{enter} 选择 · {esc} 取消",
         };
-        lines.push(key_hint::line(2, hint, palette));
+        lines.push(key_hint::line(layout::INDENT, hint, palette));
         (lines, rows)
     }
 }

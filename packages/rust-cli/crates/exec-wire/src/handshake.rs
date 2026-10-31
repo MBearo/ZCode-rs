@@ -13,6 +13,9 @@ pub const PROTOCOL: u32 = 1;
 /// 缺省的心跳间隔（毫秒，§18.5）。
 pub const HEARTBEAT_MS: u64 = 10_000;
 
+/// 连续这么多个心跳间隔没收到任何帧，就当连接断了（§18.5；客户端与服务端都按它）。
+pub const HEARTBEAT_MISSES: u32 = 3;
+
 /// 一个流最多有几项没有 ack（§18.5）：服务端到了就不再从端口取，客户端按它留缓冲。
 pub const STREAM_WINDOW: u64 = 64;
 

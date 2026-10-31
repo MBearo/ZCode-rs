@@ -601,7 +601,7 @@ mod state;
 
 /// 失败原因写进日志的部分：前 300 个字符（与 `tool.failed` 相同，logging.md §4）。
 ///
-/// 缺陷修复 R2-14：原来整段按 warn 记日志；HTTP 错误的原因带最多 64 KiB 的响应体（env-local
+/// 缺陷修复 R2-14：原来整段按 warn 记日志；HTTP 错误的原因带最多 64 KiB 的响应体（net
 /// `ERROR_BODY_LIMIT`）。界面上的原因（`McpStatus::Failed`）不截断。
 ///
 /// 截取只定义在 base 的 `log_text::head`（F58：以前这里与 query 各写一份）。

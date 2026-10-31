@@ -2,6 +2,7 @@
 //! 凭据（`app-login-golden.json` 里 App 的轮询登录写出的加密文件原文）时个人套餐出现在目录并能发请求；项目位置的键
 //! 与 App 逐字节相同、App 先建的位置直接复用；订阅查询的结论、沿用与丢弃；手工 key 照旧；请求期不写凭据。
 
+use rust_cli_base::models;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -11,7 +12,7 @@ use rust_cli_kernel_api::provider::{Credential, ModelDirectory, ModelEndpoint, M
 use serde_json::{Value, json};
 
 use crate::CredentialSecret;
-use crate::fake_server_tests::{Captured, Harness, NOW_MS, Reply, Server, selection};
+use crate::fake_server_tests::{Captured, Gate, Harness, NOW_MS, Reply, Server, selection};
 use crate::test_support::write;
 use crate::token::Family;
 use crate::token::location::storage_key;
@@ -54,7 +55,8 @@ struct App {
     subscriptions: Mutex<Vec<Reply>>,
     issued: AtomicUsize,
     /// 订阅请求到达时通知、并在回复前停一会儿（查询途中换账号的测试）。
-    hold: Mutex<Option<(Arc<tokio::sync::Notify>, u64)>>,
+    /// 下一个订阅请求：到达时通知测试，回复停在闸门上（F123：以前是固定停顿的毫秒数）。
+    hold: Mutex<Option<(Arc<tokio::sync::Notify>, Gate)>>,
 }
 
 impl App {
@@ -104,9 +106,9 @@ impl App {
                     Reply::json(only.status, &serde_json::from_str(&only.body).unwrap())
                 };
                 match self.hold.lock().unwrap().take() {
-                    Some((arrived, millis)) => {
+                    Some((arrived, gate)) => {
                         arrived.notify_one();
-                        reply.after(millis)
+                        reply.until(&gate)
                     }
                     None => reply,
                 }
@@ -137,7 +139,7 @@ async fn listed(harness: &Harness, provider: &str) -> bool {
         .await
         .models
         .iter()
-        .any(|entry| entry.provider == provider && entry.model == "GLM-5.3")
+        .any(|entry| entry.provider == provider && entry.model == models::GLM_5_3_ACCOUNT)
 }
 
 fn token(endpoint: &ModelEndpoint) -> &str {
@@ -399,15 +401,17 @@ async fn an_account_change_during_the_query_discards_the_round() {
     let app = App::new(vec![subscribed()]);
     let (server, harness) = start(app.clone(), None).await;
     let harness = Arc::new(harness);
-    let arrived = Arc::new(tokio::sync::Notify::new());
-    *app.hold.lock().unwrap() = Some((arrived.clone(), 300));
+    let (arrived, gate) = (Arc::new(tokio::sync::Notify::new()), Gate::default());
     zai_login(&harness, "u-1", "jwt-1").await;
+    // 登录之后再布置：只拦这一轮查询的订阅请求，换完账号再放行（F123）。
+    *app.hold.lock().unwrap() = Some((arrived.clone(), gate.clone()));
     let pending = tokio::spawn({
         let harness = harness.clone();
         async move { harness.platform.catalog().await }
     });
     arrived.notified().await;
     zai_login(&harness, "u-1", "jwt-2").await;
+    gate.open();
     // 这一轮丢弃：没有发布任何快照。
     let first = pending.await.unwrap();
     assert_eq!(first.revision, 0);

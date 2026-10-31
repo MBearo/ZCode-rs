@@ -6,6 +6,8 @@
 
 use std::rc::Rc;
 
+use rust_cli_base::text;
+
 use crate::common::utf16_len;
 use crate::read_support::number_lines;
 
@@ -13,8 +15,12 @@ use crate::read_support::number_lines;
 const CONTEXT: usize = 8;
 /// 一个文件的片段最多这么多 UTF-16 单元，超过时在这之前的最后一个换行处截断。
 const MAX_SNIPPET: usize = 8192;
-/// 编辑距离的上限：超过时不算 diff（相当于算 diff 超时）。
-const MAX_EDITS: usize = 10_000;
+/// 编辑距离的上限：超过时不算 diff（相当于算 diff 超时；只定义在 base 的 `text`）。
+const MAX_EDITS: usize = text::MAX_DIFF_EDITS;
+/// Myers 每一步只走同奇偶的对角线。
+const DIAGONAL_STEP: isize = 2;
+/// 最后这么多个 change 之外的公共段，短时并进同一个 hunk。
+const TAIL_CHANGES: usize = 2;
 
 /// 一段连续的相同 / 新增 / 删除的行（jsdiff 的 component）。
 struct Component {
@@ -163,7 +169,7 @@ fn diff_lines<'a>(old_text: &'a str, new_text: &'a str) -> Option<Vec<Change<'a>
                 .is_some_and(|path| path.old_pos + 1 < old_len);
             if !can_add && !can_remove {
                 best[slot(diagonal)] = None;
-                diagonal += 2;
+                diagonal += DIAGONAL_STEP;
                 continue;
             }
             // 删不了，或者能增且增的那条路在旧文件里走得更远：增；否则删。
@@ -175,7 +181,7 @@ fn diff_lines<'a>(old_text: &'a str, new_text: &'a str) -> Option<Vec<Change<'a>
                 (_, Some(add)) => add_to_path(add, true, false, 0),
                 _ => {
                     best[slot(diagonal)] = None;
-                    diagonal += 2;
+                    diagonal += DIAGONAL_STEP;
                     continue;
                 }
             };
@@ -190,7 +196,7 @@ fn diff_lines<'a>(old_text: &'a str, new_text: &'a str) -> Option<Vec<Change<'a>
                 min_diagonal = min_diagonal.max(diagonal + 1);
             }
             best[slot(diagonal)] = Some(path);
-            diagonal += 2;
+            diagonal += DIAGONAL_STEP;
         }
     }
     None
@@ -237,7 +243,7 @@ fn hunks(changes: &[Change<'_>], context: usize) -> Vec<Hunk> {
             }
         } else {
             if range_start != 0 {
-                if change.lines.len() <= context * 2 && index + 2 < all.len() {
+                if change.lines.len() <= context * 2 && index + TAIL_CHANGES < all.len() {
                     current.extend(prefixed(' ', &change.lines));
                 } else {
                     let take = change.lines.len().min(context);

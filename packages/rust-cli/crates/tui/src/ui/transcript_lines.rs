@@ -23,6 +23,8 @@ struct Entry {
     light: bool,
     kind: Kind,
     thought_ms: u64,
+    /// 回合结束那一行接的 pill（修复线 F118：每次画都现取，变了就重排）；别的块为 None。
+    tail: Option<String>,
     rendered: Rc<Rendered>,
     /// 最后一次用到它的帧；每帧结束时清掉这一帧没用到的块。
     frame: u64,
@@ -135,8 +137,12 @@ pub fn local_lines(local: &Local, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     }
 }
 
-/// 一个块的行：普通视图里点击展开的块铺悬停底色并多 1 行空行；详细视图是详细形式。
-fn render(cell: &cells::Cell<'_>, ctx: &Ctx<'_>, opened: bool) -> Rc<Rendered> {
+/// 一个块的行：普通视图里点击展开的块铺悬停底色并多 1 行空行；详细视图是详细形式。回合结束那一行接 `tail`（两种视图
+/// 相同，不能展开）。
+fn render(cell: &cells::Cell<'_>, ctx: &Ctx<'_>, opened: bool, tail: Option<&str>) -> Rc<Rendered> {
+    if cell.kind == Kind::Duration {
+        return Rendered::new(cells::duration_cell(cell, tail, ctx));
+    }
     if ctx.expanded {
         return Rendered::new(cells::render(cell, ctx));
     }
@@ -209,6 +215,13 @@ pub fn lines(app: &App, cache: &mut Cache, ctx: &Ctx<'_>) -> Layout {
     };
     // 普通视图并工作段，详细视图不并。
     let built = cells::build(rows, !ctx.expanded, ctx.mcp_machines);
+    // 回合结束那一行的 ` · <pill> still running`（修复线 F118，tui-display.md §2.7）：footer 的 pill 的同一个函数、同一份
+    // 快照，每次画都现取（后台命令结束后已经显示的行也去掉这一段）。查看子代理时那些行不在（视图来自快照）。
+    let still = app
+        .viewing
+        .is_none()
+        .then(|| crate::ui::manage::pill(&app.background, app.lang))
+        .flatten();
     let mut pending_locals: Vec<&LocalCell> = locals.collect();
     // 搜索模式（修复线 F114，tui-input.md §2.3.2）：当前匹配所在的块按展开的样子排（临时展开）；折叠着的块另排一份完整
     // 形式供搜索。详细视图本来就是完整形式。
@@ -219,9 +232,10 @@ pub fn lines(app: &App, cache: &mut Cache, ctx: &Ctx<'_>) -> Layout {
         // 点击只展开这一个块；详细视图本来就是详细形式，不看单独展开。
         let opened =
             !ctx.expanded && (app.expanded_cells.contains(&cell_key) || peek == Some(cell_key));
-        let rendered = cached(entries, cell, ctx, &live_ctx, opened, frame);
+        let tail = still.as_deref().filter(|_| cell.kind == Kind::Duration);
+        let rendered = cached(entries, cell, (ctx, &live_ctx), opened, frame, tail);
         let full = (find.is_some() && !opened && rendered.expandable)
-            .then(|| cached(entries, cell, ctx, &live_ctx, true, frame));
+            .then(|| cached(entries, cell, (ctx, &live_ctx), true, frame, tail));
         let start = out.push_full(cell_key, rendered, full);
         if cell.kind == Kind::User
             && let Some(start) = start
@@ -252,14 +266,14 @@ pub fn lines(app: &App, cache: &mut Cache, ctx: &Ctx<'_>) -> Layout {
     out
 }
 
-/// 一个块排好的行：排版参数与内容都没变时用缓存里的（`opened` 是按展开的样子排）。
+/// 一个块排好的行：排版参数与内容都没变时用缓存里的（`opened` 是按展开的样子排；`tail` 是回合结束那一行接的 pill）。
 fn cached(
     entries: &mut HashMap<(u64, bool), Entry>,
     cell: &cells::Cell<'_>,
-    ctx: &Ctx<'_>,
-    live_ctx: &Ctx<'_>,
+    (ctx, live_ctx): (&Ctx<'_>, &Ctx<'_>),
     opened: bool,
     frame: u64,
+    tail: Option<&str>,
 ) -> Rc<Rendered> {
     let versions = || cell.rows.iter().map(|row| (row.id, row.version));
     let cell_key = cell.ids().next().unwrap_or(0);
@@ -267,7 +281,7 @@ fn cached(
     // R5-5；以前每个增量都整篇重排）。
     let shown = cells::streaming_reply(cell);
     if cell.live() && shown.is_none() {
-        return render(cell, live_ctx, opened);
+        return render(cell, live_ctx, opened, tail);
     }
     let hit = entries.get_mut(&(cell_key, opened)).filter(|e| {
         e.width == ctx.width
@@ -275,6 +289,7 @@ fn cached(
             && e.light == ctx.palette.light
             && e.kind == cell.kind
             && e.thought_ms == cell.thought_ms
+            && e.tail.as_deref() == tail
             && match shown {
                 Some(shown) => e.shown.as_deref() == Some(shown),
                 None => e.shown.is_none() && versions().eq(e.versions.iter().copied()),
@@ -284,7 +299,12 @@ fn cached(
         entry.frame = frame;
         return entry.rendered.clone();
     }
-    let rendered = render(cell, if shown.is_some() { live_ctx } else { ctx }, opened);
+    let rendered = render(
+        cell,
+        if shown.is_some() { live_ctx } else { ctx },
+        opened,
+        tail,
+    );
     entries.insert(
         (cell_key, opened),
         Entry {
@@ -295,6 +315,7 @@ fn cached(
             light: ctx.palette.light,
             kind: cell.kind,
             thought_ms: cell.thought_ms,
+            tail: tail.map(str::to_owned),
             rendered: rendered.clone(),
             frame,
         },

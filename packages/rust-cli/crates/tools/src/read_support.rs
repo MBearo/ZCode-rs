@@ -1,5 +1,6 @@
 //! Read 的检查与格式化：二进制 / 设备文件判定、行号、token 估算、图片类型。
 
+use rust_cli_base::tokens;
 use rust_cli_kernel_api::tool::ToolError;
 
 use crate::common::failed;
@@ -93,12 +94,13 @@ pub(crate) fn number_lines(content: &str, start: u64) -> String {
 
 /// 粗估 token 数：JSON 类每 2 个字符一个 token，其余 4 个。
 fn estimate_tokens(content: &str, extension: &str) -> u64 {
+    // 每 token 的字符数与 Math.round 只定义在 base 的 `tokens`。
     let per_token = if matches!(extension, ".json" | ".jsonl" | ".jsonc") {
-        2.0
+        tokens::JSON_CHARS_PER_TOKEN
     } else {
-        4.0
+        tokens::CHARS_PER_TOKEN
     };
-    (crate::common::utf16_len(content) as f64 / per_token).round() as u64
+    tokens::estimate(crate::common::utf16_len(content) as u64, per_token)
 }
 
 /// 超过上限时的报错。没有 count_tokens 时也用这个估算值。

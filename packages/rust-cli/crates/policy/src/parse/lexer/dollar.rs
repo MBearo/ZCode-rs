@@ -5,8 +5,16 @@ use super::{
     AT, BACKSLASH, BACKTICK, BANG, DASH, DOLLAR, DQUOTE, HASH, LBRACE, LPAREN, Lexer, NL, PIPE,
     QUESTION, RBRACE, RPAREN, SPACE, SQUOTE, STAR, TAB, is_digit, is_id_continue, is_id_start,
 };
+use crate::consts::{DOUBLE_OPERATOR_LEN, SIGIL_PAIR_LEN};
 use crate::parse::SubstitutionKind;
 use crate::parse::parts::Part;
+
+/// ANSI-C 引号里 `\a`、`\b`、`\e`、`\f`、`\v` 翻译成的控制字符。
+const BELL: u8 = 0x07;
+const BACKSPACE: u8 = 0x08;
+const ESCAPE: u8 = 0x1b;
+const FORM_FEED: u8 = 0x0c;
+const VERTICAL_TAB: u8 = 0x0b;
 
 impl Lexer<'_> {
     /// `readDoubleQuoted`：调用时 `pos` 已越过开头的 `"`。
@@ -147,8 +155,8 @@ impl Lexer<'_> {
                 self.extract_balanced();
                 let text = self.slice(dollar, self.pos).to_vec();
                 // 去掉 `$(` 与配对的 `)`；没有配对时取到结尾。
-                let close = usize::from(text.len() > 2 && text.ends_with(b")"));
-                let inner = text[2..text.len() - close].to_vec();
+                let close = usize::from(text.len() > SIGIL_PAIR_LEN && text.ends_with(b")"));
+                let inner = text[SIGIL_PAIR_LEN..text.len() - close].to_vec();
                 self.record(SubstitutionKind::Command, &text, inner);
                 self.set_result(text.clone(), true, Some(Part::Dynamic(text)));
             }
@@ -161,7 +169,7 @@ impl Lexer<'_> {
                 if matches!(after, SPACE | TAB | NL) {
                     self.read_brace_substitution(b"${ ", 1);
                 } else if after == PIPE {
-                    self.read_brace_substitution(b"${| ", 2);
+                    self.read_brace_substitution(b"${| ", b"{|".len());
                 } else {
                     self.read_parameter_expansion();
                 }
@@ -205,7 +213,7 @@ impl Lexer<'_> {
 
     /// `scanArithmeticBody`：`pos` 指向 `((`，返回到匹配 `))` 之前的正文。
     pub(super) fn scan_arithmetic_body(&mut self) -> Vec<u8> {
-        self.pos += 2;
+        self.pos += DOUBLE_OPERATOR_LEN;
         let len = self.src_end;
         let start = self.pos;
         let mut depth = 1u32;
@@ -214,15 +222,16 @@ impl Lexer<'_> {
             let pair = self.pos + 1 < len && self.c(self.pos + 1) == c;
             if c == LPAREN && pair {
                 depth += 1;
-                self.pos += 2;
+                self.pos += DOUBLE_OPERATOR_LEN;
             } else if c == RPAREN && pair {
                 depth -= 1;
-                self.pos += 2;
+                self.pos += DOUBLE_OPERATOR_LEN;
             } else {
                 self.pos += 1;
             }
         }
-        self.slice(start, self.pos.saturating_sub(2)).to_vec()
+        self.slice(start, self.pos.saturating_sub(DOUBLE_OPERATOR_LEN))
+            .to_vec()
     }
 
     /// `readBraceSubstitution`：`${ cmd; }` 与 `${| cmd; }`，`pos` 指向 `{`。
@@ -355,11 +364,11 @@ impl Lexer<'_> {
                     b"\\" => text.push(b'\\'),
                     b"'" => text.push(b'\''),
                     b"\"" => text.push(b'"'),
-                    b"a" => text.push(0x07),
-                    b"b" => text.push(0x08),
-                    b"e" | b"E" => text.push(0x1b),
-                    b"f" => text.push(0x0c),
-                    b"v" => text.push(0x0b),
+                    b"a" => text.push(BELL),
+                    b"b" => text.push(BACKSPACE),
+                    b"e" | b"E" => text.push(ESCAPE),
+                    b"f" => text.push(FORM_FEED),
+                    b"v" => text.push(VERTICAL_TAB),
                     _ => {
                         text.push(b'\\');
                         text.extend_from_slice(unit);

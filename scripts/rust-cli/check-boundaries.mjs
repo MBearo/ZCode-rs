@@ -9,7 +9,11 @@
 // - 解耦检查（docs/specs/rust-cli/app-protocol.md §9）：协议适配层的依赖、词汇、按前端分支、feature（boundaries/decoupling.mjs）
 //   与 kernel-api 只加不改（boundaries/kernel-surface.mjs 与已提交的 kernel-surface.json）；
 // - 厂商错误的解耦（docs/specs/rust-cli/provider-errors.md §2.5）：厂商码与厂商专有的字符串只在 model 的 errors/
-//   （boundaries/vendor.mjs）。
+//   （boundaries/vendor.mjs）；
+// - 容易变的字符串（README §4.1 第 6 条，工作线 F121）：模型 ID、主机名与环境变量名只在常量模块里（boundaries/literals.mjs），
+//   另收 scripts/rust-cli 下的 JS 源码；
+// - 散写数字的棘轮（docs/specs/rust-cli/constants.md §4，F122）：每个文件的处数与已提交的 numbers.json 相等
+//   （boundaries/numbers.mjs）。
 // README 表格与规则表的一致性只在本仓库检查（scripts/rust-cli/repo-only/check.mjs，工作线 F60）。
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
@@ -39,7 +43,9 @@ import {
   readSurfaceSources,
   surfaceOf,
 } from "./boundaries/kernel-surface.mjs";
+import { checkVolatileLiterals } from "./boundaries/literals.mjs";
 import * as policy from "./boundaries/policy.mjs";
+import { checkNumbers, countNumbers, readBaseline } from "./boundaries/numbers.mjs";
 import { checkVendorTerms } from "./boundaries/vendor.mjs";
 
 const root = resolve(import.meta.dirname, "../../packages/rust-cli");
@@ -116,6 +122,17 @@ for (const entry of await readdir(crates, { withFileTypes: true })) {
 }
 const rootClippy = await readFile(resolve(root, "clippy.toml"), "utf8");
 
+// scripts/rust-cli 下的 JS 源码（路径相对仓库根），给容易变的字符串的检查。
+const repo = resolve(root, "../..");
+const scripts = [];
+for await (const path of files(resolve(repo, "scripts/rust-cli"))) {
+  if (/\.(?:mjs|mts|js)$/.test(path) && !path.split(sep).includes("node_modules"))
+    scripts.push({
+      file: relative(repo, path).replaceAll("\\", "/"),
+      text: await readFile(path, "utf8"),
+    });
+}
+
 // 三类检查（docs/specs/rust-cli/remote-exec.md §15.6）：依赖图之外的波及范围、稳定依赖与接口快照。
 const graph = internalGraph(packages, internal);
 const failures = [
@@ -138,6 +155,10 @@ const failures = [
   ),
   // 厂商错误（provider-errors.md §2.5）：第 2 层与 query 等只认中性分类。
   ...checkVendorTerms(policy, sources),
+  // 容易变的字符串（README §4.1 第 6 条）：模型 ID、主机名与环境变量名只在常量模块里。
+  ...checkVolatileLiterals(policy, sources, scripts),
+  // 有含义的数字是命名常量（constants.md §4）：散写的处数只许降低。
+  ...checkNumbers(countNumbers(sources, policy.NUMBER_ALLOWED), await readBaseline()),
 ];
 
 if (failures.length) {

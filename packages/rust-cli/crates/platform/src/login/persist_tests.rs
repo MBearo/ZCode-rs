@@ -1,4 +1,5 @@
 //! 新会话的缺省选择（`/effort` 与登录，tui-manage.md §2.2）：只换 `defaultModelSelection`，其余原样。
+use rust_cli_base::models;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_paths::StoragePaths;
 
@@ -17,7 +18,7 @@ async fn the_effort_default_keeps_the_rest_of_the_personal_config() {
     .await;
     let selection = ModelSelection {
         provider: "zai".to_owned(),
-        model: "GLM-5.3".to_owned(),
+        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: Some("high".to_owned()),
         connection: None,
     };
@@ -27,7 +28,10 @@ async fn the_effort_default_keeps_the_rest_of_the_personal_config() {
     assert_eq!(shown, file.as_path().display().to_string());
     assert_eq!(
         read_text(file.as_path()).await.unwrap(),
-        "{\n  \"schemaVersion\": 1,\n  \"config\": {\n    \"providerOrder\": [\n      \"zai\"\n    ],\n    \"defaultModelSelection\": {\n      \"providerId\": \"zai\",\n      \"modelId\": \"GLM-5.3\",\n      \"options\": {\n        \"reasoningLevel\": \"high\"\n      }\n    },\n    \"x\": true\n  }\n}"
+        format!(
+            "{{\n  \"schemaVersion\": 1,\n  \"config\": {{\n    \"providerOrder\": [\n      \"zai\"\n    ],\n    \"defaultModelSelection\": {{\n      \"providerId\": \"zai\",\n      \"modelId\": \"{}\",\n      \"options\": {{\n        \"reasoningLevel\": \"high\"\n      }}\n    }},\n    \"x\": true\n  }}\n}}",
+            models::GLM_5_3_ACCOUNT
+        )
     );
     // auto：不带 options。
     let auto = ModelSelection {
@@ -37,12 +41,10 @@ async fn the_effort_default_keeps_the_rest_of_the_personal_config() {
     super::super::save_default_model((&file, &legacy), &auto)
         .await
         .unwrap();
-    assert!(
-        read_text(file.as_path())
-            .await
-            .unwrap()
-            .contains("\"modelId\": \"GLM-5.3\"\n    },")
-    );
+    assert!(read_text(file.as_path()).await.unwrap().contains(&format!(
+        "\"modelId\": \"{}\"\n    }},",
+        models::GLM_5_3_ACCOUNT
+    )));
     write(file.as_path(), r#"{"config":{}}"#).await;
     assert!(
         super::super::save_default_model((&file, &legacy), &auto)
@@ -66,7 +68,7 @@ async fn a_pending_legacy_import_keeps_the_personal_config_absent() {
     .await;
     let selection = ModelSelection {
         provider: "zai".to_owned(),
-        model: "GLM-5.3".to_owned(),
+        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: None,
         connection: None,
     };
@@ -100,7 +102,7 @@ async fn a_team_default_keeps_only_the_node_fields() {
     write(file.as_path(), r#"{"schemaVersion":1,"config":{}}"#).await;
     let selection = ModelSelection {
         provider: "account:bigmodel-team-coding-plan".to_owned(),
-        model: "GLM-5.3".to_owned(),
+        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: Some("high".to_owned()),
         connection: Some(Box::new(rust_cli_kernel_api::model::ModelConnection {
             product_id: "prod-1".to_owned(),
@@ -115,7 +117,7 @@ async fn a_team_default_keeps_only_the_node_fields() {
         serde_json::from_str(&read_text(file.as_path()).await.unwrap()).unwrap();
     assert_eq!(
         saved["config"]["defaultModelSelection"],
-        serde_json::json!({"providerId": "account:bigmodel-team-coding-plan", "modelId": "GLM-5.3",
+        serde_json::json!({"providerId": "account:bigmodel-team-coding-plan", "modelId": models::GLM_5_3_ACCOUNT,
             "options": {"reasoningLevel": "high"}})
     );
 }

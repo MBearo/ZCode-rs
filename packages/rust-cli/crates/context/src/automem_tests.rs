@@ -56,7 +56,7 @@ async fn instructions(env: MemoryEnvironment) -> Option<String> {
         tool_names: Vec::new(),
         selection: ModelSelection {
             provider: "anthropic".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },

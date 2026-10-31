@@ -80,6 +80,11 @@ fn squeeze(text: &str) -> String {
     out
 }
 
+/// `/**/` 里 `/` 之后的一段（可以连着几段）。
+const GLOBSTAR_SEGMENT: &str = "**/";
+/// 唯一的 `*` 在结尾 ` *` 时翻译出的正则尾巴（这时它可以整个省略）。
+const TRAILING_ANY: &str = " .*";
+
 /// 通配匹配：`*` 匹配任意文本，`\*` 是字面星号，`/**/` 也匹配 `/`；只有一个 `*` 且以 ` *` 结尾时，
 /// 结尾部分可以整个省略（`git *` 也匹配 `git`）。比较前模式与命令里连续的空格、制表符并成一个空格。
 ///
@@ -104,11 +109,11 @@ pub fn wildcard_matches(pattern: &str, command: &str) -> bool {
                 // `/**/`（可以连着几段）匹配 `/` 或 `/…/`。
                 let rest: String = chars.clone().collect();
                 let mut globstars = 0;
-                while rest[globstars * 3..].starts_with("**/") {
+                while rest[globstars * GLOBSTAR_SEGMENT.len()..].starts_with(GLOBSTAR_SEGMENT) {
                     globstars += 1;
                 }
                 if globstars > 0 {
-                    for _ in 0..globstars * 3 {
+                    for _ in 0..globstars * GLOBSTAR_SEGMENT.len() {
                         chars.next();
                     }
                     stars += globstars * 2;
@@ -129,8 +134,8 @@ pub fn wildcard_matches(pattern: &str, command: &str) -> bool {
             }
         }
     }
-    if stars == 1 && regex.ends_with(" .*") {
-        regex.truncate(regex.len() - 3);
+    if stars == 1 && regex.ends_with(TRAILING_ANY) {
+        regex.truncate(regex.len() - TRAILING_ANY.len());
         regex.push_str("( .*)?");
     }
     regex.push('$');

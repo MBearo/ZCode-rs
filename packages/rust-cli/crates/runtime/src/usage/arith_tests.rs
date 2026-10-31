@@ -1,11 +1,12 @@
 //! 类别与算术（context-usage.md §4）：用一次真实运行的数字（fixture 回的计数）核对。
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::context_usage::CategoryKind;
 
 use super::*;
 
 fn c1() -> Measured {
     Measured {
-        model: "claude-opus-5-5".into(),
+        model: GLM_5_3.into(),
         window: 1_000_000,
         source: WindowSource::ModelDefault,
         auto: true,

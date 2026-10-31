@@ -7,12 +7,19 @@
 
 use std::sync::Arc;
 
+use rust_cli_base::proto::http;
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::units;
 use rust_cli_net::{Egress, HeaderValue, HttpRequest, HttpResponse, NetError, header};
 use serde_json::Value;
 
+use crate::consts;
+
+/// 临时故障的 5xx 的最后一个码：600 起不是标准状态码，按失败处理。
+const SERVER_ERROR_LAST: u16 = 599;
+
 /// 账号接口响应体的上限：项目令牌、团队与 OAuth 共用（F55：以前 oauth 另写了一份）。
-pub(crate) const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_RESPONSE_BYTES: usize = 64 * units::KIB;
 
 /// 读响应体，最多 [`MAX_RESPONSE_BYTES`]；超过时为 None（拒收，不截断）。项目令牌、团队与 OAuth 共用，照 Node
 /// `readResponseBody`（超过上限报 `too_large`）。修复线 F58：以前 OAuth 截断到上限再解析，报“不是 JSON”。
@@ -121,11 +128,13 @@ impl Http {
             }
         })?;
         match response.status() {
-            404 => return Ok(Reply::NotFound),
-            401 => return Err(Fault::Unauthorized),
-            403 => return Err(Fault::Forbidden),
-            429 | 500..=599 => return Err(Fault::Transient),
-            status if !(200..300).contains(&status) => return Err(Fault::Failed),
+            http::NOT_FOUND => return Ok(Reply::NotFound),
+            http::UNAUTHORIZED => return Err(Fault::Unauthorized),
+            http::FORBIDDEN => return Err(Fault::Forbidden),
+            http::TOO_MANY_REQUESTS | http::SERVER_ERROR_MIN..=SERVER_ERROR_LAST => {
+                return Err(Fault::Transient);
+            }
+            status if !http::is_success(status) => return Err(Fault::Failed),
             _ => {}
         }
         let body = read_limited(response)
@@ -148,7 +157,7 @@ impl Http {
 pub(crate) fn success_code(code: &Value) -> bool {
     match code {
         Value::Number(number) => {
-            matches!(number.as_f64(), Some(value) if value == 0.0 || value == 200.0)
+            matches!(number.as_f64(), Some(value) if consts::BUSINESS_SUCCESS_CODES.contains(&value))
         }
         Value::String(text) => text == "0" || text == "200",
         _ => false,

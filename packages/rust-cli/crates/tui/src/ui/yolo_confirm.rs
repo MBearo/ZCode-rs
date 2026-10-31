@@ -13,6 +13,7 @@ use unicode_width::UnicodeWidthStr;
 use super::app::{Action, App, Overlay};
 use super::i18n_yolo as words;
 use super::interaction_view::{View, bold, checkbox, dim, hint, named, option};
+use super::layout;
 use super::text::{wrap, wrap_text};
 
 /// 焦点所在的一处：勾选框、取消、确认启用（从上到下）。
@@ -114,6 +115,14 @@ impl App {
 /// 块之间的空行（块是：线、标题与说明；三项；风险段；勾选框与选项；提示）：空行在哪个块前面，要紧的在前。放不下时从后面
 /// 去掉：先去风险段前面的，再去标题块后面的、提示前面的，勾选框前面的留到最后。
 const GAPS: [usize; 4] = [3, 4, 1, 2];
+/// 三项：名称与说明之间空 2 列；说明另起一行时缩进 4 列。
+const NAME_GAP: usize = 2;
+const DESCRIPTION_INDENT: usize = 4;
+/// 勾选框文字的续行与文字对齐：缩进、指针、`[ ] `。
+const ACKNOWLEDGE_TEXT_INDENT: usize = 8;
+/// 两个选项的序号。
+const CANCEL_NUMBER: usize = 1;
+const CONFIRM_NUMBER: usize = 2;
 
 /// 框的行（tui.md §7.8）：警告色的线与 `⚠` 标题、说明、三项、风险段、勾选框、取消 / 确认启用、按键提示。`height` 是底部
 /// 区域能用的行数：连同块之间的空行放不下时按 [`GAPS`] 的先后去掉空行。所有文字按宽度折行。
@@ -170,7 +179,7 @@ fn items(view: &View<'_>) -> Vec<Line<'static>> {
         .map(|(name, _)| name.width())
         .max()
         .unwrap_or(0);
-    let start = 2 + column + 2;
+    let start = layout::INDENT + column + NAME_GAP;
     let secondary = view.palette.secondary();
     let mut lines = Vec::new();
     for (name, description) in items {
@@ -179,7 +188,7 @@ fn items(view: &View<'_>) -> Vec<Line<'static>> {
             let first = [
                 Span::raw("  "),
                 Span::styled(name, bold()),
-                Span::raw(" ".repeat(column - name.width() + 2)),
+                Span::raw(" ".repeat(column - name.width() + NAME_GAP)),
             ];
             lines.extend(wrap(
                 &description,
@@ -189,8 +198,14 @@ fn items(view: &View<'_>) -> Vec<Line<'static>> {
             ));
         } else {
             let at = |n: usize| [Span::raw(" ".repeat(n))];
-            lines.extend(wrap_text(name, bold(), view.width, &at(2), &at(2)));
-            lines.extend(wrap(&description, view.width, &at(4), &at(4)));
+            let (name_at, description_at) = (at(layout::INDENT), at(DESCRIPTION_INDENT));
+            lines.extend(wrap_text(name, bold(), view.width, &name_at, &name_at));
+            lines.extend(wrap(
+                &description,
+                view.width,
+                &description_at,
+                &description_at,
+            ));
         }
     }
     lines
@@ -216,17 +231,27 @@ fn choices(confirm: &YoloConfirm, view: &View<'_>) -> Vec<Line<'static>> {
         Style::default()
     };
     let text = [Span::styled(words::acknowledgement(view.lang), style)];
-    let rest = [Span::raw(" ".repeat(8))];
+    let rest = [Span::raw(" ".repeat(ACKNOWLEDGE_TEXT_INDENT))];
     let mut lines = wrap(&text, view.width, &first, &rest);
     let cancel = named(words::cancel(view.lang), focused(Focus::Cancel), view);
-    lines.push(option(focused(Focus::Cancel), 1, vec![cancel], view));
+    lines.push(option(
+        focused(Focus::Cancel),
+        CANCEL_NUMBER,
+        vec![cancel],
+        view,
+    ));
     let style = if confirm.checked {
         view.palette.destructive()
     } else {
         dim()
     };
     let label = Span::styled(words::confirm(view.lang), style);
-    lines.push(option(focused(Focus::Confirm), 2, vec![label], view));
+    lines.push(option(
+        focused(Focus::Confirm),
+        CONFIRM_NUMBER,
+        vec![label],
+        view,
+    ));
     lines
 }
 

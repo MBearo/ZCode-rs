@@ -1,4 +1,5 @@
 //! 旧 CLI 用户文件的导入判定（Node `importLegacyCliPersonalProviderConfig` 的筛选）。
+use rust_cli_base::models;
 use serde_json::json;
 
 use super::pending;
@@ -9,7 +10,9 @@ fn custom_providers_and_defaults_are_imported_by_node() {
         json!({"provider": {"my-proxy": {"kind": "anthropic", "options": {"apiKey": "k"}}}});
     assert!(pending(&custom));
     assert!(pending(&json!({"model": "my-proxy/m1"})));
-    assert!(pending(&json!({"model": {"main": "zai/GLM-5.3"}})));
+    assert!(pending(
+        &json!({"model": {"main": format!("zai/{}", models::GLM_5_3_ACCOUNT)}})
+    ));
     let builtin_key =
         json!({"provider": {"builtin:zai": {"kind": "openai", "options": {"apiKey": " k "}}}});
     assert!(pending(&builtin_key));

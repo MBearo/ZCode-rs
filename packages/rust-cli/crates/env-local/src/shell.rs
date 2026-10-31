@@ -1,7 +1,6 @@
 //! 本机 shell 命令（docs/specs/rust-cli/shell-permissions.md §2）。
 //!
-//! 每条命令一个 [`Running`] 记录，按 operationId 登记（同一个 ID、同样的参数重放时不再执行，
-//! 参数不同时拒绝）。进程经 `rust-cli-proc` 的账本启动：Unix 上自成会话与进程组，Windows 上放进
+//! 每条还在跑的命令一个 [`Running`] 记录，按 operationId 登记，结束时删掉（工作线 F119：不按 ID 重放）。进程经 `rust-cli-proc` 的账本启动：Unix 上自成会话与进程组，Windows 上放进
 //! 自己的 Job，取消、超时与结束时整棵树一起回收。stdout 与 stderr 写进同一个输出文件（合并的
 //! fd），[`watch`] 从文件按游标读。监督任务在执行环境自己的任务作用域里运行，后台命令
 //! 因此不随工具调用结束；它的终态作为 [`ShellNotice`] 记在会话里，ack 之前一直保留。
@@ -28,7 +27,7 @@ use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvPath, OperationContext, Origin, Outcome, StartCommand, WorkspaceRef,
 };
 use rust_cli_kernel_api::env_shell::{
-    BackgroundKind, BackgroundStop, BackgroundTask, CwdScope, ShellKind, ShellNotice, ShellState,
+    BackgroundKind, CwdScope, ShellKind, ShellNotice, ShellState,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId};
 use rust_cli_proc::ledger::Ledger;
@@ -85,6 +84,17 @@ fn hook_shell(config: &ShellConfig) -> Result<PathBuf, EnvError> {
 }
 
 /// Monitor 的后台命令（工作线 F83）。
+/// 后台命令启动时的种类与说明：后台命令取 `background`，可能转后台的前台命令取 `on_timeout` 的（修复线 F117）。
+fn registered(request: &StartCommand) -> (BackgroundKind, String) {
+    request
+        .background
+        .as_ref()
+        .or(request.on_timeout.as_ref().map(|moved| &moved.command))
+        .map_or_else(Default::default, |background| {
+            (background.kind, background.description.clone())
+        })
+}
+
 fn monitor(request: &StartCommand) -> bool {
     request
         .background
@@ -135,9 +145,14 @@ impl Finish {
     }
 }
 
-/// 一条已登记的命令。
+/// 还没 ack 的后台通知，连同命令原文：命令结束时登记就删了（工作线 F119），TaskStop 查已结束的从这里取原文。
+pub(crate) struct Pending {
+    pub notice: ShellNotice,
+    pub command: String,
+}
+
+/// 一条还在跑的命令（结束时从登记表删掉，工作线 F119）。
 pub(crate) struct Running {
-    fingerprint: String,
     session: SessionId,
     /// 命令原文（TaskStop 结果的 `command`）。
     pub command: String,
@@ -158,13 +173,17 @@ pub(crate) struct Running {
     pub movable: bool,
     /// 开始的时刻（Shell 详情的 Runtime，docs/specs/rust-cli/tui-panels.md §3.3）。
     pub started: std::time::Instant,
+    /// 后台命令启动时的种类与说明（`BackgroundCommand`；前台命令与转后台的命令是 Bash 与空）：账本回报给界面
+    /// （修复线 F117：以前只报命令与状态，界面把 monitor 数成 shell）。
+    pub kind: BackgroundKind,
+    pub description: String,
 }
 
 #[derive(Default)]
 pub(crate) struct SessionShell {
     pub cwd: Option<PathBuf>,
     /// 还没有 ack 的后台通知，按 seq 升序。
-    pub notices: Vec<ShellNotice>,
+    pub notices: Vec<Pending>,
     /// 还在跑的后台命令（任务 → 操作）。与 `notices` 在同一把锁里变化：命令结束时移出这里、同时记
     /// 通知，所以 [`ShellState::background`] 不会出现"已结束但两边都没有"的空档。
     pub background: BTreeMap<ShellTaskId, OperationId>,
@@ -178,8 +197,6 @@ pub(crate) struct SessionShell {
 pub(crate) struct State {
     pub commands: HashMap<OperationId, Arc<Running>>,
     pub sessions: HashMap<SessionId, SessionShell>,
-    /// 停止操作的结果，按 operationId 重放（README §6 规则 3）。
-    pub stops: HashMap<OperationId, (BackgroundTask, BackgroundStop)>,
     /// 正在跑的 Linux sandbox 与 bwrap 在宿主上建的挂载点（命令结束后清理）。
     pub mounts: mounts::Mounts,
 }
@@ -267,29 +284,17 @@ impl Shells {
         &self,
         context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         self.start_with(context, request, None).await
     }
 
-    /// 起一条命令；`web` 是 ws 来源的 monitor 用的网络出口（工作线 F83）。
+    /// 起一条命令，返回它从游标 0 起的事件；`web` 是 ws 来源的 monitor 用的网络出口（工作线 F83）。
     pub(crate) async fn start_with(
         &self,
         context: OperationContext,
         request: StartCommand,
         web: Option<Arc<rust_cli_net::Egress>>,
-    ) -> Result<(), EnvError> {
-        let fingerprint = serde_json::to_string(&request).map_err(|error| EnvError::Io {
-            message: error.to_string(),
-        })?;
-        if let Some(known) = self.command(&context.operation) {
-            return if known.fingerprint == fingerprint {
-                Ok(())
-            } else {
-                Err(EnvError::OperationConflict {
-                    operation: context.operation,
-                })
-            };
-        }
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         if request.shell == ShellKind::PowerShell {
             return Err(EnvError::Unsupported {
                 what: "PowerShell commands in the local environment".to_owned(),
@@ -359,12 +364,12 @@ impl Shells {
             prelude,
         };
         if let Some(socket) = request.socket.clone() {
-            return self.start_socket(context, request, socket, plan, session, fingerprint, web);
+            return self.start_socket(context, request, socket, plan, session, web);
         }
         let (launched, mounted) =
             supervise::spawn(&self.ledger, &self.backend, &self.shared, &plan, &request).await?;
+        let (kind, description) = registered(&request);
         let running = Arc::new(Running {
-            fingerprint,
             session: session.clone(),
             command: request.command.clone(),
             output: plan.output.clone(),
@@ -377,6 +382,8 @@ impl Shells {
             task: request.task.clone(),
             movable: request.on_timeout.is_some() && request.background.is_none(),
             started: std::time::Instant::now(),
+            kind,
+            description,
         });
         {
             let mut state = self.shared.state();
@@ -390,6 +397,8 @@ impl Shells {
                     .insert(request.task.clone(), context.operation.clone());
             }
         }
+        // 调用方读这条流，不再按 ID 查：结束时登记就删了（工作线 F119）。
+        let events = watch::watch(running.clone(), 0);
         let job = supervise::Job {
             operation: context.operation,
             session,
@@ -405,14 +414,10 @@ impl Shells {
                 .spawner()
                 .spawn("shell", supervise::run(shared, launched, job)),
         );
-        Ok(())
+        Ok(events)
     }
 
     /// ws 来源的 monitor（工作线 F83，tools-more.md §19.7）：登记同命令，经 net 开 WebSocket（`socket::run`）。
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "启动时算好的几样东西原样交给监督任务"
-    )]
     fn start_socket(
         &self,
         context: OperationContext,
@@ -420,11 +425,10 @@ impl Shells {
         socket: rust_cli_kernel_api::env_shell::MonitorSocket,
         plan: supervise::Plan,
         session: SessionId,
-        fingerprint: String,
         web: Option<Arc<rust_cli_net::Egress>>,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
+        let (kind, description) = registered(&request);
         let running = Arc::new(Running {
-            fingerprint,
             session: session.clone(),
             command: request.command.clone(),
             output: plan.output.clone(),
@@ -437,6 +441,8 @@ impl Shells {
             task: request.task.clone(),
             movable: request.on_timeout.is_some() && request.background.is_none(),
             started: std::time::Instant::now(),
+            kind,
+            description,
         });
         {
             let mut state = self.shared.state();
@@ -450,6 +456,8 @@ impl Shells {
                     .insert(request.task.clone(), context.operation.clone());
             }
         }
+        // 调用方读这条流，不再按 ID 查：结束时登记就删了（工作线 F119）。
+        let events = watch::watch(running.clone(), 0);
         let job = socket::SocketJob {
             operation: context.operation,
             session,
@@ -465,7 +473,7 @@ impl Shells {
                 .spawner()
                 .spawn("monitor-socket", socket::run(shared, job)),
         );
-        Ok(())
+        Ok(events)
     }
 
     pub(crate) fn watch(
@@ -492,27 +500,13 @@ impl Shells {
     pub(crate) fn busy(&self) -> crate::Busy {
         let state = self.shared.state();
         crate::Busy {
-            commands: state
-                .commands
-                .values()
-                .filter(|running| running.finished.borrow().is_none())
-                .count() as u64,
+            commands: state.commands.len() as u64,
             notices: state
                 .sessions
                 .values()
                 .map(|shell| shell.notices.len() as u64)
                 .sum(),
         }
-    }
-
-    pub(crate) fn status(&self, operation: &OperationId) -> Option<Outcome> {
-        self.command(operation).map(|running| {
-            running
-                .finished
-                .borrow()
-                .as_ref()
-                .map_or(Outcome::Running, |finish| finish.outcome.clone())
-        })
     }
 
     pub(crate) fn shell_state(&self, workspace: &WorkspaceRef, session: &SessionId) -> ShellState {
@@ -526,7 +520,10 @@ impl Shells {
         // 在跑的与已结束未 ack 的合在一起（结束的瞬间两边可能都有，按任务去重）。
         let background: BTreeSet<ShellTaskId> = shell
             .map(|shell| {
-                let finished = shell.notices.iter().map(|notice| notice.task.clone());
+                let finished = shell
+                    .notices
+                    .iter()
+                    .map(|pending| pending.notice.task.clone());
                 shell.background.keys().cloned().chain(finished).collect()
             })
             .unwrap_or_default();
@@ -549,7 +546,7 @@ impl Shells {
         let mut state = self.shared.state();
         let shell = state.sessions.entry(session.clone()).or_default();
         shell.acked = shell.acked.max(seq);
-        shell.notices.retain(|notice| notice.seq > seq);
+        shell.notices.retain(|pending| pending.notice.seq > seq);
     }
 
     /// 会话换了工作目录（EnterWorktree / ExitWorktree，docs/specs/rust-cli/tools-more.md §11.4）：
@@ -593,3 +590,7 @@ mod embedded_tests;
 #[cfg(test)]
 #[path = "shell_moved_tests.rs"]
 mod moved_tests;
+
+#[cfg(test)]
+#[path = "shell_registry_tests.rs"]
+mod registry_tests;

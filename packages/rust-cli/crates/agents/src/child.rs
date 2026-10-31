@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use rust_cli_kernel_api::checkpoint::PendingCheckpoints;
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::ids::{AgentId, MessageId, OperationId, OwnerEpoch, SessionId};
+use rust_cli_kernel_api::ids::{AgentId, MessageId, OwnerEpoch, SessionId};
 use rust_cli_kernel_api::message::{AssistantMessage, ContentBlock, Message};
 use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, PermissionAnswer,
@@ -246,9 +246,10 @@ impl Interactions for ChildSink {
         &self,
         _session: &SessionId,
         monitor: rust_cli_kernel_api::monitor::MonitorArmed,
+        events: rust_cli_kernel_api::machine::CommandEvents,
     ) -> Result<(), OrchestrationError> {
         match &self.core {
-            Some(core) => crate::monitors::arm(core, &self.agent, monitor),
+            Some(core) => crate::monitors::arm(core, &self.agent, monitor, events),
             None => Err(OrchestrationError::Unsupported {
                 what: "monitors".to_owned(),
             }),
@@ -370,18 +371,6 @@ impl RunSink for ChildSink {
             Some(message) => self.commit_with(message, vec![fact], speed).await,
             None => self.commit(vec![fact]).await,
         }
-    }
-
-    async fn commit_intent(
-        &self,
-        operation: OperationId,
-        fingerprint: String,
-    ) -> Result<(), StoreError> {
-        self.commit(vec![Fact::OperationIntent {
-            operation,
-            fingerprint,
-        }])
-        .await
     }
 
     async fn emit(&self, event: QueryEvent) -> bool {

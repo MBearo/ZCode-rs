@@ -28,6 +28,8 @@ use crate::inbox::Inbox;
 
 /// Unix 域套接字路径的上限（字节）；超过时退回私有临时目录。
 const SOCKET_PATH_LIMIT: usize = 103;
+/// 名字后缀的随机十六进制位数（1 字节）。
+const NAME_SUFFIX_HEX_DIGITS: usize = 2;
 
 /// 入口给出的位置与能力。
 pub struct PeerConfig {
@@ -121,7 +123,7 @@ impl LocalPeers {
             .as_str()
             .chars()
             .filter(char::is_ascii_hexdigit)
-            .take(2)
+            .take(NAME_SUFFIX_HEX_DIGITS)
             .collect();
         let name = format!("{}-{}", name_prefix(&directory), random.to_lowercase());
         let now = config.clock.now_ms();

@@ -243,6 +243,8 @@ pub(crate) fn background_info(info: BackgroundInfo) -> ws::BackgroundInfo {
     ws::BackgroundInfo {
         command: info.command,
         status: background_status(info.status),
+        kind: background_kind(info.kind),
+        description: info.description,
     }
 }
 

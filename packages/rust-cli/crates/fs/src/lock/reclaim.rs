@@ -19,7 +19,7 @@ fn mtime_ms(metadata: &std::fs::Metadata) -> Option<f64> {
         .ok()?
         .duration_since(UNIX_EPOCH)
         .ok()
-        .map(|duration| duration.as_secs_f64() * 1000.0)
+        .map(|duration| duration.as_secs_f64() * rust_cli_base::units::MS_PER_SECOND_F64)
 }
 
 /// 有限、非负、不明显在未来的时间戳才有效。非法时由调用方回退到 mtime 或首次观察时刻。
@@ -113,7 +113,8 @@ async fn owner_reclaimable(
     };
     let owner_exited = metadata.pid.is_some_and(|pid| !alive::is_alive(pid));
     let ownerless_stale = metadata.pid.is_none()
-        && observed_at - created_at >= ownerless_grace.as_secs_f64() * 1000.0;
+        && observed_at - created_at
+            >= ownerless_grace.as_secs_f64() * rust_cli_base::units::MS_PER_SECOND_F64;
     Ok(owner_exited || ownerless_stale)
 }
 
@@ -186,7 +187,9 @@ async fn try_remove(
     let observed_at = now_ms();
     let directory_timestamp = parse_timestamp(mtime_ms(&stat), observed_at)
         .unwrap_or_else(|| observer.observe(lock_dir, &stat, observed_at));
-    if observed_at - directory_timestamp < ownerless_grace.as_secs_f64() * 1000.0 {
+    if observed_at - directory_timestamp
+        < ownerless_grace.as_secs_f64() * rust_cli_base::units::MS_PER_SECOND_F64
+    {
         return Ok(false);
     }
     for owner in &owners {

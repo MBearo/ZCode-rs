@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 
 use super::i18n::Lang;
 use super::i18n_update as text;
+use super::layout;
 use super::palette::Palette;
 use super::text::wrap;
 use crate::update::UpdateInfo;
@@ -41,11 +42,11 @@ pub fn lines(info: &UpdateInfo, palette: &Palette, lang: Lang, width: usize) -> 
         .map(Line::width)
         .max()
         .unwrap_or(0)
-        .min(width.saturating_sub(4))
+        .min(width.saturating_sub(layout::BOX_BORDERS + layout::BOX_PADDING))
         .max(1);
     let border = palette.secondary();
     let mut lines = vec![Line::from(Span::styled(
-        format!("╭{}╮", "─".repeat(inner + 2)),
+        format!("╭{}╮", "─".repeat(inner + layout::BOX_PADDING)),
         border,
     ))];
     for line in &content {
@@ -63,7 +64,7 @@ pub fn lines(info: &UpdateInfo, palette: &Palette, lang: Lang, width: usize) -> 
         }
     }
     lines.push(Line::from(Span::styled(
-        format!("╰{}╯", "─".repeat(inner + 2)),
+        format!("╰{}╯", "─".repeat(inner + layout::BOX_PADDING)),
         border,
     )));
     lines

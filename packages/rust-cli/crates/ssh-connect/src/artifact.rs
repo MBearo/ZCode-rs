@@ -7,6 +7,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use rust_cli_base::units;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
@@ -14,6 +15,48 @@ use tokio::io::AsyncReadExt;
 const HEAD: usize = 1024;
 /// universal 的 Mach-O 最多认这么多片（也把别的格式的 `0xcafebabe` 挡住）。
 const MAX_SLICES: u32 = 16;
+/// 算 sha256 时每次读的字节数。
+const HASH_BUFFER_BYTES: usize = 256 * units::KIB;
+
+// ELF 头（System V ABI 的 `Elf64_Ehdr`）。
+/// 认平台要读到的字节数（到 `e_machine` 为止）。
+const ELF_HEAD_BYTES: usize = 20;
+/// `e_ident[EI_CLASS]` 的偏移与 64 位的值 `ELFCLASS64`。
+const ELF_CLASS_AT: usize = 4;
+const ELF_CLASS_64: u8 = 2;
+/// `e_ident[EI_DATA]` 的偏移与小端的值 `ELFDATA2LSB`。
+const ELF_DATA_AT: usize = 5;
+const ELF_DATA_LITTLE: u8 = 1;
+/// `e_machine`（2 字节，按 `EI_DATA` 是小端）的偏移。
+const ELF_MACHINE_AT: usize = 18;
+/// `e_machine` 的 `EM_X86_64`。
+const EM_X86_64: u16 = 62;
+/// `e_machine` 的 `EM_AARCH64`。
+const EM_AARCH64: u16 = 183;
+
+// Mach-O 头（`mach-o/loader.h`、`mach-o/fat.h`）。
+/// `cputype` 的 `CPU_TYPE_X86_64`。
+const CPU_TYPE_X86_64: u32 = 0x0100_0007;
+/// `cputype` 的 `CPU_TYPE_ARM64`。
+const CPU_TYPE_ARM64: u32 = 0x0100_000c;
+/// 64 位瘦包的魔数 `MH_MAGIC_64`（按小端读）。
+const MH_MAGIC_64: u32 = 0xfeed_facf;
+/// universal 包的魔数 `FAT_MAGIC`（大端），片表每片是 [`FAT_ARCH_BYTES`] 字节。
+const FAT_MAGIC: u32 = 0xcafe_babe;
+/// universal 包的魔数 `FAT_MAGIC_64`（大端），片表每片是 [`FAT_ARCH_64_BYTES`] 字节。
+const FAT_MAGIC_64: u32 = 0xcafe_babf;
+/// `fat_arch` 的字节数。
+const FAT_ARCH_BYTES: usize = 20;
+/// `fat_arch_64` 的字节数。
+const FAT_ARCH_64_BYTES: usize = 32;
+/// 头里一个字的字节数（魔数、`cputype`、片数都是 32 位）。
+const MACH_WORD_BYTES: usize = size_of::<u32>();
+/// 瘦包的 `cputype` 的偏移（紧跟魔数）。
+const MH_CPUTYPE_AT: usize = MACH_WORD_BYTES;
+/// universal 包的片数 `nfat_arch` 的偏移（紧跟魔数）。
+const FAT_NARCH_AT: usize = MACH_WORD_BYTES;
+/// universal 包的片表的起点（`fat_header` 的字节数：魔数与片数）。
+const FAT_ARCHS_AT: usize = 2 * MACH_WORD_BYTES;
 
 /// 远端支持的目标平台（§28.2）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,11 +140,14 @@ impl Platform {
 
     /// ELF 头（前 20 字节）：64 位、小端、`e_machine` 是哪种架构。
     fn from_elf(head: &[u8]) -> Option<Self> {
-        let head = head.get(..20)?;
-        if &head[..4] != b"\x7fELF" || head[4] != 2 || head[5] != 1 {
+        let head = head.get(..ELF_HEAD_BYTES)?;
+        if &head[..4] != b"\x7fELF"
+            || head[ELF_CLASS_AT] != ELF_CLASS_64
+            || head[ELF_DATA_AT] != ELF_DATA_LITTLE
+        {
             return None;
         }
-        let machine = u16::from_le_bytes([head[18], head[19]]);
+        let machine = u16::from_le_bytes([head[ELF_MACHINE_AT], head[ELF_MACHINE_AT + 1]]);
         Self::LINUX
             .into_iter()
             .find(|platform| platform.elf_machine() == Some(machine))
@@ -110,8 +156,8 @@ impl Platform {
     /// ELF 头的 `e_machine`（macOS 的平台没有）。
     fn elf_machine(self) -> Option<u16> {
         match self {
-            Self::LinuxX86_64 => Some(62),
-            Self::LinuxAarch64 => Some(183),
+            Self::LinuxX86_64 => Some(EM_X86_64),
+            Self::LinuxAarch64 => Some(EM_AARCH64),
             Self::MacosAarch64 | Self::MacosX86_64 => None,
         }
     }
@@ -119,8 +165,8 @@ impl Platform {
     /// Mach-O 的 `cputype`（Linux 的平台没有）。
     fn cpu_type(self) -> Option<u32> {
         match self {
-            Self::MacosX86_64 => Some(0x0100_0007),
-            Self::MacosAarch64 => Some(0x0100_000c),
+            Self::MacosX86_64 => Some(CPU_TYPE_X86_64),
+            Self::MacosAarch64 => Some(CPU_TYPE_ARM64),
             Self::LinuxX86_64 | Self::LinuxAarch64 => None,
         }
     }
@@ -131,7 +177,7 @@ impl Platform {
 /// 的头里时给空（别的格式也用 `0xcafebabe`，片数的上限把它们挡住）。
 fn mach_cpus(head: &[u8]) -> Vec<u32> {
     let word = |at: usize, big: bool| {
-        let bytes: [u8; 4] = head.get(at..at + 4)?.try_into().ok()?;
+        let bytes: [u8; MACH_WORD_BYTES] = head.get(at..at + MACH_WORD_BYTES)?.try_into().ok()?;
         Some(if big {
             u32::from_be_bytes(bytes)
         } else {
@@ -141,23 +187,24 @@ fn mach_cpus(head: &[u8]) -> Vec<u32> {
     let Some(magic) = word(0, false) else {
         return Vec::new();
     };
-    if magic == 0xfeed_facf {
-        return word(4, false).into_iter().collect();
+    if magic == MH_MAGIC_64 {
+        return word(MH_CPUTYPE_AT, false).into_iter().collect();
     }
     let entry = match word(0, true) {
-        Some(0xcafe_babe) => 20,
-        Some(0xcafe_babf) => 32,
+        Some(FAT_MAGIC) => FAT_ARCH_BYTES,
+        Some(FAT_MAGIC_64) => FAT_ARCH_64_BYTES,
         _ => return Vec::new(),
     };
-    let Some(slices) = word(4, true).filter(|slices| (1..=MAX_SLICES).contains(slices)) else {
+    let Some(slices) = word(FAT_NARCH_AT, true).filter(|slices| (1..=MAX_SLICES).contains(slices))
+    else {
         return Vec::new();
     };
     // 片表要完整落在读到的头里，否则不猜（别的格式的魔数多半在这里被挡下）。
-    if head.len() < 8 + entry * slices as usize {
+    if head.len() < FAT_ARCHS_AT + entry * slices as usize {
         return Vec::new();
     }
     (0..slices)
-        .map(|index| word(8 + entry * index as usize, true))
+        .map(|index| word(FAT_ARCHS_AT + entry * index as usize, true))
         .collect::<Option<Vec<u32>>>()
         .unwrap_or_default()
 }
@@ -195,7 +242,7 @@ pub(crate) async fn locate(candidates: &[PathBuf], platform: Platform) -> Option
 pub(crate) async fn sha256(path: &Path) -> io::Result<String> {
     let mut file = rust_cli_fs::open_read(path).await?;
     let mut hash = Sha256::new();
-    let mut buffer = vec![0u8; 256 * 1024];
+    let mut buffer = vec![0u8; HASH_BUFFER_BYTES];
     loop {
         let read = file.read(&mut buffer).await?;
         if read == 0 {

@@ -7,6 +7,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::{Point, contains};
 use crate::ui::app::App;
+use crate::ui::layout;
 use crate::ui::selection::{Row, join, range};
 use crate::ui::transcript::Layout;
 
@@ -110,13 +111,16 @@ pub fn draw_copied(frame: &mut ratatui::Frame<'_>, app: &App, gap: Rect) {
     if at.elapsed() >= notice.duration || gap.height == 0 {
         return;
     }
-    let width = usize::from(gap.width).saturating_sub(2);
-    if width < 2 {
+    /// 提示至少要有这么宽才画。
+    const MIN_WIDTH: usize = 2;
+    let margin = layout::RIGHT_MARGIN;
+    let width = usize::from(gap.width).saturating_sub(margin);
+    if width < MIN_WIDTH {
         return;
     }
     let label = crate::ui::text::truncate(&notice.text, width);
     let w = label.width() as u16;
-    let target = Rect::new(gap.right().saturating_sub(w + 2), gap.y, w, 1);
+    let target = Rect::new(gap.right().saturating_sub(w + margin as u16), gap.y, w, 1);
     frame.render_widget(
         ratatui::widgets::Paragraph::new(Span::styled(
             label,

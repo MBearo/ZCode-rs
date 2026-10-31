@@ -1,4 +1,5 @@
-//! `Checkpoints`：prepare 全部通过才登记；apply 写回 / 删除、按 token 重放；冲突与 prepare 之后的改动补偿回去。
+//! `Checkpoints`：prepare 全部通过才登记；apply 写回 / 删除，token 用过一次就作废（工作线 F119：不按 token 重放）；
+//! 冲突与 prepare 之后的改动补偿回去。
 
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_kernel_api::env_rewind::{
@@ -37,10 +38,6 @@ async fn a_prepared_rewind_restores_and_deletes_files(kind: Kind) {
         .unwrap();
     assert_eq!(plan, RewindPlan::Ready);
     let token = OperationId::new("op_1");
-    assert_eq!(
-        checkpoints.rewind_status(&token).await.unwrap(),
-        RewindStatus::Prepared
-    );
     let status = checkpoints.rewind_apply(&token).await.unwrap();
     let RewindStatus::Applied { files } = &status else {
         panic!("{status:?}")
@@ -49,12 +46,12 @@ async fn a_prepared_rewind_restores_and_deletes_files(kind: Kind) {
     assert_eq!(files[1].action, RestoreAction::Delete);
     assert_eq!(std::fs::read_to_string(&edited).unwrap(), "before");
     assert!(!created.exists());
-    assert_eq!(checkpoints.rewind_apply(&token).await.unwrap(), status);
-    checkpoints.rewind_finish(&token).await.unwrap();
+    // token 用过一次就作废：再 apply 不再执行，也不返回第一次的结果。
     assert_eq!(
-        checkpoints.rewind_status(&token).await.unwrap(),
+        checkpoints.rewind_apply(&token).await.unwrap(),
         RewindStatus::Unknown
     );
+    checkpoints.rewind_finish(&token).await.unwrap();
 }
 
 async fn conflicts_are_reported_and_a_late_change_is_compensated(kind: Kind) {
@@ -75,9 +72,10 @@ async fn conflicts_are_reported_and_a_late_change_is_compensated(kind: Kind) {
     assert!(
         matches!(plan, RewindPlan::Conflicts { files } if files[0].current == Some(content_hash(b"one")))
     );
+    // 有冲突时不登记 token。
     assert_eq!(
         checkpoints
-            .rewind_status(&OperationId::new("op_1"))
+            .rewind_apply(&OperationId::new("op_1"))
             .await
             .unwrap(),
         RewindStatus::Unknown

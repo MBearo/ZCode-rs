@@ -5,6 +5,7 @@
 //! （不缩放）。PDF 与 `pages` 见 [`crate::read_pdf`]（tools-files.md §1.5）。
 
 use async_trait::async_trait;
+use rust_cli_base::proto::mime;
 use rust_cli_kernel_api::env::{EnvError, EnvPath, ReadFile};
 use rust_cli_kernel_api::env_files::{ReadText, TextRead};
 use rust_cli_kernel_api::env_path;
@@ -104,7 +105,7 @@ async fn read_artifact(
     }
     let content = lines.join("\n");
     // 估算按读落盘文件时的扩展名：多段结果是 `.json`（2 字符 / token），其余是 `.txt`。
-    let extension = if artifact.media_type == "application/json" {
+    let extension = if artifact.media_type == mime::JSON {
         ".json"
     } else {
         ".txt"
@@ -195,7 +196,7 @@ impl ReadTool {
             }
             Err(error) => return Err(env_failure(error)),
         };
-        let media_type = image_type(&file.bytes).unwrap_or("image/png");
+        let media_type = image_type(&file.bytes).unwrap_or(mime::PNG);
         if file.bytes.len() > MAX_IMAGE_BYTES {
             return Err(failed(texts::too_large(
                 &format_bytes(file.bytes.len() as u64),

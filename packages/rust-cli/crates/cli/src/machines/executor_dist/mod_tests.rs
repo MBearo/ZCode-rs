@@ -10,6 +10,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use rust_cli_base::hosts::NPM_REGISTRY;
 use rust_cli_net::{Egress, NetworkPolicy};
 use rust_cli_paths::ExecutorPaths;
 use rust_cli_ssh_connect::{ArtifactSource, DownloadError, Platform};
@@ -260,11 +261,11 @@ fn release_builds_always_use_the_official_registry() {
     let fake = Some("http://127.0.0.1:9".to_owned());
     assert_eq!(
         registry(TestDeclarations::Ignored, fake.clone()).as_deref(),
-        Some("https://registry.npmjs.org")
+        Some(NPM_REGISTRY)
     );
     assert_eq!(
         registry(TestDeclarations::Ignored, None).as_deref(),
-        Some("https://registry.npmjs.org")
+        Some(NPM_REGISTRY)
     );
     assert_eq!(registry(TestDeclarations::Accepted, fake.clone()), fake);
     assert_eq!(registry(TestDeclarations::Accepted, None), None);

@@ -8,6 +8,7 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rust_cli_base::units;
 use rust_cli_kernel_api::clock::{Clock, civil_date};
 
 /// 时区规则：入口读系统时区后实现，内核只经 [`Clock`] 用它。
@@ -67,7 +68,7 @@ impl SystemClock {
 /// `utc_ms` 加上偏移之后的日期 `YYYY-MM-DD`。
 pub(crate) fn local_date(utc_ms: u64, offset_minutes: i32) -> String {
     let utc = i64::try_from(utc_ms).unwrap_or(i64::MAX);
-    let local = utc.saturating_add(i64::from(offset_minutes) * 60_000);
+    let local = utc.saturating_add(i64::from(offset_minutes) * units::MS_PER_MINUTE as i64);
     civil_date(u64::try_from(local).unwrap_or(0))
 }
 

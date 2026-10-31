@@ -4,7 +4,7 @@
 //! 这里用 NodeStore 按 query 主循环真实的提交顺序与批次提交同一组事实，各表的行逐字节相同。
 //! 两边的场景与时间线一一对应，改一边时同步改另一边。
 use rust_cli_base::js::json::stringify;
-use rust_cli_kernel_api::ids::{MessageId, OperationId, SessionId, ToolUseId};
+use rust_cli_kernel_api::ids::{MessageId, SessionId, ToolUseId};
 use rust_cli_kernel_api::message::{
     AssistantMessage, ContentBlock, ImageSource, Message, StopReason, ToolResultContent, Usage,
     UserMessage, UserOrigin,
@@ -112,14 +112,6 @@ fn result(
     vec![Fact::MessageAppended { message }, Fact::ToolCalled { call }]
 }
 
-/// query 执行器在工具开工前提交的意图（fingerprint 是 `{"tool", "input"}` 的 JSON）。
-fn intent(operation: &str, name: &str, input: &Value) -> Vec<Fact> {
-    vec![Fact::OperationIntent {
-        operation: OperationId::new(operation),
-        fingerprint: stringify(&json!({"tool": name, "input": input})),
-    }]
-}
-
 /// 与夹具脚本同一条时间线：两个并发工具（A 先声明、最后结束，B 后声明、先结束）在流式响应中开工，
 /// 结果各自到达时提交；第二步的工具开工即失败；最后的回答之后回合结束。返回提交的消息（提交顺序）。
 /// 本工程分配 uuid 的顺序（夹具脚本按它排 Node 的 uuid）：1 轮次、2 输入的 text part；a1 的 step-start 3、
@@ -162,8 +154,6 @@ async fn replay(t: &TestStore) -> Vec<Message> {
 
     let read_logo = json!({"file_path": "/w/repo/logo.png"});
     let cat = json!({"command": "cat a.txt", "description": "Show a.txt"});
-    commit(1004, None, intent("op_a", "Read", &read_logo)).await;
-    commit(1005, None, intent("op_b", "Bash", &cat)).await;
     let usage = |input, output, write, read| Usage {
         input_tokens: input,
         output_tokens: output,
@@ -201,7 +191,6 @@ async fn replay(t: &TestStore) -> Vec<Message> {
     commit(1030, None, logo).await;
 
     let missing = json!({"file_path": "/w/repo/missing.txt"});
-    commit(1040, None, intent("op_c", "Read", &missing)).await;
     let thinking = ContentBlock::Thinking {
         thinking: "Check the other file".into(),
         signature: Some("sig-2".into()),
@@ -379,9 +368,4 @@ async fn the_tool_turn_reads_back_as_committed() {
     let committed = replay(&t).await;
     let loaded = t.store.load(&SessionId::new(SESSION)).await.unwrap();
     assert_eq!(loaded.messages, committed);
-    assert!(
-        loaded.open_operations.is_empty(),
-        "{:?}",
-        loaded.open_operations
-    );
 }

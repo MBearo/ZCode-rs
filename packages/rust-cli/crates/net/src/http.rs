@@ -5,8 +5,12 @@ use std::time::Duration;
 use bytes::Bytes;
 use reqwest::header::{HeaderMap, HeaderName};
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::units;
 
 use crate::NetError;
+
+/// 错误响应体最多读这么多字节（[`HttpResponse::text`] 的上限；只用于错误的分类与提示）。模型与 MCP HTTP 共用。
+pub const ERROR_BODY_LIMIT: usize = 64 * units::KIB;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
@@ -167,7 +171,7 @@ impl HttpResponse {
     }
 
     pub fn is_success(&self) -> bool {
-        (200..300).contains(&self.status)
+        rust_cli_base::proto::http::is_success(self.status)
     }
 
     pub fn headers(&self) -> &ResponseHeaders {

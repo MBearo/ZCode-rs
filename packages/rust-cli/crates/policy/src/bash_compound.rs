@@ -8,6 +8,7 @@
 use std::ops::Range;
 
 use crate::bash_subst::{self, AS_FILE, Expanded, NESTED};
+use crate::consts::ESCAPE_LEN;
 use crate::parse::{Analysis, Complex, Invocation, Loop, analyze_structured};
 
 /// 后台 `&`：每段都放行时仍询问一次（安全检查，bypass 放行、allow 规则盖不过）。
@@ -238,7 +239,7 @@ fn referenced(source: &[u8], name: &[u8], from: usize) -> Option<usize> {
     let mut index = from;
     while index < source.len() {
         if source[index] == b'\\' {
-            index += 2;
+            index += ESCAPE_LEN;
             continue;
         }
         if source[index] == b'$' {

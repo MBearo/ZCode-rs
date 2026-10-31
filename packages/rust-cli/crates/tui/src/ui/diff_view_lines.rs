@@ -8,6 +8,7 @@ use super::cells::Ctx;
 use super::cells::patch::{diff_lines, edits_rows, unified_rows};
 use super::diff_view::{Current, DiffFile, DiffView};
 use super::i18n::Lang;
+use super::layout;
 use super::text::truncate_line;
 
 fn dim() -> Style {
@@ -158,14 +159,16 @@ pub fn lines(
     lines.push(Line::default());
     let footer = |text: &str| Line::from(Span::styled(format!("  {text}"), dim()));
     // 按键提示（`{键}` 模板，按键提示组件画，tui.md §7.4）。
-    let keys = |text: &str| super::key_hint::line(2, text, &app.palette);
+    let keys = |text: &str| super::key_hint::line(layout::INDENT, text, &app.palette);
     if let Some(empty) = empty {
         lines.push(footer(&empty));
         lines.push(Line::default());
         lines.push(keys(if zh { "{esc} 关闭" } else { "{Esc} to close" }));
         return lines;
     }
-    let room = height.saturating_sub(lines.len() + 2).max(3);
+    let room = height
+        .saturating_sub(lines.len() + layout::FOOTER_ROWS)
+        .max(layout::MIN_LIST_ROWS);
     if let Some(scroll) = view.detail {
         let Some(file) = files.get(view.selected) else {
             return lines;

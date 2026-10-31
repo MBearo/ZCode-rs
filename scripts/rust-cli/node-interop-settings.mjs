@@ -6,6 +6,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { importNode } from "./node-root.mjs";
+import { GLM_5_3_ACCOUNT } from "./fixture/model.mjs";
 
 async function nodeConfig(nodeRoot) {
   return importNode(nodeRoot, "adapters/src/config/file-config.adapter.ts");
@@ -80,24 +81,24 @@ export async function checkDefaultModel({ nodeRoot, uiPrefs, expectEqual, home }
   const personal = new NodePersonalProviderConfigRepository({ filePath: file, pollingIntervalMs: false });
   const selections = new NodeModelSelectionConfigRepository({ personalRepository: personal });
   try {
-    await selections.saveConfiguredDefault({ providerId: "zai", modelId: "GLM-5.3" });
+    await selections.saveConfiguredDefault({ providerId: "zai", modelId: GLM_5_3_ACCOUNT });
     const start = await readFile(file, "utf8");
-    const chosen = { providerId: "zai", modelId: "GLM-5.3", options: { reasoningLevel: "high" } };
+    const chosen = { providerId: "zai", modelId: GLM_5_3_ACCOUNT, options: { reasoningLevel: "high" } };
     await selections.saveConfiguredDefault(chosen);
     const nodeText = await readFile(file, "utf8");
     expectEqual("rust-cli reads the default Node saved", uiPrefs("model-read", home), {
       provider: "zai",
-      model: "GLM-5.3",
+      model: GLM_5_3_ACCOUNT,
       reasoning: "high",
     });
     await writeFile(file, start);
-    uiPrefs("model-write", home, "zai", "GLM-5.3", "high");
+    uiPrefs("model-write", home, "zai", GLM_5_3_ACCOUNT, "high");
     expectEqual("the same default gives the same file text", await readFile(file, "utf8"), nodeText);
-    uiPrefs("model-write", home, "zai", "GLM-5.3", "low");
+    uiPrefs("model-write", home, "zai", GLM_5_3_ACCOUNT, "low");
     const fresh = new NodePersonalProviderConfigRepository({ filePath: file, pollingIntervalMs: false });
     expectEqual("Node reads the default rust-cli saved", (await fresh.read()).defaultModelSelection, {
       providerId: "zai",
-      modelId: "GLM-5.3",
+      modelId: GLM_5_3_ACCOUNT,
       options: { reasoningLevel: "low" },
     });
     fresh.dispose();

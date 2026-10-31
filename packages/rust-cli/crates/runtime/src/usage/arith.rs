@@ -8,6 +8,9 @@ use rust_cli_kernel_api::context_usage::{
 
 use super::counts::TOOL_OVERHEAD;
 
+/// 百分比的满值。
+const PERCENT: u64 = rust_cli_base::units::PERCENT;
+
 /// 一个 MCP 工具：名字、定义的估算（分摊用）、是否已加载（延迟加载开启时没加载的算延迟类别）。
 pub(crate) struct McpTool {
     pub(crate) name: String,
@@ -182,7 +185,7 @@ pub(crate) fn usage(measured: Measured) -> ContextUsage {
         model: measured.model,
         total_tokens: total,
         raw_max_tokens: measured.window,
-        percentage: round_ratio(total, measured.window, 100),
+        percentage: round_ratio(total, measured.window, PERCENT),
         window_source: measured.source,
         auto_compact: measured.auto,
         categories,

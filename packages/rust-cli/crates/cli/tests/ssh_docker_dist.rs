@@ -29,6 +29,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
+use rust_cli_base::models::GLM_5;
 use serde_json::Value;
 use sha2::{Digest, Sha256, Sha512};
 use sshd::{BIN, HOST, Image, Sshd, VERSION, artifact_or_skip, run};
@@ -202,7 +203,7 @@ fn print_run(sshd: &Sshd, home: &Path, work: &Path, registry: &str) -> (Output, 
         .env("ZCODE_DATA_BASE_DIR", home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .env("ZCODE_RUNTIME_ENV", "test")
         .env("_ZCODE_ASSUME_SSH_MACHINES", "1")
         .env("_ZCODE_ASSUME_SSH_CONFIG", sshd.config())
@@ -217,7 +218,13 @@ fn last_result(requests: &[Value]) -> String {
     requests
         .get(1)
         .and_then(|request| request["messages"].as_array())
-        .and_then(|messages| messages.last())
+        // 最后一条 user 消息（有卡片形状的模型把提醒放在其后的 system 消息里）。
+        .and_then(|messages| {
+            messages
+                .iter()
+                .rev()
+                .find(|message| message["role"] == "user")
+        })
         .map(Value::to_string)
         .unwrap_or_default()
 }

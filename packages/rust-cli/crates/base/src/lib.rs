@@ -7,6 +7,8 @@
 //! - [`names`]：产品目录与文件的名字（`.zcode`、`AGENTS.md` 等），同一个名字只定义一处（F55）。
 //! - [`random`]：随机数的入口（`RandomState` 的种子，F58）。
 //! - [`glob`]、[`path`]、[`reminder`]、[`log_text`]：几个 crate 共用的小函数，只定义一处（F58，README §4.1）。
+//! - [`units`]、[`civil`]、[`proto`]、[`hash`]、[`chars`]：有含义的数字与协议固定值，只定义一处（F122，
+//!   docs/specs/rust-cli/constants.md）。
 //!
 //! 异步任务（docs/specs/rust-u0-foundation.md §3.3）：
 //!
@@ -26,19 +28,28 @@ use std::panic::AssertUnwindSafe;
 
 use futures_util::FutureExt;
 
+pub mod chars;
+pub mod civil;
 pub mod embed;
 pub mod glob;
+pub mod hash;
+pub mod hosts;
 pub mod js;
 pub mod log_text;
+pub mod models;
 pub mod names;
 mod owned;
 pub mod path;
+pub mod proto;
 pub mod random;
 pub mod redact;
 pub mod reminder;
 pub mod rule_url;
 mod scope;
 pub mod secret;
+pub mod text;
+pub mod tokens;
+pub mod units;
 
 pub use owned::{OwnedTask, blocking, owned};
 pub use scope::{Spawner, Task, TaskError, TaskPanic, TaskScope};

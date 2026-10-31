@@ -6,6 +6,7 @@
 
 use rust_cli_base::names::{DOT_DIR, PROJECT_CONFIG_FILE};
 use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use rust_cli_kernel_api::env_files::{PathStyle, StatFile};
 use rust_cli_kernel_api::env_git::has_git_marker;
 use rust_cli_kernel_api::machine::Files;
@@ -87,7 +88,7 @@ impl Reader<'_> {
         let mut levels = vec![root.clone()];
         let mut current = root.clone();
         loop {
-            if has_git_marker(self.files, self.workspace, &join(&current, ".git")).await {
+            if has_git_marker(self.files, self.workspace, &join(&current, GIT_DIR)).await {
                 levels.reverse();
                 return levels;
             }

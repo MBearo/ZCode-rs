@@ -4,6 +4,7 @@
 //! 存储映射成 Node 的 `model_usage` / `tool_usage` / `turn_usage`。`/usage` 的 API 时长与活动统计都从存储查，
 //! 不在内存里另记累计值。
 
+use rust_cli_base::units;
 use serde::{Deserialize, Serialize};
 
 use crate::context_usage::format_tokens;
@@ -186,9 +187,12 @@ impl OutputSpeed {
 pub fn output_tps(output_tokens: Option<u64>, generation_ms: Option<u64>) -> Option<f64> {
     let output = output_tokens?;
     let generation = generation_ms.filter(|ms| *ms > 0)?;
-    let tps = output as f64 * 1000.0 / generation as f64;
+    let tps = output as f64 * units::MS_PER_SECOND_F64 / generation as f64;
     tps.is_finite().then_some(tps)
 }
+
+/// “最近 30 天”的天数。
+const MONTH_RANGE_DAYS: u64 = 30;
 
 /// 活动统计的日期范围（`all` / `7d` / `30d`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -204,8 +208,8 @@ impl ActivityRange {
     pub fn days(self) -> Option<u64> {
         match self {
             Self::All => None,
-            Self::Week => Some(7),
-            Self::Month => Some(30),
+            Self::Week => Some(units::DAYS_PER_WEEK),
+            Self::Month => Some(MONTH_RANGE_DAYS),
         }
     }
 
@@ -277,28 +281,16 @@ pub struct ActivityStats {
 
 /// 时长的写法：不到一分钟是秒数加 `s`；否则 `Xm Ys`、`Xh Ym Zs`、`Xd Yh Zm`。
 pub fn format_duration(ms: u64) -> String {
-    if ms < 60_000 {
-        return format!("{}s", ms / 1000);
+    if ms < units::MS_PER_MINUTE {
+        return format!("{}s", ms / units::MS_PER_SECOND);
     }
-    let (mut days, mut hours, mut minutes) = (
-        ms / 86_400_000,
-        (ms % 86_400_000) / 3_600_000,
-        (ms % 3_600_000) / 60_000,
-    );
-    // 按 Math.round 取秒；毫秒余数小于 60000，四舍五入后最多 60。
-    let mut seconds = (ms % 60_000 + 500) / 1000;
-    if seconds == 60 {
-        seconds = 0;
-        minutes += 1;
-    }
-    if minutes == 60 {
-        minutes = 0;
-        hours += 1;
-    }
-    if hours == 24 {
-        hours = 0;
-        days += 1;
-    }
+    // 拆分与进位只定义在 base 的 `units::split_ms`（秒按 Math.round 取）。
+    let units::DurationParts {
+        days,
+        hours,
+        minutes,
+        seconds,
+    } = units::split_ms(ms);
     if days > 0 {
         format!("{days}d {hours}h {minutes}m")
     } else if hours > 0 {
@@ -312,7 +304,7 @@ pub fn format_duration(ms: u64) -> String {
 /// 期限，docs/specs/rust-cli/shell-permissions.md §1.2.1）。不到一分钟时与 [`format_duration`] 相同。
 pub fn format_duration_trimmed(ms: u64) -> String {
     let full = format_duration(ms);
-    if ms < 60_000 {
+    if ms < units::MS_PER_MINUTE {
         return full;
     }
     let mut units: Vec<&str> = full.split(' ').collect();
@@ -330,7 +322,7 @@ pub fn format_duration_trimmed(ms: u64) -> String {
 /// 数字的写法：小于 1000 原样；否则 compact 写法、固定一位小数（`1.0k`）。
 pub fn format_number(value: u64) -> String {
     let text = format_tokens(value);
-    if value < 1000 || text.contains('.') {
+    if value < crate::context_usage::COMPACT_STEP || text.contains('.') {
         return text;
     }
     let split = text

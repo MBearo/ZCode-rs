@@ -17,8 +17,12 @@ use rust_cli_exec_wire::frame::{Decoded, Frame, Kind, decode};
 /// 等回复的上限：常驻执行器收到就回。超过时当作它卡住了（这是存活探测，不用来同步状态）。
 const ANSWER: Duration = Duration::from_secs(10);
 
-/// unix socket 路径的上限（`sun_path`，含结尾的 0）：macOS 104、Linux 108。
-const SOCKET_PATH_MAX: usize = if cfg!(target_os = "linux") { 108 } else { 104 };
+/// unix socket 路径的上限（`sun_path`，含结尾的 0）：Linux 108。
+#[cfg(target_os = "linux")]
+const SOCKET_PATH_MAX: usize = 108;
+/// unix socket 路径的上限（`sun_path`，含结尾的 0）：macOS 104。
+#[cfg(not(target_os = "linux"))]
+const SOCKET_PATH_MAX: usize = 104;
 
 /// socket 的路径超过系统上限时给出写明路径的错误（系统自己的错误看不出是哪个路径，§19.4）。
 pub fn check_socket_path(socket: &Path) -> io::Result<()> {

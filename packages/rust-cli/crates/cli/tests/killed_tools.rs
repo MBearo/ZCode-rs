@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 
+use rust_cli_base::models::GLM_5;
 use serde_json::{Value, json};
 
 const INTERRUPTED: &str = "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]";
@@ -51,7 +52,7 @@ fn spawn(sandbox: &Sandbox, fixture: &sse::Fixture, args: &[&str]) -> Child {
         .env("ZCODE_DATA_BASE_DIR", &sandbox.home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -170,7 +171,13 @@ async fn a_killed_call_gets_an_interrupted_result_when_the_session_continues() {
     assert!(results[0].starts_with("res:toolu_1:"), "{results:?}");
     assert_eq!(results[1], format!("res:toolu_2:err:{INTERRUPTED}"));
     assert!(has_text(&messages[assistant + 2], "No response requested."));
-    assert!(has_text(messages.last().unwrap(), "second question"));
+    // 新的输入在最后一条 user 消息里（有卡片形状的模型把这一步的提醒放在其后的 system 消息里）。
+    let last_user = messages
+        .iter()
+        .rev()
+        .find(|message| message["role"] == "user")
+        .unwrap();
+    assert!(has_text(last_user, "second question"));
 
     // 再续写一次：补的结果是从库里读出来的，不再补第二条。
     let third = spawn(&sandbox, &fixture, &["-p", "-c", "third question"]);

@@ -1,5 +1,5 @@
 //! `Background`、`Shell` 的通知与超时转后台：后台命令的通知在 ack 之前反复送达、ack 之后不再算后台工作；TaskStop 停的
-//! 命令不发通知、终态照常；已结束未 ack 的“不在跑”；停止按 operationId 重放；运行时长；超时转后台与转后台之后的期限；
+//! 命令不发通知、终态照常；已结束未 ack 的“不在跑”；运行时长；超时转后台与转后台之后的期限；
 //! Monitor 的事件只有 stdout。需要 `/bin/bash`，Windows 上跳过。
 #![cfg(unix)]
 
@@ -11,9 +11,9 @@ use rust_cli_kernel_api::env::{
 };
 use rust_cli_kernel_api::env_shell::{
     BackgroundCommand, BackgroundInfo, BackgroundKind, BackgroundStatus, BackgroundStop,
-    BackgroundTask, CwdScope, ShellNotice, TimeoutBackground,
+    BackgroundTask, CwdScope, MonitorSocket, ShellNotice, TimeoutBackground,
 };
-use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId, ToolUseId};
+use rust_cli_kernel_api::ids::{SessionId, ShellTaskId, ToolUseId};
 
 use crate::contract;
 use crate::shell_support::{Shell, exit_of, shell};
@@ -111,6 +111,8 @@ async fn a_stopped_command_leaves_the_background_without_a_notice(kind: Kind) {
     let running = BackgroundInfo {
         command: "sleep 30".to_owned(),
         status: BackgroundStatus::Running,
+        kind: BackgroundKind::Bash,
+        description: "Wait a while".to_owned(),
     };
     assert_eq!(info(&shell, "s1", &task).await, Some(running));
     // 只找本会话的命令。
@@ -146,6 +148,8 @@ async fn an_ended_command_is_not_running_until_its_notice_is_acked(kind: Kind) {
     let failed = Some(BackgroundInfo {
         command: "exit 3".to_owned(),
         status: BackgroundStatus::Failed,
+        kind: BackgroundKind::Bash,
+        description: "Wait a while".to_owned(),
     });
     assert_eq!(info(&shell, "s1", &task).await, failed);
     assert_eq!(
@@ -166,23 +170,6 @@ async fn an_ended_command_is_not_running_until_its_notice_is_acked(kind: Kind) {
         stop(&shell, "stop2", &task).await,
         Ok(BackgroundStop::NotFound)
     );
-}
-
-async fn a_stop_replays_by_operation_and_rejects_other_arguments(kind: Kind) {
-    let shell = shell(kind, Vec::new()).await;
-    let task = background(&shell, "op1", "sleep 30").await;
-    let first = stop(&shell, "stop1", &task).await;
-    assert_eq!(first, stop(&shell, "stop1", &task).await);
-    let other = stop(&shell, "stop1", &ShellTaskId::new("bother")).await;
-    assert!(matches!(other, Err(EnvError::OperationConflict { .. })));
-    assert_eq!(
-        stop(&shell, "stop3", &ShellTaskId::new("bnotatask")).await,
-        Ok(BackgroundStop::NotFound)
-    );
-    let ran = tokio::time::timeout(Duration::from_secs(10), shell.collect("op1"))
-        .await
-        .unwrap();
-    assert_eq!(exit_of(&ran.finished).0, Outcome::Cancelled);
 }
 
 async fn a_running_command_reports_how_long_it_has_run(kind: Kind) {
@@ -238,10 +225,7 @@ async fn watch_moved(
     operation: &str,
     task: &ShellTaskId,
 ) -> (Option<String>, String, CommandEvent) {
-    let mut events = shell
-        .machine
-        .commands()
-        .watch_command(OperationId::new(operation), 0);
+    let mut events = shell.events(operation);
     let (mut before, mut output) = (None, String::new());
     while let Some(event) = events.next().await {
         match event.unwrap() {
@@ -339,10 +323,7 @@ async fn a_monitor_streams_only_stdout_and_reports_its_kind(kind: Kind) {
         kind: BackgroundKind::Monitor,
     });
     shell.start("op_m", start).await;
-    let mut events = shell
-        .machine
-        .commands()
-        .watch_command(OperationId::new("op_m"), 0);
+    let mut events = shell.events("op_m");
     let (mut stdout, mut stderr, mut finished) = (Vec::new(), Vec::new(), None);
     while let Some(event) = events.next().await {
         match event.unwrap() {
@@ -378,11 +359,70 @@ async fn a_monitor_streams_only_stdout_and_reports_its_kind(kind: Kind) {
     assert_eq!(chunks, ["[stderr] oops\n", "one\n", "two\n"], "{written}");
 }
 
+/// 修复线 F117（tools-more.md §19.12）：账本报启动时的种类与说明——在跑的 shell 与命令来源的 monitor，结束而通知还没
+/// ack 的 WebSocket 来源（没有网络出口，连接马上失败）。修前只有命令与状态，界面把 monitor 数成 shell。
+async fn background_commands_report_their_kind_and_description(kind: Kind) {
+    let shell = shell(kind, Vec::new()).await;
+    let bash = background(&shell, "op1", "sleep 30").await;
+    let mut start = shell.request("sleep 30", CwdScope::Pinned);
+    start.background = Some(BackgroundCommand {
+        description: "build log".to_owned(),
+        tool_use: None,
+        kind: BackgroundKind::Monitor,
+    });
+    let monitor = start.task.clone();
+    shell.start("op2", start).await;
+    let running = |kind, description: &str| {
+        Some(BackgroundInfo {
+            command: "sleep 30".to_owned(),
+            status: BackgroundStatus::Running,
+            kind,
+            description: description.to_owned(),
+        })
+    };
+    assert_eq!(
+        info(&shell, "s1", &bash).await,
+        running(BackgroundKind::Bash, "Wait a while")
+    );
+    assert_eq!(
+        info(&shell, "s1", &monitor).await,
+        running(BackgroundKind::Monitor, "build log")
+    );
+    let url = "ws://127.0.0.1:9/feed";
+    let mut start = shell.request(url, CwdScope::Pinned);
+    start.socket = Some(MonitorSocket {
+        url: url.to_owned(),
+        protocols: Vec::new(),
+    });
+    start.background = Some(BackgroundCommand {
+        description: "deploy feed".to_owned(),
+        tool_use: None,
+        kind: BackgroundKind::Monitor,
+    });
+    let socket = start.task.clone();
+    shell.start("op3", start).await;
+    let notice = next_notice(&shell).await;
+    assert_eq!(notice.task, socket);
+    let ended = info(&shell, "s1", &socket).await.unwrap();
+    assert_eq!(
+        (
+            ended.kind,
+            ended.description.as_str(),
+            ended.command.as_str()
+        ),
+        (BackgroundKind::Monitor, "deploy feed", url)
+    );
+    assert_ne!(ended.status, BackgroundStatus::Running);
+    for (operation, task) in [("stop1", &bash), ("stop2", &monitor)] {
+        stop(&shell, operation, task).await.unwrap();
+    }
+}
+
 contract!(
     background_commands_report_until_acked,
+    background_commands_report_their_kind_and_description,
     a_stopped_command_leaves_the_background_without_a_notice,
     an_ended_command_is_not_running_until_its_notice_is_acked,
-    a_stop_replays_by_operation_and_rejects_other_arguments,
     a_running_command_reports_how_long_it_has_run,
     a_timed_out_command_keeps_running_in_the_background,
     the_background_deadline_ends_a_moved_command,

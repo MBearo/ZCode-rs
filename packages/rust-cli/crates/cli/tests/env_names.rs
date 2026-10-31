@@ -16,6 +16,7 @@ use std::process::{Output, Stdio};
 use std::sync::{Arc, Mutex};
 use system_env::KeepSystem as _;
 
+use rust_cli_base::models::{DEEPSEEK_V4_PRO, GLM_5_3, OPUS_5_5};
 use serde_json::Value;
 
 const REPLY: &str = concat!(
@@ -168,7 +169,7 @@ fn the_zcode_names_configure_the_explicit_endpoint() {
         &[
             ("ZCODE_API_KEY", "test-key"),
             ("ZCODE_MODEL_BASE_URL", &server.url),
-            ("ZCODE_MODEL", "claude-opus-5-5"),
+            ("ZCODE_MODEL", GLM_5_3),
         ],
         &[],
     );
@@ -176,7 +177,7 @@ fn the_zcode_names_configure_the_explicit_endpoint() {
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "done");
     let requests = server.requests();
     assert!(!requests.is_empty());
-    assert_eq!(requests[0]["model"], "claude-opus-5-5");
+    assert_eq!(requests[0]["model"], GLM_5_3);
 }
 
 /// Anthropic SDK 的变量（`ANTHROPIC_*`）不读：给全了也不发请求，提示里是本工程的名字。
@@ -188,7 +189,7 @@ fn anthropic_sdk_variables_are_not_read() {
         &[
             ("ANTHROPIC_API_KEY", "test-key"),
             ("ANTHROPIC_BASE_URL", &server.url),
-            ("ANTHROPIC_MODEL", "claude-opus-5-5"),
+            ("ANTHROPIC_MODEL", GLM_5_3),
         ],
         &[],
     );
@@ -217,10 +218,10 @@ fn an_api_key_without_a_model_uses_the_default_model_selection() {
         shown.contains("ZCODE_API_KEY is set: pass --model or set ZCODE_MODEL"),
         "{shown}"
     );
-    sandbox.default_model_selection("glm-test");
+    sandbox.default_model_selection(GLM_5_3);
     let output = sandbox.run(&vars, &[]);
     assert!(output.status.success(), "{}", text(&output));
-    assert_eq!(server.requests()[0]["model"], "glm-test");
+    assert_eq!(server.requests()[0]["model"], GLM_5_3);
     // `ZCODE_MODEL` 与 `--model` 优先。
     let mut with_model = vars.to_vec();
     with_model.push(("ZCODE_MODEL", "from-env"));
@@ -232,8 +233,9 @@ fn an_api_key_without_a_model_uses_the_default_model_selection() {
     assert_eq!(server.requests().last().unwrap()["model"], "from-flag");
 }
 
-/// 主请求的 `max_tokens`（cli-args.md §9.1）：设的值不超过上限（卡片 128000；没有卡片 128000、缺省
-/// 32000）；无效值用缺省。
+/// 主请求的 `max_tokens`（cli-args.md §9.1）：设的值不超过上限（有卡片的模型按卡片 128000；按 opus 处理的 GLM 按目录，
+/// 内置规则给 glm-5.3 的是 128000；没有卡片 128000、缺省 32000）；无效值用缺省。卡片的上限只给有卡片的模型，所以这里
+/// 用 Anthropic 的有卡片的模型；“没有卡片”用 DeepSeek。
 #[test]
 fn zcode_max_output_tokens_sets_the_output_limit() {
     let sandbox = Sandbox::new();
@@ -251,25 +253,36 @@ fn zcode_max_output_tokens_sets_the_output_limit() {
         assert!(output.status.success(), "{}", text(&output));
         server.requests().last().unwrap()["max_tokens"].clone()
     };
-    let opus = "claude-opus-5-5";
-    assert_eq!(max_tokens(opus, ("ZCODE_MAX_OUTPUT_TOKENS", "4096")), 4096);
     assert_eq!(
-        max_tokens(opus, ("ZCODE_MAX_OUTPUT_TOKENS", "1e6")),
+        max_tokens(OPUS_5_5, ("ZCODE_MAX_OUTPUT_TOKENS", "4096")),
+        4096
+    );
+    assert_eq!(
+        max_tokens(OPUS_5_5, ("ZCODE_MAX_OUTPUT_TOKENS", "1e6")),
         128_000
     );
-    let glm = "glm-test";
+    let uncarded = DEEPSEEK_V4_PRO;
     assert_eq!(
-        max_tokens(glm, ("ZCODE_MAX_OUTPUT_TOKENS", "64,000")),
+        max_tokens(uncarded, ("ZCODE_MAX_OUTPUT_TOKENS", "64,000")),
         64_000
     );
     assert_eq!(
-        max_tokens(glm, ("ZCODE_MAX_OUTPUT_TOKENS", "999999")),
+        max_tokens(uncarded, ("ZCODE_MAX_OUTPUT_TOKENS", "999999")),
         128_000
     );
-    assert_eq!(max_tokens(glm, ("ZCODE_MAX_OUTPUT_TOKENS", "lots")), 32_000);
+    assert_eq!(
+        max_tokens(uncarded, ("ZCODE_MAX_OUTPUT_TOKENS", "lots")),
+        32_000
+    );
+    // GLM 的缺省是目录的输出上限（工作线 F121），不是没有卡片时的 32000。
+    assert_eq!(
+        max_tokens(GLM_5_3, ("ZCODE_MAX_OUTPUT_TOKENS", "lots")),
+        128_000
+    );
 }
 
-/// `MAX_THINKING_TOKENS`（cli-args.md §9.2）：0 时 claude-opus-5-5 不发 thinking 与 clear_thinking；大于 0 时照旧。
+/// `MAX_THINKING_TOKENS`（cli-args.md §9.2）：0 时有卡片形状的模型（GLM 按 opus）不发 thinking 与 clear_thinking；大于 0
+/// 时照旧。
 /// 本地端点按官方 API 处理（只给测试的声明，model.md §6）：其他 Anthropic 兼容的方案本来就不发这些字段。
 #[test]
 #[cfg_attr(
@@ -284,7 +297,7 @@ fn max_thinking_tokens_zero_turns_thinking_off() {
             &[
                 ("ZCODE_API_KEY", "test-key"),
                 ("ZCODE_MODEL_BASE_URL", &server.url),
-                ("ZCODE_MODEL", "claude-opus-5-5"),
+                ("ZCODE_MODEL", GLM_5_3),
                 ("_ZCODE_ASSUME_FIRST_PARTY_BASE_URL", "1"),
                 ("MAX_THINKING_TOKENS", value),
             ],
@@ -311,7 +324,7 @@ fn bash_timeouts_change_the_tool_text() {
         &[
             ("ZCODE_API_KEY", "test-key"),
             ("ZCODE_MODEL_BASE_URL", &server.url),
-            ("ZCODE_MODEL", "claude-opus-5-5"),
+            ("ZCODE_MODEL", GLM_5_3),
             ("BASH_DEFAULT_TIMEOUT_MS", "900000"),
             ("BASH_MAX_TIMEOUT_MS", "8000000"),
         ],
@@ -359,7 +372,7 @@ fn the_auto_memory_switch_takes_effect() {
             &[
                 ("ZCODE_API_KEY", "test-key"),
                 ("ZCODE_MODEL_BASE_URL", &server.url),
-                ("ZCODE_MODEL", "claude-opus-5-5"),
+                ("ZCODE_MODEL", GLM_5_3),
                 var,
             ],
             &[],

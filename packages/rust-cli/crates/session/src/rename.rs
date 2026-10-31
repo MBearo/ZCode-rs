@@ -50,9 +50,16 @@ impl Actor {
             return;
         }
         // 模型经小模型槽位，输入是 actor 的当前选择（model.md §6.1）。
-        let request = request(&small_fast_model(&self.selection), &self.meta.id, &text);
+        let selection = small_fast_model(&self.selection);
+        let session = self.meta.id.clone();
         let model = self.deps.side_model.clone();
         let task = self.deps.spawner.spawn("session-name", async move {
+            // 目录的输出上限：借卡片形状的 GLM 按它（工作线 F121）。
+            let configured = model
+                .capabilities(&selection)
+                .await
+                .and_then(|found| found.max_output_tokens);
+            let request = request(&selection, &session, (&text, configured));
             let mut stream = model.stream(request, CancellationToken::new());
             let mut reply = String::new();
             while let Some(event) = stream.next().await {

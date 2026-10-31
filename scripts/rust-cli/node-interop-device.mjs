@@ -11,6 +11,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { importNode, withHome } from "./node-root.mjs";
+import { GLM_5_3 } from "./fixture/model.mjs";
 
 const SSE = [
   'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
@@ -59,7 +60,7 @@ async function rustUserId({ zcode, home, url, session, bodies }) {
     ZCODE_DATA_BASE_DIR: home,
     ZCODE_MODEL_BASE_URL: url,
     ZCODE_API_KEY: "sk-interop",
-    ZCODE_MODEL: "claude-opus-5-5",
+    ZCODE_MODEL: GLM_5_3,
   };
   const before = bodies.length;
   const result = await run(zcode, ["-p", "hi", "--session-id", session], env, work);

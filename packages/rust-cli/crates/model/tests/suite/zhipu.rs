@@ -6,6 +6,7 @@
     reason = "辅助函数不在 #[test] 函数里，clippy 的测试放行不覆盖它；失败即测试失败"
 )]
 
+use rust_cli_base::{hosts, models};
 use std::sync::Arc;
 
 use rust_cli_base::secret::RedactedString;
@@ -19,8 +20,8 @@ use serde_json::{Value, json};
 use super::common::{clock, collect, fast_retry, message_start, model_at, request, text_response};
 use super::fixture::{Fixture, Reply};
 
-const ZHIPU_ANTHROPIC: &str = "https://open.bigmodel.cn/api/anthropic";
-const ZHIPU_OPENAI: &str = "https://open.bigmodel.cn/api/paas/v4";
+const ZHIPU_ANTHROPIC: &str = hosts::BIGMODEL_ANTHROPIC;
+const ZHIPU_OPENAI: &str = hosts::BIGMODEL_OPENAI;
 
 async fn zhipu(server: &Fixture) -> ProviderModel {
     model_at(server.url(), fast_retry(3))
@@ -115,7 +116,7 @@ fn chat_endpoint(base_url: String) -> ModelEndpoint {
         supports_audio: false,
         protocol: WireProtocol::OpenAiChatCompletions,
         base_url,
-        model: "glm-5".to_owned(),
+        model: models::GLM_5.to_owned(),
         credential: Credential::ApiKey(RedactedString::new("sk-zhipu-test-0123456789")),
         headers: Vec::new(),
         body_patches: Vec::new(),
@@ -148,7 +149,7 @@ fn chat_reply(chunks: &[Value]) -> Reply {
 }
 
 fn chunk(content: &str, finish: Option<&str>) -> Value {
-    json!({"id": "c1", "model": "glm-5",
+    json!({"id": "c1", "model": models::GLM_5,
         "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": finish}]})
 }
 

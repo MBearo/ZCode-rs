@@ -7,12 +7,12 @@ use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::agents::{AgentSignal, AgentSignals};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{ReadText, TextRead, TextSlice};
 use rust_cli_kernel_api::env_shell::{
-    BackgroundInfo, BackgroundStatus, BackgroundTask, ShellState,
+    BackgroundInfo, BackgroundKind as BackgroundKind_, BackgroundStatus, BackgroundTask, ShellState,
 };
 use rust_cli_kernel_api::ids::{AgentId, OperationId, SessionId, ShellTaskId};
 use rust_cli_kernel_api::local_services::{Fetch, Git};
@@ -42,7 +42,27 @@ struct Shells {
     /// 远端执行 F98：`b1` 的输出是 `tick-1` … `tick-12`、以换行结尾（命令的输出一般都是），`total_lines` 照 env-local 的
     /// 读法（`\n` 的个数加一）。
     ticks: bool,
+    /// 修复线 F117：账本里另有 monitor（[`MONITORS`]）。
+    monitors: bool,
 }
+
+/// 修复线 F117 的账本：任务 → （命令，种类，启动时的说明）。`b4` 是 description 为空的 monitor（名称退回命令原文）。
+const MONITORS: [(&str, &str, BackgroundKind_, &str); 4] = [
+    ("b1", "npm test", BackgroundKind_::Bash, "Run the tests"),
+    (
+        "b2",
+        "tail -f build.log",
+        BackgroundKind_::Monitor,
+        "build log",
+    ),
+    ("b4", "tail -F app.log", BackgroundKind_::Monitor, ""),
+    (
+        "s3",
+        "wss://events.example.com/feed",
+        BackgroundKind_::Monitor,
+        "deploy feed",
+    ),
+];
 
 impl Shells {
     const LOCAL: Self = Self {
@@ -50,12 +70,14 @@ impl Shells {
         outputs: "/tmp/tasks",
         hang: None,
         ticks: false,
+        monitors: false,
     };
     const REMOTE: Self = Self {
         prefix: "r",
         outputs: "/srv/tasks",
         hang: None,
         ticks: false,
+        monitors: false,
     };
 
     async fn wait_if_hanging(&self) {
@@ -139,7 +161,7 @@ impl Commands for Shells {
         _w: &WorkspaceRef,
         _c: OperationContext,
         _r: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unused())
     }
 
@@ -155,10 +177,6 @@ impl Commands for Shells {
         Err(unused())
     }
 
-    async fn operation_status(&self, _o: OperationId) -> Result<Outcome, EnvError> {
-        Err(unused())
-    }
-
     async fn close_session(&self, _s: &SessionId, _forget: bool) -> Result<(), EnvError> {
         self.wait_if_hanging().await;
         Ok(())
@@ -170,13 +188,21 @@ impl Shell for Shells {
     async fn shell_state(&self, _w: &WorkspaceRef, _s: &SessionId) -> Result<ShellState, EnvError> {
         self.wait_if_hanging().await;
         let prefix = self.prefix;
+        let background = if self.monitors {
+            MONITORS
+                .iter()
+                .map(|(task, ..)| ShellTaskId::new(*task))
+                .collect()
+        } else {
+            vec![
+                ShellTaskId::new(format!("{prefix}1")),
+                ShellTaskId::new(format!("{prefix}2")),
+            ]
+        };
         Ok(ShellState {
             cwd: EnvPath::new("/Users/dev/project"),
             outputs: Some(EnvPath::new(self.outputs)),
-            background: vec![
-                ShellTaskId::new(format!("{prefix}1")),
-                ShellTaskId::new(format!("{prefix}2")),
-            ],
+            background,
         })
     }
 }
@@ -187,6 +213,17 @@ impl Background for Shells {
         &self,
         task: BackgroundTask,
     ) -> Result<Option<BackgroundInfo>, EnvError> {
+        if self.monitors {
+            return Ok(MONITORS
+                .iter()
+                .find(|(id, ..)| *id == task.task.as_str())
+                .map(|(_, command, kind, description)| BackgroundInfo {
+                    command: (*command).to_owned(),
+                    status: BackgroundStatus::Running,
+                    kind: *kind,
+                    description: (*description).to_owned(),
+                }));
+        }
         if !task.task.as_str().starts_with(self.prefix) {
             return Ok(None);
         }
@@ -198,6 +235,8 @@ impl Background for Shells {
         Ok(Some(BackgroundInfo {
             command: format!("run {}", task.task),
             status,
+            kind: Default::default(),
+            description: String::new(),
         }))
     }
 
@@ -327,6 +366,36 @@ async fn the_tasks_snapshot_has_the_commands_and_the_agents_in_one_reply() {
     );
     // 旧的两个查询照旧（只加不改）：这个替身的旧方法没有条目。
     assert!(built.session.subagents().await.unwrap().is_empty());
+}
+
+/// 修复线 F117（tui-display.md §2.3、tui-panels.md §3.2）：执行环境报的种类照抄进快照——Bash 是 `Shell`，Monitor（命令
+/// 来源与 WebSocket 来源）是 `Monitor`；monitor 的名称是启动时的 description（空时是命令原文），shell 的仍是命令原文。
+/// 修前全是 `Shell`、名称全是命令原文。
+#[tokio::test]
+async fn monitors_keep_their_kind_and_description_in_the_snapshot() {
+    let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
+    setup.set_env(std::sync::Arc::new(Shells {
+        monitors: true,
+        ..Shells::LOCAL
+    }));
+    setup.agents = std::sync::Arc::new(OneRead);
+    let built = setup.build().await;
+    let snapshot = built.session.tasks_snapshot().await.unwrap();
+    let tasks: Vec<_> = snapshot
+        .background
+        .iter()
+        .map(|e| (e.id.as_str(), e.kind, e.description.as_str()))
+        .collect();
+    assert_eq!(
+        tasks,
+        [
+            ("b1", BackgroundKind::Shell, "npm test"),
+            ("b2", BackgroundKind::Monitor, "build log"),
+            ("b4", BackgroundKind::Monitor, "tail -F app.log"),
+            ("s3", BackgroundKind::Monitor, "deploy feed"),
+            ("agent_1", BackgroundKind::Agent, "Review"),
+        ]
+    );
 }
 
 #[tokio::test]

@@ -18,33 +18,11 @@ use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::store::StoreError;
 pub(crate) use tools::tools;
 
-/// 这些旧模型默认打开任务工具。
-const LEGACY_MODELS: &[&str] = &[
-    "claude-3-opus",
-    "claude-3-sonnet",
-    "claude-3-haiku",
-    "claude-3-5-sonnet",
-    "claude-3-5-haiku",
-    "claude-3-7-sonnet",
-    "claude-opus-4-0",
-    "claude-opus-4-1",
-    "claude-opus-4-5",
-    "claude-opus-4-6",
-    "claude-opus-4-7",
-    "claude-sonnet-4-0",
-    "claude-sonnet-4-5",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5",
-];
-
-/// 模型没有模型卡片、是上面的旧模型，或显式打开时启用。
+/// 模型没有卡片的行为形状，或显式打开时启用（agents.md §7.1）。有卡片的模型与按 opus 处理的 GLM 默认关闭。
+///
+/// 修改（工作线 F121）：以前另有一份 15 个旧模型的清单，那些模型都没有卡片，“没有卡片就打开”已经覆盖，删掉。
 pub fn task_tools_enabled(model: &str, opt_in: bool) -> bool {
-    let canonical = model.split_once('[').map_or(model, |(id, _)| id);
-    opt_in
-        || rust_cli_prompts::models::card(canonical).is_none()
-        || LEGACY_MODELS
-            .iter()
-            .any(|legacy| canonical.starts_with(legacy))
+    opt_in || rust_cli_prompts::models::shape(model).is_none()
 }
 
 /// 没有本地存储时（测试、嵌入）用的内存清单。
@@ -122,9 +100,12 @@ async fn serve(store: Arc<dyn TaskListStore>, mut jobs: mpsc::Receiver<Job>) {
     }
 }
 
+/// 任务清单写者的排队容量。
+const JOB_QUEUE: usize = 64;
+
 impl TaskBoard {
     pub(crate) fn new(store: Arc<dyn TaskListStore>, spawner: &Spawner) -> Self {
-        let (jobs, receiver) = mpsc::channel(64);
+        let (jobs, receiver) = mpsc::channel(JOB_QUEUE);
         let _task = spawner.spawn_resident("task-board", serve(store, receiver));
         Self { jobs }
     }

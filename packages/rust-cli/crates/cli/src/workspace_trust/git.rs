@@ -1,5 +1,6 @@
 //! git 根与规范根（docs/specs/rust-cli/workspace-trust.md §2.1）。只经执行环境的 `stat` 与 `read_file` 判断，不跑 git。
 
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use std::path::{Path, PathBuf};
 
 // 按段化简 `.` 与 `..`（纯词法）：唯一定义在 base（F58：以前这里、cli 的插件目录与 platform 各写一份）。
@@ -56,7 +57,7 @@ impl Probe<'_> {
     /// 往上。判定改用 kernel-api 的 `has_git_marker`（唯一定义）。
     pub(super) async fn git_root(&self, start: &Path) -> Option<PathBuf> {
         for dir in start.ancestors() {
-            let dot_git = dir.join(".git");
+            let dot_git = dir.join(GIT_DIR);
             if has_git_marker(self.files, self.workspace, &dot_git.to_string_lossy()).await {
                 return Some(dir.to_path_buf());
             }
@@ -72,7 +73,7 @@ impl Probe<'_> {
     }
 
     async fn worktree_main(&self, root: &Path) -> Option<PathBuf> {
-        let dot_git = root.join(".git");
+        let dot_git = root.join(GIT_DIR);
         let text = self.text(&dot_git).await?;
         // `gitdir:` 的解析与 UNC 的拒绝在 kernel-api（F58：以前 context、cli、runtime 各写一份）。
         let gitdir = normalize(&root.join(gitdir_pointer(&text)?));
@@ -89,11 +90,11 @@ impl Probe<'_> {
         if remote(&back) || !self.same(&normalize(&gitdir.join(&back)), &dot_git) {
             return None;
         }
-        if common.file_name().is_some_and(|name| name == ".git") {
+        if common.file_name().is_some_and(|name| name == GIT_DIR) {
             return common.parent().map(Path::to_path_buf);
         }
         // bare 仓库：公共目录本身是仓库；它下面还有 `.git` 时认不出，用 git 根。
-        if self.exists(&common.join(".git")).await {
+        if self.exists(&common.join(GIT_DIR)).await {
             return None;
         }
         Some(common)

@@ -18,6 +18,7 @@ mod scan;
 mod token;
 mod word;
 
+use crate::consts::{DOUBLE_OPERATOR_LEN, ESCAPE_LEN, SIGIL_PAIR_LEN};
 use crate::parse::parts::Part;
 pub(crate) use chars::*;
 use token::reserved_word;
@@ -54,7 +55,7 @@ pub(crate) struct RawSub {
 pub(crate) fn runs_a_command(text: &[u8]) -> bool {
     text.contains(&b'`')
         || text
-            .windows(2)
+            .windows(SIGIL_PAIR_LEN)
             .any(|pair| matches!(pair, [b'$' | b'<' | b'>', b'(']))
 }
 
@@ -205,7 +206,7 @@ impl<'a> Lexer<'a> {
                 if ch == SPACE || ch == TAB {
                     pos += 1;
                 } else if ch == BACKSLASH && pos + 1 < len && self.c(pos + 1) == NL {
-                    pos += 2;
+                    pos += ESCAPE_LEN;
                 } else {
                     break;
                 }
@@ -243,20 +244,24 @@ impl<'a> Lexer<'a> {
         } else {
             0
         };
-        let (kind, value, width): (Tk, &[u8], usize) = match ch {
-            SEMI if next == SEMI && pos + 2 < self.src_end && self.c(pos + 2) == AMP => {
-                (Tk::DoubleSemiAmp, b";;&", 3)
+        // 运算符的宽度就是它原文的长度（`value.len()`）。
+        let (kind, value): (Tk, &[u8]) = match ch {
+            SEMI if next == SEMI
+                && pos + DOUBLE_OPERATOR_LEN < self.src_end
+                && self.c(pos + DOUBLE_OPERATOR_LEN) == AMP =>
+            {
+                (Tk::DoubleSemiAmp, b";;&")
             }
-            SEMI if next == SEMI => (Tk::DoubleSemi, b";;", 2),
-            SEMI if next == AMP => (Tk::SemiAmp, b";&", 2),
-            SEMI => (Tk::Semi, b";", 1),
-            PIPE if next == PIPE => (Tk::Or, b"||", 2),
-            PIPE if next == AMP => (Tk::Pipe, b"|&", 2),
-            PIPE => (Tk::Pipe, b"|", 1),
-            AMP if next == AMP => (Tk::And, b"&&", 2),
+            SEMI if next == SEMI => (Tk::DoubleSemi, b";;"),
+            SEMI if next == AMP => (Tk::SemiAmp, b";&"),
+            SEMI => (Tk::Semi, b";"),
+            PIPE if next == PIPE => (Tk::Or, b"||"),
+            PIPE if next == AMP => (Tk::Pipe, b"|&"),
+            PIPE => (Tk::Pipe, b"|"),
+            AMP if next == AMP => (Tk::And, b"&&"),
             AMP if next == GT => {
                 // `&>` / `&>>`：重定向而非后台
-                self.pos += 2;
+                self.pos += DOUBLE_OPERATOR_LEN;
                 let append = self.pos < self.src_end && self.c(self.pos) == GT;
                 if append {
                     self.pos += 1;
@@ -269,21 +274,21 @@ impl<'a> Lexer<'a> {
                 self.redirect_token(slot, if append { b"&>>" } else { b"&>" }, start);
                 return true;
             }
-            AMP => (Tk::Amp, b"&", 1),
+            AMP => (Tk::Amp, b"&"),
             LPAREN if ctx == Ctx::CommandStart && next == LPAREN => {
                 let body = self.scan_arithmetic_body();
                 self.set_token(slot, Tk::ArithCmd, &body, start, self.pos);
                 return true;
             }
-            LPAREN => (Tk::LParen, b"(", 1),
-            RPAREN => (Tk::RParen, b")", 1),
+            LPAREN => (Tk::LParen, b"("),
+            RPAREN => (Tk::RParen, b")"),
             LT | GT => {
                 self.read_redirection(slot, start);
                 return true;
             }
             _ => return false,
         };
-        self.pos += width;
+        self.pos += value.len();
         self.set_token(slot, kind, value, start, self.pos);
         true
     }
@@ -294,7 +299,7 @@ impl<'a> Lexer<'a> {
             if ch == SPACE || ch == TAB {
                 self.pos += 1;
             } else if ch == BACKSLASH && self.pos + 1 < self.src_end && self.c(self.pos + 1) == NL {
-                self.pos += 2;
+                self.pos += ESCAPE_LEN;
             } else {
                 break;
             }

@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use ring::rand::{SecureRandom, SystemRandom};
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::units;
 use rust_cli_paths::StoragePath;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
@@ -40,8 +41,12 @@ pub(crate) async fn save_default_model(
     .map_err(|error| error.to_string())
 }
 
-const LOGIN_TIMEOUT_MS: u64 = 5 * 60 * 1000;
+const LOGIN_TIMEOUT_MS: u64 = 5 * units::MS_PER_MINUTE;
 const MIN_POLL_INTERVAL_MS: u64 = 1_000;
+/// OAuth 轮询令牌的随机字节数（十六进制后 64 个字符）。
+const POLL_TOKEN_BYTES: usize = 32;
+/// 写进 `rawProfile` 的 `zcodeProfileSchemaVersion`（App 的 profile 版本）。
+const PROFILE_SCHEMA_VERSION: u64 = 2;
 
 /// 登录失败。文案与 Node `ZCodeCliLoginError` / `CliOAuthError` 相同。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -261,13 +266,14 @@ impl Platform {
             base_url: self.services.origins.zcode_api.clone(),
             provider: family.as_str(),
         };
-        let poll_token = random_hex(32).map_err(|_| LoginError::OAuth("random".to_owned()))?;
+        let poll_token =
+            random_hex(POLL_TOKEN_BYTES).map_err(|_| LoginError::OAuth("random".to_owned()))?;
         let started = self.services.clock.now_ms();
         let init = client
             .init(&poll_token)
             .await
             .map_err(|error: OAuthError| LoginError::OAuth(error.message))?;
-        let expires_ms = (init.expires_at * 1000.0).max(0.0) as u64;
+        let expires_ms = (init.expires_at * units::MS_PER_SECOND_F64).max(0.0) as u64;
         let deadline_ms = (started + LOGIN_TIMEOUT_MS).min(expires_ms);
         if deadline_ms <= self.services.clock.now_ms() {
             return Err(LoginError::Timeout);
@@ -279,7 +285,8 @@ impl Platform {
             provider,
             poll_token,
             flow_id: init.flow_id,
-            interval_ms: ((init.poll_interval_sec * 1000.0) as u64).max(MIN_POLL_INTERVAL_MS),
+            interval_ms: ((init.poll_interval_sec * units::MS_PER_SECOND_F64) as u64)
+                .max(MIN_POLL_INTERVAL_MS),
             deadline_ms,
             authorize_url: init.authorize_url,
         })
@@ -394,7 +401,10 @@ fn app_profile(ready: &oauth::Ready) -> Value {
     }
     let mut raw = ready.raw_user.clone();
     raw.shift_remove("zcodeProfileMigrationRetryAfter");
-    raw.insert("zcodeProfileSchemaVersion".to_owned(), json!(2));
+    raw.insert(
+        "zcodeProfileSchemaVersion".to_owned(),
+        json!(PROFILE_SCHEMA_VERSION),
+    );
     profile.insert("rawProfile".to_owned(), Value::Object(raw));
     Value::Object(profile)
 }

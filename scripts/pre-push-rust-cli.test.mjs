@@ -219,6 +219,80 @@ describe("pre-push 的 rust-cli 检查", () => {
     expect(h.check).not.toHaveBeenCalled();
   });
 
+  // 散写数字的基线不许升高（docs/specs/rust-cli/constants.md §4.4）：用真的棘轮脚本，登记表是夹具里的 policy.mjs。
+  async function numbersFixture() {
+    const fx = await fixture();
+    await mkdir(join(fx.root, "scripts/rust-cli/boundaries"), { recursive: true });
+    for (const file of ["numbers.mjs", "check.mjs"])
+      await copyFile(
+        join(import.meta.dirname, "rust-cli/boundaries", file),
+        join(fx.root, "scripts/rust-cli/boundaries", file),
+      );
+    const policy = (raises) =>
+      fx.write(
+        "scripts/rust-cli/boundaries/policy.mjs",
+        `export const NUMBER_RAISES = ${JSON.stringify(raises)};\n`,
+      );
+    const numbers = (files) =>
+      fx.write(
+        "scripts/rust-cli/boundaries/numbers.json",
+        `${JSON.stringify({ total: Object.values(files).reduce((a, b) => a + b, 0), files }, null, 2)}\n`,
+      );
+    return { ...fx, policy, numbers };
+  }
+
+  it("numbers.json 比推送基线高：阻止 push、不跑 check:rust-cli；在 NUMBER_RAISES 登记后放行", async () => {
+    const { root, git, numbers, policy, push } = await numbersFixture();
+    await numbers({ "crates/base/src/lib.rs": 2 });
+    await policy([]);
+    await git("add", "-A");
+    await git("commit", "-m", "numbers");
+    const base = await git("rev-parse", "HEAD");
+    await numbers({ "crates/base/src/lib.rs": 3, "crates/base/src/new.rs": 1 });
+    await git("add", "-A");
+    await git("commit", "-m", "raise");
+    const h = harness();
+    expect(await main({ root, env: await push(base), ...h })).toBe(1);
+    expect(h.check).not.toHaveBeenCalled();
+    const message = h.lines.error.join("\n");
+    expect(message).toMatch(/lib\.rs: 2 -> 3 is not registered/u);
+    expect(message).toMatch(/new\.rs: 0 -> 1/u);
+    // 登记的旧值与推送基线不符：仍然阻止。
+    await policy([{ file: "crates/base/src/lib.rs", was: 1, now: 3, reason: "旧值写错" }]);
+    await git("add", "-A");
+    await git("commit", "-m", "wrong was");
+    const wrong = harness();
+    expect(await main({ root, env: await push(base), ...wrong })).toBe(1);
+    expect(wrong.lines.error.join("\n")).toMatch(/registered was 1, push base has 2/u);
+    await policy([
+      { file: "crates/base/src/lib.rs", was: 2, now: 3, reason: "用户决定" },
+      { file: "crates/base/src/new.rs", was: 0, now: 1, reason: "从 lib.rs 拆出" },
+    ]);
+    await git("add", "-A");
+    await git("commit", "-m", "register");
+    const ok = harness();
+    expect(await main({ root, env: await push(base), ...ok })).toBe(0);
+    expect(ok.check).toHaveBeenCalledTimes(1);
+  });
+
+  it("降低基线与推送基线里还没有 numbers.json 时照常跑 check:rust-cli", async () => {
+    const { root, git, numbers, policy, push, base } = await numbersFixture();
+    await numbers({ "crates/base/src/lib.rs": 2 });
+    await policy([]);
+    await git("add", "-A");
+    await git("commit", "-m", "numbers");
+    // 推送基线（夹具的第一个提交）没有 numbers.json：不比。
+    const first = harness();
+    expect(await main({ root, env: await push(base), ...first })).toBe(0);
+    const middle = await git("rev-parse", "HEAD");
+    await numbers({ "crates/base/src/lib.rs": 1 });
+    await git("add", "-A");
+    await git("commit", "-m", "lower");
+    const lower = harness();
+    expect(await main({ root, env: await push(middle), ...lower })).toBe(0);
+    expect(lower.check).toHaveBeenCalledTimes(1);
+  });
+
   it("合并带入的 rust-cli 改动照常算（与 affected 相同，不按来源过滤）", async () => {
     const { root, git, change, push } = await fixture();
     await git("switch", "-c", "side");

@@ -12,6 +12,9 @@ use tokio::sync::mpsc;
 
 use crate::common::{Definition, definition, text};
 
+/// ReportFindings 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
+const MAX_RESULT_CHARS: usize = 256;
+
 pub const NAME: &str = "ReportFindings";
 
 pub struct ReportFindingsTool {
@@ -68,7 +71,7 @@ impl Tool for ReportFindingsTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(256)
+        Some(MAX_RESULT_CHARS)
     }
 
     async fn call(

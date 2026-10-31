@@ -3,7 +3,7 @@
 //! 工作线 F89，tools-more.md §3.2.1）。
 //! 值的读法在入口（cli `limits.rs`），这里只按这一步的模型算请求参数。
 
-use rust_cli_prompts::models::{ModelCard, ToolSearchSetting};
+use rust_cli_prompts::models::ToolSearchSetting;
 
 /// 没有卡片的模型的输出上限的缺省与上限。
 pub(crate) const UNKNOWN_DEFAULT: u32 = rust_cli_prompts::models::UNKNOWN_MAX_OUTPUT_TOKENS;
@@ -33,17 +33,17 @@ pub struct RequestLimits {
 }
 
 impl RequestLimits {
-    /// 主请求的 `max_tokens`（由值、缺省与上限算出）：有卡片时缺省与上限都是卡片的值（claude-opus-5-5 的
-    /// 模型表是 128000 / 128000），没有卡片时 32000 / 128000；设了值时取它与上限的较小值。
-    pub(crate) fn max_tokens(&self, card: Option<&ModelCard>) -> u32 {
-        let (default, upper) = card.map_or((UNKNOWN_DEFAULT, UNKNOWN_UPPER), |card| {
-            (card.max_output_tokens, card.max_output_tokens)
-        });
+    /// 主请求的 `max_tokens`（由值、缺省与上限算出）：`output_limit` 是卡片的值（现在的卡片是 128000），借形状的 GLM 是
+    /// 目录的输出上限（工作线 F121，`models::card_output_limit`），有它时缺省与上限都是它，没有时 32000 / 128000；设了值时
+    /// 取它与上限的较小值。
+    pub(crate) fn max_tokens(&self, output_limit: Option<u32>) -> u32 {
+        let (default, upper) =
+            output_limit.map_or((UNKNOWN_DEFAULT, UNKNOWN_UPPER), |limit| (limit, limit));
         self.max_output_tokens
             .map_or(default, |value| value.min(upper))
     }
 
-    /// 这一步发不发 thinking：thinking 关时有卡片的模型也不发（claude-opus-5-5 拒绝 `{type: disabled}`，直接
+    /// 这一步发不发 thinking：thinking 关时有卡片的模型也不发（卡片模型拒绝 `{type: disabled}`，直接
     /// 不写 `thinking`）。
     pub(crate) fn thinking_allowed(&self) -> bool {
         self.thinking != ThinkingTokens::Disabled

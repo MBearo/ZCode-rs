@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::{Abort, AbortReason};
 use rust_cli_kernel_api::compaction::prompt_too_long_gap;
-use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{ContentBlock, Message, Usage};
 use rust_cli_kernel_api::model::{ModelError, QuerySource};
 use rust_cli_kernel_api::orchestration::{
@@ -76,14 +76,6 @@ impl RunSink for CollectSink {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(message);
-        Ok(())
-    }
-
-    async fn commit_intent(
-        &self,
-        _operation: OperationId,
-        _fingerprint: String,
-    ) -> Result<(), StoreError> {
         Ok(())
     }
 

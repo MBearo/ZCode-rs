@@ -117,7 +117,7 @@ fn invocation(name: &str, args: &[Word], dialect: Dialect) -> Hit {
         );
         // 递归或语法上的批量即可：不展开目标，帮助 / 交互选项不取消已知的危险证据。
         let rule = (enabled(&parsed.flags, &["-r", "-R", "--recursive"], &[])
-            || targets.operands.len() >= 2
+            || targets.operands.len() > 1
             || targets.operands.iter().any(|word| word.glob))
         .then_some("remove-critical-path");
         return settle(rule, &parsed);

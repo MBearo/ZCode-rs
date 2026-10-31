@@ -14,10 +14,10 @@ use serde_json::Value;
 use crate::branch::{Branch, active_messages, earlier_messages};
 use crate::facts::{live_session, unsupported};
 use crate::mode;
-use crate::operations;
 use crate::records;
 use crate::repo::messages;
 use crate::repo::sessions::{self, SessionRow};
+use crate::rust_entries;
 use crate::state::{self, PERMISSION_MODE_ENTRY};
 use crate::{LOCAL_ENVIRONMENT, OrStorage};
 
@@ -54,8 +54,7 @@ pub fn load(
         mode: execution.map(|state| state.mode),
         plan: execution.is_some_and(|state| state.plan),
         meta: meta(&row),
-        open_operations: operations::open_operations(conn, session.as_str())?,
-        pending_interactions: operations::pending_interactions(conn, session.as_str())?,
+        pending_interactions: rust_entries::pending_interactions(conn, session.as_str())?,
         checkpoints: Vec::new(),
         turn: turn.clone(),
         // 续写时补 assistant 的判断（session-lifecycle.md §6.3.1）：当前轮的 `turn_usage` 是错误。

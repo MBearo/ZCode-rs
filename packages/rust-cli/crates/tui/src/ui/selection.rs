@@ -21,14 +21,21 @@ pub fn columns(text: &str, from: usize, to: usize) -> String {
     out
 }
 
-/// 词的字符类：空白 0；字母、数字与 `_/.-+~\\` 1；其他 2。
-fn class(c: char) -> u8 {
+/// 词的字符类：空白；字母、数字与 `_/.-+~\\`；其他。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Class {
+    Space,
+    Word,
+    Other,
+}
+
+fn class(c: char) -> Class {
     if c == ' ' {
-        0
+        Class::Space
     } else if c.is_alphanumeric() || "_/.-+~\\".contains(c) {
-        1
+        Class::Word
     } else {
-        2
+        Class::Other
     }
 }
 

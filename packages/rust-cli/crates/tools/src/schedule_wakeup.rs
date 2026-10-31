@@ -18,6 +18,9 @@ use crate::cron_loop::Scheduled;
 use crate::cron_texts;
 use crate::cron_tools::{job_id, output, owner};
 
+/// ScheduleWakeup 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
+const MAX_RESULT_CHARS: usize = 1_000;
+
 pub const NAME: &str = "ScheduleWakeup";
 /// 搜索提示（searchHint）。
 const SEARCH_HINT: &str = "self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/cancel the dynamic loop with stop:true (a fixed-interval /loop is a recurring cron \u{2014} cancel it with CronDelete)";
@@ -70,7 +73,7 @@ impl Tool for ScheduleWakeupTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(1_000)
+        Some(MAX_RESULT_CHARS)
     }
 
     /// auto 模式交给分类器（passthrough），其余直接放行。
@@ -126,7 +129,8 @@ impl Tool for ScheduleWakeupTool {
         };
         let now = self.board.now_ms();
         // JS `Math.round`：.5 向正无穷。
-        let in_seconds = (scheduled_for.saturating_sub(now) + 500) / 1_000;
+        let in_seconds =
+            rust_cli_base::units::round_ms_to_seconds(scheduled_for.saturating_sub(now));
         let at = cron_texts::clock_time(scheduled_for, &self.board.offset());
         let text = cron_texts::wakeup_scheduled(&at, in_seconds, was_clamped.then_some(clamped));
         let display = json!({"scheduledFor": scheduled_for, "clampedDelaySeconds": clamped,

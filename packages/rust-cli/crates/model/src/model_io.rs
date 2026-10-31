@@ -28,7 +28,7 @@ const SECRET_HEADERS: [&str; 8] = [
     "proxy-authorization",
     "cookie",
     "set-cookie",
-    "x-api-key",
+    rust_cli_net::header::X_API_KEY,
     "api-key",
     "openai-api-key",
     "x-off-peak-ticket-id",

@@ -59,7 +59,7 @@ pub(crate) async fn record(context: &ToolUseContext, change: Change<'_>) -> Opti
         .put(
             &context.session,
             ArtifactPurpose::Checkpoint,
-            "application/json".to_owned(),
+            rust_cli_base::proto::mime::JSON.to_owned(),
             bytes,
         )
         .await

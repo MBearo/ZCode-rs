@@ -1,5 +1,6 @@
 //! 正常路径：线上的请求形状、SSE 的任意切分、tool 输入拼接、thinking 与 signature。
 
+use rust_cli_base::models;
 use rust_cli_kernel_api::message::{ContentBlock, StopReason, Usage};
 use rust_cli_kernel_api::model::{
     ApiContent, ApiMessage, ApiRole, CacheControl, ContextEdit, ModelEvent, QuerySource,
@@ -26,6 +27,8 @@ async fn the_wire_request_has_the_first_party_shape() {
         .await
         .with_assumed_first_party();
     let mut request = request("hello", QuerySource::MainThread);
+    // 官方方案只认官方的模型 ID（`profiles.rs` 的方案表）。
+    request.selection.model = models::GLM_5_3.to_owned();
     request.system = vec![SystemBlock {
         text: "You are ZCode.".to_owned(),
         cache_control: Some(CacheControl {
@@ -85,7 +88,7 @@ async fn the_wire_request_has_the_first_party_shape() {
     assert_eq!(
         captured.body,
         concat!(
-            r#"{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]},"#,
+            r#"{"model":"<model>","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]},"#,
             r##"{"role":"system","content":[{"type":"text","text":"# Environment"}]}],"##,
             r#""system":[{"type":"text","text":"You are ZCode.","cache_control":{"type":"ephemeral"}}],"#,
             r#""tools":[],"metadata":{"user_id":"{\"session_id\":\"s\"}"},"max_tokens":1024,"#,
@@ -93,6 +96,7 @@ async fn the_wire_request_has_the_first_party_shape() {
             r#""context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"#,
             r#""output_config":{"effort":"medium"},"diagnostics":{"previous_message_id":"msg_00"},"stream":true}"#,
         )
+        .replace("<model>", models::GLM_5_3)
     );
 }
 
@@ -151,7 +155,10 @@ async fn an_assumed_first_party_endpoint_keeps_the_scope() {
     let model = model_at(server.url(), fast_retry(0))
         .await
         .with_assumed_first_party();
-    let events = collect(&model, scoped_request()).await;
+    // 官方方案只认官方的模型 ID。
+    let mut request = scoped_request();
+    request.selection.model = models::GLM_5_3.to_owned();
+    let events = collect(&model, request).await;
     assert!(events.iter().all(Result::is_ok), "{events:?}");
 
     let captured = &server.requests()[0];
@@ -187,7 +194,7 @@ async fn a_text_response_maps_to_events() {
         events.first(),
         Some(&ModelEvent::MessageStart {
             id: "msg_01".to_owned(),
-            model: "claude-sonnet-4-5".to_owned(),
+            model: models::GLM_5_3.to_owned(),
             usage: Usage {
                 input_tokens: 25,
                 output_tokens: 1,

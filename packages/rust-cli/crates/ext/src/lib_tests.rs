@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use rust_cli_base::TaskScope;
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::mcp::McpTransportConfig;
 use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
@@ -49,7 +50,7 @@ fn request() -> ContextRequest {
         tool_names: vec!["Skill".to_owned()],
         selection: ModelSelection {
             provider: "anthropic".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },

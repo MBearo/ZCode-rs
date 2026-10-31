@@ -1,3 +1,5 @@
+use rust_cli_base::hosts;
+use rust_cli_base::models;
 use rust_cli_kernel_api::ids::{ArtifactId, SessionId, ToolUseId};
 use rust_cli_kernel_api::message::{ContentBlock, ImageSource, ToolResultContent};
 use rust_cli_kernel_api::model::{
@@ -11,14 +13,15 @@ use super::*;
 /// 编码层的方案：真是 Anthropic 官方，假是“其他 Anthropic 兼容”（这一层只差 `diagnostics`；服务端工具的版本 F93 起相同）。
 pub(crate) fn profile(first_party: bool) -> &'static crate::profiles::Profile {
     let base_url = if first_party {
-        "https://api.anthropic.com"
+        hosts::ANTHROPIC_API
     } else {
         "http://127.0.0.1:9"
     };
+    // 官方方案按地址与模型 ID 选（`profiles.rs` 的方案表，Anthropic 的模型才是官方方案）。
     crate::profiles::select(
         rust_cli_kernel_api::provider::WireProtocol::AnthropicMessages,
         base_url,
-        "claude-opus-5-5",
+        models::OPUS_5_5,
     )
 }
 
@@ -52,7 +55,7 @@ pub(crate) fn request(messages: Vec<ApiMessage>) -> ModelRequest {
     ModelRequest {
         selection: ModelSelection {
             provider: "anthropic".to_owned(),
-            model: "claude-sonnet-4-5".to_owned(),
+            model: models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },
@@ -155,7 +158,7 @@ fn a_full_request_has_the_fixed_field_order() {
     });
     request.betas = vec!["example-beta-2025-02-19".to_owned()];
     let expected = concat!(
-        r#"{"model":"claude-sonnet-4-5","messages":["#,
+        r#"{"model":"<model>","messages":["#,
         r#"{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]},"#,
         r#"{"role":"assistant","content":[{"type":"thinking","thinking":"plan","signature":"sig"},"#,
         r#"{"type":"redacted_thinking","data":"opaque"},{"type":"text","text":"ok"},"#,
@@ -170,7 +173,8 @@ fn a_full_request_has_the_fixed_field_order() {
         r#"{"name":"Bash","description":"Runs a command.","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],"#,
         r#""tool_choice":{"type":"auto"},"max_tokens":32000,"#,
         r#""thinking":{"budget_tokens":31999,"type":"enabled"},"stream":true}"#,
-    );
+    )
+    .replace("<model>", models::GLM_5_3);
     assert_eq!(body(request).unwrap(), expected);
 }
 
@@ -180,9 +184,10 @@ fn optional_fields_are_left_out_and_lists_stay() {
     assert_eq!(
         body,
         concat!(
-            r#"{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"#,
+            r#"{"model":"<model>","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"#,
             r#""system":[],"tools":[],"max_tokens":32000,"stream":true}"#,
         )
+        .replace("<model>", models::GLM_5_3)
     );
 }
 

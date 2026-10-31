@@ -10,6 +10,7 @@
 //!   重新扫描只看到 `2`，因而既不是动态单词也不是重定向。
 
 use super::{AMP, GT, LPAREN, LT, Lexer, NL, PIPE, Tk};
+use crate::consts::SIGIL_PAIR_LEN;
 
 impl Lexer<'_> {
     /// `readRedirection`：`pos` 指向 `<` 或 `>`。
@@ -90,7 +91,7 @@ impl Lexer<'_> {
             let nc = self.c(self.pos);
             if (nc == LT || nc == GT) && self.pos + 1 < len && self.c(self.pos + 1) == LPAREN {
                 let target_start = self.pos;
-                self.pos += 2;
+                self.pos += SIGIL_PAIR_LEN;
                 self.extract_balanced();
                 let target = self.slice(target_start, self.pos).to_vec();
                 self.set_token(slot, Tk::Redirect, op, start, self.pos);

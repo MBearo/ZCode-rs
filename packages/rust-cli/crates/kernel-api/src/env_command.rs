@@ -47,8 +47,7 @@ pub struct StartCommand {
     /// 只和后台的 `Monitor` 种类一起用；`command` 记 URL（TaskStop 的结果用它）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub socket: Option<MonitorSocket>,
-    /// 投影之后再加上（或去掉）的环境变量（[`EnvOverrides`]，F96）：只在执行器里由服务端填；不进序列化，所以也不进
-    /// env-local 的去重指纹（同一个操作重放时不因它算作参数不同）。
+    /// 投影之后再加上（或去掉）的环境变量（[`EnvOverrides`]，F96）：只在执行器里由服务端填，不进序列化。
     #[serde(skip)]
     pub env: EnvOverrides,
 }

@@ -10,7 +10,8 @@ use rust_cli_kernel_api::env::{CommandEvent, OutputStream};
 use rust_cli_kernel_api::env_shell::{
     BackgroundCommand, BackgroundKind, BackgroundTask, CwdScope, MonitorSocket,
 };
-use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::machine::CommandEvents;
 use rust_cli_net::{Egress, NetworkPolicy};
 
 use crate::shell::tests::{context, fixture, request};
@@ -79,14 +80,8 @@ async fn web() -> Option<std::sync::Arc<Egress>> {
     ))
 }
 
-async fn drain(
-    fixture: &crate::shell::tests::Fixture,
-    operation: &str,
-) -> (String, String, Option<CommandEvent>) {
-    let mut events = fixture
-        .shells
-        .watch(&OperationId::new(operation), 0)
-        .unwrap();
+/// 读完 `start_with` 返回的流（工作线 F119：结束的命令不留登记，不能再按 ID 查）。
+async fn drain(mut events: CommandEvents) -> (String, String, Option<CommandEvent>) {
     let (mut stdout, mut stderr, mut finished) = (Vec::new(), Vec::new(), None);
     while let Some(event) = events.next().await {
         match event.unwrap() {
@@ -115,7 +110,7 @@ async fn drain(
 async fn frames_go_to_the_output_and_the_close_to_the_lifecycle() {
     let fixture = fixture(Vec::new());
     let url = serve(false);
-    fixture
+    let events = fixture
         .shells
         .start_with(
             context("op_ws"),
@@ -124,7 +119,7 @@ async fn frames_go_to_the_output_and_the_close_to_the_lifecycle() {
         )
         .await
         .unwrap();
-    let (stdout, stderr, _) = drain(&fixture, "op_ws").await;
+    let (stdout, stderr, _) = drain(events).await;
     assert_eq!(stdout, "hello\n[binary frame, 3 bytes]\n");
     assert_eq!(stderr, "{\"type\":\"closed\",\"code\":1000}\n");
     let notice = fixture
@@ -148,7 +143,7 @@ async fn a_refused_connection_reports_an_error_then_1006() {
         .unwrap()
         .port();
     let url = format!("ws://127.0.0.1:{port}/feed");
-    fixture
+    let events = fixture
         .shells
         .start_with(
             context("op_ws"),
@@ -157,7 +152,7 @@ async fn a_refused_connection_reports_an_error_then_1006() {
         )
         .await
         .unwrap();
-    let (stdout, stderr, _) = drain(&fixture, "op_ws").await;
+    let (stdout, stderr, _) = drain(events).await;
     assert_eq!(stdout, "");
     let lines: Vec<serde_json::Value> = stderr
         .lines()
@@ -181,33 +176,26 @@ async fn a_stopped_socket_writes_no_lifecycle_and_no_notice() {
     let url = serve(true);
     let start = socket_request(&url, &fixture.root);
     let task = start.task.clone();
-    fixture
+    let mut events = fixture
         .shells
         .start_with(context("op_ws"), start, web().await)
         .await
         .unwrap();
     // 等第一帧写出来，再停。
-    let mut events = fixture.shells.watch(&OperationId::new("op_ws"), 0).unwrap();
     while let Some(event) = events.next().await {
         if matches!(event.unwrap(), CommandEvent::Output { .. }) {
             break;
         }
     }
-    let stop = fixture
-        .shells
-        .stop(
-            &context("op_stop"),
-            &BackgroundTask {
-                session: SessionId::new("s1"),
-                task,
-            },
-        )
-        .unwrap();
+    let stop = fixture.shells.stop(&BackgroundTask {
+        session: SessionId::new("s1"),
+        task,
+    });
     assert!(matches!(
         stop,
         rust_cli_kernel_api::env_shell::BackgroundStop::Stopped { .. }
     ));
-    let (_, stderr, finished) = drain(&fixture, "op_ws").await;
+    let (_, stderr, finished) = drain(events).await;
     assert_eq!(stderr, "");
     assert!(matches!(finished, Some(CommandEvent::Finished { .. })));
     let pending = tokio::time::timeout(

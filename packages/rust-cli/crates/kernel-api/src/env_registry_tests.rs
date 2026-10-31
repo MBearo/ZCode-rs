@@ -9,7 +9,7 @@ use futures_util::stream::{self, BoxStream};
 
 use super::{EnvironmentRegistry, LOCAL_MACHINE, LocalRegistry};
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
+    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::env_git::GitStatusRequest;
@@ -68,7 +68,7 @@ impl Commands for Counting {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         _request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(self.hit())
     }
 
@@ -81,10 +81,6 @@ impl Commands for Counting {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(self.hit())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(self.hit())
     }
 

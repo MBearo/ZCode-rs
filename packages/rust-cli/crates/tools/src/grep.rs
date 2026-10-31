@@ -20,6 +20,9 @@ use crate::common::{
 use crate::grep_output::{content_lines, count, globs, locale_order, paginate, pagination, plural};
 use crate::texts;
 
+/// Grep 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
+const MAX_RESULT_CHARS: usize = 20_000;
+
 pub const NAME: &str = "Grep";
 
 #[derive(Deserialize)]
@@ -89,7 +92,7 @@ impl Tool for GrepTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(20_000)
+        Some(MAX_RESULT_CHARS)
     }
 
     async fn validate_input(&self, raw: &Value, _context: &ToolUseContext) -> Validation {

@@ -4,6 +4,16 @@ use std::collections::HashMap;
 
 use regex::Regex;
 
+/// 查询以它开头时先按名字前缀找（MCP 工具名）。
+const MCP_PREFIX: &str = "mcp__";
+/// 每个词的得分：（名字段完全相同、名字段包含、粗分段完全相同、粗分段包含）；MCP 工具的高一些。
+const MCP_PART_SCORES: (u32, u32, u32, u32) = (12, 6, 12, 4);
+const PART_SCORES: (u32, u32, u32, u32) = (10, 5, 10, 3);
+/// 只在完整名字里出现、提示词命中、描述命中的得分。
+const FULL_NAME_SCORE: u32 = 3;
+const HINT_SCORE: u32 = 4;
+const DESCRIPTION_SCORE: u32 = 2;
+
 /// 一个候选的延迟工具。
 pub(crate) struct Candidate {
     pub(crate) name: String,
@@ -112,7 +122,7 @@ pub(crate) fn search(
     {
         return vec![exact.clone()];
     }
-    if query.starts_with("mcp__") && query.len() > 5 {
+    if query.starts_with(MCP_PREFIX) && query.len() > MCP_PREFIX.len() {
         let prefixed: Vec<String> = deferred
             .iter()
             .filter(|candidate| candidate.name.to_lowercase().starts_with(&query))
@@ -155,9 +165,9 @@ pub(crate) fn search(
         for term in &terms {
             let pattern = patterns.get(term).and_then(Option::as_ref);
             let (exact, partial, coarse_exact, coarse_partial) = if parts.mcp {
-                (12, 6, 12, 4)
+                MCP_PART_SCORES
             } else {
-                (10, 5, 10, 3)
+                PART_SCORES
             };
             if parts.parts.iter().any(|part| part == term) {
                 score += exact;
@@ -170,13 +180,13 @@ pub(crate) fn search(
                 score += coarse_partial;
             }
             if parts.full.contains(term) && score == 0 {
-                score += 3;
+                score += FULL_NAME_SCORE;
             }
             if hint.is_some_and(|hint| matches(pattern, hint)) {
-                score += 4;
+                score += HINT_SCORE;
             }
             if matches(pattern, &description) {
-                score += 2;
+                score += DESCRIPTION_SCORE;
             }
         }
         if score > 0 {

@@ -10,15 +10,23 @@ const THRESHOLD: f64 = 0.4;
 /// 一行最多参与比较的词数；更长的行不按词高亮（比较是平方复杂度）。
 const MAX_TOKENS: usize = 256;
 
+/// 字符的类别：同类的字母、数字与下划线连成一个词，空白连成一段，其他字符各自一个。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Class {
+    Word,
+    Space,
+    Other,
+}
+
 /// 词：连续的字母、数字与下划线；连续的空白；或单个其他字符。返回字节范围。
 fn tokens(text: &str) -> Vec<(usize, usize)> {
     let class = |c: char| {
         if c.is_alphanumeric() || c == '_' {
-            0
+            Class::Word
         } else if c.is_whitespace() {
-            1
+            Class::Space
         } else {
-            2
+            Class::Other
         }
     };
     let mut out: Vec<(usize, usize)> = Vec::new();
@@ -26,7 +34,9 @@ fn tokens(text: &str) -> Vec<(usize, usize)> {
     for (index, c) in text.char_indices() {
         let kind = class(c);
         match out.last_mut() {
-            Some(last) if previous == Some(kind) && kind != 2 => last.1 = index + c.len_utf8(),
+            Some(last) if previous == Some(kind) && kind != Class::Other => {
+                last.1 = index + c.len_utf8();
+            }
             _ => out.push((index, index + c.len_utf8())),
         }
         previous = Some(kind);

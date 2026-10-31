@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{CompactTrigger, Message};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::orchestration::{
@@ -19,11 +19,6 @@ use tokio::sync::{mpsc, oneshot};
 pub(crate) enum SinkRequest {
     Message {
         message: Message,
-        reply: oneshot::Sender<Result<(), StoreError>>,
-    },
-    Intent {
-        operation: OperationId,
-        fingerprint: String,
         reply: oneshot::Sender<Result<(), StoreError>>,
     },
     Event(QueryEvent),
@@ -97,6 +92,7 @@ pub(crate) enum SinkRequest {
     /// Monitor 工具起好的 monitor 交给 actor（工作线 F83，tools-more.md §19.6）。
     ArmMonitor {
         monitor: rust_cli_kernel_api::monitor::MonitorArmed,
+        events: rust_cli_kernel_api::machine::CommandEvents,
         reply: oneshot::Sender<Result<(), OrchestrationError>>,
     },
     /// 主循环读会话的目标条件（docs/specs/rust-cli/goal.md §4）。
@@ -228,13 +224,18 @@ impl Interactions for ActorSink {
         &self,
         _session: &SessionId,
         monitor: rust_cli_kernel_api::monitor::MonitorArmed,
+        events: rust_cli_kernel_api::machine::CommandEvents,
     ) -> Result<(), OrchestrationError> {
         let gone = || OrchestrationError::Failed {
             message: "the session is closed".to_owned(),
         };
         let (reply, answer) = oneshot::channel();
         self.sender
-            .send(SinkRequest::ArmMonitor { monitor, reply })
+            .send(SinkRequest::ArmMonitor {
+                monitor,
+                events,
+                reply,
+            })
             .await
             .map_err(|_| gone())?;
         answer.await.map_err(|_| gone())?
@@ -346,19 +347,6 @@ impl RunSink for ActorSink {
     async fn commit_message(&self, message: Message) -> Result<(), StoreError> {
         self.call(|reply| SinkRequest::Message { message, reply })
             .await
-    }
-
-    async fn commit_intent(
-        &self,
-        operation: OperationId,
-        fingerprint: String,
-    ) -> Result<(), StoreError> {
-        self.call(|reply| SinkRequest::Intent {
-            operation,
-            fingerprint,
-            reply,
-        })
-        .await
     }
 
     async fn commit_messages(&self, messages: Vec<Message>) -> Result<(), StoreError> {

@@ -41,7 +41,7 @@ const REMINDER: &str =
 const STRING: fn(&ToolUseId, bool) -> bool = |_, _| false;
 const ARRAY: fn(&ToolUseId, bool) -> bool = |_, _| true;
 
-/// 字符串结果（Read，claude-sonnet-4-6）：去掉首尾空白，空行接上提醒。
+/// 字符串结果（Read，没有对话中间 system 的模型）：去掉首尾空白，空行接上提醒。
 #[test]
 fn a_string_result_takes_the_trimmed_reminder_after_a_blank_line() {
     let mut content = vec![result(vec![text("1\talpha\n2\tbeta\n3\t")], false)];

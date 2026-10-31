@@ -65,3 +65,20 @@ fn labels_drop_the_trailing_wildcard() {
     assert_eq!(rule_label("npm:*"), "npm");
     assert_eq!(rule_label("git status"), "git status");
 }
+
+/// 双向控制符与零宽字符都不许进种子（统一成 base 的一张表）：零宽空格、LRM、已弃用的格式字符、BOM 以前放过。
+#[test]
+fn seeds_reject_every_bidi_and_zero_width_character() {
+    for c in [
+        '\u{061c}', '\u{200b}', '\u{200e}', '\u{202e}', '\u{2066}', '\u{206a}', '\u{feff}',
+    ] {
+        assert!(
+            !printable(&format!("git{c} status *")),
+            "U+{:04X}",
+            u32::from(c)
+        );
+    }
+    assert!(printable("git status *"));
+    // 变体选择符照旧不许。
+    assert!(!printable("git\u{fe0f} *"));
+}

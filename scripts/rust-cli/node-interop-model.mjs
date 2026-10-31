@@ -11,6 +11,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { GLM_5, GPT_5_4, OPUS_5 } from "./fixture/model.mjs";
 
 const FIXTURE = "packages/rust-cli/crates/platform/tests/fixtures/personal.json";
 const BUILTIN = "packages/rust-cli/crates/platform/assets/zcode-builtin.json";
@@ -77,10 +78,10 @@ export async function checkInitialModel({ nodeRoot, repoRoot, example, home, exp
 
   // rust-cli 写、Node 解析；Node 写、rust-cli 解析。
   await withDefault(undefined);
-  rust("model-write", home, "personal:anthropic", "claude-opus-5", "xhigh");
+  rust("model-write", home, "personal:anthropic", OPUS_5, "xhigh");
   expectEqual("Node resolves the default rust-cli saved", await nodeInitial(), {
     provider: "personal:anthropic",
-    model: "claude-opus-5",
+    model: OPUS_5,
     reasoning: "xhigh",
   });
   const personal = new providerNode.NodePersonalProviderConfigRepository({
@@ -91,21 +92,21 @@ export async function checkInitialModel({ nodeRoot, repoRoot, example, home, exp
   try {
     await selections.saveConfiguredDefault({
       providerId: "personal:responses",
-      modelId: "gpt-5.4",
+      modelId: GPT_5_4,
       options: { reasoningLevel: "medium" },
     });
     expectEqual("rust-cli resolves the default Node saved", rust("model-initial", home), {
       provider: "personal:responses",
-      model: "gpt-5.4",
+      model: GPT_5_4,
       reasoning: "medium",
     });
     // 同一份（Node 规范化过的）输入，两边写同一个选择：文本逐字节相同。
     const start = await readFile(file, "utf8");
-    const chosen = { providerId: "personal:gateway", modelId: "glm-5", options: { reasoningLevel: "enabled" } };
+    const chosen = { providerId: "personal:gateway", modelId: GLM_5, options: { reasoningLevel: "enabled" } };
     await selections.saveConfiguredDefault(chosen);
     const nodeText = await readFile(file, "utf8");
     await writeFile(file, start);
-    rust("model-write", home, "personal:gateway", "glm-5", "enabled");
+    rust("model-write", home, "personal:gateway", GLM_5, "enabled");
     expectEqual("the same default over the fixture gives the same file text", await readFile(file, "utf8"), nodeText);
   } finally {
     selections.dispose();

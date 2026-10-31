@@ -7,9 +7,7 @@ use crate::dto::command::{
     BackgroundCommand, BackgroundKind, CwdScope, FilesystemPolicy, HookIo, MonitorSocket,
     NetworkPolicy, SandboxPolicy, ShellKind, StartCommand, TimeoutBackground,
 };
-use crate::dto::core::{
-    EnvFacts, OperationContext, Origin, Outcome, PathFacts, PathStyle, Workspace,
-};
+use crate::dto::core::{EnvFacts, OperationContext, Origin, PathFacts, PathStyle, Workspace};
 use crate::dto::files::{
     DirEntry, FileContent, FileKind, FileStat, FileWritten, GlobFiles, GlobMatches, GrepFileLines,
     GrepLine, GrepLineKind, GrepMode, GrepOutcome, GrepSearch, GrepSubmatch, PdfRender, PutFile,
@@ -187,9 +185,6 @@ pub(crate) fn requests() -> Vec<Request> {
         Request::Cancel {
             operation: "op_3".to_owned(),
         },
-        Request::OperationStatus {
-            operation: "op_3".to_owned(),
-        },
         Request::CloseSession {
             session: "sess_1".to_owned(),
             forget: true,
@@ -233,9 +228,6 @@ pub(crate) fn requests() -> Vec<Request> {
             ],
         },
         Request::RewindApply {
-            token: "tok_1".to_owned(),
-        },
-        Request::RewindStatus {
             token: "tok_1".to_owned(),
         },
         Request::RewindFinish {
@@ -399,10 +391,6 @@ pub(crate) fn replies() -> Vec<Reply> {
         }),
         Reply::StartCommand,
         Reply::Cancel,
-        Reply::OperationStatus(Outcome::Failed {
-            code: Some("timeout".to_owned()),
-            message: "timed out".to_owned(),
-        }),
         Reply::CloseSession,
         Reply::ShellState(ShellState {
             cwd: "/w".to_owned(),
@@ -414,6 +402,8 @@ pub(crate) fn replies() -> Vec<Reply> {
         Reply::BackgroundCommand(Some(BackgroundInfo {
             command: "sleep 9".to_owned(),
             status: BackgroundStatus::Killed,
+            kind: Default::default(),
+            description: String::new(),
         })),
         Reply::BackgroundElapsed(None),
         Reply::StopBackgroundCommand(BackgroundStop::NotRunning {
@@ -426,7 +416,6 @@ pub(crate) fn replies() -> Vec<Reply> {
             message: "late change".to_owned(),
             conflicts: vec![conflict],
         }),
-        Reply::RewindStatus(RewindStatus::Unknown),
         Reply::RewindFinish,
         Reply::PdfPageCount(Some(12)),
         Reply::RenderPdfPages(PdfRender::Rendered {

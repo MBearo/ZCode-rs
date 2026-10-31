@@ -31,7 +31,7 @@ impl SiteRules {
         base_url: &str,
         model: &str,
     ) -> ModelCapabilities {
-        capabilities(&self.effective(protocol, base_url, model))
+        capabilities(model, &self.effective(protocol, base_url, model))
     }
 
     /// 同一份规则给出的压缩上限（修复线 F61，compact.md §2）：`contextWindow` 与 `optionSpecs.maxOutputTokens.max`。

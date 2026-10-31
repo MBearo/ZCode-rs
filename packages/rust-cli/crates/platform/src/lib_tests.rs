@@ -1,5 +1,6 @@
 //! 平台层对内核暴露的两个端口（platform.md §4）：目录、默认选择与每请求的端点。
 
+use rust_cli_base::{hosts, models};
 use serde_json::json;
 
 use super::*;
@@ -48,10 +49,10 @@ async fn the_catalog_and_default_come_from_the_configuration() {
     assert_eq!(
         names,
         [
-            "personal:responses/gpt-5.4",
-            "personal:gateway/glm-5",
-            "personal:gateway/custom-chat",
-            "personal:anthropic/claude-opus-5"
+            format!("personal:responses/{}", models::GPT_5_4),
+            format!("personal:gateway/{}", models::GLM_5),
+            "personal:gateway/custom-chat".to_owned(),
+            format!("personal:anthropic/{}", models::OPUS_5),
         ]
     );
     assert_eq!(
@@ -92,10 +93,7 @@ async fn api_key_providers_resolve_with_headers_and_patches() {
 
     // Anthropic 协议的 provider 另带 Bearer（Node 的 Provider 适配器）；claude-opus-5 支持中途 system 消息。
     let opus = platform
-        .endpoint(
-            &selection("personal:anthropic", "claude-opus-5", None),
-            None,
-        )
+        .endpoint(&selection("personal:anthropic", models::OPUS_5, None), None)
         .await
         .unwrap();
     assert_eq!(
@@ -109,7 +107,7 @@ async fn api_key_providers_resolve_with_headers_and_patches() {
     assert!(opus.supports_image);
 
     let missing = platform
-        .endpoint(&selection("personal:nokey", "claude-opus-5", None), None)
+        .endpoint(&selection("personal:nokey", models::OPUS_5, None), None)
         .await;
     assert!(matches!(missing, Err(ModelError::InvalidRequest { .. })));
 }
@@ -147,7 +145,7 @@ async fn the_request_output_limit_feeds_the_max_output_tokens_patch() {
 async fn account_models_take_the_credential_on_every_request() {
     let dir = tempfile::tempdir().unwrap();
     let (platform, paths) = platform(dir.path()).await;
-    let select = selection(ZAI, "GLM-5.3", Some("high"));
+    let select = selection(ZAI, models::GLM_5_3_ACCOUNT, Some("high"));
     assert!(matches!(
         platform.endpoint(&select, None).await,
         Err(ModelError::InvalidRequest { .. })
@@ -167,7 +165,7 @@ async fn account_models_take_the_credential_on_every_request() {
         Credential::ApiKey(RedactedString::new("sk-first"))
     );
     assert!(first.renewable);
-    assert_eq!(first.base_url, "https://api.z.ai/api/anthropic");
+    assert_eq!(first.base_url, hosts::ZAI_ANTHROPIC);
     // 同一个 key 被拒：不能续期。
     assert!(matches!(
         platform.endpoint(&select, Some(&first)).await,
@@ -182,7 +180,7 @@ async fn account_models_take_the_credential_on_every_request() {
     );
     assert_eq!(
         platform.catalog().await.models[0].model,
-        "GLM-5.3",
+        models::GLM_5_3_ACCOUNT,
         "account models come first"
     );
 }
@@ -225,7 +223,7 @@ async fn an_injected_header_source_supplies_account_credentials() {
         .to_string(),
     )
     .await;
-    let select = selection(ZAI, "GLM-5.3", Some("high"));
+    let select = selection(ZAI, models::GLM_5_3_ACCOUNT, Some("high"));
     let context = EndpointContext {
         session: Some(rust_cli_kernel_api::ids::SessionId::new("session_1")),
     };
@@ -295,7 +293,7 @@ async fn limits_come_from_the_published_snapshot() {
     };
     assert_eq!(platform.limits(&chat), Some(expected));
     // 内置规则 `.*glm-5.*`：200000 / 64000。
-    let glm = platform.limits(&selection("personal:gateway", "glm-5", None));
+    let glm = platform.limits(&selection("personal:gateway", models::GLM_5, None));
     assert_eq!(
         glm,
         Some(TokenLimits {

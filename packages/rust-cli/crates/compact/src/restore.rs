@@ -98,7 +98,8 @@ impl Restore<'_> {
         cancel: &CancellationToken,
     ) -> Option<String> {
         let tool = self.tools.find(READ)?;
-        let (progress, _updates) = tokio::sync::mpsc::channel(16);
+        let (progress, _updates) =
+            tokio::sync::mpsc::channel(rust_cli_kernel_api::tool::DISCARDED_PROGRESS_CAPACITY);
         let context = ToolUseContext {
             session: request.session.clone(),
             run: self.ids.run(),

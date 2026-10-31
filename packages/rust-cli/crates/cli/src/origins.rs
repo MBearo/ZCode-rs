@@ -12,12 +12,11 @@
 
 use rust_cli_platform::AccountOrigins;
 
-const ZCODE_ORIGIN: &str = "https://zcode.z.ai";
-const ZCODE_TEST_ORIGIN: &str = "https://zcode.z.ai";
-const BIGMODEL_ORIGIN: &str = "https://bigmodel.cn";
-const BIGMODEL_TEST_ORIGIN: &str = "https://bigmodel.cn";
-const ZAI_API: &str = "https://api.z.ai";
-const ZAI_TEST_API: &str = "https://api.z.ai";
+// 地址定义在 base 的 `hosts`（工作线 F121）。
+use rust_cli_base::hosts::{
+    BIGMODEL_ORIGIN, BIGMODEL_ORIGIN_TEST as BIGMODEL_TEST_ORIGIN, ZAI_API,
+    ZAI_API_TEST as ZAI_TEST_API, ZCODE_ORIGIN, ZCODE_ORIGIN_TEST as ZCODE_TEST_ORIGIN,
+};
 
 /// Node `normalizeZCodeEndpointOrigin`：http(s) URL 的 origin。
 fn origin(name: &str, value: &str) -> Result<String, String> {
@@ -31,7 +30,8 @@ fn origin(name: &str, value: &str) -> Result<String, String> {
 
 /// Node `resolveRuntimeZCodeEnv`：`ZCODE_ENV`（去掉首尾空白）不分大小写等于 `test` 时是测试环境。`env` 同下。
 pub(crate) fn is_test(env: &impl Fn(&str) -> Option<String>) -> bool {
-    env("ZCODE_ENV").is_some_and(|value| value.eq_ignore_ascii_case("test"))
+    env(rust_cli_base::names::env::ZCODE_ENV)
+        .is_some_and(|value| value.eq_ignore_ascii_case("test"))
 }
 
 /// 第一个有值的变量（名字与值）。
@@ -52,12 +52,12 @@ pub(crate) fn zcode_origin(env: &impl Fn(&str) -> Option<String>) -> Result<Stri
         match first(
             env,
             &[
-                "ZCODE_BASE_URL",
-                "ZCODE_ENDPOINT_ORIGIN",
+                rust_cli_base::names::env::ZCODE_BASE_URL,
+                rust_cli_base::names::env::ZCODE_ENDPOINT_ORIGIN,
                 if test {
-                    "ZCODE_TEST_BASE_URL"
+                    rust_cli_base::names::env::ZCODE_TEST_BASE_URL
                 } else {
-                    "ZCODE_PRODUCTION_BASE_URL"
+                    rust_cli_base::names::env::ZCODE_PRODUCTION_BASE_URL
                 },
             ],
         ) {
@@ -77,11 +77,11 @@ pub(crate) fn account_origins(
     let first = |names: &[&'static str]| first(&env, names);
     let zcode = zcode_origin(&env)?;
     let bigmodel = match first(&[
-        "BIGMODEL_API_BASE_URL",
+        rust_cli_base::names::env::BIGMODEL_API_BASE_URL,
         if test {
-            "BIGMODEL_TEST_API_BASE_URL"
+            rust_cli_base::names::env::BIGMODEL_TEST_API_BASE_URL
         } else {
-            "BIGMODEL_PRODUCTION_API_BASE_URL"
+            rust_cli_base::names::env::BIGMODEL_PRODUCTION_API_BASE_URL
         },
     ]) {
         Some((name, value)) => origin(name, &value)?,
@@ -89,11 +89,11 @@ pub(crate) fn account_origins(
         None => BIGMODEL_ORIGIN.to_owned(),
     };
     let zai = match first(&[
-        "ZAI_BUSINESS_BASE_URL",
+        rust_cli_base::names::env::ZAI_BUSINESS_BASE_URL,
         if test {
-            "ZAI_TEST_BUSINESS_BASE_URL"
+            rust_cli_base::names::env::ZAI_TEST_BUSINESS_BASE_URL
         } else {
-            "ZAI_PRODUCTION_BUSINESS_BASE_URL"
+            rust_cli_base::names::env::ZAI_PRODUCTION_BUSINESS_BASE_URL
         },
     ]) {
         Some((name, value)) => origin(name, &value)?,

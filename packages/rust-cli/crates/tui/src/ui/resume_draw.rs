@@ -10,21 +10,38 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::App;
 use super::i18n::Lang;
-use super::i18n_projects::{self as words, CTRL};
+use super::i18n_projects::{self as words, PreviewLabel as Label};
+use super::layout;
 use super::mouse::Target;
 use super::palette::Palette;
 use super::resume::{Preview, ResumePage, TranscriptState};
+use super::resume_footer::{footer_hints, hint_row, progress};
 use super::session_rows::{SessionRow, center_truncate, relative, relative_long, timestamp};
 use super::text::{truncate, truncate_line, wrap_text};
 
 /// 日期列的宽度（Codex `SESSION_META_DATE_WIDTH`）。
 const DATE: usize = 12;
-/// footer 的提示用宽版说明的最小宽度（Codex `FOOTER_COMPACT_BREAKPOINT`）。
-const WIDE_FROM: usize = 120;
-/// 提示之间的空格（Codex `FOOTER_HINT_GAP`）。
-const GAP: usize = 3;
 /// 预览里每条对话最多几行（tui-manage.md D-R6）。
 const ITEM_LINES: usize = 3;
+/// 标题、工具栏与搜索行左右各留一列；列表左右各留两列。
+const CHROME_INSET: usize = 1;
+const LIST_INSET: usize = 2;
+/// 标题、工具栏、搜索行与列表之间的三个间隙（高度不够时依次收起）。
+const GAPS: u16 = 3;
+/// footer 从倒数第 4 行起：`─` 线、两行按键提示、最底下一行。
+const FOOTER_HEIGHT: u16 = 4;
+/// 行尾的路径：最多占宽度的三分之一，至少 16 列；与标题之间空两列。
+const PATH_SHARE: usize = 3;
+const MIN_PATH: usize = 16;
+const PATH_GAP: usize = 2;
+const PATH_ICON: &str = "⌁ ";
+/// 预览左边的竖线。
+const PREVIEW_BAR: &str = "  │ ";
+/// 滚动的百分比：列表放得下时是 100。
+const SCROLLED_ALL: u8 = 100;
+/// ⌃t 的加载浮层：比文字宽 10 列，3 行高。
+const LOADING_PADDING: u16 = 10;
+const LOADING_ROWS: u16 = 3;
 
 /// 纵向的区域（Codex `layout::areas`）：三个间隙在高度不够时依次收起。
 struct Areas {
@@ -38,12 +55,12 @@ struct Areas {
 fn areas(height: u16) -> Areas {
     const FIXED: u16 = 7;
     const MIN_LIST: u16 = 6;
-    let gaps = height.saturating_sub(FIXED + MIN_LIST).min(3);
+    let gaps = height.saturating_sub(FIXED + MIN_LIST).min(GAPS);
     let header = 0;
-    let toolbar = header + 1 + u16::from(gaps >= 3);
-    let search = toolbar + 1 + u16::from(gaps >= 2);
+    let toolbar = header + 1 + u16::from(gaps >= GAPS);
+    let search = toolbar + 1 + u16::from(gaps >= GAPS - 1);
     let list_top = search + 1 + u16::from(gaps >= 1);
-    let footer = height.saturating_sub(4);
+    let footer = height.saturating_sub(FOOTER_HEIGHT);
     Areas {
         header,
         toolbar,
@@ -120,142 +137,6 @@ fn toolbar(lang: Lang, palette: &Palette, page: &ResumePage, width: usize) -> Li
     Line::from(control(lang, palette, page.focus_sort, page, true))
 }
 
-/// footer 的一条提示。
-struct Hint {
-    key: String,
-    wide: &'static str,
-    compact: &'static str,
-    priority: u8,
-}
-
-#[derive(Clone, Copy)]
-enum Mode {
-    Wide,
-    Compact,
-    KeyOnly,
-}
-
-fn hint(lang: Lang, key: &str, which: &str, priority: u8) -> Hint {
-    let (wide, compact) = words::footer_label(lang, which);
-    Hint {
-        key: key.to_owned(),
-        wide,
-        compact,
-        priority,
-    }
-}
-
-fn fit(hints: &[&Hint], mode: Mode, width: usize, palette: &Palette) -> Option<Line<'static>> {
-    let label = |hint: &Hint| match mode {
-        Mode::Wide => Some(hint.wide),
-        Mode::Compact => Some(hint.compact),
-        Mode::KeyOnly => None,
-    };
-    let total: usize = 1 + hints
-        .iter()
-        .enumerate()
-        .map(|(index, hint)| {
-            hint.key.width()
-                + label(hint).map_or(0, |label| 1 + label.width())
-                + if index > 0 { GAP } else { 0 }
-        })
-        .sum::<usize>();
-    if total > width {
-        return None;
-    }
-    let mut spans = vec![Span::raw(" ")];
-    for (index, hint) in hints.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::raw(" ".repeat(GAP)));
-        }
-        spans.push(Span::styled(hint.key.clone(), palette.key()));
-        if let Some(label) = label(hint) {
-            spans.push(Span::styled(format!(" {label}"), palette.secondary()));
-        }
-    }
-    Some(Line::from(spans))
-}
-
-/// 一行提示（Codex `hint_line_for_row`）：宽版、窄版，放不下时按优先级保留能放下的最多几条。
-fn hint_row(hints: &[Hint], width: usize, palette: &Palette) -> Line<'static> {
-    let all: Vec<&Hint> = hints.iter().collect();
-    if width >= WIDE_FROM
-        && let Some(line) = fit(&all, Mode::Wide, width, palette)
-    {
-        return line;
-    }
-    if let Some(line) = fit(&all, Mode::Compact, width, palette) {
-        return line;
-    }
-    let mut kept: Vec<usize> = (0..hints.len()).collect();
-    kept.sort_by_key(|&index| hints[index].priority);
-    for mode in [Mode::Compact, Mode::KeyOnly] {
-        for count in (1..=kept.len()).rev() {
-            let mut chosen = kept[..count].to_vec();
-            chosen.sort_unstable();
-            let picked: Vec<&Hint> = chosen.iter().map(|&index| &hints[index]).collect();
-            if let Some(line) = fit(&picked, mode, width, palette) {
-                return line;
-            }
-        }
-    }
-    Line::default()
-}
-
-fn footer_hints(lang: Lang, page: &ResumePage) -> [Vec<Hint>; 2] {
-    let ctrl = |key: char| format!("{CTRL}{key}");
-    let mut first = vec![hint(lang, "enter", "resume", 0)];
-    if !page.filtered().is_empty() {
-        first.push(hint(lang, &ctrl('r'), "rename", 2));
-        first.push(hint(lang, &ctrl('d'), "delete", 2));
-    }
-    let esc = match (page.query.is_empty(), page.startup) {
-        (false, _) => "clear",
-        (true, true) => "new",
-        (true, false) => "exit",
-    };
-    first.push(hint(lang, "esc", esc, 1));
-    first.push(hint(
-        lang,
-        &ctrl('c'),
-        if page.startup { "quit" } else { "exit" },
-        2,
-    ));
-    first.push(hint(lang, "tab", "focus", 7));
-    first.push(hint(lang, "←/→", "option", 8));
-    let density = if page.comfortable {
-        "dense"
-    } else {
-        "comfortable"
-    };
-    let second = vec![
-        hint(lang, &ctrl('o'), density, 3),
-        hint(lang, &ctrl('t'), "transcript", 4),
-        hint(lang, &ctrl('e'), "expand", 6),
-        hint(lang, "↑/↓", "browse", 5),
-    ];
-    [first, second]
-}
-
-/// 进度（Codex `picker_footer_progress_label`）：` 位置 / 总数 · 百分比% `，放不下时依次变短。
-fn progress(page: &ResumePage, percent: u8, width: usize) -> String {
-    let count = page.filtered().len();
-    let position = if count == 0 { 0 } else { page.selected + 1 };
-    let total = if page.rows.is_none() {
-        format!("{count}…")
-    } else {
-        count.to_string()
-    };
-    [
-        format!(" {position} / {total} · {percent}% "),
-        format!(" {position}/{total} · {percent}% "),
-        format!(" {percent}% "),
-    ]
-    .into_iter()
-    .find(|label| label.width() < width)
-    .unwrap_or_default()
-}
-
 impl App {
     fn session_title(&self, row: &SessionRow) -> String {
         let label = row.label();
@@ -293,20 +174,23 @@ impl App {
         let path = super::app::label(&row.root, self.home.as_deref());
         if !page.comfortable {
             let mut spans = vec![marker, Span::styled(date, palette.secondary())];
-            let mut room = width.saturating_sub(2 + DATE);
+            let mut room = width.saturating_sub(super::pick::POINTER.width() + DATE);
             let mut suffix = None;
             // Filter=All 时行尾写路径（用户决定，tui-manage.md D-R8）。
             if page.all {
-                let shown = center_truncate(&path, (width / 3).max(16));
-                room = room.saturating_sub(shown.width() + 4);
+                let shown = center_truncate(&path, (width / PATH_SHARE).max(MIN_PATH));
+                room = room.saturating_sub(PATH_GAP + PATH_ICON.width() + shown.width());
                 suffix = Some(shown);
             }
             let title = truncate(&self.session_title(row), room);
             let pad = room.saturating_sub(title.width());
             spans.push(Span::raw(title));
             if let Some(suffix) = suffix {
-                spans.push(Span::raw(" ".repeat(pad + 2)));
-                spans.push(Span::styled(format!("⌁ {suffix}"), palette.secondary()));
+                spans.push(Span::raw(" ".repeat(pad + PATH_GAP)));
+                spans.push(Span::styled(
+                    format!("{PATH_ICON}{suffix}"),
+                    palette.secondary(),
+                ));
             }
             return vec![super::pick::paint(
                 Line::from(spans),
@@ -315,7 +199,10 @@ impl App {
                 width,
             )];
         }
-        let title = truncate(&self.session_title(row), width.saturating_sub(2));
+        let title = truncate(
+            &self.session_title(row),
+            width.saturating_sub(super::pick::POINTER.width()),
+        );
         let first = Line::from(vec![marker, Span::raw(title)]);
         let mut meta = vec![
             Span::raw("  "),
@@ -323,8 +210,11 @@ impl App {
             Span::raw("  "),
         ];
         if page.all {
-            let shown = center_truncate(&path, (width / 3).max(16));
-            meta.push(Span::styled(format!("⌁ {shown}  "), palette.secondary()));
+            let shown = center_truncate(&path, (width / PATH_SHARE).max(MIN_PATH));
+            meta.push(Span::styled(
+                format!("{PATH_ICON}{shown}  "),
+                palette.secondary(),
+            ));
         }
         match &row.branch {
             Some(branch) => meta.push(Span::styled(format!("⎇ {branch}"), palette.secondary())),
@@ -354,10 +244,12 @@ impl App {
     ) -> Vec<Line<'static>> {
         let lang = self.lang;
         let secondary = self.palette.secondary();
-        let bar = || Span::styled("  │ ", secondary);
+        let bar = || Span::styled(PREVIEW_BAR, secondary);
         let detail = |label: &str, value: String| {
             let label = format!("{label:<10}  ");
-            let room = width.saturating_sub(4 + label.width()).max(1);
+            let room = width
+                .saturating_sub(PREVIEW_BAR.width() + label.width())
+                .max(1);
             Line::from(vec![
                 bar(),
                 Span::styled(label, secondary),
@@ -380,18 +272,24 @@ impl App {
             row.branch.as_deref().unwrap_or(words::no_branch(lang))
         );
         let mut lines = vec![
-            detail(words::preview_label(lang, 0), session),
-            detail(words::preview_label(lang, 1), time(row.created)),
-            detail(words::preview_label(lang, 2), time(row.updated)),
+            detail(words::preview_label(lang, Label::Session), session),
             detail(
-                words::preview_label(lang, 3),
+                words::preview_label(lang, Label::Created),
+                time(row.created),
+            ),
+            detail(
+                words::preview_label(lang, Label::Updated),
+                time(row.updated),
+            ),
+            detail(
+                words::preview_label(lang, Label::Directory),
                 super::app::label(&row.root, self.home.as_deref()),
             ),
-            detail(words::preview_label(lang, 4), branch),
+            detail(words::preview_label(lang, Label::Branch), branch),
             Line::from(Span::styled("  │", secondary)),
             Line::from(vec![
                 bar(),
-                Span::styled(words::preview_label(lang, 5), secondary),
+                Span::styled(words::preview_label(lang, Label::Conversation), secondary),
             ]),
         ];
         match page.previews.get(&row.id) {
@@ -418,8 +316,8 @@ impl App {
                     } else {
                         secondary
                     };
-                    let mut wrapped =
-                        wrap_text(text.trim(), style, width.saturating_sub(4).max(1), &[], &[]);
+                    let room = width.saturating_sub(PREVIEW_BAR.width()).max(1);
+                    let mut wrapped = wrap_text(text.trim(), style, room, &[], &[]);
                     if wrapped.len() > ITEM_LINES {
                         wrapped.truncate(ITEM_LINES);
                         wrapped[ITEM_LINES - 1]
@@ -430,7 +328,7 @@ impl App {
                 }
                 let last = content.len().saturating_sub(1);
                 for (index, line) in content.into_iter().enumerate() {
-                    let prefix = if index == last { "  └ " } else { "  │ " };
+                    let prefix = if index == last { "  └ " } else { PREVIEW_BAR };
                     let mut spans = vec![Span::styled(prefix, secondary)];
                     spans.extend(line.spans);
                     lines.push(Line::from(spans));
@@ -456,14 +354,27 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, page: &mut ResumePage, now_ms:
     let lang = app.lang;
     let width = area.width as usize;
     let layout = areas(area.height);
-    let chrome = |y: u16| Rect::new(area.x + 1, area.y + y, area.width.saturating_sub(2), 1);
+    let inset = CHROME_INSET as u16;
+    let chrome = |y: u16| {
+        Rect::new(
+            area.x + inset,
+            area.y + y,
+            area.width.saturating_sub(2 * inset),
+            1,
+        )
+    };
     let bold = Style::default().add_modifier(Modifier::BOLD);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(words::resume_title(lang), bold))),
         chrome(layout.header),
     );
     frame.render_widget(
-        Paragraph::new(toolbar(lang, &app.palette, page, width.saturating_sub(2))),
+        Paragraph::new(toolbar(
+            lang,
+            &app.palette,
+            page,
+            width.saturating_sub(2 * CHROME_INSET),
+        )),
         chrome(layout.toolbar),
     );
     let search = if let Some(error) = &page.error {
@@ -487,13 +398,17 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, page: &mut ResumePage, now_ms:
         Line::from(words::search_query(lang, &page.query))
     };
     frame.render_widget(
-        Paragraph::new(truncate_line(search, width.saturating_sub(2))),
+        Paragraph::new(truncate_line(
+            search,
+            width.saturating_sub(2 * CHROME_INSET),
+        )),
         chrome(layout.search),
     );
+    let list_inset = LIST_INSET as u16;
     let list_area = Rect::new(
-        area.x + 2,
+        area.x + list_inset,
         area.y + layout.list.0,
-        area.width.saturating_sub(4),
+        area.width.saturating_sub(2 * list_inset),
         layout.list.1,
     );
     let percent = draw_list(frame, app, page, list_area, now_ms);
@@ -567,7 +482,7 @@ fn draw_list(
             words::no_sessions_yet(lang)
         };
         frame.render_widget(Paragraph::new(Span::styled(text, italic(secondary))), area);
-        return 100;
+        return SCROLLED_ALL;
     }
     // 每个会话的行（含展开的预览），Comfortable 时会话之间空一行。
     let blocks: Vec<Vec<Line<'static>>> = filtered
@@ -650,10 +565,10 @@ fn draw_list(
     }
     let max_scroll = total.saturating_sub(height);
     if max_scroll == 0 || sum(scroll..heights.len()) <= height {
-        return 100;
+        return SCROLLED_ALL;
     }
     let skipped = sum(0..scroll).min(max_scroll);
-    ((skipped as f64 / max_scroll as f64) * 100.0).round() as u8
+    ((skipped as f64 / max_scroll as f64) * super::quantities::PERCENT_F64).round() as u8
 }
 
 /// 删除确认（列表区域的下方，文字照 Codex 命令中心）。
@@ -697,8 +612,8 @@ fn draw_confirm(frame: &mut Frame<'_>, app: &App, page: &ResumePage, list: Rect)
 fn draw_loading(frame: &mut Frame<'_>, app: &App, list: Rect) {
     let message = words::loading_transcript(app.lang);
     let message_width = message.width() as u16;
-    let width = (message_width + 10).min(list.width);
-    let height = 3.min(list.height);
+    let width = (message_width + LOADING_PADDING).min(list.width);
+    let height = LOADING_ROWS.min(list.height);
     let overlay = Rect::new(
         list.x + list.width.saturating_sub(width) / 2,
         list.y + list.height.saturating_sub(height) / 2,
@@ -767,7 +682,7 @@ fn draw_cwd(frame: &mut Frame<'_>, app: &App, page: &ResumePage) {
     }
     lines.push(Line::default());
     lines.push(super::key_hint::line(
-        2,
+        layout::INDENT,
         words::cwd_hint(lang),
         &app.palette,
     ));

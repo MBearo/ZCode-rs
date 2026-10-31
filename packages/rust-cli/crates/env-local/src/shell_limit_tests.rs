@@ -49,14 +49,14 @@ async fn a_foreground_command_past_the_limit_is_killed_and_its_file_removed() {
     let mut fixture = fixture(Vec::new());
     fixture.shells.set_output_limit(SMALL);
     let start = request(FLOOD, &fixture.root, CwdScope::Pinned);
-    fixture.shells.start(context("op1"), start).await.unwrap();
+    let events = fixture.shells.start(context("op1"), start).await.unwrap();
     let output = fixture
         .shells
         .command(&OperationId::new("op1"))
         .unwrap()
         .output
         .clone();
-    let ran = collect(&fixture, "op1").await;
+    let ran = collect(events).await;
     let (outcome, exit, timed_out, bytes, note) = finished_parts(ran.finished);
     assert_eq!(
         (outcome, exit, timed_out),
@@ -82,7 +82,7 @@ async fn a_background_command_past_the_limit_ends_as_killed() {
         tool_use: None,
         kind: Default::default(),
     });
-    fixture.shells.start(context("op1"), start).await.unwrap();
+    let _events = fixture.shells.start(context("op1"), start).await.unwrap();
     let notice = fixture
         .shells
         .notices(&SessionId::new("s1"), 0)
@@ -110,8 +110,8 @@ async fn hook_files_count_together_against_the_limit() {
         stdin: "{}\n".to_owned(),
         env: BTreeMap::new(),
     });
-    fixture.shells.start(context("op1"), start).await.unwrap();
-    let ran = collect(&fixture, "op1").await;
+    let events = fixture.shells.start(context("op1"), start).await.unwrap();
+    let ran = collect(events).await;
     let (outcome, exit, _, _, note) = finished_parts(ran.finished);
     assert_eq!((outcome, exit), (Outcome::Cancelled, Some(137)));
     assert!(note.is_some());

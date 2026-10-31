@@ -429,16 +429,8 @@ async fn execute(
     input: Value,
     cancel: CancellationToken,
 ) -> ToolExecution {
+    // 不再先落库操作意图（工作线 F119）：没有读者，执行侧也不按 operationId 重放。
     let operation = scope.parts.ids.operation();
-    let fingerprint = json!({"tool": name, "input": input}).to_string();
-    if let Err(error) = scope
-        .sink
-        .commit_intent(operation.clone(), fingerprint)
-        .await
-    {
-        tracing::warn!(event = "tool.intent_failed", session = %scope.session, tool_use = %id, tool = %name, %error, "could not record the operation intent");
-        return ToolExecution::output(text_output(texts::tool_error(&format!("Error: {error}"))));
-    }
     tracing::debug!(event = "tool.start", session = %scope.session, tool_use = %id, tool = %name, "tool started");
     let _ = scope
         .sink

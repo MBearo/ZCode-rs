@@ -55,7 +55,8 @@ fn sse(name: &str, data: &str) -> String {
 fn message_start() -> String {
     sse(
         "message_start",
-        r#"{"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}"#,
+        &r#"{"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"<model>","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}"#
+            .replace("<model>", rust_cli_base::models::GLM_5_3),
     )
 }
 

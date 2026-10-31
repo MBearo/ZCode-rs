@@ -1,5 +1,6 @@
 //! 来源头的组装与各层的合并（工作线 F64，model.md §2.4 的第一张表与合并顺序）。
 
+use rust_cli_base::hosts;
 use std::sync::Arc;
 
 use rust_cli_base::secret::RedactedString;
@@ -13,7 +14,7 @@ use crate::openai_chat::OpenAiChat;
 fn facts() -> SourceFacts {
     SourceFacts {
         version: "0.1.52".to_owned(),
-        endpoint_origin: "https://zcode.z.ai".to_owned(),
+        endpoint_origin: hosts::ZCODE_ORIGIN.to_owned(),
         release_channel: "production".to_owned(),
         locale: Some("zh-CN".to_owned()),
         time_zone: Some("Asia/Shanghai".to_owned()),
@@ -28,7 +29,7 @@ fn facts() -> SourceFacts {
 fn source_headers_follow_node() {
     let headers = source_headers(&facts());
     let expected = [
-        ("http-referer", "https://zcode.z.ai"),
+        ("http-referer", hosts::ZCODE_ORIGIN),
         ("user-agent", "ZCode/0.1.52"),
         ("x-zcode-app-version", "0.1.52"),
         ("x-title", "Z Code@cli"),
@@ -234,8 +235,11 @@ fn without_request_headers_only_the_adapter_and_provider_layers_remain() {
 #[test]
 fn openrouter_gets_the_attribution_headers() {
     for (base_url, expected) in [
-        ("https://openrouter.ai/api/v1", Some("ZCode")),
-        ("http://openrouter.ai/api/v1", None),
+        (hosts::OPENROUTER_API, Some("ZCode")),
+        (
+            &hosts::OPENROUTER_API.replacen("https://", "http://", 1),
+            None,
+        ),
         ("https://api.example.com/v1", None),
     ] {
         let chat = endpoint(WireProtocol::OpenAiChatCompletions, base_url, &[]);
@@ -255,7 +259,7 @@ fn openrouter_gets_the_attribution_headers() {
     }
     let configured = endpoint(
         WireProtocol::OpenAiChatCompletions,
-        "https://openrouter.ai/api/v1",
+        hosts::OPENROUTER_API,
         &[("X-OpenRouter-Title", "Mine")],
     );
     let http = outbound(

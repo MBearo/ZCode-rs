@@ -220,6 +220,10 @@ impl Transcript {
             }
             // 扣住的同伴消息不进记录：批准框只看会话视图与这个快照（cross-session.md §2.6）。
             KernelEvent::PeerHeldChanged { held } => self.peer_held = held,
+            // 回合结束那一行（tui-display.md §2.7，F118）：排在这个回合的错误行之后（`TurnFinished` 先到）。
+            KernelEvent::TurnDuration(line) => {
+                self.push(Body::Duration(Box::new(line)), now_ms);
+            }
         }
     }
 

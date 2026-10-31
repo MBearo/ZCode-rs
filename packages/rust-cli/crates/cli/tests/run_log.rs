@@ -12,6 +12,7 @@ use std::net::TcpListener;
 use std::process::Stdio;
 use system_env::KeepSystem as _;
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::Value;
 
 const REPLY: &str = concat!(
@@ -76,7 +77,7 @@ fn a_print_run_writes_info_lines_to_the_daily_log() {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &server)
         .env("ZCODE_API_KEY", KEY)
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

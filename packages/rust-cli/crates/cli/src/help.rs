@@ -4,6 +4,7 @@
 //! 按单词折行），宽度是终端的列数，不是终端时 80（commander `helpWidth`）。
 
 use crate::commander::locale_compare;
+use crate::consts;
 
 /// 帮助里的一项：名字一栏与说明。
 #[derive(Debug, Clone, Copy)]
@@ -214,7 +215,9 @@ fn split_flags(term: &str) -> (Option<&str>, Option<&str>) {
         _ => (None, first),
     };
     match (short, long) {
-        (None, Some(long)) if long.len() == 2 && !long.starts_with("--") => (Some(long), None),
+        (None, Some(long)) if long.len() == consts::SHORT_OPTION_LEN && !long.starts_with("--") => {
+            (Some(long), None)
+        }
         other => other,
     }
 }

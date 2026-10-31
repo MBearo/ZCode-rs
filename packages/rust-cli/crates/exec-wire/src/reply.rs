@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::dto::core::{EnvFacts, Outcome, PathFacts};
+use crate::dto::core::{EnvFacts, PathFacts};
 use crate::dto::files::{
     DirEntry, FileContent, FileStat, FileWritten, GlobMatches, GrepOutcome, PdfRender, StatEntry,
     TextRead,
@@ -46,8 +46,6 @@ pub enum Reply {
     StartCommand,
     #[serde(rename = "commands.cancel")]
     Cancel,
-    #[serde(rename = "commands.operation_status")]
-    OperationStatus(Outcome),
     #[serde(rename = "commands.close_session")]
     CloseSession,
     #[serde(rename = "shell.shell_state")]
@@ -66,8 +64,6 @@ pub enum Reply {
     RewindPrepare(RewindPlan),
     #[serde(rename = "checkpoints.rewind_apply")]
     RewindApply(RewindStatus),
-    #[serde(rename = "checkpoints.rewind_status")]
-    RewindStatus(RewindStatus),
     #[serde(rename = "checkpoints.rewind_finish")]
     RewindFinish,
     #[serde(rename = "pdf.pdf_page_count")]
@@ -107,7 +103,6 @@ impl Reply {
             Self::Grep(_) => Op::Grep,
             Self::StartCommand => Op::StartCommand,
             Self::Cancel => Op::Cancel,
-            Self::OperationStatus(_) => Op::OperationStatus,
             Self::CloseSession => Op::CloseSession,
             Self::ShellState(_) => Op::ShellState,
             Self::AckShellNotice => Op::AckShellNotice,
@@ -117,7 +112,6 @@ impl Reply {
             Self::StopBackgroundCommand(_) => Op::StopBackgroundCommand,
             Self::RewindPrepare(_) => Op::RewindPrepare,
             Self::RewindApply(_) => Op::RewindApply,
-            Self::RewindStatus(_) => Op::RewindStatus,
             Self::RewindFinish => Op::RewindFinish,
             Self::PdfPageCount(_) => Op::PdfPageCount,
             Self::RenderPdfPages(_) => Op::RenderPdfPages,

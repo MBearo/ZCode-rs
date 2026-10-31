@@ -58,7 +58,7 @@ fn conflicts(files: &BTreeMap<String, Vec<u8>>, restore: &[RestoreFile]) -> Vec<
 }
 
 #[derive(Default)]
-pub(crate) struct Transactions(HashMap<OperationId, (Vec<RestoreFile>, RewindStatus)>);
+pub(crate) struct Transactions(HashMap<OperationId, Vec<RestoreFile>>);
 
 impl Transactions {
     pub(crate) fn prepare(
@@ -71,9 +71,7 @@ impl Transactions {
         if !found.is_empty() {
             return RewindPlan::Conflicts { files: found };
         }
-        self.0
-            .entry(token)
-            .or_insert((restore, RewindStatus::Prepared));
+        self.0.insert(token, restore);
         RewindPlan::Ready
     }
 
@@ -82,14 +80,12 @@ impl Transactions {
         files: &mut BTreeMap<String, Vec<u8>>,
         token: &OperationId,
     ) -> RewindStatus {
-        let Some((restore, status)) = self.0.get_mut(token) else {
+        // token 用过一次就作废（同 env-local，工作线 F119）。
+        let Some(restore) = self.0.remove(token) else {
             return RewindStatus::Unknown;
         };
-        if *status != RewindStatus::Prepared {
-            return status.clone();
-        }
-        let found = conflicts(files, restore);
-        *status = if found.is_empty() {
+        let found = conflicts(files, &restore);
+        if found.is_empty() {
             let mut done = Vec::new();
             for file in restore.iter() {
                 let path = file.path.as_str().to_owned();
@@ -114,14 +110,7 @@ impl Transactions {
                 message: "files changed after prepare".to_owned(),
                 conflicts: found,
             }
-        };
-        status.clone()
-    }
-
-    pub(crate) fn status(&self, token: &OperationId) -> RewindStatus {
-        self.0
-            .get(token)
-            .map_or(RewindStatus::Unknown, |(_, status)| status.clone())
+        }
     }
 
     pub(crate) fn finish(&mut self, token: &OperationId) {

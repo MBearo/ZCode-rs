@@ -47,8 +47,11 @@ fn closing(rest: &str) -> Option<(&str, &str)> {
 
 fn unquote(value: &str) -> String {
     let value = value.trim();
-    let quoted =
-        |quote: char| value.len() >= 2 && value.starts_with(quote) && value.ends_with(quote);
+    // 开头与结尾各一个引号。
+    const QUOTE_PAIR: usize = 2;
+    let quoted = |quote: char| {
+        value.len() >= QUOTE_PAIR && value.starts_with(quote) && value.ends_with(quote)
+    };
     if quoted('"') || quoted('\'') {
         value[1..value.len() - 1].to_owned()
     } else {

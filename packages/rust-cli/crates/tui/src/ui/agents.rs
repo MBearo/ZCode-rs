@@ -24,6 +24,10 @@ const MAX_ROWS: usize = 5;
 /// 名字列的最小与最大宽度。
 const LABEL_MIN: usize = 4;
 const LABEL_MAX: usize = 28;
+/// 一行：圆点一列（圆点与一个空格）占 2 列；名称后、用时前各至少空 2 列。
+const DOT_WIDTH: usize = 2;
+const NAME_GAP: usize = 2;
+const STATUS_GAP: usize = 2;
 
 /// 内核给的最后一份子代理快照与它到达的时刻（用时与消失按它往后推，不比较两边的墙上时间）。
 #[derive(Debug, Clone, Default)]
@@ -332,8 +336,9 @@ impl App {
             };
             // 缺陷修复（修复线 F26）：原来活动接在用时后面、描述的宽度按两者合计算，活动一变（`∴ Thinking` ↔ 工具名）
             // 用时就左右跳。现在用时右对齐在行尾，活动接在描述后面；活动变长时让描述截短，用时的位置不变。
-            let fixed = 2 + connector.width() + 2 + name_box + 2;
-            let tail_width = 2 + status.width();
+            let fixed =
+                super::pick::POINTER.width() + connector.width() + DOT_WIDTH + name_box + NAME_GAP;
+            let tail_width = STATUS_GAP + status.width();
             let doing_text = truncate(&doing.0, width.saturating_sub(fixed + tail_width));
             let room = width.saturating_sub(fixed + doing_text.width() + tail_width);
             let description = truncate(&entry.description, room);

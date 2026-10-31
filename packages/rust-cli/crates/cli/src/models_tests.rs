@@ -1,3 +1,5 @@
+use rust_cli_base::hosts::{ANTHROPIC_API, ANTHROPIC_API_V1, ZAI_ANTHROPIC};
+use rust_cli_base::models::{GLM_5, GLM_5_3, GPT_5_4};
 use rust_cli_kernel_api::provider::{CatalogModel, WireProtocol};
 
 use super::*;
@@ -16,13 +18,13 @@ fn the_anthropic_endpoint_comes_from_the_environment_snapshot() {
     assert_eq!(
         anthropic_endpoint(None, secret("sk-ant-1")),
         Some(AnthropicEndpoint {
-            base_url: "https://api.anthropic.com".to_owned(),
+            base_url: ANTHROPIC_API.to_owned(),
             api_key: RedactedString::new("sk-ant-1"),
         })
     );
     assert_eq!(
         anthropic_endpoint(Some("  ".to_owned()), secret("k")).map(|endpoint| endpoint.base_url),
-        Some("https://api.anthropic.com".to_owned())
+        Some(ANTHROPIC_API.to_owned())
     );
     assert_eq!(
         anthropic_endpoint(Some(" http://127.0.0.1:9/proxy ".to_owned()), secret("k"))
@@ -58,33 +60,29 @@ fn selection(provider: &str, model: &str, reasoning: Option<&str>) -> ModelSelec
 fn the_model_flag_picks_from_the_catalog() {
     let catalog = ModelCatalog {
         revision: 1,
-        models: vec![
-            entry("p1", "glm-5"),
-            entry("p2", "glm-5"),
-            entry("p2", "gpt-5.4"),
-        ],
-        default: Some(selection("p2", "gpt-5.4", Some("low"))),
+        models: vec![entry("p1", GLM_5), entry("p2", GLM_5), entry("p2", GPT_5_4)],
+        default: Some(selection("p2", GPT_5_4, Some("low"))),
     };
     assert_eq!(
         pick(&catalog, None).unwrap(),
-        selection("p2", "gpt-5.4", Some("low"))
+        selection("p2", GPT_5_4, Some("low"))
     );
     assert_eq!(
-        pick(&catalog, Some("p2/glm-5")).unwrap(),
-        selection("p2", "glm-5", None)
+        pick(&catalog, Some(&format!("p2/{GLM_5}"))).unwrap(),
+        selection("p2", GLM_5, None)
     );
     // 只给模型 ID 时取目录里第一个匹配。
     assert_eq!(
-        pick(&catalog, Some("glm-5")).unwrap(),
-        selection("p1", "glm-5", None)
+        pick(&catalog, Some(GLM_5)).unwrap(),
+        selection("p1", GLM_5, None)
     );
     // 选中默认模型时沿用默认档位。
     assert_eq!(
-        pick(&catalog, Some("gpt-5.4")).unwrap(),
-        selection("p2", "gpt-5.4", Some("low"))
+        pick(&catalog, Some(GPT_5_4)).unwrap(),
+        selection("p2", GPT_5_4, Some("low"))
     );
-    let missing = pick(&catalog, Some("claude-opus-5")).unwrap_err();
-    assert!(missing.contains("p2/gpt-5.4"), "{missing}");
+    let missing = pick(&catalog, Some(GLM_5_3)).unwrap_err();
+    assert!(missing.contains(&format!("p2/{GPT_5_4}")), "{missing}");
     // 提示里是本工程读的名字（config.md §2.5），不提 Anthropic SDK 的变量。
     let none = pick(&ModelCatalog::default(), None).unwrap_err();
     assert!(none.contains("set ZCODE_API_KEY"), "{none}");
@@ -171,17 +169,18 @@ fn the_rule_url_keeps_the_old_v1_rule() {
             format!("{base}/v1")
         }
     };
+    let with_slash = format!("{ANTHROPIC_API}/");
     for input in [
-        "https://api.anthropic.com",
-        "https://api.anthropic.com/",
+        ANTHROPIC_API,
+        with_slash.as_str(),
         " https://gw.example.com/V1/ ",
-        "https://api.z.ai/api/anthropic",
+        ZAI_ANTHROPIC,
         "http://127.0.0.1:9//",
         "",
     ] {
         assert_eq!(rule_base_url(input), old(input), "{input:?}");
     }
-    assert_eq!(OFFICIAL_RULE_URL, "https://api.anthropic.com/v1");
+    assert_eq!(OFFICIAL_RULE_URL, ANTHROPIC_API_V1);
 }
 
 /// `--effort`（cli-args.md §1.4）：目录里的模型按它的档位取舍，显式覆盖原样写；没给时不改。
@@ -189,10 +188,10 @@ fn the_rule_url_keeps_the_old_v1_rule() {
 fn the_effort_flag_sets_the_new_session_level() {
     let catalog = ModelCatalog {
         revision: 1,
-        models: vec![entry("p1", "glm-5")],
+        models: vec![entry("p1", GLM_5)],
         default: None,
     };
-    let chosen = selection("p1", "glm-5", None);
+    let chosen = selection("p1", GLM_5, None);
     assert_eq!(
         with_effort(chosen.clone(), Some("high"), Some(&catalog)).reasoning,
         Some("high".to_owned())
@@ -213,12 +212,7 @@ fn the_effort_flag_sets_the_new_session_level() {
         unknown
     );
     assert_eq!(
-        with_effort(
-            selection("anthropic", "claude-opus-5-5", None),
-            Some("max"),
-            None
-        )
-        .reasoning,
+        with_effort(selection("anthropic", GLM_5_3, None), Some("max"), None).reasoning,
         Some("max".to_owned())
     );
 }

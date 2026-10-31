@@ -2,6 +2,8 @@
 
 /// 替换期间代替 `` $ `` 的占位，最后换回 `` $ ``。
 const DOLLAR: char = '\u{FFFF}';
+/// 转义的 `$`：反斜杠加 `$`。
+const ESCAPED_DOLLAR: &str = "\\$";
 /// 包住替换进去的值，替换进去的文本不再参与后面的替换，最后去掉。
 const GUARD: char = '\u{FFFE}';
 
@@ -135,7 +137,7 @@ fn protect_escapes(text: &str, names: &[&str]) -> String {
             && chars.get(index + 1) == Some(&'$')
             && (index == 0 || chars[index - 1] != '\\');
         if escaped {
-            let rest: String = chars[index + 2..].iter().collect();
+            let rest: String = chars[index + ESCAPED_DOLLAR.len()..].iter().collect();
             let protects = rest.chars().next().is_some_and(|c| c.is_ascii_digit())
                 || rest.starts_with("ARGUMENTS")
                 || names.iter().any(|name| {
@@ -147,7 +149,7 @@ fn protect_escapes(text: &str, names: &[&str]) -> String {
                 });
             if protects {
                 out.push(DOLLAR);
-                index += 2;
+                index += ESCAPED_DOLLAR.len();
                 continue;
             }
         }

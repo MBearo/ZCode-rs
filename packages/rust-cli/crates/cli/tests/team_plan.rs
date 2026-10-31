@@ -16,6 +16,8 @@ use std::process::{Output, Stdio};
 use std::sync::{Arc, Mutex};
 use system_env::KeepSystem as _;
 
+use rust_cli_base::hosts::BIGMODEL_ORIGIN;
+use rust_cli_base::models::GLM_5_3_ACCOUNT;
 use serde_json::{Value, json};
 
 const REPLY: &str = concat!(
@@ -228,13 +230,13 @@ fn the_model_flag_names_the_team_project() {
     let dir = tempfile::tempdir().unwrap();
     let home = std::fs::canonicalize(dir.path()).unwrap();
     let builtin = prepare(&home, &url);
-    let team = "account:bigmodel-team-coding-plan/GLM-5.3";
+    let team = format!("account:bigmodel-team-coding-plan/{GLM_5_3_ACCOUNT}");
     let output = zcode(&home, &builtin, &url, &["--model", &format!("{team}[p-u]")]);
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert_eq!(model_auth(&seen).as_deref(), Some("Bearer pat-p-u"));
     // 两个团队项目、没写哪一个：报错，不请求模型。显示名相同（同一组织），写法用项目 ID。
     seen.lock().unwrap().clear();
-    let output = zcode(&home, &builtin, &url, &["--model", team]);
+    let output = zcode(&home, &builtin, &url, &["--model", &team]);
     assert!(!output.status.success());
     let all = format!("{}{}", text(&output.stdout), text(&output.stderr));
     let expected =
@@ -253,7 +255,9 @@ fn an_expired_team_plan_explains_itself() {
     assert!(!output.status.success());
     let all = format!("{}{}", text(&output.stdout), text(&output.stderr));
     // 管理页照 App 只看 `ZCODE_ENV`，不跟随指向本地替身的 `BIGMODEL_API_BASE_URL`（修复线 F58）。
-    let notice = "Team plan expired. Contact your team administrator. Manage team plan: https://bigmodel.cn/coding-plan/team/plans";
-    assert!(all.contains(notice), "{all}");
+    let notice = format!(
+        "Team plan expired. Contact your team administrator. Manage team plan: {BIGMODEL_ORIGIN}/coding-plan/team/plans"
+    );
+    assert!(all.contains(&notice), "{all}");
     assert_eq!(model_auth(&seen), None);
 }

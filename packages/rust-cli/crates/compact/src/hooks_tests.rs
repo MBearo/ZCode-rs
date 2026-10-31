@@ -3,6 +3,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::ids::{AgentId, MessageId};
 use rust_cli_kernel_api::message::{AttachmentMessage, CompactTrigger, Message};
 use rust_cli_kernel_api::orchestration::{HookEvent, HookEventName, HookOutcome, HookRunner};
@@ -73,7 +74,7 @@ async fn session_start_runs_inside_every_compaction_before_post_compact() {
         // 对 compact 不传标题：只有 source 与 model；子代理里带 agent_id。
         assert_eq!(
             start.payload,
-            json!({"source": "compact", "model": "claude-opus-5-5"})
+            json!({"source": "compact", "model": GLM_5_3})
         );
         assert_eq!(start.context.agent, Some(AgentId::new("agent_1")));
         // hook 消息排在附件之后，与边界、摘要一起交给调用方提交。

@@ -2,9 +2,10 @@
 //! heredoc：定界符、正文读取（在下一个 Newline token 时）以及正文的展开扫描。
 
 use super::{
-    AT, BACKSLASH, BACKTICK, BANG, DASH, DOLLAR, DQUOTE, HASH, HereDocBody, LBRACE, LPAREN, Lexer,
-    PendingHereDoc, QUESTION, SQUOTE, STAR, TAB, UNDERSCORE, is_digit, is_meta,
+    ASCII_END, AT, BACKSLASH, BACKTICK, BANG, DASH, DOLLAR, DQUOTE, HASH, HereDocBody, LBRACE,
+    LPAREN, Lexer, PendingHereDoc, QUESTION, SQUOTE, STAR, TAB, UNDERSCORE, is_digit, is_meta,
 };
+use crate::consts::ESCAPE_LEN;
 use crate::parse::parts::Part;
 
 /// `parseHereDocBody` 的快速扫描：只有出现反引号或 `$` 后跟可展开字符时才生成正文单词。
@@ -20,7 +21,7 @@ fn body_may_expand(body: &[u8]) -> bool {
             let expands = matches!(
                 next,
                 LBRACE | LPAREN | DOLLAR | UNDERSCORE | BANG | HASH | AT | STAR | QUESTION | DASH
-            ) || (next < 128 && (next as u8).is_ascii_alphabetic())
+            ) || (next < ASCII_END && (next as u8).is_ascii_alphabetic())
                 || is_digit(next);
             if expands {
                 return true;
@@ -180,7 +181,7 @@ impl Lexer<'_> {
             if ch == BACKSLASH {
                 if i + 1 < body_end && matches!(self.c(i + 1), DOLLAR | BACKTICK | BACKSLASH) {
                     lit.extend_from_slice(self.unit(i + 1));
-                    i += 2;
+                    i += ESCAPE_LEN;
                 } else {
                     lit.push(b'\\');
                     i += 1;

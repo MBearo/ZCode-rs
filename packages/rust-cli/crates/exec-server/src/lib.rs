@@ -14,6 +14,7 @@ mod fence;
 mod ledger;
 mod mcp;
 mod server;
+mod started;
 
 pub use auth::{AllowAll, Authenticator, Principal};
 pub use fence::Fence;

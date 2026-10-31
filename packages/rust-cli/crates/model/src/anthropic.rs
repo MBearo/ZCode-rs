@@ -70,7 +70,10 @@ impl Protocol for Anthropic {
         match credential {
             Credential::None => Vec::new(),
             Credential::ApiKey(key) => {
-                vec![("x-api-key".to_owned(), HeaderValue::Secret(key.clone()))]
+                vec![(
+                    header::X_API_KEY.to_owned(),
+                    HeaderValue::Secret(key.clone()),
+                )]
             }
         }
     }

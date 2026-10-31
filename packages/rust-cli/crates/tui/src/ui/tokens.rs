@@ -3,7 +3,7 @@
 //! `bottom_pane/status_line_style.rs`；代码自己写，没有复制。颜色只取决于启动时探测到的终端事实（`Palette`）。
 use ratatui::style::{Color, Modifier, Style};
 
-use super::palette::{ColorLevel, Palette, Rgb, blend, is_light};
+use super::palette::{BLACK, ColorLevel, Palette, Rgb, WHITE, blend, is_light};
 
 // 配色的命名常量（tui.md §7.4）：别处要同样的颜色时用这里的常量与 `Palette` 的方法，不另写字面量（F27 的 footer
 // 右侧统计复用它们）。
@@ -77,22 +77,38 @@ pub const FIND_CURRENT_TEXT: Rgb = (0, 0, 0);
 pub const FIND_CURRENT_NAMED: Color = Color::Yellow;
 pub const FIND_CURRENT_TEXT_NAMED: Color = Color::Black;
 
+// WCAG 2.x 的相对亮度与对比度：sRGB 分量先线性化（不超过 0.04045 时除以 12.92，否则
+// `((v + 0.055) / 1.055)^2.4`），再按 Rec. 709 的权重加权；对比度是 `(亮 + 0.05) / (暗 + 0.05)`。
+const SRGB_LINEAR_LIMIT: f64 = 0.04045;
+const SRGB_LINEAR_SLOPE: f64 = 12.92;
+const SRGB_OFFSET: f64 = 0.055;
+const SRGB_SCALE: f64 = 1.055;
+const SRGB_GAMMA: f64 = 2.4;
+const LUMINANCE_WEIGHTS: [f64; 3] = [0.2126, 0.7152, 0.0722];
+const CONTRAST_FLARE: f64 = 0.05;
+/// 状态行颜色的整数亮度：权重（红、绿、蓝）之和是 256。
+const STATUS_LUMA_WEIGHTS: [u32; 3] = [77, 150, 29];
+const STATUS_LUMA_SCALE: u32 = 256;
+/// 百分比的分母（整数运算）。
+const PERCENT: u32 = super::quantities::PERCENT as u32;
+
 fn luminance((r, g, b): Rgb) -> f64 {
     let channel = |value: u8| {
-        let value = f64::from(value) / 255.0;
-        if value <= 0.04045 {
-            value / 12.92
+        let value = f64::from(value) / f64::from(u8::MAX);
+        if value <= SRGB_LINEAR_LIMIT {
+            value / SRGB_LINEAR_SLOPE
         } else {
-            ((value + 0.055) / 1.055).powf(2.4)
+            ((value + SRGB_OFFSET) / SRGB_SCALE).powf(SRGB_GAMMA)
         }
     };
-    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    let [wr, wg, wb] = LUMINANCE_WEIGHTS;
+    wr * channel(r) + wg * channel(g) + wb * channel(b)
 }
 
 /// 两种颜色的对比度（WCAG）。
 pub fn ratio(a: Rgb, b: Rgb) -> f64 {
     let (a, b) = (luminance(a), luminance(b));
-    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    (a.max(b) + CONTRAST_FLARE) / (a.min(b) + CONTRAST_FLARE)
 }
 
 /// 在 `background` 上读得清的 `preferred`（Codex `contrast::foreground` 的真彩色分支）：对比度够就用原色，
@@ -101,24 +117,27 @@ pub fn readable(preferred: Rgb, background: Rgb) -> Rgb {
     if ratio(preferred, background) >= MIN_TEXT_CONTRAST {
         return preferred;
     }
-    let endpoint = if ratio((0, 0, 0), background) >= ratio((255, 255, 255), background) {
-        (0, 0, 0)
+    let endpoint = if ratio(BLACK, background) >= ratio(WHITE, background) {
+        BLACK
     } else {
-        (255, 255, 255)
+        WHITE
     };
-    (1..=255)
-        .map(|step| blend(preferred, endpoint, f64::from(step) / 255.0))
+    (1..=u8::MAX)
+        .map(|step| blend(preferred, endpoint, f64::from(step) / f64::from(u8::MAX)))
         .find(|candidate| ratio(*candidate, background) >= MIN_TEXT_CONTRAST)
         .unwrap_or(endpoint)
 }
 
 /// Codex `soften_status_line_color`：85% 原色加 15% 亮度。
 fn soften((r, g, b): Rgb) -> Rgb {
-    let luma = (77 * u32::from(r) + 150 * u32::from(g) + 29 * u32::from(b)) / 256;
+    let [wr, wg, wb] = STATUS_LUMA_WEIGHTS;
+    let luma = (wr * u32::from(r) + wg * u32::from(g) + wb * u32::from(b)) / STATUS_LUMA_SCALE;
     let channel = |c: u8| {
-        ((u32::from(c) * STATUS_SATURATION_PERCENT + luma * (100 - STATUS_SATURATION_PERCENT) + 50)
-            / 100)
-            .min(255) as u8
+        ((u32::from(c) * STATUS_SATURATION_PERCENT
+            + luma * (PERCENT - STATUS_SATURATION_PERCENT)
+            + PERCENT / 2)
+            / PERCENT)
+            .min(u32::from(u8::MAX)) as u8
     };
     (channel(r), channel(g), channel(b))
 }
@@ -173,7 +192,8 @@ impl Palette {
             (SELECTION_FILL_DARK, SELECTION_FILL_LIGHT)
         };
         // 底色太接近背景（蓝色的终端）时换另一种蓝。
-        if ratio(fill, background) < 1.25 && ratio(alternate, background) > ratio(fill, background)
+        if ratio(fill, background) < SELECTION_MIN_RATIO
+            && ratio(alternate, background) > ratio(fill, background)
         {
             fill = alternate;
         }

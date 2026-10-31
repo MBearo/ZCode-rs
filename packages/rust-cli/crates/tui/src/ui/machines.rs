@@ -8,9 +8,14 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::{Action, App, Overlay};
 use super::i18n_machines as words;
+use super::layout;
 use super::palette::Palette;
 use super::text::{truncate_line, wrap_text};
 use crate::machines::{MachineRow, MachineStatus};
+
+/// 机器名与状态之间至少空 2 列；放不下时至少显示 2 行。
+const STATUS_GAP: usize = 2;
+const MIN_ROWS: usize = 2;
 
 /// 交给 runner 经机器服务做的事。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -318,7 +323,7 @@ impl App {
                 dot(&row.status, palette),
                 Span::raw(" "),
                 Span::raw(row.name.clone()),
-                Span::raw(" ".repeat(name_width - row.name.width() + 2)),
+                Span::raw(" ".repeat(name_width - row.name.width() + STATUS_GAP)),
                 Span::styled(status, palette.secondary()),
             ]);
             body.push((
@@ -359,7 +364,9 @@ impl App {
             }
         }
         // 放不下时只留焦点附近的（上面固定 4 行，下面空行与提示 2 行）。
-        let room = height.saturating_sub(lines.len() + 2).max(2);
+        let room = height
+            .saturating_sub(lines.len() + layout::FOOTER_ROWS)
+            .max(MIN_ROWS);
         let first = body.iter().position(|(_, focused)| *focused).unwrap_or(0);
         let start = first
             .saturating_sub(room.saturating_sub(1))
@@ -377,7 +384,7 @@ impl App {
             .get(focus)
             .is_some_and(|row| row.status.awaits_retry());
         lines.push(truncate_line(
-            super::key_hint::line(2, &words::hint(lang, live, retry), palette),
+            super::key_hint::line(layout::INDENT, &words::hint(lang, live, retry), palette),
             width,
         ));
         lines

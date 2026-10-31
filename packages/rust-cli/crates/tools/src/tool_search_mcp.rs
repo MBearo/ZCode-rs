@@ -11,8 +11,8 @@ use rust_cli_kernel_api::mcp_state::PENDING_LISTED as LISTED;
 use rust_cli_kernel_api::mcp_state::{McpConnections, McpView, normalize_name};
 use rust_cli_kernel_api::tool::{Tool, ToolError, ToolUseContext};
 
-/// 最多等多久（5000 ms）。
-const WAIT_MS: u64 = 5_000;
+/// 最多等多久（与 WaitForMcpServers 共用，只定义在 kernel-api）。
+const WAIT_MS: u64 = rust_cli_kernel_api::mcp_state::MCP_WAIT_MS;
 
 /// 查询点名的服务器：文本里 `mcp__<段>` 的服务器段（到 `__` 为止），加上名字按词边界（不分大小写）
 /// 出现在文本里的服务器；去重，按出现的先后。

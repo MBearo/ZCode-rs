@@ -2,13 +2,14 @@
 //! `personal/`），对本地假服务。zai 存的是业务 JWT（修复线 F47，照 App），请求期直接用、不再换。
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::model::ModelError;
 use rust_cli_kernel_api::provider::{Credential, ModelEndpoints};
 use serde_json::{Value, json};
 
-use crate::fake_server_tests::{Account, BIGMODEL, Harness, Reply, Server, ZAI, selection};
+use crate::fake_server_tests::{Account, BIGMODEL, Gate, Harness, Reply, Server, ZAI, selection};
 
 const ISSUE: &str = "/api/biz/v1/organization/org-1/projects/p-1/api_keys/key-1/access_tokens";
 
@@ -337,15 +338,22 @@ async fn bigmodel_uses_the_access_token_directly() {
 #[tokio::test]
 async fn switching_accounts_mid_exchange_invalidates_the_token() {
     let account = Account::new(true);
-    // 签发请求到达假服务时通知测试，回复再停 300 毫秒：测试在这段时间里换账号。
+    // 登录之后的第一个签发请求到达假服务时通知测试，回复停在闸门上：测试换完账号再放行（F123：以前固定停 300 毫秒，
+    // 负载高时不够长）。
     let arrived = Arc::new(tokio::sync::Notify::new());
+    let (gate, armed) = (Gate::default(), Arc::new(AtomicBool::new(false)));
     let server = Server::start({
-        let (account, arrived) = (account.clone(), arrived.clone());
+        let (account, arrived, gate, armed) = (
+            account.clone(),
+            arrived.clone(),
+            gate.clone(),
+            armed.clone(),
+        );
         move |request| {
             let reply = account.reply(request);
-            if request.path == ISSUE {
+            if request.path == ISSUE && armed.swap(false, Ordering::SeqCst) {
                 arrived.notify_one();
-                reply.after(300)
+                reply.until(&gate)
             } else {
                 reply
             }
@@ -354,12 +362,14 @@ async fn switching_accounts_mid_exchange_invalidates_the_token() {
     .await;
     let harness = Arc::new(Harness::new(&server.url()).await);
     zai_login(&harness, "at-zai").await;
+    armed.store(true, Ordering::SeqCst);
     let pending = tokio::spawn({
         let harness = harness.clone();
         async move { pat(&harness, ZAI_PLAN, None).await }
     });
     arrived.notified().await;
     zai_login(&harness, "at-switched").await;
+    gate.open();
     let message = auth_error(pending.await.unwrap());
     assert!(
         message.starts_with("project_token_scope_invalidated"),

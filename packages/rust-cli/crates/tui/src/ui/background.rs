@@ -14,12 +14,18 @@ use unicode_width::UnicodeWidthStr;
 use super::agents::{Focus, stoppable};
 use super::app::{Action, App, Overlay};
 use super::i18n::Lang;
+use super::layout;
 use super::manage::Manage;
 use super::panels::Panel;
 use super::text::{truncate, truncate_line, wrap_text};
 
 /// 命令最多占的行数。
 const COMMAND_LINES: usize = 3;
+/// 列表行：圆点一列（圆点与一个空格）占 2 列；名称与状态之间至少空 3 列。
+const BULLET_WIDTH: usize = 2;
+const STATUS_GAP: usize = 3;
+/// 输出框至少这么宽。
+const MIN_BOX_WIDTH: usize = 6;
 
 /// Background 面板：焦点在全部条目（先 shell 后代理）里的下标，与打开着的 Shell 详情。
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -39,6 +45,9 @@ pub struct ShellView {
     pub gone: bool,
     /// 所在的远端机器（远端执行 R4，remote-exec.md §21.6）；本机为 None。
     pub machine: Option<String>,
+    /// Monitor 起的命令（修复线 F117，tui-panels.md §3.3）：标题是 `Monitor details`、命令一行写 `Script:`；`command`
+    /// 是它的 description（列表的名称），命令原文要等第一次读到。
+    pub monitor: bool,
 }
 
 /// 面板里的一项。
@@ -112,12 +121,14 @@ fn plain_output(line: &str) -> String {
 }
 
 impl App {
-    /// 在跑的后台 shell（快照的顺序）。
+    /// 在跑的后台 shell 与 monitor（快照的顺序）。monitor 与 shell 同组（修复线 F117，tui-panels.md §3.2），名称是快照
+    /// 条目的 description。
     pub fn shell_rows(&self) -> Vec<&BackgroundEntry> {
         self.background
             .iter()
             .filter(|entry| {
-                entry.kind == BackgroundKind::Shell && entry.status == BackgroundStatus::Running
+                matches!(entry.kind, BackgroundKind::Shell | BackgroundKind::Monitor)
+                    && entry.status == BackgroundStatus::Running
             })
             .collect()
     }
@@ -259,6 +270,7 @@ impl App {
                 Entry::Shell(shell) => {
                     let (id, command) = (shell.id.clone(), shell.description.clone());
                     let machine = shell.machine.clone();
+                    let monitor = shell.kind == BackgroundKind::Monitor;
                     if let Some(view) = self.background_view_mut() {
                         view.detail = Some(ShellView {
                             id: id.clone(),
@@ -267,6 +279,7 @@ impl App {
                             last: None,
                             gone: false,
                             machine,
+                            monitor,
                         });
                     }
                     return Some(Action::Panel(Panel::ReadShell(id)));
@@ -407,7 +420,8 @@ impl App {
             _ => None,
         };
         let tag_width = |entry: &Entry| {
-            machine_of(entry).map_or(0, |machine| 2 + machine.width())
+            // 机器标记：前面一个空格与 `@`。
+            machine_of(entry).map_or(0, |machine| " @".width() + machine.width())
                 + stale_note(entry).map_or(0, |note| note.width())
         };
         let status_width = entries
@@ -421,7 +435,9 @@ impl App {
             .map(|e| label_of(e).width() + tag_width(e))
             .max()
             .unwrap_or(0)
-            .min(width.saturating_sub(4 + 3 + status_width));
+            .min(width.saturating_sub(
+                super::pick::POINTER.width() + BULLET_WIDTH + STATUS_GAP + status_width,
+            ));
         let headers = !shells.is_empty() && !agents.is_empty();
         let mut body: Vec<(Line<'static>, Option<usize>)> = Vec::new();
         for (index, entry) in entries.iter().enumerate() {
@@ -455,7 +471,7 @@ impl App {
                 &label_of(entry),
                 label_width.saturating_sub(tag_width(entry)),
             );
-            let pad = label_width.saturating_sub(label.width() + tag_width(entry)) + 3;
+            let pad = label_width.saturating_sub(label.width() + tag_width(entry)) + STATUS_GAP;
             let mut named = vec![Span::raw(label)];
             if let Some(machine) = &tag {
                 named.push(Span::raw(" "));
@@ -491,7 +507,9 @@ impl App {
             ));
         }
         // 条目放不下时只显示焦点附近的（上面固定 3 行，下面空行与提示 2 行）。
-        let room = height.saturating_sub(lines.len() + 2).max(3);
+        let room = height
+            .saturating_sub(lines.len() + layout::FOOTER_ROWS)
+            .max(layout::MIN_LIST_ROWS);
         let focus_line = body
             .iter()
             .position(|(_, index)| *index == Some(selected))
@@ -525,7 +543,7 @@ impl App {
             .map(|(_, en, zh)| pick(lang, en, zh))
             .collect();
         lines.push(truncate_line(
-            super::key_hint::line(2, &hint.join(" · "), &self.palette),
+            super::key_hint::line(layout::INDENT, &hint.join(" · "), &self.palette),
             width,
         ));
         (lines, rows)
@@ -552,7 +570,14 @@ impl App {
         let mut lines = vec![
             Line::from(Span::styled("─".repeat(width), Style::default().fg(accent))),
             Line::from(Span::styled(
-                format!("  {}", pick(lang, "Shell details", "Shell 详情")),
+                format!(
+                    "  {}",
+                    if open.monitor {
+                        pick(lang, "Monitor details", "Monitor 详情")
+                    } else {
+                        pick(lang, "Shell details", "Shell 详情")
+                    }
+                ),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             )),
             Line::default(),
@@ -574,21 +599,36 @@ impl App {
                 super::cells::duration(elapsed),
             ));
         }
-        let label = pick(lang, "Command: ", "命令：");
-        let indent = " ".repeat(2 + label.width());
-        lines.extend(
-            wrap_text(
-                &plain_output(&open.command),
-                Style::default(),
-                width,
-                &[
-                    Span::raw("  "),
-                    Span::styled(label, Style::default().add_modifier(Modifier::BOLD)),
-                ],
-                &[Span::raw(indent)],
+        // monitor 的命令一行写 `Script:`，内容是读到的命令原文（打开时只有 description，第一次读到之前不写，F117）。
+        let (label, command) = if open.monitor {
+            (
+                pick(lang, "Script: ", "脚本："),
+                open.last.as_ref().map(|last| last.command.as_str()),
             )
-            .into_iter()
-            .take(COMMAND_LINES),
+        } else {
+            (
+                pick(lang, "Command: ", "命令："),
+                Some(open.command.as_str()),
+            )
+        };
+        let indent = " ".repeat(layout::INDENT + label.width());
+        lines.extend(
+            command
+                .map(|command| {
+                    wrap_text(
+                        &plain_output(command),
+                        Style::default(),
+                        width,
+                        &[
+                            Span::raw("  "),
+                            Span::styled(label, Style::default().add_modifier(Modifier::BOLD)),
+                        ],
+                        &[Span::raw(indent)],
+                    )
+                })
+                .into_iter()
+                .flatten()
+                .take(COMMAND_LINES),
         );
         lines.push(Line::default());
         lines.push(Line::from(Span::styled(
@@ -624,9 +664,9 @@ impl App {
                 ),
             };
         // 输出框：从第 2 列到倒数第 2 列。
-        let box_width = width.saturating_sub(4).max(6);
-        let inner = box_width - 4;
-        let rule = "─".repeat(box_width - 2);
+        let box_width = width.saturating_sub(2 * layout::INDENT).max(MIN_BOX_WIDTH);
+        let inner = box_width - layout::BOX_BORDERS - layout::BOX_PADDING;
+        let rule = "─".repeat(box_width - layout::BOX_BORDERS);
         lines.push(Line::from(Span::styled(format!("  ╭{rule}╮"), dim())));
         for text in shown {
             let text = truncate(&text, inner);
@@ -649,7 +689,7 @@ impl App {
             (Lang::Zh, true) => "{←} 返回 · {x} 停止 · {esc} 关闭",
             (Lang::Zh, false) => "{←} 返回 · {esc} 关闭",
         };
-        lines.push(super::key_hint::line(2, hint, &self.palette));
+        lines.push(super::key_hint::line(layout::INDENT, hint, &self.palette));
         lines
     }
 }

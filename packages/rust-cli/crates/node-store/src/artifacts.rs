@@ -5,12 +5,16 @@
 //! 会话目录是 `sanitizePathSegment(sessionId)`，artifact id 是 `tool-result-<uuid>`，文件名
 //! `<前缀>-<artifactId><扩展名>` 含 artifact id，Node 按 id 子串找到文件；扩展名决定 Node 按文本
 //! 还是 base64 读回。前缀是用途（Node 用 toolCallId，内核的 put 没有它）。
+use rust_cli_base::proto::mime;
 use rust_cli_kernel_api::ids::{ArtifactId, SessionId};
 use rust_cli_kernel_api::persisted_output::ARTIFACT_SCHEME;
 use rust_cli_kernel_api::store::{ArtifactPurpose, ArtifactRef, StoreError};
 use rust_cli_paths::StoragePath;
 
 use crate::storage;
+
+/// 路径段最多这么多字节（只剩 ASCII，等于 JS 的 `slice`）。
+const MAX_SEGMENT_LEN: usize = 120;
 
 /// Node `sanitizePathSegment`（JS 正则按 UTF-16 码元替换）。
 pub fn segment(value: &str) -> String {
@@ -22,7 +26,7 @@ pub fn segment(value: &str) -> String {
             out.extend(std::iter::repeat_n('_', c.len_utf16()));
         }
     }
-    out.truncate(120);
+    out.truncate(MAX_SEGMENT_LEN);
     if out.is_empty() {
         "unknown".into()
     } else {
@@ -62,16 +66,16 @@ fn extension(media_type: &str) -> &'static str {
         .trim()
         .to_ascii_lowercase();
     match mime.as_str() {
-        "text/plain" => ".txt",
-        "text/markdown" => ".md",
-        "text/html" => ".html",
+        mime::TEXT_PLAIN => ".txt",
+        mime::TEXT_MARKDOWN => ".md",
+        mime::TEXT_HTML => ".html",
         "text/csv" => ".csv",
-        "application/json" => ".json",
-        "image/png" => ".png",
-        "image/jpeg" | "image/jpg" => ".jpg",
-        "image/gif" => ".gif",
-        "image/webp" => ".webp",
-        "application/pdf" => ".pdf",
+        mime::JSON => ".json",
+        mime::PNG => ".png",
+        mime::JPEG | "image/jpg" => ".jpg",
+        mime::GIF => ".gif",
+        mime::WEBP => ".webp",
+        mime::PDF => ".pdf",
         _ => ".bin",
     }
 }
@@ -80,16 +84,16 @@ fn extension(media_type: &str) -> &'static str {
 pub(crate) fn media_type(name: &str) -> &'static str {
     let extension = name.rsplit_once('.').map_or("", |(_, ext)| ext);
     match extension.to_ascii_lowercase().as_str() {
-        "json" => "application/json",
-        "txt" => "text/plain",
-        "md" => "text/markdown",
-        "html" => "text/html",
+        "json" => mime::JSON,
+        "txt" => mime::TEXT_PLAIN,
+        "md" => mime::TEXT_MARKDOWN,
+        "html" => mime::TEXT_HTML,
         "csv" => "text/csv",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "pdf" => "application/pdf",
+        "png" => mime::PNG,
+        "jpg" | "jpeg" => mime::JPEG,
+        "gif" => mime::GIF,
+        "webp" => mime::WEBP,
+        "pdf" => mime::PDF,
         _ => "application/octet-stream",
     }
 }

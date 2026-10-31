@@ -13,13 +13,15 @@ const MAX_DESCRIPTION_CHARS: usize = 1536;
 const DEFAULT_CONTEXT_TOKENS: u64 = 200_000;
 /// 清单占窗口的比例（`skillListingBudgetFraction` 缺省 0.01）。
 const BUDGET_PERCENT: u64 = 1;
+/// 百分比的分母。
+const PERCENT: u64 = rust_cli_base::units::PERCENT;
 
 /// 清单的字符预算：窗口 × 每 token 字符数 × 0.01。每 token 字符数按模型
 /// （`rust_cli_prompts::models::chars_per_token`）：修 bug（F10，context-usage.md D5）：以前一律按 4，
-/// 除 14 个旧模型以外（claude-opus-5-5、GLM 等）应按 3。
+/// 除 14 个旧模型以外（有卡片的模型、GLM 等）应按 3。
 pub(crate) fn budget(context_window: Option<u64>, chars_per_token: u64) -> usize {
     let tokens = context_window.unwrap_or(DEFAULT_CONTEXT_TOKENS);
-    let chars = tokens * chars_per_token * BUDGET_PERCENT / 100;
+    let chars = tokens * chars_per_token * BUDGET_PERCENT / PERCENT;
     usize::try_from(chars.max(1)).unwrap_or(usize::MAX)
 }
 

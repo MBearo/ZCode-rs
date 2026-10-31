@@ -5,6 +5,7 @@
     reason = "辅助函数与替身不在 #[test] 函数里，clippy 的测试放行不覆盖它；失败即测试失败"
 )]
 
+use rust_cli_base::models;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -86,7 +87,7 @@ async fn a_rejected_account_credential_is_renewed_once_per_failure() {
     assert!(
         requests[1]
             .body
-            .starts_with(r#"{"model":"claude-sonnet-4-5-api","#)
+            .starts_with(&format!(r#"{{"model":"{}-api","#, models::GLM_5_3))
     );
     assert_eq!(*endpoints.rejected.lock().unwrap(), ["token-1"]);
 }
@@ -97,13 +98,13 @@ async fn repeated_overload_switches_to_the_fallback_model() {
     let server = Fixture::start(replies).await;
     let model = model_at(server.url(), fast_retry(10)).await;
     let mut with_fallback = request("hi", QuerySource::MainThread);
-    with_fallback.options.fallback_model = Some("claude-haiku-4-5".to_owned());
+    with_fallback.options.fallback_model = Some(models::GLM_5_3_FLASH.to_owned());
     let events = collect(&model, with_fallback).await;
     assert_eq!(
         events,
         vec![Err(ModelError::FallbackTriggered {
-            original_model: "claude-sonnet-4-5".to_owned(),
-            fallback_model: "claude-haiku-4-5".to_owned(),
+            original_model: models::GLM_5_3.to_owned(),
+            fallback_model: models::GLM_5_3_FLASH.to_owned(),
         })]
     );
     assert_eq!(server.requests().len(), 3);
@@ -128,7 +129,7 @@ async fn opus_models_stop_after_three_overloads_without_a_fallback() {
     let server = Fixture::start(replies).await;
     let model = model_at(server.url(), fast_retry(10)).await;
     let mut opus = request("hi", QuerySource::MainThread);
-    opus.selection.model = "claude-opus-5-5".to_owned();
+    opus.selection.model = models::OPUS_5_5.to_owned();
     let events = collect(&model, opus).await;
     assert_eq!(
         events,
@@ -149,7 +150,7 @@ async fn a_sandbox_keeps_retrying_overloaded_opus_requests() {
         .await
         .with_overload_retries_in_sandbox(true);
     let mut opus = request("hi", QuerySource::MainThread);
-    opus.selection.model = "claude-opus-5-5".to_owned();
+    opus.selection.model = models::OPUS_5_5.to_owned();
     let events = collect(&model, opus).await;
     assert!(matches!(
         events.as_slice(),

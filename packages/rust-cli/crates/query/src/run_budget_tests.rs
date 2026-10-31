@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
+use rust_cli_base::models::{GLM_5_3, OPUS_5_5};
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::compaction::rough_tokens;
 use rust_cli_kernel_api::ids::MessageId;
@@ -276,11 +277,10 @@ async fn a_missing_configured_limit_uses_32000() {
     assert_eq!(got, Some(32_000));
 }
 
-/// 请求体自己的 `max_tokens` 不变：卡片模型照旧发卡片的上限（显式覆盖的端点没有补丁，只看它）。
-#[tokio::test]
-async fn the_request_max_tokens_itself_is_unchanged() {
+/// 这个模型的第一个请求（窗口 1,000,000、配置的输出上限 384,000，输入接近窗口）。
+async fn sent_for(model: &str) -> ModelRequest {
     let messages = history(990_000, 0);
-    let model = Arc::new(Configured {
+    let port = Arc::new(Configured {
         inner: ScriptedModel::new(vec![text_response(&["ok"])]),
         capabilities: configured(WINDOW),
     });
@@ -288,12 +288,27 @@ async fn the_request_max_tokens_itself_is_unchanged() {
     request.messages = messages;
     request.selection = ModelSelection {
         provider: "anthropic".to_owned(),
-        model: "claude-opus-5-5".to_owned(),
+        model: model.to_owned(),
         reasoning: None,
         connection: None,
     };
-    let (scope, _sink) = scope(parts(model.clone(), Vec::new()), &request, Abort::new());
+    let (scope, _sink) = scope(parts(port.clone(), Vec::new()), &request, Abort::new());
     super::run(scope, request).await.unwrap();
-    let sent = model.inner.requests().remove(0);
-    assert_eq!(sent.max_tokens, 128_000);
+    port.inner.requests().remove(0)
+}
+
+/// 请求体自己的 `max_tokens` 不变：卡片模型照旧发卡片的上限（显式覆盖的端点没有补丁，只看它）。卡片自己的上限只有
+/// Anthropic 的卡片模型有（128000）。
+#[tokio::test]
+async fn the_request_max_tokens_itself_is_unchanged() {
+    assert_eq!(sent_for(OPUS_5_5).await.max_tokens, 128_000);
+}
+
+/// 工作线 F121（model.md §11.1）：借卡片形状的 GLM 的 `max_tokens` 按目录（能力里的输出上限 384,000），不用卡片的
+/// 128000；请求体自己的值同样不按窗口余量压低（预算只交给补丁）。
+#[tokio::test]
+async fn glm_takes_the_configured_output_limit() {
+    let sent = sent_for(GLM_5_3).await;
+    assert_eq!(sent.max_tokens, 384_000);
+    assert!(sent.thinking.is_some());
 }

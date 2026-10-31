@@ -6,6 +6,8 @@
 //!   --dev /dev --unshare-pid --unshare-user --proc /proc -- <bash> -c <script>`；
 //! - 其他平台没有后端：`required` 时拒绝执行，否则不套 sandbox。
 
+use rust_cli_base::path::DEV_NULL;
+use rust_cli_kernel_api::env_files::{GIT_CONFIG_FILE, GIT_HOOKS_DIR};
 use std::path::{Path, PathBuf};
 
 use rust_cli_base::include_lf;
@@ -111,9 +113,9 @@ fn protected_entries() -> impl Iterator<Item = (&'static str, bool)> {
     let files = PROTECTED_FILES.iter().map(|file| (*file, false));
     let dirs = PROTECTED_DIRS
         .iter()
-        .chain([&".git/hooks"])
+        .chain([&GIT_HOOKS_DIR])
         .map(|dir| (*dir, true));
-    files.chain(dirs).chain([(".git/config", false)])
+    files.chain(dirs).chain([(GIT_CONFIG_FILE, false)])
 }
 
 /// macOS：每项一个字面路径加一个 `**` 形式（目录再加 `/**`）。
@@ -236,7 +238,7 @@ fn protected_binds(policy: &SandboxPolicy, cwd: &Path) -> (Vec<String>, Vec<Path
         let (source, target) = match first_missing(&path) {
             None => (path.clone(), path),
             Some(missing) if missing.parent().is_some_and(is_dir) => {
-                (PathBuf::from("/dev/null"), missing.to_path_buf())
+                (PathBuf::from(DEV_NULL), missing.to_path_buf())
             }
             Some(_) => continue,
         };
@@ -296,7 +298,7 @@ pub(crate) fn bwrap_args(
         if is_dir(Path::new(path.as_str())) {
             args.extend(["--tmpfs".to_owned(), path.as_str().to_owned()]);
         } else {
-            args.extend(pair("--ro-bind", "/dev/null", path.as_str()));
+            args.extend(pair("--ro-bind", DEV_NULL, path.as_str()));
         }
     }
     args.extend(

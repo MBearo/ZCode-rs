@@ -12,6 +12,7 @@ use unicode_width::UnicodeWidthStr;
 use super::app::App;
 use super::commands;
 use super::composer::Popup;
+use super::layout;
 use super::text::{truncate_line, wrap_text};
 
 fn dim() -> Style {
@@ -34,7 +35,7 @@ pub fn queue(app: &App, width: usize) -> Vec<Line<'static>> {
         let mut item = wrap_text(
             text.trim(),
             dim(),
-            width.saturating_sub(2),
+            width.saturating_sub(layout::INDENT),
             &[Span::styled("❯ ", dim())],
             &[Span::raw("  ")],
         );
@@ -87,7 +88,13 @@ fn held_text(command: &rust_cli_kernel_api::session_api::Command) -> Option<Stri
 
 /// 弹出列表的行数：max(1, min(max(6, 高度 / 2), 高度 − 3))；不足时用空行补齐，框不跳动。
 pub fn popup_rows(height: usize) -> usize {
-    (height / 2).max(6).min(height.saturating_sub(3)).max(1)
+    /// 至少 6 行；给输入框留 3 行。
+    const MIN_ROWS: usize = 6;
+    const RESERVED: usize = 3;
+    (height / 2)
+        .max(MIN_ROWS)
+        .min(height.saturating_sub(RESERVED))
+        .max(1)
 }
 
 fn empty_row(text: &str) -> Line<'static> {
@@ -142,13 +149,15 @@ pub fn popup(app: &App, width: usize, height: usize) -> (Vec<Line<'static>>, Opt
             if matches.is_empty() {
                 (vec![empty_row(app.strings.no_matches)], None)
             } else {
-                // 命令列补到最长名称 + 5，最多宽度的 40%。
+                // 命令列补到最长名称（含 `/`）+ 5，最多宽度的 40%。
+                const NAME_PAD: usize = 5;
+                const NAME_MAX_PERCENT: usize = 40;
                 let name_width = matches
                     .iter()
-                    .map(|c| c.name().width() + 1 + 5)
+                    .map(|c| c.name().width() + 1 + NAME_PAD)
                     .max()
                     .unwrap_or(0)
-                    .min(width * 2 / 5);
+                    .min(width * NAME_MAX_PERCENT / super::quantities::PERCENT as usize);
                 let start = selected.saturating_sub(rows - 1);
                 let lines = matches
                     .iter()

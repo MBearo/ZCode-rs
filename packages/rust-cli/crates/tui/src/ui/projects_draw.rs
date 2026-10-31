@@ -10,6 +10,7 @@ use super::app::App;
 use super::i18n::Lang;
 use super::i18n_panels as panel_words;
 use super::i18n_projects as words;
+use super::layout;
 use super::mouse::Target;
 use super::projects::{Entry, FILTERS, ProjectsPage, State};
 use super::session_rows::{SessionRow, center_truncate, relative};
@@ -23,6 +24,15 @@ const DETAILS_FROM: usize = 90;
 const GROUP_PATH: usize = 64;
 /// 状态列的宽度（Codex 11）。
 const STATUS: usize = 11;
+/// 右侧详情前面的分隔。
+const SEPARATOR: &str = "│ ";
+/// 组头：前面缩进 2 列，路径与个数之间空 2 列。
+const GROUP_GAPS: usize = 4;
+/// 会话行：圆点一列（圆点与一个空格）占 2 列；标题与状态之间至少空 2 列。
+const DOT_WIDTH: usize = 2;
+const TITLE_GAP: usize = 2;
+/// 详情里的首条输入最多几行。
+const PROMPT_LINES: usize = 2;
 
 fn dim() -> Style {
     Style::default().add_modifier(Modifier::DIM)
@@ -157,7 +167,11 @@ impl App {
         }
         page.scroll = page.scroll.min(entries.len().saturating_sub(room));
         let details = width >= DETAILS_FROM;
-        let list_width = if details { width - DETAILS - 2 } else { width };
+        let list_width = if details {
+            width - DETAILS - layout::RIGHT_MARGIN
+        } else {
+            width
+        };
         let mut targets = Vec::new();
         let mut body: Vec<Line<'static>> = Vec::new();
         for entry in entries.iter().skip(page.scroll).take(room) {
@@ -177,7 +191,9 @@ impl App {
                         }
                     };
                     let path = super::app::label(&all[row].root, self.home.as_deref());
-                    let room = list_width.saturating_sub(count.width() + 4).min(GROUP_PATH);
+                    let room = list_width
+                        .saturating_sub(count.width() + GROUP_GAPS)
+                        .min(GROUP_PATH);
                     body.push(Line::from(Span::styled(
                         format!("  {}  {count}", center_truncate(&path, room)),
                         dim(),
@@ -194,7 +210,12 @@ impl App {
                         "{label}{}",
                         " ".repeat(STATUS.saturating_sub(label.width()))
                     );
-                    let fixed = 2 + 2 + 2 + status.width() + updated.width() + 2;
+                    let fixed = super::pick::POINTER.width()
+                        + DOT_WIDTH
+                        + TITLE_GAP
+                        + status.width()
+                        + updated.width()
+                        + layout::RIGHT_MARGIN;
                     let title = truncate(&title(lang, row), list_width.saturating_sub(fixed));
                     let pad = list_width.saturating_sub(fixed + title.width());
                     targets.push((lines.len() + body.len(), index));
@@ -204,7 +225,7 @@ impl App {
                             Span::styled(dot, dot_style),
                             Span::raw(" "),
                             Span::raw(title),
-                            Span::raw(" ".repeat(pad + 2)),
+                            Span::raw(" ".repeat(pad + TITLE_GAP)),
                             Span::styled(status, self.palette.secondary()),
                             Span::styled(updated, self.palette.secondary()),
                         ]),
@@ -216,7 +237,7 @@ impl App {
             }
         }
         if details && let Some(row) = focused.and_then(|i| all.get(i)) {
-            let side = self.project_details(row, DETAILS - 2, room);
+            let side = self.project_details(row, DETAILS - SEPARATOR.width(), room);
             for (index, side_line) in side.into_iter().enumerate().take(room) {
                 while body.len() <= index {
                     body.push(Line::default());
@@ -227,7 +248,7 @@ impl App {
                 let used = line.width();
                 line.spans
                     .push(Span::raw(" ".repeat(list_width.saturating_sub(used))));
-                line.spans.push(Span::styled("│ ", dim()));
+                line.spans.push(Span::styled(SEPARATOR, dim()));
                 line.spans.extend(side_line.spans);
             }
         }
@@ -268,9 +289,9 @@ impl App {
             side.push(Line::default());
             side.push(Line::from(Span::styled(words::prompt(lang), dim())));
             let mut prompt = wrap_text(row.prompt.trim(), Style::default(), width, &[], &[]);
-            if prompt.len() > 2 {
-                prompt.truncate(2);
-                prompt[1] = Line::from(Span::styled("…", dim()));
+            if prompt.len() > PROMPT_LINES {
+                prompt.truncate(PROMPT_LINES);
+                prompt[PROMPT_LINES - 1] = Line::from(Span::styled("…", dim()));
             }
             side.extend(prompt);
         }

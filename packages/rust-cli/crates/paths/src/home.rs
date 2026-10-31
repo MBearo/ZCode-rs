@@ -24,8 +24,8 @@ impl HomeRule {
 
     fn variable(self) -> &'static str {
         match self {
-            Self::Unix => "HOME",
-            Self::Windows => "USERPROFILE",
+            Self::Unix => rust_cli_base::names::env::HOME,
+            Self::Windows => rust_cli_base::names::env::USERPROFILE,
         }
     }
 }
@@ -71,7 +71,7 @@ pub(crate) fn home_for(
 /// （libuv 的 GetUserNameW 与它一致，Host 同样处理）。拿不到时为 `unknown`（Node 凭据密钥的回退值）。
 pub fn user_name_with(lookup: impl Fn(&str) -> Option<OsString>) -> String {
     if cfg!(windows) {
-        return lookup("USERNAME")
+        return lookup(rust_cli_base::names::env::USERNAME)
             .map(|name| name.to_string_lossy().into_owned())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "unknown".to_owned());

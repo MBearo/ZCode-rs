@@ -2,6 +2,7 @@
 //! registry 给出的可执行模型（`tests/fixtures/node-registry.json`，由 `scripts/rust-cli/provider-registry-golden.mts`
 //! 生成）与这里的解析结果逐项相同。
 
+use rust_cli_base::models;
 use serde_json::{Map, Value, json};
 
 use super::*;
@@ -102,7 +103,7 @@ fn an_unusable_default_falls_back_to_the_first_model_like_node() {
     let snapshot = fixture_snapshot();
     let first = Some(ModelSelection {
         provider: ENTITLED.to_owned(),
-        model: "GLM-5.3".to_owned(),
+        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: Some("max".to_owned()),
         connection: None,
     });
@@ -130,11 +131,11 @@ fn an_unusable_default_falls_back_to_the_first_model_like_node() {
     // 可选：原样用它，包括档位。
     assert_eq!(
         resolve(
-            json!({"providerId": "personal:gateway", "modelId": "glm-5", "options": {"reasoningLevel": "enabled"}})
+            json!({"providerId": "personal:gateway", "modelId": models::GLM_5, "options": {"reasoningLevel": "enabled"}})
         ),
         Some(ModelSelection {
             provider: "personal:gateway".to_owned(),
-            model: "glm-5".to_owned(),
+            model: models::GLM_5.to_owned(),
             reasoning: Some("enabled".to_owned()),
             connection: None,
         })
@@ -148,7 +149,7 @@ fn an_unusable_default_falls_back_to_the_first_model_like_node() {
     }
     let fallback = default_selection(
         &templates,
-        &json!({"providerId": "personal:gateway", "modelId": "glm-5", "options": {"reasoningLevel": "enabled"}}),
+        &json!({"providerId": "personal:gateway", "modelId": models::GLM_5, "options": {"reasoningLevel": "enabled"}}),
     )
     .unwrap();
     assert_eq!(fallback.provider, "personal:responses");
@@ -164,7 +165,9 @@ fn an_unusable_default_falls_back_to_the_first_model_like_node() {
 #[test]
 fn option_maps_become_request_patches() {
     let snapshot = fixture_snapshot();
-    let glm = snapshot.find(&sel(ENTITLED, "GLM-5.3")).unwrap();
+    let glm = snapshot
+        .find(&sel(ENTITLED, models::GLM_5_3_ACCOUNT))
+        .unwrap();
     assert_eq!(glm.protocol, WireProtocol::AnthropicMessages);
     assert_eq!(
         glm.access,
@@ -173,14 +176,15 @@ fn option_maps_become_request_patches() {
             mode: "individual-coding-plan".to_owned(),
         }
     );
+    // 工作线 F121（model.md §11.1）：Anthropic 协议上的 GLM 不合并 reasoningLevel 的补丁（推理字段由卡片的形状写），输出
+    // 上限的补丁照常。
     assert_eq!(
         glm.patches(Some("high"), None).unwrap(),
-        vec![
-            json!({"thinking": {"type": "enabled"}, "output_config": {"effort": "high"}}),
-            json!({"max_tokens": 128000}),
-        ]
+        vec![json!({}), json!({"max_tokens": 128000})]
     );
-    let gateway = snapshot.find(&sel("personal:gateway", "glm-5")).unwrap();
+    let gateway = snapshot
+        .find(&sel("personal:gateway", models::GLM_5))
+        .unwrap();
     assert_eq!(
         gateway.access,
         Access::ApiKey(RedactedString::new("sk-personal-fixture"))
@@ -201,7 +205,7 @@ fn option_maps_become_request_patches() {
     assert_eq!(snapshot.catalog().len(), snapshot.templates.len());
     assert!(
         snapshot
-            .find(&sel("personal:nokey", "claude-opus-5"))
+            .find(&sel("personal:nokey", models::OPUS_5))
             .is_none()
     );
 }
@@ -211,7 +215,9 @@ fn option_maps_become_request_patches() {
 #[test]
 fn the_output_limit_caps_the_max_output_tokens_patch() {
     let snapshot = fixture_snapshot();
-    let glm = snapshot.find(&sel(ENTITLED, "GLM-5.3")).unwrap();
+    let glm = snapshot
+        .find(&sel(ENTITLED, models::GLM_5_3_ACCOUNT))
+        .unwrap();
     assert_eq!(
         glm.patches(Some("high"), Some(4096)).unwrap()[1],
         json!({"max_tokens": 4096})
@@ -220,7 +226,9 @@ fn the_output_limit_caps_the_max_output_tokens_patch() {
         glm.patches(Some("high"), Some(500_000)).unwrap()[1],
         json!({"max_tokens": 128000})
     );
-    let gateway = snapshot.find(&sel("personal:gateway", "glm-5")).unwrap();
+    let gateway = snapshot
+        .find(&sel("personal:gateway", models::GLM_5))
+        .unwrap();
     assert_eq!(
         gateway.patches(None, Some(4096)).unwrap()[1],
         json!({"max_completion_tokens": 4096})
@@ -231,8 +239,10 @@ fn the_output_limit_caps_the_max_output_tokens_patch() {
 #[test]
 fn the_configured_model_is_the_raw_default_model_selection() {
     assert_eq!(
-        configured_model(&json!({"providerId": "zai", "modelId": " GLM-5.3 "})),
-        Some("GLM-5.3".to_owned())
+        configured_model(
+            &json!({"providerId": "zai", "modelId": format!(" {} ", models::GLM_5_3_ACCOUNT)})
+        ),
+        Some(models::GLM_5_3_ACCOUNT.to_owned())
     );
     assert_eq!(
         configured_model(&json!({"providerId": "old", "modelId": "m"})),

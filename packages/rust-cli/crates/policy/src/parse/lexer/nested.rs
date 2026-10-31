@@ -8,6 +8,11 @@ use super::{
     BACKSLASH, BACKTICK, DOLLAR, DQUOTE, LBRACE, LPAREN, Lexer, RBRACE, RPAREN, SQUOTE, is_meta,
     is_special,
 };
+use crate::consts::{ESCAPE_LEN, SIGIL_PAIR_LEN};
+
+/// `case` 与 `esac`：慢速路径里配对 case..esac 中的 `)`（两个关键字一样长）。
+const CASE: &[u8] = b"case";
+const ESAC: &[u8] = b"esac";
 
 /// JS 中 `extractBalanced`/`skipDQ` 的递归帧上限。实测 Node 24 冷启动时约 2560 层 `"$(`
 /// （≈5100 帧）抛出 RangeError（被 `analyzeBashCommand` 捕获为 parse error），JIT 预热后则能跑完
@@ -94,13 +99,11 @@ impl Lexer<'_> {
     fn case_keyword_at(&self, start: usize) -> bool {
         let pos = self.pos;
         let len = self.src_end;
-        self.c(pos) == u32::from(b'c')
+        let end = pos + CASE.len();
+        end <= len
+            && self.slice(pos, end) == CASE
             && (pos == start || is_special(self.c(pos - 1)))
-            && pos + 3 < len
-            && self.c(pos + 1) == u32::from(b'a')
-            && self.c(pos + 2) == u32::from(b's')
-            && self.c(pos + 3) == u32::from(b'e')
-            && (pos + 4 >= len || is_meta(self.c(pos + 4)))
+            && (end >= len || is_meta(self.c(end)))
     }
 
     /// 反引号内容：跳到匹配的反引号之后。`guarded` 区分 extractBalanced（转义后检查边界）与
@@ -180,10 +183,10 @@ impl Lexer<'_> {
                 }
                 if self.pos == word_start {
                     self.pos += 1;
-                } else if self.pos - word_start == 4 {
+                } else if self.pos - word_start == CASE.len() {
                     match self.slice(word_start, self.pos) {
-                        b"case" => case_depth += 1,
-                        b"esac" if case_depth > 0 => case_depth -= 1,
+                        CASE => case_depth += 1,
+                        ESAC if case_depth > 0 => case_depth -= 1,
                         _ => {}
                     }
                 }
@@ -208,12 +211,12 @@ impl Lexer<'_> {
             self.pos += 1;
             frames.pop();
         } else if ch == BACKSLASH {
-            self.pos += 2;
+            self.pos += ESCAPE_LEN;
         } else if ch == DOLLAR && next == LPAREN {
-            self.pos += 2;
+            self.pos += SIGIL_PAIR_LEN;
             self.push_balanced(frames);
         } else if ch == DOLLAR && next == LBRACE {
-            self.pos += 2;
+            self.pos += SIGIL_PAIR_LEN;
             frames.push(Frame::DqBrace { depth: 1 });
         } else if ch == BACKTICK {
             self.skip_backtick(false);

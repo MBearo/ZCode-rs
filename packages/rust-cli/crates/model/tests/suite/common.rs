@@ -5,6 +5,7 @@
     reason = "辅助函数不在 #[test] 函数里，clippy 的测试放行不覆盖它；失败即测试失败"
 )]
 
+use rust_cli_base::models;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,7 +32,7 @@ pub fn event(data: Value) -> String {
 
 pub fn message_start() -> String {
     event(json!({"type": "message_start", "message": {
-        "id": "msg_01", "type": "message", "role": "assistant", "model": "claude-sonnet-4-5",
+        "id": "msg_01", "type": "message", "role": "assistant", "model": models::GLM_5_3,
         "content": [], "stop_reason": null, "stop_sequence": null,
         "usage": {"input_tokens": 25, "cache_creation_input_tokens": 0,
                   "cache_read_input_tokens": 0, "output_tokens": 1}}}))
@@ -121,7 +122,7 @@ pub fn request(prompt: &str, source: QuerySource) -> ModelRequest {
     ModelRequest {
         selection: ModelSelection {
             provider: "anthropic".to_owned(),
-            model: "claude-sonnet-4-5".to_owned(),
+            model: models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },

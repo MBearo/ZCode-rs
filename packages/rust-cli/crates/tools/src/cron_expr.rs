@@ -2,11 +2,32 @@
 //!
 //! 规则按本地时区计算；这里按注入的偏移函数换算（`Clock::utc_offset_minutes`），内部用“本地墙上时间的分钟数”迭代。
 
+// 公历日期与天数互转、星期：唯一实现在 base 的 `civil`（F122，docs/specs/rust-cli/constants.md §5.1）。
+use rust_cli_base::civil::{
+    civil_from_days as civil, days_from_civil as days_from, weekday as weekday_of,
+};
+use rust_cli_base::units;
+
 /// 每段的取值范围：分、时、日、月、星期（0 = 周日；`7` 也是周日）。
-const RANGES: [(u32, u32); 5] = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 6)];
+const RANGES: [(u32, u32); 5] = [(0, 59), (0, 23), (1, 31), (1, 12), (0, SATURDAY)];
+/// 星期一段：6 是周六，`7` 是周日的另一种写法。
+const SATURDAY: u32 = 6;
+const SUNDAY_ALIAS: u32 = 7;
 /// 找下次时间的迭代上限（366 天的分钟数）。
 const MAX_STEPS: u32 = 527_040;
-pub(crate) const MINUTE_MS: i64 = 60_000;
+pub(crate) const MINUTE_MS: i64 = units::MS_PER_MINUTE as i64;
+/// 本地墙上时间按 `i64` 算的单位：一天的分钟数、一天的秒数、一小时的分钟数、一秒的毫秒数。
+const MINUTES_PER_DAY: i64 = units::MINUTES_PER_DAY as i64;
+const SECONDS_PER_DAY: i64 = units::SECONDS_PER_DAY as i64;
+const MINUTES_PER_HOUR: i64 = units::MINUTES_PER_HOUR as i64;
+const MS_PER_SECOND: i64 = units::MS_PER_SECOND as i64;
+/// 12 月之后是下一年的 1 月。
+const DECEMBER: u32 = 12;
+/// 星期一段的天数（`*` 展开后的个数）、日一段的天数。
+const DAYS_PER_WEEK: usize = units::DAYS_PER_WEEK as usize;
+const DAYS_PER_MONTH_FIELD: usize = 31;
+/// 12 小时制：正午是 12 点，0 点写成 12 AM。
+const NOON: u32 = 12;
 
 /// 抖动配置的默认值。
 const RECURRING_FRAC: f64 = 0.5;
@@ -39,7 +60,7 @@ fn digits(text: &str) -> Option<u32> {
 
 /// 展开一段：`*`、`*/N`、`N-M[/S]`、`N`，逗号分隔。
 fn expand(field: &str, (min, max): (u32, u32)) -> Option<Vec<u32>> {
-    let day_of_week = min == 0 && max == 6;
+    let day_of_week = min == 0 && max == SATURDAY;
     let mut out = std::collections::BTreeSet::new();
     for part in field.split(',') {
         if let Some(rest) = part.strip_prefix('*') {
@@ -60,17 +81,21 @@ fn expand(field: &str, (min, max): (u32, u32)) -> Option<Vec<u32>> {
                 None => (digits(high)?, 1),
             };
             let low = digits(low)?;
-            let top = if day_of_week { 7 } else { max };
+            let top = if day_of_week { SUNDAY_ALIAS } else { max };
             if low > high || step < 1 || low < min || high > top {
                 return None;
             }
             for value in (low..=high).step_by(step as usize) {
-                out.insert(if day_of_week && value == 7 { 0 } else { value });
+                out.insert(if day_of_week && value == SUNDAY_ALIAS {
+                    0
+                } else {
+                    value
+                });
             }
             continue;
         }
         let mut value = digits(part)?;
-        if day_of_week && value == 7 {
+        if day_of_week && value == SUNDAY_ALIAS {
             value = 0;
         }
         if value < min || value > max {
@@ -96,30 +121,6 @@ pub(crate) fn parse(expr: &str) -> Option<CronFields> {
     })
 }
 
-/// 1970-01-01 起的天数 → (年, 月, 日)（Howard Hinnant 的 civil_from_days）。
-fn civil(days: i64) -> (i64, u32, u32) {
-    let days = days + 719_468;
-    let era = days.div_euclid(146_097);
-    let doe = days.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (yoe + era * 400 + i64::from(month <= 2), month, day)
-}
-
-/// (年, 月, 日) → 1970-01-01 起的天数（days_from_civil）。
-fn days_from(year: i64, month: u32, day: u32) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let yoe = year.rem_euclid(400);
-    let month = i64::from(month);
-    let doy = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + i64::from(day) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
 fn local_minutes(utc_ms: u64, offset: &dyn Fn(u64) -> i32) -> i64 {
     let local = utc_ms as i64 + i64::from(offset(utc_ms)) * MINUTE_MS;
     local.div_euclid(MINUTE_MS)
@@ -131,16 +132,20 @@ pub(crate) fn local_parts(
     offset: &dyn Fn(u64) -> i32,
 ) -> (i64, u32, u32, u32, u32, u32) {
     let local = utc_ms as i64 + i64::from(offset(utc_ms)) * MINUTE_MS;
-    let seconds = local.div_euclid(1_000);
-    let (year, month, day) = civil(seconds.div_euclid(86_400));
-    let of_day = seconds.rem_euclid(86_400) as u32;
+    let seconds = local.div_euclid(MS_PER_SECOND);
+    let (year, month, day) = civil(seconds.div_euclid(SECONDS_PER_DAY));
+    let of_day = seconds.rem_euclid(SECONDS_PER_DAY) as u32;
+    let (per_hour, per_minute) = (
+        units::SECONDS_PER_HOUR as u32,
+        units::SECONDS_PER_MINUTE as u32,
+    );
     (
         year,
         month,
         day,
-        of_day / 3_600,
-        of_day / 60 % 60,
-        of_day % 60,
+        of_day / per_hour,
+        of_day / per_minute % units::MINUTES_PER_HOUR as u32,
+        of_day % per_minute,
     )
 }
 
@@ -158,23 +163,23 @@ pub(crate) fn next_run(
     from_ms: u64,
     offset: &dyn Fn(u64) -> i32,
 ) -> Option<u64> {
-    let dom_wild = fields.day_of_month.len() == 31;
-    let dow_wild = fields.day_of_week.len() == 7;
+    let dom_wild = fields.day_of_month.len() == DAYS_PER_MONTH_FIELD;
+    let dow_wild = fields.day_of_week.len() == DAYS_PER_WEEK;
     let mut t = local_minutes(from_ms, offset) + 1;
     for _ in 0..MAX_STEPS {
-        let days = t.div_euclid(1_440);
-        let minute_of_day = t.rem_euclid(1_440);
+        let days = t.div_euclid(MINUTES_PER_DAY);
+        let minute_of_day = t.rem_euclid(MINUTES_PER_DAY);
         let (year, month, day) = civil(days);
         if !fields.month.contains(&month) {
-            let (year, month) = if month == 12 {
+            let (year, month) = if month == DECEMBER {
                 (year + 1, 1)
             } else {
                 (year, month + 1)
             };
-            t = days_from(year, month, 1) * 1_440;
+            t = days_from(year, month, 1) * MINUTES_PER_DAY;
             continue;
         }
-        let weekday = (days + 4).rem_euclid(7) as u32;
+        let weekday = weekday_of(days);
         let day_matches = match (dom_wild, dow_wild) {
             (true, true) => true,
             (true, false) => fields.day_of_week.contains(&weekday),
@@ -184,15 +189,18 @@ pub(crate) fn next_run(
             }
         };
         if !day_matches {
-            t = (days + 1) * 1_440;
+            t = (days + 1) * MINUTES_PER_DAY;
             continue;
         }
-        let hour = (minute_of_day / 60) as u32;
+        let hour = (minute_of_day / MINUTES_PER_HOUR) as u32;
         if !fields.hour.contains(&hour) {
-            t = days * 1_440 + (i64::from(hour) + 1) * 60;
+            t = days * MINUTES_PER_DAY + (i64::from(hour) + 1) * MINUTES_PER_HOUR;
             continue;
         }
-        if !fields.minute.contains(&((minute_of_day % 60) as u32)) {
+        if !fields
+            .minute
+            .contains(&((minute_of_day % MINUTES_PER_HOUR) as u32))
+        {
             t += 1;
             continue;
         }
@@ -208,8 +216,11 @@ pub(crate) fn next_after(expr: &str, from_ms: u64, offset: &dyn Fn(u64) -> i32) 
 
 /// 任务 ID 前 8 位十六进制 / 2³²；不是十六进制时为 0。
 fn fraction(id: &str) -> f64 {
-    let head: String = id.chars().take(8).collect();
-    u32::from_str_radix(&head, 16).map_or(0.0, |value| f64::from(value) / 4_294_967_296.0)
+    const HEX_DIGITS: usize = 8;
+    const HEX: u32 = rust_cli_base::units::HEX_RADIX;
+    const U32_VALUES: f64 = u32::MAX as f64 + 1.0;
+    let head: String = id.chars().take(HEX_DIGITS).collect();
+    u32::from_str_radix(&head, HEX).map_or(0.0, |value| f64::from(value) / U32_VALUES)
 }
 
 /// `*/N * * * *`。
@@ -255,7 +266,7 @@ pub(crate) fn one_shot_next(
     offset: &dyn Fn(u64) -> i32,
 ) -> Option<u64> {
     let next = next_after(expr, from_ms, offset)?;
-    let minute = local_minutes(next, offset).rem_euclid(60) as u32;
+    let minute = local_minutes(next, offset).rem_euclid(MINUTES_PER_HOUR) as u32;
     if !minute.is_multiple_of(ONE_SHOT_MINUTE_MOD) {
         return Some(next);
     }
@@ -276,13 +287,18 @@ const DAY_NAMES: [&str; 7] = [
 /// `toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'})` 的写法（时间与
 /// AM/PM 之间是普通空格）。
 fn clock_time(minute: u32, hour: u32) -> String {
-    let (display, period) = match hour {
-        0 => (12, "AM"),
-        1..=11 => (hour, "AM"),
-        12 => (12, "PM"),
-        _ => (hour - 12, "PM"),
-    };
+    let (display, period) = twelve_hour(hour);
     format!("{display}:{minute:02} {period}")
+}
+
+/// 24 小时制的钟点 → 12 小时制的（钟点, `AM` / `PM`）：0 点是 12 AM，12 点是 12 PM（定时任务的两处写法共用）。
+pub(crate) fn twelve_hour(hour: u32) -> (u32, &'static str) {
+    match hour {
+        0 => (NOON, "AM"),
+        _ if hour < NOON => (hour, "AM"),
+        NOON => (NOON, "PM"),
+        _ => (hour - NOON, "PM"),
+    }
 }
 
 /// 人读写法（本地时间，不带 `utc`）：常见写法转成英文，其余原样返回。
@@ -336,7 +352,7 @@ pub(crate) fn human(expr: &str) -> String {
         && dow.len() == 1
         && let Some(index) = digits(dow)
     {
-        let name = DAY_NAMES[(index % 7) as usize];
+        let name = DAY_NAMES[index as usize % DAY_NAMES.len()];
         return format!("Every {name} at {}", clock_time(m, h));
     }
     if *dom == "*" && *month == "*" && *dow == "1-5" {

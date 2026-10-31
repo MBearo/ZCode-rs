@@ -1,6 +1,10 @@
 //! 渲染用的小工具（列表与转义）。
 
+use rust_cli_base::chars;
 use rust_cli_kernel_api::message::{AttachmentMessage, Message, SystemMessage};
+
+/// DEL（U+007F）。
+const DEL: char = '\u{7f}';
 
 /// 一行文本或一组子项（字符串是 ` - x`，数组的每项是 `  - x`）。
 pub(crate) enum Bullet {
@@ -29,7 +33,8 @@ pub(crate) fn escape(value: &str) -> String {
         match character {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
-            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+            // C0 的范围只定义在 base 的 `chars`；这里另加 DEL，不含 C1。
+            c if chars::is_c0(c) || c == DEL => {
                 out.push_str(&format!("&#{};", c as u32));
             }
             c => out.push(c),

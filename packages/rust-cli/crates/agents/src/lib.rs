@@ -293,6 +293,20 @@ impl AgentSignals for Signals {
     }
 
     async fn background(&self, session: &SessionId) -> Vec<AgentId> {
+        let mut agents = self.background_agents(session).await;
+        // 子代理子会话里还在跑或通知未 ack 的后台命令（agents.md §5.2 第 4 条，L18）。转发任务先交出通知
+        // 再 ack，所以一条通知要么还在执行环境里、要么已在子代理的邮箱或 `signals::Hub` 里，没有两头都看不到的空档。
+        for command in shell_notices::background_commands(&self.0, session).await {
+            if !agents.contains(&command) {
+                agents.push(command);
+            }
+        }
+        agents
+    }
+
+    /// 还在跑的后台子代理（含停放的；与 TaskStop 的“能停”同一个判断，tui-display.md §3.1）。
+    /// 回合结束那一行要等的后台子代理（tui-display.md §2.7，修复线 F118）；`background` 也从它开始。
+    async fn background_agents(&self, session: &SessionId) -> Vec<AgentId> {
         // 先看运行状态、再看通知：子代理结束时在同一把锁里送出通知再标记结束（`routing`），所以读到
         // “已结束”时通知一定已在等候（或已 ack），两次读之间不会两头都落空。嵌套的后台子代理也算：
         // 它的通知可能送到这个顶层会话（agents.md §5.1）。
@@ -308,17 +322,9 @@ impl AgentSignals for Signals {
                 agents.push(pending);
             }
         }
-        // 子代理子会话里还在跑或通知未 ack 的后台命令（agents.md §5.2 第 4 条，L18）。转发任务先交出通知
-        // 再 ack，所以一条通知要么还在执行环境里、要么已在子代理的邮箱或 `signals::Hub` 里，没有两头都看不到的空档。
-        for command in shell_notices::background_commands(&self.0, session).await {
-            if !agents.contains(&command) {
-                agents.push(command);
-            }
-        }
         agents
     }
 
-    /// 还在跑的后台子代理（含停放的；与 TaskStop 的“能停”同一个判断，tui-display.md §3.1）。
     async fn background_entries(
         &self,
         session: &SessionId,

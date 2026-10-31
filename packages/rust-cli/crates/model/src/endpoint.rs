@@ -19,17 +19,9 @@ pub struct AnthropicEndpoint {
     pub api_key: RedactedString,
 }
 
-/// Anthropic 官方 API 的 origin（修复线 F58：两种写法只从这一处拼出，`concat!` 用宏）。
-macro_rules! anthropic_origin {
-    () => {
-        "https://api.anthropic.com"
-    };
-}
-pub(crate) use anthropic_origin;
-
 impl AnthropicEndpoint {
     /// 显式覆盖没给地址时的缺省：SDK 的写法，不带 `/v1`（同 `@anthropic-ai/sdk`）。
-    pub const DEFAULT_BASE_URL: &'static str = anthropic_origin!();
+    pub const DEFAULT_BASE_URL: &'static str = rust_cli_base::hosts::ANTHROPIC_API;
 }
 
 impl From<AnthropicEndpoint> for ModelEndpoint {
@@ -147,9 +139,10 @@ mod tests {
             anthropic_messages_url("http://127.0.0.1:9/"),
             "http://127.0.0.1:9/v1/messages?beta=true"
         );
+        let zai = rust_cli_base::hosts::ZAI_ANTHROPIC;
         assert_eq!(
-            anthropic_messages_url(" https://api.z.ai/api/anthropic "),
-            "https://api.z.ai/api/anthropic/v1/messages?beta=true"
+            anthropic_messages_url(&format!(" {zai} ")),
+            format!("{zai}/v1/messages?beta=true")
         );
         assert_eq!(
             anthropic_messages_url("https://gw.example.com/V1/"),

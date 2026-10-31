@@ -1,5 +1,6 @@
 //! 方案表的命中（model.md §3.2）。
 
+use rust_cli_base::models::OPUS_5_5;
 use rust_cli_kernel_api::provider::WireProtocol;
 
 use super::*;
@@ -11,23 +12,21 @@ fn name(protocol: WireProtocol, base_url: &str, model: &str) -> &'static str {
 #[test]
 fn each_endpoint_lands_on_its_profile() {
     let anthropic = WireProtocol::AnthropicMessages;
+    // 模型 ID 不分大小写。
+    let upper = OPUS_5_5.to_ascii_uppercase();
     for (base_url, model, expected) in [
-        (
-            "https://api.anthropic.com",
-            "claude-opus-5-5",
-            "anthropic-official",
-        ),
+        ("https://api.anthropic.com", OPUS_5_5, "anthropic-official"),
         (
             "https://api.anthropic.com/v1/",
-            "claude-opus-5-5",
+            OPUS_5_5,
             "anthropic-official",
         ),
         (
             "https://API.anthropic.com:443",
-            "Claude-Opus-5-5",
+            upper.as_str(),
             "anthropic-official",
         ),
-        // 官方 API 上不匹配 `.*claude-.*` 的模型、别的主机上的 claude-opus-5-5：都不是 Anthropic 官方。
+        // 官方 API 上不是官方模型 ID 的模型、别的主机上的官方模型：都不是 Anthropic 官方。
         (
             "https://api.anthropic.com",
             "glm-5.1",
@@ -35,17 +34,13 @@ fn each_endpoint_lands_on_its_profile() {
         ),
         (
             "https://api.anthropic.com.example.com",
-            "claude-opus-5-5",
+            OPUS_5_5,
             "anthropic-compatible",
         ),
-        (
-            "http://127.0.0.1:8080",
-            "claude-opus-5-5",
-            "anthropic-compatible",
-        ),
+        ("http://127.0.0.1:8080", OPUS_5_5, "anthropic-compatible"),
         (
             "https://gw.example.com/v1",
-            "claude-opus-5-5",
+            OPUS_5_5,
             "anthropic-compatible",
         ),
         (
@@ -91,10 +86,10 @@ fn each_endpoint_lands_on_its_profile() {
         ),
         (
             "https://api.deepseek.com/anthropic",
-            "claude-opus-5-5",
+            OPUS_5_5,
             "anthropic-compatible",
         ),
-        ("not a url", "claude-opus-5-5", "anthropic-compatible"),
+        ("not a url", OPUS_5_5, "anthropic-compatible"),
     ] {
         assert_eq!(
             name(anthropic, base_url, model),
@@ -162,7 +157,7 @@ fn the_profiles_carry_the_table_values() {
     let official = select(
         WireProtocol::AnthropicMessages,
         "https://api.anthropic.com",
-        "claude-opus-5-5",
+        OPUS_5_5,
     );
     assert_eq!(official.system, SystemShape::FirstParty);
     assert!(official.first_party_extras);
@@ -178,7 +173,7 @@ fn the_profiles_carry_the_table_values() {
     let gateway = select(
         WireProtocol::AnthropicMessages,
         "https://gw.example.com",
-        "claude-opus-5-5",
+        OPUS_5_5,
     );
     assert_eq!(gateway.system, SystemShape::ThirdParty);
     assert!(!gateway.first_party_extras);
@@ -211,7 +206,7 @@ fn both_spellings_of_the_official_address_agree() {
         ANTHROPIC_OFFICIAL_BASE_URL,
     ] {
         assert_eq!(
-            name(WireProtocol::AnthropicMessages, base_url, "claude-opus-5-5"),
+            name(WireProtocol::AnthropicMessages, base_url, OPUS_5_5),
             "anthropic-official",
             "{base_url}"
         );

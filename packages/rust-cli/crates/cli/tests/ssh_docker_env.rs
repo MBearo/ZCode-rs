@@ -25,7 +25,7 @@ use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, ConnectionState, Reconnect};
 use rust_cli_kernel_api::env::{CommandEvent, EnvPath, StartCommand, WorkspaceRef};
 use rust_cli_kernel_api::env_shell::CwdScope;
-use rust_cli_kernel_api::ids::{EnvironmentId, OperationId, ShellTaskId};
+use rust_cli_kernel_api::ids::{EnvironmentId, ShellTaskId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_machines::{Machine, MachineError, MachineState};
 use rust_cli_ssh_connect::{SshProvisioner, SshTarget};
@@ -51,14 +51,11 @@ async fn output(machine: &MachineEnv, operation: &str, text: &str) -> String {
         socket: None,
         env: Default::default(),
     };
-    machine
+    let mut events = machine
         .commands()
         .start_command(&ws, context(operation), start)
         .await
         .unwrap();
-    let mut events = machine
-        .commands()
-        .watch_command(OperationId::new(operation), 0);
     let mut text = String::new();
     while let Some(event) = tokio::time::timeout(Duration::from_secs(30), events.next())
         .await

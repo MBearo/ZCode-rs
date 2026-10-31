@@ -177,15 +177,18 @@ pub(crate) fn fingerprint(token: &str) -> String {
         .collect()
 }
 
+/// 登录令牌前可以带的鉴权方案名（不区分大小写，后面跟空白）。
+const BEARER_PREFIX: &str = "bearer";
+
 /// `loginToken.trim().replace(/^Bearer\s+/i, "")`。
 fn login_token(raw: &str) -> String {
     let trimmed = raw.trim();
-    match trimmed.get(..6) {
+    match trimmed.get(..BEARER_PREFIX.len()) {
         Some(prefix)
-            if prefix.eq_ignore_ascii_case("bearer")
-                && trimmed[6..].starts_with(char::is_whitespace) =>
+            if prefix.eq_ignore_ascii_case(BEARER_PREFIX)
+                && trimmed[BEARER_PREFIX.len()..].starts_with(char::is_whitespace) =>
         {
-            trimmed[6..].trim_start().to_owned()
+            trimmed[BEARER_PREFIX.len()..].trim_start().to_owned()
         }
         _ => trimmed.to_owned(),
     }

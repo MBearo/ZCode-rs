@@ -10,6 +10,8 @@ use rust_cli_kernel_api::permission::PermissionRule;
 use crate::safe_env;
 
 const TOOL: &str = "Bash";
+/// 简单前缀的词数：命令名与一个像子命令的词。
+const PREFIX_WORDS: usize = 2;
 
 /// 后面接任意命令的包装与 shell：按前缀放行它们等于放行任意命令，不给前缀。
 pub(crate) const WRAPPERS: [&str; 37] = [
@@ -111,10 +113,10 @@ fn skip_safe_assignments<'a>(words: &'a [&'a str]) -> Option<&'a [&'a str]> {
 pub(crate) fn simple_prefix(command: &str) -> Option<String> {
     let all = words(command);
     let rest = skip_safe_assignments(&all)?;
-    if rest.len() < 2 || is_wrapper(rest[0]) || !is_subcommand_word(rest[1]) {
+    if rest.len() < PREFIX_WORDS || is_wrapper(rest[0]) || !is_subcommand_word(rest[1]) {
         return None;
     }
-    Some(rest[..2].join(" "))
+    Some(rest[..PREFIX_WORDS].join(" "))
 }
 
 /// 第一个词（只给询问框的种子用）：像子命令的词、不是包装。
@@ -140,7 +142,7 @@ fn heredoc_prefix(command: &str) -> Option<String> {
     if is_wrapper(first) {
         return None;
     }
-    Some(rest[..rest.len().min(2)].join(" "))
+    Some(rest[..rest.len().min(PREFIX_WORDS)].join(" "))
 }
 
 fn prefix_rule(prefix: &str) -> PermissionRule {

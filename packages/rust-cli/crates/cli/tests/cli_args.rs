@@ -16,6 +16,7 @@ use std::process::{Output, Stdio};
 use std::sync::{Arc, Mutex};
 use system_env::KeepSystem as _;
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::Value;
 
 const REPLY: &str = concat!(
@@ -131,7 +132,7 @@ impl Sandbox {
             .env("PATH", "/usr/bin:/bin")
             .env("ZCODE_DATA_BASE_DIR", &self.home)
             .env("ZCODE_API_KEY", "test-key")
-            .env("ZCODE_MODEL", "claude-opus-5-5")
+            .env("ZCODE_MODEL", GLM_5_3)
             .stdin(if stdin.is_some() {
                 Stdio::piped()
             } else {
@@ -456,11 +457,15 @@ fn yolo_launches_in_bypass_and_the_old_flag_is_an_unknown_option() {
 }
 
 /// 工作线 F69（cli-args.md §1.4）：`--effort` 是新会话的档位，主请求与对话中间 system 消息的 `output_config.effort`
-/// 都是它；不认识的值写一行警告、按缺省档位，退出码 0。端点按官方 API 处理（只给测试用的声明），否则不发 effort。
+/// 都是它；不认识的值写一行警告、按缺省档位，退出码 0。端点按官方 API 处理（只给测试用的声明），模型有卡片的形状
+/// （GLM 按 opus，effort 按卡片写），否则不发 effort。
 #[test]
 fn effort_sets_the_request_effort() {
     let sandbox = Sandbox::new();
-    let first_party = [("_ZCODE_ASSUME_FIRST_PARTY_BASE_URL", "1")];
+    let first_party = [
+        ("_ZCODE_ASSUME_FIRST_PARTY_BASE_URL", "1"),
+        ("ZCODE_MODEL", GLM_5_3),
+    ];
     let efforts = |args: &[&str]| {
         let server = Server::start();
         let output = sandbox.run_with(args, Some(&server), None, &first_party);

@@ -12,7 +12,7 @@ use std::sync::{Mutex, PoisonError};
 
 use rust_cli_kernel_api::env::{OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{ReadText, TextRead};
-use rust_cli_kernel_api::env_shell::{BackgroundStatus, BackgroundTask};
+use rust_cli_kernel_api::env_shell::{self, BackgroundStatus, BackgroundTask};
 use rust_cli_kernel_api::ids::{OwnerEpoch, SessionId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind, OUTPUT_TAIL_LINES};
@@ -184,10 +184,19 @@ async fn running_on(place: &Place, session: &SessionId, tail: bool) -> Vec<Backg
             Some(dir) if tail => output_tail(place, &output_path(dir, task.as_str())).await,
             _ => None,
         };
+        // 修复线 F117：种类与名称照执行环境报的。Monitor 是 `Monitor`、名称是它的 description（空时是命令原文，旧执行器
+        // 不报种类时按 Bash）；以前一律记成 `Shell`、名称是命令原文，footer 把 monitor 数成 shell。
+        let (kind, description) = match info.kind {
+            env_shell::BackgroundKind::Monitor if !info.description.is_empty() => {
+                (BackgroundKind::Monitor, info.description)
+            }
+            env_shell::BackgroundKind::Monitor => (BackgroundKind::Monitor, info.command),
+            env_shell::BackgroundKind::Bash => (BackgroundKind::Shell, info.command),
+        };
         entries.push(BackgroundEntry {
             id: task.to_string(),
-            kind: BackgroundKind::Shell,
-            description: info.command,
+            kind,
+            description,
             status: info.status,
             output,
             machine: place.name.clone(),

@@ -1,5 +1,6 @@
 //! 不带参数的 `/rename` 的文本处理（titles.md §8.3–§8.5）：对话文本、JSON 解析、
 //! 名字的清理与请求的形状。
+use rust_cli_base::models::{GLM_5_3, OPUS_5_5};
 use rust_cli_kernel_api::ids::{MessageId, ToolUseId};
 use rust_cli_kernel_api::message::{
     AssistantMessage, AttachmentMessage, ContentBlock, Message, UserMessage, UserOrigin,
@@ -137,14 +138,19 @@ fn names_are_cleaned() {
 
 #[test]
 fn the_rename_request_has_the_expected_shape() {
-    let opus = ModelSelection {
+    // Anthropic 的有卡片的模型：输出上限与 effort 按卡片（卡片的上限只给有卡片的模型）。
+    let carded = ModelSelection {
         provider: "anthropic".to_owned(),
-        model: "claude-opus-5-5".to_owned(),
+        model: OPUS_5_5.to_owned(),
         reasoning: None,
         connection: None,
     };
-    let request = request(&opus, &SessionId::new("sess_rename"), "Fix it\nOK");
-    assert_eq!(request.selection, opus);
+    let request = request(
+        &carded,
+        &SessionId::new("sess_rename"),
+        ("Fix it\nOK", None),
+    );
+    assert_eq!(request.selection, carded);
     // 工作线 F52：带上会话（`metadata.user_id` 的 `session_id`）。
     assert_eq!(
         request.options.session_id,
@@ -175,20 +181,23 @@ fn the_rename_request_has_the_expected_shape() {
         request.source,
         QuerySource::Side("rename_generate_name".to_owned())
     );
-    // 卡片模型上会话选了推理档位时用它。
+    // 有卡片形状的模型（GLM 按 opus）上会话选了推理档位时用它；GLM 的输出上限按目录（工作线 F121），目录没给时同没有
+    // 卡片的模型。
     let chosen = ModelSelection {
         provider: "p".to_owned(),
-        model: "claude-opus-5-5".to_owned(),
+        model: GLM_5_3.to_owned(),
         reasoning: Some("high".to_owned()),
         connection: None,
     };
-    assert_eq!(
-        super::request(&chosen, &SessionId::new("sess_rename"), "x")
-            .options
-            .effort
-            .as_deref(),
-        Some("high")
+    let glm = super::request(
+        &chosen,
+        &SessionId::new("sess_rename"),
+        ("x", Some(128_000)),
     );
+    assert_eq!(glm.options.effort.as_deref(), Some("high"));
+    assert_eq!(glm.max_tokens, 128_000);
+    let unlisted = super::request(&chosen, &SessionId::new("sess_rename"), ("x", None));
+    assert_eq!(unlisted.max_tokens, 32_000);
     // 没有模型卡片时输出上限是 32000（与主循环相同），也不写 effort——推理字段只由配置的 option map 写（修复线
     // F23 修的 bug：以前把选择的档位写进 `output_config.effort`）。
     let other = ModelSelection {
@@ -197,7 +206,42 @@ fn the_rename_request_has_the_expected_shape() {
         reasoning: Some("high".to_owned()),
         connection: None,
     };
-    let request = super::request(&other, &SessionId::new("sess_rename"), "x");
+    let request = super::request(&other, &SessionId::new("sess_rename"), ("x", None));
     assert_eq!(request.max_tokens, 32_000);
     assert_eq!(request.options.effort, None);
+}
+
+/// 格式字符（Cf）的判断：双向与零宽部分改用 base 的表之后，与原来的整张表逐个码点相同（起名的清理不变）。
+#[test]
+fn format_characters_are_the_same_set_as_before() {
+    fn old_is_format(code: u32) -> bool {
+        matches!(
+            code,
+            0xAD | 0x600..=0x605
+                | 0x61C
+                | 0x6DD
+                | 0x70F
+                | 0x890..=0x891
+                | 0x8E2
+                | 0x180E
+                | 0x200B..=0x200F
+                | 0x202A..=0x202E
+                | 0x2060..=0x2064
+                | 0x2066..=0x206F
+                | 0xFEFF
+                | 0xFFF9..=0xFFFB
+                | 0x110BD
+                | 0x110CD
+                | 0x13430..=0x1343F
+                | 0x1BCA0..=0x1BCA3
+                | 0x1D173..=0x1D17A
+                | 0xE0001
+                | 0xE0020..=0xE007F
+        )
+    }
+    for code in 0..=0x10FFFF_u32 {
+        if let Some(c) = char::from_u32(code) {
+            assert_eq!(super::is_format(c), old_is_format(code), "U+{code:04X}");
+        }
+    }
 }

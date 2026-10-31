@@ -76,8 +76,6 @@ pub enum Request {
     WatchCommand { operation: String, cursor: u64 },
     #[serde(rename = "commands.cancel")]
     Cancel { operation: String },
-    #[serde(rename = "commands.operation_status")]
-    OperationStatus { operation: String },
     #[serde(rename = "commands.close_session")]
     CloseSession { session: String, forget: bool },
     #[serde(rename = "shell.shell_state")]
@@ -108,8 +106,6 @@ pub enum Request {
     },
     #[serde(rename = "checkpoints.rewind_apply")]
     RewindApply { token: String },
-    #[serde(rename = "checkpoints.rewind_status")]
-    RewindStatus { token: String },
     #[serde(rename = "checkpoints.rewind_finish")]
     RewindFinish { token: String },
     #[serde(rename = "pdf.pdf_page_count")]
@@ -172,7 +168,6 @@ impl Request {
             Self::StartCommand { .. } => Op::StartCommand,
             Self::WatchCommand { .. } => Op::WatchCommand,
             Self::Cancel { .. } => Op::Cancel,
-            Self::OperationStatus { .. } => Op::OperationStatus,
             Self::CloseSession { .. } => Op::CloseSession,
             Self::ShellState { .. } => Op::ShellState,
             Self::ShellNotices { .. } => Op::ShellNotices,
@@ -183,7 +178,6 @@ impl Request {
             Self::StopBackgroundCommand { .. } => Op::StopBackgroundCommand,
             Self::RewindPrepare { .. } => Op::RewindPrepare,
             Self::RewindApply { .. } => Op::RewindApply,
-            Self::RewindStatus { .. } => Op::RewindStatus,
             Self::RewindFinish { .. } => Op::RewindFinish,
             Self::PdfPageCount { .. } => Op::PdfPageCount,
             Self::RenderPdfPages { .. } => Op::RenderPdfPages,

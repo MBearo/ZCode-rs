@@ -14,10 +14,15 @@ use rust_cli_base::secret::EnvSnapshot;
 use rust_cli_net::{CaBundle, NetworkPolicy, NoProxy, TrustRoots};
 
 /// Node 版 zcode 的根证书变量（读值、报错与日志都用这个名字，F55：以前写了三次）。
-const AGENT_CA_CERT: &str = "ZCODE_AGENT_CA_CERT";
+const AGENT_CA_CERT: &str = rust_cli_base::names::env::ZCODE_AGENT_CA_CERT;
 
 /// 按这个顺序取第一个非空的代理变量。
-const STANDARD_PROXY: [&str; 4] = ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"];
+const STANDARD_PROXY: [&str; 4] = [
+    "https_proxy",
+    rust_cli_base::names::env::HTTPS_PROXY,
+    "http_proxy",
+    rust_cli_base::names::env::HTTP_PROXY,
+];
 
 /// 标准代理变量不是带主机的完整 URL（启动时的用户错误）。入口把它原样写到 stderr，退出码 1。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,7 +80,9 @@ fn var<'a>(env: &'a EnvSnapshot, name: &str) -> Option<&'a str> {
 
 /// 代理地址：`ZCODE_HTTP_PROXY`（Node 的写法）有效时用它，否则取第一个非空的标准变量。
 pub(crate) fn proxy(env: &EnvSnapshot) -> Result<Option<String>, InvalidProxy> {
-    if let Some(url) = var(env, "ZCODE_HTTP_PROXY").and_then(node_proxy_url) {
+    if let Some(url) =
+        var(env, rust_cli_base::names::env::ZCODE_HTTP_PROXY).and_then(node_proxy_url)
+    {
         return Ok(Some(url));
     }
     let Some((source, value)) = STANDARD_PROXY.iter().find_map(|name| {
@@ -121,14 +128,14 @@ fn has_scheme(value: &str) -> bool {
 
 /// 不走代理的规则：`ZCODE_NO_PROXY`（去空白后非空）优先，否则是合并后的 `no_proxy` / `NO_PROXY`。
 pub(crate) fn no_proxy(env: &EnvSnapshot) -> NoProxy {
-    if let Some(value) = var(env, "ZCODE_NO_PROXY")
+    if let Some(value) = var(env, rust_cli_base::names::env::ZCODE_NO_PROXY)
         .map(trim)
         .filter(|value| !value.is_empty())
     {
         return NoProxy::Node(value.to_owned());
     }
     let lower = var(env, "no_proxy").unwrap_or("");
-    let upper = var(env, "NO_PROXY").unwrap_or("");
+    let upper = var(env, rust_cli_base::names::env::NO_PROXY).unwrap_or("");
     let merged = if lower == "*" || upper == "*" {
         "*".to_owned()
     } else if !lower.is_empty() && !upper.is_empty() && lower != upper {
@@ -161,7 +168,7 @@ pub(crate) fn ca_source(env: &EnvSnapshot) -> Option<CaSource> {
     {
         return Some(CaSource::Agent(path.to_owned()));
     }
-    var(env, "NODE_EXTRA_CA_CERTS")
+    var(env, rust_cli_base::names::env::NODE_EXTRA_CA_CERTS)
         .filter(|path| !path.is_empty())
         .map(|path| CaSource::Extra(path.to_owned()))
 }

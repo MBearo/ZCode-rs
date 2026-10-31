@@ -21,6 +21,8 @@ use crate::texts;
 
 pub const NAME: &str = "Glob";
 const LIMIT: usize = 100;
+/// 盘符 `C:` 的长度。
+const DRIVE_LEN: usize = rust_cli_base::path::DRIVE_PREFIX_LEN;
 
 #[derive(Deserialize)]
 struct Input {
@@ -73,7 +75,7 @@ fn split_absolute(pattern: &str, root: &EnvPath) -> Option<(String, String)> {
         // `C:` 是 C 盘的当前目录，补成 `C:\`。
         drive
             if style == PathStyle::Windows
-                && drive.len() == 2
+                && drive.len() == DRIVE_LEN
                 && drive.as_bytes()[0].is_ascii_alphabetic()
                 && drive.as_bytes()[1] == b':' =>
         {
@@ -138,7 +140,7 @@ impl Tool for GlobTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(100_000)
+        Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
     }
 
     async fn call(

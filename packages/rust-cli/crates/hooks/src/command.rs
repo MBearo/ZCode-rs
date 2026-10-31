@@ -56,20 +56,12 @@ impl Captured {
     }
 }
 
-/// hook 命令的任务 ID：`h` + operationId 的 FNV-1a 的 8 位 36 进制（与 Bash 的 `b` 前缀区分）。
+/// hook 命令的任务 ID：`h` + operationId 的 FNV-1a 的 8 位 36 进制（与 Bash 的 `b` 前缀区分；base 的 `hash::short_id`）。
 pub(crate) fn task_id(operation: &OperationId) -> ShellTaskId {
-    const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in operation.as_str().bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    let mut id = String::from("h");
-    for _ in 0..8 {
-        id.push(char::from(ALPHABET[(hash % 36) as usize]));
-        hash /= 36;
-    }
-    ShellTaskId::new(id)
+    ShellTaskId::new(format!(
+        "h{}",
+        rust_cli_base::hash::short_id(operation.as_str())
+    ))
 }
 
 fn single_quote(text: &str) -> String {
@@ -178,18 +170,18 @@ pub(crate) async fn run(run: CommandRun<'_>, cancel: CancellationToken) -> Raw {
         socket: None,
         env: Default::default(),
     };
-    if let Err(error) = run
+    let mut events = match run
         .commands
         .start_command(run.workspace, run.operation, request)
         .await
     {
-        return Raw::Failed(format!("Failed to run: {error}"));
-    }
+        Ok(events) => events,
+        Err(error) => return Raw::Failed(format!("Failed to run: {error}")),
+    };
     if run.hook.background {
-        // async：不等待，结果不回送（D6）。
+        // async：不等待，结果不回送（D6）；丢掉流不影响命令。
         return Raw::Backgrounded;
     }
-    let mut events = run.commands.watch_command(operation.clone(), 0);
     let mut captured = Captured::default();
     let mut cancel_sent = false;
     loop {

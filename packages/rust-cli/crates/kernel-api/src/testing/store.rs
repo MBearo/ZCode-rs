@@ -228,7 +228,6 @@ impl SessionStore for MemoryStore {
             model: None,
             mode: None,
             plan: false,
-            open_operations: Vec::new(),
             pending_interactions: Vec::new(),
             checkpoints,
             // 最后一个批次之后的当前轮（node-store 按库推导；这里取最后一个带锚点的批次）。

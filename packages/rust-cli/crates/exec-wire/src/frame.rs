@@ -7,72 +7,78 @@
 use std::collections::HashMap;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use rust_cli_base::units;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::blob::Body;
 
 /// 一片的大小：超过它的消息拆开发，片与片之间可以插控制帧。
-pub const PART_SIZE: usize = 256 * 1024;
+pub const PART_SIZE: usize = 256 * units::KIB;
 /// 一条消息（拼回之后）的上限。
-pub const MAX_MESSAGE: u64 = 512 * 1024 * 1024;
+pub const MAX_MESSAGE: u64 = 512 * units::MIB as u64;
 
-const PART: u8 = 0x30;
 const HEAD: usize = 1 + 4;
 const PART_HEAD: usize = 1 + 8 + 1;
 
-/// 帧的类型（§18.2 的表）。
+// 帧的类型字节（§18.2 的表）：`Kind` 的判别值就是它们，编码与解码都只经 `Kind`。
+const HELLO: u8 = 0x01;
+const WELCOME: u8 = 0x02;
+const REFUSE: u8 = 0x03;
+const REQUEST: u8 = 0x10;
+const REPLY: u8 = 0x11;
+const EVENT: u8 = 0x12;
+const ACK: u8 = 0x13;
+const CLOSE: u8 = 0x14;
+const PING: u8 = 0x20;
+const PONG: u8 = 0x21;
+/// 大消息的一片（不是 `Kind`：收方拼回原来的帧再解码）。
+const PART: u8 = 0x30;
+const ADMIN: u8 = 0x40;
+const ADMIN_REPLY: u8 = 0x41;
+
+/// 帧的类型（§18.2 的表）：判别值是线上的类型字节。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum Kind {
-    Hello,
-    Welcome,
-    Refuse,
-    Request,
-    Reply,
-    Event,
-    Ack,
-    Close,
-    Ping,
-    Pong,
+    Hello = HELLO,
+    Welcome = WELCOME,
+    Refuse = REFUSE,
+    Request = REQUEST,
+    Reply = REPLY,
+    Event = EVENT,
+    Ack = ACK,
+    Close = CLOSE,
+    Ping = PING,
+    Pong = PONG,
     /// 管理帧（§19.6）：连接的第一帧，代替 `hello`。
-    Admin,
-    AdminReply,
+    Admin = ADMIN,
+    AdminReply = ADMIN_REPLY,
 }
 
 impl Kind {
+    /// 全部类型（解码按类型字节在这里找）。
+    const ALL: [Self; 12] = [
+        Self::Hello,
+        Self::Welcome,
+        Self::Refuse,
+        Self::Request,
+        Self::Reply,
+        Self::Event,
+        Self::Ack,
+        Self::Close,
+        Self::Ping,
+        Self::Pong,
+        Self::Admin,
+        Self::AdminReply,
+    ];
+
     pub fn code(self) -> u8 {
-        match self {
-            Self::Hello => 0x01,
-            Self::Welcome => 0x02,
-            Self::Refuse => 0x03,
-            Self::Request => 0x10,
-            Self::Reply => 0x11,
-            Self::Event => 0x12,
-            Self::Ack => 0x13,
-            Self::Close => 0x14,
-            Self::Ping => 0x20,
-            Self::Pong => 0x21,
-            Self::Admin => 0x40,
-            Self::AdminReply => 0x41,
-        }
+        self as u8
     }
 
     pub fn from_code(code: u8) -> Option<Self> {
-        Some(match code {
-            0x01 => Self::Hello,
-            0x02 => Self::Welcome,
-            0x03 => Self::Refuse,
-            0x10 => Self::Request,
-            0x11 => Self::Reply,
-            0x12 => Self::Event,
-            0x13 => Self::Ack,
-            0x14 => Self::Close,
-            0x20 => Self::Ping,
-            0x21 => Self::Pong,
-            0x40 => Self::Admin,
-            0x41 => Self::AdminReply,
-            _ => return None,
-        })
+        Self::ALL.into_iter().find(|kind| kind.code() == code)
     }
 
     /// 控制帧（心跳、ack、关闭流）：发送方在大消息的两片之间先发它们。

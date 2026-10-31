@@ -16,6 +16,7 @@ use std::process::Stdio;
 use std::time::{Duration, UNIX_EPOCH};
 use system_env::KeepSystem as _;
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::Value;
 
 const KEY: &str = "test-key-model-io-5d81c0";
@@ -91,7 +92,7 @@ fn run(runtime: Option<&str>, prepare: impl FnOnce(&Path)) -> Run {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &server)
         .env("ZCODE_API_KEY", KEY)
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -155,7 +156,7 @@ fn a_debug_build_records_the_round_under_cli_debug() {
     assert_eq!(record["querySource"], "main_turn");
     assert!(record["turnId"].as_str().unwrap().starts_with("run_"));
     assert!(!record["requestId"].as_str().unwrap().is_empty());
-    assert_eq!(record["model"]["modelId"], "claude-opus-5-5");
+    assert_eq!(record["model"]["modelId"], GLM_5_3);
     assert_eq!(record["model"]["protocol"], "anthropic-messages");
     // 请求：轨迹比对基线的形状，头里的 key 已脱敏，请求体是发出的 JSON。
     let request = &record["request"];
@@ -164,7 +165,7 @@ fn a_debug_build_records_the_round_under_cli_debug() {
     assert_eq!(request["method"], "POST");
     assert_eq!(request["path"], "/v1/messages?beta=true");
     assert_eq!(request["headers"]["x-api-key"], "[redacted]");
-    assert_eq!(request["body"]["model"], "claude-opus-5-5");
+    assert_eq!(request["body"]["model"], GLM_5_3);
     assert_eq!(request["body"]["stream"], true);
     assert!(request["body"]["messages"].to_string().contains(PROMPT));
     assert_eq!(request["bodyMessagesKind"], "full");

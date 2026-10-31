@@ -4,7 +4,9 @@
 //! 数组（`InputValidationError: [ … ]`，两格缩进，MO1 实测）。字段的检查先做，有问题时不做整体的“正好一个来源”。
 
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::ops::RangeInclusive;
 
+use rust_cli_base::chars;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -52,10 +54,8 @@ impl Input {
 /// （tools-more.md §19.3）。修 bug（工作线 F95）：以前回车（0x0D）也放过；回车在终端里回到行首，后面的字盖住前面的字，
 /// 对齐对象只放过制表符与换行，这里照它把回车算作控制字符。
 fn has_hidden_controls(text: &str) -> bool {
-    text.chars().any(|c| {
-        let code = u32::from(c);
-        (code < 0x20 && !matches!(c, '\t' | '\n')) || (0x7f..=0x9f).contains(&code)
-    })
+    text.chars()
+        .any(|c| (chars::is_c0(c) && !matches!(c, '\t' | '\n')) || chars::is_del_or_c1(c))
 }
 
 /// ws URL 的 refine：ASCII、`ws:` / `wss:`、没有用户名密码与空白。
@@ -167,18 +167,25 @@ pub(crate) fn validation_message(issues: &[Value]) -> String {
     format!("InputValidationError: {text}")
 }
 
+/// IPv4 的私有、链路本地与云元数据段：（第一段，第二段的范围）。127/8 不在里面。
+const PRIVATE_V4: [(u8, RangeInclusive<u8>); 6] = [
+    (0, u8::MIN..=u8::MAX),
+    (10, u8::MIN..=u8::MAX),
+    (169, 254..=254),
+    (172, 16..=31),
+    (100, 64..=127),
+    (192, 168..=168),
+];
+/// IPv6 的唯一本地地址 `fc00::/7` 与链路本地地址 `fe80::/10`：（掩码，前缀）。
+const UNIQUE_LOCAL_V6: (u16, u16) = (0xfe00, 0xfc00);
+const LINK_LOCAL_V6: (u16, u16) = (0xffc0, 0xfe80);
+
 /// IPv4 的私有、链路本地与云元数据段（127/8 不算）。
 fn private_v4(ip: Ipv4Addr) -> bool {
     let [a, b, ..] = ip.octets();
-    match a {
-        127 => false,
-        0 | 10 => true,
-        169 => b == 254,
-        172 => (16..=31).contains(&b),
-        100 => (64..=127).contains(&b),
-        192 => b == 168,
-        _ => false,
-    }
+    PRIVATE_V4
+        .iter()
+        .any(|(first, second)| a == *first && second.contains(&b))
 }
 
 /// IPv6：`::1` 不算，`::`、`fc00::/7`、`fe80::/10` 与映射的 IPv4 按上面。
@@ -193,7 +200,9 @@ fn private_v6(ip: Ipv6Addr) -> bool {
         return private_v4(v4);
     }
     let first = ip.segments()[0];
-    (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+    [UNIQUE_LOCAL_V6, LINK_LOCAL_V6]
+        .iter()
+        .any(|(mask, prefix)| first & mask == *prefix)
 }
 
 /// ws URL 的主机是 IP 字面量且在私有段时返回主机（去掉方括号），否则 None。

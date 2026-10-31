@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use rust_cli_agents::{AgentCatalog, AgentSource};
+use rust_cli_base::tokens;
 use rust_cli_compact::CompactConfig;
 use rust_cli_compact::window::{WindowSource as Source, context_buffer, window};
 use rust_cli_context::PromptAssembler;
@@ -302,7 +303,10 @@ impl UsageAnalyzer {
                 .iter()
                 .map(|(tool, loaded)| McpTool {
                     name: tool.name.clone(),
-                    estimate: rough(&serde_json::to_string(tool).unwrap_or_default(), 4),
+                    estimate: rough(
+                        &serde_json::to_string(tool).unwrap_or_default(),
+                        tokens::CHARS_PER_TOKEN,
+                    ),
                     loaded: *loaded,
                 })
                 .collect(),

@@ -169,12 +169,18 @@ fn dedup_key(hook: &HookCommand) -> String {
     }
 }
 
+/// 同一组里各种 hook 的先后：command、prompt、agent、http。
+const COMMAND_GROUP: usize = 0;
+const PROMPT_GROUP: usize = 1;
+const AGENT_GROUP: usize = 2;
+const HTTP_GROUP: usize = 3;
+
 fn group(hook: &HookCommand) -> usize {
     match hook {
-        HookCommand::Command(_) => 0,
-        HookCommand::Prompt(_) => 1,
-        HookCommand::Agent(_) => 2,
-        HookCommand::Http(_) => 3,
+        HookCommand::Command(_) => COMMAND_GROUP,
+        HookCommand::Prompt(_) => PROMPT_GROUP,
+        HookCommand::Agent(_) => AGENT_GROUP,
+        HookCommand::Http(_) => HTTP_GROUP,
     }
 }
 

@@ -9,63 +9,63 @@ use std::collections::BTreeMap;
 
 /// 原样传入的变量名（Windows 上按不区分大小写比较）。
 const NAMES: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "TERM",
-    "COLORTERM",
-    "LANG",
-    "LANGUAGE",
-    "TZ",
-    "TMPDIR",
-    "TEMP",
-    "TMP",
-    "SSH_AUTH_SOCK",
-    "DISPLAY",
-    "WAYLAND_DISPLAY",
-    "EDITOR",
-    "VISUAL",
-    "PAGER",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "ALL_PROXY",
+    rust_cli_base::names::env::PATH,
+    rust_cli_base::names::env::HOME,
+    rust_cli_base::names::env::USER,
+    rust_cli_base::names::env::LOGNAME,
+    rust_cli_base::names::env::SHELL,
+    rust_cli_base::names::env::TERM,
+    rust_cli_base::names::env::COLORTERM,
+    rust_cli_base::names::env::LANG,
+    rust_cli_base::names::env::LANGUAGE,
+    rust_cli_base::names::env::TZ,
+    rust_cli_base::names::env::TMPDIR,
+    rust_cli_base::names::env::TEMP,
+    rust_cli_base::names::env::TMP,
+    rust_cli_base::names::env::SSH_AUTH_SOCK,
+    rust_cli_base::names::env::DISPLAY,
+    rust_cli_base::names::env::WAYLAND_DISPLAY,
+    rust_cli_base::names::env::EDITOR,
+    rust_cli_base::names::env::VISUAL,
+    rust_cli_base::names::env::PAGER,
+    rust_cli_base::names::env::HTTP_PROXY,
+    rust_cli_base::names::env::HTTPS_PROXY,
+    rust_cli_base::names::env::NO_PROXY,
+    rust_cli_base::names::env::ALL_PROXY,
     "http_proxy",
     "https_proxy",
     "no_proxy",
     "all_proxy",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "NODE_EXTRA_CA_CERTS",
-    "GOPATH",
-    "GOROOT",
-    "CARGO_HOME",
-    "RUSTUP_HOME",
-    "JAVA_HOME",
-    "NVM_DIR",
-    "PNPM_HOME",
-    "PYENV_ROOT",
-    "VIRTUAL_ENV",
-    "CONDA_PREFIX",
-    "HOMEBREW_PREFIX",
+    rust_cli_base::names::env::SSL_CERT_FILE,
+    rust_cli_base::names::env::SSL_CERT_DIR,
+    rust_cli_base::names::env::NODE_EXTRA_CA_CERTS,
+    rust_cli_base::names::env::GOPATH,
+    rust_cli_base::names::env::GOROOT,
+    rust_cli_base::names::env::CARGO_HOME,
+    rust_cli_base::names::env::RUSTUP_HOME,
+    rust_cli_base::names::env::JAVA_HOME,
+    rust_cli_base::names::env::NVM_DIR,
+    rust_cli_base::names::env::PNPM_HOME,
+    rust_cli_base::names::env::PYENV_ROOT,
+    rust_cli_base::names::env::VIRTUAL_ENV,
+    rust_cli_base::names::env::CONDA_PREFIX,
+    rust_cli_base::names::env::HOMEBREW_PREFIX,
     // Windows
-    "SystemRoot",
+    rust_cli_base::names::env::SystemRoot,
     "SystemDrive",
     "windir",
-    "ComSpec",
-    "PATHEXT",
-    "USERPROFILE",
-    "USERNAME",
-    "APPDATA",
-    "LOCALAPPDATA",
+    rust_cli_base::names::env::ComSpec,
+    rust_cli_base::names::env::PATHEXT,
+    rust_cli_base::names::env::USERPROFILE,
+    rust_cli_base::names::env::USERNAME,
+    rust_cli_base::names::env::APPDATA,
+    rust_cli_base::names::env::LOCALAPPDATA,
     "ProgramData",
-    "ProgramFiles",
+    rust_cli_base::names::env::ProgramFiles,
     "ProgramFiles(x86)",
     "ProgramW6432",
-    "NUMBER_OF_PROCESSORS",
-    "PROCESSOR_ARCHITECTURE",
+    rust_cli_base::names::env::NUMBER_OF_PROCESSORS,
+    rust_cli_base::names::env::PROCESSOR_ARCHITECTURE,
 ];
 
 /// 按前缀传入的变量。
@@ -81,7 +81,8 @@ fn allowed(name: &str) -> bool {
 /// 换成它，环境段、git 等子进程、MCP stdio 都读这里。以前 env-local 三处各读一次，没设时 git 写空串、
 /// MCP 写 `/bin/sh`；应只有 `SHELL` 一个值，子进程继承它，没有缺省。
 pub(crate) fn shell_variable(snapshot: &[(String, String)]) -> Option<&str> {
-    rust_cli_base::secret::env_var(snapshot, "SHELL").filter(|value| !value.is_empty())
+    rust_cli_base::secret::env_var(snapshot, rust_cli_base::names::env::SHELL)
+        .filter(|value| !value.is_empty())
 }
 
 /// 用户命令的完整环境：白名单里的变量加上固定设置。`shell` 是实际执行命令的 shell（Bash 命令与 hook 命令写它）；
@@ -96,9 +97,15 @@ pub(crate) fn project(
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect();
     if let Some(shell) = shell {
-        env.insert("SHELL".to_owned(), shell.to_owned());
+        env.insert(
+            rust_cli_base::names::env::SHELL.to_owned(),
+            shell.to_owned(),
+        );
     }
-    env.insert("GIT_EDITOR".to_owned(), "true".to_owned());
+    env.insert(
+        rust_cli_base::names::env::GIT_EDITOR.to_owned(),
+        "true".to_owned(),
+    );
     env.insert("ZCODE".to_owned(), "1".to_owned());
     env
 }

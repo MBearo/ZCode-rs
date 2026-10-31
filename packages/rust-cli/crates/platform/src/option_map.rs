@@ -1,8 +1,38 @@
 // 复制自 rust/crates/shared/src/option_map.rs（07ab266d4b）；去掉了 platform 不用的 merge_patch（合并在 model 的 patch.rs）。
 //! Restricted CEL option maps (provider option mapping, shared by the CLI and
 //! the Host). No functions, member access or external IO.
+use std::ops::RangeInclusive;
+
 use anyhow::{Context, Result, bail, ensure};
+use rust_cli_base::units;
 use serde_json::{Map, Value};
+
+/// 选项映射源码的上限（字节）。
+const MAX_SOURCE_BYTES: usize = 64 * units::KIB;
+/// 词法记号的上限。
+const MAX_TOKENS: usize = 2048;
+/// 表达式嵌套的上限。
+const MAX_DEPTH: usize = 64;
+/// 字符串里的 `\uXXXX` 转义：前缀 `\u` 的字符数、十六进制的位数、整段的字符数。
+const UNICODE_ESCAPE_PREFIX_CHARS: usize = 2;
+const UNICODE_ESCAPE_DIGITS: usize = 4;
+const UNICODE_ESCAPE_CHARS: usize = UNICODE_ESCAPE_PREFIX_CHARS + UNICODE_ESCAPE_DIGITS;
+/// 十六进制的基数。
+const HEX_RADIX: u32 = rust_cli_base::units::HEX_RADIX;
+/// UTF-16 的高代理项：后面要再跟一个 `\u` 转义的低代理项。
+const HIGH_SURROGATES: RangeInclusive<u16> = 0xd800..=0xdbff;
+/// 双字符运算符（`==`、`!=`、`<=`、`>=`、`&&`、`||`）的字符数。
+const PAIR_OPERATOR_CHARS: usize = 2;
+/// 运算符的优先级（大的先结合）。
+const OR_PRECEDENCE: u8 = 1;
+const AND_PRECEDENCE: u8 = 2;
+const EQUALITY_PRECEDENCE: u8 = 3;
+const COMPARISON_PRECEDENCE: u8 = 4;
+const ADDITIVE_PRECEDENCE: u8 = 5;
+const MULTIPLICATIVE_PRECEDENCE: u8 = 6;
+const UNARY_PRECEDENCE: u8 = 8;
+/// JS 的 `Number.MAX_SAFE_INTEGER`：绝对值更大的整数不是 JSON 安全的。
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Token {
@@ -23,7 +53,7 @@ enum Expr {
 
 pub fn evaluate(source: &str, variable: &str, input: &Value) -> Result<Value> {
     ensure!(
-        source.len() <= 65536 && (input.is_string() || input.is_number()),
+        source.len() <= MAX_SOURCE_BYTES && (input.is_string() || input.is_number()),
         "Invalid option map"
     );
     let mut parser = Parser {
@@ -72,26 +102,29 @@ fn tokenize(source: &str) -> Result<Vec<Token>> {
                         '\\' | '\'' | '"' | '/' => value.push(e),
                         'u' => {
                             let digits: String = chars
-                                .get(i + 1..i + 5)
+                                .get(i + 1..i + 1 + UNICODE_ESCAPE_DIGITS)
                                 .context("Invalid unicode escape")?
                                 .iter()
                                 .collect();
-                            let first = u16::from_str_radix(&digits, 16)?;
-                            i += 4;
+                            let first = u16::from_str_radix(&digits, HEX_RADIX)?;
+                            i += UNICODE_ESCAPE_DIGITS;
                             let mut units = vec![first];
-                            if (0xd800..=0xdbff).contains(&first) {
+                            if HIGH_SURROGATES.contains(&first) {
                                 ensure!(
                                     chars.get(i + 1) == Some(&'\\')
-                                        && chars.get(i + 2) == Some(&'u'),
+                                        && chars.get(i + UNICODE_ESCAPE_PREFIX_CHARS) == Some(&'u'),
                                     "Invalid surrogate"
                                 );
                                 let digits: String = chars
-                                    .get(i + 3..i + 7)
+                                    .get(
+                                        i + 1 + UNICODE_ESCAPE_PREFIX_CHARS
+                                            ..i + 1 + UNICODE_ESCAPE_CHARS,
+                                    )
                                     .context("Invalid surrogate")?
                                     .iter()
                                     .collect();
-                                units.push(u16::from_str_radix(&digits, 16)?);
-                                i += 6;
+                                units.push(u16::from_str_radix(&digits, HEX_RADIX)?);
+                                i += UNICODE_ESCAPE_CHARS;
                             }
                             value.push_str(&String::from_utf16(&units)?);
                         }
@@ -134,10 +167,12 @@ fn tokenize(source: &str) -> Result<Vec<Token>> {
             }
             out.push(Token::Name(chars[start..i].iter().collect()));
         } else {
-            let pair: String = chars[i..chars.len().min(i + 2)].iter().collect();
+            let pair: String = chars[i..chars.len().min(i + PAIR_OPERATOR_CHARS)]
+                .iter()
+                .collect();
             if ["==", "!=", "<=", ">=", "&&", "||"].contains(&pair.as_str()) {
                 out.push(Token::Op(pair));
-                i += 2;
+                i += PAIR_OPERATOR_CHARS;
             } else {
                 ensure!(
                     "{}[]():,?!+-*/%<>".contains(c),
@@ -147,7 +182,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>> {
                 i += 1;
             }
         }
-        ensure!(out.len() <= 2048, "Option map exceeds token budget");
+        ensure!(out.len() <= MAX_TOKENS, "Option map exceeds token budget");
     }
     out.push(Token::End);
     Ok(out)
@@ -183,7 +218,7 @@ impl Parser<'_> {
     }
     fn expression(&mut self, min: u8) -> Result<Expr> {
         self.depth += 1;
-        ensure!(self.depth <= 64, "Option map nesting limit");
+        ensure!(self.depth <= MAX_DEPTH, "Option map nesting limit");
         let mut left = match self.take() {
             Token::Literal(v) => Expr::Literal(v),
             Token::Name(n) if n == self.variable => Expr::Input,
@@ -191,7 +226,7 @@ impl Parser<'_> {
                 Expr::Literal(serde_json::from_str(&n)?)
             }
             Token::Op(op) if ["!", "-", "+"].contains(&op.as_str()) => {
-                Expr::Unary(op, Box::new(self.expression(8)?))
+                Expr::Unary(op, Box::new(self.expression(UNARY_PRECEDENCE)?))
             }
             Token::Op(op) if op == "(" => {
                 let e = self.expression(0)?;
@@ -236,12 +271,12 @@ impl Parser<'_> {
         };
         while let Token::Op(op) = self.current() {
             let prec = match op.as_str() {
-                "||" => 1,
-                "&&" => 2,
-                "==" | "!=" => 3,
-                "<" | "<=" | ">" | ">=" => 4,
-                "+" | "-" => 5,
-                "*" | "/" | "%" => 6,
+                "||" => OR_PRECEDENCE,
+                "&&" => AND_PRECEDENCE,
+                "==" | "!=" => EQUALITY_PRECEDENCE,
+                "<" | "<=" | ">" | ">=" => COMPARISON_PRECEDENCE,
+                "+" | "-" => ADDITIVE_PRECEDENCE,
+                "*" | "/" | "%" => MULTIPLICATIVE_PRECEDENCE,
                 _ => break,
             };
             if prec < min {
@@ -263,7 +298,7 @@ impl Parser<'_> {
 }
 fn number(n: f64) -> Result<Value> {
     ensure!(
-        n.is_finite() && (n.fract() != 0.0 || n.abs() <= 9_007_199_254_740_991.0),
+        n.is_finite() && (n.fract() != 0.0 || n.abs() <= MAX_SAFE_INTEGER),
         "Number is not JSON safe"
     );
     Ok(if n.fract() == 0.0 {

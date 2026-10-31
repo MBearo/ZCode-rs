@@ -125,8 +125,8 @@ impl Connect {
                         });
                     }
                     match phase {
-                        // 修 bug（F10）：以前没有 fallback 时一律重试到上限（11 次请求、约 2.5 分钟）；应对 opus 系列在
-                        // 第 3 次过载后报 `Repeated 529 Overloaded errors`。
+                        // 修 bug（F10）：以前没有 fallback 时一律重试到上限（11 次请求、约 2.5 分钟）；应对按系列不再重试的模型
+                        // （`stops_on_repeated_overload`）在第 3 次过载后报 `Repeated 529 Overloaded errors`。
                         Phase::Head
                             if !self.route.sandbox
                                 && stops_on_repeated_overload(&self.selection.model) =>

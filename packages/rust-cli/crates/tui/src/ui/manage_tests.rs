@@ -31,8 +31,48 @@ fn the_pill_counts_only_the_running_shells() {
     // 混合时只数命令（用户决定 2026-10-27）；`running` 仍数全部在跑的条目。
     let mixed = [entry("b1", Shell, Running), entry("a1", Agent, Running)];
     assert_eq!(pill(&mixed, Lang::En).as_deref(), Some("1 shell"));
-    assert_eq!(pill(&mixed, Lang::Zh).as_deref(), Some("1 个 shell"));
+    assert_eq!(pill(&mixed, Lang::Zh).as_deref(), Some("1 shell"));
     assert_eq!(running(&mixed), 2);
+}
+
+/// 修复线 F117（tui-display.md §2.3）：Monitor 起的后台命令单独数，`N monitor(s)`；与 shell 都有时 shell 在前、用 `, `
+/// 连接（中文用 `、`）。修前 monitor 也数成 shell（`1 shell`），看不出有几个 monitor。修复线 F118（用户决定
+/// 2026-10-30）：中文不带“个”（`1 shell、2 monitor`；以前写 `1 个 shell、2 个 monitor`）。
+#[test]
+fn the_pill_counts_monitors_apart_from_shells() {
+    use BackgroundKind::{Agent, Monitor, Shell};
+    use BackgroundStatus::{Completed, Killed, Running};
+    let one = [entry("b1", Monitor, Running)];
+    assert_eq!(pill(&one, Lang::En).as_deref(), Some("1 monitor"));
+    assert_eq!(pill(&one, Lang::Zh).as_deref(), Some("1 monitor"));
+    let two = [entry("b1", Monitor, Running), entry("s2", Monitor, Running)];
+    assert_eq!(pill(&two, Lang::En).as_deref(), Some("2 monitors"));
+    assert_eq!(pill(&two, Lang::Zh).as_deref(), Some("2 monitor"));
+    // shell 在前；子代理与不在跑的都不数。
+    let both = [
+        entry("b1", Monitor, Running),
+        entry("a1", Agent, Running),
+        entry("b2", Shell, Running),
+        entry("s3", Monitor, Running),
+        entry("b4", Monitor, Completed),
+        entry("b5", Shell, Killed),
+    ];
+    assert_eq!(
+        pill(&both, Lang::En).as_deref(),
+        Some("1 shell, 2 monitors")
+    );
+    assert_eq!(pill(&both, Lang::Zh).as_deref(), Some("1 shell、2 monitor"));
+    let shells = [
+        entry("b1", Shell, Running),
+        entry("b2", Shell, Running),
+        entry("b3", Monitor, Running),
+    ];
+    assert_eq!(
+        pill(&shells, Lang::En).as_deref(),
+        Some("2 shells, 1 monitor")
+    );
+    // 只有已结束的 monitor：没有 pill。
+    assert_eq!(pill(&[entry("b1", Monitor, Completed)], Lang::En), None);
 }
 
 #[test]
@@ -130,7 +170,7 @@ fn there_is_no_pill_when_only_subagents_run() {
         entry("b2", Shell, Running),
     ];
     assert_eq!(pill(&mixed, Lang::En).as_deref(), Some("2 shells"));
-    assert_eq!(pill(&mixed, Lang::Zh).as_deref(), Some("2 个 shell"));
+    assert_eq!(pill(&mixed, Lang::Zh).as_deref(), Some("2 shell"));
     // 一个在跑的命令、一个已结束的子代理：全是命令。
     assert_eq!(
         pill(
@@ -138,7 +178,7 @@ fn there_is_no_pill_when_only_subagents_run() {
             Lang::Zh
         )
         .as_deref(),
-        Some("1 个 shell")
+        Some("1 shell")
     );
 }
 

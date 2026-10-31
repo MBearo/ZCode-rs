@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { metadata, platforms } from "./package.mjs";
 import { npm } from "./npm.mjs";
+import { NPM_REGISTRY } from "../fixture/model.mjs";
 
 const exec = promisify(execFile);
 const directory = resolve(process.argv[2]);
@@ -41,7 +42,7 @@ for (const name of names) {
             `${name}@${metadata.version}`,
             "dist.integrity",
             "--json",
-            "--registry=https://registry.npmjs.org",
+            `--registry=${NPM_REGISTRY}`,
           ])
         ).stdout,
       );
@@ -67,7 +68,7 @@ for (const name of names) {
     "--access",
     "public",
     "--ignore-scripts",
-    "--registry=https://registry.npmjs.org",
+    `--registry=${NPM_REGISTRY}`,
   ];
   if (dryRun) args.push("--dry-run");
   else if (process.env.GITHUB_ACTIONS === "true") args.push("--provenance");

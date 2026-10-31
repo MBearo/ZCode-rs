@@ -8,6 +8,10 @@ use rust_cli_base::include_lf;
 use crate::texts::render;
 use crate::trim;
 
+/// 说明里最多列出几个收件人、几个消息 ID。
+const LISTED_RECIPIENTS: usize = 3;
+const LISTED_MESSAGE_IDS: usize = 5;
+
 macro_rules! peer_texts {
     ($($name:ident => $file:literal,)*) => {
         $(
@@ -113,9 +117,9 @@ pub fn receipt(status: &str, recipients: &[&str], msg_ids: &[&str]) -> Option<St
         } else {
             "recipients"
         };
-        format!("{noun}: {}; ", listed(&unique, 3))
+        format!("{noun}: {}; ", listed(&unique, LISTED_RECIPIENTS))
     };
-    let details = format!(" ({who}msg_id: {})", listed(msg_ids, 5));
+    let details = format!(" ({who}msg_id: {})", listed(msg_ids, LISTED_MESSAGE_IDS));
     Some(render(
         template,
         &[

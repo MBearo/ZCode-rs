@@ -20,6 +20,8 @@ const NATIVE_1M: u64 = 1_000_000;
 /// 窗口覆盖的上下限。
 const OVERRIDE_MIN: u64 = 100_000;
 const OVERRIDE_MAX: u64 = 1_000_000;
+/// 百分比的满值（compact 的产品代码不依赖 base，不能引用 `units::PERCENT_F64`）。
+const PERCENT: f64 = 100.0;
 
 /// 窗口从哪里来。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,7 +131,7 @@ pub fn threshold(facts: &ModelFacts, thresholds: &Thresholds) -> u64 {
     let buffered = effective.saturating_sub(AUTOCOMPACT_BUFFER);
     match thresholds
         .pct_override
-        .filter(|pct| pct.is_finite() && *pct > 0.0 && *pct <= 100.0)
+        .filter(|pct| pct.is_finite() && *pct > 0.0 && *pct <= PERCENT)
     {
         // 向下取整：`Math.floor(effective * (pct / 100))`。
         #[allow(
@@ -137,7 +139,7 @@ pub fn threshold(facts: &ModelFacts, thresholds: &Thresholds) -> u64 {
             clippy::cast_sign_loss,
             clippy::cast_precision_loss
         )]
-        Some(pct) => buffered.min((effective as f64 * (pct / 100.0)).floor() as u64),
+        Some(pct) => buffered.min((effective as f64 * (pct / PERCENT)).floor() as u64),
         None => buffered,
     }
 }
@@ -233,7 +235,7 @@ fn percent_left(base: u64, tokens: u64) -> u64 {
     if base == 0 {
         return 0;
     }
-    let ratio = (base as f64 - tokens as f64) / base as f64 * 100.0;
+    let ratio = (base as f64 - tokens as f64) / base as f64 * PERCENT;
     ratio.round().max(0.0) as u64
 }
 

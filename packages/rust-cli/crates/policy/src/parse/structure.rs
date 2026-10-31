@@ -3,6 +3,7 @@
 //! `[[ … ]]` 读成一条名字是 `[[` 的命令；花括号组、`(( … ))`、函数体照常读，但记为不能拆。`case`、`for (( … ))`、
 //! `coproc` 记为不能拆后停下。不能拆的写法与有没有子 shell 记在 `Script::shape`，询问的文字在 `bash_compound`。
 use super::{Bail, Cmd, Parser};
+use crate::consts::SIGIL_PAIR_LEN;
 use crate::parse::SubstitutionKind;
 use crate::parse::js::slice;
 use crate::parse::lexer::{Ctx, Tk};
@@ -193,7 +194,9 @@ impl Parser<'_> {
             Some(sub) if sub.kind == SubstitutionKind::Process => Complex::AsFile,
             Some(_) => Complex::Nested,
             None if !structure.dynamic => return,
-            None if text.windows(2).any(|pair| pair == b"${") => Complex::VariableBraces,
+            None if text.windows(SIGIL_PAIR_LEN).any(|pair| pair == b"${") => {
+                Complex::VariableBraces
+            }
             None if text.contains(&b'$') => Complex::Variable,
             None => Complex::BracePattern,
         };

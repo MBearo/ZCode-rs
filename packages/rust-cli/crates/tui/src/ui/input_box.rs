@@ -38,6 +38,13 @@ fn example(workspace: &str, lang: Lang) -> &'static str {
 
 /// 占位文字里子代理类型的最大列数（tui-panels.md §1.6）。
 const VIEWING_NAME_MAX: usize = 20;
+/// 提示符占的列：文字从第 2 列起。
+pub(super) const PROMPT_WIDTH: usize = 2;
+/// 查看子代理时上边线的描述：两边各一个空格，后面一个 `─`。
+const VIEWING_LABEL_CHROME: usize = 3;
+/// 文字区最多的行数：max(3, 屏幕高度 / 2 − 5)。
+const MIN_ROWS: usize = 3;
+const ROWS_RESERVED: usize = 5;
 
 /// 输入框为空时的占位文字。
 fn placeholder(app: &App) -> String {
@@ -100,7 +107,7 @@ fn top_rule(app: &App, width: usize) -> Line<'static> {
 fn viewing_rule(app: &App, description: &str, width: usize) -> Line<'static> {
     let style = rule(app);
     let text = description.split_whitespace().collect::<Vec<_>>().join(" ");
-    let room = width.saturating_sub(3);
+    let room = width.saturating_sub(VIEWING_LABEL_CHROME);
     if text.is_empty() || room == 0 {
         return Line::from(Span::styled("─".repeat(width), style));
     }
@@ -141,12 +148,12 @@ fn spans(text: &str, placeholders: &[&str]) -> Vec<Span<'static>> {
 /// 文字区的宽度：屏幕宽度 − 3（前面 2 列是提示符，最后一列留给行尾的光标与 `↑` / `↓`）。绘制、
 /// 点击定位与上下移动都用它折行。
 pub fn text_width(width: usize) -> usize {
-    width.saturating_sub(3)
+    width.saturating_sub(PROMPT_WIDTH + 1)
 }
 
 /// 文字区最多的行数：max(3, 屏幕高度 / 2 − 5)。
 pub fn max_rows(height: usize) -> usize {
-    (height / 2).saturating_sub(5).max(3)
+    (height / 2).saturating_sub(ROWS_RESERVED).max(MIN_ROWS)
 }
 
 /// 输入框的行、光标（相对行，列）与第一可见行。搜索历史时显示匹配的那条历史。
@@ -195,7 +202,7 @@ pub fn input_box(
         // 光标落在占位文字的第一个字符上。
         let line = Line::from(vec![prompt, Span::styled(placeholder(app), dim())]);
         lines.push(super::text::truncate_line(line, width));
-        cursor = Some((1, 2));
+        cursor = Some((1, PROMPT_WIDTH as u16));
     } else {
         let placeholders: Vec<&str> = app.composer.placeholders().collect();
         let rows = area.rows(text_width);
@@ -217,7 +224,7 @@ pub fn input_box(
             if let Some((start, end)) = area.selection() {
                 let (from, to) = (start.max(row.start), end.min(row.start + text.len()));
                 if from < to {
-                    let column = |at: usize| 2 + area.text()[row.start..at].width();
+                    let column = |at: usize| PROMPT_WIDTH + area.text()[row.start..at].width();
                     super::selection::reverse(&mut line, column(from), column(to));
                 }
             }
@@ -248,7 +255,10 @@ pub fn input_box(
         if let (Some(hint), Some(last)) = (hint, lines.last_mut()) {
             last.spans.push(Span::styled(hint.to_owned(), dim()));
         }
-        cursor = Some(((cursor_row - first + 1) as u16, (cursor_col + 2) as u16));
+        cursor = Some((
+            (cursor_row - first + 1) as u16,
+            (cursor_col + PROMPT_WIDTH) as u16,
+        ));
     }
     lines.push(Line::from(Span::styled("─".repeat(width), rule(app))));
     (lines, cursor, first_row)

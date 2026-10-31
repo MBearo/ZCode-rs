@@ -5,6 +5,8 @@
     reason = "辅助函数与替身不在 #[test] 函数里，clippy 的测试放行不覆盖它；失败即测试失败"
 )]
 
+use rust_cli_base::hosts;
+use rust_cli_base::models;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -22,7 +24,7 @@ fn endpoint(base_url: String, headers: &[(&str, &str)]) -> ModelEndpoint {
     ModelEndpoint {
         protocol: WireProtocol::AnthropicMessages,
         base_url,
-        model: "claude-opus-5-5".to_owned(),
+        model: models::GLM_5_3.to_owned(),
         credential: Credential::ApiKey(RedactedString::new("sk-test")),
         headers: headers
             .iter()
@@ -41,7 +43,7 @@ fn endpoint(base_url: String, headers: &[(&str, &str)]) -> ModelEndpoint {
 fn facts() -> SourceFacts {
     SourceFacts {
         version: "0.1.52".to_owned(),
-        endpoint_origin: "https://zcode.z.ai".to_owned(),
+        endpoint_origin: hosts::ZCODE_ORIGIN.to_owned(),
         release_channel: "production".to_owned(),
         locale: Some("en-US".to_owned()),
         time_zone: Some("Asia/Shanghai".to_owned()),
@@ -124,7 +126,7 @@ async fn provider_headers_go_between_the_source_and_the_request_headers() {
     assert!(events.iter().all(Result::is_ok), "{events:?}");
     let captured = &server.requests()[0];
     for (name, value) in [
-        ("http-referer", "https://zcode.z.ai"),
+        ("http-referer", hosts::ZCODE_ORIGIN),
         ("user-agent", "ZCode/0.1.52"),
         ("x-zcode-app-version", "0.1.52"),
         ("x-title", "Probe"),

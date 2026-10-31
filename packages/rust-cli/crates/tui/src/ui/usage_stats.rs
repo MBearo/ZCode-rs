@@ -2,8 +2,7 @@
 //! 这里只算派生值并排版。
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-// 一天的毫秒数只定义在 base（F58：以前这里与 node-store 各写一份）。
-use rust_cli_base::js::date::DAY_MS;
+use rust_cli_base::{civil, units};
 use rust_cli_kernel_api::clock::civil_date;
 use rust_cli_kernel_api::metering::{
     ActivityDay, ActivityRange, ActivityStats, ModelTokens, format_duration, format_number,
@@ -20,30 +19,48 @@ const GAP: usize = 4;
 /// Models 视图每页 4 个模型、两列各宽 36。
 pub const MODELS_PER_PAGE: usize = 4;
 const MODEL_COLUMN: usize = 36;
+/// Models 视图的列数。
+const MODEL_COLUMNS: usize = 2;
+/// 趣闻里“N 倍”从 2 倍起写，不到时写“差不多”。
+const MIN_TIMES: u64 = 2;
+/// 热力图的分位（非零的消息数排序后）。
+const QUARTILES: [f64; 3] = [0.25, 0.5, 0.75];
+/// 热力图的周数：最多 52 周；宽度不够时“宽度 − 星期标签宽”，至少 10 周。星期标签只写周一、三、五（周日为 0）。
+const MAX_WEEKS: usize = 52;
+const MIN_WEEKS: usize = 10;
+const WEEKDAY_LABEL_WIDTH: usize = 4;
+const LABELED_WEEKDAYS: [usize; 3] = [1, 3, 5];
+/// 一周的天数（热力图一列）。
+const WEEK: usize = units::DAYS_PER_WEEK as usize;
 
-/// `YYYY-MM-DD` → 自 1970-01-01 的天数（days_from_civil）。
+/// `YYYY-MM-DD` 的段数。
+const DATE_PARTS: usize = 3;
+
+/// `YYYY-MM-DD` → 自 1970-01-01 的天数（base `civil`）。
 pub fn day_number(date: &str) -> Option<i64> {
-    let mut parts = date.splitn(3, '-').map(str::parse::<i64>);
+    let mut parts = date.splitn(DATE_PARTS, '-').map(str::parse::<i64>);
     let (year, month, day) = (
         parts.next()?.ok()?,
         parts.next()?.ok()?,
         parts.next()?.ok()?,
     );
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    Some(era * 146_097 + day_of_era - 719_468)
+    Some(civil::days_from_civil(
+        year,
+        u32::try_from(month).ok()?,
+        u32::try_from(day).ok()?,
+    ))
 }
 
 fn date_of(day: i64) -> String {
-    civil_date(u64::try_from(day).unwrap_or(0) * DAY_MS)
+    civil_date(u64::try_from(day).unwrap_or(0) * units::MS_PER_DAY)
 }
 
 /// （月, 日）。
 fn month_day(date: &str) -> (u32, u32) {
-    let mut parts = date.splitn(3, '-').skip(1).map(|p| p.parse().unwrap_or(1));
+    let mut parts = date
+        .splitn(DATE_PARTS, '-')
+        .skip(1)
+        .map(|p| p.parse().unwrap_or(1));
     (parts.next().unwrap_or(1), parts.next().unwrap_or(1))
 }
 
@@ -59,7 +76,7 @@ pub struct Derived {
 
 pub fn derive(stats: &ActivityStats) -> Derived {
     let total_days = match (stats.first_session_ms, stats.last_session_ms) {
-        (Some(first), Some(last)) => last.saturating_sub(first).div_ceil(DAY_MS) + 1,
+        (Some(first), Some(last)) => last.saturating_sub(first).div_ceil(units::MS_PER_DAY) + 1,
         _ => 0,
     };
     let numbers: Vec<i64> = stats
@@ -116,7 +133,7 @@ pub fn fun_fact(stats: &ActivityStats, lang: Lang) -> Option<String> {
     if tokens > 0 {
         for (en, zh, size) in text::BOOKS.iter().filter(|book| tokens >= book.2) {
             let times = tokens / size;
-            candidates.push(if times >= 2 {
+            candidates.push(if times >= MIN_TIMES {
                 text::tokens_times(lang, times, (en, zh))
             } else {
                 text::tokens_about(lang, (en, zh))
@@ -125,8 +142,8 @@ pub fn fun_fact(stats: &ActivityStats, lang: Lang) -> Option<String> {
     }
     if let Some(longest) = stats.longest_session_ms {
         for (en, zh, minutes) in text::ACTIVITIES {
-            let times = longest / (minutes * 60_000);
-            if times >= 2 {
+            let times = longest / (minutes * units::MS_PER_MINUTE);
+            if times >= MIN_TIMES {
                 candidates.push(text::session_times(lang, times, (en, zh)));
             }
         }
@@ -151,25 +168,16 @@ fn quartiles(days: &[ActivityDay]) -> Option<[u64; 3]> {
         let index = (counts.len() as f64 * fraction).floor() as usize;
         counts[index.min(counts.len() - 1)]
     };
-    Some([at(0.25), at(0.5), at(0.75)])
+    Some(QUARTILES.map(at))
 }
 
 /// 0 是灰色的 `·`，1–4 是强调色的 `░▒▓█`。
 fn cell(messages: u64, quartiles: Option<[u64; 3]>, palette: &Palette) -> Span<'static> {
+    // 分位从小到大：过了几个分位就高几档（1–4）。
     let level = match quartiles {
         Some(_) if messages == 0 => 0,
         None => 0,
-        Some([p25, p50, p75]) => {
-            if messages >= p75 {
-                4
-            } else if messages >= p50 {
-                3
-            } else if messages >= p25 {
-                2
-            } else {
-                1
-            }
-        }
+        Some(bounds) => 1 + bounds.iter().filter(|bound| messages >= **bound).count(),
     };
     match level {
         0 => Span::styled("\u{b7}", palette.dim()),
@@ -191,21 +199,23 @@ pub fn heatmap(
     let Some(today) = day_number(today) else {
         return Vec::new();
     };
-    let weeks = width.saturating_sub(4).clamp(10, 52);
+    let weeks = width
+        .saturating_sub(WEEKDAY_LABEL_WIDTH)
+        .clamp(MIN_WEEKS, MAX_WEEKS);
     let counts: std::collections::BTreeMap<i64, u64> = days
         .iter()
         .filter_map(|d| day_number(&d.date).map(|n| (n, d.messages)))
         .collect();
     let quartiles = quartiles(days);
-    // 1970-01-01 是周四：周日为 0。
-    let weekday = (today + 4).rem_euclid(7);
-    let start = today - weekday - (weeks as i64 - 1) * 7;
-    let mut rows: Vec<Vec<Span<'static>>> = (0..7).map(|_| Vec::with_capacity(weeks)).collect();
+    // 周日为 0。
+    let weekday = i64::from(civil::weekday(today));
+    let start = today - weekday - (weeks as i64 - 1) * WEEK as i64;
+    let mut rows: Vec<Vec<Span<'static>>> = (0..WEEK).map(|_| Vec::with_capacity(weeks)).collect();
     let mut months: Vec<u32> = Vec::new();
     let mut last_month = None;
     for week in 0..weeks {
         for (row, cells) in rows.iter_mut().enumerate() {
-            let day = start + (week * 7 + row) as i64;
+            let day = start + (week * WEEK + row) as i64;
             if day > today {
                 cells.push(Span::raw(" "));
                 continue;
@@ -224,18 +234,13 @@ pub fn heatmap(
             ));
         }
     }
-    const NAMES: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
     // 按月份个数均分宽度，不按真实的周对齐。
     let slot = weeks / months.len().max(1);
     let labels: String = months
         .iter()
         .map(|m| {
             let name = match lang {
-                Lang::En => {
-                    NAMES[usize::try_from(m.saturating_sub(1)).unwrap_or(0).min(11)].to_owned()
-                }
+                Lang::En => text::month_abbreviation(*m).to_owned(),
                 Lang::Zh => format!("{m}月"),
             };
             let pad = slot.saturating_sub(name.width());
@@ -243,7 +248,7 @@ pub fn heatmap(
         })
         .collect();
     let mut out = vec![Line::from(format!("    {labels}"))];
-    const WEEKDAYS: [(&str, &str); 7] = [
+    const WEEKDAYS: [(&str, &str); WEEK] = [
         ("Sun", "日"),
         ("Mon", "一"),
         ("Tue", "二"),
@@ -253,7 +258,7 @@ pub fn heatmap(
         ("Sat", "六"),
     ];
     for (row, cells) in rows.into_iter().enumerate() {
-        let label = if [1, 3, 5].contains(&row) {
+        let label = if LABELED_WEEKDAYS.contains(&row) {
             let (en, zh) = WEEKDAYS[row];
             match lang {
                 Lang::En => format!("{en:<3}"),
@@ -472,7 +477,7 @@ fn percent(model: &ModelTokens, total: u64) -> String {
         return "0.0".to_owned();
     }
     #[allow(clippy::cast_precision_loss)]
-    let value = model.total() as f64 / total as f64 * 100.0;
+    let value = model.total() as f64 / total as f64 * super::quantities::PERCENT_F64;
     format!("{value:.1}")
 }
 
@@ -542,7 +547,7 @@ pub fn models(
     let count = stats.models.len();
     let offset = offset.min(count.saturating_sub(MODELS_PER_PAGE));
     let page = &stats.models[offset..(offset + MODELS_PER_PAGE).min(count)];
-    let split = page.len().div_ceil(2);
+    let split = page.len().div_ceil(MODEL_COLUMNS);
     let column = |models: &[ModelTokens]| -> Vec<Line<'static>> {
         models
             .iter()

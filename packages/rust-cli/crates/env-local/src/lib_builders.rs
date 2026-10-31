@@ -6,7 +6,6 @@ impl LocalEnvironment {
     pub fn new(home: Option<PathBuf>) -> Self {
         Self {
             home,
-            writes: Ledger::default(),
             rewinds: rewind::Rewinds::default(),
             shells: None,
             snapshot: Default::default(),

@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url";
 import { BINARY_NAME, binaryPath } from "./binary.mjs";
 import { appSchemaRejections } from "./node-interop-history.mjs";
 import { importNode, personalProviderCount, withHome } from "./node-root.mjs";
+import { GLM_5_3_ACCOUNT, GLM_5_3_FLASH_ACCOUNT } from "./fixture/model.mjs";
 
 const SSE = [
   'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
@@ -466,7 +467,7 @@ export async function checkTeam({ nodeRoot, repoRoot, base, expectEqual, zcode, 
       const before = service.seen.length;
       const teamRun = await run(
         zcode,
-        ["-p", "hello", "--model", "account:bigmodel-team-coding-plan/GLM-5.3[p-t]"],
+        ["-p", "hello", "--model", `account:bigmodel-team-coding-plan/${GLM_5_3_ACCOUNT}[p-t]`],
         env,
         join(home, "work"),
       );
@@ -522,7 +523,7 @@ export async function checkTeam({ nodeRoot, repoRoot, base, expectEqual, zcode, 
       const before = service.seen.length;
       const written = await run(
         zcode,
-        ["-p", "hello", "--model", `${team}/GLM-5.3[p-u]`],
+        ["-p", "hello", "--model", `${team}/${GLM_5_3_ACCOUNT}[p-u]`],
         env,
         join(home, "work"),
       );
@@ -580,7 +581,7 @@ export async function checkTeam({ nodeRoot, repoRoot, base, expectEqual, zcode, 
         // Node 的 strict schema 能解析（团队项目不在选择里，另存在 rust-cli/model_connection）。
         expectEqual(
           "team D: Node reads the team model",
-          { providerId: team, modelId: "GLM-5.3" },
+          { providerId: team, modelId: GLM_5_3_ACCOUNT },
           {
             providerId: selection?.providerId,
             modelId: selection?.modelId,
@@ -665,7 +666,7 @@ export async function checkTeam({ nodeRoot, repoRoot, base, expectEqual, zcode, 
           type: "runtime/model_selection",
           touchSession: false,
           time: { created: now, updated: now },
-          data: { providerId: team, modelId: "GLM-5.3-Flash" },
+          data: { providerId: team, modelId: GLM_5_3_FLASH_ACCOUNT },
         });
       } finally {
         switched.close();
@@ -673,7 +674,7 @@ export async function checkTeam({ nodeRoot, repoRoot, base, expectEqual, zcode, 
       const after = rust("read", join(home, ".zcode"), sessionID);
       expectEqual(
         "team D: a model chosen by Node drops the team project",
-        { model: "GLM-5.3-Flash", connection: null },
+        { model: GLM_5_3_FLASH_ACCOUNT, connection: null },
         {
           model: after.model?.model,
           connection: after.model?.connection ?? null,

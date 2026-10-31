@@ -29,6 +29,9 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 
 use crate::admin;
 
+/// 拉起常驻执行器时最多判断几轮：换版本（停掉旧的 → 拉起）与有人手动起了一个（busy）各占一轮。
+const ENSURE_ROUNDS: usize = 3;
+
 /// 常驻进程的就绪行（`zcode executor --daemon` 写在 stdout 的第一行）。
 pub const READY: &str = "ready";
 /// 另一个常驻进程拿着单实例锁。
@@ -38,7 +41,7 @@ pub const ERROR: &str = "error";
 
 /// 代理带给常驻执行器的这条 ssh 会话的变量（F96，§23.2 的验证）：sshd 按会话设置、交给命令的只有 agent 转发的
 /// socket。会话结束时 sshd 删掉它，常驻执行器继承的那一个就失效了。
-pub const SESSION_ENV: &[&str] = &["SSH_AUTH_SOCK"];
+pub const SESSION_ENV: &[&str] = &[rust_cli_base::names::env::SSH_AUTH_SOCK];
 
 /// 这条会话的环境：白名单里每个名字的值，没有时是 None（执行器去掉它）。
 pub fn session_env(lookup: impl Fn(&str) -> Option<String>) -> EnvVars {
@@ -193,8 +196,7 @@ async fn ensure(config: &ProxyConfig) -> Result<(), ProxyError> {
         .await
         .map_err(|e| io("taking the spawn lock", &e))?;
     let socket = config.paths.socket();
-    // 最多判断三轮：换版本（停掉旧的 → 拉起）与有人手动起了一个（busy）各占一轮。
-    for _ in 0..3 {
+    for _ in 0..ENSURE_ROUNDS {
         let status = match admin::request(socket.as_path(), AdminAction::Status).await {
             Ok(Some(reply)) => reply.status,
             // 不认识管理帧的老执行器：直接用它（协议不对时客户端会被拒绝）。

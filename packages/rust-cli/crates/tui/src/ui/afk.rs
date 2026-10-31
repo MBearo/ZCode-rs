@@ -1,6 +1,7 @@
 //! 提问框的空闲超时（docs/specs/rust-cli/tools-more.md §1.1，工作线 F72）：从提问框弹出或最后一次输入起计时，
 //! 终端报告有焦点时不计；每秒检查一次，剩下的时间不超过倒计时门槛时显示倒计时，到期按当时已选的答案提交。
 //! 计时、上一次输入与终端焦点都是界面状态，不同步任何业务状态。
+use rust_cli_base::units;
 use rust_cli_kernel_api::ids::InteractionId;
 use rust_cli_kernel_api::orchestration::InteractionRequest;
 use tokio::time::{Duration, Instant};
@@ -33,12 +34,12 @@ impl QuestionTimeout {
     }
 
     fn seconds(ms: u64) -> u64 {
-        ms.div_ceil(1000)
+        ms.div_ceil(units::MS_PER_SECOND)
     }
 
     /// 剩下的秒数要不要显示。
     fn shows(&self, seconds: u64) -> bool {
-        seconds.saturating_mul(1000) <= self.countdown_ms
+        seconds.saturating_mul(units::MS_PER_SECOND) <= self.countdown_ms
     }
 }
 

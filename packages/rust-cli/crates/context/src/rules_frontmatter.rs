@@ -7,6 +7,9 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+/// frontmatter 的分隔行。
+const FENCE: &str = "---";
+
 /// frontmatter 的前缀：`^---\s*\n([\s\S]*?)---\s*\n?`。
 fn pattern() -> Option<&'static Regex> {
     static PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
@@ -18,10 +21,10 @@ fn pattern() -> Option<&'static Regex> {
 /// frontmatter 之后的正文，与 `paths` 给出的 glob（None 表示无条件规则）。
 pub(crate) fn split(raw: &str) -> (String, Option<Vec<String>>) {
     let text = raw.strip_prefix('\u{feff}').unwrap_or(raw);
-    // 先看第 3 个字符之后还有没有 `---`，没有就不匹配。
+    // 先看开头的 `---` 之后还有没有 `---`，没有就不匹配。
     let found = text
-        .get(3..)
-        .filter(|rest| rest.contains("---"))
+        .get(FENCE.len()..)
+        .filter(|rest| rest.contains(FENCE))
         .and(pattern())
         .and_then(|pattern| pattern.captures(text));
     let Some(found) = found else {

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::hooks::{HookEvent, HookOutcome, HookRunner, StopCondition, StopVerdict};
-use rust_cli_kernel_api::ids::{AgentId, InteractionId, MessageId, OperationId, SessionId};
+use rust_cli_kernel_api::ids::{AgentId, InteractionId, MessageId, SessionId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::model::{ApiRole, QuerySource};
 use rust_cli_kernel_api::orchestration::{
@@ -83,14 +83,6 @@ impl Interactions for GoalSink {
 impl RunSink for GoalSink {
     async fn commit_message(&self, message: Message) -> Result<(), StoreError> {
         self.inner.commit_message(message).await
-    }
-
-    async fn commit_intent(
-        &self,
-        operation: OperationId,
-        fingerprint: String,
-    ) -> Result<(), StoreError> {
-        self.inner.commit_intent(operation, fingerprint).await
     }
 
     async fn emit(&self, event: QueryEvent) -> bool {

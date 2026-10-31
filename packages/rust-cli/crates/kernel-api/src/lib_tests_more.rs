@@ -248,7 +248,7 @@ fn l13_facts_commands_and_rules_round_trip() {
     assert_eq!(sourced[1].behavior, RuleBehavior::Ask);
     let main = crate::model::ModelSelection {
         provider: "anthropic".to_owned(),
-        model: "claude-opus-5-5".to_owned(),
+        model: rust_cli_base::models::GLM_5_3.to_owned(),
         reasoning: Some("high".to_owned()),
         connection: None,
     };
@@ -437,7 +437,7 @@ fn prompt_hook_messages_default_to_empty() {
         messages: Vec::new(),
         selection: ModelSelection {
             provider: "anthropic".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },
@@ -560,6 +560,6 @@ fn the_resume_sentinel_is_recognized() {
         usage: None,
     };
     assert!(sentinel(SYNTHETIC_MODEL, NO_RESPONSE_REQUESTED).is_resume_sentinel());
-    assert!(!sentinel("glm-5", NO_RESPONSE_REQUESTED).is_resume_sentinel());
+    assert!(!sentinel(rust_cli_base::models::GLM_5, NO_RESPONSE_REQUESTED).is_resume_sentinel());
     assert!(!sentinel(SYNTHETIC_MODEL, "Prompt is too long").is_resume_sentinel());
 }

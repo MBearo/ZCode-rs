@@ -13,8 +13,9 @@ use futures_util::StreamExt;
 use rust_cli_kernel_api::env::{CommandEvent, OperationContext, Origin, OutputStream};
 use rust_cli_kernel_api::env_shell::{BackgroundTask, ShellNotice};
 use rust_cli_kernel_api::ids::{AgentId, OwnerEpoch, ShellTaskId};
+use rust_cli_kernel_api::machine::CommandEvents;
 use rust_cli_kernel_api::monitor::{MonitorArmed, MonitorSource};
-use rust_cli_kernel_api::monitor_watch::{Emit, Step, Watch};
+use rust_cli_kernel_api::monitor_watch::{Emit, STREAM_RETRIES, Step, Watch};
 use rust_cli_kernel_api::orchestration::OrchestrationError;
 use tokio::sync::oneshot;
 
@@ -71,6 +72,7 @@ pub(crate) fn arm(
     core: &Arc<Core>,
     agent: &AgentId,
     armed: MonitorArmed,
+    events: CommandEvents,
 ) -> Result<(), OrchestrationError> {
     let Some(live) = core.live.get(agent) else {
         return Err(OrchestrationError::Failed {
@@ -91,7 +93,7 @@ pub(crate) fn arm(
         .spawner
         .clone()
         .spawn("subagent-monitor", async move {
-            run(&task_core, live, armed, receiver).await;
+            run(&task_core, live, armed, events, receiver).await;
         });
     Ok(())
 }
@@ -171,12 +173,14 @@ async fn run(
     core: &Arc<Core>,
     live: LiveAgent,
     armed: MonitorArmed,
+    mut events: CommandEvents,
     notice: oneshot::Receiver<ShellNotice>,
 ) {
     let mut watch = Watch::new(armed.clone(), core.ports.clock.now_ms());
-    // monitor 所在的机器（R3）：输出流、查询、停止与 ack 都发给它。
+    // monitor 所在的机器（R3）：查询、停止、ack 与流出错后的续读都发给它。输出读 Monitor 工具交来的那条流（F119）。
     let machine = core.ports.machine_named(armed.machine.as_deref());
-    let mut events = machine.commands().watch_command(armed.operation.clone(), 0);
+    // 流连续出错的次数：到上限就不再续读，只等终态通知（以前没有上限，命令结束或机器没连上时一直重新订阅）。
+    let mut errors = 0u8;
     let socket = armed.source == MonitorSource::Socket;
     loop {
         let now = core.ports.clock.now_ms();
@@ -184,6 +188,9 @@ async fn run(
         tokio::select! {
             event = events.next() => {
                 let now = core.ports.clock.now_ms();
+                if matches!(event, Some(Ok(_))) {
+                    errors = 0;
+                }
                 match event {
                     Some(Ok(CommandEvent::Output { stream: OutputStream::Stdout, data, cursor })) => {
                         watch.on_data(&data, now);
@@ -204,6 +211,10 @@ async fn run(
                     Some(Err(error)) => {
                         // 从记下的游标重新订阅（读过的不再送）。
                         tracing::warn!(%error, task = %armed.task, "a subagent monitor stream failed");
+                        errors += 1;
+                        if errors > STREAM_RETRIES {
+                            break;
+                        }
                         events = machine.commands().watch_command(armed.operation.clone(), watch.cursor);
                     }
                     None => break,

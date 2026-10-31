@@ -28,6 +28,9 @@ use crate::{
     LOCAL_ENVIRONMENT, VERSION, config, limits, log, mcp, model_io, models, options, setup,
 };
 
+/// 退出时等进程级任务收尾的上限（存活的上限，不用来同步状态）。
+const SCOPE_CLOSE_GRACE: Duration = Duration::from_secs(2);
+
 /// 子命令的参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Parsed {
@@ -146,7 +149,7 @@ async fn run(parsed: Parsed) -> Result<u8> {
     tracing::info!(event = "process.exit", code, "process exiting");
     // 写者写完队列里剩下的帧再退出。
     drop(writer);
-    let _ = scope.close(Duration::from_secs(2)).await;
+    let _ = scope.close(SCOPE_CLOSE_GRACE).await;
     run_log.flush().await;
     result.map(|()| code)
 }
@@ -171,7 +174,7 @@ async fn serve(
     let account = platform.clone();
     let shell =
         crate::shell::config(startup.env.clone(), &startup.temp, !names_search_tools(&[])).await;
-    let monitor = options::monitor(startup.explicit.assume, shell.bash.is_some());
+    let monitor = options::monitor(&startup.explicit.assume, shell.bash.is_some());
     let mcp_transport = Arc::new(LocalMcpTransport::new(
         shell.ledger.clone(),
         shell.env.clone(),

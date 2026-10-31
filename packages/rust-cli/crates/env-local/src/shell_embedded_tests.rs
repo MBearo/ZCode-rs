@@ -61,13 +61,13 @@ fn setup(shell: &str, executable: Option<&str>, find_and_grep: bool, with_rg: bo
 
 async fn output(setup: &Setup, operation: &str, command: &str) -> String {
     let start = request(command, &setup.fixture.root, CwdScope::Pinned);
-    setup
+    let events = setup
         .fixture
         .shells
         .start(context(operation), start)
         .await
         .unwrap();
-    collect(&setup.fixture, operation).await.output
+    collect(events).await.output
 }
 
 const GREP: &str = "-G --ignore-files --hidden -I --exclude-dir=.git --exclude-dir=.svn --exclude-dir=.hg --exclude-dir=.bzr --exclude-dir=.jj --exclude-dir=.sl";
@@ -214,13 +214,13 @@ async fn hooks_get_neither_the_prelude_nor_the_variable() {
         stdin: String::new(),
         env: BTreeMap::new(),
     });
-    setup
+    let events = setup
         .fixture
         .shells
         .start(context("op1"), start)
         .await
         .unwrap();
-    let output = collect(&setup.fixture, "op1").await.output;
+    let output = collect(events).await.output;
     // hook 的 shell 是 /bin/bash、PATH 同样来自快照：系统 find 是临时目录里的假命令。
     assert_eq!(output, "unset\nsystem find: . -name x\n");
 }

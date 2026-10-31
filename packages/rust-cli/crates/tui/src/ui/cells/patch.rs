@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::words;
 use super::{Ctx, DETAIL, INDENT, bold, dim, more_lines};
-use crate::ui::palette::ColorLevel;
+use crate::ui::palette::{ColorLevel, Rgb};
 use crate::ui::text::truncate_line;
 use crate::view::ToolRow;
 
@@ -17,6 +17,40 @@ use crate::view::ToolRow;
 const COMPACT_LIMIT: usize = 20;
 /// 改动前后保留的上下文行数。
 const CONTEXT: usize = 3;
+
+/// 一种底色在各种终端里的取值：真彩色（深色背景、浅色背景）与 256 色（深色、浅色）。
+struct Shade {
+    dark: Rgb,
+    light: Rgb,
+    dark256: u8,
+    light256: u8,
+}
+
+/// diff 的底色：新增行、新增的词、删除行、删除的词。
+const ADDED_LINE: Shade = Shade {
+    dark: (0x21, 0x3a, 0x2b),
+    light: (0xda, 0xfb, 0xe1),
+    dark256: 22,
+    light256: 194,
+};
+const ADDED_WORD: Shade = Shade {
+    dark: (0x2e, 0x60, 0x3f),
+    light: (0xac, 0xee, 0xbb),
+    dark256: 28,
+    light256: 157,
+};
+const REMOVED_LINE: Shade = Shade {
+    dark: (0x4a, 0x22, 0x1d),
+    light: (0xff, 0xeb, 0xe9),
+    dark256: 52,
+    light256: 224,
+};
+const REMOVED_WORD: Shade = Shade {
+    dark: (0x7a, 0x33, 0x2b),
+    light: (0xff, 0xc1, 0xbd),
+    dark256: 88,
+    light256: 217,
+};
 
 /// 新增 / 删除行的样式：整行底色、符号、文字与改动的词。
 struct Kind {
@@ -28,32 +62,26 @@ struct Kind {
 
 fn styles(ctx: &Ctx<'_>, added: bool) -> Kind {
     let fg = if added { Color::Green } else { Color::Red };
-    let pick = |dark: (u8, u8, u8), light: (u8, u8, u8), dark256: u8, light256: u8| match ctx
-        .palette
-        .level
-    {
-        ColorLevel::TrueColor => Some(if ctx.palette.light {
-            Color::Rgb(light.0, light.1, light.2)
-        } else {
-            Color::Rgb(dark.0, dark.1, dark.2)
+    let pick = |shade: &Shade| match ctx.palette.level {
+        ColorLevel::TrueColor => Some({
+            let (r, g, b) = if ctx.palette.light {
+                shade.light
+            } else {
+                shade.dark
+            };
+            Color::Rgb(r, g, b)
         }),
         ColorLevel::Ansi256 => Some(Color::Indexed(if ctx.palette.light {
-            light256
+            shade.light256
         } else {
-            dark256
+            shade.dark256
         })),
         ColorLevel::Ansi16 => None,
     };
     let (line_bg, word_bg) = if added {
-        (
-            pick((0x21, 0x3a, 0x2b), (0xda, 0xfb, 0xe1), 22, 194),
-            pick((0x2e, 0x60, 0x3f), (0xac, 0xee, 0xbb), 28, 157),
-        )
+        (pick(&ADDED_LINE), pick(&ADDED_WORD))
     } else {
-        (
-            pick((0x4a, 0x22, 0x1d), (0xff, 0xeb, 0xe9), 52, 224),
-            pick((0x7a, 0x33, 0x2b), (0xff, 0xc1, 0xbd), 88, 217),
-        )
+        (pick(&REMOVED_LINE), pick(&REMOVED_WORD))
     };
     let (Some(bg), Some(word_bg)) = (line_bg, word_bg) else {
         // 16 色终端不画底色：符号与文字上色，改动的词加粗。

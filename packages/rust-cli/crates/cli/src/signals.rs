@@ -9,7 +9,12 @@
 use std::sync::{Arc, OnceLock};
 
 use rust_cli_base::TaskScope;
+use rust_cli_base::proto::exit;
 use tokio_util::sync::CancellationToken;
+/// 收到 SIGTERM、SIGHUP（Windows 的控制台关闭、注销、关机按 SIGHUP）时的退出码：128 + 信号编号。
+#[cfg(unix)]
+const TERMINATED_EXIT: u8 = exit::signal_exit(exit::SIGTERM) as u8;
+const HANGUP_EXIT: u8 = exit::signal_exit(exit::SIGHUP) as u8;
 
 /// 收到的第一个退出信号：名字与对应的退出码。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,8 +98,8 @@ fn listener() -> std::io::Result<impl Future<Output = Received> + Send + 'static
         let received = |name, code| Received { name, code };
         tokio::select! {
             _ = interrupt.recv() => received("SIGINT", 0),
-            _ = terminate.recv() => received("SIGTERM", 143),
-            _ = hangup.recv() => received("SIGHUP", 129),
+            _ = terminate.recv() => received("SIGTERM", TERMINATED_EXIT),
+            _ = hangup.recv() => received("SIGHUP", HANGUP_EXIT),
         }
     })
 }
@@ -114,9 +119,9 @@ fn listener() -> std::io::Result<impl Future<Output = Received> + Send + 'static
         tokio::select! {
             _ = interrupt.recv() => received("CTRL_C", 0),
             _ = brk.recv() => received("CTRL_BREAK", 0),
-            _ = close.recv() => received("CTRL_CLOSE", 129),
-            _ = logoff.recv() => received("CTRL_LOGOFF", 129),
-            _ = shutdown.recv() => received("CTRL_SHUTDOWN", 129),
+            _ = close.recv() => received("CTRL_CLOSE", HANGUP_EXIT),
+            _ = logoff.recv() => received("CTRL_LOGOFF", HANGUP_EXIT),
+            _ = shutdown.recv() => received("CTRL_SHUTDOWN", HANGUP_EXIT),
         }
     })
 }

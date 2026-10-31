@@ -9,6 +9,7 @@ mod agents {
 
     use futures_util::StreamExt;
     use futures_util::stream::BoxStream;
+    use rust_cli_base::models::GLM_4_6;
     use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
     use rust_cli_kernel_api::ids::{CommandId, EnvironmentId, SessionId};
     use rust_cli_kernel_api::message::{ContentBlock, Message, ToolResultContent};
@@ -254,7 +255,7 @@ mod agents {
                 tool_use_response(
                     "toolu_1",
                     "Agent",
-                    &json!({"description": "Say hello", "prompt": "Say hello from the subagent.", "model": "sonnet", "isolation": "worktree", "run_in_background": false}),
+                    &json!({"description": "Say hello", "prompt": "Say hello from the subagent.", "model": GLM_4_6, "isolation": "worktree", "run_in_background": false}),
                 ),
                 text_response(&["Agent checks done."]),
             ]),

@@ -23,7 +23,7 @@ use crate::ids::{created_at, part_id};
 use crate::notices::RUST_CLI;
 use crate::repo::codecs::decode_part;
 use crate::repo::messages;
-use crate::{OrStorage, operations, state, storage, tool_content};
+use crate::{OrStorage, state, storage, tool_content};
 
 /// Node `projectToolNameForNonEmptyBoundary`：空名字换成占位名，原名记在 `providerToolName`。
 const EMPTY_TOOL_NAME: &str = "empty_tool_name";
@@ -228,9 +228,6 @@ pub fn settle(
         }
         part["metadata"][RUST_CLI] = marker;
         messages::save_part(ctx.conn, &part, ctx.now as i64).storage()?;
-        let status = if is_error { "error" } else { "completed" };
-        let input = &part["state"]["input"];
-        operations::settle(ctx, (provider_name(&part), input), call.as_str(), status)?;
     }
     Ok(())
 }

@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use crate::abort::Abort;
 use crate::env::{EnvPath, WorkspaceRef};
-use crate::ids::{AgentId, OperationId, RunId, SessionId, ToolUseId};
+use crate::ids::{AgentId, RunId, SessionId, ToolUseId};
 use crate::mcp_state::{McpConnections, McpView};
 use crate::message::{AttachmentMessage, CompactTrigger, Message, UserMessage};
 use crate::model::{BlockDelta, ModelError, ModelSelection, QuerySource, SystemBlock};
@@ -116,13 +116,6 @@ pub enum QueryError {
 pub trait RunSink: Interactions {
     /// 一条完整的消息（assistant、tool_result、attachment、system）：提交、进入会话历史、通知前端。
     async fn commit_message(&self, message: Message) -> Result<(), StoreError>;
-
-    /// 执行有副作用的操作前登记意图（spec §6 规则 3）。
-    async fn commit_intent(
-        &self,
-        operation: OperationId,
-        fingerprint: String,
-    ) -> Result<(), StoreError>;
 
     /// 不需要持久化的事件；返回 false 表示接收方已经关闭，主循环按中止处理。
     async fn emit(&self, event: QueryEvent) -> bool;
@@ -602,12 +595,14 @@ pub trait Interactions: Send + Sync {
     }
 
     /// Monitor 工具起好的 monitor 交给会话 actor（工作线 F83 新增，docs/specs/rust-cli/tools-more.md §19.6）：actor 是
-    /// 切行、批、限流与通知的唯一 owner，按游标读它的输出。不持有会话的实现（子代理、测试替身）返回 `Unsupported`，
+    /// 切行、批、限流与通知的唯一 owner。`events` 是 `start_command` 返回、工具读过 `Started` 的那条流（工作线 F119：
+    /// 命令结束后不能再按 ID 查，monitor 不再自己从 0 读）。不持有会话的实现（子代理、测试替身）返回 `Unsupported`，
     /// 调用方停掉已经起的命令。
     async fn arm_monitor(
         &self,
         _session: &SessionId,
         _monitor: crate::monitor::MonitorArmed,
+        _events: crate::machine::CommandEvents,
     ) -> Result<(), OrchestrationError> {
         Err(OrchestrationError::Unsupported {
             what: "monitors".to_owned(),

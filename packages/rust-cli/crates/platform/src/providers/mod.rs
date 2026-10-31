@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use futures_util::future::{join, join_all};
 use rust_cli_base::include_lf;
+use rust_cli_base::units;
 use rust_cli_fs::{ChangeGate, FileStamp};
 use rust_cli_kernel_api::model::ModelConnection;
 use rust_cli_kernel_api::provider::CatalogConnection;
@@ -43,7 +44,7 @@ use catalog::Snapshot;
 /// 元数据不变时两次读取之间的最长间隔（Host `FULL_READ_EVERY`）。
 const FULL_READ_EVERY: Duration = Duration::from_secs(60);
 /// 单个配置文件的上限（旧 Rust CLI 的 registry 相同）。
-const MAX_CONFIG_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CONFIG_BYTES: usize = 8 * units::MIB;
 /// 随包的内置 Provider 配置：复制自仓库的 `config/provider/zcode-builtin.json`（测试校验两者相同）。
 pub(crate) const BUNDLED_BUILTIN: &str = include_lf!("../../assets/zcode-builtin.json");
 /// 个人配置不存在时的内容（Node 同样按空配置处理）。

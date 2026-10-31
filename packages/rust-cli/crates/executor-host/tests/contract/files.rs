@@ -1,4 +1,4 @@
-//! `EnvInfo` 与 `Files`：条件写与按 operationId 重放、读文本的目录 / 不存在 / 上限、元数据与目录、整份读写、环境事实。
+//! `EnvInfo` 与 `Files`：条件写（工作线 F119 起不按 operationId 重放）、读文本的目录 / 不存在 / 上限、元数据与目录、整份读写、环境事实。
 
 use std::path::{Path, PathBuf};
 
@@ -22,7 +22,7 @@ fn put(path: &Path, bytes: &[u8], precondition: WritePrecondition) -> PutFile {
     }
 }
 
-async fn conditional_writes_check_versions_and_replay_by_operation(kind: Kind) {
+async fn conditional_writes_check_versions(kind: Kind) {
     let dir = tempfile::tempdir().unwrap();
     let ws = workspace(dir.path());
     let env = machine(kind, LocalEnvironment::new(None)).await;
@@ -37,24 +37,6 @@ async fn conditional_writes_check_versions_and_replay_by_operation(kind: Kind) {
         .await
         .unwrap();
     assert!(created.created);
-    // 同一个 operationId、同样的参数：返回第一次的回执，不再写。
-    let again = files
-        .put_file(
-            &ws,
-            context("op_1"),
-            put(&file, b"one", WritePrecondition::Absent),
-        )
-        .await
-        .unwrap();
-    assert_eq!(again, created);
-    let conflict = files
-        .put_file(
-            &ws,
-            context("op_1"),
-            put(&file, b"two", WritePrecondition::Any),
-        )
-        .await;
-    assert!(matches!(conflict, Err(EnvError::OperationConflict { .. })));
     let old = WritePrecondition::Version(FileVersion::new("old"));
     let stale = files
         .put_file(&ws, context("op_2"), put(&file, b"two", old))
@@ -220,7 +202,7 @@ async fn stat_many_answers_each_path_in_order(kind: Kind) {
 
 contract!(
     stat_many_answers_each_path_in_order,
-    conditional_writes_check_versions_and_replay_by_operation,
+    conditional_writes_check_versions,
     reads_report_directories_missing_files_and_size_limits,
     whole_files_round_trip_with_binary_content,
     path_facts_carry_the_home_given_by_the_entry_crate,

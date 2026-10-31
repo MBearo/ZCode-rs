@@ -1,5 +1,6 @@
 use super::*;
 
+use rust_cli_base::hosts::BIGMODEL_ANTHROPIC;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::provider::TokenLimits;
 
@@ -150,15 +151,12 @@ fn accepted_declarations_are_truthy_test_variables() {
 /// 按另一个地址查方案表与错误码表的测试声明（provider-errors.md D13）：取值是地址，空白当没设；不接受时不读。
 #[test]
 fn the_assumed_base_url_is_a_test_declaration() {
-    let snapshot = env(&[(
-        "_ZCODE_ASSUME_BASE_URL",
-        "https://open.bigmodel.cn/api/anthropic",
-    )]);
+    let snapshot = env(&[("_ZCODE_ASSUME_BASE_URL", BIGMODEL_ANTHROPIC)]);
     assert_eq!(
         assumed_base_url(TestDeclarations::Accepted, |name| {
             var(&snapshot, name).map(str::to_owned)
         }),
-        Some("https://open.bigmodel.cn/api/anthropic".to_owned())
+        Some(BIGMODEL_ANTHROPIC.to_owned())
     );
     let blank = env(&[("_ZCODE_ASSUME_BASE_URL", "  ")]);
     assert_eq!(
@@ -170,7 +168,7 @@ fn the_assumed_base_url_is_a_test_declaration() {
     let reads = std::cell::Cell::new(0);
     let ignored = assumed_base_url(TestDeclarations::Ignored, |_| {
         reads.set(reads.get() + 1);
-        Some("https://open.bigmodel.cn/api/anthropic".to_owned())
+        Some(BIGMODEL_ANTHROPIC.to_owned())
     });
     assert_eq!((ignored, reads.get()), (None, 0));
 }
@@ -232,18 +230,18 @@ fn monitor_is_on_unless_declared_off() {
         assumptions(declarations, |name| var(&snapshot, name).map(str::to_owned))
     };
     let plain = read(&[], TestDeclarations::Accepted);
-    assert!(monitor(plain, true));
-    assert_eq!(monitor(plain, false), !cfg!(windows));
+    assert!(monitor(&plain, true));
+    assert_eq!(monitor(&plain, false), !cfg!(windows));
     let off = read(
         &[("_ZCODE_ASSUME_MONITOR_OFF", "1")],
         TestDeclarations::Accepted,
     );
-    assert!(off.monitor_off && !monitor(off, true));
+    assert!(off.monitor_off && !monitor(&off, true));
     let release = read(
         &[("_ZCODE_ASSUME_MONITOR_OFF", "1")],
         TestDeclarations::Ignored,
     );
-    assert!(monitor(release, true));
+    assert!(monitor(&release, true));
 }
 
 /// 远端执行 R1（remote-exec.md §18.6）：loopback 的声明只在接受声明时读（release 构建不认），缺省是本机的执行环境。

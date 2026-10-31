@@ -8,8 +8,8 @@ use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::watch;
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
+    WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::ids::{OperationId, SessionId};
 use crate::local_services::{Fetch, Git};
@@ -108,7 +108,7 @@ impl Commands for ClosingEnvironment {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         if let Some(hook) = request.hook {
             lock(&self.hooks).push(hook.stdin);
         }
@@ -124,10 +124,6 @@ impl Commands for ClosingEnvironment {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(unused())
     }
 

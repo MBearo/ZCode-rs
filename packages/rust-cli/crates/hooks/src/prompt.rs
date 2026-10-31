@@ -106,14 +106,16 @@ pub(crate) struct Requester<'a> {
     pub agent: Option<&'a AgentId>,
 }
 
-/// 评估请求（旁路请求的形状）：身份句与 system 各带断点；对话记录的断点去掉，只有最后一个块带。
+/// 评估请求（旁路请求的形状）：身份句与 system 各带断点；对话记录的断点去掉，只有最后一个块带。`configured_output`
+/// 是目录的输出上限（模型端口的能力）：借卡片形状的 GLM 按它（工作线 F121，model.md §11.1）。
 fn request(
     (selection, requester): (ModelSelection, Requester<'_>),
     system: &str,
     mut messages: Vec<ApiMessage>,
-    user: String,
+    (user, configured_output): (String, Option<u64>),
 ) -> ModelRequest {
-    let card = models::card(&selection.model);
+    let max_tokens = models::card_output_limit(&selection.model, configured_output)
+        .unwrap_or(DEFAULT_MAX_TOKENS);
     for message in &mut messages {
         for content in &mut message.content {
             content.cache_control = None;
@@ -140,7 +142,7 @@ fn request(
         messages,
         tools: Vec::new(),
         tool_choice: None,
-        max_tokens: card.map_or(DEFAULT_MAX_TOKENS, |card| card.max_output_tokens),
+        max_tokens,
         thinking: None,
         temperature: None,
         betas: Vec::new(),
@@ -289,11 +291,16 @@ pub(crate) async fn run(run: PromptRun<'_>, cancel: CancellationToken) -> HookRe
     let (Some(model), Some(default)) = (run.model, run.default_model) else {
         return error("no model is configured for prompt hooks");
     };
+    let selection = selection(run.hook.model.as_ref(), default);
+    let configured = model
+        .capabilities(&selection)
+        .await
+        .and_then(|found| found.max_output_tokens);
     let request = request(
-        (selection(run.hook.model.as_ref(), default), run.requester),
+        (selection, run.requester),
         goal::prompt_system(),
         Vec::new(),
-        with_arguments(&run.hook.prompt, run.input),
+        (with_arguments(&run.hook.prompt, run.input), configured),
     );
     match ask(model, request, run.timeout_ms, false, cancel).await {
         Asked::Cancelled | Asked::TimedOut => HookResult::cancelled(),
@@ -354,11 +361,15 @@ pub(crate) async fn evaluate(run: StopRun<'_>, cancel: CancellationToken) -> Sto
         &render(goal::stop_condition(), &[("condition", run.condition)]),
         run.input,
     );
+    let configured = model
+        .capabilities(default)
+        .await
+        .and_then(|found| found.max_output_tokens);
     let request = request(
         (default.clone(), run.requester),
         goal::stop_system(),
         run.transcript,
-        user,
+        (user, configured),
     );
     match ask(model, request, run.timeout_ms, true, cancel).await {
         Asked::Cancelled => StopVerdict::Cancelled,

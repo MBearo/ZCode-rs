@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rust_cli_base::{civil, units};
 use rust_cli_kernel_api::clock::{Clock, civil_date};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
@@ -106,37 +107,16 @@ async fn prune(dir: &Path, cutoff: &str) {
         else {
             continue;
         };
-        if parse_date(date).is_some() && date < cutoff {
+        if civil::parse_date(date).is_some() && date < cutoff {
             let _ = rust_cli_fs::remove_optional(&dir.join(&name)).await;
         }
     }
 }
 
-/// `YYYY-MM-DD` → 自 1970-01-01 起的天数（Howard Hinnant 的 days_from_civil）。
-fn parse_date(date: &str) -> Option<i64> {
-    let mut parts = date.split('-');
-    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
-    if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2 {
-        return None;
-    }
-    let (year, month, day): (i64, i64, i64) =
-        (year.parse().ok()?, month.parse().ok()?, day.parse().ok()?);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let shifted = if month > 2 { month - 3 } else { month + 9 };
-    let day_of_year = (153 * shifted + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    Some(era * 146_097 + day_of_era - 719_468)
-}
-
-/// `date` 往前 `days` 天的日期。
+/// `date` 往前 `days` 天的日期（严格的 `YYYY-MM-DD` 与公历换算只定义在 base 的 `civil`）。
 pub(crate) fn days_before(date: &str, days: i64) -> Option<String> {
-    let target = parse_date(date)? - days;
-    let ms = u64::try_from(target).ok()?.checked_mul(86_400_000)?;
+    let target = civil::parse_date(date)? - days;
+    let ms = u64::try_from(target).ok()?.checked_mul(units::MS_PER_DAY)?;
     Some(civil_date(ms))
 }
 

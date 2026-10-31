@@ -25,6 +25,9 @@ use crate::restore::Restore;
 use crate::summary::{self, SummaryShape};
 use crate::{CompactPorts, tokens};
 
+/// 有初始差时，组数多于它才按差多保留几组。
+const SEED_MIN_GROUPS: usize = 3;
+
 /// 全部摘要时最多从头裁几次。
 const MAX_HEAD_TRUNCATIONS: u32 = 3;
 
@@ -100,7 +103,7 @@ impl Engine<'_> {
             .collect();
         let instructions = hooks::pre_compact(self.ports.hooks.as_ref(), request, cancel).await?;
         let groups = groups::group(&messages);
-        if groups.len() < 2 {
+        if groups.len() < groups::MIN_GROUPS {
             return Err(Failure::NotEnough);
         }
         let (raw, split) = self
@@ -138,7 +141,9 @@ impl Engine<'_> {
                 },
             })
         };
-        let mut messages = Vec::with_capacity(split.summarize.len() + 2);
+        // 要压缩的消息之外：截断说明与压缩请求。
+        const EXTRA: usize = 2;
+        let mut messages = Vec::with_capacity(split.summarize.len() + EXTRA);
         if split.truncated == Some(true) {
             messages.push(meta(texts::truncated_head(), "compact_truncated"));
         }
@@ -185,7 +190,7 @@ impl Engine<'_> {
         let mut keep = 1;
         // 播种（有初始差且组数 > 3）：差减去最后一组仍 > 0 时，按剩下的差多保留几组。
         if let Some(gap) = request.initial_token_gap
-            && total > 3
+            && total > SEED_MIN_GROUPS
         {
             let remaining = gap.saturating_sub(group_tokens[total - 1]);
             if remaining > 0 {

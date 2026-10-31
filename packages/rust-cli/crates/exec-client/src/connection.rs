@@ -22,7 +22,9 @@ use rust_cli_exec_wire::envelope::{
     Beat, Close, EventHeader, ReplyHeader, ReplyResult, RequestHeader, StreamItem,
 };
 use rust_cli_exec_wire::frame::{Frame, Kind, Reassembler, Received, Splitter};
-use rust_cli_exec_wire::handshake::{Capabilities, Hello, PROTOCOL, Refuse, Welcome};
+use rust_cli_exec_wire::handshake::{
+    Capabilities, HEARTBEAT_MISSES, Hello, PROTOCOL, Refuse, Welcome,
+};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -53,7 +55,7 @@ pub(crate) struct Queues {
 }
 
 fn liveness(shared: &Shared) -> Duration {
-    shared.options.heartbeat * 3
+    shared.options.heartbeat * HEARTBEAT_MISSES
 }
 
 async fn next_frame(

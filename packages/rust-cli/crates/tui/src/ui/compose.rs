@@ -13,6 +13,8 @@ use super::notice::{self, Armed};
 
 /// 删掉这么多字符以上时提示 ctrl+y 可以粘回。
 const KILL_HINT_CHARS: usize = 3;
+/// 连按 ↑ 这么多次后提示 ctrl+r 搜索历史。
+const HISTORY_HINT_PRESSES: usize = 2;
 
 /// shift+tab 的循环（修复线 F20，用户决定，参照 Node `app-mode.ts` 去掉 plan）：build → guarded → yolo → build。
 /// 不在循环里的模式（acceptEdits、dontAsk、auto）回到 build；plan 是独立开关，shift+tab 不动它。
@@ -258,7 +260,7 @@ impl App {
         let width = self.composer_width;
         self.history_presses += 1;
         if self.composer.area.at_first_row(width) && self.composer.history_prev() {
-            if self.history_presses >= 2 && !self.history_hinted {
+            if self.history_presses >= HISTORY_HINT_PRESSES && !self.history_hinted {
                 self.history_hinted = true;
                 self.notify_keys(notice::search_history(self.lang), notice::HINT_FOR);
             }

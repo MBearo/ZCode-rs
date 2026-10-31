@@ -24,7 +24,7 @@ use anyhow::{Context, Result, bail};
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
-    CommandId, EnvironmentId, MessageId, OperationId, OwnerEpoch, SessionId, ToolUseId, TraceId,
+    CommandId, EnvironmentId, MessageId, OwnerEpoch, SessionId, ToolUseId, TraceId,
 };
 use rust_cli_kernel_api::message::{
     ATTACHMENT_BLOCKS, AssistantMessage, AttachmentMessage, ContentBlock, ImageSource, Message,
@@ -292,14 +292,6 @@ fn result(owner: &MessageId, call: &str, content: Vec<ToolResultContent>, error:
     user_with(vec![block], origin)
 }
 
-/// query 执行器的意图（fingerprint 是 `{"tool", "input"}` JSON）。
-fn intent(operation: &str, tool: &str, input: &Value) -> Fact {
-    Fact::OperationIntent {
-        operation: OperationId::new(operation),
-        fingerprint: json!({"tool": tool, "input": input}).to_string(),
-    }
-}
-
 fn said(text: &str) -> ToolResultContent {
     ToolResultContent::Text { text: text.into() }
 }
@@ -392,9 +384,6 @@ async fn tools(store: &NodeStore) -> Result<SessionId> {
             "<system-reminder>\nPDF file: /w/interop/big.pdf (page count unknown, 1MB). It was not attached because it may be too long.\n</system-reminder>",
             json!({"filename": "/w/interop/big.pdf", "pageCount": null, "fileSize": 1_100_000, "displayPath": "big.pdf"}),
         ),
-        intent("op_1", "Read", &read),
-        intent("op_2", "Glob", &glob),
-        intent("op_5", "Read", &read_pdf),
         reply(
             &a1,
             vec![
@@ -423,7 +412,6 @@ async fn tools(store: &NodeStore) -> Result<SessionId> {
     let reject = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
     let facts = vec![
         user(&message_id(), "Run it"),
-        intent("op_3", "Bash", &bash),
         reply(
             &a3,
             vec![call("toolu_3", "Bash", &bash)],
@@ -440,7 +428,6 @@ async fn tools(store: &NodeStore) -> Result<SessionId> {
                 source: "max_output_tokens_recovery".into(),
             },
         ),
-        intent("op_4", "Bash", &json!({"command": "make"})),
         Fact::Entry {
             kind: "pending_interaction".into(),
             id: "ia_1".into(),

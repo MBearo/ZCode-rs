@@ -114,6 +114,8 @@ pub enum Body {
     Goal(Box<rust_cli_kernel_api::goal::GoalStatus>),
     /// 跨会话：并入或开回合的同伴消息与发送方收到的回执（docs/specs/rust-cli/cross-session.md §2.6）。
     Peer(Box<PeerRow>),
+    /// 回合结束那一行（`TurnDuration`，修复线 F118，tui-display.md §2.7）：只在实时事件里，冷加载没有（不落库）。
+    Duration(Box<rust_cli_kernel_api::turn_duration::TurnDuration>),
 }
 
 /// 跨会话的一行（同伴消息与回执的警告行）。
@@ -165,7 +167,8 @@ impl Row {
             | Body::Shell { .. }
             | Body::ShellOutput { .. }
             | Body::Goal(_)
-            | Body::Peer(_) => false,
+            | Body::Peer(_)
+            | Body::Duration(_) => false,
         }
     }
 }
@@ -369,6 +372,10 @@ impl Transcript {
 #[cfg(test)]
 #[path = "fold_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "duration_tests.rs"]
+mod duration_tests;
 
 /// 测试用的工作区（`/Users/dev/project`）。
 #[cfg(test)]

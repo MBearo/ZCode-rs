@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use futures_util::future::BoxFuture;
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::provider::{CatalogModel, ModelCatalog, ModelDirectory, WireProtocol};
 use rust_cli_kernel_api::testing::text_response;
@@ -199,8 +200,8 @@ async fn the_explicit_endpoint_does_not_write_a_default() {
     let saved = Arc::new(Saved::default());
     with_ui(model, setup(&saved, None), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
-        ui.submit("/model claude-opus-5");
-        ui.wait_for("Set model to claude-opus-5").await;
+        ui.submit(&format!("/model {GLM_5_3}"));
+        ui.wait_for(&format!("Set model to {GLM_5_3}")).await;
     })
     .await;
     assert!(saved.models.lock().unwrap().is_empty());

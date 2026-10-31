@@ -18,12 +18,20 @@ pub(crate) struct StorageLayers {
 impl StorageLayers {
     pub(crate) fn from_layers(layers: &[Layer<'_>], process_env: &[(String, String)]) -> Self {
         Self {
-            dir: merged(layers, process_env, "dir", &["ZCODE_STORAGE_DIR"]),
+            dir: merged(
+                layers,
+                process_env,
+                "dir",
+                &[rust_cli_base::names::env::ZCODE_STORAGE_DIR],
+            ),
             session_db_path: merged(
                 layers,
                 process_env,
                 "sessionDbPath",
-                &["ZCODE_SESSION_DB_PATH", "ZCODE_SESSION_DB"],
+                &[
+                    rust_cli_base::names::env::ZCODE_SESSION_DB_PATH,
+                    rust_cli_base::names::env::ZCODE_SESSION_DB,
+                ],
             ),
         }
     }

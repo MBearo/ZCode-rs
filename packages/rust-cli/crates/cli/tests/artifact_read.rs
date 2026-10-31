@@ -18,6 +18,7 @@ mod sse;
 
 use std::process::Stdio;
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::{Value, json};
 
 const MARKER: &str = "Full output saved to: ";
@@ -78,7 +79,7 @@ fn tool_results(body: &Value) -> Vec<(String, String, bool)> {
             };
             found.push((
                 block["tool_use_id"].as_str().unwrap().to_owned(),
-                text,
+                sse::tool_output(&text).to_owned(),
                 block["is_error"] == true,
             ));
         }
@@ -155,7 +156,7 @@ async fn read_returns_persisted_tool_and_hook_output_from_the_real_store() {
         .env("SHELL", "/bin/bash")
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

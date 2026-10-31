@@ -42,8 +42,8 @@ use crate::profiles::{self, ANTHROPIC_OFFICIAL_BASE_URL, Profile};
 use crate::protocol::{self, Protocol};
 use crate::transport_read::{Next, Read};
 
-/// 错误响应正文最多读这么多字节（只用于分类与提示）。
-const ERROR_BODY_LIMIT: usize = 64 * 1024;
+/// 错误响应正文最多读这么多字节（只用于分类与提示；与 MCP 的 HTTP 传输共用，只定义在 net）。
+const ERROR_BODY_LIMIT: usize = rust_cli_net::ERROR_BODY_LIMIT;
 
 /// 连续过载这么多次后，有 fallback 模型就换模型。
 const MAX_OVERLOADED_BEFORE_FALLBACK: u32 = 3;
@@ -56,7 +56,7 @@ pub(crate) const REPEATED_OVERLOAD: &str = "Repeated 529 Overloaded errors";
 /// `us.anthropic.claude-opus-…` 等），其他模型照常按重试上限重试（model.md §5.2）。
 fn stops_on_repeated_overload(model: &str) -> bool {
     let model = model.to_ascii_lowercase();
-    ["claude-opus", "claude-fable", "claude-mythos"]
+    rust_cli_base::models::ANTHROPIC_REPEATED_OVERLOAD_FAMILIES
         .iter()
         .any(|family| model.contains(family))
 }
@@ -115,8 +115,12 @@ impl Route {
         }
     }
 
-    /// 这个端点的请求方案（model.md §3.2）。修复线 F23：原来按 `is_first_party`（只看主机名）分两种。
+    /// 这个端点的请求方案（model.md §3.2）。修复线 F23：原来按 `is_first_party`（只看主机名）分两种。只给测试用的声明
+    /// “按官方端点处理”直接取官方方案，不看模型 ID（工作线 F121，model.md §11.1）。
     pub(crate) fn profile(&self, endpoint: &ModelEndpoint) -> &'static Profile {
+        if self.assume_first_party && endpoint.protocol == WireProtocol::AnthropicMessages {
+            return profiles::anthropic_official();
+        }
         profiles::select(
             endpoint.protocol,
             self.table_base_url(endpoint),

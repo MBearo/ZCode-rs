@@ -61,7 +61,7 @@ fn models_are_right_aligned() {
         lines_added: 1,
         lines_removed: 3,
         models: vec![(
-            "claude-opus-5-5".to_owned(),
+            rust_cli_base::models::GLM_5_3.to_owned(),
             Usage {
                 input_tokens: 1_200,
                 output_tokens: 300,
@@ -72,7 +72,10 @@ fn models_are_right_aligned() {
     };
     assert_eq!(
         summary.text(),
-        "Total duration (API):  12s\nTotal duration (wall): 1m 5s\nTotal code changes:    1 line added, 3 lines removed\nUsage by model:\n     claude-opus-5-5:  1.2k input, 300 output, 40 cache read, 0 cache write"
+        format!(
+            "Total duration (API):  12s\nTotal duration (wall): 1m 5s\nTotal code changes:    1 line added, 3 lines removed\nUsage by model:\n             {}:  1.2k input, 300 output, 40 cache read, 0 cache write",
+            rust_cli_base::models::GLM_5_3
+        )
     );
 }
 

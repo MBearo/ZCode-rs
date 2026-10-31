@@ -5,6 +5,7 @@
 //! `Interactions::set_workspace` 请求修改（§11.4）。worktree 会话的记录按
 //! 顶层会话放在 [`WorktreeBoard`]，只在改目录成功后记录或清除。
 
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -26,6 +27,9 @@ use crate::common::{Definition, definition, env_failure, failed, parse, resolve,
 use crate::session_slug::session_slug;
 use crate::worktree_exit::ExitWorktreeTool;
 use crate::worktree_texts as texts;
+
+/// 校验错误码：会话已经在一个 worktree 里。
+const ALREADY_IN_CODE: i32 = 2;
 
 pub const ENTER: &str = "EnterWorktree";
 
@@ -87,7 +91,7 @@ fn name_error(name: &str) -> Option<String> {
                 "must not contain \".\" or \"..\" path segments",
             ));
         }
-        if segment.to_lowercase().trim_end_matches('.') == ".git" {
+        if segment.to_lowercase().trim_end_matches('.') == GIT_DIR {
             let reason = format!("\"{segment}\" is a reserved git directory name");
             return Some(texts::invalid_name(name, &reason));
         }
@@ -196,7 +200,7 @@ impl Tool for EnterWorktreeTool {
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {
-        Some(100_000)
+        Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
     }
 
     async fn validate_input(&self, input: &Value, context: &ToolUseContext) -> Validation {
@@ -210,7 +214,7 @@ impl Tool for EnterWorktreeTool {
             return invalid(message, None);
         }
         if input.path.is_none() && self.board.get(&owner(context).await).is_some() {
-            return invalid(texts::ALREADY_IN.to_owned(), Some(2));
+            return invalid(texts::ALREADY_IN.to_owned(), Some(ALREADY_IN_CODE));
         }
         Validation::Ok
     }

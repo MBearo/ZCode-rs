@@ -182,8 +182,20 @@ pub fn no_branch(lang: Lang) -> &'static str {
     pick(lang, "no branch", "没有分支")
 }
 
+/// 展开的预览里的一个标签。
+#[derive(Debug, Clone, Copy)]
+pub enum PreviewLabel {
+    Session,
+    Created,
+    Updated,
+    Directory,
+    Branch,
+    Conversation,
+}
+
 /// 展开的预览里的标签（Codex 的 10 宽标签）。
-pub fn preview_label(lang: Lang, which: usize) -> &'static str {
+pub fn preview_label(lang: Lang, which: PreviewLabel) -> &'static str {
+    let which = which as usize;
     const EN: [&str; 6] = [
         "Session:",
         "Created:",

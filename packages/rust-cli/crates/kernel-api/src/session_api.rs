@@ -55,8 +55,7 @@ pub enum Command {
     Shutdown,
     /// esc 撤回刚发的输入（修复线 F38，session-lifecycle.md §5.5）：空闲、队列为空、
     /// 最后一条可选的人类输入之后没有回答时，对话回退到它之前（与 `Rewind{conversation}` 同一个 `session.revert`）。
-    /// `Accepted.result` 是 `{message, removed}`：`message` 是这条输入（[`crate::message::Message`]，前端放回输入框）。
-    /// 条件不满足时 `Rejected`。
+    /// `Accepted.result` 是 `{message, removed}`：`message` 是这条输入（[`crate::message::Message`]，前端放回输入框）。条件不满足时 `Rejected`。
     RestoreCancelled,
     ResolveInteraction {
         interaction: InteractionId,
@@ -86,8 +85,7 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<MessageId>,
     },
-    /// 用户改名（`/rename`，Node `setCustomSessionTitle`）：标题来源记为 `custom`，之后不再自动生成
-    /// （docs/specs/rust-cli/titles.md §4）。
+    /// 用户改名（`/rename`，Node `setCustomSessionTitle`）：标题来源记为 `custom`，之后不再自动生成（docs/specs/rust-cli/titles.md §4）。
     Rename {
         title: String,
     },
@@ -353,6 +351,8 @@ pub enum KernelEvent {
     PeerHeldChanged {
         held: Vec<crate::peers::HeldPeerMessage>,
     },
+    /// 回合结束那一行的数据（tui-display.md §2.7，F118）：`TurnFinished` 之后、下一个回合之前发；只供显示，不落库。
+    TurnDuration(crate::turn_duration::TurnDuration),
     /// 主线程模型请求的通知（重试、停顿、恢复）：不落库，前端用它显示重试与停顿
     /// （docs/specs/rust-cli/stall-visibility.md §3）。
     ModelNotice {

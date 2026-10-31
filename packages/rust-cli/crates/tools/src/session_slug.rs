@@ -7,17 +7,11 @@
 
 use rust_cli_kernel_api::ids::SessionId;
 
-/// FNV-1a 64 位：跨平台、跨版本稳定（不用 std 的随机种子哈希）。
-fn fnv1a(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    })
-}
-
 /// 会话的词组 `形容词-动词-名词`：哈希依次对三张表的个数取余并整除，得到三个下标。
 pub(crate) fn session_slug(session: &SessionId) -> String {
     let words = rust_cli_prompts::slug_words();
-    let mut hash = fnv1a(session.as_str());
+    // FNV-1a 64 位：跨平台、跨版本稳定（不用 std 的随机种子哈希）。
+    let mut hash = rust_cli_base::hash::fnv1a_64(session.as_str().as_bytes());
     let mut pick = |list: &[String]| {
         let len = u64::try_from(list.len().max(1)).unwrap_or(1);
         let index = usize::try_from(hash % len).unwrap_or(0);

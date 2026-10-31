@@ -12,6 +12,7 @@ mod sse;
 
 use std::process::Stdio;
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::{Value, json};
 
 /// 请求里 tool_result 的 (tool_use_id, 文本)。
@@ -30,7 +31,10 @@ fn tool_results(request: &Value) -> Vec<(String, String)> {
                     .collect(),
                 _ => String::new(),
             };
-            found.push((block["tool_use_id"].as_str().unwrap().to_owned(), text));
+            found.push((
+                block["tool_use_id"].as_str().unwrap().to_owned(),
+                sse::tool_output(&text).to_owned(),
+            ));
         }
     }
     found
@@ -97,7 +101,7 @@ async fn zcode_writes_the_relative_path_the_permission_check_judged_after_cd() {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -203,7 +207,7 @@ async fn a_subagent_starts_in_the_directory_the_parent_was_in() {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

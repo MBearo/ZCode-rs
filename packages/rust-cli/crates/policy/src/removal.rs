@@ -12,9 +12,13 @@ use regex::{Regex, RegexBuilder};
 use rust_cli_kernel_api::env_files::PathStyle;
 
 use crate::check::{AskKind, Check, Inputs};
+use crate::consts::{DRIVE_LEN, DRIVE_ROOT_LEN, NICE_DASH_N_WORDS, OPTION_WITH_VALUE_WORDS};
 use crate::parse::{Invocation, WordText};
 use crate::readonly::strip_wrappers;
 use crate::texts::{self, Removal};
+
+/// `nice -5` 占的词：命令名与带数字的选项。
+const NICE_FLAG_WORDS: usize = 2;
 
 /// 根下的一级目录名：变量为空时 `$X/<名字>` 就是它。
 const TOP_LEVEL: &str = r"bin|boot|dev|etc|home|lib|lib32|lib64|libx32|media|mnt|opt|proc|root|run|sbin|srv|sys|tmp|usr|var|snap|nix|lost\+found|private|cores|Applications|Library|System|Users|Volumes|Windows|ProgramData|cygdrive";
@@ -108,7 +112,7 @@ pub(crate) fn strip_runners(argv: &[String]) -> &[String] {
                 let mut at = 1;
                 while let Some(word) = words.get(at).filter(|word| word.starts_with('-')) {
                     at += if matches!(word.as_str(), "-k" | "-s") {
-                        2
+                        OPTION_WITH_VALUE_WORDS
                     } else {
                         1
                     };
@@ -126,8 +130,10 @@ pub(crate) fn strip_runners(argv: &[String]) -> &[String] {
                 at + 1
             }
             Some("nice") => match words.get(1).map(String::as_str) {
-                Some("-n") => skip_dashes(3, words),
-                Some(flag) if flag.starts_with('-') && flag.len() > 1 => skip_dashes(2, words),
+                Some("-n") => skip_dashes(NICE_DASH_N_WORDS, words),
+                Some(flag) if flag.starts_with('-') && flag.len() > 1 => {
+                    skip_dashes(NICE_FLAG_WORDS, words)
+                }
                 _ => skip_dashes(1, words),
             },
             Some("stdbuf") => {
@@ -141,7 +147,7 @@ pub(crate) fn strip_runners(argv: &[String]) -> &[String] {
                 let mut at = 1;
                 while let Some(word) = words.get(at) {
                     if word == "-u" {
-                        at += 2;
+                        at += OPTION_WITH_VALUE_WORDS;
                     } else if word.starts_with('-') || word.contains('=') {
                         at += 1;
                     } else {
@@ -630,15 +636,15 @@ fn critical(path: &str, home: Option<&str>, style: PathStyle) -> bool {
             variant.strip_suffix('/').unwrap_or(variant)
         };
         let drive = trimmed.as_bytes();
-        let drive_root = drive.len() >= 2
+        let drive_root = drive.len() >= DRIVE_LEN
             && drive[0].is_ascii_alphabetic()
             && drive[1] == b':'
-            && (drive.len() == 2 || (drive.len() == 3 && drive[2] == b'/'));
-        let drive_top = drive.len() > 3
+            && (drive.len() == DRIVE_LEN || (drive.len() == DRIVE_ROOT_LEN && drive[2] == b'/'));
+        let drive_top = drive.len() > DRIVE_ROOT_LEN
             && drive[0].is_ascii_alphabetic()
             && drive[1] == b':'
             && drive[2] == b'/'
-            && !trimmed[3..].contains('/');
+            && !trimmed[DRIVE_ROOT_LEN..].contains('/');
         trimmed == "/"
             || drive_root
             || drive_top

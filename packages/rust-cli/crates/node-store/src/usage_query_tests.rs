@@ -1,4 +1,5 @@
 //! `/usage` 的两个查询（usage.md §4、§5.2）：会话树的 API 时长、活动统计的聚合与范围、只扫索引。
+use rust_cli_base::models::{GLM_4_6, GLM_5_3};
 use rust_cli_kernel_api::ids::{MessageId, SessionId};
 use rust_cli_kernel_api::message::Usage;
 use rust_cli_kernel_api::metering::{
@@ -100,8 +101,8 @@ async fn library() -> TestStore {
         &t,
         "sess_a",
         vec![
-            call("msg_r1", "opus", DAY + 1_100, 900, CallStatus::Completed),
-            call("msg_r2", "opus", DAY + 2_100, 300, CallStatus::Error),
+            call("msg_r1", GLM_5_3, DAY + 1_100, 900, CallStatus::Completed),
+            call("msg_r2", GLM_5_3, DAY + 2_100, 300, CallStatus::Error),
         ],
     )
     .await;
@@ -110,7 +111,7 @@ async fn library() -> TestStore {
         "sess_subagent_agent_1",
         vec![call(
             "msg_sub1",
-            "haiku",
+            GLM_4_6,
             9 * DAY,
             500,
             CallStatus::Completed,
@@ -122,7 +123,7 @@ async fn library() -> TestStore {
         "sess_b",
         vec![call(
             "msg_r3",
-            "opus",
+            GLM_5_3,
             9 * DAY + 100,
             700,
             CallStatus::Completed,
@@ -178,20 +179,20 @@ async fn all_time_activity_counts_top_level_sessions_and_their_messages() {
             day("1970-01-11", 1),
         ]
     );
-    // opus：三行主线程（失败的也算 token，统计 transcript 里的用量）；haiku：子代理。每行不含缓存的输入是
+    // 主线程的模型：三行（失败的也算 token，统计 transcript 里的用量）；子代理的模型：一行。每行不含缓存的输入是
     // 155 − 55 = 100。
     assert_eq!(
         stats.models,
         vec![
             ModelTokens {
-                model: "opus".into(),
+                model: GLM_5_3.into(),
                 input: 300,
                 output: 60,
                 cache_read: 150,
                 cache_write: 15
             },
             ModelTokens {
-                model: "haiku".into(),
+                model: GLM_4_6.into(),
                 input: 100,
                 output: 20,
                 cache_read: 50,
@@ -212,13 +213,13 @@ async fn a_week_keeps_sessions_started_and_messages_sent_in_its_days() {
     assert_eq!(stats.sessions, 1);
     assert_eq!(stats.first_session_ms, Some(9 * DAY));
     assert_eq!(stats.days, vec![day("1970-01-10", 1), day("1970-01-11", 1)]);
-    // 一样多时按模型名排（结果稳定）：haiku 在 opus 前面；opus 只剩第 9 天的一行。
+    // 一样多时按模型名排（结果稳定）：子代理的模型（glm-4.6）在主线程的（glm-5.3）前面；主线程的只剩第 9 天的一行。
     let names: Vec<_> = stats
         .models
         .iter()
         .map(|m| (m.model.as_str(), m.input))
         .collect();
-    assert_eq!(names, [("haiku", 100), ("opus", 100)]);
+    assert_eq!(names, [(GLM_4_6, 100), (GLM_5_3, 100)]);
 }
 
 #[tokio::test]
@@ -311,6 +312,50 @@ fn dates_and_day_indexes_round_trip() {
     assert_eq!(super::day_index("1970-01-01"), Some(0));
     assert_eq!(super::day_index("2026-10-18"), Some(20_744));
     assert_eq!(super::day_index("not a date"), None);
+}
+
+/// 收拢前的 `day_index`（逐字照抄）。
+fn old_day_index(date: &str) -> Option<i64> {
+    let mut parts = date.splitn(3, '-').map(str::parse::<i64>);
+    let (year, month, day) = (
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+    );
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let shifted = (month + 9) % 12;
+    let day_of_year = (153 * shifted + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
+#[test]
+fn day_indexes_match_the_old_parser() {
+    let first = rust_cli_base::civil::days_from_civil(1600, 1, 1);
+    let last = rust_cli_base::civil::days_from_civil(2400, 12, 31);
+    for days in first..=last {
+        let text = rust_cli_base::civil::format_date(days);
+        assert_eq!(super::day_index(&text), Some(days), "{text}");
+        assert_eq!(old_day_index(&text), Some(days), "{text}");
+    }
+    // 宽松的写法与越界的月、日也与以前相同。
+    for text in [
+        "2026-0-10",
+        "2026-13-01",
+        "2026-14-40",
+        "2026-02-00",
+        "2026-02--5",
+        "2026-+3-+7",
+        "26-1-1",
+        "2026-01",
+        "",
+        "x-1-1",
+        "2026-1-x",
+    ] {
+        assert_eq!(super::day_index(text), old_day_index(text), "{text}");
+    }
 }
 
 #[test]

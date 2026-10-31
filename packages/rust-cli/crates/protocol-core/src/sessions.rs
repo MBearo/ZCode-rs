@@ -56,6 +56,9 @@ impl<S> Drop for Bridged<S> {
 
 type Opening<S> = Arc<tokio::sync::OnceCell<Result<Arc<Bridged<S>>, KernelError>>>;
 
+/// 连续这么多轮重新订阅都没收到事件，就当会话的事件流结束了。
+const ENDED_AFTER_EMPTY_ROUNDS: u32 = 2;
+
 /// 打开着的会话的表。
 pub struct SessionBridge<S> {
     kernel: Arc<dyn Kernel>,
@@ -159,8 +162,8 @@ async fn pump<S: SessionSink>(
     window: Duration,
 ) {
     let mut empty = 0;
+    let mut stream = handle.subscribe(Some(last));
     loop {
-        let mut stream = handle.subscribe(Some(last));
         let mut received = false;
         let mut deadline: Option<tokio::time::Instant> = None;
         loop {
@@ -192,7 +195,7 @@ async fn pump<S: SessionSink>(
             sink.flush().await;
         }
         empty = if received { 0 } else { empty + 1 };
-        if empty >= 2 {
+        if empty >= ENDED_AFTER_EMPTY_ROUNDS {
             tracing::debug!(
                 event = "protocol.session.ended",
                 session = handle.id().as_str(),
@@ -204,6 +207,8 @@ async fn pump<S: SessionSink>(
             }
             return;
         }
+        // 先建新流再丢旧流：旧流读到的位置一直拿着，会话日志不会去掉还没补发的（工作线 F120）。
+        stream = handle.subscribe(Some(last));
     }
 }
 

@@ -80,6 +80,12 @@ pub trait AgentSignals: Send + Sync {
     /// 还在跑、或已结束但通知还没有 ack 的后台子代理（`-p` 等它们都处理完才收尾）。
     async fn background(&self, session: &SessionId) -> Vec<AgentId>;
 
+    /// 还在跑、或已结束但通知还没有 ack 的后台子代理，只有子代理、不问执行环境（回合结束那一行的“等它们完成”，
+    /// tui-display.md §2.7，F118）。[`AgentSignals::background`] 另外还算子代理子会话里的后台命令（要问执行环境）。
+    async fn background_agents(&self, _session: &SessionId) -> Vec<AgentId> {
+        Vec::new()
+    }
+
     /// 顶层会话里还在跑的后台子代理的描述与状态（`/tasks`，docs/specs/rust-cli/tui-display.md §3.1）。
     async fn background_entries(
         &self,

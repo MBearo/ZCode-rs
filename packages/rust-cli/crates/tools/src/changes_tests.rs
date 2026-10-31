@@ -233,3 +233,15 @@ fn sensitive_names_follow_the_secret_file_rules() {
         assert!(!sensitive(path), "{path}");
     }
 }
+
+/// 名字里藏着双向控制符或零宽字符的敏感文件照样认出（统一成 base 的一张表；以前只去掉其中四段）。
+#[test]
+fn hidden_bidi_and_zero_width_characters_do_not_hide_sensitive_names() {
+    use super::sensitive;
+    for c in [
+        '\u{061c}', '\u{200b}', '\u{200c}', '\u{202e}', '\u{2066}', '\u{2069}', '\u{206a}',
+        '\u{feff}',
+    ] {
+        assert!(sensitive(&format!("/w/.e{c}nv")), "U+{:04X}", u32::from(c));
+    }
+}

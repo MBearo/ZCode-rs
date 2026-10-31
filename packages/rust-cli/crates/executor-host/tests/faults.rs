@@ -30,7 +30,7 @@ use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{
     EnvironmentId, Generation, OperationId, OwnerEpoch, SessionId, ShellTaskId,
 };
-use rust_cli_kernel_api::machine::MachineEnv;
+use rust_cli_kernel_api::machine::{CommandEvents, MachineEnv};
 use rust_cli_kernel_api::mcp::NoMcpTransport;
 
 /// 帧的类型字节（exec-wire 的表）：回复 0x11、事件 0x12、ack 0x13。
@@ -177,10 +177,8 @@ fn command(root: &std::path::Path, text: &str) -> StartCommand {
     }
 }
 
-async fn output_of(machine: &MachineEnv, operation: &str) -> String {
-    let mut events = machine
-        .commands()
-        .watch_command(OperationId::new(operation), 0);
+/// 读完 `start_command` 返回的流（工作线 F119：结束的命令不能再按 ID 读）。
+async fn output_of(mut events: CommandEvents) -> String {
     let mut output = Vec::new();
     while let Some(event) = events.next().await {
         match event.unwrap() {
@@ -228,7 +226,7 @@ async fn a_stream_cut_midway_continues_by_seq_with_complete_output() {
     // 第一条连接发出 welcome、回复与几项事件之后切断。
     let setup = setup(vec![Faults::new().cut_after_sent(4)], Faults::new()).await;
     let text = "for i in $(seq 1 30); do echo line$i; sleep 0.01; done";
-    setup
+    let events = setup
         .machine
         .commands()
         .start_command(
@@ -238,7 +236,7 @@ async fn a_stream_cut_midway_continues_by_seq_with_complete_output() {
         )
         .await
         .unwrap();
-    let output = tokio::time::timeout(Duration::from_secs(20), output_of(&setup.machine, "op_s"))
+    let output = tokio::time::timeout(Duration::from_secs(20), output_of(events))
         .await
         .unwrap();
     let expected: String = (1..=30).map(|i| format!("line{i}\n")).collect();
@@ -253,7 +251,7 @@ async fn a_stream_cut_midway_continues_by_seq_with_complete_output() {
 async fn reordered_acks_still_close_the_stream_and_empty_the_ledger() {
     let setup = setup(Vec::new(), Faults::new().hold_sent(kind(0x13))).await;
     let text = "for i in $(seq 1 10); do echo $i; sleep 0.01; done";
-    setup
+    let events = setup
         .machine
         .commands()
         .start_command(
@@ -263,7 +261,7 @@ async fn reordered_acks_still_close_the_stream_and_empty_the_ledger() {
         )
         .await
         .unwrap();
-    let output = tokio::time::timeout(Duration::from_secs(20), output_of(&setup.machine, "op_a"))
+    let output = tokio::time::timeout(Duration::from_secs(20), output_of(events))
         .await
         .unwrap();
     assert_eq!(output.lines().count(), 10);

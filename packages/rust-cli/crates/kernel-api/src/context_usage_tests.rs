@@ -34,7 +34,7 @@ fn estimates_round_to_tens() {
 
 fn usage(total: u64, window: u64, source: WindowSource, auto: bool) -> ContextUsage {
     ContextUsage {
-        model: "claude-opus-5-5".into(),
+        model: rust_cli_base::models::GLM_5_3.into(),
         total_tokens: total,
         raw_max_tokens: window,
         percentage: 0,

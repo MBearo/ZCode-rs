@@ -462,7 +462,46 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
     'pub const ENTRYPOINT: &str = "MEMORY.md";\n',
     "crates/memory/src/entrypoint.rs",
   );
-  const definitions = (list) => checkDefinitions(policy, [names, memory, ...list]);
+  const headers = source(
+    "base",
+    [
+      'pub const CONTENT_TYPE: &str = "content-type";',
+      'pub const RETRY_AFTER: &str = "retry-after";',
+      'pub const USER_AGENT: &str = "user-agent";',
+    ].join("\n"),
+    "crates/base/src/proto/http.rs",
+  );
+  // F122 第二阶段：`.git`、空设备、MIME、`x-api-key` 的定义处。
+  const git = source(
+    "kernel-api",
+    [
+      'pub const VCS_DIRS: &[&str] = &[".git", ".svn"];',
+      'pub const GIT_HOOKS_DIR: &str = ".git/hooks";',
+    ].join("\n"),
+    "crates/kernel-api/src/env_files.rs",
+  );
+  const devNull = source("base", 'pub const DEV_NULL: &str = "/dev/null";\n', "crates/base/src/path.rs");
+  const mimes = source(
+    "base",
+    [
+      "application/json",
+      "application/pdf",
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "text/event-stream",
+      "text/html",
+      "text/markdown",
+      "text/plain",
+    ]
+      .map((type, index) => `pub const M${index}: &str = "${type}";`)
+      .join("\n"),
+    "crates/base/src/proto/mime.rs",
+  );
+  const apiKey = source("net", 'pub const X_API_KEY: &str = "x-api-key";\n', "crates/net/src/header.rs");
+  const definitions = (list) =>
+    checkDefinitions(policy, [names, memory, headers, git, devNull, mimes, apiKey, ...list]);
   // 给用户或模型看的文字（前后有空格、标点）、别的名字（`.zcode.json`）、注释、测试文件都不算。
   assert.deepEqual(
     definitions([
@@ -470,6 +509,10 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
       source("tools", 'const U: &str = "edit .zcode.json or the MEMORY.md index.";\n'),
       source("policy", "// zcode.json 与 MEMORY.md\nconst V: u8 = 1;\n"),
       source("context", 'let p = "/w/AGENTS.md";\n', "crates/context/src/a_tests.rs"),
+      // 头名只认整个字面量（F122）：带值的整行、别的头名不算。
+      source("hooks", 'const H: &str = "content-type: text/plain";\nconst A: &str = "accept";\n'),
+      // `.git` 只认路径用途的整段（F122 第二阶段）：参数文字、别的名字不算。
+      source("env-local", 'const E: &[&str] = &["--exclude-dir=.git", ".gitignore", "a.git"];\n'),
     ]),
     [],
   );
@@ -483,6 +526,13 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
       "the scheduled tasks file name scheduled_tasks\\.json",
     ],
     ['join(&dir, &["memory", "MEMORY.md"])', "the memory index file name MEMORY\\.md"],
+    ['headers.push(("Content-Type", json));', "the HTTP header name content-type"],
+    ['let u = "user-agent";', "the HTTP header name user-agent"],
+    ['dir.join(".git")', "the git directory name \\.git"],
+    ['let h = ".git/hooks";', "the git directory name \\.git"],
+    ['let n = "/dev/null";', "the null device /dev/null"],
+    ['let m = "image/png";', "the MIME type image/png"],
+    ['let k = "X-Api-Key";', "the HTTP header name x-api-key"],
   ]) {
     const failures = definitions([source("context", `fn f() {}\n${text}\n`)]);
     assert.equal(failures.length, 1, `${text}: ${failures}`);

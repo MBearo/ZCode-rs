@@ -15,6 +15,14 @@ use crate::view::task_counts;
 
 /// 刚完成的任务在截断时优先显示的时长。
 const RECENT: Duration = Duration::from_secs(30);
+/// 最多显示的行数：终端不超过 10 行时不显示；否则 `行数 − 14`，在 3 到 5 之间。
+const HIDDEN_UP_TO_ROWS: usize = 10;
+const ROWS_RESERVED: usize = 14;
+const MIN_SHOWN: usize = 3;
+const MAX_SHOWN: usize = 5;
+/// 标题最多 `宽度 − 15` 列，不少于 15 列。
+const SUBJECT_RESERVED: usize = 15;
+const MIN_SUBJECT: usize = 15;
 
 /// 任务清单的界面状态。
 #[derive(Debug, Default)]
@@ -65,10 +73,11 @@ fn by_id(left: &TaskRecord, right: &TaskRecord) -> std::cmp::Ordering {
 
 /// 最多显示的行数：`rows <= 10 ? 0 : min(5, max(3, rows - 14))`。
 fn max_display(rows: usize) -> usize {
-    if rows <= 10 {
+    if rows <= HIDDEN_UP_TO_ROWS {
         0
     } else {
-        rows.saturating_sub(14).clamp(3, 5)
+        rows.saturating_sub(ROWS_RESERVED)
+            .clamp(MIN_SHOWN, MAX_SHOWN)
     }
 }
 
@@ -132,7 +141,10 @@ fn item(
         subject = subject.add_modifier(Modifier::DIM);
     }
     // 标题最多 `columns - 15` 列（不少于 15）。
-    let shown = truncate(&task.subject, width.saturating_sub(15).max(15));
+    let shown = truncate(
+        &task.subject,
+        width.saturating_sub(SUBJECT_RESERVED).max(MIN_SUBJECT),
+    );
     let mut spans = vec![
         Span::raw("  "),
         Span::styled(format!("{icon} "), icon_style),

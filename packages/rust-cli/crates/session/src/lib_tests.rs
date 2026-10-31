@@ -357,14 +357,14 @@ async fn a_tool_question_is_persisted_answered_and_resumes_the_tool() {
     let kinds: Vec<&str> = facts
         .iter()
         .filter_map(|fact| match fact {
-            Fact::OperationIntent { .. } => Some("intent"),
             Fact::Entry { kind, .. } => Some(kind.as_str()),
             _ => None,
         })
         .collect();
     assert_eq!(
         kinds,
-        vec!["intent", "pending_interaction", "interaction_resolved"]
+        // 执行工具前不再提交操作意图（工作线 F119）。
+        vec!["pending_interaction", "interaction_resolved"]
     );
 }
 

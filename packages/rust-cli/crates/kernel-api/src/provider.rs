@@ -167,10 +167,13 @@ pub struct ModelCapabilities {
     pub max_output_tokens: Option<u64>,
 }
 
+/// 能力里没有写窗口时的缺省上下文窗口（token）。
+const DEFAULT_CONTEXT_WINDOW: u64 = 1_000_000;
+
 impl Default for ModelCapabilities {
     fn default() -> Self {
         Self {
-            context_window: 1_000_000,
+            context_window: DEFAULT_CONTEXT_WINDOW,
             supports_tool_call: true,
             supports_native_web_search: false,
             supports_mid_conversation_system: false,

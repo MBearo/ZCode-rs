@@ -8,6 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use rust_cli_base::units;
 use rust_cli_fs::{FileMode, ParentDir, TempName, WriteOptions};
 use serde_json::{Map, Value, json};
 
@@ -22,8 +23,8 @@ const SEGMENT_LIMIT: usize = 80;
 /// 生产模式最多保留的文件数（Node `MAX_ROLLOUT_FILES`）。
 const MAX_FILES: usize = 3;
 /// 单文件上限（Node `MAX_ROLLOUT_SESSION_BYTES` / `MAX_DEBUG_SESSION_BYTES`）。
-const PRODUCTION_CAP: u64 = 64 * 1024 * 1024;
-const DEVELOPMENT_CAP: u64 = 256 * 1024 * 1024;
+const PRODUCTION_CAP: u64 = 64 * units::MIB as u64;
+const DEVELOPMENT_CAP: u64 = 256 * units::MIB as u64;
 /// 写基线时最多保留的消息数（Node `MAX_ROLLOUT_BASELINE_MESSAGES` / `MAX_DEBUG_BASELINE_MESSAGES`）。
 const PRODUCTION_BASELINE: usize = 64;
 const DEVELOPMENT_BASELINE: usize = 256;

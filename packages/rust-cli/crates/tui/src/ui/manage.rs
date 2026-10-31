@@ -74,25 +74,42 @@ pub fn running(entries: &[BackgroundEntry]) -> usize {
         .count()
 }
 
-/// footer 的 pill：只数在跑的命令，`N shell(s)`；没有在跑的命令时没有 pill。
+/// footer 的 pill：只数在跑的命令，shell 与 monitor 分开数——`N shell(s)`、`N monitor(s)`，两种都有时 shell 在前、
+/// 用 `, ` 连接（中文 `N shell、N monitor`）；没有在跑的命令时没有 pill。回合结束那一行的 `still running` 也用它
+/// （修复线 F118，tui-display.md §2.7）。
 ///
 /// 用户决定（修复线 F105 与 F106，tui-display.md §2.3、D25）：子代理不进 pill——输入框下面的子代理列表已经逐行列出。
 /// 原来全是子代理时写 `N local agent(s)`（缺省机器在远端时 `N agent(s)`，F98），混合时写 `N background task(s)`
 /// 把子代理也算进去；两种写法都去掉了。
+///
+/// 修复线 F117（用户报告 2026-10-30）：以前快照里没有 monitor 这一种，monitor 也数成 shell（`1 shell`），看不出有几个
+/// monitor；现在按条目的种类分开数。
+///
+/// 修复线 F118（用户决定 2026-10-30：“中文不用加‘个’这个字”）：中文去掉“个”，以前写 `1 个 shell、2 个 monitor`。
 pub fn pill(entries: &[BackgroundEntry], lang: Lang) -> Option<String> {
-    let n = entries
-        .iter()
-        .filter(|entry| {
-            entry.status == BackgroundStatus::Running && entry.kind == BackgroundKind::Shell
+    let running = |kind| {
+        entries
+            .iter()
+            .filter(|entry| entry.status == BackgroundStatus::Running && entry.kind == kind)
+            .count()
+    };
+    let parts: Vec<String> = [
+        (running(BackgroundKind::Shell), "shell"),
+        (running(BackgroundKind::Monitor), "monitor"),
+    ]
+    .into_iter()
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, name)| match lang {
+        Lang::En if n == 1 => format!("1 {name}"),
+        Lang::En => format!("{n} {name}s"),
+        Lang::Zh => format!("{n} {name}"),
+    })
+    .collect();
+    (!parts.is_empty()).then(|| {
+        parts.join(match lang {
+            Lang::En => ", ",
+            Lang::Zh => "、",
         })
-        .count();
-    if n == 0 {
-        return None;
-    }
-    Some(match lang {
-        Lang::En if n == 1 => "1 shell".to_owned(),
-        Lang::En => format!("{n} shells"),
-        Lang::Zh => format!("{n} 个 shell"),
     })
 }
 

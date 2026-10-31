@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rust_cli_base::TaskScope;
+use rust_cli_base::models::GLM_5_3_ACCOUNT;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::testing::FixedClock;
@@ -25,7 +26,7 @@ fn request(session: Option<&str>) -> HeaderRequest {
     HeaderRequest {
         selection: ModelSelection {
             provider: "account:zai-individual-coding-plan".into(),
-            model: "GLM-5.3".into(),
+            model: GLM_5_3_ACCOUNT.into(),
             reasoning: None,
             connection: None,
         },

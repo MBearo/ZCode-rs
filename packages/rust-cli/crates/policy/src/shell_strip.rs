@@ -138,7 +138,7 @@ fn blanks_not_before_dash(text: &str, at: usize) -> Option<usize> {
     }
     if !text[at + run..].starts_with('-') {
         Some(at + run)
-    } else if run >= 2 {
+    } else if run > 1 {
         Some(at + run - 1)
     } else {
         None
@@ -148,7 +148,7 @@ fn blanks_not_before_dash(text: &str, at: usize) -> Option<usize> {
 /// `[ \t]+--` 接在 `at` 之后。
 fn blanks_dashes(text: &str, at: usize) -> Option<usize> {
     let run = blank_run(&text[at..]);
-    (run > 0 && text[at + run..].starts_with("--")).then_some(at + run + 2)
+    (run > 0 && text[at + run..].starts_with("--")).then_some(at + run + "--".len())
 }
 
 /// `^command(?:[ \t]+-p+)*(?:[ \t]+--)?[ \t]+(?!-)`、`^builtin(?:[ \t]+--)?[ \t]+(?!-)`、`^noglob[ \t]+(?!-)`

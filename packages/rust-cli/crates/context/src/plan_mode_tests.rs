@@ -107,7 +107,7 @@ fn request(mode: PermissionMode, agent: Option<&str>) -> ContextRequest {
         tool_names: ["Bash", "Skill"].map(str::to_owned).to_vec(),
         selection: ModelSelection {
             provider: "p".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },

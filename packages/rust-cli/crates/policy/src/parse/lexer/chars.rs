@@ -34,17 +34,24 @@ pub(crate) const LBRACE: u32 = 0x7b;
 pub(crate) const PIPE: u32 = 0x7c;
 pub(crate) const RBRACE: u32 = 0x7d;
 
-/// `charType` 表：bit0 为元字符，bit1 为单词内特殊字符；非 ASCII（含 NaN）为 0。
+/// ASCII 的上界（不含）：JS 的 `c < 128`。
+pub(crate) const ASCII_END: u32 = 0x80;
+
+/// `charType` 的位：bit0 元字符，bit1 单词内的特殊字符。
+const META: u8 = 1;
+const WORD_SPECIAL: u8 = 2;
+
+/// `charType` 表：元字符与单词内特殊字符；非 ASCII（含 NaN）为 0。
 pub(crate) fn char_type(c: u32) -> u8 {
     match c {
-        0x7c | 0x26 | 0x3b | 0x28 | 0x29 | 0x3c | 0x3e | 0x20 | 0x09 | 0x0a => 1,
-        0x5c | 0x27 | 0x22 | 0x24 | 0x60 | 0x7b => 2,
+        PIPE | AMP | SEMI | LPAREN | RPAREN | LT | GT | SPACE | TAB | NL => META,
+        BACKSLASH | SQUOTE | DQUOTE | DOLLAR | BACKTICK | LBRACE => WORD_SPECIAL,
         _ => 0,
     }
 }
 
 pub(crate) fn is_meta(c: u32) -> bool {
-    char_type(c) & 1 != 0
+    char_type(c) & META != 0
 }
 
 /// JS `c < 128 && charType[c]`。
@@ -53,7 +60,7 @@ pub(crate) fn is_special(c: u32) -> bool {
 }
 
 pub(crate) fn is_id_start(c: u32) -> bool {
-    (c < 128 && (c as u8).is_ascii_alphabetic()) || c == UNDERSCORE
+    (c < ASCII_END && (c as u8).is_ascii_alphabetic()) || c == UNDERSCORE
 }
 
 pub(crate) fn is_id_continue(c: u32) -> bool {
@@ -61,7 +68,7 @@ pub(crate) fn is_id_continue(c: u32) -> bool {
 }
 
 pub(crate) fn is_digit(c: u32) -> bool {
-    c < 128 && (c as u8).is_ascii_digit()
+    c < ASCII_END && (c as u8).is_ascii_digit()
 }
 
 pub(crate) fn is_extglob_prefix(c: u32) -> bool {

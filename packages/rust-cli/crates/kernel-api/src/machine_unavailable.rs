@@ -8,8 +8,8 @@ use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
 
 use crate::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
+    WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::ids::{OperationId, SessionId};
 use crate::machine::{
@@ -66,7 +66,7 @@ impl Commands for Unavailable {
         _workspace: &WorkspaceRef,
         _context: OperationContext,
         _request: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(self.error())
     }
 
@@ -79,10 +79,6 @@ impl Commands for Unavailable {
     }
 
     async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(self.error())
-    }
-
-    async fn operation_status(&self, _operation: OperationId) -> Result<Outcome, EnvError> {
         Err(self.error())
     }
 

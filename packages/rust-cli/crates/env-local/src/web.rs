@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use rust_cli_base::units;
 use rust_cli_kernel_api::env::EnvError;
 use rust_cli_kernel_api::env_web::{FetchUrl, FetchedUrl};
 use rust_cli_net::{Egress, HttpRequest, NetError};
@@ -47,7 +48,7 @@ async fn send(egress: &Egress, request: FetchUrl) -> Result<FetchedUrl, EnvError
 
 pub(crate) async fn fetch(egress: &Egress, request: FetchUrl) -> Result<FetchedUrl, EnvError> {
     let limit = Duration::from_millis(request.timeout_ms);
-    let seconds = request.timeout_ms / 1000;
+    let seconds = request.timeout_ms / units::MS_PER_SECOND;
     tokio::time::timeout(limit, send(egress, request))
         .await
         .unwrap_or_else(|_| {

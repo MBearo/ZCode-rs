@@ -22,6 +22,11 @@ use super::selection::{text_at, word_at};
 const MULTI_CLICK: Duration = Duration::from_millis(500);
 /// 连击允许的位置偏差（1 格）。
 const MULTI_CLICK_CELLS: u16 = 1;
+/// 连按两次选一个词，三次（及以后）选整行。
+pub(crate) const DOUBLE_CLICK: u8 = 2;
+pub(crate) const TRIPLE_CLICK: u8 = 3;
+/// 选项的序号按十进制的一位数字键发出。
+const DECIMAL: u32 = 10;
 
 /// 可点击区域的目标。transcript 里可以展开的块不在这里：点击它们要和拖选共存，按 [`Hits::expandable`]
 /// 在松开时处理（§8.2）。
@@ -230,11 +235,11 @@ impl App {
                 let count = self.click_count(x, y, now);
                 let row = self.hits.screen_rows.get(usize::from(y));
                 let (from, to) = match (count, row) {
-                    (2, Some(text)) => {
+                    (DOUBLE_CLICK, Some(text)) => {
                         let (from, to) = word_at(text, usize::from(x));
                         (from, to.saturating_sub(1).max(from))
                     }
-                    (3, Some(text)) => (
+                    (TRIPLE_CLICK, Some(text)) => (
                         0,
                         text.chars()
                             .map(|c| c.width().unwrap_or(0))
@@ -294,7 +299,9 @@ impl App {
             c.x.abs_diff(x) <= MULTI_CLICK_CELLS && c.y.abs_diff(y) <= MULTI_CLICK_CELLS
         };
         let count = match self.click {
-            Some(c) if near(&c) && now.duration_since(c.at) < MULTI_CLICK => (c.count + 1).min(3),
+            Some(c) if near(&c) && now.duration_since(c.at) < MULTI_CLICK => {
+                (c.count + 1).min(TRIPLE_CLICK)
+            }
             _ => 1,
         };
         self.click = Some(Click {
@@ -360,8 +367,8 @@ impl App {
         let point = self.point_at(x, y)?;
         let text = &self.hits.rows[usize::from(y - self.hits.transcript.y)].1;
         let (from, to) = match count {
-            2 => word_at(text, point.col),
-            3 => (
+            DOUBLE_CLICK => word_at(text, point.col),
+            TRIPLE_CLICK => (
                 0,
                 text.chars()
                     .map(|c| c.width().unwrap_or(0))
@@ -503,7 +510,7 @@ impl App {
                 self.dispatch(key(KeyCode::Enter), now)
             }
             Target::Choice(index) => {
-                let digit = char::from_digit(u32::try_from(index + 1).ok()?, 10)?;
+                let digit = char::from_digit(u32::try_from(index + 1).ok()?, DECIMAL)?;
                 self.dispatch(key(KeyCode::Char(digit)), now)
             }
             Target::Shortcuts => {

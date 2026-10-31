@@ -145,7 +145,10 @@ async fn resolve(
     host: &impl Host,
 ) -> (Option<String>, Option<PathBuf>) {
     let git_bash = if windows {
-        git_bash(lookup(env, "ZCODE_GIT_BASH_PATH"), host)
+        git_bash(
+            lookup(env, rust_cli_base::names::env::ZCODE_GIT_BASH_PATH),
+            host,
+        )
     } else {
         None
     };
@@ -155,11 +158,15 @@ async fn resolve(
         };
         Some(found.to_owned())
     } else {
-        lookup(env, "SHELL").map(str::to_owned)
+        lookup(env, rust_cli_base::names::env::SHELL).map(str::to_owned)
     };
-    let found = find(lookup(env, "ZCODE_SHELL"), shell.as_deref(), host)
-        .await
-        .map(PathBuf::from);
+    let found = find(
+        lookup(env, rust_cli_base::names::env::ZCODE_SHELL),
+        shell.as_deref(),
+        host,
+    )
+    .await
+    .map(PathBuf::from);
     (git_bash, found)
 }
 
@@ -168,7 +175,7 @@ async fn resolve(
 /// Windows 上快照里没有这个值，环境段写 `unknown`（不是 `bash`）。
 fn shell_snapshot(env: EnvSnapshot, git_bash: Option<&str>) -> EnvSnapshot {
     match git_bash {
-        Some(found) => env.with_var("SHELL", found),
+        Some(found) => env.with_var(rust_cli_base::names::env::SHELL, found),
         None => env,
     }
 }
@@ -184,13 +191,13 @@ struct System {
 impl System {
     fn new(env: &[(String, String)], windows: bool) -> Self {
         let separator = if windows { ';' } else { ':' };
-        let path = lookup(env, "PATH")
+        let path = lookup(env, rust_cli_base::names::env::PATH)
             .unwrap_or_default()
             .split(separator)
             .map(str::to_owned)
             .collect();
         let extensions = if windows {
-            lookup(env, "PATHEXT")
+            lookup(env, rust_cli_base::names::env::PATHEXT)
                 .unwrap_or(DEFAULT_PATHEXT)
                 .split(';')
                 .filter(|extension| !extension.is_empty())
@@ -227,7 +234,9 @@ fn mode_executable(path: &Path) -> Option<bool> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        Some(metadata.permissions().mode() & 0o111 != 0)
+        // 属主、属组、其他人任一可执行的权限位。
+        const ANY_EXECUTE: u32 = 0o111;
+        Some(metadata.permissions().mode() & ANY_EXECUTE != 0)
     }
     // Windows 交叉 clippy 报 `drop_non_drop`（F66）：`Metadata` 没有 Drop，用 `let _` 表示不用它。
     #[cfg(not(unix))]
@@ -266,7 +275,7 @@ impl Host for System {
         command
             .arg("--version")
             .env_clear()
-            .env("PATH", self.path_value())
+            .env(rust_cli_base::names::env::PATH, self.path_value())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -305,7 +314,7 @@ fn bwrap(env: &[(String, String)]) -> Option<PathBuf> {
     if !cfg!(target_os = "linux") {
         return None;
     }
-    lookup(env, "PATH")?
+    lookup(env, rust_cli_base::names::env::PATH)?
         .split(':')
         .map(|dir| Path::new(dir).join("bwrap"))
         .find(|candidate| present(candidate))

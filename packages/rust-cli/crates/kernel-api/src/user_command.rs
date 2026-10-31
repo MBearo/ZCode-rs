@@ -46,7 +46,9 @@ pub struct LocalCommandRecord {
 impl LocalCommandRecord {
     /// 按提交顺序给出每条消息的来源与文字。
     pub fn texts(&self) -> Vec<(&'static str, String)> {
-        let mut texts = Vec::with_capacity(3 + self.meta.len());
+        // meta 之前最多三条：说明、命令、输出。
+        const FIXED: usize = 3;
+        let mut texts = Vec::with_capacity(FIXED + self.meta.len());
         if self.caveat {
             texts.push((
                 LOCAL_COMMAND_CAVEAT_SOURCE,

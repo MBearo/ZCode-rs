@@ -149,22 +149,26 @@ texts! {
     task_reminder_tasks => "context/task_reminder_tasks",
 }
 
+/// 模板变量的开头与结尾。
+const OPEN: &str = "{{";
+const CLOSE: &str = "}}";
+
 /// 填模板变量：`{{name}}` 换成 `vars` 里同名的值。只扫描模板本身一遍，值里出现的 `{{…}}`
 /// 不会再被替换；模板里没有给值的变量原样保留（由各模板的测试保证不会发生）。
 pub fn render(template: &str, vars: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
-    while let Some(start) = rest.find("{{") {
+    while let Some(start) = rest.find(OPEN) {
         out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        match after.find("}}") {
+        let after = &rest[start + OPEN.len()..];
+        match after.find(CLOSE) {
             Some(end) => {
                 let key = &after[..end];
                 match vars.iter().find(|(name, _)| *name == key) {
                     Some((_, value)) => out.push_str(value),
-                    None => out.push_str(&rest[start..start + 2 + end + 2]),
+                    None => out.push_str(&rest[start..start + OPEN.len() + end + CLOSE.len()]),
                 }
-                rest = &after[end + 2..];
+                rest = &after[end + CLOSE.len()..];
             }
             None => {
                 out.push_str(&rest[start..]);

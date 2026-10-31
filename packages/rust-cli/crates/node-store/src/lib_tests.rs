@@ -2,9 +2,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
-use rust_cli_kernel_api::ids::{
-    CommandId, EnvironmentId, MessageId, OperationId, OwnerEpoch, TraceId,
-};
+use rust_cli_kernel_api::ids::{CommandId, EnvironmentId, MessageId, OwnerEpoch, TraceId};
 use rust_cli_kernel_api::message::{
     AssistantMessage, ContentBlock, Message, StopReason, SystemMessage, Usage, UserMessage,
     UserOrigin,
@@ -245,10 +243,6 @@ async fn a_failing_fact_rolls_back_the_whole_batch() {
     let facts = vec![
         user("msg_ru_u1", "Hello"),
         Fact::TitleChanged { title: "x".into() },
-        Fact::OperationIntent {
-            operation: OperationId::new("op_1"),
-            fingerprint: "f".into(),
-        },
         Fact::MessageAppended {
             message: Message::System(SystemMessage::Interrupted {
                 id: MessageId::new("msg_ru_s1"),

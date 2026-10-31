@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use rust_cli_base::TaskScope;
 use rust_cli_base::js::iso_timestamp;
 use rust_cli_base::redact::redact_secrets;
+use rust_cli_base::units;
 use rust_cli_kernel_api::clock::Clock;
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, oneshot};
@@ -24,7 +25,7 @@ use crate::log_writer::{DailyFiles, write_loop};
 /// 通道容量：发事件的一方从不等待，满了就丢（logging.md §6）。
 const CAPACITY: usize = 1024;
 /// 每天的上限（logging.md §1）。
-const DAILY_CAP: u64 = 32 * 1024 * 1024;
+const DAILY_CAP: u64 = 32 * units::MIB as u64;
 const REDACTED: &str = "[Redacted]";
 
 pub(crate) enum Item {

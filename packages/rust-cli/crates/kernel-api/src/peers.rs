@@ -25,6 +25,12 @@ pub const HELD_LIMIT: usize = 100;
 /// 扣住消息的缺省过期时长。
 pub const DEFAULT_HOLD_TIMEOUT_MS: u64 = 300_000;
 
+/// 地址的前缀。
+const ADDRESS_SCHEME: &str = "uds:";
+/// 百分号编码的一个字节：`%` 加两位十六进制。
+const PERCENT_ESCAPE_LEN: usize = 3;
+const HEX_RADIX: u32 = rust_cli_base::units::HEX_RADIX;
+
 /// 同伴的地址：`uds:<socket 路径>`。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -33,8 +39,8 @@ pub struct PeerAddress(String);
 impl PeerAddress {
     /// socket 路径 → 地址。路径里 `[A-Za-z0-9:_/.\-]` 以外的字符按 UTF-8 百分号编码。
     pub fn from_socket(path: &str) -> Self {
-        let mut encoded = String::with_capacity(path.len() + 4);
-        encoded.push_str("uds:");
+        let mut encoded = String::with_capacity(path.len() + ADDRESS_SCHEME.len());
+        encoded.push_str(ADDRESS_SCHEME);
         for character in path.chars() {
             if character.is_ascii_alphanumeric() || ":_/.\\-".contains(character) {
                 encoded.push(character);
@@ -50,7 +56,7 @@ impl PeerAddress {
 
     /// 已经是地址形状的文本（`uds:` 开头）；其他形状为 None。
     pub fn parse(text: &str) -> Option<Self> {
-        let rest = text.strip_prefix("uds:")?;
+        let rest = text.strip_prefix(ADDRESS_SCHEME)?;
         (!rest.trim().is_empty()).then(|| Self(text.to_owned()))
     }
 
@@ -60,7 +66,7 @@ impl PeerAddress {
 
     /// socket 路径（百分号解码）。
     pub fn socket(&self) -> String {
-        percent_decode(self.0.strip_prefix("uds:").unwrap_or(&self.0))
+        percent_decode(self.0.strip_prefix(ADDRESS_SCHEME).unwrap_or(&self.0))
     }
 
     /// 12 位 ref 串：`sha256("session:" + socket 路径)` 的 hex 前 12 位。
@@ -76,11 +82,11 @@ fn percent_decode(text: &str) -> String {
     while index < bytes.len() {
         if bytes[index] == b'%'
             && let Some(value) = text
-                .get(index + 1..index + 3)
-                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                .get(index + 1..index + PERCENT_ESCAPE_LEN)
+                .and_then(|hex| u8::from_str_radix(hex, HEX_RADIX).ok())
         {
             out.push(value);
-            index += 3;
+            index += PERCENT_ESCAPE_LEN;
             continue;
         }
         out.push(bytes[index]);
@@ -137,7 +143,10 @@ pub fn name_key(name: &str) -> String {
 /// 目录名 → 会话名的前缀：按空白切词取前 4 个、转小写、非 `[a-z0-9]` 换成 `-`、截 40 字符、去掉首尾
 /// 的 `-`；为空时是 `zcode`。
 pub fn name_prefix(directory: &str) -> String {
-    let words: Vec<&str> = directory.split_whitespace().take(4).collect();
+    // 取前几个词、截到多少个字符。
+    const WORDS: usize = 4;
+    const MAX_CHARS: usize = 40;
+    let words: Vec<&str> = directory.split_whitespace().take(WORDS).collect();
     let lower = words.join(" ").to_lowercase();
     let mut slug = String::new();
     let mut dash = false;
@@ -150,7 +159,7 @@ pub fn name_prefix(directory: &str) -> String {
             dash = true;
         }
     }
-    let clipped: String = slug.chars().take(40).collect();
+    let clipped: String = slug.chars().take(MAX_CHARS).collect();
     let trimmed = clipped.trim_matches('-');
     if trimmed.is_empty() {
         "zcode".to_owned()

@@ -1,6 +1,7 @@
 // 移植自 apps/zcode-cli/packages/core/src/tool/handlers/guarded/word.ts（修复线 F20）。
 //! 一个词的字面事实（Node `CommandWord` 去掉位置）：不做展开，未知的词不当作已知选项。
 
+use crate::consts::{ESCAPE_LEN, SIGIL_PAIR_LEN};
 use crate::parse::WordText;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +47,7 @@ pub(crate) fn literal(text: &str) -> Word {
                 if next != '\n' {
                     value.push(next);
                 }
-                i += 2;
+                i += ESCAPE_LEN;
                 continue;
             }
         }
@@ -119,17 +120,17 @@ fn top_level_glob(text: &str) -> bool {
         let c = chars[i];
         let next = chars.get(i + 1).copied();
         match c {
-            '\\' => i += 2,
+            '\\' => i += ESCAPE_LEN,
             '\'' | '"' => i = skip_quoted(&chars, i + 1, c),
             '`' => i = skip_quoted(&chars, i + 1, '`'),
             '$' => match next {
-                Some('(') => i = skip_balanced(&chars, i + 2, '(', ')'),
-                Some('{') => i = skip_balanced(&chars, i + 2, '{', '}'),
-                Some('\'') => i = skip_quoted(&chars, i + 2, '\''),
-                Some('"') => i = skip_quoted(&chars, i + 2, '"'),
+                Some('(') => i = skip_balanced(&chars, i + SIGIL_PAIR_LEN, '(', ')'),
+                Some('{') => i = skip_balanced(&chars, i + SIGIL_PAIR_LEN, '{', '}'),
+                Some('\'') => i = skip_quoted(&chars, i + SIGIL_PAIR_LEN, '\''),
+                Some('"') => i = skip_quoted(&chars, i + SIGIL_PAIR_LEN, '"'),
                 // `$*`、`$?` 等特殊参数与 `$name`：展开，不是 glob。
                 Some(n) if n.is_ascii_alphabetic() || n == '_' => {
-                    i += 2;
+                    i += SIGIL_PAIR_LEN;
                     while chars
                         .get(i)
                         .is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_')
@@ -137,12 +138,12 @@ fn top_level_glob(text: &str) -> bool {
                         i += 1;
                     }
                 }
-                Some(_) => i += 2,
+                Some(_) => i += SIGIL_PAIR_LEN,
                 None => i += 1,
             },
             // extglob：`?(…)`、`*(…)`、`+(…)`、`@(…)`、`!(…)` 是 ExtendedGlob 部件。
             '?' | '*' | '+' | '@' | '!' if next == Some('(') => {
-                i = skip_balanced(&chars, i + 2, '(', ')');
+                i = skip_balanced(&chars, i + SIGIL_PAIR_LEN, '(', ')');
             }
             '*' | '?' | '[' => return true,
             '{' => match brace_expansion(&chars, i) {

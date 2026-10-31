@@ -11,6 +11,7 @@ import { mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { importNode, withHome } from "./node-root.mjs";
+import { GLM_5_3 } from "./fixture/model.mjs";
 
 const SSE = [
   'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
@@ -103,7 +104,7 @@ export async function checkHeaders({ nodeRoot, repoRoot, base, expectEqual, zcod
       ZCODE_DATA_BASE_DIR: home,
       ZCODE_MODEL_BASE_URL: url,
       ZCODE_API_KEY: "sk-interop",
-      ZCODE_MODEL: "claude-opus-5-5",
+      ZCODE_MODEL: GLM_5_3,
       ...ENV,
     };
     const version = (await run(zcode, ["--version"], env, work)).stdout.split(/\s+/)[1];

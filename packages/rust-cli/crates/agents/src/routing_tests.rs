@@ -344,3 +344,35 @@ async fn a_message_left_in_the_mailbox_resumes_the_agent_after_it_ends() {
     assert!(first.text.contains("<tool-use-id>"));
     assert!(!second.text.contains("<tool-use-id>"));
 }
+
+/// 回合结束那一行要等的后台子代理（tui-display.md §2.7，修复线 F118）：在跑的与已结束但通知还没 ack 的都算，ack 之后
+/// 不算；不问执行环境。
+#[tokio::test]
+async fn background_agents_count_running_ones_and_unacked_notices() {
+    let gates = Gates::default();
+    let harness = held(&gates, false);
+    let signals = harness.agents.signals();
+    let mut root = signals.signals(&SessionId::new(ROOT));
+    let waited = || async {
+        let mut agents: Vec<String> = signals
+            .background_agents(&SessionId::new(ROOT))
+            .await
+            .into_iter()
+            .map(|agent| agent.to_string())
+            .collect();
+        agents.sort();
+        agents
+    };
+    let (p, c) = nested(&harness).await;
+    assert_eq!(waited().await, sorted(&[&p.id, &c.id]));
+    gates.release(&p.session);
+    let outer = next_notice(&mut root).await;
+    // P 已结束，通知还没 ack：照样算。
+    assert_eq!(waited().await, sorted(&[&p.id, &c.id]));
+    signals.ack(&SessionId::new(ROOT), outer.seq).await;
+    assert_eq!(waited().await, std::slice::from_ref(&c.id));
+    gates.release(&c.session);
+    let inner = next_notice(&mut root).await;
+    signals.ack(&SessionId::new(ROOT), inner.seq).await;
+    assert!(waited().await.is_empty());
+}

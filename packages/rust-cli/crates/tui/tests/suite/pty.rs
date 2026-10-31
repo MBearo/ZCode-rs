@@ -56,6 +56,8 @@ pub struct Pty {
     child: Child,
     seen: Vec<u8>,
     answered: usize,
+    /// 已经回答过的光标位置查询（`ESC [ 6 n`）个数。
+    positions: usize,
 }
 
 impl Pty {
@@ -96,6 +98,7 @@ impl Pty {
             child,
             seen: Vec::new(),
             answered: 0,
+            positions: 0,
         }
     }
 
@@ -140,7 +143,8 @@ impl Pty {
         (status, String::from_utf8_lossy(&self.seen).into_owned())
     }
 
-    /// 读一次；读到了返回真。新出现的主要设备属性查询（`ESC [ c`）照真实终端回答，进入终端时的探测不用等超时。
+    /// 读一次；读到了返回真。新出现的主要设备属性查询（`ESC [ c`）照真实终端回答，进入终端时的探测不用等超时；光标位置
+    /// 查询（`ESC [ 6 n`，ctrl+l 整屏重画时清屏要问）回答左上角（修复线 F117 的 `background_pty.rs` 用 ctrl+l）。
     fn read(&mut self, wait: Duration) -> bool {
         use rustix::event::{PollFd, PollFlags, Timespec, poll};
         let wait = Timespec {
@@ -165,6 +169,15 @@ impl Pty {
             self.send(b"\x1b[?62c");
         }
         self.answered = queries;
+        let positions = self
+            .seen
+            .windows(4)
+            .filter(|window| *window == b"\x1b[6n")
+            .count();
+        for _ in self.positions..positions {
+            self.send(b"\x1b[1;1R");
+        }
+        self.positions = positions;
         true
     }
 
@@ -193,9 +206,17 @@ pub fn is_raw(fd: impl std::os::fd::AsFd) -> bool {
 
 /// 子进程里：在真实终端上跑会话界面（英文，16 色：只有 `LANG`），模型是 `model`。
 pub async fn interface(model: Arc<dyn ModelPort>) {
+    interface_in(model, environments(Arc::new(UnusedEnvironment))).await;
+}
+
+/// 同 [`interface`]，执行环境是 `envs`（修复线 F117 的 `background_pty.rs`：替身报几条在跑的后台命令）。
+pub async fn interface_in(
+    model: Arc<dyn ModelPort>,
+    envs: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
+) {
     let kernel = kernel(
         model,
-        environments(Arc::new(UnusedEnvironment)),
+        envs,
         Arc::new(MemoryStore::default()),
         None,
         rust_cli_runtime::PeerDeps::off(),

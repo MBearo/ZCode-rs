@@ -1,5 +1,6 @@
 //! 清单行与预算（ext.md §2.3）。
 
+use rust_cli_base::models::GLM_5_3;
 use std::sync::Arc;
 
 use super::*;
@@ -98,12 +99,12 @@ fn over_budget_keeps_names_and_restores_descriptions_in_order() {
     );
 }
 
-/// F10（context-usage.md D5）：预算按模型的每 token 字符数：claude-opus-5-5 是 3，窗口 1000000 时
+/// F10（context-usage.md D5）：预算按模型的每 token 字符数：不在旧模型清单里的模型是 3，窗口 1000000 时
 /// 30000 个字符；旧模型与没有模型时是 4。
 #[test]
 fn the_budget_follows_the_models_chars_per_token() {
-    let opus = rust_cli_prompts::models::chars_per_token("claude-opus-5-5");
-    assert_eq!(budget(Some(1_000_000), opus), 30_000);
+    let current = rust_cli_prompts::models::chars_per_token(GLM_5_3);
+    assert_eq!(budget(Some(1_000_000), current), 30_000);
     assert_eq!(budget(Some(1_000_000), 4), 40_000);
     assert_eq!(
         budget(None, rust_cli_prompts::models::chars_per_token("")),

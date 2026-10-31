@@ -25,8 +25,12 @@ use super::{Skill, SkillCatalog};
 pub(crate) const NAME: &str = "Skill";
 /// skill 正文消息的来源标签（meta user 消息，node-store 按原文保存）。
 pub const SKILL_MESSAGE_SOURCE: &str = "skill";
-/// 结果的字符上限。
-const MAX_RESULT_CHARS: usize = 100_000;
+/// 校验失败的错误码：写法不对、没有这个 skill、不许模型调用。
+const INVALID_FORMAT: i32 = 1;
+const UNKNOWN_SKILL: i32 = 2;
+const MODEL_INVOCATION_DISABLED: i32 = 4;
+/// 结果的字符上限（通用值只定义在 kernel-api）。
+const MAX_RESULT_CHARS: usize = rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS;
 
 pub struct SkillTool {
     catalog: Arc<SkillCatalog>,
@@ -99,7 +103,7 @@ impl Tool for SkillTool {
     async fn validate_input(&self, input: &Value, context: &ToolUseContext) -> Validation {
         let (raw, name) = requested(input);
         if raw.trim().is_empty() {
-            return invalid(format!("Invalid skill format: {raw}"), 1);
+            return invalid(format!("Invalid skill format: {raw}"), INVALID_FORMAT);
         }
         let skills = self.catalog.skills(&context.workspace).await;
         let Some(skill) = skills.iter().find(|skill| skill.name == name) else {
@@ -107,14 +111,14 @@ impl Tool for SkillTool {
                 Some(close) => format!("Unknown skill: {name}. Did you mean {close}?"),
                 None => format!("Unknown skill: {name}"),
             };
-            return invalid(message, 2);
+            return invalid(message, UNKNOWN_SKILL);
         };
         if skill.disable_model_invocation {
             return invalid(
                 format!(
                     "Skill {name} cannot be used with {NAME} tool due to disable-model-invocation. Ask the user to run /{name} themselves \u{2014} it cannot be invoked via the {NAME} tool. Do not replicate this skill's workflow by other means \u{2014} it is reserved for explicit user invocation."
                 ),
-                4,
+                MODEL_INVOCATION_DISABLED,
             );
         }
         Validation::Ok

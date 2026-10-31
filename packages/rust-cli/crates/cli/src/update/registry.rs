@@ -2,17 +2,19 @@
 //! 平台包的这个版本在 npm 上能装（`dist.tarball` 与 `dist.integrity` 都有）。HTTP 只经 net 的 `Egress`。
 
 use anyhow::{Context, Result, anyhow, bail};
+use rust_cli_base::proto::http;
+use rust_cli_base::units;
 use rust_cli_net::{Egress, HttpRequest};
 use serde_json::Value;
 
 use super::install::Install;
 
-/// npm 官方 registry。
-pub(crate) const REGISTRY: &str = "https://registry.npmjs.org";
+/// npm 官方 registry（定义在 base 的 `hosts`，工作线 F121）。
+pub(crate) const REGISTRY: &str = rust_cli_base::hosts::NPM_REGISTRY;
 /// npm 的缩略元数据（只有 dist-tags 与每个版本的安装信息），没有时退回完整文档。
 const ACCEPT: &str = "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*";
 /// 响应体最多读这么多。
-const MAX_BODY: usize = 32 * 1024 * 1024;
+const MAX_BODY: usize = 32 * units::MIB;
 
 /// 注册表回了不成功的 HTTP 状态（文字同以前的 `GET <地址>: HTTP <状态>`）。执行器的 npm 来源（F103，remote-exec.md
 /// §27.3）按 404 判定“这个版本不在注册表里”，所以给出类型、不只是文字。
@@ -35,7 +37,7 @@ impl HttpStatus {
     pub(crate) fn is_not_found(error: &anyhow::Error) -> bool {
         error
             .downcast_ref::<Self>()
-            .is_some_and(|status| status.status == 404)
+            .is_some_and(|status| status.status == http::NOT_FOUND)
     }
 }
 

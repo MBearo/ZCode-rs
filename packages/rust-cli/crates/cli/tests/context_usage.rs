@@ -8,6 +8,7 @@
 )]
 
 mod system_env;
+use rust_cli_base::models::GLM_5_3;
 use system_env::KeepSystem as _;
 mod sse;
 
@@ -33,7 +34,7 @@ async fn context_sends_no_count_tokens_request() {
         .env("ZCODE_RUNTIME_ENV", "test")
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

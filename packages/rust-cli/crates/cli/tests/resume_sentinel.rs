@@ -15,6 +15,7 @@ use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use rust_cli_base::models::GLM_5;
 use serde_json::Value;
 
 const SENTINEL: &str = "No response requested.";
@@ -49,7 +50,7 @@ fn spawn(sandbox: &Sandbox, fixture: &sse::Fixture, args: &[&str]) -> Child {
         .env("ZCODE_DATA_BASE_DIR", &sandbox.home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

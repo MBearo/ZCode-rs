@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::message::{StopReason, Usage};
 use rust_cli_kernel_api::model::ModelEvent;
 use rust_cli_kernel_api::testing::{ScriptedInteractions, ScriptedModel, selection};
@@ -229,8 +230,8 @@ async fn the_side_request_uses_the_current_main_model() {
     assert_eq!(model.requests()[0].selection, current);
 }
 
-/// 有模型卡片时 effort 取卡片（`claude-opus-5-5` 是 medium）；max_tokens 不取卡片，照 Node 是 4096（工作线 F90，
-/// 修改：以前取卡片的 128000）。
+/// 有卡片形状时（GLM 按 opus，工作线 F121）effort 取卡片（现在的卡片是 medium）；max_tokens 不取卡片，照 Node 是
+/// 4096（工作线 F90，修改：以前取卡片的 128000）。
 #[tokio::test]
 async fn the_side_request_takes_the_effort_from_the_model_card() {
     let model = Arc::new(ScriptedModel::new(vec![search_response()]));
@@ -238,7 +239,7 @@ async fn the_side_request_takes_the_effort_from_the_model_card() {
         model: model.clone(),
         selection: rust_cli_kernel_api::model::ModelSelection {
             provider: "anthropic".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },

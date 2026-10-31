@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::models::GLM_5_3_FLASH;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
@@ -50,7 +51,7 @@ fn glm_reply() -> String {
         sse::raw_event(
             "message_start",
             json!({"message": {"id": "msg_glm", "type": "message", "role": "assistant",
-                "model": "glm-5.3-flash", "content": [], "stop_reason": null,
+                "model": GLM_5_3_FLASH, "content": [], "stop_reason": null,
                 "usage": {"input_tokens": 0, "output_tokens": 0}}}),
         ),
         sse::raw_event(
@@ -239,7 +240,7 @@ async fn input_and_cache_reported_in_the_message_delta_are_kept() {
         base_url: fixture.url.clone(),
         api_key: RedactedString::new("sk-test"),
     };
-    let selection = selection("anthropic", "glm-5.3-flash");
+    let selection = selection("anthropic", GLM_5_3_FLASH);
     let kernel = sandbox.kernel(endpoint.into(), &selection).await;
     let (session, used) = sandbox.one_turn(&kernel, selection).await;
     assert_eq!(fixture.main_requests().len(), 1);
@@ -253,7 +254,7 @@ async fn input_and_cache_reported_in_the_message_delta_are_kept() {
     assert_eq!(
         sandbox.usage_rows().await,
         [ModelTokens {
-            model: "glm-5.3-flash".to_owned(),
+            model: GLM_5_3_FLASH.to_owned(),
             input: 11_922,
             output: 514,
             cache_read: 448,

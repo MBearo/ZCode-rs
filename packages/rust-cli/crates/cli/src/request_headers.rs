@@ -3,6 +3,7 @@
 //!
 //! locale 与时区照 Node 的 ICU 读法（实测 Node 24 / ICU 78），只做 spec 写明的子集。
 
+use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 use rust_cli_base::js::{node_arch, node_platform};
@@ -46,7 +47,8 @@ pub(crate) fn facts(
     let test = crate::origins::is_test(&non_empty);
     Ok(SourceFacts {
         // Node `env[ZCODE_APP_VERSION] ?? appVersion`：设了（空值也算）就用它。
-        version: var("ZCODE_APP_VERSION").unwrap_or_else(|| version.to_owned()),
+        version: var(rust_cli_base::names::env::ZCODE_APP_VERSION)
+            .unwrap_or_else(|| version.to_owned()),
         endpoint_origin: crate::origins::zcode_origin(&non_empty)?,
         release_channel: if test { "test" } else { "production" }.to_owned(),
         locale: if cfg!(windows) {
@@ -57,7 +59,10 @@ pub(crate) fn facts(
         time_zone: if cfg!(windows) {
             None
         } else {
-            client_time_zone(var("TZ").as_deref(), host.localtime.as_deref())
+            client_time_zone(
+                var(rust_cli_base::names::env::TZ).as_deref(),
+                host.localtime.as_deref(),
+            )
         },
         platform: node_platform().to_owned(),
         arch: node_arch().to_owned(),
@@ -77,10 +82,13 @@ const LANGUAGE_ALIASES: [(&str, &str); 5] = [
 /// Node `Intl.DateTimeFormat().resolvedOptions().locale` 在 Unix 上的值（model.md §2.4 的读法）：依次看 `LC_ALL`、
 /// `LC_MESSAGES`、`LANG`（空值也算设了）。
 pub(crate) fn client_language(var: &dyn Fn(&str) -> Option<String>) -> String {
-    let Some(id) = ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .iter()
-        .find_map(|name| var(name))
-    else {
+    let Some(id) = [
+        rust_cli_base::names::env::LC_ALL,
+        rust_cli_base::names::env::LC_MESSAGES,
+        rust_cli_base::names::env::LANG,
+    ]
+    .iter()
+    .find_map(|name| var(name)) else {
         return "en-US".to_owned();
     };
     if id == "C" || id == "POSIX" {
@@ -156,28 +164,45 @@ pub(crate) fn client_language(var: &dyn Fn(&str) -> Option<String>) -> String {
     tag.join("-")
 }
 
+// ── BCP 47 子标签的长度（字符数）──
+
+/// 语言：2–3 个字母（ISO 639）。
+const LANGUAGE_SHORT_LEN: RangeInclusive<usize> = 2..=3;
+/// 语言：5–8 个字母（注册的语言）。
+const LANGUAGE_LONG_LEN: RangeInclusive<usize> = 5..=8;
+/// 文字：4 个字母（ISO 15924）。
+const SCRIPT_LEN: usize = 4;
+/// 地区：2 个字母（ISO 3166）。
+const REGION_ALPHA_LEN: usize = 2;
+/// 地区：3 位数字（UN M.49）。
+const REGION_DIGIT_LEN: usize = 3;
+/// 变体：5–8 位字母数字。
+const VARIANT_LEN: RangeInclusive<usize> = 5..=8;
+/// 变体：数字开头的 4 位。
+const VARIANT_DIGIT_LEN: usize = 4;
+
 /// 语言子标签：2–3 或 5–8 个 ASCII 字母（`root` 是 `und`）。
 fn is_language(value: &str) -> bool {
-    matches!(value.len(), 2..=3 | 5..=8)
+    (LANGUAGE_SHORT_LEN.contains(&value.len()) || LANGUAGE_LONG_LEN.contains(&value.len()))
         && value.bytes().all(|byte| byte.is_ascii_alphabetic())
         && value != "root"
 }
 
 fn is_script(value: &str) -> bool {
-    value.len() == 4 && value.bytes().all(|byte| byte.is_ascii_alphabetic())
+    value.len() == SCRIPT_LEN && value.bytes().all(|byte| byte.is_ascii_alphabetic())
 }
 
 fn is_region(value: &str) -> bool {
-    (value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_alphabetic()))
-        || (value.len() == 3 && value.bytes().all(|byte| byte.is_ascii_digit()))
+    (value.len() == REGION_ALPHA_LEN && value.bytes().all(|byte| byte.is_ascii_alphabetic()))
+        || (value.len() == REGION_DIGIT_LEN && value.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 /// BCP 47 的变体：5–8 位字母数字，或数字开头的 4 位。
 fn is_variant(value: &str) -> bool {
     let alnum = value.bytes().all(|byte| byte.is_ascii_alphanumeric());
     alnum
-        && (matches!(value.len(), 5..=8)
-            || (value.len() == 4 && value.as_bytes()[0].is_ascii_digit()))
+        && (VARIANT_LEN.contains(&value.len())
+            || (value.len() == VARIANT_DIGIT_LEN && value.as_bytes()[0].is_ascii_digit()))
 }
 
 fn titlecase(value: &str) -> String {

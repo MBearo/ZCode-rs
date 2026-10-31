@@ -176,7 +176,10 @@ fn stage(
     #[cfg(unix)]
     if mode == FileMode::Private {
         // 从创建起就不对其他用户可读，避免写入前的窗口期。
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        std::os::unix::fs::OpenOptionsExt::mode(
+            &mut options,
+            rust_cli_base::proto::mode::PRIVATE_FILE,
+        );
     }
     let mut file = options.open(temp)?;
     let written = restrict(&file, mode)
@@ -192,10 +195,15 @@ fn stage(
 /// open 时给的 mode 会被 umask 削减；再显式设置一次，私密文件恰好是 0600。
 #[cfg(unix)]
 fn restrict(file: &std::fs::File, mode: FileMode) -> io::Result<()> {
+    use rust_cli_base::proto::mode as bits;
     use std::os::unix::fs::PermissionsExt;
     match mode {
-        FileMode::Private => file.set_permissions(std::fs::Permissions::from_mode(0o600)),
-        FileMode::Executable => file.set_permissions(std::fs::Permissions::from_mode(0o755)),
+        FileMode::Private => {
+            file.set_permissions(std::fs::Permissions::from_mode(bits::PRIVATE_FILE))
+        }
+        FileMode::Executable => {
+            file.set_permissions(std::fs::Permissions::from_mode(bits::EXECUTABLE))
+        }
         FileMode::Default => Ok(()),
     }
 }
@@ -220,13 +228,22 @@ async fn rename_with_retry(temp: &Path, target: &Path, delays: &[Duration]) -> i
     }
 }
 
+/// Windows 的 `ERROR_SHARING_VIOLATION`（系统错误码）。
+const ERROR_SHARING_VIOLATION: i32 = 32;
+/// Windows 的 `ERROR_LOCK_VIOLATION`（系统错误码）。
+const ERROR_LOCK_VIOLATION: i32 = 33;
+
 /// 与 Node 的 `EPERM` / `EACCES` / `EBUSY` 判定一致。libuv 把 Windows 的
 /// `ERROR_SHARING_VIOLATION`（32）与 `ERROR_LOCK_VIOLATION`（33）映射为 `EBUSY`，std 不映射，单独判断。
 fn retryable(error: &io::Error) -> bool {
     matches!(
         error.kind(),
         ErrorKind::PermissionDenied | ErrorKind::ResourceBusy
-    ) || (cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)))
+    ) || (cfg!(windows)
+        && matches!(
+            error.raw_os_error(),
+            Some(ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)
+        ))
 }
 
 /// rename 之后 fsync 父目录，让目录项的变更落盘。尽力而为：rename 已经成功，有的文件系统不支持
@@ -282,9 +299,12 @@ pub async fn create_private_dir_all(path: &Path) -> io::Result<()> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-            builder.mode(0o700);
+            builder.mode(rust_cli_base::proto::mode::PRIVATE_DIR);
             builder.create(&path)?;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            std::fs::set_permissions(
+                &path,
+                std::fs::Permissions::from_mode(rust_cli_base::proto::mode::PRIVATE_DIR),
+            )
         }
         #[cfg(not(unix))]
         builder.create(&path)
@@ -299,7 +319,11 @@ pub async fn restrict_to_owner(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await
+        tokio::fs::set_permissions(
+            path,
+            std::fs::Permissions::from_mode(rust_cli_base::proto::mode::PRIVATE_FILE),
+        )
+        .await
     }
     #[cfg(not(unix))]
     {

@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::model_io_files::Files;
 
 /// 选模式的环境变量（Node 的名字与取值，config.md §2.5）。
-const RUNTIME_ENV: &str = "ZCODE_RUNTIME_ENV";
+const RUNTIME_ENV: &str = rust_cli_base::names::env::ZCODE_RUNTIME_ENV;
 /// 队列容量：满了丢这一条并计数（model-io.md §6）。
 const CAPACITY: usize = 64;
 

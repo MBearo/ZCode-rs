@@ -154,8 +154,11 @@ pub(crate) async fn request(inner: &Arc<Inner>, instance: &str, header: RequestH
                             Err(error) => ReplyResult::Err(error),
                         };
                     (result, Body::empty())
+                } else if matches!(request, Request::StartCommand { .. }) {
+                    // 端口给的流留在执行器里，等线上的 watch_command 接走（工作线 F119）。
+                    crate::started::start(&inner_task, &key.instance, request, &body, env).await
                 } else {
-                    dispatch::unary(&inner_task.machine, request, &body, env).await
+                    dispatch::unary(&inner_task.machine, request, &body).await
                 };
                 let payload = encode_reply(key.call, result, &body);
                 if let Err(error) = inner_task.ledger.finish(&key, payload.clone()).await {
@@ -243,6 +246,8 @@ fn step(inner: &Inner, key: &CallKey, seq: u64) -> Step {
 async fn produce(inner: Arc<Inner>, key: CallKey, request: Request, notify: Arc<Notify>) {
     let mut items = if request.op().capability() == Capability::Mcp {
         crate::mcp::events(&inner, &key, request).await
+    } else if let Some(events) = inner.started.claim(&key.instance, &request) {
+        dispatch::command_items(events)
     } else {
         dispatch::stream(&inner.machine, request)
     };

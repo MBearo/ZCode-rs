@@ -11,6 +11,7 @@ mod build_number;
 mod clipboard;
 mod commander;
 mod config;
+mod consts;
 mod editor;
 mod effort;
 mod embedded;
@@ -48,8 +49,8 @@ use anyhow::{Context, Result};
 
 use crate::args::{Invocation, Mode, cli_rules, names_search_tools, parse, version_line};
 use crate::output::{eprint_line, eprint_raw, help_width, print_line, print_raw, write_lossy};
-use rust_cli_base::TaskScope;
 use rust_cli_base::secret::{EnvSnapshot, RedactedString};
+use rust_cli_base::{TaskScope, names::env};
 use rust_cli_env_local::{LocalCronStore, LocalEnvironment, LocalMcpTransport};
 use rust_cli_headless::PrintOptions;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
@@ -63,7 +64,6 @@ use rust_cli_platform::{AccountServices, CredentialSecret, History, Platform, no
 use rust_cli_runtime::{
     ContextConfig, Defaults, ExtConfig, Extensions, LocalKernel, Ports, Surface, TitleModel,
 };
-
 mod os_release;
 mod shell;
 mod stdin_prompt;
@@ -87,7 +87,7 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 /// 本工程的版本：唯一来源，由 build.rs 在编译期给出（release 第三位是编译次数，debug 是 Cargo.toml 的版本，
 /// docs/specs/rust-cli/version.md）。运行时显式传给 TUI、会话库、MCP 握手与账号服务，其他 crate 不读包版本。
-const VERSION: &str = env!("ZCODE_BUILD_VERSION");
+const VERSION: &str = env!(rust_cli_base::zcode_build_version_var!());
 /// 本机执行环境的 ID。
 const LOCAL_ENVIRONMENT: &str = "local";
 
@@ -139,18 +139,18 @@ fn capture() -> Result<Startup> {
     let cwd = std::env::current_dir().context("reading the current directory")?;
     let var = |name: &str| env.get(name).map(str::to_owned);
     // 修复（R2-6）：以前只取 `TZ` 的名字，时钟一律按 UTC；现在读系统时区，时钟按它给本地日期与偏移。
-    let zone = time_zone::system(var("TZ").as_deref());
+    let zone = time_zone::system(var(env::TZ).as_deref());
     let max_output_tokens = limits::max_output_tokens(&env);
     Ok(Startup {
         user_name: user_name_with(os),
-        data_base_dir: non_empty(var("ZCODE_DATA_BASE_DIR")),
-        builtin_provider_config: non_empty(var("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE")),
-        credential_secret: non_empty(var("ZCODE_CREDENTIAL_SECRET")).map(RedactedString::new),
+        data_base_dir: non_empty(var(env::ZCODE_DATA_BASE_DIR)),
+        builtin_provider_config: non_empty(var(env::ZCODE_BUILTIN_PROVIDER_CONFIG_FILE)),
+        credential_secret: non_empty(var(env::ZCODE_CREDENTIAL_SECRET)).map(RedactedString::new),
         // 显式覆盖的名字（修复线 F42，config.md §2.5）：只读 `ZCODE_*`；端点不叫 `ZCODE_BASE_URL`（它是 Node 的 ZCode 服务地址）。
         explicit: models::Override {
-            base_url: var("ZCODE_MODEL_BASE_URL"),
-            api_key: var("ZCODE_API_KEY").map(RedactedString::new),
-            model: non_empty(var("ZCODE_MODEL")),
+            base_url: var(env::ZCODE_MODEL_BASE_URL),
+            api_key: var(env::ZCODE_API_KEY).map(RedactedString::new),
+            model: non_empty(var(env::ZCODE_MODEL)),
             // 测试声明只在 debug 构建读（工作线 F52b，model.md §6）。
             assume: options::assumptions(options::TestDeclarations::BUILD, var),
             ssh: options::ssh_assumption(options::TestDeclarations::BUILD, var),
@@ -310,7 +310,7 @@ async fn session(
         !names_search_tools(&allowed),
     )
     .await;
-    let monitor = options::monitor(startup.explicit.assume, shell.bash.is_some());
+    let monitor = options::monitor(&startup.explicit.assume, shell.bash.is_some());
     // MCP stdio 服务器与 Bash 共用进程树账本（docs/specs/rust-cli/ext.md §3.2）；快照用 shell 改写过 `SHELL` 的那份（F58）。
     let mcp_transport = Arc::new(LocalMcpTransport::new(
         shell.ledger.clone(),
@@ -574,7 +574,7 @@ async fn session(
                 version: VERSION.to_owned(),
                 // system/init 的 `apiKeySource`（headless.md §3.3）：key 来自哪个变量（本工程读 `ZCODE_API_KEY`，
                 // config.md §2.5）。
-                api_key_source: if explicit { "ZCODE_API_KEY" } else { "none" }.to_owned(),
+                api_key_source: if explicit { env::ZCODE_API_KEY } else { "none" }.to_owned(),
             };
             let options = PrintOptions {
                 prompt: prompt.unwrap_or_default(),

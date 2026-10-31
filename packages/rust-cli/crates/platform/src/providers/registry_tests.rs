@@ -49,7 +49,10 @@ async fn revisions_change_only_with_the_files() {
     write(paths.provider_config().as_path(), PERSONAL).await;
     let second = registry.current().await;
     assert_eq!(second.revision, 2);
-    assert!(models(&second).contains(&"personal:gateway/glm-5".to_owned()));
+    assert!(models(&second).contains(&format!(
+        "personal:gateway/{}",
+        rust_cli_base::models::GLM_5
+    )));
     assert_eq!(registry.current().await.revision, 2);
 
     // 内容相同的改写（签名不变）不加版本。
@@ -67,7 +70,10 @@ async fn revisions_change_only_with_the_files() {
     write(paths.credentials().as_path(), record.to_string()).await;
     let third = registry.current().await;
     assert_eq!(third.revision, 3);
-    assert_eq!(models(&third)[0], format!("{provider}/GLM-5.3"));
+    assert_eq!(
+        models(&third)[0],
+        format!("{provider}/{}", rust_cli_base::models::GLM_5_3_ACCOUNT)
+    );
 
     // 个人配置删除后回到空配置。
     rust_cli_fs::atomic_write(paths.provider_config().as_path(), b"not json", WRITE)

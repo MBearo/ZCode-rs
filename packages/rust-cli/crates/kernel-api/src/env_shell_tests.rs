@@ -164,6 +164,8 @@ fn background_task_dtos_round_trip() {
     round_trip(&Some(BackgroundInfo {
         command: "sleep 30".to_owned(),
         status: BackgroundStatus::Running,
+        kind: Default::default(),
+        description: String::new(),
     }));
     round_trip(&BackgroundStop::Stopped {
         command: "sleep 30".to_owned(),
@@ -176,6 +178,36 @@ fn background_task_dtos_round_trip() {
         serde_json::to_value(BackgroundStop::NotFound).unwrap(),
         json!({"kind": "not_found"})
     );
+}
+
+/// 修复线 F117：`BackgroundInfo` 的种类与说明。没有这两项的 JSON（旧执行器、F117 之前写的）解成 Bash 与空；Bash 与空
+/// 不写出；monitor 往返不变。
+#[test]
+fn background_info_carries_the_kind_and_the_description() {
+    let old: BackgroundInfo =
+        serde_json::from_value(json!({"command": "sleep 30", "status": "running"})).unwrap();
+    assert_eq!(
+        (old.kind, old.description.as_str()),
+        (BackgroundKind::Bash, "")
+    );
+    assert_eq!(
+        serde_json::to_value(&old).unwrap(),
+        json!({"command": "sleep 30", "status": "running"})
+    );
+    let monitor = BackgroundInfo {
+        command: "tail -f build.log".to_owned(),
+        status: BackgroundStatus::Running,
+        kind: BackgroundKind::Monitor,
+        description: "build log".to_owned(),
+    };
+    assert_eq!(
+        serde_json::to_value(&monitor).unwrap(),
+        json!({
+            "command": "tail -f build.log", "status": "running", "kind": "monitor",
+            "description": "build log"
+        })
+    );
+    round_trip(&monitor);
 }
 
 #[test]

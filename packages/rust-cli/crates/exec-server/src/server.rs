@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use bytes::Bytes;
-use rust_cli_base::{Spawner, TaskScope};
+use rust_cli_base::{Spawner, TaskScope, units};
 use rust_cli_exec_transport::{Link, LinkError, Listener};
 use rust_cli_exec_wire::dto::core::PathStyle;
 use rust_cli_exec_wire::frame::PART_SIZE;
@@ -19,6 +19,11 @@ use crate::auth::Authenticator;
 use crate::calls::StreamControl;
 use crate::fence::Fence;
 use crate::ledger::{CallKey, ExecLedger, LedgerError};
+
+/// 缺省：客户端实例断开多久后关掉它的流、删掉它只在内存里的记录（§19.7）。
+const DEFAULT_ABANDON_AFTER: Duration = Duration::from_secs(units::SECONDS_PER_DAY);
+/// 缺省：多久查一次断开太久的实例。
+const DEFAULT_SWEEP_EVERY: Duration = Duration::from_secs(10 * units::SECONDS_PER_MINUTE);
 
 /// 执行器报告给客户端的事实与服务端的设置（由执行器入口给）。
 #[derive(Debug, Clone)]
@@ -60,8 +65,8 @@ impl ServerConfig {
             capabilities: Capabilities::ports(),
             fence: Fence::Open,
             part_size: PART_SIZE,
-            abandon_after: Duration::from_secs(24 * 60 * 60),
-            sweep_every: Duration::from_secs(10 * 60),
+            abandon_after: DEFAULT_ABANDON_AFTER,
+            sweep_every: DEFAULT_SWEEP_EVERY,
         }
     }
 }
@@ -123,6 +128,8 @@ pub(crate) struct Inner {
     pub mcp: crate::mcp::McpTable,
     /// 按客户端实例推来的环境变量（F96，remote-exec.md §23.5）。
     pub env: crate::env::EnvTable,
+    /// 起好、还没被线上的 watch_command 接走的命令流（工作线 F119，remote-exec.md §18.5）。
+    pub started: crate::started::Started,
     pub spawner: Spawner,
 }
 
@@ -184,6 +191,7 @@ impl Inner {
             // 它的 MCP 服务器一起结束（R5，§22.5）；它推来的环境变量一起忘掉（F96）。
             crate::mcp::forget(self, instance).await;
             self.env.forget(instance);
+            self.started.forget(instance);
             if let Err(error) = self.ledger.forget_client(instance).await {
                 tracing::warn!(target: "exec_server", %error, "forgetting an abandoned client failed");
             }
@@ -235,6 +243,7 @@ impl ExecServer {
             away: Mutex::new(HashMap::new()),
             mcp: crate::mcp::McpTable::default(),
             env: crate::env::EnvTable::default(),
+            started: crate::started::Started::default(),
             spawner: scope.spawner(),
         });
         // 回收断开太久的实例（只回收，不同步状态）；任务属于服务端的作用域，服务端释放时结束。

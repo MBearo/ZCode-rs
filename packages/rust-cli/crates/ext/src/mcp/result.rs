@@ -1,10 +1,14 @@
 //! MCP 工具结果的转换与截断（docs/specs/rust-cli/ext.md §3.5）。
 
+use rust_cli_base::tokens;
 use rust_cli_kernel_api::message::{ImageSource, ToolResultContent};
 use serde_json::Value;
 
 /// 图片按多少 token 估算。
 const IMAGE_TOKENS: u64 = 1600;
+/// base64 每 4 个字符是 3 个字节。
+const BASE64_GROUP_CHARS: usize = 4;
+const BASE64_GROUP_BYTES: usize = 3;
 
 /// `isError: true` 的错误文本：第一个内容块的 `text`，没有时 `Unknown error`。
 pub(crate) fn error_text(result: &Value) -> Option<String> {
@@ -44,7 +48,7 @@ fn image(data: &str, mime: Option<&str>) -> ToolResultContent {
 
 fn binary(prefix: &str, mime: Option<&str>, data: &str) -> ToolResultContent {
     // 二进制不写成文件、不给路径（ext.md §8 D9）。
-    let bytes = data.len() / 4 * 3;
+    let bytes = data.len() / BASE64_GROUP_CHARS * BASE64_GROUP_BYTES;
     text(format!(
         "{prefix}Binary content ({}, {bytes} bytes) could not be saved to disk: not supported",
         mime.unwrap_or("unknown type")
@@ -127,7 +131,9 @@ fn estimate(content: &[ToolResultContent]) -> u64 {
     content
         .iter()
         .map(|item| match item {
-            ToolResultContent::Text { text } => (text.chars().count() as u64).div_ceil(4),
+            ToolResultContent::Text { text } => {
+                (text.chars().count() as u64).div_ceil(tokens::CHARS_PER_TOKEN)
+            }
             ToolResultContent::Image { .. } | ToolResultContent::Document { .. } => IMAGE_TOKENS,
             // MCP 的结果里没有 tool_reference（只有 ToolSearch 产生）。
             ToolResultContent::ToolReference { .. } => 0,
@@ -148,7 +154,8 @@ pub(crate) fn truncate(content: Vec<ToolResultContent>, max_tokens: u64) -> Vec<
     if estimate(&content) <= max_tokens {
         return content;
     }
-    let mut left = usize::try_from(max_tokens.saturating_mul(4)).unwrap_or(usize::MAX);
+    let mut left =
+        usize::try_from(max_tokens.saturating_mul(tokens::CHARS_PER_TOKEN)).unwrap_or(usize::MAX);
     let mut out = Vec::new();
     for item in content {
         match item {
@@ -161,7 +168,8 @@ pub(crate) fn truncate(content: Vec<ToolResultContent>, max_tokens: u64) -> Vec<
                 out.push(ToolResultContent::Text { text: kept });
             }
             image @ (ToolResultContent::Image { .. } | ToolResultContent::Document { .. }) => {
-                let cost = usize::try_from(IMAGE_TOKENS * 4).unwrap_or(usize::MAX);
+                let cost =
+                    usize::try_from(IMAGE_TOKENS * tokens::CHARS_PER_TOKEN).unwrap_or(usize::MAX);
                 if cost <= left {
                     left -= cost;
                     out.push(image);

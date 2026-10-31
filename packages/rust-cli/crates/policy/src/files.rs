@@ -6,6 +6,7 @@
 //! 读规则的工具名是 `Read`，写规则是 `Edit`（Write、NotebookEdit 共用）。
 
 use rust_cli_base::names::DOT_DIR;
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::permission::{PermissionMode, RuleBehavior};
 use serde_json::Value;
@@ -43,7 +44,7 @@ pub fn tool_access(tool: &str) -> Option<(Access, &'static str)> {
 }
 
 /// 写入要额外确认的位置（危险的文件与目录，配置目录是 `.zcode`）。
-const SENSITIVE_DIRS: &[&str] = &[".git", ".vscode", ".idea", DOT_DIR];
+const SENSITIVE_DIRS: &[&str] = &[GIT_DIR, ".vscode", ".idea", DOT_DIR];
 const SENSITIVE_FILES: &[&str] = &[
     ".gitconfig",
     ".gitmodules",

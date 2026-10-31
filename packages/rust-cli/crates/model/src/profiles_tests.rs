@@ -1,9 +1,12 @@
 //! 每个请求方案的请求体字节快照（model.md §3.2 的表，修复线 F23）：同一个主循环请求发到各方案的端点。
 //!
-//! 卡片模型（claude-opus-5-5）带 query 按卡片写的卡片字段；没有卡片的模型（GLM、deepseek）不带（query 修 bug 之后，没有卡片
-//! 不写 thinking / effort / context_management）。补丁是内置配置的 option map 在这个档位上的结果。
+//! 有卡片形状的模型（Anthropic 的卡片模型，与按 opus 处理的 GLM，工作线 F121）带 query 按卡片写的卡片字段；没有形状的模型
+//! （deepseek）不带（query 修 bug 之后，没有卡片不写 thinking / effort / context_management）。补丁是内置配置的 option map
+//! 在这个档位上的结果（GLM 不合并 reasoningLevel 的补丁）。
 
+use rust_cli_base::models::OPUS_5_5;
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::{hosts, models};
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{
     ApiContent, ApiMessage, ApiRole, CacheControl, ContextEdit, ModelRequest, ModelSelection,
@@ -152,12 +155,9 @@ fn encode(
     )
 }
 
-/// GLM-5.1 在 `enabled` 档位上的 option map（内置配置：`thinking` 随档位，没有 effort）与输出上限。
+/// GLM 的补丁（工作线 F121，model.md §11.1）：只有输出上限（推理字段由卡片的形状写，平台层不合并 reasoningLevel 的补丁）。
 fn glm_patches() -> Vec<Value> {
-    vec![
-        json!({"thinking": {"type": "enabled"}}),
-        json!({"max_tokens": 64000}),
-    ]
+    vec![json!({"max_tokens": 64000})]
 }
 
 fn check(
@@ -173,40 +173,41 @@ fn check(
     assert_eq!(ours_beta.as_deref(), beta);
 }
 
-/// Anthropic 官方上的 claude-opus-5-5：原样（第一方 system、`diagnostics`），beta 按特性。
+/// Anthropic 官方上的有卡片的模型：原样（第一方 system、`diagnostics`），beta 按特性。
 #[test]
 fn anthropic_official_carded_model() {
     check(
         &endpoint(
             WireProtocol::AnthropicMessages,
-            "https://api.anthropic.com",
-            "claude-opus-5-5",
+            hosts::ANTHROPIC_API,
+            OPUS_5_5,
             Vec::new(),
         ),
-        main_request("claude-opus-5-5", true),
+        main_request(OPUS_5_5, true),
         "anthropic-official",
-        r##"{"model":"claude-opus-5-5","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}],"output_config":{"effort":"medium"}}],"system":[{"type":"text","text":"I"},{"type":"text","text":"S","cache_control":{"type":"ephemeral","scope":"global"}},{"type":"text","text":"D","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":128000,"thinking":{"type":"adaptive","display":"updates"},"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"output_config":{"effort":"medium"},"diagnostics":{"previous_message_id":null},"stream":true}"##,
+        &r##"{"model":"<model>","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}],"output_config":{"effort":"medium"}}],"system":[{"type":"text","text":"I"},{"type":"text","text":"S","cache_control":{"type":"ephemeral","scope":"global"}},{"type":"text","text":"D","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":128000,"thinking":{"type":"adaptive","display":"updates"},"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"output_config":{"effort":"medium"},"diagnostics":{"previous_message_id":null},"stream":true}"##.replace("<model>", OPUS_5_5),
         Some(
             "interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,thinking-token-count-2026-05-13,per-turn-control-2026-07-01,effort-2025-11-24,advanced-tool-use-2025-11-20,thinking-display-updates-2026-08-18,cache-diagnosis-2026-04-07",
         ),
     );
 }
 
-/// z.ai 上的 GLM（没有卡片）：第一方 system 与 `diagnostics`（用户决定：一方都发）；没有 query 写的 effort（修 bug 之后），`thinking` 与 `max_tokens` 只来自 option map。
+/// z.ai 上的 GLM：第一方 system 与 `diagnostics`（用户决定：一方都发）；工作线 F121 起 GLM 按 opus 的卡片形状，query 写
+/// adaptive thinking、effort、`context_management` 与每轮 effort（同 Anthropic 官方上的卡片模型），补丁只有输出上限。
 #[test]
 fn zhipu_glm_on_z_ai() {
     check(
         &endpoint(
             WireProtocol::AnthropicMessages,
-            "https://api.z.ai/api/anthropic",
-            "glm-5.1",
+            hosts::ZAI_ANTHROPIC,
+            models::GLM_5_3,
             glm_patches(),
         ),
-        main_request("glm-5.1", false),
+        main_request(models::GLM_5_3, true),
         "zhipu-official",
-        r##"{"model":"glm-5.1","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}]}],"system":[{"type":"text","text":"I"},{"type":"text","text":"S","cache_control":{"type":"ephemeral","scope":"global"}},{"type":"text","text":"D","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":64000,"diagnostics":{"previous_message_id":null},"stream":true,"thinking":{"type":"enabled"}}"##,
+        &r##"{"model":"<model>","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}],"output_config":{"effort":"medium"}}],"system":[{"type":"text","text":"I"},{"type":"text","text":"S","cache_control":{"type":"ephemeral","scope":"global"}},{"type":"text","text":"D","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":64000,"thinking":{"type":"adaptive","display":"updates"},"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"output_config":{"effort":"medium"},"diagnostics":{"previous_message_id":null},"stream":true}"##.replace("<model>", models::GLM_5_3),
         Some(
-            "interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,cache-diagnosis-2026-04-07",
+            "interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,thinking-token-count-2026-05-13,per-turn-control-2026-07-01,effort-2025-11-24,advanced-tool-use-2025-11-20,thinking-display-updates-2026-08-18,cache-diagnosis-2026-04-07",
         ),
     );
 }
@@ -217,15 +218,15 @@ fn zhipu_glm_on_bigmodel() {
     check(
         &endpoint(
             WireProtocol::AnthropicMessages,
-            "https://open.bigmodel.cn/api/anthropic",
-            "glm-5.1",
+            hosts::BIGMODEL_ANTHROPIC,
+            models::GLM_5_3,
             glm_patches(),
         ),
-        main_request("glm-5.1", false),
+        main_request(models::GLM_5_3, true),
         "zhipu-official",
-        r##"{"model":"glm-5.1","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}]}],"system":[{"type":"text","text":"I"},{"type":"text","text":"S","cache_control":{"type":"ephemeral","scope":"global"}},{"type":"text","text":"D","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":64000,"diagnostics":{"previous_message_id":null},"stream":true,"thinking":{"type":"enabled"}}"##,
+        &r##"{"model":"<model>","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}],"output_config":{"effort":"medium"}}],"system":[{"type":"text","text":"I"},{"type":"text","text":"S","cache_control":{"type":"ephemeral","scope":"global"}},{"type":"text","text":"D","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":64000,"thinking":{"type":"adaptive","display":"updates"},"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"output_config":{"effort":"medium"},"diagnostics":{"previous_message_id":null},"stream":true}"##.replace("<model>", models::GLM_5_3),
         Some(
-            "interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,cache-diagnosis-2026-04-07",
+            "interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,thinking-token-count-2026-05-13,per-turn-control-2026-07-01,effort-2025-11-24,advanced-tool-use-2025-11-20,thinking-display-updates-2026-08-18,cache-diagnosis-2026-04-07",
         ),
     );
 }
@@ -236,38 +237,38 @@ fn deepseek_official() {
     check(
         &endpoint(
             WireProtocol::AnthropicMessages,
-            "https://api.deepseek.com/anthropic",
-            "deepseek-v4-pro",
+            hosts::DEEPSEEK_ANTHROPIC,
+            models::DEEPSEEK_V4_PRO,
             vec![
                 json!({"thinking": {"type": "enabled"}, "output_config": {"effort": "max"}}),
                 json!({"max_tokens": 128000}),
             ],
         ),
-        main_request("deepseek-v4-pro", false),
+        main_request(models::DEEPSEEK_V4_PRO, false),
         "deepseek-official",
-        r##"{"model":"deepseek-v4-pro","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}]}],"system":[{"type":"text","text":"I"},{"type":"text","text":"S","cache_control":{"type":"ephemeral","scope":"global"}},{"type":"text","text":"D","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":128000,"diagnostics":{"previous_message_id":null},"stream":true,"thinking":{"type":"enabled"},"output_config":{"effort":"max"}}"##,
+        &r##"{"model":"<model>","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}]}],"system":[{"type":"text","text":"I"},{"type":"text","text":"S","cache_control":{"type":"ephemeral","scope":"global"}},{"type":"text","text":"D","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":128000,"diagnostics":{"previous_message_id":null},"stream":true,"thinking":{"type":"enabled"},"output_config":{"effort":"max"}}"##.replace("<model>", models::DEEPSEEK_V4_PRO),
         Some(
             "interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,thinking-token-count-2026-05-13,effort-2025-11-24,advanced-tool-use-2025-11-20,cache-diagnosis-2026-04-07",
         ),
     );
 }
 
-/// 自建网关（经它转到 Bedrock）上的 claude-opus-5-5：其他 Anthropic 兼容。第三方 system、没有 `scope` 与 `diagnostics`，卡片的 thinking / effort / context_management / 每轮 effort 去掉，option map 照常；beta 照 Node（对话中间的 system 消息、延迟工具，F64）。
+/// 自建网关（经它转到 Bedrock）上的有卡片的模型：其他 Anthropic 兼容。第三方 system、没有 `scope` 与 `diagnostics`，卡片的 thinking / effort / context_management / 每轮 effort 去掉，option map 照常；beta 照 Node（对话中间的 system 消息、延迟工具，F64）。
 #[test]
 fn a_self_hosted_gateway() {
     check(
         &endpoint(
             WireProtocol::AnthropicMessages,
             "https://gw.example.com",
-            "claude-opus-5-5",
+            OPUS_5_5,
             vec![
                 json!({"thinking": {"type": "adaptive"}, "output_config": {"effort": "max"}}),
                 json!({"max_tokens": 128000}),
             ],
         ),
-        main_request("claude-opus-5-5", true),
+        main_request(OPUS_5_5, true),
         "anthropic-compatible",
-        r##"{"model":"claude-opus-5-5","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}]}],"system":[{"type":"text","text":"I","cache_control":{"type":"ephemeral"}},{"type":"text","text":"S\n\nD","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":128000,"stream":true,"thinking":{"type":"adaptive"},"output_config":{"effort":"max"}}"##,
+        &r##"{"model":"<model>","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"system","content":[{"type":"text","text":"# Env","cache_control":{"type":"ephemeral"}}]}],"system":[{"type":"text","text":"I","cache_control":{"type":"ephemeral"}},{"type":"text","text":"S\n\nD","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"Read","description":"d","input_schema":{"type":"object"}},{"name":"WebFetch","description":"d","input_schema":{"type":"object"},"defer_loading":true}],"max_tokens":128000,"stream":true,"thinking":{"type":"adaptive"},"output_config":{"effort":"max"}}"##.replace("<model>", OPUS_5_5),
         Some("mid-conversation-system-2026-04-07,advanced-tool-use-2025-11-20"),
     );
 }
@@ -279,15 +280,15 @@ fn openai_chat() {
         &endpoint(
             WireProtocol::OpenAiChatCompletions,
             "https://api.example.com/v1",
-            "glm-5.1",
+            models::GLM_5_1,
             vec![
                 json!({"reasoning_effort": "high"}),
                 json!({"max_completion_tokens": 64000}),
             ],
         ),
-        main_request("glm-5.1", false),
+        main_request(models::GLM_5_1, false),
         "openai-chat",
-        r##"{"model":"glm-5.1","messages":[{"role":"system","content":"I\n\nS\n\nD"},{"role":"user","content":[{"type":"text","text":"hi"},{"type":"text","text":"<system-reminder>\n# Env\n</system-reminder>"}]}],"tools":[{"type":"function","function":{"name":"Read","description":"d","parameters":{"type":"object"}}},{"type":"function","function":{"name":"WebFetch","description":"d","parameters":{"type":"object"}}}],"tool_choice":"auto","stream":true,"stream_options":{"include_usage":true},"reasoning_effort":"high","max_completion_tokens":64000}"##,
+        &r##"{"model":"<model>","messages":[{"role":"system","content":"I\n\nS\n\nD"},{"role":"user","content":[{"type":"text","text":"hi"},{"type":"text","text":"<system-reminder>\n# Env\n</system-reminder>"}]}],"tools":[{"type":"function","function":{"name":"Read","description":"d","parameters":{"type":"object"}}},{"type":"function","function":{"name":"WebFetch","description":"d","parameters":{"type":"object"}}}],"tool_choice":"auto","stream":true,"stream_options":{"include_usage":true},"reasoning_effort":"high","max_completion_tokens":64000}"##.replace("<model>", models::GLM_5_1),
         None,
     );
 }
@@ -299,15 +300,15 @@ fn openai_responses() {
         &endpoint(
             WireProtocol::OpenAiResponses,
             "https://api.example.com/v1",
-            "gpt-5",
+            models::GPT_5,
             vec![
                 json!({"reasoning": {"effort": "high"}}),
                 json!({"max_output_tokens": 64000}),
             ],
         ),
-        main_request("gpt-5", false),
+        main_request(models::GPT_5, false),
         "openai-responses",
-        r##"{"model":"gpt-5","stream":true,"store":false,"include":["reasoning.encrypted_content"],"max_output_tokens":64000,"input":[{"role":"developer","content":"I\n\nS\n\nD"},{"role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_text","text":"<system-reminder>\n# Env\n</system-reminder>"}]}],"tools":[{"type":"function","name":"Read","description":"d","parameters":{"type":"object"},"strict":false},{"type":"function","name":"WebFetch","description":"d","parameters":{"type":"object"},"strict":false}],"tool_choice":"auto","reasoning":{"effort":"high"}}"##,
+        &r##"{"model":"<model>","stream":true,"store":false,"include":["reasoning.encrypted_content"],"max_output_tokens":64000,"input":[{"role":"developer","content":"I\n\nS\n\nD"},{"role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_text","text":"<system-reminder>\n# Env\n</system-reminder>"}]}],"tools":[{"type":"function","name":"Read","description":"d","parameters":{"type":"object"},"strict":false},{"type":"function","name":"WebFetch","description":"d","parameters":{"type":"object"},"strict":false}],"tool_choice":"auto","reasoning":{"effort":"high"}}"##.replace("<model>", models::GPT_5),
         None,
     );
 }
@@ -325,10 +326,10 @@ fn a_gateway_request_has_none_of_the_card_fields() {
         let gateway = endpoint(
             WireProtocol::AnthropicMessages,
             base_url,
-            "claude-opus-5-5",
+            OPUS_5_5,
             Vec::new(),
         );
-        let (name, body, beta) = encode(&gateway, main_request("claude-opus-5-5", true));
+        let (name, body, beta) = encode(&gateway, main_request(OPUS_5_5, true));
         assert_eq!(name, "anthropic-compatible");
         for field in [
             r#""scope""#,
@@ -344,7 +345,7 @@ fn a_gateway_request_has_none_of_the_card_fields() {
             beta.as_deref(),
             Some("mid-conversation-system-2026-04-07,advanced-tool-use-2025-11-20")
         );
-        let mut plain = main_request("claude-opus-5-5", true);
+        let mut plain = main_request(OPUS_5_5, true);
         plain.options.tool_flags.clear();
         plain.messages.truncate(1);
         plain.betas = vec!["context-1m-2025-08-07".to_owned()];
@@ -374,11 +375,11 @@ fn a_gateway_sends_the_betas_node_sends() {
     // structured-outputs；经网关不发（工作线 F71）。
     let zhipu = endpoint(
         WireProtocol::AnthropicMessages,
-        "https://open.bigmodel.cn/api/anthropic",
-        "claude-sonnet-4-5-20250929",
+        hosts::BIGMODEL_ANTHROPIC,
+        models::SONNET_4_5_DATED,
         Vec::new(),
     );
-    let (_, _, beta) = encode(&zhipu, main_request("claude-sonnet-4-5-20250929", true));
+    let (_, _, beta) = encode(&zhipu, main_request(models::SONNET_4_5_DATED, true));
     assert_eq!(
         beta.as_deref(),
         Some(
@@ -386,15 +387,15 @@ fn a_gateway_sends_the_betas_node_sends() {
         )
     );
     let (_, _, beta) = encode(
-        &gateway("claude-sonnet-4-5-20250929"),
-        main_request("claude-sonnet-4-5-20250929", true),
+        &gateway(models::SONNET_4_5_DATED),
+        main_request(models::SONNET_4_5_DATED, true),
     );
     assert_eq!(
         beta.as_deref(),
         Some("mid-conversation-system-2026-04-07,advanced-tool-use-2025-11-20")
     );
-    // SDK 的能力表里没有的模型（claude-opus-5-5、GLM）不发 structured-outputs；`claude-sonnet-4-` 的其他版本也不发。
-    for model in ["claude-opus-5-5", "glm-5.1", "claude-sonnet-4-0"] {
+    // SDK 的能力表里没有的模型（有卡片的模型、GLM）不发 structured-outputs；`claude-sonnet-4-` 的其他版本也不发。
+    for model in [OPUS_5_5, models::GLM_5_1, models::SONNET_4_0] {
         let (_, _, beta) = encode(&gateway(model), main_request(model, true));
         assert_eq!(
             beta.as_deref(),
@@ -403,7 +404,7 @@ fn a_gateway_sends_the_betas_node_sends() {
         );
     }
     // tool_result 里的 PDF、Node 的 WebSearch 工具；没有普通工具时不发 structured-outputs。
-    let mut request = main_request("claude-opus-4-1", false);
+    let mut request = main_request(models::OPUS_4_1, false);
     request.messages.truncate(1);
     request.tools.clear();
     request.options.tool_flags.clear();
@@ -429,7 +430,7 @@ fn a_gateway_sends_the_betas_node_sends() {
         blocked_domains: None,
         max_uses: 8,
     }];
-    let mut pdf = gateway("claude-opus-4-1");
+    let mut pdf = gateway(models::OPUS_4_1);
     pdf.supports_pdf = true;
     let (_, _, beta) = encode(&pdf, request);
     assert_eq!(
@@ -444,7 +445,7 @@ fn a_gateway_sends_the_betas_node_sends() {
 #[test]
 fn the_official_endpoint_sends_the_node_web_search_tool() {
     use rust_cli_kernel_api::model::ServerTool;
-    let mut request = main_request("claude-opus-5-5", true);
+    let mut request = main_request(OPUS_5_5, true);
     request.tools.clear();
     request.options.tool_flags.clear();
     request.options.server_tools = vec![ServerTool::WebSearch {
@@ -454,8 +455,8 @@ fn the_official_endpoint_sends_the_node_web_search_tool() {
     }];
     let official = endpoint(
         WireProtocol::AnthropicMessages,
-        "https://api.anthropic.com",
-        "claude-opus-5-5",
+        hosts::ANTHROPIC_API,
+        OPUS_5_5,
         Vec::new(),
     );
     let (profile, body, beta) = encode(&official, request);

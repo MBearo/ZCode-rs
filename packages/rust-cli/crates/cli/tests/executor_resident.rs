@@ -136,14 +136,11 @@ async fn a_command_keeps_running_when_the_proxy_is_killed() {
     let machine = Arc::new(RemoteEnvironment::new(client.clone())).machine();
     let ws = home.workspace();
     let text = "for i in 1 2 3 4; do echo line$i; sleep 0.3; done";
-    machine
+    let mut events = machine
         .commands()
         .start_command(&ws, context("op_loop"), command(&home.work, "t1", text))
         .await
         .unwrap();
-    let mut events = machine
-        .commands()
-        .watch_command(OperationId::new("op_loop"), 0);
     let mut output = String::new();
     let mut killed = false;
     let mut exit = None;
@@ -344,7 +341,7 @@ async fn a_different_version_with_the_same_protocol_still_works() {
         resident["version"].as_str().unwrap()
     );
     let machine = Arc::new(RemoteEnvironment::new(second.clone())).machine();
-    machine
+    let mut events = machine
         .commands()
         .start_command(
             &home.workspace(),
@@ -353,9 +350,6 @@ async fn a_different_version_with_the_same_protocol_still_works() {
         )
         .await
         .unwrap();
-    let mut events = machine
-        .commands()
-        .watch_command(OperationId::new("op_other"), 0);
     let mut output = String::new();
     let mut exit = None;
     while let Some(event) = events.next().await {

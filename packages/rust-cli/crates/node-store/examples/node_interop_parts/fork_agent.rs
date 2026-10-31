@@ -4,6 +4,7 @@
 //! agents 的写法：模型、模式、`rust-cli/fork_parent`、directive（第一条输入）、子代理的回答。继承的前缀不写进子会话。
 //! 输出两个会话的 id 与 directive。
 use super::*;
+use rust_cli_base::models::GLM_5_3;
 
 pub(super) async fn write(dir: &str) -> Result<()> {
     let store = store(dir)?;
@@ -56,7 +57,7 @@ pub(super) async fn write(dir: &str) -> Result<()> {
                     Fact::ModelSelected {
                         selection: ModelSelection {
                             provider: "anthropic".into(),
-                            model: "claude-opus-5-5".into(),
+                            model: GLM_5_3.into(),
                             reasoning: None,
                             connection: None,
                         },

@@ -3,6 +3,12 @@
 
 use regex::Regex;
 
+/// `\uXXXX`：前缀两个字符加四位十六进制。
+const ESCAPE_PREFIX: &str = "\\u";
+const ESCAPE_LEN: usize = 6;
+const HEX_RADIX: u32 = rust_cli_base::units::HEX_RADIX;
+/// 不到它的 UTF-16 码元是 ASCII，不转义。
+const ASCII_END: u16 = 0x80;
 const LEFT_SINGLE: char = '\u{2018}';
 const RIGHT_SINGLE: char = '\u{2019}';
 const LEFT_DOUBLE: char = '\u{201C}';
@@ -18,13 +24,13 @@ fn straight(c: char) -> char {
 
 /// `\uXXXX` 转义。
 fn has_escape(text: &str) -> bool {
-    text.as_bytes().windows(6).any(|window| {
+    text.as_bytes().windows(ESCAPE_LEN).any(|window| {
         window[0] == b'\\' && window[1] == b'u' && window[2..].iter().all(u8::is_ascii_hexdigit)
     })
 }
 
 fn has_non_ascii(text: &str) -> bool {
-    text.chars().any(|c| u32::from(c) >= 0x80)
+    !text.is_ascii()
 }
 
 /// 没找到时是否附加转义提示。
@@ -42,7 +48,7 @@ fn unescape(text: &str) -> String {
             if let Some(pair) = captures.get(1) {
                 return pair.as_str().to_owned();
             }
-            u32::from_str_radix(&captures[2], 16)
+            u32::from_str_radix(&captures[2], HEX_RADIX)
                 .ok()
                 .and_then(char::from_u32)
                 .map_or_else(|| captures[0].to_owned(), String::from)
@@ -53,7 +59,7 @@ fn unescape(text: &str) -> String {
 /// 转义后的长度：每个非 ASCII 的 UTF-16 码元变成 6 个字符。
 fn escaped_len(text: &str) -> usize {
     text.encode_utf16()
-        .map(|unit| if unit >= 0x80 { 6 } else { 1 })
+        .map(|unit| if unit >= ASCII_END { ESCAPE_LEN } else { 1 })
         .sum()
 }
 
@@ -80,9 +86,9 @@ fn find_escaped(needle: &str, haystack: &str) -> Option<String> {
     for c in needle.chars() {
         let mut units = [0_u16; 2];
         for unit in c.encode_utf16(&mut units).iter() {
-            if *unit >= 0x80 {
+            if *unit >= ASCII_END {
                 escapes.push(offset);
-                offset += 6;
+                offset += ESCAPE_LEN;
                 source.push_str(r"\\u");
                 for digit in format!("{unit:04x}").chars() {
                     if digit.is_ascii_alphabetic() {
@@ -211,12 +217,15 @@ fn escape_like(old: &str, actual: &str, text: &str) -> String {
     let (mut upper, mut lower) = (0, 0);
     let mut cursor = 0;
     for unit in old.encode_utf16() {
-        if unit >= 0x80 {
-            let digits = actual.get(cursor + 2..cursor + 6).unwrap_or("").to_owned();
+        if unit >= ASCII_END {
+            let digits = actual
+                .get(cursor + ESCAPE_PREFIX.len()..cursor + ESCAPE_LEN)
+                .unwrap_or("")
+                .to_owned();
             upper += digits.chars().filter(|c| ('A'..='F').contains(c)).count();
             lower += digits.chars().filter(|c| ('a'..='f').contains(c)).count();
             known.insert(unit, digits);
-            cursor += 6;
+            cursor += ESCAPE_LEN;
         } else {
             cursor += 1;
         }
@@ -224,7 +233,7 @@ fn escape_like(old: &str, actual: &str, text: &str) -> String {
     let mut out = String::new();
     for c in text.chars() {
         let mut units = [0_u16; 2];
-        if u32::from(c) < 0x80 {
+        if c.is_ascii() {
             out.push(c);
             continue;
         }

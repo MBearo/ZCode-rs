@@ -155,12 +155,18 @@ pub fn merge_scopes(layers: Vec<Vec<McpServer>>) -> Vec<McpServer> {
             .filter(|server| server.scope == McpScope::Enterprise)
             .collect();
     }
+    // 同名时后者覆盖前者：插件 < 用户 < 项目 < 本地 < 动态与企业。
+    const PLUGIN_RANK: u8 = 0;
+    const USER_RANK: u8 = 1;
+    const PROJECT_RANK: u8 = 2;
+    const LOCAL_RANK: u8 = 3;
+    const DYNAMIC_RANK: u8 = 4;
     let rank = |scope: McpScope| match scope {
-        McpScope::Plugin => 0,
-        McpScope::User => 1,
-        McpScope::Project => 2,
-        McpScope::Local => 3,
-        McpScope::Dynamic | McpScope::Enterprise => 4,
+        McpScope::Plugin => PLUGIN_RANK,
+        McpScope::User => USER_RANK,
+        McpScope::Project => PROJECT_RANK,
+        McpScope::Local => LOCAL_RANK,
+        McpScope::Dynamic | McpScope::Enterprise => DYNAMIC_RANK,
     };
     let mut merged: BTreeMap<String, McpServer> = BTreeMap::new();
     for server in all {

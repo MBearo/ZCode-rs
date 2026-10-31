@@ -6,6 +6,7 @@
     reason = "辅助函数与替身不在 #[test] 函数里，clippy 的测试放行不覆盖它；失败即测试失败"
 )]
 
+use rust_cli_base::models;
 use std::sync::Arc;
 
 use rust_cli_base::secret::RedactedString;
@@ -73,7 +74,7 @@ fn read_tool() -> ToolDefinition {
 async fn chat_completions_stream_text_and_tool_calls() {
     let reply = sse(
         &[
-            json!({"id": "c1", "model": "glm-5", "choices": [{"delta": {"reasoning_content": "hm"}}]}),
+            json!({"id": "c1", "model": models::GLM_5, "choices": [{"delta": {"reasoning_content": "hm"}}]}),
             json!({"choices": [{"delta": {"content": "Reading."}}]}),
             json!({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "Read", "arguments": "{\"file_path\":"}}]}}]}),
             json!({"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "\"a.rs\"}"}}]}, "finish_reason": "tool_calls"}]}),
@@ -122,10 +123,11 @@ async fn chat_completions_stream_text_and_tool_calls() {
     assert_eq!(
         captured.body,
         concat!(
-            r#"{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"read a.rs"}],"#,
+            r#"{"model":"<model>","messages":[{"role":"user","content":"read a.rs"}],"#,
             r#""tools":[{"type":"function","function":{"name":"Read","description":"Read","parameters":{"type":"object"}}}],"#,
             r#""tool_choice":"auto","stream":true,"stream_options":{"include_usage":true},"max_tokens":1024,"reasoning_effort":"high"}"#,
         )
+        .replace("<model>", models::GLM_5_3)
     );
 }
 
@@ -133,7 +135,7 @@ async fn chat_completions_stream_text_and_tool_calls() {
 async fn responses_stream_text_and_finish() {
     let reply = sse(
         &[
-            json!({"type": "response.created", "response": {"id": "r1", "model": "gpt-5.4"}}),
+            json!({"type": "response.created", "response": {"id": "r1", "model": models::GPT_5_4}}),
             json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": "m1", "type": "message"}}),
             json!({"type": "response.output_text.delta", "output_index": 0, "item_id": "m1", "delta": "Hello"}),
             json!({"type": "response.output_item.done", "output_index": 0, "item": {"id": "m1", "type": "message"}}),
@@ -165,9 +167,10 @@ async fn responses_stream_text_and_finish() {
     let captured = &server.requests()[0];
     assert_eq!(captured.target, "/v1/responses");
     assert!(
-        captured
-            .body
-            .starts_with(r#"{"model":"claude-sonnet-4-5","stream":true,"store":false,"#),
+        captured.body.starts_with(&format!(
+            r#"{{"model":"{}","stream":true,"store":false,"#,
+            models::GLM_5_3
+        )),
         "{}",
         captured.body
     );

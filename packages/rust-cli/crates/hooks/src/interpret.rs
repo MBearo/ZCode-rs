@@ -2,8 +2,10 @@
 //!
 //! REPL 路径：command 与 http 的结果按退出码与 JSON 输出解释。“外部”路径：每个 hook 的结果单独给出。
 
+use rust_cli_base::proto::http;
 use serde_json::Value;
 
+use crate::consts::BLOCKING_EXIT;
 use crate::output::{self, Parsed};
 use crate::result::{Executed, HookResult, Outcome, Raw, Summary};
 
@@ -35,12 +37,12 @@ fn with_stderr(message: &str, exit: i32, stderr: &str) -> String {
 
 fn command_result(command: &str, event: &str, stdout: &str, stderr: &str, exit: i32) -> HookResult {
     match output::parse(stdout) {
-        Parsed::Invalid(_) | Parsed::Plain if exit == 2 => exit_two(command, stderr),
+        Parsed::Invalid(_) | Parsed::Plain if exit == BLOCKING_EXIT => exit_two(command, stderr),
         Parsed::Invalid(message) => HookResult::non_blocking(format!(
             "JSON validation failed: {}",
             with_stderr(&message, exit, stderr)
         )),
-        Parsed::Async if exit == 2 => exit_two(command, stderr),
+        Parsed::Async if exit == BLOCKING_EXIT => exit_two(command, stderr),
         Parsed::Async if exit != 0 => HookResult::non_blocking(format!(
             "Announced async, then failed with status code {exit}: {}",
             no_stderr(stderr.trim())
@@ -48,7 +50,7 @@ fn command_result(command: &str, event: &str, stdout: &str, stderr: &str, exit: 
         Parsed::Async => HookResult::default(),
         Parsed::Json(json) => match output::process(&json, command, event) {
             Ok(mut result) => {
-                if exit == 2 && result.blocking.is_none() {
+                if exit == BLOCKING_EXIT && result.blocking.is_none() {
                     let blocking = exit_two(command, stderr);
                     result.blocking = blocking.blocking;
                     result.outcome = Outcome::Blocking;
@@ -70,7 +72,7 @@ fn command_result(command: &str, event: &str, stdout: &str, stderr: &str, exit: 
 }
 
 fn http_result(url: &str, event: &str, status: u16, body: &str) -> HookResult {
-    if !(200..300).contains(&status) {
+    if !http::is_success(status) {
         return HookResult::non_blocking(format!("HTTP {status} from {url}"));
     }
     match output::parse_http(body) {
@@ -119,7 +121,7 @@ pub(crate) fn outside(executed: Executed, command: &str) -> Summary {
             exit,
         }) => {
             let json = match output::parse(&stdout) {
-                Parsed::Invalid(message) if exit != 2 => {
+                Parsed::Invalid(message) if exit != BLOCKING_EXIT => {
                     return summary(false, with_stderr(&message, exit, &stderr), false);
                 }
                 Parsed::Json(json) => Some(json),
@@ -137,10 +139,10 @@ pub(crate) fn outside(executed: Executed, command: &str) -> Summary {
             } else {
                 stderr
             };
-            summary(exit == 0, output, exit == 2 || json_blocked)
+            summary(exit == 0, output, exit == BLOCKING_EXIT || json_blocked)
         }
         Executed::Raw(Raw::Http { status, body }) => {
-            if !(200..300).contains(&status) {
+            if !http::is_success(status) {
                 return summary(false, format!("HTTP {status} from {command}"), false);
             }
             match output::parse_http(&body) {

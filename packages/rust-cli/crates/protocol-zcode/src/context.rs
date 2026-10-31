@@ -29,7 +29,7 @@ impl Context {
         let prefix = format!(
             "{:x}-{:x}",
             clock.now_ms(),
-            rust_cli_base::random::u64() & 0xffff_ffff
+            rust_cli_base::random::u64() & u64::from(u32::MAX)
         );
         Self {
             peer,

@@ -133,7 +133,9 @@ fn servers(names: &[&String]) -> String {
     let mut groups: Vec<(String, usize)> = Vec::new();
     for name in names {
         let key = if is_mcp(name) {
-            let mut parts = name.splitn(3, "__");
+            // `mcp`、服务器、其余。
+            const PARTS: usize = 3;
+            let mut parts = name.splitn(PARTS, "__");
             let (first, second) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
             format!("{first}__{second}__*")
         } else {

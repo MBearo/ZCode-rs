@@ -1,3 +1,5 @@
+use rust_cli_base::hosts;
+use rust_cli_base::models;
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::model::ModelError;
 use serde_json::json;
@@ -18,7 +20,7 @@ fn typed(data: Value) -> SseEvent {
 
 fn start() -> SseEvent {
     typed(json!({"type": "message_start", "message": {
-        "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-sonnet-4-5",
+        "id": "msg_1", "type": "message", "role": "assistant", "model": models::GLM_5_3,
         "content": [], "stop_reason": null, "stop_sequence": null,
         "usage": {"input_tokens": 12, "cache_creation_input_tokens": 3,
                   "cache_read_input_tokens": 100, "output_tokens": 1}}}))
@@ -89,7 +91,7 @@ fn text_thinking_and_tool_use_map_to_model_events() {
         vec![
             ModelEvent::MessageStart {
                 id: "msg_1".to_owned(),
-                model: "claude-sonnet-4-5".to_owned(),
+                model: models::GLM_5_3.to_owned(),
                 usage: usage(12, 1, 3, 100),
             },
             ModelEvent::BlockStart {
@@ -478,5 +480,5 @@ fn a_bare_tool_result_for_a_server_call_is_that_call_result() {
 
 /// 智谱的端点按方案表选出的厂商（测试不直接写厂商名，同产品代码只经 `profiles::vendor`）。
 fn zhipu() -> Vendor {
-    crate::profiles::vendor("https://open.bigmodel.cn/api/anthropic")
+    crate::profiles::vendor(hosts::BIGMODEL_ANTHROPIC)
 }

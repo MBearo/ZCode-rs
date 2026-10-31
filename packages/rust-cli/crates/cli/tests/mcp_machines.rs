@@ -14,6 +14,7 @@ mod sse;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 
+use rust_cli_base::models::GLM_5;
 use serde_json::{Value, json};
 
 struct Sandbox {
@@ -78,7 +79,7 @@ fn run(sandbox: &Sandbox, fixture: &sse::Fixture) -> Output {
         .env("ZCODE_DATA_BASE_DIR", &sandbox.home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .env("ZCODE_RUNTIME_ENV", "test")
         .env("_ZCODE_ASSUME_LOOPBACK_MACHINES", "1")
         .stdin(Stdio::null())
@@ -100,8 +101,13 @@ fn tool(id: &str, name: &str) -> String {
 
 /// 请求最后一条 user 消息里的工具结果文字。
 fn last_result(request: &Value) -> String {
+    // 最后一条 user 消息（有卡片形状的模型把这一步的提醒放在其后的 system 消息里）。
     let messages = request["messages"].as_array().unwrap();
-    messages.last().unwrap()["content"]
+    messages
+        .iter()
+        .rev()
+        .find(|message| message["role"] == "user")
+        .unwrap()["content"]
         .as_array()
         .unwrap()
         .iter()

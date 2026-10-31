@@ -64,7 +64,8 @@ fn complete<'a>(reply: &'a str, code: &str) -> Option<&'a str> {
     let start = reply.find(&format!("\x1b]{code};"))?;
     let rest = &reply[start..];
     let bell = rest.find('\x07').map(|at| at + 1);
-    let st = rest.find("\x1b\\").map(|at| at + 2);
+    const ST: &str = "\x1b\\";
+    let st = rest.find(ST).map(|at| at + ST.len());
     let end = match (bell, st) {
         (Some(bell), Some(st)) => bell.min(st),
         (end, None) | (None, end) => end?,

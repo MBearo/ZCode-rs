@@ -8,6 +8,7 @@
 )]
 
 mod system_env;
+use rust_cli_base::models::GLM_5_3;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::Path;
@@ -68,7 +69,7 @@ fn run(home: &Path, work: &Path, extra: &[(&str, &Path)]) {
         .env("ZCODE_DATA_BASE_DIR", home)
         .env("ZCODE_MODEL_BASE_URL", model_server())
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5");
+        .env("ZCODE_MODEL", GLM_5_3);
     for (name, value) in extra {
         command.env(name, value);
     }

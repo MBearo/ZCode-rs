@@ -7,6 +7,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
 use crate::target::SshTarget;
 
+/// 错误文字取 stderr 的最后这么多行。
+const TAIL_LINES: usize = 5;
+
 /// 一次远端命令的结果。
 pub(crate) struct Output {
     pub status: Option<i32>,
@@ -22,7 +25,7 @@ impl Output {
     /// stderr 的最后几行（错误文字）。
     pub fn tail(&self) -> String {
         let lines: Vec<&str> = self.stderr.lines().collect();
-        lines[lines.len().saturating_sub(5)..].join("\n")
+        lines[lines.len().saturating_sub(TAIL_LINES)..].join("\n")
     }
 }
 

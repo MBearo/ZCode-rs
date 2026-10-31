@@ -35,6 +35,7 @@ impl Actor {
             _notify,
             scope,
         });
+        self.asking_changed();
     }
 
     pub(crate) async fn resolve(
@@ -62,6 +63,7 @@ impl Actor {
             return rejected(reason);
         }
         let pending = self.pending.remove(position);
+        self.asking_changed();
         // 只记决定与记住的规则数，不记回答里的文字（logging.md §4）。
         let (kind, tool) = describe(&pending.request);
         tracing::info!(
@@ -86,7 +88,9 @@ impl Actor {
 
     /// 关闭会话或进程退出：全部待回答的交互记为取消，等待方得到错误。
     pub(crate) async fn cancel_pending(&mut self) {
-        for pending in std::mem::take(&mut self.pending) {
+        let pending = std::mem::take(&mut self.pending);
+        self.asking_changed();
+        for pending in pending {
             self.cancelled(pending).await;
         }
     }
@@ -99,6 +103,7 @@ impl Actor {
             .into_iter()
             .partition(|pending| pending.scope == crate::actor::AskScope::Turn);
         self.pending = session;
+        self.asking_changed();
         for pending in turn {
             self.cancelled(pending).await;
         }
@@ -118,6 +123,7 @@ impl Actor {
             return;
         };
         let pending = self.pending.remove(position);
+        self.asking_changed();
         self.cancelled(pending).await;
     }
 

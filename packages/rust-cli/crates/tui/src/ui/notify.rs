@@ -26,32 +26,36 @@ pub enum Channel {
 
 /// 按终端选渠道；Apple Terminal 要起进程读响铃设置，这里不发（D15）。
 pub fn channel(vars: &BTreeMap<String, String>) -> Option<Channel> {
-    match vars.get("TERM_PROGRAM").map(String::as_str) {
+    match vars
+        .get(rust_cli_base::names::env::TERM_PROGRAM)
+        .map(String::as_str)
+    {
         Some("iTerm.app") => Some(Channel::ITerm2),
         Some("kitty") => Some(Channel::Kitty),
         Some("ghostty") => Some(Channel::Ghostty),
-        _ if vars.contains_key("KITTY_WINDOW_ID") => Some(Channel::Kitty),
+        _ if vars.contains_key(rust_cli_base::names::env::KITTY_WINDOW_ID) => Some(Channel::Kitty),
         _ => None,
     }
 }
 
 /// tmux 里 ESC 加倍后包进 DCS，screen 里直接包进 DCS。
 fn wrap(sequence: String, vars: &BTreeMap<String, String>) -> String {
-    if vars.contains_key("TMUX") {
+    if vars.contains_key(rust_cli_base::names::env::TMUX) {
         return format!("\x1bPtmux;{}\x1b\\", sequence.replace('\x1b', "\x1b\x1b"));
     }
-    if vars.contains_key("STY") {
+    if vars.contains_key(rust_cli_base::names::env::STY) {
         return format!("\x1bP{sequence}\x1b\\");
     }
     sequence
 }
 
+/// kitty 通知的 `i=` 的个数（0–9999）。
+const KITTY_IDS: u64 = 10_000;
+
 /// kitty 通知的 `i=`：由一个新的随机 ID 折成 0–9999（FNV-1a）。
 pub fn id(seed: &str) -> u32 {
-    let hash = seed.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-    });
-    u32::try_from(hash % 10_000).unwrap_or(0)
+    let hash = rust_cli_base::hash::fnv1a_64(seed.as_bytes());
+    u32::try_from(hash % KITTY_IDS).unwrap_or(0)
 }
 
 /// 这个渠道要写到终端的全部字节。

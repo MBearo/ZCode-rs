@@ -3,8 +3,8 @@
 //!
 //! 智谱端点的判定也在这里（[`is_zhipu_endpoint`]，修复线 F58）：平台层的 ToolSearch 与模型适配器的请求方案共用一个。
 
-/// 智谱的两个根域名（Node / App `MODEL_PROVIDER_FAMILY_SPECS` 的 `rootDomain`）。
-pub const ZHIPU_DOMAINS: [&str; 2] = ["z.ai", "bigmodel.cn"];
+/// 智谱的两个根域名（Node / App `MODEL_PROVIDER_FAMILY_SPECS` 的 `rootDomain`；定义在 `hosts`，工作线 F121）。
+pub const ZHIPU_DOMAINS: [&str; 2] = [crate::hosts::ZAI_DOMAIN, crate::hosts::BIGMODEL_DOMAIN];
 
 /// 这个 base URL 是不是 z.ai / bigmodel 的端点：去掉首尾空白后按 WHATWG URL 解析，主机（已是小写）等于根域名或以
 /// `.<根域名>` 结尾；解析不了时为假。照 Node / App 唯一的判定 `resolveModelProviderFamilyIdByBaseURL`
@@ -35,7 +35,7 @@ pub fn is_openrouter_endpoint(base_url: &str) -> bool {
         url.scheme() == "https"
             && url
                 .host_str()
-                .is_some_and(|host| on_domain(host, "openrouter.ai"))
+                .is_some_and(|host| on_domain(host, crate::hosts::OPENROUTER_DOMAIN))
     })
 }
 
@@ -44,7 +44,7 @@ pub fn is_openrouter_endpoint(base_url: &str) -> bool {
 pub fn is_opencode_go_endpoint(base_url: &str) -> bool {
     url::Url::parse(base_url.trim()).is_ok_and(|url| {
         url.host_str()
-            .is_some_and(|host| on_domain(host, "opencode.ai"))
+            .is_some_and(|host| on_domain(host, crate::hosts::OPENCODE_DOMAIN))
             && url.path().trim_end_matches('/').to_lowercase() == "/zen/go/v1"
     })
 }
@@ -71,99 +71,5 @@ pub fn normalize(value: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{is_opencode_go_endpoint, is_openrouter_endpoint, is_zhipu_endpoint, normalize};
-
-    /// 智谱端点（F58）：两个根域名与子域名；写法（大小写、端口、空白）不影响；长得像的域名与路径里的域名不算。
-    #[test]
-    fn zhipu_endpoints_are_the_two_domains_and_their_subdomains() {
-        for base_url in [
-            "https://api.z.ai/api/anthropic",
-            "https://open.bigmodel.cn/api/anthropic",
-            "https://open.bigmodel.cn/api/anthropic",
-            "https://zcode.z.ai/api/v1/off-peak/anthropic",
-            " https://API.Z.AI:443/api/anthropic// ",
-            "https://bigmodel.cn",
-            "https://z.ai",
-        ] {
-            assert!(is_zhipu_endpoint(base_url), "{base_url}");
-        }
-        for base_url in [
-            "https://notz.ai/api/anthropic",
-            "https://z.ai.example.com",
-            "https://example.com/api.z.ai/anthropic",
-            "https://api.example.site/api/anthropic",
-            "https://api.anthropic.com/v1",
-            "not a url",
-            "",
-        ] {
-            assert!(!is_zhipu_endpoint(base_url), "{base_url}");
-        }
-    }
-
-    /// F64：OpenRouter 只认 https 与它的域名；OpenCode Go 认域名与路径（末尾的 `/` 与大小写不算）。
-    #[test]
-    fn openrouter_and_opencode_go_endpoints() {
-        for base_url in [
-            "https://openrouter.ai/api/v1",
-            " https://OpenRouter.ai/api/v1 ",
-            "https://eu.openrouter.ai/api/v1",
-        ] {
-            assert!(is_openrouter_endpoint(base_url), "{base_url}");
-        }
-        for base_url in [
-            "http://openrouter.ai/api/v1",
-            "https://notopenrouter.ai/api/v1",
-            "https://openrouter.ai.example.com",
-            "not a url",
-        ] {
-            assert!(!is_openrouter_endpoint(base_url), "{base_url}");
-        }
-        for base_url in [
-            "https://opencode.ai/zen/go/v1",
-            "https://opencode.ai/zen/go/v1/",
-            "http://api.opencode.ai/ZEN/Go/v1//",
-        ] {
-            assert!(is_opencode_go_endpoint(base_url), "{base_url}");
-        }
-        for base_url in [
-            "https://opencode.ai/zen/v1",
-            "https://opencode.ai/zen/go/v1/chat",
-            "https://myopencode.ai/zen/go/v1",
-            "",
-        ] {
-            assert!(!is_opencode_go_endpoint(base_url), "{base_url}");
-        }
-    }
-
-    #[test]
-    fn hosts_ports_and_slashes_do_not_change_the_match() {
-        for (input, expected) in [
-            (
-                "https://api.z.ai/api/anthropic",
-                "https://api.z.ai/api/anthropic",
-            ),
-            (
-                "https://API.Z.AI/api/anthropic/",
-                "https://api.z.ai/api/anthropic",
-            ),
-            (
-                "https://api.z.ai:443/api/anthropic//",
-                "https://api.z.ai/api/anthropic",
-            ),
-            ("http://127.0.0.1:80/", "http://127.0.0.1"),
-            ("https://api.anthropic.com", "https://api.anthropic.com"),
-            // path 的大小写保留（Node 的 URL parser 只改 scheme 与 host）。
-            ("https://gw.example.com/V1/", "https://gw.example.com/V1"),
-            (
-                "https://gw.example.com/v1/?a=1#x",
-                "https://gw.example.com/v1?a=1#x",
-            ),
-            ("  https://gw.example.com/v1 ", "https://gw.example.com/v1"),
-        ] {
-            assert_eq!(normalize(input).as_deref(), Some(expected), "{input}");
-        }
-        assert_eq!(normalize("not a url"), None);
-        assert_eq!(normalize(""), None);
-    }
-}
+#[path = "rule_url_tests.rs"]
+mod tests;

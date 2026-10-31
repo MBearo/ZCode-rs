@@ -73,6 +73,213 @@ pub mod vars {
     }
 }
 
+/// 构建时由 build.rs 给出的版本号的变量名：`env!` 只收字面量，给它用宏（`env!(rust_cli_base::zcode_build_version_var!())`）。
+#[macro_export]
+macro_rules! zcode_build_version_var {
+    () => {
+        "ZCODE_BUILD_VERSION"
+    };
+}
+
+/// 业务代码读写的环境变量名（工作线 F121，README §4.1 第 6 条）：同一个名字只在这里写一次。边界脚本
+/// （`scripts/rust-cli/boundaries/literals.mjs` 的 `env var name`）拒绝本文件以外的产品代码在字符串字面量里写环境变量名。
+/// 只有入口读进程环境（README §4 第一层）；别的 crate 拿入口给的快照或给子进程设变量时同样用这里的名字。
+#[expect(
+    non_upper_case_globals,
+    reason = "常量名就是变量名本身（Windows 的变量名大小写混写）"
+)]
+pub mod env {
+    /// 构建时给出的版本号（[`crate::zcode_build_version_var`]）。
+    pub const ZCODE_BUILD_VERSION: &str = crate::zcode_build_version_var!();
+
+    // 本工程的入口读的变量：存储、配置、显式覆盖的端点（config.md §2.5）。
+    pub const ZCODE_DATA_BASE_DIR: &str = "ZCODE_DATA_BASE_DIR";
+    pub const ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: &str = "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE";
+    pub const ZCODE_CREDENTIAL_SECRET: &str = "ZCODE_CREDENTIAL_SECRET";
+    pub const ZCODE_MODEL_BASE_URL: &str = "ZCODE_MODEL_BASE_URL";
+    pub const ZCODE_API_KEY: &str = "ZCODE_API_KEY";
+    pub const ZCODE_MODEL: &str = "ZCODE_MODEL";
+    pub const ZCODE_STORAGE_DIR: &str = "ZCODE_STORAGE_DIR";
+    pub const ZCODE_SESSION_DB_PATH: &str = "ZCODE_SESSION_DB_PATH";
+    pub const ZCODE_SESSION_DB: &str = "ZCODE_SESSION_DB";
+    pub const ZCODE_RUNTIME_ENV: &str = "ZCODE_RUNTIME_ENV";
+    pub const ZCODE_APP_VERSION: &str = "ZCODE_APP_VERSION";
+    pub const ZCODE_BUBBLEWRAP: &str = "ZCODE_BUBBLEWRAP";
+    pub const ZCODE_FILE_LOCK_TIMEOUT: &str = "ZCODE_FILE_LOCK_TIMEOUT";
+    pub const ZCODE_USER_DIALOG_TIMEOUT_MS: &str = "ZCODE_USER_DIALOG_TIMEOUT_MS";
+
+    // 请求、工具与 ToolSearch 的覆盖（cli-args.md §9）。
+    pub const ZCODE_MAX_OUTPUT_TOKENS: &str = "ZCODE_MAX_OUTPUT_TOKENS";
+    pub const MAX_THINKING_TOKENS: &str = "MAX_THINKING_TOKENS";
+    pub const ENABLE_TOOL_SEARCH: &str = "ENABLE_TOOL_SEARCH";
+    pub const BASH_DEFAULT_TIMEOUT_MS: &str = "BASH_DEFAULT_TIMEOUT_MS";
+    pub const BASH_MAX_TIMEOUT_MS: &str = "BASH_MAX_TIMEOUT_MS";
+    pub const ZCODE_FORK_SUBAGENT: &str = "ZCODE_FORK_SUBAGENT";
+    pub const IS_SANDBOX: &str = "IS_SANDBOX";
+    pub const ZCODE_ENABLE_TASKS: &str = "ZCODE_ENABLE_TASKS";
+    pub const ZCODE_ENABLE_TODO_TOOLS: &str = "ZCODE_ENABLE_TODO_TOOLS";
+
+    // 压缩与记忆（compact.md §2、memory.md）。
+    pub const DISABLE_COMPACT: &str = "DISABLE_COMPACT";
+    pub const DISABLE_AUTO_COMPACT: &str = "DISABLE_AUTO_COMPACT";
+    pub const ZCODE_AUTOCOMPACT_PCT_OVERRIDE: &str = "ZCODE_AUTOCOMPACT_PCT_OVERRIDE";
+    pub const ZCODE_AUTO_COMPACT_WINDOW: &str = "ZCODE_AUTO_COMPACT_WINDOW";
+    pub const ZCODE_DISABLE_AUTO_MEMORY: &str = "ZCODE_DISABLE_AUTO_MEMORY";
+
+    // 流空闲看门狗（stall-visibility.md §2.2）。
+    pub const ZCODE_STREAM_IDLE_TIMEOUT_MS: &str = "ZCODE_STREAM_IDLE_TIMEOUT_MS";
+    pub const ZCODE_BYTE_STREAM_IDLE_TIMEOUT_MS: &str = "ZCODE_BYTE_STREAM_IDLE_TIMEOUT_MS";
+    pub const ZCODE_ENABLE_STREAM_WATCHDOG: &str = "ZCODE_ENABLE_STREAM_WATCHDOG";
+    pub const ZCODE_ENABLE_BYTE_WATCHDOG: &str = "ZCODE_ENABLE_BYTE_WATCHDOG";
+
+    // MCP（ext.md）。
+    pub const ZCODE_MCP_STARTUP_WAIT_MS: &str = "ZCODE_MCP_STARTUP_WAIT_MS";
+    pub const MCP_CONNECTION_NONBLOCKING: &str = "MCP_CONNECTION_NONBLOCKING";
+    pub const MCP_CONNECT_TIMEOUT_MS: &str = "MCP_CONNECT_TIMEOUT_MS";
+    pub const MCP_TIMEOUT: &str = "MCP_TIMEOUT";
+    pub const MCP_TOOL_TIMEOUT: &str = "MCP_TOOL_TIMEOUT";
+    pub const MAX_MCP_OUTPUT_TOKENS: &str = "MAX_MCP_OUTPUT_TOKENS";
+
+    // 账号服务的地址与产品环境（platform.md §5.4，cli `origins.rs`）。
+    pub const ZCODE_ENV: &str = "ZCODE_ENV";
+    pub const ZCODE_BASE_URL: &str = "ZCODE_BASE_URL";
+    pub const ZCODE_ENDPOINT_ORIGIN: &str = "ZCODE_ENDPOINT_ORIGIN";
+    pub const ZCODE_PRODUCTION_BASE_URL: &str = "ZCODE_PRODUCTION_BASE_URL";
+    pub const ZCODE_TEST_BASE_URL: &str = "ZCODE_TEST_BASE_URL";
+    pub const BIGMODEL_API_BASE_URL: &str = "BIGMODEL_API_BASE_URL";
+    pub const BIGMODEL_PRODUCTION_API_BASE_URL: &str = "BIGMODEL_PRODUCTION_API_BASE_URL";
+    pub const BIGMODEL_TEST_API_BASE_URL: &str = "BIGMODEL_TEST_API_BASE_URL";
+    pub const ZAI_BUSINESS_BASE_URL: &str = "ZAI_BUSINESS_BASE_URL";
+    pub const ZAI_PRODUCTION_BUSINESS_BASE_URL: &str = "ZAI_PRODUCTION_BUSINESS_BASE_URL";
+    pub const ZAI_TEST_BUSINESS_BASE_URL: &str = "ZAI_TEST_BUSINESS_BASE_URL";
+
+    // 自动更新与包管理器（update.md）。
+    pub const ZCODE_MANAGED_BY_PNPM: &str = "ZCODE_MANAGED_BY_PNPM";
+    pub const ZCODE_MANAGED_BY_NPM: &str = "ZCODE_MANAGED_BY_NPM";
+    pub const ZCODE_MANAGED_BY_BUN: &str = "ZCODE_MANAGED_BY_BUN";
+    pub const ZCODE_MANAGED_PACKAGE: &str = "ZCODE_MANAGED_PACKAGE";
+    pub const ZCODE_MANAGED_PLATFORM_PACKAGE: &str = "ZCODE_MANAGED_PLATFORM_PACKAGE";
+    pub const ZCODE_MANAGED_UPDATE_HANDOFF: &str = "ZCODE_MANAGED_UPDATE_HANDOFF";
+
+    // TUI 的设置（tui.md）。
+    pub const ZCODE_SCROLL_SPEED: &str = "ZCODE_SCROLL_SPEED";
+    pub const ZCODE_AFK_TIMEOUT_MS: &str = "ZCODE_AFK_TIMEOUT_MS";
+    pub const ZCODE_AFK_COUNTDOWN_MS: &str = "ZCODE_AFK_COUNTDOWN_MS";
+
+    // Shell 与执行环境（tools-files.md、embedded-search.md）。
+    pub const ZCODE_SHELL: &str = "ZCODE_SHELL";
+    pub const ZCODE_GIT_BASH_PATH: &str = "ZCODE_GIT_BASH_PATH";
+    pub const ZCODE_EXECPATH: &str = "ZCODE_EXECPATH";
+
+    // 只给测试用的声明（只在 debug 构建读，model.md §6、remote-exec.md）。
+    pub const _ZCODE_ASSUME_FIRST_PARTY_BASE_URL: &str = "_ZCODE_ASSUME_FIRST_PARTY_BASE_URL";
+    pub const _ZCODE_ASSUME_TOOL_SEARCH: &str = "_ZCODE_ASSUME_TOOL_SEARCH";
+    pub const _ZCODE_ASSUME_MONITOR_OFF: &str = "_ZCODE_ASSUME_MONITOR_OFF";
+    pub const _ZCODE_ASSUME_LOOPBACK_EXECUTOR: &str = "_ZCODE_ASSUME_LOOPBACK_EXECUTOR";
+    pub const _ZCODE_ASSUME_LOOPBACK_MACHINES: &str = "_ZCODE_ASSUME_LOOPBACK_MACHINES";
+    pub const _ZCODE_ASSUME_SSH_MACHINES: &str = "_ZCODE_ASSUME_SSH_MACHINES";
+    pub const _ZCODE_ASSUME_SSH_CONFIG: &str = "_ZCODE_ASSUME_SSH_CONFIG";
+    pub const _ZCODE_ASSUME_SSH_ARTIFACT: &str = "_ZCODE_ASSUME_SSH_ARTIFACT";
+    pub const _ZCODE_ASSUME_SSH_EXECUTOR: &str = "_ZCODE_ASSUME_SSH_EXECUTOR";
+    pub const _ZCODE_ASSUME_BASE_URL: &str = "_ZCODE_ASSUME_BASE_URL";
+    pub const _ZCODE_ASSUME_NPM_REGISTRY: &str = "_ZCODE_ASSUME_NPM_REGISTRY";
+    pub const _ZCODE_ASSUME_RULE_MODEL: &str = "_ZCODE_ASSUME_RULE_MODEL";
+
+    // 网络：代理与证书（net、cli `network.rs`；子进程照传）。
+    pub const ZCODE_HTTP_PROXY: &str = "ZCODE_HTTP_PROXY";
+    pub const ZCODE_NO_PROXY: &str = "ZCODE_NO_PROXY";
+    pub const ZCODE_AGENT_CA_CERT: &str = "ZCODE_AGENT_CA_CERT";
+    pub const HTTP_PROXY: &str = "HTTP_PROXY";
+    pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
+    pub const NO_PROXY: &str = "NO_PROXY";
+    pub const ALL_PROXY: &str = "ALL_PROXY";
+    pub const NODE_EXTRA_CA_CERTS: &str = "NODE_EXTRA_CA_CERTS";
+    pub const SSL_CERT_FILE: &str = "SSL_CERT_FILE";
+    pub const SSL_CERT_DIR: &str = "SSL_CERT_DIR";
+
+    // 终端与语言（TUI 的探测与 i18n、请求头的语言）。
+    pub const TERM: &str = "TERM";
+    pub const COLORTERM: &str = "COLORTERM";
+    pub const TERM_PROGRAM: &str = "TERM_PROGRAM";
+    pub const TERM_PROGRAM_VERSION: &str = "TERM_PROGRAM_VERSION";
+    pub const TERMINAL_EMULATOR: &str = "TERMINAL_EMULATOR";
+    pub const KITTY_WINDOW_ID: &str = "KITTY_WINDOW_ID";
+    pub const WT_SESSION: &str = "WT_SESSION";
+    pub const KONSOLE_VERSION: &str = "KONSOLE_VERSION";
+    pub const GNOME_TERMINAL_SERVICE: &str = "GNOME_TERMINAL_SERVICE";
+    pub const XTERM_VERSION: &str = "XTERM_VERSION";
+    pub const VTE_VERSION: &str = "VTE_VERSION";
+    pub const ALACRITTY_LOG: &str = "ALACRITTY_LOG";
+    pub const LC_TERMINAL: &str = "LC_TERMINAL";
+    pub const CURSOR_TRACE_ID: &str = "CURSOR_TRACE_ID";
+    pub const VSCODE_GIT_ASKPASS_MAIN: &str = "VSCODE_GIT_ASKPASS_MAIN";
+    pub const TMUX: &str = "TMUX";
+    pub const STY: &str = "STY";
+    pub const ZELLIJ: &str = "ZELLIJ";
+    pub const SSH_CONNECTION: &str = "SSH_CONNECTION";
+    pub const WSL_DISTRO_NAME: &str = "WSL_DISTRO_NAME";
+    pub const DISPLAY: &str = "DISPLAY";
+    pub const WAYLAND_DISPLAY: &str = "WAYLAND_DISPLAY";
+    pub const LANG: &str = "LANG";
+    pub const LANGUAGE: &str = "LANGUAGE";
+    pub const LC_ALL: &str = "LC_ALL";
+    pub const LC_MESSAGES: &str = "LC_MESSAGES";
+    pub const TZ: &str = "TZ";
+
+    // 用户、目录与系统（home、临时目录、Windows 的系统变量）。
+    pub const HOME: &str = "HOME";
+    pub const USERPROFILE: &str = "USERPROFILE";
+    pub const USER: &str = "USER";
+    pub const USERNAME: &str = "USERNAME";
+    pub const LOGNAME: &str = "LOGNAME";
+    pub const TMPDIR: &str = "TMPDIR";
+    pub const TEMP: &str = "TEMP";
+    pub const TMP: &str = "TMP";
+    pub const SystemRoot: &str = "SystemRoot";
+    pub const windir: &str = "windir";
+    pub const ComSpec: &str = "ComSpec";
+    pub const PATHEXT: &str = "PATHEXT";
+    pub const APPDATA: &str = "APPDATA";
+    pub const LOCALAPPDATA: &str = "LOCALAPPDATA";
+    pub const ProgramFiles: &str = "ProgramFiles";
+    pub const NUMBER_OF_PROCESSORS: &str = "NUMBER_OF_PROCESSORS";
+    pub const PROCESSOR_ARCHITECTURE: &str = "PROCESSOR_ARCHITECTURE";
+
+    // 子进程（shell、git、编辑器）的环境。
+    pub const PATH: &str = "PATH";
+    pub const SHELL: &str = "SHELL";
+    pub const PWD: &str = "PWD";
+    pub const OLDPWD: &str = "OLDPWD";
+    pub const SHLVL: &str = "SHLVL";
+    pub const EDITOR: &str = "EDITOR";
+    pub const VISUAL: &str = "VISUAL";
+    pub const PAGER: &str = "PAGER";
+    pub const BASH_ENV: &str = "BASH_ENV";
+    pub const GIT_EDITOR: &str = "GIT_EDITOR";
+    pub const GIT_ASKPASS: &str = "GIT_ASKPASS";
+    pub const GIT_TERMINAL_PROMPT: &str = "GIT_TERMINAL_PROMPT";
+    pub const GIT_ALLOW_PROTOCOL: &str = "GIT_ALLOW_PROTOCOL";
+    pub const GIT_CONFIG_PARAMETERS: &str = "GIT_CONFIG_PARAMETERS";
+    pub const GIT_NO_LAZY_FETCH: &str = "GIT_NO_LAZY_FETCH";
+    pub const GIT_NO_REPLACE_OBJECTS: &str = "GIT_NO_REPLACE_OBJECTS";
+    pub const GIT_LFS_SKIP_SMUDGE: &str = "GIT_LFS_SKIP_SMUDGE";
+    pub const GIT_SSH_COMMAND: &str = "GIT_SSH_COMMAND";
+    pub const SSH_AUTH_SOCK: &str = "SSH_AUTH_SOCK";
+
+    // 开发工具的目录（Bash 的环境照传）。
+    pub const GOPATH: &str = "GOPATH";
+    pub const GOROOT: &str = "GOROOT";
+    pub const CARGO_HOME: &str = "CARGO_HOME";
+    pub const RUSTUP_HOME: &str = "RUSTUP_HOME";
+    pub const JAVA_HOME: &str = "JAVA_HOME";
+    pub const NVM_DIR: &str = "NVM_DIR";
+    pub const PNPM_HOME: &str = "PNPM_HOME";
+    pub const PYENV_ROOT: &str = "PYENV_ROOT";
+    pub const VIRTUAL_ENV: &str = "VIRTUAL_ENV";
+    pub const CONDA_PREFIX: &str = "CONDA_PREFIX";
+    pub const HOMEBREW_PREFIX: &str = "HOMEBREW_PREFIX";
+}
+
 /// managed 规则与 skill 所在的系统目录（按 Node 的平台名）：macOS `/Library/Application Support/ZCode`、
 /// Windows `C:\ProgramData\ZCode`、其余 `/etc/zcode`（README §2；context 的规则文件与 ext 的 skill 共用）。
 pub fn managed_dir(platform: &str) -> &'static str {

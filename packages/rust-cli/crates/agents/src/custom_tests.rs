@@ -1,3 +1,4 @@
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::EnvironmentId;
 use rust_cli_kernel_api::permission::PermissionMode;
@@ -25,11 +26,16 @@ fn workspace(root: &str) -> WorkspaceRef {
     }
 }
 
-const REVIEWER: &str = "---\nname: reviewer\ndescription: Reviews code.\\nUse after edits.\ntools: Read, Grep\nmodel: claude-sonnet-5\nmaxTurns: 4\npermissionMode: acceptEdits\nbackground: true\n---\n\nYou review code.\n";
+/// 带全部键的子代理文件；`model` 是缺省的测试模型。
+fn reviewer() -> String {
+    format!(
+        "---\nname: reviewer\ndescription: Reviews code.\\nUse after edits.\ntools: Read, Grep\nmodel: {GLM_5_3}\nmaxTurns: 4\npermissionMode: acceptEdits\nbackground: true\n---\n\nYou review code.\n"
+    )
+}
 
 #[test]
 fn parses_the_frontmatter_keys() {
-    let agent = parse(REVIEWER, AgentSource::Project).unwrap();
+    let agent = parse(&reviewer(), AgentSource::Project).unwrap();
     assert_eq!(agent.agent_type, "reviewer");
     assert_eq!(agent.when_to_use, "Reviews code.\nUse after edits.");
     assert_eq!(
@@ -37,7 +43,7 @@ fn parses_the_frontmatter_keys() {
         Some(vec!["Read".to_owned(), "Grep".to_owned()])
     );
     assert_eq!(agent.prompt, "You review code.");
-    assert_eq!(agent.model.as_deref(), Some("claude-sonnet-5"));
+    assert_eq!(agent.model.as_deref(), Some(GLM_5_3));
     assert_eq!(agent.max_turns, Some(4));
     assert_eq!(agent.permission_mode, Some(PermissionMode::AcceptEdits));
     assert!(agent.background);
@@ -73,7 +79,7 @@ async fn loads_user_then_project_dirs_up_to_the_git_root() {
             "/Users/dev/repo/.zcode/agents/helper.md",
             "---\nname: helper\ndescription: Repo helper.\n---\nRepo.",
         )
-        .with_file("/Users/dev/repo/pkg/.zcode/agents/reviewer.md", REVIEWER)
+        .with_file("/Users/dev/repo/pkg/.zcode/agents/reviewer.md", &reviewer())
         .with_file("/Users/dev/repo/pkg/.zcode/agents/notes.txt", "ignored")
         .with_file(
             "/Users/dev/outside/.zcode/agents/x.md",

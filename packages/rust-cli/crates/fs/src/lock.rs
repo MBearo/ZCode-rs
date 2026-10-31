@@ -21,7 +21,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use reclaim::{InstanceObserver, Removal, is_owner_entry, list_dir, remove_abandoned};
 
 /// 与 Node `ZCODE_FILE_LOCK_TIMEOUT_ERROR_CODE` 对应，出现在超时错误的文本开头。
-pub const FILE_LOCK_TIMEOUT_CODE: &str = "ZCODE_FILE_LOCK_TIMEOUT";
+pub const FILE_LOCK_TIMEOUT_CODE: &str = rust_cli_base::names::env::ZCODE_FILE_LOCK_TIMEOUT;
+
+/// 缺省：第 n 次重试前的等待（毫秒，用完后保持最后一个）。
+const DEFAULT_RETRY_DELAYS_MS: [u64; 5] = [25, 50, 100, 200, 400];
+/// 缺省：没有 PID 的锁超过这个时长才回收。
+const DEFAULT_OWNERLESS_GRACE: Duration = Duration::from_millis(100);
+/// 缺省：最长等待。
+const DEFAULT_MAX_WAIT: Duration = Duration::from_millis(8_000);
+/// owner 文件名里随机 token 的进制（数字与小写字母）。
+const TOKEN_RADIX: u32 = 36;
 
 /// 等待与回收的参数。默认值与 Node `privateFilePersistence.ts` 相同。
 #[derive(Debug, Clone)]
@@ -37,12 +46,12 @@ pub struct LockOptions {
 impl Default for LockOptions {
     fn default() -> Self {
         Self {
-            retry_delays: [25, 50, 100, 200, 400]
+            retry_delays: DEFAULT_RETRY_DELAYS_MS
                 .into_iter()
                 .map(Duration::from_millis)
                 .collect(),
-            ownerless_grace: Duration::from_millis(100),
-            max_wait: Duration::from_millis(8_000),
+            ownerless_grace: DEFAULT_OWNERLESS_GRACE,
+            max_wait: DEFAULT_MAX_WAIT,
         }
     }
 }
@@ -81,7 +90,7 @@ impl Drop for FileLock {
 pub(crate) fn now_ms() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs_f64() * 1000.0)
+        .map(|duration| duration.as_secs_f64() * rust_cli_base::units::MS_PER_SECOND_F64)
         .unwrap_or_default()
 }
 
@@ -94,9 +103,9 @@ fn random_base36() -> String {
     let mut value = hasher.finish();
     let mut out = String::new();
     loop {
-        let digit = (value % 36) as u32;
-        out.push(char::from_digit(digit, 36).unwrap_or('0'));
-        value /= 36;
+        let digit = (value % u64::from(TOKEN_RADIX)) as u32;
+        out.push(char::from_digit(digit, TOKEN_RADIX).unwrap_or('0'));
+        value /= u64::from(TOKEN_RADIX);
         if value == 0 {
             break;
         }

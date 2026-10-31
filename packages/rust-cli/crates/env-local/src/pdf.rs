@@ -14,6 +14,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
+use rust_cli_base::proto::exit;
 use rust_cli_kernel_api::env::EnvError;
 use rust_cli_kernel_api::env_pdf::{PdfRender, RenderPdfPages};
 use tokio::io::AsyncWriteExt;
@@ -223,7 +224,7 @@ impl Poppler {
         let found = execute("pdftoppm", &args, None, env, PROBE_TIMEOUT)
             .await
             .is_ok_and(|ran| {
-                ran.code == Some(0) || (ran.code != Some(127) && !ran.stderr.is_empty())
+                ran.code == Some(0) || (ran.code != Some(exit::NOT_FOUND) && !ran.stderr.is_empty())
             });
         if found {
             self.available.store(true, Ordering::Relaxed);

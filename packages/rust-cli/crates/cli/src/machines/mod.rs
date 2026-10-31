@@ -81,7 +81,7 @@ impl Start {
         (tui, print): (bool, bool),
         (startup, egress): (&super::Startup, &Arc<rust_cli_net::Egress>),
     ) -> Self {
-        let assume = startup.explicit.assume;
+        let assume = &startup.explicit.assume;
         let ssh = crate::options::machine_ssh(crate::options::TestDeclarations::BUILD, |name| {
             startup
                 .env

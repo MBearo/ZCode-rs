@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use rust_cli_base::names::{DOT_DIR, managed_dir};
+use rust_cli_base::text;
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{FileKind, ListDir, PathStyle, StatFile};
 use rust_cli_kernel_api::env_git::project_levels;
@@ -16,6 +17,8 @@ const MAX_SKILL_BYTES: u64 = 1_000_000;
 
 /// 每个根目录下的 skill 目录（`<根>/.zcode/skills`、`<根>/.agents/skills`）。
 const SKILLS_DIR: &str = "skills";
+/// 没有 description 时取正文第一行，最多这么多个字符（超过时截断加 `...`）。
+const MAX_DESCRIPTION_CHARS: usize = 100;
 
 /// 一个根目录与它的来源。
 struct Root {
@@ -178,11 +181,8 @@ fn first_line(body: &str) -> String {
             .map(str::trim)
             .filter(|rest| !rest.is_empty());
         let text = heading.unwrap_or(line);
-        return if text.chars().count() > 100 {
-            format!("{}...", text.chars().take(97).collect::<String>())
-        } else {
-            text.to_owned()
-        };
+        // 截断加省略号只定义在 base 的 `text`。
+        return text::truncate_chars(text, MAX_DESCRIPTION_CHARS).into_owned();
     }
     "Skill".to_owned()
 }

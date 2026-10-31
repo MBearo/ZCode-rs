@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use rust_cli_base::proto::http;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_net::{Egress, HeaderValue, HttpRequest, header};
 use serde_json::{Map, Value, json};
@@ -32,7 +33,11 @@ impl OAuthError {
 
     /// 轮询时可以重试：网络错误、408、429、5xx。
     pub fn transient(&self) -> bool {
-        self.network || matches!(self.status, Some(408 | 429 | 500..))
+        self.network
+            || matches!(
+                self.status,
+                Some(http::REQUEST_TIMEOUT | http::TOO_MANY_REQUESTS | http::SERVER_ERROR_MIN..)
+            )
     }
 }
 

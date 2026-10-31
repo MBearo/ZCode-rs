@@ -10,6 +10,11 @@ use rust_cli_kernel_api::env_path::git_bash_spelling;
 use rust_cli_kernel_api::permission::RuleBehavior;
 use rust_cli_kernel_api::plan::PlanFiles;
 
+use crate::consts::DRIVE_ROOT_LEN;
+
+/// `//c/x` 去掉 `//` 之后的盘符与它后面的 `/`（`c/`）的字节数。
+const SLASHED_DRIVE_LEN: usize = 2;
+
 /// 一次判决里解析路径所需的事实。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathContext {
@@ -103,22 +108,29 @@ pub(crate) fn anchor(pattern: &str, root: &str, context: &PathContext) -> (Strin
     if let Some(rest) = pattern.strip_prefix("//") {
         // `//c/x`：Windows 上根是 `C:\`（`/^\/[a-z]\//i`）；其余（含 `//C:/x`）的根是 `/`。
         let bytes = rest.as_bytes();
-        if windows && bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b'/' {
+        if windows
+            && bytes.len() >= SLASHED_DRIVE_LEN
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b'/'
+        {
             let letter = char::from(bytes[0]).to_ascii_uppercase();
-            return (format!(r"{letter}:\"), rest[2..].to_owned());
+            return (format!(r"{letter}:\"), rest[SLASHED_DRIVE_LEN..].to_owned());
         }
         return ("/".to_owned(), rest.to_owned());
     }
     let bytes = pattern.as_bytes();
     if windows
-        && bytes.len() >= 3
+        && bytes.len() >= DRIVE_ROOT_LEN
         && bytes[0].is_ascii_alphabetic()
         && bytes[1] == b':'
         && matches!(bytes[2], b'/' | b'\\')
     {
         // `C:/x`、`C:\x`：根是 `C:\`，其余的 `\` 换成 `/`。
         let letter = char::from(bytes[0]).to_ascii_uppercase();
-        return (format!(r"{letter}:\"), pattern[3..].replace('\\', "/"));
+        return (
+            format!(r"{letter}:\"),
+            pattern[DRIVE_ROOT_LEN..].replace('\\', "/"),
+        );
     }
     if let (Some(rest), Some(home)) = (pattern.strip_prefix("~/"), &context.home) {
         return (home.clone(), rest.to_owned());

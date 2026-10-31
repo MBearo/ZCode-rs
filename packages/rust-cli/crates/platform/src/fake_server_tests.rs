@@ -6,6 +6,7 @@
     reason = "测试直接搭本地 HTTP 夹具（docs/specs/rust-cli/README.md §4）"
 )]
 
+use rust_cli_base::models;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -46,11 +47,38 @@ impl Captured {
     }
 }
 
-/// 一个回复：状态、正文与发送前的停顿。
+/// 一个回复：状态、正文、发送前的停顿与闸门。
 pub struct Reply {
     pub status: u16,
     pub body: String,
     pub delay: Duration,
+    pub gate: Option<Gate>,
+}
+
+/// 测试放行之前不发出的回复：要让一个请求在测试做完某件事（例如换账号）之前一直在途时用它。
+///
+/// 修 bug（工作线 F123，2026-10-31）：以前这类测试让假服务固定停 300 毫秒，测试在这段时间里换账号。整套测试并行
+/// 跑、机器负载高时，换账号超过 300 毫秒，旧请求先回来，`an_account_change_during_the_query_discards_the_round`
+/// 偶发失败（发版前的验证链里重试也失败；单独连跑 30 次都通过）。改成测试换完账号再放行，先后由测试决定，与快慢无关。
+#[derive(Clone)]
+pub struct Gate(tokio::sync::watch::Sender<bool>);
+
+impl Default for Gate {
+    fn default() -> Self {
+        Self(tokio::sync::watch::channel(false).0)
+    }
+}
+
+impl Gate {
+    /// 放行：已经在等的与之后到的回复都发出。
+    pub fn open(&self) {
+        self.0.send_replace(true);
+    }
+
+    async fn opened(&self) {
+        let mut open = self.0.subscribe();
+        let _ = open.wait_for(|open| *open).await;
+    }
 }
 
 impl Reply {
@@ -59,11 +87,18 @@ impl Reply {
             status,
             body: body.to_string(),
             delay: Duration::ZERO,
+            gate: None,
         }
     }
 
     pub fn after(mut self, millis: u64) -> Self {
         self.delay = Duration::from_millis(millis);
+        self
+    }
+
+    /// 等 `gate` 放行才发出。
+    pub fn until(mut self, gate: &Gate) -> Self {
+        self.gate = Some(gate.clone());
         self
     }
 }
@@ -126,6 +161,9 @@ async fn serve(mut socket: TcpStream, log: Arc<Mutex<Vec<Captured>>>, handler: H
     log.lock().unwrap().push(request.clone());
     let reply = handler(&request);
     tokio::time::sleep(reply.delay).await;
+    if let Some(gate) = &reply.gate {
+        gate.opened().await;
+    }
     let head = format!(
         "HTTP/1.1 {} Scripted\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n",
         reply.status,
@@ -271,7 +309,7 @@ impl Harness {
 pub fn selection(provider: &str) -> ModelSelection {
     ModelSelection {
         provider: provider.to_owned(),
-        model: "GLM-5.3".to_owned(),
+        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: None,
         connection: None,
     }

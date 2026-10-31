@@ -314,6 +314,10 @@ fn parse_uri(uri: &str) -> Option<(String, String)> {
     (!session.is_empty() && !artifact.is_empty()).then_some((session, artifact))
 }
 
+/// 百分号编码的一个字节：`%` 加两位十六进制。
+const PERCENT_ESCAPE_LEN: usize = 3;
+const HEX_RADIX: u32 = rust_cli_base::units::HEX_RADIX;
+
 /// JS `decodeURIComponent`；格式不对时为空（Node 抛错，这个 checkpoint 不给出）。
 fn decode(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
@@ -321,9 +325,9 @@ fn decode(value: &str) -> Option<String> {
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] == b'%' {
-            let hex = value.get(index + 1..index + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            index += 3;
+            let hex = value.get(index + 1..index + PERCENT_ESCAPE_LEN)?;
+            out.push(u8::from_str_radix(hex, HEX_RADIX).ok()?);
+            index += PERCENT_ESCAPE_LEN;
         } else {
             out.push(bytes[index]);
             index += 1;

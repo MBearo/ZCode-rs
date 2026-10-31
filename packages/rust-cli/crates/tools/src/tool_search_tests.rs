@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rust_cli_base::models::{DEEPSEEK_V4_PRO, GLM_5_3, HAIKU_3_5_DATED};
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{EnvironmentId, SessionId};
 use rust_cli_kernel_api::listing::ListingSource;
@@ -85,10 +86,7 @@ fn request(model: &str, names: &[&str]) -> ContextRequest {
 async fn the_listing_names_deferred_tools_only_when_tool_search_is_on() {
     let (catalog, _registry) = catalog();
     let names = ["Glob", "ToolSearch", "EnterPlanMode"];
-    let listings = catalog
-        .listings(&request("claude-opus-5-5", &names))
-        .await
-        .unwrap();
+    let listings = catalog.listings(&request(GLM_5_3, &names)).await.unwrap();
     let deferred: Vec<&str> = listings
         .deferred_tools
         .iter()
@@ -97,19 +95,22 @@ async fn the_listing_names_deferred_tools_only_when_tool_search_is_on() {
     assert_eq!(deferred, ["EnterPlanMode"]);
     // 没有 ToolSearch：不宣布。
     let off = catalog
-        .listings(&request("claude-opus-5-5", &["Glob", "EnterPlanMode"]))
+        .listings(&request(GLM_5_3, &["Glob", "EnterPlanMode"]))
         .await
         .unwrap();
     assert!(off.deferred_tools.is_empty());
     // 工作线 F89（tools-more.md §3.2.1）：不区分模型，以前禁用表里的模型也宣布。修改：F84 时不宣布。
-    let haiku = catalog
-        .listings(&request("claude-3-5-haiku-20241022", &names))
+    let legacy = catalog
+        .listings(&request(HAIKU_3_5_DATED, &names))
         .await
         .unwrap();
-    assert_eq!(haiku.deferred_tools.len(), 1);
+    assert_eq!(legacy.deferred_tools.len(), 1);
     // 工作线 F84（tools-more.md §3.2）：端点不支持 `tool_reference` 时是本地 ToolSearch，清单照样宣布。修改：以前
     // 不宣布（没有卡片的模型、端点不支持的都不开）。
-    let local = catalog.listings(&request("glm-5", &names)).await.unwrap();
+    let local = catalog
+        .listings(&request(DEEPSEEK_V4_PRO, &names))
+        .await
+        .unwrap();
     let lines: Vec<&str> = local
         .deferred_tools
         .iter()
@@ -204,10 +205,7 @@ async fn the_deferred_listing_is_in_code_unit_order() {
         "WebFetch",
         "ListMcpResourcesTool",
     ];
-    let listings = catalog
-        .listings(&request("claude-opus-5-5", &names))
-        .await
-        .unwrap();
+    let listings = catalog.listings(&request(GLM_5_3, &names)).await.unwrap();
     let deferred: Vec<&str> = listings
         .deferred_tools
         .iter()
@@ -224,7 +222,7 @@ async fn the_deferred_listing_is_in_code_unit_order() {
 async fn an_unbound_catalog_fails_instead_of_finding_nothing() {
     let catalog = Arc::new(ToolCatalog::default());
     let listed = catalog
-        .listings(&request("claude-opus-5-5", &["ToolSearch", "WebFetch"]))
+        .listings(&request(GLM_5_3, &["ToolSearch", "WebFetch"]))
         .await;
     assert!(listed.is_err());
     let tool = ToolSearchTool::new(catalog.clone());

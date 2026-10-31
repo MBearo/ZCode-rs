@@ -9,8 +9,8 @@ use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::agents::AgentSignal;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Outcome, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
+    WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundStatus, BackgroundStop, BackgroundTask,
@@ -83,7 +83,7 @@ impl Commands for Shells {
         _: &WorkspaceRef,
         _: OperationContext,
         _: StartCommand,
-    ) -> Result<(), EnvError> {
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         Err(unsupported())
     }
 
@@ -96,10 +96,6 @@ impl Commands for Shells {
     }
 
     async fn cancel(&self, _: OperationId) -> Result<(), EnvError> {
-        Err(unsupported())
-    }
-
-    async fn operation_status(&self, _: OperationId) -> Result<Outcome, EnvError> {
         Err(unsupported())
     }
 
@@ -140,6 +136,8 @@ impl Background for Shells {
             .map(|(command, status)| BackgroundInfo {
                 command: command.clone(),
                 status: *status,
+                kind: Default::default(),
+                description: String::new(),
             }))
     }
 

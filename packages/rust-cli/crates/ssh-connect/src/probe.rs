@@ -18,6 +18,9 @@ use serde::Deserialize;
 
 use crate::artifact::Platform;
 
+/// 探测没有报出系统事实时，错误里带上输出的前这么多个字符。
+const OUTPUT_EXCERPT_CHARS: usize = 200;
+
 /// 探测脚本（POSIX sh）。
 ///
 /// F107（§28.3）：libc 两行只在 Linux 上问（macOS 上 `getconf GNU_LIBC_VERSION` 没有意义）；`readlink -f` 换成
@@ -151,7 +154,10 @@ impl Probe {
         if probe.os.is_empty() || probe.arch.is_empty() || probe.home.is_empty() {
             return Err(format!(
                 "the probe printed no system facts: {}",
-                output.chars().take(200).collect::<String>()
+                output
+                    .chars()
+                    .take(OUTPUT_EXCERPT_CHARS)
+                    .collect::<String>()
             ));
         }
         Ok(probe)

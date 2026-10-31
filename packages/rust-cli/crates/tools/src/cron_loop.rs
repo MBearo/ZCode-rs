@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use rust_cli_base::units::{self, MS_PER_SECOND};
 use rust_cli_kernel_api::ids::SessionId;
 
 use crate::cron_board::{CronBoard, Job, JobKind, State};
@@ -20,6 +21,13 @@ const KEEPALIVE_BUDGET: u32 = 1;
 const CACHE_LEAD_MS: u64 = cron_expr::CACHE_LEAD_MS as u64;
 const CACHE_WINDOW_MS: u64 = cron_expr::CACHE_WINDOW_MS as u64;
 const MINUTE_MS: u64 = cron_expr::MINUTE_MS as u64;
+/// 本地时间的分钟数换成钟点（`<分> <时>` 两段）。
+const MINUTES_PER_HOUR: i64 = units::MINUTES_PER_HOUR as i64;
+const HOURS_PER_DAY: i64 = units::HOURS_PER_DAY as i64;
+/// JS `Math.round` 的半格：.5 向正无穷。
+const HALF: f64 = 0.5;
+/// keepalive 任务的 ID：当前毫秒数的低 32 位，写成 8 位十六进制。
+const ID_MASK: u64 = 0xffff_ffff;
 
 /// 一个 prompt 的链。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,16 +67,17 @@ pub(crate) fn clamp(delay: f64, now: u64) -> (i64, bool, u64, u64) {
         MAX_DELAY_S
     } else {
         // JS `Math.round`：.5 向正无穷。
-        (delay + 0.5).floor() as i64
+        (delay + HALF).floor() as i64
     };
     let clamped = rounded.clamp(MIN_DELAY_S, MAX_DELAY_S);
     let was_clamped = !delay.is_finite() || rounded != clamped;
-    let at = now + clamped as u64 * 1_000;
+    let at = now + clamped as u64 * MS_PER_SECOND;
     // 本地时间的分钟边界；偏移是整分钟，所以与 UTC 的分钟边界相同。
     let mut target = at.div_ceil(MINUTE_MS) * MINUTE_MS;
-    if clamped as u64 * 1_000 <= CACHE_WINDOW_MS {
+    if clamped as u64 * MS_PER_SECOND <= CACHE_WINDOW_MS {
         let limit = CACHE_WINDOW_MS - CACHE_LEAD_MS;
-        while target - now > limit && target - MINUTE_MS >= now + MIN_DELAY_S as u64 * 1_000 {
+        while target - now > limit && target - MINUTE_MS >= now + MIN_DELAY_S as u64 * MS_PER_SECOND
+        {
             target -= MINUTE_MS;
         }
     }
@@ -126,7 +135,7 @@ impl CronBoard {
         if pending || exhausted {
             return;
         }
-        let id = format!("{:08x}", self.now_ms() & 0xffff_ffff);
+        let id = format!("{:08x}", self.now_ms() & ID_MASK);
         schedule(
             self,
             &mut state,
@@ -173,8 +182,8 @@ fn schedule(
     let now = board.now_ms();
     let lp = state.loops.entry(owner.clone()).or_default();
     let chain = lp.chains.get(prompt).copied();
-    let broken =
-        chain.is_some_and(|chain| now > chain.last_scheduled_for + MAX_DELAY_S as u64 * 1_000);
+    let broken = chain
+        .is_some_and(|chain| now > chain.last_scheduled_for + MAX_DELAY_S as u64 * MS_PER_SECOND);
     let started_at = match chain {
         Some(chain) if !broken => chain.started_at,
         _ => now,
@@ -182,7 +191,7 @@ fn schedule(
     if now.saturating_sub(started_at) >= RECURRING_MAX_AGE_MS {
         if !chain.is_some_and(|chain| chain.aged_out) {
             // 一分钟后链算断开，可以重新开始（起点记为 now 减去上限与下限之差）。
-            let last = now.saturating_sub((MAX_DELAY_S - MIN_DELAY_S) as u64 * 1_000);
+            let last = now.saturating_sub((MAX_DELAY_S - MIN_DELAY_S) as u64 * MS_PER_SECOND);
             lp.chains.insert(
                 prompt.to_owned(),
                 Chain {
@@ -199,8 +208,8 @@ fn schedule(
     let local = target as i64 / MINUTE_MS as i64 + i64::from(offset(target));
     let cron = format!(
         "{} {} * * *",
-        local.rem_euclid(60),
-        local.div_euclid(60).rem_euclid(24)
+        local.rem_euclid(MINUTES_PER_HOUR),
+        local.div_euclid(MINUTES_PER_HOUR).rem_euclid(HOURS_PER_DAY)
     );
     let next_fire = cron_expr::one_shot_next(&cron, created_at, &id, &offset);
     lp.chains.insert(

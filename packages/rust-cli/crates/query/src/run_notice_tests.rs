@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
-use rust_cli_kernel_api::ids::{OperationId, SessionId};
+use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{ContentBlock, Message, ToolResultContent};
 use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, QueryEvent, QueryStop,
@@ -43,14 +43,6 @@ impl Interactions for NoticeSink {
 impl RunSink for NoticeSink {
     async fn commit_message(&self, message: Message) -> Result<(), StoreError> {
         self.inner.commit_message(message).await
-    }
-
-    async fn commit_intent(
-        &self,
-        operation: OperationId,
-        fingerprint: String,
-    ) -> Result<(), StoreError> {
-        self.inner.commit_intent(operation, fingerprint).await
     }
 
     async fn emit(&self, event: QueryEvent) -> bool {

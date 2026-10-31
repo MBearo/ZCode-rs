@@ -75,7 +75,8 @@ export const ALLOWED = {
   base: [],
   paths: ["base"],
   fs: ["base"],
-  proc: [],
+  // base：文件权限位、`/proc/<pid>/stat` 的字段与单位（F122，constants.md §2）。
+  proc: ["base"],
   net: ["base"],
   // base：`include_lf!`（F56）与产品目录名 `.zcode`（loop.md 的位置，README §4.1，F55）。
   prompts: ["base"],
@@ -107,7 +108,8 @@ export const ALLOWED = {
   context: ["base", "kernel-api", "memory", "prompts"],
   memory: ["kernel-api"],
   tools: ["base", "kernel-api", "policy", "prompts"],
-  compact: ["kernel-api", "prompts"],
+  // base：测试的模型常量（dev-dependency，工作线 F121）。
+  compact: ["base", "kernel-api", "prompts"],
   agents: ["base", "kernel-api", "prompts"],
   ext: ["base", "kernel-api", "policy", "prompts"],
   query: ["base", "kernel-api", "prompts"],
@@ -343,6 +345,214 @@ export const SINGLE_DEFINITIONS = [
     owners: ["crates/memory/src/entrypoint.rs"],
     hint: "rust_cli_memory::entrypoint::ENTRYPOINT",
   },
+  // F122（用户决定第 9 项）：通用的请求头名只在 base 的 `proto::http::header`。`accept` 不登记：hooks 的 elicitation 结果
+  // 里有同名的取值（另一个意思）。
+  ...["content-type", "retry-after", "user-agent"].map((header) => ({
+    name: `the HTTP header name ${header}`,
+    pattern: new RegExp(`^${header}$`, "i"),
+    owners: ["crates/base/src/proto/http.rs"],
+    hint: "rust_cli_base::proto::http::header (net::header re-exports it)",
+  })),
+  // F122 第二阶段（用户决定第 9 项，docs/specs/rust-cli/constants.md §5.2）：路径用途的 `.git`（整段，前后是开头、结尾或
+  // 路径分隔符；`--exclude-dir=.git` 这类参数文字不算）、空设备、MIME、`x-api-key`。
+  {
+    name: "the git directory name .git",
+    pattern: /(?:^|[/\\])\.git(?:$|[/\\])/,
+    owners: ["crates/kernel-api/src/env_files.rs"],
+    hint: "rust_cli_kernel_api::env_files::GIT_DIR (GIT_HOOKS_DIR, GIT_CONFIG_FILE)",
+  },
+  {
+    name: "the null device /dev/null",
+    pattern: /^\/dev\/null$/,
+    owners: ["crates/base/src/path.rs"],
+    hint: "rust_cli_base::path::DEV_NULL",
+  },
+  ...[
+    "application/json",
+    "application/pdf",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "text/event-stream",
+    "text/html",
+    "text/markdown",
+    "text/plain",
+  ].map((type) => ({
+    name: `the MIME type ${type}`,
+    pattern: new RegExp(`^${type}$`, "i"),
+    owners: ["crates/base/src/proto/mime.rs"],
+    hint: "rust_cli_base::proto::mime (net::header re-exports JSON and EVENT_STREAM)",
+  })),
+  {
+    name: "the HTTP header name x-api-key",
+    pattern: /^x-api-key$/i,
+    owners: ["crates/net/src/header.rs"],
+    hint: "rust_cli_net::header::X_API_KEY",
+  },
+];
+
+// ── 容易变的字符串只在常量模块里（工作线 F121，README §4.1 第 6 条；检查在 boundaries/literals.mjs）──
+
+/// 规则：字符串字面量里的写法（`pattern`）只许出现在 `owners`；`tests: true` 时测试也查。
+export const VOLATILE_LITERALS = [
+  {
+    name: "model id",
+    // 模型 ID 样子的写法：厂商前缀后接版本或系列（`glm-5.3`、`deepseek-v4-pro`、`claude-opus-5-5`、
+    // `us.anthropic.claude-sonnet-4-5-…`、`gpt-5.4`、`kimi-k3`）。前面不是字母、数字或 `_`。Anthropic 的前缀逐个写出
+    // （导出扫描只放过完整的模型 ID 写法）。
+    pattern: new RegExp(
+      `(?<![A-Za-z0-9_])(?:${[
+        "claude-opus",
+        "claude-sonnet",
+        "claude-haiku",
+        "claude-fable",
+        "claude-mythos",
+        "claude-1",
+        "claude-2",
+        "claude-3",
+        "claude-4",
+        "claude-5",
+        "claude-6",
+        "claude-7",
+        "claude-8",
+        "claude-9",
+        "glm-[a-z0-9]",
+        "deepseek-(?:v\\d|chat|reasoner|coder)",
+        "gpt-\\d",
+        "gemini-\\d",
+        "kimi-k\\d",
+        "qwen\\d",
+      ].join("|")})`,
+      "i",
+    ),
+    owners: ["crates/base/src/models.rs", "scripts/rust-cli/fixture/model.mjs"],
+    tests: true,
+    hint: "use rust_cli_base::models (scripts: fixture/model.mjs)",
+  },
+  {
+    name: "host name",
+    // 已知主机名（小写；品牌的写法 `Z.AI` 不算）：模型端点、账号服务、注册表、测试环境。测试环境的根域名拆开写（导出
+    // 门禁的 internal-host 拦它的原文）。
+    pattern: new RegExp(
+      `(?<![A-Za-z0-9-])(?:${[
+        "api\\.anthropic\\.com",
+        "(?:[a-z0-9-]+\\.)*z\\.ai",
+        "(?:[a-z0-9-]+\\.)*bigmodel\\.cn",
+        "api\\.deepseek\\.com",
+        "registry\\.npmjs\\.org",
+        "api\\.openai\\.com",
+        "(?:[a-z0-9-]+\\.)*openrouter\\.ai",
+        "(?:[a-z0-9-]+\\.)*opencode\\.ai",
+        `(?:[a-z0-9-]+\\.)*${["chat", "glm"].join("")}\\.site`,
+      ].join("|")})(?![A-Za-z0-9-])`,
+    ),
+    owners: ["crates/base/src/hosts.rs", "scripts/rust-cli/fixture/model.mjs"],
+    tests: true,
+    hint: "use rust_cli_base::hosts (scripts: fixture/model.mjs)",
+  },
+  {
+    name: "env var name",
+    // 整个字面量就是环境变量名的样子（大写字母、数字与 `_`，至少一个 `_`）：业务代码读写的环境变量名只在 base 的
+    // `names`（`names::env`、给用户程序的 `names::vars`）。只查产品代码；单个词的名字（`HOME`、`PATH`）样子上认不出，
+    // 收进 `names::env` 之后由“同一个名字只定义一处”的约定管。
+    pattern: /^_?[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/,
+    owners: ["crates/base/src/names.rs"],
+    tests: false,
+    hint: "use rust_cli_base::names::env",
+  },
+];
+
+/// 不查的文件：只在本仓库的对齐材料（parity 测试、轨迹比对与提示词提取的脚本等，导出时删掉）。vendor 与 JSON 数据不是
+/// Rust / JS 源码，本来不收。
+export const VOLATILE_UNCHECKED = [
+  /_parity_tests\.rs$/,
+  /^crates\/[^/]+\/tests\/parity(?:_[^/]+\.rs|\/)/,
+  new RegExp(
+    `^scripts/rust-cli/(?:${["or", "acle"].join("")}|prompts|bench|export|repo-only|app-protocol)/`,
+  ),
+  /^scripts\/rust-cli\/bench\.mjs$/,
+];
+
+/// 例外（按文件，每项写类别与理由）：`{ files, rules, reason }`，`rules` 是 VOLATILE_LITERALS 的 `name`。按 crate 分组
+/// 登记（前端与入口一组，适配器、平台、内核与脚本一组），环境变量名另一组。
+const FRONT_EXCEPTIONS = [];
+const CORE_EXCEPTIONS = [
+  {
+    files: ["crates/prompts/src/models_tests.rs"],
+    rules: ["model id"],
+    reason:
+      "解析器的输入样本：按 ID 认旧模型（chars_per_token）的各种写法（日期、Bedrock / Vertex 的后缀、下划线、长得像的 ID）",
+  },
+  {
+    files: ["crates/base/src/rule_url_tests.rs"],
+    rules: ["host name"],
+    reason: "解析器的输入样本：URL 规范化与端点判定（大小写、端口、空白、路径里与长得像的域名）",
+  },
+  {
+    files: ["crates/model/src/profiles_select_tests.rs"],
+    rules: ["model id", "host name"],
+    reason: "解析器的输入样本：请求方案表对各种 URL 与模型 ID 写法的命中",
+  },
+  {
+    files: ["crates/platform/src/model_name_tests.rs"],
+    rules: ["model id"],
+    reason: "解析器的输入样本：`--model` 的各种写法（provider 前缀、团队项目的后缀）",
+  },
+  {
+    files: ["scripts/rust-cli/boundaries/literals.test.mjs"],
+    rules: ["model id", "host name"],
+    reason: "这条检查自己的测试：合成的违规样本",
+  },
+  {
+    files: ["scripts/rust-cli/boundaries/policy.mjs"],
+    rules: ["model id"],
+    reason: "这条检查自己的规则表：模型 ID 的前缀",
+  },
+  {
+    files: ["scripts/rust-cli/login-golden.mts", "scripts/rust-cli/team-plan-golden.mts"],
+    rules: ["model id"],
+    reason: "黄金文件的生成脚本：给 Node 喂固定的账号模型，产物是登录与团队套餐的黄金文件",
+  },
+];
+const ENV_NAME_EXCEPTIONS = [
+  {
+    files: ["crates/cli/build.rs", "crates/cli/src/build_number.rs"],
+    rules: ["env var name"],
+    reason:
+      "构建脚本读 Cargo 与正式发版给的变量：build.rs（及它用 #[path] 引进的 build_number.rs）在编译期跑，不依赖 base",
+  },
+  {
+    files: ["crates/proc/src/identity.rs", "crates/proc/src/tree/table.rs"],
+    rules: ["env var name"],
+    reason: "proc 不依赖 base（依赖表里 proc 没有依赖）：给子进程 ps 的固定区域设置 LC_ALL=C",
+  },
+  {
+    files: ["crates/cli/src/signals.rs"],
+    rules: ["env var name"],
+    reason: "Windows 控制台事件的名字（CTRL_C 等），不是环境变量",
+  },
+  {
+    files: ["crates/platform/src/team/list.rs"],
+    rules: ["env var name"],
+    reason: "服务返回的枚举值（订阅方式 ONE_TIME），不是环境变量",
+  },
+  {
+    files: ["crates/policy/src/bash_compound.rs"],
+    rules: ["env var name"],
+    reason: "shell 的内置变量表（判定复合命令用），不是本进程读写的变量",
+  },
+  {
+    files: ["crates/policy/src/removal.rs", "crates/policy/src/safe_env.rs"],
+    rules: ["env var name"],
+    reason:
+      "权限判定的数据表：命令里出现的变量名（删除保护的家目录变量、可以安全前置的变量），不是本进程读写的变量",
+  },
+];
+export const VOLATILE_EXCEPTIONS = [
+  ...FRONT_EXCEPTIONS,
+  ...CORE_EXCEPTIONS,
+  ...ENV_NAME_EXCEPTIONS,
 ];
 
 /** 文件名作为路径的一整段（F58）：`name` 里的正则字符转义。 */
@@ -548,7 +758,71 @@ export const NEUTRAL_FEATURES = {
 
 /// kernel-api 只加不改（boundaries/kernel-surface.json，app-protocol.md §9.4）：快照只追加；已有项的改动或删除逐项登记在这里，
 /// `was` 是快照里的值，`now` 是现在的值（删除写 null），`reason` 写用户的决定。
-export const KERNEL_API_CHANGES = [];
+export const KERNEL_API_CHANGES = [
+  {
+    key: "machine::Commands::start_command",
+    was: "async fn start_command(&self,workspace:&WorkspaceRef,context:OperationContext,request:StartCommand,) -> Result<(),EnvError>",
+    now: "async fn start_command(&self,workspace:&WorkspaceRef,context:OperationContext,request:StartCommand,) -> Result<CommandEvents,EnvError>",
+    reason:
+      "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：执行环境不按 operationId 重放；start_command 直接返回这条命令的事件流，登记只放还在跑的命令",
+  },
+  {
+    key: "machine::Commands::operation_status",
+    was: "async fn operation_status(&self,operation:OperationId) -> Result<Outcome,EnvError>",
+    now: null,
+    reason:
+      "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：执行环境不按 operationId 重放；start_command 直接返回这条命令的事件流，登记只放还在跑的命令；产品代码没有调用方",
+  },
+  {
+    key: "orchestration::Interactions::arm_monitor",
+    was: "async fn arm_monitor(&self,_session:&SessionId,_monitor:crate::monitor::MonitorArmed,) -> Result<(),OrchestrationError> {default}",
+    now: "async fn arm_monitor(&self,_session:&SessionId,_monitor:crate::monitor::MonitorArmed,_events:crate::machine::CommandEvents,) -> Result<(),OrchestrationError> {default}",
+    reason:
+      "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：执行环境不按 operationId 重放；start_command 直接返回这条命令的事件流，登记只放还在跑的命令；monitor 读 Monitor 工具交来的那条流",
+  },
+  {
+    key: "machine::Checkpoints::rewind_status",
+    was: "async fn rewind_status(&self,_token:&OperationId) -> Result<RewindStatus,EnvError> {default}",
+    now: null,
+    reason: "用户决定 2026-10-30（工作线 F119）：执行环境不按 token 重放，rewind_status 没有调用方",
+  },
+  {
+    key: "orchestration::RunSink::commit_intent",
+    was: "async fn commit_intent(&self,operation:OperationId,fingerprint:String,) -> Result<(),StoreError>",
+    now: null,
+    reason: "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：操作意图没有读者，不再落库",
+  },
+  {
+    key: "store::Fact::OperationIntent",
+    was: "OperationIntent{operation:OperationId,fingerprint:String,}",
+    now: null,
+    reason: "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：操作意图没有读者，不再落库",
+  },
+  {
+    key: "store::LoadedSession.open_operations",
+    was: '#[serde(default,skip_serializing_if = "Vec::is_empty")] open_operations:Vec<OpenOperation>',
+    now: null,
+    reason: "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：操作意图没有读者，不再落库",
+  },
+  {
+    key: "store::OpenOperation",
+    was: "#[derive(Debug,Clone,PartialEq,Eq,Serialize,Deserialize)]",
+    now: null,
+    reason: "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：操作意图没有读者，不再落库",
+  },
+  {
+    key: "store::OpenOperation.fingerprint",
+    was: "fingerprint:String",
+    now: null,
+    reason: "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：操作意图没有读者，不再落库",
+  },
+  {
+    key: "store::OpenOperation.operation",
+    was: "operation:OperationId",
+    now: null,
+    reason: "用户决定 2026-10-30（工作线 F119，README §6 规则 3）：操作意图没有读者，不再落库",
+  },
+];
 
 // ── 厂商错误的解耦（docs/specs/rust-cli/provider-errors.md §2.1、§2.5、§11）。厂商码与厂商专有的字符串只在第 1 层（model 的
 // `errors/` 目录，厂商分类器）；第 2 层（`errors/dispose.rs`、transport）、query、session 与前端只认中性分类。检查在
@@ -676,3 +950,13 @@ export const VENDOR_ERROR_TERMS = {
 
 /// 厂商错误词的例外：只按文件与精确片段（同 PROTOCOL_TERM_EXCEPTIONS），没用到的是死项。值 `why` 写理由。
 export const VENDOR_ERROR_TERM_EXCEPTIONS = [];
+
+// ── 有含义的数字（docs/specs/rust-cli/constants.md §4，工作线 F122）。检查在 boundaries/numbers.mjs。──
+
+/// 换不了写法、确实没有含义的数字：全局放行的模式。`value` 是数值，`before` / `after` 是同一行里字面量前后的代码（已去掉
+/// 注释与字符串）的正则，`reason` 写为什么没有含义。每加一条，numbers.test.mjs 加一个用例。
+export const NUMBER_ALLOWED = [];
+
+/// 推送前“不许升高”（scripts/pre-push-rust-cli.mjs）：numbers.json 里某个文件的处数比推送基线大时逐项登记。`was` 是推送基线
+/// 里的值（没有为 0），`now` 是新的上限，`reason` 写用户的决定或“从 A 拆出”。
+export const NUMBER_RAISES = [];

@@ -13,6 +13,8 @@ use crate::env_shell::BackgroundStatus;
 pub enum BackgroundKind {
     Shell,
     Agent,
+    /// Monitor 起的后台命令（命令来源与 WebSocket 来源；修复线 F117 新增，docs/specs/rust-cli/tui-display.md §2.3）。
+    Monitor,
 }
 
 /// 会话里的一个后台任务（`/tasks` 的一行、footer 的计数）。
@@ -21,7 +23,7 @@ pub struct BackgroundEntry {
     /// 任务 ID：命令是 shell 任务 ID，子代理是 agentId（TaskStop 与 `Command::StopTask` 用它）。
     pub id: String,
     pub kind: BackgroundKind,
-    /// 命令原文，或子代理的 description。
+    /// 命令原文，或子代理的 description；monitor 是它的 description（修复线 F117，没有时是命令原文）。
     pub description: String,
     pub status: BackgroundStatus,
     /// 命令输出文件的末尾（最多 [`OUTPUT_TAIL_LINES`] 行）；子代理没有。

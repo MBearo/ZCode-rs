@@ -1,6 +1,7 @@
 //! 按方案改写请求（model.md §3.2）：第三方 system 的形状；专有项的去留。与对照数据逐字节比较的用例在
 //! `anthropic_shape_parity_tests.rs`（docs/specs/rust-cli/export.md §5）。
 
+use rust_cli_base::{hosts, models};
 use rust_cli_kernel_api::model::{
     CacheControl, ContextEdit, ModelRequest, SystemBlock, ThinkingConfig, TurnOutputConfig,
 };
@@ -90,9 +91,9 @@ fn carded() -> ModelRequest {
 #[test]
 fn official_endpoints_keep_the_first_party_extras() {
     for (base_url, model) in [
-        ("https://api.anthropic.com", "claude-opus-5-5"),
-        ("https://api.z.ai/api/anthropic", "glm-5.1"),
-        ("https://api.deepseek.com/anthropic", "deepseek-v4-pro"),
+        (hosts::ANTHROPIC_API, models::OPUS_5_5),
+        (hosts::ZAI_ANTHROPIC, models::GLM_5_1),
+        (hosts::DEEPSEEK_ANTHROPIC, models::DEEPSEEK_V4_PRO),
     ] {
         let mut request = carded();
         apply(
@@ -113,7 +114,7 @@ fn other_gateways_get_the_node_shape() {
         select(
             WireProtocol::AnthropicMessages,
             "https://gw.example.com",
-            "claude-opus-5-5",
+            models::GLM_5_3,
         ),
     );
     assert_eq!(request.system, third_party());

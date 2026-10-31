@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
-use rust_cli_base::{Spawner, Task};
+use rust_cli_base::{Spawner, Task, units};
 use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
@@ -62,6 +62,11 @@ pub trait Service: Send + Sync + 'static {
     }
 }
 
+/// 缺省：一行的上限（字节）。
+const DEFAULT_MAX_LINE_BYTES: usize = 64 * units::MIB;
+/// 缺省：写者队列的容量（行）。
+const DEFAULT_QUEUE: usize = 1024;
+
 /// 连接的参数。
 #[derive(Debug, Clone, Copy)]
 pub struct Options {
@@ -74,8 +79,8 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            max_line_bytes: 64 * 1024 * 1024,
-            queue: 1024,
+            max_line_bytes: DEFAULT_MAX_LINE_BYTES,
+            queue: DEFAULT_QUEUE,
         }
     }
 }

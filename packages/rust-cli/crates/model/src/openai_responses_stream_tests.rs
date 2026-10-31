@@ -1,5 +1,6 @@
 //! OpenAI Responses 流解码（model.md §10.3）。
 
+use rust_cli_base::models;
 use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelError};
@@ -26,7 +27,7 @@ fn decode(events: Vec<Value>) -> Result<Vec<ModelEvent>, ModelError> {
 }
 
 fn created() -> Value {
-    json!({"type": "response.created", "response": {"id": "resp_1", "model": "gpt-5.4", "status": "in_progress"}})
+    json!({"type": "response.created", "response": {"id": "resp_1", "model": models::GPT_5_4, "status": "in_progress"}})
 }
 
 fn completed(status: &str, reason: Option<&str>) -> Value {
@@ -61,7 +62,7 @@ fn reasoning_text_and_calls_become_blocks() {
         vec![
             ModelEvent::MessageStart {
                 id: "resp_1".to_owned(),
-                model: "gpt-5.4".to_owned(),
+                model: models::GPT_5_4.to_owned(),
                 usage: Usage::default(),
             },
             ModelEvent::BlockStart {

@@ -12,6 +12,9 @@ use rust_cli_paths::StoragePaths;
 use rust_cli_peers::{LocalPeers, PeerConfig};
 use rust_cli_runtime::PeerDeps;
 
+/// 退出时还在发的回执最多等这么久。
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_millis(750);
+
 /// 进程级的跨会话：端口、交给会话的配置与它自己的任务作用域（收件箱、写登记）。
 pub(crate) struct Peers {
     pub(crate) local: Arc<LocalPeers>,
@@ -21,7 +24,7 @@ pub(crate) struct Peers {
 
 /// `ZCODE_USER_DIALOG_TIMEOUT_MS`（毫秒）；没有或不是数字时缺省 300000。
 pub(crate) fn hold_timeout(env: &[(String, String)]) -> u64 {
-    rust_cli_base::secret::env_var(env, "ZCODE_USER_DIALOG_TIMEOUT_MS")
+    rust_cli_base::secret::env_var(env, rust_cli_base::names::env::ZCODE_USER_DIALOG_TIMEOUT_MS)
         .and_then(|value| value.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_HOLD_TIMEOUT_MS)
 }
@@ -71,10 +74,7 @@ impl Peers {
     /// 退出：删掉登记与 socket，再关掉自己的任务（还在发的回执最多等一小会儿，750 ms）。
     pub(crate) async fn shutdown(self) {
         self.local.shutdown().await;
-        let _ = self
-            .scope
-            .close(std::time::Duration::from_millis(750))
-            .await;
+        let _ = self.scope.close(SHUTDOWN_GRACE).await;
     }
 }
 

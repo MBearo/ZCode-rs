@@ -117,8 +117,7 @@ pub(super) enum Done {
 
 /// 执行环境路径的分隔符：工作区根是盘符或 `\\` 开头时是 `\`（Windows），否则是 `/`。
 fn path_separator(root: &str) -> char {
-    let bytes = root.as_bytes();
-    let drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    let drive = matches!(root.as_bytes(), [letter, b':', ..] if letter.is_ascii_alphabetic());
     if drive || root.starts_with("\\\\") {
         '\\'
     } else {

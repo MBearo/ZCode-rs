@@ -111,7 +111,6 @@ fn paths(request: &Request) -> Vec<&str> {
         }
         Request::WatchCommand { .. }
         | Request::Cancel { .. }
-        | Request::OperationStatus { .. }
         | Request::CloseSession { .. }
         | Request::ShellNotices { .. }
         | Request::AckShellNotice { .. }
@@ -119,7 +118,6 @@ fn paths(request: &Request) -> Vec<&str> {
         | Request::BackgroundElapsed { .. }
         | Request::StopBackgroundCommand { .. }
         | Request::RewindApply { .. }
-        | Request::RewindStatus { .. }
         | Request::RewindFinish { .. }
         | Request::McpSend { .. }
         | Request::McpEvents { .. }

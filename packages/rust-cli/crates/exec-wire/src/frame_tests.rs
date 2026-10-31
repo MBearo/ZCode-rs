@@ -72,6 +72,36 @@ fn every_kind_has_a_distinct_code_and_control_frames_are_marked() {
     assert_eq!(control, [Kind::Ack, Kind::Close, Kind::Ping, Kind::Pong]);
 }
 
+/// 每种帧的类型字节（remote-exec.md §18.2 的表）：线上的值不能变，编码与解码都按它。
+#[test]
+fn every_kind_keeps_its_wire_code() {
+    let table = [
+        (Kind::Hello, 0x01),
+        (Kind::Welcome, 0x02),
+        (Kind::Refuse, 0x03),
+        (Kind::Request, 0x10),
+        (Kind::Reply, 0x11),
+        (Kind::Event, 0x12),
+        (Kind::Ack, 0x13),
+        (Kind::Close, 0x14),
+        (Kind::Ping, 0x20),
+        (Kind::Pong, 0x21),
+        (Kind::Admin, 0x40),
+        (Kind::AdminReply, 0x41),
+    ];
+    for (kind, code) in table {
+        assert_eq!(kind.code(), code, "{kind:?}");
+        assert_eq!(Kind::from_code(code), Some(kind));
+        let payload = Frame::encode(kind, &json!({}), &Body::empty()).unwrap();
+        assert_eq!(payload[0], code, "{kind:?}");
+        assert_eq!(frame(payload).kind, kind);
+    }
+    // 片的类型字节不是帧的类型；不在表里的字节解不出类型。
+    for code in [0x00, 0x04, 0x30, 0x42, 0xff] {
+        assert_eq!(Kind::from_code(code), None, "{code:#x}");
+    }
+}
+
 #[test]
 fn unknown_kinds_are_reported_and_truncated_frames_fail() {
     assert_eq!(

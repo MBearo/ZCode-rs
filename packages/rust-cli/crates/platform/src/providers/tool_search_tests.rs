@@ -4,6 +4,7 @@
 //!
 //! 修改：F52 到 F84 按端点算，z.ai / bigmodel.cn 域名下的 Anthropic 端点为真（原生），其余为假。
 
+use rust_cli_base::{hosts, models};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::provider::WireProtocol;
 use serde_json::{Value, json};
@@ -53,35 +54,31 @@ fn catalog_flag(api_type: &str, base_url: &str, model: &str) -> bool {
 #[test]
 fn no_catalog_endpoint_uses_native_tool_search() {
     for (api_type, base_url, model) in [
+        ("anthropic-messages", hosts::ZAI_ANTHROPIC, models::GLM_5_1),
         (
             "anthropic-messages",
-            "https://api.z.ai/api/anthropic",
-            "glm-5.1",
+            hosts::BIGMODEL_ANTHROPIC,
+            models::OPUS_5_5,
         ),
         (
             "anthropic-messages",
-            "https://open.bigmodel.cn/api/anthropic",
-            "claude-opus-5-5",
-        ),
-        (
-            "anthropic-messages",
-            "https://zcode.z.ai/api/v1/zcode-plan/anthropic",
-            "glm-5.1",
+            hosts::ZCODE_PLAN_ANTHROPIC,
+            models::GLM_5_1,
         ),
         (
             "anthropic-messages",
             "https://api-gateway.example.com",
-            "claude-opus-5-5",
+            models::OPUS_5_5,
         ),
         (
             "anthropic-messages",
-            "https://api.anthropic.com/v1",
-            "claude-opus-5-5",
+            hosts::ANTHROPIC_API_V1,
+            models::OPUS_5_5,
         ),
         (
             "openai-chat-completions",
-            "https://api.z.ai/api/paas/v4",
-            "glm-5.1",
+            hosts::ZAI_OPENAI,
+            models::GLM_5_1,
         ),
     ] {
         assert!(!catalog_flag(api_type, base_url, model), "{base_url}");
@@ -105,7 +102,7 @@ fn account_provider_templates_use_local_tool_search() {
         let api = &rule["config"]["api"];
         let protocol = WireProtocol::parse(api["type"].as_str().unwrap()).unwrap();
         let base_url = api["baseUrl"].as_str().unwrap();
-        let capabilities = site.capabilities(protocol, base_url, "glm-5.1");
+        let capabilities = site.capabilities(protocol, base_url, models::GLM_5_1);
         assert!(!capabilities.supports_tool_search, "{}", rule["providerId"]);
     }
 }
@@ -119,14 +116,14 @@ fn site_rules_use_the_same_decision() {
             .capabilities(WireProtocol::AnthropicMessages, base_url, model)
             .supports_tool_search
     };
-    assert!(!flag("https://api.anthropic.com/v1", "claude-opus-5-5"));
-    assert!(!flag("http://127.0.0.1:9/v1", "claude-opus-5-5"));
+    assert!(!flag(hosts::ANTHROPIC_API_V1, models::OPUS_5_5));
+    assert!(!flag("http://127.0.0.1:9/v1", models::OPUS_5_5));
     assert!(!flag(
-        "https://api.z.ai/api/anthropic/v1",
-        "claude-opus-5-5"
+        &format!("{}/v1", hosts::ZAI_ANTHROPIC),
+        models::OPUS_5_5
     ));
     assert!(!flag(
-        "https://open.bigmodel.cn/api/anthropic/v1",
-        "glm-5.1"
+        &format!("{}/v1", hosts::BIGMODEL_ANTHROPIC),
+        models::GLM_5_1
     ));
 }

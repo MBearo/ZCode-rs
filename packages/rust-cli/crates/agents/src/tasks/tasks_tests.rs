@@ -1,18 +1,27 @@
 use std::sync::Arc;
 
 use rust_cli_base::TaskScope;
+use rust_cli_base::models::{DEEPSEEK_V4_PRO, GLM_5_3, HAIKU_3_5_DATED, OPUS_5_5};
 use rust_cli_kernel_api::agents::{TaskList, TaskListStore};
 use rust_cli_kernel_api::ids::SessionId;
 
 use super::{MemoryTaskLists, TaskBoard, task_tools_enabled};
 
+/// 有卡片形状的模型（Anthropic 的有卡片的模型、按 opus 处理的 GLM）缺省关闭；没有卡片的模型（旧 Anthropic 模型、
+/// DeepSeek）打开；显式打开时都打开（agents.md §7.1，工作线 F121 删掉了不起作用的旧模型清单）。
 #[test]
 fn task_tools_follow_the_model_gate() {
-    // 有模型卡片的模型默认关闭；旧模型与不认识的模型打开。
-    assert!(!task_tools_enabled("claude-opus-5-5", false));
-    assert!(!task_tools_enabled("claude-opus-5-5[1m]", false));
-    assert!(task_tools_enabled("claude-opus-5-5", true));
-    assert!(task_tools_enabled("glm-5", false));
+    for shaped in [OPUS_5_5, GLM_5_3] {
+        assert!(!task_tools_enabled(shaped, false), "{shaped}");
+        assert!(
+            !task_tools_enabled(&format!("{shaped}[1m]"), false),
+            "{shaped}"
+        );
+        assert!(task_tools_enabled(shaped, true), "{shaped}");
+    }
+    for uncarded in [HAIKU_3_5_DATED, DEEPSEEK_V4_PRO] {
+        assert!(task_tools_enabled(uncarded, false), "{uncarded}");
+    }
 }
 
 #[tokio::test]

@@ -14,6 +14,7 @@ mod sse;
 use std::path::PathBuf;
 use std::process::Stdio;
 
+use rust_cli_base::models::GLM_5_3;
 use serde_json::{Value, json};
 
 /// 测试进程的 PATH 里的 node（`pnpm test:rust-cli` 由 node 启动，PATH 里一定有）。
@@ -47,7 +48,7 @@ fn a_tool_whose_name_is_too_long_is_not_sent_to_the_model() {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

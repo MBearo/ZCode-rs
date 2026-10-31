@@ -93,7 +93,7 @@ fn request(agent_type: &str) -> ContextRequest {
         tool_names: ["Agent", "Bash", "Skill"].map(str::to_owned).to_vec(),
         selection: ModelSelection {
             provider: "p".to_owned(),
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             reasoning: None,
             connection: None,
         },
@@ -131,7 +131,7 @@ fn round(n: usize, tokens: u64) -> [Message; 2] {
                 name: "Bash".to_owned(),
                 input: serde_json::json!({"command": "true"}),
             }],
-            model: "claude-opus-5-5".to_owned(),
+            model: rust_cli_base::models::GLM_5_3.to_owned(),
             stop_reason: None,
             usage: Some(Usage {
                 input_tokens: tokens,
@@ -261,7 +261,7 @@ async fn a_resumed_subagent_keeps_counting_the_tokens_left_from_its_start() {
         content: vec![ContentBlock::Text {
             text: "Done.".to_owned(),
         }],
-        model: "claude-opus-5-5".to_owned(),
+        model: rust_cli_base::models::GLM_5_3.to_owned(),
         stop_reason: None,
         usage: Some(Usage {
             input_tokens: 120,

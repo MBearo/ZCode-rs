@@ -6,7 +6,11 @@ use super::{
     PLUS, RPAREN, SQUOTE, Tk, is_extglob_prefix, is_id_continue, is_id_start, is_meta, is_special,
     reserved_word,
 };
+use crate::consts::SIGIL_PAIR_LEN;
 use crate::parse::parts::Part;
+
+/// fd 前缀的数字按十进制解析。
+const DECIMAL_RADIX: u64 = rust_cli_base::units::DECIMAL_RADIX as u64;
 
 fn flush(parts: &mut Vec<Part>, lit: &mut Vec<u8>) {
     if !lit.is_empty() {
@@ -47,7 +51,8 @@ fn is_assignment_word(text: &[u8]) -> bool {
         && let Some(offset) = text[i + 1..].iter().position(|&b| b == b']')
     {
         let rb = i + 1 + offset;
-        return rb + 1 == eq || (text.get(rb + 1) == Some(&b'+') && rb + 2 == eq);
+        // `name[…]=` 或 `name[…]+=`：`=` 紧跟在 `]` 或 `]+` 之后。
+        return rb + 1 == eq || (text.get(rb + 1) == Some(&b'+') && rb + b"+=".len() == eq);
     }
     false
 }
@@ -55,7 +60,8 @@ fn is_assignment_word(text: &[u8]) -> bool {
 /// `Number.parseInt(digits, 10)`；Rust 接口是 `u32`，超出范围时饱和。
 fn parse_fd(digits: &[u8]) -> u32 {
     let value = digits.iter().fold(0u64, |acc, &b| {
-        acc.saturating_mul(10).saturating_add(u64::from(b - b'0'))
+        acc.saturating_mul(DECIMAL_RADIX)
+            .saturating_add(u64::from(b - b'0'))
     });
     u32::try_from(value).unwrap_or(u32::MAX)
 }
@@ -96,7 +102,7 @@ impl Lexer<'_> {
                     self.slots[slot].fd = Some(parse_fd(&text));
                     return;
                 }
-                if text.len() > 2 && text[0] == b'{' && text[text.len() - 1] == b'}' {
+                if text.len() > b"{}".len() && text[0] == b'{' && text[text.len() - 1] == b'}' {
                     self.read_redirection(slot, start);
                     return;
                 }
@@ -299,7 +305,7 @@ impl Lexer<'_> {
         self.pos = start;
         let ch = self.c(start);
         if (ch == LT || ch == GT) && start + 1 < self.src_end && self.c(start + 1) == LPAREN {
-            self.pos = start + 2;
+            self.pos = start + SIGIL_PAIR_LEN;
             self.extract_balanced();
             let raw = self.slice(start, self.pos);
             self.record(crate::parse::SubstitutionKind::Process, raw, Vec::new());

@@ -5,6 +5,7 @@
 //! 本机路径，而是 `zcode-artifact://<会话>/<artifact>`（云端也能用，Read 能读）。
 
 use rust_cli_base::js::string::{utf16_len, utf16_prefix};
+use rust_cli_base::units;
 
 use crate::ids::SessionId;
 use crate::store::{ArtifactPurpose, ArtifactStore, StoreError};
@@ -17,29 +18,35 @@ pub const CLOSE: &str = "</persisted-output>";
 /// 预览长度，按 UTF-16 码元。
 pub const PREVIEW_UNITS: usize = 2_000;
 
+/// 一位小数：乘 10 取整，再按十进制拆出整数与小数位。
+const TENTHS: f64 = units::TENTHS_F64;
+const DECIMAL: u64 = units::DECIMAL_RADIX as u64;
+/// 字节单位之间的倍数（KB、MB、GB）。
+const BYTES_STEP: f64 = units::KIB as f64;
+
 fn fixed1(value: f64) -> String {
     // Number.prototype.toFixed(1) 再去掉 ".0"；字节数除以 1024 的幂是二进制精确值，乘 10 不丢精度。
-    let tenths = (value * 10.0).round() as u64;
-    match tenths % 10 {
-        0 => (tenths / 10).to_string(),
-        digit => format!("{}.{digit}", tenths / 10),
+    let tenths = (value * TENTHS).round() as u64;
+    match tenths % DECIMAL {
+        0 => (tenths / DECIMAL).to_string(),
+        digit => format!("{}.{digit}", tenths / DECIMAL),
     }
 }
 
 /// 字节数的写法：不到 1 KB 写 `N bytes`，否则 KB / MB / GB 各一位小数。
 pub fn format_bytes(bytes: u64) -> String {
-    let kilobytes = bytes as f64 / 1024.0;
+    let kilobytes = bytes as f64 / BYTES_STEP;
     if kilobytes < 1.0 {
         return format!("{bytes} bytes");
     }
-    if kilobytes < 1024.0 {
+    if kilobytes < BYTES_STEP {
         return format!("{}KB", fixed1(kilobytes));
     }
-    let megabytes = kilobytes / 1024.0;
-    if megabytes < 1024.0 {
+    let megabytes = kilobytes / BYTES_STEP;
+    if megabytes < BYTES_STEP {
         return format!("{}MB", fixed1(megabytes));
     }
-    format!("{}GB", fixed1(megabytes / 1024.0))
+    format!("{}GB", fixed1(megabytes / BYTES_STEP))
 }
 
 /// 预览：在前 2000 个码元里最后一个换行处截断（换行不过一半时直接截）；第二项是“有截断”。

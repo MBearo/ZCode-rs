@@ -18,14 +18,20 @@ const SPECIAL: [&str; 8] = [
 /// 一条规则最多显示的字符数，超出的截断加 `…`。
 const RULE_CHARS: usize = 60;
 
+/// 排序的分组（小的在前）。
+const SPECIAL_WHOLE: u8 = 0;
+const SPECIAL_WITH_CONTENT: u8 = 1;
+const OTHER_WHOLE: u8 = 2;
+const OTHER_WITH_CONTENT: u8 = 3;
+
 /// 分组：特殊工具整条 0、特殊工具带内容 1、其他整条 2、其他带内容 3。
 fn group(tool: &str, has_content: bool) -> u8 {
     let special = SPECIAL.contains(&tool) || tool.starts_with("mcp__");
     match (special, has_content) {
-        (true, false) => 0,
-        (true, true) => 1,
-        (false, false) => 2,
-        (false, true) => 3,
+        (true, false) => SPECIAL_WHOLE,
+        (true, true) => SPECIAL_WITH_CONTENT,
+        (false, false) => OTHER_WHOLE,
+        (false, true) => OTHER_WITH_CONTENT,
     }
 }
 

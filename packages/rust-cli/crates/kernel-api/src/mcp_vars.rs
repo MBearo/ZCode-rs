@@ -5,6 +5,9 @@
 
 use crate::mcp::McpTransportConfig;
 
+/// 变量引用的开头。
+const OPEN: &str = "${";
+
 /// `${VAR}` 与 `${VAR:-默认}` 展开；没有值也没有默认值的变量原样保留，名字记进 `missing`。
 pub fn expand_vars(
     text: &str,
@@ -13,9 +16,9 @@ pub fn expand_vars(
 ) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    while let Some(start) = rest.find("${") {
+    while let Some(start) = rest.find(OPEN) {
         out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
+        let after = &rest[start + OPEN.len()..];
         let Some(end) = after.find('}') else {
             out.push_str(&rest[start..]);
             return out;
@@ -29,7 +32,7 @@ pub fn expand_vars(
             Some(value) => out.push_str(&value),
             None => {
                 missing.push(name.to_owned());
-                out.push_str(&rest[start..start + 2 + end + 1]);
+                out.push_str(&rest[start..start + OPEN.len() + end + 1]);
             }
         }
         rest = &after[end + 1..];

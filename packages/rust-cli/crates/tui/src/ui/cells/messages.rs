@@ -177,8 +177,10 @@ pub fn error_lines(message: &str, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     };
     let first = vec![Span::styled(format!("{BULLET} "), red())];
     let rest = vec![Span::raw("  ")];
-    // 符号占 2 列，文字块宽 `列数 − 10`。
-    let width = ctx.width.saturating_sub(8).max(12);
+    // 符号占 2 列，文字块宽 `列数 − 10`（至少 10 列）。
+    const RESERVED: usize = 8;
+    const MIN_WIDTH: usize = 12;
+    let width = ctx.width.saturating_sub(RESERVED).max(MIN_WIDTH);
     let mut lines = wrap_text(&shown, red(), width, &first, &rest);
     if cut {
         lines.push(Line::from(vec![

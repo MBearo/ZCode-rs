@@ -9,6 +9,7 @@
 
 mod sse;
 
+use rust_cli_base::models::GLM_5;
 use std::process::{Output, Stdio};
 
 fn run(fixture: &sse::Fixture, disable_compact: bool) -> Output {
@@ -28,7 +29,7 @@ fn run(fixture: &sse::Fixture, disable_compact: bool) -> Output {
         .env("ZCODE_DATA_BASE_DIR", &home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

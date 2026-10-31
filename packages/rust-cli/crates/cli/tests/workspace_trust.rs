@@ -14,6 +14,7 @@ use std::path::Path;
 use std::process::{Output, Stdio};
 use system_env::KeepSystem as _;
 
+use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::workspace_trust::TrustKey;
 
@@ -71,7 +72,7 @@ fn zcode(home: &Path, work: &Path, args: &[&str], server: &str) -> Output {
         .env("ZCODE_DATA_BASE_DIR", home)
         .env("ZCODE_MODEL_BASE_URL", server)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

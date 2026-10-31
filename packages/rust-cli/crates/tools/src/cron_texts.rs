@@ -11,12 +11,7 @@ use crate::cron_expr;
 /// JS `toLocaleString('en-US')` 的写法：`10/18/2026, 1:02:03 AM`（Bun 1.x 时间与 AM/PM 之间是普通空格）。
 pub(crate) fn locale_string(utc_ms: u64, offset: &dyn Fn(u64) -> i32) -> String {
     let (year, month, day, hour, minute, second) = cron_expr::local_parts(utc_ms, offset);
-    let (twelve, half) = match hour {
-        0 => (12, "AM"),
-        1..=11 => (hour, "AM"),
-        12 => (12, "PM"),
-        _ => (hour - 12, "PM"),
-    };
+    let (twelve, half) = cron_expr::twelve_hour(hour);
     format!("{month}/{day}/{year}, {twelve}:{minute:02}:{second:02} {half}")
 }
 
@@ -28,12 +23,13 @@ pub(crate) fn clock_time(utc_ms: u64, offset: &dyn Fn(u64) -> i32) -> String {
 
 /// 用比正文里最长的反引号串多一个（至少 3 个）的围栏包起来。
 fn fence(text: &str) -> String {
+    const MIN_MARKS: usize = 3;
     let longest = text
         .split(|character| character != '`')
         .map(str::len)
         .max()
         .unwrap_or(0);
-    let marks = "`".repeat((longest + 1).max(3));
+    let marks = "`".repeat((longest + 1).max(MIN_MARKS));
     format!("{marks}\n{text}\n{marks}")
 }
 

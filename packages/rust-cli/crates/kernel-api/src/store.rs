@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use crate::env::WorkspaceRef;
 use crate::ids::{
-    AgentId, ArtifactId, CommandId, InteractionId, MessageId, OperationId, OwnerEpoch, SessionId,
-    ToolUseId, TraceId, TurnId,
+    AgentId, ArtifactId, CommandId, InteractionId, MessageId, OwnerEpoch, SessionId, ToolUseId,
+    TraceId, TurnId,
 };
 use crate::message::Message;
 use crate::model::ModelSelection;
@@ -88,11 +88,6 @@ pub enum Fact {
     },
     RevertSet {
         cursor: RevertCursor,
-    },
-    /// 执行操作的意图：先落库，再调执行环境（§6 规则 3）。
-    OperationIntent {
-        operation: OperationId,
-        fingerprint: String,
     },
     /// 本工程独有的状态，映射成带 `rust-cli/` 前缀的 session_entry（Node 忽略未知类型）。
     Entry {
@@ -232,9 +227,6 @@ pub struct LoadedSession {
     /// plan 开关（修复线 F20；serde 缺省 false）。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub plan: bool,
-    /// 已登记意图、还没有结果的操作（§6 规则 5）。恢复逻辑按 Unknown 处理，不重跑。
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub open_operations: Vec<OpenOperation>,
     /// 已持久化、还没有回答（也没有取消）的交互，按提问顺序。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_interactions: Vec<PendingInteraction>,
@@ -253,13 +245,6 @@ pub struct LoadedSession {
     /// 模型侧的历史只是 `messages`；界面显示 `earlier ++ messages`。没有压缩点时为空（serde 缺省为空、为空时不写出）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub earlier: Vec<Message>,
-}
-
-/// 有意图、没有结果的操作（[`Fact::OperationIntent`] 原样）。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OpenOperation {
-    pub operation: OperationId,
-    pub fingerprint: String,
 }
 
 /// 仍待回答的交互（会话 actor 提问时持久化的请求）。

@@ -52,8 +52,8 @@ impl ProcessEditor {
     /// 目录里；现在放在本用户 0700 的私有目录（`zcode-prompt-<uuid>.md`）。
     pub(crate) fn from_env(env: &[(String, String)], temp: &Path, ids: Arc<NodeIds>) -> Self {
         Self {
-            visual: value(env, "VISUAL"),
-            editor: value(env, "EDITOR"),
+            visual: value(env, rust_cli_base::names::env::VISUAL),
+            editor: value(env, rust_cli_base::names::env::EDITOR),
             temp_dir: rust_cli_proc::private::user_dir(temp),
             ids,
         }

@@ -57,7 +57,11 @@ mod platform {
     use std::mem::MaybeUninit;
     use std::sync::Arc;
 
+    use rust_cli_base::units;
     use rust_cli_node_store::TimeZone;
+
+    /// `tm_gmtoff`（秒）换成分钟。
+    const SECONDS_PER_MINUTE: libc::c_long = units::SECONDS_PER_MINUTE as libc::c_long;
 
     /// libc 的本地时区（`TZ` 或 `/etc/localtime`）。
     struct LibcZone {
@@ -87,7 +91,7 @@ mod platform {
         // 缺陷修复（F41，linux.md §4.1）：原来写 `libc::time_t::try_from`，musl 上 libc crate 把 `time_t`
         // 标成 deprecated（预告 32 位 musl 改成 64 位），Linux musl 的 clippy -D warnings 失败。这里不写出类型名，
         // 由 localtime_r 的参数推断，各平台仍是 time_t，行为不变。
-        let seconds = (at_ms / 1_000).try_into().ok()?;
+        let seconds = (at_ms / units::MS_PER_SECOND).try_into().ok()?;
         let mut parts = MaybeUninit::<libc::tm>::uninit();
         // SAFETY: localtime_r 是可重入版本，只写第二个参数；两个指针都指向本函数里有效的内存。
         let filled = unsafe { libc::localtime_r(&seconds, parts.as_mut_ptr()) };
@@ -96,7 +100,7 @@ mod platform {
         }
         // SAFETY: 返回非空表示 `parts` 已写满。
         let parts = unsafe { parts.assume_init() };
-        i32::try_from(parts.tm_gmtoff / 60).ok()
+        i32::try_from(parts.tm_gmtoff / SECONDS_PER_MINUTE).ok()
     }
 }
 
@@ -104,6 +108,7 @@ mod platform {
 mod platform {
     use std::sync::Arc;
 
+    use rust_cli_base::units;
     use rust_cli_node_store::{FixedOffset, TimeZone};
     use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
     use windows_sys::Win32::System::Time::{
@@ -112,8 +117,9 @@ mod platform {
     };
 
     /// 1601-01-01 到 1970-01-01 的 100 纳秒数（FILETIME 的起点）。
-    const EPOCH_TICKS: u64 = 116_444_736_000_000_000;
-    const TICKS_PER_MINUTE: i64 = 600_000_000;
+    const EPOCH_TICKS: u64 = units::FILETIME_EPOCH_OFFSET_MS * units::FILETIME_TICKS_PER_MS;
+    /// 一分钟的 100 纳秒数。
+    const TICKS_PER_MINUTE: i64 = (units::MS_PER_MINUTE * units::FILETIME_TICKS_PER_MS) as i64;
 
     /// 系统的时区（`TZ` 不是 UTC 写法时也用它，time-zone.md D1）。
     struct SystemZone {
@@ -154,9 +160,11 @@ mod platform {
 
     #[expect(unsafe_code, reason = "Win32 时间换算 API 是 FFI，没有安全封装")]
     fn offset(info: &DYNAMIC_TIME_ZONE_INFORMATION, at_ms: u64) -> Option<i32> {
-        let at = at_ms.checked_mul(10_000)?.checked_add(EPOCH_TICKS)?;
+        let at = at_ms
+            .checked_mul(units::FILETIME_TICKS_PER_MS)?
+            .checked_add(EPOCH_TICKS)?;
         let utc_file = FILETIME {
-            dwLowDateTime: u32::try_from(at & 0xFFFF_FFFF).ok()?,
+            dwLowDateTime: u32::try_from(at & u64::from(u32::MAX)).ok()?,
             dwHighDateTime: u32::try_from(at >> 32).ok()?,
         };
         let (mut utc, mut local) = (SYSTEMTIME::default(), SYSTEMTIME::default());

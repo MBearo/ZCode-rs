@@ -11,8 +11,15 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::App;
 use super::i18n::{self, Lang};
+use super::layout;
 use super::mouse::Target;
 use super::text::truncate_line;
+
+/// footer 左右两半之间至少空一列。
+const MIN_SIDE_GAP: usize = 1;
+/// `?` 面板：按键补到本组最长的按键再加 2 列；一排先试 3 组，再试 2 组。
+const KEY_GAP: usize = 2;
+const GROUPS_PER_ROW: [usize; 2] = [3, 2];
 
 fn dim() -> Style {
     Style::default().add_modifier(Modifier::DIM)
@@ -190,7 +197,7 @@ fn context_span(app: &App) -> Option<Span<'static>> {
     Some(Span::styled(text, style))
 }
 
-/// footer：左侧见 [`footer_left`]；右侧 `模型 档位 · N tok/s · ctx N% · cache N% · <上下文提示>`（请求统计见
+/// footer：左侧见 [`footer_left`]；右侧 `N tok/s · ctx N% · cache N% · <上下文提示> · 模型 档位`（请求统计见
 /// [`super::footer_stats`]，tui-display.md §2.6）。放不下时依次省掉 `? for shortcuts`、cache、TPS、ctx、上下文提示、
 /// 模型，最后截断左侧。返回行与可点击的提示：（起始列，宽度，目标）。右侧各项按 [`App::shown`] 取：查看子代理时是它的
 /// （修复线 F112，tui-panels.md §1.7）。
@@ -203,13 +210,20 @@ pub fn footer(app: &App, width: usize) -> (Line<'static>, Vec<(usize, usize, Tar
         .collect();
     // F27：输出速度、上下文占用与缓存命中率（以前速度一直是空的，tui.md §9）。
     let stats = super::footer_stats::items(app);
+    // 统计与提示在前，模型名与档位贴最右（工作线 F116，用户决定 2026-10-29，tui-display.md §2.6；以前模型在最前）。
     let joined = |parts: &[Option<&Span<'static>>]| {
-        let mut spans = model.clone();
+        let mut spans: Vec<Span<'static>> = Vec::new();
         for part in parts.iter().flatten() {
             if !spans.is_empty() {
                 spans.push(super::key_hint::separator(&app.palette));
             }
             spans.push((*part).clone());
+        }
+        if !model.is_empty() {
+            if !spans.is_empty() {
+                spans.push(super::key_hint::separator(&app.palette));
+            }
+            spans.extend(model.iter().cloned());
         }
         spans
     };
@@ -234,19 +248,20 @@ pub fn footer(app: &App, width: usize) -> (Line<'static>, Vec<(usize, usize, Tar
         let mut left = vec![Span::raw("  ")];
         left.extend(footer_left(app, *level));
         let (l, r) = (width_of(&left), width_of(right));
-        (r > 0 && l + r + 3 <= width).then(|| (left, (*right).clone()))
+        (r > 0 && l + r + MIN_SIDE_GAP + layout::RIGHT_MARGIN <= width)
+            .then(|| (left, (*right).clone()))
     });
     let spans = match chosen {
         Some((mut left, right)) => {
             let used = width_of(&left) + width_of(&right);
-            left.push(Span::raw(" ".repeat(width - used - 2)));
+            left.push(Span::raw(" ".repeat(width - used - layout::RIGHT_MARGIN)));
             left.extend(right);
             left
         }
         None => {
             let mut left = vec![Span::raw("  ")];
             let full_left = footer_left(app, Left::Full);
-            let fits = width_of(&full_left) + 2 <= width;
+            let fits = width_of(&full_left) + layout::INDENT <= width;
             left.extend(if fits {
                 full_left
             } else {
@@ -283,7 +298,7 @@ pub fn search_cursor(app: &App) -> Option<u16> {
         Lang::En => "search prompts: ",
         Lang::Zh => "搜索输入：",
     };
-    Some((2 + label.width() + query.width()) as u16)
+    Some((layout::INDENT + label.width() + query.width()) as u16)
 }
 
 /// `?` 快捷键面板（tui.md §7.4，修复线 F26，用户决定；排版参照 Codex `shortcut_overlay.rs` / `shortcut_help.rs`）：
@@ -338,7 +353,7 @@ pub fn help(app: &App, width: usize) -> Vec<Line<'static>> {
     let bold = Style::default().add_modifier(Modifier::BOLD);
     // 一组的行：组名，然后每行按键补齐、说明。
     let column = |(title, rows): &(&str, Vec<(&str, &str)>)| -> Vec<Line<'static>> {
-        let keys = rows.iter().map(|(key, _)| key.width()).max().unwrap_or(0) + 2;
+        let keys = rows.iter().map(|(key, _)| key.width()).max().unwrap_or(0) + KEY_GAP;
         let mut lines = vec![Line::from(Span::styled((*title).to_owned(), bold))];
         lines.extend(rows.iter().map(|(key, text)| {
             Line::from(vec![
@@ -354,12 +369,12 @@ pub fn help(app: &App, width: usize) -> Vec<Line<'static>> {
     let widths: Vec<usize> = columns.iter().map(|c| column_width(c)).collect();
     const GAP: usize = 4;
     // 一排能放几组：三组、两组、一组。
-    let per_row = [3usize, 2]
+    let per_row = GROUPS_PER_ROW
         .into_iter()
         .find(|n| {
-            widths
-                .chunks(*n)
-                .all(|chunk| 2 + chunk.iter().sum::<usize>() + GAP * (chunk.len() - 1) <= width)
+            widths.chunks(*n).all(|chunk| {
+                layout::INDENT + chunk.iter().sum::<usize>() + GAP * (chunk.len() - 1) <= width
+            })
         })
         .unwrap_or(1);
     let mut out = vec![

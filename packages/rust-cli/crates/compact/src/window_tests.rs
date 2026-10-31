@@ -1,3 +1,4 @@
+use rust_cli_base::models::OPUS_5_5;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::provider::TokenLimits;
 
@@ -14,7 +15,7 @@ fn selection(model: &str) -> ModelSelection {
 
 #[test]
 fn known_1m_model_compacts_at_effective_window_minus_buffer() {
-    let facts = ModelFacts::resolve(&selection("claude-opus-5-5"), None);
+    let facts = ModelFacts::resolve(&selection(OPUS_5_5), None);
     assert!(facts.recognized);
     let thresholds = Thresholds::default();
     assert_eq!(
@@ -62,7 +63,7 @@ fn known_small_window_defers_to_reactive_compaction() {
 
 #[test]
 fn window_and_percent_overrides_are_bounded() {
-    let facts = ModelFacts::resolve(&selection("claude-opus-5-5"), None);
+    let facts = ModelFacts::resolve(&selection(OPUS_5_5), None);
     let windowed = Thresholds {
         window_override: Some(150_000),
         ..Thresholds::default()
@@ -91,7 +92,7 @@ fn window_and_percent_overrides_are_bounded() {
 /// 或没设时预留仍是 20000。
 #[test]
 fn the_output_limit_shrinks_the_summary_reserve() {
-    let facts = ModelFacts::resolve(&selection("claude-opus-5-5"), None);
+    let facts = ModelFacts::resolve(&selection(OPUS_5_5), None);
     let limited = |limit| Thresholds {
         max_output_tokens: limit,
         ..Thresholds::default()
@@ -141,7 +142,7 @@ fn small_known() -> ModelFacts {
 fn notices_follow_the_level_the_window_source_and_the_switches() {
     let none = Thresholds::default();
     let unknown = ModelFacts::resolve(&selection("other"), None);
-    let opus = ModelFacts::resolve(&selection("claude-opus-5-5"), None);
+    let card = ModelFacts::resolve(&selection(OPUS_5_5), None);
     let used = |percent| ContextNotice::Used { percent };
     let until = |percent| ContextNotice::UntilAutoCompact { percent };
     let low = |percent, compact_hint| ContextNotice::Low {
@@ -166,8 +167,8 @@ fn notices_follow_the_level_the_window_source_and_the_switches() {
         // 过了阈值：剩余是 0（负数取 0）。
         (170_000, unknown, none, true, true, until(0)),
         // 来源 `model-default`（1M）：阈值 967000，提示线 947000。
-        (946_999, opus, none, true, true, ContextNotice::Hidden),
-        (957_000, opus, none, true, true, until(1)),
+        (946_999, card, none, true, true, ContextNotice::Hidden),
+        (957_000, card, none, true, true, until(1)),
         // 窗口覆盖（来源 `env`）：有效窗口 80000、阈值 67000。
         (
             60_000,

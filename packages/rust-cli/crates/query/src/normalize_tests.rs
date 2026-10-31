@@ -484,7 +484,7 @@ fn result_texts(message: &ApiMessage) -> Vec<String> {
     }
 }
 
-/// 没有 system turn 的模型（claude-sonnet-4-6）：工具轮的提醒并进工具结果的字符串，
+/// 没有 system turn 的模型：工具轮的提醒并进工具结果的字符串，
 /// 缓存断点落在工具结果上。缺陷修复前提醒是结果后面的另一个文本块（R4 F7）。
 #[test]
 fn without_system_turns_the_reminder_joins_the_tool_result() {

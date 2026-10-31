@@ -11,7 +11,13 @@ use rust_cli_kernel_api::model::ModelConnection;
 use serde_json::{Map, Value};
 
 use super::{Availability, Reason};
+use crate::consts;
 use crate::token::http::{Auth, CUSTOMER_INFO_PATH, Fault, Http, Reply};
+
+/// 补全产品的打分（App 的权重）：PRO 档、一次性购买、按月订阅各加的分。
+const PRO_TIER_SCORE: u32 = 100;
+const ONE_TIME_SCORE: u32 = 20;
+const MONTHLY_SCORE: u32 = 10;
 
 /// 列出的一个团队项目：选择用的连接与团队显示名。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +72,7 @@ pub(crate) async fn customer_info(http: &Http, origin: &str, token: &str) -> Cus
 fn unwrap_envelope(payload: &Value) -> Option<&Value> {
     let code_ok = match payload.get("code") {
         None => true,
-        Some(Value::Number(number)) => number.as_f64() == Some(200.0),
+        Some(Value::Number(number)) => number.as_f64() == Some(consts::BUSINESS_CODE_OK),
         Some(_) => false,
     };
     let data = payload.get("data").filter(|data| !data.is_null())?;
@@ -218,13 +224,13 @@ fn fallback_product(products: &[Value]) -> &Value {
     let score = |product: &Value| {
         let mut score = 0;
         if product["tier"] == "PRO" {
-            score += 100;
+            score += PRO_TIER_SCORE;
         }
         if product["subscribeMode"] == "ONE_TIME" {
-            score += 20;
+            score += ONE_TIME_SCORE;
         }
         if product["subscribePeriod"] == "MONTHLY" {
-            score += 10;
+            score += MONTHLY_SCORE;
         }
         score
     };

@@ -21,6 +21,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::hosts::BIGMODEL_ANTHROPIC;
+use rust_cli_base::models::GLM_5;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
@@ -43,7 +45,7 @@ use rust_cli_runtime::{CompactConfig, ContextConfig, Defaults, LocalKernel, Port
 use serde_json::{Value, json};
 
 /// 智谱 Anthropic 协议的地址（只用来查方案表与厂商，请求仍发到夹具）。
-const ZHIPU: &str = "https://open.bigmodel.cn/api/anthropic";
+const ZHIPU: &str = BIGMODEL_ANTHROPIC;
 /// 摘要请求的开头（`prompts/compact/control.txt`）。
 const SUMMARY_PROMPT: &str = "Your task is to create a detailed summary of the conversation so far";
 
@@ -102,13 +104,13 @@ impl Sandbox {
                         "group": "standard-personal",
                         "access": {"type": "api-key", "apiKey": "sk-test"},
                         "api": {"type": kind, "baseUrl": url},
-                        "personalModelIds": ["glm-5"]
+                        "personalModelIds": [GLM_5]
                     }
                 }]},
                 "modelConfigRules": {
                     "providerModelRules": [{
                         "providerId": "personal:glm",
-                        "modelId": "glm-5",
+                        "modelId": GLM_5,
                         "config": {"properties": {"contextWindow": 200_000}}
                     }],
                     "manualProviderModelRules": []
@@ -233,7 +235,7 @@ impl Sandbox {
 fn selection() -> ModelSelection {
     ModelSelection {
         provider: "personal:glm".to_owned(),
-        model: "glm-5".to_owned(),
+        model: GLM_5.to_owned(),
         reasoning: None,
         connection: None,
     }
@@ -388,8 +390,8 @@ async fn zhipu_sensitive_keeps_the_text_and_fails_with_the_reason() {
 /// OpenAI 协议的 Chat 流：一段文字与结束原因。
 fn chat_reply(text: &str, finish: &str) -> String {
     let chunks = [
-        json!({"id": "c1", "model": "glm-5", "choices": [{"index": 0, "delta": {"content": text}}]}),
-        json!({"id": "c1", "model": "glm-5", "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}),
+        json!({"id": "c1", "model": GLM_5, "choices": [{"index": 0, "delta": {"content": text}}]}),
+        json!({"id": "c1", "model": GLM_5, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}),
     ];
     let mut body: String = chunks
         .iter()
@@ -460,7 +462,7 @@ fn print_mode_reads_the_assumed_base_url() {
         .env("ZCODE_DATA_BASE_DIR", &sandbox.home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "glm-5")
+        .env("ZCODE_MODEL", GLM_5)
         .env("_ZCODE_ASSUME_BASE_URL", ZHIPU)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

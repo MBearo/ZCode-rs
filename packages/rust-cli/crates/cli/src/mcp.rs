@@ -8,6 +8,7 @@ use rust_cli_ext::mcp::{
     prewait_ms, required_servers, wait_for_deferrable,
 };
 
+use crate::consts;
 use crate::mcp_machines::McpBindings;
 use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
@@ -39,12 +40,16 @@ fn number(env: &[(String, String)], name: &str) -> Option<u64> {
 
 /// 毫秒数的上限（`Math.min(_, 2147483647)`，JS 定时器的上限，定义在 base）。
 const MAX_MS: u64 = rust_cli_base::js::MAX_TIMER_MS;
+/// 科学计数法的结果的绝对值上限（低于 2^53，转成 i64 不丢精度）。
+const MAX_SCIENTIFIC_ABS: f64 = 9.0e15;
+/// 千分位写法至少的组数。
+const MIN_DIGIT_GROUPS: usize = 2;
 
 /// 整数环境变量的读法：去空白；科学计数法（结果须为整数）、千分位写法（`1,000`，分隔符一致）或 `parseInt` 的前导数字。不合法时
 /// None。
 fn env_int(raw: &str) -> Option<i64> {
     let text = raw.trim();
-    if text.len() <= 32 {
+    if text.len() <= consts::SHORT_NUMBER_LEN {
         if let Some(value) = scientific(text) {
             return value;
         }
@@ -87,7 +92,8 @@ fn scientific(text: &str) -> Option<Option<i64>> {
     }
     let value: f64 = text.parse().ok()?;
     Some(
-        (value.is_finite() && value.fract() == 0.0 && value.abs() < 9.0e15).then_some(value as i64),
+        (value.is_finite() && value.fract() == 0.0 && value.abs() < MAX_SCIENTIFIC_ABS)
+            .then_some(value as i64),
     )
 }
 
@@ -101,12 +107,12 @@ fn grouped(text: &str) -> Option<i64> {
     let groups: Vec<&str> = body.split(separator).collect();
     let digits = |group: &str| group.chars().all(|c| c.is_ascii_digit());
     let first = groups.first()?;
-    let valid = groups.len() >= 2
-        && (1..=3).contains(&first.len())
+    let valid = groups.len() >= MIN_DIGIT_GROUPS
+        && (1..=consts::DIGIT_GROUP_LEN).contains(&first.len())
         && digits(first)
         && groups[1..]
             .iter()
-            .all(|group| group.len() == 3 && digits(group));
+            .all(|group| group.len() == consts::DIGIT_GROUP_LEN && digits(group));
     valid
         .then(|| groups.concat().parse::<i64>().ok())
         .flatten()
@@ -142,14 +148,24 @@ fn startup(
     allowed: &[String],
 ) -> McpStartup {
     // 启动等待的截止（config.md §2.5）。
-    let startup_wait = var(snapshot, "ZCODE_MCP_STARTUP_WAIT_MS")
-        .and_then(env_int)
-        .and_then(|value| u64::try_from(value).ok())
-        .map(|value| value.min(MAX_MS));
+    let startup_wait = var(
+        snapshot,
+        rust_cli_base::names::env::ZCODE_MCP_STARTUP_WAIT_MS,
+    )
+    .and_then(env_int)
+    .and_then(|value| u64::try_from(value).ok())
+    .map(|value| value.min(MAX_MS));
     McpStartup {
         // 只有明确设成“假”时阻塞。
-        nonblocking: tri_bool(snapshot, "MCP_CONNECTION_NONBLOCKING") != Some(false),
-        connect_wait_ms: positive_ms(snapshot, "MCP_CONNECT_TIMEOUT_MS", DEFAULT_CONNECT_WAIT_MS),
+        nonblocking: tri_bool(
+            snapshot,
+            rust_cli_base::names::env::MCP_CONNECTION_NONBLOCKING,
+        ) != Some(false),
+        connect_wait_ms: positive_ms(
+            snapshot,
+            rust_cli_base::names::env::MCP_CONNECT_TIMEOUT_MS,
+            DEFAULT_CONNECT_WAIT_MS,
+        ),
         prewait_ms: prewait_ms(startup_wait, explicit, mcp_timeout_ms),
         required: required_servers(allowed.iter().map(String::as_str)),
         wait_for_deferrable: wait_for_deferrable(
@@ -256,12 +272,17 @@ pub(crate) async fn settings(
         servers
     };
     let defaults = McpSettings::default();
-    let connect_timeout_ms = positive_ms(snapshot, "MCP_TIMEOUT", defaults.connect_timeout_ms);
+    let connect_timeout_ms = positive_ms(
+        snapshot,
+        rust_cli_base::names::env::MCP_TIMEOUT,
+        defaults.connect_timeout_ms,
+    );
     McpSettings {
         servers,
         connect_timeout_ms,
-        tool_timeout_ms: number(snapshot, "MCP_TOOL_TIMEOUT").unwrap_or(defaults.tool_timeout_ms),
-        max_output_tokens: number(snapshot, "MAX_MCP_OUTPUT_TOKENS")
+        tool_timeout_ms: number(snapshot, rust_cli_base::names::env::MCP_TOOL_TIMEOUT)
+            .unwrap_or(defaults.tool_timeout_ms),
+        max_output_tokens: number(snapshot, rust_cli_base::names::env::MAX_MCP_OUTPUT_TOKENS)
             .unwrap_or(defaults.max_output_tokens),
         // 握手的 `clientInfo.version`：入口的版本是唯一来源（docs/specs/rust-cli/version.md §4）。
         client_version: crate::VERSION.to_owned(),

@@ -5,10 +5,13 @@
 
 use std::time::Duration;
 
+use rust_cli_base::units;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 /// 管道输入的上限。
-const LIMIT: usize = 10 * 1024 * 1024;
+const LIMIT: usize = 10 * units::MIB;
+/// 第一次读的缓冲区大小。
+const FIRST_READ_BYTES: usize = 64 * units::KIB;
 /// 等第一批数据的时间。
 pub(crate) const FIRST_DATA: Duration = Duration::from_secs(3);
 
@@ -30,7 +33,7 @@ pub(crate) async fn read_piped(
     mut input: impl AsyncRead + Unpin,
     wait: Duration,
 ) -> std::io::Result<Piped> {
-    let mut first = vec![0u8; 64 * 1024];
+    let mut first = vec![0u8; FIRST_READ_BYTES];
     let read = match tokio::time::timeout(wait, input.read(&mut first)).await {
         Ok(read) => read?,
         Err(_) => return Ok(Piped::Silent),
@@ -63,7 +66,7 @@ pub(crate) fn combine(prompt: Option<String>, piped: Option<String>) -> String {
 pub(crate) fn too_large() -> String {
     format!(
         "Error: piped stdin input exceeds {}MB. Pass large content as a file path in your prompt instead.",
-        LIMIT / 1024 / 1024
+        LIMIT / units::MIB
     )
 }
 

@@ -8,6 +8,7 @@ use rust_cli_kernel_api::metering::RequestStats;
 
 use super::app::App;
 use super::i18n::Lang;
+use super::quantities::{self, PERCENT_F64};
 
 /// runner 写入的最后一份请求统计。回执带请求序号：切换会话与 `/clear` 时 [`Self::clear`] 让在途的回执作废，不用超时。
 #[derive(Debug, Default)]
@@ -58,7 +59,7 @@ fn whole(value: f64) -> u64 {
 
 /// ctx 与 cache 的百分比：四舍五入到一位小数，整数也写 `.0`（工作线 F115，用户决定 2026-10-29，tui-display.md §2.6）。
 fn tenths(percent: f64) -> String {
-    format!("{:.1}", (percent * 10.0).round().max(0.0) / 10.0)
+    quantities::tenths(percent)
 }
 
 /// 上下文占有效窗口的百分比 `min(100, token / W · 100)`；窗口为 0 时是 100。kernel-api 的 `percent()` 是整数的
@@ -66,9 +67,9 @@ fn tenths(percent: f64) -> String {
 #[allow(clippy::cast_precision_loss)]
 fn context_percent(usage: ContextOccupancy) -> f64 {
     if usage.max_tokens == 0 {
-        return 100.0;
+        return PERCENT_F64;
     }
-    (usage.used_tokens as f64 / usage.max_tokens as f64 * 100.0).min(100.0)
+    (usage.used_tokens as f64 / usage.max_tokens as f64 * PERCENT_F64).min(PERCENT_F64)
 }
 
 /// 查看子代理时 TPS 与 ctx 取它的只读视图，命中率的回执由 runner 查它的子会话（修复线 F112，tui-panels.md §1.7）；子代理
@@ -91,7 +92,7 @@ pub fn items(app: &App) -> Items {
         })
     });
     let cache = stats.cache_hit_rate().map(|rate| {
-        let percent = tenths(rate * 100.0);
+        let percent = tenths(rate * PERCENT_F64);
         span(match app.lang {
             Lang::En => format!("cache {percent}%"),
             Lang::Zh => format!("缓存 {percent}%"),

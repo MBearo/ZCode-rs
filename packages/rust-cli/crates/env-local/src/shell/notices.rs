@@ -28,8 +28,8 @@ async fn next(mut cursor: Cursor) -> Option<(Result<ShellNotice, EnvError>, Curs
                 shell
                     .notices
                     .iter()
-                    .find(|notice| notice.seq > cursor.after)
-                    .cloned()
+                    .find(|pending| pending.notice.seq > cursor.after)
+                    .map(|pending| pending.notice.clone())
             })
         };
         if let Some(notice) = pending {

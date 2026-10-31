@@ -1,3 +1,4 @@
+use rust_cli_base::models::{DEEPSEEK_V4_PRO, GLM_5_3, HAIKU_3_5_DATED};
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::listing::ListingEntry;
 use rust_cli_kernel_api::message::{AttachmentMessage, Message};
@@ -175,28 +176,24 @@ fn connecting_servers_are_announced_only_with_tool_search_and_a_snapshot() {
         ],
         instructions: Vec::new(),
     };
-    let on = request(
-        "claude-opus-5-5",
-        &["Read", "ToolSearch"],
-        Some(view.clone()),
-    );
+    let on = request(GLM_5_3, &["Read", "ToolSearch"], Some(view.clone()));
     assert_eq!(pending_servers(&on).unwrap(), ["alpha", "zeta"]);
     // 工具里没有 ToolSearch、没有快照：都不带。
-    assert!(pending_servers(&request("claude-opus-5-5", &["Read"], Some(view.clone()))).is_none());
+    assert!(pending_servers(&request(GLM_5_3, &["Read"], Some(view.clone()))).is_none());
     // 工作线 F89（tools-more.md §3.2.1）：不区分模型，以前禁用表里的模型也带。修改：F84 时不带。
     assert_eq!(
         pending_servers(&request(
-            "claude-3-haiku-20240307",
+            HAIKU_3_5_DATED,
             &["ToolSearch"],
             Some(view.clone())
         ))
         .unwrap(),
         ["alpha", "zeta"]
     );
-    assert!(pending_servers(&request("claude-opus-5-5", &["ToolSearch"], None)).is_none());
+    assert!(pending_servers(&request(GLM_5_3, &["ToolSearch"], None)).is_none());
     // 工作线 F84（tools-more.md §3.2）：本地 ToolSearch（没有卡片的模型、端点答不出能力）同样带。修改：以前不带。
     assert_eq!(
-        pending_servers(&request("glm-4.6", &["ToolSearch"], Some(view))).unwrap(),
+        pending_servers(&request(DEEPSEEK_V4_PRO, &["ToolSearch"], Some(view))).unwrap(),
         ["alpha", "zeta"]
     );
 }

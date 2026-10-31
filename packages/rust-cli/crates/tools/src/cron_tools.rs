@@ -35,11 +35,17 @@ pub(crate) async fn owner(context: &ToolUseContext) -> SessionId {
     context.interactions.owner_session(&context.session).await
 }
 
+/// 任务 ID 的字符数。
+const JOB_ID_CHARS: usize = 8;
+/// 校验错误码：表达式一年内不会触发、任务数到了上限。
+const NEVER_FIRES_CODE: i32 = 2;
+const TOO_MANY_JOBS_CODE: i32 = 3;
+
 /// 任务 ID：取这次调用的操作 ID（`op_<uuid>`）里 uuid 的前 8 位。
 pub(crate) fn job_id(context: &ToolUseContext) -> String {
     let operation = context.operation.operation.as_str();
     let uuid = operation.rsplit('_').next().unwrap_or(operation);
-    uuid.chars().take(8).collect()
+    uuid.chars().take(JOB_ID_CHARS).collect()
 }
 
 pub(crate) fn output(content: String, display: Value) -> ToolOutput {
@@ -114,7 +120,7 @@ macro_rules! shared_tool_methods {
         }
 
         fn max_result_size_chars(&self) -> Option<usize> {
-            Some(100_000)
+            Some(rust_cli_kernel_api::tool::DEFAULT_MAX_RESULT_CHARS)
         }
     };
 }
@@ -160,14 +166,14 @@ impl Tool for CronCreateTool {
                     "Cron expression '{}' does not match any calendar date in the next year.",
                     input.cron
                 ),
-                2,
+                NEVER_FIRES_CODE,
             );
         }
         let total = board.read_durable().await.len() + board.session_count(&owner(context).await);
         if total >= MAX_JOBS {
             return coded(
                 format!("Too many scheduled jobs (max {MAX_JOBS}). Cancel one first."),
-                3,
+                TOO_MANY_JOBS_CODE,
             );
         }
         Validation::Ok

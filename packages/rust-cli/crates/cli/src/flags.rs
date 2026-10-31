@@ -1,6 +1,7 @@
 //! 要读文件、看目录的参数（docs/specs/rust-cli/cli-args.md §4、§6、§7）：入口读完环境之后、建内核之前处理，
 //! 文件与目录都经执行环境端口（与 `--mcp-config` 相同）。报错的文字固定，写 stderr、退出码 1。
 
+use rust_cli_base::units;
 use rust_cli_kernel_api::env::{EnvError, EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{FileKind, PathStyle, StatFile};
 use rust_cli_kernel_api::machine::Files;
@@ -10,7 +11,7 @@ use serde_json::{Map, Value};
 use crate::args::PromptFlags;
 
 /// `--settings` 文件的上限。
-const SETTINGS_LIMIT: usize = 2 * 1024 * 1024;
+const SETTINGS_LIMIT: usize = 2 * units::MIB;
 
 /// 以 `Error: …` 退出的参数错误：原样写 stderr，退出码 1。
 #[derive(Debug)]
@@ -127,7 +128,7 @@ pub(crate) async fn settings(place: &Place<'_>, value: &str) -> Result<Map<Strin
     if bytes.len() > SETTINGS_LIMIT {
         return Err(Fatal(format!(
             "Error: Settings file exceeds the {}MiB limit: {path}",
-            SETTINGS_LIMIT / 1024 / 1024
+            SETTINGS_LIMIT / units::MIB
         )));
     }
     match serde_json::from_slice::<Value>(&bytes) {
@@ -198,7 +199,7 @@ pub(crate) fn refuse_root_bypass(
 ) -> Result<(), Fatal> {
     let var = |name: &str| rust_cli_base::secret::env_var(env, name);
     let sandbox = crate::options::is_sandbox_one(env);
-    let bubblewrap = var("ZCODE_BUBBLEWRAP").is_some_and(|value| {
+    let bubblewrap = var(rust_cli_base::names::env::ZCODE_BUBBLEWRAP).is_some_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "1" | "true" | "yes" | "on"

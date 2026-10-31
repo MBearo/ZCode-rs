@@ -1,6 +1,7 @@
 //! 环境事实（`EnvInfo::facts`，docs/specs/rust-cli/context.md §12）：平台、系统版本、shell 与
 //! git 仓库判断。写法见 context.md §12 的环境段。
 
+use rust_cli_kernel_api::env_files::GIT_DIR;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -40,7 +41,7 @@ fn git_marker(path: &Path) -> bool {
 pub(crate) fn git_root(start: &Path) -> Option<PathBuf> {
     start
         .ancestors()
-        .find(|dir| git_marker(&dir.join(".git")))
+        .find(|dir| git_marker(&dir.join(GIT_DIR)))
         .map(Path::to_path_buf)
 }
 
@@ -54,7 +55,11 @@ pub(crate) async fn os_version(env: &[(String, String)]) -> String {
     command
         .arg("-sr")
         .env_clear()
-        .envs(env.iter().filter(|(name, _)| name == "PATH").cloned())
+        .envs(
+            env.iter()
+                .filter(|(name, _)| name == rust_cli_base::names::env::PATH)
+                .cloned(),
+        )
         .stdin(Stdio::null())
         .kill_on_drop(true);
     match command.output().await {

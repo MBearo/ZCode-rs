@@ -55,6 +55,7 @@ async fn subscription_results_match_the_app() {
                 status,
                 body: body.clone(),
                 delay: std::time::Duration::ZERO,
+                gate: None,
             })
             .await;
             let actual = subscription(&http, &server.url(), "pat-1").await;

@@ -5,6 +5,8 @@
 //! 没有新帧时，图标与标题在接下来的 10 秒里渐渐变红。
 use std::time::Duration;
 
+use rust_cli_base::units;
+
 use super::app::App;
 use super::i18n::{self, Lang};
 use super::palette::{ColorLevel, blend};
@@ -31,6 +33,14 @@ const STEP_MS: u128 = 80;
 const STALL: Duration = Duration::from_secs(10);
 const FADE: Duration = Duration::from_secs(10);
 const STALL_RED: (u8, u8, u8) = (0xe0, 0x50, 0x50);
+/// 16 / 256 色终端变红的时刻（渐变过半）。
+const STALL_RED_FROM: f64 = 0.5;
+/// 推理进行中的四档：到这几个秒数时换下一档的说法。
+const STILL_THINKING_SECS: u64 = 10;
+const THINKING_MORE_SECS: u64 = 20;
+const DEEP_IN_THOUGHT_SECS: u64 = 45;
+/// 推理结束后“用了多久”留这么久（毫秒）。
+const THOUGHT_FOR_SHOWN_MS: u64 = 2 * units::MS_PER_SECOND;
 
 pub(super) const VERBS_EN: [&str; 30] = [
     "Working",
@@ -112,17 +122,16 @@ fn verb(lang: Lang, seed: usize) -> &'static str {
     }
 }
 
+/// 状态行估算流式的 token 数：每这么多个字符算一个。
+const STREAM_CHARS_PER_TOKEN: usize = 4;
+
 /// 本回合回复与推理的字数除以 4。
 fn tokens(app: &App) -> usize {
-    app.view.streamed_chars() / 4
+    app.view.streamed_chars() / STREAM_CHARS_PER_TOKEN
 }
 
 fn tokens_label(count: usize) -> String {
-    if count >= 1000 {
-        format!("{:.1}k", count as f64 / 1000.0)
-    } else {
-        count.to_string()
-    }
+    super::quantities::thousands(count as u64)
 }
 
 /// 推理的状态：进行中按时长分四档；结束后 2 秒内写用了多久。只看本回合的推理。
@@ -142,23 +151,23 @@ fn thinking(app: &App, turn_started: u64, now_ms: u64) -> Option<String> {
     let started = row.created_ms;
     let zh = app.lang == Lang::Zh;
     if streaming {
-        let seconds = now_ms.saturating_sub(started) / 1000;
+        let seconds = now_ms.saturating_sub(started) / units::MS_PER_SECOND;
         let label = match (seconds, zh) {
-            (0..10, false) => "thinking",
-            (10..20, false) => "still thinking",
-            (20..45, false) => "thinking more",
+            (0..STILL_THINKING_SECS, false) => "thinking",
+            (STILL_THINKING_SECS..THINKING_MORE_SECS, false) => "still thinking",
+            (THINKING_MORE_SECS..DEEP_IN_THOUGHT_SECS, false) => "thinking more",
             (_, false) => "deep in thought",
-            (0..10, true) => "思考中",
-            (10..20, true) => "仍在思考",
-            (20..45, true) => "深入思考",
+            (0..STILL_THINKING_SECS, true) => "思考中",
+            (STILL_THINKING_SECS..THINKING_MORE_SECS, true) => "仍在思考",
+            (THINKING_MORE_SECS..DEEP_IN_THOUGHT_SECS, true) => "深入思考",
             (_, true) => "沉思中",
         };
         return Some(label.to_owned());
     }
     let duration = duration_ms?;
     let ended = started + duration;
-    (now_ms.saturating_sub(ended) < 2_000).then(|| {
-        let seconds = duration.div_ceil(1000);
+    (now_ms.saturating_sub(ended) < THOUGHT_FOR_SHOWN_MS).then(|| {
+        let seconds = duration.div_ceil(units::MS_PER_SECOND);
         if zh {
             format!("思考了 {seconds}s")
         } else {
@@ -179,7 +188,7 @@ fn color(app: &App, since_frame: Duration) -> Color {
             let (r, g, b) = blend((r, g, b), STALL_RED, t);
             Color::Rgb(r, g, b)
         }
-        _ if t >= 0.5 => Color::Red,
+        _ if t >= STALL_RED_FROM => Color::Red,
         _ => accent,
     }
 }
@@ -207,14 +216,17 @@ pub fn status(app: &App, width: usize, clock: &Clock) -> Vec<Line<'static>> {
         Span::styled(glyph(clock.animation), Style::default().fg(color)),
         Span::raw(" "),
     ];
-    let title = format!("{}…", verb(app.lang, (started / 1000) as usize));
+    let title = format!(
+        "{}…",
+        verb(app.lang, (started / units::MS_PER_SECOND) as usize)
+    );
     spans.extend(super::shimmer::spans(
         &title,
         clock.animation,
         &app.palette,
         color,
     ));
-    let seconds = clock.now_ms.saturating_sub(started) / 1000;
+    let seconds = clock.now_ms.saturating_sub(started) / units::MS_PER_SECOND;
     let mut parts = vec![
         i18n::elapsed_plain(seconds),
         format!("↓ {} tokens", tokens_label(tokens(app))),
@@ -256,7 +268,7 @@ fn viewed(app: &App, width: usize, clock: &Clock) -> Vec<Line<'static>> {
     ));
     let elapsed = super::agents::elapsed_ms(&app.agents, entry, clock.now);
     spans.push(Span::styled(
-        format!(" ({})", i18n::elapsed_plain(elapsed / 1000)),
+        format!(" ({})", i18n::elapsed_plain(elapsed / units::MS_PER_SECOND)),
         Style::default().add_modifier(Modifier::DIM),
     ));
     vec![truncate_line(Line::from(spans), width)]

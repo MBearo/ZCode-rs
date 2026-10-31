@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use rust_cli_base::OwnedTask;
+use rust_cli_base::{OwnedTask, units};
 use rust_cli_exec_server::{Begun, CallKey, CallKind, ExecLedger, LedgerError, MemoryLedger};
 use rust_cli_kernel_api::clock::Clock;
 use tokio::sync::{mpsc, oneshot};
@@ -25,6 +25,17 @@ const JOURNAL: &str = "journal";
 const IDENTITY: &str = "id";
 /// 写者的信箱：满了调用方就等（背压）。
 const MAILBOX: usize = 64;
+
+/// 缺省：完成而没 ack 的回复留多久。
+const DEFAULT_DONE: Duration = Duration::from_secs(units::SECONDS_PER_DAY);
+/// 缺省：墓碑留多久（7 天）。
+const DEFAULT_TOMB: Duration = Duration::from_secs(7 * units::SECONDS_PER_DAY);
+/// 缺省：日志的大小上限。
+const DEFAULT_MAX_BYTES: u64 = 64 * units::MIB as u64;
+/// 缺省：超过上限后降到这里以下。
+const DEFAULT_TARGET_BYTES: u64 = 48 * units::MIB as u64;
+/// 缺省：日志至少这么大才考虑压缩。
+const DEFAULT_COMPACT_MIN: u64 = 4 * units::MIB as u64;
 
 /// 保留与清理的数值（§19.7；测试换成小的）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,11 +55,11 @@ pub struct Retention {
 impl Default for Retention {
     fn default() -> Self {
         Self {
-            done: Duration::from_secs(24 * 60 * 60),
-            tomb: Duration::from_secs(7 * 24 * 60 * 60),
-            max_bytes: 64 * 1024 * 1024,
-            target_bytes: 48 * 1024 * 1024,
-            compact_min: 4 * 1024 * 1024,
+            done: DEFAULT_DONE,
+            tomb: DEFAULT_TOMB,
+            max_bytes: DEFAULT_MAX_BYTES,
+            target_bytes: DEFAULT_TARGET_BYTES,
+            compact_min: DEFAULT_COMPACT_MIN,
         }
     }
 }

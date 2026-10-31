@@ -4,7 +4,7 @@
 
 use rust_cli_kernel_api::abort::{Abort, AbortReason};
 use rust_cli_kernel_api::hooks::HookOutcome;
-use rust_cli_kernel_api::ids::{CommandId, InteractionId, OperationId};
+use rust_cli_kernel_api::ids::{CommandId, InteractionId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::metering::{CallStatus, Metered, ModelCall, OutputSpeed};
 use rust_cli_kernel_api::model::QuerySource;
@@ -191,6 +191,10 @@ impl Actor {
             // checkpoint 挂在这次运行最后一条 user 消息上（drive 的同一规则）。
             prompt: users.last().map(|message| message.id().clone()),
             command: None,
+            timing: crate::duration::TurnTiming::start(
+                self.deps.clock.now_ms(),
+                !self.pending.is_empty(),
+            ),
         });
         Ok(())
     }
@@ -200,16 +204,13 @@ impl Actor {
             SinkRequest::Message { message, reply } => {
                 let _ = reply.send(self.record(message).await);
             }
-            SinkRequest::Intent {
-                operation,
-                fingerprint,
+            SinkRequest::Event(event) => self.forward(event),
+            SinkRequest::ArmMonitor {
+                monitor,
+                events,
                 reply,
             } => {
-                let _ = reply.send(self.intent(operation, fingerprint).await);
-            }
-            SinkRequest::Event(event) => self.forward(event),
-            SinkRequest::ArmMonitor { monitor, reply } => {
-                let _ = reply.send(self.arm_monitor(monitor));
+                let _ = reply.send(self.arm_monitor(monitor, events));
             }
             SinkRequest::Ask { request, reply } => {
                 self.ask(request, reply, crate::actor::AskScope::Turn).await
@@ -227,6 +228,7 @@ impl Actor {
                 metered,
                 reply,
             } => {
+                self.note_request(&metered);
                 let speed = match metered.as_ref() {
                     Metered::Model(call) => output_speed(call),
                     Metered::Tool(_) => None,
@@ -370,23 +372,6 @@ impl Actor {
             .map_err(|reason| self.fail(&reason))
     }
 
-    async fn intent(
-        &mut self,
-        operation: OperationId,
-        fingerprint: String,
-    ) -> Result<(), StoreError> {
-        if let Some(error) = self.failure() {
-            return Err(error);
-        }
-        let fact = Fact::OperationIntent {
-            operation,
-            fingerprint,
-        };
-        self.commit(None, vec![fact])
-            .await
-            .map_err(|reason| self.fail(&reason))
-    }
-
     fn forward(&mut self, event: QueryEvent) {
         let Some(turn) = self.running.as_ref().map(|running| running.turn.clone()) else {
             return;
@@ -471,11 +456,15 @@ impl Actor {
                 Message::Assistant(assistant) => assistant.usage,
                 _ => None,
             });
+        // 回合结束那一行（修复线 F118，tui-display.md §2.7）：排在 TurnFinished 之后、下一个回合之前。
+        let interrupted = matches!(outcome, TurnOutcome::Interrupted);
+        let turn = running.turn.clone();
         self.log.append(KernelEvent::TurnFinished {
             turn: running.turn,
             outcome,
             usage,
         });
+        self.turn_duration(turn, running.timing, interrupted).await;
         self.start_next().await;
     }
 

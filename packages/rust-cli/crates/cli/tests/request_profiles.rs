@@ -1,6 +1,6 @@
 //! 修复线 F23（docs/specs/rust-cli/model.md §3.2、§6、§11）：真实 `zcode -p` 经显式覆盖（`ZCODE_MODEL_BASE_URL`）连本地
 //! 夹具。夹具不是 Anthropic 官方 API，落到“其他 Anthropic 兼容”：第三方形状的 system、没有官方专有项，WebSearch
-//! 不发（内置规则只对 `api.anthropic.com/v1` 上匹配 `.*claude-.*` 的模型打开 `supportsNativeWebSearch`）。只给测试用的
+//! 不发（内置规则只对 `api.anthropic.com/v1` 上按模型 ID 的正则认出的官方模型打开 `supportsNativeWebSearch`）。只给测试用的
 //! `_ZCODE_ASSUME_FIRST_PARTY_BASE_URL=1` 让同一个夹具按 Anthropic 官方处理。
 //!
 //! 工作线 F52（tools-more.md §3.2、model.md §3.3、platform.md §10）：每个请求带 `metadata.user_id`，设备身份与 App / Node
@@ -20,6 +20,7 @@ mod sse;
 use std::path::PathBuf;
 use std::process::Stdio;
 
+use rust_cli_base::models::{GLM_5_3, OPUS_5_5};
 use serde_json::Value;
 
 /// 一次运行的临时 home 与工作区。
@@ -80,12 +81,13 @@ impl Sandbox {
     }
 }
 
-/// 显式覆盖连夹具：`flags` 是只给测试用的声明。
+/// 显式覆盖连夹具：`flags` 是只给测试用的声明。模型是 Anthropic 的有卡片的模型：网关要去掉卡片带来的字段（thinking、
+/// effort），官方地址上的 WebSearch 是内置目录只给它的规则。
 fn first_request(flags: &[&str]) -> (Value, Option<String>) {
     let mut vars = vec![
         ("ZCODE_MODEL_BASE_URL", "<fixture>"),
         ("ZCODE_API_KEY", "test-key"),
-        ("ZCODE_MODEL", "claude-opus-5-5"),
+        ("ZCODE_MODEL", OPUS_5_5),
     ];
     vars.extend(flags.iter().map(|flag| (*flag, "1")));
     Sandbox::new().first_request(&vars, &[])
@@ -203,7 +205,8 @@ async fn a_release_build_ignores_the_test_declarations() {
     assert!(!offers_web_search(&body), "{body}");
 }
 
-/// 用户报的场景（2026-10-22）：自定义 provider（anthropic-messages，第三方网关，后面是 Bedrock）上的 claude-opus-5-5。
+/// 用户报的场景（2026-10-22）：自定义 provider（anthropic-messages，第三方网关，后面是 Bedrock）上的有卡片形状的模型
+/// （这里用按 opus 处理的 GLM）。
 /// 修 bug（F52）：以前按模型卡片打开 ToolSearch，工具带 `defer_loading`、header 带 `advanced-tool-use-2025-11-20`，
 /// Bedrock 报 `Unexpected value(s) advanced-tool-use-2025-11-20 for the anthropic-beta header`。工作线 F84：这里是本地
 /// ToolSearch，延迟工具照样只在清单里宣布，请求仍然没有 `defer_loading`、占位工具与这个 beta。
@@ -222,7 +225,7 @@ async fn a_custom_gateway_provider_gets_local_tool_search() {
                     "group": "standard-personal",
                     "access": {"type": "api-key", "apiKey": "sk-test"},
                     "api": {"type": "anthropic-messages", "baseUrl": fixture_url},
-                    "personalModelIds": ["claude-opus-5-5"]
+                    "personalModelIds": [GLM_5_3]
                 }
             }]}
         }
@@ -234,7 +237,12 @@ async fn a_custom_gateway_provider_gets_local_tool_search() {
     std::fs::write(sandbox.home.join(".zcode/v2/provider_config.json"), text).unwrap();
     let mut command = rust_cli_proc::std_command(env!("CARGO_BIN_EXE_zcode-rs"));
     let output = command
-        .args(["-p", "hi", "--model", "personal:gateway/claude-opus-5-5"])
+        .args([
+            "-p",
+            "hi",
+            "--model",
+            &format!("personal:gateway/{GLM_5_3}"),
+        ])
         .current_dir(&sandbox.work)
         .env_clear()
         .keep_system()
@@ -254,7 +262,7 @@ async fn a_custom_gateway_provider_gets_local_tool_search() {
     );
     let body = fixture.main_requests().remove(0);
     let beta = fixture.main_betas().remove(0);
-    assert_eq!(body["model"], "claude-opus-5-5");
+    assert_eq!(body["model"], GLM_5_3);
     assert_eq!(tool_search(&body, beta.as_deref()), Search::Local, "{body}");
     assert!(listed_as_deferred(&body, "WebFetch"), "{body}");
 }
@@ -286,7 +294,7 @@ async fn a_tool_loaded_on_a_gateway_is_sent_as_a_plain_definition() {
         .env("ZCODE_DATA_BASE_DIR", &sandbox.home)
         .env("ZCODE_MODEL_BASE_URL", &fixture.url)
         .env("ZCODE_API_KEY", "test-key")
-        .env("ZCODE_MODEL", "claude-opus-5-5")
+        .env("ZCODE_MODEL", GLM_5_3)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -362,7 +370,7 @@ async fn enable_tool_search_decides_whether_tool_search_is_on() {
             &[
                 ("ZCODE_MODEL_BASE_URL", "<fixture>"),
                 ("ZCODE_API_KEY", "test-key"),
-                ("ZCODE_MODEL", "claude-opus-5-5"),
+                ("ZCODE_MODEL", GLM_5_3),
                 ("ENABLE_TOOL_SEARCH", value),
             ],
             &[],
@@ -393,7 +401,7 @@ async fn the_request_carries_the_shared_device_id_and_the_session() {
     let vars = [
         ("ZCODE_MODEL_BASE_URL", "<fixture>"),
         ("ZCODE_API_KEY", "test-key"),
-        ("ZCODE_MODEL", "claude-opus-5-5"),
+        ("ZCODE_MODEL", GLM_5_3),
     ];
     let (body, _) = sandbox.first_request(&vars, &["--session-id", SESSION]);
     assert_eq!(
@@ -420,7 +428,7 @@ async fn the_first_run_writes_the_device_id_it_sends() {
     let vars = [
         ("ZCODE_MODEL_BASE_URL", "<fixture>"),
         ("ZCODE_API_KEY", "test-key"),
-        ("ZCODE_MODEL", "claude-opus-5-5"),
+        ("ZCODE_MODEL", GLM_5_3),
     ];
     let (body, _) = sandbox.first_request(&vars, &[]);
     let user: Value = serde_json::from_str(body["metadata"]["user_id"].as_str().unwrap()).unwrap();

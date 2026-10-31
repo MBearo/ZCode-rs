@@ -3,6 +3,7 @@
 //! 最近调用的在前；保留尾段里已有带回它的附件时不带；每个正文最多 5000 token（超过时截断、接说明），合计
 //! 25000 token，放不下的跳过。
 
+use rust_cli_base::tokens;
 use rust_cli_kernel_api::compaction::rough_tokens;
 use rust_cli_kernel_api::listing::InvokedSkill;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
@@ -59,7 +60,8 @@ fn truncated(content: &str) -> String {
         return content.to_owned();
     }
     let note = compact::invoked_skill_truncated();
-    let keep = (MAX_SKILL_TOKENS as usize * 4).saturating_sub(note.encode_utf16().count());
+    let keep = (MAX_SKILL_TOKENS as usize * tokens::CHARS_PER_TOKEN as usize)
+        .saturating_sub(note.encode_utf16().count());
     let mut used = 0;
     let mut out = String::new();
     for character in content.chars() {

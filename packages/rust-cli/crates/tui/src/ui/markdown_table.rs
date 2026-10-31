@@ -8,6 +8,9 @@ use unicode_width::UnicodeWidthStr;
 use super::{Renderer, styled};
 use crate::ui::text::{width, wrap};
 
+/// 每格左右各 1 个空格。
+const CELL_PADDING: usize = 2;
+
 impl Renderer<'_> {
     pub(super) fn table(&mut self, rows: Vec<Vec<String>>) {
         self.blank();
@@ -21,7 +24,7 @@ impl Renderer<'_> {
         let (_, rest) = self.prefixes_peek();
         let room = self.width.saturating_sub(width(&rest));
         // 线框：每格左右各 1 个空格，列之间与两侧各 1 条竖线。
-        let total: usize = widths.iter().sum::<usize>() + 3 * columns + 1;
+        let total: usize = widths.iter().sum::<usize>() + (CELL_PADDING + 1) * columns + 1;
         if total > room {
             // 放不下：每行转成 `表头: 值` 的记录。
             let header = rows.first().cloned().unwrap_or_default();
@@ -46,7 +49,10 @@ impl Renderer<'_> {
         }
         let dim = Style::default().add_modifier(Modifier::DIM);
         let rule = |left: &str, middle: &str, right: &str| {
-            let cells: Vec<String> = widths.iter().map(|w| "─".repeat(w + 2)).collect();
+            let cells: Vec<String> = widths
+                .iter()
+                .map(|w| "─".repeat(w + CELL_PADDING))
+                .collect();
             styled(&format!("{left}{}{right}", cells.join(middle)), dim)
         };
         let push = |this: &mut Self, spans: Vec<Span<'static>>| {

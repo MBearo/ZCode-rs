@@ -7,6 +7,14 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+/// CommonMark：块的缩进最多 3 个空格（4 个起是缩进代码块）、围栏至少 3 个符号、标题 1–6 级。
+const MAX_INDENT: usize = 3;
+const MIN_FENCE: usize = 3;
+const MAX_HEADING_LEVEL: usize = 6;
+/// HTML 注释的开头与结尾。
+const COMMENT_OPEN: &str = "<!--";
+const COMMENT_CLOSE: &str = "-->";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Text,
@@ -43,17 +51,17 @@ fn indent(line: &str) -> usize {
 /// 围栏的开头：最多 3 个空格缩进，3 个以上的 ``` 或 ~~~。
 fn fence(line: &str) -> Option<(char, usize)> {
     let body = line.trim_start_matches(' ');
-    if indent(line) > 3 {
+    if indent(line) > MAX_INDENT {
         return None;
     }
     let mark = body.chars().next().filter(|c| *c == '`' || *c == '~')?;
     let count = body.chars().take_while(|c| *c == mark).count();
-    (count >= 3).then_some((mark, count))
+    (count >= MIN_FENCE).then_some((mark, count))
 }
 
 fn closes(line: &str, (mark, count): (char, usize)) -> bool {
     let body = line.trim_start_matches(' ');
-    indent(line) <= 3
+    indent(line) <= MAX_INDENT
         && body.chars().take_while(|c| *c == mark).count() >= count
         && body.trim_start_matches(mark).trim().is_empty()
 }
@@ -65,8 +73,8 @@ fn is_blank(line: &str) -> bool {
 fn is_heading(line: &str) -> bool {
     let body = line.trim_start_matches(' ');
     let hashes = body.chars().take_while(|c| *c == '#').count();
-    indent(line) <= 3
-        && (1..=6).contains(&hashes)
+    indent(line) <= MAX_INDENT
+        && (1..=MAX_HEADING_LEVEL).contains(&hashes)
         && body[hashes..]
             .chars()
             .next()
@@ -108,20 +116,24 @@ fn blocks(text: &str) -> Vec<Block> {
             push(&mut blocks, Kind::Code, &lines[at..end].concat());
             paragraph = false;
             at = end;
-        } else if !paragraph && (indent(line) >= 4 || line.starts_with('\t')) {
+        } else if !paragraph && (indent(line) > MAX_INDENT || line.starts_with('\t')) {
             push(&mut blocks, Kind::Code, line);
             at += 1;
-        } else if indent(line) <= 3 && line.trim_start_matches(' ').starts_with("<!--") {
+        } else if indent(line) <= MAX_INDENT
+            && line.trim_start_matches(' ').starts_with(COMMENT_OPEN)
+        {
             let rest = lines[at..].concat();
-            let open = rest.find("<!--").unwrap_or_default() + 4;
+            let open = rest.find(COMMENT_OPEN).unwrap_or_default() + COMMENT_OPEN.len();
             // marked：`<!-->`、`<!--->` 当场闭合，否则到第一个 `-->`。
             let after = &rest[open..];
             let close = if after.starts_with('>') {
                 Some(open + 1)
             } else if after.starts_with("->") {
-                Some(open + 2)
+                Some(open + "->".len())
             } else {
-                after.find("-->").map(|found| open + found + 3)
+                after
+                    .find(COMMENT_CLOSE)
+                    .map(|found| open + found + COMMENT_CLOSE.len())
             };
             let mut end = match close {
                 Some(close) => at + rest[..close].matches('\n').count() + 1,
@@ -211,8 +223,11 @@ fn segments(text: &str) -> Vec<&str> {
                     }
                 }
             }
-            b'<' if text[at..].starts_with("<!--") => {
-                text[at + 4..].find("-->").map(|end| at + 4 + end + 3)
+            b'<' if text[at..].starts_with(COMMENT_OPEN) => {
+                let body = at + COMMENT_OPEN.len();
+                text[body..]
+                    .find(COMMENT_CLOSE)
+                    .map(|end| body + end + COMMENT_CLOSE.len())
             }
             b'<' => tag()
                 .and_then(|tag| tag.find(&text[at..]))

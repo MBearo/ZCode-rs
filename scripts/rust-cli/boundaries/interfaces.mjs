@@ -187,9 +187,23 @@ export function extractWire(source) {
   return items;
 }
 
-/** 帧类型的编号（`Kind::code` 的 match）。 */
+/** 帧类型的编号：`#[repr(u8)]` 的 `Kind` 的判别值（F122 起），或旧写法 `Kind::code` 的 match。 */
 export function extractFrameCodes(source) {
   const code = stripComments(source);
+  // F122：`#[repr(u8)]` 的 `Kind`，判别值是数字或同文件里的 `const NAME: u8 = 0x..;`。
+  const kind = /\benum Kind \{([\s\S]*?)\n\}/.exec(code);
+  if (kind) {
+    const consts = Object.fromEntries(
+      [...code.matchAll(/\bconst ([A-Z_][A-Z0-9_]*): u8 = (0x[0-9a-fA-F]+);/g)].map((match) => [
+        match[1],
+        match[2],
+      ]),
+    );
+    const entries = [...kind[1].matchAll(/\b([A-Z][A-Za-z]*) = (0x[0-9a-fA-F]+|[A-Z_][A-Z0-9_]*)/g)]
+      .map((match) => [match[1], match[2].startsWith("0x") ? match[2] : consts[match[2]]])
+      .filter(([, value]) => value !== undefined);
+    if (entries.length) return Object.fromEntries(entries);
+  }
   const body = /fn code\(self\) -> u8 \{([\s\S]*?)\n {4}\}/.exec(code);
   if (!body) return {};
   return Object.fromEntries(

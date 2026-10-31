@@ -10,7 +10,9 @@ use rust_cli_exec_transport::{FrameSink, FrameSource, Link};
 use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::envelope::{Ack, Beat, Close, RequestHeader};
 use rust_cli_exec_wire::frame::{Frame, Kind, Reassembler, Received, Splitter};
-use rust_cli_exec_wire::handshake::{HEARTBEAT_MS, Hello, PROTOCOL, Refuse, RefuseCode, Welcome};
+use rust_cli_exec_wire::handshake::{
+    HEARTBEAT_MISSES, HEARTBEAT_MS, Hello, PROTOCOL, Refuse, RefuseCode, Welcome,
+};
 use tokio::sync::mpsc;
 
 use crate::calls;
@@ -158,7 +160,7 @@ pub(crate) async fn serve(inner: Arc<Inner>, link: Box<dyn Link>) -> Result<(), 
         source,
         reassembler,
         control,
-        heartbeat * 3,
+        heartbeat * HEARTBEAT_MISSES,
     )
     .await;
     // 只摘掉自己的路由（更新的连接可能已经替换了它）；执行与流照常（remote-exec.md §18.5）。

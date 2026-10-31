@@ -292,11 +292,11 @@ fn normalized(name: &str) -> String {
         .to_lowercase()
         .replace('\u{131}', "i")
         .replace('\u{17f}', "s");
+    // 修复（F122）：以前只去掉 U+200C–U+200F、U+202A–U+202E、U+206A–U+206F、U+FEFF，藏着 U+061C、零宽空格或
+    // U+2066–U+2069 的 `.env` 认不出来；三处各写一份范围，现在用 base 的同一张表（constants.md §5.1.4）。
     let visible: String = lowered
         .chars()
-        .filter(|c| {
-            !matches!(u32::from(*c), 0x200c..=0x200f | 0x202a..=0x202e | 0x206a..=0x206f | 0xfeff)
-        })
+        .filter(|c| !rust_cli_base::chars::is_bidi_or_zero_width(*c))
         .collect();
     let base = visible.split(':').next().unwrap_or_default();
     let trimmed = base.trim_end_matches(['.', ' ']);

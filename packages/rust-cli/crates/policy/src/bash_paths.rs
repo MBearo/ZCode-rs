@@ -5,9 +5,11 @@
 //! 路径都要询问，询问文本逐字固定（`texts.rs`）。复合命令里有 `cd` 又有写入时一律询问；有 `cd` 又按相对路径读、
 //! 配置了 Read deny 规则时询问（§4.5.7）。
 
+use rust_cli_base::path::DEV_NULL;
 use rust_cli_kernel_api::permission::{PermissionMode, RuleBehavior};
 
 use crate::check::{AskKind, Check, Inputs};
+use crate::consts::{MIN_COPY_OPERANDS, NEWER_XY_LETTERS};
 use crate::files::{Access, path_rule};
 use crate::parse::Invocation;
 use crate::removal::{basename, strip_runners};
@@ -116,7 +118,9 @@ fn find_operands(args: &[String]) -> Vec<String> {
     let newer_xy = |word: &str| {
         word.strip_prefix("-newer").is_some_and(|rest| {
             let rest = rest.as_bytes();
-            rest.len() == 2 && b"acmBt".contains(&rest[0]) && b"acmtB".contains(&rest[1])
+            rest.len() == NEWER_XY_LETTERS
+                && b"acmBt".contains(&rest[0])
+                && b"acmtB".contains(&rest[1])
         })
     };
     let mut paths = Vec::new();
@@ -248,7 +252,7 @@ fn redirect_targets(invocation: &Invocation, inputs: &Inputs<'_>) -> Vec<Target>
         .redirects
         .iter()
         .filter(|redirect| matches!(redirect.operator.as_str(), ">" | ">>" | ">|" | "&>" | "&>>"))
-        .filter(|redirect| redirect.target != "/dev/null" && !redirect.target.starts_with('&'))
+        .filter(|redirect| redirect.target != DEV_NULL && !redirect.target.starts_with('&'))
         .map(|redirect| {
             let path = inputs.paths.resolve(&redirect.target);
             Target {
@@ -291,7 +295,7 @@ pub(crate) fn read_paths(invocation: &Invocation) -> Vec<String> {
             let found = operands(name, argv);
             match (access, name) {
                 (Access::Read, _) | (_, "sed") => paths.extend(found),
-                (_, "cp" | "mv") if found.len() >= 2 => {
+                (_, "cp" | "mv") if found.len() >= MIN_COPY_OPERANDS => {
                     paths.extend(found[..found.len() - 1].iter().cloned());
                 }
                 _ => {}
@@ -474,7 +478,7 @@ fn expand_home(path: &str, inputs: &Inputs<'_>) -> String {
 fn standard_stream(path: &str) -> bool {
     matches!(
         path,
-        "/dev/null" | "/dev/stdin" | "/dev/stdout" | "/dev/stderr" | "/dev/tty"
+        DEV_NULL | "/dev/stdin" | "/dev/stdout" | "/dev/stderr" | "/dev/tty"
     ) || path
         .strip_prefix("/dev/fd/")
         .is_some_and(|fd| !fd.is_empty() && fd.bytes().all(|b| b.is_ascii_digit()))
