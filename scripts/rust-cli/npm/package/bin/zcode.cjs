@@ -11,7 +11,7 @@ const platforms = require("../platforms.json");
 const entry = require("../package.json");
 
 // 自动更新的安装方式标记（docs/specs/rust-cli/update.md §2）：二进制只认这些变量判断自己由哪个包管理器安装、
-// 入口包与平台包叫什么。先删掉从父进程继承来的，再按本次的判断设一组新的（照 Codex `codex.js`）。
+// 入口包与平台包叫什么。先删掉从父进程继承来的，再按本次的判断设一组新的（继承来的标记可能属于另一次安装）。
 const MARKERS = {
   npm: "ZCODE_MANAGED_BY_NPM",
   pnpm: "ZCODE_MANAGED_BY_PNPM",
@@ -52,7 +52,7 @@ function selectPlatform(platform, arch, glibc) {
   return selected;
 }
 
-/** 这个目录是不是 pnpm 管理、且其中的入口包就是本包（Codex `isPnpmOwnedCodexInstall`）。 */
+/** 这个目录是不是 pnpm 管理、且其中的入口包就是本包。 */
 function isPnpmOwnedInstall(nodeModulesDir, packageRoot, name) {
   if (!existsSync(join(nodeModulesDir, ".modules.yaml"))) return false;
   try {
@@ -63,7 +63,7 @@ function isPnpmOwnedInstall(nodeModulesDir, packageRoot, name) {
 }
 
 /**
- * 安装本包的包管理器（Codex `detectPackageManager`，没有 Vite+）：从包的真实位置与入口脚本所在目录往上找 pnpm 的
+ * 安装本包的包管理器（不认 Vite+）：从包的真实位置与入口脚本所在目录往上找 pnpm 的
  * `node_modules/.modules.yaml`；再看 bun 的痕迹；其余（包括 `npx`）按 npm。
  */
 function detectPackageManager({ packageRoot, entrypointDir, name, env }) {
@@ -163,7 +163,7 @@ function lookup(env, name) {
 }
 
 /**
- * Windows 上找命令（Codex 在 Windows 上找更新命令的做法，以前在二进制里）：只在 PATH 的绝对路径项（盘符或 UNC）里找，
+ * Windows 上找更新命令（以前在二进制里）：只在 PATH 的绝对路径项（盘符或 UNC）里找，
  * 按 PATHEXT 依次试扩展名，取第一个存在的普通文件；不让项目里的同名命令冒充。
  */
 async function findWindowsCommand(name, env, isFile) {
@@ -321,7 +321,7 @@ async function main() {
   });
   const env = managedEnv(process.env, manager, entry.name, name);
   // Unix：execve 换成 zcode-rs，没有中间进程，不转发信号（session-lifecycle.md §3.5.1：终端的 SIGINT 本来就发给整个
-  // 前台进程组，Codex `codex.js` 那样 spawn 再 `child.kill` 转发会让子进程收到两次）；更新在 zcode-rs 里执行。
+  // 前台进程组，spawn 再 `child.kill` 转发会让子进程收到两次）；更新在 zcode-rs 里执行。
   if (process.platform !== "win32") {
     launch({
       platform: process.platform,

@@ -375,10 +375,10 @@ test("Unix execve and Windows spawn both carry the update markers", () => {
   assert.equal(calls[1][3].env.ZCODE_MANAGED_BY_NPM, "1");
 });
 
-test("the package manager is detected like the Codex launcher", async (t) => {
+test("the package manager is detected from pnpm and bun traces, npm otherwise", async (t) => {
   const temp = await fixture(t);
   const name = ENTRY;
-  // npm 全局安装：没有 pnpm 的 .modules.yaml，也没有 bun 的痕迹；`npx` 同样按 npm（Codex 不区分）。
+  // npm 全局安装：没有 pnpm 的 .modules.yaml，也没有 bun 的痕迹；`npx` 同样按 npm（不区分两者）。
   const npmRoot = join(temp, "npm/lib/node_modules", ENTRY);
   await mkdir(npmRoot, { recursive: true });
   const base = { packageRoot: await realpath(npmRoot), entrypointDir: join(npmRoot, "bin"), name };
