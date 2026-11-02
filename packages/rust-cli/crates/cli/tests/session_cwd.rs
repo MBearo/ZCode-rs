@@ -14,45 +14,23 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use rust_cli_env_local::{LocalEnvironment, ShellConfig};
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, InteractionId, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
+    EnvironmentId, Generation, OperationId, RunId, SessionId, ToolUseId,
 };
 use rust_cli_kernel_api::message::ToolResultContent;
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, PermissionGate,
-    ToolExecutor, ToolRegistry,
-};
+use rust_cli_kernel_api::orchestration::{PermissionGate, ToolExecutor, ToolRegistry};
+use rust_cli_kernel_api::permission::syntax::parse_rule;
 use rust_cli_kernel_api::permission::{
     PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
 };
-use rust_cli_kernel_api::testing::{MemoryStore, NoHooks, RoundTripEnv, local_services, machine};
+use rust_cli_kernel_api::testing::{NoHooks, RoundTripEnv, controller_services, machine};
 use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
 use rust_cli_policy::PolicyGate;
-use rust_cli_policy::rules::parse_rule;
 use rust_cli_tools::{BashTool, BuiltinTools, Pipeline};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-
-/// `-p` 没有交互：询问按拒绝处理，询问的文本成为 tool_result。
-struct NoOneToAsk;
-
-#[async_trait]
-impl Interactions for NoOneToAsk {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        _request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i"),
-            answer: json!({"decision": "unavailable"}),
-        })
-    }
-}
 
 /// 一个工作区、一套工具与一条判决链（readFileState 在工具里，同一个会话的各步共用）。
 struct Bench {
@@ -108,7 +86,7 @@ impl Bench {
             _dir: dir,
             root,
             tools: rust_cli_tools::builtin(gate.clone()).with_search_opt_in(true),
-            bash: Arc::new(BashTool::new()),
+            bash: Arc::new(BashTool::default()),
             pipeline: Pipeline::new(gate, Arc::new(NoHooks)),
             env: Arc::new(RoundTripEnv(Arc::new(local))),
             mode,
@@ -127,29 +105,26 @@ impl Bench {
         let env = self.env.clone();
         let context = ToolUseContext {
             session: session.clone(),
-            run: RunId::new("run_1"),
             tool_use: ToolUseId::new(format!("toolu_{:03}", self.step)),
-            agent: None,
             workspace: WorkspaceRef {
                 environment: EnvironmentId::new("local"),
                 root: EnvPath::new(self.root.to_string_lossy()),
             },
             mode: self.mode,
-            cancel: CancellationToken::new(),
             machine: machine(env.clone()),
-            local: local_services(env),
-            artifacts: Arc::new(MemoryStore::default()),
-            interactions: Arc::new(NoOneToAsk),
-            operation: OperationContext {
-                environment: EnvironmentId::new("local"),
-                generation: Generation::new("g1"),
-                owner_epoch: OwnerEpoch::LOCAL,
-                operation: OperationId::new(format!("op_{}", self.step)),
-                origin: Origin::Agent {
+            controller: controller_services(env),
+            interactions: Arc::new(rust_cli_kernel_api::testing::NoOneToAsk),
+            session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+            operation: OperationContext::new(
+                EnvironmentId::new("local"),
+                Generation::new("g1"),
+                OperationId::new(format!("op_{}", self.step)),
+                Origin::Agent {
                     session,
                     run: RunId::new("run_1"),
                 },
-            },
+            ),
+            ..rust_cli_kernel_api::testing::tool_use_context()
         };
         let tool = if tool == "Bash" {
             self.bash.clone()
@@ -157,7 +132,11 @@ impl Bench {
             self.tools.find(tool).unwrap()
         };
         let (progress, _updates) = mpsc::channel(64);
-        let output = self.pipeline.execute(tool, input, context, progress).await;
+        let output = self
+            .pipeline
+            .execute(tool, input, context, progress)
+            .await
+            .output;
         let text = output
             .content
             .iter()

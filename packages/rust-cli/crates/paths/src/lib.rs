@@ -83,6 +83,18 @@ const PLUGINS_DIR: &str = "plugins";
 const MODEL_IO_DEBUG_DIR: &str = "debug";
 const MODEL_IO_ROLLOUT_DIR: &str = "rollout";
 
+/// 一台执行环境的 home 下自动记忆目录的各段（Node 的缺省布局 `~/.zcode/projects/<项目>/memory`；deployment.md §8、
+/// §19.1）：主 env 不在本进程时，记忆放在那台机器上，由调用方按那台机器的路径风格接在它的 home 后面。`project` 同
+/// [`StoragePaths::memory_dir`]。
+pub fn home_memory_dir(project: &str) -> [String; 4] {
+    [
+        DOT_DIR.to_owned(),
+        PROJECTS_DIR.to_owned(),
+        sanitize_path(project),
+        MEMORY_DIR.to_owned(),
+    ]
+}
+
 /// 用户根（`<home>/.zcode`）下的位置；`rest` 为空时是用户根本身（Node `DEFAULT_BASE_DIR`、Host 的 `~/.zcode`）。
 ///
 /// 本机存储里用户根只在这里计算：会话库与存储根的缺省值、配置根 `.zcode/v2`（`home` 换成 `ZCODE_DATA_BASE_DIR`

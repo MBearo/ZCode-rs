@@ -2,11 +2,12 @@
 //! 提问的按键：多于一题时有标签页与确认页。选项之后是 `Other` 行（直接输入）；单选题选中即到下一题，
 //! 多选题空格或数字勾选；←/→ 或 tab 切换标签页；esc 拒绝回答。
 use crossterm::event::{KeyCode, KeyEvent};
+use rust_cli_kernel_api::orchestration::Answer;
 use rust_cli_kernel_api::orchestration::InteractionRequest;
-use serde_json::Value;
 
 use super::{Interaction, Question, questions};
-use crate::ui::keyboard::Typing;
+use crate::ui::keyboard;
+use crate::ui::pager::cycle;
 
 fn toggle(values: &mut Vec<String>, value: &str) {
     match values.iter().position(|v| v == value) {
@@ -27,15 +28,14 @@ impl Interaction {
         &mut self,
         request: &InteractionRequest,
         key: KeyEvent,
-        input: Typing,
-    ) -> Option<Value> {
+    ) -> Option<Answer> {
         let list = questions(request);
         let pages = if list.len() > 1 { list.len() + 1 } else { 1 };
-        let typed = input.is_text(&key);
+        let typed = keyboard::is_text(&key);
         let preview = list.get(self.question).is_some_and(Question::preview_mode);
         // 预览题写备注时 tab 与左右键不切换题目（工作线 F72）。
         if preview && self.typing {
-            return self.preview_key(&list, key, input);
+            return self.preview_key(&list, key);
         }
         let switch = |this: &mut Self, page: usize| {
             this.question = page;
@@ -58,7 +58,7 @@ impl Interaction {
             _ => {}
         }
         if preview {
-            return self.preview_key(&list, key, input);
+            return self.preview_key(&list, key);
         }
         // 确认页：1. Submit answers；2. Cancel。
         let Some(question) = list.get(self.question) else {
@@ -79,16 +79,12 @@ impl Interaction {
             let draft = &mut self.drafts[self.question];
             match key.code {
                 KeyCode::Esc => self.typing = false,
-                KeyCode::Up => {
+                KeyCode::Up | KeyCode::Down => {
                     self.typing = false;
-                    self.cursor = (self.cursor + count - 1) % count;
-                }
-                KeyCode::Down => {
-                    self.typing = false;
-                    self.cursor = (self.cursor + 1) % count;
+                    self.cursor = cycle(self.cursor, count, key.code == KeyCode::Down);
                 }
                 KeyCode::Backspace => {
-                    draft.notes.pop();
+                    crate::ui::line_edit::backspace(&mut draft.notes);
                 }
                 KeyCode::Enter => {
                     if !question.multi && !draft.notes.trim().is_empty() {
@@ -103,8 +99,9 @@ impl Interaction {
         }
         let draft = &mut self.drafts[self.question];
         match key.code {
-            KeyCode::Up => self.cursor = (self.cursor + count - 1) % count,
-            KeyCode::Down => self.cursor = (self.cursor + 1) % count,
+            KeyCode::Up | KeyCode::Down => {
+                self.cursor = cycle(self.cursor, count, key.code == KeyCode::Down);
+            }
             KeyCode::Char(' ') if question.multi => {
                 if let Some((value, _)) = question.options.get(self.cursor) {
                     toggle(&mut draft.values, value);
@@ -146,7 +143,7 @@ impl Interaction {
     }
 
     /// 下一题；只有一题或已在最后一题时：一题直接提交，多题进入确认页。
-    pub(super) fn advance(&mut self, list: &[Question]) -> Option<Value> {
+    pub(super) fn advance(&mut self, list: &[Question]) -> Option<Answer> {
         self.typing = false;
         if list.len() == 1 {
             return self.submit(list);

@@ -1,6 +1,9 @@
 //! 标题请求的形状与辅助选项（titles.md §3）。
 use async_trait::async_trait;
+use rust_cli_kernel_api::message::ContentBlock;
+use rust_cli_kernel_api::model::ModelEvent;
 use rust_cli_kernel_api::provider::{CatalogModel, ModelCatalog, WireProtocol};
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::testing::{FixedClock, ScriptedModel, selection, text_response};
 
 use super::*;
@@ -87,10 +90,7 @@ async fn the_request_uses_the_title_prompt_and_node_auxiliary_options() {
     assert_eq!(request.options.provider_max_output_tokens, Some(4_096));
     assert_eq!(request.selection.reasoning.as_deref(), Some("off"));
     assert_eq!(request.selection.model, selection().model);
-    assert_eq!(
-        request.source,
-        QuerySource::Side("generate_session_title".to_owned())
-    );
+    assert_eq!(request.source, QuerySource::Side(SideSource::SessionTitle));
 }
 
 #[tokio::test]

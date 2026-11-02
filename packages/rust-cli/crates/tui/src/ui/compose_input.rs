@@ -7,16 +7,17 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::app::{Action, App};
 use super::composer::InputMode;
+use super::keyboard;
 
 /// ctrl+x 之后等下一个键的时间。
 pub const CHORD: Duration = Duration::from_millis(1000);
 
 impl App {
     pub(super) fn input_key(&mut self, key: KeyEvent, now: Instant) -> Option<Option<Action>> {
-        let ctrl = self.typing.ctrl(&key);
-        let alt = self.typing.alt(&key);
+        let ctrl = keyboard::ctrl(&key);
+        let alt = keyboard::alt(&key);
         // 和弦的第二个键；不是已知的和弦时这个键照常处理。
-        if let Some(at) = self.chord.take()
+        if let Some(at) = self.keys.chord.take()
             && now.duration_since(at) < CHORD
         {
             match key.code {
@@ -36,7 +37,7 @@ impl App {
         // 搜索模式（修复线 F114，tui-input.md §2.3.1）：输入框里只有 `/`（斜杠列表开着）、光标在末尾时手打第二个 `/`。
         // 粘贴进来的 `//` 不走这里（不切模式）。
         if key.code == KeyCode::Char('/')
-            && self.typing.is_plain_text(&key)
+            && keyboard::is_plain_text(&key)
             && self.composer.mode == InputMode::Prompt
             && self.composer.area.text() == "/"
             && self.composer.area.cursor() == 1
@@ -68,7 +69,7 @@ impl App {
         }
         match key.code {
             KeyCode::Char('x') if ctrl => {
-                self.chord = Some(now);
+                self.keys.chord = Some(now);
                 Some(None)
             }
             KeyCode::Enter if ctrl => Some(self.send_now()),
@@ -101,7 +102,7 @@ impl App {
     /// 立即发送的提示里写哪个键（修复线 F104，tui-input.md §11.1.1）：终端分辨得出增强按键时 ctrl+enter
     /// （经 `CSI u` 到达，与回车分得开），分辨不出时 ctrl+x ctrl+s（和弦，任何终端都按得出来）。
     pub(super) fn send_now_key(&self) -> &'static str {
-        if self.keyboard_enhanced {
+        if self.keys.keyboard_enhanced {
             "ctrl+enter"
         } else {
             "ctrl+x ctrl+s"

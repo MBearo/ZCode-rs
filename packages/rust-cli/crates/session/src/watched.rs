@@ -3,7 +3,8 @@
 //! 审查 R1-20：原来 `notices`、`agent_signals`、`cron` 各有一份相同的 `Option<Mutex<BoxStream>>` 包装，
 //! 合成这一个泛型。
 
-use std::sync::{Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::Mutex;
 
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
@@ -20,7 +21,7 @@ impl<T> Watched<T> {
     /// 下一项；流结束后永远等待（`select!` 里这一支不再就绪）。
     pub(crate) async fn next(&mut self) -> T {
         if let Some(stream) = &mut self.0 {
-            let stream = stream.get_mut().unwrap_or_else(PoisonError::into_inner);
+            let stream = stream.get_mut_unpoisoned();
             if let Some(item) = stream.next().await {
                 return item;
             }

@@ -20,7 +20,7 @@ fn control_characters_become_entities() {
 #[test]
 fn every_file_tool_has_its_prompt_data() {
     for name in ["Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit"] {
-        let found = definition(name);
+        let found = rust_cli_prompts::definition(name);
         assert!(!found.description.is_empty(), "{name}");
         assert_eq!(found.schema["type"], "object", "{name}");
     }

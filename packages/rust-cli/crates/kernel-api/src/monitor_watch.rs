@@ -1,19 +1,21 @@
 //! 一个 monitor 的切行、批与限流（工作线 F83 新增，docs/specs/rust-cli/tools-more.md §19.6）：纯状态，没有 IO、计时器
 //! 与文字。
 //!
-//! 主线程的 monitor 由会话 actor 持有它，子代理的由 agents 的转发任务持有（同一份规则，tools-more.md §19.1）：输出到了调
-//! [`Watch::on_data`]（ws 的生命周期调 [`Watch::on_lifecycle`]），批的截止时刻到了调 [`Watch::flush_due`]，到期调
-//! [`Watch::expire`]，事件流结束调 [`Watch::finish`]。说明是结构化的 [`Housekeeping`]，文字由调用方按 prompts 给出。
+//! 主线程的 monitor 由会话 actor 持有它，子代理的由 agents 的转发任务持有（同一份规则，tools-more.md §19.1）：输出流的
+//! 每个事件交给 [`Watch::on_event`]（按游标去重、切行、ws 的生命周期、出错续读与结束，它给出调用方要做的 IO，工作线
+//! F130 起两边不再各写一份分派），截止时刻到了调 [`Watch::on_due`]，事件流结束调 [`Watch::finish`]。说明是结构化的
+//! [`Housekeeping`]，文字由调用方按 prompts 给出。
 //! 时刻是注入的时钟给的毫秒数（README §4：内核不用单调时钟的类型），由调用方传入，所以测试不用等。
 
 use rust_cli_base::js::string::{trim, utf16_len, utf16_prefix};
 use rust_cli_base::units;
 
+use crate::env::{CommandEvent, EnvError, OutputStream};
 use crate::env_shell::SocketEvent;
-use crate::monitor::MonitorArmed;
+use crate::monitor::{MonitorArmed, MonitorSource};
 
-/// 输出流连续出错这么多次就不再按游标重新订阅（这个 monitor 之后只等终态通知）。命令结束后 `watch_command` 给
-/// `NotFound`（工作线 F119），所以会话 actor 与 agents 的转发任务都要有这个上限，不然一直重新订阅。
+/// 输出流连续出错这么多次就不再按游标重新订阅（[`Next::Ended`]：之后只等终态通知）。命令结束后 `watch_command` 给
+/// `NotFound`（工作线 F119），没有这个上限就一直重新订阅。
 pub const STREAM_RETRIES: u8 = 3;
 
 /// 一行最多这么多 UTF-16 单位。
@@ -63,6 +65,25 @@ pub struct Step {
     pub stop: bool,
 }
 
+impl Step {
+    /// 没有要送的、也不用停。
+    pub fn is_empty(&self) -> bool {
+        self.emits.is_empty() && !self.stop
+    }
+}
+
+/// 输出流的一个事件交给 [`Watch::on_event`] 之后，调用方要做的 IO。
+#[derive(Debug, PartialEq, Eq)]
+pub enum Next {
+    /// 送出这些通知（可能为空）；`stop` 时停掉命令。
+    Step(Step),
+    /// 流断了、还没到上限：从这个游标续读（`watch_command(operation, cursor)`）。
+    Resubscribe(u64),
+    /// 事件流结束：到了 `Finished`，或连续出错到了上限（命令已结束，不再续读）。调用方查命令还在不在账本里，再按
+    /// [`Watch::finish`] 收尾；之后同一个 monitor 的事件（会话 actor 里续读之前的旧流）不再处理。
+    Ended,
+}
+
 /// 令牌桶：开始时满，每 `REFILL` 补一个，不超过容量。
 #[derive(Debug, Clone)]
 struct Bucket {
@@ -94,8 +115,12 @@ impl Bucket {
 
 pub struct Watch {
     pub armed: MonitorArmed,
-    /// 已读到的输出位置（`watch_command` 的游标）。
-    pub cursor: u64,
+    /// 已读到的输出位置（`watch_command` 的游标，事件里的 `cursor` 是这一段之后的位置）。
+    cursor: u64,
+    /// 输出流连续出错的次数（到 [`STREAM_RETRIES`] 为止续读）。
+    errors: u8,
+    /// 已经给过 [`Next::Ended`]。
+    ended: bool,
     /// 还没有换行的半行（字节）。
     buffer: Vec<u8>,
     pending: Vec<String>,
@@ -140,6 +165,8 @@ impl Watch {
         Self {
             armed,
             cursor: 0,
+            errors: 0,
+            ended: false,
             buffer: Vec::new(),
             pending: Vec::new(),
             batch_due: None,
@@ -170,8 +197,62 @@ impl Watch {
         }
     }
 
+    /// 输出流的一个事件（会话 actor 与 agents 的转发任务共用的分派，工作线 F130）：stdout 按游标去重后切行，ws 的
+    /// 生命周期给说明，`Finished` 结束；出错时还没到上限就从记下的游标续读，到了上限按结束处理。
+    ///
+    /// 修正（工作线 F130）：以前两边各写一份，已经分叉——子代理一侧续读后不按游标去重（续读从头给的那段又送一遍）；
+    /// 会话一侧出错到上限后什么都不做，终态通知记下来等一个永远不来的结束（模型收不到、通知也不 ack）。
+    pub fn on_event(&mut self, event: Result<CommandEvent, EnvError>, now: u64) -> Next {
+        if self.ended {
+            return Next::Step(Step::default());
+        }
+        let event = match event {
+            Ok(event) => event,
+            Err(_) => {
+                self.errors = self.errors.saturating_add(1);
+                if self.errors <= STREAM_RETRIES {
+                    return Next::Resubscribe(self.cursor);
+                }
+                self.ended = true;
+                return Next::Ended;
+            }
+        };
+        self.errors = 0;
+        match event {
+            CommandEvent::Output {
+                stream: OutputStream::Stdout,
+                data,
+                cursor,
+            } => {
+                // 续读给出的流里游标之前的部分已经读过，不再处理（不重复、不漏，tools-more.md §19.6）。
+                if cursor > self.cursor {
+                    let fresh = usize::try_from(cursor - self.cursor).unwrap_or(data.len());
+                    let start = data.len().saturating_sub(fresh);
+                    self.on_data(&data[start..], now);
+                    self.cursor = cursor;
+                }
+                Next::Step(Step::default())
+            }
+            CommandEvent::Output {
+                stream: OutputStream::Stderr,
+                data,
+                ..
+            } => match self.armed.source {
+                MonitorSource::Socket => Next::Step(self.on_lifecycle(&data, now)),
+                MonitorSource::Command => Next::Step(Step::default()),
+            },
+            CommandEvent::Started { .. }
+            | CommandEvent::Backgrounded
+            | CommandEvent::BackgroundedBy { .. } => Next::Step(Step::default()),
+            CommandEvent::Finished { .. } => {
+                self.ended = true;
+                Next::Ended
+            }
+        }
+    }
+
     /// 新的 stdout 数据。
-    pub fn on_data(&mut self, data: &[u8], now: u64) {
+    fn on_data(&mut self, data: &[u8], now: u64) {
         self.buffer.extend_from_slice(data);
         if self.buffer.len() > BUFFER_LIMIT {
             let drop = self.buffer.len() - BUFFER_LIMIT;
@@ -343,7 +424,7 @@ impl Watch {
 
     /// ws 的生命周期（执行环境写的 JSON 行，[`SocketEvent`]）：按到达顺序给说明。关闭前先送出待发的行（含半行）；
     /// 升级被拒之后不送出错说明；一帧太大之后不送关闭说明；到期或停掉过之后什么都不送。
-    pub fn on_lifecycle(&mut self, data: &[u8], now: u64) -> Step {
+    fn on_lifecycle(&mut self, data: &[u8], now: u64) -> Step {
         self.lifecycle.extend_from_slice(data);
         let mut step = Step::default();
         if self.expired || self.stopped {

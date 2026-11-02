@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use rust_cli_base::text;
 use rust_cli_kernel_api::env::EnvPath;
 use rust_cli_kernel_api::env_rewind::{RestoreFile, content_hash};
-use rust_cli_kernel_api::ids::MessageId;
+use rust_cli_kernel_api::ids::{MachineName, MessageId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::session_api::FileChange;
 use rust_cli_kernel_api::store::WorkspaceCheckpoint;
@@ -165,7 +165,7 @@ pub(crate) fn changes(artifacts: &[Artifact]) -> Vec<FileChange> {
                 path,
                 additions,
                 deletions,
-                machine: None,
+                machine: MachineName::primary(),
             }
         })
         .collect();

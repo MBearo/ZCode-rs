@@ -16,14 +16,6 @@ const OUTPUT_RECOVERY_LIMIT: u8 = 3;
 const THINKING_RESEND_LIMIT: u8 = 2;
 const THINKING_STALL_LIMIT: u8 = 1;
 
-/// 不做 thinking-only 提示的旁路来源。
-pub(crate) const QUIET_SIDE_SOURCES: [&str; 4] = [
-    "prompt_suggestion",
-    "away_summary",
-    "agent_summary",
-    "hook_prompt",
-];
-
 /// 重试时这次响应的去向。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Fate {
@@ -91,11 +83,14 @@ fn has_visible_text(assistant: &AssistantMessage) -> bool {
         .any(|block| matches!(block, ContentBlock::Text { text } if !text.trim().is_empty()))
 }
 
-fn nudges_thinking_only(source: &QuerySource) -> bool {
+/// 安静的来源：摘要请求与安静的旁路来源。它们不做 thinking-only 提示，也不做自动与反应式压缩（compact.md §1）。
+/// 工作线 F131：以前这里与 `compaction.rs` 各写一份同样的函数体（`nudges_thinking_only` 与 `eligible`）。审查 E5：旁路
+/// 来源以前按一张 4 个名字的名单认（3 个没有生产者），现在是 `SideSource::quiet` 的穷举。
+pub(crate) fn quiet(source: &QuerySource) -> bool {
     match source {
-        QuerySource::Compact => false,
-        QuerySource::Side(name) => !QUIET_SIDE_SOURCES.contains(&name.as_str()),
-        QuerySource::MainThread | QuerySource::Subagent(_) => true,
+        QuerySource::Compact => true,
+        QuerySource::Side(side) => side.quiet(),
+        QuerySource::MainThread | QuerySource::Subagent(_) => false,
     }
 }
 
@@ -213,9 +208,7 @@ impl Guards {
                 }
             }
             Some(StopReason::EndTurn | StopReason::StopSequence)
-                if !self.thinking_nudged
-                    && !has_visible_text(assistant)
-                    && nudges_thinking_only(source) =>
+                if !self.thinking_nudged && !has_visible_text(assistant) && !quiet(source) =>
             {
                 self.thinking_nudged = true;
                 Outcome::Retry {

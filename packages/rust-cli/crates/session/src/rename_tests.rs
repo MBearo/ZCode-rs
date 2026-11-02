@@ -1,18 +1,14 @@
 //! 不带参数的 `/rename`（titles.md §8.2）：真实的会话 actor 与主循环，脚本模型给起名的回复。
 use std::sync::Arc;
 
-use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::ContentBlock;
-use rust_cli_kernel_api::model::{
-    ModelError, ModelEvent, ModelPort, ModelRequest, OutputFormat, QuerySource,
-};
+use rust_cli_kernel_api::model::{ModelPort, OutputFormat, QuerySource};
 use rust_cli_kernel_api::session_api::{Ack, Command, KernelEvent, SessionHandle};
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::store::Fact;
 use rust_cli_kernel_api::testing::{ScriptedModel, selection, text_response};
-use serde_json::json;
 use tokio::sync::Notify;
-use tokio_util::sync::CancellationToken;
 
 use crate::test_support::{Built, Setup, envelope, finished, submit, until};
 
@@ -59,7 +55,10 @@ async fn the_model_names_the_session() {
     assert_eq!(
         ack,
         Ack::Accepted {
-            result: json!({"name": "flaky-login-test", "message": "Session renamed to: flaky-login-test"})
+            result: rust_cli_kernel_api::session_api::CommandResult::Renamed {
+                name: "flaky-login-test".to_owned(),
+                message: "Session renamed to: flaky-login-test".to_owned(),
+            }
         }
     );
     let requests = side.requests();
@@ -87,10 +86,7 @@ async fn the_model_names_the_session() {
         request.options.output_format,
         Some(OutputFormat::JsonSchema { .. })
     ));
-    assert_eq!(
-        request.source,
-        QuerySource::Side("rename_generate_name".to_owned())
-    );
+    assert_eq!(request.source, QuerySource::Side(SideSource::Rename));
     // 写入按改名（来源 custom）：先提交，再改内存、发事件。
     assert_eq!(renamed(&facts(&built)), ["flaky-login-test"]);
     until(
@@ -146,31 +142,13 @@ async fn an_unusable_reply_keeps_the_title() {
     }
 }
 
-/// 回复要等 `open`：用来在起名期间插入别的命令。
-struct Gated {
-    open: Arc<Notify>,
-}
-
-impl ModelPort for Gated {
-    fn stream(
-        &self,
-        _request: ModelRequest,
-        _cancel: CancellationToken,
-    ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-        let open = self.open.clone();
-        stream::once(async move {
-            open.notified().await;
-            stream::iter(text_response(&["{\"name\":\"generated-name\"}"]))
-        })
-        .flatten()
-        .boxed()
-    }
-}
-
 #[tokio::test]
 async fn a_newer_rename_wins_over_the_generated_name() {
     let open = Arc::new(Notify::new());
-    let built = after_one_turn(Arc::new(Gated { open: open.clone() })).await;
+    // 起名的回复要等 `open`：用来在起名期间插入别的命令。
+    let side = ScriptedModel::new(vec![text_response(&["{\"name\":\"generated-name\"}"])])
+        .gated(open.clone());
+    let built = after_one_turn(Arc::new(side)).await;
     let naming = built.session.send(envelope("n1", Command::GenerateName));
     let others = async {
         // 起名期间：第二个起名被拒，改名照常提交。
@@ -197,7 +175,10 @@ async fn a_newer_rename_wins_over_the_generated_name() {
     assert_eq!(
         named,
         Ack::Accepted {
-            result: json!({"name": "mine", "message": "Session is named: mine (a newer rename landed first)"})
+            result: rust_cli_kernel_api::session_api::CommandResult::Renamed {
+                name: "mine".to_owned(),
+                message: "Session is named: mine (a newer rename landed first)".to_owned(),
+            }
         }
     );
     assert_eq!(renamed(&facts(&built)), ["mine"]);

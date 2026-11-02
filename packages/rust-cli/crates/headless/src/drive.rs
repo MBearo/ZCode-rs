@@ -10,15 +10,17 @@ use rust_cli_kernel_api::ids::CommandId;
 use rust_cli_kernel_api::message::{
     ContentBlock, Message, StopReason, Usage, UserMessage, UserOrigin,
 };
-use rust_cli_kernel_api::orchestration::PermissionAnswer;
+use rust_cli_kernel_api::orchestration::{Answer, PermissionAnswer};
 use rust_cli_kernel_api::panels::SubagentStatus;
+use rust_cli_kernel_api::permission::ExecutionState;
 use rust_cli_kernel_api::session_api::{
     Ack, Command, CommandEnvelope, Delivery, Kernel, KernelEvent, SessionHandle, TurnOutcome,
 };
+use rust_cli_kernel_api::session_follow::follow;
 use tokio::io::AsyncWrite;
 use tokio_util::sync::CancellationToken;
 
-use crate::events::{self, Init, ResultKind, TurnResult};
+use crate::events::{self, Finish, Init, ResultKind, TurnResult};
 use crate::partial::{Partial, wrap};
 use crate::printer::Printer;
 
@@ -66,13 +68,6 @@ impl Turn {
     }
 }
 
-fn add(total: &mut Usage, usage: Usage) {
-    total.input_tokens += usage.input_tokens;
-    total.output_tokens += usage.output_tokens;
-    total.cache_creation_input_tokens += usage.cache_creation_input_tokens;
-    total.cache_read_input_tokens += usage.cache_read_input_tokens;
-}
-
 /// 本地命令的输出（`<local-command-stdout>…</local-command-stdout>`）。
 fn local_output(user: &UserMessage) -> Option<&str> {
     let [ContentBlock::Text { text }] = user.content.as_slice() else {
@@ -80,14 +75,6 @@ fn local_output(user: &UserMessage) -> Option<&str> {
     };
     text.strip_prefix("<local-command-stdout>")?
         .strip_suffix("</local-command-stdout>")
-}
-
-/// 权限模式的名字；plan 开时是 `plan`（F20 的独立开关）。
-fn mode_name(view: &rust_cli_kernel_api::session_api::SessionView) -> String {
-    if view.plan {
-        return "plan".to_owned();
-    }
-    view.mode.cli_name().to_owned()
 }
 
 /// 一个会话的提问：会话、内核与输出。
@@ -120,7 +107,8 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
             .await
             .unwrap_or_default();
         let servers = self.kernel.mcp_servers().await;
-        let mode = mode_name(&view);
+        // 权限模式的名字；plan 开时是 `plan`（F20 的独立开关）。
+        let mode = ExecutionState::from_parts(view.mode, view.plan).effective();
         let uuid = self.printer.uuid();
         let output = &self.printer.output;
         let event = events::init(
@@ -130,7 +118,7 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
                 catalog: &catalog,
                 mcp_servers: &servers,
                 model: &view.selection.model,
-                permission_mode: &mode,
+                permission_mode: mode.cli_name(),
                 api_key_source: &output.api_key_source,
                 version: &output.version,
             },
@@ -153,7 +141,9 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
         let view = session.view().await?;
         let asked = view.messages.len();
         let mut model = view.selection.model.clone();
-        let mut events = session.subscribe(Some(view.last_seq));
+        // 缺陷修复（D2）：原来流结束（读端慢、订阅方落后）就当会话关了、报错退出；现在经 `follow` 按最后的 seq 重新订阅，
+        // 与 TUI、App 协议相同（session-lifecycle.md §2.1）。
+        let mut events = follow(session.clone(), view.last_seq);
         let ack = session
             .send(CommandEnvelope {
                 id: CommandId::new(format!("{session_id}:print:{asked}")),
@@ -219,9 +209,13 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
                         .await?;
                 }
                 // 没有人能回答（print 模式）：权限询问的工具结果是询问本身的文本
-                // （docs/specs/rust-cli/shell-permissions.md §4）；其他交互同样答 Unavailable。
-                KernelEvent::InteractionAsked { interaction, .. } => {
-                    let answer = serde_json::to_value(PermissionAnswer::Unavailable)?;
+                // （docs/specs/rust-cli/shell-permissions.md §4）；提问按不回答，计划审批按继续计划（工作线 F134 以前
+                // 一律答权限的 Unavailable，工具读不出，同样按没有回答处理）。
+                KernelEvent::InteractionAsked {
+                    interaction,
+                    request,
+                } => {
+                    let answer = Answer::nobody(&request, PermissionAnswer::Unavailable);
                     let command = Command::ResolveInteraction {
                         interaction,
                         answer,
@@ -282,7 +276,7 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
                     turn.answered = true;
                     turn.first_output_ms.get_or_insert(now);
                     if let Some(usage) = assistant.usage {
-                        add(&mut turn.usage, usage);
+                        turn.usage += usage;
                     }
                     turn.stop_reason = assistant.stop_reason;
                     turn.result_text = match assistant.content.last() {
@@ -292,13 +286,11 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
                 }
                 // `modelUsage` 按请求的模型记（键是请求用的模型，不是响应里的 `model`）。
                 if let Some(usage) = assistant.usage {
-                    add(
-                        self.printer
-                            .model_usage
-                            .entry(model.to_owned())
-                            .or_default(),
-                        usage,
-                    );
+                    *self
+                        .printer
+                        .model_usage
+                        .entry(model.to_owned())
+                        .or_default() += usage;
                 }
                 let (before, after) = if self.printer.format().partial {
                     partial.finish(&assistant)
@@ -368,13 +360,22 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
         stopping: bool,
     ) -> Result<Option<String>> {
         let (kind, failure) = match outcome {
-            TurnOutcome::Success => (
+            // 工具的 hook 要求停止、Stop hook 阻止继续也是 `success`，只是 `terminal_reason` 不同（query.md §3，工作线
+            // F131、F134）。
+            TurnOutcome::Success | TurnOutcome::HookStopped | TurnOutcome::StopHookPrevented => (
                 ResultKind::Success {
                     is_error: false,
                     result: turn.result_text.clone(),
                     ttft_ms: turn
                         .first_output_ms
                         .map(|first| first.saturating_sub(turn.started_ms)),
+                    finish: match outcome {
+                        TurnOutcome::HookStopped => Finish::HookStopped,
+                        TurnOutcome::StopHookPrevented => Finish::StopHookPrevented,
+                        TurnOutcome::Success
+                        | TurnOutcome::Interrupted
+                        | TurnOutcome::Failed { .. } => Finish::Completed,
+                    },
                 },
                 None,
             ),
@@ -396,6 +397,7 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
                         is_error: true,
                         result: message.clone(),
                         ttft_ms: None,
+                        finish: Finish::Completed,
                     },
                     Some(message.clone()),
                 ),
@@ -419,7 +421,8 @@ impl<W: AsyncWrite + Unpin> Driver<'_, '_, W> {
         };
         let duration_api_ms = self
             .kernel
-            .session_metering(self.session.id())
+            .queries()
+            .metering(self.session.id())
             .await
             .map_or(0, |metering| metering.api_duration_ms);
         let is_error = kind.is_error();
@@ -464,3 +467,7 @@ fn is_blocking_limit(message: &str) -> bool {
     use rust_cli_kernel_api::compaction::PROMPT_TOO_LONG;
     message == PROMPT_TOO_LONG || message.starts_with(&format!("{PROMPT_TOO_LONG} \u{b7} "))
 }
+
+#[cfg(test)]
+#[path = "drive_tests.rs"]
+mod tests;

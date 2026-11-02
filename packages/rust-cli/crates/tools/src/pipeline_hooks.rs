@@ -45,14 +45,11 @@ pub(crate) async fn event(
     payload: Value,
 ) -> HookEvent {
     let selection = context
-        .interactions
-        .current_selection(&context.session)
-        .await;
+        .session_ops
+        .view()
+        .await
+        .and_then(|view| view.selection);
     HookEvent {
-        name,
-        session: context.session.clone(),
-        workspace: context.workspace.clone(),
-        payload,
         context: HookContext {
             mode: Some(context.mode),
             agent: context.agent.clone(),
@@ -61,6 +58,12 @@ pub(crate) async fn event(
             run: Some(context.run.clone()),
             selection,
         },
+        ..HookEvent::new(
+            name,
+            context.session.clone(),
+            context.workspace.clone(),
+            payload,
+        )
     }
 }
 

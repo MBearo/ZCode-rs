@@ -1,9 +1,13 @@
 //! kernel-api 的结果 → 线上的类型（服务端的换算）。字节字段追加到二进制段。
+//!
+//! 结构一律穷举解构（F128，审查 X1）：kernel-api 加字段时这里编译失败，必须决定它上不上线；不上线的写成 `_` 并注明理由。
 
 use rust_cli_exec_wire::BodyBuilder;
 use rust_cli_exec_wire::dto::command as wc;
 use rust_cli_exec_wire::dto::core as w;
 use rust_cli_exec_wire::dto::files as wf;
+use rust_cli_exec_wire::dto::git as wg;
+use rust_cli_exec_wire::dto::mcp as wm;
 use rust_cli_exec_wire::dto::rewind as wr;
 use rust_cli_exec_wire::dto::shell as ws;
 use rust_cli_exec_wire::envelope::WireError;
@@ -11,14 +15,21 @@ use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvFacts, FileContent, Outcome, OutputStream,
 };
 use rust_cli_kernel_api::env_files::{
-    DirEntry, FileKind, FileStat, FileWritten, GlobMatches, GrepLineKind, GrepOutcome, PathFacts,
-    PathStyle, TextRead,
+    DirEntry, FileKind, FileStat, FileWritten, GlobMatches, GrepCount, GrepFileHit, GrepFileLines,
+    GrepLine, GrepLineKind, GrepOutcome, GrepSubmatch, PathFacts, PathStyle, TextRead, TextSlice,
 };
+use rust_cli_kernel_api::env_git::{GitDiff, GitSnapshot, GitStatus};
 use rust_cli_kernel_api::env_pdf::PdfRender;
-use rust_cli_kernel_api::env_rewind::{RestoreAction, RewindConflict, RewindPlan, RewindStatus};
+use rust_cli_kernel_api::env_rewind::{
+    RestoreAction, RestoredFile, RewindConflict, RewindPlan, RewindStatus,
+};
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundKind, BackgroundStatus, BackgroundStop, ShellNotice, ShellState,
 };
+use rust_cli_kernel_api::env_worktree::{
+    WorktreeChanges, WorktreeCreated, WorktreeEntry, WorktreeList,
+};
+use rust_cli_kernel_api::mcp::{McpError, McpTransportEvent};
 
 pub(crate) fn error(error: EnvError) -> WireError {
     match error {
@@ -47,18 +58,23 @@ pub(crate) fn outcome(outcome: Outcome) -> w::Outcome {
 }
 
 pub(crate) fn facts(facts: EnvFacts) -> w::EnvFacts {
+    let EnvFacts {
+        cwd,
+        platform,
+        os_version,
+        shell,
+        is_git_repo,
+        home,
+        uid,
+    } = facts;
     w::EnvFacts {
-        cwd: facts.cwd.as_str().to_owned(),
-        platform: facts.platform,
-        os_version: facts.os_version,
-        shell: facts.shell,
-        is_git_repo: facts.is_git_repo,
-        additional_directories: facts
-            .additional_directories
-            .into_iter()
-            .map(|dir| dir.as_str().to_owned())
-            .collect(),
-        home: facts.home.map(|home| home.as_str().to_owned()),
+        cwd: cwd.as_str().to_owned(),
+        platform,
+        os_version,
+        shell,
+        is_git_repo,
+        home: home.map(|home| home.as_str().to_owned()),
+        uid,
     }
 }
 
@@ -70,16 +86,18 @@ pub(crate) fn path_style(style: PathStyle) -> w::PathStyle {
 }
 
 pub(crate) fn path_facts(facts: PathFacts) -> w::PathFacts {
+    let PathFacts { home, style } = facts;
     w::PathFacts {
-        home: facts.home.map(|home| home.as_str().to_owned()),
-        style: path_style(facts.style),
+        home: home.map(|home| home.as_str().to_owned()),
+        style: path_style(style),
     }
 }
 
 pub(crate) fn file_content(content: FileContent, body: &mut BodyBuilder) -> wf::FileContent {
+    let FileContent { bytes, version } = content;
     wf::FileContent {
-        bytes: body.push(&content.bytes),
-        version: content.version.as_str().to_owned(),
+        bytes: body.push(&bytes),
+        version: version.as_str().to_owned(),
     }
 }
 
@@ -106,32 +124,50 @@ pub(crate) fn stat_entry(found: Result<Option<FileStat>, EnvError>) -> wf::StatE
 }
 
 pub(crate) fn file_stat(stat: FileStat) -> wf::FileStat {
+    let FileStat {
+        kind: file_kind,
+        size,
+        mtime_ms,
+        version,
+    } = stat;
     wf::FileStat {
-        kind: kind(stat.kind),
-        size: stat.size,
-        mtime_ms: stat.mtime_ms,
-        version: stat.version.as_str().to_owned(),
+        kind: kind(file_kind),
+        size,
+        mtime_ms,
+        version: version.as_str().to_owned(),
     }
 }
 
 pub(crate) fn dir_entry(entry: DirEntry) -> wf::DirEntry {
+    let DirEntry {
+        name,
+        kind: entry_kind,
+    } = entry;
     wf::DirEntry {
-        name: entry.name,
-        kind: kind(entry.kind),
+        name,
+        kind: kind(entry_kind),
     }
 }
 
 pub(crate) fn text_read(read: TextRead, body: &mut BodyBuilder) -> wf::TextRead {
     match read {
-        TextRead::Text(slice) => wf::TextRead::Text {
+        TextRead::Text(TextSlice {
+            content,
+            line_count,
+            total_lines,
+            total_bytes,
+            read_bytes,
+            mtime_ms,
+            version,
+        }) => wf::TextRead::Text {
             slice: wf::TextSlice {
-                content: body.push(slice.content.as_bytes()),
-                line_count: slice.line_count,
-                total_lines: slice.total_lines,
-                total_bytes: slice.total_bytes,
-                read_bytes: slice.read_bytes,
-                mtime_ms: slice.mtime_ms,
-                version: slice.version.as_str().to_owned(),
+                content: body.push(content.as_bytes()),
+                line_count,
+                total_lines,
+                total_bytes,
+                read_bytes,
+                mtime_ms,
+                version: version.as_str().to_owned(),
             },
         },
         TextRead::Directory => wf::TextRead::Directory,
@@ -140,83 +176,104 @@ pub(crate) fn text_read(read: TextRead, body: &mut BodyBuilder) -> wf::TextRead 
 }
 
 pub(crate) fn file_written(written: FileWritten) -> wf::FileWritten {
+    let FileWritten {
+        version,
+        mtime_ms,
+        created,
+    } = written;
     wf::FileWritten {
-        version: written.version.as_str().to_owned(),
-        mtime_ms: written.mtime_ms,
-        created: written.created,
+        version: version.as_str().to_owned(),
+        mtime_ms,
+        created,
     }
 }
 
 pub(crate) fn glob_matches(matches: GlobMatches) -> wf::GlobMatches {
+    let GlobMatches { files, total } = matches;
     wf::GlobMatches {
-        files: matches
-            .files
+        files: files
             .into_iter()
             .map(|file| file.as_str().to_owned())
             .collect(),
-        total: matches.total as u64,
+        total: total as u64,
+    }
+}
+
+fn grep_hit(hit: GrepFileHit) -> wf::GrepFileHit {
+    let GrepFileHit { path, mtime_ms } = hit;
+    wf::GrepFileHit {
+        path: path.as_str().to_owned(),
+        mtime_ms,
+    }
+}
+
+fn grep_count(count: GrepCount) -> wf::GrepCount {
+    let GrepCount { path, count } = count;
+    wf::GrepCount {
+        path: path.as_str().to_owned(),
+        count,
+    }
+}
+
+fn grep_line(line: GrepLine) -> wf::GrepLine {
+    let GrepLine {
+        kind,
+        line_number,
+        text,
+        submatches,
+    } = line;
+    wf::GrepLine {
+        kind: match kind {
+            GrepLineKind::Match => wf::GrepLineKind::Match,
+            GrepLineKind::Context => wf::GrepLineKind::Context,
+        },
+        line_number,
+        text,
+        submatches: submatches
+            .into_iter()
+            .map(|GrepSubmatch { start, text }| wf::GrepSubmatch { start, text })
+            .collect(),
+    }
+}
+
+fn grep_lines(file: GrepFileLines) -> wf::GrepFileLines {
+    let GrepFileLines {
+        path,
+        lines,
+        binary_offset,
+    } = file;
+    wf::GrepFileLines {
+        path: path.as_str().to_owned(),
+        lines: lines.into_iter().map(grep_line).collect(),
+        binary_offset,
     }
 }
 
 pub(crate) fn grep_outcome(outcome: GrepOutcome) -> wf::GrepOutcome {
     match outcome {
         GrepOutcome::Files { files } => wf::GrepOutcome::Files {
-            files: files
-                .into_iter()
-                .map(|hit| wf::GrepFileHit {
-                    path: hit.path.as_str().to_owned(),
-                    mtime_ms: hit.mtime_ms,
-                })
-                .collect(),
+            files: files.into_iter().map(grep_hit).collect(),
         },
         GrepOutcome::Counts { counts } => wf::GrepOutcome::Counts {
-            counts: counts
-                .into_iter()
-                .map(|count| wf::GrepCount {
-                    path: count.path.as_str().to_owned(),
-                    count: count.count,
-                })
-                .collect(),
+            counts: counts.into_iter().map(grep_count).collect(),
         },
         GrepOutcome::Content { files } => wf::GrepOutcome::Content {
-            files: files
-                .into_iter()
-                .map(|file| wf::GrepFileLines {
-                    path: file.path.as_str().to_owned(),
-                    lines: file
-                        .lines
-                        .into_iter()
-                        .map(|line| wf::GrepLine {
-                            kind: match line.kind {
-                                GrepLineKind::Match => wf::GrepLineKind::Match,
-                                GrepLineKind::Context => wf::GrepLineKind::Context,
-                            },
-                            line_number: line.line_number,
-                            text: line.text,
-                            submatches: line
-                                .submatches
-                                .into_iter()
-                                .map(|sub| wf::GrepSubmatch {
-                                    start: sub.start,
-                                    text: sub.text,
-                                })
-                                .collect(),
-                        })
-                        .collect(),
-                    binary_offset: file.binary_offset,
-                })
-                .collect(),
+            files: files.into_iter().map(grep_lines).collect(),
         },
         GrepOutcome::Rejected { message } => wf::GrepOutcome::Rejected { message },
     }
 }
 
 pub(crate) fn shell_state(state: ShellState) -> ws::ShellState {
+    let ShellState {
+        cwd,
+        outputs,
+        background,
+    } = state;
     ws::ShellState {
-        cwd: state.cwd.as_str().to_owned(),
-        outputs: state.outputs.map(|outputs| outputs.as_str().to_owned()),
-        background: state
-            .background
+        cwd: cwd.as_str().to_owned(),
+        outputs: outputs.map(|outputs| outputs.as_str().to_owned()),
+        background: background
             .into_iter()
             .map(|task| task.as_str().to_owned())
             .collect(),
@@ -240,11 +297,17 @@ fn background_status(status: BackgroundStatus) -> ws::BackgroundStatus {
 }
 
 pub(crate) fn background_info(info: BackgroundInfo) -> ws::BackgroundInfo {
+    let BackgroundInfo {
+        command,
+        status,
+        kind,
+        description,
+    } = info;
     ws::BackgroundInfo {
-        command: info.command,
-        status: background_status(info.status),
-        kind: background_kind(info.kind),
-        description: info.description,
+        command,
+        status: background_status(status),
+        kind: background_kind(kind),
+        description,
     }
 }
 
@@ -259,10 +322,15 @@ pub(crate) fn background_stop(stop: BackgroundStop) -> ws::BackgroundStop {
 }
 
 fn conflict(conflict: RewindConflict) -> wr::RewindConflict {
+    let RewindConflict {
+        path,
+        current,
+        message,
+    } = conflict;
     wr::RewindConflict {
-        path: conflict.path.as_str().to_owned(),
-        current: conflict.current,
-        message: conflict.message,
+        path: path.as_str().to_owned(),
+        current,
+        message,
     }
 }
 
@@ -282,9 +350,9 @@ pub(crate) fn rewind_status(status: RewindStatus) -> wr::RewindStatus {
         RewindStatus::Applied { files } => wr::RewindStatus::Applied {
             files: files
                 .into_iter()
-                .map(|file| wr::RestoredFile {
-                    path: file.path.as_str().to_owned(),
-                    action: match file.action {
+                .map(|RestoredFile { path, action }| wr::RestoredFile {
+                    path: path.as_str().to_owned(),
+                    action: match action {
                         RestoreAction::Restore => wr::RestoreAction::Restore,
                         RestoreAction::Delete => wr::RestoreAction::Delete,
                     },
@@ -327,7 +395,7 @@ pub(crate) fn command_event(event: CommandEvent, body: &mut BodyBuilder) -> wc::
             cursor,
         },
         // 线上没有原因（远端不支持按要求转后台，tui-input.md D31）：照超时转后台发。
-        CommandEvent::Backgrounded | CommandEvent::BackgroundedBy { .. } => {
+        CommandEvent::Backgrounded | CommandEvent::BackgroundedBy { reason: _ } => {
             wc::CommandEvent::Backgrounded
         }
         CommandEvent::Finished {
@@ -349,16 +417,127 @@ pub(crate) fn command_event(event: CommandEvent, body: &mut BodyBuilder) -> wc::
 }
 
 pub(crate) fn shell_notice(notice: ShellNotice) -> ws::ShellNotice {
+    let ShellNotice {
+        seq,
+        operation,
+        task,
+        tool_use,
+        description,
+        output,
+        outcome: ended,
+        exit_code,
+        kind,
+        output_bytes,
+    } = notice;
     ws::ShellNotice {
-        seq: notice.seq,
-        operation: notice.operation.as_str().to_owned(),
-        task: notice.task.as_str().to_owned(),
-        tool_use: notice.tool_use.map(|tool| tool.as_str().to_owned()),
-        description: notice.description,
-        output: notice.output.as_str().to_owned(),
-        outcome: outcome(notice.outcome),
-        exit_code: notice.exit_code,
-        kind: background_kind(notice.kind),
-        output_bytes: notice.output_bytes,
+        seq,
+        operation: operation.as_str().to_owned(),
+        task: task.as_str().to_owned(),
+        tool_use: tool_use.map(|tool| tool.as_str().to_owned()),
+        description,
+        output: output.as_str().to_owned(),
+        outcome: outcome(ended),
+        exit_code,
+        kind: background_kind(kind),
+        output_bytes,
+    }
+}
+
+/// 执行器的 `McpError` → 线上的错误（§22.4）：`Connect` 与 `Io` 是 `io`，`Closed` 是 `not_found`，原文不变。
+pub(crate) fn mcp_error(error: McpError) -> WireError {
+    match error {
+        McpError::Connect { message } | McpError::Io { message } => WireError::Io { message },
+        McpError::Closed { message } => WireError::NotFound { path: message },
+        McpError::Unsupported { what } => WireError::Unsupported { what },
+    }
+}
+
+pub(crate) fn mcp_event(event: McpTransportEvent) -> wm::McpEvent {
+    match event {
+        McpTransportEvent::Message { message } => wm::McpEvent::Message { message },
+        McpTransportEvent::Closed {
+            reason,
+            session_expired,
+        } => wm::McpEvent::Closed {
+            reason,
+            session_expired,
+        },
+    }
+}
+
+pub(crate) fn git_status(status: GitStatus) -> wg::GitStatus {
+    match status {
+        GitStatus::NotRepository => wg::GitStatus::NotRepository,
+        GitStatus::Repository(GitSnapshot {
+            branch,
+            default_branch,
+            status,
+            recent_commits,
+            user_name,
+        }) => wg::GitStatus::Repository(wg::GitSnapshot {
+            branch,
+            default_branch,
+            status,
+            recent_commits,
+            user_name,
+        }),
+    }
+}
+
+pub(crate) fn git_diff(diff: GitDiff) -> wg::GitDiff {
+    match diff {
+        GitDiff::NotRepository => wg::GitDiff::NotRepository,
+        GitDiff::Repository {
+            numstat,
+            patch,
+            untracked,
+        } => wg::GitDiff::Repository {
+            numstat,
+            patch,
+            untracked,
+        },
+    }
+}
+
+pub(crate) fn worktree_created(created: WorktreeCreated) -> wg::WorktreeCreated {
+    match created {
+        WorktreeCreated::Ready {
+            path,
+            branch,
+            head_commit,
+            existed,
+        } => wg::WorktreeCreated::Ready {
+            path: path.as_str().to_owned(),
+            branch,
+            head_commit,
+            existed,
+        },
+        WorktreeCreated::NotARepository => wg::WorktreeCreated::NotARepository,
+        WorktreeCreated::Failed { message } => wg::WorktreeCreated::Failed { message },
+    }
+}
+
+pub(crate) fn worktree_list(list: WorktreeList) -> wg::WorktreeList {
+    let WorktreeList { root, entries } = list;
+    wg::WorktreeList {
+        root: root.map(|root| root.as_str().to_owned()),
+        entries: entries
+            .into_iter()
+            .map(|WorktreeEntry { path, branch }| wg::WorktreeEntry {
+                path: path.as_str().to_owned(),
+                branch,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn worktree_changes(changes: WorktreeChanges) -> wg::WorktreeChanges {
+    let WorktreeChanges {
+        changed_files,
+        commits,
+    } = changes;
+    wg::WorktreeChanges {
+        changed_files,
+        commits,
     }
 }

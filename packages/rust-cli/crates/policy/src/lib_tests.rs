@@ -4,39 +4,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
-use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, InteractionId, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
-};
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
-};
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, RunId, SessionId};
 use rust_cli_kernel_api::permission::RuleBehavior;
-use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment, local_services, machine};
+use rust_cli_kernel_api::testing::UnusedEnvironment;
 use rust_cli_kernel_api::tool::{ToolError, ToolOutput, ToolProgress};
 use serde_json::json;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::classifier::{ClassifierRequest, ClassifierVerdict};
 use crate::test_support::rules;
 use crate::texts;
-
-struct NoAnswers;
-
-#[async_trait]
-impl Interactions for NoAnswers {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        _request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i"),
-            answer: json!({"decision": "unavailable"}),
-        })
-    }
-}
 
 /// 一个名字可选、自身检查可选的工具。
 struct Named(&'static str, PermissionDecision);
@@ -51,6 +29,12 @@ impl Tool for Named {
     }
     fn description(&self, _context: &rust_cli_kernel_api::tool::PromptContext) -> String {
         String::new()
+    }
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        crate::test_support::subject_of(self.0, input)
     }
     async fn check_permissions(
         &self,
@@ -75,28 +59,23 @@ fn context(mode: PermissionMode) -> ToolUseContext {
     ToolUseContext {
         session: SessionId::new("s1"),
         run: RunId::new("r1"),
-        tool_use: ToolUseId::new("toolu_1"),
-        agent: None,
         workspace: WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/w"),
         },
         mode,
-        cancel: CancellationToken::new(),
-        machine: machine(Arc::new(UnusedEnvironment)),
-        local: local_services(Arc::new(UnusedEnvironment)),
-        artifacts: Arc::new(MemoryStore::default()),
-        interactions: Arc::new(NoAnswers),
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op"),
-            origin: Origin::Agent {
+        interactions: Arc::new(rust_cli_kernel_api::testing::NoOneToAsk),
+        session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g"),
+            OperationId::new("op"),
+            Origin::Agent {
                 session: SessionId::new("s1"),
                 run: RunId::new("r1"),
             },
-        },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -294,3 +273,6 @@ mod monitor_chain;
 
 #[path = "lib_tests_machine.rs"]
 mod machine;
+
+#[path = "lib_tests_allowed.rs"]
+mod allowed;

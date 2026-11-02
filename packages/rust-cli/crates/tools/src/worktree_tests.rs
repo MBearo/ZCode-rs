@@ -1,6 +1,7 @@
 //! EnterWorktree / ExitWorktree 的校验、权限、结果文本与工作目录的切换（tools-more.md §11）。
 
-use std::sync::{Arc, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::Arc;
 
 use rust_cli_kernel_api::env_worktree::WorktreeChanges;
 use rust_cli_kernel_api::permission::PermissionDecision;
@@ -35,8 +36,8 @@ impl Fixture {
     }
 
     fn context(&self) -> ToolUseContext {
-        let mut ctx = Ctx::new(self.session.clone());
-        ctx.set_env(self.env.clone());
+        let mut ctx = Ctx::with_ops(self.session.clone());
+        ctx.set_machine(self.env.clone().machine());
         let mut context = ctx.build();
         if let Some(root) = self.root {
             context.workspace.root = EnvPath::new(root);
@@ -67,11 +68,7 @@ impl Fixture {
     }
 
     fn switches(&self) -> Vec<String> {
-        self.session
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.session.0.lock_unpoisoned().clone()
     }
 }
 
@@ -206,11 +203,7 @@ async fn remove_refuses_unsaved_work_until_confirmed() {
         "Exited and removed worktree at /Users/dev/work/.zcode/worktrees/w. Discarded 2 commits and 1 uncommitted file. Session is now back in /Users/dev/work."
     );
     assert_eq!(
-        *fixture
-            .env
-            .removed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner),
+        *fixture.env.removed.lock_unpoisoned(),
         ["/Users/dev/work/.zcode/worktrees/w"]
     );
 }
@@ -244,10 +237,7 @@ async fn entering_existing_worktrees() {
         enter
             .check_permissions(&json!({"path": "/Users/dev/elsewhere"}), &context)
             .await,
-        PermissionDecision::Ask {
-            message: texts::ask_enter("/Users/dev/elsewhere"),
-            suggestions: Vec::new(),
-        }
+        PermissionDecision::ask(texts::ask_enter("/Users/dev/elsewhere"), Vec::new())
     );
     let error = fixture
         .call(ENTER, json!({"path": "/Users/dev/nowhere"}))
@@ -318,10 +308,7 @@ async fn windows_worktrees_are_compared_by_path_key() {
         enter
             .check_permissions(&json!({"path": r"C:\Users\dev\elsewhere"}), &context)
             .await,
-        PermissionDecision::Ask {
-            message: texts::ask_enter(r"C:\Users\dev\elsewhere"),
-            suggestions: Vec::new(),
-        }
+        PermissionDecision::ask(texts::ask_enter(r"C:\Users\dev\elsewhere"), Vec::new())
     );
     let error = fixture
         .call(ENTER, json!({"path": r"C:\Users\dev\nowhere"}))

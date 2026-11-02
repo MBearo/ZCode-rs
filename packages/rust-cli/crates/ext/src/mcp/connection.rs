@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use rust_cli_base::Spawner;
 use rust_cli_kernel_api::env::WorkspaceRef;
-use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, LOCAL_MACHINE};
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
+use rust_cli_kernel_api::ids::MachineName;
 use rust_cli_kernel_api::mcp::{McpConnect, McpTransport};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -52,13 +53,13 @@ impl Pipe<'_> {
     /// 那台机器正在连时等它连完（调用方的握手期限之内）；不在清单里、没在连或连不上时是 R3 的“没连上”。
     async fn resolve(
         &self,
-        machine: Option<&str>,
+        machine: &MachineName,
     ) -> Result<(Arc<dyn McpTransport>, WorkspaceRef), String> {
-        let Some(name) = machine.filter(|name| !name.is_empty() && *name != LOCAL_MACHINE) else {
+        let Some(name) = machine.remote() else {
             return Ok((self.local.clone(), self.workspace.clone()));
         };
         let found = match self.machines {
-            Some(registry) => registry.wait_remote(name).await,
+            Some(registry) => registry.wait_remote(machine).await,
             None => None,
         };
         found
@@ -84,7 +85,7 @@ pub(crate) async fn open(
         )
     };
     let handshake = async {
-        let (transport, workspace) = pipe.resolve(server.machine.as_deref()).await?;
+        let (transport, workspace) = pipe.resolve(&server.machine).await?;
         let transport = &transport;
         let workspace = &workspace;
         let connection = transport
@@ -93,7 +94,6 @@ pub(crate) async fn open(
                 McpConnect {
                     server: server.name.clone(),
                     transport: server.transport.clone(),
-                    env: Default::default(),
                 },
             )
             .await

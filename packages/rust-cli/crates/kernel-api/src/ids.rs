@@ -121,3 +121,68 @@ impl MessageId {
         message_created_ms(&self.0)
     }
 }
+
+/// 主 env 的机器名（deployment.md §23）：名字是身份，不说那台机器在不在本地。模型在工具的 `machine` 参数里看到的就是它。
+pub const PRIMARY_MACHINE: &str = "primary";
+
+/// 主 env 以前的名字。旧会话的工具输入与旧的 `mcp-machines.json` 里还有它，读到时当作主 env（deployment.md §23）。
+pub const LEGACY_PRIMARY_MACHINE: &str = "local";
+
+/// 一台机器的名字（审查 K9，remote-exec.md §20.4.1）：主 env 是 [`PRIMARY_MACHINE`]，额外机器是 `machines.json` 里的名字。
+/// “`primary`、旧名 `local`、空串都是主 env”只在 [`MachineName::new`] 一处；构造之后主 env 总是存成 `primary`。
+/// 序列化是名字本身；DTO 里主 env 不写出（`skip_serializing_if = "MachineName::is_primary"`），没有这个键就是主 env。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct MachineName(String);
+
+impl MachineName {
+    pub fn new(name: impl Into<String>) -> Self {
+        let name = name.into();
+        if Self::is_primary_name(&name) {
+            Self::primary()
+        } else {
+            Self(name)
+        }
+    }
+
+    pub fn primary() -> Self {
+        Self(PRIMARY_MACHINE.to_owned())
+    }
+
+    /// 这个名字指不指主 env（含以前的名字与空串）：唯一的一处规则。
+    pub fn is_primary_name(name: &str) -> bool {
+        name.is_empty() || name == PRIMARY_MACHINE || name == LEGACY_PRIMARY_MACHINE
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_primary(&self) -> bool {
+        self.0 == PRIMARY_MACHINE
+    }
+
+    /// 额外机器的名字；主 env 为 None（界面的 `@机器` 标记、`dev-a:README.md` 的写法只给额外机器）。
+    pub fn remote(&self) -> Option<&str> {
+        (!self.is_primary()).then_some(self.0.as_str())
+    }
+}
+
+impl Default for MachineName {
+    fn default() -> Self {
+        Self::primary()
+    }
+}
+
+impl fmt::Display for MachineName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+// 读的时候也经 `new`：旧记录里的 `local` 与空串读成主 env。
+impl<'de> Deserialize<'de> for MachineName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::new)
+    }
+}

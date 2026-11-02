@@ -33,7 +33,7 @@ export async function checkMachines(ctx) {
   const nodeText = JSON.stringify(node);
   expectEqual(
     "Node sends the machine list reminder to the model",
-    nodeText.includes("Remote machines connected to this session."),
+    nodeText.includes("Machines connected to this session besides the primary machine."),
     true,
   );
   const rustBefore = rust("read", dir, sessionID);

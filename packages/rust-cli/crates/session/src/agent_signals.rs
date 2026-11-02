@@ -30,7 +30,7 @@ impl Actor {
             return;
         }
         let work = notice.agent.to_string();
-        let status = notice.status.clone();
+        let status = notice.status;
         if !self.enqueue_notice(Waiting::Agent(notice)).await {
             return;
         }

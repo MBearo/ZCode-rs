@@ -1,5 +1,5 @@
 //! 前端记录（缺口 G2）：原样写成 `session_entry`，与 Node 的 `savePersistentCommandFact` 同一行形状。
-use rust_cli_kernel_api::store::{FrontendRecord, SessionStore, StoreError};
+use rust_cli_kernel_api::store::{FrontendRecord, StoreError, StoreQueries};
 use serde_json::{Value, json};
 
 use crate::SessionId;

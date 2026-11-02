@@ -1,8 +1,8 @@
 //! 执行状态的修改（docs/specs/rust-cli/tools-more.md §2.3、shell-permissions.md §4.6）。执行状态（权限模式 ×
-//! plan 开关）只有会话 actor 一个 owner：前端的 `SetMode` / `SetPlan` 命令与工具的 `Interactions::set_mode` /
-//! `set_plan`（EnterPlanMode、ExitPlanMode）走同一个入口，先提交 `ExecutionChanged` 事实，成功后才改内存里的
-//! 状态并通知前端。主循环经 `RunSink::current_mode` 读判决用的模式（plan 开时是 plan），所以同一回合里后续的
-//! 工具调用立即按新状态判决。
+//! plan 开关）只有会话 actor 一个 owner：前端的 `SetMode` / `SetPlan` 命令与工具的 `SessionOps::set_plan`
+//! （EnterPlanMode、ExitPlanMode）走同一个入口，先提交 `ExecutionChanged` 事实，成功后才改内存里的状态并通知前端。
+//! 主循环经 `SessionOps::view` 读判决用的模式（plan 开时是 plan），所以同一回合里后续的工具调用立即按新状态判决。
+//! 工具不改权限模式（工作线 F134 删掉了没有调用方的 `Interactions::set_mode` 与这里的 `change_mode`）。
 //!
 //! 修复线 F20（用户决定）：plan 是独立开关。以前 plan 是一个模式，进入前的模式不在这里（TUI 记 `before_plan`，
 //! ExitPlanMode 按审批的回答换模式）；现在权限模式一直在 actor 里，开关 plan 不动它，退出 plan 后就是进入前的值。
@@ -14,7 +14,7 @@ use rust_cli_kernel_api::ids::CommandId;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::permission::{ExecutionState, PermissionMode};
 use rust_cli_kernel_api::session_api::KernelEvent;
-use rust_cli_kernel_api::store::Fact;
+use rust_cli_kernel_api::store::{Fact, StoreError};
 
 use crate::actor::Actor;
 
@@ -24,18 +24,8 @@ impl Actor {
         self.execution.effective()
     }
 
-    /// 工具改权限模式（`Interactions::set_mode`；`Plan` 是旧写法，只打开 plan）。
-    pub(crate) async fn change_mode(
-        &mut self,
-        command: Option<CommandId>,
-        mode: PermissionMode,
-    ) -> Result<(), String> {
-        self.apply(command, self.execution.with_mode(mode), false)
-            .await
-    }
-
     /// 工具开关 plan（EnterPlanMode、ExitPlanMode）：权限模式不变，不写项目的持久模式。
-    pub(crate) async fn change_plan(&mut self, enabled: bool) -> Result<(), String> {
+    pub(crate) async fn change_plan(&mut self, enabled: bool) -> Result<(), StoreError> {
         self.apply(None, self.execution.with_plan(enabled), false)
             .await
     }
@@ -47,7 +37,7 @@ impl Actor {
         &mut self,
         command: CommandId,
         mode: PermissionMode,
-    ) -> Result<(), String> {
+    ) -> Result<(), StoreError> {
         self.apply(Some(command), self.execution.with_mode(mode), true)
             .await
     }
@@ -58,7 +48,7 @@ impl Actor {
         &mut self,
         command: CommandId,
         enabled: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), StoreError> {
         self.apply(Some(command), self.execution.with_plan(enabled), false)
             .await
     }
@@ -68,7 +58,7 @@ impl Actor {
         command: Option<CommandId>,
         next: ExecutionState,
         save: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), StoreError> {
         let mut facts = vec![Fact::ExecutionChanged { state: next }];
         if save {
             facts.push(Fact::ProjectModeSet { mode: next.mode });

@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::env_shell::BackgroundStatus;
+use rust_cli_kernel_api::ids::MachineName;
 use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind};
 use rust_cli_kernel_api::panels::{ShellDetail, ShellOutput, SubagentEntry, SubagentStatus};
 use unicode_width::UnicodeWidthStr;
@@ -14,10 +15,12 @@ use unicode_width::UnicodeWidthStr;
 use super::agents::{Focus, stoppable};
 use super::app::{Action, App, Overlay};
 use super::i18n::Lang;
+use super::keyboard;
 use super::layout;
 use super::manage::Manage;
 use super::panels::Panel;
 use super::text::{truncate, truncate_line, wrap_text};
+use crate::ui::style::dim;
 
 /// 命令最多占的行数。
 const COMMAND_LINES: usize = 3;
@@ -43,8 +46,8 @@ pub struct ShellView {
     pub last: Option<ShellDetail>,
     /// 内核已不认识它（结束且通知已 ack、或已停止）：不再读取。
     pub gone: bool,
-    /// 所在的远端机器（远端执行 R4，remote-exec.md §21.6）；本机为 None。
-    pub machine: Option<String>,
+    /// 所在的机器（远端执行 R4，remote-exec.md §21.6；F138 起与条目同一个类型，以前是 `Option<String>`）。
+    pub machine: MachineName,
     /// Monitor 起的命令（修复线 F117，tui-panels.md §3.3）：标题是 `Monitor details`、命令一行写 `Script:`；`command`
     /// 是它的 description（列表的名称），命令原文要等第一次读到。
     pub monitor: bool,
@@ -56,43 +59,22 @@ enum Entry<'a> {
     Agent(&'a SubagentEntry),
 }
 
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
-
-fn pick(lang: Lang, en: &'static str, zh: &'static str) -> &'static str {
-    match lang {
-        Lang::En => en,
-        Lang::Zh => zh,
-    }
-}
-
 fn agent_status(agent: &SubagentEntry, lang: Lang) -> &'static str {
     match agent.status {
-        SubagentStatus::Running if agent.waiting => pick(lang, "waiting", "等待中"),
-        SubagentStatus::Running => pick(lang, "running", "运行中"),
-        SubagentStatus::Completed => pick(lang, "done", "已完成"),
-        SubagentStatus::Failed => pick(lang, "error", "出错"),
-        SubagentStatus::Killed => pick(lang, "stopped", "已停止"),
+        SubagentStatus::Running if agent.waiting => lang.pick("waiting", "等待中"),
+        SubagentStatus::Running => lang.pick("running", "运行中"),
+        SubagentStatus::Completed => lang.pick("done", "已完成"),
+        SubagentStatus::Failed => lang.pick("error", "出错"),
+        SubagentStatus::Killed => lang.pick("stopped", "已停止"),
     }
 }
 
 fn shell_status(status: BackgroundStatus, lang: Lang) -> &'static str {
     match status {
-        BackgroundStatus::Running => pick(lang, "running", "运行中"),
-        BackgroundStatus::Completed => pick(lang, "completed", "已完成"),
-        BackgroundStatus::Failed => pick(lang, "failed", "失败"),
-        BackgroundStatus::Killed => pick(lang, "stopped", "已停止"),
-    }
-}
-
-/// `completed` / `failed` / `killed`（通知的 `<status>`）。
-fn parse_status(status: &str) -> Option<BackgroundStatus> {
-    match status {
-        "completed" => Some(BackgroundStatus::Completed),
-        "failed" => Some(BackgroundStatus::Failed),
-        "killed" => Some(BackgroundStatus::Killed),
-        _ => None,
+        BackgroundStatus::Running => lang.pick("running", "运行中"),
+        BackgroundStatus::Completed => lang.pick("completed", "已完成"),
+        BackgroundStatus::Failed => lang.pick("failed", "失败"),
+        BackgroundStatus::Killed => lang.pick("stopped", "已停止"),
     }
 }
 
@@ -124,7 +106,8 @@ impl App {
     /// 在跑的后台 shell 与 monitor（快照的顺序）。monitor 与 shell 同组（修复线 F117，tui-panels.md §3.2），名称是快照
     /// 条目的 description。
     pub fn shell_rows(&self) -> Vec<&BackgroundEntry> {
-        self.background
+        self.snapshots
+            .background
             .iter()
             .filter(|entry| {
                 matches!(entry.kind, BackgroundKind::Shell | BackgroundKind::Monitor)
@@ -135,7 +118,7 @@ impl App {
 
     /// 输入框为空时按 ↓：有 pill 时先选中它（tui-panels.md §3.1）。
     pub(super) fn focus_pill(&mut self) -> bool {
-        if super::manage::pill(&self.background, self.lang).is_none() {
+        if super::manage::pill(&self.snapshots.background, self.lang).is_none() {
             return false;
         }
         self.focus = Some(Focus::Pill);
@@ -219,7 +202,8 @@ impl App {
             last => self
                 .view
                 .ended_work(&open.id)
-                .and_then(parse_status)
+                // 只认终态（工作线 F134：以前按字符串解析，running 与认不出的都当没有）。
+                .filter(|status| *status != BackgroundStatus::Running)
                 .or_else(|| {
                     last.as_ref()
                         .map(|l| l.status)
@@ -237,7 +221,7 @@ impl App {
         let agents = self.agent_rows(now);
         let len = shells.len() + agents.len();
         let selected = self.background_selected(len);
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let ctrl = keyboard::ctrl(&key);
         let entry = if selected < shells.len() {
             shells.get(selected).map(|s| Entry::Shell(s))
         } else {
@@ -305,7 +289,7 @@ impl App {
                 }
             }
             KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') => self.overlay = None,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('c') if keyboard::ctrl(&key) => {
                 self.overlay = None;
             }
             KeyCode::Char('x') if self.shell_detail_status(open) == BackgroundStatus::Running => {
@@ -358,9 +342,9 @@ impl App {
             .filter(|a| a.status == SubagentStatus::Running)
             .count();
         let mut lines = vec![
-            Line::from(Span::styled("─".repeat(width), Style::default().fg(accent))),
+            crate::ui::style::rule(width, Style::default().fg(accent)),
             Line::from(Span::styled(
-                format!("  {}", pick(lang, "Background", "后台任务")),
+                format!("  {}", lang.pick("Background", "后台任务")),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             )),
         ];
@@ -380,7 +364,8 @@ impl App {
             });
         }
         let subtitle = if parts.is_empty() {
-            pick(lang, "No tasks currently running", "当前没有后台任务").to_owned()
+            lang.pick("No tasks currently running", "当前没有后台任务")
+                .to_owned()
         } else {
             parts.join(" · ")
         };
@@ -410,8 +395,8 @@ impl App {
         // 远端的后台命令与缺省在远端的子代理：名称后面接 ` @机器`（远端执行 R4，remote-exec.md §21.6）。重连中的机器上
         // 一份的条目再接 dim 的 ` · reconnecting`（F96，§23.3）。
         let machine_of = |entry: &Entry| match entry {
-            Entry::Shell(shell) => shell.machine.clone(),
-            Entry::Agent(agent) => agent.machine.clone(),
+            Entry::Shell(shell) => shell.machine.remote().map(str::to_owned),
+            Entry::Agent(agent) => agent.machine.remote().map(str::to_owned),
         };
         let stale_note = |entry: &Entry| match entry {
             Entry::Shell(shell) if shell.reconnecting => {
@@ -446,12 +431,13 @@ impl App {
                 body.push((Line::default(), None));
                 if headers {
                     // 有缺省机器在远端的子代理时不写“本地”（F98，remote-exec.md §25.4.5）。
-                    let (name, n) = if first_agent && agents.iter().any(|e| e.machine.is_some()) {
-                        (pick(lang, "Agents", "代理"), agents.len())
+                    let (name, n) = if first_agent && agents.iter().any(|e| !e.machine.is_primary())
+                    {
+                        (lang.pick("Agents", "代理"), agents.len())
                     } else if first_agent {
-                        (pick(lang, "Local agents", "本地代理"), agents.len())
+                        (lang.pick("Local agents", "本地代理"), agents.len())
                     } else {
-                        (pick(lang, "Shells", "Shell"), shells.len())
+                        (lang.pick("Shells", "Shell"), shells.len())
                     };
                     body.push((
                         Line::from(vec![
@@ -540,7 +526,7 @@ impl App {
         let hint: Vec<&str> = parts
             .iter()
             .filter(|(show, _, _)| *show)
-            .map(|(_, en, zh)| pick(lang, en, zh))
+            .map(|(_, en, zh)| lang.pick(en, zh))
             .collect();
         lines.push(truncate_line(
             super::key_hint::line(layout::INDENT, &hint.join(" · "), &self.palette),
@@ -568,14 +554,14 @@ impl App {
             )
         };
         let mut lines = vec![
-            Line::from(Span::styled("─".repeat(width), Style::default().fg(accent))),
+            crate::ui::style::rule(width, Style::default().fg(accent)),
             Line::from(Span::styled(
                 format!(
                     "  {}",
                     if open.monitor {
-                        pick(lang, "Monitor details", "Monitor 详情")
+                        lang.pick("Monitor details", "Monitor 详情")
                     } else {
-                        pick(lang, "Shell details", "Shell 详情")
+                        lang.pick("Shell details", "Shell 详情")
                     }
                 ),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
@@ -583,31 +569,31 @@ impl App {
             Line::default(),
         ];
         // 远端的任务写明机器（远端执行 R4，remote-exec.md §21.6）。
-        if let Some(machine) = &open.machine {
+        if let Some(machine) = open.machine.remote() {
             lines.push(field(
                 super::i18n_machines::machine_field(lang),
-                machine.clone(),
+                machine.to_owned(),
             ));
         }
         lines.push(field(
-            pick(lang, "Status: ", "状态："),
+            lang.pick("Status: ", "状态："),
             shell_status(status, lang).to_owned(),
         ));
         if let Some(elapsed) = open.last.as_ref().and_then(|last| last.elapsed_ms) {
             lines.push(field(
-                pick(lang, "Runtime: ", "运行时长："),
+                lang.pick("Runtime: ", "运行时长："),
                 super::cells::duration(elapsed),
             ));
         }
         // monitor 的命令一行写 `Script:`，内容是读到的命令原文（打开时只有 description，第一次读到之前不写，F117）。
         let (label, command) = if open.monitor {
             (
-                pick(lang, "Script: ", "脚本："),
+                lang.pick("Script: ", "脚本："),
                 open.last.as_ref().map(|last| last.command.as_str()),
             )
         } else {
             (
-                pick(lang, "Command: ", "命令："),
+                lang.pick("Command: ", "命令："),
                 Some(open.command.as_str()),
             )
         };
@@ -632,14 +618,14 @@ impl App {
         );
         lines.push(Line::default());
         lines.push(Line::from(Span::styled(
-            format!("  {}", pick(lang, "Output:", "输出：")),
+            format!("  {}", lang.pick("Output:", "输出：")),
             Style::default().add_modifier(Modifier::BOLD),
         )));
         let (shown, note): (Vec<String>, Option<String>) =
             match open.last.as_ref().map(|l| &l.output) {
                 None => (vec![self.strings.loading.to_owned()], None),
                 Some(ShellOutput::Tail { lines, .. }) if lines.is_empty() => (
-                    vec![pick(lang, "No output yet", "还没有输出").to_owned()],
+                    vec![lang.pick("No output yet", "还没有输出").to_owned()],
                     None,
                 ),
                 Some(ShellOutput::Tail { lines, total }) => {
@@ -655,11 +641,14 @@ impl App {
                     (lines.iter().map(|l| plain_output(l)).collect(), Some(note))
                 }
                 Some(ShellOutput::TooLarge { .. }) => (
-                    vec![pick(lang, "Output too large to preview", "输出太大，不预览").to_owned()],
+                    vec![
+                        lang.pick("Output too large to preview", "输出太大，不预览")
+                            .to_owned(),
+                    ],
                     None,
                 ),
                 Some(ShellOutput::Unavailable) => (
-                    vec![pick(lang, "Output unavailable", "读不到输出").to_owned()],
+                    vec![lang.pick("Output unavailable", "读不到输出").to_owned()],
                     None,
                 ),
             };

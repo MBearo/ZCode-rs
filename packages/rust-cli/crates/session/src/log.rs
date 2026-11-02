@@ -12,9 +12,10 @@
 //! 自己读到的 seq，下限是最慢的活着的订阅流的位置与 `当前 − RETAIN` 中较小的一个，下限之前的条目去掉。新订阅方从视图
 //! 快照的 `last_seq` 或新会话的 0 开始，都在 `RETAIN` 里；落后的订阅方在重新订阅之前一直拿着旧流，位置不丢。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::ids::{ToolUseId, TurnId};
@@ -420,7 +421,7 @@ impl EventLog {
     }
 
     pub(crate) fn append(&self, event: KernelEvent) -> u64 {
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut inner = self.inner.lock_unpoisoned();
         if changes_state(&event) {
             inner.revision += 1;
         }
@@ -440,23 +441,16 @@ impl EventLog {
 
     /// 当前的状态 revision（缺口 G1）：与 `last_seq` 同一时刻（视图在 actor 里取，二者之间没有追加）。
     pub(crate) fn revision(&self) -> u64 {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .revision
+        self.inner.lock_unpoisoned().revision
     }
 
     pub(crate) fn last_seq(&self) -> u64 {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .next
-            - 1
+        self.inner.lock_unpoisoned().next - 1
     }
 
     /// `after` 为空时只接收之后的新事件。
     pub(crate) fn subscribe(&self, after: Option<u64>) -> BoxStream<'static, SequencedEvent> {
-        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut inner = self.inner.lock_unpoisoned();
         if let Some(after) = after
             && after < inner.floor
         {
@@ -504,7 +498,7 @@ impl EventLog {
 
     #[cfg(test)]
     pub(crate) fn retained(&self) -> Retained {
-        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let inner = self.inner.lock_unpoisoned();
         let live = inner
             .entries
             .iter()

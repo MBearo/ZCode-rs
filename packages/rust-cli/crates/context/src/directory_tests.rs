@@ -16,8 +16,8 @@ fn assembler() -> PromptAssembler {
         os_version: "Linux".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     })
     .with_file("/Users/dev/AGENTS.md", "dev rules")
     .with_file("/Users/dev/other/AGENTS.md", "other rules")

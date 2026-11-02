@@ -166,10 +166,8 @@ pub(crate) fn text(text: &str) -> ContentBlock {
 
 pub(crate) fn selection() -> ModelSelection {
     ModelSelection {
-        provider: "p".into(),
-        model: "m".into(),
         reasoning: Some("high".into()),
-        connection: None,
+        ..ModelSelection::new("p", "m")
     }
 }
 

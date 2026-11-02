@@ -19,22 +19,20 @@ export const PORT_TRAITS = {
     "Background",
     "Checkpoints",
     "Pdf",
+    "Git",
   ],
   "crates/kernel-api/src/mcp.rs": ["McpTransport"],
-  "crates/kernel-api/src/local_services.rs": ["Git", "Fetch"],
+  "crates/kernel-api/src/controller_services.rs": ["Fetch"],
   "crates/kernel-api/src/env_registry.rs": ["EnvironmentRegistry"],
-  "crates/exec-transport/src/link.rs": [
-    "FrameSink",
-    "FrameSource",
-    "Link",
-    "Listener",
-    "Connector",
-    "Provisioner",
-  ],
+  "crates/exec-transport/src/link.rs": ["FrameSink", "FrameSource", "Link", "Listener", "Connector"],
+  // F128（remote-exec.md §15.3）：部署器从 exec-transport 移到 machines。
+  "crates/machines/src/provision.rs": ["Provisioner"],
   // F100（remote-exec.md §26.7）：执行器产物的来源，cli 实现、ssh-connect 用。
   "crates/ssh-connect/src/source.rs": ["ArtifactSource"],
   "crates/exec-server/src/ledger.rs": ["ExecLedger"],
   "crates/exec-server/src/auth.rs": ["Authenticator"],
+  // F128（remote-exec.md §23.5）：执行器起进程时带上推来的环境变量，executor-host 用 env-local 实现。
+  "crates/exec-server/src/launch.rs": ["Launcher"],
 };
 
 /** 线上结构所在的目录（不含测试文件）。 */

@@ -1,21 +1,23 @@
 //! 子循环的输出端：消息与意图提交到子会话（提交屏障：存储成功后才返回），进度转给父工具调用，
 //! 交互转给父会话：前台经父工具调用，后台经父会话的会话级入口（交互界面里，docs/specs/rust-cli/agents.md
-//! §4.1.1）；没有入口的后台子代理（`-p`）按“没有人能回答”处理。
+//! §4.1.1）；没有入口的后台子代理（`-p`）按“没有人能回答”处理。会话的读与命令（`SessionOps`）：前台子代理的工作目录、
+//! 定时任务的 owner 与主模型跟着父会话，模式与工作区是子代理自己的，plan 开关与对话不归子代理。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::checkpoint::PendingCheckpoints;
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::ids::{AgentId, MessageId, OwnerEpoch, SessionId};
+use rust_cli_kernel_api::ids::{AgentId, MessageId, SessionId};
 use rust_cli_kernel_api::message::{AssistantMessage, ContentBlock, Message};
 use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, PermissionAnswer,
-    PlanApprovalAnswer, QueryEvent, QuestionAnswer, RunSink,
+    Absorbed, Answer, InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
+    PermissionAnswer, QueryEvent, RunSink, RunView, SessionOps, Steered,
 };
-use rust_cli_kernel_api::store::{Fact, FactBatch, SessionStore, StoreError, TurnAnchor};
+use rust_cli_kernel_api::run_ledger::RunLedger;
+use rust_cli_kernel_api::store::{Fact, SessionStore, StoreError};
 use rust_cli_kernel_api::tool::ToolProgress;
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::mpsc;
 
 use crate::doing::Doing;
@@ -32,10 +34,12 @@ impl std::fmt::Debug for Asks {
     }
 }
 
-/// 前台子代理的父工具调用：进度与交互都交给它。
+/// 前台子代理的父工具调用：进度、询问与会话操作都交给它（父工具调用的 `ToolUseContext` 的两个端口）。
 pub(crate) struct Parent {
+    /// 父工具调用所在的会话（`owner_session` 问父会话时用）。
     pub(crate) session: SessionId,
-    pub(crate) interactions: Arc<dyn Interactions>,
+    pub(crate) asks: Arc<dyn Interactions>,
+    pub(crate) ops: Arc<dyn SessionOps>,
     pub(crate) progress: mpsc::Sender<ToolProgress>,
 }
 
@@ -43,8 +47,9 @@ pub(crate) struct Parent {
 struct Record {
     last: Option<AssistantMessage>,
     tool_uses: usize,
-    /// 已结束、结果还没提交的工具带出的 checkpoint（与会话 actor 同一份规则）。
-    checkpoints: PendingCheckpoints,
+    /// 提交核心（kernel-api `RunLedger`，与会话 actor 同一份，工作线 F130）：子会话的当前轮（随每个批次交给存储，
+    /// node-store.md §4，修复线 F6）、已结束而结果还没提交的工具带出的 checkpoint 与子代理关联。锁不跨 await。
+    ledger: RunLedger,
 }
 
 pub(crate) struct ChildSink {
@@ -62,8 +67,6 @@ pub(crate) struct ChildSink {
     /// 写进询问的子代理名字（agent 类型）。
     name: String,
     record: Mutex<Record>,
-    /// 子会话的当前轮：随每个批次交给存储（node-store.md §4，修复线 F6）。
-    turn: Mutex<Option<TurnAnchor>>,
     /// 子代理里的 Monitor 交给 agents（agents.md §5.3，工作线 F83）；没有时（测试）不支持。
     core: Option<Arc<crate::Core>>,
 }
@@ -89,7 +92,6 @@ impl ChildSink {
             asks: None,
             name: String::new(),
             record: Mutex::default(),
-            turn: Mutex::default(),
             core: None,
         }
     }
@@ -102,10 +104,13 @@ impl ChildSink {
         }
     }
 
-    /// 这次运行开头时子会话的当前轮（`spawn::create` / `resume` 提交输入时给出）。
-    pub(crate) fn with_turn(self, turn: Option<TurnAnchor>) -> Self {
+    /// 这次运行开头时子会话的提交核心（`spawn::create` / `resume` 提交输入时用的那一份，带着当前轮）。
+    pub(crate) fn with_ledger(self, ledger: RunLedger) -> Self {
         Self {
-            turn: Mutex::new(turn),
+            record: Mutex::new(Record {
+                ledger,
+                ..Record::default()
+            }),
             ..self
         }
     }
@@ -120,16 +125,16 @@ impl ChildSink {
     }
 
     /// 询问要交给谁：前台是父工具调用，后台是父会话的入口；都没有时为 None。
-    fn asker(&self) -> Option<(&SessionId, &Arc<dyn Interactions>)> {
+    fn asker(&self) -> Option<&Arc<dyn Interactions>> {
         match (&self.parent, &self.asks) {
-            (Some(parent), _) => Some((&parent.session, &parent.interactions)),
-            (None, Some(asks)) => Some((&self.session, &asks.0)),
+            (Some(parent), _) => Some(&parent.asks),
+            (None, Some(asks)) => Some(&asks.0),
             (None, None) => None,
         }
     }
 
     fn record(&self) -> std::sync::MutexGuard<'_, Record> {
-        self.record.lock().unwrap_or_else(PoisonError::into_inner)
+        self.record.lock_unpoisoned()
     }
 
     /// 本次运行最后一条 assistant 消息与 tool_use 块数。
@@ -138,22 +143,13 @@ impl ChildSink {
         (record.last.clone(), record.tool_uses)
     }
 
+    /// 提交到子会话：当前轮随批次给出（修复线 F6，审查 R5-3），提交成功后才记下。子循环按顺序提交，锁只在算批次与
+    /// 记下轮次时拿，不跨 await。
     pub(crate) async fn commit(&self, facts: Vec<Fact>) -> Result<(), StoreError> {
-        // 当前轮随批次给出，存储不再逐行从库里推导（修复线 F6，审查 R5-3）；提交成功后才记下。
-        let current = self
-            .turn
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        let turn = TurnAnchor::after(current.as_ref(), &facts, || self.ids.turn());
-        let batch = FactBatch {
-            owner_epoch: OwnerEpoch::LOCAL,
-            command: None,
-            facts,
-            turn: turn.clone(),
-        };
+        let batch = self.record().ledger.batch(None, facts, self.ids.as_ref());
+        let turn = batch.turn.clone();
         self.store.commit(&self.session, batch).await?;
-        *self.turn.lock().unwrap_or_else(PoisonError::into_inner) = turn;
+        self.record().ledger.committed(turn);
         Ok(())
     }
 }
@@ -177,30 +173,18 @@ impl Drop for Waiting<'_> {
     }
 }
 
-/// 没有入口的后台子代理（`-p`）的交互没有人回答：权限按“不能询问”（`NoPrompts`，管线给拒绝的文字，agents.md
-/// §4.1.1），提问按不回答，计划审批按继续计划。
-fn unanswered(request: &InteractionRequest) -> Value {
-    let answer = match request {
-        InteractionRequest::Permission { .. } => serde_json::to_value(PermissionAnswer::NoPrompts),
-        InteractionRequest::Question { .. } => serde_json::to_value(QuestionAnswer::Declined),
-        InteractionRequest::PlanApproval { .. } => {
-            serde_json::to_value(PlanApprovalAnswer::KeepPlanning { feedback: None })
-        }
-    };
-    answer.unwrap_or(Value::Null)
-}
-
 #[async_trait]
 impl Interactions for ChildSink {
     async fn ask(
         &self,
-        _session: &SessionId,
         request: InteractionRequest,
     ) -> Result<InteractionAnswer, OrchestrationError> {
-        let Some((session, asker)) = self.asker() else {
+        let Some(asker) = self.asker() else {
+            // 没有入口的后台子代理（`-p`）的交互没有人回答：权限按“不能询问”（`NoPrompts`，管线给拒绝的文字，
+            // agents.md §4.1.1），提问按不回答，计划审批按继续计划。
             return Ok(InteractionAnswer {
                 interaction: self.ids.interaction(),
-                answer: unanswered(&request),
+                answer: Answer::nobody(&request, PermissionAnswer::NoPrompts),
             });
         };
         // 修复线 F67：以前后台子代理一律按没人回答处理，交互界面里也不询问；现在经父会话的会话级入口询问，
@@ -212,6 +196,7 @@ impl Interactions for ChildSink {
                 input,
                 message,
                 suggestions,
+                rule_seed,
                 asked_by: None,
                 machine,
             } => InteractionRequest::Permission {
@@ -221,30 +206,86 @@ impl Interactions for ChildSink {
                 input,
                 message,
                 suggestions,
+                rule_seed,
                 asked_by: Some(self.name.clone()),
             },
             other => other,
         };
         // 等用户回答期间列表显示 ` · waiting`（tui-panels.md §1.1）；被取消时 guard 复原。
         let _waiting = Waiting::start(&self.live, &self.agent);
-        asker.ask(session, request).await
+        asker.ask(request).await
     }
 
     /// 询问转给父会话，撤回也转过去（没有入口的后台子代理的询问当场按没人回答处理，没有可撤回的）。
-    async fn cancel_ask(
+    async fn cancel_ask(&self, tool_use: &rust_cli_kernel_api::ids::ToolUseId) {
+        if let Some(asker) = self.asker() {
+            asker.cancel_ask(tool_use).await;
+        }
+    }
+
+    /// 子代理里再派生的后台子代理也经最外层会话的入口询问：前台转给父工具调用，后台就是自己的入口。
+    fn lasting(&self) -> Option<Arc<dyn Interactions>> {
+        match &self.parent {
+            Some(parent) => parent.asks.lasting(),
+            None => self.asks.as_ref().map(|asks| asks.0.clone()),
+        }
+    }
+}
+
+/// 子代理的会话操作：前台跟着父工具调用的会话（工作目录、定时任务的 owner、主模型），其余是子代理自己的。
+#[async_trait]
+impl SessionOps for ChildSink {
+    /// 子代理自己的模式与工作区（派生时定下，一次运行里不变）；主模型是父会话现在的（前台；子代理的旁路请求跟随它，
+    /// model.md §6.1），后台没有；子代理没有目标与计划模式的会话标志。
+    async fn view(&self) -> Option<RunView> {
+        let agent = self.live.get(&self.agent)?;
+        let selection = match &self.parent {
+            Some(parent) => parent.ops.view().await.and_then(|view| view.selection),
+            None => None,
+        };
+        Some(RunView {
+            selection,
+            ..RunView::new(agent.mode, agent.workspace)
+        })
+    }
+
+    /// 前台子代理的会话级状态（定时任务、worktree）记在父会话名下（docs/specs/rust-cli/tools-more.md
+    /// §10.2）；后台子代理没有父调用，是它自己。
+    async fn owner_session(&self, session: &SessionId) -> SessionId {
+        match &self.parent {
+            Some(parent) => parent.ops.owner_session(&parent.session).await,
+            None => session.clone(),
+        }
+    }
+
+    /// 对话的 owner 是会话 actor；子代理里不能 fork（agents.md §8.1.2）。
+    async fn conversation(&self) -> Option<Vec<Message>> {
+        None
+    }
+
+    /// 子代理的模式不归会话 actor 管（ExitPlanMode 在子代理里只回报批准）。
+    async fn set_plan(&self, _enabled: bool) -> Result<(), OrchestrationError> {
+        Err(OrchestrationError::Unsupported {
+            what: "changing plan mode".to_owned(),
+        })
+    }
+
+    /// 前台子代理改的是父会话的工作目录（工作目录是进程级的，tools-more.md §11.4）。
+    async fn set_workspace(
         &self,
-        _session: &SessionId,
-        tool_use: &rust_cli_kernel_api::ids::ToolUseId,
-    ) {
-        if let Some((session, asker)) = self.asker() {
-            asker.cancel_ask(session, tool_use).await;
+        root: rust_cli_kernel_api::env::EnvPath,
+    ) -> Result<(), OrchestrationError> {
+        match &self.parent {
+            Some(parent) => parent.ops.set_workspace(root).await,
+            None => Err(OrchestrationError::Unsupported {
+                what: "changing the working directory from a background agent".to_owned(),
+            }),
         }
     }
 
     /// 子代理里的 Monitor：状态与送达在 agents（agents.md §5.3，工作线 F83）。
     async fn arm_monitor(
         &self,
-        _session: &SessionId,
         monitor: rust_cli_kernel_api::monitor::MonitorArmed,
         events: rust_cli_kernel_api::machine::CommandEvents,
     ) -> Result<(), OrchestrationError> {
@@ -254,51 +295,6 @@ impl Interactions for ChildSink {
                 what: "monitors".to_owned(),
             }),
         }
-    }
-
-    /// 子代理里再派生的后台子代理也经最外层会话的入口询问：前台转给父工具调用，后台就是自己的入口。
-    fn lasting(&self, _session: &SessionId) -> Option<Arc<dyn Interactions>> {
-        match &self.parent {
-            Some(parent) => parent.interactions.lasting(&parent.session),
-            None => self.asks.as_ref().map(|asks| asks.0.clone()),
-        }
-    }
-
-    /// 前台子代理的会话级状态（定时任务、worktree）记在父会话名下（docs/specs/rust-cli/tools-more.md
-    /// §10.2）；后台子代理没有父调用，是它自己。
-    async fn owner_session(&self, session: &SessionId) -> SessionId {
-        match &self.parent {
-            Some(parent) => parent.interactions.owner_session(&parent.session).await,
-            None => session.clone(),
-        }
-    }
-
-    /// 前台子代理改的是父会话的工作目录（工作目录是进程级的，tools-more.md §11.4）。
-    async fn set_workspace(
-        &self,
-        _session: &SessionId,
-        root: rust_cli_kernel_api::env::EnvPath,
-    ) -> Result<(), OrchestrationError> {
-        match &self.parent {
-            Some(parent) => {
-                parent
-                    .interactions
-                    .set_workspace(&parent.session, root)
-                    .await
-            }
-            None => Err(OrchestrationError::Unsupported {
-                what: "changing the working directory from a background agent".to_owned(),
-            }),
-        }
-    }
-
-    /// 子代理的旁路请求跟随父会话当前的主模型（小模型槽位来自主循环模型，model.md §6.1）。
-    async fn current_selection(
-        &self,
-        _session: &SessionId,
-    ) -> Option<rust_cli_kernel_api::model::ModelSelection> {
-        let parent = self.parent.as_ref()?;
-        parent.interactions.current_selection(&parent.session).await
     }
 }
 
@@ -311,22 +307,16 @@ impl ChildSink {
         usage: Vec<Fact>,
         speed: Option<rust_cli_kernel_api::metering::OutputSpeed>,
     ) -> Result<(), StoreError> {
-        // 工具结果与它的 checkpoint 在一个事务里提交（session-lifecycle.md §4.2）。子代理的提交不经
-        // 会话 actor，所以在这里按同一份规则配对；以前这里不配对，子会话里的写入没有 checkpoint。
-        let settled = self
-            .record()
-            .checkpoints
-            .settle(&message, &self.prompt, self.ids.as_ref());
-        let mut facts = vec![Fact::MessageAppended {
-            message: message.clone(),
-        }];
-        facts.extend(
-            settled
-                .into_iter()
-                .map(|(checkpoint, _)| Fact::CheckpointCreated { checkpoint }),
+        // 工具结果与它的 checkpoint、子代理关联在一个事务里提交（session-lifecycle.md §4.2）。子代理的提交不经会话
+        // actor，规则是 kernel-api `RunLedger` 的同一份。缺陷修复（D5）：以前这里只配对 checkpoint、不记子代理关联，
+        // 子代理再派生的子代理（孙会话）在子会话里没有 `SubagentLinked`，App 的子代理面板找不到它。
+        let settled = self.record().ledger.settle(
+            message.clone(),
+            Some(&self.prompt),
+            usage,
+            self.ids.as_ref(),
         );
-        facts.extend(usage);
-        self.commit(facts).await?;
+        self.commit(settled.facts).await?;
         // 提交之后才加版本：只读查看看到新版本时去取，存储里一定已有这条消息（tui-panels.md §1.4）。
         self.live.committed(&self.agent, speed);
         if let Message::Assistant(assistant) = message {
@@ -355,18 +345,16 @@ impl RunSink for ChildSink {
         message: Option<Message>,
         metered: rust_cli_kernel_api::metering::Metered,
     ) -> Result<(), StoreError> {
-        let (fact, speed) = match metered {
-            rust_cli_kernel_api::metering::Metered::Model(call) => {
-                let speed = matches!(
-                    call.source,
-                    rust_cli_kernel_api::model::QuerySource::Subagent(_)
-                )
-                .then(|| rust_cli_kernel_api::metering::OutputSpeed::of(&call))
-                .flatten();
-                (Fact::ModelCalled { call }, speed)
-            }
-            rust_cli_kernel_api::metering::Metered::Tool(call) => (Fact::ToolCalled { call }, None),
+        let speed = match &metered {
+            rust_cli_kernel_api::metering::Metered::Model(call) => matches!(
+                call.source,
+                rust_cli_kernel_api::model::QuerySource::Subagent(_)
+            )
+            .then(|| rust_cli_kernel_api::metering::OutputSpeed::of(call))
+            .flatten(),
+            rust_cli_kernel_api::metering::Metered::Tool(_) => None,
         };
+        let fact = Fact::from(metered);
         match message {
             Some(message) => self.commit_with(message, vec![fact], speed).await,
             None => self.commit(vec![fact]).await,
@@ -374,9 +362,9 @@ impl RunSink for ChildSink {
     }
 
     async fn emit(&self, event: QueryEvent) -> bool {
-        // `ToolFinished` 先于工具结果的提交到达（同一个任务里按顺序调用）：记下 checkpoint。
+        // `ToolFinished` 先于工具结果的提交到达（同一个任务里按顺序调用）：记下 checkpoint 与子代理关联。
         if let QueryEvent::ToolFinished { tool_use, output } = &event {
-            self.record().checkpoints.note(tool_use, output);
+            self.record().ledger.tool_finished(tool_use, output);
         }
         // 列表行的当前活动（前台与后台都记，L35，stall-visibility.md §4.3）。
         if let Some(doing) = Doing::after(&event) {
@@ -390,22 +378,37 @@ impl RunSink for ChildSink {
         true
     }
 
-    async fn take_steering(&self) -> Vec<String> {
-        self.live.take_mailbox(&self.agent)
+    /// 一组消息逐条提交到子会话（子代理里的压缩：每条一个事务，同以前的缺省）。
+    async fn commit_messages(&self, messages: Vec<Message>) -> Result<(), StoreError> {
+        for message in messages {
+            self.commit_message(message).await?;
+        }
+        Ok(())
     }
 
-    /// 子代理的缺省机器（R3，remote-exec.md §20.6）：派生时 Agent 的 `machine`。
-    async fn default_machine(&self) -> Option<String> {
-        self.live.get(&self.agent).and_then(|agent| agent.machine)
-    }
+    /// 子代理里的压缩不显示进度。
+    async fn compact_started(&self, _trigger: rust_cli_kernel_api::message::CompactTrigger) {}
 
-    /// 它派生的后台子代理的通知（agents.md §5.1）：全文，在工具边界作为 `task-notification` 并入。
-    async fn take_notices(&self) -> Vec<String> {
-        self.live
+    /// 邮箱里的 SendMessage（插话，没有 UserPromptSubmit）与它派生的后台子代理的通知（agents.md §5.1：全文，在工具
+    /// 边界作为 `task-notification` 并入），先插话后通知。
+    async fn take_absorbed(&self) -> Vec<Absorbed> {
+        let steered = self.live.take_mailbox(&self.agent);
+        let notices = self
+            .live
             .take_notices(&self.agent)
             .into_iter()
             .map(|notice| rust_cli_prompts::agents::notification_wrap(&notice.envelope))
-            .collect()
+            .collect();
+        Absorbed::ordered(steered.into_iter().map(Steered::plain).collect(), notices)
+    }
+
+    /// 子代理没有目标（goal.md §4）：不提交。
+    async fn goal_checked(
+        &self,
+        _condition: String,
+        _verdict: rust_cli_kernel_api::hooks::StopVerdict,
+    ) -> Result<Vec<Message>, StoreError> {
+        Ok(Vec::new())
     }
 }
 

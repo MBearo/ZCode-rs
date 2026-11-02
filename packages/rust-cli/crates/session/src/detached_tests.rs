@@ -3,9 +3,11 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use rust_cli_kernel_api::ids::{InteractionId, SessionId, ToolUseId};
-use rust_cli_kernel_api::orchestration::{DetachedEvent, InteractionRequest};
+use rust_cli_kernel_api::orchestration::{
+    Answer, DetachedEvent, InteractionRequest, PermissionAnswer,
+};
 use rust_cli_kernel_api::permission::PermissionRule;
-use rust_cli_kernel_api::store::SessionStore;
+use rust_cli_kernel_api::store::{LocalSettings, SessionStore};
 use rust_cli_kernel_api::testing::{MemoryStore, SequentialIds};
 use serde_json::json;
 
@@ -14,7 +16,7 @@ use crate::test_support::meta;
 
 fn permission(tool_use: &str) -> InteractionRequest {
     InteractionRequest::Permission {
-        machine: None,
+        machine: Default::default(),
         tool_use: ToolUseId::new(tool_use),
         tool: "Bash".to_owned(),
         input: json!({"command": "mytool build"}),
@@ -23,6 +25,7 @@ fn permission(tool_use: &str) -> InteractionRequest {
             tool: "Bash".to_owned(),
             content: Some("mytool build *".to_owned()),
         }],
+        rule_seed: None,
         asked_by: Some("general-purpose".to_owned()),
     }
 }
@@ -77,8 +80,12 @@ async fn answers_reach_the_asker_and_remember_rules() {
         late.next().await,
         Some(DetachedEvent::Asked { ask: ask.clone() })
     );
-    let answer =
-        json!({"decision": "allow", "remember": [{"tool": "Bash", "content": "mytool build *"}]});
+    let answer = Answer::from(PermissionAnswer::Allow {
+        remember: vec![PermissionRule {
+            tool: "Bash".to_owned(),
+            content: Some("mytool build *".to_owned()),
+        }],
+    });
     hub.resolve(&ask.interaction, answer.clone()).await.unwrap();
     let answered = asking.await.unwrap().unwrap();
     assert_eq!(
@@ -101,14 +108,20 @@ async fn answers_reach_the_asker_and_remember_rules() {
     );
     // 回答过的不能再回答。
     assert!(
-        hub.resolve(&ask.interaction, json!({"decision": "deny"}))
-            .await
-            .is_err()
+        hub.resolve(
+            &ask.interaction,
+            PermissionAnswer::Deny { feedback: None }.into()
+        )
+        .await
+        .is_err()
     );
     assert!(
-        hub.resolve(&InteractionId::new("nope"), json!({}))
-            .await
-            .is_err()
+        hub.resolve(
+            &InteractionId::new("nope"),
+            PermissionAnswer::Unavailable.into()
+        )
+        .await
+        .is_err()
     );
 }
 

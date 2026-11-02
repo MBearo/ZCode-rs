@@ -17,6 +17,7 @@ mod bash;
 mod bash_mode;
 pub mod bash_output;
 mod bash_reads;
+mod bash_settings;
 mod bash_sleep;
 mod bash_timeouts;
 pub mod budget;
@@ -33,6 +34,7 @@ mod cron_texts;
 mod cron_tools;
 mod cron_wakeups;
 mod edit;
+mod edit_input;
 mod edit_match;
 mod encoding;
 pub mod file_state;
@@ -47,6 +49,9 @@ mod monitor;
 mod monitor_input;
 mod notebook;
 mod notebook_edit;
+#[cfg(test)]
+#[path = "permission_subject_tests.rs"]
+mod permission_subject_tests;
 mod pipeline;
 mod pipeline_hooks;
 mod pipeline_machine;
@@ -85,7 +90,9 @@ use rust_cli_kernel_api::orchestration::PermissionGate;
 use rust_cli_kernel_api::tool::Tool;
 
 pub use ask_user_question::AskUserQuestionTool;
-pub use bash::{BashTimeouts, BashTool};
+pub use bash::BashTool;
+pub use bash_settings::BashSettings;
+pub use bash_timeouts::BashTimeouts;
 pub use changes::FileChanges;
 pub use common::FileTools;
 pub use cron_board::CronBoard;

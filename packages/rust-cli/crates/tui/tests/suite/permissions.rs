@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crossterm::event::KeyCode;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::EnvironmentId;
-use rust_cli_kernel_api::store::SessionStore;
+use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_kernel_api::testing::MemoryStore;
 
 use super::support::{GatedModel, Setup, with_ui};

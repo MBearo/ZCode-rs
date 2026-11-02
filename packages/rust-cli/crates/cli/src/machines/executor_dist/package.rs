@@ -8,7 +8,7 @@ use base64::Engine;
 use rust_cli_base::units;
 use rust_cli_ssh_connect::Platform;
 use serde_json::Value;
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha512};
 
 use crate::consts;
 
@@ -66,10 +66,6 @@ pub(super) fn plain_version(text: &str) -> bool {
         && !text.contains("..")
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 /// 从 tarball（gzip + tar）解出执行器，核对 `build.json`（版本、target、sha256）与产物的头。错误是一句简短的原因。
 pub(super) fn extract(
     tarball: &[u8],
@@ -96,7 +92,7 @@ pub(super) fn extract(
             field("target")
         ));
     }
-    if !field("sha256").eq_ignore_ascii_case(&hex(&Sha256::digest(&binary))) {
+    if !field("sha256").eq_ignore_ascii_case(&rust_cli_base::hash::sha256_hex(&binary)) {
         return Err("build.json's sha256 does not match bin/zcode-rs".to_owned());
     }
     if !platform.runs_image(&binary) {

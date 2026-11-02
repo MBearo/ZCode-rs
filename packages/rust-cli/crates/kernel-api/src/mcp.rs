@@ -44,15 +44,37 @@ pub enum McpTransportConfig {
     },
 }
 
+impl McpTransportConfig {
+    /// 本地进程：没有额外的环境变量，工作目录是工作区根。
+    pub fn stdio(command: impl Into<String>, args: Vec<String>) -> Self {
+        Self::Stdio {
+            command: command.into(),
+            args,
+            env: BTreeMap::new(),
+            cwd: None,
+        }
+    }
+
+    pub fn sse(url: impl Into<String>, headers: BTreeMap<String, String>) -> Self {
+        Self::Sse {
+            url: url.into(),
+            headers,
+        }
+    }
+
+    pub fn http(url: impl Into<String>, headers: BTreeMap<String, String>) -> Self {
+        Self::Http {
+            url: url.into(),
+            headers,
+        }
+    }
+}
+
 /// 建立一条连接。`server` 只用于日志与错误文本。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpConnect {
     pub server: String,
     pub transport: McpTransportConfig,
-    /// stdio 服务器的进程环境在投影之后、配置的 `env` 之前加上（或去掉）的变量（远端执行 F96，remote-exec.md §23.5）；
-    /// `${VAR}` 展开也先查它。只在执行器里由服务端按客户端实例填；不进序列化。
-    #[serde(skip)]
-    pub env: crate::env_command::EnvOverrides,
 }
 
 /// 执行侧给出的连接 ID。

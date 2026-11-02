@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod syntax;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PermissionMode {
@@ -166,17 +168,35 @@ pub enum PermissionDecision {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         updated_input: Option<serde_json::Value>,
     },
-    /// 询问用户；`suggestions` 是可一键加入的规则。
+    /// 询问用户；`suggestions` 是可一键加入的规则。普通的询问用 [`PermissionDecision::ask`] 建。
     Ask {
         message: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         suggestions: Vec<PermissionRule>,
+        /// 只批准这一次（guarded 的危险命令，Node `approvalMode: "user-once"`，docs/specs/rust-cli/shell-permissions.md
+        /// §4.6.1）：执行管线不跑 PermissionRequest hooks，hook 不能替用户批准。只有判决链给出。
+        ///
+        /// 工作线 F137（审查 T6 的剩余）：以前是 `PermissionGate::ask_once`，执行管线询问前另调一次，它又向执行环境取一次
+        /// 路径风格（远端执行时多一个往返）；现在是判决结果的一部分，一次判决只取一次路径事实。
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        once: bool,
     },
     Deny {
         message: String,
     },
     /// 工具没有意见，交给通用判决链。
     Passthrough,
+}
+
+impl PermissionDecision {
+    /// 普通的询问（不是“只批准这一次”）。
+    pub fn ask(message: impl Into<String>, suggestions: Vec<PermissionRule>) -> Self {
+        Self::Ask {
+            message: message.into(),
+            suggestions,
+            once: false,
+        }
+    }
 }
 
 /// 规则从哪里来（zcode 的配置来源）。按这个顺序列出，
@@ -204,6 +224,43 @@ pub struct SourcedRule {
     pub rule: PermissionRule,
 }
 
+/// 文件访问的方向：读按 `Read(...)` 规则，写按 `Edit(...)` 规则（Write、NotebookEdit 共用；shell-permissions.md §4.4）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileAccess {
+    Read,
+    Write,
+}
+
+impl FileAccess {
+    /// 这个方向的路径规则写在哪个工具名下。
+    pub fn rule_tool(self) -> &'static str {
+        match self {
+            Self::Read => crate::tool_names::READ,
+            Self::Write => crate::tool_names::EDIT,
+        }
+    }
+}
+
+/// 内置权限检查的判决主体（shell-permissions.md §4.1）：工具声明这次输入按哪一类检查（[`crate::tool::Tool::permission_subject`]）。
+/// 没有主体的工具只经整个工具的规则与它自己的 `check_permissions`。
+///
+/// F125（T3）：以前判决链按工具名分派（`Bash`、带 `command` 的 `Monitor`、六个文件工具、`WebFetch`、`Skill`），哪个工具
+/// 用哪类检查、路径在哪个字段，都写在 policy 里。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PermissionSubject {
+    /// 一条 shell 命令：按 `Bash(...)` 规则、只读判定、危险删除与复合结构判。
+    Shell { command: String },
+    /// 一个文件路径；`path` 为 None 时（Glob、Grep 没给路径）是当前目录。
+    Path {
+        access: FileAccess,
+        path: Option<String>,
+    },
+    /// 一个网址：按 `WebFetch(domain:<host>)` 规则与预批准域名判。
+    Url { url: String },
+    /// 一个 skill：按 `Skill(<名字>)` 规则判；`name` 是模型给的原文。
+    Skill { name: String },
+}
+
 /// 判决链用的规则快照（README §6 规则 7：带版本的快照值）。由入口层或会话从配置组装后交给
 /// 判决链；判决链自己不读配置。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,6 +275,18 @@ pub struct PermissionRules {
     /// 处理，拒绝的文本就是询问的文本。
     #[serde(default)]
     pub avoid_prompts: bool,
+}
+
+impl PermissionRules {
+    /// 针对整个工具（没有 content）、行为是 `behavior` 的第一条规则：工具名相同，或 MCP 服务器规则
+    /// （[`syntax::tool_matches`]）。判决链与工具清单（整个工具被 deny 时从清单去掉，tools-files.md §1.1.1）共用。
+    pub fn whole_tool(&self, tool: &str, behavior: RuleBehavior) -> Option<&SourcedRule> {
+        self.rules.iter().find(|sourced| {
+            sourced.behavior == behavior
+                && sourced.rule.content.is_none()
+                && syntax::tool_matches(&sourced.rule.tool, tool)
+        })
+    }
 }
 
 /// 本机项目规则集（Node `local_setting(namespace=permission, key=ruleset, scope=project)` 的 `allow` /

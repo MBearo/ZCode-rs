@@ -49,7 +49,8 @@ pub mod workspace_digest;
 #[cfg(test)]
 mod test_support;
 
-use std::sync::{Arc, PoisonError, RwLock};
+use rust_cli_base::sync::RwLockUnpoisoned;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use rust_cli_base::units;
@@ -57,6 +58,7 @@ use rust_cli_kernel_api::hooks::{
     HookEvent, HookEventName, HookOutcome, HookRunner, StopCondition, StopVerdict,
 };
 use rust_cli_kernel_api::model::small_fast_model;
+use rust_cli_kernel_api::side_request::Requester;
 use tokio_util::sync::CancellationToken;
 
 pub use config::{HookSource, HooksConfig, HooksSettings};
@@ -135,22 +137,19 @@ impl HookEngine {
     /// 换上新的快照；正在运行的事件用旧快照。插件 hooks
     /// 保留。
     pub fn replace(&self, config: HooksConfig) {
-        let mut loaded = self.loaded.write().unwrap_or_else(PoisonError::into_inner);
+        let mut loaded = self.loaded.write_unpoisoned();
         *loaded = Arc::new(load(config, loaded.plugins.clone()));
     }
 
     /// 登记插件的 hooks（runtime 在插件加载后调用，hooks.md §2.2）；设置快照保留。读改写在同一把
     /// 写锁里，与 [`HookEngine::replace`] 不会互相冲掉。
     pub fn register_plugins(&self, plugins: Vec<PluginHooks>) {
-        let mut loaded = self.loaded.write().unwrap_or_else(PoisonError::into_inner);
+        let mut loaded = self.loaded.write_unpoisoned();
         *loaded = Arc::new(load(loaded.config.clone(), plugins));
     }
 
     fn snapshot(&self) -> Arc<Loaded> {
-        self.loaded
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.loaded.read_unpoisoned().clone()
     }
 
     /// hook 输入的 `cwd`：调用方给出的，或会话的 shell cwd，再没有时是工作区根。
@@ -205,7 +204,7 @@ impl HookRunner for HookEngine {
             http: HttpPolicy {
                 allowed_urls: loaded.effective.allowed_urls.as_deref(),
                 allowed_env_vars: loaded.effective.allowed_env_vars.as_deref(),
-                env: &loaded.config.env,
+                env: loaded.config.env.vars(),
             },
             prompt_model: loaded.config.prompt_model.as_ref(),
         };
@@ -283,10 +282,10 @@ impl HookRunner for HookEngine {
         let input = input::build(&request.event, &self.cwd(&request.event).await).to_string();
         let run = prompt::StopRun {
             model: self.ports.model.as_deref(),
-            requester: prompt::Requester {
-                session: &request.event.session,
-                run: request.event.context.run.as_ref(),
-                agent: request.event.context.agent.as_ref(),
+            requester: Requester {
+                session: request.event.session.clone(),
+                run: request.event.context.run.clone(),
+                agent: request.event.context.agent.clone(),
             },
             default_model: default_model.as_ref(),
             ids: self.ports.ids.as_ref(),

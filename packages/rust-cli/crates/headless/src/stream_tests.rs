@@ -441,3 +441,58 @@ async fn local_commands_write_a_synthetic_reply() {
             .starts_with("Total duration (API)")
     );
 }
+
+/// 工具的 hook 要求停止（query.md §3，工作线 F131）：`success`、不是错误，`terminal_reason` 是 `hook_stopped`。
+#[test]
+fn a_hook_stop_is_a_success_with_its_own_terminal_reason() {
+    let model_usage = std::collections::BTreeMap::new();
+    let result = crate::events::turn_result(crate::events::TurnResult {
+        duration_api_ms: 0,
+        stop_reason: Some(rust_cli_kernel_api::message::StopReason::ToolUse),
+        session_id: "sess_1",
+        usage: rust_cli_kernel_api::message::Usage::default(),
+        model_usage: &model_usage,
+        num_turns: 2,
+        kind: crate::events::ResultKind::Success {
+            is_error: false,
+            result: String::new(),
+            ttft_ms: None,
+            finish: crate::events::Finish::HookStopped,
+        },
+        duration_ms: 0,
+        uuid: "u1".to_owned(),
+        result_index: 0,
+    });
+    assert_eq!(result["subtype"], "success");
+    assert_eq!(result["is_error"], false);
+    assert_eq!(result["terminal_reason"], "hook_stopped");
+    assert_eq!(result["stop_reason"], "tool_use");
+}
+
+/// Stop hook 阻止继续（query.md §3 的 Stop hooks，工作线 F134）：同样是 `success`、不是错误，`terminal_reason` 是
+/// `stop_hook_prevented`。
+#[test]
+fn a_prevented_stop_is_a_success_with_its_own_terminal_reason() {
+    let model_usage = std::collections::BTreeMap::new();
+    let result = crate::events::turn_result(crate::events::TurnResult {
+        duration_api_ms: 0,
+        stop_reason: Some(rust_cli_kernel_api::message::StopReason::EndTurn),
+        session_id: "sess_1",
+        usage: rust_cli_kernel_api::message::Usage::default(),
+        model_usage: &model_usage,
+        num_turns: 1,
+        kind: crate::events::ResultKind::Success {
+            is_error: false,
+            result: "done".to_owned(),
+            ttft_ms: None,
+            finish: crate::events::Finish::StopHookPrevented,
+        },
+        duration_ms: 0,
+        uuid: "u1".to_owned(),
+        result_index: 0,
+    });
+    assert_eq!(result["subtype"], "success");
+    assert_eq!(result["is_error"], false);
+    assert_eq!(result["terminal_reason"], "stop_hook_prevented");
+    assert_eq!(result["result"], "done");
+}

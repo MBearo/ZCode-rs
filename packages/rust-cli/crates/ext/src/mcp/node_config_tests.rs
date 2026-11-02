@@ -51,10 +51,10 @@ fn servers_follow_the_node_shape_and_legacy_fields() {
     // 值原样使用，不展开 `${VAR}`（Node 不展开）。
     assert_eq!(
         servers[1].transport,
-        McpTransportConfig::Http {
-            url: "https://mcp.example.com/mcp".into(),
-            headers: [("X".to_owned(), "${TOKEN}".to_owned())].into(),
-        }
+        McpTransportConfig::http(
+            "https://mcp.example.com/mcp",
+            [("X".to_owned(), "${TOKEN}".to_owned())].into()
+        )
     );
     assert!(matches!(
         servers[2].transport,

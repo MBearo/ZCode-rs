@@ -11,8 +11,7 @@ use rust_cli_kernel_api::orchestration::{QueryError, QueryEvent, QueryRequest, Q
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::testing::{
     DirectExecutor, FixedContext, ListTools, MemoryStore, NeverCompact, NoHooks, RecordingSink,
-    ScriptedModel, SequentialIds, UnusedEnvironment, local_services, machine, selection,
-    text_response, tool_use_response,
+    ScriptedModel, SequentialIds, UnusedEnvironment, selection, text_response, tool_use_response,
 };
 use rust_cli_kernel_api::tool::Tool;
 use serde_json::json;
@@ -21,6 +20,7 @@ use crate::{QueryParts, RunScope};
 
 pub(crate) fn parts(model: Arc<dyn ModelPort>, tools: Vec<Arc<dyn Tool>>) -> QueryParts {
     let env = Arc::new(UnusedEnvironment);
+    let ids: Arc<dyn rust_cli_kernel_api::clock::Ids> = Arc::new(SequentialIds::default());
     QueryParts {
         model,
         context: Arc::new(FixedContext(vec![SystemBlock {
@@ -31,40 +31,35 @@ pub(crate) fn parts(model: Arc<dyn ModelPort>, tools: Vec<Arc<dyn Tool>>) -> Que
         executor: Arc::new(DirectExecutor),
         compactor: Arc::new(NeverCompact),
         hooks: Arc::new(NoHooks),
-        ids: Arc::new(SequentialIds::default()),
+        ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        machine: machine(env.clone()),
-        machines: rust_cli_kernel_api::testing::environments(env.clone()),
-        local: local_services(env),
+        machines: rust_cli_kernel_api::testing::environments(env),
         artifacts: Arc::new(MemoryStore::default()),
-        generation: Generation::new("g1"),
+        operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids),
         non_interactive: false,
         limits: crate::RequestLimits::default(),
     }
 }
 
 pub(crate) fn request(text: &str) -> QueryRequest {
-    QueryRequest {
-        session: SessionId::new("sess_1"),
-        run: RunId::new("run_1"),
-        workspace: WorkspaceRef {
+    QueryRequest::new(
+        SessionId::new("sess_1"),
+        RunId::new("run_1"),
+        WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/work"),
         },
-        agent: None,
-        messages: vec![Message::User(UserMessage {
+        vec![Message::User(UserMessage {
             id: MessageId::new("msg_user"),
             content: vec![ContentBlock::Text {
                 text: text.to_owned(),
             }],
             origin: UserOrigin::Human,
         })],
-        selection: selection(),
-        mode: PermissionMode::Default,
-        source: QuerySource::MainThread,
-        max_turns: None,
-        prompt_hook_messages: Vec::new(),
-    }
+        selection(),
+        PermissionMode::Default,
+        QuerySource::MainThread,
+    )
 }
 
 pub(crate) fn scope(
@@ -73,17 +68,7 @@ pub(crate) fn scope(
     abort: Abort,
 ) -> (Arc<RunScope>, Arc<RecordingSink>) {
     let sink = Arc::new(RecordingSink::default());
-    let scope = Arc::new(RunScope {
-        session: request.session.clone(),
-        run: request.run.clone(),
-        workspace: request.workspace.clone(),
-        agent: None,
-        mode: request.mode,
-        abort,
-        sink: sink.clone(),
-        parts,
-        exhausted: Default::default(),
-    });
+    let scope = Arc::new(RunScope::new(request, sink.clone(), parts, abort));
     (scope, sink)
 }
 

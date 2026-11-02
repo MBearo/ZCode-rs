@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::hooks::{HookContext, HookEventName};
 use rust_cli_kernel_api::ids::RunId;
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode};
@@ -14,7 +15,10 @@ use crate::test_support::{
 
 fn stdin_of(env: &ScriptedEnv, index: usize) -> Value {
     let (_, request) = &env.started()[index];
-    serde_json::from_str(request.hook.as_ref().unwrap().stdin.trim_end()).unwrap()
+    let CommandKind::Hook { hook } = &request.kind else {
+        panic!("{:?}", request.kind);
+    };
+    serde_json::from_str(hook.stdin.trim_end()).unwrap()
 }
 
 #[tokio::test]

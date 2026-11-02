@@ -1,7 +1,8 @@
 //! 会话 actor 的跨会话入站（cross-session.md §2.4、§3）：接收的在空闲时开回合，模式不同时扣住、回执，批准后投递，
 //! 拒绝、改模式与过期，重开会话后扣住的仍在。端口是测试替身：入站经通道推入，回执与 ack 记下来。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
@@ -28,10 +29,6 @@ struct FakePort {
     bound: Mutex<Vec<String>>,
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 impl FakePort {
     fn new() -> Arc<Self> {
         let port = Arc::new(Self::default());
@@ -42,16 +39,21 @@ impl FakePort {
     /// 新的入站通道（重开会话时 actor 重新订阅）。
     fn reset(&self) {
         let (sender, receiver) = mpsc::unbounded_channel();
-        *lock(&self.sender) = Some(sender);
-        *lock(&self.inbound) = Some(receiver);
+        *self.sender.lock_unpoisoned() = Some(sender);
+        *self.inbound.lock_unpoisoned() = Some(receiver);
     }
 
     fn push(&self, signal: PeerSignal) {
-        lock(&self.sender).as_ref().unwrap().send(signal).unwrap();
+        self.sender
+            .lock_unpoisoned()
+            .as_ref()
+            .unwrap()
+            .send(signal)
+            .unwrap();
     }
 
     fn receipts(&self) -> Vec<(String, ReceiptStatus)> {
-        lock(&self.receipts).clone()
+        self.receipts.lock_unpoisoned().clone()
     }
 }
 
@@ -67,21 +69,21 @@ impl PeerMessaging for FakePort {
         Ok(())
     }
     async fn receipt(&self, _to: PeerAddress, msg_id: String, status: ReceiptStatus) {
-        lock(&self.receipts).push((msg_id, status));
+        self.receipts.lock_unpoisoned().push((msg_id, status));
     }
     async fn bind(&self, session: &SessionId) {
-        lock(&self.bound).push(session.to_string());
+        self.bound.lock_unpoisoned().push(session.to_string());
     }
     async fn unbind(&self, _session: &SessionId) {}
     fn signals(&self, _session: &SessionId) -> BoxStream<'static, PeerSignal> {
-        let receiver = lock(&self.inbound).take().unwrap();
+        let receiver = self.inbound.lock_unpoisoned().take().unwrap();
         Box::pin(futures_util::stream::unfold(
             receiver,
             |mut receiver| async move { receiver.recv().await.map(|signal| (signal, receiver)) },
         ))
     }
     async fn ack(&self, _session: &SessionId, seq: u64) {
-        lock(&self.acked).push(seq);
+        self.acked.lock_unpoisoned().push(seq);
     }
     async fn set_status(&self, _session: &SessionId, _status: PeerStatus) {}
 }
@@ -146,8 +148,8 @@ async fn an_accepted_message_opens_an_idle_turn_with_the_idle_wrap() {
     assert_eq!(users[0].0, "cross-session");
     assert!(users[0].1.starts_with("Another ZCode session sent a message:\n<cross-session-message from=\"uds:/peers/9.sock\" from-name=\"work-b-7f\" from-mode=\"prompting\">\nhello from B\n</cross-session-message>"));
     // 先提交再 ack；主会话已绑定。
-    assert_eq!(*lock(&port.acked), [1]);
-    assert_eq!(*lock(&port.bound), ["sess_1"]);
+    assert_eq!(*port.acked.lock_unpoisoned(), [1]);
+    assert_eq!(*port.bound.lock_unpoisoned(), ["sess_1"]);
     assert!(port.receipts().is_empty());
     let entries = built.store.facts(&SessionId::new("sess_1"));
     assert!(entries.iter().any(|fact| matches!(fact, rust_cli_kernel_api::store::Fact::Entry { kind, id, .. } if kind == "peer_message" && id == "m1")));
@@ -326,7 +328,7 @@ async fn a_held_message_is_restored_when_the_session_reopens() {
     port.push(message(5, "m1", ModeClass::Bypass, 0));
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(built.session.view().await.unwrap().peer_held.len(), 1);
-    assert!(lock(&port.acked).contains(&5));
+    assert!(port.acked.lock_unpoisoned().contains(&5));
 }
 
 #[tokio::test]
@@ -346,7 +348,7 @@ async fn receipts_wait_for_a_tool_boundary_when_they_do_not_wake() {
     // `-p`（passive）：不开回合，留到下一个回合的工具边界。
     assert!(!view.running);
     assert!(user_texts(&view.messages).is_empty());
-    assert_eq!(*lock(&port.acked), [1]);
+    assert_eq!(*port.acked.lock_unpoisoned(), [1]);
 }
 
 #[tokio::test]

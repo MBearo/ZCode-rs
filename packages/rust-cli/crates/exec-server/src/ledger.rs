@@ -3,11 +3,13 @@
 //!
 //! 账本存编码好的帧（回复、事件），不认识它们的内容：补发时原样发出。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use rust_cli_exec_wire::op::OpKind;
 
 /// 一次调用：按（客户端实例，调用 ID）区分，不同实例互不影响。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -31,27 +33,19 @@ pub enum Begun {
     Interrupted,
 }
 
-/// 调用的种类（§19.7）：文件版账本只把有副作用的调用写进日志；只读调用重跑没有副作用，流的消费方按自己的游标重新
-/// 订阅，所以它们只在内存里。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CallKind {
-    Read,
-    Mutation,
-    Stream,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("exec ledger: {0}")]
 pub struct LedgerError(pub String);
 
 #[async_trait]
 pub trait ExecLedger: Send + Sync {
-    /// 先记账再执行：没见过就登记为进行中（带请求的指纹）；见过就给出它的状态。
+    /// 先记账再执行：没见过就登记为进行中（带请求的指纹）；见过就给出它的状态。`kind` 是消息的种类（§19.7）：文件版
+    /// 账本只把有副作用的调用写进日志；只读调用重跑没有副作用，流的消费方按自己的游标重新订阅，所以它们只在内存里。
     async fn begin(
         &self,
         key: &CallKey,
         fingerprint: &str,
-        kind: CallKind,
+        kind: OpKind,
     ) -> Result<Begun, LedgerError>;
 
     /// 一次调用完成：存下编码好的回复帧。
@@ -102,9 +96,7 @@ pub struct MemoryLedger {
 
 impl MemoryLedger {
     fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<CallKey, Entry>> {
-        self.entries
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.entries.lock_unpoisoned()
     }
 
     /// 账本里还有几次调用（测试看 ack 之后是否删掉）。
@@ -123,7 +115,7 @@ impl ExecLedger for MemoryLedger {
         &self,
         key: &CallKey,
         fingerprint: &str,
-        _kind: CallKind,
+        _kind: OpKind,
     ) -> Result<Begun, LedgerError> {
         let mut entries = self.entries();
         let Some(entry) = entries.get(key) else {

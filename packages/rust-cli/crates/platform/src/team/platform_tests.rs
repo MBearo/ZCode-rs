@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use rust_cli_kernel_api::model::{ModelConnection, ModelError, ModelSelection};
 use rust_cli_kernel_api::provider::{
-    CatalogModel, Credential, ModelDirectory, ModelEndpoint, ModelEndpoints,
+    CatalogModel, Credential, EndpointQuery, ModelDirectory, ModelEndpoint, ModelEndpoints,
 };
 use serde_json::{Value, json};
 
@@ -195,10 +195,8 @@ fn team(project: &str) -> ModelConnection {
 
 fn model(provider: &str, project: Option<&str>) -> ModelSelection {
     ModelSelection {
-        provider: provider.to_owned(),
-        model: models::GLM_5_3_ACCOUNT.to_owned(),
-        reasoning: None,
         connection: project.map(|project| Box::new(team(project))),
+        ..ModelSelection::new(provider.to_owned(), models::GLM_5_3_ACCOUNT.to_owned())
     }
 }
 
@@ -328,12 +326,12 @@ async fn the_app_connection_does_not_matter() {
     // 选哪一项就用哪个套餐的令牌：团队项目 p-t 的 key（团队头）、个人的 key。
     let team_endpoint = harness
         .platform
-        .endpoint(&model(TEAM, Some("p-t")), None)
+        .endpoint(EndpointQuery::new(&model(TEAM, Some("p-t"))))
         .await
         .unwrap();
     let personal_endpoint = harness
         .platform
-        .endpoint(&model(PERSONAL, None), None)
+        .endpoint(EndpointQuery::new(&model(PERSONAL, None)))
         .await
         .unwrap();
     assert_ne!(token(&team_endpoint), token(&personal_endpoint));
@@ -361,7 +359,7 @@ async fn the_app_connection_does_not_matter() {
     // 选择没带团队项目（Node / App 写的会话）：取这个模型的第一个团队项目。
     let first = harness
         .platform
-        .endpoint(&model(TEAM, None), None)
+        .endpoint(EndpointQuery::new(&model(TEAM, None)))
         .await
         .unwrap();
     assert_eq!(token(&first), token(&team_endpoint));
@@ -377,8 +375,8 @@ async fn two_team_projects_request_concurrently() {
     service.delay("/api/biz/v1/organization/org-t/projects/p-t/api_keys", 300);
     let (first, second) = (model(TEAM, Some("p-t")), model(TEAM, Some("p-u")));
     let (a, b) = tokio::join!(
-        harness.platform.endpoint(&first, None),
-        harness.platform.endpoint(&second, None),
+        harness.platform.endpoint(EndpointQuery::new(&first)),
+        harness.platform.endpoint(EndpointQuery::new(&second)),
     );
     let (a, b) = (a.unwrap(), b.unwrap());
     assert_ne!(token(&a), token(&b));
@@ -400,7 +398,10 @@ async fn two_team_projects_request_concurrently() {
     login(&harness, "at-big-2").await;
     let message = match harness
         .platform
-        .endpoint(&model(TEAM, Some("p-t")), Some(&a))
+        .endpoint(EndpointQuery {
+            rejected: Some(&a),
+            ..EndpointQuery::new(&model(TEAM, Some("p-t")))
+        })
         .await
     {
         Err(ModelError::Authentication { message }) => message,
@@ -462,7 +463,7 @@ async fn unknown_keeps_the_last_result_and_expiry_explains_itself() {
     // 过期的团队项目取端点：报 App 的文案；可用的另一个项目照常。
     let message = match harness
         .platform
-        .endpoint(&model(TEAM, Some("p-t")), None)
+        .endpoint(EndpointQuery::new(&model(TEAM, Some("p-t"))))
         .await
     {
         Err(ModelError::Authentication { message }) => message,
@@ -472,7 +473,7 @@ async fn unknown_keeps_the_last_result_and_expiry_explains_itself() {
     assert!(
         harness
             .platform
-            .endpoint(&model(TEAM, Some("p-u")), None)
+            .endpoint(EndpointQuery::new(&model(TEAM, Some("p-u"))))
             .await
             .is_ok()
     );
@@ -577,7 +578,7 @@ async fn a_login_change_during_the_exchange_invalidates_the_token() {
         async move {
             harness
                 .platform
-                .endpoint(&model(TEAM, Some("p-t")), None)
+                .endpoint(EndpointQuery::new(&model(TEAM, Some("p-t"))))
                 .await
         }
     });

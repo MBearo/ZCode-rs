@@ -84,8 +84,8 @@ fn main_app(lang: Lang) -> App {
 
 /// 一份命中率的回执（累计输入、缓存读）。
 fn receipt(app: &mut App, input: u64, read: u64) {
-    let seq = app.request_stats.begin();
-    assert!(app.request_stats.arrived(
+    let seq = app.snapshots.request_stats.begin();
+    assert!(app.snapshots.request_stats.arrived(
         seq,
         Some(RequestStats {
             requests: 1,
@@ -100,33 +100,8 @@ fn receipt(app: &mut App, input: u64, read: u64) {
 /// 子代理的快照：自己的模型与档位、权限模式；`stats` 时带 ctx 20.0%（9000 / 45000）与 30 tok/s。
 fn subagent_view(mode: PermissionMode, plan: bool, stats: bool) -> Transcript {
     let view = SessionView {
-        meta: SessionMeta {
-            id: SessionId::new("sess_subagent_agent_a"),
-            kind: SessionKind::Subagent,
-            parent: Some(SessionId::new("sess_main")),
-            workspace: WorkspaceRef {
-                environment: EnvironmentId::new("local"),
-                root: EnvPath::new("/Users/dev/project"),
-            },
-            title: "Find callers".into(),
-            trace: TraceId::new("sess_main"),
-            created_at_ms: 0,
-        },
-        messages: Vec::new(),
-        selection: ModelSelection {
-            model: "child-model".into(),
-            reasoning: Some("high".into()),
-            ..selection()
-        },
-        mode,
         plan,
-        pending: Vec::new(),
-        queue: Vec::new(),
-        last_seq: 0,
-        revision: 0,
         running: true,
-        background: Vec::new(),
-        peer_held: Vec::new(),
         context_usage: stats.then_some(ContextOccupancy {
             used_tokens: 9_000,
             max_tokens: 45_000,
@@ -137,6 +112,27 @@ fn subagent_view(mode: PermissionMode, plan: bool, stats: bool) -> Transcript {
             duration_ms: 4_000,
             first_content_ms: Some(1_000),
         }),
+        ..SessionView::new(
+            SessionMeta {
+                id: SessionId::new("sess_subagent_agent_a"),
+                kind: SessionKind::Subagent,
+                parent: Some(SessionId::new("sess_main")),
+                workspace: WorkspaceRef {
+                    environment: EnvironmentId::new("local"),
+                    root: EnvPath::new("/Users/dev/project"),
+                },
+                title: "Find callers".into(),
+                trace: TraceId::new("sess_main"),
+                created_at_ms: 0,
+            },
+            Vec::new(),
+            ModelSelection {
+                model: "child-model".into(),
+                reasoning: Some("high".into()),
+                ..selection()
+            },
+            mode,
+        )
     };
     Transcript::from_view(view, 0)
 }
@@ -156,13 +152,13 @@ fn entry() -> SubagentEntry {
         owner: None,
         activity: None,
         parked: false,
-        machine: None,
+        machine: Default::default(),
     }
 }
 
 /// 开始查看 agent_a：runner 在查看对象换了时清空命中率的回执再查子会话（这里直接给回执）。
 fn view(app: &mut App, view: Transcript) {
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![entry()],
         at: Some(Instant::now()),
     };
@@ -176,7 +172,7 @@ fn view(app: &mut App, view: Transcript) {
         owner: None,
         view,
     });
-    app.request_stats.clear();
+    app.snapshots.request_stats.clear();
 }
 
 fn plain(app: &App, width: usize) -> String {
@@ -279,15 +275,12 @@ fn the_context_notice_is_the_subagents() {
 fn the_left_side_follows_the_subagent_without_main_hints() {
     let mut app = main_app(Lang::En);
     // 主会话有一个在跑的 shell（pill）。
-    app.background = vec![rust_cli_kernel_api::manage::BackgroundEntry {
-        id: "bash_1".into(),
-        kind: rust_cli_kernel_api::manage::BackgroundKind::Shell,
-        description: "npm run dev".into(),
-        status: rust_cli_kernel_api::env_shell::BackgroundStatus::Running,
-        output: None,
-        machine: None,
-        reconnecting: false,
-    }];
+    app.snapshots.background = vec![rust_cli_kernel_api::manage::BackgroundEntry::new(
+        "bash_1",
+        rust_cli_kernel_api::manage::BackgroundKind::Shell,
+        "npm run dev",
+        rust_cli_kernel_api::env_shell::BackgroundStatus::Running,
+    )];
     let before = plain(&app, 160);
     assert!(before.contains("Ask before changes"), "{before}");
     assert!(before.contains("esc to interrupt"), "{before}");
@@ -329,7 +322,7 @@ fn the_left_side_follows_the_subagent_without_main_hints() {
                                        "status": "pending", "blocks": [], "blockedBy": []}]),
         },
     );
-    app.background.clear();
+    app.snapshots.background.clear();
     assert!(
         main_tip_without_viewing(&mut app).contains("ctrl+t"),
         "主会话空闲、有任务清单时写 ctrl+t 的提示"
@@ -338,7 +331,7 @@ fn the_left_side_follows_the_subagent_without_main_hints() {
     assert!(!text.contains("ctrl+t"), "{text}");
     assert!(!text.contains("for projects"), "{text}");
     // 上滚时 esc 先回到底部：照旧提示。
-    app.scroll = 3;
+    app.port.scroll = 3;
     let text = plain(&app, 160);
     assert!(text.contains("esc latest"), "{text}");
 }
@@ -353,7 +346,7 @@ fn returning_to_main_restores_it() {
     );
     receipt(&mut app, 400, 200);
     app.viewing = None;
-    app.request_stats.clear();
+    app.snapshots.request_stats.clear();
     let text = plain(&app, 160);
     assert!(
         text.ends_with("40 tok/s \u{b7} ctx 37.0% \u{b7} 10% until auto-compact \u{b7} scripted"),
@@ -369,12 +362,12 @@ fn returning_to_main_restores_it() {
 #[test]
 fn a_receipt_from_before_the_switch_is_dropped() {
     let mut app = main_app(Lang::En);
-    let in_flight = app.request_stats.begin();
+    let in_flight = app.snapshots.request_stats.begin();
     view(
         &mut app,
         subagent_view(PermissionMode::Default, false, true),
     );
-    assert!(!app.request_stats.arrived(
+    assert!(!app.snapshots.request_stats.arrived(
         in_flight,
         Some(RequestStats {
             requests: 1,
@@ -400,7 +393,7 @@ fn the_stats_follow_the_viewed_session() {
         app.stats_session(),
         Some(SessionId::new("sess_subagent_agent_a"))
     );
-    app.agents.entries.clear();
+    app.snapshots.agents.entries.clear();
     assert_eq!(app.stats_session(), None);
     app.viewing = None;
     app.session = None;
@@ -468,28 +461,24 @@ fn narrow_terminals_keep_the_order_while_viewing() {
 /// 测试里改快照的一项：把子代理视图的设置还原成快照（只取 footer 用到的字段）。
 fn snapshot_of(view: Transcript) -> SessionView {
     SessionView {
-        meta: SessionMeta {
-            id: SessionId::new("sess_subagent_agent_a"),
-            kind: SessionKind::Subagent,
-            parent: Some(SessionId::new("sess_main")),
-            workspace: view.workspace().clone(),
-            title: view.title().to_owned(),
-            trace: TraceId::new("sess_main"),
-            created_at_ms: 0,
-        },
-        messages: Vec::new(),
-        selection: view.selection().clone(),
-        mode: view.mode(),
         plan: view.plan(),
-        pending: Vec::new(),
-        queue: Vec::new(),
-        last_seq: 0,
-        revision: 0,
         running: view.running(),
-        background: Vec::new(),
-        peer_held: Vec::new(),
         context_usage: view.context_usage(),
         context_notice: view.context_notice(),
         output_speed: view.output_speed(),
+        ..SessionView::new(
+            SessionMeta {
+                id: SessionId::new("sess_subagent_agent_a"),
+                kind: SessionKind::Subagent,
+                parent: Some(SessionId::new("sess_main")),
+                workspace: view.workspace().clone(),
+                title: view.title().to_owned(),
+                trace: TraceId::new("sess_main"),
+                created_at_ms: 0,
+            },
+            Vec::new(),
+            view.selection().clone(),
+            view.mode(),
+        )
     }
 }

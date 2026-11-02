@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::model::ModelError;
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoints};
+use rust_cli_kernel_api::provider::{Credential, EndpointQuery, ModelEndpoints};
 use serde_json::{Value, json};
 
 use crate::fake_server_tests::{Account, BIGMODEL, Gate, Harness, Reply, Server, ZAI, selection};
@@ -109,8 +109,12 @@ async fn zai_uses_the_stored_business_jwt_and_caches_a_project_token() {
     let source =
         credentials.present("account-provider:account:zai-individual-coding-plan:auth-source");
     assert!(source.is_none());
-    let key =
-        crate::token::location::storage_key(&server.url(), crate::token::Family::Zai, "u-1", None);
+    let key = crate::token::location::storage_key(
+        &server.url(),
+        rust_cli_base::account::Family::Zai,
+        "u-1",
+        None,
+    );
     let saved = credentials.present(&key).unwrap();
     assert_eq!(
         saved.expose(),
@@ -139,7 +143,7 @@ async fn zai_uses_the_stored_business_jwt_and_caches_a_project_token() {
     // 经端点（先过个人订阅的查询，platform.md §5.7）：账号模型的端点可续期，Anthropic 协议另带同一个令牌的 Bearer。
     let endpoint = harness
         .platform
-        .endpoint(&selection(ZAI), None)
+        .endpoint(EndpointQuery::new(&selection(ZAI)))
         .await
         .unwrap();
     let Credential::ApiKey(key) = &endpoint.credential else {
@@ -238,8 +242,12 @@ async fn a_missing_key_forgets_the_location_and_disabled_tokens_fail() {
         message.starts_with("project_token_invalid_response"),
         "{message}"
     );
-    let key =
-        crate::token::location::storage_key(&server.url(), crate::token::Family::Zai, "u-1", None);
+    let key = crate::token::location::storage_key(
+        &server.url(),
+        rust_cli_base::account::Family::Zai,
+        "u-1",
+        None,
+    );
     assert!(harness.credentials().await.present(&key).is_none());
     // 位置重新解析，这次签发成功。
     assert_eq!(pat(&harness, ZAI_PLAN, None).await.unwrap(), "pat-1");

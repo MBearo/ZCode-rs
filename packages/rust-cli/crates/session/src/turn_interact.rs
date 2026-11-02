@@ -3,24 +3,18 @@
 use super::*;
 
 impl Actor {
-    /// 待回答的交互：先持久化，再通知前端；回答经 `ResolveInteraction` 命令送达。
-    pub(crate) async fn ask(
+    /// 待回答的交互：登记在内存里并通知前端；回答经 `ResolveInteraction` 命令送达。
+    ///
+    /// 不落库（D4，工作线 F130）：以前提问与回答各写一条 `rust-cli/pending_interaction` / `interaction_resolved`
+    /// entry，冷读取读出 `LoadedSession.pending_interactions`，却没有读者——进程重启后询问已无法回答，续写时未结的
+    /// 工具调用按中断结算（session-lifecycle.md §6.3）。现在两头一起删；库里的旧记录不读、不删。
+    pub(crate) fn ask(
         &mut self,
         request: InteractionRequest,
         reply: oneshot::Sender<Result<InteractionAnswer, OrchestrationError>>,
         scope: crate::actor::AskScope,
     ) {
         let id = self.deps.ids.interaction();
-        let fact = Fact::Entry {
-            kind: PENDING_INTERACTION.to_owned(),
-            id: id.as_str().to_owned(),
-            data: serde_json::to_value(&request).unwrap_or(Value::Null),
-        };
-        if let Err(reason) = self.commit(None, vec![fact]).await {
-            tracing::warn!(event = "interaction.failed", session = %self.meta.id, %reason, "could not record a pending interaction");
-            let _ = reply.send(Err(OrchestrationError::Failed { message: reason }));
-            return;
-        }
         let (kind, tool) = describe(&request);
         tracing::info!(event = "interaction.asked", session = %self.meta.id, interaction = %id, kind, tool, "interaction asked");
         self.log.append(KernelEvent::InteractionAsked {
@@ -42,7 +36,7 @@ impl Actor {
         &mut self,
         command: CommandId,
         interaction: InteractionId,
-        answer: Value,
+        answer: Answer,
     ) -> Ack {
         let Some(position) = self
             .pending
@@ -51,15 +45,10 @@ impl Actor {
         else {
             return rejected(format!("no pending interaction {interaction}"));
         };
-        let fact = Fact::Entry {
-            kind: INTERACTION_RESOLVED.to_owned(),
-            id: interaction.as_str().to_owned(),
-            data: answer.clone(),
-        };
-        // “总是允许”的规则与解决同一批提交（shell-permissions.md §5）。
-        let rules = crate::rules::remembered(&self.pending[position].request, &answer);
-        let facts = std::iter::once(fact).chain(rules).collect();
-        if let Err(reason) = self.commit(Some(command), facts).await {
+        // “总是允许”的规则先落库，成功了才算回答（shell-permissions.md §5）；没有要记住的规则时不写库。
+        if let Some(rules) = crate::rules::remembered(&self.pending[position].request, &answer)
+            && let Err(reason) = self.commit(Some(command), vec![rules]).await
+        {
             return rejected(reason);
         }
         let pending = self.pending.remove(position);
@@ -72,8 +61,8 @@ impl Actor {
             interaction = %interaction,
             kind,
             tool,
-            decision = answer["decision"].as_str().unwrap_or_default(),
-            remembered = answer["remember"].as_array().map_or(0, Vec::len),
+            decision = answer.decision(),
+            remembered = answer.remembered().len(),
             waiting = !pending.reply.is_closed(),
             "interaction resolved"
         );
@@ -86,26 +75,26 @@ impl Actor {
         accepted()
     }
 
-    /// 关闭会话或进程退出：全部待回答的交互记为取消，等待方得到错误。
-    pub(crate) async fn cancel_pending(&mut self) {
+    /// 关闭会话或进程退出：全部待回答的交互取消，等待方得到错误。
+    pub(crate) fn cancel_pending(&mut self) {
         let pending = std::mem::take(&mut self.pending);
         self.asking_changed();
         for pending in pending {
-            self.cancelled(pending).await;
+            self.cancelled(pending);
         }
     }
 
     /// 回合结束或被中断：只取消回合里的询问，会话级的询问（后台子代理的，agents.md §4.1.1）留着。
     ///
     /// 修复线 F67：以前回合结束时取消全部待回答的交互（那时只有回合里的询问）。
-    pub(crate) async fn cancel_turn_asks(&mut self) {
+    pub(crate) fn cancel_turn_asks(&mut self) {
         let (turn, session): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
             .into_iter()
             .partition(|pending| pending.scope == crate::actor::AskScope::Turn);
         self.pending = session;
         self.asking_changed();
         for pending in turn {
-            self.cancelled(pending).await;
+            self.cancelled(pending);
         }
     }
 
@@ -114,7 +103,7 @@ impl Actor {
     /// 修复（R1-5）：以前工具被取消时只丢掉等回答的 future，这里的待回答交互要到回合结束才清——对话框一直显示，
     /// 用户之后的回答还会被接受、提交“总是允许”。现在工具取消时发来这条消息：从待回答里去掉、记为取消、通知前端
     /// 关闭对话框；之后到达的回答找不到它，被拒绝（`resolve`），不提交规则。
-    pub(crate) async fn cancel_ask(&mut self, tool_use: &rust_cli_kernel_api::ids::ToolUseId) {
+    pub(crate) fn cancel_ask(&mut self, tool_use: &rust_cli_kernel_api::ids::ToolUseId) {
         let Some(position) = self
             .pending
             .iter()
@@ -124,20 +113,12 @@ impl Actor {
         };
         let pending = self.pending.remove(position);
         self.asking_changed();
-        self.cancelled(pending).await;
+        self.cancelled(pending);
     }
 
-    /// 一条交互记为取消并通知前端（等待方随 `reply` 丢弃得到错误）。
-    async fn cancelled(&mut self, pending: Pending) {
+    /// 一条交互取消并通知前端（等待方随 `reply` 丢弃得到错误）。
+    fn cancelled(&self, pending: Pending) {
         tracing::info!(event = "interaction.cancelled", session = %self.meta.id, interaction = %pending.id, "interaction cancelled");
-        let fact = Fact::Entry {
-            kind: INTERACTION_RESOLVED.to_owned(),
-            id: pending.id.as_str().to_owned(),
-            data: json!({"cancelled": true}),
-        };
-        if let Err(reason) = self.commit(None, vec![fact]).await {
-            tracing::warn!(%reason, "could not record a cancelled interaction");
-        }
         self.log.append(KernelEvent::InteractionResolved {
             interaction: pending.id,
         });

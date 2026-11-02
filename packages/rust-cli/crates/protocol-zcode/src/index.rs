@@ -3,12 +3,13 @@
 //! 会话列表的快照 = 存储里这个工作区的会话 + 本进程打开着的会话的实时行；之后每次实时行变了发一个 `session.upserted`。
 //! 工作区配置在 P1 只有快照（配置项与斜杠命令为空，斜杠命令由 `workspace/readPresentation` 给）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use rust_cli_protocol_core::delivery::TopicLog;
 use serde_json::{Value, json};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 use rust_cli_protocol_core::serial::Serial;
 
@@ -100,9 +101,7 @@ impl Topics {
     }
 
     fn table(&self) -> MutexGuard<'_, HashMap<String, Published>> {
-        self.published
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.published.lock_unpoisoned()
     }
 
     fn entry<'a>(

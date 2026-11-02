@@ -50,7 +50,7 @@ pub(super) async fn write(dir: &str) -> Result<()> {
         message: Message::Attachment(AttachmentMessage {
             id: notice.clone(),
             source: "remote_machines".into(),
-            text: "<system-reminder>\nRemote machines connected to this session.\n- dev-a: Linux x86_64, shell /bin/bash, working directory /home/dev/proj\n</system-reminder>".into(),
+            text: "<system-reminder>\nMachines connected to this session besides the primary machine.\n- dev-a: Linux x86_64, shell /bin/bash, working directory /home/dev/proj\n</system-reminder>".into(),
             data: json!({"machines": [{"name": "dev-a", "os": "linux", "arch": "x86_64",
                 "shell": "/bin/bash", "workingDirectory": "/home/dev/proj"}]}),
         }),
@@ -86,7 +86,7 @@ pub(super) async fn write(dir: &str) -> Result<()> {
             assistant: reply_id.clone(),
             tool_use: ToolUseId::new(call),
             snapshot,
-            machine: machine.map(str::to_owned),
+            machine: rust_cli_kernel_api::ids::MachineName::new(machine.unwrap_or_default()),
         };
     let facts = vec![
         result(&reply_id, "toolu_bash", vec![said("x86_64")], false),

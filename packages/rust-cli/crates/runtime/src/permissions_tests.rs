@@ -102,14 +102,10 @@ async fn the_listing_reads_local_settings_fresh() {
 /// “总是允许”落库后（db 里已有规则），判决链读回同一份规则集：快照的 LocalSettings 层换成库值（R1-2）。
 #[tokio::test]
 async fn a_committed_always_allow_replaces_the_local_layer() {
-    let gate = Arc::new(gate());
     let store = Arc::new(MemoryStore::default());
     add(&store, RuleBehavior::Allow, "Bash(npm test:*)").await;
-    let shared = SharedRules {
-        gate: gate.clone(),
-        store: store.clone(),
-    };
-    shared.local_rules_committed(&workspace()).await;
+    let gate = gate().with_local_rules(Arc::new(StoredRules(store.clone())));
+    gate.local_rules_committed(&workspace()).await;
     let snapshot = gate.rules();
     assert_eq!(snapshot.version, 4);
     assert_eq!(

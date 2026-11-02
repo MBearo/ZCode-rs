@@ -6,6 +6,7 @@ use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
 use rust_cli_kernel_api::hooks::HookEventName;
 use rust_cli_kernel_api::ids::EnvironmentId;
 use rust_cli_kernel_api::permission::PermissionRule;
+use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::MemoryEnvironment;
 use serde_json::json;
 
@@ -20,8 +21,8 @@ fn env(files: &[(&str, Value)]) -> MemoryEnvironment {
         os_version: "Linux".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: true,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     };
     files
         .iter()
@@ -43,6 +44,15 @@ fn home(user: Option<Value>) -> (tempfile::TempDir, StoragePaths) {
 }
 
 async fn assemble_with(user: Option<Value>, files: &[(&str, Value)]) -> ConfigSnapshot {
+    assemble_on(user, files, true).await
+}
+
+/// `project_is_local` 为假：项目文件在别的机器上（主 env 不在本进程里）。
+async fn assemble_on(
+    user: Option<Value>,
+    files: &[(&str, Value)],
+    project_is_local: bool,
+) -> ConfigSnapshot {
     let (_dir, paths) = home(user);
     let env = env(files);
     let workspace = WorkspaceRef {
@@ -53,10 +63,25 @@ async fn assemble_with(user: Option<Value>, files: &[(&str, Value)]) -> ConfigSn
         files: &env,
         workspace: &workspace,
         paths: &paths,
-        process_env: &[],
+        process_env: &rust_cli_base::secret::EnvSnapshot::default(),
         flag: None,
+        project_is_local,
     })
     .await
+}
+
+/// 主 env 不在本机时，项目级配置是执行侧的文件，不能改 controller 的存储位置（deployment.md §21）：只认用户级配置。
+#[tokio::test]
+async fn project_files_on_another_machine_do_not_move_the_storage() {
+    let user = json!({"storage": {"dir": "/Users/dev/store"}});
+    let project = json!({"storage": {"dir": "/srv/store", "sessionDbPath": "/srv/db.sqlite"}});
+    let files = [("/Users/dev/repo/zcode.json", project)];
+    let local = assemble_on(Some(user.clone()), &files, true).await.storage;
+    assert_eq!(local.dir.as_deref(), Some("/srv/store"));
+    assert_eq!(local.session_db_path.as_deref(), Some("/srv/db.sqlite"));
+    let remote = assemble_on(Some(user), &files, false).await.storage;
+    assert_eq!(remote.dir.as_deref(), Some("/Users/dev/store"));
+    assert_eq!(remote.session_db_path, None);
 }
 
 #[tokio::test]
@@ -182,7 +207,7 @@ async fn the_initial_mode_follows_the_node_order() {
     let store = rust_cli_node_store::NodeStore::new(
         paths,
         std::sync::Arc::new(rust_cli_node_store::NodeIds::new(std::sync::Arc::new(
-            rust_cli_node_store::SystemClock::utc(),
+            rust_cli_base::clock::SystemClock::utc(),
         ))),
     );
     let workspace = WorkspaceRef {

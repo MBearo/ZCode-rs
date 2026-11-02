@@ -2,12 +2,7 @@
 //! 一节用它。
 use super::i18n::Lang;
 
-/// 粘贴图片的键：Windows 是 alt+v，其他平台是 ctrl+v。
-pub fn image_paste_key() -> &'static str {
-    if cfg!(windows) { "alt + v" } else { "ctrl + v" }
-}
-
-/// 同上，提示里的写法（`ctrl+v`，没有空格）。
+/// 粘贴图片的键：Windows 是 alt+v，其他平台是 ctrl+v（提示里的写法，没有空格）。
 pub fn image_paste_chord() -> &'static str {
     if cfg!(windows) { "alt+v" } else { "ctrl+v" }
 }

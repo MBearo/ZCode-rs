@@ -1,39 +1,25 @@
 //! 子代理快照（tui-panels.md §1）：时刻、等待、版本、变化通知与只读查看。
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::StreamExt;
 use rust_cli_kernel_api::abort::Abort;
-use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::ids::{AgentId, SessionId};
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::panels::{SubagentStatus, TasksSnapshot};
 use serde_json::json;
 use tokio::sync::Notify;
 
+use rust_cli_kernel_api::testing::ManualClock;
+
 use super::*;
 use crate::live::{AgentState, Live};
 use crate::report::Ending;
 use crate::test_support::{harness, text};
 
-/// 测试里手动拨动的时钟。
-#[derive(Default)]
-struct Dial(AtomicU64);
-
-impl Clock for Dial {
-    fn now_ms(&self) -> u64 {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
-
 fn running(agent: &str, root: &str) -> crate::live::LiveAgent {
     crate::live::LiveAgent {
-        machine: None,
+        machine: Default::default(),
         agent: AgentId::new(agent),
         child: SessionId::new(format!("sess_subagent_{agent}")),
         parent: SessionId::new(root),
@@ -64,12 +50,12 @@ fn running(agent: &str, root: &str) -> crate::live::LiveAgent {
 
 #[test]
 fn times_follow_the_state_and_restart_resets_the_clock() {
-    let clock = Arc::new(Dial::default());
+    let clock = Arc::new(ManualClock::default());
     let live = Live::new(clock.clone());
-    clock.0.store(1_000, Ordering::SeqCst);
+    clock.set(1_000);
     live.insert(running("agent_a", "sess_root"));
     live.insert(running("agent_b", "sess_other"));
-    clock.0.store(4_000, Ordering::SeqCst);
+    clock.set(4_000);
     let root = SessionId::new("sess_root");
     let listed = entries(&live, &root);
     assert_eq!(listed.len(), 1, "only the root's agents");
@@ -78,7 +64,7 @@ fn times_follow_the_state_and_restart_resets_the_clock() {
     assert_eq!(listed[0].ended_ago_ms, None);
 
     live.finish(&AgentId::new("agent_a"), Ending::Failed);
-    clock.0.store(10_000, Ordering::SeqCst);
+    clock.set(10_000);
     let entry = &entries(&live, &root)[0];
     assert_eq!(entry.status, SubagentStatus::Failed);
     assert_eq!(entry.elapsed_ms, 3_000, "stops at the end of the run");
@@ -86,7 +72,7 @@ fn times_follow_the_state_and_restart_resets_the_clock() {
 
     // SendMessage 续跑：重新开始计时。
     assert!(live.restart(&AgentId::new("agent_a"), Abort::new()));
-    clock.0.store(12_000, Ordering::SeqCst);
+    clock.set(12_000);
     let entry = &entries(&live, &root)[0];
     assert_eq!(entry.status, SubagentStatus::Running);
     assert_eq!(entry.elapsed_ms, 2_000);
@@ -96,7 +82,7 @@ fn times_follow_the_state_and_restart_resets_the_clock() {
 /// 修复线 F30（tui-panels.md §1.1）：停放的条目带 `parked`、状态仍是 completed，owner 原样给出；真的结束了的没有。
 #[test]
 fn parked_agents_are_marked_in_the_snapshot() {
-    let clock = Arc::new(Dial::default());
+    let clock = Arc::new(ManualClock::default());
     let live = Live::new(clock.clone());
     live.insert(running("agent_p", "sess_root"));
     let mut child = running("agent_c", "sess_root");
@@ -106,7 +92,7 @@ fn parked_agents_are_marked_in_the_snapshot() {
         agents.get_mut(&AgentId::new("agent_p")).unwrap().state =
             AgentState::Parked(crate::report::Report::default());
     });
-    clock.0.store(5_000, Ordering::SeqCst);
+    clock.set(5_000);
     let root = SessionId::new("sess_root");
     let listed = entries(&live, &root);
     assert_eq!(listed[0].status, SubagentStatus::Completed);
@@ -178,7 +164,7 @@ fn the_tasks_snapshot_reads_the_rows_and_the_background_agents_together() {
 fn entries_carry_the_default_machine() {
     let live = Live::default();
     let mut remote = running("agent_r", "sess_root");
-    remote.machine = Some("dev-a".to_owned());
+    remote.machine = rust_cli_kernel_api::ids::MachineName::new("dev-a");
     live.insert(remote);
     live.insert(running("agent_l", "sess_root"));
     let root = SessionId::new("sess_root");
@@ -186,7 +172,12 @@ fn entries_carry_the_default_machine() {
     let rows: Vec<_> = snapshot
         .subagents
         .iter()
-        .map(|entry| (entry.agent.to_string(), entry.machine.clone()))
+        .map(|entry| {
+            (
+                entry.agent.to_string(),
+                entry.machine.remote().map(str::to_owned),
+            )
+        })
         .collect();
     assert_eq!(
         rows,
@@ -198,7 +189,7 @@ fn entries_carry_the_default_machine() {
     let background: Vec<_> = snapshot
         .background
         .iter()
-        .map(|entry| (entry.id.clone(), entry.machine.clone()))
+        .map(|entry| (entry.id.clone(), entry.machine.remote().map(str::to_owned)))
         .collect();
     assert_eq!(
         background,
@@ -289,7 +280,7 @@ fn the_current_activity_follows_the_child_events() {
 
     use crate::doing::Doing;
 
-    let clock = Arc::new(Dial::default());
+    let clock = Arc::new(ManualClock::default());
     let live = Live::new(clock.clone());
     live.insert(running("agent_a", "sess_root"));
     let agent = AgentId::new("agent_a");
@@ -339,7 +330,7 @@ fn the_current_activity_follows_the_child_events() {
     assert!(!changes.has_changed().unwrap());
 
     // 重试：按查询时刻算还要等多久。
-    clock.0.store(1_000, Ordering::SeqCst);
+    clock.set(1_000);
     apply(QueryEvent::ModelNotice {
         notice: ModelNotice::Retrying {
             attempt: 2,
@@ -351,7 +342,7 @@ fn the_current_activity_follows_the_child_events() {
             },
         },
     });
-    clock.0.store(3_000, Ordering::SeqCst);
+    clock.set(3_000);
     assert_eq!(
         activity(),
         Some(SubagentActivity::Retrying {
@@ -366,7 +357,7 @@ fn the_current_activity_follows_the_child_events() {
             retry_in_ms: 280_000,
         },
     });
-    clock.0.store(13_000, Ordering::SeqCst);
+    clock.set(13_000);
     assert_eq!(
         activity(),
         Some(SubagentActivity::Stalled {
@@ -460,24 +451,22 @@ async fn a_completed_subagent_request_records_its_speed() {
         })
     };
     let call = |id: &str, status: CallStatus, source: QuerySource, output: u64| ModelCall {
-        message: MessageId::new(id),
-        source,
-        selection: selection(),
-        started_at_ms: 1_000,
         first_token_at_ms: Some(2_000),
         first_content_at_ms: Some(2_000),
-        completed_at_ms: 4_000,
-        status,
-        stop_reason: None,
-        tool_calls: 0,
         usage: Some(Usage {
             input_tokens: 10,
             output_tokens: output,
             cache_creation_input_tokens: 0,
             cache_read_input_tokens: 0,
         }),
-        retries: 0,
-        error: None,
+        ..ModelCall::new(
+            MessageId::new(id),
+            source,
+            selection(),
+            1_000,
+            4_000,
+            status,
+        )
     };
     let explore = || QuerySource::Subagent("Explore".to_owned());
     let shown = |live: &Live| {

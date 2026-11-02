@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use rust_cli_base::proto::exit;
 use rust_cli_base::units;
-use rust_cli_kernel_api::env::{EnvError, EnvPath, Outcome, StartCommand};
+use rust_cli_kernel_api::env::{CommandKind, EnvError, EnvPath, Outcome, StartCommand};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::env_path::git_bash_spelling;
 use rust_cli_kernel_api::env_shell::{BackgroundKind, CwdScope, ShellNotice};
@@ -152,7 +152,7 @@ pub(crate) async fn spawn(
     }
     .map_err(|error| io(&error))?;
     let cwd_file = matches!(request.cwd_scope, CwdScope::Session { .. }).then_some(&*plan.cwd_file);
-    let hook = request.hook.is_some();
+    let hook = matches!(request.kind, CommandKind::Hook { .. });
     let text = script(
         &request.command,
         cwd_file,
@@ -510,14 +510,25 @@ async fn supervise(
 ) {
     let mut timeout = job.request.timeout_ms.map(Duration::from_millis);
     let stdin = tracked.child().stdin.take();
-    let input = job.request.hook.as_ref().map(|hook| hook.stdin.as_str());
+    let input = match &job.request.kind {
+        CommandKind::Hook { hook } => Some(hook.stdin.as_str()),
+        CommandKind::Foreground { .. }
+        | CommandKind::Background { .. }
+        | CommandKind::Socket { .. } => None,
+    };
     // 输入与等待同时进行：输入超过管道缓冲、命令又不读时，靠超时或取消结束进程后写入随之失败。
     let (ended, ()) = tokio::join!(wait_for(&mut tracked, timeout, job), feed(stdin, input));
     // 修 bug（工作线 F69）：以前前台命令到了超时一律结束，长编译、长测试被杀，模型只能重跑。`on_timeout` 有值时
     // 不结束，转到后台继续跑，之后的期限是后台命令的期限（从这时算起）；结束时照后台命令处理。
     // 取消已经发出（调用被中断）时不转，照旧结束。
     // 修复线 L-A：用户按转后台的键或来了低延迟投递的输入时同样转（tui-input.md §11），之后的期限同超时转后台。
-    let moved = match (&ended, &job.request.on_timeout) {
+    let on_timeout = match &job.request.kind {
+        CommandKind::Foreground { on_timeout } => on_timeout.as_ref(),
+        CommandKind::Background { .. } | CommandKind::Hook { .. } | CommandKind::Socket { .. } => {
+            None
+        }
+    };
+    let moved = match (&ended, on_timeout) {
         (Ended::TimedOut | Ended::Requested, Some(moved)) if !job.running.cancel.is_cancelled() => {
             Some(moved)
         }
@@ -534,8 +545,8 @@ async fn supervise(
     // 结束时按后台命令处理的：本来就是后台命令，或者超时转到了后台。
     let background = job
         .request
-        .background
-        .as_ref()
+        .kind
+        .background()
         .or(moved.map(|moved| &moved.command));
     let mut output_limit = None;
     let (outcome, exit, timed_out) = match ended {

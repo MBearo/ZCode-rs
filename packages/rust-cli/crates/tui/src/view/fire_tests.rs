@@ -8,12 +8,7 @@ use rust_cli_kernel_api::session_api::{KernelEvent, SequencedEvent, TurnOutcome}
 use super::*;
 
 fn view_with(events: Vec<KernelEvent>) -> Transcript {
-    let selection = ModelSelection {
-        provider: "fixture".into(),
-        model: "scripted".into(),
-        reasoning: None,
-        connection: None,
-    };
+    let selection = ModelSelection::new("fixture", "scripted");
     let mut view = Transcript::new(
         selection,
         PermissionMode::Default,

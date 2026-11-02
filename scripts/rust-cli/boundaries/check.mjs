@@ -254,9 +254,23 @@ export function checkSources(policy, clippyEntries, sources) {
     if (crate !== "base" && SPAWN.test(code)) {
       failures.push(`${file}: start tasks through rust_cli_base::TaskScope / owned / blocking`);
     }
-    if (policy.LAYERS[crate] === "kernel" && /\bInstant\b/.test(code)) {
+    // kernel-api 的 testing 模块只在测试里编译（feature `testing`，同 numbers.mjs 的口径）：测试时钟 TokioClock 按
+    // tokio 时间走（F126）。
+    const testing = /^crates\/kernel-api\/src\/testing(\.rs|\/)/.test(file);
+    if (policy.LAYERS[crate] === "kernel" && !testing && /\bInstant\b/.test(code)) {
       failures.push(
         `${file}: kernel crates take time from the injected Clock, not Instant (README §4)`,
+      );
+    }
+    // F128（审查 X9）：系统时钟在 base，内核的 crate 也看得见它；内核只经注入的 Clock 取时间（kernel-api 为它实现
+    // Clock 的那一处除外）。
+    if (
+      policy.LAYERS[crate] === "kernel" &&
+      !file.endsWith("crates/kernel-api/src/clock.rs") &&
+      /\bSystemClock\b/.test(code)
+    ) {
+      failures.push(
+        `${file}: kernel crates take time from the injected Clock, not SystemClock (README §4)`,
       );
     }
   }
@@ -270,13 +284,43 @@ export function isTestOnly(file) {
 }
 
 /// 同一个名字只定义一处（README §4.1，F55）：产品代码的字符串字面量里，登记的名字只出现在它的定义处。
+/// cli 碰本机文件的写法（deployment.md §25）。
+const LOCAL_FILES = /\b(?:rust_cli_fs::|std::fs::|tokio::fs::|LocalEnvironment::new\b)/;
+
+/// cli 的产品代码里碰本机文件的文件只许是 `CLI_LOCAL_FILES` 里的（deployment.md §21、§25）：路径一律指执行侧，会话的
+/// 输入经主 env 读。白名单里不再碰本机文件的条目也报出来。测试文件、注释与别的 crate 不算。
+export function checkLocalFiles(policy, sources) {
+  const failures = [];
+  const seen = new Set();
+  for (const { crate, file, text } of sources) {
+    if (crate !== "cli" || isTestFile(file) || !LOCAL_FILES.test(stripCode(text))) continue;
+    seen.add(file);
+    if (!(file in policy.CLI_LOCAL_FILES)) {
+      failures.push(
+        `${file}: touches local files (rust_cli_fs / std::fs / tokio::fs / LocalEnvironment::new); paths mean the execution side, so read session inputs through the primary env (deployment.md §21, §25), or list the file in CLI_LOCAL_FILES with a reason`,
+      );
+    }
+  }
+  for (const file of Object.keys(policy.CLI_LOCAL_FILES)) {
+    if (!seen.has(file)) {
+      failures.push(`CLI_LOCAL_FILES: ${file} no longer touches local files (dead entry)`);
+    }
+  }
+  return failures;
+}
+
 export function checkDefinitions(policy, sources) {
   const failures = [];
   const defined = new Set();
   for (const { file, text } of sources) {
     if (isTestOnly(file)) continue;
-    for (const { value, line } of stringLiterals(text)) {
-      for (const definition of policy.SINGLE_DEFINITIONS) {
+    // `code: true` 的规则按代码查（去掉注释与字面量的内容），其余按字符串字面量查（审查 X8）。
+    const literals = stringLiterals(text);
+    const code = stripCode(text)
+      .split("\n")
+      .map((value, index) => ({ value, line: index + 1 }));
+    for (const definition of policy.SINGLE_DEFINITIONS) {
+      for (const { value, line } of definition.code ? code : literals) {
         if (!definition.pattern.test(value)) continue;
         if (definition.owners.includes(file)) defined.add(`${definition.name}|${file}`);
         else {
@@ -364,13 +408,17 @@ export function checkGraph(policy, packages, internal, isInside) {
   for (const crate of Object.keys(policy.ALLOWED)) {
     if (!names.has(crate)) failures.push(`ALLOWED.${crate}: no such crate (dead entry)`);
   }
-  // 依赖表本身不能越层。
+  // 依赖表本身不能越层（`testOnly` 的 crate 也算在层的上限里，只是只许做测试依赖，见下面）。
   for (const [crate, allowed] of Object.entries(policy.ALLOWED)) {
     const rule = policy.LAYER_RULES[policy.LAYERS[crate]];
     if (allowed === "*" || rule === "*" || !rule) continue;
     for (const dependency of allowed) {
       const layer = policy.LAYERS[dependency];
-      if (!rule.crates.includes(dependency) && !rule.layers.includes(layer)) {
+      if (
+        !rule.crates.includes(dependency) &&
+        !rule.layers.includes(layer) &&
+        !(rule.testOnly ?? []).includes(dependency)
+      ) {
         failures.push(
           `ALLOWED.${crate}: ${policy.LAYERS[crate]} crates must not depend on ${dependency} (${layer}, README §3.1)`,
         );
@@ -393,6 +441,14 @@ export function checkGraph(policy, packages, internal, isInside) {
         if (allowed !== undefined && allowed !== "*" && !allowed.includes(target)) {
           failures.push(
             `${manifest}: ${crate} must not depend on ${target} (not in ALLOWED.${crate})`,
+          );
+        }
+        // 层的 `testOnly`（F133：前端只在测试里组装内核）：产品代码不能依赖它。
+        const layer = policy.LAYERS[crate];
+        const rule = policy.LAYER_RULES[layer];
+        if (dependency.kind !== "dev" && rule !== "*" && rule?.testOnly?.includes(target)) {
+          failures.push(
+            `${manifest}: ${crate} may depend on ${target} only as a dev-dependency (LAYER_RULES.${layer}.testOnly)`,
           );
         }
         continue;

@@ -9,18 +9,19 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
+use rust_cli_kernel_api::ids::MessageId;
+use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
+use rust_cli_kernel_api::session_api::RewindScope;
 
 use super::i18n::Lang;
 use super::key_hint;
-use super::keyboard::Typing;
+use super::keyboard;
 use super::layout;
 use super::palette::Palette;
 use super::pick;
 use super::text::truncate_line;
 
-/// 分隔选择值里的 provider / model / 档位（不会出现在 id 里）。
-pub const SEP: char = '\u{1f}';
 /// 两行的条目（rewind、`/mode`）每条占的行。
 const TWO_LINE_ROWS: usize = 2;
 /// 模型的档位：档位行与下面的空行。
@@ -40,38 +41,56 @@ pub struct Item {
     pub description: String,
     pub current: bool,
     /// 选中后交给调用方的值。
-    pub value: String,
+    pub value: Choice,
     /// 推理档位（从低到高）与当前选中的一档；只有模型列表用。
     pub levels: Vec<String>,
     pub level: usize,
 }
 
-/// 列表的用途：决定选中后做什么。
-#[derive(Debug, Clone, PartialEq)]
-pub enum Purpose {
-    Model,
-    /// `/mode` 不带参数的选择器（修复线 F26）：值是 Node 的模式名，选中后同 `/mode <名>`。工作线 F76：照 App 的菜单
-    /// 每个模式两行（名称、说明），名称用模式的颜色。
-    Permissions,
-    /// `/effort` 不带参数的选择器（修复线 F26）：值是档位或 `auto`，选中后同 `/effort <档>`。
-    Effort,
-    /// rewind 选择器的消息列表：每条两行（消息、这一回合的改动）。
-    Rewind,
-    /// rewind 的确认选项；值是 `范围 SEP 消息 ID`。
-    RewindConfirm,
-    /// 只读信息：enter 与 esc 都关闭。
-    Info,
-    /// `/memory` 的文件（tui-input.md §4.2）；值是文件在列表里的下标。
-    Memory,
-    /// `/fork` 的用户输入列表（session-lifecycle.md §6.5.3）：每条一行；值是消息 ID。
-    Fork,
-    /// `/theme`：深色 / 浅色。
-    Theme,
+/// 选中一项后交给调用方的值（架构整理 U4：以前是用分隔符拼的字符串，模型的团队项目先序列化成 JSON，下标写成数字
+/// 文字，选中后再拆开解析）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Choice {
+    /// 只关闭列表（rewind 的 `(current)`）。
+    #[default]
+    Close,
+    /// `/model` 的一个模型；档位由列表的 ←/→ 给出（[`Outcome::Chosen`] 的 `level`）。
+    Model(ModelSelection),
+    /// `/mode` 不带参数的选择器（修复线 F26）：选中后同 `/mode <名>`。
+    Mode(PermissionMode),
+    /// `/effort` 不带参数的选择器（修复线 F26）：档位或 `auto`，选中后同 `/effort <档>`。
+    Effort(String),
+    /// rewind 选择器的一条消息。
+    Rewind(MessageId),
+    /// rewind 的确认：回退的范围与目标。
+    RewindTo {
+        scope: RewindScope,
+        target: MessageId,
+    },
+    /// rewind 确认页的 `Never mind`：回到消息列表。
+    RewindBack,
+    /// `/memory` 的一个文件（tui-input.md §4.2）。
+    Memory(crate::services::MemoryFile),
+    /// `/fork` 的一条用户输入（session-lifecycle.md §6.5.3）。
+    Fork(MessageId),
+    /// `/theme`。
+    Theme(crate::services::UiTheme),
+}
+
+/// 列表的排版（以前的 `Purpose` 还决定选中后做什么，现在由 [`Choice`] 决定，这里只剩样式）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    /// 每条一行。
+    OneLine,
+    /// 每条两行：消息与这一回合的改动（rewind）；当前项在第二行写 ` · current`。
+    TwoLines,
+    /// `/mode`（工作线 F76，照 App 的菜单）：每条两行（名称、说明），名称用模式的颜色，✔ 在名称那一行。
+    Modes,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListView {
-    pub purpose: Purpose,
+    pub shape: Shape,
     pub title: String,
     pub subtitle: Option<String>,
     pub items: Vec<Item>,
@@ -79,11 +98,17 @@ pub struct ListView {
     /// 可过滤时的查询；None 表示不可过滤。
     pub filter: Option<String>,
     pub empty: String,
+    /// esc / ctrl+c 关掉列表时插进对话的提示（`/memory`，tui-input.md §4.2）。
+    pub cancelled: Option<String>,
 }
 
 pub enum Outcome {
     Pending,
-    Chosen(String),
+    /// 选中的值与焦点条目的档位（只有带档位的条目有）。
+    Chosen {
+        choice: Choice,
+        level: Option<String>,
+    },
     Closed,
 }
 
@@ -97,16 +122,17 @@ fn effort_glyph(level: usize, count: usize) -> &'static str {
 }
 
 impl ListView {
-    pub fn new(purpose: Purpose, title: String, items: Vec<Item>, empty: String) -> Self {
+    pub fn new(shape: Shape, title: String, items: Vec<Item>, empty: String) -> Self {
         let selected = items.iter().position(|item| item.current).unwrap_or(0);
         Self {
-            purpose,
+            shape,
             title,
             subtitle: None,
             items,
             selected,
             filter: None,
             empty,
+            cancelled: None,
         }
     }
 
@@ -139,14 +165,11 @@ impl ListView {
             .collect()
     }
 
-    /// 选中条目的值；模型列表后面接上选中的档位。
-    fn chosen(item: &Item) -> String {
-        match item.levels.get(item.level) {
-            Some(level) => format!("{}{SEP}{level}", item.value),
-            None if item.levels.is_empty() && item.value.contains(SEP) => {
-                format!("{}{SEP}", item.value)
-            }
-            None => item.value.clone(),
+    /// 选中这个条目：值与焦点的档位。
+    fn chosen(item: &Item) -> Outcome {
+        Outcome::Chosen {
+            choice: item.value.clone(),
+            level: item.levels.get(item.level).cloned(),
         }
     }
 
@@ -156,15 +179,11 @@ impl ListView {
         self.items.iter().position(|i| std::ptr::eq(i, item))
     }
 
-    /// 一个按键；`typing` 按平台判断文字输入（Windows 的 AltGr，tui-input.md §9.1）。
-    pub fn on_key(&mut self, key: KeyEvent, typing: Typing) -> Outcome {
+    /// 一个按键（入口已归一 Windows 的 AltGr，tui-input.md §9.1）。
+    pub fn on_key(&mut self, key: KeyEvent) -> Outcome {
         let count = self.visible().len();
-        let ctrl = typing.ctrl(&key);
-        let step = |selected: usize, down: bool| match count {
-            0 => 0,
-            _ if down => (selected + 1) % count,
-            _ => (selected + count - 1) % count,
-        };
+        let ctrl = keyboard::ctrl(&key);
+        let step = |selected: usize, down: bool| super::pager::cycle(selected, count, down);
         match key.code {
             KeyCode::Esc => return Outcome::Closed,
             KeyCode::Char('c') if ctrl => return Outcome::Closed,
@@ -172,8 +191,11 @@ impl ListView {
             KeyCode::Char('p') if ctrl => self.selected = step(self.selected, false),
             KeyCode::Down => self.selected = step(self.selected, true),
             KeyCode::Char('n') if ctrl => self.selected = step(self.selected, true),
-            KeyCode::Left | KeyCode::Right if self.purpose == Purpose::Model => {
-                if let Some(index) = self.focused() {
+            // 带档位的条目（模型）：←/→ 调焦点条目的档位。
+            KeyCode::Left | KeyCode::Right => {
+                if let Some(index) = self.focused()
+                    && !self.items[index].levels.is_empty()
+                {
                     let item = &mut self.items[index];
                     let last = item.levels.len().saturating_sub(1);
                     item.level = if key.code == KeyCode::Left {
@@ -184,36 +206,39 @@ impl ListView {
                 }
             }
             KeyCode::Enter => {
-                if self.purpose == Purpose::Info {
-                    return Outcome::Closed;
-                }
                 return self
                     .visible()
                     .get(self.selected)
-                    .map_or(Outcome::Pending, |item| Outcome::Chosen(Self::chosen(item)));
+                    .map_or(Outcome::Pending, |item| Self::chosen(item));
             }
             KeyCode::Backspace => {
                 if let Some(filter) = self.filter.as_mut() {
-                    filter.pop();
+                    crate::ui::line_edit::backspace(filter);
                     self.selected = 0;
                 }
             }
-            KeyCode::Char(c) if typing.is_text(&key) => {
+            KeyCode::Char(c) if keyboard::is_text(&key) => {
                 if let Some(filter) = self.filter.as_mut() {
                     filter.push(c);
                     self.selected = 0;
                 } else if ('1'..='9').contains(&c) {
                     let index = usize::from(c as u8 - b'1');
-                    if let Some(item) = self.visible().get(index)
-                        && self.purpose != Purpose::Info
-                    {
-                        return Outcome::Chosen(Self::chosen(item));
+                    if let Some(item) = self.visible().get(index) {
+                        return Self::chosen(item);
                     }
                 }
             }
             _ => {}
         }
         Outcome::Pending
+    }
+
+    /// 粘贴进过滤（不可过滤的列表丢掉）；焦点回到第一条。
+    pub fn paste(&mut self, text: &str) {
+        if let Some(filter) = self.filter.as_mut() {
+            super::line_edit::paste(filter, text);
+            self.selected = 0;
+        }
     }
 
     /// 视图的行与每个条目所在的行；`height` 是可用高度，列表只显示焦点附近的条目。
@@ -229,7 +254,7 @@ impl ListView {
         let secondary = palette.secondary();
         let mut rows = Vec::new();
         let mut lines = vec![
-            Line::from(Span::styled("─".repeat(width), Style::default().fg(accent))),
+            crate::ui::style::rule(width, Style::default().fg(accent)),
             Line::from(Span::styled(
                 format!("  {}", self.title),
                 Style::default().add_modifier(Modifier::BOLD),
@@ -266,8 +291,8 @@ impl ListView {
             lines.push(Line::from(Span::styled(format!("  {empty}"), dim)));
         }
         // 每条两行：rewind（消息、改动）与 `/mode`（名称、说明，工作线 F76）；`/mode` 的 ✔ 在名称那一行。
-        let modes = self.purpose == Purpose::Permissions;
-        let two_lines = self.purpose == Purpose::Rewind || modes;
+        let modes = self.shape == Shape::Modes;
+        let two_lines = self.shape != Shape::OneLine;
         let ticked = |item: &Item| item.current && (!two_lines || modes);
         let per_item = if two_lines { TWO_LINE_ROWS } else { 1 };
         let focused = visible.get(self.selected).copied();
@@ -301,12 +326,9 @@ impl ListView {
             if self.filter.is_none() {
                 spans.push(Span::styled(format!("{}. ", index + 1), secondary));
             }
-            let label = if modes {
-                let mode =
-                    PermissionMode::from_node_name(&item.value).unwrap_or(PermissionMode::Default);
-                super::footer::mode_style(mode, palette)
-            } else {
-                Style::default()
+            let label = match (&item.value, modes) {
+                (Choice::Mode(mode), true) => super::footer::mode_style(*mode, palette),
+                _ => Style::default(),
             };
             spans.push(Span::styled(item.label.clone(), label));
             let mut used = item.label.width();

@@ -2,7 +2,8 @@
 //! 本机的 `LocalEnvironment`，与经内存 loopback 连到同进程 exec-server（背后是同一个 `LocalEnvironment`）的
 //! `RemoteEnvironment`。每个测试只经 `MachineEnv` 的端口操作，两种实现的断言完全相同。
 //!
-//! 测试从 env-local 原有的端口测试搬来（R1）；只测内部函数的留在 env-local。
+//! 测试从 env-local 原有的端口测试搬来（R1）；只测内部函数的留在 env-local。`round_trip` 不分两种：服务端背后是记录
+//! 参数的替身，核对换算本身（kernel → 线上 → kernel，F128）。
 
 #![allow(
     clippy::disallowed_methods,
@@ -14,9 +15,11 @@ mod background;
 mod checkpoints;
 mod commands;
 mod files;
+mod git;
 #[cfg(unix)]
 mod mcp;
 mod pdf;
+mod round_trip;
 mod search;
 #[cfg(unix)]
 mod shell_support;

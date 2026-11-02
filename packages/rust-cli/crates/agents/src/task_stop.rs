@@ -8,22 +8,22 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::OperationContext;
 use rust_cli_kernel_api::env_shell::{BackgroundStatus, BackgroundStop, BackgroundTask};
-use rust_cli_kernel_api::ids::{AgentId, OperationId, SessionId, ShellTaskId};
+use rust_cli_kernel_api::ids::{AgentId, MachineName, OperationId, SessionId, ShellTaskId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
-    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
+    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation, invalid,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::Core;
-use crate::agent_tool::text_output;
 use crate::live::{AgentState, LiveAgent};
 use crate::routing;
+use rust_cli_kernel_api::tool_names;
 
-const NAME: &str = "TaskStop";
+const NAME: &str = tool_names::TASK_STOP;
 
 #[derive(Deserialize)]
 struct Input {
@@ -111,8 +111,8 @@ pub(crate) struct StoppedTask {
     pub(crate) id: String,
     pub(crate) task_type: &'static str,
     pub(crate) command: String,
-    /// 命令在远端机器上时是那台机器的名字（F98）；本机与子代理为 None。
-    pub(crate) machine: Option<String>,
+    /// 命令所在的机器（F98）；子代理是主 env。
+    pub(crate) machine: MachineName,
 }
 
 impl StoppedTask {
@@ -168,7 +168,7 @@ impl TaskStopTool {
             .filter(|agent| self.visible(agent, context));
         if let Some(agent) = agent {
             return match agent.state {
-                AgentState::Finished(ending) => Err(not_running(ending.status())),
+                AgentState::Finished(ending) => Err(not_running(ending.status().as_str())),
                 // 停放的也能停（agents.md §5.1）。
                 AgentState::Running { .. } | AgentState::Parked(_) => {
                     Ok(Target::Agent(agent.agent, agent.description))
@@ -204,7 +204,7 @@ impl TaskStopTool {
                 .machines()
                 .machines
                 .iter()
-                .filter_map(|remote| registry.machine(&remote.name)),
+                .filter_map(|remote| registry.machine(&MachineName::new(remote.name.as_str()))),
         );
         machines
     }
@@ -280,7 +280,7 @@ impl TaskStopTool {
                     id: id.to_owned(),
                     task_type: "local_agent",
                     command: description,
-                    machine: None,
+                    machine: MachineName::primary(),
                 })
             }
             Ok(Target::Command(Found { session, machine })) => {
@@ -297,7 +297,7 @@ impl TaskStopTool {
                         id: id.to_owned(),
                         task_type: "local_bash",
                         command,
-                        machine: (!machine.is_local()).then(|| machine.name().to_owned()),
+                        machine: machine.name().clone(),
                     }),
                     BackgroundStop::NotRunning { status } => Err(ToolError::Failed {
                         message: format!("Task {id} is not running (status: {})", status.as_str()),
@@ -321,11 +321,11 @@ fn json(stopped: &StoppedTask) -> ToolOutput {
         task_id: &stopped.id,
         task_type: stopped.task_type,
         command: &stopped.command,
-        machine: stopped.machine.as_deref(),
+        machine: stopped.machine.remote(),
     };
     let text = serde_json::to_string(&receipt).unwrap_or_default();
-    let mut output = text_output(text, false);
-    if let Some(machine) = &stopped.machine {
+    let mut output = rust_cli_kernel_api::tool::text(text);
+    if let Some(machine) = stopped.machine.remote() {
         output.display = serde_json::json!({ "machine": machine });
     }
     output
@@ -338,10 +338,6 @@ impl Tool for TaskStopTool {
     }
 
     /// TaskStop 的旧名。
-    fn aliases(&self) -> &[&str] {
-        &["KillShell", "KillBash"]
-    }
-
     /// 延迟加载（docs/specs/rust-cli/tools-more.md §3.1）。
     fn should_defer(&self) -> bool {
         true
@@ -352,11 +348,11 @@ impl Tool for TaskStopTool {
     }
 
     fn input_schema(&self) -> Value {
-        rust_cli_prompts::tool(NAME).map_or(Value::Null, |prompt| prompt.input_schema.clone())
+        rust_cli_prompts::definition(NAME).schema.clone()
     }
 
     fn description(&self, _context: &PromptContext) -> String {
-        rust_cli_prompts::tool(NAME).map_or_else(String::new, |prompt| prompt.description.clone())
+        rust_cli_prompts::definition(NAME).description.clone()
     }
 
     fn is_read_only(&self, _input: &Value) -> bool {
@@ -369,10 +365,6 @@ impl Tool for TaskStopTool {
     }
 
     async fn validate_input(&self, input: &Value, context: &ToolUseContext) -> Validation {
-        let invalid = |message: String| Validation::Invalid {
-            message,
-            error_code: None,
-        };
         let Some(id) = task_id(input) else {
             return invalid("Missing required parameter: task_id".to_owned());
         };

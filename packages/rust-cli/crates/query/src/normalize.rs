@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 
+use rust_cli_kernel_api::hooks::queued_command;
 use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::message::{AttachmentMessage, AttachmentRole, ContentBlock, Message};
 use rust_cli_kernel_api::model::{ApiContent, ApiMessage, ApiRole, CacheControl, TurnOutputConfig};
@@ -65,8 +66,12 @@ fn text(value: String) -> ApiContent {
 /// 人类插话（记录里带 `humanTurn: true` 的 `queued_command`）：插话的 `commandMode` 是 `prompt`，
 /// 后台通知是 `task-notification`（query.md §4、§5）。
 fn is_human_prompt(attachment: &AttachmentMessage) -> bool {
-    attachment.source == "queued_command"
-        && attachment.data.get("commandMode").and_then(Value::as_str) == Some("prompt")
+    attachment.source == queued_command::SOURCE
+        && attachment
+            .data
+            .get(queued_command::MODE_KEY)
+            .and_then(Value::as_str)
+            == Some(queued_command::PROMPT_MODE)
 }
 
 /// 停止上浮的位置：assistant，或以工具结果开头的 user 消息。

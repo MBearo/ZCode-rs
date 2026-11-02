@@ -198,9 +198,9 @@ fn server(value: &Value) -> Result<Parsed, String> {
             let url = required(&server, "url")?;
             let headers = string_map(server.get("headers"), "headers")?;
             if kind == "sse" {
-                McpTransportConfig::Sse { url, headers }
+                McpTransportConfig::sse(url, headers)
             } else {
-                McpTransportConfig::Http { url, headers }
+                McpTransportConfig::http(url, headers)
             }
         }
         Some(other) => return Err(format!("type: unsupported transport \"{other}\"")),
@@ -235,7 +235,7 @@ pub fn parse_node_servers(servers: &Value, scope: McpScope) -> (Vec<NodeMcpServe
                         scope,
                         transport: parsed.transport,
                         options: parsed.options,
-                        machine: None,
+                        machine: Default::default(),
                     },
                     enabled: parsed.enabled,
                 });

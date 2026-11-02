@@ -8,9 +8,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::env::{OperationContext, Origin};
-use rust_cli_kernel_api::ids::{Generation, OwnerEpoch, ToolUseId};
-use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::controller_services::ControllerServices;
+use rust_cli_kernel_api::env::{Operations, Origin};
+use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::{AttachmentMessage, ContentBlock, Message, ToolResultContent};
 use rust_cli_kernel_api::orchestration::{CompactRequest, ToolRegistry};
@@ -25,6 +25,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::request::CollectSink;
 use crate::tokens;
+use rust_cli_kernel_api::tool_names;
 
 /// 最多重读几个文件。
 const MAX_FILES: usize = 5;
@@ -33,17 +34,17 @@ const TOTAL_BUDGET: u64 = 50_000;
 /// 单个文件的估算上限（重读时的读取上限）。
 const FILE_BUDGET: u64 = 5_000;
 
-const READ: &str = "Read";
+const READ: &str = tool_names::READ;
 pub(crate) const SOURCE: &str = "file";
 
 /// 重读用到的端口。
 pub(crate) struct Restore<'a> {
     pub tools: &'a dyn ToolRegistry,
     pub machine: MachineEnv,
-    pub local: LocalServices,
+    pub controller: ControllerServices,
     pub artifacts: Arc<dyn ArtifactStore>,
     pub ids: &'a dyn Ids,
-    pub generation: Generation,
+    pub operations: Operations,
 }
 
 fn file_path(input: &Value) -> Option<String> {
@@ -100,28 +101,31 @@ impl Restore<'_> {
         let tool = self.tools.find(READ)?;
         let (progress, _updates) =
             tokio::sync::mpsc::channel(rust_cli_kernel_api::tool::DISCARDED_PROGRESS_CAPACITY);
+        // 修 bug（工作线 F131）：以前上下文里的运行、调用 ID 与操作来源各取一次 ID，一次重读带着两个运行与两个操作。
+        // 一次重读是一次调用：运行与操作 ID 各取一次，两处共用。
+        let run = self.ids.run();
+        let operation = self.ids.operation();
         let context = ToolUseContext {
             session: request.session.clone(),
-            run: self.ids.run(),
-            tool_use: ToolUseId::new(self.ids.operation().as_str()),
+            run: run.clone(),
+            tool_use: ToolUseId::new(operation.as_str()),
             agent: request.agent.clone(),
             workspace: request.workspace.clone(),
             mode: request.mode.unwrap_or(PermissionMode::Default),
             cancel: cancel.clone(),
             machine: self.machine.clone(),
-            local: self.local.clone(),
+            controller: self.controller.clone(),
             artifacts: self.artifacts.clone(),
             interactions: Arc::new(CollectSink::default()),
-            operation: OperationContext {
-                environment: request.workspace.environment.clone(),
-                generation: self.generation.clone(),
-                owner_epoch: OwnerEpoch::LOCAL,
-                operation: self.ids.operation(),
-                origin: Origin::Agent {
+            session_ops: Arc::new(CollectSink::default()),
+            operation: self.operations.with_id(
+                request.workspace.environment.clone(),
+                operation,
+                Origin::Agent {
                     session: request.session.clone(),
-                    run: self.ids.run(),
+                    run,
                 },
-            },
+            ),
         };
         let output = tool
             .call(json!({ "file_path": path }), context, progress)

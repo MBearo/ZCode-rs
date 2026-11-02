@@ -248,7 +248,6 @@ impl rust_cli_kernel_api::orchestration::ContextBuilder for Phased {
     > {
         Ok(rust_cli_kernel_api::orchestration::BuiltContext {
             system: Vec::new(),
-            user_context: Vec::new(),
             attachments: vec![attachment("msg_date", "date")],
         })
     }

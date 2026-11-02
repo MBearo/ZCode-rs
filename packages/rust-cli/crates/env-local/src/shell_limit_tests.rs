@@ -7,6 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env::{CommandEvent, Outcome};
 use rust_cli_kernel_api::env_shell::{BackgroundCommand, CwdScope, HookIo};
 use rust_cli_kernel_api::ids::SessionId;
@@ -77,11 +78,13 @@ async fn a_background_command_past_the_limit_ends_as_killed() {
     let mut fixture = fixture(Vec::new());
     fixture.shells.set_output_limit(SMALL);
     let mut start = request(FLOOD, &fixture.root, CwdScope::Pinned);
-    start.background = Some(BackgroundCommand {
-        description: "Flood".to_owned(),
-        tool_use: None,
-        kind: Default::default(),
-    });
+    start.kind = CommandKind::Background {
+        background: BackgroundCommand {
+            description: "Flood".to_owned(),
+            tool_use: None,
+            kind: Default::default(),
+        },
+    };
     let _events = fixture.shells.start(context("op1"), start).await.unwrap();
     let notice = fixture
         .shells
@@ -106,10 +109,12 @@ async fn hook_files_count_together_against_the_limit() {
     let mut fixture = fixture(vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())]);
     fixture.shells.set_output_limit(SMALL);
     let mut start = request(&format!("{FLOOD} >&2"), &fixture.root, CwdScope::Pinned);
-    start.hook = Some(HookIo {
-        stdin: "{}\n".to_owned(),
-        env: BTreeMap::new(),
-    });
+    start.kind = CommandKind::Hook {
+        hook: HookIo {
+            stdin: "{}\n".to_owned(),
+            env: BTreeMap::new(),
+        },
+    };
     let events = fixture.shells.start(context("op1"), start).await.unwrap();
     let ran = collect(events).await;
     let (outcome, exit, _, _, note) = finished_parts(ran.finished);

@@ -11,6 +11,7 @@ import {
   checkClippy,
   checkDefinitions,
   checkGraph,
+  checkLocalFiles,
   checkSources,
   checkStableDependencies,
   instability,
@@ -158,6 +159,63 @@ test("依赖图：允许表本身不能越层（内核 crate 依赖 fs）", () =
   expectOnly(checkGraph(strict, list, internal, inside), /kernel crates must not depend on fs/);
 });
 
+test("依赖图：层的 testOnly 只许做测试依赖（前端的产品代码不依赖 runtime，F133）", () => {
+  const front = {
+    ...policy,
+    LAYERS: { ...policy.LAYERS, runtime: "kernel", tui: "frontend" },
+    ALLOWED: { ...policy.ALLOWED, runtime: ["kernel-api"], tui: ["kernel-api", "runtime"] },
+  };
+  const names = new Map([...internal, ["rust-cli-runtime", "runtime"], ["rust-cli-tui", "tui"]]);
+  const list = [
+    ...packages(),
+    {
+      crate: "runtime",
+      manifest: "crates/runtime/Cargo.toml",
+      dependencies: [dep("rust-cli-kernel-api")],
+    },
+    {
+      crate: "tui",
+      manifest: "crates/tui/Cargo.toml",
+      dependencies: [dep("rust-cli-kernel-api"), dep("rust-cli-runtime", { kind: "dev" })],
+    },
+  ];
+  assert.deepEqual(checkGraph(front, list, names, inside), []);
+  const product = edit(list, "tui", (deps) =>
+    deps.map((entry) => (entry.name === "rust-cli-runtime" ? { ...entry, kind: null } : entry)),
+  );
+  expectOnly(
+    checkGraph(front, product, names, inside),
+    /tui may depend on runtime only as a dev-dependency \(LAYER_RULES\.frontend\.testOnly\)/,
+  );
+  // 前端的上限里没有 platform（登录与凭据从前端不可达，审查 E7）。
+  const platform = {
+    ...front,
+    LAYERS: { ...front.LAYERS, platform: "platform" },
+    ALLOWED: {
+      ...front.ALLOWED,
+      platform: ["kernel-api"],
+      tui: ["kernel-api", "platform", "runtime"],
+    },
+  };
+  const withPlatform = [
+    ...edit(list, "tui", (deps) => [...deps, dep("rust-cli-platform")]),
+    {
+      crate: "platform",
+      manifest: "crates/platform/Cargo.toml",
+      dependencies: [dep("rust-cli-kernel-api")],
+    },
+  ];
+  expectOnly(
+    checkGraph(
+      platform,
+      withPlatform,
+      new Map([...names, ["rust-cli-platform", "platform"]]),
+      inside,
+    ),
+    /ALLOWED\.tui: frontend crates must not depend on platform/,
+  );
+});
+
 test("依赖图：没登记的 crate", () => {
   const list = [
     ...packages(),
@@ -260,10 +318,9 @@ const exempt = (body) =>
 test("源码：入口 crate 按类别豁免没有违规", () => {
   assert.deepEqual(
     sources([
-      source(
-        "node-store",
-        exempt("let _ = std::time::SystemTime::now(); let _ = uuid::Uuid::new_v4();"),
-      ),
+      source("node-store", exempt("let _ = uuid::Uuid::new_v4();")),
+      // F128：系统时钟在 base。
+      source("base", exempt("let _ = std::time::SystemTime::now();")),
       source(
         "cli",
         exempt('let _ = std::env::var("HOME"); let _ = std::path::Path::new("/").exists();'),
@@ -365,6 +422,39 @@ test("源码：内核 crate 不用 Instant", () => {
   // 适配器可以用（超时与动画）。
   assert.deepEqual(
     sources([source("node-store", "fn f() { let _ = std::time::Instant::now(); }\n")]),
+    [],
+  );
+  // kernel-api 的 testing 模块只在测试里编译（feature `testing`）：测试时钟可以按 tokio 时间走（F126）；
+  // kernel-api 的其他文件照旧不许。
+  const tokioClock = "fn f() { let _ = tokio::time::Instant::now(); }\n";
+  assert.deepEqual(
+    sources([
+      source("kernel-api", tokioClock, "crates/kernel-api/src/testing.rs"),
+      source("kernel-api", tokioClock, "crates/kernel-api/src/testing/clocks.rs"),
+    ]),
+    [],
+  );
+  expectOnly(
+    sources([source("kernel-api", tokioClock, "crates/kernel-api/src/testing_notes.rs")]),
+    /kernel crates take time from the injected Clock/,
+  );
+});
+
+test("源码：内核 crate 不建 SystemClock（F128：系统时钟在 base，内核只经注入的 Clock）", () => {
+  expectOnly(
+    sources([source("tools", "fn f() { let _ = rust_cli_base::clock::SystemClock::utc(); }\n")]),
+    /not SystemClock/,
+  );
+  // kernel-api 为它实现 Clock 的那一处、入口与适配器可以。
+  assert.deepEqual(
+    sources([
+      source(
+        "kernel-api",
+        "impl Clock for rust_cli_base::clock::SystemClock {}\n",
+        "crates/kernel-api/src/clock.rs",
+      ),
+      source("cli", "fn f() { let _ = rust_cli_base::clock::SystemClock::utc(); }\n"),
+    ]),
     [],
   );
 });
@@ -480,7 +570,11 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
     ].join("\n"),
     "crates/kernel-api/src/env_files.rs",
   );
-  const devNull = source("base", 'pub const DEV_NULL: &str = "/dev/null";\n', "crates/base/src/path.rs");
+  const devNull = source(
+    "base",
+    'pub const DEV_NULL: &str = "/dev/null";\n',
+    "crates/base/src/path.rs",
+  );
   const mimes = source(
     "base",
     [
@@ -499,15 +593,48 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
       .join("\n"),
     "crates/base/src/proto/mime.rs",
   );
-  const apiKey = source("net", 'pub const X_API_KEY: &str = "x-api-key";\n', "crates/net/src/header.rs");
+  const apiKey = source(
+    "net",
+    'pub const X_API_KEY: &str = "x-api-key";\n',
+    "crates/net/src/header.rs",
+  );
+  // F128（审查 X8）：字节的两位 hex 只在 base 的 `hash`。
+  const hex = source("base", 'let _ = write!(out, "{byte:02x}");\n', "crates/base/src/hash.rs");
+  // 审查 X8：中毒的锁取内层只在 base 的 `sync`（按代码查，不查字面量）。
+  const poison = source(
+    "base",
+    "self.lock().unwrap_or_else(PoisonError::into_inner)\n",
+    "crates/base/src/sync.rs",
+  );
   const definitions = (list) =>
-    checkDefinitions(policy, [names, memory, headers, git, devNull, mimes, apiKey, ...list]);
+    checkDefinitions(policy, [
+      names,
+      memory,
+      headers,
+      git,
+      devNull,
+      mimes,
+      apiKey,
+      hex,
+      poison,
+      ...list,
+    ]);
   // 给用户或模型看的文字（前后有空格、标点）、别的名字（`.zcode.json`）、注释、测试文件都不算。
   assert.deepEqual(
     definitions([
       source("tui", 'const T: &str = "Create an AGENTS.md file in the project";\n'),
       source("tools", 'const U: &str = "edit .zcode.json or the MEMORY.md index.";\n'),
       source("policy", "// zcode.json 与 MEMORY.md\nconst V: u8 = 1;\n"),
+      // 按代码查的规则：注释与字符串里的写法不算，测试文件不查。
+      source(
+        "session",
+        '// 以前写 `.lock().unwrap_or_else(PoisonError::into_inner)`\nconst W: &str = "PoisonError::into_inner";\n',
+      ),
+      source(
+        "session",
+        "let g = m.lock().unwrap_or_else(PoisonError::into_inner);\n",
+        "crates/session/src/a_tests.rs",
+      ),
       source("context", 'let p = "/w/AGENTS.md";\n', "crates/context/src/a_tests.rs"),
       // 头名只认整个字面量（F122）：带值的整行、别的头名不算。
       source("hooks", 'const H: &str = "content-type: text/plain";\nconst A: &str = "accept";\n'),
@@ -533,6 +660,15 @@ test("文件名只定义一处，只抓路径用途（F58，README §4.1）", ()
     ['let n = "/dev/null";', "the null device /dev/null"],
     ['let m = "image/png";', "the MIME type image/png"],
     ['let k = "X-Api-Key";', "the HTTP header name x-api-key"],
+    ['let x = format!("{byte:02x}");', "the two-digit hex format of a byte"],
+    [
+      "let g = m.lock().unwrap_or_else(PoisonError::into_inner);",
+      "taking a poisoned lock's inner value",
+    ],
+    [
+      "let g = m.read().unwrap_or_else(std::sync::PoisonError::into_inner);",
+      "taking a poisoned lock's inner value",
+    ],
   ]) {
     const failures = definitions([source("context", `fn f() {}\n${text}\n`)]);
     assert.equal(failures.length, 1, `${text}: ${failures}`);
@@ -622,5 +758,46 @@ test("稳定依赖：I = 出度 /（入度 + 出度），只向更稳定的依�
   const dead = { ...remote, SDP_EXCEPTIONS: { "cli->base": "reason" } };
   assert.deepEqual(checkStableDependencies(dead, graph), [
     "SDP_EXCEPTIONS.cli->base: no longer an exception (dead entry)",
+  ]);
+});
+
+test("cli 碰本机文件只许白名单里的文件（deployment.md §25）：白名单外报错、白名单里不再用到也报错", () => {
+  const listed = { ...policy, CLI_LOCAL_FILES: { "crates/cli/src/deployment.rs": "启动参数" } };
+  const source = (file, text, crate = "cli") => ({ crate, file, text });
+  const reading = "async fn load() { rust_cli_fs::read_optional(path).await }";
+  // 白名单里的文件用到了；测试文件、别的 crate、注释里的提及都不算。
+  assert.deepEqual(
+    checkLocalFiles(listed, [
+      source("crates/cli/src/deployment.rs", reading),
+      source("crates/cli/src/flags_tests.rs", "fn t() { std::fs::write(p, b).unwrap(); }"),
+      source("crates/cli/tests/e2e.rs", "fn t() { std::fs::read(p).unwrap(); }"),
+      source("crates/env-local/src/lib.rs", reading, "env-local"),
+      source(
+        "crates/cli/src/main_setup.rs",
+        "// 以前经 LocalEnvironment::new 读，现在经主 env\nfn f() {}",
+      ),
+    ]),
+    [],
+  );
+  // 白名单外的文件：四种写法都认。
+  for (const text of [
+    reading,
+    "fn f() { std::fs::metadata(p) }",
+    "use tokio::fs::read;",
+    "let probe = LocalEnvironment::new(Some(home));",
+  ]) {
+    assert.deepEqual(
+      checkLocalFiles(listed, [
+        source("crates/cli/src/deployment.rs", reading),
+        source("crates/cli/src/main_setup.rs", text),
+      ]),
+      [
+        "crates/cli/src/main_setup.rs: touches local files (rust_cli_fs / std::fs / tokio::fs / LocalEnvironment::new); paths mean the execution side, so read session inputs through the primary env (deployment.md §21, §25), or list the file in CLI_LOCAL_FILES with a reason",
+      ],
+    );
+  }
+  // 白名单里的文件不再用到：要跟着代码收。
+  assert.deepEqual(checkLocalFiles(listed, [source("crates/cli/src/deployment.rs", "fn f() {}")]), [
+    "CLI_LOCAL_FILES: crates/cli/src/deployment.rs no longer touches local files (dead entry)",
   ]);
 });

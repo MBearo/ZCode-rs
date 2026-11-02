@@ -70,8 +70,8 @@ async fn plugin_agents_reach_the_agent_listing() {
         os_version: "Darwin 24".to_owned(),
         shell: "zsh".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     })
     .with_file(
         &format!("{KIT}/agents/helper.md"),

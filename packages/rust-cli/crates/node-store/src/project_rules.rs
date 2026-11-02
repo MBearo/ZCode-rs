@@ -10,31 +10,34 @@
 //! `permission.scope` 是 `session` 时，规则集就是会话行的 `permission`（同样的键），“总是允许”只写它，不读也不写
 //! 项目规则集。以前续写这样的会话时规则写进项目、读的也是项目的。
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::Connection;
 use rust_cli_base::js::json::stringify;
 use rust_cli_kernel_api::permission::{PermissionRule, ProjectRules, RuleBehavior};
 use rust_cli_kernel_api::store::StoreError;
 use serde_json::{Map, Value, json};
 
 use crate::facts::Commit;
+use crate::repo::sessions;
+use crate::repo::settings::{self, SettingKey};
 use crate::{OrStorage, storage};
 
 /// Node 存的值（JSON 文本）：`local_setting` 优先，没有时读旧 `permission` 表；都没有时为 None。
 fn stored(conn: &Connection, project: &str) -> rusqlite::Result<Option<String>> {
-    let setting: Option<String> = conn
-        .prepare_cached(
-            "select value from local_setting where scope = ? and scope_id = ? and namespace = ? and key = ?",
-        )?
-        .query_row(params!["project", project, "permission", "ruleset"], |row| {
-            row.get(0)
-        })
-        .optional()?;
+    let setting = settings::get(conn, permission_setting(project, "ruleset"))?;
     if setting.is_some() {
         return Ok(setting);
     }
-    conn.prepare_cached("select data from permission where project_id = ?")?
-        .query_row(params![project], |row| row.get(0))
-        .optional()
+    settings::legacy_permission(conn, project)
+}
+
+/// 项目的权限设置（Node `local_setting(project, <项目>, permission, <key>)`）。
+pub(crate) fn permission_setting<'a>(project: &'a str, key: &'a str) -> SettingKey<'a> {
+    SettingKey {
+        scope: "project",
+        scope_id: project,
+        namespace: "permission",
+        key,
+    }
 }
 
 fn rules(value: &Value, key: &str) -> Vec<PermissionRule> {
@@ -217,11 +220,7 @@ pub(crate) fn change(
 
 /// 本会话所在项目的 ID（会话行的 `project_id`）。
 pub(crate) fn session_project(ctx: &Commit<'_>) -> Result<String, StoreError> {
-    ctx.conn
-        .prepare_cached("select project_id from session where id = ?")
-        .storage()?
-        .query_row(params![ctx.session], |row| row.get(0))
-        .storage()
+    sessions::project_id(ctx.conn, ctx.session).storage()
 }
 
 /// Node `writeLocalSetting`：`local_setting(project, <项目>, permission, <key>)` 的 upsert，
@@ -243,28 +242,13 @@ fn upsert(
     value: &Value,
 ) -> Result<(), StoreError> {
     let now = i64::try_from(now).unwrap_or(i64::MAX);
-    conn
-        .prepare_cached(
-            "insert into local_setting (scope, scope_id, namespace, key, value, schema_version, time_created, time_updated)
-             values (?, ?, ?, ?, ?, ?, ?, ?)
-             on conflict(scope, scope_id, namespace, key) do update set
-               value = excluded.value,
-               schema_version = excluded.schema_version,
-               time_updated = excluded.time_updated",
-        )
-        .storage()?
-        .execute(params![
-            "project",
-            project,
-            "permission",
-            key,
-            stringify(value),
-            1,
-            now,
-            now
-        ])
-        .storage()?;
-    Ok(())
+    settings::put(
+        conn,
+        permission_setting(project, key),
+        &stringify(value),
+        now,
+    )
+    .storage()
 }
 
 #[cfg(test)]

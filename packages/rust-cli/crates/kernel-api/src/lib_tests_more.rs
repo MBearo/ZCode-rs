@@ -82,7 +82,7 @@ fn checkpoint_facts_round_trip() {
             path: "/work/a.txt".to_owned(),
             additions: 1,
             deletions: 2,
-            machine: None,
+            machine: Default::default(),
         }],
         code: true,
     });
@@ -95,7 +95,7 @@ fn file_changes_carry_their_machine_only_when_remote() {
         path: "/srv/proj/README.md".to_owned(),
         additions: 1,
         deletions: 1,
-        machine: Some("dev-a".to_owned()),
+        machine: crate::ids::MachineName::new("dev-a"),
     };
     round_trip(&remote);
     assert_eq!(serde_json::to_value(&remote).unwrap()["machine"], "dev-a");
@@ -103,7 +103,7 @@ fn file_changes_carry_their_machine_only_when_remote() {
         serde_json::json!({"path": "/work/a.txt", "additions": 1, "deletions": 0}),
     )
     .unwrap();
-    assert_eq!(local.machine, None);
+    assert_eq!(local.machine, Default::default());
     assert!(
         serde_json::to_value(&local)
             .unwrap()
@@ -182,27 +182,18 @@ fn cron_and_worktree_dtos_round_trip() {
     });
 }
 
-/// 新方法的默认值：没有会话 owner 时不改目录、顶层会话是自己、偏移按 UTC、没有定时任务。
+/// 不持有会话时（`testing::NoSession`，工作线 F134 以前是 `Interactions` 的缺省体）：不改目录、顶层会话是自己；没有
+/// 定时任务。
 #[tokio::test]
 async fn l11b_defaults() {
     use crate::cron::{CronSignals, NoCron};
-    use crate::orchestration::Interactions;
-    struct Bare;
-    #[async_trait::async_trait]
-    impl Interactions for Bare {
-        async fn ask(
-            &self,
-            _session: &crate::ids::SessionId,
-            _request: crate::orchestration::InteractionRequest,
-        ) -> Result<crate::orchestration::InteractionAnswer, crate::orchestration::OrchestrationError>
-        {
-            unreachable!("not asked")
-        }
-    }
+    use crate::orchestration::SessionOps;
+    use crate::testing::NoSession;
     let session = crate::ids::SessionId::new("sess_1");
-    assert_eq!(Bare.owner_session(&session).await, session);
+    assert_eq!(NoSession.owner_session(&session).await, session);
     assert!(
-        Bare.set_workspace(&session, crate::env::EnvPath::new("/Users/dev"))
+        NoSession
+            .set_workspace(crate::env::EnvPath::new("/Users/dev"))
             .await
             .is_err()
     );
@@ -247,10 +238,11 @@ fn l13_facts_commands_and_rules_round_trip() {
     );
     assert_eq!(sourced[1].behavior, RuleBehavior::Ask);
     let main = crate::model::ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: rust_cli_base::models::GLM_5_3.to_owned(),
         reasoning: Some("high".to_owned()),
-        connection: None,
+        ..crate::model::ModelSelection::new(
+            "anthropic".to_owned(),
+            rust_cli_base::models::GLM_5_3.to_owned(),
+        )
     };
     // 小模型槽位现在等于当前主模型（model.md §6.1）。
     assert_eq!(crate::model::small_fast_model(&main), main);
@@ -296,27 +288,19 @@ fn f64_request_run_and_agent_round_trip() {
     assert_eq!((old.run, old.agent), (None, None));
 }
 
-/// 存储端口的项目持久模式缺省不支持：没有本机项目的存储（测试替身、云端）不必实现它。
+/// 测试的输出端只并入记下的插话，没有通知（工作线 F134：`RunSink` 只有 `take_absorbed`，以前另有缺省为空的
+/// `take_notices`）。
 #[tokio::test]
-async fn project_mode_is_unsupported_by_default() {
-    use crate::store::SessionStore;
-    let store = crate::testing::MemoryStore::default();
-    let workspace = crate::env::WorkspaceRef {
-        environment: EnvironmentId::new("local"),
-        root: crate::env::EnvPath::new("/Users/dev/project"),
-    };
-    assert!(matches!(
-        store.project_mode(&workspace).await,
-        Err(crate::store::StoreError::Unsupported { .. })
-    ));
-}
-
-/// `RunSink::take_notices` 缺省为空：没有通知来源的输出端（会话 actor、测试替身）不必实现它。
-#[tokio::test]
-async fn run_sinks_have_no_notices_by_default() {
-    use crate::orchestration::RunSink;
+async fn the_recording_sink_absorbs_only_its_steering() {
+    use crate::orchestration::{Absorbed, RunSink};
     let sink = crate::testing::RecordingSink::default();
-    assert!(sink.take_notices().await.is_empty());
+    sink.steer("also b");
+    let absorbed = sink.take_absorbed().await;
+    assert!(
+        matches!(&absorbed[..], [Absorbed::Prompt(steered)] if steered.text == "also b"),
+        "{absorbed:?}"
+    );
+    assert!(sink.take_absorbed().await.is_empty());
 }
 
 /// L18：只供显示的系统提示随事件流往返（前端经序列化收到它）。
@@ -363,10 +347,10 @@ async fn run_sinks_absorb_nothing_by_default() {
     assert!(sink.take_absorbed().await.is_empty());
 }
 
-/// 修复线 F2 的事实与端口缺省：`SubagentLinked` 往返；会话自己的规则集缺省为 None（规则在项目规则集）。
+/// 修复线 F2 的事实：`SubagentLinked` 往返；内存存储里没有群协作会话，会话自己的规则集为 None（规则在项目规则集）。
 #[tokio::test]
 async fn f2_subagent_link_round_trips_and_session_rules_default_to_none() {
-    use crate::store::SessionStore;
+    use crate::store::LocalSettings;
     round_trip(&crate::store::Fact::SubagentLinked {
         tool_use: crate::ids::ToolUseId::new("toolu_1"),
         agent: crate::ids::AgentId::new("agent_1"),
@@ -426,26 +410,21 @@ fn prompt_hook_messages_default_to_empty() {
     use crate::model::{ModelSelection, QuerySource};
     use crate::orchestration::QueryRequest;
     use crate::permission::PermissionMode;
-    let mut request = QueryRequest {
-        session: SessionId::new("sess_1"),
-        run: RunId::new("run_1"),
-        workspace: WorkspaceRef {
+    let mut request = QueryRequest::new(
+        SessionId::new("sess_1"),
+        RunId::new("run_1"),
+        WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/work"),
         },
-        agent: None,
-        messages: Vec::new(),
-        selection: ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        mode: PermissionMode::Default,
-        source: QuerySource::MainThread,
-        max_turns: None,
-        prompt_hook_messages: Vec::new(),
-    };
+        Vec::new(),
+        ModelSelection::new(
+            "anthropic".to_owned(),
+            rust_cli_base::models::GLM_5_3.to_owned(),
+        ),
+        PermissionMode::Default,
+        QuerySource::MainThread,
+    );
     let text = serde_json::to_string(&request).unwrap();
     assert!(!text.contains("prompt_hook_messages"), "{text}");
     let back: QueryRequest = serde_json::from_str(&text).unwrap();
@@ -463,22 +442,16 @@ async fn turn_attachments_default_to_empty() {
     use crate::orchestration::{ContextBuilder, ContextRequest};
     use crate::permission::PermissionMode;
     let context = crate::testing::FixedContext(Vec::new());
-    let request = ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("sess_1"),
-        workspace: WorkspaceRef {
+    let request = ContextRequest::new(
+        SessionId::new("sess_1"),
+        WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/work"),
         },
-        agent: None,
-        source: QuerySource::MainThread,
-        mode: PermissionMode::Default,
-        tool_names: Vec::new(),
-        selection: crate::testing::selection(),
-        plan_flags: Default::default(),
-        mcp: None,
-    };
+        QuerySource::MainThread,
+        PermissionMode::Default,
+        crate::testing::selection(),
+    );
     let attachments = context.turn_attachments(request, &[]).await.unwrap();
     assert!(attachments.is_empty());
 }
@@ -562,4 +535,43 @@ fn the_resume_sentinel_is_recognized() {
     assert!(sentinel(SYNTHETIC_MODEL, NO_RESPONSE_REQUESTED).is_resume_sentinel());
     assert!(!sentinel(rust_cli_base::models::GLM_5, NO_RESPONSE_REQUESTED).is_resume_sentinel());
     assert!(!sentinel(SYNTHETIC_MODEL, "Prompt is too long").is_resume_sentinel());
+}
+
+/// 操作上下文的工厂（工作线 F134）：本机 owner、这个实例的 generation；`next` 从共用的 Ids 取新的操作 ID（与别的 ID
+/// 同一个序列），`with_id` 用给定的 ID。
+#[test]
+fn operations_build_local_contexts_from_the_shared_ids() {
+    use std::sync::Arc;
+
+    use crate::clock::Ids;
+    use crate::env::{Operations, Origin};
+    use crate::ids::{EnvironmentId, Generation, OperationId, OwnerEpoch, SessionId};
+
+    let ids: Arc<dyn Ids> = Arc::new(crate::testing::SequentialIds::default());
+    let operations = Operations::new(Generation::new("g1"), ids.clone());
+    let origin = Origin::User {
+        session: Some(SessionId::new("sess_1")),
+    };
+    let first = operations.next(EnvironmentId::new("local"), origin.clone());
+    let message = ids.message();
+    let second = operations.next(EnvironmentId::new("local"), origin.clone());
+    assert_eq!(
+        (first.generation.as_str(), first.owner_epoch),
+        ("g1", OwnerEpoch::LOCAL)
+    );
+    // 同一个序列：操作 ID 与消息 ID 交替取号。
+    assert_eq!(
+        (
+            first.operation.as_str(),
+            message.as_str(),
+            second.operation.as_str()
+        ),
+        ("op_1", "msg_2", "op_3")
+    );
+    let given = operations.with_id(
+        EnvironmentId::new("local"),
+        OperationId::new("op_x"),
+        origin,
+    );
+    assert_eq!(given.operation, OperationId::new("op_x"));
 }

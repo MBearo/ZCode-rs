@@ -12,7 +12,7 @@ use crate::run::tests::{parts, request, scope};
 /// 点名清单的顺序（`Read, Grep`）就是发出的顺序。
 struct Declared(Vec<Arc<dyn Tool>>);
 
-impl ToolRegistry for Declared {
+impl rust_cli_kernel_api::testing::RegistryOverride for Declared {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
         self.0.clone()
     }

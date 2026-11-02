@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use rust_cli_exec_transport::{ProvisionError, ProvisionStep, Provisioner};
+use rust_cli_machines::{ProvisionError, ProvisionStep, Provisioner};
 
 use crate::artifact::Platform;
 use crate::provision_tests::{Remote, mode, wanted};

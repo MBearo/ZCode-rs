@@ -6,6 +6,7 @@
 
 mod failure;
 mod from_wire;
+mod git;
 mod mcp;
 mod ports;
 mod to_wire;
@@ -21,6 +22,8 @@ use rust_cli_exec_wire::{Body, BodyBuilder};
 use rust_cli_kernel_api::env::EnvError;
 use rust_cli_kernel_api::machine::MachineEnv;
 
+pub use from_wire::remote_machine;
+
 /// 一台远端机器：一条到执行器的连接实现全部 8 个端口。
 pub struct RemoteEnvironment {
     client: ExecClient,
@@ -32,7 +35,7 @@ impl RemoteEnvironment {
     pub fn new(client: ExecClient) -> Self {
         Self {
             client,
-            name: rust_cli_kernel_api::env_registry::LOCAL_MACHINE.to_owned(),
+            name: rust_cli_kernel_api::ids::PRIMARY_MACHINE.to_owned(),
         }
     }
 
@@ -47,7 +50,7 @@ impl RemoteEnvironment {
         &self.client
     }
 
-    /// 装成一台机器：8 个端口与 MCP 的管道都经这条连接（MCP 是 R5，§22.6）。
+    /// 装成一台机器：9 个端口与 MCP 的管道都经这条连接（MCP 是 R5，§22.6；Git 是 F110）。
     pub fn machine(self: Arc<Self>) -> MachineEnv {
         MachineEnv::new(self.clone(), self)
     }

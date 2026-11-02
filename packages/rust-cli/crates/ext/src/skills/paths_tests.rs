@@ -1,7 +1,9 @@
 //! `paths` 条件 skill 的激活（ext.md §2.6）。
 
 use rust_cli_kernel_api::ids::{MessageId, ToolUseId};
-use rust_cli_kernel_api::message::{AssistantMessage, ToolResultContent, UserMessage, UserOrigin};
+use rust_cli_kernel_api::message::{
+    AssistantMessage, ContentBlock, ToolResultContent, UserMessage, UserOrigin,
+};
 use serde_json::json;
 
 use super::*;

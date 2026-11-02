@@ -5,9 +5,8 @@
 
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::message::Message;
-use rust_cli_kernel_api::session_api::Ack;
+use rust_cli_kernel_api::session_api::{Ack, CommandResult, Forked};
 use rust_cli_kernel_api::store::SessionFork;
-use serde_json::json;
 
 use crate::actor::{Actor, rejected};
 use crate::rewind_plan::selectable;
@@ -58,17 +57,12 @@ impl Actor {
             Ok(receipt) => receipt,
             Err(error) => return rejected(error.to_string()),
         };
-        // 回执的文字是 Node 分叉对话的原文；`message` 给界面拼中文提示（工作线 F78）。
-        let response = format!(
-            "Forked session {child} from message {through}: copied {} messages.",
-            receipt.copied
-        );
+        // 回执的文字（Node 分叉对话的原文）由 `Forked::response` 给出；`through` 与 `copied` 给界面拼中文提示（工作线 F78）。
         Ack::Accepted {
-            result: json!({
-                "session": child.as_str(),
-                "response": response,
-                "copied": receipt.copied,
-                "message": through.as_str(),
+            result: CommandResult::Forked(Forked {
+                session: child,
+                through: Some(through),
+                copied: receipt.copied,
             }),
         }
     }

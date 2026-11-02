@@ -1,4 +1,5 @@
 //! 重试与停顿状态行的文字（stall-visibility.md §3）。
+use ratatui::style::Modifier;
 use rust_cli_kernel_api::model::{ModelError, ModelNotice};
 
 use super::*;

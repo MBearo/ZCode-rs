@@ -2,15 +2,15 @@
 //! ack（docs/specs/rust-cli/query.md §5）。
 
 use rust_cli_kernel_api::ids::{MessageId, ShellTaskId};
+use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::testing::{
-    DirectExecutor, ListTools, NoticeEnvironment, local_services, machine, shell_notice,
-    tool_use_response,
+    DirectExecutor, ListTools, NoticeEnvironment, machine, shell_notice, tool_use_response,
 };
 use rust_cli_kernel_api::tool::Tool;
-use rust_cli_query::task_notification;
 
 use super::*;
+use crate::notices::task_notification;
 
 pub(super) async fn session(
     scope: &TaskScope,
@@ -21,7 +21,7 @@ pub(super) async fn session(
 ) -> Session {
     session_on(
         scope,
-        env,
+        machine(env),
         model,
         tools,
         messages,
@@ -30,26 +30,23 @@ pub(super) async fn session(
     .await
 }
 
-/// 同 [`session`]，执行环境可以是任何替身（monitors_tests 用自己的）。
-pub(crate) async fn session_on<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
+/// 同 [`session`]，机器可以是任何替身（monitors_tests 用自己的）。
+pub(crate) async fn session_on(
     scope: &TaskScope,
-    env: Arc<E>,
+    machine: MachineEnv,
     model: Arc<dyn ModelPort>,
     tools: Vec<Arc<dyn Tool>>,
     messages: Vec<Message>,
     clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
 ) -> Session {
-    let registry = rust_cli_kernel_api::testing::environments(env.clone());
-    session_on_machines(scope, (env, registry), model, tools, messages, clock).await
+    let registry = rust_cli_kernel_api::testing::registry(machine);
+    session_on_machines(scope, registry, model, tools, messages, clock).await
 }
 
-/// 同 [`session_on`]，另给执行环境的注册表（R3：远端机器上的 monitor 与通知）。
-pub(crate) async fn session_on_machines<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
+/// 同 [`session_on`]，另给执行环境的注册表（R3：远端机器上的 monitor 与通知）；会话在注册表的主 env 上。
+pub(crate) async fn session_on_machines(
     scope: &TaskScope,
-    (env, registry): (
-        Arc<E>,
-        Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
-    ),
+    registry: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
     model: Arc<dyn ModelPort>,
     tools: Vec<Arc<dyn Tool>>,
     messages: Vec<Message>,
@@ -68,10 +65,8 @@ pub(crate) async fn session_on_machines<E: rust_cli_kernel_api::testing::AllPort
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
         machines: registry.clone(),
-        machine: machine(env.clone()),
-        local: local_services(env.clone()),
         artifacts: store.clone(),
-        generation: Generation::new("g1"),
+        operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids.clone()),
         non_interactive: false,
         limits: rust_cli_query::RequestLimits::default(),
     }));
@@ -80,19 +75,20 @@ pub(crate) async fn session_on_machines<E: rust_cli_kernel_api::testing::AllPort
             agents: Arc::new(rust_cli_kernel_api::agents::NoAgentSignals),
             cron: Arc::new(rust_cli_kernel_api::cron::NoCron),
             store,
-            ids,
+            ids: ids.clone(),
             runner,
             compactor: Arc::new(NeverCompact),
             machines: registry,
-            machine: machine(env.clone()),
-            local: local_services(env),
             max_turns: None,
             hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
             inputs: Arc::new(rust_cli_kernel_api::user_input::NoUserInputs),
             artifacts: Arc::new(rust_cli_kernel_api::testing::MemoryArtifacts::default()),
             clock,
-            generation: rust_cli_kernel_api::ids::Generation::new("g1"),
+            operations: rust_cli_kernel_api::env::Operations::new(
+                rust_cli_kernel_api::ids::Generation::new("g1"),
+                ids,
+            ),
             spawner: scope.spawner(),
             closing: scope.spawner(),
             titles: None,
@@ -145,7 +141,7 @@ async fn an_idle_session_starts_a_turn_for_a_notice_and_acks_after_the_commit() 
     let seen = until_finished(&mut events, 1).await;
     assert!(seen.iter().any(|event| matches!(
         event,
-        KernelEvent::BackgroundWork { work, status } if work == "b1" && status == "completed"
+        KernelEvent::BackgroundWork { work, status } if work == "b1" && *status == rust_cli_kernel_api::env_shell::BackgroundStatus::Completed
     )));
     assert!(
         seen.iter()

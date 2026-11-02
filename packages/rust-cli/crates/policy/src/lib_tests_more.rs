@@ -198,7 +198,9 @@ async fn a_scoped_session_uses_its_own_rules_instead_of_the_project_ones() {
     let mut base = PermissionRules::default();
     base.rules.extend(
         ProjectRules {
-            allow: vec![rules::parse_rule("Bash(touch:*)")],
+            allow: vec![rust_cli_kernel_api::permission::syntax::parse_rule(
+                "Bash(touch:*)",
+            )],
             ..ProjectRules::default()
         }
         .sourced(),
@@ -216,7 +218,9 @@ async fn a_scoped_session_uses_its_own_rules_instead_of_the_project_ones() {
     gate.scope(
         &SessionId::new("s1"),
         &ProjectRules {
-            deny: vec![rules::parse_rule("Bash(rm:*)")],
+            deny: vec![rust_cli_kernel_api::permission::syntax::parse_rule(
+                "Bash(rm:*)",
+            )],
             ..ProjectRules::default()
         },
     );

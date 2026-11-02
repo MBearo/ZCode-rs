@@ -24,8 +24,9 @@ use crate::tool::ToolOutput;
 pub const DISPLAY_KEY: &str = "agent";
 
 /// Agent 工具的结果关联到子会话的事实（[`Fact::SubagentLinked`]）：输出的 display 带 agentId、子会话与类型时有。
-/// 提交方（会话 actor）在工具结束时取出，与这次调用的工具结果同批提交。
-pub fn subagent_link(tool_use: &ToolUseId, output: &ToolOutput) -> Option<Fact> {
+/// 提交方（会话 actor 与子代理的 sink，经 [`crate::run_ledger::RunLedger`]）在工具结束时取出，与这次调用的工具结果
+/// 同批提交。
+pub(crate) fn subagent_link(tool_use: &ToolUseId, output: &ToolOutput) -> Option<Fact> {
     let display = &output.display[DISPLAY_KEY];
     let text = |key: &str| display[key].as_str().filter(|value| !value.is_empty());
     Some(Fact::SubagentLinked {
@@ -52,8 +53,8 @@ pub struct AgentNotice {
     /// 在接收会话内单调递增；ack 用它。
     pub seq: u64,
     pub agent: AgentId,
-    /// `<status>` 的值：`completed`、`failed` 或 `killed`（会话的 `BackgroundWork` 事件也用它）。
-    pub status: String,
+    /// `<status>` 的值：`completed`、`failed` 或 `killed`（会话的 `BackgroundWork` 事件也用它；工作线 F134 以前是字符串）。
+    pub status: crate::env_shell::BackgroundStatus,
     /// 完整的通知文本（含 `<system-reminder>` 包装），作为 meta user 消息提交。
     pub text: String,
 }

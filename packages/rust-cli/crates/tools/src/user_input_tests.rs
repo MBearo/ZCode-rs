@@ -1,9 +1,7 @@
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
-use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::permission::PermissionRule;
+use rust_cli_kernel_api::env::{EnvFacts, EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::testing::{MemoryEnvironment, ScriptedInteractions};
 use rust_cli_kernel_api::tool::{PromptContext, ToolError, ToolOutput};
 
@@ -56,7 +54,7 @@ impl PermissionGate for DenySecret {
     async fn decide(&self, _: &dyn Tool, _: &Value, _: &ToolUseContext) -> PermissionDecision {
         PermissionDecision::Passthrough
     }
-    async fn remember(&self, _: &SessionId, _: &[PermissionRule]) {}
+    async fn local_rules_committed(&self, _: &WorkspaceRef) {}
     async fn check_rules(
         &self,
         _tool: &dyn Tool,
@@ -78,8 +76,8 @@ fn environment() -> MemoryEnvironment {
         os_version: String::new(),
         shell: "zsh".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     })
     .with_file("/Users/dev/work/a.txt", "alpha\n")
     .with_file("/Users/dev/work/secret.txt", "s\n")
@@ -93,7 +91,7 @@ fn environment() -> MemoryEnvironment {
 fn tools(read: Arc<FakeRead>) -> UserInputTools {
     UserInputTools {
         read: Some(read),
-        bash: crate::bash::BashTool::new(),
+        bash: crate::bash::BashTool::default(),
         gate: Arc::new(DenySecret),
     }
 }
@@ -139,7 +137,7 @@ async fn mentions_become_file_directory_and_reference_attachments() {
 async fn without_a_read_tool_nothing_is_attached() {
     let tools = UserInputTools {
         read: None,
-        bash: crate::bash::BashTool::new(),
+        bash: crate::bash::BashTool::default(),
         gate: Arc::new(DenySecret),
     };
     assert!(tools.mentions("@a.txt", context()).await.is_empty());

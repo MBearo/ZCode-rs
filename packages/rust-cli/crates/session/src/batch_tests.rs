@@ -8,7 +8,7 @@ use rust_cli_kernel_api::model::{ApiContent, ApiRole};
 use rust_cli_kernel_api::session_api::{Command, Delivery, KernelEvent, SessionHandle};
 use rust_cli_kernel_api::testing::{ScriptedModel, text_response};
 
-use crate::test_support::{GatedModel, Setup, envelope, finished, until};
+use crate::test_support::{Setup, envelope, finished, until};
 
 fn queued(
     id: &str,
@@ -57,37 +57,18 @@ fn human_texts(messages: &[Message]) -> Vec<String> {
         .collect()
 }
 
-/// 第一个请求等放行，之后按剧本回（记下全部请求）。
-struct FirstGated {
-    gated: GatedModel,
-    first: std::sync::atomic::AtomicBool,
-    rest: ScriptedModel,
-}
-
-impl rust_cli_kernel_api::model::ModelPort for FirstGated {
-    fn stream(
-        &self,
-        request: rust_cli_kernel_api::model::ModelRequest,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> futures_util::stream::BoxStream<
-        'static,
-        Result<rust_cli_kernel_api::model::ModelEvent, rust_cli_kernel_api::model::ModelError>,
-    > {
-        if self.first.swap(false, std::sync::atomic::Ordering::SeqCst) {
-            return self.gated.stream(request, cancel);
-        }
-        self.rest.stream(request, cancel)
-    }
-}
-
 #[tokio::test]
 async fn consecutive_plain_inputs_run_as_one_turn() {
     let gate = Arc::new(tokio::sync::Notify::new());
-    let model = Arc::new(FirstGated {
-        gated: GatedModel::new(gate.clone()),
-        first: std::sync::atomic::AtomicBool::new(true),
-        rest: ScriptedModel::new(vec![text_response(&["both"]), text_response(&["slash"])]),
-    });
+    // 第一个请求等放行，之后按剧本。
+    let model = Arc::new(
+        ScriptedModel::new(vec![
+            text_response(&["ok"]),
+            text_response(&["both"]),
+            text_response(&["slash"]),
+        ])
+        .gated_at(0, gate.clone()),
+    );
     let built = Setup::new(model.clone()).build().await;
     let mut events = built.session.subscribe(Some(0));
     built
@@ -115,8 +96,8 @@ async fn consecutive_plain_inputs_run_as_one_turn() {
     until(&mut events, finished).await;
     until(&mut events, finished).await;
     until(&mut events, finished).await;
-    let requests = model.rest.requests();
-    // 第一个回合的请求不在剧本模型里；之后两个回合：成批的两条，与斜杠命令。
+    // 第一个回合的请求等放行；之后两个回合：成批的两条，与斜杠命令。
+    let requests = model.requests().split_off(1);
     assert_eq!(requests.len(), 2, "{requests:#?}");
     assert_eq!(
         last_user_texts(&requests[0]),
@@ -133,11 +114,14 @@ async fn consecutive_plain_inputs_run_as_one_turn() {
 #[tokio::test]
 async fn a_mention_after_the_first_input_starts_its_own_turn() {
     let gate = Arc::new(tokio::sync::Notify::new());
-    let model = Arc::new(FirstGated {
-        gated: GatedModel::new(gate.clone()),
-        first: std::sync::atomic::AtomicBool::new(true),
-        rest: ScriptedModel::new(vec![text_response(&["one"]), text_response(&["two"])]),
-    });
+    let model = Arc::new(
+        ScriptedModel::new(vec![
+            text_response(&["ok"]),
+            text_response(&["one"]),
+            text_response(&["two"]),
+        ])
+        .gated_at(0, gate.clone()),
+    );
     let built = Setup::new(model.clone()).build().await;
     let mut events = built.session.subscribe(Some(0));
     built
@@ -160,7 +144,7 @@ async fn a_mention_after_the_first_input_starts_its_own_turn() {
     until(&mut events, finished).await;
     until(&mut events, finished).await;
     until(&mut events, finished).await;
-    let requests = model.rest.requests();
+    let requests = model.requests().split_off(1);
     assert_eq!(requests.len(), 2, "{requests:#?}");
     assert_eq!(last_user_texts(&requests[0]), ["plain one".to_owned()]);
 }

@@ -7,6 +7,7 @@
 //! 每个会话一个 actor，运行在自己的子任务作用域里；内核释放时根作用域中止全部会话任务。
 
 mod agents;
+mod assemble;
 mod catalog;
 mod config;
 mod directory;
@@ -24,41 +25,34 @@ mod workspace_sessions;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rust_cli_agents::{AgentCatalog, Agents, AgentsConfig, AgentsPorts, MemoryTaskLists};
+use rust_cli_agents::{AgentCatalog, MemoryTaskLists};
 use rust_cli_base::TaskScope;
-use rust_cli_compact::{CompactPorts, Compaction, DenyTools, Disabled};
-use rust_cli_context::{ContextPorts, PromptAssembler};
-use rust_cli_ext::{Ext, ExtPorts};
-use rust_cli_hooks::{HookEngine, HookPorts};
+use rust_cli_ext::Ext;
+use rust_cli_hooks::HookEngine;
 use rust_cli_kernel_api::agents::{AgentSignals, TaskListStore};
 use rust_cli_kernel_api::clock::{Clock, Ids};
+use rust_cli_kernel_api::env::Operations;
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
-use rust_cli_kernel_api::ids::{Generation, OwnerEpoch, SessionId, TraceId};
-use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::ids::{OwnerEpoch, SessionId, TraceId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
 use rust_cli_kernel_api::orchestration::{Compactor, QueryRunner};
-use rust_cli_kernel_api::peers::ModeClass;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{
     CreateSession, Kernel, KernelError, SessionHandle, StartSource,
 };
 use rust_cli_kernel_api::store::{
-    ArtifactStore, Fact, FactBatch, SessionFilter, SessionKind, SessionMeta, SessionStore,
-    SessionSummary, StoreError,
+    ArtifactStore, Fact, FactBatch, SessionFilter, SessionKind, SessionMeta, SessionSummary, Store,
 };
 use rust_cli_kernel_api::tool::ReadFileStates;
 use rust_cli_policy::PolicyGate;
 use rust_cli_query::{QueryLoop, QueryParts};
 use rust_cli_session::{Opened, Session, SessionState};
-use rust_cli_tools::Pipeline;
 use table::{Closer, OpenSessions};
 
+use crate::assemble::SurfaceTraits;
+
 pub use ext::{ExtConfig, Extensions};
-pub use permissions::{
-    bash_rule_label, bash_rule_seed, format_rule as format_permission_rule,
-    parse_rule as parse_permission_rule,
-};
 pub use rust_cli_compact::{CompactConfig, Thresholds as CompactThresholds};
 pub use rust_cli_context::{Attribution, ContextConfig, OutputStyle, Surface};
 // hooks 快照（`LocalKernel::replace_hooks` 的参数）：前端的测试组装它不必依赖 hooks crate（修复线 F37 的 TUI 测试）。
@@ -73,7 +67,9 @@ pub struct Ports {
     pub model: Arc<dyn ModelPort>,
     /// 执行环境的注册表（R0 只有本机，remote-exec.md §15.8.1）：内核建好时取本机的机器与本机服务分给各能力。
     pub environments: Arc<dyn EnvironmentRegistry>,
-    pub store: Arc<dyn SessionStore>,
+    /// 会话存储的三个端口（生命周期、本机设置、只读查询，审查 K7）：一个适配器实现全部；runtime 按能力分给会话、子代理、
+    /// 判决链的读回与前端的查询。
+    pub store: Arc<dyn Store>,
     pub artifacts: Arc<dyn ArtifactStore>,
     pub clock: Arc<dyn Clock>,
     pub ids: Arc<dyn Ids>,
@@ -111,11 +107,8 @@ pub struct Limits {
 }
 
 pub struct LocalKernel {
+    /// 端口；会话的主 env 与 controller 的服务都从 `environments` 取（[`LocalKernel::machine`]；工作线 F131：以前另存一份）。
     ports: Ports,
-    /// 本机（注册表的 `local_machine()`）：会话、`/cd`、导出、项目清单、`@` 清单都在本机。
-    machine: MachineEnv,
-    /// 只在本机的服务（`/diff`）。
-    local: LocalServices,
     defaults: Defaults,
     runner: Arc<dyn QueryRunner>,
     /// 子代理的信号来源（后台子代理的通知、任务清单变化），交给每个会话 actor。
@@ -136,7 +129,8 @@ pub struct LocalKernel {
     usage: Arc<usage::UsageAnalyzer>,
     /// 用户输入的 `@` 提及与 bash 模式（tui-input.md §1.1、§2.2）：基础注册表里的 Read 与 Bash。
     inputs: Arc<dyn rust_cli_kernel_api::user_input::UserInputs>,
-    generation: Generation,
+    /// 操作上下文的工厂（执行环境的实例 + 注入的 Ids，F134）：会话 actor 与 `/export` 用它。
+    operations: Operations,
     scope: TaskScope,
     /// 会话表（session-lifecycle.md §3.3.1）：每个会话归谁的唯一来源。
     sessions: OpenSessions,
@@ -209,270 +203,75 @@ impl LocalKernel {
         });
         // 本地执行环境的实例随进程变化（spec §6 规则 3）；hook 命令与工具共用同一个实例。ID 经注入的 Ids
         // （F7，审查 R2-11：以前直接调用 `Uuid::new_v4`）。
-        let generation = ports.ids.generation();
-        // 各能力拿本机的端口：R0 只有本机；规则文件、记忆、插件与 skills 本来就只在本机读（remote-exec.md §3）。
-        let machine = ports.environments.local_machine();
-        let local = ports.environments.local();
-        // hooks 的配置快照由入口层组装后经 `HookEngine::replace` 交进来（hooks.md §2.2）。
-        let hooks = Arc::new(HookEngine::new(HookPorts {
-            commands: machine.commands().clone(),
-            shell: machine.shell().clone(),
-            ids: ports.ids.clone(),
-            model: Some(ports.model.clone()),
-            http: None,
-            generation: generation.clone(),
-            // 大输出与工具结果落在同一个存储（hooks.md §4.5，修复线 F15）。
-            artifacts: ports.artifacts.clone(),
-        }));
-        let non_interactive = matches!(context.surface, Surface::Print);
+        let operations = Operations::new(ports.ids.generation(), ports.ids.clone());
+        // 各能力拿会话主 env 的端口：规则文件、记忆、插件、skills 与 git 都跟着主 env（deployment.md §8、§10）。
+        let machine = ports.environments.primary_machine();
+        let hooks = assemble::hooks(&ports, &operations);
+        let traits = SurfaceTraits::new(
+            matches!(context.surface, Surface::Print),
+            extensions.streaming_input,
+        );
         let late = Arc::new(late::LateCompactor::default());
-        // 一个判决链实例：工具注册（Edit / Write 的先读规则）与执行管线共用，会话内“总是允许”的
-        // 规则因此对两边都生效。规则快照由入口层接入配置后替换（shell-permissions.md §5）。
-        let gate = Arc::new(PolicyGate::default());
-        // ToolSearch 与延迟工具清单看同一个主线程注册表，建好注册表后绑定（tools-more.md §3.4）；`ENABLE_TOOL_SEARCH` 为关时
-        // ToolSearch 不启用（工作线 F89，§3.2.1）。
-        let catalog = Arc::new(rust_cli_tools::ToolCatalog::new(
-            defaults.limits.request.tool_search,
-        ));
-        // 会话内定时任务（L11b）：任务表在这里，触发由会话 actor 在空闲时取走。
-        let cron =
-            rust_cli_tools::CronBoard::new(ports.clock.clone(), extensions.cron_store.clone());
-        // 基础工具：文件与搜索（L3）、Bash（L4）、交互与 Web 工具（L11a）；Skill 与 MCP 工具由 ext
-        // 加在后面（L9），Agent 等由 agents 再加（L7）。
-        // Read 整读 PDF 前按会话当前模型的生效配置查 `supports_pdf`（tools-files.md §1.5，修复线 F24）。
-        let pdf_model = rust_cli_tools::SideModel {
-            model: ports.model.clone(),
-            selection: defaults.selection.clone(),
-        };
-        let builtin = rust_cli_tools::builtin_with(gate.clone(), Some(pdf_model));
-        // 压缩时清空的 readFileState 与文件工具是同一份（compact.md §3.4）；关闭会话时也释放它（[`Closer`]）。
-        let read_files: Arc<rust_cli_tools::ReadFileState> =
-            builtin.file_state().cloned().unwrap_or_default();
-        let file_states: Arc<dyn ReadFileStates> = read_files.clone();
-        let worktrees = Arc::new(rust_cli_tools::WorktreeBoard::default());
-        let base: Arc<dyn rust_cli_kernel_api::orchestration::ToolRegistry> = Arc::new(
-            builtin
-                .with_search_opt_in(defaults.search_tools)
-                // 后台命令的期限只在 `-p`（shell-permissions.md §1.1，修复线 F9）；启动时是 bypass 类别时
-                // 描述去掉“不要用 cat”一行（§4.9，修复线 F43），整个进程不变。
-                .with_leading(Arc::new({
-                    // `BASH_*_TIMEOUT_MS` 的缺省与上限（cli-args.md §9.3，修复线 F42）；进程启动时是 bypass 类别时
-                    // 去掉“不要用 cat”一行（修复线 F43，shell-permissions.md §4.9）。
-                    let bash = rust_cli_tools::BashTool::new()
-                        .with_timeouts(defaults.limits.bash)
-                        // 读文件的命令记进文件工具的同一份 readFileState（tools-files.md §4.2）。
-                        .with_file_state(read_files.clone())
-                        .with_background_deadline(non_interactive)
-                        .with_bash_first_trimmed(ModeClass::of(defaults.mode) == ModeClass::Bypass)
-                        // Monitor 开着时描述多一句、前台长 `sleep` 拦下（tools-more.md §19.9）。
-                        .with_monitor(extensions.monitor);
-                    // stream-json 输入：后台命令的缺省期限 max(1800000, 前台缺省)（headless.md §6.1）。
-                    if extensions.streaming_input {
-                        bash.with_streaming_input()
-                    } else {
-                        bash
-                    }
-                }))
-                .with_tools(rust_cli_tools::interaction_tools(
-                    &catalog,
-                    !non_interactive,
-                ))
-                .with_tools(rust_cli_tools::web_tools(
-                    rust_cli_tools::SideModel {
-                        model: ports.model.clone(),
-                        selection: defaults.selection.clone(),
-                    },
-                    ports.clock.clone(),
-                ))
-                .with_tools(rust_cli_tools::cron_tools(&cron, extensions.monitor))
-                // `/loop` 动态模式的自定节奏（L17，tools-more.md §17.2）：默认注册、不延迟。
-                .with_tools(vec![Arc::new(rust_cli_tools::ScheduleWakeupTool::new(
-                    &cron,
-                ))])
-                // Monitor（工作线 F83，tools-more.md §19）：单次的 `-p` 上限 10 分钟，其余 30 分钟。
-                .with_tools(if extensions.monitor {
-                    let session = !non_interactive || extensions.streaming_input;
-                    vec![Arc::new(
-                        rust_cli_tools::MonitorTool::new().with_session_cap(session),
-                    )]
-                } else {
-                    Vec::new()
-                })
-                .with_tools(vec![Arc::new(rust_cli_tools::ReportFindingsTool::new())])
-                .with_tools(rust_cli_tools::worktree_tools(&worktrees)),
+        let gate = assemble::gate(&ports);
+        let base = assemble::base_tools(&ports, &defaults, &extensions, (traits, &gate));
+        let ext = assemble::ext(
+            &ports,
+            (&gate, scope.spawner()),
+            base.registry.clone(),
+            (extensions.config.clone(), traits),
         );
-        // 用户输入的提及与 bash 模式用基础注册表里的 Read 与 Bash（与模型的调用共用 readFileState 与 shell 状态）。
-        let inputs: Arc<dyn rust_cli_kernel_api::user_input::UserInputs> = Arc::new(
-            rust_cli_tools::UserInputTools::new(base.as_ref(), gate.clone())
-                .with_bash_timeouts(defaults.limits.bash),
-        );
-        let ext = Arc::new(Ext::new(
-            ExtPorts {
-                info: machine.info().clone(),
-                files: machine.files().clone(),
-                ids: ports.ids.clone(),
-                gate: gate.clone(),
-                mcp: machine.mcp().clone(),
-                // 绑定到远端机器的 MCP 服务器经注册表取那台机器的管道（R5，remote-exec.md §22.6）。
-                machines: Some(ports.environments.clone()),
-                spawner: scope.spawner(),
-                clock: ports.clock.clone(),
-            },
-            base,
-            extensions.config,
-        ));
-        ext.set_print_session(non_interactive);
         // agent 清单（context）与 Agent 工具共用一个目录：插件 agent 设置一次，两处同时看到（L12）。
         let agent_catalog = Arc::new(AgentCatalog::new(
             machine.info().clone(),
             machine.files().clone(),
         ));
-        let context = PromptAssembler::new(
-            ContextPorts {
-                info: machine.info().clone(),
-                files: machine.files().clone(),
-                shell: machine.shell().clone(),
-                git: local.git().clone(),
-                clock: ports.clock.clone(),
-                ids: ports.ids.clone(),
-                // agent 清单由 agents 给出（L7），延迟工具由 ToolCatalog 给出（L11a），skill 清单与 MCP
-                // instructions 由 ext 给出（L9）。
-                listings: Arc::new(listings::CombinedListings(vec![
-                    agent_catalog.clone(),
-                    catalog.clone(),
-                    ext.listings(),
-                ])),
-            },
-            context,
-        )
-        // 读过的文件在磁盘上被改动（tools-files.md §4.1）：与文件工具同一份 readFileState；远端机器上读过的文件每台每步
-        // 一次批量 stat（R3，remote-exec.md §20.7.4）。
-        .with_changed_files(Arc::new(
-            rust_cli_tools::FileChanges::new(read_files.clone(), machine.files().clone())
-                .with_machines(ports.environments.clone()),
-        ))
-        // 机器清单提醒（R3，remote-exec.md §20.5.3）。
-        .with_machines(ports.environments.clone());
-        let context = Arc::new(context);
-        let assembler = context.clone();
+        let assembler = assemble::context(&ports, context, (&agent_catalog, &base, &ext));
         let sessions = OpenSessions::default();
         let closer = Arc::new(Closer {
             sessions: Arc::downgrade(&sessions),
-            context: context.clone(),
-            read_files,
-            worktrees,
-            gate: gate.clone(),
-            mcp: ext.mcp().clone(),
+            scoped: table::SessionScoped {
+                context: assembler.clone(),
+                read_files: base.read_files.clone(),
+                worktrees: base.worktrees.clone(),
+                gate: gate.clone(),
+                mcp: ext.mcp().clone(),
+            },
         });
-        let parts = QueryParts {
-            model: ports.model.clone(),
-            context: context.clone(),
-            // 整个工具的 deny 规则从清单里去掉（tools-files.md §1.1.1，工作线 F69）：主线程、子代理、延迟清单与
-            // 压缩摘要都从这一层往外取，规则用判决链当前的快照。
-            tools: Arc::new(rust_cli_tools::PolicyFiltered::new(
-                ext.registry(),
-                gate.clone(),
-            )),
-            // 按调用的 `machine` 选机器（R3，remote-exec.md §20.6）。
-            executor: Arc::new(
-                Pipeline::new(
-                    Arc::new(permissions::SharedRules {
-                        gate: gate.clone(),
-                        store: ports.store.clone(),
-                    }),
-                    hooks.clone(),
-                )
-                .with_machines(ports.environments.clone()),
-            ),
-            // 先交出“稍后接上”的句柄：子循环（agents）与主循环共用，压缩器建好后再设置（late.rs）。
-            compactor: late.clone(),
-            hooks: hooks.clone(),
-            ids: ports.ids.clone(),
-            clock: ports.clock.clone(),
-            machine: machine.clone(),
-            machines: ports.environments.clone(),
-            local: local.clone(),
-            artifacts: ports.artifacts.clone(),
-            generation,
-            non_interactive,
-            limits: defaults.limits.request,
-        };
-        // 子代理与任务清单（工作线 L7）：主线程的工具注册表换成 agents 的（基础工具 + Agent 等），
-        // 主循环包一层运行登记；子循环由 `LoopFactory` 用同一套能力组装。
-        let agents = Agents::new(
-            AgentsPorts {
-                store: ports.store.clone(),
-                ids: ports.ids.clone(),
-                clock: ports.clock.clone(),
-                machine: machine.clone(),
-                machines: ports.environments.clone(),
-                tasks,
-                queries: Arc::new(agents::LoopFactory {
-                    parts: parts.clone(),
-                }),
-                context: context.clone(),
-                // 只读查看的子代理快照算 ctx 与上下文提示（修复线 F112）：与主循环、子循环同一个压缩器。
-                compactor: late.clone(),
-                catalog: agent_catalog.clone(),
-                spawner: scope.spawner(),
-                shell_notice: agents::shell_notice,
-                monitor: rust_cli_agents::MonitorTexts {
-                    notice: rust_cli_query::monitor_notice_text,
-                    end: agents::monitor_end,
-                },
-                peers: extensions.peers.port.clone(),
-            },
-            parts.tools.clone(),
-            AgentsConfig {
-                task_tools: defaults.task_tools.unwrap_or_else(|| {
-                    rust_cli_agents::task_tools_enabled(&defaults.selection.model, false)
-                }),
-                // 只有交互模式停放还有后台子代理的子代理（agents.md §5.1）。
-                keep_alive: !non_interactive,
-                // 修复线 F67：交互界面里后台子代理也能询问（agents.md §4.1.1）。
-                background_prompts: !non_interactive,
-                // 修复线 L-A：交互会话缺省打开 fork 子代理，`-p` 关；环境变量可以改（agents.md §8.1.1）。
-                fork: defaults.limits.fork_subagent.unwrap_or(!non_interactive),
-            },
+        let parts = assemble::query_parts(
+            &ports,
+            (&assembler, &ext, &gate, &hooks),
+            (&late, operations),
+            (&defaults, traits),
         );
+        let agents = assemble::agents(
+            &ports,
+            (&parts, tasks, &agent_catalog),
+            (&late, scope.spawner(), &extensions.peers),
+            (&defaults, traits),
+        );
+        // 两处晚绑定（late.rs）：ToolSearch 的目录看 agents 的注册表；任务提醒读 agents 的清单（agents 要用上下文）。
         let tools = agents.registry();
-        catalog.bind(&tools);
-        // 任务提醒读的清单（agents.md §7.4）：agents 要用上下文，所以建好之后再接给它。
+        base.catalog.bind(&tools);
         assembler.bind_tasks(agents.task_reader());
         let usage = Arc::new(usage::UsageAnalyzer {
             model: ports.model.clone(),
-            context: assembler,
+            context: assembler.clone(),
             tools: tools.clone(),
             agents: agent_catalog.clone(),
             skills: ext.skills().clone(),
             compact: compact.clone(),
             tool_search: defaults.limits.request.tool_search,
         });
-        // 摘要请求的子循环：同一个上下文与主线程的工具清单（共享缓存前缀），工具一律拒绝，自己不再压缩
-        // （compact.md §3.2）。
-        let summary = QueryLoop::new(QueryParts {
-            executor: Arc::new(DenyTools),
-            tools: tools.clone(),
-            compactor: Arc::new(Disabled),
-            ..parts.clone()
-        });
-        let compactor: Arc<dyn Compactor> = Arc::new(Compaction::new(
-            CompactPorts {
-                runner: Arc::new(summary),
-                tools: tools.clone(),
-                files: file_states,
-                context,
-                hooks: hooks.clone(),
-                ids: ports.ids.clone(),
-                machine: machine.clone(),
-                local: local.clone(),
-                artifacts: ports.artifacts.clone(),
-                generation: parts.generation.clone(),
-            },
+        let file_states: Arc<dyn ReadFileStates> = base.read_files.clone();
+        let compactor = assemble::compactor(
+            &ports,
+            (&parts, &tools),
+            (file_states, assembler, &hooks),
             compact,
-        ));
-        late.set(compactor.clone());
-        let generation = parts.generation.clone();
+        );
+        // 第三处晚绑定：主循环与子循环拿到的压缩器句柄。
+        late.bind(compactor.clone());
+        let operations = parts.operations.clone();
         let parts = QueryParts { tools, ..parts };
         let runner = agents.track(Arc::new(QueryLoop::new(parts)));
         let detached = Arc::new(rust_cli_session::DetachedAsks::new(
@@ -481,15 +280,13 @@ impl LocalKernel {
         ));
         Self {
             ports,
-            machine,
-            local,
             defaults,
             runner,
             agents: agents.signals(),
-            cron: if non_interactive {
-                Arc::new(rust_cli_kernel_api::cron::NoCron)
+            cron: if traits.interactive {
+                base.cron.signals()
             } else {
-                cron.signals()
+                Arc::new(rust_cli_kernel_api::cron::NoCron)
             },
             compactor,
             gate,
@@ -498,8 +295,8 @@ impl LocalKernel {
             agent_catalog,
             titles: None,
             usage,
-            inputs,
-            generation,
+            inputs: base.inputs,
+            operations,
             scope,
             sessions,
             closer,
@@ -525,6 +322,11 @@ impl LocalKernel {
 
     pub fn ports(&self) -> &Ports {
         &self.ports
+    }
+
+    /// 会话的主 env（注册表的 `primary_machine()`）：会话、`/cd`、`/diff`、导出、项目清单、`@` 清单都在它上面。
+    fn machine(&self) -> MachineEnv {
+        self.ports.environments.primary_machine()
     }
 }
 

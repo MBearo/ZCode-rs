@@ -8,9 +8,11 @@ use rust_cli_kernel_api::model::{
 };
 use serde_json::json;
 
+use rust_cli_model::RouteOptions;
+
 use super::common::{
     API_KEY, assemble, block_start, block_stop, collect, delta, fast_retry, message_end,
-    message_start, model_at, request, text_response,
+    message_start, model_at, model_with, request, text_response,
 };
 use super::fixture::{Fixture, Reply};
 
@@ -23,9 +25,15 @@ async fn the_wire_request_has_the_first_party_shape() {
     let server = Fixture::start(vec![sse_reply().send(text_response(&["Hi"]))]).await;
     // 基址带路径前缀与结尾的 `/`：与 SDK 一样只去掉一个 `/`。本地端点按 Anthropic 官方方案处理（只给测试用的
     // 声明，model.md §6），这里看的是第一方的线上形状；其他 Anthropic 兼容见 `profiles_tests.rs`。
-    let model = model_at(format!("{}/gateway/", server.url()), fast_retry(0))
-        .await
-        .with_assumed_first_party();
+    let model = model_with(
+        format!("{}/gateway/", server.url()),
+        RouteOptions {
+            retry: fast_retry(0),
+            assume_first_party: true,
+            ..RouteOptions::default()
+        },
+    )
+    .await;
     let mut request = request("hello", QuerySource::MainThread);
     // 官方方案只认官方的模型 ID（`profiles.rs` 的方案表）。
     request.selection.model = models::GLM_5_3.to_owned();
@@ -152,9 +160,15 @@ async fn a_gateway_gets_no_cache_scope() {
 #[tokio::test]
 async fn an_assumed_first_party_endpoint_keeps_the_scope() {
     let server = Fixture::start(vec![sse_reply().send(text_response(&["Hi"]))]).await;
-    let model = model_at(server.url(), fast_retry(0))
-        .await
-        .with_assumed_first_party();
+    let model = model_with(
+        server.url(),
+        RouteOptions {
+            retry: fast_retry(0),
+            assume_first_party: true,
+            ..RouteOptions::default()
+        },
+    )
+    .await;
     // 官方方案只认官方的模型 ID。
     let mut request = scoped_request();
     request.selection.model = models::GLM_5_3.to_owned();

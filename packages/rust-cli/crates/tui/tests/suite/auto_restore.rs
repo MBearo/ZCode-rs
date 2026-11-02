@@ -8,15 +8,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use futures_util::FutureExt;
-use futures_util::future::BoxFuture;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
 use rust_cli_kernel_api::store::Fact;
 use rust_cli_kernel_api::testing::{MemoryStore, text_response};
-use rust_cli_tui::{Clipboard, ImageBytes, Services};
+use rust_cli_tui::Services;
 
+use super::stub_services::FakeClipboard;
 use super::support::{GatedModel, Item, Setup, finish, request_text, send, with_ui};
 
 const MARKER: &str = "[Request interrupted by user]";
@@ -241,24 +240,6 @@ async fn esc_with_a_queued_input_keeps_the_input() {
     );
 }
 
-/// 剪贴板替身：`image` 给出一张 PNG。
-struct FakeClipboard;
-
-impl Clipboard for FakeClipboard {
-    fn image(&self) -> BoxFuture<'static, Result<Option<ImageBytes>, String>> {
-        async move {
-            Ok(Some(ImageBytes {
-                bytes: PNG.to_vec(),
-            }))
-        }
-        .boxed()
-    }
-
-    fn image_file(&self, _path: String) -> BoxFuture<'static, Result<Option<ImageBytes>, String>> {
-        async move { Ok(None) }.boxed()
-    }
-}
-
 /// 带图片的输入：`[Image #1]` 与图片一起回到输入框，再发送时模型照样收到 image 块。
 #[tokio::test(flavor = "multi_thread")]
 async fn esc_puts_an_image_input_back_with_its_image() {
@@ -267,8 +248,11 @@ async fn esc_puts_an_image_input_back_with_its_image() {
     let (first, second) = (senders.next().unwrap(), senders.next().unwrap());
     let setup = Setup {
         services: Services {
-            clipboard: Some(Arc::new(FakeClipboard)),
-            ..Services::default()
+            clipboard: Arc::new(FakeClipboard {
+                image: Some(PNG.to_vec()),
+                ..FakeClipboard::default()
+            }),
+            ..super::stub_services::services()
         },
         ..Setup::default()
     };

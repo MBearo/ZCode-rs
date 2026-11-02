@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 use super::*;
-use crate::env::{CommandEvent, StartCommand};
+use crate::env::{CommandEvent, CommandKind, StartCommand};
 use crate::permission::{PermissionRule, PermissionRules, RuleBehavior, RuleSource, SourcedRule};
 
 fn round_trip<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(value: &T) {
@@ -19,8 +19,8 @@ fn path(value: &str) -> EnvPath {
 }
 
 #[test]
-fn start_command_round_trips_with_every_option() {
-    round_trip(&StartCommand {
+fn start_command_round_trips_with_every_kind() {
+    let start = StartCommand {
         command: "npm test".to_owned(),
         cwd: path("/w"),
         timeout_ms: Some(120_000),
@@ -29,11 +29,6 @@ fn start_command_round_trips_with_every_option() {
         cwd_scope: CwdScope::Session {
             roots: vec![path("/w"), path("/extra")],
         },
-        background: Some(BackgroundCommand {
-            description: "Run tests".to_owned(),
-            tool_use: Some(ToolUseId::new("toolu_1")),
-            kind: Default::default(),
-        }),
         sandbox: Some(SandboxPolicy {
             filesystem: FilesystemPolicy {
                 allow_write: vec![path("/w")],
@@ -46,21 +41,49 @@ fn start_command_round_trips_with_every_option() {
             },
             required: true,
         }),
-        hook: Some(HookIo {
-            stdin: "{\"hook_event_name\":\"PreToolUse\"}\n".to_owned(),
-            env: [("ZCODE_PROJECT_DIR".to_owned(), "/w".to_owned())].into(),
-        }),
-        on_timeout: Some(TimeoutBackground {
-            command: BackgroundCommand {
+        kind: CommandKind::Foreground {
+            on_timeout: Some(TimeoutBackground {
+                command: BackgroundCommand {
+                    description: "Run tests".to_owned(),
+                    tool_use: Some(ToolUseId::new("toolu_1")),
+                    kind: Default::default(),
+                },
+                deadline_ms: Some(600_000),
+            }),
+        },
+    };
+    round_trip(&start);
+    for kind in [
+        CommandKind::Background {
+            background: BackgroundCommand {
                 description: "Run tests".to_owned(),
                 tool_use: Some(ToolUseId::new("toolu_1")),
                 kind: Default::default(),
             },
-            deadline_ms: Some(600_000),
-        }),
-        socket: None,
-        env: Default::default(),
-    });
+        },
+        CommandKind::Hook {
+            hook: HookIo {
+                stdin: "{\"hook_event_name\":\"PreToolUse\"}\n".to_owned(),
+                env: [("ZCODE_PROJECT_DIR".to_owned(), "/w".to_owned())].into(),
+            },
+        },
+        CommandKind::Socket {
+            background: BackgroundCommand {
+                description: "Watch".to_owned(),
+                tool_use: None,
+                kind: BackgroundKind::Monitor,
+            },
+            socket: MonitorSocket {
+                url: "wss://example.com/feed".to_owned(),
+                protocols: vec!["v1".to_owned()],
+            },
+        },
+    ] {
+        round_trip(&StartCommand {
+            kind,
+            ..start.clone()
+        });
+    }
 }
 
 /// 工作线 F69：没有 `on_timeout` 的请求序列化后没有这个键（执行环境按请求的 JSON 认重放，旧请求的指纹不变）；
@@ -71,7 +94,7 @@ fn timeout_backgrounding_is_optional_on_the_wire() {
         "command": "ls", "cwd": "/w", "timeout_ms": 5, "task": "b1"
     }))
     .unwrap();
-    assert!(start.on_timeout.is_none());
+    assert_eq!(start.kind, CommandKind::default());
     let text = serde_json::to_string(&start).unwrap();
     assert!(!text.contains("on_timeout"), "{text}");
     round_trip(&CommandEvent::Backgrounded);
@@ -89,7 +112,8 @@ fn older_start_command_payloads_get_defaults() {
     .unwrap();
     assert_eq!(start.shell, ShellKind::Bash);
     assert_eq!(start.cwd_scope, CwdScope::Pinned);
-    assert!(start.background.is_none() && start.sandbox.is_none() && start.hook.is_none());
+    assert!(start.sandbox.is_none());
+    assert_eq!(start.kind, CommandKind::Foreground { on_timeout: None });
 }
 
 #[test]
@@ -234,6 +258,69 @@ fn ended_status_follows_the_notification_rule() {
     );
 }
 
+/// 通知的状态与“被停掉”（工作线 F131）：超时是带退出码的失败，状态是 failed、说明按被停掉写；等待出错没有退出码，
+/// 说明按失败写。
+#[test]
+fn a_notice_knows_its_status_and_whether_it_was_stopped() {
+    let notice = |outcome, exit_code| ShellNotice {
+        seq: 1,
+        operation: OperationId::new("op"),
+        task: ShellTaskId::new("b1"),
+        tool_use: None,
+        description: String::new(),
+        output: EnvPath::new("/t/b1.output"),
+        outcome,
+        exit_code,
+        kind: BackgroundKind::Bash,
+        output_bytes: 0,
+    };
+    let failed = |code: &str| Outcome::Failed {
+        code: Some(code.to_owned()),
+        message: String::new(),
+    };
+    let cases = [
+        (
+            notice(Outcome::Completed, Some(0)),
+            BackgroundStatus::Completed,
+            false,
+        ),
+        (
+            notice(Outcome::Completed, Some(2)),
+            BackgroundStatus::Failed,
+            false,
+        ),
+        (
+            notice(Outcome::Completed, None),
+            BackgroundStatus::Failed,
+            false,
+        ),
+        (
+            notice(failed("wait"), None),
+            BackgroundStatus::Failed,
+            false,
+        ),
+        (
+            notice(failed("timeout"), Some(143)),
+            BackgroundStatus::Failed,
+            true,
+        ),
+        (
+            notice(Outcome::Cancelled, Some(137)),
+            BackgroundStatus::Killed,
+            true,
+        ),
+        (
+            notice(Outcome::Interrupted, None),
+            BackgroundStatus::Killed,
+            true,
+        ),
+    ];
+    for (notice, status, stopped) in cases {
+        assert_eq!(notice.status(), status, "{notice:?}");
+        assert_eq!(notice.stopped(), stopped, "{notice:?}");
+    }
+}
+
 #[test]
 fn older_finished_payloads_have_no_output_limit() {
     // F11：`output_limit` 是后加的字段，没有它的旧载荷照常解析，也不写出这个键。
@@ -309,7 +396,7 @@ fn monitor_payloads_round_trip_and_older_ones_still_parse() {
         "{text}"
     );
     round_trip(&crate::monitor::MonitorArmed {
-        machine: None,
+        machine: Default::default(),
         operation: crate::ids::OperationId::new("op_1"),
         task: crate::ids::ShellTaskId::new("b1"),
         tool_use: ToolUseId::new("toolu_1"),
@@ -318,23 +405,4 @@ fn monitor_payloads_round_trip_and_older_ones_still_parse() {
         source: crate::monitor::MonitorSource::Socket,
         output: crate::env::EnvPath::new("/t/b1.output"),
     });
-}
-
-#[test]
-fn start_command_overrides_are_not_serialized() {
-    // F96（remote-exec.md §23.5）：环境的覆盖只在执行器里由服务端填，不进序列化（也就不进 env-local 的去重指纹）。
-    let mut start: StartCommand = serde_json::from_value(json!({
-        "command": "true",
-        "cwd": "/w",
-        "timeout_ms": null,
-        "task": "b1",
-    }))
-    .unwrap();
-    assert!(start.env.is_empty());
-    let plain = serde_json::to_string(&start).unwrap();
-    start
-        .env
-        .insert("SSH_AUTH_SOCK".to_owned(), Some("/tmp/a".to_owned()));
-    start.env.insert("DISPLAY".to_owned(), None);
-    assert_eq!(serde_json::to_string(&start).unwrap(), plain);
 }

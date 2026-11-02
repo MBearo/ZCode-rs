@@ -9,6 +9,7 @@ use rust_cli_kernel_api::message::{
     AssistantMessage, ContentBlock, ImageSource, StopReason, ToolResultContent, Usage, UserMessage,
     UserOrigin,
 };
+use rust_cli_kernel_api::tool_names;
 use serde_json::{Map, Value, json};
 
 /// 一个事件的 uuid 与时间（`toISOString`）。
@@ -36,7 +37,11 @@ pub(crate) const LOCAL_COMMANDS: [&str; 3] = ["context", "usage", "rename"];
 
 /// Agent 工具在清单里写成旧名 `Task`。
 fn tool_name(name: &str) -> &str {
-    if name == "Agent" { "Task" } else { name }
+    if name == tool_names::AGENT {
+        "Task"
+    } else {
+        name
+    }
 }
 
 fn mcp_status(state: McpServerState) -> &'static str {
@@ -242,14 +247,35 @@ pub(crate) fn synthetic_assistant(text: &str, session_id: &str, stamp: Stamp) ->
     })
 }
 
+/// 没有出错的回合怎样结束（`terminal_reason`，headless.md §3.6）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Finish {
+    Completed,
+    /// 工具的 hook 要求停止（query.md §3，工作线 F131）。
+    HookStopped,
+    /// Stop hook 阻止继续（query.md §3 的 Stop hooks，工作线 F134）。
+    StopHookPrevented,
+}
+
+impl Finish {
+    fn terminal_reason(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::HookStopped => "hook_stopped",
+            Self::StopHookPrevented => "stop_hook_prevented",
+        }
+    }
+}
+
 /// result 的种类（headless.md §3.6）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ResultKind {
-    /// `success`；回合失败时 `is_error` 为真，`result` 是错误文字。
+    /// `success`；回合失败时 `is_error` 为真，`result` 是错误文字（`terminal_reason` 是 `api_error`，不看 `finish`）。
     Success {
         is_error: bool,
         result: String,
         ttft_ms: Option<u64>,
+        finish: Finish,
     },
     /// 发请求前到了阻塞线（compact.md §2.2）：`success`、`is_error`，`result` 是错误文字，`terminal_reason` 是
     /// `blocking_limit`。
@@ -271,8 +297,10 @@ impl ResultKind {
     fn terminal_reason(&self) -> &'static str {
         match self {
             Self::Success {
-                is_error: false, ..
-            } => "completed",
+                is_error: false,
+                finish,
+                ..
+            } => finish.terminal_reason(),
             Self::Success { is_error: true, .. } => "api_error",
             Self::Blocked { .. } => "blocking_limit",
             Self::MaxTurns { .. } => "max_turns",
@@ -338,6 +366,7 @@ pub(crate) fn turn_result(result: TurnResult<'_>) -> Value {
             is_error,
             result: text,
             ttft_ms,
+            finish: _,
         } => {
             put("subtype", json!("success"));
             put("api_error_status", Value::Null);

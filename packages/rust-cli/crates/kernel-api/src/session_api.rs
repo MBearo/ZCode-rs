@@ -9,18 +9,14 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::env::WorkspaceRef;
-use crate::ids::{
-    AgentId, CommandId, InteractionId, MessageId, SessionId, ShellTaskId, ToolUseId, TurnId,
-};
-use crate::message::{CompactTrigger, Message, Usage};
-use crate::model::{BlockDelta, ModelSelection};
+use crate::ids::{AgentId, CommandId, InteractionId, MessageId, SessionId, ShellTaskId};
+use crate::message::Message;
+use crate::model::ModelSelection;
 use crate::orchestration::InteractionRequest;
 use crate::permission::PermissionMode;
 use crate::store::{ArtifactRef, SessionFilter, SessionMeta, SessionSummary};
-use crate::tool::{ToolOutput, ToolProgress};
 
 /// 运行中提交的输入怎样投递（工具边界吸收排队消息）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,11 +51,11 @@ pub enum Command {
     Shutdown,
     /// esc 撤回刚发的输入（修复线 F38，session-lifecycle.md §5.5）：空闲、队列为空、
     /// 最后一条可选的人类输入之后没有回答时，对话回退到它之前（与 `Rewind{conversation}` 同一个 `session.revert`）。
-    /// `Accepted.result` 是 `{message, removed}`：`message` 是这条输入（[`crate::message::Message`]，前端放回输入框）。条件不满足时 `Rejected`。
+    /// 回执是 [`CommandResult::Restored`]（这条输入，前端放回输入框）。条件不满足时 `Rejected`。
     RestoreCancelled,
     ResolveInteraction {
         interaction: InteractionId,
-        answer: Value,
+        answer: crate::interaction::Answer,
     },
     SetModel {
         selection: ModelSelection,
@@ -80,7 +76,7 @@ pub enum Command {
         target: MessageId,
         scope: RewindScope,
     },
-    /// 从 `at` 处分叉出新会话；Ack 的 `result` 是新会话 ID。
+    /// 从 `at` 处分叉出新会话；回执是 [`CommandResult::Forked`]。
     Fork {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<MessageId>,
@@ -90,7 +86,7 @@ pub enum Command {
         title: String,
     },
     /// 不带参数的 `/rename`（docs/specs/rust-cli/titles.md §8）：会话 actor
-    /// 用模型从对话起名，再按 `Rename` 写入。回执等名字：`Accepted.result` 是 `{name, message}`，
+    /// 用模型从对话起名，再按 `Rename` 写入。回执等名字：[`CommandResult::Renamed`]，
     /// 起不出名字时 `Rejected.reason` 是给用户看的文本。
     GenerateName,
     /// 带内容块的输入（文字加粘贴的图片，docs/specs/rust-cli/tui-input.md §3）：回合与 [`Command::Submit`]
@@ -106,8 +102,8 @@ pub enum Command {
         delivery: Delivery,
     },
     /// `/fork`（docs/specs/rust-cli/session-lifecycle.md §6.5，工作线 F75）：从一条可选的用户输入分出新会话，
-    /// 新会话带到这一轮为止（这一轮最后一条 assistant），文件不动。只在空闲时接受；`Accepted.result` 是
-    /// `{session, response, copied, message}`（`message` 是复制到的那条消息，F78）。`input` 不是可选的输入时 `Rejected`。
+    /// 新会话带到这一轮为止（这一轮最后一条 assistant），文件不动。只在空闲时接受；回执是 [`CommandResult::Forked`]
+    /// （`through` 是复制到的那条消息，F78）。`input` 不是可选的输入时 `Rejected`。
     ForkFromInput {
         input: MessageId,
     },
@@ -118,20 +114,13 @@ pub enum Command {
         approve: bool,
     },
     /// 停止会话里的一个后台任务（`/tasks`，docs/specs/rust-cli/tui-display.md §3.1）：与 TaskStop 工具同一条
-    /// 停止路径。`task` 是 [`crate::manage::BackgroundEntry::id`]；回执 `Accepted.result` 是 `{message}`，
+    /// 停止路径。`task` 是 [`crate::manage::BackgroundEntry::id`]；回执是 [`CommandResult::Stopped`]，
     /// 找不到或不在跑时 `Rejected.reason` 是给用户看的文本。
     StopTask {
         task: String,
     },
-    /// `/cd`（docs/specs/rust-cli/tui-manage.md §7）：把会话的工作目录换成 `root`（会话 actor 先设执行环境的
-    /// shell cwd），`note` 是给模型的说明，作为 meta 用户消息一起提交。运行中时 `Rejected`。
-    SetWorkspace {
-        root: crate::env::EnvPath,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        note: Option<String>,
-    },
     /// `/cd` 由会话 actor 判定（docs/specs/rust-cli/tui-manage.md §7.1，F1）：运行中 `Rejected`（固定的文字）；
-    /// 否则 `Accepted.result` 是 [`crate::manage::DirectoryOutcome`]。移动时 actor 设 shell cwd、改工作区、
+    /// 否则回执是 [`CommandResult::Directory`]。移动时 actor 设 shell cwd、改工作区、
     /// 发 [`KernelEvent::WorkspaceChanged`]，给模型的说明（固定的说明文字加新目录的规则文件）由 actor 组成并提交。
     ChangeDirectory {
         root: crate::env::EnvPath,
@@ -148,8 +137,8 @@ pub enum Command {
         record: crate::user_command::LocalCommandRecord,
     },
     /// 把这个会话在跑的前台 Bash 转到后台（修复线 L-A，docs/specs/rust-cli/tui-input.md §11）：用户的转后台键
-    /// （`User`），或低延迟投递的输入（`DeliverMessage`）。会话 actor 交给本机的执行环境；总是 `Accepted`，`result`
-    /// 是转了的个数。
+    /// （`User`），或低延迟投递的输入（`DeliverMessage`）。会话 actor 交给本机的执行环境；总是 `Accepted`：没有回合在跑
+    /// 时是 [`CommandResult::Done`]，否则是 [`CommandResult::Backgrounded`]（转了的个数）。
     BackgroundForeground {
         reason: crate::env_command::BackgroundReason,
     },
@@ -171,205 +160,13 @@ pub struct CommandEnvelope {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Ack {
     Accepted {
-        #[serde(default, skip_serializing_if = "Value::is_null")]
-        result: Value,
+        #[serde(default, skip_serializing_if = "CommandResult::is_done")]
+        result: CommandResult,
     },
     Duplicate,
     Rejected {
         reason: String,
     },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "outcome", rename_all = "snake_case")]
-pub enum TurnOutcome {
-    Success,
-    Interrupted,
-    Failed { message: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FileChange {
-    pub path: String,
-    pub additions: u64,
-    pub deletions: u64,
-    /// 文件所在的远端机器（远端执行 F98，docs/specs/rust-cli/remote-exec.md §25.4.5：`/rewind` 写成 `dev-a:README.md`）；
-    /// 本机为 None，不写出。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub machine: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QueuedInput {
-    pub command: CommandId,
-    pub text: String,
-    pub delivery: Delivery,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SubagentPhase {
-    Spawned,
-    Done,
-}
-
-/// 只供显示的系统提示的级别（informational system 消息的 `level`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NoticeLevel {
-    Info,
-    Warning,
-}
-
-/// 内核事件。新增变体时同步更新前端与 spec §7。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum KernelEvent {
-    SessionCreated {
-        meta: SessionMeta,
-    },
-    TitleChanged {
-        title: String,
-    },
-    ModelChanged {
-        selection: ModelSelection,
-    },
-    /// 权限模式变了（修复线 F20 起只带权限模式，不会是 `Plan`；plan 开关见 [`KernelEvent::PlanChanged`]）。
-    ModeChanged {
-        mode: PermissionMode,
-    },
-    /// plan 开关变了（修复线 F20）。
-    PlanChanged {
-        enabled: bool,
-    },
-    TurnStarted {
-        turn: TurnId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        command: Option<CommandId>,
-    },
-    TurnFinished {
-        turn: TurnId,
-        outcome: TurnOutcome,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<Usage>,
-    },
-    /// 正文、thinking、工具输入的流式增量；`response` 是本回合内第几次模型响应。
-    StreamDelta {
-        turn: TurnId,
-        response: u32,
-        index: usize,
-        delta: BlockDelta,
-    },
-    /// 一条消息已完整并已落库。
-    MessageDone {
-        message: Message,
-    },
-    ToolStarted {
-        tool_use: ToolUseId,
-        name: String,
-        input: Value,
-    },
-    ToolProgress {
-        tool_use: ToolUseId,
-        progress: ToolProgress,
-    },
-    ToolDone {
-        tool_use: ToolUseId,
-        output: ToolOutput,
-    },
-    FileChanges {
-        turn: TurnId,
-        files: Vec<FileChange>,
-        rewindable: bool,
-    },
-    InteractionAsked {
-        interaction: InteractionId,
-        request: InteractionRequest,
-    },
-    InteractionResolved {
-        interaction: InteractionId,
-    },
-    ContextUsage {
-        used_tokens: u64,
-        max_tokens: u64,
-    },
-    /// 上下文快满的提示（docs/specs/rust-cli/compact.md §2.1）：提交带用量的 assistant 与压缩结果之后重算。
-    ContextNotice {
-        notice: crate::compaction::ContextNotice,
-    },
-    /// 完成的主回合请求的输出速度（footer 的 TPS，tui-display.md §2.6，F105）：计量提交之后发，不落库。
-    OutputSpeed {
-        speed: crate::metering::OutputSpeed,
-    },
-    TasksChanged {
-        tasks: Value,
-    },
-    QueueChanged {
-        items: Vec<QueuedInput>,
-    },
-    BackgroundWork {
-        work: String,
-        status: String,
-    },
-    Subagent {
-        agent: AgentId,
-        phase: SubagentPhase,
-        child: SessionId,
-        parent_tool_use: ToolUseId,
-    },
-    CompactStarted {
-        trigger: CompactTrigger,
-    },
-    CompactDone {
-        boundary: MessageId,
-    },
-    /// 历史被改写（rewind、编辑重发）；前端丢弃旧视图后重新取快照。
-    HistoryRewritten {
-        generation: u64,
-    },
-    /// 定时任务触发的界面行（tools-more.md §18.3，L22）：不进模型上下文、不落库，
-    /// 紧接着是这次触发开的回合。`at` 是本地时间（`Oct 18 3:04pm`）；`fold` 有值时前端收起上一个 loop tick。
-    ScheduledFire {
-        at: String,
-        kind: crate::cron::CronFireKind,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        fold: Option<crate::cron::LoopFold>,
-    },
-    /// 只供显示的系统提示，不发给模型、不落库（L18：插话被 UserPromptSubmit 阻塞，
-    /// docs/specs/rust-cli/query.md §4.2）。
-    SystemNotice {
-        level: NoticeLevel,
-        text: String,
-    },
-    /// 会话的工作目录换了（EnterWorktree / ExitWorktree / `/cd`，F1）：前端的工作区只从这里与快照的
-    /// `meta.workspace` 取（tools-more.md §11.4、tui-manage.md §7.1）。
-    WorkspaceChanged {
-        workspace: WorkspaceRef,
-    },
-    /// 扣住的同伴消息变了（cross-session.md §2.4，F28）：整份快照，界面的批准框只从它与
-    /// [`SessionView::peer_held`] 取。
-    PeerHeldChanged {
-        held: Vec<crate::peers::HeldPeerMessage>,
-    },
-    /// 回合结束那一行的数据（tui-display.md §2.7，F118）：`TurnFinished` 之后、下一个回合之前发；只供显示，不落库。
-    TurnDuration(crate::turn_duration::TurnDuration),
-    /// 主线程模型请求的通知（重试、停顿、恢复）：不落库，前端用它显示重试与停顿
-    /// （docs/specs/rust-cli/stall-visibility.md §3）。
-    ModelNotice {
-        notice: crate::model::ModelNotice,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SequencedEvent {
-    pub seq: u64,
-    pub event: KernelEvent,
-    /// 会话的状态 revision（缺口 G1，docs/specs/rust-cli/app-protocol.md §6.4）：会话 actor 在可见状态变化时加一
-    /// （回合开始与结束、消息落定、工具开始与结束、询问、队列、模式、模型、plan、标题、历史改写、压缩、工作区、子代理与
-    /// 后台任务）；流式增量、进度、用量与只供显示的提示不加。新会话从 0 开始，只在 actor 的寿命内单调（进程重启后从 0
-    /// 重来）。这条事件之后的值；serde 缺省 0。
-    #[serde(default)]
-    pub revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -426,6 +223,16 @@ pub struct SessionView {
     pub output_speed: Option<crate::metering::OutputSpeed>,
 }
 
+// 内核事件与回合结局放在分出的文件里（800 行上限，工作线 F131；路径与名字不变）。
+#[path = "session_api_events.rs"]
+mod events;
+pub use events::{FileChange, KernelEvent, NoticeLevel, QueuedInput, SequencedEvent, TurnOutcome};
+
+// 命令的结果放在分出的文件里（800 行上限，工作线 F134）。
+#[path = "session_api_results.rs"]
+mod results;
+pub use results::{CommandResult, Forked, RewoundFile};
+
 // 会话生命周期的类型（SessionStart / SessionEnd 的来源、rewind 选择器的条目）放在分出的文件里（400 行上限，
 // L24 合并后拆出；路径与名字不变）。
 #[path = "session_api_lifecycle.rs"]
@@ -443,6 +250,10 @@ pub enum KernelError {
     Unsupported { what: String },
 }
 
+/// 一个打开着的会话（前端经它发命令、订阅事件、取快照）。
+///
+/// 方法都没有缺省体（工作线 F134，审查 K6）：以前 9 个缺省 `Unsupported` 或空实现只服务测试替身。测试替身用
+/// `testing::HandleOverride`（只写 ID、命令、订阅与视图，其余是中性的缺省）。
 #[async_trait]
 pub trait SessionHandle: Send + Sync {
     fn id(&self) -> &SessionId;
@@ -455,71 +266,37 @@ pub trait SessionHandle: Send + Sync {
     async fn view(&self) -> Result<SessionView, KernelError>;
 
     /// 前端离开会话时调用：运行 SessionEnd hook，返回只给用户看的提示（失败的 hook）。
-    async fn close(&self, _reason: EndReason) -> Vec<String> {
-        Vec::new()
-    }
+    async fn close(&self, reason: EndReason) -> Vec<String>;
 
     /// rewind 选择器的条目（活动历史里可选的 user 消息，按顺序）。
-    async fn rewind_options(&self) -> Result<Vec<RewindOption>, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "rewind options".to_owned(),
-        })
-    }
+    async fn rewind_options(&self) -> Result<Vec<RewindOption>, KernelError>;
 
     /// `/goal` 面板的数据：会话 actor 的当前目标与最近一次达成的结果（docs/specs/rust-cli/goal.md §6.2）。
-    async fn goal(&self) -> Result<crate::goal::GoalView, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "goal".to_owned(),
-        })
-    }
+    async fn goal(&self) -> Result<crate::goal::GoalView, KernelError>;
 
     /// 会话里还在跑的后台命令与后台子代理（`/tasks` 与 footer 的计数，tui-display.md §2.3、§3.1）。
-    async fn background_tasks(&self) -> Result<Vec<crate::manage::BackgroundEntry>, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "background tasks".to_owned(),
-        })
-    }
+    async fn background_tasks(&self) -> Result<Vec<crate::manage::BackgroundEntry>, KernelError>;
 
     /// 这个顶层会话里本进程启动过的子代理（含嵌套的），按启动顺序（tui-panels.md §1.1，L30）。
-    async fn subagents(&self) -> Result<Vec<crate::panels::SubagentEntry>, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "subagents".to_owned(),
-        })
-    }
+    async fn subagents(&self) -> Result<Vec<crate::panels::SubagentEntry>, KernelError>;
 
-    /// 子代理的状态有变化时产生一项（多次变化可能合并成一项）；收到后重取 [`SessionHandle::subagents`]
-    /// （修复线 F34 起前端重取 [`SessionHandle::tasks_snapshot`]）。
-    fn subagent_changes(&self) -> BoxStream<'static, ()> {
-        futures_util::stream::pending().boxed()
-    }
+    /// 子代理的状态有变化时产生一项（多次变化可能合并成一项）；收到后重取 [`SessionHandle::tasks_snapshot`]
+    /// （修复线 F34）。
+    fn subagent_changes(&self) -> BoxStream<'static, ()>;
 
     /// 子代理列表与后台任务的同一份快照（修复线 F34，tui-panels.md §0、§3.1）：一次查询、一次回执。前端在子代理的变化
     /// 通知与后台任务相关的事件之后都重取它，不再分别取 [`SessionHandle::subagents`] 与
-    /// [`SessionHandle::background_tasks`]（两者保留，只加不改）。缺省实现依次取那两个方法（不是同一次读取，只为别的
-    /// 实现照常可用）。
-    async fn tasks_snapshot(&self) -> Result<crate::panels::TasksSnapshot, KernelError> {
-        Ok(crate::panels::TasksSnapshot {
-            subagents: self.subagents().await?,
-            background: self.background_tasks().await?,
-        })
-    }
+    /// [`SessionHandle::background_tasks`]。
+    async fn tasks_snapshot(&self) -> Result<crate::panels::TasksSnapshot, KernelError>;
 
     /// 子代理的只读快照：子会话里已提交的消息；`running` 是它是否在跑（tui-panels.md §1.4）。
-    async fn subagent_view(&self, _agent: &AgentId) -> Result<SessionView, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "subagent view".to_owned(),
-        })
-    }
+    async fn subagent_view(&self, agent: &AgentId) -> Result<SessionView, KernelError>;
 
     /// 一个后台命令的详情（Shell 详情，tui-panels.md §3.3）；不认识时为 None。
     async fn shell_detail(
         &self,
-        _task: &str,
-    ) -> Result<Option<crate::panels::ShellDetail>, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "shell detail".to_owned(),
-        })
-    }
+        task: &str,
+    ) -> Result<Option<crate::panels::ShellDetail>, KernelError>;
 }
 
 #[async_trait]
@@ -662,26 +439,10 @@ pub trait Kernel: Send + Sync {
         })
     }
 
-    /// `/usage` 的 API 时长（docs/specs/rust-cli/usage.md §4）：从存储的用量表查。默认 `Unsupported`。
-    async fn session_metering(
-        &self,
-        _session: &SessionId,
-    ) -> Result<crate::metering::SessionMetering, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "session metering".to_owned(),
-        })
-    }
-
-    /// footer 的请求统计（TPS 与缓存命中率，docs/specs/rust-cli/tui-display.md §2.6，修复线 F27）：从存储的用量表查。
-    /// 默认 `Unsupported`。
-    async fn request_stats(
-        &self,
-        _session: &SessionId,
-    ) -> Result<crate::metering::RequestStats, KernelError> {
-        Err(KernelError::Unsupported {
-            what: "request stats".to_owned(),
-        })
-    }
+    /// 存储的只读查询与前端记录（审查 K7：`/usage` 的 API 时长、footer 的请求统计、App 的命令事实）：前端直接问存储，
+    /// 不经会话 actor。以前是 4 个透传的方法（`session_metering`、`request_stats`、`put_session_record`、
+    /// `session_records`）。
+    fn queries(&self) -> Arc<dyn crate::store::StoreQueries>;
 
     /// 活动统计（`/stats`，usage.md §5）：今天与时区偏移取自内核的时钟，聚合在存储。默认 `Unsupported`。
     async fn activity(
@@ -747,36 +508,15 @@ pub trait Kernel: Send + Sync {
         futures_util::stream::pending().boxed()
     }
 
-    /// 回答旧会话的询问（回答的形状同 [`Command::ResolveInteraction`]）。缺省 `Unsupported`。
+    /// 回答旧会话的询问（回答同 [`Command::ResolveInteraction`]）。缺省 `Unsupported`。
     async fn resolve_detached(
         &self,
         _interaction: &InteractionId,
-        _answer: Value,
+        _answer: crate::interaction::Answer,
     ) -> Result<(), KernelError> {
         Err(KernelError::Unsupported {
             what: "answering questions of closed sessions".to_owned(),
         })
-    }
-
-    /// 写一条前端记录（缺口 G2，docs/specs/rust-cli/app-protocol.md §5.2）：内核不解释它，经存储端口原样落库（同 key
-    /// 覆盖）；会话不存在时 `NotFound`。缺省 `Unsupported`。
-    async fn put_session_record(
-        &self,
-        _session: &SessionId,
-        _record: crate::store::FrontendRecord,
-    ) -> Result<(), KernelError> {
-        Err(KernelError::Unsupported {
-            what: "frontend records".to_owned(),
-        })
-    }
-
-    /// 这个会话里某一种前端记录，按写入顺序（缺口 G2）。缺省没有。
-    async fn session_records(
-        &self,
-        _session: &SessionId,
-        _kind: &str,
-    ) -> Result<Vec<crate::store::FrontendRecord>, KernelError> {
-        Ok(Vec::new())
     }
 
     /// 工作区的会话（与 [`Kernel::list_sessions`] 同一个来源），合并本进程里打开着的会话的实时状态
@@ -797,3 +537,6 @@ pub trait Kernel: Send + Sync {
             .collect())
     }
 }
+
+#[path = "session_view.rs"]
+mod view;

@@ -10,6 +10,7 @@ use bytes::Bytes;
 use rust_cli_exec_wire::envelope::{Ack, Beat, ReplyResult, WireError};
 use rust_cli_exec_wire::frame::Kind;
 use rust_cli_exec_wire::handshake::{Capabilities, Capability, Hello, Refuse, RefuseCode, Welcome};
+use rust_cli_exec_wire::op::OpKind;
 use rust_cli_exec_wire::reply::Reply;
 use rust_cli_exec_wire::request::Request;
 use rust_cli_exec_wire::{Body, BodyBuilder};
@@ -19,8 +20,8 @@ use crate::test_support::{
     TestMachine, config, connect, hello, server, server_with, workspace, write,
 };
 use crate::{
-    Authenticator, Begun, CallKey, CallKind, ExecLedger, ExecServer, Fence, LedgerError,
-    MemoryLedger, Principal,
+    Authenticator, Begun, CallKey, ExecLedger, ExecServer, Fence, LedgerError, MemoryLedger,
+    Principal,
 };
 
 fn read(path: &str) -> Request {
@@ -67,12 +68,11 @@ impl Authenticator for Deny {
 
 #[tokio::test]
 async fn an_authenticator_can_refuse_and_an_older_epoch_is_stale() {
-    let machine = rust_cli_kernel_api::machine::MachineEnv::new(
-        Arc::new(TestMachine::default()),
-        Arc::new(rust_cli_kernel_api::mcp::NoMcpTransport),
-    );
+    let machine = Arc::new(TestMachine::default())
+        .machine(Arc::new(rust_cli_kernel_api::mcp::NoMcpTransport));
+    let launcher = Arc::new(crate::PortLauncher(machine.clone()));
     let denied = ExecServer::start(
-        machine,
+        (machine, launcher),
         Arc::new(MemoryLedger::default()),
         Arc::new(Deny),
         config(),
@@ -246,7 +246,7 @@ struct Restarted;
 
 #[async_trait]
 impl ExecLedger for Restarted {
-    async fn begin(&self, _: &CallKey, _: &str, _: CallKind) -> Result<Begun, LedgerError> {
+    async fn begin(&self, _: &CallKey, _: &str, _: OpKind) -> Result<Begun, LedgerError> {
         Ok(Begun::Interrupted)
     }
     async fn finish(&self, _: &CallKey, _: Bytes) -> Result<(), LedgerError> {

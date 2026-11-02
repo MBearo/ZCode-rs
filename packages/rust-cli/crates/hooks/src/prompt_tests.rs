@@ -1,7 +1,9 @@
 //! prompt hook（spec §5.3）与 `/goal` 的停止条件（goal.md §5）。
 
+use rust_cli_kernel_api::ids::{AgentId, RunId, SessionId};
 use rust_cli_kernel_api::message::{Message, UserOrigin};
-use rust_cli_kernel_api::model::OutputFormat;
+use rust_cli_kernel_api::model::{OutputFormat, QuerySource};
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::testing::{ScriptedModel, SequentialIds, selection, text_response};
 use serde_json::json;
 
@@ -23,9 +25,9 @@ async fn evaluate_hook(model: &ScriptedModel, hook: &PromptHook, stop_event: boo
     run(
         PromptRun {
             requester: Requester {
-                session: &SessionId::new("sess_hook"),
-                run: Some(&turn),
-                agent: Some(&agent),
+                session: SessionId::new("sess_hook"),
+                run: Some(turn),
+                agent: Some(agent),
             },
             model: Some(model),
             default_model: Some(&default),
@@ -91,7 +93,7 @@ async fn sends_the_evaluation_request() {
             .all(|block| block.cache_control.is_some())
     );
     assert_eq!(request.thinking, None);
-    assert_eq!(request.source, QuerySource::Side("hook_prompt".to_owned()));
+    assert_eq!(request.source, QuerySource::Side(SideSource::HookPrompt));
     assert!(request.tools.is_empty());
     assert!(matches!(
         request.options.output_format,
@@ -145,7 +147,7 @@ async fn bad_responses_and_unsupported_cases() {
     let missing = run(
         PromptRun {
             requester: Requester {
-                session: &SessionId::new("sess_hook"),
+                session: SessionId::new("sess_hook"),
                 run: None,
                 agent: None,
             },
@@ -192,7 +194,7 @@ async fn stop(model: &ScriptedModel, transcript: Vec<ApiMessage>) -> StopVerdict
     evaluate(
         StopRun {
             requester: Requester {
-                session: &SessionId::new("sess_hook"),
+                session: SessionId::new("sess_hook"),
                 run: None,
                 agent: None,
             },
@@ -312,7 +314,7 @@ async fn a_repeated_condition_is_truncated_in_the_feedback() {
     let verdict = evaluate(
         StopRun {
             requester: Requester {
-                session: &SessionId::new("sess_hook"),
+                session: SessionId::new("sess_hook"),
                 run: None,
                 agent: None,
             },

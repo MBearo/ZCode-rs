@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
+use super::render::Cell;
 use super::shape::{FIELD, sample};
 use super::*;
 use crate::ui::palette::{ColorLevel, Palette};

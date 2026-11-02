@@ -47,14 +47,16 @@ pub(crate) async fn pre_compact(
     cancel: &CancellationToken,
 ) -> Result<Option<String>, Failure> {
     let event = HookEvent {
-        name: HookEventName::PreCompact,
-        session: request.session.clone(),
-        workspace: request.workspace.clone(),
-        payload: json!({
-            "trigger": trigger_name(request.trigger),
-            "custom_instructions": request.instructions,
-        }),
         context: hook_context(request),
+        ..HookEvent::new(
+            HookEventName::PreCompact,
+            request.session.clone(),
+            request.workspace.clone(),
+            json!({
+                "trigger": trigger_name(request.trigger),
+                "custom_instructions": request.instructions,
+            }),
+        )
     };
     let outcome = hooks.run(event, cancel.clone()).await;
     if let Some(reason) = outcome.blocking_error {
@@ -75,14 +77,16 @@ pub(crate) async fn session_start(
     cancel: &CancellationToken,
 ) -> Vec<Message> {
     let event = HookEvent {
-        name: HookEventName::SessionStart,
-        session: request.session.clone(),
-        workspace: request.workspace.clone(),
-        payload: json!({"source": "compact", "model": request.selection.model}),
         context: HookContext {
             agent: request.agent.clone(),
             ..HookContext::default()
         },
+        ..HookEvent::new(
+            HookEventName::SessionStart,
+            request.session.clone(),
+            request.workspace.clone(),
+            json!({"source": "compact", "model": request.selection.model}),
+        )
     };
     hooks.run(event, cancel.clone()).await.messages
 }
@@ -95,14 +99,16 @@ pub(crate) async fn post_compact(
     cancel: &CancellationToken,
 ) {
     let event = HookEvent {
-        name: HookEventName::PostCompact,
-        session: request.session.clone(),
-        workspace: request.workspace.clone(),
-        payload: json!({
-            "trigger": trigger_name(request.trigger),
-            "compact_summary": summary,
-        }),
         context: hook_context(request),
+        ..HookEvent::new(
+            HookEventName::PostCompact,
+            request.session.clone(),
+            request.workspace.clone(),
+            json!({
+                "trigger": trigger_name(request.trigger),
+                "compact_summary": summary,
+            }),
+        )
     };
     let _ = hooks.run(event, cancel.clone()).await;
 }

@@ -5,15 +5,7 @@ use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind, McpServerInfo
 use super::*;
 
 fn entry(id: &str, kind: BackgroundKind, status: BackgroundStatus) -> BackgroundEntry {
-    BackgroundEntry {
-        id: id.into(),
-        kind,
-        description: id.into(),
-        status,
-        output: None,
-        machine: None,
-        reconnecting: false,
-    }
+    BackgroundEntry::new(id, kind, id, status)
 }
 
 #[test]
@@ -28,11 +20,10 @@ fn the_pill_counts_only_the_running_shells() {
     );
     let shells = [entry("b1", Shell, Running), entry("b2", Shell, Running)];
     assert_eq!(pill(&shells, Lang::En).as_deref(), Some("2 shells"));
-    // 混合时只数命令（用户决定 2026-10-27）；`running` 仍数全部在跑的条目。
+    // 混合时只数命令（用户决定 2026-10-27）。
     let mixed = [entry("b1", Shell, Running), entry("a1", Agent, Running)];
     assert_eq!(pill(&mixed, Lang::En).as_deref(), Some("1 shell"));
     assert_eq!(pill(&mixed, Lang::Zh).as_deref(), Some("1 shell"));
-    assert_eq!(running(&mixed), 2);
 }
 
 /// 修复线 F117（tui-display.md §2.3）：Monitor 起的后台命令单独数，`N monitor(s)`；与 shell 都有时 shell 在前、用 `, `
@@ -82,7 +73,7 @@ fn the_status_line_sums_up_mcp_servers() {
         state,
         reason: None,
         tools: 0,
-        machine: None,
+        machine: Default::default(),
     };
     assert_eq!(mcp_summary(&[], Lang::En), "none");
     let servers = [
@@ -124,7 +115,7 @@ fn the_mcp_list_names_the_machine_of_a_remote_server() {
         state: McpServerState::Connected,
         reason: None,
         tools: 1,
-        machine: machine.map(str::to_owned),
+        machine: rust_cli_kernel_api::ids::MachineName::new(machine.unwrap_or_default()),
     };
     app.open_mcp(&[server("browser-a", Some("dev-a")), server("docs", None)]);
     let Some(Overlay::Page {
@@ -146,7 +137,7 @@ fn there_is_no_pill_when_only_subagents_run() {
     use BackgroundStatus::{Completed, Running};
     let local = [entry("a1", Agent, Running), entry("a2", Agent, Running)];
     let remote = BackgroundEntry {
-        machine: Some("dev-a".into()),
+        machine: rust_cli_kernel_api::ids::MachineName::new("dev-a"),
         ..entry("a3", Agent, Running)
     };
     for lang in [Lang::En, Lang::Zh] {
@@ -198,14 +189,14 @@ fn the_mcp_list_speaks_the_interface_language() {
             state: McpServerState::Failed,
             reason: Some("Machine \"dev-a\" is not connected.".into()),
             tools: 0,
-            machine: Some("dev-a".into()),
+            machine: rust_cli_kernel_api::ids::MachineName::new("dev-a"),
         },
         McpServerInfo {
             name: "docs".into(),
             state: McpServerState::Connected,
             reason: None,
             tools: 2,
-            machine: None,
+            machine: Default::default(),
         },
     ];
     let rows = |lang| {

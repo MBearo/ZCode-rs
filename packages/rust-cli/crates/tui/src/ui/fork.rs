@@ -2,11 +2,11 @@
 //! （与 `/rewind` 同一份，内核给出），每条一行、带序号，旧的在上、焦点在最新的一条；选中即分叉，没有第二步。
 //! 选择器与分叉后的提示都随界面语言（工作线 F78）。
 use rust_cli_kernel_api::ids::MessageId;
-use serde_json::Value;
+use rust_cli_kernel_api::session_api::Forked;
 
-use super::app::{Action, App, Overlay};
+use super::app::{App, Overlay};
 use super::i18n::Lang;
-use super::list::{Item, ListView, Purpose};
+use super::list::{Choice, Item, ListView, Shape};
 
 /// 一条可选的输入：消息 ID 与它的文字。
 #[derive(Debug, Clone, PartialEq)]
@@ -16,17 +16,22 @@ pub struct Entry {
 }
 
 /// 分叉完成后的提示（§6.5.3）：英文是内核的回执（Node 原文）加 Node 的 `Switched to forked session <ID>.`；
-/// Node 只有英文，中文另配（工作线 F78），消息 ID 与条数取回执的 `message`、`copied`。
-pub fn forked_notice(lang: Lang, session: &str, result: &Value) -> String {
+/// Node 只有英文，中文另配（工作线 F78），消息 ID 与条数取回执的 `through`、`copied`。
+pub fn forked_notice(lang: Lang, forked: &Forked) -> String {
+    let session = &forked.session;
+    let through = forked
+        .through
+        .as_ref()
+        .map(MessageId::as_str)
+        .unwrap_or_default();
     match lang {
         Lang::En => format!(
             "{}\nSwitched to forked session {session}.",
-            result["response"].as_str().unwrap_or_default()
+            forked.response().unwrap_or_default()
         ),
         Lang::Zh => format!(
-            "已从消息 {} 分出会话 {session}：复制了 {} 条消息。\n已切换到分出的会话 {session}。",
-            result["message"].as_str().unwrap_or_default(),
-            result["copied"].as_u64().unwrap_or_default()
+            "已从消息 {through} 分出会话 {session}：复制了 {} 条消息。\n已切换到分出的会话 {session}。",
+            forked.copied
         ),
     }
 }
@@ -38,7 +43,7 @@ impl App {
             .into_iter()
             .map(|entry| Item {
                 label: entry.text.split_whitespace().collect::<Vec<_>>().join(" "),
-                value: entry.message.as_str().to_owned(),
+                value: Choice::Fork(entry.message),
                 ..Item::default()
             })
             .collect();
@@ -54,18 +59,11 @@ impl App {
                 "还没有可以分叉的输入。",
             ),
         };
-        let mut list = ListView::new(Purpose::Fork, title.to_owned(), items, empty.to_owned())
+        let mut list = ListView::new(Shape::OneLine, title.to_owned(), items, empty.to_owned())
             .with_subtitle(subtitle.to_owned());
         // 焦点在最新的一条（最后一项）。
         list.selected = list.items.len().saturating_sub(1);
         self.overlay = Some(Overlay::List(list));
-    }
-
-    /// 选中一条输入：分叉到这一轮为止。
-    pub(super) fn fork_chosen(&mut self, value: &str) -> Option<Action> {
-        (!value.is_empty()).then(|| Action::Fork {
-            input: MessageId::new(value),
-        })
     }
 }
 

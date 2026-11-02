@@ -5,7 +5,7 @@ use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
 use rust_cli_kernel_api::testing::{text_response, tool_use_response};
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 use serde_json::{Value, json};
 
 use super::support::{GatedModel, Setup, Ui, request_text, with_ui};

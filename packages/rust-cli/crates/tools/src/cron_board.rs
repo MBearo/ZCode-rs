@@ -7,8 +7,9 @@
 //! 三类任务：会话任务（内存，按顶层会话分组，含 ScheduleWakeup 的 loop 唤醒）；持久任务（文件是事实源，
 //! 这里是投影，[`crate::cron_durable`]）；loop 的链与 keepalive（[`crate::cron_loop`]）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::cron::{CronFire, CronFireKind, CronSignals};
@@ -101,7 +102,7 @@ impl CronBoard {
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, State> {
-        self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.state.lock_unpoisoned()
     }
 
     pub(crate) fn store(&self) -> Option<Arc<dyn CronStore>> {

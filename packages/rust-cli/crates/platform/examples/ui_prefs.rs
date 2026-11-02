@@ -13,13 +13,14 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::ui_prefs::UiTheme;
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_net::{Egress, NetworkPolicy};
 use rust_cli_paths::{StoragePaths, StorageSettings};
+use rust_cli_platform::local::{read_cli_config, write_mcp_enabled, write_ui_theme};
 use rust_cli_platform::{
-    AccountOrigins, AccountServices, CredentialSecret, Platform, UiTheme, read_cli_config,
-    save_default_model, write_mcp_enabled, write_ui_theme,
+    AccountOrigins, AccountServices, CredentialSecret, Platform, save_default_model,
 };
 use serde_json::{Value, json};
 
@@ -59,10 +60,8 @@ async fn main() -> Result<()> {
         }
         ["model-write", home, provider, model, rest @ ..] => {
             let selection = ModelSelection {
-                provider: (*provider).to_owned(),
-                model: (*model).to_owned(),
                 reasoning: rest.first().map(|level| (*level).to_owned()),
-                connection: None,
+                ..ModelSelection::new((*provider).to_owned(), (*model).to_owned())
             };
             let path = save_default_model(&paths(home), &selection)
                 .await

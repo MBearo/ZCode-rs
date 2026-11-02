@@ -8,12 +8,10 @@ mod denied_tools {
     use std::time::Duration;
 
     use futures_util::StreamExt;
-    use futures_util::stream::BoxStream;
     use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
     use rust_cli_kernel_api::ids::{CommandId, EnvironmentId};
-    use rust_cli_kernel_api::model::{
-        ModelError, ModelEvent, ModelPort, ModelRequest, QuerySource,
-    };
+    use rust_cli_kernel_api::model::{ModelRequest, QuerySource};
+    use rust_cli_kernel_api::permission::syntax::parse_rule;
     use rust_cli_kernel_api::permission::{
         PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
     };
@@ -24,29 +22,8 @@ mod denied_tools {
         FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
         selection, text_response, tool_use_response,
     };
-    use rust_cli_policy::rules::parse_rule;
     use rust_cli_runtime::{Defaults, LocalKernel, Ports};
     use serde_json::json;
-    use tokio_util::sync::CancellationToken;
-
-    /// 主线程的请求按剧本，子代理的请求交给另一份剧本。
-    struct Routed {
-        main: ScriptedModel,
-        subagent: ScriptedModel,
-    }
-
-    impl ModelPort for Routed {
-        fn stream(
-            &self,
-            request: ModelRequest,
-            cancel: CancellationToken,
-        ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-            match &request.source {
-                QuerySource::Subagent(_) => self.subagent.stream(request, cancel),
-                _ => self.main.stream(request, cancel),
-            }
-        }
-    }
 
     fn denied(texts: &[&str]) -> PermissionRules {
         PermissionRules {
@@ -70,17 +47,24 @@ mod denied_tools {
     /// 的工具表从主线程的清单过滤，同样没有它们。
     #[tokio::test]
     async fn denied_tools_leave_the_main_and_subagent_tool_lists() {
-        let model = Arc::new(Routed {
-            main: ScriptedModel::new(vec![
+        // 主线程的请求按剧本，子代理的请求交给另一份剧本。
+        let subagent = Arc::new(ScriptedModel::new(vec![text_response(&[
+            "Hello from the subagent.",
+        ])]));
+        let model = Arc::new(
+            ScriptedModel::new(vec![
                 tool_use_response(
                     "toolu_1",
                     "Agent",
                     &json!({"description": "Say hello", "prompt": "Say hello.", "subagent_type": "general-purpose"}),
                 ),
                 text_response(&["Agent checks done."]),
-            ]),
-            subagent: ScriptedModel::new(vec![text_response(&["Hello from the subagent."])]),
-        });
+            ])
+            .by_source(
+                |source| matches!(source, QuerySource::Subagent(_)),
+                subagent.clone(),
+            ),
+        );
         let store = Arc::new(MemoryStore::default());
         let kernel = LocalKernel::new(
             Ports {
@@ -136,8 +120,8 @@ mod denied_tools {
                 break;
             }
         }
-        let main = names(&model.main.requests()[0]);
-        let child = names(&model.subagent.requests()[0]);
+        let main = names(&model.requests()[0]);
+        let child = names(&subagent.requests()[0]);
         for tools in [&main, &child] {
             for gone in ["Bash", "Edit", "TaskStop"] {
                 assert!(!tools.iter().any(|name| name == gone), "{gone}: {tools:?}");

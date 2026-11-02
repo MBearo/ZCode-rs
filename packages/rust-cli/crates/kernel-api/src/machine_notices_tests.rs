@@ -1,5 +1,6 @@
 //! 合成的通知流（remote-exec.md §20.7.2）：本机一开始就订阅，新连上的机器开流，重连的机器重开，ack 发给所在的机器。
 
+use crate::ids::MachineName;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,7 +24,7 @@ async fn notices_from_every_connected_machine_arrive_tagged() {
     let mut stream = all_shell_notices(registry.clone(), session.clone());
     local.finish(shell_notice(1, "b0000000l"));
     let first = next(&mut stream).await;
-    assert_eq!(first.machine, "local");
+    assert_eq!(first.machine.as_str(), "primary");
     assert_eq!(first.notice.seq, 1);
 
     // 会话开始之后才连上的机器：changes() 出项时开流。
@@ -31,7 +32,7 @@ async fn notices_from_every_connected_machine_arrive_tagged() {
     registry.connect("dev-a", remote.clone(), "/home/dev/proj");
     remote.finish(shell_notice(1, "b0000000r"));
     let second = next(&mut stream).await;
-    assert_eq!(second.machine, "dev-a");
+    assert_eq!(second.machine.as_str(), "dev-a");
     assert_eq!(second.notice.task.as_str(), "b0000000r");
 
     // ack 发给它所在的机器。
@@ -47,7 +48,7 @@ async fn a_disconnected_machine_cannot_be_acknowledged() {
     let local = Arc::new(NoticeEnvironment::default());
     let registry = TestMachines::new(local);
     let notice = MachineNotice {
-        machine: "dev-a".to_owned(),
+        machine: MachineName::new("dev-a"),
         notice: shell_notice(3, "b0000000r"),
     };
     let error = ack(registry.as_ref(), &notice, &SessionId::new("sess_1"))
@@ -79,7 +80,7 @@ async fn a_machine_that_reconnects_gets_a_new_stream() {
     drop(first);
     second.finish(shell_notice(1, "b00000002"));
     let again = next(&mut stream).await;
-    assert_eq!(again.machine, "dev-a");
+    assert_eq!(again.machine.as_str(), "dev-a");
     assert_eq!(again.notice.task.as_str(), "b00000002");
 }
 

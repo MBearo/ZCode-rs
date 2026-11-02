@@ -2,8 +2,9 @@
 //! 终态的 msg_id。没有队列：未 ack 的入站留在表里，`watch` 计数唤醒订阅者（与 agents 的 `Hub` 同一模式，README §6
 //! 的进程内通道表）；锁不跨 await。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::stream::{self, BoxStream};
 use rust_cli_kernel_api::ids::SessionId;
@@ -49,7 +50,7 @@ impl Inbox {
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_unpoisoned()
     }
 
     fn bump(&self) {

@@ -15,8 +15,10 @@ const BLOCK_CAP: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StopHook {
-    /// 照常结束（hook 阻止继续时，结束说明已提交）。
+    /// 照常结束。
     End,
+    /// hook 阻止继续（`prevent_continuation`）：结束说明已提交，以 `stop_hook_prevented` 结束（query.md §3）。
+    Prevented,
     /// hook 阻塞了结束：反馈已提交，再请求一次（`stop_hook_blocking`）。
     Continue,
 }
@@ -76,11 +78,9 @@ pub(crate) async fn stop_hooks(
         }
         _ => (HookEventName::Stop, None),
     };
+    // 会话当前的主模型与目标：一次读取（工作线 F134：以前分两次问会话 actor）。
+    let view = scope.view().await;
     let event = HookEvent {
-        name,
-        session: scope.session.clone(),
-        workspace: scope.workspace.clone(),
-        payload: payload(scope, source, active, last_assistant_text(history)),
         context: HookContext {
             mode: Some(scope.mode),
             agent: scope.agent.clone(),
@@ -88,11 +88,17 @@ pub(crate) async fn stop_hooks(
             cwd: None,
             run: Some(scope.run.clone()),
             // 会话当前的主模型（owner 是会话 actor，model.md §6.1）。
-            selection: scope.sink.current_selection(&scope.session).await,
+            selection: view.selection,
         },
+        ..HookEvent::new(
+            name,
+            scope.session.clone(),
+            scope.workspace.clone(),
+            payload(scope, source, active, last_assistant_text(history)),
+        )
     };
     // 会话有目标时，目标的评估与配置的 Stop hooks 一起跑（会话级的 Stop hook，goal.md §4）。
-    let goal = crate::goal::due(scope, source).await;
+    let goal = crate::goal::due(scope, source, view.goal);
     let hooks = scope
         .parts
         .hooks
@@ -114,6 +120,11 @@ pub(crate) async fn stop_hooks(
     if let Some((condition, verdict)) = checked.filter(|_| !scope.abort.is_aborted()) {
         let not_met = crate::goal::report(scope, history, condition, verdict).await?;
         block |= not_met && !prevent;
+    }
+    // 修正（工作线 F134，modularity.md §7 F131-1）：以前阻止继续也按 `End` 照常结束，`-p` 写 `completed`；对照实现
+    // 在看阻塞反馈之前以 `stop_hook_prevented` 结束。
+    if prevent {
+        return Ok(StopHook::Prevented);
     }
     if !block {
         return Ok(StopHook::End);

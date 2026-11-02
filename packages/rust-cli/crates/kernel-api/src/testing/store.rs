@@ -1,12 +1,12 @@
 //! 内存里的会话存储。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
-use super::lock;
 use crate::ids::ArtifactId;
 use crate::ids::MessageId;
 use crate::ids::SessionId;
@@ -14,8 +14,9 @@ use crate::message::AttachmentMessage;
 use crate::message::Message;
 use crate::store::{
     ArtifactPurpose, ArtifactRef, ArtifactStore, CommitReceipt, Fact, FactBatch, ForkReceipt,
-    LoadedSession, SessionFilter, SessionFork, SessionKind, SessionMeta, SessionOrder, SessionPage,
-    SessionQuery, SessionRecord, SessionStore, SessionSummary, StoreError,
+    LoadedSession, LocalSettings, SessionFilter, SessionFork, SessionKind, SessionMeta,
+    SessionOrder, SessionPage, SessionQuery, SessionRecord, SessionStore, SessionSummary,
+    StoreError, StoreQueries,
 };
 
 /// 重放事实得到活动历史与 checkpoint 清单：`RevertSet` 之后活动历史 = `kept` + 切点之后追加的
@@ -105,16 +106,21 @@ impl MemoryStore {
 
     /// 已写下的信任记录（按写入顺序，重复写只留一条）。
     pub fn trusted_keys(&self) -> Vec<crate::workspace_trust::TrustKey> {
-        lock(&self.trusted).clone()
+        self.trusted.lock_unpoisoned().clone()
     }
 
     /// 每个成功提交的批次带的回合锚点，按提交顺序。
     pub fn batch_turns(&self, session: &SessionId) -> Vec<Option<crate::store::TurnAnchor>> {
-        lock(&self.turns).get(session).cloned().unwrap_or_default()
+        self.turns
+            .lock_unpoisoned()
+            .get(session)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn facts(&self, session: &SessionId) -> Vec<Fact> {
-        lock(&self.sessions)
+        self.sessions
+            .lock_unpoisoned()
             .get(session)
             .map(|(_, facts)| facts.clone())
             .unwrap_or_default()
@@ -122,17 +128,19 @@ impl MemoryStore {
 
     /// 会话的活动时间（`query_sessions` 的排序与显示，测试用）。
     pub fn set_updated(&self, session: &SessionId, at_ms: u64) {
-        lock(&self.updated).insert(session.clone(), at_ms);
+        self.updated
+            .lock_unpoisoned()
+            .insert(session.clone(), at_ms);
     }
 
     /// 已删除的会话（修复线 F29）。
     pub fn is_deleted(&self, session: &SessionId) -> bool {
-        lock(&self.deleted).contains(session)
+        self.deleted.lock_unpoisoned().contains(session)
     }
 
     /// 会话现在的标题（最后一次写入；node-store 的会话行）。
     pub fn title(&self, session: &SessionId) -> Option<String> {
-        let sessions = lock(&self.sessions);
+        let sessions = self.sessions.lock_unpoisoned();
         let (meta, facts) = sessions.get(session)?;
         Some(last_title(facts).unwrap_or_else(|| meta.title.clone()))
     }
@@ -143,14 +151,16 @@ impl MemoryStore {
         range: crate::metering::ActivityRange,
         stats: crate::metering::ActivityStats,
     ) {
-        lock(&self.activity).insert(range, stats);
+        self.activity.lock_unpoisoned().insert(range, stats);
     }
 }
 
 #[async_trait]
 impl SessionStore for MemoryStore {
     async fn create(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        lock(&self.sessions).insert(meta.id.clone(), (meta, Vec::new()));
+        self.sessions
+            .lock_unpoisoned()
+            .insert(meta.id.clone(), (meta, Vec::new()));
         Ok(())
     }
 
@@ -164,7 +174,7 @@ impl SessionStore for MemoryStore {
                 session: session.clone(),
             });
         }
-        let mut sessions = lock(&self.sessions);
+        let mut sessions = self.sessions.lock_unpoisoned();
         let (meta, facts) = sessions
             .get_mut(session)
             .ok_or_else(|| StoreError::NotFound {
@@ -173,7 +183,7 @@ impl SessionStore for MemoryStore {
         // “总是允许”与 node-store 一样写进会话所在项目的规则集（追加、去重）。
         for fact in &batch.facts {
             if let Fact::PermissionRulesAdded { behavior, rules } = fact {
-                let mut all = lock(&self.project_rules);
+                let mut all = self.project_rules.lock_unpoisoned();
                 let project = all
                     .entry(meta.workspace.root.as_str().to_owned())
                     .or_default();
@@ -190,7 +200,8 @@ impl SessionStore for MemoryStore {
             }
         }
         facts.extend(batch.facts);
-        lock(&self.turns)
+        self.turns
+            .lock_unpoisoned()
             .entry(session.clone())
             .or_default()
             .push(batch.turn);
@@ -205,7 +216,7 @@ impl SessionStore for MemoryStore {
                 session: session.clone(),
             });
         }
-        let sessions = lock(&self.sessions);
+        let sessions = self.sessions.lock_unpoisoned();
         let (meta, facts) = sessions.get(session).ok_or_else(|| StoreError::NotFound {
             session: session.clone(),
         })?;
@@ -228,50 +239,30 @@ impl SessionStore for MemoryStore {
             model: None,
             mode: None,
             plan: false,
-            pending_interactions: Vec::new(),
             checkpoints,
             // 最后一个批次之后的当前轮（node-store 按库推导；这里取最后一个带锚点的批次）。
-            turn: lock(&self.turns)
+            turn: self
+                .turns
+                .lock_unpoisoned()
                 .get(session)
                 .and_then(|turns| turns.iter().rev().find_map(Clone::clone)),
             last_turn_failed: last_turn_failed(facts),
         })
     }
 
-    /// 前端记录（缺口 G2）：会话要存在；同 key 覆盖原位置。
-    async fn put_record(
-        &self,
-        session: &SessionId,
-        record: &crate::store::FrontendRecord,
-    ) -> Result<(), StoreError> {
-        if !lock(&self.sessions).contains_key(session) {
-            return Err(StoreError::NotFound {
-                session: session.clone(),
-            });
-        }
-        let mut records = lock(&self.records);
-        let list = records.entry(session.clone()).or_default();
-        match list.iter_mut().find(|known| known.key == record.key) {
-            Some(known) => *known = record.clone(),
-            None => list.push(record.clone()),
-        }
-        Ok(())
-    }
-
-    async fn records(
-        &self,
-        session: &SessionId,
-        kind: &str,
-    ) -> Result<Vec<crate::store::FrontendRecord>, StoreError> {
-        Ok(lock(&self.records)
-            .get(session)
-            .map(|list| {
-                list.iter()
-                    .filter(|record| record.kind == kind)
-                    .cloned()
-                    .collect()
+    async fn list(&self, _filter: SessionFilter) -> Result<Vec<SessionSummary>, StoreError> {
+        let deleted = self.deleted.lock_unpoisoned().clone();
+        Ok(self
+            .sessions
+            .lock_unpoisoned()
+            .values()
+            .filter(|(meta, _)| !deleted.contains(&meta.id))
+            .map(|(meta, _)| SessionSummary {
+                id: meta.id.clone(),
+                title: meta.title.clone(),
+                updated_at_ms: meta.created_at_ms,
             })
-            .unwrap_or_default())
+            .collect())
     }
 
     /// `Fact::Entry` 按写入顺序（node-store 的同一口径，cross-session.md §2.2）。
@@ -280,7 +271,7 @@ impl SessionStore for MemoryStore {
         session: &SessionId,
         kind: &str,
     ) -> Result<Vec<(String, serde_json::Value)>, StoreError> {
-        let sessions = lock(&self.sessions);
+        let sessions = self.sessions.lock_unpoisoned();
         let (_, facts) = sessions.get(session).ok_or_else(|| StoreError::NotFound {
             session: session.clone(),
         })?;
@@ -297,107 +288,10 @@ impl SessionStore for MemoryStore {
             .collect())
     }
 
-    /// 会话与以它为祖先的会话里 `ModelCalled{status: completed}` 的耗时之和（node-store 的同一口径，usage.md §4）。
-    async fn metering(
-        &self,
-        session: &SessionId,
-    ) -> Result<crate::metering::SessionMetering, StoreError> {
-        let sessions = lock(&self.sessions);
-        if !sessions.contains_key(session) {
-            return Err(StoreError::NotFound {
-                session: session.clone(),
-            });
-        }
-        let descends = |start: &SessionId| {
-            let mut id = start.clone();
-            loop {
-                if &id == session {
-                    return true;
-                }
-                match sessions.get(&id).and_then(|(meta, _)| meta.parent.clone()) {
-                    Some(parent) => id = parent,
-                    None => return false,
-                }
-            }
-        };
-        let api_duration_ms = sessions
-            .iter()
-            .filter(|(id, _)| descends(id))
-            .flat_map(|(_, (_, facts))| facts)
-            .filter_map(|fact| match fact {
-                Fact::ModelCalled { call }
-                    if call.status == crate::metering::CallStatus::Completed =>
-                {
-                    Some(call.completed_at_ms.saturating_sub(call.started_at_ms))
-                }
-                _ => None,
-            })
-            .sum();
-        Ok(crate::metering::SessionMetering { api_duration_ms })
-    }
-
-    /// 会话里 `ModelCalled{source: 主线程或子代理, status: completed}` 的聚合（node-store 的同一口径，usage.md §4.1；
-    /// 子代理的请求只在子会话里，F112）：用量缺失时输入与缓存读都算未知；“最近一个”是最后提交的那个。
-    async fn request_stats(
-        &self,
-        session: &SessionId,
-    ) -> Result<crate::metering::RequestStats, StoreError> {
-        let sessions = lock(&self.sessions);
-        let (_, facts) = sessions.get(session).ok_or_else(|| StoreError::NotFound {
-            session: session.clone(),
-        })?;
-        let mut stats = crate::metering::RequestStats::default();
-        for fact in facts {
-            let Fact::ModelCalled { call } = fact else {
-                continue;
-            };
-            let own_loop = matches!(
-                call.source,
-                crate::model::QuerySource::MainThread | crate::model::QuerySource::Subagent(_)
-            );
-            if !own_loop || call.status != crate::metering::CallStatus::Completed {
-                continue;
-            }
-            stats.requests += 1;
-            match &call.usage {
-                // Node 归一化的输入含缓存读写（usage.md §2.2）。
-                Some(usage) => {
-                    stats.input_tokens += usage.input_tokens
-                        + usage.cache_creation_input_tokens
-                        + usage.cache_read_input_tokens;
-                    stats.cache_read_tokens += usage.cache_read_input_tokens;
-                }
-                None => stats.unknown_cache_usage = true,
-            }
-            stats.last = Some(crate::metering::LastRequest {
-                output_tokens: call.usage.map(|usage| usage.output_tokens),
-                duration_ms: Some(call.completed_at_ms.saturating_sub(call.started_at_ms)),
-                first_token_ms: call
-                    .first_token_at_ms
-                    .map(|first| first.saturating_sub(call.started_at_ms)),
-            });
-        }
-        Ok(stats)
-    }
-
-    async fn activity(
-        &self,
-        query: crate::metering::ActivityQuery,
-    ) -> Result<crate::metering::ActivityStats, StoreError> {
-        Ok(lock(&self.activity)
-            .get(&query.range)
-            .cloned()
-            .unwrap_or_else(|| crate::metering::ActivityStats {
-                range: Some(query.range),
-                today: query.today,
-                ..Default::default()
-            }))
-    }
-
     /// Node `/fork` 的替身：活动历史到 `through` 为止原样复制（内存里不必换 ID），末尾是一条
     /// `source = fork` 的 attachment（正文是简化的分叉提示）。
     async fn fork(&self, fork: SessionFork) -> Result<ForkReceipt, StoreError> {
-        let mut sessions = lock(&self.sessions);
+        let mut sessions = self.sessions.lock_unpoisoned();
         let (parent, facts) =
             sessions
                 .get(&fork.parent)
@@ -461,9 +355,11 @@ impl SessionStore for MemoryStore {
 
     /// node-store 的同一口径（node-store.md §5.1）：按根目录筛、删除的不列、按时间从新到旧（同一时刻 id 大的在前）。
     async fn query_sessions(&self, query: SessionQuery) -> Result<SessionPage, StoreError> {
-        let deleted = lock(&self.deleted).clone();
-        let updated = lock(&self.updated).clone();
-        let mut records: Vec<SessionRecord> = lock(&self.sessions)
+        let deleted = self.deleted.lock_unpoisoned().clone();
+        let updated = self.updated.lock_unpoisoned().clone();
+        let mut records: Vec<SessionRecord> = self
+            .sessions
+            .lock_unpoisoned()
             .values()
             .filter(|(meta, _)| !deleted.contains(&meta.id) && meta.kind != SessionKind::Subagent)
             .filter(|(meta, _)| {
@@ -506,7 +402,7 @@ impl SessionStore for MemoryStore {
                 session: session.clone(),
             });
         }
-        let mut sessions = lock(&self.sessions);
+        let mut sessions = self.sessions.lock_unpoisoned();
         let (_, facts) = sessions
             .get_mut(session)
             .ok_or_else(|| StoreError::NotFound {
@@ -519,33 +415,25 @@ impl SessionStore for MemoryStore {
     }
 
     async fn delete(&self, session: &SessionId) -> Result<(), StoreError> {
-        if !lock(&self.sessions).contains_key(session) {
+        if !self.sessions.lock_unpoisoned().contains_key(session) {
             return Err(StoreError::NotFound {
                 session: session.clone(),
             });
         }
-        lock(&self.deleted).insert(session.clone());
+        self.deleted.lock_unpoisoned().insert(session.clone());
         Ok(())
     }
+}
 
-    async fn list(&self, _filter: SessionFilter) -> Result<Vec<SessionSummary>, StoreError> {
-        let deleted = lock(&self.deleted).clone();
-        Ok(lock(&self.sessions)
-            .values()
-            .filter(|(meta, _)| !deleted.contains(&meta.id))
-            .map(|(meta, _)| SessionSummary {
-                id: meta.id.clone(),
-                title: meta.title.clone(),
-                updated_at_ms: meta.created_at_ms,
-            })
-            .collect())
-    }
-
+#[async_trait]
+impl LocalSettings for MemoryStore {
     async fn project_rules(
         &self,
         workspace: &crate::env::WorkspaceRef,
     ) -> Result<crate::permission::ProjectRules, StoreError> {
-        Ok(lock(&self.project_rules)
+        Ok(self
+            .project_rules
+            .lock_unpoisoned()
             .get(workspace.root.as_str())
             .cloned()
             .unwrap_or_default())
@@ -558,7 +446,7 @@ impl SessionStore for MemoryStore {
         change: crate::store::ProjectRulesChange,
     ) -> Result<crate::permission::ProjectRules, StoreError> {
         use crate::permission::RuleBehavior;
-        let mut all = lock(&self.project_rules);
+        let mut all = self.project_rules.lock_unpoisoned();
         let rules = all.entry(workspace.root.as_str().to_owned()).or_default();
         let list = match change.behavior {
             RuleBehavior::Allow => &mut rules.allow,
@@ -578,7 +466,7 @@ impl SessionStore for MemoryStore {
         &self,
         candidates: &[crate::workspace_trust::TrustKey],
     ) -> Result<Option<crate::workspace_trust::TrustKey>, StoreError> {
-        let trusted = lock(&self.trusted);
+        let trusted = self.trusted.lock_unpoisoned();
         Ok(candidates.iter().find(|key| trusted.contains(key)).cloned())
     }
 
@@ -586,11 +474,167 @@ impl SessionStore for MemoryStore {
         &self,
         key: &crate::workspace_trust::TrustKey,
     ) -> Result<(), StoreError> {
-        let mut trusted = lock(&self.trusted);
+        let mut trusted = self.trusted.lock_unpoisoned();
         if !trusted.contains(key) {
             trusted.push(key.clone());
         }
         Ok(())
+    }
+
+    /// 群协作会话自己的规则集：内存里没有这种会话（node-store 读会话行的 `permission.scope`）。
+    async fn session_rules(
+        &self,
+        _session: &SessionId,
+    ) -> Result<Option<crate::permission::ProjectRules>, StoreError> {
+        Ok(None)
+    }
+
+    /// 本机项目的持久模式：内存里不记（node-store 读 `local_setting`），总是没有。
+    async fn project_mode(
+        &self,
+        _workspace: &crate::env::WorkspaceRef,
+    ) -> Result<Option<crate::permission::PermissionMode>, StoreError> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
+impl StoreQueries for MemoryStore {
+    /// 会话与以它为祖先的会话里 `ModelCalled{status: completed}` 的耗时之和（node-store 的同一口径，usage.md §4）。
+    async fn metering(
+        &self,
+        session: &SessionId,
+    ) -> Result<crate::metering::SessionMetering, StoreError> {
+        let sessions = self.sessions.lock_unpoisoned();
+        if !sessions.contains_key(session) {
+            return Err(StoreError::NotFound {
+                session: session.clone(),
+            });
+        }
+        let descends = |start: &SessionId| {
+            let mut id = start.clone();
+            loop {
+                if &id == session {
+                    return true;
+                }
+                match sessions.get(&id).and_then(|(meta, _)| meta.parent.clone()) {
+                    Some(parent) => id = parent,
+                    None => return false,
+                }
+            }
+        };
+        let api_duration_ms = sessions
+            .iter()
+            .filter(|(id, _)| descends(id))
+            .flat_map(|(_, (_, facts))| facts)
+            .filter_map(|fact| match fact {
+                Fact::ModelCalled { call }
+                    if call.status == crate::metering::CallStatus::Completed =>
+                {
+                    Some(call.completed_at_ms.saturating_sub(call.started_at_ms))
+                }
+                _ => None,
+            })
+            .sum();
+        Ok(crate::metering::SessionMetering { api_duration_ms })
+    }
+
+    /// 会话里 `ModelCalled{source: 主线程或子代理, status: completed}` 的聚合（node-store 的同一口径，usage.md §4.1；
+    /// 子代理的请求只在子会话里，F112）：用量缺失时输入与缓存读都算未知；“最近一个”是最后提交的那个。
+    async fn request_stats(
+        &self,
+        session: &SessionId,
+    ) -> Result<crate::metering::RequestStats, StoreError> {
+        let sessions = self.sessions.lock_unpoisoned();
+        let (_, facts) = sessions.get(session).ok_or_else(|| StoreError::NotFound {
+            session: session.clone(),
+        })?;
+        let mut stats = crate::metering::RequestStats::default();
+        for fact in facts {
+            let Fact::ModelCalled { call } = fact else {
+                continue;
+            };
+            let own_loop = matches!(
+                call.source,
+                crate::model::QuerySource::MainThread | crate::model::QuerySource::Subagent(_)
+            );
+            if !own_loop || call.status != crate::metering::CallStatus::Completed {
+                continue;
+            }
+            stats.requests += 1;
+            match &call.usage {
+                // Node 归一化的输入含缓存读写（usage.md §2.2）。
+                Some(usage) => {
+                    stats.input_tokens += usage.input_tokens
+                        + usage.cache_creation_input_tokens
+                        + usage.cache_read_input_tokens;
+                    stats.cache_read_tokens += usage.cache_read_input_tokens;
+                }
+                None => stats.unknown_cache_usage = true,
+            }
+            stats.last = Some(crate::metering::LastRequest {
+                output_tokens: call.usage.map(|usage| usage.output_tokens),
+                duration_ms: Some(call.completed_at_ms.saturating_sub(call.started_at_ms)),
+                first_token_ms: call
+                    .first_token_at_ms
+                    .map(|first| first.saturating_sub(call.started_at_ms)),
+            });
+        }
+        Ok(stats)
+    }
+
+    async fn activity(
+        &self,
+        query: crate::metering::ActivityQuery,
+    ) -> Result<crate::metering::ActivityStats, StoreError> {
+        Ok(self
+            .activity
+            .lock_unpoisoned()
+            .get(&query.range)
+            .cloned()
+            .unwrap_or_else(|| crate::metering::ActivityStats {
+                range: Some(query.range),
+                today: query.today,
+                ..Default::default()
+            }))
+    }
+
+    /// 前端记录（缺口 G2）：会话要存在；同 key 覆盖原位置。
+    async fn put_record(
+        &self,
+        session: &SessionId,
+        record: &crate::store::FrontendRecord,
+    ) -> Result<(), StoreError> {
+        if !self.sessions.lock_unpoisoned().contains_key(session) {
+            return Err(StoreError::NotFound {
+                session: session.clone(),
+            });
+        }
+        let mut records = self.records.lock_unpoisoned();
+        let list = records.entry(session.clone()).or_default();
+        match list.iter_mut().find(|known| known.key == record.key) {
+            Some(known) => *known = record.clone(),
+            None => list.push(record.clone()),
+        }
+        Ok(())
+    }
+
+    async fn records(
+        &self,
+        session: &SessionId,
+        kind: &str,
+    ) -> Result<Vec<crate::store::FrontendRecord>, StoreError> {
+        Ok(self
+            .records
+            .lock_unpoisoned()
+            .get(session)
+            .map(|list| {
+                list.iter()
+                    .filter(|record| record.kind == kind)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 }
 
@@ -627,7 +671,7 @@ pub struct MemoryArtifacts {
 
 impl MemoryArtifacts {
     pub fn count(&self) -> usize {
-        lock(&self.objects).len()
+        self.objects.lock_unpoisoned().len()
     }
 }
 
@@ -651,12 +695,14 @@ impl ArtifactStore for MemoryArtifacts {
             media_type,
             size: bytes.len() as u64,
         };
-        lock(&self.objects).insert(id, (artifact.clone(), bytes));
+        self.objects
+            .lock_unpoisoned()
+            .insert(id, (artifact.clone(), bytes));
         Ok(artifact)
     }
 
     async fn get(&self, artifact: &ArtifactRef) -> Result<Vec<u8>, StoreError> {
-        let objects = lock(&self.objects);
+        let objects = self.objects.lock_unpoisoned();
         let Some((_, bytes)) = objects
             .get(&artifact.id)
             .filter(|(stored, _)| stored.session == artifact.session)
@@ -683,7 +729,9 @@ impl ArtifactStore for MemoryArtifacts {
         session: &SessionId,
         id: &ArtifactId,
     ) -> Result<Option<ArtifactRef>, StoreError> {
-        Ok(lock(&self.objects)
+        Ok(self
+            .objects
+            .lock_unpoisoned()
             .get(id)
             .filter(|(stored, _)| &stored.session == session)
             .map(|(stored, _)| stored.clone()))

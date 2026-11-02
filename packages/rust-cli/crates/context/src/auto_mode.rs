@@ -10,6 +10,7 @@
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::peers::ModeClass;
 use rust_cli_kernel_api::permission::PermissionMode;
+use rust_cli_kernel_api::tool_names;
 use rust_cli_prompts::texts;
 use serde_json::{Value, json};
 
@@ -18,9 +19,9 @@ pub(crate) const SOURCE: &str = "auto_mode";
 const EXIT_SOURCE: &str = "auto_mode_exit";
 
 /// bashFirst 要求的工具（有 Bash，且有 Edit 或 Write）。
-const BASH: &str = "Bash";
-const EDIT: &str = "Edit";
-const WRITE: &str = "Write";
+const BASH: &str = tool_names::BASH;
+const EDIT: &str = tool_names::EDIT;
+const WRITE: &str = tool_names::WRITE;
 
 /// 这一步要不要宣布 bypass 模式。`history` 是最近一次压缩边界之后的部分，`mode` 是判决用的模式（plan 开时是
 /// plan），`tool_names` 是这一步的工具。

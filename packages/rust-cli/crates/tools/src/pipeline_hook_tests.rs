@@ -8,15 +8,14 @@ use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::hooks::{HookEvent, HookOutcome};
 use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, InteractionId, MessageId, OperationId, OwnerEpoch, RunId, SessionId,
-    ToolUseId,
+    EnvironmentId, Generation, MessageId, OperationId, RunId, SessionId,
 };
 use rust_cli_kernel_api::message::{AttachmentMessage, Message};
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
-};
+use rust_cli_kernel_api::orchestration::InteractionRequest;
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment, local_services, machine};
+use rust_cli_kernel_api::testing::{
+    ScriptedInteractions, UnusedEnvironment, controller_services, machine,
+};
 use rust_cli_kernel_api::tool::PromptContext;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -58,8 +57,6 @@ struct Gate {
     decide: PermissionDecision,
     rules: Option<PermissionDecision>,
     decided: Mutex<u32>,
-    /// `ask_once` 的答案（guarded 的危险命令，修复线 F20）。
-    once: bool,
 }
 
 impl Gate {
@@ -68,7 +65,6 @@ impl Gate {
             decide,
             rules,
             decided: Mutex::new(0),
-            once: false,
         })
     }
 }
@@ -79,6 +75,7 @@ impl PermissionGate for Gate {
         *self.decided.lock().unwrap() += 1;
         self.decide.clone()
     }
+    async fn local_rules_committed(&self, _w: &WorkspaceRef) {}
     async fn check_rules(
         &self,
         _t: &dyn Tool,
@@ -86,9 +83,6 @@ impl PermissionGate for Gate {
         _c: &ToolUseContext,
     ) -> Option<PermissionDecision> {
         self.rules.clone()
-    }
-    async fn ask_once(&self, _t: &dyn Tool, _i: &Value, _c: &ToolUseContext) -> bool {
-        self.once
     }
 }
 
@@ -108,52 +102,28 @@ impl HookRunner for Hooks {
     }
 }
 
-struct Asked(Mutex<Vec<String>>);
-
-#[async_trait]
-impl Interactions for Asked {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        if let InteractionRequest::Permission { message, .. } = request {
-            self.0.lock().unwrap().push(message);
-        }
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i1"),
-            answer: json!({"decision": "allow"}),
-        })
-    }
-}
-
-fn context(asked: Arc<Asked>) -> ToolUseContext {
+fn context(asked: Arc<ScriptedInteractions>) -> ToolUseContext {
     let env = Arc::new(UnusedEnvironment);
     ToolUseContext {
-        session: SessionId::new("sess_1"),
-        run: RunId::new("run_1"),
-        tool_use: ToolUseId::new("toolu_1"),
-        agent: None,
         workspace: WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/work"),
         },
         mode: PermissionMode::AcceptEdits,
-        cancel: CancellationToken::new(),
         machine: machine(env.clone()),
-        local: local_services(env),
-        artifacts: Arc::new(MemoryStore::default()),
+        controller: controller_services(env),
         interactions: asked,
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g1"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op_1"),
-            origin: Origin::Agent {
+        session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g1"),
+            OperationId::new("op_1"),
+            Origin::Agent {
                 session: SessionId::new("sess_1"),
                 run: RunId::new("run_1"),
             },
-        },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -178,11 +148,11 @@ async fn run(gate: Arc<Gate>, outcomes: &[(HookEventName, HookOutcome)]) -> Ran 
         outcomes: outcomes.iter().cloned().collect(),
         ..Hooks::default()
     });
-    let asked = Arc::new(Asked(Mutex::default()));
+    let asked = Arc::new(ScriptedInteractions::allowing());
     let pipeline = Pipeline::new(gate.clone(), hooks.clone());
     let (progress, _updates) = mpsc::channel(4);
     let execution = pipeline
-        .execute_full(
+        .execute(
             Arc::new(Echo),
             json!({"command": "ls"}),
             context(asked.clone()),
@@ -191,7 +161,14 @@ async fn run(gate: Arc<Gate>, outcomes: &[(HookEventName, HookOutcome)]) -> Ran 
         .await;
     let events = hooks.seen.lock().unwrap().drain(..).collect();
     let decided = *gate.decided.lock().unwrap();
-    let asked = asked.0.lock().unwrap().clone();
+    let asked = asked
+        .asked()
+        .into_iter()
+        .filter_map(|request| match request {
+            InteractionRequest::Permission { message, .. } => Some(message),
+            _ => None,
+        })
+        .collect();
     Ran {
         execution,
         asked,
@@ -208,13 +185,7 @@ fn text(output: &ToolOutput) -> String {
 }
 
 fn ask_gate() -> Arc<Gate> {
-    Gate::new(
-        PermissionDecision::Ask {
-            message: "chain asks".to_owned(),
-            suggestions: Vec::new(),
-        },
-        None,
-    )
+    Gate::new(PermissionDecision::ask("chain asks", Vec::new()), None)
 }
 
 fn pre(
@@ -254,14 +225,8 @@ async fn hook_allow_skips_the_prompt_unless_rules_say_otherwise() {
     assert_eq!(text(&ran.execution.output), "rule says no");
     // ask 规则：走完整判决链。
     let rule_ask = Gate::new(
-        PermissionDecision::Ask {
-            message: "chain asks".to_owned(),
-            suggestions: Vec::new(),
-        },
-        Some(PermissionDecision::Ask {
-            message: "rule".to_owned(),
-            suggestions: Vec::new(),
-        }),
+        PermissionDecision::ask("chain asks", Vec::new()),
+        Some(PermissionDecision::ask("rule", Vec::new())),
     );
     let ran = run(rule_ask, &[pre(allow, None)]).await;
     assert_eq!(
@@ -272,10 +237,7 @@ async fn hook_allow_skips_the_prompt_unless_rules_say_otherwise() {
 
 #[tokio::test]
 async fn hook_ask_and_deny() {
-    let ask = Some(PermissionDecision::Ask {
-        message: "hook asks".to_owned(),
-        suggestions: Vec::new(),
-    });
+    let ask = Some(PermissionDecision::ask("hook asks", Vec::new()));
     let ran = run(ask_gate(), &[pre(ask, None)]).await;
     assert_eq!(ran.asked, ["hook asks"]);
     assert_eq!(ran.decided, 0);
@@ -407,7 +369,7 @@ async fn non_hook_rejections_drop_the_pre_tool_stop() {
 }
 
 /// 修复线 F20：guarded 的危险命令只批准这一次（Node user-once）：PermissionRequest hook 不能替用户批准，
-/// 不跑这个事件，直接问用户。
+/// 不跑这个事件，直接问用户。工作线 F137：判决链的询问带 `once`（以前是单独的 `ask_once`）。
 #[tokio::test]
 async fn ask_once_questions_skip_permission_request_hooks() {
     let allow = (
@@ -419,15 +381,14 @@ async fn ask_once_questions_skip_permission_request_hooks() {
             ..HookOutcome::default()
         },
     );
-    let gate = Arc::new(Gate {
-        decide: PermissionDecision::Ask {
+    let gate = Gate::new(
+        PermissionDecision::Ask {
             message: "Dangerous command requires your approval for this execution".to_owned(),
             suggestions: Vec::new(),
+            once: true,
         },
-        rules: None,
-        decided: Mutex::new(0),
-        once: true,
-    });
+        None,
+    );
     let ran = run(gate, &[allow]).await;
     assert_eq!(
         ran.asked,

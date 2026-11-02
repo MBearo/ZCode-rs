@@ -130,25 +130,18 @@ fn request(
     use rust_cli_kernel_api::ids::{EnvironmentId, SessionId};
     use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("sess_1"),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/work"),
-        },
-        agent: None,
-        source: QuerySource::MainThread,
-        mode: rust_cli_kernel_api::permission::PermissionMode::Default,
         tool_names: names.iter().map(|name| (*name).to_owned()).collect(),
-        selection: ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: model.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
         mcp,
+        ..ContextRequest::new(
+            SessionId::new("sess_1"),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/work"),
+            },
+            QuerySource::MainThread,
+            rust_cli_kernel_api::permission::PermissionMode::Default,
+            ModelSelection::new("anthropic".to_owned(), model.to_owned()),
+        )
     }
 }
 

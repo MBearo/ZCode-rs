@@ -1,13 +1,18 @@
 //! 执行环境的公共类型（docs/specs/rust-cli/README.md §6）。
 //!
 //! 工作区文件、搜索、进程、Git、环境事实都在执行环境里。端口在 [`crate::machine`]（一台机器上的 8 个小端口与
-//! [`crate::machine::MachineEnv`]）与 [`crate::local_services`]（只在本机的 Git 与取网页），机器经
+//! [`crate::machine::MachineEnv`]）与 [`crate::controller_services`]（只在本机的 Git 与取网页），机器经
 //! [`crate::env_registry`] 取到（remote-exec.md §15.8；R0 前是一个 `Environment` trait）。本地实现是 `env-local`；
 //! 上云后换成远端实现，内核不变。这里是端口共用的 DTO：路径、工作区、操作上下文、终态、文件读写与错误。
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
-pub use crate::env_command::{BackgroundReason, CommandEvent, OutputStream, StartCommand};
+use crate::clock::Ids;
+pub use crate::env_command::{
+    BackgroundReason, CommandEvent, CommandKind, OutputStream, StartCommand,
+};
 use crate::ids::{EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId};
 
 /// 执行环境里的路径。与本机存储路径（`rust_cli_paths::StoragePath`）是不同的类型。
@@ -65,6 +70,55 @@ pub struct OperationContext {
     pub origin: Origin,
 }
 
+impl OperationContext {
+    /// 本机 owner（[`OwnerEpoch::LOCAL`]）的一次操作；换 owner 的一侧用结构更新填 `owner_epoch`。
+    pub fn new(
+        environment: EnvironmentId,
+        generation: Generation,
+        operation: OperationId,
+        origin: Origin,
+    ) -> Self {
+        Self {
+            environment,
+            generation,
+            owner_epoch: OwnerEpoch::LOCAL,
+            operation,
+            origin,
+        }
+    }
+}
+
+/// 本机 owner 的操作上下文的工厂（工作线 F134，modularity.md §7 F131-3，审查 C9）：执行环境的当前实例（generation）
+/// 与操作 ID 的来源在一起。端口结构（主循环、压缩、hooks、会话 actor、agents）只带它，不再各自带一个 `generation`、
+/// 各自拼五个字段。
+#[derive(Clone)]
+pub struct Operations {
+    generation: Generation,
+    ids: Arc<dyn Ids>,
+}
+
+impl Operations {
+    /// `ids` 与端口结构里取别的 ID 的是同一个（ID 的顺序不变）。
+    pub fn new(generation: Generation, ids: Arc<dyn Ids>) -> Self {
+        Self { generation, ids }
+    }
+
+    /// 一次新的操作：取一个新的操作 ID。
+    pub fn next(&self, environment: EnvironmentId, origin: Origin) -> OperationContext {
+        self.with_id(environment, self.ids.operation(), origin)
+    }
+
+    /// 用已经取好的操作 ID（同一个 ID 在别处也用，例如压缩后重读文件的调用 ID）。
+    pub fn with_id(
+        &self,
+        environment: EnvironmentId,
+        operation: OperationId,
+        origin: Origin,
+    ) -> OperationContext {
+        OperationContext::new(environment, self.generation.clone(), operation, origin)
+    }
+}
+
 /// 操作终态（§6 规则 5）。Unknown 与 Interrupted 不重跑。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -91,12 +145,13 @@ pub struct EnvFacts {
     pub os_version: String,
     pub shell: String,
     pub is_git_repo: bool,
-    /// 除 cwd 外允许访问的工作目录。
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub additional_directories: Vec<EnvPath>,
     /// 执行侧用户的 home；用户级规则文件 `~/.zcode/AGENTS.md` 由它定位。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<EnvPath>,
+    /// 执行侧用户的 uid（POSIX；Windows 与不报告的老执行器没有）。root 不能用 bypassPermissions 的检查看它：命令在
+    /// 执行侧、以这个用户跑（deployment.md §21）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

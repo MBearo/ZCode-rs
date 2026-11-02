@@ -4,7 +4,7 @@
 //   node scripts/rust-cli/build-number.mjs release          发版：读文件、加 1、原子写回，打印新版本
 //   node scripts/rust-cli/build-number.mjs merge %O %A %B   git 合并驱动：两边取较大值写进 %A
 //
-// 规则与 crates/cli/src/build_number.rs 相同（十进制整数加换行，坏内容报错不回退）。脚本不 commit、不 push。
+// 规则与 crates/cli/src/commands/build_number.rs 相同（十进制整数加换行，坏内容报错不回退）。脚本不 commit、不 push。
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

@@ -1,20 +1,21 @@
 //! 关闭会话时停住的执行环境（docs/specs/rust-cli/session-lifecycle.md §3.3.1，修复线 F33）：会话关闭中途再打开
 //! 同一个会话的竞态要确定地发生——测试让 `close_session` 停住，做完要验证的操作再放行，或让它失败。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::watch;
 
+use crate::controller_services::Fetch;
 use crate::env::{
     CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
     WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::ids::{OperationId, SessionId};
-use crate::local_services::{Fetch, Git};
+use crate::machine::Git;
 use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
-use crate::testing::lock;
 
 /// `close_session` 停在闸门上，直到 [`ClosingEnvironment::release`]（成功返回）或 [`ClosingEnvironment::fail`]
 /// （返回执行环境的错误）；放行之后的调用不再停。`start_command` 记下 hook 的 stdin（看得出跑了哪个 hook）后返回
@@ -64,7 +65,7 @@ impl ClosingEnvironment {
 
     /// 收到的 hook 命令的 stdin，按调用顺序（hook 的输入是 JSON，带 `hook_event_name`）。
     pub fn hook_inputs(&self) -> Vec<String> {
-        lock(&self.hooks).clone()
+        self.hooks.lock_unpoisoned().clone()
     }
 }
 
@@ -109,8 +110,8 @@ impl Commands for ClosingEnvironment {
         _context: OperationContext,
         request: StartCommand,
     ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        if let Some(hook) = request.hook {
-            lock(&self.hooks).push(hook.stdin);
+        if let crate::env::CommandKind::Hook { hook } = request.kind {
+            self.hooks.lock_unpoisoned().push(hook.stdin);
         }
         Err(unused())
     }

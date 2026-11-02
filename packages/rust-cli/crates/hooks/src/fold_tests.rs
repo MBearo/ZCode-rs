@@ -63,19 +63,16 @@ fn pre_tool_use_precedence_and_texts() {
     );
     assert_eq!(
         out.decision,
-        Some(PermissionDecision::Ask {
-            message: "check".to_owned(),
-            suggestions: Vec::new()
-        })
+        Some(PermissionDecision::ask("check", Vec::new()))
     );
     assert_eq!(out.updated_input, Some(json!({"command": "b"})));
     let out = pre_tool_use(&f, &[decided(Behavior::Ask, None, None)]);
     assert_eq!(
         out.decision,
-        Some(PermissionDecision::Ask {
-            message: "Hook PreToolUse:Bash asked for confirmation for this tool".to_owned(),
-            suggestions: Vec::new()
-        })
+        Some(PermissionDecision::ask(
+            "Hook PreToolUse:Bash asked for confirmation for this tool",
+            Vec::new()
+        ))
     );
     // 退出码 2 的阻塞：PreToolUse 的拒绝文本。
     let out = pre_tool_use(&f, &[blocking("[g]: nope")]);

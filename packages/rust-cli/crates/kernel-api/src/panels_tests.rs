@@ -18,7 +18,7 @@ fn subagent_entries_round_trip() {
         owner: None,
         activity: None,
         parked: false,
-        machine: None,
+        machine: Default::default(),
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["status"], "running");
@@ -32,7 +32,7 @@ fn subagent_entries_round_trip() {
     );
     // 远端执行 R4（remote-exec.md §21.7）：缺省机器在远端的子代理写出 `machine`。
     let remote = SubagentEntry {
-        machine: Some("dev-a".to_owned()),
+        machine: crate::ids::MachineName::new("dev-a"),
         ..entry.clone()
     };
     let json = serde_json::to_value(&remote).unwrap();
@@ -106,17 +106,14 @@ fn tasks_snapshots_round_trip() {
             owner: None,
             activity: None,
             parked: false,
-            machine: None,
+            machine: Default::default(),
         }],
-        background: vec![crate::manage::BackgroundEntry {
-            id: "agent_1".to_owned(),
-            kind: crate::manage::BackgroundKind::Agent,
-            description: "Alpha task".to_owned(),
-            status: BackgroundStatus::Running,
-            output: None,
-            machine: None,
-            reconnecting: false,
-        }],
+        background: vec![crate::manage::BackgroundEntry::new(
+            "agent_1".to_owned(),
+            crate::manage::BackgroundKind::Agent,
+            "Alpha task".to_owned(),
+            BackgroundStatus::Running,
+        )],
     };
     let json = serde_json::to_value(&snapshot).unwrap();
     assert_eq!(json["background"][0]["kind"], "agent");

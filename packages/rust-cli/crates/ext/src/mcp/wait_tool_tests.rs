@@ -10,7 +10,9 @@ use rust_cli_kernel_api::testing::MemoryEnvironment;
 use serde_json::json;
 
 use super::*;
-use crate::clock_tests::TokioClock;
+use rust_cli_kernel_api::testing::TokioClock;
+
+use crate::clock_tests::clock;
 use crate::mcp::config::McpSettings;
 use crate::mcp::{McpScope, McpServer};
 use crate::test_support::{FakeMcp, held, server, tool_context, workspace};
@@ -19,14 +21,9 @@ fn config(name: &str) -> McpServer {
     McpServer {
         name: name.to_owned(),
         scope: McpScope::Project,
-        transport: McpTransportConfig::Stdio {
-            command: "node".to_owned(),
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-        },
+        transport: McpTransportConfig::stdio("node".to_owned(), Vec::new()),
         options: Default::default(),
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -40,7 +37,7 @@ struct Rig {
 fn rig(fake: FakeMcp, servers: &[&str]) -> Rig {
     let fake = Arc::new(fake);
     let scope = TaskScope::root("test", |_| {});
-    let clock = TokioClock::new();
+    let clock = clock();
     let manager = Arc::new(McpManager::new(
         fake.clone(),
         scope.spawner(),

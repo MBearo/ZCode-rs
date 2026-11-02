@@ -7,7 +7,7 @@ use rust_cli_kernel_api::permission::PermissionRule;
 
 use crate::check::{AskKind, Check};
 use crate::consts::DOUBLE_OPERATOR_LEN;
-use crate::parse::{Analysis, Operator};
+use crate::shell::parse::{Analysis, Operator};
 use crate::suggest::suggestion;
 
 /// 汇总时每段最多几条。

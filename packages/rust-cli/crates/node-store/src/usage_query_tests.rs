@@ -6,9 +6,9 @@ use rust_cli_kernel_api::metering::{
     ActivityDay, ActivityQuery, ActivityRange, CallStatus, ModelCall, ModelTokens,
 };
 use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
+use rust_cli_kernel_api::store::StoreQueries;
 use rust_cli_kernel_api::store::{Fact, SessionKind, SessionStore};
 
-use super::{days_sql, sessions_sql};
 use crate::tests::{TestStore, batch, meta, started, user};
 
 const DAY: u64 = 86_400_000;
@@ -25,29 +25,20 @@ fn call(message: &str, model: &str, started: u64, duration: u64, status: CallSta
     };
     Fact::ModelCalled {
         call: ModelCall {
-            message: MessageId::new(message),
-            source,
-            selection: ModelSelection {
-                provider: "p".into(),
-                model: model.into(),
-                reasoning: None,
-                connection: None,
-            },
-            started_at_ms: started,
-            first_token_at_ms: None,
-            first_content_at_ms: None,
-            completed_at_ms: started + duration,
-            status,
-            stop_reason: None,
-            tool_calls: 0,
             usage: Some(Usage {
                 input_tokens: 100,
                 output_tokens: 20,
                 cache_creation_input_tokens: 5,
                 cache_read_input_tokens: 50,
             }),
-            retries: 0,
-            error: None,
+            ..ModelCall::new(
+                MessageId::new(message),
+                source,
+                ModelSelection::new("p", model),
+                started,
+                started + duration,
+                status,
+            )
         },
     }
 }
@@ -277,37 +268,6 @@ async fn legacy_rows_with_input_excluding_cache_keep_their_input() {
 }
 
 #[test]
-fn the_message_queries_only_scan_the_covering_index() {
-    // 大库也要快（usage.md §5.2）：会话在外层，消息只走覆盖索引，不读消息行（行里是大 JSON）。
-    let dir = tempfile::tempdir().unwrap();
-    let (conn, _) = crate::repo::open::open(
-        &dir.path().join("db.sqlite"),
-        crate::repo::open::MIGRATION_LOCK_WAIT,
-        1,
-    )
-    .unwrap();
-    for (sql, params) in [(sessions_sql(), 1), (days_sql(), 2)] {
-        let mut plan = conn.prepare(&format!("explain query plan {sql}")).unwrap();
-        let steps: Vec<String> = plan
-            .query_map(rusqlite::params_from_iter(vec![0_i64; params]), |row| {
-                row.get::<_, String>(3)
-            })
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        let text = steps.join("\n");
-        assert!(
-            text.contains("COVERING INDEX message_session_time_created_id_idx"),
-            "{sql}\n{text}"
-        );
-        assert!(
-            !text.contains("SCAN m\n") && !text.ends_with("SCAN m"),
-            "{text}"
-        );
-    }
-}
-
-#[test]
 fn dates_and_day_indexes_round_trip() {
     assert_eq!(super::day_index("1970-01-01"), Some(0));
     assert_eq!(super::day_index("2026-10-18"), Some(20_744));
@@ -356,12 +316,4 @@ fn day_indexes_match_the_old_parser() {
     ] {
         assert_eq!(super::day_index(text), old_day_index(text), "{text}");
     }
-}
-
-#[test]
-fn the_day_bucket_sql_text_is_unchanged() {
-    // F58：一天的毫秒数改为引用 base 的 `DAY_MS`（u64），SQL 里仍是同一段文字。
-    assert!(
-        days_sql().starts_with("select cast((m.time_created + ?1) / 86400000 as integer) as day")
-    );
 }

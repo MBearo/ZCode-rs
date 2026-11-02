@@ -172,3 +172,32 @@ test("环境变量名：产品代码里报，测试与示例程序里不报；na
       text,
     );
 });
+
+test("内置工具名：产品代码里整个字面量是工具名时报，测试不报；tool_names.rs 与登记的例外放行", () => {
+  const rules = {
+    ...policy,
+    VOLATILE_EXCEPTIONS: [
+      { files: ["crates/x/src/host.rs"], rules: ["built-in tool name"], reason: "shell 的名字" },
+    ],
+  };
+  const found = checkVolatileLiterals(
+    rules,
+    [
+      rust(PRODUCT, 'if tool == "Bash" { return "Read"; }'),
+      rust(TEST, 'let tool = "Bash";'),
+      rust("crates/kernel-api/src/tool_names.rs", 'pub const BASH: &str = "Bash";'),
+      rust("crates/x/src/host.rs", 'return "PowerShell".to_owned();'),
+    ],
+    [],
+  );
+  const names = found.filter((line) => /built-in tool name/.test(line));
+  assert.equal(names.length, 2, names.join("\n"));
+  assert.ok(names.every((line) => line.startsWith(`${PRODUCT}:1: built-in tool name`)));
+  // 旧名、更长的词与句子里的工具名不算。
+  for (const text of ['"Task"', '"KillShell"', '"Bash command"', '"Reader"', '"bash"'])
+    assert.deepEqual(
+      run([rust(PRODUCT, `let k = ${text};`)]).filter((line) => /built-in tool name/.test(line)),
+      [],
+      text,
+    );
+});

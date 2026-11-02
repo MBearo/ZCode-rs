@@ -5,7 +5,7 @@
 //! 父子关系在 `agents_tree`，排版在这里，§1.3）。
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::ids::AgentId;
@@ -15,8 +15,10 @@ use unicode_width::UnicodeWidthStr;
 use super::agents_tree::{Forest, TreeRow};
 use super::app::{Action, App};
 use super::i18n_panels as words;
+use super::keyboard;
 use super::panels::Panel;
 use super::text::truncate;
+use crate::ui::style::dim;
 use crate::view::Transcript;
 
 /// 窗口里最多的子代理行数。
@@ -68,10 +70,6 @@ impl Viewing {
     }
 }
 
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
-
 fn since(list: &AgentList, now: Instant) -> u64 {
     list.at
         .map_or(0, |at| now.saturating_duration_since(at).as_millis() as u64)
@@ -113,7 +111,7 @@ fn kind(entry: &SubagentEntry) -> &str {
 fn machine_suffix(entry: &SubagentEntry) -> String {
     entry
         .machine
-        .as_ref()
+        .remote()
         .map_or_else(String::new, |machine| format!(" @{machine}"))
 }
 
@@ -130,8 +128,8 @@ impl App {
     /// 这份快照在当前查看位置、当前时刻的样子（tui-panels.md §1.2）。
     fn forest(&self, now: Instant) -> Forest<'_> {
         Forest::new(
-            &self.agents.entries,
-            since(&self.agents, now),
+            &self.snapshots.agents.entries,
+            since(&self.snapshots.agents, now),
             self.viewing.as_ref().map(|v| &v.agent),
         )
     }
@@ -140,7 +138,8 @@ impl App {
     /// 停放的、正在查看的、结束不到 30 秒的都在。
     pub fn agent_rows(&self, now: Instant) -> Vec<&SubagentEntry> {
         let forest = self.forest(now);
-        self.agents
+        self.snapshots
+            .agents
             .entries
             .iter()
             .filter(|entry| !forest.evicted(entry))
@@ -169,7 +168,8 @@ impl App {
     /// 正在查看的子代理在列表快照里的条目（修复线 F112：查看时的状态行与命中率的查询对象都取自它）。
     pub fn viewed_entry(&self) -> Option<&SubagentEntry> {
         let viewing = self.viewing.as_ref()?;
-        self.agents
+        self.snapshots
+            .agents
             .entries
             .iter()
             .find(|entry| entry.agent == viewing.agent)
@@ -179,7 +179,7 @@ impl App {
     /// 否则回到主会话（`Some(None)`）。还在快照里、或没在查看时为 None。
     pub fn viewed_gone(&self, now: Instant) -> Option<Option<AgentId>> {
         let viewing = self.viewing.as_ref()?;
-        let entries = &self.agents.entries;
+        let entries = &self.snapshots.agents.entries;
         if entries.iter().any(|entry| entry.agent == viewing.agent) {
             return None;
         }
@@ -320,12 +320,16 @@ impl App {
             };
             let named: usize = name_spans.iter().map(|span| span.content.width()).sum();
             name_spans.push(Span::raw(" ".repeat(name_box.saturating_sub(named))));
-            let status = super::cells::duration(elapsed_ms(&self.agents, entry, now));
+            let status = super::cells::duration(elapsed_ms(&self.snapshots.agents, entry, now));
             // 等用户回答优先；否则接当前活动（L35，stall-visibility.md §4.3）。
             let doing = if entry.waiting {
                 (words::waiting(self.lang).to_owned(), false)
             } else if let Some(activity) = entry.activity.as_ref() {
-                words::activity(self.lang, activity, left_ms(&self.agents, activity, now))
+                words::activity(
+                    self.lang,
+                    activity,
+                    left_ms(&self.snapshots.agents, activity, now),
+                )
             } else {
                 (String::new(), false)
             };
@@ -404,7 +408,7 @@ impl App {
         now: Instant,
     ) -> Option<Action> {
         let rows = self.agent_tree(now);
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let ctrl = keyboard::ctrl(&key);
         match key.code {
             KeyCode::Up => self.focus = index.checked_sub(1).map(Focus::Agents),
             KeyCode::Char('p') if ctrl => self.focus = index.checked_sub(1).map(Focus::Agents),
@@ -457,12 +461,12 @@ impl App {
 
     /// 查看子代理时：esc 回到主会话，↓ 进入列表，翻页滚动，ctrl+o 详细视图；其余输入不生效（只读）。
     pub(super) fn viewing_key(&mut self, key: KeyEvent, now: Instant) -> Option<Action> {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let ctrl = keyboard::ctrl(&key);
         let page = self.viewport.saturating_sub(1).max(1) as isize;
         match key.code {
-            KeyCode::Esc if self.scroll > 0 => {
-                self.scroll = 0;
-                self.new_activity = false;
+            KeyCode::Esc if self.port.scroll > 0 => {
+                self.port.scroll = 0;
+                self.port.new_activity = false;
                 None
             }
             KeyCode::Esc => Some(Action::Panel(Panel::ViewAgent(None))),

@@ -14,7 +14,7 @@ use super::i18n_projects::{self as words, PreviewLabel as Label};
 use super::layout;
 use super::mouse::Target;
 use super::palette::Palette;
-use super::resume::{Preview, ResumePage, TranscriptState};
+use super::resume::{Confirm, CwdPrompt, Modal, Preview, ResumePage, TranscriptState};
 use super::resume_footer::{footer_hints, hint_row, progress};
 use super::session_rows::{SessionRow, center_truncate, relative, relative_long, timestamp};
 use super::text::{truncate, truncate_line, wrap_text};
@@ -342,14 +342,18 @@ impl App {
 /// 画 `/resume` 页。`page` 是从 `app.overlay` 里取出来的（画完由调用方放回），滚动位置与列表高度写回它。
 pub fn draw(frame: &mut Frame<'_>, app: &mut App, page: &mut ResumePage, now_ms: u64) {
     let area = frame.area();
-    app.hits = super::mouse::Hits::default();
-    if let Some(TranscriptState::Shown(shown)) = page.transcript.as_mut() {
-        super::resume_transcript::draw(frame, app, shown, now_ms);
-        return;
-    }
-    if page.cwd.is_some() {
-        draw_cwd(frame, app, page);
-        return;
+    app.pointer.hits = super::mouse::Hits::default();
+    match page.modal.as_mut() {
+        Some(Modal::Transcript(TranscriptState::Shown(shown))) => {
+            return super::resume_transcript::draw(frame, app, shown, now_ms);
+        }
+        Some(Modal::Cwd(prompt)) => return draw_cwd(frame, app, prompt),
+        Some(
+            Modal::Transcript(TranscriptState::Loading(_))
+            | Modal::Rename { .. }
+            | Modal::Confirm(_),
+        )
+        | None => {}
     }
     let lang = app.lang;
     let width = area.width as usize;
@@ -379,7 +383,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, page: &mut ResumePage, now_ms:
     );
     let search = if let Some(error) = &page.error {
         Line::from(Span::styled(error.clone(), Style::default().fg(Color::Red)))
-    } else if let Some((_, input)) = &page.rename {
+    } else if let Some(Modal::Rename { input, .. }) = &page.modal {
         Line::from(vec![
             Span::styled(
                 words::rename_prefix(lang),
@@ -435,7 +439,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, page: &mut ResumePage, now_ms:
             ),
         );
     }
-    let rows: Vec<Line<'static>> = if page.confirm.is_some() {
+    let confirm = match &page.modal {
+        Some(Modal::Confirm(confirm)) => Some(confirm),
+        Some(Modal::Rename { .. } | Modal::Cwd(_) | Modal::Transcript(_)) | None => None,
+    };
+    let rows: Vec<Line<'static>> = if confirm.is_some() {
         vec![
             super::key_hint::line(1, words::select_hint(lang), &app.palette),
             Line::default(),
@@ -452,10 +460,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, page: &mut ResumePage, now_ms:
             frame.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
         }
     }
-    if page.confirm.is_some() {
-        draw_confirm(frame, app, page, list_area);
+    if let Some(confirm) = confirm {
+        draw_confirm(frame, app, confirm, list_area);
     }
-    if matches!(page.transcript, Some(TranscriptState::Loading(_))) {
+    if matches!(
+        page.modal,
+        Some(Modal::Transcript(TranscriptState::Loading(_)))
+    ) {
         draw_loading(frame, app, list_area);
     }
 }
@@ -536,7 +547,8 @@ fn draw_list(
                 break 'blocks;
             }
             if offset == 0 {
-                app.hits
+                app.pointer
+                    .hits
                     .regions
                     .push((Rect::new(area.x, y, area.width, 1), Target::Session(index)));
             }
@@ -572,10 +584,7 @@ fn draw_list(
 }
 
 /// 删除确认（列表区域的下方）：标题、说明、取消与删除两个选项。
-fn draw_confirm(frame: &mut Frame<'_>, app: &App, page: &ResumePage, list: Rect) {
-    let Some(confirm) = &page.confirm else {
-        return;
-    };
+fn draw_confirm(frame: &mut Frame<'_>, app: &App, confirm: &Confirm, list: Rect) {
     let lang = app.lang;
     let width = list.width as usize;
     let bold = Style::default().add_modifier(Modifier::BOLD);
@@ -640,10 +649,7 @@ fn draw_loading(frame: &mut Frame<'_>, app: &App, list: Rect) {
 }
 
 /// 目录选择：标题、两行说明、两个选项、按键提示，纵向居中。
-fn draw_cwd(frame: &mut Frame<'_>, app: &App, page: &ResumePage) {
-    let Some(prompt) = &page.cwd else {
-        return;
-    };
+fn draw_cwd(frame: &mut Frame<'_>, app: &App, prompt: &CwdPrompt) {
     let area = frame.area();
     let lang = app.lang;
     let width = area.width as usize;

@@ -3,17 +3,13 @@
 use rust_cli_base::hosts;
 use rust_cli_kernel_api::ids::{AgentId, RunId, SessionId};
 use rust_cli_kernel_api::model::{ModelRequest, QuerySource, RequestOptions};
+use rust_cli_kernel_api::side_request::SideSource;
 
 use super::*;
 
 fn request(source: QuerySource, options: RequestOptions) -> ModelRequest {
     ModelRequest {
-        selection: rust_cli_kernel_api::model::ModelSelection {
-            provider: "p".to_owned(),
-            model: "m".to_owned(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: rust_cli_kernel_api::model::ModelSelection::new("p".to_owned(), "m".to_owned()),
         system: Vec::new(),
         messages: Vec::new(),
         tools: Vec::new(),
@@ -38,21 +34,15 @@ fn query_sources_use_the_node_names() {
         (QuerySource::MainThread, "main_turn"),
         (QuerySource::Subagent("Explore".to_owned()), "subagent"),
         (QuerySource::Compact, "compact"),
+        (QuerySource::Side(SideSource::SessionTitle), "session_title"),
         (
-            QuerySource::Side("generate_session_title".to_owned()),
-            "session_title",
-        ),
-        (
-            QuerySource::Side("web_fetch_apply".to_owned()),
+            QuerySource::Side(SideSource::WebFetch),
             "web_fetch_processing",
         ),
+        (QuerySource::Side(SideSource::WebSearch), "web_search_tool"),
+        (QuerySource::Side(SideSource::HookPrompt), "hook_prompt"),
         (
-            QuerySource::Side("web_search_tool".to_owned()),
-            "web_search_tool",
-        ),
-        (QuerySource::Side("hook_prompt".to_owned()), "hook_prompt"),
-        (
-            QuerySource::Side("rename_generate_name".to_owned()),
+            QuerySource::Side(SideSource::Rename),
             "rename_generate_name",
         ),
     ] {
@@ -92,10 +82,7 @@ fn session_types_and_missing_parts() {
         agent: Some(AgentId::new("agent_a1")),
         ..RequestOptions::default()
     };
-    let origin = Origin::of(&request(
-        QuerySource::Side("web_search_tool".to_owned()),
-        child,
-    ));
+    let origin = Origin::of(&request(QuerySource::Side(SideSource::WebSearch), child));
     let headers = headers(&origin, "http://127.0.0.1:9", "t", "q".to_owned());
     assert_eq!(headers[1], (SESSION_TYPE, "subagent".to_owned()));
     assert_eq!(headers.last(), Some(&(SESSION_ID, "a1".to_owned())));
@@ -123,20 +110,15 @@ fn headers_of(origin: &Origin, base_url: &str) -> Vec<(&'static str, String)> {
 /// 不合 `^[A-Za-z0-9_.:-]{1,128}$` 的用途名不发；OpenCode Go 的端点另带会话头。
 #[test]
 fn invalid_sources_are_dropped_and_opencode_gets_the_session() {
+    // 本工程的来源名都是合格的常量（`SideSource`）；规则照 Node 留着，按名字直接试。
     for name in ["has space", "", &"a".repeat(129), "中文"] {
-        let origin = Origin::of(&request(
-            QuerySource::Side(name.to_owned()),
-            RequestOptions::default(),
-        ));
+        let origin = Origin::sourced(name, &RequestOptions::default());
         assert!(
             !names(&headers_of(&origin, "http://127.0.0.1:9")).contains(&QUERY_SOURCE),
             "{name}"
         );
     }
-    let origin = Origin::of(&request(
-        QuerySource::Side("a.b:c-d_1".to_owned()),
-        RequestOptions::default(),
-    ));
+    let origin = Origin::sourced("a.b:c-d_1", &RequestOptions::default());
     assert!(
         headers_of(&origin, "http://127.0.0.1:9").contains(&(QUERY_SOURCE, "a.b:c-d_1".to_owned()))
     );
@@ -170,13 +152,12 @@ fn request_headers_match_node() {
     assert!(cases.len() >= 50);
     for case in cases {
         let text = |key: &str| case[key].as_str().map(str::to_owned);
+        let name = case["source"]["name"].as_str().unwrap_or_default();
         let source = match case["source"]["kind"].as_str().unwrap() {
-            "main_thread" => QuerySource::MainThread,
-            "subagent" => {
-                QuerySource::Subagent(case["source"]["name"].as_str().unwrap().to_owned())
-            }
-            "compact" => QuerySource::Compact,
-            _ => QuerySource::Side(case["source"]["name"].as_str().unwrap().to_owned()),
+            "main_thread" => Some(QuerySource::MainThread),
+            "subagent" => Some(QuerySource::Subagent(name.to_owned())),
+            "compact" => Some(QuerySource::Compact),
+            _ => SideSource::from_wire(name).map(QuerySource::Side),
         };
         let options = RequestOptions {
             session_id: text("session").map(SessionId::new),
@@ -184,7 +165,11 @@ fn request_headers_match_node() {
             agent: text("agent").map(AgentId::new),
             ..RequestOptions::default()
         };
-        let origin = Origin::of(&request(source, options));
+        // 夹具里校验不过的名字不是本工程的来源：按名字直接给。
+        let origin = match source {
+            Some(source) => Origin::of(&request(source, options)),
+            None => Origin::sourced(name, &options),
+        };
         let ours = headers(
             &origin,
             case["baseUrl"].as_str().unwrap(),

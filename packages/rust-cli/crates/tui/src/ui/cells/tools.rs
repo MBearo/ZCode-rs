@@ -11,8 +11,7 @@ use super::{
 };
 use crate::ui::markdown;
 use crate::ui::text::{truncate, truncate_line, wrap};
-use crate::view::{ToolRow, ToolStatus};
-use rust_cli_kernel_api::mcp_state::WAIT_FOR_MCP_SERVERS;
+use crate::view::{ToolKind, ToolRow, ToolStatus};
 
 /// 紧凑模式下输出保留开头的行数。
 const HEAD: usize = 3;
@@ -20,8 +19,6 @@ const HEAD: usize = 3;
 const EXPANDED_LIMIT: usize = 400;
 /// 紧凑模式下命令参数最多的字符数。
 const COMMAND_LIMIT: usize = 160;
-
-pub(super) const PATCH_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
 /// 参数摘要：`键: 值, 键: 值`（按 JSON 写值，字符串带引号）。远端的 `machine` 不写在这里，接在行尾（`@机器`，
 /// remote-exec.md §21.6）。
@@ -71,16 +68,16 @@ pub(super) fn head_parts(tool: &ToolRow, ctx: &Ctx<'_>) -> (String, Option<Strin
         let text = format!("input JSON failed to parse \u{2014} {} bytes", unparsed.len);
         return (name.to_owned(), Some(text), "");
     }
-    if let Some(rest) = name.strip_prefix("mcp__") {
-        let label = rest.replacen("__", ".", 1);
-        return (label, Some(args_summary(args)), " (MCP)");
-    }
-    // WaitForMcpServers（ext.md §3.8，修复线 F36）：显示名与参数位置。
-    if name == WAIT_FOR_MCP_SERVERS {
-        return (WAIT_LABEL.to_owned(), Some(wait_for_servers(args)), "");
-    }
-    let args_text = match name {
-        "Read" => path(&["file_path", "path"]).map(|mut path| {
+    let args_text = match tool.kind {
+        ToolKind::Mcp => {
+            let label = super::group::mcp_label(name);
+            return (label, Some(args_summary(args)), " (MCP)");
+        }
+        // WaitForMcpServers（ext.md §3.8，修复线 F36）：显示名与参数位置。
+        ToolKind::WaitForMcpServers => {
+            return (WAIT_LABEL.to_owned(), Some(wait_for_servers(args)), "");
+        }
+        ToolKind::Read => path(&["file_path", "path"]).map(|mut path| {
             if ctx.expanded
                 && let Some(offset) = args["offset"].as_u64()
             {
@@ -91,7 +88,7 @@ pub(super) fn head_parts(tool: &ToolRow, ctx: &Ctx<'_>) -> (String, Option<Strin
             }
             path
         }),
-        "Bash" => {
+        ToolKind::Bash => {
             let command = args["command"].as_str().unwrap_or_default();
             Some(if ctx.expanded {
                 command.to_owned()
@@ -104,19 +101,25 @@ pub(super) fn head_parts(tool: &ToolRow, ctx: &Ctx<'_>) -> (String, Option<Strin
                 text
             })
         }
-        "Grep" | "Glob" => {
+        ToolKind::Grep | ToolKind::Glob => {
             let mut text = format!("pattern: {}", args["pattern"]);
             if let Some(path) = path(&["path"]) {
                 text.push_str(&format!(", path: \"{path}\""));
             }
             Some(text)
         }
-        "List" | "LS" => Some(path(&["path"]).unwrap_or_else(|| ".".into())),
-        "WebSearch" => args["query"].as_str().map(str::to_owned),
-        "WebFetch" => args["url"].as_str().map(str::to_owned),
-        "AskUserQuestion" => None,
-        _ if PATCH_TOOLS.contains(&name) => path(&["file_path", "notebook_path", "path"]),
-        _ => Some(args_summary(args)),
+        ToolKind::List => Some(path(&["path"]).unwrap_or_else(|| ".".into())),
+        ToolKind::WebSearch => args["query"].as_str().map(str::to_owned),
+        ToolKind::WebFetch => args["url"].as_str().map(str::to_owned),
+        ToolKind::AskUserQuestion => None,
+        ToolKind::Edit | ToolKind::MultiEdit | ToolKind::Write | ToolKind::NotebookEdit => {
+            path(&["file_path", "notebook_path", "path"])
+        }
+        ToolKind::ExitPlanMode
+        | ToolKind::Agent
+        | ToolKind::TodoRead
+        | ToolKind::ToolSearch
+        | ToolKind::Other => Some(args_summary(args)),
     };
     (name.to_owned(), args_text, "")
 }
@@ -246,7 +249,7 @@ fn counted_line((before, count, after): Counted) -> Line<'static> {
 
 /// 搜索类工具的计数：（数，单位）。数从输出取。
 fn search_count(tool: &ToolRow, lines: &[String]) -> (u64, &'static str) {
-    let name = tool.name.as_str();
+    let grep = tool.kind == ToolKind::Grep;
     let first = lines.first().map(String::as_str).unwrap_or_default();
     let leading = |line: &str, word: &str| {
         line.strip_prefix(word)
@@ -259,11 +262,11 @@ fn search_count(tool: &ToolRow, lines: &[String]) -> (u64, &'static str) {
             .filter(|line| !line.trim().is_empty() && !skip(line))
             .count() as u64
     };
-    if matches!(name, "List" | "LS") {
+    if tool.kind == ToolKind::List {
         return (non_empty(&|_| false), "paths");
     }
     match tool.input["output_mode"].as_str() {
-        Some("content") if name == "Grep" => {
+        Some("content") if grep => {
             if first == "No matches found" {
                 return (0, "lines");
             }
@@ -272,7 +275,7 @@ fn search_count(tool: &ToolRow, lines: &[String]) -> (u64, &'static str) {
                 "lines",
             )
         }
-        Some("count") if name == "Grep" => {
+        Some("count") if grep => {
             let total = lines.iter().find_map(|line| leading(line, "Found "));
             (total.unwrap_or_else(|| non_empty(&|_| false)), "matches")
         }
@@ -338,7 +341,7 @@ pub fn tool(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
 
 /// 普通工具行（Agent 认不出结果、失败或中断时也用它）。
 pub(super) fn plain(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    if tool.name == "ExitPlanMode" && !tool.status.is_live() {
+    if tool.kind == ToolKind::ExitPlanMode && !tool.status.is_live() {
         return plan(tool, ctx);
     }
     let mut lines = head(tool, ctx);
@@ -367,7 +370,7 @@ pub(super) fn plain(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
         ToolStatus::Approval => lines.push(detail_line(words::waiting(ctx.lang).into(), dim())),
         ToolStatus::Cancelled => lines.push(detail_line(words::interrupted(ctx.lang), dim())),
         ToolStatus::Error => lines.extend(output_block(&output, red(), ctx)),
-        ToolStatus::Running if output.is_empty() && tool.name == "Bash" => {
+        ToolStatus::Running if output.is_empty() && tool.kind == ToolKind::Bash => {
             lines.push(detail_line(words::running(ctx.lang).into(), dim()));
         }
         ToolStatus::Running | ToolStatus::Pending if output.is_empty() => {}
@@ -386,12 +389,11 @@ pub(super) fn plain(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
 
 /// 成功后的细节行。
 fn details(tool: &ToolRow, output: &[String], ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    let name = tool.name.as_str();
-    if PATCH_TOOLS.contains(&name) {
-        return patch::details(tool, ctx);
-    }
-    match name {
-        "Read" => {
+    match tool.kind {
+        ToolKind::Edit | ToolKind::MultiEdit | ToolKind::Write | ToolKind::NotebookEdit => {
+            patch::details(tool, ctx)
+        }
+        ToolKind::Read => {
             let numbered = output
                 .iter()
                 .filter(|line| {
@@ -408,22 +410,30 @@ fn details(tool: &ToolRow, output: &[String], ctx: &Ctx<'_>) -> Vec<Line<'static
                 _ => vec![counted_line(words::read_lines(ctx.lang, numbered))],
             }
         }
-        "Grep" | "Glob" | "List" | "LS" => {
+        ToolKind::Grep | ToolKind::Glob | ToolKind::List => {
             let (count, unit) = search_count(tool, output);
             vec![counted_line(words::found(ctx.lang, count, unit))]
         }
-        "AskUserQuestion" => answers(tool)
+        ToolKind::AskUserQuestion => answers(tool)
             .into_iter()
             .flat_map(|(question, answer)| {
                 detail_text(&format!("· {question} → {answer}"), Style::default(), ctx)
             })
             .collect(),
-        "Bash" if output.is_empty() => {
+        ToolKind::Bash if output.is_empty() => {
             vec![detail_line(words::no_output(ctx.lang).into(), dim())]
         }
         // 没有结果的渲染：成功时不画结果（失败照常画错误文字）。
-        WAIT_FOR_MCP_SERVERS => Vec::new(),
-        _ => output_block(output, dim(), ctx),
+        ToolKind::WaitForMcpServers => Vec::new(),
+        ToolKind::Bash
+        | ToolKind::WebSearch
+        | ToolKind::WebFetch
+        | ToolKind::ExitPlanMode
+        | ToolKind::Agent
+        | ToolKind::TodoRead
+        | ToolKind::ToolSearch
+        | ToolKind::Mcp
+        | ToolKind::Other => output_block(output, dim(), ctx),
     }
 }
 

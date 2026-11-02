@@ -76,9 +76,9 @@ fn transport(
                 .map(|(key, value)| (key, expand(&value)))
                 .collect();
             Ok(if kind == "sse" {
-                McpTransportConfig::Sse { url, headers }
+                McpTransportConfig::sse(url, headers)
             } else {
-                McpTransportConfig::Http { url, headers }
+                McpTransportConfig::http(url, headers)
             })
         }
         other => Err(format!("unsupported transport type \"{other}\"")),
@@ -134,7 +134,7 @@ pub fn parse_servers_keeping(
                     scope,
                     transport,
                     options: Default::default(),
-                    machine: None,
+                    machine: Default::default(),
                 });
             }
             Err(reason) => warnings.push(format!("MCP server \"{name}\" skipped: {reason}")),

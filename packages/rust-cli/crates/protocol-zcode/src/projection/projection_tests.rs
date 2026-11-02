@@ -4,7 +4,9 @@ use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
     CommandId, EnvironmentId, InteractionId, MessageId, SessionId, ToolUseId, TraceId, TurnId,
 };
-use rust_cli_kernel_api::message::{AssistantMessage, Message, UserMessage, UserOrigin};
+use rust_cli_kernel_api::message::{
+    AssistantMessage, Message, ToolResultContent, UserMessage, UserOrigin,
+};
 use rust_cli_kernel_api::model::BlockDelta;
 use rust_cli_kernel_api::orchestration::InteractionRequest;
 use rust_cli_kernel_api::store::{SessionKind, SessionMeta};
@@ -14,8 +16,8 @@ use serde_json::json;
 use super::*;
 
 fn view(messages: Vec<Message>) -> SessionView {
-    SessionView {
-        meta: SessionMeta {
+    SessionView::new(
+        SessionMeta {
             id: SessionId::new("session_1"),
             kind: SessionKind::Interactive,
             parent: None,
@@ -28,20 +30,9 @@ fn view(messages: Vec<Message>) -> SessionView {
             created_at_ms: 1000,
         },
         messages,
-        selection: selection(),
-        mode: PermissionMode::Default,
-        plan: false,
-        pending: Vec::new(),
-        queue: Vec::new(),
-        last_seq: 0,
-        revision: 0,
-        running: false,
-        background: Vec::new(),
-        peer_held: Vec::new(),
-        context_usage: None,
-        context_notice: Default::default(),
-        output_speed: None,
-    }
+        selection(),
+        PermissionMode::Default,
+    )
 }
 
 fn user(id: &str, text: &str) -> Message {
@@ -234,8 +225,9 @@ fn a_permission_ask_marks_the_tool_and_lists_the_interaction() {
             input: json!({"file_path": "/w/a.txt"}),
             message: "Write a.txt?".into(),
             suggestions: Vec::new(),
+            rule_seed: None,
             asked_by: None,
-            machine: None,
+            machine: Default::default(),
         },
     });
     assert_eq!(asked[0]["row"]["status"], "pendingApproval");

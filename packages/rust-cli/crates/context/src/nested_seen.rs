@@ -4,14 +4,16 @@
 //! 性能修复：以前每一步（只要上一步有 Read / Write / Edit）都从头扫一遍压缩边界后的全部历史，配对全部工具调用与结果。
 //! 这里缓存上一次的计算结果和它覆盖的历史前缀；这一步的历史以它为前缀时只处理新增的消息，否则从头算。缓存只是历史的
 //! 计算结果（历史是唯一来源，与 readFileState 冷恢复同源），不另存会话状态，丢了可以重算；会话关闭时与规则缓存一起释放。
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 
+use rust_cli_kernel_api::history::touched_file;
 use rust_cli_kernel_api::ids::{MessageId, SessionId, ToolUseId};
 use rust_cli_kernel_api::message::{ContentBlock, Message};
 use serde_json::Value;
 
-use super::{SOURCE, TRIGGERING};
+use super::SOURCE;
 use crate::rules::Scope;
 use rust_cli_kernel_api::env_files::PathStyle;
 
@@ -91,13 +93,10 @@ impl Tracked {
                     let ContentBlock::ToolUse { id, name, input } = block else {
                         continue;
                     };
-                    let path = input.get("file_path").and_then(Value::as_str);
-                    let Some(path) = path.filter(|path| !path.is_empty()) else {
+                    // 与从头算的写法同一条规则（kernel-api `history::touched_file`，F132 的 T9）。
+                    let Some(path) = touched_file(name, input) else {
                         continue;
                     };
-                    if !TRIGGERING.contains(&name.as_str()) {
-                        continue;
-                    }
                     let key = scope.style.key(&scope.resolve(path));
                     self.uses.entry(id.clone()).or_default().push(key.clone());
                     if self.ok(id) {
@@ -123,7 +122,7 @@ impl Seen {
         scope: &Scope<'_>,
         history: &[Message],
     ) -> HashSet<String> {
-        let mut sessions = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut sessions = self.0.lock_unpoisoned();
         let tracked = sessions.entry(session.clone()).or_default();
         let base = (scope.cwd.clone(), scope.home.clone(), scope.style);
         if !tracked.covers(history, &base) {
@@ -148,9 +147,6 @@ impl Seen {
 
     /// 会话关闭：释放它的缓存。
     pub(crate) fn forget(&self, session: &SessionId) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(session);
+        self.0.lock_unpoisoned().remove(session);
     }
 }

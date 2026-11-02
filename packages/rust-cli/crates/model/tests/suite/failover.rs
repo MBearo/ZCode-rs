@@ -12,15 +12,17 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::model::{
-    ModelError, ModelNotice, ModelPort, ModelSelection, ModelStreamItem, QuerySource,
+    ModelError, ModelNotice, ModelPort, ModelStreamItem, QuerySource,
 };
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, ModelEndpoints, WireProtocol};
-use rust_cli_model::ProviderModel;
+use rust_cli_kernel_api::provider::{
+    Credential, EndpointQuery, ModelCapabilities, ModelEndpoint, ModelEndpoints, WireProtocol,
+};
+use rust_cli_model::{ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use super::common::{clock, collect, fast_retry, model_at, request, text_response};
+use super::common::{clock, collect, fast_retry, model_at, model_with, request, text_response};
 use super::fixture::{Fixture, Reply};
 
 /// 账号模型的替身：每次取端点给出下一个令牌，并记下被拒的令牌。
@@ -32,28 +34,29 @@ struct Rotating {
 
 #[async_trait]
 impl ModelEndpoints for Rotating {
-    async fn endpoint(
-        &self,
-        selection: &ModelSelection,
-        rejected: Option<&ModelEndpoint>,
-    ) -> Result<ModelEndpoint, ModelError> {
+    async fn endpoint(&self, query: EndpointQuery<'_>) -> Result<ModelEndpoint, ModelError> {
+        let EndpointQuery {
+            selection,
+            rejected,
+            ..
+        } = query;
         if let Some(Credential::ApiKey(key)) = rejected.map(|endpoint| &endpoint.credential) {
             self.rejected.lock().unwrap().push(key.expose().to_owned());
         }
         let mut issued = self.issued.lock().unwrap();
         *issued += 1;
         Ok(ModelEndpoint {
-            supports_pdf: false,
-            supports_video: false,
-            supports_audio: false,
             protocol: WireProtocol::AnthropicMessages,
             base_url: self.base_url.clone(),
             model: format!("{}-api", selection.model),
             credential: Credential::ApiKey(RedactedString::new(format!("token-{issued}"))),
             headers: Vec::new(),
             body_patches: Vec::new(),
-            mid_conversation_system: true,
-            supports_image: true,
+            capabilities: ModelCapabilities {
+                supports_mid_conversation_system: true,
+                supports_image: true,
+                ..ModelCapabilities::default()
+            },
             renewable: true,
         })
     }
@@ -77,7 +80,15 @@ async fn a_rejected_account_credential_is_renewed_once_per_failure() {
         rejected: Mutex::new(Vec::new()),
     });
     let egress = Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap());
-    let model = ProviderModel::new(egress, endpoints.clone(), clock()).with_retry(fast_retry(2));
+    let model = ProviderModel::new(
+        egress,
+        endpoints.clone(),
+        clock(),
+        RouteOptions {
+            retry: fast_retry(2),
+            ..RouteOptions::default()
+        },
+    );
     let events = collect(&model, request("hi", QuerySource::MainThread)).await;
     assert!(events.iter().all(Result::is_ok), "{events:?}");
     let requests = server.requests();
@@ -146,9 +157,15 @@ async fn opus_models_stop_after_three_overloads_without_a_fallback() {
 async fn a_sandbox_keeps_retrying_overloaded_opus_requests() {
     let replies = (0..4).map(|_| error(529, "overloaded_error")).collect();
     let server = Fixture::start(replies).await;
-    let model = model_at(server.url(), fast_retry(3))
-        .await
-        .with_overload_retries_in_sandbox(true);
+    let model = model_with(
+        server.url(),
+        RouteOptions {
+            retry: fast_retry(3),
+            sandbox: true,
+            ..RouteOptions::default()
+        },
+    )
+    .await;
     let mut opus = request("hi", QuerySource::MainThread);
     opus.selection.model = models::OPUS_5_5.to_owned();
     let events = collect(&model, opus).await;

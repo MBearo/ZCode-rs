@@ -6,8 +6,8 @@
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::ids::CommandId;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
-use rust_cli_kernel_api::session_api::{Ack, KernelEvent};
-use rust_cli_kernel_api::store::Fact;
+use rust_cli_kernel_api::session_api::Ack;
+use rust_cli_kernel_api::store::StoreError;
 use rust_cli_kernel_api::user_command::{
     LOCAL_COMMAND_CAVEAT_SOURCE, LOCAL_COMMAND_INPUT_SOURCE, LOCAL_COMMAND_META_SOURCE,
     LOCAL_COMMAND_OUTPUT_SOURCE, LocalCommandRecord,
@@ -83,18 +83,9 @@ impl Actor {
         &mut self,
         command: Option<CommandId>,
         messages: Vec<Message>,
-    ) -> Result<(), String> {
-        let facts = messages
-            .iter()
-            .map(|message| Fact::MessageAppended {
-                message: message.clone(),
-            })
-            .collect();
-        self.commit(command, facts).await?;
-        for message in messages {
-            self.messages.push(message.clone());
-            self.log.append(KernelEvent::MessageDone { message });
-        }
+    ) -> Result<(), StoreError> {
+        let appended = self.append(command, messages, Vec::new()).await?;
+        self.after_commit(appended).await;
         Ok(())
     }
 }

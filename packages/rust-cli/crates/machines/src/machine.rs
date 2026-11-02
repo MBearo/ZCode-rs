@@ -1,14 +1,16 @@
 //! 连接状态机的驱动（remote-exec.md §19.10）：跑部署与握手，订阅 exec-client 的连接状态，把状态发到一个 `watch`。
 //! 状态只由这里改（[`Machine::apply`]）：每次都经纯函数 [`transition`]。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rust_cli_base::{Task, TaskScope};
 use rust_cli_exec_client::{ClientError, ClientOptions, ConnectionState, ExecClient};
-use rust_cli_exec_transport::{Connector, LinkError, ProvisionStep, Provisioned, Provisioner};
+use rust_cli_exec_transport::{Connector, LinkError};
 use tokio::sync::watch;
 
+use crate::provision::{ProvisionStep, Provisioned, Provisioner};
 use crate::state::{MachineError, MachineEvent, MachineState, Retry, Welcomed, transition};
 
 /// 一台机器怎么到达（组装根注入；SSH 的实现在 cli，用 ssh-connect）。
@@ -194,9 +196,7 @@ impl Machine {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    mutex.lock_unpoisoned()
 }
 
 /// 把 exec-client 的连接状态换成机器的事件。

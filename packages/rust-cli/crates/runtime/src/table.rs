@@ -8,12 +8,16 @@
 //! `the session is closed`。现在关闭第一步就把条目标成 Closing，打开同一个会话等它移出再冷加载；并发的打开也不再
 //! 各自冷加载（Loading）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use rust_cli_base::TaskScope;
 use rust_cli_context::PromptAssembler;
 use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::machine::Files;
+use rust_cli_kernel_api::permission::ProjectRules;
+use rust_cli_kernel_api::store::LoadedSession;
 use rust_cli_policy::PolicyGate;
 use rust_cli_session::{Opened, Session, SessionDeps, SessionState};
 use tokio_util::sync::CancellationToken;
@@ -66,7 +70,7 @@ impl Slot {
 pub(crate) type OpenSessions = Arc<Mutex<HashMap<SessionId, Slot>>>;
 
 fn lock(sessions: &Mutex<HashMap<SessionId, Slot>>) -> MutexGuard<'_, HashMap<SessionId, Slot>> {
-    sessions.lock().unwrap_or_else(PoisonError::into_inner)
+    sessions.lock_unpoisoned()
 }
 
 /// 看表的结果。
@@ -110,17 +114,62 @@ impl Drop for Loading<'_> {
     }
 }
 
-/// 会话关闭的收尾（session-lifecycle.md §3.3，R1-1）：关闭开始时把条目标成 Closing；关完时清掉各能力按会话保存的表，
-/// 最后移出条目（释放它的任务作用域）。所有按会话的表都在这一条关闭路径上释放；执行环境与定时任务由会话自己在调用
-/// `released` 之前释放。会话表用弱引用：表里的会话持有这个收尾者，强引用会成环。
-pub(crate) struct Closer {
-    pub(crate) sessions: Weak<Mutex<HashMap<SessionId, Slot>>>,
+/// 会话之外、各能力按会话保存的状态（工作线 F130，审查 C10）：冷加载时恢复（[`Self::restored`]）与关闭时释放
+/// （[`Self::released`]）都在这里列一次，加一种按会话的表只改这一处。
+pub(crate) struct SessionScoped {
+    /// 规则文件缓存与 nested memory 的已读记录（`/clear` 清掉，resume 从历史重建）。
     pub(crate) context: Arc<PromptAssembler>,
+    /// “先读后改”记录（tools-files.md §4）。
     pub(crate) read_files: Arc<rust_cli_tools::ReadFileState>,
     pub(crate) worktrees: Arc<rust_cli_tools::WorktreeBoard>,
+    /// 判决链里 Node 群协作会话的规则（修复线 F2）。
     pub(crate) gate: Arc<PolicyGate>,
     /// WaitForMcpServers 的 declared 按会话记，会话关闭时清掉（ext.md §3.8、D34）。
     pub(crate) mcp: Arc<rust_cli_ext::McpManager>,
+}
+
+impl SessionScoped {
+    /// 冷加载之后、启动 actor 之前：Node 群协作会话（`permission.scope = session`）的规则只在会话行里，这个会话的判决
+    /// 用它代替本机项目规则集（修复线 F2，shell-permissions.md §5）；“先读后改”记录按模型侧的历史重建（基准是工作区根）。
+    ///
+    /// 缺陷修复（D4，tools-files.md §4）：以前冷加载不恢复“先读后改”记录（`restore_file_state` 没有调用方），关闭后再打开
+    /// 或重启续写，Read 过的文件 Edit 时报 `File has not been read yet`。
+    pub(crate) async fn restored(
+        &self,
+        session: &SessionId,
+        loaded: &LoadedSession,
+        rules: Option<&ProjectRules>,
+        files: &dyn Files,
+    ) {
+        if let Some(rules) = rules {
+            self.gate.scope(session, rules);
+        }
+        rust_cli_tools::restore_file_state(
+            &self.read_files,
+            session,
+            &loaded.messages,
+            files,
+            &loaded.meta.workspace,
+        )
+        .await;
+    }
+
+    /// 关闭的最后一步：清掉各能力按会话保存的表。`/clear` 清 readFileState 与规则文件缓存；resume 从历史重建它们。
+    fn released(&self, session: &SessionId) {
+        self.context.session_closed(session);
+        self.read_files.forget(session);
+        self.worktrees.forget(session);
+        self.gate.release(session);
+        self.mcp.release(session);
+    }
+}
+
+/// 会话关闭的收尾（session-lifecycle.md §3.3，R1-1）：关闭开始时把条目标成 Closing；关完时释放会话之外按会话保存的
+/// 状态（[`SessionScoped`]），最后移出条目（释放它的任务作用域）。执行环境与定时任务由会话自己在调用 `released` 之前
+/// 释放。会话表用弱引用：表里的会话持有这个收尾者，强引用会成环。
+pub(crate) struct Closer {
+    pub(crate) sessions: Weak<Mutex<HashMap<SessionId, Slot>>>,
+    pub(crate) scoped: SessionScoped,
 }
 
 impl rust_cli_session::Released for Closer {
@@ -144,12 +193,7 @@ impl rust_cli_session::Released for Closer {
     }
 
     fn released(&self, session: &SessionId) {
-        // `/clear` 清 readFileState 与规则文件缓存；resume 从历史重建它们。
-        self.context.session_closed(session);
-        self.read_files.forget(session);
-        self.worktrees.forget(session);
-        self.gate.release(session);
-        self.mcp.release(session);
+        self.scoped.released(session);
         // 最后移出条目：释放作用域会中止这个会话剩下的任务（actor 已经退出，只剩标题等旁路任务）；Closing 的令牌随之
         // 丢弃，等它的打开醒来冷加载，看到的是上面已经清干净的表（先清后移，顺序不能反）。
         let slot = self.sessions.upgrade().and_then(|sessions| {
@@ -215,9 +259,7 @@ impl LocalKernel {
             ids: self.ports.ids.clone(),
             runner: self.runner.clone(),
             compactor: self.compactor.clone(),
-            machine: self.machine.clone(),
             machines: self.ports.environments.clone(),
-            local: self.local.clone(),
             max_turns: self.defaults.max_turns,
             agents: self.agents.clone(),
             cron: self.cron.clone(),
@@ -226,7 +268,7 @@ impl LocalKernel {
             inputs: self.inputs.clone(),
             artifacts: self.ports.artifacts.clone(),
             clock: self.ports.clock.clone(),
-            generation: self.generation.clone(),
+            operations: self.operations.clone(),
             spawner: scope.spawner(),
             closing: self.scope.spawner(),
             titles: self.titles.clone(),

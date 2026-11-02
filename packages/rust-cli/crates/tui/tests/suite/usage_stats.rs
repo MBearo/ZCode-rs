@@ -4,7 +4,7 @@ use crossterm::event::KeyCode;
 use ratatui::style::Color;
 use rust_cli_base::models::{GLM_4_6, GLM_5_3};
 use rust_cli_kernel_api::metering::{ActivityDay, ActivityRange, ActivityStats, ModelTokens};
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 
 use super::support::{GatedModel, Setup, with_ui};
 

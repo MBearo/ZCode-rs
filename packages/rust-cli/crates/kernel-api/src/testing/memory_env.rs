@@ -1,5 +1,6 @@
 //! 内存文件系统的执行环境替身：规则文件、条件规则与 git 状态的测试用它。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -7,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
+use crate::controller_services::Fetch;
 use crate::env::{
     CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext,
     ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
@@ -19,9 +21,8 @@ use crate::env_git::{GitStatus, GitStatusRequest};
 use crate::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
 use crate::env_shell::ShellState;
 use crate::ids::{OperationId, SessionId};
-use crate::local_services::{Fetch, Git};
+use crate::machine::Git;
 use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
-use crate::testing::lock;
 use crate::testing::memory_rewind::{self, Transactions};
 
 /// 文件表里的路径就是全部文件；某个路径加分隔符是其他文件的前缀时，它是目录。分隔符看路径本身：
@@ -93,7 +94,7 @@ impl MemoryEnvironment {
 
     /// `background_foreground` 收到的原因，按顺序。
     pub fn moved(&self) -> Vec<crate::env_command::BackgroundReason> {
-        lock(&self.moved).clone()
+        self.moved.lock_unpoisoned().clone()
     }
 
     #[must_use]
@@ -106,7 +107,7 @@ impl MemoryEnvironment {
     /// （失败），不让上层成为目录，也不出现在 `list_dir` 里。
     #[must_use]
     pub fn with_special(self, path: &str) -> Self {
-        lock(&self.specials).insert(path.to_owned());
+        self.specials.lock_unpoisoned().insert(path.to_owned());
         self
     }
 
@@ -125,7 +126,7 @@ impl MemoryEnvironment {
 
     /// Bash `cd` 之后 shell 的当前目录。
     pub fn set_shell_cwd(&self, cwd: &str) {
-        *lock(&self.shell_cwd) = Some(EnvPath::new(cwd));
+        *self.shell_cwd.lock_unpoisoned() = Some(EnvPath::new(cwd));
     }
 
     /// 会话中途改写或新建文件。
@@ -136,7 +137,7 @@ impl MemoryEnvironment {
 
     /// `rewind_finish` 收到的 token，按顺序。
     pub fn rewinds_finished(&self) -> Vec<OperationId> {
-        lock(&self.finished).clone()
+        self.finished.lock_unpoisoned().clone()
     }
 
     /// `stat` 与 `stat_many` 各被调用了几次（`stat_many` 里的逐项不算进 `stat`）。
@@ -148,11 +149,13 @@ impl MemoryEnvironment {
     }
 
     pub fn set_file(&self, path: &str, text: &str) {
-        lock(&self.files).insert(path.to_owned(), text.as_bytes().to_vec());
+        self.files
+            .lock_unpoisoned()
+            .insert(path.to_owned(), text.as_bytes().to_vec());
     }
 
     pub fn remove_file(&self, path: &str) {
-        lock(&self.files).remove(path);
+        self.files.lock_unpoisoned().remove(path);
     }
 
     /// `read_file` 被调用的次数。
@@ -162,7 +165,10 @@ impl MemoryEnvironment {
 
     fn is_dir(&self, path: &str) -> bool {
         let prefix = child_prefix(path);
-        lock(&self.files).keys().any(|key| key.starts_with(&prefix))
+        self.files
+            .lock_unpoisoned()
+            .keys()
+            .any(|key| key.starts_with(&prefix))
     }
 }
 
@@ -195,12 +201,12 @@ impl Files for MemoryEnvironment {
     ) -> Result<FileContent, EnvError> {
         self.reads.fetch_add(1, Ordering::Relaxed);
         let path = request.path.as_str();
-        if lock(&self.specials).contains(path) {
+        if self.specials.lock_unpoisoned().contains(path) {
             return Err(EnvError::Io {
                 message: format!("{path} is not a regular file"),
             });
         }
-        let bytes = lock(&self.files).get(path).cloned();
+        let bytes = self.files.lock_unpoisoned().get(path).cloned();
         match bytes {
             Some(bytes) => Ok(FileContent {
                 version: memory_rewind::version(&bytes),
@@ -252,7 +258,7 @@ impl Files for MemoryEnvironment {
         let prefix = child_prefix(path);
         let sep = separator(path);
         let mut entries: Vec<DirEntry> = Vec::new();
-        for key in lock(&self.files).keys() {
+        for key in self.files.lock_unpoisoned().keys() {
             let Some(rest) = key.strip_prefix(&prefix) else {
                 continue;
             };
@@ -280,7 +286,7 @@ impl Files for MemoryEnvironment {
         request: ReadText,
     ) -> Result<TextRead, EnvError> {
         let path = request.path.as_str();
-        let Some(bytes) = lock(&self.files).get(path).cloned() else {
+        let Some(bytes) = self.files.lock_unpoisoned().get(path).cloned() else {
             return if self.is_dir(path) {
                 Ok(TextRead::Directory)
             } else {
@@ -315,7 +321,7 @@ impl Files for MemoryEnvironment {
         _context: OperationContext,
         request: PutFile,
     ) -> Result<FileWritten, EnvError> {
-        memory_rewind::put(&mut lock(&self.files), request)
+        memory_rewind::put(&mut self.files.lock_unpoisoned(), request)
     }
 }
 
@@ -328,7 +334,9 @@ impl Search for MemoryEnvironment {
         request: ListFiles,
     ) -> Result<FileList, EnvError> {
         let prefix = child_prefix(request.cwd.as_str());
-        let files = lock(&self.files)
+        let files = self
+            .files
+            .lock_unpoisoned()
             .keys()
             .filter_map(|key| key.strip_prefix(&prefix).map(str::to_owned))
             .collect();
@@ -372,7 +380,9 @@ impl Shell for MemoryEnvironment {
         _session: &SessionId,
     ) -> Result<ShellState, EnvError> {
         Ok(ShellState {
-            cwd: lock(&self.shell_cwd)
+            cwd: self
+                .shell_cwd
+                .lock_unpoisoned()
                 .clone()
                 .unwrap_or_else(|| workspace.root.clone()),
             outputs: None,
@@ -382,7 +392,7 @@ impl Shell for MemoryEnvironment {
 
     /// 会话换工作目录（EnterWorktree、`/cd`）：之后的 `shell_state` 给出新目录。
     async fn set_shell_cwd(&self, _session: &SessionId, cwd: EnvPath) -> Result<(), EnvError> {
-        *lock(&self.shell_cwd) = Some(cwd);
+        *self.shell_cwd.lock_unpoisoned() = Some(cwd);
         Ok(())
     }
 }
@@ -395,8 +405,11 @@ impl Checkpoints for MemoryEnvironment {
         context: OperationContext,
         request: RewindPrepare,
     ) -> Result<RewindPlan, EnvError> {
-        let files = lock(&self.files).clone();
-        Ok(lock(&self.rewinds).prepare(&files, context.operation, request.files))
+        let files = self.files.lock_unpoisoned().clone();
+        Ok(self
+            .rewinds
+            .lock_unpoisoned()
+            .prepare(&files, context.operation, request.files))
     }
 
     async fn rewind_apply(&self, token: &OperationId) -> Result<RewindStatus, EnvError> {
@@ -406,13 +419,13 @@ impl Checkpoints for MemoryEnvironment {
                 conflicts: Vec::new(),
             });
         }
-        let mut files = lock(&self.files);
-        Ok(lock(&self.rewinds).apply(&mut files, token))
+        let mut files = self.files.lock_unpoisoned();
+        Ok(self.rewinds.lock_unpoisoned().apply(&mut files, token))
     }
 
     async fn rewind_finish(&self, token: &OperationId) -> Result<(), EnvError> {
-        lock(&self.finished).push(token.clone());
-        lock(&self.rewinds).finish(token);
+        self.finished.lock_unpoisoned().push(token.clone());
+        self.rewinds.lock_unpoisoned().finish(token);
         Ok(())
     }
 }
@@ -443,7 +456,7 @@ impl Background for MemoryEnvironment {
         _session: &SessionId,
         reason: crate::env_command::BackgroundReason,
     ) -> Result<Vec<crate::ids::ShellTaskId>, EnvError> {
-        lock(&self.moved).push(reason);
+        self.moved.lock_unpoisoned().push(reason);
         Ok(Vec::new())
     }
 }
@@ -457,7 +470,9 @@ impl MemoryEnvironment {
         request: StatFile,
     ) -> Result<Option<FileStat>, EnvError> {
         let path = request.path.as_str();
-        let file = lock(&self.files)
+        let file = self
+            .files
+            .lock_unpoisoned()
             .get(path)
             .map(|bytes| (bytes.len(), memory_rewind::version(bytes)));
         let stat = |kind, size: usize, version| FileStat {
@@ -466,7 +481,7 @@ impl MemoryEnvironment {
             mtime_ms: 0,
             version,
         };
-        let special = lock(&self.specials).contains(path);
+        let special = self.specials.lock_unpoisoned().contains(path);
         Ok(match file {
             None if special => Some(stat(FileKind::Other, 0, FileVersion::new("special"))),
             Some((size, version)) => Some(stat(FileKind::File, size, version)),

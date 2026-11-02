@@ -94,6 +94,15 @@ fn paths(request: &Request) -> Vec<&str> {
             .chain(files.iter().map(|file| file.path.as_str()))
             .collect(),
         Request::RenderPdfPages { workspace, request } => vec![&workspace.root, &request.path],
+        // git 的仓库目录、worktree 的位置（F110）。
+        Request::GitStatus { workspace, cwd } | Request::GitDiff { workspace, cwd } => {
+            vec![&workspace.root, cwd]
+        }
+        Request::WorktreeCreate { request, .. } => vec![&request.cwd],
+        Request::WorktreeList { cwd } => vec![cwd],
+        Request::WorktreeChanges { request } => vec![&request.path],
+        Request::WorktreeRemove { request, .. } => vec![&request.path],
+        Request::EnsureDir { workspace, path } => vec![&workspace.root, path],
         // MCP 服务器的工作区；stdio 的 cwd 是绝对路径时也查（相对的落在工作区里）。
         Request::McpConnect {
             workspace,

@@ -10,11 +10,12 @@
 
 use std::sync::Arc;
 
-use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, LOCAL_MACHINE, MachineSet};
+use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, MachineSet};
+use rust_cli_kernel_api::ids::{LEGACY_PRIMARY_MACHINE, MachineName, PRIMARY_MACHINE};
 use rust_cli_kernel_api::machine_param::{
-    AGENT_TOOL, MACHINE, choices, named_in, take, takes_machine, with_machine,
+    MACHINE, MachineParam, choices, named_in, take, with_machine,
 };
-use rust_cli_kernel_api::tool::ToolUseContext;
+use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
 use rust_cli_prompts::texts;
 use serde_json::Value;
 
@@ -22,8 +23,8 @@ use serde_json::Value;
 pub(crate) struct Routed {
     pub context: ToolUseContext,
     pub hooks: ToolUseContext,
-    /// 远端调用的机器名（hooks 的 `machine`、询问的 `machine`）；本机为 None。
-    pub machine: Option<String>,
+    /// 调用的机器（hooks 的 `machine`、询问的 `machine` 只给额外机器）。
+    pub machine: MachineName,
 }
 
 impl Routed {
@@ -32,7 +33,7 @@ impl Routed {
         Self {
             hooks: context.clone(),
             context,
-            machine: None,
+            machine: MachineName::primary(),
         }
     }
 }
@@ -56,19 +57,19 @@ impl Machines {
         Self(Some(registry))
     }
 
-    pub(crate) fn plan(&self, tool: &str, context: &ToolUseContext) -> Plan {
+    pub(crate) fn plan(&self, tool: &dyn Tool, context: &ToolUseContext) -> Plan {
         let Some(registry) = &self.0 else {
             return Plan::Unchanged;
         };
-        if !takes_machine(tool) {
-            return if context.machine.is_local() {
+        if tool.machine_param() == MachineParam::Absent {
+            return if context.machine.is_primary() {
                 Plan::Unchanged
             } else {
                 Plan::ToLocal
             };
         }
         let machines = registry.machines();
-        if machines.is_empty() && context.machine.is_local() {
+        if machines.is_empty() && context.machine.is_primary() {
             return Plan::Unchanged;
         }
         Plan::Route { machines }
@@ -79,19 +80,24 @@ impl Machines {
     /// 缺陷修复（Docker 试用 M2）：schema 校验在路由之前，没连上的机器不在工具定义里（没有远端机器时没有 `machine`，
     /// 有别的机器时 `enum` 里没有它），模型拿到的是 schema 错误，F96 的“没有执行”说明到不了；宽松对象的 Agent 甚至丢掉
     /// `machine`、在本机起子代理。现在先于 schema 校验认出它。不在清单里的名字照旧交给 schema 校验。
-    pub(crate) fn not_connected(&self, tool: &str, input: &Value) -> Option<String> {
+    pub(crate) fn not_connected(&self, tool: &dyn Tool, input: &Value) -> Option<String> {
         let registry = self.0.as_ref()?;
-        let name = named_in(input).filter(|_| takes_machine(tool))?;
-        (registry.remote(name).is_none() && registry.listed(name))
-            .then(|| texts::render(texts::remote_not_connected(), &[("machine", name)]))
+        let name = named_in(input).filter(|_| tool.machine_param() != MachineParam::Absent)?;
+        let machine = MachineName::new(name);
+        (registry.remote(&machine).is_none() && registry.listed(&machine))
+            .then(|| not_connected(name))
     }
 
     /// 校验用的 schema：有远端机器连上时加上 `machine`（与发给模型的相同的取值）；否则是工具自己的。
     pub(crate) fn schema(base: Value, plan: &Plan) -> Value {
         match plan {
             Plan::Route { machines } if !machines.is_empty() => {
-                // 描述不参与校验，这里用本机的写法。
-                with_machine(&base, &choices(machines), texts::machine_param())
+                // 描述不参与校验。主 env 以前的名字（`local`）也认：旧会话里模型照着历史写的调用（deployment.md §23）。
+                let mut values = choices(machines);
+                values.push(LEGACY_PRIMARY_MACHINE.to_owned());
+                let description =
+                    texts::render(texts::machine_param(), &[("name", PRIMARY_MACHINE)]);
+                with_machine(&base, &values, &description)
             }
             _ => base,
         }
@@ -100,7 +106,7 @@ impl Machines {
     /// 取出 `machine`、建两份上下文。机器没连上时是给模型的错误文字。
     pub(crate) fn route(
         &self,
-        tool: &str,
+        tool: &dyn Tool,
         input: &mut Value,
         context: ToolUseContext,
         plan: &Plan,
@@ -112,11 +118,11 @@ impl Machines {
             Plan::Unchanged => Ok(Routed::unchanged(context)),
             Plan::ToLocal => {
                 let mut routed = context.clone();
-                routed.machine = registry.local_machine();
+                routed.machine = registry.primary_machine();
                 Ok(Routed {
                     context: routed,
                     hooks: context,
-                    machine: None,
+                    machine: MachineName::primary(),
                 })
             }
             Plan::Route { machines } => {
@@ -127,46 +133,57 @@ impl Machines {
                     take(input)
                 };
                 let target = match &named {
-                    Some(Value::String(name)) => name.clone(),
+                    Some(Value::String(name)) => MachineName::new(name.as_str()),
                     Some(other) => {
                         return Err(format!("`{MACHINE}` must be a string, got {other}"));
                     }
-                    None => context.machine.name().to_owned(),
+                    None => context.machine.name().clone(),
                 };
                 let mut routed = context.clone();
-                if target == LOCAL_MACHINE {
-                    routed.machine = registry.local_machine();
+                let Some(remote) = target.remote() else {
+                    routed.machine = registry.primary_machine();
                     return Ok(Routed {
                         context: routed,
                         hooks: context,
-                        machine: None,
+                        machine: target,
                     });
-                }
+                };
                 // 没连上的机器：写明没有执行、下一步做什么（远端执行 F96，remote-exec.md §23.6）。
                 let Some((machine, workspace)) = registry.remote(&target) else {
-                    return Err(texts::render(
-                        texts::remote_not_connected(),
-                        &[("machine", target.as_str())],
-                    ));
+                    return Err(not_connected(remote));
                 };
                 routed.machine = machine;
-                if tool != AGENT_TOOL {
-                    routed.workspace = workspace;
+                match tool.machine_param() {
+                    MachineParam::RunsThere => routed.workspace = workspace,
+                    // Agent 自己在主 env 上跑，只把机器交给子代理（工作区不换）；不带参数的工具不走这一支（`plan` 给的是
+                    // Unchanged 或 ToLocal）。
+                    MachineParam::Delegates | MachineParam::Absent => {}
                 }
                 Ok(Routed {
                     context: routed,
                     hooks: context,
-                    machine: Some(target),
+                    machine: target,
                 })
             }
         }
     }
 }
 
-/// hooks 的 payload 加上 `machine`（只有远端调用，§20.8）。
-pub(crate) fn tag(mut payload: Value, machine: Option<&str>) -> Value {
-    if let (Some(name), Some(object)) = (machine, payload.as_object_mut()) {
+/// hooks 的 payload 加上 `machine`（只有额外机器上的调用，§20.8）。
+pub(crate) fn tag(mut payload: Value, machine: &MachineName) -> Value {
+    if let (Some(name), Some(object)) = (machine.remote(), payload.as_object_mut()) {
         object.insert(MACHINE.to_owned(), Value::from(name));
     }
     payload
+}
+
+/// 没连上的额外机器：给模型的“没有执行”说明（F96，remote-exec.md §23.6），建议改在缺省机器上跑（deployment.md §23）。
+fn not_connected(name: &str) -> String {
+    texts::render(
+        texts::remote_not_connected(),
+        &[
+            ("machine", name),
+            ("instead", rust_cli_prompts::remote::instead(false)),
+        ],
+    )
 }

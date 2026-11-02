@@ -57,7 +57,7 @@ fn signals_round_trip() {
         AgentSignal::Notice(AgentNotice {
             seq: 3,
             agent: AgentId::new("agent_1"),
-            status: "completed".to_owned(),
+            status: crate::env_shell::BackgroundStatus::Completed,
             text: "<system-reminder>…</system-reminder>".to_owned(),
         }),
         AgentSignal::TasksChanged {

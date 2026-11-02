@@ -14,6 +14,8 @@ workspace = true
 doctest = false
 
 [dependencies]
+# 部署器的 trait（F128：从 exec-transport 移来）。
+async-trait.workspace = true
 # 订阅连接状态的任务经 base 的 TaskScope 启动（README §3.1）。
 rust-cli-base.workspace = true
 rust-cli-exec-client.workspace = true

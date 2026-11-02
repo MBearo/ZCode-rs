@@ -9,20 +9,19 @@ use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::agents::AgentSignal;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
-    OutputStream, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvPath, OperationContext, Outcome, OutputStream, StartCommand,
+    WorkspaceRef,
 };
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundKind, BackgroundStatus, BackgroundStop, BackgroundTask, ShellNotice,
     ShellState,
 };
 use rust_cli_kernel_api::ids::{AgentId, OperationId, SessionId, ShellTaskId, ToolUseId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::machine::{Background, Commands, MachineEnv, Shell};
 use rust_cli_kernel_api::monitor::{MonitorArmed, MonitorSource};
-use rust_cli_kernel_api::testing::{NoticeEnvironment, shell_notice};
+use rust_cli_kernel_api::testing::{
+    NoticeEnvironment, TokioClock, shell_notice, unsupported_machine,
+};
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -31,28 +30,17 @@ use crate::test_support::{Gates, held_with_clock, text};
 
 const ROOT: &str = "sess_parent";
 
-/// 走着的时钟（monitor 的批与到期按时钟算）。
-struct Ticking(tokio::time::Instant);
-
-impl rust_cli_kernel_api::clock::Clock for Ticking {
-    fn now_ms(&self) -> u64 {
-        1_000 + u64::try_from(self.0.elapsed().as_millis()).unwrap()
-    }
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
-
-fn held_ticking<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
+fn held_ticking(
     gates: &Gates,
     keep_alive: bool,
-    env: Arc<E>,
+    machine: MachineEnv,
 ) -> crate::test_support::Harness {
     held_with_clock(
         gates,
         keep_alive,
-        env,
-        Arc::new(Ticking(tokio::time::Instant::now())),
+        machine,
+        // 走着的时钟（monitor 的批与到期按时钟算）。
+        Arc::new(TokioClock::new(1_000)),
     )
 }
 
@@ -65,6 +53,8 @@ struct MonitorEnv {
     streams: Mutex<HashMap<OperationId, mpsc::UnboundedReceiver<Result<CommandEvent, EnvError>>>>,
     running: Mutex<HashSet<ShellTaskId>>,
     ended: Mutex<HashMap<ShellTaskId, u64>>,
+    /// 停止请求带的 generation（README §6 规则 3 的操作上下文）。
+    stops: Mutex<Vec<String>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -90,34 +80,19 @@ impl MonitorEnv {
     fn stop(&self, task: &str) {
         lock(&self.running).remove(&ShellTaskId::new(task));
     }
+
+    /// 只换上命令、shell 与后台命令三个端口的机器（其余端口返回 `Unsupported`）。
+    fn machine(self: Arc<Self>) -> MachineEnv {
+        unsupported_machine()
+            .with_commands(self.clone())
+            .with_shell(self.clone())
+            .with_background(self)
+    }
 }
 
 fn unused() -> EnvError {
     EnvError::Unsupported {
         what: "not in this test".to_owned(),
-    }
-}
-
-#[async_trait]
-impl EnvInfo for MonitorEnv {
-    async fn facts(&self, _w: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        Err(unused())
-    }
-}
-
-#[async_trait]
-impl Files for MonitorEnv {
-    async fn read_file(&self, _w: &WorkspaceRef, _r: ReadFile) -> Result<FileContent, EnvError> {
-        Err(unused())
-    }
-
-    async fn write_file(
-        &self,
-        _w: &WorkspaceRef,
-        _c: OperationContext,
-        _r: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        Err(unused())
     }
 }
 
@@ -192,30 +167,24 @@ impl Background for MonitorEnv {
         Ok(Some(BackgroundInfo {
             command: "watch".to_owned(),
             status,
-            kind: Default::default(),
-            description: String::new(),
+            ..BackgroundInfo::default()
         }))
     }
 
     async fn stop_background_command(
         &self,
-        _c: OperationContext,
+        context: OperationContext,
         request: BackgroundTask,
     ) -> Result<BackgroundStop, EnvError> {
+        lock(&self.stops).push(context.generation.as_str().to_owned());
         lock(&self.running).remove(&request.task);
         Ok(BackgroundStop::NotFound)
     }
 }
 
-impl Search for MonitorEnv {}
-impl Checkpoints for MonitorEnv {}
-impl Pdf for MonitorEnv {}
-impl Git for MonitorEnv {}
-impl Fetch for MonitorEnv {}
-
 fn armed(task: &str) -> MonitorArmed {
     MonitorArmed {
-        machine: None,
+        machine: Default::default(),
         operation: OperationId::new("op_m"),
         task: ShellTaskId::new(task),
         tool_use: ToolUseId::new("toolu_m"),
@@ -261,7 +230,7 @@ async fn until(done: impl Fn() -> bool) {
 async fn events_reach_the_running_subagent_and_the_end_carries_the_rest() {
     let gates = Gates::default();
     let env = Arc::new(MonitorEnv::default());
-    let harness = held_ticking(&gates, false, env.clone());
+    let harness = held_ticking(&gates, false, env.clone().machine());
     let (agent, session) = launched(&harness).await;
     let output = env.command("op_m", "b1");
     let events = env.watch_command(OperationId::new("op_m"), 0);
@@ -313,8 +282,9 @@ async fn events_reach_the_running_subagent_and_the_end_carries_the_rest() {
         all.contains("<summary>Monitor event: \"errors\"</summary>\n<event>one</event>"),
         "{absorbed:?}"
     );
+    // 终态的信封是真实的文字（工作线 F131：以前是测试替身给的假文字），剩下的行进 `<event>`。
     assert!(
-        all.contains("<task-id>b1</task-id> end Some(\"part\")"),
+        all.contains("<task-id>b1</task-id>\n<output-file>/tmp/b1.output</output-file>\n<status>completed</status>\n<summary>Monitor \"Run b1\" ended without producing output (exit 0)</summary>\n<event>part</event>\n</task-notification>"),
         "{absorbed:?}"
     );
 }
@@ -323,7 +293,7 @@ async fn events_reach_the_running_subagent_and_the_end_carries_the_rest() {
 async fn a_live_monitor_parks_the_subagent_until_it_ends() {
     let gates = Gates::default();
     let env = Arc::new(MonitorEnv::default());
-    let harness = held_ticking(&gates, true, env.clone());
+    let harness = held_ticking(&gates, true, env.clone().machine());
     let signals = harness.agents.signals();
     let mut root = signals.signals(&SessionId::new(ROOT));
     let (agent, session) = launched(&harness).await;
@@ -356,4 +326,83 @@ async fn a_live_monitor_parks_the_subagent_until_it_ends() {
     };
     assert_eq!(own.agent, agent);
     assert!(!harness.agents.core.monitors.owns(&agent));
+}
+
+fn stdout(data: &str, cursor: u64) -> Result<CommandEvent, EnvError> {
+    Ok(CommandEvent::Output {
+        stream: OutputStream::Stdout,
+        data: data.as_bytes().to_vec(),
+        cursor,
+    })
+}
+
+/// 流断了之后按游标续读：续读给出的流里游标之前的部分不再送（不重复，tools-more.md §19.6，与会话 actor 同一份
+/// 分派）。以前子代理这一侧不按游标去重，续读从头给的那段又送一遍。
+#[tokio::test]
+async fn a_resumed_stream_does_not_repeat_what_was_read() {
+    let gates = Gates::default();
+    let env = Arc::new(MonitorEnv::default());
+    let harness = held_ticking(&gates, false, env.clone().machine());
+    let (agent, session) = launched(&harness).await;
+    let first = env.command("op_m", "b1");
+    let events = env.watch_command(OperationId::new("op_m"), 0);
+    arm(&harness.agents.core, &agent, armed("b1"), events).unwrap();
+    first.send(stdout("one\n", 4)).unwrap();
+    // 续读拿到的是同一个操作的下一条流；它从头给出（游标 8 之前的 4 个字节已经读过）。
+    let second = env.command("op_m", "b1");
+    first
+        .send(Err(EnvError::Io {
+            message: "the stream broke".to_owned(),
+        }))
+        .unwrap();
+    second.send(stdout("one\ntwo\n", 8)).unwrap();
+    let mut notice = shell_notice(1, "b1");
+    notice.kind = BackgroundKind::Monitor;
+    env.end(notice);
+    second
+        .send(Ok(CommandEvent::Finished {
+            outcome: Outcome::Completed,
+            exit_code: Some(0),
+            timed_out: false,
+            cwd_reset: None,
+            output_bytes: 8,
+            output_limit: None,
+        }))
+        .unwrap();
+    let notices = env.clone();
+    until(|| notices.notices.acked() == [1]).await;
+    gates.release(&session);
+    let core = harness.agents.core.clone();
+    until(|| {
+        core.live
+            .get(&agent)
+            .is_some_and(|entry| matches!(entry.state, crate::live::AgentState::Finished(_)))
+    })
+    .await;
+    let absorbed = harness.absorbed.lock().unwrap().clone();
+    let all: String = absorbed.iter().map(|(_, text)| text.as_str()).collect();
+    assert_eq!(all.matches("one").count(), 1, "{absorbed:?}");
+    assert!(all.contains("two"), "{absorbed:?}");
+}
+
+/// 到期停掉命令：停止请求的操作上下文带内核的执行环境 generation（与会话 actor 相同），不是写死的值。
+#[tokio::test]
+async fn an_expired_monitor_stops_with_the_kernel_generation() {
+    let gates = Gates::default();
+    let env = Arc::new(MonitorEnv::default());
+    let harness = held_ticking(&gates, false, env.clone().machine());
+    let (agent, _session) = launched(&harness).await;
+    let _output = env.command("op_m", "b1");
+    let events = env.watch_command(OperationId::new("op_m"), 0);
+    let short = MonitorArmed {
+        timeout_ms: 50,
+        ..armed("b1")
+    };
+    arm(&harness.agents.core, &agent, short, events).unwrap();
+    let stops = env.clone();
+    until(|| !lock(&stops.stops).is_empty()).await;
+    assert_eq!(
+        lock(&env.stops).as_slice(),
+        [crate::test_support::GENERATION]
+    );
 }

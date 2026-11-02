@@ -1,8 +1,9 @@
 //! 当步的 attachment 的两个时点（docs/specs/rust-cli/query.md §1.1，修复线 F10）：运行开始（输入之后、
 //! UserPromptSubmit 的结果之前）与每个工具轮结束时（下一次自动压缩之前、轮数检查之前）。旧代码每一步先压缩、
 //! 再在 `build` 里一次给出全部 attachment，不调 `turn_attachments`，也不提交 `prompt_hook_messages`。
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::{Abort, AbortReason};
@@ -48,7 +49,6 @@ impl ContextBuilder for Phased {
                 text: "system".to_owned(),
                 cache_control: None,
             }],
-            user_context: Vec::new(),
             attachments: vec![attachment(format!("announce-{n}"), "date")],
         })
     }
@@ -89,10 +89,7 @@ impl Compactor for Watching {
             .last()
             .map(|message| message.id().as_str().to_owned())
             .unwrap_or_default();
-        self.last
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(last);
+        self.last.lock_unpoisoned().push(last);
         Ok(AutoCompactOutcome::NotNeeded)
     }
 
@@ -205,7 +202,6 @@ impl ContextBuilder for Split {
     ) -> Result<BuiltContext, OrchestrationError> {
         Ok(BuiltContext {
             system: Vec::new(),
-            user_context: Vec::new(),
             attachments: Vec::new(),
         })
     }
@@ -284,11 +280,7 @@ async fn a_run_aborted_before_its_request_announces_and_marks_the_interruption()
     assert_eq!(messages.len(), 4);
     assert!(model.requests().is_empty(), "no request for an aborted run");
     assert!(
-        compactor
-            .last
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_empty(),
+        compactor.last.lock_unpoisoned().is_empty(),
         "no compaction for an aborted run"
     );
 }

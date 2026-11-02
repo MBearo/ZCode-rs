@@ -17,7 +17,7 @@ mod wait_tool;
 pub use config::{
     McpScope, McpServer, McpServerOptions, McpServers, McpSettings, normalize_name, tool_name,
 };
-pub use manager::{McpManager, McpStatus};
+pub use manager::McpManager;
 pub use node_config::{NodeMcpServer, parse_node_servers};
 pub use parse::{expand_vars, merge_scopes, parse_servers, parse_servers_keeping};
 pub use startup::{

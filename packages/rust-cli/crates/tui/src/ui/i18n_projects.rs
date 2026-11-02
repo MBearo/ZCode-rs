@@ -2,18 +2,11 @@
 //! 中文与英文。
 use super::i18n::Lang;
 
-fn pick(lang: Lang, en: &'static str, zh: &'static str) -> &'static str {
-    match lang {
-        Lang::En => en,
-        Lang::Zh => zh,
-    }
-}
-
 /// 应用内的 ctrl 键（提示里写 `⌃`）。
 pub const CTRL: &str = "⌃";
 
 pub fn projects_title(lang: Lang) -> &'static str {
-    pick(lang, "Projects", "项目")
+    lang.pick("Projects", "项目")
 }
 
 /// footer 在输入框为空时的提示：`← for projects · ? for shortcuts`；`compact` 时只留前一半。
@@ -28,31 +21,31 @@ pub fn empty_hint(lang: Lang, compact: bool) -> &'static str {
 
 /// footer 里可以点击的 `← for projects`。
 pub fn for_projects(lang: Lang) -> &'static str {
-    pick(lang, "{←} for projects", "{←} 查看项目")
+    lang.pick("{←} for projects", "{←} 查看项目")
 }
 
 pub fn details(lang: Lang) -> &'static str {
-    pick(lang, "Session details", "会话详情")
+    lang.pick("Session details", "会话详情")
 }
 
 pub fn project(lang: Lang) -> &'static str {
-    pick(lang, "Project", "项目")
+    lang.pick("Project", "项目")
 }
 
 pub fn branch(lang: Lang) -> &'static str {
-    pick(lang, "Branch", "分支")
+    lang.pick("Branch", "分支")
 }
 
 pub fn prompt(lang: Lang) -> &'static str {
-    pick(lang, "Prompt", "首条输入")
+    lang.pick("Prompt", "首条输入")
 }
 
 pub fn search_prefix(lang: Lang) -> &'static str {
-    pick(lang, "Search › ", "搜索 › ")
+    lang.pick("Search › ", "搜索 › ")
 }
 
 pub fn rename_prefix(lang: Lang) -> &'static str {
-    pick(lang, "Rename › ", "改名 › ")
+    lang.pick("Rename › ", "改名 › ")
 }
 
 /// 项目页最后一行的提示（`{键}` 模板）：平时、搜索时、改名时。
@@ -109,35 +102,35 @@ pub fn delete_failed(lang: Lang, reason: &str) -> String {
 }
 
 pub fn resume_title(lang: Lang) -> &'static str {
-    pick(lang, "Resume a previous session", "恢复以前的会话")
+    lang.pick("Resume a previous session", "恢复以前的会话")
 }
 
 pub fn filter_label(lang: Lang) -> &'static str {
-    pick(lang, "Filter:", "筛选：")
+    lang.pick("Filter:", "筛选：")
 }
 
 pub fn sort_label(lang: Lang) -> &'static str {
-    pick(lang, "Sort:", "排序：")
+    lang.pick("Sort:", "排序：")
 }
 
 /// Filter 的两个值（当前目录、全部）。
 pub fn filter_value(lang: Lang, all: bool) -> &'static str {
     match all {
-        false => pick(lang, "Cwd", "当前目录"),
-        true => pick(lang, "All", "全部"),
+        false => lang.pick("Cwd", "当前目录"),
+        true => lang.pick("All", "全部"),
     }
 }
 
 /// Sort 的两个值（更新时间、创建时间）。
 pub fn sort_value(lang: Lang, created: bool) -> &'static str {
     match created {
-        false => pick(lang, "Updated", "更新时间"),
-        true => pick(lang, "Created", "创建时间"),
+        false => lang.pick("Updated", "更新时间"),
+        true => lang.pick("Created", "创建时间"),
     }
 }
 
 pub fn type_to_search(lang: Lang) -> &'static str {
-    pick(lang, "Type to search", "键入以搜索")
+    lang.pick("Type to search", "键入以搜索")
 }
 
 pub fn search_query(lang: Lang, query: &str) -> String {
@@ -148,27 +141,27 @@ pub fn search_query(lang: Lang, query: &str) -> String {
 }
 
 pub fn no_message(lang: Lang) -> &'static str {
-    pick(lang, "(no message yet)", "（还没有消息）")
+    lang.pick("(no message yet)", "（还没有消息）")
 }
 
 pub fn more_above(lang: Lang) -> &'static str {
-    pick(lang, "↑ more", "↑ 更多")
+    lang.pick("↑ more", "↑ 更多")
 }
 
 pub fn more_below(lang: Lang) -> &'static str {
-    pick(lang, "↓ more", "↓ 更多")
+    lang.pick("↓ more", "↓ 更多")
 }
 
 pub fn no_results(lang: Lang) -> &'static str {
-    pick(lang, "No results for your search", "没有匹配的会话")
+    lang.pick("No results for your search", "没有匹配的会话")
 }
 
 pub fn loading_sessions(lang: Lang) -> &'static str {
-    pick(lang, "Loading sessions…", "正在加载会话…")
+    lang.pick("Loading sessions…", "正在加载会话…")
 }
 
 pub fn no_sessions_yet(lang: Lang) -> &'static str {
-    pick(lang, "No sessions yet", "还没有会话")
+    lang.pick("No sessions yet", "还没有会话")
 }
 
 pub fn resume_more(lang: Lang, limit: usize) -> String {
@@ -179,7 +172,7 @@ pub fn resume_more(lang: Lang, limit: usize) -> String {
 }
 
 pub fn no_branch(lang: Lang) -> &'static str {
-    pick(lang, "no branch", "没有分支")
+    lang.pick("no branch", "没有分支")
 }
 
 /// 展开的预览里的一个标签。
@@ -212,27 +205,23 @@ pub fn preview_label(lang: Lang, which: PreviewLabel) -> &'static str {
 }
 
 pub fn preview_loading(lang: Lang) -> &'static str {
-    pick(lang, "Loading recent transcript...", "正在加载最近的对话…")
+    lang.pick("Loading recent transcript...", "正在加载最近的对话…")
 }
 
 pub fn preview_failed(lang: Lang) -> &'static str {
-    pick(
-        lang,
-        "Could not load transcript preview",
-        "无法加载对话预览",
-    )
+    lang.pick("Could not load transcript preview", "无法加载对话预览")
 }
 
 pub fn preview_empty(lang: Lang) -> &'static str {
-    pick(lang, "No transcript preview available", "没有可预览的对话")
+    lang.pick("No transcript preview available", "没有可预览的对话")
 }
 
 pub fn loading_transcript(lang: Lang) -> &'static str {
-    pick(lang, "Loading transcript…", "正在加载对话…")
+    lang.pick("Loading transcript…", "正在加载对话…")
 }
 
 pub fn transcript_hint(lang: Lang) -> &'static str {
-    pick(lang, "{↑/↓} scroll · {q} close", "{↑/↓} 滚动 · {q} 关闭")
+    lang.pick("{↑/↓} scroll · {q} close", "{↑/↓} 滚动 · {q} 关闭")
 }
 
 pub fn delete_title(lang: Lang, name: &str) -> String {
@@ -243,35 +232,30 @@ pub fn delete_title(lang: Lang, name: &str) -> String {
 }
 
 pub fn delete_note(lang: Lang) -> &'static str {
-    pick(lang, "This cannot be undone.", "此操作无法撤销。")
+    lang.pick("This cannot be undone.", "此操作无法撤销。")
 }
 
 /// 删除确认的两项：取消、删除。
 pub fn delete_choice(lang: Lang, delete: bool) -> &'static str {
     match delete {
-        false => pick(lang, "Cancel", "取消"),
-        true => pick(lang, "Permanently delete session", "永久删除会话"),
+        false => lang.pick("Cancel", "取消"),
+        true => lang.pick("Permanently delete session", "永久删除会话"),
     }
 }
 
 pub fn select_hint(lang: Lang) -> &'static str {
-    pick(
-        lang,
-        "{enter} select · {esc} cancel",
-        "{enter} 选择 · {esc} 取消",
-    )
+    lang.pick("{enter} select · {esc} cancel", "{enter} 选择 · {esc} 取消")
 }
 
 pub fn delete_current(lang: Lang) -> &'static str {
-    pick(
-        lang,
+    lang.pick(
         "Use /clear to leave the current session before deleting it.",
         "先用 /clear 离开当前会话再删除它。",
     )
 }
 
 pub fn cwd_title(lang: Lang) -> &'static str {
-    pick(lang, "Working directory · resume", "工作目录 · 恢复")
+    lang.pick("Working directory · resume", "工作目录 · 恢复")
 }
 
 pub fn cwd_note(lang: Lang) -> [&'static str; 2] {
@@ -298,8 +282,7 @@ pub fn cwd_choice(lang: Lang, current: bool, path: &str) -> String {
 }
 
 pub fn cwd_hint(lang: Lang) -> &'static str {
-    pick(
-        lang,
+    lang.pick(
         "{enter} continue · {esc} use session · {⌃c} exit",
         "{enter} 继续 · {esc} 用会话目录 · {⌃c} 退出",
     )

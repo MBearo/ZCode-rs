@@ -65,12 +65,7 @@ fn history(input_tokens: u64) -> Vec<Message> {
 }
 
 fn selection(model: &str) -> ModelSelection {
-    ModelSelection {
-        provider: "p".to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("p".to_owned(), model.to_owned())
 }
 
 fn compaction(runner: Arc<ScriptedRunner>, config: CompactConfig) -> Compaction {

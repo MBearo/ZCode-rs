@@ -2,27 +2,18 @@
 //! 这一行是可编辑的前缀，记住的规则由它得出；没有种子时列出全部建议规则。
 use rust_cli_kernel_api::orchestration::InteractionRequest;
 use rust_cli_kernel_api::permission::PermissionRule;
+use rust_cli_kernel_api::permission::syntax::shell_rule_label;
 
 use crate::ui::i18n::Lang;
 
-const BASH: &str = "Bash";
+use crate::view::BASH;
 
-/// 询问框弹出时的种子：Bash 且有建议规则时才有。
+/// 询问框弹出时的种子：内核在询问里给出（Bash 且有建议规则时才有，F133：以前这里经 runtime 调判决链的命令分析）。
 pub(in crate::ui) fn seed(request: &InteractionRequest) -> Option<String> {
-    let InteractionRequest::Permission {
-        tool,
-        input,
-        suggestions,
-        ..
-    } = request
-    else {
-        return None;
-    };
-    if tool != BASH || suggestions.is_empty() {
-        return None;
+    match request {
+        InteractionRequest::Permission { rule_seed, .. } => rule_seed.clone(),
+        InteractionRequest::Question { .. } | InteractionRequest::PlanApproval { .. } => None,
     }
-    let command = input["command"].as_str()?;
-    rust_cli_runtime::bash_rule_seed(command, suggestions)
 }
 
 /// 种子（可能被用户改过）记住的规则：`*` 是整个 Bash，空的只允许这一次。
@@ -69,7 +60,7 @@ pub(in crate::ui) fn commands_label(
     let commands: Vec<&str> = suggestions
         .iter()
         .filter_map(|rule| rule.content.as_deref())
-        .map(rust_cli_runtime::bash_rule_label)
+        .map(shell_rule_label)
         .collect();
     let commands = listed(&commands, lang);
     match lang {

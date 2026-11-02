@@ -4,8 +4,9 @@
 //! Agent 工具要用父运行的模型与模式，`ToolUseContext` 只带 `run`。运行开始时登记、结束（或被丢弃）时
 //! 删除，所以查到的总是这次运行自己的值，不会过期。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
@@ -31,7 +32,7 @@ pub(crate) struct RunBook(Mutex<HashMap<RunId, RunInfo>>);
 
 impl RunBook {
     fn runs(&self) -> std::sync::MutexGuard<'_, HashMap<RunId, RunInfo>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_unpoisoned()
     }
 
     pub(crate) fn get(&self, run: &RunId) -> Option<RunInfo> {

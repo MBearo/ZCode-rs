@@ -111,8 +111,8 @@ impl rust_cli_tui::services::WorkspaceTrust for Trust {
 
 pub fn services(trust: &Arc<Trust>) -> rust_cli_tui::Services {
     rust_cli_tui::Services {
-        trust: Some(trust.clone()),
-        ..rust_cli_tui::Services::default()
+        trust: trust.clone(),
+        ..super::stub_services::services()
     }
 }
 
@@ -125,8 +125,8 @@ pub fn env() -> Arc<rust_cli_kernel_api::testing::MemoryEnvironment> {
             os_version: "x".into(),
             shell: "zsh".into(),
             is_git_repo: false,
-            additional_directories: Vec::new(),
             home: Some(EnvPath::new("/Users/dev")),
+            uid: None,
         })
         .with_file("/Users/dev/project/AGENTS.md", "project rules")
         .with_file("/Users/dev/other/AGENTS.md", "other rules"),

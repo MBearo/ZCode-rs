@@ -1,10 +1,11 @@
 //! 转移表（remote-exec.md §19.10）：合法的每一条与不合法的组合。
 
 use rust_cli_exec_client::ClientError;
-use rust_cli_exec_transport::ProvisionError;
 use rust_cli_exec_wire::handshake::RefuseCode;
 
-use crate::{MachineError, MachineEvent as E, MachineState as S, Retry, Welcomed, transition};
+use crate::{
+    MachineError, MachineEvent as E, MachineState as S, ProvisionError, Retry, Welcomed, transition,
+};
 
 fn welcomed(instance: &str) -> Welcomed {
     Welcomed {
@@ -29,11 +30,7 @@ fn retrying(attempt: u32, waiting: bool, reason: &str) -> Retry {
 }
 
 fn reconnecting(retry: &Retry) -> S {
-    S::Reconnecting {
-        attempt: retry.attempt,
-        retry_at: retry.retry_at,
-        reason: retry.reason.clone(),
-    }
+    S::Reconnecting(retry.clone())
 }
 
 #[test]
@@ -65,10 +62,10 @@ fn the_happy_path_and_reconnecting() {
 
 #[test]
 fn failures_lead_to_failed_and_disconnect_always_resets() {
-    let unsupported = MachineError::Unsupported {
+    let unsupported = MachineError::Provision(ProvisionError::Unsupported {
         os: "Darwin".to_owned(),
         arch: "arm64".to_owned(),
-    };
+    });
     assert_eq!(
         transition(&S::Provisioning, E::ProvisionFailed(unsupported.clone())),
         Some(S::Failed { error: unsupported })
@@ -116,25 +113,25 @@ fn other_combinations_are_ignored() {
 
 #[test]
 fn errors_are_converted() {
+    // F128（审查 X3）：部署的失败原样包着，不再逐个照抄；显示仍是短的说法。
+    let incompatible = MachineError::from(ProvisionError::Incompatible {
+        version: "0.9".to_owned(),
+        protocol: 2,
+        busy: true,
+    });
+    assert!(matches!(
+        &incompatible,
+        MachineError::Provision(ProvisionError::Incompatible { busy: true, .. })
+    ));
     assert_eq!(
-        MachineError::from(ProvisionError::Incompatible {
-            version: "0.9".to_owned(),
-            protocol: 2,
-            busy: true
-        }),
-        MachineError::Incompatible {
-            version: "0.9".to_owned(),
-            protocol: 2,
-            busy: true
-        }
+        incompatible.to_string(),
+        "the remote executor 0.9 speaks protocol 2 and is busy"
     );
-    assert_eq!(
-        MachineError::from(ProvisionError::Unreachable {
-            target: "dev-a".to_owned(),
-            message: "Permission denied".to_owned()
-        }),
-        MachineError::Unreachable("Permission denied".to_owned())
-    );
+    let unreachable = MachineError::from(ProvisionError::Unreachable {
+        target: "dev-a".to_owned(),
+        message: "Permission denied".to_owned(),
+    });
+    assert_eq!(unreachable.to_string(), "unreachable: Permission denied");
     assert_eq!(
         MachineError::from(ClientError::Refused {
             code: RefuseCode::Protocol,
@@ -170,11 +167,11 @@ fn downloading_is_a_step_before_the_upload() {
         transition(&S::Downloading, E::Provisioned),
         Some(S::Handshaking)
     );
-    let failed = MachineError::DownloadFailed {
+    let failed = MachineError::Provision(ProvisionError::DownloadFailed {
         version: "0.2.0".to_owned(),
         target: "x86_64-unknown-linux-gnu".to_owned(),
         reason: "HTTP 404".to_owned(),
-    };
+    });
     assert_eq!(
         transition(&S::Downloading, E::ProvisionFailed(failed.clone())),
         Some(S::Failed { error: failed })
@@ -191,17 +188,18 @@ fn downloading_is_a_step_before_the_upload() {
     ] {
         assert_eq!(transition(&state, event), None);
     }
-    // 部署的三种新错误照样换算。
-    assert_eq!(MachineError::from(ProvisionError::Musl), MachineError::Musl);
+    // 部署的三种新错误照样显示。
+    assert_eq!(
+        MachineError::from(ProvisionError::Musl).to_string(),
+        "the remote uses musl libc; there is no zcode executor package for it"
+    );
     assert_eq!(
         MachineError::from(ProvisionError::OldGlibc {
             glibc: Some("2.31".to_owned()),
             needs: "GLIBC_2.34".to_owned()
-        }),
-        MachineError::OldGlibc {
-            glibc: Some("2.31".to_owned()),
-            needs: "GLIBC_2.34".to_owned()
-        }
+        })
+        .to_string(),
+        "the executor needs GLIBC_2.34, but the remote has glibc 2.31"
     );
 }
 
@@ -211,18 +209,11 @@ fn the_platform_errors_are_converted() {
     let no_package = MachineError::from(ProvisionError::NoPackage {
         package: "darwin-x64".to_owned(),
     });
-    assert_eq!(
-        no_package,
-        MachineError::NoPackage {
-            package: "darwin-x64".to_owned()
-        }
-    );
     assert!(
         no_package.to_string().contains("darwin-x64"),
         "{no_package}"
     );
     let unsigned = MachineError::from(ProvisionError::Unsigned);
-    assert_eq!(unsigned, MachineError::Unsigned);
     assert!(unsigned.to_string().contains("signature"), "{unsigned}");
 }
 
@@ -238,16 +229,6 @@ fn falling_back_to_the_latest_downloads_once_and_names_both_protocols() {
         latest_protocol: 2,
         target: "aarch64-unknown-linux-gnu".to_owned(),
     });
-    assert_eq!(
-        error,
-        MachineError::LatestIncompatible {
-            version: "0.1.64".to_owned(),
-            protocol: 1,
-            latest: "0.1.63".to_owned(),
-            latest_protocol: 2,
-            target: "aarch64-unknown-linux-gnu".to_owned(),
-        }
-    );
     assert_eq!(
         error.to_string(),
         "zcode 0.1.64 (protocol 1) is not on npm, and the latest executor there, 0.1.63, speaks protocol 2"
@@ -270,7 +251,7 @@ fn uploading_is_a_step_between_probing_and_the_handshake() {
         Some(uploading.clone())
     );
     assert_eq!(transition(&uploading, E::Provisioned), Some(S::Handshaking));
-    let failed = MachineError::Upload("sha256 mismatch".to_owned());
+    let failed = MachineError::Provision(ProvisionError::Upload("sha256 mismatch".to_owned()));
     assert_eq!(
         transition(&uploading, E::ProvisionFailed(failed.clone())),
         Some(S::Failed { error: failed })

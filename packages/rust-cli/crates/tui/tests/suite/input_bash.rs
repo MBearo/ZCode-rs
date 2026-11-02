@@ -7,28 +7,19 @@ use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
-    OutputStream, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvFacts, EnvPath, OperationContext, Outcome, OutputStream,
+    StartCommand, WorkspaceRef,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
-use rust_cli_kernel_api::testing::{environments, text_response};
+use rust_cli_kernel_api::machine::{Commands, EnvInfo};
+use rust_cli_kernel_api::testing::{registry, text_response, unsupported_machine};
 
 use super::support::{GatedModel, Setup, request_text, with_ui};
 
-/// 执行命令的替身：输出 `ran <命令>`，退出码 0。
+/// 执行命令的替身（环境事实与命令两个端口）：输出 `ran <命令>`，退出码 0。
 #[derive(Default)]
 struct ShellEnv {
     commands: Mutex<Vec<(OperationId, StartCommand)>>,
-}
-
-fn unsupported(what: &str) -> EnvError {
-    EnvError::Unsupported {
-        what: what.to_owned(),
-    }
 }
 
 #[async_trait]
@@ -40,25 +31,9 @@ impl EnvInfo for ShellEnv {
             os_version: "x".into(),
             shell: "zsh".into(),
             is_git_repo: false,
-            additional_directories: Vec::new(),
             home: Some(EnvPath::new("/Users/dev")),
+            uid: None,
         })
-    }
-}
-
-#[async_trait]
-impl Files for ShellEnv {
-    async fn read_file(&self, _w: &WorkspaceRef, _r: ReadFile) -> Result<FileContent, EnvError> {
-        Err(unsupported("read"))
-    }
-
-    async fn write_file(
-        &self,
-        _w: &WorkspaceRef,
-        _c: OperationContext,
-        _r: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        Err(unsupported("write"))
     }
 }
 
@@ -123,19 +98,15 @@ impl Commands for ShellEnv {
     }
 }
 
-impl Search for ShellEnv {}
-impl Shell for ShellEnv {}
-impl Background for ShellEnv {}
-impl Checkpoints for ShellEnv {}
-impl Pdf for ShellEnv {}
-impl Git for ShellEnv {}
-impl Fetch for ShellEnv {}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn bang_runs_a_shell_command_and_the_model_sees_both_messages() {
     let env = Arc::new(ShellEnv::default());
     let setup = Setup {
-        environments: environments(env.clone()),
+        environments: registry(
+            unsupported_machine()
+                .with_info(env.clone())
+                .with_commands(env.clone()),
+        ),
         ..Setup::default()
     };
     let model = GatedModel::scripted(vec![text_response(&["listed the files"])]);

@@ -14,16 +14,13 @@ use super::i18n::{self, Lang};
 use super::layout;
 use super::mouse::Target;
 use super::text::truncate_line;
+use crate::ui::style::dim;
 
 /// footer 左右两半之间至少空一列。
 const MIN_SIDE_GAP: usize = 1;
 /// `?` 面板：按键补到本组最长的按键再加 2 列；一排先试 3 组，再试 2 组。
 const KEY_GAP: usize = 2;
 const GROUPS_PER_ROW: [usize; 2] = [3, 2];
-
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
 
 /// 提示模板：`{键}` 标出按键名（模板里的词序中英文都能放），经按键提示组件画（tui.md §7.4）。
 pub fn hint(template: &str, palette: &super::palette::Palette) -> Vec<Span<'static>> {
@@ -89,7 +86,7 @@ fn footer_left(app: &App, left: Left) -> Vec<Span<'static>> {
     let compact = left >= Left::NoShortcuts;
     let strings = app.strings;
     // 搜索模式（修复线 F114，tui-input.md §2.3.5）：整段换成搜索的按键提示。
-    if app.find.is_some() {
+    if app.port.find.is_some() {
         return hint(super::find::hint(app.lang), &app.palette);
     }
     if let Some((query, _)) = &app.composer.search {
@@ -131,12 +128,12 @@ fn footer_left(app: &App, left: Left) -> Vec<Span<'static>> {
         };
     }
     // 后台任务的 pill 与任务清单的提示（tui-display.md §2.2、§2.3）。
-    let pill = super::manage::pill(&app.background, app.lang);
+    let pill = super::manage::pill(&app.snapshots.background, app.lang);
     let pill_focused = app.focus == Some(super::agents::Focus::Pill);
     let viewing = app.viewing.is_some();
     let tip = if pill_focused {
         hint(super::i18n_panels::pill_hint(app.lang), palette)
-    } else if app.scroll > 0 {
+    } else if app.port.scroll > 0 {
         hint(strings.esc_latest, palette)
     } else if viewing {
         // 查看子代理时（修复线 F112，tui-panels.md §1.7）：esc 是返回主会话、不中断；↓ 进子代理列表，ctrl+t、←、`?` 不生效。
@@ -274,7 +271,7 @@ pub fn footer(app: &App, width: usize) -> (Line<'static>, Vec<(usize, usize, Tar
     let plain = super::text::plain(&line);
     let mut targets = Vec::new();
     let agents = super::i18n_projects::for_projects(app.lang);
-    let pill = super::manage::pill(&app.background, app.lang).unwrap_or_default();
+    let pill = super::manage::pill(&app.snapshots.background, app.lang).unwrap_or_default();
     for (text, target) in [
         (app.strings.for_shortcuts, Target::Shortcuts),
         (agents, Target::Agents),

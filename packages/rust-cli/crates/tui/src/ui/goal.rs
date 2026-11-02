@@ -5,8 +5,9 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::goal::{GoalStatus, GoalView};
 
-use super::cells::{BULLET, Ctx, bold, dim, red};
+use super::cells::{BULLET, Ctx, red};
 use super::i18n::Lang;
+use super::style::{bold, dim};
 use super::text::{truncate_line, wrap_text};
 
 /// 时长只写最高的一个单位。

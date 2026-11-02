@@ -206,29 +206,20 @@ pub enum QuerySource {
     MainThread,
     Subagent(String),
     Compact,
-    /// 标题生成、WebFetch 二次处理、记忆召回等旁路请求。
-    Side(String),
+    /// 标题生成、WebFetch 摘要、prompt hook 等旁路请求（[`crate::side_request`]）。
+    Side(crate::side_request::SideSource),
 }
-
-/// 会话标题的旁路请求名（docs/specs/rust-cli/titles.md §3）。
-pub const SIDE_SESSION_TITLE: &str = "generate_session_title";
-/// WebFetch 摘要的旁路请求名（docs/specs/rust-cli/tools-more.md 的 WebFetch）。
-pub const SIDE_WEB_FETCH: &str = "web_fetch_apply";
 
 impl QuerySource {
     /// 写给 Node 的用途名（工作线 F71）：用量表的 `query_source`（usage.md §2.1）与请求头 `x-zcode-query-source`
-    /// （model.md §2.4）共用。Node 有对应用途的用 Node 的名字（`main_turn`、`subagent`、`compact`、`session_title`、
-    /// `web_fetch_processing`），其余旁路请求用本工程的名字。
-    pub fn node_name(&self) -> String {
+    /// （model.md §2.4）共用。Node 有对应用途的用 Node 的名字（`main_turn`、`subagent`、`compact`，旁路请求见
+    /// [`crate::side_request::SideSource::node_name`]）。
+    pub const fn node_name(&self) -> &'static str {
         match self {
-            Self::MainThread => "main_turn".to_owned(),
-            Self::Subagent(_) => "subagent".to_owned(),
-            Self::Compact => "compact".to_owned(),
-            Self::Side(name) => match name.as_str() {
-                SIDE_SESSION_TITLE => "session_title".to_owned(),
-                SIDE_WEB_FETCH => "web_fetch_processing".to_owned(),
-                _ => name.clone(),
-            },
+            Self::MainThread => "main_turn",
+            Self::Subagent(_) => "subagent",
+            Self::Compact => "compact",
+            Self::Side(side) => side.node_name(),
         }
     }
 }
@@ -245,6 +236,18 @@ pub struct ModelSelection {
     /// 装箱：选择随用量事实（`metering::Metered`）到处复制，不让它变大。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection: Option<Box<ModelConnection>>,
+}
+
+impl ModelSelection {
+    /// 只有 provider 与模型的选择：推理档位、账号连接为空（由目录项或用户的选择填上，结构更新）。
+    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            model: model.into(),
+            reasoning: None,
+            connection: None,
+        }
+    }
 }
 
 /// 账号 provider 下的一个连接：Team Plan 的团队项目（App `ProviderFamilyConnectionSelection` 的团队变体去掉

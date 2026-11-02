@@ -8,9 +8,8 @@ use rust_cli_kernel_api::ids::{InteractionId, ToolUseId};
 use serde_json::json;
 
 use super::super::View;
-use crate::ui::i18n::{EN, Lang, ZH};
+use crate::ui::i18n::Lang;
 use crate::ui::interaction::Interaction;
-use crate::ui::keyboard::Typing;
 use crate::ui::palette::{ColorLevel, Palette};
 use crate::ui::text::plain;
 use rust_cli_kernel_api::orchestration::InteractionRequest;
@@ -38,7 +37,6 @@ fn pressed(request: &InteractionRequest, keys: &[KeyCode]) -> Interaction {
             request,
             KeyEvent::new(*code, KeyModifiers::NONE),
             start + Duration::from_millis(200),
-            Typing::default(),
         );
     }
     ui
@@ -61,7 +59,6 @@ fn a_chosen_single_option_is_green_with_a_tick() {
     let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
     let view = View {
         palette: &palette,
-        strings: &EN,
         lang: Lang::En,
         width: 60,
         height: 40,
@@ -110,7 +107,6 @@ fn the_review_page_has_green_answers_and_plain_choices() {
     let palette = Palette::new(ColorLevel::TrueColor, Some((255, 255, 255)));
     let view = View {
         palette: &palette,
-        strings: &EN,
         lang: Lang::En,
         width: 60,
         height: 40,
@@ -149,7 +145,6 @@ fn the_cursor_follows_the_other_row_and_stays_on_screen() {
     // 中文的占位文字：光标在它的第一个字上（缩进 2、指针 2、序号 3）。
     let view = View {
         palette: &palette,
-        strings: &ZH,
         lang: Lang::Zh,
         width: 30,
         height: 40,

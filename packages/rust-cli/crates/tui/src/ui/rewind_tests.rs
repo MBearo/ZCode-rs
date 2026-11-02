@@ -7,7 +7,7 @@ fn change(path: &str, additions: u64, deletions: u64) -> FileChange {
         path: path.into(),
         additions,
         deletions,
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -43,7 +43,7 @@ fn summaries_follow_the_message_selector_text() {
 #[test]
 fn remote_files_name_their_machine() {
     let remote = |path: &str, additions, deletions| FileChange {
-        machine: Some("dev-a".into()),
+        machine: rust_cli_kernel_api::ids::MachineName::new("dev-a"),
         ..change(path, additions, deletions)
     };
     assert_eq!(

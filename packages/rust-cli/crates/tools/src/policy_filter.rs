@@ -9,63 +9,59 @@ use std::sync::Arc;
 
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::mcp_state::McpConnections;
-use rust_cli_kernel_api::orchestration::{ToolRegistry, ToolSnapshot};
+use rust_cli_kernel_api::orchestration::{RuleSnapshots, ToolRegistry, ToolSnapshot};
 use rust_cli_kernel_api::permission::{PermissionRules, RuleBehavior};
 use rust_cli_kernel_api::tool::Tool;
-use rust_cli_policy::PolicyGate;
-use rust_cli_policy::rules::Rules;
-
-use crate::registry::BASH;
-use crate::{glob, grep};
-
-/// 被 Bash 藏起来、Bash 不在清单里时补回的搜索工具（按这个顺序）。
-const SEARCH: [&str; 2] = [glob::NAME, grep::NAME];
+use rust_cli_kernel_api::tool_search::{SEARCH_TOOLS, search_fallback};
 
 /// 按规则快照过滤的注册表：包住基础工具与 MCP 工具，外层（Agent 等）经 [`ToolRegistry::hides`] 过滤自己的工具。
 pub struct PolicyFiltered {
     inner: Arc<dyn ToolRegistry>,
-    gate: Arc<PolicyGate>,
+    gate: Arc<dyn RuleSnapshots>,
 }
 
 impl PolicyFiltered {
-    pub fn new(inner: Arc<dyn ToolRegistry>, gate: Arc<PolicyGate>) -> Self {
+    /// `gate` 是判决链的规则快照（kernel-api `RuleSnapshots`，F125：以前是具体类型 `PolicyGate`）。
+    pub fn new(inner: Arc<dyn ToolRegistry>, gate: Arc<dyn RuleSnapshots>) -> Self {
         Self { inner, gate }
     }
 
     /// 规则快照里有整个工具的 deny 规则指向这个名字（会话自己的规则集只用于判决，不影响清单）。
     fn denied(rules: &PermissionRules, name: &str) -> bool {
-        Rules {
-            base: rules,
-            session: &[],
-        }
-        .whole_tool(name, RuleBehavior::Deny)
-        .is_some()
+        rules.whole_tool(name, RuleBehavior::Deny).is_some()
     }
 
-    /// 去掉被 deny 的工具之后还有没有启用的 Bash。
-    fn bash_left(&self, rules: &PermissionRules) -> bool {
-        !Self::denied(rules, BASH) && self.inner.find(BASH).is_some_and(|bash| bash.is_enabled())
+    /// 补回的搜索工具（kernel-api `tool_search::search_fallback`）：`shown` 里没有启用的 Bash 时，`wanted` 里没被 deny
+    /// 的 Glob / Grep 从里面的注册表取回藏起来的那个。
+    fn restored<'a>(
+        &self,
+        rules: &PermissionRules,
+        shown: &[Arc<dyn Tool>],
+        wanted: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<Arc<dyn Tool>> {
+        let wanted = wanted.into_iter().filter(|name| !Self::denied(rules, name));
+        search_fallback(shown, wanted, |name| self.inner.withheld(name))
     }
 
-    /// 补回的搜索工具：名字是 Glob / Grep、没有被 deny、Bash 不在清单里时，从里面的注册表取回藏起来的那个。
-    fn restored(&self, rules: &PermissionRules, name: &str) -> Option<Arc<dyn Tool>> {
-        if !SEARCH.contains(&name) || Self::denied(rules, name) || self.bash_left(rules) {
-            return None;
-        }
-        self.inner.withheld(name)
+    /// 补回的那个搜索工具（`find` / `withheld` 只问一个名字时）：按去掉 deny 之后的 Bash 判断。
+    fn restored_one(&self, rules: &PermissionRules, name: &str) -> Option<Arc<dyn Tool>> {
+        let bash: Vec<Arc<dyn Tool>> = self
+            .inner
+            .find(crate::bash::NAME)
+            .filter(|bash| !Self::denied(rules, bash.name()))
+            .into_iter()
+            .collect();
+        self.restored(rules, &bash, [name]).pop()
     }
 
     fn visible(&self, tools: Vec<Arc<dyn Tool>>) -> Vec<Arc<dyn Tool>> {
-        let rules = self.gate.rules();
+        let rules = self.gate.current_rules();
         let mut kept: Vec<Arc<dyn Tool>> = tools
             .into_iter()
             .filter(|tool| !Self::denied(&rules, tool.name()))
             .collect();
-        for name in SEARCH {
-            if kept.iter().all(|tool| tool.name() != name) {
-                kept.extend(self.restored(&rules, name));
-            }
-        }
+        let restored = self.restored(&rules, &kept, SEARCH_TOOLS);
+        kept.extend(restored);
         kept
     }
 }
@@ -76,25 +72,25 @@ impl ToolRegistry for PolicyFiltered {
     }
 
     fn find(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        let rules = self.gate.rules();
+        let rules = self.gate.current_rules();
         match self.inner.find(name) {
             Some(tool) if Self::denied(&rules, tool.name()) => None,
             Some(tool) => Some(tool),
-            None => self.restored(&rules, name),
+            None => self.restored_one(&rules, name),
         }
     }
 
     fn withheld(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        let rules = self.gate.rules();
+        let rules = self.gate.current_rules();
         // 已经补回清单里的不再算藏起来的。
-        if Self::denied(&rules, name) || self.restored(&rules, name).is_some() {
+        if Self::denied(&rules, name) || self.restored_one(&rules, name).is_some() {
             return None;
         }
         self.inner.withheld(name)
     }
 
     fn hides(&self, name: &str) -> bool {
-        Self::denied(&self.gate.rules(), name)
+        Self::denied(&self.gate.current_rules(), name)
     }
 
     fn keeps_order(&self) -> bool {

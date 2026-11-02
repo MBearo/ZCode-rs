@@ -25,6 +25,7 @@ use rust_cli_exec_wire::frame::{Frame, Kind, Reassembler, Received, Splitter};
 use rust_cli_exec_wire::handshake::{
     Capabilities, HEARTBEAT_MISSES, Hello, PROTOCOL, Refuse, Welcome,
 };
+use rust_cli_exec_wire::op::OpKind;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -155,7 +156,6 @@ pub(crate) async fn supervise(
             shared.state().fail_all(&ClientError::Closed);
             return;
         }
-        shared.state().connected = false;
         shared
             .connection
             .send_replace(ConnectionState::Reconnecting {
@@ -172,13 +172,11 @@ pub(crate) async fn supervise(
                     final_ @ (ClientError::Refused { .. } | ClientError::Rejected(_)) => final_,
                     other => ClientError::Disconnected(format!("{reason}; {other}")),
                 };
-                let mut state = shared.state();
-                state.closed = Some(error.clone());
-                state.fail_all(&error);
-                drop(state);
-                shared
-                    .connection
-                    .send_replace(ConnectionState::Closed { error });
+                // 先发 `Closed`（之后的登记都被拒绝），再结束已经登记的调用（`Shared::closed`）。
+                shared.connection.send_replace(ConnectionState::Closed {
+                    error: error.clone(),
+                });
+                shared.state().fail_all(&error);
                 return;
             }
         }
@@ -313,15 +311,18 @@ fn resume(shared: &Shared, welcome: &Welcome, previous: Option<&Welcome>) -> Vec
         .is_some_and(|ledger| welcome.ledger.as_ref() == Some(ledger));
     let mut state = shared.state();
     state.welcome = Some(welcome.clone());
-    state.connected = true;
     let epoch = state.epoch;
     if restarted {
         let lost: Vec<u64> = state
             .pending
             .iter()
             .filter(|(_, pending)| {
-                let op = pending.request.op();
-                pending.sent_epoch != 0 && (op.is_stream() || (op.is_mutation() && !same_ledger))
+                let lost = match pending.request.op().kind() {
+                    OpKind::Stream => true,
+                    OpKind::Mutation => !same_ledger,
+                    OpKind::Read => false,
+                };
+                pending.sent_epoch != 0 && lost
             })
             .map(|(call, _)| *call)
             .collect();

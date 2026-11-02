@@ -2,7 +2,6 @@
 //! 服务器、一条不丢；服务器不读输入时发送立即报错，关闭照常完成。需要 `/bin/sh`。
 #![cfg(unix)]
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -31,13 +30,10 @@ fn transport() -> (LocalMcpTransport, tempfile::TempDir) {
 fn shell(script: &str) -> McpConnect {
     McpConnect {
         server: "s".to_owned(),
-        transport: McpTransportConfig::Stdio {
-            command: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), script.to_owned()],
-            env: BTreeMap::new(),
-            cwd: None,
-        },
-        env: Default::default(),
+        transport: McpTransportConfig::stdio(
+            "/bin/sh".to_owned(),
+            vec!["-c".to_owned(), script.to_owned()],
+        ),
     }
 }
 

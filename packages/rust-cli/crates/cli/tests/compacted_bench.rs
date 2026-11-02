@@ -62,7 +62,7 @@ async fn opening_a_large_compacted_session() {
         open.push(started.elapsed());
         shown = view.messages.len();
         let started = Instant::now();
-        let transcript = rust_cli_tui::view::Transcript::from_view(view, 0);
+        let transcript = rust_cli_tui::Transcript::from_view(view, 0);
         fold.push(started.elapsed());
         std::hint::black_box(&transcript);
         handle

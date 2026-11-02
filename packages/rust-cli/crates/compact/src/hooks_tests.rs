@@ -1,6 +1,7 @@
 //! 压缩里的 hooks 顺序与 SessionStart（`compact`）的消息（compact.md §7）。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_base::models::GLM_5_3;
@@ -20,10 +21,7 @@ struct Recorded(Mutex<Vec<HookEvent>>);
 impl HookRunner for Recorded {
     async fn run(&self, event: HookEvent, _cancel: CancellationToken) -> HookOutcome {
         let name = event.name;
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(event);
+        self.0.lock_unpoisoned().push(event);
         if name != HookEventName::SessionStart {
             return HookOutcome::default();
         }
@@ -56,11 +54,7 @@ async fn session_start_runs_inside_every_compaction_before_post_compact() {
             .run(&request, true, &CancellationToken::new())
             .await
             .unwrap();
-        let seen = hooks
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let seen = hooks.0.lock_unpoisoned().clone();
         let names: Vec<HookEventName> = seen.iter().map(|event| event.name).collect();
         assert_eq!(
             names,

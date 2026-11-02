@@ -8,16 +8,18 @@
 //!
 //! F98（§25.2.2）：“这台在不在清单里”读 Fleet 内存里的清单（Fleet 建好时交给这里一个查询），也不另存一份。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use futures_util::{FutureExt, StreamExt};
 use rust_cli_exec_client::ConnectionState;
+use rust_cli_kernel_api::controller_services::ControllerServices;
 use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, MachineSet, RemoteMachine};
-use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::ids::MachineName;
 use rust_cli_kernel_api::machine::MachineEnv;
 use tokio::sync::watch;
 
@@ -45,7 +47,7 @@ struct Shared {
 
 impl Shared {
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_unpoisoned()
     }
 
     fn settle(&self) {
@@ -57,7 +59,7 @@ impl Shared {
 pub(crate) type Listing = Box<dyn Fn(&str) -> bool + Send + Sync>;
 
 pub(crate) struct MachineRegistry {
-    local: Arc<dyn EnvironmentRegistry>,
+    primary: Arc<dyn EnvironmentRegistry>,
     shared: Arc<Shared>,
     changes: watch::Sender<u64>,
     /// 清单（F98）：没有 Fleet（release 的 `-p`）时没有，`listed` 恒为假。
@@ -86,9 +88,9 @@ impl Drop for Connecting {
 }
 
 impl MachineRegistry {
-    pub(crate) fn new(local: Arc<dyn EnvironmentRegistry>) -> Self {
+    pub(crate) fn new(primary: Arc<dyn EnvironmentRegistry>) -> Self {
         Self {
-            local,
+            primary,
             shared: Arc::default(),
             changes: watch::channel(0).0,
             listing: OnceLock::new(),
@@ -162,12 +164,12 @@ fn lookup(state: &State, name: &str) -> Option<(MachineEnv, WorkspaceRef)> {
 }
 
 impl EnvironmentRegistry for MachineRegistry {
-    fn local_machine(&self) -> MachineEnv {
-        self.local.local_machine()
+    fn primary_machine(&self) -> MachineEnv {
+        self.primary.primary_machine()
     }
 
-    fn local(&self) -> LocalServices {
-        self.local.local()
+    fn controller(&self) -> ControllerServices {
+        self.primary.controller()
     }
 
     fn machines(&self) -> MachineSet {
@@ -178,11 +180,14 @@ impl EnvironmentRegistry for MachineRegistry {
         }
     }
 
-    fn remote(&self, name: &str) -> Option<(MachineEnv, WorkspaceRef)> {
-        lookup(&self.shared.state(), name)
+    fn remote(&self, name: &MachineName) -> Option<(MachineEnv, WorkspaceRef)> {
+        lookup(&self.shared.state(), name.remote()?)
     }
 
-    fn reconnecting(&self, name: &str) -> bool {
+    fn reconnecting(&self, name: &MachineName) -> bool {
+        let Some(name) = name.remote() else {
+            return false;
+        };
         self.shared
             .state()
             .connected
@@ -190,8 +195,9 @@ impl EnvironmentRegistry for MachineRegistry {
             .is_some_and(|c| matches!(*c.link.borrow(), ConnectionState::Reconnecting { .. }))
     }
 
-    fn listed(&self, name: &str) -> bool {
-        self.listing.get().is_some_and(|listing| listing(name))
+    fn listed(&self, name: &MachineName) -> bool {
+        name.remote()
+            .is_some_and(|name| self.listing.get().is_some_and(|listing| listing(name)))
     }
 
     fn changes(&self) -> BoxStream<'static, u64> {
@@ -204,9 +210,14 @@ impl EnvironmentRegistry for MachineRegistry {
         .boxed()
     }
 
-    fn wait_remote(&self, name: &str) -> BoxFuture<'static, Option<(MachineEnv, WorkspaceRef)>> {
+    fn wait_remote(
+        &self,
+        name: &MachineName,
+    ) -> BoxFuture<'static, Option<(MachineEnv, WorkspaceRef)>> {
         let shared = self.shared.clone();
-        let name = name.to_owned();
+        let Some(name) = name.remote().map(str::to_owned) else {
+            return futures_util::future::ready(None).boxed();
+        };
         async move {
             // 先订阅再看状态：看完之后的变化都会唤醒。
             let mut settled = shared.settled.subscribe();

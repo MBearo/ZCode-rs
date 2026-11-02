@@ -3,7 +3,8 @@
 //! 取页面经执行环境的 `fetch_url`（一次 GET）；重定向策略、HTML 转换、缓存与旁路模型请求在这里。
 //! 权限：工具不给意见，判决链按 `domain:` 规则与预批准域名判断（policy `chain::web_fetch`）。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_base::proto::{http, mime};
@@ -18,10 +19,12 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use url::Url;
 
-use crate::common::{Definition, definition, failed, text};
 use crate::web_cache::{Page, PageCache};
 use crate::web_side::apply_prompt;
 use crate::web_texts as texts;
+use rust_cli_kernel_api::tool::{failed, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
 /// 主机名至少有这么多段（`a.b`）。
 const MIN_HOST_LABELS: usize = 2;
@@ -31,7 +34,7 @@ const MAX_RETRY_AFTER_DIGITS: usize = 6;
 /// WebFetch 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
 const MAX_RESULT_CHARS: usize = 50_000;
 
-pub const NAME: &str = "WebFetch";
+pub const NAME: &str = tool_names::WEB_FETCH;
 
 /// URL 最长 2000 个字符。
 const MAX_URL: usize = 2000;
@@ -64,7 +67,7 @@ pub struct WebFetchTool {
 impl WebFetchTool {
     pub fn new(side: Option<SideModel>, clock: Arc<dyn Clock>) -> Self {
         Self {
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
             side,
             cache: Mutex::default(),
             clock,
@@ -72,16 +75,12 @@ impl WebFetchTool {
     }
 
     fn cached(&self, url: &str) -> Option<Page> {
-        self.cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(url, self.clock.now_ms())
+        self.cache.lock_unpoisoned().get(url, self.clock.now_ms())
     }
 
     fn remember(&self, url: &str, page: &Page) {
         self.cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_unpoisoned()
             .put(url, page.clone(), self.clock.now_ms());
     }
 }
@@ -152,7 +151,7 @@ async fn fetch(context: &ToolUseContext, start: Url) -> Result<Fetched, ToolErro
             max_bytes: MAX_BYTES,
         };
         let reply = context
-            .local
+            .controller
             .fetch()
             .fetch_url(&context.workspace, request)
             .await
@@ -211,6 +210,20 @@ async fn fetch(context: &ToolUseContext, start: Url) -> Result<Fetched, ToolErro
 impl Tool for WebFetchTool {
     fn name(&self) -> &str {
         NAME
+    }
+
+    /// 判决链按 `domain:` 规则与预批准域名检查网址（tools-more.md §4）；没有网址时是空串。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        Some(rust_cli_kernel_api::permission::PermissionSubject::Url {
+            url: input
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        })
     }
 
     fn input_schema(&self) -> Value {

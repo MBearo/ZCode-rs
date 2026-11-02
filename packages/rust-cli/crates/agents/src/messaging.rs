@@ -9,16 +9,16 @@ use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::ids::AgentId;
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
-    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
+    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, parse,
 };
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::Core;
-use crate::agent_tool::text_output;
 use crate::spawn;
 use crate::task_stop::TaskStopTool;
+use rust_cli_kernel_api::tool_names;
 
 pub(crate) fn tools(core: &Arc<Core>) -> Vec<Arc<dyn Tool>> {
     let mut tools: Vec<Arc<dyn Tool>> = [Kind::ListAgents, Kind::SendMessage]
@@ -43,8 +43,8 @@ enum Kind {
 impl Kind {
     fn name(self) -> &'static str {
         match self {
-            Self::ListAgents => "ListAgents",
-            Self::SendMessage => "SendMessage",
+            Self::ListAgents => tool_names::LIST_AGENTS,
+            Self::SendMessage => tool_names::SEND_MESSAGE,
         }
     }
 }
@@ -66,7 +66,7 @@ struct SendInput {
 impl Messaging {
     /// 段落格式：自己那一段、子代理、同伴会话（cross-session.md §1.3）。
     async fn list(&self, context: &ToolUseContext) -> ToolOutput {
-        text_output(crate::peer_send::listing(&self.core, context).await, false)
+        rust_cli_kernel_api::tool::text(crate::peer_send::listing(&self.core, context).await)
     }
 
     async fn send(
@@ -92,17 +92,17 @@ impl Messaging {
                 context,
             )
             .await;
-            return Ok(text_output(text, false));
+            return Ok(rust_cli_kernel_api::tool::text(text));
         };
         if self.core.live.enqueue(&id, input.message.clone()) {
             let text = format!(
                 "Message queued for delivery to {} at its next tool round.",
                 input.to
             );
-            return Ok(text_output(text, false));
+            return Ok(rust_cli_kernel_api::tool::text(text));
         }
         // 已结束：在后台续跑子会话。
-        let status = agent.status();
+        let status = agent.status().as_str();
         if !self.core.live.restart(&id, Abort::new()) {
             // 并发的另一条消息刚刚让它跑起来：排进邮箱。
             self.core.live.enqueue(&id, input.message.clone());
@@ -110,7 +110,7 @@ impl Messaging {
                 "Message queued for delivery to {} at its next tool round.",
                 input.to
             );
-            return Ok(text_output(text, false));
+            return Ok(rust_cli_kernel_api::tool::text(text));
         }
         let origin = rust_cli_kernel_api::message::UserOrigin::Human;
         let opening = match spawn::resume(&self.core, &agent, &input.message, origin).await {
@@ -132,7 +132,7 @@ impl Messaging {
             "Agent \"{}\" was stopped ({status}); it was resumed in the background with your message. You'll be notified when it finishes.",
             input.to
         );
-        Ok(text_output(text, false))
+        Ok(rust_cli_kernel_api::tool::text(text))
     }
 }
 
@@ -156,13 +156,15 @@ impl Tool for Messaging {
     }
 
     fn input_schema(&self) -> Value {
-        rust_cli_prompts::tool(self.kind.name())
-            .map_or(Value::Null, |prompt| prompt.input_schema.clone())
+        rust_cli_prompts::definition(self.kind.name())
+            .schema
+            .clone()
     }
 
     fn description(&self, _context: &PromptContext) -> String {
-        rust_cli_prompts::tool(self.kind.name())
-            .map_or_else(String::new, |prompt| prompt.description.clone())
+        rust_cli_prompts::definition(self.kind.name())
+            .description
+            .clone()
     }
 
     fn is_read_only(&self, _input: &Value) -> bool {
@@ -189,13 +191,10 @@ impl Tool for Messaging {
         context: ToolUseContext,
         _progress: mpsc::Sender<ToolProgress>,
     ) -> Result<ToolOutput, ToolError> {
-        let invalid = |error: serde_json::Error| ToolError::InvalidInput {
-            message: error.to_string(),
-        };
         match self.kind {
             Kind::ListAgents => Ok(self.list(&context).await),
             Kind::SendMessage => {
-                let input = serde_json::from_value(value).map_err(invalid)?;
+                let input = parse(&value)?;
                 self.send(input, &context).await
             }
         }

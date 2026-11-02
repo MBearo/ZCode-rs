@@ -6,6 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::manage::McpServerState;
+use rust_cli_kernel_api::mcp::McpToolInfo;
 use rust_cli_kernel_api::mcp_state::{McpConnections, McpServerView, McpView};
 use rust_cli_kernel_api::orchestration::ToolRegistry;
 use rust_cli_kernel_api::testing::ScriptedInteractions;
@@ -118,7 +119,7 @@ fn the_note_lists_pending_servers_and_caps_at_thirty() {
 }
 
 /// 一个 MCP 工具（延迟）。
-struct Mcp(String);
+struct Mcp(String, McpToolInfo);
 
 #[async_trait]
 impl Tool for Mcp {
@@ -134,8 +135,8 @@ impl Tool for Mcp {
         "Look up a stored value.".to_owned()
     }
 
-    fn is_mcp(&self) -> bool {
-        true
+    fn mcp_info(&self) -> Option<&McpToolInfo> {
+        Some(&self.1)
     }
 
     async fn call(
@@ -155,7 +156,7 @@ struct Registry {
     mcp: Arc<Connections>,
 }
 
-impl ToolRegistry for Registry {
+impl rust_cli_kernel_api::testing::RegistryOverride for Registry {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
         let mut tools = vec![self.search.clone()];
         tools.extend(self.late.lock().unwrap().iter().cloned());
@@ -163,7 +164,9 @@ impl ToolRegistry for Registry {
     }
 
     fn find(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools().into_iter().find(|tool| tool.name() == name)
+        ToolRegistry::tools(self)
+            .into_iter()
+            .find(|tool| tool.name() == name)
     }
 
     fn mcp(&self) -> Option<Arc<dyn McpConnections>> {
@@ -197,11 +200,14 @@ fn connect_after(rig: &Rig, server: &'static str, after_ms: u64) {
     let registry = rig.registry.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(after_ms)).await;
-        registry
-            .late
-            .lock()
-            .unwrap()
-            .push(Arc::new(Mcp(format!("mcp__{server}__lookup"))));
+        registry.late.lock().unwrap().push(Arc::new(Mcp(
+            format!("mcp__{server}__lookup"),
+            McpToolInfo {
+                server: server.to_owned(),
+                tool: "lookup".to_owned(),
+                always_load: false,
+            },
+        )));
         let mut view = registry.mcp.view();
         for each in &mut view.servers {
             if each.name == server {

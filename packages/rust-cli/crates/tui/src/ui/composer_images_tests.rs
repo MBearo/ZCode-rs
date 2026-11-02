@@ -92,20 +92,20 @@ fn deleting_the_placeholder_detaches_the_image_and_undo_brings_it_back() {
     let mut composer = Composer::default();
     composer.area.insert_str("see ");
     composer.add_image(PNG);
-    assert!(composer.has_images());
+    assert!(!composer.image_blocks(composer.area.text()).is_empty());
     composer.area.checkpoint(now, false);
     composer.area.backspace();
     composer.sync_images(false);
     assert_eq!(composer.area.text(), "see ");
     assert!(
-        !composer.has_images(),
+        composer.image_blocks(composer.area.text()).is_empty(),
         "the image goes with its placeholder"
     );
     // 撤销：占位文字与图片都回来。
     composer.area.undo();
     composer.sync_images(true);
     assert_eq!(composer.area.text(), "see [Image #1]");
-    assert!(composer.has_images());
+    assert!(!composer.image_blocks(composer.area.text()).is_empty());
     assert_eq!(composer.image_blocks(composer.area.text()).len(), 1);
     // ctrl+w 删掉、ctrl+y 粘回：只有文字回来。
     composer.area.kill_word();
@@ -113,6 +113,5 @@ fn deleting_the_placeholder_detaches_the_image_and_undo_brings_it_back() {
     composer.area.yank();
     composer.sync_images(false);
     assert_eq!(composer.area.text(), "see [Image #1]");
-    assert!(!composer.has_images());
     assert!(composer.image_blocks(composer.area.text()).is_empty());
 }

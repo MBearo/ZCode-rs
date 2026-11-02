@@ -22,6 +22,8 @@ rust-cli-base.workspace = true
 # 上传前读本机的 Linux 产物（ELF 头、sha256、内容）：本机文件经 fs（README §4）。
 rust-cli-fs.workspace = true
 rust-cli-exec-transport.workspace = true
+# 部署器的 trait、进度与错误（F128：在 machines，remote-exec.md §15.3）。
+rust-cli-machines.workspace = true
 # ssh 进程只经 proc 起（README §4）。
 rust-cli-proc.workspace = true
 serde = { workspace = true, features = ["derive"] }

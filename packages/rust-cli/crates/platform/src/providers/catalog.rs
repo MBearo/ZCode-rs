@@ -312,14 +312,13 @@ fn default_selection(templates: &[Template], configured: &Value) -> Option<Model
         None => visible().find_map(|template| Some((template, template.levels.last()?.clone())))?,
     };
     Some(ModelSelection {
-        provider: template.provider.clone(),
-        model: template.model.clone(),
         reasoning: Some(reasoning),
         // 指向团队 provider 时是这个模型的第一个团队项目（缺省不存团队项目，D-F49-3）。
         connection: template
             .connection
             .as_ref()
             .map(|connection| Box::new(connection.id.clone())),
+        ..ModelSelection::new(template.provider.clone(), template.model.clone())
     })
 }
 

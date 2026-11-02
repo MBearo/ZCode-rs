@@ -12,7 +12,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 
 use super::palette::{Palette, Rgb, blend};
-pub use render::{Cell, Metal, Pose, REST, frame};
+pub use render::{Metal, Pose, REST, frame};
 
 /// 一次点击的时长（秒）：0.1 秒亮起，弹簧在 1.2 秒内停住，`FADE_FROM` 起淡回。
 pub const DURATION: f64 = 2.0;

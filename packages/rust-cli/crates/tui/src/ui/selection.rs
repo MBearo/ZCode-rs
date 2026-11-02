@@ -82,27 +82,6 @@ pub fn text_at(text: &str, col: usize) -> bool {
     false
 }
 
-/// 行里 `col` 处的网址（`http://` 或 `https://` 开头）。
-pub fn url_at(text: &str, col: usize) -> Option<String> {
-    let mut used = 0;
-    let mut start = 0;
-    for (index, c) in text.char_indices() {
-        if c.is_whitespace() || matches!(c, '(' | ')' | '<' | '>' | '"' | '\'') {
-            if used > col {
-                break;
-            }
-            start = index + c.len_utf8();
-        }
-        used += c.width().unwrap_or(0);
-    }
-    let token: String = text[start..]
-        .chars()
-        .take_while(|c| !c.is_whitespace() && !matches!(c, '(' | ')' | '<' | '>' | '"' | '\''))
-        .collect();
-    let token = token.trim_end_matches(['.', ',', ';', ':']);
-    (token.starts_with("http://") || token.starts_with("https://")).then(|| token.to_owned())
-}
-
 /// 把行的 `[from, to)` 列反色（按需拆开片段）。输入框的选区用。
 pub fn reverse(line: &mut Line<'static>, from: usize, to: usize) {
     restyle(line, from, to, |style| {

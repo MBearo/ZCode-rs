@@ -10,6 +10,7 @@ use rust_cli_kernel_api::env::{EnvError, EnvPath, ReadFile};
 use rust_cli_kernel_api::env_files::{ReadText, TextRead};
 use rust_cli_kernel_api::env_path;
 use rust_cli_kernel_api::ids::{ArtifactId, SessionId};
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::message::{ImageSource, ToolResultContent};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
@@ -19,8 +20,8 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::common::{
-    Definition, FileTools, cwd, definition, env_failure, failed, format_bytes, invalid,
-    missing_file, parse, resolve_input, stable_path, stat, text, unstable_input,
+    FileTools, cwd, env_failure, format_bytes, missing_file, resolve_input, stable_path, stat,
+    unstable_input,
 };
 use crate::file_state::{Baseline, FileState};
 use crate::read_support::{
@@ -28,8 +29,11 @@ use crate::read_support::{
     number_lines,
 };
 use crate::{base64, budget, notebook, read_pdf, texts};
+use rust_cli_kernel_api::tool::{failed, invalid, parse, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const NAME: &str = "Read";
+pub const NAME: &str = tool_names::READ;
 
 #[derive(Deserialize)]
 struct Input {
@@ -50,7 +54,7 @@ impl ReadTool {
     pub fn new(files: FileTools) -> Self {
         Self {
             files,
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
         }
     }
 }
@@ -243,6 +247,23 @@ impl ReadTool {
 impl Tool for ReadTool {
     fn name(&self) -> &str {
         NAME
+    }
+
+    /// 读点名的机器上的文件（remote-exec.md §20.5.1）。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::RunsThere
+    }
+
+    /// 判决链按路径规则检查（`Read(...)`，shell-permissions.md §4.4）。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        crate::common::path_subject(
+            rust_cli_kernel_api::permission::FileAccess::Read,
+            input,
+            "file_path",
+        )
     }
 
     fn input_schema(&self) -> Value {

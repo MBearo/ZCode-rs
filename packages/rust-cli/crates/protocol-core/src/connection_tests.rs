@@ -1,3 +1,4 @@
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,10 +40,7 @@ impl Service for Echo {
     }
 
     async fn notification(&self, method: &str, _params: Value) {
-        self.seen
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(method.to_owned());
+        self.seen.lock_unpoisoned().push(method.to_owned());
     }
 }
 
@@ -152,14 +150,7 @@ async fn outbound_requests_use_their_own_ids_and_get_the_peer_answer() {
         .send(r#"{"id":10,"method":"echo","params":1}"#)
         .await;
     harness.next().await;
-    assert_eq!(
-        *harness
-            .service
-            .seen
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner),
-        ["host/note"]
-    );
+    assert_eq!(*harness.service.seen.lock_unpoisoned(), ["host/note"]);
 }
 
 #[tokio::test]

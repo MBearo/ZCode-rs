@@ -284,3 +284,111 @@ pub fn touch(conn: &Connection, id: &str, time_updated: i64) -> rusqlite::Result
         .execute(params![time_updated, id])?;
     Ok(())
 }
+
+/// 新会话行要从原会话行取的列（Node `buildForkedSessionInput`）。
+pub struct ForkParent {
+    pub project_id: String,
+    pub workspace_id: Option<String>,
+    pub trace_id: Option<String>,
+    pub slug: String,
+    pub directory: String,
+    pub path: Option<String>,
+    pub title: String,
+    pub version: String,
+    pub permission: Option<Value>,
+    pub revert: Option<Value>,
+}
+
+/// 分叉时新会话行要从原会话行取的列；原会话不在或已删时 None。
+pub fn fork_parent(conn: &Connection, id: &str) -> rusqlite::Result<Option<ForkParent>> {
+    let json = |text: Option<String>| text.and_then(|text| serde_json::from_str(&text).ok());
+    conn.query_row(
+        "select project_id, workspace_id, trace_id, slug, directory, path, title, version,
+           permission, revert
+         from session where id = ? and time_deleted is null",
+        [id],
+        |row| {
+            Ok(ForkParent {
+                project_id: row.get(0)?,
+                workspace_id: row.get::<_, Option<String>>(1)?.filter(|s| !s.is_empty()),
+                trace_id: row.get::<_, Option<String>>(2)?.filter(|s| !s.is_empty()),
+                slug: row.get(3)?,
+                directory: row.get(4)?,
+                path: row.get(5)?,
+                title: row.get(6)?,
+                version: row.get(7)?,
+                permission: json(row.get(8)?),
+                revert: json(row.get(9)?),
+            })
+        },
+    )
+    .optional()
+}
+
+/// 会话所属的项目（`session.project_id`）。
+pub fn project_id(conn: &Connection, id: &str) -> rusqlite::Result<String> {
+    conn.prepare_cached("select project_id from session where id = ?")?
+        .query_row(params![id], |row| row.get(0))
+}
+
+/// 会话的目标（Node `session_target`）：分叉时复制的列。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    pub target_id: String,
+    pub objective: String,
+    pub summary_title: Option<String>,
+    pub status: String,
+    pub token_budget: Option<i64>,
+    pub tokens_used: i64,
+    pub time_used_seconds: i64,
+    pub time_created: i64,
+    pub time_updated: i64,
+}
+
+/// 这个会话的目标；没有时 None。
+pub fn target(conn: &Connection, session: &str) -> rusqlite::Result<Option<Target>> {
+    conn.query_row(
+        "select target_id, objective, summary_title, status, token_budget, tokens_used,
+               time_used_seconds, time_created, time_updated
+             from session_target where session_id = ?",
+        [session],
+        |row| {
+            Ok(Target {
+                target_id: row.get(0)?,
+                objective: row.get(1)?,
+                summary_title: row.get(2)?,
+                status: row.get(3)?,
+                token_budget: row.get(4)?,
+                tokens_used: row.get(5)?,
+                time_used_seconds: row.get(6)?,
+                time_created: row.get(7)?,
+                time_updated: row.get(8)?,
+            })
+        },
+    )
+    .optional()
+}
+
+/// Node `cloneSessionTargetForFork` 写的一行（没有正在跑的输入）。
+pub fn insert_target(conn: &Connection, session: &str, target: &Target) -> rusqlite::Result<()> {
+    conn.execute(
+        "insert into session_target (
+               session_id, target_id, objective, summary_title, status, token_budget, tokens_used,
+               time_used_seconds, active_input_id, active_run_started_at, active_run_last_seen_at,
+               time_created, time_updated
+             ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?)",
+        params![
+            session,
+            target.target_id,
+            target.objective,
+            target.summary_title,
+            target.status,
+            target.token_budget,
+            target.tokens_used,
+            target.time_used_seconds,
+            target.time_created,
+            target.time_updated
+        ],
+    )?;
+    Ok(())
+}

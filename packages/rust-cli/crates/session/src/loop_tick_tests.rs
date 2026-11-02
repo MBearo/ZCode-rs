@@ -1,7 +1,8 @@
 //! `/loop` 哨兵的展开（tools-more.md §17.3）与会话关闭时停止持久调度（§16.4）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -83,15 +84,12 @@ impl CronSignals for Cron {
     }
 
     async fn take_due(&self, _session: &SessionId) -> Vec<CronFire> {
-        let mut due = self.due.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut due = self.due.lock_unpoisoned();
         due.pop_front().into_iter().collect()
     }
 
     async fn session_closed(&self, session: &SessionId) {
-        self.closed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(session.clone());
+        self.closed.lock_unpoisoned().push(session.clone());
     }
 }
 
@@ -117,14 +115,11 @@ fn scheduled(messages: &[Message]) -> Vec<String> {
 async fn a_fired_sentinel_becomes_the_loop_md_tasks() {
     let model = Arc::new(ScriptedModel::new(vec![text_response(&["done"])]));
     let cron = Arc::new(Cron::default());
-    cron.due
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .push_back(CronFire {
-            job: "1a2b3c4d".to_owned(),
-            prompt: "<<loop.md>>".to_owned(),
-            kind: rust_cli_kernel_api::cron::CronFireKind::Loop,
-        });
+    cron.due.lock_unpoisoned().push_back(CronFire {
+        job: "1a2b3c4d".to_owned(),
+        prompt: "<<loop.md>>".to_owned(),
+        kind: rust_cli_kernel_api::cron::CronFireKind::Loop,
+    });
     let environment: Arc<MemoryEnvironment> = Arc::new(
         Arc::try_unwrap(env())
             .unwrap_or_else(|_| unreachable!("fresh environment"))
@@ -143,8 +138,5 @@ async fn a_fired_sentinel_becomes_the_loop_md_tasks() {
     assert!(prompts[0].contains("\n- run the tests\n"));
     assert!(prompts[0].ends_with(loops::file_tick_fixed()));
     built.session.close(EndReason::Clear).await;
-    assert_eq!(
-        *cron.closed.lock().unwrap_or_else(PoisonError::into_inner),
-        [SessionId::new("sess_1")]
-    );
+    assert_eq!(*cron.closed.lock_unpoisoned(), [SessionId::new("sess_1")]);
 }

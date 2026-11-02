@@ -1,5 +1,5 @@
 //! 执行端口的本地实现（docs/specs/rust-cli/README.md §6）：一台机器的 8 个端口（kernel-api `machine`）与只在本机的
-//! Git、取网页（`local_services`）都由 [`LocalEnvironment`] 实现，MCP 传输是 [`LocalMcpTransport`]；入口把两者装成
+//! Git、取网页（`controller_services`）都由 [`LocalEnvironment`] 实现，MCP 传输是 [`LocalMcpTransport`]；入口把两者装成
 //! `MachineEnv`（remote-exec.md §15.8.1）。
 //!
 //! 工作区文件（版本回执、条件写、apply_patch）、搜索（ignore + grep-searcher，rg 语义）、进程（shell、
@@ -38,13 +38,15 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
+use rust_cli_kernel_api::controller_services::Fetch;
 use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
+use rust_cli_kernel_api::env_command::EnvOverrides;
 use rust_cli_kernel_api::env_files::{
-    DirEntry, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome, GrepSearch, ListDir,
-    PathFacts, PathStyle, PutFile, ReadText, StatFile, TextRead,
+    DirEntry, EnsureDir, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome, GrepSearch,
+    ListDir, PathFacts, PathStyle, PutFile, ReadText, StatFile, TextRead,
 };
 use rust_cli_kernel_api::env_git::{GitStatus, GitStatusRequest};
 use rust_cli_kernel_api::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
@@ -55,7 +57,7 @@ use rust_cli_kernel_api::env_worktree::{
     WorktreeChanges, WorktreeCreate, WorktreeCreated, WorktreeInspect, WorktreeList, WorktreeRemove,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
+use rust_cli_kernel_api::machine::Git;
 use rust_cli_kernel_api::machine::{
     Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
 };
@@ -94,8 +96,6 @@ pub struct LocalEnvironment {
     web: Option<std::sync::Arc<rust_cli_net::Egress>>,
     /// pdftoppm 是否可用（可用的结论只查一次，tools-files.md §1.5）。
     poppler: pdf::Poppler,
-    /// `--add-dir` 的目录（入口已解析成绝对路径并检查过，cli-args.md §6）：环境事实的附加工作目录。
-    additional: Vec<EnvPath>,
 }
 
 #[async_trait]
@@ -106,20 +106,20 @@ impl EnvInfo for LocalEnvironment {
         let is_git_repo = run(move || Ok(host::git_root(&root).is_some())).await?;
         let os_version = self
             .os_version
-            .get_or_init(|| host::os_version(&self.snapshot))
+            .get_or_init(|| host::os_version(self.snapshot.vars()))
             .await
             .clone();
         Ok(EnvFacts {
             cwd: workspace.root.clone(),
             platform: host::platform().to_owned(),
             os_version,
-            shell: host::describe_shell(environ::shell_variable(&self.snapshot), self.bash),
+            shell: host::describe_shell(environ::shell_variable(self.snapshot.vars()), self.bash),
             is_git_repo,
-            additional_directories: self.additional.clone(),
             home: self
                 .home
                 .as_ref()
                 .map(|home| EnvPath::new(home.to_string_lossy())),
+            uid: user_id(),
         })
     }
 
@@ -201,6 +201,19 @@ impl Files for LocalEnvironment {
         let target = path(&request.path);
         run(move || files::put_file(&target, &request)).await
     }
+
+    async fn ensure_dir(
+        &self,
+        _workspace: &WorkspaceRef,
+        request: EnsureDir,
+    ) -> Result<(), EnvError> {
+        // 已经存在算成功；路径上有同名的文件时是 io 错误（不覆盖）。
+        rust_cli_fs::create_dir_all(&path(&request.path))
+            .await
+            .map_err(|error| EnvError::Io {
+                message: format!("{}: {error}", request.path.as_str()),
+            })
+    }
 }
 
 #[async_trait]
@@ -230,6 +243,21 @@ impl Search for LocalEnvironment {
     }
 }
 
+impl LocalEnvironment {
+    /// 执行器起命令（F96，remote-exec.md §23.5）：同 [`Commands::start_command`]，环境的投影之后再加上（或去掉）这个
+    /// 客户端实例推来的变量。推来的变量只在执行器里有，所以是这里的参数，不在 `StartCommand` 里（F128，审查 K10）。
+    pub async fn start_command_with_env(
+        &self,
+        context: OperationContext,
+        request: StartCommand,
+        env: &EnvOverrides,
+    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
+        self.shells()?
+            .start_with(context, request, self.web.clone(), env)
+            .await
+    }
+}
+
 #[async_trait]
 impl Commands for LocalEnvironment {
     async fn start_command(
@@ -239,7 +267,7 @@ impl Commands for LocalEnvironment {
         request: StartCommand,
     ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         self.shells()?
-            .start_with(context, request, self.web.clone())
+            .start_with(context, request, self.web.clone(), &EnvOverrides::new())
             .await
     }
 
@@ -453,4 +481,15 @@ impl Fetch for LocalEnvironment {
         let egress = self.web.as_ref().ok_or_else(|| unsupported("web fetch"))?;
         web::fetch(egress, request).await
     }
+}
+
+/// 执行命令的用户（本进程）的 uid：root 检查看执行侧（deployment.md §21）。Windows 没有 uid。
+#[cfg(unix)]
+fn user_id() -> Option<u32> {
+    Some(rust_cli_proc::private::uid())
+}
+
+#[cfg(not(unix))]
+fn user_id() -> Option<u32> {
+    None
 }

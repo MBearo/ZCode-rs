@@ -6,7 +6,7 @@ use rust_cli_kernel_api::orchestration::InteractionRequest;
 use rust_cli_kernel_api::user_input::INTERRUPT_TEXTS;
 use serde_json::{Value, json};
 
-use super::{Projection, block_key, state, text_of, tool_key};
+use super::{Projection, RowKind, ToolStatus, block_key, state, text_of, tool_key};
 
 impl Projection {
     #[allow(clippy::too_many_arguments)]
@@ -21,8 +21,8 @@ impl Projection {
         out: &mut Vec<Value>,
     ) {
         let (kind, text) = match delta {
-            BlockDelta::Text(text) => ("assistantText", text),
-            BlockDelta::Thinking(text) => ("reasoning", text),
+            BlockDelta::Text(text) => (RowKind::AssistantText, text),
+            BlockDelta::Thinking(text) => (RowKind::Reasoning, text),
             BlockDelta::Signature(_) | BlockDelta::InputJson(_) => return,
         };
         if let Some(current) = &mut self.turn {
@@ -60,7 +60,7 @@ impl Projection {
                 if self.index.contains_key(&key) {
                     return;
                 }
-                let mut row = self.base(&turn.id, user.id.as_str(), "userInput", now, seq);
+                let mut row = self.base(&turn.id, user.id.as_str(), RowKind::UserInput, now, seq);
                 row.insert("text".into(), json!(text_of(&user.content)));
                 row.insert("origin".into(), json!("realUser"));
                 if let Some(command) = &turn.command {
@@ -84,7 +84,7 @@ impl Projection {
                     match block {
                         ContentBlock::Text { text } => {
                             self.settle_block(
-                                "assistantText",
+                                RowKind::AssistantText,
                                 &turn.id,
                                 response,
                                 index,
@@ -97,7 +97,7 @@ impl Projection {
                         }
                         ContentBlock::Thinking { thinking, .. } => {
                             self.settle_block(
-                                "reasoning",
+                                RowKind::Reasoning,
                                 &turn.id,
                                 response,
                                 index,
@@ -121,21 +121,27 @@ impl Projection {
                                 out,
                             );
                         }
-                        _ => {}
+                        // 不投成行的块（P1）。
+                        ContentBlock::Image { .. }
+                        | ContentBlock::RedactedThinking { .. }
+                        | ContentBlock::ToolResult { .. }
+                        | ContentBlock::ServerToolUse { .. }
+                        | ContentBlock::WebSearchToolResult { .. } => {}
                     }
                 }
                 if let Some(current) = &mut self.turn {
                     current.response = None;
                 }
             }
-            _ => {}
+            // 工具结果、meta 输入与中断标记（user）、附件与 system 消息不投成行（P1）。
+            Message::User(_) | Message::Attachment(_) | Message::System(_) => {}
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn settle_block(
         &mut self,
-        kind: &str,
+        kind: RowKind,
         turn: &str,
         response: u32,
         index: usize,
@@ -162,7 +168,7 @@ impl Projection {
             self.append(key.clone(), row, out);
         }
         let (message_id, model) = (assistant.id.as_str().to_owned(), assistant.model.clone());
-        let assistant_text = kind == "assistantText";
+        let assistant_text = kind == RowKind::AssistantText;
         self.upsert(
             &key,
             |row| {
@@ -190,10 +196,10 @@ impl Projection {
             .turn
             .as_ref()
             .map_or_else(|| self.session.clone(), |turn| turn.id.clone());
-        let mut row = self.base(&turn, tool_use, "toolCall", now, seq);
+        let mut row = self.base(&turn, tool_use, RowKind::ToolCall, now, seq);
         row.insert("toolCallId".into(), json!(tool_use));
         row.insert("toolName".into(), json!(name));
-        row.insert("status".into(), json!("running"));
+        row.insert("status".into(), json!(ToolStatus::Running.as_str()));
         row.insert("inputText".into(), json!(input.to_string()));
         row.insert("input".into(), input.clone());
         self.append(tool_key(tool_use), row, out);

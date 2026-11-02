@@ -149,7 +149,10 @@ async fn a_background_agent_notifies_its_parent_once_it_finishes() {
     let Some(AgentSignal::Notice(notice)) = stream.next().await else {
         panic!("expected a notice");
     };
-    assert_eq!(notice.status, "completed");
+    assert_eq!(
+        notice.status,
+        rust_cli_kernel_api::env_shell::BackgroundStatus::Completed
+    );
     assert!(
         notice
             .text
@@ -193,7 +196,10 @@ async fn task_stop_kills_a_running_agent_and_send_message_resumes_a_finished_one
     let Some(AgentSignal::Notice(notice)) = stream.next().await else {
         panic!("expected a notice");
     };
-    assert_eq!(notice.status, "killed");
+    assert_eq!(
+        notice.status,
+        rust_cli_kernel_api::env_shell::BackgroundStatus::Killed
+    );
     assert!(
         notice
             .text
@@ -239,7 +245,7 @@ async fn task_stop_kills_a_running_agent_and_send_message_resumes_a_finished_one
     assert_eq!(seen[1].request.messages.len(), 2);
     gate.notify_one();
     assert!(
-        matches!(stream.next().await, Some(AgentSignal::Notice(notice)) if notice.status == "completed")
+        matches!(stream.next().await, Some(AgentSignal::Notice(notice)) if notice.status == rust_cli_kernel_api::env_shell::BackgroundStatus::Completed)
     );
 }
 
@@ -405,4 +411,23 @@ async fn tools_hidden_by_the_base_registry_leave_the_main_list() {
     assert!(names.iter().any(|name| name == "SendMessage"), "{names:?}");
     let snapshot = registry.snapshot(&SessionId::new("s"));
     assert!(snapshot.tools.iter().all(|tool| tool.name() != "Agent"));
+}
+
+/// 旧名按 kernel-api 的旧名表找到现在的工具（shell-permissions.md §4.2，F132）。缺陷：以前每个工具自己列旧名，
+/// ListAgents 没有列 ListPeers，模型按旧名调用时找不到工具（表里有、工具上没有）。
+#[tokio::test]
+async fn legacy_names_find_the_current_tools() {
+    let harness = harness(None);
+    let registry = harness.agents.registry();
+    let found = |name: &str| registry.find(name).map(|tool| tool.name().to_owned());
+    for (old, new) in [
+        ("ListPeers", "ListAgents"),
+        ("Task", "Agent"),
+        ("KillShell", "TaskStop"),
+        ("KillBash", "TaskStop"),
+    ] {
+        assert_eq!(found(old).as_deref(), Some(new), "{old}");
+    }
+    let listed = harness.call("sess_parent", "ListPeers", json!({})).await;
+    assert!(!listed.is_error, "{}", text(&listed));
 }

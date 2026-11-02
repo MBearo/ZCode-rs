@@ -45,12 +45,7 @@ impl Compactor for Fixed {
 }
 
 fn selection() -> ModelSelection {
-    ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: GLM_5_3.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("anthropic".to_owned(), GLM_5_3.to_owned())
 }
 
 fn request() -> CompactRequest {
@@ -93,7 +88,7 @@ async fn an_unassembled_compactor_fails_instead_of_skipping() {
 #[test]
 fn an_assembled_compactor_forwards_every_method() {
     let late = LateCompactor::default();
-    late.set(Arc::new(Fixed));
+    late.bind(Arc::new(Fixed));
     assert!(late.should_auto_compact(&[], &selection()));
     assert_eq!(
         late.context_usage(&[], &selection()),

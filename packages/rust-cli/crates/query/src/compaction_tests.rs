@@ -1,5 +1,6 @@
 //! 主循环里的自动与反应式压缩（compact.md §4.1）：用假压缩器，检查提交的消息与下一次请求。
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
@@ -79,11 +80,7 @@ fn result(trigger: CompactTrigger) -> CompactResult {
 #[async_trait]
 impl Compactor for FakeCompactor {
     fn should_auto_compact(&self, _history: &[Message], _selection: &ModelSelection) -> bool {
-        !self
-            .auto
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_empty()
+        !self.auto.lock_unpoisoned().is_empty()
     }
 
     async fn auto_compact(
@@ -92,7 +89,7 @@ impl Compactor for FakeCompactor {
         _tracking: &mut CompactTracking,
         _cancel: CancellationToken,
     ) -> Result<AutoCompactOutcome, OrchestrationError> {
-        let mut auto = self.auto.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut auto = self.auto.lock_unpoisoned();
         Ok(auto.pop().unwrap_or(AutoCompactOutcome::NotNeeded))
     }
 
@@ -101,14 +98,8 @@ impl Compactor for FakeCompactor {
         request: CompactRequest,
         _cancel: CancellationToken,
     ) -> Result<CompactResult, OrchestrationError> {
-        self.calls
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(request.trigger);
-        self.gaps
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(request.initial_token_gap);
+        self.calls.lock_unpoisoned().push(request.trigger);
+        self.gaps.lock_unpoisoned().push(request.initial_token_gap);
         Ok(result(request.trigger))
     }
 
@@ -119,8 +110,7 @@ impl Compactor for FakeCompactor {
         failure: Option<&str>,
     ) -> Option<String> {
         self.failures
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_unpoisoned()
             .push(failure.map(str::to_owned));
         self.blocks.then(|| "Prompt is too long".to_owned())
     }

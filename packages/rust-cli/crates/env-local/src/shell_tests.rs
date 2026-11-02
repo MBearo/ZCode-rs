@@ -11,7 +11,7 @@ use futures_util::StreamExt;
 use rust_cli_kernel_api::env::{CommandEvent, EnvPath, OperationContext, Origin, StartCommand};
 use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ShellTaskId,
+    EnvironmentId, Generation, OperationId, RunId, SessionId, ShellTaskId,
 };
 use rust_cli_kernel_api::machine::CommandEvents;
 
@@ -47,33 +47,24 @@ pub(super) fn fixture(env: Vec<(String, String)>) -> Fixture {
 }
 
 pub(super) fn context(operation: &str) -> OperationContext {
-    OperationContext {
-        environment: EnvironmentId::new("local"),
-        generation: Generation::new("g"),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: OperationId::new(operation),
-        origin: Origin::Agent {
+    OperationContext::new(
+        EnvironmentId::new("local"),
+        Generation::new("g"),
+        OperationId::new(operation),
+        Origin::Agent {
             session: SessionId::new("s1"),
             run: RunId::new("r1"),
         },
-    }
+    )
 }
 
 pub(super) fn request(command: &str, root: &Path, scope: CwdScope) -> StartCommand {
+    // 真实调用里内核从 operationId 派生任务 ID，每次调用不同；这里用计数器。
+    let task = ShellTaskId::new(format!("b{}", NEXT_TASK.fetch_add(1, Ordering::Relaxed)));
     StartCommand {
-        command: command.to_owned(),
-        cwd: EnvPath::new(root.to_string_lossy()),
         timeout_ms: Some(10_000),
-        // 真实调用里内核从 operationId 派生任务 ID，每次调用不同；这里用计数器。
-        task: ShellTaskId::new(format!("b{}", NEXT_TASK.fetch_add(1, Ordering::Relaxed))),
-        shell: Default::default(),
         cwd_scope: scope,
-        background: None,
-        sandbox: None,
-        hook: None,
-        on_timeout: None,
-        socket: None,
-        env: Default::default(),
+        ..StartCommand::new(command, EnvPath::new(root.to_string_lossy()), task)
     }
 }
 
@@ -172,12 +163,12 @@ async fn command_overrides_are_added_after_the_projection() {
         ),
         ("DISPLAY".to_owned(), "localhost:10.0".to_owned()),
     ]);
-    let mut start = request(
+    let start = request(
         r#"printf '%s|%s|%s' "$SSH_AUTH_SOCK" "${DISPLAY-unset}" "$F96_TOKEN""#,
         &fixture.root,
         CwdScope::Pinned,
     );
-    start.env = [
+    let pushed = [
         (
             "SSH_AUTH_SOCK".to_owned(),
             Some("/tmp/ssh-new/agent.2".to_owned()),
@@ -186,6 +177,11 @@ async fn command_overrides_are_added_after_the_projection() {
         ("F96_TOKEN".to_owned(), Some("t".to_owned())),
     ]
     .into();
-    let ran = run(&fixture, "op_env", start).await;
+    let events = fixture
+        .shells
+        .start_with(context("op_env"), start, None, &pushed)
+        .await
+        .unwrap();
+    let ran = collect(events).await;
     assert_eq!(ran.output, "/tmp/ssh-new/agent.2|unset|t");
 }

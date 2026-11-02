@@ -91,14 +91,6 @@ impl Composer {
         }
     }
 
-    /// 有附上的图片：占位文字还在输入框里的（运行中的投递方式按它判断，tui-input.md D9）。
-    pub fn has_images(&self) -> bool {
-        let text = self.area.text();
-        self.images
-            .iter()
-            .any(|image| text.contains(&image.placeholder))
-    }
-
     /// 编辑之后（修复线 F26，每次编辑后同步删掉图片）：占位文字不在了的图片去掉，留给撤销；
     /// `undo` 为真（ctrl+_）时，占位文字回来了的图片一起回来。
     /// ctrl+y 粘回、手打同样的文字都不找回。

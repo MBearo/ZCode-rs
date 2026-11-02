@@ -1,6 +1,8 @@
 // 复制自 apps/zcode-cli-rust/crates/domain/src/node_ids.rs 的测试（feat/rs 79b6691c55）。
 use std::sync::Mutex;
 
+use rust_cli_kernel_api::testing::FixedClock;
+
 use super::*;
 
 #[test]
@@ -29,22 +31,12 @@ fn slugs_and_project_ids_follow_node() {
     assert_eq!(project_id(&dashy), format!("proj_{}-", "a".repeat(79)));
 }
 
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now_ms(&self) -> u64 {
-        1_760_000_000_000
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
+const NOW_MS: u64 = 1_760_000_000_000;
 
 /// 从 runtime 移来（F7）：内核的 ID 用 Node 的格式，消息 ID 的毫秒取自注入的时钟。
 #[test]
 fn kernel_ids_use_the_node_formats() {
-    let ids = NodeIds::new(Arc::new(FixedClock));
+    let ids = NodeIds::new(Arc::new(FixedClock(NOW_MS)));
     let message = ids.message();
     assert!(message.as_str().starts_with("msg_mgj6k3cw_"), "{message}");
     assert_eq!(message.created_ms(), Some(1_760_000_000_000));
@@ -75,7 +67,10 @@ impl UuidSource for Sequence {
 /// 各自取 uuid 与系统时间）。
 #[test]
 fn every_id_comes_from_the_one_injected_source() {
-    let ids = NodeIds::with_uuids(Arc::new(FixedClock), Arc::new(Sequence(Mutex::new(0))));
+    let ids = NodeIds::with_uuids(
+        Arc::new(FixedClock(NOW_MS)),
+        Arc::new(Sequence(Mutex::new(0))),
+    );
     assert_eq!(ids.session().as_str(), "sess_u1");
     assert_eq!(ids.message().as_str(), "msg_mgj6k3cw_u2");
     assert_eq!(ids.turn().as_str(), "turn_u3");

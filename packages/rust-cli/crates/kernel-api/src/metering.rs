@@ -54,6 +54,35 @@ pub struct ModelCall {
     pub error: Option<ModelError>,
 }
 
+impl ModelCall {
+    /// 一次模型请求的计量：没有首字与首个内容的时刻、停止原因、工具调用、用量、重试与错误（主循环按响应用结构更新
+    /// 填上）。
+    pub fn new(
+        message: MessageId,
+        source: QuerySource,
+        selection: ModelSelection,
+        started_at_ms: u64,
+        completed_at_ms: u64,
+        status: CallStatus,
+    ) -> Self {
+        Self {
+            message,
+            source,
+            selection,
+            started_at_ms,
+            first_token_at_ms: None,
+            first_content_at_ms: None,
+            completed_at_ms,
+            status,
+            stop_reason: None,
+            tool_calls: 0,
+            usage: None,
+            retries: 0,
+            error: None,
+        }
+    }
+}
+
 /// 一次工具调用：Node `tool_usage` 的一行（usage.md §2.3）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -77,6 +106,16 @@ pub struct ToolCall {
 pub enum Metered {
     Model(ModelCall),
     Tool(ToolCall),
+}
+
+/// 计量落库的事实（会话 actor 与子代理的 sink 共用，以前各写一份）。
+impl From<Metered> for crate::store::Fact {
+    fn from(metered: Metered) -> Self {
+        match metered {
+            Metered::Model(call) => Self::ModelCalled { call },
+            Metered::Tool(call) => Self::ToolCalled { call },
+        }
+    }
 }
 
 /// `/usage` 的会话部分里来自存储的值（usage.md §4）。

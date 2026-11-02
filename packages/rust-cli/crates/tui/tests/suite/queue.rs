@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use rust_cli_kernel_api::env::BackgroundReason;
-use rust_cli_kernel_api::testing::{environments, text_response, tool_use_response};
+use rust_cli_kernel_api::testing::{text_response, tool_use_response};
 use serde_json::json;
 
 use super::queue_send_now::MovesEnv;
@@ -80,45 +80,19 @@ async fn ctrl_x_enter_while_running_also_joins_at_the_tool_boundary() {
 
 /// 建会话时停住的存储：`create` 等测试放行（R5-9）。
 struct SlowCreate {
-    inner: std::sync::Arc<rust_cli_kernel_api::testing::MemoryStore>,
     gate: std::sync::Arc<tokio::sync::Notify>,
 }
 
 #[async_trait::async_trait]
-impl rust_cli_kernel_api::store::SessionStore for SlowCreate {
-    async fn create(
+impl rust_cli_kernel_api::testing::StoreHooks for SlowCreate {
+    async fn before(
         &self,
-        meta: rust_cli_kernel_api::store::SessionMeta,
+        call: rust_cli_kernel_api::testing::StoreCall<'_>,
     ) -> Result<(), rust_cli_kernel_api::store::StoreError> {
-        self.gate.notified().await;
-        self.inner.create(meta).await
-    }
-
-    async fn commit(
-        &self,
-        session: &rust_cli_kernel_api::ids::SessionId,
-        batch: rust_cli_kernel_api::store::FactBatch,
-    ) -> Result<rust_cli_kernel_api::store::CommitReceipt, rust_cli_kernel_api::store::StoreError>
-    {
-        self.inner.commit(session, batch).await
-    }
-
-    async fn load(
-        &self,
-        session: &rust_cli_kernel_api::ids::SessionId,
-    ) -> Result<rust_cli_kernel_api::store::LoadedSession, rust_cli_kernel_api::store::StoreError>
-    {
-        self.inner.load(session).await
-    }
-
-    async fn list(
-        &self,
-        filter: rust_cli_kernel_api::store::SessionFilter,
-    ) -> Result<
-        Vec<rust_cli_kernel_api::store::SessionSummary>,
-        rust_cli_kernel_api::store::StoreError,
-    > {
-        self.inner.list(filter).await
+        if let rust_cli_kernel_api::testing::StoreCall::Create(_) = call {
+            self.gate.notified().await;
+        }
+        Ok(())
     }
 }
 
@@ -132,10 +106,12 @@ async fn input_while_the_session_is_starting_is_held_and_sent_in_order() {
     ]);
     let gate = std::sync::Arc::new(tokio::sync::Notify::new());
     let setup = Setup {
-        session_store: Some(std::sync::Arc::new(SlowCreate {
-            inner: std::sync::Arc::default(),
-            gate: gate.clone(),
-        })),
+        session_store: Some(std::sync::Arc::new(
+            rust_cli_kernel_api::testing::StoreProxy::new(
+                std::sync::Arc::new(rust_cli_kernel_api::testing::MemoryStore::default()),
+                SlowCreate { gate: gate.clone() },
+            ),
+        )),
         ..Setup::default()
     };
     with_ui(model.clone(), setup, |mut ui| async move {
@@ -221,7 +197,7 @@ async fn an_enhanced_terminal_shows_ctrl_enter_in_the_hint() {
 async fn an_empty_input_delivers_the_queued_input_now() {
     let env = Arc::new(MovesEnv::default());
     let setup = Setup {
-        environments: environments(env.clone()),
+        environments: env.clone().registry(),
         ..Setup::default()
     };
     let (model, senders) = GatedModel::new(2);

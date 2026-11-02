@@ -48,6 +48,12 @@ pub struct StatFile {
     pub path: EnvPath,
 }
 
+/// 建一个目录与它的上级目录（`Files::ensure_dir`）；已经存在算成功。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnsureDir {
+    pub path: EnvPath,
+}
+
 /// 一次取多个路径的元数据（`Files::stat_many`，remote-exec.md §20.7.4）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatMany {

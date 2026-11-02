@@ -10,12 +10,10 @@ use serde_json::Value;
 
 use crate::env::WorkspaceRef;
 use crate::ids::{
-    AgentId, ArtifactId, CommandId, InteractionId, MessageId, OwnerEpoch, SessionId, ToolUseId,
-    TraceId, TurnId,
+    AgentId, ArtifactId, CommandId, MessageId, OwnerEpoch, SessionId, ToolUseId, TraceId, TurnId,
 };
 use crate::message::Message;
 use crate::model::ModelSelection;
-use crate::orchestration::InteractionRequest;
 use crate::permission::PermissionMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,10 +57,10 @@ pub struct WorkspaceCheckpoint {
     pub assistant: MessageId,
     pub tool_use: ToolUseId,
     pub snapshot: ArtifactRef,
-    /// 改的是哪台远端机器上的文件（R3，remote-exec.md §20.7.5、§20.9）；本机为 None。远端的存成本工程的记录，
+    /// 改的是哪台机器上的文件（R3，remote-exec.md §20.7.5、§20.9）；主 env 不写出。额外机器的存成本工程的记录，
     /// Node / App 看不到。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub machine: Option<String>,
+    #[serde(default, skip_serializing_if = "crate::ids::MachineName::is_primary")]
+    pub machine: crate::ids::MachineName,
 }
 
 /// 内核提交给存储的一条事实。新增变体时同步更新各存储适配器的映射与 spec §5。
@@ -89,7 +87,7 @@ pub enum Fact {
     RevertSet {
         cursor: RevertCursor,
     },
-    /// 本工程独有的状态，映射成带 `rust-cli/` 前缀的 session_entry（Node 忽略未知类型）。
+    /// 本工程独有的状态，映射成带 `rust-cli/` 前缀的 session_entry（Node 忽略未知类型）。`kind` 取 [`entry_kinds`]。
     Entry {
         kind: String,
         id: String,
@@ -138,8 +136,8 @@ pub enum Fact {
         status: crate::metering::CallStatus,
     },
     /// 子代理调用关联到它的子会话（修复线 F2）：Node 的子代理查询（`subagent-session-query.ts`）从 tool part 的
-    /// `state.metadata` 读 `childSessionId`、`agentId`、`agentType`。与这次调用的工具结果同批提交，排在结果之后
-    /// （[`crate::agents::subagent_link`]）。
+    /// `state.metadata` 读 `childSessionId`、`agentId`、`agentType`。与这次调用的工具结果同批提交，排在结果与它的
+    /// checkpoint 之后（[`crate::run_ledger::RunLedger`]）；主会话与子代理（它再派生的子代理）都记。
     SubagentLinked {
         tool_use: ToolUseId,
         agent: AgentId,
@@ -227,9 +225,6 @@ pub struct LoadedSession {
     /// plan 开关（修复线 F20；serde 缺省 false）。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub plan: bool,
-    /// 已持久化、还没有回答（也没有取消）的交互，按提问顺序。
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_interactions: Vec<PendingInteraction>,
     /// 还没有被代码回退撤销的文件 checkpoint，按写入顺序。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checkpoints: Vec<WorkspaceCheckpoint>,
@@ -245,13 +240,6 @@ pub struct LoadedSession {
     /// 模型侧的历史只是 `messages`；界面显示 `earlier ++ messages`。没有压缩点时为空（serde 缺省为空、为空时不写出）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub earlier: Vec<Message>,
-}
-
-/// 仍待回答的交互（会话 actor 提问时持久化的请求）。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PendingInteraction {
-    pub interaction: InteractionId,
-    pub request: InteractionRequest,
 }
 
 /// `/fork` 的新会话（docs/specs/rust-cli/session-lifecycle.md §6.5.2，Node 分叉对话的形状）：存储在一个事务里写完会话行、
@@ -351,6 +339,20 @@ pub enum StoreError {
     Unsupported { what: String },
 }
 
+/// 存储的错误到内核 API（工作线 F130，审查 K8）：会话不存在与不支持原样保留，其余给出存储的原文。以前 runtime 与 agents
+/// 各写一份这个换算。
+impl From<StoreError> for crate::session_api::KernelError {
+    fn from(error: StoreError) -> Self {
+        match error {
+            StoreError::NotFound { session } => Self::NotFound { session },
+            StoreError::Unsupported { what } => Self::Unsupported { what },
+            StoreError::StaleOwner { .. } | StoreError::Storage { .. } => Self::Failed {
+                message: error.to_string(),
+            },
+        }
+    }
+}
+
 /// 前端记录（缺口 G2，docs/specs/rust-cli/app-protocol.md §5.2）：前端给出的不透明记录，挂在一个会话上。内核与存储
 /// 不解释 `kind` 与 `data`：node-store 原样写成 `session_entry`（`type = kind`、`id = key`，同 key 覆盖）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -360,6 +362,8 @@ pub struct FrontendRecord {
     pub data: Value,
 }
 
+/// 会话的生命周期（审查 K7）：建、提交、冷加载、列出、读回会话自己写的 entry、分叉、查询、改名、删除。方法都是必需的：
+/// 包装层与新的适配器漏一个就编译失败（以前 16 个方法有缺省的 `Unsupported`）。
 #[async_trait]
 pub trait SessionStore: Send + Sync {
     async fn create(&self, meta: SessionMeta) -> Result<(), StoreError>;
@@ -374,166 +378,120 @@ pub trait SessionStore: Send + Sync {
 
     async fn list(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, StoreError>;
 
-    /// 本机项目规则集（Node `local_setting(permission/ruleset)`，shell-permissions.md §5）：启动时读回，
-    /// 作为 LocalSettings 来源。不支持的实现返回 `Unsupported`。
+    /// 这个会话经 `Fact::Entry` 写的某一种记录（[`entry_kinds`]），按写入顺序：`(id, data)`（跨会话的入站与回执在重开
+    /// 会话时恢复，docs/specs/rust-cli/cross-session.md §2.2，F28）。只读。
+    async fn entries(
+        &self,
+        session: &SessionId,
+        kind: &str,
+    ) -> Result<Vec<(String, Value)>, StoreError>;
+
+    /// Node `/fork` 的新会话，一个事务写完（[`SessionFork`]）。目标消息不在原会话的 fork 源分支里时整批失败，不留会话行。
+    async fn fork(&self, fork: SessionFork) -> Result<ForkReceipt, StoreError>;
+
+    /// ← 项目页与 `/resume` 页的会话（修复线 F29，node-store.md §5.1）：只读。
+    async fn query_sessions(&self, query: SessionQuery) -> Result<SessionPage, StoreError>;
+
+    /// 给没有打开的会话改名（Node `setCustomSessionTitle`：标题来源记为 custom，不改活动时间）。会话不存在或已删除时
+    /// `NotFound`。打开着的会话经它的 actor 改名（`Command::Rename`），不走这里。
+    async fn rename(&self, session: &SessionId, title: &str) -> Result<(), StoreError>;
+
+    /// 删除会话（Node `softDeleteSession`：记删除时刻，消息保留，之后不再读出与列出）。会话不存在时 `NotFound`；
+    /// 已删除时什么都不做。
+    async fn delete(&self, session: &SessionId) -> Result<(), StoreError>;
+}
+
+/// 本机设置（审查 K7；Node 的 `local_setting`，不进仓库的设置，与 `RuleSource::LocalSettings` 同一层）：项目的权限规则集与
+/// 持久模式、工作区信任，另有群协作会话自己的规则集（在会话行里）。启动、`/permissions` 与信任框读写，不属于某个会话的事务。
+#[async_trait]
+pub trait LocalSettings: Send + Sync {
+    /// 本机项目规则集（Node `local_setting(permission/ruleset)`，shell-permissions.md §5）：启动时读回，作为 LocalSettings
+    /// 来源。
     async fn project_rules(
         &self,
-        _workspace: &WorkspaceRef,
-    ) -> Result<crate::permission::ProjectRules, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "project permission rules".to_owned(),
-        })
-    }
+        workspace: &WorkspaceRef,
+    ) -> Result<crate::permission::ProjectRules, StoreError>;
 
-    /// 改本机项目规则集（`/permissions`，docs/specs/rust-cli/tui-manage.md §1.1）：在一个事务里读当前值、按 Node
-    /// 的写法加或删、upsert，返回落库后的规则集。不支持的实现返回 `Unsupported`。
+    /// 改本机项目规则集（`/permissions`，docs/specs/rust-cli/tui-manage.md §1.1）：在一个事务里读当前值、按 Node 的写法
+    /// 加或删、upsert，返回落库后的规则集。
     async fn change_project_rules(
         &self,
-        _workspace: &WorkspaceRef,
-        _change: ProjectRulesChange,
-    ) -> Result<crate::permission::ProjectRules, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "changing project permission rules".to_owned(),
-        })
-    }
+        workspace: &WorkspaceRef,
+        change: ProjectRulesChange,
+    ) -> Result<crate::permission::ProjectRules, StoreError>;
 
     /// 会话自己的规则集（Node `loadProjectPermissionRuleset`，修复线 F2）：Node 群协作会话的
     /// `session.permission.scope` 是 `session`，规则与模式只在会话行里，不读也不写本机项目的规则与持久模式。
-    /// 其他会话为 None（规则在 [`Self::project_rules`]）。不支持的实现也是 None。
+    /// 其他会话为 None（规则在 [`Self::project_rules`]）。
     async fn session_rules(
         &self,
-        _session: &SessionId,
-    ) -> Result<Option<crate::permission::ProjectRules>, StoreError> {
-        Ok(None)
-    }
+        session: &SessionId,
+    ) -> Result<Option<crate::permission::ProjectRules>, StoreError>;
 
-    /// 本机项目的持久模式（Node `getProjectPermissionMode`，docs/specs/rust-cli/config.md §2.2）：启动时读一次，
-    /// 作为新会话的缺省模式；没有或不合法时为 None。不支持的实现返回 `Unsupported`。
+    /// 本机项目的持久模式（Node `getProjectPermissionMode`，docs/specs/rust-cli/config.md §2.2）：启动时读一次，作为新会话
+    /// 的缺省模式；没有或不合法时为 None。
     async fn project_mode(
         &self,
-        _workspace: &WorkspaceRef,
-    ) -> Result<Option<crate::permission::PermissionMode>, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "project permission mode".to_owned(),
-        })
-    }
+        workspace: &WorkspaceRef,
+    ) -> Result<Option<crate::permission::PermissionMode>, StoreError>;
 
-    /// Node `/fork` 的新会话，一个事务写完（[`SessionFork`]）。目标消息不在原会话的 fork 源分支里时
-    /// 整批失败，不留会话行。不支持的实现返回 `Unsupported`。
-    async fn fork(&self, _fork: SessionFork) -> Result<ForkReceipt, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "fork from a checkpoint".to_owned(),
-        })
-    }
-
-    /// `/usage` 的 API 时长（docs/specs/rust-cli/usage.md §4）：会话及其子代理子会话里成功请求的耗时之和。
-    /// 不支持的实现返回 `Unsupported`。
-    async fn metering(
-        &self,
-        _session: &SessionId,
-    ) -> Result<crate::metering::SessionMetering, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "session metering".to_owned(),
-        })
-    }
-
-    /// footer 的请求统计（docs/specs/rust-cli/usage.md §4.1，修复线 F27）：本会话完成的主回合请求在用量表里的聚合；
-    /// 修复线 F112 起子会话给出它完成的子代理请求（子代理的行只在子会话，主会话的结果不变）。
-    /// 只读；每次都从行聚合，不缓存。不支持的实现返回 `Unsupported`。
-    async fn request_stats(
-        &self,
-        _session: &SessionId,
-    ) -> Result<crate::metering::RequestStats, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "request stats".to_owned(),
-        })
-    }
-
-    /// 活动统计的原始聚合（usage.md §5.2）：只读的聚合查询。不支持的实现返回 `Unsupported`。
-    async fn activity(
-        &self,
-        _query: crate::metering::ActivityQuery,
-    ) -> Result<crate::metering::ActivityStats, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "activity stats".to_owned(),
-        })
-    }
-
-    /// 工作区信任（docs/specs/rust-cli/workspace-trust.md §2.3）：按给出的顺序，返回 `candidates` 里第一个
-    /// 有信任记录的键；都没有时为 None。只读。不支持的实现返回 `Unsupported`。
+    /// 工作区信任（docs/specs/rust-cli/workspace-trust.md §2.3）：按给出的顺序，返回 `candidates` 里第一个有信任记录的键；
+    /// 都没有时为 None。只读。
     async fn trusted_workspace(
         &self,
-        _candidates: &[crate::workspace_trust::TrustKey],
-    ) -> Result<Option<crate::workspace_trust::TrustKey>, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "workspace trust".to_owned(),
-        })
-    }
+        candidates: &[crate::workspace_trust::TrustKey],
+    ) -> Result<Option<crate::workspace_trust::TrustKey>, StoreError>;
 
-    /// 这个会话里某一种 `rust-cli/<kind>` entry 的全部记录，按写入顺序：`(id, data)`（跨会话的入站与回执在
-    /// 重开会话时恢复，docs/specs/rust-cli/cross-session.md §2.2，F28）。只读；不支持的实现返回空。
-    async fn entries(
-        &self,
-        _session: &SessionId,
-        _kind: &str,
-    ) -> Result<Vec<(String, Value)>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    /// 写一条前端记录（缺口 G2）：同 key 覆盖，不推进会话的活动时间。会话不存在时 `NotFound`；不支持的实现返回
-    /// `Unsupported`。
-    async fn put_record(
-        &self,
-        _session: &SessionId,
-        _record: &FrontendRecord,
-    ) -> Result<(), StoreError> {
-        Err(StoreError::Unsupported {
-            what: "frontend records".to_owned(),
-        })
-    }
-
-    /// 这个会话里某一种前端记录，按写入顺序（缺口 G2）。不支持的实现返回空。
-    async fn records(
-        &self,
-        _session: &SessionId,
-        _kind: &str,
-    ) -> Result<Vec<FrontendRecord>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    /// 记下一个工作区已信任（upsert，workspace-trust.md §2.3）。不支持的实现返回 `Unsupported`。
+    /// 记下一个工作区已信任（upsert，workspace-trust.md §2.3）。
     async fn trust_workspace(
         &self,
-        _key: &crate::workspace_trust::TrustKey,
-    ) -> Result<(), StoreError> {
-        Err(StoreError::Unsupported {
-            what: "workspace trust".to_owned(),
-        })
-    }
-
-    /// ← 项目页与 `/resume` 页的会话（修复线 F29，node-store.md §5.1）：只读。不支持的实现返回 `Unsupported`。
-    async fn query_sessions(&self, _query: SessionQuery) -> Result<SessionPage, StoreError> {
-        Err(StoreError::Unsupported {
-            what: "session queries".to_owned(),
-        })
-    }
-
-    /// 给没有打开的会话改名（Node `setCustomSessionTitle`：标题来源记为 custom，不改活动时间）。会话不存在或已删除时
-    /// `NotFound`。打开着的会话经它的 actor 改名（`Command::Rename`），不走这里。不支持的实现返回 `Unsupported`。
-    async fn rename(&self, _session: &SessionId, _title: &str) -> Result<(), StoreError> {
-        Err(StoreError::Unsupported {
-            what: "renaming sessions".to_owned(),
-        })
-    }
-
-    /// 删除会话（Node `softDeleteSession`：记删除时刻，消息保留，之后不再读出与列出）。会话不存在时 `NotFound`；
-    /// 已删除时什么都不做。不支持的实现返回 `Unsupported`。
-    async fn delete(&self, _session: &SessionId) -> Result<(), StoreError> {
-        Err(StoreError::Unsupported {
-            what: "deleting sessions".to_owned(),
-        })
-    }
+        key: &crate::workspace_trust::TrustKey,
+    ) -> Result<(), StoreError>;
 }
+
+/// 用量的只读查询与前端记录（审查 K7）：前端经 `Kernel::queries` 直接用，不经会话 actor（这些都不是会话状态）。以前
+/// runtime 为它们各写一个透传的 `Kernel` 方法，加一个查询要改 9 个文件。
+#[async_trait]
+pub trait StoreQueries: Send + Sync {
+    /// `/usage` 的 API 时长（docs/specs/rust-cli/usage.md §4）：会话及其子代理子会话里成功请求的耗时之和。
+    async fn metering(
+        &self,
+        session: &SessionId,
+    ) -> Result<crate::metering::SessionMetering, StoreError>;
+
+    /// footer 的请求统计（docs/specs/rust-cli/usage.md §4.1，修复线 F27）：本会话完成的主回合请求在用量表里的聚合；
+    /// 修复线 F112 起子会话给出它完成的子代理请求（子代理的行只在子会话，主会话的结果不变）。每次都从行聚合，不缓存。
+    async fn request_stats(
+        &self,
+        session: &SessionId,
+    ) -> Result<crate::metering::RequestStats, StoreError>;
+
+    /// 活动统计的原始聚合（usage.md §5.2）：只读的聚合查询。今天与时区偏移由调用方给（`Kernel::activity` 取注入的时钟）。
+    async fn activity(
+        &self,
+        query: crate::metering::ActivityQuery,
+    ) -> Result<crate::metering::ActivityStats, StoreError>;
+
+    /// 写一条前端记录（缺口 G2）：同 key 覆盖，不推进会话的活动时间。会话不存在时 `NotFound`。
+    async fn put_record(
+        &self,
+        session: &SessionId,
+        record: &FrontendRecord,
+    ) -> Result<(), StoreError>;
+
+    /// 这个会话里某一种前端记录，按写入顺序（缺口 G2）。
+    async fn records(
+        &self,
+        session: &SessionId,
+        kind: &str,
+    ) -> Result<Vec<FrontendRecord>, StoreError>;
+}
+
+/// 一个存储适配器实现的全部会话端口（组装根与 runtime 的 `Ports` 用；各能力只拿自己用的那一个）。node-store 与测试的
+/// `MemoryStore` 都实现三个；以后的云端适配器也要实现全部，不会悄悄缺功能。
+pub trait Store: SessionStore + LocalSettings + StoreQueries {}
+
+impl<T: SessionStore + LocalSettings + StoreQueries + ?Sized> Store for T {}
 
 /// Artifact 的用途：决定是否进入文件选择器、保留策略（cloud 规则 7）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -581,6 +539,23 @@ pub trait ArtifactStore: Send + Sync {
             what: "artifact lookup by id".to_owned(),
         })
     }
+}
+
+/// `Fact::Entry` 的种类（不带 `rust-cli/` 前缀；node-store 写成 `type = rust-cli/<种类>`、键 `<会话>:rust-cli/<种类>:<id>`）。
+/// 写的一方（session、agents）与读回的一方（node-store、`SessionStore::entries`）共用这里的名字（F128，审查 X10：以前在
+/// session 与 node-store 各写一份）。
+///
+/// 工作线 F130 删掉 `pending_interaction` 与 `interaction_resolved`：待回答的交互只在会话 actor 的内存里，不再写（库里的旧
+/// 记录不读）。
+pub mod entry_kinds {
+    /// 跨会话收到的消息（docs/specs/rust-cli/cross-session.md §2.2）。
+    pub const PEER_MESSAGE: &str = "peer_message";
+    /// 跨会话的消息已处理。
+    pub const PEER_RESOLVED: &str = "peer_resolved";
+    /// 跨会话的回执。
+    pub const PEER_RECEIPT: &str = "peer_receipt";
+    /// 分叉的子代理会话记下父会话（agents）。
+    pub const FORK_PARENT: &str = "fork_parent";
 }
 
 #[cfg(test)]

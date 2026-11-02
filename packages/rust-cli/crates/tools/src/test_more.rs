@@ -1,29 +1,27 @@
 //! 本工作线工具（docs/specs/rust-cli/tools-more.md）单测共用的工具上下文。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rust_cli_kernel_api::controller_services::{ControllerServices, Fetch};
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
-use rust_cli_kernel_api::ids::{
-    AgentId, EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
-};
-use rust_cli_kernel_api::local_services::{Fetch, Git, LocalServices};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, MachineEnv, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::ids::{AgentId, EnvironmentId, Generation, OperationId, RunId, SessionId};
+use rust_cli_kernel_api::machine::{EnvInfo, Files, MachineEnv};
 use rust_cli_kernel_api::message::ToolResultContent;
-use rust_cli_kernel_api::orchestration::Interactions;
+use rust_cli_kernel_api::orchestration::{Interactions, SessionOps};
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::testing::{
-    AllPorts, MemoryStore, UnusedEnvironment, local_services, machine,
+    AllPorts, UnusedEnvironment, controller_services, machine, unsupported_machine,
 };
 use rust_cli_kernel_api::tool::{ToolOutput, ToolUseContext};
-use tokio_util::sync::CancellationToken;
 
 pub(crate) struct Ctx {
     pub(crate) interactions: Arc<dyn Interactions>,
+    /// 会话操作：缺省不持有会话（`testing::NoSession`）。
+    pub(crate) session_ops: Arc<dyn SessionOps>,
     pub(crate) machine: MachineEnv,
-    pub(crate) local: LocalServices,
+    pub(crate) controller: ControllerServices,
     pub(crate) mode: PermissionMode,
     pub(crate) agent: Option<AgentId>,
 }
@@ -32,45 +30,71 @@ impl Ctx {
     pub(crate) fn new(interactions: Arc<dyn Interactions>) -> Self {
         Self {
             interactions,
+            session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
             machine: machine(Arc::new(UnusedEnvironment)),
-            local: local_services(Arc::new(UnusedEnvironment)),
+            controller: controller_services(Arc::new(UnusedEnvironment)),
             mode: PermissionMode::Default,
             agent: None,
+        }
+    }
+
+    /// 询问与会话操作是同一个替身（它也实现 `SessionOps`，例如 `ScriptedInteractions` 记下 plan 开关）。
+    pub(crate) fn with_session<T: Interactions + SessionOps + 'static>(session: Arc<T>) -> Self {
+        Self {
+            session_ops: session.clone(),
+            ..Self::new(session)
+        }
+    }
+
+    /// 会话操作是这个替身；询问没有人回答（`NoOneToAsk`）。
+    pub(crate) fn with_ops(ops: Arc<dyn SessionOps>) -> Self {
+        Self {
+            session_ops: ops,
+            ..Self::new(Arc::new(rust_cli_kernel_api::testing::NoOneToAsk))
         }
     }
 
     /// 工具调用的机器与本机服务都换成 `env`（一个替身实现全部端口）。
     pub(crate) fn set_env<E: AllPorts + 'static>(&mut self, env: Arc<E>) {
         self.machine = machine(env.clone());
-        self.local = local_services(env);
+        self.controller = controller_services(env);
+    }
+
+    /// 工具调用的机器换成按端口装好的 `machine`（`unsupported_machine().with_*`，F126）；本机服务不变。
+    pub(crate) fn set_machine(&mut self, machine: MachineEnv) {
+        self.machine = machine;
+    }
+
+    /// 机器的环境事实与文件、本机服务的取网页都换成 `env`；其余端口返回 `Unsupported`。
+    pub(crate) fn set_text_env(&mut self, env: Arc<TextEnv>) {
+        self.machine = unsupported_machine()
+            .with_info(env.clone())
+            .with_files(env.clone());
+        self.controller = controller_services(env);
     }
 
     pub(crate) fn build(self) -> ToolUseContext {
         ToolUseContext {
-            session: SessionId::new("sess_1"),
-            run: RunId::new("run_1"),
-            tool_use: ToolUseId::new("toolu_1"),
             agent: self.agent,
             workspace: WorkspaceRef {
                 environment: EnvironmentId::new("local"),
                 root: EnvPath::new("/Users/dev/work"),
             },
             mode: self.mode,
-            cancel: CancellationToken::new(),
             machine: self.machine,
-            local: self.local,
-            artifacts: Arc::new(MemoryStore::default()),
+            controller: self.controller,
             interactions: self.interactions,
-            operation: OperationContext {
-                environment: EnvironmentId::new("local"),
-                generation: Generation::new("g1"),
-                owner_epoch: OwnerEpoch::LOCAL,
-                operation: OperationId::new("op_1"),
-                origin: Origin::Agent {
+            session_ops: self.session_ops,
+            operation: OperationContext::new(
+                EnvironmentId::new("local"),
+                Generation::new("g1"),
+                OperationId::new("op_1"),
+                Origin::Agent {
                     session: SessionId::new("sess_1"),
                     run: RunId::new("run_1"),
                 },
-            },
+            ),
+            ..rust_cli_kernel_api::testing::tool_use_context()
         }
     }
 }
@@ -90,7 +114,8 @@ pub(crate) fn output_text(output: &ToolOutput) -> String {
         .join("\n")
 }
 
-/// 只有 home 与若干文本文件的执行环境：`path_facts`、`read_text` 可用，其余操作 `Unsupported`。
+/// 只有 home 与若干文本文件的执行环境（环境事实、文件与取网页三个端口）：`path_facts`、`read_text`、`fetch_url`
+/// 可用，其余操作 `Unsupported`。
 pub(crate) struct TextEnv {
     pub(crate) home: String,
     pub(crate) files: std::sync::Mutex<Vec<(String, String)>>,
@@ -125,10 +150,7 @@ impl TextEnv {
     }
 
     pub(crate) fn fetched(&self) -> Vec<String> {
-        self.fetched
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.fetched.lock_unpoisoned().clone()
     }
 }
 
@@ -182,10 +204,7 @@ impl Files for TextEnv {
         _workspace: &WorkspaceRef,
         request: rust_cli_kernel_api::env_files::ReadText,
     ) -> Result<rust_cli_kernel_api::env_files::TextRead, rust_cli_kernel_api::env::EnvError> {
-        let files = self
-            .files
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let files = self.files.lock_unpoisoned();
         let Some((_, text)) = files.iter().find(|(path, _)| path == request.path.as_str()) else {
             return Err(rust_cli_kernel_api::env::EnvError::NotFound {
                 path: request.path.as_str().to_owned(),
@@ -208,56 +227,13 @@ impl Files for TextEnv {
 }
 
 #[async_trait]
-impl Commands for TextEnv {
-    async fn start_command(
-        &self,
-        _workspace: &WorkspaceRef,
-        _context: OperationContext,
-        _request: rust_cli_kernel_api::env::StartCommand,
-    ) -> Result<rust_cli_kernel_api::machine::CommandEvents, rust_cli_kernel_api::env::EnvError>
-    {
-        Err(unsupported())
-    }
-
-    fn watch_command(
-        &self,
-        _operation: OperationId,
-        _cursor: u64,
-    ) -> futures_util::stream::BoxStream<
-        'static,
-        Result<rust_cli_kernel_api::env::CommandEvent, rust_cli_kernel_api::env::EnvError>,
-    > {
-        use futures_util::StreamExt;
-        futures_util::stream::iter([Err(unsupported())]).boxed()
-    }
-
-    async fn cancel(
-        &self,
-        _operation: OperationId,
-    ) -> Result<(), rust_cli_kernel_api::env::EnvError> {
-        Err(unsupported())
-    }
-
-    async fn close_session(
-        &self,
-        _session: &SessionId,
-        _forget: bool,
-    ) -> Result<(), rust_cli_kernel_api::env::EnvError> {
-        Ok(())
-    }
-}
-
-#[async_trait]
 impl Fetch for TextEnv {
     async fn fetch_url(
         &self,
         _workspace: &WorkspaceRef,
         request: rust_cli_kernel_api::env_web::FetchUrl,
     ) -> Result<rust_cli_kernel_api::env_web::FetchedUrl, rust_cli_kernel_api::env::EnvError> {
-        self.fetched
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(request.url.clone());
+        self.fetched.lock_unpoisoned().push(request.url.clone());
         self.pages
             .iter()
             .find(|(url, _)| *url == request.url)
@@ -265,10 +241,3 @@ impl Fetch for TextEnv {
             .ok_or_else(unsupported)
     }
 }
-
-impl Search for TextEnv {}
-impl Shell for TextEnv {}
-impl Background for TextEnv {}
-impl Checkpoints for TextEnv {}
-impl Pdf for TextEnv {}
-impl Git for TextEnv {}

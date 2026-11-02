@@ -5,6 +5,7 @@
 
 use rust_cli_kernel_api::agents::TaskRecord;
 use rust_cli_kernel_api::message::{ContentBlock, Message};
+use rust_cli_kernel_api::tool_names;
 use rust_cli_prompts::texts;
 use serde_json::{Value, json};
 
@@ -13,9 +14,9 @@ pub(crate) const SOURCE: &str = "task_reminder";
 /// 提醒要的轮数（上次用任务工具之后、上次提醒之后都要到）。
 const TURNS: usize = 10;
 /// 算作“用过任务工具”的调用。
-const TASK_TOOLS: [&str; 2] = ["TaskCreate", "TaskUpdate"];
+const TASK_TOOLS: [&str; 2] = [tool_names::TASK_CREATE, tool_names::TASK_UPDATE];
 /// 有这个工具时才提醒。
-pub(crate) const REQUIRED_TOOL: &str = "TaskUpdate";
+pub(crate) const REQUIRED_TOOL: &str = tool_names::TASK_UPDATE;
 
 /// （上次用任务工具之后的轮数，上次提醒之后的轮数）。
 fn turns(history: &[Message]) -> (usize, usize) {

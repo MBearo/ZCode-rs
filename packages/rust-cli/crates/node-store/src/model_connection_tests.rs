@@ -14,14 +14,13 @@ const TEAM: &str = "account:bigmodel-team-coding-plan";
 
 fn team_selection(project: &str) -> ModelSelection {
     ModelSelection {
-        provider: TEAM.to_owned(),
-        model: GLM_5_3_ACCOUNT.to_owned(),
         reasoning: Some("high".to_owned()),
         connection: Some(Box::new(ModelConnection {
             product_id: "prod-1".to_owned(),
             organization_id: "org-t".to_owned(),
             project_id: project.to_owned(),
         })),
+        ..ModelSelection::new(TEAM.to_owned(), GLM_5_3_ACCOUNT.to_owned())
     }
 }
 

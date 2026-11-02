@@ -43,7 +43,7 @@ mod tests {
     #[cfg(feature = "testing")]
     #[tokio::test]
     async fn the_memory_store_returns_the_first_trusted_candidate() {
-        use crate::store::SessionStore;
+        use crate::store::LocalSettings;
         let store = crate::testing::MemoryStore::default();
         let (work, parent) = (TrustKey::new("/w/a"), TrustKey::new("/w"));
         assert_eq!(

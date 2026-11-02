@@ -5,12 +5,7 @@ use rust_cli_kernel_api::provider::TokenLimits;
 use super::*;
 
 fn selection(model: &str) -> ModelSelection {
-    ModelSelection {
-        provider: "p".to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("p".to_owned(), model.to_owned())
 }
 
 #[test]

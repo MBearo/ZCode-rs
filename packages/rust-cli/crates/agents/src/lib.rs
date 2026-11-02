@@ -40,8 +40,7 @@ use futures_util::stream::BoxStream;
 use rust_cli_base::Spawner;
 use rust_cli_kernel_api::agents::{AgentSignal, AgentSignals, SubagentQueries, TaskListStore};
 use rust_cli_kernel_api::clock::{Clock, Ids};
-use rust_cli_kernel_api::env_shell::ShellNotice;
-use rust_cli_kernel_api::ids::{AgentId, SessionId};
+use rust_cli_kernel_api::ids::{AgentId, MachineName, SessionId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::mcp_state::McpConnections;
 use rust_cli_kernel_api::orchestration::{ContextBuilder, QueryRunner, ToolRegistry, ToolSnapshot};
@@ -51,7 +50,6 @@ use rust_cli_kernel_api::tool::Tool;
 pub use agent_tool::AgentTool;
 pub use context::AgentCatalog;
 pub use definitions::{AgentDefinition, AgentSource, builtins};
-pub use monitors::MonitorTexts;
 pub use plugin::PluginAgentFile;
 pub use tasks::{MemoryTaskLists, task_tools_enabled};
 
@@ -66,9 +64,9 @@ pub struct AgentsPorts {
     pub store: Arc<dyn SessionStore>,
     pub ids: Arc<dyn Ids>,
     pub clock: Arc<dyn Clock>,
-    /// 子会话所在的机器：后台命令的通知、monitor、shell 当前目录、TaskStop（R0 只有本机，remote-exec.md §15.8.1）。
-    pub machine: MachineEnv,
-    /// 执行环境的注册表（R3，remote-exec.md §20.6、§20.7.2）：远端机器上的后台通知、monitor 与 TaskStop 经它找到那台机器。
+    /// 执行环境的注册表（R3，remote-exec.md §20.6、§20.7.2）：子会话缺省在它的主 env 上（后台命令的通知、monitor、
+    /// shell 当前目录、TaskStop，§15.8.1），远端机器上的后台通知、monitor 与 TaskStop 经它找到那台机器。工作线 F131：
+    /// 以前另存一份主 env，与注册表给的是同一份。
     pub machines: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
     pub tasks: Arc<dyn TaskListStore>,
     pub queries: Arc<dyn SubagentQueries>,
@@ -80,13 +78,10 @@ pub struct AgentsPorts {
     pub catalog: Arc<AgentCatalog>,
     /// 后台子代理在这里启动。
     pub spawner: Spawner,
-    /// 后台命令通知的 `(<status>, <task-notification> 信封)`（runtime 给 `rust_cli_query` 的实现；agents
-    /// 不依赖 query）：子代理里的命令通知送给它（agents.md §5.2，L18）。
-    pub shell_notice: fn(&ShellNotice) -> (&'static str, String),
-    /// 子代理里 Monitor 的文字（同上，runtime 给 `rust_cli_query` 的实现，agents.md §5.3，工作线 F83）。
-    pub monitor: MonitorTexts,
     /// 本机的同伴会话（ListAgents 的同伴段、SendMessage 发给同伴；docs/specs/rust-cli/cross-session.md）。
     pub peers: Arc<dyn rust_cli_kernel_api::peers::PeerMessaging>,
+    /// 操作上下文的工厂（同会话 actor 的 `SessionDeps::operations`）：子代理里停掉 monitor 的操作上下文。
+    pub operations: rust_cli_kernel_api::env::Operations,
 }
 
 /// 开关。
@@ -104,15 +99,11 @@ pub struct AgentsConfig {
 }
 
 impl AgentsPorts {
-    /// 一台机器：本机（None），或注册表里那台；没连上时是“没连上”的机器（调用报错）。
-    pub(crate) fn machine_named(&self, name: Option<&str>) -> MachineEnv {
-        match name {
-            None => self.machine.clone(),
-            Some(name) => self
-                .machines
-                .machine(name)
-                .unwrap_or_else(|| MachineEnv::unavailable(name)),
-        }
+    /// 一台机器：主 env，或注册表里那台额外机器；没连上时是“没连上”的机器（调用报错）。
+    pub(crate) fn machine_named(&self, name: &MachineName) -> MachineEnv {
+        self.machines
+            .machine(name)
+            .unwrap_or_else(|| MachineEnv::unavailable(name.as_str()))
     }
 }
 
@@ -185,7 +176,7 @@ impl ToolRegistry for AgentRegistry {
         match self
             .own
             .iter()
-            .find(|tool| tool.name() == name || tool.aliases().contains(&name))
+            .find(|tool| rust_cli_kernel_api::tool::answers_to(tool.as_ref(), name))
         {
             Some(tool) if self.base.hides(tool.name()) => None,
             Some(tool) => Some(tool.clone()),
@@ -199,6 +190,11 @@ impl ToolRegistry for AgentRegistry {
 
     fn withheld(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.base.withheld(name)
+    }
+
+    /// 本 crate 的工具接在基础注册表的后面，顺序同基础注册表（工作线 F134：以前是缺省的 false，基础注册表也是 false）。
+    fn keeps_order(&self) -> bool {
+        self.base.keeps_order()
     }
 }
 
@@ -347,10 +343,11 @@ impl AgentSignals for Signals {
         let tool = task_stop::TaskStopTool {
             core: self.0.clone(),
         };
+        let machine = self.0.ports.machines.primary_machine();
         let caller = task_stop::Caller {
             session,
             agent: None,
-            machine: &self.0.ports.machine,
+            machine: &machine,
             operation: &operation,
         };
         tool.stop(task, &caller)

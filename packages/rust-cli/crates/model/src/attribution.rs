@@ -5,7 +5,7 @@
 //! `x-request-id` 算出这一组头。
 
 use rust_cli_base::rule_url::is_opencode_go_endpoint;
-use rust_cli_kernel_api::model::ModelRequest;
+use rust_cli_kernel_api::model::{ModelRequest, RequestOptions};
 
 use crate::metadata::{external_session, strip_prefixes};
 
@@ -36,10 +36,13 @@ pub(crate) struct Origin {
 
 impl Origin {
     pub(crate) fn of(request: &ModelRequest) -> Self {
-        let options = &request.options;
         // 请求来源的名字（model.md §2.4 的表）：Node 有对应用途的用 Node 的名字，其余用本工程的名字；与用量表的
         // `query_source` 同一个映射（工作线 F71）。
-        let source = request.source.node_name();
+        Self::sourced(request.source.node_name(), &request.options)
+    }
+
+    /// 按来源名与请求选项（Node 对照夹具里的来源名不一定是本工程的来源，测试经这里给）。
+    pub(crate) fn sourced(source: &str, options: &RequestOptions) -> Self {
         Self {
             session: options
                 .session_id
@@ -50,7 +53,7 @@ impl Origin {
                 .as_ref()
                 .map(|run| strip_prefixes(run.as_str(), &[RUN_PREFIX]).to_owned()),
             subagent: options.agent.is_some(),
-            source: valid_source(&source).then_some(source),
+            source: valid_source(source).then(|| source.to_owned()),
         }
     }
 

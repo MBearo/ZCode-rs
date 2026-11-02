@@ -64,7 +64,6 @@ rust-cli-paths.workspace = true
 # 本机跨会话通信（docs/specs/rust-cli/cross-session.md）。
 rust-cli-peers.workspace = true
 rust-cli-platform.workspace = true
-rust-cli-policy.workspace = true
 # `zcode login` 打开浏览器（docs/specs/rust-cli/platform.md §5.6）。
 rust-cli-proc.workspace = true
 # stream-json 输入的 MCP prewait 按模型卡片判断能不能用工具搜索（headless.md §6）。
@@ -76,6 +75,8 @@ rust-cli-tui.workspace = true
 rust-cli-vendor-rg = { path = "../../vendor/rg" }
 # 内嵌的 ugrep：zcode 以 `ugrep` 的名字启动时直接跑它（embedded-search.md §3、§7，F53）。
 rust-cli-vendor-ugrep = { path = "../../vendor/ugrep" }
+# 部署配置的 JSON（docs/specs/rust-cli/deployment.md §6）：类型化的解析，未知字段报错。
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std", "signal", "sync"] }
 # 退出信号交给前端的取消令牌（session-lifecycle.md §3.5）。
@@ -104,7 +105,8 @@ windows-sys.workspace = true
 futures-util.workspace = true
 rust-cli-context.workspace = true
 rust-cli-kernel-api = { workspace = true, features = ["testing"] }
-rust-cli-query.workspace = true
+# 测试直接组装判决链（产品代码经 runtime 组装；规则语法在 kernel-api，F125）。
+rust-cli-policy.workspace = true
 rust-cli-tools.workspace = true
 # 真实进程测试的本地 HTTPS 模型端点：现生成的证书与 rustls 服务端（config.md §5，F21）。
 rcgen.workspace = true

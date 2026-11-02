@@ -43,10 +43,8 @@ pub(crate) enum ServiceDone {
 /// 只属于事件循环的服务状态。
 #[derive(Default)]
 pub(super) struct ServiceState {
-    /// 有一次界面语言写回在途。
-    locale_writing: bool,
-    /// 在途期间又输入的语言：只留最后一个，在途的完成后再写（两次写入不交错，tui.md §7.1）。
-    locale_next: Option<UiLocale>,
+    /// 界面语言的写回：同时只有一次在途，在途期间又输入的只留最后一个（tui.md §7.1）。
+    locale: super::latest::Latest<UiLocale>,
     /// 在途的浏览器授权登录的取消令牌：登录状态的唯一 owner（tui.md §7.2）。
     login: Option<CancellationToken>,
 }
@@ -54,15 +52,10 @@ pub(super) struct ServiceState {
 impl<B: Backend> Loop<'_, B> {
     /// `/locale <值>`：先写回配置文件，成功后再切换（Node 先写后改）。
     pub(super) fn save_locale(&mut self, locale: UiLocale) {
-        let Some(store) = self.options.services.locale_store.clone() else {
-            self.app.info(i18n::locale_unavailable(self.app.lang));
+        let Some(locale) = self.services.locale.start(locale) else {
             return;
         };
-        if self.services.locale_writing {
-            self.services.locale_next = Some(locale);
-            return;
-        }
-        self.services.locale_writing = true;
+        let store = self.options.services.locale_store.clone();
         // 写入在输入时就开始；完成后回到事件循环。
         let saving = store.save(locale);
         self.pending.push(
@@ -76,12 +69,7 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 浏览器授权登录（tui.md §7.2）：同时只有一个；地址与结果分别作为 `Done` 回来。
     pub(super) fn login(&mut self, family: Family) {
-        let lang = self.app.lang;
-        let Some(account) = self.options.services.account.clone() else {
-            self.app.login_closed();
-            self.app.info(i18n::login_unavailable(lang, family, false));
-            return;
-        };
+        let account = self.options.services.account.clone();
         if self.services.login.is_some() {
             return;
         }
@@ -104,7 +92,7 @@ impl<B: Backend> Loop<'_, B> {
     pub(super) fn context_usage(&mut self, all: bool) {
         let kernel = self.kernel.clone();
         let query = ContextUsageQuery {
-            session: self.session.as_ref().map(|session| session.id().clone()),
+            session: self.outbox.session().map(|session| session.id().clone()),
             workspace: self.app.view.workspace().clone(),
             selection: self.app.view.selection().clone(),
             // 判决用的模式（plan 开时是 plan，修复线 F20）。
@@ -130,22 +118,14 @@ impl<B: Backend> Loop<'_, B> {
     }
 
     pub(super) fn configure_key(&mut self, family: Family, key: RedactedString) {
-        let Some(account) = self.options.services.account.clone() else {
-            self.app.login_closed();
-            self.app
-                .info(i18n::login_unavailable(self.app.lang, family, true));
-            return;
-        };
+        let account = self.options.services.account.clone();
         let saving = account.configure_api_key(family, key);
         self.pending
             .push(async move { Done::Service(ServiceDone::ApiKey(saving.await)) }.boxed());
     }
 
     pub(super) fn logout(&mut self) {
-        let Some(account) = self.options.services.account.clone() else {
-            self.app.info(i18n::logout_unavailable(self.app.lang));
-            return;
-        };
+        let account = self.options.services.account.clone();
         let logout = account.logout();
         self.pending
             .push(async move { Done::Service(ServiceDone::Logout(logout.await)) }.boxed());
@@ -204,7 +184,7 @@ impl<B: Backend> Loop<'_, B> {
                 Err(reason) => self.app.error(reason),
             },
             ServiceDone::Locale { locale, result } => {
-                self.services.locale_writing = false;
+                let next = self.services.locale.finish();
                 match result {
                     Ok(path) => {
                         let lang = i18n::resolve(Some(locale.as_str()), &self.options.vars);
@@ -218,7 +198,7 @@ impl<B: Backend> Loop<'_, B> {
                     }
                     Err(reason) => self.app.error(i18n::locale_failed(self.app.lang, &reason)),
                 }
-                if let Some(next) = self.services.locale_next.take() {
+                if let Some(next) = next {
                     self.save_locale(next);
                 }
             }

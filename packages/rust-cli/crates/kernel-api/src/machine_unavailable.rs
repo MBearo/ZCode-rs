@@ -13,7 +13,7 @@ use crate::env::{
 };
 use crate::ids::{OperationId, SessionId};
 use crate::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, MachineEnv, Pdf, Search, Shell,
+    Background, Checkpoints, Commands, EnvInfo, Files, Git, MachineEnv, Pdf, Search, Shell,
 };
 use crate::mcp::NoMcpTransport;
 
@@ -92,6 +92,7 @@ impl Shell for Unavailable {}
 impl Background for Unavailable {}
 impl Checkpoints for Unavailable {}
 impl Pdf for Unavailable {}
+impl Git for Unavailable {}
 
 impl MachineEnv {
     /// 叫这个名字、但没连上的机器：每个方法都是 [`not_connected`] 的 io 错误（没有覆盖的方法照旧 `Unsupported`）。
@@ -100,6 +101,6 @@ impl MachineEnv {
             Arc::new(Unavailable(name.to_owned())),
             Arc::new(NoMcpTransport),
         )
-        .named(name)
+        .named(crate::ids::MachineName::new(name))
     }
 }

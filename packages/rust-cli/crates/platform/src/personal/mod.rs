@@ -14,9 +14,11 @@
 
 mod check;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
+use rust_cli_base::account::Family;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_net::Egress;
 use tokio::sync::OnceCell;
@@ -24,7 +26,7 @@ use tokio::sync::OnceCell;
 use crate::credentials::CredentialStore;
 use crate::team::{Availability, Reason};
 use crate::token::http::Http;
-use crate::token::{AccountOrigins, Family, ProjectTokens, TokenRequest, fingerprint};
+use crate::token::{AccountOrigins, ProjectTokens, TokenRequest, fingerprint};
 
 /// 一个个人 Coding Plan provider 的 OAuth 账号输入（来源是 manual 的不在这里，platform.md §5.2）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,11 +71,6 @@ pub(crate) struct PersonalPlans {
     state: Mutex<State>,
 }
 
-fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
-    // 持锁的代码不 panic、不 await；中毒时数据仍然一致，继续使用。
-    state.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 impl PersonalPlans {
     /// `tokens` 与请求期共用（同一账号的项目令牌只换一次）；项目位置写进 `credentials`（App 能读，§5.4）。
     pub fn new(
@@ -116,7 +113,9 @@ impl PersonalPlans {
             return offline(known);
         }
         let key = (account.provider.clone(), identity.to_owned(), print);
-        let flight = lock(&self.state)
+        let flight = self
+            .state
+            .lock_unpoisoned()
             .flights
             .entry(key.clone())
             .or_default()
@@ -124,7 +123,7 @@ impl PersonalPlans {
         let availability = *flight
             .get_or_init(|| async {
                 let availability = self.query(account.family, identity, token).await;
-                let mut state = lock(&self.state);
+                let mut state = self.state.lock_unpoisoned();
                 if state
                     .flights
                     .get(&key)
@@ -163,7 +162,7 @@ impl PersonalPlans {
 
     /// 记下的确定结论（同一 profile id 与 token）。
     fn known(&self, provider: &str, identity: &str, print: &str) -> Option<Availability> {
-        let state = lock(&self.state);
+        let state = self.state.lock_unpoisoned();
         let recorded = state.recorded.get(provider)?;
         (recorded.identity == identity
             && recorded.token == print
@@ -174,7 +173,7 @@ impl PersonalPlans {
     /// 发布前记下这一轮，给出 entitled：available true、unavailable false、unknown 沿用上次同一 profile id 的值（第一次
     /// false；换了 profile id 不沿用，App `resetPrevious`）。没有 profile id 时删掉记录。
     pub fn commit(&self, account: &PersonalAccount, check: Check) -> bool {
-        let mut state = lock(&self.state);
+        let mut state = self.state.lock_unpoisoned();
         let Some(identity) = account.identity.clone() else {
             state.recorded.remove(&account.provider);
             return false;

@@ -78,8 +78,6 @@ pub struct Inputs<'a> {
     pub root: &'a str,
     /// 这次调用是 guarded 下命中危险命令规则的 Bash 命令（`guarded::applies`，修复线 F20）。
     pub dangerous: bool,
-    /// hook 放行之后的检查（`PermissionGate::check_rules`）：[`AskKind::Safety`] 的询问也留下，不按 bypass 放行。
-    pub hook_check: bool,
     /// 完全访问：会话的模式是 bypassPermissions（yolo）且 plan 关着（plan 开着时判决用的模式是 plan）。除拒绝外的
     /// 询问一律放行（工作线 F76，用户决定 2026-10-23“如果是 yolo 啥也不问”，shell-permissions.md §4.6.2）。
     pub full_access: bool,
@@ -94,7 +92,6 @@ impl Inputs<'_> {
             paths,
             root: self.root,
             dangerous: self.dangerous,
-            hook_check: self.hook_check,
             full_access: self.full_access,
         }
     }

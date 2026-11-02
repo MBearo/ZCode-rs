@@ -16,12 +16,7 @@ use serde_json::json;
 use super::*;
 
 fn selection() -> ModelSelection {
-    ModelSelection {
-        provider: "fixture".into(),
-        model: "scripted".into(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("fixture", "scripted")
 }
 
 /// 按顺序给事件编 seq 并折叠。
@@ -162,7 +157,7 @@ fn a_streamed_reply_becomes_the_final_message() {
         ]
     );
     assert!(!feed.view.running());
-    assert_eq!(feed.view.last_reply(), Some("hello"));
+    assert_eq!(feed.view.nth_reply(1), Some("hello"));
 }
 
 #[test]
@@ -257,12 +252,13 @@ fn a_failed_turn_shows_its_reason() {
 fn permission_asks_mark_the_tool_and_resolve() {
     let mut feed = Feed::new();
     let ask = InteractionRequest::Permission {
-        machine: None,
+        machine: Default::default(),
         tool_use: ToolUseId::new("tu1"),
         tool: "Bash".into(),
         input: json!({"command": "rm x"}),
         message: "rm needs approval".into(),
         suggestions: Vec::new(),
+        rule_seed: None,
         asked_by: None,
     };
     feed.push(started())

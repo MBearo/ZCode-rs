@@ -5,11 +5,12 @@
 //! 做，所以同一个会话的帧按计算的顺序写出，接收方不用跨 `.await` 持锁。
 //!
 //! 接收方先拿到 [`SessionView`]（`last_seq` 时刻的状态），再从 `last_seq` 之后接事件：中间没有空隙。内核的订阅流
-//! 落后太多时会结束，这里从最后收到的 seq 重新订阅；连着两次没有新事件就结束（会话已经不在）。
+//! 落后太多时会结束，由 kernel-api 的 `follow` 从最后收到的 seq 重新订阅；连着两次没有新事件就结束（会话已经不在）。
 //! 会话状态只归会话 actor：接收方只能保存由事件派生的东西（投影），不能当第二份事实。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -19,6 +20,7 @@ use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::session_api::{
     Kernel, KernelError, SequencedEvent, SessionHandle, SessionView,
 };
+use rust_cli_kernel_api::session_follow::follow;
 use tokio::sync::mpsc;
 
 use crate::serial::Job;
@@ -56,9 +58,6 @@ impl<S> Drop for Bridged<S> {
 
 type Opening<S> = Arc<tokio::sync::OnceCell<Result<Arc<Bridged<S>>, KernelError>>>;
 
-/// 连续这么多轮重新订阅都没收到事件，就当会话的事件流结束了。
-const ENDED_AFTER_EMPTY_ROUNDS: u32 = 2;
-
 /// 打开着的会话的表。
 pub struct SessionBridge<S> {
     kernel: Arc<dyn Kernel>,
@@ -83,7 +82,7 @@ impl<S: SessionSink> SessionBridge<S> {
     }
 
     fn table(&self) -> std::sync::MutexGuard<'_, HashMap<SessionId, Opening<S>>> {
-        self.open.lock().unwrap_or_else(PoisonError::into_inner)
+        self.open.lock_unpoisoned()
     }
 
     /// 已经打开的会话。
@@ -158,57 +157,47 @@ async fn pump<S: SessionSink>(
     handle: Arc<dyn SessionHandle>,
     sink: Arc<S>,
     mut jobs: mpsc::UnboundedReceiver<Job>,
-    mut last: u64,
+    last: u64,
     window: Duration,
 ) {
-    let mut empty = 0;
-    let mut stream = handle.subscribe(Some(last));
+    let id = handle.id().as_str().to_owned();
+    // 落后时的重新订阅在 `follow` 里（三个前端同一份规则，session-lifecycle.md §2.1）。
+    let mut stream = follow(handle, last);
+    let mut deadline: Option<tokio::time::Instant> = None;
     loop {
-        let mut received = false;
-        let mut deadline: Option<tokio::time::Instant> = None;
-        loop {
-            let due = deadline.unwrap_or_else(|| tokio::time::Instant::now() + window);
-            tokio::select! {
-                next = stream.next() => match next {
-                    Some(event) => {
-                        last = event.seq;
-                        received = true;
-                        sink.event(event).await;
-                        if deadline.is_none() {
-                            deadline = Some(tokio::time::Instant::now() + window);
-                        }
+        let due = deadline.unwrap_or_else(|| tokio::time::Instant::now() + window);
+        tokio::select! {
+            next = stream.next() => match next {
+                Some(event) => {
+                    sink.event(event).await;
+                    if deadline.is_none() {
+                        deadline = Some(tokio::time::Instant::now() + window);
                     }
-                    None => break,
-                },
-                job = jobs.recv() => match job {
-                    Some(job) => job.await,
-                    // 句柄都已丢弃：会话关了。
-                    None => return,
-                },
-                () = tokio::time::sleep_until(due), if deadline.is_some() => {
-                    deadline = None;
-                    sink.flush().await;
                 }
+                None => break,
+            },
+            job = jobs.recv() => match job {
+                Some(job) => job.await,
+                // 句柄都已丢弃：会话关了。
+                None => return,
+            },
+            () = tokio::time::sleep_until(due), if deadline.is_some() => {
+                deadline = None;
+                sink.flush().await;
             }
         }
-        if deadline.is_some() {
-            sink.flush().await;
-        }
-        empty = if received { 0 } else { empty + 1 };
-        if empty >= ENDED_AFTER_EMPTY_ROUNDS {
-            tracing::debug!(
-                event = "protocol.session.ended",
-                session = handle.id().as_str(),
-                "the session event stream ended"
-            );
-            // 流不会再有东西：之后的工作照常跑完。
-            while let Some(job) = jobs.recv().await {
-                job.await;
-            }
-            return;
-        }
-        // 先建新流再丢旧流：旧流读到的位置一直拿着，会话日志不会去掉还没补发的（工作线 F120）。
-        stream = handle.subscribe(Some(last));
+    }
+    if deadline.is_some() {
+        sink.flush().await;
+    }
+    tracing::debug!(
+        event = "protocol.session.ended",
+        session = id,
+        "the session event stream ended"
+    );
+    // 流不会再有东西：之后的工作照常跑完。
+    while let Some(job) = jobs.recv().await {
+        job.await;
     }
 }
 

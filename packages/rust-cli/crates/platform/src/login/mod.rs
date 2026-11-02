@@ -13,6 +13,7 @@ mod persist;
 use std::time::Duration;
 
 use ring::rand::{SecureRandom, SystemRandom};
+use rust_cli_base::account::Family;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_base::units;
 use rust_cli_paths::StoragePath;
@@ -21,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Platform;
 use crate::account::CodingPlanProvider;
-use crate::token::{Family, ProjectTokens, TokenError};
+use crate::token::{ProjectTokens, TokenError};
 use oauth::{OAuthClient, OAuthError, Poll};
 pub(crate) use persist::identity_from_secret;
 
@@ -417,7 +418,7 @@ fn app_profile(ready: &oauth::Ready) -> Value {
 fn random_hex(bytes: usize) -> Result<String, ring::error::Unspecified> {
     let mut buffer = vec![0u8; bytes];
     SystemRandom::new().fill(&mut buffer)?;
-    Ok(buffer.iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(rust_cli_base::hash::hex(&buffer))
 }
 
 #[cfg(test)]

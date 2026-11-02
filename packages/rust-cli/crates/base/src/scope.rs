@@ -4,12 +4,13 @@
 //! 每个任务属于一个作用域：所有者释放作用域时任务被中止，panic 被捕获并上报，关闭时能列出
 //! 还在运行的任务。这里是 `tokio::spawn` 与 `spawn_blocking` 的唯一入口。
 
+use crate::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -76,7 +77,7 @@ struct Running {
 impl Shared {
     /// 锁只保护表本身，持有期间不 await；中毒时数据仍然一致（每次修改都是单步）。
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_unpoisoned()
     }
 
     fn children(&self) -> Vec<Arc<Shared>> {

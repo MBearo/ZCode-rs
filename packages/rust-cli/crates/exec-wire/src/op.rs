@@ -1,4 +1,4 @@
-//! 每种消息的名字、所属端口（能力位）、是不是流、有没有副作用（docs/specs/rust-cli/remote-exec.md §18.3、§18.5）。
+//! 每种消息的名字、所属端口（能力位）与种类（只读、有副作用、流）（docs/specs/rust-cli/remote-exec.md §18.3、§18.5）。
 
 use crate::handshake::Capability;
 
@@ -41,10 +41,32 @@ pub enum Op {
     McpDeclare,
     /// 按客户端实例推一组环境变量（F96，remote-exec.md §23.5）。
     EnvUpdate,
+    /// git 与 worktree（F110，deployment.md §19.1）。
+    GitStatus,
+    GitDiff,
+    WorktreeCreate,
+    WorktreeList,
+    WorktreeChanges,
+    WorktreeRemove,
+    /// 建目录与上级目录（F110）。
+    EnsureDir,
+}
+
+/// 一种消息的种类（remote-exec.md §18.5、§19.7）：决定服务端记不记账（文件版账本只把有副作用的写进日志）、执行器换了
+/// 实例后补不补发、调用失败时给模型的说明（F96）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OpKind {
+    /// 只读或幂等：重跑没有副作用，执行器换了实例照常补发。
+    Read,
+    /// 有副作用：执行器换了实例时不补发，返回 `interrupted`；文件版账本写进日志。
+    Mutation,
+    /// 结果是带 `seq` 的事件流（`watch_command`、`shell_notices`、`mcp.events`），不是一条回复；消费方按自己的游标
+    /// 重新订阅。
+    Stream,
 }
 
 impl Op {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 41] = [
         Self::Facts,
         Self::PathFacts,
         Self::ReadFile,
@@ -79,6 +101,13 @@ impl Op {
         Self::McpClose,
         Self::McpDeclare,
         Self::EnvUpdate,
+        Self::GitStatus,
+        Self::GitDiff,
+        Self::WorktreeCreate,
+        Self::WorktreeList,
+        Self::WorktreeChanges,
+        Self::WorktreeRemove,
+        Self::EnsureDir,
     ];
 
     /// 线上的名字（“端口.方法”），与请求、回复里的 `op` 相同。
@@ -118,6 +147,13 @@ impl Op {
             Self::McpClose => "mcp.close",
             Self::McpDeclare => "mcp.declare",
             Self::EnvUpdate => "env.update",
+            Self::GitStatus => "git.status",
+            Self::GitDiff => "git.diff",
+            Self::WorktreeCreate => "git.worktree_create",
+            Self::WorktreeList => "git.worktree_list",
+            Self::WorktreeChanges => "git.worktree_changes",
+            Self::WorktreeRemove => "git.worktree_remove",
+            Self::EnsureDir => "dirs.ensure_dir",
         }
     }
 
@@ -154,37 +190,58 @@ impl Op {
             | Self::McpClose
             | Self::McpDeclare => Capability::Mcp,
             Self::EnvUpdate => Capability::Env,
+            Self::GitStatus
+            | Self::GitDiff
+            | Self::WorktreeCreate
+            | Self::WorktreeList
+            | Self::WorktreeChanges
+            | Self::WorktreeRemove => Capability::Git,
+            Self::EnsureDir => Capability::Dirs,
         }
     }
 
-    /// 结果是带 `seq` 的事件流（`watch_command`、`shell_notices`、`mcp.events`），不是一条回复。
-    pub fn is_stream(self) -> bool {
-        matches!(
-            self,
-            Self::WatchCommand | Self::ShellNotices | Self::McpEvents
-        )
-    }
-
-    /// 有副作用：执行器换了实例时不补发，返回 `interrupted`（§18.5）。`env.update` 不算（幂等：再做一次结果相同，换了
-    /// 实例照常补发，F96）。
-    pub fn is_mutation(self) -> bool {
-        matches!(
-            self,
+    /// 这种消息的种类（[`OpKind`]）。穷举：加一种消息时必须在这里当场决定它是只读、有副作用还是流。
+    pub fn kind(self) -> OpKind {
+        match self {
+            Self::Facts
+            | Self::PathFacts
+            | Self::ReadFile
+            | Self::Stat
+            | Self::StatMany
+            | Self::ListDir
+            | Self::ReadText
+            | Self::Glob
+            | Self::ListFiles
+            | Self::Grep
+            | Self::ShellState
+            | Self::BackgroundCommand
+            | Self::BackgroundElapsed
+            | Self::PdfPageCount
+            | Self::RenderPdfPages
+            | Self::GitStatus
+            | Self::GitDiff
+            | Self::WorktreeList
+            | Self::WorktreeChanges => OpKind::Read,
+            // 幂等：再做一次结果相同，换了实例照常补发（F96、F110）。
+            Self::EnvUpdate | Self::EnsureDir => OpKind::Read,
             Self::WriteFile
-                | Self::PutFile
-                | Self::StartCommand
-                | Self::Cancel
-                | Self::CloseSession
-                | Self::AckShellNotice
-                | Self::SetShellCwd
-                | Self::StopBackgroundCommand
-                | Self::RewindPrepare
-                | Self::RewindApply
-                | Self::RewindFinish
-                | Self::McpConnect
-                | Self::McpSend
-                | Self::McpClose
-                | Self::McpDeclare
-        )
+            | Self::PutFile
+            | Self::StartCommand
+            | Self::Cancel
+            | Self::CloseSession
+            | Self::AckShellNotice
+            | Self::SetShellCwd
+            | Self::StopBackgroundCommand
+            | Self::RewindPrepare
+            | Self::RewindApply
+            | Self::RewindFinish
+            | Self::McpConnect
+            | Self::McpSend
+            | Self::McpClose
+            | Self::McpDeclare
+            | Self::WorktreeCreate
+            | Self::WorktreeRemove => OpKind::Mutation,
+            Self::WatchCommand | Self::ShellNotices | Self::McpEvents => OpKind::Stream,
+        }
     }
 }

@@ -11,11 +11,12 @@ use rust_cli_kernel_api::store::{CommitReceipt, Fact, FactBatch, StoreError, Tur
 use serde_json::{Value, json};
 
 use crate::ids::NodeIds;
+use crate::keys::{self, EntryKey};
 use crate::mode::{self, Execution};
 use crate::records;
 use crate::repo::entries::{self, Entry};
 use crate::repo::sessions::{self, SessionRow};
-use crate::state::{self, COMMIT_ENTRY, PERMISSION_MODE_ENTRY};
+use crate::state;
 use crate::{OrStorage, storage};
 
 /// 一次提交的上下文：同一个事务连接、同一个提交时间。
@@ -197,11 +198,10 @@ pub(crate) fn apply(ctx: &Commit<'_>, fact: &Fact) -> Result<(), StoreError> {
             if kind.is_empty() || data.is_null() {
                 return Err(storage("a rust-cli entry needs a kind and non-null data"));
             }
-            let kind = format!("rust-cli/{kind}");
             let entry = records::entry(
-                format!("{}:{kind}:{id}", ctx.session),
+                EntryKey::item(ctx.session, kind, id).encode(),
                 ctx.session,
-                &kind,
+                &keys::named(kind),
                 ctx.now,
                 data.clone(),
                 false,
@@ -329,9 +329,9 @@ fn write(
         return Ok(());
     };
     let named = records::entry(
-        format!("{}:{PERMISSION_MODE_ENTRY}", ctx.session),
+        EntryKey::single(ctx.session, keys::PERMISSION_MODE).encode(),
         ctx.session,
-        PERMISSION_MODE_ENTRY,
+        &keys::named(keys::PERMISSION_MODE),
         ctx.now,
         json!({"mode": mode::entry_name(named)}),
         false,
@@ -359,15 +359,15 @@ fn last_outcome(ctx: &Commit<'_>, status: CallStatus) -> Result<(), StoreError> 
 
 /// 回执序号：每个会话一条 `rust-cli/commit` entry，每次提交加一（与事实在同一事务里）。
 pub(crate) fn next_sequence(ctx: &Commit<'_>) -> Result<u64, StoreError> {
-    let previous = state::last_entry(ctx.conn, ctx.session, COMMIT_ENTRY)
+    let previous = state::last_entry(ctx.conn, ctx.session, &keys::named(keys::COMMIT))
         .storage()?
         .and_then(|data| data["sequence"].as_u64())
         .unwrap_or(0);
     let sequence = previous + 1;
     let entry = records::entry(
-        format!("{}:{COMMIT_ENTRY}", ctx.session),
+        EntryKey::single(ctx.session, keys::COMMIT).encode(),
         ctx.session,
-        COMMIT_ENTRY,
+        &keys::named(keys::COMMIT),
         ctx.now,
         json!({"sequence": sequence}),
         false,

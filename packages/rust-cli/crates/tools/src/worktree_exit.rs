@@ -12,16 +12,18 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::common::{Definition, definition, failed, parse, text};
 use crate::worktree::{WorktreeBoard, WorktreeSession, invalid, owner, switch};
 use crate::worktree_texts as texts;
+use rust_cli_kernel_api::tool::{failed, parse, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
 /// 校验错误码（删除时）：有未提交的改动或提交、查不了状态、不是本会话建的 worktree。
 const HAS_WORK_CODE: i32 = 2;
 const UNVERIFIED_CODE: i32 = 3;
 const NOT_OWNER_CODE: i32 = 4;
 
-pub const EXIT: &str = "ExitWorktree";
+pub const EXIT: &str = tool_names::EXIT_WORKTREE;
 
 #[derive(Deserialize)]
 struct ExitInput {
@@ -38,7 +40,7 @@ pub struct ExitWorktreeTool {
 impl ExitWorktreeTool {
     pub(crate) fn new(board: &Arc<WorktreeBoard>) -> Self {
         Self {
-            definition: definition(EXIT),
+            definition: rust_cli_prompts::definition(EXIT).clone(),
             board: board.clone(),
         }
     }
@@ -135,7 +137,7 @@ impl Tool for ExitWorktreeTool {
                 branch: session.branch.clone(),
             };
             let removed = context
-                .local
+                .machine
                 .git()
                 .worktree_remove(context.operation.clone(), request)
                 .await
@@ -156,6 +158,11 @@ async fn inspect(context: &ToolUseContext, session: &WorktreeSession) -> Option<
         path: session.path.clone(),
         base: session.head_commit.clone(),
     };
-    let found = context.local.git().worktree_changes(request).await.ok()??;
+    let found = context
+        .machine
+        .git()
+        .worktree_changes(request)
+        .await
+        .ok()??;
     Some((found.changed_files, found.commits))
 }

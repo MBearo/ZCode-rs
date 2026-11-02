@@ -3,9 +3,10 @@
 //!
 //! 读者任务是这条连接上事件的唯一消费者；它结束（连接关闭）时让全部等待中的请求失败。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -58,10 +59,6 @@ pub(crate) struct Client {
     next: AtomicU64,
     pending: Arc<Mutex<Pending>>,
     closed: CancellationToken,
-}
-
-fn lock(pending: &Mutex<Pending>) -> std::sync::MutexGuard<'_, Pending> {
-    pending.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// 服务器发来的请求的回答：`ping`、`roots/list`；其余回 Method not found。
@@ -185,10 +182,10 @@ impl Client {
         }
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
-        lock(&self.pending).insert(id, sender);
+        self.pending.lock_unpoisoned().insert(id, sender);
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         if let Err(error) = self.transport.send(&self.connection, message).await {
-            lock(&self.pending).remove(&id);
+            self.pending.lock_unpoisoned().remove(&id);
             return Err(RpcError::Send(error.to_string()));
         }
         let outcome = tokio::select! {
@@ -197,7 +194,7 @@ impl Client {
             () = cancel.cancelled() => Err(RpcError::Cancelled),
         };
         if matches!(outcome, Err(RpcError::TimedOut | RpcError::Cancelled)) {
-            lock(&self.pending).remove(&id);
+            self.pending.lock_unpoisoned().remove(&id);
             let reason = if matches!(outcome, Err(RpcError::Cancelled)) {
                 "User interrupted"
             } else {
@@ -251,7 +248,7 @@ impl Reader {
         }
         // 先标记关闭，再让等待方失败：之后的请求立即失败，不再登记。
         self.closed.cancel();
-        let waiting: Vec<_> = lock(&self.pending).drain().collect();
+        let waiting: Vec<_> = self.pending.lock_unpoisoned().drain().collect();
         for (_, sender) in waiting {
             let _ = sender.send(Err(RpcError::Closed("connection closed".to_owned())));
         }
@@ -270,7 +267,10 @@ impl Reader {
     }
 
     fn response(&self, id: &Value, message: &Value) {
-        let Some(sender) = id.as_u64().and_then(|id| lock(&self.pending).remove(&id)) else {
+        let Some(sender) = id
+            .as_u64()
+            .and_then(|id| self.pending.lock_unpoisoned().remove(&id))
+        else {
             tracing::debug!(%id, "MCP response for an unknown request");
             return;
         };

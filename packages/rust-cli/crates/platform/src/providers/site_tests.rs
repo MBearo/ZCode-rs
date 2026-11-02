@@ -196,12 +196,7 @@ fn site_rules_give_the_compaction_limits() {
 
 /// 不带团队项目的选择（按 provider 与模型找模板）。
 fn sel(provider: &str, model: &str) -> rust_cli_kernel_api::model::ModelSelection {
-    rust_cli_kernel_api::model::ModelSelection {
-        provider: provider.to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    rust_cli_kernel_api::model::ModelSelection::new(provider.to_owned(), model.to_owned())
 }
 
 /// 工作线 F90（tools-more.md §5 的“是否提供”）：GLM-5.3-Flash 在账号 provider 上的生效配置与 Node 的规则解析

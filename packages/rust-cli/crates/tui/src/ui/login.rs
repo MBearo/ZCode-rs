@@ -7,6 +7,7 @@ use ratatui::text::{Line, Span};
 
 use super::app::{Action, App, Overlay};
 use super::i18n::{self, Strings};
+use super::keyboard;
 use crate::services::{Family, RedactedString};
 
 /// 登录视图的选项（Node `buildLoginSelection` 的顺序）。
@@ -134,7 +135,7 @@ impl App {
 
     /// 登录视图的按键；只在视图是登录视图时调用。
     pub(super) fn login_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let (ctrl, typed) = (self.typing.ctrl(&key), self.typing.is_text(&key));
+        let (ctrl, typed) = (keyboard::ctrl(&key), keyboard::is_text(&key));
         let strings = self.strings;
         let Some(Overlay::Login(view)) = self.overlay.as_mut() else {
             return None;
@@ -196,7 +197,7 @@ impl App {
                 }
                 KeyCode::Backspace => {
                     let mut text = secret.expose().to_owned();
-                    text.pop();
+                    crate::ui::line_edit::backspace(&mut text);
                     *secret = RedactedString::new(text);
                     Next::Stay
                 }
@@ -278,7 +279,7 @@ pub fn lines(
 ) -> Vec<Line<'static>> {
     let accent = palette.accent;
     let keys = |template: &str| super::key_hint::line(super::layout::INDENT, template, palette);
-    let rule = Line::from(Span::styled("─".repeat(width), Style::default().fg(accent)));
+    let rule = crate::ui::style::rule(width, Style::default().fg(accent));
     let mut lines = vec![rule];
     match view {
         LoginView::Choose { selected, status } => {

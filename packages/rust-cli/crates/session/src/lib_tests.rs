@@ -13,8 +13,7 @@ use rust_cli_kernel_api::session_api::{Command, Delivery, KernelEvent, StartSour
 use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, SessionStore};
 use rust_cli_kernel_api::testing::{
     FailingExecutor, FixedClock, FixedContext, MemoryArtifacts, MemoryStore, NeverCompact, NoHooks,
-    NoTools, ScriptedModel, SequentialIds, UnusedEnvironment, local_services, machine, selection,
-    text_response,
+    NoTools, ScriptedModel, SequentialIds, UnusedEnvironment, selection, text_response,
 };
 use rust_cli_query::{QueryLoop, QueryParts};
 use tokio::sync::Notify;
@@ -117,34 +116,14 @@ async fn a_submitted_text_runs_a_turn_and_commits_both_messages() {
     );
 }
 
-/// 等到被放行或取消才结束的模型。
-struct GatedModel {
-    gate: Arc<Notify>,
-}
-
-impl ModelPort for GatedModel {
-    fn stream(
-        &self,
-        _request: ModelRequest,
-        cancel: CancellationToken,
-    ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-        let gate = self.gate.clone();
-        stream::once(async move {
-            tokio::select! {
-                () = gate.notified() => None,
-                () = cancel.cancelled() => Some(Err(ModelError::Cancelled)),
-            }
-        })
-        .filter_map(|item| async move { item })
-        .chain(stream::iter(text_response(&["ok"])))
-        .boxed()
-    }
-}
-
 #[tokio::test]
 async fn input_while_running_is_queued_and_interrupt_cancels_the_turn() {
     let gate = Arc::new(Notify::new());
-    let fixture = fixture(Arc::new(GatedModel { gate: gate.clone() }), true).await;
+    let fixture = fixture(
+        Arc::new(crate::test_support::GatedModel::new(gate.clone())),
+        true,
+    )
+    .await;
     let mut events = fixture.session.subscribe(Some(0));
     fixture.session.send(submit("c1", "first")).await;
     fixture.session.send(submit("c2", "second")).await;
@@ -204,7 +183,6 @@ impl rust_cli_kernel_api::tool::Tool for AskingTool {
         let answer = context
             .interactions
             .ask(
-                &context.session,
                 rust_cli_kernel_api::orchestration::InteractionRequest::Question {
                     tool_use: context.tool_use.clone(),
                     questions: input,
@@ -216,7 +194,7 @@ impl rust_cli_kernel_api::tool::Tool for AskingTool {
             })?;
         Ok(rust_cli_kernel_api::tool::ToolOutput {
             content: vec![rust_cli_kernel_api::message::ToolResultContent::Text {
-                text: answer.answer.to_string(),
+                text: serde_json::to_string(&answer.answer).unwrap(),
             }],
             is_error: false,
             display: serde_json::Value::Null,
@@ -257,11 +235,9 @@ async fn asking_session_with(
         hooks: Arc::new(NoHooks),
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        machines: rust_cli_kernel_api::testing::environments(env.clone()),
-        machine: machine(env.clone()),
-        local: local_services(env),
+        machines: rust_cli_kernel_api::testing::environments(env),
         artifacts: store.clone(),
-        generation: Generation::new("g1"),
+        operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids.clone()),
         non_interactive: false,
         limits: rust_cli_query::RequestLimits::default(),
     }));
@@ -271,19 +247,17 @@ async fn asking_session_with(
             agents: Arc::new(rust_cli_kernel_api::agents::NoAgentSignals),
             cron: Arc::new(rust_cli_kernel_api::cron::NoCron),
             store: store.clone(),
-            ids,
+            ids: ids.clone(),
             runner,
             compactor: Arc::new(NeverCompact),
-            machines: rust_cli_kernel_api::testing::environments(env.clone()),
-            machine: machine(env.clone()),
-            local: local_services(env),
+            machines: rust_cli_kernel_api::testing::environments(env),
             max_turns: None,
             hooks,
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
             inputs: Arc::new(rust_cli_kernel_api::user_input::NoUserInputs),
             artifacts: Arc::new(MemoryArtifacts::default()),
             clock: Arc::new(FixedClock(0)),
-            generation: Generation::new("g1"),
+            operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids),
             spawner: scope.spawner(),
             closing: scope.spawner(),
             titles: None,
@@ -327,13 +301,20 @@ pub(super) fn answer(id: &str, interaction: InteractionId) -> CommandEnvelope {
         id: CommandId::new(id),
         command: Command::ResolveInteraction {
             interaction,
-            answer: serde_json::json!("blue"),
+            answer: rust_cli_kernel_api::orchestration::QuestionAnswer::Answered {
+                answers: [("color".to_owned(), "blue".to_owned())].into(),
+                annotations: Default::default(),
+                response: None,
+                follow_up: false,
+                afk_timeout_ms: None,
+            }
+            .into(),
         },
     }
 }
 
 #[tokio::test]
-async fn a_tool_question_is_persisted_answered_and_resumes_the_tool() {
+async fn a_tool_question_is_answered_and_resumes_the_tool() {
     let scope = TaskScope::root("test", |_| {});
     let (store, model, session) = asking_session(&scope).await;
     let mut events = session.subscribe(Some(0));
@@ -361,11 +342,8 @@ async fn a_tool_question_is_persisted_answered_and_resumes_the_tool() {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        kinds,
-        // 执行工具前不再提交操作意图（工作线 F119）。
-        vec!["pending_interaction", "interaction_resolved"]
-    );
+    // 执行工具前不再提交操作意图（工作线 F119）；询问与回答只在内存，不写 entry（D4，工作线 F130）。
+    assert!(kinds.is_empty(), "{kinds:?}");
 }
 
 #[path = "steer_tests.rs"]

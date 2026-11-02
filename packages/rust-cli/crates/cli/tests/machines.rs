@@ -173,7 +173,7 @@ async fn tool_calls_run_on_the_named_machine_and_come_back() {
     // 工具定义：带参数的工具多 `machine`，其余不变。
     assert_eq!(
         schema(&requests[0], "Bash")["properties"]["machine"],
-        json!({"type": "string", "enum": ["local", "dev-a"], "description": "Machine to run on; omit to use the local machine."})
+        json!({"type": "string", "enum": ["primary", "dev-a"], "description": "Machine to run on; omit to use the default machine \"primary\"."})
     );
     assert!(schema(&requests[0], "Read")["properties"]["machine"].is_object());
     assert!(
@@ -183,7 +183,7 @@ async fn tool_calls_run_on_the_named_machine_and_come_back() {
     );
     // 机器清单提醒在第一次请求里，只发一次。
     let line = "- dev-a: ";
-    let reminder = "Remote machines connected to this session.";
+    let reminder = "Machines connected to this session besides the primary machine.";
     assert!(all_text(&requests[0]).contains(reminder));
     assert!(all_text(&requests[0]).contains(line));
     assert!(
@@ -237,5 +237,5 @@ async fn without_the_loopback_declaration_print_mode_connects_nothing() {
             .get("machine")
             .is_none()
     );
-    assert!(!all_text(&requests[0]).contains("Remote machines"));
+    assert!(!all_text(&requests[0]).contains("Machines connected to this session"));
 }

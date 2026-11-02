@@ -14,10 +14,11 @@ use rust_cli_kernel_api::session_api::KernelEvent;
 use crate::actor::Actor;
 use crate::cron::CRON_SOURCE;
 use crate::notices::NOTICE_SOURCE;
+use rust_cli_kernel_api::tool_names;
 
 /// 给模型的折叠说明的来源（meta user 消息）。
 pub(crate) const FOLD_SOURCE: &str = "loop-noop";
-const SCHEDULE_WAKEUP: &str = "ScheduleWakeup";
+const SCHEDULE_WAKEUP: &str = tool_names::SCHEDULE_WAKEUP;
 /// 用户拒绝与中断的工具结果（内核消息没有拒绝种类的字段，按文字认，D44）。
 const DENIALS: [&str; 2] = [
     "The user doesn't want to proceed with this tool use.",
@@ -47,12 +48,10 @@ fn is_cron_prompt(message: &Message) -> bool {
 }
 
 fn denied(content: &[rust_cli_kernel_api::message::ToolResultContent]) -> bool {
-    content.iter().any(|item| match item {
-        rust_cli_kernel_api::message::ToolResultContent::Text { text } => {
-            DENIALS.iter().any(|denial| text.starts_with(denial))
-        }
-        _ => false,
-    })
+    content
+        .iter()
+        .filter_map(rust_cli_kernel_api::message::ToolResultContent::text)
+        .any(|text| DENIALS.iter().any(|denial| text.starts_with(denial)))
 }
 
 impl FoldState {
@@ -78,7 +77,9 @@ impl FoldState {
         for message in &messages[at + 1..] {
             match message {
                 Message::System(_) => return None,
-                Message::Attachment(attachment) if attachment.source == "queued_command" => {
+                Message::Attachment(attachment)
+                    if attachment.source == rust_cli_kernel_api::hooks::queued_command::SOURCE =>
+                {
                     return None;
                 }
                 Message::Attachment(_) => {}

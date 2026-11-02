@@ -1,12 +1,12 @@
 //! 完整消息的折叠（docs/specs/rust-cli/tui.md §4.2）：`MessageDone` 与冷加载的消息；assistant 消息替换
 //! 流式的响应段。
 use rust_cli_kernel_api::goal;
+use rust_cli_kernel_api::hooks::queued_command;
 use rust_cli_kernel_api::message::{ContentBlock, Message, SystemMessage, UserOrigin};
 use rust_cli_kernel_api::{user_command, user_input};
-use serde_json::Value;
 
-use super::result_text;
 use crate::view::{Body, Marker, PeerRow, Row, ToolRow, ToolStatus, Transcript};
+use rust_cli_kernel_api::message::text_of;
 
 /// 会话里同伴消息开回合的 meta 来源（session `peers.rs` 的 `PEER_SOURCE`）。
 const PEER_SOURCE: &str = "cross-session";
@@ -97,7 +97,7 @@ impl Transcript {
                         {
                             self.update_tool(&tool_use_id, |tool| {
                                 if tool.status.is_live() || tool.output.is_empty() {
-                                    tool.output = result_text(&content);
+                                    tool.output = text_of(&content);
                                     tool.status = if is_error {
                                         ToolStatus::Error
                                     } else {
@@ -143,7 +143,7 @@ impl Transcript {
             }
             // 工具边界并入的同伴消息与回执（cross-session.md §2.6）。
             Message::Attachment(attachment)
-                if attachment.source == "queued_command"
+                if attachment.source == queued_command::SOURCE
                     && peer_row(&attachment.text).is_some() =>
             {
                 if let Some(row) = peer_row(&attachment.text) {
@@ -153,10 +153,13 @@ impl Transcript {
             // 插话显示成用户行；工具边界并入的后台通知（`task-notification`，L18）与开回合的通知 meta
             // 消息一样不显示。
             Message::Attachment(attachment)
-                if attachment.source == "queued_command"
-                    && attachment.data["commandMode"] != "task-notification" =>
+                if attachment.source == queued_command::SOURCE
+                    && attachment.data[queued_command::MODE_KEY]
+                        != queued_command::TASK_NOTIFICATION =>
             {
-                let text = attachment.data["prompt"].as_str().unwrap_or_default();
+                let text = attachment.data[queued_command::PROMPT_KEY]
+                    .as_str()
+                    .unwrap_or_default();
                 self.push(Body::User { text: text.into() }, now_ms);
             }
             Message::Attachment(attachment) if attachment.source == goal::STATUS_SOURCE => {
@@ -217,16 +220,12 @@ impl Transcript {
                         Some(at) => self.rows.push(old.remove(at)),
                         None => {
                             self.push(
-                                Body::Tool(Box::new(ToolRow {
+                                Body::Tool(Box::new(ToolRow::new(
                                     id,
                                     name,
                                     input,
-                                    status: ToolStatus::Pending,
-                                    output: String::new(),
-                                    preview: String::new(),
-                                    display: Value::Null,
-                                    activity: None,
-                                })),
+                                    ToolStatus::Pending,
+                                ))),
                                 now_ms,
                             );
                         }

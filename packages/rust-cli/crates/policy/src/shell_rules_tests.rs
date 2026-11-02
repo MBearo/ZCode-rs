@@ -69,7 +69,7 @@ fn rule_matching_strips_every_safe_variable() {
         );
     }
     assert!(hit("npm test", "CI=1 npm test"));
-    assert_eq!(crate::safe_env::SAFE_ENV_VARS.len(), 39);
+    assert_eq!(crate::shell::safe_env::SAFE_ENV_VARS.len(), 39);
 }
 
 /// 工作线 F85（§4.5.6）：deny 与 ask 规则去掉全部前缀赋值，allow 规则只去安全的。

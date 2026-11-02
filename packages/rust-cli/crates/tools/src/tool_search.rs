@@ -12,6 +12,8 @@
 
 use std::sync::{Arc, OnceLock, Weak};
 
+use rust_cli_base::late::Late;
+
 use async_trait::async_trait;
 use regex::Regex;
 use rust_cli_kernel_api::listing::{ListingEntry, ListingSource, Listings};
@@ -22,23 +24,26 @@ use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
-use rust_cli_kernel_api::tool_search::{TOOL_SEARCH, compare_names, is_deferred};
+use rust_cli_kernel_api::tool_names::TOOL_SEARCH;
+use rust_cli_kernel_api::tool_search::{compare_names, is_deferred};
 use rust_cli_prompts::models::ToolSearchSetting;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::common::{Definition, definition, text};
 use crate::texts_more as texts;
 use crate::tool_search_keywords::{self as keywords, Candidate};
 use crate::tool_search_mcp;
+use rust_cli_kernel_api::tool::text;
+use rust_cli_prompts::Definition;
 
 /// 没有给 `max_results` 时最多返回几个。
 const DEFAULT_MAX_RESULTS: usize = 5;
 
-/// 主线程注册表的弱引用（避免 注册表 → 工具 → 目录 → 注册表 的 `Arc` 环）与 `ENABLE_TOOL_SEARCH` 的设置（缺省开）。
+/// 主线程注册表的弱引用（避免 注册表 → 工具 → 目录 → 注册表 的 `Arc` 环；组装的晚绑定，base 的 `late::Late`）与
+/// `ENABLE_TOOL_SEARCH` 的设置（缺省开）。
 #[derive(Default)]
 pub struct ToolCatalog {
-    registry: OnceLock<Weak<dyn ToolRegistry>>,
+    registry: Late<Weak<dyn ToolRegistry>>,
     setting: ToolSearchSetting,
 }
 
@@ -46,14 +51,16 @@ impl ToolCatalog {
     /// 带入口读到的 `ENABLE_TOOL_SEARCH` 设置（runtime 组装时给出）。
     pub fn new(setting: ToolSearchSetting) -> Self {
         Self {
-            registry: OnceLock::new(),
+            registry: Late::new(),
             setting,
         }
     }
 
-    /// 建好主线程注册表后绑定一次；之后的绑定被忽略。
+    /// 建好主线程注册表后绑定一次；再绑定是组装的缺陷，留着第一个、记 error 日志（工作线 F131：以前静默忽略）。
     pub fn bind(&self, registry: &Arc<dyn ToolRegistry>) {
-        let _ = self.registry.set(Arc::downgrade(registry));
+        if self.registry.bind(Arc::downgrade(registry)).is_err() {
+            tracing::error!("the tool catalog was bound twice; keeping the first registry");
+        }
     }
 
     fn registry(&self) -> Result<Arc<dyn ToolRegistry>, String> {
@@ -136,7 +143,7 @@ pub struct ToolSearchTool {
 impl ToolSearchTool {
     pub fn new(catalog: Arc<ToolCatalog>) -> Self {
         Self {
-            definition: definition(TOOL_SEARCH),
+            definition: rust_cli_prompts::definition(TOOL_SEARCH).clone(),
             catalog,
         }
     }
@@ -153,7 +160,7 @@ impl ToolSearchTool {
                 name: tool.name().to_owned(),
                 description: tool.description(&prompt),
                 hint: tool.search_hint().map(str::to_owned),
-                mcp: tool.is_mcp(),
+                mcp: rust_cli_kernel_api::tool_search::is_mcp(tool.as_ref()),
             })
             .collect()
     }
@@ -170,7 +177,7 @@ impl ToolSearchTool {
         let by_name = |tools: &[Arc<dyn Tool>], name: &str| {
             tools
                 .iter()
-                .find(|tool| tool.name() == name || tool.aliases().contains(&name))
+                .find(|tool| rust_cli_kernel_api::tool::answers_to(tool.as_ref(), name))
                 .map(|tool| vec![tool.name().to_owned()])
         };
         for name in list

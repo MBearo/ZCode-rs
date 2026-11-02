@@ -2,7 +2,7 @@
 //!
 //! F107（§28.2）：第一行按目标平台判（Linux x86_64 / aarch64 与 macOS arm64 / x86_64 之外报 `Unsupported`）。
 
-use rust_cli_exec_transport::ProvisionError;
+use rust_cli_machines::ProvisionError;
 
 use crate::artifact::Platform;
 use crate::probe::Probe;

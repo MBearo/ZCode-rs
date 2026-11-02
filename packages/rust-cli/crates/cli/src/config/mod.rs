@@ -17,13 +17,13 @@ use rust_cli_hooks::node_config::NodeHooks;
 use rust_cli_hooks::{HookSource, HooksConfig};
 use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::machine::Files as FilesPort;
+use rust_cli_kernel_api::permission::syntax::parse_rule;
 use rust_cli_kernel_api::permission::{
     PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
 };
-use rust_cli_kernel_api::store::SessionStore;
+use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_paths::StoragePaths;
-use rust_cli_platform::{ConfigFile, read_cli_config};
-use rust_cli_policy::rules::parse_rule;
+use rust_cli_platform::local::{ConfigFile, read_cli_config};
 use serde_json::{Map, Value};
 
 use self::files::ProjectFile;
@@ -38,10 +38,13 @@ pub(crate) struct ConfigInputs<'a> {
     pub(crate) workspace: &'a WorkspaceRef,
     pub(crate) paths: &'a StoragePaths,
     /// 入口捕获的进程环境（http hook 的 header 插值用）。
-    pub(crate) process_env: &'a [(String, String)],
+    pub(crate) process_env: &'a rust_cli_base::secret::EnvSnapshot,
     /// `--settings` 给的配置（docs/specs/rust-cli/cli-args.md §8）：Node 配置的同一种写法，排在项目级之后（文件层里
     /// 优先级最高），命令行的单项参数仍在它之上。
     pub(crate) flag: Option<&'a Map<String, Value>>,
+    /// 项目级配置文件在不在本机（主 env 就在本进程里）。不在时它们是执行侧的文件，不能改 controller 的存储位置：
+    /// 存储键只认用户级配置与环境变量（deployment.md §21）。
+    pub(crate) project_is_local: bool,
 }
 
 /// `--settings` 一层在警告里的名字。
@@ -68,9 +71,9 @@ pub(crate) struct ConfigSnapshot {
     /// 插件候选与启用设置（config.md §2.1、ext.md §4.1）。
     pub(crate) plugins: PluginSources,
     /// 界面语言 `ui.locale`（tui.md §7.1）。
-    pub(crate) locale: Option<rust_cli_platform::UiLocale>,
+    pub(crate) locale: Option<rust_cli_base::ui_prefs::UiLocale>,
     /// 主题 `ui.theme`（tui-manage.md §2.1）。
-    pub(crate) theme: Option<rust_cli_platform::UiTheme>,
+    pub(crate) theme: Option<rust_cli_base::ui_prefs::UiTheme>,
     /// 启动时检查新版本 `checkForUpdateOnStartup`（update.md §10，F48；缺省 true）。
     pub(crate) check_for_update: bool,
     /// 提问框的空闲超时 `askUserQuestionTimeout`（毫秒，tools-more.md §1.1，工作线 F72；缺省不计时）。
@@ -106,7 +109,7 @@ impl ConfigSnapshot {
 
 /// 本机项目规则集（LocalSettings 来源，shell-permissions.md §5）；读不出时为空并记警告。
 pub(crate) async fn local_rules(
-    store: &dyn SessionStore,
+    store: &dyn LocalSettings,
     workspace: &WorkspaceRef,
 ) -> Vec<SourcedRule> {
     match store.project_rules(workspace).await {
@@ -124,7 +127,7 @@ pub(crate) async fn local_rules(
 pub(crate) async fn initial_mode(
     cli: Option<PermissionMode>,
     config: Option<PermissionMode>,
-    store: &dyn SessionStore,
+    store: &dyn LocalSettings,
     workspace: &WorkspaceRef,
 ) -> PermissionMode {
     if let Some(mode) = cli {
@@ -230,7 +233,12 @@ pub(crate) async fn assemble(inputs: &ConfigInputs<'_>) -> ConfigSnapshot {
     let question_timeout = merge::question_timeout(&layers, &mut warnings);
     let root = inputs.workspace.root.as_str();
     let plugin_section = plugins::merge(&layers, &mut warnings);
-    let storage = StorageLayers::from_layers(&layers, inputs.process_env);
+    let storage = if inputs.project_is_local {
+        StorageLayers::from_layers(&layers, inputs.process_env)
+    } else {
+        let own = storage::controller_layers(&layers, &mut warnings);
+        StorageLayers::from_layers(&own, inputs.process_env)
+    };
     let plugin_root = inputs
         .paths
         .plugin_storage(storage.dir.as_deref(), std::path::Path::new(root));
@@ -268,7 +276,7 @@ pub(crate) async fn assemble(inputs: &ConfigInputs<'_>) -> ConfigSnapshot {
         version: 1,
         sources,
         trusted: true,
-        env: inputs.process_env.to_vec().into(),
+        env: inputs.process_env.clone(),
         prompt_model: None,
     };
     for warning in &warnings {

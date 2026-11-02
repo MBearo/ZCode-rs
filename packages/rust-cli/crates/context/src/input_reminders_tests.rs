@@ -44,25 +44,17 @@ impl ListingSource for Skills {
 
 fn request(source: QuerySource, tools: &[&str]) -> ContextRequest {
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("s"),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/w"),
-        },
-        agent: None,
-        source,
-        mode: PermissionMode::Default,
         tool_names: tools.iter().map(|name| (*name).to_owned()).collect(),
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
+        ..ContextRequest::new(
+            SessionId::new("s"),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/w"),
+            },
+            source,
+            PermissionMode::Default,
+            ModelSelection::new("p".to_owned(), rust_cli_base::models::GLM_5_3.to_owned()),
+        )
     }
 }
 

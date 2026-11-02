@@ -43,7 +43,6 @@ async fn report(transport: &LocalMcpTransport, root: &str) -> serde_json::Value 
             env: [("TOKEN".to_owned(), "${REMOTE_TOKEN}".to_owned())].into(),
             cwd: None,
         },
-        env: Default::default(),
     };
     let workspace = WorkspaceRef {
         environment: EnvironmentId::new("dev-a"),
@@ -98,18 +97,24 @@ async fn pushed_variables_reach_the_server_and_its_expansion() {
             env: [("PINNED".to_owned(), "from-config".to_owned())].into(),
             cwd: None,
         },
-        env: [
-            ("SSH_AUTH_SOCK".to_owned(), Some("/tmp/ssh-new/agent.2".to_owned())),
-            ("PINNED".to_owned(), Some("pushed".to_owned())),
-            ("REMOTE_TOKEN".to_owned(), None),
-        ]
-        .into(),
     };
+    let pushed = [
+        (
+            "SSH_AUTH_SOCK".to_owned(),
+            Some("/tmp/ssh-new/agent.2".to_owned()),
+        ),
+        ("PINNED".to_owned(), Some("pushed".to_owned())),
+        ("REMOTE_TOKEN".to_owned(), None),
+    ]
+    .into();
     let workspace = WorkspaceRef {
         environment: EnvironmentId::new("dev-a"),
         root: EnvPath::new(dir.path().to_str().unwrap()),
     };
-    let id = transport.connect(&workspace, request).await.unwrap();
+    let id = transport
+        .connect_with_env(&workspace, request, &pushed)
+        .await
+        .unwrap();
     let mut events = transport.events(&id);
     let event = tokio::time::timeout(Duration::from_secs(10), events.next())
         .await

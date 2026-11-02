@@ -55,7 +55,7 @@ pub(crate) struct Profile {
 
 const OFFICIAL_IDLE: Duration = Duration::from_secs(180);
 /// 其他端点的字节级缺省与事件级上限的下限是同一个常量（F55：以前各写一份 300 s）。
-const OTHER_IDLE: Duration = crate::idle::EVENT_IDLE_FLOOR;
+const OTHER_IDLE: Duration = crate::transport::idle::EVENT_IDLE_FLOOR;
 
 /// 一方：第一方 system、一方专有项都发。
 const fn official(

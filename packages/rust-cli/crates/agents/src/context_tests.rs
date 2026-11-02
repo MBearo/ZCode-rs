@@ -37,7 +37,6 @@ impl ContextBuilder for Inner {
     ) -> Result<BuiltContext, OrchestrationError> {
         Ok(BuiltContext {
             system: Vec::new(),
-            user_context: Vec::new(),
             attachments: vec![attachment("date")],
         })
     }
@@ -60,22 +59,16 @@ impl ContextBuilder for Inner {
 }
 
 fn request() -> ContextRequest {
-    ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("sess_subagent_agent_1"),
-        workspace: WorkspaceRef {
+    ContextRequest::new(
+        SessionId::new("sess_subagent_agent_1"),
+        WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/Users/dev/w"),
         },
-        agent: None,
-        source: QuerySource::Subagent("general-purpose".to_owned()),
-        mode: PermissionMode::Default,
-        tool_names: Vec::new(),
-        selection: selection(),
-        plan_flags: Default::default(),
-        mcp: None,
-    }
+        QuerySource::Subagent("general-purpose".to_owned()),
+        PermissionMode::Default,
+        selection(),
+    )
 }
 
 /// 修 bug（F16）：包装没有转发 `start_attachments` 时落到缺省实现（`turn_attachments`），子代理

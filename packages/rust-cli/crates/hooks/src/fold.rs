@@ -87,10 +87,7 @@ pub(crate) fn pre_tool_use(fold: &Fold<'_>, results: &[HookResult]) -> HookOutco
                         let message = reason.unwrap_or_else(|| {
                             texts::decision_default(fold.hook_name, "asked for confirmation for")
                         });
-                        decision = Some(PermissionDecision::Ask {
-                            message,
-                            suggestions: Vec::new(),
-                        });
+                        decision = Some(PermissionDecision::ask(message, Vec::new()));
                         decision_input.clone_from(&result.updated_input);
                     }
                     // 同一个 hook 已给出阻塞时保留阻塞文本：JSON deny 的结果是

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
-use rust_cli_kernel_api::ids::{MessageId, OwnerEpoch, SessionId, ToolUseId};
+use rust_cli_kernel_api::ids::{MessageId, OwnerEpoch, ToolUseId};
 use rust_cli_kernel_api::message::{
     AssistantMessage, ContentBlock, Message, ToolResultContent, UserMessage, UserOrigin,
 };
@@ -111,18 +111,22 @@ async fn forking_at_the_second_input_keeps_that_turn_and_its_answer() {
     };
     let (second, answer) = (id_of("second"), id_of("two"));
     let ack = built.session.send(fork(&second)).await;
-    let Ack::Accepted { result } = ack else {
+    let Ack::Accepted {
+        result: rust_cli_kernel_api::session_api::CommandResult::Forked(forked),
+    } = ack
+    else {
         panic!("{ack:?}")
     };
-    let child = SessionId::new(result["session"].as_str().unwrap());
+    let child = forked.session.clone();
     let end = messages.iter().position(|m| m.id() == &answer).unwrap() + 1;
     assert_eq!(
-        result["response"],
-        format!("Forked session {child} from message {answer}: copied {end} messages.")
+        forked.response(),
+        Some(format!(
+            "Forked session {child} from message {answer}: copied {end} messages."
+        ))
     );
-    // 回执带复制到的那条消息（界面的中文提示用），不再带总是空的 `restored`。
-    assert_eq!(result["message"], json!(answer.as_str()));
-    assert!(result.get("restored").is_none(), "{result}");
+    // 回执带复制到的那条消息（界面的中文提示用）。
+    assert_eq!(forked.through.as_ref(), Some(&answer));
     let loaded = built.store.load(&child).await.unwrap();
     assert_eq!(loaded.meta.parent, Some(meta().id));
     // 复制的是前两轮（含第二轮的工具调用、结果与最后的回答），之后是分叉提示；第三轮不在。
@@ -170,13 +174,18 @@ async fn a_turn_without_an_answer_is_copied_up_to_its_input() {
         "{view:?}"
     );
     let ack = built.session.send(fork(&MessageId::new("msg_u2"))).await;
-    let Ack::Accepted { result } = ack else {
+    let Ack::Accepted {
+        result: rust_cli_kernel_api::session_api::CommandResult::Forked(forked),
+    } = ack
+    else {
         panic!("{ack:?}")
     };
-    let child = SessionId::new(result["session"].as_str().unwrap());
+    let child = forked.session.clone();
     assert_eq!(
-        result["response"],
-        format!("Forked session {child} from message msg_u2: copied 3 messages.")
+        forked.response(),
+        Some(format!(
+            "Forked session {child} from message msg_u2: copied 3 messages."
+        ))
     );
     let loaded = store.load(&child).await.unwrap();
     assert_eq!(loaded.messages[..3], history[..]);

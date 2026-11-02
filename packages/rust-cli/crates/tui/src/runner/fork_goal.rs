@@ -3,9 +3,8 @@
 use futures_util::FutureExt;
 use ratatui::backend::Backend;
 use rust_cli_kernel_api::goal::GoalView;
-use rust_cli_kernel_api::ids::{MessageId, SessionId};
-use rust_cli_kernel_api::session_api::{Command, KernelError, StartSource};
-use serde_json::Value;
+use rust_cli_kernel_api::ids::MessageId;
+use rust_cli_kernel_api::session_api::{Command, Forked, KernelError, StartSource};
 
 use super::Loop;
 use super::session::{Done, Sent};
@@ -25,7 +24,7 @@ pub(super) enum ForkGoalDone {
 impl<B: Backend> Loop<'_, B> {
     /// `/goal` 不带参数：还没有会话时没有目标。
     pub(super) fn show_goal(&mut self) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             self.open_goal(&GoalView::default());
             return;
         };
@@ -55,7 +54,7 @@ impl<B: Backend> Loop<'_, B> {
     /// `/fork`：可选的用户输入来自会话 actor（与 `/rewind` 同一份，改动统计不用），文字取视图里的消息；
     /// 还没有会话时列表为空。
     pub(super) fn open_fork(&mut self) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             self.app.open_fork(Vec::new());
             return;
         };
@@ -88,19 +87,21 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 选中一条输入：发 `ForkFromInput`（选择器只在有会话时有条目）。
     pub(super) fn fork(&mut self, input: MessageId) {
-        if self.session.is_none() {
+        if self.outbox.session().is_none() {
             return;
         }
         let command = Command::ForkFromInput { input };
-        self.send(Sent::Fork, command, String::new());
+        self.send(Sent::Fork, command);
     }
 
     /// 分叉完成：切到新会话，显示回执与切换的提示（随界面语言，`fork::forked_notice`）。
-    pub(super) fn forked(&mut self, result: &Value) {
-        let Some(id) = result["session"].as_str() else {
-            return;
-        };
-        let notice = fork::forked_notice(self.app.lang, id, result);
-        self.switch(SessionId::new(id), StartSource::Fork, Some(notice), true);
+    pub(super) fn forked(&mut self, forked: &Forked) {
+        let notice = fork::forked_notice(self.app.lang, forked);
+        self.switch(
+            forked.session.clone(),
+            StartSource::Fork,
+            Some(notice),
+            true,
+        );
     }
 }

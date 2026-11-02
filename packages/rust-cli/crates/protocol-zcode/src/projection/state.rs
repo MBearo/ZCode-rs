@@ -109,7 +109,8 @@ pub fn availability() -> Value {
 }
 
 /// 跟进的方式（`followupMode`）：运行中输入入队还是插话。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Followup {
     Queue,
     Guide,
@@ -122,21 +123,16 @@ impl Followup {
             Self::Guide => "guide",
         }
     }
-
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "queue" => Some(Self::Queue),
-            "guide" => Some(Self::Guide),
-            _ => None,
-        }
-    }
 }
 
 pub fn input_routing(phase: Phase, followup: Followup) -> Value {
     match (phase, followup) {
         (Phase::Running, Followup::Queue) => json!({"mode": "enqueue"}),
         (Phase::Running, Followup::Guide) => json!({"mode": "guide"}),
-        _ => json!({"mode": "startNow"}),
+        (
+            Phase::Draft | Phase::CompletedSuccess | Phase::CompletedInterrupted | Phase::Error,
+            Followup::Queue | Followup::Guide,
+        ) => json!({"mode": "startNow"}),
     }
 }
 
@@ -195,13 +191,6 @@ pub fn usage(context: Option<(u64, u64)>, total: &Usage) -> Value {
             "cacheWriteTokens": total.cache_creation_input_tokens,
         },
     })
-}
-
-pub fn add_usage(total: &mut Usage, usage: &Usage) {
-    total.input_tokens += usage.input_tokens;
-    total.output_tokens += usage.output_tokens;
-    total.cache_creation_input_tokens += usage.cache_creation_input_tokens;
-    total.cache_read_input_tokens += usage.cache_read_input_tokens;
 }
 
 /// 权限询问的选项（与 Node 的 V4 投影同一组）：允许一次、本项目一直允许、拒绝。

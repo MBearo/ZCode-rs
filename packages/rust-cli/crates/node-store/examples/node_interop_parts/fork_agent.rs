@@ -55,12 +55,7 @@ pub(super) async fn write(dir: &str) -> Result<()> {
                 &mut current,
                 vec![
                     Fact::ModelSelected {
-                        selection: ModelSelection {
-                            provider: "anthropic".into(),
-                            model: GLM_5_3.into(),
-                            reasoning: None,
-                            connection: None,
-                        },
+                        selection: ModelSelection::new("anthropic", GLM_5_3),
                     },
                     Fact::ModeChanged {
                         mode: PermissionMode::Default,

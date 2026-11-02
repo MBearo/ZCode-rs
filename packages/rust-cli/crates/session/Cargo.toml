@@ -20,7 +20,6 @@ rust-cli-base.workspace = true
 rust-cli-kernel-api.workspace = true
 # 会话标题的提示词（docs/specs/rust-cli/titles.md §1）。
 rust-cli-prompts.workspace = true
-rust-cli-query.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "time"] }
@@ -29,4 +28,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+# 会话 actor 的测试跑真实的主循环（工作线 F131 起产品代码不依赖 query：通知的文字在 prompts）。
+rust-cli-query.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

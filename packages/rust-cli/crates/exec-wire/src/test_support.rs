@@ -13,6 +13,10 @@ use crate::dto::files::{
     GrepLine, GrepLineKind, GrepMode, GrepOutcome, GrepSearch, GrepSubmatch, PdfRender, PutFile,
     ReadText, RenderPdfPages, TextRead, TextSlice, WritePrecondition,
 };
+use crate::dto::git::{
+    GitDiff, GitSnapshot, GitStatus, WorktreeChanges, WorktreeCreate, WorktreeCreated,
+    WorktreeEntry, WorktreeInspect, WorktreeList, WorktreeRemove,
+};
 use crate::dto::mcp::{McpDeclared, McpTransport};
 use crate::dto::rewind::{RestoreFile, RewindConflict, RewindPlan, RewindStatus};
 use crate::dto::shell::{
@@ -289,6 +293,41 @@ pub(crate) fn requests() -> Vec<Request> {
             ]),
             injected: vec!["TOKEN".to_owned()],
         },
+        Request::GitStatus {
+            workspace: workspace(),
+            cwd: "/w".to_owned(),
+        },
+        Request::GitDiff {
+            workspace: workspace(),
+            cwd: "/w/sub".to_owned(),
+        },
+        Request::WorktreeCreate {
+            context: context("op-wt"),
+            request: WorktreeCreate {
+                cwd: "/w".to_owned(),
+                name: "feature".to_owned(),
+            },
+        },
+        Request::WorktreeList {
+            cwd: "/w".to_owned(),
+        },
+        Request::WorktreeChanges {
+            request: WorktreeInspect {
+                path: "/w/.zcode/worktrees/feature".to_owned(),
+                base: Some("abc123".to_owned()),
+            },
+        },
+        Request::WorktreeRemove {
+            context: context("op-wt-rm"),
+            request: WorktreeRemove {
+                path: "/w/.zcode/worktrees/feature".to_owned(),
+                branch: Some("worktree-feature".to_owned()),
+            },
+        },
+        Request::EnsureDir {
+            workspace: workspace(),
+            path: "/home/dev/.zcode/projects/-w/memory".to_owned(),
+        },
     ]
 }
 
@@ -306,8 +345,8 @@ pub(crate) fn replies() -> Vec<Reply> {
             os_version: "Darwin 24".to_owned(),
             shell: "zsh".to_owned(),
             is_git_repo: true,
-            additional_directories: vec!["/x".to_owned()],
             home: Some("/home/dev".to_owned()),
+            uid: None,
         }),
         Reply::PathFacts(PathFacts {
             home: None,
@@ -430,5 +469,36 @@ pub(crate) fn replies() -> Vec<Reply> {
             closed: vec!["old".to_owned()],
         },
         Reply::EnvUpdate,
+        Reply::GitStatus(GitStatus::Repository(GitSnapshot {
+            branch: "main".to_owned(),
+            default_branch: "main".to_owned(),
+            status: "M a.txt".to_owned(),
+            recent_commits: "abc123 first".to_owned(),
+            user_name: Some("dev".to_owned()),
+        })),
+        Reply::GitDiff(GitDiff::Repository {
+            numstat: "1\t0\ta.txt".to_owned(),
+            patch: "+x\n".to_owned(),
+            untracked: String::new(),
+        }),
+        Reply::WorktreeCreate(WorktreeCreated::Ready {
+            path: "/w/.zcode/worktrees/feature".to_owned(),
+            branch: "worktree-feature".to_owned(),
+            head_commit: Some("abc123".to_owned()),
+            existed: false,
+        }),
+        Reply::WorktreeList(WorktreeList {
+            root: Some("/w".to_owned()),
+            entries: vec![WorktreeEntry {
+                path: "/w".to_owned(),
+                branch: Some("main".to_owned()),
+            }],
+        }),
+        Reply::WorktreeChanges(Some(WorktreeChanges {
+            changed_files: 2,
+            commits: 1,
+        })),
+        Reply::WorktreeRemove { removed: true },
+        Reply::EnsureDir,
     ]
 }

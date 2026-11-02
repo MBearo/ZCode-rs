@@ -9,13 +9,14 @@ use super::{Ctx, DETAIL, INDENT, bold, detail_line, dim, dot, red, tools};
 use crate::ui::i18n::Lang;
 use crate::ui::retry_status;
 use crate::ui::text::{truncate, truncate_line};
-use crate::view::{Activity, AgentActivity, ToolRow, ToolStatus};
+use crate::view::{Activity, AgentActivity, ToolKind, ToolRow, ToolStatus};
+use rust_cli_kernel_api::tool_names;
 
 /// 紧凑模式下显示的活动项数。
 const SHOWN: usize = 3;
 
 pub(super) fn is_agent(tool: &ToolRow) -> bool {
-    matches!(tool.name.as_str(), "Agent" | "Task")
+    tool.kind == ToolKind::Agent
 }
 
 /// 显示名：`subagent_type`，没有或是 general-purpose 时写 `Agent`。
@@ -24,7 +25,7 @@ fn display_name(input: &Value) -> String {
         Some(kind) if !kind.is_empty() && kind != "general-purpose" && kind != "worker" => {
             kind.to_owned()
         }
-        _ => "Agent".to_owned(),
+        _ => tool_names::AGENT.to_owned(),
     }
 }
 
@@ -106,16 +107,7 @@ fn activity_line(item: &Activity, ctx: &Ctx<'_>) -> Line<'static> {
             status,
             id,
         } => {
-            let row = ToolRow {
-                id: id.clone(),
-                name: name.clone(),
-                input: input.clone(),
-                status: *status,
-                output: String::new(),
-                preview: String::new(),
-                display: Value::Null,
-                activity: None,
-            };
+            let row = ToolRow::new(id.clone(), name.clone(), input.clone(), *status);
             let (label, args, note) = tools::head_parts(&row, ctx);
             let mut text = match args {
                 Some(args) => format!("{label}({args}){note}"),

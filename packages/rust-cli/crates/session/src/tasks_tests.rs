@@ -7,22 +7,19 @@ use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::agents::{AgentSignal, AgentSignals};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvPath, FileContent, OperationContext, ReadFile, StartCommand,
+    WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{ReadText, TextRead, TextSlice};
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundKind as BackgroundKind_, BackgroundStatus, BackgroundTask, ShellState,
 };
 use rust_cli_kernel_api::ids::{AgentId, OperationId, SessionId, ShellTaskId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::machine::{Background, Commands, Files, MachineEnv, Shell};
 use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind};
 use rust_cli_kernel_api::panels::{ShellOutput, SubagentEntry, TasksSnapshot};
 use rust_cli_kernel_api::session_api::{Ack, Command, SessionHandle};
-use rust_cli_kernel_api::testing::ScriptedModel;
+use rust_cli_kernel_api::testing::{ScriptedModel, unsupported_machine};
 
 use crate::test_support::{Setup, envelope};
 
@@ -80,6 +77,16 @@ impl Shells {
         monitors: false,
     };
 
+    /// 只换上文件、命令、shell 与后台命令四个端口的机器（其余端口返回 `Unsupported`）。
+    fn machine(self) -> MachineEnv {
+        let shells = std::sync::Arc::new(self);
+        unsupported_machine()
+            .with_files(shells.clone())
+            .with_commands(shells.clone())
+            .with_shell(shells.clone())
+            .with_background(shells)
+    }
+
     async fn wait_if_hanging(&self) {
         if self
             .hang
@@ -87,13 +94,6 @@ impl Shells {
         {
             std::future::pending::<()>().await;
         }
-    }
-}
-
-#[async_trait]
-impl EnvInfo for Shells {
-    async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        Err(unused())
     }
 }
 
@@ -235,8 +235,7 @@ impl Background for Shells {
         Ok(Some(BackgroundInfo {
             command: format!("run {}", task.task),
             status,
-            kind: Default::default(),
-            description: String::new(),
+            ..BackgroundInfo::default()
         }))
     }
 
@@ -244,12 +243,6 @@ impl Background for Shells {
         Ok((task.task.as_str() == format!("{}1", self.prefix)).then_some(65_000))
     }
 }
-
-impl Search for Shells {}
-impl Checkpoints for Shells {}
-impl Pdf for Shells {}
-impl Git for Shells {}
-impl Fetch for Shells {}
 
 /// 一个后台子代理；记下停止请求。
 #[derive(Default)]
@@ -267,15 +260,12 @@ impl AgentSignals for OneAgent {
         Vec::new()
     }
     async fn background_entries(&self, _session: &SessionId) -> Vec<BackgroundEntry> {
-        vec![BackgroundEntry {
-            id: "agent_1".to_owned(),
-            kind: BackgroundKind::Agent,
-            description: "Review".to_owned(),
-            status: BackgroundStatus::Running,
-            output: None,
-            machine: None,
-            reconnecting: false,
-        }]
+        vec![BackgroundEntry::new(
+            "agent_1".to_owned(),
+            BackgroundKind::Agent,
+            "Review".to_owned(),
+            BackgroundStatus::Running,
+        )]
     }
     async fn stop_task(
         &self,
@@ -295,7 +285,7 @@ impl AgentSignals for OneAgent {
 #[tokio::test]
 async fn background_tasks_list_running_commands_and_agents() {
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.set_machine(Shells::LOCAL.machine());
     setup.agents = std::sync::Arc::new(OneAgent::default());
     let built = setup.build().await;
     let entries = built.session.background_tasks().await.unwrap();
@@ -342,7 +332,7 @@ impl AgentSignals for OneRead {
 #[tokio::test]
 async fn the_tasks_snapshot_has_the_commands_and_the_agents_in_one_reply() {
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.set_machine(Shells::LOCAL.machine());
     setup.agents = std::sync::Arc::new(OneRead);
     let built = setup.build().await;
     let snapshot = built.session.tasks_snapshot().await.unwrap();
@@ -374,10 +364,13 @@ async fn the_tasks_snapshot_has_the_commands_and_the_agents_in_one_reply() {
 #[tokio::test]
 async fn monitors_keep_their_kind_and_description_in_the_snapshot() {
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells {
-        monitors: true,
-        ..Shells::LOCAL
-    }));
+    setup.set_machine(
+        Shells {
+            monitors: true,
+            ..Shells::LOCAL
+        }
+        .machine(),
+    );
     setup.agents = std::sync::Arc::new(OneRead);
     let built = setup.build().await;
     let snapshot = built.session.tasks_snapshot().await.unwrap();
@@ -411,7 +404,9 @@ async fn stop_task_goes_through_the_agents_stop_path() {
     assert_eq!(
         ack,
         Ack::Accepted {
-            result: serde_json::json!({"message": "Successfully stopped task: agent_1 (Review)"})
+            result: rust_cli_kernel_api::session_api::CommandResult::Stopped {
+                message: "Successfully stopped task: agent_1 (Review)".to_owned(),
+            }
         }
     );
     let ack = built.session.send(envelope("c2", stop("nope"))).await;
@@ -427,7 +422,7 @@ async fn stop_task_goes_through_the_agents_stop_path() {
 #[tokio::test]
 async fn shell_details_show_the_last_ten_lines_and_the_runtime() {
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.set_machine(Shells::LOCAL.machine());
     let built = setup.build().await;
     let detail = built.session.shell_detail("b1").await.unwrap().unwrap();
     assert_eq!(detail.command, "run b1");
@@ -463,10 +458,13 @@ async fn shell_details_show_the_last_ten_lines_and_the_runtime() {
 #[tokio::test]
 async fn the_line_count_of_an_output_that_ends_with_a_newline_matches_the_lines() {
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells {
-        ticks: true,
-        ..Shells::LOCAL
-    }));
+    setup.set_machine(
+        Shells {
+            ticks: true,
+            ..Shells::LOCAL
+        }
+        .machine(),
+    );
     let built = setup.build().await;
     let detail = built.session.shell_detail("b1").await.unwrap().unwrap();
     let ShellOutput::Tail { lines, total } = &detail.output else {
@@ -488,17 +486,17 @@ async fn the_line_count_of_an_output_that_ends_with_a_newline_matches_the_lines(
 #[tokio::test]
 async fn remote_background_commands_are_listed_with_their_machine() {
     use rust_cli_kernel_api::testing::TestMachines;
-    let machines = TestMachines::new(std::sync::Arc::new(Shells::LOCAL));
-    machines.connect("dev-a", std::sync::Arc::new(Shells::REMOTE), "/srv/proj");
+    let machines = TestMachines::with_primary(Shells::LOCAL.machine());
+    machines.connect_machine("dev-a", Shells::REMOTE.machine(), "/srv/proj");
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.set_machine(Shells::LOCAL.machine());
     setup.machines = Some(machines);
     setup.agents = std::sync::Arc::new(OneAgent::default());
     let built = setup.build().await;
     let entries = built.session.background_tasks().await.unwrap();
     let rows: Vec<_> = entries
         .iter()
-        .map(|e| (e.id.as_str(), e.machine.as_deref()))
+        .map(|e| (e.id.as_str(), e.machine.remote()))
         .collect();
     assert_eq!(
         rows,
@@ -510,7 +508,7 @@ async fn remote_background_commands_are_listed_with_their_machine() {
     let rows: Vec<_> = snapshot
         .background
         .iter()
-        .map(|e| (e.id.as_str(), e.machine.as_deref(), e.output.is_none()))
+        .map(|e| (e.id.as_str(), e.machine.remote(), e.output.is_none()))
         .collect();
     assert_eq!(
         rows,
@@ -536,14 +534,14 @@ async fn a_reconnecting_machine_shows_its_last_entries_without_waiting() {
 
     use rust_cli_kernel_api::testing::TestMachines;
     static HANG: AtomicBool = AtomicBool::new(false);
-    let machines = TestMachines::new(std::sync::Arc::new(Shells::LOCAL));
+    let machines = TestMachines::with_primary(Shells::LOCAL.machine());
     let remote = Shells {
         hang: Some(&HANG),
         ..Shells::REMOTE
     };
-    machines.connect("dev-a", std::sync::Arc::new(remote), "/srv/proj");
+    machines.connect_machine("dev-a", remote.machine(), "/srv/proj");
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.set_machine(Shells::LOCAL.machine());
     setup.machines = Some(machines.clone());
     setup.agents = std::sync::Arc::new(OneAgent::default());
     let built = setup.build().await;
@@ -551,7 +549,13 @@ async fn a_reconnecting_machine_shows_its_last_entries_without_waiting() {
         snapshot
             .background
             .iter()
-            .map(|e| (e.id.clone(), e.machine.clone(), e.reconnecting))
+            .map(|e| {
+                (
+                    e.id.clone(),
+                    e.machine.remote().map(str::to_owned),
+                    e.reconnecting,
+                )
+            })
             .collect()
     };
     let row = |id: &str, machine: Option<&str>, reconnecting: bool| {
@@ -614,14 +618,14 @@ async fn closing_does_not_wait_for_a_reconnecting_machine() {
 
     use rust_cli_kernel_api::testing::TestMachines;
     static HANG: AtomicBool = AtomicBool::new(false);
-    let machines = TestMachines::new(std::sync::Arc::new(Shells::LOCAL));
+    let machines = TestMachines::with_primary(Shells::LOCAL.machine());
     let remote = Shells {
         hang: Some(&HANG),
         ..Shells::REMOTE
     };
-    machines.connect("dev-a", std::sync::Arc::new(remote), "/srv/proj");
+    machines.connect_machine("dev-a", remote.machine(), "/srv/proj");
     let mut setup = Setup::new(std::sync::Arc::new(ScriptedModel::new(Vec::new())));
-    setup.set_env(std::sync::Arc::new(Shells::LOCAL));
+    setup.set_machine(Shells::LOCAL.machine());
     setup.machines = Some(machines.clone());
     let built = setup.build().await;
     HANG.store(true, Ordering::SeqCst);

@@ -1,28 +1,10 @@
 //! `/fork` 的选择器（session-lifecycle.md §6.5.3）：每条一行、带序号、焦点在最新的一条；选中即分叉。
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rust_cli_kernel_api::ids::MessageId;
-use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::selection;
 
 use super::*;
-use crate::ui::keyboard::Typing;
-use crate::ui::list::Outcome;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::view::Transcript;
-
-fn app(lang: Lang) -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        lang,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
-}
+use crate::ui::app::Action;
+use crate::ui::test_support::app_in;
 
 fn entries() -> Vec<Entry> {
     ["first", "second\n  line", "third"]
@@ -48,7 +30,7 @@ fn rows(app: &App) -> Vec<String> {
 
 #[test]
 fn the_inputs_are_numbered_with_the_newest_focused() {
-    let mut app = app(Lang::En);
+    let mut app = app_in(Lang::En);
     app.open_fork(entries());
     let rows = rows(&app);
     assert_eq!(rows[1], "  Fork");
@@ -59,7 +41,7 @@ fn the_inputs_are_numbered_with_the_newest_focused() {
         rows.iter().any(|row| row.starts_with("  › 3. third")),
         "{rows:?}"
     );
-    let mut zh = self::app(Lang::Zh);
+    let mut zh = self::app_in(Lang::Zh);
     zh.open_fork(Vec::new());
     let rows = self::rows(&zh);
     assert_eq!(rows[1], "  分叉");
@@ -72,16 +54,12 @@ fn the_inputs_are_numbered_with_the_newest_focused() {
 
 #[test]
 fn a_digit_forks_after_that_input() {
-    let mut app = app(Lang::En);
+    let mut app = app_in(Lang::En);
     app.open_fork(entries());
-    let Some(Overlay::List(list)) = &mut app.overlay else {
-        panic!("the picker is not open")
-    };
+    assert!(matches!(app.overlay, Some(Overlay::List(_))));
     let key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
-    let Outcome::Chosen(value) = list.on_key(key, Typing::default()) else {
-        panic!("a digit chooses directly")
-    };
-    let action = app.fork_chosen(&value);
+    let action = app.on_key(key, std::time::Instant::now());
+    assert!(app.overlay.is_none(), "a digit chooses directly");
     assert!(
         matches!(&action, Some(Action::Fork { input }) if input.as_str() == "msg_2"),
         "{action:?}"
@@ -92,7 +70,7 @@ fn a_digit_forks_after_that_input() {
 #[test]
 fn arguments_are_ignored() {
     for text in ["/fork", "/fork latest", "/fork checkpoint_1 more"] {
-        let mut app = app(Lang::En);
+        let mut app = app_in(Lang::En);
         assert_eq!(app.slash(text), Some(Action::OpenFork), "{text}");
         assert!(app.local.is_empty(), "{text}");
     }
@@ -101,18 +79,17 @@ fn arguments_are_ignored() {
 /// 分叉后的提示（工作线 F78）：英文是内核的回执（Node 原文）加 Node 的切换提示；中文另配，消息 ID 与条数取回执。
 #[test]
 fn the_notice_after_a_fork_follows_the_language() {
-    let result = serde_json::json!({
-        "session": "sess_2",
-        "response": "Forked session sess_2 from message msg_4: copied 4 messages.",
-        "copied": 4,
-        "message": "msg_4",
-    });
+    let forked = rust_cli_kernel_api::session_api::Forked {
+        session: rust_cli_kernel_api::ids::SessionId::new("sess_2"),
+        through: Some(MessageId::new("msg_4")),
+        copied: 4,
+    };
     assert_eq!(
-        forked_notice(Lang::En, "sess_2", &result),
+        forked_notice(Lang::En, &forked),
         "Forked session sess_2 from message msg_4: copied 4 messages.\nSwitched to forked session sess_2."
     );
     assert_eq!(
-        forked_notice(Lang::Zh, "sess_2", &result),
+        forked_notice(Lang::Zh, &forked),
         "已从消息 msg_4 分出会话 sess_2：复制了 4 条消息。\n已切换到分出的会话 sess_2。"
     );
 }

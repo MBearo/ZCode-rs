@@ -7,12 +7,10 @@ use rust_cli_base::OwnedTask;
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, ExecClient};
-use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, ServerConfig};
+use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, PortLauncher, ServerConfig};
 use rust_cli_exec_transport::memory::network;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
-use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId,
-};
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, RunId, SessionId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::mcp::NoMcpTransport;
 
@@ -53,35 +51,39 @@ pub async fn machine_with_mcp(
             env: local,
             _loopback: None,
         },
-        Kind::Loopback => {
-            let mut config =
-                ServerConfig::new("contract", std::env::consts::OS, std::env::consts::ARCH);
-            config.capabilities = rust_cli_exec_wire::handshake::Capabilities::executor();
-            let server = ExecServer::start(
-                local,
-                Arc::new(MemoryLedger::default()),
-                Arc::new(AllowAll),
-                config,
-            )
-            .await
-            .unwrap();
-            let (connector, listener) = network("contract");
-            let serving = {
-                let server = server.clone();
-                rust_cli_base::owned(async move { server.serve(&listener).await })
-            };
-            let client = ExecClient::connect(
-                Arc::new(connector),
-                ClientOptions::new("contract", "client"),
-            )
-            .await
-            .unwrap();
-            let remote = Arc::new(RemoteEnvironment::new(client.clone()));
-            Machine {
-                env: remote.machine(),
-                _loopback: Some((server, client, serving)),
-            }
-        }
+        Kind::Loopback => loopback(local).await,
+    }
+}
+
+/// 经内存 loopback 连到同进程的 exec-server：服务端派发给 `served`，返回的是客户端一侧的 `RemoteEnvironment`。执行器报告
+/// 全部能力位；合同测试不推环境变量，起进程直接经端口（`PortLauncher`）。
+pub async fn loopback(served: MachineEnv) -> Machine {
+    let mut config = ServerConfig::new("contract", std::env::consts::OS, std::env::consts::ARCH);
+    config.capabilities = rust_cli_exec_wire::handshake::Capabilities::executor();
+    let launcher = Arc::new(PortLauncher(served.clone()));
+    let server = ExecServer::start(
+        (served, launcher),
+        Arc::new(MemoryLedger::default()),
+        Arc::new(AllowAll),
+        config,
+    )
+    .await
+    .unwrap();
+    let (connector, listener) = network("contract");
+    let serving = {
+        let server = server.clone();
+        rust_cli_base::owned(async move { server.serve(&listener).await })
+    };
+    let client = ExecClient::connect(
+        Arc::new(connector),
+        ClientOptions::new("contract", "client"),
+    )
+    .await
+    .unwrap();
+    let remote = Arc::new(RemoteEnvironment::new(client.clone()));
+    Machine {
+        env: remote.machine(),
+        _loopback: Some((server, client, serving)),
     }
 }
 
@@ -97,14 +99,13 @@ pub fn env_path(path: &Path) -> EnvPath {
 }
 
 pub fn context(operation: &str) -> OperationContext {
-    OperationContext {
-        environment: EnvironmentId::new("local"),
-        generation: Generation::new("g"),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: OperationId::new(operation),
-        origin: Origin::Agent {
+    OperationContext::new(
+        EnvironmentId::new("local"),
+        Generation::new("g"),
+        OperationId::new(operation),
+        Origin::Agent {
             session: SessionId::new("s1"),
             run: RunId::new("r1"),
         },
-    }
+    )
 }

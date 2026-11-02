@@ -3,17 +3,14 @@
 //! 历史时左侧是 `History k/n`。提示符 `❯ `（运行中 dim），续行缩进 2 列；行数超出时内部滚动，右侧
 //! 显示 `↑` / `↓`。查看子代理时边线换成子代理色，标题换成子代理的描述（修复线 F62，docs/specs/rust-cli/tui-panels.md
 //! §1.6）。
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::App;
 use super::i18n::Lang;
 use super::text::truncate;
-
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
+use crate::ui::style::dim;
 
 /// 新会话的占位例子：按工作区固定选一个。
 fn example(workspace: &str, lang: Lang) -> &'static str {
@@ -71,7 +68,7 @@ fn placeholder(app: &App) -> String {
 fn rule(app: &App) -> Style {
     if app.viewing.is_some() {
         app.palette.subagent_rule()
-    } else if app.find.is_some() {
+    } else if app.port.find.is_some() {
         Style::default().fg(app.palette.accent)
     } else if app.composer.mode == super::composer::InputMode::Bash {
         Style::default().fg(app.palette.bash())
@@ -109,7 +106,7 @@ fn viewing_rule(app: &App, description: &str, width: usize) -> Line<'static> {
     let text = description.split_whitespace().collect::<Vec<_>>().join(" ");
     let room = width.saturating_sub(VIEWING_LABEL_CHROME);
     if text.is_empty() || room == 0 {
-        return Line::from(Span::styled("─".repeat(width), style));
+        return crate::ui::style::rule(width, style);
     }
     let label = format!(" {} ", truncate(&text, room));
     let fill = width.saturating_sub(label.width() + 1);
@@ -175,7 +172,7 @@ pub fn input_box(
     };
     let mut cursor = None;
     let mut first_row = 0;
-    if let Some(find) = &app.find {
+    if let Some(find) = &app.port.find {
         // 搜索模式（修复线 F114）：`⌕ ` 加查询，右侧是计数；光标在查询末尾。
         let (line, column) = super::find::input_line(app, find, width);
         lines.push(line);
@@ -246,7 +243,7 @@ pub fn input_box(
         // TUI 命令的参数提示；skill 用 frontmatter 的 `argument-hint`（tui.md §6）。
         let hint = typed.and_then(|name| {
             super::commands::find(name)
-                .and_then(super::commands::Command::arg_hint)
+                .and_then(|command| command.hint)
                 .or_else(|| {
                     super::commands::skill(&app.composer.skills, name)
                         .and_then(|skill| skill.argument_hint.as_deref())
@@ -260,7 +257,7 @@ pub fn input_box(
             (cursor_col + PROMPT_WIDTH) as u16,
         ));
     }
-    lines.push(Line::from(Span::styled("─".repeat(width), rule(app))));
+    lines.push(crate::ui::style::rule(width, rule(app)));
     (lines, cursor, first_row)
 }
 

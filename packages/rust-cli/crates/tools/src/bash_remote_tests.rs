@@ -9,9 +9,11 @@ const NOTE: &str =
 /// `env` 当成远端机器 dev-a 上的执行环境。
 async fn on_dev_a(env: Arc<Scripted>, input: Value) -> String {
     let mut context = context(env.clone(), None);
-    context.machine = machine(env).named("dev-a");
+    context.machine = env
+        .machine()
+        .named(rust_cli_kernel_api::ids::MachineName::new("dev-a"));
     let (progress, _updates) = mpsc::channel(8);
-    let output = BashTool::new()
+    let output = BashTool::default()
         .call(input, context, progress)
         .await
         .unwrap();

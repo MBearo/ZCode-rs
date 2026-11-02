@@ -3,8 +3,8 @@ use std::sync::Mutex as StdMutex;
 use futures_util::stream::{self, BoxStream};
 use rust_cli_base::TaskScope;
 use rust_cli_kernel_api::session_api::{Ack, CommandEnvelope, CreateSession, KernelEvent};
-use rust_cli_kernel_api::store::{SessionFilter, SessionSummary};
-use rust_cli_kernel_api::testing::selection;
+use rust_cli_kernel_api::store::{SessionFilter, SessionSummary, StoreQueries};
+use rust_cli_kernel_api::testing::{MemoryStore, selection};
 
 use super::*;
 
@@ -26,7 +26,7 @@ struct FakeHandle {
 }
 
 #[async_trait]
-impl SessionHandle for FakeHandle {
+impl rust_cli_kernel_api::testing::HandleOverride for FakeHandle {
     fn id(&self) -> &SessionId {
         &self.id
     }
@@ -68,6 +68,10 @@ struct FakeKernel {
 
 #[async_trait]
 impl Kernel for FakeKernel {
+    fn queries(&self) -> Arc<dyn StoreQueries> {
+        Arc::new(MemoryStore::default())
+    }
+
     async fn create_session(&self, _request: CreateSession) -> Result<SessionId, KernelError> {
         Err(KernelError::Unsupported {
             what: "create".to_owned(),
@@ -116,32 +120,24 @@ impl SessionSink for Recorder {
 
 fn view(last_seq: u64) -> SessionView {
     SessionView {
-        meta: rust_cli_kernel_api::store::SessionMeta {
-            id: SessionId::new("s1"),
-            kind: rust_cli_kernel_api::store::SessionKind::Interactive,
-            parent: None,
-            workspace: rust_cli_kernel_api::env::WorkspaceRef {
-                environment: rust_cli_kernel_api::ids::EnvironmentId::new("local"),
-                root: rust_cli_kernel_api::env::EnvPath::new("/w"),
-            },
-            title: String::new(),
-            trace: rust_cli_kernel_api::ids::TraceId::new("trace"),
-            created_at_ms: 0,
-        },
-        messages: Vec::new(),
-        selection: selection(),
-        mode: rust_cli_kernel_api::permission::PermissionMode::Default,
-        plan: false,
-        pending: Vec::new(),
-        queue: Vec::new(),
         last_seq,
-        revision: 0,
-        running: false,
-        background: Vec::new(),
-        peer_held: Vec::new(),
-        context_usage: None,
-        context_notice: Default::default(),
-        output_speed: None,
+        ..SessionView::new(
+            rust_cli_kernel_api::store::SessionMeta {
+                id: SessionId::new("s1"),
+                kind: rust_cli_kernel_api::store::SessionKind::Interactive,
+                parent: None,
+                workspace: rust_cli_kernel_api::env::WorkspaceRef {
+                    environment: rust_cli_kernel_api::ids::EnvironmentId::new("local"),
+                    root: rust_cli_kernel_api::env::EnvPath::new("/w"),
+                },
+                title: String::new(),
+                trace: rust_cli_kernel_api::ids::TraceId::new("trace"),
+                created_at_ms: 0,
+            },
+            Vec::new(),
+            selection(),
+            rust_cli_kernel_api::permission::PermissionMode::Default,
+        )
     }
 }
 
@@ -198,17 +194,17 @@ struct ViewKernel(Arc<FakeKernel>);
 struct ViewHandle(Arc<FakeHandle>);
 
 #[async_trait]
-impl SessionHandle for ViewHandle {
+impl rust_cli_kernel_api::testing::HandleOverride for ViewHandle {
     fn id(&self) -> &SessionId {
-        self.0.id()
+        SessionHandle::id(self.0.as_ref())
     }
 
     async fn send(&self, command: CommandEnvelope) -> Ack {
-        self.0.send(command).await
+        SessionHandle::send(self.0.as_ref(), command).await
     }
 
     fn subscribe(&self, after: Option<u64>) -> BoxStream<'static, SequencedEvent> {
-        self.0.subscribe(after)
+        SessionHandle::subscribe(self.0.as_ref(), after)
     }
 
     async fn view(&self) -> Result<SessionView, KernelError> {
@@ -218,6 +214,10 @@ impl SessionHandle for ViewHandle {
 
 #[async_trait]
 impl Kernel for ViewKernel {
+    fn queries(&self) -> Arc<dyn StoreQueries> {
+        Arc::new(MemoryStore::default())
+    }
+
     async fn create_session(&self, request: CreateSession) -> Result<SessionId, KernelError> {
         self.0.create_session(request).await
     }

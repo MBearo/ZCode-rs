@@ -12,7 +12,7 @@ use rust_cli_kernel_api::testing::{
     TestMachines, UnusedEnvironment, text_response, tool_use_response,
 };
 use rust_cli_tui::machines::{MachineFailure, MachineStatus};
-use rust_cli_tui::ui::palette::{ColorLevel, Palette, Rgb};
+use rust_cli_tui::{ColorLevel, Palette, Rgb};
 use serde_json::json;
 
 use super::machines::{FakeMachines, row, setup_with};

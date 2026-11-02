@@ -18,7 +18,7 @@ use futures_util::StreamExt;
 use rust_cli_env_local::{LocalEnvironment, ShellConfig};
 use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, ExecClient, Reconnect};
-use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, ServerConfig};
+use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, PortLauncher, ServerConfig};
 use rust_cli_exec_transport::fault::{Faults, Matcher, Switch, inject};
 use rust_cli_exec_transport::memory::{MemoryConnector, MemoryListener, network};
 use rust_cli_exec_transport::{Connector, Link, LinkError, Listener};
@@ -26,10 +26,7 @@ use rust_cli_kernel_api::env::{
     CommandEvent, EnvPath, OperationContext, Origin, StartCommand, WorkspaceRef, WriteFile,
     WritePrecondition,
 };
-use rust_cli_kernel_api::env_shell::CwdScope;
-use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, OperationId, OwnerEpoch, SessionId, ShellTaskId,
-};
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, SessionId, ShellTaskId};
 use rust_cli_kernel_api::machine::{CommandEvents, MachineEnv};
 use rust_cli_kernel_api::mcp::NoMcpTransport;
 
@@ -97,8 +94,10 @@ async fn setup(server_faults: Vec<Faults>, client_faults: Faults) -> Setup {
         env: vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())].into(),
     });
     let ledger = Arc::new(MemoryLedger::default());
+    let machine = MachineEnv::new(Arc::new(local), Arc::new(NoMcpTransport));
+    let launcher = Arc::new(PortLauncher(machine.clone()));
     let server = ExecServer::start(
-        MachineEnv::new(Arc::new(local), Arc::new(NoMcpTransport)),
+        (machine, launcher),
         ledger.clone(),
         Arc::new(AllowAll),
         ServerConfig::new("faults", std::env::consts::OS, std::env::consts::ARCH),
@@ -149,31 +148,24 @@ fn workspace(root: &std::path::Path) -> WorkspaceRef {
 }
 
 fn context(operation: &str) -> OperationContext {
-    OperationContext {
-        environment: EnvironmentId::new("local"),
-        generation: Generation::new("g"),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: OperationId::new(operation),
-        origin: Origin::User {
+    OperationContext::new(
+        EnvironmentId::new("local"),
+        Generation::new("g"),
+        OperationId::new(operation),
+        Origin::User {
             session: Some(SessionId::new("s1")),
         },
-    }
+    )
 }
 
 fn command(root: &std::path::Path, text: &str) -> StartCommand {
     StartCommand {
-        command: text.to_owned(),
-        cwd: EnvPath::new(root.to_string_lossy()),
         timeout_ms: Some(20_000),
-        task: ShellTaskId::new("bfault1"),
-        shell: Default::default(),
-        cwd_scope: CwdScope::Pinned,
-        background: None,
-        sandbox: None,
-        hook: None,
-        on_timeout: None,
-        socket: None,
-        env: Default::default(),
+        ..StartCommand::new(
+            text.to_owned(),
+            EnvPath::new(root.to_string_lossy()),
+            ShellTaskId::new("bfault1"),
+        )
     }
 }
 

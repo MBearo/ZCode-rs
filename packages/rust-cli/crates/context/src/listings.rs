@@ -4,6 +4,7 @@
 //! 已宣布的集合从压缩边界之后的 attachment 的 `data` 累计（加上 added、去掉 removed；skill 看全部历史），
 //! 与这一步的清单比较，只发增量。清单内容由 [`rust_cli_kernel_api::listing::ListingSource`] 提供。
 
+use rust_cli_kernel_api::mcp_name;
 use std::collections::BTreeSet;
 
 use rust_cli_kernel_api::listing::ListingEntry;
@@ -11,7 +12,8 @@ use rust_cli_kernel_api::listing::ListingEntry;
 use rust_cli_kernel_api::mcp_state::PENDING_LISTED;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::orchestration::ContextRequest;
-use rust_cli_kernel_api::tool_search::{TOOL_SEARCH, compare_names};
+use rust_cli_kernel_api::tool_names::TOOL_SEARCH;
+use rust_cli_kernel_api::tool_search::compare_names;
 use rust_cli_prompts::texts::{self, render};
 use serde_json::{Value, json};
 
@@ -124,22 +126,13 @@ const READDED_KEY: &str = "readdedNames";
 /// 多于这么多个撤回的 MCP 工具时按服务器归组。
 const MCP_LISTED: usize = 30;
 
-fn is_mcp(name: &str) -> bool {
-    name.starts_with("mcp__")
-}
-
 /// 服务器摘要：`mcp__<server>__x` 归成 `mcp__<server>__*`，同组多于一个时写个数，按名字排序。
 fn servers(names: &[&String]) -> String {
     let mut groups: Vec<(String, usize)> = Vec::new();
     for name in names {
-        let key = if is_mcp(name) {
-            // `mcp`、服务器、其余。
-            const PARTS: usize = 3;
-            let mut parts = name.splitn(PARTS, "__");
-            let (first, second) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-            format!("{first}__{second}__*")
-        } else {
-            (*name).clone()
+        let key = match mcp_name::parse(name) {
+            Some(parsed) => format!("{}*", mcp_name::server_prefix(parsed.server)),
+            None => (*name).clone(),
         };
         match groups.iter_mut().find(|(group, _)| *group == key) {
             Some((_, count)) => *count += 1,
@@ -167,7 +160,8 @@ fn verb(count: usize) -> &'static str {
 
 /// 重新可用的工具（`readdedNames` 的两段）：MCP 的按服务器归组，其余逐个列名。
 fn readded_sections(readded: &[String]) -> Vec<String> {
-    let (mcp, other): (Vec<&String>, Vec<&String>) = readded.iter().partition(|name| is_mcp(name));
+    let (mcp, other): (Vec<&String>, Vec<&String>) =
+        readded.iter().partition(|name| mcp_name::is_mcp(name));
     let mut sections = Vec::new();
     if !mcp.is_empty() {
         let count = mcp.len().to_string();
@@ -197,7 +191,8 @@ fn readded_sections(readded: &[String]) -> Vec<String> {
 
 /// 撤回的工具：MCP 的用“服务器断开”的模板（多于 30 个时按服务器归组），其余用原来的模板。
 fn removed_sections(removed: &[String]) -> Vec<String> {
-    let (mcp, other): (Vec<&String>, Vec<&String>) = removed.iter().partition(|name| is_mcp(name));
+    let (mcp, other): (Vec<&String>, Vec<&String>) =
+        removed.iter().partition(|name| mcp_name::is_mcp(name));
     let mut sections = Vec::new();
     if mcp.len() > MCP_LISTED {
         let count = mcp.len().to_string();

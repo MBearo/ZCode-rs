@@ -10,6 +10,7 @@ use super::app::{App, Overlay};
 use super::bottom;
 use super::footer;
 use super::interaction::View;
+use super::layer::Layer;
 use super::mouse::Target;
 use super::status_line::{self, Clock};
 
@@ -20,9 +21,9 @@ const INPUT_BORDERS: usize = 2;
 pub(super) type RowTarget = (usize, usize, Option<usize>, Target);
 
 /// 视图的行、其中可点击的行与终端光标（行，列）。
-type ViewLines = (Vec<Line<'static>>, Vec<RowTarget>, Option<(u16, u16)>);
+pub(super) type ViewLines = (Vec<Line<'static>>, Vec<RowTarget>, Option<(u16, u16)>);
 
-/// 替换输入区的视图（列表、审批与提问）；没有视图时返回 None。光标只有提问的“其他”行聚焦时有
+/// 替换输入区的视图（最上面的一层，`layer.rs`：列表、审批与提问）；输入框在最上面时返回 None。光标只有提问的“其他”行聚焦时有
 /// （tui.md §7.6），别的视图隐藏光标。`rows` 是终端的行数（带预览的题按它限制预览框，工作线 F72）。
 fn view_lines(
     app: &App,
@@ -31,90 +32,39 @@ fn view_lines(
     rows: usize,
     now_ms: u64,
 ) -> Option<ViewLines> {
-    if let Some(Overlay::Login(view)) = &app.overlay {
-        let lines = super::login::lines(view, app.strings, &app.palette, width);
-        return Some((lines, Vec::new(), None));
-    }
-    if let Some(Overlay::Diff(view)) = &app.overlay {
-        let lines = super::diff_view_lines::lines(app, view, width, height, now_ms);
-        return Some((lines, Vec::new(), None));
-    }
-    if let Some(Overlay::Export(view)) = &app.overlay {
-        let lines = super::export::lines(view, app.lang, &app.palette, width);
-        return Some((lines, Vec::new(), None));
-    }
-    if let Some(Overlay::Permissions(view)) = &app.overlay {
-        let lines = super::permissions_lines::lines(view, app.lang, &app.palette, width, height);
-        return Some((lines, Vec::new(), None));
-    }
-    if let Some(Overlay::Background(_)) = &app.overlay {
-        let (lines, rows) = app.background_lines(width, height, Instant::now());
-        let targets = rows
-            .into_iter()
-            .map(|(row, index)| (row, 0, None, Target::Background(index)))
-            .collect();
-        return Some((lines, targets, None));
-    }
-    // 切到完全访问的确认框（tui.md §7.8）：局部的框，上面的对话照常显示。
-    if let Some(Overlay::YoloConfirm(confirm)) = &app.overlay {
-        let view = View {
-            palette: &app.palette,
-            strings: app.strings,
-            lang: app.lang,
-            width,
-            height: rows,
-            now_ms,
-        };
-        let lines = super::yolo_confirm::lines(confirm, &view, height);
-        return Some((lines, Vec::new(), None));
-    }
-    // `/machines` 的列表（remote-exec.md §21.3）。
-    if let Some(Overlay::Machines(_)) = &app.overlay {
-        return Some((app.machines_lines(width, height, now_ms), Vec::new(), None));
-    }
-    if let Some(Overlay::List(list)) = &app.overlay {
-        let (lines, items) = list.lines(width, height, app.lang, &app.palette);
-        let targets = items
-            .into_iter()
-            .map(|(row, index)| (row, 0, None, Target::Item(index)))
-            .collect();
-        return Some((lines, targets, None));
-    }
-    // 扣住的同伴消息（cross-session.md §2.6）：没有待回答的交互时显示批准框，替换输入区。
-    if app.pending().is_none()
-        && let Some(held) = app.view.peer_held()
-    {
-        let view = View {
-            palette: &app.palette,
-            strings: app.strings,
-            lang: app.lang,
-            width,
-            height: rows,
-            now_ms,
-        };
-        let (lines, _) =
-            super::peer_view::lines(held, app.view.peer_held_count(), app.peer_choice, &view);
-        return Some((lines, Vec::new(), None));
-    }
-    let (_, request) = app.pending()?;
-    let interaction = app.interaction.as_ref()?;
     let view = View {
         palette: &app.palette,
-        strings: app.strings,
         lang: app.lang,
         width,
         height: rows,
         now_ms,
     };
-    let (lines, options) = interaction.lines(request, &view);
-    let targets = options
-        .into_iter()
-        .map(|(row, index)| (row, 0, None, Target::Choice(index)))
-        .collect();
-    let cursor = interaction
-        .cursor(request, &view)
-        .and_then(|(row, column)| Some((u16::try_from(row).ok()?, u16::try_from(column).ok()?)));
-    Some((lines, targets, cursor))
+    match app.top_layer() {
+        Layer::Overlay => app.overlay_lines(width, height, rows, now_ms),
+        // 扣住的同伴消息（cross-session.md §2.6）：没有待回答的交互时显示批准框，替换输入区。
+        Layer::Peer => {
+            let held = app.view.peer_held()?;
+            let (lines, _) =
+                super::peer_view::lines(held, app.view.peer_held_count(), app.peer_choice, &view);
+            Some((lines, Vec::new(), None))
+        }
+        Layer::Interaction => {
+            let (_, request) = app.pending()?;
+            let interaction = app.interaction.as_ref()?;
+            let (lines, options) = interaction.lines(request, &view);
+            let targets = options
+                .into_iter()
+                .map(|(row, index)| (row, 0, None, Target::Choice(index)))
+                .collect();
+            let cursor = interaction
+                .cursor(request, &view)
+                .and_then(|(row, column)| {
+                    Some((u16::try_from(row).ok()?, u16::try_from(column).ok()?))
+                });
+            Some((lines, targets, cursor))
+        }
+        Layer::Composer => None,
+    }
 }
 
 /// 底部区域：行、光标（相对行，列）、可点击的行、输入框文字区（起始行，行数，第一可见行）。

@@ -1,110 +1,79 @@
+use std::sync::Arc;
+
+use rust_cli_kernel_api::ids::ToolUseId;
+use rust_cli_kernel_api::testing::ListTools;
+use rust_cli_kernel_api::tool::{
+    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
+};
 use serde_json::{Value, json};
+use tokio::sync::mpsc;
 
 use super::*;
 
-fn keys(value: &Value) -> Vec<&str> {
-    value
-        .as_object()
-        .map(|object| object.keys().map(String::as_str).collect())
-        .unwrap_or_default()
+/// 整理输入（`rewrite` 为真时把输入换成 `{"rewritten": true}`）的工具。
+struct Rewriting {
+    name: &'static str,
+    rewrite: bool,
 }
 
-/// 没给 `replace_all` 时写回 `false`，并排在最前（重建的对象字面量）。
-#[test]
-fn edit_without_replace_all_is_rebuilt_with_replace_all_first() {
-    let input = json!({"file_path": "/a", "old_string": "x", "new_string": "y"});
-    let rebuilt = edit(&input).expect("valid input");
-    assert_eq!(
-        keys(&rebuilt),
-        ["replace_all", "file_path", "old_string", "new_string"]
-    );
-    assert_eq!(rebuilt["replace_all"], json!(false));
-}
-
-/// 模型给了 `replace_all`（在最后）也排到最前。
-#[test]
-fn edit_with_replace_all_moves_it_to_the_front() {
-    let input =
-        json!({"file_path": "/a", "old_string": "x", "new_string": "y", "replace_all": true});
-    let rebuilt = edit(&input).expect("valid input");
-    assert_eq!(
-        keys(&rebuilt),
-        ["replace_all", "file_path", "old_string", "new_string"]
-    );
-    assert_eq!(rebuilt["replace_all"], json!(true));
-}
-
-/// `fv` 是 `z.preprocess`：字符串 "true" / "false" 换成布尔。
-#[test]
-fn string_booleans_become_booleans() {
-    let input =
-        json!({"file_path": "/a", "old_string": "x", "new_string": "y", "replace_all": "true"});
-    assert_eq!(edit(&input).expect("valid")["replace_all"], json!(true));
-    let input =
-        json!({"file_path": "/a", "old_string": "x", "new_string": "y", "replace_all": "false"});
-    assert_eq!(edit(&input).expect("valid")["replace_all"], json!(false));
-}
-
-/// schema 解析失败时保留原输入：多余的键（严格对象）、类型不对、缺必填键、null。
-#[test]
-fn invalid_input_is_left_alone() {
-    for input in [
-        json!({"file_path": "/a", "old_string": "x", "new_string": "y", "extra": 1}),
-        json!({"file_path": "/a", "old_string": 1, "new_string": "y"}),
-        json!({"file_path": "/a", "new_string": "y"}),
-        json!({"file_path": "/a", "old_string": "x", "new_string": "y", "replace_all": null}),
-        json!({"file_path": "/a", "old_string": "x", "new_string": "y", "replace_all": "yes"}),
-        json!("not an object"),
-    ] {
-        assert_eq!(edit(&input), None, "{input}");
+#[async_trait::async_trait]
+impl Tool for Rewriting {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type": "object"})
+    }
+    fn description(&self, _context: &PromptContext) -> String {
+        String::new()
+    }
+    fn rewrite_input(&self, _input: &Value) -> Option<Value> {
+        self.rewrite.then(|| json!({"rewritten": true}))
+    }
+    async fn call(
+        &self,
+        _input: Value,
+        _context: ToolUseContext,
+        _progress: mpsc::Sender<ToolProgress>,
+    ) -> Result<ToolOutput, ToolError> {
+        unreachable!("not called")
     }
 }
 
-/// 只整理 Edit；ToolSearch 的 `max_results` 不补。
-#[test]
-fn only_edit_is_rewritten() {
-    struct Named(&'static str);
-    #[async_trait::async_trait]
-    impl rust_cli_kernel_api::tool::Tool for Named {
-        fn name(&self) -> &str {
-            self.0
-        }
-        fn input_schema(&self) -> Value {
-            json!({"type": "object", "properties": {"n": {"type": "number", "default": 5}}})
-        }
-        fn description(&self, _context: &rust_cli_kernel_api::tool::PromptContext) -> String {
-            String::new()
-        }
-        async fn call(
-            &self,
-            _input: Value,
-            _context: rust_cli_kernel_api::tool::ToolUseContext,
-            _progress: tokio::sync::mpsc::Sender<rust_cli_kernel_api::tool::ToolProgress>,
-        ) -> Result<rust_cli_kernel_api::tool::ToolOutput, rust_cli_kernel_api::tool::ToolError>
-        {
-            unreachable!("not called")
-        }
-    }
-    let tools = rust_cli_kernel_api::testing::ListTools(vec![
-        std::sync::Arc::new(Named("Edit")),
-        std::sync::Arc::new(Named("ToolSearch")),
-    ]);
-    let block = |name: &str, input: Value| ContentBlock::ToolUse {
-        id: rust_cli_kernel_api::ids::ToolUseId::new("t"),
+fn block(name: &str) -> ContentBlock {
+    ContentBlock::ToolUse {
+        id: ToolUseId::new("t"),
         name: name.to_owned(),
-        input,
-    };
-    let given = json!({"file_path": "/a", "old_string": "x", "new_string": "y"});
-    let mut edit_block = block("Edit", given);
-    apply(&tools, &mut edit_block);
-    let ContentBlock::ToolUse { input, .. } = &edit_block else {
+        input: json!({"n": 1}),
+    }
+}
+
+fn input(block: &ContentBlock) -> &Value {
+    let ContentBlock::ToolUse { input, .. } = block else {
         unreachable!()
     };
-    assert_eq!(
-        keys(input),
-        ["replace_all", "file_path", "old_string", "new_string"]
-    );
-    let mut search = block("ToolSearch", json!({}));
-    apply(&tools, &mut search);
-    assert!(matches!(search, ContentBlock::ToolUse { input, .. } if input == json!({})));
+    input
+}
+
+/// 只按工具自己的整理写回（工作线 F131）：整理的工具写回，不整理的与找不到的工具不动。
+#[test]
+fn only_tools_that_rewrite_change_the_input() {
+    let tools = ListTools(vec![
+        Arc::new(Rewriting {
+            name: "Rewrites",
+            rewrite: true,
+        }),
+        Arc::new(Rewriting {
+            name: "Keeps",
+            rewrite: false,
+        }),
+    ]);
+    let mut rewritten = block("Rewrites");
+    apply(&tools, &mut rewritten);
+    assert_eq!(input(&rewritten), &json!({"rewritten": true}));
+    for name in ["Keeps", "Missing"] {
+        let mut kept = block(name);
+        apply(&tools, &mut kept);
+        assert_eq!(input(&kept), &json!({"n": 1}), "{name}");
+    }
 }

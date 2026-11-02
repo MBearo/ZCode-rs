@@ -60,11 +60,13 @@ impl LocaleStore for Store {
 
 fn setup(store: &Arc<Store>, locale: Option<UiLocale>) -> Setup {
     Setup {
-        services: Services {
+        ui: rust_cli_tui::UiConfig {
             locale,
-            locale_store: Some(store.clone()),
-            account: None,
-            ..Services::default()
+            ..rust_cli_tui::UiConfig::default()
+        },
+        services: Services {
+            locale_store: store.clone(),
+            ..super::stub_services::services()
         },
         ..Setup::default()
     }

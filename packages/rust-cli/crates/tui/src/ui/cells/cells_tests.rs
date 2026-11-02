@@ -7,7 +7,7 @@ use rust_cli_kernel_api::permission::PermissionMode;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::ui::i18n::{EN, Lang};
+use crate::ui::i18n::Lang;
 use crate::ui::palette::{ColorLevel, Palette};
 use crate::ui::text::plain;
 use crate::view::Marker;
@@ -16,7 +16,6 @@ pub(crate) fn ctx<'a>(palette: &'a Palette, expanded: bool) -> Ctx<'a> {
     Ctx {
         palette,
         lang: Lang::En,
-        strings: &EN,
         width: 60,
         expanded,
         elapsed: Duration::ZERO,
@@ -53,16 +52,12 @@ pub(crate) fn text(rows: &[Row], expanded: bool) -> Vec<String> {
 pub(crate) fn tool(id: u64, name: &str, status: ToolStatus, input: Value) -> Row {
     row(
         id,
-        Body::Tool(Box::new(ToolRow {
-            id: ToolUseId::new(format!("tu{id}")),
-            name: name.into(),
+        Body::Tool(Box::new(ToolRow::new(
+            ToolUseId::new(format!("tu{id}")),
+            name.into(),
             input,
             status,
-            output: String::new(),
-            preview: String::new(),
-            display: Value::Null,
-            activity: None,
-        })),
+        ))),
     )
 }
 

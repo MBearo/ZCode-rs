@@ -6,36 +6,20 @@ use rust_cli_kernel_api::env_shell::BackgroundStatus;
 use rust_cli_kernel_api::ids::{MessageId, TurnId};
 use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
-use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{KernelEvent, SequencedEvent, TurnOutcome};
-use rust_cli_kernel_api::testing::selection;
 use rust_cli_kernel_api::turn_duration::TurnDuration;
 
 use super::{Cache, lines};
 use crate::ui::app::App;
 use crate::ui::cells::Ctx;
-use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
+use crate::ui::test_support::app;
 use crate::ui::text::plain;
-use crate::view::Transcript;
 
-fn app() -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
-}
-
-fn feed(app: &mut App, events: Vec<KernelEvent>) {
+/// 按顺序喂给视图：`seq` 是已经喂过的个数（视图丢掉不大于已收到的 seq 的事件），时刻是 seq 秒。
+fn feed(app: &mut App, seq: &mut u64, events: Vec<KernelEvent>) {
     for event in events {
-        let seq = app.view.last_seq() + 1;
+        *seq += 1;
+        let seq = *seq;
         app.view.apply(
             SequencedEvent {
                 seq,
@@ -48,10 +32,11 @@ fn feed(app: &mut App, events: Vec<KernelEvent>) {
 }
 
 /// 一个回合：开始、成功结束、回合结束那一行（等 `waiting` 个后台子代理）。
-fn turn(app: &mut App, id: &str, waiting_agents: u32) {
+fn turn(app: &mut App, seq: &mut u64, id: &str, waiting_agents: u32) {
     let turn = TurnId::new(id);
     feed(
         app,
+        seq,
         vec![
             KernelEvent::TurnStarted {
                 turn: turn.clone(),
@@ -73,9 +58,10 @@ fn turn(app: &mut App, id: &str, waiting_agents: u32) {
     );
 }
 
-fn typed(app: &mut App, id: &str) {
+fn typed(app: &mut App, seq: &mut u64, id: &str) {
     feed(
         app,
+        seq,
         vec![KernelEvent::MessageDone {
             message: Message::User(UserMessage {
                 id: MessageId::new(id),
@@ -87,15 +73,7 @@ fn typed(app: &mut App, id: &str) {
 }
 
 fn running(id: &str, kind: BackgroundKind) -> BackgroundEntry {
-    BackgroundEntry {
-        id: id.into(),
-        kind,
-        description: id.into(),
-        status: BackgroundStatus::Running,
-        output: None,
-        machine: None,
-        reconnecting: false,
-    }
+    BackgroundEntry::new(id, kind, id, BackgroundStatus::Running)
 }
 
 /// transcript 里 `✻ ` 开头的行。
@@ -103,7 +81,6 @@ fn shown(app: &App, cache: &mut Cache, expanded: bool) -> Vec<String> {
     let ctx = Ctx {
         palette: &app.palette,
         lang: app.lang,
-        strings: app.strings,
         width: 80,
         expanded,
         elapsed: Duration::ZERO,
@@ -125,9 +102,10 @@ fn shown(app: &App, cache: &mut Cache, expanded: bool) -> Vec<String> {
 #[test]
 fn the_still_running_segment_follows_the_current_pill() {
     let mut app = app();
+    let mut seq = 0;
     let mut cache = Cache::default();
-    turn(&mut app, "turn_1", 0);
-    turn(&mut app, "turn_2", 0);
+    turn(&mut app, &mut seq, "turn_1", 0);
+    turn(&mut app, &mut seq, "turn_2", 0);
     assert_eq!(
         shown(&app, &mut cache, false),
         [
@@ -136,7 +114,7 @@ fn the_still_running_segment_follows_the_current_pill() {
         ]
     );
     // 两个回合都在命令运行时结束：每一行都带。
-    app.background = vec![running("b1", BackgroundKind::Monitor)];
+    app.snapshots.background = vec![running("b1", BackgroundKind::Monitor)];
     assert_eq!(
         shown(&app, &mut cache, false),
         [
@@ -144,21 +122,23 @@ fn the_still_running_segment_follows_the_current_pill() {
             "✻ Baked for 2s · done 12:00 AM · 1 monitor still running"
         ]
     );
-    app.background.push(running("b2", BackgroundKind::Shell));
+    app.snapshots
+        .background
+        .push(running("b2", BackgroundKind::Shell));
     assert!(
         shown(&app, &mut cache, true)
             .iter()
             .all(|line| line.ends_with("· 1 shell, 1 monitor still running"))
     );
     // 命令结束、快照重取之后：已经显示的行也去掉这一段（同一份缓存）。
-    app.background.clear();
+    app.snapshots.background.clear();
     assert!(
         shown(&app, &mut cache, false)
             .iter()
             .all(|line| line.ends_with("done 12:00 AM"))
     );
     // 在跑的只有子代理：没有 pill，也没有这一段。
-    app.background = vec![running("agent_1", BackgroundKind::Agent)];
+    app.snapshots.background = vec![running("agent_1", BackgroundKind::Agent)];
     assert!(
         shown(&app, &mut cache, false)
             .iter()
@@ -169,8 +149,9 @@ fn the_still_running_segment_follows_the_current_pill() {
 #[test]
 fn the_waiting_line_takes_no_still_running_segment() {
     let mut app = app();
-    turn(&mut app, "turn_1", 1);
-    app.background = vec![running("b1", BackgroundKind::Shell)];
+    let mut seq = 0;
+    turn(&mut app, &mut seq, "turn_1", 1);
+    app.snapshots.background = vec![running("b1", BackgroundKind::Shell)];
     assert_eq!(
         shown(&app, &mut Cache::default(), false),
         ["✻ Waiting for 1 background agent to finish"]
@@ -180,13 +161,14 @@ fn the_waiting_line_takes_no_still_running_segment() {
 #[test]
 fn a_repeated_waiting_line_shows_once_until_the_user_types() {
     let mut app = app();
-    turn(&mut app, "turn_1", 2);
-    turn(&mut app, "turn_2", 2);
-    typed(&mut app, "next");
-    turn(&mut app, "turn_3", 2);
-    turn(&mut app, "turn_4", 1);
-    turn(&mut app, "turn_5", 1);
-    turn(&mut app, "turn_6", 0);
+    let mut seq = 0;
+    turn(&mut app, &mut seq, "turn_1", 2);
+    turn(&mut app, &mut seq, "turn_2", 2);
+    typed(&mut app, &mut seq, "next");
+    turn(&mut app, &mut seq, "turn_3", 2);
+    turn(&mut app, &mut seq, "turn_4", 1);
+    turn(&mut app, &mut seq, "turn_5", 1);
+    turn(&mut app, &mut seq, "turn_6", 0);
     let two = "✻ Waiting for 2 background agents to finish";
     let one = "✻ Waiting for 1 background agent to finish";
     let done = "✻ Cooked for 2s · done 12:00 AM";

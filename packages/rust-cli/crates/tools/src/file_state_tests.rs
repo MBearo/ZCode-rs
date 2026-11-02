@@ -1,4 +1,5 @@
 use super::*;
+use rust_cli_kernel_api::ids::MachineName;
 
 fn state(content: &str, version: &str) -> FileState {
     FileState {
@@ -15,13 +16,19 @@ fn state(content: &str, version: &str) -> FileState {
 fn sessions_are_isolated_and_forgotten_on_close() {
     let store = ReadFileState::default();
     let (a, b) = (SessionId::new("a"), SessionId::new("b"));
-    store.set(&a, "/w/x", state("x", "v1"));
-    assert!(store.get(&b, "/w/x").is_none());
+    store.set_at(&a, &MachineName::primary(), "/w/x", state("x", "v1"));
+    assert!(store.get_at(&b, &MachineName::primary(), "/w/x").is_none());
     store.fork(&a, &b);
-    assert_eq!(store.get(&b, "/w/x").unwrap().content, "x");
+    assert_eq!(
+        store
+            .get_at(&b, &MachineName::primary(), "/w/x")
+            .unwrap()
+            .content,
+        "x"
+    );
     store.forget(&a);
-    assert!(store.get(&a, "/w/x").is_none());
-    assert!(store.get(&b, "/w/x").is_some());
+    assert!(store.get_at(&a, &MachineName::primary(), "/w/x").is_none());
+    assert!(store.get_at(&b, &MachineName::primary(), "/w/x").is_some());
 }
 
 #[test]
@@ -29,18 +36,40 @@ fn least_recently_used_entries_and_sessions_are_evicted() {
     let store = ReadFileState::default();
     let session = SessionId::new("s");
     for index in 0..=MAX_ENTRIES {
-        store.set(&session, &format!("/w/{index}"), state("x", "v"));
+        store.set_at(
+            &session,
+            &MachineName::primary(),
+            &format!("/w/{index}"),
+            state("x", "v"),
+        );
     }
-    assert!(store.get(&session, "/w/0").is_none());
-    assert!(store.get(&session, &format!("/w/{MAX_ENTRIES}")).is_some());
+    assert!(
+        store
+            .get_at(&session, &MachineName::primary(), "/w/0")
+            .is_none()
+    );
+    assert!(
+        store
+            .get_at(
+                &session,
+                &MachineName::primary(),
+                &format!("/w/{MAX_ENTRIES}")
+            )
+            .is_some()
+    );
     for index in 0..MAX_SESSIONS {
-        store.set(
+        store.set_at(
             &SessionId::new(format!("other{index}")),
+            &MachineName::primary(),
             "/w/x",
             state("x", "v"),
         );
     }
-    assert!(store.get(&session, "/w/1").is_none());
+    assert!(
+        store
+            .get_at(&session, &MachineName::primary(), "/w/1")
+            .is_none()
+    );
 }
 
 #[test]
@@ -88,14 +117,30 @@ fn clearing_for_compaction_returns_the_paths_most_recent_first() {
     use rust_cli_kernel_api::tool::ReadFileStates;
     let store = ReadFileState::default();
     let (a, b) = (SessionId::new("a"), SessionId::new("b"));
-    store.set(&a, "/w/old", state("o", "v"));
-    store.set(&a, "/w/new", state("n", "v"));
-    store.set(&b, "/w/other", state("x", "v"));
+    store.set_at(&a, &MachineName::primary(), "/w/old", state("o", "v"));
+    store.set_at(&a, &MachineName::primary(), "/w/new", state("n", "v"));
+    store.set_at(&b, &MachineName::primary(), "/w/other", state("x", "v"));
     // 读一次也算用过（LRU）。
-    assert!(store.get(&a, "/w/old").is_some());
+    assert!(
+        store
+            .get_at(&a, &MachineName::primary(), "/w/old")
+            .is_some()
+    );
     assert_eq!(ReadFileStates::clear(&store, &a), ["/w/old", "/w/new"]);
-    assert!(store.get(&a, "/w/old").is_none());
-    assert!(store.get(&a, "/w/new").is_none());
-    assert!(store.get(&b, "/w/other").is_some());
+    assert!(
+        store
+            .get_at(&a, &MachineName::primary(), "/w/old")
+            .is_none()
+    );
+    assert!(
+        store
+            .get_at(&a, &MachineName::primary(), "/w/new")
+            .is_none()
+    );
+    assert!(
+        store
+            .get_at(&b, &MachineName::primary(), "/w/other")
+            .is_some()
+    );
     assert!(ReadFileStates::clear(&store, &SessionId::new("none")).is_empty());
 }

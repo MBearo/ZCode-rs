@@ -7,7 +7,6 @@
 //! 还是 base64 读回。前缀是用途（Node 用 toolCallId，内核的 put 没有它）。
 use rust_cli_base::proto::mime;
 use rust_cli_kernel_api::ids::{ArtifactId, SessionId};
-use rust_cli_kernel_api::persisted_output::ARTIFACT_SCHEME;
 use rust_cli_kernel_api::store::{ArtifactPurpose, ArtifactRef, StoreError};
 use rust_cli_paths::StoragePath;
 
@@ -34,27 +33,7 @@ pub fn segment(value: &str) -> String {
     }
 }
 
-/// JS `encodeURIComponent`。
-fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
-            out.push(char::from(byte));
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
-/// Artifact 的 URI（写进 part 时使用）。
-pub fn uri(artifact: &ArtifactRef) -> String {
-    format!(
-        "{ARTIFACT_SCHEME}{}/{}",
-        encode(artifact.session.as_str()),
-        encode(artifact.id.as_str())
-    )
-}
+pub use rust_cli_node_records::artifacts::uri;
 
 /// 扩展名：文本类型用 Node 按 UTF-8 读回的扩展名（`.txt`、`.md`、`.json`、`.html`、`.csv`），图片与
 /// PDF 用各自的扩展名，其余是 `.bin`（Node 按 base64 读回，不会误当成 JSON）。

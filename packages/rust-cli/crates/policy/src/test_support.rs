@@ -4,15 +4,52 @@ use rust_cli_kernel_api::env::EnvPath;
 use rust_cli_kernel_api::env_files::{PathFacts, PathStyle};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::permission::{
-    PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
+    FileAccess, PermissionMode, PermissionRules, PermissionSubject, RuleBehavior, RuleSource,
+    SourcedRule,
 };
 use rust_cli_kernel_api::plan::PlanFiles;
 
 use crate::check::{Check, Inputs};
 use crate::paths::PathContext;
-use crate::rules::{Rules, parse_rule};
+use crate::rules::Rules;
+use rust_cli_kernel_api::permission::syntax::parse_rule;
 
 pub const CWD: &str = "/w";
+
+/// 测试替身工具的判决主体：照内置工具的声明（tools 的 `permission_subject`，那边的 `permission_subject_tests.rs`
+/// 逐项对照）。policy 不依赖 tools，测试里按名字给出同样的主体。
+pub fn subject_of(tool: &str, input: &serde_json::Value) -> Option<PermissionSubject> {
+    let text = |field: &str| input.get(field).and_then(serde_json::Value::as_str);
+    let path = |access, field: &str| {
+        Some(PermissionSubject::Path {
+            access,
+            path: text(field)
+                .filter(|path| !path.is_empty())
+                .map(str::to_owned),
+        })
+    };
+    match tool {
+        "Bash" => Some(PermissionSubject::Shell {
+            command: text("command").unwrap_or_default().to_owned(),
+        }),
+        "Monitor" => input
+            .get("command")
+            .map(|command| PermissionSubject::Shell {
+                command: command.as_str().unwrap_or_default().to_owned(),
+            }),
+        "Read" => path(FileAccess::Read, "file_path"),
+        "Glob" | "Grep" => path(FileAccess::Read, "path"),
+        "Edit" | "Write" => path(FileAccess::Write, "file_path"),
+        "NotebookEdit" => path(FileAccess::Write, "notebook_path"),
+        "WebFetch" => Some(PermissionSubject::Url {
+            url: text("url").unwrap_or_default().to_owned(),
+        }),
+        "Skill" => Some(PermissionSubject::Skill {
+            name: text("skill").unwrap_or_default().to_owned(),
+        }),
+        _ => None,
+    }
+}
 
 pub fn rules(entries: &[(RuleBehavior, &str)]) -> PermissionRules {
     PermissionRules {
@@ -75,7 +112,6 @@ pub fn run_in<T>(
         paths,
         root,
         dangerous: false,
-        hook_check: false,
         full_access: mode == PermissionMode::BypassPermissions,
     };
     check(&inputs)

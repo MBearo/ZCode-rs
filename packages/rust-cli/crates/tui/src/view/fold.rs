@@ -1,6 +1,6 @@
 //! 事件 → 行（docs/specs/rust-cli/tui.md §4.2）。冷加载（[`SessionView`]）与实时事件走同一套处理。
 use rust_cli_kernel_api::ids::ToolUseId;
-use rust_cli_kernel_api::message::ToolResultContent;
+use rust_cli_kernel_api::message::text_of;
 use rust_cli_kernel_api::model::BlockDelta;
 use rust_cli_kernel_api::orchestration::InteractionRequest;
 use rust_cli_kernel_api::permission::ExecutionState;
@@ -14,19 +14,6 @@ mod message;
 
 /// 运行中预览保留的输出行数。
 const PREVIEW_LINES: usize = 5;
-
-fn result_text(content: &[ToolResultContent]) -> String {
-    content
-        .iter()
-        .filter_map(|item| match item {
-            ToolResultContent::Text { text } => Some(text.as_str()),
-            ToolResultContent::Image { .. }
-            | ToolResultContent::Document { .. }
-            | ToolResultContent::ToolReference { .. } => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
 
 impl Transcript {
     /// 从会话的当前视图重建（打开会话、`HistoryRewritten` 之后）。
@@ -150,7 +137,7 @@ impl Transcript {
                 } else {
                     ToolStatus::Success
                 };
-                let text = result_text(&output.content);
+                let text = text_of(&output.content);
                 self.update_tool(&tool_use, |tool| {
                     tool.status = status;
                     tool.output = text;
@@ -203,9 +190,7 @@ impl Transcript {
             // HistoryRewritten 由 runner 处理（丢弃视图后重新 view()）；后台任务的快照由 runner 在
             // BackgroundWork 之后重取（tui-display.md §1）；其余不显示（tui.md §9）。
             KernelEvent::WorkspaceChanged { workspace } => self.workspace = workspace,
-            KernelEvent::HistoryRewritten { .. }
-            | KernelEvent::SessionCreated { .. }
-            | KernelEvent::Subagent { .. } => {}
+            KernelEvent::HistoryRewritten { .. } | KernelEvent::SessionCreated { .. } => {}
             // 终态只进投影（Shell 详情在内核已不认识这条命令时用，tui-panels.md §3.3）。
             KernelEvent::BackgroundWork { work, status } => self.background_ended(work, status),
             KernelEvent::ScheduledFire { at, kind, fold } => {
@@ -348,16 +333,7 @@ impl Transcript {
             blocks: Vec::new(),
         });
         self.push(
-            Body::Tool(Box::new(ToolRow {
-                id,
-                name,
-                input,
-                status: ToolStatus::Running,
-                output: String::new(),
-                preview: String::new(),
-                display: Value::Null,
-                activity: None,
-            })),
+            Body::Tool(Box::new(ToolRow::new(id, name, input, ToolStatus::Running))),
             now_ms,
         );
     }
@@ -386,7 +362,10 @@ impl Transcript {
     fn finish(&mut self, outcome: TurnOutcome, now_ms: u64) {
         self.settle(Some(ToolStatus::Cancelled));
         let (state, error) = match outcome {
-            TurnOutcome::Success => (TurnState::Success, None),
+            // 工具的 hook 要求停止、Stop hook 阻止继续都不是失败，按成功结束显示（query.md §3，工作线 F131、F134）。
+            TurnOutcome::Success | TurnOutcome::HookStopped | TurnOutcome::StopHookPrevented => {
+                (TurnState::Success, None)
+            }
             TurnOutcome::Interrupted => (TurnState::Interrupted, None),
             TurnOutcome::Failed { message } => (TurnState::Failed, Some(message)),
         };

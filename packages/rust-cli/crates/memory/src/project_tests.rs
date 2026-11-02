@@ -11,8 +11,8 @@ fn facts() -> EnvFacts {
         os_version: "Darwin".to_owned(),
         shell: "zsh".to_owned(),
         is_git_repo: true,
-        additional_directories: Vec::new(),
         home: None,
+        uid: None,
     }
 }
 

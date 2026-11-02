@@ -3,37 +3,21 @@
 //! 口径照 App 的任务列表（Node `sessions-index`：`task_type in (interactive, fork, workflow_parent)`、本机
 //! `workspace_id is null`、没删除，`order by time_updated desc, id desc`），可以不限目录；改名照 Node
 //! `setCustomSessionTitle`，删除照 Node `softDeleteSession`。
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, TransactionBehavior};
 use rust_cli_kernel_api::env::EnvPath;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::store::{
     SessionOrder, SessionPage, SessionQuery, SessionRecord, StoreError,
 };
 
-use crate::repo::sessions;
+use crate::repo::{messages, sessions};
 use crate::{LOCAL_ENVIRONMENT, OrStorage, facts};
 
 /// 首条输入最多保留的字符数（Unicode 标量）。
 const FIRST_PROMPT_CHARS: usize = 500;
 
-/// 首条真实用户输入的第一个文字 part：沿 `message_session_time_created_id_idx` 的顺序找第一条
-/// `role = user`、`semantics.origin = real_user` 的消息，取它的第一个非合成 text part（按 part 的顺序）。
-const FIRST_PROMPT: &str = "select p.data from message m join part p on p.message_id = m.id
-      where m.session_id = ?1
-        and (case when json_valid(m.data) then json_extract(m.data, '$.role') end) = 'user'
-        and (case when json_valid(m.data) then json_extract(m.data, '$.semantics.origin') end) = 'real_user'
-        and (case when json_valid(p.data) then json_extract(p.data, '$.type') end) = 'text'
-        and coalesce(case when json_valid(p.data) then json_extract(p.data, '$.synthetic') end, 0) = 0
-      order by m.time_created, m.id, p.sequence is null, p.sequence, p.time_created, p.id
-      limit 1";
-
 fn first_prompt(conn: &Connection, session: &str) -> Result<Option<String>, StoreError> {
-    let data: Option<String> = conn
-        .prepare_cached(FIRST_PROMPT)
-        .storage()?
-        .query_row([session], |row| row.get(0))
-        .optional()
-        .storage()?;
+    let data = messages::first_prompt(conn, session).storage()?;
     Ok(data
         .and_then(|data| serde_json::from_str::<serde_json::Value>(&data).ok())
         .and_then(|part| part["text"].as_str().map(str::to_owned))

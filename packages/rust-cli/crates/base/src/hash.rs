@@ -1,7 +1,28 @@
 //! FNV-1a 64 位哈希（docs/specs/rust-cli/constants.md §2）：跨平台、跨版本稳定（不用 std 的随机种子哈希），用于
 //! 从 ID 派生短 ID、选词组。以前 hooks、tools（两处）、tui 各写一份两个常数（F122 收拢）。
+//!
+//! 字节的 hex 与 sha256 的 hex（F128，审查 X8）：以前 9 个 crate 里手写 11 处 `format!("{byte:02x}")` 的循环。
+
+use std::fmt::Write as _;
+
+use sha2::{Digest, Sha256};
 
 use crate::js::radix::{DIGITS, RADIX};
+
+/// 字节写成小写 hex，每个字节两位（Node `buffer.toString("hex")`）。
+pub fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        // 写进 String 不会失败。
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+/// 字节的 sha256，写成小写 hex（64 位）。
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
+}
 
 /// FNV-1a 64 位的初始值。
 pub const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;

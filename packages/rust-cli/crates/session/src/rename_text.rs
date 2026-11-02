@@ -8,15 +8,13 @@ use rust_cli_kernel_api::history;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
 use rust_cli_kernel_api::model::{
-    ApiContent, ApiMessage, ApiRole, ModelRequest, ModelSelection, OutputFormat, QuerySource,
-    RequestOptions, SystemBlock,
+    ApiMessage, ModelRequest, ModelSelection, OutputFormat, SystemBlock,
 };
+use rust_cli_kernel_api::side_request::{Requester, SideSource};
 use rust_cli_prompts::texts::{identity, render};
 use rust_cli_prompts::{models, title};
 use serde_json::Value;
 
-/// 请求来源（`querySource`）。
-const QUERY_SOURCE: &str = "rename_generate_name";
 /// 对话文本只留末尾这么多 UTF-16 码元。
 const TAIL_UNITS: usize = 1000;
 /// 名字最多这么多个码点。
@@ -133,32 +131,24 @@ pub(crate) fn request(
         cache_control: None,
     };
     let user = render(title::rename_user(), &[("conversation", conversation)]);
-    ModelRequest {
-        selection: selection.clone(),
-        system: vec![block(identity()), block(title::rename_system())],
-        messages: vec![ApiMessage {
-            role: ApiRole::User,
-            content: vec![ApiContent {
-                block: ContentBlock::Text { text: user },
-                cache_control: None,
-            }],
-            output_config: None,
-        }],
-        tools: Vec::new(),
-        tool_choice: None,
+    let mut request = ModelRequest::side(
+        selection.clone(),
+        SideSource::Rename,
+        vec![block(identity()), block(title::rename_system())],
+        vec![ApiMessage::user_text(user)],
         max_tokens,
-        thinking: None,
-        temperature: None,
-        betas: Vec::new(),
-        source: QuerySource::Side(QUERY_SOURCE.to_owned()),
-        options: RequestOptions {
-            // 修 bug（F23）：没有卡片的模型以前也写选择的档位（`card_effort` 的注释）。
-            effort: models::card_effort(&selection.model, selection.reasoning.as_deref()),
-            output_format: serde_json::from_value::<OutputFormat>(title::rename_format()).ok(),
-            session_id: Some(session.clone()),
-            ..RequestOptions::default()
+        // 没有回合（不发 `x-query-id`，model.md §2.4）。
+        Requester {
+            session: session.clone(),
+            run: None,
+            agent: None,
         },
-    }
+    );
+    // 修 bug（F23）：没有卡片的模型以前也写选择的档位（`card_effort` 的注释）。
+    request.options.effort = models::card_effort(&selection.model, selection.reasoning.as_deref());
+    request.options.output_format =
+        serde_json::from_value::<OutputFormat>(title::rename_format()).ok();
+    request
 }
 
 #[cfg(test)]

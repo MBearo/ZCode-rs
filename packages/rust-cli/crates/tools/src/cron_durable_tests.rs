@@ -8,9 +8,9 @@ use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::testing::MemoryCronStore;
 
 use super::*;
-use crate::cron_board::tests::TokioClock;
+use crate::cron_board::tests::clock;
 
-/// TokioClock 的起点 2026-10-17T10:07:30Z。
+/// 测试时钟的起点 2026-10-17T10:07:30Z。
 const START: u64 = 1_792_231_650_000;
 const HOUR: u64 = 3_600_000;
 
@@ -34,7 +34,7 @@ fn task(id: &str, cron: &str, created_by: Option<&str>, creator: CronCreator) ->
 }
 
 fn board(store: &Arc<MemoryCronStore>) -> CronBoard {
-    CronBoard::new(TokioClock::new(), Some(store.clone()))
+    CronBoard::new(clock(), Some(store.clone()))
 }
 
 async fn advance(ms: u64) {

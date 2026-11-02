@@ -5,11 +5,12 @@
 //! （prepare 与 apply 之间不持锁，文件可能又被改），先记下当前内容再写 / 删，任一步失败就按
 //! 记录逆序补偿。登记表的锁只保护内存操作，文件 IO 在锁外的阻塞线程里做。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 use rust_cli_kernel_api::env::{EnvError, WritePrecondition};
 use rust_cli_kernel_api::env_files::PutFile;
@@ -26,7 +27,7 @@ pub(crate) struct Rewinds(Mutex<HashMap<OperationId, Vec<RestoreFile>>>);
 
 impl Rewinds {
     fn table(&self) -> MutexGuard<'_, HashMap<OperationId, Vec<RestoreFile>>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_unpoisoned()
     }
 
     pub(crate) fn register(&self, token: OperationId, files: Vec<RestoreFile>) {

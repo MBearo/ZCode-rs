@@ -158,7 +158,7 @@ async fn run(dir: &Path) -> (Arc<ScriptedModel>, String) {
                         id: CommandId::new("c2"),
                         command: Command::ResolveInteraction {
                             interaction,
-                            answer: serde_json::to_value(answer).unwrap(),
+                            answer: answer.into(),
                         },
                     })
                     .await;

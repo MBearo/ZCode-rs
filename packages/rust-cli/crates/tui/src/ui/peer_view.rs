@@ -6,7 +6,8 @@ use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::peers::HeldPeerMessage;
 
 use super::i18n_peers as words;
-use super::interaction_view::{View, bold, dashed, dim, hint, named, option};
+use super::interaction_view::{View, dashed, hint, named, option};
+use super::style::{bold, dim};
 use super::text::{truncate_line, wrap_text};
 
 /// 预览最多几行、每行多少列。
@@ -22,7 +23,7 @@ pub fn lines(
 ) -> (Vec<Line<'static>>, Vec<(usize, usize)>) {
     let warning = Style::default().fg(Color::Yellow);
     let mut lines = vec![
-        Line::from(Span::styled("─".repeat(view.width), warning)),
+        crate::ui::style::rule(view.width, warning),
         truncate_line(
             Line::from(Span::styled(
                 format!("  {}", words::title(view.lang)),

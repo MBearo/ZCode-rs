@@ -1,6 +1,7 @@
 //! 压缩后重读与 readFileState（compact.md §3.4）。
 
-use std::sync::{Arc, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::message::{CompactTrigger, Message, ToolResultContent};
@@ -38,7 +39,7 @@ impl Tool for StatefulRead {
         _progress: mpsc::Sender<ToolProgress>,
     ) -> Result<ToolOutput, ToolError> {
         let path = input["file_path"].as_str().unwrap_or_default().to_owned();
-        let mut recent = self.0.recent.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut recent = self.0.recent.lock_unpoisoned();
         let text = if recent.contains(&path) {
             "Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead."
         } else {

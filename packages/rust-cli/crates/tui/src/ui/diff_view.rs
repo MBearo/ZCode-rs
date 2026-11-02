@@ -1,10 +1,11 @@
 //! `/diff`（docs/specs/rust-cli/tui-manage.md §4）：当前未提交的改动与每回合的改动。未提交改动是打开时向内核
 //! 现取的 git 原始输出（解析只为显示）；回合改动来自视图的 `turn_changes`。这里只有页面的界面状态。
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use rust_cli_kernel_api::env_git::GitDiff;
 
 use super::app::{Action, App, Overlay};
 use super::i18n::Lang;
+use super::keyboard;
 use super::manage::Manage;
 
 /// 文件数、每个文件的行数与 diff 大小的上限。
@@ -181,10 +182,10 @@ impl App {
 
     /// 滚轮（tui-select.md §4.1）：文件详情里滚动 `lines` 行；文件列表里每格移动选中项 1 项，到头停住。
     pub(super) fn diff_wheel(&mut self, lines: isize) {
-        let Some(Overlay::Diff(view)) = self.overlay.clone() else {
+        let Some(Overlay::Diff(view)) = &self.overlay else {
             return;
         };
-        let files = self.diff_files(&view);
+        let files = self.diff_files(view);
         if let Some(Overlay::Diff(open)) = self.overlay.as_mut() {
             match open.detail {
                 Some(scroll) => open.detail = Some(scroll.saturating_add_signed(lines)),
@@ -198,10 +199,11 @@ impl App {
     }
 
     pub(super) fn diff_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let Some(Overlay::Diff(view)) = self.overlay.clone() else {
+        let ctrl = keyboard::ctrl(&key);
+        let Some(Overlay::Diff(view)) = &self.overlay else {
             return None;
         };
+        let view = view.clone();
         let sources = 1 + self.view.turn_changes().len();
         let files = self.diff_files(&view);
         let mut next = view.clone();

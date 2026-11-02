@@ -5,6 +5,7 @@ use rust_cli_kernel_api::message::{ImageSource, ToolResultContent};
 use serde_json::{Map, Value, json};
 
 use crate::texts;
+use rust_cli_kernel_api::tool_names;
 
 /// 单元格输出合计超过这么多字符时整体换成提示。
 const OUTPUTS_LIMIT: usize = 10_000;
@@ -157,7 +158,7 @@ pub(crate) fn cells(notebook: &Value) -> Vec<Value> {
             cells
                 .iter()
                 .enumerate()
-                .map(|(index, cell)| cell_view(cell, index, &language, "Bash"))
+                .map(|(index, cell)| cell_view(cell, index, &language, tool_names::BASH))
                 .collect()
         })
         .unwrap_or_default()

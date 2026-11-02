@@ -13,8 +13,8 @@ use rust_cli_net::{HeaderValue, HttpRequest};
 
 use crate::anthropic::Anthropic;
 use crate::errors::{Vendor, Verdict};
-use crate::openai_chat::OpenAiChat;
-use crate::openai_responses::OpenAiResponses;
+use crate::openai::chat::OpenAiChat;
+use crate::openai::responses::OpenAiResponses;
 use crate::profiles::Profile;
 
 pub(crate) trait Protocol: Send + Sync {
@@ -49,16 +49,5 @@ pub(crate) fn for_wire(protocol: WireProtocol) -> &'static dyn Protocol {
         WireProtocol::AnthropicMessages => &Anthropic,
         WireProtocol::OpenAiChatCompletions => &OpenAiChat,
         WireProtocol::OpenAiResponses => &OpenAiResponses,
-    }
-}
-
-/// `Authorization: Bearer <key>`（OpenAI 两种协议）。
-pub(crate) fn bearer(credential: &Credential) -> Vec<(String, HeaderValue)> {
-    match credential {
-        Credential::None => Vec::new(),
-        Credential::ApiKey(key) => vec![(
-            rust_cli_net::header::AUTHORIZATION.to_owned(),
-            HeaderValue::Secret(rust_cli_net::header::bearer(key.expose())),
-        )],
     }
 }

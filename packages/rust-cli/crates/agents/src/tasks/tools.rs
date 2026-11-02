@@ -8,15 +8,14 @@ use rust_cli_kernel_api::agents::TaskList;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
-    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
+    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, parse,
 };
-use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::Core;
-use crate::agent_tool::text_output;
 use crate::tasks::edit::{CreateInput, GetInput, UpdateInput, create, get, list_text, update};
+use rust_cli_kernel_api::tool_names;
 
 pub(crate) fn tools(core: &Arc<Core>) -> Vec<Arc<dyn Tool>> {
     [Kind::Create, Kind::Get, Kind::List, Kind::Update]
@@ -41,10 +40,10 @@ enum Kind {
 impl Kind {
     fn name(self) -> &'static str {
         match self {
-            Self::Create => "TaskCreate",
-            Self::Get => "TaskGet",
-            Self::List => "TaskList",
-            Self::Update => "TaskUpdate",
+            Self::Create => tool_names::TASK_CREATE,
+            Self::Get => tool_names::TASK_GET,
+            Self::List => tool_names::TASK_LIST,
+            Self::Update => tool_names::TASK_UPDATE,
         }
     }
 }
@@ -52,12 +51,6 @@ impl Kind {
 struct TaskTool {
     core: Arc<Core>,
     kind: Kind,
-}
-
-fn input<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, ToolError> {
-    serde_json::from_value(value).map_err(|error| ToolError::InvalidInput {
-        message: error.to_string(),
-    })
 }
 
 fn failed(error: impl std::fmt::Display) -> ToolError {
@@ -102,13 +95,15 @@ impl Tool for TaskTool {
     }
 
     fn input_schema(&self) -> Value {
-        rust_cli_prompts::tool(self.kind.name())
-            .map_or(Value::Null, |prompt| prompt.input_schema.clone())
+        rust_cli_prompts::definition(self.kind.name())
+            .schema
+            .clone()
     }
 
     fn description(&self, _context: &PromptContext) -> String {
-        rust_cli_prompts::tool(self.kind.name())
-            .map_or_else(String::new, |prompt| prompt.description.clone())
+        rust_cli_prompts::definition(self.kind.name())
+            .description
+            .clone()
     }
 
     fn is_read_only(&self, _input: &Value) -> bool {
@@ -144,7 +139,7 @@ impl Tool for TaskTool {
         let board = &self.core.board;
         let text = match self.kind {
             Kind::Create => {
-                let input: CreateInput = input(value)?;
+                let input: CreateInput = parse(&value)?;
                 let (text, tasks) = board
                     .update(&list, Box::new(move |tasks| (create(tasks, input), true)))
                     .await
@@ -153,7 +148,7 @@ impl Tool for TaskTool {
                 text
             }
             Kind::Update => {
-                let input: UpdateInput = input(value)?;
+                let input: UpdateInput = parse(&value)?;
                 let (text, tasks) = board
                     .update(&list, Box::new(move |tasks| update(tasks, input)))
                     .await
@@ -162,11 +157,11 @@ impl Tool for TaskTool {
                 text
             }
             Kind::Get => {
-                let input: GetInput = input(value)?;
+                let input: GetInput = parse(&value)?;
                 get(&board.read(&list).await.map_err(failed)?, &input.task_id)
             }
             Kind::List => list_text(&board.read(&list).await.map_err(failed)?),
         };
-        Ok(text_output(text, false))
+        Ok(rust_cli_kernel_api::tool::text(text))
     }
 }

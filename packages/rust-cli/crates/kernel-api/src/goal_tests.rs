@@ -68,17 +68,19 @@ fn goal_status_uses_the_fixed_keys() {
 #[test]
 fn stop_conditions_and_verdicts_round_trip() {
     let event = HookEvent {
-        name: HookEventName::Stop,
-        session: SessionId::new("sess_1"),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/Users/dev/project"),
-        },
-        payload: json!({"stop_hook_active": false}),
         context: HookContext {
             mode: Some(PermissionMode::Default),
             ..HookContext::default()
         },
+        ..HookEvent::new(
+            HookEventName::Stop,
+            SessionId::new("sess_1"),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/project"),
+            },
+            json!({"stop_hook_active": false}),
+        )
     };
     round_trip(&StopCondition {
         event,
@@ -135,12 +137,10 @@ fn forks_round_trip() {
         child: SessionId::new("sess_2"),
         created_at_ms: 5,
         through: MessageId::new("msg_1"),
-        selection: ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: ModelSelection::new(
+            "anthropic".to_owned(),
+            rust_cli_base::models::GLM_5_3.to_owned(),
+        ),
         mode: PermissionMode::Default,
         plan: true,
     });

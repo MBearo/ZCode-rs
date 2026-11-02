@@ -47,5 +47,7 @@ tracing.workspace = true
 futures-util.workspace = true
 rust-cli-env-remote.workspace = true
 rust-cli-exec-client.workspace = true
+# 共用的测试时钟（kernel-api 的 testing，F126）。
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

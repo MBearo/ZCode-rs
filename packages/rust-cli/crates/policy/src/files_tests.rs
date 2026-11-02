@@ -6,7 +6,7 @@ use crate::test_support::run;
 fn verdict(
     mode: PermissionMode,
     entries: &[(RuleBehavior, &str)],
-    access: Access,
+    access: FileAccess,
     path: &str,
 ) -> Check {
     run(mode, entries, |inputs| check(access, Some(path), inputs))
@@ -15,11 +15,11 @@ fn verdict(
 #[test]
 fn reads_inside_are_allowed_and_outside_ask() {
     assert_eq!(
-        verdict(PermissionMode::Default, &[], Access::Read, "a.txt"),
+        verdict(PermissionMode::Default, &[], FileAccess::Read, "a.txt"),
         Check::Allow
     );
     assert_eq!(
-        verdict(PermissionMode::Default, &[], Access::Read, "/etc/hosts"),
+        verdict(PermissionMode::Default, &[], FileAccess::Read, "/etc/hosts"),
         Check::ask(
             "ZCode requested permissions to read from /etc/hosts, but you haven't granted it yet."
         )
@@ -28,7 +28,7 @@ fn reads_inside_are_allowed_and_outside_ask() {
         verdict(
             PermissionMode::Default,
             &[(RuleBehavior::Allow, "Read(//etc/**)")],
-            Access::Read,
+            FileAccess::Read,
             "/etc/hosts"
         ),
         Check::Allow
@@ -37,7 +37,7 @@ fn reads_inside_are_allowed_and_outside_ask() {
         verdict(
             PermissionMode::Default,
             &[(RuleBehavior::Deny, "Read(*.env)")],
-            Access::Read,
+            FileAccess::Read,
             ".env"
         ),
         Check::deny("Permission to read /w/.env has been denied.")
@@ -47,24 +47,34 @@ fn reads_inside_are_allowed_and_outside_ask() {
 #[test]
 fn writes_need_accept_edits_inside_and_always_ask_for_sensitive_paths() {
     assert_eq!(
-        verdict(PermissionMode::Default, &[], Access::Write, "src/a.rs"),
+        verdict(PermissionMode::Default, &[], FileAccess::Write, "src/a.rs"),
         Check::ask(
             "ZCode requested permissions to write to /w/src/a.rs, but you haven't granted it yet."
         )
     );
     assert_eq!(
-        verdict(PermissionMode::AcceptEdits, &[], Access::Write, "src/a.rs"),
+        verdict(
+            PermissionMode::AcceptEdits,
+            &[],
+            FileAccess::Write,
+            "src/a.rs"
+        ),
         Check::Allow
     );
     assert!(matches!(
-        verdict(PermissionMode::AcceptEdits, &[], Access::Write, "/tmp/x"),
+        verdict(
+            PermissionMode::AcceptEdits,
+            &[],
+            FileAccess::Write,
+            "/tmp/x"
+        ),
         Check::Ask { .. }
     ));
     assert_eq!(
         verdict(
             PermissionMode::AcceptEdits,
             &[],
-            Access::Write,
+            FileAccess::Write,
             ".git/config"
         ),
         Check::Ask {
@@ -79,7 +89,7 @@ fn writes_need_accept_edits_inside_and_always_ask_for_sensitive_paths() {
         verdict(
             PermissionMode::Default,
             &[(RuleBehavior::Allow, "Edit(src/**)")],
-            Access::Write,
+            FileAccess::Write,
             "src/a.rs"
         ),
         Check::Allow
@@ -88,7 +98,7 @@ fn writes_need_accept_edits_inside_and_always_ask_for_sensitive_paths() {
         verdict(
             PermissionMode::AcceptEdits,
             &[(RuleBehavior::Deny, "Edit(src/**)")],
-            Access::Write,
+            FileAccess::Write,
             "src/a.rs"
         ),
         Check::deny("Permission to edit /w/src/a.rs has been denied.")
@@ -103,7 +113,7 @@ fn the_project_config_is_a_sensitive_file() {
         verdict(
             PermissionMode::AcceptEdits,
             &[],
-            Access::Write,
+            FileAccess::Write,
             "zcode.json"
         ),
         Check::Ask {
@@ -117,13 +127,18 @@ fn the_project_config_is_a_sensitive_file() {
         verdict(
             PermissionMode::AcceptEdits,
             &[],
-            Access::Write,
+            FileAccess::Write,
             ".zcode.json"
         ),
         Check::Allow
     );
     assert!(matches!(
-        verdict(PermissionMode::AcceptEdits, &[], Access::Write, ".mcp.json"),
+        verdict(
+            PermissionMode::AcceptEdits,
+            &[],
+            FileAccess::Write,
+            ".mcp.json"
+        ),
         Check::Ask { .. }
     ));
 }
@@ -133,7 +148,12 @@ fn the_project_config_is_a_sensitive_file() {
 #[test]
 fn file_paths_are_resolved_like_the_tools_resolve_them() {
     assert_eq!(
-        verdict(PermissionMode::Default, &[], Access::Read, " /etc/hosts\n"),
+        verdict(
+            PermissionMode::Default,
+            &[],
+            FileAccess::Read,
+            " /etc/hosts\n"
+        ),
         Check::ask(
             "ZCode requested permissions to read from /etc/hosts, but you haven't granted it yet."
         )
@@ -143,14 +163,14 @@ fn file_paths_are_resolved_like_the_tools_resolve_them() {
         verdict(
             PermissionMode::Default,
             &[(RuleBehavior::Deny, "Read(caf\u{e9}.env)")],
-            Access::Read,
+            FileAccess::Read,
             "cafe\u{301}.env"
         ),
         Check::deny("Permission to read /w/caf\u{e9}.env has been denied.")
     );
     // 只认 `~/`：`~x` 是工作区里的文件。
     assert_eq!(
-        verdict(PermissionMode::Default, &[], Access::Read, "~x"),
+        verdict(PermissionMode::Default, &[], FileAccess::Read, "~x"),
         Check::Allow
     );
 }

@@ -10,12 +10,14 @@
 //!
 //! 两类信号按到达顺序交出（共用一个顺序号），替换掉的任务清单不再占位置。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::agents::{AgentNotice, AgentSignal};
+use rust_cli_kernel_api::env_shell::BackgroundStatus;
 use rust_cli_kernel_api::ids::{AgentId, SessionId};
 use serde_json::Value;
 use tokio::sync::watch;
@@ -68,10 +70,7 @@ struct Cursor {
 }
 
 fn lock(inner: &Inner) -> MutexGuard<'_, HashMap<SessionId, Channel>> {
-    inner
-        .channels
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+    inner.channels.lock_unpoisoned()
 }
 
 /// 下一个要交出的信号：通知与任务清单里到达顺序最小、还没交出的一个。
@@ -143,7 +142,7 @@ impl Hub {
         &self,
         session: &SessionId,
         agent: AgentId,
-        status: &str,
+        status: BackgroundStatus,
         text: String,
     ) -> u64 {
         let seq = {
@@ -153,7 +152,7 @@ impl Hub {
             let notice = AgentNotice {
                 seq: channel.next_seq,
                 agent,
-                status: status.to_owned(),
+                status,
                 text,
             };
             let order = channel.order();

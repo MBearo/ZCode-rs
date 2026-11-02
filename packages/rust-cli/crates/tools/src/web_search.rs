@@ -5,27 +5,26 @@
 //! （工作线 F90）；结果文本的写法见 spec（tools-more.md §5、D53）。非 Anthropic 协议由模型适配器报 `Unsupported`，工具把它
 //! 作为错误交给模型。
 
-use futures_util::StreamExt;
 use rust_cli_kernel_api::message::ContentBlock;
-use rust_cli_kernel_api::model::{
-    ApiContent, ApiMessage, ApiRole, BlockDelta, ModelEvent, ModelRequest, QuerySource,
-    RequestOptions, ServerTool, SystemBlock,
-};
+use rust_cli_kernel_api::model::{ApiMessage, ModelRequest, ServerTool, SystemBlock};
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionRule};
+use rust_cli_kernel_api::side_request::{Requester, SideReply, SideSource};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
 };
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::common::{Definition, definition, failed, text};
 use crate::web_fetch::SideModel;
+use rust_cli_kernel_api::tool::{failed, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
 /// 校验错误码：没有查询词、同时给了允许与屏蔽的域名。
 const MISSING_QUERY_CODE: i32 = 1;
 const BOTH_DOMAIN_LISTS_CODE: i32 = 2;
 
-pub const NAME: &str = "WebSearch";
+pub const NAME: &str = tool_names::WEB_SEARCH;
 
 /// 每次请求最多搜索的次数。
 const MAX_USES: u32 = 8;
@@ -45,7 +44,7 @@ pub struct WebSearchTool {
 impl WebSearchTool {
     pub fn new(side: SideModel) -> Self {
         Self {
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
             side,
         }
     }
@@ -131,9 +130,10 @@ impl WebSearchTool {
         // 用主循环的当前模型，所以在请求时向会话 actor 取当前主模型，不经小模型
         // 槽位（model.md §6.1）；没有会话 owner 的测试替身取不到时才用组装时的值。
         let selection = context
-            .interactions
-            .current_selection(&context.session)
+            .session_ops
+            .view()
             .await
+            .and_then(|view| view.selection)
             .unwrap_or_else(|| self.side.selection.clone());
         // 能力检查（工作线 F90，照 Node）：当前模型的生效配置不支持原生搜索时不发请求，给模型可恢复的错误。主循环已按同一个
         // 能力去掉这个工具；这里挡住模型从历史里看到它、或换模型后仍然调用的情况。答不出能力时不检查（同主循环）。
@@ -155,70 +155,42 @@ impl WebSearchTool {
         // 档位，`card_effort` 的注释）。
         let effort =
             rust_cli_prompts::models::card_effort(&selection.model, selection.reasoning.as_deref());
-        let request = ModelRequest {
+        let mut request = ModelRequest::side(
             selection,
-            system: vec![SystemBlock {
+            SideSource::WebSearch,
+            vec![SystemBlock {
                 text: SYSTEM.to_owned(),
                 cache_control: None,
             }],
-            messages: vec![ApiMessage {
-                role: ApiRole::User,
-                content: vec![ApiContent {
-                    block: ContentBlock::Text {
-                        text: format!("Perform a web search for the query: {query}"),
-                    },
-                    cache_control: None,
-                }],
-                output_config: None,
-            }],
-            tools: Vec::new(),
-            tool_choice: None,
+            vec![ApiMessage::user_text(format!(
+                "Perform a web search for the query: {query}"
+            ))],
             max_tokens,
-            thinking: None,
-            temperature: None,
-            betas: Vec::new(),
-            source: QuerySource::Side("web_search_tool".to_owned()),
-            options: RequestOptions {
-                effort,
-                server_tools: vec![ServerTool::WebSearch {
-                    allowed_domains: domains(input, "allowed_domains"),
-                    blocked_domains: domains(input, "blocked_domains"),
-                    max_uses: MAX_USES,
-                }],
-                // 工作线 F52：`metadata.user_id` 的 `session_id`（model.md §3.3）。
-                session_id: Some(context.session.clone()),
-                // 工作线 F64：每请求头的回合与子代理（model.md §2.4）。
+            // 工作线 F52：`metadata.user_id` 的 `session_id`（model.md §3.3）；工作线 F64：每请求头的回合与子代理
+            // （model.md §2.4）。
+            Requester {
+                session: context.session.clone(),
                 run: Some(context.run.clone()),
                 agent: context.agent.clone(),
-                // 修 bug（工作线 F95，tools-more.md §5 表后）：目录模型的 Provider 补丁以配置的上限改写 max_tokens，
-                // 这次请求自己的上限在那里不生效（GLM-5.3-Flash 发 128000）。Node 的补丁以请求自己的上限为输入，
-                // 发 4096；这里把同一个上限交给补丁。
-                provider_max_output_tokens: Some(max_tokens),
-                ..RequestOptions::default()
             },
-        };
-        let mut stream = self.side.model.stream(request, context.cancel.clone());
-        let mut blocks: Vec<(usize, ContentBlock)> = Vec::new();
-        while let Some(event) = stream.next().await {
-            match event.map_err(|error| failed(error.to_string()))? {
-                ModelEvent::BlockStart { index, block } => blocks.push((index, block)),
-                ModelEvent::BlockDelta {
-                    index,
-                    delta: BlockDelta::Text(more),
-                } => {
-                    if let Some((_, ContentBlock::Text { text })) =
-                        blocks.iter_mut().find(|(at, _)| *at == index)
-                    {
-                        text.push_str(&more);
-                    }
-                }
-                _ => {}
-            }
-        }
+        );
+        request.options.effort = effort;
+        request.options.server_tools = vec![ServerTool::WebSearch {
+            allowed_domains: domains(input, "allowed_domains"),
+            blocked_domains: domains(input, "blocked_domains"),
+            max_uses: MAX_USES,
+        }];
+        // 修 bug（工作线 F95，tools-more.md §5 表后）：目录模型的 Provider 补丁以配置的上限改写 max_tokens，这次请求
+        // 自己的上限在那里不生效（GLM-5.3-Flash 发 128000）。Node 的补丁以请求自己的上限为输入，发 4096；这里把同一个
+        // 上限交给补丁。
+        request.options.provider_max_output_tokens = Some(max_tokens);
+        let reply = SideReply::collect(self.side.model.stream(request, context.cancel.clone()))
+            .await
+            .map_err(|error| failed(error.to_string()))?;
         if context.cancel.is_cancelled() {
             return Err(ToolError::Cancelled);
         }
-        Ok(items(blocks.into_iter().map(|(_, block)| block).collect()))
+        Ok(items(reply.into_blocks()))
     }
 }
 
@@ -289,13 +261,13 @@ impl Tool for WebSearchTool {
         _input: &Value,
         _context: &ToolUseContext,
     ) -> PermissionDecision {
-        PermissionDecision::Ask {
-            message: rust_cli_policy::texts::request_message(NAME, None),
-            suggestions: vec![PermissionRule {
+        PermissionDecision::ask(
+            rust_cli_policy::texts::request_message(NAME, None),
+            vec![PermissionRule {
                 tool: NAME.to_owned(),
                 content: None,
             }],
-        }
+        )
     }
 
     async fn call(

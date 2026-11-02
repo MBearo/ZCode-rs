@@ -295,6 +295,10 @@ async fn task_stop_ends_a_parked_agent_with_its_last_report() {
 async fn a_message_left_in_the_mailbox_resumes_the_agent_after_it_ends() {
     let gates = Gates::default();
     let harness = held(&gates, false);
+    // 消息在这次运行最后一个工具边界之后才到：假的子循环放行后直接结束。
+    harness
+        .no_boundary
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let mut root = harness.agents.signals().signals(&SessionId::new(ROOT));
     let launched = harness
         .call(
@@ -317,7 +321,7 @@ async fn a_message_left_in_the_mailbox_resumes_the_agent_after_it_ends() {
         "{}",
         text(&sent)
     );
-    // 这次运行没有取走消息（假的子循环只在工具边界取通知）。
+    // 这次运行没有取走消息（假的子循环没有工具边界）。
     gates.release(&worker.session);
     let first = next_notice(&mut root).await;
     assert!(

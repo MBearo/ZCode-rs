@@ -72,6 +72,22 @@ fn memory_lives_under_the_storage_root() {
 }
 
 #[test]
+fn the_home_layout_of_memory_matches_the_default_storage_root() {
+    // 主 env 在别处时按它的 home 拼（deployment.md §19.1）；缺省设置下与本机的位置是同一个布局。
+    let segments = home_memory_dir("/work/repo");
+    assert_eq!(segments, [".zcode", "projects", "-work-repo", "memory"]);
+    let joined = segments
+        .iter()
+        .fold(PathBuf::from("/home/dev"), |path, segment| {
+            path.join(segment)
+        });
+    assert_eq!(
+        joined.as_path(),
+        resolve(None, None).memory_dir("/work/repo").as_path()
+    );
+}
+
+#[test]
 fn long_paths_are_truncated_with_the_node_hash() {
     let long = format!("/{}", "a".repeat(250));
     let name = sanitize_path(&long);

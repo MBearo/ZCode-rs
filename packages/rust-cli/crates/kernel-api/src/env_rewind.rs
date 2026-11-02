@@ -5,17 +5,13 @@
 //! 执行侧不跨调用持锁：prepare 与 apply 之间文件可能变化，apply 写每个文件前再核对一次。
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::env::EnvPath;
 
 /// 回退核对用的内容 hash：sha256 的小写 hex（与 Node `file-rewind.ts` 的 `hashContent` 相同）。
 /// 内核算期望值、执行环境算当前值，都用这一个函数。
 pub fn content_hash(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    rust_cli_base::hash::sha256_hex(bytes)
 }
 
 /// 一个文件的回退：期望的当前内容与要恢复成的内容。

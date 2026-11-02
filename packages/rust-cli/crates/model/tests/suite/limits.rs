@@ -9,13 +9,16 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::model::{ModelError, ModelSelection, QuerySource};
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, ModelEndpoints, WireProtocol};
-use rust_cli_model::ProviderModel;
+use rust_cli_kernel_api::model::{ModelError, QuerySource};
+use rust_cli_kernel_api::provider::{
+    Credential, EndpointQuery, ModelCapabilities, ModelEndpoint, ModelEndpoints, WireProtocol,
+};
+use rust_cli_kernel_api::side_request::SideSource;
+use rust_cli_model::{ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
 use serde_json::{Value, json};
 
-use super::common::{clock, collect, fast_retry, model_at, request, text_response};
+use super::common::{clock, collect, fast_retry, model_with, request, text_response};
 use super::fixture::{Fixture, Reply};
 
 fn sse() -> Reply {
@@ -26,10 +29,16 @@ fn sse() -> Reply {
 
 async fn sent_max_tokens(limit: Option<u32>, asked: u32) -> Option<Value> {
     let server = Fixture::start(vec![sse()]).await;
-    let model = model_at(server.url(), fast_retry(0))
-        .await
-        .with_max_output_tokens(limit);
-    let mut request = request("hello", QuerySource::Side("web_search".to_owned()));
+    let model = model_with(
+        server.url(),
+        RouteOptions {
+            retry: fast_retry(0),
+            max_output_tokens: limit,
+            ..RouteOptions::default()
+        },
+    )
+    .await;
+    let mut request = request("hello", QuerySource::Side(SideSource::WebSearch));
     request.max_tokens = asked;
     let events = collect(&model, request).await;
     assert!(events.iter().all(Result::is_ok), "{events:?}");
@@ -56,21 +65,12 @@ struct Patching {
 
 #[async_trait]
 impl ModelEndpoints for Patching {
-    async fn endpoint(
-        &self,
-        selection: &ModelSelection,
-        rejected: Option<&ModelEndpoint>,
-    ) -> Result<ModelEndpoint, ModelError> {
-        self.endpoint_with_output_limit(selection, rejected, None)
-            .await
-    }
-
-    async fn endpoint_with_output_limit(
-        &self,
-        selection: &ModelSelection,
-        _rejected: Option<&ModelEndpoint>,
-        output_limit: Option<u64>,
-    ) -> Result<ModelEndpoint, ModelError> {
+    async fn endpoint(&self, query: EndpointQuery<'_>) -> Result<ModelEndpoint, ModelError> {
+        let EndpointQuery {
+            selection,
+            output_limit,
+            ..
+        } = query;
         self.limits.lock().unwrap().push(output_limit);
         Ok(ModelEndpoint {
             protocol: WireProtocol::AnthropicMessages,
@@ -79,11 +79,12 @@ impl ModelEndpoints for Patching {
             credential: Credential::None,
             headers: Vec::new(),
             body_patches: vec![json!({"max_tokens": output_limit.unwrap_or(128_000).min(128_000)})],
-            mid_conversation_system: true,
-            supports_image: true,
-            supports_pdf: true,
-            supports_video: false,
-            supports_audio: false,
+            capabilities: ModelCapabilities {
+                supports_mid_conversation_system: true,
+                supports_image: true,
+                supports_pdf: true,
+                ..ModelCapabilities::default()
+            },
             renewable: false,
         })
     }
@@ -98,8 +99,16 @@ async fn the_provider_output_limit_reaches_the_endpoint() {
         limits: Mutex::new(Vec::new()),
     });
     let egress = Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap());
-    let model = ProviderModel::new(egress, endpoints.clone(), clock()).with_retry(fast_retry(0));
-    let mut side = request("search", QuerySource::Side("web_search_tool".to_owned()));
+    let model = ProviderModel::new(
+        egress,
+        endpoints.clone(),
+        clock(),
+        RouteOptions {
+            retry: fast_retry(0),
+            ..RouteOptions::default()
+        },
+    );
+    let mut side = request("search", QuerySource::Side(SideSource::WebSearch));
     side.max_tokens = 4096;
     side.options.provider_max_output_tokens = Some(4096);
     assert!(collect(&model, side).await.iter().all(Result::is_ok));

@@ -3,6 +3,7 @@
 //! 夹具在 shell_tests.rs（需要 `/bin/bash`，Windows 上跳过）。
 #![cfg(unix)]
 use futures_util::StreamExt;
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env::{BackgroundReason, CommandEvent};
 use rust_cli_kernel_api::env_shell::{BackgroundCommand, CwdScope, TimeoutBackground};
 use rust_cli_kernel_api::ids::{SessionId, ToolUseId};
@@ -17,14 +18,16 @@ async fn a_requested_move_backgrounds_the_foreground_command_with_its_reason() {
         &fixture.root,
         CwdScope::Pinned,
     );
-    start.on_timeout = Some(TimeoutBackground {
-        command: BackgroundCommand {
-            description: "Long build".to_owned(),
-            tool_use: Some(ToolUseId::new("toolu_1")),
-            kind: Default::default(),
-        },
-        deadline_ms: None,
-    });
+    start.kind = CommandKind::Foreground {
+        on_timeout: Some(TimeoutBackground {
+            command: BackgroundCommand {
+                description: "Long build".to_owned(),
+                tool_use: Some(ToolUseId::new("toolu_1")),
+                kind: Default::default(),
+            },
+            deadline_ms: None,
+        }),
+    };
     let task = start.task.clone();
     let mut hook = request("sleep 1", &fixture.root, CwdScope::Pinned);
     hook.timeout_ms = Some(10_000);

@@ -6,6 +6,7 @@ use rust_cli_kernel_api::message::{
     AssistantMessage, AttachmentMessage, ContentBlock, Message, UserMessage, UserOrigin,
 };
 use rust_cli_kernel_api::model::{ModelSelection, OutputFormat, QuerySource};
+use rust_cli_kernel_api::side_request::SideSource;
 
 use super::*;
 
@@ -139,12 +140,7 @@ fn names_are_cleaned() {
 #[test]
 fn the_rename_request_has_the_expected_shape() {
     // Anthropic 的有卡片的模型：输出上限与 effort 按卡片（卡片的上限只给有卡片的模型）。
-    let carded = ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: OPUS_5_5.to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    let carded = ModelSelection::new("anthropic".to_owned(), OPUS_5_5.to_owned());
     let request = request(
         &carded,
         &SessionId::new("sess_rename"),
@@ -177,17 +173,12 @@ fn the_rename_request_has_the_expected_shape() {
         &request.options.output_format,
         Some(OutputFormat::JsonSchema { schema }) if schema["required"] == serde_json::json!(["name"])
     ));
-    assert_eq!(
-        request.source,
-        QuerySource::Side("rename_generate_name".to_owned())
-    );
+    assert_eq!(request.source, QuerySource::Side(SideSource::Rename));
     // 有卡片形状的模型（GLM 按 opus）上会话选了推理档位时用它；GLM 的输出上限按目录（工作线 F121），目录没给时同没有
     // 卡片的模型。
     let chosen = ModelSelection {
-        provider: "p".to_owned(),
-        model: GLM_5_3.to_owned(),
         reasoning: Some("high".to_owned()),
-        connection: None,
+        ..ModelSelection::new("p".to_owned(), GLM_5_3.to_owned())
     };
     let glm = super::request(
         &chosen,
@@ -201,10 +192,8 @@ fn the_rename_request_has_the_expected_shape() {
     // 没有模型卡片时输出上限是 32000（与主循环相同），也不写 effort——推理字段只由配置的 option map 写（修复线
     // F23 修的 bug：以前把选择的档位写进 `output_config.effort`）。
     let other = ModelSelection {
-        provider: "p".to_owned(),
-        model: "unknown".to_owned(),
         reasoning: Some("high".to_owned()),
-        connection: None,
+        ..ModelSelection::new("p".to_owned(), "unknown".to_owned())
     };
     let request = super::request(&other, &SessionId::new("sess_rename"), ("x", None));
     assert_eq!(request.max_tokens, 32_000);

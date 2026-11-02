@@ -7,9 +7,10 @@
 use rust_cli_base::js::string::is_space;
 use rust_cli_kernel_api::permission::PermissionRule;
 
-use crate::safe_env;
+use crate::shell::safe_env;
+use rust_cli_kernel_api::tool_names;
 
-const TOOL: &str = "Bash";
+const TOOL: &str = tool_names::BASH;
 /// 简单前缀的词数：命令名与一个像子命令的词。
 const PREFIX_WORDS: usize = 2;
 

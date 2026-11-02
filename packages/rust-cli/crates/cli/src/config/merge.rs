@@ -2,13 +2,14 @@
 //!
 //! 输入是按优先级排好的层（用户级在前，项目级自根向工作区根），都已是 JSON 对象；这里不做 IO。
 
+use rust_cli_base::ui_prefs::{UiLocale, UiTheme};
 use rust_cli_base::units;
 use rust_cli_ext::mcp::{McpScope, McpServer, parse_node_servers};
 use rust_cli_kernel_api::permission::{PermissionMode, RuleSource};
-use rust_cli_platform::UiLocale;
 use serde_json::{Map, Value};
 
 /// 一层配置：来源与对象。
+#[derive(Clone, Copy)]
 pub(crate) struct Layer<'a> {
     pub(crate) source: RuleSource,
     pub(crate) object: &'a Map<String, Value>,
@@ -89,16 +90,13 @@ pub(crate) fn locale(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> Option
 }
 
 /// `ui.theme` 按键覆盖（tui-manage.md §2.1，Node `ui.theme`）：只认 `auto`、`dark`、`light`，坏值记警告、跳过这一层。
-pub(crate) fn theme(
-    layers: &[Layer<'_>],
-    warnings: &mut Vec<String>,
-) -> Option<rust_cli_platform::UiTheme> {
+pub(crate) fn theme(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> Option<UiTheme> {
     let mut merged = None;
     for layer in layers {
         let Some(value) = layer.object.get("ui").and_then(|ui| ui.get("theme")) else {
             continue;
         };
-        match value.as_str().and_then(rust_cli_platform::UiTheme::parse) {
+        match value.as_str().and_then(UiTheme::parse) {
             Some(theme) => merged = Some(theme),
             None => warnings.push(format!("{}: unknown ui.theme {value}", layer.path)),
         }

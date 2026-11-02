@@ -122,20 +122,19 @@ texts! {
     edited_text_file => "context/edited_text_file",
     edited_text_file_changes => "context/edited_text_file_changes",
     edited_text_file_hidden => "context/edited_text_file_hidden",
-    // 远端机器：工具的 `machine` 参数与机器清单提醒（remote-exec.md §20.5，R3）。
+    // 别的机器：工具的 `machine` 参数与机器清单提醒（remote-exec.md §20.5，R3）；缺省机器总写出名字（deployment.md §23）。
     machine_param => "context/machine_param",
-    machine_param_default => "context/machine_param_default",
     machine_param_agent => "context/machine_param_agent",
-    machine_param_agent_default => "context/machine_param_agent_default",
     machines => "context/machines",
     machines_none => "context/machines_none",
-    // 子代理的缺省机器在远端时的提醒（F98，remote-exec.md §25.2.1）。
-    machines_default => "context/machines_default",
+    // 子代理的缺省机器断开时的提醒（F98，remote-exec.md §25.2.1）。
     machines_none_default => "context/machines_none_default",
     machine_line => "context/machine_line",
     machine_gone => "context/machine_gone",
     // 远端调用失败的说明：有没有执行、能不能重试、下一步做什么（remote-exec.md §23.6，F96）。
     remote_not_connected => "remote/not_connected",
+    // 失败说明的最后半句：只对额外机器建议改在缺省机器上跑（deployment.md §23）。
+    remote_instead => "remote/instead",
     remote_ended_unsent => "remote/ended_unsent",
     remote_ended_read => "remote/ended_read",
     remote_ended_unknown => "remote/ended_unknown",

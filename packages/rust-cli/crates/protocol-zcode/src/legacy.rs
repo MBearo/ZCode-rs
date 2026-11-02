@@ -3,22 +3,12 @@
 //! 工具与思考的大载荷）。
 
 use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
+use rust_cli_kernel_api::message::{Message, UserOrigin};
 use rust_cli_protocol_core::rpc::RpcError;
 use serde_json::{Value, json};
 
+use crate::projection::text_of;
 use crate::server::{Server, kernel_error};
-
-fn text(content: &[ContentBlock]) -> String {
-    content
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
 
 pub async fn read(server: &Server, params: &Value) -> Result<Value, RpcError> {
     let session = SessionId::new(params["sessionId"].as_str().unwrap_or_default());
@@ -33,11 +23,13 @@ pub async fn read(server: &Server, params: &Value) -> Result<Value, RpcError> {
     for (index, message) in view.messages.iter().enumerate() {
         let (role, body, message_id) = match message {
             Message::User(user) if user.origin == UserOrigin::Human => {
-                ("user", text(&user.content), user.id.as_str())
+                ("user", text_of(&user.content), user.id.as_str())
             }
-            Message::Assistant(assistant) => {
-                ("assistant", text(&assistant.content), assistant.id.as_str())
-            }
+            Message::Assistant(assistant) => (
+                "assistant",
+                text_of(&assistant.content),
+                assistant.id.as_str(),
+            ),
             _ => continue,
         };
         if body.is_empty() {

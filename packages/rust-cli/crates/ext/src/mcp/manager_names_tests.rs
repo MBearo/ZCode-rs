@@ -13,14 +13,9 @@ fn stdio(name: &str) -> McpServer {
     McpServer {
         name: name.to_owned(),
         scope: McpScope::Project,
-        transport: McpTransportConfig::Stdio {
-            command: "node".to_owned(),
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-        },
+        transport: McpTransportConfig::stdio("node".to_owned(), Vec::new()),
         options: Default::default(),
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -41,7 +36,7 @@ fn manager(fake: Arc<FakeMcp>, scope: &TaskScope) -> McpManager {
         fake,
         scope.spawner(),
         McpSettings::default(),
-        crate::clock_tests::TokioClock::new(),
+        crate::clock_tests::clock(),
     )
 }
 

@@ -156,7 +156,7 @@ fn the_agent_tool_depends_on_the_depth_only() {
 /// 主注册表：有 Bash，Glob / Grep 被它藏起来（`tools()` 里没有，`withheld` 能取回）。
 struct HidingSearch(Vec<Arc<dyn Tool>>);
 
-impl ToolRegistry for HidingSearch {
+impl rust_cli_kernel_api::testing::RegistryOverride for HidingSearch {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
         self.0
             .iter()
@@ -166,7 +166,9 @@ impl ToolRegistry for HidingSearch {
     }
 
     fn find(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools().into_iter().find(|tool| tool.name() == name)
+        ToolRegistry::tools(self)
+            .into_iter()
+            .find(|tool| tool.name() == name)
     }
 
     fn withheld(&self, name: &str) -> Option<Arc<dyn Tool>> {

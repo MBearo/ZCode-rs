@@ -6,13 +6,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{CompactTrigger, Message};
-use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::orchestration::{
     Absorbed, InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, QueryEvent,
-    RunSink,
+    RunSink, RunView, SessionOps,
 };
-use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::plan::PlanModeFlags;
 use rust_cli_kernel_api::store::StoreError;
 use tokio::sync::{mpsc, oneshot};
 
@@ -34,10 +31,11 @@ pub(crate) enum SinkRequest {
     ClaimSteering {
         reply: oneshot::Sender<Option<crate::steering::Claimed>>,
     },
-    /// 插话的结局：出队或留下。
+    /// 插话的结局（出队或留下）与并入的通知（按顺序）：回复每条通知的 attachment 用的消息 ID。
     SettleSteering {
         fates: Vec<(rust_cli_kernel_api::ids::CommandId, crate::steering::Fate)>,
-        reply: oneshot::Sender<()>,
+        notices: Vec<crate::inbox::NoticeKey>,
+        reply: oneshot::Sender<Vec<rust_cli_kernel_api::ids::MessageId>>,
     },
     /// 一条消息（可以没有）与它的计量一个事务（docs/specs/rust-cli/usage.md §2.5）。
     Metered {
@@ -52,23 +50,15 @@ pub(crate) enum SinkRequest {
     },
     /// 主循环开始压缩。
     CompactStarted(CompactTrigger),
-    /// 工具请求修改权限模式（docs/specs/rust-cli/tools-more.md §2.3）。
-    SetMode {
-        mode: PermissionMode,
-        reply: oneshot::Sender<Result<(), OrchestrationError>>,
-    },
     /// 工具请求打开或关掉 plan 开关（EnterPlanMode / ExitPlanMode，修复线 F20）。
     SetPlan {
         enabled: bool,
         reply: oneshot::Sender<Result<(), OrchestrationError>>,
     },
-    /// 主循环读判决用的模式（plan 开时是 plan）。
-    Mode {
-        reply: oneshot::Sender<PermissionMode>,
-    },
-    /// 主循环组装上下文时读模式与计划模式的会话标志（同一个快照，context.md §13.4）。
-    ModeAndPlanFlags {
-        reply: oneshot::Sender<(PermissionMode, PlanModeFlags)>,
+    /// 主循环与工具读会话现在的状态（判决用的模式、计划模式的会话标志、工作目录、主模型、目标，一次往返，工作线
+    /// F134：以前分五个请求：模式、模式与计划标志、工作目录、模型选择、目标）。
+    View {
+        reply: oneshot::Sender<RunView>,
     },
     /// hook 给出的会话标题（UserPromptSubmit / SessionStart 的 `sessionTitle`）。
     Title(String),
@@ -76,14 +66,6 @@ pub(crate) enum SinkRequest {
     SetWorkspace {
         root: rust_cli_kernel_api::env::EnvPath,
         reply: oneshot::Sender<Result<(), OrchestrationError>>,
-    },
-    /// 主循环读当前的工作目录。
-    Workspace {
-        reply: oneshot::Sender<rust_cli_kernel_api::env::WorkspaceRef>,
-    },
-    /// 工具与 hook 读会话当前的主模型（小模型槽位的输入，docs/specs/rust-cli/model.md §6.1）。
-    Selection {
-        reply: oneshot::Sender<ModelSelection>,
     },
     /// fork 子代理读已提交的对话（修复线 L-A，agents.md §8.1.2）。
     Conversation {
@@ -94,10 +76,6 @@ pub(crate) enum SinkRequest {
         monitor: rust_cli_kernel_api::monitor::MonitorArmed,
         events: rust_cli_kernel_api::machine::CommandEvents,
         reply: oneshot::Sender<Result<(), OrchestrationError>>,
-    },
-    /// 主循环读会话的目标条件（docs/specs/rust-cli/goal.md §4）。
-    Goal {
-        reply: oneshot::Sender<Option<String>>,
     },
     /// 主循环报告目标的判定：actor 提交反馈与 `goal_status`，回复已提交的消息（goal.md §3）。
     GoalChecked {
@@ -145,7 +123,6 @@ impl ActorSink {
 impl Interactions for ActorSink {
     async fn ask(
         &self,
-        _session: &SessionId,
         request: InteractionRequest,
     ) -> Result<InteractionAnswer, OrchestrationError> {
         let gone = || OrchestrationError::Failed {
@@ -159,11 +136,7 @@ impl Interactions for ActorSink {
         answer.await.map_err(|_| gone())?
     }
 
-    async fn cancel_ask(
-        &self,
-        _session: &SessionId,
-        tool_use: &rust_cli_kernel_api::ids::ToolUseId,
-    ) {
+    async fn cancel_ask(&self, tool_use: &rust_cli_kernel_api::ids::ToolUseId) {
         let request = SinkRequest::CancelAsk {
             tool_use: tool_use.clone(),
         };
@@ -171,88 +144,47 @@ impl Interactions for ActorSink {
         let _ = self.sender.send(request).await;
     }
 
-    async fn set_mode(
-        &self,
-        _session: &SessionId,
-        mode: PermissionMode,
-    ) -> Result<(), OrchestrationError> {
-        let gone = || OrchestrationError::Failed {
-            message: "the session is closed".to_owned(),
-        };
-        let (reply, answer) = oneshot::channel();
-        self.sender
-            .send(SinkRequest::SetMode { mode, reply })
-            .await
-            .map_err(|_| gone())?;
-        answer.await.map_err(|_| gone())?
+    /// 会话级的询问入口（docs/specs/rust-cli/agents.md §4.1.1）：回合通道在回合结束时关闭，后台子代理在那之后仍要问。
+    fn lasting(&self) -> Option<Arc<dyn Interactions>> {
+        Some(Arc::new(SessionAsks {
+            requests: self.asks.clone(),
+            session: self.session.clone(),
+            detached: self.detached.clone(),
+        }))
     }
+}
 
-    async fn set_plan(
+impl ActorSink {
+    /// 一个要回复的会话命令：回合已经结束（通道关了）时是 `Closed`。
+    async fn command<T>(
         &self,
-        _session: &SessionId,
-        enabled: bool,
-    ) -> Result<(), OrchestrationError> {
-        let gone = || OrchestrationError::Failed {
-            message: "the session is closed".to_owned(),
-        };
+        request: impl FnOnce(oneshot::Sender<Result<T, OrchestrationError>>) -> SinkRequest,
+    ) -> Result<T, OrchestrationError> {
         let (reply, answer) = oneshot::channel();
         self.sender
-            .send(SinkRequest::SetPlan { enabled, reply })
+            .send(request(reply))
             .await
-            .map_err(|_| gone())?;
-        answer.await.map_err(|_| gone())?
+            .map_err(|_| OrchestrationError::Closed)?;
+        answer.await.map_err(|_| OrchestrationError::Closed)?
     }
+}
 
-    async fn set_workspace(
-        &self,
-        _session: &SessionId,
-        root: rust_cli_kernel_api::env::EnvPath,
-    ) -> Result<(), OrchestrationError> {
-        let gone = || OrchestrationError::Failed {
-            message: "the session is closed".to_owned(),
-        };
+/// 会话状态与对话的 owner 是会话 actor：按请求时的值回答，不另存副本。
+#[async_trait]
+impl SessionOps for ActorSink {
+    async fn view(&self) -> Option<RunView> {
         let (reply, answer) = oneshot::channel();
-        self.sender
-            .send(SinkRequest::SetWorkspace { root, reply })
-            .await
-            .map_err(|_| gone())?;
-        answer.await.map_err(|_| gone())?
-    }
-
-    /// monitor 的 owner 是会话 actor（工作线 F83）。
-    async fn arm_monitor(
-        &self,
-        _session: &SessionId,
-        monitor: rust_cli_kernel_api::monitor::MonitorArmed,
-        events: rust_cli_kernel_api::machine::CommandEvents,
-    ) -> Result<(), OrchestrationError> {
-        let gone = || OrchestrationError::Failed {
-            message: "the session is closed".to_owned(),
-        };
-        let (reply, answer) = oneshot::channel();
-        self.sender
-            .send(SinkRequest::ArmMonitor {
-                monitor,
-                events,
-                reply,
-            })
-            .await
-            .map_err(|_| gone())?;
-        answer.await.map_err(|_| gone())?
-    }
-
-    /// 选择的 owner 是会话 actor：按请求时的值回答，不另存副本。
-    async fn current_selection(&self, _session: &SessionId) -> Option<ModelSelection> {
-        let (reply, answer) = oneshot::channel();
-        self.sender
-            .send(SinkRequest::Selection { reply })
-            .await
-            .ok()?;
+        self.sender.send(SinkRequest::View { reply }).await.ok()?;
         answer.await.ok()
     }
 
-    /// 对话的 owner 是会话 actor：按请求时已提交的消息回答（fork 子代理继承它，修复线 L-A）。
-    async fn conversation(&self, _session: &SessionId) -> Option<Vec<Message>> {
+    /// 顶层会话就是自己。
+    async fn owner_session(&self, _session: &SessionId) -> SessionId {
+        self.session.clone()
+    }
+
+    /// 按请求时已提交的消息回答（fork 子代理继承它，修复线 L-A）。
+    async fn conversation(&self) -> Option<Vec<Message>> {
         let (reply, answer) = oneshot::channel();
         self.sender
             .send(SinkRequest::Conversation { reply })
@@ -261,13 +193,31 @@ impl Interactions for ActorSink {
         answer.await.ok()
     }
 
-    /// 会话级的询问入口（docs/specs/rust-cli/agents.md §4.1.1）：回合通道在回合结束时关闭，后台子代理在那之后仍要问。
-    fn lasting(&self, _session: &SessionId) -> Option<Arc<dyn Interactions>> {
-        Some(Arc::new(SessionAsks {
-            requests: self.asks.clone(),
-            session: self.session.clone(),
-            detached: self.detached.clone(),
-        }))
+    async fn set_plan(&self, enabled: bool) -> Result<(), OrchestrationError> {
+        self.command(|reply| SinkRequest::SetPlan { enabled, reply })
+            .await
+    }
+
+    async fn set_workspace(
+        &self,
+        root: rust_cli_kernel_api::env::EnvPath,
+    ) -> Result<(), OrchestrationError> {
+        self.command(|reply| SinkRequest::SetWorkspace { root, reply })
+            .await
+    }
+
+    /// monitor 的 owner 是会话 actor（工作线 F83）。
+    async fn arm_monitor(
+        &self,
+        monitor: rust_cli_kernel_api::monitor::MonitorArmed,
+        events: rust_cli_kernel_api::machine::CommandEvents,
+    ) -> Result<(), OrchestrationError> {
+        self.command(|reply| SinkRequest::ArmMonitor {
+            monitor,
+            events,
+            reply,
+        })
+        .await
     }
 }
 
@@ -301,7 +251,6 @@ impl SessionAsks {
 impl Interactions for SessionAsks {
     async fn ask(
         &self,
-        _session: &SessionId,
         request: InteractionRequest,
     ) -> Result<InteractionAnswer, OrchestrationError> {
         if let Some(answered) = self.to_actor(request.clone()).await {
@@ -310,17 +259,11 @@ impl Interactions for SessionAsks {
         // 修复（工作线 F72）：以前父会话关闭之后这里直接按会话已关闭失败，后台子代理按拒绝处理。
         match &self.detached {
             Some(detached) => detached.ask(&self.session, request).await,
-            None => Err(OrchestrationError::Failed {
-                message: "the session is closed".to_owned(),
-            }),
+            None => Err(OrchestrationError::Closed),
         }
     }
 
-    async fn cancel_ask(
-        &self,
-        _session: &SessionId,
-        tool_use: &rust_cli_kernel_api::ids::ToolUseId,
-    ) {
+    async fn cancel_ask(&self, tool_use: &rust_cli_kernel_api::ids::ToolUseId) {
         // 会话已关闭时，关闭已经取消了全部待回答的交互；询问可能已转到进程级的入口。
         if let Some(requests) = self.requests.upgrade() {
             let request = crate::actor::Request::CancelAsk {
@@ -333,7 +276,7 @@ impl Interactions for SessionAsks {
         }
     }
 
-    fn lasting(&self, _session: &SessionId) -> Option<Arc<dyn Interactions>> {
+    fn lasting(&self) -> Option<Arc<dyn Interactions>> {
         Some(Arc::new(Self {
             requests: self.requests.clone(),
             session: self.session.clone(),
@@ -378,36 +321,6 @@ impl RunSink for ActorSink {
     /// 插话（并入前先跑 UserPromptSubmit）与后台通知，按到达顺序（steering.rs，query.md §5）。
     async fn take_absorbed(&self) -> Vec<Absorbed> {
         self.absorbed().await
-    }
-
-    async fn current_mode(&self) -> Option<PermissionMode> {
-        let (reply, answer) = oneshot::channel();
-        self.sender.send(SinkRequest::Mode { reply }).await.ok()?;
-        answer.await.ok()
-    }
-
-    async fn current_mode_and_plan_flags(&self) -> Option<(PermissionMode, PlanModeFlags)> {
-        let (reply, answer) = oneshot::channel();
-        self.sender
-            .send(SinkRequest::ModeAndPlanFlags { reply })
-            .await
-            .ok()?;
-        answer.await.ok()
-    }
-
-    async fn current_workspace(&self) -> Option<rust_cli_kernel_api::env::WorkspaceRef> {
-        let (reply, answer) = oneshot::channel();
-        self.sender
-            .send(SinkRequest::Workspace { reply })
-            .await
-            .ok()?;
-        answer.await.ok()
-    }
-
-    async fn current_goal(&self) -> Option<String> {
-        let (reply, answer) = oneshot::channel();
-        self.sender.send(SinkRequest::Goal { reply }).await.ok()?;
-        answer.await.ok().flatten()
     }
 
     async fn goal_checked(

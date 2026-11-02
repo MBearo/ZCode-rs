@@ -6,9 +6,13 @@
 //! - [`js`]：与 JavaScript 语义一致的字符串、`JSON.stringify`、`toISOString`（原 zcode-kit）。
 //! - [`names`]：产品目录与文件的名字（`.zcode`、`AGENTS.md` 等），同一个名字只定义一处（F55）。
 //! - [`random`]：随机数的入口（`RandomState` 的种子，F58）。
-//! - [`glob`]、[`path`]、[`reminder`]、[`log_text`]：几个 crate 共用的小函数，只定义一处（F58，README §4.1）。
+//! - [`glob`]、[`path`]、[`reminder`]、[`log_text`]：几个 crate 共用的小函数，只定义一处（F58，README §4.1）；
+//!   [`frontmatter`]：agent 文件与 SKILL.md 的 frontmatter（F132）。
+//! - [`late::Late`]：组装时先建好、后接上一次的值（打破构造环，F131）。
 //! - [`units`]、[`civil`]、[`proto`]、[`hash`]、[`chars`]：有含义的数字与协议固定值，只定义一处（F122，
 //!   docs/specs/rust-cli/constants.md）。
+//! - [`clock`]：系统时钟与时区（业务时间的唯一来源，入口建、经 kernel-api 的 `Clock` 注入；F128 从 node-store 移来）。
+//! - [`account`]、[`ui_prefs`]：账号体系与界面配置的取值，平台层与 TUI 共用（F133 从 platform 移来）。
 //!
 //! 异步任务（docs/specs/rust-u0-foundation.md §3.3）：
 //!
@@ -28,16 +32,21 @@ use std::panic::AssertUnwindSafe;
 
 use futures_util::FutureExt;
 
+pub mod account;
 pub mod chars;
 pub mod civil;
+pub mod clock;
 pub mod embed;
+pub mod frontmatter;
 pub mod glob;
 pub mod hash;
 pub mod hosts;
 pub mod js;
+pub mod late;
 pub mod log_text;
 pub mod models;
 pub mod names;
+pub mod notice;
 mod owned;
 pub mod path;
 pub mod proto;
@@ -47,8 +56,10 @@ pub mod reminder;
 pub mod rule_url;
 mod scope;
 pub mod secret;
+pub mod sync;
 pub mod text;
 pub mod tokens;
+pub mod ui_prefs;
 pub mod units;
 
 pub use owned::{OwnedTask, blocking, owned};

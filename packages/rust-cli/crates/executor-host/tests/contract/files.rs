@@ -150,19 +150,23 @@ async fn path_facts_carry_the_home_given_by_the_entry_crate(kind: Kind) {
 async fn facts_describe_the_machine_and_its_workspace(kind: Kind) {
     let home = tempfile::tempdir().unwrap();
     let work = tempfile::tempdir().unwrap();
-    let local = LocalEnvironment::new(Some(home.path().to_path_buf()))
-        .with_shell(ShellConfig {
-            env: vec![("SHELL".to_owned(), "/bin/zsh".to_owned())].into(),
-            bash: Some("/bin/bash".into()),
-            ..ShellConfig::default()
-        })
-        .with_additional_directories(vec![EnvPath::new("/extra")]);
+    let local = LocalEnvironment::new(Some(home.path().to_path_buf())).with_shell(ShellConfig {
+        env: vec![("SHELL".to_owned(), "/bin/zsh".to_owned())].into(),
+        bash: Some("/bin/bash".into()),
+        ..ShellConfig::default()
+    });
     let env = machine(kind, local).await;
     let facts = env.info().facts(&workspace(work.path())).await.unwrap();
     assert_eq!(facts.cwd.as_str(), work.path().to_string_lossy());
     assert_eq!(facts.shell, "zsh");
     assert!(!facts.is_git_repo);
-    assert_eq!(facts.additional_directories, [EnvPath::new("/extra")]);
+    // 执行命令的用户：本进程（两种绑定都是这个测试进程的用户）。root 检查看它（deployment.md §21）。
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let owner = std::fs::metadata(work.path()).unwrap().uid();
+        assert_eq!(facts.uid, Some(owner));
+    }
     assert_eq!(
         facts.home.as_ref().map(EnvPath::as_str),
         Some(&*home.path().to_string_lossy())

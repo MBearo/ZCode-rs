@@ -51,13 +51,18 @@ async fn open(
     let mut handle = kernel.open_session_as(&id, source).await?;
     if let Some(command) = fork {
         let ack = handle.send(command).await;
-        let rust_cli_kernel_api::session_api::Ack::Accepted { result } = ack else {
+        // 缺陷修复（工作线 F134，审查 K4）：以前回执是 JSON，形状不对时拿空 ID 去开会话。
+        let rust_cli_kernel_api::session_api::Ack::Accepted {
+            result: rust_cli_kernel_api::session_api::CommandResult::Forked(forked),
+        } = ack
+        else {
             return Err(KernelError::Failed {
                 message: format!("{ack:?}"),
             });
         };
-        let child = SessionId::new(result.as_str().unwrap_or_default());
-        handle = kernel.open_session_as(&child, StartSource::Fork).await?;
+        handle = kernel
+            .open_session_as(&forked.session, StartSource::Fork)
+            .await?;
     }
     // 会话里切过去（`/resume`、`/fork`）：对话已经换了，续写时补的占位马上落库（session-lifecycle.md §6.3.1，工作线
     // F79）。回执不看：提交失败时它留在会话里，随下一批带消息的提交写。
@@ -113,7 +118,7 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 不再看当前会话：停止接收它的事件与面板通知，交出句柄（由调用方关闭）。
     fn detach(&mut self) -> Option<Arc<dyn SessionHandle>> {
-        let session = self.session.take()?;
+        let session = self.outbox.detach()?;
         self.events = idle();
         self.detach_panels();
         Some(session)
@@ -176,12 +181,10 @@ impl<B: Backend> Loop<'_, B> {
                         local: crate::ui::app::Local::Update(Box::new(info)),
                     });
                 }
-                self.app.session = Some(handle.id().as_str().to_owned());
                 let last = view.last_seq;
                 self.app.view = Transcript::from_view(view, self.now_ms());
                 self.app.sync_interaction(std::time::Instant::now());
-                self.events = handle.subscribe(Some(last));
-                self.session = Some(handle);
+                self.attach(handle, last);
                 // 切过去的会话可能已有后台任务与子代理（tui-display.md §1、tui-panels.md §1；`attach_panels` 取两者的
                 // 同一份快照，修复线 F34）；footer 的请求统计从已有的用量行重建（F27，与新会话同一个查询）。
                 self.refresh_stats();
@@ -205,7 +208,7 @@ impl<B: Backend> Loop<'_, B> {
 
     /// rewind 选择器：取可选消息（带改动统计）与它们的文字。
     pub(super) fn open_rewind(&mut self) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             self.app.open_rewind(Vec::new());
             return;
         };
@@ -235,18 +238,15 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 选择器确认：运行中先中断，回合结束后再发（`deferred`，事件驱动，不等超时）。
     pub(super) fn rewind(&mut self, target: MessageId, scope: RewindScope, text: String) {
-        let label = if scope == RewindScope::Code {
-            String::new()
-        } else {
-            text
-        };
+        // 对话被回退时把那条消息放回输入框（只回退代码、或消息没有文字时不放）。
+        let restore = (scope != RewindScope::Code && !text.is_empty()).then_some(text);
         let command = Command::Rewind { target, scope };
         if self.app.running() {
-            self.send(Sent::Interrupt, Command::Interrupt, String::new());
-            self.deferred = Some((command, label));
+            self.send(Sent::Interrupt, Command::Interrupt);
+            self.outbox.defer(Sent::Rewind(restore), command);
             return;
         }
-        self.send(Sent::Rewind, command, label);
+        self.send(Sent::Rewind(restore), command);
     }
 
     /// 回合结束（视图回到空闲）时发出等待中的回退。
@@ -254,8 +254,8 @@ impl<B: Backend> Loop<'_, B> {
         if self.app.running() {
             return;
         }
-        if let Some((command, label)) = self.deferred.take() {
-            self.send(Sent::Rewind, command, label);
+        if let Some((sent, command)) = self.outbox.take_deferred() {
+            self.send(sent, command);
         }
     }
 
@@ -265,7 +265,7 @@ impl<B: Backend> Loop<'_, B> {
     /// 之后这个回合不再记录；以前按 esc 中断，空档里的输入与中断标记落库。
     pub(super) fn stop(&mut self) {
         self.stopping = true;
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             self.app.quit = true;
             return;
         };

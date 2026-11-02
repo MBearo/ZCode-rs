@@ -191,7 +191,7 @@ pub(crate) async fn run(shared: Arc<Shared>, job: SocketJob) {
     // 结束时删登记，再写终态（同命令的监督任务，工作线 F119）。
     let mut state = shared.state();
     state.commands.remove(&job.operation);
-    if let Some(background) = &job.request.background {
+    if let Some(background) = job.request.kind.background() {
         let shell = state.sessions.entry(job.session.clone()).or_default();
         shell.background.remove(&job.request.task);
         // 被停掉的不记通知（同命令，shell-permissions.md §2.6）。

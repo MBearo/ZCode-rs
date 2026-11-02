@@ -1,6 +1,7 @@
 //! 按机器分开的会话状态（remote-exec.md §20.7）：远端机器上的后台通知 ack 到那台机器、会话关闭也通知它；跨机器的
 //! `/rewind` 全部 prepare 再 apply，prepare 失败整体拒绝，apply 中途失败逐台报告。
 
+use rust_cli_kernel_api::ids::MachineName;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -39,7 +40,7 @@ impl Tool for WritingOnDevA {
         context: ToolUseContext,
         _progress: mpsc::Sender<ToolProgress>,
     ) -> Result<ToolOutput, ToolError> {
-        let (machine, workspace) = self.0.remote("dev-a").unwrap();
+        let (machine, workspace) = self.0.remote(&MachineName::new("dev-a")).unwrap();
         let path = input["file_path"].as_str().unwrap_or_default().to_owned();
         let after = input["content"].as_str().unwrap_or_default().to_owned();
         let read = ReadFile {
@@ -160,7 +161,9 @@ async fn a_remote_checkpoint_carries_its_machine_and_both_machines_are_restored(
     let machines: Vec<Option<String>> = facts
         .iter()
         .filter_map(|f| match f {
-            Fact::CheckpointCreated { checkpoint } => Some(checkpoint.machine.clone()),
+            Fact::CheckpointCreated { checkpoint } => {
+                Some(checkpoint.machine.remote().map(str::to_owned))
+            }
             _ => None,
         })
         .collect();
@@ -170,15 +173,23 @@ async fn a_remote_checkpoint_carries_its_machine_and_both_machines_are_restored(
         .session
         .send(envelope("r1", rewind(&prompt)))
         .await;
-    let Ack::Accepted { result } = ack else {
+    let Ack::Accepted {
+        result: rust_cli_kernel_api::session_api::CommandResult::Rewound { restored, .. },
+    } = ack
+    else {
         panic!("{ack:?}")
     };
+    let rewound = |path: &str, machine: &str| rust_cli_kernel_api::session_api::RewoundFile {
+        path: EnvPath::new(path),
+        action: rust_cli_kernel_api::env_rewind::RestoreAction::Restore,
+        machine: rust_cli_kernel_api::ids::MachineName::new(machine),
+    };
     assert_eq!(
-        result["restored"],
-        json!([
-            {"path": "/work/a.txt", "action": "restore"},
-            {"path": "/home/dev/proj/b.txt", "action": "restore", "machine": "dev-a"}
-        ])
+        restored,
+        [
+            rewound("/work/a.txt", ""),
+            rewound("/home/dev/proj/b.txt", "dev-a")
+        ]
     );
     assert_eq!(file(&two.local, "/work/a.txt").as_deref(), Some("old a\n"));
     assert_eq!(
@@ -297,7 +308,7 @@ async fn rewind_options_name_the_machine_of_remote_files() {
     let files: Vec<(&str, Option<&str>)> = options[0]
         .files
         .iter()
-        .map(|change| (change.path.as_str(), change.machine.as_deref()))
+        .map(|change| (change.path.as_str(), change.machine.remote()))
         .collect();
     assert_eq!(
         files,

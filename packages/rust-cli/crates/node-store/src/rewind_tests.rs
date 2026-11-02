@@ -48,7 +48,7 @@ fn result(id: &str, owner: &str, call: &str) -> Fact {
 
 fn checkpoint(id: &str, prompt: &str, assistant: &str, call: &str) -> WorkspaceCheckpoint {
     WorkspaceCheckpoint {
-        machine: None,
+        machine: Default::default(),
         id: id.into(),
         prompt: MessageId::new(prompt),
         assistant: MessageId::new(assistant),
@@ -249,7 +249,7 @@ async fn remote_checkpoints_use_rust_cli_entries() {
     two_turns_with_a_write(&t).await;
     let local = checkpoint("checkpoint_l", "msg_1_u1", "msg_2_a1", "toolu_1");
     let remote = WorkspaceCheckpoint {
-        machine: Some("dev-a".into()),
+        machine: rust_cli_kernel_api::ids::MachineName::new("dev-a"),
         ..checkpoint("checkpoint_r", "msg_1_u1", "msg_2_a1", "toolu_1")
     };
     for one in [&local, &remote] {

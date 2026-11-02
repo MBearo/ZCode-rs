@@ -1,26 +1,23 @@
 //! 会话 actor 的循环：命令、主循环的提交请求、回合收尾都在这一个任务里按序处理（会话状态的
 //! 唯一 owner）。回合内的逻辑见 [`crate::turn`]。
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use rust_cli_base::Task;
 use rust_cli_kernel_api::abort::{Abort, AbortReason};
 use rust_cli_kernel_api::agents::AgentSignal;
-use rust_cli_kernel_api::checkpoint::PendingCheckpoints;
-use rust_cli_kernel_api::hooks::HookOutcome;
-use rust_cli_kernel_api::ids::{
-    CommandId, InteractionId, MessageId, OwnerEpoch, RunId, ToolUseId, TurnId,
-};
+use rust_cli_kernel_api::ids::{CommandId, InteractionId, MessageId, RunId, ToolUseId, TurnId};
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::orchestration::{
     InteractionAnswer, InteractionRequest, OrchestrationError, QueryError, QueryStop,
 };
+use rust_cli_kernel_api::run_ledger::RunLedger;
 use rust_cli_kernel_api::session_api::{
-    Ack, Command, CommandEnvelope, Delivery, KernelEvent, QueuedInput, SessionView,
+    Ack, Command, CommandEnvelope, CommandResult, KernelEvent, QueuedInput, SessionView,
 };
-use rust_cli_kernel_api::store::{Fact, FactBatch, SessionMeta, TurnAnchor, WorkspaceCheckpoint};
+use rust_cli_kernel_api::store::{Fact, SessionMeta, StoreError, WorkspaceCheckpoint};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -86,7 +83,7 @@ pub(crate) struct Job {
     pub(crate) cancel: Option<CancellationToken>,
 }
 
-/// 等待用户回答的交互：已持久化为待回答事实。
+/// 等待用户回答的交互（只在内存：进程退出后无法再回答，不落库，D4）。
 pub(crate) struct Pending {
     pub(crate) id: InteractionId,
     pub(crate) request: InteractionRequest,
@@ -104,7 +101,7 @@ pub(crate) struct Running {
     pub(crate) requests: mpsc::Receiver<SinkRequest>,
     pub(crate) task: Task<Result<QueryStop, QueryError>>,
     /// 提交失败的原因；有值时本回合以失败收尾，之后的提交一律拒绝。
-    pub(crate) failure: Option<String>,
+    pub(crate) failure: Option<StoreError>,
     /// 开启本回合的 user 消息：checkpoint 的 `messageId`（spec §4.2）。
     pub(crate) prompt: Option<MessageId>,
     /// 开启本回合的命令；提交 `prompt` 时写进批次（Node `anchor.sourceCommandId`）。
@@ -164,9 +161,9 @@ pub(crate) struct Actor {
     /// 计划模式的两个会话标志（已退出计划模式、待发退出提示）：与 `mode` 同一个
     /// owner，改模式时更新，提交 reentry / exit 时清掉；不持久化（context.md §13.4）。
     pub(crate) plan_flags: rust_cli_kernel_api::plan::PlanModeFlags,
-    pub(crate) queue: VecDeque<QueuedInput>,
-    /// next 通道：插话输入与两种后台通知的到达顺序（优先级 `next`，lane.rs）。
-    pub(crate) lane: VecDeque<crate::lane::Lane>,
+    /// 输入调度：排队的输入与 next 通道（插话输入与后台通知的到达顺序，优先级 `next`），一条输入只存一份（inbox.rs，
+    /// 工作线 F130）。
+    pub(crate) inbox: crate::inbox::Inbox,
     /// 已从任务表取走、还没开回合的定时任务（排在通道与 `Queue` 输入之后）。
     pub(crate) cron_fires: VecDeque<rust_cli_kernel_api::cron::CronFire>,
     pub(crate) pending: Vec<Pending>,
@@ -174,14 +171,10 @@ pub(crate) struct Actor {
     pub(crate) job: Option<Job>,
     /// 没有被代码回退撤销的 checkpoint，按写入顺序（spec §4）。
     pub(crate) checkpoints: Vec<WorkspaceCheckpoint>,
-    /// 工具已结束、结果还没提交的 checkpoint（`ToolFinished` 的 display）。
-    pub(crate) unsettled: PendingCheckpoints,
-    /// 工具已结束、结果还没提交的子代理关联（Agent 工具的 display，checkpoints.rs）。
-    pub(crate) links: HashMap<ToolUseId, Fact>,
-    /// 并入点跑过 UPS 而留下的插话（只在回合结束后取）与记下的结果（steering.rs）。
-    pub(crate) screened: HashMap<CommandId, Option<Box<HookOutcome>>>,
-    /// 排队输入里的 bash 模式命令与带内容块的输入（bash.rs，tui-input.md §2.2、§3.2）。
-    pub(crate) queued_kinds: HashMap<CommandId, crate::bash::QueuedKind>,
+    /// 提交核心（kernel-api `RunLedger`，与子代理的 sink 同一份，工作线 F130）：当前轮（随每个批次交给存储，node-store.md
+    /// §4，修复线 F6；冷加载时取 `LoadedSession.turn`）、工具已结束而结果还没提交的 checkpoint 与子代理关联。只在
+    /// [`Self::commit`] 与提交消息时改。
+    pub(crate) ledger: RunLedger,
     /// 历史被改写的次数（`HistoryRewritten.generation`）。
     pub(crate) generation: u64,
     /// 会话标题的生成（title.rs）与不带参数的 `/rename` 的起名任务（rename.rs）。
@@ -194,13 +187,10 @@ pub(crate) struct Actor {
     /// 回合或压缩在跑时到达的本地命令记录（修复线 L-A，local_record.rs）：收尾后按到达顺序提交。
     pub(crate) held_records: Vec<rust_cli_kernel_api::user_command::LocalCommandRecord>,
     seen: HashSet<CommandId>,
-    /// 当前轮（开启它的真实用户输入与轮次 ID）：随每个批次交给存储（node-store.md §4，修复线 F6）；冷加载时取
-    /// `LoadedSession.turn`。只在 `commit` 里改，锁不跨 await。
-    turn: std::sync::Mutex<Option<TurnAnchor>>,
     /// 续写时补在内存里、还没落库的消息，按历史里的顺序：末尾未结调用的中断结果（session-lifecycle.md §6.3，工作线
     /// F81）与 `No response requested.`（§6.3.1，工作线 F77）。第一批带消息的提交把它们排在最前面，成功后清掉；
-    /// `StoreResumeSentinel` 把它们单独提交（F79）。只在 `commit` 与 `store_resume_sentinel` 里改，锁不跨 await。
-    resume_pending: std::sync::Mutex<Vec<MessageId>>,
+    /// `StoreResumeSentinel` 把它们单独提交（F79）。只在 `commit` 与 `store_resume_sentinel` 里改。
+    pub(crate) resume_pending: Vec<MessageId>,
     /// 正在关闭：前台工作收尾后回复它并退出循环；期间不开新回合、不接新命令（spec §3.3）。
     pub(crate) closing: Option<oneshot::Sender<()>>,
     /// 收到了 `Shutdown`（进程要退出，修复线 F38，spec §3.5）：之后不再开回合。
@@ -221,15 +211,16 @@ pub(crate) struct Actor {
     asks: mpsc::WeakSender<Request>,
 }
 
-pub(crate) fn rejected(reason: impl Into<String>) -> Ack {
+/// 拒绝的回执：原因是给前端的文字（存储的错误按它的原文）。
+pub(crate) fn rejected(reason: impl std::fmt::Display) -> Ack {
     Ack::Rejected {
-        reason: reason.into(),
+        reason: reason.to_string(),
     }
 }
 
 pub(crate) fn accepted() -> Ack {
     Ack::Accepted {
-        result: serde_json::Value::Null,
+        result: CommandResult::Done,
     }
 }
 
@@ -262,17 +253,13 @@ impl Actor {
             selection: state.selection,
             execution: state.mode,
             plan_flags: Default::default(),
-            queue: VecDeque::new(),
-            lane: VecDeque::new(),
+            inbox: crate::inbox::Inbox::default(),
             cron_fires: VecDeque::new(),
             pending: Vec::new(),
             running: None,
             job: None,
             checkpoints: state.checkpoints,
-            unsettled: PendingCheckpoints::default(),
-            links: HashMap::new(),
-            screened: HashMap::new(),
-            queued_kinds: HashMap::new(),
+            ledger: RunLedger::new(state.turn),
             generation: 0,
             titles: TitleState::default(),
             loop_ticks: Default::default(),
@@ -280,8 +267,7 @@ impl Actor {
             goal,
             held_records: Vec::new(),
             seen: HashSet::new(),
-            turn: std::sync::Mutex::new(state.turn),
-            resume_pending: std::sync::Mutex::new(resume_pending),
+            resume_pending,
             closing: None,
             shutting_down: false,
             stream,
@@ -370,27 +356,6 @@ impl Actor {
         }
     }
 
-    /// 关闭（spec §3.3，`/clear`、`/resume` 的前台任务处理）：中止在跑的回合与可取消的后台工作，取消待回答的
-    /// 交互；排队的输入与通知不再开回合（通知没有 ack，留在执行环境与 agents 里，会话再打开时送达）。
-    async fn close(&mut self, reply: oneshot::Sender<()>, reason: AbortReason) {
-        tracing::info!(event = "session.closing", session = %self.meta.id, busy = self.busy(), "session closing");
-        self.closing = Some(reply);
-        // `/clear`、`/resume`（用户中止）之后旧会话的后台子代理照样询问（agents.md §4.1.2，工作线 F72）：先登记这个会话
-        // 与它的标题，下面取消的会话级询问与之后的询问都转到进程级的入口。退出程序时不登记。
-        if reason == AbortReason::User
-            && let Some(detached) = &self.deps.detached
-        {
-            detached.closed(&self.meta.id, &self.meta.title);
-        }
-        if let Some(running) = &self.running {
-            running.abort.abort(reason);
-        }
-        if let Some(cancel) = self.job.as_ref().and_then(|job| job.cancel.as_ref()) {
-            cancel.cancel();
-        }
-        self.cancel_pending().await;
-    }
-
     async fn handle(&mut self, request: Request) {
         match request {
             Request::View { reply } => {
@@ -410,8 +375,8 @@ impl Actor {
             Request::Ask { reply, .. } if self.closing.is_some() || self.shutting_down => {
                 drop(reply);
             }
-            Request::Ask { request, reply } => self.ask(request, reply, AskScope::Session).await,
-            Request::CancelAsk { tool_use } => self.cancel_ask(&tool_use).await,
+            Request::Ask { request, reply } => self.ask(request, reply, AskScope::Session),
+            Request::CancelAsk { tool_use } => self.cancel_ask(&tool_use),
             // 关闭中不接新命令：会话即将退出。
             Request::Command { reply, .. } if self.closing.is_some() => {
                 let _ = reply.send(rejected("the session is closed"));
@@ -441,14 +406,14 @@ impl Actor {
             Command::Submit { text, delivery, .. } => {
                 if self.busy() {
                     // 插话（Steer）进 next 通道，由主循环在下一个工具边界领取（steering.rs），其余等回合结束。
-                    if delivery == Delivery::Steer {
-                        self.lane.push_back(crate::lane::Lane::Input(id.clone()));
-                    }
-                    self.queue.push_back(QueuedInput {
-                        command: id,
-                        text,
-                        delivery,
-                    });
+                    self.inbox.push_input(
+                        QueuedInput {
+                            command: id,
+                            text,
+                            delivery,
+                        },
+                        crate::inbox::InputKind::Text,
+                    );
                     self.emit_queue();
                     return accepted();
                 }
@@ -507,7 +472,6 @@ impl Actor {
                     Err(reason) => rejected(reason),
                 }
             }
-            Command::SetWorkspace { root, note } => self.set_workspace(id, root, note).await,
             Command::ChangeDirectory { root } => self.change_directory(id, root, None).await,
             Command::ChangeDirectoryRecorded { root, record } => {
                 self.change_directory(id, root, Some(record)).await
@@ -536,130 +500,6 @@ impl Actor {
         }
     }
 
-    pub(crate) async fn commit(
-        &self,
-        command: Option<CommandId>,
-        facts: Vec<Fact>,
-    ) -> Result<(), String> {
-        // 性能修复（修复线 F6，审查 R5-3）：当前轮由 actor 给出，存储不再为 assistant 与每个用量行各从库里推导一次
-        // （那条查询要倒着扫本提示的全部消息）。批次里有新的人类输入时这里换轮次，提交成功后才记下。
-        let current = self.turn_anchor();
-        let turn = TurnAnchor::after(current.as_ref(), &facts, || self.deps.ids.turn());
-        let pending = self.pending_resume(&facts);
-        let stored_pending = !pending.is_empty();
-        let facts = pending.into_iter().chain(facts).collect();
-        let batch = FactBatch {
-            owner_epoch: OwnerEpoch::LOCAL,
-            command,
-            facts,
-            turn: turn.clone(),
-        };
-        self.deps
-            .store
-            .commit(&self.meta.id, batch)
-            .await
-            .map_err(|error| error.to_string())?;
-        *self
-            .turn
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = turn;
-        if stored_pending {
-            self.resume_pending
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clear();
-        }
-        Ok(())
-    }
-
-    /// 续写时补的消息还没落库、这一批有消息：返回它们，按历史里的顺序排在这一批最前面（工作线 F77、F81，
-    /// session-lifecycle.md §6.3、§6.3.1）。已不在活动历史里（被回退掉）的丢掉。
-    fn pending_resume(&self, facts: &[Fact]) -> Vec<Fact> {
-        if !facts
-            .iter()
-            .any(|fact| matches!(fact, Fact::MessageAppended { .. }))
-        {
-            return Vec::new();
-        }
-        let mut pending = self
-            .resume_pending
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let found: Vec<Fact> = pending
-            .iter()
-            .filter_map(|id| self.messages.iter().find(|message| message.id() == id))
-            .map(|message| Fact::MessageAppended {
-                message: message.clone(),
-            })
-            .collect();
-        if found.is_empty() {
-            pending.clear();
-        }
-        found
-    }
-
-    /// 会话里切到这个会话（`/resume`、`/fork`）之后：续写时补在内存里、还没落库的消息（末尾未结调用的中断结果与
-    /// `No response requested.`）马上单独提交一批（工作线 F79、F81，session-lifecycle.md §6.3、§6.3.1）。没有要写的时候
-    /// 什么都不做；提交失败时放回去，随下一批带消息的提交写。
-    async fn store_resume_sentinel(&self, id: CommandId) -> Ack {
-        // 先取下再提交：`commit` 看到这一批有消息时不会再把它们排进来一次。
-        let pending = std::mem::take(
-            &mut *self
-                .resume_pending
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
-        // 已不在活动历史里（被回退掉）的丢掉，同 `pending_resume`。
-        let facts: Vec<Fact> = pending
-            .iter()
-            .filter_map(|wanted| self.messages.iter().find(|message| message.id() == wanted))
-            .map(|message| Fact::MessageAppended {
-                message: message.clone(),
-            })
-            .collect();
-        if facts.is_empty() {
-            return accepted();
-        }
-        match self.commit(Some(id), facts).await {
-            Ok(()) => accepted(),
-            Err(reason) => {
-                *self
-                    .resume_pending
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = pending;
-                rejected(reason)
-            }
-        }
-    }
-
-    /// 提交一批锚在给定回合的事实，不改当前轮：起任务时记下回合、结果晚到的旁路请求用（会话标题的用量行，
-    /// usage.md §2.1.1，工作线 F73）。
-    pub(crate) async fn commit_in_turn(
-        &self,
-        turn: Option<TurnAnchor>,
-        facts: Vec<Fact>,
-    ) -> Result<(), String> {
-        let batch = FactBatch {
-            owner_epoch: OwnerEpoch::LOCAL,
-            command: None,
-            facts,
-            turn,
-        };
-        self.deps
-            .store
-            .commit(&self.meta.id, batch)
-            .await
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    }
-
-    pub(crate) fn turn_anchor(&self) -> Option<TurnAnchor> {
-        self.turn
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
     async fn on_job(&mut self, done: Result<JobDone, rust_cli_base::TaskError>) {
         self.job = None;
         match done {
@@ -674,23 +514,19 @@ impl Actor {
 
     pub(crate) fn emit_queue(&self) {
         self.log.append(KernelEvent::QueueChanged {
-            items: self.queue.iter().cloned().collect(),
+            items: self.inbox.queued(),
         });
     }
 
     async fn view(&self) -> SessionView {
         SessionView {
-            meta: self.meta.clone(),
-            messages: [self.earlier.as_slice(), self.messages.as_slice()].concat(),
-            selection: self.selection.clone(),
-            mode: self.execution.mode,
             plan: self.execution.plan,
             pending: self
                 .pending
                 .iter()
                 .map(|pending| (pending.id.clone(), pending.request.clone()))
                 .collect(),
-            queue: self.queue.iter().cloned().collect(),
+            queue: self.inbox.queued(),
             last_seq: self.log.last_seq(),
             revision: self.log.revision(),
             running: self.running.is_some(),
@@ -700,6 +536,12 @@ impl Actor {
             context_usage: self.context_occupancy(),
             context_notice: self.context_notice().unwrap_or_default(),
             output_speed: self.output_speed,
+            ..SessionView::new(
+                self.meta.clone(),
+                [self.earlier.as_slice(), self.messages.as_slice()].concat(),
+                self.selection.clone(),
+                self.execution.mode,
+            )
         }
     }
 }

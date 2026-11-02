@@ -17,7 +17,7 @@ use rust_cli_ssh_connect::{ArtifactSource, DownloadError, Platform};
 
 use super::fake_npm_tests::{FakeNpm, build_json, image, package, sha256_hex, sri};
 use super::{NpmExecutors, registry};
-use crate::options::TestDeclarations;
+use crate::assemble::options::TestDeclarations;
 
 const X64: &str = "@mbearo/zcode-linux-x64-gnu";
 const TARGET: &str = "x86_64-unknown-linux-gnu";

@@ -87,8 +87,8 @@ fn setup(account: &Arc<FakeAccount>) -> Setup {
         width: 100,
         height: 30,
         services: Services {
-            account: Some(account.clone()),
-            ..Services::default()
+            account: account.clone(),
+            ..super::stub_services::services()
         },
         ..Setup::default()
     }
@@ -209,19 +209,6 @@ async fn logout_reports_the_credentials_file() {
             "Logged out from Coding Plan accounts. Credentials: {CREDENTIALS}"
         ))
         .await;
-    })
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn without_an_account_service_login_is_unavailable() {
-    let model = GatedModel::scripted(vec![text_response(&["ok"])]);
-    with_ui(model, Setup::default(), |mut ui| async move {
-        ui.submit("/login zai-coding-plan");
-        ui.wait_for("Z.AI Coding Plan login is not available in this client.")
-            .await;
-        ui.submit("/logout");
-        ui.wait_for("Logout is not available in this client.").await;
     })
     .await;
 }

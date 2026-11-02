@@ -9,12 +9,7 @@ use serde_json::Value;
 use super::*;
 
 fn selection(model: &str) -> ModelSelection {
-    ModelSelection {
-        provider: "p".to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("p".to_owned(), model.to_owned())
 }
 
 fn recorded(source: &str, (text, data): (String, Value)) -> Message {

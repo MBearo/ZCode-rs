@@ -2,6 +2,7 @@
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{EnvironmentId, SessionId};
 use rust_cli_kernel_api::permission::{PermissionRule, RuleBehavior};
+use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_kernel_api::store::{Fact, SessionStore};
 
 use crate::tests::{TestStore, batch, meta};

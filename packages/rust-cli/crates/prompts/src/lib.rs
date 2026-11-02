@@ -19,6 +19,7 @@
 //! | [`goal`] | `/goal` 的说明与 prompt hook 评估的提示词（`prompts/goal/`） |
 //! | [`peers`] | 跨会话通信的包装、回执与工具结果的固定句子（`prompts/peers/`） |
 //! | [`monitor`] | Monitor 的结果、事件、说明与随开关多出的句子（`prompts/monitor/`，F83） |
+//! | [`notification`] | 后台命令与 Monitor 的终态通知（`<task-notification>`，F131 从 query 移来） |
 
 pub mod agents;
 pub mod commands;
@@ -27,6 +28,7 @@ pub mod goal;
 pub mod loops;
 pub mod models;
 pub mod monitor;
+pub mod notification;
 pub mod peers;
 pub mod reminder;
 pub mod remote;
@@ -49,12 +51,19 @@ pub(crate) fn trim(raw: &'static str) -> &'static str {
     raw.strip_suffix('\n').unwrap_or(raw)
 }
 
-/// 一个工具的描述与输入 schema。
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct ToolPrompt {
-    pub name: String,
+/// 一个工具发给模型的定义：描述与输入 schema（`prompts/tools/<名字>.json`）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Definition {
     pub description: String,
-    pub input_schema: Value,
+    pub schema: Value,
+}
+
+/// 数据文件的形状（只在加载时用）。
+#[derive(Deserialize)]
+struct ToolFile {
+    name: String,
+    description: String,
+    input_schema: Value,
 }
 
 /// 新增工具时在这里登记它的数据文件。
@@ -101,20 +110,33 @@ const TOOL_FILES: &[&str] = &[
     include_lf!("../../../prompts/tools/WaitForMcpServers.json"),
 ];
 
-fn tools() -> &'static HashMap<String, ToolPrompt> {
-    static TOOLS: OnceLock<HashMap<String, ToolPrompt>> = OnceLock::new();
+fn tools() -> &'static HashMap<String, Definition> {
+    static TOOLS: OnceLock<HashMap<String, Definition>> = OnceLock::new();
     TOOLS.get_or_init(|| {
         TOOL_FILES
             .iter()
-            .filter_map(|text| serde_json::from_str::<ToolPrompt>(text).ok())
-            .map(|prompt| (prompt.name.clone(), prompt))
+            .filter_map(|text| serde_json::from_str::<ToolFile>(text).ok())
+            .map(|file| {
+                let definition = Definition {
+                    description: file.description,
+                    schema: file.input_schema,
+                };
+                (file.name, definition)
+            })
             .collect()
     })
 }
 
-/// 按工具名取描述与 schema；没有登记的工具为 None。
-pub fn tool(name: &str) -> Option<&'static ToolPrompt> {
-    tools().get(name)
+/// 按工具名取定义。没有登记的名字给空描述与 `{"type": "object"}`：兜底只有这一处（工作线 F132 的 T7；以前 tools
+/// 给 `{"type": "object"}`，agents 与 ext 各自读、给 `null`）。内置工具都登记了（`lib_tests` 检查条数）。
+pub fn definition(name: &str) -> &'static Definition {
+    static MISSING: OnceLock<Definition> = OnceLock::new();
+    tools().get(name).unwrap_or_else(|| {
+        MISSING.get_or_init(|| Definition {
+            description: String::new(),
+            schema: serde_json::json!({"type": "object"}),
+        })
+    })
 }
 
 #[cfg(test)]

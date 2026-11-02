@@ -4,10 +4,10 @@
 //! `Request::Close` 失去回复）；调用方丢下 future 时会话停在半关的状态。会话表加了“关闭中”之后，打开同一个会话要
 //! 等关闭走完，所以关闭必须不依赖调用方：第一次 `close` 起关闭任务，之后的调用等同一个任务结束。
 
-use std::sync::PoisonError;
+use rust_cli_base::sync::LockUnpoisoned;
 
 use rust_cli_kernel_api::abort::AbortReason;
-use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::ids::{MachineName, SessionId};
 use rust_cli_kernel_api::session_api::{EndReason, KernelError};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -33,10 +33,7 @@ pub(crate) async fn ask<T>(
 pub(crate) async fn close(session: &Session, reason: EndReason) -> Vec<String> {
     // 关闭的进度（`Session::closing`）：None 还没关；Some 关闭任务已经起了，令牌在任务结束（或被丢下）时取消。
     let first = {
-        let mut latch = session
-            .closing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut latch = session.closing.lock_unpoisoned();
         match latch.as_ref() {
             Some(running) => Err(running.clone()),
             None => {
@@ -103,15 +100,16 @@ async fn run(
     // 后台任务跨 `/clear`、`/resume` 保留（只停前台任务）：这两种关闭
     // 不让执行环境忘掉会话（后台命令继续跑、通知留着）；退出程序时全部释放。
     let forget = !matches!(reason, EndReason::Clear | EndReason::Resume);
-    if let Err(error) = deps.machine.commands().close_session(&id, forget).await {
+    let primary = deps.machines.primary_machine();
+    if let Err(error) = primary.commands().close_session(&id, forget).await {
         tracing::warn!(%error, session = %id, "the environment could not close the session");
     }
     // 连上的远端机器同样关闭（R3，remote-exec.md §20.7.2）：没连上的那台以后重连时不会再送这个会话的通知给它。
     for remote in deps.machines.machines().machines {
-        let Some(machine) = deps.machines.machine(&remote.name) else {
+        let name = MachineName::new(remote.name);
+        let Some(machine) = deps.machines.machine(&name) else {
             continue;
         };
-        let name = remote.name;
         // 远端执行 F96（§23.3）：重连中的机器不等（SSH 一直重连，等它会挡住关闭）；请求交给关闭任务的作用域在后台发，
         // 连回来时送达，进程退出时随作用域结束。
         if deps.machines.reconnecting(&name) {
@@ -132,4 +130,27 @@ async fn run(
     // 最后一步：组装方清按会话的表、把会话移出会话表（等它的打开在这之后醒来）。
     deps.released.released(&id);
     notices
+}
+
+impl crate::actor::Actor {
+    /// 关闭（spec §3.3，`/clear`、`/resume` 的前台任务处理）：中止在跑的回合与可取消的后台工作，取消待回答的
+    /// 交互；排队的输入与通知不再开回合（通知没有 ack，留在执行环境与 agents 里，会话再打开时送达）。
+    pub(crate) async fn close(&mut self, reply: oneshot::Sender<()>, reason: AbortReason) {
+        tracing::info!(event = "session.closing", session = %self.meta.id, busy = self.busy(), "session closing");
+        self.closing = Some(reply);
+        // `/clear`、`/resume`（用户中止）之后旧会话的后台子代理照样询问（agents.md §4.1.2，工作线 F72）：先登记这个会话
+        // 与它的标题，下面取消的会话级询问与之后的询问都转到进程级的入口。退出程序时不登记。
+        if reason == AbortReason::User
+            && let Some(detached) = &self.deps.detached
+        {
+            detached.closed(&self.meta.id, &self.meta.title);
+        }
+        if let Some(running) = &self.running {
+            running.abort.abort(reason);
+        }
+        if let Some(cancel) = self.job.as_ref().and_then(|job| job.cancel.as_ref()) {
+            cancel.cancel();
+        }
+        self.cancel_pending();
+    }
 }

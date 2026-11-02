@@ -4,32 +4,22 @@ use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{EnvironmentId, SessionId};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::testing::{FixedClock, SequentialIds, UnusedEnvironment};
 
 use super::*;
 
 fn request(source: QuerySource) -> ContextRequest {
-    ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("s"),
-        workspace: WorkspaceRef {
+    ContextRequest::new(
+        SessionId::new("s"),
+        WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/w"),
         },
-        agent: None,
         source,
-        mode: PermissionMode::Default,
-        tool_names: Vec::new(),
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
-    }
+        PermissionMode::Default,
+        ModelSelection::new("p".to_owned(), rust_cli_base::models::GLM_5_3.to_owned()),
+    )
 }
 
 fn assembler() -> PromptAssembler {
@@ -99,7 +89,7 @@ async fn the_attribution_needs_the_bash_tool() {
 #[tokio::test]
 async fn other_query_sources_get_no_announcements() {
     let built = assembler()
-        .build(request(QuerySource::Side("title".to_owned())), &[])
+        .build(request(QuerySource::Side(SideSource::SessionTitle)), &[])
         .await
         .unwrap();
     assert!(built.attachments.is_empty());
@@ -139,7 +129,10 @@ async fn the_main_thread_step_splits_turn_attachments_from_announcements() {
         .map(|item| item.source.as_str())
         .collect();
     assert_eq!(announced, ["date"]);
-    for source in [QuerySource::Compact, QuerySource::Side("title".to_owned())] {
+    for source in [
+        QuerySource::Compact,
+        QuerySource::Side(SideSource::SessionTitle),
+    ] {
         let turn = assembler
             .turn_attachments(request(source), &prompt())
             .await

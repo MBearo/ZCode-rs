@@ -1,8 +1,9 @@
 //! ext 测试共用的替身：执行环境事实、内存里的 MCP 服务器（传输端口的替身）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -25,8 +26,8 @@ pub(crate) fn facts() -> EnvFacts {
         os_version: "Darwin 24".to_owned(),
         shell: "zsh".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new(HOME)),
+        uid: None,
     }
 }
 
@@ -60,10 +61,6 @@ pub(crate) struct FakeMcp {
     released: Mutex<HashMap<String, Value>>,
     /// 每次连接的（服务器名，工作区根）。
     roots: Mutex<Vec<(String, String)>>,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// 一个能握手、有给定能力与 instructions 的服务器；其余请求交给 `rest`。
@@ -110,8 +107,12 @@ impl FakeMcp {
         if let Some(text) = instructions {
             result["instructions"] = json!(text);
         }
-        lock(&self.released).insert(server.to_owned(), result.clone());
-        let id = lock(&self.received)
+        self.released
+            .lock_unpoisoned()
+            .insert(server.to_owned(), result.clone());
+        let id = self
+            .received
+            .lock_unpoisoned()
             .iter()
             .rev()
             .find(|(name, message)| name == server && message["method"] == "initialize")
@@ -125,28 +126,30 @@ impl FakeMcp {
     }
 
     pub(crate) fn with(self, name: &str, handler: Arc<Handler>) -> Self {
-        lock(&self.handlers).insert(name.to_owned(), handler);
+        self.handlers
+            .lock_unpoisoned()
+            .insert(name.to_owned(), handler);
         self
     }
 
     pub(crate) fn refusing(self, name: &str) -> Self {
-        lock(&self.refuse).push(name.to_owned());
+        self.refuse.lock_unpoisoned().push(name.to_owned());
         self
     }
 
     /// 收到的消息（服务器名，消息）。
     pub(crate) fn received(&self) -> Vec<(String, Value)> {
-        lock(&self.received).clone()
+        self.received.lock_unpoisoned().clone()
     }
 
     /// 每次连接的（服务器名，工作区根）。
     pub(crate) fn roots(&self) -> Vec<(String, String)> {
-        lock(&self.roots).clone()
+        self.roots.lock_unpoisoned().clone()
     }
 
     /// 服务器主动发一条消息（通知或请求）。
     pub(crate) fn push(&self, server: &str, message: Value) {
-        for connection in lock(&self.connections).values() {
+        for connection in self.connections.lock_unpoisoned().values() {
             if connection.server == server {
                 let _ = connection.sender.send(McpTransportEvent::Message {
                     message: message.clone(),
@@ -157,7 +160,7 @@ impl FakeMcp {
 
     /// 关闭某个服务器的全部连接。
     pub(crate) fn drop_server(&self, server: &str, session_expired: bool) {
-        for connection in lock(&self.connections).values() {
+        for connection in self.connections.lock_unpoisoned().values() {
             if connection.server == server {
                 let _ = connection.sender.send(McpTransportEvent::Closed {
                     reason: Some("gone".to_owned()),
@@ -175,15 +178,17 @@ impl McpTransport for FakeMcp {
         workspace: &WorkspaceRef,
         request: McpConnect,
     ) -> Result<McpConnectionId, McpError> {
-        lock(&self.roots).push((request.server.clone(), workspace.root.as_str().to_owned()));
-        if lock(&self.refuse).contains(&request.server) {
+        self.roots
+            .lock_unpoisoned()
+            .push((request.server.clone(), workspace.root.as_str().to_owned()));
+        if self.refuse.lock_unpoisoned().contains(&request.server) {
             return Err(McpError::Connect {
                 message: "spawn failed".to_owned(),
             });
         }
         let id = format!("c{}", self.next.fetch_add(1, Ordering::Relaxed));
         let (sender, events) = mpsc::unbounded_channel();
-        lock(&self.connections).insert(
+        self.connections.lock_unpoisoned().insert(
             id.clone(),
             Connection {
                 events: Some(events),
@@ -196,7 +201,7 @@ impl McpTransport for FakeMcp {
 
     async fn send(&self, connection: &McpConnectionId, message: Value) -> Result<(), McpError> {
         let (server, sender) = {
-            let connections = lock(&self.connections);
+            let connections = self.connections.lock_unpoisoned();
             let found = connections
                 .get(connection.as_str())
                 .ok_or_else(|| McpError::Closed {
@@ -204,17 +209,19 @@ impl McpTransport for FakeMcp {
                 })?;
             (found.server.clone(), found.sender.clone())
         };
-        lock(&self.received).push((server.clone(), message.clone()));
+        self.received
+            .lock_unpoisoned()
+            .push((server.clone(), message.clone()));
         let (Some(id), Some(method)) = (
             message.get("id").cloned(),
             message.get("method").and_then(Value::as_str),
         ) else {
             return Ok(());
         };
-        let handler = lock(&self.handlers).get(&server).cloned();
+        let handler = self.handlers.lock_unpoisoned().get(&server).cloned();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let released = (method == "initialize")
-            .then(|| lock(&self.released).get(&server).cloned())
+            .then(|| self.released.lock_unpoisoned().get(&server).cloned())
             .flatten();
         let reply = match released {
             Some(result) => Some(Ok(result)),
@@ -232,7 +239,9 @@ impl McpTransport for FakeMcp {
     }
 
     fn events(&self, connection: &McpConnectionId) -> BoxStream<'static, McpTransportEvent> {
-        let events = lock(&self.connections)
+        let events = self
+            .connections
+            .lock_unpoisoned()
             .get_mut(connection.as_str())
             .and_then(|found| found.events.take());
         match events {
@@ -244,7 +253,7 @@ impl McpTransport for FakeMcp {
     }
 
     async fn close(&self, connection: &McpConnectionId) -> Result<(), McpError> {
-        if let Some(found) = lock(&self.connections).get(connection.as_str()) {
+        if let Some(found) = self.connections.lock_unpoisoned().get(connection.as_str()) {
             let _ = found.sender.send(McpTransportEvent::Closed {
                 reason: None,
                 session_expired: false,
@@ -260,31 +269,26 @@ pub(crate) fn tool_context<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
     mode: rust_cli_kernel_api::permission::PermissionMode,
 ) -> rust_cli_kernel_api::tool::ToolUseContext {
     use rust_cli_kernel_api::env::{OperationContext, Origin};
-    use rust_cli_kernel_api::ids::{
-        Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
-    };
-    use rust_cli_kernel_api::testing::{MemoryStore, RecordingSink, local_services, machine};
+    use rust_cli_kernel_api::ids::{Generation, OperationId, RunId, SessionId};
+    use rust_cli_kernel_api::testing::{RecordingSink, controller_services, machine};
     let session = SessionId::new("sess_1");
     let run = RunId::new("run_1");
     rust_cli_kernel_api::tool::ToolUseContext {
         session: session.clone(),
         run: run.clone(),
-        tool_use: ToolUseId::new("toolu_1"),
-        agent: None,
         workspace: workspace(),
         mode,
-        cancel: tokio_util::sync::CancellationToken::new(),
         machine: machine(env.clone()),
-        local: local_services(env),
-        artifacts: Arc::new(MemoryStore::default()),
+        controller: controller_services(env),
         interactions: Arc::new(RecordingSink::default()),
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g1"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op_call"),
-            origin: Origin::Agent { session, run },
-        },
+        session_ops: Arc::new(RecordingSink::default()),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g1"),
+            OperationId::new("op_call"),
+            Origin::Agent { session, run },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -315,7 +319,9 @@ impl rust_cli_kernel_api::tool::Tool for EchoBash {
         _progress: mpsc::Sender<rust_cli_kernel_api::tool::ToolProgress>,
     ) -> Result<rust_cli_kernel_api::tool::ToolOutput, rust_cli_kernel_api::tool::ToolError> {
         let command = input["command"].as_str().unwrap_or_default().to_owned();
-        lock(&self.commands).push((command.clone(), context.operation.operation.to_string()));
+        self.commands
+            .lock_unpoisoned()
+            .push((command.clone(), context.operation.operation.to_string()));
         Ok(rust_cli_kernel_api::tool::ToolOutput {
             content: vec![rust_cli_kernel_api::message::ToolResultContent::Text {
                 text: format!("out:{command}"),
@@ -323,5 +329,46 @@ impl rust_cli_kernel_api::tool::Tool for EchoBash {
             is_error: command.contains("fail"),
             display: Value::Null,
         })
+    }
+}
+
+/// skill `!` 命令的判决链替身（kernel-api `ScopedGate`）：命令在 `denied` 里时拒绝，命令匹配一条前缀写法的
+/// `Bash(<前缀>:*)` allowed 规则时放行，其余询问。规则本身的语义（deny 与 ask 优先、通配、并空白）在 policy 的测试里
+/// （`lib_tests_allowed.rs`）；这里只看 ext 怎样用判决的结论。
+#[derive(Default)]
+pub(crate) struct AllowedGate {
+    pub denied: Vec<String>,
+}
+
+#[async_trait]
+impl rust_cli_kernel_api::orchestration::ScopedGate for AllowedGate {
+    async fn decide_with_allowed(
+        &self,
+        _tool: &dyn rust_cli_kernel_api::tool::Tool,
+        input: &Value,
+        _context: &rust_cli_kernel_api::tool::ToolUseContext,
+        allowed: &[rust_cli_kernel_api::permission::PermissionRule],
+    ) -> rust_cli_kernel_api::permission::PermissionDecision {
+        use rust_cli_kernel_api::permission::PermissionDecision;
+        use rust_cli_kernel_api::permission::syntax::{ShellRule, prefix_matches};
+        let command = input["command"].as_str().unwrap_or_default();
+        if self.denied.iter().any(|denied| denied == command) {
+            return PermissionDecision::Deny {
+                message: "Permission to use Bash has been denied.".to_owned(),
+            };
+        }
+        let admitted = allowed.iter().any(|rule| {
+            rule.tool == "Bash"
+                && rule.content.as_deref().is_some_and(|content| {
+                    matches!(ShellRule::parse(content), ShellRule::Prefix(prefix) if prefix_matches(prefix, command))
+                })
+        });
+        if admitted {
+            PermissionDecision::Allow {
+                updated_input: None,
+            }
+        } else {
+            PermissionDecision::ask("This command requires approval", Vec::new())
+        }
     }
 }

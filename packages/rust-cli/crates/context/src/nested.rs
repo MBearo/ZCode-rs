@@ -6,11 +6,12 @@
 
 use std::collections::HashSet;
 
-use rust_cli_kernel_api::env::EnvFacts;
+use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
 use rust_cli_kernel_api::env_shell;
+use rust_cli_kernel_api::history::touched_files;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::machine::Shell;
-use rust_cli_kernel_api::message::{ContentBlock, Message};
+use rust_cli_kernel_api::message::Message;
 use serde_json::{Value, json};
 
 use crate::instructions::{self, Announced};
@@ -21,56 +22,9 @@ use crate::rules_load::Worktree;
 
 pub(crate) const SOURCE: &str = "nested_memory";
 
-/// 会把路径记为触发的工具（Read、Write、Edit；NotebookEdit 不触发）。
-const TRIGGERING: &[&str] = &["Read", "Write", "Edit"];
-
 #[path = "nested_seen.rs"]
 mod seen;
 pub(crate) use seen::Seen;
-
-/// 成功的 Read / Write / Edit 调用的原始 `file_path`，按调用顺序。只看 `messages` 范围内的调用。
-fn touched_paths(messages: &[Message]) -> Vec<String> {
-    let mut failed = HashSet::new();
-    let mut answered = HashSet::new();
-    for message in messages {
-        let Message::User(user) = message else {
-            continue;
-        };
-        for block in &user.content {
-            if let ContentBlock::ToolResult {
-                tool_use_id,
-                is_error,
-                ..
-            } = block
-            {
-                answered.insert(tool_use_id.clone());
-                if *is_error {
-                    failed.insert(tool_use_id.clone());
-                }
-            }
-        }
-    }
-    let mut paths = Vec::new();
-    for message in messages {
-        let Message::Assistant(assistant) = message else {
-            continue;
-        };
-        for block in &assistant.content {
-            let ContentBlock::ToolUse { id, name, input } = block else {
-                continue;
-            };
-            let path = input.get("file_path").and_then(Value::as_str);
-            if let Some(path) = path.filter(|path| !path.is_empty())
-                && TRIGGERING.contains(&name.as_str())
-                && answered.contains(id)
-                && !failed.contains(id)
-            {
-                paths.push(path.to_owned());
-            }
-        }
-    }
-    paths
-}
 
 /// 这一步的触发：最近一条 assistant 消息里成功的调用（结果已在其后的历史里）。
 fn triggers(history: &[Message]) -> Vec<String> {
@@ -80,18 +34,21 @@ fn triggers(history: &[Message]) -> Vec<String> {
     else {
         return Vec::new();
     };
-    let mut paths = touched_paths(&history[last..]);
+    // 触发的工具与“成功”的判断只在 kernel-api 的 `history::touched_files`（F132 的 T9：以前这里与 ext 的条件 skill 各写一份）。
     let mut seen = HashSet::new();
-    paths.retain(|path| seen.insert(path.clone()));
-    paths
+    touched_files(&history[last..])
+        .into_iter()
+        .filter(|path| seen.insert(*path))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// 读写过的文件与发过的 `nested_memory`（读取状态：在里面的不再发）。从头算的写法，
 /// 是 [`Seen::known`] 的对照（`nested_tests.rs`）。
 #[cfg(test)]
 fn already_known(scope: &Scope<'_>, history: &[Message]) -> HashSet<String> {
-    let mut known: HashSet<String> = touched_paths(history)
-        .iter()
+    let mut known: HashSet<String> = touched_files(history)
+        .into_iter()
         .map(|path| scope.style.key(&scope.resolve(path)))
         .collect();
     for attachment in attachments(history, SOURCE) {
@@ -128,7 +85,7 @@ impl<'a> Scope<'a> {
 /// 仍在其中的不再随 nested memory 发。
 pub(crate) async fn announce(
     (scope, seen, session, shell): (&Scope<'_>, &Seen, &SessionId, &dyn Shell),
-    facts: &EnvFacts,
+    (facts, additional): (&EnvFacts, &[EnvPath]),
     history: &[Message],
     files: &[RuleFile],
 ) -> Vec<(String, Value)> {
@@ -148,14 +105,9 @@ pub(crate) async fn announce(
         .into_iter()
         .filter(|old| current.iter().any(|file| file.path == old.path))
         .collect();
-    // 工作目录：工作区根与附加目录。
+    // 工作目录：工作区根与附加目录（附加目录来自会话配置，deployment.md §21）。
     let mut roots = vec![scope.cwd.clone()];
-    roots.extend(
-        facts
-            .additional_directories
-            .iter()
-            .map(|dir| dir.as_str().to_owned()),
-    );
+    roots.extend(additional.iter().map(|dir| dir.as_str().to_owned()));
     // 只在有候选规则文件时才算，按会话增量算（修复线 F6，`nested_seen.rs`）。
     let mut known: Option<HashSet<String>> = None;
     let worktree: Option<Worktree> = scope.worktree().await;

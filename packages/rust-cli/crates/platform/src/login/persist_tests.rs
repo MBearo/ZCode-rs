@@ -17,10 +17,8 @@ async fn the_effort_default_keeps_the_rest_of_the_personal_config() {
     )
     .await;
     let selection = ModelSelection {
-        provider: "zai".to_owned(),
-        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: Some("high".to_owned()),
-        connection: None,
+        ..ModelSelection::new("zai".to_owned(), models::GLM_5_3_ACCOUNT.to_owned())
     };
     let shown = super::super::save_default_model((&file, &legacy), &selection)
         .await
@@ -66,12 +64,7 @@ async fn a_pending_legacy_import_keeps_the_personal_config_absent() {
         r#"{"provider":{"my-proxy":{"kind":"anthropic","options":{"apiKey":"k"}}}}"#,
     )
     .await;
-    let selection = ModelSelection {
-        provider: "zai".to_owned(),
-        model: models::GLM_5_3_ACCOUNT.to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    let selection = ModelSelection::new("zai".to_owned(), models::GLM_5_3_ACCOUNT.to_owned());
     let refused = super::super::save_default_model((&file, &legacy), &selection)
         .await
         .unwrap_err();
@@ -101,14 +94,16 @@ async fn a_team_default_keeps_only_the_node_fields() {
     let (file, legacy) = (paths.provider_config(), paths.cli_config());
     write(file.as_path(), r#"{"schemaVersion":1,"config":{}}"#).await;
     let selection = ModelSelection {
-        provider: "account:bigmodel-team-coding-plan".to_owned(),
-        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: Some("high".to_owned()),
         connection: Some(Box::new(rust_cli_kernel_api::model::ModelConnection {
             product_id: "prod-1".to_owned(),
             organization_id: "org-t".to_owned(),
             project_id: "p-t".to_owned(),
         })),
+        ..ModelSelection::new(
+            "account:bigmodel-team-coding-plan".to_owned(),
+            models::GLM_5_3_ACCOUNT.to_owned(),
+        )
     };
     super::super::save_default_model((&file, &legacy), &selection)
         .await

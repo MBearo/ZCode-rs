@@ -28,16 +28,17 @@ use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::listing::{ListingEntry, ListingSource, Listings};
 use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::mcp::McpTransport;
-use rust_cli_kernel_api::mcp_state::{McpConnections, WAIT_FOR_MCP_SERVERS};
+use rust_cli_kernel_api::mcp_state::McpConnections;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::orchestration::{
-    ContextRequest, OrchestrationError, ToolRegistry, ToolSnapshot,
+    ContextRequest, OrchestrationError, ScopedGate, ToolRegistry, ToolSnapshot,
 };
 use rust_cli_kernel_api::tool::Tool;
-use rust_cli_policy::PolicyGate;
+use rust_cli_kernel_api::tool_names::WAIT_FOR_MCP_SERVERS;
 
 pub use mcp::{McpManager, McpScope, McpServer, McpServers, McpSettings};
 pub use plugins::{Plugin, PluginAgentFile, PluginSources, Plugins};
+use rust_cli_kernel_api::tool_names;
 pub use skills::{Skill, SkillCatalog, SkillCommands, SkillSource, SkillTool};
 
 /// ext 用到的端口，由 runtime 注入。
@@ -49,7 +50,7 @@ pub struct ExtPorts {
     pub files: Arc<dyn Files>,
     pub ids: Arc<dyn Ids>,
     /// Skill 的 `!` 命令用判决链（带 skill 的 `allowed-tools`，ext.md §2.5）。
-    pub gate: Arc<PolicyGate>,
+    pub gate: Arc<dyn ScopedGate>,
     pub mcp: Arc<dyn McpTransport>,
     /// 远端机器的注册表（R5，remote-exec.md §22.6）：绑定到远端机器的 MCP 服务器从这里取那台机器的管道；None 时
     /// （只给测试的组装）它们都连不上。
@@ -91,7 +92,7 @@ impl Ext {
     pub fn new(ports: ExtPorts, base: Arc<dyn ToolRegistry>, config: ExtConfig) -> Self {
         let skills = Arc::new(SkillCatalog::new(ports.info.clone(), ports.files.clone()));
         let runner = base
-            .find("Bash")
+            .find(tool_names::BASH)
             .map(|bash| skills::runner(bash, ports.gate.clone(), ports.ids.clone()));
         // 用户调用（`/<名字>`，ext.md §2.7）与 Skill 工具共用目录与 `!` 命令的执行者。
         let commands = Arc::new(SkillCommands::new(skills.clone(), runner.clone()));
@@ -223,6 +224,16 @@ impl ToolRegistry for ExtRegistry {
 
     fn withheld(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.base.withheld(name)
+    }
+
+    /// 内置注册表的规则（工作线 F134：以前是缺省的 false，内置注册表也是 false）。
+    fn hides(&self, name: &str) -> bool {
+        self.base.hides(name)
+    }
+
+    /// 内置工具在前、skill 与 MCP 工具接在后面，发请求前照内置注册表的规则排（同上）。
+    fn keeps_order(&self) -> bool {
+        self.base.keeps_order()
     }
 
     /// MCP 工具、连接中的服务器与 instructions 在同一把锁里取（query.md §1.3，修复线 F36）。

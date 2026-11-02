@@ -38,18 +38,17 @@ mod tools {
         EnvFacts, EnvPath, OperationContext, Origin, ReadFile, WorkspaceRef,
     };
     use rust_cli_kernel_api::ids::{
-        EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
+        EnvironmentId, Generation, OperationId, RunId, SessionId, ToolUseId,
     };
     use rust_cli_kernel_api::machine::Files;
     use rust_cli_kernel_api::permission::PermissionMode;
     use rust_cli_kernel_api::store::{ArtifactRef, ArtifactStore};
     use rust_cli_kernel_api::testing::{
-        MemoryArtifacts, MemoryEnvironment, RecordingSink, local_services, machine,
+        MemoryArtifacts, MemoryEnvironment, RecordingSink, controller_services, machine,
     };
     use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
     use serde_json::{Value, json};
     use tokio::sync::mpsc;
-    use tokio_util::sync::CancellationToken;
 
     use crate::{FileTools, ReadFileState, WriteTool};
 
@@ -60,8 +59,8 @@ mod tools {
             os_version: "x".into(),
             shell: "zsh".into(),
             is_git_repo: false,
-            additional_directories: Vec::new(),
             home: None,
+            uid: None,
         }
     }
 
@@ -74,29 +73,27 @@ mod tools {
         let env = env.clone();
         ToolUseContext {
             session: session.clone(),
-            run: RunId::new("run_1"),
             tool_use: ToolUseId::new(call),
-            agent: None,
             workspace: WorkspaceRef {
                 environment: EnvironmentId::new("local"),
                 root: EnvPath::new("/work"),
             },
             mode: PermissionMode::AcceptEdits,
-            cancel: CancellationToken::new(),
             machine: machine(env.clone()),
-            local: local_services(env),
+            controller: controller_services(env),
             artifacts: artifacts.clone(),
             interactions: Arc::new(RecordingSink::default()),
-            operation: OperationContext {
-                environment: EnvironmentId::new("local"),
-                generation: Generation::new("g"),
-                owner_epoch: OwnerEpoch::LOCAL,
-                operation: OperationId::new(format!("op_{call}")),
-                origin: Origin::Agent {
+            session_ops: Arc::new(RecordingSink::default()),
+            operation: OperationContext::new(
+                EnvironmentId::new("local"),
+                Generation::new("g"),
+                OperationId::new(format!("op_{call}")),
+                Origin::Agent {
                     session,
                     run: RunId::new("run_1"),
                 },
-            },
+            ),
+            ..rust_cli_kernel_api::testing::tool_use_context()
         }
     }
 

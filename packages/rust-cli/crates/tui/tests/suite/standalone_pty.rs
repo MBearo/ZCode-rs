@@ -1,0 +1,91 @@
+#![allow(clippy::disallowed_methods, reason = "子进程按环境变量扮演哪一种情况")]
+//! 启动前的两个独立对话框在真实终端里（docs/specs/rust-cli/workspace-trust.md §2.4、update.md §6）：子进程经伪终端
+//! 进入真实终端、画出对话框；对话框出现之前排着的键丢掉，按键给出回答之后离开 alternate screen、回到普通模式，再把回答
+//! 写到 stdout。同 `panic_terminal.rs` 的做法（只在 unix 上）。
+use std::collections::BTreeMap;
+use std::io::Write;
+
+use rust_cli_tui::Os;
+use rust_cli_tui::trust::{self, TrustPrompt};
+use rust_cli_tui::update::{self, UpdateInfo};
+
+use super::pty::{Pty, ROLE, shows};
+
+/// 子进程的入口（[`child`]）。
+const CHILD: &str = "suite::standalone_pty::child";
+/// 离开 alternate screen。
+const LEAVE: &str = "\x1b[?1049l";
+/// ↓ 键。
+const DOWN: &[u8] = b"\x1b[B";
+/// 子进程写回答的前缀。
+const ANSWER: &str = "ANSWER ";
+/// 键盘增强的检测是进入终端时的第 2 个设备属性查询：颜色探测（第 1 个）已经结束，对话框还没开始读按键。
+const AFTER_PROBE: usize = 2;
+
+/// 回答在离开 alternate screen 之后写出，子进程正常退出，终端回到普通模式。
+fn answered(pty: &mut Pty, expected: &str) {
+    let (status, all) = pty.finish();
+    assert!(status.success(), "{all:?}");
+    let answer = all
+        .find(&format!("{ANSWER}{expected}"))
+        .unwrap_or_else(|| panic!("{all:?}"));
+    let leave = all.rfind(LEAVE).unwrap_or_else(|| panic!("{all:?}"));
+    assert!(leave < answer, "{all:?}");
+    assert!(!pty.raw());
+}
+
+/// 对话框出现之前就排着的回车不算回答（F138-1，主会话定）：以前它选中焦点所在的 `No, exit`，进程以退出码 1 退出。
+#[test]
+fn the_trust_dialog_answers_in_a_real_terminal() {
+    let mut pty = Pty::start(CHILD, "trust");
+    pty.type_ahead(AFTER_PROBE, b"\r");
+    pty.until("the dialog", |text| shows(text, "› No, exit"));
+    pty.send(DOWN);
+    pty.send(b"\r");
+    answered(&mut pty, "Trusted");
+}
+
+/// 选择屏出现之前就排着的回车同样丢掉（不是 Update now）。
+#[test]
+fn the_update_prompt_answers_in_a_real_terminal() {
+    let mut pty = Pty::start(CHILD, "update");
+    pty.type_ahead(AFTER_PROBE, b"\r");
+    pty.until("the prompt", |text| shows(text, "› 1. Update now"));
+    pty.send(b"3");
+    answered(&mut pty, "SkipUntilNext");
+}
+
+/// 子进程的入口（只被上面的测试经伪终端启动）：英文，16 色（只有 `LANG`）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "被伪终端的测试作为子进程启动"]
+async fn child() {
+    let Ok(role) = std::env::var(ROLE) else {
+        return;
+    };
+    let vars = BTreeMap::from([("LANG".to_owned(), "en_US.UTF-8".to_owned())]);
+    let answer = match role.as_str() {
+        "trust" => {
+            let prompt = TrustPrompt {
+                path: "/Users/dev/work".to_owned(),
+                backstop: false,
+                grants: None,
+            };
+            let answer = trust::ask(prompt, &vars, None, None, Os::Unix).await;
+            format!("{:?}", answer.unwrap())
+        }
+        "update" => {
+            let info = UpdateInfo {
+                current: "0.1.46".to_owned(),
+                latest: "0.1.47".to_owned(),
+                command: "npm install -g @scope/zcode".to_owned(),
+                notes_url: "https://www.npmjs.com/package/@scope/zcode".to_owned(),
+            };
+            let choice = update::ask(info, &vars, None, None, Os::Unix).await;
+            format!("{:?}", choice.unwrap())
+        }
+        other => panic!("unknown role {other}"),
+    };
+    let line = format!("\r\n{ANSWER}{answer}\r\n");
+    std::io::stdout().write_all(line.as_bytes()).unwrap();
+    std::io::stdout().flush().unwrap();
+}

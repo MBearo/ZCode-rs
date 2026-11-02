@@ -15,11 +15,12 @@ use rust_cli_prompts::texts::{self, render};
 
 use crate::config::{OutputStyle, Surface};
 use crate::render::{Bullet, bullets};
+use rust_cli_kernel_api::tool_names;
 
 /// 提示词里提到的工具名。
-pub(crate) const SKILL_TOOL: &str = "Skill";
-pub(crate) const AGENT_TOOL: &str = "Agent";
-pub(crate) const BASH_TOOL: &str = "Bash";
+pub(crate) const SKILL_TOOL: &str = tool_names::SKILL;
+pub(crate) const AGENT_TOOL: &str = tool_names::AGENT;
+pub(crate) const BASH_TOOL: &str = tool_names::BASH;
 
 /// `<total_tokens>` 的预算（padded-countdown 模式的默认值）。
 pub(crate) const TOTAL_TOKENS_BUDGET: u64 = 15_000_000;

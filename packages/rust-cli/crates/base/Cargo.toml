@@ -18,6 +18,8 @@ futures-util.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# 字节的 sha256 写成 hex（`hash::sha256_hex`，F128）。
+sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true

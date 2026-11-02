@@ -3,25 +3,17 @@ use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::selection;
 
 use super::*;
 use crate::ui::app::Local;
-use crate::ui::i18n::{Lang, strings};
+use crate::ui::i18n::Lang;
 use crate::ui::palette::{ColorLevel, Palette};
 use crate::ui::text::plain;
-use crate::view::Transcript;
 
 const FULL: PermissionMode = PermissionMode::BypassPermissions;
 
 fn app(mode: PermissionMode) -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(selection(), mode, crate::view::test_workspace()),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
+    crate::ui::test_support::app_with(crate::ui::test_support::palette(), Lang::En, mode)
 }
 
 fn press(app: &mut App, code: KeyCode) -> Option<Action> {
@@ -239,7 +231,6 @@ fn render(confirm: &YoloConfirm, lang: Lang, width: usize, height: usize) -> Vec
     let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
     let view = View {
         palette: &palette,
-        strings: strings(lang),
         lang,
         width,
         height: 24,

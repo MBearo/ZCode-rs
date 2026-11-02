@@ -1,8 +1,9 @@
 //! App 协议的方法表（docs/specs/rust-cli/app-protocol.md §3.4、§10.3）：P1 的方法；其余回 `-32601`。
 //! 命令在 [`crate::commands`]，订阅在 [`crate::subscribe`]。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
@@ -101,8 +102,7 @@ impl Server {
     ) -> Result<Arc<Bridged<Live>>, KernelError> {
         let followup = self
             .followups
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_unpoisoned()
             .get(session)
             .copied()
             .unwrap_or(Followup::Queue);
@@ -115,9 +115,7 @@ impl Server {
     }
 
     fn preferences(&self) -> std::sync::MutexGuard<'_, Preferences> {
-        self.preferences
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.preferences.lock_unpoisoned()
     }
 
     async fn read_presentation(&self, params: &Value) -> Value {

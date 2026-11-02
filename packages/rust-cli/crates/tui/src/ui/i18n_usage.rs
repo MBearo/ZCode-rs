@@ -4,7 +4,6 @@ use super::i18n::Lang;
 
 /// 一种语言的固定文字。
 pub struct UsageStrings {
-    pub title: &'static str,
     pub usage_tab: &'static str,
     pub stats_tab: &'static str,
     pub session: &'static str,
@@ -25,14 +24,12 @@ pub struct UsageStrings {
     pub less: &'static str,
     pub more: &'static str,
     pub empty: &'static str,
-    pub loading: &'static str,
     pub no_models: &'static str,
     pub usage_hint: &'static str,
     pub stats_hint: &'static str,
 }
 
 const EN: UsageStrings = UsageStrings {
-    title: "Usage",
     usage_tab: "Usage",
     stats_tab: "Stats",
     session: "Session",
@@ -53,14 +50,12 @@ const EN: UsageStrings = UsageStrings {
     less: "Less",
     more: "More",
     empty: "No stats available yet. Start using ZCode!",
-    loading: "Loading your ZCode stats\u{2026}",
     no_models: "No model usage data available",
     usage_hint: "{tab} to switch tabs",
     stats_hint: "{tab} to switch tabs \u{b7} {\u{2190}/\u{2192}} to switch views \u{b7} {r} to cycle dates \u{b7} {esc} to close",
 };
 
 const ZH: UsageStrings = UsageStrings {
-    title: "用量",
     usage_tab: "用量",
     stats_tab: "统计",
     session: "会话",
@@ -81,7 +76,6 @@ const ZH: UsageStrings = UsageStrings {
     less: "少",
     more: "多",
     empty: "还没有统计数据。开始使用 ZCode 吧！",
-    loading: "正在读取 ZCode 的统计\u{2026}",
     no_models: "没有模型用量数据",
     usage_hint: "{tab} 切换标签页",
     stats_hint: "{tab} 切换标签页 \u{b7} {\u{2190}/\u{2192}} 切换视图 \u{b7} {r} 切换日期范围 \u{b7} {esc} 关闭",

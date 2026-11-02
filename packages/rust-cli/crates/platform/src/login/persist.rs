@@ -7,12 +7,11 @@
 use rust_cli_fs::LockOptions;
 use rust_cli_paths::StoragePath;
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 
 use super::LoginError;
 use crate::account::{self, CodingPlanProvider};
 use crate::credentials::{CredentialError, CredentialStore, Credentials, PRIVATE_WRITE};
-use crate::token::Family;
+use rust_cli_base::account::Family;
 
 /// 没有账号 Profile 的连接身份取 sha256 十六进制摘要的前几位。
 const IDENTITY_DIGEST_HEX_CHARS: usize = 24;
@@ -44,10 +43,7 @@ fn empty_personal() -> Value {
 /// 没有账号 Profile 的连接身份：`key-` + sha256(secret) 的前 24 个 hex（Node
 /// `createStandaloneAccountIdentityFromSecret`）。
 pub(crate) fn identity_from_secret(secret: &str) -> String {
-    let digest: String = Sha256::digest(secret.trim().as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let digest = rust_cli_base::hash::sha256_hex(secret.trim().as_bytes());
     format!("key-{}", &digest[..IDENTITY_DIGEST_HEX_CHARS])
 }
 
@@ -191,7 +187,7 @@ pub(crate) async fn save_default_selection(
             selection.insert("options".to_owned(), Value::Object(options));
         }
         body.insert("defaultModelSelection".to_owned(), Value::Object(selection));
-        let text = crate::cli_config::node_pretty(&config);
+        let text = crate::local::cli_config::node_pretty(&config);
         rust_cli_fs::atomic_write(path, text.as_bytes(), PRIVATE_WRITE)
             .await
             .map_err(|error| failed(format!("{}: {error}", path.display())))

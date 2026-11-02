@@ -38,13 +38,13 @@ fn the_parameter_goes_last_with_local_first() {
         machines: vec![remote("dev-a"), remote("gpu-1")],
     };
     let choices = choices(&set);
-    assert_eq!(choices, ["local", "dev-a", "gpu-1"]);
+    assert_eq!(choices, ["primary", "dev-a", "gpu-1"]);
     let extended = with_machine(&schema, &choices, "Machine to run on.");
     let keys: Vec<&String> = extended["properties"].as_object().unwrap().keys().collect();
     assert_eq!(keys, ["command", "timeout", "machine"]);
     assert_eq!(
         extended["properties"]["machine"],
-        json!({"type": "string", "enum": ["local", "dev-a", "gpu-1"], "description": "Machine to run on."})
+        json!({"type": "string", "enum": ["primary", "dev-a", "gpu-1"], "description": "Machine to run on."})
     );
     // 其余不变：required 不含它，工具自己的 schema 不被改。
     assert_eq!(extended["required"], json!(["command"]));
@@ -59,32 +59,18 @@ fn taking_the_parameter_removes_it() {
     assert_eq!(take(&mut input), None);
     assert_eq!(take(&mut json!("not an object")), None);
     assert_eq!(named_in(&json!({"machine": "dev-a"})), Some("dev-a"));
+    assert_eq!(named_in(&json!({"machine": "primary"})), None);
+    // 以前的名字也是主 env（deployment.md §23）。
     assert_eq!(named_in(&json!({"machine": "local"})), None);
     assert_eq!(named_in(&json!({})), None);
 }
 
+/// 工具不说时不带参数（工作线 F137：带参数的工具自己说，tools 与 agents 的测试逐个列出）。
 #[test]
-fn the_tools_with_the_parameter() {
-    for tool in [
-        "Bash",
-        "Monitor",
-        "Read",
-        "Edit",
-        "Write",
-        "NotebookEdit",
-        "Grep",
-        "Glob",
-        "Agent",
-    ] {
-        assert!(takes_machine(tool), "{tool}");
-    }
-    for tool in [
-        "TaskStop",
-        "WebFetch",
-        "Skill",
-        "EnterWorktree",
-        "mcp__s__t",
-    ] {
-        assert!(!takes_machine(tool), "{tool}");
-    }
+fn a_tool_takes_no_machine_parameter_by_default() {
+    let tool = crate::testing::FakeTool::new("Bash", false, "ok");
+    assert_eq!(
+        crate::tool::Tool::machine_param(&tool),
+        MachineParam::Absent
+    );
 }

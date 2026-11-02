@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use ratatui::buffer::Buffer;
 use rust_cli_kernel_api::testing::text_response;
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 
 use super::support::{GatedModel, Setup, with_ui};
 

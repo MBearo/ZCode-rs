@@ -10,6 +10,7 @@ use rust_cli_kernel_api::store::SessionOrder;
 
 use super::app::{Action, App, Overlay};
 use super::i18n_projects as words;
+use super::keyboard;
 use super::projects::Request;
 use super::session_rows::SessionRow;
 use crate::view::Transcript;
@@ -48,6 +49,19 @@ pub enum TranscriptState {
     Shown(Shown),
 }
 
+/// 盖在列表上的东西：收这一页的按键与粘贴，画在列表上面或替换整页。
+#[derive(Debug, Clone, PartialEq)]
+pub enum Modal {
+    /// 改名：会话 ID 与输入的名字（搜索行变成输入框）。
+    Rename { id: String, input: String },
+    /// 删除确认。
+    Confirm(Confirm),
+    /// 别的目录的会话：先选目录。
+    Cwd(CwdPrompt),
+    /// 全屏对话（⌃t）：取快照中或已显示。
+    Transcript(TranscriptState),
+}
+
 /// 删除确认（焦点 0 是取消：缺省焦点在取消上，误按 enter 不删）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Confirm {
@@ -84,10 +98,8 @@ pub struct ResumePage {
     pub height: usize,
     pub expanded: Option<String>,
     pub previews: HashMap<String, Preview>,
-    pub rename: Option<(String, String)>,
-    pub confirm: Option<Confirm>,
-    pub cwd: Option<CwdPrompt>,
-    pub transcript: Option<TranscriptState>,
+    /// 盖在列表上的东西，一次只有一个（架构整理 U7：以前是 4 个 `Option`，互斥只靠按键的先后）。
+    pub modal: Option<Modal>,
     /// 搜索行的红字。
     pub error: Option<String>,
     /// 本地时间的偏移（预览里的绝对时间，打开时由 runner 给出）。
@@ -227,10 +239,10 @@ impl App {
             page.previews.insert(id.to_owned(), preview);
             return;
         }
-        if page.transcript != Some(TranscriptState::Loading(id.to_owned())) {
+        if page.modal != Some(Modal::Transcript(TranscriptState::Loading(id.to_owned()))) {
             return;
         }
-        page.transcript = match view {
+        page.modal = match view {
             Ok(view) => {
                 let title = page
                     .rows
@@ -240,12 +252,12 @@ impl App {
                     .map(SessionRow::label)
                     .filter(|title| !title.is_empty())
                     .unwrap_or_else(|| id.to_owned());
-                Some(TranscriptState::Shown(Shown {
+                Some(Modal::Transcript(TranscriptState::Shown(Shown {
                     id: id.to_owned(),
                     title,
                     view: Box::new(Transcript::from_view(view, now_ms)),
                     scroll: 0,
-                }))
+                })))
             }
             Err(error) => {
                 page.error = Some(error);
@@ -274,87 +286,72 @@ impl App {
             return None;
         };
         // 文字输入不带 ctrl 与 alt（Windows 的 AltGr 算文字，修复线 F65，tui-input.md §9.1）。
-        let ctrl = self.typing.ctrl(&key);
-        let plain = self.typing.is_plain_text(&key);
-        // 全屏对话：只读，滚动与关闭（q / esc / ctrl+c / ctrl+t）。
-        if let Some(transcript) = page.transcript.as_mut() {
-            let close = matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
-                || (ctrl && matches!(key.code, KeyCode::Char('c' | 't')));
-            match transcript {
-                _ if close => page.transcript = None,
-                TranscriptState::Loading(_) => {}
-                TranscriptState::Shown(shown) => {
-                    let page_rows = self.viewport.max(1);
-                    match key.code {
-                        KeyCode::Down | KeyCode::Char('j') => shown.scroll += 1,
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            shown.scroll = shown.scroll.saturating_sub(1)
-                        }
-                        KeyCode::PageDown | KeyCode::Char(' ') => shown.scroll += page_rows,
-                        KeyCode::PageUp => shown.scroll = shown.scroll.saturating_sub(page_rows),
-                        KeyCode::Home => shown.scroll = 0,
-                        KeyCode::End => shown.scroll = usize::MAX / 2,
-                        _ => {}
+        let ctrl = keyboard::ctrl(&key);
+        let plain = keyboard::is_plain_text(&key);
+        match page.modal.as_mut() {
+            Some(Modal::Transcript(transcript)) => {
+                if transcript_key(transcript, key, self.viewport.max(1)) {
+                    page.modal = None;
+                }
+                return None;
+            }
+            Some(Modal::Cwd(prompt)) => {
+                // 目录选择：↑/↓ 选，enter 继续，esc 用会话目录，ctrl+c 关闭页面。
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('1') => prompt.focus = 0,
+                    KeyCode::Down | KeyCode::Char('2') => prompt.focus = 1,
+                    KeyCode::Char('c') if ctrl => {
+                        self.overlay = None;
+                        return None;
                     }
+                    KeyCode::Enter | KeyCode::Esc => {
+                        let current = key.code == KeyCode::Enter && prompt.focus == 1;
+                        let row = prompt.row.clone();
+                        page.modal = None;
+                        let startup = page.startup;
+                        let cd = current.then(|| self.view.workspace().root.as_str().to_owned());
+                        return self.open_row(&row, cd, startup);
+                    }
+                    _ => {}
                 }
+                return None;
             }
-            return None;
-        }
-        // 目录选择：↑/↓ 选，enter 继续，esc 用会话目录，ctrl+c 关闭页面。
-        if let Some(prompt) = page.cwd.as_mut() {
-            match key.code {
-                KeyCode::Up | KeyCode::Char('1') => prompt.focus = 0,
-                KeyCode::Down | KeyCode::Char('2') => prompt.focus = 1,
-                KeyCode::Char('c') if ctrl => {
-                    self.overlay = None;
-                    return None;
+            Some(Modal::Confirm(confirm)) => {
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('1') => confirm.focus = 0,
+                    // 删除要明确确认：数字只移到删除，要再按 enter。
+                    KeyCode::Down | KeyCode::Char('2') => confirm.focus = 1,
+                    KeyCode::Esc => page.modal = None,
+                    KeyCode::Char('c') if ctrl => page.modal = None,
+                    KeyCode::Enter => {
+                        let delete = (confirm.focus == 1).then(|| confirm.id.clone());
+                        page.modal = None;
+                        return delete.map(|id| Action::Projects(Request::Delete(id)));
+                    }
+                    _ => {}
                 }
-                KeyCode::Enter | KeyCode::Esc => {
-                    let current = key.code == KeyCode::Enter && prompt.focus == 1;
-                    let row = prompt.row.clone();
-                    page.cwd = None;
-                    let startup = page.startup;
-                    let cd = current.then(|| self.view.workspace().root.as_str().to_owned());
-                    return self.open_row(&row, cd, startup);
-                }
-                _ => {}
+                return None;
             }
-            return None;
-        }
-        if let Some(confirm) = page.confirm.as_mut() {
-            match key.code {
-                KeyCode::Up | KeyCode::Char('1') => confirm.focus = 0,
-                // 删除要明确确认：数字只移到删除，要再按 enter。
-                KeyCode::Down | KeyCode::Char('2') => confirm.focus = 1,
-                KeyCode::Esc => page.confirm = None,
-                KeyCode::Char('c') if ctrl => page.confirm = None,
-                KeyCode::Enter => {
-                    let confirm = page.confirm.take()?;
-                    return (confirm.focus == 1)
-                        .then_some(Action::Projects(Request::Delete(confirm.id)));
+            Some(Modal::Rename { id, input }) => {
+                page.error = None;
+                match key.code {
+                    KeyCode::Esc => page.modal = None,
+                    KeyCode::Char('c') if ctrl => page.modal = None,
+                    KeyCode::Enter => {
+                        let (id, title) = (id.clone(), input.trim().to_owned());
+                        page.modal = None;
+                        return (!title.is_empty())
+                            .then_some(Action::Projects(Request::Rename { id, title }));
+                    }
+                    KeyCode::Backspace => {
+                        crate::ui::line_edit::backspace(input);
+                    }
+                    KeyCode::Char(c) if plain => input.push(c),
+                    _ => {}
                 }
-                _ => {}
+                return None;
             }
-            return None;
-        }
-        page.error = None;
-        if let Some((id, input)) = page.rename.as_mut() {
-            match key.code {
-                KeyCode::Esc => page.rename = None,
-                KeyCode::Char('c') if ctrl => page.rename = None,
-                KeyCode::Enter => {
-                    let (id, title) = (id.clone(), input.trim().to_owned());
-                    page.rename = None;
-                    return (!title.is_empty())
-                        .then_some(Action::Projects(Request::Rename { id, title }));
-                }
-                KeyCode::Backspace => {
-                    input.pop();
-                }
-                KeyCode::Char(c) if plain => input.push(c),
-                _ => {}
-            }
-            return None;
+            None => page.error = None,
         }
         let count = page.filtered().len();
         let step = page.height.max(1);
@@ -372,7 +369,7 @@ impl App {
             }
             KeyCode::Char('t') if ctrl => {
                 let id = page.focused()?.id.clone();
-                page.transcript = Some(TranscriptState::Loading(id.clone()));
+                page.modal = Some(Modal::Transcript(TranscriptState::Loading(id.clone())));
                 return Some(Action::Projects(Request::Transcript(id)));
             }
             KeyCode::Char('e') if ctrl => {
@@ -390,7 +387,10 @@ impl App {
             KeyCode::Char('o') if ctrl => page.comfortable = !page.comfortable,
             KeyCode::Char('r') if ctrl => {
                 if let Some(row) = page.focused() {
-                    page.rename = Some((row.id.clone(), row.title.clone()));
+                    page.modal = Some(Modal::Rename {
+                        id: row.id.clone(),
+                        input: row.title.clone(),
+                    });
                 }
             }
             KeyCode::Char('d') if ctrl => {
@@ -399,7 +399,7 @@ impl App {
                     page.error = Some(words::delete_current(lang).to_owned());
                 } else {
                     let name = row.label();
-                    page.confirm = Some(Confirm {
+                    page.modal = Some(Modal::Confirm(Confirm {
                         id: row.id,
                         name: if name.is_empty() {
                             words::no_message(lang).to_owned()
@@ -407,13 +407,13 @@ impl App {
                             name
                         },
                         focus: 0,
-                    });
+                    }));
                 }
             }
             KeyCode::Enter => {
                 let row = page.focused()?.clone();
                 if !row.current && row.root != self.view.workspace().root.as_str() {
-                    page.cwd = Some(CwdPrompt { row, focus: 0 });
+                    page.modal = Some(Modal::Cwd(CwdPrompt { row, focus: 0 }));
                     return None;
                 }
                 let startup = page.startup;
@@ -440,7 +440,7 @@ impl App {
             KeyCode::Char('h' | 'l') if ctrl => return self.resume_toggle(),
             KeyCode::Backspace => {
                 let mut query = page.query.clone();
-                query.pop();
+                crate::ui::line_edit::backspace(&mut query);
                 page.set_query(query);
             }
             KeyCode::Char(c) if plain => {
@@ -478,9 +478,11 @@ impl App {
         if pasted.is_empty() {
             return;
         }
-        if let Some((_, input)) = page.rename.as_mut() {
-            input.push_str(&pasted);
-            return;
+        // 与按键同一层（架构整理 U7）：改名时进名字；确认框、目录选择与全屏对话盖住搜索行，丢掉。
+        match page.modal.as_mut() {
+            Some(Modal::Rename { input, .. }) => return input.push_str(&pasted),
+            Some(Modal::Confirm(_) | Modal::Cwd(_) | Modal::Transcript(_)) => return,
+            None => {}
         }
         let mut query = page.query.clone();
         if !query.is_empty() && !query.ends_with(char::is_whitespace) {
@@ -493,7 +495,7 @@ impl App {
     /// 滚轮：焦点移动，到头停住（本工程列表的规则）。
     pub(super) fn resume_wheel(&mut self, rows: isize) {
         if let Some(Overlay::Resume(page)) = self.overlay.as_mut() {
-            if let Some(TranscriptState::Shown(shown)) = page.transcript.as_mut() {
+            if let Some(Modal::Transcript(TranscriptState::Shown(shown))) = page.modal.as_mut() {
                 shown.scroll = (shown.scroll as isize + rows).max(0) as usize;
                 return;
             }
@@ -508,6 +510,26 @@ impl App {
             page.clamp();
         }
     }
+}
+
+/// 全屏对话的按键：只读，滚动与关闭（q / esc / ctrl+c / ctrl+t）。返回 true 时关闭。
+fn transcript_key(transcript: &mut TranscriptState, key: KeyEvent, page_rows: usize) -> bool {
+    let ctrl = keyboard::ctrl(&key);
+    let close = matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
+        || (ctrl && matches!(key.code, KeyCode::Char('c' | 't')));
+    match transcript {
+        _ if close => return true,
+        TranscriptState::Loading(_) => {}
+        TranscriptState::Shown(shown) => match key.code {
+            KeyCode::End => shown.scroll = usize::MAX / 2,
+            _ => {
+                if let Some(step) = crate::ui::pager::page_move(&key) {
+                    crate::ui::pager::scroll_from_top(&mut shown.scroll, step, page_rows);
+                }
+            }
+        },
+    }
+    false
 }
 
 #[cfg(test)]

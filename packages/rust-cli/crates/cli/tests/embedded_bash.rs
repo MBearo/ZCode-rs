@@ -17,9 +17,8 @@ use rust_cli_env_local::{EmbeddedSearch, LocalEnvironment, ShellConfig};
 use rust_cli_kernel_api::env::{
     CommandEvent, EnvPath, OperationContext, Origin, StartCommand, WorkspaceRef,
 };
-use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ShellTaskId,
+    EnvironmentId, Generation, OperationId, RunId, SessionId, ShellTaskId,
 };
 use rust_cli_kernel_api::machine::Commands;
 
@@ -75,29 +74,22 @@ async fn bash(harness: &Harness, index: usize, command: &str) -> String {
         environment: EnvironmentId::new("local"),
         root: EnvPath::new(harness.root.to_string_lossy()),
     };
-    let context = OperationContext {
-        environment: EnvironmentId::new("local"),
-        generation: Generation::new("g"),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: operation.clone(),
-        origin: Origin::Agent {
+    let context = OperationContext::new(
+        EnvironmentId::new("local"),
+        Generation::new("g"),
+        operation.clone(),
+        Origin::Agent {
             session: SessionId::new("s1"),
             run: RunId::new("r1"),
         },
-    };
+    );
     let request = StartCommand {
-        command: command.to_owned(),
-        cwd: EnvPath::new(harness.root.to_string_lossy()),
         timeout_ms: Some(30_000),
-        task: ShellTaskId::new(format!("b{index}")),
-        shell: Default::default(),
-        cwd_scope: CwdScope::Pinned,
-        background: None,
-        sandbox: None,
-        hook: None,
-        on_timeout: None,
-        socket: None,
-        env: Default::default(),
+        ..StartCommand::new(
+            command.to_owned(),
+            EnvPath::new(harness.root.to_string_lossy()),
+            ShellTaskId::new(format!("b{index}")),
+        )
     };
     let mut events = harness
         .env

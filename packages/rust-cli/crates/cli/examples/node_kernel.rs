@@ -16,19 +16,21 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
+use rust_cli_base::clock::SystemClock;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_kernel_api::ids::{CommandId, MessageId, SessionId};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{
-    Ack, Command, CommandEnvelope, EndReason, Kernel, KernelEvent, RewindScope, SessionHandle,
-    TurnOutcome,
+    Ack, Command, CommandEnvelope, CommandResult, EndReason, Forked, Kernel, KernelEvent,
+    RewindScope, SessionHandle, TurnOutcome,
 };
+use rust_cli_kernel_api::session_follow::follow;
 use rust_cli_kernel_api::testing::environments;
-use rust_cli_model::{AnthropicEndpoint, ProviderModel};
+use rust_cli_model::{AnthropicEndpoint, FixedEndpoint, ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
-use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 use serde_json::{Value, json};
@@ -57,7 +59,12 @@ async fn kernel(dir: &str, base_url: Option<&str>) -> Result<LocalKernel> {
         api_key: RedactedString::new("sk-interop"),
     };
     let ports = Ports {
-        model: Arc::new(ProviderModel::anthropic(egress, endpoint, clock.clone())),
+        model: Arc::new(ProviderModel::new(
+            egress,
+            Arc::new(FixedEndpoint::new(endpoint)),
+            clock.clone(),
+            RouteOptions::default(),
+        )),
         environments: environments(Arc::new(LocalEnvironment::new(Some(root.to_path_buf())))),
         store: store.clone(),
         artifacts: store,
@@ -65,12 +72,7 @@ async fn kernel(dir: &str, base_url: Option<&str>) -> Result<LocalKernel> {
         ids,
     };
     let defaults = Defaults {
-        selection: ModelSelection {
-            provider: String::new(),
-            model: String::new(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: ModelSelection::new(String::new(), String::new()),
         mode: PermissionMode::BypassPermissions,
         max_turns: None,
         search_tools: false,
@@ -91,10 +93,18 @@ async fn open(kernel: &LocalKernel, session: &str) -> Result<Arc<dyn SessionHand
     Ok(kernel.open_session(&SessionId::new(session)).await?)
 }
 
-fn accepted(ack: Ack) -> Result<Value> {
+fn accepted(ack: Ack) -> Result<CommandResult> {
     match ack {
         Ack::Accepted { result } => Ok(result),
         other => bail!("the command was not accepted: {other:?}"),
+    }
+}
+
+/// fork 的回执（脚本读 `session` 与 `response`）。
+fn forked(result: CommandResult) -> Result<Forked> {
+    match result {
+        CommandResult::Forked(forked) => Ok(forked),
+        other => bail!("the fork answered {other:?}"),
     }
 }
 
@@ -102,7 +112,8 @@ async fn compact(dir: &str, session: &str, base_url: &str) -> Result<Value> {
     let kernel = kernel(dir, Some(base_url)).await?;
     let handle = open(&kernel, session).await?;
     let after = handle.view().await?.last_seq;
-    let mut events = handle.subscribe(Some(after));
+    // 与三个前端同一个跟随（session-lifecycle.md §2.1）：订阅方落后时按最后收到的 seq 重新订阅，不会漏掉结束的事件。
+    let mut events = follow(handle.clone(), after);
     let ack = handle
         .send(envelope(
             "interop-compact",
@@ -145,7 +156,7 @@ async fn rewind(dir: &str, session: &str, target: &str, scope: &str) -> Result<V
         .context("the rewind did not finish")?;
     // 拒绝（例如代码回退遇到冲突）也是结果：原文交给脚本比较。
     let result = match ack {
-        Ack::Accepted { result } => json!({"accepted": result}),
+        Ack::Accepted { result } => json!({"accepted": serde_json::to_value(result)?}),
         Ack::Rejected { reason } => json!({"rejected": reason}),
         Ack::Duplicate => bail!("the rewind was a duplicate"),
     };
@@ -159,7 +170,7 @@ async fn branch(dir: &str, session: &str) -> Result<Value> {
     let ack = handle
         .send(envelope("interop-branch", Command::Fork { at: None }))
         .await;
-    let child = accepted(ack)?;
+    let child = forked(accepted(ack)?)?.session;
     let _ = handle.close(EndReason::Other).await;
     Ok(json!({"session": child}))
 }
@@ -171,9 +182,14 @@ async fn fork(dir: &str, session: &str, input: &str) -> Result<Value> {
         input: MessageId::new(input),
     };
     let ack = handle.send(envelope("interop-fork", command)).await;
-    let result = accepted(ack)?;
+    let forked = forked(accepted(ack)?)?;
     let _ = handle.close(EndReason::Other).await;
-    Ok(result)
+    Ok(json!({
+        "session": forked.session,
+        "response": forked.response(),
+        "copied": forked.copied,
+        "message": forked.through,
+    }))
 }
 
 async fn options(dir: &str, session: &str) -> Result<Value> {

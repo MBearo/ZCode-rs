@@ -3,6 +3,8 @@ use rust_cli_kernel_api::ids::{MessageId, SessionId};
 use rust_cli_kernel_api::message::Usage;
 use rust_cli_kernel_api::metering::{CallStatus, LastRequest, ModelCall, RequestStats};
 use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
+use rust_cli_kernel_api::side_request::SideSource;
+use rust_cli_kernel_api::store::StoreQueries;
 use rust_cli_kernel_api::store::{Fact, SessionStore, StoreError};
 
 use crate::tests::{TestStore, batch, started};
@@ -22,24 +24,16 @@ fn call(
     let (started_at_ms, first_token_at_ms, completed_at_ms) = times;
     Fact::ModelCalled {
         call: ModelCall {
-            message: MessageId::new(message),
-            source,
-            selection: ModelSelection {
-                provider: "p".into(),
-                model: "m".into(),
-                reasoning: None,
-                connection: None,
-            },
-            started_at_ms,
             first_token_at_ms,
-            first_content_at_ms: None,
-            completed_at_ms,
-            status,
-            stop_reason: None,
-            tool_calls: 0,
             usage,
-            retries: 0,
-            error: None,
+            ..ModelCall::new(
+                MessageId::new(message),
+                source,
+                ModelSelection::new("p", "m"),
+                started_at_ms,
+                completed_at_ms,
+                status,
+            )
         },
     }
 }
@@ -108,7 +102,7 @@ async fn rust_rows_add_up_the_completed_main_turn_requests() {
             ),
             call(
                 "msg_t1",
-                QuerySource::Side("session_title".into()),
+                QuerySource::Side(SideSource::SessionTitle),
                 (4_000, Some(4_100), 9_900),
                 CallStatus::Completed,
                 usage(7, 0, 0, 7),
@@ -244,30 +238,6 @@ async fn an_empty_session_has_no_stats_and_a_missing_one_is_not_found() {
     ));
 }
 
-#[test]
-fn both_queries_search_by_session() {
-    let dir = tempfile::tempdir().unwrap();
-    let (conn, _) = crate::repo::open::open(
-        &dir.path().join("db.sqlite"),
-        crate::repo::open::MIGRATION_LOCK_WAIT,
-        1,
-    )
-    .unwrap();
-    for sql in [super::totals_sql(), super::last_sql()] {
-        let mut plan = conn.prepare(&format!("explain query plan {sql}")).unwrap();
-        let steps: Vec<String> = plan
-            .query_map(["sess"], |row| row.get::<_, String>(3))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        let text = steps.join("\n");
-        assert!(
-            text.contains("USING INDEX model_usage_session_turn_idx"),
-            "{sql}\n{text}"
-        );
-    }
-}
-
 /// 修复线 F112（usage.md §4.1、tui-panels.md §1.7）：查看子代理时 footer 查它的子会话。子会话里完成的子代理请求算进
 /// 统计，同一个子会话里失败的与旁路的不算；主会话不受子会话的行影响。修前只认 `main_turn`，子会话没有统计。
 #[tokio::test]
@@ -308,7 +278,7 @@ async fn a_child_session_counts_its_subagent_requests() {
             ),
             call(
                 "msg_s3",
-                QuerySource::Side("web_fetch_apply".into()),
+                QuerySource::Side(SideSource::WebFetch),
                 (11_000, Some(11_100), 11_900),
                 CallStatus::Completed,
                 usage(50, 0, 0, 5),

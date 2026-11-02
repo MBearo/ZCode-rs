@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::ui::cells::tests::{b, done, row};
 use crate::ui::cells::*;
-use crate::ui::i18n::{EN, Lang, ZH};
+use crate::ui::i18n::Lang;
 use crate::ui::palette::{ColorLevel, Palette};
 use crate::ui::text::plain;
 use crate::view::{Body, Row, ToolStatus, TurnState};
@@ -15,7 +15,6 @@ fn ctx_at<'a>(palette: &'a Palette, lang: Lang, expanded: bool, now_ms: u64) -> 
     Ctx {
         palette,
         lang,
-        strings: if lang == Lang::Zh { &ZH } else { &EN },
         width: 160,
         expanded,
         // 圆点亮着的那一半周期。
@@ -277,4 +276,17 @@ fn remote_calls_stay_out_of_the_summary() {
         2,
         "{shown:?}"
     );
+}
+
+/// 服务器就叫 `mcp` 时，分组的服务器名仍是 `mcp`（F132 的 T10：以前去掉开头所有重复的 `mcp__`，成了 `find`）。
+#[test]
+fn a_server_named_mcp_keeps_its_name_in_the_summary() {
+    let rows = [
+        turn(1, TurnState::Success),
+        row(2, Body::User { text: "go".into() }),
+        mcp(3, "mcp"),
+        mcp(4, "docs"),
+        text(5, "done"),
+    ];
+    assert_eq!(summary(&rows)[1], "  Called mcp, called docs");
 }

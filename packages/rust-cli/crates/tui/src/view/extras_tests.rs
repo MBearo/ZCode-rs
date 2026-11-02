@@ -23,12 +23,7 @@ fn feed(view: &mut Transcript, seq: u64, event: KernelEvent) {
 
 fn empty() -> Transcript {
     Transcript::new(
-        ModelSelection {
-            provider: "fixture".into(),
-            model: "scripted".into(),
-            reasoning: None,
-            connection: None,
-        },
+        ModelSelection::new("fixture", "scripted"),
         PermissionMode::Default,
         crate::view::test_workspace(),
     )
@@ -39,7 +34,7 @@ fn change(path: &str, additions: u64, deletions: u64) -> FileChange {
         path: path.into(),
         additions,
         deletions,
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -218,7 +213,7 @@ fn agent_progress_folds_into_the_tool_row() {
         panic!("no tool row");
     };
     let activity = tool.activity.as_ref().expect("activity");
-    assert_eq!(activity.tool_uses(), 1);
+    assert_eq!(activity.items.len(), 2);
     assert_eq!(
         activity.items[0],
         Activity::Text {

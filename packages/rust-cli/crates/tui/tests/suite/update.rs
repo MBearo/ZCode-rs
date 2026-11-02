@@ -1,26 +1,21 @@
 // 自动更新的选择屏与会话里的提示（docs/specs/rust-cli/update.md §6、§7，工作线 F48）：画面、焦点与回绕、按键、
 // 中文、深浅背景的强调色；会话头下面的提示框，启动时打开已有会话后仍在顶上。终端是 `TestBackend`，按键经 stream
 // 送进选择屏的循环。
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use crossterm::event::{Event, KeyCode};
 use futures_util::stream;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::{Color, Modifier};
 use rust_cli_kernel_api::testing::MemoryStore;
-use rust_cli_tui::ui::i18n::Lang;
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::Lang;
 use rust_cli_tui::update::{UpdateChoice, UpdateInfo, drive};
+use rust_cli_tui::{ColorLevel, Palette};
 
 use super::sessions_seed::{Seed, seed};
-use super::support::{GatedModel, Setup, text_of, with_ui};
-
-fn key(code: KeyCode) -> Event {
-    Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
-}
-
-fn ctrl(c: char) -> Event {
-    Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
-}
+use super::support::{
+    GatedModel, Setup, ctrl_event as ctrl, key_event as key, release_event as release, text_of,
+    with_ui,
+};
 
 fn info() -> UpdateInfo {
     UpdateInfo {
@@ -167,15 +162,7 @@ async fn the_keys_wrap_pick_and_skip() {
         ),
         // 松开按键的事件不处理。
         (
-            vec![
-                Event::Key(KeyEvent {
-                    code: KeyCode::Char('3'),
-                    modifiers: KeyModifiers::NONE,
-                    kind: KeyEventKind::Release,
-                    state: KeyEventState::NONE,
-                }),
-                key(KeyCode::Enter),
-            ],
+            vec![release(KeyCode::Char('3')), key(KeyCode::Enter)],
             UpdateChoice::UpdateNow,
         ),
         // 输入结束（终端关掉）：当作 Skip。
@@ -216,7 +203,7 @@ fn update_setup(lang: &'static str, store: Option<MemoryStore>) -> Setup {
         lang,
         ..Setup::default()
     };
-    setup.services.update = Some(info());
+    setup.ui.update = Some(info());
     if let Some(store) = store {
         setup.store = std::sync::Arc::new(store);
     }

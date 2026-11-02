@@ -31,7 +31,7 @@ fn task() -> String {
 async fn a_timed_out_foreground_command_moves_to_the_background() {
     let env = moving();
     let output = call_with(
-        BashTool::new(),
+        BashTool::default(),
         env.clone(),
         json!({"command": "npm test", "timeout": 1000}),
     )
@@ -47,10 +47,10 @@ async fn a_timed_out_foreground_command_moves_to_the_background() {
     );
     let start = env.started.lock().unwrap()[0].clone();
     assert_eq!(start.timeout_ms, Some(1000));
-    assert!(start.background.is_none());
+    assert!(start.kind.background().is_none());
     assert_eq!(
-        start.on_timeout,
-        Some(TimeoutBackground {
+        start.kind.on_timeout(),
+        Some(&TimeoutBackground {
             command: BackgroundCommand {
                 description: "npm test".to_owned(),
                 tool_use: Some(ToolUseId::new("toolu_1")),
@@ -77,21 +77,25 @@ async fn only_commands_not_starting_with_sleep_move() {
     ];
     for (command, moves) in cases {
         let env = Arc::new(Scripted::default());
-        call_with(BashTool::new(), env.clone(), json!({"command": command}))
-            .await
-            .unwrap();
+        call_with(
+            BashTool::default(),
+            env.clone(),
+            json!({"command": command}),
+        )
+        .await
+        .unwrap();
         let start = env.started.lock().unwrap()[0].clone();
-        assert_eq!(start.on_timeout.is_some(), moves, "{command}");
+        assert_eq!(start.kind.on_timeout().is_some(), moves, "{command}");
     }
     let env = Arc::new(Scripted::default());
     call_with(
-        BashTool::new(),
+        BashTool::default(),
         env.clone(),
         json!({"command": "cargo test", "run_in_background": true}),
     )
     .await
     .unwrap();
-    assert!(env.started.lock().unwrap()[0].on_timeout.is_none());
+    assert!(env.started.lock().unwrap()[0].kind.on_timeout().is_none());
 }
 
 /// 交互会话的后台命令没有期限：转后台之后也没有，说明里没有 “If it is still running …” 一句；stream-json 输入的
@@ -100,7 +104,10 @@ async fn only_commands_not_starting_with_sleep_move() {
 async fn the_deadline_follows_the_background_deadline() {
     let env = moving();
     let output = call_with(
-        BashTool::new().with_background_deadline(false),
+        BashTool::new(crate::BashSettings {
+            background_deadline: false,
+            ..crate::BashSettings::default()
+        }),
         env.clone(),
         json!({"command": "npm test", "timeout": 1500}),
     )
@@ -114,10 +121,13 @@ async fn the_deadline_follows_the_background_deadline() {
         )
     );
     let start = env.started.lock().unwrap()[0].clone();
-    assert_eq!(start.on_timeout.unwrap().deadline_ms, None);
+    assert_eq!(start.kind.on_timeout().unwrap().deadline_ms, None);
     let env = moving();
     let output = call_with(
-        BashTool::new().with_streaming_input(),
+        BashTool::new(crate::BashSettings {
+            timeouts: BashTimeouts::default().with_streaming_input(),
+            ..crate::BashSettings::default()
+        }),
         env.clone(),
         json!({"command": "npm test", "timeout": 400}),
     )
@@ -130,5 +140,8 @@ async fn the_deadline_follows_the_background_deadline() {
     );
     assert!(text_of(&output).contains("If it is still running after 30m in the background"));
     let start = env.started.lock().unwrap()[0].clone();
-    assert_eq!(start.on_timeout.unwrap().deadline_ms, Some(1_800_000));
+    assert_eq!(
+        start.kind.on_timeout().unwrap().deadline_ms,
+        Some(1_800_000)
+    );
 }

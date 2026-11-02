@@ -124,7 +124,8 @@ async fn a_prevented_turn_ends_without_another_request() {
         ..HookOutcome::default()
     };
     let (stop, messages, _events, requests) = run(2, vec![prevented], None).await;
-    assert_eq!(stop, QueryStop::Completed);
+    // 工作线 F134：以 `stop_hook_prevented` 结束（以前是 `Completed`）。
+    assert_eq!(stop, QueryStop::StopHookPrevented);
     assert_eq!(requests, 1);
     assert!(messages.contains(&feedback("done for today")));
 }

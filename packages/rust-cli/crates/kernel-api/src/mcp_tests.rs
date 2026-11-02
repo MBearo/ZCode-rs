@@ -27,16 +27,15 @@ fn transport_types_round_trip() {
             env: BTreeMap::from([("TOKEN".to_owned(), "x".to_owned())]),
             cwd: Some("tools/mcp".to_owned()),
         },
-        env: Default::default(),
     });
-    round_trip(&McpTransportConfig::Http {
-        url: "https://mcp.example.com/mcp".to_owned(),
-        headers: BTreeMap::from([("authorization".to_owned(), "Bearer t".to_owned())]),
-    });
-    round_trip(&McpTransportConfig::Sse {
-        url: "https://mcp.example.com/sse".to_owned(),
-        headers: BTreeMap::new(),
-    });
+    round_trip(&McpTransportConfig::http(
+        "https://mcp.example.com/mcp".to_owned(),
+        BTreeMap::from([("authorization".to_owned(), "Bearer t".to_owned())]),
+    ));
+    round_trip(&McpTransportConfig::sse(
+        "https://mcp.example.com/sse".to_owned(),
+        BTreeMap::new(),
+    ));
     round_trip(&McpTransportEvent::Message {
         message: json!({"jsonrpc": "2.0", "id": 0, "result": {}}),
     });
@@ -62,12 +61,7 @@ fn stdio_config_reads_the_mcp_servers_shape() {
             .unwrap();
     assert_eq!(
         config,
-        McpTransportConfig::Stdio {
-            command: "npx".to_owned(),
-            args: vec!["-y".to_owned(), "pkg".to_owned()],
-            env: BTreeMap::new(),
-            cwd: None,
-        }
+        McpTransportConfig::stdio("npx".to_owned(), vec!["-y".to_owned(), "pkg".to_owned()])
     );
     // L19：没有 `cwd` 时不写出（旧的序列化结果照常能读）。
     let text = serde_json::to_string(&config).unwrap();
@@ -82,11 +76,7 @@ fn no_transport_refuses_to_connect() {
     };
     let request = McpConnect {
         server: "s".to_owned(),
-        transport: McpTransportConfig::Http {
-            url: "https://mcp.example.com".to_owned(),
-            headers: BTreeMap::new(),
-        },
-        env: Default::default(),
+        transport: McpTransportConfig::http("https://mcp.example.com".to_owned(), BTreeMap::new()),
     };
     // 空实现不等待任何东西：立即完成。
     let connected = NoMcpTransport.connect(&workspace, request).now_or_never();

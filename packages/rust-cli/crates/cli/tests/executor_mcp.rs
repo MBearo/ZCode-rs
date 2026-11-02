@@ -44,7 +44,6 @@ fn server(extra: &[&str]) -> McpConnect {
             env: [("MCP_PROBE".to_owned(), "${HOME}".to_owned())].into(),
             cwd: None,
         },
-        env: Default::default(),
     }
 }
 

@@ -7,7 +7,6 @@ mod args;
 mod body;
 mod builtin;
 mod closest;
-mod frontmatter;
 mod inline;
 mod invoked;
 mod listing;
@@ -19,9 +18,10 @@ mod tool;
 mod unknown;
 mod user;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use rust_cli_kernel_api::env::{EnvFacts, FileVersion, WorkspaceRef};
 use rust_cli_kernel_api::listing::ListingEntry;
@@ -35,7 +35,7 @@ pub use user::SkillCommands;
 /// `!` 命令的执行者：注册表里的 Bash 工具、判决链与 ID（ext.md §2.5）。
 pub(crate) fn runner(
     bash: Arc<dyn rust_cli_kernel_api::tool::Tool>,
-    gate: Arc<rust_cli_policy::PolicyGate>,
+    gate: Arc<dyn rust_cli_kernel_api::orchestration::ScopedGate>,
     ids: Arc<dyn rust_cli_kernel_api::clock::Ids>,
 ) -> inline::Runner {
     inline::Runner { bash, gate, ids }
@@ -151,18 +151,15 @@ impl SkillCatalog {
 
     /// 换上插件的 skill 根目录（插件加载完成后，ext.md §4）。
     pub fn set_plugin_roots(&self, roots: Vec<PluginSkillRoot>) {
-        *self.plugins.lock().unwrap_or_else(PoisonError::into_inner) = roots;
+        *self.plugins.lock_unpoisoned() = roots;
     }
 
     fn plugin_roots(&self) -> Vec<PluginSkillRoot> {
-        self.plugins
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.plugins.lock_unpoisoned().clone()
     }
 
     pub(crate) fn cached(&self, path: &str, version: &FileVersion) -> Option<Arc<Skill>> {
-        let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        let cache = self.cache.lock_unpoisoned();
         cache
             .parsed
             .get(path)
@@ -171,7 +168,7 @@ impl SkillCatalog {
     }
 
     pub(crate) fn remember(&self, path: String, version: FileVersion, skill: Arc<Skill>) {
-        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut cache = self.cache.lock_unpoisoned();
         cache.parsed.insert(path, (version, skill));
     }
 

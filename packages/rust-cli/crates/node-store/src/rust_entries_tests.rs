@@ -1,12 +1,11 @@
-//! 本工程独有的 entry 的读回（spec node-store.md §4.7）：待回答的交互、按种类的记录；旧版本写的操作意图不读、不再配对结果
-//! （工作线 F119）。
+//! 本工程独有的 entry 的读回（spec node-store.md §4.7）：按种类的记录；旧版本写的操作意图（工作线 F119）与交互
+//! （工作线 F130）不读、不再配对结果。
 use rust_cli_base::js::json::stringify;
-use rust_cli_kernel_api::ids::{InteractionId, MessageId, SessionId, ToolUseId};
+use rust_cli_kernel_api::ids::{MessageId, SessionId, ToolUseId};
 use rust_cli_kernel_api::message::{
     AssistantMessage, ContentBlock, Message, StopReason, ToolResultContent, UserMessage, UserOrigin,
 };
-use rust_cli_kernel_api::orchestration::InteractionRequest;
-use rust_cli_kernel_api::store::{Fact, PendingInteraction, SessionStore};
+use rust_cli_kernel_api::store::{Fact, SessionStore};
 use serde_json::{Value, json};
 
 use crate::tests::{TestStore, batch, started, user};
@@ -49,55 +48,6 @@ fn result(id: &str, owner: &str, call: &str) -> Fact {
             },
         }),
     }
-}
-
-fn entry(kind: &str, id: &str, data: Value) -> Fact {
-    Fact::Entry {
-        kind: kind.into(),
-        id: id.into(),
-        data,
-    }
-}
-
-/// 会话 actor 的两种交互 entry：问过、没有回答（也没有取消）的交互在冷读取后仍待回答。
-#[tokio::test]
-async fn unanswered_interactions_are_pending_after_a_cold_load() {
-    let t = TestStore::new();
-    started(&t, "sess_1").await;
-    let permission = InteractionRequest::Permission {
-        machine: None,
-        tool_use: ToolUseId::new("toolu_1"),
-        tool: "Bash".into(),
-        input: json!({"command": "rm -rf build"}),
-        message: "Allow?".into(),
-        suggestions: Vec::new(),
-        asked_by: None,
-    };
-    let plan = InteractionRequest::PlanApproval {
-        tool_use: ToolUseId::new("toolu_2"),
-        plan: "Ship it".into(),
-    };
-    let question = InteractionRequest::Question {
-        tool_use: ToolUseId::new("toolu_3"),
-        questions: json!([{"question": "Which?"}]),
-    };
-    let value = |request: &InteractionRequest| serde_json::to_value(request).unwrap();
-    let facts = vec![
-        entry("pending_interaction", "ia_1", value(&permission)),
-        entry("pending_interaction", "ia_2", value(&plan)),
-        entry("pending_interaction", "ia_3", value(&question)),
-        entry("interaction_resolved", "ia_1", json!({"decision": "allow"})),
-        entry("interaction_resolved", "ia_3", json!({"cancelled": true})),
-    ];
-    t.store.commit(&sid(), batch(None, facts)).await.unwrap();
-    let loaded = t.store.load(&sid()).await.unwrap();
-    assert_eq!(
-        loaded.pending_interactions,
-        vec![PendingInteraction {
-            interaction: InteractionId::new("ia_2"),
-            request: plan,
-        }]
-    );
 }
 
 /// 旧版本写的一条操作意图（工作线 F119 之前；`fingerprint` 是整份 JSON 时旧代码会按它配对工具结果）。

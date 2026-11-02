@@ -3,15 +3,8 @@
 use super::i18n::Lang;
 use crate::machines::{ConnectStep, MachineFailure, MachineProblem, MachineStatus};
 
-fn pick(lang: Lang, en: &'static str, zh: &'static str) -> &'static str {
-    match lang {
-        Lang::En => en,
-        Lang::Zh => zh,
-    }
-}
-
 pub fn title(lang: Lang) -> &'static str {
-    pick(lang, "Machines", "远端机器")
+    lang.pick("Machines", "远端机器")
 }
 
 /// 列表的副标题：`2 machines · 1 connected`；没有机器时 `No machines yet`。
@@ -26,8 +19,7 @@ pub fn summary(lang: Lang, total: usize, connected: usize) -> String {
 }
 
 pub fn empty_hint(lang: Lang) -> &'static str {
-    pick(
-        lang,
+    lang.pick(
         "Add one with /machines add <name> <ssh target> [working directory]",
         "用 /machines add <名字> <ssh 目标> [工作目录] 添加",
     )
@@ -35,7 +27,7 @@ pub fn empty_hint(lang: Lang) -> &'static str {
 
 /// 没写工作目录（远端的 home）。
 pub fn remote_home(lang: Lang) -> &'static str {
-    pick(lang, "remote home", "远端 home")
+    lang.pick("remote home", "远端 home")
 }
 
 pub fn executor(lang: Lang, version: &str) -> String {
@@ -58,24 +50,24 @@ pub fn os_name(os: &str) -> String {
 /// 列表里的状态词（就绪写 `connected`）。
 pub fn status_word(lang: Lang, status: &MachineStatus) -> &'static str {
     match status {
-        MachineStatus::Ready => pick(lang, "connected", "已连接"),
+        MachineStatus::Ready => lang.pick("connected", "已连接"),
         other => short_word(lang, other).unwrap_or_default(),
     }
 }
 
 /// “重连中”：状态行的词；Background 面板里重连中的机器上一份的条目也用它（F96，remote-exec.md §23.3）。
 pub fn reconnecting(lang: Lang) -> &'static str {
-    pick(lang, "reconnecting", "重连中")
+    lang.pick("reconnecting", "重连中")
 }
 
 /// 状态行里名字后面的词；就绪时没有（写延迟）。
 pub fn short_word(lang: Lang, status: &MachineStatus) -> Option<&'static str> {
     Some(match status {
         MachineStatus::Ready => return None,
-        MachineStatus::Connecting(_) => pick(lang, "connecting", "连接中"),
+        MachineStatus::Connecting(_) => lang.pick("connecting", "连接中"),
         MachineStatus::Reconnecting { .. } => reconnecting(lang),
-        MachineStatus::Failed(_) => pick(lang, "failed", "连接失败"),
-        MachineStatus::Disconnected => pick(lang, "disconnected", "未连接"),
+        MachineStatus::Failed(_) => lang.pick("failed", "连接失败"),
+        MachineStatus::Disconnected => lang.pick("disconnected", "未连接"),
     })
 }
 
@@ -257,8 +249,7 @@ pub fn last_error(lang: Lang, reason: &str) -> String {
 
 /// 执行器没有 `env` 能力位（F96，§23.5）：重连后不刷新 ssh 会话的 `SSH_AUTH_SOCK`。
 pub fn env_not_refreshed(lang: Lang) -> &'static str {
-    pick(
-        lang,
+    lang.pick(
         "env not refreshed (older executor)",
         "不能刷新环境（执行器较旧）",
     )
@@ -296,16 +287,13 @@ pub fn hint(lang: Lang, focused_live: Option<bool>, retry: bool) -> String {
 }
 
 pub fn usage(lang: Lang) -> &'static str {
-    pick(
-        lang,
-        "Usage: /machines [add <name> <ssh target> [working directory] | connect <name> | disconnect <name> | remove <name>]",
+    lang.pick("Usage: /machines [add <name> <ssh target> [working directory] | connect <name> | disconnect <name> | remove <name>]",
         "用法：/machines [add <名字> <ssh 目标> [工作目录] | connect <名字> | disconnect <名字> | remove <名字>]",
     )
 }
 
 pub fn unavailable(lang: Lang) -> &'static str {
-    pick(
-        lang,
+    lang.pick(
         "Remote machines aren't available here.",
         "这里不能用远端机器。",
     )
@@ -558,7 +546,7 @@ pub fn runs_on(lang: Lang) -> (&'static str, &'static str) {
 
 /// Shell 详情的机器一行（§21.6）。
 pub fn machine_field(lang: Lang) -> &'static str {
-    pick(lang, "Machine: ", "机器：")
+    lang.pick("Machine: ", "机器：")
 }
 
 fn pick2(

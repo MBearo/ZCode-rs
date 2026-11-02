@@ -1,12 +1,28 @@
 //! Node 用量表的原文 SQL（`apps/zcode-cli/packages/adapters/src/storage/session-store/repositories/usage.ts`：
 //! `recordModelUsage`、`upsertTurnUsage`、`upsertToolUsage`、`pruneUsage`，docs/specs/rust-cli/usage.md §2）。
 //!
-//! 只有 SQL 与参数绑定；取值规则在 `crate::usage`。所有函数都在存储事务里调用。
+//! 只有 SQL 与参数绑定；取值规则在 `crate::usage`。所有函数都在存储事务里调用。用量写入的 savepoint 也在这里（F138；
+//! 写失败时回不回退、记不记日志是 `crate::usage::observe` 的规则）。
 use anyhow::Result;
 use rusqlite::{Connection, params};
 
 /// Node `USAGE_RETENTION_DAYS`。
 pub const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
+/// 一个用量事实写入之前：开 savepoint（usage.md §2.5，工作线 F77）。
+pub fn savepoint(conn: &Connection) -> Result<()> {
+    Ok(conn.execute_batch("savepoint rust_cli_usage")?)
+}
+
+/// 写成了：并进外面的事务。
+pub fn release(conn: &Connection) -> Result<()> {
+    Ok(conn.execute_batch("release rust_cli_usage")?)
+}
+
+/// 写失败：只回退这个 savepoint。SQLite 已经自己回滚了整个事务时 savepoint 不在了，这一步失败。
+pub fn roll_back(conn: &Connection) -> Result<()> {
+    Ok(conn.execute_batch("rollback to rust_cli_usage; release rust_cli_usage")?)
+}
 
 /// `model_usage` 的一行（列按 Node 插入的顺序）。
 #[derive(Debug, Clone, Default)]

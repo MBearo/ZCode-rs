@@ -5,21 +5,25 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures_util::stream::BoxStream;
+use futures_util::{FutureExt, StreamExt};
 use rust_cli_base::Task;
 use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::envelope::{
     Ack, EventHeader, ReplyHeader, ReplyResult, RequestHeader, StreamItem, WireError,
 };
 use rust_cli_exec_wire::frame::{Frame, Kind};
-use rust_cli_exec_wire::handshake::{Capability, STREAM_WINDOW};
+use rust_cli_exec_wire::handshake::STREAM_WINDOW;
+use rust_cli_exec_wire::op::OpKind;
+use rust_cli_exec_wire::reply::Reply;
 use rust_cli_exec_wire::request::Request;
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 
-use crate::dispatch;
-use crate::ledger::{Begun, CallKey, CallKind};
+use crate::dispatch::{PortCall, commands, shell};
+use crate::ledger::{Begun, CallKey};
 use crate::server::Inner;
+use crate::target::{EnvPush, Mcp, Port, Target};
 
 /// 一个开着的流在服务端的运行状态（账本里是它的事件）。
 pub(crate) struct StreamControl {
@@ -43,10 +47,7 @@ fn fingerprint(request: &Request, body: &Body) -> String {
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(request).unwrap_or_default());
     hash.update(body.bytes());
-    hash.finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    rust_cli_base::hash::hex(&hash.finalize())
 }
 
 fn encode_reply(call: u64, result: ReplyResult, body: &Body) -> Bytes {
@@ -88,13 +89,7 @@ pub(crate) async fn request(inner: &Arc<Inner>, instance: &str, header: RequestH
         instance: instance.to_owned(),
         call,
     };
-    let kind = if op.is_stream() {
-        CallKind::Stream
-    } else if op.is_mutation() {
-        CallKind::Mutation
-    } else {
-        CallKind::Read
-    };
+    let kind = op.kind();
     let begun = match inner
         .ledger
         .begin(&key, &fingerprint(&request, &body), kind)
@@ -109,66 +104,11 @@ pub(crate) async fn request(inner: &Arc<Inner>, instance: &str, header: RequestH
         }
     };
     match begun {
-        Begun::New if op.is_stream() => open_stream(inner, key, request),
-        // 环境变量推送（F96，remote-exec.md §23.5）：在读循环里当场生效，之后读到的请求都看得到它。
-        Begun::New if op == rust_cli_exec_wire::op::Op::EnvUpdate => {
-            let result = match request {
-                Request::EnvUpdate {
-                    mode,
-                    vars,
-                    injected,
-                } => match inner.env.update(instance, mode, vars, injected) {
-                    Ok(()) => ReplyResult::Ok(rust_cli_exec_wire::reply::Reply::EnvUpdate),
-                    Err(message) => ReplyResult::Err(WireError::BadRequest { message }),
-                },
-                _ => ReplyResult::Err(WireError::BadRequest {
-                    message: "not an env.update".to_owned(),
-                }),
-            };
-            let payload = encode_reply(call, result, &Body::empty());
-            if let Err(error) = inner.ledger.finish(&key, payload.clone()).await {
-                tracing::warn!(target: "exec_server", %error, "ledger finish failed");
-            }
-            inner.send_to(instance, payload).await;
-        }
-        Begun::New => {
-            // 起进程的请求带上这个客户端实例推来的环境变量：在读到请求的这一刻取（F96，与 `env.update` 的先后一致）。
-            let env = if matches!(
-                op,
-                rust_cli_exec_wire::op::Op::StartCommand | rust_cli_exec_wire::op::Op::McpConnect
-            ) {
-                inner.env.overrides(instance)
-            } else {
-                Default::default()
-            };
-            let inner_task = inner.clone();
-            // 正在执行的调用数（常驻执行器的“空闲”判断，§19.5）：任务开始前加一，结束（含被中止）时减一。
-            let running = crate::server::Running::start(inner);
-            drop(inner.spawner.spawn("call", async move {
-                let _running = running;
-                let (result, body) = if request.op().capability() == Capability::Mcp {
-                    // MCP 的管道要连接表与客户端实例（R5，§22.5）。
-                    let result =
-                        match crate::mcp::unary(&inner_task, &key.instance, request, env).await {
-                            Ok(reply) => ReplyResult::Ok(reply),
-                            Err(error) => ReplyResult::Err(error),
-                        };
-                    (result, Body::empty())
-                } else if matches!(request, Request::StartCommand { .. }) {
-                    // 端口给的流留在执行器里，等线上的 watch_command 接走（工作线 F119）。
-                    crate::started::start(&inner_task, &key.instance, request, &body, env).await
-                } else {
-                    dispatch::unary(&inner_task.machine, request, &body).await
-                };
-                let payload = encode_reply(key.call, result, &body);
-                if let Err(error) = inner_task.ledger.finish(&key, payload.clone()).await {
-                    tracing::warn!(target: "exec_server", %error, "ledger finish failed");
-                }
-                inner_task.send_to(&key.instance, payload).await;
-            }));
-        }
+        Begun::New => run(inner, key, Target::of(request, &inner.machine, &body)).await,
         // 补发：流从 `resume_after` 之后重发；没完成的调用等它完成（回复发到当前连接）。
-        Begun::Running if op.is_stream() => resume_stream(inner, &key, resume_after.unwrap_or(0)),
+        Begun::Running if kind == OpKind::Stream => {
+            resume_stream(inner, &key, resume_after.unwrap_or(0))
+        }
         Begun::Running => {}
         Begun::Done(payload) => inner.send_to(instance, payload).await,
         Begun::Conflict => {
@@ -189,7 +129,84 @@ pub(crate) async fn request(inner: &Arc<Inner>, instance: &str, header: RequestH
     }
 }
 
-fn open_stream(inner: &Arc<Inner>, key: CallKey, request: Request) {
+/// 执行一个新登记的调用：按分好的去处。
+async fn run(inner: &Arc<Inner>, key: CallKey, target: Target) {
+    match target {
+        // 环境变量推送（F96，remote-exec.md §23.5）：在读循环里当场生效，之后读到的请求都看得到它。
+        Target::Env(EnvPush {
+            mode,
+            vars,
+            injected,
+        }) => {
+            let result = match inner.env.update(&key.instance, mode, vars, injected) {
+                Ok(()) => ReplyResult::Ok(Reply::EnvUpdate),
+                Err(message) => ReplyResult::Err(WireError::BadRequest { message }),
+            };
+            finish(inner, &key, result, &Body::empty()).await;
+        }
+        Target::Port(Port::Call(work)) => spawn_call(inner, key, work),
+        Target::Port(Port::Watch { operation, cursor }) => {
+            open_stream(inner, key, Source::Watch { operation, cursor });
+        }
+        Target::Port(Port::Notices { session, after }) => {
+            open_stream(inner, key, Source::Notices { session, after });
+        }
+        // 起进程的请求带上这个客户端实例推来的环境变量：在读到请求的这一刻取（F96，与 `env.update` 的先后一致）。
+        Target::Start(start) => {
+            let env = inner.env.overrides(&key.instance);
+            let work = crate::started::start(inner.clone(), key.instance.clone(), start, env);
+            spawn_call(inner, key, work.boxed());
+        }
+        Target::Mcp(Mcp::Events { connection }) => {
+            open_stream(inner, key, Source::Mcp { connection });
+        }
+        // MCP 的管道要连接表与客户端实例（R5，§22.5）；新起的服务器同样带上推来的环境变量。
+        Target::Mcp(Mcp::Call(call)) => {
+            let env = inner.env.overrides(&key.instance);
+            let work = crate::mcp::unary(inner.clone(), key.instance.clone(), call, env);
+            spawn_call(inner, key, work.boxed());
+        }
+    }
+}
+
+/// 在任务里执行一次调用，完成后记账并发出。正在执行的调用数（常驻执行器的“空闲”判断，§19.5）：任务开始前加一，结束
+/// （含被中止）时减一。
+fn spawn_call(inner: &Arc<Inner>, key: CallKey, work: PortCall) {
+    let inner_task = inner.clone();
+    let running = crate::server::Running::start(inner);
+    drop(inner.spawner.spawn("call", async move {
+        let _running = running;
+        let (result, body) = work.await;
+        finish(&inner_task, &key, result, &body).await;
+    }));
+}
+
+/// 一次调用的终态：存进账本，发给这个客户端实例当前的连接。
+async fn finish(inner: &Inner, key: &CallKey, result: ReplyResult, body: &Body) {
+    let payload = encode_reply(key.call, result, body);
+    if let Err(error) = inner.ledger.finish(key, payload.clone()).await {
+        tracing::warn!(target: "exec_server", %error, "ledger finish failed");
+    }
+    inner.send_to(&key.instance, payload).await;
+}
+
+/// 流的项从哪里来。
+enum Source {
+    /// `watch_command`：同一个客户端实例的第一个 `(op, 0)` 先接走 `start_command` 留下的流，其余经端口（F119）。
+    Watch {
+        operation: String,
+        cursor: u64,
+    },
+    Notices {
+        session: String,
+        after: u64,
+    },
+    Mcp {
+        connection: String,
+    },
+}
+
+fn open_stream(inner: &Arc<Inner>, key: CallKey, source: Source) {
     let notify = Arc::new(Notify::new());
     inner.streams().insert(
         key.clone(),
@@ -203,12 +220,29 @@ fn open_stream(inner: &Arc<Inner>, key: CallKey, request: Request) {
     );
     let task = inner.spawner.spawn(
         "stream",
-        produce(inner.clone(), key.clone(), request, notify),
+        produce(inner.clone(), key.clone(), source, notify),
     );
     match inner.streams().get_mut(&key) {
         Some(control) => control.task = Some(task),
         // 起任务之前流已经被关掉。
         None => task.abort(),
+    }
+}
+
+async fn items(
+    inner: &Inner,
+    key: &CallKey,
+    source: Source,
+) -> BoxStream<'static, (StreamItem, Body)> {
+    match source {
+        Source::Watch { operation, cursor } => {
+            match inner.started.claim(&key.instance, &operation, cursor) {
+                Some(events) => commands::items(events),
+                None => commands::watch(&inner.machine, operation, cursor),
+            }
+        }
+        Source::Notices { session, after } => shell::notices(&inner.machine, session, after),
+        Source::Mcp { connection } => crate::mcp::events(inner, key, &connection).await,
     }
 }
 
@@ -243,14 +277,8 @@ fn step(inner: &Inner, key: &CallKey, seq: u64) -> Step {
 
 /// 流的生产者：从端口取一项、编号、记账、发出；窗口满了就等 ack；收到补发请求就从账本重发。补发与新项都经这个任务，
 /// 所以客户端收到的 `seq` 总是递增的（按 `seq` 去重不会丢项）。
-async fn produce(inner: Arc<Inner>, key: CallKey, request: Request, notify: Arc<Notify>) {
-    let mut items = if request.op().capability() == Capability::Mcp {
-        crate::mcp::events(&inner, &key, request).await
-    } else if let Some(events) = inner.started.claim(&key.instance, &request) {
-        dispatch::command_items(events)
-    } else {
-        dispatch::stream(&inner.machine, request)
-    };
+async fn produce(inner: Arc<Inner>, key: CallKey, source: Source, notify: Arc<Notify>) {
+    let mut items = items(&inner, &key, source).await;
     let mut seq = 0u64;
     loop {
         let mut notified = pin!(notify.notified());

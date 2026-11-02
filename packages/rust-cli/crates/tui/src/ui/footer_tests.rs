@@ -10,17 +10,7 @@ use crate::ui::palette::{ColorLevel, Palette};
 use crate::view::Transcript;
 
 fn app(lang: Lang, notice: ContextNotice) -> App {
-    let mut app = App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        lang,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    );
+    let mut app = crate::ui::test_support::app_in(lang);
     app.view.apply(
         SequencedEvent {
             seq: 1,
@@ -147,8 +137,8 @@ fn speed_app(
         );
     }
     if let Some(stats) = stats {
-        let seq = app.request_stats.begin();
-        assert!(app.request_stats.arrived(seq, Some(stats)));
+        let seq = app.snapshots.request_stats.begin();
+        assert!(app.snapshots.request_stats.arrived(seq, Some(stats)));
     }
     app
 }
@@ -318,16 +308,22 @@ fn the_speed_comes_from_the_session_not_the_usage_rows() {
 #[test]
 fn a_late_receipt_from_the_old_session_is_dropped() {
     let mut app = stats_app(Lang::En, false, None);
-    let old = app.request_stats.begin();
+    let old = app.snapshots.request_stats.begin();
     app.reset();
-    assert!(!app.request_stats.arrived(old, Some(node_stats())));
-    assert_eq!(app.request_stats.stats(), &RequestStats::default());
-    let new = app.request_stats.begin();
-    assert!(app.request_stats.arrived(new, Some(node_stats())));
+    assert!(!app.snapshots.request_stats.arrived(old, Some(node_stats())));
+    assert_eq!(
+        app.snapshots.request_stats.stats(),
+        &RequestStats::default()
+    );
+    let new = app.snapshots.request_stats.begin();
+    assert!(app.snapshots.request_stats.arrived(new, Some(node_stats())));
     // 查询失败（存储不支持）时当作没有值。
-    let again = app.request_stats.begin();
-    assert!(app.request_stats.arrived(again, None));
-    assert_eq!(app.request_stats.stats(), &RequestStats::default());
+    let again = app.snapshots.request_stats.begin();
+    assert!(app.snapshots.request_stats.arrived(again, None));
+    assert_eq!(
+        app.snapshots.request_stats.stats(),
+        &RequestStats::default()
+    );
 }
 
 /// 窄终端：依次省掉 `? for shortcuts`、cache、TPS、ctx、上下文提示，最后才省模型名；模型名不被统计挤掉。
@@ -395,16 +391,8 @@ fn a_narrow_footer_keeps_the_monitor_count_whole_until_the_line_is_cut() {
     use rust_cli_kernel_api::env_shell::BackgroundStatus;
     use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind};
     let mut app = app(Lang::En, ContextNotice::Hidden);
-    let entry = |id: &str, kind| BackgroundEntry {
-        id: id.into(),
-        kind,
-        description: id.into(),
-        status: BackgroundStatus::Running,
-        output: None,
-        machine: None,
-        reconnecting: false,
-    };
-    app.background = vec![
+    let entry = |id: &str, kind| BackgroundEntry::new(id, kind, id, BackgroundStatus::Running);
+    app.snapshots.background = vec![
         entry("b1", BackgroundKind::Shell),
         entry("b2", BackgroundKind::Monitor),
         entry("s3", BackgroundKind::Monitor),

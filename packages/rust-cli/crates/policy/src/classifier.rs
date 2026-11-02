@@ -18,6 +18,13 @@ pub struct ClassifierRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "分类器还没有实现（shell-permissions.md §4.7），产品里只有 Unavailable；Allow / Block 只在测试里构造"
+    )
+)]
 pub enum ClassifierVerdict {
     Allow,
     Block {

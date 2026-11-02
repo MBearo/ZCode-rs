@@ -4,9 +4,10 @@
 //! Pending（工具与 Connected 一起发布）或用完预算，再找一次工具。预算 `min(MCP_TIMEOUT, 10000)` ms，一次模型响应
 //! 里这类等待合计不超过它；一次等满预算仍找不到时，这个服务器在本次运行里不再等（记为 exhausted）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use rust_cli_kernel_api::manage::McpServerState;
 use rust_cli_kernel_api::mcp_state::{McpView, servers_for_tool};
@@ -21,17 +22,11 @@ pub(crate) struct Exhausted(Mutex<HashSet<String>>);
 
 impl Exhausted {
     fn has(&self, server: &str) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains(server)
+        self.0.lock_unpoisoned().contains(server)
     }
 
     fn add(&self, servers: impl IntoIterator<Item = String>) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .extend(servers);
+        self.0.lock_unpoisoned().extend(servers);
     }
 }
 

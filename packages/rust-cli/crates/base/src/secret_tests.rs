@@ -40,7 +40,34 @@ fn env_snapshot_debug_lists_names_only() {
     );
     assert_eq!(snapshot.get("ZCODE_API_KEY"), Some("sk-secret"));
     assert_eq!(snapshot.get("HOME"), None);
-    assert_eq!(snapshot.len(), 2);
+    assert_eq!(snapshot.vars().len(), 2);
+}
+
+/// 带语义名字的读法（F129）：原值、去空白的值、开关的真假、毫秒数。
+#[test]
+fn the_readers_keep_their_meanings_apart() {
+    let snapshot = EnvSnapshot::from(vec![
+        ("EMPTY".to_owned(), String::new()),
+        ("SPACED".to_owned(), "  value  ".to_owned()),
+        ("ON".to_owned(), " Yes ".to_owned()),
+        ("OFF".to_owned(), "OFF".to_owned()),
+        ("MS".to_owned(), "250ms".to_owned()),
+        ("ZERO".to_owned(), "0".to_owned()),
+    ]);
+    assert_eq!(snapshot.get("EMPTY"), Some(""));
+    assert_eq!(snapshot.raw("EMPTY"), None);
+    assert_eq!(snapshot.raw("SPACED"), Some("  value  "));
+    assert_eq!(snapshot.text("SPACED"), Some("value"));
+    assert_eq!(snapshot.text("EMPTY"), None);
+    assert!(snapshot.flag("ON") && !snapshot.off("ON"));
+    assert!(snapshot.off("OFF") && !snapshot.flag("OFF"));
+    assert!(!snapshot.flag("MISSING") && !snapshot.off("MISSING"));
+    assert_eq!(
+        snapshot.millis("MS"),
+        Some(std::time::Duration::from_millis(250))
+    );
+    assert_eq!(snapshot.millis("ZERO"), None);
+    assert_eq!(snapshot.millis("SPACED"), None);
 }
 
 /// 入口改写快照里的一个变量：有同名的就换值，没有就加（F58）。
@@ -49,7 +76,7 @@ fn with_var_replaces_or_appends() {
     let snapshot = EnvSnapshot::from(vec![("SHELL".to_owned(), "/bin/zsh".to_owned())]);
     let replaced = snapshot.with_var("SHELL", "/bin/bash");
     assert_eq!(replaced.get("SHELL"), Some("/bin/bash"));
-    assert_eq!(replaced.len(), 1);
+    assert_eq!(replaced.vars().len(), 1);
     let added = EnvSnapshot::default().with_var("SHELL", "/bin/bash");
     assert_eq!(added.get("SHELL"), Some("/bin/bash"));
 }

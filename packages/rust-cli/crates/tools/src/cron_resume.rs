@@ -33,16 +33,9 @@ fn scheduled(text: &str) -> Option<(String, bool)> {
     (!id.is_empty()).then(|| (id.to_owned(), recurring))
 }
 
+/// 工具结果的文字块直接接起来（不加换行：建任务的回执只有一个文字块，按开头认）。
 fn text_of(content: &[ToolResultContent]) -> String {
-    content
-        .iter()
-        .filter_map(|item| match item {
-            ToolResultContent::Text { text } => Some(text.as_str()),
-            ToolResultContent::Image { .. }
-            | ToolResultContent::Document { .. }
-            | ToolResultContent::ToolReference { .. } => None,
-        })
-        .collect()
+    content.iter().filter_map(ToolResultContent::text).collect()
 }
 
 impl CronBoard {

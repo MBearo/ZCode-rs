@@ -11,32 +11,24 @@ use super::*;
 
 fn snapshot(messages: Vec<Message>, running: bool) -> SessionView {
     SessionView {
-        meta: SessionMeta {
-            id: SessionId::new("sess_subagent_agent_1"),
-            kind: SessionKind::Subagent,
-            parent: Some(SessionId::new("s1")),
-            workspace: WorkspaceRef {
-                environment: EnvironmentId::new("local"),
-                root: EnvPath::new("/Users/dev/project"),
-            },
-            title: "Look around".into(),
-            trace: TraceId::new("s1"),
-            created_at_ms: 0,
-        },
-        messages,
-        selection: selection(),
-        mode: PermissionMode::Default,
-        plan: false,
-        pending: Vec::new(),
-        queue: Vec::new(),
-        last_seq: 0,
-        revision: 0,
         running,
-        background: Vec::new(),
-        peer_held: Vec::new(),
-        context_usage: None,
-        context_notice: Default::default(),
-        output_speed: None,
+        ..SessionView::new(
+            SessionMeta {
+                id: SessionId::new("sess_subagent_agent_1"),
+                kind: SessionKind::Subagent,
+                parent: Some(SessionId::new("s1")),
+                workspace: WorkspaceRef {
+                    environment: EnvironmentId::new("local"),
+                    root: EnvPath::new("/Users/dev/project"),
+                },
+                title: "Look around".into(),
+                trace: TraceId::new("s1"),
+                created_at_ms: 0,
+            },
+            messages,
+            selection(),
+            PermissionMode::Default,
+        )
     }
 }
 

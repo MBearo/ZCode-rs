@@ -9,14 +9,14 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::ids::{MessageId, RunId, SessionId};
-use rust_cli_kernel_api::message::{ContentBlock, StopReason, Usage};
+use rust_cli_kernel_api::message::Usage;
 use rust_cli_kernel_api::metering::{CallStatus, ModelCall};
 use rust_cli_kernel_api::model::{
-    ApiContent, ApiMessage, ApiRole, BlockDelta, ModelError, ModelEvent, ModelNotice, ModelPort,
-    ModelRequest, ModelSelection, ModelStreamItem, QuerySource, RequestOptions, SystemBlock,
-    small_fast_model,
+    ApiMessage, ModelError, ModelNotice, ModelPort, ModelRequest, ModelSelection, ModelStreamItem,
+    QuerySource, SystemBlock, small_fast_model,
 };
 use rust_cli_kernel_api::provider::ModelDirectory;
+use rust_cli_kernel_api::side_request::{Requester, SideReply, SideSource};
 use rust_cli_prompts::texts::render;
 use rust_cli_prompts::title;
 use tokio_util::sync::CancellationToken;
@@ -27,8 +27,8 @@ use crate::title_parse::{clean_title, normalize_input};
 const TIMEOUT: Duration = Duration::from_secs(60);
 /// Node `AUXILIARY_MAX_OUTPUT_TOKENS`。
 const AUXILIARY_MAX_OUTPUT_TOKENS: u64 = 5_000;
-/// 请求来源（`querySource`；名字只在 kernel-api 定义一处，用量表与请求头写成 Node 的 `session_title`，工作线 F71）。
-const QUERY_SOURCE: &str = rust_cli_kernel_api::model::SIDE_SESSION_TITLE;
+/// 请求来源（`querySource`；用量表与请求头写成 Node 的 `session_title`，工作线 F71）。
+const SOURCE: SideSource = SideSource::SessionTitle;
 
 /// 标题生成用的模型端口与模型目录（交互形态的会话才有，`-p` 不生成，titles.md §2）。
 #[derive(Clone)]
@@ -45,14 +45,12 @@ pub(crate) struct Generated {
     pub(crate) call: ModelCall,
 }
 
-/// 读流时收集的回复：文本、用量（`message_start` 的用量，之后由 `message_delta` 合并好的累计用量整体替换，同主循环）、
-/// 停止原因、tool_use 块数、重试次数。
+/// 读流时收集的回复（审查 E5：块、文字、用量与停止原因由 kernel-api 的 `SideReply` 收）与重试次数。用量是
+/// `message_start` 的，之后由 `message_delta` 合并好的累计用量整体替换（同主循环）。修 bug（修复线 F99，query.md
+/// §1.10）：以前只取输出，只在 `message_delta` 里给输入与缓存的端点（GLM）用量行的输入是 0。
 #[derive(Default)]
 struct Reply {
-    text: String,
-    usage: Usage,
-    stop_reason: Option<StopReason>,
-    tool_calls: u32,
+    reply: SideReply,
     retries: u32,
 }
 
@@ -60,23 +58,8 @@ impl Reply {
     fn push(&mut self, item: ModelStreamItem) {
         match item {
             ModelStreamItem::Notice(ModelNotice::Retrying { .. }) => self.retries += 1,
-            ModelStreamItem::Event(ModelEvent::MessageStart { usage, .. }) => self.usage = usage,
-            ModelStreamItem::Event(ModelEvent::BlockStart { block, .. }) => match block {
-                ContentBlock::Text { text } => self.text.push_str(&text),
-                ContentBlock::ToolUse { .. } => self.tool_calls += 1,
-                _ => {}
-            },
-            ModelStreamItem::Event(ModelEvent::BlockDelta {
-                delta: BlockDelta::Text(delta),
-                ..
-            }) => self.text.push_str(&delta),
-            ModelStreamItem::Event(ModelEvent::MessageDelta { stop_reason, usage }) => {
-                self.stop_reason = stop_reason.or(self.stop_reason);
-                // 修 bug（修复线 F99，query.md §1.10）：以前只取输出，只在 `message_delta` 里给输入与缓存的端点（GLM）用量行
-                // 的输入是 0。这里的用量是适配器合并好的累计值，整体采用（同主循环的组装器）。
-                self.usage = usage;
-            }
-            ModelStreamItem::Notice(_) | ModelStreamItem::Event(_) => {}
+            ModelStreamItem::Event(event) => self.reply.push(event),
+            ModelStreamItem::Notice(_) => {}
         }
     }
 }
@@ -131,39 +114,27 @@ impl TitleModel {
                 ("language", title::language_default()),
             ],
         );
-        let source = QuerySource::Side(QUERY_SOURCE.to_owned());
-        let request = ModelRequest {
-            selection: selection.clone(),
-            system: vec![SystemBlock {
+        let source = QuerySource::Side(SOURCE);
+        let mut request = ModelRequest::side(
+            selection.clone(),
+            SOURCE,
+            vec![SystemBlock {
                 text: title::system().to_owned(),
                 cache_control: None,
             }],
-            messages: vec![ApiMessage {
-                role: ApiRole::User,
-                content: vec![ApiContent {
-                    block: ContentBlock::Text { text: user },
-                    cache_control: None,
-                }],
-                output_config: None,
-            }],
-            tools: Vec::new(),
-            tool_choice: None,
+            vec![ApiMessage::user_text(user)],
             max_tokens,
-            thinking: None,
-            temperature: None,
-            betas: Vec::new(),
-            source: source.clone(),
             // 工作线 F52：`metadata.user_id` 的 `session_id`（model.md §3.3）。
-            options: RequestOptions {
-                session_id: Some(session.clone()),
+            Requester {
+                session: session.clone(),
                 run: run.cloned(),
-                // 修 bug（工作线 F97，titles.md §3）：目录模型的 Provider 补丁以配置的上限改写 max_tokens，这次请求自己的
-                // `min(5000, 上限)` 在那里不生效（glm-5.3 发 128000）。Node 的补丁以请求自己的上限为输入，发 5000；
-                // 这里把同一个上限交给补丁（同 WebSearch，F95）。显式覆盖的端点没有补丁，不看它。
-                provider_max_output_tokens: Some(max_tokens),
-                ..RequestOptions::default()
+                agent: None,
             },
-        };
+        );
+        // 修 bug（工作线 F97，titles.md §3）：目录模型的 Provider 补丁以配置的上限改写 max_tokens，这次请求自己的
+        // `min(5000, 上限)` 在那里不生效（glm-5.3 发 128000）。Node 的补丁以请求自己的上限为输入，发 5000；这里把同一个
+        // 上限交给补丁（同 WebSearch，F95）。显式覆盖的端点没有补丁，不看它。
+        request.options.provider_max_output_tokens = Some(max_tokens);
         let mut reply = Reply::default();
         let started = clock.now_ms();
         let collect = async {
@@ -177,7 +148,11 @@ impl TitleModel {
         let outcome = tokio::time::timeout(TIMEOUT, collect).await;
         let completed = clock.now_ms();
         let (status, error, title) = match outcome {
-            Ok(Ok(())) => (CallStatus::Completed, None, clean_title(&reply.text)),
+            Ok(Ok(())) => (
+                CallStatus::Completed,
+                None,
+                clean_title(&reply.reply.text()),
+            ),
             Ok(Err(error)) => {
                 tracing::warn!(%error, "session title generation failed");
                 (CallStatus::Error, Some(error), None)
@@ -190,21 +165,13 @@ impl TitleModel {
             }
         };
         let call = ModelCall {
-            message: request_id,
-            source,
-            selection,
-            started_at_ms: started,
-            // Node 的标题请求是非流式的 `generateText`，没有首字时间（usage.md §2.1.1）。
-            first_token_at_ms: None,
-            first_content_at_ms: None,
-            completed_at_ms: completed,
-            status,
-            stop_reason: reply.stop_reason,
-            tool_calls: reply.tool_calls,
+            stop_reason: reply.reply.stop_reason,
+            tool_calls: reply.reply.tool_calls(),
             // 全为 0 时不写（同主循环）。
-            usage: Some(reply.usage).filter(|usage| *usage != Usage::default()),
+            usage: Some(reply.reply.usage).filter(|usage| *usage != Usage::default()),
             retries: reply.retries,
             error,
+            ..ModelCall::new(request_id, source, selection, started, completed, status)
         };
         Generated { title, call }
     }

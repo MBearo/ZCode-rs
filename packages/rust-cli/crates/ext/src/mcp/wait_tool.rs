@@ -7,14 +7,13 @@ use std::sync::Weak;
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::manage::McpServerState;
-use rust_cli_kernel_api::mcp_state::{
-    McpConnections, McpServerView, McpView, WAIT_FOR_MCP_SERVERS, normalize_name,
-};
+use rust_cli_kernel_api::mcp_state::{McpConnections, McpServerView, McpView, normalize_name};
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
+use rust_cli_kernel_api::tool_names::WAIT_FOR_MCP_SERVERS;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -145,15 +144,15 @@ impl Tool for WaitForMcpServers {
     }
 
     fn input_schema(&self) -> Value {
-        rust_cli_prompts::tool(WAIT_FOR_MCP_SERVERS)
-            .map(|prompt| prompt.input_schema.clone())
-            .unwrap_or(Value::Null)
+        rust_cli_prompts::definition(WAIT_FOR_MCP_SERVERS)
+            .schema
+            .clone()
     }
 
     fn description(&self, _context: &PromptContext) -> String {
-        rust_cli_prompts::tool(WAIT_FOR_MCP_SERVERS)
-            .map(|prompt| prompt.description.clone())
-            .unwrap_or_default()
+        rust_cli_prompts::definition(WAIT_FOR_MCP_SERVERS)
+            .description
+            .clone()
     }
 
     fn is_read_only(&self, _input: &Value) -> bool {

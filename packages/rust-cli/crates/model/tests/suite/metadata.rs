@@ -14,8 +14,9 @@ use futures_util::FutureExt;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::model::QuerySource;
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
-use rust_cli_model::{DeviceIdSource, FixedEndpoint, ProviderModel};
+use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, ModelEndpoint, WireProtocol};
+use rust_cli_kernel_api::side_request::SideSource;
+use rust_cli_model::{DeviceIdSource, FixedEndpoint, ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
 use serde_json::{Value, json};
 
@@ -43,11 +44,10 @@ fn endpoint(protocol: WireProtocol, base_url: String) -> ModelEndpoint {
         credential: Credential::ApiKey(RedactedString::new("sk-test")),
         headers: Vec::new(),
         body_patches: Vec::new(),
-        mid_conversation_system: false,
-        supports_image: true,
-        supports_pdf: false,
-        supports_video: false,
-        supports_audio: false,
+        capabilities: ModelCapabilities {
+            supports_image: true,
+            ..ModelCapabilities::default()
+        },
         renewable: false,
     }
 }
@@ -86,9 +86,16 @@ async fn sent_body(protocol: WireProtocol, reply: Reply, session: Option<&str>) 
     let egress = Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap());
     let fixed = FixedEndpoint::new(endpoint(protocol, server.url()));
     let calls = Arc::new(AtomicUsize::new(0));
-    let model = ProviderModel::new(egress, Arc::new(fixed), clock())
-        .with_retry(fast_retry(0))
-        .with_device_id(device(calls.clone()));
+    let model = ProviderModel::new(
+        egress,
+        Arc::new(fixed),
+        clock(),
+        RouteOptions {
+            retry: fast_retry(0),
+            device: Some(device(calls.clone())),
+            ..RouteOptions::default()
+        },
+    );
     let mut request = request("hi", QuerySource::MainThread);
     request.options.session_id = session.map(SessionId::new);
     let events = collect(&model, request).await;
@@ -166,14 +173,29 @@ async fn an_explicit_user_id_wins_and_no_source_writes_nothing() {
             server.url(),
         )))
     };
-    let model = ProviderModel::new(egress.clone(), fixed(), clock())
-        .with_retry(fast_retry(0))
-        .with_device_id(device(calls.clone()));
+    let model = ProviderModel::new(
+        egress.clone(),
+        fixed(),
+        clock(),
+        RouteOptions {
+            retry: fast_retry(0),
+            device: Some(device(calls.clone())),
+            ..RouteOptions::default()
+        },
+    );
     let mut request = request("hi", QuerySource::MainThread);
     request.options.user_id = Some("explicit".to_owned());
     collect(&model, request).await;
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    let plain = ProviderModel::new(egress, fixed(), clock()).with_retry(fast_retry(0));
+    let plain = ProviderModel::new(
+        egress,
+        fixed(),
+        clock(),
+        RouteOptions {
+            retry: fast_retry(0),
+            ..RouteOptions::default()
+        },
+    );
     collect(&plain, request_with_session()).await;
     let bodies: Vec<Value> = server
         .requests()
@@ -185,7 +207,7 @@ async fn an_explicit_user_id_wins_and_no_source_writes_nothing() {
 }
 
 fn request_with_session() -> rust_cli_kernel_api::model::ModelRequest {
-    let mut request = request("hi", QuerySource::Side("title".to_owned()));
+    let mut request = request("hi", QuerySource::Side(SideSource::SessionTitle));
     request.options.session_id = Some(SessionId::new(SESSION));
     request
 }

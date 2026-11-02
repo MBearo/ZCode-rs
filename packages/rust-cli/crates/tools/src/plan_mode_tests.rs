@@ -13,13 +13,13 @@ use crate::test_more::{Ctx, TextEnv, output_text};
 
 const PLAN_PATH: &str = "/Users/dev/work/.zcode/plans/plan-sess_1.md";
 
-fn approve(mode: PermissionMode) -> serde_json::Value {
-    serde_json::to_value(PlanApprovalAnswer::Approve { mode }).unwrap()
+fn approve(mode: PermissionMode) -> rust_cli_kernel_api::orchestration::Answer {
+    PlanApprovalAnswer::Approve { mode }.into()
 }
 
 fn plan_context(interactions: Arc<ScriptedInteractions>, files: &[(&str, &str)]) -> Ctx {
-    let mut context = Ctx::new(interactions);
-    context.set_env(Arc::new(TextEnv::new(files)));
+    let mut context = Ctx::with_session(interactions);
+    context.set_text_env(Arc::new(TextEnv::new(files)));
     context.mode = PermissionMode::Plan;
     context
 }
@@ -28,7 +28,7 @@ fn plan_context(interactions: Arc<ScriptedInteractions>, files: &[(&str, &str)])
 async fn entering_plan_mode_only_turns_the_plan_switch_on() {
     let interactions = Arc::new(ScriptedInteractions::default());
     let tool = EnterPlanModeTool::new(true);
-    let context = Ctx::new(interactions.clone()).build();
+    let context = Ctx::with_session(interactions.clone()).build();
     assert_eq!(
         tool.validate_input(&json!({}), &context).await,
         Validation::Ok
@@ -40,11 +40,10 @@ async fn entering_plan_mode_only_turns_the_plan_switch_on() {
     let (progress, _) = mpsc::channel(1);
     let output = tool.call(json!({}), context, progress).await.unwrap();
     assert_eq!(output_text(&output), texts::ENTERED_PLAN_MODE);
-    // 修复线 F20：只开 plan，不改权限模式（以前请求 set_mode(plan)）。
+    // 修复线 F20：只开 plan，不改权限模式。
     assert_eq!(interactions.plans(), [true]);
-    assert!(interactions.modes().is_empty());
     // 子代理不能进入计划模式。
-    let mut agent = Ctx::new(interactions);
+    let mut agent = Ctx::with_session(interactions);
     agent.agent = Some(AgentId::new("a1"));
     assert_eq!(
         tool.validate_input(&json!({}), &agent.build()).await,
@@ -118,7 +117,6 @@ async fn approving_the_plan_only_turns_the_plan_switch_off() {
     );
     // 修复线 F20：批准只关掉 plan，回答里的模式不用来改权限模式（退出后是进入前的模式，由会话 actor 保留）。
     assert_eq!(interactions.plans(), [false]);
-    assert!(interactions.modes().is_empty());
     match &interactions.asked()[..] {
         [InteractionRequest::PlanApproval { plan, .. }] => assert_eq!(plan, "# Plan\n1. do it"),
         other => panic!("unexpected {other:?}"),
@@ -142,7 +140,6 @@ async fn without_a_plan_file_the_exit_is_still_approved() {
         .unwrap();
     assert_eq!(output_text(&output), texts::PLAN_EXIT_APPROVED);
     assert_eq!(interactions.plans(), [false]);
-    assert!(interactions.modes().is_empty());
 }
 
 #[tokio::test]
@@ -151,7 +148,7 @@ async fn keep_planning_rejects_with_the_feedback_and_keeps_the_mode() {
         feedback: Some("add tests".to_owned()),
     };
     let interactions = Arc::new(ScriptedInteractions::new([
-        serde_json::to_value(feedback).unwrap()
+        rust_cli_kernel_api::orchestration::Answer::from(feedback),
     ]));
     let tool = ExitPlanModeTool::new(true);
     let (progress, _) = mpsc::channel(1);
@@ -168,7 +165,6 @@ async fn keep_planning_rejects_with_the_feedback_and_keeps_the_mode() {
         output_text(&output),
         format!("{REJECT_WITH_REASON}add tests")
     );
-    assert!(interactions.modes().is_empty());
     assert!(interactions.plans().is_empty());
 }
 
@@ -199,6 +195,5 @@ async fn a_subagent_plan_is_approved_without_touching_the_session_mode() {
         .await
         .unwrap();
     assert_eq!(output_text(&output), texts::AGENT_PLAN_APPROVED);
-    assert!(interactions.modes().is_empty());
     assert!(interactions.plans().is_empty());
 }

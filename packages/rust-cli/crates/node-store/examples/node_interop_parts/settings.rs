@@ -2,6 +2,7 @@
 //! §5）、项目的持久模式（config.md §2.2）与生成的会话标题（titles.md §4）；`rules` 命令读回规则集，
 //! `mode` / `mode-set` 读写持久模式，给 Node 一侧比对。
 use rust_cli_kernel_api::permission::{PermissionRule, RuleBehavior};
+use rust_cli_kernel_api::store::LocalSettings;
 
 use super::*;
 

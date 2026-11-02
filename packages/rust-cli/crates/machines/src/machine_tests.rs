@@ -3,13 +3,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::{ProvisionError, Provisioned, Provisioner};
 use async_trait::async_trait;
 use rust_cli_exec_client::{ClientOptions, Reconnect};
 use rust_cli_exec_transport::fault::{Faults, Switch, inject};
 use rust_cli_exec_transport::memory::{MemoryConnector, MemoryListener, network};
-use rust_cli_exec_transport::{
-    Connector, Link, LinkError, Listener, ProvisionError, Provisioned, Provisioner,
-};
+use rust_cli_exec_transport::{Connector, Link, LinkError, Listener};
 use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::dto::core::PathStyle;
 use rust_cli_exec_wire::envelope::Beat;
@@ -17,7 +16,7 @@ use rust_cli_exec_wire::frame::{Frame, Kind, Reassembler, Received};
 use rust_cli_exec_wire::handshake::{Capabilities, PROTOCOL, Refuse, RefuseCode, Welcome};
 use tokio::sync::watch;
 
-use crate::{Endpoint, Machine, MachineError, MachineState};
+use crate::{Endpoint, Machine, MachineError, MachineState, Retry};
 
 /// 部署：按顺序给出结果（用完之后都成功）。
 struct Steps(Mutex<Vec<Result<Provisioned, ProvisionError>>>);
@@ -205,14 +204,17 @@ async fn a_failed_provision_is_reported_and_a_later_connect_succeeds() {
     let mut states = machine.states();
     assert_eq!(
         machine.connect().await.map(|_| ()),
-        Err(MachineError::Unsupported {
+        Err(MachineError::Provision(ProvisionError::Unsupported {
             os: "Darwin".to_owned(),
             arch: "arm64".to_owned()
-        })
+        }))
     );
     assert!(matches!(machine.state(), MachineState::Failed { .. }));
     let client = machine.connect().await.unwrap();
-    assert!(client.is_connected());
+    assert!(matches!(
+        *client.states().borrow(),
+        rust_cli_exec_client::ConnectionState::Connected { .. }
+    ));
     let mut seen = Vec::new();
     until(&mut states, &mut seen, |state| {
         matches!(state, MachineState::Ready(_))
@@ -258,7 +260,7 @@ async fn a_lost_link_reconnects_and_the_state_follows() {
     .await;
     connector.switches.lock().unwrap()[0].cut();
     until(&mut states, &mut seen, |state| {
-        matches!(state, MachineState::Reconnecting { .. })
+        matches!(state, MachineState::Reconnecting(_))
     })
     .await;
     until(&mut states, &mut seen, |state| {
@@ -270,10 +272,10 @@ async fn a_lost_link_reconnects_and_the_state_follows() {
     assert!(
         seen.iter().any(|state| matches!(
             state,
-            MachineState::Reconnecting {
+            MachineState::Reconnecting(Retry {
                 retry_at: Some(_),
                 ..
-            }
+            })
         )),
         "{seen:?}"
     );
@@ -304,7 +306,7 @@ async fn a_rejected_reconnect_fails_the_machine_at_once() {
     assert!(
         seen.iter().all(|state| !matches!(
             state,
-            MachineState::Reconnecting { attempt, .. } if *attempt > 1
+            MachineState::Reconnecting(retry) if retry.attempt > 1
         )),
         "{seen:?}"
     );
@@ -326,7 +328,7 @@ async fn when_reconnecting_gives_up_the_machine_fails() {
     .await;
     assert!(
         seen.iter()
-            .any(|state| matches!(state, MachineState::Reconnecting { .. })),
+            .any(|state| matches!(state, MachineState::Reconnecting(_))),
         "{seen:?}"
     );
     assert!(matches!(
@@ -355,10 +357,7 @@ async fn every_new_client_has_its_own_instance() {
 }
 
 /// 部署时依次报告这些步（F98 上传、F100 下载），每步之后等测试放行。
-struct Uploads(
-    Arc<tokio::sync::Notify>,
-    Vec<rust_cli_exec_transport::ProvisionStep>,
-);
+struct Uploads(Arc<tokio::sync::Notify>, Vec<crate::ProvisionStep>);
 
 #[async_trait]
 impl Provisioner for Uploads {
@@ -368,7 +367,7 @@ impl Provisioner for Uploads {
 
     async fn provision_reporting(
         &self,
-        progress: &(dyn Fn(rust_cli_exec_transport::ProvisionStep) + Send + Sync),
+        progress: &(dyn Fn(crate::ProvisionStep) + Send + Sync),
     ) -> Result<Provisioned, ProvisionError> {
         for step in &self.1 {
             progress(step.clone());
@@ -407,7 +406,7 @@ async fn the_upload_shows_as_its_own_state() {
     let endpoint = Arc::new(UploadingEndpoint {
         uploads: Uploads(
             release.clone(),
-            vec![rust_cli_exec_transport::ProvisionStep::Uploading { bytes: 93_323_264 }],
+            vec![crate::ProvisionStep::Uploading { bytes: 93_323_264 }],
         ),
         connector: Arc::new(Cuttable {
             inner: Mutex::new(Arc::new(connector)),
@@ -442,7 +441,7 @@ async fn the_upload_shows_as_its_own_state() {
 /// F100（remote-exec.md §26.6）：本机缓存里没有执行器时，第一次连接先是“下载”，再是“上传”，之后握手、就绪。
 #[tokio::test]
 async fn the_download_shows_as_its_own_state_before_the_upload() {
-    use rust_cli_exec_transport::ProvisionStep;
+    use crate::ProvisionStep;
     let (connector, listener) = network("machine");
     let _server = serve(listener, false);
     let release = Arc::new(tokio::sync::Notify::new());

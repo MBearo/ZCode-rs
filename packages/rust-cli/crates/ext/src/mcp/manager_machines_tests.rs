@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use rust_cli_base::TaskScope;
+use rust_cli_kernel_api::controller_services::ControllerServices;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::EnvironmentId;
-use rust_cli_kernel_api::local_services::LocalServices;
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::testing::UnusedEnvironment;
 use serde_json::json;
@@ -36,7 +36,8 @@ fn remote_workspace() -> WorkspaceRef {
 impl Machines {
     fn new(fake: Arc<FakeMcp>, ready: bool) -> Arc<Self> {
         Arc::new(Self {
-            remote: MachineEnv::new(Arc::new(UnusedEnvironment), fake).named("dev-a"),
+            remote: MachineEnv::new(Arc::new(UnusedEnvironment), fake)
+                .named(rust_cli_kernel_api::ids::MachineName::new("dev-a")),
             ready: watch::channel(ready).0,
             known: Mutex::new(vec!["dev-a".to_owned()]),
         })
@@ -44,23 +45,36 @@ impl Machines {
 }
 
 impl EnvironmentRegistry for Machines {
-    fn local_machine(&self) -> MachineEnv {
+    fn primary_machine(&self) -> MachineEnv {
         MachineEnv::new(
             Arc::new(UnusedEnvironment),
             Arc::new(rust_cli_kernel_api::mcp::NoMcpTransport),
         )
     }
 
-    fn local(&self) -> LocalServices {
-        LocalServices::new(Arc::new(UnusedEnvironment))
+    fn controller(&self) -> ControllerServices {
+        ControllerServices::new(Arc::new(UnusedEnvironment))
     }
 
-    fn remote(&self, name: &str) -> Option<(MachineEnv, WorkspaceRef)> {
-        (name == "dev-a" && *self.ready.borrow()).then(|| (self.remote.clone(), remote_workspace()))
+    fn remote(
+        &self,
+        name: &rust_cli_kernel_api::ids::MachineName,
+    ) -> Option<(MachineEnv, WorkspaceRef)> {
+        (name.as_str() == "dev-a" && *self.ready.borrow())
+            .then(|| (self.remote.clone(), remote_workspace()))
     }
 
-    fn wait_remote(&self, name: &str) -> BoxFuture<'static, Option<(MachineEnv, WorkspaceRef)>> {
-        if !self.known.lock().unwrap().iter().any(|known| known == name) {
+    fn wait_remote(
+        &self,
+        name: &rust_cli_kernel_api::ids::MachineName,
+    ) -> BoxFuture<'static, Option<(MachineEnv, WorkspaceRef)>> {
+        if !self
+            .known
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|known| known == name.as_str())
+        {
             return async { None }.boxed();
         }
         let mut ready = self.ready.subscribe();
@@ -77,14 +91,9 @@ fn bound(name: &str, machine: Option<&str>) -> McpServer {
     McpServer {
         name: name.to_owned(),
         scope: McpScope::User,
-        transport: McpTransportConfig::Stdio {
-            command: "npx".to_owned(),
-            args: vec!["@playwright/mcp".to_owned()],
-            env: Default::default(),
-            cwd: None,
-        },
+        transport: McpTransportConfig::stdio("npx".to_owned(), vec!["@playwright/mcp".to_owned()]),
         options: Default::default(),
-        machine: machine.map(str::to_owned),
+        machine: rust_cli_kernel_api::ids::MachineName::new(machine.unwrap_or_default()),
     }
 }
 
@@ -102,7 +111,7 @@ fn manager(local: Arc<FakeMcp>, machines: Arc<Machines>, scope: &TaskScope) -> M
         local,
         scope.spawner(),
         McpSettings::default(),
-        crate::clock_tests::TokioClock::new(),
+        crate::clock_tests::clock(),
     );
     manager.set_machines(machines);
     manager
@@ -125,8 +134,8 @@ async fn a_bound_server_uses_the_pipe_and_workspace_of_its_machine() {
     assert_eq!(
         manager.status(),
         [
-            ("browser-a".to_owned(), McpStatus::Connected),
-            ("here".to_owned(), McpStatus::Connected),
+            ("browser-a".to_owned(), McpStatus::CONNECTED),
+            ("here".to_owned(), McpStatus::CONNECTED),
         ]
     );
     // 管道：绑定的服务器只在 dev-a 的传输上连，工作区是 dev-a 的工作目录；`local` 是本机。
@@ -146,8 +155,8 @@ async fn a_bound_server_uses_the_pipe_and_workspace_of_its_machine() {
         .collect();
     assert_eq!(names, ["mcp__browser-a__navigate", "mcp__here__navigate"]);
     let infos = manager.server_infos();
-    assert_eq!(infos[0].machine.as_deref(), Some("dev-a"));
-    assert_eq!(infos[1].machine, None);
+    assert_eq!(infos[0].machine.remote(), Some("dev-a"));
+    assert_eq!(infos[1].machine, Default::default());
 }
 
 #[tokio::test]
@@ -183,20 +192,20 @@ async fn a_server_waits_for_its_machine_while_it_is_connecting() {
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
     assert_eq!(
         manager.status(),
-        [("browser-a".to_owned(), McpStatus::Pending)]
+        [("browser-a".to_owned(), McpStatus::CONNECTING)]
     );
     machines.ready.send_replace(true);
     manager.wait_ready().await;
     assert_eq!(
         manager.status(),
-        [("browser-a".to_owned(), McpStatus::Connected)]
+        [("browser-a".to_owned(), McpStatus::CONNECTED)]
     );
     // 没有注册表的组装（只给测试）：绑定的服务器连不上。
     let alone = McpManager::new(
         Arc::new(FakeMcp::default()),
         scope.spawner(),
         McpSettings::default(),
-        crate::clock_tests::TokioClock::new(),
+        crate::clock_tests::clock(),
     );
     alone.start(workspace(), vec![bound("browser-a", Some("dev-a"))]);
     alone.wait_ready().await;
@@ -212,7 +221,8 @@ struct Arriving {
 impl Arriving {
     fn new(fake: Arc<FakeMcp>) -> Arc<Self> {
         Arc::new(Self {
-            remote: MachineEnv::new(Arc::new(UnusedEnvironment), fake).named("dev-a"),
+            remote: MachineEnv::new(Arc::new(UnusedEnvironment), fake)
+                .named(rust_cli_kernel_api::ids::MachineName::new("dev-a")),
             here: watch::channel(false).0,
         })
     }
@@ -223,15 +233,15 @@ impl Arriving {
 }
 
 impl EnvironmentRegistry for Arriving {
-    fn local_machine(&self) -> MachineEnv {
+    fn primary_machine(&self) -> MachineEnv {
         MachineEnv::new(
             Arc::new(UnusedEnvironment),
             Arc::new(rust_cli_kernel_api::mcp::NoMcpTransport),
         )
     }
 
-    fn local(&self) -> LocalServices {
-        LocalServices::new(Arc::new(UnusedEnvironment))
+    fn controller(&self) -> ControllerServices {
+        ControllerServices::new(Arc::new(UnusedEnvironment))
     }
 
     fn machines(&self) -> rust_cli_kernel_api::env_registry::MachineSet {
@@ -256,8 +266,12 @@ impl EnvironmentRegistry for Arriving {
         }
     }
 
-    fn remote(&self, name: &str) -> Option<(MachineEnv, WorkspaceRef)> {
-        (name == "dev-a" && *self.here.borrow()).then(|| (self.remote.clone(), remote_workspace()))
+    fn remote(
+        &self,
+        name: &rust_cli_kernel_api::ids::MachineName,
+    ) -> Option<(MachineEnv, WorkspaceRef)> {
+        (name.as_str() == "dev-a" && *self.here.borrow())
+            .then(|| (self.remote.clone(), remote_workspace()))
     }
 
     fn changes(&self) -> futures_util::stream::BoxStream<'static, u64> {
@@ -293,7 +307,7 @@ async fn a_failed_bound_server_reconnects_when_its_machine_arrives() {
         Arc::new(FakeMcp::default()),
         scope.spawner(),
         McpSettings::default(),
-        crate::clock_tests::TokioClock::new(),
+        crate::clock_tests::clock(),
     );
     manager.set_machines(machines.clone());
     manager.start(
@@ -315,7 +329,7 @@ async fn a_failed_bound_server_reconnects_when_its_machine_arrives() {
         ]
     );
     machines.arrive(true);
-    until_status(&manager, |status| status[0].1 == McpStatus::Connected).await;
+    until_status(&manager, |status| status[0].1 == McpStatus::CONNECTED).await;
     assert_eq!(manager.status()[1].1, failed("gpu-1"));
     assert_eq!(
         remote.roots(),

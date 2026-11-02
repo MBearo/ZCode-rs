@@ -5,12 +5,12 @@
 //! 组装里从本机存储的插件清单得出（platform `plugin_inventory`）。
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use rust_cli_ext::plugins::{PluginCandidate, PluginOrigin, PluginSources};
 use rust_cli_kernel_api::env::EnvPath;
+use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_paths::StoragePath;
-use rust_cli_platform::plugin_inventory::{
+use rust_cli_platform::local::plugin_inventory::{
     installed_plugins, installed_root, official_plugin_roots,
 };
 use serde_json::Value;
@@ -113,13 +113,9 @@ pub(crate) fn merge(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> PluginS
 }
 
 /// 配置目录的位置（Node `resolve(rootPath)`）：绝对路径原样，相对路径相对工作区根；`.` 与 `..` 按字面
-/// 化简，不展开 `~`。
-///
-/// 化简用 base 的 `path::normalize`（F58：以前这里自己写了一份）。
+/// 化简，不展开 `~`。目录在执行侧（deployment.md §21），按工作区根的路径风格拼接，不用 controller 的 `std::path`。
 pub(crate) fn resolve_dir(root: &str, dir: &str) -> String {
-    rust_cli_base::path::normalize(&Path::new(root).join(dir))
-        .to_string_lossy()
-        .into_owned()
+    PathStyle::infer(root).resolve(root, dir, None)
 }
 
 /// 插件候选（ext.md §4.1 的来源 2–4，按 Node `resolveCandidates` 的顺序）。插件目录在本机存储里，路径直接用作

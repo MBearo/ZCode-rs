@@ -75,7 +75,7 @@ fn context_percent(usage: ContextOccupancy) -> f64 {
 /// 查看子代理时 TPS 与 ctx 取它的只读视图，命中率的回执由 runner 查它的子会话（修复线 F112，tui-panels.md §1.7）；子代理
 /// 没有的项不出现，不用主会话的值顶替。
 pub fn items(app: &App) -> Items {
-    let stats = app.request_stats.stats();
+    let stats = app.snapshots.request_stats.stats();
     let shown = app.shown();
     let style = app.palette.secondary();
     let span = |text: String| Span::styled(text, style);

@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use rust_cli_exec_transport::stdio::{ChildCommand, StdioConnector};
-use rust_cli_exec_transport::{Connector, LinkError, Provisioned, Provisioner, Ready};
+use rust_cli_exec_transport::{Connector, LinkError};
 use rust_cli_machines::{Endpoint, Machine, MachineEntry};
+use rust_cli_machines::{Provisioned, Provisioner, Ready};
 
 use super::{Connect, Start};
 
@@ -51,7 +52,7 @@ impl Endpoint for Loopback {
 pub(super) fn machine(start: &Start, entry: &MachineEntry) -> Result<Machine> {
     let connect = &start.connect;
     let endpoint: Arc<dyn Endpoint> = match connect {
-        Connect::Ssh { config, artifact } => crate::ssh_executor::endpoint(
+        Connect::Ssh { config, artifact } => crate::assemble::ssh_executor::endpoint(
             (&start.env, &start.executor),
             &entry.ssh,
             (config.as_deref(), artifact.as_deref()),
@@ -65,9 +66,9 @@ pub(super) fn machine(start: &Start, entry: &MachineEntry) -> Result<Machine> {
             Arc::new(Loopback {
                 ready: Ready(Provisioned {
                     program: this_executable()?.to_string_lossy().into_owned(),
-                    args: crate::executor::child_args(&[], true),
+                    args: crate::commands::executor::child_args(true),
                 }),
-                env: start.env.clone(),
+                env: start.env.vars().to_vec(),
                 cwd: PathBuf::from(dir),
                 name: entry.name.clone(),
             })

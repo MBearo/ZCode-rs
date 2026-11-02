@@ -145,3 +145,47 @@ fn if_conditions_and_session_start_http() {
     let start = select(E::SessionStart, &matchers, &json!({"source": "startup"}));
     assert!(start.is_empty());
 }
+
+/// `if` 条件按权限规则的语法求值（hooks.md §3.3，kernel-api `permission::syntax`，F125 的 T4）。以前 hooks 自己写了一份
+/// 简化的匹配：下面标“修前”的几行以前不匹配（`Bash(git *)` 不认 `git`、不并空白、不认转义的括号与星号、前缀不认
+/// `xargs`），与判决链的同一条规则结论不同。
+#[test]
+fn if_conditions_use_the_permission_rule_syntax() {
+    let hit = |condition: &str, command: &str| {
+        condition_matches(condition, "Bash", &json!({ "command": command }))
+    };
+    // 修前不匹配：单个 ` *` 结尾时尾部可以省略。
+    assert!(hit("Bash(git *)", "git"));
+    assert!(hit("Bash(git *)", "git log -1"));
+    // 修前不匹配：连续的空格、制表符并成一个空格。
+    assert!(hit("Bash(git *)", "git\tlog"));
+    assert!(hit("Bash(git status:*)", "git  status --short"));
+    // 修前不匹配：content 里转义的括号。
+    assert!(hit(r"Bash(echo \(hi\))", "echo (hi)"));
+    // 修前不匹配：`\*` 是字面的星号。
+    assert!(hit(r"Bash(echo \*)", "echo *"));
+    assert!(!hit(r"Bash(echo \*)", "echo hi"));
+    // 修前不匹配：前缀规则也认 `xargs <前缀>`。
+    assert!(hit("Bash(rm:*)", "xargs rm -f x"));
+    // 修前修后相同。
+    assert!(hit("Bash(git:*)", "git"));
+    assert!(!hit("Bash(git:*)", "gitk"));
+    assert!(hit("Bash(npm run *)", "npm run build"));
+    assert!(!hit("Bash(npm test)", "npm test -- x"));
+    assert!(hit("Bash", "anything"));
+    assert!(hit("Bash(*)", "anything"));
+    assert!(hit("Bash()", "anything"));
+    assert!(!hit("Read", "anything"));
+    // 旧工具名与规则同一张表。
+    assert!(condition_matches(
+        "Task",
+        "Agent",
+        &json!({ "prompt": "x" })
+    ));
+    // 其他工具带内容的条件仍不匹配（D5）。
+    assert!(!condition_matches(
+        "Read(./a)",
+        "Read",
+        &json!({ "file_path": "./a" })
+    ));
+}

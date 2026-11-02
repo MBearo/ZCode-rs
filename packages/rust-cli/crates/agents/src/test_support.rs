@@ -1,17 +1,16 @@
 //! 测试替身：假的子循环工厂（记录它看到的工具、system 段与请求）、调用工具的父运行。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_base::TaskScope;
 use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::agents::{SubagentQueries, TaskListStore};
+use rust_cli_kernel_api::controller_services::ControllerServices;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
-use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
-};
-use rust_cli_kernel_api::local_services::LocalServices;
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, RunId, SessionId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::message::{AssistantMessage, ContentBlock, Message, StopReason, Usage};
@@ -23,8 +22,8 @@ use rust_cli_kernel_api::orchestration::{
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::{
-    AllPorts, FakeTool, FixedClock, FixedContext, ListTools, MemoryStore, RecordingSink,
-    SequentialIds, UnusedEnvironment, local_services, machine, selection,
+    FakeTool, FixedClock, FixedContext, ListTools, MemoryStore, RecordingSink, SequentialIds,
+    UnusedEnvironment, controller_services, machine, selection, unsupported_machine,
 };
 use rust_cli_kernel_api::tool::{Tool, ToolOutput, ToolUseContext, Validation};
 use serde_json::Value;
@@ -33,14 +32,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{Agents, AgentsConfig, AgentsPorts, MemoryTaskLists};
 
+/// 测试内核的执行环境 generation（`AgentsPorts::generation`）。
+pub(crate) const GENERATION: &str = "gen_agents_test";
+
 /// 子循环看到的东西。
 #[derive(Clone)]
 pub(crate) struct Seen {
     pub(crate) tools: Vec<String>,
     pub(crate) system: Vec<SystemBlock>,
     pub(crate) request: QueryRequest,
-    /// 子代理运行的缺省机器（`RunSink::default_machine`，R3）。
-    pub(crate) default_machine: Option<String>,
 }
 
 /// 子循环在哪里等（后台场景）；中止时提前返回。
@@ -58,7 +58,7 @@ pub(crate) struct Gates(Arc<Mutex<std::collections::HashMap<SessionId, Arc<Notif
 
 impl Gates {
     fn of(&self, session: &SessionId) -> Arc<Notify> {
-        let mut gates = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut gates = self.0.lock_unpoisoned();
         gates.entry(session.clone()).or_default().clone()
     }
 
@@ -73,6 +73,8 @@ pub(crate) struct FakeQueries {
     pub(crate) gate: Option<Gate>,
     /// 放行后、结束前在“工具边界”取走的通知：(子会话, 通知全文)。
     pub(crate) absorbed: Arc<Mutex<Vec<(SessionId, String)>>>,
+    /// 为真时放行后直接结束、没有工具边界（插话与通知都留着）：模拟消息在最后一个工具边界之后才到。
+    pub(crate) no_boundary: Arc<std::sync::atomic::AtomicBool>,
 }
 
 struct FakeRunner {
@@ -81,6 +83,7 @@ struct FakeRunner {
     seen: Arc<Mutex<Vec<Seen>>>,
     gate: Option<Gate>,
     absorbed: Arc<Mutex<Vec<(SessionId, String)>>>,
+    no_boundary: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl SubagentQueries for FakeQueries {
@@ -95,6 +98,7 @@ impl SubagentQueries for FakeQueries {
             seen: self.seen.clone(),
             gate: self.gate.clone(),
             absorbed: self.absorbed.clone(),
+            no_boundary: self.no_boundary.clone(),
         })
     }
 }
@@ -125,17 +129,14 @@ impl QueryRunner for FakeRunner {
         abort: Abort,
     ) -> Result<QueryStop, QueryError> {
         let context = ContextRequest {
-            default_machine: None,
-            capabilities: None,
-            session: request.session.clone(),
-            workspace: request.workspace.clone(),
             agent: request.agent.clone(),
-            source: request.source.clone(),
-            mode: request.mode,
-            tool_names: Vec::new(),
-            selection: request.selection.clone(),
-            plan_flags: Default::default(),
-            mcp: None,
+            ..ContextRequest::new(
+                request.session.clone(),
+                request.workspace.clone(),
+                request.source.clone(),
+                request.mode,
+                request.selection.clone(),
+            )
         };
         let system = self
             .context
@@ -150,16 +151,11 @@ impl QueryRunner for FakeRunner {
             .map(|tool| tool.name().to_owned())
             .collect();
         let session = request.session.clone();
-        let default_machine = sink.default_machine().await;
-        self.seen
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(Seen {
-                tools,
-                system,
-                request,
-                default_machine,
-            });
+        self.seen.lock_unpoisoned().push(Seen {
+            tools,
+            system,
+            request,
+        });
         let gate = match &self.gate {
             Some(Gate::Shared(gate)) => Some(gate.clone()),
             Some(Gate::PerSession(gates)) => Some(gates.of(&session)),
@@ -171,12 +167,19 @@ impl QueryRunner for FakeRunner {
                 () = abort.aborted() => return Ok(QueryStop::Aborted),
             }
         }
-        // 一个工具边界：取走发给这次运行的通知（query.md §5.1）。
-        for notice in sink.take_notices().await {
-            self.absorbed
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push((session.clone(), notice));
+        // 一个工具边界：取走发给这次运行的插话与通知（query.md §5.1），记下通知。工作线 F134：`RunSink` 只有
+        // `take_absorbed`（以前这里只取 `take_notices`，插话留在邮箱）；要插话留着的测试关掉这个边界。
+        let absorbed = if self.no_boundary.load(std::sync::atomic::Ordering::SeqCst) {
+            Vec::new()
+        } else {
+            sink.take_absorbed().await
+        };
+        for item in absorbed {
+            if let rust_cli_kernel_api::orchestration::Absorbed::Notice(notice) = item {
+                self.absorbed
+                    .lock_unpoisoned()
+                    .push((session.clone(), notice.text));
+            }
         }
         sink.commit_message(report_message("Hello from the subagent."))
             .await?;
@@ -190,7 +193,7 @@ pub(crate) struct ParentRunner {
     pub(crate) registry: Arc<dyn ToolRegistry>,
     /// 工具调用看到的机器与本机服务。
     pub(crate) machine: MachineEnv,
-    pub(crate) local: LocalServices,
+    pub(crate) controller: ControllerServices,
     pub(crate) tool: String,
     pub(crate) input: Value,
     pub(crate) output: Arc<Mutex<Option<ToolOutput>>>,
@@ -208,25 +211,22 @@ pub(crate) fn tool_context(session: &SessionId, run: &RunId) -> ToolUseContext {
     ToolUseContext {
         session: session.clone(),
         run: run.clone(),
-        tool_use: ToolUseId::new("toolu_1"),
-        agent: None,
         workspace: workspace(),
         mode: PermissionMode::DontAsk,
-        cancel: CancellationToken::new(),
         machine: machine(env.clone()),
-        local: local_services(env),
-        artifacts: Arc::new(MemoryStore::default()),
+        controller: controller_services(env),
         interactions: Arc::new(RecordingSink::default()),
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g1"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op_1"),
-            origin: Origin::Agent {
+        session_ops: Arc::new(RecordingSink::default()),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g1"),
+            OperationId::new("op_1"),
+            Origin::Agent {
                 session: session.clone(),
                 run: run.clone(),
             },
-        },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -243,7 +243,7 @@ impl QueryRunner for ParentRunner {
         let mut context = tool_context(&request.session, &request.run);
         context.agent = request.agent.clone();
         context.machine = self.machine.clone();
-        context.local = self.local.clone();
+        context.controller = self.controller.clone();
         let output = match tool.validate_input(&self.input, &context).await {
             Validation::Invalid { message, .. } => ToolOutput {
                 content: vec![ToolResultContent::Text {
@@ -257,7 +257,7 @@ impl QueryRunner for ParentRunner {
                 .await
                 .unwrap(),
         };
-        *self.output.lock().unwrap_or_else(PoisonError::into_inner) = Some(output);
+        *self.output.lock_unpoisoned() = Some(output);
         Ok(QueryStop::Completed)
     }
 }
@@ -268,9 +268,11 @@ pub(crate) struct Harness {
     pub(crate) tasks: Arc<MemoryTaskLists>,
     pub(crate) seen: Arc<Mutex<Vec<Seen>>>,
     pub(crate) absorbed: Arc<Mutex<Vec<(SessionId, String)>>>,
+    /// 假的子循环没有工具边界（[`FakeQueries::no_boundary`]）。
+    pub(crate) no_boundary: Arc<std::sync::atomic::AtomicBool>,
     /// 父运行里工具调用看到的机器与本机服务（缺省什么都不支持）。
     pub(crate) machine: MachineEnv,
-    pub(crate) local: LocalServices,
+    pub(crate) controller: ControllerServices,
     /// 只读快照问过的压缩器（F112）：每次问的模型与档位。
     pub(crate) compactor: Arc<ContextFake>,
     pub(crate) _scope: TaskScope,
@@ -286,8 +288,7 @@ pub(crate) struct ContextFake {
 impl ContextFake {
     fn ask(&self, selection: &rust_cli_kernel_api::model::ModelSelection) {
         self.asked
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_unpoisoned()
             .push((selection.model.clone(), selection.reasoning.clone()));
     }
 }
@@ -357,19 +358,15 @@ pub(crate) fn with_peers(peers: Arc<dyn rust_cli_kernel_api::peers::PeerMessagin
 
 /// 每个子会话分别放行；`keep_alive` 是交互模式（停放）还是 `-p`。
 pub(crate) fn held(gates: &Gates, keep_alive: bool) -> Harness {
-    held_with_env(gates, keep_alive, Arc::new(UnusedEnvironment))
+    held_with_env(gates, keep_alive, unsupported_machine())
 }
 
-/// 同 [`held`]，agents 自己用的执行环境换成 `env`（子会话里后台命令的通知，agents.md §5.2）。
-pub(crate) fn held_with_env<E: AllPorts + 'static>(
-    gates: &Gates,
-    keep_alive: bool,
-    env: Arc<E>,
-) -> Harness {
+/// 同 [`held`]，agents 自己用的机器换成 `machine`（子会话里后台命令的通知，agents.md §5.2）。
+pub(crate) fn held_with_env(gates: &Gates, keep_alive: bool, machine: MachineEnv) -> Harness {
     built(
         Some(Gate::PerSession(gates.clone())),
         keep_alive,
-        machine(env),
+        machine,
         no_peers(),
     )
 }
@@ -392,17 +389,15 @@ struct Hiding {
     hidden: &'static [&'static str],
 }
 
-impl ToolRegistry for Hiding {
+impl rust_cli_kernel_api::testing::RegistryOverride for Hiding {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
-        let mut tools = self.inner.tools();
+        let mut tools = ToolRegistry::tools(&self.inner);
         tools.retain(|tool| !self.hidden.contains(&tool.name()));
         tools
     }
 
     fn find(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.inner
-            .find(name)
-            .filter(|_| !self.hidden.contains(&name))
+        ToolRegistry::find(&self.inner, name).filter(|_| !self.hidden.contains(&name))
     }
 
     fn hides(&self, name: &str) -> bool {
@@ -427,16 +422,16 @@ fn built(
 }
 
 /// 同 [`held_with_env`]，另给时钟（子代理里 monitor 的批与到期按时钟算，agents.md §5.3）。
-pub(crate) fn held_with_clock<E: AllPorts + 'static>(
+pub(crate) fn held_with_clock(
     gates: &Gates,
     keep_alive: bool,
-    env: Arc<E>,
+    machine: MachineEnv,
     clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
 ) -> Harness {
     built_with(
         Some(Gate::PerSession(gates.clone())),
         keep_alive,
-        machine(env),
+        machine,
         no_peers(),
         &[],
         clock,
@@ -447,7 +442,7 @@ pub(crate) fn held_with_clock<E: AllPorts + 'static>(
 pub(crate) fn with_machines(
     machines: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
 ) -> Harness {
-    let local = machines.local_machine();
+    let local = machines.primary_machine();
     built_full(
         None,
         false,
@@ -488,23 +483,25 @@ fn built_full(
     };
     let seen = queries.seen.clone();
     let absorbed = queries.absorbed.clone();
+    let no_boundary = queries.no_boundary.clone();
     let base: Vec<Arc<dyn Tool>> = ["Bash", "Read", "Edit", "Workflow"]
         .into_iter()
         .map(|name| Arc::new(FakeTool::new(name, true, "")) as Arc<dyn Tool>)
         .collect();
     let compactor = Arc::new(ContextFake::default());
+    // 操作上下文与别的 ID 同一个来源（ID 的顺序不变，工作线 F134）。
+    let ids: Arc<dyn rust_cli_kernel_api::clock::Ids> = Arc::new(SequentialIds::default());
     let ports = AgentsPorts {
         store: store.clone(),
-        ids: Arc::new(SequentialIds::default()),
+        ids: ids.clone(),
         clock,
         compactor: compactor.clone(),
         machines: machines.unwrap_or_else(|| {
-            Arc::new(rust_cli_kernel_api::env_registry::LocalRegistry::new(
+            Arc::new(rust_cli_kernel_api::env_registry::PrimaryRegistry::new(
                 machine_env.clone(),
-                rust_cli_kernel_api::testing::local_services(Arc::new(UnusedEnvironment)),
+                rust_cli_kernel_api::testing::controller_services(Arc::new(UnusedEnvironment)),
             ))
         }),
-        machine: machine_env,
         catalog: Arc::new(crate::AgentCatalog::new(
             Arc::new(UnusedEnvironment),
             Arc::new(UnusedEnvironment),
@@ -513,17 +510,11 @@ fn built_full(
         queries: Arc::new(queries),
         context: Arc::new(FixedContext(Vec::new())),
         spawner: scope.spawner(),
-        shell_notice: |notice| ("completed", format!("<task-id>{}</task-id>", notice.task)),
-        monitor: crate::MonitorTexts {
-            notice: |notice| format!("{notice:?}"),
-            end: |notice, events| {
-                (
-                    "completed",
-                    format!("<task-id>{}</task-id> end {events:?}", notice.task),
-                )
-            },
-        },
         peers,
+        operations: rust_cli_kernel_api::env::Operations::new(
+            rust_cli_kernel_api::ids::Generation::new(GENERATION),
+            ids,
+        ),
     };
     let agents = Agents::new(
         ports,
@@ -546,18 +537,18 @@ fn built_full(
         tasks,
         seen,
         absorbed,
+        no_boundary,
         machine: machine(Arc::new(UnusedEnvironment)),
-        local: local_services(Arc::new(UnusedEnvironment)),
+        controller: controller_services(Arc::new(UnusedEnvironment)),
         compactor,
         _scope: scope,
     }
 }
 
 impl Harness {
-    /// 父运行里工具调用看到的机器与本机服务换成 `env`（一个替身实现全部端口）。
-    pub(crate) fn set_env<E: AllPorts + 'static>(&mut self, env: Arc<E>) {
-        self.machine = machine(env.clone());
-        self.local = local_services(env);
+    /// 父运行里工具调用看到的机器换成 `machine`（controller 的服务不变，都返回 `Unsupported`）。
+    pub(crate) fn set_machine(&mut self, machine: MachineEnv) {
+        self.machine = machine;
     }
 
     /// 在会话 `session` 的一次运行里调用 `tool`。
@@ -566,7 +557,7 @@ impl Harness {
         let parent = ParentRunner {
             registry: self.agents.registry(),
             machine: self.machine.clone(),
-            local: self.local.clone(),
+            controller: self.controller.clone(),
             tool: tool.to_owned(),
             input,
             output: output.clone(),
@@ -591,33 +582,26 @@ impl Harness {
             .strip_prefix("sess_subagent_")
             .map(rust_cli_kernel_api::ids::AgentId::new);
         let request = QueryRequest {
-            session,
-            run: RunId::new(format!("run_parent_{tool}")),
-            workspace: workspace(),
             agent,
-            messages: Vec::new(),
-            selection: selection(),
-            mode: PermissionMode::DontAsk,
-            source: QuerySource::MainThread,
-            max_turns: None,
-            prompt_hook_messages: Vec::new(),
+            ..QueryRequest::new(
+                session,
+                RunId::new(format!("run_parent_{tool}")),
+                workspace(),
+                Vec::new(),
+                selection(),
+                PermissionMode::DontAsk,
+                QuerySource::MainThread,
+            )
         };
         runner
             .run(request, Arc::new(RecordingSink::default()), Abort::new())
             .await
             .unwrap();
-        output
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-            .unwrap()
+        output.lock_unpoisoned().take().unwrap()
     }
 
     pub(crate) fn seen(&self) -> Vec<Seen> {
-        self.seen
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.seen.lock_unpoisoned().clone()
     }
 
     /// 后台子代理在自己的任务里跑：让出执行权，直到子循环至少开始了 `count` 次。
@@ -637,5 +621,12 @@ pub(crate) fn text(output: &ToolOutput) -> String {
     match output.content.as_slice() {
         [rust_cli_kernel_api::message::ToolResultContent::Text { text }] => text.clone(),
         other => panic!("unexpected content {other:?}"),
+    }
+}
+
+/// 单测里不关心时刻的 [`crate::live::Live`]：时钟固定在 0（以前是 live.rs 里只给测试用的 `ZeroClock`）。
+impl Default for crate::live::Live {
+    fn default() -> Self {
+        Self::new(Arc::new(FixedClock(0)))
     }
 }

@@ -21,11 +21,11 @@ fn ext(env: MemoryEnvironment, fake: Arc<FakeMcp>, scope: &TaskScope, servers: M
         info: env.clone(),
         files: env,
         ids: Arc::new(SequentialIds::default()),
-        gate: Arc::new(PolicyGate::default()),
+        gate: Arc::new(crate::test_support::AllowedGate::default()),
         mcp: fake,
         machines: None,
         spawner: scope.spawner(),
-        clock: crate::clock_tests::TokioClock::new(),
+        clock: crate::clock_tests::clock(),
     };
     let config = ExtConfig {
         mcp: McpSettings {
@@ -40,22 +40,14 @@ fn ext(env: MemoryEnvironment, fake: Arc<FakeMcp>, scope: &TaskScope, servers: M
 
 fn request() -> ContextRequest {
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("sess_1"),
-        workspace: workspace(),
-        agent: None,
-        source: QuerySource::MainThread,
-        mode: PermissionMode::Default,
         tool_names: vec!["Skill".to_owned()],
-        selection: ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
+        ..ContextRequest::new(
+            SessionId::new("sess_1"),
+            workspace(),
+            QuerySource::MainThread,
+            PermissionMode::Default,
+            ModelSelection::new("anthropic".to_owned(), GLM_5_3.to_owned()),
+        )
     }
 }
 
@@ -77,14 +69,9 @@ async fn the_registry_adds_skill_and_mcp_tools_after_the_base() {
     let servers = vec![McpServer {
         name: "files".to_owned(),
         scope: McpScope::Project,
-        transport: McpTransportConfig::Stdio {
-            command: "node".to_owned(),
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-        },
+        transport: McpTransportConfig::stdio("node".to_owned(), Vec::new()),
         options: Default::default(),
-        machine: None,
+        machine: Default::default(),
     }];
     let ext = ext(env, fake, &scope, servers);
     let registry = ext.registry();
@@ -126,14 +113,9 @@ async fn the_wait_tool_follows_pending_servers_and_the_declared_session() {
     let servers = vec![McpServer {
         name: "slow".to_owned(),
         scope: McpScope::Project,
-        transport: McpTransportConfig::Stdio {
-            command: "node".to_owned(),
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-        },
+        transport: McpTransportConfig::stdio("node".to_owned(), Vec::new()),
         options: Default::default(),
-        machine: None,
+        machine: Default::default(),
     }];
     let ext = ext(
         MemoryEnvironment::new(facts()),

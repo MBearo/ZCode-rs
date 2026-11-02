@@ -14,6 +14,7 @@ use rust_cli_kernel_api::agents::{TaskListStore, TaskRecord, TaskStatus};
 use rust_cli_kernel_api::metering::{CallStatus, ModelCall};
 use rust_cli_kernel_api::model::QuerySource;
 use rust_cli_kernel_api::permission::{PermissionRule, RuleBehavior};
+use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_kernel_api::store::{ArtifactPurpose, ArtifactStore, WorkspaceCheckpoint};
 
 use super::*;
@@ -25,24 +26,19 @@ fn called(message: &MessageId, status: CallStatus, stop: Option<StopReason>) -> 
     let now = now_ms();
     Fact::ModelCalled {
         call: ModelCall {
-            message: message.clone(),
-            source: QuerySource::MainThread,
-            selection: ModelSelection {
-                provider: "p".into(),
-                model: "m".into(),
-                reasoning: Some("high".into()),
-                connection: None,
-            },
-            started_at_ms: now,
             first_token_at_ms: Some(now),
-            first_content_at_ms: None,
-            completed_at_ms: now,
-            status,
             stop_reason: stop,
-            tool_calls: 0,
-            usage: None,
-            retries: 0,
-            error: None,
+            ..ModelCall::new(
+                message.clone(),
+                QuerySource::MainThread,
+                ModelSelection {
+                    reasoning: Some("high".into()),
+                    ..ModelSelection::new("p", "m")
+                },
+                now,
+                now,
+                status,
+            )
         },
     }
 }
@@ -301,7 +297,7 @@ pub(super) async fn checkpoints(dir: &str, session: &str) -> Result<()> {
         facts.push(result(&a1, call, vec![said("written")], false));
         facts.push(Fact::CheckpointCreated {
             checkpoint: WorkspaceCheckpoint {
-                machine: None,
+                machine: Default::default(),
                 id: format!("checkpoint_{call}"),
                 prompt: u1.clone(),
                 assistant: a1.clone(),

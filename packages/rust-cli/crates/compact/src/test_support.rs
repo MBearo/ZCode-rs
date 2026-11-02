@@ -1,6 +1,7 @@
 //! 测试共用：按顺序回答摘要请求的假子循环、消息构造。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
@@ -17,7 +18,7 @@ use rust_cli_kernel_api::orchestration::{
     QueryStop, RunSink, ToolRegistry,
 };
 use rust_cli_kernel_api::testing::{
-    ListTools, MemoryStore, NoHooks, SequentialIds, UnusedEnvironment, local_services, machine,
+    ListTools, MemoryStore, NoHooks, SequentialIds, UnusedEnvironment,
 };
 use rust_cli_kernel_api::tool::ReadFileStates;
 use serde_json::json;
@@ -45,10 +46,7 @@ impl ScriptedRunner {
     }
 
     pub(crate) fn requests(&self) -> Vec<QueryRequest> {
-        self.requests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.requests.lock_unpoisoned().clone()
     }
 }
 
@@ -60,14 +58,10 @@ impl QueryRunner for ScriptedRunner {
         sink: Arc<dyn RunSink>,
         _abort: Abort,
     ) -> Result<QueryStop, QueryError> {
-        self.requests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(request);
+        self.requests.lock_unpoisoned().push(request);
         let reply = self
             .replies
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_unpoisoned()
             .pop()
             .expect("no scripted reply left");
         match reply {
@@ -114,11 +108,8 @@ impl FakeFileStates {
 
 impl ReadFileStates for FakeFileStates {
     fn clear(&self, session: &SessionId) -> Vec<String> {
-        self.cleared
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(session.clone());
-        std::mem::take(&mut self.recent.lock().unwrap_or_else(PoisonError::into_inner))
+        self.cleared.lock_unpoisoned().push(session.clone());
+        std::mem::take(&mut self.recent.lock_unpoisoned())
     }
 }
 
@@ -147,17 +138,17 @@ pub(crate) fn ports_with_files(
 ) -> CompactPorts {
     let store = Arc::new(MemoryStore::default());
     let env = Arc::new(UnusedEnvironment);
+    let ids: Arc<dyn rust_cli_kernel_api::clock::Ids> = Arc::new(SequentialIds::default());
     CompactPorts {
         runner,
         tools,
         files,
         context: Arc::new(NoListings),
         hooks: Arc::new(NoHooks),
-        ids: Arc::new(SequentialIds::default()),
-        machine: machine(env.clone()),
-        local: local_services(env),
+        ids: ids.clone(),
+        machines: rust_cli_kernel_api::testing::environments(env),
         artifacts: store,
-        generation: Generation::new("g"),
+        operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g"), ids),
     }
 }
 
@@ -170,12 +161,10 @@ pub(crate) fn request(messages: Vec<Message>, trigger: CompactTrigger) -> Compac
         session: SessionId::new("s"),
         workspace: workspace(),
         trigger,
-        selection: ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: ModelSelection::new(
+            "anthropic".to_owned(),
+            rust_cli_base::models::GLM_5_3.to_owned(),
+        ),
         instructions: None,
         messages,
         mode: None,

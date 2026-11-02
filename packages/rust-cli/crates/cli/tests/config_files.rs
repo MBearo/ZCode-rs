@@ -168,7 +168,7 @@ async fn latest_mode(
     let store = rust_cli_node_store::NodeStore::new(
         paths,
         std::sync::Arc::new(rust_cli_node_store::NodeIds::new(std::sync::Arc::new(
-            rust_cli_node_store::SystemClock::utc(),
+            rust_cli_base::clock::SystemClock::utc(),
         ))),
     );
     let filter = SessionFilter {
@@ -218,7 +218,7 @@ async fn the_project_mode_sits_between_the_command_line_and_the_config() {
     let store = rust_cli_node_store::NodeStore::new(
         paths,
         std::sync::Arc::new(rust_cli_node_store::NodeIds::new(std::sync::Arc::new(
-            rust_cli_node_store::SystemClock::utc(),
+            rust_cli_base::clock::SystemClock::utc(),
         ))),
     );
     let filter = SessionFilter {

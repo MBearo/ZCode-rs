@@ -4,8 +4,9 @@
 //!
 //! 作用范围是客户端实例：账本、流、MCP 连接本来就按它隔离；同一个实例的会话共用同一条 ssh；不同实例互不覆盖。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{BTreeSet, HashMap};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 use rust_cli_exec_wire::dto::env::{EnvMode, EnvVars};
 use rust_cli_kernel_api::env_command::EnvOverrides;
@@ -98,7 +99,7 @@ fn check(vars: &EnvOverrides, injected: &BTreeSet<String>) -> Result<(), String>
 
 impl EnvTable {
     fn table(&self) -> MutexGuard<'_, HashMap<String, ClientEnv>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_unpoisoned()
     }
 
     /// 这个客户端实例现在的那组变量（起进程时交给 env-local）。

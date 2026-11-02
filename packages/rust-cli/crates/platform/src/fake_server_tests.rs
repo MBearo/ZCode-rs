@@ -7,7 +7,7 @@
 )]
 
 use rust_cli_base::models;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -22,7 +22,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use crate::credentials::{CredentialStore, Credentials};
-use crate::test_support::{FixedClock, write};
+use rust_cli_kernel_api::testing::ManualClock;
+
+use crate::test_support::write;
 use crate::{AccountOrigins, AccountServices, CredentialSecret, Platform};
 
 /// 收到的一个请求。header 名为小写。
@@ -237,7 +239,7 @@ pub struct Harness {
     /// 临时目录随测试结束删除。
     _dir: tempfile::TempDir,
     pub paths: StoragePaths,
-    pub clock: Arc<FixedClock>,
+    pub clock: Arc<ManualClock>,
     pub platform: Platform,
     secret: CredentialSecret,
 }
@@ -252,7 +254,7 @@ impl Harness {
     pub async fn with_secret(url: &str, secret: CredentialSecret) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let paths = StoragePaths::resolve(&Default::default(), dir.path(), dir.path());
-        let clock = Arc::new(FixedClock(AtomicU64::new(NOW_MS)));
+        let clock = Arc::new(ManualClock::new(NOW_MS));
         let platform = Self::platform_with(&paths, url, clock.clone(), &secret).await;
         Self {
             _dir: dir,
@@ -264,14 +266,14 @@ impl Harness {
     }
 
     /// 同一份文件上的另一个平台层（新进程）。
-    pub async fn platform(paths: &StoragePaths, url: &str, clock: Arc<FixedClock>) -> Platform {
+    pub async fn platform(paths: &StoragePaths, url: &str, clock: Arc<ManualClock>) -> Platform {
         Self::platform_with(paths, url, clock, &secret()).await
     }
 
     pub async fn platform_with(
         paths: &StoragePaths,
         url: &str,
-        clock: Arc<FixedClock>,
+        clock: Arc<ManualClock>,
         secret: &CredentialSecret,
     ) -> Platform {
         let services = AccountServices {
@@ -289,7 +291,7 @@ impl Harness {
     }
 
     pub fn advance(&self, millis: u64) {
-        self.clock.0.fetch_add(millis, Ordering::SeqCst);
+        self.clock.advance(millis);
     }
 
     pub fn store(&self) -> CredentialStore {
@@ -307,12 +309,7 @@ impl Harness {
 }
 
 pub fn selection(provider: &str) -> ModelSelection {
-    ModelSelection {
-        provider: provider.to_owned(),
-        model: models::GLM_5_3_ACCOUNT.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new(provider.to_owned(), models::GLM_5_3_ACCOUNT.to_owned())
 }
 
 /// `header.<{"exp": exp}>.signature`。

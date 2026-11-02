@@ -597,24 +597,8 @@ try {
     );
     expectEqual("mode after Node switched to yolo", loaded.mode, "bypassPermissions");
 
-    // 工具会话：rust-cli 冷读取出没回答的计划审批（工作线 F119 起不再记操作意图）。
+    // 工具会话（工作线 F119 起不再记操作意图，F130 起不再记待回答的交互）。
     const toolsID = written.sessions[2];
-    const openWork = (read) => ({
-      interactions: read.pending_interactions ?? [],
-    });
-    const expectedWork = {
-      interactions: [
-        {
-          interaction: "ia_1",
-          request: { kind: "plan_approval", tool_use: "toolu_9", plan: "Ship it" },
-        },
-      ],
-    };
-    expectEqual(
-      "open work of the tool session",
-      openWork(rust("read", dir, toolsID)),
-      expectedWork,
-    );
 
     // Node 续写工具会话：一轮带工具调用的回合（Node 的 pending tool part 与 settleToolResults 的
     // completed 形状），再给出最后的回答。
@@ -709,7 +693,6 @@ try {
       toolsLoaded.messages.slice(-4).map((m) => m.id),
       [askID, stepID, toolPartID, finalID],
     );
-    expectEqual("open work after Node continued", openWork(toolsLoaded), expectedWork);
 
     // 第七段：`/fork`（按用户输入分叉）。
     await checkFork({

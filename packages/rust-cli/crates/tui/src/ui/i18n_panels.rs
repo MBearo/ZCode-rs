@@ -1,21 +1,14 @@
 //! L30 面板的界面文字（docs/specs/rust-cli/tui-panels.md）：中文与英文。英文照原文（Host 的照抄）。
 use super::i18n::Lang;
 
-fn pick(lang: Lang, en: &'static str, zh: &'static str) -> &'static str {
-    match lang {
-        Lang::En => en,
-        Lang::Zh => zh,
-    }
-}
-
 /// 子代理列表的第一行（主会话）。
 pub fn main_line(lang: Lang) -> &'static str {
-    pick(lang, "main", "主会话")
+    lang.pick("main", "主会话")
 }
 
 /// 用时后面的等待标记。
 pub fn waiting(lang: Lang) -> &'static str {
-    pick(lang, " · waiting", " · 等待中")
+    lang.pick(" · waiting", " · 等待中")
 }
 
 /// 描述后面的当前活动（L35，stall-visibility.md §4.3）与它是不是错误（error 色）。`left_ms` 是重试或停顿
@@ -43,7 +36,8 @@ pub fn activity(
             true,
         ),
         SubagentActivity::Stalled { .. } => (
-            pick(lang, " · Waiting for API response", " · 等待 API 响应").to_owned(),
+            lang.pick(" · Waiting for API response", " · 等待 API 响应")
+                .to_owned(),
             true,
         ),
     }
@@ -67,7 +61,7 @@ pub fn more_above(lang: Lang, n: usize) -> String {
 
 /// 有隐藏的已完成后台代理时 footer 的提示（按键提示模板，tui-panels.md §1.4）。
 pub fn tasks_hint(lang: Lang) -> &'static str {
-    pick(lang, "{/tasks} to see subagents", "{/tasks} 查看子代理")
+    lang.pick("{/tasks} to see subagents", "{/tasks} 查看子代理")
 }
 
 /// 列表获得焦点时 footer 左侧的提示（按键提示模板）；`stop` 为真时选中项能停止。
@@ -92,26 +86,26 @@ pub fn viewing_placeholder(lang: Lang, kind: &str) -> String {
 
 // ← 项目页的文字（F29 起）在 i18n_projects.rs；这里留项目页也用的几项。
 pub fn filter_hint(lang: Lang) -> &'static str {
-    pick(lang, " {tab}/{⇧tab} filter", " {tab}/{⇧tab} 筛选")
+    lang.pick(" {tab}/{⇧tab} filter", " {tab}/{⇧tab} 筛选")
 }
 
 pub fn current(lang: Lang) -> &'static str {
-    pick(lang, " (current)", "（当前）")
+    lang.pick(" (current)", "（当前）")
 }
 
 pub fn untitled(lang: Lang) -> &'static str {
-    pick(lang, "(untitled)", "（无标题）")
+    lang.pick("(untitled)", "（无标题）")
 }
 
 pub fn no_sessions(lang: Lang) -> &'static str {
-    pick(lang, "No sessions", "没有会话")
+    lang.pick("No sessions", "没有会话")
 }
 
 pub fn last_message(lang: Lang) -> &'static str {
-    pick(lang, "Last message", "最近一条回复")
+    lang.pick("Last message", "最近一条回复")
 }
 
 /// 选中 pill 时 footer 的提示（Host §8.10）。
 pub fn pill_hint(lang: Lang) -> &'static str {
-    pick(lang, "{Enter} to view tasks", "{enter} 查看任务")
+    lang.pick("{Enter} to view tasks", "{enter} 查看任务")
 }

@@ -1,4 +1,4 @@
-//! 工具经 `set_mode` 修改模式：先落库再通知，同一回合里后续的工具调用看到新模式
+//! 工具经 `set_plan` 打开 plan：先落库再通知，同一回合里后续的工具调用看到新的判决模式
 //! （docs/specs/rust-cli/tools-more.md §2.3）。
 
 use std::sync::Arc;
@@ -16,8 +16,8 @@ use rust_cli_kernel_api::session_api::{
 use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, SessionStore};
 use rust_cli_kernel_api::testing::{
     DirectExecutor, FixedClock, FixedContext, ListTools, MemoryArtifacts, MemoryStore,
-    NeverCompact, NoHooks, ScriptedModel, SequentialIds, UnusedEnvironment, local_services,
-    machine, selection, text_response, tool_use_response,
+    NeverCompact, NoHooks, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
+    text_response, tool_use_response,
 };
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 
 use crate::{Opened, Session, SessionDeps, SessionState};
 
-/// 输入里有 `mode` 时请求改成 plan；结果总是调用时看到的模式。
+/// 输入里有 `plan` 时请求打开 plan；结果总是调用时看到的模式。
 struct ModeTool;
 
 #[async_trait::async_trait]
@@ -53,8 +53,8 @@ impl Tool for ModeTool {
         let seen = format!("{:?}", context.mode);
         if input.get("plan").is_some() {
             context
-                .interactions
-                .set_mode(&context.session, PermissionMode::Plan)
+                .session_ops
+                .set_plan(true)
                 .await
                 .map_err(|error| ToolError::Failed {
                     message: error.to_string(),
@@ -101,11 +101,9 @@ fn spawn(
         hooks: Arc::new(NoHooks),
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        machines: rust_cli_kernel_api::testing::environments(env.clone()),
-        machine: machine(env.clone()),
-        local: local_services(env),
+        machines: rust_cli_kernel_api::testing::environments(env),
         artifacts: store.clone(),
-        generation: Generation::new("g1"),
+        operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids.clone()),
         non_interactive: false,
         limits: rust_cli_query::RequestLimits::default(),
     }));
@@ -115,19 +113,17 @@ fn spawn(
             agents: Arc::new(rust_cli_kernel_api::agents::NoAgentSignals),
             cron: Arc::new(rust_cli_kernel_api::cron::NoCron),
             store: store.clone(),
-            ids,
+            ids: ids.clone(),
             runner,
             compactor: Arc::new(NeverCompact),
-            machines: rust_cli_kernel_api::testing::environments(env.clone()),
-            machine: machine(env.clone()),
-            local: local_services(env),
+            machines: rust_cli_kernel_api::testing::environments(env),
             max_turns: None,
             hooks: Arc::new(NoHooks),
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
             inputs: Arc::new(rust_cli_kernel_api::user_input::NoUserInputs),
             artifacts: Arc::new(MemoryArtifacts::default()),
             clock: Arc::new(FixedClock(0)),
-            generation: Generation::new("g1"),
+            operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids),
             spawner: scope.spawner(),
             closing: scope.spawner(),
             titles: None,
@@ -187,7 +183,7 @@ async fn a_tool_changes_the_mode_for_the_rest_of_the_turn() {
             break;
         }
     }
-    // 修复线 F20：`set_mode(plan)` 是旧写法，只打开 plan；权限模式不变，事件是 PlanChanged。
+    // 修复线 F20：只打开 plan；权限模式不变，事件是 PlanChanged。
     assert!(
         seen.iter()
             .any(|event| matches!(event, KernelEvent::PlanChanged { enabled: true }))

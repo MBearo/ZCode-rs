@@ -12,8 +12,8 @@ fn facts(cwd: &str) -> EnvFacts {
         os_version: String::new(),
         shell: "bash".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     }
 }
 

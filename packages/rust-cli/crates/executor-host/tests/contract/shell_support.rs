@@ -53,18 +53,13 @@ impl Shell {
 
     pub fn request(&self, command: &str, scope: CwdScope) -> StartCommand {
         StartCommand {
-            command: command.to_owned(),
-            cwd: env_path(&self.root),
             timeout_ms: Some(10_000),
-            task: ShellTaskId::new(format!("b{}", NEXT_TASK.fetch_add(1, Ordering::Relaxed))),
-            shell: Default::default(),
             cwd_scope: scope,
-            background: None,
-            sandbox: None,
-            hook: None,
-            on_timeout: None,
-            socket: None,
-            env: Default::default(),
+            ..StartCommand::new(
+                command.to_owned(),
+                env_path(&self.root),
+                ShellTaskId::new(format!("b{}", NEXT_TASK.fetch_add(1, Ordering::Relaxed))),
+            )
         }
     }
 

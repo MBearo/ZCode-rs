@@ -8,6 +8,7 @@ use rust_cli_base::units;
 use super::app::{Action, App, Overlay};
 use super::cells::Ctx;
 use super::i18n::Lang;
+use super::keyboard;
 use super::layout;
 use super::manage::Manage;
 use super::palette::Palette;
@@ -24,7 +25,7 @@ pub enum ExportView {
 /// 会话的文字：与界面同一套排版（会话头、cell、本地提示，非展开视图），去掉样式与行尾空白。宽度取上一帧
 /// transcript 的宽度，没有画过时 80 列。
 pub fn conversation_text(app: &App, now_ms: u64) -> (String, Option<String>) {
-    let width = match app.hits.transcript.width {
+    let width = match app.pointer.hits.transcript.width {
         0 => layout::DEFAULT_WIDTH,
         width => usize::from(width),
     };
@@ -32,7 +33,6 @@ pub fn conversation_text(app: &App, now_ms: u64) -> (String, Option<String>) {
     let ctx = Ctx {
         palette: &app.palette,
         lang: app.lang,
-        strings: app.strings,
         width,
         expanded: false,
         elapsed: std::time::Duration::ZERO,
@@ -167,7 +167,7 @@ pub fn lines(view: &ExportView, lang: Lang, palette: &Palette, width: usize) -> 
     ] = texts(lang);
     let dim = Style::default().add_modifier(Modifier::DIM);
     let mut lines = vec![
-        Line::from(Span::styled("─".repeat(width), Style::default().fg(accent))),
+        crate::ui::style::rule(width, Style::default().fg(accent)),
         Line::from(Span::styled(
             format!("  {title}"),
             Style::default().add_modifier(Modifier::BOLD),
@@ -230,8 +230,8 @@ impl App {
     }
 
     pub(super) fn export_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let ctrl = self.typing.ctrl(&key);
-        let typed = self.typing.is_text(&key);
+        let ctrl = keyboard::ctrl(&key);
+        let typed = keyboard::is_text(&key);
         let Some(Overlay::Export(view)) = self.overlay.as_mut() else {
             return None;
         };
@@ -264,7 +264,7 @@ impl App {
                     return Some(Action::Manage(Manage::Export(path)));
                 }
                 KeyCode::Backspace => {
-                    name.pop();
+                    crate::ui::line_edit::backspace(name);
                 }
                 KeyCode::Char(c) if typed => name.push(c),
                 _ => {}

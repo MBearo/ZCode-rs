@@ -1,5 +1,5 @@
-//! `/usage` 的两个只读查询（docs/specs/rust-cli/usage.md §4、§5.2）：都是聚合 SQL，不把消息或用量行整表读进
-//! 内存。会话的开始与时长、按天的消息数只扫 `message_session_time_created_id_idx`。
+//! `/usage` 的两个只读查询（docs/specs/rust-cli/usage.md §4、§5.2）：SQL 在 `repo::usage_reports`（F138），这里是
+//! 范围的换算与换成 kernel-api 的 metering 类型。会话的开始与时长、按天的消息数只扫 `message_session_time_created_id_idx`。
 use rusqlite::Connection;
 use rust_cli_base::{civil, units};
 use rust_cli_kernel_api::clock::civil_date;
@@ -8,80 +8,15 @@ use rust_cli_kernel_api::metering::{
 };
 use rust_cli_kernel_api::store::StoreError;
 
+use crate::repo::usage_reports::{self as reports, DAY_MS};
 use crate::{OrStorage, storage};
 
-/// 一天的毫秒数：只定义在 base 的 `js::date::DAY_MS`（u64，F58：以前这里另写一份 i64）。SQL 文本与 i64 的日界
-/// 算术用这个局部的 i64 值，文本逐字不变。
-const DAY_MS: i64 = rust_cli_base::js::date::DAY_MS as i64;
-
-/// 会话及其子代理子会话（`parent_id` 递归）里成功请求的耗时之和（`Total duration (API)`）。
-pub(crate) const METERING: &str = "with recursive tree(id) as (
-       select ?1
-       union
-       select s.id from session s join tree t on s.parent_id = t.id
-        where s.task_type = 'subagent_child'
-     )
-     select coalesce(sum(duration_ms), 0) from model_usage
-      where session_id in (select id from tree) and status = 'completed'";
-
 pub fn metering(conn: &Connection, session: &str) -> Result<SessionMetering, StoreError> {
-    let total: i64 = conn
-        .prepare_cached(METERING)
-        .storage()?
-        .query_row([session], |r| r.get(0))
-        .storage()?;
+    let total = reports::api_duration(conn, session).storage()?;
     Ok(SessionMetering {
         api_duration_ms: u64::try_from(total).unwrap_or(0),
     })
 }
-
-/// 统计里的会话：未删除、不是子代理或工作流的子运行（子代理的 transcript 不统计）。
-const COUNTED: &str = "s.time_deleted is null
-       and s.task_type not in ('subagent_child', 'workflow_child', 'nested_workflow_child')";
-
-/// 范围内开始的会话：个数、最长时长、最早与最晚的开始。开始与结束是这个会话消息的最早与最晚
-/// 创建时间（每个会话两次索引上的 min / max）。
-pub(crate) fn sessions_sql() -> String {
-    format!(
-        "with started as (
-           select (select min(m.time_created) from message m where m.session_id = s.id) as first,
-                  (select max(m.time_created) from message m where m.session_id = s.id) as last
-             from session s where {COUNTED}
-         )
-         select count(*), max(last - first), min(first), max(first)
-           from started where first is not null and first >= ?1"
-    )
-}
-
-/// 按本地日的消息数（`dailyActivity.messageCount`）。`cross join` 固定会话在外层：每个会话一段覆盖索引。
-pub(crate) fn days_sql() -> String {
-    format!(
-        "select cast((m.time_created + ?1) / {DAY_MS} as integer) as day, count(*)
-           from session s cross join message m on m.session_id = s.id
-          where {COUNTED} and m.time_created >= ?2
-          group by day order by day"
-    )
-}
-
-/// 按模型的 token（`modelUsage`）：transcript 里的请求（主线程、子代理、工作流子运行）。`input_tokens` 是
-/// AI SDK 的总输入；不含缓存的输入按 Node `inputSideTokensFromStoredUsage` 的判别得出（旧行的输入不含缓存）。
-pub(crate) const MODELS: &str = "select model_id,
-       coalesce(sum(case
-         when input_tokens <= 0 then 0
-         when cache_read_input_tokens + cache_creation_input_tokens <= 0 then input_tokens
-         when coalesce(provider_total_tokens, computed_total_tokens) > 0
-          and abs(coalesce(provider_total_tokens, computed_total_tokens)
-                  - (input_tokens + cache_read_input_tokens + cache_creation_input_tokens + output_tokens))
-            < abs(coalesce(provider_total_tokens, computed_total_tokens) - (input_tokens + output_tokens))
-           then input_tokens
-         else max(input_tokens - cache_read_input_tokens - cache_creation_input_tokens, 0)
-       end), 0),
-       coalesce(sum(output_tokens), 0),
-       coalesce(sum(cache_read_input_tokens), 0),
-       coalesce(sum(cache_creation_input_tokens), 0)
-     from model_usage
-    where query_source in ('main_turn', 'subagent', 'workflow_child') and started_at >= ?1
-    group by model_id";
 
 /// `YYYY-MM-DD` → 自 1970-01-01 的天数（宽松：三段都按整数读，不查位数与范围；公历换算只定义在 base 的 `civil`）。
 /// 日数在换算里是线性的（`+ 日 − 1`），所以按 1 日换算再加上去，超出 1–31 的日数与以前一样往后（前）数。
@@ -113,48 +48,26 @@ pub fn activity(conn: &Connection, query: &ActivityQuery) -> Result<ActivityStat
             (today - (days - 1)) * DAY_MS - offset
         }
     };
-    let (sessions, longest, first, last) = conn
-        .prepare_cached(&sessions_sql())
+    let started = reports::started(conn, from).storage()?;
+    let days = reports::days(conn, offset, from)
         .storage()?
-        .query_row([from], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, Option<i64>>(1)?,
-                r.get::<_, Option<i64>>(2)?,
-                r.get::<_, Option<i64>>(3)?,
-            ))
+        .into_iter()
+        .map(|(day, messages)| ActivityDay {
+            date: civil_date(to_u64(day) * rust_cli_base::js::date::DAY_MS),
+            messages: to_u64(messages),
         })
-        .storage()?;
-    let days = conn
-        .prepare_cached(&days_sql())
+        .collect();
+    let mut models: Vec<ModelTokens> = reports::models(conn, from)
         .storage()?
-        .query_map([offset, from], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        .into_iter()
+        .map(|row| ModelTokens {
+            model: row.model,
+            input: to_u64(row.input),
+            output: to_u64(row.output),
+            cache_read: to_u64(row.cache_read),
+            cache_write: to_u64(row.cache_write),
         })
-        .storage()?
-        .map(|row| {
-            row.map(|(day, messages)| ActivityDay {
-                date: civil_date(to_u64(day) * rust_cli_base::js::date::DAY_MS),
-                messages: to_u64(messages),
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .storage()?;
-    let mut models = conn
-        .prepare_cached(MODELS)
-        .storage()?
-        .query_map([from], |r| {
-            Ok(ModelTokens {
-                model: r.get(0)?,
-                input: to_u64(r.get(1)?),
-                output: to_u64(r.get(2)?),
-                cache_read: to_u64(r.get(3)?),
-                cache_write: to_u64(r.get(4)?),
-            })
-        })
-        .storage()?
-        .collect::<Result<Vec<_>, _>>()
-        .storage()?;
+        .collect();
     // 按总数降序；相同时按模型名，结果稳定。
     models.sort_by(|a, b| {
         b.total()
@@ -167,10 +80,10 @@ pub fn activity(conn: &Connection, query: &ActivityQuery) -> Result<ActivityStat
         today: query.today.clone(),
         days,
         models,
-        sessions: to_u64(sessions),
-        longest_session_ms: longest.map(to_u64),
-        first_session_ms: first.map(to_u64),
-        last_session_ms: last.map(to_u64),
+        sessions: to_u64(started.count),
+        longest_session_ms: started.longest.map(to_u64),
+        first_session_ms: started.first.map(to_u64),
+        last_session_ms: started.last.map(to_u64),
     })
 }
 

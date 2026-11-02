@@ -1,8 +1,9 @@
 //! MCP 工具的包装（docs/specs/rust-cli/ext.md §3.4）：名字
 //! `mcp__<server>__<tool>`、描述截断、只读标记、权限交给判决链、调用与结果转换。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -11,7 +12,7 @@ use rust_cli_kernel_api::mcp::McpToolInfo;
 use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
-    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
+    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, failed,
 };
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -43,7 +44,7 @@ pub(crate) fn note_long_names(
     tools: &[Arc<dyn Tool>],
     noted: &Mutex<HashSet<String>>,
 ) {
-    let mut noted = noted.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut noted = noted.lock_unpoisoned();
     for tool in tools.iter().filter(|tool| name_too_long(tool.name())) {
         let name = tool.name();
         if noted.len() >= NOTED_NAMES || !noted.insert(name.to_owned()) {
@@ -115,10 +116,6 @@ impl McpTool {
     }
 }
 
-fn failed(message: String) -> ToolError {
-    ToolError::Failed { message }
-}
-
 #[async_trait]
 impl Tool for McpTool {
     fn name(&self) -> &str {
@@ -145,18 +142,10 @@ impl Tool for McpTool {
         Some(MAX_RESULT_CHARS)
     }
 
-    fn mcp_info(&self) -> Option<McpToolInfo> {
-        Some(self.info.clone())
-    }
-
-    /// MCP 工具除 `alwaysLoad` 外一律延迟（tools-more.md §3.1）。
-    fn is_mcp(&self) -> bool {
-        true
-    }
-
-    /// 与 `mcp_info().always_load` 同源（服务器的 `alwaysLoad` 或工具的 `_meta` 标记，[`ALWAYS_LOAD_KEYS`]）。
-    fn always_load(&self) -> bool {
-        self.info.always_load
+    /// 来源与 `always_load`（服务器的 `alwaysLoad` 或工具的 `_meta` 标记，[`ALWAYS_LOAD_KEYS`]）：MCP 工具除 `alwaysLoad`
+    /// 外一律延迟，由 kernel-api 的 `tool_search::is_deferred` 按它判定（tools-more.md §3.1）。
+    fn mcp_info(&self) -> Option<&McpToolInfo> {
+        Some(&self.info)
     }
 
     /// 交给判决链（返回 `passthrough`，询问文本由判决链生成；建议的整个工具名规则只用于

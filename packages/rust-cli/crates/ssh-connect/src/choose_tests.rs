@@ -1,6 +1,6 @@
 //! remote-exec.md §19.9 的选用表：每一行一个用例。
 
-use rust_cli_exec_transport::ProvisionError;
+use rust_cli_machines::ProvisionError;
 
 use crate::artifact::Platform;
 use crate::choose::{Plan, Wanted, choose};

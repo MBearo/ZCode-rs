@@ -15,12 +15,13 @@ use rust_cli_kernel_api::permission::RuleBehavior;
 
 use crate::bash_paths;
 use crate::check::{Check, Inputs};
-use crate::files::{self, Access, matched_path_rule};
-use crate::parse::{Invocation, analyze};
+use crate::files::{self, matched_path_rule};
 use crate::paths::{PathContext, anchor};
 use crate::removal::{bare_home, strip_runners};
-use crate::shell_rules::strip_safe_wrappers;
+use crate::shell::parse::{Invocation, analyze};
+use crate::shell::strip::strip_safe_wrappers;
 use crate::texts;
+use rust_cli_kernel_api::permission::FileAccess;
 
 /// 一组子命令的 cd 结论。
 pub(crate) struct Group {
@@ -122,7 +123,7 @@ fn leading_target(invocation: &Invocation, inputs: &Inputs<'_>) -> Option<String
         return None;
     }
     let resolved = paths.resolve(target);
-    (files::check(Access::Read, Some(&resolved), inputs).is_allow()
+    (files::check(FileAccess::Read, Some(&resolved), inputs).is_allow()
         && paths.in_working_dirs(&resolved))
     .then_some(resolved)
 }
@@ -341,7 +342,7 @@ fn rule_directories(command: &str, invocation: &Invocation, inputs: &Inputs<'_>)
     let paths = inputs.paths;
     let home = paths.home.as_deref();
     let denied = |path: &str, shown: &str| {
-        matched_path_rule(Access::Read, path, RuleBehavior::Deny, inputs)
+        matched_path_rule(FileAccess::Read, path, RuleBehavior::Deny, inputs)
             .map(|rule| Check::deny(texts::unresolved_cd_denied(command, shown, rule)))
     };
     for shown in bash_paths::read_paths(invocation) {
@@ -364,7 +365,7 @@ fn rule_directories(command: &str, invocation: &Invocation, inputs: &Inputs<'_>)
         let tail = parts.join("/");
         for (pattern, _) in inputs
             .rules
-            .contents(Access::Read.rule_tool(), RuleBehavior::Deny)
+            .contents(FileAccess::Read.rule_tool(), RuleBehavior::Deny)
         {
             let (base, glob) = anchor(pattern, inputs.root, paths);
             let levels: Vec<&str> = glob.split('/').filter(|part| !part.is_empty()).collect();

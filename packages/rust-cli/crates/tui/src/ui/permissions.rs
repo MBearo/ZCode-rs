@@ -2,12 +2,12 @@
 //! 规则来自内核的查询（[`PermissionsView::rules`] 是最后一次列表或修改的回执）；这里只有页面的界面状态。
 //! 修改经 [`Outcome::Change`] 交给 runner，回执到了才回到列表（同时只有一次修改在途）。
 use crossterm::event::{KeyCode, KeyEvent};
+use rust_cli_kernel_api::permission::syntax::format_rule;
 use rust_cli_kernel_api::permission::{RuleBehavior, RuleChange, RuleSource, SourcedRule};
-use rust_cli_runtime::format_permission_rule;
 
 use super::app::{Action, App, Overlay};
 use super::i18n::Lang;
-use super::keyboard::Typing;
+use super::keyboard;
 use super::manage::Manage;
 
 /// 标签页（Allow / Ask / Deny / Workspace；没有 Recently denied 与 Auto mode，D3）。
@@ -71,7 +71,7 @@ pub enum Outcome {
 
 /// 规则文字。
 pub(crate) fn rule_text(rule: &SourcedRule) -> String {
-    format_permission_rule(&rule.rule)
+    format_rule(&rule.rule)
 }
 
 /// 来源名。
@@ -160,13 +160,13 @@ impl PermissionsView {
         self.filter = None;
     }
 
-    /// 一个按键；`typing` 按平台判断文字输入（Windows 的 AltGr，tui-input.md §9.1）。
-    pub fn on_key(&mut self, key: KeyEvent, typing: Typing) -> Outcome {
-        let ctrl = typing.ctrl(&key);
+    /// 一个按键（入口已归一 Windows 的 AltGr，tui-input.md §9.1）。
+    pub fn on_key(&mut self, key: KeyEvent) -> Outcome {
+        let ctrl = keyboard::ctrl(&key);
         if ctrl && key.code == KeyCode::Char('c') {
             return Outcome::Close;
         }
-        let typed = typing.is_text(&key);
+        let typed = keyboard::is_text(&key);
         match self.stage.clone() {
             Stage::List => self.list_key(key, typed),
             Stage::Input(mut text) => {
@@ -176,10 +176,10 @@ impl PermissionsView {
                         self.stage = Stage::Destination(text.trim().to_owned());
                     }
                     KeyCode::Backspace => {
-                        text.pop();
+                        crate::ui::line_edit::backspace(&mut text);
                         self.stage = Stage::Input(text);
                     }
-                    KeyCode::Char(c) if typing.is_text(&key) => {
+                    KeyCode::Char(c) if keyboard::is_text(&key) => {
                         text.push(c);
                         self.stage = Stage::Input(text);
                     }
@@ -236,7 +236,7 @@ impl PermissionsView {
         }
     }
 
-    /// `typed`：这个键是文字输入（`Typing::is_text`）。
+    /// `typed`：这个键是文字输入（`keyboard::is_text`）。
     fn list_key(&mut self, key: KeyEvent, typed: bool) -> Outcome {
         let count = self.count();
         match key.code {
@@ -248,10 +248,10 @@ impl PermissionsView {
             KeyCode::Left | KeyCode::BackTab => self.switch(false),
             KeyCode::Right | KeyCode::Tab => self.switch(true),
             KeyCode::Up | KeyCode::Char('k') if count > 0 => {
-                self.selected = (self.selected + count - 1) % count;
+                self.selected = super::pager::cycle(self.selected, count, false);
             }
             KeyCode::Down | KeyCode::Char('j') if count > 0 => {
-                self.selected = (self.selected + 1) % count;
+                self.selected = super::pager::cycle(self.selected, count, true);
             }
             KeyCode::Enter => {
                 if self.has_add() && self.selected == 0 {
@@ -268,7 +268,7 @@ impl PermissionsView {
             }
             KeyCode::Backspace => {
                 if let Some(filter) = self.filter.as_mut() {
-                    filter.pop();
+                    crate::ui::line_edit::backspace(filter);
                     if filter.is_empty() {
                         self.filter = None;
                     }
@@ -285,6 +285,14 @@ impl PermissionsView {
         Outcome::Pending
     }
 
+    /// 列表阶段的粘贴：同打字，开始或接着过滤（能过滤的标签页）。
+    pub fn paste_filter(&mut self, text: &str) {
+        if self.tab.behavior().is_some() && !text.trim().is_empty() {
+            crate::ui::line_edit::paste(self.filter.get_or_insert_with(String::new), text);
+            self.selected = 0;
+        }
+    }
+
     /// 修改的回执：成功时换上新列表并记下结果，失败时记下原因；都回到列表。
     pub fn changed(
         &mut self,
@@ -295,7 +303,7 @@ impl PermissionsView {
         let text = match change {
             RuleChange::Add { rules, .. } => rules
                 .first()
-                .map(|text| format_permission_rule(&rust_cli_runtime::parse_permission_rule(text)))
+                .map(|text| format_rule(&rust_cli_kernel_api::permission::syntax::parse_rule(text)))
                 .unwrap_or_default(),
             RuleChange::Remove { rule } => rule_text(rule),
         };
@@ -347,7 +355,7 @@ impl App {
         let Some(Overlay::Permissions(view)) = self.overlay.as_mut() else {
             return None;
         };
-        match view.on_key(key, self.typing) {
+        match view.on_key(key) {
             Outcome::Pending => None,
             Outcome::Change(change) => Some(Action::Manage(Manage::ChangeRule(change))),
             Outcome::Close => {

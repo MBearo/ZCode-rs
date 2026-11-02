@@ -1,35 +1,28 @@
-//! hooks 测试共用的替身：按脚本回放命令输出的执行环境、记录请求的 HTTP 出口、引擎构造。
+//! hooks 测试共用的替身：按脚本回放命令输出的执行环境（只有 hook 用到的命令与 shell 两个端口）、记录请求的 HTTP 出口、引擎构造。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
-    OutputStream, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvPath, OperationContext, Outcome, OutputStream, StartCommand,
+    WorkspaceRef,
 };
 use rust_cli_kernel_api::env_shell::ShellState;
 use rust_cli_kernel_api::hooks::{
-    HookContext, HookEvent, HookEventName, HookHttp, HookHttpError, HookHttpRequest,
-    HookHttpResponse,
+    HookEvent, HookEventName, HookHttp, HookHttpError, HookHttpRequest, HookHttpResponse,
 };
 use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, SessionId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::machine::{Commands, Shell};
 use rust_cli_kernel_api::testing::{MemoryArtifacts, SequentialIds};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{HookSource, HooksConfig, HooksSettings};
 use crate::{HookEngine, HookPorts};
-
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
 
 /// 一条命令的脚本：输出、退出码与耗时。`delay_ms` 超过请求的超时时按超时结束。
 #[derive(Debug, Clone, Default)]
@@ -93,36 +86,13 @@ impl ScriptedEnv {
     }
 
     pub fn started(&self) -> Vec<(OperationContext, StartCommand)> {
-        lock(&self.started).clone()
+        self.started.lock_unpoisoned().clone()
     }
 }
 
 fn unused() -> EnvError {
     EnvError::Unsupported {
         what: "scripted env".to_owned(),
-    }
-}
-
-#[async_trait]
-impl EnvInfo for ScriptedEnv {
-    async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        Err(unused())
-    }
-}
-
-#[async_trait]
-impl Files for ScriptedEnv {
-    async fn read_file(&self, _w: &WorkspaceRef, _r: ReadFile) -> Result<FileContent, EnvError> {
-        Err(unused())
-    }
-
-    async fn write_file(
-        &self,
-        _w: &WorkspaceRef,
-        _c: OperationContext,
-        _r: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        Err(unused())
     }
 }
 
@@ -140,11 +110,13 @@ impl Commands for ScriptedEnv {
                 message: "spawn failed".to_owned(),
             });
         }
-        let script = lock(&self.scripts)
+        let script = self
+            .scripts
+            .lock_unpoisoned()
             .get(&request.command)
             .cloned()
             .unwrap_or_default();
-        lock(&self.running).insert(
+        self.running.lock_unpoisoned().insert(
             context.operation.clone(),
             Started {
                 script,
@@ -152,7 +124,7 @@ impl Commands for ScriptedEnv {
                 cancel: CancellationToken::new(),
             },
         );
-        lock(&self.started).push((context, request));
+        self.started.lock_unpoisoned().push((context, request));
         Ok(self.watch_command(operation, 0))
     }
 
@@ -161,7 +133,7 @@ impl Commands for ScriptedEnv {
         operation: OperationId,
         _cursor: u64,
     ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        let Some(started) = lock(&self.running).remove(&operation) else {
+        let Some(started) = self.running.lock_unpoisoned().remove(&operation) else {
             return stream::iter([Err(unused())]).boxed();
         };
         let Started {
@@ -170,7 +142,7 @@ impl Commands for ScriptedEnv {
             cancel,
         } = started;
         // 取消令牌留给 cancel() 使用。
-        lock(&self.running).insert(
+        self.running.lock_unpoisoned().insert(
             operation,
             Started {
                 script: Script::default(),
@@ -226,7 +198,7 @@ impl Commands for ScriptedEnv {
     }
 
     async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
-        if let Some(started) = lock(&self.running).get(&operation) {
+        if let Some(started) = self.running.lock_unpoisoned().get(&operation) {
             started.cancel.cancel();
         }
         Ok(())
@@ -245,22 +217,11 @@ impl Shell for ScriptedEnv {
         _session: &SessionId,
     ) -> Result<ShellState, EnvError> {
         match &self.shell_cwd {
-            Some(cwd) => Ok(ShellState {
-                cwd: EnvPath::new(cwd.clone()),
-                outputs: None,
-                background: Vec::new(),
-            }),
+            Some(cwd) => Ok(ShellState::new(EnvPath::new(cwd.clone()))),
             None => Err(unused()),
         }
     }
 }
-
-impl Search for ScriptedEnv {}
-impl Background for ScriptedEnv {}
-impl Checkpoints for ScriptedEnv {}
-impl Pdf for ScriptedEnv {}
-impl Git for ScriptedEnv {}
-impl Fetch for ScriptedEnv {}
 
 /// 记录请求、按脚本回答的 HTTP 出口。
 #[derive(Default)]
@@ -288,8 +249,9 @@ impl HookHttp for ScriptedHttp {
         request: HookHttpRequest,
         _cancel: CancellationToken,
     ) -> Result<HookHttpResponse, HookHttpError> {
-        lock(&self.requests).push(request);
-        lock(&self.response)
+        self.requests.lock_unpoisoned().push(request);
+        self.response
+            .lock_unpoisoned()
             .clone()
             .unwrap_or(Err(HookHttpError::Failed {
                 message: "no response".to_owned(),
@@ -305,13 +267,14 @@ pub fn workspace() -> WorkspaceRef {
 }
 
 pub fn ports<E: Commands + Shell + 'static>(env: Arc<E>) -> HookPorts {
+    let ids: Arc<dyn rust_cli_kernel_api::clock::Ids> = Arc::new(SequentialIds::default());
     HookPorts {
         commands: env.clone(),
         shell: env,
-        ids: Arc::new(SequentialIds::default()),
+        ids: ids.clone(),
         model: None,
         http: None,
-        generation: Generation::new("g1"),
+        operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids),
         artifacts: Arc::new(MemoryArtifacts::default()),
     }
 }
@@ -332,13 +295,7 @@ pub fn engine<E: Commands + Shell + 'static>(env: Arc<E>, settings: &Value) -> H
 }
 
 pub fn event(name: HookEventName, payload: Value) -> HookEvent {
-    HookEvent {
-        name,
-        session: SessionId::new("sess_1"),
-        workspace: workspace(),
-        payload,
-        context: HookContext::default(),
-    }
+    HookEvent::new(name, SessionId::new("sess_1"), workspace(), payload)
 }
 
 /// 一个事件只配一个 command hook 的设置。

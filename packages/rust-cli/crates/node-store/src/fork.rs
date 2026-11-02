@@ -6,9 +6,11 @@
 //! （`persistSyntheticUserNoticeForSession`）与 `helpers/rewind.ts` 的分叉对话提示。
 use std::borrow::Cow;
 
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, TransactionBehavior};
 use rust_cli_kernel_api::store::{Fact, ForkReceipt, SessionFork, StoreError};
 use serde_json::{Value, json};
+
+use rust_cli_node_records::notices::FORK_NOTICE_SOURCE;
 
 use crate::branch::{Branch, select_branch};
 use crate::facts::{self, Commit};
@@ -16,53 +18,16 @@ use crate::ids::{NodeIds, message_id, part_id, slugify};
 use crate::repo::{messages, sessions};
 use crate::{OrStorage, records, state, storage};
 
-/// 分叉提示的来源（Node `SyntheticUserMessageSource` 的 `fork`）。
-pub(crate) const NOTICE_SOURCE: &str = "fork";
 /// fork 出的会话的 slug 最多这么多个字符。
 const MAX_FORK_SLUG_LEN: usize = 120;
 const CONTINUE: &str = "Continue from this fork. Do not assume messages after the fork point happened in this session.";
 
-/// 新会话行要从原会话行取的列（Node `buildForkedSessionInput`）。
-struct Parent {
-    project_id: String,
-    workspace_id: Option<String>,
-    trace_id: Option<String>,
-    slug: String,
-    directory: String,
-    path: Option<String>,
-    title: String,
-    version: String,
-    permission: Option<Value>,
-    revert: Option<Value>,
-}
-
-fn parent(conn: &Connection, id: &str) -> Result<Parent, StoreError> {
-    let json = |text: Option<String>| text.and_then(|text| serde_json::from_str(&text).ok());
-    conn.query_row(
-        "select project_id, workspace_id, trace_id, slug, directory, path, title, version,
-           permission, revert
-         from session where id = ? and time_deleted is null",
-        [id],
-        |row| {
-            Ok(Parent {
-                project_id: row.get(0)?,
-                workspace_id: row.get::<_, Option<String>>(1)?.filter(|s| !s.is_empty()),
-                trace_id: row.get::<_, Option<String>>(2)?.filter(|s| !s.is_empty()),
-                slug: row.get(3)?,
-                directory: row.get(4)?,
-                path: row.get(5)?,
-                title: row.get(6)?,
-                version: row.get(7)?,
-                permission: json(row.get(8)?),
-                revert: json(row.get(9)?),
-            })
-        },
-    )
-    .optional()
-    .storage()?
-    .ok_or_else(|| StoreError::NotFound {
-        session: rust_cli_kernel_api::ids::SessionId::new(id),
-    })
+fn parent(conn: &Connection, id: &str) -> Result<sessions::ForkParent, StoreError> {
+    sessions::fork_parent(conn, id)
+        .storage()?
+        .ok_or_else(|| StoreError::NotFound {
+            session: rust_cli_kernel_api::ids::SessionId::new(id),
+        })
 }
 
 /// JS `String.prototype.slice(0, n)`（slug 只有 ASCII）。
@@ -143,18 +108,18 @@ fn notice(ctx: &Commit<'_>, fork: &SessionFork) -> Result<(), StoreError> {
     let fork_context = context(fork);
     let info = json!({"id": id, "sessionID": ctx.session, "role": "user",
         "time": {"created": ctx.now}, "agent": records::AGENT,
-        "metadata": {"forkContext": fork_context, "source": NOTICE_SOURCE, "visibility": "model-only"},
+        "metadata": {"forkContext": fork_context, "source": FORK_NOTICE_SOURCE, "visibility": "model-only"},
         "modelSelection": facts::node_selection(&fork.selection),
-        "semantics": {"origin": "agent_runtime", "kind": "fork_notice", "source": NOTICE_SOURCE,
+        "semantics": {"origin": "agent_runtime", "kind": "fork_notice", "source": FORK_NOTICE_SOURCE,
             "uiVisibility": "hidden", "providerVisibility": "visible", "transcriptVisibility": "hidden"},
-        "anchor": {"origin": "synthetic"}, "source": NOTICE_SOURCE, "synthetic": true, "tools": {},
+        "anchor": {"origin": "synthetic"}, "source": FORK_NOTICE_SOURCE, "synthetic": true, "tools": {},
         "visibility": "model-only"});
     messages::save_message(ctx.conn, &info, ctx.now as i64).storage()?;
     let part = json!({"id": part_id(ctx.now, &(ctx.uuid)()), "sessionID": ctx.session,
         "messageID": id, "type": "text", "text": notice_text(fork), "synthetic": true,
         "time": {"start": ctx.now, "end": ctx.now},
         "metadata": {"forkContext": fork_context, "runtimeMessage": {"source": "rewind_notice"},
-            "source": NOTICE_SOURCE, "visibility": "model-only"}});
+            "source": FORK_NOTICE_SOURCE, "visibility": "model-only"}});
     messages::save_part(ctx.conn, &part, ctx.now as i64).storage()
 }
 

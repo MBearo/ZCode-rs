@@ -1,8 +1,8 @@
 //! 会话工作目录的修改（docs/specs/rust-cli/tools-more.md §11.4）。工作目录只有会话 actor 一个 owner：
-//! 工具（EnterWorktree / ExitWorktree）经 `Interactions::set_workspace` 请求修改，`/cd` 经
+//! 工具（EnterWorktree / ExitWorktree）经 `SessionOps::set_workspace` 请求修改，`/cd` 经
 //! `Command::ChangeDirectory`；actor 先把执行环境里这个会话的 shell cwd 设到新目录，成功后才改内存里的
 //! `meta.workspace` 并发 `WorkspaceChanged`（前端的工作区只从这里与快照取）。主循环经
-//! `RunSink::current_workspace` 读这里的值，同一回合里后续的工具调用立即在新目录。
+//! `SessionOps::view` 读这里的值，同一回合里后续的工具调用立即在新目录。
 //!
 //! 不落库：resume 回到会话创建时的目录（tools-more.md D23）。
 
@@ -12,7 +12,8 @@ use rust_cli_kernel_api::ids::CommandId;
 use rust_cli_kernel_api::manage::DirectoryOutcome;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::orchestration::OrchestrationError;
-use rust_cli_kernel_api::session_api::{Ack, KernelEvent};
+use rust_cli_kernel_api::session_api::{Ack, CommandResult, KernelEvent};
+use rust_cli_kernel_api::store::StoreError;
 use rust_cli_kernel_api::user_command::LocalCommandRecord;
 
 use crate::actor::{Actor, accepted, rejected};
@@ -25,7 +26,8 @@ impl Actor {
         root: EnvPath,
     ) -> Result<(), OrchestrationError> {
         self.deps
-            .machine
+            .machines
+            .primary_machine()
             .shell()
             .set_shell_cwd(&self.meta.id, root.clone())
             .await
@@ -90,29 +92,8 @@ impl Actor {
             }
         };
         Ack::Accepted {
-            result: serde_json::to_value(outcome).unwrap_or_default(),
+            result: CommandResult::Directory(outcome),
         }
-    }
-
-    /// `Command::SetWorkspace`（调用方给出说明）：空闲时换工作目录，说明作为 meta 用户消息提交；运行中拒绝。
-    pub(crate) async fn set_workspace(
-        &mut self,
-        command: CommandId,
-        root: EnvPath,
-        note: Option<String>,
-    ) -> Ack {
-        if self.busy() {
-            return rejected(BUSY);
-        }
-        if let Err(error) = self.change_workspace(root).await {
-            return rejected(error.to_string());
-        }
-        if let Some(note) = note
-            && let Err(reason) = self.commit_note(command, note, None).await
-        {
-            return rejected(reason);
-        }
-        accepted()
     }
 
     /// 给模型的说明（来源 `rust-cli/cd` 的 meta 用户消息），先提交再进历史、发事件；`record` 的消息排在它前面、同一批。
@@ -121,7 +102,7 @@ impl Actor {
         command: CommandId,
         note: String,
         record: Option<LocalCommandRecord>,
-    ) -> Result<(), String> {
+    ) -> Result<(), StoreError> {
         let mut messages = record
             .map(|record| crate::local_record::record_messages(self.deps.ids.as_ref(), &record))
             .unwrap_or_default();
@@ -150,16 +131,14 @@ impl Actor {
         if self.running.is_none() {
             return accepted();
         }
-        let waiting = self
-            .lane
-            .iter()
-            .any(|lane| matches!(lane, crate::lane::Lane::Input(_)));
+        let waiting = self.inbox.has_lane_input();
         if reason == rust_cli_kernel_api::env::BackgroundReason::DeliverMessage && !waiting {
             return accepted();
         }
         let moved = match self
             .deps
-            .machine
+            .machines
+            .primary_machine()
             .background()
             .background_foreground(&self.meta.id, reason)
             .await
@@ -171,7 +150,7 @@ impl Actor {
             }
         };
         Ack::Accepted {
-            result: serde_json::json!(moved),
+            result: CommandResult::Backgrounded { count: moved },
         }
     }
 }

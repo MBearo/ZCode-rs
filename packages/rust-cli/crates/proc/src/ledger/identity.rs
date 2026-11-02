@@ -2,9 +2,10 @@
 //! 进程的身份（pid 与操作系统给出的启动时间）与进程内 runtime 实例的登记表
 //! （docs/specs/rust-tool-process-reaping.md 2.1）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use tokio::sync::OnceCell;
 
@@ -171,7 +172,7 @@ static LIVE: LazyLock<Mutex<HashSet<u64>>> = LazyLock::new(Default::default);
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 fn live() -> MutexGuard<'static, HashSet<u64>> {
-    LIVE.lock().unwrap_or_else(PoisonError::into_inner)
+    LIVE.lock_unpoisoned()
 }
 
 /// 一个 runtime 实例的登记：创建时登记，释放时注销。本进程写下的记录，实例已注销就是无主的。

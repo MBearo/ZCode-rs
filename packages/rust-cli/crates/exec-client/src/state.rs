@@ -1,5 +1,6 @@
 //! 客户端的共享状态：还没结束的调用、待发的 ack、当前的握手结果。锁只在取放时短暂持有，不跨 await。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
@@ -50,10 +51,6 @@ pub(crate) struct State {
     pub welcome: Option<Welcome>,
     /// 当前（或下一次）连接的序号：握手的 `epoch`。
     pub epoch: u64,
-    /// 连接已就绪（握手完成、还没断）。
-    pub connected: bool,
-    /// 不再工作的原因（关闭或断线后不再重连）。
-    pub closed: Option<ClientError>,
     /// 发过的心跳个数（nonce 的来源，跨连接递增）。
     pub beats: u64,
     /// 最近一次 ping 的 nonce 与发出的时刻：同一个 nonce 的 pong 回来时算往返（远端执行 R4，remote-exec.md §21.2）。
@@ -129,7 +126,8 @@ pub(crate) struct Shared {
     pub ack: Notify,
     /// 客户端关闭。
     pub shutdown: CancellationToken,
-    /// 连接的状态（§19.8）；只由管连接的任务（与 `close`）改。
+    /// 连接的状态（§19.8）；只由管连接的任务（与 `close`）改。“连着没有”“还能不能用”都从它读（F128，审查 X6：以前另有
+    /// `connected` 与 `closed` 两份，先置了标志、后发状态，中间有一段两者不一致）。
     pub connection: watch::Sender<ConnectionState>,
     /// 最近一次心跳的往返时间（R4，§21.2）；还没量到时 None。只由读任务改。
     pub latency: watch::Sender<Option<std::time::Duration>>,
@@ -165,8 +163,17 @@ impl Shared {
 
     pub fn state(&self) -> MutexGuard<'_, State> {
         // 锁里的代码不 panic；真的中毒时照常取出（状态仍然一致：每次修改都是一步完成的）。
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.state.lock_unpoisoned()
+    }
+}
+
+impl Shared {
+    /// 客户端不再工作的原因（关闭、重连次数用完、被拒绝）；还能用时 None。先发 `Closed` 再结束全部调用（`fail_all`），所以
+    /// 在状态锁里看到“还能用”而登记的调用，一定会被随后的 `fail_all` 结束，不会悬着。
+    pub fn closed(&self) -> Option<ClientError> {
+        match &*self.connection.borrow() {
+            ConnectionState::Closed { error } => Some(error.clone()),
+            ConnectionState::Connected { .. } | ConnectionState::Reconnecting { .. } => None,
+        }
     }
 }

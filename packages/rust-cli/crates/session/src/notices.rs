@@ -4,17 +4,24 @@
 //! 输入队列只有一个 owner。通知进 next 通道（[`crate::lane`]）：运行中在下一个工具边界并入，空闲或
 //! 回合结束时开回合；提交之后才 ack（至少一次：重复的按对话里已有的同文本消息去掉）。
 
+use rust_cli_kernel_api::env_shell::{BackgroundKind, ShellNotice};
 use rust_cli_kernel_api::ids::ShellTaskId;
 use rust_cli_kernel_api::machine_notices::{self, MachineNotice};
 use rust_cli_kernel_api::session_api::KernelEvent;
-use rust_cli_query::task_status;
 
 use crate::actor::Actor;
 use crate::lane::Waiting;
 use crate::watched::Watched;
 
-/// 通知开启的回合里，user 消息的来源（排队命令的 `task-notification` 模式）。
-pub(crate) const NOTICE_SOURCE: &str = "task-notification";
+/// 通知开启的回合里，user 消息的来源（排队命令的 `task-notification` 模式，kernel-api 的同一个名字）。
+pub(crate) const NOTICE_SOURCE: &str =
+    rust_cli_kernel_api::hooks::queued_command::TASK_NOTIFICATION;
+
+/// 后台命令通知的全文（`<system-reminder>` 包装，query.md §5）：工具边界并入与开回合都用它。入参由 kernel-api 的
+/// `ShellNotice::task_notice` 换算（工作线 F134：以前这里与 agents 各写一份）。
+pub(crate) fn task_notification(notice: &ShellNotice) -> String {
+    rust_cli_prompts::notification::task_notification(&notice.task_notice())
+}
 
 /// 执行环境的通知流：本机与连上的远端机器合成一个流（R3，remote-exec.md §20.7.2），每条带机器名。某台机器不提供
 /// 通知或断开时，合成流丢掉那台的流、继续等其余的。
@@ -32,13 +39,11 @@ impl Actor {
             return;
         }
         // Monitor 的终态（工作线 F83）：在看的 monitor 等事件流也结束了再合成（monitors.rs）。
-        if notice.notice.kind == rust_cli_kernel_api::env_shell::BackgroundKind::Monitor
-            && self.monitor_notice(&notice).await
-        {
+        if notice.notice.kind == BackgroundKind::Monitor && self.monitor_notice(&notice).await {
             return;
         }
         let work = notice.notice.task.to_string();
-        let status = task_status(&notice.notice).to_owned();
+        let status = notice.notice.status();
         if !self.enqueue_notice(Waiting::Shell(notice)).await {
             return;
         }
@@ -62,7 +67,8 @@ impl Actor {
     /// 执行环境里还没有处理完的后台命令；执行环境不支持时为空。
     pub(crate) async fn background(&self) -> Vec<ShellTaskId> {
         self.deps
-            .machine
+            .machines
+            .primary_machine()
             .shell()
             .shell_state(&self.meta.workspace, &self.meta.id)
             .await

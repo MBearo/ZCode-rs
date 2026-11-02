@@ -9,10 +9,10 @@ fn the_editor_sees_expanded_pastes_and_they_fold_back() {
     let expanded = composer.expanded_text();
     assert_eq!(expanded, format!("see {long}"));
     // 编辑器加了一个末尾换行：去掉；粘贴内容原样还在：折回占位文字。
-    composer.from_editor(&format!("please {expanded}\n"));
+    composer.load_edited(&format!("please {expanded}\n"));
     assert_eq!(composer.area.text(), "please see [Pasted text #1 +3 lines]");
     // 以空行结尾时不去掉换行；内容改过的粘贴不再折回。
-    composer.from_editor("rewritten\n\n");
+    composer.load_edited("rewritten\n\n");
     assert_eq!(composer.area.text(), "rewritten\n\n");
     assert_eq!(composer.placeholders().count(), 0);
 }
@@ -25,9 +25,9 @@ fn crlf_from_the_editor_is_normalized_like_a_paste() {
     composer.paste_text("one\r\ntwo\r\nthree");
     let expanded = composer.expanded_text();
     assert_eq!(expanded, "one\ntwo\nthree");
-    composer.from_editor("ask: one\r\ntwo\r\nthree\r\n");
+    composer.load_edited("ask: one\r\ntwo\r\nthree\r\n");
     assert_eq!(composer.area.text(), "ask: [Pasted text #1 +3 lines]");
-    composer.from_editor("a\r\nb\rc\r\n\r\n");
+    composer.load_edited("a\r\nb\rc\r\n\r\n");
     assert_eq!(composer.area.text(), "a\nb\nc\n\n");
 }
 

@@ -14,11 +14,13 @@ use rust_cli_kernel_api::tool::{
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::common::{Definition, definition, invalid, text};
 use crate::pipeline::{REJECT_MESSAGE, rejected};
 use crate::texts_more as texts;
+use rust_cli_kernel_api::tool::{invalid, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const NAME: &str = "AskUserQuestion";
+pub const NAME: &str = tool_names::ASK_USER_QUESTION;
 
 /// 只给多选答案拼接时用的分隔符（`answers` 用 `, ` 连接）。
 const SEPARATOR: &str = ", ";
@@ -38,7 +40,7 @@ pub struct AskUserQuestionTool {
 impl AskUserQuestionTool {
     pub fn new(interactive: bool) -> Self {
         Self {
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
             interactive,
         }
     }
@@ -359,10 +361,7 @@ impl Tool for AskUserQuestionTool {
 /// dontAsk 下返回询问，由判决链外层按 dontAsk 拒绝（docs/specs/rust-cli/tools-more.md §1）。
 pub(crate) fn user_interaction(mode: PermissionMode, message: &str) -> PermissionDecision {
     if mode == PermissionMode::DontAsk {
-        return PermissionDecision::Ask {
-            message: message.to_owned(),
-            suggestions: Vec::new(),
-        };
+        return PermissionDecision::ask(message.to_owned(), Vec::new());
     }
     PermissionDecision::Allow {
         updated_input: None,

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::ids::{MessageId, ToolUseId};
+use rust_cli_kernel_api::mcp::McpToolInfo;
 use rust_cli_kernel_api::message::{ContentBlock, ToolResultContent, UserMessage, UserOrigin};
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::tool::{ToolError, ToolOutput, ToolProgress, ToolUseContext};
@@ -16,7 +17,8 @@ use super::*;
 struct Named {
     name: &'static str,
     defer: bool,
-    mcp: bool,
+    /// MCP 工具的来源（名字以 `mcp__` 开头的）。
+    mcp: Option<McpToolInfo>,
 }
 
 #[async_trait]
@@ -33,8 +35,8 @@ impl Tool for Named {
     fn should_defer(&self) -> bool {
         self.defer
     }
-    fn is_mcp(&self) -> bool {
-        self.mcp
+    fn mcp_info(&self) -> Option<&McpToolInfo> {
+        self.mcp.as_ref()
     }
     async fn call(
         &self,
@@ -52,7 +54,11 @@ fn tool(name: &'static str, defer: bool) -> Arc<dyn Tool> {
     Arc::new(Named {
         name,
         defer,
-        mcp: name.starts_with("mcp__"),
+        mcp: name.starts_with("mcp__").then(|| McpToolInfo {
+            server: "s".to_owned(),
+            tool: name.to_owned(),
+            always_load: false,
+        }),
     })
 }
 

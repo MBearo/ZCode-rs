@@ -1,12 +1,8 @@
 //! ← 项目页的视图状态（F29，tui-panels.md §2）：分组与排序、筛选与搜索、组头的计数、焦点的移动、改名输入。
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::selection;
+use crossterm::event::KeyCode;
 
 use super::*;
-use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::view::Transcript;
+use crate::ui::test_support::{app, key};
 
 fn row(
     id: &str,
@@ -115,24 +111,6 @@ fn more_rows_end_with_a_note() {
     let mut page = page();
     page.more = true;
     assert_eq!(page.entries("/w/here").last(), Some(&Entry::More));
-}
-
-fn app() -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
 }
 
 fn open(app: &mut App) -> &mut ProjectsPage {

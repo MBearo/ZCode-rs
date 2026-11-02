@@ -22,12 +22,7 @@ fn feed(view: &mut Transcript, seq: u64, now_ms: u64, event: KernelEvent) {
 
 fn empty() -> Transcript {
     Transcript::new(
-        ModelSelection {
-            provider: "fixture".into(),
-            model: "scripted".into(),
-            reasoning: None,
-            connection: None,
-        },
+        ModelSelection::new("fixture", "scripted"),
         PermissionMode::Default,
         crate::view::test_workspace(),
     )

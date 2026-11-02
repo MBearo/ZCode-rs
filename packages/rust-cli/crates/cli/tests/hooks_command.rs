@@ -10,48 +10,28 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
 use rust_cli_env_local::{LocalEnvironment, ShellConfig};
 use rust_cli_hooks::{HookEngine, HookPorts, HookSource, HooksConfig, HooksSettings};
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::hooks::{HookContext, HookEvent, HookEventName, HookRunner};
 use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, InteractionId, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
+    EnvironmentId, Generation, OperationId, RunId, SessionId, ToolUseId,
 };
 use rust_cli_kernel_api::message::{Message, ToolResultContent};
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, ToolExecution,
-    ToolExecutor,
-};
+use rust_cli_kernel_api::orchestration::{ToolExecution, ToolExecutor};
+use rust_cli_kernel_api::permission::syntax::parse_rule;
 use rust_cli_kernel_api::permission::{
     PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
 };
 use rust_cli_kernel_api::testing::{
-    MemoryArtifacts, MemoryStore, RoundTripEnv, SequentialIds, local_services, machine,
+    MemoryArtifacts, RoundTripEnv, SequentialIds, controller_services, machine,
 };
 use rust_cli_kernel_api::tool::ToolUseContext;
 use rust_cli_policy::PolicyGate;
-use rust_cli_policy::rules::parse_rule;
 use rust_cli_tools::{BashTool, Pipeline};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-
-struct NoOneToAsk;
-
-#[async_trait]
-impl Interactions for NoOneToAsk {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        _request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i"),
-            answer: json!({"decision": "unavailable"}),
-        })
-    }
-}
 
 const GUARD: &str = r#"input=$(cat)
 case "$input" in
@@ -109,14 +89,15 @@ fn script(harness: &Harness, name: &str) -> String {
 fn engine(harness: &Harness, settings: &Value) -> HookEngine {
     let (parsed, warnings) = HooksSettings::from_json(settings);
     assert!(warnings.is_empty(), "{warnings:?}");
+    let ids: Arc<dyn rust_cli_kernel_api::clock::Ids> = Arc::new(SequentialIds::default());
     HookEngine::with_config(
         HookPorts {
             commands: harness.env.clone(),
             shell: harness.env.clone(),
-            ids: Arc::new(SequentialIds::default()),
+            ids: ids.clone(),
             model: None,
             http: None,
-            generation: Generation::new("g1"),
+            operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids),
             artifacts: Arc::new(MemoryArtifacts::default()),
         },
         HooksConfig {
@@ -139,26 +120,23 @@ fn context(harness: &Harness, index: usize) -> ToolUseContext {
     let env = harness.env.clone();
     ToolUseContext {
         session: session.clone(),
-        run: RunId::new("run_1"),
         tool_use: ToolUseId::new(format!("toolu_{index}")),
-        agent: None,
         workspace: workspace(&harness.root),
         mode: PermissionMode::DontAsk,
-        cancel: CancellationToken::new(),
         machine: machine(env.clone()),
-        local: local_services(env),
-        artifacts: Arc::new(MemoryStore::default()),
-        interactions: Arc::new(NoOneToAsk),
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g1"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new(format!("op_tool_{index}")),
-            origin: Origin::Agent {
+        controller: controller_services(env),
+        interactions: Arc::new(rust_cli_kernel_api::testing::NoOneToAsk),
+        session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g1"),
+            OperationId::new(format!("op_tool_{index}")),
+            Origin::Agent {
                 session,
                 run: RunId::new("run_1"),
             },
-        },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -187,8 +165,8 @@ async fn bash(
 ) -> ToolExecution {
     let (progress, _updates) = mpsc::channel(64);
     pipeline
-        .execute_full(
-            Arc::new(BashTool::new()),
+        .execute(
+            Arc::new(BashTool::default()),
             json!({"command": command}),
             context(harness, index),
             progress,
@@ -251,14 +229,16 @@ async fn slow_hooks_time_out_and_exit_two_blocks_stop() {
     let outcome = engine
         .run(
             HookEvent {
-                name: HookEventName::Stop,
-                session: SessionId::new("sess_1"),
-                workspace: workspace(&harness.root),
-                payload: json!({"stop_hook_active": false, "background_tasks": [], "session_crons": []}),
                 context: HookContext {
                     mode: Some(PermissionMode::Default),
                     ..HookContext::default()
                 },
+                ..HookEvent::new(
+                    HookEventName::Stop,
+                    SessionId::new("sess_1"),
+                    workspace(&harness.root),
+                    json!({"stop_hook_active": false, "background_tasks": [], "session_crons": []}),
+                )
             },
             CancellationToken::new(),
         )

@@ -83,7 +83,7 @@ pub(crate) async fn listing(core: &Core, context: &ToolUseContext) -> String {
                 row(&[
                     agent.agent.as_str(),
                     agent.definition.agent_type.as_str(),
-                    agent.status(),
+                    agent.status().as_str(),
                     &started,
                 ])
             })

@@ -1,8 +1,9 @@
 //! 定时任务的触发（docs/specs/rust-cli/tools-more.md §10.4）：空闲时唤醒即开回合；回合进行中的唤醒
 //! 忽略，回合结束后排在其他输入之后取走到期任务。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -49,25 +50,18 @@ impl ScriptedCron {
     }
 
     fn due_as(&self, prompt: &str, kind: rust_cli_kernel_api::cron::CronFireKind) {
-        self.due
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push_back(CronFire {
-                job: "1a2b3c4d".to_owned(),
-                prompt: prompt.to_owned(),
-                kind,
-            });
+        self.due.lock_unpoisoned().push_back(CronFire {
+            job: "1a2b3c4d".to_owned(),
+            prompt: prompt.to_owned(),
+            kind,
+        });
     }
 }
 
 #[async_trait]
 impl CronSignals for ScriptedCron {
     fn wakeups(&self, _session: &SessionId) -> BoxStream<'static, ()> {
-        let receiver = self
-            .wakeups
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let receiver = self.wakeups.lock_unpoisoned().take();
         match receiver {
             Some(receiver) => ReceiverStream(receiver).boxed(),
             None => futures_util::stream::pending().boxed(),
@@ -75,24 +69,17 @@ impl CronSignals for ScriptedCron {
     }
 
     async fn take_due(&self, _session: &SessionId) -> Vec<CronFire> {
-        *self.taken.lock().unwrap_or_else(PoisonError::into_inner) += 1;
-        self.due
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .drain(..)
-            .collect()
+        *self.taken.lock_unpoisoned() += 1;
+        self.due.lock_unpoisoned().drain(..).collect()
     }
 
     async fn resume(&self, _session: &SessionId, history: &[Message]) {
-        self.resumed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(history.len());
+        self.resumed.lock_unpoisoned().push(history.len());
     }
 
     async fn cancel_loops(&self, _session: &SessionId) -> usize {
-        *self.cancels.lock().unwrap_or_else(PoisonError::into_inner) += 1;
-        std::mem::take(&mut *self.loops.lock().unwrap_or_else(PoisonError::into_inner))
+        *self.cancels.lock_unpoisoned() += 1;
+        std::mem::take(&mut *self.loops.lock_unpoisoned())
     }
 }
 
@@ -173,10 +160,7 @@ async fn a_busy_session_runs_due_jobs_after_queued_input() {
     wake.send(()).unwrap();
     built.session.send(submit("c2", "next")).await;
     tokio::task::yield_now().await;
-    assert_eq!(
-        *cron.taken.lock().unwrap_or_else(PoisonError::into_inner),
-        0
-    );
+    assert_eq!(*cron.taken.lock_unpoisoned(), 0);
     gate.notify_one();
     until(&mut events, finished).await;
     until(&mut events, finished).await;
@@ -217,7 +201,7 @@ async fn an_interrupt_cancels_loop_wakeups_first() {
     let built = setup.build().await;
     let session = &built.session;
     // 空闲：有两个唤醒 → 取消、接受；再按一次没有可取消的 → 照旧拒绝。
-    *cron.loops.lock().unwrap_or_else(PoisonError::into_inner) = 2;
+    *cron.loops.lock_unpoisoned() = 2;
     assert!(matches!(
         session.send(envelope("i1", Command::Interrupt)).await,
         Ack::Accepted { .. }
@@ -226,10 +210,7 @@ async fn an_interrupt_cancels_loop_wakeups_first() {
         session.send(envelope("i2", Command::Interrupt)).await,
         Ack::Rejected { .. }
     ));
-    assert_eq!(
-        *cron.loops.lock().unwrap_or_else(PoisonError::into_inner),
-        0
-    );
+    assert_eq!(*cron.loops.lock_unpoisoned(), 0);
     // 运行中：先取消唤醒，再中止回合。
     let mut events = session.subscribe(Some(0));
     session.send(submit("c1", "go")).await;
@@ -237,7 +218,7 @@ async fn an_interrupt_cancels_loop_wakeups_first() {
         matches!(event, KernelEvent::ToolStarted { .. })
     })
     .await;
-    *cron.loops.lock().unwrap_or_else(PoisonError::into_inner) = 1;
+    *cron.loops.lock_unpoisoned() = 1;
     session.send(envelope("i3", Command::Interrupt)).await;
     let seen = until(&mut events, finished).await;
     assert!(matches!(
@@ -247,14 +228,8 @@ async fn an_interrupt_cancels_loop_wakeups_first() {
             ..
         })
     ));
-    assert_eq!(
-        *cron.loops.lock().unwrap_or_else(PoisonError::into_inner),
-        0
-    );
-    assert_eq!(
-        *cron.cancels.lock().unwrap_or_else(PoisonError::into_inner),
-        3
-    );
+    assert_eq!(*cron.loops.lock_unpoisoned(), 0);
+    assert_eq!(*cron.cancels.lock_unpoisoned(), 3);
 }
 
 /// resume（tools-more.md §18.2）：从存储打开的会话在进入循环前把活动历史交给任务表复原会话任务；新建的
@@ -285,10 +260,7 @@ async fn a_loaded_session_hands_its_history_to_the_task_table_first() {
         let built = setup.build().await;
         // view 由 actor 回答：到这里时它已经进入循环，resume 一定已经做完。
         built.session.view().await.unwrap();
-        assert_eq!(
-            *cron.resumed.lock().unwrap_or_else(PoisonError::into_inner),
-            expected
-        );
+        assert_eq!(*cron.resumed.lock_unpoisoned(), expected);
     }
 }
 

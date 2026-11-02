@@ -2,20 +2,17 @@
 // Action 换成内核会话 API 的命令（docs/specs/rust-cli/tui.md §2、§4）。
 //! 界面状态：会话内容只来自视图（`view::Transcript`）；这里只有草稿、视图、滚动、展开等界面状态，
 //! 以及插在 transcript 里的本地 cell（提示、错误）。不做 IO：按键产生 [`Action`]，由 runner 执行。
-use std::collections::HashSet;
 use std::time::Instant;
 
-use rust_cli_kernel_api::ids::{InteractionId, MessageId};
+use rust_cli_kernel_api::ids::{InteractionId, MachineName, MessageId};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{Delivery, RewindScope};
-use serde_json::Value;
 
+use super::app_state::{KeyState, Pointer, Port, Snapshots};
 use super::composer::Composer;
 use super::i18n::{Lang, Strings};
 use super::interaction::Interaction;
-use super::list::ListView;
-use super::mouse::{Click, ComposerDrag, Hits, ScreenSelection, Selection, Target};
 use super::palette::Palette;
 use crate::view::Transcript;
 
@@ -63,7 +60,7 @@ pub enum Action {
     Interrupt,
     Resolve {
         interaction: InteractionId,
-        answer: Value,
+        answer: rust_cli_kernel_api::orchestration::Answer,
     },
     /// 批准或拒绝扣住的同伴消息（cross-session.md §2.6）。
     ResolvePeer {
@@ -156,11 +153,6 @@ pub enum Local {
     },
     /// `/goal` 面板（goal.md §6.2）。
     Goal(Box<super::goal::Panel>),
-    /// 标题加多行正文（`/usage`、后台任务的详情，tui-display.md）。
-    Text {
-        title: String,
-        body: String,
-    },
     /// （名称，说明，补充）。
     Table {
         title: String,
@@ -178,41 +170,8 @@ pub struct LocalCell {
     pub local: Local,
 }
 
-/// 替换输入框的视图。
-#[derive(Debug, Clone, PartialEq)]
-pub enum Overlay {
-    List(ListView),
-    /// 独立页面（`/status`、`/help`）：内容不插进 transcript，esc 关闭。
-    Page {
-        local: Local,
-        scroll: usize,
-    },
-    Shortcuts,
-    /// ctrl+o：详细视图。
-    Detail(super::detail::Detail),
-    /// `/login`：登录视图（tui.md §7.2）。
-    Login(super::login::LoginView),
-    /// `/permissions`：规则页面（tui-manage.md §1.2）。装箱：比其他变体大得多。
-    Permissions(Box<super::permissions::PermissionsView>),
-    /// `/export`：导出方式与文件名（tui-manage.md §3）。
-    Export(super::export::ExportView),
-    /// `/diff`：当前改动与每回合的改动（tui-manage.md §4）。
-    Diff(super::diff_view::DiffView),
-    /// ← 项目页（修复线 F29，tui-panels.md §2）。装箱：比其他变体大得多。
-    Projects(Box<super::projects::ProjectsPage>),
-    /// `/resume` 页（修复线 F29，tui-manage.md §10）。
-    Resume(Box<super::resume::ResumePage>),
-    /// 切到别的项目之前的信任对话框（workspace-trust.md §2.8）。
-    Trust(Box<super::trust_ask::TrustAsk>),
-    /// Background 面板与 Shell 详情（tui-panels.md §3）：替换底部区域。
-    Background(super::background::BackgroundView),
-    /// `/usage` 的 Usage / Stats 页面（usage.md §4、§5）。装箱：统计数据比其他变体大得多。
-    Usage(Box<super::usage::UsageView>),
-    /// 切到完全访问的确认框（tui.md §7.8，工作线 F87）：替换底部区域，不是全屏视图。
-    YoloConfirm(super::yolo_confirm::YoloConfirm),
-    /// `/machines` 的列表（远端执行 R4，remote-exec.md §21.3）：替换底部区域。
-    Machines(super::machines::MachinesView),
-}
+/// 替换输入框或整个屏幕的视图；类型与它的所有分派在 `overlay.rs`。
+pub use super::overlay::Overlay;
 
 pub struct App {
     pub palette: Palette,
@@ -242,59 +201,31 @@ pub struct App {
     /// 同伴消息批准框的焦点（0 拒绝，1 投递）；扣住的消息本身在视图里（cross-session.md §2.6）。
     pub peer_choice: usize,
     pub local: Vec<LocalCell>,
-    /// 从底部向上滚过的行数；0 表示跟随最新内容。
-    pub scroll: usize,
-    /// 上滚期间又来了新内容。
-    pub new_activity: bool,
+    /// 显示的 transcript 里的读位置（滚动、单独展开、搜索）。
+    pub port: Port,
+    /// 鼠标与选区。
+    pub pointer: Pointer,
+    /// 按键的状态。
+    pub keys: KeyState,
+    /// 当前会话的快照（任务、后台任务、请求统计、子代理）。
+    pub snapshots: Snapshots,
     /// 上次排版的 transcript 总行数与可视高度。
     pub transcript_lines: usize,
     pub viewport: usize,
-    /// 点击展开行单独展开的 cell（第一个行 id）。
-    pub expanded_cells: HashSet<u64>,
-    /// 主界面的搜索模式（`//`，修复线 F114，tui-input.md §2.3）。
-    pub find: Option<super::find::Find>,
-    /// 下一帧把这一行（块的键，块内行）放回视口的最后一行：退出搜索模式时回到进入前的位置。
-    pub restore_bottom: Option<(u64, usize)>,
     /// footer 的临时提示与等待第二次按下的按键。
     pub notice: Option<super::notice::Notice>,
     /// 最后一个会话事件到达的时间；状态行据此判断卡住。
     pub last_frame: Instant,
-    /// 鼠标最后的位置（悬停的反馈）。
-    pub hover: Option<(u16, u16)>,
     /// 家目录（显示路径时写成 `~`）；工作区本身只在 `view` 里（R1-3）。
     pub home: Option<String>,
     pub version: String,
     pub started: Instant,
     /// 输入框文字区的宽度（上下移动与折行用）；每帧由绘制更新。
     pub composer_width: usize,
-    /// 上一帧的可点击区域与可见行。
-    pub hits: Hits,
-    pub selection: Option<Selection>,
-    pub(crate) composer_drag: Option<ComposerDrag>,
-    pub(crate) click: Option<Click>,
-    pub(crate) press: Option<Target>,
-    /// 全屏视图里的选区（屏幕坐标，tui-select.md §2.1）；与 `selection` 互斥。
-    pub screen_selection: Option<ScreenSelection>,
-    /// 最近一次复制的提示与时间（gap 行右侧显示，时长按途径）。
-    pub copied: Option<(super::clipboard::Notice, Instant)>,
-    /// 滚轮的加速状态（tui-select.md §4.2）；runner 按终端变量换成对应的参数。
-    pub wheel: super::wheel::Accel,
-    pub history_presses: usize,
-    pub history_hinted: bool,
     /// rewind 选择器的条目（打开时由 runner 填入）。
     pub rewind: Vec<super::rewind::Entry>,
-    /// ctrl+x 和弦的第一个键按下的时间（tui-input.md §5）。
-    pub chord: Option<Instant>,
     /// `/memory` 列出的文件（入口给出，tui-input.md §4.2）。
     pub memory_files: Vec<crate::services::MemoryFile>,
-    /// 任务清单的界面状态（ctrl+t，tui-display.md §2.2）。
-    pub tasks: super::tasks::TaskPanel,
-    /// 后台任务的最新快照（与 `agents` 同一份快照、同一个回执，runner 按请求序号写入，tui-display.md §2.3，修复线 F34）。
-    pub background: Vec<rust_cli_kernel_api::manage::BackgroundEntry>,
-    /// footer 的请求统计（TPS 与缓存命中率）的最后一份回执（runner 按请求序号写入，tui-display.md §2.6，F27）。
-    pub request_stats: super::footer_stats::FooterStats,
-    /// `/tasks` 列表的条目（打开时的快照；停止后按新快照刷新）。
-    pub task_list: Vec<rust_cli_kernel_api::manage::BackgroundEntry>,
     /// 主题的当前值（配置的 `ui.theme` 或 `/theme` 选的，tui-manage.md §2.1）与启动时探测到的终端背景
     /// （`auto` 用它）。
     pub theme: crate::services::UiTheme,
@@ -303,8 +234,6 @@ pub struct App {
     pub notify: super::notify::Notify,
     /// 提问框的空闲计时（tools-more.md §1.1，工作线 F72）。
     pub afk: super::afk::Afk,
-    /// 子代理的最后一份快照（与 `background` 同一份快照，runner 按请求序号写入，tui-panels.md §0、§1）。
-    pub agents: super::agents::AgentList,
     /// 正在查看的子代理（只读）。
     pub viewing: Option<super::agents::Viewing>,
     /// footer 下面获得焦点的东西（pill 或子代理列表）。
@@ -313,20 +242,12 @@ pub struct App {
     pub logo: super::logo::Logo,
     /// 启动时要打开已有会话：“有新版本”的提示在第一次切换后移到新视图的顶上（docs/specs/rust-cli/update.md §7）。
     pub update_carry: Option<crate::update::UpdateInfo>,
-    /// 按平台判断文字输入、松开事件与 alt 码、没有括号粘贴时的 paste burst（只在 Windows 上有，tui-input.md §9，
-    /// 修复线 F65）；runner 按入口注入的平台设置（[`App::set_os`]）。
-    pub typing: super::keyboard::Typing,
-    pub releases: super::keyboard::Releases,
-    pub burst: Option<super::paste_burst::PasteBurst>,
     /// 机器服务的最新快照（远端执行 R4，remote-exec.md §21.2；runner 在服务的变化通知之后重取）：状态行与 `/machines`。
     pub machines: Vec<crate::machines::MachineRow>,
     /// 入口注入了机器服务（没有时 `/machines` 提示不可用）。
     pub machines_enabled: bool,
     /// 绑定到远端机器的 MCP 服务器（规范化的服务器名，机器名；R5，remote-exec.md §22.8）：runner 启动时从服务取。
     pub mcp_machines: Vec<(String, String)>,
-    /// 终端分辨得出增强按键（修复线 F104，tui-input.md §11.1.1）：进界面时键盘增强的查询结论，由 `Screen` 带进来；
-    /// 决定立即发送的提示写 ctrl+enter 还是 ctrl+x ctrl+s。
-    pub keyboard_enhanced: bool,
     pub quit: bool,
 }
 
@@ -370,54 +291,32 @@ impl App {
             detached: Vec::new(),
             peer_choice: 0,
             local: Vec::new(),
-            scroll: 0,
-            new_activity: false,
+            port: Port::default(),
+            pointer: Pointer::default(),
+            keys: KeyState::default(),
+            snapshots: Snapshots::default(),
             transcript_lines: 0,
             viewport: 0,
-            expanded_cells: HashSet::new(),
-            find: None,
-            restore_bottom: None,
             notice: None,
             last_frame: Instant::now(),
-            hover: None,
             home,
             version,
             started: Instant::now(),
             composer_width: super::layout::DEFAULT_WIDTH,
-            hits: Hits::default(),
-            selection: None,
-            composer_drag: None,
-            click: None,
-            press: None,
-            screen_selection: None,
-            copied: None,
-            wheel: super::wheel::Accel::default(),
-            history_presses: 0,
-            history_hinted: false,
             rewind: Vec::new(),
-            chord: None,
             held_command: false,
             memory_files: Vec::new(),
-            tasks: super::tasks::TaskPanel::default(),
-            background: Vec::new(),
-            request_stats: Default::default(),
-            task_list: Vec::new(),
             theme: crate::services::UiTheme::Auto,
             terminal_background: palette.background,
             notify: super::notify::Notify::default(),
             afk: super::afk::Afk::default(),
-            agents: super::agents::AgentList::default(),
             viewing: None,
             focus: None,
             logo: super::logo::Logo::default(),
             update_carry: None,
-            typing: super::keyboard::Typing::default(),
-            releases: super::keyboard::Releases::default(),
-            burst: None,
             machines: Vec::new(),
             machines_enabled: false,
             mcp_machines: Vec::new(),
-            keyboard_enhanced: false,
             quit: false,
         }
     }
@@ -444,8 +343,12 @@ impl App {
 
     /// 是否需要定时重绘（运行中的动画、拖选到边缘、复制提示、临时提示）。
     pub fn animating(&self) -> bool {
-        let dragging_at_edge = self.selection.is_some_and(|s| s.dragging && s.edge != 0);
+        let dragging_at_edge = self
+            .pointer
+            .selection
+            .is_some_and(|s| s.dragging && s.edge != 0);
         let copied = self
+            .pointer
             .copied
             .as_ref()
             .is_some_and(|(notice, at)| at.elapsed() < notice.duration);
@@ -517,11 +420,12 @@ impl App {
                 ..
             } = request
             {
-                if machine.is_none() {
+                if machine.is_primary() {
                     ui.bound_machine = super::machines::remote_of(tool, input, &self.mcp_machines)
-                        .map(str::to_owned);
+                        .map(MachineName::new)
+                        .unwrap_or_default();
                 }
-                if let Some(remote) = machine.as_deref().or(ui.bound_machine.as_deref()) {
+                if let Some(remote) = machine.remote().or(ui.bound_machine.remote()) {
                     ui.workspace = self
                         .remote_root(remote)
                         .unwrap_or_else(|| remote.to_owned());
@@ -544,7 +448,7 @@ impl App {
     pub fn push_local(&mut self, local: Local) {
         let anchor = self.view.rows().last().map(|row| row.id);
         self.local.push(LocalCell { anchor, local });
-        self.scroll = 0;
+        self.port.scroll = 0;
     }
 
     pub fn info(&mut self, text: impl Into<String>) {
@@ -582,23 +486,23 @@ impl App {
 
     /// 内容变长时保持用户正在看的位置（已上滚时）。
     pub fn content_resized(&mut self, lines: usize) {
-        if self.scroll > 0 && lines > self.transcript_lines {
-            self.scroll += lines - self.transcript_lines;
-            self.new_activity = true;
+        if self.port.scroll > 0 && lines > self.transcript_lines {
+            self.port.scroll += lines - self.transcript_lines;
+            self.port.new_activity = true;
         }
         self.transcript_lines = lines;
-        self.scroll = self.scroll.min(lines.saturating_sub(self.viewport));
-        if self.scroll == 0 {
-            self.new_activity = false;
+        self.port.scroll = self.port.scroll.min(lines.saturating_sub(self.viewport));
+        if self.port.scroll == 0 {
+            self.port.new_activity = false;
         }
     }
 
     pub fn scroll_by(&mut self, lines: isize) -> Option<Action> {
         let max = self.transcript_lines.saturating_sub(self.viewport);
-        let next = (self.scroll as isize + lines).clamp(0, max as isize) as usize;
-        self.scroll = next;
+        let next = (self.port.scroll as isize + lines).clamp(0, max as isize) as usize;
+        self.port.scroll = next;
         if next == 0 {
-            self.new_activity = false;
+            self.port.new_activity = false;
         }
         None
     }
@@ -614,9 +518,21 @@ impl App {
         label(self.workspace(), self.home.as_deref())
     }
 
+    /// 显示的 transcript 换了（离开会话、开始查看子代理、换一个、返回主会话）：读位置（滚动、单独展开、搜索）与两种选区都
+    /// 属于原来那份。
+    ///
+    /// 缺陷修复（架构整理 U3）：换显示的 transcript 原来在 runner 里另有一份手写的重置列表，漏了全屏视图的选区：异步的
+    /// 查看切换（被查看的子代理离开快照、回到主会话）落在详细视图打开时，屏幕坐标的选区留在换了内容的画面上。现在两处
+    /// 都调这里。
+    pub fn shown_changed(&mut self) {
+        self.port = super::app_state::Port::default();
+        self.pointer.clear_selection();
+    }
+
     /// 离开会话（`/clear`、切换会话）：模型、模式与工作区留作新会话的草稿（`/clear` 留在原来的工作目录：
     /// EnterWorktree 与 `/cd` 都改它）；`@` 补全的索引属于旧工作区，丢掉。
     pub fn reset(&mut self) {
+        // 读位置、选区与搜索属于离开的那份 transcript（搜索：F114）。
         self.view = Transcript::new(
             self.view.selection().clone(),
             self.view.execution(),
@@ -626,19 +542,9 @@ impl App {
         self.session = None;
         self.interaction = None;
         self.local.clear();
-        self.expanded_cells.clear();
-        // 搜索属于离开的那份 transcript（F114）。
-        self.find = None;
-        self.restore_bottom = None;
-        self.scroll = 0;
-        self.new_activity = false;
-        self.selection = None;
-        self.screen_selection = None;
-        self.tasks = super::tasks::TaskPanel::default();
-        self.background.clear();
-        // 离开的会话的请求统计不再显示，在途的回执作废（F27）。
-        self.request_stats.clear();
-        self.agents = super::agents::AgentList::default();
+        self.shown_changed();
+        // 离开的会话的任务、后台任务与子代理不再显示；请求统计的在途回执作废（F27）。
+        self.snapshots.clear();
         self.viewing = None;
         self.focus = None;
         // 切到完全访问的确认框属于离开的会话：作废，不发命令（tui.md §7.8；App 在目标换代时同样作废）。

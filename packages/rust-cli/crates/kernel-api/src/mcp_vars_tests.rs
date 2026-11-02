@@ -48,14 +48,14 @@ fn every_string_field_of_a_stdio_server_is_expanded() {
 
 #[test]
 fn urls_and_header_values_are_expanded_and_missing_names_listed_once() {
-    let config = McpTransportConfig::Http {
-        url: "https://${HOST:-mcp.example.com}/mcp".to_owned(),
-        headers: BTreeMap::from([
+    let config = McpTransportConfig::http(
+        "https://${HOST:-mcp.example.com}/mcp".to_owned(),
+        BTreeMap::from([
             ("Authorization".to_owned(), "Bearer ${TOKEN}".to_owned()),
             ("X-One".to_owned(), "${MISSING}".to_owned()),
             ("X-Two".to_owned(), "${MISSING}".to_owned()),
         ]),
-    };
+    );
     let (expanded, missing) = expand_transport_vars(&config, &lookup);
     let McpTransportConfig::Http { url, headers } = expanded else {
         panic!("still http");

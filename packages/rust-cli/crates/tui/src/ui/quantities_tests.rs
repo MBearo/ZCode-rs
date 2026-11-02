@@ -123,15 +123,6 @@ mod old {
         }
     }
 
-    pub fn elapsed(seconds: u64) -> String {
-        let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
-        match (h, m) {
-            (0, 0) => format!("{s}s"),
-            (0, _) => format!("{m}m {s:02}s"),
-            _ => format!("{h}h {m:02}m {s:02}s"),
-        }
-    }
-
     pub fn day_number(date: &str) -> Option<i64> {
         let mut parts = date.splitn(3, '-').map(str::parse::<i64>);
         let (year, month, day) = (
@@ -201,7 +192,6 @@ fn largest_unit_texts_are_unchanged() {
 fn hours_minutes_and_seconds_are_unchanged() {
     for s in seconds() {
         assert_eq!(i18n::elapsed_plain(s), old::elapsed_plain(s), "{s}");
-        assert_eq!(i18n::elapsed(s), old::elapsed(s), "{s}");
     }
 }
 

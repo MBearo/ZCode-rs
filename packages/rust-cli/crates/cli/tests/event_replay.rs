@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use futures_util::stream::{self, BoxStream};
 use futures_util::{FutureExt, StreamExt};
+use rust_cli_base::clock::SystemClock;
 use rust_cli_env_local::{LocalEnvironment, ShellConfig};
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{CommandId, EnvironmentId, ToolUseId};
@@ -31,10 +32,10 @@ use rust_cli_kernel_api::session_api::{
     Ack, Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent, SequencedEvent,
 };
 use rust_cli_kernel_api::testing::{ScriptedModel, environments, selection, text_response};
-use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
-use rust_cli_tui::view::{Body, Transcript};
+use rust_cli_tui::{Body, Transcript};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;

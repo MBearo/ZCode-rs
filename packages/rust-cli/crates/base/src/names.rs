@@ -126,6 +126,9 @@ pub mod env {
     pub const ZCODE_AUTO_COMPACT_WINDOW: &str = "ZCODE_AUTO_COMPACT_WINDOW";
     pub const ZCODE_DISABLE_AUTO_MEMORY: &str = "ZCODE_DISABLE_AUTO_MEMORY";
 
+    // 部署配置（deployment.md §6）：JSON 文件的路径。
+    pub const ZCODE_DEPLOYMENT: &str = "ZCODE_DEPLOYMENT";
+
     // 流空闲看门狗（stall-visibility.md §2.2）。
     pub const ZCODE_STREAM_IDLE_TIMEOUT_MS: &str = "ZCODE_STREAM_IDLE_TIMEOUT_MS";
     pub const ZCODE_BYTE_STREAM_IDLE_TIMEOUT_MS: &str = "ZCODE_BYTE_STREAM_IDLE_TIMEOUT_MS";

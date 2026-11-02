@@ -80,6 +80,13 @@ pub(crate) fn rejected(text: String) -> ToolOutput {
     error(text)
 }
 
+/// 一次权限询问：文字、建议规则与“只批准这一次”（判决链或 PreToolUse hook 的 `Ask`）。
+struct Asking {
+    message: String,
+    suggestions: Vec<PermissionRule>,
+    once: bool,
+}
+
 fn wrapped(text: &str) -> ToolOutput {
     error(format!("<tool_use_error>{text}</tool_use_error>"))
 }
@@ -137,17 +144,22 @@ impl Pipeline {
         &self,
         tool: &dyn Tool,
         input: &Value,
-        message: String,
-        suggestions: &[PermissionRule],
+        asking: Asking,
         call: &Routed,
     ) -> Result<Option<Value>, ToolOutput> {
         let context = &call.context;
+        let Asking {
+            message,
+            suggestions,
+            once,
+        } = asking;
         // 修复线 F20：guarded 的危险命令只批准这一次（Node `approvalMode: "user-once"` 时 `runHooks: false`）：
-        // 不跑 PermissionRequest hooks，hook 不能替用户批准；没有“总是允许”（判决链不给建议规则）。
-        if !self.gate.ask_once(tool, input, context).await {
+        // 不跑 PermissionRequest hooks，hook 不能替用户批准；没有“总是允许”（判决链不给建议规则）。工作线 F137：这个事实
+        // 随判决给出（`Ask.once`），不再另问判决链（以前的 `ask_once` 又取一次执行环境的路径风格）。
+        if !once {
             let payload = tag(
-                hooks::permission_request(tool.name(), input, suggestions),
-                call.machine.as_deref(),
+                hooks::permission_request(tool.name(), input, &suggestions),
+                &call.machine,
             );
             let event = hooks::event(HookEventName::PermissionRequest, &call.hooks, payload).await;
             let request = self.hooks.run(event, context.cancel.clone()).await;
@@ -157,14 +169,17 @@ impl Pipeline {
                 Some(PermissionDecision::Ask { .. } | PermissionDecision::Passthrough) | None => {}
             }
         }
+        // “不再询问”一行的种子与建议规则出自同一套命令分析（shell-permissions.md §4.10）；前端不再自己算（F133）。
+        let rule_seed = rust_cli_policy::ask_rule_seed(tool.name(), input, &suggestions);
         let request = InteractionRequest::Permission {
             tool_use: context.tool_use.clone(),
             tool: tool.name().to_owned(),
             input: input.clone(),
             message: message.clone(),
-            suggestions: suggestions.to_vec(),
+            suggestions,
+            rule_seed,
             asked_by: None,
-            // 远端调用的询问带机器名（R3，remote-exec.md §20.8）。
+            // 额外机器上的调用，询问带机器名（R3，remote-exec.md §20.8；主 env 不写出）。
             machine: call.machine.clone(),
         };
         let Ok(answer) = crate::asking::ask::<PermissionAnswer>(context, request).await else {
@@ -201,11 +216,10 @@ impl Pipeline {
         tool: &dyn Tool,
         schema: &Value,
         input: Value,
-        message: String,
-        suggestions: &[PermissionRule],
+        asking: Asking,
         call: &Routed,
     ) -> Result<Value, ToolOutput> {
-        match self.ask(tool, &input, message, suggestions, call).await? {
+        match self.ask(tool, &input, asking, call).await? {
             Some(updated) => Self::revalidate(tool, schema, updated),
             None => Ok(input),
         }
@@ -230,16 +244,23 @@ impl Pipeline {
             PermissionDecision::Ask {
                 message,
                 suggestions,
+                once,
             } => {
-                self.ask_for(tool, schema, input, message, &suggestions, call)
-                    .await
+                let asking = Asking {
+                    message,
+                    suggestions,
+                    once,
+                };
+                self.ask_for(tool, schema, input, asking, call).await
             }
+            // 没有理由的询问文字只在 policy 的 `texts`（F132 的 T15：以前这里内联了同一句）。
             PermissionDecision::Passthrough => {
-                let message = format!(
-                    "ZCode requested permissions to use {}, but you haven't granted it yet.",
-                    tool.name()
-                );
-                self.ask_for(tool, schema, input, message, &[], call).await
+                let asking = Asking {
+                    message: rust_cli_policy::texts::request_message(tool.name(), None),
+                    suggestions: Vec::new(),
+                    once: false,
+                };
+                self.ask_for(tool, schema, input, asking, call).await
             }
         }
     }
@@ -261,12 +282,12 @@ impl Pipeline {
             ))));
         }
         // F98（remote-exec.md §25.2.2）：点名清单里有、没连上的机器时回“没有执行”，先于 schema 校验与去键。
-        if let Some(message) = self.machines.not_connected(tool.name(), &input) {
+        if let Some(message) = self.machines.not_connected(tool, &input) {
             return Err(Rejection::Other(wrapped(&message)));
         }
         let schema = tool.input_schema();
         // R3（remote-exec.md §20.6）：有远端机器时，去键与校验用加了 `machine` 的 schema（发给模型的同一组取值）。
-        let plan = self.machines.plan(tool.name(), &context);
+        let plan = self.machines.plan(tool, &context);
         let checked = Machines::schema(schema.clone(), &plan);
         // 修复线 F51（agents.md §2）：宽松对象的工具（Agent）丢掉 schema 外的键、不报错，之后的 hook、
         // `validate_input` 与 `call` 都用丢掉之后的输入。以前一律按严格对象，
@@ -281,7 +302,7 @@ impl Pipeline {
         }
         let call = self
             .machines
-            .route(tool.name(), &mut input, context, &plan)
+            .route(tool, &mut input, context, &plan)
             .map_err(|message| Rejection::Other(wrapped(&message)))?;
         let context = &call.context;
         if let Validation::Invalid { message, .. } = tool.validate_input(&input, context).await {
@@ -289,7 +310,7 @@ impl Pipeline {
         }
         let payload = tag(
             hooks::pre_tool_use(tool.name(), &input, context),
-            call.machine.as_deref(),
+            &call.machine,
         );
         let event = hooks::event(HookEventName::PreToolUse, &call.hooks, payload).await;
         let mut pre = self.hooks.run(event, context.cancel.clone()).await;
@@ -318,10 +339,12 @@ impl Pipeline {
                     | None => Ok(input),
                 }
             }
-            // hook 要求询问：用 hook 的原因询问。
+            // hook 要求询问：用 hook 的原因询问。hook 的询问不是“只批准这一次”（危险命令时 `check_rules` 一定拒绝或询问，
+            // 走上面两支）。
             Some(PermissionDecision::Ask {
                 message,
                 suggestions,
+                once,
             }) => match self.gate.check_rules(tool, &input, context).await {
                 Some(PermissionDecision::Deny { message }) => Err(other(error(message))),
                 Some(PermissionDecision::Ask { .. }) => self
@@ -329,7 +352,12 @@ impl Pipeline {
                     .await
                     .map_err(other),
                 Some(PermissionDecision::Allow { .. } | PermissionDecision::Passthrough) | None => {
-                    self.ask_for(tool, &schema, input, message, &suggestions, &call)
+                    let asking = Asking {
+                        message,
+                        suggestions,
+                        once,
+                    };
+                    self.ask_for(tool, &schema, input, asking, &call)
                         .await
                         .map_err(other)
                 }
@@ -356,7 +384,7 @@ impl Pipeline {
             hooks: session,
             machine,
         } = call;
-        let machine = machine.as_deref();
+        let machine = &machine;
         match tool
             .call_with_messages(input.clone(), context.clone(), progress)
             .await
@@ -412,18 +440,6 @@ impl Pipeline {
 #[async_trait]
 impl ToolExecutor for Pipeline {
     async fn execute(
-        &self,
-        tool: Arc<dyn Tool>,
-        input: Value,
-        context: ToolUseContext,
-        progress: mpsc::Sender<ToolProgress>,
-    ) -> ToolOutput {
-        self.execute_full(tool, input, context, progress)
-            .await
-            .output
-    }
-
-    async fn execute_full(
         &self,
         tool: Arc<dyn Tool>,
         input: Value,

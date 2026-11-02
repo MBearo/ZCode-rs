@@ -19,20 +19,12 @@ fn config(name: &str, remote: bool) -> McpServer {
         name: name.to_owned(),
         scope: McpScope::Project,
         transport: if remote {
-            McpTransportConfig::Http {
-                url: "https://mcp.example.com/mcp".to_owned(),
-                headers: Default::default(),
-            }
+            McpTransportConfig::http("https://mcp.example.com/mcp".to_owned(), Default::default())
         } else {
-            McpTransportConfig::Stdio {
-                command: "node".to_owned(),
-                args: Vec::new(),
-                env: Default::default(),
-                cwd: None,
-            }
+            McpTransportConfig::stdio("node".to_owned(), Vec::new())
         },
         options: Default::default(),
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -67,7 +59,7 @@ fn manager(fake: Arc<FakeMcp>, scope: &TaskScope) -> McpManager {
         fake,
         scope.spawner(),
         McpSettings::default(),
-        crate::clock_tests::TokioClock::new(),
+        crate::clock_tests::clock(),
     )
 }
 
@@ -106,7 +98,7 @@ async fn connects_lists_and_calls_tools() {
                     reason: "spawn failed".to_owned()
                 }
             ),
-            ("files".to_owned(), McpStatus::Connected),
+            ("files".to_owned(), McpStatus::CONNECTED),
         ]
     );
     // `/mcp` 的快照（tui-display.md §3.4）：失败原因与已连接服务器的工具数。
@@ -258,9 +250,10 @@ async fn list_changed_refreshes_and_stdio_closing_fails() {
         changes.changed().await.unwrap();
     }
     fake.drop_server("dyn", false);
-    while manager.status()[0].1 == McpStatus::Connected
-        || manager.status()[0].1 == McpStatus::Pending
-    {
+    while matches!(
+        manager.status()[0].1,
+        McpStatus::Connected { .. } | McpStatus::Pending { .. }
+    ) {
         changes.changed().await.unwrap();
     }
     assert!(matches!(&manager.status()[0].1, McpStatus::Failed { reason } if reason == "gone"));
@@ -285,7 +278,7 @@ async fn remote_servers_reconnect_after_closing() {
         }
         changes.changed().await.unwrap();
     }
-    assert_eq!(manager.status()[0].1, McpStatus::Connected);
+    assert_eq!(manager.status()[0].1, McpStatus::CONNECTED);
     let initializes = fake
         .received()
         .iter()
@@ -298,16 +291,17 @@ async fn remote_servers_reconnect_after_closing() {
 /// D35，两个键见 `tool_tests.rs`）外都延迟，资源工具按 `shouldDefer` 延迟并带 `searchHint` 与旧名。
 #[tokio::test]
 async fn mcp_tools_are_deferred_unless_always_load() {
-    use rust_cli_kernel_api::tool_search::is_deferred;
+    use rust_cli_kernel_api::tool_search::{is_deferred, is_mcp};
     let fake = Arc::new(FakeMcp::default().with("files", files_server()));
     let scope = TaskScope::root("test", |_| {});
     let manager = manager(fake, &scope);
     manager.start(workspace(), vec![config("files", false)]);
     manager.wait_ready().await;
     let deferred = |name: &str| is_deferred(manager.find(name).unwrap().as_ref());
-    assert!(manager.find("mcp__files__read").unwrap().is_mcp());
+    assert!(is_mcp(manager.find("mcp__files__read").unwrap().as_ref()));
     assert!(deferred("mcp__files__read"));
-    assert!(manager.find("mcp__files__fail").unwrap().always_load());
+    let fail = manager.find("mcp__files__fail").unwrap();
+    assert!(fail.mcp_info().is_some_and(|info| info.always_load));
     assert!(!deferred("mcp__files__fail"));
     for (name, alias, hint) in [
         (
@@ -327,10 +321,11 @@ async fn mcp_tools_are_deferred_unless_always_load() {
         ),
     ] {
         let tool = manager.find(name).unwrap();
-        assert!(!tool.is_mcp(), "{name}");
+        assert!(!is_mcp(tool.as_ref()), "{name}");
         assert!(deferred(name), "{name}");
         assert_eq!(tool.search_hint(), Some(hint));
-        assert_eq!(tool.aliases(), [alias]);
+        // 旧名按 kernel-api 的旧名表找到它（F132：以前每个工具自己列旧名）。
+        assert_eq!(manager.find(alias).unwrap().name(), name);
     }
 }
 
@@ -366,7 +361,7 @@ async fn node_options_apply_per_server() {
             timeout_ms,
             always_load,
         },
-        machine: None,
+        machine: Default::default(),
         ..config(name, false)
     };
     manager.start(
@@ -421,7 +416,7 @@ async fn the_handshake_reports_the_client_version_from_the_entry() {
         fake.clone(),
         scope.spawner(),
         settings,
-        crate::clock_tests::TokioClock::new(),
+        crate::clock_tests::clock(),
     );
     manager.start(workspace(), vec![config("files", false)]);
     manager.wait_ready().await;

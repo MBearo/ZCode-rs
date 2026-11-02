@@ -4,10 +4,8 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
-use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{ATTACHMENT_BLOCKS, ContentBlock, ImageSource};
-use rust_cli_kernel_api::permission::PermissionRule;
-use rust_cli_kernel_api::testing::{MemoryEnvironment, ScriptedInteractions};
+use rust_cli_kernel_api::testing::{FixedGate, MemoryEnvironment, ScriptedInteractions};
 use rust_cli_kernel_api::tool::{PromptContext, ToolError, ToolOutput};
 
 use super::*;
@@ -66,7 +64,11 @@ impl Tool for MediaRead {
             ],
             "empty.ipynb" => Vec::new(),
             "seen.ipynb" => vec![said(crate::texts::FILE_UNCHANGED)],
-            _ => return Err(crate::common::failed("unexpected read".to_owned())),
+            _ => {
+                return Err(rust_cli_kernel_api::tool::failed(
+                    "unexpected read".to_owned(),
+                ));
+            }
         };
         Ok(ToolOutput {
             content,
@@ -74,16 +76,6 @@ impl Tool for MediaRead {
             display: Value::Null,
         })
     }
-}
-
-struct AllowAll;
-
-#[async_trait]
-impl PermissionGate for AllowAll {
-    async fn decide(&self, _: &dyn Tool, _: &Value, _: &ToolUseContext) -> PermissionDecision {
-        PermissionDecision::Passthrough
-    }
-    async fn remember(&self, _: &SessionId, _: &[PermissionRule]) {}
 }
 
 const PDF: &str = "%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n";
@@ -95,8 +87,8 @@ fn context() -> ToolUseContext {
         os_version: String::new(),
         shell: "zsh".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     })
     .with_file("/Users/dev/work/pic.png", "png bytes")
     .with_file("/Users/dev/work/huge.png", &"p".repeat(300_000))
@@ -128,8 +120,8 @@ fn context() -> ToolUseContext {
 fn tools(read: Arc<MediaRead>) -> UserInputTools {
     UserInputTools {
         read: Some(read),
-        bash: crate::bash::BashTool::new(),
-        gate: Arc::new(AllowAll),
+        bash: crate::bash::BashTool::default(),
+        gate: Arc::new(FixedGate::passthrough()),
     }
 }
 

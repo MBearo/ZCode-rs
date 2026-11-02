@@ -13,12 +13,12 @@ use futures_util::StreamExt;
 use rust_cli_kernel_api::model::{
     ModelError, ModelEvent, ModelNotice, ModelPort, ModelStreamItem, QuerySource,
 };
-use rust_cli_model::{ByteIdle, ProviderModel, StreamIdle};
+use rust_cli_model::{ByteIdle, ProviderModel, RouteOptions, StreamIdle};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use super::common::{
-    block_start, delta, fast_retry, message_start, model_at, request, started_text, text_response,
+    block_start, delta, fast_retry, message_start, model_with, request, started_text, text_response,
 };
 use super::fixture::{Fixture, Reply};
 
@@ -32,9 +32,15 @@ fn idle(bytes: u64, events: u64) -> StreamIdle {
 }
 
 async fn model(server: &Fixture, idle: StreamIdle) -> ProviderModel {
-    model_at(server.url(), fast_retry(3))
-        .await
-        .with_stream_idle(idle)
+    model_with(
+        server.url(),
+        RouteOptions {
+            retry: fast_retry(3),
+            idle,
+            ..RouteOptions::default()
+        },
+    )
+    .await
 }
 
 async fn items(model: &ProviderModel) -> Vec<Result<ModelStreamItem, ModelError>> {

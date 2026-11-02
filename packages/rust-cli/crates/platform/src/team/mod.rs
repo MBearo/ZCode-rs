@@ -14,10 +14,12 @@
 mod check;
 mod list;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use futures_util::future::join_all;
+use rust_cli_base::account::Family;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::model::ModelConnection;
 use rust_cli_net::Egress;
@@ -27,7 +29,7 @@ pub(crate) use check::successful_data;
 pub(crate) use list::TeamPlan;
 
 use crate::token::http::Http;
-use crate::token::{AccountOrigins, Family, fingerprint};
+use crate::token::{AccountOrigins, fingerprint};
 
 /// 一次查询的结论（App `CodingPlanAvailabilityResult` 的团队部分；不可用的原因保留细分，给提示用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,11 +121,6 @@ pub(crate) struct TeamPlans {
     state: Mutex<State>,
 }
 
-fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
-    // 持锁的代码不 panic、不 await；中毒时数据仍然一致，继续使用。
-    state.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 impl TeamPlans {
     pub fn new(egress: Arc<Egress>, origins: AccountOrigins) -> Self {
         Self {
@@ -150,7 +147,9 @@ impl TeamPlans {
             account.identity.clone(),
             account.token_print(),
         );
-        let flight = lock(&self.state)
+        let flight = self
+            .state
+            .lock_unpoisoned()
             .flights
             .entry(key.clone())
             .or_default()
@@ -158,7 +157,7 @@ impl TeamPlans {
         flight
             .get_or_init(|| async {
                 let round = self.query(account, token).await;
-                let mut state = lock(&self.state);
+                let mut state = self.state.lock_unpoisoned();
                 if state
                     .flights
                     .get(&key)
@@ -177,7 +176,7 @@ impl TeamPlans {
         let print = account.token_print();
         // 记下的列表：同一 profile id 与 token 时直接用；只有 profile id 相同时，列表读取失败才沿用它。
         let (cached, previous) = {
-            let state = lock(&self.state);
+            let state = self.state.lock_unpoisoned();
             let same = state
                 .lists
                 .get(&account.provider)
@@ -250,7 +249,7 @@ impl TeamPlans {
         print: &str,
         id: &ModelConnection,
     ) -> Option<Availability> {
-        let state = lock(&self.state);
+        let state = self.state.lock_unpoisoned();
         let recorded = state
             .recorded
             .get(&(account.provider.clone(), id.clone()))?;
@@ -264,7 +263,7 @@ impl TeamPlans {
     /// 同范围的值（第一次 false；换了 profile id 不沿用，App `resetPrevious`）。
     pub fn commit(&self, account: &TeamAccount, round: Round) -> Vec<TeamPlan> {
         let print = account.token_print();
-        let mut state = lock(&self.state);
+        let mut state = self.state.lock_unpoisoned();
         if let Some(plans) = round.fresh {
             state.lists.insert(
                 account.provider.clone(),
@@ -307,7 +306,7 @@ impl TeamPlans {
     /// 记下的已过期 / 未分配（只这两种有 App 的文案）：给了团队项目时只看它，否则按列表顺序第一个。
     pub fn notice(&self, account: &TeamAccount, team: Option<&ModelConnection>) -> Option<Reason> {
         account.connected()?;
-        let state = lock(&self.state);
+        let state = self.state.lock_unpoisoned();
         let reason = |id: &ModelConnection| {
             let recorded = state
                 .recorded

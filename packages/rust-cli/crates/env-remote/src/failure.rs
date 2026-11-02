@@ -6,7 +6,7 @@
 
 use rust_cli_exec_client::ClientError;
 use rust_cli_exec_wire::envelope::WireError;
-use rust_cli_exec_wire::op::Op;
+use rust_cli_exec_wire::op::{Op, OpKind};
 use rust_cli_kernel_api::env::EnvError;
 use rust_cli_prompts::texts;
 
@@ -30,12 +30,14 @@ fn reason(error: &ClientError) -> String {
 }
 
 fn render(template: &str, machine: &str, op: Op, reason: &str) -> String {
+    let primary = rust_cli_kernel_api::ids::MachineName::is_primary_name(machine);
     texts::render(
         template,
         &[
             ("machine", machine),
             ("action", rust_cli_prompts::remote::action(op.as_str())),
             ("reason", reason),
+            ("instead", rust_cli_prompts::remote::instead(primary)),
         ],
     )
 }
@@ -66,12 +68,10 @@ pub(crate) fn client(machine: &str, op: Op, error: ClientError) -> EnvError {
         | ClientError::Refused { .. }
         | ClientError::Rejected(_)) => {
             // 发出过：命令可能还在那台机器上跑；有副作用的调用结果不明；只读的没有改动。
-            let template = if op == Op::WatchCommand {
-                texts::remote_ended_command()
-            } else if op.is_mutation() {
-                texts::remote_ended_unknown()
-            } else {
-                texts::remote_ended_read()
+            let template = match (op, op.kind()) {
+                (Op::WatchCommand, _) => texts::remote_ended_command(),
+                (_, OpKind::Mutation) => texts::remote_ended_unknown(),
+                (_, OpKind::Read | OpKind::Stream) => texts::remote_ended_read(),
             };
             io(render(template, machine, op, &reason(&ended)))
         }

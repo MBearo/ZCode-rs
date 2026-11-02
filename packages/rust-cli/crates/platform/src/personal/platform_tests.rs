@@ -8,14 +8,16 @@ use std::sync::{Arc, Mutex};
 
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::model::ModelError;
-use rust_cli_kernel_api::provider::{Credential, ModelDirectory, ModelEndpoint, ModelEndpoints};
+use rust_cli_kernel_api::provider::{
+    Credential, EndpointQuery, ModelDirectory, ModelEndpoint, ModelEndpoints,
+};
 use serde_json::{Value, json};
 
 use crate::CredentialSecret;
 use crate::fake_server_tests::{Captured, Gate, Harness, NOW_MS, Reply, Server, selection};
 use crate::test_support::write;
-use crate::token::Family;
 use crate::token::location::storage_key;
+use rust_cli_base::account::Family;
 
 const SUBSCRIPTION: &str = "/api/biz/subscription/list";
 const CUSTOMER: &str = "/api/biz/customer/getCustomerInfo";
@@ -195,7 +197,7 @@ async fn an_app_login_alone_lists_the_individual_plan() {
         assert!(listed(&harness, &provider).await, "{name}: listed");
         let endpoint = harness
             .platform
-            .endpoint(&selection(&provider), None)
+            .endpoint(EndpointQuery::new(&selection(&provider)))
             .await
             .unwrap();
         // 取目录时为订阅查询换到的令牌，第一次请求直接用。
@@ -322,7 +324,7 @@ async fn a_node_cli_identity_is_neither_needed_nor_enough() {
     assert!(
         harness
             .platform
-            .endpoint(&selection(&zai), None)
+            .endpoint(EndpointQuery::new(&selection(&zai)))
             .await
             .is_err()
     );
@@ -332,7 +334,7 @@ async fn a_node_cli_identity_is_neither_needed_nor_enough() {
     assert!(listed(&harness, &zai).await);
     harness
         .platform
-        .endpoint(&selection(&zai), None)
+        .endpoint(EndpointQuery::new(&selection(&zai)))
         .await
         .unwrap();
     let credentials = harness.credentials().await;
@@ -453,7 +455,7 @@ async fn a_manual_key_wins_over_the_app_login_without_a_subscription_check() {
         .unwrap();
     let endpoint = harness
         .platform
-        .endpoint(&selection(&zai), None)
+        .endpoint(EndpointQuery::new(&selection(&zai)))
         .await
         .unwrap();
     assert_eq!(token(&endpoint), "sk-manual");
@@ -469,7 +471,7 @@ async fn a_rejected_token_is_not_retried_after_the_zcode_jwt_changed() {
     zai_login(&harness, "u-1", "jwt-1").await;
     let first = harness
         .platform
-        .endpoint(&selection(&zai), None)
+        .endpoint(EndpointQuery::new(&selection(&zai)))
         .await
         .unwrap();
     assert_eq!(token(&first), "pat-1");
@@ -481,7 +483,10 @@ async fn a_rejected_token_is_not_retried_after_the_zcode_jwt_changed() {
         .unwrap();
     let message = match harness
         .platform
-        .endpoint(&selection(&zai), Some(&first))
+        .endpoint(EndpointQuery {
+            rejected: Some(&first),
+            ..EndpointQuery::new(&selection(&zai))
+        })
         .await
     {
         Err(ModelError::Authentication { message }) => message,

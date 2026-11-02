@@ -12,8 +12,8 @@ use serde_json::Value;
 use super::list::Customer;
 use super::{Availability, Reason};
 use crate::consts;
-use crate::token::Family;
 use crate::token::http::{Auth, Fault, Http, ORGANIZATION_HEADER, PROJECT_HEADER, Reply};
+use rust_cli_base::account::Family;
 
 /// 订阅详情请求的输入（未连接的情形调用方先排除）。
 pub(crate) struct Detail<'a> {

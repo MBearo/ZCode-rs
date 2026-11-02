@@ -3,8 +3,8 @@
 use rust_cli_base::tokens;
 use rust_cli_kernel_api::tool::ToolError;
 
-use crate::common::failed;
 use crate::texts;
+use rust_cli_kernel_api::tool::failed;
 
 /// 不加 limit 时允许读的最大字节数。
 pub(crate) const MAX_BYTES: u64 = 262_144;

@@ -4,24 +4,34 @@ use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::dto::command as wc;
 use rust_cli_exec_wire::dto::core as w;
 use rust_cli_exec_wire::dto::files as wf;
+use rust_cli_exec_wire::dto::git as wg;
+use rust_cli_exec_wire::dto::mcp as wm;
 use rust_cli_exec_wire::dto::rewind as wr;
 use rust_cli_exec_wire::dto::shell as ws;
 use rust_cli_exec_wire::envelope::WireError;
+use rust_cli_exec_wire::handshake::Welcome;
 use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, Outcome, OutputStream,
+    WorkspaceRef,
 };
 use rust_cli_kernel_api::env_files::{
     DirEntry, FileKind, FileStat, FileWritten, GlobMatches, GrepCount, GrepFileHit, GrepFileLines,
     GrepLine, GrepLineKind, GrepOutcome, GrepSubmatch, PathFacts, PathStyle, TextRead, TextSlice,
 };
+use rust_cli_kernel_api::env_git::{GitDiff, GitSnapshot, GitStatus};
 use rust_cli_kernel_api::env_pdf::PdfRender;
+use rust_cli_kernel_api::env_registry::{MachineFacts, RemoteMachine};
 use rust_cli_kernel_api::env_rewind::{
     RestoreAction, RestoredFile, RewindConflict, RewindPlan, RewindStatus,
 };
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundKind, BackgroundStatus, BackgroundStop, ShellNotice, ShellState,
 };
-use rust_cli_kernel_api::ids::{OperationId, ShellTaskId, ToolUseId};
+use rust_cli_kernel_api::env_worktree::{
+    WorktreeChanges, WorktreeCreated, WorktreeEntry, WorktreeList,
+};
+use rust_cli_kernel_api::ids::{EnvironmentId, OperationId, ShellTaskId, ToolUseId};
+use rust_cli_kernel_api::mcp::{McpError, McpTransportEvent};
 
 /// 线上的错误 → `EnvError`：七种一一对应；协议自己的两种是 `Io`。
 pub(crate) fn error(error: WireError) -> EnvError {
@@ -68,18 +78,15 @@ pub(crate) fn facts(facts: w::EnvFacts) -> EnvFacts {
         os_version: facts.os_version,
         shell: facts.shell,
         is_git_repo: facts.is_git_repo,
-        additional_directories: facts.additional_directories.into_iter().map(path).collect(),
         home: facts.home.map(path),
+        uid: facts.uid,
     }
 }
 
 pub(crate) fn path_facts(facts: w::PathFacts) -> PathFacts {
     PathFacts {
         home: facts.home.map(path),
-        style: match facts.style {
-            w::PathStyle::Posix => PathStyle::Posix,
-            w::PathStyle::Windows => PathStyle::Windows,
-        },
+        style: path_style(facts.style),
     }
 }
 
@@ -355,4 +362,137 @@ pub(crate) fn shell_notice(notice: ws::ShellNotice) -> ShellNotice {
         kind: background_kind(notice.kind),
         output_bytes: notice.output_bytes,
     }
+}
+
+pub(crate) fn mcp_event(event: wm::McpEvent) -> McpTransportEvent {
+    match event {
+        wm::McpEvent::Message { message } => McpTransportEvent::Message { message },
+        wm::McpEvent::Closed {
+            reason,
+            session_expired,
+        } => McpTransportEvent::Closed {
+            reason,
+            session_expired,
+        },
+    }
+}
+
+/// 线上错误的原文（执行器的 `Connect` / `Io` 是 `io`、`Closed` 是 `not_found`，§22.4）。
+pub(crate) fn mcp_text(error: &WireError) -> String {
+    match error {
+        WireError::Io { message } => message.clone(),
+        WireError::NotFound { path } => path.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// `mcp.send` / `mcp.close` / `mcp.declare` 的错误：连接不在了是 `Closed`，执行器没有这一能力是 `Unsupported`，其余是
+/// `Io`。
+pub(crate) fn mcp_error(error: WireError) -> McpError {
+    match error {
+        WireError::NotFound { path } => McpError::Closed { message: path },
+        WireError::Unsupported { what } => McpError::Unsupported { what },
+        other => McpError::Io {
+            message: mcp_text(&other),
+        },
+    }
+}
+
+pub(crate) fn git_status(status: wg::GitStatus) -> GitStatus {
+    match status {
+        wg::GitStatus::NotRepository => GitStatus::NotRepository,
+        wg::GitStatus::Repository(snapshot) => GitStatus::Repository(GitSnapshot {
+            branch: snapshot.branch,
+            default_branch: snapshot.default_branch,
+            status: snapshot.status,
+            recent_commits: snapshot.recent_commits,
+            user_name: snapshot.user_name,
+        }),
+    }
+}
+
+pub(crate) fn git_diff(diff: wg::GitDiff) -> GitDiff {
+    match diff {
+        wg::GitDiff::NotRepository => GitDiff::NotRepository,
+        wg::GitDiff::Repository {
+            numstat,
+            patch,
+            untracked,
+        } => GitDiff::Repository {
+            numstat,
+            patch,
+            untracked,
+        },
+    }
+}
+
+pub(crate) fn worktree_created(created: wg::WorktreeCreated) -> WorktreeCreated {
+    match created {
+        wg::WorktreeCreated::Ready {
+            path,
+            branch,
+            head_commit,
+            existed,
+        } => WorktreeCreated::Ready {
+            path: EnvPath::new(path),
+            branch,
+            head_commit,
+            existed,
+        },
+        wg::WorktreeCreated::NotARepository => WorktreeCreated::NotARepository,
+        wg::WorktreeCreated::Failed { message } => WorktreeCreated::Failed { message },
+    }
+}
+
+pub(crate) fn worktree_list(list: wg::WorktreeList) -> WorktreeList {
+    WorktreeList {
+        root: list.root.map(EnvPath::new),
+        entries: list
+            .entries
+            .into_iter()
+            .map(|entry| WorktreeEntry {
+                path: EnvPath::new(entry.path),
+                branch: entry.branch,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn worktree_changes(changes: wg::WorktreeChanges) -> WorktreeChanges {
+    WorktreeChanges {
+        changed_files: changes.changed_files,
+        commits: changes.commits,
+    }
+}
+
+fn path_style(style: w::PathStyle) -> PathStyle {
+    match style {
+        w::PathStyle::Posix => PathStyle::Posix,
+        w::PathStyle::Windows => PathStyle::Windows,
+    }
+}
+
+/// 握手的结果 → 注册表里的一台机器（remote-exec.md §20.4）：工作目录没写时是远端的 home；两者都没有时 None。
+pub fn remote_machine(
+    name: &str,
+    working_directory: Option<&str>,
+    welcome: Welcome,
+) -> Option<RemoteMachine> {
+    let root = working_directory
+        .map(str::to_owned)
+        .or_else(|| welcome.home.clone())?;
+    Some(RemoteMachine {
+        name: name.to_owned(),
+        workspace: WorkspaceRef {
+            environment: EnvironmentId::new(name),
+            root: EnvPath::new(root),
+        },
+        facts: MachineFacts {
+            os: welcome.os,
+            arch: welcome.arch,
+            shell: welcome.shell.unwrap_or_default(),
+            home: welcome.home.map(EnvPath::new),
+            path_style: path_style(welcome.path_style),
+        },
+    })
 }

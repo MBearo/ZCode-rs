@@ -7,7 +7,8 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
 
-use super::{EnvironmentRegistry, LOCAL_MACHINE, LocalRegistry};
+use super::{EnvironmentRegistry, PrimaryRegistry};
+use crate::controller_services::{ControllerServices, Fetch};
 use crate::env::{
     CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
@@ -15,7 +16,8 @@ use crate::env::{
 use crate::env_git::GitStatusRequest;
 use crate::env_shell::BackgroundTask;
 use crate::ids::{EnvironmentId, OperationId, SessionId, ShellTaskId};
-use crate::local_services::{Fetch, Git, LocalServices};
+use crate::ids::{MachineName, PRIMARY_MACHINE};
+use crate::machine::Git;
 use crate::machine::{
     Background, Checkpoints, Commands, EnvInfo, Files, MachineEnv, Pdf, Search, Shell,
 };
@@ -132,27 +134,38 @@ fn workspace() -> WorkspaceRef {
     }
 }
 
-fn registry(env: &Arc<Counting>) -> LocalRegistry {
-    LocalRegistry::new(
+fn registry(env: &Arc<Counting>) -> PrimaryRegistry {
+    PrimaryRegistry::new(
         MachineEnv::new(env.clone(), Arc::new(NoMcpTransport)),
-        LocalServices::new(env.clone()),
+        ControllerServices::new(env.clone()),
     )
 }
 
 #[test]
 fn the_registry_only_knows_the_local_machine() {
     let registry = registry(&Arc::new(Counting::default()));
-    assert_eq!(LOCAL_MACHINE, "local");
-    assert!(registry.machine(LOCAL_MACHINE).is_some());
-    assert!(registry.machine("dev-a").is_none());
-    assert!(registry.machine("").is_none());
+    // 名字是身份（deployment.md §23）；以前的名字仍指主 env。
+    assert_eq!(PRIMARY_MACHINE, "primary");
+    assert!(
+        MachineName::is_primary_name("primary")
+            && MachineName::is_primary_name("local")
+            && !MachineName::is_primary_name("dev-a")
+    );
+    assert!(registry.machine(&MachineName::primary()).is_some());
+    assert!(registry.machine(&MachineName::new("dev-a")).is_none());
+    // 审查 K9：空串与别处一样是主 env（以前这里查不到，别的地方当主 env；产品代码里没有按空串查的调用方）。
+    assert!(
+        registry
+            .machine(&MachineName::new(""))
+            .is_some_and(|machine| machine.is_primary())
+    );
 }
 
 #[tokio::test]
 async fn every_port_of_a_machine_reaches_the_same_object() {
     let env = Arc::new(Counting::default());
     let registry = registry(&env);
-    let Some(machine) = registry.machine(LOCAL_MACHINE) else {
+    let Some(machine) = registry.machine(&MachineName::primary()) else {
         panic!("the local machine is always there");
     };
     let session = SessionId::new("sess_1");
@@ -171,12 +184,12 @@ async fn every_port_of_a_machine_reaches_the_same_object() {
     let _ = machine.background().background_elapsed(task).await;
     let _ = machine.checkpoints().rewind_finish(&token).await;
     let _ = registry
-        .local()
+        .primary_machine()
         .git()
         .worktree_list(EnvPath::new("/Users/dev/repo"))
         .await;
     let _ = registry
-        .local_machine()
+        .primary_machine()
         .commands()
         .close_session(&session, false)
         .await;
@@ -187,15 +200,11 @@ async fn every_port_of_a_machine_reaches_the_same_object() {
 async fn ports_without_an_override_keep_the_unsupported_default() {
     let env = Arc::new(Counting::default());
     let registry = registry(&env);
-    let machine = registry.local_machine();
+    let machine = registry.primary_machine();
     let request = GitStatusRequest {
         cwd: EnvPath::new("/Users/dev/repo"),
     };
-    let status = registry
-        .local()
-        .git()
-        .git_status(&workspace(), request)
-        .await;
+    let status = machine.git().git_status(&workspace(), request).await;
     assert_eq!(
         status,
         Err(EnvError::Unsupported {
@@ -213,18 +222,18 @@ async fn ports_without_an_override_keep_the_unsupported_default() {
 #[test]
 fn a_machine_carries_its_name() {
     let env = Arc::new(Counting::default());
-    let local = MachineEnv::new(env, Arc::new(NoMcpTransport));
-    assert_eq!(local.name(), LOCAL_MACHINE);
-    assert!(local.is_local());
-    let remote = local.named("dev-a");
-    assert_eq!(remote.name(), "dev-a");
-    assert!(!remote.is_local());
+    let primary = MachineEnv::new(env, Arc::new(NoMcpTransport));
+    assert_eq!(primary.name().as_str(), PRIMARY_MACHINE);
+    assert!(primary.is_primary());
+    let remote = primary.named(MachineName::new("dev-a"));
+    assert_eq!(remote.name().as_str(), "dev-a");
+    assert!(!remote.is_primary());
 }
 
 #[tokio::test]
 async fn an_unavailable_machine_says_it_is_not_connected() {
     let machine = MachineEnv::unavailable("dev-a");
-    assert_eq!(machine.name(), "dev-a");
+    assert_eq!(machine.name().as_str(), "dev-a");
     let error = machine.info().facts(&workspace()).await.unwrap_err();
     assert_eq!(
         error,
@@ -246,11 +255,11 @@ async fn an_unavailable_machine_says_it_is_not_connected() {
 fn the_default_lookup_goes_through_remote() {
     let env = Arc::new(Counting::default());
     let registry = crate::testing::TestMachines::new(Arc::new(crate::testing::UnusedEnvironment));
-    assert!(registry.machine("dev-a").is_none());
+    assert!(registry.machine(&MachineName::new("dev-a")).is_none());
     assert!(registry.machines().is_empty());
     registry.connect("dev-a", env, "/home/dev/proj");
-    let found = registry.machine("dev-a").unwrap();
-    assert_eq!(found.name(), "dev-a");
+    let found = registry.machine(&MachineName::new("dev-a")).unwrap();
+    assert_eq!(found.name().as_str(), "dev-a");
     let set = registry.machines();
     assert_eq!(set.version, 1);
     assert_eq!(set.names(), ["dev-a"]);
@@ -259,11 +268,16 @@ fn the_default_lookup_goes_through_remote() {
         "/home/dev/proj"
     );
     assert_eq!(
-        registry.remote("dev-a").unwrap().1.environment.as_str(),
+        registry
+            .remote(&MachineName::new("dev-a"))
+            .unwrap()
+            .1
+            .environment
+            .as_str(),
         "dev-a"
     );
     registry.disconnect("dev-a");
-    assert!(registry.machine("dev-a").is_none());
+    assert!(registry.machine(&MachineName::new("dev-a")).is_none());
     assert_eq!(registry.machines().version, 2);
 }
 
@@ -292,10 +306,18 @@ async fn stat_many_defaults_to_one_stat_per_path() {
 async fn waiting_for_a_remote_machine_does_not_wait_by_default() {
     // R5（remote-exec.md §22.9）：缺省的 wait_remote 立即给出 remote(name) 的结果，没在连的机器不等。
     let registry = crate::testing::TestMachines::new(Arc::new(crate::testing::UnusedEnvironment));
-    assert!(registry.wait_remote("dev-a").await.is_none());
+    assert!(
+        registry
+            .wait_remote(&MachineName::new("dev-a"))
+            .await
+            .is_none()
+    );
     registry.connect("dev-a", Arc::new(Counting::default()), "/home/dev/proj");
-    let (machine, workspace) = registry.wait_remote("dev-a").await.unwrap();
-    assert_eq!(machine.name(), "dev-a");
+    let (machine, workspace) = registry
+        .wait_remote(&MachineName::new("dev-a"))
+        .await
+        .unwrap();
+    assert_eq!(machine.name().as_str(), "dev-a");
     assert_eq!(workspace.root.as_str(), "/home/dev/proj");
 }
 
@@ -303,40 +325,90 @@ async fn waiting_for_a_remote_machine_does_not_wait_by_default() {
 fn reconnecting_is_false_unless_the_registry_says_so() {
     // F96（remote-exec.md §23.3）：只有本机的注册表没有重连中的机器；替身按测试的设置答，机器断开时一起忘掉。
     let env = Arc::new(Counting::default());
-    assert!(!registry(&env).reconnecting("dev-a"));
+    assert!(!registry(&env).reconnecting(&MachineName::new("dev-a")));
     let machines = crate::testing::TestMachines::new(Arc::new(crate::testing::UnusedEnvironment));
     machines.connect("dev-a", env, "/home/dev/proj");
-    assert!(!machines.reconnecting("dev-a"));
+    assert!(!machines.reconnecting(&MachineName::new("dev-a")));
     machines.set_reconnecting("dev-a", true);
-    assert!(machines.reconnecting("dev-a"));
+    assert!(machines.reconnecting(&MachineName::new("dev-a")));
     assert!(
-        machines.remote("dev-a").is_some(),
+        machines.remote(&MachineName::new("dev-a")).is_some(),
         "a reconnecting machine stays"
     );
     machines.disconnect("dev-a");
-    assert!(!machines.reconnecting("dev-a"));
+    assert!(!machines.reconnecting(&MachineName::new("dev-a")));
 }
 
 #[test]
 fn listed_machines_are_known_even_when_they_are_not_connected() {
     // F98（remote-exec.md §25.2.2）：只有本机的注册表不认识任何清单里的机器；替身连上的与登记的都算，断开之后仍算。
     let env = Arc::new(Counting::default());
-    assert!(!registry(&env).listed("dev-a"));
+    assert!(!registry(&env).listed(&MachineName::new("dev-a")));
     let machines = crate::testing::TestMachines::new(Arc::new(crate::testing::UnusedEnvironment));
-    assert!(!machines.listed("dev-a"));
+    assert!(!machines.listed(&MachineName::new("dev-a")));
     machines.connect("dev-a", env, "/home/dev/proj");
-    assert!(machines.listed("dev-a"));
+    assert!(machines.listed(&MachineName::new("dev-a")));
     machines.disconnect("dev-a");
     assert!(
-        machines.listed("dev-a"),
+        machines.listed(&MachineName::new("dev-a")),
         "a disconnected machine stays listed"
     );
-    assert!(machines.remote("dev-a").is_none());
+    assert!(machines.remote(&MachineName::new("dev-a")).is_none());
     machines.list("gpu-1");
-    assert!(machines.listed("gpu-1"));
+    assert!(machines.listed(&MachineName::new("gpu-1")));
     assert!(
-        machines.remote("gpu-1").is_none(),
+        machines.remote(&MachineName::new("gpu-1")).is_none(),
         "listing does not connect"
     );
-    assert!(!machines.listed("ci-3"));
+    assert!(!machines.listed(&MachineName::new("ci-3")));
+}
+
+/// 机器名的规则只有一处（审查 K9）：`primary`、旧名 `local` 与空串都是主 env，构造之后存成 `primary`；读的时候也经它。
+/// 序列化是名字本身，DTO 里主 env 不写出。
+#[test]
+fn machine_names_have_one_rule_for_the_primary_env() {
+    for name in ["primary", "local", ""] {
+        let machine = MachineName::new(name);
+        assert!(machine.is_primary(), "{name:?}");
+        assert_eq!(machine.as_str(), PRIMARY_MACHINE);
+        assert_eq!(machine.remote(), None);
+    }
+    let remote = MachineName::new("dev-a");
+    assert!(!remote.is_primary());
+    assert_eq!(remote.remote(), Some("dev-a"));
+    assert_eq!(MachineName::default(), MachineName::primary());
+    assert_eq!(serde_json::to_string(&remote).unwrap(), r#""dev-a""#);
+    assert_eq!(
+        serde_json::from_str::<MachineName>(r#""local""#).unwrap(),
+        MachineName::primary()
+    );
+    assert_eq!(
+        serde_json::from_str::<MachineName>(r#""dev-a""#).unwrap(),
+        remote
+    );
+}
+
+/// DTO 的字节与以前的 `Option<String>` 相同：主 env 不写出、没有这个键读成主 env，额外机器写名字。
+#[test]
+fn a_machine_field_serializes_as_the_previous_option() {
+    use crate::session_api::FileChange;
+    let local = FileChange {
+        path: "a.txt".to_owned(),
+        additions: 1,
+        deletions: 0,
+        machine: MachineName::primary(),
+    };
+    let text = serde_json::to_string(&local).unwrap();
+    assert_eq!(text, r#"{"path":"a.txt","additions":1,"deletions":0}"#);
+    assert_eq!(serde_json::from_str::<FileChange>(&text).unwrap(), local);
+    let remote = FileChange {
+        machine: MachineName::new("dev-a"),
+        ..local
+    };
+    let text = serde_json::to_string(&remote).unwrap();
+    assert_eq!(
+        text,
+        r#"{"path":"a.txt","additions":1,"deletions":0,"machine":"dev-a"}"#
+    );
+    assert_eq!(serde_json::from_str::<FileChange>(&text).unwrap(), remote);
 }

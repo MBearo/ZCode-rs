@@ -83,12 +83,20 @@ fn compile(pattern: &str) -> Option<Rule> {
     if pattern.is_empty() {
         return None;
     }
+    let prefix = if anchored { "^" } else { "(?:^|/)" };
+    let suffix = if dir_only { "/$" } else { "/?$" };
+    let regex = Regex::new(&format!("(?i){prefix}{}{suffix}", body(pattern))).ok()?;
+    Some(Rule { negated, regex })
+}
+
+/// 一个 glob（`/` 分隔，不以 `/` 开头）的正则主体：整段的 `**` 跨目录（`**/` 是零或多层目录，结尾的 `**` 是其下的一切），
+/// 段里的 `*`、`?` 不跨目录（段里的 `**` 同 `*`），`[...]` 是字符类，`\` 转义。
+fn body(pattern: &str) -> String {
     let parts: Vec<&str> = pattern.split('/').collect();
     let mut body = String::new();
     for (index, part) in parts.iter().enumerate() {
         let last = index + 1 == parts.len();
         if *part == "**" {
-            // `**/` 是零或多层目录；结尾的 `**` 是其下的一切。
             body.push_str(if last { ".*" } else { "(?:[^/]*/)*" });
             continue;
         }
@@ -97,10 +105,14 @@ fn compile(pattern: &str) -> Option<Rule> {
             body.push('/');
         }
     }
-    let prefix = if anchored { "^" } else { "(?:^|/)" };
-    let suffix = if dir_only { "/$" } else { "/?$" };
-    let regex = Regex::new(&format!("(?i){prefix}{body}{suffix}")).ok()?;
-    Some(Rule { negated, regex })
+    body
+}
+
+/// 整个相对路径（`/` 分隔）匹配一个 glob，不分大小写：同 [`Globs`] 的语法，但不认 `!`、`#`、结尾的 `/` 这些行级写法。
+/// 权限规则的路径部分用它（docs/specs/rust-cli/shell-permissions.md §4.2；F125 以前 policy 另有一份不认 `[...]`、`\` 与段里
+/// `**` 的转换）。
+pub fn path_regex(pattern: &str) -> Option<Regex> {
+    Regex::new(&format!("(?i)^{}$", body(pattern))).ok()
 }
 
 impl Globs {

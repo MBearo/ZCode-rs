@@ -29,7 +29,7 @@ pub(crate) enum ModelDone {
 
 impl<B: Backend> Loop<'_, B> {
     pub(super) fn choose_model(&mut self, selection: ModelSelection, args: Option<String>) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             // 没有会话：切换只在新会话的草稿里，立即生效，立即写。
             if let Some(args) = &args {
                 let saved = self.saves_default(&selection);
@@ -57,20 +57,21 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 这次切换会不会存成新会话的缺省（`/model` 的命令记录的说法，修复线 L-A）。
     fn saves_default(&self, selection: &ModelSelection) -> bool {
-        self.options.services.preferences.is_some() && selection.reasoning.is_some()
+        selection.reasoning.is_some()
     }
 
-    /// 写成新会话的默认模型。没有注入存储（显式覆盖、测试）时不写，与 Node 没有 registry 时相同。
+    /// 写成新会话的默认模型。
     fn remember_model(&mut self, selection: ModelSelection) {
-        let Some(store) = self.options.services.preferences.clone() else {
-            return;
-        };
         if selection.reasoning.is_none() {
             self.app
                 .error(i18n::default_model_unsaved(self.app.lang, INCOMPLETE));
             return;
         }
-        let saving = store.save_default_model(selection);
+        let saving = self
+            .options
+            .services
+            .preferences
+            .save_default_model(selection);
         self.pending
             .push(async move { Done::Model(ModelDone::Saved(saving.await)) }.boxed());
     }

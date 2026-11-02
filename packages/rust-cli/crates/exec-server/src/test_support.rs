@@ -18,24 +18,59 @@ use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvFacts, FileContent, FileVersion, OperationContext as Ctx, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
+use rust_cli_kernel_api::env_command::EnvOverrides;
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, MachineEnv, Pdf, Search, Shell,
+use rust_cli_kernel_api::machine::{CommandEvents, Commands, EnvInfo, Files, MachineEnv};
+use rust_cli_kernel_api::mcp::{
+    McpConnect, McpConnectionId, McpError, McpTransport, NoMcpTransport,
 };
-use rust_cli_kernel_api::mcp::NoMcpTransport;
+use rust_cli_kernel_api::testing::UnusedEnvironment;
 use serde::Serialize;
 use tokio::sync::{Notify, mpsc};
 
-use crate::{AllowAll, ExecLedger, ExecServer, MemoryLedger, ServerConfig};
+use crate::{AllowAll, ExecLedger, ExecServer, Launcher, MemoryLedger, ServerConfig};
 
 /// 执行环境的替身：写文件计数（看有没有重跑）、可以卡住等测试放行；`watch_command` 的事件由测试推入；记下每条起的命令
-/// 带的环境覆盖（F96）。
+/// 与每个连上的 MCP 服务器带的推来的环境变量（F96，经 [`TestLauncher`]）。
 #[derive(Default)]
 pub(crate) struct TestMachine {
     pub writes: AtomicUsize,
     pub gate: Option<Arc<Notify>>,
     pub events: Mutex<Option<mpsc::UnboundedReceiver<Result<CommandEvent, EnvError>>>>,
-    pub started: Mutex<Vec<rust_cli_kernel_api::env_command::EnvOverrides>>,
+    pub started: Mutex<Vec<EnvOverrides>>,
+    pub mcp_started: Mutex<Vec<EnvOverrides>>,
+}
+
+/// 起进程的入口：命令交给 `TestMachine` 的端口、MCP 交给给的传输，推来的变量记在 `TestMachine` 里。
+pub(crate) struct TestLauncher {
+    machine: Arc<TestMachine>,
+    mcp: Arc<dyn McpTransport>,
+}
+
+#[async_trait]
+impl Launcher for TestLauncher {
+    async fn start_command(
+        &self,
+        workspace: &WorkspaceRef,
+        context: Ctx,
+        request: StartCommand,
+        env: &EnvOverrides,
+    ) -> Result<CommandEvents, EnvError> {
+        self.machine.started.lock().unwrap().push(env.clone());
+        self.machine
+            .start_command(workspace, context, request)
+            .await
+    }
+
+    async fn connect_mcp(
+        &self,
+        workspace: &WorkspaceRef,
+        request: McpConnect,
+        env: &EnvOverrides,
+    ) -> Result<McpConnectionId, McpError> {
+        self.machine.mcp_started.lock().unwrap().push(env.clone());
+        self.mcp.connect(workspace, request).await
+    }
 }
 
 #[async_trait]
@@ -47,8 +82,8 @@ impl EnvInfo for TestMachine {
             os_version: "Linux 6".to_owned(),
             shell: "bash".to_owned(),
             is_git_repo: false,
-            additional_directories: Vec::new(),
             home: None,
+            uid: None,
         })
     }
 }
@@ -83,9 +118,6 @@ impl Files for TestMachine {
 }
 
 #[async_trait]
-impl Search for TestMachine {}
-
-#[async_trait]
 impl Commands for TestMachine {
     async fn start_command(
         &self,
@@ -93,9 +125,8 @@ impl Commands for TestMachine {
         context: Ctx,
         request: StartCommand,
     ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        let operation = context.operation;
-        self.started.lock().unwrap().push(request.env);
-        Ok(self.watch_command(operation, 0))
+        let _ = request;
+        Ok(self.watch_command(context.operation, 0))
     }
 
     fn watch_command(
@@ -118,14 +149,18 @@ impl Commands for TestMachine {
     }
 }
 
-#[async_trait]
-impl Shell for TestMachine {}
-#[async_trait]
-impl Background for TestMachine {}
-#[async_trait]
-impl Checkpoints for TestMachine {}
-#[async_trait]
-impl Pdf for TestMachine {}
+impl TestMachine {
+    /// 只换上环境事实、文件与命令三个端口的机器（其余端口返回 `Unsupported`），MCP 的管道是 `mcp`。
+    pub(crate) fn machine(
+        self: Arc<Self>,
+        mcp: Arc<dyn rust_cli_kernel_api::mcp::McpTransport>,
+    ) -> MachineEnv {
+        MachineEnv::new(Arc::new(UnusedEnvironment), mcp)
+            .with_info(self.clone())
+            .with_files(self.clone())
+            .with_commands(self)
+    }
+}
 
 pub(crate) fn config() -> ServerConfig {
     let mut config = ServerConfig::new("0.1.0-test", "linux", "x86_64");
@@ -148,10 +183,18 @@ pub(crate) async fn server_with_mcp(
     ledger: Arc<dyn ExecLedger>,
     config: ServerConfig,
 ) -> ExecServer {
-    let machine = MachineEnv::new(machine, mcp);
-    ExecServer::start(machine, ledger, Arc::new(AllowAll), config)
-        .await
-        .unwrap()
+    let launcher = Arc::new(TestLauncher {
+        machine: machine.clone(),
+        mcp: mcp.clone(),
+    });
+    ExecServer::start(
+        (machine.machine(mcp), launcher),
+        ledger,
+        Arc::new(AllowAll),
+        config,
+    )
+    .await
+    .unwrap()
 }
 
 pub(crate) async fn server(machine: Arc<TestMachine>) -> (ExecServer, Arc<MemoryLedger>) {

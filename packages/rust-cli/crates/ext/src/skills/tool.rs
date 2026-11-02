@@ -10,7 +10,7 @@ use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::message::{
     ContentBlock, Message, ToolResultContent, UserMessage, UserOrigin,
 };
-use rust_cli_kernel_api::permission::PermissionDecision;
+use rust_cli_kernel_api::permission::{PermissionDecision, PermissionSubject};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolCallOutput, ToolError, ToolOutput, ToolProgress, ToolUseContext,
     Validation,
@@ -20,9 +20,10 @@ use tokio::sync::mpsc;
 
 use super::inline::Runner;
 use super::{Skill, SkillCatalog};
+use rust_cli_kernel_api::tool_names;
 
 /// 工具名。
-pub(crate) const NAME: &str = "Skill";
+pub(crate) const NAME: &str = tool_names::SKILL;
 /// skill 正文消息的来源标签（meta user 消息，node-store 按原文保存）。
 pub const SKILL_MESSAGE_SOURCE: &str = "skill";
 /// 校验失败的错误码：写法不对、没有这个 skill、不许模型调用。
@@ -84,16 +85,23 @@ impl Tool for SkillTool {
         NAME
     }
 
+    /// 判决链按 `Skill(<名字>)` 规则检查（ext.md §2.4）；名字是模型给的原文（判决链去掉首尾空白与前导 `/`）。
+    fn permission_subject(&self, input: &Value) -> Option<PermissionSubject> {
+        Some(PermissionSubject::Skill {
+            name: input
+                .get("skill")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        })
+    }
+
     fn input_schema(&self) -> Value {
-        rust_cli_prompts::tool(NAME)
-            .map(|prompt| prompt.input_schema.clone())
-            .unwrap_or(Value::Null)
+        rust_cli_prompts::definition(NAME).schema.clone()
     }
 
     fn description(&self, _context: &PromptContext) -> String {
-        rust_cli_prompts::tool(NAME)
-            .map(|prompt| prompt.description.clone())
-            .unwrap_or_default()
+        rust_cli_prompts::definition(NAME).description.clone()
     }
 
     fn max_result_size_chars(&self) -> Option<usize> {

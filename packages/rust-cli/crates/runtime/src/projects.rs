@@ -22,15 +22,6 @@ const DRIVE_LEN: usize = rust_cli_base::path::DRIVE_PREFIX_LEN;
 /// 打开着的会话拒绝删除时的文字（tui-manage.md §10.6）。
 const OPEN_SESSION: &str = "The session is open in this window.";
 
-fn failed(error: StoreError) -> KernelError {
-    match error {
-        StoreError::NotFound { session } => KernelError::NotFound { session },
-        other => KernelError::Failed {
-            message: other.to_string(),
-        },
-    }
-}
-
 /// 路径的上一层（按字符串，两种分隔符都认）；已经是根时为 None。
 fn parent(path: &str) -> Option<&str> {
     let trimmed = path.trim_end_matches(['/', '\\']);
@@ -164,12 +155,7 @@ impl LocalKernel {
     ) -> Result<ProjectSessions, KernelError> {
         let environment = query.environment.clone();
         let root = query.root.clone();
-        let page = self
-            .ports
-            .store
-            .query_sessions(query)
-            .await
-            .map_err(failed)?;
+        let page = self.ports.store.query_sessions(query).await?;
         // 先在锁里取出句柄，放锁后再逐个问（view 要等 actor 回复）。只合并打开着的：加载中、关闭中的按库里的行。
         let open: Vec<Arc<Session>> = self
             .sessions()
@@ -226,7 +212,7 @@ impl LocalKernel {
         for session in &mut sessions {
             let root = session.record.root.clone();
             if !branches.contains_key(&root) {
-                let found = branch(self.machine.files().as_ref(), &environment, &root).await;
+                let found = branch(self.machine().files().as_ref(), &environment, &root).await;
                 branches.insert(root.clone(), found);
             }
             session.branch = branches.get(&root).cloned().flatten();
@@ -259,7 +245,7 @@ impl LocalKernel {
             .store
             .rename(session, &title)
             .await
-            .map_err(failed)
+            .map_err(KernelError::from)
     }
 
     /// 打开着的会话不能删（它的 actor 还会提交）；否则存储软删除。
@@ -269,7 +255,11 @@ impl LocalKernel {
                 message: OPEN_SESSION.to_owned(),
             });
         }
-        self.ports.store.delete(session).await.map_err(failed)
+        self.ports
+            .store
+            .delete(session)
+            .await
+            .map_err(KernelError::from)
     }
 
     /// 只读快照：打开着的问 actor，否则冷加载（不启动 actor、不跑 SessionStart）。
@@ -277,30 +267,21 @@ impl LocalKernel {
         if let Some(open) = self.open(session).await {
             return open.view().await;
         }
-        let loaded = self.ports.store.load(session).await.map_err(failed)?;
+        let loaded = self.ports.store.load(session).await?;
         let execution = loaded.mode.map_or_else(
             || self.defaults.mode.into(),
             |mode| rust_cli_kernel_api::permission::ExecutionState::from_parts(mode, loaded.plan),
         );
         Ok(SessionView {
-            meta: loaded.meta,
-            // 显示用的历史：压缩点之前只供显示的消息接上模型侧的历史（工作线 F102，compact.md §5.1）。
-            messages: [loaded.earlier, loaded.messages].concat(),
-            selection: loaded
-                .model
-                .unwrap_or_else(|| self.defaults.selection.clone()),
-            mode: execution.mode,
             plan: execution.plan,
-            pending: Vec::new(),
-            queue: Vec::new(),
-            last_seq: 0,
-            revision: 0,
-            running: false,
-            background: Vec::new(),
-            peer_held: Vec::new(),
-            context_usage: None,
-            context_notice: Default::default(),
-            output_speed: None,
+            ..SessionView::new(
+                loaded.meta, // 显示用的历史：压缩点之前只供显示的消息接上模型侧的历史（工作线 F102，compact.md §5.1）。
+                [loaded.earlier, loaded.messages].concat(),
+                loaded
+                    .model
+                    .unwrap_or_else(|| self.defaults.selection.clone()),
+                execution.mode,
+            )
         })
     }
 }

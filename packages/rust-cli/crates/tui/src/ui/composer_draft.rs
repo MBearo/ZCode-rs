@@ -66,7 +66,7 @@ impl Composer {
     /// 编辑器写回的文字：去掉单个末尾换行（以空行结尾时不去）；原样出现的粘贴内容
     /// 折回占位文字（`recollapsePastedContent`），没出现的不再保留。模式与图片不变。
     /// 这些之前先统一换行（与 [`Composer::paste_text`] 相同，修复线 F65）。
-    pub fn from_editor(&mut self, edited: &str) {
+    pub fn load_edited(&mut self, edited: &str) {
         // 缺陷修复（F65 的 T4）：Windows 的编辑器常写 CRLF，以前 `\r` 留在输入里发给模型；折叠的粘贴存的是统一过换行
         // 的原文，带 `\r` 的读回也折不回去。照粘贴的做法先统一。
         let edited = edited.replace("\r\n", "\n").replace('\r', "\n");

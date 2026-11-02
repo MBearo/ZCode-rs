@@ -7,9 +7,10 @@
 //!   之后。
 //! - 本端发的请求用字符串 id `rs-<n>`，与对端的 id 空间分开；连接断开时等待中的请求全部失败。不靠超时同步状态。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
@@ -151,10 +152,7 @@ impl Peer {
     }
 
     fn waiting(&self) -> std::sync::MutexGuard<'_, Waiting> {
-        self.0
-            .waiting
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.0.waiting.lock_unpoisoned()
     }
 
     fn resolve(&self, id: &Value, result: Result<Value, RpcError>) {

@@ -60,13 +60,13 @@ fn entry(status: SubagentStatus, activity: Option<SubagentActivity>) -> Subagent
         owner: None,
         activity,
         parked: false,
-        machine: None,
+        machine: Default::default(),
     }
 }
 
 /// 查看 agent_a；快照在 `at` 到达。
 fn view(app: &mut App, entry: SubagentEntry, at: Instant) {
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![entry],
         at: Some(at),
     };

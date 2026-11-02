@@ -12,19 +12,20 @@ use rust_cli_exec_wire::{Body, BodyBuilder};
 use tokio::sync::Notify;
 
 use crate::test_support::{TestMachine, config, connect, server_with, write};
-use crate::{Activity, Begun, CallKey, CallKind, ExecLedger, LedgerError, MemoryLedger};
+use crate::{Activity, Begun, CallKey, ExecLedger, LedgerError, MemoryLedger};
+use rust_cli_exec_wire::op::OpKind;
 
 /// 记下每次 `begin` 的种类、有身份的内存账本。
 #[derive(Default)]
 struct Recording {
     inner: MemoryLedger,
-    kinds: Mutex<Vec<CallKind>>,
+    kinds: Mutex<Vec<OpKind>>,
     forgotten: Mutex<Vec<String>>,
 }
 
 #[async_trait]
 impl ExecLedger for Recording {
-    async fn begin(&self, key: &CallKey, fp: &str, kind: CallKind) -> Result<Begun, LedgerError> {
+    async fn begin(&self, key: &CallKey, fp: &str, kind: OpKind) -> Result<Begun, LedgerError> {
         self.kinds.lock().unwrap().push(kind);
         self.inner.begin(key, fp, kind).await
     }
@@ -102,7 +103,7 @@ async fn activity_counts_clients_running_calls_and_open_streams() {
     // 账本收到了种类：变更类与流（只读调用在别的测试里）。
     assert_eq!(
         *ledger.kinds.lock().unwrap(),
-        [CallKind::Mutation, CallKind::Stream]
+        [OpKind::Mutation, OpKind::Stream]
     );
 }
 
@@ -157,5 +158,5 @@ async fn a_client_that_comes_back_in_time_is_kept() {
     again.handshake(2).await;
     again.request(2, read, &Body::empty()).await;
     let _ = again.reply().await;
-    assert_eq!(ledger.kinds.lock().unwrap().last(), Some(&CallKind::Read));
+    assert_eq!(ledger.kinds.lock().unwrap().last(), Some(&OpKind::Read));
 }

@@ -6,10 +6,9 @@ use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{StopReason, Usage, UserMessage};
 use rust_cli_kernel_api::metering::{CallStatus, ModelCall};
-use rust_cli_kernel_api::model::{
-    ModelError, ModelEvent, ModelPort, ModelRequest, QuerySource, SIDE_SESSION_TITLE,
-};
+use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, ModelRequest, QuerySource};
 use rust_cli_kernel_api::session_api::{Command, SessionHandle};
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::testing::{MemoryStore, ScriptedModel, text_response};
 use tokio::sync::Notify;
 
@@ -42,7 +41,7 @@ fn title_calls(facts: &[Fact]) -> Vec<ModelCall> {
         .iter()
         .filter_map(|fact| match fact {
             Fact::ModelCalled { call }
-                if call.source == QuerySource::Side(SIDE_SESSION_TITLE.to_owned()) =>
+                if call.source == QuerySource::Side(SideSource::SessionTitle) =>
             {
                 Some(call.clone())
             }

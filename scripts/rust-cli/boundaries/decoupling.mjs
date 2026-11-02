@@ -1,7 +1,7 @@
 // 解耦检查（docs/specs/rust-cli/app-protocol.md §9）：协议适配层不入侵内核。纯函数，这里不做 IO：
 // check-boundaries.mjs 收集依赖图、源码与 feature 表后调用；boundaries/decoupling.test.mjs 每条规则一个合成的违规。
 //
-// 四条规则（kernel-api 只加不改的第五条在 kernel-surface.mjs）：
+// 四条规则：
 // 1. 依赖：前端只被入口依赖，协议框架只被前端与入口依赖，协议 crate 互不依赖；规划中的 crate 的依赖也过层规则。
 // 2. 词汇：中立层（基础、内核、适配器、平台、协议框架）与别的协议 crate 里没有某种协议的名字、方法名与概念。
 // 3. 按前端分支：中立层的代码里没有“当前前端是谁”的写法；登记的形态枚举的变体固定。

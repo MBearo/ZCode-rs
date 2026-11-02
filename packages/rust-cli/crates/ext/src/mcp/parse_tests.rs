@@ -59,14 +59,9 @@ fn server(name: &str, scope: McpScope, command: &str) -> McpServer {
     McpServer {
         name: name.to_owned(),
         scope,
-        transport: McpTransportConfig::Stdio {
-            command: command.to_owned(),
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-        },
+        transport: McpTransportConfig::stdio(command.to_owned(), Vec::new()),
         options: Default::default(),
-        machine: None,
+        machine: Default::default(),
     }
 }
 

@@ -201,7 +201,7 @@ fn stored_messages(home: &std::path::Path, work: &std::path::Path) -> String {
         work,
     );
     let ids = rust_cli_node_store::NodeIds::new(std::sync::Arc::new(
-        rust_cli_node_store::SystemClock::utc(),
+        rust_cli_base::clock::SystemClock::utc(),
     ));
     let store = rust_cli_node_store::NodeStore::new(paths, std::sync::Arc::new(ids));
     let runtime = tokio::runtime::Builder::new_current_thread()

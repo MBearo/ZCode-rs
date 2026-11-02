@@ -16,8 +16,8 @@ impl<B: Backend> Loop<'_, B> {
     /// 缺陷修复（R5-9）：原来创建期间的输入被丢掉（`creating` 时什么都不做）。现在先按顺序留在 `held`，会话打开、
     /// 第一条发出后再逐条走这里，由内核排队（`Done::Opened`）。
     pub(super) fn submit(&mut self, command: Command) {
-        if self.session.is_some() {
-            self.send(Sent::Submit, command, String::new());
+        if self.outbox.session().is_some() {
+            self.send(Sent::Submit, command);
         } else if self.app.creating {
             self.app.held.push(command);
         } else {
@@ -31,7 +31,7 @@ impl<B: Backend> Loop<'_, B> {
     ///
     /// 修复线 L-A（用户决定 2026-10-25：照对照实现）：以前入队后中断当前回合，等着的请求被丢掉、对话里多一条中断标记。
     pub(super) fn send_now(&mut self, command: Command) {
-        let session = match &self.session {
+        let session = match self.outbox.session() {
             Some(session) if self.app.running() => session.clone(),
             _ => return self.submit(command),
         };
@@ -47,7 +47,6 @@ impl<B: Backend> Loop<'_, B> {
                 }
                 Done::Ack {
                     sent: Sent::Submit,
-                    label: String::new(),
                     ack,
                 }
             }
@@ -57,22 +56,14 @@ impl<B: Backend> Loop<'_, B> {
 
     /// ctrl+v / alt+v：经入口注入的剪贴板服务读图片（tui 不起进程，tui-input.md §3.1）。
     pub(super) fn paste_image(&mut self) {
-        let Some(clipboard) = self.options.services.clipboard.clone() else {
-            let lang = self.app.lang;
-            self.app
-                .notify(i18n_input::clipboard_unavailable(lang), HINT_FOR);
-            return;
-        };
+        let clipboard = self.options.services.clipboard.clone();
         self.pending
             .push(async move { Done::Image(clipboard.image().await) }.boxed());
     }
 
     /// 粘贴的路径像图片文件：读出来再决定（读不出时当文字粘贴）。
     pub(super) fn paste_image_path(&mut self, path: String, text: String) {
-        let Some(clipboard) = self.options.services.clipboard.clone() else {
-            self.app.paste_plain(&text);
-            return;
-        };
+        let clipboard = self.options.services.clipboard.clone();
         self.pending.push(
             async move {
                 let image = clipboard.image_file(path).await.ok().flatten();
@@ -131,12 +122,7 @@ impl<B: Backend> Loop<'_, B> {
 
     /// ctrl+g、ctrl+x ctrl+e：用外部编辑器编辑输入（粘贴的折叠内容展开后交出去）。
     pub(super) fn external_editor(&mut self) {
-        let Some(editor) = self.options.services.editor.clone() else {
-            let lang = self.app.lang;
-            self.app
-                .notify(i18n_input::editor_unavailable(lang), HINT_FOR);
-            return;
-        };
+        let editor = self.options.services.editor.clone();
         let text = self.app.composer.expanded_text();
         self.hand_over();
         self.pending
@@ -146,7 +132,7 @@ impl<B: Backend> Loop<'_, B> {
     pub(super) fn on_edited(&mut self, result: Result<String, String>) {
         self.take_back();
         match result {
-            Ok(text) => self.app.composer.from_editor(&text),
+            Ok(text) => self.app.composer.load_edited(&text),
             Err(reason) => {
                 let lang = self.app.lang;
                 self.app
@@ -157,12 +143,7 @@ impl<B: Backend> Loop<'_, B> {
 
     /// `/memory` 选中的文件（tui-input.md §4.2）。
     pub(super) fn open_memory(&mut self, path: String, display: String) {
-        let Some(editor) = self.options.services.editor.clone() else {
-            let lang = self.app.lang;
-            self.app
-                .error(i18n_input::editor_unavailable(lang).to_owned());
-            return;
-        };
+        let editor = self.options.services.editor.clone();
         self.hand_over();
         self.pending.push(
             async move {
@@ -178,12 +159,7 @@ impl<B: Backend> Loop<'_, B> {
         self.take_back();
         match result {
             Ok(()) => {
-                let source = self
-                    .options
-                    .services
-                    .editor
-                    .as_ref()
-                    .and_then(|e| e.source());
+                let source = self.options.services.editor.source();
                 let hint = match source {
                     Some((name, value)) => format!(
                         "> Using {name}=\"{value}\". To change editor, set $EDITOR or $VISUAL environment variable."

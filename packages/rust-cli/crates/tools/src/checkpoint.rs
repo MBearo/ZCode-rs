@@ -49,9 +49,10 @@ pub(crate) async fn record(context: &ToolUseContext, change: Change<'_>) -> Opti
         "toolName": change.tool,
         "version": 1,
     });
-    let machine = (!context.machine.is_local()).then(|| context.machine.name().to_owned());
-    if let Some(name) = &machine {
-        artifact["machine"] = Value::from(name.as_str());
+    // 额外机器上的改动带机器名（主 env 不写，R3）。
+    let machine = context.machine.name().remote();
+    if let Some(name) = machine {
+        artifact["machine"] = Value::from(name);
     }
     let bytes = serde_json::to_string_pretty(&artifact).ok()?.into_bytes();
     match context

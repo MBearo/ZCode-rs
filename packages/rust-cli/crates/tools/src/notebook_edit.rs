@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvError, EnvPath, ReadFile, WritePrecondition};
 use rust_cli_kernel_api::env_files::PutFile;
 use rust_cli_kernel_api::env_path;
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
 };
@@ -16,15 +17,15 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
-use crate::common::{
-    Definition, FileTools, cwd, definition, env_failure, failed, invalid, parse, resolve_input,
-    stable_path, text, unstable_input,
-};
+use crate::common::{FileTools, cwd, env_failure, resolve_input, stable_path, unstable_input};
 use crate::encoding::{decode, encode};
 use crate::file_state::{Baseline, FileState};
 use crate::{checkpoint, notebook, texts};
+use rust_cli_kernel_api::tool::{failed, invalid, parse, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const NAME: &str = "NotebookEdit";
+pub const NAME: &str = tool_names::NOTEBOOK_EDIT;
 /// 能处理的最大 notebook（100MB）。
 const MAX_NOTEBOOK_BYTES: usize = 104_857_600;
 
@@ -46,7 +47,7 @@ impl NotebookEditTool {
     pub fn new(files: FileTools) -> Self {
         Self {
             files,
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
         }
     }
 }
@@ -74,6 +75,23 @@ fn new_cell_id(context: &ToolUseContext) -> String {
 impl Tool for NotebookEditTool {
     fn name(&self) -> &str {
         NAME
+    }
+
+    /// 改点名的机器上的 notebook（remote-exec.md §20.5.1）。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::RunsThere
+    }
+
+    /// 判决链按路径规则检查（`Edit(...)`，shell-permissions.md §4.4）。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        crate::common::path_subject(
+            rust_cli_kernel_api::permission::FileAccess::Write,
+            input,
+            "notebook_path",
+        )
     }
 
     /// 延迟加载（docs/specs/rust-cli/tools-more.md §3.1）。
@@ -141,6 +159,7 @@ impl Tool for NotebookEditTool {
         let changed = match &prior.baseline {
             Baseline::Version(version) => version != &file.version,
             Baseline::Content => prior.content != decoded.content,
+            Baseline::Transcript => prior.content != decoded.content.trim(),
         };
         if changed {
             return invalid(texts::MODIFIED_SINCE_READ.to_owned());

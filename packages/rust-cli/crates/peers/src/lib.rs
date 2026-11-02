@@ -9,6 +9,7 @@ mod inbox;
 mod registry;
 mod server;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -181,11 +182,7 @@ impl LocalPeers {
         let Some(live) = &self.live else { return };
         live.inbox.close();
         live.record.send_replace(None);
-        let writer = live
-            .writer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        let writer = live.writer.lock_unpoisoned().take();
         if let Some(writer) = writer {
             let _ = writer.await;
         }

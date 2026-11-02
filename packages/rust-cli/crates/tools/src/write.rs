@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvError, EnvPath, FileVersion, ReadFile, WritePrecondition};
 use rust_cli_kernel_api::env_files::{FileKind, PutFile};
 use rust_cli_kernel_api::env_path;
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
 };
@@ -15,14 +16,17 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::common::{
-    Definition, FileTools, cwd, definition, env_failure, escape_control, failed, invalid, parse,
-    resolve_input, stable_path, stat, style, text, unstable_input,
+    FileTools, cwd, env_failure, escape_control, resolve_input, stable_path, stat, style,
+    unstable_input,
 };
 use crate::encoding::{Decoded, Encoding, LineEndings, decode, encode, normalize};
 use crate::file_state::{Baseline, FileState};
 use crate::{checkpoint, texts};
+use rust_cli_kernel_api::tool::{failed, invalid, parse, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const NAME: &str = "Write";
+pub const NAME: &str = tool_names::WRITE;
 
 #[derive(Deserialize)]
 struct Input {
@@ -39,7 +43,7 @@ impl WriteTool {
     pub fn new(files: FileTools) -> Self {
         Self {
             files,
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
         }
     }
 
@@ -103,6 +107,23 @@ fn is_report(name: &str) -> bool {
 impl Tool for WriteTool {
     fn name(&self) -> &str {
         NAME
+    }
+
+    /// 写点名的机器上的文件（remote-exec.md §20.5.1）。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::RunsThere
+    }
+
+    /// 判决链按路径规则检查（`Edit(...)`，shell-permissions.md §4.4）。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        crate::common::path_subject(
+            rust_cli_kernel_api::permission::FileAccess::Write,
+            input,
+            "file_path",
+        )
     }
 
     fn input_schema(&self) -> Value {

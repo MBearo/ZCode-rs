@@ -248,7 +248,7 @@ fn viewed(app: &App, width: usize, clock: &Clock) -> Vec<Line<'static>> {
         return Vec::new();
     };
     if let Some(line) = entry.activity.as_ref().and_then(|activity| {
-        let left = super::agents::left_ms(&app.agents, activity, clock.now);
+        let left = super::agents::left_ms(&app.snapshots.agents, activity, clock.now);
         super::retry_status::activity_line(activity, left, app.lang, width)
     }) {
         return vec![line];
@@ -266,7 +266,7 @@ fn viewed(app: &App, width: usize, clock: &Clock) -> Vec<Line<'static>> {
         &app.palette,
         color,
     ));
-    let elapsed = super::agents::elapsed_ms(&app.agents, entry, clock.now);
+    let elapsed = super::agents::elapsed_ms(&app.snapshots.agents, entry, clock.now);
     spans.push(Span::styled(
         format!(" ({})", i18n::elapsed_plain(elapsed / units::MS_PER_SECOND)),
         Style::default().add_modifier(Modifier::DIM),

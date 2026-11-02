@@ -58,10 +58,8 @@ impl ModelDirectory for Plans {
                 model("fixture", "scripted", None),
             ],
             default: Some(ModelSelection {
-                provider: PERSONAL.into(),
-                model: GLM_5_3_ACCOUNT.into(),
                 reasoning: Some("high".into()),
-                connection: None,
+                ..ModelSelection::new(PERSONAL, GLM_5_3_ACCOUNT)
             }),
         }
     }

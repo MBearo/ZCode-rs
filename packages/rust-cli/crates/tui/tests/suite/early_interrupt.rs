@@ -2,22 +2,19 @@
 //! 按 esc 或收到退出信号，输入照常留在对话里，接着是中断标记；下一条输入的请求带着它们。
 //! hook 的命令在执行环境里一直不结束，只有回合被中止（hook 的取消令牌经 `Commands::cancel` 结束它）
 //! 才往下走，所以中断一定落在空档里。旧代码以 `Aborted` 结束、什么都不提交：对话里没有这条输入，下一条请求也没有。
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvPath, OperationContext, Outcome, StartCommand, WorkspaceRef,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
-use rust_cli_kernel_api::testing::{MemoryStore, UnusedEnvironment, environments, text_response};
+use rust_cli_kernel_api::machine::Commands;
+use rust_cli_kernel_api::testing::{MemoryStore, registry, text_response, unsupported_machine};
 use rust_cli_runtime::{HookSource, HooksConfig, HooksSettings};
 use tokio::sync::{Notify, watch};
 use tokio_util::sync::CancellationToken;
@@ -26,8 +23,8 @@ use super::support::{GatedModel, Setup, request_text, with_ui};
 
 const MARKER: &str = "[Request interrupted by user]";
 
-/// hook 命令的执行环境：第一条命令一直不结束，直到它被取消（`cancel`）；之后的命令立即以 0 结束、没有输出。
-/// 其余操作同 [`UnusedEnvironment`]。
+/// hook 命令的命令端口：第一条命令一直不结束，直到它被取消（`cancel`）；之后的命令立即以 0 结束、没有输出。
+/// 机器的其余端口同 [`rust_cli_kernel_api::testing::UnusedEnvironment`]。
 struct HeldHook {
     first: Mutex<Option<OperationId>>,
     started: Notify,
@@ -44,11 +41,7 @@ impl HeldHook {
     }
 
     fn is_first(&self, operation: &OperationId) -> bool {
-        self.first
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            == Some(operation)
+        self.first.lock_unpoisoned().as_ref() == Some(operation)
     }
 }
 
@@ -64,35 +57,6 @@ fn finished(outcome: Outcome, exit_code: Option<i32>) -> Result<CommandEvent, En
 }
 
 #[async_trait]
-impl EnvInfo for HeldHook {
-    async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        UnusedEnvironment.facts(workspace).await
-    }
-}
-
-#[async_trait]
-impl Files for HeldHook {
-    async fn read_file(
-        &self,
-        workspace: &WorkspaceRef,
-        request: ReadFile,
-    ) -> Result<FileContent, EnvError> {
-        UnusedEnvironment.read_file(workspace, request).await
-    }
-
-    async fn write_file(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        UnusedEnvironment
-            .write_file(workspace, context, request)
-            .await
-    }
-}
-
-#[async_trait]
 impl Commands for HeldHook {
     async fn start_command(
         &self,
@@ -103,7 +67,7 @@ impl Commands for HeldHook {
         let operation = context.operation.clone();
         {
             // 先放掉锁：watch_command 里的 is_first 也要拿它。
-            let mut first = self.first.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut first = self.first.lock_unpoisoned();
             if first.is_none() {
                 *first = Some(context.operation);
                 self.started.notify_one();
@@ -143,14 +107,6 @@ impl Commands for HeldHook {
     }
 }
 
-impl Search for HeldHook {}
-impl Shell for HeldHook {}
-impl Background for HeldHook {}
-impl Checkpoints for HeldHook {}
-impl Pdf for HeldHook {}
-impl Git for HeldHook {}
-impl Fetch for HeldHook {}
-
 /// 一个 UserPromptSubmit command hook（命令本身由 `HeldHook` 扮演）。
 fn prompt_hook() -> HooksConfig {
     let settings = serde_json::json!({"hooks": {
@@ -172,7 +128,7 @@ async fn esc_while_the_prompt_hook_runs_keeps_the_input_with_the_marker() {
     let env = HeldHook::new();
     let model = GatedModel::scripted(vec![text_response(&["second reply"])]);
     let setup = Setup {
-        environments: environments(env.clone()),
+        environments: registry(unsupported_machine().with_commands(env.clone())),
         hooks: Some(prompt_hook()),
         ..Setup::default()
     };
@@ -216,7 +172,7 @@ async fn a_stop_signal_while_the_prompt_hook_runs_records_nothing() {
     let stop = CancellationToken::new();
     let store = Arc::new(MemoryStore::default());
     let setup = Setup {
-        environments: environments(env.clone()),
+        environments: registry(unsupported_machine().with_commands(env.clone())),
         hooks: Some(prompt_hook()),
         stop: Some(stop.clone()),
         store: store.clone(),

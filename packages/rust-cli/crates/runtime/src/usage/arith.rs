@@ -77,7 +77,9 @@ fn mcp(measured: &Measured) -> (Vec<McpToolUsage>, u64, u64) {
             }
             McpToolUsage {
                 name: tool.name.clone(),
-                server: tool.name.split("__").nth(1).unwrap_or("unknown").to_owned(),
+                server: rust_cli_kernel_api::mcp_name::parse(&tool.name)
+                    .map_or("unknown", |parsed| parsed.server)
+                    .to_owned(),
                 tokens,
             }
         })

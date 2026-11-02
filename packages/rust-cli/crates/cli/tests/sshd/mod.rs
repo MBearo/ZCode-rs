@@ -6,11 +6,12 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rust_cli_exec_transport::{Connector, LinkError, Provisioned, Provisioner};
+use rust_cli_exec_transport::{Connector, LinkError};
 use rust_cli_exec_wire::handshake::PROTOCOL;
 use rust_cli_kernel_api::env::{OperationContext, Origin};
-use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, OwnerEpoch, SessionId};
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, SessionId};
 use rust_cli_machines::Endpoint;
+use rust_cli_machines::{Provisioned, Provisioner};
 use rust_cli_ssh_connect::{SshConnector, SshProvisioner, SshTarget, Wanted};
 
 /// F107（remote-exec.md §28.10）：本机就是 macOS 时的真实 SSH 夹具（不用 Docker）。
@@ -22,25 +23,30 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const BASE_IMAGE: &str = "alpine:3.20";
 pub const HOST: &str = "zcode-test";
 
-/// 容器的系统（F100，remote-exec.md §26.9 的测试）：alpine 是 musl；debian 是 glibc。
+/// 容器的系统（F100，remote-exec.md §26.9 的测试）：alpine 是 musl；debian 是 glibc。`AlpineGit` 多装 git（F110：会话的
+/// 主 env 在容器里时，git 状态来自容器里的仓库，deployment.md §19.1）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Image {
     Alpine,
+    AlpineGit,
     Debian,
 }
 
 impl Image {
     fn base(self) -> &'static str {
         match self {
-            Self::Alpine => BASE_IMAGE,
+            Self::Alpine | Self::AlpineGit => BASE_IMAGE,
             Self::Debian => "debian:bookworm-slim",
         }
     }
 
-    fn dockerfile(self) -> &'static str {
+    fn dockerfile(self) -> String {
         match self {
-            Self::Alpine => DOCKERFILE,
-            Self::Debian => DEBIAN_DOCKERFILE,
+            Self::Alpine => DOCKERFILE.to_owned(),
+            Self::AlpineGit => {
+                DOCKERFILE.replacen("openssh-server bash", "openssh-server bash git", 1)
+            }
+            Self::Debian => DEBIAN_DOCKERFILE.to_owned(),
         }
     }
 }
@@ -402,15 +408,14 @@ pub fn wanted() -> Wanted {
 }
 
 pub fn context(operation: &str) -> OperationContext {
-    OperationContext {
-        environment: EnvironmentId::new("local"),
-        generation: Generation::new("g"),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: OperationId::new(operation),
-        origin: Origin::User {
+    OperationContext::new(
+        EnvironmentId::new("local"),
+        Generation::new("g"),
+        OperationId::new(operation),
+        Origin::User {
             session: Some(SessionId::new("s1")),
         },
-    }
+    )
 }
 
 /// 没有 Docker 或没有 Linux 产物时跳过（写明原因）；有时返回产物的路径。

@@ -4,10 +4,12 @@
 mod actions;
 mod fork_goal;
 mod input;
+mod latest;
 mod lifecycle;
 mod machines;
 mod manage;
 mod model_default;
+mod outbox;
 mod panels;
 mod projects;
 mod records;
@@ -37,7 +39,7 @@ use rust_cli_kernel_api::provider::ModelDirectory;
 use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, EndReason, Kernel, SequencedEvent, SessionHandle, StartSource,
 };
-use rust_cli_platform::Recorder;
+use rust_cli_kernel_api::session_follow::follow;
 
 use crate::ui::app::App;
 use crate::ui::palette::Palette;
@@ -63,11 +65,13 @@ pub struct Options {
     pub models: Option<Arc<dyn ModelDirectory>>,
     /// 入口载入的本工作区输入历史（从旧到新）与追加入口（tui.md「输入历史」）；TUI 不做文件 IO。
     pub history: Vec<String>,
-    pub recorder: Option<Recorder>,
+    pub recorder: Option<Arc<dyn crate::services::HistoryRecorder>>,
     /// 启动时打开的会话（`--resume` / `-c`）；`fork` 为真时打开后先 fork（`--fork-session`）。
     pub startup: Startup,
     pub fork: bool,
-    /// 入口注入的服务与配置值：界面语言（tui.md §7.1）。
+    /// 入口给的配置值（界面语言、主题、`/memory` 的文件等，启动时定了）。
+    pub ui: crate::services::UiConfig,
+    /// 入口注入的服务（tui.md §7.1、§7.2，tui-input.md §3、§4）。
     pub services: crate::services::Services,
     /// 入口收到退出信号时取消（session-lifecycle.md §3.5）：中止在跑的回合，等它结束后离开。
     pub stop: tokio_util::sync::CancellationToken,
@@ -143,7 +147,8 @@ struct Loop<'a, B: Backend> {
     cache: Cache,
     terminal: &'a mut Terminal<B>,
     screen: &'a mut dyn Screen,
-    session: Option<Arc<dyn SessionHandle>>,
+    /// 当前会话的句柄与 runner 一侧稍后再发的东西（`outbox.rs`）。
+    outbox: outbox::Outbox,
     events: BoxStream<'static, SequencedEvent>,
     /// 父会话关闭之后旧会话的询问（内核进程级的入口，agents.md §4.1.2，工作线 F72）。
     detached: BoxStream<'static, rust_cli_kernel_api::orchestration::DetachedEvent>,
@@ -151,17 +156,14 @@ struct Loop<'a, B: Backend> {
     dirty: bool,
     /// 画完下一帧后复制选区（`true` 时复制后清掉选区）。
     copy_after_draw: Option<bool>,
-    /// 运行中确认的 rewind：回合结束后发出（命令与回执提示）。
-    deferred: Option<(Command, String)>,
     /// 下一个新建会话的 SessionStart 来源（`/clear` 之后是 clear）。
     next_start: StartSource,
     /// 服务操作的在途状态（界面语言的写回）。
     services: services::ServiceState,
     /// 终端交给了外部编辑器（tui-input.md §4.1）：不画帧，回来后整屏重画。
     suspended: bool,
-    /// `ui.theme` 的写入在途；在途期间又选的只留最后一个（tui-manage.md §2.1）。
-    theme_writing: bool,
-    theme_next: Option<crate::services::UiTheme>,
+    /// `ui.theme` 的写入：同时只有一次在途，在途期间又选的只留最后一个（tui-manage.md §2.1）。
+    theme: latest::Latest<crate::services::UiTheme>,
     /// L30 面板的查询状态（子代理的变化通知与请求序号，tui-panels.md §0；修复线 F34 起子代理列表与后台任务共用一个
     /// 请求序号）。
     panels: panels::Panels,
@@ -174,9 +176,6 @@ struct Loop<'a, B: Backend> {
     user_cancel: bool,
     /// 机器服务的变化通知（远端执行 R4，remote-exec.md §21.2）：出项时重取快照；没有服务时永远不出项。
     machine_changes: BoxStream<'static, ()>,
-    /// 还没有会话时（启动后、`/clear` 之后）完成的本地命令的记录：建会话后、第一条输入之前按顺序发出（修复线 L-A，
-    /// tui-manage.md §11.3；新会话草稿的一部分）。
-    pending_records: Vec<rust_cli_kernel_api::user_command::LocalCommandRecord>,
 }
 
 /// 跑事件循环直到退出；返回退出时的会话与还没跑的 SessionEnd（[`Exit`]）。真实终端与测试（`TestBackend`）走同一个循环。
@@ -188,16 +187,10 @@ pub async fn drive<B: Backend>(
     screen: &mut dyn Screen,
     mut input: impl Stream<Item = Event> + Unpin,
 ) -> Result<Exit> {
-    let preference = options
-        .services
-        .locale
-        .map(crate::services::UiLocale::as_str);
+    let preference = options.ui.locale.map(crate::services::UiLocale::as_str);
     let lang = crate::ui::i18n::resolve(preference, &options.vars);
     // 配置的 `ui.theme`：dark / light 用固定的底色，auto 用探测到的背景（tui-manage.md §2.1）。
-    let theme = options
-        .services
-        .theme
-        .unwrap_or(crate::services::UiTheme::Auto);
+    let theme = options.ui.theme.unwrap_or(crate::services::UiTheme::Auto);
     let detected = palette.background;
     let palette = crate::ui::palette::Palette::new(
         palette.level,
@@ -216,18 +209,18 @@ pub async fn drive<B: Backend>(
         options.version.clone(),
     );
     // 滚轮每格的行数按终端（tui-select.md §4.2）；原来按终端决定要不要松开即复制，F25 起所有终端都复制。
-    app.wheel = crate::ui::wheel::Accel::new(&options.vars, cfg!(windows));
+    app.pointer.wheel = crate::ui::wheel::Accel::new(&options.vars, cfg!(windows));
     app.set_os(options.os);
     // 终端分辨得出 ctrl+enter 吗（修复线 F104）：立即发送的提示按它选键。
-    app.keyboard_enhanced = screen.keyboard_enhanced();
+    app.keys.keyboard_enhanced = screen.keyboard_enhanced();
     app.theme = theme;
     app.terminal_background = detected;
     app.composer.load_history(options.history.clone());
-    app.memory_files = options.services.memory_files.clone();
-    app.afk = crate::ui::afk::Afk::new(options.services.question_timeout);
+    app.memory_files = options.ui.memory_files.clone();
+    app.afk = crate::ui::afk::Afk::new(options.ui.question_timeout);
     // npm 上有更新的版本（docs/specs/rust-cli/update.md §7，F48）：会话头下面插一个提示；启动时要打开已有会话时，
     // 第一次切换清掉旧视图后再插到新视图的顶上。
-    if let Some(info) = options.services.update.clone() {
+    if let Some(info) = options.ui.update.clone() {
         app.push_local(crate::ui::app::Local::Update(Box::new(info.clone())));
         if !matches!(options.startup, Startup::New) {
             app.update_carry = Some(info);
@@ -243,23 +236,20 @@ pub async fn drive<B: Backend>(
         cache: Cache::default(),
         terminal,
         screen,
-        session: None,
+        outbox: outbox::Outbox::default(),
         events: idle(),
         pending: FuturesUnordered::new(),
         dirty: true,
         copy_after_draw: None,
-        deferred: None,
         next_start: StartSource::Startup,
         services: services::ServiceState::default(),
         suspended: false,
-        theme_writing: false,
-        theme_next: None,
+        theme: latest::Latest::default(),
         panels: panels::Panels::default(),
         projects: projects::Projects::default(),
         stopping: false,
         user_cancel: false,
         machine_changes,
-        pending_records: Vec::new(),
     };
     let (startup, fork) = (state.options.startup.clone(), state.options.fork);
     state.startup(startup, fork);
@@ -279,6 +269,7 @@ pub async fn drive<B: Backend>(
         let notify_at = state.app.notify.next_due();
         let afk_at = state.app.afk.next_due(tokio::time::Instant::now());
         let burst_at = state.app.burst_deadline();
+        let trust_at = state.app.trust_redraw_at();
         tokio::select! {
             event = input.next() => match event {
                 Some(event) => {
@@ -303,6 +294,15 @@ pub async fn drive<B: Backend>(
             () = tokio::time::sleep_until(tokio::time::Instant::from_std(
                 burst_at.unwrap_or_else(Instant::now),
             )), if burst_at.is_some() => state.on_burst_due()?,
+            // 缺陷修复（F138-2，主会话定）：应用内信任框按一次 ctrl+c 后的“再按一次”提示以前一直留到下一个键——只有启动时
+            // 的独立对话框（`standalone_dialog::drive`）在提示到期时重画，这里没有人调 `expire`。现在按同一个 `redraw_at`
+            // 定时刻，到时清掉提示并重画。
+            () = tokio::time::sleep_until(tokio::time::Instant::from_std(
+                trust_at.unwrap_or_else(Instant::now),
+            )), if trust_at.is_some() => {
+                state.app.trust_expire(Instant::now());
+                state.dirty = true;
+            }
             () = tokio::time::sleep(crate::ui::bottom::ANIMATION), if animating => {
                 state.dirty = true;
             }
@@ -340,7 +340,7 @@ pub async fn drive<B: Backend>(
         session: state.app.session.clone(),
         ending: Ending {
             _kernel: state.kernel.clone(),
-            session: state.session.take(),
+            session: state.outbox.detach(),
             reason,
         },
     })
@@ -350,6 +350,15 @@ impl<B: Backend> Loop<'_, B> {
     /// 注入的时钟的当前时间（Unix 毫秒）。
     pub(super) fn now_ms(&self) -> u64 {
         self.options.clock.now_ms()
+    }
+
+    /// 接上一个会话（新建的、切过去的）：句柄、画面上的会话 ID 与事件订阅（从 `from` 之后的 seq 起）在这一处写
+    /// （架构整理 U10：以前打开与切换各在两处分别写 `App.session` 与 `Loop.session`）。
+    pub(super) fn attach(&mut self, handle: Arc<dyn SessionHandle>, from: u64) {
+        self.app.session = Some(handle.id().as_str().to_owned());
+        // 订阅方落后时的重新订阅在 `follow` 里（session-lifecycle.md §2.1，F129）。
+        self.events = follow(handle.clone(), from);
+        self.outbox.attach(handle);
     }
 
     /// 发给会话的命令：命令 ID 取自注入的 Ids（落库为 `anchor.sourceCommandId`）。
@@ -386,7 +395,7 @@ impl<B: Backend> Loop<'_, B> {
         &mut self,
         input: &mut (impl Stream<Item = Event> + Unpin),
     ) -> Result<bool> {
-        if self.app.burst.is_none() {
+        if self.app.keys.burst.is_none() {
             return Ok(false);
         }
         for _ in 0..READY_EVENTS {
@@ -415,20 +424,17 @@ impl<B: Backend> Loop<'_, B> {
         for _ in 0..READY_EVENTS {
             match self.events.next().now_or_never() {
                 Some(Some(event)) => self.on_event(Some(event)),
-                // 流结束：`on_event` 重新订阅，这一轮到此为止。
+                // 流结束（会话已经不在）：`on_event` 不再等事件，这一轮到此为止。
                 Some(None) => return self.on_event(None),
                 None => return,
             }
         }
     }
 
-    /// 内核事件；流结束（订阅方落后）时按最后的 seq 重新订阅（tui.md §4.1）。
+    /// 内核事件。订阅方落后时的重新订阅在 `follow` 里（tui.md §4.1）；流结束说明会话已经不在，之后不再等事件。
     fn on_event(&mut self, event: Option<SequencedEvent>) {
         let Some(event) = event else {
-            self.events = match &self.session {
-                Some(session) => session.subscribe(Some(self.app.view.last_seq())),
-                None => idle(),
-            };
+            self.events = idle();
             return;
         };
         let rewritten = matches!(
@@ -479,7 +485,7 @@ impl<B: Backend> Loop<'_, B> {
             self.fetch_commands();
         }
         if tasks {
-            self.app.tasks.changed(self.app.view.tasks(), now);
+            self.app.snapshots.tasks.changed(self.app.view.tasks(), now);
         }
         // 后台任务可能变了：与子代理的变化通知发同一个查询（修复线 F34）。
         if background {
@@ -565,7 +571,7 @@ impl<B: Backend> Loop<'_, B> {
         let quiet = !self.app.running()
             && self.app.pending().is_none()
             && self.app.overlay.is_none()
-            && !self.app.background.iter().any(|entry| {
+            && !self.app.snapshots.background.iter().any(|entry| {
                 entry.kind == rust_cli_kernel_api::manage::BackgroundKind::Agent
                     && entry.status == rust_cli_kernel_api::env_shell::BackgroundStatus::Running
             });

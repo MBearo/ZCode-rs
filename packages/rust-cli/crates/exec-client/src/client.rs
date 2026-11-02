@@ -7,7 +7,7 @@ use rust_cli_base::TaskScope;
 use rust_cli_exec_transport::Connector;
 use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::handshake::{STREAM_WINDOW, Welcome};
-use rust_cli_exec_wire::op::Op;
+use rust_cli_exec_wire::op::{Op, OpKind};
 use rust_cli_exec_wire::request::Request;
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -46,7 +46,6 @@ impl ExecClient {
         let shared = Arc::new(Shared::new(options, requests, control));
         let live = connect_once(connector.as_ref(), &shared).await?;
         // 调用方拿到客户端时状态已经是“连上”（不等后台任务）。
-        shared.state().connected = true;
         let epoch = shared.state().epoch;
         if let Some(welcome) = shared.state().welcome.clone() {
             connected(&shared, epoch, &welcome.server_instance);
@@ -71,11 +70,6 @@ impl ExecClient {
     /// 最近一次握手的结果（执行器的系统、架构、能力位）。
     pub fn welcome(&self) -> Option<Welcome> {
         self.inner.shared.state().welcome.clone()
-    }
-
-    /// 连接现在是否就绪。
-    pub fn is_connected(&self) -> bool {
-        self.inner.shared.state().connected
     }
 
     /// 订阅连接的状态（§19.8）：连上、断开重连、关闭。
@@ -128,11 +122,10 @@ impl ExecClient {
     /// 关闭：关掉连接的发送方向，等任务收尾。之后的调用都是 [`ClientError::Closed`]。
     pub async fn close(&self) {
         let shared = &self.inner.shared;
-        shared.state().closed = Some(ClientError::Closed);
-        shared.shutdown.cancel();
         shared.connection.send_replace(ConnectionState::Closed {
             error: ClientError::Closed,
         });
+        shared.shutdown.cancel();
         let left = self.inner.scope.close(CLOSE_GRACE).await;
         if !left.is_empty() {
             tracing::warn!(target: "exec_client", ?left, "executor client tasks were aborted");
@@ -148,7 +141,7 @@ impl ExecClient {
         stream: bool,
     ) -> Result<u64, ClientError> {
         let op: Op = request.op();
-        if op.is_stream() != stream {
+        if (op.kind() == OpKind::Stream) != stream {
             return Err(ClientError::Protocol(format!(
                 "{} is {} a stream",
                 op.as_str(),
@@ -156,9 +149,10 @@ impl ExecClient {
             )));
         }
         let mut state = self.inner.shared.state();
-        // 客户端已经不工作了：这个调用不会发出去（F96，remote-exec.md §23.6）。
-        if let Some(closed) = &state.closed {
-            return Err(not_sent(closed));
+        // 客户端已经不工作了：这个调用不会发出去（F96，remote-exec.md §23.6）。在状态锁里看：之后才变成关闭的话，
+        // 关闭的一方会在发出 `Closed` 之后用 `fail_all` 结束这个调用（`Shared::closed`）。
+        if let Some(closed) = self.inner.shared.closed() {
+            return Err(not_sent(&closed));
         }
         let supported = state
             .welcome
@@ -185,11 +179,9 @@ impl ExecClient {
 
     async fn enqueue(&self, call: u64) -> Result<(), ClientError> {
         if self.inner.shared.requests.send(call).await.is_err() {
-            let mut state = self.inner.shared.state();
-            state.pending.remove(&call);
-            return Err(not_sent(
-                state.closed.as_ref().unwrap_or(&ClientError::Closed),
-            ));
+            self.inner.shared.state().pending.remove(&call);
+            let closed = self.inner.shared.closed().unwrap_or(ClientError::Closed);
+            return Err(not_sent(&closed));
         }
         Ok(())
     }

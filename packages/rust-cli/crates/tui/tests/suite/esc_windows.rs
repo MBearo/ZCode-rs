@@ -7,11 +7,8 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::store::{
-    CommitReceipt, Fact, FactBatch, LoadedSession, SessionFilter, SessionMeta, SessionStore,
-    SessionSummary, StoreError,
-};
-use rust_cli_kernel_api::testing::{MemoryStore, text_response};
+use rust_cli_kernel_api::store::{Fact, StoreError};
+use rust_cli_kernel_api::testing::{MemoryStore, StoreCall, StoreHooks, StoreProxy, text_response};
 use tokio::sync::Notify;
 
 use super::support::{GatedModel, Setup, request_text, with_ui};
@@ -29,16 +26,14 @@ type Stop = fn(&Fact) -> bool;
 /// 提交可以停住的存储：`hold` 之后第一次满足条件的提交先通知 `held`，等 `release` 再写。actor 停在这次提交里，
 /// 之后的命令在它的信箱里按顺序排着，事件也不再发出。
 struct HeldCommit {
-    inner: Arc<MemoryStore>,
     stop: Mutex<Option<Stop>>,
     held: Notify,
     release: Notify,
 }
 
 impl HeldCommit {
-    fn new(inner: Arc<MemoryStore>) -> Arc<Self> {
+    fn new() -> Arc<Self> {
         Arc::new(Self {
-            inner,
             stop: Mutex::new(None),
             held: Notify::new(),
             release: Notify::new(),
@@ -65,16 +60,11 @@ impl HeldCommit {
 }
 
 #[async_trait::async_trait]
-impl SessionStore for HeldCommit {
-    async fn create(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        self.inner.create(meta).await
-    }
-
-    async fn commit(
-        &self,
-        session: &SessionId,
-        batch: FactBatch,
-    ) -> Result<CommitReceipt, StoreError> {
+impl StoreHooks for HeldCommit {
+    async fn before(&self, call: StoreCall<'_>) -> Result<(), StoreError> {
+        let StoreCall::Commit(_, batch) = call else {
+            return Ok(());
+        };
         let stop = {
             let mut stop = self.stop.lock().unwrap();
             let hit = stop.is_some_and(|stop| batch.facts.iter().any(stop));
@@ -87,22 +77,14 @@ impl SessionStore for HeldCommit {
             self.held.notify_one();
             self.release.notified().await;
         }
-        self.inner.commit(session, batch).await
-    }
-
-    async fn load(&self, session: &SessionId) -> Result<LoadedSession, StoreError> {
-        self.inner.load(session).await
-    }
-
-    async fn list(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, StoreError> {
-        self.inner.list(filter).await
+        Ok(())
     }
 }
 
 fn setup(store: &Arc<MemoryStore>, held: &Arc<HeldCommit>) -> Setup {
     Setup {
         store: store.clone(),
-        session_store: Some(held.clone()),
+        session_store: Some(Arc::new(StoreProxy::new(store.clone(), held.clone()))),
         ..Setup::default()
     }
 }
@@ -118,7 +100,7 @@ async fn esc_before_the_turn_is_drawn_puts_the_input_back() {
         text_response(&["second reply"]),
     ]);
     let store = Arc::new(MemoryStore::default());
-    let held = HeldCommit::new(store.clone());
+    let held = HeldCommit::new();
     let actor = held.clone();
     let session = with_ui(model.clone(), setup(&store, &held), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
@@ -164,7 +146,7 @@ async fn esc_before_the_turn_is_drawn_puts_the_input_back() {
 async fn esc_after_the_turn_ended_reports_nothing() {
     let model = GatedModel::scripted(vec![text_response(&["hello"])]);
     let store = Arc::new(MemoryStore::default());
-    let held = HeldCommit::new(store.clone());
+    let held = HeldCommit::new();
     let actor = held.clone();
     with_ui(model, setup(&store, &held), |mut ui| async move {
         ui.wait_for("Ask before changes").await;

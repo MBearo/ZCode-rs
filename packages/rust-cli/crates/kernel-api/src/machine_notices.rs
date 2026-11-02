@@ -12,21 +12,22 @@ use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream, Fuse, SelectAll};
 
 use crate::env::EnvError;
-use crate::env_registry::{EnvironmentRegistry, LOCAL_MACHINE};
+use crate::env_registry::EnvironmentRegistry;
 use crate::env_shell::ShellNotice;
+use crate::ids::MachineName;
 use crate::ids::SessionId;
 use crate::machine::not_connected;
 
-/// 一条带机器名的通知：ack 要发给这台机器。
+/// 一条带机器名的通知：ack 要发给这台机器。工作线 F137：机器以前是名字的字符串，现在同注册表的查找用 `MachineName`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineNotice {
-    pub machine: String,
+    pub machine: MachineName,
     pub notice: ShellNotice,
 }
 
 enum Item {
     Notice(MachineNotice),
-    Ended(String),
+    Ended(MachineName),
 }
 
 struct Merged {
@@ -35,22 +36,22 @@ struct Merged {
     changes: Fuse<BoxStream<'static, u64>>,
     streams: SelectAll<BoxStream<'static, Item>>,
     /// 开着的流：机器名 → 开流时注册表的 version。
-    open: HashMap<String, u64>,
+    open: HashMap<MachineName, u64>,
 }
 
 impl Merged {
-    fn subscribe(&mut self, name: &str, version: u64) {
+    fn subscribe(&mut self, name: &MachineName, version: u64) {
         let Some(machine) = self.registry.machine(name) else {
             return;
         };
-        let ended = name.to_owned();
+        let ended = name.clone();
         // 流里的错误（执行环境不提供通知、连接断了）结束这台机器的流；kernel-api 不记日志，订阅方看不到这条错误。
         let notices = machine
             .shell()
             .shell_notices(&self.session, 0)
             .take_while(|item| std::future::ready(item.is_ok()))
             .filter_map({
-                let name = name.to_owned();
+                let name = name.clone();
                 move |item| {
                     let name = name.clone();
                     std::future::ready(item.ok().map(|notice| {
@@ -63,14 +64,14 @@ impl Merged {
             })
             .chain(stream::once(std::future::ready(Item::Ended(ended))));
         self.streams.push(notices.boxed());
-        self.open.insert(name.to_owned(), version);
+        self.open.insert(name.clone(), version);
     }
 
     /// 给本机与连上、但还没开流的机器开流。
     fn open_new(&mut self) {
         let set = self.registry.machines();
-        let mut names = vec![LOCAL_MACHINE.to_owned()];
-        names.extend(set.names());
+        let mut names = vec![MachineName::primary()];
+        names.extend(set.names().into_iter().map(MachineName::new));
         for name in names {
             if !self.open.contains_key(&name) {
                 self.subscribe(&name, set.version);
@@ -87,7 +88,7 @@ impl Merged {
                 Poll::Ready(Some(Item::Notice(notice))) => return Poll::Ready(Some(notice)),
                 Poll::Ready(Some(Item::Ended(name))) => {
                     let opened = self.open.remove(&name).unwrap_or(0);
-                    if name != LOCAL_MACHINE && self.registry.machines().version > opened {
+                    if !name.is_primary() && self.registry.machines().version > opened {
                         self.open_new();
                     }
                 }
@@ -123,7 +124,7 @@ pub async fn ack(
 ) -> Result<(), EnvError> {
     let Some(machine) = registry.machine(&notice.machine) else {
         return Err(EnvError::Io {
-            message: not_connected(&notice.machine),
+            message: not_connected(notice.machine.as_str()),
         });
     };
     machine

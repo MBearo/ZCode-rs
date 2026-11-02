@@ -1,23 +1,17 @@
 // 工作区信任对话框（docs/specs/rust-cli/workspace-trust.md §2.4、§2.5）：画面、
 // 焦点、按键与退出码、后备询问、项目授权的列表、中文。终端是 `TestBackend`，按键经通道送进对话框的循环。
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use futures_util::stream;
+use std::time::Duration;
+
+use crossterm::event::{Event, KeyCode};
+use futures_util::stream::{self, BoxStream, StreamExt};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
+use rust_cli_tui::Lang;
 use rust_cli_tui::trust::{Grants, TrustAnswer, TrustPrompt, drive};
-use rust_cli_tui::ui::i18n::Lang;
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 
-use super::support::text_of;
-
-fn key(code: KeyCode) -> Event {
-    Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
-}
-
-fn ctrl(c: char) -> Event {
-    Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
-}
+use super::support::{ctrl_event as ctrl, key_event as key, release_event as release, text_of};
 
 fn prompt() -> TrustPrompt {
     TrustPrompt {
@@ -48,13 +42,32 @@ async fn run(
     lang: Lang,
     keys: Vec<Event>,
 ) -> (TrustAnswer, String, Terminal<TestBackend>) {
+    run_input(prompt, lang, stream::iter(keys).boxed()).await
+}
+
+/// 同 [`run`]，输入是任意的事件流（按键之间可以停顿）。
+async fn run_input(
+    prompt: &TrustPrompt,
+    lang: Lang,
+    input: BoxStream<'static, Event>,
+) -> (TrustAnswer, String, Terminal<TestBackend>) {
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
-    let answer = drive(prompt, palette, lang, &mut terminal, stream::iter(keys))
+    let answer = drive(prompt, palette, lang, &mut terminal, input)
         .await
         .unwrap();
     let screen = text_of(terminal.backend().buffer());
     (answer, screen, terminal)
+}
+
+/// 停 `pause` 之后给出 `event`（`None`：停顿之后什么都不给）。
+fn after(pause: Duration, event: Option<Event>) -> BoxStream<'static, Event> {
+    stream::once(async move {
+        tokio::time::sleep(pause).await;
+        event
+    })
+    .filter_map(std::future::ready)
+    .boxed()
 }
 
 fn line_of(screen: &str, needle: &str) -> usize {
@@ -156,6 +169,11 @@ async fn the_answers_have_fixed_exit_codes() {
             vec![key(KeyCode::Down), key(KeyCode::Down), key(KeyCode::Enter)],
             TrustAnswer::Trusted,
         ),
+        // 松开按键的事件不处理。
+        (
+            vec![release(KeyCode::Enter), key(KeyCode::Esc)],
+            TrustAnswer::Exit(0),
+        ),
         // 输入结束（终端关掉）当作拒绝。
         (Vec::new(), TrustAnswer::Exit(1)),
     ];
@@ -171,6 +189,31 @@ async fn the_first_ctrl_c_only_changes_the_hint() {
     assert_eq!(answer, TrustAnswer::Exit(0));
     assert!(screen.contains("Press Ctrl-C again to exit"), "{screen}");
     assert!(!screen.contains("Enter to confirm"), "{screen}");
+}
+
+/// 连按的提示到期（800 ms）时对话框自己重画，提示行回到按键说明，不等下一个键；到期之后再按 ctrl+c 只重新显示提示，
+/// 不退出。
+#[tokio::test]
+async fn the_hint_expires_on_its_own_and_a_late_ctrl_c_starts_over() {
+    // 比连按的时限长得多：提示的计时总是先到。
+    const LATE: Duration = Duration::from_millis(1500);
+    // 到期之后输入才结束：最后一帧是到期时的重画。
+    let input = stream::iter([ctrl('c')]).chain(after(LATE, None)).boxed();
+    let (answer, screen, _) = run_input(&prompt(), Lang::En, input).await;
+    assert_eq!(answer, TrustAnswer::Exit(1));
+    assert!(
+        screen.contains("Enter to confirm · Esc to cancel"),
+        "{screen}"
+    );
+    assert!(!screen.contains("Press Ctrl-C again"), "{screen}");
+    // 到期之后的第二个 ctrl+c 重新开始计时；esc 照常是退出码 0。
+    let input = stream::iter([ctrl('c')])
+        .chain(after(LATE, Some(ctrl('c'))))
+        .chain(stream::iter([key(KeyCode::Esc)]))
+        .boxed();
+    let (answer, screen, _) = run_input(&prompt(), Lang::En, input).await;
+    assert_eq!(answer, TrustAnswer::Exit(0));
+    assert!(screen.contains("Press Ctrl-C again to exit"), "{screen}");
 }
 
 #[tokio::test]

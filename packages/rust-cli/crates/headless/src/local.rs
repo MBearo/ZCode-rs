@@ -33,14 +33,6 @@ pub(crate) fn session_id(options: &PrintOptions) -> String {
     }
 }
 
-/// 权限模式的名字。
-pub(crate) fn mode_name(mode: rust_cli_kernel_api::permission::PermissionMode) -> String {
-    match serde_json::to_value(mode) {
-        Ok(serde_json::Value::String(name)) => name,
-        _ => "default".to_owned(),
-    }
-}
-
 /// 写本地命令的输出并结束。`command` 是命令名（result 的 `local_command`）。
 pub(crate) async fn finish<W: AsyncWrite + Unpin>(
     kernel: &Arc<dyn Kernel>,
@@ -60,7 +52,6 @@ pub(crate) async fn finish<W: AsyncWrite + Unpin>(
             .await
             .unwrap_or_default();
         let servers = kernel.mcp_servers().await;
-        let mode = mode_name(options.mode);
         let uuid = printer.uuid();
         let init = events::init(
             &events::Init {
@@ -69,7 +60,7 @@ pub(crate) async fn finish<W: AsyncWrite + Unpin>(
                 catalog: &catalog,
                 mcp_servers: &servers,
                 model: &options.selection.model,
-                permission_mode: &mode,
+                permission_mode: options.mode.cli_name(),
                 api_key_source: &options.output.api_key_source,
                 version: &options.output.version,
             },

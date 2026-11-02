@@ -236,18 +236,6 @@ impl Composer {
         self.clear();
     }
 
-    /// ↑ / ↓ 浏览历史的条件：输入框为空，或内容就是刚取出的历史且光标在开头或末尾。
-    pub fn can_browse(&self) -> bool {
-        if self.area.is_empty() {
-            return true;
-        }
-        let at_edge = self.area.cursor() == 0 || self.area.cursor() == self.area.text().len();
-        let recalled = self.browsing.is_some_and(|index| {
-            self.history.get(index).map(String::as_str) == Some(self.entry_text().as_str())
-        });
-        recalled && at_edge
-    }
-
     /// 正在浏览的历史：（第几条，共几条），最新的一条是第 1 条。
     pub fn history_position(&self) -> Option<(usize, usize)> {
         self.browsing

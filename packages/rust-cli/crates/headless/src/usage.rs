@@ -28,11 +28,7 @@ fn by_model(messages: &[Message]) -> Vec<(String, Usage)> {
         let Some(usage) = assistant.usage else {
             continue;
         };
-        let total = models.entry(assistant.model.clone()).or_default();
-        total.input_tokens += usage.input_tokens;
-        total.output_tokens += usage.output_tokens;
-        total.cache_read_input_tokens += usage.cache_read_input_tokens;
-        total.cache_creation_input_tokens += usage.cache_creation_input_tokens;
+        *models.entry(assistant.model.clone()).or_default() += usage;
     }
     models.into_iter().collect()
 }
@@ -47,7 +43,11 @@ pub(crate) async fn text(
     // `-c` / `-r`：那个会话的 API 时长（用量表）与用量；新会话（含找不到会话的 `-c`）还没有请求。代码改动是
     // 本进程的，`-p` 没有。
     if let Some(session) = existing_session(kernel.as_ref(), options).await? {
-        summary.api_duration_ms = kernel.session_metering(session.id()).await?.api_duration_ms;
+        summary.api_duration_ms = kernel
+            .queries()
+            .metering(session.id())
+            .await?
+            .api_duration_ms;
         summary.models = by_model(&session.view().await?.messages);
         let _ = session.close(EndReason::Other).await;
     }

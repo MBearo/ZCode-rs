@@ -56,7 +56,7 @@ async fn machines_round_trip_and_keep_unknown_fields() {
 #[tokio::test]
 async fn names_are_checked() {
     let (_dir, list) = list();
-    for bad in ["", "local", "a b", "x/y", &"n".repeat(33)] {
+    for bad in ["", "primary", "local", "a b", "x/y", &"n".repeat(33)] {
         assert!(matches!(
             list.add(MachineEntry::new(bad, "h", None)).await,
             Err(MachinesError::Name(_))

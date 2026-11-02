@@ -4,7 +4,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::context_usage::{ContextUsage, format_estimate, format_tokens};
 
-use super::cells::{self, Ctx};
+use super::cells::Ctx;
 use super::i18n::Lang;
 use super::layout;
 use super::quantities::PERCENT;
@@ -99,11 +99,14 @@ fn sections(usage: &ContextUsage) -> Vec<Section> {
 
 /// 明细：每段一个粗体标题；折叠时一行 `└ N 个 · X tokens`，展开时每项一行（`├`，最后一项 `└`）。
 fn details(usage: &ContextUsage, all: bool, lang: Lang) -> Vec<Line<'static>> {
-    let dim = cells::dim();
+    let dim = super::style::dim();
     let mut lines = Vec::new();
     for section in sections(usage).into_iter().filter(|s| !s.rows.is_empty()) {
         lines.push(Line::default());
-        lines.push(Line::from(Span::styled(section.title, cells::bold())));
+        lines.push(Line::from(Span::styled(
+            section.title,
+            super::style::bold(),
+        )));
         if all {
             let last = section.rows.len() - 1;
             for (index, row) in section.rows.into_iter().enumerate() {
@@ -220,14 +223,14 @@ fn suggestion_lines(usage: &ContextUsage, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
     if list.is_empty() {
         return Vec::new();
     }
-    let dim = cells::dim();
+    let dim = super::style::dim();
     let title = match ctx.lang {
         Lang::En => "Suggestions",
         Lang::Zh => "建议",
     };
     let mut lines = vec![
         Line::default(),
-        Line::from(Span::styled(title, cells::bold())),
+        Line::from(Span::styled(title, super::style::bold())),
     ];
     for (index, item) in list.into_iter().enumerate() {
         if index > 0 {

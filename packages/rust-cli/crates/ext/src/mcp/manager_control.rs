@@ -2,8 +2,9 @@
 //! [`McpManager`]。重连与停用时代号加一、发取消消息并关闭旧客户端，旧任务之后的更新因代号不符被丢弃；
 //! 等待用状态变化的 watch，不用超时。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::BTreeSet;
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
 
 use futures_util::StreamExt;
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
@@ -47,8 +48,6 @@ impl McpManager {
         server.prompts.clear();
         server.instructions = None;
         server.resources = false;
-        server.expired = false;
-        server.reconnecting = false;
         let client = server.client.take();
         Some((
             server.config.clone(),
@@ -60,7 +59,7 @@ impl McpManager {
 
     /// 重新连一个服务器（重连与启用共用）。
     async fn restart(&self, name: &str) {
-        let Some((config, client, generation, cancel)) = self.retire(name, McpStatus::Pending)
+        let Some((config, client, generation, cancel)) = self.retire(name, McpStatus::CONNECTING)
         else {
             return;
         };
@@ -68,12 +67,7 @@ impl McpManager {
         if let Some(client) = client {
             client.close().await;
         }
-        let workspace = self
-            .0
-            .workspace
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let workspace = self.0.workspace.lock_unpoisoned().clone();
         let Some(workspace) = workspace else {
             return;
         };
@@ -102,7 +96,7 @@ impl McpManager {
                     .servers()
                     .iter()
                     .filter(|(_, server)| {
-                        server.config.machine.as_deref() == Some(machine.as_str())
+                        server.config.machine.remote() == Some(machine.as_str())
                             && matches!(server.status, McpStatus::Failed { .. })
                     })
                     .map(|(name, _)| name.clone())
@@ -141,8 +135,12 @@ impl McpManager {
             };
             match (action, status) {
                 (McpAction::Reconnect, McpStatus::Disabled)
-                | (McpAction::Enable, McpStatus::Pending | McpStatus::Connected)
-                | (McpAction::Enable, McpStatus::Failed { .. })
+                | (
+                    McpAction::Enable,
+                    McpStatus::Pending { .. }
+                    | McpStatus::Connected { .. }
+                    | McpStatus::Failed { .. },
+                )
                 | (McpAction::Disable, McpStatus::Disabled) => {}
                 (McpAction::Reconnect | McpAction::Enable, _) => self.restart(name).await,
                 (McpAction::Disable, _) => self.stop(name).await,
@@ -152,7 +150,7 @@ impl McpManager {
         loop {
             let pending = names
                 .iter()
-                .any(|name| self.status_of(name) == Some(McpStatus::Pending));
+                .any(|name| self.status_of(name).is_some_and(|status| status.pending()));
             if !pending || changes.changed().await.is_err() {
                 break;
             }

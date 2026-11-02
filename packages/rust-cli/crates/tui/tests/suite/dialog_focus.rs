@@ -11,7 +11,7 @@ use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
 use rust_cli_kernel_api::testing::{
     MemoryEnvironment, environments, text_response, tool_use_response,
 };
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 use serde_json::json;
 
 use super::support::{GatedModel, Setup, Ui, request_text, with_ui};
@@ -49,8 +49,8 @@ fn setup(theme: &Theme) -> Setup {
             os_version: "x".into(),
             shell: "zsh".into(),
             is_git_repo: false,
-            additional_directories: Vec::new(),
             home: Some(EnvPath::new("/Users/dev")),
+            uid: None,
         }))),
         ..Setup::default()
     }

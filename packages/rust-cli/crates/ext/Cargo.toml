@@ -19,8 +19,6 @@ futures-util.workspace = true
 regex.workspace = true
 rust-cli-base.workspace = true
 rust-cli-kernel-api.workspace = true
-# Skill 的 `Skill(...)` 规则与 `!` 命令的 `allowed-tools` 匹配（ext.md §2.4、§2.5）。
-rust-cli-policy.workspace = true
 rust-cli-prompts.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

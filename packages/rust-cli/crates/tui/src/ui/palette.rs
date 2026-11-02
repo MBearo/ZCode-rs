@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 
 pub type Rgb = (u8, u8, u8);
 
@@ -235,10 +235,6 @@ impl Palette {
         self.user_bg
             .map_or_else(Style::default, |bg| Style::default().bg(bg))
     }
-
-    pub fn dim(&self) -> Style {
-        Style::default().add_modifier(Modifier::DIM)
-    }
 }
 
 /// 从 OSC 11 回复里取 `rgb:RRRR/GGGG/BBBB`（每段 1–4 位十六进制）。
@@ -265,7 +261,9 @@ pub struct Probed {
     pub background: Option<Rgb>,
 }
 
-/// 从探测的回复里分别取 OSC 10（前景）与 OSC 11（背景）的颜色。
+/// 从探测的回复里分别取 OSC 10（前景）与 OSC 11（背景）的颜色。只有 unix 的探测用它（Windows 读控制台，
+/// `probe_console.rs`）；`ui` 改成 crate 内部后 Windows 上的未使用检查会报它（架构整理 U5）。
+#[cfg(any(unix, test))]
 pub fn parse_probe(reply: &str) -> Probed {
     let color = |code: &str| {
         let start = reply.find(&format!("\x1b]{code};"))?;

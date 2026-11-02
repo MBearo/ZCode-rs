@@ -11,12 +11,7 @@ fn catalog_types_round_trip() {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/work"),
         },
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: "m".to_owned(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: ModelSelection::new("p".to_owned(), "m".to_owned()),
     };
     let back: CatalogQuery = serde_json::from_value(serde_json::to_value(&query).unwrap()).unwrap();
     assert_eq!(back, query);

@@ -11,8 +11,8 @@ use rust_cli_kernel_api::env::{
     ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{
-    DirEntry, FileList, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome, GrepSearch,
-    ListDir, ListFiles, PathFacts, PutFile, ReadText, StatFile, StatMany, TextRead,
+    DirEntry, EnsureDir, FileList, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome,
+    GrepSearch, ListDir, ListFiles, PathFacts, PutFile, ReadText, StatFile, StatMany, TextRead,
 };
 use rust_cli_kernel_api::env_pdf::{PdfPageCount, PdfRender, RenderPdfPages};
 use rust_cli_kernel_api::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
@@ -74,9 +74,10 @@ impl Files for RemoteEnvironment {
         ws: &WorkspaceRef,
         request: ReadFile,
     ) -> Result<FileContent, EnvError> {
+        let ReadFile { path } = request;
         let request = Request::ReadFile {
             workspace: workspace(ws),
-            path: request.path.as_str().to_owned(),
+            path: path.as_str().to_owned(),
         };
         let (reply, body) = self.call(request, empty()).await?;
         from::file_content(
@@ -91,13 +92,18 @@ impl Files for RemoteEnvironment {
         context: OperationContext,
         request: WriteFile,
     ) -> Result<WriteReceipt, EnvError> {
+        let WriteFile {
+            path,
+            bytes,
+            precondition,
+        } = request;
         let mut body = empty();
         let request = Request::WriteFile {
             workspace: workspace(ws),
             context: to::context(context),
-            path: request.path.as_str().to_owned(),
-            bytes: body.push(&request.bytes),
-            precondition: to::precondition(request.precondition),
+            path: path.as_str().to_owned(),
+            bytes: body.push(&bytes),
+            precondition: to::precondition(precondition),
         };
         let (reply, _) = self.call(request, body).await?;
         let version = expect!(reply, "files.write_file", Reply::WriteFile { version } => version);
@@ -111,9 +117,10 @@ impl Files for RemoteEnvironment {
         ws: &WorkspaceRef,
         request: StatFile,
     ) -> Result<Option<FileStat>, EnvError> {
+        let StatFile { path } = request;
         let request = Request::Stat {
             workspace: workspace(ws),
-            path: request.path.as_str().to_owned(),
+            path: path.as_str().to_owned(),
         };
         let (reply, _) = self.call(request, empty()).await?;
         Ok(expect!(reply, "files.stat", Reply::Stat(stat) => stat).map(from::file_stat))
@@ -125,13 +132,10 @@ impl Files for RemoteEnvironment {
         ws: &WorkspaceRef,
         request: StatMany,
     ) -> Result<Vec<Result<Option<FileStat>, EnvError>>, EnvError> {
+        let StatMany { paths } = request;
         let wire = Request::StatMany {
             workspace: workspace(ws),
-            paths: request
-                .paths
-                .iter()
-                .map(|path| path.as_str().to_owned())
-                .collect(),
+            paths: paths.iter().map(|path| path.as_str().to_owned()).collect(),
         };
         match self.call(wire, empty()).await {
             Ok((reply, _)) => Ok(
@@ -141,8 +145,8 @@ impl Files for RemoteEnvironment {
                     .collect(),
             ),
             Err(EnvError::Unsupported { .. }) => {
-                let mut out = Vec::with_capacity(request.paths.len());
-                for path in request.paths {
+                let mut out = Vec::with_capacity(paths.len());
+                for path in paths {
                     out.push(self.stat(ws, StatFile { path }).await);
                 }
                 Ok(out)
@@ -156,9 +160,10 @@ impl Files for RemoteEnvironment {
         ws: &WorkspaceRef,
         request: ListDir,
     ) -> Result<Vec<DirEntry>, EnvError> {
+        let ListDir { path } = request;
         let request = Request::ListDir {
             workspace: workspace(ws),
-            path: request.path.as_str().to_owned(),
+            path: path.as_str().to_owned(),
         };
         let (reply, _) = self.call(request, empty()).await?;
         let entries = expect!(reply, "files.list_dir", Reply::ListDir(entries) => entries);
@@ -194,6 +199,17 @@ impl Files for RemoteEnvironment {
             expect!(reply, "files.put_file", Reply::PutFile(written) => written),
         ))
     }
+
+    async fn ensure_dir(&self, ws: &WorkspaceRef, request: EnsureDir) -> Result<(), EnvError> {
+        let EnsureDir { path } = request;
+        let request = Request::EnsureDir {
+            workspace: workspace(ws),
+            path: path.as_str().to_owned(),
+        };
+        let (reply, _) = self.call(request, empty()).await?;
+        expect!(reply, "dirs.ensure_dir", Reply::EnsureDir => ());
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -214,9 +230,10 @@ impl Search for RemoteEnvironment {
         ws: &WorkspaceRef,
         request: ListFiles,
     ) -> Result<FileList, EnvError> {
+        let ListFiles { cwd } = request;
         let request = Request::ListFiles {
             workspace: workspace(ws),
-            cwd: request.cwd.as_str().to_owned(),
+            cwd: cwd.as_str().to_owned(),
         };
         let (reply, _) = self.call(request, empty()).await?;
         let files = expect!(reply, "search.list_files", Reply::ListFiles { files } => files);
@@ -443,9 +460,10 @@ impl Pdf for RemoteEnvironment {
         ws: &WorkspaceRef,
         request: PdfPageCount,
     ) -> Result<Option<u64>, EnvError> {
+        let PdfPageCount { path } = request;
         let request = Request::PdfPageCount {
             workspace: workspace(ws),
-            path: request.path.as_str().to_owned(),
+            path: path.as_str().to_owned(),
         };
         let (reply, _) = self.call(request, empty()).await?;
         Ok(expect!(reply, "pdf.pdf_page_count", Reply::PdfPageCount(count) => count))

@@ -12,7 +12,6 @@ use rust_cli_kernel_api::orchestration::{
     CompactRequest, CompactResult, ContextRequest, QueryRequest,
 };
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::plan::PlanModeFlags;
 use rust_cli_kernel_api::tool_search;
 use rust_cli_prompts::compact as texts;
 use tokio_util::sync::CancellationToken;
@@ -157,16 +156,17 @@ impl Engine<'_> {
             origin: UserOrigin::Human,
         }));
         let query = QueryRequest {
-            session: request.session.clone(),
-            run: self.ports.ids.run(),
-            workspace: request.workspace.clone(),
             agent: request.agent.clone(),
-            messages,
-            selection: request.selection.clone(),
-            mode: request.mode.unwrap_or(PermissionMode::Default),
-            source: rust_cli_kernel_api::model::QuerySource::Compact,
             max_turns: Some(1),
-            prompt_hook_messages: Vec::new(),
+            ..QueryRequest::new(
+                request.session.clone(),
+                self.ports.ids.run(),
+                request.workspace.clone(),
+                messages,
+                request.selection.clone(),
+                request.mode.unwrap_or(PermissionMode::Default),
+                rust_cli_kernel_api::model::QuerySource::Compact,
+            )
         };
         request::run(self.ports.runner.as_ref(), query, cancel).await
     }
@@ -281,13 +281,6 @@ impl Engine<'_> {
             return Vec::new();
         }
         let context = ContextRequest {
-            default_machine: None,
-            capabilities: None,
-            session: request.session.clone(),
-            workspace: request.workspace.clone(),
-            agent: None,
-            source: QuerySource::MainThread,
-            mode: request.mode.unwrap_or(PermissionMode::Default),
             tool_names: self
                 .ports
                 .tools
@@ -296,9 +289,13 @@ impl Engine<'_> {
                 .filter(|tool| tool.is_enabled())
                 .map(|tool| tool.name().to_owned())
                 .collect(),
-            selection: request.selection.clone(),
-            plan_flags: PlanModeFlags::default(),
-            mcp: None,
+            ..ContextRequest::new(
+                request.session.clone(),
+                request.workspace.clone(),
+                QuerySource::MainThread,
+                request.mode.unwrap_or(PermissionMode::Default),
+                request.selection.clone(),
+            )
         };
         let kept: Vec<Message> = kept.iter().map(|message| (*message).clone()).collect();
         // 压缩前的全部历史：调用过的 skill 从它取（spec §3.4）。
@@ -344,11 +341,11 @@ impl Engine<'_> {
         };
         let restore = Restore {
             tools: self.ports.tools.as_ref(),
-            machine: self.ports.machine.clone(),
-            local: self.ports.local.clone(),
+            machine: self.ports.machines.primary_machine(),
+            controller: self.ports.machines.controller(),
             artifacts: self.ports.artifacts.clone(),
             ids,
-            generation: self.ports.generation.clone(),
+            operations: self.ports.operations.clone(),
         };
         // 缺陷修复（L25，用户同意按缺陷修）：原来不清空 readFileState，从历史里选文件重读，Read
         // 判断“读过且未变”，压缩后的文件附件是 `Wasted call…`。应在这里先复制、再清空，用复制品选文件，

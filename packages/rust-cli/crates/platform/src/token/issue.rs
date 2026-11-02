@@ -8,6 +8,7 @@
 
 use ring::rand::{SecureRandom, SystemRandom};
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::sync::LockUnpoisoned;
 use rust_cli_base::units;
 use serde_json::{Value, json};
 
@@ -15,7 +16,7 @@ use super::http::{Auth, Fault, Reply, success_code};
 use super::location::{self, Location, TeamProject};
 use super::{
     Account, Family, Issued, Material, ProjectTokens, REFRESH_LEAD_MS, RETRY_BACKOFF_MS, Session,
-    State, TokenError, fingerprint, lock,
+    State, TokenError, fingerprint,
 };
 use crate::credentials::CredentialStore;
 
@@ -85,7 +86,7 @@ impl ProjectTokens {
     /// 取 (origin, family) 的会话；login token 变了就换一个新会话（旧的位置与 PAT 一起丢掉）。
     fn open_session(&self, family: Family, login: &str, epoch: u64) -> Scope {
         let origin = self.origin(family).to_owned();
-        let mut state = lock(&self.state);
+        let mut state = self.state.lock_unpoisoned();
         state.next_generation += 1;
         let generation = state.next_generation;
         let key = (origin.clone(), family);
@@ -117,7 +118,7 @@ impl ProjectTokens {
         store: &CredentialStore,
     ) -> Result<Location, TokenError> {
         {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock_unpoisoned();
             let session = scope.session(&mut state)?;
             if let Some(location) = session
                 .accounts
@@ -147,7 +148,7 @@ impl ProjectTokens {
                     team: input.team,
                 };
                 let location = location::resolve(&self.http, lookup).await?;
-                scope.session(&mut lock(&self.state))?;
+                scope.session(&mut self.state.lock_unpoisoned())?;
                 store
                     .mutate(|credentials| credentials.set(&key, &location.to_json()))
                     .await
@@ -155,7 +156,7 @@ impl ProjectTokens {
                 location
             }
         };
-        let mut state = lock(&self.state);
+        let mut state = self.state.lock_unpoisoned();
         let session = scope.session(&mut state)?;
         session
             .accounts
@@ -178,7 +179,7 @@ impl ProjectTokens {
             location: location.clone(),
         };
         {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock_unpoisoned();
             let now = self.clock.now_ms();
             let session = scope.session(&mut state)?;
             if let Some(issued) = session
@@ -208,7 +209,7 @@ impl ProjectTokens {
             // 只有明确不存在才废弃位置；权限、网络错误不触发重建。
             self.forget_location(scope, input, store).await;
         }
-        let mut state = lock(&self.state);
+        let mut state = self.state.lock_unpoisoned();
         let session = scope.session(&mut state)?;
         let entry: &mut Account = session.accounts.entry(input.scope.to_owned()).or_default();
         let outcome = match reply {
@@ -242,7 +243,7 @@ impl ProjectTokens {
 
     async fn forget_location(&self, scope: &Scope, input: &Input<'_>, store: &CredentialStore) {
         {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock_unpoisoned();
             if let Ok(session) = scope.session(&mut state)
                 && let Some(entry) = session.accounts.get_mut(input.scope)
             {

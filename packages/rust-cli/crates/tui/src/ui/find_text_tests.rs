@@ -37,16 +37,3 @@ fn matches_do_not_split_graphemes() {
 fn occurrences_do_not_overlap() {
     assert_eq!(find("aaaa", "aa"), [(0, 2), (2, 4)]);
 }
-
-#[test]
-fn backspace_removes_one_grapheme() {
-    let mut query = "ae\u{301}".to_owned();
-    pop_grapheme(&mut query);
-    assert_eq!(query, "a");
-    let mut query = "搜索".to_owned();
-    pop_grapheme(&mut query);
-    assert_eq!(query, "搜");
-    let mut empty = String::new();
-    pop_grapheme(&mut empty);
-    assert!(empty.is_empty());
-}

@@ -2,7 +2,8 @@
 //! `Command::RestoreCancelled` 在 actor 的一次处理里判断“空闲、最后一条可选输入之后没有回答”，回退对话（`RevertSet`，
 //! Node 的 `session.revert`）并带回这条输入。模型第一次被调用时先流出给定的事件，再等到被取消，测试在事件流出之后
 //! 中断，所以中断一定落在这个进度上。旧代码没有这个命令（`Rejected`），撤回不了。
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::ids::SessionId;
@@ -41,11 +42,7 @@ impl ModelPort for Partial {
         request: ModelRequest,
         cancel: CancellationToken,
     ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-        let first = self
-            .first
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let first = self.first.lock_unpoisoned().take();
         let Some(events) = first else {
             return self.then.stream(request, cancel);
         };
@@ -121,12 +118,14 @@ async fn interrupt_then_restore(model: Arc<Partial>) -> (crate::test_support::Bu
 async fn an_input_interrupted_before_any_text_is_rewound_and_returned() {
     let model = Partial::new(vec![start()], vec![text_response(&["again"])]);
     let (built, ack) = interrupt_then_restore(model.clone()).await;
-    let Ack::Accepted { result } = ack else {
+    let Ack::Accepted {
+        result: rust_cli_kernel_api::session_api::CommandResult::Restored { message, removed },
+    } = ack
+    else {
         panic!("{ack:?}");
     };
-    let message: Message = serde_json::from_value(result["message"].clone()).unwrap();
     assert_eq!(text_of(&message), "first");
-    assert!(result["removed"].as_u64().unwrap() >= 2, "{result}");
+    assert!(removed >= 2, "{removed}");
     let view = built.session.view().await.unwrap();
     assert!(view.messages.is_empty(), "{:?}", view.messages);
     let id = SessionId::new("sess_1");
@@ -272,10 +271,12 @@ async fn an_interrupted_bash_command_is_restored() {
         .session
         .send(envelope("c3", Command::RestoreCancelled))
         .await;
-    let Ack::Accepted { result } = ack else {
+    let Ack::Accepted {
+        result: rust_cli_kernel_api::session_api::CommandResult::Restored { message, .. },
+    } = ack
+    else {
         panic!("{ack:?}");
     };
-    let message: Message = serde_json::from_value(result["message"].clone()).unwrap();
     assert_eq!(text_of(&message), "<bash-input>slow</bash-input>");
     let view = built.session.view().await.unwrap();
     let texts: Vec<String> = view.messages.iter().map(text_of).collect();

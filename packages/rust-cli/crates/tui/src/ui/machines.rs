@@ -3,11 +3,13 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use rust_cli_kernel_api::mcp_name;
 use serde_json::Value;
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{Action, App, Overlay};
 use super::i18n_machines as words;
+use super::keyboard;
 use super::layout;
 use super::palette::Palette;
 use super::text::{truncate_line, wrap_text};
@@ -40,23 +42,20 @@ pub struct MachinesView {
     pub name: Option<String>,
 }
 
-/// 工具输入里的远端机器（`machine` 不是 `local` 时）。
+/// 工具输入里的额外机器（`machine` 不是主 env 时）。
 pub fn machine_of(input: &Value) -> Option<&str> {
-    input.get("machine").and_then(Value::as_str).filter(|name| {
-        !name.is_empty() && *name != rust_cli_kernel_api::env_registry::LOCAL_MACHINE
-    })
+    input
+        .get("machine")
+        .and_then(Value::as_str)
+        .filter(|name| !rust_cli_kernel_api::ids::MachineName::is_primary_name(name))
 }
 
 /// 一次工具调用在哪台远端机器上：输入里的 `machine`（不是 `local`）；MCP 工具看它的服务器绑定的机器（R5，§22.8）。
 /// `mcp` 是（规范化的服务器名，机器名）；工具名 `mcp__<服务器>__<工具>` 按最长的服务器名前缀找。
 pub fn remote_of<'a>(name: &str, input: &'a Value, mcp: &'a [(String, String)]) -> Option<&'a str> {
     machine_of(input).or_else(|| {
-        let rest = name.strip_prefix("mcp__")?;
         mcp.iter()
-            .filter(|(server, _)| {
-                rest.strip_prefix(server.as_str())
-                    .is_some_and(|tail| tail.starts_with("__"))
-            })
+            .filter(|(server, _)| name.starts_with(&mcp_name::server_prefix(server)))
             .max_by_key(|(server, _)| server.len())
             .map(|(_, machine)| machine.as_str())
     })
@@ -163,15 +162,11 @@ impl App {
 
     /// 列表的按键（§21.3）：↑ / ↓ 循环移动，enter 连接或断开，`c` / `d` / `x`，esc / ctrl+c 关闭。
     pub(super) fn machines_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let ctrl = self.typing.ctrl(&key);
+        let ctrl = keyboard::ctrl(&key);
         let count = self.machines.len();
         let focus = self.machine_focus();
         let focused = self.machines.get(focus).cloned();
-        let step = |down: bool| match count {
-            0 => 0,
-            _ if down => (focus + 1) % count,
-            _ => (focus + count - 1) % count,
-        };
+        let step = |down: bool| super::pager::cycle(focus, count, down);
         let request = match key.code {
             KeyCode::Esc => {
                 self.overlay = None;
@@ -276,7 +271,7 @@ impl App {
             .filter(|row| row.status == MachineStatus::Ready)
             .count();
         let mut lines = vec![
-            Line::from(Span::styled("─".repeat(width), accent)),
+            crate::ui::style::rule(width, accent),
             Line::from(Span::styled(
                 format!("  {}", words::title(lang)),
                 accent.add_modifier(Modifier::BOLD),

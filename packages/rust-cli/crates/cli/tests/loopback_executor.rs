@@ -17,41 +17,33 @@ use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, ExecClient};
 use rust_cli_exec_transport::stdio::{ChildCommand, StdioConnector};
 use rust_cli_exec_wire::handshake::Capabilities;
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env::{
     CommandEvent, EnvPath, OperationContext, Origin, ReadFile, StartCommand, WorkspaceRef,
     WriteFile, WritePrecondition,
 };
-use rust_cli_kernel_api::env_shell::{BackgroundCommand, CwdScope};
-use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, OperationId, OwnerEpoch, SessionId, ShellTaskId,
-};
+use rust_cli_kernel_api::env_shell::BackgroundCommand;
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, SessionId, ShellTaskId};
 
 fn context(operation: &str) -> OperationContext {
-    OperationContext {
-        environment: EnvironmentId::new("local"),
-        generation: Generation::new("g"),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: OperationId::new(operation),
-        origin: Origin::User {
+    OperationContext::new(
+        EnvironmentId::new("local"),
+        Generation::new("g"),
+        OperationId::new(operation),
+        Origin::User {
             session: Some(SessionId::new("s1")),
         },
-    }
+    )
 }
 
 fn command(root: &std::path::Path, task: &str, text: &str) -> StartCommand {
     StartCommand {
-        command: text.to_owned(),
-        cwd: EnvPath::new(root.to_string_lossy()),
         timeout_ms: Some(10_000),
-        task: ShellTaskId::new(task),
-        shell: Default::default(),
-        cwd_scope: CwdScope::Pinned,
-        background: None,
-        sandbox: None,
-        hook: None,
-        on_timeout: None,
-        socket: None,
-        env: Default::default(),
+        ..StartCommand::new(
+            text.to_owned(),
+            EnvPath::new(root.to_string_lossy()),
+            ShellTaskId::new(task),
+        )
     }
 }
 
@@ -101,7 +93,7 @@ async fn the_executor_serves_the_ports_over_stdio_and_exits_when_closed() {
     ];
     let connector = StdioConnector::new(ChildCommand {
         program: PathBuf::from(env!("CARGO_BIN_EXE_zcode-rs")),
-        args: ["executor", "--stdio", "--standalone", "--add-dir", "/extra"]
+        args: ["executor", "--stdio", "--standalone"]
             .map(str::to_owned)
             .to_vec(),
         env,
@@ -126,7 +118,6 @@ async fn the_executor_serves_the_ports_over_stdio_and_exits_when_closed() {
         root: EnvPath::new(root.to_string_lossy()),
     };
     let facts = machine.info().facts(&ws).await.unwrap();
-    assert_eq!(facts.additional_directories, [EnvPath::new("/extra")]);
     assert_eq!(facts.cwd, ws.root);
 
     let path = EnvPath::new(root.join("a.txt").to_string_lossy());
@@ -149,11 +140,13 @@ async fn the_executor_serves_the_ports_over_stdio_and_exits_when_closed() {
 
     // 一条后台命令：记下 sleep 的 pid，执行器退出时它要被结束。
     let mut background = command(&root, "bloop1", "echo $$; exec sleep 30");
-    background.background = Some(BackgroundCommand {
-        description: "sleep".to_owned(),
-        tool_use: None,
-        kind: Default::default(),
-    });
+    background.kind = CommandKind::Background {
+        background: BackgroundCommand {
+            description: "sleep".to_owned(),
+            tool_use: None,
+            kind: Default::default(),
+        },
+    };
     let mut events = machine
         .commands()
         .start_command(&ws, context("op_bg"), background)

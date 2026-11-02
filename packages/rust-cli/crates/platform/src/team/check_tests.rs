@@ -14,8 +14,8 @@ use super::check::{Detail, detail, verify};
 use super::list::customer_info;
 use super::{Availability, Reason};
 use crate::fake_server_tests::{Reply, Server};
-use crate::token::Family;
 use crate::token::http::Http;
+use rust_cli_base::account::Family;
 
 /// App `CodingPlanAvailabilityResult` 的写法（团队的过期 / 未分配在 App 里并成 not_entitled）。
 fn as_app(availability: Availability) -> Value {

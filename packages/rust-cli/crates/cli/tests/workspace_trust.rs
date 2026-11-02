@@ -15,7 +15,7 @@ use std::process::{Output, Stdio};
 use system_env::KeepSystem as _;
 
 use rust_cli_base::models::GLM_5_3;
-use rust_cli_kernel_api::store::SessionStore;
+use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_kernel_api::workspace_trust::TrustKey;
 
 const REPLY: &str = concat!(
@@ -89,7 +89,7 @@ async fn trusted(home: &Path, work: &Path) -> Option<TrustKey> {
     let store = rust_cli_node_store::NodeStore::new(
         paths,
         std::sync::Arc::new(rust_cli_node_store::NodeIds::new(std::sync::Arc::new(
-            rust_cli_node_store::SystemClock::utc(),
+            rust_cli_base::clock::SystemClock::utc(),
         ))),
     );
     let keys = [work, work.parent().unwrap()].map(|dir| TrustKey::new(dir.to_string_lossy()));

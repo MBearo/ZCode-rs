@@ -16,12 +16,7 @@ pub(super) async fn fork(dir: &str, session: &str, through: &str) -> Result<()> 
         child: child.clone(),
         created_at_ms: now_ms(),
         through: MessageId::new(through),
-        selection: loaded.model.unwrap_or(ModelSelection {
-            provider: "p".into(),
-            model: "m".into(),
-            reasoning: None,
-            connection: None,
-        }),
+        selection: loaded.model.unwrap_or(ModelSelection::new("p", "m")),
         mode: loaded.mode.unwrap_or(PermissionMode::Default),
         plan: loaded.plan,
     };

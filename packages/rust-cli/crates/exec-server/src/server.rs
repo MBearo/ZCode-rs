@@ -1,5 +1,6 @@
 //! 执行器的服务端（remote-exec.md §15.3、§18）：收连接、握手与鉴权、把请求派发给注入的 `MachineEnv`。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -18,6 +19,7 @@ use tokio::time::Instant;
 use crate::auth::Authenticator;
 use crate::calls::StreamControl;
 use crate::fence::Fence;
+use crate::launch::Launcher;
 use crate::ledger::{CallKey, ExecLedger, LedgerError};
 
 /// 缺省：客户端实例断开多久后关掉它的流、删掉它只在内存里的记录（§19.7）。
@@ -114,6 +116,8 @@ pub(crate) struct Route {
 
 pub(crate) struct Inner {
     pub machine: MachineEnv,
+    /// 起进程（命令、MCP 服务器）带上推来的环境变量（F96、F128）。
+    pub launcher: Arc<dyn Launcher>,
     pub ledger: Arc<dyn ExecLedger>,
     pub auth: Arc<dyn Authenticator>,
     pub config: ServerConfig,
@@ -135,21 +139,15 @@ pub(crate) struct Inner {
 
 impl Inner {
     pub fn routes(&self) -> MutexGuard<'_, HashMap<String, Route>> {
-        self.routes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.routes.lock_unpoisoned()
     }
 
     pub fn streams(&self) -> MutexGuard<'_, HashMap<CallKey, StreamControl>> {
-        self.streams
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.streams.lock_unpoisoned()
     }
 
     fn away(&self) -> MutexGuard<'_, HashMap<String, Instant>> {
-        self.away
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.away.lock_unpoisoned()
     }
 
     /// 一个客户端实例连上了。
@@ -217,9 +215,10 @@ pub struct ExecServer {
 }
 
 impl ExecServer {
-    /// 建服务端：先按账本恢复（执行器重启前没有终态的调用记成中断）。
+    /// 建服务端：先按账本恢复（执行器重启前没有终态的调用记成中断）。`launcher` 起进程时带上推来的环境变量，与
+    /// `machine` 是同一台机器（[`crate::PortLauncher`] 直接经它的端口）。
     pub async fn start(
-        machine: MachineEnv,
+        (machine, launcher): (MachineEnv, Arc<dyn Launcher>),
         ledger: Arc<dyn ExecLedger>,
         auth: Arc<dyn Authenticator>,
         config: ServerConfig,
@@ -233,6 +232,7 @@ impl ExecServer {
         });
         let inner = Arc::new(Inner {
             machine,
+            launcher,
             ledger,
             auth,
             config,

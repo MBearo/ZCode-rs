@@ -9,12 +9,9 @@ use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::store::{
-    CommitReceipt, Fact, FactBatch, LoadedSession, SessionFilter, SessionMeta, SessionStore,
-    SessionSummary, StoreError,
-};
-use rust_cli_kernel_api::testing::{MemoryStore, text_response};
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_kernel_api::store::{Fact, LoadedSession};
+use rust_cli_kernel_api::testing::{MemoryStore, StoreHooks, StoreProxy, text_response};
+use rust_cli_tui::{ColorLevel, Palette};
 
 use super::support::{GatedModel, Setup, Ui, row_of, with_ui};
 
@@ -265,29 +262,14 @@ async fn the_dialog_does_not_stack() {
 /// 冷加载时像 node-store 一样读回会话最后提交的权限模式（内存存储的替身不读回，`load` 的 `mode` 总是 None）。
 struct ModeOnLoad(Arc<MemoryStore>);
 
-#[async_trait::async_trait]
-impl SessionStore for ModeOnLoad {
-    async fn create(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        self.0.create(meta).await
-    }
-
-    async fn commit(
-        &self,
-        session: &SessionId,
-        batch: FactBatch,
-    ) -> Result<CommitReceipt, StoreError> {
-        self.0.commit(session, batch).await
-    }
-
-    async fn load(&self, session: &SessionId) -> Result<LoadedSession, StoreError> {
-        let mut loaded = self.0.load(session).await?;
+impl StoreHooks for ModeOnLoad {
+    fn loaded(&self, session: &SessionId, loaded: &mut LoadedSession) {
         loaded.mode = committed_modes(&self.0, session.as_str()).last().copied();
-        Ok(loaded)
     }
+}
 
-    async fn list(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, StoreError> {
-        self.0.list(filter).await
-    }
+fn mode_on_load(store: &Arc<MemoryStore>) -> Arc<StoreProxy<ModeOnLoad>> {
+    Arc::new(StoreProxy::new(store.clone(), ModeOnLoad(store.clone())))
 }
 
 /// 启动参数是完全访问、恢复一个完全访问的会话（`--resume` 与 `/resume`）：直接是完全访问，不弹框。
@@ -311,7 +293,7 @@ async fn starting_or_resuming_in_full_access_does_not_ask() {
     .unwrap();
     // `--resume <id>`：启动参数是缺省模式，会话读回来是完全访问。
     let setup = Setup {
-        session_store: Some(Arc::new(ModeOnLoad(store.clone()))),
+        session_store: Some(mode_on_load(&store)),
         startup: rust_cli_tui::Startup::Session(session.clone()),
         ..Setup::default()
     };
@@ -327,7 +309,7 @@ async fn starting_or_resuming_in_full_access_does_not_ask() {
     .await;
     // 会话里 `/resume <id>`。
     let setup = Setup {
-        session_store: Some(Arc::new(ModeOnLoad(store))),
+        session_store: Some(mode_on_load(&store)),
         ..Setup::default()
     };
     with_ui(

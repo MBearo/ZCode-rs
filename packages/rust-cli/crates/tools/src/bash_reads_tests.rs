@@ -1,5 +1,6 @@
 //! Bash 读文件记为已读（tools-files.md §4.2）：认哪些命令、记下的形状。
 
+use rust_cli_kernel_api::ids::MachineName;
 use std::sync::Arc;
 
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
@@ -181,8 +182,8 @@ fn env() -> Arc<MemoryEnvironment> {
         os_version: "Darwin 24".to_owned(),
         shell: "zsh".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     })
     .with_file("/Users/dev/work/a.txt", "one\ntwo\n")
     .with_file("/Users/dev/work/sub/b.txt", "x\ny\nz\n");
@@ -206,7 +207,11 @@ async fn recorded_files_come_from_disk() {
     )
     .await;
     let a = state
-        .get(&context.session, "/Users/dev/work/a.txt")
+        .get_at(
+            &context.session,
+            &MachineName::primary(),
+            "/Users/dev/work/a.txt",
+        )
         .unwrap();
     assert_eq!(
         (a.content.as_str(), a.offset, a.limit),
@@ -214,7 +219,11 @@ async fn recorded_files_come_from_disk() {
     );
     assert!(a.is_in_context());
     let b = state
-        .get(&context.session, "/Users/dev/work/sub/b.txt")
+        .get_at(
+            &context.session,
+            &MachineName::primary(),
+            "/Users/dev/work/sub/b.txt",
+        )
         .unwrap();
     assert_eq!(
         (b.content.as_str(), b.offset, b.limit),
@@ -225,7 +234,11 @@ async fn recorded_files_come_from_disk() {
     record(&state, &context, "cat ../a.txt", (0, true)).await;
     assert_eq!(
         state
-            .get(&context.session, "/Users/dev/work/a.txt")
+            .get_at(
+                &context.session,
+                &MachineName::primary(),
+                "/Users/dev/work/a.txt"
+            )
             .unwrap()
             .content,
         "one\ntwo\n"
@@ -235,27 +248,43 @@ async fn recorded_files_come_from_disk() {
     record(&other, &context, "grep -n x b.txt", (1, false)).await;
     assert!(
         other
-            .get(&context.session, "/Users/dev/work/sub/b.txt")
+            .get_at(
+                &context.session,
+                &MachineName::primary(),
+                "/Users/dev/work/sub/b.txt"
+            )
             .is_none()
     );
     record(&other, &context, "grep -n x b.txt", (0, false)).await;
     assert!(
         other
-            .get(&context.session, "/Users/dev/work/sub/b.txt")
+            .get_at(
+                &context.session,
+                &MachineName::primary(),
+                "/Users/dev/work/sub/b.txt"
+            )
             .unwrap()
             .not_in_context
     );
     record(&other, &context, "cat ../a.txt", (0, true)).await;
     assert!(
         other
-            .get(&context.session, "/Users/dev/work/a.txt")
+            .get_at(
+                &context.session,
+                &MachineName::primary(),
+                "/Users/dev/work/a.txt"
+            )
             .unwrap()
             .not_in_context
     );
     record(&other, &context, "cat missing.txt", (0, false)).await;
     assert!(
         other
-            .get(&context.session, "/Users/dev/work/sub/missing.txt")
+            .get_at(
+                &context.session,
+                &MachineName::primary(),
+                "/Users/dev/work/sub/missing.txt"
+            )
             .is_none()
     );
 }

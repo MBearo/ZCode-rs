@@ -1,5 +1,5 @@
 //! Bash 结果的文本（shell-permissions.md §1.3）。后台通知的文本在
-//! `rust_cli_query::task_notification`。
+//! `rust_cli_prompts::notification`。
 //!
 //! 逐字固定：成功、退出码、超时、超长输出、cwd 重置、空输出、后台。
 

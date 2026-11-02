@@ -18,14 +18,16 @@ use rust_cli_kernel_api::context_usage::{
 };
 use rust_cli_kernel_api::history;
 use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::mcp_state::WAIT_FOR_MCP_SERVERS;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::model::{ModelPort, QuerySource, ToolDefinition};
 use rust_cli_kernel_api::orchestration::{ContextRequest, ToolRegistry};
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::KernelError;
 use rust_cli_kernel_api::tool::{PromptContext, Tool};
-use rust_cli_kernel_api::tool_search::{TOOL_SEARCH, compare_names, is_deferred, loaded};
+use rust_cli_kernel_api::tool_names::TOOL_SEARCH;
+use rust_cli_kernel_api::tool_search::{
+    is_deferred, is_mcp, loaded, model_order, search_applies, visible_tools,
+};
 use rust_cli_prompts::models::{self, ToolSearchSetting};
 
 use self::arith::{McpTool, Measured, Messages};
@@ -80,14 +82,8 @@ fn wire(
     supported: bool,
 ) -> Wired {
     let mut sorted: Vec<&Arc<dyn Tool>> = tools.iter().collect();
-    sorted.sort_by(|left, right| {
-        left.is_mcp()
-            .cmp(&right.is_mcp())
-            .then_with(|| compare_names(left.name(), right.name()))
-    });
-    let search = supported
-        && sorted.iter().any(|tool| tool.name() == TOOL_SEARCH)
-        && sorted.iter().any(|tool| is_deferred(tool.as_ref()));
+    sorted.sort_by(|left, right| model_order(left.as_ref(), right.as_ref()));
+    let search = supported && search_applies(tools);
     let carried: BTreeSet<String> = if search {
         // 同主循环：压缩边界带下来的也算已加载（compact.md §3.5）。
         loaded(active.iter().copied())
@@ -97,7 +93,8 @@ fn wire(
     let waiting = |tool: &Arc<dyn Tool>| {
         search && is_deferred(tool.as_ref()) && !carried.contains(tool.name())
     };
-    let (mcp, builtin): (Vec<_>, Vec<_>) = sorted.into_iter().partition(|tool| tool.is_mcp());
+    let (mcp, builtin): (Vec<_>, Vec<_>) =
+        sorted.into_iter().partition(|tool| is_mcp(tool.as_ref()));
     let listed: Vec<_> = builtin
         .iter()
         .copied()
@@ -161,20 +158,11 @@ impl UsageAnalyzer {
     ) -> Result<ContextUsage, KernelError> {
         let active = history::active(history);
         let active: Vec<&Message> = active.iter().map(AsRef::as_ref).collect();
-        // 与主循环同一个能力来源（model.md §11，修复线 F23）：WebSearch 的去留、对话中间的 system。
+        // 与主循环同一个能力来源（model.md §11，修复线 F23）：WebSearch 的去留、对话中间的 system。工具的取舍是主循环的
+        // 同一个函数（kernel-api `tool_search::visible_tools`，工作线 F131）。
         let capabilities = self.model.capabilities(&query.selection).await;
-        let web_search = capabilities.is_none_or(|found| found.supports_native_web_search);
-        let mut tools: Vec<Arc<dyn Tool>> = self
-            .tools
-            .tools()
-            .into_iter()
-            .filter(|tool| tool.is_enabled() && (web_search || !tool.needs_native_web_search()))
-            .collect();
+        let tools = visible_tools(self.tools.tools(), capabilities.as_ref());
         let model = query.selection.model.clone();
-        // 有 ToolSearch 时没有 WaitForMcpServers（与主循环的工具快照相同，tools-more.md §3.3 第 4 条，修复线 F36）。
-        if tools.iter().any(|tool| tool.name() == TOOL_SEARCH) {
-            tools.retain(|tool| tool.name() != WAIT_FOR_MCP_SERVERS);
-        }
         let tool_names: Vec<String> = tools.iter().map(|tool| tool.name().to_owned()).collect();
         // 这一步的 ToolSearch 形式：与主循环同一个判定（工作线 F89：`ENABLE_TOOL_SEARCH` 与自动的门槛，不看模型；F84 时
         // 禁用表里的模型不开，tools-more.md §3.2.1）。
@@ -189,21 +177,19 @@ impl UsageAnalyzer {
         );
         let per_token = models::chars_per_token(&model);
         let request = ContextRequest {
-            default_machine: None,
             capabilities,
-            // 没有会话时规则缓存不参与（analysis 不缓存），会话 ID 只是占位。
-            session: query
-                .session
-                .clone()
-                .unwrap_or_else(|| SessionId::new("context-usage")),
-            workspace: query.workspace.clone(),
-            agent: None,
-            source: QuerySource::MainThread,
-            mode: query.mode,
             tool_names,
-            selection: query.selection.clone(),
-            plan_flags: Default::default(),
-            mcp: None,
+            ..ContextRequest::new(
+                // 没有会话时规则缓存不参与（analysis 不缓存），会话 ID 只是占位。
+                query
+                    .session
+                    .clone()
+                    .unwrap_or_else(|| SessionId::new("context-usage")),
+                query.workspace.clone(),
+                QuerySource::MainThread,
+                query.mode,
+                query.selection.clone(),
+            )
         };
         let analysis = self
             .context

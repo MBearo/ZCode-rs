@@ -66,7 +66,10 @@ mod sessions_seed;
 mod skills;
 mod slash;
 mod stall;
+#[cfg(unix)]
+mod standalone_pty;
 mod stream;
+mod stub_services;
 mod styles;
 mod support;
 mod themes;

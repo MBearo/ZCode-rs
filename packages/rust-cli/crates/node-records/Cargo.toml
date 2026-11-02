@@ -1,0 +1,21 @@
+[package]
+name = "rust-cli-node-records"
+description = "The Node CLI record format (messages, parts, entries) as pure functions for rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+# JS 语义的 JSON 文本与字符串（Node 记录逐字节一致）、MIME。
+rust-cli-base.workspace = true
+# 内核的消息、事实与 ID 类型（记录 ↔ 内核形状的换算）。
+rust-cli-kernel-api.workspace = true
+serde_json.workspace = true

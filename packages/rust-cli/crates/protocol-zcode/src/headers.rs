@@ -1,4 +1,4 @@
-//! 账号模型的每请求鉴权（缺口 G8）：平台层注入的 [`HeaderSource`] 由这里实现，照 Node 的
+//! 账号模型的每请求鉴权（缺口 G8）：kernel-api 的 [`HeaderSource`]（入口注入平台层）由这里实现，照 Node 的
 //! `provider-runtime-headers.ts`，经反向请求 `interaction/requestProviderRuntimeHeaders` 问 Host 要这次请求的凭据；
 //! 调用方放弃（模型请求被取消）或超过 180 s 时发 `interaction/providerRuntimeHeadersCancelled`，Host 释放它的队列。
 
@@ -8,7 +8,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::model::ModelError;
-use rust_cli_platform::header_source::{HeaderRequest, HeaderSource, SuppliedAuth};
+use rust_cli_kernel_api::provider::{HeaderRequest, HeaderSource, SuppliedAuth};
 use serde_json::{Value, json};
 
 use crate::context::Context;

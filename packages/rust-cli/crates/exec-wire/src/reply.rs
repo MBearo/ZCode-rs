@@ -8,6 +8,7 @@ use crate::dto::files::{
     DirEntry, FileContent, FileStat, FileWritten, GlobMatches, GrepOutcome, PdfRender, StatEntry,
     TextRead,
 };
+use crate::dto::git::{GitDiff, GitStatus, WorktreeChanges, WorktreeCreated, WorktreeList};
 use crate::dto::rewind::{RewindPlan, RewindStatus};
 use crate::dto::shell::{BackgroundInfo, BackgroundStop, ShellState};
 use crate::op::Op;
@@ -83,6 +84,21 @@ pub enum Reply {
     /// 环境变量推送生效了（F96，remote-exec.md §23.5）。
     #[serde(rename = "env.update")]
     EnvUpdate,
+    #[serde(rename = "git.status")]
+    GitStatus(GitStatus),
+    #[serde(rename = "git.diff")]
+    GitDiff(GitDiff),
+    #[serde(rename = "git.worktree_create")]
+    WorktreeCreate(WorktreeCreated),
+    #[serde(rename = "git.worktree_list")]
+    WorktreeList(WorktreeList),
+    #[serde(rename = "git.worktree_changes")]
+    WorktreeChanges(Option<WorktreeChanges>),
+    /// 是否删掉了目录。
+    #[serde(rename = "git.worktree_remove")]
+    WorktreeRemove { removed: bool },
+    #[serde(rename = "dirs.ensure_dir")]
+    EnsureDir,
 }
 
 impl Reply {
@@ -120,6 +136,13 @@ impl Reply {
             Self::McpClose => Op::McpClose,
             Self::McpDeclare { .. } => Op::McpDeclare,
             Self::EnvUpdate => Op::EnvUpdate,
+            Self::GitStatus(_) => Op::GitStatus,
+            Self::GitDiff(_) => Op::GitDiff,
+            Self::WorktreeCreate(_) => Op::WorktreeCreate,
+            Self::WorktreeList(_) => Op::WorktreeList,
+            Self::WorktreeChanges(_) => Op::WorktreeChanges,
+            Self::WorktreeRemove { .. } => Op::WorktreeRemove,
+            Self::EnsureDir => Op::EnsureDir,
         }
     }
 }

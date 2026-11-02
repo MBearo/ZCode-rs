@@ -1,8 +1,9 @@
 // 复制自 apps/zcode-host/crates/tui/src/ui/list_tests.rs（feat/rs 79b6691c55）。
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use rust_cli_base::models::{GLM_4_6_ACCOUNT, GLM_4_ACCOUNT, GLM_5_ACCOUNT};
 
 use super::*;
+use crate::ui::test_support::key;
 use crate::ui::text::plain;
 
 fn item(label: &str, current: bool) -> Item {
@@ -10,13 +11,27 @@ fn item(label: &str, current: bool) -> Item {
         label: label.into(),
         description: format!("{label} description"),
         current,
-        value: label.into(),
+        value: Choice::Effort(label.into()),
         ..Item::default()
     }
 }
 
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
+/// 选中的值是 `Choice::Effort(label)`（测试用它当带名字的值）。
+fn chose(outcome: Outcome, label: &str) -> bool {
+    matches!(outcome, Outcome::Chosen { choice: Choice::Effort(v), level: None } if v == label)
+}
+
+/// 选中的是这个模型、这一档。
+fn chose_model(outcome: Outcome, model: &str, effort: &str) -> bool {
+    matches!(
+        outcome,
+        Outcome::Chosen { choice: Choice::Model(selection), level: Some(level) }
+            if selection.model == model && level == effort
+    )
+}
+
+fn model_choice(provider: &str, model: &str) -> Choice {
+    Choice::Model(ModelSelection::new(provider, model))
 }
 
 fn text(list: &ListView, width: usize) -> Vec<String> {
@@ -38,32 +53,25 @@ fn text(list: &ListView, width: usize) -> Vec<String> {
 #[test]
 fn starts_on_the_current_item_wraps_around_and_chooses_with_enter_or_digits() {
     let mut list = ListView::new(
-        Purpose::Permissions,
+        Shape::Modes,
         "Pick".into(),
         vec![item("a", false), item("b", true)],
         "none".into(),
     );
     assert_eq!(list.selected, 1);
-    list.on_key(key(KeyCode::Down), Typing::default());
+    list.on_key(key(KeyCode::Down));
     assert_eq!(list.selected, 0, "wraps to the top");
-    list.on_key(key(KeyCode::Up), Typing::default());
+    list.on_key(key(KeyCode::Up));
     assert_eq!(list.selected, 1, "wraps to the bottom");
-    assert!(
-        matches!(list.on_key(key(KeyCode::Enter), Typing::default()), Outcome::Chosen(v) if v == "b")
-    );
-    assert!(
-        matches!(list.on_key(key(KeyCode::Char('1')), Typing::default()), Outcome::Chosen(v) if v == "a")
-    );
-    assert!(matches!(
-        list.on_key(key(KeyCode::Esc), Typing::default()),
-        Outcome::Closed
-    ));
+    assert!(chose(list.on_key(key(KeyCode::Enter)), "b"));
+    assert!(chose(list.on_key(key(KeyCode::Char('1'))), "a"));
+    assert!(matches!(list.on_key(key(KeyCode::Esc)), Outcome::Closed));
 }
 
 #[test]
 fn the_frame_has_a_rule_a_bold_title_a_focus_pointer_and_a_hint() {
     let list = ListView::new(
-        Purpose::Effort,
+        Shape::OneLine,
         "Pick".into(),
         vec![item("a", false), item("b", true)],
         "none".into(),
@@ -87,19 +95,19 @@ fn the_frame_has_a_rule_a_bold_title_a_focus_pointer_and_a_hint() {
 /// `/mode` 的选择器（工作线 F76，照 App 的菜单）：每个模式两行，名称（当前的打勾）与下面一行的说明。
 #[test]
 fn the_mode_picker_puts_the_description_under_the_name() {
-    let mode = |label: &str, value: &str, current: bool| Item {
+    let mode = |label: &str, mode: PermissionMode, current: bool| Item {
         label: label.into(),
         description: format!("{label} description"),
         current,
-        value: value.into(),
+        value: Choice::Mode(mode),
         ..Item::default()
     };
     let list = ListView::new(
-        Purpose::Permissions,
+        Shape::Modes,
         "Mode".into(),
         vec![
-            mode("Ask before changes", "build", true),
-            mode("Full access", "yolo", false),
+            mode("Ask before changes", PermissionMode::Default, true),
+            mode("Full access", PermissionMode::BypassPermissions, false),
         ],
         "none".into(),
     );
@@ -119,12 +127,12 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
         label: label.into(),
         description: "Z.ai".into(),
         current,
-        value: format!("zai{SEP}{label}"),
+        value: model_choice("zai", label),
         levels: vec!["low".into(), "medium".into(), "high".into()],
         level,
     };
     let mut list = ListView::new(
-        Purpose::Model,
+        Shape::OneLine,
         "Select model".into(),
         vec![
             model(GLM_5_ACCOUNT, true, 2),
@@ -137,7 +145,7 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
         lines.iter().any(|l| l == "  ◉ high effort  ←/→ to adjust"),
         "{lines:?}"
     );
-    list.on_key(key(KeyCode::Left), Typing::default());
+    list.on_key(key(KeyCode::Left));
     let lines = text(&list, 60);
     assert!(
         lines
@@ -145,32 +153,36 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
             .any(|l| l == "  ● medium effort  ←/→ to adjust"),
         "{lines:?}"
     );
-    assert!(
-        matches!(list.on_key(key(KeyCode::Enter), Typing::default()), Outcome::Chosen(v) if v == format!("zai{SEP}{GLM_5_ACCOUNT}{SEP}medium"))
-    );
+    assert!(chose_model(
+        list.on_key(key(KeyCode::Enter)),
+        GLM_5_ACCOUNT,
+        "medium"
+    ));
     // 数字选中别的模型，用它自己的档位。
-    assert!(
-        matches!(list.on_key(key(KeyCode::Char('2')), Typing::default()), Outcome::Chosen(v) if v == format!("zai{SEP}{GLM_4_ACCOUNT}{SEP}low"))
-    );
+    assert!(chose_model(
+        list.on_key(key(KeyCode::Char('2'))),
+        GLM_4_ACCOUNT,
+        "low"
+    ));
 }
 
 #[test]
 fn two_line_lists_search_and_two_lines_per_item() {
     let mut list = ListView::new(
-        Purpose::Rewind,
+        Shape::TwoLines,
         "Resume session".into(),
         vec![
             Item {
                 label: "alpha".into(),
                 description: "5m ago".into(),
                 current: true,
-                value: "a".into(),
+                value: Choice::Effort("a".into()),
                 ..Item::default()
             },
             Item {
                 label: "beta".into(),
                 description: "2h ago".into(),
-                value: "b".into(),
+                value: Choice::Effort("b".into()),
                 ..Item::default()
             },
         ],
@@ -184,17 +196,15 @@ fn two_line_lists_search_and_two_lines_per_item() {
         lines.contains(&"    5m ago · current".to_owned()),
         "{lines:?}"
     );
-    list.on_key(key(KeyCode::Char('b')), Typing::default());
+    list.on_key(key(KeyCode::Char('b')));
     assert_eq!(list.visible().len(), 1);
-    assert!(
-        matches!(list.on_key(key(KeyCode::Enter), Typing::default()), Outcome::Chosen(v) if v == "b")
-    );
+    assert!(chose(list.on_key(key(KeyCode::Enter)), "b"));
 }
 
 #[test]
 fn the_wheel_moves_the_focus_and_stops_at_the_ends() {
     let mut list = ListView::new(
-        Purpose::Permissions,
+        Shape::OneLine,
         "Pick".into(),
         vec![item("a", true), item("b", false), item("c", false)],
         "none".into(),
@@ -214,12 +224,12 @@ fn models_are_searchable_and_digits_go_into_the_search() {
         label: label.into(),
         description: provider.into(),
         current,
-        value: format!("p{SEP}{label}"),
+        value: model_choice("p", label),
         levels: vec!["low".into(), "high".into()],
         level: 1,
     };
     let mut list = ListView::new(
-        Purpose::Model,
+        Shape::OneLine,
         "Select model".into(),
         vec![
             model(GLM_5_ACCOUNT, "Z.ai", false),
@@ -242,22 +252,24 @@ fn models_are_searchable_and_digits_go_into_the_search() {
     );
     // 数字输入到搜索里，不直接选中。
     assert!(matches!(
-        list.on_key(key(KeyCode::Char('4')), Typing::default()),
+        list.on_key(key(KeyCode::Char('4'))),
         Outcome::Pending
     ));
     assert_eq!(list.visible().len(), 1);
-    assert!(
-        matches!(list.on_key(key(KeyCode::Enter), Typing::default()), Outcome::Chosen(v) if v == format!("p{SEP}{GLM_4_6_ACCOUNT}{SEP}high"))
-    );
+    assert!(chose_model(
+        list.on_key(key(KeyCode::Enter)),
+        GLM_4_6_ACCOUNT,
+        "high"
+    ));
     // 也按 provider 过滤，不区分大小写。
-    list.on_key(key(KeyCode::Backspace), Typing::default());
+    list.on_key(key(KeyCode::Backspace));
     for c in "MOON".chars() {
-        list.on_key(key(KeyCode::Char(c)), Typing::default());
+        list.on_key(key(KeyCode::Char(c)));
     }
     let visible: Vec<_> = list.visible().iter().map(|i| i.label.clone()).collect();
     assert_eq!(visible, ["Kimi K2"]);
     // 有条目但没有匹配：写 No matches，不用列表为空时的说法。
-    list.on_key(key(KeyCode::Char('x')), Typing::default());
+    list.on_key(key(KeyCode::Char('x')));
     let lines = text(&list, 60);
     assert!(lines.contains(&"  No matches".to_owned()), "{lines:?}");
     assert!(!lines.iter().any(|l| l.contains("none")), "{lines:?}");

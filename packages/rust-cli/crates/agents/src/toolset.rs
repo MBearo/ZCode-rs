@@ -9,42 +9,44 @@ use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::mcp_state::McpConnections;
 use rust_cli_kernel_api::orchestration::{ToolRegistry, ToolSnapshot};
 use rust_cli_kernel_api::tool::Tool;
+use rust_cli_kernel_api::tool_search::{SEARCH_TOOLS, search_fallback};
 
 use crate::definitions::AgentDefinition;
+use rust_cli_kernel_api::tool_names;
 
 /// 所有子代理都不能用的工具（general-purpose 有 Agent、TaskStop、SendMessage，没有
 /// Workflow、ScheduleWakeup）。
 const ALL_AGENT_DISALLOWED: &[&str] = &[
     "Workflow",
-    "ScheduleWakeup",
-    "TaskOutput",
-    "ExitPlanMode",
-    "EnterPlanMode",
-    "AskUserQuestion",
+    tool_names::SCHEDULE_WAKEUP,
+    tool_names::TASK_OUTPUT,
+    tool_names::EXIT_PLAN_MODE,
+    tool_names::ENTER_PLAN_MODE,
+    tool_names::ASK_USER_QUESTION,
 ];
 
 /// 后台子代理只能用的工具（含 SendMessage、TaskStop、Monitor）。
 const ASYNC_ALLOWED: &[&str] = &[
-    "Read",
-    "WebSearch",
-    "TodoWrite",
-    "Grep",
-    "WebFetch",
-    "Glob",
-    "Bash",
-    "PowerShell",
-    "Edit",
-    "Write",
-    "NotebookEdit",
-    "Skill",
+    tool_names::READ,
+    tool_names::WEB_SEARCH,
+    tool_names::TODO_WRITE,
+    tool_names::GREP,
+    tool_names::WEB_FETCH,
+    tool_names::GLOB,
+    tool_names::BASH,
+    tool_names::POWER_SHELL,
+    tool_names::EDIT,
+    tool_names::WRITE,
+    tool_names::NOTEBOOK_EDIT,
+    tool_names::SKILL,
     "StructuredOutput",
-    "ToolSearch",
-    "EnterWorktree",
-    "ExitWorktree",
-    "SendMessage",
-    "TaskStop",
+    tool_names::TOOL_SEARCH,
+    tool_names::ENTER_WORKTREE,
+    tool_names::EXIT_WORKTREE,
+    tool_names::SEND_MESSAGE,
+    tool_names::TASK_STOP,
     // 工作线 F83：后台子代理的白名单里有 Monitor（tools-more.md §19.1）。
-    "Monitor",
+    tool_names::MONITOR,
 ];
 
 /// 能派生子代理的最大深度（固定值，没有环境变量能改）。
@@ -74,7 +76,7 @@ impl ToolRule {
     }
 
     pub(crate) fn allows(&self, name: &str) -> bool {
-        let mcp = name.starts_with("mcp__");
+        let mcp = rust_cli_kernel_api::mcp_name::is_mcp(name);
         if !mcp && ALL_AGENT_DISALLOWED.contains(&name) {
             return false;
         }
@@ -100,11 +102,6 @@ impl ToolRule {
     }
 }
 
-/// Bash 的名字（有它时搜索交给它，不补回 Glob / Grep）。
-const BASH: &str = "Bash";
-/// 有 Bash 时主注册表藏起来的搜索工具（tools-files.md §1.1）。
-const SEARCH_TOOLS: &[&str] = &["Glob", "Grep"];
-
 /// 子代理看到的工具：主注册表按 [`ToolRule`] 过滤。
 ///
 /// 定义点名了工具清单时（修复线 F16，agents.md §4.2 第 4 条）：按清单的顺序排，发给模型时
@@ -116,29 +113,17 @@ pub(crate) struct FilteredTools {
 }
 
 impl FilteredTools {
-    /// 补回的搜索工具（按清单里出现的顺序）；没有点名清单、或解析出的工具里有 Bash 时为空。
+    /// 补回的搜索工具（按清单里出现的顺序，kernel-api `tool_search::search_fallback`）；没有点名清单、或解析出的
+    /// 工具里有 Bash 时为空。
     fn restored(&self, resolved: &[Arc<dyn Tool>]) -> Vec<Arc<dyn Tool>> {
         let Some(allow) = &self.rule.allow else {
             return Vec::new();
         };
-        if resolved
+        let wanted = allow
             .iter()
-            .any(|tool| tool.name() == BASH && tool.is_enabled())
-        {
-            return Vec::new();
-        }
-        let mut out: Vec<Arc<dyn Tool>> = Vec::new();
-        for name in allow {
-            if !SEARCH_TOOLS.contains(&name.as_str())
-                || !self.rule.allows(name)
-                || out.iter().any(|tool| tool.name() == name)
-                || resolved.iter().any(|tool| tool.name() == name)
-            {
-                continue;
-            }
-            out.extend(self.inner.withheld(name));
-        }
-        out
+            .map(String::as_str)
+            .filter(|name| self.rule.allows(name));
+        search_fallback(resolved, wanted, |name| self.inner.withheld(name))
     }
 }
 
@@ -201,6 +186,17 @@ impl ToolRegistry for FilteredTools {
 
     fn keeps_order(&self) -> bool {
         self.rule.allow.is_some()
+    }
+
+    /// 子代理的清单已经补回了点名的搜索工具（`resolve`），没有再扣下的。子代理的注册表不再被包一层：嵌套的子代理用
+    /// 主线程的注册表（工作线 F134 把以前的缺省写明）。
+    fn withheld(&self, _name: &str) -> Option<Arc<dyn Tool>> {
+        None
+    }
+
+    /// 同上：没有叠在它上面的工具（以前的缺省）。
+    fn hides(&self, _name: &str) -> bool {
+        false
     }
 }
 

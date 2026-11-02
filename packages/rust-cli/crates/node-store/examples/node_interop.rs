@@ -21,6 +21,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use rust_cli_base::clock::SystemClock;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
@@ -31,13 +32,12 @@ use rust_cli_kernel_api::message::{
     StopReason, ToolResultContent, Usage, UserMessage, UserOrigin,
 };
 use rust_cli_kernel_api::model::ModelSelection;
-use rust_cli_kernel_api::orchestration::InteractionRequest;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::store::{
     Fact, FactBatch, RevertCursor, SessionFilter, SessionKind, SessionMeta, SessionStore,
     TurnAnchor,
 };
-use rust_cli_node_store::{LOCAL_ENVIRONMENT, NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{LOCAL_ENVIRONMENT, NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use serde_json::{Value, json};
 
@@ -166,10 +166,8 @@ async fn create(store: &NodeStore) -> Result<SessionId> {
         })
         .await?;
     let selection = ModelSelection {
-        provider: "p".into(),
-        model: "m".into(),
         reasoning: Some("high".into()),
-        connection: None,
+        ..ModelSelection::new("p", "m")
     };
     let facts = vec![
         Fact::ModelSelected { selection },
@@ -296,8 +294,8 @@ fn said(text: &str) -> ToolResultContent {
     ToolResultContent::Text { text: text.into() }
 }
 
-/// 第三段会话：attachment、两个并发工具（后声明的先结束，结果带图片）、被中断的工具、meta 消息；
-/// 最后留一个没有 assistant 的意图（进程在流式响应中退出）和一个没回答的计划审批。
+/// 第三段会话：attachment、两个并发工具（后声明的先结束，结果带图片）、被中断的工具、meta 消息。待回答的交互不落库
+/// （工作线 F130），以前这里最后写一个没回答的计划审批。
 async fn tools(store: &NodeStore) -> Result<SessionId> {
     let id = create(store).await?;
     let (read, glob, bash) = (
@@ -428,14 +426,6 @@ async fn tools(store: &NodeStore) -> Result<SessionId> {
                 source: "max_output_tokens_recovery".into(),
             },
         ),
-        Fact::Entry {
-            kind: "pending_interaction".into(),
-            id: "ia_1".into(),
-            data: serde_json::to_value(InteractionRequest::PlanApproval {
-                tool_use: ToolUseId::new("toolu_9"),
-                plan: "Ship it".into(),
-            })?,
-        },
     ];
     store.commit(&id, batch(Some("cmd_t2"), facts)).await?;
     Ok(id)

@@ -1,7 +1,8 @@
 //! 连接上的共用部分：往 Host 写帧（wire v3、每个订阅自己的逻辑帧序号）、时间与随机标识。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_protocol_core::connection::Peer;
@@ -44,17 +45,12 @@ impl Context {
     /// 记下一个打开着的会话所在的工作区。
     pub fn register(&self, session: &str, workspace: &str) {
         self.sessions
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_unpoisoned()
             .insert(session.to_owned(), workspace.to_owned());
     }
 
     pub fn workspace_of(&self, session: &str) -> Option<String> {
-        self.sessions
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(session)
-            .cloned()
+        self.sessions.lock_unpoisoned().get(session).cloned()
     }
 
     pub fn now(&self) -> u64 {
@@ -63,13 +59,13 @@ impl Context {
 
     /// 本进程里唯一的标识：`<kind>-<进程前缀>-<n>`（代际标识、订阅 ID）。
     pub fn fresh(&self, kind: &str) -> String {
-        let mut counter = self.counter.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut counter = self.counter.lock_unpoisoned();
         *counter += 1;
         format!("{kind}-{}-{}", self.prefix, *counter)
     }
 
     fn ordinal(&self, subscription: &str) -> u64 {
-        let mut ordinals = self.ordinals.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut ordinals = self.ordinals.lock_unpoisoned();
         let ordinal = ordinals.entry(subscription.to_owned()).or_default();
         *ordinal += 1;
         *ordinal
@@ -77,10 +73,7 @@ impl Context {
 
     /// 订阅结束：逻辑帧序号不再需要。
     pub fn forget(&self, subscription: &str) {
-        self.ordinals
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(subscription);
+        self.ordinals.lock_unpoisoned().remove(subscription);
     }
 
     /// 写一个逻辑帧（`topicFrame`）：快照或一段增量。

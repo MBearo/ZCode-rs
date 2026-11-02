@@ -180,7 +180,7 @@ fn cell(messages: u64, quartiles: Option<[u64; 3]>, palette: &Palette) -> Span<'
         Some(bounds) => 1 + bounds.iter().filter(|bound| messages >= **bound).count(),
     };
     match level {
-        0 => Span::styled("\u{b7}", palette.dim()),
+        0 => Span::styled("\u{b7}", crate::ui::style::dim()),
         n => Span::styled(
             ["\u{2591}", "\u{2592}", "\u{2593}", "\u{2588}"][n - 1],
             Style::default().fg(palette.accent),
@@ -299,7 +299,7 @@ pub fn range_bar(
     .enumerate()
     {
         if index > 0 {
-            spans.push(Span::styled(" \u{b7} ", palette.dim()));
+            spans.push(Span::styled(" \u{b7} ", crate::ui::style::dim()));
         }
         spans.push(if option == range {
             Span::styled(
@@ -309,11 +309,11 @@ pub fn range_bar(
                     .add_modifier(Modifier::BOLD),
             )
         } else {
-            Span::styled(label, palette.dim())
+            Span::styled(label, crate::ui::style::dim())
         });
     }
     if loading {
-        spans.push(Span::styled(" \u{2026}", palette.dim()));
+        spans.push(Span::styled(" \u{2026}", crate::ui::style::dim()));
     }
     Line::from(spans)
 }
@@ -423,7 +423,10 @@ pub fn overview(
     ));
     let denominator = range.days().unwrap_or(derived.total_days);
     let mut active = value(derived.active_days.to_string(), palette);
-    active.push(Span::styled(format!("/{denominator}"), palette.dim()));
+    active.push(Span::styled(
+        format!("/{denominator}"),
+        crate::ui::style::dim(),
+    ));
     let mut longest_streak = bold_value(derived.longest_streak.to_string(), palette);
     longest_streak.push(Span::raw(days_word(lang, derived.longest_streak)));
     out.push(row(
@@ -451,7 +454,7 @@ pub fn overview(
     if total > 0 {
         out.push(Line::from(Span::styled(
             token_line(&stats.models, lang),
-            palette.dim(),
+            crate::ui::style::dim(),
         )));
     }
     if let Some(fact) = fun_fact(stats, lang) {
@@ -482,12 +485,7 @@ fn percent(model: &ModelTokens, total: u64) -> String {
 }
 
 /// 一个模型的三行。
-fn model_block(
-    model: &ModelTokens,
-    total: u64,
-    palette: &Palette,
-    lang: Lang,
-) -> [Line<'static>; 3] {
+fn model_block(model: &ModelTokens, total: u64, lang: Lang) -> [Line<'static>; 3] {
     let (io, cache) = text::model_lines(
         lang,
         [
@@ -504,10 +502,13 @@ fn model_block(
                 model.model.clone(),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
-            Span::styled(format!(" ({}%)", percent(model, total)), palette.dim()),
+            Span::styled(
+                format!(" ({}%)", percent(model, total)),
+                crate::ui::style::dim(),
+            ),
         ]),
-        Line::from(Span::styled(io, palette.dim())),
-        Line::from(Span::styled(cache, palette.dim())),
+        Line::from(Span::styled(io, crate::ui::style::dim())),
+        Line::from(Span::styled(cache, crate::ui::style::dim())),
     ]
 }
 
@@ -540,7 +541,10 @@ pub fn models(
 ) -> Vec<Line<'static>> {
     let strings = text::strings(lang);
     if stats.models.is_empty() {
-        return vec![Line::from(Span::styled(strings.no_models, palette.dim()))];
+        return vec![Line::from(Span::styled(
+            strings.no_models,
+            crate::ui::style::dim(),
+        ))];
     }
     let mut out = vec![range_bar(range, loading, strings, palette), Line::default()];
     let total = total_tokens(&stats.models);
@@ -551,7 +555,7 @@ pub fn models(
     let column = |models: &[ModelTokens]| -> Vec<Line<'static>> {
         models
             .iter()
-            .flat_map(|m| model_block(m, total, palette, lang))
+            .flat_map(|m| model_block(m, total, lang))
             .collect()
     };
     out.extend(side_by_side(column(&page[..split]), column(&page[split..])));
@@ -573,7 +577,7 @@ pub fn models(
                     count
                 )
             ),
-            palette.dim(),
+            crate::ui::style::dim(),
         )));
     }
     out

@@ -91,6 +91,26 @@ pub enum ToolResultContent {
     },
 }
 
+impl ToolResultContent {
+    /// 文字块的文字；图片、文档与工具引用没有。
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Self::Text { text } => Some(text),
+            Self::Image { .. } | Self::Document { .. } | Self::ToolReference { .. } => None,
+        }
+    }
+}
+
+/// 工具结果里的文字：文字块按顺序以换行接起来（图片、文档与工具引用不算）。前端的预览、技能的命令输出与 App 的
+/// 投影共用这一份（F129，审查 E11）。
+pub fn text_of(content: &[ToolResultContent]) -> String {
+    content
+        .iter()
+        .filter_map(ToolResultContent::text)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// `tool_reference` 在不支持它的地方（OpenAI 协议、Node 记录的文本）降成的文本。
 pub fn tool_reference_text(tool_name: &str) -> String {
     format!("Tool loaded: {tool_name}")
@@ -143,6 +163,23 @@ pub struct Usage {
     pub cache_creation_input_tokens: u64,
     #[serde(default)]
     pub cache_read_input_tokens: u64,
+}
+
+/// 用量的累加（headless 的 result 与 `/usage`、App 的投影、TUI 的视图共用，F129，审查 E11）。穷举解构：加字段时这里
+/// 编译失败，不会漏加。
+impl std::ops::AddAssign for Usage {
+    fn add_assign(&mut self, other: Self) {
+        let Self {
+            input_tokens,
+            output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
+        } = other;
+        self.input_tokens += input_tokens;
+        self.output_tokens += output_tokens;
+        self.cache_creation_input_tokens += cache_creation_input_tokens;
+        self.cache_read_input_tokens += cache_read_input_tokens;
+    }
 }
 
 /// 一次模型响应：一条消息、多个块（不按内容块拆成多行）。
@@ -312,3 +349,7 @@ impl Message {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "message_tests.rs"]
+mod tests;

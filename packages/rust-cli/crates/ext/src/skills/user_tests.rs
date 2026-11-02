@@ -9,11 +9,10 @@ use rust_cli_kernel_api::user_command::{
     ExpandedKind, ExpandedMessage, Expansion, LOCAL_COMMAND_CAVEAT_SOURCE, LOCAL_COMMAND_SOURCE,
     UserCommands,
 };
-use rust_cli_policy::PolicyGate;
 
 use super::*;
 use crate::skills::runner;
-use crate::test_support::{CWD, EchoBash, facts, tool_context};
+use crate::test_support::{AllowedGate, CWD, EchoBash, facts, tool_context};
 
 const GREET: &str = "---\ndescription: Greet someone by name\nargument-hint: <name>\narguments: [who]\nallowed-tools: Bash(echo:*)\n---\nSay hello to $ARGUMENTS ($who, first: $0).\nSkill dir: ${CLAUDE_SKILL_DIR}\nInline: !`echo inline-ok`\n";
 const HELPER: &str = "---\ndescription: A helper the model must not call\ndisable-model-invocation: true\n---\nHidden helper.\n";
@@ -40,7 +39,7 @@ fn commands(env: Arc<MemoryEnvironment>) -> SkillCommands {
     let bash = Arc::new(EchoBash::default());
     SkillCommands::new(
         catalog,
-        Some(runner(bash, Arc::new(PolicyGate::default()), ids)),
+        Some(runner(bash, Arc::new(AllowedGate::default()), ids)),
     )
 }
 

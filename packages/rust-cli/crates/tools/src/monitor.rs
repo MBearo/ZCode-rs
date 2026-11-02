@@ -1,19 +1,20 @@
 //! Monitor 工具（docs/specs/rust-cli/tools-more.md §19）。
 //!
 //! 起一条后台命令（或开一个 WebSocket），stdout 的每行是一条事件。工具只做语义：校验、权限的 ws 一半（命令一半交
-//! 判决链按 Bash 判）、起后台命令，再经 `Interactions::arm_monitor` 把它交给会话 actor；切行、批、限流、到期与通知都
+//! 判决链按 Bash 判）、起后台命令，再经 `SessionOps::arm_monitor` 把它交给会话 actor；切行、批、限流、到期与通知都
 //! 在 actor 里（session 的 `monitors`）。描述与 schema 是 MO0 基线的 `-p` 写法（`prompts/tools/Monitor.json`），交互
 //! 会话与 stream-json 输入的上限换成 30 分钟（[`MonitorTool::with_session_cap`]）。
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use rust_cli_kernel_api::env::{CommandEvent, StartCommand};
+use rust_cli_kernel_api::env::{CommandEvent, CommandKind, StartCommand};
 use rust_cli_kernel_api::env_shell::{
     self, BackgroundCommand, BackgroundKind, BackgroundTask, CwdScope, MonitorSocket,
     SandboxPolicy, ShellKind,
 };
 use rust_cli_kernel_api::ids::{OperationId, ShellTaskId};
 use rust_cli_kernel_api::machine::CommandEvents;
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::monitor::{MonitorArmed, MonitorSource};
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
@@ -22,13 +23,16 @@ use rust_cli_kernel_api::tool::{
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::common::{Definition, definition, env_failure, text};
+use crate::common::env_failure;
 use crate::monitor_input::{self, Input};
+use rust_cli_kernel_api::tool::text;
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
 /// Monitor 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
 const MAX_RESULT_CHARS: usize = 10_000;
 
-pub const NAME: &str = "Monitor";
+pub const NAME: &str = tool_names::MONITOR;
 
 /// 单次的 `-p` 的上限；其余形态 30 分钟。
 pub const PRINT_CAP_MS: u64 = 600_000;
@@ -73,7 +77,7 @@ impl MonitorTool {
     /// 单次的 `-p` 的写法（上限 10 分钟，MO0 基线）。
     pub fn new() -> Self {
         Self {
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
             cap_ms: PRINT_CAP_MS,
             sandbox: None,
         }
@@ -129,6 +133,23 @@ impl Tool for MonitorTool {
         NAME
     }
 
+    /// 在点名的机器上起命令（remote-exec.md §20.5.1）。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::RunsThere
+    }
+
+    /// 命令来源照 Bash 判（tools-more.md §19.4）：有 `command` 字段时是 shell 主体；ws 来源没有主体，询问来自
+    /// [`Tool::check_permissions`]。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        let command = input.get("command")?;
+        Some(rust_cli_kernel_api::permission::PermissionSubject::Shell {
+            command: command.as_str().unwrap_or_default().to_owned(),
+        })
+    }
+
     fn input_schema(&self) -> Value {
         self.definition.schema.clone()
     }
@@ -180,13 +201,10 @@ impl Tool for MonitorTool {
                 message: rust_cli_prompts::monitor::ws_private(&host),
             };
         }
-        PermissionDecision::Ask {
-            message: rust_cli_prompts::monitor::ws_ask(
-                &ws.url,
-                ws.protocols.as_deref().unwrap_or_default(),
-            ),
-            suggestions: Vec::new(),
-        }
+        PermissionDecision::ask(
+            rust_cli_prompts::monitor::ws_ask(&ws.url, ws.protocols.as_deref().unwrap_or_default()),
+            Vec::new(),
+        )
     }
 
     async fn call(
@@ -222,26 +240,25 @@ impl Tool for MonitorTool {
         )
         .await;
         let start = StartCommand {
-            command,
-            cwd,
-            timeout_ms: None,
-            task: task.clone(),
             shell: ShellKind::Bash,
             cwd_scope: CwdScope::Pinned,
-            background: Some(BackgroundCommand {
-                description: input.description.clone(),
-                tool_use: Some(context.tool_use.clone()),
-                kind: BackgroundKind::Monitor,
-            }),
             sandbox: if socket.is_some() {
                 None
             } else {
                 self.sandbox.clone()
             },
-            hook: None,
-            on_timeout: None,
-            socket: socket.clone(),
-            env: Default::default(),
+            kind: {
+                let background = BackgroundCommand {
+                    description: input.description.clone(),
+                    tool_use: Some(context.tool_use.clone()),
+                    kind: BackgroundKind::Monitor,
+                };
+                match socket.clone() {
+                    Some(socket) => CommandKind::Socket { background, socket },
+                    None => CommandKind::Background { background },
+                }
+            },
+            ..StartCommand::new(command, cwd, task.clone())
         };
         let mut events = context
             .machine
@@ -252,7 +269,7 @@ impl Tool for MonitorTool {
         let output = started(&mut events).await?;
         let armed = MonitorArmed {
             // 在远端机器上起的命令：输出流与停止都发给那台机器（R3，remote-exec.md §20.7.2）。
-            machine: (!context.machine.is_local()).then(|| context.machine.name().to_owned()),
+            machine: context.machine.name().clone(),
             operation: context.operation.operation.clone(),
             task: task.clone(),
             tool_use: context.tool_use.clone(),
@@ -265,11 +282,7 @@ impl Tool for MonitorTool {
             },
             output: rust_cli_kernel_api::env::EnvPath::new(output),
         };
-        if let Err(error) = context
-            .interactions
-            .arm_monitor(&context.session, armed, events)
-            .await
-        {
+        if let Err(error) = context.session_ops.arm_monitor(armed, events).await {
             // 没有会话 owner 接手（不该发生：子代理没有 Monitor）：停掉已经起的命令。
             let request = BackgroundTask {
                 session: context.session.clone(),

@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
-use rust_cli_kernel_api::orchestration::ToolRegistry;
+use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::mcp_state::McpConnections;
+use rust_cli_kernel_api::orchestration::{ToolRegistry, ToolSnapshot};
 use rust_cli_kernel_api::tool::Tool;
 
-use crate::file_state::ReadFileState;
-use crate::{glob, grep};
+use rust_cli_kernel_api::tool_search::{SEARCH_TOOLS, search_covered};
 
-/// Bash 工具的名字（工作线 L4 注册）。
-pub(crate) const BASH: &str = "Bash";
+use crate::file_state::ReadFileState;
 
 /// 当前可用的工具。由 runtime 组装：内置工具、子代理工具、MCP 工具。
 ///
@@ -63,14 +63,7 @@ impl BuiltinTools {
     }
 
     fn exposed(&self, tool: &dyn Tool) -> bool {
-        let search = tool.name() == glob::NAME || tool.name() == grep::NAME;
-        if !search || self.search_opt_in {
-            return true;
-        }
-        !self
-            .tools
-            .iter()
-            .any(|other| other.name() == BASH && other.is_enabled())
+        !SEARCH_TOOLS.contains(&tool.name()) || self.search_opt_in || !search_covered(&self.tools)
     }
 }
 
@@ -87,7 +80,7 @@ impl ToolRegistry for BuiltinTools {
         self.tools
             .iter()
             .filter(|tool| self.exposed(tool.as_ref()))
-            .find(|tool| tool.name() == name || tool.aliases().contains(&name))
+            .find(|tool| rust_cli_kernel_api::tool::answers_to(tool.as_ref(), name))
             .cloned()
     }
 
@@ -98,6 +91,28 @@ impl ToolRegistry for BuiltinTools {
             .filter(|tool| !self.exposed(tool.as_ref()))
             .find(|tool| tool.name() == name)
             .cloned()
+    }
+
+    /// 内置注册表下面没有别的层：不藏叠在上面的工具（整个工具的 deny 规则在 `PolicyFiltered`）。
+    fn hides(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// 发请求前按名字排序（tools-more.md §3.3）。
+    fn keeps_order(&self) -> bool {
+        false
+    }
+
+    /// 没有 MCP：快照就是清单。
+    fn snapshot(&self, _session: &SessionId) -> ToolSnapshot {
+        ToolSnapshot {
+            tools: self.tools(),
+            mcp: None,
+        }
+    }
+
+    fn mcp(&self) -> Option<Arc<dyn McpConnections>> {
+        None
     }
 }
 

@@ -1,12 +1,11 @@
 //! 回合结束那一行（docs/specs/rust-cli/tui-display.md §2.7，修复线 F118）：真实内核，内核的时钟固定在 0（UTC 的
 //! `12:00 AM`）。正常结束与出错结束的回合在最后有 `✻ <动词> for 0s · done 12:00 AM`，中断的没有；后台还有在跑的命令时
 //! 接 ` · 1 monitor still running`（与 footer 的 pill 同一份文字）。修前没有这一行。
-use std::sync::Arc;
 
 use crossterm::event::KeyCode;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelError, ModelEvent};
-use rust_cli_kernel_api::testing::{environments, text_response};
+use rust_cli_kernel_api::testing::text_response;
 
 use super::ledger::Ledger;
 use super::support::{GatedModel, Setup, row_of, send, with_ui};
@@ -131,7 +130,7 @@ async fn a_running_monitor_is_named_at_the_end_of_the_line() {
     let model = GatedModel::scripted(vec![text_response(&["watching"])]);
     let setup = Setup {
         width: 100,
-        environments: environments(Arc::new(Ledger(&["b2"]))),
+        environments: Ledger(&["b2"]).registry(),
         ..Setup::default()
     };
     with_ui(model, setup, |mut ui| async move {
@@ -160,7 +159,7 @@ async fn shells_and_monitors_both_show_in_english_and_chinese() {
         let setup = Setup {
             width: 100,
             lang,
-            environments: environments(Arc::new(Ledger(&["b1", "b2"]))),
+            environments: Ledger(&["b1", "b2"]).registry(),
             ..Setup::default()
         };
         with_ui(model, setup, |mut ui| async move {

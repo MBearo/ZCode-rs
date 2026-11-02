@@ -1,11 +1,11 @@
 //! ToolSearch 的关键词查询（docs/specs/rust-cli/tools-more.md §3）。
 
+use rust_cli_kernel_api::mcp_name;
 use std::collections::HashMap;
 
 use regex::Regex;
 
 /// 查询以它开头时先按名字前缀找（MCP 工具名）。
-const MCP_PREFIX: &str = "mcp__";
 /// 每个词的得分：（名字段完全相同、名字段包含、粗分段完全相同、粗分段包含）；MCP 工具的高一些。
 const MCP_PART_SCORES: (u32, u32, u32, u32) = (12, 6, 12, 4);
 const PART_SCORES: (u32, u32, u32, u32) = (10, 5, 10, 3);
@@ -24,17 +24,17 @@ pub(crate) struct Candidate {
 
 /// `mcp__<server>__<tool>` 里的 tool 名。
 pub(crate) fn mcp_tool_name(name: &str) -> Option<&str> {
-    let rest = name.strip_prefix("mcp__")?;
-    let (_, tool) = rest.split_once("__")?;
-    (!tool.is_empty()).then_some(tool)
+    mcp_name::parse(name)?.tool.filter(|tool| !tool.is_empty())
 }
 
 fn mcp_parts(name: &str) -> Option<(String, Option<String>)> {
-    let rest = name.strip_prefix("mcp__")?;
-    let (server, tool) = rest.split_once("__").unwrap_or((rest, ""));
+    let parsed = mcp_name::parse(name)?;
     Some((
-        server.to_owned(),
-        (!tool.is_empty()).then(|| tool.to_owned()),
+        parsed.server.to_owned(),
+        parsed
+            .tool
+            .filter(|tool| !tool.is_empty())
+            .map(str::to_owned),
     ))
 }
 
@@ -122,7 +122,7 @@ pub(crate) fn search(
     {
         return vec![exact.clone()];
     }
-    if query.starts_with(MCP_PREFIX) && query.len() > MCP_PREFIX.len() {
+    if mcp_name::is_mcp(&query) && query.len() > mcp_name::PREFIX.len() {
         let prefixed: Vec<String> = deferred
             .iter()
             .filter(|candidate| candidate.name.to_lowercase().starts_with(&query))

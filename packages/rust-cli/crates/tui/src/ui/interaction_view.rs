@@ -7,18 +7,20 @@
 //! 不铺底色条，焦点行是强调色的 `❯ ` 与名字，序号 dim；输入行（“否”行的意见、继续计划、提问的“其他”）聚焦时
 //! [`Interaction::cursor`] 给出终端光标的位置。工作线 F76（用户决定 2026-10-23）：前三种以前用选择列表组件的底色条，
 //! 底色条盖住输入、看不到光标。
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use rust_cli_kernel_api::orchestration::InteractionRequest;
 use serde_json::Value;
 
 use super::cells::{self, Ctx};
 use super::highlight;
-use super::i18n::{Lang, Strings};
+use super::i18n::Lang;
 use super::interaction::Interaction;
 use super::layout;
 use super::palette::Palette;
 use super::text::{truncate_line, width, wrap, wrap_text};
+use crate::ui::style::{bold, dim};
+use crate::view::ToolKind;
 
 /// 改动预览与计划最多显示的行数。
 pub(super) const PREVIEW: usize = 12;
@@ -26,20 +28,11 @@ pub(super) const PREVIEW: usize = 12;
 /// 视图排版所需的上下文。
 pub struct View<'a> {
     pub palette: &'a Palette,
-    pub strings: &'a Strings,
     pub lang: Lang,
     pub width: usize,
     /// 终端的行数（带预览的题按它限制预览框的行数，tools-more.md §1.1）。
     pub height: usize,
     pub now_ms: u64,
-}
-
-pub(super) fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
-
-pub(super) fn bold() -> Style {
-    Style::default().add_modifier(Modifier::BOLD)
 }
 
 /// 视图的开头：强调色的线与粗体标题。
@@ -247,7 +240,7 @@ impl Interaction {
                     layout.0[1] = asked_from(&layout.0[1], name, self.origin.as_deref(), view);
                 }
                 // 机器来自询问（工具输入的 `machine`，R3）或 MCP 服务器的绑定（F98），前者优先。
-                if let Some(machine) = machine.as_deref().or(self.bound_machine.as_deref()) {
+                if let Some(machine) = machine.remote().or(self.bound_machine.remote()) {
                     layout.0[1] = runs_on(&layout.0[1], machine, view);
                 }
                 layout
@@ -269,15 +262,16 @@ impl Interaction {
             return None;
         }
         let zh = view.lang == Lang::Zh;
-        let edit = matches!(tool, "Edit" | "MultiEdit" | "NotebookEdit" | "Write");
-        Some(match (tool, &self.seed) {
-            ("Bash", Some(seed)) => {
+        let kind = ToolKind::of(tool);
+        let edit = kind.edits_files();
+        Some(match (kind, &self.seed) {
+            (ToolKind::Bash, Some(seed)) => {
                 format!(
                     "{}{seed}",
                     super::interaction::remember::seed_label(view.lang)
                 )
             }
-            ("Bash", None) => super::interaction::remember::commands_label(
+            (ToolKind::Bash, None) => super::interaction::remember::commands_label(
                 suggestions,
                 &self.workspace,
                 view.lang,
@@ -305,10 +299,9 @@ impl Interaction {
             .or_else(|| detail["notebook_path"].as_str())
             .unwrap_or_default();
         let name = file_name(path).to_owned();
-        let edit = matches!(tool, "Edit" | "MultiEdit" | "NotebookEdit");
-        let (title, question) = match tool {
-            "Bash" => (if zh { "Bash 命令" } else { "Bash command" }, None),
-            _ if edit => (
+        let (title, question) = match ToolKind::of(tool) {
+            ToolKind::Bash => (if zh { "Bash 命令" } else { "Bash command" }, None),
+            ToolKind::Edit | ToolKind::MultiEdit | ToolKind::NotebookEdit => (
                 if zh { "编辑文件" } else { "Edit file" },
                 Some(if zh {
                     ("要对 ", " 做这处修改吗？")
@@ -316,7 +309,7 @@ impl Interaction {
                     ("Do you want to make this edit to ", "?")
                 }),
             ),
-            "Write" => (
+            ToolKind::Write => (
                 if zh { "写入文件" } else { "Write file" },
                 Some(if zh {
                     ("要写入 ", " 吗？")
@@ -324,8 +317,20 @@ impl Interaction {
                     ("Do you want to write ", "?")
                 }),
             ),
-            "WebFetch" => (if zh { "获取网页" } else { "Fetch" }, None),
-            _ => (if zh { "使用工具" } else { "Tool use" }, None),
+            ToolKind::WebFetch => (if zh { "获取网页" } else { "Fetch" }, None),
+            ToolKind::Read
+            | ToolKind::Grep
+            | ToolKind::Glob
+            | ToolKind::List
+            | ToolKind::WebSearch
+            | ToolKind::AskUserQuestion
+            | ToolKind::ExitPlanMode
+            | ToolKind::Agent
+            | ToolKind::TodoRead
+            | ToolKind::ToolSearch
+            | ToolKind::WaitForMcpServers
+            | ToolKind::Mcp
+            | ToolKind::Other => (if zh { "使用工具" } else { "Tool use" }, None),
         };
         let mut lines = frame(title, view);
         // 说明：工具参数里的 description（Bash 的命令说明）。
@@ -451,7 +456,6 @@ impl Interaction {
         let ctx = Ctx {
             palette: view.palette,
             lang: view.lang,
-            strings: view.strings,
             width: view.width,
             expanded: false,
             elapsed: std::time::Duration::ZERO,
@@ -463,7 +467,7 @@ impl Interaction {
             machines: &[],
             markdown: None,
         };
-        let rows = cells::patch_rows(tool, input);
+        let rows = cells::patch_rows(ToolKind::of(tool), input);
         let (mut lines, hidden) = cells::diff_lines(&rows, &ctx, PREVIEW);
         if hidden > 0 {
             lines.push(Line::from(Span::styled(

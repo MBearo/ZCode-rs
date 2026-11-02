@@ -10,6 +10,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use rust_cli_base::clock::SystemClock;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
     EnvironmentId, MessageId, OwnerEpoch, SessionId, ToolUseId, TraceId,
@@ -21,7 +22,7 @@ use rust_cli_kernel_api::message::{
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::store::{Fact, FactBatch, SessionKind, SessionMeta, SessionStore};
-use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use serde_json::json;
 
@@ -209,12 +210,7 @@ pub async fn seed(store: &NodeStore, root: &Path, turns: usize, after: &[(usize,
         .unwrap();
     let setup = vec![
         Fact::ModelSelected {
-            selection: ModelSelection {
-                provider: "p".to_owned(),
-                model: "m".to_owned(),
-                reasoning: None,
-                connection: None,
-            },
+            selection: ModelSelection::new("p".to_owned(), "m".to_owned()),
         },
         Fact::ModeChanged {
             mode: PermissionMode::Default,
@@ -271,7 +267,7 @@ pub async fn seed(store: &NodeStore, root: &Path, turns: usize, after: &[(usize,
 /// 入口同样的部件组成的内核（NodeStore、LocalEnvironment、指向不可达地址的 Anthropic 端点）：打开会话、取视图不调模型。
 pub async fn kernel(home: &Path, root: &Path) -> rust_cli_runtime::LocalKernel {
     use rust_cli_base::secret::RedactedString;
-    use rust_cli_model::{AnthropicEndpoint, ProviderModel};
+    use rust_cli_model::{AnthropicEndpoint, FixedEndpoint, ProviderModel, RouteOptions};
     use rust_cli_net::{Egress, NetworkPolicy};
 
     let clock = Arc::new(SystemClock::utc());
@@ -291,7 +287,12 @@ pub async fn kernel(home: &Path, root: &Path) -> rust_cli_runtime::LocalKernel {
         api_key: RedactedString::new("sk-test"),
     };
     let ports = rust_cli_runtime::Ports {
-        model: Arc::new(ProviderModel::anthropic(egress, endpoint, clock.clone())),
+        model: Arc::new(ProviderModel::new(
+            egress,
+            Arc::new(FixedEndpoint::new(endpoint)),
+            clock.clone(),
+            RouteOptions::default(),
+        )),
         environments: rust_cli_kernel_api::testing::environments(Arc::new(
             rust_cli_env_local::LocalEnvironment::new(Some(root.to_path_buf())),
         )),
@@ -301,12 +302,7 @@ pub async fn kernel(home: &Path, root: &Path) -> rust_cli_runtime::LocalKernel {
         ids,
     };
     let defaults = rust_cli_runtime::Defaults {
-        selection: ModelSelection {
-            provider: String::new(),
-            model: String::new(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: ModelSelection::new(String::new(), String::new()),
         mode: PermissionMode::Default,
         max_turns: None,
         search_tools: false,

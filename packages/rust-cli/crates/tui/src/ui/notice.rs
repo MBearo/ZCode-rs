@@ -10,7 +10,6 @@ use super::i18n::Lang;
 pub const DOUBLE: Duration = Duration::from_millis(800);
 pub const PASTE_FOR: Duration = Duration::from_secs(8);
 pub const HINT_FOR: Duration = Duration::from_secs(5);
-pub const IMAGE_FOR: Duration = Duration::from_secs(2);
 
 /// 等待第二次按下的按键。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,13 +64,6 @@ pub fn yank_hint(lang: Lang) -> &'static str {
     match lang {
         Lang::En => "{Ctrl+Y} to paste deleted text",
         Lang::Zh => "{Ctrl+Y} 粘回删掉的文字",
-    }
-}
-
-pub fn no_image(lang: Lang) -> &'static str {
-    match lang {
-        Lang::En => "No image found in clipboard",
-        Lang::Zh => "剪贴板里没有图片",
     }
 }
 

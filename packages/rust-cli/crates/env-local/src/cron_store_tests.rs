@@ -1,23 +1,15 @@
 use futures_util::StreamExt;
 use rust_cli_kernel_api::cron_store::NewCronTask;
+use rust_cli_kernel_api::testing::FixedClock;
 
 use super::*;
 
-/// 注入的时钟：晚于各用例里任务的 `created_at`（与以前读系统时间时的先后相同）。
-struct Later;
-
-impl Clock for Later {
-    fn now_ms(&self) -> u64 {
-        1_800_000_000_000
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
-
 fn store(dir: &tempfile::TempDir) -> LocalCronStore {
-    LocalCronStore::new(&EnvPath::new(dir.path().to_string_lossy()), Arc::new(Later))
+    // 注入的时钟：晚于各用例里任务的 `created_at`（与以前读系统时间时的先后相同）。
+    LocalCronStore::new(
+        &EnvPath::new(dir.path().to_string_lossy()),
+        Arc::new(FixedClock(1_800_000_000_000)),
+    )
 }
 
 fn new_task(id: &str, session: &str) -> NewCronTask {

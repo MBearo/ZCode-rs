@@ -4,11 +4,15 @@
 //! 展开 → 按类型分组去重 → `if` 条件 → SessionStart / Setup 不跑 http hook。
 
 use rust_cli_kernel_api::hooks::HookEventName;
+use rust_cli_kernel_api::permission::syntax::{
+    ShellRule, canonical_rule_tool, parse_rule, prefix_matches, wildcard_matches,
+};
 // 旧工具名：与权限规则共用 kernel-api 的一张表（F58）。
 use rust_cli_kernel_api::tool::{LEGACY_TOOL_NAMES as LEGACY, canonical_tool_name};
 use serde_json::Value;
 
 use crate::config::{HookCommand, HookMatcher, HookShell};
+use rust_cli_kernel_api::tool_names;
 
 /// matcher 精确列表允许 `,`、空格与 `-` 的事件。
 const EXTENDED: &[HookEventName] = &[
@@ -34,6 +38,9 @@ const EXTENDED: &[HookEventName] = &[
     HookEventName::InstructionsLoaded,
     HookEventName::DirectoryAdded,
 ];
+
+/// 只有这个工具的 `if` 内容会求值（D5）。
+const BASH: &str = tool_names::BASH;
 
 /// `if` 条件能求值的事件。
 const TOOL_EVENTS: &[HookEventName] = &[
@@ -198,45 +205,34 @@ fn dedup(hooks: Vec<HookCommand>) -> Vec<HookCommand> {
     groups.into_iter().flatten().map(|(_, hook)| hook).collect()
 }
 
-/// 权限规则的通配：`*` 匹配任意串；`prefix:*` 是前缀规则。
-fn wildcard(pattern: &str, text: &str) -> bool {
-    if let Some(prefix) = pattern.strip_suffix(":*") {
-        return text == prefix || text.starts_with(&format!("{prefix} "));
-    }
-    let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.len() == 1 {
-        return pattern == text;
-    }
-    let (first, last) = (parts[0], parts[parts.len() - 1]);
-    if text.len() < first.len() + last.len() || !text.starts_with(first) || !text.ends_with(last) {
-        return false;
-    }
-    let mut at = first.len();
-    let end = text.len() - last.len();
-    for part in &parts[1..parts.len() - 1] {
-        match text[at..end].find(part) {
-            Some(found) => at += found + part.len(),
-            None => return false,
+/// Bash 的 `command` 是否匹配条件的 content：前缀规则按前缀，其余按通配（`*`、`\*`、`git *` 也匹配 `git`、并空白），
+/// 两种都另认 `xargs <content>`（照对照实现的 hook 条件；hooks.md §3.3）。比较的是整条命令（去首尾空白），不拆子命令（D5）。
+fn command_matches(content: &str, command: &str) -> bool {
+    match ShellRule::parse(content) {
+        ShellRule::Prefix(prefix) => prefix_matches(prefix, command),
+        ShellRule::Exact(pattern) | ShellRule::Wildcard(pattern) => {
+            wildcard_matches(pattern, command)
+                || wildcard_matches(&format!("xargs {pattern}"), command)
         }
     }
-    true
 }
 
-/// `if` 条件（D5）：工具名相同；有括号内容时只对 Bash 的 `command` 求值。
+/// `if` 条件（D5）：按权限规则的语法解析（kernel-api `permission::syntax`，与判决链共用）；工具名相同（旧名按同一张
+/// 表）；有内容时只对 Bash 的 `command` 求值。
+///
+/// 修复（F125 的 T4）：以前这里是规则匹配的简化副本，`Bash(git *)` 不匹配 `git`、不并空白、不认转义的括号与星号、
+/// 前缀规则不认 `xargs`，与判决链对同一条规则的结论不同。
 fn condition_matches(condition: &str, tool: &str, input: &Value) -> bool {
-    let (name, content) = match condition.split_once('(') {
-        Some((name, rest)) => (name.trim(), rest.strip_suffix(')')),
-        None => (condition.trim(), None),
-    };
-    if normalize(name) != normalize(tool) {
+    let rule = parse_rule(condition.trim());
+    if rule.tool != canonical_rule_tool(tool) {
         return false;
     }
-    match content {
-        None | Some("") => true,
-        Some(content) if normalize(tool) == "Bash" => input
+    match rule.content.as_deref() {
+        None => true,
+        Some(content) if canonical_rule_tool(tool) == BASH => input
             .get("command")
             .and_then(Value::as_str)
-            .is_some_and(|command| wildcard(content, command.trim())),
+            .is_some_and(|command| command_matches(content, command.trim())),
         Some(_) => false,
     }
 }

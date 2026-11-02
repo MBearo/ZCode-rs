@@ -1,7 +1,8 @@
 //! 压缩附件的顺序（compact.md §3.4，附件与 hook 的结果）：
 //! 重读的文件、清单增量、SessionStart（`compact`）的消息。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::compaction::PostCompactContext;
@@ -40,10 +41,7 @@ impl PostCompactContext for Listings {
         request: ContextRequest,
         kept: &[Message],
     ) -> Result<Vec<AttachmentMessage>, OrchestrationError> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push((request, kept.len()));
+        self.0.lock_unpoisoned().push((request, kept.len()));
         Ok(vec![attachment("msg_deferred", "deferred_tools_delta")])
     }
 
@@ -53,10 +51,7 @@ impl PostCompactContext for Listings {
         history: &[Message],
         kept: &[Message],
     ) -> Result<Vec<AttachmentMessage>, OrchestrationError> {
-        self.1
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(history.len());
+        self.1.lock_unpoisoned().push(history.len());
         self.post_compact(request, kept).await
     }
 }

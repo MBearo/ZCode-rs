@@ -1,7 +1,7 @@
 //! `/usage`（别名 `/cost`、`/stats`）的页面（docs/specs/rust-cli/usage.md §4、§5）：Usage 与 Stats 两个标签页。
 //! Usage 是会话部分（API 时长由 runner 从内核查，用量表是唯一来源）；Stats 是活动统计，数据是内核
 //! 给出的聚合。换日期范围时按请求序号丢掉过时的回执（`FuturesUnordered` 里回执的先后不定），不用超时。
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -13,6 +13,7 @@ use rust_cli_kernel_api::metering::{
 
 use super::app::{Action, App, Overlay};
 use super::i18n_usage::{self as text, UsageStrings};
+use super::keyboard;
 use super::manage::Manage;
 use super::palette::Palette;
 use super::usage_stats::{self as stats, MODELS_PER_PAGE};
@@ -142,7 +143,7 @@ impl App {
         let Some(Overlay::Usage(view)) = self.overlay.as_mut() else {
             return None;
         };
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let ctrl = keyboard::ctrl(&key);
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.overlay = None,
             KeyCode::Char('c') if ctrl => self.overlay = None,
@@ -215,7 +216,7 @@ fn tabs<T: PartialEq>(
                     .add_modifier(Modifier::BOLD),
             )
         } else {
-            Span::styled(*label, palette.dim())
+            Span::styled(*label, crate::ui::style::dim())
         });
     }
     spans
@@ -233,7 +234,7 @@ fn usage_body(view: &UsageView, strings: &UsageStrings, palette: &Palette) -> Ve
     out.extend(
         view.summary
             .lines()
-            .map(|line| Line::from(Span::styled(line.to_owned(), palette.dim()))),
+            .map(|line| Line::from(Span::styled(line.to_owned(), crate::ui::style::dim()))),
     );
     out.push(Line::default());
     out.push(Line::from(super::key_hint::spans(
@@ -259,7 +260,10 @@ fn stats_body(view: &UsageView, width: usize, app: &App) -> Vec<Line<'static>> {
     ];
     let all = match &view.all {
         Err(error) => {
-            out.push(Line::from(Span::styled(error.clone(), palette.dim())));
+            out.push(Line::from(Span::styled(
+                error.clone(),
+                crate::ui::style::dim(),
+            )));
             return out;
         }
         // 一个会话都没有时只给提示。
@@ -273,7 +277,10 @@ fn stats_body(view: &UsageView, width: usize, app: &App) -> Vec<Line<'static>> {
     let shown = match shown {
         Ok(shown) => shown,
         Err(error) => {
-            out.push(Line::from(Span::styled(error.clone(), palette.dim())));
+            out.push(Line::from(Span::styled(
+                error.clone(),
+                crate::ui::style::dim(),
+            )));
             return out;
         }
     };
@@ -294,7 +301,7 @@ fn stats_body(view: &UsageView, width: usize, app: &App) -> Vec<Line<'static>> {
 }
 
 /// 整屏页面：第一行是标签栏，空一行，正文（左缩进两格），最后一行 dim 的提示。
-pub fn draw(frame: &mut Frame<'_>, app: &mut App, view: &UsageView) {
+pub fn draw(frame: &mut Frame<'_>, app: &mut App, view: &mut UsageView) {
     let area = frame.area();
     let strings = text::strings(app.lang);
     let width = usize::from(area.width).saturating_sub(super::layout::INDENT);
@@ -315,9 +322,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, view: &UsageView) {
     };
     let scroll = view.scroll.min(body.len().saturating_sub(height));
     // 夹住之后写回（F25：原来不写回，往回滚要多滚很多格）。
-    if let Some(Overlay::Usage(stored)) = app.overlay.as_mut() {
-        stored.scroll = scroll;
-    }
+    view.scroll = scroll;
     let mut out = vec![Line::from(header), Line::default()];
     out.extend(body.into_iter().skip(scroll).take(height).map(|line| {
         let mut spans = vec![Span::raw("  ")];

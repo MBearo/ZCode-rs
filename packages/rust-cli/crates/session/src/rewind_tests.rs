@@ -172,14 +172,21 @@ async fn rewinding_code_and_conversation_restores_the_file_and_cuts_history() {
         scope: RewindScope::Both,
     };
     let ack = built.session.send(envelope("r1", command)).await;
-    let Ack::Accepted { result } = ack else {
+    let Ack::Accepted {
+        result: rust_cli_kernel_api::session_api::CommandResult::Rewound { restored, removed },
+    } = ack
+    else {
         panic!("{ack:?}")
     };
     assert_eq!(
-        result["restored"],
-        json!([{"path": "/work/a.txt", "action": "restore"}])
+        restored,
+        [rust_cli_kernel_api::session_api::RewoundFile {
+            path: EnvPath::new("/work/a.txt"),
+            action: rust_cli_kernel_api::env_rewind::RestoreAction::Restore,
+            machine: rust_cli_kernel_api::ids::MachineName::primary(),
+        }]
     );
-    assert_eq!(result["removed"], 4);
+    assert_eq!(removed, 4);
     assert_eq!(file(&env, "/work/a.txt").as_deref(), Some("old\n"));
     until(&mut events, |e| {
         matches!(e, KernelEvent::HistoryRewritten { generation: 1 })

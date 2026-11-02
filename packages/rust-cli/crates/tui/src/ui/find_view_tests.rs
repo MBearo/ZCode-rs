@@ -358,7 +358,7 @@ fn a_width_change_keeps_the_current_match_and_brings_it_into_view() {
     );
     assert!(input_row(&lines).unwrap().ends_with("1/1"));
     // 滚开它（滚轮、翻页不换当前匹配），再改宽度：重新找回并滚回视口。
-    screen.app.scroll = 0;
+    screen.app.port.scroll = 0;
     let lines = screen.draw();
     assert!(
         !lines.iter().any(|l| l.contains("needle at the top")),
@@ -379,7 +379,7 @@ fn a_width_change_keeps_the_current_match_and_brings_it_into_view() {
         !lines.iter().any(|l| l.contains("needle at the top")),
         "{lines:#?}"
     );
-    assert_eq!(screen.app.scroll, 0);
+    assert_eq!(screen.app.port.scroll, 0);
 }
 
 #[test]

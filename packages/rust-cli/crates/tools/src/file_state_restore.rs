@@ -5,7 +5,9 @@
 //! - Write：取调用里的 content；
 //! - Edit：结果不含全文，现在从执行环境读一次，记下当前版本。
 //!
-//! 历史里没有版本，Read / Write 的记录用 [`Baseline::Content`]：之后按内容判断是否被改过。
+//! 历史里没有版本：Write 的记录用 [`Baseline::Content`]（输入的原样内容），Read 的用 [`Baseline::Transcript`]（结果文字
+//! 去掉了首尾空白，比的时候当前内容也去掉）：之后按内容判断是否被改过。Read 的记录同实时的
+//! Read，`offset` 是 1（所以不进“读过的文件在磁盘上被改动”的检查）；Write、Edit 的没有 offset。
 //!
 //! 写了 `machine` 的调用（R3，remote-exec.md §20.7.3）归到那台机器：只认绝对路径（恢复时不知道那台机器的工作目录），
 //! Edit 不重读（那台机器可能没连上），暂定。
@@ -15,7 +17,7 @@ use std::collections::HashMap;
 use regex::Regex;
 use rust_cli_kernel_api::env::{EnvPath, ReadFile, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
-use rust_cli_kernel_api::env_registry::LOCAL_MACHINE;
+use rust_cli_kernel_api::ids::MachineName;
 use rust_cli_kernel_api::ids::{SessionId, ToolUseId};
 use rust_cli_kernel_api::machine::Files;
 use rust_cli_kernel_api::machine_param::named_in;
@@ -60,7 +62,7 @@ fn calls(messages: &[Message], root: &EnvPath) -> HashMap<ToolUseId, Pending> {
                 Some(_) if PathStyle::infer(raw).is_absolute(raw) => raw.to_owned(),
                 Some(_) => continue,
             };
-            let key = FileKey::new(machine.unwrap_or(LOCAL_MACHINE), &path);
+            let key = FileKey::new(machine.map(MachineName::new).unwrap_or_default(), &path);
             let pending = match name.as_str() {
                 read::NAME if input.get("offset").is_none() && input.get("limit").is_none() => {
                     Pending::Read(key)
@@ -145,7 +147,14 @@ pub async fn restore_file_state(
                     if text.starts_with(texts::FILE_UNCHANGED) {
                         continue;
                     }
-                    entries.push((key.clone(), entry(file_text(text), Baseline::Content)));
+                    // 同实时的 Read 与对照实现的冷恢复：`offset` 是 1。修正（工作线 F130）：以前没有 offset，D4 接上冷恢复
+                    // 之后，读过的文件在磁盘上被改动的检查（只看没有 offset、limit 的记录，tools-files.md §4.1）拿去掉
+                    // 末尾空白的结果文字比文件内容，没改过的文件在续写后被报成“改过”。
+                    let read = FileState {
+                        offset: Some(1),
+                        ..entry(file_text(text), Baseline::Transcript)
+                    };
+                    entries.push((key.clone(), read));
                 }
                 Some(Pending::Write(key, content)) => {
                     entries.push((key.clone(), entry(normalize(content), Baseline::Content)));
@@ -156,7 +165,7 @@ pub async fn restore_file_state(
                     };
                     if let Ok(file) = files.read_file(workspace, request).await {
                         let text = decode(&file.bytes).content;
-                        let key = FileKey::new(LOCAL_MACHINE, path);
+                        let key = FileKey::new(MachineName::primary(), path);
                         entries.push((key, entry(text, Baseline::Version(file.version))));
                     }
                 }

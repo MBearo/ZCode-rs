@@ -9,11 +9,12 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use rust_cli_base::proto::exit;
-use rust_cli_kernel_api::env::{CommandEvent, EnvPath, Outcome, StartCommand};
+use rust_cli_kernel_api::env::{CommandEvent, CommandKind, EnvPath, Outcome, StartCommand};
 use rust_cli_kernel_api::env_shell::{
     self, BackgroundCommand, CwdScope, SandboxPolicy, ShellKind, TimeoutBackground,
 };
 use rust_cli_kernel_api::machine::CommandEvents;
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
@@ -22,10 +23,13 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::bash_output::{self as output, INLINE_LIMIT};
-pub use crate::bash_timeouts::BashTimeouts;
-use crate::common::{Definition, definition, env_failure, text};
+use crate::bash_settings::BashSettings;
+use crate::common::env_failure;
+use rust_cli_kernel_api::tool::text;
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const NAME: &str = "Bash";
+pub const NAME: &str = tool_names::BASH;
 
 // 缺陷修复：Bash 提示原来总用缺省的文字。启动参数点名了
 // Glob / Grep（它们在工具清单里）时提示另点名 `find`、`grep`；缺省不点名。工具清单就是唯一来源：
@@ -33,26 +37,10 @@ pub const NAME: &str = "Bash";
 const WITHOUT_SEARCH_TOOLS: &str = "`cat`, `head`, `tail`, `sed`, `awk`, or `echo`";
 const WITH_SEARCH_TOOLS: &str = "`find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo`";
 
-// 修 bug（修复线 F9）：只在非交互会话（`-p`）给后台命令设期限（shell-permissions.md §1.1）；
-// 原来 TUI 也照 `-p` 写期限、设超时。交互会话去掉期限的两段说明（`BashTimeouts` 的
-// `deadline_sentence` / `deadline_parameter`），后台命令不设超时。
-/// “不要用 cat”一行的开头（只在没有去掉这一行时出现；两种点名写法开头相同）。
-const AVOID_LINE: &str = "\n- IMPORTANT: Avoid using this tool to run ";
 /// 进度里带上这一块输出的最后这么多个字节。
 const PROGRESS_TAIL_BYTES: usize = 2_000;
 /// 校验错误码：命令是被拦下的 sleep 一类。
 const SLEEP_BLOCKED_CODE: i32 = 10;
-
-/// 去掉以 `start`（含前面的换行）开头的那一行；没有这一行时原样返回。
-fn without_line(text: &str, start: &str) -> String {
-    let Some(at) = text.find(start) else {
-        return text.to_owned();
-    };
-    let end = text[at + 1..]
-        .find('\n')
-        .map_or(text.len(), |offset| at + 1 + offset);
-    format!("{}{}", &text[..at], &text[end..])
-}
 
 #[derive(Debug, Deserialize)]
 struct Input {
@@ -89,51 +77,31 @@ fn moves_on_timeout(command: &str) -> bool {
 }
 
 pub struct BashTool {
+    /// 由 `settings` 渲染出的描述与 schema（构造时算一次）。
     definition: Definition,
+    /// 进程级设置：超时、后台期限、去掉一行、Monitor（[`BashSettings`]）。
+    settings: BashSettings,
     /// 默认的 sandbox 规则；None 表示不套 sandbox（默认 `sandbox.enabled = false`）。
     sandbox: Option<SandboxPolicy>,
-    /// 后台命令有没有期限：`-p` 有（缺省），交互会话没有（[`BashTool::with_background_deadline`]）。
-    background_deadline: bool,
-    /// 前台与后台的缺省与上限（入口按 `BASH_*_TIMEOUT_MS` 给出，[`BashTool::with_timeouts`]）。
-    timeouts: BashTimeouts,
     /// 读文件的命令记进的 readFileState（tools-files.md §4.2）；None 时不记。
     files: Option<std::sync::Arc<crate::file_state::ReadFileState>>,
-    /// Monitor 开着（工作线 F83，tools-more.md §19.9）：描述多一句，前台的长 `sleep` 拦下。
-    monitor: bool,
 }
 
 impl Default for BashTool {
+    /// 缺省设置（单次 `-p` 的写法）。
     fn default() -> Self {
-        Self::new()
+        Self::new(BashSettings::default())
     }
 }
 
 impl BashTool {
-    pub fn new() -> Self {
+    pub fn new(settings: BashSettings) -> Self {
         Self {
-            definition: definition(NAME),
+            definition: settings.render(),
+            settings,
             sandbox: None,
-            background_deadline: true,
-            timeouts: BashTimeouts::default(),
             files: None,
-            monitor: false,
         }
-    }
-
-    /// Monitor 开着（工作线 F83，tools-more.md §19.9）：`run_in_background` 一行末尾加 “Foreground `sleep` is
-    /// blocked; …” 一句，没有 `run_in_background` 的前台长 `sleep` 拦下（errorCode 10）。与期限的两个方法先后无关。
-    #[must_use]
-    pub fn with_monitor(mut self, enabled: bool) -> Self {
-        if enabled && !self.monitor {
-            const ANCHOR: &str = "No `&` needed.";
-            self.definition.description = self.definition.description.replacen(
-                ANCHOR,
-                &format!("{ANCHOR}{}", rust_cli_prompts::monitor::bash_sentence()),
-                1,
-            );
-        }
-        self.monitor = enabled;
-        self
     }
 
     /// 读文件的命令（`cat`、`head`、`sed -n` 等）正常结束后把文件记进这份 readFileState（文件工具用的同一份，
@@ -144,71 +112,6 @@ impl BashTool {
         files: std::sync::Arc<crate::file_state::ReadFileState>,
     ) -> Self {
         self.files = Some(files);
-        self
-    }
-
-    /// stream-json 输入的 `-p`：后台命令的缺省期限是 max(1800000, 前台
-    /// 缺省)，描述与 schema 里的数字随之变（headless.md §6.1，修复线 F39；F42 起经 [`BashTimeouts`]，
-    /// 与 `BASH_DEFAULT_TIMEOUT_MS` 一起算）。
-    #[must_use]
-    pub fn with_streaming_input(self) -> Self {
-        let timeouts = self.timeouts.with_streaming_input();
-        self.with_timeouts(timeouts)
-    }
-
-    /// 后台命令的期限：交互会话传 false，描述与 schema 去掉期限的说明，后台命令不设超时。
-    #[must_use]
-    pub fn with_background_deadline(mut self, enabled: bool) -> Self {
-        if !enabled {
-            let (sentence, parameter) = (
-                self.timeouts.deadline_sentence(),
-                self.timeouts.deadline_parameter(),
-            );
-            self.definition.description = self.definition.description.replacen(&sentence, "", 1);
-            if let Some(Value::String(text)) = self
-                .definition
-                .schema
-                .pointer_mut("/properties/run_in_background/description")
-            {
-                *text = text.replacen(&parameter, "", 1);
-            }
-        }
-        self.background_deadline = enabled;
-        self
-    }
-
-    /// 进程启动时是 bypass 类别时去掉 `- IMPORTANT: Avoid using this tool to run …` 一行（修复线 F43，
-    /// shell-permissions.md §1.1、§4.9）。条件是自动模式或会话的 bypass 模式，
-    /// 会话里算一次就不变，所以按启动时的模式定下，不看每一步的模式；工具定义在会话中途不变，缓存前缀不断。
-    #[must_use]
-    pub fn with_bash_first_trimmed(mut self, trimmed: bool) -> Self {
-        if trimmed {
-            self.definition.description = without_line(&self.definition.description, AVOID_LINE);
-        }
-        self
-    }
-
-    /// 超时的缺省与上限（`BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS`，cli-args.md §9.3，修复线 F42）：执行时用
-    /// 它们，描述与 schema 里的数字跟着换（文字由这些值生成）。与 [`BashTool::with_background_deadline`] 的
-    /// 先后不影响结果。
-    #[must_use]
-    pub fn with_timeouts(mut self, timeouts: BashTimeouts) -> Self {
-        let old = self.timeouts;
-        self.definition.description = self
-            .definition
-            .description
-            .replacen(&old.foreground_line(), &timeouts.foreground_line(), 1)
-            .replacen(&old.deadline_sentence(), &timeouts.deadline_sentence(), 1);
-        let schema = &mut self.definition.schema;
-        if let Some(Value::String(text)) = schema.pointer_mut("/properties/timeout/description") {
-            *text = text.replacen(&old.timeout_parameter(), &timeouts.timeout_parameter(), 1);
-        }
-        if let Some(Value::String(text)) =
-            schema.pointer_mut("/properties/run_in_background/description")
-        {
-            *text = text.replacen(&old.deadline_parameter(), &timeouts.deadline_parameter(), 1);
-        }
-        self.timeouts = timeouts;
         self
     }
 
@@ -323,6 +226,25 @@ impl Tool for BashTool {
         NAME
     }
 
+    /// 在点名的机器上执行命令（remote-exec.md §20.5.1）。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::RunsThere
+    }
+
+    /// 判决链按 Bash 的规则检查这条命令（shell-permissions.md §4.5）；没有 command 时是空命令。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        Some(rust_cli_kernel_api::permission::PermissionSubject::Shell {
+            command: input
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        })
+    }
+
     fn input_schema(&self) -> Value {
         self.definition.schema.clone()
     }
@@ -345,7 +267,7 @@ impl Tool for BashTool {
         input
             .get("command")
             .and_then(Value::as_str)
-            .is_some_and(|command| rust_cli_policy::readonly::is_read_only(command, false))
+            .is_some_and(|command| rust_cli_policy::is_read_only(command, false))
     }
 
     fn is_concurrency_safe(&self, input: &Value) -> bool {
@@ -362,7 +284,9 @@ impl Tool for BashTool {
         _context: &ToolUseContext,
     ) -> rust_cli_kernel_api::tool::Validation {
         use rust_cli_kernel_api::tool::Validation;
-        if !self.monitor || input.get("run_in_background").and_then(Value::as_bool) == Some(true) {
+        if !self.settings.monitor
+            || input.get("run_in_background").and_then(Value::as_bool) == Some(true)
+        {
             return Validation::Ok;
         }
         let command = input
@@ -434,7 +358,9 @@ impl BashTool {
         may_move: bool,
     ) -> Result<Ran, ToolError> {
         let background = input.run_in_background == Some(true);
-        let timeout_ms = self.timeouts.effective(input.timeout, background);
+        let timeouts = &self.settings.timeouts;
+        let deadline = self.settings.background_deadline;
+        let timeout_ms = timeouts.effective(input.timeout, background);
         let description = input
             .description
             .clone()
@@ -448,14 +374,12 @@ impl BashTool {
                     tool_use: Some(context.tool_use.clone()),
                     kind: Default::default(),
                 },
-                deadline_ms: self
-                    .background_deadline
-                    .then(|| self.timeouts.effective(None, true)),
+                deadline_ms: deadline.then(|| timeouts.effective(None, true)),
             }
         });
         let deadline_ms = on_timeout.as_ref().and_then(|moved| moved.deadline_ms);
         // 交互会话的后台命令没有期限。
-        let start_timeout = (!background || self.background_deadline).then_some(timeout_ms);
+        let start_timeout = (!background || deadline).then_some(timeout_ms);
         let task = output::task_id(&context.operation.operation);
         let workspace = &context.workspace;
         // 子代理不改主线程的 cwd：在子会话的当前目录启动（派生时取自父会话，
@@ -475,22 +399,22 @@ impl BashTool {
             (workspace.root.clone(), CwdScope::Session { roots })
         };
         let start = StartCommand {
-            command: input.command.clone(),
-            cwd: cwd.clone(),
             timeout_ms: start_timeout,
-            task: task.clone(),
             shell: ShellKind::Bash,
             cwd_scope,
-            background: background.then(|| BackgroundCommand {
-                description,
-                tool_use: Some(context.tool_use.clone()),
-                kind: Default::default(),
-            }),
             sandbox: self.sandbox_for(&input),
-            hook: None,
-            on_timeout,
-            socket: None,
-            env: Default::default(),
+            kind: if background {
+                CommandKind::Background {
+                    background: BackgroundCommand {
+                        description,
+                        tool_use: Some(context.tool_use.clone()),
+                        kind: Default::default(),
+                    },
+                }
+            } else {
+                CommandKind::Foreground { on_timeout }
+            },
+            ..StartCommand::new(input.command.clone(), cwd.clone(), task.clone())
         };
         let events = context
             .machine
@@ -584,12 +508,12 @@ impl BashTool {
 /// 缺陷修复（Docker 试用 L1）：以前只写路径与“use Read on that file path”，模型照做（不写 `machine`）在本机读，得到
 /// “File does not exist”；文件在执行命令的那台机器上。本机的调用不变（逐字照参照版本）。
 fn file_on_machine(text: String, context: &ToolUseContext) -> String {
-    if context.machine.is_local() {
+    if context.machine.is_primary() {
         return text;
     }
     let note = rust_cli_prompts::texts::render(
         rust_cli_prompts::texts::remote_output_file(),
-        &[("machine", context.machine.name())],
+        &[("machine", context.machine.name().as_str())],
     );
     format!("{text}\n{note}")
 }
@@ -615,7 +539,7 @@ fn changes_directory(command: &str) -> bool {
             .collect()
     };
     parts.iter().any(|part| {
-        rust_cli_policy::shell_rules::strip_safe_wrappers(part)
+        rust_cli_policy::strip_safe_wrappers(part)
             .split_whitespace()
             .next()
             .is_some_and(|word| NAMES.contains(&word))

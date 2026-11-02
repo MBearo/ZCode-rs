@@ -15,22 +15,15 @@
 
 mod account;
 mod auth;
-mod cli_config;
 mod consts;
 mod credentials;
-mod device;
 #[cfg(test)]
 mod fake_server_tests;
-pub mod header_source;
-mod history;
-mod hook_trust;
+pub mod local;
 mod login;
-pub mod model_name;
 mod option_map;
 mod personal;
-pub mod plugin_inventory;
 mod providers;
-mod settings;
 mod team;
 #[cfg(test)]
 mod test_support;
@@ -43,29 +36,22 @@ use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::model::{ModelError, ModelSelection};
 use rust_cli_kernel_api::provider::{
-    Credential, EndpointContext, ModelCapabilities, ModelCatalog, ModelDirectory, ModelEndpoint,
-    ModelEndpoints, ModelLimits, TokenLimits, WireProtocol,
+    Credential, EndpointQuery, HeaderRequest, HeaderSource, ModelCapabilities, ModelCatalog,
+    ModelDirectory, ModelEndpoint, ModelEndpoints, ModelLimits, TokenLimits, WireProtocol,
 };
 use rust_cli_net::Egress;
 use rust_cli_net::header;
 use rust_cli_paths::{StoragePath, StoragePaths};
 
-pub use cli_config::{
-    ConfigFile, ConfigWriteError, UiLocale, UiTheme, mcp_enabled_text, read_cli_config,
-    write_mcp_enabled, write_ui_locale, write_ui_theme,
-};
 pub use credentials::{CredentialError, CredentialSecret};
-pub use device::{DeviceMid, NewUuid};
-pub use history::{History, Recorder};
-pub use hook_trust::{HookTrustStore, TrustError, TrustLoad, TrustRecord};
 pub use login::{LoginError, LoginOutcome, PendingLogin, SetupOutcome};
 /// Node 的平台名（定义在 base，F55）；入口经 platform 取用，路径不变。
 pub use rust_cli_base::js::node_platform;
-pub use settings::Settings;
-pub use token::{AccountOrigins, Family, TokenError};
+pub use token::{AccountOrigins, TokenError};
 
 use crate::auth::AccountAuth;
 use crate::credentials::CredentialStore;
+use crate::local::Settings;
 use crate::providers::catalog::{Access, Template};
 pub use crate::providers::site::SiteRules;
 use crate::providers::{Plans, Registry};
@@ -101,7 +87,7 @@ pub struct Platform {
     /// `ZCODE_MAX_OUTPUT_TOKENS`（cli-args.md §9.1，修复线 F42）：`maxOutputTokens.map` 取它与配置的较小值。
     max_output_tokens: Option<u64>,
     /// 注入的账号凭据来源（缺口 G8）：有时账号模型的凭据向它要，没有时自己算（TUI、`-p`）。
-    header_source: Option<Arc<dyn header_source::HeaderSource>>,
+    header_source: Option<Arc<dyn HeaderSource>>,
 }
 
 impl Platform {
@@ -149,7 +135,7 @@ impl Platform {
     /// 注入账号模型每请求鉴权的来源（缺口 G8，app-protocol.md §5.2）：之后账号模型的凭据与请求头都向它要；
     /// API key 的 provider 不变。
     #[must_use]
-    pub fn with_header_source(mut self, source: Arc<dyn header_source::HeaderSource>) -> Self {
+    pub fn with_header_source(mut self, source: Arc<dyn HeaderSource>) -> Self {
         self.header_source = Some(source);
         self
     }
@@ -214,17 +200,17 @@ impl Platform {
         template: &Template,
         selection: &ModelSelection,
         rejected: Option<&RedactedString>,
-        context: &EndpointContext,
+        session: Option<&rust_cli_kernel_api::ids::SessionId>,
     ) -> Result<(Option<RedactedString>, Vec<(String, RedactedString)>), ModelError> {
         if let (Access::Account { account_type, mode }, Some(source)) =
             (&template.access, &self.header_source)
         {
             let supplied = source
-                .request_auth(header_source::HeaderRequest {
+                .request_auth(HeaderRequest {
                     selection: selection.clone(),
                     account_type: account_type.clone(),
                     mode: mode.clone(),
-                    session: context.session.clone(),
+                    session: session.cloned(),
                     rejected_fingerprint: rejected.map(|key| token::fingerprint(key.expose())),
                 })
                 .await?;
@@ -275,41 +261,18 @@ impl ModelLimits for Platform {
 
 #[async_trait]
 impl ModelEndpoints for Platform {
-    async fn endpoint(
-        &self,
-        selection: &ModelSelection,
-        rejected: Option<&ModelEndpoint>,
-    ) -> Result<ModelEndpoint, ModelError> {
-        self.endpoint_with_output_limit(selection, rejected, None)
-            .await
-    }
-
     /// 修 bug（工作线 F95，platform.md §3.3、tools-more.md §5 表后）：以前 `maxOutputTokens` 补丁的输入只是配置的上限
     /// （与 `ZCODE_MAX_OUTPUT_TOKENS` 取小），目录模型上 WebSearch 旁路请求自己的 `min(4096, 上限)` 被改写成配置的上限
     /// （GLM-5.3-Flash 发 128000）；Node 的 option map 以请求自己的上限为输入，发 4096。现在请求交来的上限也参与取小。
-    async fn endpoint_with_output_limit(
-        &self,
-        selection: &ModelSelection,
-        rejected: Option<&ModelEndpoint>,
-        output_limit: Option<u64>,
-    ) -> Result<ModelEndpoint, ModelError> {
-        self.endpoint_in(
+    ///
+    /// 缺口 G8：查询里的会话只给注入的凭据来源用；没有来源时不看它。
+    async fn endpoint(&self, query: EndpointQuery<'_>) -> Result<ModelEndpoint, ModelError> {
+        let EndpointQuery {
             selection,
             rejected,
             output_limit,
-            &EndpointContext::default(),
-        )
-        .await
-    }
-
-    /// 缺口 G8：上下文只给注入的凭据来源用（发请求的会话）；没有来源时与 `endpoint_with_output_limit` 相同。
-    async fn endpoint_in(
-        &self,
-        selection: &ModelSelection,
-        rejected: Option<&ModelEndpoint>,
-        output_limit: Option<u64>,
-        context: &EndpointContext,
-    ) -> Result<ModelEndpoint, ModelError> {
+            session,
+        } = query;
         let current = self.registry.current().await;
         let Some(template) = current.snapshot.find(selection) else {
             // 这个团队项目已过期 / 未分配：照 App 的文案提示（platform.md §9.2）。
@@ -338,7 +301,7 @@ impl ModelEndpoints for Platform {
             Some(Credential::None) | None => None,
         };
         let (key, supplied) = self
-            .request_auth(template, selection, previous, context)
+            .request_auth(template, selection, previous, session)
             .await?;
         // 被拒的凭据重新读到的还是同一个（手工 key 不会自己变）：不再重试，直接报鉴权失败。
         if let (Some(previous), Some(key)) = (previous, &key)
@@ -374,7 +337,6 @@ impl ModelEndpoints for Platform {
                 ),
             );
         }
-        let capabilities = &template.capabilities;
         Ok(ModelEndpoint {
             protocol: template.protocol,
             base_url: template.base_url.clone(),
@@ -382,11 +344,7 @@ impl ModelEndpoints for Platform {
             credential: key.map_or(Credential::None, Credential::ApiKey),
             headers,
             body_patches,
-            mid_conversation_system: capabilities.supports_mid_conversation_system,
-            supports_image: capabilities.supports_image,
-            supports_pdf: capabilities.supports_pdf,
-            supports_video: capabilities.supports_video,
-            supports_audio: capabilities.supports_audio,
+            capabilities: template.capabilities,
             renewable: matches!(template.access, Access::Account { .. }),
         })
     }

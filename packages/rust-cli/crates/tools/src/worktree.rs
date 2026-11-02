@@ -2,12 +2,13 @@
 //! [`crate::worktree_exit`]。
 //!
 //! git 操作经执行环境（`Git::worktree_*`）；会话的工作目录只有会话 actor 一个 owner，工具经
-//! `Interactions::set_workspace` 请求修改（§11.4）。worktree 会话的记录按
+//! `SessionOps::set_workspace` 请求修改（§11.4）。worktree 会话的记录按
 //! 顶层会话放在 [`WorktreeBoard`]，只在改目录成功后记录或清除。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use rust_cli_kernel_api::env_files::GIT_DIR;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use rust_cli_base::names::{DOT_DIR, WORKTREES_DIR};
@@ -23,15 +24,18 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::common::{Definition, definition, env_failure, failed, parse, resolve, style, text};
+use crate::common::{env_failure, resolve, style};
 use crate::session_slug::session_slug;
 use crate::worktree_exit::ExitWorktreeTool;
 use crate::worktree_texts as texts;
+use rust_cli_kernel_api::tool::{failed, parse, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
 /// 校验错误码：会话已经在一个 worktree 里。
 const ALREADY_IN_CODE: i32 = 2;
 
-pub const ENTER: &str = "EnterWorktree";
+pub const ENTER: &str = tool_names::ENTER_WORKTREE;
 
 /// 一个顶层会话当前所在的 worktree。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +54,7 @@ pub struct WorktreeBoard(Mutex<HashMap<SessionId, WorktreeSession>>);
 
 impl WorktreeBoard {
     pub(crate) fn sessions(&self) -> MutexGuard<'_, HashMap<SessionId, WorktreeSession>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_unpoisoned()
     }
 
     pub(crate) fn get(&self, owner: &SessionId) -> Option<WorktreeSession> {
@@ -68,7 +72,7 @@ impl WorktreeBoard {
 pub fn worktree_tools(board: &Arc<WorktreeBoard>) -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(EnterWorktreeTool {
-            definition: definition(ENTER),
+            definition: rust_cli_prompts::definition(ENTER).clone(),
             board: board.clone(),
         }),
         Arc::new(ExitWorktreeTool::new(board)),
@@ -76,7 +80,7 @@ pub fn worktree_tools(board: &Arc<WorktreeBoard>) -> Vec<Arc<dyn Tool>> {
 }
 
 pub(crate) async fn owner(context: &ToolUseContext) -> SessionId {
-    context.interactions.owner_session(&context.session).await
+    context.session_ops.owner_session(&context.session).await
 }
 
 /// 名字：总长不超过 64；按 `/` 分段，每段非空、只含字母数字与 `._-`，不能是 `.` / `..` / `.git`。
@@ -121,8 +125,8 @@ pub(crate) fn invalid(message: String, code: Option<i32>) -> Validation {
 
 pub(crate) async fn switch(context: &ToolUseContext, root: EnvPath) -> Result<(), ToolError> {
     context
-        .interactions
-        .set_workspace(&context.session, root)
+        .session_ops
+        .set_workspace(root)
         .await
         .map_err(|error| failed(error.to_string()))
 }
@@ -154,7 +158,7 @@ impl EnterWorktreeTool {
         let style = style(context);
         let wanted = resolve(context, context.workspace.root.as_str(), raw).await?;
         let listed = context
-            .local
+            .machine
             .git()
             .worktree_list(context.workspace.root.clone())
             .await
@@ -236,15 +240,9 @@ impl Tool for EnterWorktreeTool {
             // 严格在本仓库的 `.zcode/worktrees/` 里（F57：按 `env_path` 的键，以前是 `<根>/.zcode/worktrees/` 的字符串前缀，
             // Windows 上写法对不上）。
             Ok((path, root, _)) if managed(style, &path, &root) => allow,
-            Ok((path, ..)) => PermissionDecision::Ask {
-                message: texts::ask_enter(&path),
-                suggestions: Vec::new(),
-            },
+            Ok((path, ..)) => PermissionDecision::ask(texts::ask_enter(&path), Vec::new()),
             Err(_) => match resolve(context, context.workspace.root.as_str(), raw).await {
-                Ok(path) => PermissionDecision::Ask {
-                    message: texts::ask_enter(&path),
-                    suggestions: Vec::new(),
-                },
+                Ok(path) => PermissionDecision::ask(texts::ask_enter(&path), Vec::new()),
                 Err(_) => allow,
             },
         }
@@ -287,7 +285,7 @@ impl Tool for EnterWorktreeTool {
                     name,
                 };
                 let created = context
-                    .local
+                    .machine
                     .git()
                     .worktree_create(context.operation.clone(), request)
                     .await

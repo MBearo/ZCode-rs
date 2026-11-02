@@ -3,9 +3,8 @@
 //! 一条在跑的 shell 与两条在跑的 monitor（命令来源与 WebSocket 来源），子进程进入真实终端；footer 写
 //! `1 shell, 2 monitors`，↓ enter 打开 Background 面板，monitor 的名称是它的 description，详情是 `Monitor details`。
 //! 修前 footer 写 `3 shells`。
-use std::sync::Arc;
 
-use rust_cli_kernel_api::testing::{environments, text_response};
+use rust_cli_kernel_api::testing::text_response;
 
 use super::ledger::Ledger;
 use super::pty::{Pty, ROLE, interface_in, shows};
@@ -75,7 +74,7 @@ async fn child() {
     assert_eq!(role, "monitors");
     interface_in(
         GatedModel::scripted(vec![text_response(&["watching the build"])]),
-        environments(Arc::new(Ledger(&["b1", "b2", "s3"]))),
+        Ledger(&["b1", "b2", "s3"]).registry(),
     )
     .await;
 }

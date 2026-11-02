@@ -1,36 +1,20 @@
 //! 模型请求与工具调用的计时（docs/specs/rust-cli/usage.md §1、§2）：计时点、状态、与消息同批提交。
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::abort::Abort;
-use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::message::{Message, StopReason};
 use rust_cli_kernel_api::metering::{CallStatus, Metered, ModelCall, ToolCall};
 use rust_cli_kernel_api::model::{
     ModelError, ModelEvent, ModelNotice, ModelPort, ModelRequest, ModelStreamItem, QuerySource,
 };
 use rust_cli_kernel_api::testing::{
-    FakeTool, RecordingSink, ScriptedModel, selection, text_response, tool_use_response,
+    FakeTool, RecordingSink, ScriptedModel, StepClock, selection, text_response, tool_use_response,
 };
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use crate::run::tests::{parts, request, scope};
-
-/// 每读一次前进 10 ms 的时钟：计时点的先后可以逐个核对。
-#[derive(Default)]
-struct TickClock(AtomicU64);
-
-impl Clock for TickClock {
-    fn now_ms(&self) -> u64 {
-        self.0.fetch_add(10, Ordering::SeqCst) + 10
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
 
 async fn run(
     model: Arc<dyn ModelPort>,
@@ -43,7 +27,8 @@ async fn run(
     Arc<RecordingSink>,
 ) {
     let mut parts = parts(model, tools);
-    parts.clock = Arc::new(TickClock::default());
+    // 每读一次前进 10 ms：计时点的先后可以逐个核对。
+    parts.clock = Arc::new(StepClock::new(10, 10));
     let request = request("hi");
     let (scope, sink) = scope(parts, &request, Abort::new());
     (crate::run::run(scope, request).await, sink)

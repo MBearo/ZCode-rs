@@ -14,12 +14,13 @@ mod words;
 
 use std::time::Duration;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
-use super::i18n::{Lang, Strings};
+use super::i18n::Lang;
 use super::palette::Palette;
 use super::text::{plain, wrap_text};
+use crate::ui::style::{bold, dim};
 use crate::view::{Body, Row, ToolRow, ToolStatus, TurnState};
 
 /// 排版所需的上下文；只读。
@@ -27,7 +28,6 @@ use crate::view::{Body, Row, ToolRow, ToolStatus, TurnState};
 pub struct Ctx<'a> {
     pub palette: &'a Palette,
     pub lang: Lang,
-    pub strings: &'a Strings,
     pub width: usize,
     pub expanded: bool,
     /// 动画时间（运行中的圆点闪烁）。
@@ -276,14 +276,6 @@ pub(crate) const DETAIL: &str = "  ⎿  ";
 pub(crate) const INDENT: &str = "     ";
 /// 运行中圆点的闪烁周期。
 const BLINK_MS: u128 = 600;
-
-pub(crate) fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
-
-pub(crate) fn bold() -> Style {
-    Style::default().add_modifier(Modifier::BOLD)
-}
 
 pub(crate) fn red() -> Style {
     Style::default().fg(Color::Red)

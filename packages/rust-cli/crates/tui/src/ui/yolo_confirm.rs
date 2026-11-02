@@ -12,8 +12,10 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::{Action, App, Overlay};
 use super::i18n_yolo as words;
-use super::interaction_view::{View, bold, checkbox, dim, hint, named, option};
+use super::interaction_view::{View, checkbox, hint, named, option};
+use super::keyboard;
 use super::layout;
+use super::style::{bold, dim};
 use super::text::{wrap, wrap_text};
 
 /// 焦点所在的一处：勾选框、取消、确认启用（从上到下）。
@@ -73,7 +75,7 @@ impl App {
     /// 确认框开着时的按键：↑↓ 移动，Space 勾选（焦点在勾选框上时），Enter 作用于当前项，`1` / `2` 作用于对应序号的选项，
     /// Esc 与 ctrl+c 取消；其余不起作用。
     pub(super) fn yolo_confirm_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let ctrl = self.typing.ctrl(&key);
+        let ctrl = keyboard::ctrl(&key);
         let Some(Overlay::YoloConfirm(confirm)) = self.overlay.as_mut() else {
             return None;
         };
@@ -130,7 +132,7 @@ pub fn lines(confirm: &YoloConfirm, view: &View<'_>, height: usize) -> Vec<Line<
     let (lang, width) = (view.lang, view.width);
     let warning = view.palette.warning();
     let indent = || [Span::raw("  ")];
-    let mut header = vec![Line::from(Span::styled("─".repeat(width), warning))];
+    let mut header = vec![crate::ui::style::rule(width, warning)];
     header.extend(wrap_text(
         &format!("⚠ {}", words::title(lang)),
         warning.add_modifier(Modifier::BOLD),

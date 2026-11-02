@@ -1,0 +1,323 @@
+//! `zcode executor` 各个命令的执行（docs/specs/rust-cli/remote-exec.md §19.3；解析在 `executor.rs`）。
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use rust_cli_base::clock::SystemClock;
+use rust_cli_base::units;
+use rust_cli_env_local::{LocalEnvironment, LocalMcpTransport};
+use rust_cli_exec_server::ServerConfig;
+use rust_cli_exec_wire::admin::ExecutorStatus;
+use rust_cli_exec_wire::handshake::PROTOCOL;
+use rust_cli_executor_host::admin::{self, Stopped};
+use rust_cli_executor_host::file_ledger::Retention;
+use rust_cli_executor_host::proxy::{self, DaemonCommand, ProxyConfig};
+use rust_cli_executor_host::resident::{Resident, ResidentConfig, StartError};
+use rust_cli_paths::ExecutorPaths;
+
+use crate::commands::executor::ExecutorCommand;
+use crate::process::facts::ProcessFacts;
+use crate::process::output::{eprint_line, print_line, write_lossy};
+use crate::process::{Process, Start};
+
+/// `status` 在常驻进程没在跑时的退出码（LSB 的“程序没在运行”）。
+const NOT_RUNNING: u8 = 3;
+/// 账本多久清理一次（§19.7）。
+const LEDGER_SWEEP: Duration = Duration::from_secs(10 * units::SECONDS_PER_MINUTE);
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "入口 crate 是唯一读取进程事实的位置：执行器拉起的常驻进程、loopback 的子进程都是本进程的二进制（README §4）"
+)]
+pub(crate) fn this_executable() -> Result<std::path::PathBuf> {
+    std::env::current_exe().context("finding this executable")
+}
+
+/// 跑一个命令，返回退出码。
+pub(crate) async fn run(command: ExecutorCommand) -> u8 {
+    let result = match command {
+        ExecutorCommand::Resident { daemon } => return resident(daemon).await,
+        ExecutorCommand::Proxy => proxy().await,
+        ExecutorCommand::Standalone { find_and_grep } => standalone(find_and_grep).await,
+        ExecutorCommand::Status { json } => return status(json).await,
+        ExecutorCommand::Stop { if_idle } => return stop(if_idle).await,
+    };
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            eprint_line(&format!("zcode executor: {error:#}"));
+            1
+        }
+    }
+}
+
+/// 执行器这台机器的执行环境与 MCP 的管道。
+struct Executing {
+    env: LocalEnvironment,
+    /// MCP 服务器的管道（R5，remote-exec.md §22.5）：与 Bash 同一份进程树账本、环境快照与网络出口，打开 `${VAR}` 展开
+    /// （用执行器自己的环境，§22.7）。
+    mcp: Arc<LocalMcpTransport>,
+    shell: Option<String>,
+}
+
+/// 按与 controller 相同的规则建本机的执行环境（`assemble::local_env`，F129：以前这里另写一份）与 MCP 的管道；另给 shell
+/// 的名字。
+async fn local_environment(facts: &ProcessFacts, find_and_grep: bool) -> Result<Executing> {
+    let egress = crate::assemble::setup::egress(facts).await?;
+    let local = crate::assemble::local_env(facts, &egress, (find_and_grep, true)).await;
+    let shell = local
+        .bash
+        .as_ref()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned());
+    Ok(Executing {
+        env: local.env,
+        mcp: local.mcp,
+        shell,
+    })
+}
+
+fn server_config(facts: &ProcessFacts, shell: Option<String>) -> ServerConfig {
+    let mut config =
+        ServerConfig::new(crate::VERSION, std::env::consts::OS, std::env::consts::ARCH);
+    config.home = Some(facts.home.to_string_lossy().into_owned());
+    config.shell = shell;
+    // R5 的执行器也提供 MCP 的管道（remote-exec.md §22.4）；F96 起另有环境变量推送（§23.5）。
+    config.capabilities = rust_cli_exec_wire::handshake::Capabilities::executor();
+    config
+}
+
+/// 运行日志（只写文件：stdout 可能是协议的通道）。
+fn begin(dir: &std::path::Path, facts: &ProcessFacts, mode: &str) -> Process {
+    let clock = Arc::new(SystemClock::new(facts.zone.clone()));
+    Process::begin(
+        dir.to_path_buf(),
+        clock,
+        Start {
+            mode,
+            surface: None,
+        },
+    )
+}
+
+/// 结束一次运行：`Ok` 是 0，失败是 1（与退出码一致）。
+async fn finish(process: Process, result: &Result<()>) {
+    match result {
+        Ok(()) => process.finish(0, None).await,
+        Err(error) => process.finish(1, Some(error)).await,
+    }
+}
+
+/// 常驻执行器（§19.5）。`daemon`：代理拉起的，在 stdout 写一行就绪结果（`ready` / `busy` / `error <原因>`）。
+async fn resident(daemon: bool) -> u8 {
+    let report = |line: &str| {
+        if daemon {
+            write_lossy(std::io::stdout(), line);
+        }
+    };
+    let facts = match ProcessFacts::capture() {
+        Ok(facts) => facts,
+        Err(error) => {
+            report(&format!("{} {error:#}", proxy::ERROR));
+            eprint_line(&format!("zcode executor: {error:#}"));
+            return 1;
+        }
+    };
+    let paths = facts.executor_paths();
+    let process = begin(paths.logs().as_path(), &facts, "executor");
+    let (code, error) = match start_resident(&facts, paths).await {
+        Ok(Ok(resident)) => {
+            report(proxy::READY);
+            if !daemon {
+                eprint_line(&format!(
+                    "zcode executor: listening on {}",
+                    resident.socket().display()
+                ));
+            }
+            // 一直跑到 stop 或退出信号（§12：不按空闲时间退出）。
+            let stop = crate::process::signals::Stop::listen();
+            resident.run(stop.token.cancelled()).await;
+            (0, None)
+        }
+        Ok(Err(StartError::AlreadyRunning)) => {
+            report(proxy::BUSY);
+            if daemon {
+                (0, None)
+            } else {
+                eprint_line("zcode executor: another executor is already running");
+                (1, None)
+            }
+        }
+        Ok(Err(StartError::Failed(message))) => {
+            report(&format!("{} {message}", proxy::ERROR));
+            eprint_line(&format!("zcode executor: {message}"));
+            (1, Some(anyhow::anyhow!(message)))
+        }
+        Err(error) => {
+            report(&format!("{} {error:#}", proxy::ERROR));
+            eprint_line(&format!("zcode executor: {error:#}"));
+            (1, Some(error))
+        }
+    };
+    process.finish(code, error.as_ref()).await;
+    code
+}
+
+async fn start_resident(
+    facts: &ProcessFacts,
+    paths: ExecutorPaths,
+) -> Result<Result<Resident, StartError>> {
+    let Executing { env, mcp, shell } = local_environment(facts, true).await?;
+    let config = ResidentConfig {
+        paths,
+        version: crate::VERSION.to_owned(),
+        executable: this_executable()
+            .ok()
+            .map(|path| path.to_string_lossy().into_owned()),
+        clock: Arc::new(SystemClock::new(facts.zone.clone())),
+        retention: Retention::default(),
+        ledger_sweep: LEDGER_SWEEP,
+        mcp,
+    };
+    Ok(Resident::start(config, Arc::new(env), server_config(facts, shell)).await)
+}
+
+/// `--stdio`：代理（§19.5）。
+async fn proxy() -> Result<()> {
+    let facts = ProcessFacts::capture()?;
+    let paths = facts.executor_paths();
+    let process = begin(paths.logs().as_path(), &facts, "executor-proxy");
+    let config = ProxyConfig {
+        paths,
+        version: crate::VERSION.to_owned(),
+        protocol: PROTOCOL,
+        daemon: DaemonCommand {
+            program: this_executable()?,
+            args: vec!["executor".to_owned(), "--daemon".to_owned()],
+            env: facts.env.vars().to_vec(),
+            cwd: Some(facts.cwd.clone()),
+        },
+        // 这条 ssh 会话的环境（远端执行 F96，remote-exec.md §23.5）：代理自己的环境就是这条会话在远端的环境。
+        session_env: proxy::session_env(|name| facts.env.get(name).map(str::to_owned)),
+    };
+    let result = proxy::proxy(tokio::io::stdin(), tokio::io::stdout(), config)
+        .await
+        .map_err(anyhow::Error::from);
+    finish(process, &result).await;
+    result
+}
+
+/// `--stdio --standalone`：R1 的行为，只给 loopback（§18.6）。
+async fn standalone(find_and_grep: bool) -> Result<()> {
+    let facts = ProcessFacts::capture()?;
+    let paths = facts.default_paths();
+    let process = begin(paths.logs().as_path(), &facts, "executor");
+    let result = async {
+        let Executing { env, mcp, shell } = local_environment(&facts, find_and_grep).await?;
+        rust_cli_executor_host::serve_stdio(
+            tokio::io::stdin(),
+            tokio::io::stdout(),
+            (Arc::new(env), mcp),
+            server_config(&facts, shell),
+        )
+        .await?;
+        Ok(())
+    }
+    .await;
+    finish(process, &result).await;
+    result
+}
+
+/// `status --json` 的一行（§19.6）：这个二进制自己的版本与协议，加上常驻进程的状态（没在跑时为 null）。部署时的探测
+/// 读它（ssh-connect）。
+pub(crate) fn status_report(resident: Option<&ExecutorStatus>) -> serde_json::Value {
+    serde_json::json!({
+        "version": crate::VERSION,
+        "protocol": PROTOCOL,
+        "executable": this_executable().ok().map(|path| path.to_string_lossy().into_owned()),
+        "resident": resident,
+    })
+}
+
+fn status_lines(status: &ExecutorStatus, socket: &std::path::Path) -> Vec<String> {
+    let yes = |value: bool| if value { "yes" } else { "no" };
+    vec![
+        "zcode executor is running".to_owned(),
+        format!(
+            "  version   {} (protocol {})",
+            status.version, status.protocol
+        ),
+        format!("  pid       {}", status.pid),
+        format!("  instance  {}", status.instance),
+        format!("  socket    {}", socket.display()),
+        format!("  uptime    {}s", status.uptime_ms / units::MS_PER_SECOND),
+        format!("  clients   {}", status.clients),
+        format!("  calls     {}", status.calls),
+        format!("  streams   {}", status.streams),
+        format!("  commands  {}", status.commands),
+        format!("  notices   {}", status.notices),
+        format!("  idle      {}", yes(status.idle)),
+    ]
+}
+
+async fn status(json: bool) -> u8 {
+    let facts = match ProcessFacts::capture() {
+        Ok(facts) => facts,
+        Err(error) => {
+            eprint_line(&format!("zcode executor: {error:#}"));
+            return 1;
+        }
+    };
+    let socket = facts.executor_paths().socket();
+    let resident = match admin::status(socket.as_path()).await {
+        Ok(resident) => resident,
+        Err(error) => {
+            eprint_line(&format!("zcode executor: {error}"));
+            return 1;
+        }
+    };
+    let running = resident.is_some();
+    if json {
+        print_line(&status_report(resident.as_ref()).to_string());
+    } else if let Some(status) = &resident {
+        for line in status_lines(status, socket.as_path()) {
+            print_line(&line);
+        }
+    } else {
+        print_line("zcode executor is not running");
+    }
+    if running { 0 } else { NOT_RUNNING }
+}
+
+async fn stop(if_idle: bool) -> u8 {
+    let facts = match ProcessFacts::capture() {
+        Ok(facts) => facts,
+        Err(error) => {
+            eprint_line(&format!("zcode executor: {error:#}"));
+            return 1;
+        }
+    };
+    let paths = facts.executor_paths();
+    match admin::stop(paths.socket().as_path(), paths.lock().as_path(), if_idle).await {
+        Ok(Stopped::NotRunning) => {
+            print_line("zcode executor is not running");
+            0
+        }
+        Ok(Stopped::Stopped(status)) => {
+            print_line(&format!("zcode executor stopped (pid {})", status.pid));
+            0
+        }
+        Ok(Stopped::Busy(status)) => {
+            print_line(&format!(
+                "zcode executor is busy (clients {}, calls {}, streams {}, commands {}, notices {}); not stopped",
+                status.clients, status.calls, status.streams, status.commands, status.notices
+            ));
+            1
+        }
+        Err(error) => {
+            eprint_line(&format!("zcode executor: {error}"));
+            1
+        }
+    }
+}

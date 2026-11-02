@@ -24,8 +24,8 @@ fn env() -> Arc<MemoryEnvironment> {
         os_version: "x".into(),
         shell: "zsh".into(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     }))
 }
 

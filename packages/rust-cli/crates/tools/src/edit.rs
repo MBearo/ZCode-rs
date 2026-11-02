@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvError, EnvPath, FileVersion, ReadFile, WritePrecondition};
 use rust_cli_kernel_api::env_files::PutFile;
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
 };
@@ -14,15 +15,18 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::common::{
-    Definition, FileTools, cwd, definition, env_failure, failed, format_bytes, invalid,
-    missing_file, parse, resolve_input, stable_path, stat, text, unstable_input,
+    FileTools, cwd, env_failure, format_bytes, missing_file, resolve_input, stable_path, stat,
+    unstable_input,
 };
 use crate::edit_match::{adapt_new, applies, apply, find_actual, wants_escape_hint};
 use crate::encoding::{Decoded, encode};
 use crate::file_state::{Baseline, FileState};
 use crate::{checkpoint, notebook_edit, texts};
+use rust_cli_kernel_api::tool::{failed, invalid, parse, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const NAME: &str = "Edit";
+pub const NAME: &str = tool_names::EDIT;
 /// 能编辑的最大文件（1GB）。
 const MAX_EDIT_BYTES: u64 = 1_073_741_824;
 
@@ -52,7 +56,7 @@ impl EditTool {
     pub fn new(files: FileTools) -> Self {
         Self {
             files,
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
         }
     }
 
@@ -129,8 +133,30 @@ impl Tool for EditTool {
         NAME
     }
 
+    /// 改点名的机器上的文件（remote-exec.md §20.5.1）。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::RunsThere
+    }
+
+    /// 判决链按路径规则检查（`Edit(...)`，shell-permissions.md §4.4）。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        crate::common::path_subject(
+            rust_cli_kernel_api::permission::FileAccess::Write,
+            input,
+            "file_path",
+        )
+    }
+
     fn input_schema(&self) -> Value {
         self.definition.schema.clone()
+    }
+
+    /// 按 schema 重建输入，`replace_all` 排在最前（query.md §3「工具输入的整理与写回」）。
+    fn rewrite_input(&self, input: &Value) -> Option<Value> {
+        crate::edit_input::rebuild(input)
     }
 
     fn description(&self, _context: &PromptContext) -> String {

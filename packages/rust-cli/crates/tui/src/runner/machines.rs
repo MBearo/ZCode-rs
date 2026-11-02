@@ -51,7 +51,7 @@ impl<B: Backend> Loop<'_, B> {
         // MCP 工具行的 `@机器`（R5，§22.8）：按工具名的前缀找，服务器名先规范化。
         self.app.mcp_machines = self
             .options
-            .services
+            .ui
             .mcp_machines
             .iter()
             .map(|(server, machine)| {

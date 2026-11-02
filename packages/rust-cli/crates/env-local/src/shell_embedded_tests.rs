@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env_shell::{CwdScope, HookIo};
 
 use super::embedded::EmbeddedSearch;
@@ -210,10 +211,12 @@ async fn hooks_get_neither_the_prelude_nor_the_variable() {
         &setup.fixture.root,
         CwdScope::Pinned,
     );
-    start.hook = Some(HookIo {
-        stdin: String::new(),
-        env: BTreeMap::new(),
-    });
+    start.kind = CommandKind::Hook {
+        hook: HookIo {
+            stdin: String::new(),
+            env: BTreeMap::new(),
+        },
+    };
     let events = setup
         .fixture
         .shells

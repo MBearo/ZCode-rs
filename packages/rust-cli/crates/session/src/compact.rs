@@ -3,17 +3,13 @@
 //! `/compact` 作为一个回合运行：与主循环共用 [`Running`]，所以中断、排队与收尾都走同一条路径；
 //! 压缩任务经 [`ActorSink`] 把边界、摘要与附件交给 actor，在一个存储事务里提交。
 
-use rust_cli_kernel_api::abort::Abort;
+use crate::actor::Actor;
 use rust_cli_kernel_api::compaction::{ContextNotice, ContextOccupancy};
 use rust_cli_kernel_api::ids::CommandId;
 use rust_cli_kernel_api::message::{CompactTrigger, Message, SystemMessage};
 use rust_cli_kernel_api::orchestration::{CompactRequest, QueryStop, RunSink};
 use rust_cli_kernel_api::session_api::KernelEvent;
-use rust_cli_kernel_api::store::{Fact, StoreError};
 use rust_cli_kernel_api::user_command::{LocalCommandOutput, LocalCommandRecord, dim};
-use tokio::sync::mpsc;
-
-use crate::actor::{Actor, Running};
 
 /// 压缩任务提交请求的缓冲。
 const SINK_REQUESTS: usize = 16;
@@ -64,11 +60,10 @@ impl Actor {
             agent: None,
             initial_token_gap: None,
         };
-        let abort = Abort::new();
-        let (sender, requests) = mpsc::channel(SINK_REQUESTS);
-        let sink = self.sink(sender);
+        let opening = self.open_turn(turn, None, SINK_REQUESTS);
+        let sink = opening.sink.clone();
         let compactor = self.deps.compactor.clone();
-        let signal = abort.clone();
+        let signal = opening.abort.clone();
         // SessionStart（`compact`）在压缩器里跑，消息已在 `restored` 末尾（compact.md §7），与边界、
         // 摘要一个事务提交；这里不再单独跑（以前只有 `/compact` 跑，自动 / 反应式压缩漏掉了）。
         let task = self.deps.spawner.spawn("compact-run", async move {
@@ -100,61 +95,7 @@ impl Actor {
                 }
             }
         });
-        self.running = Some(Running {
-            turn,
-            run: None,
-            abort,
-            requests,
-            task,
-            failure: None,
-            prompt: None,
-            command: None,
-            timing: crate::duration::TurnTiming::start(
-                self.deps.clock.now_ms(),
-                !self.pending.is_empty(),
-            ),
-        });
-        Ok(())
-    }
-
-    /// 一组消息一个事务（`RunSink::commit_messages`）：全部成功才进入历史并发事件；含压缩边界时
-    /// 最后发 `CompactDone`。
-    pub(crate) async fn record_all(&mut self, messages: Vec<Message>) -> Result<(), StoreError> {
-        if let Some(reason) = self.running.as_ref().and_then(|r| r.failure.clone()) {
-            return Err(StoreError::Storage { message: reason });
-        }
-        let facts = messages
-            .iter()
-            .map(|message| Fact::MessageAppended {
-                message: message.clone(),
-            })
-            .collect();
-        if let Err(reason) = self.commit(None, facts).await {
-            if let Some(running) = &mut self.running {
-                running
-                    .abort
-                    .abort(rust_cli_kernel_api::abort::AbortReason::User);
-                running.failure.get_or_insert_with(|| reason.clone());
-            }
-            return Err(StoreError::Storage { message: reason });
-        }
-        let boundary = messages.iter().find_map(|message| match message {
-            Message::System(SystemMessage::CompactBoundary(boundary)) => Some(boundary.id.clone()),
-            _ => None,
-        });
-        for message in messages {
-            self.goal_committed(&message);
-            self.messages.push(message.clone());
-            self.log.append(KernelEvent::MessageDone { message });
-        }
-        if let Some(boundary) = boundary {
-            // 压缩后自主说明已不在上下文里：下一次 `/loop` 触发重新发全文（压缩后的清理）。
-            self.reset_loop_ticks();
-            self.log.append(KernelEvent::CompactDone { boundary });
-            // 缺陷修复（F14）：上下文提示应在消息变化时重算；以前只在提交 assistant 时算，压缩后到下一条回复
-            // 之前仍显示压缩前的百分比（compact.md §2.1）。F27 起 footer 的 ctx 同一处重算。
-            self.context_changed();
-        }
+        self.launch(opening, task, None, None);
         Ok(())
     }
 

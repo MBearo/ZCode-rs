@@ -44,13 +44,6 @@ pub fn locale_failed(lang: Lang, reason: &str) -> String {
     }
 }
 
-pub fn locale_unavailable(lang: Lang) -> &'static str {
-    match lang {
-        Lang::En => "Locale switching is not available in this client.",
-        Lang::Zh => "当前客户端不能切换界面语言。",
-    }
-}
-
 /// 授权地址（Node `emitLoginAuthorizeMessage`）。
 pub fn login_open_url(lang: Lang, family: Family, url: &str) -> String {
     let name = family.display_name();
@@ -131,23 +124,5 @@ pub fn logout_usage(lang: Lang) -> &'static str {
     match lang {
         Lang::En => "Usage: /logout",
         Lang::Zh => "用法：/logout",
-    }
-}
-
-/// 入口没有给账号服务时（Node 的 `… is not available in this client.`）。
-pub fn login_unavailable(lang: Lang, family: Family, api_key: bool) -> String {
-    let name = family.display_name();
-    match (lang, api_key) {
-        (Lang::En, false) => format!("{name} Coding Plan login is not available in this client."),
-        (Lang::En, true) => "Manual API key setup is not available in this client.".to_owned(),
-        (Lang::Zh, false) => format!("当前客户端不能登录 {name} Coding Plan。"),
-        (Lang::Zh, true) => "当前客户端不能手动配置 API key。".to_owned(),
-    }
-}
-
-pub fn logout_unavailable(lang: Lang) -> &'static str {
-    match lang {
-        Lang::En => "Logout is not available in this client.",
-        Lang::Zh => "当前客户端不能退出登录。",
     }
 }

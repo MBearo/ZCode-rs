@@ -2,13 +2,13 @@
 //!
 //! 等待只在连接状态变化（`changed` 的 watch）与截止时刻醒来；截止时刻用注入的时钟算，不轮询。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::BTreeMap;
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::manage::McpServerState;
 use rust_cli_kernel_api::mcp_state::{McpConnections, McpServerView, McpView};
 use rust_cli_kernel_api::tool::Tool;
 
@@ -18,23 +18,20 @@ use crate::mcp::startup::{DEFAULT_PREWAIT_MS, segment};
 /// 直接调用连接中服务器的工具时，一次模型响应里等待的上限（10 s）。
 const TOOL_WAIT_CAP_MS: u64 = 10_000;
 
-fn state_of(status: &McpStatus) -> McpServerState {
-    match status {
-        McpStatus::Pending => McpServerState::Pending,
-        McpStatus::Connected => McpServerState::Connected,
-        McpStatus::Failed { .. } => McpServerState::Failed,
-        McpStatus::Disabled => McpServerState::Disabled,
-    }
-}
-
 fn view_of(servers: &BTreeMap<String, Server>) -> McpView {
     McpView {
         servers: servers
             .values()
             .map(|server| McpServerView {
                 name: server.config.name.clone(),
-                state: state_of(&server.status),
-                reconnecting: server.status == McpStatus::Pending && server.reconnecting,
+                state: server.status.state(),
+                reconnecting: matches!(
+                    server.status,
+                    McpStatus::Pending {
+                        reconnecting: true,
+                        ..
+                    }
+                ),
             })
             .collect(),
         instructions: instructions_of(servers),
@@ -42,7 +39,7 @@ fn view_of(servers: &BTreeMap<String, Server>) -> McpView {
 }
 
 fn pending(server: &Server) -> bool {
-    server.status == McpStatus::Pending
+    server.status.pending()
 }
 
 impl Inner {
@@ -97,20 +94,12 @@ impl McpManager {
 
     /// 这个会话的主线程请求带过 WaitForMcpServers（ext.md §3.8）。
     pub fn declared(&self, session: &SessionId) -> bool {
-        self.0
-            .declared
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains(session)
+        self.0.declared.lock_unpoisoned().contains(session)
     }
 
     /// 会话关闭：去掉它的 declared（ext.md D34；`/clear`、`/resume` 时清掉）。
     pub fn release(&self, session: &SessionId) {
-        self.0
-            .declared
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(session);
+        self.0.declared.lock_unpoisoned().remove(session);
     }
 
     /// `-p` 的启动等待（ext.md §3.3.1）：① alwaysLoad 的服务器（阻塞时全部）到 `MCP_CONNECT_TIMEOUT_MS`；② 从 ①
@@ -196,11 +185,7 @@ impl McpConnections for McpManager {
     }
 
     fn declare_wait_tool(&self, session: &SessionId) {
-        self.0
-            .declared
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(session.clone());
+        self.0.declared.lock_unpoisoned().insert(session.clone());
     }
 
     fn tool_wait_ms(&self) -> u64 {

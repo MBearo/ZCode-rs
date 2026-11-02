@@ -10,10 +10,7 @@ use super::diff_view::{Current, DiffFile, DiffView};
 use super::i18n::Lang;
 use super::layout;
 use super::text::truncate_line;
-
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
+use crate::ui::style::dim;
 
 fn files_word(lang: Lang, n: usize) -> String {
     match lang {
@@ -110,7 +107,7 @@ pub fn lines(
         header.push(Span::styled(format!(" {subtitle}"), dim()));
     }
     let mut lines = vec![
-        Line::from(Span::styled("─".repeat(width), Style::default().fg(accent))),
+        crate::ui::style::rule(width, Style::default().fg(accent)),
         truncate_line(Line::from(header), width),
     ];
     if !turns.is_empty() {
@@ -318,7 +315,6 @@ fn rendered(
     let ctx = Ctx {
         palette: &app.palette,
         lang: app.lang,
-        strings: app.strings,
         width,
         expanded: true,
         elapsed: std::time::Duration::ZERO,

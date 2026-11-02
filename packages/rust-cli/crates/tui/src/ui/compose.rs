@@ -9,6 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rust_cli_kernel_api::permission::PermissionMode;
 
 use super::app::{Action, App, Overlay};
+use super::keyboard;
 use super::notice::{self, Armed};
 
 /// 删掉这么多字符以上时提示 ctrl+y 可以粘回。
@@ -34,8 +35,8 @@ pub(super) fn next_mode(mode: PermissionMode) -> PermissionMode {
 impl App {
     pub(super) fn compose_key(&mut self, key: KeyEvent, now: Instant) -> Option<Action> {
         // Windows 的 AltGr（Ctrl+Alt 加字符）是文字，不是 ctrl / alt（修复线 F65，tui-input.md §9.1）。
-        let ctrl = self.typing.ctrl(&key);
-        let alt = self.typing.alt(&key);
+        let ctrl = keyboard::ctrl(&key);
+        let alt = keyboard::alt(&key);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let width = self.composer_width;
         // 翻页：每次可视高度减 1 行。
@@ -47,10 +48,10 @@ impl App {
             self.notice = self.notice.take().filter(|n| n.armed.is_none());
         }
         if !matches!(key.code, KeyCode::Up) {
-            self.history_presses = 0;
+            self.keys.history_presses = 0;
         }
         // 编辑前记撤销点：普通输入 1 秒内的连续按键算一步。
-        let typed = self.typing.is_plain_text(&key);
+        let typed = keyboard::is_plain_text(&key);
         let edits = typed
             || matches!(key.code, KeyCode::Backspace | KeyCode::Delete)
             || (ctrl && matches!(key.code, KeyCode::Char('k' | 'u' | 'w' | 'y' | 'd' | 'j')))
@@ -66,7 +67,7 @@ impl App {
             return action;
         }
         // 粘贴图片之后键入的第一个字符前按规则补空格（tui-input.md §3.1）。
-        let text = self.typing.is_text(&key);
+        let text = keyboard::is_text(&key);
         if let KeyCode::Char(c) = key.code
             && text
         {
@@ -92,9 +93,9 @@ impl App {
                 None
             }
             // 上滚时输入框为空，enter 回到底部。
-            KeyCode::Enter if area.is_empty() && self.scroll > 0 => {
-                self.scroll = 0;
-                self.new_activity = false;
+            KeyCode::Enter if area.is_empty() && self.port.scroll > 0 => {
+                self.port.scroll = 0;
+                self.port.new_activity = false;
                 None
             }
             KeyCode::Enter => return self.submit(),
@@ -113,7 +114,7 @@ impl App {
             }
             // 展开或收起任务清单（tui-display.md §2.2）。
             KeyCode::Char('t') if ctrl => {
-                self.tasks.expanded = !self.tasks.expanded;
+                self.snapshots.tasks.expanded = !self.snapshots.tasks.expanded;
                 return None;
             }
             KeyCode::Char('r') if ctrl => {
@@ -186,8 +187,8 @@ impl App {
                 return self.scroll_by(top as isize);
             }
             KeyCode::End if ctrl => {
-                self.scroll = 0;
-                self.new_activity = false;
+                self.port.scroll = 0;
+                self.port.new_activity = false;
                 None
             }
             // 循环到完全访问时先弹确认框（tui.md §7.8，工作线 F87）。
@@ -258,10 +259,10 @@ impl App {
     /// ↑：光标在第一行时取更早的历史（连按两次后提示 ctrl+r）；否则上移一行。
     fn up(&mut self) -> Option<Action> {
         let width = self.composer_width;
-        self.history_presses += 1;
+        self.keys.history_presses += 1;
         if self.composer.area.at_first_row(width) && self.composer.history_prev() {
-            if self.history_presses >= HISTORY_HINT_PRESSES && !self.history_hinted {
-                self.history_hinted = true;
+            if self.keys.history_presses >= HISTORY_HINT_PRESSES && !self.keys.history_hinted {
+                self.keys.history_hinted = true;
                 self.notify_keys(notice::search_history(self.lang), notice::HINT_FOR);
             }
         } else {
@@ -284,9 +285,9 @@ impl App {
 
     /// esc：上滚时回到底部 → 运行中中断 → 输入框有内容时连按两次清空。
     fn escape(&mut self, now: Instant) -> Option<Action> {
-        if self.scroll > 0 {
-            self.scroll = 0;
-            self.new_activity = false;
+        if self.port.scroll > 0 {
+            self.port.scroll = 0;
+            self.port.new_activity = false;
             return None;
         }
         if self.running() {
@@ -334,7 +335,7 @@ impl App {
             if command.is_empty() {
                 return None;
             }
-            self.scroll = 0;
+            self.port.scroll = 0;
             return Some(Action::Bash {
                 command,
                 delivery: self.delivery(),
@@ -373,7 +374,7 @@ impl App {
         if text.is_empty() && images.is_empty() {
             return None;
         }
-        self.scroll = 0;
+        self.port.scroll = 0;
         // 发送普通输入后放回 ctrl+s 暂存的草稿（tui-input.md §5）。
         if self.composer.pop_stash() {
             self.notify(

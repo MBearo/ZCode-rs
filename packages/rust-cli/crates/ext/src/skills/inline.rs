@@ -9,10 +9,10 @@ use futures_util::future::join_all;
 use regex::Regex;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::env::OperationContext;
-use rust_cli_kernel_api::message::ToolResultContent;
+use rust_cli_kernel_api::message::text_of;
+use rust_cli_kernel_api::orchestration::ScopedGate;
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionRule};
 use rust_cli_kernel_api::tool::{DISCARDED_PROGRESS_CAPACITY, Tool, ToolUseContext};
-use rust_cli_policy::PolicyGate;
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -108,21 +108,8 @@ pub(crate) fn find(text: &str) -> Vec<Inline> {
 #[derive(Clone)]
 pub(crate) struct Runner {
     pub bash: Arc<dyn Tool>,
-    pub gate: Arc<PolicyGate>,
+    pub gate: Arc<dyn ScopedGate>,
     pub ids: Arc<dyn Ids>,
-}
-
-fn text_of(content: &[ToolResultContent]) -> String {
-    content
-        .iter()
-        .filter_map(|block| match block {
-            ToolResultContent::Text { text } => Some(text.as_str()),
-            ToolResultContent::Image { .. }
-            | ToolResultContent::Document { .. }
-            | ToolResultContent::ToolReference { .. } => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 impl Runner {
@@ -186,7 +173,7 @@ impl Runner {
         }
         let rules: Vec<PermissionRule> = allowed
             .iter()
-            .map(|rule| rust_cli_policy::rules::parse_rule(rule))
+            .map(|rule| rust_cli_kernel_api::permission::syntax::parse_rule(rule))
             .collect();
         let outputs = join_all(
             commands

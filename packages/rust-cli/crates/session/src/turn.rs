@@ -2,39 +2,28 @@
 //!
 //! 每条消息先提交到存储，成功后才进入内存历史并发出事件；提交失败时中止本回合并以失败收尾。
 
-use rust_cli_kernel_api::abort::{Abort, AbortReason};
+use rust_cli_kernel_api::abort::AbortReason;
 use rust_cli_kernel_api::hooks::HookOutcome;
 use rust_cli_kernel_api::ids::{CommandId, InteractionId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::metering::{CallStatus, Metered, ModelCall, OutputSpeed};
 use rust_cli_kernel_api::model::QuerySource;
 use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, OrchestrationError, QueryEvent, QueryRequest, QueryStop,
+    Answer, InteractionAnswer, InteractionRequest, OrchestrationError, QueryEvent, QueryStop,
+    RunView,
 };
 use rust_cli_kernel_api::session_api::{Ack, KernelEvent, TurnOutcome};
 use rust_cli_kernel_api::store::{Fact, StoreError};
-use serde_json::{Value, json};
-use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
-use crate::actor::{Actor, Pending, Running, accepted, rejected};
+use crate::actor::{Actor, Pending, accepted, rejected};
 use crate::lane::Waiting;
 use crate::sink::SinkRequest;
 
-/// 主循环提交请求的缓冲；满了时主循环等待，不丢请求。人类输入的 Bash 与 hook 的回合任务用同一个值（F55）。
-pub(crate) const SINK_REQUESTS: usize = 256;
-/// 待回答交互在存储里的 entry 种类（node-store 映射成 `rust-cli/<kind>`）。
-const PENDING_INTERACTION: &str = "pending_interaction";
-const INTERACTION_RESOLVED: &str = "interaction_resolved";
-
-fn store_error(reason: String) -> StoreError {
-    StoreError::Storage { message: reason }
-}
-
-fn metered_fact(metered: Metered) -> Fact {
-    match metered {
-        Metered::Model(call) => Fact::ModelCalled { call },
-        Metered::Tool(call) => Fact::ToolCalled { call },
+/// 工具请求的改动没能落库：原因是存储的原文。
+fn failed(error: StoreError) -> OrchestrationError {
+    OrchestrationError::Failed {
+        message: error.to_string(),
     }
 }
 
@@ -80,7 +69,7 @@ pub(crate) enum TurnInput {
 }
 
 impl Actor {
-    pub(crate) async fn start_turn(&mut self, input: TurnInput) -> Result<(), String> {
+    pub(crate) async fn start_turn(&mut self, input: TurnInput) -> Result<(), StoreError> {
         let meta = |source: &str| UserOrigin::Meta {
             source: source.to_owned(),
         };
@@ -134,75 +123,39 @@ impl Actor {
                 })
             }))
             .collect();
-        let facts = users
-            .iter()
-            .map(|message| Fact::MessageAppended {
-                message: message.clone(),
-            })
-            .collect();
         // 一个事务：几条通知一起成立；折叠说明与定时任务的 prompt 一起成立。
-        self.commit(None, facts).await?;
-        self.messages.extend(users.iter().cloned());
-        if let (Some(fired), Some(prompt)) = (fired, users.last()) {
-            self.fired(fired, prompt.id().clone());
+        // checkpoint 挂在这次运行最后一条 user 消息上（drive 的同一规则）。
+        let prompt = users.last().map(|message| message.id().clone());
+        let appended = self.append(None, users, Vec::new()).await?;
+        if let (Some(fired), Some(prompt)) = (fired, &prompt) {
+            self.fired(fired, prompt.clone());
         }
         // 通知已经在对话里：现在才 ack（至少一次）。
         for notice in &notices {
             self.ack_notice(notice).await;
         }
         let turn = self.deps.ids.turn();
+        // 先开始回合，再发这些消息（与人类输入的回合同一个顺序）。
         self.log.append(KernelEvent::TurnStarted {
             turn: turn.clone(),
             command: None,
         });
-        for message in &users {
-            self.log.append(KernelEvent::MessageDone {
-                message: message.clone(),
-            });
-        }
-        let abort = Abort::new();
-        let (sender, requests) = mpsc::channel(SINK_REQUESTS);
-        let run = self.deps.ids.run();
-        let request = QueryRequest {
-            session: self.meta.id.clone(),
-            run: run.clone(),
-            workspace: self.meta.workspace.clone(),
-            agent: None,
-            messages: self.messages.clone(),
-            selection: self.selection.clone(),
-            mode: self.mode(),
-            source: QuerySource::MainThread,
-            max_turns: self.deps.max_turns,
-            prompt_hook_messages: Vec::new(),
-        };
+        self.after_commit(appended).await;
+        let (opening, request) = self.open_main_turn(turn);
         let runner = self.deps.runner.clone();
-        let sink = Arc::new(self.sink(sender));
-        let signal = abort.clone();
+        let sink = opening.sink.clone();
+        let signal = opening.abort.clone();
         let task = self.deps.spawner.spawn("query-run", async move {
             runner.run(request, sink, signal).await
         });
-        self.running = Some(Running {
-            turn,
-            run: Some(run),
-            abort,
-            requests,
-            task,
-            failure: None,
-            // checkpoint 挂在这次运行最后一条 user 消息上（drive 的同一规则）。
-            prompt: users.last().map(|message| message.id().clone()),
-            command: None,
-            timing: crate::duration::TurnTiming::start(
-                self.deps.clock.now_ms(),
-                !self.pending.is_empty(),
-            ),
-        });
+        self.launch(opening, task, prompt, None);
         Ok(())
     }
 
     pub(crate) async fn on_sink(&mut self, request: SinkRequest) {
         match request {
             SinkRequest::Message { message, reply } => {
-                let _ = reply.send(self.record(message).await);
+                let _ = reply.send(self.record(vec![message], Vec::new()).await);
             }
             SinkRequest::Event(event) => self.forward(event),
             SinkRequest::ArmMonitor {
@@ -213,15 +166,18 @@ impl Actor {
                 let _ = reply.send(self.arm_monitor(monitor, events));
             }
             SinkRequest::Ask { request, reply } => {
-                self.ask(request, reply, crate::actor::AskScope::Turn).await
+                self.ask(request, reply, crate::actor::AskScope::Turn);
             }
-            SinkRequest::CancelAsk { tool_use } => self.cancel_ask(&tool_use).await,
+            SinkRequest::CancelAsk { tool_use } => self.cancel_ask(&tool_use),
             SinkRequest::ClaimSteering { reply } => {
                 let _ = reply.send(self.claim_steering());
             }
-            SinkRequest::SettleSteering { fates, reply } => {
-                self.settle_steering(fates);
-                let _ = reply.send(());
+            SinkRequest::SettleSteering {
+                fates,
+                notices,
+                reply,
+            } => {
+                let _ = reply.send(self.settle_steering(fates, notices));
             }
             SinkRequest::Metered {
                 message,
@@ -233,11 +189,9 @@ impl Actor {
                     Metered::Model(call) => output_speed(call),
                     Metered::Tool(_) => None,
                 };
-                let usage = vec![metered_fact(*metered)];
-                let result = match message {
-                    Some(message) => self.record_with(message, usage).await,
-                    None => self.record_facts(usage).await,
-                };
+                // 没有消息的计量（没有内容的失败请求、丢弃的响应）单独一批。
+                let messages = message.into_iter().collect();
+                let result = self.record(messages, vec![Fact::from(*metered)]).await;
                 // 先落库，再记下并发出（只在内存，F105）。
                 if let (Ok(()), Some(speed)) = (&result, speed) {
                     self.output_speed = Some(speed);
@@ -246,40 +200,22 @@ impl Actor {
                 let _ = reply.send(result);
             }
             SinkRequest::Messages { messages, reply } => {
-                let _ = reply.send(self.record_all(messages).await);
+                let _ = reply.send(self.record(messages, Vec::new()).await);
             }
             SinkRequest::CompactStarted(trigger) => crate::compact::compact_started(self, trigger),
-            SinkRequest::SetMode { mode, reply } => {
-                let changed = self.change_mode(None, mode).await;
-                let _ =
-                    reply.send(changed.map_err(|message| OrchestrationError::Failed { message }));
-            }
             SinkRequest::SetPlan { enabled, reply } => {
                 let changed = self.change_plan(enabled).await;
-                let _ =
-                    reply.send(changed.map_err(|message| OrchestrationError::Failed { message }));
+                let _ = reply.send(changed.map_err(failed));
             }
-            SinkRequest::Mode { reply } => {
-                let _ = reply.send(self.mode());
-            }
-            SinkRequest::ModeAndPlanFlags { reply } => {
-                let _ = reply.send((self.mode(), self.plan_flags));
+            SinkRequest::View { reply } => {
+                let _ = reply.send(self.run_view());
             }
             SinkRequest::Title(title) => self.retitle(title).await,
             SinkRequest::SetWorkspace { root, reply } => {
                 let _ = reply.send(self.change_workspace(root).await);
             }
-            SinkRequest::Workspace { reply } => {
-                let _ = reply.send(self.meta.workspace.clone());
-            }
             SinkRequest::Conversation { reply } => {
                 let _ = reply.send(self.messages.clone());
-            }
-            SinkRequest::Selection { reply } => {
-                let _ = reply.send(self.selection.clone());
-            }
-            SinkRequest::Goal { reply } => {
-                let _ = reply.send(self.goal.condition());
             }
             SinkRequest::GoalChecked {
                 condition,
@@ -291,85 +227,58 @@ impl Actor {
         }
     }
 
+    /// 会话现在的状态（[`SinkRequest::View`]）：判决用的模式（plan 开时是 plan）、计划模式的会话标志、工作目录、主模型与
+    /// 目标，同一时刻的值。
+    fn run_view(&self) -> RunView {
+        RunView {
+            plan_flags: self.plan_flags,
+            selection: Some(self.selection.clone()),
+            goal: self.goal.condition(),
+            ..RunView::new(self.mode(), self.meta.workspace.clone())
+        }
+    }
+
     fn failure(&self) -> Option<StoreError> {
         self.running
             .as_ref()
             .and_then(|running| running.failure.clone())
-            .map(store_error)
     }
 
-    /// 提交失败：记下原因并中止本回合，之后的提交一律拒绝。
+    /// 提交失败：记下原因并中止本回合，之后的提交一律拒绝。主循环拿到的是存储原样的错误。
     ///
     /// 工作线 F77：记一条 warn。以前原因只进回合的结局（界面上的 `storage error: …`），日志里没有一行。
-    fn fail(&mut self, reason: &str) -> StoreError {
+    fn fail(&mut self, error: StoreError) -> StoreError {
         if let Some(running) = &mut self.running {
             running.abort.abort(AbortReason::User);
-            running.failure.get_or_insert_with(|| reason.to_owned());
+            running.failure.get_or_insert_with(|| error.clone());
         }
-        tracing::warn!(event = "session.write.failed", session = %self.meta.id, %reason, "a turn write could not be stored; the turn stops");
-        store_error(reason.to_owned())
+        tracing::warn!(event = "session.write.failed", session = %self.meta.id, reason = %error, "a turn write could not be stored; the turn stops");
+        error
     }
 
-    async fn record(&mut self, message: Message) -> Result<(), StoreError> {
-        self.record_with(message, Vec::new()).await
-    }
-
-    /// 同 [`Self::record`]，`usage` 是同一批里的计量事实（排在消息与 checkpoint 之后，usage.md §2.5）。
-    async fn record_with(&mut self, message: Message, usage: Vec<Fact>) -> Result<(), StoreError> {
+    /// 主循环交来的消息（一条、一组或没有）与计量：一个事务（[`Self::append`]），成功后进历史（[`Self::after_commit`]）；
+    /// 失败时中止本回合（[`Self::fail`]），之后的提交一律拒绝。批次带上本回合开头那条输入的命令（`command_of`）。
+    ///
+    /// 工作线 F130：以前一条消息、一组消息（压缩的结果、目标的判定）与只有计量各走一条路径，一组消息那条内联了失败处理、
+    /// 少了 warn 日志。
+    pub(crate) async fn record(
+        &mut self,
+        messages: Vec<Message>,
+        usage: Vec<Fact>,
+    ) -> Result<(), StoreError> {
         if let Some(error) = self.failure() {
             return Err(error);
         }
-        let fact = Fact::MessageAppended {
-            message: message.clone(),
-        };
-        // 工具结果与它的 checkpoint 在一个事务里提交（checkpoints.rs）。
-        let (checkpoints, extra) = self.settle_checkpoints(&message);
-        let command = self.command_of(message.id());
-        // 本回合开头的人类输入：之前没有 user 消息时是首个回合（会话标题，title.rs）。
-        let prompt = self
-            .running
-            .as_ref()
-            .is_some_and(|running| running.prompt.as_ref() == Some(message.id()));
-        // 本地命令的记录不算（修复线 L-A：`/clear` 之后的新会话以 `/clear` 的记录开头，第一条输入照样起标题）。
-        let first = !self
-            .messages
+        let command = messages
             .iter()
-            .any(|m| matches!(m, Message::User(user) if !crate::local_record::is_record(user)));
-        if let Err(reason) = self
-            .commit(command, [vec![fact], extra, usage].concat())
-            .await
-        {
-            return Err(self.fail(&reason));
+            .find_map(|message| self.command_of(message.id()));
+        match self.append(command, messages, usage).await {
+            Ok(appended) => {
+                self.after_commit(appended).await;
+                Ok(())
+            }
+            Err(error) => Err(self.fail(error)),
         }
-        self.plan_attachment_committed(&message);
-        self.goal_committed(&message);
-        // 工具边界并入的通知：提交后才从通道去掉并 ack（lane.rs）。
-        self.notice_absorbed(&message).await;
-        self.messages.push(message.clone());
-        if prompt {
-            self.after_prompt(&message, first);
-        }
-        // 缺陷修复（R5-8）：原来内核从不发上下文用量，footer 的上下文提示永远不出现（单测手工注入所以通过）。
-        // 在每条带用量的 assistant 之后重算；提示的级别与文字选择由压缩模块给出（compact.md §2.1，F14 起是
-        // ContextNotice：以前只发 `(token, 有效窗口)`，TUI 只能显示 `N% context used` 一种）。F27 起同一处另发
-        // `(token, 有效窗口)`，给 footer 的 ctx。
-        let usage = matches!(&message, Message::Assistant(assistant) if assistant.usage.is_some());
-        self.log.append(KernelEvent::MessageDone { message });
-        if usage {
-            self.context_changed();
-        }
-        self.checkpoints_settled(checkpoints);
-        Ok(())
-    }
-
-    /// 没有消息的计量（没有内容的失败请求、丢弃的响应）：单独一批，失败时与其他提交一样中止本回合。
-    async fn record_facts(&mut self, facts: Vec<Fact>) -> Result<(), StoreError> {
-        if let Some(error) = self.failure() {
-            return Err(error);
-        }
-        self.commit(None, facts)
-            .await
-            .map_err(|reason| self.fail(&reason))
     }
 
     fn forward(&mut self, event: QueryEvent) {
@@ -400,7 +309,7 @@ impl Actor {
                 KernelEvent::ToolProgress { tool_use, progress }
             }
             QueryEvent::ToolFinished { tool_use, output } => {
-                self.unsettle(&tool_use, &output);
+                self.ledger.tool_finished(&tool_use, &output);
                 KernelEvent::ToolDone { tool_use, output }
             }
             // 模型通知只供显示，不落库（stall-visibility.md §1）。
@@ -413,12 +322,16 @@ impl Actor {
         let Some(running) = self.running.take() else {
             return;
         };
-        self.cancel_turn_asks().await;
+        self.cancel_turn_asks();
         let result = running.task.await;
         let outcome = match (running.failure, result) {
-            (Some(message), _) => TurnOutcome::Failed { message },
+            (Some(error), _) => TurnOutcome::Failed {
+                message: error.to_string(),
+            },
             (None, Ok(Ok(QueryStop::Completed))) => TurnOutcome::Success,
             (None, Ok(Ok(QueryStop::Aborted))) => TurnOutcome::Interrupted,
+            (None, Ok(Ok(QueryStop::HookStopped))) => TurnOutcome::HookStopped,
+            (None, Ok(Ok(QueryStop::StopHookPrevented))) => TurnOutcome::StopHookPrevented,
             (None, Ok(Ok(QueryStop::MaxTurns))) => TurnOutcome::Failed {
                 message: "reached the maximum number of turns".to_owned(),
             },
@@ -440,7 +353,9 @@ impl Actor {
             .is_some_and(|prompt| self.messages.iter().rev().any(|m| m.id() == prompt));
         if prompted {
             let status = match &outcome {
-                TurnOutcome::Success => CallStatus::Completed,
+                TurnOutcome::Success
+                | TurnOutcome::HookStopped
+                | TurnOutcome::StopHookPrevented => CallStatus::Completed,
                 TurnOutcome::Interrupted => CallStatus::Cancelled,
                 TurnOutcome::Failed { .. } => CallStatus::Error,
             };

@@ -4,10 +4,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::message::ToolResultContent;
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::tool::{
-    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
+    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation, invalid,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -20,8 +20,9 @@ use crate::live::{AgentState, LiveAgent};
 use crate::report::{self, Ending};
 use crate::routing;
 use crate::spawn;
+use rust_cli_kernel_api::tool_names;
 
-pub(crate) const NAME: &str = "Agent";
+pub(crate) const NAME: &str = tool_names::AGENT;
 
 #[derive(Debug, Deserialize)]
 struct Input {
@@ -33,14 +34,6 @@ struct Input {
     effort: Option<String>,
     #[serde(default)]
     run_in_background: Option<bool>,
-}
-
-pub(crate) fn text_output(text: String, is_error: bool) -> ToolOutput {
-    ToolOutput {
-        content: vec![ToolResultContent::Text { text }],
-        is_error,
-        display: Value::Null,
-    }
 }
 
 /// 只给界面的结局（结果的 `status` 与统计，docs/specs/rust-cli/tui-display.md §2.1）：one-shot agent
@@ -57,13 +50,13 @@ fn with_display(mut output: ToolOutput, entry: &LiveAgent, mut display: Value) -
 
 fn launched_output(entry: &LiveAgent) -> ToolOutput {
     with_display(
-        text_output(report::launched(entry.agent.as_str()), false),
+        rust_cli_kernel_api::tool::text(report::launched(entry.agent.as_str())),
         entry,
         serde_json::json!({ "status": "async_launched" }),
     )
 }
 
-fn parse(input: &Value) -> Result<Input, String> {
+fn parse_input(input: &Value) -> Result<Input, String> {
     serde_json::from_value(input.clone()).map_err(|error| error.to_string())
 }
 
@@ -103,9 +96,9 @@ impl Tool for AgentTool {
         NAME
     }
 
-    fn aliases(&self) -> &[&str] {
-        // 仍接受旧名 `Task`。
-        &["Task"]
+    /// 子代理在点名的机器上执行（remote-exec.md §20.5.1）：Agent 自己在主 env 上，只把机器交给子代理。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::Delegates
     }
 
     fn input_schema(&self) -> Value {
@@ -115,7 +108,7 @@ impl Tool for AgentTool {
         {
             return fork.input_schema.clone();
         }
-        rust_cli_prompts::tool(NAME).map_or(Value::Null, |prompt| prompt.input_schema.clone())
+        rust_cli_prompts::definition(NAME).schema.clone()
     }
 
     /// Agent 的 schema 是宽松对象（agents.md §2，修复线 F51）：schema 外的键（例如删掉的 `model`，F51b 删掉的
@@ -130,7 +123,7 @@ impl Tool for AgentTool {
         {
             return fork.description.clone();
         }
-        rust_cli_prompts::tool(NAME).map_or_else(String::new, |prompt| prompt.description.clone())
+        rust_cli_prompts::definition(NAME).description.clone()
     }
 
     /// 权限交给子代理自己的工具，Agent 本身算只读。
@@ -147,11 +140,7 @@ impl Tool for AgentTool {
     }
 
     async fn validate_input(&self, input: &Value, context: &ToolUseContext) -> Validation {
-        let invalid = |message: String| Validation::Invalid {
-            message,
-            error_code: None,
-        };
-        let input = match parse(input) {
+        let input = match parse_input(input) {
             Ok(input) => input,
             Err(message) => return invalid(message),
         };
@@ -179,7 +168,7 @@ impl Tool for AgentTool {
         progress: mpsc::Sender<ToolProgress>,
     ) -> Result<ToolOutput, ToolError> {
         let raw = input.clone();
-        let input = parse(&input).map_err(|message| ToolError::InvalidInput { message })?;
+        let input = parse_input(&input).map_err(|message| ToolError::InvalidInput { message })?;
         let definition = self
             .definition(&input, &context)
             .await
@@ -198,7 +187,7 @@ impl Tool for AgentTool {
         let fork = definition.agent_type == crate::fork::FORK && self.core.fork;
         // fork 继承父会话已提交的对话（agents.md §8.1.2）；会话 actor 是它的 owner。
         let inherited = if fork {
-            match context.interactions.conversation(&context.session).await {
+            match context.session_ops.conversation().await {
                 Some(history) => Some(crate::fork::prefix(
                     core.ports.ids.as_ref(),
                     history,
@@ -244,12 +233,12 @@ impl Tool for AgentTool {
             definition: Arc::new(definition),
             workspace: context.workspace.clone(),
             // 执行管线已按 Agent 的 `machine` 换好了机器（R3）：远端时记下它，子代理的工具缺省在那里跑。
-            machine: (!context.machine.is_local()).then(|| context.machine.name().to_owned()),
+            machine: context.machine.name().clone(),
             background,
             // 前台的条目也记：停放后转成后台、之后的续跑都按后台运行（agents.md §4.1.1）。
             asks: core
                 .background_prompts
-                .then(|| context.interactions.lasting(&context.session))
+                .then(|| context.interactions.lasting())
                 .flatten()
                 .map(crate::child::Asks),
             state: AgentState::Finished(Ending::Completed),
@@ -276,7 +265,8 @@ impl Tool for AgentTool {
         }
         let parent = Parent {
             session: context.session.clone(),
-            interactions: context.interactions.clone(),
+            asks: context.interactions.clone(),
+            ops: context.session_ops.clone(),
             progress,
         };
         let finished = spawn::drive(
@@ -303,7 +293,7 @@ impl Tool for AgentTool {
                 let text = report::handback(entry.agent.as_str(), &finished.report, trailer);
                 let report = &finished.report;
                 Ok(with_display(
-                    text_output(text, false),
+                    rust_cli_kernel_api::tool::text(text),
                     &entry,
                     serde_json::json!({
                         "status": "completed",

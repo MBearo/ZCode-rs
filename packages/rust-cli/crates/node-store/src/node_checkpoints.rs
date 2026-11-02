@@ -6,7 +6,7 @@
 //! 本工程命名的文件时也按同样的读法找。
 use std::collections::HashMap;
 
-use rust_cli_kernel_api::ids::ToolUseId;
+use rust_cli_kernel_api::ids::{MachineName, ToolUseId};
 use rust_cli_kernel_api::store::{ArtifactPurpose, ArtifactRef, StoreError, WorkspaceCheckpoint};
 use rust_cli_paths::StoragePath;
 
@@ -58,7 +58,7 @@ async fn node_checkpoint(
         .split_once(&format!("-{}", node.artifact.as_str()))
         .map_or("", |(tool, _)| tool);
     Some(WorkspaceCheckpoint {
-        machine: None,
+        machine: MachineName::primary(),
         id: node.id.clone(),
         prompt: node.prompt.clone(),
         assistant: node.assistant.clone(),

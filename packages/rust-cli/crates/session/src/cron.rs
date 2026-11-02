@@ -27,7 +27,7 @@ impl Actor {
                 running.abort.abort(AbortReason::User);
                 // 回合里正在等用户回答的交互一并取消，等待中的工具立即得到错误并结束；后台子代理的询问不属于这个
                 // 回合，留着（agents.md §4.1.1）。
-                self.cancel_turn_asks().await;
+                self.cancel_turn_asks();
                 accepted()
             }
             None => match self.job.as_ref().and_then(|job| job.cancel.as_ref()) {
@@ -52,7 +52,7 @@ impl Actor {
             cancel.cancel();
         }
         // 全部待回答的交互：含回合之外的会话级询问（agents.md §4.1.1）。
-        self.cancel_pending().await;
+        self.cancel_pending();
         accepted()
     }
 

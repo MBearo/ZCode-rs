@@ -1,40 +1,20 @@
 //! 后台任务（tui-panels.md §3）：pill 的选中、Background 面板的分组与按键、Shell 详情的读取与排版。
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use rust_cli_kernel_api::ids::{AgentId, SessionId};
-use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::selection;
 
 use super::*;
 use crate::ui::agents::AgentList;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::view::Transcript;
-
-fn app() -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
-}
+use crate::ui::test_support::{app, key};
 
 fn shell(id: &str, command: &str) -> BackgroundEntry {
-    BackgroundEntry {
-        id: id.into(),
-        kind: BackgroundKind::Shell,
-        description: command.into(),
-        status: BackgroundStatus::Running,
-        output: None,
-        machine: None,
-        reconnecting: false,
-    }
+    BackgroundEntry::new(
+        id,
+        BackgroundKind::Shell,
+        command,
+        BackgroundStatus::Running,
+    )
 }
 
 fn agent(id: &str) -> SubagentEntry {
@@ -52,12 +32,8 @@ fn agent(id: &str) -> SubagentEntry {
         owner: None,
         activity: None,
         parked: false,
-        machine: None,
+        machine: Default::default(),
     }
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
 }
 
 /// 行的文字（选中行的底色条补到整行，去掉行尾的空格）。
@@ -85,8 +61,8 @@ fn detail(status: BackgroundStatus, lines: &[&str], total: u64) -> ShellDetail {
 fn down_selects_the_pill_then_the_agent_list() {
     let mut app = app();
     let now = Instant::now();
-    app.background = vec![shell("b1", "npm test")];
-    app.agents = AgentList {
+    app.snapshots.background = vec![shell("b1", "npm test")];
+    app.snapshots.agents = AgentList {
         entries: vec![agent("agent_a")],
         at: Some(now),
     };
@@ -109,12 +85,12 @@ fn down_selects_the_pill_then_the_agent_list() {
 fn down_goes_straight_to_the_list_when_only_subagents_run() {
     let mut app = app();
     let now = Instant::now();
-    app.background = vec![BackgroundEntry {
+    app.snapshots.background = vec![BackgroundEntry {
         kind: BackgroundKind::Agent,
         description: "Review code".into(),
         ..shell("agent_a", "")
     }];
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![agent("agent_a")],
         at: Some(now),
     };
@@ -126,8 +102,8 @@ fn down_goes_straight_to_the_list_when_only_subagents_run() {
 fn the_panel_groups_shells_and_agents() {
     let mut app = app();
     let now = Instant::now();
-    app.background = vec![shell("b1", "npm test"), shell("b2", "cargo build")];
-    app.agents = AgentList {
+    app.snapshots.background = vec![shell("b1", "npm test"), shell("b2", "cargo build")];
+    app.snapshots.agents = AgentList {
         entries: vec![agent("agent_a")],
         at: Some(now),
     };
@@ -167,8 +143,8 @@ fn the_panel_groups_shells_and_agents() {
     );
     assert!(app.overlay.is_none());
     // 都没有时：No tasks currently running。
-    app.background.clear();
-    app.agents = AgentList::default();
+    app.snapshots.background.clear();
+    app.snapshots.agents = AgentList::default();
     app.open_background();
     let text = plain(&app.background_lines(80, 30, now).0);
     assert_eq!(text[2], "  No tasks currently running");
@@ -178,7 +154,7 @@ fn the_panel_groups_shells_and_agents() {
 fn the_shell_detail_keeps_the_latest_read_only() {
     let mut app = app();
     let now = Instant::now();
-    app.background = vec![shell("b1", "npm test")];
+    app.snapshots.background = vec![shell("b1", "npm test")];
     app.open_background();
     assert_eq!(
         app.on_key(key(KeyCode::Enter), now),
@@ -222,7 +198,7 @@ fn the_shell_detail_keeps_the_latest_read_only() {
 fn output_previews_cover_the_empty_large_and_missing_cases() {
     let mut app = app();
     let now = Instant::now();
-    app.background = vec![shell("b1", "npm test")];
+    app.snapshots.background = vec![shell("b1", "npm test")];
     app.open_background();
     app.on_key(key(KeyCode::Enter), now);
     app.shell_reading("b1", 1);
@@ -263,11 +239,11 @@ fn remote_entries_name_their_machine() {
     let mut app = app();
     let now = Instant::now();
     let mut remote = shell("b2", "make data");
-    remote.machine = Some("dev-a".into());
+    remote.machine = rust_cli_kernel_api::ids::MachineName::new("dev-a");
     let mut helper = agent("agent_a");
-    helper.machine = Some("gpu-1".into());
-    app.background = vec![shell("b1", "npm test"), remote];
-    app.agents = AgentList {
+    helper.machine = rust_cli_kernel_api::ids::MachineName::new("gpu-1");
+    app.snapshots.background = vec![shell("b1", "npm test"), remote];
+    app.snapshots.agents = AgentList {
         entries: vec![helper],
         at: Some(now),
     };
@@ -308,9 +284,9 @@ fn entries_of_a_reconnecting_machine_are_marked() {
     let mut app = app();
     let now = Instant::now();
     let mut stale = shell("b2", "make data");
-    stale.machine = Some("dev-a".into());
+    stale.machine = rust_cli_kernel_api::ids::MachineName::new("dev-a");
     stale.reconnecting = true;
-    app.background = vec![shell("b1", "npm test"), stale];
+    app.snapshots.background = vec![shell("b1", "npm test"), stale];
     app.open_background();
     let (lines, _) = app.background_lines(80, 30, now);
     let text = plain(&lines);
@@ -350,10 +326,10 @@ fn the_agent_group_drops_local_for_an_agent_on_a_remote_machine() {
         let mut app = app();
         app.lang = lang;
         let now = Instant::now();
-        app.background = vec![shell("b1", "npm test")];
+        app.snapshots.background = vec![shell("b1", "npm test")];
         let mut remote = agent("agent_a");
-        remote.machine = Some("dev-a".into());
-        app.agents = AgentList {
+        remote.machine = rust_cli_kernel_api::ids::MachineName::new("dev-a");
+        app.snapshots.agents = AgentList {
             entries: vec![remote],
             at: Some(now),
         };
@@ -375,12 +351,12 @@ fn monitors_are_listed_with_shells_under_their_description() {
         kind: BackgroundKind::Monitor,
         ..shell(id, description)
     };
-    app.background = vec![
+    app.snapshots.background = vec![
         shell("b1", "npm test"),
         monitor("b2", "build log"),
         monitor("s3", "deploy feed"),
     ];
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![agent("agent_a")],
         at: Some(now),
     };

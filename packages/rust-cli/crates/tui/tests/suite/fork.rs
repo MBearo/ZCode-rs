@@ -94,8 +94,8 @@ async fn fork_leaves_the_files_as_they_are() {
         os_version: "x".into(),
         shell: "zsh".into(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     }));
     let setup = Setup {
         environments: environments(env.clone()),

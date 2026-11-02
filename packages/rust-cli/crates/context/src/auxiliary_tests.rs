@@ -8,6 +8,7 @@ use rust_cli_kernel_api::ids::{EnvironmentId, MessageId, SessionId};
 use rust_cli_kernel_api::message::{ContentBlock, UserMessage, UserOrigin};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::testing::{FixedClock, MemoryEnvironment, SequentialIds};
 
 use super::*;
@@ -19,8 +20,8 @@ fn environment() -> MemoryEnvironment {
         os_version: "Linux 6.8.0".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: true,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     })
     .with_file("/Users/dev/w/AGENTS.md", "project rules")
     .with_git(GitStatus::Repository(GitSnapshot {
@@ -50,25 +51,17 @@ fn assembler() -> PromptAssembler {
 
 fn request(source: QuerySource) -> ContextRequest {
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("s"),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/Users/dev/w"),
-        },
-        agent: None,
-        source,
-        mode: PermissionMode::Default,
         tool_names: vec!["Read".to_owned(), "Bash".to_owned()],
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
+        ..ContextRequest::new(
+            SessionId::new("s"),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/w"),
+            },
+            source,
+            PermissionMode::Default,
+            ModelSelection::new("p".to_owned(), rust_cli_base::models::GLM_5_3.to_owned()),
+        )
     }
 }
 
@@ -124,7 +117,7 @@ async fn an_untruncated_summary_request_announces_nothing() {
 #[tokio::test]
 async fn side_requests_announce_nothing() {
     let built = assembler()
-        .build(request(QuerySource::Side("title".to_owned())), &[])
+        .build(request(QuerySource::Side(SideSource::SessionTitle)), &[])
         .await
         .unwrap();
     assert!(built.attachments.is_empty());

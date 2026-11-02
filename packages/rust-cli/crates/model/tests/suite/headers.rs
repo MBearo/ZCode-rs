@@ -13,8 +13,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::ids::{AgentId, RunId, SessionId};
 use rust_cli_kernel_api::model::QuerySource;
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
-use rust_cli_model::{FixedEndpoint, ProviderModel, RequestHeaders, SourceFacts, source_headers};
+use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, ModelEndpoint, WireProtocol};
+use rust_cli_kernel_api::side_request::SideSource;
+use rust_cli_model::{
+    FixedEndpoint, ProviderModel, RequestHeaders, RouteOptions, SourceFacts, source_headers,
+};
 use rust_cli_net::{Egress, NetworkPolicy};
 
 use super::common::{clock, collect, fast_retry, request, text_response};
@@ -31,11 +34,11 @@ fn endpoint(base_url: String, headers: &[(&str, &str)]) -> ModelEndpoint {
             .map(|(name, value)| ((*name).to_owned(), RedactedString::new(*value)))
             .collect(),
         body_patches: Vec::new(),
-        mid_conversation_system: true,
-        supports_image: true,
-        supports_pdf: false,
-        supports_video: false,
-        supports_audio: false,
+        capabilities: ModelCapabilities {
+            supports_mid_conversation_system: true,
+            supports_image: true,
+            ..ModelCapabilities::default()
+        },
         renewable: false,
     }
 }
@@ -65,9 +68,16 @@ fn ids() -> RequestHeaders {
 
 async fn model(endpoint: ModelEndpoint, retries: u32) -> ProviderModel {
     let egress = Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap());
-    ProviderModel::new(egress, Arc::new(FixedEndpoint::new(endpoint)), clock())
-        .with_retry(fast_retry(retries))
-        .with_request_headers(ids())
+    ProviderModel::new(
+        egress,
+        Arc::new(FixedEndpoint::new(endpoint)),
+        clock(),
+        RouteOptions {
+            retry: fast_retry(retries),
+            headers: Some(Arc::new(ids())),
+            ..RouteOptions::default()
+        },
+    )
 }
 
 fn ok() -> Reply {
@@ -187,7 +197,7 @@ async fn each_attempt_gets_a_new_request_id() {
 async fn side_requests_use_the_node_query_source() {
     let server = Fixture::start(vec![ok()]).await;
     let model = model(endpoint(server.url(), &[]), 0).await;
-    let mut title = request("hi", QuerySource::Side("generate_session_title".to_owned()));
+    let mut title = request("hi", QuerySource::Side(SideSource::SessionTitle));
     title.options.session_id = Some(SessionId::new("sess_s1"));
     title.options.run = Some(RunId::new("run_r2"));
     let events = collect(&model, title).await;

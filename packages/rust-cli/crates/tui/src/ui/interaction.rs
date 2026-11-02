@@ -6,14 +6,14 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent};
-use rust_cli_kernel_api::ids::InteractionId;
+use rust_cli_kernel_api::ids::{InteractionId, MachineName};
 use rust_cli_kernel_api::orchestration::{
-    InteractionRequest, PermissionAnswer, PlanApprovalAnswer, QuestionAnnotation, QuestionAnswer,
+    Answer, InteractionRequest, PermissionAnswer, PlanApprovalAnswer, QuestionAnnotation,
+    QuestionAnswer,
 };
 use rust_cli_kernel_api::permission::{PermissionMode, PermissionRule};
-use serde_json::Value;
 
-use super::keyboard::Typing;
+use super::keyboard;
 
 pub use super::interaction_view::View;
 
@@ -126,8 +126,9 @@ pub struct Interaction {
     pub seed: Option<String>,
     /// 当前工作目录：没有种子时“不再询问”一行里显示（远端的调用是那台机器的工作目录，F98）。
     pub workspace: String,
-    /// MCP 工具绑定的远端机器（F98，remote-exec.md §25.4.3）：询问里没有 `machine` 时标题照它写“在 dev-a 上执行”。
-    pub bound_machine: Option<String>,
+    /// MCP 工具绑定的机器（F98，remote-exec.md §25.4.3；没有绑定是主 env）：询问里没有 `machine` 时标题照它写
+    /// “在 dev-a 上执行”。
+    pub bound_machine: MachineName,
     /// 旧会话的询问（父会话已关闭，agents.md §4.1.2，工作线 F72）：那个会话的标题（可能为空）；当前会话的询问为 None。
     pub origin: Option<String>,
     /// 预览题的焦点在这道题上动过（写完备注按 enter 时选焦点所在的选项，工作线 F72）。
@@ -138,8 +139,9 @@ pub struct Interaction {
     shown: Instant,
 }
 
-fn json(value: impl serde::Serialize) -> Option<Value> {
-    serde_json::to_value(value).ok()
+/// 作答（工作线 F134：以前回答是 JSON，这里 `to_value`）。
+fn answer(value: impl Into<Answer>) -> Option<Answer> {
+    Some(value.into())
 }
 
 impl Interaction {
@@ -154,7 +156,7 @@ impl Interaction {
             mode: PermissionMode::Default,
             seed: remember::seed(request),
             workspace: String::new(),
-            bound_machine: None,
+            bound_machine: MachineName::primary(),
             origin: None,
             moved: false,
             countdown: None,
@@ -172,7 +174,9 @@ impl Interaction {
 
     /// 粘贴进正在输入的那一行：审批的意见、计划的反馈或提问的 `Other`。
     pub fn paste(&mut self, request: &InteractionRequest, text: &str) {
-        let text = text.replace(['\r', '\n'], " ");
+        let mut pasted = String::new();
+        crate::ui::line_edit::paste(&mut pasted, text);
+        let text = pasted;
         if let InteractionRequest::Permission { suggestions, .. } = request
             && self.editing_seed(suggestions)
             && let Some(seed) = self.seed.as_mut()
@@ -195,52 +199,45 @@ impl Interaction {
         }
     }
 
-    /// 按键；作答时返回回答（`ResolveInteraction` 的 `answer`）。`input` 按平台判断文字输入（Windows 的 AltGr，
-    /// tui-input.md §9.1）。
+    /// 按键（入口已归一，tui-input.md §9.1）；作答时返回回答（`ResolveInteraction` 的 `answer`）。
     pub fn on_key(
         &mut self,
         request: &InteractionRequest,
         key: KeyEvent,
         now: Instant,
-        input: Typing,
-    ) -> Option<Value> {
+    ) -> Option<Answer> {
         if now.saturating_duration_since(self.shown) < GUARD {
             return None;
         }
         match request {
             InteractionRequest::Permission { suggestions, .. } => {
-                self.permission_key(key, suggestions, input)
+                self.permission_key(key, suggestions)
             }
-            InteractionRequest::PlanApproval { .. } => self.plan_key(key, input),
-            InteractionRequest::Question { .. } => self.question_key(request, key, input),
+            InteractionRequest::PlanApproval { .. } => self.plan_key(key),
+            InteractionRequest::Question { .. } => self.question_key(request, key),
         }
     }
 
     /// 输入一行文字（意见、反馈）：返回 true 表示按键已处理。
-    fn edit_text(&mut self, key: KeyEvent, input: Typing) -> bool {
+    fn edit_text(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Backspace => {
-                self.text.pop();
+                crate::ui::line_edit::backspace(&mut self.text);
             }
-            KeyCode::Char(c) if input.is_text(&key) => self.text.push(c),
+            KeyCode::Char(c) if keyboard::is_text(&key) => self.text.push(c),
             _ => return false,
         }
         true
     }
 
-    fn deny(&self) -> Option<Value> {
+    fn deny(&self) -> Option<Answer> {
         let feedback = Some(self.text.trim().to_owned()).filter(|text| !text.is_empty());
-        json(PermissionAnswer::Deny { feedback })
+        answer(PermissionAnswer::Deny { feedback })
     }
 
     /// 权限询问：1. Yes；（有建议规则时）2. Yes，不再询问；最后一行 No。任何一行按 tab 都补充意见
     /// （焦点移到 No 行），esc 拒绝。
-    fn permission_key(
-        &mut self,
-        key: KeyEvent,
-        suggestions: &[PermissionRule],
-        input: Typing,
-    ) -> Option<Value> {
+    fn permission_key(&mut self, key: KeyEvent, suggestions: &[PermissionRule]) -> Option<Answer> {
         let rows = permission_rows(suggestions);
         let last = rows - 1;
         if self.typing {
@@ -248,7 +245,7 @@ impl Interaction {
                 KeyCode::Enter => return self.deny(),
                 KeyCode::Esc | KeyCode::Tab => self.typing = false,
                 _ => {
-                    self.edit_text(key, input);
+                    self.edit_text(key);
                 }
             }
             return None;
@@ -259,10 +256,10 @@ impl Interaction {
         {
             match key.code {
                 KeyCode::Backspace => {
-                    seed.pop();
+                    crate::ui::line_edit::backspace(seed);
                     return None;
                 }
-                KeyCode::Char(c) if input.is_text(&key) => {
+                KeyCode::Char(c) if keyboard::is_text(&key) => {
                     seed.push(c);
                     return None;
                 }
@@ -270,7 +267,7 @@ impl Interaction {
             }
         }
         let allow = |remember: &[PermissionRule]| {
-            json(PermissionAnswer::Allow {
+            answer(PermissionAnswer::Allow {
                 remember: remember.to_vec(),
             })
         };
@@ -305,12 +302,12 @@ impl Interaction {
 
     /// 计划审批（修复线 F20，按 Node 的计划审批）：1. 批准（只关掉 plan，权限模式不变）；2. 继续计划（这一行直接是
     /// 输入）。
-    fn plan_key(&mut self, key: KeyEvent, input: Typing) -> Option<Value> {
-        let approve = |mode| json(PlanApprovalAnswer::Approve { mode });
+    fn plan_key(&mut self, key: KeyEvent) -> Option<Answer> {
+        let approve = |mode| answer(PlanApprovalAnswer::Approve { mode });
         let mode = self.mode;
         let keep = |this: &Self| {
             let feedback = Some(this.text.trim().to_owned()).filter(|text| !text.is_empty());
-            json(PlanApprovalAnswer::KeepPlanning { feedback })
+            answer(PlanApprovalAnswer::KeepPlanning { feedback })
         };
         let last = PLAN_ROWS - 1;
         match key.code {
@@ -321,7 +318,7 @@ impl Interaction {
             KeyCode::Enter if self.cursor == 0 => return approve(mode),
             KeyCode::Enter | KeyCode::Esc => return keep(self),
             _ if self.typing => {
-                self.edit_text(key, input);
+                self.edit_text(key);
             }
             _ => {}
         }
@@ -329,17 +326,17 @@ impl Interaction {
         None
     }
 
-    pub(super) fn decline(&self) -> Option<Value> {
-        json(QuestionAnswer::Declined)
+    pub(super) fn decline(&self) -> Option<Answer> {
+        answer(QuestionAnswer::Declined)
     }
 
     /// 提交提问的回答：问题文字 → 选中的标签（多选用 `, ` 连接）。
-    pub(super) fn submit(&self, list: &[Question]) -> Option<Value> {
+    pub(super) fn submit(&self, list: &[Question]) -> Option<Answer> {
         self.submit_with(list, None)
     }
 
     /// 提交；预览题另带选中选项的预览与备注（`annotations`），空闲到期时带超时的毫秒数（工作线 F72）。
-    fn submit_with(&self, list: &[Question], afk_timeout_ms: Option<u64>) -> Option<Value> {
+    fn submit_with(&self, list: &[Question], afk_timeout_ms: Option<u64>) -> Option<Answer> {
         let mut answers = BTreeMap::new();
         let mut annotations = BTreeMap::new();
         for (question, draft) in list.iter().zip(&self.drafts) {
@@ -363,7 +360,7 @@ impl Interaction {
                 annotations.insert(question.text.clone(), QuestionAnnotation { preview, notes });
             }
         }
-        json(QuestionAnswer::Answered {
+        answer(QuestionAnswer::Answered {
             answers,
             annotations,
             response: None,
@@ -373,7 +370,7 @@ impl Interaction {
     }
 
     /// 提问空闲到期：按当时已选的答案与备注提交（tools-more.md §1.1）。
-    pub fn idle_answer(&self, request: &InteractionRequest, timeout_ms: u64) -> Option<Value> {
+    pub fn idle_answer(&self, request: &InteractionRequest, timeout_ms: u64) -> Option<Answer> {
         matches!(request, InteractionRequest::Question { .. })
             .then(|| self.submit_with(&questions(request), Some(timeout_ms)))
             .flatten()

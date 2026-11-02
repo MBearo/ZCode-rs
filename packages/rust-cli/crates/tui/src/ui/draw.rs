@@ -38,10 +38,10 @@ pub(super) fn fill_rows(lines: &mut [Line<'static>], width: usize) {
 
 /// 画一帧。`now` 是动画时钟，`now_ms` 是墙上时间（与视图行的时间同一个时钟）。
 pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instant, now_ms: u64) {
-    if app.overlay.as_ref().is_some_and(mouse::full_screen) {
+    if app.overlay.as_ref().is_some_and(Overlay::full_screen) {
         // 全屏视图：可点击区域与软折行的记号由视图自己记（原来独立页面不重置，鼠标按上一帧 transcript 的记录处理）。
-        app.hits = mouse::Hits::default();
-        full_screen(frame, app, cache, now, now_ms);
+        app.pointer.hits = mouse::Hits::default();
+        app.draw_full_screen(frame, cache, now, now_ms);
         // 选区画在视图之上，文字取自这一帧的屏幕（F25，tui-select.md §2.1）；复制的提示放在最后一行（提示行）的右侧。
         mouse::paint_screen(frame, app);
         let area = frame.area();
@@ -49,20 +49,20 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         mouse::draw_copied(frame, app, last);
         return;
     }
-    app.screen_selection = None;
+    app.pointer.screen_selection = None;
     let area = frame.area();
     let width = area.width as usize;
     // 宽度变化后行会重新折行，选区端点不再对应原来的文字：清掉（输入框的选区按字节记，不受影响）。
     let composer_width = super::input_box::text_width(width);
     if app.composer_width != composer_width {
-        app.selection = None;
+        app.pointer.selection = None;
     }
     app.composer_width = composer_width;
     // transcript 先排：搜索模式（修复线 F114，tui-input.md §2.3）要在画输入框之前定当前匹配与计数；当前匹配换了块时
     // 那一块要按展开的样子再排一次（其余的块都是缓存）。
     let mut layout = transcript_layout(app, cache, width, now, now_ms);
     let mut settled = None;
-    if app.find.is_some() {
+    if app.port.find.is_some() {
         let before = super::find::peek(app);
         settled = super::find::settle(app, &layout, cache.epoch(), width);
         if super::find::peek(app) != before {
@@ -98,12 +98,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         frame.set_cursor_position((bottom_area.x + col, bottom_area.y + row));
     }
     // 可点击区域：每帧重记。
-    app.hits = mouse::Hits::default();
+    app.pointer.hits = mouse::Hits::default();
     let row_y = |row: usize| (row >= overflow).then(|| bottom_area.y + (row - overflow) as u16);
     for (row, col, w, target) in targets {
         if let Some(y) = row_y(row) {
             let w = w.unwrap_or(width.saturating_sub(col));
-            app.hits
+            app.pointer
+                .hits
                 .regions
                 .push((Rect::new(area.x + col as u16, y, w as u16, 1), target));
         }
@@ -111,7 +112,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
     if let Some((row, rows, first)) = composer
         && let Some(y) = row_y(row)
     {
-        app.hits.composer = Some((
+        app.pointer.hits.composer = Some((
             Rect::new(
                 area.x + super::input_box::PROMPT_WIDTH as u16,
                 y,
@@ -123,7 +124,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
     }
     // 输入框的选区：复制时取这里的文字（transcript 的选区在下面算，两者互斥）。
     if let Some((start, end)) = app.composer.area.selection() {
-        app.hits.selected = Some(app.composer.area.text()[start..end].to_owned());
+        app.pointer.hits.selected = Some(app.composer.area.text()[start..end].to_owned());
     }
     let gap = Rect::new(
         area.x,
@@ -139,14 +140,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
     // 搜索模式：把当前匹配滚进视口、没有匹配时回到原处；esc 之后回到进入前的位置（tui-input.md §2.3.5）。
     super::find::scroll(app, &layout, settled.as_ref(), height);
     // 拖选到第一行 / 最后一行：每帧滚动 1 行。
-    if let Some(selection) = app.selection
+    if let Some(selection) = app.pointer.selection
         && selection.dragging
         && selection.edge != 0
     {
         app.scroll_by(selection.edge);
     }
     // 从顶部开始排：不满一屏时会话头在第一行；超过一屏时跟随末尾，上滚时按 scroll 偏移。
-    let end = total.saturating_sub(app.scroll);
+    let end = total.saturating_sub(app.port.scroll);
     let start = end.saturating_sub(height);
     let range = mouse::select(app, &layout, start, end);
     // 只复制可见行（布局与缓存共享其余的行）。
@@ -165,11 +166,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
             super::selection::highlight(line, from, to, app.palette.selection_bg);
         }
     }
-    app.hits.transcript = transcript_area;
-    app.hits.rows = (start..end)
+    app.pointer.hits.transcript = transcript_area;
+    app.pointer.hits.rows = (start..end)
         .map(|l| (layout.owner(l), super::text::plain(layout.line(l))))
         .collect();
-    app.hits.expandable = (start..end).filter_map(|l| layout.expandable(l)).collect();
+    app.pointer.hits.expandable = (start..end).filter_map(|l| layout.expandable(l)).collect();
     // 提问已滚出顶部时固定在第一行（区域太小时不固定）；点击跳到这条消息。
     let prompts = &layout.prompts;
     let mut pinned = false;
@@ -181,7 +182,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         *first = pin;
         pinned = true;
         if let Some(prompt) = prompts.iter().rev().find(|p| p.start < start) {
-            app.hits.regions.push((
+            app.pointer.hits.regions.push((
                 Rect::new(area.x, transcript_area.y, area.width, 1),
                 Target::Jump(prompt.start),
             ));
@@ -212,14 +213,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
         );
         app.logo.draw(frame.buffer_mut(), free, &app.palette, now);
         if let Some(stage) = app.logo.stage {
-            app.hits.regions.push((stage, Target::Logo));
+            app.pointer.hits.regions.push((stage, Target::Logo));
         }
     } else {
         app.logo.hide();
     }
     mouse::draw_copied(frame, app, gap);
-    if app.scroll > 0 && gap.height > 0 {
-        let label = super::i18n::follow_labels(app.lang, app.new_activity)
+    if app.port.scroll > 0 && gap.height > 0 {
+        let label = super::i18n::follow_labels(app.lang, app.port.new_activity)
             .into_iter()
             .find(|label| label.width() <= width);
         if let Some(label) = label {
@@ -227,7 +228,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instan
             let target = Rect::new(gap.x + (gap.width - label_width) / 2, gap.y, label_width, 1);
             let style = app.palette.user_block().fg(app.palette.accent);
             frame.render_widget(Paragraph::new(Span::styled(label, style)), target);
-            app.hits.regions.push((target, Target::Bottom));
+            app.pointer.hits.regions.push((target, Target::Bottom));
         }
     }
     // 悬停的反馈放在最后：这一帧的可点击区域都已记下。
@@ -247,7 +248,6 @@ fn transcript_layout(
     let ctx = Ctx {
         palette: &app.palette,
         lang: app.lang,
-        strings: app.strings,
         width,
         expanded: false,
         elapsed: now.duration_since(app.started),
@@ -260,43 +260,4 @@ fn transcript_layout(
         markdown: None,
     };
     transcript::lines(app, cache, &ctx)
-}
-
-/// 全屏视图（`mouse::full_screen`）的绘制。
-fn full_screen(frame: &mut Frame<'_>, app: &mut App, cache: &mut Cache, now: Instant, now_ms: u64) {
-    match app.overlay.clone() {
-        Some(Overlay::Detail(_)) => {
-            super::detail::draw(frame, app, cache, now.duration_since(app.started), now_ms);
-        }
-        Some(Overlay::Page { local, scroll }) => {
-            super::page::page(frame, app, &local, scroll, now_ms)
-        }
-        Some(Overlay::Usage(view)) => super::usage::draw(frame, app, &view),
-        Some(Overlay::Projects(_) | Overlay::Resume(_) | Overlay::Trust(_)) => {
-            // 取出来画（不每帧复制会话列表与全屏对话），画完放回。
-            let overlay = app.overlay.take();
-            match &overlay {
-                Some(Overlay::Projects(_)) => {
-                    let Some(Overlay::Projects(mut page)) = overlay else {
-                        return;
-                    };
-                    super::projects_draw::draw(frame, app, &mut page, now_ms);
-                    app.overlay = Some(Overlay::Projects(page));
-                    return;
-                }
-                Some(Overlay::Resume(_)) => {
-                    let Some(Overlay::Resume(mut page)) = overlay else {
-                        return;
-                    };
-                    super::resume_draw::draw(frame, app, &mut page, now_ms);
-                    app.overlay = Some(Overlay::Resume(page));
-                    return;
-                }
-                Some(Overlay::Trust(ask)) => super::trust_ask::draw(frame, app, ask),
-                _ => {}
-            }
-            app.overlay = overlay;
-        }
-        _ => {}
-    }
 }

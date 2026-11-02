@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use anyhow::Result;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, MouseEventKind};
 use futures_util::FutureExt;
 use ratatui::backend::Backend;
 use rust_cli_kernel_api::model::ModelSelection;
@@ -40,13 +40,14 @@ impl<B: Backend> Loop<'_, B> {
         };
         match event {
             Event::Key(key) => {
-                self.cancel_loops_on(&key);
+                // 与界面同一个归一（tui-input.md §9.1）：Windows 的 AltGr 字符不是 ctrl+c。
+                self.cancel_loops_on(&crate::ui::keyboard::normalize(key, self.options.os));
                 actions.extend(self.app.on_terminal_key(key, now));
             }
             Event::Paste(text) => actions.extend(self.app.on_paste(&text)),
             Event::Mouse(mouse) => actions.extend(self.app.on_mouse(mouse, now)),
             // 尺寸变了：全屏视图的选区（屏幕坐标）不再对应原来的文字（tui-select.md §2.1）。
-            Event::Resize(..) => self.app.screen_selection = None,
+            Event::Resize(..) => self.app.pointer.screen_selection = None,
             Event::FocusGained | Event::FocusLost => self.app.focus_changed(),
         }
         self.dirty = true;
@@ -73,10 +74,10 @@ impl<B: Backend> Loop<'_, B> {
     fn cancel_loops_on(&mut self, key: &KeyEvent) {
         let cancel = match key.code {
             KeyCode::Esc => key.modifiers.is_empty(),
-            KeyCode::Char('c') => key.modifiers.contains(KeyModifiers::CONTROL),
+            KeyCode::Char('c') => crate::ui::keyboard::ctrl(key),
             _ => false,
         };
-        let idle = self.session.is_some()
+        let idle = self.outbox.session().is_some()
             && !self.app.running()
             && self.app.overlay.is_none()
             && self.app.interaction.is_none()
@@ -88,7 +89,7 @@ impl<B: Backend> Loop<'_, B> {
             // 标记在下一个回合结束时取走——那个回合若因别的原因中断（ctrl+enter、运行中的 `/rewind`、退出），界面一侧的
             // 条件或 actor 的判断都不满足（restore.rs）。
             self.user_cancel = true;
-            self.send(Sent::CancelLoops, Command::Interrupt, String::new());
+            self.send(Sent::CancelLoops, Command::Interrupt);
         }
     }
 
@@ -151,7 +152,6 @@ impl<B: Backend> Loop<'_, B> {
                 Command::BackgroundForeground {
                     reason: rust_cli_kernel_api::env::BackgroundReason::User,
                 },
-                String::new(),
             ),
             // 只投递排着的插话（F105）：与有文字时的立即发送同一个原因，只是不先入队。
             Action::DeliverQueued => self.send(
@@ -159,17 +159,15 @@ impl<B: Backend> Loop<'_, B> {
                 Command::BackgroundForeground {
                     reason: rust_cli_kernel_api::env::BackgroundReason::DeliverMessage,
                 },
-                String::new(),
             ),
             // esc / ctrl+c 的中断：回合结束时据此判断要不要撤回（修复线 F38，restore.rs）。
             Action::Interrupt => {
                 self.user_cancel = true;
-                self.send(Sent::Interrupt, Command::Interrupt, String::new());
+                self.send(Sent::Interrupt, Command::Interrupt);
             }
             Action::ResolvePeer { message, approve } => self.send(
                 Sent::Resolve,
                 Command::ResolvePeerMessage { message, approve },
-                String::new(),
             ),
             // 旧会话的询问（agents.md §4.1.2，工作线 F72）经内核的进程级入口回答，回执同会话的回答。
             Action::Resolve {
@@ -181,7 +179,7 @@ impl<B: Backend> Loop<'_, B> {
                     async move {
                         let ack = match kernel.resolve_detached(&interaction, answer).await {
                             Ok(()) => rust_cli_kernel_api::session_api::Ack::Accepted {
-                                result: serde_json::Value::Null,
+                                result: rust_cli_kernel_api::session_api::CommandResult::Done,
                             },
                             Err(error) => rust_cli_kernel_api::session_api::Ack::Rejected {
                                 reason: error.to_string(),
@@ -189,7 +187,6 @@ impl<B: Backend> Loop<'_, B> {
                         };
                         super::session::Done::Ack {
                             sent: Sent::Resolve,
-                            label: String::new(),
                             ack,
                         }
                     }
@@ -205,19 +202,14 @@ impl<B: Backend> Loop<'_, B> {
                     interaction,
                     answer,
                 },
-                String::new(),
             ),
             Action::SetModel(selection) => self.set_model(selection),
             Action::ChooseModel(selection) => self.choose_model(selection, None),
             Action::SetMode(mode) => self.set_mode(mode),
             Action::SetPlan(enabled) => self.set_plan(enabled),
             Action::Compact(instructions) => {
-                if self.session.is_some() {
-                    self.send(
-                        Sent::Compact,
-                        Command::Compact { instructions },
-                        String::new(),
-                    );
+                if self.outbox.session().is_some() {
+                    self.send(Sent::Compact, Command::Compact { instructions });
                 } else {
                     self.app.info(i18n::not_implemented(lang, "compact"));
                 }
@@ -249,19 +241,19 @@ impl<B: Backend> Loop<'_, B> {
                 true,
             ),
             Action::Rename(title) => {
-                if self.session.is_some() {
+                if self.outbox.session().is_some() {
                     let command = Command::Rename {
                         title: title.clone(),
                     };
-                    self.send(Sent::Rename, command, title);
+                    self.send(Sent::Rename(title), command);
                 } else {
                     self.app.info(i18n::not_implemented(lang, "rename"));
                 }
             }
             // 还没有会话时没有对话可起名：直接给出说明，不发命令（titles.md §8.3）。
             Action::GenerateName => {
-                if self.session.is_some() {
-                    self.send(Sent::GenerateName, Command::GenerateName, String::new());
+                if self.outbox.session().is_some() {
+                    self.send(Sent::GenerateName, Command::GenerateName);
                 } else {
                     self.app.info(NO_NAME.to_owned());
                 }
@@ -286,8 +278,8 @@ impl<B: Backend> Loop<'_, B> {
 
     pub(super) fn set_model(&mut self, selection: ModelSelection) {
         let label = selection.model.clone();
-        if self.session.is_some() {
-            self.send(Sent::SetModel, Command::SetModel { selection }, label);
+        if self.outbox.session().is_some() {
+            self.send(Sent::SetModel(label), Command::SetModel { selection });
         } else {
             let execution = self.app.view.execution();
             self.app.view.set_draft(selection, execution);
@@ -296,8 +288,8 @@ impl<B: Backend> Loop<'_, B> {
     }
 
     fn set_mode(&mut self, mode: PermissionMode) {
-        if self.session.is_some() {
-            self.send(Sent::SetMode, Command::SetMode { mode }, String::new());
+        if self.outbox.session().is_some() {
+            self.send(Sent::SetMode, Command::SetMode { mode });
         } else {
             let selection = self.app.view.selection().clone();
             let execution = self.app.view.execution().with_mode(mode);
@@ -307,8 +299,8 @@ impl<B: Backend> Loop<'_, B> {
 
     /// plan 开关（修复线 F20）：有会话时 `SetPlan`，以 `PlanChanged` 为准；没有会话时改新会话的草稿。
     pub(super) fn set_plan(&mut self, enabled: bool) {
-        if self.session.is_some() {
-            self.send(Sent::SetPlan, Command::SetPlan { enabled }, String::new());
+        if self.outbox.session().is_some() {
+            self.send(Sent::SetPlan, Command::SetPlan { enabled });
         } else {
             let selection = self.app.view.selection().clone();
             let execution = self.app.view.execution().with_plan(enabled);
@@ -325,9 +317,9 @@ impl<B: Backend> Loop<'_, B> {
     /// 与空的输出，修复线 L-A，tui-manage.md §11.2）；之前留在草稿里的记录随旧对话一起清掉。
     pub(super) fn clear_as(&mut self, args: &str) -> Result<()> {
         self.clear_into(None)?;
-        self.pending_records.clear();
-        self.pending_records
-            .push(super::records::record("clear", args, String::new(), true));
+        self.outbox.clear_records();
+        self.outbox
+            .hold_record(super::records::record("clear", args, String::new(), true));
         Ok(())
     }
 
@@ -337,7 +329,7 @@ impl<B: Backend> Loop<'_, B> {
         workspace: Option<(rust_cli_kernel_api::env::WorkspaceRef, String)>,
     ) -> Result<()> {
         if self.app.running() {
-            self.send(Sent::Interrupt, Command::Interrupt, String::new());
+            self.send(Sent::Interrupt, Command::Interrupt);
         }
         // SessionEnd(clear)；下一次发送建的会话 SessionStart 来源是 clear。
         self.leave(rust_cli_kernel_api::session_api::EndReason::Clear);
@@ -360,7 +352,7 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 画完一帧后复制选区（选中的文字在绘制时算出）。只有空白时不复制；`clear` 时复制后清掉选区。
     pub(super) fn copy_selection(&mut self, clear: bool) {
-        let Some(text) = self.app.hits.selected.clone() else {
+        let Some(text) = self.app.pointer.hits.selected.clone() else {
             return;
         };
         self.app.mark_copied();
@@ -368,7 +360,7 @@ impl<B: Backend> Loop<'_, B> {
             self.copy_text(text);
         }
         if clear {
-            self.app.clear_selection();
+            self.app.pointer.clear_selection();
         }
         self.dirty = true;
     }
@@ -380,22 +372,20 @@ impl<B: Backend> Loop<'_, B> {
     /// 剪贴板不变，提示却说已发送。
     pub(super) fn copy_text(&mut self, text: String) {
         self.screen.copy(&text);
-        match self.options.services.clipboard.clone() {
-            Some(clipboard) => self.pending.push(
-                async move {
-                    let route = clipboard.copy_text(text.clone()).await;
-                    super::session::Done::Copied { route, text }
-                }
-                .boxed(),
-            ),
-            None => self.copied(crate::ui::clipboard::NO_SERVICE, &text),
-        }
+        let clipboard = self.options.services.clipboard.clone();
+        self.pending.push(
+            async move {
+                let route = clipboard.copy_text(text.clone()).await;
+                super::session::Done::Copied { route, text }
+            }
+            .boxed(),
+        );
     }
 
     /// 复制完成：显示提示。
     pub(super) fn copied(&mut self, route: crate::services::CopyRoute, text: &str) {
         let notice = crate::ui::clipboard::notice(route, text, &self.options.vars, self.app.lang);
-        self.app.copied = Some((notice, Instant::now()));
+        self.app.pointer.copied = Some((notice, Instant::now()));
         self.dirty = true;
     }
 }

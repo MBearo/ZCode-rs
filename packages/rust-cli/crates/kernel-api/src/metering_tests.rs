@@ -230,24 +230,24 @@ fn request_stats_round_trip_and_read_old_shapes() {
     assert_eq!(bare, RequestStats::default());
 }
 
-/// 写给 Node 的用途名（工作线 F71，usage.md §2.1）：标题与 WebFetch 摘要用 Node 的名字，其余旁路照原样。
+/// 写给 Node 的用途名（工作线 F71，usage.md §2.1）：主线程、子代理与压缩；旁路请求的见 `side_request_tests`。
 #[test]
 fn query_sources_use_the_node_names() {
-    use crate::model::{QuerySource, SIDE_SESSION_TITLE, SIDE_WEB_FETCH};
-    let side = |name: &str| QuerySource::Side(name.to_owned());
+    use crate::model::QuerySource;
+    use crate::side_request::SideSource;
     for (source, name) in [
         (QuerySource::MainThread, "main_turn"),
         (QuerySource::Subagent("Explore".to_owned()), "subagent"),
         (QuerySource::Compact, "compact"),
-        (side(SIDE_SESSION_TITLE), "session_title"),
-        (side(SIDE_WEB_FETCH), "web_fetch_processing"),
-        (side("hook_agent"), "hook_agent"),
-        (side("web_search_tool"), "web_search_tool"),
+        (QuerySource::Side(SideSource::SessionTitle), "session_title"),
+        (
+            QuerySource::Side(SideSource::WebFetch),
+            "web_fetch_processing",
+        ),
+        (QuerySource::Side(SideSource::WebSearch), "web_search_tool"),
     ] {
         assert_eq!(source.node_name(), name, "{source:?}");
     }
-    assert_eq!(SIDE_SESSION_TITLE, "generate_session_title");
-    assert_eq!(SIDE_WEB_FETCH, "web_fetch_apply");
 }
 
 /// 修复线 F112（tui-panels.md §1.7）：一个完成的请求的输出速度，时刻都相对请求开始；主回合与子代理共用这一个写法
@@ -257,29 +257,22 @@ fn the_speed_of_a_completed_call() {
     use crate::ids::MessageId;
     use crate::model::{ModelSelection, QuerySource};
     let call = ModelCall {
-        message: MessageId::new("msg_1"),
-        source: QuerySource::Subagent("Explore".to_owned()),
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: "m".to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        started_at_ms: 1_000,
         first_token_at_ms: Some(3_500),
         first_content_at_ms: Some(3_000),
-        completed_at_ms: 6_000,
-        status: CallStatus::Completed,
-        stop_reason: None,
-        tool_calls: 0,
         usage: Some(crate::message::Usage {
             input_tokens: 10,
             output_tokens: 120,
             cache_creation_input_tokens: 0,
             cache_read_input_tokens: 0,
         }),
-        retries: 0,
-        error: None,
+        ..ModelCall::new(
+            MessageId::new("msg_1"),
+            QuerySource::Subagent("Explore".to_owned()),
+            ModelSelection::new("p".to_owned(), "m".to_owned()),
+            1_000,
+            6_000,
+            CallStatus::Completed,
+        )
     };
     let speed = OutputSpeed::of(&call).unwrap();
     assert_eq!(

@@ -44,19 +44,18 @@ fn step(id: &str, content: Vec<ContentBlock>, usage: Usage, stop: StopReason) ->
         .filter(|block| matches!(block, ContentBlock::ToolUse { .. }))
         .count();
     let call = ModelCall {
-        message: MessageId::new(id),
-        source: QuerySource::MainThread,
-        selection: selection(),
-        started_at_ms: started,
         first_token_at_ms: Some(started + 1),
-        first_content_at_ms: None,
-        completed_at_ms: completed,
-        status: CallStatus::Completed,
         stop_reason: Some(stop),
         tool_calls: u32::try_from(tool_calls).unwrap(),
         usage: Some(usage),
-        retries: 0,
-        error: None,
+        ..ModelCall::new(
+            MessageId::new(id),
+            QuerySource::MainThread,
+            selection(),
+            started,
+            completed,
+            CallStatus::Completed,
+        )
     };
     let assistant = Message::Assistant(AssistantMessage {
         id: MessageId::new(id),

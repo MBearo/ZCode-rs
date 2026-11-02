@@ -1,39 +1,17 @@
 //! `/usage` 页面（usage.md §4、§5）：会话部分、标签页与范围查询的序号。
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use rust_cli_kernel_api::metering::{ActivityRange, ActivityStats, SessionMetering};
-use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::selection;
 
 use super::{StatsView, UsageTab, UsageView};
 use crate::ui::app::{Action, App, Overlay};
-use crate::ui::i18n::Lang;
 use crate::ui::manage::Manage;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::view::Transcript;
-
-fn app() -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
-}
+use crate::ui::test_support::{app, key};
 
 fn view(app: &App) -> &UsageView {
     match &app.overlay {
         Some(Overlay::Usage(view)) => view,
         other => panic!("no usage page: {other:?}"),
     }
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
 }
 
 #[test]

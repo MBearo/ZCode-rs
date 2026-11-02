@@ -48,8 +48,8 @@ fn assembler_in(shell_cwd: Option<&str>) -> PromptAssembler {
         os_version: "Linux 6.8.0".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: true,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     };
     let env = MemoryEnvironment::new(facts)
         .with_file("/Users/dev/w/AGENTS.md", "Keep answers short.")
@@ -80,25 +80,18 @@ fn assembler_in(shell_cwd: Option<&str>) -> PromptAssembler {
 
 fn request(agent_type: &str) -> ContextRequest {
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("sess_subagent_agent_1"),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/Users/dev/w"),
-        },
         agent: Some(AgentId::new("agent_1")),
-        source: QuerySource::Subagent(agent_type.to_owned()),
-        mode: PermissionMode::Default,
         tool_names: ["Agent", "Bash", "Skill"].map(str::to_owned).to_vec(),
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
+        ..ContextRequest::new(
+            SessionId::new("sess_subagent_agent_1"),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/w"),
+            },
+            QuerySource::Subagent(agent_type.to_owned()),
+            PermissionMode::Default,
+            ModelSelection::new("p".to_owned(), rust_cli_base::models::GLM_5_3.to_owned()),
+        )
     }
 }
 

@@ -26,8 +26,6 @@ use crate::definitions::{AgentDefinition, AgentSource};
 pub(crate) const FORK: &str = "fork";
 /// fork 的轮数上限（同对照实现）。
 const MAX_TURNS: u32 = 200;
-/// 子会话里记父会话与切点的 entry（`rust-cli/` 前缀由存储加，node-store.md §4.8.1）。
-pub(crate) const PARENT_ENTRY: &str = "fork_parent";
 
 /// fork 的定义（同对照实现）：全部工具、继承模型与模式、没有自己的 system prompt；不进 agent 清单。
 pub(crate) fn definition() -> AgentDefinition {

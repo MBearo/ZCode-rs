@@ -1,20 +1,14 @@
-//! 立即发送的键在输入框为空时的替身（修复线 F105，docs/specs/rust-cli/tui.md §5.1.1）：执行环境记下“把前台命令转到
-//! 后台”的请求，其余操作同 [`UnusedEnvironment`]。测试在 `queue.rs`。
-use std::sync::Mutex;
+//! 立即发送的键在输入框为空时的替身（修复线 F105，docs/specs/rust-cli/tui.md §5.1.1）：后台命令端口记下“把前台命令转到
+//! 后台”的请求，机器的其余端口返回 `Unsupported`。测试在 `queue.rs`。
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures_util::stream::BoxStream;
-use rust_cli_kernel_api::env::{
-    BackgroundReason, CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
-};
-use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
-use rust_cli_kernel_api::testing::UnusedEnvironment;
+use rust_cli_kernel_api::env::{BackgroundReason, EnvError};
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
+use rust_cli_kernel_api::ids::{SessionId, ShellTaskId};
+use rust_cli_kernel_api::machine::Background;
+use rust_cli_kernel_api::testing::{registry, unsupported_machine};
 
 /// 记下每次 `background_foreground` 的原因（没有前台命令，转了 0 个）。
 #[derive(Default)]
@@ -23,6 +17,11 @@ pub struct MovesEnv {
 }
 
 impl MovesEnv {
+    /// 只有主 env 的注册表：机器只换上后台命令端口（其余端口返回 `Unsupported`）。
+    pub fn registry(self: Arc<Self>) -> Arc<dyn EnvironmentRegistry> {
+        registry(unsupported_machine().with_background(self))
+    }
+
     pub fn moved(&self) -> Vec<BackgroundReason> {
         self.moved.lock().unwrap().clone()
     }
@@ -57,69 +56,3 @@ impl Background for MovesEnv {
         Ok(Vec::new())
     }
 }
-
-#[async_trait]
-impl EnvInfo for MovesEnv {
-    async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        UnusedEnvironment.facts(workspace).await
-    }
-}
-
-#[async_trait]
-impl Files for MovesEnv {
-    async fn read_file(
-        &self,
-        workspace: &WorkspaceRef,
-        request: ReadFile,
-    ) -> Result<FileContent, EnvError> {
-        UnusedEnvironment.read_file(workspace, request).await
-    }
-
-    async fn write_file(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        UnusedEnvironment
-            .write_file(workspace, context, request)
-            .await
-    }
-}
-
-#[async_trait]
-impl Commands for MovesEnv {
-    async fn start_command(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: StartCommand,
-    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        UnusedEnvironment
-            .start_command(workspace, context, request)
-            .await
-    }
-
-    fn watch_command(
-        &self,
-        operation: OperationId,
-        cursor: u64,
-    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        UnusedEnvironment.watch_command(operation, cursor)
-    }
-
-    async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
-        UnusedEnvironment.cancel(operation).await
-    }
-
-    async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
-        UnusedEnvironment.close_session(session, forget).await
-    }
-}
-
-impl Search for MovesEnv {}
-impl Shell for MovesEnv {}
-impl Checkpoints for MovesEnv {}
-impl Pdf for MovesEnv {}
-impl Git for MovesEnv {}
-impl Fetch for MovesEnv {}

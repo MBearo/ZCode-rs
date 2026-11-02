@@ -106,3 +106,15 @@ pub fn list(conn: &Connection, session: &str, kind: Option<&str>) -> Result<Vec<
         })
         .collect()
 }
+
+/// 这两种 entry 里最大的 `data.sequenceNumber`（工作区事件的序号：checkpoint 与文件回退共用一个空间）。
+pub fn max_sequence(conn: &Connection, session: &str, kinds: (&str, &str)) -> Result<Option<i64>> {
+    Ok(conn
+        .prepare_cached(
+            "select max(cast(json_extract(data, '$.sequenceNumber') as integer)) from session_entry
+             where session_id = ? and type in (?, ?)",
+        )?
+        .query_row(rusqlite::params![session, kinds.0, kinds.1], |row| {
+            row.get(0)
+        })?)
+}

@@ -1,5 +1,6 @@
 //! 命令的处理（[`crate::inbox`] 的裁决与转交）：P1 的五个命令。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use rust_cli_kernel_api::ids::{CommandId, InteractionId, SessionId};
 use rust_cli_kernel_api::interaction::PermissionAnswer;
 use rust_cli_kernel_api::model::ModelSelection;
@@ -9,6 +10,8 @@ use rust_cli_kernel_api::session_api::{
     Ack as KernelAck, Command, CommandEnvelope, CreateSession, Delivery, SessionHandle,
 };
 use rust_cli_protocol_core::rpc::RpcError;
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::inbound::Inbound;
@@ -17,25 +20,133 @@ use crate::projection::InputMeta;
 use crate::projection::state::{Followup, Phase};
 use crate::server::{Server, kernel_error};
 
-/// App 的模型选择 → 内核的选择。
-fn selection(value: &Value) -> Option<ModelSelection> {
+/// App 的模型选择（`modelSelectionSchema`）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSelection {
+    provider_id: String,
+    model_id: String,
+    #[serde(default)]
+    options: AppSelectionOptions,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSelectionOptions {
+    reasoning_level: Option<String>,
+}
+
+/// App 的模型选择 → 内核的选择。原样留着 JSON（排队项照原样带回去），用时再解。
+fn selection(value: Option<&Value>) -> Option<ModelSelection> {
+    let chosen: AppSelection = serde_json::from_value(value?.clone()).ok()?;
     Some(ModelSelection {
-        provider: value["providerId"].as_str()?.to_owned(),
-        model: value["modelId"].as_str()?.to_owned(),
-        reasoning: value["options"]["reasoningLevel"]
-            .as_str()
-            .map(str::to_owned),
-        connection: None,
+        reasoning: chosen.options.reasoning_level,
+        ..ModelSelection::new(chosen.provider_id, chosen.model_id)
     })
 }
 
 /// App 的模式与 plan 开关 → 内核的权限模式与 plan（README §5 的映射；`plan` 是旧写法，读成 plan 开、build）。
-fn mode(value: &Value, plan: Option<bool>) -> Option<(PermissionMode, bool)> {
-    let name = value.as_str()?;
+fn mode(name: Option<&str>, plan: Option<bool>) -> Option<(PermissionMode, bool)> {
+    let name = name?;
     if name == "plan" {
         return Some((PermissionMode::Default, true));
     }
     Some((PermissionMode::from_node_name(name)?, plan.unwrap_or(false)))
+}
+
+/// 一次输入（sendText 的 payload、createSession 的 firstInput；只取用到的字段）。
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Input {
+    text: Option<String>,
+    model_selection: Option<Value>,
+    mode: Option<String>,
+    plan_enabled: Option<bool>,
+    input_origin: Option<String>,
+    requested_delivery: Option<Requested>,
+}
+
+/// sendText 要的投递（`requestedDelivery`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum Requested {
+    StartNow,
+    Queue,
+    Guide,
+}
+
+impl Requested {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::StartNow => "startNow",
+            Self::Queue => "queue",
+            Self::Guide => "guide",
+        }
+    }
+}
+
+/// createSession 的 payload。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateSessionPayload {
+    session_id: Option<String>,
+    workspace_id: Option<String>,
+    first_input: Option<Input>,
+    #[serde(default)]
+    config: SessionConfig,
+}
+
+/// createSession 的 `config`。
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionConfig {
+    model_selection: Option<Value>,
+    mode: Option<String>,
+    plan_enabled: Option<bool>,
+    followup_mode: Option<Followup>,
+}
+
+/// resolveInteraction 的 payload。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvePayload {
+    interaction_id: String,
+    answer: AnswerPayload,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnswerPayload {
+    option_id: Option<String>,
+    free_text: Option<String>,
+}
+
+/// setFollowupMode 的 payload。
+#[derive(Deserialize)]
+struct FollowupPayload {
+    mode: Followup,
+}
+
+/// 解 payload（已经过 schema，失败只会是 schema 与这里的结构不一致）：解不出时按 payload 不合规拒绝。
+fn payload<P: DeserializeOwned>(envelope: &Envelope) -> Result<P, Box<Ack>> {
+    serde_json::from_value(envelope.payload.clone()).map_err(|error| {
+        Box::new(Ack::refused(
+            &envelope.command_id,
+            Status::Rejected,
+            "proto.invalidPayload",
+            format!("Invalid {} payload: {error}", envelope.kind),
+            0,
+        ))
+    })
+}
+
+/// 内核的回执 → 命令的 ACK：接受是 `accepted`，重复是同一个标成 duplicate，拒绝按 `refused` 给出。
+fn ack_of(kernel: KernelAck, accepted: Ack, refused: impl FnOnce(String) -> Ack) -> Ack {
+    match kernel {
+        KernelAck::Accepted { .. } => accepted,
+        KernelAck::Duplicate => inbox::duplicate(&accepted),
+        KernelAck::Rejected { reason } => refused(reason),
+    }
 }
 
 async fn send(handle: &dyn SessionHandle, id: &str, command: Command) -> KernelAck {
@@ -61,12 +172,7 @@ pub async fn command(server: &Server, params: Value) -> Result<Value, RpcError> 
     let envelope: Envelope = serde_json::from_value(params.clone())
         .map_err(|error| RpcError::invalid_params(format!("Invalid command envelope: {error}")))?;
     let key = inbox::key(envelope.session_id.as_deref(), &envelope.command_id);
-    let known = server
-        .remembered
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(&key)
-        .cloned();
+    let known = server.remembered.lock_unpoisoned().get(&key).cloned();
     if let Some(known) = known {
         return Ok(inbox::duplicate(&known).to_value());
     }
@@ -81,18 +187,15 @@ pub async fn command(server: &Server, params: Value) -> Result<Value, RpcError> 
         Ok(()) => decide(server, &envelope).await,
     };
     if ack.status != Status::Duplicate {
-        server
-            .remembered
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .put(key, ack.clone());
+        server.remembered.lock_unpoisoned().put(key, ack.clone());
     }
     // 命令事实（G2）：会话命令照 Node 的格式落库；写失败只记日志，ACK 照常回。
     if let Some(session) = &envelope.session_id
         && ack.is_fact()
         && let Err(error) = server
             .kernel
-            .put_session_record(&SessionId::new(session), inbox::fact(&ack))
+            .queries()
+            .put_record(&SessionId::new(session), &inbox::fact(&ack))
             .await
     {
         tracing::warn!(event = "protocol.command_fact.failed", error = %error, "writing the command fact failed");
@@ -129,19 +232,19 @@ async fn decide(server: &Server, envelope: &Envelope) -> Ack {
     let handle = live.handle.as_ref();
     match envelope.kind.as_str() {
         "sendText" => send_text(handle, &live.sink, envelope, phase, revision).await,
-        "stop" => match send(handle, &envelope.command_id, Command::Interrupt).await {
-            KernelAck::Accepted { .. } => Ack::accepted(&envelope.command_id, revision, None),
-            KernelAck::Duplicate => {
-                inbox::duplicate(&Ack::accepted(&envelope.command_id, revision, None))
-            }
-            KernelAck::Rejected { reason } => Ack::refused(
-                &envelope.command_id,
-                Status::Noop,
-                "proto.nothingToStop",
-                reason,
-                revision,
-            ),
-        },
+        "stop" => ack_of(
+            send(handle, &envelope.command_id, Command::Interrupt).await,
+            Ack::accepted(&envelope.command_id, revision, None),
+            |reason| {
+                Ack::refused(
+                    &envelope.command_id,
+                    Status::Noop,
+                    "proto.nothingToStop",
+                    reason,
+                    revision,
+                )
+            },
+        ),
         "resolveInteraction" => resolve(handle, &live.sink, envelope, revision).await,
         "setFollowupMode" => set_followup(server, handle, &live, envelope).await,
         _ => unsupported(envelope, revision),
@@ -149,24 +252,28 @@ async fn decide(server: &Server, envelope: &Envelope) -> Ack {
 }
 
 async fn create_session(server: &Server, envelope: &Envelope) -> Ack {
-    let payload = &envelope.payload;
-    let config = &payload["config"];
-    let chosen = selection(&config["modelSelection"])
-        .or_else(|| selection(&payload["firstInput"]["modelSelection"]))
+    let payload: CreateSessionPayload = match payload(envelope) {
+        Ok(payload) => payload,
+        Err(ack) => return *ack,
+    };
+    let config = &payload.config;
+    let first = payload.first_input.unwrap_or_default();
+    let chosen = selection(config.model_selection.as_ref())
+        .or_else(|| selection(first.model_selection.as_ref()))
         .unwrap_or_else(|| server.defaults.selection.clone());
-    let (permission, plan) = mode(&config["mode"], config["planEnabled"].as_bool())
-        .unwrap_or((server.defaults.mode, false));
-    let id = payload["sessionId"]
-        .as_str()
+    let (permission, plan) =
+        mode(config.mode.as_deref(), config.plan_enabled).unwrap_or((server.defaults.mode, false));
+    let id = payload
+        .session_id
+        .as_deref()
         .map_or_else(inbox::new_session_id, SessionId::new);
-    if let Some(followup) = config["followupMode"].as_str().and_then(Followup::parse) {
+    if let Some(followup) = config.followup_mode {
         server
             .followups
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_unpoisoned()
             .insert(id.clone(), followup);
     }
-    let workspace = payload["workspaceId"].as_str().unwrap_or_default();
+    let workspace = payload.workspace_id.as_deref().unwrap_or_default();
     let created = server
         .kernel
         .create_session(CreateSession {
@@ -196,14 +303,13 @@ async fn create_session(server: &Server, envelope: &Envelope) -> Ack {
     };
     crate::subscribe::announce(&live);
     let mut result = json!({"type": "createSession", "sessionId": id.as_str()});
-    let first = &payload["firstInput"];
-    if let Some(text) = first["text"].as_str() {
+    if let Some(text) = first.text.clone() {
         live.sink.remember_input(
             &envelope.command_id,
-            input_meta(envelope, first, "startNow", "startNow"),
+            input_meta(envelope, &first, "startNow", "startNow"),
         );
         let submit = Command::Submit {
-            text: text.to_owned(),
+            text,
             attachments: Vec::new(),
             delivery: Delivery::Queue,
         };
@@ -218,7 +324,7 @@ async fn create_session(server: &Server, envelope: &Envelope) -> Ack {
 
 fn input_meta(
     envelope: &Envelope,
-    payload: &Value,
+    input: &Input,
     requested: &'static str,
     admitted: &'static str,
 ) -> InputMeta {
@@ -227,11 +333,11 @@ fn input_meta(
         origin: envelope
             .input_origin
             .clone()
-            .or_else(|| payload["inputOrigin"].as_str().map(str::to_owned)),
-        text: payload["text"].as_str().unwrap_or_default().to_owned(),
-        selection: payload.get("modelSelection").cloned(),
-        mode: payload["mode"].as_str().map(str::to_owned),
-        plan: payload["planEnabled"].as_bool(),
+            .or_else(|| input.input_origin.clone()),
+        text: input.text.clone().unwrap_or_default(),
+        selection: input.model_selection.clone(),
+        mode: input.mode.clone(),
+        plan: input.plan_enabled,
         admitted_at: 0,
         requested,
         admitted,
@@ -245,11 +351,14 @@ async fn send_text(
     phase: Phase,
     revision: u64,
 ) -> Ack {
-    let payload = &envelope.payload;
+    let input: Input = match payload(envelope) {
+        Ok(input) => input,
+        Err(ack) => return *ack,
+    };
     let command = envelope.command_id.as_str();
     // 这次提交带的模型与模式先作用到会话（同 Node：Submission 带完整的选择）。
     let view = handle.view().await.ok();
-    if let Some(chosen) = selection(&payload["modelSelection"])
+    if let Some(chosen) = selection(input.model_selection.as_ref())
         && view.as_ref().is_none_or(|view| view.selection != chosen)
     {
         send(
@@ -259,7 +368,7 @@ async fn send_text(
         )
         .await;
     }
-    if let Some((permission, plan)) = mode(&payload["mode"], payload["planEnabled"].as_bool()) {
+    if let Some((permission, plan)) = mode(input.mode.as_deref(), input.plan_enabled) {
         if view.as_ref().is_none_or(|view| view.mode != permission) {
             send(
                 handle,
@@ -278,37 +387,35 @@ async fn send_text(
         }
     }
     let running = phase == Phase::Running;
-    let requested = payload["requestedDelivery"].as_str();
+    let requested = input.requested_delivery;
     let followup = live.followup();
-    let (delivery, admitted) = match requested {
-        Some("guide") if running => (Delivery::Steer, "guide"),
-        None if running && followup == Followup::Guide => (Delivery::Steer, "guide"),
-        _ if running => (Delivery::Queue, "queue"),
-        _ => (Delivery::Queue, "startNow"),
+    let (delivery, admitted) = match (requested, running) {
+        (Some(Requested::Guide), true) => (Delivery::Steer, "guide"),
+        (None, true) if followup == Followup::Guide => (Delivery::Steer, "guide"),
+        (_, true) => (Delivery::Queue, "queue"),
+        (_, false) => (Delivery::Queue, "startNow"),
     };
-    let requested = match requested {
-        Some("guide") => "guide",
-        Some("queue") => "queue",
-        _ => "startNow",
-    };
-    live.remember_input(command, input_meta(envelope, payload, requested, admitted));
+    let requested = requested.unwrap_or(Requested::StartNow).as_str();
+    live.remember_input(command, input_meta(envelope, &input, requested, admitted));
     let submit = Command::Submit {
-        text: payload["text"].as_str().unwrap_or_default().to_owned(),
+        text: input.text.unwrap_or_default(),
         attachments: Vec::new(),
         delivery,
     };
     let result = json!({"type": "inputAccepted", "delivery": admitted, "inputId": command});
-    match send(handle, command, submit).await {
-        KernelAck::Accepted { .. } => Ack::accepted(command, revision, Some(result)),
-        KernelAck::Duplicate => inbox::duplicate(&Ack::accepted(command, revision, Some(result))),
-        KernelAck::Rejected { reason } => Ack::refused(
-            command,
-            Status::Rejected,
-            "guard.inputRejected",
-            reason,
-            revision,
-        ),
-    }
+    ack_of(
+        send(handle, command, submit).await,
+        Ack::accepted(command, revision, Some(result)),
+        |reason| {
+            Ack::refused(
+                command,
+                Status::Rejected,
+                "guard.inputRejected",
+                reason,
+                revision,
+            )
+        },
+    )
 }
 
 async fn resolve(
@@ -317,9 +424,12 @@ async fn resolve(
     envelope: &Envelope,
     revision: u64,
 ) -> Ack {
-    let payload = &envelope.payload;
-    let interaction = payload["interactionId"].as_str().unwrap_or_default();
-    let option = payload["answer"]["optionId"].as_str();
+    let resolved: ResolvePayload = match payload(envelope) {
+        Ok(resolved) => resolved,
+        Err(ack) => return *ack,
+    };
+    let interaction = resolved.interaction_id.as_str();
+    let option = resolved.answer.option_id.as_deref();
     let pending = handle.view().await.ok().and_then(|view| {
         view.pending
             .into_iter()
@@ -359,8 +469,10 @@ async fn resolve(
             remember: suggestions,
         },
         _ => PermissionAnswer::Deny {
-            feedback: payload["answer"]["freeText"]
-                .as_str()
+            feedback: resolved
+                .answer
+                .free_text
+                .as_deref()
                 .map(str::trim)
                 .filter(|text| !text.is_empty())
                 .map(str::to_owned),
@@ -371,22 +483,22 @@ async fn resolve(
     }
     let command = Command::ResolveInteraction {
         interaction: InteractionId::new(interaction),
-        answer: serde_json::to_value(answer).unwrap_or(Value::Null),
+        answer: answer.into(),
     };
     // 与 Node 相同：ACK 不带 result（答案已经进了会话，投影随事件更新）。
-    match send(handle, &envelope.command_id, command).await {
-        KernelAck::Accepted { .. } => Ack::accepted(&envelope.command_id, revision, None),
-        KernelAck::Duplicate => {
-            inbox::duplicate(&Ack::accepted(&envelope.command_id, revision, None))
-        }
-        KernelAck::Rejected { reason } => Ack::refused(
-            &envelope.command_id,
-            Status::Noop,
-            "proto.alreadyResolved",
-            reason,
-            revision,
-        ),
-    }
+    ack_of(
+        send(handle, &envelope.command_id, command).await,
+        Ack::accepted(&envelope.command_id, revision, None),
+        |reason| {
+            Ack::refused(
+                &envelope.command_id,
+                Status::Noop,
+                "proto.alreadyResolved",
+                reason,
+                revision,
+            )
+        },
+    )
 }
 
 /// setFollowupMode（CAS）：跟进方式是协议保存的配置；裁决用会话 actor 的当前 revision（G1）。
@@ -409,14 +521,17 @@ async fn set_followup(
             );
         }
     };
-    let Some(wanted) = envelope.payload["mode"].as_str().and_then(Followup::parse) else {
-        return Ack::refused(
-            command,
-            Status::Rejected,
-            "proto.invalidPayload",
-            "unknown followup mode",
-            revision,
-        );
+    let wanted = match payload::<FollowupPayload>(envelope) {
+        Ok(chosen) => chosen.mode,
+        Err(_) => {
+            return Ack::refused(
+                command,
+                Status::Rejected,
+                "proto.invalidPayload",
+                "unknown followup mode",
+                revision,
+            );
+        }
     };
     if live.sink.followup() == wanted {
         return Ack::refused(
@@ -439,8 +554,7 @@ async fn set_followup(
     if let Some(session) = &envelope.session_id {
         server
             .followups
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_unpoisoned()
             .insert(SessionId::new(session), wanted);
     }
     // 增量在会话的泵任务里发（与内核事件的帧同一个顺序）。
@@ -458,15 +572,15 @@ pub async fn query(server: &Server, params: &Value) -> Result<Value, RpcError> {
         let command = key["commandId"].as_str().unwrap_or_default();
         let known = server
             .remembered
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_unpoisoned()
             .get(&inbox::key(session, command))
             .cloned();
         let known = match (known, session) {
             (Some(ack), _) => Some(ack),
             (None, Some(session)) => server
                 .kernel
-                .session_records(&SessionId::new(session), inbox::COMMAND_FACT)
+                .queries()
+                .records(&SessionId::new(session), inbox::COMMAND_FACT)
                 .await
                 .ok()
                 .and_then(|records| inbox::find_fact(&records, command)),

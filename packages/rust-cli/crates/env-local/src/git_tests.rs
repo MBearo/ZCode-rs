@@ -5,14 +5,13 @@
 
 use std::path::Path;
 
+use crate::{LocalEnvironment, ShellConfig};
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_git::{
     GitDiff, GitDiffRequest, GitSnapshot, GitStatus, GitStatusRequest,
 };
 use rust_cli_kernel_api::ids::EnvironmentId;
-use rust_cli_kernel_api::local_services::Git;
-
-use crate::{LocalEnvironment, ShellConfig};
+use rust_cli_kernel_api::machine::Git;
 
 /// 测试用的进程环境：真实 PATH（找到 git），HOME / XDG 指向临时目录，不读本机的 git 全局配置。
 fn snapshot(home: &Path) -> Vec<(String, String)> {

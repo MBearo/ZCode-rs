@@ -25,7 +25,7 @@ mod background_asks {
         text_response, tool_use_response,
     };
     use rust_cli_runtime::{ContextConfig, Defaults, LocalKernel, Ports, Surface};
-    use serde_json::{Value, json};
+    use serde_json::json;
     use tokio::sync::watch;
     use tokio_util::sync::CancellationToken;
 
@@ -241,13 +241,18 @@ mod background_asks {
             .unwrap()
     }
 
-    async fn resolve(run: &Run, id: &str, interaction: InteractionId, answer: Value) {
+    async fn resolve(
+        run: &Run,
+        id: &str,
+        interaction: InteractionId,
+        answer: rust_cli_kernel_api::orchestration::PermissionAnswer,
+    ) {
         let ack = send(
             &run.session,
             id,
             Command::ResolveInteraction {
                 interaction,
-                answer,
+                answer: answer.into(),
             },
         )
         .await;
@@ -278,7 +283,15 @@ mod background_asks {
                 .any(|entry| entry.background && entry.waiting),
             "{subagents:?}"
         );
-        resolve(&run, "answer", interaction, json!({"decision": "allow"})).await;
+        resolve(
+            &run,
+            "answer",
+            interaction,
+            rust_cli_kernel_api::orchestration::PermissionAnswer::Allow {
+                remember: Vec::new(),
+            },
+        )
+        .await;
         // 允许之后工具执行了（执行环境是不能用的替身：结果是执行环境的错误，不是拒绝）。
         next(&mut run.events, "the notice turn", turn_finished).await;
         let child = run.model.child_requests();
@@ -315,7 +328,13 @@ mod background_asks {
     async fn a_denied_background_ask_gives_the_subagent_text() {
         let mut run = start(Surface::Interactive).await;
         let (interaction, _) = ask_after_the_turn(&mut run).await;
-        resolve(&run, "answer", interaction, json!({"decision": "deny"})).await;
+        resolve(
+            &run,
+            "answer",
+            interaction,
+            rust_cli_kernel_api::orchestration::PermissionAnswer::Deny { feedback: None },
+        )
+        .await;
         next(&mut run.events, "the notice turn", turn_finished).await;
         let (text, is_error) = last_result(&run.model.child_requests()[1]);
         // 结果后面接着这一步的 attachment（agent 清单等），文字在最前面。

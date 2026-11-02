@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::EnvPath;
 use rust_cli_kernel_api::env_files::{FileKind, GlobFiles, PathStyle};
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
@@ -14,12 +15,15 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::common::{
-    Definition, cwd, definition, display_path, env_failure, escape_control, failed, parse, resolve,
-    resolve_input, stat, style, suggestion_under_cwd, text,
+    cwd, display_path, env_failure, escape_control, resolve, resolve_input, stat, style,
+    suggestion_under_cwd,
 };
 use crate::texts;
+use rust_cli_kernel_api::tool::{failed, parse, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const NAME: &str = "Glob";
+pub const NAME: &str = tool_names::GLOB;
 const LIMIT: usize = 100;
 /// 盘符 `C:` 的长度。
 const DRIVE_LEN: usize = rust_cli_base::path::DRIVE_PREFIX_LEN;
@@ -37,7 +41,7 @@ pub struct GlobTool {
 impl GlobTool {
     pub fn new() -> Self {
         Self {
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
         }
     }
 }
@@ -121,6 +125,23 @@ fn truncation_note(shown: usize, total: usize) -> String {
 impl Tool for GlobTool {
     fn name(&self) -> &str {
         NAME
+    }
+
+    /// 在点名的机器上找文件（remote-exec.md §20.5.1）。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::RunsThere
+    }
+
+    /// 判决链按路径规则检查（`Read(...)`，shell-permissions.md §4.4）。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        crate::common::path_subject(
+            rust_cli_kernel_api::permission::FileAccess::Read,
+            input,
+            "path",
+        )
     }
 
     fn input_schema(&self) -> Value {

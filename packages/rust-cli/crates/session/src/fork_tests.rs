@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{Message, UserOrigin};
 use rust_cli_kernel_api::session_api::{Ack, Command, SessionHandle};
 use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, SessionStore};
@@ -26,10 +25,13 @@ async fn forks_copy_the_active_branch_with_new_ids() {
         .session
         .send(envelope("f1", Command::Fork { at: None }))
         .await;
-    let Ack::Accepted { result } = ack else {
+    let Ack::Accepted {
+        result: rust_cli_kernel_api::session_api::CommandResult::Forked(forked),
+    } = ack
+    else {
         panic!("{ack:?}")
     };
-    let child = SessionId::new(result.as_str().unwrap());
+    let child = forked.session;
     let loaded = built.store.load(&child).await.unwrap();
     assert_eq!(loaded.meta.kind, SessionKind::Fork);
     assert_eq!(loaded.meta.parent, Some(crate::test_support::meta().id));
@@ -53,10 +55,13 @@ async fn a_fork_of_an_untitled_session_is_named_like_node() {
         .session
         .send(envelope("f1", Command::Fork { at: None }))
         .await;
-    let Ack::Accepted { result } = ack else {
+    let Ack::Accepted {
+        result: rust_cli_kernel_api::session_api::CommandResult::Forked(forked),
+    } = ack
+    else {
         panic!("{ack:?}")
     };
-    let child = SessionId::new(result.as_str().unwrap());
+    let child = forked.session;
     let loaded = built.store.load(&child).await.unwrap();
     assert_eq!(loaded.meta.title, "Fork of Untitled session");
 }

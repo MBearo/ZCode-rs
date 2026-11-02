@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 
 use futures_util::StreamExt;
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env::{CommandEvent, OutputStream};
 use rust_cli_kernel_api::env_shell::{
     BackgroundCommand, BackgroundKind, BackgroundTask, CwdScope, MonitorSocket,
@@ -62,15 +63,17 @@ fn accept(key: &str) -> String {
 fn socket_request(url: &str, root: &std::path::Path) -> rust_cli_kernel_api::env::StartCommand {
     let mut start = request(url, root, CwdScope::Pinned);
     start.timeout_ms = None;
-    start.background = Some(BackgroundCommand {
-        description: "feed".to_owned(),
-        tool_use: None,
-        kind: BackgroundKind::Monitor,
-    });
-    start.socket = Some(MonitorSocket {
-        url: url.to_owned(),
-        protocols: Vec::new(),
-    });
+    start.kind = CommandKind::Socket {
+        background: BackgroundCommand {
+            description: "feed".to_owned(),
+            tool_use: None,
+            kind: BackgroundKind::Monitor,
+        },
+        socket: MonitorSocket {
+            url: url.to_owned(),
+            protocols: Vec::new(),
+        },
+    };
     start
 }
 
@@ -116,6 +119,7 @@ async fn frames_go_to_the_output_and_the_close_to_the_lifecycle() {
             context("op_ws"),
             socket_request(&url, &fixture.root),
             web().await,
+            &Default::default(),
         )
         .await
         .unwrap();
@@ -149,6 +153,7 @@ async fn a_refused_connection_reports_an_error_then_1006() {
             context("op_ws"),
             socket_request(&url, &fixture.root),
             web().await,
+            &Default::default(),
         )
         .await
         .unwrap();
@@ -178,7 +183,7 @@ async fn a_stopped_socket_writes_no_lifecycle_and_no_notice() {
     let task = start.task.clone();
     let mut events = fixture
         .shells
-        .start_with(context("op_ws"), start, web().await)
+        .start_with(context("op_ws"), start, web().await, &Default::default())
         .await
         .unwrap();
     // 等第一帧写出来，再停。

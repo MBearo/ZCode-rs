@@ -3,7 +3,7 @@
 //! 压缩边界之后第一次、或平台 / shell / 系统版本变了时发整块；否则只在 cwd、git、附加目录变化时
 //! 发 `# Environment update`。快照存在 attachment 的 `data.snapshot` 里，resume 后据此算增量。
 
-use rust_cli_kernel_api::env::EnvFacts;
+use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
 use rust_cli_kernel_api::message::{AttachmentMessage, Message};
 use rust_cli_prompts::texts::{self, render};
 use serde::{Deserialize, Serialize};
@@ -29,13 +29,13 @@ pub(crate) struct Snapshot {
 }
 
 impl Snapshot {
-    pub(crate) fn from_facts(facts: &EnvFacts) -> Self {
+    /// 附加目录来自会话配置，不来自执行环境（deployment.md §21）。
+    pub(crate) fn from_facts(facts: &EnvFacts, additional: &[EnvPath]) -> Self {
         let present = |value: &str| (!value.is_empty()).then(|| value.to_owned());
         Self {
             working_directory: facts.cwd.as_str().to_owned(),
             is_git_repo: facts.is_git_repo,
-            additional_working_directories: facts
-                .additional_directories
+            additional_working_directories: additional
                 .iter()
                 .map(|path| path.as_str().to_owned())
                 .collect(),
@@ -159,8 +159,12 @@ fn snapshot_of(attachment: &AttachmentMessage) -> Option<Snapshot> {
 }
 
 /// 这一步的环境 attachment：`(text, data)`，text 未包 `<system-reminder>`。
-pub(crate) fn announce(history: &[Message], facts: &EnvFacts) -> Option<(String, Value)> {
-    let current = Snapshot::from_facts(facts);
+pub(crate) fn announce(
+    history: &[Message],
+    facts: &EnvFacts,
+    additional: &[EnvPath],
+) -> Option<(String, Value)> {
+    let current = Snapshot::from_facts(facts, additional);
     let announced: Vec<&AttachmentMessage> = attachments(history, SOURCE).collect();
     let latest = announced
         .last()

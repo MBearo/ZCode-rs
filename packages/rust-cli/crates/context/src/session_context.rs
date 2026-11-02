@@ -4,7 +4,7 @@
 
 use rust_cli_kernel_api::env::{EnvFacts, WorkspaceRef};
 use rust_cli_kernel_api::env_git::{GitSnapshot, GitStatus, GitStatusRequest};
-use rust_cli_kernel_api::local_services::Git;
+use rust_cli_kernel_api::machine::Git;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_prompts::texts::{self, render};
 use serde_json::{Value, json};

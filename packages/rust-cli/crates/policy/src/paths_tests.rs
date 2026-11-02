@@ -104,8 +104,9 @@ fn windows_path_rules_use_git_bash_spelling() {
     assert!(!hit("/src/**", r"C:\Other\src\a.rs"));
     assert!(hit(".env", r"C:\Work\a\.env"));
     assert!(hit("*.env", r"C:\Work\deep\x.env"));
-    // `\!`、`\#` 开头的是 gitignore 的转义，不换。
-    assert!(!hit(r"\!x", r"C:\Work\!x"));
+    // `\!`、`\#` 开头的是 gitignore 的转义，不换成 `/`：`\!x` 是名字 `!x`。F125 修前 glob 不认转义，这里不命中。
+    assert!(hit(r"\!x", r"C:\Work\!x"));
+    assert!(!hit(r"\!x", r"C:\Work\x"));
     // 网络共享：`\\server\share` 写成 `//server/share`。
     let unc = PathContext {
         cwd: r"\\server\share\repo".to_owned(),
@@ -171,4 +172,31 @@ fn a_double_star_rule_also_matches_the_directory_itself() {
     }
     assert!(!rule_matches("//etc/**", "/etcetera", "/w", &context, Deny));
     assert!(!rule_matches("//etc/**", "/", "/w", &context, Deny));
+}
+
+/// 路径规则的 glob 与 base 的 glob 同一份转换（`glob::path_regex`，gitignore 的段语法；F125）。以前 policy 另有一份：
+/// `[...]` 与 `\` 按字面、段里的 `**` 跨目录。标“修前”的几行以前结论相反。
+#[test]
+fn path_rule_globs_share_the_base_syntax() {
+    let context = paths();
+    let hit = |pattern: &str, path: &str| rule_matches(pattern, path, "/w", &context, Deny);
+    // 修前：字符类按字面。
+    assert!(hit("*.[ch]", "/w/a.c"));
+    assert!(!hit("*.[ch]", "/w/a.[ch]"));
+    assert!(hit("file[0-9].txt", "/w/file7.txt"));
+    // 修前：反斜杠按字面。
+    assert!(hit(r"\*.txt", "/w/*.txt"));
+    assert!(!hit(r"\*.txt", "/w/a.txt"));
+    // 修前：段里的 `**` 跨目录。
+    assert!(!hit("src/**.rs", "/w/src/a/b.rs"));
+    assert!(hit("src/**.rs", "/w/src/b.rs"));
+    // 修前修后相同。
+    assert!(hit("/src/a**", "/w/src/a/b"));
+    assert!(hit("/src/a**", "/w/src/abc"));
+    assert!(hit("**/*.env", "/w/x/.y.env"));
+    assert!(hit("/src/**/x.rs", "/w/src/x.rs"));
+    assert!(hit("/src/**/x.rs", "/w/src/a/b/x.rs"));
+    assert!(hit("//etc/**", "/etc"));
+    assert!(hit("?.rs", "/w/a.rs"));
+    assert!(!hit("?.rs", "/w/ab.rs"));
 }

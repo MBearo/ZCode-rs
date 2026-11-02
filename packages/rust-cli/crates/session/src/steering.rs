@@ -2,28 +2,29 @@
 //! （§5，L18）。
 //!
 //! 队列与 next 通道只由 actor 持有：主循环经 [`ActorSink`] 先领取（不出队），在主循环的任务里跑 hook
-//! （不挡 actor），再把每条插话的结局交回 actor 出队或留下。通知不跑 hook，提交之后才出通道（lane.rs）。
-//! 领取与结局之间队列可能被改动，actor 只按命令 ID 处理还在队列里的项。
+//! （不挡 actor），再把每条插话的结局交回 actor 出队或留下。通知不跑 hook，交回时 actor 给并入的每条通知一个
+//! attachment 的消息 ID，那条消息提交之后才出通道（lane.rs）。领取与结局之间队列可能被改动，actor 只按命令 ID 处理还在
+//! 队列里的插话、按通知的身份（只在内存的 `NoticeKey`）处理通知。
 
 use std::sync::Arc;
 
 use rust_cli_kernel_api::hooks::{HookEvent, HookEventName, HookOutcome, HookRunner};
-use rust_cli_kernel_api::ids::CommandId;
-use rust_cli_kernel_api::orchestration::{Absorbed, Steered};
+use rust_cli_kernel_api::ids::{CommandId, MessageId};
+use rust_cli_kernel_api::orchestration::{Absorbed, AbsorbedNotice, Steered};
 use rust_cli_kernel_api::session_api::{KernelEvent, NoticeLevel};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::actor::Actor;
-use crate::lane::Lane;
+use crate::inbox::{LaneItem, NoticeKey, Screening, is_slash};
 use crate::sink::{ActorSink, SinkRequest};
 
 /// 领取到的一项，按通道顺序。
 pub(crate) enum ClaimedItem {
     /// 插话，带组装好的 UPS 事件。
     Prompt(CommandId, String, Box<HookEvent>),
-    /// 通知全文。
-    Notice(String),
+    /// 通知与它的全文。
+    Notice(NoticeKey, String),
 }
 
 /// 领取到的插话与通知；没有 UPS hook 时 `hooks` 为 None。
@@ -53,30 +54,29 @@ impl Actor {
         }
         let mut items = Vec::new();
         let mut barrier = false;
-        for item in &self.lane {
+        for item in self.inbox.lane() {
             match item {
-                Lane::Input(command) => {
-                    if barrier || self.screened.contains_key(command) {
+                LaneItem::Input(queued) => {
+                    if barrier || matches!(queued.screening, Screening::Held(_)) {
                         barrier = true;
                         continue;
                     }
-                    let Some(input) = self.queue.iter().find(|input| input.command == *command)
-                    else {
-                        continue;
-                    };
+                    let input = &queued.input;
                     // 斜杠命令不在工具边界并入，留在通道里，回合结束后作为独立回合展开（query.md §4，L22）；它不是屏障，
                     // 后面的插话照常领取。
-                    if input.text.trim_start().starts_with('/') {
+                    if is_slash(&input.text) {
                         continue;
                     }
                     let event = self.user_prompt_submit(&input.text);
                     items.push(ClaimedItem::Prompt(
-                        command.clone(),
+                        input.command.clone(),
                         input.text.clone(),
                         Box::new(event),
                     ));
                 }
-                Lane::Notice(notice) => items.push(ClaimedItem::Notice(notice.text())),
+                LaneItem::Notice(notice) => {
+                    items.push(ClaimedItem::Notice(notice.key, notice.waiting.text()));
+                }
             }
         }
         let hooks = self
@@ -91,16 +91,23 @@ impl Actor {
         })
     }
 
-    /// 结局：并入与丢弃的出队（丢弃时发提示）；留下的记下结果（回合结束后由 `start_next` 取用）。
-    pub(crate) fn settle_steering(&mut self, fates: Vec<(CommandId, Fate)>) {
+    /// 结局：并入与丢弃的出队（丢弃时发提示）；留下的记下结果（回合结束后由 `start_next` 取用）。并入的通知（按顺序）
+    /// 各得到一个 attachment 的消息 ID，返回给主循环；提交之后按它出通道（C8）。
+    pub(crate) fn settle_steering(
+        &mut self,
+        fates: Vec<(CommandId, Fate)>,
+        notices: Vec<NoticeKey>,
+    ) -> Vec<MessageId> {
         for (command, fate) in fates {
-            if !self.queue.iter().any(|input| input.command == command) {
+            if !self.inbox.contains_input(&command) {
                 continue;
             }
             match fate {
-                Fate::Absorbed => self.remove_input(&command),
+                Fate::Absorbed => {
+                    self.inbox.remove_input(&command);
+                }
                 Fate::Dropped(notice) => {
-                    self.remove_input(&command);
+                    self.inbox.remove_input(&command);
                     // 只供显示，排在本次工具边界的 queued_command 之前（先给出 notices）。
                     if let Some(text) = notice {
                         self.log.append(KernelEvent::SystemNotice {
@@ -109,18 +116,30 @@ impl Actor {
                         });
                     }
                 }
-                Fate::Waits(outcome) => {
-                    self.screened.insert(command, outcome);
-                }
+                Fate::Waits(outcome) => self.inbox.hold(&command, outcome),
             }
         }
         self.emit_queue();
+        notices
+            .into_iter()
+            .map(|key| {
+                let id = self.deps.ids.message();
+                self.inbox.absorbing(key, id.clone());
+                id
+            })
+            .collect()
     }
 }
 
 /// 领取之后、交回之前的一项。
 enum Screened {
     Prompt(CommandId, String, Box<HookOutcome>),
+    Notice(NoticeKey, String),
+}
+
+/// 交回之前的并入项：通知的消息 ID 要等 actor 给出。
+enum Taken {
+    Prompt(Steered),
     Notice(String),
 }
 
@@ -144,8 +163,8 @@ impl ActorSink {
         let mut barrier = false;
         for item in claimed.items {
             let (command, text, event) = match item {
-                ClaimedItem::Notice(text) => {
-                    screened.push(Screened::Notice(text));
+                ClaimedItem::Notice(key, text) => {
+                    screened.push(Screened::Notice(key, text));
                     continue;
                 }
                 ClaimedItem::Prompt(..) if barrier => continue,
@@ -175,35 +194,54 @@ impl ActorSink {
         // 领取后回合被中止：全部留下（"leaving commands queued"），已跑完的记下结果；通知不并入，
         // 留在通道里。
         let aborted = claimed.abort.is_cancelled();
-        let mut absorbed = Vec::new();
+        let mut taken = Vec::new();
+        let mut notices = Vec::new();
         for item in screened {
             match item {
                 Screened::Prompt(command, _, outcome) if aborted => {
                     fates.push((command, Fate::Waits(Some(outcome))));
                 }
-                Screened::Notice(_) if aborted => {}
+                Screened::Notice(..) if aborted => {}
                 Screened::Prompt(command, text, outcome) => {
                     if let Some(title) = outcome.session_title.clone() {
                         self.title(title).await;
                     }
                     fates.push((command, Fate::Absorbed));
-                    absorbed.push(Absorbed::Prompt(Steered {
+                    taken.push(Taken::Prompt(Steered {
                         text,
                         after: outcome.messages,
                     }));
                 }
-                Screened::Notice(text) => absorbed.push(Absorbed::Notice(text)),
+                Screened::Notice(key, text) => {
+                    notices.push(key);
+                    taken.push(Taken::Notice(text));
+                }
             }
         }
         let (reply, answer) = oneshot::channel();
-        if self
+        let ids = match self
             .sender
-            .send(SinkRequest::SettleSteering { fates, reply })
+            .send(SinkRequest::SettleSteering {
+                fates,
+                notices,
+                reply,
+            })
             .await
-            .is_ok()
         {
-            let _ = answer.await;
-        }
-        absorbed
+            Ok(()) => answer.await.unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        // 回合已经结束（通道关了）时拿不到 ID：主循环自己取，提交时不再有人认它（与回合一起结束）。
+        let mut ids = ids.into_iter();
+        taken
+            .into_iter()
+            .map(|item| match item {
+                Taken::Prompt(steered) => Absorbed::Prompt(steered),
+                Taken::Notice(text) => Absorbed::Notice(AbsorbedNotice {
+                    text,
+                    id: ids.next(),
+                }),
+            })
+            .collect()
     }
 }

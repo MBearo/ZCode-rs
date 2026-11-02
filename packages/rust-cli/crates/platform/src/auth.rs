@@ -6,16 +6,17 @@
 // 读 `setting.json`）。
 //! 账号模型的每请求凭据（platform.md §5.3、§9.5）：手工 key，或 OAuth access token 换来的项目令牌（个人或团队）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
+use rust_cli_base::account::Family;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::model::{ModelConnection, ModelError};
-use sha2::{Digest, Sha256};
 
 use crate::account::{self, OAuthLogin, RequestAuth, profile_id};
 use crate::credentials::{CredentialStore, Credentials};
-use crate::token::{Family, ProjectTokens, TeamProject, TokenError, TokenRequest, fingerprint};
+use crate::token::{ProjectTokens, TeamProject, TokenError, TokenRequest, fingerprint};
 
 /// 记下的“令牌指纹 → 账号范围”的条数上限（令牌每小时级才换一次）。
 const ISSUED_LIMIT: usize = 32;
@@ -195,7 +196,7 @@ impl AccountAuth {
     }
 
     fn scope_of(&self, print: &str) -> Option<String> {
-        let issued = self.issued.lock().unwrap_or_else(PoisonError::into_inner);
+        let issued = self.issued.lock_unpoisoned();
         issued
             .iter()
             .find(|(known, _)| known == print)
@@ -203,7 +204,7 @@ impl AccountAuth {
     }
 
     fn remember(&self, print: String, scope: String) {
-        let mut issued = self.issued.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut issued = self.issued.lock_unpoisoned();
         if issued.iter().any(|(known, _)| *known == print) {
             return;
         }
@@ -267,10 +268,7 @@ fn app_scope(
         token.expose(),
         jwt.map(RedactedString::expose),
     ]));
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    rust_cli_base::hash::sha256_hex(text.as_bytes())
 }
 
 /// 个人 OAuth 的账号范围（App `#scope` 的个人分支，F50）。以前照 Node 是 sha256(JSON [provider, family, 身份,

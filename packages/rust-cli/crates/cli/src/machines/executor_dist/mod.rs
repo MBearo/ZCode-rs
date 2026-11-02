@@ -11,6 +11,7 @@
 
 mod package;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -26,8 +27,8 @@ use rust_cli_net::{Egress, HttpRequest};
 use rust_cli_paths::ExecutorPaths;
 use rust_cli_ssh_connect::{ArtifactSource, DownloadError, Platform};
 
-use crate::options::TestDeclarations;
-use crate::update::registry as npm;
+use crate::assemble::options::TestDeclarations;
+use crate::commands::update::registry as npm;
 
 /// tarball 最多这么大（执行器的包压缩后几十 MB）。
 const MAX_TARBALL: usize = 256 * units::MIB;
@@ -86,9 +87,7 @@ impl NpmExecutors {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    mutex.lock_unpoisoned()
 }
 
 #[async_trait]

@@ -3,6 +3,7 @@
 //! 关闭停在执行环境的 `close_session` 上（testing 的 [`ClosingEnvironment`]），冷加载停在 [`HeldLoads`] 上：测试在
 //! 停住的时候做要验证的操作，再放行，竞态因此确定地发生，不靠睡眠。
 
+use rust_cli_kernel_api::ids::MachineName;
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,12 +16,10 @@ use rust_cli_kernel_api::ids::{CommandId, EnvironmentId};
 use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, CreateSession, Delivery, EndReason, KernelEvent, StartSource,
 };
-use rust_cli_kernel_api::store::{
-    CommitReceipt, FactBatch, LoadedSession, SessionFilter, SessionStore, SessionSummary,
-};
+use rust_cli_kernel_api::store::{Store, StoreError};
 use rust_cli_kernel_api::testing::{
-    ClosingEnvironment, FixedClock, MemoryStore, ScriptedModel, SequentialIds, environments,
-    selection, text_response,
+    ClosingEnvironment, FixedClock, MemoryStore, ScriptedModel, SequentialIds, StoreCall,
+    StoreHooks, StoreProxy, environments, selection, text_response,
 };
 use rust_cli_tools::file_state::{Baseline, FileState};
 use tokio::sync::watch;
@@ -31,7 +30,7 @@ const WAIT: Duration = Duration::from_secs(5);
 
 fn kernel(
     env: Arc<ClosingEnvironment>,
-    store: Arc<dyn SessionStore>,
+    store: Arc<dyn Store>,
     model: Arc<ScriptedModel>,
 ) -> LocalKernel {
     let kernel = LocalKernel::new(
@@ -135,8 +134,9 @@ async fn opening_a_closing_session_waits_for_the_close_and_starts_a_new_actor() 
     let first = kernel.open_session(&id).await.unwrap();
     // 先让 SessionStart(startup) 跑完，hook 的顺序才确定。
     run_a_turn(&first, "hello").await;
-    kernel.closer.read_files.set(
+    kernel.closer.scoped.read_files.set_at(
         &id,
+        &MachineName::primary(),
         "/work/a.txt",
         FileState {
             content: "a".to_owned(),
@@ -160,7 +160,12 @@ async fn opening_a_closing_session_waits_for_the_close_and_starts_a_new_actor() 
         let reopened = open.await.unwrap();
         // 按会话的表在条目移出之前就清掉了：醒来的打开看到的是释放干净的状态。
         assert!(
-            kernel.closer.read_files.get(&id, "/work/a.txt").is_none(),
+            kernel
+                .closer
+                .scoped
+                .read_files
+                .get_at(&id, &MachineName::primary(), "/work/a.txt")
+                .is_none(),
             "the old session's readFileState must be released before the reopen"
         );
         reopened
@@ -372,7 +377,6 @@ async fn a_close_whose_caller_goes_away_still_finishes() {
 
 /// 冷加载停在闸门上的存储：数 `load` 的次数，放行后转给内存存储；`fail_next` 让下一个通过的加载失败。
 struct HeldLoads {
-    inner: Arc<MemoryStore>,
     gate: watch::Sender<Gate>,
 }
 
@@ -384,11 +388,10 @@ struct Gate {
 }
 
 impl HeldLoads {
-    fn held(inner: Arc<MemoryStore>) -> Self {
-        Self {
-            inner,
+    fn held() -> Arc<Self> {
+        Arc::new(Self {
             gate: watch::Sender::new(Gate::default()),
-        }
+        })
     }
 
     async fn loading(&self, count: usize) {
@@ -413,20 +416,11 @@ impl HeldLoads {
 }
 
 #[async_trait]
-impl SessionStore for HeldLoads {
-    async fn create(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        self.inner.create(meta).await
-    }
-
-    async fn commit(
-        &self,
-        session: &SessionId,
-        batch: FactBatch,
-    ) -> Result<CommitReceipt, StoreError> {
-        self.inner.commit(session, batch).await
-    }
-
-    async fn load(&self, session: &SessionId) -> Result<LoadedSession, StoreError> {
+impl StoreHooks for HeldLoads {
+    async fn before(&self, call: StoreCall<'_>) -> Result<(), StoreError> {
+        let StoreCall::Load(_) = call else {
+            return Ok(());
+        };
         self.gate.send_modify(|gate| gate.loads += 1);
         let _ = self.gate.subscribe().wait_for(|gate| gate.open).await;
         let mut failed = false;
@@ -441,11 +435,7 @@ impl SessionStore for HeldLoads {
                 message: "the test store failed to load".to_owned(),
             });
         }
-        self.inner.load(session).await
-    }
-
-    async fn list(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, StoreError> {
-        self.inner.list(filter).await
+        Ok(())
     }
 }
 
@@ -464,10 +454,10 @@ async fn stored_session(store: &Arc<MemoryStore>) -> SessionId {
 async fn two_opens_of_one_session_share_one_cold_load() {
     let memory = Arc::new(MemoryStore::default());
     let id = stored_session(&memory).await;
-    let store = Arc::new(HeldLoads::held(memory));
+    let store = HeldLoads::held();
     let kernel = kernel(
         Arc::new(ClosingEnvironment::held()),
-        store.clone(),
+        Arc::new(StoreProxy::new(memory, store.clone())),
         Arc::new(ScriptedModel::new(Vec::new())),
     );
     let (one, two, ()) = tokio::time::timeout(WAIT, async {
@@ -492,10 +482,10 @@ async fn two_opens_of_one_session_share_one_cold_load() {
 async fn a_failed_cold_load_lets_the_waiting_open_load_again() {
     let memory = Arc::new(MemoryStore::default());
     let id = stored_session(&memory).await;
-    let store = Arc::new(HeldLoads::held(memory));
+    let store = HeldLoads::held();
     let kernel = kernel(
         Arc::new(ClosingEnvironment::held()),
-        store.clone(),
+        Arc::new(StoreProxy::new(memory, store.clone())),
         Arc::new(ScriptedModel::new(Vec::new())),
     );
     let (one, two, ()) = tokio::time::timeout(WAIT, async {
@@ -521,10 +511,10 @@ async fn a_failed_cold_load_lets_the_waiting_open_load_again() {
 async fn dropping_the_loading_open_hands_the_load_to_the_waiting_one() {
     let memory = Arc::new(MemoryStore::default());
     let id = stored_session(&memory).await;
-    let store = Arc::new(HeldLoads::held(memory));
+    let store = HeldLoads::held();
     let kernel = kernel(
         Arc::new(ClosingEnvironment::held()),
-        store.clone(),
+        Arc::new(StoreProxy::new(memory, store.clone())),
         Arc::new(ScriptedModel::new(Vec::new())),
     );
     let mut waiting = pin!(kernel.open_session_as(&id, StartSource::Resume));

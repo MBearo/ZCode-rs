@@ -30,13 +30,12 @@ use futures_util::StreamExt;
 use rust_cli_base::models::GLM_5;
 use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, Reconnect};
-use rust_cli_exec_transport::Provisioner;
 use rust_cli_kernel_api::env::{
     CommandEvent, EnvPath, ReadFile, StartCommand, WorkspaceRef, WritePrecondition,
 };
 use rust_cli_kernel_api::env_files::{GrepMode, GrepOutcome, GrepSearch, PutFile};
-use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{EnvironmentId, ShellTaskId};
+use rust_cli_machines::Provisioner;
 use rust_cli_machines::{Machine, MachineState};
 use rust_cli_ssh_connect::SshProvisioner;
 use serde_json::Value;
@@ -165,18 +164,8 @@ async fn an_ssh_machine_is_provisioned_used_and_survives_a_dropped_link() {
             &ws,
             context("op_loop"),
             StartCommand {
-                command: text.to_owned(),
-                cwd: EnvPath::new(root),
                 timeout_ms: Some(60_000),
-                task: ShellTaskId::new("t1"),
-                shell: Default::default(),
-                cwd_scope: CwdScope::Pinned,
-                background: None,
-                sandbox: None,
-                hook: None,
-                on_timeout: None,
-                socket: None,
-                env: Default::default(),
+                ..StartCommand::new(text.to_owned(), EnvPath::new(root), ShellTaskId::new("t1"))
             },
         )
         .await
@@ -209,7 +198,7 @@ async fn an_ssh_machine_is_provisioned_used_and_survives_a_dropped_link() {
     drop(recorder);
     assert!(
         seen.iter()
-            .any(|state| matches!(state, MachineState::Reconnecting { .. })),
+            .any(|state| matches!(state, MachineState::Reconnecting(_))),
         "{seen:?}"
     );
     assert!(matches!(
@@ -239,7 +228,8 @@ async fn an_ssh_machine_is_provisioned_used_and_survives_a_dropped_link() {
         sse::text_reply("done"),
     ]);
     let output = Command::new(BIN)
-        .args(["-p", "run it", "--permission-mode", "bypassPermissions"])
+        // 主 env 是容器里的 root：root 不能用 bypassPermissions（deployment.md §21），预先放行 Bash。
+        .args(["-p", "run it", "--allowedTools", "Bash"])
         .current_dir(&work_path)
         .env_clear()
         .env("HOME", home.path())
@@ -356,7 +346,7 @@ async fn a_listed_machine_runs_bash_and_read_in_the_container() {
         .find(|tool| tool["name"] == "Bash")
         .map(|tool| tool["input_schema"]["properties"]["machine"]["enum"].clone())
         .unwrap();
-    assert_eq!(bash_schema, serde_json::json!(["local", "dev-a"]));
+    assert_eq!(bash_schema, serde_json::json!(["primary", "dev-a"]));
     let first = requests[0]["messages"].to_string();
     assert!(first.contains("- dev-a: Linux "), "{first}");
     assert!(first.contains("working directory /srv/proj"), "{first}");

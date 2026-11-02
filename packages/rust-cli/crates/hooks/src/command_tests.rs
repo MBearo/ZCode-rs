@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OwnerEpoch, SessionId};
+use rust_cli_kernel_api::env::CommandKind;
+use rust_cli_kernel_api::env_shell::CwdScope;
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, SessionId};
 
 use super::*;
 use crate::test_support::{Script, ScriptedEnv, script, workspace};
@@ -21,15 +23,14 @@ fn hook(command: &str) -> CommandHook {
 }
 
 fn context(operation: &str) -> OperationContext {
-    OperationContext {
-        environment: EnvironmentId::new("local"),
-        generation: Generation::new("g1"),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: OperationId::new(operation),
-        origin: rust_cli_kernel_api::env::Origin::User {
+    OperationContext::new(
+        EnvironmentId::new("local"),
+        Generation::new("g1"),
+        OperationId::new(operation),
+        rust_cli_kernel_api::env::Origin::User {
             session: Some(SessionId::new("sess_1")),
         },
-    }
+    )
 }
 
 async fn run_with(
@@ -71,7 +72,9 @@ async fn sends_stdin_env_and_collects_separate_streams() {
     assert_eq!(request.timeout_ms, Some(5_000));
     assert_eq!(request.cwd_scope, CwdScope::Pinned);
     assert!(request.task.as_str().starts_with('h') && request.task.as_str().len() == 9);
-    let io = request.hook.unwrap();
+    let CommandKind::Hook { hook: io } = request.kind else {
+        panic!("{:?}", request.kind);
+    };
     assert_eq!(io.stdin, "{\"hook_event_name\":\"Stop\"}\n");
     // 名字按 Node（`createPluginEnvOverlay`，两套都给，修复线 F42，config.md §2.5.1）。
     for name in ["ZCODE_PROJECT_DIR", "CLAUDE_PROJECT_DIR"] {
@@ -209,7 +212,9 @@ async fn plugin_hooks_see_their_root() {
         script("", "", 0),
     )]);
     run_with(&env, &shell, 5_000, CancellationToken::new()).await;
-    let io = env.started().remove(0).1.hook.unwrap();
+    let CommandKind::Hook { hook: io } = env.started().remove(0).1.kind else {
+        panic!("not a hook command");
+    };
     for name in ["CLAUDE_PLUGIN_ROOT", "ZCODE_PLUGIN_ROOT"] {
         assert_eq!(io.env.get(name).map(String::as_str), Some(root), "{name}");
     }

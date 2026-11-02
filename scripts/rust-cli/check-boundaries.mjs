@@ -6,14 +6,15 @@
 // - 依赖图取自 `cargo metadata`（Cargo 自己解析，表格写法、`package =` 改名、按平台的依赖都按真实包名）；
 // - 每个 crate 的 .rs 文件、根与 crate 自己的 clippy.toml；
 // - 接口快照的源码与已提交的 interfaces.json（boundaries/interfaces.mjs）；
-// - 解耦检查（docs/specs/rust-cli/app-protocol.md §9）：协议适配层的依赖、词汇、按前端分支、feature（boundaries/decoupling.mjs）
-//   与 kernel-api 只加不改（boundaries/kernel-surface.mjs 与已提交的 kernel-surface.json）；
+// - 解耦检查（docs/specs/rust-cli/app-protocol.md §9）：协议适配层的依赖、词汇、按前端分支、feature（boundaries/decoupling.mjs）；
 // - 厂商错误的解耦（docs/specs/rust-cli/provider-errors.md §2.5）：厂商码与厂商专有的字符串只在 model 的 errors/
 //   （boundaries/vendor.mjs）；
 // - 容易变的字符串（README §4.1 第 6 条，工作线 F121）：模型 ID、主机名与环境变量名只在常量模块里（boundaries/literals.mjs），
 //   另收 scripts/rust-cli 下的 JS 源码；
 // - 散写数字的棘轮（docs/specs/rust-cli/constants.md §4，F122）：每个文件的处数与已提交的 numbers.json 相等
-//   （boundaries/numbers.mjs）。
+//   （boundaries/numbers.mjs）；
+// - 枢纽 DTO 只经 kernel-api 的构造函数建（README §4.1 第 7 条，F126）：别的 crate 不写完整的结构体字面量
+//   （boundaries/constructors.mjs）。
 // README 表格与规则表的一致性只在本仓库检查（scripts/rust-cli/repo-only/check.mjs，工作线 F60）。
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
@@ -25,6 +26,7 @@ import {
   checkClippy,
   checkDefinitions,
   checkGraph,
+  checkLocalFiles,
   checkSources,
   checkStableDependencies,
   internalGraph,
@@ -36,13 +38,8 @@ import {
   checkProtocolLayering,
   checkVocabulary,
 } from "./boundaries/decoupling.mjs";
+import { checkConstructors } from "./boundaries/constructors.mjs";
 import { SNAPSHOT, checkInterfaces, readSources } from "./boundaries/interfaces.mjs";
-import {
-  checkSurface,
-  readSnapshot,
-  readSurfaceSources,
-  surfaceOf,
-} from "./boundaries/kernel-surface.mjs";
 import { checkVolatileLiterals } from "./boundaries/literals.mjs";
 import * as policy from "./boundaries/policy.mjs";
 import { checkNumbers, countNumbers, readBaseline } from "./boundaries/numbers.mjs";
@@ -143,22 +140,21 @@ const failures = [
   ...checkClippy(policy, rootClippy, crateClippy),
   ...checkSources(policy, parseClippy(rootClippy).entries, sources),
   ...checkDefinitions(policy, sources),
+  // 路径一律指执行侧（deployment.md §21、§25）：cli 碰本机文件只许白名单里的文件。
+  ...checkLocalFiles(policy, sources),
   // 解耦（app-protocol.md §9）：协议适配层不入侵内核。
   ...checkProtocolLayering(policy, graph),
   ...checkVocabulary(policy, sources),
   ...checkFrontendBranching(policy, sources),
   ...checkFeatures(policy, packages),
-  ...checkSurface(
-    surfaceOf(await readSurfaceSources(root)),
-    await readSnapshot(),
-    policy.KERNEL_API_CHANGES,
-  ),
   // 厂商错误（provider-errors.md §2.5）：第 2 层与 query 等只认中性分类。
   ...checkVendorTerms(policy, sources),
   // 容易变的字符串（README §4.1 第 6 条）：模型 ID、主机名与环境变量名只在常量模块里。
   ...checkVolatileLiterals(policy, sources, scripts),
   // 有含义的数字是命名常量（constants.md §4）：散写的处数只许降低。
   ...checkNumbers(countNumbers(sources, policy.NUMBER_ALLOWED), await readBaseline()),
+  // 枢纽 DTO 的构造（README §4.1 第 7 条）：加字段时只改 kernel-api。
+  ...checkConstructors(policy, sources),
 ];
 
 if (failures.length) {

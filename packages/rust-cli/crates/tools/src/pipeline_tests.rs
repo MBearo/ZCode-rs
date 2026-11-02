@@ -3,16 +3,14 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use rust_cli_base::models::GLM_4_6;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
-use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, InteractionId, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
-};
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, RunId, SessionId};
 use rust_cli_kernel_api::orchestration::{
-    HookEvent, HookEventName, HookOutcome, HookRunner, InteractionAnswer, InteractionRequest,
-    Interactions, OrchestrationError, PermissionAnswer, PermissionGate,
+    HookEvent, HookEventName, HookOutcome, HookRunner, InteractionRequest, PermissionAnswer,
+    PermissionGate,
 };
-use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode};
+use rust_cli_kernel_api::permission::PermissionDecision;
 use rust_cli_kernel_api::testing::{
-    FakeTool, MemoryStore, UnusedEnvironment, local_services, machine,
+    FakeTool, FixedGate, ScriptedInteractions, UnusedEnvironment, controller_services, machine,
 };
 use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
 use serde_json::{Value, json};
@@ -20,20 +18,6 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::*;
-
-struct FixedGate(PermissionDecision);
-
-#[async_trait]
-impl PermissionGate for FixedGate {
-    async fn decide(
-        &self,
-        _tool: &dyn Tool,
-        _input: &Value,
-        _context: &ToolUseContext,
-    ) -> PermissionDecision {
-        self.0.clone()
-    }
-}
 
 #[derive(Default)]
 struct RecordingHooks(Mutex<Vec<HookEventName>>);
@@ -46,49 +30,27 @@ impl HookRunner for RecordingHooks {
     }
 }
 
-struct Answer(PermissionAnswer);
-
-#[async_trait]
-impl Interactions for Answer {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        _request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i1"),
-            answer: serde_json::to_value(&self.0).unwrap(),
-        })
-    }
-}
-
 fn context(answer: PermissionAnswer) -> ToolUseContext {
     let env = Arc::new(UnusedEnvironment);
     ToolUseContext {
-        session: SessionId::new("sess_1"),
-        run: RunId::new("run_1"),
-        tool_use: ToolUseId::new("toolu_1"),
-        agent: None,
         workspace: WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/work"),
         },
-        mode: PermissionMode::Default,
-        cancel: CancellationToken::new(),
         machine: machine(env.clone()),
-        local: local_services(env),
-        artifacts: Arc::new(MemoryStore::default()),
-        interactions: Arc::new(Answer(answer)),
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g1"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op_1"),
-            origin: Origin::Agent {
+        controller: controller_services(env),
+        interactions: Arc::new(ScriptedInteractions::always(answer)),
+        session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g1"),
+            OperationId::new("op_1"),
+            Origin::Agent {
                 session: SessionId::new("sess_1"),
                 run: RunId::new("run_1"),
             },
-        },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -109,7 +71,8 @@ async fn run(
     let (progress, _updates) = mpsc::channel(4);
     let output = pipeline
         .execute(Arc::new(tool), input, context(answer), progress)
-        .await;
+        .await
+        .output;
     let events = hooks.0.lock().unwrap().clone();
     (output, events)
 }
@@ -158,10 +121,7 @@ async fn a_denied_call_never_runs() {
 
 #[tokio::test]
 async fn asking_the_user_follows_the_answer() {
-    let ask = || PermissionDecision::Ask {
-        message: "run it?".to_owned(),
-        suggestions: Vec::new(),
-    };
+    let ask = || PermissionDecision::ask("run it?", Vec::new());
     let (allowed, _) = run(
         ask(),
         allow(),
@@ -220,7 +180,8 @@ async fn invalid_input_is_rejected_before_any_hook() {
     let (progress, _updates) = mpsc::channel(4);
     let output = pipeline
         .execute(Arc::new(Strict), json!({}), context(allow()), progress)
-        .await;
+        .await
+        .output;
     assert_eq!(
         text(&output),
         "<tool_use_error>InputValidationError: Read failed due to the following issue:\nThe required parameter `file_path` is missing</tool_use_error>"
@@ -249,7 +210,8 @@ async fn unparsed_input_is_a_json_input_validation_error_before_any_hook() {
             context(allow()),
             progress,
         )
-        .await;
+        .await
+        .output;
     let sent = &raw[..200];
     assert!(output.is_error);
     assert_eq!(
@@ -283,10 +245,7 @@ impl PermissionGate for Remembering {
         _input: &Value,
         _context: &ToolUseContext,
     ) -> PermissionDecision {
-        PermissionDecision::Ask {
-            message: "Run it?".to_owned(),
-            suggestions: Vec::new(),
-        }
+        PermissionDecision::ask("Run it?", Vec::new())
     }
 
     async fn local_rules_committed(&self, workspace: &WorkspaceRef) {
@@ -294,6 +253,15 @@ impl PermissionGate for Remembering {
             .lock()
             .unwrap()
             .push(workspace.root.as_str().to_owned());
+    }
+
+    async fn check_rules(
+        &self,
+        _tool: &dyn Tool,
+        _input: &Value,
+        _context: &ToolUseContext,
+    ) -> Option<PermissionDecision> {
+        None
     }
 }
 
@@ -313,7 +281,8 @@ async fn always_allow_answers_tell_the_gate_to_reload_the_workspace_rules() {
     let tool = Arc::new(FakeTool::new("Bash", false, "ran"));
     let output = pipeline
         .execute(tool, json!({}), context(answer), progress)
-        .await;
+        .await
+        .output;
     assert_eq!(text(&output), "ran");
     assert_eq!(gate.0.lock().unwrap().as_slice(), ["/work"]);
 }
@@ -321,10 +290,7 @@ async fn always_allow_answers_tell_the_gate_to_reload_the_workspace_rules() {
 #[tokio::test]
 async fn unanswerable_questions_return_the_question_itself() {
     let (output, _) = run(
-        PermissionDecision::Ask {
-            message: "touch in '/w/x' needs approval.".to_owned(),
-            suggestions: Vec::new(),
-        },
+        PermissionDecision::ask("touch in '/w/x' needs approval.", Vec::new()),
         PermissionAnswer::Unavailable,
         FakeTool::new("Bash", false, "ran"),
         json!({}),
@@ -334,49 +300,69 @@ async fn unanswerable_questions_return_the_question_itself() {
     assert_eq!(text(&output), "touch in '/w/x' needs approval.");
 }
 
-/// 记下收到的询问，并一律允许。
-#[derive(Default)]
-struct Asked(Mutex<Vec<InteractionRequest>>);
-
-#[async_trait]
-impl Interactions for Asked {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        self.0.lock().unwrap().push(request);
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i1"),
-            answer: json!({"decision": "allow"}),
-        })
+fn bash_rule(content: &str) -> rust_cli_kernel_api::permission::PermissionRule {
+    rust_cli_kernel_api::permission::PermissionRule {
+        tool: "Bash".to_owned(),
+        content: Some(content.to_owned()),
     }
+}
+
+/// 判决链要询问、给出这些建议规则时，`tool` 的这次调用发出的询问（询问一律允许）。
+async fn ask_of(
+    tool: &str,
+    input: Value,
+    suggestions: &[rust_cli_kernel_api::permission::PermissionRule],
+) -> InteractionRequest {
+    let gate = Arc::new(FixedGate(PermissionDecision::ask(
+        "Run it?",
+        suggestions.to_vec(),
+    )));
+    let pipeline = Pipeline::new(gate, Arc::new(RecordingHooks::default()));
+    let asked = Arc::new(ScriptedInteractions::allowing());
+    let mut context = context(PermissionAnswer::Unavailable);
+    context.interactions = asked.clone();
+    let (progress, _updates) = mpsc::channel(4);
+    let tool = Arc::new(FakeTool::new(tool, false, "ran"));
+    let output = pipeline
+        .execute(tool, input, context, progress)
+        .await
+        .output;
+    assert_eq!(text(&output), "ran");
+    let mut requests = asked.asked();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    requests.remove(0)
 }
 
 /// 判决链的建议规则进入询问，前端据此提供"不再询问"（tui.md §5.2）。
 #[tokio::test]
 async fn the_ask_carries_the_suggested_rules() {
-    let rule = rust_cli_kernel_api::permission::PermissionRule {
-        tool: "Bash".to_owned(),
-        content: Some("npm test:*".to_owned()),
-    };
-    let gate = Arc::new(FixedGate(PermissionDecision::Ask {
-        message: "Run it?".to_owned(),
-        suggestions: vec![rule.clone()],
-    }));
-    let pipeline = Pipeline::new(gate, Arc::new(RecordingHooks::default()));
-    let asked = Arc::new(Asked::default());
-    let mut context = context(PermissionAnswer::Unavailable);
-    context.interactions = asked.clone();
-    let (progress, _updates) = mpsc::channel(4);
-    let tool = Arc::new(FakeTool::new("Bash", false, "ran"));
-    let output = pipeline.execute(tool, json!({}), context, progress).await;
-    assert_eq!(text(&output), "ran");
-    let requests = asked.0.lock().unwrap();
-    let [InteractionRequest::Permission { suggestions, .. }] = requests.as_slice() else {
-        panic!("expected one permission ask: {requests:?}");
+    let rule = bash_rule("npm test:*");
+    let request = ask_of("Bash", json!({}), std::slice::from_ref(&rule)).await;
+    let InteractionRequest::Permission { suggestions, .. } = request else {
+        panic!("expected a permission ask: {request:?}");
     };
     assert_eq!(suggestions.as_slice(), [rule]);
+}
+
+/// “不再询问”一行的种子由管线放进询问（F133，shell-permissions.md §4.10）：按询问框的规则算，不是判决链的精确规则；
+/// 只有 Bash 有，多条建议的复合命令没有。
+#[tokio::test]
+async fn the_ask_carries_the_seed_of_the_dont_ask_again_row() {
+    let seed = |request: InteractionRequest| match request {
+        InteractionRequest::Permission { rule_seed, .. } => rule_seed,
+        other => panic!("expected a permission ask: {other:?}"),
+    };
+    let exact = [bash_rule("git -C /repo status")];
+    let request = ask_of("Bash", json!({"command": "git -C /repo status"}), &exact).await;
+    assert_eq!(seed(request).as_deref(), Some("git *"));
+    let prefix = [bash_rule("docker compose *")];
+    let request = ask_of("Bash", json!({"command": "docker compose up -d"}), &prefix).await;
+    assert_eq!(seed(request).as_deref(), Some("docker compose up *"));
+    let two = [bash_rule("mytool a *"), bash_rule("othertool b *")];
+    let command = json!({"command": "mytool a && othertool b c"});
+    assert_eq!(seed(ask_of("Bash", command, &two).await), None);
+    let input = json!({"command": "npm test"});
+    assert_eq!(seed(ask_of("Monitor", input, &prefix).await), None);
 }
 
 /// 记下 `call` 收到的输入；`strips` 为真时丢掉 schema 外的键（宽松对象），为假时按严格对象。
@@ -451,7 +437,8 @@ async fn object_tools_drop_unknown_keys_and_strict_tools_reject_them() {
     let (progress, _updates) = mpsc::channel(4);
     let output = pipeline
         .execute(lenient.clone(), input.clone(), context(allow()), progress)
-        .await;
+        .await
+        .output;
     assert!(!output.is_error, "{}", text(&output));
     assert_eq!(text(&output), "ok");
     assert_eq!(*lenient.seen.lock().unwrap(), Some(json!({"prompt": "x"})));
@@ -463,7 +450,8 @@ async fn object_tools_drop_unknown_keys_and_strict_tools_reject_them() {
     let (progress, _updates) = mpsc::channel(4);
     let output = pipeline
         .execute(strict.clone(), input, context(allow()), progress)
-        .await;
+        .await
+        .output;
     assert!(output.is_error);
     assert_eq!(
         text(&output),
@@ -475,10 +463,7 @@ async fn object_tools_drop_unknown_keys_and_strict_tools_reject_them() {
 /// 子代理里的询问被拒：结果是给子代理的拒绝文字（主线程是另一段，docs/specs/rust-cli/agents.md §4.1.1）。
 #[tokio::test]
 async fn subagent_denials_use_the_subagent_text() {
-    let ask = || PermissionDecision::Ask {
-        message: "run it?".to_owned(),
-        suggestions: Vec::new(),
-    };
+    let ask = || PermissionDecision::ask("run it?", Vec::new());
     let pipeline = Pipeline::new(
         Arc::new(FixedGate(ask())),
         Arc::new(RecordingHooks::default()),
@@ -502,6 +487,7 @@ async fn subagent_denials_use_the_subagent_text() {
                     progress,
                 )
                 .await
+                .output
         }
     };
     let plain = call(deny(None)).await;
@@ -528,10 +514,7 @@ async fn subagent_denials_use_the_subagent_text() {
 /// `Permission to use <tool> has been denied.` 加变通说明（不是询问本身的文字）。
 #[tokio::test]
 async fn background_agents_without_prompts_get_the_denial_text() {
-    let ask = PermissionDecision::Ask {
-        message: "run it?".to_owned(),
-        suggestions: Vec::new(),
-    };
+    let ask = PermissionDecision::ask("run it?", Vec::new());
     let (output, events) = run(
         ask,
         PermissionAnswer::NoPrompts,

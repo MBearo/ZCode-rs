@@ -54,7 +54,10 @@ fn setup(editor: Arc<FakeEditor>) -> Setup {
     };
     Setup {
         services: Services {
-            editor: Some(editor),
+            editor,
+            ..super::stub_services::services()
+        },
+        ui: rust_cli_tui::UiConfig {
             memory_files: vec![
                 file(
                     "User memory",
@@ -67,7 +70,7 @@ fn setup(editor: Arc<FakeEditor>) -> Setup {
                     "/Users/dev/project/AGENTS.md",
                 ),
             ],
-            ..Services::default()
+            ..rust_cli_tui::UiConfig::default()
         },
         ..Setup::default()
     }

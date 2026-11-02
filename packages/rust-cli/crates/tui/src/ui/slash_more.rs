@@ -5,7 +5,7 @@ use rust_cli_kernel_api::permission::PermissionMode;
 
 use super::app::{Action, App, Local, Overlay};
 use super::i18n::Lang;
-use super::list::{Item, ListView, Purpose};
+use super::list::{Choice, Item, ListView, Shape};
 use super::manage::Manage;
 
 /// 整行是这些词时退出（不在 bash 模式，tui-display.md §4.1）。
@@ -34,56 +34,30 @@ const MENU: [PermissionMode; 3] = [
 ];
 
 impl App {
-    /// L28 的命令；不是 L28 的命令返回 None（由 `slash` 继续处理）。
-    pub(super) fn slash_more(&mut self, name: &str, args: &str) -> Option<Option<Action>> {
-        Some(match name {
-            "skills" => self.skills_page(),
-            "mode" => self.mode_command(args),
-            "effort" => Some(Action::Manage(Manage::Effort(args.to_owned()))),
-            "copy" => self.copy_nth(args),
-            "theme" => self.theme_list(),
-            "tasks" => Some(Action::Manage(Manage::Tasks)),
-            "hooks" => Some(Action::Manage(Manage::Hooks)),
-            "permissions" => Some(Action::Manage(Manage::Permissions)),
-            "export" => self.export_command(args),
-            "diff" => self.open_diff(),
-            // `/cd <path>`（tui-manage.md §7）：内核检查路径并经会话 actor 换目录。
-            "cd" if args.is_empty() => {
-                self.info(match self.lang {
-                    Lang::En => "Usage: /cd <path>",
-                    Lang::Zh => "用法：/cd <路径>",
-                });
-                // 对照实现记这一句（缺省显示，加固定说明；修复线 L-A，tui-manage.md §11.2）。
-                self.records
-                    .push(rust_cli_kernel_api::user_command::LocalCommandRecord {
-                        name: "cd".to_owned(),
-                        args: String::new(),
-                        output: rust_cli_kernel_api::user_command::LocalCommandOutput::Stdout(
-                            "Usage: /cd <path>".to_owned(),
-                        ),
-                        caveat: true,
-                        meta: Vec::new(),
-                    });
-                None
-            }
-            "cd" => Some(Action::Manage(Manage::ChangeDirectory(args.to_owned()))),
-            "mcp" if args.is_empty() => Some(Action::Manage(Manage::Mcp)),
-            // reconnect / enable / disable（tui-manage.md §6）：先取服务器快照再判断。
-            "mcp" => Some(Action::Manage(Manage::McpControl(args.to_owned()))),
-            "clear" if !args.is_empty() && self.session.is_some() => {
-                Some(Action::Manage(Manage::ClearNamed(args.to_owned())))
-            }
-            // 在外部编辑器打开计划文件（tui-manage.md §8；编辑器是 L27 的端口）。
-            "plan" if args == "open" => Some(Action::Manage(Manage::PlanOpen)),
-            "plan" if !args.is_empty() => Some(Action::Manage(Manage::PlanPrompt(args.to_owned()))),
-            "status" => Some(Action::Manage(Manage::Status)),
-            // 远端机器（remote-exec.md §21.3）。
-            "machines" => self.machines_command(args),
-            _ => return None,
-        })
+    /// `/cd <path>`（tui-manage.md §7）：内核检查路径并经会话 actor 换目录；不带路径时提示用法。
+    pub(super) fn cd_command(&mut self, args: &str) -> Option<Action> {
+        if !args.is_empty() {
+            return Some(Action::Manage(Manage::ChangeDirectory(args.to_owned())));
+        }
+        self.info(match self.lang {
+            Lang::En => "Usage: /cd <path>",
+            Lang::Zh => "用法：/cd <路径>",
+        });
+        // 对照实现记这一句（缺省显示，加固定说明；修复线 L-A，tui-manage.md §11.2）。
+        self.records
+            .push(rust_cli_kernel_api::user_command::LocalCommandRecord {
+                name: "cd".to_owned(),
+                args: String::new(),
+                output: rust_cli_kernel_api::user_command::LocalCommandOutput::Stdout(
+                    "Usage: /cd <path>".to_owned(),
+                ),
+                caveat: true,
+                meta: Vec::new(),
+            });
+        None
     }
 
-    fn skills_page(&mut self) -> Option<Action> {
+    pub(super) fn skills_page(&mut self) -> Option<Action> {
         let lang = self.lang;
         let model_only = match lang {
             Lang::En => "(model only)",
@@ -130,7 +104,7 @@ impl App {
                     label: super::i18n::mode_label(self.lang, *mode).to_owned(),
                     description: super::i18n::mode_description(self.lang, *mode).to_owned(),
                     current: *mode == current,
-                    value: mode.node_name().to_owned(),
+                    value: Choice::Mode(*mode),
                     ..Item::default()
                 })
                 .collect();
@@ -145,7 +119,7 @@ impl App {
                 )
             };
             self.overlay = Some(Overlay::List(
-                ListView::new(Purpose::Permissions, title.into(), items, String::new())
+                ListView::new(Shape::Modes, title.into(), items, String::new())
                     .with_subtitle(subtitle),
             ));
             return None;
@@ -173,7 +147,7 @@ impl App {
     }
 
     /// `/copy [N]`：第 N 新的回复（1 是最后一条）。
-    fn copy_nth(&mut self, args: &str) -> Option<Action> {
+    pub(super) fn copy_nth(&mut self, args: &str) -> Option<Action> {
         let zh = self.lang == Lang::Zh;
         let n = if args.is_empty() {
             1

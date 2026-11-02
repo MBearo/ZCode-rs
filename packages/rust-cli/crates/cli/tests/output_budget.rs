@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::clock::SystemClock;
 use rust_cli_base::models::DEEPSEEK_V4_PRO;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
@@ -37,9 +38,9 @@ use rust_cli_kernel_api::session_api::{
 };
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::environments;
-use rust_cli_model::ProviderModel;
+use rust_cli_model::{ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
-use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_platform::{AccountOrigins, AccountServices, CredentialSecret, Platform};
 use rust_cli_runtime::{CompactConfig, ContextConfig, Defaults, LocalKernel, Ports, Surface};
@@ -144,8 +145,12 @@ impl Sandbox {
         };
         let platform = Arc::new(Platform::new(&self.paths(), &secret, services));
         let endpoints: Arc<dyn ModelEndpoints> = platform.clone();
-        let model: Arc<dyn ModelPort> =
-            Arc::new(ProviderModel::new(egress, endpoints, clock.clone()));
+        let model: Arc<dyn ModelPort> = Arc::new(ProviderModel::new(
+            egress,
+            endpoints,
+            clock.clone(),
+            RouteOptions::default(),
+        ));
         let ids = Arc::new(NodeIds::new(clock.clone()));
         let store = self.store();
         let ports = Ports {
@@ -222,12 +227,7 @@ impl Sandbox {
 }
 
 fn selection() -> ModelSelection {
-    ModelSelection {
-        provider: "personal:gateway".to_owned(),
-        model: DEEPSEEK_V4_PRO.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("personal:gateway".to_owned(), DEEPSEEK_V4_PRO.to_owned())
 }
 
 /// 第一次回复：读 `a.txt`，用量里的输入是 [`LARGE_INPUT`]。

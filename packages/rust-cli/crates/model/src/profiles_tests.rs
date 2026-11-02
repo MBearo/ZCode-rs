@@ -13,7 +13,7 @@ use rust_cli_kernel_api::model::{
     QuerySource, RequestOptions, SystemBlock, ThinkingConfig, ToolDefinition, ToolFlags,
     TurnOutputConfig,
 };
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
+use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, ModelEndpoint, WireProtocol};
 use rust_cli_net::HeaderValue;
 use serde_json::{Value, json};
 
@@ -57,12 +57,7 @@ fn main_request(model: &str, carded: bool) -> ModelRequest {
         cache_control: None,
     };
     ModelRequest {
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: model.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: ModelSelection::new("p".to_owned(), model.to_owned()),
         system: vec![
             SystemBlock {
                 text: "I".to_owned(),
@@ -126,11 +121,11 @@ fn endpoint(
         credential: Credential::ApiKey(RedactedString::new("sk-test")),
         headers: Vec::new(),
         body_patches: patches,
-        mid_conversation_system: true,
-        supports_image: true,
-        supports_pdf: false,
-        supports_video: false,
-        supports_audio: false,
+        capabilities: ModelCapabilities {
+            supports_mid_conversation_system: true,
+            supports_image: true,
+            ..ModelCapabilities::default()
+        },
         renewable: false,
     }
 }
@@ -431,7 +426,7 @@ fn a_gateway_sends_the_betas_node_sends() {
         max_uses: 8,
     }];
     let mut pdf = gateway(models::OPUS_4_1);
-    pdf.supports_pdf = true;
+    pdf.capabilities.supports_pdf = true;
     let (_, _, beta) = encode(&pdf, request);
     assert_eq!(
         beta.as_deref(),

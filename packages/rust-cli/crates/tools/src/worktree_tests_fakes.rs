@@ -1,26 +1,18 @@
 //! worktree 工具测试用的替身：记下工作目录修改的会话、脚本化 worktree 操作的执行环境。
 
-use std::sync::Mutex;
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures_util::stream::BoxStream;
-use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
-};
-use rust_cli_kernel_api::env_files::PathFacts;
+use rust_cli_kernel_api::env::{EnvError, EnvPath, OperationContext};
 use rust_cli_kernel_api::env_worktree::{
     WorktreeChanges, WorktreeCreate, WorktreeCreated, WorktreeEntry, WorktreeInspect, WorktreeList,
     WorktreeRemove,
 };
-use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::local_services::{Fetch, Git as GitPort};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
-};
+use rust_cli_kernel_api::machine::{Git as GitPort, MachineEnv};
+use rust_cli_kernel_api::orchestration::OrchestrationError;
+
+use rust_cli_kernel_api::testing::unsupported_machine;
 
 use crate::test_more::TextEnv;
 
@@ -33,31 +25,15 @@ pub(super) const WINDOWS_ROOT: &str = r"C:\Users\dev\work";
 pub(super) struct Session(pub(super) Mutex<Vec<String>>);
 
 #[async_trait]
-impl Interactions for Session {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        _request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        unreachable!("not asked")
-    }
-
-    async fn set_workspace(
-        &self,
-        _session: &SessionId,
-        root: EnvPath,
-    ) -> Result<(), OrchestrationError> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(root.as_str().to_owned());
+impl rust_cli_kernel_api::testing::OpsOverride for Session {
+    async fn set_workspace(&self, root: EnvPath) -> Result<(), OrchestrationError> {
+        self.0.lock_unpoisoned().push(root.as_str().to_owned());
         Ok(())
     }
 }
 
-/// 脚本化的 worktree 操作；其余操作交给 `TextEnv`。
+/// 脚本化的 worktree 操作（只有 Git 端口；环境事实由 [`Git::machine`] 交给 `TextEnv`）。
 pub(super) struct Git {
-    inner: TextEnv,
     pub(super) existed: bool,
     pub(super) changes: Option<WorktreeChanges>,
     pub(super) removed: Mutex<Vec<String>>,
@@ -68,7 +44,6 @@ pub(super) struct Git {
 impl Git {
     pub(super) fn new() -> Self {
         Self {
-            inner: TextEnv::new(&[]),
             existed: false,
             changes: Some(WorktreeChanges {
                 changed_files: 0,
@@ -78,64 +53,12 @@ impl Git {
             windows: false,
         }
     }
-}
 
-#[async_trait]
-impl EnvInfo for Git {
-    async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        self.inner.facts(workspace).await
-    }
-
-    async fn path_facts(&self, workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
-        self.inner.path_facts(workspace).await
-    }
-}
-
-#[async_trait]
-impl Files for Git {
-    async fn read_file(
-        &self,
-        workspace: &WorkspaceRef,
-        request: ReadFile,
-    ) -> Result<FileContent, EnvError> {
-        self.inner.read_file(workspace, request).await
-    }
-
-    async fn write_file(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        self.inner.write_file(workspace, context, request).await
-    }
-}
-
-#[async_trait]
-impl Commands for Git {
-    async fn start_command(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: StartCommand,
-    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        self.inner.start_command(workspace, context, request).await
-    }
-
-    fn watch_command(
-        &self,
-        operation: OperationId,
-        cursor: u64,
-    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        self.inner.watch_command(operation, cursor)
-    }
-
-    async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
-        self.inner.cancel(operation).await
-    }
-
-    async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
-        self.inner.close_session(session, forget).await
+    /// 环境事实是 `TextEnv` 的、Git 是自己的机器；其余端口返回 `Unsupported`。
+    pub(super) fn machine(self: Arc<Self>) -> MachineEnv {
+        unsupported_machine()
+            .with_info(Arc::new(TextEnv::new(&[])))
+            .with_git(self)
     }
 }
 
@@ -189,16 +112,8 @@ impl GitPort for Git {
         request: WorktreeRemove,
     ) -> Result<bool, EnvError> {
         self.removed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_unpoisoned()
             .push(request.path.as_str().to_owned());
         Ok(true)
     }
 }
-
-impl Search for Git {}
-impl Shell for Git {}
-impl Background for Git {}
-impl Checkpoints for Git {}
-impl Pdf for Git {}
-impl Fetch for Git {}

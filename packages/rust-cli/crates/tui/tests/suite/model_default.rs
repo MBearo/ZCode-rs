@@ -71,16 +71,14 @@ fn setup(saved: &Arc<Saved>, models: Option<Arc<dyn ModelDirectory>>) -> Setup {
         models,
         ..Setup::default()
     };
-    setup.services.preferences = Some(saved.clone());
+    setup.services.preferences = saved.clone();
     setup
 }
 
 fn other(level: Option<&str>) -> ModelSelection {
     ModelSelection {
-        provider: "fixture".into(),
-        model: "other-model".into(),
         reasoning: level.map(str::to_owned),
-        connection: None,
+        ..ModelSelection::new("fixture", "other-model")
     }
 }
 

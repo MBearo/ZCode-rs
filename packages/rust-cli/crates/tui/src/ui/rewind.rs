@@ -7,7 +7,7 @@ use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::session_api::{FileChange, RewindOption, RewindScope};
 
 use super::app::{Action, App, Overlay};
-use super::list::{Item, ListView, Purpose, SEP};
+use super::list::{Choice, Item, ListView, Shape};
 
 /// 一条可选的 user 消息：内核给的改动统计 + 消息文字。
 #[derive(Debug, Clone, PartialEq)]
@@ -26,7 +26,7 @@ fn basename(path: &str) -> String {
 /// 列表与确认页里的文件名：远端的写 `dev-a:README.md`（F98，remote-exec.md §25.4.5，Docker 试用 L8：以前看不出文件在哪
 /// 台机器上）。
 fn shown(change: &FileChange) -> String {
-    match &change.machine {
+    match change.machine.remote() {
         Some(machine) => format!("{machine}:{}", basename(&change.path)),
         None => basename(&change.path),
     }
@@ -88,7 +88,7 @@ fn code_text(files: &[FileChange]) -> String {
     format!("The code will be restored +{additions} -{deletions} in {label}.")
 }
 
-fn option(label: &str, description: String, value: String) -> Item {
+fn option(label: &str, description: String, value: Choice) -> Item {
     Item {
         label: label.to_owned(),
         description,
@@ -105,7 +105,7 @@ impl App {
             .map(|entry| Item {
                 label: preview(&entry.text),
                 description: summary(&entry.option.files),
-                value: entry.option.message.as_str().to_owned(),
+                value: Choice::Rewind(entry.option.message.clone()),
                 ..Item::default()
             })
             .collect();
@@ -118,7 +118,7 @@ impl App {
         }
         self.rewind = entries;
         let list = ListView::new(
-            Purpose::Rewind,
+            Shape::TwoLines,
             "Rewind".to_owned(),
             items,
             "Nothing to rewind to yet.".to_owned(),
@@ -127,31 +127,45 @@ impl App {
         self.overlay = Some(Overlay::List(list));
     }
 
-    /// 选中一条消息：打开确认选项（`(current)` 只关闭）。
-    pub(super) fn rewind_chosen(&mut self, value: &str) -> Option<Action> {
+    /// 选中一条消息：打开确认选项（`(current)` 是 [`Choice::Close`]，只关闭）。
+    pub(super) fn rewind_chosen(&mut self, message: &MessageId) -> Option<Action> {
         let entry = self
             .rewind
             .iter()
-            .find(|e| e.option.message.as_str() == value)?
+            .find(|e| e.option.message == *message)?
             .clone();
         let files = changes_from(&self.rewind, &entry.option.message);
         let code = entry.option.code && !files.is_empty();
-        let id = entry.option.message.as_str();
-        let value = |scope: &str| format!("{scope}{SEP}{id}");
+        let value = |scope: RewindScope| Choice::RewindTo {
+            scope,
+            target: entry.option.message.clone(),
+        };
         let forked = "The conversation will be forked.".to_owned();
         let mut items = Vec::new();
         if code {
             let both = format!("{forked} {}", code_text(&files));
-            items.push(option("Restore code and conversation", both, value("both")));
+            items.push(option(
+                "Restore code and conversation",
+                both,
+                value(RewindScope::Both),
+            ));
             let only = format!("{forked} The code will be unchanged.");
-            items.push(option("Restore conversation", only, value("conversation")));
+            items.push(option(
+                "Restore conversation",
+                only,
+                value(RewindScope::Conversation),
+            ));
             let unchanged = format!("The conversation will be unchanged. {}", code_text(&files));
-            items.push(option("Restore code", unchanged, value("code")));
+            items.push(option("Restore code", unchanged, value(RewindScope::Code)));
         } else {
             let only = format!("{forked} The code will be unchanged.");
-            items.push(option("Restore conversation", only, value("conversation")));
+            items.push(option(
+                "Restore conversation",
+                only,
+                value(RewindScope::Conversation),
+            ));
         }
-        items.push(option("Never mind", String::new(), String::new()));
+        items.push(option("Never mind", String::new(), Choice::RewindBack));
         let mut subtitle = format!(
             "Confirm you want to restore {}to the point before you sent this message:\n  {}",
             if code { "" } else { "the conversation " },
@@ -160,39 +174,26 @@ impl App {
         if code {
             subtitle.push_str("\n⚠ Rewinding does not affect files edited manually or via bash.");
         }
-        let list = ListView::new(
-            Purpose::RewindConfirm,
-            "Rewind".to_owned(),
-            items,
-            String::new(),
-        )
-        .with_subtitle(subtitle);
+        let list = ListView::new(Shape::OneLine, "Rewind".to_owned(), items, String::new())
+            .with_subtitle(subtitle);
         self.overlay = Some(Overlay::List(list));
         None
     }
 
-    /// 确认：`Never mind` 回到消息列表；其余发回退。
-    pub(super) fn rewind_confirmed(&mut self, value: &str) -> Option<Action> {
-        // 列表给含 SEP 的值末尾再补一个 SEP（模型列表的档位位置），这里去掉。
-        let value = value.trim_end_matches(SEP);
-        let Some((scope, id)) = value.split_once(SEP) else {
-            let entries = std::mem::take(&mut self.rewind);
-            self.open_rewind(entries);
-            return None;
-        };
-        let scope = match scope {
-            "both" => RewindScope::Both,
-            "code" => RewindScope::Code,
-            _ => RewindScope::Conversation,
-        };
+    /// 确认：发回退（`Never mind` 是 [`Choice::RewindBack`]，回到消息列表）。
+    pub(super) fn rewind_confirmed(
+        &mut self,
+        scope: RewindScope,
+        target: MessageId,
+    ) -> Option<Action> {
         let text = self
             .rewind
             .iter()
-            .find(|e| e.option.message.as_str() == id)
+            .find(|e| e.option.message == target)
             .map(|e| e.text.clone())
             .unwrap_or_default();
         Some(Action::Rewind {
-            target: MessageId::new(id),
+            target,
             scope,
             text,
         })

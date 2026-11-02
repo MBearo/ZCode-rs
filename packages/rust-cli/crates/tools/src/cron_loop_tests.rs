@@ -4,9 +4,9 @@ use rust_cli_kernel_api::cron::CronSignals;
 use rust_cli_kernel_api::ids::SessionId;
 
 use super::*;
-use crate::cron_board::tests::TokioClock;
+use crate::cron_board::tests::clock;
 
-/// TokioClock 的起点 2026-10-17T10:07:30Z。
+/// 测试时钟的起点 2026-10-17T10:07:30Z。
 const START: u64 = 1_792_231_650_000;
 const MINUTE: u64 = 60_000;
 
@@ -56,7 +56,7 @@ fn clamp_keeps_the_delay_in_range() {
 /// 排一个 loop 唤醒（只留一个），到点空闲触发；之后模型没有再排 → keepalive 排 1200 秒（只一次）。
 #[tokio::test(start_paused = true)]
 async fn wakeups_fire_and_keepalive_once() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     let first = board.schedule_wakeup(&owner(), "aaaa0001".to_owned(), 1200.0, "/loop check");
     assert_eq!(
         first,
@@ -88,7 +88,7 @@ async fn wakeups_fire_and_keepalive_once() {
 /// 模型自己排唤醒时 keepalive 计数清零；`stop` 删掉唤醒并清掉在跑的 tick。
 #[tokio::test(start_paused = true)]
 async fn stop_cancels_wakeups_and_the_tick() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     board.schedule_wakeup(&owner(), "aaaa0001".to_owned(), 60.0, "/loop check");
     assert_eq!(board.stop_loop(&owner()), 1);
     assert_eq!(board.stop_loop(&owner()), 0);
@@ -104,7 +104,7 @@ async fn stop_cancels_wakeups_and_the_tick() {
 /// 一条链从开始满 7 天不再排；一分钟后链算断开，可以重新开始。
 #[tokio::test(start_paused = true)]
 async fn chains_end_after_seven_days() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     let schedule = || board.schedule_wakeup(&owner(), "aaaa0001".to_owned(), 3600.0, "/loop x");
     assert!(matches!(schedule(), Scheduled::At { .. }));
     for _ in 0..(7 * 24 * 60 / 59) {
@@ -122,7 +122,7 @@ async fn chains_end_after_seven_days() {
 /// CronCreate 的循环任务不受影响。
 #[tokio::test(start_paused = true)]
 async fn a_user_interrupt_cancels_every_loop_wakeup() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     board.add(
         &owner(),
         "cccc0001".to_owned(),

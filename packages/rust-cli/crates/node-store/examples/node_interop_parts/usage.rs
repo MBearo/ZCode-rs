@@ -12,7 +12,9 @@ use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::metering::{
     ActivityQuery, ActivityRange, CallStatus, ModelCall, ToolCall,
 };
-use rust_cli_kernel_api::model::{QuerySource, SIDE_SESSION_TITLE};
+use rust_cli_kernel_api::model::QuerySource;
+use rust_cli_kernel_api::side_request::SideSource;
+use rust_cli_kernel_api::store::StoreQueries;
 
 use super::*;
 
@@ -28,10 +30,8 @@ fn usage() -> Usage {
 
 fn requested() -> ModelSelection {
     ModelSelection {
-        provider: "anthropic".into(),
-        model: GLM_5_3.into(),
         reasoning: Some("max".into()),
-        connection: None,
+        ..ModelSelection::new("anthropic", GLM_5_3)
     }
 }
 
@@ -39,19 +39,19 @@ fn model(message: &MessageId, source: QuerySource, at: (u64, u64, u64), stop: St
     let (started, first, completed) = at;
     Fact::ModelCalled {
         call: ModelCall {
-            message: message.clone(),
-            source,
-            selection: requested(),
-            started_at_ms: started,
             first_token_at_ms: Some(first),
-            first_content_at_ms: None,
-            completed_at_ms: completed,
-            status: CallStatus::Completed,
             stop_reason: Some(stop),
             tool_calls: u32::from(stop == StopReason::ToolUse),
             usage: Some(usage()),
             retries: u32::from(stop == StopReason::ToolUse),
-            error: None,
+            ..ModelCall::new(
+                message.clone(),
+                source,
+                requested(),
+                started,
+                completed,
+                CallStatus::Completed,
+            )
         },
     }
 }
@@ -188,19 +188,16 @@ pub(super) async fn side(dir: &str) -> Result<()> {
         .await?;
     let call = Fact::ModelCalled {
         call: ModelCall {
-            message: title.clone(),
-            source: QuerySource::Side(SIDE_SESSION_TITLE.to_owned()),
-            selection: requested(),
-            started_at_ms: base,
-            first_token_at_ms: None,
-            first_content_at_ms: None,
-            completed_at_ms: base + 400,
-            status: CallStatus::Completed,
             stop_reason: Some(StopReason::EndTurn),
-            tool_calls: 0,
             usage: Some(usage()),
-            retries: 0,
-            error: None,
+            ..ModelCall::new(
+                title.clone(),
+                QuerySource::Side(SideSource::SessionTitle),
+                requested(),
+                base,
+                base + 400,
+                CallStatus::Completed,
+            )
         },
     };
     store

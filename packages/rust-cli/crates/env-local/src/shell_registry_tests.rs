@@ -4,6 +4,7 @@
 #![cfg(unix)]
 
 use futures_util::StreamExt;
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env_shell::{
     BackgroundCommand, BackgroundInfo, BackgroundStatus, BackgroundStop, BackgroundTask, CwdScope,
 };
@@ -41,11 +42,13 @@ async fn finished_commands_leave_no_registration() {
 async fn a_finished_background_command_is_found_until_its_notice_is_acked() {
     let fixture = fixture(Vec::new());
     let mut start = request("echo done", &fixture.root, CwdScope::Pinned);
-    start.background = Some(BackgroundCommand {
-        description: "Done".to_owned(),
-        tool_use: None,
-        kind: Default::default(),
-    });
+    start.kind = CommandKind::Background {
+        background: BackgroundCommand {
+            description: "Done".to_owned(),
+            tool_use: None,
+            kind: Default::default(),
+        },
+    };
     let key = BackgroundTask {
         session: SessionId::new("s1"),
         task: start.task.clone(),

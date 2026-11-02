@@ -12,21 +12,29 @@ use std::sync::Arc;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::message::StopReason;
 use rust_cli_kernel_api::model::{ModelError, ModelEvent, QuerySource};
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
-use rust_cli_model::{FixedEndpoint, ProviderModel};
+use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, ModelEndpoint, WireProtocol};
+use rust_cli_model::{FixedEndpoint, ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
 use serde_json::{Value, json};
 
-use super::common::{clock, collect, fast_retry, message_start, model_at, request, text_response};
+use super::common::{
+    clock, collect, fast_retry, message_start, model_at, model_with, request, text_response,
+};
 use super::fixture::{Fixture, Reply};
 
 const ZHIPU_ANTHROPIC: &str = hosts::BIGMODEL_ANTHROPIC;
 const ZHIPU_OPENAI: &str = hosts::BIGMODEL_OPENAI;
 
 async fn zhipu(server: &Fixture) -> ProviderModel {
-    model_at(server.url(), fast_retry(3))
-        .await
-        .with_assumed_base_url(ZHIPU_ANTHROPIC)
+    model_with(
+        server.url(),
+        RouteOptions {
+            retry: fast_retry(3),
+            assume_base_url: Some(ZHIPU_ANTHROPIC.to_owned()),
+            ..RouteOptions::default()
+        },
+    )
+    .await
 }
 
 fn coded(status: u16, code: &str, message: &str) -> Reply {
@@ -111,17 +119,16 @@ async fn a_rate_limit_block_in_the_stream_is_resent() {
 
 fn chat_endpoint(base_url: String) -> ModelEndpoint {
     ModelEndpoint {
-        supports_pdf: false,
-        supports_video: false,
-        supports_audio: false,
         protocol: WireProtocol::OpenAiChatCompletions,
         base_url,
         model: models::GLM_5.to_owned(),
         credential: Credential::ApiKey(RedactedString::new("sk-zhipu-test-0123456789")),
         headers: Vec::new(),
         body_patches: Vec::new(),
-        mid_conversation_system: false,
-        supports_image: true,
+        capabilities: ModelCapabilities {
+            supports_image: true,
+            ..ModelCapabilities::default()
+        },
         renewable: false,
     }
 }
@@ -132,9 +139,12 @@ async fn chat(server: &Fixture) -> ProviderModel {
         egress,
         Arc::new(FixedEndpoint::new(chat_endpoint(server.url()))),
         clock(),
+        RouteOptions {
+            retry: fast_retry(3),
+            assume_base_url: Some(ZHIPU_OPENAI.to_owned()),
+            ..RouteOptions::default()
+        },
     )
-    .with_retry(fast_retry(3))
-    .with_assumed_base_url(ZHIPU_OPENAI)
 }
 
 fn chat_reply(chunks: &[Value]) -> Reply {

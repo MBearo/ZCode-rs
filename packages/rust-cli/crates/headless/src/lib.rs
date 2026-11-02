@@ -12,8 +12,8 @@ use rust_cli_kernel_api::ids::{CommandId, SessionId};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{
-    Ack, Command, CommandEnvelope, CreateSession, EndReason, Kernel, KernelError, SessionHandle,
-    StartSource,
+    Ack, Command, CommandEnvelope, CommandResult, CreateSession, EndReason, Kernel, KernelError,
+    SessionHandle, StartSource,
 };
 use rust_cli_kernel_api::store::SessionFilter;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite};
@@ -158,12 +158,17 @@ pub(crate) async fn existing_session(
             command: Command::Fork { at: None },
         })
         .await;
-    let Ack::Accepted { result } = ack else {
+    // 缺陷修复（工作线 F134，审查 K4）：以前回执是 JSON，形状不对时拿空 ID 去开会话。
+    let Ack::Accepted {
+        result: CommandResult::Forked(forked),
+    } = ack
+    else {
         bail!("the session could not be forked: {ack:?}");
     };
-    let child = SessionId::new(result.as_str().unwrap_or_default());
     Ok(Some(
-        kernel.open_session_as(&child, StartSource::Fork).await?,
+        kernel
+            .open_session_as(&forked.session, StartSource::Fork)
+            .await?,
     ))
 }
 
@@ -380,9 +385,12 @@ async fn rename(session: &Arc<dyn SessionHandle>, command: Command) -> Result<St
     Ok(
         match (session.send(CommandEnvelope { id, command }).await, label) {
             (Ack::Accepted { .. }, Some(title)) => format!("Session renamed to: {title}"),
-            (Ack::Accepted { result }, None) => {
-                result["message"].as_str().unwrap_or_default().to_owned()
-            }
+            (
+                Ack::Accepted {
+                    result: CommandResult::Renamed { message, .. },
+                },
+                None,
+            ) => message,
             (Ack::Rejected { reason }, None) => reason,
             (ack, _) => bail!("the session could not be renamed: {ack:?}"),
         },

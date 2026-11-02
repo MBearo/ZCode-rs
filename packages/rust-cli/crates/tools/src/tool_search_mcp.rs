@@ -23,11 +23,15 @@ pub(crate) fn mentioned_servers(text: &str, servers: &[String]) -> Vec<String> {
             found.push(name.to_owned());
         }
     };
-    if let Ok(prefix) = Regex::new(r"mcp__([a-zA-Z0-9._-]+)") {
+    let pattern = format!(
+        "{}([a-zA-Z0-9._-]+)",
+        regex::escape(rust_cli_kernel_api::mcp_name::PREFIX)
+    );
+    if let Ok(prefix) = Regex::new(&pattern) {
         for captures in prefix.captures_iter(text) {
             let segment = &captures[1];
             add(segment
-                .split_once("__")
+                .split_once(rust_cli_kernel_api::mcp_name::SEPARATOR)
                 .map_or(segment, |(server, _)| server));
         }
     }

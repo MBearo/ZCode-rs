@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use rust_cli_kernel_api::agents::{TaskRecord, TaskStatus};
+use rust_cli_kernel_api::env_shell::BackgroundStatus;
 use rust_cli_kernel_api::ids::{ToolUseId, TurnId};
 use rust_cli_kernel_api::message::Usage;
 use rust_cli_kernel_api::model::BlockDelta;
@@ -44,14 +45,6 @@ pub struct AgentActivity {
 }
 
 impl AgentActivity {
-    /// 子代理调用过的工具数（进度的 tool use 计数）。
-    pub fn tool_uses(&self) -> usize {
-        self.items
-            .iter()
-            .filter(|item| matches!(item, Activity::Tool { .. }))
-            .count()
-    }
-
     /// 折叠一个子循环事件；认不出的事件忽略。流增量与工具开始清掉重试或停顿通知。
     pub(super) fn apply(&mut self, event: QueryEvent, now_ms: u64) {
         if matches!(
@@ -157,7 +150,7 @@ pub(super) struct Extras {
     pub(super) turn_changes: Vec<TurnChanges>,
     pub(super) usage: BTreeMap<String, Usage>,
     /// 后台工作的终态（`BackgroundWork{work, status}`）：Shell 详情在内核已不认识它时用（tui-panels.md §3.3）。
-    pub(super) ended: BTreeMap<String, String>,
+    pub(super) ended: BTreeMap<String, BackgroundStatus>,
 }
 
 impl Transcript {
@@ -166,12 +159,13 @@ impl Transcript {
         &self.extras.tasks
     }
 
-    /// 后台工作（命令或子代理）在通知里的终态：`completed`、`failed`、`killed`。
-    pub fn ended_work(&self, work: &str) -> Option<&str> {
-        self.extras.ended.get(work).map(String::as_str)
+    /// 后台工作（命令或子代理）在通知里的状态：终态是 completed、failed、killed；子代理里 Monitor 的事件转到会话时是
+    /// running。
+    pub fn ended_work(&self, work: &str) -> Option<BackgroundStatus> {
+        self.extras.ended.get(work).copied()
     }
 
-    pub(super) fn background_ended(&mut self, work: String, status: String) {
+    pub(super) fn background_ended(&mut self, work: String, status: BackgroundStatus) {
         self.extras.ended.insert(work, status);
     }
 
@@ -238,11 +232,7 @@ impl Transcript {
         let Some(usage) = usage else {
             return;
         };
-        let total = self.extras.usage.entry(model.to_owned()).or_default();
-        total.input_tokens += usage.input_tokens;
-        total.output_tokens += usage.output_tokens;
-        total.cache_creation_input_tokens += usage.cache_creation_input_tokens;
-        total.cache_read_input_tokens += usage.cache_read_input_tokens;
+        *self.extras.usage.entry(model.to_owned()).or_default() += usage;
     }
 
     /// Agent 工具的进度：`{agentId, event}` 折叠进工具行的活动。返回是否认出了它。
@@ -301,11 +291,7 @@ impl Transcript {
             .filter(|row| row.id > start && row.id < end)
             .filter_map(|row| row.tool())
             .filter(|tool| {
-                matches!(
-                    tool.name.as_str(),
-                    "Edit" | "MultiEdit" | "Write" | "NotebookEdit"
-                ) && tool.status == ToolStatus::Success
-                    && target(&tool.input)
+                tool.kind.edits_files() && tool.status == ToolStatus::Success && target(&tool.input)
             })
             .map(|tool| (tool.name.clone(), tool.input.clone()))
             .collect()

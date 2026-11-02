@@ -4,7 +4,6 @@ use anyhow::Result;
 use ratatui::backend::Backend;
 use rust_cli_kernel_api::message::{ContentBlock, ImageSource, Message};
 use rust_cli_kernel_api::session_api::Command;
-use serde_json::Value;
 
 use super::Loop;
 use super::session::Sent;
@@ -34,25 +33,18 @@ impl<B: Backend> Loop<'_, B> {
             && app.after_turn.is_empty()
             && app.view.queue().is_empty()
             && app.viewing.is_none();
-        if cancelled && interrupted && quiet && self.deferred.is_none() && !self.stopping {
-            self.send(
-                Sent::RestoreCancelled,
-                Command::RestoreCancelled,
-                String::new(),
-            );
+        if cancelled && interrupted && quiet && !self.outbox.has_deferred() && !self.stopping {
+            self.send(Sent::RestoreCancelled, Command::RestoreCancelled);
         }
     }
 
     /// 撤回的回执：这条输入放回输入框（文字、bash 模式、`[Image #N]` 与图片），去掉刚记下的
     /// 历史。对话由随后的 `HistoryRewritten` 重新取快照。
-    pub(super) fn restored(&mut self, result: &Value) {
-        let Ok(message) = serde_json::from_value::<Message>(result["message"].clone()) else {
+    pub(super) fn restored(&mut self, message: &Message) {
+        let Message::User(user) = message else {
             return;
         };
-        let Message::User(user) = &message else {
-            return;
-        };
-        let text = crate::ui::session_rows::user_text(&message).unwrap_or_default();
+        let text = crate::ui::session_rows::user_text(message).unwrap_or_default();
         let images = user
             .content
             .iter()

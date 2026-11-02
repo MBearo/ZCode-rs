@@ -103,19 +103,6 @@ pub struct ScreenSelection {
     pub copied: bool,
 }
 
-/// 占满整个屏幕、不画 transcript 的视图：鼠标在这里按屏幕坐标选择。
-pub fn full_screen(overlay: &Overlay) -> bool {
-    matches!(
-        overlay,
-        Overlay::Detail(_)
-            | Overlay::Page { .. }
-            | Overlay::Projects(_)
-            | Overlay::Resume(_)
-            | Overlay::Trust(_)
-            | Overlay::Usage(_)
-    )
-}
-
 /// 输入框里的一次拖选：按下时的范围（多击时是词或行）与连击次数。
 #[derive(Debug, Clone, Copy)]
 pub struct ComposerDrag {
@@ -141,7 +128,8 @@ fn key(code: KeyCode) -> KeyEvent {
 
 impl App {
     fn target_at(&self, x: u16, y: u16) -> Option<Target> {
-        self.hits
+        self.pointer
+            .hits
             .regions
             .iter()
             .rev()
@@ -151,26 +139,27 @@ impl App {
 
     /// 屏幕位置所在的、可以点击展开的块：位置在块的文字上（空白处不算），那里也没有别的可点击目标。
     fn block_at(&self, x: u16, y: u16) -> Option<u64> {
-        let t = self.hits.transcript;
+        let t = self.pointer.hits.transcript;
         if !contains(t, x, y) || self.target_at(x, y).is_some() {
             return None;
         }
-        let ((key, _), text) = self.hits.rows.get(usize::from(y - t.y))?;
-        (self.hits.expandable.contains(key) && text_at(text, usize::from(x - t.x))).then_some(*key)
+        let ((key, _), text) = self.pointer.hits.rows.get(usize::from(y - t.y))?;
+        (self.pointer.hits.expandable.contains(key) && text_at(text, usize::from(x - t.x)))
+            .then_some(*key)
     }
 
     /// 鼠标停在还没展开的可展开块的文字上时，这个块的键：绘制时去掉它的 dim（§8.2）。展开的块不再有悬停效果。
     pub fn hovered_block(&self) -> Option<u64> {
-        let (x, y) = self.hover?;
+        let (x, y) = self.pointer.hover?;
         self.block_at(x, y)
-            .filter(|key| !self.expanded_cells.contains(key))
+            .filter(|key| !self.port.expanded_cells.contains(key))
     }
 
     /// transcript 里屏幕位置对应的选区端点。
     fn point_at(&self, x: u16, y: u16) -> Option<Point> {
-        let t = self.hits.transcript;
+        let t = self.pointer.hits.transcript;
         let row = usize::from(y.checked_sub(t.y)?);
-        let ((key, offset), _) = self.hits.rows.get(row)?;
+        let ((key, offset), _) = self.pointer.hits.rows.get(row)?;
         Some(Point {
             key: *key,
             offset: *offset,
@@ -192,7 +181,7 @@ impl App {
             }
             _ => {}
         }
-        if self.overlay.as_ref().is_some_and(full_screen) {
+        if self.overlay.as_ref().is_some_and(Overlay::full_screen) {
             return self.on_screen_mouse(mouse, now);
         }
         match mouse.kind {
@@ -207,7 +196,7 @@ impl App {
                 None
             }
             MouseEventKind::Moved => {
-                self.hover = Some((x, y));
+                self.pointer.hover = Some((x, y));
                 None
             }
             _ => None,
@@ -218,8 +207,8 @@ impl App {
     /// macOS 无作用。原来右键复制选区，现在不复制。
     fn right_click(&mut self) {
         if !cfg!(target_os = "macos") {
-            self.selection = None;
-            self.screen_selection = None;
+            self.pointer.selection = None;
+            self.pointer.screen_selection = None;
         }
     }
 
@@ -229,11 +218,11 @@ impl App {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(target) = self.target_at(x, y) {
-                    self.press = Some(target);
+                    self.pointer.press = Some(target);
                     return None;
                 }
                 let count = self.click_count(x, y, now);
-                let row = self.hits.screen_rows.get(usize::from(y));
+                let row = self.pointer.hits.screen_rows.get(usize::from(y));
                 let (from, to) = match (count, row) {
                     (DOUBLE_CLICK, Some(text)) => {
                         let (from, to) = word_at(text, usize::from(x));
@@ -249,7 +238,7 @@ impl App {
                     _ => (usize::from(x), usize::from(x)),
                 };
                 let col = |c: usize| u16::try_from(c).unwrap_or(u16::MAX);
-                self.screen_selection = Some(ScreenSelection {
+                self.pointer.screen_selection = Some(ScreenSelection {
                     anchor: (col(from), y),
                     head: (col(to), y),
                     dragging: count == 1,
@@ -258,7 +247,7 @@ impl App {
                 None
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                if let Some(selection) = self.screen_selection.as_mut()
+                if let Some(selection) = self.pointer.screen_selection.as_mut()
                     && selection.dragging
                 {
                     selection.head = (x, y);
@@ -266,16 +255,16 @@ impl App {
                 None
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                if let Some(target) = self.press.take() {
+                if let Some(target) = self.pointer.press.take() {
                     return (self.target_at(x, y) == Some(target.clone()))
                         .then(|| self.activate(target))
                         .flatten();
                 }
-                let selection = self.screen_selection.as_mut()?;
+                let selection = self.pointer.screen_selection.as_mut()?;
                 if selection.dragging {
                     selection.dragging = false;
                     if selection.anchor == selection.head {
-                        self.screen_selection = None;
+                        self.pointer.screen_selection = None;
                         return None;
                     }
                 }
@@ -286,7 +275,7 @@ impl App {
                 None
             }
             MouseEventKind::Moved => {
-                self.hover = Some((x, y));
+                self.pointer.hover = Some((x, y));
                 None
             }
             _ => None,
@@ -298,13 +287,13 @@ impl App {
         let near = |c: &Click| {
             c.x.abs_diff(x) <= MULTI_CLICK_CELLS && c.y.abs_diff(y) <= MULTI_CLICK_CELLS
         };
-        let count = match self.click {
+        let count = match self.pointer.click {
             Some(c) if near(&c) && now.duration_since(c.at) < MULTI_CLICK => {
                 (c.count + 1).min(TRIPLE_CLICK)
             }
             _ => 1,
         };
-        self.click = Some(Click {
+        self.pointer.click = Some(Click {
             x,
             y,
             at: now,
@@ -315,7 +304,7 @@ impl App {
 
     /// 输入框文字区里屏幕位置对应的字节位置；拖出上下边时多走一行（输入框跟着光标滚动）。
     fn composer_offset(&self, x: u16, y: u16) -> Option<usize> {
-        let (rect, first) = self.hits.composer?;
+        let (rect, first) = self.pointer.hits.composer?;
         let row = if y < rect.y {
             first.saturating_sub(1)
         } else if y >= rect.bottom() {
@@ -338,13 +327,13 @@ impl App {
             return None;
         }
         if let Some(target) = self.target_at(x, y) {
-            self.press = Some(target);
+            self.pointer.press = Some(target);
             return None;
         }
-        if let Some((rect, _)) = self.hits.composer
+        if let Some((rect, _)) = self.pointer.hits.composer
             && contains(rect, x, y)
         {
-            self.selection = None;
+            self.pointer.selection = None;
             let clicks = self.click_count(x, y, now);
             let at = self.composer_offset(x, y)?;
             // 搜索历史时输入框显示的不是编辑区的文字：只放光标，不选择。
@@ -355,17 +344,17 @@ impl App {
             };
             let origin = self.composer.area.unit_range(at, clicks);
             self.composer.select(origin, at, clicks);
-            self.composer_drag = Some(ComposerDrag { origin, clicks });
+            self.pointer.composer_drag = Some(ComposerDrag { origin, clicks });
             return None;
         }
-        if !contains(self.hits.transcript, x, y) {
+        if !contains(self.pointer.hits.transcript, x, y) {
             return None;
         }
         self.composer.area.clear_selection();
-        self.screen_selection = None;
+        self.pointer.screen_selection = None;
         let count = self.click_count(x, y, now);
         let point = self.point_at(x, y)?;
-        let text = &self.hits.rows[usize::from(y - self.hits.transcript.y)].1;
+        let text = &self.pointer.hits.rows[usize::from(y - self.pointer.hits.transcript.y)].1;
         let (from, to) = match count {
             DOUBLE_CLICK => word_at(text, point.col),
             TRIPLE_CLICK => (
@@ -377,7 +366,7 @@ impl App {
             ),
             _ => (point.col, point.col + 1),
         };
-        self.selection = Some(Selection {
+        self.pointer.selection = Some(Selection {
             anchor: Point { col: from, ..point },
             head: Point {
                 col: to.saturating_sub(1),
@@ -391,7 +380,7 @@ impl App {
     }
 
     fn drag(&mut self, x: u16, y: u16) {
-        if let Some(drag) = self.composer_drag {
+        if let Some(drag) = self.pointer.composer_drag {
             if self.composer.search.is_none()
                 && let Some(at) = self.composer_offset(x, y)
             {
@@ -399,13 +388,13 @@ impl App {
             }
             return;
         }
-        let t = self.hits.transcript;
-        if t.height == 0 || !self.selection.is_some_and(|s| s.dragging) {
+        let t = self.pointer.hits.transcript;
+        if t.height == 0 || !self.pointer.selection.is_some_and(|s| s.dragging) {
             return;
         }
         let row = y.clamp(t.y, t.bottom() - 1);
         let head = self.point_at(x, row);
-        if let Some(selection) = self.selection.as_mut() {
+        if let Some(selection) = self.pointer.selection.as_mut() {
             selection.edge = if y <= t.y {
                 1
             } else if y >= t.bottom() - 1 {
@@ -421,15 +410,15 @@ impl App {
 
     fn release_left(&mut self, x: u16, y: u16) -> Option<Action> {
         // 输入框的选区松开时不自动复制（打字可以直接替换它）。
-        if self.composer_drag.take().is_some() {
+        if self.pointer.composer_drag.take().is_some() {
             return None;
         }
-        if let Some(target) = self.press.take() {
+        if let Some(target) = self.pointer.press.take() {
             return (self.target_at(x, y) == Some(target.clone()))
                 .then(|| self.activate(target))
                 .flatten();
         }
-        let selection = self.selection.as_mut()?;
+        let selection = self.pointer.selection.as_mut()?;
         selection.edge = 0;
         if !selection.dragging {
             // 双击、三击的选区：松开即复制。
@@ -439,12 +428,12 @@ impl App {
         if selection.anchor == selection.head {
             // 没有拖动：清掉选区；点在可以展开的块的文字上时展开 / 收起这个块（§8.2）。双击、三击的
             // 第二下起是选词、选行，不再切换。
-            self.selection = None;
-            if self.click.is_some_and(|c| c.count == 1)
+            self.pointer.selection = None;
+            if self.pointer.click.is_some_and(|c| c.count == 1)
                 && let Some(key) = self.block_at(x, y)
-                && !self.expanded_cells.remove(&key)
+                && !self.port.expanded_cells.remove(&key)
             {
-                self.expanded_cells.insert(key);
+                self.port.expanded_cells.insert(key);
             }
             return None;
         }
@@ -454,31 +443,26 @@ impl App {
 
     /// 复制选区（`clear` 为真时复制后清掉选区）；transcript、全屏视图与输入框的选区都算。
     pub fn copy_selection(&mut self, clear: bool) -> Option<Action> {
-        (self.selection.is_some()
-            || self.screen_selection.is_some()
+        (self.pointer.selection.is_some()
+            || self.pointer.screen_selection.is_some()
             || self.composer.area.selection().is_some())
         .then_some(Action::CopySelection { clear })
     }
 
     /// 有鼠标选区（transcript 或全屏视图，不在拖动中）。
     pub fn has_selection(&self) -> bool {
-        self.selection.is_some_and(|s| !s.dragging)
-            || self.screen_selection.is_some_and(|s| !s.dragging)
+        self.pointer.selection.is_some_and(|s| !s.dragging)
+            || self.pointer.screen_selection.is_some_and(|s| !s.dragging)
     }
 
     /// 复制过之后（松开即复制）记下；ctrl+c 据此只清选区。
     pub fn mark_copied(&mut self) {
-        if let Some(selection) = self.selection.as_mut() {
+        if let Some(selection) = self.pointer.selection.as_mut() {
             selection.copied = true;
         }
-        if let Some(selection) = self.screen_selection.as_mut() {
+        if let Some(selection) = self.pointer.screen_selection.as_mut() {
             selection.copied = true;
         }
-    }
-
-    pub fn clear_selection(&mut self) {
-        self.selection = None;
-        self.screen_selection = None;
     }
 
     /// 点击目标：与对应的按键效果相同。
@@ -487,12 +471,12 @@ impl App {
         match target {
             Target::Jump(line) => {
                 let top = (line + self.viewport).min(self.transcript_lines);
-                self.scroll = self.transcript_lines - top;
+                self.port.scroll = self.transcript_lines - top;
                 None
             }
             Target::Bottom => {
-                self.scroll = 0;
-                self.new_activity = false;
+                self.port.scroll = 0;
+                self.port.new_activity = false;
                 None
             }
             Target::Popup(index) => {

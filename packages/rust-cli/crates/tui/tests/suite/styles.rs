@@ -3,7 +3,7 @@
 //! 旧代码的选中行是强调色的 `❯ `、提示整行 dim、快捷键面板在输入框下面，这些测试都失败。
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 
 use super::support::{GatedModel, Setup, Ui, with_ui};
 

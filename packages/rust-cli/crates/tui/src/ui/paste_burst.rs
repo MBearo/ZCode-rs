@@ -258,16 +258,6 @@ impl PasteBurst {
     fn is_active_internal(&self) -> bool {
         self.active || !self.buffer.is_empty()
     }
-
-    /// 收回失败时放弃这次缓存。
-    pub fn clear_after_explicit_paste(&mut self) {
-        self.last_plain_char_time = None;
-        self.consecutive_plain_char_burst = 0;
-        self.burst_window_until = None;
-        self.active = false;
-        self.buffer.clear();
-        self.pending_first_char = None;
-    }
 }
 
 /// `before` 末尾 `retro_chars` 个字符的起点（字节）。

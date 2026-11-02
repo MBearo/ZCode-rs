@@ -82,7 +82,7 @@ async fn the_tool_asks_and_maps_the_answer() {
         afk_timeout_ms: None,
     };
     let interactions = Arc::new(ScriptedInteractions::new([
-        serde_json::to_value(answer).unwrap()
+        rust_cli_kernel_api::orchestration::Answer::from(answer),
     ]));
     let tool = AskUserQuestionTool::new(true);
     let context = Ctx::new(interactions.clone()).build();
@@ -100,10 +100,9 @@ async fn the_tool_asks_and_maps_the_answer() {
 
 #[tokio::test]
 async fn declining_rejects_the_call() {
-    let interactions = Arc::new(ScriptedInteractions::new([serde_json::to_value(
-        QuestionAnswer::Declined,
-    )
-    .unwrap()]));
+    let interactions = Arc::new(ScriptedInteractions::new([
+        rust_cli_kernel_api::orchestration::Answer::from(QuestionAnswer::Declined),
+    ]));
     let tool = AskUserQuestionTool::new(true);
     let (progress, _) = mpsc::channel(1);
     let output = tool

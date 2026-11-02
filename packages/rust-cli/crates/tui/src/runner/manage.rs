@@ -104,7 +104,7 @@ impl<B: Backend> Loop<'_, B> {
                 self.refresh_tasks();
             }
             Manage::StopTask { id, label } => {
-                let Some(session) = self.session.clone() else {
+                let Some(session) = self.outbox.session().cloned() else {
                     return Ok(());
                 };
                 let envelope = self.envelope(Command::StopTask { task: id });
@@ -150,14 +150,10 @@ impl<B: Backend> Loop<'_, B> {
             // 先改名，再离开（tui-display.md §4.6）。改名的命令先进 actor 的队列。
             Manage::ClearNamed(name) => {
                 let name_args = name.clone();
-                self.send(
-                    Sent::ClearRename,
-                    Command::Rename { title: name },
-                    String::new(),
-                );
+                self.send(Sent::ClearRename, Command::Rename { title: name });
                 self.clear_as(&name_args)?;
             }
-            Manage::PlanPrompt(text) => match self.session.clone() {
+            Manage::PlanPrompt(text) => match self.outbox.session().cloned() {
                 Some(session) => {
                     let mode = self.envelope(Command::SetPlan { enabled: true });
                     self.pending.push(
@@ -190,7 +186,7 @@ impl<B: Backend> Loop<'_, B> {
                 let kernel = self.kernel.clone();
                 let query = PermissionRulesQuery {
                     workspace: self.app.view.workspace().clone(),
-                    session: self.session.as_ref().map(|session| session.id().clone()),
+                    session: self.outbox.session().map(|session| session.id().clone()),
                 };
                 self.pending.push(
                     async move {
@@ -206,7 +202,7 @@ impl<B: Backend> Loop<'_, B> {
                 let kernel = self.kernel.clone();
                 let request = PermissionRulesChange {
                     workspace: self.app.view.workspace().clone(),
-                    session: self.session.as_ref().map(|session| session.id().clone()),
+                    session: self.outbox.session().map(|session| session.id().clone()),
                     change: change.clone(),
                 };
                 self.pending.push(
@@ -224,7 +220,7 @@ impl<B: Backend> Loop<'_, B> {
                 if entering {
                     self.act(crate::ui::app::Action::SetPlan(true))?;
                 }
-                match self.session.clone() {
+                match self.outbox.session().cloned() {
                     Some(session) => {
                         let kernel = self.kernel.clone();
                         let query = rust_cli_kernel_api::manage::PlanFileQuery {
@@ -248,7 +244,7 @@ impl<B: Backend> Loop<'_, B> {
                 let kernel = self.kernel.clone();
                 let request = rust_cli_kernel_api::manage::ChangeDirectory {
                     workspace: self.app.view.workspace().clone(),
-                    session: self.session.as_ref().map(|session| session.id().clone()),
+                    session: self.outbox.session().map(|session| session.id().clone()),
                     path: path.clone(),
                 };
                 self.pending.push(
@@ -307,29 +303,19 @@ impl<B: Backend> Loop<'_, B> {
                 self.app.info(crate::ui::export::copied(self.app.lang));
             }
             // 先写回，成功后再换调色板（与 `/locale` 相同的顺序）；同时只有一次写入在途。
-            Manage::SetTheme(theme) => match self.options.services.preferences.clone() {
-                Some(store) => {
-                    if self.theme_writing {
-                        self.theme_next = Some(theme);
-                        return Ok(());
+            Manage::SetTheme(theme) => {
+                let Some(theme) = self.theme.start(theme) else {
+                    return Ok(());
+                };
+                let saving = self.options.services.preferences.save_theme(theme);
+                self.pending.push(
+                    async move {
+                        let result = saving.await;
+                        Done::Manage(ManageDone::ThemeSaved { theme, result })
                     }
-                    self.theme_writing = true;
-                    let saving = store.save_theme(theme);
-                    self.pending.push(
-                        async move {
-                            let result = saving.await;
-                            Done::Manage(ManageDone::ThemeSaved { theme, result })
-                        }
-                        .boxed(),
-                    );
-                }
-                None => {
-                    self.app.apply_theme(theme);
-                    self.app
-                        .info(crate::ui::slash_theme::theme_set(self.app.lang, theme));
-                    self.manage(Manage::Repaint)?;
-                }
-            },
+                    .boxed(),
+                );
+            }
             // 本会话先换档位（以 `ModelChanged` 为准），再存成新会话的缺省（与 Node 的顺序相同）。
             Manage::EffortChosen {
                 selection,
@@ -338,23 +324,22 @@ impl<B: Backend> Loop<'_, B> {
             } => {
                 // 档位的切换不是 `/model`：不写 `/model` 的记录（`/effort` 的记录在 `effort_done`）。
                 self.act(crate::ui::app::Action::SetModel(selection.clone()))?;
-                match self.options.services.preferences.clone() {
-                    Some(store) => {
-                        let saving = store.save_default_model(selection);
-                        self.pending.push(
-                            async move {
-                                let result = saving.await;
-                                Done::Manage(ManageDone::EffortSaved {
-                                    level,
-                                    result,
-                                    args,
-                                })
-                            }
-                            .boxed(),
-                        );
+                let saving = self
+                    .options
+                    .services
+                    .preferences
+                    .save_default_model(selection);
+                self.pending.push(
+                    async move {
+                        let result = saving.await;
+                        Done::Manage(ManageDone::EffortSaved {
+                            level,
+                            result,
+                            args,
+                        })
                     }
-                    None => self.app.effort_done(level.as_deref(), None, &args),
-                }
+                    .boxed(),
+                );
             }
             Manage::Repaint => {
                 self.cache.clear();
@@ -375,11 +360,9 @@ impl<B: Backend> Loop<'_, B> {
                 let mut failed = Vec::new();
                 let mut changed = Vec::new();
                 for name in &run.names {
-                    let saved = match (run.persist(), &preferences) {
-                        (Some(enabled), Some(store)) => {
-                            store.save_mcp_enabled(name.clone(), enabled).await
-                        }
-                        _ => Ok(None),
+                    let saved = match run.persist() {
+                        Some(enabled) => preferences.save_mcp_enabled(name.clone(), enabled).await,
+                        None => Ok(None),
                     };
                     match saved {
                         Ok(_) => changed.push(name.clone()),
@@ -432,11 +415,7 @@ impl<B: Backend> Loop<'_, B> {
             },
             ManageDone::PlanFile { entering, file } => match file {
                 Ok(file) if file.exists => {
-                    let Some(editor) = self.options.services.editor.clone() else {
-                        self.app
-                            .error(crate::ui::i18n_input::editor_unavailable(lang).to_owned());
-                        return Ok(());
-                    };
+                    let editor = self.options.services.editor.clone();
                     self.hand_over();
                     let path = file.path;
                     self.pending.push(
@@ -464,7 +443,7 @@ impl<B: Backend> Loop<'_, B> {
             // 以前这里改 TUI 自存的工作区副本，EnterWorktree / ExitWorktree 不经这里，副本就过时了。
             ManageDone::DirectoryChanged { path, result } => match result {
                 Ok(moved) => {
-                    if self.session.is_none() {
+                    if self.outbox.session().is_none() {
                         let mut workspace = self.app.view.workspace().clone();
                         workspace.root = moved.root.clone();
                         self.app.view.set_draft_workspace(workspace);
@@ -508,7 +487,7 @@ impl<B: Backend> Loop<'_, B> {
                     .error(crate::ui::export::export_failed(lang, &error.to_string())),
             },
             ManageDone::ThemeSaved { theme, result } => {
-                self.theme_writing = false;
+                let next = self.theme.finish();
                 match result {
                     Ok(_) => {
                         self.app.apply_theme(theme);
@@ -520,7 +499,7 @@ impl<B: Backend> Loop<'_, B> {
                         .app
                         .error(crate::ui::slash_theme::theme_failed(lang, &reason)),
                 }
-                if let Some(next) = self.theme_next.take() {
+                if let Some(next) = next {
                     self.manage(Manage::SetTheme(next))?;
                 }
             }
@@ -529,7 +508,7 @@ impl<B: Backend> Loop<'_, B> {
                 result,
                 args,
             } => {
-                self.app.effort_done(level.as_deref(), Some(result), &args);
+                self.app.effort_done(level.as_deref(), result, &args);
             }
             ManageDone::RuleChanged { change, result } => self
                 .app
@@ -542,7 +521,6 @@ impl<B: Backend> Loop<'_, B> {
                         attachments: Vec::new(),
                         delivery: Delivery::Queue,
                     },
-                    String::new(),
                 ),
                 Ack::Rejected { reason } => self.app.error(i18n::rejected(lang, &reason)),
             },

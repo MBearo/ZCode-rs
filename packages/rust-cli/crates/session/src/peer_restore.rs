@@ -7,12 +7,11 @@ use rust_cli_kernel_api::message::{ContentBlock, Message};
 use rust_cli_kernel_api::peers::{
     HeldPeerMessage, HoldCause, PeerReceipt, ReceiptStatus, parse_envelope,
 };
+use rust_cli_kernel_api::store::entry_kinds;
 
 use crate::actor::Actor;
-use crate::lane::{Lane, Waiting};
-use crate::peers::{
-    Held, MESSAGE_ENTRY, PeerItem, RECEIPT_ENTRY, RESOLVED_ENTRY, address, outcome_of, text_field,
-};
+use crate::lane::Waiting;
+use crate::peers::{Held, PeerItem, address, outcome_of, text_field};
 
 /// 对话里每条消息的文字（attachment 的 text、user 消息的文本块）。
 fn conversation(messages: &[Message]) -> Vec<String> {
@@ -54,12 +53,12 @@ pub(crate) async fn restore(actor: &mut Actor) {
             })
         }
     };
-    let messages = read(MESSAGE_ENTRY).await;
-    let receipts = read(RECEIPT_ENTRY).await;
+    let messages = read(entry_kinds::PEER_MESSAGE).await;
+    let receipts = read(entry_kinds::PEER_RECEIPT).await;
     if messages.is_empty() && receipts.is_empty() {
         return;
     }
-    let resolved: HashMap<String, Option<ReceiptStatus>> = read(RESOLVED_ENTRY)
+    let resolved: HashMap<String, Option<ReceiptStatus>> = read(entry_kinds::PEER_RESOLVED)
         .await
         .into_iter()
         .map(|(msg_id, data)| (msg_id, outcome_of(&data)))
@@ -102,7 +101,7 @@ pub(crate) async fn restore(actor: &mut Actor) {
             hold.is_none() || resolved.get(&msg_id) == Some(&Some(ReceiptStatus::Delivered));
         let item = PeerItem::Message { msg_id, envelope };
         if delivered && !merged(&item) {
-            actor.lane.push_back(Lane::Notice(Waiting::Peer(item)));
+            actor.inbox.push_notice(Waiting::Peer(item));
         }
     }
     // 没并入对话的回执：放回合并表，下一次醒来（立即到期）时交出。对话里有同一 msg_id 的这种回执就算已并入。

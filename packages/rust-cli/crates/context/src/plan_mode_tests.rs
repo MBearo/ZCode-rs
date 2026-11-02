@@ -63,8 +63,8 @@ fn assembler(home: Option<&str>, plan: Option<&str>) -> PromptAssembler {
         os_version: "Linux 6.8.0".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: home.map(EnvPath::new),
+        uid: None,
     };
     let mut env = MemoryEnvironment::new(facts);
     if let Some(path) = plan {
@@ -94,25 +94,18 @@ fn request(mode: PermissionMode, agent: Option<&str>) -> ContextRequest {
         None => ("sess_1", QuerySource::MainThread),
     };
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new(session),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/Users/dev/w"),
-        },
         agent: agent.map(AgentId::new),
-        source,
-        mode,
         tool_names: ["Bash", "Skill"].map(str::to_owned).to_vec(),
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
+        ..ContextRequest::new(
+            SessionId::new(session),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/w"),
+            },
+            source,
+            mode,
+            ModelSelection::new("p".to_owned(), rust_cli_base::models::GLM_5_3.to_owned()),
+        )
     }
 }
 

@@ -14,10 +14,7 @@ use super::commands;
 use super::composer::Popup;
 use super::layout;
 use super::text::{truncate_line, wrap_text};
-
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
+use crate::ui::style::dim;
 
 /// 排队的消息：每条 dim 的 `❯ 文字`，续行缩进 2 列，最多 3 行（超出时第 3 行末尾写 `…`）。
 pub fn queue(app: &App, width: usize) -> Vec<Line<'static>> {

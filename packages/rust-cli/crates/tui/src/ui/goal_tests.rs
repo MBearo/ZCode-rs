@@ -2,7 +2,6 @@
 use rust_cli_kernel_api::goal::{ActiveGoal, GoalStatus, GoalView};
 
 use super::*;
-use crate::ui::i18n::{EN, ZH};
 use crate::ui::palette::{ColorLevel, Palette};
 
 fn text(lines: &[Line<'_>]) -> Vec<String> {
@@ -35,7 +34,6 @@ fn with_ctx<T>(lang: Lang, run: impl FnOnce(&Ctx<'_>) -> T) -> T {
     let ctx = Ctx {
         palette: &palette,
         lang,
-        strings: if lang == Lang::Zh { &ZH } else { &EN },
         width: 80,
         expanded: false,
         elapsed: std::time::Duration::ZERO,

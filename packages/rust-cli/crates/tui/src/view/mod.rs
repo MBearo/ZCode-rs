@@ -6,9 +6,11 @@ mod extras;
 mod fire;
 mod fold;
 mod notice;
+mod tool_kind;
 
 pub use extras::{Activity, AgentActivity, TurnChanges, task_counts};
 pub use notice::Notice;
+pub use tool_kind::{BASH, ToolKind};
 
 use rust_cli_kernel_api::compaction::{ContextNotice, ContextOccupancy};
 use rust_cli_kernel_api::env::WorkspaceRef;
@@ -52,6 +54,8 @@ impl ToolStatus {
 pub struct ToolRow {
     pub id: ToolUseId,
     pub name: String,
+    /// 按名字认出的种类（建行时算一次）。
+    pub kind: ToolKind,
     pub input: Value,
     pub status: ToolStatus,
     /// 结果的文字（tool_result 的 text 内容拼接）。
@@ -62,6 +66,23 @@ pub struct ToolRow {
     pub display: Value,
     /// 前台子代理的活动（Agent 工具的进度，tui-display.md §2.1）；其他工具为 None。
     pub activity: Option<AgentActivity>,
+}
+
+impl ToolRow {
+    /// 新的工具行：还没有输出；种类按名字认一次。
+    pub fn new(id: ToolUseId, name: String, input: Value, status: ToolStatus) -> Self {
+        Self {
+            id,
+            kind: ToolKind::of(&name),
+            name,
+            input,
+            status,
+            output: String::new(),
+            preview: String::new(),
+            display: Value::Null,
+            activity: None,
+        }
+    }
 }
 
 /// 时间线标记。
@@ -245,11 +266,6 @@ impl Transcript {
         &self.rows
     }
 
-    /// 最后收到的事件 seq（重新订阅的起点）。
-    pub fn last_seq(&self) -> u64 {
-        self.last_seq
-    }
-
     pub fn selection(&self) -> &ModelSelection {
         &self.selection
     }
@@ -358,14 +374,6 @@ impl Transcript {
         self.rows
             .iter()
             .any(|row| matches!(row.body, Body::User { .. } | Body::Shell { .. }))
-    }
-
-    /// 最后一条回复的正文（`/copy`）。
-    pub fn last_reply(&self) -> Option<&str> {
-        self.rows.iter().rev().find_map(|row| match &row.body {
-            Body::Agent { text, .. } if !text.trim().is_empty() => Some(text.as_str()),
-            _ => None,
-        })
     }
 }
 

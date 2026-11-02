@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
+use rust_cli_base::clock::SystemClock;
 use rust_cli_env_local::{LocalEnvironment, ShellConfig};
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{CommandId, EnvironmentId, ToolUseId};
@@ -40,8 +41,8 @@ use rust_cli_kernel_api::session_api::{
 };
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::{ScriptedModel, environments, selection, text_response};
+use rust_cli_node_store::NodeIds;
 use rust_cli_node_store::NodeStore;
-use rust_cli_node_store::{NodeIds, SystemClock};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 use serde_json::{Value, json};
@@ -340,14 +341,25 @@ fn from_b(request: &InteractionRequest) -> bool {
 }
 
 /// B 的询问拒绝；A 的 Bash 允许并记住 `mkdir:*`，A 的其余询问允许。
-fn answer_for(request: &InteractionRequest, tool: &str) -> Value {
-    if from_b(request) {
-        json!({"decision": "deny"})
+fn answer_for(
+    request: &InteractionRequest,
+    tool: &str,
+) -> rust_cli_kernel_api::orchestration::Answer {
+    let answer = if from_b(request) {
+        rust_cli_kernel_api::orchestration::PermissionAnswer::Deny { feedback: None }
     } else if tool == "Bash" {
-        json!({"decision": "allow", "remember": [{"tool": "Bash", "content": "mkdir:*"}]})
+        rust_cli_kernel_api::orchestration::PermissionAnswer::Allow {
+            remember: vec![rust_cli_kernel_api::permission::PermissionRule {
+                tool: "Bash".to_owned(),
+                content: Some("mkdir:*".to_owned()),
+            }],
+        }
     } else {
-        json!({"decision": "allow"})
-    }
+        rust_cli_kernel_api::orchestration::PermissionAnswer::Allow {
+            remember: Vec::new(),
+        }
+    };
+    answer.into()
 }
 
 /// 负载下（外接盘上的工作区读规则文件要几秒）B 的第一个请求可能晚于 A 跑完、主回合结束，
@@ -422,7 +434,7 @@ async fn drive(harness: &Harness) -> (Vec<String>, Arc<dyn SessionHandle>) {
             }
             // 剧本里只有 B 在后台（A 的 Bash 在前台）：后台工作的终态就是 B 的。
             KernelEvent::BackgroundWork { work, status } => {
-                seen.push(format!("background {work} {status}"));
+                seen.push(format!("background {work} {}", status.as_str()));
                 background_finished = true;
             }
             _ => {}
@@ -626,7 +638,8 @@ async fn a_stalled_request_after_the_approval_leaves_the_incident_trail() {
             .any(|text| text.starts_with("assistant")),
         "no assistant message after the Bash result: {trail:#?}"
     );
-    assert!(loaded.pending_interactions.is_empty());
+    // 中断之后父会话里没有留下待回答的询问（询问只在内存，D4）。
+    assert!(session.view().await.unwrap().pending.is_empty());
     let parent = harness.store.load(&id).await.unwrap();
     let handback = parent
         .messages

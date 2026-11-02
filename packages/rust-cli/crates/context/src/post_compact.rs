@@ -59,7 +59,7 @@ impl PromptAssembler {
         let facts = self.facts(&request).await;
         if let Some(shown) = self.shown_facts(&request, facts.as_ref()).await {
             out.extend(
-                environment::announce(kept, &shown)
+                environment::announce(kept, &shown, &self.config.additional_directories)
                     .map(|found| self.attachment(environment::SOURCE, found)),
             );
         }

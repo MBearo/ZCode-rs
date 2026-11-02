@@ -9,7 +9,9 @@ use rust_cli_kernel_api::message::{ContentBlock, Message, ToolResultContent};
 use rust_cli_kernel_api::testing::{FakeTool, ScriptedModel, text_response, tool_use_response};
 use serde_json::json;
 
-use crate::mcp_support_tests::{FakeConnections, McpRegistry, TokioClock, server};
+use rust_cli_kernel_api::testing::TokioClock;
+
+use crate::mcp_support_tests::{FakeConnections, McpRegistry, server};
 use crate::run::tests::{parts, request, scope};
 
 const TOOL: &str = "mcp__slow__lookup";
@@ -49,7 +51,7 @@ async fn run(
         .collect();
     script.push(text_response(&["done"]));
     let model = Arc::new(ScriptedModel::new(script));
-    let clock = TokioClock::new();
+    let clock = Arc::new(TokioClock::new(0));
     let mut parts = parts(model, Vec::new());
     parts.tools = registry.clone();
     parts.clock = clock.clone();

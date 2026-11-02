@@ -18,8 +18,8 @@ fn facts() -> EnvFacts {
         os_version: "x".into(),
         shell: "zsh".into(),
         is_git_repo: true,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     }
 }
 

@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use rust_cli_kernel_api::permission::syntax::parse_rule;
 use rust_cli_kernel_api::permission::{PermissionRules, RuleBehavior, RuleSource, SourcedRule};
 use rust_cli_kernel_api::testing::FakeTool;
-use rust_cli_policy::rules::parse_rule;
+use rust_cli_policy::PolicyGate;
 
 use super::*;
 use crate::registry::BuiltinTools;

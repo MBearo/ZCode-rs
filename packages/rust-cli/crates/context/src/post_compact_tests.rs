@@ -53,8 +53,8 @@ fn assembler() -> PromptAssembler {
         os_version: "Linux 6.8.0".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     };
     let env = Arc::new(MemoryEnvironment::new(facts));
     PromptAssembler::new(
@@ -73,25 +73,17 @@ fn assembler() -> PromptAssembler {
 
 fn request(source: QuerySource) -> ContextRequest {
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("s"),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/Users/dev/w"),
-        },
-        agent: None,
-        source,
-        mode: PermissionMode::Default,
         tool_names: vec!["Read".to_owned(), "Agent".to_owned(), "Skill".to_owned()],
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
+        ..ContextRequest::new(
+            SessionId::new("s"),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/w"),
+            },
+            source,
+            PermissionMode::Default,
+            ModelSelection::new("p".to_owned(), rust_cli_base::models::GLM_5_3.to_owned()),
+        )
     }
 }
 

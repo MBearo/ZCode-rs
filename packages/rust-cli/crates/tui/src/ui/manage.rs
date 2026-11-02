@@ -66,14 +66,6 @@ pub enum Manage {
     },
 }
 
-/// 还在跑的后台任务数（命令与子代理都算；footer 的 pill 只数其中的命令，见 [`pill`]）。
-pub fn running(entries: &[BackgroundEntry]) -> usize {
-    entries
-        .iter()
-        .filter(|entry| entry.status == BackgroundStatus::Running)
-        .count()
-}
-
 /// footer 的 pill：只数在跑的命令，shell 与 monitor 分开数——`N shell(s)`、`N monitor(s)`，两种都有时 shell 在前、
 /// 用 `, ` 连接（中文 `N shell、N monitor`）；没有在跑的命令时没有 pill。回合结束那一行的 `still running` 也用它
 /// （修复线 F118，tui-display.md §2.7）。
@@ -200,7 +192,7 @@ impl App {
                 label: level.clone(),
                 description: effort_description(level).unwrap_or_default().to_owned(),
                 current: current == Some(level.as_str()),
-                value: level.clone(),
+                value: super::list::Choice::Effort(level.clone()),
                 ..super::list::Item::default()
             })
             .collect();
@@ -214,7 +206,7 @@ impl App {
             }
             .to_owned(),
             current: current.is_none(),
-            value: "auto".to_owned(),
+            value: super::list::Choice::Effort("auto".to_owned()),
             ..super::list::Item::default()
         });
         let (title, subtitle) = if zh {
@@ -224,7 +216,7 @@ impl App {
         };
         self.overlay = Some(Overlay::List(
             super::list::ListView::new(
-                super::list::Purpose::Effort,
+                super::list::Shape::OneLine,
                 title.into(),
                 items,
                 String::new(),
@@ -233,26 +225,17 @@ impl App {
         ));
     }
 
-    /// `/effort` 的提示：`saved` 为 None 时没有存储（只对本会话有效），否则是保存的结果。
+    /// `/effort` 的提示：`saved` 是存成新会话缺省的结果（入口总是给存储，架构整理 U13 删掉了“只对本会话有效”的分支）。
     ///
     /// 修复线 L-A（tui-manage.md §11.2）：成功时同一句（英文原文）记进对话，前面加固定说明（对照实现的缺省显示）。
-    pub fn effort_done(
-        &mut self,
-        level: Option<&str>,
-        saved: Option<Result<String, String>>,
-        args: &str,
-    ) {
-        let suffix = match &saved {
-            None => " (this session only)",
-            Some(Ok(_)) => " (saved as your default for new sessions)",
-            Some(Err(reason)) => {
-                self.error(format!("Failed to set effort level: {reason}"));
-                return;
-            }
-        };
+    pub fn effort_done(&mut self, level: Option<&str>, saved: Result<String, String>, args: &str) {
+        if let Err(reason) = saved {
+            self.error(format!("Failed to set effort level: {reason}"));
+            return;
+        }
+        let suffix = " (saved as your default for new sessions)";
         let text = match level {
-            None if saved.is_some() => "Effort level set to auto".to_owned(),
-            None => format!("Effort level set to auto{suffix}"),
+            None => "Effort level set to auto".to_owned(),
             Some(level) => match effort_description(level) {
                 Some(d) => format!("Set effort level to {level}{suffix}: {d}"),
                 None => format!("Set effort level to {level}{suffix}"),
@@ -290,7 +273,7 @@ impl App {
                     _ => String::new(),
                 };
                 // 绑定到远端机器的服务器名后面接 ` @机器`（R5，remote-exec.md §22.8；表格的单元格不分颜色）。
-                let name = match &server.machine {
+                let name = match server.machine.remote() {
                     Some(machine) => format!("{} @{machine}", server.name),
                     None => server.name.clone(),
                 };

@@ -6,14 +6,13 @@ use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::hooks::{HookEvent, HookOutcome};
 use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, MessageId, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
+    EnvironmentId, Generation, MessageId, OperationId, RunId, SessionId,
 };
 use rust_cli_kernel_api::message::{
     AttachmentMessage, ContentBlock, Message, UserMessage, UserOrigin,
 };
-use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::testing::{
-    MemoryStore, RecordingSink, UnusedEnvironment, local_services, machine,
+    FixedGate, RecordingSink, UnusedEnvironment, controller_services, machine,
 };
 use rust_cli_kernel_api::tool::PromptContext;
 use serde_json::json;
@@ -76,17 +75,6 @@ impl Tool for Loader {
     }
 }
 
-struct Allow;
-
-#[async_trait]
-impl PermissionGate for Allow {
-    async fn decide(&self, _t: &dyn Tool, _i: &Value, _c: &ToolUseContext) -> PermissionDecision {
-        PermissionDecision::Allow {
-            updated_input: None,
-        }
-    }
-}
-
 /// PostToolUse 给一条附加上下文。
 struct PostNote;
 
@@ -117,34 +105,30 @@ fn context() -> ToolUseContext {
     ToolUseContext {
         session: session.clone(),
         run: run.clone(),
-        tool_use: ToolUseId::new("toolu_1"),
-        agent: None,
         workspace: WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/work"),
         },
-        mode: PermissionMode::Default,
-        cancel: CancellationToken::new(),
         machine: machine(env.clone()),
-        local: local_services(env),
-        artifacts: Arc::new(MemoryStore::default()),
+        controller: controller_services(env),
         interactions: Arc::new(RecordingSink::default()),
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g1"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op_1"),
-            origin: Origin::Agent { session, run },
-        },
+        session_ops: Arc::new(RecordingSink::default()),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g1"),
+            OperationId::new("op_1"),
+            Origin::Agent { session, run },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
 #[tokio::test]
 async fn follow_up_messages_come_after_post_tool_use_messages() {
-    let pipeline = Pipeline::new(Arc::new(Allow), Arc::new(PostNote));
+    let pipeline = Pipeline::new(Arc::new(FixedGate::allow()), Arc::new(PostNote));
     let (progress, _updates) = mpsc::channel(4);
     let execution = pipeline
-        .execute_full(Arc::new(Loader), json!({}), context(), progress)
+        .execute(Arc::new(Loader), json!({}), context(), progress)
         .await;
     assert_eq!(
         execution.output.content,

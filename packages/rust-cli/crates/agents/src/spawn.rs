@@ -4,15 +4,15 @@ use std::sync::Arc;
 
 use rust_cli_kernel_api::abort::{Abort, AbortReason};
 use rust_cli_kernel_api::env_shell;
-use rust_cli_kernel_api::ids::{AgentId, OwnerEpoch, SessionId, TraceId};
+use rust_cli_kernel_api::ids::{AgentId, SessionId, TraceId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::metering::CallStatus;
 use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
 use rust_cli_kernel_api::orchestration::{QueryError, QueryRequest, QueryStop, ToolRegistry};
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::store::{
-    Fact, FactBatch, SessionKind, SessionMeta, StoreError, TurnAnchor,
-};
+use rust_cli_kernel_api::run_ledger::RunLedger;
+use rust_cli_kernel_api::store::entry_kinds;
+use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, StoreError};
 use tokio_util::sync::CancellationToken;
 
 use crate::Core;
@@ -33,10 +33,8 @@ pub(crate) fn selection(
 ) -> ModelSelection {
     let mut selection = match model.filter(|model| *model != "inherit") {
         Some(model) => ModelSelection {
-            provider: parent.provider.clone(),
-            model: model.to_owned(),
-            reasoning: None,
             connection: parent.connection.clone(),
+            ..ModelSelection::new(parent.provider.clone(), model.to_owned())
         },
         None => parent.clone(),
     };
@@ -68,28 +66,25 @@ fn user(core: &Core, text: &str, origin: UserOrigin) -> Message {
     })
 }
 
-/// 提交到子会话；返回这一批之后的当前轮（子会话的当前轮由这里与 `ChildSink` 持有，node-store.md §4，修复线 F6）。
+/// 提交到子会话（运行开头的输入）：同 `ChildSink::commit`，提交核心是这次运行的那一份 `RunLedger`（node-store.md §4，
+/// 修复线 F6），之后交给 `ChildSink`。
 async fn commit(
     core: &Core,
     session: &SessionId,
+    ledger: &mut RunLedger,
     facts: Vec<Fact>,
-    current: Option<&TurnAnchor>,
-) -> Result<Option<TurnAnchor>, StoreError> {
-    let turn = TurnAnchor::after(current, &facts, || core.ports.ids.turn());
-    let batch = FactBatch {
-        owner_epoch: OwnerEpoch::LOCAL,
-        command: None,
-        facts,
-        turn: turn.clone(),
-    };
+) -> Result<(), StoreError> {
+    let batch = ledger.batch(None, facts, core.ports.ids.as_ref());
+    let turn = batch.turn.clone();
     core.ports.store.commit(session, batch).await?;
-    Ok(turn)
+    ledger.committed(turn);
+    Ok(())
 }
 
-/// 一次运行的开头：历史（最后一条是这次运行的输入）与子会话的当前轮。
+/// 一次运行的开头：历史（最后一条是这次运行的输入）与这次运行的提交核心（带着子会话的当前轮）。
 pub(crate) struct Opening {
     pub(crate) messages: Vec<Message>,
-    pub(crate) turn: Option<TurnAnchor>,
+    pub(crate) ledger: RunLedger,
 }
 
 /// 建子会话并提交模型、模式与第一条 user 消息；返回登记好的子代理（状态为运行中）。
@@ -120,7 +115,7 @@ pub(crate) async fn create(
     // fork：子会话记下父会话与切点（溯源用，node-store.md §4.8.1）；继承的前缀不落库。
     if let Some(prefix) = &agent.fork_prefix {
         facts.push(Fact::Entry {
-            kind: crate::fork::PARENT_ENTRY.to_owned(),
+            kind: entry_kinds::FORK_PARENT.to_owned(),
             id: agent.agent.as_str().to_owned(),
             data: serde_json::json!({
                 "parentSession": parent.session.as_str(),
@@ -136,21 +131,23 @@ pub(crate) async fn create(
     facts.push(Fact::MessageAppended {
         message: first.clone(),
     });
-    let turn = commit(core, &agent.child, facts, None).await?;
+    let mut ledger = RunLedger::new(None);
+    commit(core, &agent.child, &mut ledger, facts).await?;
     agent.state = AgentState::Running {
         abort: Abort::new(),
         mailbox: Vec::new(),
     };
     core.live.insert(agent.clone());
     let messages = with_prefix(&agent, vec![first]);
-    Ok((agent, Opening { messages, turn }))
+    Ok((agent, Opening { messages, ledger }))
 }
 
 /// 子会话的当前目录取父会话此刻的当前目录（派生时复制父会话的 cwd，之后主线程的
 /// `cd` 传不过去，tools-files.md §3.3）。缺陷修复（F19）：以前子会话没有自己的 shell cwd，文件工具、判决链与 Bash 都
 /// 落回工作区根——父会话 `cd sub` 之后，子代理的 `x.txt` 是根下的 x.txt。执行环境不支持时照旧（工作区根）。
 async fn inherit_directory(core: &Core, agent: &LiveAgent) {
-    let shell = core.ports.machine.shell().as_ref();
+    let machine = core.ports.machines.primary_machine();
+    let shell = machine.shell().as_ref();
     let cwd = env_shell::current_dir(shell, &agent.workspace, &agent.parent).await;
     if let Err(error) = shell.set_shell_cwd(&agent.child, cwd).await {
         tracing::debug!(%error, "the subagent starts in the workspace root");
@@ -168,17 +165,18 @@ pub(crate) async fn resume(
     let loaded = core.ports.store.load(&agent.child).await?;
     let mut messages = with_prefix(agent, loaded.messages);
     let next = user(core, message, origin);
-    let turn = commit(
+    let mut ledger = RunLedger::new(loaded.turn);
+    commit(
         core,
         &agent.child,
+        &mut ledger,
         vec![Fact::MessageAppended {
             message: next.clone(),
         }],
-        loaded.turn.as_ref(),
     )
     .await?;
     messages.push(next);
-    Ok(Opening { messages, turn })
+    Ok(Opening { messages, ledger })
 }
 
 /// fork 的子会话只存自己的消息：前面拼上内存里继承的前缀（修复线 L-A，agents.md §8.1.3）。
@@ -212,7 +210,7 @@ pub(crate) async fn drive(
     parent: Option<Parent>,
     cancel: Option<CancellationToken>,
 ) -> Finished {
-    let Opening { messages, turn } = opening;
+    let Opening { messages, ledger } = opening;
     let started = core.ports.clock.now_ms();
     tracing::info!(
         event = "subagent.start",
@@ -239,7 +237,7 @@ pub(crate) async fn drive(
             prompt,
             parent,
         )
-        .with_turn(turn)
+        .with_ledger(ledger)
         .asking(&agent.definition.agent_type, agent.asks.clone())
         .with_core(core.clone()),
     );
@@ -256,9 +254,13 @@ pub(crate) async fn drive(
     let status = match &result {
         Ok(QueryStop::Aborted) => CallStatus::Cancelled,
         Ok(QueryStop::ApiError { .. }) | Err(_) => CallStatus::Error,
-        Ok(QueryStop::Completed | QueryStop::MaxTurns | QueryStop::Blocked { .. }) => {
-            CallStatus::Completed
-        }
+        Ok(
+            QueryStop::Completed
+            | QueryStop::MaxTurns
+            | QueryStop::HookStopped
+            | QueryStop::StopHookPrevented
+            | QueryStop::Blocked { .. },
+        ) => CallStatus::Completed,
     };
     if let Err(error) = sink.commit(vec![Fact::TurnEnded { status }]).await {
         tracing::warn!(%error, "the subagent turn usage could not be stored");
@@ -274,7 +276,13 @@ pub(crate) async fn drive(
             }
             (Ending::Completed, None)
         }
-        Ok(QueryStop::Completed | QueryStop::MaxTurns) => (Ending::Completed, None),
+        // 工具的 hook 要求停止、SubagentStop 阻止继续：子代理按正常结束，结果是已有的文本（query.md §3）。
+        Ok(
+            QueryStop::Completed
+            | QueryStop::MaxTurns
+            | QueryStop::HookStopped
+            | QueryStop::StopHookPrevented,
+        ) => (Ending::Completed, None),
         // 失败时 `<result>` 仍是已有的文本，错误进 `<summary>`（`failed: <error>`，agents.md §5）。
         Err(error) => (Ending::Failed, Some(error)),
     };
@@ -343,16 +351,19 @@ async fn run_loop(
         book: core.runs.clone(),
     };
     let request = QueryRequest {
-        session: agent.child.clone(),
-        run: core.ports.ids.run(),
-        workspace: agent.workspace.clone(),
         agent: Some(agent.agent.clone()),
-        messages,
-        selection: agent.selection.clone(),
-        mode: agent.mode,
-        source: QuerySource::Subagent(agent.definition.agent_type.clone()),
         max_turns: agent.definition.max_turns,
-        prompt_hook_messages: Vec::new(),
+        // 子代理的缺省机器（R3，remote-exec.md §20.6）：派生时 Agent 的 `machine`。
+        default_machine: agent.machine.clone(),
+        ..QueryRequest::new(
+            agent.child.clone(),
+            core.ports.ids.run(),
+            agent.workspace.clone(),
+            messages,
+            agent.selection.clone(),
+            agent.mode,
+            QuerySource::Subagent(agent.definition.agent_type.clone()),
+        )
     };
     let run = rust_cli_kernel_api::orchestration::QueryRunner::run(
         &runner,

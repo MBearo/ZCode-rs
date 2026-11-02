@@ -1,17 +1,13 @@
 //! 子代理在工具边界收到的通知（docs/specs/rust-cli/query.md §5.1）：插话之后，每条通知一个
 //! `queued_command`（`commandMode: task-notification`），文本是通知全文。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
-use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{ContentBlock, Message, ToolResultContent};
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, QueryEvent, QueryStop,
-    RunSink,
-};
-use rust_cli_kernel_api::store::StoreError;
+use rust_cli_kernel_api::orchestration::{Absorbed, QueryStop, RunSink};
 use rust_cli_kernel_api::testing::{
     RecordingSink, ScriptedModel, text_response, tool_use_response,
 };
@@ -28,33 +24,27 @@ struct NoticeSink {
     notices: Mutex<Vec<String>>,
 }
 
-#[async_trait]
-impl Interactions for NoticeSink {
-    async fn ask(
-        &self,
-        session: &SessionId,
-        request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        self.inner.ask(session, request).await
+impl rust_cli_kernel_api::testing::OpsOverride for NoticeSink {}
+
+/// 询问交给内层的记录输出端。
+impl rust_cli_kernel_api::testing::AskOverride for NoticeSink {
+    fn asks(&self) -> &dyn rust_cli_kernel_api::orchestration::Interactions {
+        self.inner.as_ref()
     }
 }
 
+/// 插话（内层记下的）在前、这一队通知在后。
 #[async_trait]
-impl RunSink for NoticeSink {
-    async fn commit_message(&self, message: Message) -> Result<(), StoreError> {
-        self.inner.commit_message(message).await
+impl rust_cli_kernel_api::testing::SinkOverride for NoticeSink {
+    fn sink(&self) -> &dyn RunSink {
+        self.inner.as_ref()
     }
 
-    async fn emit(&self, event: QueryEvent) -> bool {
-        self.inner.emit(event).await
-    }
-
-    async fn take_steering(&self) -> Vec<String> {
-        self.inner.take_steering().await
-    }
-
-    async fn take_notices(&self) -> Vec<String> {
-        std::mem::take(&mut *self.notices.lock().unwrap_or_else(PoisonError::into_inner))
+    async fn take_absorbed(&self) -> Vec<Absorbed> {
+        let mut absorbed = self.inner.take_absorbed().await;
+        let notices = std::mem::take(&mut *self.notices.lock_unpoisoned());
+        absorbed.extend(Absorbed::ordered(Vec::new(), notices));
+        absorbed
     }
 }
 
@@ -71,17 +61,12 @@ async fn notices_join_the_run_after_the_steering_input() {
         inner: inner.clone(),
         notices: Mutex::new(vec![NOTICE.to_owned()]),
     });
-    let scope = Arc::new(RunScope {
-        session: first.session.clone(),
-        run: first.run.clone(),
-        workspace: first.workspace.clone(),
-        agent: None,
-        mode: first.mode,
-        abort: Abort::new(),
+    let scope = Arc::new(RunScope::new(
+        &first,
         sink,
-        parts: parts(model.clone(), Vec::new()),
-        exhausted: Default::default(),
-    });
+        parts(model.clone(), Vec::new()),
+        Abort::new(),
+    ));
     assert_eq!(
         super::run(scope, first).await.unwrap(),
         QueryStop::Completed

@@ -3,6 +3,7 @@
 //! 入口层读配置文件、展开 `${VAR}`、按作用域合并，交给 ext 的只是这份快照。
 
 use rust_cli_base::units;
+use rust_cli_kernel_api::ids::MachineName;
 use rust_cli_kernel_api::mcp::McpTransportConfig;
 
 /// 配置作用域。
@@ -25,9 +26,9 @@ pub struct McpServer {
     pub scope: McpScope,
     pub transport: McpTransportConfig,
     pub options: McpServerOptions,
-    /// 服务器绑定的远端机器（R5，remote-exec.md §22.2：入口按 rust-cli 的旁路文件设）；None 或 `local` 是本机。绑定到
-    /// 远端时 `transport` 是配置的原文（`${VAR}` 由那台机器的执行器展开，§22.7）。
-    pub machine: Option<String>,
+    /// 服务器绑定的机器（R5，remote-exec.md §22.2：入口按 rust-cli 的旁路文件设）；缺省是主 env。绑定到额外机器时
+    /// `transport` 是配置的原文（`${VAR}` 由那台机器的执行器展开，§22.7）。
+    pub machine: MachineName,
 }
 
 /// 按服务器的选项（Node 配置的 `timeoutMs`、`alwaysLoad`，ext.md §3.1）；`--mcp-config` 与插件的服务器用缺省值。
@@ -94,9 +95,9 @@ impl Default for McpSettings {
 /// 一份，在 kernel-api（ToolSearch 与直接调用时的等待也用它，F36）。
 pub use rust_cli_kernel_api::mcp_state::normalize_name;
 
-/// `mcp__<server>__<tool>`。
+/// `mcp__<server>__<tool>`，两段都规范化（拼法只在 kernel-api 的 `mcp_name`）。
 pub fn tool_name(server: &str, tool: &str) -> String {
-    format!("mcp__{}__{}", normalize_name(server), normalize_name(tool))
+    rust_cli_kernel_api::mcp_name::compose(&normalize_name(server), &normalize_name(tool))
 }
 
 #[cfg(test)]

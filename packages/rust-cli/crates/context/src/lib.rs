@@ -39,6 +39,7 @@ mod task_reminder;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rust_cli_base::late::Late;
 use rust_cli_kernel_api::agents::TaskReader;
 use rust_cli_kernel_api::clock::{Clock, Ids};
 use rust_cli_kernel_api::env::EnvFacts;
@@ -46,7 +47,7 @@ use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::listing::{ListingEntry, ListingSource, Listings};
-use rust_cli_kernel_api::local_services::Git;
+use rust_cli_kernel_api::machine::Git;
 use rust_cli_kernel_api::machine::{EnvInfo, Files, Shell};
 use rust_cli_kernel_api::message::{AttachmentMessage, Message, SystemMessage};
 use rust_cli_kernel_api::model::QuerySource;
@@ -101,8 +102,9 @@ pub struct PromptAssembler {
     nested: nested::Seen,
     /// 读过的文件在磁盘上被改动（tools-files.md §4.1）：readFileState 的 owner 给出；没有时不查。
     changed: Option<Arc<dyn ChangedFiles>>,
-    /// 任务提醒读的任务清单（agents.md §7.4）：agents 建好之后由 runtime 接上一次；没有时不提醒。
-    tasks: std::sync::OnceLock<Arc<dyn TaskReader>>,
+    /// 任务提醒读的任务清单（agents.md §7.4）：agents 建好之后由 runtime 接上一次（组装的晚绑定，base 的 `late::Late`）；
+    /// 没有时不提醒。
+    tasks: Late<Arc<dyn TaskReader>>,
     /// 连上的远端机器（R3，remote-exec.md §20.5.3）：机器清单提醒读它的快照；没有时不提醒。
     machines: Option<Arc<dyn EnvironmentRegistry>>,
 }
@@ -115,7 +117,17 @@ enum Thread<'a> {
     Subagent(&'a str),
 }
 
-impl Thread<'_> {
+impl<'a> Thread<'a> {
+    /// 这次请求属于哪个循环：主线程或子代理；摘要与旁路请求不是（没有当步的 attachment）。`QuerySource` 到 `Thread`
+    /// 的映射只在这里（工作线 F131：以前 `build` 与 `turn_attachments` 各写一份）。
+    fn of(source: &'a QuerySource) -> Option<Self> {
+        match source {
+            QuerySource::MainThread => Some(Thread::Main),
+            QuerySource::Subagent(agent_type) => Some(Thread::Subagent(agent_type)),
+            QuerySource::Compact | QuerySource::Side(_) => None,
+        }
+    }
+
     /// Explore / Plan 不带规则文件、git 状态与 nested memory。
     fn omits_context(self) -> bool {
         matches!(self, Thread::Subagent(agent_type) if subagent::omits_context(agent_type))
@@ -144,7 +156,7 @@ impl PromptAssembler {
             rules: Memo::default(),
             nested: nested::Seen::default(),
             changed: None,
-            tasks: std::sync::OnceLock::new(),
+            tasks: Late::new(),
             machines: None,
         }
     }
@@ -158,7 +170,7 @@ impl PromptAssembler {
 
     /// 接上任务提醒读的任务清单（agents 依赖 context，所以建好 agents 之后再接；只接一次）。
     pub fn bind_tasks(&self, tasks: Arc<dyn TaskReader>) {
-        if self.tasks.set(tasks).is_err() {
+        if self.tasks.bind(tasks).is_err() {
             tracing::error!("the task list reader was bound twice; keeping the first");
         }
     }
@@ -298,21 +310,16 @@ impl PromptAssembler {
         // 主工作目录是这个会话的当前目录：子代理的子会话在派生时取父会话当时的目录（F19，tools-files.md §3.3），
         // 与运行开始那一组（`subagent_start`）同一来源。
         let shown = self.shown_facts(request, facts.as_ref()).await;
-        if let Some(found) = shown
-            .as_ref()
-            .and_then(|shown| environment::announce(history, shown))
-        {
+        if let Some(found) = shown.as_ref().and_then(|shown| {
+            environment::announce(history, shown, &self.config.additional_directories)
+        }) {
             out.push(self.attachment(environment::SOURCE, found));
         }
         // 机器清单（R3，remote-exec.md §20.5.3）：紧跟环境段；只在有变化时发。
         if let Some(registry) = &self.machines {
             out.extend(
-                machines::announce(
-                    history,
-                    &registry.machines(),
-                    request.default_machine.as_deref(),
-                )
-                .map(|found| self.attachment(machines::SOURCE, found)),
+                machines::announce(history, &registry.machines(), &request.default_machine)
+                    .map(|found| self.attachment(machines::SOURCE, found)),
             );
         }
         out.extend(
@@ -363,7 +370,8 @@ impl PromptAssembler {
                 &request.session,
                 self.ports.shell.as_ref(),
             );
-            for found in nested::announce(seen, facts, history, &files).await {
+            let additional = self.config.additional_directories.as_slice();
+            for found in nested::announce(seen, (facts, additional), history, &files).await {
                 out.push(self.attachment(nested::SOURCE, found));
             }
         }
@@ -476,26 +484,19 @@ impl ContextBuilder for PromptAssembler {
         let system = system_blocks(&facts);
         // 当步的 attachment 在 `start_attachments` / `turn_attachments`（query.md §1.1；子代理同样，F16）；摘要请求见
         // `auxiliary.rs`（context.md §4.1）。
-        let attachments = match &request.source {
-            QuerySource::MainThread => {
-                let boundary = last_boundary(history);
-                let window = since_boundary(history);
-                self.announcements((&request, Thread::Main), window, boundary)
-                    .await
-            }
-            QuerySource::Subagent(agent_type) => {
-                let boundary = last_boundary(history);
-                let window = since_boundary(history);
-                let thread = Thread::Subagent(agent_type);
-                self.announcements((&request, thread), window, boundary)
-                    .await
-            }
-            QuerySource::Compact => self.auxiliary_announcements(&request, history).await,
-            QuerySource::Side(_) => Vec::new(),
+        let attachments = if let Some(thread) = Thread::of(&request.source) {
+            let boundary = last_boundary(history);
+            let window = since_boundary(history);
+            self.announcements((&request, thread), window, boundary)
+                .await
+        } else if request.source == QuerySource::Compact {
+            self.auxiliary_announcements(&request, history).await
+        } else {
+            // 旁路请求没有宣布。
+            Vec::new()
         };
         Ok(BuiltContext {
             system,
-            user_context: Vec::new(),
             attachments,
         })
     }
@@ -507,10 +508,8 @@ impl ContextBuilder for PromptAssembler {
         request: ContextRequest,
         history: &[Message],
     ) -> Result<Vec<AttachmentMessage>, OrchestrationError> {
-        let thread = match &request.source {
-            QuerySource::MainThread => Thread::Main,
-            QuerySource::Subagent(agent_type) => Thread::Subagent(agent_type),
-            QuerySource::Compact | QuerySource::Side(_) => return Ok(Vec::new()),
+        let Some(thread) = Thread::of(&request.source) else {
+            return Ok(Vec::new());
         };
         let window = since_boundary(history);
         let listings = self.ports.listings.listings_for(&request, window).await?;

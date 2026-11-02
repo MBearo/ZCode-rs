@@ -1,7 +1,7 @@
 //! 子代理列表（tui-panels.md §1）：可见规则、排版与按键。
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use rust_cli_kernel_api::ids::{AgentId, SessionId};
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::testing::selection;
@@ -9,21 +9,7 @@ use rust_cli_kernel_api::testing::selection;
 use super::*;
 use crate::ui::i18n::Lang;
 use crate::ui::manage::Manage;
-use crate::ui::palette::{ColorLevel, Palette};
-
-fn app() -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
-}
+use crate::ui::test_support::{app, key};
 
 fn entry(id: &str, status: SubagentStatus, ended_ago_ms: Option<u64>) -> SubagentEntry {
     SubagentEntry {
@@ -40,7 +26,7 @@ fn entry(id: &str, status: SubagentStatus, ended_ago_ms: Option<u64>) -> Subagen
         owner: None,
         activity: None,
         parked: false,
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -48,15 +34,11 @@ fn plain(lines: &[Line<'static>]) -> Vec<String> {
     lines.iter().map(crate::ui::text::plain).collect()
 }
 
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
 #[test]
 fn ended_agents_leave_the_list_thirty_seconds_after_they_end() {
     let mut app = app();
     let now = Instant::now();
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![
             entry("agent_a", SubagentStatus::Running, None),
             entry("agent_b", SubagentStatus::Completed, Some(29_000)),
@@ -76,11 +58,19 @@ fn ended_agents_leave_the_list_thirty_seconds_after_they_end() {
     // 在跑的行的用时往后推，结束的不变。
     let later = now + Duration::from_secs(5);
     assert_eq!(
-        elapsed_ms(&app.agents, &app.agents.entries[0], later),
+        elapsed_ms(
+            &app.snapshots.agents,
+            &app.snapshots.agents.entries[0],
+            later
+        ),
         70_000
     );
     assert_eq!(
-        elapsed_ms(&app.agents, &app.agents.entries[1], later),
+        elapsed_ms(
+            &app.snapshots.agents,
+            &app.snapshots.agents.entries[1],
+            later
+        ),
         65_000
     );
 }
@@ -95,7 +85,7 @@ fn the_list_has_main_then_one_line_per_agent() {
     // 前台完成的照常留 30 秒；后台完成的立即隐藏（修复线 F30，tui-panels.md §1.2，见 agents_tree_tests.rs）。
     let mut done = entry("agent_b", SubagentStatus::Completed, Some(0));
     done.background = false;
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![waiting, done],
         at: Some(now),
     };
@@ -119,7 +109,7 @@ fn the_list_has_main_then_one_line_per_agent() {
         .unwrap();
     assert_eq!(dot.style.fg, Some(Color::Green));
     // 没有子代理时不显示。
-    app.agents = AgentList::default();
+    app.snapshots.agents = AgentList::default();
     assert!(app.agents_lines(80, now).0.is_empty());
 }
 
@@ -127,7 +117,7 @@ fn the_list_has_main_then_one_line_per_agent() {
 fn more_than_five_agents_end_with_a_count() {
     let mut app = app();
     let now = Instant::now();
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: (0..7)
             .map(|i| entry(&format!("agent_{i}"), SubagentStatus::Running, None))
             .collect(),
@@ -144,7 +134,7 @@ fn keys_move_view_stop_and_leave() {
     let now = Instant::now();
     let mut foreground = entry("agent_f", SubagentStatus::Running, None);
     foreground.background = false;
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![entry("agent_b", SubagentStatus::Running, None), foreground],
         at: Some(now),
     };
@@ -191,7 +181,7 @@ fn keys_move_view_stop_and_leave() {
 fn viewing_is_read_only_and_esc_returns() {
     let mut app = app();
     let now = Instant::now();
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![entry("agent_a", SubagentStatus::Running, None)],
         at: Some(now),
     };
@@ -233,7 +223,7 @@ fn rows_show_what_the_agent_is_doing() {
         row.activity = Some(activity);
         row
     };
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![
             with("agent_a", SubagentActivity::Thinking),
             with(
@@ -295,7 +285,7 @@ fn rows_show_what_the_agent_is_doing() {
     assert!(text[5].contains(" · 等待 API 响应 "), "{text:?}");
     // 等用户回答时只写 waiting。
     app.lang = Lang::En;
-    app.agents.entries[0].waiting = true;
+    app.snapshots.agents.entries[0].waiting = true;
     let text = plain(&app.agents_lines(100, later).0);
     assert!(text[2].contains("Look at agent_a · waiting "), "{text:?}");
     assert!(text[2].ends_with(" 1m 8s"), "{text:?}");
@@ -330,7 +320,7 @@ fn the_duration_stays_in_place_when_the_activity_changes() {
         }),
     ] {
         row.activity = activity;
-        app.agents = AgentList {
+        app.snapshots.agents = AgentList {
             entries: vec![row.clone()],
             at: Some(now),
         };
@@ -342,7 +332,7 @@ fn the_duration_stays_in_place_when_the_activity_changes() {
     row.activity = Some(SubagentActivity::Tool {
         name: "a_tool_with_a_very_long_name_indeed".into(),
     });
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![row],
         at: Some(now),
     };
@@ -357,9 +347,9 @@ fn agents_on_a_remote_machine_name_it() {
     let mut app = app();
     let now = Instant::now();
     let mut remote = entry("agent_a", SubagentStatus::Running, None);
-    remote.machine = Some("dev-a".into());
+    remote.machine = rust_cli_kernel_api::ids::MachineName::new("dev-a");
     let local = entry("agent_b", SubagentStatus::Running, None);
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: vec![remote, local],
         at: Some(now),
     };

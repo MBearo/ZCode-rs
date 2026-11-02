@@ -5,41 +5,24 @@ use std::sync::Arc;
 
 use base64::Engine;
 use crossterm::event::{KeyCode, KeyModifiers};
-use futures_util::FutureExt;
-use futures_util::future::BoxFuture;
 use rust_cli_kernel_api::testing::text_response;
-use rust_cli_tui::{Clipboard, ImageBytes, Services};
+use rust_cli_tui::Services;
 
+use super::stub_services::FakeClipboard;
 use super::support::{GatedModel, Setup, request_text, with_ui};
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n0000IHDR";
 
-/// 剪贴板替身：`image` 给出 `clipboard`；`image_file` 只认 `/Users/dev/shot.png`。
-struct FakeClipboard {
-    clipboard: Option<Vec<u8>>,
-}
-
-impl Clipboard for FakeClipboard {
-    fn image(&self) -> BoxFuture<'static, Result<Option<ImageBytes>, String>> {
-        let bytes = self.clipboard.clone();
-        async move { Ok(bytes.map(|bytes| ImageBytes { bytes })) }.boxed()
-    }
-
-    fn image_file(&self, path: String) -> BoxFuture<'static, Result<Option<ImageBytes>, String>> {
-        async move {
-            Ok((path == "/Users/dev/my shot.png").then(|| ImageBytes {
-                bytes: PNG.to_vec(),
-            }))
-        }
-        .boxed()
-    }
-}
-
 fn setup(clipboard: Option<Vec<u8>>) -> Setup {
     Setup {
         services: Services {
-            clipboard: Some(Arc::new(FakeClipboard { clipboard })),
-            ..Services::default()
+            clipboard: Arc::new(FakeClipboard {
+                image: clipboard,
+                // 拖进终端的图片文件（只认这一个路径）。
+                files: vec![("/Users/dev/my shot.png".into(), PNG.to_vec())],
+                ..FakeClipboard::default()
+            }),
+            ..super::stub_services::services()
         },
         ..Setup::default()
     }

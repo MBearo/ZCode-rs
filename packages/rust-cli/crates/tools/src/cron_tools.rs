@@ -1,6 +1,6 @@
 //! CronCreate / CronDelete / CronList（docs/specs/rust-cli/tools-more.md §10.2）。
 //!
-//! 工具只改任务表（[`CronBoard`]），任务记在顶层会话名下（`Interactions::owner_session`，前台子代理
+//! 工具只改任务表（[`CronBoard`]），任务记在顶层会话名下（`SessionOps::owner_session`，前台子代理
 //! 转给父会话）。触发由会话 actor 在空闲时取走到期任务（§10.4）。`durable: true` 的任务写进
 //! `.zcode/scheduled_tasks.json`（§16）；计数、删除校验与列出每次重读文件。
 
@@ -16,13 +16,15 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::common::{Definition, definition, parse};
 use crate::cron_board::{CronBoard, MAX_JOBS};
 use crate::cron_expr;
+use rust_cli_kernel_api::tool::parse;
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const CREATE: &str = "CronCreate";
-pub const DELETE: &str = "CronDelete";
-pub const LIST: &str = "CronList";
+pub const CREATE: &str = tool_names::CRON_CREATE;
+pub const DELETE: &str = tool_names::CRON_DELETE;
+pub const LIST: &str = tool_names::CRON_LIST;
 
 /// CronCreate 结果的两种说明之一（另一种 `Persisted to
 /// .zcode/scheduled_tasks.json` 在结果里用共用的名字拼）。产品名按替换规则换成 ZCode（2026-10-18 用户确认，
@@ -32,7 +34,7 @@ const SESSION_ONLY: &str = "Session-only (not written to disk, dies when ZCode e
 const MAX_AGE_DAYS: u64 = crate::cron_expr::RECURRING_MAX_AGE_MS / 86_400_000;
 
 pub(crate) async fn owner(context: &ToolUseContext) -> SessionId {
-    context.interactions.owner_session(&context.session).await
+    context.session_ops.owner_session(&context.session).await
 }
 
 /// 任务 ID 的字符数。
@@ -49,7 +51,7 @@ pub(crate) fn job_id(context: &ToolUseContext) -> String {
 }
 
 pub(crate) fn output(content: String, display: Value) -> ToolOutput {
-    let mut output = crate::common::text(content);
+    let mut output = rust_cli_kernel_api::tool::text(content);
     output.display = display;
     output
 }
@@ -64,7 +66,7 @@ pub(crate) struct Shared {
 impl Shared {
     fn new(name: &str, board: &CronBoard, hint: &'static str) -> Self {
         Self {
-            definition: definition(name),
+            definition: rust_cli_prompts::definition(name).clone(),
             board: board.clone(),
             hint,
         }

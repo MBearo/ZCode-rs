@@ -15,55 +15,19 @@ use async_trait::async_trait;
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
-    ArtifactId, EnvironmentId, Generation, InteractionId, OperationId, OwnerEpoch, RunId,
-    SessionId, ToolUseId,
+    ArtifactId, EnvironmentId, Generation, OperationId, RunId, SessionId, ToolUseId,
 };
 use rust_cli_kernel_api::message::ToolResultContent;
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, PermissionGate,
-    ToolExecutor, ToolRegistry,
-};
-use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode};
+use rust_cli_kernel_api::orchestration::{PermissionGate, ToolExecutor, ToolRegistry};
+use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::store::{ArtifactPurpose, ArtifactRef, ArtifactStore, StoreError};
-use rust_cli_kernel_api::testing::{NoHooks, RoundTripEnv, local_services, machine};
-use rust_cli_kernel_api::tool::{Tool, ToolUseContext};
+use rust_cli_kernel_api::testing::{
+    FixedGate, NoHooks, RoundTripEnv, controller_services, machine,
+};
+use rust_cli_kernel_api::tool::ToolUseContext;
 use rust_cli_tools::{BuiltinTools, Pipeline};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-
-/// 权限不在这里测（policy `files_tests.rs`）：一律放行。
-struct AllowAll;
-
-#[async_trait]
-impl PermissionGate for AllowAll {
-    async fn decide(
-        &self,
-        _tool: &dyn Tool,
-        _input: &Value,
-        _context: &ToolUseContext,
-    ) -> PermissionDecision {
-        PermissionDecision::Allow {
-            updated_input: None,
-        }
-    }
-}
-
-struct NoQuestions;
-
-#[async_trait]
-impl Interactions for NoQuestions {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        _request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i"),
-            answer: json!({"decision": "allow"}),
-        })
-    }
-}
 
 #[derive(Default)]
 struct Artifacts(Mutex<HashMap<String, Vec<u8>>>);
@@ -142,7 +106,7 @@ impl Bench {
         } else {
             std::fs::canonicalize(dir.path()).unwrap()
         };
-        let gate: Arc<dyn PermissionGate> = Arc::new(AllowAll);
+        let gate: Arc<dyn PermissionGate> = Arc::new(FixedGate::allow());
         Self {
             _dir: dir,
             root,
@@ -165,33 +129,35 @@ impl Bench {
         let env = self.env.clone();
         let context = ToolUseContext {
             session: session.clone(),
-            run: RunId::new("run_1"),
             tool_use: ToolUseId::new(format!("toolu_{:03}", self.step)),
-            agent: None,
             workspace: WorkspaceRef {
                 environment: EnvironmentId::new("local"),
                 root: EnvPath::new(self.root.to_string_lossy()),
             },
             mode: PermissionMode::DontAsk,
-            cancel: CancellationToken::new(),
             machine: machine(env.clone()),
-            local: local_services(env),
+            controller: controller_services(env),
             artifacts: self.artifacts.clone(),
-            interactions: Arc::new(NoQuestions),
-            operation: OperationContext {
-                environment: EnvironmentId::new("local"),
-                generation: Generation::new("g1"),
-                owner_epoch: OwnerEpoch::LOCAL,
-                operation: OperationId::new(format!("op_{}", self.step)),
-                origin: Origin::Agent {
+            interactions: Arc::new(rust_cli_kernel_api::testing::ScriptedInteractions::allowing()),
+            session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+            operation: OperationContext::new(
+                EnvironmentId::new("local"),
+                Generation::new("g1"),
+                OperationId::new(format!("op_{}", self.step)),
+                Origin::Agent {
                     session,
                     run: RunId::new("run_1"),
                 },
-            },
+            ),
+            ..rust_cli_kernel_api::testing::tool_use_context()
         };
         let tool = self.tools.find(tool).unwrap();
         let (progress, _updates) = mpsc::channel(4);
-        let output = self.pipeline.execute(tool, input, context, progress).await;
+        let output = self
+            .pipeline
+            .execute(tool, input, context, progress)
+            .await
+            .output;
         let text = output
             .content
             .iter()

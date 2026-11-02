@@ -4,12 +4,11 @@ use std::sync::Arc;
 
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::testing::{MemoryEnvironment, SequentialIds};
-use rust_cli_policy::PolicyGate;
 use serde_json::json;
 
 use super::*;
 use crate::skills::runner;
-use crate::test_support::{CWD, EchoBash, facts, tool_context};
+use crate::test_support::{AllowedGate, CWD, EchoBash, facts, tool_context};
 
 const GREET: &str = "---\ndescription: Greet someone by name\nwhen_to_use: When the user asks for a greeting\nargument-hint: <name>\narguments: [who]\nallowed-tools: Bash(echo:*)\n---\nSay hello to $ARGUMENTS ($who, first: $0).\nSkill dir: ${CLAUDE_SKILL_DIR}\nInline: !`echo inline-ok`\n";
 const HELPER: &str = "---\nname: Helper\ndescription: A helper the model must not call\ndisable-model-invocation: true\n---\nHidden helper.\n";
@@ -37,7 +36,7 @@ fn tool(env: Arc<MemoryEnvironment>) -> SkillTool {
     SkillTool::new(
         catalog,
         ids.clone(),
-        Some(runner(bash, Arc::new(PolicyGate::default()), ids)),
+        Some(runner(bash, Arc::new(AllowedGate::default()), ids)),
     )
 }
 
@@ -178,31 +177,14 @@ async fn only_safe_skills_skip_the_permission_chain() {
     assert_eq!(decision("greet").await, PermissionDecision::Passthrough);
 }
 
-#[tokio::test]
-async fn the_k1_dont_ask_run_asks_for_greet_and_admits_plain() {
-    // K1 第一次抓取（没有 allow 规则）：greet 带 allowed-tools，dontAsk 下被拒；plain 放行。
-    let env = env();
-    let tool = tool(env.clone());
-    let context = tool_context(env, PermissionMode::DontAsk);
-    let gate = PolicyGate::default();
-    use rust_cli_kernel_api::orchestration::PermissionGate;
-    let greet = gate
-        .decide(&tool, &json!({"skill": "greet", "args": "Ada"}), &context)
-        .await;
-    let PermissionDecision::Deny { message } = greet else {
-        panic!("expected a denial, got {greet:?}");
-    };
-    assert!(
-        message.starts_with(
-            "Permission to use Skill has been denied because ZCode is running in don't ask mode."
-        ),
-        "{message}"
-    );
-    let plain = gate
-        .decide(&tool, &json!({"skill": "plain"}), &context)
-        .await;
-    assert!(
-        matches!(plain, PermissionDecision::Allow { .. }),
-        "{plain:?}"
+/// 判决主体是 skill 的名字原文（判决链去掉前导 `/`；kernel-api `PermissionSubject`，F125）。
+#[test]
+fn the_permission_subject_is_the_requested_skill() {
+    let tool = tool(env());
+    assert_eq!(
+        tool.permission_subject(&json!({"skill": "/greet", "args": "Ada"})),
+        Some(rust_cli_kernel_api::permission::PermissionSubject::Skill {
+            name: "/greet".to_owned()
+        })
     );
 }

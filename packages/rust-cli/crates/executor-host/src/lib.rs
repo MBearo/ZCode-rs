@@ -11,22 +11,25 @@
 pub mod admin;
 pub mod file_ledger;
 mod journal;
+mod launch;
 pub mod proxy;
 pub mod resident;
 
 use std::sync::Arc;
 
+use rust_cli_env_local::{LocalEnvironment, LocalMcpTransport};
 use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, ServerConfig, ServerError};
 use rust_cli_exec_transport::MAX_FRAME;
 use rust_cli_exec_transport::stream::stream_link;
-use rust_cli_kernel_api::machine::MachineEnv;
 use tokio::io::{AsyncRead, AsyncWrite};
+
+pub use launch::LocalLauncher;
 
 /// 在一对字节流（执行器进程的 stdin / stdout）上服务一条连接，直到它结束。
 pub async fn serve_stdio<R, W>(
     reader: R,
     writer: W,
-    machine: MachineEnv,
+    (env, mcp): (Arc<LocalEnvironment>, Arc<LocalMcpTransport>),
     config: ServerConfig,
 ) -> Result<(), ServerError>
 where
@@ -35,7 +38,7 @@ where
 {
     let link = stream_link(reader, writer, "stdio", MAX_FRAME);
     let server = ExecServer::start(
-        machine,
+        LocalLauncher::served(env, mcp),
         Arc::new(MemoryLedger::default()),
         Arc::new(AllowAll),
         config,

@@ -4,8 +4,9 @@
 //! `MachineRegistry`（R3），清单归 `machines.json`。这里只按需拼快照（读的时候取，不另存）；清单的内存副本是本进程最后一次
 //! 读或写文件的结果。每台用过的机器一个跟随任务：状态变了就照 R3 放进或拿走注册表，并唤醒订阅方（`changes`）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use rust_cli_base::{Spawner, Task};
@@ -124,7 +125,7 @@ impl Drop for Turn {
 }
 
 fn lock_state(state: &Mutex<State>) -> MutexGuard<'_, State> {
-    state.lock().unwrap_or_else(PoisonError::into_inner)
+    state.lock_unpoisoned()
 }
 
 /// 唤醒订阅方（版本加一）。
@@ -303,7 +304,7 @@ impl Fleet {
         let _turn = loop {
             if matches!(
                 machine.state(),
-                MachineState::Ready(_) | MachineState::Reconnecting { .. }
+                MachineState::Ready(_) | MachineState::Reconnecting(_)
             ) {
                 return Ok(Changed::Already);
             }
@@ -437,7 +438,7 @@ async fn follow(
             | MachineState::Downloading
             | MachineState::Uploading { .. }
             | MachineState::Handshaking
-            | MachineState::Reconnecting { .. } => {}
+            | MachineState::Reconnecting(_) => {}
         }
         bump(&changes);
     }

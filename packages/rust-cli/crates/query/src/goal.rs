@@ -12,12 +12,12 @@ use rust_cli_prompts::models;
 use crate::RunScope;
 use crate::normalize::{NormalizeOptions, normalize};
 
-/// 这一步要检查的目标条件：只在主线程，没有目标时为 None。
-pub(crate) async fn due(scope: &RunScope, source: &QuerySource) -> Option<String> {
+/// 这一步要检查的目标条件：只在主线程；`goal` 是会话现在的目标（[`RunScope::view`]），没有时为 None。
+pub(crate) fn due(scope: &RunScope, source: &QuerySource, goal: Option<String>) -> Option<String> {
     if scope.agent.is_some() || *source != QuerySource::MainThread {
         return None;
     }
-    scope.sink.current_goal().await
+    goal
 }
 
 /// 评估的对话记录：活动历史按发给模型的规则 normalize（对话中间的 system 消息照模型能力），不带每轮

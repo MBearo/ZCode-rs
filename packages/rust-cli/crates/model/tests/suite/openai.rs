@@ -12,8 +12,8 @@ use std::sync::Arc;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::message::{ContentBlock, StopReason};
 use rust_cli_kernel_api::model::{ModelError, ModelEvent, QuerySource, ToolDefinition};
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
-use rust_cli_model::{FixedEndpoint, ProviderModel};
+use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, ModelEndpoint, WireProtocol};
+use rust_cli_model::{FixedEndpoint, ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
 use serde_json::json;
 
@@ -24,25 +24,31 @@ const KEY: &str = "sk-openai-test-0123456789";
 
 fn endpoint(protocol: WireProtocol, base_url: String) -> ModelEndpoint {
     ModelEndpoint {
-        supports_pdf: false,
-        supports_video: false,
-        supports_audio: false,
         protocol,
         base_url,
         model: String::new(),
         credential: Credential::ApiKey(RedactedString::new(KEY)),
         headers: vec![("X-Provider".to_owned(), RedactedString::new("p1"))],
         body_patches: vec![json!({"reasoning_effort": "high"})],
-        mid_conversation_system: false,
-        supports_image: true,
+        capabilities: ModelCapabilities {
+            supports_image: true,
+            ..ModelCapabilities::default()
+        },
         renewable: false,
     }
 }
 
 async fn model(endpoint: ModelEndpoint) -> ProviderModel {
     let egress = Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap());
-    ProviderModel::new(egress, Arc::new(FixedEndpoint::new(endpoint)), clock())
-        .with_retry(fast_retry(2))
+    ProviderModel::new(
+        egress,
+        Arc::new(FixedEndpoint::new(endpoint)),
+        clock(),
+        RouteOptions {
+            retry: fast_retry(2),
+            ..RouteOptions::default()
+        },
+    )
 }
 
 /// 每个事件一行 `data:`，再把整段切成 7 字节的块（任意切分）。
@@ -240,10 +246,10 @@ async fn text_only_models_get_image_placeholders() {
     });
     for supports_image in [false, true] {
         let endpoint = ModelEndpoint {
-            supports_pdf: false,
-            supports_video: false,
-            supports_audio: false,
-            supports_image,
+            capabilities: ModelCapabilities {
+                supports_image,
+                ..ModelCapabilities::default()
+            },
             ..endpoint(WireProtocol::OpenAiChatCompletions, server.url())
         };
         let events = collect(&model(endpoint).await, request.clone()).await;

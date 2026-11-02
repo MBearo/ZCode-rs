@@ -2,6 +2,7 @@
 //! 说明进展。按模型开启（模型卡片 `silent_turn_reminder`）。
 
 use rust_cli_kernel_api::message::{AssistantMessage, ContentBlock, Message, UserOrigin};
+use rust_cli_kernel_api::tool_names;
 use rust_cli_prompts::texts;
 use serde_json::Value;
 
@@ -12,7 +13,7 @@ const TURNS: usize = 5;
 /// 一段静默里最多提醒几次。
 const MAX_REMINDERS: usize = 3;
 /// 让用户看到内容的工具（本工程目前有其中的 AskUserQuestion 与 ExitPlanMode）。
-const VISIBLE_TOOLS: [&str; 2] = ["AskUserQuestion", "ExitPlanMode"];
+const VISIBLE_TOOLS: [&str; 2] = [tool_names::ASK_USER_QUESTION, tool_names::EXIT_PLAN_MODE];
 /// 不算可见文本的占位（kernel-api 的定义）。
 const NO_CONTENT: &str = rust_cli_kernel_api::message::NO_CONTENT;
 

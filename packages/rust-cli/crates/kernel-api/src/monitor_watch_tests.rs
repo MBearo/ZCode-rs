@@ -9,7 +9,7 @@ use super::*;
 fn watch(timeout_ms: u64, start: u64) -> Watch {
     Watch::new(
         MonitorArmed {
-            machine: None,
+            machine: Default::default(),
             operation: OperationId::new("op_1"),
             task: ShellTaskId::new("b1"),
             tool_use: ToolUseId::new("toolu_1"),
@@ -260,4 +260,77 @@ fn after_a_stop_the_rest_is_an_event() {
             .emits
             .is_empty()
     );
+}
+
+fn stdout(data: &str, cursor: u64) -> Result<CommandEvent, EnvError> {
+    Ok(CommandEvent::Output {
+        stream: OutputStream::Stdout,
+        data: data.as_bytes().to_vec(),
+        cursor,
+    })
+}
+
+fn broken() -> Result<CommandEvent, EnvError> {
+    Err(EnvError::Io {
+        message: "broken".to_owned(),
+    })
+}
+
+/// 续读给出的流从头给出时，游标之前的部分不再切行（会话 actor 与 agents 共用这一份分派，工作线 F130）。
+#[test]
+fn a_resumed_stream_is_cut_at_the_cursor() {
+    let start = 1_000_000;
+    let mut watch = watch(60_000, start);
+    assert_eq!(
+        watch.on_event(stdout("one\n", 4), start),
+        Next::Step(Step::default())
+    );
+    assert_eq!(watch.on_event(broken(), start), Next::Resubscribe(4));
+    watch.on_event(stdout("one\ntwo\n", 8), start);
+    // 游标没有前进的整段（旧流晚到的）不处理。
+    watch.on_event(stdout("one\n", 4), start);
+    let step = watch.on_due(start + BATCH_DELAY);
+    assert_eq!(step.emits, [event("one\ntwo")]);
+}
+
+/// 连续出错到上限就按结束处理；中间有一个正常事件时重新计数。结束之后的事件不再处理。
+#[test]
+fn errors_resubscribe_up_to_the_limit_then_end() {
+    let start = 1_000_000;
+    let mut watch = watch(60_000, start);
+    for _ in 0..STREAM_RETRIES {
+        assert_eq!(watch.on_event(broken(), start), Next::Resubscribe(0));
+    }
+    watch.on_event(stdout("one\n", 4), start);
+    for _ in 0..STREAM_RETRIES {
+        assert_eq!(watch.on_event(broken(), start), Next::Resubscribe(4));
+    }
+    assert_eq!(watch.on_event(broken(), start), Next::Ended);
+    assert_eq!(
+        watch.on_event(stdout("one\ntwo\n", 8), start),
+        Next::Step(Step::default())
+    );
+    assert_eq!(watch.finish().as_deref(), Some("one"));
+}
+
+/// `Finished` 结束事件流；命令来源的 stderr 不是事件。
+#[test]
+fn finished_ends_and_stderr_of_a_command_is_ignored() {
+    let start = 1_000_000;
+    let mut watch = watch(60_000, start);
+    let stderr = Ok(CommandEvent::Output {
+        stream: OutputStream::Stderr,
+        data: b"oops\n".to_vec(),
+        cursor: 0,
+    });
+    assert_eq!(watch.on_event(stderr, start), Next::Step(Step::default()));
+    let finished = Ok(CommandEvent::Finished {
+        outcome: crate::env::Outcome::Completed,
+        exit_code: Some(0),
+        timed_out: false,
+        cwd_reset: None,
+        output_bytes: 0,
+        output_limit: None,
+    });
+    assert_eq!(watch.on_event(finished, start), Next::Ended);
 }

@@ -1,5 +1,6 @@
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::model::ModelError;
+use rust_cli_kernel_api::side_request::SideSource;
 
 use super::*;
 
@@ -104,10 +105,10 @@ fn compaction_and_quiet_side_queries_are_not_nudged() {
     let decide = |source: QuerySource| Guards::default().decide(&silent, &source, 1);
     assert_eq!(decide(QuerySource::Compact), Outcome::Completed);
     assert_eq!(
-        decide(QuerySource::Side("away_summary".to_owned())),
+        decide(QuerySource::Side(SideSource::HookPrompt)),
         Outcome::Completed
     );
-    assert!(retried(&decide(QuerySource::Side("title".to_owned()))).is_some());
+    assert!(retried(&decide(QuerySource::Side(SideSource::SessionTitle))).is_some());
     assert!(retried(&decide(QuerySource::Subagent("Explore".to_owned()))).is_some());
 }
 

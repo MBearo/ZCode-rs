@@ -4,6 +4,7 @@
 //! 也没发过时什么都不发（没有机器时完全不变）。不改 system prompt。
 
 use rust_cli_kernel_api::env_registry::MachineSet;
+use rust_cli_kernel_api::ids::MachineName;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_prompts::texts::{self, render};
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,7 @@ fn line(entry: &Entry) -> String {
 pub(crate) fn announce(
     history: &[Message],
     set: &MachineSet,
-    default: Option<&str>,
+    default: &MachineName,
 ) -> Option<(String, Value)> {
     let current = snapshot(set);
     let latest: Option<Vec<Entry>> = attachments(history, SOURCE)
@@ -92,15 +93,14 @@ pub(crate) fn announce(
             .filter(|entry| !current.iter().any(|now| now.name == entry.name))
             .map(|entry| render(texts::machine_gone(), &[("name", &entry.name)])),
     );
-    let template = match (current.is_empty(), default) {
+    // 文字总写出缺省机器的名字（主 env 或子代理的缺省机器，deployment.md §23）；只有“缺省机器也断开了”要另一种写法。
+    let template = match (current.is_empty(), default.remote()) {
         (true, None) => texts::machines_none(),
-        (false, None) => texts::machines(),
         (true, Some(_)) => texts::machines_none_default(),
-        (false, Some(_)) => texts::machines_default(),
+        (false, _) => texts::machines(),
     };
     let lines = lines.join("\n");
-    let mut vars = vec![("lines", lines.as_str())];
-    vars.extend(default.map(|name| ("name", name)));
+    let vars = [("lines", lines.as_str()), ("name", default.as_str())];
     Some((render(template, &vars), json!({"machines": current})))
 }
 

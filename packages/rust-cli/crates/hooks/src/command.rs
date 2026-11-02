@@ -9,10 +9,10 @@ use std::collections::BTreeMap;
 
 use futures_util::StreamExt;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvPath, OperationContext, Origin, Outcome, OutputStream, StartCommand,
-    WorkspaceRef,
+    CommandEvent, CommandKind, EnvPath, OperationContext, Origin, Outcome, OutputStream,
+    StartCommand, WorkspaceRef,
 };
-use rust_cli_kernel_api::env_shell::{CwdScope, HookIo, ShellKind};
+use rust_cli_kernel_api::env_shell::{HookIo, ShellKind};
 use rust_cli_kernel_api::ids::{OperationId, ShellTaskId};
 use rust_cli_kernel_api::machine::Commands;
 use tokio_util::sync::CancellationToken;
@@ -150,25 +150,23 @@ pub(crate) async fn run(run: CommandRun<'_>, cancel: CancellationToken) -> Raw {
         Origin::User { session } => session.as_ref().map(|session| session.as_str().to_owned()),
     };
     let request = StartCommand {
-        command: command_line(run.hook, &project_dir, session.as_deref()),
-        cwd: EnvPath::new(project_dir.clone()),
         timeout_ms: Some(run.timeout_ms),
-        task: task_id(&operation),
         shell: match run.hook.shell {
             HookShell::Bash => ShellKind::Bash,
             HookShell::PowerShell => ShellKind::PowerShell,
         },
-        cwd_scope: CwdScope::Pinned,
-        background: None,
-        sandbox: None,
-        hook: Some(HookIo {
-            stdin: format!("{}\n", run.input),
-            env: hook_env(run.hook, &project_dir, session.as_deref()),
-        }),
-        // hook 命令到了超时照旧结束（不转后台）。
-        on_timeout: None,
-        socket: None,
-        env: Default::default(),
+        // 目录固定、不在 sandbox 里（构造函数的缺省）；hook 命令到了超时照旧结束（不转后台）。
+        kind: CommandKind::Hook {
+            hook: HookIo {
+                stdin: format!("{}\n", run.input),
+                env: hook_env(run.hook, &project_dir, session.as_deref()),
+            },
+        },
+        ..StartCommand::new(
+            command_line(run.hook, &project_dir, session.as_deref()),
+            EnvPath::new(project_dir.clone()),
+            task_id(&operation),
+        )
     };
     let mut events = match run
         .commands

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env::{CommandEvent, EnvError, EnvPath, Outcome, OutputStream};
 use rust_cli_kernel_api::env_shell::{CwdScope, HookIo};
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
@@ -159,13 +160,15 @@ async fn run_hook(
     stdin: String,
 ) -> (String, String, Outcome, Option<i32>) {
     let mut start = shell.request(command, CwdScope::Pinned);
-    start.hook = Some(HookIo {
-        stdin,
-        env: BTreeMap::from([(
-            "ZCODE_PROJECT_DIR".to_owned(),
-            "/Users/dev/project".to_owned(),
-        )]),
-    });
+    start.kind = CommandKind::Hook {
+        hook: HookIo {
+            stdin,
+            env: BTreeMap::from([(
+                "ZCODE_PROJECT_DIR".to_owned(),
+                "/Users/dev/project".to_owned(),
+            )]),
+        },
+    };
     shell.start(operation, start).await;
     let mut events = shell.events(operation);
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());

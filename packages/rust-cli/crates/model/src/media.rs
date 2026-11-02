@@ -1,8 +1,8 @@
 //! 模型不支持图片或 PDF 时的降级（docs/specs/rust-cli/model.md §10.5；Node `projectMessagesForInputFormat` 与
 //! `createUnsupportedModelInputMediaText`）。
 //!
-//! Provider 配置的 `inputFormat.supportsImage` 为假（[`ModelEndpoint::supports_image`]）时，发送前把 user 内容与
-//! 工具结果里的图片换成 Node 的占位文字；`supportsPdf` 为假（[`ModelEndpoint::supports_pdf`]）时同样换掉工具结果里的
+//! Provider 配置的 `inputFormat.supportsImage` 为假（[`ModelEndpoint::capabilities`]）时，发送前把 user 内容与
+//! 工具结果里的图片换成 Node 的占位文字；`supportsPdf` 为假（[`ModelEndpoint::capabilities`]）时同样换掉工具结果里的
 //! document 块（Read 整读 PDF 的结果，修复线 F24：在支持 PDF 的模型上读过、之后换了模型）。只改这次请求：会话历史
 //! 不变，换回支持的模型后照常发送。三种协议共用，在按协议编码之前调用（transport 的 `resolve`；工作线 F93 删掉计数请求之前 count_tokens 另调一次）。
 
@@ -22,10 +22,10 @@ fn placeholder(source: &ImageSource, kind: &str) -> String {
 fn project_result(content: &mut [ToolResultContent], endpoint: &ModelEndpoint) {
     for item in content {
         let text = match item {
-            ToolResultContent::Image { source } if !endpoint.supports_image => {
+            ToolResultContent::Image { source } if !endpoint.capabilities.supports_image => {
                 placeholder(source, "image input")
             }
-            ToolResultContent::Document { source } if !endpoint.supports_pdf => {
+            ToolResultContent::Document { source } if !endpoint.capabilities.supports_pdf => {
                 placeholder(source, "PDF input")
             }
             _ => continue,
@@ -36,13 +36,13 @@ fn project_result(content: &mut [ToolResultContent], endpoint: &ModelEndpoint) {
 
 /// 端点不接受图片或 PDF 时，把请求消息里的图片与 document 块换成占位文字。
 pub(crate) fn project(messages: &mut [ApiMessage], endpoint: &ModelEndpoint) {
-    if endpoint.supports_image && endpoint.supports_pdf {
+    if endpoint.capabilities.supports_image && endpoint.capabilities.supports_pdf {
         return;
     }
     for message in messages {
         for content in &mut message.content {
             match &mut content.block {
-                ContentBlock::Image { source } if !endpoint.supports_image => {
+                ContentBlock::Image { source } if !endpoint.capabilities.supports_image => {
                     content.block = ContentBlock::Text {
                         text: placeholder(source, "image input"),
                     };
@@ -62,23 +62,22 @@ mod tests {
     use rust_cli_kernel_api::model::{
         ApiContent, ApiRole, ModelRequest, ModelSelection, QuerySource, RequestOptions,
     };
-    use rust_cli_kernel_api::provider::{Credential, WireProtocol};
+    use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, WireProtocol};
 
     use super::*;
 
     fn endpoint(supports_image: bool) -> ModelEndpoint {
         ModelEndpoint {
-            supports_pdf: false,
-            supports_video: false,
-            supports_audio: false,
             protocol: WireProtocol::OpenAiChatCompletions,
             base_url: "https://api.example.com/v1".to_owned(),
             model: "text-only".to_owned(),
             credential: Credential::ApiKey(RedactedString::new("sk-test")),
             headers: Vec::new(),
             body_patches: Vec::new(),
-            mid_conversation_system: false,
-            supports_image,
+            capabilities: ModelCapabilities {
+                supports_image,
+                ..ModelCapabilities::default()
+            },
             renewable: false,
         }
     }
@@ -99,12 +98,7 @@ mod tests {
 
     fn request() -> ModelRequest {
         ModelRequest {
-            selection: ModelSelection {
-                provider: "p".to_owned(),
-                model: "text-only".to_owned(),
-                reasoning: None,
-                connection: None,
-            },
+            selection: ModelSelection::new("p".to_owned(), "text-only".to_owned()),
             system: Vec::new(),
             messages: vec![ApiMessage {
                 role: ApiRole::User,
@@ -173,7 +167,10 @@ mod tests {
         project(
             &mut kept,
             &ModelEndpoint {
-                supports_pdf: true,
+                capabilities: ModelCapabilities {
+                    supports_pdf: true,
+                    ..endpoint(true).capabilities
+                },
                 ..endpoint(true)
             },
         );

@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
-use rust_cli_kernel_api::env::{OperationContext, Origin};
-use rust_cli_kernel_api::env_rewind::RestoreAction;
-use rust_cli_kernel_api::ids::{CommandId, MessageId, OperationId, OwnerEpoch};
+use rust_cli_kernel_api::env::Origin;
+use rust_cli_kernel_api::ids::{CommandId, MachineName, MessageId, OperationId};
 use rust_cli_kernel_api::machine::{Checkpoints, not_connected};
-use rust_cli_kernel_api::session_api::{Ack, KernelEvent, RewindOption, RewindScope};
+use rust_cli_kernel_api::session_api::{
+    Ack, CommandResult, KernelEvent, RewindOption, RewindScope, RewoundFile,
+};
 use rust_cli_kernel_api::store::{ArtifactStore, Fact, RevertCursor, WorkspaceCheckpoint};
-use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use crate::actor::{Actor, Job, JobDone, rejected};
@@ -31,7 +31,7 @@ pub(crate) struct Finished {
     tokens: Vec<(Arc<dyn Checkpoints>, OperationId)>,
     /// 撤销成功的 checkpoint（R3：跨机器时一台 apply 失败，成功的那几台也要记下）。
     restored: Vec<String>,
-    result: Result<Value, String>,
+    result: Result<Vec<RewoundFile>, String>,
 }
 
 async fn read(
@@ -52,7 +52,7 @@ async fn read(
 pub(crate) async fn options(store: &dyn ArtifactStore, snapshot: Snapshot) -> Vec<RewindOption> {
     let mut out = Vec::new();
     for (message, turn, code) in snapshot.options {
-        let mut machines: Vec<(Option<String>, Vec<Artifact>)> = Vec::new();
+        let mut machines: Vec<(MachineName, Vec<Artifact>)> = Vec::new();
         for checkpoint in &turn {
             let Ok(artifact) = read(store, checkpoint).await else {
                 continue;
@@ -73,7 +73,8 @@ pub(crate) async fn options(store: &dyn ArtifactStore, snapshot: Snapshot) -> Ve
                     })
             })
             .collect();
-        files.sort_by(|a, b| (&a.path, &a.machine).cmp(&(&b.path, &b.machine)));
+        // 同一路径主 env 在前、额外机器按名字（`remote()` 的 None 排在前面）。
+        files.sort_by(|a, b| (&a.path, a.machine.remote()).cmp(&(&b.path, b.machine.remote())));
         out.push(RewindOption {
             message,
             files,
@@ -83,22 +84,18 @@ pub(crate) async fn options(store: &dyn ArtifactStore, snapshot: Snapshot) -> Ve
     out
 }
 
-/// 回执里的文件：`[{path, action}]`；远端机器上的另有 `machine`（R3）。
-fn restored_json(groups: &[rewind_machines::Restored]) -> Value {
-    let mut out = Vec::new();
-    for (machine, files) in groups {
-        for f in files {
-            let mut item = json!({"path": f.path, "action": match f.action {
-                RestoreAction::Restore => "restore",
-                RestoreAction::Delete => "delete",
-            }});
-            if let Some(name) = machine {
-                item["machine"] = Value::from(name.as_str());
-            }
-            out.push(item);
-        }
-    }
-    Value::Array(out)
+/// 回执里恢复的文件：各台机器的，按分组的顺序（本机在前，R3）。
+fn rewound_files(groups: &[rewind_machines::Restored]) -> Vec<RewoundFile> {
+    groups
+        .iter()
+        .flat_map(|(machine, files)| {
+            files.iter().map(|file| RewoundFile {
+                path: file.path.clone(),
+                action: file.action,
+                machine: machine.clone(),
+            })
+        })
+        .collect()
 }
 
 impl Actor {
@@ -154,7 +151,10 @@ impl Actor {
                 .await
             {
                 Ok(removed) => Ack::Accepted {
-                    result: json!({"restored": [], "removed": removed}),
+                    result: CommandResult::Rewound {
+                        restored: Vec::new(),
+                        removed,
+                    },
                 },
                 Err(reason) => rejected(reason),
             };
@@ -187,7 +187,7 @@ impl Actor {
                 reply,
                 tokens,
                 restored: outcome.restored,
-                result: outcome.result.map(|done| restored_json(&done)),
+                result: outcome.result.map(|done| rewound_files(&done)),
             }))
         });
         self.job = Some(Job { task, cancel: None });
@@ -224,13 +224,16 @@ impl Actor {
                     self.rewind_conversation(Some(command), &target, vec![fact])
                         .await
                 } else {
-                    self.commit(Some(command), vec![fact]).await.map(|()| 0)
+                    self.commit(Some(command), vec![fact])
+                        .await
+                        .map(|()| 0)
+                        .map_err(|error| error.to_string())
                 };
                 match committed {
                     Ok(removed) => {
                         self.checkpoints.retain(|c| !checkpoints.contains(&c.id));
                         Ack::Accepted {
-                            result: json!({"restored": restored, "removed": removed}),
+                            result: CommandResult::Rewound { restored, removed },
                         }
                     }
                     Err(reason) => rejected(reason),
@@ -255,7 +258,7 @@ impl Actor {
         if self.busy() {
             return rejected("a turn is running");
         }
-        if !self.queue.is_empty() {
+        if self.inbox.has_inputs() {
             return rejected("inputs are queued");
         }
         let Some(index) = self
@@ -274,7 +277,10 @@ impl Actor {
             .await
         {
             Ok(removed) => Ack::Accepted {
-                result: json!({"message": message, "removed": removed}),
+                result: CommandResult::Restored {
+                    message: Box::new(message),
+                    removed,
+                },
             },
             Err(reason) => rejected(reason),
         }
@@ -282,36 +288,34 @@ impl Actor {
 
     /// 要撤销的 checkpoint 按机器分组：本机在前，远端按名字；每组一个 token、那台机器的端口与工作区。
     fn rewind_groups(&self, undo: Vec<WorkspaceCheckpoint>) -> Result<Vec<Group>, String> {
-        let mut names: Vec<Option<String>> = Vec::new();
+        let mut names: Vec<MachineName> = Vec::new();
         for checkpoint in &undo {
             if !names.contains(&checkpoint.machine) {
                 names.push(checkpoint.machine.clone());
             }
         }
-        names.sort();
+        // 主 env 在前，额外机器按名字（`remote()` 的 None 排在前面）。
+        names.sort_by(|a, b| a.remote().cmp(&b.remote()));
         let mut groups = Vec::new();
         for machine in names {
-            let (port, workspace) = match &machine {
+            let (port, workspace) = match machine.remote() {
                 None => (
-                    self.deps.machine.checkpoints().clone(),
+                    self.deps.machines.primary_machine().checkpoints().clone(),
                     self.meta.workspace.clone(),
                 ),
-                Some(name) => match self.deps.machines.remote(name) {
+                Some(name) => match self.deps.machines.remote(&machine) {
                     Some((env, workspace)) => (env.checkpoints().clone(), workspace),
                     None => {
                         return Err(format!("Cannot restore code: {}", not_connected(name)));
                     }
                 },
             };
-            let context = OperationContext {
-                environment: workspace.environment.clone(),
-                generation: self.deps.generation.clone(),
-                owner_epoch: OwnerEpoch::LOCAL,
-                operation: self.deps.ids.operation(),
-                origin: Origin::User {
+            let context = self.deps.operations.next(
+                workspace.environment.clone(),
+                Origin::User {
                     session: Some(self.meta.id.clone()),
                 },
-            };
+            );
             let checkpoints = undo
                 .iter()
                 .filter(|c| c.machine == machine)
@@ -357,7 +361,10 @@ impl Actor {
         };
         let mut facts = extra;
         facts.push(Fact::RevertSet { cursor });
-        self.commit(command, facts).await?;
+        // 回执的拒绝原因是给前端的文字：存储的错误在这里按原文写进去。
+        self.commit(command, facts)
+            .await
+            .map_err(|error| error.to_string())?;
         let removed = self.messages.len() - index;
         self.messages.truncate(index);
         self.generation = generation;

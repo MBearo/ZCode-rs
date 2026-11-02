@@ -11,20 +11,17 @@ use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
-    WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, OperationContext, StartCommand, WorkspaceRef,
 };
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundStatus, BackgroundTask, ShellState,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::machine::{Background, Commands, Shell};
 use rust_cli_kernel_api::model::{ModelPort, ModelRequest, QuerySource};
 use rust_cli_kernel_api::testing::{
-    MemoryStore, UnusedEnvironment, environments, text_response, tool_use_response,
+    MemoryStore, UnusedEnvironment, registry, text_response, tool_use_response, unsupported_machine,
 };
 use serde_json::json;
 use tokio::sync::watch;
@@ -290,34 +287,15 @@ impl SlowEnv {
             asked: AtomicUsize::new(0),
         })
     }
-}
 
-#[async_trait]
-impl EnvInfo for SlowEnv {
-    async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        UnusedEnvironment.facts(workspace).await
-    }
-}
-
-#[async_trait]
-impl Files for SlowEnv {
-    async fn read_file(
-        &self,
-        workspace: &WorkspaceRef,
-        request: ReadFile,
-    ) -> Result<FileContent, EnvError> {
-        UnusedEnvironment.read_file(workspace, request).await
-    }
-
-    async fn write_file(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        UnusedEnvironment
-            .write_file(workspace, context, request)
-            .await
+    /// 只有主 env 的注册表：机器只换上命令、shell 与后台命令三个端口（其余端口同 [`UnusedEnvironment`]）。
+    fn registry(self: Arc<Self>) -> Arc<dyn EnvironmentRegistry> {
+        registry(
+            unsupported_machine()
+                .with_commands(self.clone())
+                .with_shell(self.clone())
+                .with_background(self),
+        )
     }
 }
 
@@ -380,17 +358,10 @@ impl Background for SlowEnv {
         Ok(Some(BackgroundInfo {
             command: "npm run dev".into(),
             status: BackgroundStatus::Running,
-            kind: Default::default(),
-            description: String::new(),
+            ..BackgroundInfo::default()
         }))
     }
 }
-
-impl Search for SlowEnv {}
-impl Checkpoints for SlowEnv {}
-impl Pdf for SlowEnv {}
-impl Git for SlowEnv {}
-impl Fetch for SlowEnv {}
 
 /// 列表里有子代理的行。
 fn rows(screen: &str) -> bool {
@@ -436,7 +407,7 @@ async fn the_rows_and_the_pill_arrive_in_one_frame() {
     let model = Routed::new();
     let gates = model.clone();
     let setup = Setup {
-        environments: environments(SlowEnv::shells(Duration::from_millis(500))),
+        environments: SlowEnv::shells(Duration::from_millis(500)).registry(),
         ..wide()
     };
     with_ui(model, setup, |mut ui| async move {
@@ -501,11 +472,12 @@ async fn switching_sessions_clears_the_rows_and_the_pill_together() {
     .await;
     let (close, closing) = watch::channel(false);
     let setup = Setup {
-        environments: environments(Arc::new(SlowEnv {
+        environments: Arc::new(SlowEnv {
             shells: Duration::ZERO,
             close: closing,
             asked: AtomicUsize::new(0),
-        })),
+        })
+        .registry(),
         store,
         ..wide()
     };

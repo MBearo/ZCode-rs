@@ -91,8 +91,7 @@ async fn mode_and_effort_follow_node() {
         ui.submit("/variant high");
         ui.wait_for("Usage: /effort [auto]").await;
         ui.submit("/effort auto");
-        ui.wait_for("Effort level set to auto (this session only)")
-            .await;
+        ui.wait_for("Effort level set to auto").await;
     })
     .await;
 }
@@ -196,7 +195,7 @@ async fn effort_without_arguments_opens_a_picker() {
         ui.wait_for("Set effort level for model usage").await;
         ui.key(KeyCode::Up);
         ui.key(KeyCode::Enter);
-        ui.wait_for("Set effort level to high (this session only)")
+        ui.wait_for("Set effort level to high (saved as your default for new sessions)")
             .await;
         ui.submit("/effort");
         let list = ui.wait_for("Set effort level for model usage").await;
@@ -204,7 +203,7 @@ async fn effort_without_arguments_opens_a_picker() {
         ui.key(KeyCode::Esc);
         // 带参数照旧直接生效。
         ui.submit("/effort low");
-        ui.wait_for("Set effort level to low (this session only)")
+        ui.wait_for("Set effort level to low (saved as your default for new sessions)")
             .await;
         ui.submit("say ok");
         ui.wait("the reply", |s| idle(s, "⏺ ok")).await;
@@ -387,8 +386,8 @@ impl rust_cli_tui::Preferences for Saved {
 
 fn with_preferences(saved: &Arc<Saved>, theme: Option<rust_cli_tui::UiTheme>) -> Setup {
     let mut setup = Setup::default();
-    setup.services.preferences = Some(saved.clone());
-    setup.services.theme = theme;
+    setup.services.preferences = saved.clone();
+    setup.ui.theme = theme;
     setup
 }
 

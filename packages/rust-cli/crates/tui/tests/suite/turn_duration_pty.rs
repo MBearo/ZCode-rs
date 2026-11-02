@@ -2,9 +2,8 @@
 //! 伪终端里回合结束那一行（docs/specs/rust-cli/tui-display.md §2.7，修复线 F118）：执行环境的替身报一条在跑的 monitor，
 //! 子进程进入真实终端；回合结束那一行是 `✻ <动词> for 0s · done 12:00 AM · 1 monitor still running`（内核的时钟固定在
 //! 0）。修前没有这一行。
-use std::sync::Arc;
 
-use rust_cli_kernel_api::testing::{environments, text_response};
+use rust_cli_kernel_api::testing::text_response;
 
 use super::ledger::Ledger;
 use super::pty::{Pty, ROLE, interface_in, shows};
@@ -50,7 +49,7 @@ async fn child() {
     assert_eq!(role, "monitor");
     interface_in(
         GatedModel::scripted(vec![text_response(&["watching the build"])]),
-        environments(Arc::new(Ledger(&["b2"]))),
+        Ledger(&["b2"]).registry(),
     )
     .await;
 }

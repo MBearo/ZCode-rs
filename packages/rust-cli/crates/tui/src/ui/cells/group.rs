@@ -4,20 +4,18 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use rust_cli_base::units;
+use rust_cli_kernel_api::mcp_name;
 
 use super::words::{self, Segment};
 use super::{Cell, Ctx, DETAIL, Dot, INDENT, dim, dot, messages, relative, tools};
 use crate::ui::i18n::Lang;
 use crate::ui::text::{truncate_line, wrap, wrap_text};
-use crate::view::{Body, Row};
+use crate::view::{Body, Row, ToolKind};
 
 /// 单段推理计入的时长上限（10 分钟）。
 const THOUGHT_CAP_MS: u64 = 600_000;
 /// 进行中的推理在摘要下面显示的行数。
 const THOUGHT_TAIL: usize = 10;
-/// 并进工作段、但不计数的工具。
-const SILENT: [&str; 2] = ["TodoRead", "ToolSearch"];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Member {
     Thought,
@@ -39,16 +37,25 @@ fn member(row: &Row) -> Option<Member> {
     if crate::ui::machines::machine_of(&tool.input).is_some() {
         return None;
     }
-    if tool.name.starts_with("mcp__") {
-        return Some(Member::Mcp);
-    }
-    match tool.name.as_str() {
-        "Grep" | "Glob" => Some(Member::Search),
-        "Read" => Some(Member::Read),
-        "List" | "LS" => Some(Member::List),
-        "Bash" => Some(Member::Command),
-        name if SILENT.contains(&name) => Some(Member::Silent),
-        _ => None,
+    match tool.kind {
+        ToolKind::Mcp => Some(Member::Mcp),
+        ToolKind::Grep | ToolKind::Glob => Some(Member::Search),
+        ToolKind::Read => Some(Member::Read),
+        ToolKind::List => Some(Member::List),
+        ToolKind::Bash => Some(Member::Command),
+        // 并进工作段、但不计数。
+        ToolKind::TodoRead | ToolKind::ToolSearch => Some(Member::Silent),
+        ToolKind::Edit
+        | ToolKind::MultiEdit
+        | ToolKind::Write
+        | ToolKind::NotebookEdit
+        | ToolKind::WebSearch
+        | ToolKind::WebFetch
+        | ToolKind::AskUserQuestion
+        | ToolKind::ExitPlanMode
+        | ToolKind::Agent
+        | ToolKind::WaitForMcpServers
+        | ToolKind::Other => None,
     }
 }
 
@@ -79,10 +86,26 @@ pub(super) fn thought_ms(row: &Row, next_created: Option<u64>) -> u64 {
     ms.min(THOUGHT_CAP_MS)
 }
 
-/// MCP 工具的服务名（`mcp__服务__工具`）。
+/// MCP 工具的服务名（`mcp__服务__工具`，拆法只在 kernel-api 的 `mcp_name`）。
+///
+/// 缺陷修复（F132 的 T10）：以前用 `trim_start_matches("mcp__")` 去掉开头所有重复的前缀，服务器就叫 `mcp` 时
+/// （`mcp__mcp__read`）分组成了 `read`。
 fn server(name: &str) -> String {
-    let rest = name.trim_start_matches("mcp__");
-    rest.split("__").next().unwrap_or(rest).to_owned()
+    mcp_name::parse(name)
+        .map_or(name, |parsed| parsed.server)
+        .to_owned()
+}
+
+/// MCP 工具在界面上的标签：`<服务器>.<工具>`，只有服务器段时就是它（同上，以前 `mcp__mcp__read` 是 `read`）。
+pub(super) fn mcp_label(name: &str) -> String {
+    match mcp_name::parse(name) {
+        Some(mcp_name::McpName {
+            server,
+            tool: Some(tool),
+        }) => format!("{server}.{tool}"),
+        Some(mcp_name::McpName { server, tool: None }) => server.to_owned(),
+        None => name.to_owned(),
+    }
 }
 
 /// 摘要的各段，按 rust-tui.md §8.2.1 的顺序。
@@ -251,7 +274,7 @@ fn latest(cell: &Cell<'_>, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
             .unwrap_or_default(),
         Some(Member::List) => path("path").unwrap_or_else(|| ".".into()),
         Some(Member::Search) => format!("\"{}\"", args["pattern"].as_str().unwrap_or_default()),
-        Some(Member::Mcp) => tool.name.trim_start_matches("mcp__").replacen("__", ".", 1),
+        Some(Member::Mcp) => mcp_label(&tool.name),
         _ => return Vec::new(),
     };
     vec![truncate_line(

@@ -38,6 +38,8 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+# 共用的测试时钟（kernel-api 的 testing，F126）。
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 # fs、net：测试读回文件、搭本地 HTTP 夹具（README §4）。
 tokio = { workspace = true, features = ["fs", "macros", "net", "rt"] }

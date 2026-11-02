@@ -68,6 +68,17 @@ pub struct ShellState {
     pub background: Vec<ShellTaskId>,
 }
 
+impl ShellState {
+    /// 在 `cwd`、没有输出目录、没有后台命令的状态。
+    pub fn new(cwd: EnvPath) -> Self {
+        Self {
+            cwd,
+            outputs: None,
+            background: Vec::new(),
+        }
+    }
+}
+
 /// 后台命令：`start_command` 立即返回，命令跑完后执行侧发一条 [`ShellNotice`]。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackgroundCommand {
@@ -218,6 +229,39 @@ pub struct ShellNotice {
     pub output_bytes: u64,
 }
 
+impl ShellNotice {
+    /// 终态通知的入参（文字在 prompts 的 `notification`）：会话与子代理的通知都由这里换算（工作线 F134，
+    /// modularity.md §7 F131-2：以前 session 的 `notices.rs` 与 agents 的 `shell_notices.rs` 各写一份）。
+    pub fn task_notice(&self) -> rust_cli_base::notice::TaskNotice<'_> {
+        rust_cli_base::notice::TaskNotice {
+            task: self.task.as_str(),
+            tool_use: self.tool_use.as_ref().map(crate::ids::ToolUseId::as_str),
+            description: &self.description,
+            output: self.output.as_str(),
+            status: self.status().as_str(),
+            exit_code: self.exit_code,
+            stopped: self.stopped(),
+            monitor: self.kind == BackgroundKind::Monitor,
+            output_bytes: self.output_bytes,
+        }
+    }
+
+    /// 通知的 `<status>`：与 TaskStop 看到的终态同一规则（[`BackgroundStatus::ended`]）。会话与子代理的通知、
+    /// `BackgroundWork` 事件都用它（工作线 F131：以前 query 另写了一份同样的规则）。
+    pub fn status(&self) -> BackgroundStatus {
+        BackgroundStatus::ended(&self.outcome, self.exit_code)
+    }
+
+    /// 命令被停掉：不是自己退出（`Completed`），也不是没有退出码的失败（等待出错）——取消、中断、超时（超时是带退出码
+    /// 的 `Failed`）。命令通知的 `<summary>` 这时写 `was stopped`（docs/specs/rust-cli/query.md §5）。
+    pub fn stopped(&self) -> bool {
+        !matches!(
+            (&self.outcome, self.exit_code),
+            (Outcome::Completed, _) | (Outcome::Failed { .. }, None)
+        )
+    }
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde 的 skip_serializing_if 按引用传字段"
@@ -276,6 +320,18 @@ pub struct BackgroundInfo {
     /// 启动时的说明（`BackgroundCommand.description`：Bash 的说明、Monitor 的 description；修复线 F117 新增，缺省空）。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+}
+
+/// 缺省：在跑的 Bash 命令，命令原文与说明为空（替身与测试按需改字段）。
+impl Default for BackgroundInfo {
+    fn default() -> Self {
+        Self {
+            command: String::new(),
+            status: BackgroundStatus::Running,
+            kind: BackgroundKind::Bash,
+            description: String::new(),
+        }
+    }
 }
 
 /// 停止后台命令的结果（mutate）。终态不在这里：照常经 `watch_command` / `operation_status` 给出。

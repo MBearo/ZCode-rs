@@ -95,8 +95,8 @@ async fn the_skills_page_scrolls() {
         os_version: "x".into(),
         shell: "zsh".into(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     });
     for index in 0..30 {
         env = env.with_file(

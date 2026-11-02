@@ -28,13 +28,10 @@ async fn setup(kind: Kind) -> (crate::support::Machine, tempfile::TempDir) {
 fn stdio(command: &str, args: &[&str]) -> McpConnect {
     McpConnect {
         server: "s".to_owned(),
-        transport: McpTransportConfig::Stdio {
-            command: command.to_owned(),
-            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
-            env: Default::default(),
-            cwd: None,
-        },
-        env: Default::default(),
+        transport: McpTransportConfig::stdio(
+            command.to_owned(),
+            args.iter().map(|arg| (*arg).to_owned()).collect(),
+        ),
     }
 }
 

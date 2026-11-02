@@ -6,7 +6,7 @@
 //! 变量是编译期行为，不是 `zcode` 运行时的 IO，不受 README §4 的入口规则约束；clippy 的禁令只在下面的函数上
 //! 局部放开。
 
-#[path = "src/build_number.rs"]
+#[path = "src/commands/build_number.rs"]
 mod build_number;
 
 use std::path::Path;

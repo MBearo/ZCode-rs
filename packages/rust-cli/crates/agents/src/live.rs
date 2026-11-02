@@ -3,14 +3,16 @@
 //! 子代理的消息只在子会话里（存储是唯一事实源）；这里只记身份、归属、运行状态与邮箱。发给子代理的
 //! 通知也记在这里它自己的条目上（docs/specs/rust-cli/agents.md §5.1），不另起状态源。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rust_cli_kernel_api::abort::{Abort, AbortReason};
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::env::WorkspaceRef;
-use rust_cli_kernel_api::ids::{AgentId, SessionId, ToolUseId};
+use rust_cli_kernel_api::env_shell::BackgroundStatus;
+use rust_cli_kernel_api::ids::{AgentId, MachineName, SessionId, ToolUseId};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
 
@@ -22,7 +24,7 @@ use crate::report::{Ending, Report};
 #[derive(Debug, Clone)]
 pub(crate) struct Notice {
     pub(crate) from: AgentId,
-    pub(crate) status: &'static str,
+    pub(crate) status: BackgroundStatus,
     /// `<task-notification>` 信封（不带说明与包装）。
     pub(crate) envelope: String,
 }
@@ -66,8 +68,8 @@ pub(crate) struct LiveAgent {
     /// 定义（含 system prompt 正文）共享一份：条目每次被查询、快照都要复制（修复线 F6，审查 R5-11）。
     pub(crate) definition: Arc<AgentDefinition>,
     pub(crate) workspace: WorkspaceRef,
-    /// 子代理的工具缺省在哪台远端机器上跑（Agent 的 `machine`，R3，remote-exec.md §20.6）；本机为 None。
-    pub(crate) machine: Option<String>,
+    /// 子代理的工具缺省在哪台机器上跑（Agent 的 `machine`，R3，remote-exec.md §20.6）。
+    pub(crate) machine: MachineName,
     pub(crate) selection: ModelSelection,
     pub(crate) mode: PermissionMode,
     pub(crate) background: bool,
@@ -96,11 +98,11 @@ pub(crate) struct Shown {
 }
 
 impl LiveAgent {
-    pub(crate) fn status(&self) -> &'static str {
+    pub(crate) fn status(&self) -> BackgroundStatus {
         match &self.state {
-            AgentState::Running { .. } => "running",
+            AgentState::Running { .. } => BackgroundStatus::Running,
             // 停放的子代理状态是 completed（带 keepalive）。
-            AgentState::Parked(_) => "completed",
+            AgentState::Parked(_) => BackgroundStatus::Completed,
             AgentState::Finished(ending) => ending.status(),
         }
     }
@@ -113,19 +115,6 @@ impl LiveAgent {
 
 pub(crate) type Agents = BTreeMap<AgentId, LiveAgent>;
 
-/// 没有注入时钟时（单测）的时刻：一律 0。
-struct ZeroClock;
-
-impl Clock for ZeroClock {
-    fn now_ms(&self) -> u64 {
-        0
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
-
 pub(crate) struct Live {
     agents: Mutex<Agents>,
     clock: Arc<dyn Clock>,
@@ -133,12 +122,6 @@ pub(crate) struct Live {
     order: AtomicU64,
     /// 每次改动后加一（tokio watch：多次改动合并成一次通知，tui-panels.md §0）。
     changes: tokio::sync::watch::Sender<u64>,
-}
-
-impl Default for Live {
-    fn default() -> Self {
-        Self::new(Arc::new(ZeroClock))
-    }
 }
 
 impl Live {
@@ -152,7 +135,7 @@ impl Live {
     }
 
     fn agents(&self) -> MutexGuard<'_, Agents> {
-        self.agents.lock().unwrap_or_else(PoisonError::into_inner)
+        self.agents.lock_unpoisoned()
     }
 
     /// 改动条目：锁里改完、记好时刻，放锁后再通知（订阅方收到通知后去查，一定看得到这次改动）。

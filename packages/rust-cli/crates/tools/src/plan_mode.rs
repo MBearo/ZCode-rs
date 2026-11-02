@@ -1,6 +1,6 @@
 //! EnterPlanMode / ExitPlanMode（docs/specs/rust-cli/tools-more.md §2）。
 //!
-//! 两个工具都不持有执行状态：经 `Interactions::set_plan` 请求会话 actor 打开或关掉 plan 开关（唯一 owner），
+//! 两个工具都不持有执行状态：经 `SessionOps::set_plan` 请求会话 actor 打开或关掉 plan 开关（唯一 owner），
 //! 返回后同一回合里后续的调用按新状态判决（§2.3）。修复线 F20：plan 是独立开关，权限模式留在 actor 里，退出
 //! plan 后就是进入前的值（Node `exitPlanMode` 只设 `planEnabled: false`）。计划文件经执行环境端口读（§2.2）。
 
@@ -17,12 +17,14 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::ask_user_question::user_interaction;
-use crate::common::{Definition, definition, failed, text};
 use crate::pipeline::{REJECT_MESSAGE, REJECT_WITH_REASON, rejected};
 use crate::texts_more as texts;
+use rust_cli_kernel_api::tool::{failed, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
-pub const ENTER: &str = "EnterPlanMode";
-pub const EXIT: &str = "ExitPlanMode";
+pub const ENTER: &str = tool_names::ENTER_PLAN_MODE;
+pub const EXIT: &str = tool_names::EXIT_PLAN_MODE;
 
 /// 描述里探索工具的写法：Glob / Grep
 /// 不在工具清单里（由 `find` / `grep` 代替）时写 `find`/Glob。
@@ -50,8 +52,8 @@ fn invalid(message: &str) -> Validation {
 
 async fn set_plan(context: &ToolUseContext, enabled: bool) -> Result<(), ToolError> {
     context
-        .interactions
-        .set_plan(&context.session, enabled)
+        .session_ops
+        .set_plan(enabled)
         .await
         .map_err(|error| failed(error.to_string()))
 }
@@ -65,7 +67,7 @@ impl EnterPlanModeTool {
     /// `interactive`：EnterPlanMode 跟随 ExitPlanMode 的可用性，非交互会话不提供。
     pub fn new(interactive: bool) -> Self {
         Self {
-            definition: definition(ENTER),
+            definition: rust_cli_prompts::definition(ENTER).clone(),
             interactive,
         }
     }
@@ -148,7 +150,7 @@ pub struct ExitPlanModeTool {
 impl ExitPlanModeTool {
     pub fn new(interactive: bool) -> Self {
         Self {
-            definition: definition(EXIT),
+            definition: rust_cli_prompts::definition(EXIT).clone(),
             interactive,
         }
     }

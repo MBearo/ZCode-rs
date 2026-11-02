@@ -31,7 +31,7 @@ test("编入与逐字比较的文本都是 text=auto、eol=lf；vendor 不转换
     "packages/rust-cli/prompts/loop/preamble.md",
     "packages/rust-cli/prompts/tools/Bash.json",
     "packages/rust-cli/crates/env-local/src/shell/macos-base.sb",
-    "packages/rust-cli/crates/policy/src/readonly/readonly-policy.json",
+    "packages/rust-cli/crates/policy/src/shell/readonly/readonly-policy.json",
     "packages/rust-cli/crates/platform/assets/zcode-builtin.json",
     // scripts/rust-cli 下的脚本与逐字比较的文本（`*` 一条规则，F60 起不点名只在本仓库的文件）。
     "scripts/rust-cli/fixture/model.mjs",

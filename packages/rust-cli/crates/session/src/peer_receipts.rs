@@ -5,11 +5,12 @@
 
 use rust_cli_kernel_api::peers::{PeerReceipt, ReceiptStatus};
 use rust_cli_kernel_api::store::Fact;
+use rust_cli_kernel_api::store::entry_kinds;
 use serde_json::json;
 
 use crate::actor::Actor;
-use crate::lane::{Lane, Waiting};
-use crate::peers::{PeerItem, RECEIPT_ENTRY};
+use crate::lane::Waiting;
+use crate::peers::PeerItem;
 
 /// 最后一条回执之后等这么久再交出。
 pub(crate) const RECEIPT_WINDOW_MS: u64 = 500;
@@ -40,7 +41,7 @@ impl Actor {
             return;
         }
         let fact = Fact::Entry {
-            kind: RECEIPT_ENTRY.to_owned(),
+            kind: entry_kinds::PEER_RECEIPT.to_owned(),
             id: key.clone(),
             data: json!({
                 "msgId": receipt.msg_id,
@@ -70,12 +71,11 @@ impl Actor {
             let group: Vec<&PeerReceipt> = pending.iter().filter(|r| r.status == status).collect();
             let Some(first) = group.first() else { continue };
             let key = format!("{}:{}", first.msg_id, status.as_str());
-            self.lane
-                .push_back(Lane::Notice(Waiting::Peer(PeerItem::Receipt {
-                    key,
-                    text: group_text(status, &group),
-                    passive,
-                })));
+            self.inbox.push_notice(Waiting::Peer(PeerItem::Receipt {
+                key,
+                text: group_text(status, &group),
+                passive,
+            }));
         }
         if start && self.running.is_none() && !passive {
             self.start_next().await;

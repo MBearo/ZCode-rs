@@ -12,6 +12,7 @@ use unicode_width::UnicodeWidthStr;
 use super::app::{Action, App, Overlay};
 use super::cells::Ctx;
 use super::i18n::Lang;
+use super::keyboard;
 use super::transcript::{self, Cache};
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -36,6 +37,13 @@ pub struct Search {
 }
 
 impl Detail {
+    /// 输入搜索词时粘贴进去。
+    pub fn paste(&mut self, text: &str) {
+        if let Some(search) = self.search.as_mut().filter(|search| search.typing) {
+            super::line_edit::paste(&mut search.query, text);
+        }
+    }
+
     fn max(&self) -> usize {
         self.total.saturating_sub(self.height)
     }
@@ -51,7 +59,7 @@ impl App {
     }
 
     pub(super) fn detail_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let (ctrl, typed) = (self.typing.ctrl(&key), self.typing.is_text(&key));
+        let (ctrl, typed) = (keyboard::ctrl(&key), keyboard::is_text(&key));
         let Some(Overlay::Detail(detail)) = self.overlay.as_mut() else {
             return None;
         };
@@ -67,7 +75,7 @@ impl App {
                 }
                 KeyCode::Backspace if search.query.is_empty() => detail.search = None,
                 KeyCode::Backspace => {
-                    search.query.pop();
+                    crate::ui::line_edit::backspace(&mut search.query);
                 }
                 KeyCode::Char(c) if typed => search.query.push(c),
                 _ => {}
@@ -81,11 +89,9 @@ impl App {
             KeyCode::Char('o' | 'c') if ctrl => self.overlay = None,
             KeyCode::Char('u') if ctrl => detail.scroll_by(half),
             KeyCode::Char('d') if ctrl => detail.scroll_by(-half),
-            KeyCode::Up | KeyCode::Char('k') => detail.scroll_by(1),
-            KeyCode::Down | KeyCode::Char('j') => detail.scroll_by(-1),
-            KeyCode::PageUp | KeyCode::Char('b') => detail.scroll_by(page),
-            KeyCode::PageDown | KeyCode::Char(' ') => detail.scroll_by(-page),
-            KeyCode::Home | KeyCode::Char('g') => detail.scroll = detail.max(),
+            // 详细视图的滚动量从底部量：往下是减。
+            KeyCode::Char('b') => detail.scroll_by(page),
+            KeyCode::Char('g') => detail.scroll = detail.max(),
             KeyCode::End | KeyCode::Char('G') => detail.scroll = 0,
             KeyCode::Char('/') => {
                 detail.search = Some(Search {
@@ -98,15 +104,16 @@ impl App {
                     && search.count > 0
                 {
                     let current = search.current.unwrap_or(0);
-                    search.current = Some(if c == 'n' {
-                        (current + 1) % search.count
-                    } else {
-                        (current + search.count - 1) % search.count
-                    });
+                    search.current = Some(super::pager::cycle(current, search.count, c == 'n'));
                     search.jump = true;
                 }
             }
-            _ => {}
+            _ => match super::pager::page_move(&key) {
+                Some(super::pager::Move::Lines(lines)) => detail.scroll_by(-lines),
+                Some(super::pager::Move::Pages(pages)) => detail.scroll_by(-pages * page),
+                Some(super::pager::Move::Top) => detail.scroll = detail.max(),
+                None => {}
+            },
         }
         None
     }
@@ -133,16 +140,15 @@ pub(super) fn no_matches(lang: Lang) -> &'static str {
     }
 }
 
+/// 画详细视图；`detail` 是从 `app.overlay` 里取出来的（画完由调用方放回）。
 pub fn draw(
     frame: &mut Frame<'_>,
     app: &mut App,
+    detail: &mut Detail,
     cache: &mut Cache,
     elapsed: std::time::Duration,
     now_ms: u64,
 ) {
-    let Some(Overlay::Detail(mut detail)) = app.overlay.clone() else {
-        return;
-    };
     let area = frame.area();
     let height = area.height.saturating_sub(1) as usize;
     let palette = app.palette;
@@ -154,7 +160,6 @@ pub fn draw(
     let ctx = Ctx {
         palette: &palette,
         lang: app.lang,
-        strings: app.strings,
         width: area.width as usize,
         expanded: true,
         elapsed,
@@ -234,12 +239,11 @@ pub fn draw(
             footer_area.y,
         ));
     }
-    app.hits = super::mouse::Hits::default();
-    app.hits.soft = (start..end)
+    app.pointer.hits = super::mouse::Hits::default();
+    app.pointer.hits.soft = (start..end)
         .filter_map(|index| {
             let soft = super::text::soft_wrap(layout.line(index))?;
             Some((area.y + u16::try_from(index - start).ok()?, soft))
         })
         .collect();
-    app.overlay = Some(Overlay::Detail(detail));
 }

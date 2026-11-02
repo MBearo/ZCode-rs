@@ -97,10 +97,6 @@ impl Layout {
         self.len
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
     /// 追加一个块（与前一个块之间空 1 行）；返回块的第一行行号。空块不占行。
     pub fn push(&mut self, key: u64, rendered: Rc<Rendered>) -> Option<usize> {
         self.push_full(key, rendered, None)

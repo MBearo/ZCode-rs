@@ -1,7 +1,7 @@
 //! 项目 hooks 的信任（config.md §4、§5）：digest 与 Node 对拍、准入与 `-p` 的提示。
 use rust_cli_hooks::config::HookCommand;
 use rust_cli_kernel_api::hooks::HookEventName;
-use rust_cli_platform::{ConfigFile, TrustRecord};
+use rust_cli_platform::local::{ConfigFile, TrustRecord};
 use serde_json::json;
 
 use super::super::files::project_file;

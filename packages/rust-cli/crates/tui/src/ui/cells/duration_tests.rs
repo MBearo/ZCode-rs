@@ -5,7 +5,7 @@ use rust_cli_kernel_api::turn_duration::TurnDuration;
 
 use super::*;
 use crate::ui::cells::tests::ctx;
-use crate::ui::i18n::{Lang, strings};
+use crate::ui::i18n::Lang;
 use crate::ui::palette::{ColorLevel, Palette};
 use crate::ui::text::plain;
 
@@ -26,7 +26,6 @@ fn shown(line: &TurnDuration, still: Option<&str>, lang: Lang, width: usize) -> 
     let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
     let ctx = Ctx {
         lang,
-        strings: strings(lang),
         width,
         ..ctx(&palette, false)
     };

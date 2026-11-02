@@ -36,3 +36,17 @@ fn short_ids_match_the_old_task_ids() {
         assert_eq!(short_id(text).len(), SHORT_ID_LEN);
     }
 }
+
+#[test]
+fn hex_and_sha256_hex_match_the_published_vectors() {
+    assert_eq!(hex(&[]), "");
+    assert_eq!(hex(&[0x00, 0x0f, 0xa5, 0xff]), "000fa5ff");
+    assert_eq!(
+        sha256_hex(b""),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        sha256_hex(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}

@@ -63,69 +63,50 @@ pub struct ModelEndpoint {
     /// Provider 的 option map 算出的 JSON merge patch（RFC 7396），按顺序合并进请求体
     /// （例如 thinking、`output_config.effort`、`max_tokens`）。
     pub body_patches: Vec<Value>,
-    /// 模型接受对话中间的 `role: system` 消息（Provider 配置的 `supportsMidConversationSystem`，只对
-    /// Anthropic 协议有意义）。为假时适配器把这些消息降级成 user 消息里的 `<system-reminder>`。
-    pub mid_conversation_system: bool,
-    /// 模型接受图片输入（Provider 配置的 `inputFormat.supportsImage`）。为假时适配器把请求里的图片换成占位文字
-    /// （docs/specs/rust-cli/model.md §10.5）。显式覆盖的 Anthropic 端点为真。
-    pub supports_image: bool,
-    /// 模型接受 PDF / 视频 / 音频输入（`inputFormat.supportsPdf` / `supportsVideo` / `supportsAudio`，修复线 F23）。
-    /// 与 `supports_image` 一样由平台层从生效配置写入（docs/specs/rust-cli/model.md §11）。
-    pub supports_pdf: bool,
-    pub supports_video: bool,
-    pub supports_audio: bool,
+    /// 这个模型的能力（平台层的生效配置；显式覆盖按内置规则，docs/specs/rust-cli/model.md §11）。适配器看其中的
+    /// `supports_mid_conversation_system`（为假时把对话中间的 `role: system` 降级成 user 消息里的 `<system-reminder>`，
+    /// 只对 Anthropic 协议有意义）与 `supports_image` / `supports_pdf`（为假时把请求里的图片、PDF 换成占位文字，§10.5）。
+    /// F129（审查 E6）：以前是 5 个照抄的布尔。
+    pub capabilities: ModelCapabilities,
     /// 凭据是每次请求现取的（官方账号模型）：服务端回 401 时，适配器带上这个端点再取一次（见
-    /// [`ModelEndpoints::endpoint`] 的 `rejected`），换到新凭据后重发。
+    /// [`EndpointQuery::rejected`]），换到新凭据后重发。
     pub renewable: bool,
 }
 
-/// 一次取端点的上下文（缺口 G8，docs/specs/rust-cli/app-protocol.md §5.2）：发请求的会话。前端提供的请求头来源
-/// （例如经宿主取账号凭据）按它找到会话与工作区；平台层自己算凭据时不用它。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EndpointContext {
-    /// 发这次请求的会话（[`crate::model::RequestOptions::session_id`]；子代理是子会话）。
-    pub session: Option<crate::ids::SessionId>,
+/// 一次取端点的查询（F129，审查 K1：以前是 `endpoint → endpoint_with_output_limit → endpoint_in` 三层伸缩的方法，
+/// 适配器只用最后一个）。
+#[derive(Debug, Clone, Copy)]
+pub struct EndpointQuery<'a> {
+    pub selection: &'a ModelSelection,
+    /// 上一次取到、刚被服务端拒绝（401）的端点：实现方不能再给出同一份缓存的凭据。
+    pub rejected: Option<&'a ModelEndpoint>,
+    /// 这次请求交给 Provider 补丁的输出上限（工作线 F95，docs/specs/rust-cli/model.md §9、platform.md §4）：有值时
+    /// `maxOutputTokens` map 的输入再与它取小。固定端点没有补丁，不看它。
+    pub output_limit: Option<u64>,
+    /// 发这次请求的会话（缺口 G8，docs/specs/rust-cli/app-protocol.md §5.2；子代理是子会话）：前端提供的请求头来源
+    /// （例如经宿主取账号凭据）按它找到会话与工作区；平台层自己算凭据时不用它。
+    pub session: Option<&'a crate::ids::SessionId>,
+}
+
+impl<'a> EndpointQuery<'a> {
+    /// 第一次取：没有被拒的端点、没有输出上限与会话。
+    pub fn new(selection: &'a ModelSelection) -> Self {
+        Self {
+            selection,
+            rejected: None,
+            output_limit: None,
+            session: None,
+        }
+    }
 }
 
 /// 按选择解析端点。实现方是平台层；测试与显式覆盖（`ZCODE_MODEL_BASE_URL` / `ZCODE_API_KEY`）
 /// 用固定端点。
 #[async_trait]
 pub trait ModelEndpoints: Send + Sync {
-    /// 这次请求的端点与凭据。`rejected` 是上一次取到、刚被服务端拒绝（401）的端点：实现方不能再给出
-    /// 同一份缓存的凭据。选择不可用时返回 [`ModelError::Authentication`]（没有凭据）或
+    /// 这次请求的端点与凭据。选择不可用时返回 [`ModelError::Authentication`]（没有凭据）或
     /// [`ModelError::InvalidRequest`]（目录里没有这个模型）。
-    async fn endpoint(
-        &self,
-        selection: &ModelSelection,
-        rejected: Option<&ModelEndpoint>,
-    ) -> Result<ModelEndpoint, ModelError>;
-
-    /// 同 [`Self::endpoint`]，另带这次请求交给 Provider 补丁的输出上限（工作线 F95，docs/specs/rust-cli/model.md §9、
-    /// platform.md §4）：有值时 `maxOutputTokens` map 的输入再与它取小。缺省实现忽略它、调 `endpoint`（固定端点与测试
-    /// 替身没有补丁）。
-    async fn endpoint_with_output_limit(
-        &self,
-        selection: &ModelSelection,
-        rejected: Option<&ModelEndpoint>,
-        output_limit: Option<u64>,
-    ) -> Result<ModelEndpoint, ModelError> {
-        let _ = output_limit;
-        self.endpoint(selection, rejected).await
-    }
-
-    /// 同 [`Self::endpoint_with_output_limit`]，另带这次请求的上下文（缺口 G8）。模型适配器取端点只经它；缺省实现
-    /// 忽略上下文，行为与以前相同。
-    async fn endpoint_in(
-        &self,
-        selection: &ModelSelection,
-        rejected: Option<&ModelEndpoint>,
-        output_limit: Option<u64>,
-        context: &EndpointContext,
-    ) -> Result<ModelEndpoint, ModelError> {
-        let _ = context;
-        self.endpoint_with_output_limit(selection, rejected, output_limit)
-            .await
-    }
+    async fn endpoint(&self, query: EndpointQuery<'_>) -> Result<ModelEndpoint, ModelError>;
 
     /// 这个选择的模型能力（Node 的生效模型配置，docs/specs/rust-cli/model.md §11，修复线 F23）。不取凭据；
     /// 答不出（没有这个模型、测试替身）时为 None。
@@ -226,6 +207,38 @@ pub struct ModelCatalog {
     /// 新会话默认使用的模型；目录为空时没有。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<ModelSelection>,
+}
+
+/// 向账号模型每请求鉴权的外部来源要凭据的一次请求（缺口 G8，docs/specs/rust-cli/app-protocol.md §5.2、platform.md §5.3）。
+/// 平台层缺省自己算账号凭据；组装根可以注入一个来源（[`HeaderSource`]），之后账号模型的凭据与请求头都向它要（例如由宿主
+/// 按它的账号状态给出），API key 的 provider 不受影响。来源的形状与前端无关：只认模型选择、账号的类别与模式、发请求的会话
+/// 与被拒的凭据。F129（审查 E7）：从 platform 移来，App 协议的实现因此不依赖 platform。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderRequest {
+    /// 这次模型请求的选择。
+    pub selection: ModelSelection,
+    /// 账号的类别（Provider 配置的 `access.accountType`）。
+    pub account_type: String,
+    /// 账号的模式（Provider 配置的 `access.mode`）。
+    pub mode: String,
+    /// 发请求的会话（[`EndpointQuery::session`]）；没有时来源可以拒绝。
+    pub session: Option<crate::ids::SessionId>,
+    /// 刚被模型服务拒绝（401）的凭据的 sha256（小写十六进制）；第一次请求为 None。
+    pub rejected_fingerprint: Option<String>,
+}
+
+/// 来源给出的凭据：key 写进 `Authorization: Bearer`（Anthropic 协议）或适配器的鉴权位置；`headers` 原样加在请求上。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SuppliedAuth {
+    pub api_key: Option<RedactedString>,
+    pub headers: Vec<(String, RedactedString)>,
+}
+
+/// 账号模型每请求鉴权的来源。
+#[async_trait]
+pub trait HeaderSource: Send + Sync {
+    /// 这次请求的凭据。拿不到时返回 [`ModelError::Authentication`]（文字给用户看）。
+    async fn request_auth(&self, request: HeaderRequest) -> Result<SuppliedAuth, ModelError>;
 }
 
 /// 读取模型目录。

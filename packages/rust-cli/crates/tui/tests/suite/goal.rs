@@ -3,7 +3,7 @@
 
 use crossterm::event::KeyCode;
 use rust_cli_kernel_api::testing::text_response;
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 
 use super::support::{GatedModel, Setup, request_text, with_ui};
 

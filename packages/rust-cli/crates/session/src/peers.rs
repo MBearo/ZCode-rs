@@ -13,16 +13,13 @@ use rust_cli_kernel_api::peers::{
     PeerMessaging, PeerReceipt, PeerSignal, PeerStatus, ReceiptStatus, gate, parse_envelope,
 };
 use rust_cli_kernel_api::session_api::KernelEvent;
+use rust_cli_kernel_api::store::entry_kinds;
 use rust_cli_kernel_api::store::{Fact, SessionKind};
 use serde_json::{Value, json};
 
 use crate::actor::Actor;
-use crate::lane::{Lane, Waiting};
+use crate::lane::Waiting;
 
-/// 收到的消息、扣住的解决与回执的 entry 种类（node-store 映射成 `rust-cli/<kind>`）。
-pub(crate) const MESSAGE_ENTRY: &str = "peer_message";
-pub(crate) const RESOLVED_ENTRY: &str = "peer_resolved";
-pub(crate) const RECEIPT_ENTRY: &str = "peer_receipt";
 /// 开回合的 meta user 消息的来源。
 pub(crate) const PEER_SOURCE: &str = "cross-session";
 
@@ -219,7 +216,7 @@ impl Actor {
             "held": cause.map(|cause| json!({"cause": cause_name(cause), "expiresAt": expires_at_ms})),
         });
         let fact = Fact::Entry {
-            kind: MESSAGE_ENTRY.to_owned(),
+            kind: entry_kinds::PEER_MESSAGE.to_owned(),
             id: message.msg_id.clone(),
             data,
         };
@@ -237,11 +234,10 @@ impl Actor {
         );
         match cause {
             None => {
-                self.lane
-                    .push_back(Lane::Notice(Waiting::Peer(PeerItem::Message {
-                        msg_id: message.msg_id,
-                        envelope: message.envelope,
-                    })));
+                self.inbox.push_notice(Waiting::Peer(PeerItem::Message {
+                    msg_id: message.msg_id,
+                    envelope: message.envelope,
+                }));
                 if self.running.is_none() {
                     self.start_next().await;
                 }
@@ -298,7 +294,7 @@ impl Actor {
             return false;
         };
         let fact = Fact::Entry {
-            kind: RESOLVED_ENTRY.to_owned(),
+            kind: entry_kinds::PEER_RESOLVED.to_owned(),
             id: msg_id.to_owned(),
             data: json!({"msgId": msg_id, "outcome": outcome.as_str()}),
         };
@@ -313,11 +309,10 @@ impl Actor {
             "held cross-session message resolved"
         );
         if outcome == ReceiptStatus::Delivered {
-            self.lane
-                .push_back(Lane::Notice(Waiting::Peer(PeerItem::Message {
-                    msg_id: held.view.msg_id.clone(),
-                    envelope: held.envelope,
-                })));
+            self.inbox.push_notice(Waiting::Peer(PeerItem::Message {
+                msg_id: held.view.msg_id.clone(),
+                envelope: held.envelope,
+            }));
         }
         self.emit_held();
         self.deps

@@ -63,7 +63,8 @@ pub(super) fn rows(projection: &mut Projection, view: &SessionView) {
             }
             Message::Assistant(_) => projection.message(message, at, 0, &mut out),
             Message::System(SystemMessage::Interrupted { .. }) => interrupted = true,
-            _ => {}
+            // 附件与别的 system 消息不投成行（P1）。
+            Message::Attachment(_) | Message::System(_) => {}
         }
     }
     if projection.turn.is_some() {

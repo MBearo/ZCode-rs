@@ -19,8 +19,9 @@ pub(crate) mod resolve;
 pub(crate) mod rules;
 pub(crate) mod site;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use std::collections::{BTreeMap, HashMap};
@@ -86,11 +87,6 @@ struct Inputs {
     account: Value,
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    // 持锁的代码不 panic、不 await；中毒时数据仍然一致，继续使用。
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 impl Registry {
     pub fn new(
         builtin: Option<StoragePath>,
@@ -122,9 +118,9 @@ impl Registry {
             stamps.push(FileStamp::of(builtin.as_path()).await);
         }
         let now = Instant::now();
-        let fresh = lock(&self.published).current.revision > 0;
-        if fresh && !lock(&self.gate).should_read(&stamps, now) {
-            return lock(&self.published).current.clone();
+        let fresh = self.published.lock_unpoisoned().current.revision > 0;
+        if fresh && !self.gate.lock_unpoisoned().should_read(&stamps, now) {
+            return self.published.lock_unpoisoned().current.clone();
         }
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         let inputs = match self.read().await {
@@ -132,13 +128,13 @@ impl Registry {
             Err(error) => {
                 // 读失败不记录元数据，下次照常重读；已有的快照继续生效。
                 tracing::warn!(%error, "cannot read the provider configuration");
-                return lock(&self.published).current.clone();
+                return self.published.lock_unpoisoned().current.clone();
             }
         };
-        lock(&self.gate).record(stamps, now);
+        self.gate.lock_unpoisoned().record(stamps, now);
         let signature = signature(&inputs);
-        if lock(&self.published).current.signature == signature {
-            return lock(&self.published).current.clone();
+        if self.published.lock_unpoisoned().current.signature == signature {
+            return self.published.lock_unpoisoned().current.clone();
         }
         let snapshot = match rust_cli_base::blocking(move || parse(&inputs)).await {
             Ok(Ok(snapshot)) => snapshot,
@@ -148,10 +144,10 @@ impl Registry {
             }
             Err(error) => {
                 tracing::warn!(%error, "resolving the provider configuration failed");
-                return lock(&self.published).current.clone();
+                return self.published.lock_unpoisoned().current.clone();
             }
         };
-        let mut published = lock(&self.published);
+        let mut published = self.published.lock_unpoisoned();
         if seq > published.seq && published.current.signature != signature {
             published.seq = seq;
             published.current = Arc::new(Current {
@@ -166,7 +162,7 @@ impl Registry {
     /// 已发布的快照，不比元数据、不重读（同步的模型上限查询用，修复线 F61）：配置的变化由下一次 [`Self::current`]
     /// （取目录或端点）发现，所以最多晚一步。还没读过时是空快照。
     pub fn published(&self) -> Arc<Current> {
-        lock(&self.published).current.clone()
+        self.published.lock_unpoisoned().current.clone()
     }
 
     /// 内置配置的 `config`（登录时找个人 Coding Plan provider）。

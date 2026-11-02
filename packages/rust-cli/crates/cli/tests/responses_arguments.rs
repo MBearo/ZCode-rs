@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::clock::SystemClock;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
@@ -29,15 +30,15 @@ use rust_cli_kernel_api::ids::{CommandId, EnvironmentId, SessionId};
 use rust_cli_kernel_api::message::{ContentBlock, Message};
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
+use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, ModelEndpoint, WireProtocol};
 use rust_cli_kernel_api::session_api::{
     Ack, Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent,
 };
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::environments;
-use rust_cli_model::{FixedEndpoint, ProviderModel};
+use rust_cli_model::{FixedEndpoint, ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
-use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 use serde_json::{Value, json};
@@ -114,22 +115,17 @@ fn endpoint(base_url: String) -> ModelEndpoint {
         credential: Credential::ApiKey(RedactedString::new("sk-test")),
         headers: Vec::new(),
         body_patches: Vec::new(),
-        mid_conversation_system: true,
-        supports_image: true,
-        supports_pdf: false,
-        supports_video: false,
-        supports_audio: false,
+        capabilities: ModelCapabilities {
+            supports_mid_conversation_system: true,
+            supports_image: true,
+            ..ModelCapabilities::default()
+        },
         renewable: false,
     }
 }
 
 fn selection() -> ModelSelection {
-    ModelSelection {
-        provider: "openai-test".to_owned(),
-        model: "gpt-test".to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("openai-test".to_owned(), "gpt-test".to_owned())
 }
 
 /// 一次运行的临时 home 与工作区。
@@ -171,6 +167,7 @@ impl Sandbox {
             egress,
             Arc::new(FixedEndpoint::new(endpoint)),
             clock.clone(),
+            RouteOptions::default(),
         ));
         let store = self.store();
         let ports = Ports {

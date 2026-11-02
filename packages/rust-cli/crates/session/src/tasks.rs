@@ -7,18 +7,18 @@
 //! F96（remote-exec.md §23.3）：重连中的机器不问（它的调用要等重连，SSH 又一直重连）；用它上一份的条目，标
 //! `reconnecting`。“上一份”由快照的唯一 owner——会话（[`LastSeen`]，`Session` 持有）——记着，不靠超时。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::BTreeMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 
-use rust_cli_kernel_api::env::{OperationContext, Origin, WorkspaceRef};
+use rust_cli_kernel_api::env::{Origin, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{ReadText, TextRead};
 use rust_cli_kernel_api::env_shell::{self, BackgroundStatus, BackgroundTask};
-use rust_cli_kernel_api::ids::{OwnerEpoch, SessionId};
+use rust_cli_kernel_api::ids::{MachineName, SessionId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind, OUTPUT_TAIL_LINES};
 use rust_cli_kernel_api::panels::{SHELL_DETAIL_LINES, ShellDetail, ShellOutput, TasksSnapshot};
-use rust_cli_kernel_api::session_api::Ack;
-use serde_json::json;
+use rust_cli_kernel_api::session_api::{Ack, CommandResult};
 
 use crate::SessionDeps;
 use crate::actor::Actor;
@@ -32,7 +32,7 @@ pub(crate) struct LastSeen(Mutex<BTreeMap<String, Vec<BackgroundEntry>>>);
 
 impl LastSeen {
     fn map(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Vec<BackgroundEntry>>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_unpoisoned()
     }
 
     /// 重连中的这台机器上一份的条目，每条标 `reconnecting`；没问到过时是空的。
@@ -84,22 +84,23 @@ pub(crate) async fn snapshot(
 struct Place {
     machine: MachineEnv,
     workspace: WorkspaceRef,
-    name: Option<String>,
+    name: MachineName,
 }
 
 /// 本机在前，再是连上的远端机器（按名字，注册表的快照）。
 fn places(deps: &SessionDeps, workspace: &WorkspaceRef) -> Vec<Place> {
     let mut places = vec![Place {
-        machine: deps.machine.clone(),
+        machine: deps.machines.primary_machine(),
         workspace: workspace.clone(),
-        name: None,
+        name: MachineName::primary(),
     }];
     for remote in deps.machines.machines().machines {
-        if let Some((machine, workspace)) = deps.machines.remote(&remote.name) {
+        let name = MachineName::new(remote.name);
+        if let Some((machine, workspace)) = deps.machines.remote(&name) {
             places.push(Place {
                 machine,
                 workspace,
-                name: Some(remote.name),
+                name,
             });
         }
     }
@@ -119,12 +120,7 @@ async fn running_shells(
     // 每台机器在不在重连只看一次：下面“问哪些”与“结果归哪台”都按这一次的答案，不会因为中途状态变了而错位。
     let reconnecting: Vec<bool> = places
         .iter()
-        .map(|place| {
-            place
-                .name
-                .as_deref()
-                .is_some_and(|name| deps.machines.reconnecting(name))
-        })
+        .map(|place| deps.machines.reconnecting(&place.name))
         .collect();
     // 各台机器同时问（一台慢不拖住别的台；结果仍按本机在前、远端按名字的顺序）。
     let asked = futures_util::future::join_all(
@@ -141,20 +137,23 @@ async fn running_shells(
         let found = if reconnecting {
             place
                 .name
-                .as_deref()
+                .remote()
                 .map(|name| last.stale(name))
                 .unwrap_or_default()
         } else {
             let found = asked.next().unwrap_or_default();
-            if let Some(name) = &place.name {
-                last.map().insert(name.clone(), found.clone());
+            if let Some(name) = place.name.remote() {
+                last.map().insert(name.to_owned(), found.clone());
             }
             found
         };
         entries.extend(found);
     }
-    last.map()
-        .retain(|name, _| places.iter().any(|place| place.name.as_ref() == Some(name)));
+    last.map().retain(|name, _| {
+        places
+            .iter()
+            .any(|place| place.name.remote() == Some(name.as_str()))
+    });
     entries
 }
 
@@ -194,13 +193,9 @@ async fn running_on(place: &Place, session: &SessionId, tail: bool) -> Vec<Backg
             env_shell::BackgroundKind::Bash => (BackgroundKind::Shell, info.command),
         };
         entries.push(BackgroundEntry {
-            id: task.to_string(),
-            kind,
-            description,
-            status: info.status,
             output,
             machine: place.name.clone(),
-            reconnecting: false,
+            ..BackgroundEntry::new(task.to_string(), kind, description, info.status)
         });
     }
     entries
@@ -332,15 +327,12 @@ async fn output_tail(place: &Place, path: &rust_cli_kernel_api::env::EnvPath) ->
 impl Actor {
     /// `Command::StopTask`：用户停止一个后台任务，走 agents 的 TaskStop 路径。
     pub(crate) async fn stop_task(&self, task: String) -> Ack {
-        let operation = OperationContext {
-            environment: self.meta.workspace.environment.clone(),
-            generation: self.deps.generation.clone(),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: self.deps.ids.operation(),
-            origin: Origin::User {
+        let operation = self.deps.operations.next(
+            self.meta.workspace.environment.clone(),
+            Origin::User {
                 session: Some(self.meta.id.clone()),
             },
-        };
+        );
         match self
             .deps
             .agents
@@ -348,7 +340,7 @@ impl Actor {
             .await
         {
             Ok(message) => Ack::Accepted {
-                result: json!({ "message": message }),
+                result: CommandResult::Stopped { message },
             },
             Err(reason) => Ack::Rejected { reason },
         }

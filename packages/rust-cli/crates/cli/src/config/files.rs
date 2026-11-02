@@ -10,7 +10,7 @@ use rust_cli_kernel_api::env_files::GIT_DIR;
 use rust_cli_kernel_api::env_files::{PathStyle, StatFile};
 use rust_cli_kernel_api::env_git::has_git_marker;
 use rust_cli_kernel_api::machine::Files;
-use rust_cli_platform::ConfigFile;
+use rust_cli_platform::local::ConfigFile;
 
 /// 每一层的 `zcode.json`（F55：以前写了 3 次；F58 起名字在 base，policy 的敏感文件表也用它）。
 const ZCODE_JSON: &str = PROJECT_CONFIG_FILE;

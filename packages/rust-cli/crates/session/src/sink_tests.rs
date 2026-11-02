@@ -13,12 +13,13 @@ use crate::DetachedAsks;
 
 fn question() -> InteractionRequest {
     InteractionRequest::Permission {
-        machine: None,
+        machine: Default::default(),
         tool_use: ToolUseId::new("tu1"),
         tool: "Bash".to_owned(),
         input: json!({"command": "mytool build"}),
         message: "This command requires approval".to_owned(),
         suggestions: Vec::new(),
+        rule_seed: None,
         asked_by: Some("Explore".to_owned()),
     }
 }
@@ -47,7 +48,7 @@ async fn a_closed_session_asks_through_the_detached_entry() {
     let entry = Arc::new(closed_entry(Some(hub.clone())));
     let asking = {
         let entry = entry.clone();
-        tokio::spawn(async move { entry.ask(&SessionId::new("ignored"), question()).await })
+        tokio::spawn(async move { entry.ask(question()).await })
     };
     let Some(DetachedEvent::Asked { ask }) = events.next().await else {
         panic!("asked");
@@ -56,15 +57,18 @@ async fn a_closed_session_asks_through_the_detached_entry() {
         (ask.session.as_str(), ask.title.as_str()),
         ("old", "Old work")
     );
-    hub.resolve(&ask.interaction, json!({"decision": "allow"}))
-        .await
-        .unwrap();
+    let allow = rust_cli_kernel_api::orchestration::Answer::from(
+        rust_cli_kernel_api::orchestration::PermissionAnswer::Allow {
+            remember: Vec::new(),
+        },
+    );
+    hub.resolve(&ask.interaction, allow.clone()).await.unwrap();
     let answered = asking.await.unwrap().unwrap();
-    assert_eq!(answered.answer, json!({"decision": "allow"}));
+    assert_eq!(answered.answer, allow);
     // 撤回也转过去。
     let asking = {
         let entry = entry.clone();
-        tokio::spawn(async move { entry.ask(&SessionId::new("ignored"), question()).await })
+        tokio::spawn(async move { entry.ask(question()).await })
     };
     assert!(matches!(
         events.next().await,
@@ -73,9 +77,7 @@ async fn a_closed_session_asks_through_the_detached_entry() {
     let Some(DetachedEvent::Asked { ask }) = events.next().await else {
         panic!("asked again");
     };
-    entry
-        .cancel_ask(&SessionId::new("ignored"), &ToolUseId::new("tu1"))
-        .await;
+    entry.cancel_ask(&ToolUseId::new("tu1")).await;
     assert!(asking.await.unwrap().is_err());
     assert_eq!(
         events.next().await,
@@ -89,5 +91,5 @@ async fn a_closed_session_asks_through_the_detached_entry() {
 #[tokio::test]
 async fn without_the_entry_a_closed_session_cannot_ask() {
     let entry = closed_entry(None);
-    assert!(entry.ask(&SessionId::new("old"), question()).await.is_err());
+    assert!(entry.ask(question()).await.is_err());
 }

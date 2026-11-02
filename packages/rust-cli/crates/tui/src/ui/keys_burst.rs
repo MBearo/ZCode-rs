@@ -1,4 +1,4 @@
-//! 终端按键的入口（docs/specs/rust-cli/tui-input.md §9，修复线 F65）：松开事件与 alt 码（`Releases`）、Windows 上
+//! 终端按键的入口（docs/specs/rust-cli/tui-input.md §9，修复线 F65）：松开事件、alt 码与 AltGr（`Keyboard`）、Windows 上
 //! 没有括号粘贴时的 paste burst（`PasteBurst`），之后交给 [`App::dispatch`] 或 [`App::on_paste`]。缓存的文字作为一次
 //! 粘贴，走与括号粘贴相同的路径。
 use std::time::Instant;
@@ -7,25 +7,24 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::app::{Action, App};
 use super::composer::{InputMode, Popup};
-use super::keyboard::{Releases, Typing};
+use super::keyboard::{self, Keyboard};
 use super::paste_burst::{CharDecision, FlushResult, PasteBurst, retro_start_index};
 use crate::os::Os;
 
 impl App {
-    /// 入口注入的平台（runner 启动时）：文字输入的判断、松开事件；Windows 上打开 paste burst。
+    /// 入口注入的平台（runner 启动时）：按键的归一与松开事件；Windows 上打开 paste burst。
     pub fn set_os(&mut self, os: Os) {
-        self.typing = Typing::new(os);
-        self.releases = Releases::new(os);
-        self.burst = os.is_windows().then(PasteBurst::default);
+        self.keys.keyboard = Keyboard::new(os);
+        self.keys.burst = os.is_windows().then(PasteBurst::default);
     }
 
     /// runner 的按键入口。返回要执行的动作：先交出缓存的粘贴、再处理这个键时有两个。
     pub fn on_terminal_key(&mut self, key: KeyEvent, now: Instant) -> Vec<Action> {
         let mut actions = Vec::new();
-        let Some(key) = self.releases.admit(key) else {
+        let Some(key) = self.keys.keyboard.admit(key) else {
             return actions;
         };
-        if self.burst.is_none() {
+        if self.keys.burst.is_none() {
             actions.extend(self.dispatch(key, now));
             return actions;
         }
@@ -36,7 +35,7 @@ impl App {
 
     /// 下一次该调 [`Self::flush_burst`] 的时刻；没有扣住的字符与缓存时为 None。
     pub fn burst_deadline(&self) -> Option<Instant> {
-        self.burst.as_ref().and_then(PasteBurst::deadline)
+        self.keys.burst.as_ref().and_then(PasteBurst::deadline)
     }
 
     /// 到了冲刷时刻（runner 的计时）：缓存作为一次粘贴交出，扣住的字符照常键入。
@@ -50,7 +49,7 @@ impl App {
     pub fn flush_burst_before_input(&mut self) -> Vec<Action> {
         let mut actions = Vec::new();
         self.flush_now(&mut actions);
-        if let Some(burst) = self.burst.as_mut() {
+        if let Some(burst) = self.keys.burst.as_mut() {
             burst.clear_window_after_non_char();
         }
         actions
@@ -58,11 +57,11 @@ impl App {
 
     /// 焦点变化（`Event::FocusGained` / `FocusLost`）。
     pub fn focus_changed(&mut self) {
-        self.releases.focus_changed();
+        self.keys.keyboard.focus_changed();
     }
 
     fn flush_due(&mut self, now: Instant, actions: &mut Vec<Action>) {
-        let Some(burst) = self.burst.as_mut() else {
+        let Some(burst) = self.keys.burst.as_mut() else {
             return;
         };
         match burst.flush_if_due(now) {
@@ -77,6 +76,7 @@ impl App {
 
     fn flush_now(&mut self, actions: &mut Vec<Action>) {
         if let Some(text) = self
+            .keys
             .burst
             .as_mut()
             .and_then(PasteBurst::flush_before_modified_input)
@@ -86,12 +86,12 @@ impl App {
     }
 
     fn burst_key(&mut self, key: KeyEvent, now: Instant, actions: &mut Vec<Action>) {
-        let (ctrl, alt) = (self.typing.ctrl(&key), self.typing.alt(&key));
+        let (ctrl, alt) = (keyboard::ctrl(&key), keyboard::alt(&key));
         match key.code {
             KeyCode::Enter if !ctrl && !alt => {
                 // 输入框第一行以 `/` 开头、斜杠列表打开时 enter 照常执行命令。
                 let slash = self.slash_context();
-                let Some(burst) = self.burst.as_mut() else {
+                let Some(burst) = self.keys.burst.as_mut() else {
                     return;
                 };
                 if !slash && burst.append_control_char_if_active('\n', now) {
@@ -107,14 +107,14 @@ impl App {
                 actions.extend(self.dispatch(key, now));
             }
             KeyCode::Tab if key.modifiers.is_empty() => {
-                if let Some(burst) = self.burst.as_mut()
+                if let Some(burst) = self.keys.burst.as_mut()
                     && burst.append_control_char_if_active('\t', now)
                 {
                     return;
                 }
                 self.other_key(key, now, actions);
             }
-            KeyCode::Char(c) if self.typing.is_plain_text(&key) => {
+            KeyCode::Char(c) if keyboard::is_plain_text(&key) => {
                 if !self.burst_char(c, now, actions) {
                     self.flush_now(actions);
                     actions.extend(self.dispatch(key, now));
@@ -128,14 +128,14 @@ impl App {
     fn other_key(&mut self, key: KeyEvent, now: Instant, actions: &mut Vec<Action>) {
         self.flush_now(actions);
         actions.extend(self.dispatch(key, now));
-        if let Some(burst) = self.burst.as_mut() {
+        if let Some(burst) = self.keys.burst.as_mut() {
             burst.clear_window_after_non_char();
         }
     }
 
     /// 一个文字键进判定；返回 true 表示进了缓存或被扣住（不照常键入）。
     fn burst_char(&mut self, c: char, now: Instant, actions: &mut Vec<Action>) -> bool {
-        let Some(burst) = self.burst.as_mut() else {
+        let Some(burst) = self.keys.burst.as_mut() else {
             return false;
         };
         let decision = if c.is_ascii() {
@@ -146,7 +146,7 @@ impl App {
                 return true;
             }
             self.flush_now(actions);
-            let Some(burst) = self.burst.as_mut() else {
+            let Some(burst) = self.keys.burst.as_mut() else {
                 return false;
             };
             burst.on_plain_char_no_hold(now)
@@ -157,7 +157,7 @@ impl App {
             Some(CharDecision::BeginBuffer { retro_chars }) => self.retro_grab(retro_chars, now),
             None => false,
         };
-        if begun && let Some(burst) = self.burst.as_mut() {
+        if begun && let Some(burst) = self.keys.burst.as_mut() {
             burst.append_char_to_buffer(c, now);
         }
         begun
@@ -176,7 +176,7 @@ impl App {
         if chips.iter().any(|&(from, to)| from < cursor && to > start) {
             return false;
         }
-        let Some(burst) = self.burst.as_mut() else {
+        let Some(burst) = self.keys.burst.as_mut() else {
             return false;
         };
         let Some(grab) = burst.decide_begin_buffer(now, before, usize::from(retro_chars)) else {
@@ -196,7 +196,7 @@ impl App {
             && self.view.peer_held().is_none()
             && self.focus.is_none()
             && self.viewing.is_none()
-            && self.find.is_none()
+            && self.port.find.is_none()
             && self.composer.search.is_none()
     }
 

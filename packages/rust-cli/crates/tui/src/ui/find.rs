@@ -9,8 +9,9 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{Action, App};
-use super::find_text::{fold, pop_grapheme};
+use super::find_text::fold;
 use super::i18n::Lang;
+use super::keyboard;
 use super::transcript::{Layout, Target};
 
 /// 下一帧怎么定当前匹配：`nearest` 先取离参照点最近的（查询变了），再按 `step` 往前 / 往后挪（↑ ↓，回绕）。两者都没有
@@ -59,22 +60,14 @@ pub(super) struct Settled {
     snap_back: bool,
 }
 
-fn pick(lang: Lang, en: &'static str, zh: &'static str) -> &'static str {
-    match lang {
-        Lang::En => en,
-        Lang::Zh => zh,
-    }
-}
-
 /// 查询为空时的占位文字。
 pub fn placeholder(lang: Lang) -> &'static str {
-    pick(lang, "Search the transcript", "搜索对话记录")
+    lang.pick("Search the transcript", "搜索对话记录")
 }
 
 /// footer 左侧的按键提示（按键提示组件的模板）。
 pub fn hint(lang: Lang) -> &'static str {
-    pick(
-        lang,
+    lang.pick(
         "{↑↓} previous/next · {enter} stop here · {esc} exit",
         "{↑↓} 上一个/下一个 · {enter} 停在这里 · {esc} 退出",
     )
@@ -84,10 +77,10 @@ impl App {
     /// 进入搜索模式；`swallow_slash`：查看子代理时单个 `/` 进入，紧跟的一个 `/` 丢掉。进入时的位置取上一帧视口的最后
     /// 一行（跟随末尾时不记）。
     pub(super) fn open_find(&mut self, swallow_slash: bool) {
-        let origin = (self.scroll > 0)
-            .then(|| self.hits.rows.last().map(|(owner, _)| *owner))
+        let origin = (self.port.scroll > 0)
+            .then(|| self.pointer.hits.rows.last().map(|(owner, _)| *owner))
             .flatten();
-        self.find = Some(Find {
+        self.port.find = Some(Find {
             query: String::new(),
             current: None,
             pick: Pick::default(),
@@ -102,13 +95,13 @@ impl App {
 
     /// 退出搜索模式。`stay` 且有当前匹配时停在那里（临时展开的块记进单独展开）；否则回到进入前的位置。
     fn close_find(&mut self, stay: bool) {
-        let Some(find) = self.find.take() else {
+        let Some(find) = self.port.find.take() else {
             return;
         };
         match find.current.filter(|_| stay) {
             Some(hit) => {
                 if hit.peeked {
-                    self.expanded_cells.insert(hit.key);
+                    self.port.expanded_cells.insert(hit.key);
                 }
             }
             None => self.back_to(find.origin),
@@ -118,20 +111,20 @@ impl App {
     /// 回到 `origin`：跟随末尾时马上回到底部；否则下一帧把那一行放回视口的最后一行（要按那一帧的排版换算）。
     fn back_to(&mut self, origin: Option<(u64, usize)>) {
         match origin {
-            Some(anchor) => self.restore_bottom = Some(anchor),
+            Some(anchor) => self.port.restore_bottom = Some(anchor),
             None => {
-                self.scroll = 0;
-                self.new_activity = false;
+                self.port.scroll = 0;
+                self.port.new_activity = false;
             }
         }
     }
 
     /// 搜索模式的按键（tui-input.md §2.3.1）。
     pub(super) fn find_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let ctrl = self.typing.ctrl(&key);
-        let typed = self.typing.is_plain_text(&key);
+        let ctrl = keyboard::ctrl(&key);
+        let typed = keyboard::is_plain_text(&key);
         let page = self.viewport.saturating_sub(1).max(1) as isize;
-        let find = self.find.as_mut()?;
+        let find = self.port.find.as_mut()?;
         let swallow = std::mem::take(&mut find.swallow_slash);
         match key.code {
             KeyCode::Up => find.step(-1),
@@ -139,7 +132,7 @@ impl App {
             KeyCode::Char('p') if ctrl => find.step(-1),
             KeyCode::Char('n') if ctrl => find.step(1),
             KeyCode::Backspace if !find.query.is_empty() => {
-                pop_grapheme(&mut find.query);
+                crate::ui::line_edit::backspace(&mut find.query);
                 find.pick.nearest = true;
             }
             KeyCode::Char('/') if swallow && find.query.is_empty() => {}
@@ -164,10 +157,9 @@ impl App {
 
     /// 搜索模式里的粘贴：加进查询，换行压成空格。
     pub(super) fn find_paste(&mut self, text: &str) {
-        if let Some(find) = self.find.as_mut() {
+        if let Some(find) = self.port.find.as_mut() {
             find.swallow_slash = false;
-            let text = text.replace("\r\n", " ").replace(['\n', '\r'], " ");
-            find.query.push_str(&text);
+            crate::ui::line_edit::paste(&mut find.query, text);
             find.pick.nearest = true;
         }
     }
@@ -183,17 +175,17 @@ impl Find {
 
 /// 当前匹配所在的块（排版时按展开的样子排）。
 pub(super) fn peek(app: &App) -> Option<u64> {
-    app.find.as_ref()?.current.map(|hit| hit.key)
+    app.port.find.as_ref()?.current.map(|hit| hit.key)
 }
 
 /// 每一帧：在排好的 transcript 里找，按 `pick` 定当前匹配，记下匹配数与序号。`epoch` 是排版缓存的 epoch，`width` 是这一帧
 /// 的宽度。当前匹配换了块时调用方要再排一次（[`peek`] 变了）。
 pub(super) fn settle(app: &mut App, layout: &Layout, epoch: u64, width: usize) -> Option<Settled> {
-    let App {
+    let super::app_state::Port {
         find,
         expanded_cells,
         ..
-    } = app;
+    } = &mut app.port;
     let find = find.as_mut()?;
     if find.epoch != Some(epoch) {
         // 视图重建过：行 id 从头分配，记下的块的键不再作数。
@@ -265,14 +257,14 @@ fn nearest(targets: &[Target], reference: Option<(usize, usize, usize)>) -> usiz
 /// 绘制里排版之后：esc 之后回到进入前的位置；搜索中当前匹配换了或宽度变了时，它不在视口里就滚到中间；有查询的输入之后
 /// 没有匹配时回到进入前的位置。`height` 是 transcript 的高度。
 pub(super) fn scroll(app: &mut App, layout: &Layout, settled: Option<&Settled>, height: usize) {
-    if let Some(anchor) = app.restore_bottom.take() {
+    if let Some(anchor) = app.port.restore_bottom.take() {
         put_bottom(app, layout, Some(anchor), height);
     }
     let Some(settled) = settled else {
         return;
     };
     if settled.snap_back {
-        let origin = app.find.as_ref().and_then(|find| find.origin);
+        let origin = app.port.find.as_ref().and_then(|find| find.origin);
         put_bottom(app, layout, origin, height);
         return;
     }
@@ -283,31 +275,31 @@ pub(super) fn scroll(app: &mut App, layout: &Layout, settled: Option<&Settled>, 
         return;
     };
     let total = layout.len();
-    let end = total.saturating_sub(app.scroll);
+    let end = total.saturating_sub(app.port.scroll);
     if (end.saturating_sub(height)..end).contains(&at) {
         return;
     }
     let top = at.saturating_sub(height / 2);
-    app.scroll = total
+    app.port.scroll = total
         .saturating_sub(top + height)
         .min(total.saturating_sub(height));
-    if app.scroll == 0 {
-        app.new_activity = false;
+    if app.port.scroll == 0 {
+        app.port.new_activity = false;
     }
 }
 
 /// 把（块的键，块内行）放回视口的最后一行；None（或那一块不在了）时回到底部。
 fn put_bottom(app: &mut App, layout: &Layout, anchor: Option<(u64, usize)>, height: usize) {
     let total = layout.len();
-    app.scroll = anchor
+    app.port.scroll = anchor
         .and_then(|(key, line)| layout.at(key, line))
         .map_or(0, |at| {
             total
                 .saturating_sub(at + 1)
                 .min(total.saturating_sub(height))
         });
-    if app.scroll == 0 {
-        app.new_activity = false;
+    if app.port.scroll == 0 {
+        app.port.new_activity = false;
     }
 }
 

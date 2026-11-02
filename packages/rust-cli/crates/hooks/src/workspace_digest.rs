@@ -7,7 +7,6 @@
 
 use rust_cli_base::js::json::stringify;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
 use crate::node_config::{
     DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT_MS, NODE_EVENTS, NodeHook, NodeHookKind, NodeHooks,
@@ -21,8 +20,7 @@ const SCHEMA_VERSION: u64 = 1;
 /// `sha256(JSON.stringify(value))`，JSON 文本按 JS 的规则生成（`rust_cli_base::js::json`：数字是 JS 的
 /// 最短形式，整数不带小数点）。
 fn sha256(value: &Value) -> String {
-    let digest = Sha256::digest(stringify(value).as_bytes());
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    rust_cli_base::hash::sha256_hex(stringify(value).as_bytes())
 }
 
 /// 运行根（Node `WorkspaceHookRuntimeRoot`）。

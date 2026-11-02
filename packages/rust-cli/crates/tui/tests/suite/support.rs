@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
 };
 use futures_util::stream::{self, BoxStream, StreamExt};
 use ratatui::Terminal;
@@ -26,7 +27,7 @@ use rust_cli_kernel_api::testing::{
     selection,
 };
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 use rust_cli_tui::{Options, Screen, drive};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
@@ -123,13 +124,39 @@ impl ModelDirectory for Directory {
     }
 }
 
+/// 启动前选择屏的按键事件（信任对话框与自动更新的选择屏直接收终端事件）。
+pub fn key_event(code: KeyCode) -> crossterm::event::Event {
+    crossterm::event::Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+/// 同上，ctrl 加一个字符。
+pub fn ctrl_event(c: char) -> crossterm::event::Event {
+    crossterm::event::Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+}
+
+/// 同上，松开按键的事件（两个选择屏都不处理）。
+pub fn release_event(code: KeyCode) -> crossterm::event::Event {
+    crossterm::event::Event::Key(KeyEvent {
+        code,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Release,
+        state: KeyEventState::NONE,
+    })
+}
+
+/// 测试拨动的内核时钟：请求的开始、首个内容与结束各读一次（usage.md §1；架构整理 U15：以前两个测试文件各写一份；F126：
+/// 用 kernel-api testing 的共用时钟）。
+pub use rust_cli_kernel_api::testing::ManualClock;
+
 /// 测试的终端设置。
 pub struct Setup {
     pub width: u16,
     pub height: u16,
     pub lang: &'static str,
     pub palette: Palette,
-    /// 入口注入的服务（界面语言的配置值与写回，tui.md §7.1）。
+    /// 入口给的配置值（界面语言、主题等，tui.md §7.1）。
+    pub ui: rust_cli_tui::UiConfig,
+    /// 入口注入的服务；缺省全是替身（`stub_services.rs`）。
     pub services: rust_cli_tui::Services,
     /// 执行环境的注册表；缺省本机是不能用的替身（没有 skill，skills.rs 换成内存文件系统）。
     pub environments: Arc<dyn EnvironmentRegistry>,
@@ -144,7 +171,7 @@ pub struct Setup {
     /// 入口的退出信号（R5-2）。给了时脚本结束后输入也不结束：事件循环只能经这个信号退出（exit_signal.rs）。
     pub stop: Option<CancellationToken>,
     /// 换掉内核用的会话存储（queue.rs 用它让建会话停住）；缺省直接用 `store`。
-    pub session_store: Option<Arc<dyn rust_cli_kernel_api::store::SessionStore>>,
+    pub session_store: Option<Arc<dyn rust_cli_kernel_api::store::Store>>,
     /// 打开后画帧失败（终端关掉了，dead_terminal.rs）。
     pub hang: Arc<std::sync::atomic::AtomicBool>,
     /// 跨会话的端口（peers.rs）；缺省关闭。
@@ -172,7 +199,8 @@ impl Default for Setup {
             height: 24,
             lang: "en_US.UTF-8",
             palette: Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-            services: rust_cli_tui::Services::default(),
+            ui: rust_cli_tui::UiConfig::default(),
+            services: super::stub_services::services(),
             environments: environments(Arc::new(UnusedEnvironment)),
             artifacts: None,
             store: Arc::new(MemoryStore::default()),
@@ -410,7 +438,7 @@ impl Ui {
 pub fn kernel(
     model: Arc<dyn ModelPort>,
     environments: Arc<dyn EnvironmentRegistry>,
-    store: Arc<dyn rust_cli_kernel_api::store::SessionStore>,
+    store: Arc<dyn rust_cli_kernel_api::store::Store>,
     artifacts: Option<Arc<dyn rust_cli_kernel_api::store::ArtifactStore>>,
     peers: rust_cli_runtime::PeerDeps,
     clock: Option<Arc<dyn rust_cli_kernel_api::clock::Clock>>,
@@ -516,6 +544,7 @@ where
         models: setup.models,
         startup: setup.startup,
         fork: false,
+        ui: setup.ui,
         services: setup.services,
         stop: setup.stop.unwrap_or_default(),
         clock: Arc::new(WallClock),

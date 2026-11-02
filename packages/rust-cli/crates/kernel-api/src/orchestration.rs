@@ -2,7 +2,7 @@
 //!
 //! 内核能力 crate 只依赖 kernel-api，彼此通过这里的 trait 调用，由 runtime 组装实现：
 //! - query 用 [`ContextBuilder`]、[`ToolRegistry`]、[`ToolExecutor`]、[`Compactor`]、[`HookRunner`]；
-//! - tools 的执行管线用 [`PermissionGate`]、[`HookRunner`]、[`Interactions`]；
+//! - tools 的执行管线用 [`PermissionGate`]、[`HookRunner`]、[`Interactions`]、[`SessionOps`]；
 //! - agents 与 compact 用 [`QueryRunner`] 跑子循环或摘要请求。
 
 use std::sync::Arc;
@@ -13,10 +13,10 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::abort::Abort;
-use crate::env::{EnvPath, WorkspaceRef};
+use crate::env::WorkspaceRef;
 use crate::ids::{AgentId, RunId, SessionId, ToolUseId};
 use crate::mcp_state::{McpConnections, McpView};
-use crate::message::{AttachmentMessage, CompactTrigger, Message, UserMessage};
+use crate::message::{AttachmentMessage, CompactTrigger, Message};
 use crate::model::{BlockDelta, ModelError, ModelSelection, QuerySource, SystemBlock};
 use crate::permission::{PermissionDecision, PermissionMode};
 use crate::plan::PlanModeFlags;
@@ -26,7 +26,7 @@ use crate::tool::{Tool, ToolOutput, ToolProgress, ToolUseContext};
 pub use crate::compaction::{
     AutoCompactOutcome, CompactRequest, CompactResult, CompactTracking, Compactor,
 };
-pub use crate::hooks::Absorbed;
+pub use crate::hooks::{Absorbed, AbsorbedNotice};
 pub use crate::hooks::{HookContext, HookEvent, HookEventName, HookOutcome, HookRunner, Steered};
 pub use crate::hooks::{StopCondition, StopVerdict};
 
@@ -44,11 +44,44 @@ pub struct QueryRequest {
     pub source: QuerySource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
+    /// 这次运行的工具缺省在哪台机器上跑（R3，remote-exec.md §20.6）：子代理派生时 Agent 的 `machine`；主线程是主 env
+    /// （不写出）。一次运行里不变（工作线 F134，审查 K2：以前是 `RunSink::default_machine`，主循环每一步与每次工具调用
+    /// 各问一次输出端）。
+    #[serde(default, skip_serializing_if = "crate::ids::MachineName::is_primary")]
+    pub default_machine: crate::ids::MachineName,
     /// 人类输入的 UserPromptSubmit 结果（hook 的附加上下文等，还没有提交）。主循环在运行开始时先产生当步的
     /// attachment（[`ContextBuilder::turn_attachments`]），再提交它们（先产生 attachment、再跑
     /// UserPromptSubmit，docs/specs/rust-cli/query.md §1.1）。其他运行为空（修复线 F10 新增）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_hook_messages: Vec<Message>,
+}
+
+impl QueryRequest {
+    /// 一次运行的输入：不是子代理、没有轮数上限、缺省机器是主 env、没有待提交的 UserPromptSubmit 消息（各自的调用方用
+    /// 结构更新填上）。
+    pub fn new(
+        session: SessionId,
+        run: RunId,
+        workspace: WorkspaceRef,
+        messages: Vec<Message>,
+        selection: ModelSelection,
+        mode: PermissionMode,
+        source: QuerySource,
+    ) -> Self {
+        Self {
+            session,
+            run,
+            workspace,
+            agent: None,
+            messages,
+            selection,
+            mode,
+            source,
+            max_turns: None,
+            default_machine: crate::ids::MachineName::primary(),
+            prompt_hook_messages: Vec::new(),
+        }
+    }
 }
 
 /// 主循环产生的、不需要持久化的事件（流式增量与工具进度）。完整的消息经
@@ -85,6 +118,12 @@ pub enum QueryStop {
     Completed,
     MaxTurns,
     Aborted,
+    /// 工具的 hook 要求停止（PreToolUse / PostToolUse 的 `continue: false`，docs/specs/rust-cli/hooks.md §6）：本批的结果
+    /// 与停止说明都已提交，不再请求模型（终止原因 `hook_stopped`，query.md §3）。
+    HookStopped,
+    /// Stop hook（子代理里 SubagentStop）阻止继续（`prevent_continuation`）：结束说明已提交，不再请求模型（终止原因
+    /// `stop_hook_prevented`，docs/specs/rust-cli/query.md §3 的 Stop hooks，工作线 F134）。
+    StopHookPrevented,
     /// Stop hook 阻止了结束且次数用尽等由主循环判定的终止。
     Blocked {
         message: String,
@@ -111,9 +150,13 @@ pub enum QueryError {
 ///
 /// 提交屏障：`commit_message` 与 `commit_intent` 在存储事务成功后才返回，主循环拿到 `Ok` 才继续
 /// 下一步（执行工具、发下一次请求）。这样崩溃后，存储里的事实总是领先于外部副作用。
-/// 待回答的交互（[`Interactions`]）也经这里：先持久化再通知前端。
+/// 待回答的交互（[`Interactions`]）与会话的读和命令（[`SessionOps`]）也经这里：会话 actor 登记后通知前端（只在内存，
+/// 工作线 F130）。
+///
+/// 方法都没有缺省体（工作线 F134，审查 K6）：以前 8 个缺省体只服务测试替身，包装层漏转发一个也能编译。测试替身用
+/// `testing::SinkOverride`（全委托给一个内层输出端，只覆盖关心的方法）。
 #[async_trait]
-pub trait RunSink: Interactions {
+pub trait RunSink: Interactions + SessionOps {
     /// 一条完整的消息（assistant、tool_result、attachment、system）：提交、进入会话历史、通知前端。
     async fn commit_message(&self, message: Message) -> Result<(), StoreError>;
 
@@ -121,96 +164,34 @@ pub trait RunSink: Interactions {
     async fn emit(&self, event: QueryEvent) -> bool;
 
     /// 一组必须一起成立的消息（压缩的边界、摘要与附件，docs/specs/rust-cli/compact.md §6）：在一个
-    /// 存储事务里提交。默认实现逐条提交，只用于没有事务的输出端（测试替身、只收集的输出端）。
-    async fn commit_messages(&self, messages: Vec<Message>) -> Result<(), StoreError> {
-        for message in messages {
-            self.commit_message(message).await?;
-        }
-        Ok(())
-    }
+    /// 存储事务里提交。没有事务的输出端（只收集的、子代理的）逐条提交。
+    async fn commit_messages(&self, messages: Vec<Message>) -> Result<(), StoreError>;
 
     /// 一条消息与它的计量事实在一个存储事务里提交（docs/specs/rust-cli/usage.md §2.5）：assistant 消息带这次
     /// 模型请求，工具结果带这次工具调用；`message` 为 None 时只提交计量（没有内容的失败请求、丢弃的响应）。
-    /// 默认实现只提交消息、丢弃计量，只用于没有存储的输出端（测试替身、只收集的输出端）。
+    /// 没有存储的输出端只提交消息、丢弃计量。
     async fn commit_metered(
         &self,
         message: Option<Message>,
-        _metered: crate::metering::Metered,
-    ) -> Result<(), StoreError> {
-        match message {
-            Some(message) => self.commit_message(message).await,
-            None => Ok(()),
-        }
-    }
+        metered: crate::metering::Metered,
+    ) -> Result<(), StoreError>;
 
-    /// 主循环开始一次压缩（自动或反应式），前端据此显示进度；默认忽略。
-    async fn compact_started(&self, _trigger: CompactTrigger) {}
+    /// 主循环开始一次压缩（自动或反应式），前端据此显示进度；没有前端的输出端什么都不做。
+    async fn compact_started(&self, trigger: CompactTrigger);
 
-    /// 工具边界取走插话（`Delivery::Steer`）的输入，按提交顺序（docs/specs/rust-cli/query.md §4）。
-    /// 取走即属于当前回合；本回合已中止时返回空，输入继续排队。没有插话来源的输出端用默认实现。
-    async fn take_steering(&self) -> Vec<String> {
-        Vec::new()
-    }
-
-    /// 工具边界并入的插话，带各自 UserPromptSubmit 的消息（query.md §4.1）。缺省：`take_steering`
-    /// 的文本，没有 hook 消息。
-    async fn take_steered(&self) -> Vec<Steered> {
-        let prompts = self.take_steering().await;
-        prompts.into_iter().map(Steered::plain).collect()
-    }
-
-    /// 工具边界取走发给这次运行的通知，按到达顺序，每条是通知全文（子代理派生的后台子代理结束，
-    /// docs/specs/rust-cli/agents.md §5.1）。缺省为空：顶层会话的通知由会话 actor 在回合结束后
-    /// 开新回合（query.md §5）。
-    async fn take_notices(&self) -> Vec<String> {
-        Vec::new()
-    }
-
-    /// 工具边界并入的插话与通知，按到达顺序（L18，query.md §5）。缺省：先插话、后通知。
-    async fn take_absorbed(&self) -> Vec<Absorbed> {
-        Absorbed::ordered(self.take_steered().await, self.take_notices().await)
-    }
-
-    /// 会话现在的权限模式；主循环每一步与每次工具调用前读一次，工具改过的模式在同一回合里立即
-    /// 生效（docs/specs/rust-cli/tools-more.md §2.3）。没有会话 owner 的输出端返回 None，主循环用
-    /// 请求里的模式。
-    async fn current_mode(&self) -> Option<PermissionMode> {
-        None
-    }
-
-    /// 会话现在的权限模式与计划模式的会话标志，一次取回同一个快照（docs/specs/rust-cli/context.md
-    /// §13.4）；主循环组装上下文时用。缺省：`current_mode` 加默认标志。
-    async fn current_mode_and_plan_flags(&self) -> Option<(PermissionMode, PlanModeFlags)> {
-        self.current_mode()
-            .await
-            .map(|mode| (mode, PlanModeFlags::default()))
-    }
-
-    /// 会话现在的工作目录，读法同 `current_mode`（tools-more.md §11.4）；None 时用请求里的。
-    async fn current_workspace(&self) -> Option<WorkspaceRef> {
-        None
-    }
-
-    /// 这次运行的工具缺省在哪台机器上跑（R3，remote-exec.md §20.6）：子代理派生时 Agent 的 `machine`；None 是本机。
-    async fn default_machine(&self) -> Option<String> {
-        None
-    }
-
-    /// 会话现在的目标条件（`/goal`，docs/specs/rust-cli/goal.md §4）：主循环要正常结束时读一次。
-    /// owner 是会话 actor；子代理与没有会话 owner 的输出端返回 None（不检查）。
-    async fn current_goal(&self) -> Option<String> {
-        None
-    }
+    /// 工具边界并入的插话（`Delivery::Steer`，带各自 UserPromptSubmit 的消息）与发给这次运行的通知，按到达顺序
+    /// （L18，docs/specs/rust-cli/query.md §4、§5）。取走即属于当前回合；本回合已中止时插话不取，继续排队。顶层会话的
+    /// 通知由会话 actor 在回合结束后开新回合；子代理收到它派生的后台子代理的通知（agents.md §5.1）。工作线 F134 以前
+    /// 另有 `take_steering`、`take_steered`、`take_notices` 三个缺省方法拼出它，主循环只调这一个。
+    async fn take_absorbed(&self) -> Vec<Absorbed>;
 
     /// 报告一次目标评估（goal.md §3）：actor 按判定提交反馈与 `goal_status`、改目标，返回已提交的
-    /// 消息（主循环并入自己的历史）。`condition` 不是当前目标时什么都不做。缺省不提交。
+    /// 消息（主循环并入自己的历史）。`condition` 不是当前目标时什么都不做；没有目标的输出端（子代理）不提交。
     async fn goal_checked(
         &self,
-        _condition: String,
-        _verdict: crate::hooks::StopVerdict,
-    ) -> Result<Vec<Message>, StoreError> {
-        Ok(Vec::new())
-    }
+        condition: String,
+        verdict: crate::hooks::StopVerdict,
+    ) -> Result<Vec<Message>, StoreError>;
 }
 
 #[async_trait]
@@ -249,12 +230,38 @@ pub struct ContextRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<McpView>,
     /// 这次运行的缺省机器（远端执行 F98，docs/specs/rust-cli/remote-exec.md §25.2.1）：子代理派生时 Agent 的 `machine`
-    /// （`RunSink::default_machine`）；本机为 None。机器清单提醒按它写“不写 `machine` 时在哪台机器上”。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_machine: Option<String>,
+    /// （[`QueryRequest::default_machine`]）；主 env 不写出。机器清单提醒按它写“不写 `machine` 时在哪台机器上”。
+    #[serde(default, skip_serializing_if = "crate::ids::MachineName::is_primary")]
+    pub default_machine: crate::ids::MachineName,
 }
 
-/// system prompt 段落、user / system context，以及这一步要追加的 attachment。
+impl ContextRequest {
+    /// 一步请求的上下文输入：没有子代理、工具名、计划模式标志、能力、MCP 状态与缺省机器（主循环按这一步的快照
+    /// 用结构更新填上）。
+    pub fn new(
+        session: SessionId,
+        workspace: WorkspaceRef,
+        source: QuerySource,
+        mode: PermissionMode,
+        selection: ModelSelection,
+    ) -> Self {
+        Self {
+            session,
+            workspace,
+            agent: None,
+            source,
+            mode,
+            tool_names: Vec::new(),
+            selection,
+            plan_flags: PlanModeFlags::default(),
+            capabilities: None,
+            mcp: None,
+            default_machine: crate::ids::MachineName::default(),
+        }
+    }
+}
+
+/// system prompt 段落，以及这一步要追加的 attachment。
 ///
 /// attachment 发给模型时的位置由 normalize 的规则决定，不在这里表达：
 /// [`AttachmentMessage::role`] 为 user 的排在本轮人类输入之前、并进同一条 user 消息；为 system
@@ -262,9 +269,6 @@ pub struct ContextRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BuiltContext {
     pub system: Vec<SystemBlock>,
-    /// 作为首条 meta user 消息注入、不落库的上下文（inline 渲染）。默认走 announced
-    /// 渲染，规则文件与会话上下文都是 attachment，这里通常为空。
-    pub user_context: Vec<UserMessage>,
     /// 这一步新增的 attachment；会作为消息落库，resume 后原样重放。
     pub attachments: Vec<AttachmentMessage>,
 }
@@ -276,6 +280,9 @@ pub enum OrchestrationError {
     Failed { message: String },
     #[error("not implemented: {what}")]
     Unsupported { what: String },
+    /// 会话已经关闭（会话 actor 收不下请求了；工作线 F130，以前各处写 `Failed { "the session is closed" }`）。
+    #[error("the session is closed")]
+    Closed,
 }
 
 #[async_trait]
@@ -339,45 +346,35 @@ impl DirectoryRules for NoDirectoryRules {
 }
 
 /// 当前可用的工具（内置 + MCP + 插件），按名字或别名查找。
+///
+/// 方法都没有缺省体（工作线 F134，modularity.md §7 F132-2）：装饰链（内置 → 扩展 → 判决链过滤 → Agent 等工具 →
+/// 子代理的过滤）的每一层显式决定每个方法转发还是自己回答，漏写是编译错误（以前有的层不转发 `hides` / `withheld`
+/// 只是因为位置刚好）。测试替身用 `testing::RegistryOverride`。
 pub trait ToolRegistry: Send + Sync {
     fn tools(&self) -> Vec<Arc<dyn Tool>>;
     fn find(&self, name: &str) -> Option<Arc<dyn Tool>>;
 
     /// 注册了、但按暴露规则不出现在 [`Self::tools`] 里的工具（有 Bash 时的 Glob / Grep，内嵌搜索，
     /// docs/specs/rust-cli/tools-files.md §1.1）。子代理的工具清单点名它们、又没有 Bash 时补回（
-    /// agents.md §4.2，修复线 F16 新增）。缺省没有。
-    fn withheld(&self, _name: &str) -> Option<Arc<dyn Tool>> {
-        None
-    }
+    /// agents.md §4.2，修复线 F16 新增）。
+    fn withheld(&self, name: &str) -> Option<Arc<dyn Tool>>;
 
     /// 叠在这个注册表上的工具里，名字为 `name` 的要不要藏起来（整个工具的 deny 规则把它从清单里去掉，
     /// docs/specs/rust-cli/tools-files.md §1.1.1，工作线 F69 新增）。外层注册表（Agent 等工具）按它过滤自己的工具。
-    /// 缺省 false。
-    fn hides(&self, _name: &str) -> bool {
-        false
-    }
+    fn hides(&self, name: &str) -> bool;
 
     /// [`Self::tools`] 的顺序就是发给模型的顺序（子代理按点名的工具清单排，agents.md §4.2，修复线 F16 新增）。
-    /// 缺省 false：主循环发请求前按名字排序（tools-more.md §3.3）。
-    fn keeps_order(&self) -> bool {
-        false
-    }
+    /// 为 false 时主循环发请求前按名字排序（tools-more.md §3.3）。
+    fn keeps_order(&self) -> bool;
 
     /// 同一时点的工具与 MCP 状态（docs/specs/rust-cli/query.md §1.3，修复线 F36）：主循环在运行开始与每个工具批
     /// 之后各取一次，当步 attachment 与之后的请求都用它。`session` 是
-    /// 这次运行的会话（WaitForMcpServers 的 declared 按会话，ext.md §3.8）。缺省是 [`Self::tools`]、没有 MCP 状态。
-    fn snapshot(&self, _session: &SessionId) -> ToolSnapshot {
-        ToolSnapshot {
-            tools: self.tools(),
-            mcp: None,
-        }
-    }
+    /// 这次运行的会话（WaitForMcpServers 的 declared 按会话，ext.md §3.8）。没有 MCP 的注册表是 [`Self::tools`]、
+    /// 没有 MCP 状态。
+    fn snapshot(&self, session: &SessionId) -> ToolSnapshot;
 
     /// MCP 连接（ToolSearch、WaitForMcpServers 与直接调用连接中服务器的工具时等待，ext.md §3.8，修复线 F36）。
-    /// 缺省没有。
-    fn mcp(&self) -> Option<Arc<dyn McpConnections>> {
-        None
-    }
+    fn mcp(&self) -> Option<Arc<dyn McpConnections>>;
 }
 
 /// [`ToolRegistry::snapshot`] 的结果。
@@ -417,27 +414,21 @@ impl ToolExecution {
 /// 工具执行管线（validate → PreToolUse → 权限 → call → PostToolUse），主循环逐个调用。
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
+    /// 执行一个工具调用：结果，加上 hook 的消息与停止请求。
     async fn execute(
         &self,
         tool: Arc<dyn Tool>,
         input: Value,
         context: ToolUseContext,
         progress: mpsc::Sender<ToolProgress>,
-    ) -> ToolOutput;
-
-    /// 与 [`execute`](Self::execute) 相同，另外带上 hook 的消息与停止请求。默认实现没有 hook 消息。
-    async fn execute_full(
-        &self,
-        tool: Arc<dyn Tool>,
-        input: Value,
-        context: ToolUseContext,
-        progress: mpsc::Sender<ToolProgress>,
-    ) -> ToolExecution {
-        ToolExecution::output(self.execute(tool, input, context, progress).await)
-    }
+    ) -> ToolExecution;
 }
 
 /// 通用权限判决链（deny 规则 → 工具自身检查 → 模式 → allow 规则 → 询问）。
+///
+/// 方法都没有缺省体（F125）：缺陷 D1 就是包在判决链外面的一层漏转发了当时的 `ask_once`，落到缺省的 `false` 也能编译。
+/// 现在漏转发、漏实现都是编译错误；测试替身用 `testing::FixedGate` 或各自写全。“只批准这一次”是判决结果
+/// （`PermissionDecision::Ask.once`，工作线 F137），不再是单独的方法。
 #[async_trait]
 pub trait PermissionGate: Send + Sync {
     async fn decide(
@@ -447,37 +438,42 @@ pub trait PermissionGate: Send + Sync {
         context: &ToolUseContext,
     ) -> PermissionDecision;
 
-    /// 用户在询问里选了“总是允许”：把规则加进本会话（持久化到配置由实现决定，
-    /// docs/specs/rust-cli/shell-permissions.md §5）。F1 起没有调用方：落库后改走
-    /// [`PermissionGate::local_rules_committed`]。
-    async fn remember(&self, _session: &SessionId, _rules: &[crate::permission::PermissionRule]) {}
-
     /// “总是允许”的规则已与交互的解决同一批写进 `workspace` 的本机项目规则集（docs/specs/rust-cli/shell-permissions.md
     /// §5）：判决链按 `/permissions` 的同一条路径读回库值、换上 LocalSettings 层，同一进程里的子代理与之后的会话都
-    /// 看到它（共享的权限上下文）。缺省什么都不做。
-    async fn local_rules_committed(&self, _workspace: &crate::env::WorkspaceRef) {}
+    /// 看到它（共享的权限上下文）。
+    async fn local_rules_committed(&self, workspace: &crate::env::WorkspaceRef);
 
     /// hook 放行或要求询问时仍然生效的检查：
     /// deny / ask 规则、工具自身检查的拒绝、规则与安全路径的询问。没有命中时为 None
     /// （docs/specs/rust-cli/hooks.md §6）。
     async fn check_rules(
         &self,
-        _tool: &dyn Tool,
-        _input: &Value,
-        _context: &ToolUseContext,
-    ) -> Option<PermissionDecision> {
-        None
-    }
-
-    /// 这次调用的询问只批准这一次（Node guarded 的 `approvalMode: "user-once"`，修复线 F20，
-    /// docs/specs/rust-cli/shell-permissions.md §4.6.1）：执行管线不跑 PermissionRequest hooks，询问没有
-    /// “总是允许”。缺省 false。
-    async fn ask_once(&self, _tool: &dyn Tool, _input: &Value, _context: &ToolUseContext) -> bool {
-        false
-    }
+        tool: &dyn Tool,
+        input: &Value,
+        context: &ToolUseContext,
+    ) -> Option<PermissionDecision>;
 }
 
-/// 需要用户回答的交互。会话 actor 实现：先持久化待回答事实，再通知前端，回答后唤醒等待方。
+/// 带一组只对这一次判决生效的 allow 规则的判决（skill 的 `allowed-tools`，docs/specs/rust-cli/ext.md §2.5）：deny、ask
+/// 规则仍然优先。policy 实现，ext 的 skill `!` 命令用。F125（T5）：以前 ext 为这一个方法依赖具体类型 `PolicyGate`。
+#[async_trait]
+pub trait ScopedGate: Send + Sync {
+    async fn decide_with_allowed(
+        &self,
+        tool: &dyn Tool,
+        input: &Value,
+        context: &ToolUseContext,
+        allowed: &[crate::permission::PermissionRule],
+    ) -> PermissionDecision;
+}
+
+/// 判决链当前的规则快照（只读）：工具清单按它去掉整个工具被 deny 的工具（docs/specs/rust-cli/tools-files.md §1.1.1）。
+/// 一次清单只取一次，清单前后用同一份。policy 实现。F125（T5）：以前 tools 为此依赖具体类型 `PolicyGate`。
+pub trait RuleSnapshots: Send + Sync {
+    fn current_rules(&self) -> Arc<crate::permission::PermissionRules>;
+}
+
+/// 需要用户回答的交互。会话 actor 实现：登记待回答（只在内存，工作线 F130），通知前端，回答后唤醒等待方。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InteractionRequest {
@@ -489,13 +485,17 @@ pub enum InteractionRequest {
         /// 判决链建议的规则：用户选"不再询问"时随 `PermissionAnswer::Allow { remember }` 带回。
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         suggestions: Vec<crate::permission::PermissionRule>,
+        /// “不再询问”一行的可编辑前缀（种子，docs/specs/rust-cli/shell-permissions.md §4.10）：Bash 且有建议规则时由执行
+        /// 管线按判决链的同一套命令分析算出；前端只显示、编辑（F133，审查 U14：以前 TUI 经 runtime 调 policy 自己算）。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule_seed: Option<String>,
         /// 发起询问的子代理的名字（agent 类型）；主线程的询问为 None。界面在标题后标出它（docs/specs/rust-cli/
         /// agents.md §4.1.1）。最里层的子代理写入，外层转发时不改。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         asked_by: Option<String>,
-        /// 调用在哪台远端机器上执行（R3，remote-exec.md §20.8）；本机为 None。界面的标记在 R4。
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        machine: Option<String>,
+        /// 调用在哪台机器上执行（R3，remote-exec.md §20.8）；主 env 不写出。界面的标记在 R4。
+        #[serde(default, skip_serializing_if = "crate::ids::MachineName::is_primary")]
+        machine: crate::ids::MachineName,
     },
     Question {
         tool_use: ToolUseId,
@@ -519,103 +519,33 @@ impl InteractionRequest {
 }
 
 pub use crate::interaction::{
-    DetachedAsk, DetachedEvent, InteractionAnswer, PermissionAnswer, PlanApprovalAnswer,
+    Answer, DetachedAsk, DetachedEvent, InteractionAnswer, PermissionAnswer, PlanApprovalAnswer,
     QuestionAnnotation, QuestionAnswer,
 };
+pub use crate::session_ops::{RunView, SessionOps};
 
+/// 询问用户（权限、提问、计划审批）。会话的读与命令在 [`SessionOps`]（工作线 F134，审查 C3：以前 10 个方法里混着
+/// 会话命令）；各方法的 `session` 参数生产实现都不用，一起删掉（询问总是交给给出入口的会话）。
+///
+/// 方法都没有缺省体（工作线 F137，审查 K6 的剩余）：每个实现写明撤回与会话级的入口（以前缺省“什么都不做”与 None，
+/// 只为约 20 个只回答询问的测试替身存在，包装层漏转发也能编译）。测试替身用 `testing::ScriptedInteractions`、
+/// `testing::NoOneToAsk` 或代理 `testing::AskOverride`。
 #[async_trait]
 pub trait Interactions: Send + Sync {
     async fn ask(
         &self,
-        session: &SessionId,
         request: InteractionRequest,
     ) -> Result<InteractionAnswer, OrchestrationError>;
 
     /// 撤回 `tool_use` 还没有回答的询问（工具被取消，docs/specs/rust-cli/session-lifecycle.md §2）：交互的 owner
     /// 清掉它并通知前端关闭对话框，之后到达的回答被拒绝。取消是一条消息，不靠丢弃 `ask` 的 future（README §6
-    /// 规则 5）。没有这个询问时什么都不做；不持有交互的实现缺省什么都不做。
-    async fn cancel_ask(&self, _session: &SessionId, _tool_use: &ToolUseId) {}
-
-    /// 工具请求修改会话的权限模式。模式的 owner 是会话 actor：先提交事实再通知前端，返回后新模式已生效
-    /// （docs/specs/rust-cli/tools-more.md §2.3）。`Plan` 是旧写法，只打开 plan。不持有会话模式的实现（子代理、
-    /// 测试替身）返回 `Unsupported`。
-    async fn set_mode(
-        &self,
-        _session: &SessionId,
-        _mode: PermissionMode,
-    ) -> Result<(), OrchestrationError> {
-        Err(OrchestrationError::Unsupported {
-            what: "changing the permission mode".to_owned(),
-        })
-    }
-
-    /// 工具请求打开或关掉 plan 开关（EnterPlanMode、ExitPlanMode，修复线 F20），权限模式不变。owner 与时序同
-    /// [`Interactions::set_mode`]。缺省 `Unsupported`。
-    async fn set_plan(
-        &self,
-        _session: &SessionId,
-        _enabled: bool,
-    ) -> Result<(), OrchestrationError> {
-        Err(OrchestrationError::Unsupported {
-            what: "changing plan mode".to_owned(),
-        })
-    }
-
-    /// 接收交互与排队输入的顶层会话（tools-more.md §10.2）：前台子代理转给父会话，其余是自己。
-    async fn owner_session(&self, session: &SessionId) -> SessionId {
-        session.clone()
-    }
-
-    /// 会话已提交的消息（这次回复之前的历史）：fork 子代理继承它（修复线 L-A，docs/specs/rust-cli/agents.md §8.1.2）。
-    /// 对话的 owner 是会话 actor；不持有会话对话的实现（子代理、测试替身）缺省 None。
-    async fn conversation(&self, _session: &SessionId) -> Option<Vec<crate::message::Message>> {
-        None
-    }
-
-    /// 改会话的工作目录（EnterWorktree / ExitWorktree）；owner 是会话 actor，它同时设执行环境的
-    /// shell cwd（tools-more.md §11.4）。不持有会话的实现返回 `Unsupported`。
-    async fn set_workspace(
-        &self,
-        _session: &SessionId,
-        _root: EnvPath,
-    ) -> Result<(), OrchestrationError> {
-        Err(OrchestrationError::Unsupported {
-            what: "changing the working directory".to_owned(),
-        })
-    }
-
-    /// 会话现在的主模型选择（工具与 hook 在请求时取，旁路请求再经 `model::small_fast_model`，
-    /// docs/specs/rust-cli/model.md §6.1）。选择的 owner 是会话 actor；子代理转给父会话；不持有会话的
-    /// 实现（测试替身）返回 None，调用方用自己的回退值。
-    async fn current_selection(
-        &self,
-        _session: &SessionId,
-    ) -> Option<crate::model::ModelSelection> {
-        None
-    }
-
-    /// Monitor 工具起好的 monitor 交给会话 actor（工作线 F83 新增，docs/specs/rust-cli/tools-more.md §19.6）：actor 是
-    /// 切行、批、限流与通知的唯一 owner。`events` 是 `start_command` 返回、工具读过 `Started` 的那条流（工作线 F119：
-    /// 命令结束后不能再按 ID 查，monitor 不再自己从 0 读）。不持有会话的实现（子代理、测试替身）返回 `Unsupported`，
-    /// 调用方停掉已经起的命令。
-    async fn arm_monitor(
-        &self,
-        _session: &SessionId,
-        _monitor: crate::monitor::MonitorArmed,
-        _events: crate::machine::CommandEvents,
-    ) -> Result<(), OrchestrationError> {
-        Err(OrchestrationError::Unsupported {
-            what: "monitors".to_owned(),
-        })
-    }
+    /// 规则 5）。没有这个询问时什么都不做；不持有交互的实现什么都不做。
+    async fn cancel_ask(&self, tool_use: &ToolUseId);
 
     /// 不随当前回合结束的询问入口（docs/specs/rust-cli/agents.md §4.1.1）：后台工作（交互界面里的后台子代理）
     /// 在父回合结束之后仍经它询问会话的用户。会话 actor 的回合通道给出会话级的入口，它的询问不随回合结束取消、
-    /// 只随会话关闭取消；子代理的 sink 转给父会话。入口的 `session` 参数不用（询问总是交给给出入口的会话）。
-    /// 不能询问的实现缺省 None，调用方按“没有人能回答”处理。
-    fn lasting(&self, _session: &SessionId) -> Option<Arc<dyn Interactions>> {
-        None
-    }
+    /// 只随会话关闭取消；子代理的 sink 转给父会话。不能询问的实现给 None，调用方按“没有人能回答”处理。
+    fn lasting(&self) -> Option<Arc<dyn Interactions>>;
 }
 
 #[cfg(test)]

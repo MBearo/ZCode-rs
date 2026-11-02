@@ -1,19 +1,20 @@
 //! 交互的回答形状（[`crate::orchestration::Interactions`] 的返回值）。从 `orchestration` 拆出，
-//! 原路径经 `orchestration` 重新导出，接口不变。
+//! 原路径经 `orchestration` 重新导出。
 
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::ids::InteractionId;
+use crate::orchestration::InteractionRequest;
+use crate::permission::PermissionRule;
 
 /// 待处理的交互多久没回答就通知（6000 ms）：TUI 的终端通知（检查的间隔与“多久
 /// 没按键”的门槛）与权限询问的 Notification hook 用同一个值。F58：以前 tui 与 session
 /// 各写一份。
 pub const NOTIFY_AFTER: Duration = Duration::from_secs(6);
 
-/// 权限询问的回答（[`InteractionAnswer::answer`] 的形状）。
+/// 权限询问的回答（[`Answer::Permission`]）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum PermissionAnswer {
@@ -36,7 +37,7 @@ pub enum PermissionAnswer {
     NoPrompts,
 }
 
-/// 提问（AskUserQuestion）的回答（[`InteractionAnswer::answer`] 的形状）。
+/// 提问（AskUserQuestion）的回答（[`Answer::Question`]）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum QuestionAnswer {
@@ -71,7 +72,7 @@ pub struct QuestionAnnotation {
     pub notes: Option<String>,
 }
 
-/// 计划审批（ExitPlanMode）的回答（[`InteractionAnswer::answer`] 的形状）。
+/// 计划审批（ExitPlanMode）的回答（[`Answer::PlanApproval`]）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum PlanApprovalAnswer {
@@ -88,10 +89,115 @@ pub enum PlanApprovalAnswer {
     },
 }
 
+/// 一个询问的回答：三种询问各一种（工作线 F134，审查 K4）。以前是 `serde_json::Value`：前端 `to_value`、工具
+/// `from_value(..).ok()`，形状不对时一律当拒绝。JSON 的形状不变（`untagged`：就是里面那种回答的 JSON，三种的
+/// `decision` 不重名）；App 协议的回答在 protocol-zcode 的边界换成它。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Answer {
+    Permission(PermissionAnswer),
+    Question(QuestionAnswer),
+    PlanApproval(PlanApprovalAnswer),
+}
+
+impl Answer {
+    /// 没有人能回答时按询问的种类给的回答：权限询问是 `permission`（`-p` 是 `Unavailable`，`-p` 里的后台子代理是
+    /// `NoPrompts`），提问是不回答，计划审批是继续计划（工具按这几种与“没有回答”同样处理）。
+    pub fn nobody(request: &InteractionRequest, permission: PermissionAnswer) -> Self {
+        match request {
+            InteractionRequest::Permission { .. } => Self::Permission(permission),
+            InteractionRequest::Question { .. } => Self::Question(QuestionAnswer::Declined),
+            InteractionRequest::PlanApproval { .. } => {
+                Self::PlanApproval(PlanApprovalAnswer::KeepPlanning { feedback: None })
+            }
+        }
+    }
+
+    /// 回答的决定（日志的 `decision`，同 JSON 里的名字）。
+    pub fn decision(&self) -> &'static str {
+        match self {
+            Self::Permission(PermissionAnswer::Allow { .. }) => "allow",
+            Self::Permission(PermissionAnswer::Deny { .. }) => "deny",
+            Self::Permission(PermissionAnswer::Unavailable) => "unavailable",
+            Self::Permission(PermissionAnswer::NoPrompts) => "no_prompts",
+            Self::Question(QuestionAnswer::Answered { .. }) => "answered",
+            Self::Question(QuestionAnswer::Declined) => "declined",
+            Self::PlanApproval(PlanApprovalAnswer::Approve { .. }) => "approve",
+            Self::PlanApproval(PlanApprovalAnswer::KeepPlanning { .. }) => "keep_planning",
+        }
+    }
+
+    /// 用户选“不再询问”时一并加入的规则（权限询问的 `Allow { remember }`）；其余回答没有。
+    pub fn remembered(&self) -> &[PermissionRule] {
+        match self {
+            Self::Permission(PermissionAnswer::Allow { remember }) => remember,
+            Self::Permission(
+                PermissionAnswer::Deny { .. }
+                | PermissionAnswer::Unavailable
+                | PermissionAnswer::NoPrompts,
+            )
+            | Self::Question(_)
+            | Self::PlanApproval(_) => &[],
+        }
+    }
+}
+
+impl From<PermissionAnswer> for Answer {
+    fn from(answer: PermissionAnswer) -> Self {
+        Self::Permission(answer)
+    }
+}
+
+impl From<QuestionAnswer> for Answer {
+    fn from(answer: QuestionAnswer) -> Self {
+        Self::Question(answer)
+    }
+}
+
+impl From<PlanApprovalAnswer> for Answer {
+    fn from(answer: PlanApprovalAnswer) -> Self {
+        Self::PlanApproval(answer)
+    }
+}
+
+/// 工具按询问的种类取回答：回答是别的种类时原样退回（工具按没有回答处理）。
+impl TryFrom<Answer> for PermissionAnswer {
+    type Error = Answer;
+
+    fn try_from(answer: Answer) -> Result<Self, Answer> {
+        match answer {
+            Answer::Permission(answer) => Ok(answer),
+            other @ (Answer::Question(_) | Answer::PlanApproval(_)) => Err(other),
+        }
+    }
+}
+
+impl TryFrom<Answer> for QuestionAnswer {
+    type Error = Answer;
+
+    fn try_from(answer: Answer) -> Result<Self, Answer> {
+        match answer {
+            Answer::Question(answer) => Ok(answer),
+            other @ (Answer::Permission(_) | Answer::PlanApproval(_)) => Err(other),
+        }
+    }
+}
+
+impl TryFrom<Answer> for PlanApprovalAnswer {
+    type Error = Answer;
+
+    fn try_from(answer: Answer) -> Result<Self, Answer> {
+        match answer {
+            Answer::PlanApproval(answer) => Ok(answer),
+            other @ (Answer::Permission(_) | Answer::Question(_)) => Err(other),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InteractionAnswer {
     pub interaction: InteractionId,
-    pub answer: Value,
+    pub answer: Answer,
 }
 
 /// 父会话已关闭（`/clear`、`/resume`）之后，旧会话里后台子代理的询问（docs/specs/rust-cli/agents.md §4.1.2，
@@ -116,3 +222,7 @@ pub enum DetachedEvent {
     /// 回答了，或询问被撤回（子代理被停止）。
     Resolved { interaction: InteractionId },
 }
+
+#[cfg(test)]
+#[path = "interaction_tests.rs"]
+mod tests;

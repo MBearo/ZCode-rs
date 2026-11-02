@@ -5,6 +5,7 @@ use rust_cli_kernel_api::message::{
 };
 use rust_cli_kernel_api::metering::{CallStatus, ModelCall};
 use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
+use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_kernel_api::store::{Fact, SessionStore};
 use serde_json::{Value, json};
 
@@ -24,26 +25,14 @@ fn reply(id: &str, model: &str, stop: Option<StopReason>) -> Fact {
 
 fn called(id: &str, provider: &str, model: &str) -> Fact {
     Fact::ModelCalled {
-        call: ModelCall {
-            message: MessageId::new(id),
-            source: QuerySource::MainThread,
-            selection: ModelSelection {
-                provider: provider.into(),
-                model: model.into(),
-                reasoning: None,
-                connection: None,
-            },
-            started_at_ms: 1000,
-            first_token_at_ms: None,
-            first_content_at_ms: None,
-            completed_at_ms: 1000,
-            status: CallStatus::Cancelled,
-            stop_reason: None,
-            tool_calls: 0,
-            usage: None,
-            retries: 0,
-            error: None,
-        },
+        call: ModelCall::new(
+            MessageId::new(id),
+            QuerySource::MainThread,
+            ModelSelection::new(provider, model),
+            1000,
+            1000,
+            CallStatus::Cancelled,
+        ),
     }
 }
 

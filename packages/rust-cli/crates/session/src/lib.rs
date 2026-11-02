@@ -4,14 +4,16 @@
 //! 给事件分配 seq。前端只经 [`SessionHandle`] 访问。
 //!
 //! 已实现：回合、排队、中断、切换模型与模式、主循环的提交屏障（[`sink`]）、待回答的交互
-//! （先持久化再通知）；会话侧 hooks、文件 checkpoint、rewind、fork 与中断后续跑
+//! （只在内存，工作线 F130）；会话侧 hooks、文件 checkpoint、rewind、fork 与中断后续跑
 //! （docs/specs/rust-cli/session-lifecycle.md）。
 
 mod actor;
 mod agent_signals;
+mod append;
 mod bash;
 mod checkpoints;
 mod closing;
+mod commit;
 mod compact;
 mod cron;
 mod detached;
@@ -20,9 +22,12 @@ mod fork;
 mod fork_input;
 mod goal;
 mod hooks;
+mod inbox;
+mod input;
 #[cfg(test)]
 mod input_tests;
 mod lane;
+mod launch;
 mod local_record;
 mod log;
 mod loop_fold;
@@ -63,9 +68,8 @@ use futures_util::stream::BoxStream;
 use rust_cli_base::{Spawner, Task};
 use rust_cli_kernel_api::agents::AgentSignals;
 use rust_cli_kernel_api::clock::{Clock, Ids};
-use rust_cli_kernel_api::ids::{Generation, SessionId};
-use rust_cli_kernel_api::local_services::LocalServices;
-use rust_cli_kernel_api::machine::MachineEnv;
+use rust_cli_kernel_api::env::Operations;
+use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
 use rust_cli_kernel_api::orchestration::{Compactor, HookRunner, QueryRunner};
@@ -94,12 +98,10 @@ pub struct SessionDeps {
     pub runner: Arc<dyn QueryRunner>,
     /// 手动压缩（`Command::Compact`，docs/specs/rust-cli/compact.md §4.2）。
     pub compactor: Arc<dyn Compactor>,
-    /// 会话的机器：订阅后台命令的终态通知、查询后台工作（docs/specs/rust-cli/query.md §5）、shell 当前目录、代码回退
-    /// （R0 只有本机；R3 起按机器分开，remote-exec.md §15.8.1）。
-    pub machine: MachineEnv,
-    /// 只在本机的服务：斜杠命令的工具上下文要带它。
-    pub local: LocalServices,
-    /// 执行环境的注册表（R3，remote-exec.md §20.7）：远端机器上的后台通知、Monitor、代码回退与会话关闭经它找到那台机器。
+    /// 执行环境的注册表（R3，remote-exec.md §20.7）：会话在它的主 env 上（订阅后台命令的终态通知、查询后台工作，
+    /// docs/specs/rust-cli/query.md §5；shell 当前目录、代码回退，§15.8.1），斜杠命令的工具上下文带它的 controller 服务；
+    /// 远端机器上的后台通知、Monitor、代码回退与会话关闭经它找到那台机器。工作线 F131：以前另存一份主 env 与 controller
+    /// 的服务，与注册表给的是同一份。
     pub machines: Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>,
     /// 每次提问最多几轮（`--max-turns`）。
     pub max_turns: Option<u32>,
@@ -117,8 +119,9 @@ pub struct SessionDeps {
     pub artifacts: Arc<dyn ArtifactStore>,
     /// fork 出的会话的创建时间；会话标题请求的用量计时（工作线 F73）。
     pub clock: Arc<dyn Clock>,
-    /// 本地执行环境实例的 generation（回退事务的操作上下文）。
-    pub generation: Generation,
+    /// 操作上下文的工厂（执行环境的当前实例 + `ids`；回退事务、停任务、停 monitor、`!` 命令，F134：以前另带一个
+    /// `generation`）。
+    pub operations: Operations,
     /// 会话自己的任务作用域：actor 与主循环都在这里启动。
     pub spawner: Spawner,
     /// 关闭任务的作用域（内核的根作用域，session-lifecycle.md §3.3.1）：关闭不依赖调用方的 future；会话自己的作用域
@@ -173,6 +176,55 @@ pub struct SessionState {
     /// 当前轮以错误结束（冷加载的 `LoadedSession.last_turn_failed`）：续写时不补 assistant（session-lifecycle.md
     /// §6.3.1）。
     pub last_turn_failed: bool,
+}
+
+impl SessionState {
+    /// 新建的会话（还没有历史）。
+    pub fn created(
+        meta: SessionMeta,
+        selection: ModelSelection,
+        mode: rust_cli_kernel_api::permission::ExecutionState,
+        start: StartSource,
+    ) -> Self {
+        Self {
+            meta,
+            messages: Vec::new(),
+            earlier: Vec::new(),
+            selection,
+            mode,
+            checkpoints: Vec::new(),
+            start,
+            turn: None,
+            last_turn_failed: false,
+        }
+    }
+
+    /// 冷加载的会话（工作线 F130，审查 C10：冷加载的恢复在会话这一侧只有这一个入口，以前由 runtime 逐个字段拼）：库里
+    /// 没有模型选择时用 `selection`，没有执行状态时用 `mode`（新会话的缺省）。续跑时要补的消息、定时任务与目标的恢复
+    /// 在 [`Session::spawn`] 里按 [`Opened::Loaded`] 做。
+    pub fn from_loaded(
+        loaded: rust_cli_kernel_api::store::LoadedSession,
+        selection: &ModelSelection,
+        mode: rust_cli_kernel_api::permission::PermissionMode,
+        start: StartSource,
+    ) -> Self {
+        Self {
+            meta: loaded.meta,
+            messages: loaded.messages,
+            earlier: loaded.earlier,
+            selection: loaded.model.unwrap_or_else(|| selection.clone()),
+            mode: loaded.mode.map_or_else(
+                || mode.into(),
+                |stored| {
+                    rust_cli_kernel_api::permission::ExecutionState::from_parts(stored, loaded.plan)
+                },
+            ),
+            checkpoints: loaded.checkpoints,
+            start,
+            turn: loaded.turn,
+            last_turn_failed: loaded.last_turn_failed,
+        }
+    }
 }
 
 /// 会话是新建的还是从存储加载的；新建时发出 `SessionCreated`。

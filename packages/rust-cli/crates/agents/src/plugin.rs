@@ -73,6 +73,8 @@ pub(crate) fn parse(raw: &str, file: &PluginAgentFile, project_dir: &str) -> Age
             model.to_owned()
         }
     });
+    // 缺陷修复（F132 的 T8，只影响日志）：以前 agents 自己那份解析器丢掉嵌套的键，`hooks:` / `mcpServers:` 下是
+    // 对象（唯一实际的写法）时不警告；共用 base 的解析器之后嵌套块（`Value::Block`）也算写了。
     if ["permissionMode", "hooks", "mcpServers"]
         .iter()
         .any(|key| map.contains_key(*key))

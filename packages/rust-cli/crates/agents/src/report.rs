@@ -1,6 +1,7 @@
 //! 给模型看的子代理文本：system prompt、前台结果、后台启动结果、完成通知（agents.md §2、§4.3、§5）。
 //! 文本都在 `prompts/agents/`，这里只拼接。
 
+use rust_cli_kernel_api::env_shell::BackgroundStatus;
 use rust_cli_kernel_api::message::{AssistantMessage, ContentBlock, Usage};
 use rust_cli_kernel_api::model::{CacheControl, SystemBlock};
 use rust_cli_prompts::agents as texts;
@@ -123,11 +124,11 @@ pub(crate) enum Ending {
 }
 
 impl Ending {
-    pub(crate) fn status(self) -> &'static str {
+    pub(crate) fn status(self) -> BackgroundStatus {
         match self {
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Killed | Self::KilledParked => "killed",
+            Self::Completed => BackgroundStatus::Completed,
+            Self::Failed => BackgroundStatus::Failed,
+            Self::Killed | Self::KilledParked => BackgroundStatus::Killed,
         }
     }
 
@@ -196,7 +197,7 @@ pub(crate) fn envelope(
         &[
             ("id", agent),
             ("tool_use", tool_use.unwrap_or_default()),
-            ("status", ending.status()),
+            ("status", ending.status().as_str()),
             ("summary", &summary),
             ("body", &body),
         ],

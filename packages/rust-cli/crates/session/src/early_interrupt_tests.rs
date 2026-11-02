@@ -51,7 +51,6 @@ impl ContextBuilder for Counted {
         let n = self.builds.fetch_add(1, Ordering::SeqCst) + 1;
         Ok(BuiltContext {
             system: Vec::new(),
-            user_context: Vec::new(),
             attachments: vec![attachment(format!("date-{n}"), "date")],
         })
     }

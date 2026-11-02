@@ -175,11 +175,11 @@ fn remote_failures_say_whether_the_call_ran_and_what_to_do() {
             Op::WriteFile,
             ClientError::NotSent(Box::new(ClientError::Closed))
         )),
-        "Machine \"dev-a\" disconnected before this call was sent (disconnected by the user), so it did not run. Retry once the machine is connected again, or run it on the local machine instead."
+        "Machine \"dev-a\" disconnected before this call was sent (disconnected by the user), so it did not run. Retry once the machine is connected again, or omit `machine` to run it on the default machine instead."
     );
     assert_eq!(
         io(failure::client("dev-a", Op::ReadFile, ClientError::Closed)),
-        "Machine \"dev-a\" disconnected before the result came back (disconnected by the user). Nothing was changed; retry once the machine is connected again, or run it on the local machine instead."
+        "Machine \"dev-a\" disconnected before the result came back (disconnected by the user). Nothing was changed; retry once the machine is connected again, or omit `machine` to run it on the default machine instead."
     );
     assert_eq!(
         io(failure::client(

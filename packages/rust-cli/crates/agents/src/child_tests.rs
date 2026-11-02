@@ -153,3 +153,86 @@ async fn subagent_calls_are_committed_with_their_messages_in_the_child_session()
         Some(MessageId::new("assistant_1"))
     );
 }
+
+/// 缺陷 D5（architecture-review.md）：子代理再派生的子代理（孙会话）要在子会话里有关联事实。子代理的 Agent 调用的结果
+/// 提交时，排在工具结果与它的 checkpoint 之后、同一批写 `Fact::SubagentLinked`（与主会话同一份规则，node-store.md
+/// §4.6）。以前子代理的提交路径不记关联，App 的子代理面板找不到孙会话。
+#[tokio::test]
+async fn a_nested_agent_call_links_the_grandchild_session_in_the_same_batch() {
+    use rust_cli_kernel_api::store::Fact;
+
+    let store = Arc::new(MemoryStore::default());
+    let child = SessionId::new("sess_subagent_agent_1");
+    store
+        .create(SessionMeta {
+            id: child.clone(),
+            kind: SessionKind::Subagent,
+            parent: Some(SessionId::new("sess_parent")),
+            workspace: WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/work"),
+            },
+            title: "nest".to_owned(),
+            trace: TraceId::new("trace"),
+            created_at_ms: 1,
+        })
+        .await
+        .unwrap();
+    let sink = ChildSink::new(
+        store.clone(),
+        Arc::new(SequentialIds::default()),
+        Arc::new(Live::default()),
+        AgentId::new("agent_1"),
+        child.clone(),
+        MessageId::new("prompt_1"),
+        None,
+    );
+    sink.emit(QueryEvent::ToolFinished {
+        tool_use: ToolUseId::new("toolu_agent"),
+        output: ToolOutput {
+            content: Vec::new(),
+            is_error: false,
+            display: json!({"agent": {
+                "agentId": "agent_2",
+                "childSessionId": "sess_subagent_agent_2",
+                "agentType": "Explore",
+            }}),
+        },
+    })
+    .await;
+    sink.commit_message(Message::User(UserMessage {
+        id: MessageId::new("result_1"),
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: ToolUseId::new("toolu_agent"),
+            content: vec![ToolResultContent::Text {
+                text: "done".to_owned(),
+            }],
+            is_error: false,
+        }],
+        origin: UserOrigin::ToolResult {
+            assistant: MessageId::new("assistant_1"),
+        },
+    }))
+    .await
+    .unwrap();
+    let facts = store.facts(&child);
+    let kinds: Vec<&str> = facts
+        .iter()
+        .map(|fact| match fact {
+            Fact::MessageAppended { .. } => "message",
+            Fact::SubagentLinked { .. } => "link",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(kinds, ["message", "link"]);
+    assert_eq!(store.batch_turns(&child).len(), 1, "one batch");
+    assert_eq!(
+        facts[1],
+        Fact::SubagentLinked {
+            tool_use: ToolUseId::new("toolu_agent"),
+            agent: AgentId::new("agent_2"),
+            child: SessionId::new("sess_subagent_agent_2"),
+            agent_type: "Explore".to_owned(),
+        }
+    );
+}

@@ -8,7 +8,7 @@ use rust_cli_hooks::node_config::{NODE_EVENTS, NodeHooks};
 use rust_cli_hooks::workspace_digest::{Bundle, DigestEntry, DigestSource, RuntimeRoot};
 use rust_cli_hooks::{HookSource, workspace_digest};
 use rust_cli_paths::StoragePaths;
-use rust_cli_platform::{HookTrustStore, TrustLoad};
+use rust_cli_platform::local::{HookTrustStore, TrustLoad};
 use serde_json::{Map, Value};
 
 use super::files::{ProjectFile, relative};

@@ -94,7 +94,7 @@ async fn local_commands_are_recorded_for_the_next_request() {
         ui.submit("hello");
         ui.wait("the first reply", |s| idle(s, "⏺ first")).await;
         ui.submit("/effort high");
-        ui.wait_for("Set effort level to high (this session only)")
+        ui.wait_for("Set effort level to high (saved as your default for new sessions)")
             .await;
         ui.submit("/model other-model");
         ui.wait_for("Set model to other-model").await;
@@ -117,10 +117,10 @@ async fn local_commands_are_recorded_for_the_next_request() {
             &[
                 CAVEAT.to_owned(),
                 input("effort", "high"),
-                "<local-command-stdout>Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation</local-command-stdout>".to_owned(),
+                "<local-command-stdout>Set effort level to high (saved as your default for new sessions): Comprehensive implementation with extensive testing and documentation</local-command-stdout>".to_owned(),
                 CAVEAT.to_owned(),
                 input("model", "other-model"),
-                "<local-command-stdout>Set model to `other-model` for this session only</local-command-stdout>".to_owned(),
+                "<local-command-stdout>Set model to `other-model` and saved as your default for new sessions</local-command-stdout>".to_owned(),
                 CAVEAT.to_owned(),
                 input("plan", ""),
                 "<local-command-stdout>Enabled plan mode</local-command-stdout>".to_owned(),
@@ -216,7 +216,7 @@ async fn a_model_command_keeps_its_record_when_a_later_command_finishes_first() 
         // `/model` 等目录；`/effort` 先完成。
         ui.submit("/model other-model");
         ui.submit("/effort high");
-        ui.wait_for("Set effort level to high (this session only)")
+        ui.wait_for("Set effort level to high (saved as your default for new sessions)")
             .await;
         gate.notify_one();
         ui.wait_for("Set model to other-model").await;
@@ -233,7 +233,7 @@ async fn a_model_command_keeps_its_record_when_a_later_command_finishes_first() 
             &[
                 input("effort", "high"),
                 input("model", "other-model"),
-                "<local-command-stdout>Set model to `other-model` for this session only</local-command-stdout>".to_owned(),
+                "<local-command-stdout>Set model to `other-model` and saved as your default for new sessions</local-command-stdout>".to_owned(),
                 "next".to_owned(),
             ]
         ),

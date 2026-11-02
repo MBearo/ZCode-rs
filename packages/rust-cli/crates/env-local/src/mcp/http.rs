@@ -12,8 +12,9 @@
 //! 会话过期交给一个后台任务送出——`send` 可能正由事件的唯一读者调用（回答服务器的请求），在这里等通道就是
 //! 自己等自己。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use rust_cli_base::OwnedTask;
 use rust_cli_base::proto::http;
@@ -46,10 +47,6 @@ pub(crate) struct HttpLink {
     /// 后台读响应流的任务；连接释放时一起中止。
     readers: Mutex<Vec<OwnedTask<()>>>,
     closed: CancellationToken,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn failed(message: String) -> McpError {
@@ -121,14 +118,14 @@ async fn read_sse(
 impl HttpLink {
     fn request(&self, request: HttpRequest) -> HttpRequest {
         let mut request = with_headers(request, &self.headers);
-        if let Some(session) = lock(&self.session).clone() {
+        if let Some(session) = self.session.lock_unpoisoned().clone() {
             request = request.header(SESSION_HEADER, session);
         }
         request
     }
 
     fn keep(&self, task: OwnedTask<()>) {
-        let mut readers = lock(&self.readers);
+        let mut readers = self.readers.lock_unpoisoned();
         readers.retain(|reader| !reader.is_finished());
         readers.push(task);
     }
@@ -187,9 +184,10 @@ impl HttpLink {
             .map_err(|error| failed(error.to_string()))?;
         let status = response.status();
         if let Some(session) = response.headers().get(SESSION_HEADER) {
-            *lock(&self.session) = Some(session.to_owned());
+            *self.session.lock_unpoisoned() = Some(session.to_owned());
         }
-        if status == http::NOT_FOUND && self.streamable && lock(&self.session).is_some() {
+        if status == http::NOT_FOUND && self.streamable && self.session.lock_unpoisoned().is_some()
+        {
             self.deliver(vec![McpTransportEvent::Closed {
                 reason: Some("MCP session expired".to_owned()),
                 session_expired: true,
@@ -239,7 +237,7 @@ impl HttpLink {
 
     pub(crate) async fn close(&self) {
         self.closed.cancel();
-        lock(&self.readers).clear();
+        self.readers.lock_unpoisoned().clear();
     }
 }
 

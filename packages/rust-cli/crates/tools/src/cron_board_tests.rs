@@ -2,36 +2,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::cron::CronSignals;
 use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::testing::TokioClock;
 
 use super::*;
 
-/// 跟着 tokio 的（暂停的）时间走的时钟：测试里睡眠会自动推进时间。
-pub(crate) struct TokioClock {
-    base: u64,
-    start: tokio::time::Instant,
-}
-
-impl TokioClock {
-    /// 从 2026-10-17T10:07:30Z 开始。
-    pub(crate) fn new() -> Arc<Self> {
-        Arc::new(Self {
-            base: 1_792_231_650_000,
-            start: tokio::time::Instant::now(),
-        })
-    }
-}
-
-impl Clock for TokioClock {
-    fn now_ms(&self) -> u64 {
-        self.base + u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX)
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
+/// 跟着 tokio 时间走的时钟，从 2026-10-17T10:07:30Z 开始。
+pub(crate) fn clock() -> Arc<TokioClock> {
+    Arc::new(TokioClock::new(1_792_231_650_000))
 }
 
 fn owner() -> SessionId {
@@ -44,7 +23,7 @@ async fn advance(ms: u64) {
 
 #[tokio::test(start_paused = true)]
 async fn one_shot_fires_once_when_due_and_is_removed() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     // 10:12 不落在 :00 / :30，没有抖动。
     board.add(
         &owner(),
@@ -67,7 +46,7 @@ async fn one_shot_fires_once_when_due_and_is_removed() {
 
 #[tokio::test(start_paused = true)]
 async fn recurring_job_reschedules_and_expires_after_seven_days() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     board.add(&owner(), "00000000".to_owned(), "* * * * *", "tick", true);
     advance(60_000).await;
     assert_eq!(board.take_due(&owner()).await.len(), 1);
@@ -84,7 +63,7 @@ async fn recurring_job_reschedules_and_expires_after_seven_days() {
 
 #[tokio::test(start_paused = true)]
 async fn wakeups_fire_once_per_due_time_and_follow_changes() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     let mut wakeups = board.wakeups(&owner());
     // 还没有任务：等到任务表变化。
     let added = board.clone();
@@ -113,7 +92,7 @@ async fn wakeups_fire_once_per_due_time_and_follow_changes() {
 
 #[tokio::test(start_paused = true)]
 async fn jobs_are_kept_per_owner_session() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     let other = SessionId::new("sess_2");
     board.add(&owner(), "a".to_owned(), "*/5 * * * *", "one", true);
     board.add(&other, "b".to_owned(), "*/5 * * * *", "two", true);

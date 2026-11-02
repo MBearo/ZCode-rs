@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use rust_cli_kernel_api::abort::AbortReason;
+use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::message::{
     AssistantMessage, ContentBlock, Message, StopReason, Usage, UserMessage, UserOrigin,
 };
@@ -15,7 +16,7 @@ use rust_cli_kernel_api::model::{
 use rust_cli_kernel_api::orchestration::{QueryError, QueryEvent};
 
 use crate::RunScope;
-use crate::assembler::Assembler;
+use crate::assembler::{Assembled, Assembler};
 use crate::defaults;
 use crate::executor::{Ready, ToolBatch};
 use crate::texts;
@@ -41,6 +42,8 @@ pub(crate) enum Responded {
     },
     /// 工具都已执行完，结果已提交：发下一次请求。
     ToolsFinished,
+    /// 工具都已执行完，结果已提交，本批有工具的 hook 要求停止：以 `hook_stopped` 结束（query.md §3，缺陷 D3）。
+    HookStopped,
     Aborted,
 }
 
@@ -92,7 +95,7 @@ fn hand_out(scope: &RunScope, batch: &mut ToolBatch, handed: &mut Vec<Ready>) {
 /// 一次请求的计时（usage.md §1）：请求前、第一个非空的文本或推理增量、流结束各读一次注入的时钟。
 /// 选择与来源是请求时的快照（运行中切换模型不影响这一行）。
 struct Timing {
-    message: rust_cli_kernel_api::ids::MessageId,
+    message: MessageId,
     source: rust_cli_kernel_api::model::QuerySource,
     selection: rust_cli_kernel_api::model::ModelSelection,
     started: u64,
@@ -146,7 +149,7 @@ impl Timing {
     }
 
     fn call(
-        self,
+        &self,
         completed_at_ms: u64,
         status: CallStatus,
         assembled: (Option<StopReason>, u32, Usage),
@@ -154,20 +157,22 @@ impl Timing {
     ) -> ModelCall {
         let (stop_reason, tool_calls, usage) = assembled;
         ModelCall {
-            message: self.message,
-            source: self.source,
-            selection: self.selection,
-            started_at_ms: self.started,
             first_token_at_ms: self.first_token,
             first_content_at_ms: self.first_content,
-            completed_at_ms,
-            status,
             stop_reason,
             tool_calls,
             // 失败与中断时只有已经报告的用量（Node 用失败事件里的用量）；全为 0 时不写。
             usage: Some(usage).filter(|usage| *usage != Usage::default()),
             retries: self.retries,
             error,
+            ..ModelCall::new(
+                self.message.clone(),
+                self.source.clone(),
+                self.selection.clone(),
+                self.started,
+                completed_at_ms,
+                status,
+            )
         }
     }
 }
@@ -209,6 +214,29 @@ async fn interrupted(
     Ok(Responded::Aborted)
 }
 
+/// 流式阶段的结果：组装器、已开工的调用、流还开着时已交出待提交的结果、流内的错误与计时。
+struct Streamed {
+    assembler: Assembler,
+    batch: ToolBatch,
+    handed: Vec<Ready>,
+    failure: Option<ModelError>,
+    timing: Timing,
+    deltas: u64,
+}
+
+/// 流结束后这次响应怎样收尾。
+enum Ending {
+    /// 交给主循环决定（没有 tool_use、流内失败只交出了 thinking、半截没有 tool_use）。
+    Decide(Responded),
+    /// 一个块都没结束就失败：计量单独提交，等已开工的调用结束，以模型错误结束。
+    Failed { call: ModelCall, error: ModelError },
+    /// 有 tool_use 或已中止：提交 assistant，再按交出规则提交工具结果。
+    Commit {
+        assistant: AssistantMessage,
+        call: ModelCall,
+    },
+}
+
 pub(crate) async fn respond(
     scope: &Arc<RunScope>,
     history: &mut Vec<Message>,
@@ -216,6 +244,65 @@ pub(crate) async fn respond(
     response: usize,
 ) -> Result<Responded, QueryError> {
     let assistant_id = scope.parts.ids.message();
+    let mut streamed = stream(scope, request, response, &assistant_id).await;
+    let aborted_streaming = scope.abort.is_aborted();
+    // 流读完却没有正常收尾（没有 `message_stop`、有没结束的块）：与流中途出错同样处理（R5-1，原来用 `?` 提前
+    // 返回，丢下已经开工的工具）。
+    if streamed.failure.is_none() && !aborted_streaming {
+        streamed.failure = streamed.assembler.incomplete();
+    }
+    // 流结束：读一次时钟，日志与用量行都用它（usage.md §1）。
+    let completed = scope.parts.clock.now_ms();
+    log_end(scope, &streamed, completed, aborted_streaming);
+    let Streamed {
+        assembler,
+        mut batch,
+        handed,
+        failure,
+        timing,
+        ..
+    } = streamed;
+    let ending = finish(
+        scope,
+        (assistant_id, assembler, timing),
+        failure,
+        (completed, aborted_streaming),
+    );
+    match ending {
+        Ending::Decide(responded) => Ok(responded),
+        Ending::Failed { call, error } => {
+            // 没有内容的失败也是一次请求：计量单独提交（usage.md §2.2）；已经开工的调用先等它们结束。
+            scope
+                .sink
+                .commit_metered(None, Metered::Model(call))
+                .await?;
+            while batch.next_completion().await {}
+            Err(error.into())
+        }
+        Ending::Commit { assistant, call } => {
+            commit_batch(scope, history, (assistant, call), handed, &mut batch).await?;
+            if aborted_streaming {
+                return interrupted(scope, history, false).await;
+            }
+            if scope.abort.is_aborted() {
+                return interrupted(scope, history, true).await;
+            }
+            // 先看中止、再看停止请求（query.md §3）。
+            if batch.stop_requested() {
+                return Ok(Responded::HookStopped);
+            }
+            Ok(Responded::ToolsFinished)
+        }
+    }
+}
+
+/// 发请求、读流：增量与通知转给界面，tool_use 块一结束就开工，流还开着时已经能交出的结果先暂存。
+async fn stream(
+    scope: &Arc<RunScope>,
+    request: ModelRequest,
+    response: usize,
+    assistant_id: &MessageId,
+) -> Streamed {
     let mut timing = Timing {
         message: assistant_id.clone(),
         source: request.source.clone(),
@@ -227,13 +314,12 @@ pub(crate) async fn respond(
     };
     // 运行日志（logging.md §4）：请求的开始与结束、失败。计时与重试数和用量行同一份（`Timing`，usage.md §1），
     // 不另外计时。
-    let model = request.selection.model.clone();
     tracing::info!(
         event = "model.request.start",
         session = %scope.session,
         agent = scope.agent.as_ref().map(rust_cli_kernel_api::ids::AgentId::as_str),
         source = ?request.source,
-        model = %model,
+        model = %request.selection.model,
         response,
         "model request started"
     );
@@ -259,29 +345,7 @@ pub(crate) async fn respond(
                     break;
                 }
                 Some(Ok(ModelStreamItem::Notice(notice))) => {
-                    if let ModelNotice::Retrying {
-                        attempt,
-                        max_retries,
-                        delay_ms,
-                        error,
-                    } = &notice
-                    {
-                        // 适配器内部的重试算在这次调用里（Node `retry_count`），同时记日志（带会话，logging.md §4）。
-                        timing.retries += 1;
-                        tracing::warn!(
-                            event = "model.retry",
-                            session = %scope.session,
-                            model = %model,
-                            attempt,
-                            max_retries,
-                            delay_ms,
-                            error = %error,
-                            "model request failed; retrying"
-                        );
-                    }
-                    // 同一份通知交给界面：主线程转成内核事件，子代理转给父工具调用与子代理列表
-                    // （docs/specs/rust-cli/stall-visibility.md §1）。
-                    let _ = scope.sink.emit(QueryEvent::ModelNotice { notice }).await;
+                    on_notice(scope, &mut timing, notice).await;
                 }
                 Some(Ok(ModelStreamItem::Event(event))) => {
                     // 首字（Node `firstModelTokenAt`）与首个内容（F105）。
@@ -320,18 +384,51 @@ pub(crate) async fn respond(
             }
         }
     }
-    let aborted_streaming = scope.abort.is_aborted();
-    // 流读完却没有正常收尾（没有 `message_stop`、有没结束的块）：与流中途出错同样处理（R5-1，原来用 `?` 提前
-    // 返回，丢下已经开工的工具）。
-    if failure.is_none() && !aborted_streaming {
-        failure = assembler.incomplete();
+    Streamed {
+        assembler,
+        batch,
+        handed,
+        failure,
+        timing,
+        deltas,
     }
-    // 流结束：读一次时钟，日志与用量行都用它（usage.md §1）。
-    let completed = scope.parts.clock.now_ms();
-    let duration_ms = completed.saturating_sub(timing.started);
-    let retries = timing.retries;
-    tracing::debug!(event = "model.stream", session = %scope.session, deltas, "model stream events");
-    if let Some(ModelError::StreamIdle { idle_ms }) = &failure {
+}
+
+/// 模型端口的通知：重试算进这次调用并记日志；同一份通知交给界面。
+async fn on_notice(scope: &RunScope, timing: &mut Timing, notice: ModelNotice) {
+    if let ModelNotice::Retrying {
+        attempt,
+        max_retries,
+        delay_ms,
+        error,
+    } = &notice
+    {
+        // 适配器内部的重试算在这次调用里（Node `retry_count`），同时记日志（带会话，logging.md §4）。
+        timing.retries += 1;
+        tracing::warn!(
+            event = "model.retry",
+            session = %scope.session,
+            model = %timing.selection.model,
+            attempt,
+            max_retries,
+            delay_ms,
+            error = %error,
+            "model request failed; retrying"
+        );
+    }
+    // 同一份通知交给界面：主线程转成内核事件，子代理转给父工具调用与子代理列表
+    // （docs/specs/rust-cli/stall-visibility.md §1）。
+    let _ = scope.sink.emit(QueryEvent::ModelNotice { notice }).await;
+}
+
+/// 流结束的日志：增量数、停顿、请求的结束或失败。
+fn log_end(scope: &RunScope, streamed: &Streamed, completed: u64, aborted_streaming: bool) {
+    let model = &streamed.timing.selection.model;
+    let duration_ms = completed.saturating_sub(streamed.timing.started);
+    let retries = streamed.timing.retries;
+    let tools = streamed.batch.len();
+    tracing::debug!(event = "model.stream", session = %scope.session, deltas = streamed.deltas, "model stream events");
+    if let Some(ModelError::StreamIdle { idle_ms }) = &streamed.failure {
         // 看门狗中止且不再重发（静默重发记的是 `model.retry`，logging.md §4）。
         tracing::warn!(
             event = "model.stream.idle",
@@ -341,13 +438,13 @@ pub(crate) async fn respond(
             "model stream idle; aborted"
         );
     }
-    match &failure {
+    match &streamed.failure {
         Some(error) => tracing::info!(
             event = "model.request.failed",
             session = %scope.session,
             model = %model,
             duration_ms,
-            tools = batch.len(),
+            tools,
             retries,
             error = %error,
             "model request failed"
@@ -357,96 +454,34 @@ pub(crate) async fn respond(
             session = %scope.session,
             model = %model,
             duration_ms,
-            tools = batch.len(),
+            tools,
             retries,
             aborted = aborted_streaming,
             "model request finished"
         ),
     }
-    let mut error_of_call = None;
+}
+
+/// 判断这次响应怎样收尾：组装 assistant 消息与这次调用的计量（`completed` 是流结束的时刻）。
+fn finish(
+    scope: &RunScope,
+    (assistant_id, assembler, timing): (MessageId, Assembler, Timing),
+    failure: Option<ModelError>,
+    (completed, aborted_streaming): (u64, bool),
+) -> Ending {
     // 修 bug（修复线 F38，query.md §1.4）：以前被中断时没写完的块一律丢掉，已经流出的半句不进历史——下一条请求里
     // 没有它，esc 撤回也把“已经流出文字”判成没有回答。主线程的 query 中止时保留部分消息，
     // 留下没写完的文字块（`trim` 后不为空）；子代理不保留，退出（`Shutdown`）时不中止、不走这一步。
     let keep_partial = aborted_streaming
         && scope.agent.is_none()
         && scope.abort.reason() != Some(AbortReason::Shutdown);
-    let assembled = match failure {
-        None if keep_partial => assembler.finish_aborted(),
-        None => assembler.finish(),
-        Some(error) => {
-            // 只交出了 thinking：交给主循环决定重发（F113，provider-errors.md §3.3）。以前同下面的部分收尾，只结束了
-            // thinking 时提交它、以错误结束，thinking 没结束时直接以模型错误结束。
-            if assembler.thinking_only() && crate::recovery::resends_after_thinking(&error) {
-                let partial = assembler.finish();
-                let call = timing.call(
-                    completed,
-                    CallStatus::Error,
-                    (None, 0, partial.usage),
-                    Some(error.clone()),
-                );
-                let assistant = AssistantMessage {
-                    id: assistant_id,
-                    content: partial.content,
-                    model: partial.model,
-                    stop_reason: Some(StopReason::EndTurn),
-                    usage: Some(partial.usage),
-                };
-                return Ok(Responded::ThinkingOnly {
-                    assistant,
-                    error,
-                    call,
-                });
-            }
-            // 流在中途出错（部分收尾）：只留结束的块。一个都没有时照旧报错，已经开工的
-            // 调用先等它们结束。
-            let mut partial = assembler.finish();
-            if partial.content.is_empty() {
-                // 没有内容的失败也是一次请求：计量单独提交（usage.md §2.2）。
-                let call = timing.call(
-                    completed,
-                    CallStatus::Error,
-                    (None, 0, partial.usage),
-                    Some(error.clone()),
-                );
-                scope
-                    .sink
-                    .commit_metered(None, Metered::Model(call))
-                    .await?;
-                while batch.next_completion().await {}
-                return Err(error.into());
-            }
-            let tools = partial
-                .content
-                .iter()
-                .any(|block| matches!(block, ContentBlock::ToolUse { .. }));
-            partial.stop_reason = Some(if tools {
-                StopReason::ToolUse
-            } else {
-                StopReason::EndTurn
-            });
-            if !tools {
-                let call = timing.call(
-                    completed,
-                    CallStatus::Error,
-                    (None, 0, partial.usage),
-                    Some(error.clone()),
-                );
-                let assistant = AssistantMessage {
-                    id: assistant_id,
-                    content: partial.content,
-                    model: partial.model,
-                    stop_reason: partial.stop_reason,
-                    usage: Some(partial.usage),
-                };
-                return Ok(Responded::Truncated {
-                    assistant,
-                    error,
-                    call,
-                });
-            }
-            error_of_call = Some(error);
-            partial
-        }
+    let (assembled, error_of_call) = match failure {
+        None if keep_partial => (assembler.finish_aborted(), None),
+        None => (assembler.finish(), None),
+        Some(error) => match partial(&assistant_id, assembler, error, (&timing, completed)) {
+            Partial::WithTools(assembled, error) => (assembled, Some(error)),
+            Partial::Ended(ending) => return *ending,
+        },
     };
     let tool_uses = assembled
         .content
@@ -486,8 +521,93 @@ pub(crate) async fn respond(
         usage: Some(assembled.usage),
     };
     if tool_uses == 0 && !aborted_streaming && !scope.abort.is_aborted() {
-        return Ok(Responded::Done(assistant, call));
+        return Ending::Decide(Responded::Done(assistant, call));
     }
+    Ending::Commit { assistant, call }
+}
+
+/// 流在中途出错时的部分收尾。
+enum Partial {
+    /// 结束的块里有 tool_use：照常提交、执行，这次调用记为失败。
+    WithTools(Assembled, ModelError),
+    /// 直接收尾（只交出了 thinking、一个块都没有、半截没有 tool_use）；少见的路径，装箱让两个变体一样大。
+    Ended(Box<Ending>),
+}
+
+/// 流在中途出错（部分收尾）：只留结束的块。
+fn partial(
+    assistant_id: &MessageId,
+    assembler: Assembler,
+    error: ModelError,
+    (timing, completed): (&Timing, u64),
+) -> Partial {
+    let failed_call = |usage| {
+        timing.call(
+            completed,
+            CallStatus::Error,
+            (None, 0, usage),
+            Some(error.clone()),
+        )
+    };
+    // 只交出了 thinking：交给主循环决定重发（F113，provider-errors.md §3.3）。以前同下面的部分收尾，只结束了
+    // thinking 时提交它、以错误结束，thinking 没结束时直接以模型错误结束。
+    if assembler.thinking_only() && crate::recovery::resends_after_thinking(&error) {
+        let partial = assembler.finish();
+        let call = failed_call(partial.usage);
+        let assistant = AssistantMessage {
+            id: assistant_id.clone(),
+            content: partial.content,
+            model: partial.model,
+            stop_reason: Some(StopReason::EndTurn),
+            usage: Some(partial.usage),
+        };
+        return Partial::Ended(Box::new(Ending::Decide(Responded::ThinkingOnly {
+            assistant,
+            error,
+            call,
+        })));
+    }
+    // 一个块都没有时照旧报错，已经开工的调用先等它们结束。
+    let mut partial = assembler.finish();
+    if partial.content.is_empty() {
+        let call = failed_call(partial.usage);
+        return Partial::Ended(Box::new(Ending::Failed { call, error }));
+    }
+    let tools = partial
+        .content
+        .iter()
+        .any(|block| matches!(block, ContentBlock::ToolUse { .. }));
+    partial.stop_reason = Some(if tools {
+        StopReason::ToolUse
+    } else {
+        StopReason::EndTurn
+    });
+    if tools {
+        return Partial::WithTools(partial, error);
+    }
+    let call = failed_call(partial.usage);
+    let assistant = AssistantMessage {
+        id: assistant_id.clone(),
+        content: partial.content,
+        model: partial.model,
+        stop_reason: partial.stop_reason,
+        usage: Some(partial.usage),
+    };
+    Partial::Ended(Box::new(Ending::Decide(Responded::Truncated {
+        assistant,
+        error,
+        call,
+    })))
+}
+
+/// 提交 assistant（没有内容时只提交计量）与这批工具的结果：先是流还开着时暂存的，再按交出规则等其余的。
+async fn commit_batch(
+    scope: &RunScope,
+    history: &mut Vec<Message>,
+    (assistant, call): (AssistantMessage, ModelCall),
+    handed: Vec<Ready>,
+    batch: &mut ToolBatch,
+) -> Result<(), QueryError> {
     if assistant.content.is_empty() {
         scope
             .sink
@@ -508,13 +628,7 @@ pub(crate) async fn respond(
             break;
         }
     }
-    if aborted_streaming {
-        return interrupted(scope, history, false).await;
-    }
-    if scope.abort.is_aborted() {
-        return interrupted(scope, history, true).await;
-    }
-    Ok(Responded::ToolsFinished)
+    Ok(())
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ members = [
   "crates/kernel-api",
   "crates/prompts",
   "crates/node-store",
+  "crates/node-records",
   "crates/model",
   "crates/env-local",
   "crates/exec-wire",
@@ -195,6 +196,7 @@ rust-cli-proc = { path = "crates/proc" }
 rust-cli-prompts = { path = "crates/prompts" }
 rust-cli-kernel-api = { path = "crates/kernel-api" }
 rust-cli-node-store = { path = "crates/node-store" }
+rust-cli-node-records = { path = "crates/node-records" }
 rust-cli-model = { path = "crates/model" }
 rust-cli-env-local = { path = "crates/env-local" }
 rust-cli-exec-wire = { path = "crates/exec-wire" }

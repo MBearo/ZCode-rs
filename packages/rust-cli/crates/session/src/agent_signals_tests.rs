@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use rust_cli_kernel_api::agents::{AgentNotice, AgentSignal, AgentSignals};
 use rust_cli_kernel_api::ids::{AgentId, ShellTaskId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
-use rust_cli_kernel_api::testing::{local_services, machine};
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -44,7 +43,7 @@ fn notice(seq: u64) -> AgentSignal {
     AgentSignal::Notice(AgentNotice {
         seq,
         agent: AgentId::new("agent_1"),
-        status: "completed".to_owned(),
+        status: rust_cli_kernel_api::env_shell::BackgroundStatus::Completed,
         text: "<system-reminder>\nagent done\n</system-reminder>".to_owned(),
     })
 }
@@ -73,10 +72,8 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
         ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
         machines: rust_cli_kernel_api::testing::environments(env.clone()),
-        machine: machine(env.clone()),
-        local: local_services(env),
         artifacts: store.clone(),
-        generation: Generation::new("g1"),
+        operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids.clone()),
         non_interactive: false,
         limits: rust_cli_query::RequestLimits::default(),
     }));
@@ -86,19 +83,20 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
             agents: signals.clone(),
             cron: Arc::new(rust_cli_kernel_api::cron::NoCron),
             store,
-            ids,
+            ids: ids.clone(),
             runner,
             compactor: Arc::new(rust_cli_kernel_api::testing::NeverCompact),
             machines: rust_cli_kernel_api::testing::environments(env.clone()),
-            machine: machine(env.clone()),
-            local: local_services(env),
             max_turns: None,
             hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
             inputs: Arc::new(rust_cli_kernel_api::user_input::NoUserInputs),
             artifacts: Arc::new(rust_cli_kernel_api::testing::MemoryArtifacts::default()),
             clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-            generation: rust_cli_kernel_api::ids::Generation::new("g1"),
+            operations: rust_cli_kernel_api::env::Operations::new(
+                rust_cli_kernel_api::ids::Generation::new("g1"),
+                ids.clone(),
+            ),
             spawner: scope.spawner(),
             closing: scope.spawner(),
             titles: None,
@@ -136,7 +134,7 @@ async fn an_agent_notice_starts_a_turn_and_is_acked_after_the_commit() {
     ));
     assert!(seen.iter().any(|event| matches!(
         event,
-        KernelEvent::BackgroundWork { work, status } if work == "agent_1" && status == "completed"
+        KernelEvent::BackgroundWork { work, status } if work == "agent_1" && *status == rust_cli_kernel_api::env_shell::BackgroundStatus::Completed
     )));
     assert_eq!(*signals.acked.lock().unwrap(), [1]);
     // 重复送达：对话里已有同文本的 meta 消息，只 ack，不开回合。

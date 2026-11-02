@@ -5,28 +5,14 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures_util::StreamExt;
-use futures_util::future::BoxFuture;
-use futures_util::stream::BoxStream;
-use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, StartCommand,
-    WorkspaceRef, WriteFile, WriteReceipt,
-};
-use rust_cli_kernel_api::env_files::{DirEntry, FileStat, ListDir, PathFacts, StatFile};
+use rust_cli_kernel_api::env::{EnvError, EnvFacts, EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_pdf::{PdfPageCount, PdfRender, RenderPdfPages};
-use rust_cli_kernel_api::env_shell::ShellState;
-use rust_cli_kernel_api::ids::OperationId;
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::machine::{MachineEnv, Pdf};
 use rust_cli_kernel_api::message::ImageSource;
-use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection};
-use rust_cli_kernel_api::orchestration::PermissionGate;
-use rust_cli_kernel_api::permission::{PermissionDecision, PermissionRule};
 use rust_cli_kernel_api::provider::ModelCapabilities;
-use rust_cli_kernel_api::testing::{MemoryEnvironment, ScriptedInteractions};
-use tokio_util::sync::CancellationToken;
+use rust_cli_kernel_api::testing::{
+    FixedGate, MemoryEnvironment, ScriptedInteractions, ScriptedModel, unsupported_machine,
+};
 
 use super::*;
 use crate::test_more::Ctx;
@@ -36,9 +22,9 @@ use crate::web_fetch::SideModel;
 const PDF: &str = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n";
 const DOC: &str = "/Users/dev/work/doc.pdf";
 
-/// 两项 PDF 操作按脚本回答、其余交给内存执行环境的替身。
+/// 两项 PDF 操作按脚本回答的替身；机器的其余端口（[`PdfEnv::machine`]）交给内存执行环境。
 struct PdfEnv {
-    inner: MemoryEnvironment,
+    inner: Arc<MemoryEnvironment>,
     /// `pdf_page_count` 的答复；None 时报 `Unsupported`（没有这项操作的执行环境）。
     pages: Option<Option<u64>>,
     /// `render_pdf_pages` 的答复；None 时报 `Unsupported`。
@@ -55,14 +41,14 @@ impl PdfEnv {
             os_version: String::new(),
             shell: "zsh".to_owned(),
             is_git_repo: false,
-            additional_directories: Vec::new(),
             home: Some(EnvPath::new("/Users/dev")),
+            uid: None,
         });
         for (path, text) in files {
             inner = inner.with_file(path, text);
         }
         Self {
-            inner,
+            inner: Arc::new(inner),
             pages: Some(None),
             render: None,
             counted: Mutex::default(),
@@ -83,105 +69,21 @@ impl PdfEnv {
     fn rendered(&self) -> Vec<RenderPdfPages> {
         self.rendered.lock().unwrap().clone()
     }
+
+    /// 环境事实、文件、命令与 shell 是内存执行环境的，PDF 是自己的；其余端口返回 `Unsupported`。
+    fn machine(self: Arc<Self>) -> MachineEnv {
+        unsupported_machine()
+            .with_info(self.inner.clone())
+            .with_files(self.inner.clone())
+            .with_commands(self.inner.clone())
+            .with_shell(self.inner.clone())
+            .with_pdf(self)
+    }
 }
 
 fn unsupported(what: &str) -> EnvError {
     EnvError::Unsupported {
         what: what.to_owned(),
-    }
-}
-
-#[async_trait]
-impl EnvInfo for PdfEnv {
-    async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        self.inner.facts(workspace).await
-    }
-
-    async fn path_facts(&self, workspace: &WorkspaceRef) -> Result<PathFacts, EnvError> {
-        self.inner.path_facts(workspace).await
-    }
-}
-
-#[async_trait]
-impl Files for PdfEnv {
-    async fn read_file(
-        &self,
-        workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env::ReadFile,
-    ) -> Result<FileContent, EnvError> {
-        self.inner.read_file(workspace, request).await
-    }
-
-    async fn write_file(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        self.inner.write_file(workspace, context, request).await
-    }
-
-    async fn stat(
-        &self,
-        workspace: &WorkspaceRef,
-        request: StatFile,
-    ) -> Result<Option<FileStat>, EnvError> {
-        self.inner.stat(workspace, request).await
-    }
-
-    async fn list_dir(
-        &self,
-        workspace: &WorkspaceRef,
-        request: ListDir,
-    ) -> Result<Vec<DirEntry>, EnvError> {
-        self.inner.list_dir(workspace, request).await
-    }
-
-    async fn read_text(
-        &self,
-        workspace: &WorkspaceRef,
-        request: rust_cli_kernel_api::env_files::ReadText,
-    ) -> Result<rust_cli_kernel_api::env_files::TextRead, EnvError> {
-        self.inner.read_text(workspace, request).await
-    }
-}
-
-#[async_trait]
-impl Commands for PdfEnv {
-    async fn start_command(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: StartCommand,
-    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        self.inner.start_command(workspace, context, request).await
-    }
-
-    fn watch_command(
-        &self,
-        operation: OperationId,
-        cursor: u64,
-    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        self.inner.watch_command(operation, cursor)
-    }
-
-    async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
-        self.inner.cancel(operation).await
-    }
-
-    async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
-        self.inner.close_session(session, forget).await
-    }
-}
-
-#[async_trait]
-impl Shell for PdfEnv {
-    async fn shell_state(
-        &self,
-        workspace: &WorkspaceRef,
-        session: &SessionId,
-    ) -> Result<ShellState, EnvError> {
-        self.inner.shell_state(workspace, session).await
     }
 }
 
@@ -208,49 +110,8 @@ impl Pdf for PdfEnv {
     }
 }
 
-impl Search for PdfEnv {}
-impl Background for PdfEnv {}
-impl Checkpoints for PdfEnv {}
-impl Git for PdfEnv {}
-impl Fetch for PdfEnv {}
-
-struct AllowAll;
-
-#[async_trait]
-impl PermissionGate for AllowAll {
-    async fn decide(&self, _: &dyn Tool, _: &Value, _: &ToolUseContext) -> PermissionDecision {
-        PermissionDecision::Passthrough
-    }
-    async fn remember(&self, _: &SessionId, _: &[PermissionRule]) {}
-}
-
-/// 模型端口替身：只回答能力（`supports_pdf`；None 是答不出）。
-struct Capable(Option<bool>);
-
-impl ModelPort for Capable {
-    fn stream(
-        &self,
-        _request: ModelRequest,
-        _cancel: CancellationToken,
-    ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-        futures_util::stream::empty().boxed()
-    }
-    fn capabilities(
-        &self,
-        _selection: &ModelSelection,
-    ) -> BoxFuture<'static, Option<ModelCapabilities>> {
-        let pdf = self.0;
-        Box::pin(async move {
-            pdf.map(|supports_pdf| ModelCapabilities {
-                supports_pdf,
-                ..ModelCapabilities::default()
-            })
-        })
-    }
-}
-
 fn files() -> FileTools {
-    FileTools::new(Arc::default(), Arc::new(AllowAll))
+    FileTools::new(Arc::default(), Arc::new(FixedGate::passthrough()))
 }
 
 fn tool() -> ReadTool {
@@ -258,15 +119,20 @@ fn tool() -> ReadTool {
 }
 
 fn tool_on(pdf: Option<bool>) -> ReadTool {
+    // 模型只回答能力（`supports_pdf`；None 是答不出）。
+    let capabilities = pdf.map(|supports_pdf| ModelCapabilities {
+        supports_pdf,
+        ..ModelCapabilities::default()
+    });
     ReadTool::new(files().with_model(SideModel {
-        model: Arc::new(Capable(pdf)),
+        model: Arc::new(ScriptedModel::new(Vec::new()).capabilities(capabilities)),
         selection: rust_cli_kernel_api::testing::selection(),
     }))
 }
 
 fn context(env: &Arc<PdfEnv>) -> ToolUseContext {
     let mut ctx = Ctx::new(Arc::new(ScriptedInteractions::default()));
-    ctx.set_env(env.clone());
+    ctx.set_machine(env.clone().machine());
     ctx.build()
 }
 

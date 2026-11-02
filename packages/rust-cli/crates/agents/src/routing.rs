@@ -256,7 +256,8 @@ pub(crate) async fn wake(core: &Arc<Core>, wakes: Vec<Wake>) {
             Resume::Notices(envelopes) => (
                 texts::notification_wrap(&envelopes.join("\n\n")),
                 UserOrigin::Meta {
-                    source: "task-notification".to_owned(),
+                    source: rust_cli_kernel_api::hooks::queued_command::TASK_NOTIFICATION
+                        .to_owned(),
                 },
             ),
             // 续跑时按来自父代理的消息包一层说明（`The coordinator sent a message while you were

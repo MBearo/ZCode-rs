@@ -4,6 +4,7 @@ use rust_cli_base::models::{DEEPSEEK_V4_PRO, GLM_5_3, HAIKU_3_5_DATED};
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{EnvironmentId, SessionId};
 use rust_cli_kernel_api::listing::ListingSource;
+use rust_cli_kernel_api::mcp::McpToolInfo;
 use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
 use rust_cli_kernel_api::orchestration::{ContextRequest, ToolRegistry};
 use rust_cli_kernel_api::permission::PermissionMode;
@@ -60,25 +61,17 @@ async fn select_returns_tool_references() {
 
 fn request(model: &str, names: &[&str]) -> ContextRequest {
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("sess_1"),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/Users/dev/work"),
-        },
-        agent: None,
-        source: QuerySource::MainThread,
-        mode: PermissionMode::Default,
         tool_names: names.iter().map(|name| (*name).to_owned()).collect(),
-        selection: ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: model.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
+        ..ContextRequest::new(
+            SessionId::new("sess_1"),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/work"),
+            },
+            QuerySource::MainThread,
+            PermissionMode::Default,
+            ModelSelection::new("anthropic".to_owned(), model.to_owned()),
+        )
     }
 }
 
@@ -143,10 +136,10 @@ fn tool_search_itself_is_never_deferred() {
     assert!(!is_deferred(&tool));
 }
 
-/// 只用来占名字的延迟工具（`mcp` 为真时是 MCP 工具）。
+/// 只用来占名字的延迟工具（`mcp` 有值时是 MCP 工具）。
 struct Named {
     name: &'static str,
-    mcp: bool,
+    mcp: Option<McpToolInfo>,
 }
 
 #[async_trait::async_trait]
@@ -163,8 +156,8 @@ impl Tool for Named {
     fn should_defer(&self) -> bool {
         true
     }
-    fn is_mcp(&self) -> bool {
-        self.mcp
+    fn mcp_info(&self) -> Option<&McpToolInfo> {
+        self.mcp.as_ref()
     }
     async fn call(
         &self,
@@ -187,15 +180,19 @@ async fn the_deferred_listing_is_in_code_unit_order() {
         Arc::new(ToolSearchTool::new(catalog.clone())),
         Arc::new(Named {
             name: "mcp__fixture__lookup",
-            mcp: true,
+            mcp: Some(McpToolInfo {
+                server: "fixture".to_owned(),
+                tool: "lookup".to_owned(),
+                always_load: false,
+            }),
         }),
         Arc::new(Named {
             name: "WebFetch",
-            mcp: false,
+            mcp: None,
         }),
         Arc::new(Named {
             name: "ListMcpResourcesTool",
-            mcp: false,
+            mcp: None,
         }),
     ]));
     catalog.bind(&registry);

@@ -183,7 +183,12 @@ async fn when_reconnecting_fails_pending_and_later_calls_end_disconnected() {
         client.call(stat(), Body::empty()).await,
         Err(ClientError::NotSent(inner)) if matches!(*inner, ClientError::Disconnected(_))
     ));
-    assert!(!client.is_connected());
+    assert!(matches!(
+        *client.states().borrow(),
+        ConnectionState::Closed {
+            error: ClientError::Disconnected(_)
+        }
+    ));
     server.await.unwrap();
 }
 

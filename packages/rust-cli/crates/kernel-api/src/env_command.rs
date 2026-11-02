@@ -11,14 +11,14 @@ use crate::env_shell::{
 use crate::ids::ShellTaskId;
 
 /// 加在子进程环境之后的变量（远端执行 F96，docs/specs/rust-cli/remote-exec.md §23.5）：值为 `None` 时去掉这个变量。
-/// 只由执行器的服务端按请求所属的客户端实例填（`env.update` 与 SSH 代理带来的 `hello.session_env`）；工具与本机的组装
-/// 都不写，缺省是空的。保护的名字已经在服务端拒绝。
+/// 只在执行器里有（`env.update` 与 SSH 代理带来的 `hello.session_env`，按请求所属的客户端实例）：执行器起进程时作为参数
+/// 交给本机的执行环境，不在 [`StartCommand`] 与 [`crate::mcp::McpConnect`] 里（F128，审查 K10）。
 pub type EnvOverrides = BTreeMap<String, Option<String>>;
 
 /// 启动一条 shell 命令。前台、后台都经这里；输出用 [`crate::machine::Commands::watch_command`] 按游标读。
 ///
-/// stdout 与 stderr 写进同一个输出文件（合并的 fd），事件流里都标为 stdout。
-/// `task` 之后的字段是 Bash 工具加的（docs/specs/rust-cli/shell-permissions.md §3）。
+/// stdout 与 stderr 写进同一个输出文件（合并的 fd），事件流里都标为 stdout（hook 命令除外）。
+/// `sandbox` 之后的字段是 Bash 工具加的（docs/specs/rust-cli/shell-permissions.md §3）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StartCommand {
     pub command: String,
@@ -30,26 +30,76 @@ pub struct StartCommand {
     pub shell: ShellKind,
     #[serde(default)]
     pub cwd_scope: CwdScope,
-    /// 有值时是后台命令：不随本次工具调用结束，终态经 [`crate::machine::Shell::shell_notices`] 送达。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub background: Option<BackgroundCommand>,
-    /// 有值时在 sandbox 里执行。
+    /// 有值时在 sandbox 里执行（与种类无关）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxPolicy>,
-    /// 有值时是 hook 命令：输入经 stdin，stdout 与 stderr 分开（docs/specs/rust-cli/hooks.md §5.1）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hook: Option<HookIo>,
-    /// 有值时前台命令到了 `timeout_ms` 不结束，转到后台继续跑（docs/specs/rust-cli/shell-permissions.md §1.2.1，
-    /// 工作线 F69 新增）。没有时照旧按超时结束。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_timeout: Option<TimeoutBackground>,
-    /// 有值时不跑 `command`，开这个 WebSocket（Monitor 的 ws 来源，工作线 F83 新增，tools-more.md §19.7）：
-    /// 只和后台的 `Monitor` 种类一起用；`command` 记 URL（TaskStop 的结果用它）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub socket: Option<MonitorSocket>,
-    /// 投影之后再加上（或去掉）的环境变量（[`EnvOverrides`]，F96）：只在执行器里由服务端填，不进序列化。
-    #[serde(skip)]
-    pub env: EnvOverrides,
+    #[serde(default)]
+    pub kind: CommandKind,
+}
+
+impl StartCommand {
+    /// 在 `cwd` 里跑 `command` 的前台命令（任务 ID 是 `task`）：没有超时，bash，目录固定，不在 sandbox 里，到了超时照旧
+    /// 结束。别的字段用结构更新（`StartCommand { kind, ..StartCommand::new(..) }`，工作线 F137：以前每个调用方写全八个字段）。
+    pub fn new(command: impl Into<String>, cwd: EnvPath, task: ShellTaskId) -> Self {
+        Self {
+            command: command.into(),
+            cwd,
+            timeout_ms: None,
+            task,
+            shell: ShellKind::default(),
+            cwd_scope: CwdScope::default(),
+            sandbox: None,
+            kind: CommandKind::default(),
+        }
+    }
+}
+
+/// 命令的种类：四种互斥（F128，审查 K10；以前是四个 `Option`，执行环境用 `is_some` 拼回来）。线上格式仍是那四个可选
+/// 字段，换算在执行协议的两边（remote-exec.md §18.3）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CommandKind {
+    /// 前台命令：随本次工具调用结束。`on_timeout` 有值时到了 `timeout_ms` 不结束，转到后台继续跑
+    /// （docs/specs/rust-cli/shell-permissions.md §1.2.1，工作线 F69）；没有时照旧按超时结束。
+    Foreground {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_timeout: Option<TimeoutBackground>,
+    },
+    /// 后台命令：不随本次工具调用结束，终态经 [`crate::machine::Shell::shell_notices`] 送达。
+    Background { background: BackgroundCommand },
+    /// hook 命令：输入经 stdin，stdout 与 stderr 分开（docs/specs/rust-cli/hooks.md §5.1）。
+    Hook { hook: HookIo },
+    /// 不跑 `command`，开这个 WebSocket（Monitor 的 ws 来源，工作线 F83，tools-more.md §19.7）：是后台命令（`background`
+    /// 的种类是 `Monitor`）；`command` 记 URL（TaskStop 的结果用它）。
+    Socket {
+        background: BackgroundCommand,
+        socket: MonitorSocket,
+    },
+}
+
+/// 缺省是前台命令、到了超时照旧结束（没有种类的旧载荷）。
+impl Default for CommandKind {
+    fn default() -> Self {
+        Self::Foreground { on_timeout: None }
+    }
+}
+
+impl CommandKind {
+    /// 前台命令到了超时转后台时的说明与期限（[`CommandKind::Foreground`] 的 `on_timeout`）。
+    pub fn on_timeout(&self) -> Option<&TimeoutBackground> {
+        match self {
+            Self::Foreground { on_timeout } => on_timeout.as_ref(),
+            Self::Background { .. } | Self::Hook { .. } | Self::Socket { .. } => None,
+        }
+    }
+
+    /// 启动时就是后台命令（`Background` 与 `Socket`）的说明与种类。
+    pub fn background(&self) -> Option<&BackgroundCommand> {
+        match self {
+            Self::Background { background } | Self::Socket { background, .. } => Some(background),
+            Self::Foreground { .. } | Self::Hook { .. } => None,
+        }
+    }
 }
 
 /// 前台命令为什么被转到后台（修复线 L-A，tui-input.md §11）：用户按了转后台的键，或运行中来了一条低延迟投递的输入。
@@ -71,7 +121,7 @@ pub enum CommandEvent {
         data: Vec<u8>,
         cursor: u64,
     },
-    /// 前台命令到了超时、转到了后台（[`StartCommand::on_timeout`]，工作线 F69 新增）：只发一次，之后照常有输出
+    /// 前台命令到了超时、转到了后台（[`CommandKind::Foreground`] 的 `on_timeout`，工作线 F69 新增）：只发一次，之后照常有输出
     /// 与终态（命令真正结束时）。
     Backgrounded,
     /// 前台命令被要求转到了后台（[`crate::machine::Background::background_foreground`]，修复线 L-A，

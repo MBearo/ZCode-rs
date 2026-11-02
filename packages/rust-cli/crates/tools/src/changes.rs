@@ -11,7 +11,7 @@ use rust_cli_kernel_api::env::{EnvError, EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_files::{ReadText, StatFile, StatMany, TextRead};
 use rust_cli_kernel_api::env_path;
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
-use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::ids::{MachineName, SessionId};
 use rust_cli_kernel_api::machine::Files;
 use rust_cli_kernel_api::tool::{ChangedFile, ChangedFiles};
 
@@ -91,7 +91,7 @@ impl FileChanges {
     async fn check_remote(
         &self,
         session: &SessionId,
-        name: &str,
+        name: &MachineName,
         entries: Vec<(FileKey, FileState)>,
     ) -> Vec<(FileKey, ChangedFile)> {
         let Some((machine, workspace)) = self
@@ -218,7 +218,7 @@ impl ChangedFiles for FileChanges {
     ) -> Vec<ChangedFile> {
         let mut found: Vec<(FileKey, ChangedFile)> = Vec::new();
         // 远端的按机器分组（按第一次出现的顺序），本机的照旧逐个查。
-        let mut remote: Vec<(String, Vec<(FileKey, FileState)>)> = Vec::new();
+        let mut remote: Vec<(MachineName, Vec<(FileKey, FileState)>)> = Vec::new();
         for (key, entry) in self.state.whole_files_everywhere(session) {
             if key.is_local() {
                 if let Some(change) = self.check((session, workspace), &key, entry).await {

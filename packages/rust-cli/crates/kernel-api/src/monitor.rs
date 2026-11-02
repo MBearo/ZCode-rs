@@ -1,6 +1,6 @@
 //! Monitor 交给会话 actor 的登记（工作线 F83 新增，docs/specs/rust-cli/tools-more.md §19.6）。
 //!
-//! Monitor 工具起好后台命令（或 WebSocket）之后，经 [`crate::orchestration::Interactions::arm_monitor`] 把这条登记
+//! Monitor 工具起好后台命令（或 WebSocket）之后，经 [`crate::orchestration::SessionOps::arm_monitor`] 把这条登记
 //! 交给会话 actor；切行、批、限流、到期与终态通知的状态都在 actor 里，按游标从
 //! [`crate::machine::Commands::watch_command`] 读输出。
 
@@ -33,7 +33,7 @@ pub struct MonitorArmed {
     pub source: MonitorSource,
     /// 输出文件（终态通知的 `<output-file>`）。
     pub output: EnvPath,
-    /// 命令在哪台远端机器上（R3，remote-exec.md §20.7.2）：输出流与停止都发给它；本机为 None。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub machine: Option<String>,
+    /// 命令在哪台机器上（R3，remote-exec.md §20.7.2）：输出流与停止都发给它；主 env 不写出。
+    #[serde(default, skip_serializing_if = "crate::ids::MachineName::is_primary")]
+    pub machine: crate::ids::MachineName,
 }

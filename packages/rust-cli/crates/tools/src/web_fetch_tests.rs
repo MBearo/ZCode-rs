@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use rust_cli_kernel_api::env_web::FetchedUrl;
 use rust_cli_kernel_api::model::{ApiRole, QuerySource};
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::testing::{
     FixedClock, ScriptedInteractions, ScriptedModel, selection, text_response,
 };
@@ -55,7 +56,7 @@ fn setup(pages: Vec<(&str, FetchedUrl)>, replies: &[&str]) -> Run {
 
 async fn call(run: &Run, input: Value) -> Result<String, ToolError> {
     let mut context = Ctx::new(Arc::new(ScriptedInteractions::default()));
-    context.set_env(run.env.clone());
+    context.set_text_env(run.env.clone());
     let (progress, _) = mpsc::channel(1);
     run.tool
         .call(input, context.build(), progress)
@@ -86,10 +87,7 @@ async fn html_is_converted_and_answered_by_the_side_model() {
     // http 升级为 https；旁路请求的来源与正文固定。
     assert_eq!(run.env.fetched(), ["https://example.com/doc"]);
     let request = &run.model.requests()[0];
-    assert_eq!(
-        request.source,
-        QuerySource::Side("web_fetch_apply".to_owned())
-    );
+    assert_eq!(request.source, QuerySource::Side(SideSource::WebFetch));
     // 工作线 F52：带上工具所在的会话（`metadata.user_id` 的 `session_id`，model.md §3.3）。
     assert_eq!(
         request.options.session_id,

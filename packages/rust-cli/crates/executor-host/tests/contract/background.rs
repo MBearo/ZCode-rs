@@ -6,6 +6,7 @@
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env::{
     CommandEvent, EnvError, EnvPath, Outcome, OutputStream, StartCommand,
 };
@@ -29,11 +30,13 @@ fn key(session: &str, task: &ShellTaskId) -> BackgroundTask {
 /// 起一条后台命令，返回它的任务 ID。
 async fn background(shell: &Shell, operation: &str, command: &str) -> ShellTaskId {
     let mut start = shell.request(command, CwdScope::Pinned);
-    start.background = Some(BackgroundCommand {
-        description: "Wait a while".to_owned(),
-        tool_use: None,
-        kind: Default::default(),
-    });
+    start.kind = CommandKind::Background {
+        background: BackgroundCommand {
+            description: "Wait a while".to_owned(),
+            tool_use: None,
+            kind: Default::default(),
+        },
+    };
     let task = start.task.clone();
     shell.start(operation, start).await;
     task
@@ -75,11 +78,13 @@ async fn stop(
 async fn background_commands_report_until_acked(kind: Kind) {
     let shell = shell(kind, Vec::new()).await;
     let mut start = shell.request("echo bg", CwdScope::Pinned);
-    start.background = Some(BackgroundCommand {
-        description: "Echo".to_owned(),
-        tool_use: None,
-        kind: Default::default(),
-    });
+    start.kind = CommandKind::Background {
+        background: BackgroundCommand {
+            description: "Echo".to_owned(),
+            tool_use: None,
+            kind: Default::default(),
+        },
+    };
     let task = start.task.clone();
     shell.start("op1", start).await;
     // 启动后就在后台列表里（不论是否已经跑完）。
@@ -208,14 +213,16 @@ fn timing_out(
 ) -> StartCommand {
     let mut start = shell.request(command, CwdScope::Pinned);
     start.timeout_ms = Some(timeout_ms);
-    start.on_timeout = Some(TimeoutBackground {
-        command: BackgroundCommand {
-            description: "Long build".to_owned(),
-            tool_use: Some(ToolUseId::new("toolu_1")),
-            kind: Default::default(),
-        },
-        deadline_ms,
-    });
+    start.kind = CommandKind::Foreground {
+        on_timeout: Some(TimeoutBackground {
+            command: BackgroundCommand {
+                description: "Long build".to_owned(),
+                tool_use: Some(ToolUseId::new("toolu_1")),
+                kind: Default::default(),
+            },
+            deadline_ms,
+        }),
+    };
     start
 }
 
@@ -317,11 +324,13 @@ async fn a_monitor_streams_only_stdout_and_reports_its_kind(kind: Kind) {
     let shell = shell(kind, Vec::new()).await;
     let mut start = shell.request("echo one; echo oops >&2; echo two", CwdScope::Pinned);
     start.timeout_ms = None;
-    start.background = Some(BackgroundCommand {
-        description: "watch".to_owned(),
-        tool_use: None,
-        kind: BackgroundKind::Monitor,
-    });
+    start.kind = CommandKind::Background {
+        background: BackgroundCommand {
+            description: "watch".to_owned(),
+            tool_use: None,
+            kind: BackgroundKind::Monitor,
+        },
+    };
     shell.start("op_m", start).await;
     let mut events = shell.events("op_m");
     let (mut stdout, mut stderr, mut finished) = (Vec::new(), Vec::new(), None);
@@ -365,11 +374,13 @@ async fn background_commands_report_their_kind_and_description(kind: Kind) {
     let shell = shell(kind, Vec::new()).await;
     let bash = background(&shell, "op1", "sleep 30").await;
     let mut start = shell.request("sleep 30", CwdScope::Pinned);
-    start.background = Some(BackgroundCommand {
-        description: "build log".to_owned(),
-        tool_use: None,
-        kind: BackgroundKind::Monitor,
-    });
+    start.kind = CommandKind::Background {
+        background: BackgroundCommand {
+            description: "build log".to_owned(),
+            tool_use: None,
+            kind: BackgroundKind::Monitor,
+        },
+    };
     let monitor = start.task.clone();
     shell.start("op2", start).await;
     let running = |kind, description: &str| {
@@ -390,15 +401,17 @@ async fn background_commands_report_their_kind_and_description(kind: Kind) {
     );
     let url = "ws://127.0.0.1:9/feed";
     let mut start = shell.request(url, CwdScope::Pinned);
-    start.socket = Some(MonitorSocket {
-        url: url.to_owned(),
-        protocols: Vec::new(),
-    });
-    start.background = Some(BackgroundCommand {
-        description: "deploy feed".to_owned(),
-        tool_use: None,
-        kind: BackgroundKind::Monitor,
-    });
+    start.kind = CommandKind::Socket {
+        background: BackgroundCommand {
+            description: "deploy feed".to_owned(),
+            tool_use: None,
+            kind: BackgroundKind::Monitor,
+        },
+        socket: MonitorSocket {
+            url: url.to_owned(),
+            protocols: Vec::new(),
+        },
+    };
     let socket = start.task.clone();
     shell.start("op3", start).await;
     let notice = next_notice(&shell).await;

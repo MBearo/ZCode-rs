@@ -1,12 +1,19 @@
 //! 入口注入的服务（依赖注入，docs/specs/rust-cli/tui.md §7.1、§7.2）：TUI 不读写文件、不起进程，界面语言的
-//! 持久化与账号的登录、退出由入口经 platform 实现；测试用替身。
+//! 持久化、输入历史的追加与账号的登录、退出由入口经 platform 实现；测试用替身。TUI 不依赖 platform（F133，审查 E7）。
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
+pub use rust_cli_base::account::Family;
 pub use rust_cli_base::secret::RedactedString;
-pub use rust_cli_platform::{Family, UiLocale, UiTheme};
+pub use rust_cli_base::ui_prefs::{UiLocale, UiTheme};
 use tokio::sync::oneshot;
 pub use tokio_util::sync::CancellationToken;
+
+/// 输入历史的追加（tui.md「输入历史」）：发送时调用，不等待写完；入口唯一的写者按调用顺序追加到历史文件。`at_ms` 是
+/// 发送时刻（毫秒）。
+pub trait HistoryRecorder: Send + Sync {
+    fn record(&self, text: &str, at_ms: u64);
+}
 
 /// 界面语言的持久化：写回 Node 共用的用户级配置文件 `ui.locale`。成功时给出文件路径，失败时给出原因。
 pub trait LocaleStore: Send + Sync {
@@ -157,35 +164,43 @@ pub trait WorkspaceTrust: Send + Sync {
     fn accept(&self, workspace: rust_cli_kernel_api::env::WorkspaceRef) -> BoxFuture<'static, ()>;
 }
 
-/// 入口给 TUI 的服务与配置值。
+/// 入口给 TUI 的配置值：启动时读一次，之后不变（架构整理 U13：以前与服务混放在 `Services` 里）。
 #[derive(Clone, Default)]
-pub struct Services {
-    /// 配置文件的 `ui.locale`（启动时读一次）；没有时按系统语言。
+pub struct UiConfig {
+    /// 配置文件的 `ui.locale`；没有时按系统语言。
     pub locale: Option<UiLocale>,
-    /// 没有时 `/locale <值>` 提示不能切换。
-    pub locale_store: Option<Arc<dyn LocaleStore>>,
-    /// 没有时 `/login`、`/logout` 提示不可用。
-    pub account: Option<Arc<dyn Account>>,
-    /// 没有时粘贴图片提示不可用（tui-input.md §3.1）。
-    pub clipboard: Option<Arc<dyn Clipboard>>,
-    /// 没有时 ctrl+g 与 `/memory` 提示不可用（tui-input.md §4）。
-    pub editor: Option<Arc<dyn Editor>>,
     /// `/memory` 的文件（入口按规则文件的位置给出）。
     pub memory_files: Vec<MemoryFile>,
-    /// 配置文件的 `ui.theme`（启动时读一次）；没有时按终端背景（tui-manage.md §2.1）。
+    /// 配置文件的 `ui.theme`；没有时按终端背景（tui-manage.md §2.1）。
     pub theme: Option<UiTheme>,
-    /// 没有时 `/theme`、`/effort` 只对本次运行有效。
-    pub preferences: Option<Arc<dyn Preferences>>,
-    /// 没有时切到别的项目不做信任检查（测试）。
-    pub trust: Option<Arc<dyn WorkspaceTrust>>,
     /// npm 上有更新的版本时，会话头下面插的提示（docs/specs/rust-cli/update.md §7，F48）。
     pub update: Option<crate::update::UpdateInfo>,
     /// 提问框的空闲超时（配置的 `askUserQuestionTimeout` 与 `ZCODE_AFK_*`，tools-more.md §1.1，工作线 F72）；
     /// 没有时不计时。
     pub question_timeout: Option<crate::ui::afk::QuestionTimeout>,
+    /// 绑定到远端机器的 MCP 服务器（服务器名，机器名；R5，remote-exec.md §22.8）：MCP 工具行标出机器。入口从同一份
+    /// MCP 设置给出。
+    pub mcp_machines: Vec<(String, String)>,
+}
+
+/// 入口注入的服务。
+///
+/// 架构整理 U13：以前 7 个服务都是 `Option`，入口除了远端机器都给了，`None` 的分支（“不可用”的提示、不写配置、不做
+/// 信任检查）只有测试走到；现在只有远端机器可以没有。
+#[derive(Clone)]
+pub struct Services {
+    /// `/locale <值>` 的写回。
+    pub locale_store: Arc<dyn LocaleStore>,
+    /// `/login`、`/logout`。
+    pub account: Arc<dyn Account>,
+    /// 粘贴图片与复制（tui-input.md §3.1、tui-select.md §3.2）。
+    pub clipboard: Arc<dyn Clipboard>,
+    /// ctrl+g 与 `/memory`（tui-input.md §4）。
+    pub editor: Arc<dyn Editor>,
+    /// `/theme`、`/effort`、`/model` 的缺省与 `/mcp enable/disable` 的写回。
+    pub preferences: Arc<dyn Preferences>,
+    /// 切到别的项目之前的信任检查（workspace-trust.md §2.8）。
+    pub trust: Arc<dyn WorkspaceTrust>,
     /// 远端机器（remote-exec.md §21.2）：`/machines` 与机器状态行；没有时 `/machines` 提示不可用、状态行不出现。
     pub machines: Option<Arc<dyn crate::machines::Machines>>,
-    /// 绑定到远端机器的 MCP 服务器（服务器名，机器名；R5，remote-exec.md §22.8）：MCP 工具行标出机器。入口从同一份
-    /// MCP 设置给出（启动时定了，之后不变）。
-    pub mcp_machines: Vec<(String, String)>,
 }

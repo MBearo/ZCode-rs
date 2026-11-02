@@ -113,8 +113,8 @@ pub fn unknown_model(lang: Lang, name: &str) -> String {
 }
 
 /// `/model 名称` 说不清是哪个团队项目（docs/specs/rust-cli/cli-args.md §1.3，工作线 F49）：要写 `[<团队>]`。
-pub fn ambiguous_model(lang: Lang, error: &rust_cli_platform::model_name::LookupError) -> String {
-    use rust_cli_platform::model_name::LookupError;
+pub fn ambiguous_model(lang: Lang, error: &rust_cli_kernel_api::model_name::LookupError) -> String {
+    use rust_cli_kernel_api::model_name::LookupError;
     match (lang, error) {
         (Lang::Zh, LookupError::SeveralTeams { name, choices }) => {
             format!(
@@ -212,16 +212,6 @@ pub fn elapsed_plain(seconds: u64) -> String {
         (0, 0) => format!("{s}s"),
         (0, _) => format!("{m}m {s}s"),
         _ => format!("{h}h {m}m {s}s"),
-    }
-}
-
-/// `0s`、`1m 05s`、`1h 02m 03s`。
-pub fn elapsed(seconds: u64) -> String {
-    let (h, m, s) = crate::ui::quantities::hours_minutes_seconds(seconds);
-    match (h, m) {
-        (0, 0) => format!("{s}s"),
-        (0, _) => format!("{m}m {s:02}s"),
-        _ => format!("{h}h {m:02}m {s:02}s"),
     }
 }
 

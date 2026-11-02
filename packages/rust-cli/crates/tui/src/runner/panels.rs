@@ -67,7 +67,7 @@ pub(super) enum PanelDone {
 impl<B: Backend> Loop<'_, B> {
     /// 有了会话（新建、切换）：订阅子代理的变化，先取一次子代理列表与后台任务。
     pub(super) fn attach_panels(&mut self) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             return;
         };
         self.panels.changes = session.subagent_changes();
@@ -82,13 +82,13 @@ impl<B: Backend> Loop<'_, B> {
         self.panels.changes = stream::pending().boxed();
         self.panels.tasks_seq += 1;
         self.panels.view_seq += 1;
-        self.app.agents = crate::ui::agents::AgentList::default();
-        self.app.background.clear();
+        self.app.snapshots.agents = crate::ui::agents::AgentList::default();
+        self.app.snapshots.background.clear();
         self.app.focus = None;
         if self.app.viewing.take().is_some() {
             self.cache.clear();
-            self.app.find = None;
-            self.app.restore_bottom = None;
+            self.app.port.find = None;
+            self.app.port.restore_bottom = None;
         }
     }
 
@@ -99,7 +99,7 @@ impl<B: Backend> Loop<'_, B> {
     /// `background_tasks()`，两次查询、两个序号，谁先画出不定，子代理里再派生的子代理也不刷新 pill（F32 查明，D16）。
     /// 现在一次查询、一个序号，回执一次收下、一次重画，列表的行与 pill 同一帧出现（两者出自同一份快照）。
     pub(super) fn refresh_tasks(&mut self) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             return;
         };
         self.panels.tasks_seq += 1;
@@ -129,7 +129,7 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 读一次 Shell 详情；`later` 为真时 1 s 后再读（还在跑时每秒刷新，同一时刻只有一个读取）。
     fn read_shell(&mut self, id: String, seq: u64, later: bool) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             return;
         };
         self.pending.push(
@@ -146,11 +146,12 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 取子代理的只读快照（打开查看、或它的版本与状态变了）。
     fn load_agent(&mut self, agent: &AgentId) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             return;
         };
         let Some(entry) = self
             .app
+            .snapshots
             .agents
             .entries
             .iter()
@@ -180,21 +181,16 @@ impl<B: Backend> Loop<'_, B> {
         self.panels.view_seq += 1;
         if self.app.viewing.take().is_some() {
             self.reset_transcript_view();
-            self.app.request_stats.clear();
+            self.app.snapshots.request_stats.clear();
             self.refresh_stats();
         }
     }
 
-    /// 显示的 transcript 换了（开始查看、换一个、返回主会话）：滚动、选区、单独展开与搜索模式都属于原来那份（搜索：修复线
-    /// F114，tui-input.md §2.3.4）。
+    /// 显示的 transcript 换了（开始查看、换一个、返回主会话）：两个视图的行 id 会重复，清掉排版缓存；读位置与选区见
+    /// [`App::shown_changed`](crate::ui::app::App::shown_changed)（搜索：修复线 F114，tui-input.md §2.3.4）。
     fn reset_transcript_view(&mut self) {
         self.cache.clear();
-        self.app.scroll = 0;
-        self.app.new_activity = false;
-        self.app.selection = None;
-        self.app.expanded_cells.clear();
-        self.app.find = None;
-        self.app.restore_bottom = None;
+        self.app.shown_changed();
     }
 
     pub(super) fn on_panel(&mut self, done: PanelDone) {
@@ -209,13 +205,13 @@ impl<B: Backend> Loop<'_, B> {
                     subagents,
                     background,
                 } = snapshot.unwrap_or_default();
-                self.app.agents = crate::ui::agents::AgentList {
+                self.app.snapshots.agents = crate::ui::agents::AgentList {
                     entries: subagents,
                     at: Some(std::time::Instant::now()),
                 };
-                self.app.background = background;
+                self.app.snapshots.background = background;
                 // pill 没了：选中也随之取消（tui-panels.md §3.1）。
-                let gone = crate::ui::manage::pill(&self.app.background, lang).is_none();
+                let gone = crate::ui::manage::pill(&self.app.snapshots.background, lang).is_none();
                 if gone && self.app.focus == Some(crate::ui::agents::Focus::Pill) {
                     self.app.focus = None;
                 }
@@ -261,7 +257,7 @@ impl<B: Backend> Loop<'_, B> {
                         if fresh {
                             self.reset_transcript_view();
                             // 查看对象换了（F112）：命中率的回执清空、在途的作废，再查新对象的子会话。
-                            self.app.request_stats.clear();
+                            self.app.snapshots.request_stats.clear();
                         } else {
                             self.cache.clear();
                         }
@@ -298,6 +294,7 @@ impl<B: Backend> Loop<'_, B> {
         };
         let changed = self
             .app
+            .snapshots
             .agents
             .entries
             .iter()

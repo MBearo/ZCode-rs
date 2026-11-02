@@ -59,11 +59,21 @@ fn seeds_with_control_characters_are_dropped() {
     assert_eq!(rule_seed("cd x && y", &[bash("y\tz")]), None);
 }
 
+/// 询问的种子只给 Bash、有建议规则、输入里有命令的询问。
 #[test]
-fn labels_drop_the_trailing_wildcard() {
-    assert_eq!(rule_label("mytool a *"), "mytool a");
-    assert_eq!(rule_label("npm:*"), "npm");
-    assert_eq!(rule_label("git status"), "git status");
+fn only_bash_asks_with_suggestions_have_a_seed() {
+    let input = serde_json::json!({"command": "npm run build"});
+    let suggested = [bash("npm run *")];
+    assert_eq!(
+        ask_rule_seed("Bash", &input, &suggested).as_deref(),
+        Some("npm run *")
+    );
+    assert_eq!(ask_rule_seed("Bash", &input, &[]), None);
+    assert_eq!(ask_rule_seed("Monitor", &input, &suggested), None);
+    assert_eq!(
+        ask_rule_seed("Bash", &serde_json::json!({}), &suggested),
+        None
+    );
 }
 
 /// 双向控制符与零宽字符都不许进种子（统一成 base 的一张表）：零宽空格、LRM、已弃用的格式字符、BOM 以前放过。

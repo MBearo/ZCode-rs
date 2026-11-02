@@ -10,7 +10,6 @@ use rust_cli_kernel_api::ids::{AgentId, SessionId};
 use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind};
 use rust_cli_kernel_api::panels::{SubagentEntry, SubagentStatus, TasksSnapshot};
 use rust_cli_kernel_api::session_api::{KernelError, SessionView};
-use rust_cli_kernel_api::store::StoreError;
 
 use crate::Core;
 use crate::live::{AgentState, Live, LiveAgent};
@@ -66,13 +65,13 @@ pub(crate) fn entries(live: &Live, root: &SessionId) -> Vec<SubagentEntry> {
 /// footer 的一个后台子代理：在跑或停放的后台子代理都算在跑（与 TaskStop 的“能停”同一个判断，tui-display.md §3.1）。
 pub(crate) fn background_entry(agent: &LiveAgent) -> BackgroundEntry {
     BackgroundEntry {
-        id: agent.agent.to_string(),
-        kind: BackgroundKind::Agent,
-        description: agent.description.clone(),
-        status: BackgroundStatus::Running,
-        output: None,
         machine: agent.machine.clone(),
-        reconnecting: false,
+        ..BackgroundEntry::new(
+            agent.agent.to_string(),
+            BackgroundKind::Agent,
+            agent.description.clone(),
+            BackgroundStatus::Running,
+        )
     }
 }
 
@@ -117,12 +116,7 @@ pub(crate) async fn view(
         .store
         .load(&found.child)
         .await
-        .map_err(|error| match error {
-            StoreError::NotFound { session } => KernelError::NotFound { session },
-            other => KernelError::Failed {
-                message: other.to_string(),
-            },
-        })?;
+        .map_err(KernelError::from)?;
     // 执行状态（修复线 F20）：库里有就用库里的权限模式与 plan 开关；没有时用子代理运行的单值模式。
     let execution = match loaded.mode {
         Some(mode) => {
@@ -147,23 +141,18 @@ pub(crate) async fn view(
         .context_notice(&loaded.messages, &selection)
         .unwrap_or_default();
     Ok(SessionView {
-        meta: loaded.meta,
-        // 显示用的历史：压缩点之前只供显示的消息接上模型侧的历史（工作线 F102，compact.md §5.1）。
-        messages: [loaded.earlier, loaded.messages].concat(),
-        selection,
-        mode: execution.mode,
         plan: execution.plan,
-        pending: Vec::new(),
-        queue: Vec::new(),
-        last_seq: 0,
-        revision: 0,
         running: matches!(found.state, AgentState::Running { .. }),
-        background: Vec::new(),
-        peer_held: Vec::new(),
         context_usage,
         context_notice,
         // 最近一个完成的子代理请求的速度（F112；修前子代理的快照不带 footer 的统计，写死空）。
         output_speed: found.shown.speed,
+        ..SessionView::new(
+            loaded.meta, // 显示用的历史：压缩点之前只供显示的消息接上模型侧的历史（工作线 F102，compact.md §5.1）。
+            [loaded.earlier, loaded.messages].concat(),
+            selection,
+            execution.mode,
+        )
     })
 }
 

@@ -5,21 +5,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use crossterm::event::KeyCode;
-use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, FileVersion, OperationContext,
-    ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    EnvError, EnvPath, FileContent, FileVersion, OperationContext, ReadFile, WorkspaceRef,
+    WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{ReadText, TextRead, TextSlice};
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundStatus, BackgroundStop, BackgroundTask, ShellState,
 };
-use rust_cli_kernel_api::ids::{OperationId, SessionId, ShellTaskId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
-use rust_cli_kernel_api::testing::{environments, text_response};
+use rust_cli_kernel_api::ids::{SessionId, ShellTaskId};
+use rust_cli_kernel_api::machine::{Background, Files, MachineEnv, Shell};
+use rust_cli_kernel_api::testing::{registry, text_response, unsupported_machine};
 
 use super::support::{GatedModel, Setup, with_ui};
 
@@ -35,10 +31,13 @@ struct OneShell {
     stopped: AtomicBool,
 }
 
-#[async_trait]
-impl EnvInfo for OneShell {
-    async fn facts(&self, _w: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        Err(unused())
+impl OneShell {
+    /// 机器只换上文件、shell 与后台命令三个端口（其余端口返回 `Unsupported`）。
+    fn machine(self: Arc<Self>) -> MachineEnv {
+        unsupported_machine()
+            .with_files(self.clone())
+            .with_shell(self.clone())
+            .with_background(self)
     }
 }
 
@@ -76,34 +75,6 @@ impl Files for OneShell {
 }
 
 #[async_trait]
-impl Commands for OneShell {
-    async fn start_command(
-        &self,
-        _w: &WorkspaceRef,
-        _c: OperationContext,
-        _r: StartCommand,
-    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        Err(unused())
-    }
-
-    fn watch_command(
-        &self,
-        _o: OperationId,
-        _cursor: u64,
-    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        stream::iter([Err(unused())]).boxed()
-    }
-
-    async fn cancel(&self, _o: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn close_session(&self, _s: &SessionId, _forget: bool) -> Result<(), EnvError> {
-        Ok(())
-    }
-}
-
-#[async_trait]
 impl Shell for OneShell {
     async fn shell_state(&self, _w: &WorkspaceRef, _s: &SessionId) -> Result<ShellState, EnvError> {
         let background = if self.stopped.load(Ordering::SeqCst) {
@@ -129,8 +100,7 @@ impl Background for OneShell {
         Ok(known.then(|| BackgroundInfo {
             command: "npm test".to_owned(),
             status: BackgroundStatus::Running,
-            kind: Default::default(),
-            description: String::new(),
+            ..BackgroundInfo::default()
         }))
     }
 
@@ -150,12 +120,6 @@ impl Background for OneShell {
     }
 }
 
-impl Search for OneShell {}
-impl Checkpoints for OneShell {}
-impl Pdf for OneShell {}
-impl Git for OneShell {}
-impl Fetch for OneShell {}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn the_pill_opens_the_panel_and_the_shell_details() {
     let model = GatedModel::scripted(vec![text_response(&["started the tests"])]);
@@ -163,7 +127,7 @@ async fn the_pill_opens_the_panel_and_the_shell_details() {
         // 详情约 23 行；底部区域最高是屏幕的 2/3。
         width: 100,
         height: 40,
-        environments: environments(Arc::new(OneShell::default())),
+        environments: registry(Arc::new(OneShell::default()).machine()),
         ..Setup::default()
     };
     with_ui(model, setup, |mut ui| async move {

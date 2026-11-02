@@ -3,6 +3,7 @@
 //!
 //! 启动只等 alwaysLoad 的服务器（非阻塞时），第一条命令前的 prewait 再等到截止；缺省值见下面的常量。
 
+use rust_cli_kernel_api::mcp_name;
 use std::collections::BTreeSet;
 
 use super::config::normalize_name;
@@ -61,17 +62,14 @@ pub fn wait_for_deferrable(
     !(streaming_input && tool_search && !explicit && startup_wait_ms.is_none())
 }
 
-/// allow 规则点名的服务器：规则名（`(` 之前）按 `__` 拆开，第一段是 `mcp`、第二段不为空时，
-/// 第二段规范化后就是服务器。
+/// allow 规则点名的服务器：规则名（`(` 之前）是 MCP 的写法、服务器段不为空时，服务器段规范化后就是服务器。
 pub fn required_servers<'a>(rules: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
     rules
         .into_iter()
         .filter_map(|rule| {
             let name = rule.split('(').next().unwrap_or_default().trim();
-            let mut parts = name.split("__");
-            (parts.next() == Some("mcp"))
-                .then(|| parts.next())
-                .flatten()
+            mcp_name::parse(name)
+                .map(|parsed| parsed.server)
                 .filter(|server| !server.is_empty())
                 .map(normalize_name)
         })
@@ -81,7 +79,7 @@ pub fn required_servers<'a>(rules: impl IntoIterator<Item = &'a str>) -> BTreeSe
 /// 服务器名比较用的段：规范化后到第一个 `__` 为止；那一段为空时是整个规范化的名字。
 pub fn segment(name: &str) -> String {
     let normalized = normalize_name(name);
-    match normalized.split("__").next() {
+    match normalized.split(mcp_name::SEPARATOR).next() {
         Some(first) if !first.is_empty() => first.to_owned(),
         _ => normalized,
     }

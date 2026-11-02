@@ -22,10 +22,7 @@ pulldown-cmark.workspace = true
 ratatui.workspace = true
 rust-cli-base.workspace = true
 rust-cli-kernel-api.workspace = true
-rust-cli-platform.workspace = true
 rust-cli-prompts.workspace = true
-# 权限规则文字的解析与格式（`/permissions` 显示用，与判决链同一个实现，tui-manage.md §1.3）。
-rust-cli-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 syntect.workspace = true
@@ -50,6 +47,8 @@ windows-sys = { workspace = true, features = ["Win32_System_Console"] }
 [dev-dependencies]
 async-trait.workspace = true
 rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+# 只在测试里组装 `LocalKernel`（同 headless）；产品代码只认 kernel-api 的会话 API（F133，审查 U14）。
+rust-cli-runtime.workspace = true
 # test-util：终端通知的计时用暂停的时钟推进（tui-manage.md §5.3）。
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "test-util", "time"] }
 tokio-util.workspace = true

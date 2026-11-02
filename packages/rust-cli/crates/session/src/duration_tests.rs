@@ -1,7 +1,7 @@
 //! 回合结束那一行的用时（docs/specs/rust-cli/tui-display.md §2.7，修复线 F118）：会话 actor 在 `TurnFinished` 之后发
 //! `TurnDuration`；中断与没发主线程请求的回合没有；等回答的时间不算；等后台子代理之后的那一行从第一个等待的回合算起。
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -14,7 +14,7 @@ use rust_cli_kernel_api::model::ModelError;
 use rust_cli_kernel_api::session_api::{
     Command, KernelEvent, SequencedEvent, SessionHandle, TurnOutcome,
 };
-use rust_cli_kernel_api::testing::{ScriptedModel, text_response, tool_use_response};
+use rust_cli_kernel_api::testing::{ManualClock, ScriptedModel, text_response, tool_use_response};
 use rust_cli_kernel_api::turn_duration::TurnDuration;
 use serde_json::json;
 use tokio::sync::Notify;
@@ -22,30 +22,8 @@ use tokio::sync::Notify;
 use crate::test_support::{GatedModel, ScriptedHooks, Setup, envelope, submit};
 
 /// 测试拨动的时钟；UTC 偏移固定是东八区。
-struct ManualClock(AtomicU64);
-
-impl ManualClock {
-    fn at(ms: u64) -> Arc<Self> {
-        Arc::new(Self(AtomicU64::new(ms)))
-    }
-
-    fn set(&self, ms: u64) {
-        self.0.store(ms, Ordering::SeqCst);
-    }
-}
-
-impl rust_cli_kernel_api::clock::Clock for ManualClock {
-    fn now_ms(&self) -> u64 {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    fn time_zone(&self) -> String {
-        "Asia/Shanghai".to_owned()
-    }
-
-    fn utc_offset_minutes(&self, _at_ms: u64) -> i32 {
-        480
-    }
+fn shanghai(now_ms: u64) -> Arc<ManualClock> {
+    Arc::new(ManualClock::new(now_ms).with_zone("Asia/Shanghai", 480))
 }
 
 /// 后台子代理的替身：`background_agents` 给出测试设定的清单，没有信号。
@@ -54,8 +32,7 @@ struct Waiting(Mutex<Vec<AgentId>>);
 
 impl Waiting {
     fn set(&self, agents: &[&str]) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) =
-            agents.iter().map(|agent| AgentId::new(*agent)).collect();
+        *self.0.lock_unpoisoned() = agents.iter().map(|agent| AgentId::new(*agent)).collect();
     }
 }
 
@@ -72,10 +49,7 @@ impl AgentSignals for Waiting {
     }
 
     async fn background_agents(&self, _session: &SessionId) -> Vec<AgentId> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.0.lock_unpoisoned().clone()
     }
 }
 
@@ -129,7 +103,7 @@ async fn drain(
 #[tokio::test]
 async fn a_finished_turn_reports_how_long_it_took_right_after_turn_finished() {
     let gate = Arc::new(Notify::new());
-    let clock = ManualClock::at(1_000);
+    let clock = shanghai(1_000);
     let mut setup = Setup::new(Arc::new(GatedModel::new(gate.clone())));
     setup.clock = clock.clone();
     let built = setup.build().await;
@@ -246,7 +220,7 @@ async fn time_spent_waiting_for_an_answer_is_left_out() {
         tool_use_response("toolu_1", "AskUserQuestion", &json!({"question": "which?"})),
         text_response(&["thanks"]),
     ]));
-    let clock = ManualClock::at(1_000);
+    let clock = shanghai(1_000);
     let mut setup = Setup::new(model);
     setup.tools = vec![Arc::new(crate::tests::AskingTool)];
     setup.clock = clock.clone();
@@ -288,7 +262,7 @@ async fn gated_turn(
 #[tokio::test]
 async fn after_waiting_for_background_agents_the_line_counts_from_the_first_wait() {
     let gate = Arc::new(Notify::new());
-    let clock = ManualClock::at(1_000);
+    let clock = shanghai(1_000);
     let agents = Arc::new(Waiting::default());
     let mut setup = Setup::new(Arc::new(GatedModel::new(gate.clone())));
     setup.clock = clock.clone();

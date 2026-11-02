@@ -52,6 +52,11 @@
           "name": "put_file",
           "signature": "async fn put_file(&self,_workspace:&WorkspaceRef,_context:OperationContext,_request:PutFile,) -> Result<FileWritten,EnvError>",
           "default": true
+        },
+        {
+          "name": "ensure_dir",
+          "signature": "async fn ensure_dir(&self,_workspace:&WorkspaceRef,_request:EnsureDir,) -> Result<(),EnvError>",
+          "default": true
         }
       ]
     },
@@ -185,31 +190,6 @@
         }
       ]
     },
-    "McpTransport": {
-      "bounds": ":Send + Sync",
-      "methods": [
-        {
-          "name": "connect",
-          "signature": "async fn connect(&self,workspace:&WorkspaceRef,request:McpConnect,) -> Result<McpConnectionId,McpError>",
-          "default": false
-        },
-        {
-          "name": "send",
-          "signature": "async fn send(&self,connection:&McpConnectionId,message:Value) -> Result<(),McpError>",
-          "default": false
-        },
-        {
-          "name": "events",
-          "signature": "fn events(&self,connection:&McpConnectionId) -> BoxStream<'static,McpTransportEvent>",
-          "default": false
-        },
-        {
-          "name": "close",
-          "signature": "async fn close(&self,connection:&McpConnectionId) -> Result<(),McpError>",
-          "default": false
-        }
-      ]
-    },
     "Git": {
       "bounds": ":Send + Sync",
       "methods": [
@@ -245,6 +225,31 @@
         }
       ]
     },
+    "McpTransport": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "connect",
+          "signature": "async fn connect(&self,workspace:&WorkspaceRef,request:McpConnect,) -> Result<McpConnectionId,McpError>",
+          "default": false
+        },
+        {
+          "name": "send",
+          "signature": "async fn send(&self,connection:&McpConnectionId,message:Value) -> Result<(),McpError>",
+          "default": false
+        },
+        {
+          "name": "events",
+          "signature": "fn events(&self,connection:&McpConnectionId) -> BoxStream<'static,McpTransportEvent>",
+          "default": false
+        },
+        {
+          "name": "close",
+          "signature": "async fn close(&self,connection:&McpConnectionId) -> Result<(),McpError>",
+          "default": false
+        }
+      ]
+    },
     "Fetch": {
       "bounds": ":Send + Sync",
       "methods": [
@@ -259,18 +264,18 @@
       "bounds": ":Send + Sync",
       "methods": [
         {
-          "name": "local_machine",
-          "signature": "fn local_machine(&self) -> MachineEnv",
+          "name": "primary_machine",
+          "signature": "fn primary_machine(&self) -> MachineEnv",
           "default": false
         },
         {
           "name": "machine",
-          "signature": "fn machine(&self,name:&str) -> Option<MachineEnv>",
+          "signature": "fn machine(&self,name:&MachineName) -> Option<MachineEnv>",
           "default": true
         },
         {
-          "name": "local",
-          "signature": "fn local(&self) -> LocalServices",
+          "name": "controller",
+          "signature": "fn controller(&self) -> ControllerServices",
           "default": false
         },
         {
@@ -280,7 +285,7 @@
         },
         {
           "name": "remote",
-          "signature": "fn remote(&self,_name:&str) -> Option<(MachineEnv,WorkspaceRef)>",
+          "signature": "fn remote(&self,_name:&MachineName) -> Option<(MachineEnv,WorkspaceRef)>",
           "default": true
         },
         {
@@ -290,17 +295,17 @@
         },
         {
           "name": "wait_remote",
-          "signature": "fn wait_remote(&self,name:&str) -> BoxFuture<'static,Option<(MachineEnv,WorkspaceRef)>>",
+          "signature": "fn wait_remote(&self,name:&MachineName,) -> BoxFuture<'static,Option<(MachineEnv,WorkspaceRef)>>",
           "default": true
         },
         {
           "name": "reconnecting",
-          "signature": "fn reconnecting(&self,_name:&str) -> bool",
+          "signature": "fn reconnecting(&self,_name:&MachineName) -> bool",
           "default": true
         },
         {
           "name": "listed",
-          "signature": "fn listed(&self,_name:&str) -> bool",
+          "signature": "fn listed(&self,_name:&MachineName) -> bool",
           "default": true
         }
       ]
@@ -405,7 +410,7 @@
       "methods": [
         {
           "name": "begin",
-          "signature": "async fn begin(&self,key:&CallKey,fingerprint:&str,kind:CallKind,) -> Result<Begun,LedgerError>",
+          "signature": "async fn begin(&self,key:&CallKey,fingerprint:&str,kind:OpKind,) -> Result<Begun,LedgerError>",
           "default": false
         },
         {
@@ -456,6 +461,21 @@
         {
           "name": "authenticate",
           "signature": "async fn authenticate(&self,hello:&Hello) -> Result<Principal,String>",
+          "default": false
+        }
+      ]
+    },
+    "Launcher": {
+      "bounds": ":Send + Sync",
+      "methods": [
+        {
+          "name": "start_command",
+          "signature": "async fn start_command(&self,workspace:&WorkspaceRef,context:OperationContext,request:StartCommand,env:&EnvOverrides,) -> Result<CommandEvents,EnvError>",
+          "default": false
+        },
+        {
+          "name": "connect_mcp",
+          "signature": "async fn connect_mcp(&self,workspace:&WorkspaceRef,request:McpConnect,env:&EnvOverrides,) -> Result<McpConnectionId,McpError>",
           "default": false
         }
       ]
@@ -943,15 +963,15 @@
           },
           {
             "attributes": [
-              "default,skip_serializing_if = \"Vec::is_empty\""
+              "default,skip_serializing_if = \"Option::is_none\""
             ],
-            "item": "additional_directories:Vec<String>"
+            "item": "home:Option<String>"
           },
           {
             "attributes": [
               "default,skip_serializing_if = \"Option::is_none\""
             ],
-            "item": "home:Option<String>"
+            "item": "uid:Option<u32>"
           }
         ]
       },
@@ -1418,6 +1438,157 @@
           },
           {
             "item": "Rendered{pages:Vec<Blob>,}"
+          }
+        ]
+      }
+    },
+    "dto/git.rs": {
+      "GitStatus": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "NotRepository"
+          },
+          {
+            "item": "Repository(GitSnapshot)"
+          }
+        ]
+      },
+      "GitSnapshot": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "branch:String"
+          },
+          {
+            "item": "default_branch:String"
+          },
+          {
+            "item": "status:String"
+          },
+          {
+            "item": "recent_commits:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "user_name:Option<String>"
+          }
+        ]
+      },
+      "GitDiff": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "NotRepository"
+          },
+          {
+            "item": "Repository{numstat:String,patch:String,untracked:String,}"
+          }
+        ]
+      },
+      "WorktreeCreate": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "cwd:String"
+          },
+          {
+            "item": "name:String"
+          }
+        ]
+      },
+      "WorktreeCreated": {
+        "kind": "enum",
+        "attributes": [
+          "tag = \"kind\",rename_all = \"snake_case\""
+        ],
+        "variants": [
+          {
+            "item": "Ready{path:String,branch:String,#[serde(default,skip_serializing_if = \"Option::is_none\")]head_commit:Option<String>,existed:bool,}"
+          },
+          {
+            "item": "NotARepository"
+          },
+          {
+            "item": "Failed{message:String,}"
+          }
+        ]
+      },
+      "WorktreeList": {
+        "kind": "struct",
+        "fields": [
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "root:Option<String>"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Vec::is_empty\""
+            ],
+            "item": "entries:Vec<WorktreeEntry>"
+          }
+        ]
+      },
+      "WorktreeEntry": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "branch:Option<String>"
+          }
+        ]
+      },
+      "WorktreeInspect": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "base:Option<String>"
+          }
+        ]
+      },
+      "WorktreeChanges": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "changed_files:u64"
+          },
+          {
+            "item": "commits:u64"
+          }
+        ]
+      },
+      "WorktreeRemove": {
+        "kind": "struct",
+        "fields": [
+          {
+            "item": "path:String"
+          },
+          {
+            "attributes": [
+              "default,skip_serializing_if = \"Option::is_none\""
+            ],
+            "item": "branch:Option<String>"
           }
         ]
       }
@@ -2056,6 +2227,12 @@
           },
           {
             "item": "Env"
+          },
+          {
+            "item": "Git"
+          },
+          {
+            "item": "Dirs"
           }
         ]
       },
@@ -2295,6 +2472,41 @@
           },
           {
             "item": "EnvUpdate"
+          },
+          {
+            "item": "GitStatus"
+          },
+          {
+            "item": "GitDiff"
+          },
+          {
+            "item": "WorktreeCreate"
+          },
+          {
+            "item": "WorktreeList"
+          },
+          {
+            "item": "WorktreeChanges"
+          },
+          {
+            "item": "WorktreeRemove"
+          },
+          {
+            "item": "EnsureDir"
+          }
+        ]
+      },
+      "OpKind": {
+        "kind": "enum",
+        "variants": [
+          {
+            "item": "Read"
+          },
+          {
+            "item": "Mutation"
+          },
+          {
+            "item": "Stream"
           }
         ]
       },
@@ -2495,6 +2707,48 @@
               "rename = \"env.update\""
             ],
             "item": "EnvUpdate"
+          },
+          {
+            "attributes": [
+              "rename = \"git.status\""
+            ],
+            "item": "GitStatus(GitStatus)"
+          },
+          {
+            "attributes": [
+              "rename = \"git.diff\""
+            ],
+            "item": "GitDiff(GitDiff)"
+          },
+          {
+            "attributes": [
+              "rename = \"git.worktree_create\""
+            ],
+            "item": "WorktreeCreate(WorktreeCreated)"
+          },
+          {
+            "attributes": [
+              "rename = \"git.worktree_list\""
+            ],
+            "item": "WorktreeList(WorktreeList)"
+          },
+          {
+            "attributes": [
+              "rename = \"git.worktree_changes\""
+            ],
+            "item": "WorktreeChanges(Option<WorktreeChanges>)"
+          },
+          {
+            "attributes": [
+              "rename = \"git.worktree_remove\""
+            ],
+            "item": "WorktreeRemove{removed:bool}"
+          },
+          {
+            "attributes": [
+              "rename = \"dirs.ensure_dir\""
+            ],
+            "item": "EnsureDir"
           }
         ]
       }
@@ -2709,6 +2963,48 @@
               "rename = \"env.update\""
             ],
             "item": "EnvUpdate{mode:EnvMode,vars:EnvVars,#[serde(default,skip_serializing_if = \"Vec::is_empty\")]injected:Vec<String>,}"
+          },
+          {
+            "attributes": [
+              "rename = \"git.status\""
+            ],
+            "item": "GitStatus{workspace:Workspace,cwd:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"git.diff\""
+            ],
+            "item": "GitDiff{workspace:Workspace,cwd:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"git.worktree_create\""
+            ],
+            "item": "WorktreeCreate{context:OperationContext,request:WorktreeCreate,}"
+          },
+          {
+            "attributes": [
+              "rename = \"git.worktree_list\""
+            ],
+            "item": "WorktreeList{cwd:String}"
+          },
+          {
+            "attributes": [
+              "rename = \"git.worktree_changes\""
+            ],
+            "item": "WorktreeChanges{request:WorktreeInspect}"
+          },
+          {
+            "attributes": [
+              "rename = \"git.worktree_remove\""
+            ],
+            "item": "WorktreeRemove{context:OperationContext,request:WorktreeRemove,}"
+          },
+          {
+            "attributes": [
+              "rename = \"dirs.ensure_dir\""
+            ],
+            "item": "EnsureDir{workspace:Workspace,path:String}"
           }
         ]
       }

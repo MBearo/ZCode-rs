@@ -2,6 +2,7 @@
 //! 配置相同的不动；连的过程中注册表记着“正在连”，绑定的服务器等它连完。远端是本进程里的真实执行器（exec-server +
 //! 内存网络），MCP 传输是记录用的替身。
 
+use rust_cli_kernel_api::ids::MachineName;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -11,9 +12,9 @@ use futures_util::stream::BoxStream;
 use rust_cli_base::{OwnedTask, TaskScope};
 use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, ExecClient};
-use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, ServerConfig};
+use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, PortLauncher, ServerConfig};
 use rust_cli_exec_transport::memory::{MemoryConnector, network};
-use rust_cli_exec_transport::{Connector, LinkError, Provisioned, Provisioner, Ready};
+use rust_cli_exec_transport::{Connector, LinkError};
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::EnvironmentId;
@@ -23,6 +24,7 @@ use rust_cli_kernel_api::mcp::{
 };
 use rust_cli_kernel_api::testing::{UnusedEnvironment, environments};
 use rust_cli_machines::{Endpoint, Machine, MachineEntry, MachineList};
+use rust_cli_machines::{Provisioned, Provisioner, Ready};
 
 use super::Fleet;
 use crate::machines::MachineRegistry;
@@ -89,13 +91,7 @@ impl Endpoint for TestEndpoint {
 fn stdio(server: &str, arg: &str) -> McpConnect {
     McpConnect {
         server: server.to_owned(),
-        transport: McpTransportConfig::Stdio {
-            command: "server".to_owned(),
-            args: vec![arg.to_owned()],
-            env: Default::default(),
-            cwd: None,
-        },
-        env: Default::default(),
+        transport: McpTransportConfig::stdio("server".to_owned(), vec![arg.to_owned()]),
     }
 }
 
@@ -111,8 +107,10 @@ async fn executor(mcp: Arc<Recording>) -> (Arc<MemoryConnector>, OwnedTask<()>) 
     let mut config = ServerConfig::new("0.1.60-test", "linux", "aarch64");
     config.home = Some("/home/dev".to_owned());
     config.capabilities = rust_cli_exec_wire::handshake::Capabilities::ports_and_mcp();
+    let served = MachineEnv::new(Arc::new(UnusedEnvironment), mcp);
+    let launcher = Arc::new(PortLauncher(served.clone()));
     let server = ExecServer::start(
-        MachineEnv::new(Arc::new(UnusedEnvironment), mcp),
+        (served, launcher),
         Arc::new(MemoryLedger::default()),
         Arc::new(AllowAll),
         config,
@@ -188,7 +186,7 @@ async fn connecting_a_machine_closes_servers_that_are_not_configured_any_more() 
     let auto = registry.connecting("dev-a");
     let waiting = tokio::spawn({
         let registry = registry.clone();
-        async move { registry.wait_remote("dev-a").await }
+        async move { registry.wait_remote(&MachineName::new("dev-a")).await }
     });
     fleet.connect("dev-a").await.unwrap();
     drop(auto);
@@ -198,7 +196,7 @@ async fn connecting_a_machine_closes_servers_that_are_not_configured_any_more() 
     closed.sort();
     assert_eq!(closed, ["db-2", "docs-3"]);
     // 配置相同的接回同一个进程（不重启），缺的（新的 db）按需起。
-    let (machine, workspace) = registry.remote("dev-a").unwrap();
+    let (machine, workspace) = registry.remote(&MachineName::new("dev-a")).unwrap();
     machine
         .mcp()
         .connect(&workspace, stdio("browser-a", "--x"))

@@ -4,12 +4,13 @@
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
+use crate::controller_services::Fetch;
 use crate::env::{
     CommandEvent, EnvError, EnvFacts, FileContent, FileVersion, OperationContext, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::ids::{OperationId, SessionId};
-use crate::local_services::{Fetch, Git};
+use crate::machine::Git;
 use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
 
 /// 文本回路用不到执行环境：每个操作都返回 `Unsupported`。

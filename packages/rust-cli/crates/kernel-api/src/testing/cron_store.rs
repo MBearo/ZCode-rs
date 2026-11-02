@@ -1,12 +1,12 @@
 //! 持久定时任务存储的测试替身：任务放在内存，变化经 watch 通知，锁的另一个持有者由测试控制。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 use futures_util::stream::{BoxStream, StreamExt};
 use tokio::sync::watch;
 
-use super::lock;
 use crate::cron_store::{CronCreator, CronStore, CronTasksChange, StoredCronTask};
 use crate::env::EnvError;
 use crate::ids::SessionId;
@@ -43,24 +43,24 @@ impl MemoryCronStore {
     /// 文件里已有这些任务（启动前写好的）。
     pub fn with_tasks(tasks: Vec<StoredCronTask>) -> Self {
         let store = Self::default();
-        *lock(&store.tasks) = tasks;
+        *store.tasks.lock_unpoisoned() = tasks;
         store
     }
 
     /// 别的进程写入一项：任务出现在文件里，并产出一次变化。
     pub fn push_external(&self, task: StoredCronTask) {
-        lock(&self.tasks).push(task);
+        self.tasks.lock_unpoisoned().push(task);
         self.version.send_modify(|version| *version += 1);
     }
 
     /// 别的活着的进程持有调度锁。
     pub fn hold_elsewhere(&self) {
-        *lock(&self.holder) = Some(Holder::Foreign { alive: true });
+        *self.holder.lock_unpoisoned() = Some(Holder::Foreign { alive: true });
     }
 
     /// 持有锁的别的进程退出了（没有删锁）。
     pub fn holder_died(&self) {
-        let mut holder = lock(&self.holder);
+        let mut holder = self.holder.lock_unpoisoned();
         if let Some(Holder::Foreign { alive }) = holder.as_mut() {
             *alive = false;
         }
@@ -68,7 +68,7 @@ impl MemoryCronStore {
 
     /// 本进程里持有锁的会话；锁空着或在别的进程时为 None。
     pub fn holder(&self) -> Option<SessionId> {
-        match lock(&self.holder).clone() {
+        match self.holder.lock_unpoisoned().clone() {
             Some(Holder::Ours(session)) => Some(session),
             _ => None,
         }
@@ -76,12 +76,12 @@ impl MemoryCronStore {
 
     /// 当前文件里的任务。
     pub fn snapshot(&self) -> Vec<StoredCronTask> {
-        lock(&self.tasks).clone()
+        self.tasks.lock_unpoisoned().clone()
     }
 
     /// 收到的读改写，按顺序。
     pub fn changes_made(&self) -> Vec<CronTasksChange> {
-        lock(&self.changes_made).clone()
+        self.changes_made.lock_unpoisoned().clone()
     }
 }
 
@@ -92,8 +92,8 @@ impl CronStore for MemoryCronStore {
     }
 
     async fn change(&self, change: CronTasksChange) -> Result<(), EnvError> {
-        lock(&self.changes_made).push(change.clone());
-        let mut tasks = lock(&self.tasks);
+        self.changes_made.lock_unpoisoned().push(change.clone());
+        let mut tasks = self.tasks.lock_unpoisoned();
         match change {
             CronTasksChange::Add { task } => tasks.push(StoredCronTask {
                 id: task.id,
@@ -132,7 +132,7 @@ impl CronStore for MemoryCronStore {
     }
 
     async fn lead(&self, holder: &SessionId) -> Result<bool, EnvError> {
-        let mut current = lock(&self.holder);
+        let mut current = self.holder.lock_unpoisoned();
         let free = match current.as_ref() {
             None | Some(Holder::Foreign { alive: false }) => true,
             Some(Holder::Ours(session)) => session == holder,
@@ -145,7 +145,7 @@ impl CronStore for MemoryCronStore {
     }
 
     async fn release(&self, holder: &SessionId) -> Result<(), EnvError> {
-        let mut current = lock(&self.holder);
+        let mut current = self.holder.lock_unpoisoned();
         if current.as_ref() == Some(&Holder::Ours(holder.clone())) {
             *current = None;
         }

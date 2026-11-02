@@ -2,16 +2,12 @@
 //! 用量锚点。模型端口用脚本模型的替身（不连真实服务）；F93 删掉模型端口的计数之后，“不发计数”由类型保证。
 use std::sync::Arc;
 
-use futures_util::FutureExt;
-use futures_util::future::BoxFuture;
-use futures_util::stream::BoxStream;
 use rust_cli_base::models::OPUS_5_5;
 use rust_cli_kernel_api::context_usage::{ContextUsageQuery, UsageCategory};
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{CommandId, EnvironmentId};
-use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection};
+use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelSelection};
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::provider::ModelCapabilities;
 use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent,
 };
@@ -19,42 +15,12 @@ use rust_cli_kernel_api::testing::{
     FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
     text_response,
 };
-use tokio_util::sync::CancellationToken;
 
 use crate::{Defaults, LocalKernel, Ports};
 
-/// 脚本模型加端点的能力（None 是答不出）。工作线 F93 之前它还记录计数请求（`supported` 为假时像 OpenAI 协议一样不支持）。
-struct Counting {
-    inner: ScriptedModel,
-    capabilities: Option<ModelCapabilities>,
-}
-
-impl ModelPort for Counting {
-    fn stream(
-        &self,
-        request: ModelRequest,
-        cancel: CancellationToken,
-    ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-        self.inner.stream(request, cancel)
-    }
-
-    fn capabilities(
-        &self,
-        _selection: &ModelSelection,
-    ) -> BoxFuture<'static, Option<ModelCapabilities>> {
-        let found = self.capabilities;
-        async move { found }.boxed()
-    }
-}
-
 /// Anthropic 的有卡片的模型：窗口按卡片是 1,000,000（下面的窗口与缓冲按它算；卡片的窗口只给有卡片的模型）。
 fn carded() -> ModelSelection {
-    ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: OPUS_5_5.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("anthropic".to_owned(), OPUS_5_5.to_owned())
 }
 
 fn workspace() -> WorkspaceRef {
@@ -64,7 +30,7 @@ fn workspace() -> WorkspaceRef {
     }
 }
 
-fn setup(model: Arc<Counting>) -> LocalKernel {
+fn setup(model: Arc<ScriptedModel>) -> LocalKernel {
     let store = Arc::new(MemoryStore::default());
     LocalKernel::new(
         Ports {
@@ -86,11 +52,8 @@ fn setup(model: Arc<Counting>) -> LocalKernel {
     )
 }
 
-fn counting(responses: Vec<Vec<Result<ModelEvent, ModelError>>>) -> Arc<Counting> {
-    Arc::new(Counting {
-        inner: ScriptedModel::new(responses),
-        capabilities: None,
-    })
+fn counting(responses: Vec<Vec<Result<ModelEvent, ModelError>>>) -> Arc<ScriptedModel> {
+    Arc::new(ScriptedModel::new(responses))
 }
 
 fn query(session: Option<rust_cli_kernel_api::ids::SessionId>) -> ContextUsageQuery {

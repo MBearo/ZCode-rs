@@ -4,15 +4,12 @@ use super::*;
 /// 修复线 F117：Monitor 起的后台命令是 `monitor`。
 #[test]
 fn a_monitor_entry_is_named_monitor() {
-    let entry = BackgroundEntry {
-        id: "b2".to_owned(),
-        kind: BackgroundKind::Monitor,
-        description: "build log".to_owned(),
-        status: BackgroundStatus::Running,
-        output: None,
-        machine: None,
-        reconnecting: false,
-    };
+    let entry = BackgroundEntry::new(
+        "b2".to_owned(),
+        BackgroundKind::Monitor,
+        "build log".to_owned(),
+        BackgroundStatus::Running,
+    );
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["kind"], "monitor");
     assert_eq!(
@@ -24,13 +21,13 @@ fn a_monitor_entry_is_named_monitor() {
 #[test]
 fn entries_round_trip() {
     let entry = BackgroundEntry {
-        id: "b1".to_owned(),
-        kind: BackgroundKind::Shell,
-        description: "sleep 10".to_owned(),
-        status: BackgroundStatus::Running,
         output: Some("tick".to_owned()),
-        machine: None,
-        reconnecting: false,
+        ..BackgroundEntry::new(
+            "b1".to_owned(),
+            BackgroundKind::Shell,
+            "sleep 10".to_owned(),
+            BackgroundStatus::Running,
+        )
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["kind"], "shell");
@@ -42,7 +39,7 @@ fn entries_round_trip() {
         entry
     );
     let remote = BackgroundEntry {
-        machine: Some("dev-a".to_owned()),
+        machine: crate::ids::MachineName::new("dev-a"),
         ..entry
     };
     let json = serde_json::to_value(&remote).unwrap();
@@ -69,7 +66,7 @@ fn entries_round_trip() {
         state: McpServerState::Failed,
         reason: Some("spawn failed".to_owned()),
         tools: 0,
-        machine: None,
+        machine: Default::default(),
     };
     let json = serde_json::to_value(&server).unwrap();
     assert_eq!(json["state"], "failed");
@@ -80,7 +77,7 @@ fn entries_round_trip() {
     );
     // 绑定到远端机器的服务器（R5，remote-exec.md §22.2）。
     let remote = McpServerInfo {
-        machine: Some("dev-a".to_owned()),
+        machine: crate::ids::MachineName::new("dev-a"),
         ..server
     };
     let json = serde_json::to_value(&remote).unwrap();
@@ -149,16 +146,6 @@ fn directory_changes_round_trip() {
     assert_eq!(
         serde_json::from_value::<ChangeDirectory>(json).unwrap(),
         request
-    );
-    let command = crate::session_api::Command::SetWorkspace {
-        root: crate::env::EnvPath::new("/Users/dev/other"),
-        note: Some("moved".to_owned()),
-    };
-    let json = serde_json::to_value(&command).unwrap();
-    assert_eq!(json["type"], "set_workspace");
-    assert_eq!(
-        serde_json::from_value::<crate::session_api::Command>(json).unwrap(),
-        command
     );
     let command = crate::session_api::Command::ChangeDirectory {
         root: crate::env::EnvPath::new("/Users/dev/other"),

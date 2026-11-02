@@ -3,8 +3,6 @@
 
 use std::sync::Arc;
 
-use futures_util::future::BoxFuture;
-use futures_util::stream::BoxStream;
 use rust_cli_base::models::{GLM_5_3, OPUS_5_5};
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::compaction::rough_tokens;
@@ -12,12 +10,9 @@ use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::message::{
     AssistantMessage, ContentBlock, Message, StopReason, Usage, UserMessage, UserOrigin,
 };
-use rust_cli_kernel_api::model::{
-    ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection, QuerySource,
-};
+use rust_cli_kernel_api::model::{ModelRequest, ModelSelection, QuerySource};
 use rust_cli_kernel_api::provider::ModelCapabilities;
 use rust_cli_kernel_api::testing::{ScriptedModel, text_response};
-use tokio_util::sync::CancellationToken;
 
 use super::tests::{parts, request, scope};
 use crate::RequestLimits;
@@ -27,30 +22,6 @@ const WINDOW: u64 = 1_000_000;
 const CONFIGURED_MAX: u64 = 384_000;
 /// 最后一条 user 消息的文字（粗估 1 个 token）。
 const NEXT: &str = "next";
-
-/// 按固定的生效配置答能力的模型端口（`None` 是答不出）。
-struct Configured {
-    inner: ScriptedModel,
-    capabilities: Option<ModelCapabilities>,
-}
-
-impl ModelPort for Configured {
-    fn stream(
-        &self,
-        request: ModelRequest,
-        cancel: CancellationToken,
-    ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-        self.inner.stream(request, cancel)
-    }
-
-    fn capabilities(
-        &self,
-        _selection: &ModelSelection,
-    ) -> BoxFuture<'static, Option<ModelCapabilities>> {
-        let found = self.capabilities;
-        Box::pin(async move { found })
-    }
-}
 
 fn configured(context_window: u64) -> Option<ModelCapabilities> {
     Some(ModelCapabilities {
@@ -103,24 +74,17 @@ async fn first_request(
     source: QuerySource,
     limits: RequestLimits,
 ) -> ModelRequest {
-    let model = Arc::new(Configured {
-        inner: ScriptedModel::new(vec![text_response(&["ok"])]),
-        capabilities,
-    });
+    let model =
+        Arc::new(ScriptedModel::new(vec![text_response(&["ok"])]).capabilities(capabilities));
     let mut request = request("unused");
     request.messages = messages;
     request.source = source;
-    request.selection = ModelSelection {
-        provider: "gateway".to_owned(),
-        model: "gateway-model".to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    request.selection = ModelSelection::new("gateway".to_owned(), "gateway-model".to_owned());
     let mut parts = parts(model.clone(), Vec::new());
     parts.limits = limits;
     let (scope, _sink) = scope(parts, &request, Abort::new());
     super::run(scope, request).await.unwrap();
-    model.inner.requests().remove(0)
+    model.requests().remove(0)
 }
 
 async fn budget(
@@ -280,21 +244,14 @@ async fn a_missing_configured_limit_uses_32000() {
 /// 这个模型的第一个请求（窗口 1,000,000、配置的输出上限 384,000，输入接近窗口）。
 async fn sent_for(model: &str) -> ModelRequest {
     let messages = history(990_000, 0);
-    let port = Arc::new(Configured {
-        inner: ScriptedModel::new(vec![text_response(&["ok"])]),
-        capabilities: configured(WINDOW),
-    });
+    let port =
+        Arc::new(ScriptedModel::new(vec![text_response(&["ok"])]).capabilities(configured(WINDOW)));
     let mut request = request("unused");
     request.messages = messages;
-    request.selection = ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    request.selection = ModelSelection::new("anthropic".to_owned(), model.to_owned());
     let (scope, _sink) = scope(parts(port.clone(), Vec::new()), &request, Abort::new());
     super::run(scope, request).await.unwrap();
-    port.inner.requests().remove(0)
+    port.requests().remove(0)
 }
 
 /// 请求体自己的 `max_tokens` 不变：卡片模型照旧发卡片的上限（显式覆盖的端点没有补丁，只看它）。卡片自己的上限只有

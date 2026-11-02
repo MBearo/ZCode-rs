@@ -4,9 +4,10 @@
     reason = "测试直接准备目录夹具；注入的事件源像系统的监听一样检查目录"
 )]
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, mpsc as std_mpsc};
+use std::sync::{Arc, Mutex, mpsc as std_mpsc};
 use std::time::Duration;
 
 use futures_util::{FutureExt, StreamExt};
@@ -42,7 +43,7 @@ impl Stall {
 
     fn wait(&self) {
         self.waiting.notify_one();
-        let release = self.release.lock().unwrap_or_else(PoisonError::into_inner);
+        let release = self.release.lock_unpoisoned();
         if release.recv_timeout(STALL).is_err() {
             self.expired.store(true, Ordering::SeqCst);
         }
@@ -94,7 +95,7 @@ impl Fake {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Watches> {
-        self.watches.lock().unwrap_or_else(PoisonError::into_inner)
+        self.watches.lock_unpoisoned()
     }
 
     /// 像系统那样从回调线程送一个事件。

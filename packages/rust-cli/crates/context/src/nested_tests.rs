@@ -2,7 +2,7 @@ use rust_cli_kernel_api::env::{EnvFacts, EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::ids::{EnvironmentId, MessageId, ToolUseId};
 use rust_cli_kernel_api::message::{
-    AssistantMessage, AttachmentMessage, ToolResultContent, UserMessage, UserOrigin,
+    AssistantMessage, AttachmentMessage, ContentBlock, ToolResultContent, UserMessage, UserOrigin,
 };
 use rust_cli_kernel_api::testing::MemoryEnvironment;
 
@@ -87,8 +87,8 @@ fn facts() -> EnvFacts {
         os_version: String::new(),
         shell: "bash".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     }
 }
 
@@ -150,7 +150,13 @@ async fn directory_rules_are_announced_once_per_file() {
     ];
     let seen = Seen::default();
     let session = SessionId::new("sess_1");
-    let found = announce((&scope, &seen, &session, &env), &facts(), &history, &files).await;
+    let found = announce(
+        (&scope, &seen, &session, &env),
+        (&facts(), &[]),
+        &history,
+        &files,
+    )
+    .await;
     assert_eq!(found.len(), 1);
     let (text, data) = &found[0];
     // 内容不 trim，没有 label。
@@ -170,7 +176,13 @@ async fn directory_rules_are_announced_once_per_file() {
     history.push(results(&[("t3", false)]));
     let seen = Seen::default();
     let session = SessionId::new("sess_1");
-    let found = announce((&scope, &seen, &session, &env), &facts(), &history, &files).await;
+    let found = announce(
+        (&scope, &seen, &session, &env),
+        (&facts(), &[]),
+        &history,
+        &files,
+    )
+    .await;
     assert_eq!(
         found
             .iter()
@@ -190,7 +202,13 @@ async fn directory_rules_are_announced_once_per_file() {
     ];
     let seen = Seen::default();
     let session = SessionId::new("sess_1");
-    let found = announce((&scope, &seen, &session, &env), &facts(), &history, &files).await;
+    let found = announce(
+        (&scope, &seen, &session, &env),
+        (&facts(), &[]),
+        &history,
+        &files,
+    )
+    .await;
     assert_eq!(
         found
             .iter()
@@ -220,7 +238,7 @@ async fn trigger_paths_are_resolved_like_the_tools_resolve_them() {
     ];
     let found = announce(
         (&scope, &Seen::default(), &SessionId::new("sess_1"), &env),
-        &facts(),
+        (&facts(), &[]),
         &history,
         &[],
     )
@@ -258,7 +276,7 @@ async fn relative_triggers_follow_the_session_directory() {
     let session = SessionId::new("sess_1");
     let found = announce(
         (&scope, &Seen::default(), &session, &env),
-        &facts(),
+        (&facts(), &[]),
         &history,
         &[],
     )
@@ -274,7 +292,7 @@ async fn relative_triggers_follow_the_session_directory() {
     env.set_shell_cwd("/x");
     let found = announce(
         (&scope, &Seen::default(), &session, &env),
-        &facts(),
+        (&facts(), &[]),
         &history,
         &[],
     )

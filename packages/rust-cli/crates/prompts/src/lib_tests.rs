@@ -7,20 +7,28 @@ fn every_registered_file_parses() {
     assert_eq!(tools().len(), TOOL_FILES.len());
 }
 
+/// 没有登记的名字：空描述与对象 schema（兜底只有这一处）。
+#[test]
+fn an_unregistered_name_gets_an_empty_object_definition() {
+    let missing = definition("NoSuchTool");
+    assert!(missing.description.is_empty());
+    assert_eq!(missing.schema, serde_json::json!({"type": "object"}));
+}
+
 #[test]
 fn texts_use_the_product_names() {
     // cron 工具里指产品的地方写 ZCode（tools-more.md §10.2）。
-    let cron = tool("CronCreate").unwrap();
-    let text = format!("{}{}", cron.description, cron.input_schema);
+    let cron = definition("CronCreate");
+    let text = format!("{}{}", cron.description, cron.schema);
     for phrase in ["this ZCode session", "when ZCode exits"] {
         assert!(text.contains(phrase), "{phrase}");
     }
-    let read = tool("Read").unwrap();
+    let read = definition("Read");
     assert!(
         read.description
             .starts_with("Reads a file from the local filesystem.")
     );
-    assert_eq!(read.input_schema["required"][0], "file_path");
+    assert_eq!(read.schema["required"][0], "file_path");
 }
 
 #[test]
@@ -135,17 +143,16 @@ fn the_slug_word_lists_keep_their_sizes_and_order() {
 /// 词表扫描拦下（export.md §4），这里不再逐个断言。
 #[test]
 fn texts_have_no_environment_section_or_model_parameter() {
-    let agent = tool("Agent").unwrap();
-    assert!(agent.input_schema["properties"].get("model").is_none());
-    assert!(agent.input_schema["properties"].get("effort").is_some());
+    let agent = definition("Agent");
+    assert!(agent.schema["properties"].get("model").is_none());
+    assert!(agent.schema["properties"].get("effort").is_some());
     // 修复线 F51b（agents.md §2）：没有 isolation 参数与说明它的一行，不提 SDK 的 `agents` 选项。
-    assert!(agent.input_schema["properties"].get("isolation").is_none());
+    assert!(agent.schema["properties"].get("isolation").is_none());
     assert!(!agent.description.contains("isolation"));
     assert!(!agent.description.contains("SDK"));
     // 修复线 F51c（tools-more.md §11.1）：EnterWorktree 不提子代理的 isolation。
     assert!(
-        !tool("EnterWorktree")
-            .unwrap()
+        !definition("EnterWorktree")
             .description
             .contains("subagent isolation")
     );

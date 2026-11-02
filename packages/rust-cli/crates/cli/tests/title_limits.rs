@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::clock::SystemClock;
 use rust_cli_base::models::GLM_5_3;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
@@ -34,9 +35,9 @@ use rust_cli_kernel_api::session_api::{
     Ack, Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent,
 };
 use rust_cli_kernel_api::testing::environments;
-use rust_cli_model::{AnthropicEndpoint, FixedEndpoint, ProviderModel};
+use rust_cli_model::{AnthropicEndpoint, FixedEndpoint, ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
-use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_platform::{AccountOrigins, AccountServices, CredentialSecret, Platform};
 use rust_cli_runtime::{Defaults, LocalKernel, Ports, TitleModel};
@@ -218,13 +219,13 @@ async fn a_catalog_title_request_sends_the_node_output_limit() {
     };
     let platform = Arc::new(Platform::new(&sandbox.paths(), &secret, services));
     let endpoints: Arc<dyn ModelEndpoints> = platform.clone();
-    let model: Arc<dyn ModelPort> = Arc::new(ProviderModel::new(egress, endpoints, clock.clone()));
-    let selection = ModelSelection {
-        provider: "personal:gateway".to_owned(),
-        model: GLM_5_3.to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    let model: Arc<dyn ModelPort> = Arc::new(ProviderModel::new(
+        egress,
+        endpoints,
+        clock.clone(),
+        RouteOptions::default(),
+    ));
+    let selection = ModelSelection::new("personal:gateway".to_owned(), GLM_5_3.to_owned());
     let directory: Arc<dyn ModelDirectory> = platform;
     let kernel = sandbox.kernel(model, Some(directory), &selection, clock);
     sandbox.first_input(&kernel, selection).await;
@@ -251,13 +252,9 @@ async fn an_explicit_title_request_still_sends_5000() {
         egress,
         Arc::new(endpoint),
         clock.clone(),
+        RouteOptions::default(),
     ));
-    let selection = ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: GLM_5_3.to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    let selection = ModelSelection::new("anthropic".to_owned(), GLM_5_3.to_owned());
     let kernel = sandbox.kernel(model, None, &selection, clock);
     sandbox.first_input(&kernel, selection).await;
     let titles = title_requests(&fixture);

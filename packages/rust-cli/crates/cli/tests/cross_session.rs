@@ -393,7 +393,7 @@ fn with_latest<T>(
     runtime.block_on(async {
         let paths =
             StoragePaths::resolve(&StorageSettings::default(), &sandbox.home, &sandbox.home);
-        let clock = Arc::new(rust_cli_node_store::SystemClock::utc());
+        let clock = Arc::new(rust_cli_base::clock::SystemClock::utc());
         let ids = Arc::new(rust_cli_node_store::NodeIds::new(clock));
         let store = rust_cli_node_store::NodeStore::new(paths, ids);
         let workspace = WorkspaceRef {

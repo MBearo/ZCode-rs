@@ -47,8 +47,6 @@ pub type Highlighted = Rc<Vec<Vec<Span<'static>>>>;
 
 /// 记住的代码原文总字节数上限；超过时整体清空。
 const MEMO_BYTES: usize = 4 * rust_cli_base::units::MIB;
-/// 单独取一个作用域的颜色时保留的饱和度（向亮度靠 15%）。
-const SATURATION: f64 = 0.85;
 
 /// 高亮结果按（代码、语言、明暗、色彩级别）记忆。流式中的回复每帧重排，原来每帧把已闭合的代码块
 /// 重新高亮，占流式 CPU 的 85%，总成本随回复长度平方增长（docs/specs/rust-tui.md §8.1）。高亮是这几项的
@@ -149,35 +147,6 @@ fn highlight_uncached(
         );
     }
     Some(out)
-}
-
-/// 主题里某类记号的前景色（取第一个有颜色的 scope），饱和度降到 85%；16 色终端返回 None。
-/// status line 用它给模型与目录着色。
-pub fn scope_color(scopes: &[&str], palette: &Palette) -> Option<Color> {
-    if palette.level == ColorLevel::Ansi16 {
-        return None;
-    }
-    let highlighter = syntect::highlighting::Highlighter::new(theme(palette.light));
-    let c = scopes.iter().find_map(|scope| {
-        let stack: syntect::parsing::ScopeStack = scope.parse().ok()?;
-        let style = highlighter.style_mod_for_stack(stack.as_slice());
-        style.foreground
-    })?;
-    let luma = super::palette::luma((c.r, c.g, c.b));
-    let soften = |v: u8| {
-        (luma + (f64::from(v) - luma) * SATURATION)
-            .round()
-            .clamp(0.0, f64::from(u8::MAX)) as u8
-    };
-    color(
-        syntect::highlighting::Color {
-            r: soften(c.r),
-            g: soften(c.g),
-            b: soften(c.b),
-            a: c.a,
-        },
-        palette.level,
-    )
 }
 
 #[cfg(test)]

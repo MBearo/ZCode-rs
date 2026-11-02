@@ -3,43 +3,18 @@
 //! ctx 立即更新。替身模型不在模型卡片里：窗口 200,000、预留 20,000，有效窗口 180,000。修复线 F105：TPS 来自会话
 //! actor 的内存（只有工具调用的请求也有，换会话之后没有）。
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crossterm::event::KeyCode;
-use rust_cli_kernel_api::ids::{SessionId, ToolUseId};
+use rust_cli_kernel_api::ids::ToolUseId;
 use rust_cli_kernel_api::message::{ContentBlock, StopReason, Usage};
-use rust_cli_kernel_api::metering::RequestStats;
 use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
-use rust_cli_kernel_api::store::{
-    CommitReceipt, FactBatch, LoadedSession, SessionFilter, SessionMeta, SessionPage, SessionQuery,
-    SessionStore, SessionSummary, StoreError,
-};
-use rust_cli_kernel_api::testing::MemoryStore;
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_kernel_api::store::StoreError;
+use rust_cli_kernel_api::testing::{MemoryStore, StepClock, StoreCall, StoreHooks, StoreProxy};
+use rust_cli_tui::{ColorLevel, Palette};
 use tokio::sync::watch;
 
-use super::support::{GatedModel, Item, Setup, finish, send, with_ui};
-
-/// 测试拨动的内核时钟：请求的开始、首字与结束各读一次（usage.md §1）。
-#[derive(Default)]
-struct ManualClock(AtomicU64);
-
-impl ManualClock {
-    fn set(&self, ms: u64) {
-        self.0.store(ms, Ordering::SeqCst);
-    }
-}
-
-impl rust_cli_kernel_api::clock::Clock for ManualClock {
-    fn now_ms(&self) -> u64 {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
+use super::support::{GatedModel, Item, ManualClock, Setup, finish, send, with_ui};
 
 fn usage(input: u64, read: u64, output: u64) -> Usage {
     Usage {
@@ -151,49 +126,18 @@ async fn a_finished_request_shows_tps_context_and_cache() {
 /// `/resume` 页的会话列表在测试放行之前取不到，其余直接交给内存存储：让“页面框架已经画出、列表还没到”这一刻每次都
 /// 出现（修复线 F31）。
 struct HeldList {
-    inner: MemoryStore,
     open: watch::Receiver<bool>,
 }
 
 #[async_trait::async_trait]
-impl SessionStore for HeldList {
-    async fn create(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        self.inner.create(meta).await
-    }
-
-    async fn commit(
-        &self,
-        session: &SessionId,
-        batch: FactBatch,
-    ) -> Result<CommitReceipt, StoreError> {
-        self.inner.commit(session, batch).await
-    }
-
-    async fn load(&self, session: &SessionId) -> Result<LoadedSession, StoreError> {
-        self.inner.load(session).await
-    }
-
-    async fn list(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, StoreError> {
-        self.inner.list(filter).await
-    }
-
-    async fn entries(
-        &self,
-        session: &SessionId,
-        kind: &str,
-    ) -> Result<Vec<(String, serde_json::Value)>, StoreError> {
-        self.inner.entries(session, kind).await
-    }
-
-    async fn request_stats(&self, session: &SessionId) -> Result<RequestStats, StoreError> {
-        self.inner.request_stats(session).await
-    }
-
-    async fn query_sessions(&self, query: SessionQuery) -> Result<SessionPage, StoreError> {
-        let mut open = self.open.clone();
-        // 放行端随测试结束释放时也不再等。
-        let _ = open.wait_for(|open| *open).await;
-        self.inner.query_sessions(query).await
+impl StoreHooks for HeldList {
+    async fn before(&self, call: StoreCall<'_>) -> Result<(), StoreError> {
+        if let StoreCall::QuerySessions = call {
+            let mut open = self.open.clone();
+            // 放行端随测试结束释放时也不再等。
+            let _ = open.wait_for(|open| *open).await;
+        }
+        Ok(())
     }
 }
 
@@ -208,10 +152,10 @@ async fn the_hit_rate_is_rebuilt_from_the_usage_rows_after_resume() {
     let (release, open) = watch::channel(false);
     let setup = Setup {
         width: 120,
-        session_store: Some(Arc::new(HeldList {
-            inner: MemoryStore::default(),
-            open,
-        })),
+        session_store: Some(Arc::new(StoreProxy::new(
+            Arc::new(MemoryStore::default()),
+            HeldList { open },
+        ))),
         ..Setup::default()
     };
     with_ui(model, setup, |mut ui| async move {
@@ -314,20 +258,6 @@ async fn chinese_and_light_themes_show_the_same_items() {
     .await;
 }
 
-/// 每读一次前进 1 ms 的内核时钟（修复线 F105）：只有工具调用的请求，块开始（首个内容）一定早于流结束，生成时长大于 0；
-/// 速度的具体数值随读时钟的次数变，这里只看有没有。
-struct TickClock(AtomicU64);
-
-impl rust_cli_kernel_api::clock::Clock for TickClock {
-    fn now_ms(&self) -> u64 {
-        self.0.fetch_add(1, Ordering::SeqCst)
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
-
 /// 只有一个 Read 调用、没有文字的回复，带输出 token。
 fn tool_call(output: u64) -> Vec<Item> {
     let input = usage(10, 0, 0);
@@ -377,7 +307,9 @@ async fn a_tool_only_request_has_tps_until_the_session_changes() {
     );
     let setup = Setup {
         width: 120,
-        clock: Some(Arc::new(TickClock(AtomicU64::new(1_000)))),
+        // 每读一次前进 1 ms 的内核时钟（修复线 F105）：只有工具调用的请求，块开始（首个内容）一定早于流结束，生成时长
+        // 大于 0；速度的具体数值随读时钟的次数变，这里只看有没有。
+        clock: Some(Arc::new(StepClock::new(1_000, 1))),
         ..Setup::default()
     };
     with_ui(model, setup, |mut ui| async move {

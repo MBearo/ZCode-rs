@@ -13,8 +13,9 @@ use rust_cli_kernel_api::env_files::PathStyle;
 
 use crate::check::{AskKind, Check, Inputs};
 use crate::consts::{DRIVE_LEN, DRIVE_ROOT_LEN, NICE_DASH_N_WORDS, OPTION_WITH_VALUE_WORDS};
-use crate::parse::{Invocation, WordText};
-use crate::readonly::strip_wrappers;
+use crate::shell::argv::skip_dashes;
+use crate::shell::parse::{Invocation, WordText};
+use crate::shell::readonly::strip_wrappers;
 use crate::texts::{self, Removal};
 
 /// `nice -5` 占的词：命令名与带数字的选项。
@@ -99,13 +100,6 @@ pub(crate) fn strip_runners(argv: &[String]) -> &[String] {
     let mut words = strip_wrappers(argv);
     loop {
         let name = words.first().map(|word| basename(word));
-        let skip_dashes = |at: usize, words: &[String]| {
-            if words.get(at).is_some_and(|word| word == "--") {
-                at + 1
-            } else {
-                at
-            }
-        };
         let next = match name {
             Some("time" | "nohup") => skip_dashes(1, words),
             Some("timeout") => {

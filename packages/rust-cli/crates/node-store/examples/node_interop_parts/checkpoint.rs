@@ -47,7 +47,7 @@ pub(super) async fn checkpointed(store: &NodeStore) -> Result<SessionId> {
         )
         .await?;
     let checkpoint = WorkspaceCheckpoint {
-        machine: None,
+        machine: Default::default(),
         id: "checkpoint_interop".into(),
         prompt: u1.clone(),
         assistant: a1.clone(),

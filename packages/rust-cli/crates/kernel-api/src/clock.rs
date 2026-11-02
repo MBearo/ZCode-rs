@@ -1,7 +1,8 @@
 //! 时间与 ID 的注入端口（docs/specs/rust-cli/README.md §6 规则 12）。
 //!
 //! 内核不直接读系统时钟、不直接生成 uuid：测试里注入固定值，云端统一时间来源。ID 格式与 Node
-//! 记录一致，本机实现见 node-store（`SystemClock`、`NodeIds`，README §4）。
+//! 记录一致；本机的时钟是 base 的 `SystemClock`（这里为它实现 [`Clock`]，F128），ID 是 node-store 的 `NodeIds`
+//! （README §4）。
 
 use rust_cli_base::{civil, units};
 
@@ -27,6 +28,25 @@ pub trait Clock: Send + Sync {
     /// （docs/specs/rust-cli/tools-more.md §10.3）。默认按 UTC；能解析时区的实现应覆盖它。
     fn utc_offset_minutes(&self, _at_ms: u64) -> i32 {
         0
+    }
+}
+
+/// 本机的系统时钟（入口建一份注入；内核的 crate 不建它，`check:rust-cli` 拦）。
+impl Clock for rust_cli_base::clock::SystemClock {
+    fn now_ms(&self) -> u64 {
+        rust_cli_base::clock::SystemClock::now_ms(self)
+    }
+
+    fn time_zone(&self) -> String {
+        rust_cli_base::clock::SystemClock::time_zone(self)
+    }
+
+    fn today(&self) -> String {
+        rust_cli_base::clock::SystemClock::today(self)
+    }
+
+    fn utc_offset_minutes(&self, at_ms: u64) -> i32 {
+        rust_cli_base::clock::SystemClock::utc_offset_minutes(self, at_ms)
     }
 }
 

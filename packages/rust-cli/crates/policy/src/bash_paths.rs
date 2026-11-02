@@ -10,10 +10,11 @@ use rust_cli_kernel_api::permission::{PermissionMode, RuleBehavior};
 
 use crate::check::{AskKind, Check, Inputs};
 use crate::consts::{MIN_COPY_OPERANDS, NEWER_XY_LETTERS};
-use crate::files::{Access, path_rule};
-use crate::parse::Invocation;
+use crate::files::path_rule;
 use crate::removal::{basename, strip_runners};
+use crate::shell::parse::Invocation;
 use crate::{removal, texts};
+use rust_cli_kernel_api::permission::FileAccess;
 
 /// 命令名：去掉目录只对 `rm`、`rmdir`、`tee` 做（同对照实现；`/bin/cat` 不算 cat）。
 pub(crate) fn command_name(word: &str) -> &str {
@@ -26,8 +27,8 @@ pub(crate) fn command_name(word: &str) -> &str {
 }
 
 /// 命令的动作说明与操作类型。
-fn command_kind(name: &str) -> Option<(&'static str, Access)> {
-    use Access::{Read, Write};
+fn command_kind(name: &str) -> Option<(&'static str, FileAccess)> {
+    use FileAccess::{Read, Write};
     Some(match name {
         "cd" => ("change directories to", Read),
         "ls" => ("list files in", Read),
@@ -205,7 +206,7 @@ pub(crate) fn operands(name: &str, argv: &[String]) -> Vec<String> {
 /// 一个目标路径的检查。`subject` 用在询问文本里（`touch in '<path>'`、`Output redirection to …`）。
 struct Target {
     command: String,
-    access: Access,
+    access: FileAccess,
     action: &'static str,
     path: String,
     subject: String,
@@ -216,26 +217,26 @@ fn verdict(target: &Target, inputs: &Inputs<'_>) -> Option<(Check, bool)> {
     let dirs = texts::directories(&paths.root_list());
     let inside = paths.in_working_dirs(&target.path);
     let allowed = match target.access {
-        Access::Read => inside || paths.internal_readable(&target.path),
-        Access::Write => {
+        FileAccess::Read => inside || paths.internal_readable(&target.path),
+        FileAccess::Write => {
             (inside && inputs.mode == PermissionMode::AcceptEdits)
-                || path_rule(Access::Write, &target.path, RuleBehavior::Allow, inputs)
+                || path_rule(FileAccess::Write, &target.path, RuleBehavior::Allow, inputs)
         }
     };
     if allowed {
         return None;
     }
     let message = match (target.access, inside) {
-        (Access::Write, true) => texts::write_inside(&target.subject, &dirs),
-        (Access::Write, false) => texts::write_outside(&target.subject, &dirs),
-        (Access::Read, _) => {
+        (FileAccess::Write, true) => texts::write_inside(&target.subject, &dirs),
+        (FileAccess::Write, false) => texts::write_outside(&target.subject, &dirs),
+        (FileAccess::Read, _) => {
             texts::read_outside(&target.command, &target.path, target.action, &dirs)
         }
     };
     // 工作目录里的写入可以被这条命令的 allow 规则盖过。
     Some((
         Check::ask(message),
-        target.access == Access::Write && inside,
+        target.access == FileAccess::Write && inside,
     ))
 }
 
@@ -257,7 +258,7 @@ fn redirect_targets(invocation: &Invocation, inputs: &Inputs<'_>) -> Vec<Target>
             let path = inputs.paths.resolve(&redirect.target);
             Target {
                 command: "Output redirection".to_owned(),
-                access: Access::Write,
+                access: FileAccess::Write,
                 action: "write to files in",
                 subject: format!("Output redirection to '{path}'"),
                 path,
@@ -275,13 +276,20 @@ pub fn redirect_denied(invocation: &Invocation, inputs: &Inputs<'_>) -> bool {
 }
 
 /// 路径命令的动作与读写；`sed` 没有 `-i` 时是读。不是路径命令时 None。
-fn kind_of(name: &str, argv: &[String]) -> Option<(&'static str, Access)> {
+fn kind_of(name: &str, argv: &[String]) -> Option<(&'static str, FileAccess)> {
     let (action, access) = command_kind(name)?;
     let read_only_sed = name == "sed"
         && !argv
             .iter()
             .any(|arg| arg == "-i" || arg.starts_with("-i") || arg == "--in-place");
-    Some((action, if read_only_sed { Access::Read } else { access }))
+    Some((
+        action,
+        if read_only_sed {
+            FileAccess::Read
+        } else {
+            access
+        },
+    ))
 }
 
 /// 这条命令读的路径（原文）：读命令的路径参数、`cp` / `mv` 的源、`sed` 的参数，加上输入重定向的目标
@@ -294,7 +302,7 @@ pub(crate) fn read_paths(invocation: &Invocation) -> Vec<String> {
         if let Some((_, access)) = kind_of(name, argv) {
             let found = operands(name, argv);
             match (access, name) {
-                (Access::Read, _) | (_, "sed") => paths.extend(found),
+                (FileAccess::Read, _) | (_, "sed") => paths.extend(found),
                 (_, "cp" | "mv") if found.len() >= MIN_COPY_OPERANDS => {
                     paths.extend(found[..found.len() - 1].iter().cloned());
                 }
@@ -338,7 +346,7 @@ pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>
             let path = inputs.paths.resolve(operand);
             // cp 只写最后一个参数，前面的是读。
             let access = if name == "cp" && index < last {
-                Access::Read
+                FileAccess::Read
             } else {
                 access
             };
@@ -353,7 +361,7 @@ pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>
     }
     for target in &targets {
         if path_rule(target.access, &target.path, RuleBehavior::Deny, inputs) {
-            let preposition = if target.access == Access::Read {
+            let preposition = if target.access == FileAccess::Read {
                 "from"
             } else {
                 "to"
@@ -372,7 +380,7 @@ pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>
         return removal;
     }
     if let Some((_, access)) = kind {
-        if access == Access::Write && invocation.has_dynamic_words {
+        if access == FileAccess::Write && invocation.has_dynamic_words {
             return asked(texts::runtime_target(name), false);
         }
         if matches!(name, "mv" | "cp") && argv.iter().skip(1).any(|arg| arg.starts_with('-')) {
@@ -385,7 +393,7 @@ pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>
         }
         // 工作线 F85（§4.5.7）：有 cd、按相对路径读、配置了 Read deny 规则时询问（cd 的目标不能静态确定）。
         if compound_has_cd
-            && access == Access::Read
+            && access == FileAccess::Read
             && name != "cd"
             && read_deny_configured(inputs)
             && operand_list.iter().any(|operand| {
@@ -398,7 +406,11 @@ pub fn check(invocation: &Invocation, compound_has_cd: bool, inputs: &Inputs<'_>
             return asked(format!("{name} {}", texts::CD_RELATIVE_READ), false);
         }
     }
-    if compound_has_cd && targets.iter().any(|target| target.access == Access::Write) {
+    if compound_has_cd
+        && targets
+            .iter()
+            .any(|target| target.access == FileAccess::Write)
+    {
         return PathVerdict {
             check: Check::Ask {
                 message: texts::CD_WITH_WRITE.to_owned(),
@@ -456,11 +468,11 @@ fn verdict_of(check: Check, overridable: bool) -> PathVerdict {
 pub(crate) fn read_deny_configured(inputs: &Inputs<'_>) -> bool {
     inputs
         .rules
-        .whole_tool(Access::Read.rule_tool(), RuleBehavior::Deny)
+        .whole_tool(FileAccess::Read.rule_tool(), RuleBehavior::Deny)
         .is_some()
         || !inputs
             .rules
-            .contents(Access::Read.rule_tool(), RuleBehavior::Deny)
+            .contents(FileAccess::Read.rule_tool(), RuleBehavior::Deny)
             .is_empty()
 }
 
@@ -531,7 +543,7 @@ fn input_verdict(
             }
             if let Some(path) = candidates
                 .into_iter()
-                .find(|path| path_rule(Access::Read, path, RuleBehavior::Deny, inputs))
+                .find(|path| path_rule(FileAccess::Read, path, RuleBehavior::Deny, inputs))
             {
                 return Some(Check::deny(texts::path_rule_denied(
                     "Input redirection",
@@ -543,7 +555,7 @@ fn input_verdict(
             continue;
         }
         let path = paths.resolve(&target);
-        if path_rule(Access::Read, &path, RuleBehavior::Deny, inputs) {
+        if path_rule(FileAccess::Read, &path, RuleBehavior::Deny, inputs) {
             return Some(Check::deny(texts::path_rule_denied(
                 "Input redirection",
                 "from",

@@ -19,7 +19,7 @@ pub fn select(
     start: usize,
     end: usize,
 ) -> Option<(usize, usize, usize, usize)> {
-    let mut selection = app.selection?;
+    let mut selection = app.pointer.selection?;
     if selection.dragging && selection.edge != 0 && end > start {
         let edge = if selection.edge > 0 { start } else { end - 1 };
         let (key, offset) = layout.owner(edge);
@@ -28,10 +28,10 @@ pub fn select(
             offset,
             ..selection.head
         };
-        app.selection = Some(selection);
+        app.pointer.selection = Some(selection);
     }
     let Some(found) = range(&selection, |p| layout.position(p.key, p.offset)) else {
-        app.selection = None;
+        app.pointer.selection = None;
         return None;
     };
     // 只取选中的行；软折行的续行按记号接到上一行后面（tui-select.md §2.3）。
@@ -44,7 +44,7 @@ pub fn select(
             soft: crate::ui::text::soft_wrap(line),
         })
         .collect();
-    app.hits.selected = Some(join(&rows, c1, c2));
+    app.pointer.hits.selected = Some(join(&rows, c1, c2));
     Some(found)
 }
 
@@ -63,10 +63,10 @@ pub fn paint_screen(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         }
         text
     };
-    app.hits.screen_rows = (area.top()..area.bottom())
+    app.pointer.hits.screen_rows = (area.top()..area.bottom())
         .map(|y| row_text(buffer, y))
         .collect();
-    let Some(selection) = app.screen_selection else {
+    let Some(selection) = app.pointer.screen_selection else {
         return;
     };
     let (start, end) =
@@ -91,8 +91,9 @@ pub fn paint_screen(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     }
     let rows: Vec<Row> = (r1..=r2)
         .map(|y| Row {
-            text: app.hits.screen_rows[usize::from(y)].clone(),
+            text: app.pointer.hits.screen_rows[usize::from(y)].clone(),
             soft: app
+                .pointer
                 .hits
                 .soft
                 .iter()
@@ -100,12 +101,12 @@ pub fn paint_screen(frame: &mut ratatui::Frame<'_>, app: &mut App) {
                 .map(|(_, soft)| *soft),
         })
         .collect();
-    app.hits.selected = Some(join(&rows, usize::from(start.0), usize::from(end.0) + 1));
+    app.pointer.hits.selected = Some(join(&rows, usize::from(start.0), usize::from(end.0) + 1));
 }
 
 /// 复制结果的提示，显示在 gap 行右侧；放不下时截断加 `…`。
 pub fn draw_copied(frame: &mut ratatui::Frame<'_>, app: &App, gap: Rect) {
-    let Some((notice, at)) = &app.copied else {
+    let Some((notice, at)) = &app.pointer.copied else {
         return;
     };
     if at.elapsed() >= notice.duration || gap.height == 0 {
@@ -133,10 +134,11 @@ pub fn draw_copied(frame: &mut ratatui::Frame<'_>, app: &App, gap: Rect) {
 /// 悬停的反馈（§8.7）：鼠标所在的可点击区域换成更亮一档的底色；16 色终端加下划线。在每一帧记下
 /// 全部可点击区域之后调用。
 pub fn paint_hover(frame: &mut ratatui::Frame<'_>, app: &App) {
-    let Some((x, y)) = app.hover else {
+    let Some((x, y)) = app.pointer.hover else {
         return;
     };
     let Some((rect, _)) = app
+        .pointer
         .hits
         .regions
         .iter()

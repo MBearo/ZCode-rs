@@ -17,9 +17,6 @@ use crate::manage::McpServerState;
 /// 连接中服务器与 ToolSearch 的补充句都用它（两处的列表格式不同）。F58：以前 context 与 tools 各写一份。
 pub const PENDING_LISTED: usize = 30;
 
-/// WaitForMcpServers 工具名。
-pub const WAIT_FOR_MCP_SERVERS: &str = "WaitForMcpServers";
-
 /// 等连接中的服务器离开 Pending 的上限（毫秒）：WaitForMcpServers 工具与 ToolSearch 搜不到时的等待共用
 /// （工作线 F122：以前 ext 与 tools 各写一份 5000）。`-p` 的启动等待是另一个设置（ext 的 `startup`）。
 pub const MCP_WAIT_MS: u64 = 5_000;
@@ -77,7 +74,7 @@ pub fn servers_for_tool<'a>(view: &'a McpView, tool_name: &str) -> Vec<&'a McpSe
     let mut found: Vec<&McpServerView> = Vec::new();
     let mut longest = 0;
     for server in &view.servers {
-        let prefix = format!("mcp__{}__", normalize_name(&server.name));
+        let prefix = crate::mcp_name::server_prefix(&normalize_name(&server.name));
         if !tool_name.starts_with(&prefix) || prefix.len() < longest {
             continue;
         }

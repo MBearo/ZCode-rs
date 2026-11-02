@@ -10,10 +10,11 @@
 //!
 //! 断线不杀：连接表与事件流都属于服务端，ssh 断开时服务器进程照常，事件按 `seq` 留在流里等补发（calls.rs 的流规则）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
 
 use futures_util::StreamExt;
@@ -21,18 +22,17 @@ use futures_util::stream::{BoxStream, Stream};
 use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::dto::core::Workspace;
 use rust_cli_exec_wire::dto::mcp as wm;
-use rust_cli_exec_wire::envelope::{StreamItem, WireError};
+use rust_cli_exec_wire::envelope::{ReplyResult, StreamItem, WireError};
 use rust_cli_exec_wire::reply::Reply;
-use rust_cli_exec_wire::request::Request;
-use rust_cli_kernel_api::mcp::{
-    McpConnect, McpConnectionId, McpError, McpTransportConfig, McpTransportEvent,
-};
+use rust_cli_kernel_api::mcp::{McpConnect, McpConnectionId, McpTransportEvent};
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 
 use crate::convert_in as input;
+use crate::convert_out as output;
 use crate::ledger::CallKey;
 use crate::server::Inner;
+use crate::target::McpCall;
 
 /// 传输的事件流：只取一次，放在这里；订阅时借走，订阅的流被丢掉时放回（接回的新订阅接着读）。
 struct Slot {
@@ -68,11 +68,7 @@ impl Stream for Lease {
 impl Drop for Lease {
     fn drop(&mut self) {
         if let Some(events) = self.events.take() {
-            *self
-                .slot
-                .events
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) = Some(events);
+            *self.slot.events.lock_unpoisoned() = Some(events);
             self.slot.returned.notify_one();
         }
     }
@@ -84,11 +80,7 @@ async fn lease(slot: Events) -> Lease {
         let returned = slot.returned.notified();
         tokio::pin!(returned);
         returned.as_mut().enable();
-        let taken = slot
-            .events
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let taken = slot.events.lock_unpoisoned().take();
         match taken {
             Some(events) => break events,
             None => returned.await,
@@ -118,7 +110,7 @@ pub(crate) struct McpTable(Mutex<HashMap<String, Entry>>);
 
 impl McpTable {
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Entry>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_unpoisoned()
     }
 }
 
@@ -127,55 +119,12 @@ impl McpTable {
 fn fingerprint(server: &str, workspace: &Workspace, transport: &wm::McpTransport) -> String {
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(&(server, &workspace.root, transport)).unwrap_or_default());
-    hash.finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// 执行器的 `McpError` → 线上的错误（§22.4）：`Connect` 与 `Io` 是 `io`，`Closed` 是 `not_found`，原文不变。
-fn error(error: McpError) -> WireError {
-    match error {
-        McpError::Connect { message } | McpError::Io { message } => WireError::Io { message },
-        McpError::Closed { message } => WireError::NotFound { path: message },
-        McpError::Unsupported { what } => WireError::Unsupported { what },
-    }
+    rust_cli_base::hash::hex(&hash.finalize())
 }
 
 fn unknown(connection: &str) -> WireError {
     WireError::NotFound {
         path: format!("MCP connection {connection}"),
-    }
-}
-
-fn transport(transport: wm::McpTransport) -> McpTransportConfig {
-    match transport {
-        wm::McpTransport::Stdio {
-            command,
-            args,
-            env,
-            cwd,
-        } => McpTransportConfig::Stdio {
-            command,
-            args,
-            env,
-            cwd,
-        },
-        wm::McpTransport::Sse { url, headers } => McpTransportConfig::Sse { url, headers },
-        wm::McpTransport::Http { url, headers } => McpTransportConfig::Http { url, headers },
-    }
-}
-
-fn event(event: McpTransportEvent) -> wm::McpEvent {
-    match event {
-        McpTransportEvent::Message { message } => wm::McpEvent::Message { message },
-        McpTransportEvent::Closed {
-            reason,
-            session_expired,
-        } => wm::McpEvent::Closed {
-            reason,
-            session_expired,
-        },
     }
 }
 
@@ -262,13 +211,13 @@ async fn connect(
     let mcp = inner.machine.mcp();
     let connect = McpConnect {
         server: server.clone(),
-        transport: transport(config),
-        env,
+        transport: input::mcp_transport(config),
     };
-    let local = mcp
-        .connect(&input::workspace(workspace), connect)
+    let local = inner
+        .launcher
+        .connect_mcp(&input::workspace(workspace), connect, &env)
         .await
-        .map_err(error)?;
+        .map_err(output::mcp_error)?;
     let connection = format!("{}-{}", inner.instance, local.as_str());
     let events = Arc::new(Slot {
         events: Mutex::new(Some(mcp.events(&local))),
@@ -325,20 +274,33 @@ async fn declare(
     Reply::McpDeclare { closed }
 }
 
-/// 执行一条不是流的 MCP 消息。
+/// 执行一条不是流的 MCP 消息（`mcp.events` 是流，在 [`events`]）。
 pub(crate) async fn unary(
+    inner: Arc<Inner>,
+    instance: String,
+    call: McpCall,
+    env: rust_cli_kernel_api::env_command::EnvOverrides,
+) -> (ReplyResult, Body) {
+    let result = match unary_call(&inner, &instance, call, env).await {
+        Ok(reply) => ReplyResult::Ok(reply),
+        Err(error) => ReplyResult::Err(error),
+    };
+    (result, Body::empty())
+}
+
+async fn unary_call(
     inner: &Inner,
     instance: &str,
-    request: Request,
+    call: McpCall,
     env: rust_cli_kernel_api::env_command::EnvOverrides,
 ) -> Result<Reply, WireError> {
-    match request {
-        Request::McpConnect {
+    match call {
+        McpCall::Connect {
             workspace,
             server,
             transport,
         } => connect(inner, instance, (workspace, server), transport, env).await,
-        Request::McpSend {
+        McpCall::Send {
             connection,
             message,
         } => {
@@ -354,10 +316,10 @@ pub(crate) async fn unary(
                 .mcp()
                 .send(&local, message)
                 .await
-                .map_err(error)?;
+                .map_err(output::mcp_error)?;
             Ok(Reply::McpSend)
         }
-        Request::McpClose { connection } => {
+        McpCall::Close { connection } => {
             // 关掉不认识的（已经关过的、别的实例的）连接不做事。
             let removed = {
                 let mut table = inner.mcp.lock();
@@ -376,16 +338,13 @@ pub(crate) async fn unary(
                     .mcp()
                     .close(&entry.local)
                     .await
-                    .map_err(error)?;
+                    .map_err(output::mcp_error)?;
             }
             Ok(Reply::McpClose)
         }
-        Request::McpDeclare { workspace, servers } => {
+        McpCall::Declare { workspace, servers } => {
             Ok(declare(inner, instance, &workspace, servers).await)
         }
-        other => Err(WireError::BadRequest {
-            message: format!("{} is not an MCP call", other.op().as_str()),
-        }),
     }
 }
 
@@ -393,32 +352,34 @@ pub(crate) async fn unary(
 pub(crate) async fn events(
     inner: &Inner,
     key: &CallKey,
-    request: Request,
+    connection: &str,
 ) -> BoxStream<'static, (StreamItem, Body)> {
-    let found = match &request {
-        Request::McpEvents { connection } => {
-            let mut table = inner.mcp.lock();
-            match table
-                .get_mut(connection)
-                .filter(|entry| entry.owner == key.instance)
-            {
-                Some(entry) => {
-                    let old = entry.subscriber.replace(key.clone());
-                    Ok((entry.events.clone(), old.filter(|old| old != key)))
-                }
-                None => Err(unknown(connection)),
+    let found = {
+        let mut table = inner.mcp.lock();
+        match table
+            .get_mut(connection)
+            .filter(|entry| entry.owner == key.instance)
+        {
+            Some(entry) => {
+                let old = entry.subscriber.replace(key.clone());
+                Ok((entry.events.clone(), old.filter(|old| old != key)))
             }
+            None => Err(unknown(connection)),
         }
-        other => Err(WireError::BadRequest {
-            message: format!("{} is not an MCP stream", other.op().as_str()),
-        }),
     };
     match found {
         Ok((shared, old)) => {
             drop_subscriber(inner, old).await;
             futures_util::stream::once(lease(shared))
                 .flatten()
-                .map(|item| (StreamItem::Mcp { event: event(item) }, Body::empty()))
+                .map(|item| {
+                    (
+                        StreamItem::Mcp {
+                            event: output::mcp_event(item),
+                        },
+                        Body::empty(),
+                    )
+                })
                 .boxed()
         }
         Err(error) => {

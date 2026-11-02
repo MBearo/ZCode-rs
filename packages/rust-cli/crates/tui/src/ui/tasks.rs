@@ -215,7 +215,7 @@ fn hidden_summary(hidden: &[&TaskRecord], lang: Lang) -> String {
 /// 输入框上方的清单；没有任务或收起时为空。`rows` 是终端高度。
 pub fn lines(app: &App, width: usize, rows: usize, now: Instant) -> Vec<Line<'static>> {
     let tasks = app.view.tasks();
-    if !app.tasks.expanded || tasks.is_empty() {
+    if !app.snapshots.tasks.expanded || tasks.is_empty() {
         return Vec::new();
     }
     let open: Vec<&str> = tasks
@@ -226,7 +226,7 @@ pub fn lines(app: &App, width: usize, rows: usize, now: Instant) -> Vec<Line<'st
     let limit = max_display(rows);
     let mut out = vec![header(tasks, app.lang)];
     let (visible, hidden): (Vec<&TaskRecord>, Vec<&TaskRecord>) = if tasks.len() > limit {
-        let all = ordered(tasks, &app.tasks, &open, now);
+        let all = ordered(tasks, &app.snapshots.tasks, &open, now);
         let (shown, rest) = all.split_at(limit.min(all.len()));
         (shown.to_vec(), rest.to_vec())
     } else {
@@ -253,7 +253,7 @@ pub fn toggle_hint(app: &App) -> Option<&'static str> {
     if app.view.tasks().is_empty() {
         return None;
     }
-    Some(match (app.lang, app.tasks.expanded) {
+    Some(match (app.lang, app.snapshots.tasks.expanded) {
         (Lang::En, true) => "{ctrl+t} to hide tasks",
         (Lang::En, false) => "{ctrl+t} to show tasks",
         (Lang::Zh, true) => "{ctrl+t} 隐藏任务",

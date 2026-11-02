@@ -1,6 +1,7 @@
 // 改写自 apps/zcode-host/crates/tui/tests/suite/settings.rs 与 manage.rs（feat/rs 79b6691c55）的用意：斜杠
 // 命令的核心子集（docs/specs/rust-cli/tui.md §6）。
 use crossterm::event::KeyCode;
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::testing::text_response;
 
 use super::support::{GatedModel, Setup, with_ui};
@@ -149,6 +150,6 @@ async fn rename_without_a_name_asks_the_model() {
     assert_eq!(requests.len(), 2);
     assert_eq!(
         requests[1].source,
-        rust_cli_kernel_api::model::QuerySource::Side("rename_generate_name".to_owned())
+        rust_cli_kernel_api::model::QuerySource::Side(SideSource::Rename)
     );
 }

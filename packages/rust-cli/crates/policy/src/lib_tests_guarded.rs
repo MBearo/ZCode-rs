@@ -5,16 +5,21 @@ use super::*;
 
 const DANGER: &str = "Dangerous command requires your approval for this execution";
 
+/// guarded 的危险命令询问：只批准这一次（执行管线不跑 PermissionRequest hooks），没有建议规则。
+fn asked_once() -> PermissionDecision {
+    PermissionDecision::Ask {
+        message: DANGER.to_owned(),
+        suggestions: Vec::new(),
+        once: true,
+    }
+}
+
 #[tokio::test]
 async fn guarded_asks_once_for_dangerous_commands_and_allows_the_rest() {
     let gate = PolicyGate::default();
-    let asked = bash(&gate, PermissionMode::Guarded, "rm -rf build").await;
     assert_eq!(
-        asked,
-        PermissionDecision::Ask {
-            message: DANGER.to_owned(),
-            suggestions: Vec::new(),
-        }
+        bash(&gate, PermissionMode::Guarded, "rm -rf build").await,
+        asked_once()
     );
     // 其余命令同 yolo：不询问。
     assert_eq!(
@@ -30,21 +35,31 @@ async fn guarded_asks_once_for_dangerous_commands_and_allows_the_rest() {
         bash(&gate, PermissionMode::BypassPermissions, "rm -rf build").await,
         allow()
     );
-    let input = json!({"command": "git reset --hard"});
-    let bash_tool = Named("Bash", PermissionDecision::Passthrough);
-    assert!(
-        gate.ask_once(&bash_tool, &input, &context(PermissionMode::Guarded))
-            .await
+    // 只批准这一次是判决结果的一部分（工作线 F137 以前是单独的 `ask_once`）：别的危险命令同样带它，yolo 下放行。
+    assert_eq!(
+        bash(&gate, PermissionMode::Guarded, "git reset --hard").await,
+        asked_once()
     );
-    assert!(
-        !gate
-            .ask_once(
-                &bash_tool,
-                &input,
-                &context(PermissionMode::BypassPermissions)
-            )
-            .await
+    assert_eq!(
+        bash(&gate, PermissionMode::BypassPermissions, "git reset --hard").await,
+        allow()
     );
+}
+
+/// 危险命令又命中整个工具的 ask 规则：问的是规则那一句，同样只批准这一次（与以前的 `ask_once` 只看命令相同）；
+/// 不危险的命令命中它时是普通的询问。
+#[tokio::test]
+async fn a_whole_tool_ask_rule_on_a_dangerous_command_is_asked_once() {
+    let gate = PolicyGate::new(rules(&[(RuleBehavior::Ask, "Bash")]));
+    let dangerous = bash(&gate, PermissionMode::Guarded, "rm -rf build").await;
+    assert!(
+        matches!(&dangerous, PermissionDecision::Ask { once: true, message, .. } if message != DANGER),
+        "{dangerous:?}"
+    );
+    assert!(matches!(
+        bash(&gate, PermissionMode::Guarded, "touch x").await,
+        PermissionDecision::Ask { once: false, .. }
+    ));
 }
 
 #[tokio::test]
@@ -67,10 +82,7 @@ async fn allow_rules_do_not_skip_the_guarded_question_but_deny_rules_win() {
     assert_eq!(
         gate.check_rules(&tool, &input, &context(PermissionMode::Guarded))
             .await,
-        Some(PermissionDecision::Ask {
-            message: DANGER.to_owned(),
-            suggestions: Vec::new(),
-        })
+        Some(asked_once())
     );
     assert_eq!(
         gate.check_rules(&tool, &input, &context(PermissionMode::BypassPermissions))

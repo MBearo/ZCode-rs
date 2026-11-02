@@ -9,39 +9,37 @@
 //! （`rust_cli_base::blocking`），不在 async 线程上做同步 IO。
 mod append;
 mod artifacts;
-mod branch;
-mod clock;
 mod compaction;
 mod facts;
 mod fork;
 mod fork_clone;
 mod frontend_records;
-mod hydrate;
 mod ids;
 mod load;
-mod mode;
 mod node_checkpoints;
 mod notices;
 mod project_mode;
 mod project_rules;
 mod query;
-mod records;
 mod repo;
 mod rewind;
 mod rust_entries;
 mod state;
 mod task_lists;
-mod tool_content;
 mod tool_parts;
 mod usage;
 mod usage_query;
 mod usage_stats;
 mod workspace_trust;
 
+// 记录格式的纯函数在 node-records（F128）：这里按 `crate::records` 这样的路径照常引用。
+use rust_cli_base::sync::LockUnpoisoned;
+use rust_cli_node_records::{branch, hydrate, keys, mode, records, tool_content};
+
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rusqlite::Connection;
@@ -50,15 +48,14 @@ use rust_cli_kernel_api::ids::{ArtifactId, SessionId};
 use rust_cli_kernel_api::permission::{PermissionMode, ProjectRules};
 use rust_cli_kernel_api::store::{
     ArtifactPurpose, ArtifactRef, ArtifactStore, CommitReceipt, FactBatch, ForkReceipt,
-    LoadedSession, SessionFilter, SessionFork, SessionKind, SessionMeta, SessionPage, SessionQuery,
-    SessionStore, SessionSummary, StoreError,
+    LoadedSession, LocalSettings, SessionFilter, SessionFork, SessionKind, SessionMeta,
+    SessionPage, SessionQuery, SessionStore, SessionSummary, StoreError, StoreQueries,
 };
 use rust_cli_kernel_api::workspace_trust::TrustKey;
 use rust_cli_paths::StoragePaths;
 use serde_json::json;
 
 pub use artifacts::uri as artifact_uri;
-pub use clock::{FixedOffset, SystemClock, TimeZone};
 pub use ids::{NodeIds, RandomUuids, UuidSource};
 
 /// 本机执行环境的 ID（与入口 crate 相同）。只有它的会话写进本地库；`workspace_id` 为 NULL。
@@ -122,7 +119,7 @@ impl NodeStore {
         }
         rust_cli_base::blocking(move || {
             // 上一次在持锁时 panic：rusqlite 的事务在展开时已回滚，连接仍可用。
-            let mut slot = connection.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut slot = connection.lock_unpoisoned();
             let conn = match &mut *slot {
                 Some(conn) => conn,
                 empty => empty.insert(open_database(&path, ids.now_ms())?),
@@ -229,6 +226,17 @@ impl SessionStore for NodeStore {
         self.with_db(move |conn, _| load::list(conn, &filter)).await
     }
 
+    /// 跨会话的入站与回执（cross-session.md §2.2）：只读。
+    async fn entries(
+        &self,
+        session: &SessionId,
+        kind: &str,
+    ) -> Result<Vec<(String, serde_json::Value)>, StoreError> {
+        let (session, kind) = (session.as_str().to_owned(), kind.to_owned());
+        self.with_db(move |conn, _| rust_entries::kind_entries(conn, &session, &kind))
+            .await
+    }
+
     /// ← 项目页与 `/resume` 页的会话（修复线 F29，node-store.md §5.1）。
     async fn query_sessions(&self, query: SessionQuery) -> Result<SessionPage, StoreError> {
         self.with_db(move |conn, _| query::query(conn, &query))
@@ -254,7 +262,10 @@ impl SessionStore for NodeStore {
         self.with_db(move |conn, ids| fork::fork(conn, &fork, ids))
             .await
     }
+}
 
+#[async_trait]
+impl LocalSettings for NodeStore {
     /// 本机项目规则集（Node `getProjectPermission`）；项目 ID 由工作区根按 Node 规则算出。
     async fn project_rules(&self, workspace: &WorkspaceRef) -> Result<ProjectRules, StoreError> {
         let project = ids::project_id(workspace.root.as_str());
@@ -290,6 +301,26 @@ impl SessionStore for NodeStore {
             .await
     }
 
+    /// 工作区信任（docs/specs/rust-cli/workspace-trust.md §2.3）：候选里第一个有记录的键。
+    async fn trusted_workspace(
+        &self,
+        candidates: &[TrustKey],
+    ) -> Result<Option<TrustKey>, StoreError> {
+        let candidates = candidates.to_vec();
+        self.with_db(move |conn, _| workspace_trust::find(conn, &candidates))
+            .await
+    }
+
+    /// 记下工作区已信任（upsert；不在会话事务里）。
+    async fn trust_workspace(&self, key: &TrustKey) -> Result<(), StoreError> {
+        let key = key.clone();
+        self.with_db(move |conn, ids| workspace_trust::record(conn, &key, ids.now_ms()))
+            .await
+    }
+}
+
+#[async_trait]
+impl StoreQueries for NodeStore {
     /// `/usage` 的 API 时长（docs/specs/rust-cli/usage.md §4）。
     async fn metering(
         &self,
@@ -325,27 +356,6 @@ impl SessionStore for NodeStore {
             .await
     }
 
-    /// 工作区信任（docs/specs/rust-cli/workspace-trust.md §2.3）：候选里第一个有记录的键。
-    async fn trusted_workspace(
-        &self,
-        candidates: &[TrustKey],
-    ) -> Result<Option<TrustKey>, StoreError> {
-        let candidates = candidates.to_vec();
-        self.with_db(move |conn, _| workspace_trust::find(conn, &candidates))
-            .await
-    }
-
-    /// 跨会话的入站与回执（cross-session.md §2.2）：只读。
-    async fn entries(
-        &self,
-        session: &SessionId,
-        kind: &str,
-    ) -> Result<Vec<(String, serde_json::Value)>, StoreError> {
-        let (session, kind) = (session.as_str().to_owned(), kind.to_owned());
-        self.with_db(move |conn, _| rust_entries::kind_entries(conn, &session, &kind))
-            .await
-    }
-
     /// 前端记录（缺口 G2）：原样写成 `session_entry`，不在会话事务里（记录不是会话状态）。
     async fn put_record(
         &self,
@@ -364,13 +374,6 @@ impl SessionStore for NodeStore {
     ) -> Result<Vec<rust_cli_kernel_api::store::FrontendRecord>, StoreError> {
         let (session, kind) = (session.as_str().to_owned(), kind.to_owned());
         self.with_db(move |conn, _| frontend_records::list(conn, &session, &kind))
-            .await
-    }
-
-    /// 记下工作区已信任（upsert；不在会话事务里）。
-    async fn trust_workspace(&self, key: &TrustKey) -> Result<(), StoreError> {
-        let key = key.clone();
-        self.with_db(move |conn, ids| workspace_trust::record(conn, &key, ids.now_ms()))
             .await
     }
 }

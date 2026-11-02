@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::envelope::{BadRequest, ReplyHeader, ReplyResult, RequestHeader, WireError};
 use crate::frame::{Frame, Kind};
 use crate::handshake::{Capabilities, Capability, Hello, PROTOCOL, Refuse, RefuseCode};
-use crate::op::Op;
+use crate::op::{Op, OpKind};
 use crate::reply::Reply;
 use crate::request::Request;
 use crate::test_support::{replies, requests};
@@ -22,7 +22,7 @@ fn every_method_has_one_request_whose_json_op_is_its_name() {
         .collect();
     let all: BTreeSet<&str> = Op::ALL.iter().map(|op| op.as_str()).collect();
     assert_eq!(ops, all);
-    assert_eq!(Op::ALL.len(), 34);
+    assert_eq!(Op::ALL.len(), 41);
     for request in requests {
         let value = serde_json::to_value(&request).unwrap();
         assert_eq!(value["op"], request.op().as_str());
@@ -38,7 +38,7 @@ fn every_unary_method_has_one_reply_with_the_same_name() {
     let ops: BTreeSet<&str> = replies.iter().map(|reply| reply.op().as_str()).collect();
     let unary: BTreeSet<&str> = Op::ALL
         .iter()
-        .filter(|op| !op.is_stream())
+        .filter(|op| op.kind() != OpKind::Stream)
         .map(|op| op.as_str())
         .collect();
     assert_eq!(ops, unary);
@@ -52,18 +52,62 @@ fn every_unary_method_has_one_reply_with_the_same_name() {
 
 #[test]
 fn ports_group_the_methods_and_only_the_three_streams_are_streams() {
-    let streams: Vec<Op> = Op::ALL.into_iter().filter(|op| op.is_stream()).collect();
+    let streams: Vec<Op> = Op::ALL
+        .into_iter()
+        .filter(|op| op.kind() == OpKind::Stream)
+        .collect();
     assert_eq!(streams, [Op::WatchCommand, Op::ShellNotices, Op::McpEvents]);
     for op in Op::ALL {
         let port = op.as_str().split('.').next().unwrap();
         assert_eq!(port, op.capability().as_str(), "{op:?}");
         assert!(
             Capability::PORTS.contains(&op.capability())
-                || [Capability::Mcp, Capability::Env].contains(&op.capability())
+                || [
+                    Capability::Mcp,
+                    Capability::Env,
+                    Capability::Git,
+                    Capability::Dirs
+                ]
+                .contains(&op.capability())
         );
     }
-    let mutations = Op::ALL.into_iter().filter(|op| op.is_mutation()).count();
-    assert_eq!(mutations, 15);
+    let mutations = Op::ALL
+        .into_iter()
+        .filter(|op| op.kind() == OpKind::Mutation)
+        .count();
+    assert_eq!(mutations, 17);
+}
+
+#[test]
+fn git_and_dirs_are_their_own_capabilities() {
+    // F110（deployment.md §19.1）：git 跟着主 env，老执行器不报告这两个能力位，客户端据此不发请求。
+    let git: Vec<Op> = Op::ALL
+        .into_iter()
+        .filter(|op| op.capability() == Capability::Git)
+        .collect();
+    assert_eq!(
+        git,
+        [
+            Op::GitStatus,
+            Op::GitDiff,
+            Op::WorktreeCreate,
+            Op::WorktreeList,
+            Op::WorktreeChanges,
+            Op::WorktreeRemove
+        ]
+    );
+    let mutations: Vec<Op> = git
+        .iter()
+        .copied()
+        .filter(|op| op.kind() == OpKind::Mutation)
+        .collect();
+    assert_eq!(mutations, [Op::WorktreeCreate, Op::WorktreeRemove]);
+    assert_eq!(Op::EnsureDir.capability(), Capability::Dirs);
+    // 建目录是幂等的：执行器换了实例照常补发。
+    assert_eq!(Op::EnsureDir.kind(), OpKind::Read);
+    let executor = Capabilities::executor();
+    assert!(executor.contains(Capability::Git) && executor.contains(Capability::Dirs));
+    assert!(!Capabilities::ports_and_mcp().contains(Capability::Git));
 }
 
 #[test]
@@ -83,11 +127,11 @@ fn the_mcp_pipe_is_its_own_capability() {
             Op::McpDeclare
         ]
     );
-    assert!(Op::McpEvents.is_stream() && !Op::McpEvents.is_mutation());
+    assert_eq!(Op::McpEvents.kind(), OpKind::Stream);
     assert!(
         [Op::McpConnect, Op::McpSend, Op::McpClose, Op::McpDeclare]
             .iter()
-            .all(|op| op.is_mutation() && !op.is_stream())
+            .all(|op| op.kind() == OpKind::Mutation)
     );
     let both = Capabilities::ports_and_mcp();
     assert!(both.contains(Capability::Mcp) && both.contains(Capability::Files));
@@ -252,7 +296,7 @@ fn the_env_update_is_its_own_capability() {
         .filter(|op| op.capability() == Capability::Env)
         .collect();
     assert_eq!(env, [Op::EnvUpdate]);
-    assert!(!Op::EnvUpdate.is_stream() && !Op::EnvUpdate.is_mutation());
+    assert_eq!(Op::EnvUpdate.kind(), OpKind::Read);
     let update = requests()
         .into_iter()
         .find(|request| request.op() == Op::EnvUpdate)
@@ -274,7 +318,8 @@ fn the_env_update_is_its_own_capability() {
     );
     let executor = Capabilities::executor();
     assert!(executor.contains(Capability::Env) && executor.contains(Capability::Mcp));
-    assert_eq!(executor.names().count(), 10);
+    // 8 个端口 + mcp + env + git + dirs（F110）。
+    assert_eq!(executor.names().count(), 12);
     assert!(!Capabilities::ports_and_mcp().contains(Capability::Env));
     let hello = Hello {
         protocol: PROTOCOL,

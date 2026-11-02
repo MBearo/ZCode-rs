@@ -1,16 +1,17 @@
 //! 会话 crate 的测试组装：可替换 hooks、执行环境、artifact 与初始状态（L10 的测试共用）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::stream::{BoxStream, StreamExt};
 use rust_cli_base::TaskScope;
+use rust_cli_kernel_api::controller_services::ControllerServices;
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::hooks::{HookEvent, HookEventName, HookOutcome, HookRunner};
 use rust_cli_kernel_api::ids::{CommandId, EnvironmentId, Generation, SessionId, TraceId};
-use rust_cli_kernel_api::local_services::LocalServices;
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::model::{ModelPort, SystemBlock};
@@ -21,7 +22,7 @@ use rust_cli_kernel_api::session_api::{
 use rust_cli_kernel_api::store::{SessionKind, SessionMeta, SessionStore, WorkspaceCheckpoint};
 use rust_cli_kernel_api::testing::{
     AllPorts, DirectExecutor, FixedClock, FixedContext, ListTools, MemoryArtifacts,
-    MemoryEnvironment, MemoryStore, NeverCompact, SequentialIds, local_services, machine,
+    MemoryEnvironment, MemoryStore, NeverCompact, SequentialIds, controller_services, machine,
     selection,
 };
 use rust_cli_kernel_api::tool::Tool;
@@ -53,8 +54,8 @@ pub(crate) fn env() -> Arc<MemoryEnvironment> {
         os_version: "x".into(),
         shell: "zsh".into(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: None,
+        uid: None,
     }))
 }
 
@@ -76,17 +77,11 @@ impl ScriptedHooks {
     }
 
     pub(crate) fn set(&self, event: HookEventName, outcome: HookOutcome) {
-        self.outcomes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(event, outcome);
+        self.outcomes.lock_unpoisoned().insert(event, outcome);
     }
 
     pub(crate) fn seen(&self) -> Vec<HookEvent> {
-        self.seen
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.seen.lock_unpoisoned().clone()
     }
 }
 
@@ -94,10 +89,7 @@ impl ScriptedHooks {
 impl HookRunner for ScriptedHooks {
     async fn run(&self, event: HookEvent, cancel: CancellationToken) -> HookOutcome {
         let name = event.name;
-        self.seen
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(event);
+        self.seen.lock_unpoisoned().push(event);
         if let (Some(gate), HookEventName::UserPromptSubmit) = (&self.gate, name) {
             if let Some(entered) = &self.entered {
                 entered.notify_one();
@@ -108,18 +100,14 @@ impl HookRunner for ScriptedHooks {
             }
         }
         self.outcomes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_unpoisoned()
             .get(&name)
             .cloned()
             .unwrap_or_default()
     }
 
     fn has_hooks(&self, event: HookEventName) -> bool {
-        self.outcomes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains_key(&event)
+        self.outcomes.lock_unpoisoned().contains_key(&event)
     }
 }
 
@@ -133,7 +121,7 @@ pub(crate) struct Setup {
     pub model: Arc<dyn ModelPort>,
     pub hooks: Arc<dyn HookRunner>,
     pub machine: MachineEnv,
-    pub local: LocalServices,
+    pub controller: ControllerServices,
     pub artifacts: Arc<MemoryArtifacts>,
     pub tools: Vec<Arc<dyn Tool>>,
     pub messages: Vec<Message>,
@@ -184,7 +172,7 @@ impl Setup {
             model,
             hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
             machine: machine(env.clone()),
-            local: local_services(env),
+            controller: controller_services(env),
             artifacts: Arc::new(MemoryArtifacts::default()),
             tools: Vec::new(),
             messages: Vec::new(),
@@ -215,7 +203,12 @@ impl Setup {
     /// 会话的机器与本机服务都换成 `env`（一个替身实现全部端口）。
     pub(crate) fn set_env<E: AllPorts + 'static>(&mut self, env: Arc<E>) {
         self.machine = machine(env.clone());
-        self.local = local_services(env);
+        self.controller = controller_services(env);
+    }
+
+    /// 会话的机器换成按端口装好的 `machine`（`unsupported_machine().with_*`，F126）；本机服务不变。
+    pub(crate) fn set_machine(&mut self, machine: MachineEnv) {
+        self.machine = machine;
     }
 
     pub(crate) async fn build(self) -> Built {
@@ -230,9 +223,9 @@ impl Setup {
         let ids = Arc::new(SequentialIds::default());
         let side_model = self.side_model.unwrap_or_else(|| self.model.clone());
         let machines = self.machines.unwrap_or_else(|| {
-            Arc::new(rust_cli_kernel_api::env_registry::LocalRegistry::new(
+            Arc::new(rust_cli_kernel_api::env_registry::PrimaryRegistry::new(
                 self.machine.clone(),
-                self.local.clone(),
+                self.controller.clone(),
             ))
         });
         let runner = Arc::new(QueryLoop::new(QueryParts {
@@ -249,23 +242,22 @@ impl Setup {
             hooks: self.hooks.clone(),
             ids: ids.clone(),
             clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-            machine: self.machine.clone(),
             machines: machines.clone(),
-            local: self.local.clone(),
             artifacts: self.artifacts.clone(),
-            generation: Generation::new("g1"),
+            operations: rust_cli_kernel_api::env::Operations::new(
+                Generation::new("g1"),
+                ids.clone(),
+            ),
             non_interactive: false,
             limits: rust_cli_query::RequestLimits::default(),
         }));
         let session = Session::spawn(
             SessionDeps {
                 store: store.clone(),
-                ids,
+                ids: ids.clone(),
                 runner,
                 compactor: Arc::new(NeverCompact),
-                machine: self.machine,
                 machines,
-                local: self.local,
                 max_turns: None,
                 agents: self.agents,
                 cron: self.cron,
@@ -274,7 +266,7 @@ impl Setup {
                 inputs: self.inputs,
                 artifacts: self.artifacts.clone(),
                 clock: self.clock,
-                generation: Generation::new("g1"),
+                operations: rust_cli_kernel_api::env::Operations::new(Generation::new("g1"), ids),
                 spawner: scope.spawner(),
                 closing: scope.spawner(),
                 titles: self.titles,

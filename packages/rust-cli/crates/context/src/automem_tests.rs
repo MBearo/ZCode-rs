@@ -21,8 +21,8 @@ fn facts() -> EnvFacts {
         os_version: "Linux 6.8.0".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     }
 }
 
@@ -42,27 +42,19 @@ async fn instructions(env: MemoryEnvironment) -> Option<String> {
         },
         config,
     );
-    let request = ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("sess_1"),
-        workspace: WorkspaceRef {
+    let request = ContextRequest::new(
+        SessionId::new("sess_1"),
+        WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/Users/dev/w"),
         },
-        agent: None,
-        source: QuerySource::MainThread,
-        mode: PermissionMode::Default,
-        tool_names: Vec::new(),
-        selection: ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
-    };
+        QuerySource::MainThread,
+        PermissionMode::Default,
+        ModelSelection::new(
+            "anthropic".to_owned(),
+            rust_cli_base::models::GLM_5_3.to_owned(),
+        ),
+    );
     let history = [Message::User(UserMessage {
         id: MessageId::new("u"),
         content: vec![ContentBlock::Text {

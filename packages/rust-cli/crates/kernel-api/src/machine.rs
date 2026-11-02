@@ -1,11 +1,10 @@
-//! 一台机器上的执行端口（docs/specs/rust-cli/remote-exec.md §15.8、§15.8.1；README §6）。
+//! 一台机器上的执行端口（docs/specs/rust-cli/remote-exec.md §15.8、§15.8.1；deployment.md §7；README §6）。
 //!
-//! 工作区文件、搜索、进程、shell 状态、后台命令、代码回退、PDF 与 MCP 的管道都在执行它的那台机器上。本机的实现
-//! 是 `env-local`；远端机器（R1 起）另有实现，内核不变。R0 前这些方法都在一个 `Environment` trait 里（36 个），
-//! 现在按能力拆成 8 个小端口，[`MachineEnv`] 把它们与 MCP 传输装成一台机器。只在本机的 Git 与取网页在
-//! [`crate::local_services`]。
+//! 工作区文件、搜索、进程、shell 状态、后台命令、代码回退、PDF、Git 与 MCP 的管道都在执行它的那台机器上。本机的实现
+//! 是 `env-local`；远端机器另有实现（env-remote，经执行器），内核不变。[`MachineEnv`] 把这些小端口与 MCP 传输装成一台
+//! 机器。从 controller 出网的取网页在 [`crate::controller_services`]。
 //!
-//! 规则（与拆分前相同）：
+//! 规则：
 //! - 类型化操作，分 read 与 mutate，不提供万能 invoke；
 //! - 每个 mutate 操作带 [`OperationContext`]（operationId 由内核生成，不重复；执行侧不按它重放，工作线 F119）；
 //! - 只传可序列化的 DTO，不传回调、句柄、PID 或本机路径；
@@ -26,13 +25,17 @@ use crate::env::{
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::env_files::{
-    DirEntry, FileList, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome, GrepSearch,
-    ListDir, ListFiles, PathFacts, PutFile, ReadText, StatFile, StatMany, TextRead,
+    DirEntry, EnsureDir, FileList, FileStat, FileWritten, GlobFiles, GlobMatches, GrepOutcome,
+    GrepSearch, ListDir, ListFiles, PathFacts, PutFile, ReadText, StatFile, StatMany, TextRead,
 };
+use crate::env_git::{GitDiff, GitDiffRequest, GitStatus, GitStatusRequest};
 use crate::env_pdf::{PdfPageCount, PdfRender, RenderPdfPages};
-use crate::env_registry::LOCAL_MACHINE;
 use crate::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
 use crate::env_shell::{BackgroundInfo, BackgroundStop, BackgroundTask, ShellNotice, ShellState};
+use crate::env_worktree::{
+    WorktreeChanges, WorktreeCreate, WorktreeCreated, WorktreeInspect, WorktreeList, WorktreeRemove,
+};
+use crate::ids::MachineName;
 use crate::ids::{OperationId, SessionId};
 use crate::mcp::McpTransport;
 
@@ -118,6 +121,16 @@ pub trait Files: Send + Sync {
         _request: PutFile,
     ) -> Result<FileWritten, EnvError> {
         Err(not_provided("put_file"))
+    }
+
+    /// 建目录与它的上级目录；已经存在算成功（deployment.md §19.1：主 env 上的自动记忆目录）。幂等，所以不带
+    /// [`OperationContext`]：重发不会多出副作用。
+    async fn ensure_dir(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: EnsureDir,
+    ) -> Result<(), EnvError> {
+        Err(not_provided("ensure_dir"))
     }
 }
 
@@ -296,14 +309,67 @@ pub trait Pdf: Send + Sync {
     }
 }
 
-/// 一台机器：8 个执行端口与 MCP 的管道（remote-exec.md §15.8.1）。
+/// git 状态、未提交改动与 worktree：在会话的主 env 上（deployment.md §10：项目在哪台机器，git 就在哪台机器）。
+#[async_trait]
+pub trait Git: Send + Sync {
+    /// `cwd` 所在仓库的 git 状态（read，docs/specs/rust-cli/context.md §12）。
+    async fn git_status(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: GitStatusRequest,
+    ) -> Result<GitStatus, EnvError> {
+        Err(not_provided("git_status"))
+    }
+
+    /// 未提交改动（`/diff`，read）。
+    async fn git_diff(
+        &self,
+        _workspace: &WorkspaceRef,
+        _request: GitDiffRequest,
+    ) -> Result<GitDiff, EnvError> {
+        Err(not_provided("git_diff"))
+    }
+
+    /// 新建或续用 worktree（mutate，docs/specs/rust-cli/tools-more.md §11.2）。
+    async fn worktree_create(
+        &self,
+        _context: OperationContext,
+        _request: WorktreeCreate,
+    ) -> Result<WorktreeCreated, EnvError> {
+        Err(not_provided("worktree_create"))
+    }
+
+    /// `cwd` 所在仓库的主仓库根与 `git worktree list`（read）。
+    async fn worktree_list(&self, _cwd: EnvPath) -> Result<WorktreeList, EnvError> {
+        Err(not_provided("worktree_list"))
+    }
+
+    /// worktree 里未保存的工作；查不到时 None（read）。
+    async fn worktree_changes(
+        &self,
+        _request: WorktreeInspect,
+    ) -> Result<Option<WorktreeChanges>, EnvError> {
+        Err(not_provided("worktree_changes"))
+    }
+
+    /// 删除 worktree 与分支（mutate）；返回是否删掉了目录。
+    async fn worktree_remove(
+        &self,
+        _context: OperationContext,
+        _request: WorktreeRemove,
+    ) -> Result<bool, EnvError> {
+        Err(not_provided("worktree_remove"))
+    }
+}
+
+/// 一台机器：9 个执行端口与 MCP 的管道（remote-exec.md §15.8.1）。
 ///
-/// 只经 [`MachineEnv::new`] 建：8 个端口总是同一个对象（一台机器不会一半在本机、一半在远端）。拿到其中一个端口的
+/// 只经 [`MachineEnv::new`] 建：9 个端口总是同一个对象（一台机器不会一半在本机、一半在远端）。拿到其中一个端口的
 /// 代码只看得到这个端口的方法（端口 trait 不继承 `std::any::Any`，不能向下转型）。
 #[derive(Clone)]
 pub struct MachineEnv {
-    /// 机器名（R3，remote-exec.md §20.4）：本机是 [`LOCAL_MACHINE`]，远端是 `machines.json` 里的名字。
-    name: Arc<str>,
+    /// 机器名（R3，remote-exec.md §20.4）：主 env 是 `primary`，额外机器是 `machines.json` 里的名字。
+    name: MachineName,
     info: Arc<dyn EnvInfo>,
     files: Arc<dyn Files>,
     search: Arc<dyn Search>,
@@ -312,18 +378,28 @@ pub struct MachineEnv {
     background: Arc<dyn Background>,
     checkpoints: Arc<dyn Checkpoints>,
     pdf: Arc<dyn Pdf>,
+    git: Arc<dyn Git>,
     mcp: Arc<dyn McpTransport>,
 }
 
 impl MachineEnv {
-    /// `env` 实现全部 8 个端口（本机是 env-local 的 `LocalEnvironment`）；`mcp` 是这台机器上的 MCP 传输（本机是
-    /// `LocalMcpTransport`）。远端一条连接两者都实现。
+    /// `env` 实现全部 9 个端口（本机是 env-local 的 `LocalEnvironment`，远端是 env-remote 的 `RemoteEnvironment`）；
+    /// `mcp` 是这台机器上的 MCP 传输。远端一条连接两者都实现。
     pub fn new<E>(env: Arc<E>, mcp: Arc<dyn McpTransport>) -> Self
     where
-        E: EnvInfo + Files + Search + Commands + Shell + Background + Checkpoints + Pdf + 'static,
+        E: EnvInfo
+            + Files
+            + Search
+            + Commands
+            + Shell
+            + Background
+            + Checkpoints
+            + Pdf
+            + Git
+            + 'static,
     {
         Self {
-            name: Arc::from(LOCAL_MACHINE),
+            name: MachineName::primary(),
             info: env.clone(),
             files: env.clone(),
             search: env.clone(),
@@ -331,26 +407,27 @@ impl MachineEnv {
             shell: env.clone(),
             background: env.clone(),
             checkpoints: env.clone(),
-            pdf: env,
+            pdf: env.clone(),
+            git: env,
             mcp,
         }
     }
 
-    /// 换上机器名（远端机器由组装根命名；缺省是本机）。
+    /// 换上机器名（额外机器由组装根命名；缺省是主 env）。
     #[must_use]
-    pub fn named(mut self, name: impl Into<Arc<str>>) -> Self {
-        self.name = name.into();
+    pub fn named(mut self, name: MachineName) -> Self {
+        self.name = name;
         self
     }
 
-    /// 机器名：本机是 [`LOCAL_MACHINE`]。
-    pub fn name(&self) -> &str {
+    /// 机器名：主 env 是 `primary`。
+    pub fn name(&self) -> &MachineName {
         &self.name
     }
 
-    /// 是不是本机。
-    pub fn is_local(&self) -> bool {
-        &*self.name == LOCAL_MACHINE
+    /// 是不是会话的主 env（不写 `machine` 的工具调用在它上面执行）。
+    pub fn is_primary(&self) -> bool {
+        self.name.is_primary()
     }
 
     pub fn info(&self) -> &Arc<dyn EnvInfo> {
@@ -385,8 +462,71 @@ impl MachineEnv {
         &self.pdf
     }
 
+    pub fn git(&self) -> &Arc<dyn Git> {
+        &self.git
+    }
+
     pub fn mcp(&self) -> &Arc<dyn McpTransport> {
         &self.mcp
+    }
+}
+
+/// 测试替身只写关心的端口（F126，feature `testing`）：从 `testing::unsupported_machine()`（每个端口都返回
+/// `Unsupported`）起，按端口换上替身。生产构建没有这些方法，一台机器只能经 [`MachineEnv::new`] 整体构造。
+#[cfg(any(test, feature = "testing"))]
+impl MachineEnv {
+    #[must_use]
+    pub fn with_info(mut self, port: Arc<dyn EnvInfo>) -> Self {
+        self.info = port;
+        self
+    }
+
+    #[must_use]
+    pub fn with_files(mut self, port: Arc<dyn Files>) -> Self {
+        self.files = port;
+        self
+    }
+
+    #[must_use]
+    pub fn with_search(mut self, port: Arc<dyn Search>) -> Self {
+        self.search = port;
+        self
+    }
+
+    #[must_use]
+    pub fn with_commands(mut self, port: Arc<dyn Commands>) -> Self {
+        self.commands = port;
+        self
+    }
+
+    #[must_use]
+    pub fn with_shell(mut self, port: Arc<dyn Shell>) -> Self {
+        self.shell = port;
+        self
+    }
+
+    #[must_use]
+    pub fn with_background(mut self, port: Arc<dyn Background>) -> Self {
+        self.background = port;
+        self
+    }
+
+    #[must_use]
+    pub fn with_checkpoints(mut self, port: Arc<dyn Checkpoints>) -> Self {
+        self.checkpoints = port;
+        self
+    }
+
+    #[must_use]
+    pub fn with_pdf(mut self, port: Arc<dyn Pdf>) -> Self {
+        self.pdf = port;
+        self
+    }
+
+    #[must_use]
+    pub fn with_git(mut self, port: Arc<dyn Git>) -> Self {
+        self.git = port;
+        self
     }
 }
 

@@ -1,5 +1,6 @@
 //! 注册表的“正在连”（R5，remote-exec.md §22.6）：`wait_remote` 在正在连时等它连上或放弃；没在连时不等。
 
+use rust_cli_kernel_api::ids::MachineName;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -51,7 +52,12 @@ fn registry() -> Arc<MachineRegistry> {
 #[tokio::test]
 async fn a_machine_that_is_not_connecting_is_not_waited_for() {
     let registry = registry();
-    assert!(registry.wait_remote("dev-a").await.is_none());
+    assert!(
+        registry
+            .wait_remote(&MachineName::new("dev-a"))
+            .await
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -60,18 +66,19 @@ async fn waiting_ends_when_the_machine_connects() {
     let connecting = registry.connecting("dev-a");
     let waiting = tokio::spawn({
         let registry = registry.clone();
-        async move { registry.wait_remote("dev-a").await }
+        async move { registry.wait_remote(&MachineName::new("dev-a")).await }
     });
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert!(!waiting.is_finished());
     registry.connected(
-        machine(Arc::new(UnusedEnvironment)).named("dev-a"),
+        machine(Arc::new(UnusedEnvironment))
+            .named(rust_cli_kernel_api::ids::MachineName::new("dev-a")),
         info("dev-a"),
         connected_link().1,
     );
     drop(connecting);
     let (found, workspace) = waiting.await.unwrap().unwrap();
-    assert_eq!(found.name(), "dev-a");
+    assert_eq!(found.name().as_str(), "dev-a");
     assert_eq!(workspace.root.as_str(), "/srv/proj");
 }
 
@@ -82,7 +89,7 @@ async fn waiting_ends_when_the_connection_gives_up() {
     let second = registry.connecting("dev-a");
     let waiting = tokio::spawn({
         let registry = registry.clone();
-        async move { registry.wait_remote("dev-a").await }
+        async move { registry.wait_remote(&MachineName::new("dev-a")).await }
     });
     drop(first);
     tokio::time::sleep(Duration::from_millis(20)).await;
@@ -99,29 +106,30 @@ fn reconnecting_follows_the_connection_state_of_the_machine() {
     let registry = registry();
     let (link, state) = connected_link();
     registry.connected(
-        machine(Arc::new(UnusedEnvironment)).named("dev-a"),
+        machine(Arc::new(UnusedEnvironment))
+            .named(rust_cli_kernel_api::ids::MachineName::new("dev-a")),
         info("dev-a"),
         state,
     );
-    assert!(!registry.reconnecting("dev-a"));
+    assert!(!registry.reconnecting(&MachineName::new("dev-a")));
     link.send_replace(ConnectionState::Reconnecting {
         attempt: 0,
         reason: "link closed".to_owned(),
         retry_at: None,
     });
-    assert!(registry.reconnecting("dev-a"));
-    assert!(registry.remote("dev-a").is_some());
+    assert!(registry.reconnecting(&MachineName::new("dev-a")));
+    assert!(registry.remote(&MachineName::new("dev-a")).is_some());
     link.send_replace(ConnectionState::Connected {
         epoch: 2,
         server_instance: "exec-1".to_owned(),
     });
-    assert!(!registry.reconnecting("dev-a"));
+    assert!(!registry.reconnecting(&MachineName::new("dev-a")));
     link.send_replace(ConnectionState::Reconnecting {
         attempt: 1,
         reason: "link closed".to_owned(),
         retry_at: None,
     });
     registry.disconnected("dev-a");
-    assert!(!registry.reconnecting("dev-a"));
-    assert!(!registry.reconnecting("gpu-1"));
+    assert!(!registry.reconnecting(&MachineName::new("dev-a")));
+    assert!(!registry.reconnecting(&MachineName::new("gpu-1")));
 }

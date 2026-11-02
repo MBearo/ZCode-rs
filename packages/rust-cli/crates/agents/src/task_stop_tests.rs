@@ -1,35 +1,24 @@
 //! TaskStop 的结果与校验（后台命令、后台子代理；agents.md §6）。
 //! 读对照数据的两项在 `task_stop_parity_tests.rs`（docs/specs/rust-cli/export.md §5）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::agents::AgentSignal;
-use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
-    WorkspaceRef, WriteFile, WriteReceipt,
-};
+use rust_cli_kernel_api::env::{EnvError, OperationContext, WorkspaceRef};
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundStatus, BackgroundStop, BackgroundTask,
 };
 use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::machine::{Background, MachineEnv, Shell};
+use rust_cli_kernel_api::testing::unsupported_machine;
 use serde_json::json;
 use tokio::sync::Notify;
 
 use crate::test_support::{harness, text};
-
-fn unsupported() -> EnvError {
-    EnvError::Unsupported {
-        what: "test".to_owned(),
-    }
-}
 
 /// 执行环境的后台命令账本：(会话, 任务) → (命令, 状态)。停止的规则同 env-local（§2.6）。
 #[derive(Default)]
@@ -51,56 +40,12 @@ impl Shells {
     fn key(request: &BackgroundTask) -> (String, String) {
         (request.session.to_string(), request.task.to_string())
     }
-}
 
-#[async_trait]
-impl EnvInfo for Shells {
-    async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        Err(unsupported())
-    }
-}
-
-#[async_trait]
-impl Files for Shells {
-    async fn read_file(&self, _: &WorkspaceRef, _: ReadFile) -> Result<FileContent, EnvError> {
-        Err(unsupported())
-    }
-
-    async fn write_file(
-        &self,
-        _: &WorkspaceRef,
-        _: OperationContext,
-        _: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        Err(unsupported())
-    }
-}
-
-#[async_trait]
-impl Commands for Shells {
-    async fn start_command(
-        &self,
-        _: &WorkspaceRef,
-        _: OperationContext,
-        _: StartCommand,
-    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        Err(unsupported())
-    }
-
-    fn watch_command(
-        &self,
-        _: OperationId,
-        _: u64,
-    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        futures_util::stream::iter([Err(unsupported())]).boxed()
-    }
-
-    async fn cancel(&self, _: OperationId) -> Result<(), EnvError> {
-        Err(unsupported())
-    }
-
-    async fn close_session(&self, _: &SessionId, _: bool) -> Result<(), EnvError> {
-        Ok(())
+    /// 只换上 shell 与后台命令两个端口的机器（其余端口返回 `Unsupported`）。
+    fn machine(self: Arc<Self>) -> MachineEnv {
+        unsupported_machine()
+            .with_shell(self.clone())
+            .with_background(self)
     }
 }
 
@@ -111,7 +56,7 @@ impl Shell for Shells {
         workspace: &WorkspaceRef,
         session: &SessionId,
     ) -> Result<rust_cli_kernel_api::env_shell::ShellState, EnvError> {
-        let commands = self.commands.lock().unwrap_or_else(PoisonError::into_inner);
+        let commands = self.commands.lock_unpoisoned();
         Ok(rust_cli_kernel_api::env_shell::ShellState {
             cwd: workspace.root.clone(),
             outputs: None,
@@ -130,14 +75,13 @@ impl Background for Shells {
         &self,
         request: BackgroundTask,
     ) -> Result<Option<BackgroundInfo>, EnvError> {
-        let commands = self.commands.lock().unwrap_or_else(PoisonError::into_inner);
+        let commands = self.commands.lock_unpoisoned();
         Ok(commands
             .get(&Self::key(&request))
             .map(|(command, status)| BackgroundInfo {
                 command: command.clone(),
                 status: *status,
-                kind: Default::default(),
-                description: String::new(),
+                ..BackgroundInfo::default()
             }))
     }
 
@@ -147,7 +91,7 @@ impl Background for Shells {
         request: BackgroundTask,
     ) -> Result<BackgroundStop, EnvError> {
         self.stops.lock().unwrap().push(context.operation);
-        let mut commands = self.commands.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut commands = self.commands.lock_unpoisoned();
         Ok(match commands.get(&Self::key(&request)).cloned() {
             None => BackgroundStop::NotFound,
             Some((command, BackgroundStatus::Running)) => {
@@ -159,21 +103,18 @@ impl Background for Shells {
     }
 }
 
-impl Search for Shells {}
-impl Checkpoints for Shells {}
-impl Pdf for Shells {}
-impl Git for Shells {}
-impl Fetch for Shells {}
-
 #[tokio::test]
 async fn an_ended_command_is_not_running() {
     let mut harness = harness(None);
-    harness.set_env(Arc::new(Shells::with(
-        "sess_parent",
-        "b1",
-        "exit 3",
-        BackgroundStatus::Failed,
-    )));
+    harness.set_machine(
+        Arc::new(Shells::with(
+            "sess_parent",
+            "b1",
+            "exit 3",
+            BackgroundStatus::Failed,
+        ))
+        .machine(),
+    );
     let output = harness
         .call("sess_parent", "KillShell", json!({"shell_id": "b1"}))
         .await;
@@ -223,7 +164,7 @@ async fn the_main_thread_stops_a_command_of_its_subagent() {
         "sleep 30",
         BackgroundStatus::Running,
     ));
-    harness.set_env(shells.clone());
+    harness.set_machine(shells.clone().machine());
     let stopped = harness
         .call("sess_parent", "TaskStop", json!({"task_id": "b1"}))
         .await;
@@ -234,12 +175,15 @@ async fn the_main_thread_stops_a_command_of_its_subagent() {
     );
     assert!(shells.commands.lock().unwrap().is_empty());
     // 另一个会话（不在这个顶层会话里）看不到它。
-    harness.set_env(Arc::new(Shells::with(
-        "sess_subagent_agent_1",
-        "b2",
-        "sleep 30",
-        BackgroundStatus::Running,
-    )));
+    harness.set_machine(
+        Arc::new(Shells::with(
+            "sess_subagent_agent_1",
+            "b2",
+            "sleep 30",
+            BackgroundStatus::Running,
+        ))
+        .machine(),
+    );
     let other = harness
         .call("sess_other", "TaskStop", json!({"task_id": "b2"}))
         .await;
@@ -299,7 +243,7 @@ async fn stopping_a_parked_agent_stops_its_commands_but_not_its_children() {
         "sleep 30",
         BackgroundStatus::Running,
     ));
-    harness.set_env(shells.clone());
+    harness.set_machine(shells.clone().machine());
     let stopped = harness
         .call("sess_parent", "TaskStop", json!({"task_id": outer}))
         .await;
@@ -337,14 +281,15 @@ async fn the_user_stops_a_background_agent_through_the_same_path() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].id, "agent_1");
     assert_eq!(entries[0].description, "Wait for me");
-    let operation = || OperationContext {
-        environment: rust_cli_kernel_api::ids::EnvironmentId::new("local"),
-        generation: rust_cli_kernel_api::ids::Generation::new("g1"),
-        owner_epoch: rust_cli_kernel_api::ids::OwnerEpoch::LOCAL,
-        operation: OperationId::new("op_user"),
-        origin: rust_cli_kernel_api::env::Origin::User {
-            session: Some(parent.clone()),
-        },
+    let operation = || {
+        OperationContext::new(
+            rust_cli_kernel_api::ids::EnvironmentId::new("local"),
+            rust_cli_kernel_api::ids::Generation::new("g1"),
+            OperationId::new("op_user"),
+            rust_cli_kernel_api::env::Origin::User {
+                session: Some(parent.clone()),
+            },
+        )
     };
     let stopped = signals.stop_task(&parent, "agent_1", operation()).await;
     assert_eq!(
@@ -354,7 +299,10 @@ async fn the_user_stops_a_background_agent_through_the_same_path() {
     let Some(AgentSignal::Notice(notice)) = stream.next().await else {
         panic!("expected a notice");
     };
-    assert_eq!(notice.status, "killed");
+    assert_eq!(
+        notice.status,
+        rust_cli_kernel_api::env_shell::BackgroundStatus::Killed
+    );
     let again = signals.stop_task(&parent, "agent_1", operation()).await;
     assert_eq!(
         again,
@@ -381,7 +329,7 @@ async fn a_command_on_a_remote_machine_is_stopped_there() {
     let registry = rust_cli_kernel_api::testing::TestMachines::new(Arc::new(
         rust_cli_kernel_api::testing::UnusedEnvironment,
     ));
-    registry.connect("dev-a", remote.clone(), "/home/dev/proj");
+    registry.connect_machine("dev-a", remote.clone().machine(), "/home/dev/proj");
     let harness = crate::test_support::with_machines(registry);
     let output = harness
         .call("sess_1", "TaskStop", json!({"task_id": "b0000000r"}))
@@ -404,7 +352,7 @@ async fn stopping_a_remote_command_names_its_machine() {
     let registry = rust_cli_kernel_api::testing::TestMachines::new(Arc::new(
         rust_cli_kernel_api::testing::UnusedEnvironment,
     ));
-    registry.connect("dev-a", remote, "/home/dev/proj");
+    registry.connect_machine("dev-a", remote.machine(), "/home/dev/proj");
     let on_dev_a = crate::test_support::with_machines(registry);
     let output = on_dev_a
         .call("sess_1", "TaskStop", json!({"task_id": "b0000000r"}))
@@ -416,12 +364,15 @@ async fn stopping_a_remote_command_names_its_machine() {
     assert_eq!(output.display, json!({"machine": "dev-a"}));
 
     let mut local = harness(None);
-    local.set_env(Arc::new(Shells::with(
-        "sess_1",
-        "b0000000l",
-        "sleep 100",
-        BackgroundStatus::Running,
-    )));
+    local.set_machine(
+        Arc::new(Shells::with(
+            "sess_1",
+            "b0000000l",
+            "sleep 100",
+            BackgroundStatus::Running,
+        ))
+        .machine(),
+    );
     let output = local
         .call("sess_1", "TaskStop", json!({"task_id": "b0000000l"}))
         .await;

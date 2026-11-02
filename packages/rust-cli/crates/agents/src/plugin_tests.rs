@@ -59,8 +59,8 @@ async fn plugin_agents_sit_between_built_ins_and_user_agents() {
         os_version: "Darwin 24".to_owned(),
         shell: "zsh".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     };
     let env = MemoryEnvironment::new(facts)
         .with_file(

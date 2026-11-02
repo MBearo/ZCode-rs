@@ -13,6 +13,16 @@ fn actions() -> &'static BTreeMap<String, String> {
     ACTIONS_MAP.get_or_init(|| serde_json::from_str(ACTIONS).unwrap_or_default())
 }
 
+/// 失败说明里 `{{instead}}` 的值：失败的是额外机器时建议不写 `machine`、改在缺省机器上跑；失败的就是主 env 时没有
+/// 这半句（再建议它自己没有意义，deployment.md §23）。
+pub fn instead(primary: bool) -> &'static str {
+    if primary {
+        ""
+    } else {
+        crate::texts::remote_instead()
+    }
+}
+
 /// 消息 `op`（例如 `files.write_file`）在说明里的写法；没列的是 `default`（单测保证有）。
 pub fn action(op: &str) -> &'static str {
     let actions = actions();

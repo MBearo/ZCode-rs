@@ -32,27 +32,16 @@ impl ListingSource for Names {
 #[tokio::test]
 async fn skill_mentions_are_passed_through() {
     let combined = CombinedListings(vec![Arc::new(Names(&[])), Arc::new(Names(&["greet"]))]);
-    let request = ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new("s"),
-        workspace: WorkspaceRef {
+    let request = ContextRequest::new(
+        SessionId::new("s"),
+        WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/w"),
         },
-        agent: None,
-        source: QuerySource::MainThread,
-        mode: PermissionMode::Default,
-        tool_names: Vec::new(),
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: "m".to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
-    };
+        QuerySource::MainThread,
+        PermissionMode::Default,
+        ModelSelection::new("p".to_owned(), "m".to_owned()),
+    );
     assert_eq!(
         combined
             .skill_mentions(&request, "run /greet")

@@ -59,12 +59,7 @@ fn the_text_names_the_compaction_error() {
 }
 
 fn selection(model: &str) -> ModelSelection {
-    ModelSelection {
-        provider: "p".to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("p".to_owned(), model.to_owned())
 }
 
 fn history(input_tokens: u64) -> Vec<rust_cli_kernel_api::message::Message> {

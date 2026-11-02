@@ -6,12 +6,11 @@ use std::sync::Arc;
 
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::env::{OperationContext, Origin};
-use rust_cli_kernel_api::ids::{OwnerEpoch, RunId, ToolUseId};
+use rust_cli_kernel_api::env::Origin;
+use rust_cli_kernel_api::ids::{RunId, ToolUseId};
 use rust_cli_kernel_api::message::{
     AttachmentMessage, ContentBlock, Message, UserMessage, UserOrigin,
 };
-use rust_cli_kernel_api::orchestration::Interactions;
 use rust_cli_kernel_api::tool::ToolUseContext;
 use rust_cli_kernel_api::user_command::{ExpandedKind, Expansion, UserCommands};
 
@@ -26,12 +25,13 @@ pub(crate) struct Inputs {
 }
 
 impl Actor {
-    /// 展开时 `!` 命令用的工具上下文：操作来源是用户（`Origin::User`），取消令牌是本回合的中止信号。
+    /// 展开时 `!` 命令用的工具上下文：操作来源是用户（`Origin::User`），取消令牌是本回合的中止信号；询问与会话操作都经
+    /// 这个回合的输出端。
     pub(crate) fn command_context(
         &self,
         run: &RunId,
         abort: &Abort,
-        interactions: Arc<dyn Interactions>,
+        sink: Arc<crate::sink::ActorSink>,
     ) -> ToolUseContext {
         let operation = self.deps.ids.operation();
         ToolUseContext {
@@ -42,19 +42,18 @@ impl Actor {
             workspace: self.meta.workspace.clone(),
             mode: self.mode(),
             cancel: abort.token().clone(),
-            machine: self.deps.machine.clone(),
-            local: self.deps.local.clone(),
+            machine: self.deps.machines.primary_machine(),
+            controller: self.deps.machines.controller(),
             artifacts: self.deps.artifacts.clone(),
-            interactions,
-            operation: OperationContext {
-                environment: self.meta.workspace.environment.clone(),
-                generation: self.deps.generation.clone(),
-                owner_epoch: OwnerEpoch::LOCAL,
+            interactions: sink.clone(),
+            session_ops: sink,
+            operation: self.deps.operations.with_id(
+                self.meta.workspace.environment.clone(),
                 operation,
-                origin: Origin::User {
+                Origin::User {
                     session: Some(self.meta.id.clone()),
                 },
-            },
+            ),
         }
     }
 }

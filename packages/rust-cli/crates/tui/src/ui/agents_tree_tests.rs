@@ -5,7 +5,7 @@
 //! 条目经 JSON 构造（`parked` 是 F30 加的字段；旧代码不认识它也能编译，用来确认这些测试在旧代码上失败）。
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use ratatui::style::Color;
 use rust_cli_kernel_api::ids::AgentId;
 use rust_cli_kernel_api::permission::PermissionMode;
@@ -16,18 +16,13 @@ use super::*;
 use crate::ui::cells::BULLET;
 use crate::ui::i18n::Lang;
 use crate::ui::palette::{ColorLevel, Palette};
+use crate::ui::test_support::key;
 
 fn app_on(background: (u8, u8, u8)) -> App {
-    App::new(
+    crate::ui::test_support::app_with(
         Palette::new(ColorLevel::TrueColor, Some(background)),
         Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
+        PermissionMode::Default,
     )
 }
 
@@ -57,7 +52,7 @@ fn ended(mut value: serde_json::Value, status: &str, ago_ms: u64) -> serde_json:
 }
 
 fn set(app: &mut App, entries: Vec<serde_json::Value>, now: Instant) {
-    app.agents = AgentList {
+    app.snapshots.agents = AgentList {
         entries: entries
             .into_iter()
             .map(|value| serde_json::from_value(value).unwrap())
@@ -79,6 +74,7 @@ fn family() -> Vec<serde_json::Value> {
 
 fn view(app: &mut App, id: &str) {
     let found = app
+        .snapshots
         .agents
         .entries
         .iter()
@@ -119,10 +115,6 @@ fn plain(lines: &[Line<'static>]) -> Vec<String> {
             }
         })
         .collect()
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
 }
 
 #[test]

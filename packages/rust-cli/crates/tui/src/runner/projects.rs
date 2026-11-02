@@ -73,16 +73,15 @@ impl<B: Backend> Loop<'_, B> {
             Request::LoadResume { root, order } => self.load_sessions(root, order, true),
             Request::Open { .. } | Request::New { .. } => self.check_trust(request),
             Request::Trusted { root, then } => {
-                if let Some(trust) = self.options.services.trust.clone() {
-                    let workspace = self.workspace_at(&root);
-                    self.pending.push(
-                        async move {
-                            trust.accept(workspace).await;
-                            Done::Projects(ProjectsDone::Accepted)
-                        }
-                        .boxed(),
-                    );
-                }
+                let trust = self.options.services.trust.clone();
+                let workspace = self.workspace_at(&root);
+                self.pending.push(
+                    async move {
+                        trust.accept(workspace).await;
+                        Done::Projects(ProjectsDone::Accepted)
+                    }
+                    .boxed(),
+                );
                 self.proceed(*then);
             }
             Request::Rename { id, title } => {
@@ -157,24 +156,22 @@ impl<B: Backend> Loop<'_, B> {
             _ => return,
         };
         let here = root == self.app.view.workspace().root.as_str();
-        let trust = self.options.services.trust.clone();
-        match trust {
-            Some(trust) if !here && !skip => {
-                let workspace = self.workspace_at(&root);
-                self.pending.push(
-                    async move {
-                        let prompt = trust.check(workspace).await;
-                        Done::Projects(ProjectsDone::Checked {
-                            root,
-                            then: request,
-                            prompt,
-                        })
-                    }
-                    .boxed(),
-                );
-            }
-            _ => self.proceed(request),
+        if here || skip {
+            return self.proceed(request);
         }
+        let trust = self.options.services.trust.clone();
+        let workspace = self.workspace_at(&root);
+        self.pending.push(
+            async move {
+                let prompt = trust.check(workspace).await;
+                Done::Projects(ProjectsDone::Checked {
+                    root,
+                    then: request,
+                    prompt,
+                })
+            }
+            .boxed(),
+        );
     }
 
     /// 检查通过之后：打开会话（会话自己的工作目录；`cd` 时打开后换到它）或在这个目录新建会话。

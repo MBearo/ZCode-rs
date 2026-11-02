@@ -1,27 +1,9 @@
 //! 发送输入（docs/specs/rust-cli/tui.md §6）：skill 清单还没到时提交的命令。
-use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::Delivery;
-use rust_cli_kernel_api::testing::selection;
 use rust_cli_kernel_api::user_command::UserCommand;
 
 use super::super::app::{Action, App, Local};
-use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::view::Transcript;
-
-fn app() -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
-}
+use crate::ui::test_support::app;
 
 /// 本地提示行的文字（`App::info`）。
 fn infos(app: &App) -> Vec<String> {

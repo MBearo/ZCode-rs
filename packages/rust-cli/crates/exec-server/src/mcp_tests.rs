@@ -199,12 +199,10 @@ async fn a_server_connects_takes_messages_and_streams_its_events() {
     );
     assert_eq!(
         request.transport,
-        McpTransportConfig::Stdio {
-            command: "server".to_owned(),
-            args: vec!["--token".to_owned(), "${TOKEN}".to_owned()],
-            env: Default::default(),
-            cwd: None,
-        }
+        McpTransportConfig::stdio(
+            "server".to_owned(),
+            vec!["--token".to_owned(), "${TOKEN}".to_owned()]
+        )
     );
     let events = Request::McpEvents {
         connection: connection.clone(),
@@ -578,7 +576,14 @@ async fn a_new_server_gets_the_pushed_variables_and_reattaching_ignores_them() {
     let fake = Arc::new(FakeMcp::default());
     let mut settings = with_mcp();
     settings.capabilities = Capabilities::executor();
-    let server = mcp_server(fake.clone(), settings).await;
+    let machine = Arc::new(TestMachine::default());
+    let server = server_with_mcp(
+        machine.clone(),
+        fake.clone(),
+        Arc::new(MemoryLedger::default()),
+        settings,
+    )
+    .await;
     let (mut client, _task) = connect(&server);
     let first = Hello {
         session_env: Some(std::collections::BTreeMap::from([(
@@ -592,7 +597,7 @@ async fn a_new_server_gets_the_pushed_variables_and_reattaching_ignores_them() {
     let connection = connected(&mut client).await;
     let (_, request) = fake.connects.lock().unwrap()[0].clone();
     assert_eq!(
-        request.env,
+        machine.mcp_started.lock().unwrap()[0],
         std::collections::BTreeMap::from([(
             "SSH_AUTH_SOCK".to_owned(),
             Some("/tmp/ssh-1/agent.1".to_owned())

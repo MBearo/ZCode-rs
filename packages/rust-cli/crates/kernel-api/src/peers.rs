@@ -98,11 +98,7 @@ fn percent_decode(text: &str) -> String {
 /// socket 路径的 12 位 ref 串。
 pub fn reference_of(socket: &str) -> String {
     let digest = Sha256::digest(format!("session:{socket}").as_bytes());
-    let mut hex = String::with_capacity(REF_MAX);
-    for byte in digest.iter().take(REF_MAX / 2) {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    hex
+    rust_cli_base::hash::hex(&digest[..REF_MAX / 2])
 }
 
 /// 每个候选显示的 ref：全部 12 位串排序，每项取 `max(6, 与相邻项的公共前缀长 + 1)`，不超过 12。

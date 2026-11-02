@@ -1,14 +1,15 @@
 //! Skill 的内容规则（ext.md §2.4）。
 
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode, RuleBehavior};
-use serde_json::json;
 
 use super::*;
 use crate::chain;
 use crate::test_support::run;
 
-fn input(name: &str) -> Value {
-    json!({"skill": name})
+fn subject(name: &str) -> rust_cli_kernel_api::permission::PermissionSubject {
+    rust_cli_kernel_api::permission::PermissionSubject::Skill {
+        name: name.to_owned(),
+    }
 }
 
 #[test]
@@ -28,7 +29,7 @@ fn deny_beats_allow_and_a_leading_slash_is_ignored() {
         (RuleBehavior::Allow, "Skill(greet:*)"),
     ];
     let check = run(PermissionMode::Default, &entries, |inputs| {
-        check(&input("/greet"), inputs)
+        check("/greet", inputs)
     });
     assert_eq!(
         check,
@@ -41,11 +42,11 @@ fn an_allow_rule_admits_and_nothing_asks_to_execute() {
     let allowed = run(
         PermissionMode::Default,
         &[(RuleBehavior::Allow, "Skill(greet)")],
-        |inputs| check(&input("greet"), inputs),
+        |inputs| check("greet", inputs),
     );
     assert_eq!(allowed, Check::Allow);
     let asked = run(PermissionMode::Default, &[], |inputs| {
-        check(&input("greet"), inputs)
+        check("greet", inputs)
     });
     let Check::Ask {
         message,
@@ -56,7 +57,10 @@ fn an_allow_rule_admits_and_nothing_asks_to_execute() {
         panic!("expected an ask, got {asked:?}");
     };
     assert_eq!(message, "Execute skill: greet");
-    let rendered: Vec<_> = suggestions.iter().map(crate::rules::format_rule).collect();
+    let rendered: Vec<_> = suggestions
+        .iter()
+        .map(rust_cli_kernel_api::permission::syntax::format_rule)
+        .collect();
     assert_eq!(rendered, ["Skill(greet)", "Skill(greet:*)"]);
 }
 
@@ -68,14 +72,14 @@ fn a_safe_skill_still_meets_deny_rules_first() {
     let denied = run(
         PermissionMode::Default,
         &[(RuleBehavior::Deny, "Skill(greet)")],
-        |inputs| chain::own(TOOL, safe.clone(), &input("greet"), inputs).0,
+        |inputs| chain::own(Some(&subject("greet")), safe.clone(), inputs).0,
     );
     assert_eq!(
         denied,
         Check::deny("Skill execution blocked by permission rules")
     );
     let allowed = run(PermissionMode::Default, &[], |inputs| {
-        chain::own(TOOL, safe.clone(), &input("greet"), inputs).0
+        chain::own(Some(&subject("greet")), safe.clone(), inputs).0
     });
     assert_eq!(allowed, Check::Allow);
 }

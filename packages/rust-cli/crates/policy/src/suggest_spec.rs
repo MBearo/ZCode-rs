@@ -1,7 +1,7 @@
 //! 询问框种子的规格细化：按命令的规格与深度表取更长的前缀（docs/specs/rust-cli/shell-permissions.md §4.10，
 //! 工作线 F72）。只有 7 个内置规格（外部规格库在单个可执行文件里不加载），都没有子命令。
 
-use crate::parse::analyze;
+use crate::shell::parse::analyze;
 use crate::suggest::is_assignment;
 
 /// 规格里的一个参数。

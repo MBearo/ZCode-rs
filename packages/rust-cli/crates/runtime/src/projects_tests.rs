@@ -77,8 +77,8 @@ async fn sessions_of_every_project_carry_state_and_branch() {
             os_version: String::new(),
             shell: "zsh".to_owned(),
             is_git_repo: true,
-            additional_directories: Vec::new(),
             home: None,
+            uid: None,
         })
         .with_file("/w/app/.git/HEAD", "ref: refs/heads/main\n")
         // worktree：`.git` 是文件，指向主仓库里的 gitdir。
@@ -232,8 +232,8 @@ async fn a_dot_git_that_is_neither_file_nor_directory_is_passed_over() {
         os_version: String::new(),
         shell: "zsh".to_owned(),
         is_git_repo: true,
-        additional_directories: Vec::new(),
         home: None,
+        uid: None,
     })
     .with_special("/w/app/.git")
     .with_file("/w/.git/HEAD", "ref: refs/heads/up\n");

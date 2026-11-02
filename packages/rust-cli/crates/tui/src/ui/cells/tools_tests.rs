@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::ui::cells::tests::{b, ctx, done, text, tool};
 use crate::ui::cells::{Ctx, build, render};
-use crate::ui::i18n::{Lang, ZH};
+use crate::ui::i18n::Lang;
 use crate::ui::palette::{ColorLevel, Palette};
 use crate::ui::text::plain;
 use crate::view::{Body, Row, ToolRow, ToolStatus};
@@ -290,7 +290,6 @@ fn chinese_details() {
     let palette = Palette::new(ColorLevel::Ansi16, None);
     let ctx = Ctx {
         lang: Lang::Zh,
-        strings: &ZH,
         ..ctx(&palette, false)
     };
     let row = done(1, "Read", json!({"file_path": "/w/a.rs"}), "1\ta\n2\tb");
@@ -447,7 +446,6 @@ fn lines_with(rows: &[Row], machines: &[crate::machines::MachineRow], lang: Lang
     let ctx = Ctx {
         machines,
         lang,
-        strings: if lang == Lang::Zh { &ZH } else { base.strings },
         ..base
     };
     build(rows, false, &[])

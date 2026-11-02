@@ -227,50 +227,14 @@ impl App {
     /// 一格滚轮：按最上层的可滚动视图分发（tui-select.md §4.1）。列表类每格 1 项，滚动类按加速的行数。
     pub fn wheel(&mut self, down: bool, now: Instant) {
         let step: isize = if down { 1 } else { -1 };
-        let rows = self.wheel.rows(down, now) as isize;
+        let rows = self.pointer.wheel.rows(down, now) as isize;
         let lines = if down { rows } else { -rows };
         // 全屏视图的选区按屏幕坐标记：内容滚动之后不再对应原来的文字（tui-select.md D3）。
-        if self.overlay.as_ref().is_some_and(super::mouse::full_screen) {
-            self.screen_selection = None;
+        if self.overlay.as_ref().is_some_and(Overlay::full_screen) {
+            self.pointer.screen_selection = None;
         }
-        match &self.overlay {
-            // 详细视图的滚动量是离底部的行数。
-            Some(Overlay::Detail(_)) => self.detail_wheel(-lines),
-            Some(Overlay::Page { .. }) => {
-                if let Some(Overlay::Page { scroll, .. }) = self.overlay.as_mut() {
-                    *scroll = scroll.saturating_add_signed(lines);
-                }
-            }
-            Some(Overlay::Usage(_)) => {
-                if let Some(Overlay::Usage(view)) = self.overlay.as_mut() {
-                    view.wheel(lines);
-                }
-            }
-            Some(Overlay::Diff(_)) => self.diff_wheel(lines),
-            Some(Overlay::List(_)) => {
-                if let Some(Overlay::List(list)) = self.overlay.as_mut() {
-                    list.wheel(step);
-                }
-            }
-            Some(Overlay::Permissions(_)) => {
-                if let Some(Overlay::Permissions(view)) = self.overlay.as_mut() {
-                    view.wheel(step);
-                }
-            }
-            Some(Overlay::Projects(_)) => self.projects_wheel(step),
-            Some(Overlay::Resume(_)) => self.resume_wheel(step),
-            Some(Overlay::Trust(_)) => {}
-            Some(Overlay::Background(_)) => self.background_wheel(step, now),
-            Some(
-                Overlay::Login(_)
-                | Overlay::Export(_)
-                | Overlay::Shortcuts
-                | Overlay::YoloConfirm(_)
-                | Overlay::Machines(_),
-            )
-            | None => {
-                self.scroll_by(-lines);
-            }
+        if !self.overlay_wheel(step, lines, now) {
+            self.scroll_by(-lines);
         }
     }
 }

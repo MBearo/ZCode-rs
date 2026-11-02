@@ -12,10 +12,11 @@
 //! | [`message`] | 会话消息与内容块 |
 //! | [`metering`] | 用量的计量事实（模型请求、工具调用、回合）与 `/usage` 的查询 |
 //! | [`model`] | 模型端口，canonical 请求是 Anthropic Messages |
+//! | [`model_name`] | `--model` 与 `/model <名称>` 在模型目录里的查找（cli 与 TUI 共用） |
 //! | [`env`] | 执行环境的公共类型（路径、工作区、操作上下文、终态、文件读写、错误） |
 //! | [`machine`] | 一台机器上的执行端口（环境事实、文件、搜索、命令、shell、后台命令、回退、PDF）与 `MachineEnv` |
-//! | [`local_services`] | 只在本机的服务（Git 与 worktree、取网页）与 `LocalServices` |
-//! | [`env_registry`] | 执行环境的注册表（机器名 → `MachineEnv`，本机的 `LocalServices`） |
+//! | [`controller_services`] | 只在本机的服务（Git 与 worktree、取网页）与 `ControllerServices` |
+//! | [`env_registry`] | 执行环境的注册表（机器名 → `MachineEnv`，本机的 `ControllerServices`） |
 //! | [`machine_param`] | 工具的 `machine` 参数：哪些工具带它、发出时的 schema、从输入里取出（R3） |
 //! | [`machine_notices`] | 本机与连上的远端机器的后台命令通知合成一个流（R3） |
 //! | [`env_shell`] | shell 执行的 DTO（shell 选择、cwd 延续、sandbox、后台通知） |
@@ -50,6 +51,7 @@
 //! | [`history`] | 活动历史（最近一次压缩边界之后，含保留段） |
 //! | [`hooks`] | hook 事件、合并结果与 http hook 的出口端口 |
 //! | [`session_api`] | 前端使用的会话 API 与内核事件 |
+//! | [`session_follow`] | 跟着一个会话的事件走：订阅流落后结束时按最后的 seq 重新订阅（三个前端共用） |
 //! | [`clock`] | 时间与 ID 的注入端口 |
 //! | [`user_command`] | 用户输入的斜杠命令（skill 的用户调用） |
 //! | [`workspace_trust`] | 工作区信任记录的键 |
@@ -61,6 +63,7 @@ pub mod checkpoint;
 pub mod clock;
 pub mod compaction;
 pub mod context_usage;
+pub mod controller_services;
 pub mod cron;
 pub mod cron_store;
 pub mod env;
@@ -81,17 +84,18 @@ pub mod ids;
 pub mod image;
 pub mod interaction;
 pub mod listing;
-pub mod local_services;
 pub mod machine;
 pub mod machine_notices;
 pub mod machine_param;
 pub mod manage;
 pub mod mcp;
+pub mod mcp_name;
 pub mod mcp_state;
 pub mod mcp_vars;
 pub mod message;
 pub mod metering;
 pub mod model;
+pub mod model_name;
 pub mod monitor;
 pub mod monitor_watch;
 pub mod orchestration;
@@ -102,10 +106,15 @@ pub mod persisted_output;
 pub mod plan;
 pub mod provider;
 pub mod reminder_fold;
+pub mod run_ledger;
 pub mod session_api;
+pub mod session_follow;
+pub mod session_ops;
+pub mod side_request;
 pub mod store;
 pub mod title;
 pub mod tool;
+pub mod tool_names;
 pub mod tool_search;
 pub mod turn_duration;
 pub mod unparsed_input;

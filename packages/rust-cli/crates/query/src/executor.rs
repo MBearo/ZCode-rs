@@ -13,8 +13,8 @@ use futures_util::future::{BoxFuture, FutureExt, join};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use rust_cli_kernel_api::abort::AbortReason;
 use rust_cli_kernel_api::checkpoint::DISPLAY_KEY;
-use rust_cli_kernel_api::env::{OperationContext, Origin};
-use rust_cli_kernel_api::ids::{MessageId, OwnerEpoch, ToolUseId};
+use rust_cli_kernel_api::env::Origin;
+use rust_cli_kernel_api::ids::{MessageId, ToolUseId};
 use rust_cli_kernel_api::message::{
     ContentBlock, Message, ToolResultContent, UserMessage, UserOrigin,
 };
@@ -87,6 +87,8 @@ pub(crate) struct ToolBatch {
     running: FuturesUnordered<BoxFuture<'static, (usize, ToolExecution)>>,
     /// 这次模型响应里等连接中服务器已用的时间（按响应记的预算，ext.md §3.8）。
     mcp_waited: Arc<AtomicU64>,
+    /// 本批有工具的 hook 要求停止（`continue: false`，hooks.md §6）：结果都提交后以 `hook_stopped` 结束。
+    stop_requested: bool,
 }
 
 fn text_output(text: String) -> ToolOutput {
@@ -116,6 +118,7 @@ impl ToolBatch {
             tools: Vec::new(),
             running: FuturesUnordered::new(),
             mcp_waited: Arc::default(),
+            stop_requested: false,
         }
     }
 
@@ -284,15 +287,22 @@ impl ToolBatch {
         true
     }
 
+    /// 本批有没有工具的 hook 要求停止（被中止的调用不算：它只交付拒绝结果）。
+    pub(crate) fn stop_requested(&self) -> bool {
+        self.stop_requested
+    }
+
     /// 处理一个结束的调用（[`Self::next_done`] 的结果）。
     pub(crate) async fn complete(&mut self, index: usize, execution: ToolExecution) {
+        // 修 bug（缺陷 D3，hooks.md §6）：以前这里用 `..` 丢掉了 `prevent_continuation`，hook 的停止说明照常提交，
+        // 回合却继续请求模型。现在记下来，本批结果都提交后由 `respond` 以 `hook_stopped` 结束。
         let ToolExecution {
             output,
             before,
             after,
-            ..
+            prevent_continuation,
         } = execution;
-        // 被中止的调用只交付拒绝结果，不带执行管线的其他消息；写入的 checkpoint 保留。
+        // 被中止的调用只交付拒绝结果，不带执行管线的其他消息与停止请求；写入的 checkpoint 保留。
         let (output, before, after, status) = match self.abort_text(&self.tools[index]) {
             Some(text) => (
                 interrupted(text, &output),
@@ -301,6 +311,7 @@ impl ToolBatch {
                 CallStatus::Cancelled,
             ),
             None => {
+                self.stop_requested |= prevent_continuation;
                 let status = if output.is_error {
                     CallStatus::Error
                 } else {
@@ -430,7 +441,13 @@ async fn execute(
     cancel: CancellationToken,
 ) -> ToolExecution {
     // 不再先落库操作意图（工作线 F119）：没有读者，执行侧也不按 operationId 重放。
-    let operation = scope.parts.ids.operation();
+    let operation = scope.parts.operations.next(
+        scope.workspace.environment.clone(),
+        Origin::Agent {
+            session: scope.session.clone(),
+            run: scope.run.clone(),
+        },
+    );
     tracing::debug!(event = "tool.start", session = %scope.session, tool_use = %id, tool = %name, "tool started");
     let _ = scope
         .sink
@@ -440,35 +457,26 @@ async fn execute(
             input: input.clone(),
         })
         .await;
+    // 会话现在的模式与工作目录：一次读取（工作线 F134：以前分两次问会话 actor）。
+    let view = scope.view().await;
     let context = ToolUseContext {
         session: scope.session.clone(),
         run: scope.run.clone(),
         tool_use: id.clone(),
         agent: scope.agent.clone(),
-        workspace: scope.current_workspace().await,
-        mode: scope.current_mode().await,
+        workspace: view.workspace,
+        mode: view.mode,
         cancel,
         // 缺省机器（R3，remote-exec.md §20.6）：主线程是本机，子代理是派生时给的机器；执行管线再按调用的 `machine` 换。
-        machine: scope.default_machine().await,
-        local: scope.parts.local.clone(),
+        machine: scope.default_machine_env(),
+        controller: scope.parts.machines.controller(),
         artifacts: scope.parts.artifacts.clone(),
         interactions: scope.sink.clone(),
-        operation: OperationContext {
-            environment: scope.workspace.environment.clone(),
-            generation: scope.parts.generation.clone(),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation,
-            origin: Origin::Agent {
-                session: scope.session.clone(),
-                run: scope.run.clone(),
-            },
-        },
+        session_ops: scope.sink.clone(),
+        operation,
     };
     let (progress, mut updates) = mpsc::channel(PROGRESS);
-    let run = scope
-        .parts
-        .executor
-        .execute_full(tool, input, context, progress);
+    let run = scope.parts.executor.execute(tool, input, context, progress);
     let forward = async {
         while let Some(progress) = updates.recv().await {
             let event = QueryEvent::ToolProgress {

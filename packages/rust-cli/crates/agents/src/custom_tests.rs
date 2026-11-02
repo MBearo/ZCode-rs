@@ -14,8 +14,8 @@ fn facts(cwd: &str) -> EnvFacts {
         os_version: "Darwin 24".to_owned(),
         shell: "zsh".to_owned(),
         is_git_repo: true,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     }
 }
 

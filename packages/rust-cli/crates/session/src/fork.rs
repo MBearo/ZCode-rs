@@ -8,9 +8,8 @@ use std::collections::HashMap;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::ids::{CommandId, MessageId, OwnerEpoch};
 use rust_cli_kernel_api::message::{Message, SystemMessage, UserOrigin};
-use rust_cli_kernel_api::session_api::Ack;
+use rust_cli_kernel_api::session_api::{Ack, CommandResult, Forked};
 use rust_cli_kernel_api::store::{Fact, FactBatch, SessionKind, SessionMeta};
-use serde_json::Value;
 
 use crate::actor::{Actor, rejected};
 
@@ -84,6 +83,11 @@ impl Actor {
             Err(error) => return rejected(error.to_string()),
         };
         let copied = copy(&self.messages[..end], self.deps.ids.as_ref());
+        // 回执写复制到原会话的哪一条、复制了几条（两种 fork 同一种回执，工作线 F134）。
+        let through = end
+            .checked_sub(1)
+            .map(|last| self.messages[last].id().clone());
+        let count = copied.len();
         let id = self.deps.ids.session();
         let meta = SessionMeta {
             id: id.clone(),
@@ -118,7 +122,11 @@ impl Actor {
         };
         match self.deps.store.commit(&id, batch).await {
             Ok(_) => Ack::Accepted {
-                result: Value::String(id.as_str().to_owned()),
+                result: CommandResult::Forked(Forked {
+                    session: id,
+                    through,
+                    copied: count,
+                }),
             },
             Err(error) => rejected(error.to_string()),
         }

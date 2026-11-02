@@ -2252,7 +2252,6 @@ dependencies = [
  "rust-cli-prompts",
  "rust-cli-protocol-core",
  "rust-cli-protocol-zcode",
- "rust-cli-query",
  "rust-cli-runtime",
  "rust-cli-ssh-connect",
  "rust-cli-tools",
@@ -2261,6 +2260,7 @@ dependencies = [
  "rust-cli-vendor-rg",
  "rust-cli-vendor-ugrep",
  "rustls",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",
@@ -2295,6 +2295,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-util",
  "url",
@@ -2468,7 +2469,6 @@ dependencies = [
  "regex",
  "rust-cli-base",
  "rust-cli-kernel-api",
- "rust-cli-policy",
  "rust-cli-prompts",
  "serde",
  "serde_json",
@@ -2528,6 +2528,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "icu_normalizer",
+ "regex",
  "rust-cli-base",
  "serde",
  "serde_json",
@@ -2600,6 +2601,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-cli-node-records"
+version = "0.1.0"
+dependencies = [
+ "rust-cli-base",
+ "rust-cli-kernel-api",
+ "serde_json",
+]
+
+[[package]]
 name = "rust-cli-node-store"
 version = "0.1.0"
 dependencies = [
@@ -2609,6 +2619,7 @@ dependencies = [
  "rust-cli-base",
  "rust-cli-fs",
  "rust-cli-kernel-api",
+ "rust-cli-node-records",
  "rust-cli-paths",
  "serde_json",
  "sha2",
@@ -2731,7 +2742,6 @@ dependencies = [
  "futures-util",
  "rust-cli-base",
  "rust-cli-kernel-api",
- "rust-cli-platform",
  "rust-cli-protocol-core",
  "serde",
  "serde_json",
@@ -2804,6 +2814,7 @@ dependencies = [
  "rust-cli-base",
  "rust-cli-exec-transport",
  "rust-cli-fs",
+ "rust-cli-machines",
  "rust-cli-proc",
  "serde",
  "serde_json",
@@ -2847,7 +2858,6 @@ dependencies = [
  "ratatui",
  "rust-cli-base",
  "rust-cli-kernel-api",
- "rust-cli-platform",
  "rust-cli-prompts",
  "rust-cli-runtime",
  "rustix",

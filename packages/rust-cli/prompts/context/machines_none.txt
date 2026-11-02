@@ -1,2 +1,2 @@
-No remote machines are connected now; every tool runs on the local machine.
+No machines are connected now besides the primary machine; every tool runs on the default machine "{{name}}".
 {{lines}}

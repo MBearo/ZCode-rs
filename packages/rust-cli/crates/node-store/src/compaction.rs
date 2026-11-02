@@ -8,56 +8,27 @@
 //!
 //! 压缩前已加载的工具（compact.md §3.5）写在 `compaction` part 的 `metadata.rustCli`（不进 strict 的 `compactBoundary`）。
 //!
-//! 冷读取：带 `summary` 且有 `compactBoundary` 的 user 消息还原成边界 + 摘要；Node 自己写的同样能读。
-use rusqlite::{OptionalExtension, params};
-use rust_cli_kernel_api::ids::MessageId;
-use rust_cli_kernel_api::message::{
-    CompactBoundary, CompactTrigger, ContentBlock, Message, PreservedSegment, SystemMessage,
-    UserMessage,
-};
+//! 冷读取：带 `summary` 且有 `compactBoundary` 的 user 消息还原成边界 + 摘要；Node 自己写的同样能读（node-records 的
+//! `compaction`，F128）。
+use rust_cli_kernel_api::message::{CompactBoundary, ContentBlock, UserMessage};
 use rust_cli_kernel_api::store::StoreError;
+use rust_cli_node_records::compaction::{DISCOVERED_KEY, node_trigger};
+use rust_cli_node_records::records::RUST_CLI;
 use serde_json::{Value, json};
 
 use crate::facts::{Commit, save_entry};
 use crate::ids::{created_at, part_id};
-use crate::notices::RUST_CLI;
+use crate::keys::{self, EntryKey};
 use crate::records::{self, AGENT};
 use crate::repo::{messages, sessions};
 use crate::{OrStorage, state, storage};
 
-/// entry 种类（不带 `rust-cli/` 前缀的部分）。
-const BOUNDARY_ENTRY: &str = "rust-cli/compact_boundary";
-
-/// `compaction` part 的 `metadata.rustCli` 里记压缩前已加载的工具的键（compact.md §3.5）。
-const DISCOVERED_KEY: &str = "preCompactDiscoveredTools";
-
-fn entry_id(session: &str, boundary: &str) -> String {
-    format!("{session}:{BOUNDARY_ENTRY}:{boundary}")
-}
-
-/// trigger → Node 的 `trigger`、`phase`、`compactReason`。
-fn node_trigger(trigger: CompactTrigger) -> (&'static str, &'static str, &'static str) {
-    match trigger {
-        CompactTrigger::Manual => ("manual", "standalone_turn", "user_requested"),
-        CompactTrigger::Auto => ("auto", "pre_request", "context_limit"),
-        CompactTrigger::Reactive => ("reactive", "reactive", "provider_overflow"),
-    }
-}
-
-fn kernel_trigger(trigger: &str) -> CompactTrigger {
-    match trigger {
-        "manual" => CompactTrigger::Manual,
-        "reactive" => CompactTrigger::Reactive,
-        _ => CompactTrigger::Auto,
-    }
-}
-
 pub fn append_boundary(ctx: &Commit<'_>, boundary: &CompactBoundary) -> Result<(), StoreError> {
     let data = serde_json::to_value(boundary).map_err(|error| storage(error.to_string()))?;
     let entry = records::entry(
-        entry_id(ctx.session, boundary.id.as_str()),
+        EntryKey::item(ctx.session, keys::COMPACT_BOUNDARY, boundary.id.as_str()).encode(),
         ctx.session,
-        BOUNDARY_ENTRY,
+        &keys::named(keys::COMPACT_BOUNDARY),
         ctx.now,
         data,
         false,
@@ -67,8 +38,12 @@ pub fn append_boundary(ctx: &Commit<'_>, boundary: &CompactBoundary) -> Result<(
 
 /// 同一事务里先到的边界（摘要 ID 对得上的最后一个）。
 fn boundary_for(ctx: &Commit<'_>, summary: &str) -> Result<CompactBoundary, StoreError> {
-    let entries =
-        crate::repo::entries::list(ctx.conn, ctx.session, Some(BOUNDARY_ENTRY)).storage()?;
+    let entries = crate::repo::entries::list(
+        ctx.conn,
+        ctx.session,
+        Some(&keys::named(keys::COMPACT_BOUNDARY)),
+    )
+    .storage()?;
     entries
         .into_iter()
         .rev()
@@ -88,16 +63,7 @@ fn row_id(ctx: &Commit<'_>, id: &str) -> Result<String, StoreError> {
     if messages::exists(ctx.conn, id).storage()? {
         return Ok(id.to_owned());
     }
-    ctx.conn
-        .query_row(
-            "select message_id from part where session_id = ?1
-              and (json_extract(data, '$.metadata.rustCli.resultMessageId') = ?2
-                or (id = ?2 and json_extract(data, '$.type') = 'tool'))
-              limit 1",
-            params![ctx.session, id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
+    messages::message_of_result(ctx.conn, ctx.session, id)
         .storage()?
         .ok_or_else(|| storage(format!("preserved message {id} has no stored row")))
 }
@@ -193,44 +159,6 @@ pub fn append_summary(ctx: &Commit<'_>, user: &UserMessage) -> Result<(), StoreE
     }
     messages::save_part(ctx.conn, &compaction, ctx.now as i64).storage()?;
     Ok(())
-}
-
-/// 冷读取：摘要消息的 `compactBoundary` → 内核边界（摘要之前）。
-pub fn hydrate_boundary(parts: &[Value], summary: &str) -> Option<Message> {
-    let payload = parts
-        .iter()
-        .find(|part| part["type"] == "compaction" && part["compactBoundary"].is_object())
-        .map(|part| &part["compactBoundary"])?;
-    let preserved = payload["preservedSegment"].as_object().and_then(|segment| {
-        let id = |key: &str| segment.get(key)?.as_str().map(MessageId::new);
-        Some(PreservedSegment {
-            head: id("headMessageId")?,
-            anchor: id("anchorMessageId")?,
-            tail: id("tailMessageId")?,
-        })
-    });
-    let compaction = parts
-        .iter()
-        .find(|part| part["type"] == "compaction" && part["compactBoundary"].is_object());
-    let discovered_tools = compaction
-        .and_then(|part| part["metadata"][RUST_CLI][DISCOVERED_KEY].as_array())
-        .map(|names| {
-            names
-                .iter()
-                .filter_map(|name| name.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default();
-    Some(Message::System(SystemMessage::CompactBoundary(
-        CompactBoundary {
-            id: MessageId::new(payload["boundaryId"].as_str()?),
-            trigger: kernel_trigger(payload["trigger"].as_str().unwrap_or("")),
-            pre_tokens: payload["preCompactTokenCount"].as_u64().unwrap_or(0),
-            summary: MessageId::new(payload["summaryMessageIds"][0].as_str().unwrap_or(summary)),
-            preserved,
-            discovered_tools,
-        },
-    )))
 }
 
 #[cfg(test)]

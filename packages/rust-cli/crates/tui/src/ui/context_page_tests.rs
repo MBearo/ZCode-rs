@@ -61,11 +61,9 @@ fn usage(total: u64, memory: &[(&str, u64)]) -> ContextUsage {
 
 fn text(usage: &ContextUsage, all: bool, lang: Lang) -> Vec<String> {
     let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
-    let strings = crate::ui::i18n::strings(lang);
     let ctx = Ctx {
         palette: &palette,
         lang,
-        strings,
         width: 100,
         expanded: true,
         elapsed: std::time::Duration::ZERO,

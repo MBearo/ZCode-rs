@@ -4,26 +4,22 @@
 // 集成测试里的辅助函数也按测试代码处理（clippy 的 allow-unwrap-in-tests 只认 cfg(test)）。
 #[cfg(test)]
 mod interactions {
-    use std::collections::VecDeque;
-    use std::sync::{Arc, Mutex, PoisonError};
+
+    use std::sync::Arc;
     use std::time::Duration;
 
     use async_trait::async_trait;
     use futures_util::StreamExt;
     use futures_util::stream::BoxStream;
     use rust_cli_kernel_api::env::{
-        CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
-        StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+        CommandEvent, EnvError, EnvPath, OperationContext, StartCommand, WorkspaceRef,
     };
     use rust_cli_kernel_api::ids::{
         CommandId, EnvironmentId, InteractionId, OperationId, SessionId,
     };
-    use rust_cli_kernel_api::local_services::{Fetch, Git};
-    use rust_cli_kernel_api::machine::{
-        Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-    };
+    use rust_cli_kernel_api::machine::{Commands, MachineEnv};
     use rust_cli_kernel_api::message::{ContentBlock, Message, StopReason, Usage};
-    use rust_cli_kernel_api::model::{BlockDelta, ModelError, ModelEvent, ModelPort, ModelRequest};
+    use rust_cli_kernel_api::model::{BlockDelta, ModelError, ModelEvent, ModelPort};
     use rust_cli_kernel_api::orchestration::InteractionRequest;
     use rust_cli_kernel_api::permission::PermissionMode;
     use rust_cli_kernel_api::session_api::{
@@ -32,50 +28,14 @@ mod interactions {
     };
     use rust_cli_kernel_api::store::Fact;
     use rust_cli_kernel_api::testing::{
-        FixedClock, MemoryStore, SequentialIds, environments, selection, text_response,
-        tool_use_response,
+        FixedClock, MemoryStore, ScriptedModel, SequentialIds, registry, selection, text_response,
+        tool_use_response, unsupported_machine,
     };
     use rust_cli_runtime::{Defaults, LocalKernel, Ports};
     use serde_json::{Value, json};
     use tokio::sync::Notify;
-    use tokio_util::sync::CancellationToken;
 
     type Events = Vec<Result<ModelEvent, ModelError>>;
-
-    /// 按顺序给出响应；带闸门的响应等测试放行后才流出。
-    #[derive(Default)]
-    struct Script(Mutex<VecDeque<(Option<Arc<Notify>>, Events)>>);
-
-    impl Script {
-        fn new(responses: Vec<(Option<Arc<Notify>>, Events)>) -> Self {
-            Self(Mutex::new(responses.into()))
-        }
-    }
-
-    impl ModelPort for Script {
-        fn stream(
-            &self,
-            _request: ModelRequest,
-            _cancel: CancellationToken,
-        ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-            let next = self
-                .0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .pop_front();
-            let Some((gate, events)) = next else {
-                return futures_util::stream::iter(text_response(&["done"])).boxed();
-            };
-            futures_util::stream::once(async move {
-                if let Some(gate) = gate {
-                    gate.notified().await;
-                }
-                futures_util::stream::iter(events)
-            })
-            .flatten()
-            .boxed()
-        }
-    }
 
     /// 一次响应里的两个工具调用（并发安全的两个调用同时开工）。
     fn two_calls(first: (&str, &str, Value), second: (&str, &str, Value)) -> Events {
@@ -115,7 +75,7 @@ mod interactions {
         events
     }
 
-    /// 命令在测试放行后才失败的执行环境（让并发的 Bash 在询问登记之后出错、取消兄弟调用）；其余操作不支持。
+    /// 命令在测试放行后才失败的命令端口（让并发的 Bash 在询问登记之后出错、取消兄弟调用）；机器的其余端口不支持。
     struct GatedEnv {
         gate: Arc<Notify>,
     }
@@ -123,33 +83,6 @@ mod interactions {
     fn unsupported() -> EnvError {
         EnvError::Unsupported {
             what: "test environment".to_owned(),
-        }
-    }
-
-    #[async_trait]
-    impl EnvInfo for GatedEnv {
-        async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-            Err(unsupported())
-        }
-    }
-
-    #[async_trait]
-    impl Files for GatedEnv {
-        async fn read_file(
-            &self,
-            _workspace: &WorkspaceRef,
-            _request: ReadFile,
-        ) -> Result<FileContent, EnvError> {
-            Err(unsupported())
-        }
-
-        async fn write_file(
-            &self,
-            _workspace: &WorkspaceRef,
-            _context: OperationContext,
-            _request: WriteFile,
-        ) -> Result<WriteReceipt, EnvError> {
-            Err(unsupported())
         }
     }
 
@@ -182,14 +115,6 @@ mod interactions {
         }
     }
 
-    impl Search for GatedEnv {}
-    impl Shell for GatedEnv {}
-    impl Background for GatedEnv {}
-    impl Checkpoints for GatedEnv {}
-    impl Pdf for GatedEnv {}
-    impl Git for GatedEnv {}
-    impl Fetch for GatedEnv {}
-
     fn workspace() -> WorkspaceRef {
         WorkspaceRef {
             environment: EnvironmentId::new("local"),
@@ -197,15 +122,15 @@ mod interactions {
         }
     }
 
-    fn kernel<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
+    fn kernel(
         model: Arc<dyn ModelPort>,
-        env: Arc<E>,
+        machine: MachineEnv,
         store: Arc<MemoryStore>,
     ) -> LocalKernel {
         LocalKernel::new(
             Ports {
                 model,
-                environments: environments(env),
+                environments: registry(machine),
                 store: store.clone(),
                 artifacts: store,
                 clock: Arc::new(FixedClock(1_000)),
@@ -285,20 +210,25 @@ mod interactions {
         let failing = Arc::new(Notify::new());
         let reply = Arc::new(Notify::new());
         let store = Arc::new(MemoryStore::default());
-        let model = Arc::new(Script::new(vec![
-            (
-                None,
+        // 工具之后的回复等测试放行。
+        let model = Arc::new(
+            ScriptedModel::new(vec![
                 two_calls(
                     ("toolu_read", "Read", json!({"file_path": "/etc/hosts"})),
                     ("toolu_bash", "Bash", json!({"command": "ls"})),
                 ),
-            ),
-            (Some(reply.clone()), text_response(&["after the tools"])),
-        ]));
-        let env = Arc::new(GatedEnv {
+                text_response(&["after the tools"]),
+            ])
+            .gated_at(1, reply.clone()),
+        );
+        let commands = Arc::new(GatedEnv {
             gate: failing.clone(),
         });
-        let kernel = kernel(model, env, store.clone());
+        let kernel = kernel(
+            model,
+            unsupported_machine().with_commands(commands),
+            store.clone(),
+        );
         let session = open(&kernel).await;
         let mut events = session.subscribe(Some(0));
         session.send(submit("c1", "read the hosts file")).await;
@@ -335,7 +265,13 @@ mod interactions {
                 id: CommandId::new("c2"),
                 command: Command::ResolveInteraction {
                     interaction,
-                    answer: json!({"decision": "allow", "remember": [{"tool": "Read", "content": "//etc/**"}]}),
+                    answer: rust_cli_kernel_api::orchestration::PermissionAnswer::Allow {
+                        remember: vec![rust_cli_kernel_api::permission::PermissionRule {
+                            tool: "Read".to_owned(),
+                            content: Some("//etc/**".to_owned()),
+                        }],
+                    }
+                    .into(),
                 },
             })
             .await;
@@ -373,17 +309,13 @@ mod interactions {
     async fn an_always_allow_answer_reaches_the_next_session() {
         let read = || tool_use_response("toolu_read", "Read", &json!({"file_path": "/etc/hosts"}));
         let store = Arc::new(MemoryStore::default());
-        let model = Arc::new(Script::new(vec![
-            (None, read()),
-            (None, text_response(&["first done"])),
-            (None, read()),
-            (None, text_response(&["second done"])),
+        let model = Arc::new(ScriptedModel::new(vec![
+            read(),
+            text_response(&["first done"]),
+            read(),
+            text_response(&["second done"]),
         ]));
-        let kernel = kernel(
-            model,
-            Arc::new(rust_cli_kernel_api::testing::UnusedEnvironment),
-            store.clone(),
-        );
+        let kernel = kernel(model, unsupported_machine(), store.clone());
         let first = open(&kernel).await;
         let mut events = first.subscribe(Some(0));
         first.send(submit("c1", "read the hosts file")).await;
@@ -395,7 +327,13 @@ mod interactions {
                 id: CommandId::new("c2"),
                 command: Command::ResolveInteraction {
                     interaction,
-                    answer: json!({"decision": "allow", "remember": [{"tool": "Read", "content": "//etc/**"}]}),
+                    answer: rust_cli_kernel_api::orchestration::PermissionAnswer::Allow {
+                        remember: vec![rust_cli_kernel_api::permission::PermissionRule {
+                            tool: "Read".to_owned(),
+                            content: Some("//etc/**".to_owned()),
+                        }],
+                    }
+                    .into(),
                 },
             })
             .await;

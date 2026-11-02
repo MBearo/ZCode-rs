@@ -12,8 +12,8 @@ fn env(files: &[(&str, &str)]) -> MemoryEnvironment {
         os_version: "Linux".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: true,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     };
     files
         .iter()

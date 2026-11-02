@@ -5,8 +5,9 @@ use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{EnvironmentId, MessageId, OwnerEpoch, SessionId};
 use rust_cli_kernel_api::metering::{CallStatus, ModelCall};
 use rust_cli_kernel_api::model::QuerySource;
-use rust_cli_kernel_api::session_api::{CreateSession, Kernel, KernelError};
-use rust_cli_kernel_api::store::{Fact, FactBatch, SessionStore};
+use rust_cli_kernel_api::session_api::{CreateSession, Kernel};
+use rust_cli_kernel_api::side_request::SideSource;
+use rust_cli_kernel_api::store::{Fact, FactBatch, SessionStore, StoreError};
 use rust_cli_kernel_api::testing::{
     FixedClock, MemoryStore, ScriptedModel, SequentialIds, UnusedEnvironment, environments,
     selection,
@@ -37,21 +38,14 @@ fn kernel(store: Arc<MemoryStore>) -> LocalKernel {
 
 fn call(message: &str, duration: u64, status: CallStatus) -> Fact {
     Fact::ModelCalled {
-        call: ModelCall {
-            message: MessageId::new(message),
-            source: QuerySource::MainThread,
-            selection: selection(),
-            started_at_ms: 10,
-            first_token_at_ms: None,
-            first_content_at_ms: None,
-            completed_at_ms: 10 + duration,
+        call: ModelCall::new(
+            MessageId::new(message),
+            QuerySource::MainThread,
+            selection(),
+            10,
+            10 + duration,
             status,
-            stop_reason: None,
-            tool_calls: 0,
-            usage: None,
-            retries: 0,
-            error: None,
-        },
+        ),
     }
 }
 
@@ -89,11 +83,14 @@ async fn api_duration_comes_from_the_stored_calls() {
         )
         .await
         .unwrap();
-    let metering = kernel.session_metering(&session).await.unwrap();
+    let metering = kernel.queries().metering(&session).await.unwrap();
     assert_eq!(metering.api_duration_ms, 1_500);
     assert!(matches!(
-        kernel.session_metering(&SessionId::new("sess_none")).await,
-        Err(KernelError::NotFound { .. })
+        kernel
+            .queries()
+            .metering(&SessionId::new("sess_none"))
+            .await,
+        Err(StoreError::NotFound { .. })
     ));
 }
 
@@ -173,13 +170,16 @@ async fn request_stats_come_from_the_stored_calls() {
         )
         .await
         .unwrap();
-    let stats = kernel.request_stats(&session).await.unwrap();
+    let stats = kernel.queries().request_stats(&session).await.unwrap();
     assert_eq!(stats.requests, 1);
     assert_eq!(stats.cache_hit_rate(), Some(0.8));
     assert_eq!(stats.tokens_per_second(), Some(40.0));
     assert!(matches!(
-        kernel.request_stats(&SessionId::new("sess_none")).await,
-        Err(KernelError::NotFound { .. })
+        kernel
+            .queries()
+            .request_stats(&SessionId::new("sess_none"))
+            .await,
+        Err(StoreError::NotFound { .. })
     ));
 }
 
@@ -227,7 +227,7 @@ async fn a_child_session_counts_its_subagent_requests() {
         with(call("msg_2", 500, CallStatus::Error), explore(), 0),
         with(
             call("msg_3", 500, CallStatus::Completed),
-            QuerySource::Side("web_fetch_apply".to_owned()),
+            QuerySource::Side(SideSource::WebFetch),
             0,
         ),
     ];
@@ -243,7 +243,7 @@ async fn a_child_session_counts_its_subagent_requests() {
         )
         .await
         .unwrap();
-    let stats = kernel.request_stats(&child).await.unwrap();
+    let stats = kernel.queries().request_stats(&child).await.unwrap();
     assert_eq!(stats.requests, 1);
     // 输入含缓存读：300 ÷ 400。
     assert_eq!(stats.cache_hit_rate(), Some(0.75));

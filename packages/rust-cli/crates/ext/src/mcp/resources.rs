@@ -5,9 +5,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::tool::{
-    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
+    PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, failed, text,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
@@ -15,10 +14,11 @@ use tokio::sync::mpsc;
 use super::connection;
 use super::manager::{Inner, resource_servers};
 use super::rpc::{self, RpcError};
+use rust_cli_kernel_api::tool_names;
 
-pub(crate) const LIST: &str = "ListMcpResourcesTool";
-pub(crate) const READ: &str = "ReadMcpResourceTool";
-pub(crate) const READ_DIR: &str = "ReadMcpResourceDirTool";
+pub(crate) const LIST: &str = tool_names::LIST_MCP_RESOURCES;
+pub(crate) const READ: &str = tool_names::READ_MCP_RESOURCE;
+pub(crate) const READ_DIR: &str = tool_names::READ_MCP_RESOURCE_DIR;
 /// MCP SDK 的 `ResourceSchema` 字段顺序：结果是 schema 解析后的对象，键按 schema 的顺序，
 /// 未知的键在后。
 const RESOURCE_KEYS: &[&str] = &[
@@ -61,30 +61,6 @@ fn with_server(resource: Value, server: &str) -> Value {
     Value::Object(out)
 }
 
-fn prompt_schema(name: &str) -> Value {
-    rust_cli_prompts::tool(name)
-        .map(|prompt| prompt.input_schema.clone())
-        .unwrap_or(Value::Null)
-}
-
-fn prompt_description(name: &str) -> String {
-    rust_cli_prompts::tool(name)
-        .map(|prompt| prompt.description.clone())
-        .unwrap_or_default()
-}
-
-fn text_output(text: String) -> ToolOutput {
-    ToolOutput {
-        content: vec![ToolResultContent::Text { text }],
-        is_error: false,
-        display: Value::Null,
-    }
-}
-
-fn failed(message: String) -> ToolError {
-    ToolError::Failed { message }
-}
-
 fn manager(weak: &Weak<Inner>) -> Result<Arc<Inner>, ToolError> {
     weak.upgrade()
         .ok_or_else(|| failed("MCP is shut down".to_owned()))
@@ -109,16 +85,12 @@ impl Tool for ListResources {
         Some("list resources from connected MCP servers")
     }
 
-    fn aliases(&self) -> &[&str] {
-        &["ListMcpResources"]
-    }
-
     fn input_schema(&self) -> Value {
-        prompt_schema(LIST)
+        rust_cli_prompts::definition(LIST).schema.clone()
     }
 
     fn description(&self, _context: &PromptContext) -> String {
-        prompt_description(LIST)
+        rust_cli_prompts::definition(LIST).description.clone()
     }
 
     fn is_read_only(&self, _input: &Value) -> bool {
@@ -168,12 +140,12 @@ impl Tool for ListResources {
             }
         }
         if all.is_empty() {
-            return Ok(text_output(
+            return Ok(text(
                 "No resources found. MCP servers may still provide tools even if they have no resources."
                     .to_owned(),
             ));
         }
-        Ok(text_output(Value::Array(all).to_string()))
+        Ok(text(Value::Array(all).to_string()))
     }
 }
 
@@ -199,16 +171,12 @@ impl Tool for ReadResourceDir {
         Some("list the children of an MCP directory resource")
     }
 
-    fn aliases(&self) -> &[&str] {
-        &["ReadMcpResourceDir"]
-    }
-
     fn input_schema(&self) -> Value {
-        prompt_schema(READ_DIR)
+        rust_cli_prompts::definition(READ_DIR).schema.clone()
     }
 
     fn description(&self, _context: &PromptContext) -> String {
-        prompt_description(READ_DIR)
+        rust_cli_prompts::definition(READ_DIR).description.clone()
     }
 
     fn is_read_only(&self, _input: &Value) -> bool {
@@ -225,7 +193,7 @@ impl Tool for ReadResourceDir {
         _context: ToolUseContext,
         _progress: mpsc::Sender<ToolProgress>,
     ) -> Result<ToolOutput, ToolError> {
-        Ok(text_output(
+        Ok(text(
             "Directory listing is not enabled in this build.".to_owned(),
         ))
     }
@@ -265,16 +233,12 @@ impl Tool for ReadResource {
         Some("read a specific MCP resource by URI")
     }
 
-    fn aliases(&self) -> &[&str] {
-        &["ReadMcpResource"]
-    }
-
     fn input_schema(&self) -> Value {
-        prompt_schema(READ)
+        rust_cli_prompts::definition(READ).schema.clone()
     }
 
     fn description(&self, _context: &PromptContext) -> String {
-        prompt_description(READ)
+        rust_cli_prompts::definition(READ).description.clone()
     }
 
     fn is_read_only(&self, _input: &Value) -> bool {
@@ -327,7 +291,7 @@ impl Tool for ReadResource {
                 code: rpc::METHOD_NOT_FOUND,
                 ..
             }) => {
-                return Ok(text_output(format!(
+                return Ok(text(format!(
                     "Server \"{server}\" advertises resource support but does not implement resource reads."
                 )));
             }
@@ -338,6 +302,6 @@ impl Tool for ReadResource {
             .and_then(Value::as_array)
             .map(|items| items.iter().map(content).collect())
             .unwrap_or_default();
-        Ok(text_output(json!({"contents": contents}).to_string()))
+        Ok(text(json!({"contents": contents}).to_string()))
     }
 }

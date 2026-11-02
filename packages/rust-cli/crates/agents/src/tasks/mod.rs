@@ -6,8 +6,9 @@
 mod edit;
 mod tools;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use rust_cli_base::Spawner;
 use tokio::sync::{mpsc, oneshot};
@@ -32,12 +33,12 @@ pub struct MemoryTaskLists(Mutex<HashMap<SessionId, TaskList>>);
 #[async_trait]
 impl TaskListStore for MemoryTaskLists {
     async fn load(&self, session: &SessionId) -> Result<TaskList, StoreError> {
-        let lists = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let lists = self.0.lock_unpoisoned();
         Ok(lists.get(session).cloned().unwrap_or_default())
     }
 
     async fn save(&self, session: &SessionId, list: &TaskList) -> Result<(), StoreError> {
-        let mut lists = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut lists = self.0.lock_unpoisoned();
         lists.insert(session.clone(), list.clone());
         Ok(())
     }

@@ -285,7 +285,7 @@ impl Actor {
         }
     }
 
-    /// 提交后改目标（`record` 与 `record_all` 调用）。
+    /// 提交后改目标（提交后的观察者之一，append.rs）。
     pub(crate) fn goal_committed(&mut self, message: &Message) {
         let now = self.deps.clock.now_ms();
         self.goal.observe(message, now);
@@ -306,7 +306,7 @@ impl Actor {
             messages.push(feedback);
         }
         messages.push(self.status_message(&status));
-        self.record_all(messages.clone()).await?;
+        self.record(messages.clone(), Vec::new()).await?;
         Ok(messages)
     }
 

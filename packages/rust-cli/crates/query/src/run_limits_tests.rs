@@ -14,12 +14,7 @@ use crate::{RequestLimits, ThinkingTokens};
 async fn first_request(model: &str, limits: RequestLimits, source: QuerySource) -> ModelRequest {
     let scripted = Arc::new(ScriptedModel::new(vec![text_response(&["ok"])]));
     let mut request = request("hi");
-    request.selection = ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    request.selection = ModelSelection::new("anthropic".to_owned(), model.to_owned());
     request.source = source;
     let mut parts = parts(scripted.clone(), Vec::new());
     parts.limits = limits;

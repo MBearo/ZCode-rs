@@ -4,7 +4,8 @@
 //! 投影与主题日志在一把锁里，只在计算时短暂持有；发帧的工作（事件、窗口、首帧、协议配置的变化）都在会话的泵任务里按
 //! 顺序做（protocol-core 的会话桥），所以首帧之后的增量只给一次，首帧与增量不交错。
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::session_api::{SequencedEvent, SessionView};
@@ -67,7 +68,7 @@ impl Live {
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_unpoisoned()
     }
 
     pub fn topic(&self) -> String {

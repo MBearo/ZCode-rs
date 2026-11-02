@@ -15,7 +15,6 @@ pub fn lines(app: &App, shown: &Shown, width: usize, now_ms: u64) -> Vec<Line<'s
     let ctx = Ctx {
         palette: &app.palette,
         lang: app.lang,
-        strings: app.strings,
         width,
         expanded: false,
         elapsed: std::time::Duration::ZERO,

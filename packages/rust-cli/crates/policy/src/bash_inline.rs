@@ -12,9 +12,8 @@ use regex::Regex;
 
 use crate::check::{AskKind, Check, Inputs};
 use crate::consts::SHORT_OPTION_LEN;
-use crate::parse::Invocation;
 use crate::removal::{basename, strip_runners};
-use crate::shell_argv;
+use crate::shell::parse::Invocation;
 
 /// 认作 shell 的命令名。
 const SHELLS: [&str; 9] = [
@@ -542,7 +541,7 @@ pub(crate) fn check(
         if let Some(first) = argv.first_mut() {
             *first = bare(first);
         }
-        let argv = shell_argv::strip_wrappers(strip_runners(&argv));
+        let argv = crate::shell::argv::strip_wrappers(strip_runners(&argv));
         let Some(script) = script_of(&argv, patterns) else {
             continue;
         };

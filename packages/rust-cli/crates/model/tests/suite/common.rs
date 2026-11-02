@@ -17,7 +17,7 @@ use rust_cli_kernel_api::model::{
     ApiContent, ApiMessage, ApiRole, BlockDelta, ModelError, ModelEvent, ModelPort, ModelRequest,
     ModelSelection, QuerySource, RequestOptions,
 };
-use rust_cli_model::{AnthropicEndpoint, ProviderModel, RetryPolicy};
+use rust_cli_model::{AnthropicEndpoint, FixedEndpoint, ProviderModel, RetryPolicy, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -93,39 +93,39 @@ pub fn fast_retry(max_retries: u32) -> RetryPolicy {
 /// 注入给模型的时钟的“现在”（2020-09-13T12:26:40Z）：Retry-After 的 HTTP 日期按它换算（F7）。
 pub const NOW_MS: u64 = 1_600_000_000_000;
 
-pub struct TestClock;
-
-impl Clock for TestClock {
-    fn now_ms(&self) -> u64 {
-        NOW_MS
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
-
 pub fn clock() -> Arc<dyn Clock> {
-    Arc::new(TestClock)
+    Arc::new(rust_cli_kernel_api::testing::FixedClock(NOW_MS))
 }
 
 pub async fn model_at(base_url: String, retry: RetryPolicy) -> ProviderModel {
+    model_with(
+        base_url,
+        RouteOptions {
+            retry,
+            ..RouteOptions::default()
+        },
+    )
+    .await
+}
+
+/// 固定的 Anthropic 端点，带入口级的选项。
+pub async fn model_with(base_url: String, options: RouteOptions) -> ProviderModel {
     let egress = Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap());
     let endpoint = AnthropicEndpoint {
         base_url,
         api_key: RedactedString::new(API_KEY),
     };
-    ProviderModel::anthropic(egress, endpoint, clock()).with_retry(retry)
+    ProviderModel::new(
+        egress,
+        Arc::new(FixedEndpoint::new(endpoint)),
+        clock(),
+        options,
+    )
 }
 
 pub fn request(prompt: &str, source: QuerySource) -> ModelRequest {
     ModelRequest {
-        selection: ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: ModelSelection::new("anthropic".to_owned(), models::GLM_5_3.to_owned()),
         system: Vec::new(),
         messages: vec![ApiMessage {
             role: ApiRole::User,

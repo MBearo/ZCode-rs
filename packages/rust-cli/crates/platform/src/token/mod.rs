@@ -17,13 +17,14 @@ pub(crate) mod http;
 mod issue;
 pub(crate) mod location;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
+use rust_cli_base::account::Family;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_net::Egress;
-use sha2::{Digest, Sha256};
 use tokio::sync::OnceCell;
 
 pub use location::Location;
@@ -37,39 +38,6 @@ const REFRESH_LEAD_MS: u64 = 120_000;
 /// 刷新失败后多久再试（毫秒），两种令牌相同。
 const RETRY_BACKOFF_MS: u64 = 5_000;
 use http::Http;
-
-/// Coding Plan 的账号体系（`accountType`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Family {
-    Zai,
-    Bigmodel,
-}
-
-impl Family {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Zai => "zai",
-            Self::Bigmodel => "bigmodel",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "zai" => Some(Self::Zai),
-            "bigmodel" => Some(Self::Bigmodel),
-            _ => None,
-        }
-    }
-
-    /// 显示名（Node `providerName`）：目录项的供应商名（platform.md §9.3）与 TUI 的登录文字都用它，中英文相同。
-    /// F58：以前 platform（`account::vendor`）与 tui（`i18n_account::provider_name`）各写一份。
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Zai => "Z.AI",
-            Self::Bigmodel => "BigModel",
-        }
-    }
-}
 
 /// 换取失败。文本是 Node 的固定错误码：不带上游错误体、URL 或令牌。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -164,17 +132,9 @@ struct State {
     flights: HashMap<FlightKey, Flight>,
 }
 
-fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
-    // 持锁的代码不 panic、不 await；中毒时数据仍然一致，继续使用。
-    state.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 /// 令牌指纹：只用于“作废哪一代”的比较，不作为身份，也不发出。
 pub(crate) fn fingerprint(token: &str) -> String {
-    Sha256::digest(token.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    rust_cli_base::hash::sha256_hex(token.as_bytes())
 }
 
 /// 登录令牌前可以带的鉴权方案名（不区分大小写，后面跟空白）。
@@ -220,7 +180,7 @@ impl ProjectTokens {
 
     /// 清空全部缓存；在途换取的结果作废（凭据被删除或不再是 OAuth 登录时）。
     pub fn clear(&self) {
-        let mut state = lock(&self.state);
+        let mut state = self.state.lock_unpoisoned();
         state.epoch += 1;
         state.business = None;
         state.sessions.clear();
@@ -241,7 +201,7 @@ impl ProjectTokens {
         let scope = location::scope_key(request.account, request.team);
         let key = (request.family, scope.clone(), fingerprint(&login));
         let (flight, epoch) = {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock_unpoisoned();
             if let Some(rejected) = request.rejected {
                 // 只作废被拒的那一代；迟到的 401 碰不到之后换好的 PAT。
                 for account in state
@@ -275,7 +235,7 @@ impl ProjectTokens {
                     epoch,
                 };
                 let result = self.exchange(input, store).await;
-                let mut state = lock(&self.state);
+                let mut state = self.state.lock_unpoisoned();
                 if state.flights.get(&key).is_some_and(|f| Arc::ptr_eq(f, &flight)) {
                     state.flights.remove(&key);
                 }
@@ -316,7 +276,7 @@ impl ProjectTokens {
     }
 
     fn check_epoch(&self, epoch: u64) -> Result<(), TokenError> {
-        if lock(&self.state).epoch == epoch {
+        if self.state.lock_unpoisoned().epoch == epoch {
             Ok(())
         } else {
             Err(TokenError::ScopeInvalidated)

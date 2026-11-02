@@ -170,8 +170,8 @@ fn assembler() -> PromptAssembler {
         os_version: "Darwin 24.6.0".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: None,
+        uid: None,
     };
     let env = Arc::new(MemoryEnvironment::new(facts));
     PromptAssembler::new(
@@ -199,25 +199,18 @@ fn request(mode: PermissionMode, subagent: bool) -> ContextRequest {
         ("sess_1", QuerySource::MainThread, None)
     };
     ContextRequest {
-        default_machine: None,
-        capabilities: None,
-        session: SessionId::new(session),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new("local"),
-            root: EnvPath::new("/Users/dev/w"),
-        },
         agent,
-        source,
-        mode,
         tool_names: names(TOOLS),
-        selection: ModelSelection {
-            provider: "p".to_owned(),
-            model: rust_cli_base::models::GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
+        ..ContextRequest::new(
+            SessionId::new(session),
+            WorkspaceRef {
+                environment: EnvironmentId::new("local"),
+                root: EnvPath::new("/Users/dev/w"),
+            },
+            source,
+            mode,
+            ModelSelection::new("p".to_owned(), rust_cli_base::models::GLM_5_3.to_owned()),
+        )
     }
 }
 

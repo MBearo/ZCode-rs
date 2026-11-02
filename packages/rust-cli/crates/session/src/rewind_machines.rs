@@ -8,7 +8,7 @@ use rust_cli_kernel_api::env::{OperationContext, WorkspaceRef};
 use rust_cli_kernel_api::env_rewind::{
     RestoreFile, RestoredFile, RewindPlan, RewindPrepare, RewindStatus,
 };
-use rust_cli_kernel_api::ids::OperationId;
+use rust_cli_kernel_api::ids::{MachineName, OperationId};
 use rust_cli_kernel_api::machine::Checkpoints;
 use rust_cli_kernel_api::store::{ArtifactStore, WorkspaceCheckpoint};
 
@@ -16,8 +16,8 @@ use crate::rewind_plan::{self, Artifact};
 
 /// 一台机器上的回退：checkpoint、端口、工作区与 token。
 pub(crate) struct Group {
-    /// 远端机器名；本机为 None。
-    pub machine: Option<String>,
+    /// 这一组的机器。
+    pub machine: MachineName,
     pub checkpoints: Vec<WorkspaceCheckpoint>,
     pub port: Arc<dyn Checkpoints>,
     pub workspace: WorkspaceRef,
@@ -31,7 +31,7 @@ impl Group {
 
     /// 结果文字：只有本机时原样；否则前面写机器名（本机写 `local`）。
     fn label(&self, message: &str, many: bool) -> String {
-        match (&self.machine, many) {
+        match (self.machine.remote(), many) {
             (None, false) => message.to_owned(),
             (None, true) => format!("local: {message}"),
             (Some(name), _) => format!("{name}: {message}"),
@@ -44,7 +44,7 @@ impl Group {
 }
 
 /// 一台机器上恢复了的文件（远端的带机器名）。
-pub(crate) type Restored = (Option<String>, Vec<RestoredFile>);
+pub(crate) type Restored = (MachineName, Vec<RestoredFile>);
 
 /// 回退的结果：撤销成功的 checkpoint，与回执（全部成功）或拒绝的理由。
 pub(crate) struct Outcome {

@@ -67,13 +67,6 @@ pub fn fold(query: &str) -> String {
     query.chars().flat_map(char::to_lowercase).collect()
 }
 
-/// 删掉最后一个字素（搜索框的 backspace）。
-pub fn pop_grapheme(text: &mut String) {
-    if let Some((at, _)) = text.grapheme_indices(true).next_back() {
-        text.truncate(at);
-    }
-}
-
 #[cfg(test)]
 #[path = "find_text_tests.rs"]
 mod tests;

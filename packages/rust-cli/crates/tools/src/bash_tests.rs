@@ -5,27 +5,20 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, Origin, OutputStream,
-    ReadFile, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, OperationContext, Origin, OutputStream, WorkspaceRef,
 };
 use rust_cli_kernel_api::env_shell::ShellState;
 use rust_cli_kernel_api::ids::{
-    AgentId, EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
+    AgentId, EnvironmentId, Generation, OperationId, RunId, SessionId, ToolUseId,
 };
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::machine::{Commands, MachineEnv, Shell};
 use rust_cli_kernel_api::message::ToolResultContent;
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
-};
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::{MemoryStore, local_services, machine};
+use rust_cli_kernel_api::testing::unsupported_machine;
 use tokio::sync::Notify;
-use tokio_util::sync::CancellationToken;
 
 use super::*;
+use crate::BashTimeouts;
 
 /// 记下请求、按剧本回事件的执行环境。`hold` 为 true 时终态要等取消。
 #[derive(Default)]
@@ -42,32 +35,12 @@ struct Scripted {
     backgrounded: bool,
 }
 
-#[async_trait]
-impl EnvInfo for Scripted {
-    async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        Err(EnvError::Unsupported {
-            what: "facts".to_owned(),
-        })
-    }
-}
-
-#[async_trait]
-impl Files for Scripted {
-    async fn read_file(&self, _w: &WorkspaceRef, _r: ReadFile) -> Result<FileContent, EnvError> {
-        Err(EnvError::Unsupported {
-            what: "read".to_owned(),
-        })
-    }
-
-    async fn write_file(
-        &self,
-        _w: &WorkspaceRef,
-        _c: OperationContext,
-        _r: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        Err(EnvError::Unsupported {
-            what: "write".to_owned(),
-        })
+impl Scripted {
+    /// 只换上命令与 shell 两个端口的机器（其余端口返回 `Unsupported`）。
+    fn machine(self: Arc<Self>) -> MachineEnv {
+        unsupported_machine()
+            .with_commands(self.clone())
+            .with_shell(self)
     }
 }
 
@@ -140,33 +113,7 @@ impl Commands for Scripted {
 #[async_trait]
 impl Shell for Scripted {
     async fn shell_state(&self, _w: &WorkspaceRef, _s: &SessionId) -> Result<ShellState, EnvError> {
-        Ok(ShellState {
-            cwd: EnvPath::new("/w/sub"),
-            outputs: None,
-            background: Vec::new(),
-        })
-    }
-}
-
-impl Search for Scripted {}
-impl Background for Scripted {}
-impl Checkpoints for Scripted {}
-impl Pdf for Scripted {}
-impl Git for Scripted {}
-impl Fetch for Scripted {}
-
-struct Unused;
-
-#[async_trait]
-impl Interactions for Unused {
-    async fn ask(
-        &self,
-        _s: &SessionId,
-        _r: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        Err(OrchestrationError::Unsupported {
-            what: "ask".to_owned(),
-        })
+        Ok(ShellState::new(EnvPath::new("/w/sub")))
     }
 }
 
@@ -174,28 +121,24 @@ fn context(env: Arc<Scripted>, agent: Option<AgentId>) -> ToolUseContext {
     ToolUseContext {
         session: SessionId::new("s1"),
         run: RunId::new("r1"),
-        tool_use: ToolUseId::new("toolu_1"),
         agent,
         workspace: WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/w"),
         },
-        mode: PermissionMode::Default,
-        cancel: CancellationToken::new(),
-        machine: machine(env.clone()),
-        local: local_services(env),
-        artifacts: Arc::new(MemoryStore::default()),
-        interactions: Arc::new(Unused),
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op_1"),
-            origin: Origin::Agent {
+        machine: env.machine(),
+        interactions: Arc::new(rust_cli_kernel_api::testing::NoOneToAsk),
+        session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g"),
+            OperationId::new("op_1"),
+            Origin::Agent {
                 session: SessionId::new("s1"),
                 run: RunId::new("r1"),
             },
-        },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -205,7 +148,7 @@ async fn call(
     agent: Option<AgentId>,
 ) -> Result<ToolOutput, ToolError> {
     let (progress, _updates) = mpsc::channel(8);
-    BashTool::new()
+    BashTool::default()
         .call(input, context(env, agent), progress)
         .await
 }
@@ -239,7 +182,7 @@ async fn foreground_commands_use_clamped_timeouts_and_the_session_cwd() {
             roots: vec![EnvPath::new("/w")]
         }
     );
-    assert!(start.background.is_none() && start.sandbox.is_none());
+    assert!(start.kind.background().is_none() && start.sandbox.is_none());
     assert_eq!(start.task, output::task_id(&OperationId::new("op_1")));
     call(env.clone(), json!({"command": "ls"}), None)
         .await
@@ -276,7 +219,7 @@ async fn background_commands_return_the_output_file_at_once() {
     assert_eq!(text_of(&output), output::backgrounded(&task, "/t/b.output"));
     let start = env.started.lock().unwrap()[0].clone();
     assert_eq!(start.timeout_ms, Some(600_000));
-    assert_eq!(start.background.unwrap().description, "Wait");
+    assert_eq!(start.kind.background().unwrap().description, "Wait");
     assert!(env.cancelled.lock().unwrap().is_empty());
 }
 
@@ -347,7 +290,7 @@ async fn cancelling_sends_a_cancel_and_waits_for_the_terminal_state() {
     let context = context(env.clone(), None);
     let cancel = context.cancel.clone();
     let (progress, _updates) = mpsc::channel(8);
-    let tool = BashTool::new();
+    let tool = BashTool::default();
     let running = tool.call(json!({"command": "sleep 9"}), context, progress);
     cancel.cancel();
     assert_eq!(running.await, Err(ToolError::Cancelled));
@@ -359,7 +302,7 @@ async fn cancelling_sends_a_cancel_and_waits_for_the_terminal_state() {
 
 #[test]
 fn definition_and_flags_come_from_the_prompts_and_the_read_only_check() {
-    let tool = BashTool::new();
+    let tool = BashTool::default();
     assert!(
         tool.description(&PromptContext {
             tool_names: Vec::new(),
@@ -380,7 +323,7 @@ fn definition_and_flags_come_from_the_prompts_and_the_read_only_check() {
 /// 不可见时（缺省）不点名。
 #[test]
 fn the_description_names_find_and_grep_only_when_the_search_tools_are_visible() {
-    let tool = BashTool::new();
+    let tool = BashTool::default();
     let describe = |names: &[&str]| {
         tool.description(&PromptContext {
             tool_names: names.iter().map(|name| (*name).to_owned()).collect(),
@@ -403,8 +346,11 @@ fn the_description_names_find_and_grep_only_when_the_search_tools_are_visible() 
 /// 描述不随每一步的模式变（在会话里算一次）。
 #[test]
 fn a_bypass_launch_trims_the_avoid_cat_line() {
-    let trimmed = BashTool::new().with_bash_first_trimmed(true);
-    let plain = BashTool::new().with_bash_first_trimmed(false);
+    let trimmed = BashTool::new(BashSettings {
+        bash_first_trimmed: true,
+        ..BashSettings::default()
+    });
+    let plain = BashTool::default();
     let describe = |tool: &BashTool, names: &[&str], mode: PermissionMode| {
         tool.description(&PromptContext {
             tool_names: names.iter().map(|name| (*name).to_owned()).collect(),
@@ -415,7 +361,7 @@ fn a_bypass_launch_trims_the_avoid_cat_line() {
     for names in [&["Bash", "Read"][..], &["Bash", "Glob", "Grep", "Read"][..]] {
         for mode in [PermissionMode::Default, PermissionMode::BypassPermissions] {
             let full = describe(&plain, names, mode);
-            assert_eq!(full, describe(&BashTool::new(), names, mode));
+            assert_eq!(full, describe(&BashTool::default(), names, mode));
             let start = full.find(line).unwrap();
             let end = start + 1 + full[start + 1..].find('\n').unwrap();
             let expected = format!("{}{}", &full[..start], &full[end..]);
@@ -436,7 +382,10 @@ fn a_bypass_launch_trims_the_avoid_cat_line() {
 /// §1.1）：描述与 schema 不写期限，后台命令不设超时；前台命令照旧。
 #[tokio::test]
 async fn interactive_sessions_have_no_background_deadline() {
-    let tool = BashTool::new().with_background_deadline(false);
+    let tool = BashTool::new(BashSettings {
+        background_deadline: false,
+        ..BashSettings::default()
+    });
     let context = PromptContext {
         tool_names: vec!["Bash".to_owned()],
         mode: PermissionMode::Default,
@@ -451,7 +400,7 @@ async fn interactive_sessions_have_no_background_deadline() {
         "Set to true to run this command in the background."
     );
     // `-p`（缺省）仍是缺省的写法。
-    let print = BashTool::new();
+    let print = BashTool::default();
     assert!(
         print
             .description(&context)
@@ -498,7 +447,7 @@ async fn bash_mode_splits_stdout_and_stderr() {
         output: b"<a> & b\n".to_vec(),
         ..Scripted::default()
     });
-    let bash = BashTool::new().with_sandbox(SandboxPolicy {
+    let bash = BashTool::default().with_sandbox(SandboxPolicy {
         filesystem: rust_cli_kernel_api::env_shell::FilesystemPolicy::default(),
         network: rust_cli_kernel_api::env_shell::NetworkPolicy::default(),
         required: true,
@@ -568,20 +517,23 @@ async fn an_output_file_past_the_limit_reads_as_a_killed_command() {
 }
 
 /// `BASH_*_TIMEOUT_MS`（cli-args.md §9.3，修复线 F42）：描述与 schema 里的数字跟着换，执行时用新的缺省与上限；
-/// 与交互形态的去掉期限可以任意先后；缺省值时文字不变。
+/// 交互形态同时去掉期限的说明；缺省值时文字与数据文件相同。
 #[tokio::test]
 async fn the_timeouts_change_the_text_and_the_execution() {
     let context = PromptContext {
         tool_names: vec!["Bash".to_owned()],
         mode: PermissionMode::Default,
     };
-    let baseline = BashTool::new();
-    let same = BashTool::new().with_timeouts(BashTimeouts::default());
-    assert_eq!(same.description(&context), baseline.description(&context));
-    assert_eq!(same.input_schema(), baseline.input_schema());
+    let baseline = BashTool::default();
+    let data = rust_cli_prompts::definition("Bash");
+    assert_eq!(baseline.description(&context), data.description);
+    assert_eq!(baseline.input_schema(), data.schema);
 
     let timeouts = BashTimeouts::new(Some(900_000), Some(8_000_000));
-    let tool = BashTool::new().with_timeouts(timeouts);
+    let tool = BashTool::new(BashSettings {
+        timeouts,
+        ..BashSettings::default()
+    });
     let description = tool.description(&context);
     assert!(description.contains(
         "- `timeout` is in milliseconds: default 900000, max 8000000 for a foreground command."
@@ -599,16 +551,17 @@ async fn the_timeouts_change_the_text_and_the_execution() {
             .unwrap()
             .ends_with("(default 900000 ms, max 8000000 ms).")
     );
-    // 交互形态：先后两种顺序结果相同，期限的说明都去掉。
-    let first = BashTool::new()
-        .with_timeouts(timeouts)
-        .with_background_deadline(false);
-    let second = BashTool::new()
-        .with_background_deadline(false)
-        .with_timeouts(timeouts);
-    assert_eq!(first.description(&context), second.description(&context));
-    assert_eq!(first.input_schema(), second.input_schema());
+    // 交互形态：期限的说明去掉，前台的数字照换。
+    let first = BashTool::new(BashSettings {
+        timeouts,
+        background_deadline: false,
+        ..BashSettings::default()
+    });
     assert!(!first.description(&context).contains("With it, `timeout`"));
+    assert_eq!(
+        first.input_schema()["properties"]["run_in_background"]["description"],
+        "Set to true to run this command in the background."
+    );
     assert!(
         first
             .description(&context)
@@ -637,7 +590,10 @@ async fn the_timeouts_change_the_text_and_the_execution() {
 /// 1800000（单次 `-p` 是 600000）；描述与 schema 的数字随之变。
 #[tokio::test]
 async fn streaming_input_gives_background_commands_thirty_minutes() {
-    let tool = BashTool::new().with_streaming_input();
+    let tool = BashTool::new(BashSettings {
+        timeouts: BashTimeouts::default().with_streaming_input(),
+        ..BashSettings::default()
+    });
     let context = PromptContext {
         tool_names: vec!["Bash".to_owned()],
         mode: PermissionMode::Default,
@@ -665,9 +621,10 @@ async fn streaming_input_gives_background_commands_thirty_minutes() {
 /// stream-json 输入与 `BASH_DEFAULT_TIMEOUT_MS` 同时设（F39 与 F42 合并）：后台缺省是 max(1800000, 前台缺省)。
 #[test]
 fn streaming_input_keeps_the_configured_timeouts() {
-    let tool = BashTool::new()
-        .with_timeouts(BashTimeouts::new(Some(2_000_000), Some(8_000_000)))
-        .with_streaming_input();
+    let tool = BashTool::new(BashSettings {
+        timeouts: BashTimeouts::new(Some(2_000_000), Some(8_000_000)).with_streaming_input(),
+        ..BashSettings::default()
+    });
     let context = PromptContext {
         tool_names: vec!["Bash".to_owned()],
         mode: PermissionMode::Default,

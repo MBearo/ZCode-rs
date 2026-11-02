@@ -28,10 +28,8 @@ async fn platform(dir: &std::path::Path) -> (Platform, StoragePaths) {
 
 fn selection(provider: &str, model: &str, reasoning: Option<&str>) -> ModelSelection {
     ModelSelection {
-        provider: provider.to_owned(),
-        model: model.to_owned(),
         reasoning: reasoning.map(str::to_owned),
-        connection: None,
+        ..ModelSelection::new(provider.to_owned(), model.to_owned())
     }
 }
 
@@ -66,10 +64,11 @@ async fn api_key_providers_resolve_with_headers_and_patches() {
     let dir = tempfile::tempdir().unwrap();
     let (platform, _paths) = platform(dir.path()).await;
     let endpoint = platform
-        .endpoint(
-            &selection("personal:gateway", "custom-chat", Some("high")),
-            None,
-        )
+        .endpoint(EndpointQuery::new(&selection(
+            "personal:gateway",
+            "custom-chat",
+            Some("high"),
+        )))
         .await
         .unwrap();
     assert_eq!(endpoint.protocol, WireProtocol::OpenAiChatCompletions);
@@ -87,13 +86,17 @@ async fn api_key_providers_resolve_with_headers_and_patches() {
         endpoint.body_patches[1],
         json!({"max_completion_tokens": 8192})
     );
-    assert!(!endpoint.renewable && !endpoint.mid_conversation_system);
+    assert!(!endpoint.renewable && !endpoint.capabilities.supports_mid_conversation_system);
     // `inputFormat.supportsImage` 为假：适配器把图片换成占位文字（model.md §10.5）。
-    assert!(!endpoint.supports_image);
+    assert!(!endpoint.capabilities.supports_image);
 
     // Anthropic 协议的 provider 另带 Bearer（Node 的 Provider 适配器）；claude-opus-5 支持中途 system 消息。
     let opus = platform
-        .endpoint(&selection("personal:anthropic", models::OPUS_5, None), None)
+        .endpoint(EndpointQuery::new(&selection(
+            "personal:anthropic",
+            models::OPUS_5,
+            None,
+        )))
         .await
         .unwrap();
     assert_eq!(
@@ -103,11 +106,15 @@ async fn api_key_providers_resolve_with_headers_and_patches() {
             RedactedString::new("Bearer sk-ant-fixture")
         )]
     );
-    assert!(opus.mid_conversation_system);
-    assert!(opus.supports_image);
+    assert!(opus.capabilities.supports_mid_conversation_system);
+    assert!(opus.capabilities.supports_image);
 
     let missing = platform
-        .endpoint(&selection("personal:nokey", models::OPUS_5, None), None)
+        .endpoint(EndpointQuery::new(&selection(
+            "personal:nokey",
+            models::OPUS_5,
+            None,
+        )))
         .await;
     assert!(matches!(missing, Err(ModelError::InvalidRequest { .. })));
 }
@@ -120,7 +127,12 @@ async fn the_request_output_limit_feeds_the_max_output_tokens_patch() {
     let (platform, _paths) = platform(dir.path()).await;
     let chat = selection("personal:gateway", "custom-chat", Some("high"));
     let patch = |endpoint: ModelEndpoint| endpoint.body_patches[1].clone();
-    let limited = |limit| platform.endpoint_with_output_limit(&chat, None, limit);
+    let limited = |limit| {
+        platform.endpoint(EndpointQuery {
+            output_limit: limit,
+            ..EndpointQuery::new(&chat)
+        })
+    };
     assert_eq!(
         patch(limited(Some(4096)).await.unwrap()),
         json!({"max_completion_tokens": 4096})
@@ -131,11 +143,14 @@ async fn the_request_output_limit_feeds_the_max_output_tokens_patch() {
     );
     assert_eq!(
         patch(limited(None).await.unwrap()),
-        patch(platform.endpoint(&chat, None).await.unwrap())
+        patch(platform.endpoint(EndpointQuery::new(&chat)).await.unwrap())
     );
     let capped = platform.with_max_output_tokens(Some(2000));
     let both = capped
-        .endpoint_with_output_limit(&chat, None, Some(4096))
+        .endpoint(EndpointQuery {
+            output_limit: Some(4096),
+            ..EndpointQuery::new(&chat)
+        })
         .await
         .unwrap();
     assert_eq!(patch(both), json!({"max_completion_tokens": 2000}));
@@ -147,7 +162,7 @@ async fn account_models_take_the_credential_on_every_request() {
     let (platform, paths) = platform(dir.path()).await;
     let select = selection(ZAI, models::GLM_5_3_ACCOUNT, Some("high"));
     assert!(matches!(
-        platform.endpoint(&select, None).await,
+        platform.endpoint(EndpointQuery::new(&select)).await,
         Err(ModelError::InvalidRequest { .. })
     ));
     let login = |key: &str| {
@@ -159,7 +174,10 @@ async fn account_models_take_the_credential_on_every_request() {
         .to_string()
     };
     write(paths.credentials().as_path(), login("sk-first")).await;
-    let first = platform.endpoint(&select, None).await.unwrap();
+    let first = platform
+        .endpoint(EndpointQuery::new(&select))
+        .await
+        .unwrap();
     assert_eq!(
         first.credential,
         Credential::ApiKey(RedactedString::new("sk-first"))
@@ -168,12 +186,23 @@ async fn account_models_take_the_credential_on_every_request() {
     assert_eq!(first.base_url, hosts::ZAI_ANTHROPIC);
     // 同一个 key 被拒：不能续期。
     assert!(matches!(
-        platform.endpoint(&select, Some(&first)).await,
+        platform
+            .endpoint(EndpointQuery {
+                rejected: Some(&first),
+                ..EndpointQuery::new(&select)
+            })
+            .await,
         Err(ModelError::Authentication { .. })
     ));
     // 凭据换了：下一次请求拿到新的。
     write(paths.credentials().as_path(), login("sk-second")).await;
-    let renewed = platform.endpoint(&select, Some(&first)).await.unwrap();
+    let renewed = platform
+        .endpoint(EndpointQuery {
+            rejected: Some(&first),
+            ..EndpointQuery::new(&select)
+        })
+        .await
+        .unwrap();
     assert_eq!(
         renewed.credential,
         Credential::ApiKey(RedactedString::new("sk-second"))
@@ -186,20 +215,20 @@ async fn account_models_take_the_credential_on_every_request() {
 }
 
 /// 缺口 G8（app-protocol.md §5.2）：注入的来源记下每次请求，给固定的 key 与一个请求头。
-struct Supplied(std::sync::Mutex<Vec<header_source::HeaderRequest>>);
+struct Supplied(std::sync::Mutex<Vec<rust_cli_kernel_api::provider::HeaderRequest>>);
 
 #[async_trait]
-impl header_source::HeaderSource for Supplied {
+impl rust_cli_kernel_api::provider::HeaderSource for Supplied {
     async fn request_auth(
         &self,
-        request: header_source::HeaderRequest,
-    ) -> Result<header_source::SuppliedAuth, ModelError> {
+        request: rust_cli_kernel_api::provider::HeaderRequest,
+    ) -> Result<rust_cli_kernel_api::provider::SuppliedAuth, ModelError> {
         let count = {
             let mut seen = self.0.lock().unwrap();
             seen.push(request);
             seen.len()
         };
-        Ok(header_source::SuppliedAuth {
+        Ok(rust_cli_kernel_api::provider::SuppliedAuth {
             api_key: Some(RedactedString::new(format!("sk-host-{count}"))),
             headers: vec![("x-host-sign".to_owned(), RedactedString::new("signed"))],
         })
@@ -224,11 +253,12 @@ async fn an_injected_header_source_supplies_account_credentials() {
     )
     .await;
     let select = selection(ZAI, models::GLM_5_3_ACCOUNT, Some("high"));
-    let context = EndpointContext {
-        session: Some(rust_cli_kernel_api::ids::SessionId::new("session_1")),
-    };
+    let session = rust_cli_kernel_api::ids::SessionId::new("session_1");
     let first = platform
-        .endpoint_in(&select, None, None, &context)
+        .endpoint(EndpointQuery {
+            session: Some(&session),
+            ..EndpointQuery::new(&select)
+        })
         .await
         .unwrap();
     assert_eq!(
@@ -248,7 +278,11 @@ async fn an_injected_header_source_supplies_account_credentials() {
         Some("Bearer sk-host-1")
     );
     let renewed = platform
-        .endpoint_in(&select, Some(&first), None, &context)
+        .endpoint(EndpointQuery {
+            rejected: Some(&first),
+            session: Some(&session),
+            ..EndpointQuery::new(&select)
+        })
         .await
         .unwrap();
     assert_eq!(
@@ -257,7 +291,7 @@ async fn an_injected_header_source_supplies_account_credentials() {
     );
     let seen = source.0.lock().unwrap().clone();
     assert_eq!(seen.len(), 2);
-    assert_eq!(seen[0].session, context.session);
+    assert_eq!(seen[0].session, Some(session.clone()));
     assert_eq!(seen[0].rejected_fingerprint, None);
     assert_eq!(
         seen[1].rejected_fingerprint.as_deref(),
@@ -266,12 +300,10 @@ async fn an_injected_header_source_supplies_account_credentials() {
     assert!(!seen[0].account_type.is_empty() && !seen[0].mode.is_empty());
     // API key 的 provider 照旧用配置里的 key，不问来源。
     let personal = platform
-        .endpoint_in(
-            &selection("personal:gateway", "custom-chat", Some("high")),
-            None,
-            None,
-            &context,
-        )
+        .endpoint(EndpointQuery {
+            session: Some(&session),
+            ..EndpointQuery::new(&selection("personal:gateway", "custom-chat", Some("high")))
+        })
         .await
         .unwrap();
     assert!(matches!(personal.credential, Credential::ApiKey(_)));
@@ -317,7 +349,7 @@ async fn limits_come_from_the_published_snapshot() {
     assert_ne!(changed, PERSONAL);
     write(paths.provider_config().as_path(), changed).await;
     assert_eq!(platform.limits(&chat), Some(expected));
-    let _ = platform.endpoint(&chat, None).await;
+    let _ = platform.endpoint(EndpointQuery::new(&chat)).await;
     assert_eq!(
         platform.limits(&chat).map(|limits| limits.context_window),
         Some(100_000)

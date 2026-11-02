@@ -7,11 +7,11 @@ use rust_cli_kernel_api::message::{
 };
 use serde_json::{Value, json};
 
-use crate::cron_board::tests::TokioClock;
+use crate::cron_board::tests::clock;
 use crate::cron_board::{CronBoard, JobKind};
 use crate::cron_expr::RECURRING_MAX_AGE_MS;
 
-/// TokioClock 的起点 2026-10-17T10:07:30Z。
+/// 测试时钟的起点 2026-10-17T10:07:30Z。
 const START: u64 = 1_792_231_650_000;
 const MINUTE: u64 = 60_000;
 
@@ -84,7 +84,7 @@ fn one_shot(id: &str) -> String {
 
 #[tokio::test(start_paused = true)]
 async fn resume_rebuilds_session_tasks_from_the_history() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     let earlier = START - 2 * MINUTE;
     let mut history = Vec::new();
     // 复原：循环任务、还没到点的一次性任务（10:12）。
@@ -176,7 +176,7 @@ async fn resume_rebuilds_session_tasks_from_the_history() {
 /// 消息 ID 不是 Node 格式时没有创建时间：循环任务按现在，一次性任务跳过。
 #[tokio::test(start_paused = true)]
 async fn ids_without_a_time_keep_recurring_tasks_only() {
-    let board = CronBoard::new(TokioClock::new(), None);
+    let board = CronBoard::new(clock(), None);
     let history = [
         Message::Assistant(AssistantMessage {
             id: MessageId::new("m1"),

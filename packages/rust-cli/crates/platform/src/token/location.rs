@@ -14,7 +14,7 @@ use super::http::{
     envelope_data,
 };
 use crate::account::encode_uri_component;
-use crate::token::Family;
+use rust_cli_base::account::Family;
 
 const DEFAULT_ORGANIZATION_NAME: &str = "默认机构";
 const DEFAULT_PROJECT_NAME: &str = "默认项目";

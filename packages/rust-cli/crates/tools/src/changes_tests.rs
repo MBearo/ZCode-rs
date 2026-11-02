@@ -1,5 +1,6 @@
 //! 读过的文件在磁盘上被改动（tools-files.md §4.1）：查哪些记录、片段、去重、上限与敏感文件。
 
+use rust_cli_kernel_api::ids::MachineName;
 use std::sync::Arc;
 
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath, FileVersion, WorkspaceRef};
@@ -24,8 +25,8 @@ fn env() -> Arc<MemoryEnvironment> {
         os_version: "Darwin 24".to_owned(),
         shell: "zsh".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: None,
+        uid: None,
     }))
 }
 
@@ -63,15 +64,20 @@ impl Case {
     }
 
     fn entry(&self, path: &str) -> Option<FileState> {
-        self.state.get(&self.session, path)
+        self.state
+            .get_at(&self.session, &MachineName::primary(), path)
     }
 }
 
 #[tokio::test]
 async fn a_written_file_changed_on_disk_gives_its_changes_once() {
     let case = Case::new();
-    case.state
-        .set(&case.session, "/w/a.txt", written("a\nb\nc\n"));
+    case.state.set_at(
+        &case.session,
+        &MachineName::primary(),
+        "/w/a.txt",
+        written("a\nb\nc\n"),
+    );
     case.env.set_file("/w/a.txt", "a\nB\nc\n");
     assert_eq!(
         case.check().await,
@@ -97,7 +103,8 @@ async fn entries_written_by_read_are_not_checked() {
         offset: Some(1),
         ..written("a\n")
     };
-    case.state.set(&case.session, "/w/a.txt", read);
+    case.state
+        .set_at(&case.session, &MachineName::primary(), "/w/a.txt", read);
     case.env.set_file("/w/a.txt", "b\n");
     assert!(case.check().await.is_empty());
     assert_eq!(case.entry("/w/a.txt").unwrap().content, "a\n");
@@ -108,7 +115,12 @@ async fn entries_written_by_read_are_not_checked() {
 async fn same_content_is_quiet() {
     let case = Case::new();
     case.env.set_file("/w/a.txt", "same\n");
-    case.state.set(&case.session, "/w/a.txt", written("same\n"));
+    case.state.set_at(
+        &case.session,
+        &MachineName::primary(),
+        "/w/a.txt",
+        written("same\n"),
+    );
     assert!(case.check().await.is_empty());
     assert_eq!(case.entry("/w/a.txt").unwrap().offset, Some(1));
 }
@@ -124,7 +136,8 @@ async fn restored_entries_are_compared_by_content_first() {
             baseline: Baseline::Content,
             ..written(content)
         };
-        case.state.set(&case.session, path, restored);
+        case.state
+            .set_at(&case.session, &MachineName::primary(), path, restored);
     }
     let found = case.check().await;
     assert_eq!(found.len(), 1);
@@ -139,7 +152,12 @@ async fn restored_entries_are_compared_by_content_first() {
 #[tokio::test]
 async fn a_deleted_file_drops_its_entry() {
     let case = Case::new();
-    case.state.set(&case.session, "/w/a.txt", written("a\n"));
+    case.state.set_at(
+        &case.session,
+        &MachineName::primary(),
+        "/w/a.txt",
+        written("a\n"),
+    );
     assert!(case.check().await.is_empty());
     assert!(case.entry("/w/a.txt").is_none());
 }
@@ -149,12 +167,26 @@ async fn a_deleted_file_drops_its_entry() {
 async fn large_and_sensitive_files_only_say_they_changed() {
     let case = Case::new();
     let big = "x\n".repeat(2049);
-    case.state.set(&case.session, "/w/big.txt", written(&big));
+    case.state.set_at(
+        &case.session,
+        &MachineName::primary(),
+        "/w/big.txt",
+        written(&big),
+    );
     case.env.set_file("/w/big.txt", "x\n");
-    case.state.set(&case.session, "/w/.env", written("A=1\n"));
+    case.state.set_at(
+        &case.session,
+        &MachineName::primary(),
+        "/w/.env",
+        written("A=1\n"),
+    );
     case.env.set_file("/w/.env", "A=2\n");
-    case.state
-        .set(&case.session, "/w/keys/id_ed25519", written("k\n"));
+    case.state.set_at(
+        &case.session,
+        &MachineName::primary(),
+        "/w/keys/id_ed25519",
+        written("k\n"),
+    );
     case.env.set_file("/w/keys/id_ed25519", "k2\n");
     let found = case.check().await;
     let paths: Vec<&str> = found.iter().map(|change| change.path.as_str()).collect();
@@ -169,7 +201,12 @@ async fn large_and_sensitive_files_only_say_they_changed() {
 #[tokio::test]
 async fn nothing_to_show_is_not_announced() {
     let case = Case::new();
-    case.state.set(&case.session, "/w/a.txt", written("gone\n"));
+    case.state.set_at(
+        &case.session,
+        &MachineName::primary(),
+        "/w/a.txt",
+        written("gone\n"),
+    );
     case.env.set_file("/w/a.txt", "");
     assert!(case.check().await.is_empty());
 }
@@ -181,7 +218,8 @@ async fn the_pass_budget_clears_later_snippets() {
     let long: String = (1..=2000).map(|n| format!("line {n}\n")).collect();
     for name in ["c", "b", "a"] {
         let path = format!("/w/{name}.txt");
-        case.state.set(&case.session, &path, written(""));
+        case.state
+            .set_at(&case.session, &MachineName::primary(), &path, written(""));
         case.env.set_file(&path, &long);
     }
     let found = case.check().await;
@@ -201,7 +239,8 @@ async fn the_pass_budget_clears_later_snippets() {
 async fn images_notebooks_and_pdfs_are_skipped() {
     let case = Case::new();
     for path in ["/w/a.png", "/w/n.ipynb", "/w/d.pdf", "/w/app.exe"] {
-        case.state.set(&case.session, path, written("x\n"));
+        case.state
+            .set_at(&case.session, &MachineName::primary(), path, written("x\n"));
         case.env.set_file(path, "y\n");
     }
     assert!(case.check().await.is_empty());

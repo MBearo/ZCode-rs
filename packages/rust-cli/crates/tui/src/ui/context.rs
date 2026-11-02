@@ -6,7 +6,7 @@ use rust_cli_kernel_api::context_usage::{
     CategoryKind, ContextUsage, UsageCategory, format_tokens,
 };
 
-use super::cells::{self, Ctx};
+use super::cells::Ctx;
 use super::i18n::Lang;
 use super::quantities::{PERCENT_F64, tenths};
 
@@ -140,7 +140,7 @@ fn square_span(square: &Square, usage: &ContextUsage, ctx: &Ctx<'_>) -> Span<'st
         .iter()
         .any(|c| c.kind == CategoryKind::Buffer && c.name == square.category);
     if square.category == FREE {
-        return Span::styled("\u{26F6} ", cells::dim());
+        return Span::styled("\u{26F6} ", super::style::dim());
     }
     let symbol = if buffer {
         "\u{26DD} "
@@ -154,7 +154,7 @@ fn square_span(square: &Square, usage: &ContextUsage, ctx: &Ctx<'_>) -> Span<'st
 
 /// 右边的说明。
 fn legend(usage: &ContextUsage, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    let dim = cells::dim();
+    let dim = super::style::dim();
     let window = usage.raw_max_tokens;
     let (tokens, heading) = match ctx.lang {
         Lang::En => ("tokens", "Estimated usage by category"),

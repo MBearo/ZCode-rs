@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::clock::SystemClock;
 use rust_cli_base::models::GLM_5_3_FLASH;
 use rust_cli_base::secret::RedactedString;
 use rust_cli_env_local::LocalEnvironment;
@@ -32,15 +33,15 @@ use rust_cli_kernel_api::message::{Message, Usage};
 use rust_cli_kernel_api::metering::{ActivityQuery, ActivityRange, ModelTokens};
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
+use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, ModelEndpoint, WireProtocol};
 use rust_cli_kernel_api::session_api::{
     Ack, Command, CommandEnvelope, CreateSession, Delivery, Kernel, KernelEvent,
 };
-use rust_cli_kernel_api::store::SessionStore;
+use rust_cli_kernel_api::store::{SessionStore, StoreQueries};
 use rust_cli_kernel_api::testing::environments;
-use rust_cli_model::{AnthropicEndpoint, FixedEndpoint, ProviderModel};
+use rust_cli_model::{AnthropicEndpoint, FixedEndpoint, ProviderModel, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
-use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_runtime::{Defaults, LocalKernel, Ports};
 use serde_json::json;
@@ -124,6 +125,7 @@ impl Sandbox {
             egress,
             Arc::new(FixedEndpoint::new(endpoint)),
             clock.clone(),
+            RouteOptions::default(),
         ));
         let ids = Arc::new(NodeIds::new(clock.clone()));
         let store = self.store();
@@ -222,12 +224,7 @@ impl Sandbox {
 }
 
 fn selection(provider: &str, model: &str) -> ModelSelection {
-    ModelSelection {
-        provider: provider.to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new(provider.to_owned(), model.to_owned())
 }
 
 /// Anthropic 兼容端点（GLM）：输入与缓存只在 `message_delta` 里。存储里 assistant 的 `tokens`（Node 形状：输入
@@ -277,11 +274,11 @@ async fn openai_usage_reported_at_the_end_is_kept() {
         credential: Credential::ApiKey(RedactedString::new("sk-test")),
         headers: Vec::new(),
         body_patches: Vec::new(),
-        mid_conversation_system: true,
-        supports_image: true,
-        supports_pdf: false,
-        supports_video: false,
-        supports_audio: false,
+        capabilities: ModelCapabilities {
+            supports_mid_conversation_system: true,
+            supports_image: true,
+            ..ModelCapabilities::default()
+        },
         renewable: false,
     };
     let selection = selection("openai-test", "gpt-test");

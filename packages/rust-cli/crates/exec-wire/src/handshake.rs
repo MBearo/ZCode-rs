@@ -34,10 +34,14 @@ pub enum Capability {
     Mcp,
     /// 按客户端实例推送环境变量（F96，remote-exec.md §23.5）：`env.update` 与 `hello.session_env`。F96 的执行器报告它。
     Env,
+    /// git 状态、`/diff` 与 worktree（F110，deployment.md §19.1：git 跟着会话的主 env）。F110 的执行器报告它。
+    Git,
+    /// 建目录（F110：主 env 上的自动记忆目录）。F110 的执行器报告它。
+    Dirs,
 }
 
 impl Capability {
-    /// `MachineEnv` 的 8 个端口（R1 的执行器全部报告）。
+    /// `MachineEnv` 的 8 个端口（R1 的执行器全部报告）。Git 是 F110 才有的端口，单独报告（[`Capability::Git`]）。
     pub const PORTS: [Self; 8] = [
         Self::Info,
         Self::Files,
@@ -61,6 +65,8 @@ impl Capability {
             Self::Pdf => "pdf",
             Self::Mcp => "mcp",
             Self::Env => "env",
+            Self::Git => "git",
+            Self::Dirs => "dirs",
         }
     }
 }
@@ -90,13 +96,14 @@ impl Capabilities {
         Self::of(Capability::PORTS.into_iter().chain([Capability::Mcp]))
     }
 
-    /// 现在的执行器报告的全部能力位：端口、MCP 的管道与环境变量推送（F96，§23.5）。
+    /// 现在的执行器报告的全部能力位：端口、MCP 的管道、环境变量推送（F96，§23.5）、git 与建目录（F110）。
     pub fn executor() -> Self {
-        Self::of(
-            Capability::PORTS
-                .into_iter()
-                .chain([Capability::Mcp, Capability::Env]),
-        )
+        Self::of(Capability::PORTS.into_iter().chain([
+            Capability::Mcp,
+            Capability::Env,
+            Capability::Git,
+            Capability::Dirs,
+        ]))
     }
 
     pub fn contains(&self, capability: Capability) -> bool {

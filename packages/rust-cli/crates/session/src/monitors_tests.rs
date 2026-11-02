@@ -7,21 +7,20 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome,
-    OutputStream, ReadFile, StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
+    CommandEvent, EnvError, EnvPath, OperationContext, Outcome, OutputStream, StartCommand,
+    WorkspaceRef,
 };
 use rust_cli_kernel_api::env_shell::{
     BackgroundInfo, BackgroundKind, BackgroundStatus, BackgroundStop, BackgroundTask, ShellNotice,
     ShellState,
 };
 use rust_cli_kernel_api::ids::{OperationId, ShellTaskId, ToolUseId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::machine::{Background, Commands, MachineEnv, Shell};
 use rust_cli_kernel_api::message::Message;
 use rust_cli_kernel_api::monitor::{MonitorArmed, MonitorSource};
-use rust_cli_kernel_api::testing::{NoticeEnvironment, shell_notice, tool_use_response};
+use rust_cli_kernel_api::testing::{
+    NoticeEnvironment, TokioClock, shell_notice, tool_use_response, unsupported_machine,
+};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
@@ -41,6 +40,10 @@ struct MonitorEnv {
     /// 已结束、通知还没 ack 的（同 env-local：先记通知，再报告结束）。
     ended: Mutex<HashMap<ShellTaskId, u64>>,
     stopped: Mutex<Vec<ShellTaskId>>,
+    /// 命令已结束、执行环境不再认识的操作：按游标续读给 `NotFound`（同 env-local，工作线 F119）。
+    gone: Mutex<HashSet<OperationId>>,
+    /// 续读的次数。
+    resubscribed: std::sync::atomic::AtomicUsize,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -64,34 +67,24 @@ impl MonitorEnv {
     fn stopped(&self) -> Vec<ShellTaskId> {
         lock(&self.stopped).clone()
     }
+
+    /// 只换上命令、shell 与后台命令三个端口的机器（其余端口返回 `Unsupported`）。
+    fn machine(self: Arc<Self>) -> MachineEnv {
+        unsupported_machine()
+            .with_commands(self.clone())
+            .with_shell(self.clone())
+            .with_background(self)
+    }
+
+    /// 之后按游标续读这个操作都给 `NotFound`。
+    fn forget(&self, operation: &str) {
+        lock(&self.gone).insert(OperationId::new(operation));
+    }
 }
 
 fn unused() -> EnvError {
     EnvError::Unsupported {
         what: "not in this test".to_owned(),
-    }
-}
-
-#[async_trait]
-impl EnvInfo for MonitorEnv {
-    async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        Err(unused())
-    }
-}
-
-#[async_trait]
-impl Files for MonitorEnv {
-    async fn read_file(&self, _w: &WorkspaceRef, _r: ReadFile) -> Result<FileContent, EnvError> {
-        Err(unused())
-    }
-
-    async fn write_file(
-        &self,
-        _w: &WorkspaceRef,
-        _c: OperationContext,
-        _r: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        Err(unused())
     }
 }
 
@@ -111,6 +104,14 @@ impl Commands for MonitorEnv {
         operation: OperationId,
         _cursor: u64,
     ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
+        if lock(&self.gone).contains(&operation) {
+            self.resubscribed
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let error = EnvError::NotFound {
+                path: operation.to_string(),
+            };
+            return stream::iter([Err(error)]).boxed();
+        }
         match lock(&self.streams).remove(&operation) {
             Some(mut receiver) => stream::poll_fn(move |cx| receiver.poll_recv(cx)).boxed(),
             None => stream::pending().boxed(),
@@ -178,8 +179,7 @@ impl Background for MonitorEnv {
         Ok(Some(BackgroundInfo {
             command: "watch".to_owned(),
             status,
-            kind: Default::default(),
-            description: String::new(),
+            ..BackgroundInfo::default()
         }))
     }
 
@@ -193,24 +193,6 @@ impl Background for MonitorEnv {
         Ok(BackgroundStop::Stopped {
             command: "watch".to_owned(),
         })
-    }
-}
-
-impl Search for MonitorEnv {}
-impl Checkpoints for MonitorEnv {}
-impl Pdf for MonitorEnv {}
-impl Git for MonitorEnv {}
-impl Fetch for MonitorEnv {}
-
-/// 走着的时钟（monitor 的批与到期按时钟算）。
-struct Ticking(tokio::time::Instant);
-
-impl rust_cli_kernel_api::clock::Clock for Ticking {
-    fn now_ms(&self) -> u64 {
-        1_000_000 + u64::try_from(self.0.elapsed().as_millis()).unwrap()
-    }
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
     }
 }
 
@@ -239,7 +221,9 @@ impl Tool for ArmTool {
         _progress: mpsc::Sender<ToolProgress>,
     ) -> Result<ToolOutput, ToolError> {
         let armed = MonitorArmed {
-            machine: input["machine"].as_str().map(str::to_owned),
+            machine: rust_cli_kernel_api::ids::MachineName::new(
+                input["machine"].as_str().unwrap_or_default(),
+            ),
             operation: OperationId::new(input["operation"].as_str().unwrap()),
             task: ShellTaskId::new(input["task"].as_str().unwrap()),
             tool_use: context.tool_use.clone(),
@@ -253,7 +237,7 @@ impl Tool for ArmTool {
             output: EnvPath::new("/t/b1.output"),
         };
         // 测试替身的 watch_command 给脚本里的事件；产品里是 start_command 返回的那条流（工作线 F119）。
-        let events = match (&armed.machine, &self.remote) {
+        let events = match (armed.machine.remote(), &self.remote) {
             (Some(_), Some(remote)) => remote.watch_command(armed.operation.clone(), 0),
             _ => context
                 .machine
@@ -261,8 +245,8 @@ impl Tool for ArmTool {
                 .watch_command(armed.operation.clone(), 0),
         };
         context
-            .interactions
-            .arm_monitor(&context.session, armed, events)
+            .session_ops
+            .arm_monitor(armed, events)
             .await
             .map_err(|error| ToolError::Failed {
                 message: error.to_string(),
@@ -322,11 +306,11 @@ async fn session_with(
 ) -> Session {
     super::notice::session_on(
         scope,
-        env,
+        env.machine(),
         model,
         vec![Arc::new(ArmTool::default())],
         Vec::new(),
-        Arc::new(Ticking(tokio::time::Instant::now())),
+        Arc::new(TokioClock::new(1_000_000)),
     )
     .await
 }
@@ -434,7 +418,7 @@ async fn expiry_reports_and_stops_the_command() {
 #[tokio::test]
 async fn a_notice_without_a_watch_uses_the_monitor_summary() {
     let notice = monitor_notice(0);
-    let text = rust_cli_query::task_notification(&notice);
+    let text = crate::notices::task_notification(&notice);
     assert!(
         text.contains("<summary>Monitor \"errors &lt;log&gt;\" ended without producing output (exit 0)</summary>\n</task-notification>"),
         "{text}"
@@ -522,8 +506,9 @@ async fn a_monitor_on_a_remote_machine_reads_and_acks_there() {
     let local = Arc::new(MonitorEnv::default());
     let remote = Arc::new(MonitorEnv::default());
     let output_events = remote.command("op_m", "b1");
-    let registry = rust_cli_kernel_api::testing::TestMachines::new(local.clone());
-    registry.connect("dev-a", remote.clone(), "/home/dev/proj");
+    let registry =
+        rust_cli_kernel_api::testing::TestMachines::with_primary(local.clone().machine());
+    registry.connect_machine("dev-a", remote.clone().machine(), "/home/dev/proj");
     let model = Arc::new(ScriptedModel::new(vec![
         tool_use_response(
             "toolu_1",
@@ -535,13 +520,13 @@ async fn a_monitor_on_a_remote_machine_reads_and_acks_there() {
     ]));
     let session = super::notice::session_on_machines(
         &scope,
-        (local.clone(), registry),
+        registry,
         model.clone(),
         vec![Arc::new(ArmTool {
             remote: Some(remote.clone()),
         })],
         Vec::new(),
-        Arc::new(Ticking(tokio::time::Instant::now())),
+        Arc::new(TokioClock::new(1_000_000)),
     )
     .await;
     let mut events = session.subscribe(Some(0));
@@ -555,4 +540,42 @@ async fn a_monitor_on_a_remote_machine_reads_and_acks_there() {
     assert!(text.contains("<event>one\\ntwo</event>"), "{text}");
     assert_eq!(remote.notices.acked(), [1]);
     assert!(local.notices.acked().is_empty());
+}
+
+/// 流断了、命令也已结束（续读给 `NotFound`）：重试到上限后按事件流结束收尾，终态通知照常合成、提交后 ack
+/// （tools-more.md §19.6：命令已结束就不再续读，剩下的随终态通知给出）。以前会话 actor 到上限后什么都不做，终态
+/// 通知被当作这个 monitor 的、记下等事件流结束，永远等不到：模型收不到，通知也不 ack（`-p` 一直等后台工作）。
+#[tokio::test]
+async fn a_stream_that_cannot_be_resumed_still_ends_with_the_notice() {
+    let scope = TaskScope::root("test", |_| {});
+    let env = Arc::new(MonitorEnv::default());
+    let output_events = env.command("op_m", "b1");
+    let model = Arc::new(ScriptedModel::new(vec![
+        arm(60_000),
+        text_response(&["armed"]),
+        text_response(&["ended"]),
+    ]));
+    let session = session_with(&scope, env.clone(), model.clone()).await;
+    let mut events = session.subscribe(Some(0));
+    session.send(submit("c1", "watch")).await;
+    turns(&mut events, 1).await;
+    // 命令结束、记下终态通知；这时事件流断了，续读都给 NotFound。
+    env.forget("op_m");
+    env.end(monitor_notice(4));
+    output_events
+        .send(Err(EnvError::Io {
+            message: "the machine went away".to_owned(),
+        }))
+        .unwrap();
+    turns(&mut events, 1).await;
+    let text = last_user(&model);
+    assert!(
+        text.contains("<summary>Monitor \\\"errors &lt;log&gt;\\\" stream ended</summary>"),
+        "{text}"
+    );
+    assert_eq!(env.notices.acked(), [1]);
+    assert_eq!(
+        env.resubscribed.load(std::sync::atomic::Ordering::SeqCst),
+        usize::from(rust_cli_kernel_api::monitor_watch::STREAM_RETRIES)
+    );
 }

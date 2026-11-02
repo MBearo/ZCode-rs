@@ -13,8 +13,9 @@ use rust_cli_kernel_api::message::{ContentBlock, Message, ToolResultContent, too
 use rust_cli_kernel_api::model::{ToolDefinition, ToolFlags};
 use rust_cli_kernel_api::provider::ModelCapabilities;
 use rust_cli_kernel_api::tool::{PromptContext, Tool};
+use rust_cli_kernel_api::tool_names::TOOL_SEARCH;
 use rust_cli_kernel_api::tool_search::{
-    PLACEHOLDER, PLACEHOLDER_DESCRIPTION, TOOL_SEARCH, compare_names, is_deferred, loaded,
+    PLACEHOLDER, PLACEHOLDER_DESCRIPTION, is_deferred, loaded, model_order, search_applies,
 };
 use rust_cli_prompts::models::{self, ToolSearchMode, ToolSearchSetting};
 use serde_json::json;
@@ -173,15 +174,9 @@ pub(crate) fn wire_tools<'a>(
 ) -> WireTools {
     let mut sorted: Vec<&Arc<dyn Tool>> = tools.iter().collect();
     if order == ToolOrder::ByName {
-        sorted.sort_by(|left, right| {
-            left.is_mcp()
-                .cmp(&right.is_mcp())
-                .then_with(|| compare_names(left.name(), right.name()))
-        });
+        sorted.sort_by(|left, right| model_order(left.as_ref(), right.as_ref()));
     }
-    let active = mode.is_on()
-        && sorted.iter().any(|tool| tool.name() == TOOL_SEARCH)
-        && sorted.iter().any(|tool| is_deferred(tool.as_ref()));
+    let active = mode.is_on() && search_applies(tools);
     let mode = if active { mode } else { ToolSearchMode::Off };
     // 本地 ToolSearch（工作线 F84，tools-more.md §3.2.2）：已加载的工具以普通定义发出，不带 `defer_loading`，也没有
     // 占位工具——端点不认这两样（F52 的起因：网关后面的 Bedrock 拒绝随之生成的 `advanced-tool-use` beta）。

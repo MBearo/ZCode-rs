@@ -1,4 +1,4 @@
-//! 编排 trait 的缺省实现（修复线 F16 新增的方法不改变已有实现的行为）。
+//! 编排 trait 的缺省实现（修复线 F16 新增的方法不改变已有实现的行为）与测试代理的中性缺省。
 
 use std::sync::Arc;
 
@@ -20,16 +20,15 @@ impl ContextBuilder for BuildOnly {
     ) -> Result<BuiltContext, OrchestrationError> {
         Ok(BuiltContext {
             system: Vec::new(),
-            user_context: Vec::new(),
             attachments: Vec::new(),
         })
     }
 }
 
-/// 只实现两个必需方法的注册表。
+/// 只写两个必需方法的注册表（测试代理 `RegistryOverride` 的中性缺省，工作线 F134：`ToolRegistry` 本身没有缺省体）。
 struct Empty;
 
-impl ToolRegistry for Empty {
+impl crate::testing::RegistryOverride for Empty {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
         Vec::new()
     }
@@ -48,7 +47,6 @@ impl ContextBuilder for Turns {
     ) -> Result<BuiltContext, OrchestrationError> {
         Ok(BuiltContext {
             system: Vec::new(),
-            user_context: Vec::new(),
             attachments: Vec::new(),
         })
     }
@@ -68,27 +66,16 @@ impl ContextBuilder for Turns {
 }
 
 fn request() -> ContextRequest {
-    ContextRequest {
-        capabilities: None,
-        session: crate::ids::SessionId::new("s1"),
-        workspace: crate::env::WorkspaceRef {
+    ContextRequest::new(
+        crate::ids::SessionId::new("s1"),
+        crate::env::WorkspaceRef {
             environment: crate::ids::EnvironmentId::new("local"),
             root: crate::env::EnvPath::new("/Users/dev/w"),
         },
-        agent: None,
-        source: QuerySource::MainThread,
-        mode: crate::permission::PermissionMode::Default,
-        tool_names: Vec::new(),
-        selection: crate::model::ModelSelection {
-            provider: "p".to_owned(),
-            model: "m".to_owned(),
-            reasoning: None,
-            connection: None,
-        },
-        plan_flags: Default::default(),
-        mcp: None,
-        default_machine: None,
-    }
+        QuerySource::MainThread,
+        crate::permission::PermissionMode::Default,
+        crate::model::ModelSelection::new("p".to_owned(), "m".to_owned()),
+    )
 }
 
 /// F98（remote-exec.md §25.2.1、§25.7）：这次运行的缺省机器只在不是本机时写出；旧形状照常能读。
@@ -97,9 +84,9 @@ fn the_default_machine_is_written_only_when_remote() {
     let plain = serde_json::to_value(request()).unwrap();
     assert!(plain.get("default_machine").is_none());
     let back: ContextRequest = serde_json::from_value(plain).unwrap();
-    assert_eq!(back.default_machine, None);
+    assert_eq!(back.default_machine, Default::default());
     let remote = ContextRequest {
-        default_machine: Some("dev-a".to_owned()),
+        default_machine: crate::ids::MachineName::new("dev-a"),
         ..request()
     };
     let value = serde_json::to_value(&remote).unwrap();
@@ -128,14 +115,13 @@ fn registries_withhold_nothing_and_are_sorted_by_default() {
     assert!(!tools.hides("Agent"));
 }
 
-/// 只实现 `ask` 的交互：不给会话级的询问入口。
+/// 只覆盖 `ask` 的测试代理（工作线 F137：`Interactions` 本身没有缺省体）：撤回与会话级的入口委托给 `NoOneToAsk`。
 struct AskOnly;
 
 #[async_trait]
-impl Interactions for AskOnly {
+impl crate::testing::AskOverride for AskOnly {
     async fn ask(
         &self,
-        _session: &SessionId,
         _request: InteractionRequest,
     ) -> Result<InteractionAnswer, OrchestrationError> {
         Err(OrchestrationError::Failed {
@@ -145,8 +131,37 @@ impl Interactions for AskOnly {
 }
 
 #[test]
-fn interactions_have_no_lasting_entry_by_default() {
-    assert!(AskOnly.lasting(&SessionId::new("sess_1")).is_none());
+fn the_ask_proxy_has_no_lasting_entry_unless_overridden() {
+    assert!(Interactions::lasting(&AskOnly).is_none());
+}
+
+/// 没有人能回答：权限询问是 Unavailable，提问不回答（按询问的种类）。
+#[tokio::test]
+async fn no_one_to_ask_answers_by_the_kind_of_question() {
+    let permission = InteractionRequest::Permission {
+        tool_use: ToolUseId::new("toolu_1"),
+        tool: "Bash".to_owned(),
+        input: serde_json::json!({"command": "ls"}),
+        message: "ask".to_owned(),
+        suggestions: Vec::new(),
+        rule_seed: None,
+        asked_by: None,
+        machine: crate::ids::MachineName::primary(),
+    };
+    let question = InteractionRequest::Question {
+        tool_use: ToolUseId::new("toolu_2"),
+        questions: serde_json::Value::Null,
+    };
+    let nobody = crate::testing::NoOneToAsk;
+    assert_eq!(
+        nobody.ask(permission).await.unwrap().answer,
+        Answer::from(PermissionAnswer::Unavailable)
+    );
+    assert_eq!(
+        nobody.ask(question).await.unwrap().answer,
+        Answer::from(QuestionAnswer::Declined)
+    );
+    assert!(nobody.lasting().is_none());
 }
 
 #[test]
@@ -166,4 +181,17 @@ fn the_asking_agent_is_optional_on_the_wire() {
     tagged["asked_by"] = serde_json::json!("Explore");
     let request: InteractionRequest = serde_json::from_value(tagged.clone()).unwrap();
     assert_eq!(serde_json::to_value(&request).unwrap(), tagged);
+}
+
+/// 会话关闭是自己的变体（工作线 F130）：文字不变，序列化成 `{"kind": "closed"}`。
+#[test]
+fn a_closed_session_has_its_own_error() {
+    let closed = OrchestrationError::Closed;
+    assert_eq!(closed.to_string(), "the session is closed");
+    let value = serde_json::to_value(&closed).unwrap();
+    assert_eq!(value, serde_json::json!({"kind": "closed"}));
+    assert_eq!(
+        serde_json::from_value::<OrchestrationError>(value).unwrap(),
+        closed
+    );
 }

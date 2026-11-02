@@ -29,14 +29,34 @@ pub struct BackgroundEntry {
     /// 命令输出文件的末尾（最多 [`OUTPUT_TAIL_LINES`] 行）；子代理没有。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
-    /// 远端的后台命令所在的机器；后台子代理是它的缺省机器（Agent 的 `machine`）；本机为 None（远端执行 R4，
+    /// 后台命令所在的机器；后台子代理是它的缺省机器（Agent 的 `machine`）；主 env 不写出（远端执行 R4，
     /// docs/specs/rust-cli/remote-exec.md §21.7）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub machine: Option<String>,
+    #[serde(default, skip_serializing_if = "crate::ids::MachineName::is_primary")]
+    pub machine: crate::ids::MachineName,
     /// 远端的后台命令所在的机器正在重连：这一条是那台机器上一份的内容（远端执行 F96，remote-exec.md §23.3）；本机与
     /// 连着的机器为 false（serde 缺省 false、不写出）。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reconnecting: bool,
+}
+
+impl BackgroundEntry {
+    /// 本机的一个后台任务，没有输出末尾（远端的机器与重连状态由会话 actor 用结构更新填上）。
+    pub fn new(
+        id: impl Into<String>,
+        kind: BackgroundKind,
+        description: impl Into<String>,
+        status: BackgroundStatus,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            description: description.into(),
+            status,
+            output: None,
+            machine: crate::ids::MachineName::default(),
+            reconnecting: false,
+        }
+    }
 }
 
 /// `BackgroundEntry.output` 最多保留的行数。
@@ -80,9 +100,9 @@ pub struct McpServerInfo {
     /// 已连接时提供的工具数。
     #[serde(default)]
     pub tools: usize,
-    /// 服务器绑定的远端机器（R5，remote-exec.md §22.2）；本机为 None，不写出。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub machine: Option<String>,
+    /// 服务器绑定的机器（R5，remote-exec.md §22.2）；主 env 不写出。
+    #[serde(default, skip_serializing_if = "crate::ids::MachineName::is_primary")]
+    pub machine: crate::ids::MachineName,
 }
 
 /// 一条已配置的 hook（`/hooks` 只读查看，docs/specs/rust-cli/tui-display.md §3.5）。
@@ -116,7 +136,7 @@ pub struct DirectoryChanged {
     pub display: String,
 }
 
-/// `Command::ChangeDirectory` 的结果（`Ack::Accepted.result`，tui-manage.md §7.1，F1）：会话 actor 按自己的工作目录
+/// `Command::ChangeDirectory` 的结果（`CommandResult::Directory`，tui-manage.md §7.1，F1）：会话 actor 按自己的工作目录
 /// 判定。给用户的文字由调用方按结果组成（显示路径要 home）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]

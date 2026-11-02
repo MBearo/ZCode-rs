@@ -1,10 +1,10 @@
 //! 路径：解析、工作目录判断与路径规则（shell-permissions.md §4.4）。纯字符串运算，不碰文件系统。
 //!
 //! 路径规则（`Read(...)`、`Edit(...)`）按 gitignore 风格：`//x` 是绝对路径，`~/x` 在 home 下，
-//! `/x` 相对规则的根（工作区根），其余相对根且不带 `/` 时在任意层级匹配文件名。`**` 跨目录，
-//! `*`、`?` 不跨目录；匹配到目录时它下面的一切都算匹配。
+//! `/x` 相对规则的根（工作区根），其余相对根且不带 `/` 时在任意层级匹配文件名。glob 的语法是 base 的
+//! `glob::path_regex`（整段的 `**` 跨目录，`*`、`?` 不跨目录，`[...]` 字符类，`\` 转义）；匹配到目录时它下面的一切都算匹配。
 
-use regex::{Regex, RegexBuilder};
+use rust_cli_base::glob::path_regex;
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::env_path::git_bash_spelling;
 use rust_cli_kernel_api::permission::RuleBehavior;
@@ -67,30 +67,6 @@ impl PathContext {
     pub fn root_list(&self) -> Vec<String> {
         self.roots.clone()
     }
-}
-
-/// glob 换成正则：`**` 跨目录，`*` / `?` 不跨目录；不分大小写（F57）。
-fn glob_regex(glob: &str) -> Option<Regex> {
-    let mut out = String::from("^");
-    let mut chars = glob.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '*' if chars.peek() == Some(&'*') => {
-                chars.next();
-                if chars.peek() == Some(&'/') {
-                    chars.next();
-                    out.push_str("(?:.*/)?");
-                } else {
-                    out.push_str(".*");
-                }
-            }
-            '*' => out.push_str("[^/]*"),
-            '?' => out.push_str("[^/]"),
-            other => out.push_str(&regex::escape(&other.to_string())),
-        }
-    }
-    out.push('$');
-    RegexBuilder::new(&out).case_insensitive(true).build().ok()
 }
 
 /// 规则的根与相对根的 glob。根是本机写法
@@ -191,7 +167,7 @@ pub fn rule_matches(
         return false;
     };
     let glob = glob.trim_end_matches('/');
-    let Some(regex) = glob_regex(glob) else {
+    let Some(regex) = path_regex(glob) else {
         return false;
     };
     // 修复（工作线 F85）：`x/**` 也匹配 `x` 目录本身（对照实现按 gitignore 的 `x` 匹配）。以前只匹配它下面的，
@@ -199,7 +175,7 @@ pub fn rule_matches(
     if let Some(directory) = glob
         .strip_suffix("/**")
         .filter(|directory| directory.contains(|c| c != '/'))
-        && glob_regex(directory).is_some_and(|regex| regex.is_match(relative))
+        && path_regex(directory).is_some_and(|regex| regex.is_match(relative))
     {
         return true;
     }

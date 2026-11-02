@@ -174,13 +174,7 @@ async fn yolo_never_asks() {
         deny(texts::bash_command_denied("git reset --hard"))
     );
     // 工具自身的询问也放行，拒绝照旧。
-    let own_ask = Named(
-        "Other",
-        PermissionDecision::Ask {
-            message: "why".to_owned(),
-            suggestions: Vec::new(),
-        },
-    );
+    let own_ask = Named("Other", PermissionDecision::ask("why", Vec::new()));
     assert_eq!(
         gate.decide(&own_ask, &json!({}), &context(mode)).await,
         allow()

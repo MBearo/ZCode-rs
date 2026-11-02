@@ -13,6 +13,7 @@ use futures_util::StreamExt;
 use rust_cli_kernel_api::env_shell::ShellNotice;
 use rust_cli_kernel_api::ids::{AgentId, SessionId};
 use rust_cli_kernel_api::machine_notices::{self, all_shell_notices};
+use rust_cli_prompts::notification;
 
 use crate::Core;
 use crate::live::{LiveAgent, Notice};
@@ -51,7 +52,9 @@ pub(crate) fn watch(core: &Arc<Core>, agent: &LiveAgent) {
 
 /// 一条命令通知交给这个子代理（或它已结束时交给顶层会话）。
 async fn forward(core: &Arc<Core>, agent: &AgentId, root: &SessionId, notice: ShellNotice) {
-    let (status, envelope) = (core.ports.shell_notice)(&notice);
+    let status = notice.status();
+    // 入参由 kernel-api 的 `ShellNotice::task_notice` 换算（工作线 F134：以前这里与 session 各写一份）。
+    let envelope = notification::task_envelope(&notice.task_notice());
     let notice = Notice {
         // 通知的来源标识：顶层会话的 `BackgroundWork` 与后台列表用它（命令的任务 ID）。
         from: AgentId::new(notice.task.as_str()),
@@ -74,10 +77,9 @@ pub(crate) async fn background_commands(core: &Core, root: &SessionId) -> Vec<Ag
             .collect()
     });
     let mut commands = Vec::new();
+    let machine = core.ports.machines.primary_machine();
     for agent in children {
-        if let Ok(state) = core
-            .ports
-            .machine
+        if let Ok(state) = machine
             .shell()
             .shell_state(&agent.workspace, &agent.child)
             .await

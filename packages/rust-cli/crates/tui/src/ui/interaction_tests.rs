@@ -6,18 +6,19 @@ use rust_cli_kernel_api::ids::{InteractionId, ToolUseId};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::ui::i18n::{EN, Lang};
+use crate::ui::i18n::Lang;
 use crate::ui::palette::{ColorLevel, Palette};
 use crate::ui::text::plain;
 
 fn permission() -> InteractionRequest {
     InteractionRequest::Permission {
-        machine: None,
+        machine: Default::default(),
         tool_use: ToolUseId::new("tu1"),
         tool: "Bash".into(),
         input: json!({"command": "rm -rf build", "description": "clean the build"}),
         message: "rm needs approval".into(),
         suggestions: Vec::new(),
+        rule_seed: None,
         asked_by: None,
     }
 }
@@ -44,14 +45,10 @@ fn answer(request: &InteractionRequest, keys: &[KeyCode]) -> Option<Value> {
     let start = Instant::now();
     let mut ui = Interaction::new(InteractionId::new("i1"), request, start);
     let at = start + Duration::from_millis(200);
-    keys.iter().find_map(|code| {
-        ui.on_key(
-            request,
-            KeyEvent::new(*code, KeyModifiers::NONE),
-            at,
-            Typing::default(),
-        )
-    })
+    // 比回答的 JSON（同前端交给内核之前的形状，工作线 F134 起回答是 `Answer`）。
+    keys.iter()
+        .find_map(|code| ui.on_key(request, KeyEvent::new(*code, KeyModifiers::NONE), at))
+        .map(|answer| serde_json::to_value(answer).unwrap())
 }
 
 fn chars(text: &str) -> Vec<KeyCode> {
@@ -87,15 +84,10 @@ fn keys_right_after_the_view_opens_are_ignored() {
     let start = Instant::now();
     let mut ui = Interaction::new(InteractionId::new("i1"), &request, start);
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    assert_eq!(ui.on_key(&request, enter, start, Typing::default()), None);
+    assert_eq!(ui.on_key(&request, enter, start), None);
     assert!(
-        ui.on_key(
-            &request,
-            enter,
-            start + Duration::from_millis(151),
-            Typing::default()
-        )
-        .is_some()
+        ui.on_key(&request, enter, start + Duration::from_millis(151))
+            .is_some()
     );
 }
 
@@ -148,7 +140,6 @@ fn views_show_the_request() {
     let palette = Palette::new(ColorLevel::Ansi16, None);
     let view = View {
         palette: &palette,
-        strings: &EN,
         lang: Lang::En,
         width: 60,
         height: 40,
@@ -177,12 +168,13 @@ fn views_show_the_request() {
     assert!(shown.iter().any(|l| l.contains("2. SQLite")));
     // Edit 的审批带 diff 预览。
     let edit = InteractionRequest::Permission {
-        machine: None,
+        machine: Default::default(),
         tool_use: ToolUseId::new("tu4"),
         tool: "Edit".into(),
         input: json!({"file_path": "/w/a.rs", "old_string": "a", "new_string": "b"}),
         message: String::new(),
         suggestions: Vec::new(),
+        rule_seed: None,
         asked_by: None,
     };
     let shown = text(&edit);
@@ -191,9 +183,10 @@ fn views_show_the_request() {
     assert!(shown.iter().any(|l| l.contains("make this edit to a.rs")));
 }
 
-fn bash_ask(command: &str, suggestions: &[&str]) -> InteractionRequest {
+/// 一个 Bash 询问；`seed` 是内核放进询问的“不再询问”种子（算法在 policy，`suggest_seed_tests.rs`）。
+fn bash_ask(command: &str, suggestions: &[&str], seed: Option<&str>) -> InteractionRequest {
     InteractionRequest::Permission {
-        machine: None,
+        machine: Default::default(),
         tool_use: ToolUseId::new("tu5"),
         tool: "Bash".into(),
         input: json!({ "command": command }),
@@ -205,19 +198,19 @@ fn bash_ask(command: &str, suggestions: &[&str]) -> InteractionRequest {
                 content: Some((*content).into()),
             })
             .collect(),
+        rule_seed: seed.map(str::to_owned),
         asked_by: None,
     }
 }
 
 fn suggested() -> InteractionRequest {
-    bash_ask("npm test", &["npm test *"])
+    bash_ask("npm test", &["npm test *"], Some("npm test *"))
 }
 
 fn shown(request: &InteractionRequest, lang: Lang) -> Vec<String> {
     let palette = Palette::new(ColorLevel::Ansi16, None);
     let view = View {
         palette: &palette,
-        strings: &EN,
         lang,
         width: 120,
         height: 40,
@@ -271,25 +264,24 @@ fn a_suggested_rule_adds_the_dont_ask_again_row() {
     );
 }
 
-/// 种子按询问框的规则算：第二个词不像子命令时只取命令名，不用判决链的精确规则。
+/// 这一行用询问里的种子，不用判决链的精确规则（种子怎么算是内核的事，tools `pipeline_tests.rs`）。
 #[test]
 fn the_seed_is_not_the_exact_suggestion() {
-    let request = bash_ask("git -C /repo status", &["git -C /repo status"]);
+    let request = bash_ask(
+        "git -C /repo status",
+        &["git -C /repo status"],
+        Some("git *"),
+    );
     assert_eq!(
         answer(&request, &[KeyCode::Down, KeyCode::Enter]),
         Some(remember("git *"))
-    );
-    let request = bash_ask("docker compose up -d", &["docker compose *"]);
-    assert_eq!(
-        answer(&request, &[KeyCode::Char('2')]),
-        Some(remember("docker compose up *"))
     );
 }
 
 /// 焦点在种子这一行时键入的字改种子（数字也是字），退格删字；`*` 是整个 Bash，空的只允许这一次。
 #[test]
 fn the_seed_row_is_editable() {
-    let request = bash_ask("npm test", &["npm test *"]);
+    let request = suggested();
     let mut keys = vec![KeyCode::Down];
     keys.extend([KeyCode::Backspace; 6]);
     keys.extend(chars("run 2 *"));
@@ -315,6 +307,7 @@ fn several_suggestions_are_listed() {
     let request = bash_ask(
         "mytool a && othertool b c",
         &["mytool a *", "othertool b *"],
+        None,
     );
     let lines = shown(&request, Lang::En);
     assert!(
@@ -335,19 +328,19 @@ fn several_suggestions_are_listed() {
 #[test]
 fn asks_of_closed_sessions_name_the_session() {
     let request = InteractionRequest::Permission {
-        machine: None,
+        machine: Default::default(),
         tool_use: ToolUseId::new("tu9"),
         tool: "Bash".into(),
         input: json!({"command": "mytool build"}),
         message: "This command requires approval".into(),
         suggestions: Vec::new(),
+        rule_seed: None,
         asked_by: Some("Explore".into()),
     };
     let palette = Palette::new(ColorLevel::Ansi16, None);
     let title = |origin: &str, lang: Lang| {
         let view = View {
             palette: &palette,
-            strings: &EN,
             lang,
             width: 120,
             height: 40,

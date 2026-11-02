@@ -15,17 +15,20 @@ mod stop;
 mod supervise;
 mod watch;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use futures_util::stream::BoxStream;
 use rust_cli_base::TaskScope;
 use rust_cli_base::secret::EnvSnapshot;
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvPath, OperationContext, Origin, Outcome, StartCommand, WorkspaceRef,
+    CommandEvent, CommandKind, EnvError, EnvPath, OperationContext, Origin, Outcome, StartCommand,
+    WorkspaceRef,
 };
+use rust_cli_kernel_api::env_command::EnvOverrides;
 use rust_cli_kernel_api::env_shell::{
     BackgroundKind, CwdScope, ShellKind, ShellNotice, ShellState,
 };
@@ -83,23 +86,29 @@ fn hook_shell(config: &ShellConfig) -> Result<PathBuf, EnvError> {
     Ok(PathBuf::from("/bin/bash"))
 }
 
-/// Monitor 的后台命令（工作线 F83）。
-/// 后台命令启动时的种类与说明：后台命令取 `background`，可能转后台的前台命令取 `on_timeout` 的（修复线 F117）。
+/// 后台命令启动时的种类与说明：后台命令（含 ws 来源的 monitor）取 `background`，可能转后台的前台命令取 `on_timeout` 的
+/// （修复线 F117）。
 fn registered(request: &StartCommand) -> (BackgroundKind, String) {
-    request
-        .background
-        .as_ref()
-        .or(request.on_timeout.as_ref().map(|moved| &moved.command))
-        .map_or_else(Default::default, |background| {
-            (background.kind, background.description.clone())
-        })
+    let background = match &request.kind {
+        CommandKind::Background { background } | CommandKind::Socket { background, .. } => {
+            Some(background)
+        }
+        CommandKind::Foreground { on_timeout } => on_timeout.as_ref().map(|moved| &moved.command),
+        CommandKind::Hook { .. } => None,
+    };
+    background.map_or_else(Default::default, |background| {
+        (background.kind, background.description.clone())
+    })
 }
 
-fn monitor(request: &StartCommand) -> bool {
-    request
-        .background
-        .as_ref()
-        .is_some_and(|background| background.kind == BackgroundKind::Monitor)
+/// 命令来源的 monitor（工作线 F83）：stdout 是事件流，另写一份。
+fn command_monitor(request: &StartCommand) -> bool {
+    matches!(&request.kind, CommandKind::Background { background } if background.kind == BackgroundKind::Monitor)
+}
+
+/// 到了超时（或被要求时）可以转到后台的前台命令（工作线 F69）。
+fn movable(request: &StartCommand) -> bool {
+    request.kind.on_timeout().is_some()
 }
 
 /// 输出文件的上限（docs/specs/rust-cli/shell-permissions.md §2.2“输出上限”，审查 R2-18）。
@@ -210,7 +219,7 @@ pub(crate) struct Shared {
 
 impl Shared {
     pub(crate) fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_unpoisoned()
     }
 }
 
@@ -285,15 +294,18 @@ impl Shells {
         context: OperationContext,
         request: StartCommand,
     ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        self.start_with(context, request, None).await
+        self.start_with(context, request, None, &EnvOverrides::new())
+            .await
     }
 
-    /// 起一条命令，返回它从游标 0 起的事件；`web` 是 ws 来源的 monitor 用的网络出口（工作线 F83）。
+    /// 起一条命令，返回它从游标 0 起的事件；`web` 是 ws 来源的 monitor 用的网络出口（工作线 F83）；`overrides` 是执行器
+    /// 按客户端实例推来的环境变量（F96，本机的调用是空的）。
     pub(crate) async fn start_with(
         &self,
         context: OperationContext,
         request: StartCommand,
         web: Option<Arc<rust_cli_net::Egress>>,
+        overrides: &EnvOverrides,
     ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
         if request.shell == ShellKind::PowerShell {
             return Err(EnvError::Unsupported {
@@ -301,12 +313,12 @@ impl Shells {
             });
         }
         // ws 来源的 monitor 不起进程（工作线 F83），不需要 shell。
-        let bash = if request.socket.is_some() {
-            PathBuf::new()
-        } else if request.hook.is_some() {
-            hook_shell(&self.config)?
-        } else {
-            self.config.bash.clone().ok_or_else(no_shell)?
+        let bash = match &request.kind {
+            CommandKind::Socket { .. } => PathBuf::new(),
+            CommandKind::Hook { .. } => hook_shell(&self.config)?,
+            CommandKind::Foreground { .. } | CommandKind::Background { .. } => {
+                self.config.bash.clone().ok_or_else(no_shell)?
+            }
         };
         let session = session_of(&context);
         let origin = PathBuf::from(request.cwd.as_str());
@@ -329,15 +341,21 @@ impl Shells {
             })?;
         let dir = self.task_outputs(&session);
         let shell_name = bash.to_string_lossy().into_owned();
-        let mut env = environ::project(&self.config.env, Some(&shell_name));
+        let mut env = environ::project(self.config.env.vars(), Some(&shell_name));
         // 执行器的服务端按客户端实例填的变量（远端执行 F96，remote-exec.md §23.5）：加在投影之后，`None` 是去掉。
-        environ::apply(&mut env, &request.env);
-        if let Some(hook) = &request.hook {
+        environ::apply(&mut env, overrides);
+        let hook = match &request.kind {
+            CommandKind::Hook { hook } => Some(hook),
+            CommandKind::Foreground { .. }
+            | CommandKind::Background { .. }
+            | CommandKind::Socket { .. } => None,
+        };
+        if let Some(hook) = hook {
             env.extend(hook.env.clone());
         }
         // 内嵌搜索工具的 prelude 只给 Bash 工具与 `!` 命令（hook 命令不加 prelude、不设本进程路径的变量）；
         // 环境的白名单投影不变，这个变量单独加。
-        let prelude = match (&request.hook, &self.config.embedded) {
+        let prelude = match (hook, &self.config.embedded) {
             (None, Some(search)) => {
                 env.insert(
                     embedded::EXECPATH.to_owned(),
@@ -350,11 +368,13 @@ impl Shells {
         let plan = supervise::Plan {
             output: dir.join(format!("{}.output", request.task)),
             // hook 命令的 stderr 单独写；ws 来源的 monitor 把生命周期写在这里（tools-more.md §19.7）。
-            errors: (request.hook.is_some() || request.socket.is_some())
-                .then(|| dir.join(format!("{}.stderr", request.task))),
+            errors: matches!(
+                request.kind,
+                CommandKind::Hook { .. } | CommandKind::Socket { .. }
+            )
+            .then(|| dir.join(format!("{}.stderr", request.task))),
             // 命令来源的 monitor：只有 stdout 是事件流，另写一份；输出文件里 stdout 与 stderr 都在（tools-more.md §19.5）。
-            events: (monitor(&request) && request.socket.is_none())
-                .then(|| dir.join(format!("{}.events", request.task))),
+            events: command_monitor(&request).then(|| dir.join(format!("{}.events", request.task))),
             cwd_file: dir.join(format!("{}.cwd", request.task)),
             dir,
             cwd,
@@ -363,7 +383,8 @@ impl Shells {
             bash,
             prelude,
         };
-        if let Some(socket) = request.socket.clone() {
+        if let CommandKind::Socket { socket, .. } = &request.kind {
+            let socket = socket.clone();
             return self.start_socket(context, request, socket, plan, session, web);
         }
         let (launched, mounted) =
@@ -380,7 +401,7 @@ impl Shells {
             backgrounded: signal::channel(false).0,
             moved_by: signal::channel(None).0,
             task: request.task.clone(),
-            movable: request.on_timeout.is_some() && request.background.is_none(),
+            movable: movable(&request),
             started: std::time::Instant::now(),
             kind,
             description,
@@ -390,7 +411,7 @@ impl Shells {
             state
                 .commands
                 .insert(context.operation.clone(), running.clone());
-            if request.background.is_some() {
+            if request.kind.background().is_some() {
                 let shell = state.sessions.entry(session.clone()).or_default();
                 shell
                     .background
@@ -439,7 +460,7 @@ impl Shells {
             backgrounded: signal::channel(false).0,
             moved_by: signal::channel(None).0,
             task: request.task.clone(),
-            movable: request.on_timeout.is_some() && request.background.is_none(),
+            movable: movable(&request),
             started: std::time::Instant::now(),
             kind,
             description,
@@ -449,7 +470,7 @@ impl Shells {
             state
                 .commands
                 .insert(context.operation.clone(), running.clone());
-            if request.background.is_some() {
+            if request.kind.background().is_some() {
                 let shell = state.sessions.entry(session.clone()).or_default();
                 shell
                     .background

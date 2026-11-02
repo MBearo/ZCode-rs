@@ -11,7 +11,7 @@ use super::words;
 use super::{Ctx, DETAIL, INDENT, bold, dim, more_lines};
 use crate::ui::palette::{ColorLevel, Rgb};
 use crate::ui::text::truncate_line;
-use crate::view::ToolRow;
+use crate::view::{ToolKind, ToolRow};
 
 /// 紧凑模式显示的 diff 行数。
 const COMPACT_LIMIT: usize = 20;
@@ -150,12 +150,12 @@ fn diff_text(old: &str, new: &str, out: &mut Vec<PatchRow>) {
 }
 
 /// 文件类工具的 diff 行（审批的改动预览也用它）。
-pub(crate) fn patch_rows(name: &str, input: &Value) -> Vec<PatchRow> {
+pub(crate) fn patch_rows(kind: ToolKind, input: &Value) -> Vec<PatchRow> {
     let text = |key: &str| input[key].as_str().unwrap_or_default();
     let mut out = Vec::new();
-    match name {
-        "Edit" => diff_text(text("old_string"), text("new_string"), &mut out),
-        "MultiEdit" => {
+    match kind {
+        ToolKind::Edit => diff_text(text("old_string"), text("new_string"), &mut out),
+        ToolKind::MultiEdit => {
             for (index, edit) in input["edits"].as_array().into_iter().flatten().enumerate() {
                 if index > 0 {
                     out.push(row('.', ""));
@@ -164,9 +164,25 @@ pub(crate) fn patch_rows(name: &str, input: &Value) -> Vec<PatchRow> {
                 diff_text(part("old_string"), part("new_string"), &mut out);
             }
         }
-        "Write" => out.extend(text("content").lines().map(|line| row('+', line))),
-        "NotebookEdit" => out.extend(text("new_source").lines().map(|line| row('+', line))),
-        _ => {}
+        ToolKind::Write => out.extend(text("content").lines().map(|line| row('+', line))),
+        ToolKind::NotebookEdit => {
+            out.extend(text("new_source").lines().map(|line| row('+', line)));
+        }
+        ToolKind::Bash
+        | ToolKind::Read
+        | ToolKind::Grep
+        | ToolKind::Glob
+        | ToolKind::List
+        | ToolKind::WebSearch
+        | ToolKind::WebFetch
+        | ToolKind::AskUserQuestion
+        | ToolKind::ExitPlanMode
+        | ToolKind::Agent
+        | ToolKind::TodoRead
+        | ToolKind::ToolSearch
+        | ToolKind::WaitForMcpServers
+        | ToolKind::Mcp
+        | ToolKind::Other => {}
     }
     pair(&mut out);
     out
@@ -200,7 +216,7 @@ pub(crate) fn edits_rows(edits: &[(String, Value)]) -> Vec<PatchRow> {
         if !out.is_empty() {
             out.push(row('.', ""));
         }
-        out.extend(patch_rows(name, input));
+        out.extend(patch_rows(ToolKind::of(name), input));
     }
     out
 }
@@ -262,7 +278,7 @@ fn counted(parts: Vec<words::Counted>) -> Line<'static> {
 }
 
 pub fn details(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    let rows = patch_rows(&tool.name, &tool.input);
+    let rows = patch_rows(tool.kind, &tool.input);
     let path = ["file_path", "notebook_path", "path"]
         .iter()
         .find_map(|key| tool.input[*key].as_str())
@@ -270,7 +286,7 @@ pub fn details(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
         .unwrap_or_default();
     let additions = rows.iter().filter(|row| row.sign == '+').count() as u64;
     let deletions = rows.iter().filter(|row| row.sign == '-').count() as u64;
-    let created = tool.name == "Write" && tool.display["type"] == "create";
+    let created = tool.kind == ToolKind::Write && tool.display["type"] == "create";
     let summary = if created {
         vec![words::wrote(ctx.lang, additions, &path)]
     } else {

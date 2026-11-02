@@ -9,67 +9,15 @@ use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
 use rust_cli_exec_client::ClientError;
 use rust_cli_exec_wire::BodyBuilder;
-use rust_cli_exec_wire::dto::mcp as wm;
 use rust_cli_exec_wire::envelope::{ReplyResult, StreamItem, WireError};
 use rust_cli_exec_wire::reply::Reply;
 use rust_cli_exec_wire::request::Request;
 use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::mcp::{
-    McpConnect, McpConnectionId, McpError, McpTransport, McpTransportConfig, McpTransportEvent,
+    McpConnect, McpConnectionId, McpError, McpTransport, McpTransportEvent,
 };
 
-use crate::{RemoteEnvironment, to_wire};
-
-fn transport(config: McpTransportConfig) -> wm::McpTransport {
-    match config {
-        McpTransportConfig::Stdio {
-            command,
-            args,
-            env,
-            cwd,
-        } => wm::McpTransport::Stdio {
-            command,
-            args,
-            env,
-            cwd,
-        },
-        McpTransportConfig::Sse { url, headers } => wm::McpTransport::Sse { url, headers },
-        McpTransportConfig::Http { url, headers } => wm::McpTransport::Http { url, headers },
-    }
-}
-
-fn event(event: wm::McpEvent) -> McpTransportEvent {
-    match event {
-        wm::McpEvent::Message { message } => McpTransportEvent::Message { message },
-        wm::McpEvent::Closed {
-            reason,
-            session_expired,
-        } => McpTransportEvent::Closed {
-            reason,
-            session_expired,
-        },
-    }
-}
-
-/// 线上错误的原文（执行器的 `Connect` / `Io` 是 `io`、`Closed` 是 `not_found`，§22.4）。
-fn text(error: &WireError) -> String {
-    match error {
-        WireError::Io { message } => message.clone(),
-        WireError::NotFound { path } => path.clone(),
-        other => other.to_string(),
-    }
-}
-
-/// `mcp.send` / `mcp.close` 的错误：连接不在了是 `Closed`，执行器没有这一能力是 `Unsupported`，其余是 `Io`。
-fn pipe_error(error: WireError) -> McpError {
-    match error {
-        WireError::NotFound { path } => McpError::Closed { message: path },
-        WireError::Unsupported { what } => McpError::Unsupported { what },
-        other => McpError::Io {
-            message: text(&other),
-        },
-    }
-}
+use crate::{RemoteEnvironment, from_wire, to_wire};
 
 /// 连接层的错误：执行器没报告 `mcp` 是 `Unsupported`，其余（断开、次数用完）是连接关了。
 fn client_error(error: ClientError) -> McpError {
@@ -107,20 +55,14 @@ impl RemoteEnvironment {
     ) -> Result<Vec<String>, McpError> {
         let request = Request::McpDeclare {
             workspace: to_wire::workspace(workspace),
-            servers: servers
-                .into_iter()
-                .map(|server| wm::McpDeclared {
-                    server: server.server,
-                    transport: transport(server.transport),
-                })
-                .collect(),
+            servers: servers.into_iter().map(to_wire::mcp_declared).collect(),
         };
         match self.mcp_call(request).await {
             Ok(Reply::McpDeclare { closed }) => Ok(closed),
             Ok(_) => Ok(Vec::new()),
             Err(Err(ClientError::Unsupported { .. })) => Ok(Vec::new()),
             Err(Err(error)) => Err(client_error(error)),
-            Err(Ok(wire)) => Err(pipe_error(wire)),
+            Err(Ok(wire)) => Err(from_wire::mcp_error(wire)),
         }
     }
 }
@@ -132,10 +74,11 @@ impl McpTransport for RemoteEnvironment {
         workspace: &WorkspaceRef,
         request: McpConnect,
     ) -> Result<McpConnectionId, McpError> {
+        let McpConnect { server, transport } = request;
         let request = Request::McpConnect {
             workspace: to_wire::workspace(workspace),
-            server: request.server,
-            transport: transport(request.transport),
+            server,
+            transport: to_wire::mcp_transport(transport),
         };
         match self.mcp_call(request).await {
             Ok(Reply::McpConnect { connection }) => Ok(McpConnectionId::new(connection)),
@@ -148,7 +91,7 @@ impl McpTransport for RemoteEnvironment {
                 message: error.to_string(),
             }),
             Err(Ok(wire)) => Err(McpError::Connect {
-                message: text(&wire),
+                message: from_wire::mcp_text(&wire),
             }),
         }
     }
@@ -165,7 +108,7 @@ impl McpTransport for RemoteEnvironment {
         match self.mcp_call(request).await {
             Ok(_) => Ok(()),
             Err(Err(error)) => Err(client_error(error)),
-            Err(Ok(wire)) => Err(pipe_error(wire)),
+            Err(Ok(wire)) => Err(from_wire::mcp_error(wire)),
         }
     }
 
@@ -183,8 +126,8 @@ impl McpTransport for RemoteEnvironment {
                 Ok(items) => items
                     .map(move |item| match item {
                         Ok(delivered) => match delivered.item {
-                            StreamItem::Mcp { event: found } => event(found),
-                            StreamItem::Error { error } => closed(text(&error)),
+                            StreamItem::Mcp { event } => from_wire::mcp_event(event),
+                            StreamItem::Error { error } => closed(from_wire::mcp_text(&error)),
                             other => closed(format!("unexpected MCP stream item {other:?}")),
                         },
                         Err(error) => closed(error.to_string()),
@@ -210,7 +153,7 @@ impl McpTransport for RemoteEnvironment {
         match self.mcp_call(request).await {
             Ok(_) => Ok(()),
             Err(Err(error)) => Err(client_error(error)),
-            Err(Ok(wire)) => Err(pipe_error(wire)),
+            Err(Ok(wire)) => Err(from_wire::mcp_error(wire)),
         }
     }
 }

@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use rust_cli_kernel_api::env::CommandKind;
 use rust_cli_kernel_api::env::{EnvError, StartCommand};
 use rust_cli_kernel_api::env_shell::{CwdScope, HookIo};
 
@@ -98,10 +99,12 @@ async fn hooks_keep_bin_bash_when_the_tool_shell_is_zsh() {
         &fixture.root,
         CwdScope::Pinned,
     );
-    start.hook = Some(HookIo {
-        stdin: "{}\n".to_owned(),
-        env: BTreeMap::new(),
-    });
+    start.kind = CommandKind::Hook {
+        hook: HookIo {
+            stdin: "{}\n".to_owned(),
+            env: BTreeMap::new(),
+        },
+    };
     assert_eq!(output(&fixture, "op1", start).await, "bash /bin/bash\n");
 }
 
@@ -122,9 +125,11 @@ async fn without_a_shell_commands_fail_with_the_fixed_text() {
     );
     // hook 命令不受影响（仍用 /bin/bash）。
     let mut hook = request("echo hook", &fixture.root, CwdScope::Pinned);
-    hook.hook = Some(HookIo {
-        stdin: String::new(),
-        env: BTreeMap::new(),
-    });
+    hook.kind = CommandKind::Hook {
+        hook: HookIo {
+            stdin: String::new(),
+            env: BTreeMap::new(),
+        },
+    };
     assert_eq!(output(&fixture, "op2", hook).await, "hook\n");
 }

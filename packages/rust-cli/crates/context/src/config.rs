@@ -2,6 +2,8 @@
 //!
 //! 由入口 crate 按进程形态与设置构造，经 runtime 传给 [`crate::PromptAssembler`]；不读进程环境。
 
+use rust_cli_kernel_api::env::EnvPath;
+
 /// 前端形态：`-p`（非交互）与 TUI 的提示词有差别。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
@@ -48,6 +50,9 @@ pub struct ContextConfig {
     pub custom_system_prompt: Option<String>,
     /// `--append-system-prompt`：接在 system prompt 最后一段之后（空行连接）。
     pub append_system_prompt: Option<String>,
+    /// `--add-dir`（cli-args.md §6）：主 env 上解析过的附加工作目录，环境段与嵌套规则文件的范围。它是会话的选择，
+    /// 不是执行环境的事实，所以由会话配置持有（deployment.md §21）；权限规则另外持有同一份。
+    pub additional_directories: Vec<EnvPath>,
 }
 
 impl ContextConfig {
@@ -59,6 +64,7 @@ impl ContextConfig {
             attribution: Attribution::default(),
             custom_system_prompt: None,
             append_system_prompt: None,
+            additional_directories: Vec::new(),
         }
     }
 }

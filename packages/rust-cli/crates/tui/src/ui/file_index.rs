@@ -115,12 +115,9 @@ impl FileIndex {
         }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.paths.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.paths.is_empty()
     }
 
     /// 模糊匹配（smart case），按分数从高到低，最多 `limit` 条；空查询给顶层条目。

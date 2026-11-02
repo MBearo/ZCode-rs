@@ -4,41 +4,20 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath, OperationContext, Origin, WorkspaceRef};
-use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, InteractionId, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
-};
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, PermissionGate,
-};
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, RunId, SessionId};
+use rust_cli_kernel_api::orchestration::PermissionGate;
 use rust_cli_kernel_api::permission::{PermissionDecision, PermissionMode, RuleBehavior};
-use rust_cli_kernel_api::testing::{MemoryEnvironment, MemoryStore, local_services, machine};
+use rust_cli_kernel_api::testing::{MemoryEnvironment, controller_services, machine};
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
 };
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 use crate::test_support::rules;
 use crate::{PolicyGate, PolicyOptions, texts};
 
 const PLAN: &str = "/w/.zcode/plans/plan-s1.md";
-
-struct NoAnswers;
-
-#[async_trait]
-impl Interactions for NoAnswers {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        _request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i"),
-            answer: json!({"decision": "unavailable"}),
-        })
-    }
-}
 
 /// 没有自身检查的内置文件工具（Write / Edit / Read）。
 struct Builtin(&'static str);
@@ -53,6 +32,12 @@ impl Tool for Builtin {
     }
     fn description(&self, _context: &PromptContext) -> String {
         String::new()
+    }
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        crate::test_support::subject_of(self.0, input)
     }
     async fn call(
         &self,
@@ -73,35 +58,32 @@ fn context(mode: PermissionMode, home: Option<&str>) -> ToolUseContext {
         os_version: "Linux 6.8.0".to_owned(),
         shell: "bash".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: home.map(EnvPath::new),
+        uid: None,
     }));
     let session = SessionId::new("s1");
     ToolUseContext {
         session: session.clone(),
         run: RunId::new("r1"),
-        tool_use: ToolUseId::new("toolu_1"),
-        agent: None,
         workspace: WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/w"),
         },
         mode,
-        cancel: CancellationToken::new(),
         machine: machine(env.clone()),
-        local: local_services(env),
-        artifacts: Arc::new(MemoryStore::default()),
-        interactions: Arc::new(NoAnswers),
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g1"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op_1"),
-            origin: Origin::Agent {
+        controller: controller_services(env),
+        interactions: Arc::new(rust_cli_kernel_api::testing::NoOneToAsk),
+        session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g1"),
+            OperationId::new("op_1"),
+            Origin::Agent {
                 session,
                 run: RunId::new("r1"),
             },
-        },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -167,10 +149,7 @@ async fn other_writes_stay_blocked_in_plan_mode() {
     ] {
         assert_eq!(
             decide(&gate, "Write", path, PermissionMode::Plan).await,
-            PermissionDecision::Ask {
-                message: texts::file_sensitive(path),
-                suggestions: Vec::new(),
-            },
+            PermissionDecision::ask(texts::file_sensitive(path), Vec::new()),
             "{path}"
         );
     }
@@ -184,10 +163,10 @@ async fn without_the_classifier_plan_mode_asks_with_the_plan_mode_text() {
     let decision = decide(&gate, "Write", "/w/src/a.rs", PermissionMode::Plan).await;
     assert_eq!(
         decision,
-        PermissionDecision::Ask {
-            message: "Cannot write to /w/src/a.rs while in plan mode.".to_owned(),
-            suggestions: Vec::new(),
-        }
+        PermissionDecision::ask(
+            "Cannot write to /w/src/a.rs while in plan mode.",
+            Vec::new()
+        )
     );
 }
 
@@ -224,9 +203,6 @@ async fn deny_and_ask_rules_still_apply_to_the_plan_file() {
     );
     assert_eq!(
         decide(&asked, "Write", PLAN, PermissionMode::Plan).await,
-        PermissionDecision::Ask {
-            message: texts::file_write_request(PLAN),
-            suggestions: Vec::new(),
-        }
+        PermissionDecision::ask(texts::file_write_request(PLAN), Vec::new())
     );
 }

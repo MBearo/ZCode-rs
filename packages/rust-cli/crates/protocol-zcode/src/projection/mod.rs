@@ -4,20 +4,21 @@
 //! 行：turnHeader（回合）、userInput（真人输入）、assistantText、reasoning、toolCall；其余事件只改状态或忽略（P1）。
 
 mod cold;
+mod kinds;
 mod rows;
 pub mod state;
 
 use std::collections::HashMap;
 
-use rust_cli_kernel_api::message::{ContentBlock, ToolResultContent, Usage};
+use rust_cli_kernel_api::message::{ContentBlock, Usage, text_of as text_of_result};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{
     KernelEvent, QueuedInput, SequencedEvent, SessionView, TurnOutcome,
 };
-use rust_cli_kernel_api::tool::ToolOutput;
 use serde_json::{Map, Value, json};
 
+use kinds::{RowKind, ToolStatus};
 use state::{ActiveWork, Followup, LastError, Phase};
 
 /// 快照里最多带的行（尾部窗口）。
@@ -77,24 +78,19 @@ pub struct Projection {
     created_at: u64,
 }
 
-fn text_of(content: &[ContentBlock]) -> String {
+/// user 与 assistant 消息里的文字块，以换行接起来（`session/read` 的旧快照也用它）。
+pub(crate) fn text_of(content: &[ContentBlock]) -> String {
     content
         .iter()
         .filter_map(|block| match block {
             ContentBlock::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn output_text(output: &ToolOutput) -> String {
-    output
-        .content
-        .iter()
-        .filter_map(|block| match block {
-            ToolResultContent::Text { text } => Some(text.as_str()),
-            _ => None,
+            ContentBlock::Image { .. }
+            | ContentBlock::Thinking { .. }
+            | ContentBlock::RedactedThinking { .. }
+            | ContentBlock::ToolUse { .. }
+            | ContentBlock::ToolResult { .. }
+            | ContentBlock::ServerToolUse { .. }
+            | ContentBlock::WebSearchToolResult { .. } => None,
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -104,8 +100,8 @@ fn turn_key(turn: &str) -> String {
     format!("turn:{turn}")
 }
 
-fn block_key(kind: &str, turn: &str, response: u32, index: usize) -> String {
-    format!("{kind}:{turn}:{response}:{index}")
+fn block_key(kind: RowKind, turn: &str, response: u32, index: usize) -> String {
+    format!("{}:{turn}:{response}:{index}", kind.as_str())
 }
 
 fn tool_key(tool_use: &str) -> String {
@@ -169,7 +165,7 @@ impl Projection {
     /// 最后一条 assistant 正文（会话列表的预览）。
     pub fn last_reply(&self) -> Option<String> {
         self.rows.iter().rev().find_map(|row| {
-            (row["kind"] == "assistantText")
+            (RowKind::of(row) == Some(RowKind::AssistantText))
                 .then(|| row["text"].as_str().map(str::to_owned))
                 .flatten()
         })
@@ -212,7 +208,7 @@ impl Projection {
         &self,
         key_turn: &str,
         entity: &str,
-        kind: &str,
+        kind: RowKind,
         now: u64,
         seq: u64,
     ) -> Map<String, Value> {
@@ -224,7 +220,7 @@ impl Projection {
         row.insert("visibility".into(), json!("visible"));
         row.insert("createdAt".into(), json!(now));
         row.insert("createdAtSeq".into(), json!(seq));
-        row.insert("kind".into(), json!(kind));
+        row.insert("kind".into(), json!(kind.as_str()));
         row
     }
 
@@ -310,8 +306,8 @@ impl Projection {
                 self.upsert(
                     &key,
                     |row| {
-                        if row["status"] != "pendingApproval" {
-                            row.insert("status".into(), json!("running"));
+                        if ToolStatus::of(row) != Some(ToolStatus::PendingApproval) {
+                            row.insert("status".into(), json!(ToolStatus::Running.as_str()));
                         }
                         row.entry("startedAt").or_insert(json!(now));
                     },
@@ -319,18 +315,18 @@ impl Projection {
                 );
             }
             KernelEvent::ToolDone { tool_use, output } => {
-                let text = output_text(output);
+                let text = text_of_result(&output.content);
                 let status = if self.denied.remove(tool_use.as_str()) {
-                    "cancelled"
+                    ToolStatus::Cancelled
                 } else if output.is_error {
-                    "error"
+                    ToolStatus::Error
                 } else {
-                    "success"
+                    ToolStatus::Success
                 };
                 self.upsert(
                     &tool_key(tool_use.as_str()),
                     |row| {
-                        row.insert("status".into(), json!(status));
+                        row.insert("status".into(), json!(status.as_str()));
                         row.insert("output".into(), json!({"text": text}));
                         row.insert("endedAt".into(), json!(now));
                         row.remove("approvalInteractionId");
@@ -347,7 +343,10 @@ impl Projection {
                     self.upsert(
                         &tool_key(&tool),
                         |row| {
-                            row.insert("status".into(), json!("pendingApproval"));
+                            row.insert(
+                                "status".into(),
+                                json!(ToolStatus::PendingApproval.as_str()),
+                            );
                             row.insert("approvalInteractionId".into(), json!(id));
                         },
                         &mut out,
@@ -373,8 +372,8 @@ impl Projection {
                     self.upsert(
                         &tool_key(&tool),
                         |row| {
-                            if row["status"] == "pendingApproval" {
-                                row.insert("status".into(), json!("running"));
+                            if ToolStatus::of(row) == Some(ToolStatus::PendingApproval) {
+                                row.insert("status".into(), json!(ToolStatus::Running.as_str()));
                             }
                         },
                         &mut out,
@@ -426,7 +425,23 @@ impl Projection {
                     patch.insert("queue".into(), after);
                 }
             }
-            _ => {}
+            // 不改 App 的行与状态的事件（P1）。显式列出：内核加了事件时这里编译失败，要当场决定投不投（审查 E9）。
+            KernelEvent::SessionCreated { .. }
+            | KernelEvent::ToolProgress { .. }
+            | KernelEvent::FileChanges { .. }
+            | KernelEvent::ContextNotice { .. }
+            | KernelEvent::OutputSpeed { .. }
+            | KernelEvent::TasksChanged { .. }
+            | KernelEvent::BackgroundWork { .. }
+            | KernelEvent::CompactStarted { .. }
+            | KernelEvent::CompactDone { .. }
+            | KernelEvent::HistoryRewritten { .. }
+            | KernelEvent::ScheduledFire { .. }
+            | KernelEvent::SystemNotice { .. }
+            | KernelEvent::WorkspaceChanged { .. }
+            | KernelEvent::PeerHeldChanged { .. }
+            | KernelEvent::TurnDuration(_)
+            | KernelEvent::ModelNotice { .. } => {}
         }
         if event.revision != self.revision {
             self.revision = event.revision;
@@ -461,8 +476,8 @@ impl Projection {
             response: None,
             keys: Vec::new(),
         });
-        let mut row = self.base(turn, turn, "turnHeader", now, seq);
-        row.insert("origin".into(), json!("userInput"));
+        let mut row = self.base(turn, turn, RowKind::TurnHeader, now, seq);
+        row.insert("origin".into(), json!(RowKind::UserInput.as_str()));
         row.insert("executionKind".into(), json!("agent"));
         if let Some(command) = &command {
             row.insert("sourceCommandId".into(), json!(command));
@@ -481,10 +496,13 @@ impl Projection {
         out: &mut Vec<Value>,
     ) {
         if let Some(usage) = usage {
-            state::add_usage(&mut self.total, usage);
+            self.total += *usage;
         }
         let (header, row_state, phase) = match outcome {
-            TurnOutcome::Success => ("completedSuccess", "complete", Phase::CompletedSuccess),
+            // 工具的 hook 要求停止、Stop hook 阻止继续都不是失败，按成功结束投影（query.md §3，工作线 F131、F134）。
+            TurnOutcome::Success | TurnOutcome::HookStopped | TurnOutcome::StopHookPrevented => {
+                ("completedSuccess", "complete", Phase::CompletedSuccess)
+            }
             TurnOutcome::Interrupted => (
                 "completedInterrupted",
                 "interrupted",
@@ -505,29 +523,30 @@ impl Projection {
         for key in &keys {
             self.upsert(
                 key,
-                |row| match row["kind"].as_str() {
-                    Some("assistantText") if row["state"] == "streaming" => {
-                        row.insert("state".into(), json!(row_state));
+                |row| match RowKind::of(row) {
+                    Some(RowKind::AssistantText) => {
+                        if row["state"] == "streaming" {
+                            row.insert("state".into(), json!(row_state));
+                        }
                     }
-                    Some("reasoning") if row["state"] == "streaming" => {
-                        let reasoning = if row_state == "failed" {
-                            "interrupted"
-                        } else {
-                            row_state
-                        };
-                        row.insert("state".into(), json!(reasoning));
+                    Some(RowKind::Reasoning) => {
+                        if row["state"] == "streaming" {
+                            let reasoning = if row_state == "failed" {
+                                "interrupted"
+                            } else {
+                                row_state
+                            };
+                            row.insert("state".into(), json!(reasoning));
+                        }
                     }
-                    Some("toolCall")
-                        if matches!(
-                            row["status"].as_str(),
-                            Some("inputStreaming" | "pendingApproval" | "running")
-                        ) =>
-                    {
-                        row.insert("status".into(), json!("cancelled"));
-                        row.remove("approvalInteractionId");
-                        row.insert("endedAt".into(), json!(now));
+                    Some(RowKind::ToolCall) => {
+                        if ToolStatus::of(row).is_some_and(ToolStatus::is_open) {
+                            row.insert("status".into(), json!(ToolStatus::Cancelled.as_str()));
+                            row.remove("approvalInteractionId");
+                            row.insert("endedAt".into(), json!(now));
+                        }
                     }
-                    _ => {}
+                    Some(RowKind::TurnHeader | RowKind::UserInput) | None => {}
                 },
                 out,
             );

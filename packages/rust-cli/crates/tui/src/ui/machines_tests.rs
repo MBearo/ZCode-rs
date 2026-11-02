@@ -2,32 +2,20 @@
 //! 的机器、错误的说明。界面状态在 `App` 里，这里不起事件循环（端到端的在 suite 的 `machines_more.rs`）。
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use rust_cli_kernel_api::ids::{InteractionId, SessionId, ToolUseId};
 use rust_cli_kernel_api::orchestration::{DetachedAsk, DetachedEvent, InteractionRequest};
-use rust_cli_kernel_api::permission::{PermissionMode, PermissionRule};
-use rust_cli_kernel_api::testing::selection;
+use rust_cli_kernel_api::permission::PermissionRule;
 use serde_json::json;
 
 use super::*;
 use crate::machines::{ConnectStep, ExecutorInfo};
-use crate::ui::i18n::{EN, Lang};
+use crate::ui::i18n::Lang;
 use crate::ui::interaction_view::View;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::view::Transcript;
+use crate::ui::test_support::key;
 
 fn app(lang: Lang) -> App {
-    let mut app = App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        lang,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    );
+    let mut app = crate::ui::test_support::app_in(lang);
     app.machines_enabled = true;
     app
 }
@@ -49,10 +37,6 @@ fn waiting() -> MachineStatus {
         retry_at_ms: Some(16_000),
         reason: "cannot reach the executor: link io error: executor exited (exit status: 255): ssh: connect to host 127.0.0.1 port 51110: Connection refused".into(),
     }
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
 }
 
 fn plain(lines: &[Line<'static>]) -> Vec<String> {
@@ -168,8 +152,9 @@ fn ask(tool: &str, input: serde_json::Value, machine: Option<&str>) -> DetachedE
                         content: Some("awk:*".into()),
                     },
                 ],
+                rule_seed: None,
                 asked_by: None,
-                machine: machine.map(str::to_owned),
+                machine: rust_cli_kernel_api::ids::MachineName::new(machine.unwrap_or_default()),
             },
         }),
     }
@@ -181,7 +166,6 @@ fn ask_lines(app: &mut App) -> Vec<String> {
     let request = request.clone();
     let view = View {
         palette: &app.palette,
-        strings: &EN,
         lang: app.lang,
         width: 120,
         height: 40,

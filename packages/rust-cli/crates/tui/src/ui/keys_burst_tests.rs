@@ -3,16 +3,11 @@
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::Delivery;
-use rust_cli_kernel_api::testing::selection;
 
 use super::super::app::{Action, App, Overlay};
 use super::super::composer::InputMode;
 use crate::os::{Os, WindowsRelease};
-use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::view::Transcript;
 
 const WINDOWS: Os = Os::Windows(Some(WindowsRelease {
     major: 10,
@@ -20,17 +15,7 @@ const WINDOWS: Os = Os::Windows(Some(WindowsRelease {
 }));
 
 fn app(os: Os) -> App {
-    let mut app = App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    );
+    let mut app = crate::ui::test_support::app();
     app.set_os(os);
     app.composer.skills_loaded = true;
     app
@@ -267,4 +252,38 @@ fn other_platforms_keep_the_old_behavior() {
     );
     app.on_terminal_key(up, last + ms(20));
     assert_eq!(app.composer.area.text(), "two");
+}
+
+/// 架构整理 U9（tui-input.md §9.1）：Windows 的 AltGr（crossterm 报成 Ctrl+Alt 加字符）在入口归一成普通字符，之后
+/// 每个面板都只看普通修饰键。修前产品路径上看不出差别（paste burst 把扣住的 ASCII 字符去掉修饰键再交出），但不经
+/// burst 的入口（`on_key`）与 burst 原样放行的键（非 ASCII 字符）带着 Ctrl+Alt 进面板：10 处直接读 `CONTROL` 的地方
+/// 把它当 ctrl（Ctrl+Alt+c 关掉 Background 面板），读 `Typing` 的地方当文字。
+#[test]
+fn ctrl_alt_characters_are_text_in_every_panel_on_windows() {
+    let altgr = KeyEvent::new(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    );
+    let mut app = app(WINDOWS);
+    app.open_background();
+    app.on_key(altgr, Instant::now());
+    assert!(
+        matches!(app.overlay, Some(Overlay::Background(_))),
+        "AltGr+c is a character, not ctrl+c"
+    );
+    // 经 paste burst 的入口结果相同。
+    app.on_terminal_key(altgr, Instant::now());
+    settle(&mut app);
+    assert!(matches!(app.overlay, Some(Overlay::Background(_))));
+    // 真的 ctrl+c 照旧关闭。
+    app.on_key(
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        Instant::now(),
+    );
+    assert!(app.overlay.is_none());
+    // 其他平台：Ctrl+Alt+c 仍是 ctrl 组合，照旧关闭。
+    let mut unix = self::app(Os::Unix);
+    unix.open_background();
+    unix.on_key(altgr, Instant::now());
+    assert!(unix.overlay.is_none());
 }

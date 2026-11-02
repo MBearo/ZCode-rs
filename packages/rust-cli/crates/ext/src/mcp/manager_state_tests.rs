@@ -10,7 +10,9 @@ use rust_cli_kernel_api::mcp::McpTransportConfig;
 use serde_json::json;
 
 use super::*;
-use crate::clock_tests::TokioClock;
+use rust_cli_kernel_api::testing::TokioClock;
+
+use crate::clock_tests::clock;
 use crate::mcp::config::{McpServerOptions, McpSettings};
 use crate::mcp::startup::McpStartup;
 use crate::mcp::{McpScope, McpServer};
@@ -21,23 +23,15 @@ fn config(name: &str, always_load: bool, remote: bool) -> McpServer {
         name: name.to_owned(),
         scope: McpScope::Project,
         transport: if remote {
-            McpTransportConfig::Http {
-                url: "https://mcp.example.com/mcp".to_owned(),
-                headers: Default::default(),
-            }
+            McpTransportConfig::http("https://mcp.example.com/mcp".to_owned(), Default::default())
         } else {
-            McpTransportConfig::Stdio {
-                command: "node".to_owned(),
-                args: Vec::new(),
-                env: Default::default(),
-                cwd: None,
-            }
+            McpTransportConfig::stdio("node".to_owned(), Vec::new())
         },
         options: McpServerOptions {
             timeout_ms: None,
             always_load,
         },
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -70,7 +64,7 @@ struct Rig {
 fn rig(fake: FakeMcp, startup: McpStartup, servers: Vec<McpServer>) -> Rig {
     let fake = Arc::new(fake);
     let scope = TaskScope::root("test", |_| {});
-    let clock = TokioClock::new();
+    let clock = clock();
     let settings = McpSettings {
         startup,
         ..McpSettings::default()
@@ -315,7 +309,7 @@ async fn a_direct_call_waits_at_most_ten_seconds_or_mcp_timeout() {
                 connect_timeout_ms,
                 ..McpSettings::default()
             },
-            TokioClock::new(),
+            clock(),
         )
     };
     assert_eq!(manager(30_000).tool_wait_ms(), 10_000);

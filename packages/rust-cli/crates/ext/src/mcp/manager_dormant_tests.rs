@@ -18,14 +18,9 @@ fn stdio(name: &str) -> McpServer {
     McpServer {
         name: name.to_owned(),
         scope: McpScope::Project,
-        transport: McpTransportConfig::Stdio {
-            command: "node".to_owned(),
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-        },
+        transport: McpTransportConfig::stdio("node".to_owned(), Vec::new()),
         options: Default::default(),
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -67,7 +62,7 @@ async fn started(print: bool) -> (Arc<FakeMcp>, McpManager, TaskScope) {
         fake.clone(),
         scope.spawner(),
         McpSettings::default(),
-        crate::clock_tests::TokioClock::new(),
+        crate::clock_tests::clock(),
     );
     manager.set_print_session(print);
     manager.start(workspace(), vec![stdio("files")]);
@@ -90,8 +85,15 @@ async fn a_print_session_keeps_a_closed_stdio_server_and_reconnects_on_the_next_
     while manager.0.client("files").is_some() {
         changes.changed().await.unwrap();
     }
-    // 工具与状态不变：模型看不到断开。
-    assert_eq!(manager.status()[0].1, McpStatus::Connected);
+    // 工具与状态不变：模型看不到断开（仍是 Connected，只标记等下次调用）。
+    assert_eq!(
+        manager.status()[0].1,
+        McpStatus::Connected { dormant: true }
+    );
+    assert_eq!(
+        manager.server_infos()[0].state,
+        rust_cli_kernel_api::manage::McpServerState::Connected
+    );
     assert_eq!(names(&manager), ALL);
     let read = manager.find("mcp__files__read").unwrap();
     let context = tool_context(

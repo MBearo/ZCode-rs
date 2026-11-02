@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use rust_cli_base::clock::SystemClock;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{
@@ -31,7 +32,7 @@ use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::store::{
     Fact, FactBatch, SessionFilter, SessionKind, SessionMeta, SessionStore,
 };
-use rust_cli_node_store::{LOCAL_ENVIRONMENT, NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{LOCAL_ENVIRONMENT, NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use serde_json::{Value, json};
 use tokio::runtime::Runtime;
@@ -128,12 +129,7 @@ async fn create(store: &NodeStore) -> Result<SessionId> {
             created_at_ms: now_ms(),
         })
         .await?;
-    let selection = ModelSelection {
-        provider: "p".into(),
-        model: "m".into(),
-        reasoning: None,
-        connection: None,
-    };
+    let selection = ModelSelection::new("p", "m");
     let facts = vec![
         Fact::ModelSelected { selection },
         Fact::ModeChanged {

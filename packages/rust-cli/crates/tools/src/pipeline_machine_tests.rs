@@ -1,22 +1,19 @@
 //! 执行管线的机器路由（remote-exec.md §20.6、§20.8）：按 `machine` 选机器与工作区，不带参数的工具回到本机，hooks
 //! 用会话的工作区并带 `machine`，询问带 `machine`。
 
+use rust_cli_kernel_api::ids::MachineName;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::{EnvPath, OperationContext, Origin, WorkspaceRef};
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry as _;
 use rust_cli_kernel_api::hooks::{HookEvent, HookOutcome};
-use rust_cli_kernel_api::ids::{
-    EnvironmentId, Generation, InteractionId, OperationId, OwnerEpoch, RunId, SessionId, ToolUseId,
-};
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation, OperationId, RunId, SessionId};
 use rust_cli_kernel_api::machine::MachineEnv;
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError,
-};
-use rust_cli_kernel_api::permission::PermissionMode;
+use rust_cli_kernel_api::machine_param::MachineParam;
+use rust_cli_kernel_api::orchestration::InteractionRequest;
 use rust_cli_kernel_api::testing::{
-    MemoryStore, TestMachines, UnusedEnvironment, local_services, machine,
+    ScriptedInteractions, TestMachines, UnusedEnvironment, machine,
 };
 use rust_cli_kernel_api::tool::PromptContext;
 use serde_json::json;
@@ -37,6 +34,14 @@ impl Tool for Where {
     }
     fn strips_unknown_keys(&self) -> bool {
         self.0 == "Agent"
+    }
+    /// 同名的真实工具怎样用 `machine` 参数（Bash 在那台机器上执行，Agent 交给它，WebFetch 不带）。
+    fn machine_param(&self) -> MachineParam {
+        match self.0 {
+            "Bash" => MachineParam::RunsThere,
+            "Agent" => MachineParam::Delegates,
+            _ => MachineParam::Absent,
+        }
     }
     fn description(&self, _context: &PromptContext) -> String {
         String::new()
@@ -72,19 +77,25 @@ struct Gate {
 impl PermissionGate for Gate {
     async fn decide(&self, _t: &dyn Tool, _i: &Value, c: &ToolUseContext) -> PermissionDecision {
         self.seen.lock().unwrap().push((
-            c.machine.name().to_owned(),
+            c.machine.name().as_str().to_owned(),
             c.workspace.root.as_str().to_owned(),
         ));
         if self.ask {
-            PermissionDecision::Ask {
-                message: "May I?".to_owned(),
-                suggestions: Vec::new(),
-            }
+            PermissionDecision::ask("May I?", Vec::new())
         } else {
             PermissionDecision::Allow {
                 updated_input: None,
             }
         }
+    }
+    async fn local_rules_committed(&self, _w: &WorkspaceRef) {}
+    async fn check_rules(
+        &self,
+        _t: &dyn Tool,
+        _i: &Value,
+        _c: &ToolUseContext,
+    ) -> Option<PermissionDecision> {
+        None
     }
 }
 
@@ -99,52 +110,25 @@ impl HookRunner for Hooks {
     }
 }
 
-#[derive(Default)]
-struct Asked(Mutex<Vec<Option<String>>>);
-
-#[async_trait]
-impl Interactions for Asked {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        if let InteractionRequest::Permission { machine, .. } = request {
-            self.0.lock().unwrap().push(machine);
-        }
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("i1"),
-            answer: json!({"decision": "allow"}),
-        })
-    }
-}
-
-fn context(asked: Arc<Asked>, on: MachineEnv) -> ToolUseContext {
+fn context(asked: Arc<ScriptedInteractions>, on: MachineEnv) -> ToolUseContext {
     ToolUseContext {
-        session: SessionId::new("sess_1"),
-        run: RunId::new("run_1"),
-        tool_use: ToolUseId::new("toolu_1"),
-        agent: None,
         workspace: WorkspaceRef {
             environment: EnvironmentId::new("local"),
             root: EnvPath::new("/work"),
         },
-        mode: PermissionMode::Default,
-        cancel: CancellationToken::new(),
         machine: on,
-        local: local_services(Arc::new(UnusedEnvironment)),
-        artifacts: Arc::new(MemoryStore::default()),
         interactions: asked,
-        operation: OperationContext {
-            environment: EnvironmentId::new("local"),
-            generation: Generation::new("g1"),
-            owner_epoch: OwnerEpoch::LOCAL,
-            operation: OperationId::new("op_1"),
-            origin: Origin::Agent {
+        session_ops: Arc::new(rust_cli_kernel_api::testing::NoSession),
+        operation: OperationContext::new(
+            EnvironmentId::new("local"),
+            Generation::new("g1"),
+            OperationId::new("op_1"),
+            Origin::Agent {
                 session: SessionId::new("sess_1"),
                 run: RunId::new("run_1"),
             },
-        },
+        ),
+        ..rust_cli_kernel_api::testing::tool_use_context()
     }
 }
 
@@ -168,7 +152,7 @@ async fn run(
         seen: Mutex::default(),
     });
     let hooks = Arc::new(Hooks::default());
-    let asked = Arc::new(Asked::default());
+    let asked = Arc::new(ScriptedInteractions::allowing());
     let mut pipeline = Pipeline::new(gate.clone(), hooks.clone());
     if let Some(registry) = registry {
         pipeline = pipeline.with_machines(registry);
@@ -182,7 +166,8 @@ async fn run(
             context(asked.clone(), on),
             progress,
         )
-        .await;
+        .await
+        .output;
     let text = match &output.content[0] {
         ToolResultContent::Text { text } => text.clone(),
         other => panic!("{other:?}"),
@@ -192,7 +177,16 @@ async fn run(
         is_error: output.is_error,
         judged: gate.seen.lock().unwrap().clone(),
         events: hooks.0.lock().unwrap().drain(..).collect(),
-        asked: asked.0.lock().unwrap().clone(),
+        asked: asked
+            .asked()
+            .into_iter()
+            .filter_map(|request| match request {
+                InteractionRequest::Permission { machine, .. } => {
+                    Some(machine.remote().map(str::to_owned))
+                }
+                _ => None,
+            })
+            .collect(),
     }
 }
 
@@ -230,13 +224,15 @@ async fn a_call_naming_a_machine_runs_there_with_its_workspace() {
 }
 
 #[tokio::test]
-async fn omitting_the_machine_or_naming_local_stays_local() {
+async fn omitting_the_machine_or_naming_the_primary_stays_on_it() {
+    // 以前的名字 `local` 也指主 env（旧会话里照着历史写的调用，deployment.md §23）。
     for input in [
         json!({"command": "pwd"}),
+        json!({"command": "pwd", "machine": "primary"}),
         json!({"command": "pwd", "machine": "local"}),
     ] {
         let ran = run(Some(dev_a()), "Bash", input, None, false).await;
-        assert_eq!(ran.text, r#"local /work {"command":"pwd"}"#);
+        assert_eq!(ran.text, r#"primary /work {"command":"pwd"}"#);
         // 本机调用的 hooks 输入不变：没有 `machine`。
         assert!(ran.events[0].payload.get("machine").is_none());
     }
@@ -275,11 +271,11 @@ async fn without_remote_machines_nothing_changes() {
             false,
         )
         .await;
-        assert_eq!(ran.text, r#"local /work {"command":"pwd"}"#);
+        assert_eq!(ran.text, r#"primary /work {"command":"pwd"}"#);
         let ran = run(
             registry,
             "Bash",
-            json!({"command": "pwd", "machine": "local"}),
+            json!({"command": "pwd", "machine": "primary"}),
             None,
             false,
         )
@@ -305,7 +301,7 @@ async fn a_disconnected_default_machine_is_reported() {
     assert_eq!(
         ran.text,
         // F96（remote-exec.md §23.6）：写明没有执行、下一步做什么。
-        "<tool_use_error>Machine \"dev-a\" is not connected, so this call did not run. Retry once it is connected again, or run it on the local machine instead.</tool_use_error>"
+        "<tool_use_error>Machine \"dev-a\" is not connected, so this call did not run. Retry once it is connected again, or omit `machine` to run it on the default machine instead.</tool_use_error>"
     );
 }
 
@@ -313,7 +309,7 @@ async fn a_disconnected_default_machine_is_reported() {
 async fn tools_without_the_parameter_run_locally() {
     // 子代理在 dev-a 上：WebFetch 一类的工具仍在本机。
     let registry = dev_a();
-    let remote = registry.machine("dev-a").unwrap();
+    let remote = registry.machine(&MachineName::new("dev-a")).unwrap();
     let ran = run(
         Some(registry),
         "WebFetch",
@@ -322,7 +318,7 @@ async fn tools_without_the_parameter_run_locally() {
         false,
     )
     .await;
-    assert_eq!(ran.text, r#"local /work {"command":"x"}"#);
+    assert_eq!(ran.text, r#"primary /work {"command":"x"}"#);
 }
 
 #[tokio::test]
@@ -369,7 +365,7 @@ async fn the_permission_question_names_the_machine() {
 }
 
 /// F96 的“没有执行”说明（remote-exec.md §23.6）。
-const NOT_CONNECTED: &str = "<tool_use_error>Machine \"dev-a\" is not connected, so this call did not run. Retry once it is connected again, or run it on the local machine instead.</tool_use_error>";
+const NOT_CONNECTED: &str = "<tool_use_error>Machine \"dev-a\" is not connected, so this call did not run. Retry once it is connected again, or omit `machine` to run it on the default machine instead.</tool_use_error>";
 
 #[tokio::test]
 async fn a_listed_machine_that_is_not_connected_did_not_run() {

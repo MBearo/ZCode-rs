@@ -2,13 +2,11 @@
 
 use std::sync::Arc;
 
-use rust_cli_kernel_api::permission::{
-    PermissionMode, PermissionRules, RuleBehavior, RuleSource, SourcedRule,
-};
+use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::testing::{MemoryEnvironment, SequentialIds};
 
 use super::*;
-use crate::test_support::{EchoBash, facts, tool_context};
+use crate::test_support::{AllowedGate, EchoBash, facts, tool_context};
 
 fn commands(text: &str) -> Vec<(String, String)> {
     find(text)
@@ -34,22 +32,12 @@ fn inline_and_block_forms() {
     assert!(commands("x!`no` and `a !`b` c` and !` `").is_empty());
 }
 
-fn runner(bash: Arc<EchoBash>, rules: &[(RuleBehavior, &str)]) -> Runner {
-    let gate = PolicyGate::new(PermissionRules {
-        version: 1,
-        rules: rules
-            .iter()
-            .map(|(behavior, text)| SourcedRule {
-                source: RuleSource::CliArg,
-                behavior: *behavior,
-                rule: rust_cli_policy::rules::parse_rule(text),
-            })
-            .collect(),
-        ..PermissionRules::default()
-    });
+fn runner(bash: Arc<EchoBash>, denied: &[&str]) -> Runner {
     Runner {
         bash,
-        gate: Arc::new(gate),
+        gate: Arc::new(AllowedGate {
+            denied: denied.iter().map(|command| (*command).to_owned()).collect(),
+        }),
         ids: Arc::new(SequentialIds::default()),
     }
 }
@@ -102,8 +90,8 @@ async fn unpermitted_and_failing_commands_fail_the_skill() {
         "{denied}"
     );
     assert!(bash.commands.lock().unwrap().is_empty());
-    // deny 规则优先于 skill 的 allowed-tools。
-    let blocked = runner(bash.clone(), &[(RuleBehavior::Deny, "Bash(echo:*)")])
+    // 判决链拒绝（deny 规则优先于 skill 的 allowed-tools，policy `lib_tests_allowed.rs`）。
+    let blocked = runner(bash.clone(), &["echo hi"])
         .expand(
             "!`echo hi`".to_owned(),
             &["Bash(echo:*)".to_owned()],

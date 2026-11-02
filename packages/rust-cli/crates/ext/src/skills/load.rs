@@ -9,8 +9,9 @@ use rust_cli_kernel_api::env_files::{FileKind, ListDir, PathStyle, StatFile};
 use rust_cli_kernel_api::env_git::project_levels;
 use rust_cli_kernel_api::machine::Files;
 
-use super::frontmatter::{self, Value};
 use super::{PluginSkillRoot, Skill, SkillCatalog, SkillShell, SkillSource};
+use rust_cli_base::frontmatter::{self, Value};
+use rust_cli_kernel_api::tool_names;
 
 /// SKILL.md 的大小上限（1e6 字节），超过时跳过。
 const MAX_SKILL_BYTES: u64 = 1_000_000;
@@ -159,8 +160,12 @@ pub(crate) async fn discover(
     found
 }
 
+/// skill 的字段把嵌套块（`Value::Block`）当文本读（以前 ext 自己那份解析器就是这样，F132 收进 base 时保留）。
 fn text<'a>(map: &'a std::collections::BTreeMap<String, Value>, key: &str) -> Option<&'a str> {
-    map.get(key).and_then(Value::text)
+    match map.get(key)? {
+        Value::Text(text) | Value::Block(text) => Some(text),
+        Value::List(_) => None,
+    }
 }
 
 fn boolean(map: &std::collections::BTreeMap<String, Value>, key: &str) -> bool {
@@ -184,13 +189,13 @@ fn first_line(body: &str) -> String {
         // 截断加省略号只定义在 base 的 `text`。
         return text::truncate_chars(text, MAX_DESCRIPTION_CHARS).into_owned();
     }
-    "Skill".to_owned()
+    tool_names::SKILL.to_owned()
 }
 
 /// `allowed-tools` 一类的工具列表：逗号或空白分隔，括号里的不切。
 pub(crate) fn tool_list(value: Option<&Value>) -> Vec<String> {
     let items: Vec<&str> = match value {
-        Some(Value::Text(text)) => vec![text.as_str()],
+        Some(Value::Text(text) | Value::Block(text)) => vec![text.as_str()],
         Some(Value::List(items)) => items.iter().map(String::as_str).collect(),
         None => Vec::new(),
     };
@@ -222,7 +227,9 @@ pub(crate) fn tool_list(value: Option<&Value>) -> Vec<String> {
 /// 命名参数：去掉空串与纯数字。
 fn arg_names(value: Option<&Value>) -> Vec<String> {
     let items: Vec<String> = match value {
-        Some(Value::Text(text)) => text.split_whitespace().map(str::to_owned).collect(),
+        Some(Value::Text(text) | Value::Block(text)) => {
+            text.split_whitespace().map(str::to_owned).collect()
+        }
         Some(Value::List(items)) => items.clone(),
         None => Vec::new(),
     };
@@ -235,7 +242,9 @@ fn arg_names(value: Option<&Value>) -> Vec<String> {
 /// `paths`：`/**` 结尾去掉，全是 `**` 时视为无条件。
 fn skill_paths(value: Option<&Value>) -> Option<Vec<String>> {
     let items: Vec<String> = match value? {
-        Value::Text(text) => text.split(',').map(|item| item.trim().to_owned()).collect(),
+        Value::Text(text) | Value::Block(text) => {
+            text.split(',').map(|item| item.trim().to_owned()).collect()
+        }
         Value::List(items) => items.clone(),
     };
     let patterns: Vec<String> = items

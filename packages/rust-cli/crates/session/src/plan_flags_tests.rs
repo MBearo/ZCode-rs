@@ -1,7 +1,8 @@
 //! 计划模式的两个会话标志（docs/specs/rust-cli/context.md §13.4）：actor 在改模式的同一处更新，
 //! 经 `current_mode_and_plan_flags` 与模式一起交给主循环，提交 reentry / exit 时清掉。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::ids::MessageId;
@@ -46,8 +47,8 @@ impl Tool for SwitchMode {
     ) -> Result<ToolOutput, ToolError> {
         let enabled = input["to"].as_str() == Some("plan");
         context
-            .interactions
-            .set_plan(&context.session, enabled)
+            .session_ops
+            .set_plan(enabled)
             .await
             .map_err(|error| ToolError::Failed {
                 message: error.to_string(),
@@ -73,7 +74,7 @@ impl ContextBuilder for Recording {
         request: ContextRequest,
         _history: &[Message],
     ) -> Result<BuiltContext, OrchestrationError> {
-        let mut seen = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut seen = self.0.lock_unpoisoned();
         seen.push((request.mode, request.plan_flags));
         let plan = request.mode == PermissionMode::Plan;
         let source = match (plan, request.plan_flags) {
@@ -95,7 +96,6 @@ impl ContextBuilder for Recording {
                 text: "system".to_owned(),
                 cache_control: None,
             }],
-            user_context: Vec::new(),
             attachments,
         })
     }

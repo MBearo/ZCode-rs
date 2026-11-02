@@ -28,20 +28,18 @@ pub struct UserInputTools {
 }
 
 impl UserInputTools {
-    /// `registry` 是主线程的基础工具注册表；`gate` 判断提及的文件是否被规则拒绝。
-    pub fn new(registry: &dyn ToolRegistry, gate: Arc<dyn PermissionGate>) -> Self {
+    /// `registry` 是主线程的基础工具注册表；`gate` 判断提及的文件是否被规则拒绝；`bash` 是模型的 Bash 的同一份设置
+    /// （超时 `BASH_*_TIMEOUT_MS` 相同，cli-args.md §9.3，修复线 F42；shell-permissions.md §1.1）。
+    pub fn new(
+        registry: &dyn ToolRegistry,
+        gate: Arc<dyn PermissionGate>,
+        bash: crate::BashSettings,
+    ) -> Self {
         Self {
             read: registry.find(crate::read::NAME),
-            bash: crate::bash::BashTool::new(),
+            bash: crate::bash::BashTool::new(bash),
             gate,
         }
-    }
-
-    /// bash 模式的超时与模型的 Bash 相同（`BASH_*_TIMEOUT_MS`，cli-args.md §9.3，修复线 F42）。
-    #[must_use]
-    pub fn with_bash_timeouts(mut self, timeouts: crate::BashTimeouts) -> Self {
-        self.bash = self.bash.with_timeouts(timeouts);
-        self
     }
 
     async fn denied(&self, read: &dyn Tool, input: &Value, context: &ToolUseContext) -> bool {

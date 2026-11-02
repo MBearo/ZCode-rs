@@ -1,7 +1,7 @@
 //! 重试与停顿的状态行（docs/specs/rust-cli/stall-visibility.md §3）：`✻ <错误> · Retrying in 5s · attempt 1/10`、
 //! `✻ Waiting for API response · will retry in 4m 40s ·
 //! check your network`。图标与前半用 error 色，后半 dim。主线程的状态行与前台子代理的 Agent 行共用。
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use rust_cli_base::units;
 use rust_cli_kernel_api::model::ModelNotice;
@@ -11,6 +11,7 @@ use super::cells::duration;
 use super::i18n::Lang;
 use super::layout;
 use super::text::truncate;
+use crate::ui::style::dim;
 use crate::view::Notice;
 
 /// 状态行的图标。
@@ -18,10 +19,6 @@ pub const GLYPH: &str = "✻";
 
 fn error() -> Style {
     Style::default().fg(Color::Red)
-}
-
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
 }
 
 /// 倒计时从这么长起只写最大的单位。

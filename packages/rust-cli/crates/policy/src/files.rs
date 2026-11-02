@@ -8,40 +8,11 @@
 use rust_cli_base::names::DOT_DIR;
 use rust_cli_kernel_api::env_files::GIT_DIR;
 use rust_cli_kernel_api::env_files::PathStyle;
-use rust_cli_kernel_api::permission::{PermissionMode, RuleBehavior};
-use serde_json::Value;
+use rust_cli_kernel_api::permission::{FileAccess, PermissionMode, RuleBehavior};
 
 use crate::check::{AskKind, Check, Inputs};
 use crate::paths::rule_matches;
 use crate::texts;
-
-/// 文件访问的方向。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Access {
-    Read,
-    Write,
-}
-
-impl Access {
-    /// 路径规则的工具名。
-    pub fn rule_tool(self) -> &'static str {
-        match self {
-            Access::Read => "Read",
-            Access::Write => "Edit",
-        }
-    }
-}
-
-/// 内置文件工具的访问方向与路径字段。`path` 缺省时（Glob、Grep）是 cwd。
-pub fn tool_access(tool: &str) -> Option<(Access, &'static str)> {
-    Some(match tool {
-        "Read" => (Access::Read, "file_path"),
-        "Glob" | "Grep" => (Access::Read, "path"),
-        "Edit" | "Write" => (Access::Write, "file_path"),
-        "NotebookEdit" => (Access::Write, "notebook_path"),
-        _ => return None,
-    })
-}
 
 /// 写入要额外确认的位置（危险的文件与目录，配置目录是 `.zcode`）。
 const SENSITIVE_DIRS: &[&str] = &[GIT_DIR, ".vscode", ".idea", DOT_DIR];
@@ -77,13 +48,18 @@ fn sensitive(path: &str, windows: bool) -> bool {
 }
 
 /// 路径命中某种行为的路径规则。
-pub fn path_rule(access: Access, path: &str, behavior: RuleBehavior, inputs: &Inputs<'_>) -> bool {
+pub fn path_rule(
+    access: FileAccess,
+    path: &str,
+    behavior: RuleBehavior,
+    inputs: &Inputs<'_>,
+) -> bool {
     matched_path_rule(access, path, behavior, inputs).is_some()
 }
 
 /// 路径命中的第一条路径规则的 content。
 pub(crate) fn matched_path_rule<'a>(
-    access: Access,
+    access: FileAccess,
     path: &str,
     behavior: RuleBehavior,
     inputs: &Inputs<'a>,
@@ -97,14 +73,14 @@ pub(crate) fn matched_path_rule<'a>(
 }
 
 /// 检查一次读或写。`path` 是工具输入里的原样路径（None 表示 cwd）。
-pub fn check(access: Access, path: Option<&str>, inputs: &Inputs<'_>) -> Check {
+pub fn check(access: FileAccess, path: Option<&str>, inputs: &Inputs<'_>) -> Check {
     let paths = inputs.paths;
     // 缺陷修复（F14）：工具改成去首尾空白、做 NFC 之后，判定若仍用 `resolve`，
     // `" /etc/hosts"` 会被当成工作区里的相对路径放行，而工具读的是 `/etc/hosts`。两边用同一条规则。
     let resolved = paths.resolve_input(path.unwrap_or("."));
     let rule = |behavior| path_rule(access, &resolved, behavior, inputs);
     match access {
-        Access::Read => {
+        FileAccess::Read => {
             if rule(RuleBehavior::Deny) {
                 return Check::deny(texts::file_read_denied(&resolved));
             }
@@ -115,13 +91,13 @@ pub fn check(access: Access, path: Option<&str>, inputs: &Inputs<'_>) -> Check {
                 || paths.internal_readable(&resolved)
                 || paths.is_plan_file(&resolved)
                 || rule(RuleBehavior::Allow)
-                || path_rule(Access::Write, &resolved, RuleBehavior::Allow, inputs)
+                || path_rule(FileAccess::Write, &resolved, RuleBehavior::Allow, inputs)
             {
                 return Check::Allow;
             }
             ask(texts::file_read_request(&resolved), AskKind::Other)
         }
-        Access::Write => {
+        FileAccess::Write => {
             if rule(RuleBehavior::Deny) {
                 return Check::deny(texts::file_edit_denied(&resolved));
             }
@@ -162,14 +138,6 @@ fn ask(message: String, kind: AskKind) -> Check {
         kind,
         suggestions: Vec::new(),
     }
-}
-
-/// 工具输入里的路径字段。
-pub fn input_path<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
-    input
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|path| !path.is_empty())
 }
 
 #[cfg(test)]

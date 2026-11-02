@@ -1,22 +1,22 @@
 //! Fleet（remote-exec.md §21.2）：清单的读写、连接状态与延迟拼成的快照、注册表的放进与拿走、错误的换算、变化通知。
 //! 远端是本进程里的真实执行器（exec-server + 内存网络，执行端口是 kernel-api 的替身），不起子进程。
 
+use rust_cli_kernel_api::ids::MachineName;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rust_cli_base::{OwnedTask, TaskScope};
 use rust_cli_exec_client::ClientOptions;
-use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, ServerConfig};
+use rust_cli_exec_server::{AllowAll, ExecServer, MemoryLedger, PortLauncher, ServerConfig};
 use rust_cli_exec_transport::memory::{MemoryConnector, network};
-use rust_cli_exec_transport::{
-    Connector, LinkError, ProvisionError, Provisioned, Provisioner, Ready,
-};
+use rust_cli_exec_transport::{Connector, LinkError};
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::testing::{UnusedEnvironment, environments, machine};
 use rust_cli_machines::{
     Endpoint, Machine, MachineEntry, MachineError, MachineList, MachineState, MachinesError,
 };
+use rust_cli_machines::{ProvisionError, Provisioned, Provisioner, Ready};
 use tokio::sync::watch;
 
 use super::{Changed, Fleet, FleetError, MakeMachine};
@@ -32,8 +32,10 @@ async fn remote(name: &str) -> Remote {
     let (connector, listener) = network(name);
     let mut config = ServerConfig::new("0.1.58-test", "linux", "aarch64");
     config.home = Some("/home/dev".to_owned());
+    let served = machine(Arc::new(UnusedEnvironment));
+    let launcher = Arc::new(PortLauncher(served.clone()));
     let server = ExecServer::start(
-        machine(Arc::new(UnusedEnvironment)),
+        (served, launcher),
         Arc::new(MemoryLedger::default()),
         Arc::new(AllowAll),
         config,
@@ -184,7 +186,9 @@ async fn add_connect_disconnect_and_remove() {
         ("linux", "aarch64", "0.1.58-test")
     );
     // 进了注册表（工作区是清单里的工作目录），清单记下连着。
-    let (_, workspace) = registry.remote("dev-a").expect("in the registry");
+    let (_, workspace) = registry
+        .remote(&MachineName::new("dev-a"))
+        .expect("in the registry");
     assert_eq!(workspace.root.as_str(), "/srv/proj");
     assert!(list.load().await.unwrap()[0].connected);
     // 握手后马上一次心跳：延迟到了就唤醒订阅方。
@@ -197,14 +201,14 @@ async fn add_connect_disconnect_and_remove() {
     assert_eq!(fleet.disconnect("dev-a").await.unwrap(), Changed::Done);
     assert_eq!(fleet.snapshot()[0].state, MachineState::Unconnected);
     assert!(fleet.snapshot()[0].latency.is_none());
-    assert!(registry.remote("dev-a").is_none());
+    assert!(registry.remote(&MachineName::new("dev-a")).is_none());
     assert!(!list.load().await.unwrap()[0].connected);
     assert_eq!(fleet.disconnect("dev-a").await.unwrap(), Changed::Already);
 
     fleet.connect("dev-a").await.unwrap();
     fleet.remove("dev-a").await.unwrap();
     assert!(fleet.snapshot().is_empty());
-    assert!(registry.remote("dev-a").is_none());
+    assert!(registry.remote(&MachineName::new("dev-a")).is_none());
     assert!(list.load().await.unwrap().is_empty());
 }
 
@@ -224,13 +228,13 @@ async fn problems_come_back_typed() {
         .unwrap();
     let error = fleet.connect("bad").await.unwrap_err();
     assert!(
-        matches!(&error, FleetError::Connection(MachineError::Unreachable(m)) if m == "connection refused"),
+        matches!(&error, FleetError::Connection(MachineError::Provision(ProvisionError::Unreachable { message, .. })) if message == "connection refused"),
         "{error:?}"
     );
     assert!(matches!(
         fleet.snapshot()[0].state,
         MachineState::Failed {
-            error: MachineError::Unreachable(_)
+            error: MachineError::Provision(ProvisionError::Unreachable { .. })
         }
     ));
     // 连不上不改清单的 `connected`。
@@ -313,16 +317,19 @@ async fn the_registry_knows_the_listed_machines() {
         _remote,
         ..
     } = built(dir.path()).await;
-    assert!(!registry.listed("dev-a"));
+    assert!(!registry.listed(&MachineName::new("dev-a")));
     fleet
         .add(MachineEntry::new("dev-a", "dev-a", None))
         .await
         .unwrap();
-    assert!(registry.listed("dev-a"));
-    assert!(registry.remote("dev-a").is_none(), "listed, not connected");
-    assert!(!registry.listed("gpu-1"));
+    assert!(registry.listed(&MachineName::new("dev-a")));
+    assert!(
+        registry.remote(&MachineName::new("dev-a")).is_none(),
+        "listed, not connected"
+    );
+    assert!(!registry.listed(&MachineName::new("gpu-1")));
     fleet.remove("dev-a").await.unwrap();
-    assert!(!registry.listed("dev-a"));
+    assert!(!registry.listed(&MachineName::new("dev-a")));
 }
 
 #[tokio::test(flavor = "multi_thread")]

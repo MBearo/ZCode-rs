@@ -2,7 +2,7 @@
 //!
 //! 一个压缩核心（分组、保留尾段、PTL 阶梯、摘要消息与边界、压缩后重读
 //! 文件）供 `/compact`、阈值触发的自动压缩与上下文超限后的反应式压缩共用；自动压缩的窗口、阈值与
-//! 熔断；micro 压缩的算法（默认不触发，不接线）。
+//! 熔断。
 //!
 //! 摘要请求经 [`QueryRunner`] 跑 `QuerySource::Compact` 的子循环；它的执行器是 [`DenyTools`]、
 //! 压缩器是 [`Disabled`]（由 runtime 组装）。本 crate 不做 IO。
@@ -12,7 +12,6 @@ mod engine;
 mod fallback;
 mod groups;
 mod hooks;
-pub mod micro;
 mod request;
 mod restore;
 mod summary;
@@ -31,10 +30,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::compaction::{ContextNotice, PostCompactContext};
+use rust_cli_kernel_api::env::Operations;
+use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::history;
-use rust_cli_kernel_api::ids::Generation;
-use rust_cli_kernel_api::local_services::LocalServices;
-use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_kernel_api::message::{CompactTrigger, Message};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::orchestration::{
@@ -71,12 +69,12 @@ pub struct CompactPorts {
     pub context: Arc<dyn PostCompactContext>,
     pub hooks: Arc<dyn HookRunner>,
     pub ids: Arc<dyn Ids>,
-    /// 压缩后重读文件的那台机器（经 Read 工具；R0 只有本机，remote-exec.md §15.8.1）。
-    pub machine: MachineEnv,
-    /// Read 工具的上下文要带本机服务（重读用不到）。
-    pub local: LocalServices,
+    /// 执行环境的注册表：压缩后经 Read 工具在它的主 env 上重读文件（remote-exec.md §15.8.1）；Read 工具的上下文要带
+    /// controller 的服务（重读用不到）。工作线 F131：以前另存主 env 与 controller 的服务，与注册表给的是同一份。
+    pub machines: Arc<dyn EnvironmentRegistry>,
     pub artifacts: Arc<dyn ArtifactStore>,
-    pub generation: Generation,
+    /// 操作上下文的工厂（重读文件的 Read 调用；F134：以前另带一个 `generation`）。
+    pub operations: Operations,
 }
 
 /// 入口从设置与环境变量构造（自动压缩的设置、`DISABLE_COMPACT`；`ZCODE_AUTOCOMPACT_PCT_OVERRIDE`、

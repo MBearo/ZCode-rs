@@ -4,12 +4,13 @@
 //! key='trust_dialog')`，值 `{"hasTrustDialogAccepted":true}`。Node 只按 `(scope, scope_id, namespace, key)`
 //! 精确读 `permission` 命名空间，读不到这些行；表结构不变。
 
-use rusqlite::{Connection, params, params_from_iter};
+use rusqlite::Connection;
 use rust_cli_kernel_api::store::StoreError;
 use rust_cli_kernel_api::workspace_trust::TrustKey;
 use serde_json::Value;
 
 use crate::OrStorage;
+use crate::repo::settings::{self, SettingKey};
 
 const SCOPE: &str = "directory";
 const NAMESPACE: &str = "rust-cli/workspace-trust";
@@ -28,26 +29,10 @@ pub(crate) fn find(
     conn: &Connection,
     candidates: &[TrustKey],
 ) -> Result<Option<TrustKey>, StoreError> {
-    if candidates.is_empty() {
-        return Ok(None);
-    }
-    let holes = vec!["?"; candidates.len()].join(", ");
-    let sql = format!(
-        "select scope_id, value from local_setting
-         where scope = ? and namespace = ? and key = ? and scope_id in ({holes})"
-    );
-    let bound = [SCOPE, NAMESPACE, KEY]
-        .into_iter()
-        .chain(candidates.iter().map(TrustKey::as_str));
-    let mut statement = conn.prepare(&sql).storage()?;
-    let rows = statement
-        .query_map(params_from_iter(bound), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .storage()?;
+    let ids: Vec<&str> = candidates.iter().map(TrustKey::as_str).collect();
+    let rows = settings::get_many(conn, (SCOPE, NAMESPACE, KEY), &ids).storage()?;
     let mut trusted = Vec::new();
-    for row in rows {
-        let (scope_id, value) = row.storage()?;
+    for (scope_id, value) in rows {
         if accepted(&value) {
             trusted.push(scope_id);
         }
@@ -61,18 +46,13 @@ pub(crate) fn find(
 /// Node `writeLocalSetting` 的 upsert：已有行只改 value、schema_version 与 time_updated。
 pub(crate) fn record(conn: &Connection, key: &TrustKey, now_ms: u64) -> Result<(), StoreError> {
     let now = i64::try_from(now_ms).unwrap_or(i64::MAX);
-    conn.prepare_cached(
-        "insert into local_setting (scope, scope_id, namespace, key, value, schema_version, time_created, time_updated)
-         values (?, ?, ?, ?, ?, ?, ?, ?)
-         on conflict(scope, scope_id, namespace, key) do update set
-           value = excluded.value,
-           schema_version = excluded.schema_version,
-           time_updated = excluded.time_updated",
-    )
-    .storage()?
-    .execute(params![SCOPE, key.as_str(), NAMESPACE, KEY, VALUE, 1, now, now])
-    .storage()?;
-    Ok(())
+    let at = SettingKey {
+        scope: SCOPE,
+        scope_id: key.as_str(),
+        namespace: NAMESPACE,
+        key: KEY,
+    };
+    settings::put(conn, at, VALUE, now).storage()
 }
 
 #[cfg(test)]

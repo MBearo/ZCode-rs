@@ -6,6 +6,7 @@ use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::{Message, UserOrigin};
 use rust_cli_kernel_api::metering::CallStatus;
 use rust_cli_kernel_api::session_api::SessionHandle;
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::store::Fact;
 use rust_cli_kernel_api::testing::{FakeTool, ScriptedModel, text_response, tool_use_response};
 use serde_json::json;
@@ -171,22 +172,20 @@ fn only_completed_main_requests_have_an_output_speed() {
     use crate::turn::output_speed;
 
     let call = ModelCall {
-        message: MessageId::new("msg_1"),
-        source: QuerySource::MainThread,
-        selection: selection(),
-        started_at_ms: 1_000,
-        first_token_at_ms: None,
         first_content_at_ms: Some(1_400),
-        completed_at_ms: 3_000,
-        status: CallStatus::Completed,
-        stop_reason: None,
         tool_calls: 1,
         usage: Some(Usage {
             output_tokens: 80,
             ..Usage::default()
         }),
-        retries: 0,
-        error: None,
+        ..ModelCall::new(
+            MessageId::new("msg_1"),
+            QuerySource::MainThread,
+            selection(),
+            1_000,
+            3_000,
+            CallStatus::Completed,
+        )
     };
     let speed = output_speed(&call).expect("a completed main request");
     assert_eq!(
@@ -210,7 +209,7 @@ fn only_completed_main_requests_have_an_output_speed() {
     for source in [
         QuerySource::Subagent("general-purpose".into()),
         QuerySource::Compact,
-        QuerySource::Side("generate_session_title".into()),
+        QuerySource::Side(SideSource::SessionTitle),
     ] {
         assert_eq!(
             output_speed(&ModelCall {

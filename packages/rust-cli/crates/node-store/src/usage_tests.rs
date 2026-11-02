@@ -25,29 +25,27 @@ fn usage() -> Usage {
 /// 请求时的选择（与会话的选择不同：行里取请求时的快照）。
 fn requested() -> ModelSelection {
     ModelSelection {
-        provider: "anthropic".into(),
-        model: GLM_5_3.into(),
         reasoning: Some("max".into()),
-        connection: None,
+        ..ModelSelection::new("anthropic", GLM_5_3)
     }
 }
 
 fn call(message: &str, status: CallStatus) -> ModelCall {
     ModelCall {
-        message: MessageId::new(message),
-        source: QuerySource::MainThread,
-        selection: requested(),
-        started_at_ms: 2_000,
         first_token_at_ms: Some(2_300),
         // 只在内存里的首个内容（早于首字）：用量表不写它，下面的列照旧按首字（修复线 F105）。
         first_content_at_ms: Some(2_200),
-        completed_at_ms: 2_900,
-        status,
         stop_reason: Some(StopReason::ToolUse),
         tool_calls: 2,
         usage: Some(usage()),
-        retries: 0,
-        error: None,
+        ..ModelCall::new(
+            MessageId::new(message),
+            QuerySource::MainThread,
+            requested(),
+            2_000,
+            2_900,
+            status,
+        )
     }
 }
 
@@ -215,25 +213,25 @@ async fn an_interrupted_or_too_long_request_sets_its_flags() {
 /// `web_fetch_processing`；Node 没有对应用途的旁路照原样。以前写的是本工程的名字。
 #[tokio::test]
 async fn side_requests_use_the_node_names() {
-    use rust_cli_kernel_api::model::{SIDE_SESSION_TITLE, SIDE_WEB_FETCH};
+    use rust_cli_kernel_api::side_request::SideSource;
     let t = TestStore::new();
     started(&t, "sess_1").await;
     commit(&t, &sid(), vec![user("msg_u1", "hi")]).await;
     for (message, side) in [
-        ("msg_t1", SIDE_SESSION_TITLE),
-        ("msg_w1", SIDE_WEB_FETCH),
-        ("msg_h1", "hook_agent"),
+        ("msg_t1", SideSource::SessionTitle),
+        ("msg_w1", SideSource::WebFetch),
+        ("msg_h1", SideSource::HookPrompt),
     ] {
         let mut side_call = call(message, CallStatus::Completed);
-        side_call.source = QuerySource::Side(side.to_owned());
+        side_call.source = QuerySource::Side(side);
         commit(&t, &sid(), vec![Fact::ModelCalled { call: side_call }]).await;
     }
     assert_eq!(
         t.rows("select id, query_source from model_usage order by logical_request_id"),
         vec![
             vec![
-                json!("usage_model_hook_agent_msg_h1_0"),
-                json!("hook_agent")
+                json!("usage_model_hook_prompt_msg_h1_0"),
+                json!("hook_prompt")
             ],
             vec![
                 json!("usage_model_session_title_msg_t1_0"),
@@ -373,12 +371,12 @@ async fn a_turn_aggregates_its_rows_and_keeps_the_earliest_start() {
 /// 自己的请求事件数，标题有自己的事件列表）。
 #[tokio::test]
 async fn title_rows_do_not_count_in_the_turn() {
-    use rust_cli_kernel_api::model::SIDE_SESSION_TITLE;
+    use rust_cli_kernel_api::side_request::SideSource;
     let t = TestStore::new();
     started(&t, "sess_1").await;
     commit(&t, &sid(), vec![user("msg_u1", "name this session please")]).await;
     let mut title = call("msg_t1", CallStatus::Completed);
-    title.source = QuerySource::Side(SIDE_SESSION_TITLE.to_owned());
+    title.source = QuerySource::Side(SideSource::SessionTitle);
     title.started_at_ms = 1_500;
     title.first_token_at_ms = None;
     title.tool_calls = 0;

@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, QuerySource};
-use rust_cli_model::ProviderModel;
+use rust_cli_kernel_api::side_request::SideSource;
+use rust_cli_model::UnconfiguredModel;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
@@ -63,7 +64,7 @@ async fn overload_is_retried_only_when_the_user_waits() {
     let model = model_at(server.url(), fast_retry(3)).await;
     let events = collect(
         &model,
-        request("title", QuerySource::Side("title".to_owned())),
+        request("title", QuerySource::Side(SideSource::SessionTitle)),
     )
     .await;
     assert_eq!(
@@ -256,7 +257,7 @@ async fn assert_cancelled_soon(
 
 #[tokio::test]
 async fn an_unconfigured_model_reports_authentication() {
-    let model = ProviderModel::unconfigured("ZCODE_API_KEY is not set");
+    let model = UnconfiguredModel::new("ZCODE_API_KEY is not set");
     let events: Vec<_> = model
         .stream(
             request("hi", QuerySource::MainThread),

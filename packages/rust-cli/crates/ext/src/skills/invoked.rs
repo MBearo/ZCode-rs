@@ -38,14 +38,10 @@ fn invoked_name(previous: &Message) -> Option<String> {
     };
     match user.origin {
         UserOrigin::ToolResult { .. } => user.content.iter().find_map(|block| match block {
-            ContentBlock::ToolResult { content, .. } => {
-                content.iter().find_map(|item| match item {
-                    ToolResultContent::Text { text } => {
-                        text.strip_prefix(LAUNCHING).map(str::to_owned)
-                    }
-                    _ => None,
-                })
-            }
+            ContentBlock::ToolResult { content, .. } => content
+                .iter()
+                .filter_map(ToolResultContent::text)
+                .find_map(|text| text.strip_prefix(LAUNCHING).map(str::to_owned)),
             _ => None,
         }),
         UserOrigin::Human => {

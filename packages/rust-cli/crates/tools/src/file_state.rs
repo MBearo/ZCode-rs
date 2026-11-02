@@ -12,11 +12,12 @@
 //! 冷恢复时用 [`ReadFileState::restore`] 从会话历史重建；
 //! 压缩时经 [`ReadFileStates::clear`] 清空（compact.md §3.4）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 use rust_cli_kernel_api::env::FileVersion;
-use rust_cli_kernel_api::env_registry::LOCAL_MACHINE;
+use rust_cli_kernel_api::ids::MachineName;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::tool::ReadFileStates;
 
@@ -29,8 +30,12 @@ pub const MAX_SESSIONS: usize = 16;
 pub enum Baseline {
     /// 执行侧在读或写时给出的版本；当前版本不同即为改过。
     Version(FileVersion),
-    /// 从会话历史重建的记录没有版本：拿当前内容与记录的内容比（比内容，不比消息时间戳与 mtime）。
+    /// 从会话历史重建的记录没有版本：拿当前内容与记录的内容比（比内容，不比消息时间戳与 mtime）。Write 的输入是原样的内容。
     Content,
+    /// 同 [`Self::Content`]，内容取自记录里 Read 的结果文字（去掉了行号、提醒与首尾空白，对照实现的
+    /// `contentFromTranscript`）：拿当前内容去掉首尾空白之后比。工作线 F130：以前与 Write 一样原样比，带末尾换行的文件
+    /// 在续写之后一律算“读后被改过”，Edit 报 `File has been modified since read`。
+    Transcript,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +76,7 @@ impl FileState {
                 !(self.is_full_view() && current().is_some_and(|text| text == self.content))
             }
             Baseline::Content => current().is_none_or(|text| text != self.content),
+            Baseline::Transcript => current().is_none_or(|text| text.trim() != self.content),
         }
     }
 
@@ -81,26 +87,25 @@ impl FileState {
 }
 
 /// 一条记录的键（R3，remote-exec.md §20.7.3）：哪台机器上的哪个路径。远端读过的文件不能拿去改本机的同名文件。
+///
+/// 工作线 F137：机器以前是名字的字符串（主 env 靠 `is_primary_name` 认出），现在是 `MachineName`（主 env 只有一种写法）。
+/// 记录只在内存里，不落库。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileKey {
-    pub machine: String,
+    pub machine: MachineName,
     pub path: String,
 }
 
 impl FileKey {
-    pub fn new(machine: &str, path: &str) -> Self {
+    pub fn new(machine: MachineName, path: &str) -> Self {
         Self {
-            machine: machine.to_owned(),
+            machine,
             path: path.to_owned(),
         }
     }
 
-    fn local(path: &str) -> Self {
-        Self::new(LOCAL_MACHINE, path)
-    }
-
     pub fn is_local(&self) -> bool {
-        self.machine == LOCAL_MACHINE
+        self.machine.is_primary()
     }
 }
 
@@ -168,21 +173,23 @@ impl Sessions {
     }
 }
 
-/// 全部会话的 readFileState。方法都是同步的，锁不跨 await。`*_at` 带机器名（R3）；不带的是本机。
+/// 全部会话的 readFileState。方法都是同步的，锁不跨 await。记录按机器与路径（R3）。工作线 F132（T15）删掉了只认本机的 6 个便捷方法（`get`、`set`、`whole_files`、`remove`、
+/// `rebase`、`mark_not_in_context`）：都没有产品调用方，三个只有测试在用。
 #[derive(Default)]
 pub struct ReadFileState(Mutex<Sessions>);
 
 impl ReadFileState {
     fn sessions(&self) -> MutexGuard<'_, Sessions> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_unpoisoned()
     }
 
-    pub fn get(&self, session: &SessionId, path: &str) -> Option<FileState> {
-        self.get_at(session, LOCAL_MACHINE, path)
-    }
-
-    pub fn get_at(&self, session: &SessionId, machine: &str, path: &str) -> Option<FileState> {
-        let key = FileKey::new(machine, path);
+    pub fn get_at(
+        &self,
+        session: &SessionId,
+        machine: &MachineName,
+        path: &str,
+    ) -> Option<FileState> {
+        let key = FileKey::new(machine.clone(), path);
         let mut sessions = self.sessions();
         let files = sessions.session(session);
         let found = files.entries.get(&key).cloned();
@@ -192,14 +199,10 @@ impl ReadFileState {
         found
     }
 
-    pub fn set(&self, session: &SessionId, path: &str, state: FileState) {
-        self.set_at(session, LOCAL_MACHINE, path, state);
-    }
-
-    pub fn set_at(&self, session: &SessionId, machine: &str, path: &str, state: FileState) {
+    pub fn set_at(&self, session: &SessionId, machine: &MachineName, path: &str, state: FileState) {
         self.sessions()
             .session(session)
-            .insert(FileKey::new(machine, path), state);
+            .insert(FileKey::new(machine.clone(), path), state);
     }
 
     /// 会话关闭：释放它的全部记录。
@@ -229,17 +232,8 @@ impl ReadFileState {
         }
     }
 
-    /// 本机上没有 offset、也没有 limit 的记录（读过的文件在磁盘上被改动时要查的那些，tools-files.md §4.1），最近用过的
-    /// 在前。不算一次使用。
-    pub fn whole_files(&self, session: &SessionId) -> Vec<(String, FileState)> {
-        self.whole_files_everywhere(session)
-            .into_iter()
-            .filter(|(key, _)| key.is_local())
-            .map(|(key, state)| (key.path, state))
-            .collect()
-    }
-
-    /// 同 [`ReadFileState::whole_files`]，全部机器（R3，remote-exec.md §20.7.4）。
+    /// 没有 offset、也没有 limit 的记录（读过的文件在磁盘上被改动时要查的那些，tools-files.md §4.1），全部机器（R3，
+    /// remote-exec.md §20.7.4），最近用过的在前。不算一次使用。
     pub fn whole_files_everywhere(&self, session: &SessionId) -> Vec<(FileKey, FileState)> {
         let sessions = self.sessions();
         let Some(files) = sessions.files.get(session) else {
@@ -257,31 +251,16 @@ impl ReadFileState {
             .collect()
     }
 
-    /// 去掉一条记录（文件已经不在了）。
-    pub fn remove(&self, session: &SessionId, path: &str) {
-        self.remove_at(session, &FileKey::local(path));
-    }
-
     pub fn remove_at(&self, session: &SessionId, key: &FileKey) {
         if let Some(files) = self.sessions().files.get_mut(session) {
             files.remove(key);
         }
     }
 
-    /// 内容就是记录的内容，记下执行侧现在的版本；不改顺序与形状。
-    pub fn rebase(&self, session: &SessionId, path: &str, version: FileVersion) {
-        self.rebase_at(session, &FileKey::local(path), version);
-    }
-
     pub fn rebase_at(&self, session: &SessionId, key: &FileKey, version: FileVersion) {
         if let Some(state) = self.sessions().entry(session, key) {
             state.baseline = Baseline::Version(version);
         }
-    }
-
-    /// 记录的内容不在模型的上下文里（只告诉了模型文件改了，没给内容）。不改顺序。
-    pub fn mark_not_in_context(&self, session: &SessionId, path: &str) {
-        self.mark_not_in_context_at(session, &FileKey::local(path));
     }
 
     pub fn mark_not_in_context_at(&self, session: &SessionId, key: &FileKey) {

@@ -9,7 +9,7 @@ use rust_cli_kernel_api::model::{ModelError, ModelSelection};
 use std::sync::Arc;
 
 use rust_cli_kernel_api::provider::{
-    Credential, ModelCapabilities, ModelEndpoint, ModelEndpoints, WireProtocol,
+    Credential, EndpointQuery, ModelCapabilities, ModelEndpoint, ModelEndpoints, WireProtocol,
 };
 
 /// 显式给出的 Anthropic 端点（入口从 `ZCODE_MODEL_BASE_URL` / `ZCODE_API_KEY` 构造）。
@@ -35,11 +35,12 @@ impl From<AnthropicEndpoint> for ModelEndpoint {
             body_patches: Vec::new(),
             // 没有能力来源时（测试）按缺省的语义：对话中间的 system 消息原样发出，模型接受图片
             // 与 PDF。入口给了能力来源（[`FixedEndpoint::with_capabilities`]）时每次按模型改写。
-            mid_conversation_system: true,
-            supports_image: true,
-            supports_pdf: true,
-            supports_video: false,
-            supports_audio: false,
+            capabilities: ModelCapabilities {
+                supports_mid_conversation_system: true,
+                supports_image: true,
+                supports_pdf: true,
+                ..ModelCapabilities::default()
+            },
             renewable: false,
         }
     }
@@ -72,20 +73,12 @@ impl FixedEndpoint {
 
 #[async_trait]
 impl ModelEndpoints for FixedEndpoint {
-    async fn endpoint(
-        &self,
-        selection: &ModelSelection,
-        _rejected: Option<&ModelEndpoint>,
-    ) -> Result<ModelEndpoint, ModelError> {
+    /// 固定端点没有补丁、凭据不会换：只看查询里的选择。
+    async fn endpoint(&self, query: EndpointQuery<'_>) -> Result<ModelEndpoint, ModelError> {
         let mut endpoint = self.template.clone();
-        endpoint.model.clone_from(&selection.model);
+        endpoint.model.clone_from(&query.selection.model);
         if let Some(rules) = &self.capabilities {
-            let capabilities = rules(&selection.model);
-            endpoint.mid_conversation_system = capabilities.supports_mid_conversation_system;
-            endpoint.supports_image = capabilities.supports_image;
-            endpoint.supports_pdf = capabilities.supports_pdf;
-            endpoint.supports_video = capabilities.supports_video;
-            endpoint.supports_audio = capabilities.supports_audio;
+            endpoint.capabilities = rules(&query.selection.model);
         }
         Ok(endpoint)
     }

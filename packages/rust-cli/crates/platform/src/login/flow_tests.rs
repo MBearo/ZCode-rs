@@ -4,8 +4,9 @@ use rust_cli_base::models;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use rust_cli_base::account::Family;
 use rust_cli_base::secret::RedactedString;
-use rust_cli_kernel_api::provider::{Credential, ModelDirectory, ModelEndpoints};
+use rust_cli_kernel_api::provider::{Credential, EndpointQuery, ModelDirectory, ModelEndpoints};
 use serde_json::{Value, json};
 
 use super::LoginError;
@@ -13,7 +14,7 @@ use crate::fake_server_tests::{
     Account, BIGMODEL, Captured, Harness, NOW_MS, Reply, Server, ZAI, selection,
 };
 use crate::test_support::{read_text, write};
-use crate::token::{Family, TokenError};
+use crate::token::TokenError;
 
 const EMPTY_CONFIG: &str = include_str!("../../tests/fixtures/login-config-empty.json");
 const NODE_CONFIG: &str = include_str!("../../tests/fixtures/login-config-node.json");
@@ -160,7 +161,7 @@ async fn zai_login_polls_exchanges_and_writes_both_files() {
     );
     let endpoint = harness
         .platform
-        .endpoint(&selection(ZAI), None)
+        .endpoint(EndpointQuery::new(&selection(ZAI)))
         .await
         .unwrap();
     assert_eq!(
@@ -369,7 +370,11 @@ async fn a_team_only_account_logs_in_and_uses_the_team_plan() {
     // 新会话的缺省落到第一个团队项目（登录写的个人缺省不可选，§9.3），请求用团队项目的令牌。
     let default = catalog.default.unwrap();
     assert_eq!(default.provider, team);
-    let endpoint = harness.platform.endpoint(&default, None).await.unwrap();
+    let endpoint = harness
+        .platform
+        .endpoint(EndpointQuery::new(&default))
+        .await
+        .unwrap();
     assert_eq!(
         endpoint.credential,
         Credential::ApiKey(RedactedString::new("pat-team"))
@@ -430,7 +435,7 @@ async fn api_keys_and_logout_follow_node() {
     );
     let endpoint = harness
         .platform
-        .endpoint(&selection(ZAI), None)
+        .endpoint(EndpointQuery::new(&selection(ZAI)))
         .await
         .unwrap();
     assert_eq!(
@@ -596,7 +601,7 @@ async fn an_oauth_login_replaces_a_manual_connection() {
         .unwrap();
     let manual = harness
         .platform
-        .endpoint(&selection(ZAI), None)
+        .endpoint(EndpointQuery::new(&selection(ZAI)))
         .await
         .unwrap();
     assert_eq!(
@@ -627,7 +632,7 @@ async fn an_oauth_login_replaces_a_manual_connection() {
     );
     let endpoint = harness
         .platform
-        .endpoint(&selection(ZAI), None)
+        .endpoint(EndpointQuery::new(&selection(ZAI)))
         .await
         .unwrap();
     assert!(matches!(

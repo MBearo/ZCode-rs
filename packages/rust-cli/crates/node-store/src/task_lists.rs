@@ -9,11 +9,12 @@
 //! 看不到 Node 的 todo，第一次改清单还把它们删掉。
 
 use async_trait::async_trait;
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use rust_cli_kernel_api::agents::{TaskList, TaskListStore, TaskRecord, TaskStatus};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::store::StoreError;
 
+use crate::repo::todos;
 use crate::{NodeStore, OrStorage, storage};
 
 /// `todo.priority` 的占位（Task v2 没有优先级）。
@@ -46,22 +47,7 @@ fn rows(list: &TaskList) -> Vec<(String, String, String)> {
 
 /// Node 写的 todo（`position` 升序）读成任务清单：ID 依次是 1、2…，状态不认识时按 pending。
 fn imported(conn: &Connection, session: &str) -> Result<TaskList, StoreError> {
-    let mut statement = conn
-        .prepare(
-            "select content, status, priority from todo where session_id = ? order by position asc",
-        )
-        .storage()?;
-    let todos = statement
-        .query_map(params![session], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .storage()?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .storage()?;
+    let todos = todos::list(conn, session).storage()?;
     let tasks: Vec<TaskRecord> = todos
         .into_iter()
         .enumerate()
@@ -97,28 +83,7 @@ pub(crate) fn project(
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .storage()?;
-    tx.execute("delete from todo where session_id = ?", params![session])
-        .storage()?;
-    {
-        let mut insert = tx
-            .prepare(
-                "insert into todo (session_id, content, status, priority, position, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)",
-            )
-            .storage()?;
-        for (position, (content, status, priority)) in rows.iter().enumerate() {
-            let position = i64::try_from(position).unwrap_or(i64::MAX);
-            insert
-                .execute(params![
-                    session, content, status, priority, position, now, now
-                ])
-                .storage()?;
-        }
-    }
-    tx.execute(
-        "update session set time_updated = max(time_updated, ?) where id = ?",
-        params![now, session],
-    )
-    .storage()?;
+    todos::replace(&tx, session, rows, now).storage()?;
     tx.commit().storage()
 }
 

@@ -11,6 +11,7 @@ use crate::dto::env::{EnvMode, EnvVars};
 use crate::dto::files::{
     GlobFiles, GrepSearch, PutFile, ReadText, RenderPdfPages, WritePrecondition,
 };
+use crate::dto::git::{WorktreeCreate, WorktreeInspect, WorktreeRemove};
 use crate::dto::mcp::{McpDeclared, McpTransport};
 use crate::dto::rewind::RestoreFile;
 use crate::dto::shell::BackgroundTask;
@@ -148,6 +149,28 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         injected: Vec<String>,
     },
+    /// `cwd` 所在仓库的 git 状态（F110，deployment.md §19.1）。
+    #[serde(rename = "git.status")]
+    GitStatus { workspace: Workspace, cwd: String },
+    #[serde(rename = "git.diff")]
+    GitDiff { workspace: Workspace, cwd: String },
+    #[serde(rename = "git.worktree_create")]
+    WorktreeCreate {
+        context: OperationContext,
+        request: WorktreeCreate,
+    },
+    #[serde(rename = "git.worktree_list")]
+    WorktreeList { cwd: String },
+    #[serde(rename = "git.worktree_changes")]
+    WorktreeChanges { request: WorktreeInspect },
+    #[serde(rename = "git.worktree_remove")]
+    WorktreeRemove {
+        context: OperationContext,
+        request: WorktreeRemove,
+    },
+    /// 建目录与上级目录（F110）。幂等，不带操作上下文。
+    #[serde(rename = "dirs.ensure_dir")]
+    EnsureDir { workspace: Workspace, path: String },
 }
 
 impl Request {
@@ -187,6 +210,13 @@ impl Request {
             Self::McpClose { .. } => Op::McpClose,
             Self::McpDeclare { .. } => Op::McpDeclare,
             Self::EnvUpdate { .. } => Op::EnvUpdate,
+            Self::GitStatus { .. } => Op::GitStatus,
+            Self::GitDiff { .. } => Op::GitDiff,
+            Self::WorktreeCreate { .. } => Op::WorktreeCreate,
+            Self::WorktreeList { .. } => Op::WorktreeList,
+            Self::WorktreeChanges { .. } => Op::WorktreeChanges,
+            Self::WorktreeRemove { .. } => Op::WorktreeRemove,
+            Self::EnsureDir { .. } => Op::EnsureDir,
         }
     }
 }

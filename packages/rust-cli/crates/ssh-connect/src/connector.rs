@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use rust_cli_base::proto::exit;
 use rust_cli_exec_transport::stdio::{ChildCommand, StdioConnector};
-use rust_cli_exec_transport::{Connector, FrameSink, FrameSource, Link, LinkError, Provisioned};
+use rust_cli_exec_transport::{Connector, FrameSink, FrameSource, Link, LinkError};
+use rust_cli_machines::Provisioned;
 
 use crate::target::{SshTarget, quote};
 

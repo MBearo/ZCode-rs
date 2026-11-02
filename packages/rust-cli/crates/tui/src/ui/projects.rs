@@ -7,6 +7,7 @@ use rust_cli_kernel_api::store::SessionOrder;
 
 use super::app::{Action, App, Overlay};
 use super::i18n_projects as words;
+use super::keyboard;
 use super::session_rows::SessionRow;
 
 /// 项目页与 `/resume` 页一次最多取的会话数（tui-panels.md §2.1）。
@@ -254,6 +255,22 @@ impl App {
         }
     }
 
+    /// 粘贴：改名时进名字，搜索时进查询（焦点回到第一个匹配，同打字）；都不在时丢掉。
+    pub(super) fn projects_paste(&mut self, text: &str) {
+        let root = self.view.workspace().root.as_str().to_owned();
+        let Some(Overlay::Projects(page)) = self.overlay.as_mut() else {
+            return;
+        };
+        if let Some((_, input)) = page.rename.as_mut() {
+            return crate::ui::line_edit::paste(input, text);
+        }
+        if let Some(query) = page.search.as_mut() {
+            crate::ui::line_edit::paste(query, text);
+            let first = page.visible(&root).first().copied();
+            page.selected = first.and_then(|i| page.rows.as_ref().map(|r| r[i].id.clone()));
+        }
+    }
+
     pub(super) fn projects_key(&mut self, key: KeyEvent) -> Option<Action> {
         let Some(Overlay::Projects(page)) = self.overlay.as_mut() else {
             return None;
@@ -261,8 +278,8 @@ impl App {
         let root = self.view.workspace().root.as_str().to_owned();
         page.error = None;
         // 文字输入不带 ctrl 与 alt（Windows 的 AltGr 算文字，修复线 F65，tui-input.md §9.1）。
-        let ctrl = self.typing.ctrl(&key);
-        let plain = self.typing.is_plain_text(&key);
+        let ctrl = keyboard::ctrl(&key);
+        let plain = keyboard::is_plain_text(&key);
         if let Some((id, input)) = page.rename.as_mut() {
             match key.code {
                 KeyCode::Esc => page.rename = None,
@@ -275,7 +292,7 @@ impl App {
                         .then_some(Action::Projects(Request::Rename { id, title }));
                 }
                 KeyCode::Backspace => {
-                    input.pop();
+                    crate::ui::line_edit::backspace(input);
                 }
                 KeyCode::Char(c) if plain => input.push(c),
                 _ => {}
@@ -293,7 +310,7 @@ impl App {
                     return None;
                 }
                 KeyCode::Backspace => {
-                    query.pop();
+                    crate::ui::line_edit::backspace(query);
                     return None;
                 }
                 KeyCode::Char(c) if plain => {

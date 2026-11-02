@@ -3,14 +3,14 @@
 //! `scripts/rust-cli/team-plan-golden.mts` 生成），对本地假服务。
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 use rust_cli_net::{Egress, NetworkPolicy};
 use serde_json::{Value, json};
 
-use super::{AccountOrigins, Family, ProjectTokens, TeamProject, TokenError, TokenRequest};
+use super::{AccountOrigins, ProjectTokens, TeamProject, TokenError, TokenRequest};
 use crate::fake_server_tests::{Captured, Harness, NOW_MS, Reply, Server};
-use crate::test_support::FixedClock;
+use rust_cli_base::account::Family;
+use rust_cli_kernel_api::testing::ManualClock;
 
 /// 按 golden 一行的脚本回复：customerInfo、key 列表、创建、签发。
 fn reply(customer: &Value, keys: &Value, request: &Captured) -> Reply {
@@ -85,7 +85,7 @@ async fn team_and_personal_exchanges_match_the_app() {
         let family = Family::parse(input["family"].as_str().unwrap()).unwrap();
         let tokens = ProjectTokens::new(
             Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap()),
-            Arc::new(FixedClock(AtomicU64::new(NOW_MS))),
+            Arc::new(ManualClock::new(NOW_MS)),
             AccountOrigins {
                 zcode_api: String::new(),
                 zai_api: server.url(),
@@ -153,7 +153,7 @@ async fn team_locations_are_checked_and_re_resolved() {
     let harness = Harness::new(&server.url()).await;
     let tokens = ProjectTokens::new(
         Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap()),
-        Arc::new(FixedClock(AtomicU64::new(NOW_MS))),
+        Arc::new(ManualClock::new(NOW_MS)),
         AccountOrigins {
             zcode_api: String::new(),
             zai_api: server.url(),
@@ -237,7 +237,7 @@ async fn invalid_team_keys_are_rejected() {
     let harness = Harness::new(&server.url()).await;
     let tokens = ProjectTokens::new(
         Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap()),
-        Arc::new(FixedClock(AtomicU64::new(NOW_MS))),
+        Arc::new(ManualClock::new(NOW_MS)),
         AccountOrigins {
             zcode_api: String::new(),
             zai_api: server.url(),

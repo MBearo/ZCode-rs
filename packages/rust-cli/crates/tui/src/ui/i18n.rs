@@ -10,6 +10,14 @@ pub enum Lang {
 }
 
 impl Lang {
+    /// 按界面语言取一句（架构整理 U11：以前 8 个文件各写一份同样的 `pick`）。
+    pub fn pick<'a>(self, en: &'a str, zh: &'a str) -> &'a str {
+        match self {
+            Self::En => en,
+            Self::Zh => zh,
+        }
+    }
+
     /// Node 的语言代码（`/locale` 的提示用）。
     pub fn code(self) -> &'static str {
         match self {
@@ -90,20 +98,15 @@ strings! {
     esc_latest: "{esc} latest", "{esc} 回到最新";
     no_matches: "no matches", "没有匹配";
     loading: "loading...", "加载中...";
-    running: "Running", "运行中";
-    failed: "Failed", "失败";
     page_hint: "{↑/↓} scroll · {esc} close", "{↑/↓} 滚动 · {esc} 关闭";
     status_title: "Status", "状态";
     select_model: "Select model", "选择模型";
     select_model_subtitle: "Applies to this session and new sessions started here.", "用于本会话与之后在这里开始的新会话。";
     help_title: "Slash commands", "斜杠命令";
     help_not_implemented: "(not implemented)", "（未实现）";
-    current: "current", "当前";
     no_models: "No model is configured. Add a provider or set ZCODE_API_KEY.", "没有可用的模型。先添加供应商，或设置 ZCODE_API_KEY。";
     copied: "Copied the last reply", "已复制最后一条回复";
     nothing_to_copy: "Nothing to copy yet", "还没有可复制的回复";
-    image: "Image", "图片";
-    error: "Error", "错误";
     status_version: "Version", "版本";
     status_model: "Model", "模型";
     status_directory: "Directory", "目录";
@@ -113,10 +116,6 @@ strings! {
     status_no_session: "not started", "还没有开始";
     cleared: "Started a new session.", "已开始新会话。";
     starting_session: "Starting the session…", "正在开始会话…";
-    plan_on: "Plan mode on", "已打开计划模式";
-    plan_off: "Plan mode off", "已关闭计划模式";
-    interrupted: "Interrupted · What should ZCode do instead?", "已中断 · 要 ZCode 改做什么？";
-    no_changes: "No changes", "没有改动";
     // 登录视图（tui.md §7.2，Node `tui.loginSetup` 的中英文）。
     login_title: "Set Up Coding Plan", "配置 Coding Plan";
     login_prompt: "Choose a login or API key setup method.", "选择登录或 API key 配置方式。";
@@ -225,13 +224,6 @@ mod tests {
             Lang::En
         );
         assert_eq!(Lang::Zh.code(), "zh-CN");
-    }
-
-    #[test]
-    fn durations_use_the_compact_form() {
-        assert_eq!(elapsed(0), "0s");
-        assert_eq!(elapsed(65), "1m 05s");
-        assert_eq!(elapsed(3723), "1h 02m 03s");
     }
 
     #[test]

@@ -6,7 +6,7 @@ use rust_cli_kernel_api::env_files::{FileKind, PathStyle, StatFile};
 use rust_cli_kernel_api::ids::CommandId;
 use rust_cli_kernel_api::machine::{EnvInfo, Files, Shell};
 use rust_cli_kernel_api::manage::{ChangeDirectory, DirectoryChanged, DirectoryOutcome};
-use rust_cli_kernel_api::session_api::{Ack, Command, CommandEnvelope, KernelError};
+use rust_cli_kernel_api::session_api::{Ack, Command, CommandEnvelope, CommandResult, KernelError};
 use rust_cli_kernel_api::user_command::{LocalCommandOutput, LocalCommandRecord, bold};
 
 use crate::LocalKernel;
@@ -138,7 +138,7 @@ pub(crate) async fn change(
     kernel: &LocalKernel,
     request: ChangeDirectory,
 ) -> Result<DirectoryChanged, KernelError> {
-    let machine = &kernel.machine;
+    let machine = &kernel.machine();
     let home = machine
         .info()
         .path_facts(&request.workspace)
@@ -175,18 +175,18 @@ pub(crate) async fn change(
         },
     };
     match handle.send(envelope).await {
-        Ack::Accepted { result } => match serde_json::from_value::<DirectoryOutcome>(result) {
-            Ok(DirectoryOutcome::Moved) => Ok(DirectoryChanged {
+        Ack::Accepted { result } => match result {
+            CommandResult::Directory(DirectoryOutcome::Moved) => Ok(DirectoryChanged {
                 root,
                 display: shown,
             }),
-            Ok(DirectoryOutcome::Unchanged) => Err(refuse(
+            CommandResult::Directory(DirectoryOutcome::Unchanged) => Err(refuse(
                 kernel,
                 &request,
                 Refused::new(&[("Already in ", false), (&shown, true), (".", false)]),
             )
             .await),
-            Ok(DirectoryOutcome::Failed { current }) => {
+            CommandResult::Directory(DirectoryOutcome::Failed { current }) => {
                 let current = display(current.as_str(), home.as_ref());
                 Err(refuse(
                     kernel,
@@ -204,7 +204,16 @@ pub(crate) async fn change(
                 )
                 .await)
             }
-            Err(error) => Err(failed(format!("unreadable /cd receipt: {error}"))),
+            // 内核不会给出别的结果；以前回执是 JSON，读不出时同样按失败。
+            other @ (CommandResult::Done
+            | CommandResult::Forked(_)
+            | CommandResult::Renamed { .. }
+            | CommandResult::Rewound { .. }
+            | CommandResult::Restored { .. }
+            | CommandResult::Stopped { .. }
+            | CommandResult::Backgrounded { .. }) => {
+                Err(failed(format!("unexpected /cd receipt: {other:?}")))
+            }
         },
         // 运行中或会话已关闭：actor 给的就是给用户看的文字。
         Ack::Rejected { reason } => Err(failed(reason)),

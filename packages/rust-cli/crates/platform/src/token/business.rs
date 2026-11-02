@@ -7,11 +7,12 @@
 
 use base64::Engine;
 use rust_cli_base::secret::RedactedString;
+use rust_cli_base::sync::LockUnpoisoned;
 use rust_cli_base::units;
 use serde_json::{Value, json};
 
 use super::http::{Auth, Fault, Reply, success_code};
-use super::{ProjectTokens, REFRESH_LEAD_MS, RETRY_BACKOFF_MS, TokenError, lock};
+use super::{ProjectTokens, REFRESH_LEAD_MS, RETRY_BACKOFF_MS, TokenError};
 
 const UNKNOWN_TTL_MS: u64 = 300_000;
 
@@ -45,7 +46,7 @@ impl ProjectTokens {
     /// 当前可用的业务 token；没有或到了刷新点时换一个。失败一律是 `project_token_login_failed`。
     pub(crate) async fn business(&self, oauth: &str) -> Result<BusinessToken, TokenError> {
         {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock_unpoisoned();
             let fresh = state
                 .business
                 .as_ref()
@@ -75,7 +76,7 @@ impl ProjectTokens {
             )
             .await;
         let now = self.clock.now_ms();
-        let mut state = lock(&self.state);
+        let mut state = self.state.lock_unpoisoned();
         // 换取期间凭据被清空或换了账号：结果作废。
         let Some(session) = state
             .business

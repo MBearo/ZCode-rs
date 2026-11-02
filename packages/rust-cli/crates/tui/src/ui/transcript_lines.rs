@@ -59,7 +59,7 @@ impl Cache {
 
 /// 本地 cell 的行（transcript 与独立页面共用）。
 pub fn local_lines(local: &Local, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    let dim = cells::dim();
+    let dim = crate::ui::style::dim();
     match local {
         Local::Info(text) => cells::detail_text(text, dim, ctx),
         Local::Error(text) => cells::error_lines(text, ctx),
@@ -75,7 +75,7 @@ pub fn local_lines(local: &Local, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
                 .max()
                 .unwrap_or(0);
             let mut lines = vec![Line::from(vec![
-                Span::styled("ZCode", cells::bold()),
+                Span::styled("ZCode", crate::ui::style::bold()),
                 Span::styled(format!(" v{}", ctx.version), dim),
             ])];
             lines.push(Line::default());
@@ -96,18 +96,11 @@ pub fn local_lines(local: &Local, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
             }
             lines
         }
-        Local::Text { title, body } => {
-            let mut lines = vec![Line::from(Span::styled(title.clone(), cells::bold()))];
-            for line in body.lines() {
-                lines.push(truncate_line(
-                    Line::from(Span::raw(format!("  {line}"))),
-                    ctx.width,
-                ));
-            }
-            lines
-        }
         Local::Table { title, rows, empty } => {
-            let mut lines = vec![Line::from(Span::styled(title.clone(), cells::bold()))];
+            let mut lines = vec![Line::from(Span::styled(
+                title.clone(),
+                crate::ui::style::bold(),
+            ))];
             if rows.is_empty() {
                 lines.push(Line::from(vec![
                     Span::raw("  "),
@@ -220,18 +213,18 @@ pub fn lines(app: &App, cache: &mut Cache, ctx: &Ctx<'_>) -> Layout {
     let still = app
         .viewing
         .is_none()
-        .then(|| crate::ui::manage::pill(&app.background, app.lang))
+        .then(|| crate::ui::manage::pill(&app.snapshots.background, app.lang))
         .flatten();
     let mut pending_locals: Vec<&LocalCell> = locals.collect();
     // 搜索模式（修复线 F114，tui-input.md §2.3.2）：当前匹配所在的块按展开的样子排（临时展开）；折叠着的块另排一份完整
     // 形式供搜索。详细视图本来就是完整形式。
-    let find = app.find.as_ref().filter(|_| !ctx.expanded);
+    let find = app.port.find.as_ref().filter(|_| !ctx.expanded);
     let peek = find.and_then(|find| find.current).map(|hit| hit.key);
     for cell in &built {
         let cell_key = cell.ids().next().unwrap_or(0);
         // 点击只展开这一个块；详细视图本来就是详细形式，不看单独展开。
-        let opened =
-            !ctx.expanded && (app.expanded_cells.contains(&cell_key) || peek == Some(cell_key));
+        let opened = !ctx.expanded
+            && (app.port.expanded_cells.contains(&cell_key) || peek == Some(cell_key));
         let tail = still.as_deref().filter(|_| cell.kind == Kind::Duration);
         let rendered = cached(entries, cell, (ctx, &live_ctx), opened, frame, tail);
         let full = (find.is_some() && !opened && rendered.expandable)
@@ -330,6 +323,9 @@ pub fn pinned(prompts: &[Prompt], top: usize, width: usize, block: Style) -> Opt
         return None;
     }
     let text = prompt.text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let line = Line::from(vec![Span::styled("❯ ", cells::dim()), Span::raw(text)]);
+    let line = Line::from(vec![
+        Span::styled("❯ ", crate::ui::style::dim()),
+        Span::raw(text),
+    ]);
     Some(truncate_line(line, width.saturating_sub(1)).style(block))
 }

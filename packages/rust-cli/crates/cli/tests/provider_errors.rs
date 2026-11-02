@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use rust_cli_base::clock::SystemClock;
 use rust_cli_base::hosts::BIGMODEL_ANTHROPIC;
 use rust_cli_base::models::GLM_5;
 use rust_cli_base::secret::RedactedString;
@@ -36,9 +37,9 @@ use rust_cli_kernel_api::session_api::{
 };
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::environments;
-use rust_cli_model::{ProviderModel, RetryPolicy};
+use rust_cli_model::{ProviderModel, RetryPolicy, RouteOptions};
 use rust_cli_net::{Egress, NetworkPolicy};
-use rust_cli_node_store::{NodeIds, NodeStore, SystemClock};
+use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::{StoragePaths, StorageSettings};
 use rust_cli_platform::{AccountOrigins, AccountServices, CredentialSecret, Platform};
 use rust_cli_runtime::{CompactConfig, ContextConfig, Defaults, LocalKernel, Ports, Surface};
@@ -152,11 +153,17 @@ impl Sandbox {
             jitter_ratio: 0.0,
             ..RetryPolicy::default()
         };
-        let mut model = ProviderModel::new(egress, endpoints, clock.clone()).with_retry(retry);
-        if let Some(base_url) = assumed {
-            model = model.with_assumed_base_url(base_url);
-        }
-        let model: Arc<dyn ModelPort> = Arc::new(model);
+        let options = RouteOptions {
+            retry,
+            assume_base_url: assumed.map(str::to_owned),
+            ..RouteOptions::default()
+        };
+        let model: Arc<dyn ModelPort> = Arc::new(ProviderModel::new(
+            egress,
+            endpoints,
+            clock.clone(),
+            options,
+        ));
         let ids = Arc::new(NodeIds::new(clock.clone()));
         let store = self.store();
         let ports = Ports {
@@ -233,12 +240,7 @@ impl Sandbox {
 }
 
 fn selection() -> ModelSelection {
-    ModelSelection {
-        provider: "personal:glm".to_owned(),
-        model: GLM_5.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("personal:glm".to_owned(), GLM_5.to_owned())
 }
 
 /// 库里 assistant 消息的文字。

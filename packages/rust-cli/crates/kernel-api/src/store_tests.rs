@@ -90,3 +90,40 @@ async fn finding_an_artifact_is_unsupported_unless_the_store_implements_it() {
         "{found:?}"
     );
 }
+
+/// 存储的错误到内核 API 只有一份换算（工作线 F130，审查 K8）：会话不存在与不支持原样保留，其余给出存储的原文。
+#[test]
+fn store_errors_become_kernel_errors() {
+    use crate::session_api::KernelError;
+    let session = crate::ids::SessionId::new("sess_1");
+    assert_eq!(
+        KernelError::from(StoreError::NotFound {
+            session: session.clone()
+        }),
+        KernelError::NotFound {
+            session: session.clone()
+        }
+    );
+    assert_eq!(
+        KernelError::from(StoreError::Unsupported {
+            what: "fork".to_owned()
+        }),
+        KernelError::Unsupported {
+            what: "fork".to_owned()
+        }
+    );
+    assert_eq!(
+        KernelError::from(StoreError::StaleOwner { session }),
+        KernelError::Failed {
+            message: "stale owner epoch for sess_1".to_owned()
+        }
+    );
+    assert_eq!(
+        KernelError::from(StoreError::Storage {
+            message: "disk full".to_owned()
+        }),
+        KernelError::Failed {
+            message: "storage error: disk full".to_owned()
+        }
+    );
+}

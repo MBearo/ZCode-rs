@@ -4,11 +4,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::future::BoxFuture;
-use futures_util::stream::BoxStream;
 use rust_cli_base::models::{DEEPSEEK_V4_PRO, GLM_5_3, HAIKU_3_5_DATED};
 use rust_cli_kernel_api::abort::Abort;
-use rust_cli_kernel_api::model::{ModelError, ModelEvent, ModelPort, ModelRequest, ModelSelection};
+use rust_cli_kernel_api::model::{ModelRequest, ModelSelection};
 use rust_cli_kernel_api::provider::ModelCapabilities;
 use rust_cli_kernel_api::testing::{ScriptedModel, text_response};
 use rust_cli_kernel_api::tool::{
@@ -17,7 +15,6 @@ use rust_cli_kernel_api::tool::{
 use rust_cli_prompts::models::ToolSearchSetting;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 use super::tests::{parts, request, scope};
 
@@ -65,30 +62,6 @@ impl Tool for Named {
     }
 }
 
-/// 按固定的生效配置答能力的模型端口（`None` 是答不出，同测试替身的缺省）。
-struct Configured {
-    inner: ScriptedModel,
-    capabilities: Option<ModelCapabilities>,
-}
-
-impl ModelPort for Configured {
-    fn stream(
-        &self,
-        request: ModelRequest,
-        cancel: CancellationToken,
-    ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-        self.inner.stream(request, cancel)
-    }
-
-    fn capabilities(
-        &self,
-        _selection: &ModelSelection,
-    ) -> BoxFuture<'static, Option<ModelCapabilities>> {
-        let found = self.capabilities;
-        Box::pin(async move { found })
-    }
-}
-
 async fn first_request(
     selection: ModelSelection,
     capabilities: Option<ModelCapabilities>,
@@ -119,35 +92,29 @@ async fn first_request_set(
     tools: Vec<Arc<dyn Tool>>,
     setting: ToolSearchSetting,
 ) -> ModelRequest {
-    let model = Arc::new(Configured {
-        inner: ScriptedModel::new(vec![text_response(&["ok"])]),
-        capabilities,
-    });
+    let model =
+        Arc::new(ScriptedModel::new(vec![text_response(&["ok"])]).capabilities(capabilities));
     let mut request = request("hi");
     request.selection = selection;
     let mut parts = parts(model.clone(), tools);
     parts.limits.tool_search = setting;
     let (scope, _sink) = scope(parts, &request, Abort::new());
     super::run(scope, request).await.unwrap();
-    model.inner.requests().remove(0)
+    model.requests().remove(0)
 }
 
 fn glm() -> ModelSelection {
     ModelSelection {
-        provider: "zai".to_owned(),
-        model: GLM_5_3.to_owned(),
         reasoning: Some("enabled".to_owned()),
-        connection: None,
+        ..ModelSelection::new("zai".to_owned(), GLM_5_3.to_owned())
     }
 }
 
 /// 没有卡片形状的模型（DeepSeek）。
 fn deepseek() -> ModelSelection {
     ModelSelection {
-        provider: "deepseek".to_owned(),
-        model: DEEPSEEK_V4_PRO.to_owned(),
         reasoning: Some("max".to_owned()),
-        connection: None,
+        ..ModelSelection::new("deepseek".to_owned(), DEEPSEEK_V4_PRO.to_owned())
     }
 }
 
@@ -206,12 +173,7 @@ async fn web_search_follows_the_native_web_search_capability() {
 
 /// 网关上的有卡片形状的模型（用户报的场景：anthropic 协议的网关，后面是 Bedrock；GLM 借 opus 的形状，F121）。
 fn gateway_carded() -> ModelSelection {
-    ModelSelection {
-        provider: "gateway".to_owned(),
-        model: GLM_5_3.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    ModelSelection::new("gateway".to_owned(), GLM_5_3.to_owned())
 }
 
 /// Read、ToolSearch 与一个延迟工具（TaskStop）。

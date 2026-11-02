@@ -13,6 +13,7 @@ use rust_cli_prompts::loops::{self, LoopFile};
 use rust_cli_prompts::texts::render;
 
 use super::{Skill, SkillCatalog, SkillShell, SkillSource};
+use rust_cli_kernel_api::tool_names;
 
 /// 内置 skill 的名字。
 pub(crate) const LOOP: &str = "loop";
@@ -34,9 +35,9 @@ const SECURITY_REVIEW_TOOLS: [&str; 15] = [
     "PowerShell(git show *)",
     "Bash(git remote show *)",
     "PowerShell(git remote show *)",
-    "Read",
-    "Glob",
-    "Grep",
+    tool_names::READ,
+    tool_names::GLOB,
+    tool_names::GREP,
     "LS",
     "Task",
 ];

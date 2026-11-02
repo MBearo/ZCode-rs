@@ -2,7 +2,8 @@
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use super::{CURRENT_USER_QUERIES, current_user};
+use super::current_user;
+use crate::repo::messages::CURRENT_USER_QUERIES;
 use crate::repo::{messages, open, sessions};
 
 const SESSION: &str = "ses_state";

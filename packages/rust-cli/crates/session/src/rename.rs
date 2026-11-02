@@ -2,13 +2,11 @@
 //! owner：对话文本在 actor 里取，起名任务只算名字，回到 actor 后才按 `Rename` 提交、发事件、回执。
 //! 同一时间只有一个起名任务；起名期间有新的改名（`Rename` 或 hook）时不写，回执 `superseded` 的文本。
 
-use futures_util::StreamExt;
 use rust_cli_base::{Task, TaskError};
 use rust_cli_kernel_api::ids::CommandId;
-use rust_cli_kernel_api::message::ContentBlock;
-use rust_cli_kernel_api::model::{BlockDelta, ModelEvent, small_fast_model};
-use rust_cli_kernel_api::session_api::Ack;
-use serde_json::json;
+use rust_cli_kernel_api::model::small_fast_model;
+use rust_cli_kernel_api::session_api::{Ack, CommandResult};
+use rust_cli_kernel_api::side_request::SideReply;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
@@ -60,25 +58,14 @@ impl Actor {
                 .await
                 .and_then(|found| found.max_output_tokens);
             let request = request(&selection, &session, (&text, configured));
-            let mut stream = model.stream(request, CancellationToken::new());
-            let mut reply = String::new();
-            while let Some(event) = stream.next().await {
-                match event {
-                    Ok(ModelEvent::BlockStart {
-                        block: ContentBlock::Text { text },
-                        ..
-                    }) => reply.push_str(&text),
-                    Ok(ModelEvent::BlockDelta {
-                        delta: BlockDelta::Text(delta),
-                        ..
-                    }) => reply.push_str(&delta),
-                    Ok(_) => {}
+            let reply =
+                match SideReply::collect(model.stream(request, CancellationToken::new())).await {
+                    Ok(reply) => reply.text(),
                     Err(error) => {
                         tracing::warn!(%error, "session name generation failed");
                         return None;
                     }
-                }
-            }
+                };
             parse_name(&reply).as_deref().and_then(clean_name)
         });
         self.naming = Some(NameJob {
@@ -109,7 +96,10 @@ impl Actor {
         let ack = if self.titles.renames() == job.renames {
             match self.rename(job.command, name.clone()).await {
                 Ack::Accepted { .. } => Ack::Accepted {
-                    result: json!({"name": name, "message": format!("Session renamed to: {name}")}),
+                    result: CommandResult::Renamed {
+                        message: format!("Session renamed to: {name}"),
+                        name,
+                    },
                 },
                 other => other,
             }
@@ -117,10 +107,10 @@ impl Actor {
             // `superseded`：新的改名先落地，保留它。
             let current = self.meta.title.clone();
             Ack::Accepted {
-                result: json!({
-                    "name": current,
-                    "message": format!("Session is named: {current} (a newer rename landed first)"),
-                }),
+                result: CommandResult::Renamed {
+                    message: format!("Session is named: {current} (a newer rename landed first)"),
+                    name: current,
+                },
             }
         };
         let _ = job.reply.send(ack);

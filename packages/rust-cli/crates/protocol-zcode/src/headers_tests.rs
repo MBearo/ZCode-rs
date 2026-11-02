@@ -24,12 +24,7 @@ impl Service for Nothing {
 
 fn request(session: Option<&str>) -> HeaderRequest {
     HeaderRequest {
-        selection: ModelSelection {
-            provider: "account:zai-individual-coding-plan".into(),
-            model: GLM_5_3_ACCOUNT.into(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: ModelSelection::new("account:zai-individual-coding-plan", GLM_5_3_ACCOUNT),
         account_type: "zai".into(),
         mode: "individual-coding-plan".into(),
         session: session.map(SessionId::new),

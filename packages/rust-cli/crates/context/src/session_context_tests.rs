@@ -22,8 +22,8 @@ fn facts(git: bool) -> EnvFacts {
         os_version: String::new(),
         shell: "bash".to_owned(),
         is_git_repo: git,
-        additional_directories: Vec::new(),
         home: None,
+        uid: None,
     }
 }
 

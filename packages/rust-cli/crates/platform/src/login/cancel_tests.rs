@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use super::LoginError;
 use crate::fake_server_tests::{Captured, Harness, NOW_MS, Reply, Server};
 use crate::test_support::read_text;
-use crate::token::Family;
+use rust_cli_base::account::Family;
 
 /// 授权一直没有完成的服务；返回轮询次数的计数。
 async fn pending_service() -> (Server, Arc<AtomicUsize>) {

@@ -6,9 +6,8 @@ use rust_cli_kernel_api::ids::{InteractionId, ToolUseId};
 use rust_cli_kernel_api::orchestration::InteractionRequest;
 use serde_json::{Value, json};
 
-use crate::ui::i18n::{EN, Lang};
+use crate::ui::i18n::Lang;
 use crate::ui::interaction::{Interaction, View};
-use crate::ui::keyboard::Typing;
 use crate::ui::palette::{ColorLevel, Palette};
 use crate::ui::text::plain;
 
@@ -56,21 +55,19 @@ impl Driven {
 
     /// 依次按键，返回第一个回答。
     fn keys(&mut self, request: &InteractionRequest, keys: &[KeyCode]) -> Option<Value> {
-        keys.iter().find_map(|code| {
-            self.ui.on_key(
-                request,
-                KeyEvent::new(*code, KeyModifiers::NONE),
-                self.at,
-                Typing::default(),
-            )
-        })
+        // 比回答的 JSON（工作线 F134 起回答是 `Answer`）。
+        keys.iter()
+            .find_map(|code| {
+                self.ui
+                    .on_key(request, KeyEvent::new(*code, KeyModifiers::NONE), self.at)
+            })
+            .map(|answer| serde_json::to_value(answer).unwrap())
     }
 
     fn shown(&self, request: &InteractionRequest) -> Vec<String> {
         let palette = Palette::new(ColorLevel::Ansi16, None);
         let view = View {
             palette: &palette,
-            strings: &EN,
             lang: Lang::En,
             width: 120,
             height: 40,
@@ -181,7 +178,10 @@ fn several_questions_and_the_idle_answer() {
     );
     assert_eq!(driven.ui.question, 1);
     assert_eq!(
-        driven.ui.idle_answer(&request, 60_000),
+        driven
+            .ui
+            .idle_answer(&request, 60_000)
+            .map(|answer| serde_json::to_value(answer).unwrap()),
         Some(
             json!({"decision": "answered", "answers": {LAYOUT: "Top bar"},
             "annotations": {LAYOUT: {"preview": TOP}}, "afk_timeout_ms": 60_000})
@@ -198,7 +198,10 @@ fn several_questions_and_the_idle_answer() {
     let mut driven = Driven::new(&request);
     driven.keys(&request, &[KeyCode::Down, KeyCode::Enter, KeyCode::Left]);
     assert_eq!((driven.ui.question, driven.ui.cursor), (0, 1));
-    let idle = Driven::new(&request).ui.idle_answer(&request, 4_000);
+    let idle = Driven::new(&request)
+        .ui
+        .idle_answer(&request, 4_000)
+        .map(|answer| serde_json::to_value(answer).unwrap());
     assert_eq!(
         idle,
         Some(json!({"decision": "answered", "answers": {}, "afk_timeout_ms": 4_000}))

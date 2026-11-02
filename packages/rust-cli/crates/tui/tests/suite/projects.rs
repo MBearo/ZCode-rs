@@ -2,7 +2,7 @@
 //! 筛选、`/` 搜索、`r` 改名、`n` 在别的项目新建、enter 切到别的项目的会话（信任检查），esc 关闭。
 use std::sync::Arc;
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::{MemoryStore, text_response};
@@ -217,6 +217,48 @@ async fn enter_switches_to_a_session_of_another_project_after_the_trust_check() 
         text.contains("write the notes") && text.contains("go on"),
         "{text}"
     );
+}
+
+/// 应用内的信任框按一次 ctrl+c：提示行换成“再按一次”，到期（800 ms）后不等下一个键自己换回按键说明，与启动时的信任框
+/// 相同（F138-2）；到期之后再按 esc 照常只取消这次切换。旧代码的提示一直留在画面上。
+#[tokio::test(flavor = "multi_thread")]
+async fn the_in_app_trust_hint_expires_on_its_own() {
+    let store = Arc::new(MemoryStore::default());
+    seed(&store, &SEEDS).await;
+    let trust = Arc::new(Trust {
+        untrusted: vec!["/Users/dev/work/lib"],
+        ..Trust::default()
+    });
+    let setup = Setup {
+        width: 100,
+        height: 30,
+        store,
+        services: services(&trust),
+        ..Setup::default()
+    };
+    let model = GatedModel::scripted(Vec::new());
+    with_ui(model, setup, |mut ui| async move {
+        ui.wait_for("← for projects").await;
+        ui.key(KeyCode::Left);
+        ui.wait_for("~/work/lib  2").await;
+        focus(&mut ui, "Release notes").await;
+        ui.key(KeyCode::Enter);
+        ui.wait_for("Enter to confirm · Esc to cancel").await;
+        ui.press(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        ui.wait_for("Press Ctrl-C again to exit").await;
+        let screen = ui
+            .wait("the hint to expire", |s| {
+                s.contains("Enter to confirm · Esc to cancel") && !s.contains("Ctrl-C again")
+            })
+            .await;
+        assert!(screen.contains("Accessing workspace"), "{screen}");
+        ui.key(KeyCode::Esc);
+        ui.wait("the projects page", |s| {
+            s.contains("~/work/lib  2") && !s.contains("Accessing workspace")
+        })
+        .await;
+    })
+    .await;
 }
 
 /// `n` 在选中行的项目新建会话；`r` 改名写进库（不是当前会话：直接写存储）。

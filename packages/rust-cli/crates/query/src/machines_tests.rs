@@ -6,8 +6,10 @@ use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::env_registry::{MachineFacts, MachineSet, RemoteMachine};
-use rust_cli_kernel_api::ids::EnvironmentId;
+use rust_cli_kernel_api::ids::{EnvironmentId, MachineName};
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::model::ToolDefinition;
+use rust_cli_kernel_api::orchestration::QueryRequest;
 use rust_cli_kernel_api::testing::{
     FakeTool, ScriptedModel, TestMachines, UnusedEnvironment, text_response,
 };
@@ -46,40 +48,62 @@ fn dev_a() -> MachineSet {
     }
 }
 
-fn names() -> Vec<ToolDefinition> {
+/// 工具与它们的定义（同名）：Agent 把机器交给子代理，TaskStop、WebFetch 不带参数，其余在那台机器上执行。
+fn tools() -> Vec<Arc<dyn Tool>> {
     [
-        "Agent",
-        "Bash",
-        "Edit",
-        "Glob",
-        "Grep",
-        "Monitor",
-        "NotebookEdit",
-        "Read",
-        "TaskStop",
-        "WebFetch",
-        "Write",
+        ("Agent", MachineParam::Delegates),
+        ("Bash", MachineParam::RunsThere),
+        ("Edit", MachineParam::RunsThere),
+        ("Glob", MachineParam::RunsThere),
+        ("Grep", MachineParam::RunsThere),
+        ("Monitor", MachineParam::RunsThere),
+        ("NotebookEdit", MachineParam::RunsThere),
+        ("Read", MachineParam::RunsThere),
+        ("TaskStop", MachineParam::Absent),
+        ("WebFetch", MachineParam::Absent),
+        ("Write", MachineParam::RunsThere),
     ]
-    .iter()
-    .map(|name| definition(name))
+    .into_iter()
+    .map(|(name, param)| {
+        Arc::new(FakeTool::new(name, false, "ok").taking_machine(param)) as Arc<dyn Tool>
+    })
     .collect()
+}
+
+fn names() -> Vec<ToolDefinition> {
+    tools().iter().map(|tool| definition(tool.name())).collect()
 }
 
 #[test]
 fn without_remote_machines_the_definitions_stay_byte_for_byte() {
     let mut definitions = names();
     let before = serde_json::to_string(&definitions).unwrap();
-    add_machine_param(&mut definitions, &MachineSet::default(), None);
+    add_machine_param(
+        &mut definitions,
+        &tools(),
+        &MachineSet::default(),
+        &MachineName::primary(),
+    );
     assert_eq!(serde_json::to_string(&definitions).unwrap(), before);
     // 子代理的缺省机器断开、没有别的远端机器时同样不加。
-    add_machine_param(&mut definitions, &MachineSet::default(), Some("dev-a"));
+    add_machine_param(
+        &mut definitions,
+        &tools(),
+        &MachineSet::default(),
+        &MachineName::new("dev-a"),
+    );
     assert_eq!(serde_json::to_string(&definitions).unwrap(), before);
 }
 
 #[test]
 fn a_connected_machine_adds_the_parameter_to_the_machine_tools() {
     let mut definitions = names();
-    add_machine_param(&mut definitions, &dev_a(), None);
+    add_machine_param(
+        &mut definitions,
+        &tools(),
+        &dev_a(),
+        &MachineName::primary(),
+    );
     let with: Vec<&str> = definitions
         .iter()
         .filter(|d| d.input_schema["properties"].get("machine").is_some())
@@ -104,13 +128,13 @@ fn a_connected_machine_adds_the_parameter_to_the_machine_tools() {
         bash,
         &json!({
             "type": "string",
-            "enum": ["local", "dev-a"],
-            "description": "Machine to run on; omit to use the local machine."
+            "enum": ["primary", "dev-a"],
+            "description": "Machine to run on; omit to use the default machine \"primary\"."
         })
     );
     assert_eq!(
         definitions[0].input_schema["properties"]["machine"]["description"],
-        "Machine the agent's tools run on by default; omit to use the local machine."
+        "Machine the agent's tools run on by default; omit to use the default machine \"primary\"."
     );
     // 不改 required。
     assert_eq!(definitions[1].input_schema["required"], json!(["x"]));
@@ -119,7 +143,12 @@ fn a_connected_machine_adds_the_parameter_to_the_machine_tools() {
 #[test]
 fn a_subagent_on_a_remote_machine_names_its_default() {
     let mut definitions = names();
-    add_machine_param(&mut definitions, &dev_a(), Some("dev-a"));
+    add_machine_param(
+        &mut definitions,
+        &tools(),
+        &dev_a(),
+        &MachineName::new("dev-a"),
+    );
     assert_eq!(
         definitions[7].input_schema["properties"]["machine"]["description"],
         "Machine to run on; omit to use the default machine \"dev-a\"."
@@ -142,7 +171,7 @@ fn schema_of<'a>(request: &'a rust_cli_kernel_api::model::ModelRequest, name: &s
 #[tokio::test]
 async fn the_request_follows_the_registry_at_each_step() {
     let tools: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(FakeTool::new("Bash", false, "ok")),
+        Arc::new(FakeTool::new("Bash", false, "ok").taking_machine(MachineParam::RunsThere)),
         Arc::new(FakeTool::new("WebFetch", false, "ok")),
     ];
     let registry = TestMachines::new(Arc::new(UnusedEnvironment));
@@ -161,7 +190,7 @@ async fn the_request_follows_the_registry_at_each_step() {
         if connected {
             assert_eq!(
                 schema_of(sent, "Bash")["properties"]["machine"]["enum"],
-                json!(["local", "dev-a"])
+                json!(["primary", "dev-a"])
             );
         } else {
             assert_eq!(schema_of(sent, "Bash"), &json!({"type": "object"}));
@@ -183,50 +212,14 @@ impl rust_cli_kernel_api::orchestration::ContextBuilder for SeenDefaults {
         rust_cli_kernel_api::orchestration::BuiltContext,
         rust_cli_kernel_api::orchestration::OrchestrationError,
     > {
-        self.0.lock().unwrap().push(request.default_machine);
+        self.0
+            .lock()
+            .unwrap()
+            .push(request.default_machine.remote().map(str::to_owned));
         Ok(rust_cli_kernel_api::orchestration::BuiltContext {
             system: Vec::new(),
-            user_context: Vec::new(),
             attachments: Vec::new(),
         })
-    }
-}
-
-/// 缺省机器在 `machine` 上的输出端（子代理派生时 Agent 的 `machine`）；其余交给记录的输出端。
-struct OnMachine(
-    Arc<rust_cli_kernel_api::testing::RecordingSink>,
-    &'static str,
-);
-
-#[async_trait::async_trait]
-impl rust_cli_kernel_api::orchestration::Interactions for OnMachine {
-    async fn ask(
-        &self,
-        session: &rust_cli_kernel_api::ids::SessionId,
-        request: rust_cli_kernel_api::orchestration::InteractionRequest,
-    ) -> Result<
-        rust_cli_kernel_api::orchestration::InteractionAnswer,
-        rust_cli_kernel_api::orchestration::OrchestrationError,
-    > {
-        self.0.ask(session, request).await
-    }
-}
-
-#[async_trait::async_trait]
-impl rust_cli_kernel_api::orchestration::RunSink for OnMachine {
-    async fn commit_message(
-        &self,
-        message: rust_cli_kernel_api::message::Message,
-    ) -> Result<(), rust_cli_kernel_api::store::StoreError> {
-        self.0.commit_message(message).await
-    }
-
-    async fn emit(&self, event: rust_cli_kernel_api::orchestration::QueryEvent) -> bool {
-        self.0.emit(event).await
-    }
-
-    async fn default_machine(&self) -> Option<String> {
-        Some(self.1.to_owned())
     }
 }
 
@@ -242,15 +235,16 @@ async fn the_context_hears_the_default_machine_of_the_run() {
         let mut parts = parts(model, Vec::new());
         parts.machines = registry.clone();
         parts.context = seen.clone();
-        let request = request("hi");
-        let (scope, sink) = scope(parts, &request, Abort::new());
-        let scope = if remote {
-            let mut scope = Arc::into_inner(scope).unwrap();
-            scope.sink = Arc::new(OnMachine(sink, "dev-a"));
-            Arc::new(scope)
-        } else {
-            scope
+        // 子代理的请求带派生时 Agent 的 `machine`（工作线 F134：以前经输出端的 `default_machine`）。
+        let request = QueryRequest {
+            default_machine: if remote {
+                MachineName::new("dev-a")
+            } else {
+                MachineName::primary()
+            },
+            ..request("hi")
         };
+        let (scope, _sink) = scope(parts, &request, Abort::new());
         crate::run::run(scope, request).await.unwrap();
         let expected = remote.then(|| "dev-a".to_owned());
         assert_eq!(seen.0.lock().unwrap().first(), Some(&expected), "{remote}");

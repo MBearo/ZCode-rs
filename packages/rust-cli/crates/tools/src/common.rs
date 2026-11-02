@@ -1,16 +1,15 @@
-//! 文件工具共用的零件：定义、路径解析、结果构造、错误映射与 JS 语义的格式化。
+//! 文件工具共用的零件：路径解析、执行环境错误的文字与 JS 语义的格式化。工具的定义在 prompts 的 `definition`，结果
+//! 与错误的构造在 kernel-api 的 `tool`（工作线 F132 的 T7）。
 
 use std::sync::Arc;
 
 use rust_cli_kernel_api::env::{EnvError, EnvPath};
 use rust_cli_kernel_api::env_files::{FileStat, ListDir, PathStyle, StatFile};
-use rust_cli_kernel_api::message::ToolResultContent;
 use rust_cli_kernel_api::orchestration::PermissionGate;
 use rust_cli_kernel_api::permission::PermissionDecision;
-use rust_cli_kernel_api::tool::{Tool, ToolError, ToolOutput, ToolUseContext, Validation};
+use rust_cli_kernel_api::tool::{Tool, ToolError, ToolUseContext, Validation};
 use rust_cli_kernel_api::{env_path, env_shell};
-use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::file_state::ReadFileState;
 use crate::texts;
@@ -59,48 +58,20 @@ impl FileTools {
     }
 }
 
-/// 工具名、描述与 schema（来自 `rust-cli-prompts`；数据文件缺失时为空，由单测兜住）。
-pub(crate) struct Definition {
-    pub description: String,
-    pub schema: Value,
-}
-
-pub(crate) fn definition(name: &str) -> Definition {
-    rust_cli_prompts::tool(name).map_or_else(
-        || Definition {
-            description: String::new(),
-            schema: json!({"type": "object"}),
-        },
-        |prompt| Definition {
-            description: prompt.description.clone(),
-            schema: prompt.input_schema.clone(),
-        },
-    )
-}
-
-pub(crate) fn parse<T: DeserializeOwned>(input: &Value) -> Result<T, ToolError> {
-    serde_json::from_value(input.clone()).map_err(|error| ToolError::InvalidInput {
-        message: error.to_string(),
+/// 文件工具的判决主体：路径在 `field`（空串与缺少都是 None，即当前目录；shell-permissions.md §4.4）。
+pub(crate) fn path_subject(
+    access: rust_cli_kernel_api::permission::FileAccess,
+    input: &Value,
+    field: &str,
+) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+    Some(rust_cli_kernel_api::permission::PermissionSubject::Path {
+        access,
+        path: input
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned),
     })
-}
-
-pub(crate) fn text(text: String) -> ToolOutput {
-    ToolOutput {
-        content: vec![ToolResultContent::Text { text }],
-        is_error: false,
-        display: Value::Null,
-    }
-}
-
-pub(crate) fn failed(message: String) -> ToolError {
-    ToolError::Failed { message }
-}
-
-pub(crate) fn invalid(message: String) -> Validation {
-    Validation::Invalid {
-        message,
-        error_code: None,
-    }
 }
 
 /// 执行环境错误给模型看的文本：不带端口内部的前缀。

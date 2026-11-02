@@ -216,11 +216,11 @@ fn the_expanded_preview_lists_details_and_the_conversation() {
 fn confirmations_and_the_directory_prompt() {
     let mut app = shared::app();
     shared::with_rows(&mut app, rows());
-    page(&mut app).confirm = Some(Confirm {
+    page(&mut app).modal = Some(Modal::Confirm(Confirm {
         id: "sess_far".into(),
         name: "Far away".into(),
         focus: 0,
-    });
+    }));
     let (lines, _) = render(&mut app, 100, 24);
     let at = lines
         .iter()
@@ -230,11 +230,10 @@ fn confirmations_and_the_directory_prompt() {
     assert_eq!(lines[at + 2], "  › Cancel");
     assert_eq!(lines[at + 3], "    Permanently delete session");
     assert!(lines[21].contains("enter select · esc cancel"), "{lines:?}");
-    page(&mut app).confirm = None;
-    page(&mut app).cwd = Some(CwdPrompt {
+    page(&mut app).modal = Some(Modal::Cwd(CwdPrompt {
         row: rows()[1].clone(),
         focus: 1,
-    });
+    }));
     let (lines, _) = render(&mut app, 100, 24);
     let at = lines
         .iter()

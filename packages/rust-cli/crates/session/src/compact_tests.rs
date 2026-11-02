@@ -21,8 +21,7 @@ use rust_cli_kernel_api::session_api::{
 };
 use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, SessionStore};
 use rust_cli_kernel_api::testing::{
-    MemoryStore, NeverCompact, ScriptedModel, SequentialIds, UnusedEnvironment, local_services,
-    machine, selection,
+    MemoryStore, NeverCompact, ScriptedModel, SequentialIds, UnusedEnvironment, selection,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -120,6 +119,7 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
     let store = Arc::new(MemoryStore::default());
     store.create(meta()).await.unwrap();
     let env = Arc::new(UnusedEnvironment);
+    let ids: Arc<dyn rust_cli_kernel_api::clock::Ids> = Arc::new(SequentialIds::default());
     let runner = Arc::new(rust_cli_query::QueryLoop::new(rust_cli_query::QueryParts {
         model: Arc::new(ScriptedModel::new(Vec::new())),
         context: Arc::new(rust_cli_kernel_api::testing::FixedContext(Vec::new())),
@@ -127,13 +127,14 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
         executor: Arc::new(rust_cli_kernel_api::testing::FailingExecutor),
         compactor: Arc::new(NeverCompact),
         hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
-        ids: Arc::new(SequentialIds::default()),
+        ids: ids.clone(),
         clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-        machines: rust_cli_kernel_api::testing::environments(env.clone()),
-        machine: machine(env.clone()),
-        local: local_services(env),
+        machines: rust_cli_kernel_api::testing::environments(env),
         artifacts: store.clone(),
-        generation: rust_cli_kernel_api::ids::Generation::new("g"),
+        operations: rust_cli_kernel_api::env::Operations::new(
+            rust_cli_kernel_api::ids::Generation::new("g"),
+            ids.clone(),
+        ),
         non_interactive: false,
         limits: rust_cli_query::RequestLimits::default(),
     }));
@@ -150,21 +151,22 @@ async fn session(fail: Option<&str>) -> (TaskScope, Arc<MemoryStore>, Session) {
             agents: Arc::new(rust_cli_kernel_api::agents::NoAgentSignals),
             cron: Arc::new(rust_cli_kernel_api::cron::NoCron),
             store: store.clone(),
-            ids: Arc::new(SequentialIds::default()),
+            ids: ids.clone(),
             runner,
             compactor: Arc::new(FakeCompactor {
                 fail: fail.map(str::to_owned),
             }),
-            machines: rust_cli_kernel_api::testing::environments(env.clone()),
-            machine: machine(env.clone()),
-            local: local_services(env),
+            machines: rust_cli_kernel_api::testing::environments(env),
             max_turns: None,
             hooks: Arc::new(rust_cli_kernel_api::testing::NoHooks),
             commands: Arc::new(rust_cli_kernel_api::user_command::NoUserCommands),
             inputs: Arc::new(rust_cli_kernel_api::user_input::NoUserInputs),
             artifacts: Arc::new(rust_cli_kernel_api::testing::MemoryArtifacts::default()),
             clock: Arc::new(rust_cli_kernel_api::testing::FixedClock(0)),
-            generation: rust_cli_kernel_api::ids::Generation::new("g1"),
+            operations: rust_cli_kernel_api::env::Operations::new(
+                rust_cli_kernel_api::ids::Generation::new("g1"),
+                ids.clone(),
+            ),
             spawner: scope.spawner(),
             closing: scope.spawner(),
             titles: None,

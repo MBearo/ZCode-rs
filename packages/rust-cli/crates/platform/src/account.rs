@@ -29,7 +29,7 @@ use crate::personal::PersonalAccount;
 use crate::providers::resolve::AccountLayer;
 use crate::providers::rules::{array, ids, text};
 use crate::team::{TeamAccount, TeamPlan};
-use crate::token::Family;
+use rust_cli_base::account::Family;
 
 pub(crate) const INDIVIDUAL_CODING_PLAN: &str = "individual-coding-plan";
 pub(crate) const TEAM_CODING_PLAN: &str = "team-coding-plan";

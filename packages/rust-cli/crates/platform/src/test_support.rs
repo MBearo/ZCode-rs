@@ -3,10 +3,9 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use rust_cli_fs::{FileMode, ParentDir, TempName, WriteOptions};
-use rust_cli_kernel_api::clock::Clock;
+use rust_cli_kernel_api::testing::ManualClock;
 use rust_cli_net::{Egress, NetworkPolicy};
 
 use crate::{AccountOrigins, AccountServices};
@@ -55,25 +54,12 @@ pub(crate) async fn read_text(path: &Path) -> Option<String> {
         .map(|bytes| String::from_utf8(bytes).unwrap())
 }
 
-/// 测试设定的时钟。
-pub(crate) struct FixedClock(pub AtomicU64);
-
-impl Clock for FixedClock {
-    fn now_ms(&self) -> u64 {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
-
 /// 不连任何服务的账号服务（地址指向不可达的本地端口）。
 pub(crate) async fn offline_services() -> AccountServices {
     let origin = "http://127.0.0.1:9".to_owned();
     AccountServices {
         egress: Arc::new(Egress::new(NetworkPolicy::default()).await.unwrap()),
-        clock: Arc::new(FixedClock(AtomicU64::new(1_700_000_000_000))),
+        clock: Arc::new(ManualClock::new(1_700_000_000_000)),
         origins: AccountOrigins {
             zcode_api: format!("{origin}/api/v1"),
             zai_api: origin.clone(),

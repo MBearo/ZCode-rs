@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use rust_cli_base::models::GLM_5_3;
 use rust_cli_kernel_api::message::{StopReason, Usage};
-use rust_cli_kernel_api::model::ModelEvent;
+use rust_cli_kernel_api::model::{BlockDelta, ModelEvent, QuerySource};
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_kernel_api::testing::{ScriptedInteractions, ScriptedModel, selection};
 use rust_cli_kernel_api::tool::{Tool, Validation};
 use serde_json::json;
@@ -81,10 +82,7 @@ async fn a_side_request_with_the_server_tool_becomes_the_result() {
         "Web search results for query: \"rust lang\"\n\nI'll search.\n\nLinks: [{\"title\":\"Rust\",\"url\":\"https://www.rust-lang.org/\"}]\n\nFound it.\n\n\nREMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks."
     );
     let request = &model.requests()[0];
-    assert_eq!(
-        request.source,
-        QuerySource::Side("web_search_tool".to_owned())
-    );
+    assert_eq!(request.source, QuerySource::Side(SideSource::WebSearch));
     // 工作线 F52：带上工具所在的会话（`metadata.user_id` 的 `session_id`，model.md §3.3）。
     assert_eq!(
         request.options.session_id,
@@ -183,27 +181,23 @@ async fn validation_and_permissions_follow_the_spec() {
     assert!(tool.should_defer());
 }
 
-/// 会话 actor 给出当前主模型的交互替身（`/model` 切换之后）。
+/// 会话 actor 给出当前主模型的替身（`/model` 切换之后）。
 struct Switched(rust_cli_kernel_api::model::ModelSelection);
 
 #[async_trait::async_trait]
-impl rust_cli_kernel_api::orchestration::Interactions for Switched {
-    async fn ask(
-        &self,
-        _session: &rust_cli_kernel_api::ids::SessionId,
-        _request: rust_cli_kernel_api::orchestration::InteractionRequest,
-    ) -> Result<
-        rust_cli_kernel_api::orchestration::InteractionAnswer,
-        rust_cli_kernel_api::orchestration::OrchestrationError,
-    > {
-        unreachable!("WebSearch does not ask")
-    }
-
-    async fn current_selection(
-        &self,
-        _session: &rust_cli_kernel_api::ids::SessionId,
-    ) -> Option<rust_cli_kernel_api::model::ModelSelection> {
-        Some(self.0.clone())
+impl rust_cli_kernel_api::testing::OpsOverride for Switched {
+    async fn view(&self) -> Option<rust_cli_kernel_api::orchestration::RunView> {
+        let workspace = rust_cli_kernel_api::env::WorkspaceRef {
+            environment: rust_cli_kernel_api::ids::EnvironmentId::new("local"),
+            root: rust_cli_kernel_api::env::EnvPath::new("/Users/dev/work"),
+        };
+        Some(rust_cli_kernel_api::orchestration::RunView {
+            selection: Some(self.0.clone()),
+            ..rust_cli_kernel_api::orchestration::RunView::new(
+                rust_cli_kernel_api::permission::PermissionMode::Default,
+                workspace,
+            )
+        })
     }
 }
 
@@ -217,13 +211,14 @@ async fn the_side_request_uses_the_current_main_model() {
         selection: selection(),
     });
     let current = rust_cli_kernel_api::model::ModelSelection {
-        provider: "fixture".to_owned(),
-        model: "switched".to_owned(),
         reasoning: Some("high".to_owned()),
-        connection: None,
+        ..rust_cli_kernel_api::model::ModelSelection::new(
+            "fixture".to_owned(),
+            "switched".to_owned(),
+        )
     };
     let (progress, _) = mpsc::channel(1);
-    let context = Ctx::new(Arc::new(Switched(current.clone()))).build();
+    let context = Ctx::with_ops(Arc::new(Switched(current.clone()))).build();
     tool.call(json!({"query": "rust lang"}), context, progress)
         .await
         .unwrap();
@@ -237,12 +232,10 @@ async fn the_side_request_takes_the_effort_from_the_model_card() {
     let model = Arc::new(ScriptedModel::new(vec![search_response()]));
     let tool = WebSearchTool::new(SideModel {
         model: model.clone(),
-        selection: rust_cli_kernel_api::model::ModelSelection {
-            provider: "anthropic".to_owned(),
-            model: GLM_5_3.to_owned(),
-            reasoning: None,
-            connection: None,
-        },
+        selection: rust_cli_kernel_api::model::ModelSelection::new(
+            "anthropic".to_owned(),
+            GLM_5_3.to_owned(),
+        ),
     });
     let (progress, _) = mpsc::channel(1);
     let context = Ctx::new(Arc::new(ScriptedInteractions::default())).build();
@@ -270,56 +263,30 @@ async fn web_search_needs_the_native_web_search_capability() {
     );
     assert!(!fetch.needs_native_web_search());
     let current = rust_cli_kernel_api::model::ModelSelection {
-        provider: "fixture".to_owned(),
-        model: "switched".to_owned(),
         reasoning: Some("high".to_owned()),
-        connection: None,
+        ..rust_cli_kernel_api::model::ModelSelection::new(
+            "fixture".to_owned(),
+            "switched".to_owned(),
+        )
     };
     let (progress, _) = mpsc::channel(1);
-    let context = Ctx::new(Arc::new(Switched(current))).build();
+    let context = Ctx::with_ops(Arc::new(Switched(current))).build();
     tool.call(json!({"query": "q"}), context, progress)
         .await
         .unwrap();
     assert_eq!(model.requests()[0].options.effort, None);
 }
 
-/// 模型端口替身：流交给脚本模型，能力只回答 `supportsNativeWebSearch` 与输出上限（`web_search` 为 None 是答不出）。
-struct Capable {
-    scripted: Arc<ScriptedModel>,
-    web_search: Option<bool>,
-    max_output_tokens: Option<u64>,
-}
-
-impl rust_cli_kernel_api::model::ModelPort for Capable {
-    fn stream(
-        &self,
-        request: ModelRequest,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> futures_util::stream::BoxStream<
-        'static,
-        Result<ModelEvent, rust_cli_kernel_api::model::ModelError>,
-    > {
-        self.scripted.stream(request, cancel)
-    }
-
-    fn capabilities(
-        &self,
-        _selection: &rust_cli_kernel_api::model::ModelSelection,
-    ) -> futures_util::future::BoxFuture<
-        'static,
-        Option<rust_cli_kernel_api::provider::ModelCapabilities>,
-    > {
-        let (web_search, max_output_tokens) = (self.web_search, self.max_output_tokens);
-        Box::pin(async move {
-            web_search.map(|supports_native_web_search| {
-                rust_cli_kernel_api::provider::ModelCapabilities {
-                    supports_native_web_search,
-                    max_output_tokens,
-                    ..Default::default()
-                }
-            })
-        })
-    }
+/// 脚本模型，能力只回答 `supportsNativeWebSearch` 与输出上限（`web_search` 为 None 是答不出）。
+fn capable(web_search: Option<bool>, max_output_tokens: Option<u64>) -> Arc<ScriptedModel> {
+    let capabilities = web_search.map(|supports_native_web_search| {
+        rust_cli_kernel_api::provider::ModelCapabilities {
+            supports_native_web_search,
+            max_output_tokens,
+            ..Default::default()
+        }
+    });
+    Arc::new(ScriptedModel::new(vec![search_response()]).capabilities(capabilities))
 }
 
 /// 工作线 F90（tools-more.md §5 的“能力检查”，照 Node `websearch.ts`）：调用时当前模型的生效配置
@@ -328,13 +295,9 @@ impl rust_cli_kernel_api::model::ModelPort for Capable {
 #[tokio::test]
 async fn a_model_without_native_web_search_gets_the_recoverable_error() {
     let run = |web_search: Option<bool>| async move {
-        let scripted = Arc::new(ScriptedModel::new(vec![search_response()]));
+        let scripted = capable(web_search, None);
         let tool = WebSearchTool::new(SideModel {
-            model: Arc::new(Capable {
-                scripted: scripted.clone(),
-                web_search,
-                max_output_tokens: None,
-            }),
+            model: scripted.clone(),
             selection: selection(),
         });
         let (progress, _) = mpsc::channel(1);
@@ -364,13 +327,9 @@ async fn a_model_without_native_web_search_gets_the_recoverable_error() {
 #[tokio::test]
 async fn the_side_request_caps_max_tokens_at_the_configured_output_limit() {
     let run = |web_search: Option<bool>, max_output_tokens: Option<u64>| async move {
-        let scripted = Arc::new(ScriptedModel::new(vec![search_response()]));
+        let scripted = capable(web_search, max_output_tokens);
         let tool = WebSearchTool::new(SideModel {
-            model: Arc::new(Capable {
-                scripted: scripted.clone(),
-                web_search,
-                max_output_tokens,
-            }),
+            model: scripted.clone(),
             selection: selection(),
         });
         let (progress, _) = mpsc::channel(1);

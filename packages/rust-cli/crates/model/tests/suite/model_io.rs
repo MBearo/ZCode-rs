@@ -15,14 +15,14 @@ use futures_util::StreamExt;
 use rust_cli_kernel_api::ids::{RunId, SessionId};
 use rust_cli_kernel_api::model::{ModelError, ModelPort, ModelRequest, QuerySource};
 use rust_cli_model::{
-    ByteIdle, ModelIoRecord, ModelIoSink, ProviderModel, RequestHeaders, StreamIdle,
+    ByteIdle, ModelIoRecord, ModelIoSink, ProviderModel, RequestHeaders, RouteOptions, StreamIdle,
 };
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::common::{
     API_KEY, block_start, block_stop, collect, delta, event, fast_retry, message_end,
-    message_start, model_at, request, started_text, text_response,
+    message_start, model_at, model_with, request, started_text, text_response,
 };
 use super::fixture::{Fixture, Reply};
 
@@ -54,11 +54,26 @@ fn headers() -> RequestHeaders {
 }
 
 async fn recorded(server: &Fixture, retries: u32) -> (ProviderModel, Arc<Collected>) {
+    recorded_with(server, retries, StreamIdle::default()).await
+}
+
+async fn recorded_with(
+    server: &Fixture,
+    retries: u32,
+    idle: StreamIdle,
+) -> (ProviderModel, Arc<Collected>) {
     let sink = Arc::new(Collected::default());
-    let model = model_at(server.url(), fast_retry(retries))
-        .await
-        .with_request_headers(headers())
-        .with_model_io(sink.clone());
+    let model = model_with(
+        server.url(),
+        RouteOptions {
+            retry: fast_retry(retries),
+            idle,
+            headers: Some(Arc::new(headers())),
+            model_io: Some(sink.clone()),
+            ..RouteOptions::default()
+        },
+    )
+    .await;
     (model, sink)
 }
 
@@ -340,12 +355,16 @@ async fn the_idle_watchdog_is_recorded_with_its_silent_resend() {
         stream_reply(text_response(&["ok"])),
     ])
     .await;
-    let (model, sink) = recorded(&server, 3).await;
-    let model = model.with_stream_idle(StreamIdle {
-        events: Some(Duration::from_millis(10_000)),
-        bytes: Some(ByteIdle::Fixed(Duration::from_millis(150))),
-        stall_notice: Duration::from_millis(50),
-    });
+    let (model, sink) = recorded_with(
+        &server,
+        3,
+        StreamIdle {
+            events: Some(Duration::from_millis(10_000)),
+            bytes: Some(ByteIdle::Fixed(Duration::from_millis(150))),
+            stall_notice: Duration::from_millis(50),
+        },
+    )
+    .await;
     let events = collect(&model, main_request()).await;
     assert!(events.iter().all(Result::is_ok), "{events:?}");
     let records = sink.take();

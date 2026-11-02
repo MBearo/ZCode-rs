@@ -1,9 +1,10 @@
 //! MCP 连接管理（docs/specs/rust-cli/ext.md §3.3）：每个服务器一个连接任务，状态与工具快照只在这里，
 //! 注册表每步读当前快照；`list_changed` 重新拉取；HTTP / SSE 断开后退避重连。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use rust_cli_base::Spawner;
@@ -12,6 +13,7 @@ use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::listing::ListingEntry;
+use rust_cli_kernel_api::manage::{McpServerInfo, McpServerState};
 use rust_cli_kernel_api::mcp::{McpTransport, McpTransportConfig};
 use rust_cli_kernel_api::tool::Tool;
 use serde_json::Value;
@@ -29,16 +31,54 @@ const MAX_RECONNECTS: u32 = 5;
 const INITIAL_BACKOFF_MS: u64 = 1_000;
 const MAX_BACKOFF_MS: u64 = 30_000;
 
-/// 一个服务器的连接状态。
+/// 一个服务器的连接状态（ext.md §3.3）。附带的标记只在它所属的变体里，非法组合（例如停用的服务器“在重连”）写不出来。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum McpStatus {
-    Pending,
-    Connected,
+pub(crate) enum McpStatus {
+    /// 连接中。
+    Pending {
+        /// 连上过、断开后在退避重连（HTTP / SSE）；直接调用时不等它（ext.md §3.8）。
+        reconnecting: bool,
+        /// 这次断开是 HTTP 会话过期（工具调用据此等重连、重试一次）。
+        expired: bool,
+    },
+    /// 已连接。
+    Connected {
+        /// `-p` 里连上过的 stdio 服务器断开了，工具留着、等下次调用再连（ext.md §3.3.3）。
+        dormant: bool,
+    },
     Failed {
         reason: String,
     },
     /// 停用（配置里 `enabled: false`，或 `/mcp disable`，docs/specs/rust-cli/tui-manage.md §6）：不连接。
     Disabled,
+}
+
+impl McpStatus {
+    /// 首次连接（或 `/mcp reconnect`、启用）的连接中。
+    pub const CONNECTING: Self = Self::Pending {
+        reconnecting: false,
+        expired: false,
+    };
+    /// 已连接、客户端可用。
+    pub const CONNECTED: Self = Self::Connected { dormant: false };
+
+    /// 界面与等待用的状态（不带附带的标记）。
+    pub fn state(&self) -> McpServerState {
+        match self {
+            Self::Pending { .. } => McpServerState::Pending,
+            Self::Connected { .. } => McpServerState::Connected,
+            Self::Failed { .. } => McpServerState::Failed,
+            Self::Disabled => McpServerState::Disabled,
+        }
+    }
+
+    fn connected(&self) -> bool {
+        matches!(self, Self::Connected { .. })
+    }
+
+    fn pending(&self) -> bool {
+        matches!(self, Self::Pending { .. })
+    }
 }
 
 struct Server {
@@ -49,12 +89,6 @@ struct Server {
     instructions: Option<String>,
     resources: bool,
     prompts: Vec<Value>,
-    /// 最近一次断开是 HTTP 会话过期（工具调用据此重试一次）。
-    expired: bool,
-    /// 连上过、断开后在退避重连（HTTP / SSE）；状态是 Pending（直接调用时不等它，ext.md §3.8）。
-    reconnecting: bool,
-    /// `-p` 里连上过的 stdio 服务器断开了，工具留着、等下次调用再连（ext.md §3.3.3）；状态仍是 Connected。
-    dormant: bool,
     /// 叫醒等下次调用的连接任务。
     wake: Arc<Notify>,
     /// 连接任务的代号：重连、停用时加一；旧任务的状态更新因代号不符被丢弃（tui-manage.md §6.1）。
@@ -73,9 +107,6 @@ impl Server {
             instructions: None,
             resources: false,
             prompts: Vec::new(),
-            expired: false,
-            reconnecting: false,
-            dormant: false,
             wake: Arc::new(Notify::new()),
             generation: 0,
             cancel: CancellationToken::new(),
@@ -108,7 +139,7 @@ pub(crate) struct Inner {
 
 impl Inner {
     fn servers(&self) -> MutexGuard<'_, BTreeMap<String, Server>> {
-        self.servers.lock().unwrap_or_else(PoisonError::into_inner)
+        self.servers.lock_unpoisoned()
     }
 
     /// 只改仍是这个代号的服务器：重连或停用之后，旧连接任务的更新不覆盖新的状态。
@@ -139,7 +170,7 @@ impl Inner {
     pub(crate) fn client(&self, name: &str) -> Option<Arc<Client>> {
         self.servers()
             .get(name)
-            .filter(|server| server.status == McpStatus::Connected)
+            .filter(|server| server.status.connected())
             .and_then(|server| server.client.clone())
     }
 
@@ -148,20 +179,28 @@ impl Inner {
     pub(crate) async fn reconnect_dormant(&self, name: &str) -> Option<Arc<Client>> {
         let wake = {
             let servers = self.servers();
-            let server = servers.get(name).filter(|server| server.dormant)?;
+            let server = servers
+                .get(name)
+                .filter(|server| server.status == McpStatus::Connected { dormant: true })?;
             server.wake.clone()
         };
         wake.notify_one();
         let mut changes = self.changed.subscribe();
         loop {
-            match self.servers().get(name) {
-                Some(server) if server.status == McpStatus::Connected && !server.dormant => {
-                    if let Some(client) = &server.client {
-                        return Some(client.clone());
-                    }
+            match self
+                .servers()
+                .get(name)
+                .map(|server| (&server.status, &server.client))
+            {
+                Some((McpStatus::Connected { dormant: false }, Some(client))) => {
+                    return Some(client.clone());
                 }
-                Some(server) if server.status == McpStatus::Connected => {}
-                _ => return None,
+                Some((McpStatus::Connected { .. }, _)) => {}
+                Some((
+                    McpStatus::Pending { .. } | McpStatus::Failed { .. } | McpStatus::Disabled,
+                    _,
+                ))
+                | None => return None,
             }
             if changes.changed().await.is_err() {
                 return None;
@@ -172,7 +211,7 @@ impl Inner {
     pub(crate) fn expired(&self, name: &str) -> bool {
         self.servers()
             .get(name)
-            .is_some_and(|server| server.expired)
+            .is_some_and(|server| matches!(server.status, McpStatus::Pending { expired: true, .. }))
     }
 
     /// 等服务器换上新客户端（重连成功）或不再重连。
@@ -181,12 +220,12 @@ impl Inner {
         loop {
             let settled = match self.servers().get(name) {
                 Some(server) => match &server.status {
-                    McpStatus::Connected => server
+                    McpStatus::Connected { .. } => server
                         .client
                         .as_ref()
                         .is_some_and(|client| !Arc::ptr_eq(client, old)),
                     McpStatus::Failed { .. } | McpStatus::Disabled => true,
-                    McpStatus::Pending => false,
+                    McpStatus::Pending { .. } => false,
                 },
                 None => true,
             };
@@ -263,15 +302,12 @@ impl Inner {
         }
         let published = client.clone();
         self.update(name, generation, move |server| {
-            server.status = McpStatus::Connected;
+            server.status = McpStatus::CONNECTED;
             server.client = Some(published);
             server.tools = tools;
             server.prompts = prompts;
             server.instructions = instructions;
             server.resources = resources;
-            server.expired = false;
-            server.reconnecting = false;
-            server.dormant = false;
         });
         tracing::info!(server = name, "MCP server connected");
         while let Some(notice) = notices.recv().await {
@@ -339,8 +375,8 @@ impl Inner {
                     if !remote && self.print.load(Ordering::Relaxed) {
                         let mut wake = None;
                         self.update(&name, generation, |server| {
+                            server.status = McpStatus::Connected { dormant: true };
                             server.client = None;
-                            server.dormant = true;
                             wake = Some(server.wake.clone());
                         });
                         let Some(wake) = wake else { return };
@@ -352,12 +388,13 @@ impl Inner {
                         continue;
                     }
                     self.update(&name, generation, |server| {
-                        server.status = McpStatus::Pending;
+                        // stdio 不重连：下面马上记为失败。
+                        server.status = McpStatus::Pending {
+                            reconnecting: remote,
+                            expired,
+                        };
                         server.client = None;
                         server.tools.clear();
-                        server.expired = expired;
-                        // stdio 不重连：下面马上记为失败。
-                        server.reconnecting = remote;
                     });
                     reason.unwrap_or_else(|| "connection closed".to_owned())
                 }
@@ -373,8 +410,6 @@ impl Inner {
                     server.status = McpStatus::Failed { reason };
                     server.client = None;
                     server.tools.clear();
-                    server.reconnecting = false;
-                    server.dormant = false;
                 });
                 return;
             }
@@ -437,18 +472,14 @@ impl McpManager {
 
     /// 开始连接（每个服务器一个常驻任务，不等待）。同名的服务器只连一次。
     pub fn start(&self, workspace: WorkspaceRef, servers: Vec<McpServer>) {
-        *self
-            .0
-            .workspace
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(workspace.clone());
+        *self.0.workspace.lock_unpoisoned() = Some(workspace.clone());
         for config in servers {
             let cancel = {
                 let mut known = self.0.servers();
                 if known.contains_key(&config.name) {
                     continue;
                 }
-                let server = Server::new(config.clone(), McpStatus::Pending);
+                let server = Server::new(config.clone(), McpStatus::CONNECTING);
                 let cancel = server.cancel.clone();
                 known.insert(config.name.clone(), server);
                 cancel
@@ -465,10 +496,10 @@ impl McpManager {
     }
 
     pub fn find(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        // 旧名也能找到（资源工具的 `ListMcpResources` 等，与内置工具的查找相同）。
+        // 旧名按 kernel-api 的旧名表也能找到（资源工具的 `ListMcpResources` 等，与内置工具的查找相同）。
         self.tools()
             .into_iter()
-            .find(|tool| tool.name() == name || tool.aliases().contains(&name))
+            .find(|tool| rust_cli_kernel_api::tool::answers_to(tool.as_ref(), name))
     }
 
     /// 已连接、有 instructions 的服务器，按名字排序：`## <server>\n<instructions>`（ext.md §3.6）。
@@ -477,7 +508,8 @@ impl McpManager {
     }
 
     /// 每个服务器的状态（按名字排序）。
-    pub fn status(&self) -> Vec<(String, McpStatus)> {
+    #[cfg(test)]
+    pub(crate) fn status(&self) -> Vec<(String, McpStatus)> {
         self.0
             .servers()
             .values()
@@ -486,24 +518,23 @@ impl McpManager {
     }
 
     /// `/mcp` 与 `/status` 的快照（docs/specs/rust-cli/tui-display.md §3.4）：状态、失败原因、已连接时的工具数。
-    pub fn server_infos(&self) -> Vec<rust_cli_kernel_api::manage::McpServerInfo> {
-        use rust_cli_kernel_api::manage::{McpServerInfo, McpServerState};
+    pub fn server_infos(&self) -> Vec<McpServerInfo> {
         self.0
             .servers()
             .values()
             .map(|server| {
-                let (state, reason) = match &server.status {
-                    McpStatus::Pending => (McpServerState::Pending, None),
-                    McpStatus::Connected => (McpServerState::Connected, None),
-                    McpStatus::Failed { reason } => (McpServerState::Failed, Some(reason.clone())),
-                    McpStatus::Disabled => (McpServerState::Disabled, None),
+                let reason = match &server.status {
+                    McpStatus::Failed { reason } => Some(reason.clone()),
+                    McpStatus::Pending { .. }
+                    | McpStatus::Connected { .. }
+                    | McpStatus::Disabled => None,
                 };
                 McpServerInfo {
                     name: server.config.name.clone(),
-                    state,
+                    state: server.status.state(),
                     reason,
                     tools: server.tools.len(),
-                    machine: remote_machine(&server.config),
+                    machine: server.config.machine.clone(),
                 }
             })
             .collect()
@@ -526,7 +557,7 @@ impl McpManager {
                 .0
                 .servers()
                 .values()
-                .any(|server| server.status == McpStatus::Pending);
+                .any(|server| server.status.pending());
             if !pending || changes.changed().await.is_err() {
                 return;
             }
@@ -538,11 +569,7 @@ impl McpManager {
 /// 持有的锁里的表：快照（manager_state.rs）与工具、状态在同一把锁里取。这是给模型的工具表：名字太长的工具不在里面
 /// （主线程、子代理、ToolSearch 与直接调用都从这里取，ext.md §3.4）；`/mcp` 的工具数仍按服务器列出的全部工具。
 fn tools_of(inner: &Arc<Inner>, servers: &BTreeMap<String, Server>) -> Vec<Arc<dyn Tool>> {
-    let connected = || {
-        servers
-            .values()
-            .filter(|server| server.status == McpStatus::Connected)
-    };
+    let connected = || servers.values().filter(|server| server.status.connected());
     // 资源工具：有 resources 能力的服务器连上过一次之后一直在（服务器断开不撤回，ext.md §3.3.3）。
     let seen = inner.resources_seen.load(Ordering::Relaxed);
     let mut tools: Vec<Arc<dyn Tool>> = if seen || connected().any(|server| server.resources) {
@@ -560,19 +587,11 @@ fn tools_of(inner: &Arc<Inner>, servers: &BTreeMap<String, Server>) -> Vec<Arc<d
     tools
 }
 
-/// 服务器绑定的远端机器（`local` 与空串是本机）。
-fn remote_machine(config: &McpServer) -> Option<String> {
-    config
-        .machine
-        .clone()
-        .filter(|name| !name.is_empty() && name != rust_cli_kernel_api::env_registry::LOCAL_MACHINE)
-}
-
 /// 已连接、有 instructions 的服务器，按名字排序：`## <server>\n<instructions>`（ext.md §3.6）。
 fn instructions_of(servers: &BTreeMap<String, Server>) -> Vec<ListingEntry> {
     servers
         .values()
-        .filter(|server| server.status == McpStatus::Connected)
+        .filter(|server| server.status.connected())
         .filter_map(|server| {
             let text = server.instructions.as_ref()?;
             Some(ListingEntry {
@@ -588,7 +607,7 @@ pub(crate) fn resource_servers(inner: &Inner) -> Vec<(String, Arc<Client>)> {
     inner
         .servers()
         .values()
-        .filter(|server| server.status == McpStatus::Connected && server.resources)
+        .filter(|server| server.status.connected() && server.resources)
         .filter_map(|server| Some((server.config.name.clone(), server.client.clone()?)))
         .collect()
 }

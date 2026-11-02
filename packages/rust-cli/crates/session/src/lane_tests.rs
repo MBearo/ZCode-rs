@@ -4,10 +4,10 @@
 use rust_cli_kernel_api::message::{Message, UserOrigin};
 use rust_cli_kernel_api::testing::{NoticeEnvironment, shell_notice, tool_use_response};
 use rust_cli_kernel_api::tool::Tool;
-use rust_cli_query::task_notification;
 
 use super::notice::{notices_in, session};
 use super::*;
+use crate::notices::task_notification;
 
 fn steer(id: &str, text: &str) -> CommandEnvelope {
     CommandEnvelope {
@@ -51,37 +51,6 @@ fn absorbed(messages: &[Message]) -> Vec<String> {
             _ => None,
         })
         .collect()
-}
-
-/// 第一次响应等放行（回合没有工具边界），之后交给剧本；记下全部请求。
-struct GatedThenScripted {
-    gate: Arc<Notify>,
-    first: std::sync::atomic::AtomicBool,
-    rest: ScriptedModel,
-    requests: std::sync::Mutex<Vec<ModelRequest>>,
-}
-
-impl GatedThenScripted {
-    fn requests(&self) -> Vec<ModelRequest> {
-        self.requests.lock().unwrap().clone()
-    }
-}
-
-impl ModelPort for GatedThenScripted {
-    fn stream(
-        &self,
-        request: ModelRequest,
-        cancel: CancellationToken,
-    ) -> BoxStream<'static, Result<ModelEvent, ModelError>> {
-        self.requests.lock().unwrap().push(request.clone());
-        if !self.first.swap(false, std::sync::atomic::Ordering::SeqCst) {
-            return self.rest.stream(request, cancel);
-        }
-        let gate = self.gate.clone();
-        stream::once(async move { gate.notified().await })
-            .flat_map(|()| stream::iter(text_response(&["ok"])))
-            .boxed()
-    }
 }
 
 async fn asking(
@@ -156,15 +125,15 @@ async fn notices_left_at_the_end_share_one_turn_before_queued_input() {
     let scope = TaskScope::root("test", |_| {});
     let env = Arc::new(NoticeEnvironment::default());
     // 第一次响应等放行（没有工具边界），之后按剧本。
-    let model = Arc::new(GatedThenScripted {
-        gate: gate.clone(),
-        first: std::sync::atomic::AtomicBool::new(true),
-        rest: ScriptedModel::new(vec![
+    // 第一次响应等放行（回合没有工具边界），之后按剧本。
+    let model = Arc::new(
+        ScriptedModel::new(vec![
+            text_response(&["ok"]),
             text_response(&["notices seen"]),
             text_response(&["queued seen"]),
-        ]),
-        requests: std::sync::Mutex::default(),
-    });
+        ])
+        .gated_at(0, gate.clone()),
+    );
     let session = session(&scope, env.clone(), model.clone(), Vec::new(), Vec::new()).await;
     let mut events = session.subscribe(Some(0));
     session.send(submit("c1", "first")).await;

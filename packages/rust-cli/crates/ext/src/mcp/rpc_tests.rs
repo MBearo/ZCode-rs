@@ -11,11 +11,10 @@ use crate::test_support::{FakeMcp, server, workspace};
 async fn connected(fake: &Arc<FakeMcp>, scope: &TaskScope) -> (Arc<Client>, NoticeReceiver) {
     let request = McpConnect {
         server: "s".to_owned(),
-        transport: McpTransportConfig::Http {
-            url: "https://mcp.example.com".to_owned(),
-            headers: Default::default(),
-        },
-        env: Default::default(),
+        transport: McpTransportConfig::http(
+            "https://mcp.example.com".to_owned(),
+            Default::default(),
+        ),
     };
     let transport: Arc<dyn McpTransport> = fake.clone();
     let id = transport.connect(&workspace(), request).await.unwrap();

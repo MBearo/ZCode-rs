@@ -3,19 +3,19 @@
 //!
 //! 修复（用户决定 2026-10-23）：以前父会话 actor 退出之后，会话级询问入口发不出询问，后台子代理按拒绝处理。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::ids::{InteractionId, OwnerEpoch, SessionId, ToolUseId};
 use rust_cli_kernel_api::orchestration::{
-    DetachedAsk, DetachedEvent, InteractionAnswer, InteractionRequest, OrchestrationError,
+    Answer, DetachedAsk, DetachedEvent, InteractionAnswer, InteractionRequest, OrchestrationError,
 };
 use rust_cli_kernel_api::session_api::KernelError;
 use rust_cli_kernel_api::store::{FactBatch, SessionStore};
-use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 
 type Reply = oneshot::Sender<Result<InteractionAnswer, OrchestrationError>>;
@@ -55,9 +55,7 @@ pub struct DetachedAsks {
 }
 
 fn gone() -> OrchestrationError {
-    OrchestrationError::Failed {
-        message: "the session is closed".to_owned(),
-    }
+    OrchestrationError::Closed
 }
 
 impl DetachedAsks {
@@ -70,7 +68,7 @@ impl DetachedAsks {
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_unpoisoned()
     }
 
     /// 会话因 `/clear`、`/resume` 关闭（取消待回答的交互之前）：登记它与它的标题，之后它的询问用标题做标签。
@@ -146,7 +144,7 @@ impl DetachedAsks {
     pub async fn resolve(
         &self,
         interaction: &InteractionId,
-        answer: Value,
+        answer: Answer,
     ) -> Result<(), KernelError> {
         let (position, entry) = {
             let mut state = self.state();
@@ -182,8 +180,8 @@ impl DetachedAsks {
             event = "interaction.resolved",
             session = %entry.ask.session,
             interaction = %interaction,
-            decision = answer["decision"].as_str().unwrap_or_default(),
-            remembered = answer["remember"].as_array().map_or(0, Vec::len),
+            decision = answer.decision(),
+            remembered = answer.remembered().len(),
             "a closed session's question was answered"
         );
         let _ = entry.reply.send(Ok(InteractionAnswer {

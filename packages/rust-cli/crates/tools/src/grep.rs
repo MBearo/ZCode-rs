@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::EnvPath;
 use rust_cli_kernel_api::env_files::{FileKind, GrepMode, GrepOutcome, GrepSearch};
+use rust_cli_kernel_api::machine_param::MachineParam;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
 };
@@ -14,16 +15,19 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::common::{
-    Definition, cwd, definition, display_path, env_failure, escape_control, failed, invalid, parse,
-    resolve_input, stat, style, suggestion_under_cwd, text,
+    cwd, display_path, env_failure, escape_control, resolve_input, stat, style,
+    suggestion_under_cwd,
 };
 use crate::grep_output::{content_lines, count, globs, locale_order, paginate, pagination, plural};
 use crate::texts;
+use rust_cli_kernel_api::tool::{failed, invalid, parse, text};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
 /// Grep 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
 const MAX_RESULT_CHARS: usize = 20_000;
 
-pub const NAME: &str = "Grep";
+pub const NAME: &str = tool_names::GREP;
 
 #[derive(Deserialize)]
 struct Input {
@@ -58,7 +62,7 @@ pub struct GrepTool {
 impl GrepTool {
     pub fn new() -> Self {
         Self {
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
         }
     }
 }
@@ -73,6 +77,23 @@ impl Default for GrepTool {
 impl Tool for GrepTool {
     fn name(&self) -> &str {
         NAME
+    }
+
+    /// 在点名的机器上搜索（remote-exec.md §20.5.1）。
+    fn machine_param(&self) -> MachineParam {
+        MachineParam::RunsThere
+    }
+
+    /// 判决链按路径规则检查（`Read(...)`，shell-permissions.md §4.4）。
+    fn permission_subject(
+        &self,
+        input: &Value,
+    ) -> Option<rust_cli_kernel_api::permission::PermissionSubject> {
+        crate::common::path_subject(
+            rust_cli_kernel_api::permission::FileAccess::Read,
+            input,
+            "path",
+        )
     }
 
     fn input_schema(&self) -> Value {

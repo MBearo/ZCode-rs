@@ -15,6 +15,7 @@ use super::mouse::Target;
 use super::projects::{Entry, FILTERS, ProjectsPage, State};
 use super::session_rows::{SessionRow, center_truncate, relative};
 use super::text::{truncate, truncate_line, wrap_text};
+use crate::ui::style::dim;
 
 /// 右侧详情的宽度与它前面的分隔（`│ `）。
 const DETAILS: usize = 38;
@@ -33,10 +34,6 @@ const DOT_WIDTH: usize = 2;
 const TITLE_GAP: usize = 2;
 /// 详情里的首条输入最多几行。
 const PROMPT_LINES: usize = 2;
-
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
 
 pub fn dot(state: State) -> (&'static str, Style) {
     match state {
@@ -108,7 +105,7 @@ impl App {
         ));
         let mut lines = vec![
             truncate_line(Line::from(tabs), width),
-            Line::from(Span::styled("─".repeat(width), dim())),
+            crate::ui::style::rule(width, dim()),
         ];
         // 搜索行（搜索、改名或出错时才有，`Search › ` / `Rename › `）。
         let accent = Style::default()
@@ -321,11 +318,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, page: &mut ProjectsPage, now_m
     let width = area.width as usize;
     let height = super::page::body_height(area.height);
     let (body, targets) = app.projects_body(page, width, height, now_ms);
-    app.hits = super::mouse::Hits::default();
+    app.pointer.hits = super::mouse::Hits::default();
     for (row, index) in targets {
         let y = area.y + super::page::BODY_TOP + row as u16;
         if y < area.bottom().saturating_sub(1) {
-            app.hits
+            app.pointer
+                .hits
                 .regions
                 .push((Rect::new(area.x, y, area.width, 1), Target::Session(index)));
         }

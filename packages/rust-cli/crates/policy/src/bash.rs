@@ -9,19 +9,21 @@
 
 use rust_cli_kernel_api::permission::{PermissionMode, RuleBehavior};
 
-use crate::bash_compound::{self, BACKGROUND, SHELL_OPERATORS, Split};
-use crate::bash_subst;
 use crate::bash_suggest;
 use crate::check::{AskKind, Check, Inputs};
-use crate::parse::{Analysis, Invocation, analyze};
 use crate::paths::PathContext;
-use crate::readonly::is_read_only_on;
 use crate::rules::Found;
+use crate::shell::compound::{self, BACKGROUND, SHELL_OPERATORS, Split};
+use crate::shell::parse::{Analysis, Invocation, analyze};
+use crate::shell::readonly::is_read_only_on;
+use crate::shell::subst;
 use crate::shell_rules::{self, Mode, Subject};
 use crate::texts::{self, Reason};
 use crate::{bash_cd, bash_inline, bash_paths, removal};
+use rust_cli_kernel_api::tool_names;
 
-const TOOL: &str = "Bash";
+/// Bash 规则写在这个工具名下（shell 主体的规则，Monitor 的命令也用它）。
+pub(crate) const TOOL: &str = tool_names::BASH;
 /// acceptEdits 下自动放行的文件命令。
 const ACCEPT_EDITS: &[&str] = &["mkdir", "touch", "rm", "rmdir", "mv", "cp", "sed"];
 /// 一条命令命中的第一条某种行为的 Bash 规则（候选按行为算，§4.5.6）。
@@ -139,11 +141,11 @@ fn check_subcommand(
         return Check::Allow.into();
     }
     // 工作线 F85：acceptEdits 的文件命令按去掉安全前缀之后的第一个词认（同规则的候选）；`X=1 mkdir x` 不算。
-    let stripped = shell_rules::strip_safe_wrappers(text);
+    let stripped = crate::shell::strip::strip_safe_wrappers(text);
     let name = stripped.split_whitespace().next().unwrap_or_default();
     if (inputs.mode == PermissionMode::AcceptEdits && ACCEPT_EDITS.contains(&name))
         || is_read_only_on(text, false, inputs.paths.style)
-        || invocation.is_some_and(bash_compound::test_is_read_only)
+        || invocation.is_some_and(compound::test_is_read_only)
     {
         return Check::Allow.into();
     }
@@ -177,7 +179,7 @@ struct Parts {
 /// 子命令：解析出错时整条命令当一个；替换里的命令按 §4.5.2 拆出，复合结构按 §4.5.4 拆开（不能静态检查时是 Err，
 /// 带询问的理由与找到的简单命令）。
 fn parts(command: &str, analysis: &Analysis) -> Result<Parts, (String, Vec<Invocation>)> {
-    match bash_compound::split(command, analysis) {
+    match compound::split(command, analysis) {
         Split::Whole => Ok(Parts {
             list: vec![(command.to_owned(), None, None)],
             groups: vec![0],
@@ -558,7 +560,7 @@ fn too_complex(
             suggestions: Vec::new(),
         };
     }
-    let segments = bash_subst::segments(commands);
+    let segments = subst::segments(commands);
     let denied = segments.iter().any(|segment| {
         let subject = Subject {
             plain: Some(segment.plain_text.as_str()),

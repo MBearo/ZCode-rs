@@ -37,8 +37,8 @@ fn env() -> Arc<MemoryEnvironment> {
         os_version: "x".into(),
         shell: "zsh".into(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     }))
 }
 
@@ -54,8 +54,8 @@ async fn plan_open_switches_to_plan_and_opens_the_plan_file() {
     let setup = Setup {
         environments: environments(env.clone()),
         services: Services {
-            editor: Some(editor.clone()),
-            ..Services::default()
+            editor: editor.clone(),
+            ..super::stub_services::services()
         },
         ..Setup::default()
     };

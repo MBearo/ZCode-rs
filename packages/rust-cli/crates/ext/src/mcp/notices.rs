@@ -8,7 +8,8 @@
 //! 发送方从不等待：读者是这条连接上事件的唯一消费者，连接任务拉清单时正等着读者送来响应，读者若在这里等连接
 //! 任务就成了互相等待。
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 
@@ -19,10 +20,6 @@ struct Pending {
     /// 还没取走的 `list_changed` 种类，按第一次到达的顺序。
     changed: Vec<String>,
     closed: Option<Notice>,
-}
-
-fn lock(pending: &Mutex<Pending>) -> MutexGuard<'_, Pending> {
-    pending.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// 读者一侧。释放时接收方读完剩下的就结束。
@@ -55,7 +52,7 @@ pub(crate) fn channel() -> (NoticeSender, NoticeReceiver) {
 impl NoticeSender {
     pub(crate) fn send(&self, notice: Notice) {
         {
-            let mut pending = lock(&self.pending);
+            let mut pending = self.pending.lock_unpoisoned();
             match notice {
                 Notice::ListChanged(kind) => {
                     if !pending.changed.contains(&kind) {
@@ -71,7 +68,7 @@ impl NoticeSender {
 
 impl NoticeReceiver {
     fn take(&self) -> Option<Notice> {
-        let mut pending = lock(&self.pending);
+        let mut pending = self.pending.lock_unpoisoned();
         if pending.changed.is_empty() {
             pending.closed.take()
         } else {

@@ -10,7 +10,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::env::{EnvPath, WorkspaceRef};
-use crate::ids::{AgentId, RunId, SessionId};
+use crate::ids::{AgentId, MessageId, RunId, SessionId};
 use crate::message::Message;
 use crate::permission::{PermissionDecision, PermissionMode};
 
@@ -120,6 +120,24 @@ pub struct HookEvent {
     pub payload: Value,
     #[serde(default)]
     pub context: HookContext,
+}
+
+impl HookEvent {
+    /// 一个 hook 事件，上下文是缺省（[`HookContext::default`]；调用方按需用结构更新填上）。
+    pub fn new(
+        name: HookEventName,
+        session: SessionId,
+        workspace: WorkspaceRef,
+        payload: Value,
+    ) -> Self {
+        Self {
+            name,
+            session,
+            workspace,
+            payload,
+            context: HookContext::default(),
+        }
+    }
 }
 
 /// 所有匹配的 hook 运行后的合并结果。各字段的含义按事件见 docs/specs/rust-cli/hooks.md §6、§7。
@@ -279,22 +297,51 @@ impl Steered {
     }
 }
 
+/// 工具边界并入的排队命令：主循环把并入的插话与通知写成 `queued_command` attachment（query.md §4、§5），会话 actor 与
+/// TUI 按这些名字认出它们（工作线 F130，审查 C8：以前在 4 个 crate 里各写字面量）。
+pub mod queued_command {
+    /// attachment 的来源。
+    pub const SOURCE: &str = "queued_command";
+    /// `data` 里放模式的键。
+    pub const MODE_KEY: &str = "commandMode";
+    /// `data` 里放原文的键。
+    pub const PROMPT_KEY: &str = "prompt";
+    /// 插话的模式。
+    pub const PROMPT_MODE: &str = "prompt";
+    /// 后台通知的模式；通知开的回合里 meta user 消息的来源也是它（会话 actor 与子代理的续跑）。
+    pub const TASK_NOTIFICATION: &str = "task-notification";
+}
+
+/// 工具边界并入的一条通知。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AbsorbedNotice {
+    /// 通知全文。
+    pub text: String,
+    /// 它的 `queued_command` attachment 用的消息 ID：输出端给出时，提交之后按这个 ID 认出是哪一条（只在内存里配对，
+    /// attachment 的 `data` 不变）；None 时主循环自己取（不需要配对的输出端，例如子代理的邮箱当场取走）。
+    pub id: Option<MessageId>,
+}
+
 /// 工具边界并入的一项（L18，docs/specs/rust-cli/query.md §5）：插话与通知按到达顺序交错（两者
 /// 都是优先级 `next`，按队列顺序取）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Absorbed {
     /// 插话：`queued_command`（`commandMode: prompt`），之后提交它的 hook 消息。
     Prompt(Steered),
-    /// 通知全文：`queued_command`（`commandMode: task-notification`）。
-    Notice(String),
+    /// 通知：`queued_command`（`commandMode: task-notification`）。
+    Notice(AbsorbedNotice),
 }
 
 impl Absorbed {
-    /// 没有到达顺序时的排列：先插话、后通知（`RunSink::take_absorbed` 的缺省）。
+    /// 没有到达顺序时的排列：先插话、后通知（子代理与测试的输出端的 `RunSink::take_absorbed`）。
     pub fn ordered(steered: Vec<Steered>, notices: Vec<String>) -> Vec<Self> {
         let prompts = steered.into_iter().map(Self::Prompt);
         prompts
-            .chain(notices.into_iter().map(Self::Notice))
+            .chain(
+                notices
+                    .into_iter()
+                    .map(|text| Self::Notice(AbsorbedNotice { text, id: None })),
+            )
             .collect()
     }
 }

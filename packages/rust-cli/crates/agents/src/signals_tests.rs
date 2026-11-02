@@ -13,7 +13,7 @@ async fn unacked_notices_are_delivered_again_to_a_new_subscriber() {
     let seq = hub.notify(
         &session,
         AgentId::new("agent_1"),
-        "completed",
+        rust_cli_kernel_api::env_shell::BackgroundStatus::Completed,
         "done".to_owned(),
     );
     assert_eq!(seq, 1);
@@ -42,11 +42,21 @@ async fn a_slow_consumer_gets_the_latest_task_list_and_every_notice() {
     let hub = Hub::default();
     let session = SessionId::new("sess_1");
     let mut stream = hub.subscribe(&session);
-    hub.notify(&session, AgentId::new("a1"), "completed", "one".to_owned());
+    hub.notify(
+        &session,
+        AgentId::new("a1"),
+        rust_cli_kernel_api::env_shell::BackgroundStatus::Completed,
+        "one".to_owned(),
+    );
     for version in 0..100 {
         hub.tasks_changed(&session, json!(version));
     }
-    hub.notify(&session, AgentId::new("a2"), "failed", "two".to_owned());
+    hub.notify(
+        &session,
+        AgentId::new("a2"),
+        rust_cli_kernel_api::env_shell::BackgroundStatus::Failed,
+        "two".to_owned(),
+    );
     let mut seen = Vec::new();
     for _ in 0..3 {
         seen.push(stream.next().await.unwrap());

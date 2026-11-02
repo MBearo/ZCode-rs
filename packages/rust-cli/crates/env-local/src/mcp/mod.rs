@@ -13,16 +13,18 @@
 mod http;
 pub(crate) mod stdio;
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use rust_cli_base::secret::EnvSnapshot;
 use rust_cli_kernel_api::env::WorkspaceRef;
+use rust_cli_kernel_api::env_command::EnvOverrides;
 use rust_cli_kernel_api::mcp::{
     McpConnect, McpConnectionId, McpError, McpTransport, McpTransportConfig, McpTransportEvent,
 };
@@ -87,13 +89,13 @@ impl LocalMcpTransport {
 
     /// 执行器一侧的展开：没有值的变量原样保留，只记名字（不记值）。先查客户端实例推来的变量（F96：推来的 `None` 是
     /// 去掉了，按没有值处理），再查传输自己的环境。
-    fn expanded(&self, request: McpConnect) -> McpConnect {
+    fn expanded(&self, request: McpConnect, pushed: &EnvOverrides) -> McpConnect {
         if !self.expand_vars {
             return request;
         }
-        let lookup = |name: &str| match request.env.get(name) {
+        let lookup = |name: &str| match pushed.get(name) {
             Some(pushed) => pushed.clone(),
-            None => rust_cli_base::secret::env_var(&self.env, name).map(str::to_owned),
+            None => self.env.get(name).map(str::to_owned),
         };
         let (transport, missing) =
             rust_cli_kernel_api::mcp_vars::expand_transport_vars(&request.transport, &lookup);
@@ -103,31 +105,19 @@ impl LocalMcpTransport {
         McpConnect {
             server: request.server,
             transport,
-            env: request.env,
         }
     }
 
-    fn connections(&self) -> MutexGuard<'_, HashMap<String, Connection>> {
-        self.connections
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn egress(&self) -> Result<Arc<Egress>, McpError> {
-        self.egress.clone().ok_or_else(|| McpError::Unsupported {
-            what: "MCP over HTTP without network egress".to_owned(),
-        })
-    }
-}
-
-#[async_trait]
-impl McpTransport for LocalMcpTransport {
-    async fn connect(
+    /// 执行器连 MCP 服务器（F96，remote-exec.md §23.5）：同 [`McpTransport::connect`]，stdio 服务器的进程环境在投影之后、
+    /// 配置的 `env` 之前加上（或去掉）这个客户端实例推来的变量，`${VAR}` 展开也先查它们。推来的变量只在执行器里有，
+    /// 所以是这里的参数，不在 `McpConnect` 里（F128，审查 K10）。
+    pub async fn connect_with_env(
         &self,
         workspace: &WorkspaceRef,
         request: McpConnect,
+        pushed: &EnvOverrides,
     ) -> Result<McpConnectionId, McpError> {
-        let request = self.expanded(request);
+        let request = self.expanded(request, pushed);
         let (sender, events) = mpsc::channel(EVENTS_CAPACITY);
         let (outbox, task) = match &request.transport {
             McpTransportConfig::Stdio {
@@ -146,9 +136,9 @@ impl McpTransport for LocalMcpTransport {
                     command,
                     args,
                     env,
-                    overrides: &request.env,
+                    overrides: pushed,
                     cwd: &cwd.to_string_lossy(),
-                    snapshot: &self.env,
+                    snapshot: self.env.vars(),
                 };
                 let (outbox, task) = stdio::start(&self.ledger, launch, sender).await?;
                 (Outbox::Stdio(outbox), task)
@@ -172,6 +162,28 @@ impl McpTransport for LocalMcpTransport {
             },
         );
         Ok(McpConnectionId::new(id))
+    }
+
+    fn connections(&self) -> MutexGuard<'_, HashMap<String, Connection>> {
+        self.connections.lock_unpoisoned()
+    }
+
+    fn egress(&self) -> Result<Arc<Egress>, McpError> {
+        self.egress.clone().ok_or_else(|| McpError::Unsupported {
+            what: "MCP over HTTP without network egress".to_owned(),
+        })
+    }
+}
+
+#[async_trait]
+impl McpTransport for LocalMcpTransport {
+    async fn connect(
+        &self,
+        workspace: &WorkspaceRef,
+        request: McpConnect,
+    ) -> Result<McpConnectionId, McpError> {
+        self.connect_with_env(workspace, request, &EnvOverrides::new())
+            .await
     }
 
     async fn send(&self, connection: &McpConnectionId, message: Value) -> Result<(), McpError> {

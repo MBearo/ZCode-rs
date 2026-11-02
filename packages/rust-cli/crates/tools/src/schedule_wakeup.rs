@@ -12,16 +12,17 @@ use rust_cli_kernel_api::tool::{
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::common::{Definition, definition};
 use crate::cron_board::CronBoard;
 use crate::cron_loop::Scheduled;
 use crate::cron_texts;
 use crate::cron_tools::{job_id, output, owner};
+use rust_cli_kernel_api::tool_names;
+use rust_cli_prompts::Definition;
 
 /// ScheduleWakeup 的结果落盘上限（字符）：与通用的 `tool::DEFAULT_MAX_RESULT_CHARS` 不同，是这个工具自己的值（F122）。
 const MAX_RESULT_CHARS: usize = 1_000;
 
-pub const NAME: &str = "ScheduleWakeup";
+pub const NAME: &str = tool_names::SCHEDULE_WAKEUP;
 /// 搜索提示（searchHint）。
 const SEARCH_HINT: &str = "self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/cancel the dynamic loop with stop:true (a fixed-interval /loop is a recurring cron \u{2014} cancel it with CronDelete)";
 
@@ -33,7 +34,7 @@ pub struct ScheduleWakeupTool {
 impl ScheduleWakeupTool {
     pub fn new(board: &CronBoard) -> Self {
         Self {
-            definition: definition(NAME),
+            definition: rust_cli_prompts::definition(NAME).clone(),
             board: board.clone(),
         }
     }

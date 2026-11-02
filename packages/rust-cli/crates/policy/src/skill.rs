@@ -4,19 +4,15 @@
 //! `Passthrough`，由 [`check`] 按规则放行、拒绝或给出询问。
 
 use rust_cli_kernel_api::permission::{PermissionRule, RuleBehavior};
-use serde_json::Value;
 
 use crate::check::{AskKind, Check, Inputs};
+use rust_cli_kernel_api::tool_names;
 
-pub(crate) const TOOL: &str = "Skill";
+pub(crate) const TOOL: &str = tool_names::SKILL;
 
-/// 模型给的名字：去掉首尾空白与前导 `/`。
-fn requested(input: &Value) -> String {
-    let raw = input
-        .get("skill")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim();
+/// 模型给的名字（判决主体里的原文）：去掉首尾空白与前导 `/`。
+fn requested(raw: &str) -> String {
+    let raw = raw.trim();
     raw.strip_prefix('/').unwrap_or(raw).to_owned()
 }
 
@@ -40,8 +36,8 @@ fn blocked() -> Check {
 }
 
 /// 工具说这个 skill 安全时：deny 规则仍然先于它。
-pub(crate) fn deny_first(input: &Value, inputs: &Inputs<'_>) -> Check {
-    if hit(inputs, RuleBehavior::Deny, &requested(input)) {
+pub(crate) fn deny_first(raw: &str, inputs: &Inputs<'_>) -> Check {
+    if hit(inputs, RuleBehavior::Deny, &requested(raw)) {
         blocked()
     } else {
         Check::Allow
@@ -49,8 +45,8 @@ pub(crate) fn deny_first(input: &Value, inputs: &Inputs<'_>) -> Check {
 }
 
 /// 工具没有意见时：deny → allow → 询问 `Execute skill: <名字>`，建议 `Skill(<名字>)` 与 `Skill(<名字>:*)`。
-pub(crate) fn check(input: &Value, inputs: &Inputs<'_>) -> Check {
-    let name = requested(input);
+pub(crate) fn check(raw: &str, inputs: &Inputs<'_>) -> Check {
+    let name = requested(raw);
     if hit(inputs, RuleBehavior::Deny, &name) {
         return blocked();
     }

@@ -4,63 +4,20 @@
 //! 激活不记在进程状态里，而是从历史推导（与 nested memory 相同，context.md §11.6），
 //! resume 后结果相同。
 
-use std::collections::HashSet;
-
 use rust_cli_base::glob::Globs;
 use rust_cli_kernel_api::env_files::PathStyle;
-use rust_cli_kernel_api::message::{ContentBlock, Message};
-use serde_json::Value;
+use rust_cli_kernel_api::history::touched_files;
+use rust_cli_kernel_api::message::Message;
 
 use super::Skill;
 
-/// 触发激活的工具。
-const TRIGGERING: &[&str] = &["Read", "Write", "Edit"];
-
-/// 历史里成功的 Read / Write / Edit 触及的文件，换成相对 cwd 的 `/` 路径；越出 cwd 的不算。
+/// 历史里成功的 Read / Write / Edit 触及的文件，换成相对 cwd 的 `/` 路径；越出 cwd 的不算。触发的工具与“成功”
+/// 的判断只在 kernel-api 的 `history::touched_files`（F132 的 T9：以前这里与 context 的 nested memory 各写一份）。
 pub(crate) fn touched(history: &[Message], cwd: &str) -> Vec<String> {
-    let mut answered = HashSet::new();
-    let mut failed = HashSet::new();
-    for message in history {
-        let Message::User(user) = message else {
-            continue;
-        };
-        for block in &user.content {
-            if let ContentBlock::ToolResult {
-                tool_use_id,
-                is_error,
-                ..
-            } = block
-            {
-                answered.insert(tool_use_id.clone());
-                if *is_error {
-                    failed.insert(tool_use_id.clone());
-                }
-            }
-        }
-    }
-    let mut out = Vec::new();
-    for message in history {
-        let Message::Assistant(assistant) = message else {
-            continue;
-        };
-        for block in &assistant.content {
-            let ContentBlock::ToolUse { id, name, input } = block else {
-                continue;
-            };
-            if !TRIGGERING.contains(&name.as_str()) || !answered.contains(id) || failed.contains(id)
-            {
-                continue;
-            }
-            if let Some(relative) = input
-                .get("file_path")
-                .and_then(Value::as_str)
-                .and_then(|path| relative_to(path, cwd))
-            {
-                out.push(relative);
-            }
-        }
-    }
-    out
+    touched_files(history)
+        .into_iter()
+        .filter_map(|path| relative_to(path, cwd))
+        .collect()
 }
 
 /// 相对 cwd 的 `/` 路径（`path.relative(cwd, file)`）；在 cwd 外面或就是 cwd 时为 None。

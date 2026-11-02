@@ -5,16 +5,17 @@
 //! 对象成员的位置按 JS 展开：已有的成员原地换值，新成员追加在后，删掉的成员不留位置。
 use std::collections::HashMap;
 
-use rusqlite::{OptionalExtension, params};
 use rust_cli_kernel_api::store::StoreError;
 use serde_json::{Map, Value, json};
+
+use rust_cli_node_records::records::RUST_CLI;
 
 use crate::OrStorage;
 use crate::facts::Commit;
 use crate::ids::{message_id, part_id};
-use crate::notices::RUST_CLI;
 use crate::repo::entries::{self, Entry};
 use crate::repo::messages::{self, WithParts};
+use crate::repo::sessions;
 
 /// 父会话的消息 ID → 新会话的消息 ID。
 pub(crate) type Mapping = HashMap<String, String>;
@@ -285,67 +286,20 @@ fn forked_status(parent: &str, copied: &[Value]) -> String {
 /// Node `copyGoalStateForFork`（legacy，没有目标边界）：复制验证记录，再按 `cloneSessionTargetForFork` 写
 /// `session_target`。原会话没有目标时什么都不写。
 pub(crate) fn copy_goal(ctx: &Commit<'_>, parent: &str, map: &Mapping) -> Result<(), StoreError> {
-    let row = ctx
-        .conn
-        .query_row(
-            "select target_id, objective, summary_title, status, token_budget, tokens_used,
-               time_used_seconds, time_created, time_updated
-             from session_target where session_id = ?",
-            [parent],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                ))
-            },
-        )
-        .optional()
-        .storage()?;
-    let Some((target, objective, summary, status, budget, used, seconds, created, updated)) = row
-    else {
+    let row = sessions::target(ctx.conn, parent).storage()?;
+    let Some(mut goal) = row else {
         return Ok(());
     };
     let mut copied = Vec::new();
     for entry in entries::list(ctx.conn, parent, Some(VERIFICATION_ENTRY)).storage()? {
-        if let Some((copy, payload)) = verification(ctx, &entry, map, &target) {
+        if let Some((copy, payload)) = verification(ctx, &entry, map, &goal.target_id) {
             entries::save(ctx.conn, &copy).storage()?;
             copied.push(payload);
         }
     }
-    ctx.conn
-        .execute(
-            "insert into session_target (
-               session_id, target_id, objective, summary_title, status, token_budget, tokens_used,
-               time_used_seconds, active_input_id, active_run_started_at, active_run_last_seen_at,
-               time_created, time_updated
-             ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?)",
-            params![
-                ctx.session,
-                target,
-                objective,
-                summary,
-                forked_status(&status, &copied),
-                budget,
-                used,
-                seconds,
-                created,
-                updated
-            ],
-        )
-        .storage()?;
-    ctx.conn
-        .execute(
-            "update session set time_updated = max(time_updated, ?) where id = ?",
-            params![ctx.now as i64, ctx.session],
-        )
-        .storage()?;
+    goal.status = forked_status(&goal.status, &copied);
+    sessions::insert_target(ctx.conn, ctx.session, &goal).storage()?;
+    sessions::touch(ctx.conn, ctx.session, ctx.now as i64).storage()?;
     Ok(())
 }
 

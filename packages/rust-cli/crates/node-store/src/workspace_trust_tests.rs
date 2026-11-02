@@ -1,5 +1,5 @@
 //! 工作区信任的记录（docs/specs/rust-cli/workspace-trust.md §2.3、node-store.md §4.9）。
-use rust_cli_kernel_api::store::SessionStore;
+use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_kernel_api::workspace_trust::TrustKey;
 
 use crate::tests::TestStore;

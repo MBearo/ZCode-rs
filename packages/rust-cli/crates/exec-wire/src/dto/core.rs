@@ -52,7 +52,8 @@ pub enum Outcome {
     Cancelled,
 }
 
-/// 环境事实（kernel-api `EnvFacts`）。
+/// 环境事实（kernel-api `EnvFacts`）。老执行器还会带 `additional_directories`：未知字段忽略（附加目录现在归会话
+/// 配置，deployment.md §21）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnvFacts {
     pub cwd: String,
@@ -60,10 +61,11 @@ pub struct EnvFacts {
     pub os_version: String,
     pub shell: String,
     pub is_git_repo: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub additional_directories: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<String>,
+    /// 执行器所在用户的 uid（POSIX）；老执行器不带。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<u32>,
 }
 
 /// 路径风格（kernel-api `PathStyle`）。

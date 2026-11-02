@@ -4,6 +4,7 @@
 //! 只描述别的产品功能的内置 agent 不提供。
 
 use rust_cli_kernel_api::permission::PermissionMode;
+use rust_cli_kernel_api::tool_names;
 use rust_cli_prompts::agents as texts;
 
 pub(crate) const GENERAL_PURPOSE: &str = "general-purpose";
@@ -13,15 +14,15 @@ pub(crate) const PLAN: &str = "Plan";
 /// Explore / Plan 不能用的工具（Agent、Artifact 一组工具、ExitPlanMode 与
 /// 改文件的工具）。名字原样保留，清单行逐字照写。
 const READ_ONLY_DISALLOWED: &[&str] = &[
-    "Agent",
+    tool_names::AGENT,
     "Artifact",
     "ArtifactComments",
     "ArtifactData",
     "ArtifactCheck",
-    "ExitPlanMode",
-    "Edit",
-    "Write",
-    "NotebookEdit",
+    tool_names::EXIT_PLAN_MODE,
+    tool_names::EDIT,
+    tool_names::WRITE,
+    tool_names::NOTEBOOK_EDIT,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

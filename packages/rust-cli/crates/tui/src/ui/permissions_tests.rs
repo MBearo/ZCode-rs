@@ -8,7 +8,7 @@ fn rule(source: RuleSource, behavior: RuleBehavior, text: &str) -> SourcedRule {
     SourcedRule {
         source,
         behavior,
-        rule: rust_cli_runtime::parse_permission_rule(text),
+        rule: rust_cli_kernel_api::permission::syntax::parse_rule(text),
     }
 }
 
@@ -28,7 +28,7 @@ fn view() -> PermissionsView {
 }
 
 fn key(view: &mut PermissionsView, code: KeyCode) -> Outcome {
-    view.on_key(KeyEvent::new(code, KeyModifiers::NONE), Typing::default())
+    view.on_key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
 fn text(view: &PermissionsView) -> String {

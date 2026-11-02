@@ -96,9 +96,6 @@ pub fn osc52(text: &str, vars: &Vars) -> String {
     }
 }
 
-/// 没有注入剪贴板服务时的途径（测试）：只有 OSC 52。
-pub const NO_SERVICE: CopyRoute = CopyRoute::Osc52;
-
 /// screen 里 OSC 52 的 base64 按这么多个字节分段（每段包进一个 DCS）。
 const SCREEN_CHUNK: usize = 76;
 /// 版本号只看前三段（主、次、修订）；VS Code 1.123、1.124 的 OSC 52 会弄乱非 ASCII。

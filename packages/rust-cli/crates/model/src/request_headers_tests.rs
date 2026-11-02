@@ -4,12 +4,12 @@ use rust_cli_base::hosts;
 use std::sync::Arc;
 
 use rust_cli_base::secret::RedactedString;
-use rust_cli_kernel_api::provider::{Credential, ModelEndpoint, WireProtocol};
+use rust_cli_kernel_api::provider::{Credential, ModelCapabilities, ModelEndpoint, WireProtocol};
 use rust_cli_net::{HeaderValue, HttpRequest};
 
 use super::*;
 use crate::anthropic::Anthropic;
-use crate::openai_chat::OpenAiChat;
+use crate::openai::chat::OpenAiChat;
 
 fn facts() -> SourceFacts {
     SourceFacts {
@@ -124,11 +124,11 @@ fn endpoint(protocol: WireProtocol, base_url: &str, headers: &[(&str, &str)]) ->
             .map(|(name, value)| ((*name).to_owned(), RedactedString::new(*value)))
             .collect(),
         body_patches: Vec::new(),
-        mid_conversation_system: true,
-        supports_image: true,
-        supports_pdf: false,
-        supports_video: false,
-        supports_audio: false,
+        capabilities: ModelCapabilities {
+            supports_mid_conversation_system: true,
+            supports_image: true,
+            ..ModelCapabilities::default()
+        },
         renewable: false,
     }
 }

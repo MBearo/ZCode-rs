@@ -6,16 +6,12 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::hooks::{HookEvent, HookOutcome, HookRunner, StopCondition, StopVerdict};
-use rust_cli_kernel_api::ids::{AgentId, InteractionId, MessageId, SessionId};
+use rust_cli_kernel_api::ids::{AgentId, MessageId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserMessage, UserOrigin};
 use rust_cli_kernel_api::model::{ApiRole, QuerySource};
-use rust_cli_kernel_api::orchestration::{
-    InteractionAnswer, InteractionRequest, Interactions, OrchestrationError, QueryEvent, QueryStop,
-    RunSink,
-};
+use rust_cli_kernel_api::orchestration::{QueryRequest, QueryStop, RunSink};
 use rust_cli_kernel_api::store::StoreError;
 use rust_cli_kernel_api::testing::{RecordingSink, ScriptedModel, text_response};
-use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::RunScope;
@@ -65,32 +61,26 @@ impl GoalSink {
     }
 }
 
+/// 会话的状态是请求里的模式与工作区，加上这个目标。
 #[async_trait]
-impl Interactions for GoalSink {
-    async fn ask(
-        &self,
-        _session: &SessionId,
-        _request: InteractionRequest,
-    ) -> Result<InteractionAnswer, OrchestrationError> {
-        Ok(InteractionAnswer {
-            interaction: InteractionId::new("interaction_test"),
-            answer: Value::Null,
+impl rust_cli_kernel_api::testing::OpsOverride for GoalSink {
+    async fn view(&self) -> Option<rust_cli_kernel_api::orchestration::RunView> {
+        let request = request("");
+        Some(rust_cli_kernel_api::orchestration::RunView {
+            goal: self.goal.lock().unwrap().clone(),
+            ..rust_cli_kernel_api::orchestration::RunView::new(request.mode, request.workspace)
         })
     }
 }
 
+/// 询问没有人回答（按询问的种类，`NoOneToAsk`）。
+impl rust_cli_kernel_api::testing::AskOverride for GoalSink {}
+
+/// 其余委托给记录的输出端。
 #[async_trait]
-impl RunSink for GoalSink {
-    async fn commit_message(&self, message: Message) -> Result<(), StoreError> {
-        self.inner.commit_message(message).await
-    }
-
-    async fn emit(&self, event: QueryEvent) -> bool {
-        self.inner.emit(event).await
-    }
-
-    async fn current_goal(&self) -> Option<String> {
-        self.goal.lock().unwrap().clone()
+impl rust_cli_kernel_api::testing::SinkOverride for GoalSink {
+    fn sink(&self) -> &dyn RunSink {
+        &self.inner
     }
 
     async fn goal_checked(
@@ -145,19 +135,12 @@ async fn run(goal: Option<&str>, verdicts: Vec<StopVerdict>, agent: Option<Agent
     });
     let mut parts = parts(model.clone(), Vec::new());
     parts.hooks = evaluator.clone();
-    let request = request("go");
-    let sink = Arc::new(GoalSink::new(goal));
-    let scope = Arc::new(RunScope {
-        session: request.session.clone(),
-        run: request.run.clone(),
-        workspace: request.workspace.clone(),
+    let request = QueryRequest {
         agent,
-        mode: request.mode,
-        abort: Abort::new(),
-        sink: sink.clone(),
-        parts,
-        exhausted: Default::default(),
-    });
+        ..request("go")
+    };
+    let sink = Arc::new(GoalSink::new(goal));
+    let scope = Arc::new(RunScope::new(&request, sink.clone(), parts, Abort::new()));
     let stop = crate::run::run(scope, request).await.unwrap();
     let asked = std::mem::take(&mut *evaluator.asked.lock().unwrap());
     let reports = sink.reports.lock().unwrap().clone();

@@ -47,7 +47,9 @@ impl PromptAssembler {
         if let Some(found) = self
             .shown_facts(request, facts.as_ref())
             .await
-            .and_then(|facts| environment::announce(history, &facts))
+            .and_then(|facts| {
+                environment::announce(history, &facts, &self.config.additional_directories)
+            })
         {
             out.push(self.attachment(environment::SOURCE, found));
         }

@@ -58,6 +58,8 @@ pub struct Pty {
     answered: usize,
     /// 已经回答过的光标位置查询（`ESC [ 6 n`）个数。
     positions: usize,
+    /// 第几个主要设备属性查询（从 1 数）的回答后面紧跟哪些输入（[`Self::type_ahead`]）。
+    ahead: Option<(usize, Vec<u8>)>,
 }
 
 impl Pty {
@@ -99,7 +101,14 @@ impl Pty {
             seen: Vec::new(),
             answered: 0,
             positions: 0,
+            ahead: None,
         }
+    }
+
+    /// 第 `query` 个主要设备属性查询（从 1 数）的回答后面紧跟 `bytes`，与回答同一次写进主端：子进程读到回答时这些输入
+    /// 已经排在后面，是“界面出现之前就敲下的键”。进入终端时第 1 个查询是颜色探测、第 2 个是键盘增强的检测。
+    pub fn type_ahead(&mut self, query: usize, bytes: &[u8]) {
+        self.ahead = Some((query, bytes.to_vec()));
     }
 
     /// 读输出直到 `done` 为真（最多 20 秒），返回到那时为止的全部输出。
@@ -165,8 +174,14 @@ impl Pty {
             .windows(3)
             .filter(|window| *window == b"\x1b[c")
             .count();
-        for _ in self.answered..queries {
-            self.send(b"\x1b[?62c");
+        for index in self.answered..queries {
+            let mut reply = b"\x1b[?62c".to_vec();
+            if let Some((query, bytes)) = &self.ahead
+                && *query == index + 1
+            {
+                reply.extend_from_slice(bytes);
+            }
+            self.send(&reply);
         }
         self.answered = queries;
         let positions = self
@@ -238,7 +253,8 @@ pub async fn interface_in(
         models: None,
         startup: rust_cli_tui::Startup::New,
         fork: false,
-        services: rust_cli_tui::Services::default(),
+        ui: rust_cli_tui::UiConfig::default(),
+        services: super::stub_services::services(),
         stop: CancellationToken::new(),
         clock: Arc::new(WallClock),
         ids: Arc::new(SequentialIds::default()),

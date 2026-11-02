@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use rust_cli_base::names::UNIX_EXECUTABLE;
-use rust_cli_exec_transport::{ProvisionError, ProvisionStep, Provisioned, Provisioner};
+use rust_cli_machines::{ProvisionError, ProvisionStep, Provisioned, Provisioner};
 
 use crate::artifact::{Platform, locate, sha256};
 use crate::choose::{Plan, Wanted, choose};

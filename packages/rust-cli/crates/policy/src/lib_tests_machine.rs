@@ -6,7 +6,7 @@ use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::machine::MachineEnv;
 
 use super::*;
-use crate::readonly::is_read_only_on;
+use crate::shell::readonly::is_read_only_on;
 
 /// 路由后的上下文：dev-a 上，工作区是它的工作目录。
 fn remote(mode: PermissionMode) -> ToolUseContext {
@@ -15,7 +15,7 @@ fn remote(mode: PermissionMode) -> ToolUseContext {
         Arc::new(UnusedEnvironment),
         Arc::new(rust_cli_kernel_api::mcp::NoMcpTransport),
     )
-    .named("dev-a");
+    .named(rust_cli_kernel_api::ids::MachineName::new("dev-a"));
     context.workspace = WorkspaceRef {
         environment: EnvironmentId::new("dev-a"),
         root: EnvPath::new("/home/dev/proj"),

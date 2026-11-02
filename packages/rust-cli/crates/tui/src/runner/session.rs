@@ -6,28 +6,33 @@ use futures_util::FutureExt;
 use ratatui::backend::Backend;
 use rust_cli_kernel_api::provider::ModelCatalog;
 use rust_cli_kernel_api::session_api::{
-    Ack, Command, CommandEnvelope, CreateSession, KernelError, SessionHandle, SessionView,
-    StartSource,
+    Ack, Command, CommandEnvelope, CommandResult, CreateSession, KernelError, SessionHandle,
+    SessionView, StartSource,
 };
+use rust_cli_kernel_api::session_follow::follow;
 
 use super::{Loop, idle};
 use crate::ui::i18n;
 use crate::view::Transcript;
 
-/// 命令的种类（回执的提示用）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 发出的命令与回执要用的数据（回执的提示用）。
+///
+/// 架构整理 U2：以前每种命令另带一个含义不定的 `label: String`（25 处里 20 处传空串，其余各是模型名、要放回输入框的
+/// 文字、新名字或参数），回执用一串带守卫的分支按种类与 `label` 判断；现在数据在变体里，回执是一个穷举的 `match`。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Sent {
     Submit,
     Interrupt,
     Resolve,
-    SetModel,
+    /// 换模型：回执后提示这个模型名。
+    SetModel(String),
     SetMode,
     SetPlan,
     Compact,
-    /// rewind；回执的 `label` 是要放回输入框的文字（只回退代码时为空）。
-    Rewind,
-    /// `/rename`：回执后提示新名字（`label`）。
-    Rename,
+    /// rewind：对话被回退时要放回输入框的文字（只回退代码时为 None）。
+    Rewind(Option<String>),
+    /// `/rename`：回执后提示新名字。
+    Rename(String),
     /// 空闲时 esc / ctrl+c 取消 loop 唤醒（tools-more.md §18.1）：回执不提示。
     CancelLoops,
     /// 不带名字的 `/rename`：回执的文本（`result.message` 或 `reason`）原样显示（titles.md §8.6）。
@@ -40,8 +45,8 @@ pub(super) enum Sent {
     RestoreCancelled,
     /// 本地命令的记录（修复线 L-A）：回执不提示。
     Record,
-    /// 没有模型目录时的 `/model <名字>`：`label` 是参数，也是新模型；回执后提示并写命令记录（修复线 L-A）。
-    PickModel,
+    /// 没有模型目录时的 `/model <名字>`：名字是参数，也是新模型；回执后提示并写命令记录（修复线 L-A）。
+    PickModel(String),
 }
 
 /// 异步操作的结果。
@@ -54,7 +59,6 @@ pub(super) enum Done {
     OpenFailed(KernelError),
     Ack {
         sent: Sent,
-        label: String,
         ack: Ack,
     },
     /// 快照（`HistoryRewritten` 之后）。装箱：快照比其他变体大得多。
@@ -137,16 +141,16 @@ pub(super) fn envelope(
 }
 
 impl<B: Backend> Loop<'_, B> {
-    /// 发一条命令；没有会话时不发（调用方先判断）。`label` 是回执提示里的内容（例如模型名）。
-    pub(super) fn send(&mut self, sent: Sent, command: Command, label: String) {
-        let Some(session) = self.session.clone() else {
+    /// 发一条命令；没有会话时不发（调用方先判断）。`sent` 带着回执提示要用的数据（例如模型名）。
+    pub(super) fn send(&mut self, sent: Sent, command: Command) {
+        let Some(session) = self.outbox.session().cloned() else {
             return;
         };
         let envelope = self.envelope(command);
         self.pending.push(
             async move {
                 let ack = session.send(envelope).await;
-                Done::Ack { sent, label, ack }
+                Done::Ack { sent, ack }
             }
             .boxed(),
         );
@@ -182,7 +186,7 @@ impl<B: Backend> Loop<'_, B> {
 
     /// 历史被改写：丢弃视图，取快照后从快照的 seq 重新订阅。等快照期间不接收事件。
     pub(super) fn refetch(&mut self) {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.outbox.session().cloned() else {
             return;
         };
         self.events = idle();
@@ -197,15 +201,11 @@ impl<B: Backend> Loop<'_, B> {
             match pick {
                 Some(model) => {
                     let provider = self.app.view.selection().provider.clone();
-                    let selection = rust_cli_kernel_api::model::ModelSelection {
-                        provider,
-                        model: model.clone(),
-                        reasoning: None,
-                        connection: None,
-                    };
+                    let selection =
+                        rust_cli_kernel_api::model::ModelSelection::new(provider, model.clone());
                     // 直接换、不存成缺省；有会话时回执里记（`Sent::PickModel`）。
-                    if self.session.is_some() {
-                        self.send(Sent::PickModel, Command::SetModel { selection }, model);
+                    if self.outbox.session().is_some() {
+                        self.send(Sent::PickModel(model), Command::SetModel { selection });
                     } else {
                         self.set_model(selection);
                         self.record_model(&model, &model, false);
@@ -246,20 +246,116 @@ impl<B: Backend> Loop<'_, B> {
         );
     }
 
+    /// 命令的回执。
+    fn on_ack(&mut self, sent: Sent, ack: Ack) {
+        let lang = self.app.lang;
+        match (sent, ack) {
+            // 中断与取消唤醒的回执不提示：内核只在没有东西可中断时拒绝（空闲时没有唤醒；内核已经结束回合、
+            // `TurnFinished` 还没画出来时按 esc）。缺陷修复（F45）：以前运行中的中断被拒绝时显示 `Not done: no turn
+            // is running`（tui-input.md §8）。
+            (Sent::CancelLoops | Sent::Interrupt | Sent::Record, _) => {}
+            // esc 撤回：条件不满足被拒绝时不提示。
+            (
+                Sent::RestoreCancelled,
+                Ack::Accepted {
+                    result: CommandResult::Restored { message, .. },
+                },
+            ) => self.restored(&message),
+            (Sent::RestoreCancelled, Ack::Accepted { .. } | Ack::Rejected { .. } | Ack::Duplicate) => {}
+            // 选择器在失败时显示 `Failed to restore …`。
+            (Sent::Rewind(_), Ack::Rejected { reason }) => {
+                self.app.error(format!("Failed to restore:\n{reason}"));
+            }
+            (Sent::GenerateName, Ack::Rejected { reason }) => self.app.info(reason),
+            (
+                Sent::Submit
+                | Sent::Resolve
+                | Sent::SetModel(_)
+                | Sent::SetMode
+                | Sent::SetPlan
+                | Sent::Compact
+                | Sent::Rename(_)
+                | Sent::Fork
+                | Sent::ClearRename
+                | Sent::PickModel(_),
+                Ack::Rejected { reason },
+            ) => self.app.error(i18n::rejected(lang, &reason)),
+            (
+                Sent::GenerateName,
+                Ack::Accepted {
+                    result: CommandResult::Renamed { message, .. },
+                },
+            ) => self.app.info(message),
+            (Sent::SetModel(model), Ack::Accepted { .. }) => {
+                self.app.info(i18n::model_set(lang, &model));
+            }
+            (Sent::PickModel(model), Ack::Accepted { .. }) => {
+                self.app.info(i18n::model_set(lang, &model));
+                self.record_model(&model, &model, false);
+            }
+            // 对话被回退：把那条消息放回输入框。
+            (Sent::Rewind(Some(text)), Ack::Accepted { .. }) => self.app.composer.set_text(&text),
+            (Sent::Rename(title), Ack::Accepted { .. }) => {
+                self.app.info(format!("Session renamed to: {title}"));
+                // 对照实现的 system 显示：命令输入、结果与给模型的提醒（修复线 L-A，tui-manage.md §11.2）。
+                let mut record = super::records::record(
+                    "rename",
+                    &title,
+                    format!("Session renamed to: {title}"),
+                    false,
+                );
+                record.meta = vec![rust_cli_prompts::commands::rename_named(&title)];
+                self.record_command(record);
+            }
+            (
+                Sent::Fork,
+                Ack::Accepted {
+                    result: CommandResult::Forked(forked),
+                },
+            ) => self.forked(&forked),
+            (
+                Sent::Submit
+                | Sent::Resolve
+                | Sent::SetMode
+                | Sent::SetPlan
+                | Sent::Compact
+                | Sent::Rewind(None)
+                | Sent::ClearRename
+                // 回执不是这个命令的那种结果（内核不会给出）：不提示。
+                | Sent::GenerateName
+                | Sent::Fork,
+                Ack::Accepted { .. },
+            )
+            | (
+                Sent::Submit
+                | Sent::Resolve
+                | Sent::SetModel(_)
+                | Sent::SetMode
+                | Sent::SetPlan
+                | Sent::Compact
+                | Sent::Rewind(_)
+                | Sent::Rename(_)
+                | Sent::GenerateName
+                | Sent::Fork
+                | Sent::ClearRename
+                | Sent::PickModel(_),
+                Ack::Duplicate,
+            ) => {}
+        }
+    }
+
     pub(super) fn on_done(&mut self, done: Done) {
         self.dirty = true;
         let lang = self.app.lang;
         match done {
             Done::Opened { handle, command } => {
                 self.app.creating = false;
-                self.app.session = Some(handle.id().as_str().to_owned());
                 // 新会话从头订阅：SessionCreated 之后的全部事件。
-                self.events = handle.subscribe(Some(0));
-                self.session = Some(handle);
+                self.attach(handle, 0);
                 self.attach_panels();
                 // 还没有会话时完成的本地命令的记录排在第一条输入之前（修复线 L-A，tui-manage.md §11.3）。
                 self.send_pending_records();
-                self.send(Sent::Submit, command, String::new());
+                self.send(Sent::Submit, command);
                 // 创建期间留下的输入：按顺序发出（发送 future 按加入顺序首次轮询，命令按这个顺序进 actor）。
                 for held in std::mem::take(&mut self.app.held) {
                     self.submit(held);
@@ -270,52 +366,7 @@ impl<B: Backend> Loop<'_, B> {
                 self.app.held.clear();
                 self.app.error(i18n::rejected(lang, &error.to_string()));
             }
-            Done::Ack { sent, label, ack } => match ack {
-                // 中断与取消唤醒的回执不提示：内核只在没有东西可中断时拒绝（空闲时没有唤醒；内核已经结束回合、
-                // `TurnFinished` 还没画出来时按 esc）。缺陷修复（F45）：以前运行中的中断被拒绝时显示 `Not done: no turn
-                // is running`（tui-input.md §8）。
-                _ if matches!(sent, Sent::CancelLoops | Sent::Interrupt | Sent::Record) => {}
-                Ack::Accepted { result } if sent == Sent::RestoreCancelled => {
-                    self.restored(&result)
-                }
-                _ if sent == Sent::RestoreCancelled => {}
-                // 选择器在失败时显示 `Failed to restore …`。
-                Ack::Rejected { reason } if sent == Sent::Rewind => {
-                    self.app.error(format!("Failed to restore:\n{reason}"));
-                }
-                Ack::Rejected { reason } if sent == Sent::GenerateName => self.app.info(reason),
-                Ack::Rejected { reason } => self.app.error(i18n::rejected(lang, &reason)),
-                Ack::Accepted { result } if sent == Sent::GenerateName => {
-                    self.app
-                        .info(result["message"].as_str().unwrap_or_default().to_owned());
-                }
-                Ack::Accepted { .. } if sent == Sent::SetModel => {
-                    self.app.info(i18n::model_set(lang, &label));
-                }
-                Ack::Accepted { .. } if sent == Sent::PickModel => {
-                    self.app.info(i18n::model_set(lang, &label));
-                    self.record_model(&label, &label, false);
-                }
-                // 对话被回退：把那条消息放回输入框。
-                Ack::Accepted { .. } if sent == Sent::Rewind && !label.is_empty() => {
-                    self.app.composer.set_text(&label);
-                }
-                Ack::Accepted { .. } if sent == Sent::ClearRename => {}
-                Ack::Accepted { .. } if sent == Sent::Rename => {
-                    self.app.info(format!("Session renamed to: {label}"));
-                    // 对照实现的 system 显示：命令输入、结果与给模型的提醒（修复线 L-A，tui-manage.md §11.2）。
-                    let mut record = super::records::record(
-                        "rename",
-                        &label,
-                        format!("Session renamed to: {label}"),
-                        false,
-                    );
-                    record.meta = vec![rust_cli_prompts::commands::rename_named(&label)];
-                    self.record_command(record);
-                }
-                Ack::Accepted { result } if sent == Sent::Fork => self.forked(&result),
-                Ack::Accepted { .. } | Ack::Duplicate => {}
-            },
+            Done::Ack { sent, ack } => self.on_ack(sent, ack),
             Done::Rewinds(entries) => match entries {
                 Ok(entries) => self.app.open_rewind(entries),
                 Err(error) => self.app.error(i18n::rejected(lang, &error.to_string())),
@@ -361,13 +412,13 @@ impl<B: Backend> Loop<'_, B> {
             }
             Done::View(view) => match *view {
                 Ok(view) => {
-                    let session = self.session.clone();
+                    let session = self.outbox.session().cloned();
                     let last = view.last_seq;
                     self.app.view = Transcript::from_view(view, self.now_ms());
                     self.cache.clear();
                     self.app.sync_interaction(std::time::Instant::now());
                     if let Some(session) = session {
-                        self.events = session.subscribe(Some(last));
+                        self.events = follow(session, last);
                     }
                 }
                 Err(error) => self.app.error(i18n::rejected(lang, &error.to_string())),
@@ -376,7 +427,7 @@ impl<B: Backend> Loop<'_, B> {
                 None => self.app.open_models(&catalog.models),
                 Some(name) => match crate::ui::resolve_model(&catalog.models, &name) {
                     Ok(selection) => self.choose_model(selection, Some(name)),
-                    Err(rust_cli_platform::model_name::LookupError::Missing) => {
+                    Err(rust_cli_kernel_api::model_name::LookupError::Missing) => {
                         self.app.info(i18n::unknown_model(lang, &name))
                     }
                     Err(error) => self.app.info(i18n::ambiguous_model(lang, &error)),

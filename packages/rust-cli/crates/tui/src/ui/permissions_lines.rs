@@ -11,14 +11,8 @@ use super::permissions::{
     PermissionsView, Stage, TABS, Tab, behavior_name, deletable, rule_text, source_name,
 };
 use super::text::{truncate_line, wrap_text};
-
-fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
-}
-
-fn bold() -> Style {
-    Style::default().add_modifier(Modifier::BOLD)
-}
+use crate::ui::style::{bold, dim};
+use rust_cli_kernel_api::tool_names;
 
 fn tab_name(tab: Tab, lang: Lang) -> &'static str {
     match (lang, tab) {
@@ -52,7 +46,7 @@ fn tab_note(tab: Tab, lang: Lang) -> &'static str {
 /// 规则说明：（前缀，强调部分，后缀）；没有说明时为 None。
 fn description(rule: &PermissionRule, lang: Lang) -> Option<(&'static str, String, &'static str)> {
     let zh = lang == Lang::Zh;
-    if rule.tool == "Bash" {
+    if crate::view::ToolKind::of(&rule.tool) == crate::view::ToolKind::Bash {
         return Some(match rule.content.as_deref() {
             None | Some("") => (
                 if zh {
@@ -94,7 +88,7 @@ fn description(rule: &PermissionRule, lang: Lang) -> Option<(&'static str, Strin
 }
 
 fn rule_block(rule: &PermissionRule, lang: Lang, width: usize) -> Vec<Line<'static>> {
-    let text = rust_cli_runtime::format_permission_rule(rule);
+    let text = rust_cli_kernel_api::permission::syntax::format_rule(rule);
     let mut lines = vec![truncate_line(
         Line::from(Span::styled(format!("    {text}"), bold())),
         width,
@@ -137,8 +131,7 @@ pub fn lines(
 ) -> Vec<Line<'static>> {
     let zh = lang == Lang::Zh;
     let accent = palette.accent;
-    let top =
-        |color: Color| Line::from(Span::styled("─".repeat(width), Style::default().fg(color)));
+    let top = |color: Color| crate::ui::style::rule(width, Style::default().fg(color));
     match &view.stage {
         Stage::Input(text) => {
             let behavior = view.tab.behavior().map_or("allow", behavior_name);
@@ -152,7 +145,7 @@ pub fn lines(
             lines.extend(wrapped(note, Style::default(), width));
             lines.push(Line::from(vec![
                 Span::raw(if zh { "  例如 " } else { "  e.g., " }),
-                Span::styled("WebFetch", bold()),
+                Span::styled(tool_names::WEB_FETCH, bold()),
                 Span::raw(if zh { " 或 " } else { " or " }),
                 Span::styled("Bash(ls *)", bold()),
             ]));
@@ -189,7 +182,7 @@ pub fn lines(
         }
         Stage::Destination(text) => {
             let behavior = view.tab.behavior().map_or("allow", behavior_name);
-            let rule = rust_cli_runtime::parse_permission_rule(text);
+            let rule = rust_cli_kernel_api::permission::syntax::parse_rule(text);
             let mut lines = vec![
                 top(accent),
                 title(&add_title(lang, behavior)),
@@ -284,7 +277,7 @@ fn details(
             "project"
         };
         let mut lines = vec![
-            Line::from(Span::styled("─".repeat(width), Style::default().fg(accent))),
+            crate::ui::style::rule(width, Style::default().fg(accent)),
             title(if zh { "规则详情" } else { "Rule details" }),
             Line::default(),
         ];
@@ -329,7 +322,7 @@ fn details(
         format!("  Delete {kind} tool?")
     };
     let mut lines = vec![
-        Line::from(Span::styled("─".repeat(width), red)),
+        crate::ui::style::rule(width, red),
         Line::from(Span::styled(heading, red.add_modifier(Modifier::BOLD))),
         Line::default(),
     ];
@@ -393,7 +386,7 @@ fn list(
         });
     }
     let mut lines = vec![
-        Line::from(Span::styled("─".repeat(width), Style::default().fg(accent))),
+        crate::ui::style::rule(width, Style::default().fg(accent)),
         truncate_line(Line::from(tabs), width),
         Line::default(),
     ];

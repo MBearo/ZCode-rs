@@ -9,47 +9,50 @@ use rust_cli_kernel_api::model::ModelSelection;
 
 use super::app::{Action, App, Overlay};
 use super::composer::Popup;
-use super::list::{Outcome, Purpose, SEP};
+use super::keyboard;
+use super::layer::Layer;
+use super::list::{Choice, Outcome};
 
 impl App {
+    /// 粘贴给最上面的一层（与按键同一层，`layer.rs`）。
     pub fn on_paste(&mut self, text: &str) -> Option<Action> {
-        if let (Some((_, request)), Some(interaction)) = (
-            super::app::pending_of(&self.view, &self.detached),
-            self.interaction.as_mut(),
-        ) && interaction.typing
-        {
-            interaction.paste(request, text);
-            return None;
+        match self.top_layer() {
+            // 打开着的视图：有输入框的收进去，别的丢掉。
+            Layer::Overlay => {
+                self.overlay_paste(text);
+                return None;
+            }
+            // 询问框：写意见、`Other` 或改“不再询问”的前缀时收进去，别的时候丢掉（不进被盖住的输入框）。
+            Layer::Interaction => {
+                if let (Some((_, request)), Some(interaction)) = (
+                    super::app::pending_of(&self.view, &self.detached),
+                    self.interaction.as_mut(),
+                ) {
+                    interaction.paste(request, text);
+                }
+                return None;
+            }
+            Layer::Peer => return None,
+            Layer::Composer => {}
         }
-        if matches!(self.overlay, Some(Overlay::Login(_))) {
-            self.login_paste(text);
-            return None;
-        }
-        // `/resume` 页：粘贴进查询或改名输入（tui-manage.md §10.4）。
-        if matches!(self.overlay, Some(Overlay::Resume(_))) {
-            self.resume_paste(text);
-            return None;
-        }
-        // `/export` 的文件名输入框收粘贴（只取第一行）。
-        if let Some(Overlay::Export(super::export::ExportView::Name(name))) = self.overlay.as_mut()
-        {
-            name.push_str(text.lines().next().unwrap_or_default());
-            return None;
-        }
-        // `/permissions` 的规则输入框收粘贴（只取第一行）。
-        if let Some(Overlay::Permissions(view)) = self.overlay.as_mut()
-            && let super::permissions::Stage::Input(typed) = &mut view.stage
-        {
-            typed.push_str(text.lines().next().unwrap_or_default());
+        // 快捷键面板：丢掉（同按键，下一个键关闭它）。
+        if self.overlay.is_some() {
+            self.overlay_paste(text);
             return None;
         }
         // 搜索模式：粘贴进查询（修复线 F114，tui-input.md §2.3.1）。
-        if self.find.is_some() && self.overlay.is_none() {
+        if self.port.find.is_some() {
             self.find_paste(text);
             return None;
         }
         // 只读查看子代理时输入框不能输入。
-        if self.overlay.is_some() || self.viewing.is_some() {
+        if self.viewing.is_some() {
+            return None;
+        }
+        // 输入历史的搜索（ctrl+r）：进查询（架构整理 U12；以前进了被盖住的输入框）。
+        if let Some((mut query, _)) = self.composer.search.clone() {
+            super::line_edit::paste(&mut query, text);
+            self.composer.search_update(query);
             return None;
         }
         // 粘贴的是图片文件的路径（拖文件进终端）：先读文件，是图片才当图片（tui-input.md §3.1）。
@@ -88,61 +91,33 @@ impl App {
     }
 
     /// 一个按键（测试与不经 paste burst 的入口；runner 用 `on_terminal_key`，tui-input.md §9）：松开事件丢掉，Windows
-    /// 的 alt 码当作按下（`Releases::admit`），再交给 [`Self::dispatch`]。
+    /// 的 alt 码当作按下、AltGr 归一（`Keyboard::admit`），再交给 [`Self::dispatch`]。
+    #[cfg(test)]
     pub fn on_key(&mut self, key: KeyEvent, now: Instant) -> Option<Action> {
-        let key = self.releases.admit(key)?;
+        let key = self.keys.keyboard.admit(key)?;
         self.dispatch(key, now)
     }
 
-    /// 进了界面的按键：视图 → 选区 → 待处理交互 → 历史搜索 → 弹出列表 → 输入框与全局键。ctrl 不算 Windows 的
-    /// AltGr（`Typing`）。
+    /// 进了界面的按键（入口已归一，AltGr 不带 ctrl）：视图 → 选区 → 待处理交互 → 历史搜索 → 弹出列表 → 输入框与全局键。
     pub(crate) fn dispatch(&mut self, key: KeyEvent, now: Instant) -> Option<Action> {
-        let ctrl = self.typing.ctrl(&key);
+        let ctrl = keyboard::ctrl(&key);
         // 有鼠标选区时的按键（tui-select.md §3.1）：在视图之前处理（独立页面的 ctrl+c 是关闭）。
         if self.has_selection()
             && let Some(action) = self.selection_key(&key, now)
         {
             return action;
         }
+        // ctrl+c 越过询问框与批准框，照常中断与退出。
+        let ctrl_c = ctrl && key.code == KeyCode::Char('c');
+        match self.top_layer() {
+            Layer::Overlay => return self.overlay_key(key),
+            Layer::Interaction if !ctrl_c => return self.interaction_key(key, now),
+            Layer::Peer if !ctrl_c => return self.peer_key(key),
+            Layer::Interaction | Layer::Peer | Layer::Composer => {}
+        }
+        // 快捷键面板（输入框这一层）：任何键都关闭。
         if self.overlay.is_some() {
             return self.overlay_key(key);
-        }
-        if let (Some((id, request)), Some(ui)) = (
-            super::app::pending_of(&self.view, &self.detached),
-            self.interaction.as_mut(),
-        ) && !(ctrl && key.code == KeyCode::Char('c'))
-        {
-            let answer = ui.on_key(request, key, now, self.typing)?;
-            return Some(Action::Resolve {
-                interaction: id.clone(),
-                answer,
-            });
-        }
-        // 扣住的同伴消息的批准框（cross-session.md §2.6）：待回答的交互优先；↑ 拒绝、↓ 投递，enter 确认，esc 拒绝。
-        if self.pending().is_none()
-            && let Some(held) = self.view.peer_held()
-            && !(ctrl && key.code == KeyCode::Char('c'))
-        {
-            let message = held.msg_id.clone();
-            match key.code {
-                KeyCode::Up | KeyCode::Char('1') => self.peer_choice = 0,
-                KeyCode::Down | KeyCode::Char('2') => self.peer_choice = 1,
-                KeyCode::Tab | KeyCode::BackTab => self.peer_choice = 1 - self.peer_choice.min(1),
-                KeyCode::Enter => {
-                    let approve = self.peer_choice == 1;
-                    self.peer_choice = 0;
-                    return Some(Action::ResolvePeer { message, approve });
-                }
-                KeyCode::Esc => {
-                    self.peer_choice = 0;
-                    return Some(Action::ResolvePeer {
-                        message,
-                        approve: false,
-                    });
-                }
-                _ => {}
-            }
-            return None;
         }
         // footer 下面的子代理列表获得焦点、或正在只读查看子代理（tui-panels.md §1.3、§1.4）。
         match self.focus {
@@ -151,7 +126,7 @@ impl App {
             None => {}
         }
         // 搜索模式（修复线 F114，tui-input.md §2.3.1）：查看子代理时也在这里，先于查看的按键。
-        if self.find.is_some() {
+        if self.port.find.is_some() {
             return self.find_key(key);
         }
         if self.viewing.is_some() {
@@ -162,7 +137,7 @@ impl App {
         }
         // 输入框有选区时：ctrl+c 复制，esc 与 ↑/↓ 只取消选区，enter 取消后照常发送；其他键交给编辑区。
         // 只认上一帧可见的输入框：审批等视图替换了输入框时，ctrl+c 仍是中断。
-        if self.composer.area.selection().is_some() && self.hits.composer.is_some() {
+        if self.composer.area.selection().is_some() && self.pointer.hits.composer.is_some() {
             match key.code {
                 KeyCode::Char('c') if ctrl => return self.copy_selection(false),
                 KeyCode::Esc | KeyCode::Up | KeyCode::Down => {
@@ -181,6 +156,45 @@ impl App {
         self.compose_key(key, now)
     }
 
+    /// 待回答的交互的按键：作答时发回答。
+    fn interaction_key(&mut self, key: KeyEvent, now: Instant) -> Option<Action> {
+        let (Some((id, request)), Some(ui)) = (
+            super::app::pending_of(&self.view, &self.detached),
+            self.interaction.as_mut(),
+        ) else {
+            return None;
+        };
+        let answer = ui.on_key(request, key, now)?;
+        Some(Action::Resolve {
+            interaction: id.clone(),
+            answer,
+        })
+    }
+
+    /// 扣住的同伴消息的批准框（cross-session.md §2.6）：↑ 拒绝、↓ 投递，enter 确认，esc 拒绝；别的键不生效。
+    fn peer_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let message = self.view.peer_held()?.msg_id.clone();
+        match key.code {
+            KeyCode::Up | KeyCode::Char('1') => self.peer_choice = 0,
+            KeyCode::Down | KeyCode::Char('2') => self.peer_choice = 1,
+            KeyCode::Tab | KeyCode::BackTab => self.peer_choice = 1 - self.peer_choice.min(1),
+            KeyCode::Enter => {
+                let approve = self.peer_choice == 1;
+                self.peer_choice = 0;
+                return Some(Action::ResolvePeer { message, approve });
+            }
+            KeyCode::Esc => {
+                self.peer_choice = 0;
+                return Some(Action::ResolvePeer {
+                    message,
+                    approve: false,
+                });
+            }
+            _ => {}
+        }
+        None
+    }
+
     /// 有鼠标选区时的一个按键。返回 `Some` 时按键到此为止。
     ///
     /// 缺陷修复（F25）：原来 enter 是“复制并回到底部”、esc 清掉选区，footer 写着这两个键；其实不需要这两个键，复制在松开
@@ -188,17 +202,16 @@ impl App {
     /// ctrl+shift+c、cmd+c 复制；esc、翻页、shift / alt 加方向键不动选区；其余按键清掉选区后照常处理。
     fn selection_key(&mut self, key: &KeyEvent, now: Instant) -> Option<Option<Action>> {
         let mods = key.modifiers;
-        let ctrl = mods.contains(KeyModifiers::CONTROL);
+        let (ctrl, alt) = (keyboard::ctrl(key), keyboard::alt(key));
         let shift = mods.contains(KeyModifiers::SHIFT);
-        let alt = mods.contains(KeyModifiers::ALT);
         let sup = mods.contains(KeyModifiers::SUPER);
         if matches!(key.code, KeyCode::Char('c' | 'C')) && !alt {
             if ctrl && !shift && !sup {
-                let copied = self.selection.is_some_and(|s| s.copied)
-                    || self.screen_selection.is_some_and(|s| s.copied);
+                let copied = self.pointer.selection.is_some_and(|s| s.copied)
+                    || self.pointer.screen_selection.is_some_and(|s| s.copied);
                 if copied {
-                    self.clear_selection();
-                    if let Some((_, at)) = self.copied.as_mut() {
+                    self.pointer.clear_selection();
+                    if let Some((_, at)) = self.pointer.copied.as_mut() {
                         *at = now;
                     }
                     return Some(None);
@@ -223,144 +236,66 @@ impl App {
             || (matches!(key.code, KeyCode::Home | KeyCode::End) && ctrl)
             || (arrows && (shift || alt || sup));
         // 全屏视图的选区按屏幕坐标记：翻页之后不再对应原来的文字，清掉（tui-select.md D3）。
-        let scrolls_screen = self.screen_selection.is_some()
+        let scrolls_screen = self.pointer.screen_selection.is_some()
             && matches!(key.code, KeyCode::PageUp | KeyCode::PageDown);
         if !keeps || scrolls_screen {
-            self.clear_selection();
+            self.pointer.clear_selection();
         }
         None
     }
 
-    fn overlay_key(&mut self, key: KeyEvent) -> Option<Action> {
-        if matches!(self.overlay, Some(Overlay::Detail(_))) {
-            return self.detail_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::Login(_))) {
-            return self.login_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::Permissions(_))) {
-            return self.permissions_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::Export(_))) {
-            return self.export_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::Diff(_))) {
-            return self.diff_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::Projects(_))) {
-            return self.projects_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::Resume(_))) {
-            return self.resume_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::Trust(_))) {
-            return self.trust_key(key, Instant::now());
-        }
-        if matches!(self.overlay, Some(Overlay::Background(_))) {
-            return self.background_key(key, Instant::now());
-        }
-        if matches!(self.overlay, Some(Overlay::Usage(_))) {
-            return self.usage_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::YoloConfirm(_))) {
-            return self.yolo_confirm_key(key);
-        }
-        if matches!(self.overlay, Some(Overlay::Machines(_))) {
-            return self.machines_key(key);
-        }
-        let ctrl = self.typing.ctrl(&key);
-        match self.overlay.as_mut()? {
-            Overlay::List(list) => match list.on_key(key, self.typing) {
-                Outcome::Pending => None,
-                Outcome::Closed => {
-                    // `/memory` 按 esc：给出提示（tui-input.md §4.2）。
-                    if list.purpose == Purpose::Memory {
-                        self.info(super::i18n_input::memory_cancelled(self.lang).to_owned());
-                    }
-                    self.overlay = None;
-                    None
-                }
-                Outcome::Chosen(value) => {
-                    let purpose = list.purpose.clone();
-                    self.overlay = None;
-                    self.chosen(&purpose, &value)
-                }
-            },
-            Overlay::Page { scroll, .. } => {
-                let page = self.viewport.max(1);
-                match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => self.overlay = None,
-                    KeyCode::Char('c') if ctrl => self.overlay = None,
-                    KeyCode::Down | KeyCode::Char('j') => *scroll += 1,
-                    KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
-                    KeyCode::PageDown | KeyCode::Char(' ') => *scroll += page,
-                    KeyCode::PageUp => *scroll = scroll.saturating_sub(page),
-                    KeyCode::Home => *scroll = 0,
-                    _ => {}
-                }
-                None
-            }
-            Overlay::Shortcuts => {
+    /// 选择列表的按键（`overlay.rs` 分派）。
+    pub(super) fn list_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let Some(Overlay::List(list)) = self.overlay.as_mut() else {
+            return None;
+        };
+        match list.on_key(key) {
+            Outcome::Pending => None,
+            Outcome::Closed => {
+                // `/memory` 按 esc：给出提示（tui-input.md §4.2）。
+                let cancelled = list.cancelled.take();
                 self.overlay = None;
+                if let Some(text) = cancelled {
+                    self.info(text);
+                }
                 None
             }
-            Overlay::Detail(_)
-            | Overlay::Login(_)
-            | Overlay::Permissions(_)
-            | Overlay::Export(_)
-            | Overlay::Diff(_)
-            | Overlay::Projects(_)
-            | Overlay::Resume(_)
-            | Overlay::Trust(_)
-            | Overlay::Background(_)
-            | Overlay::Usage(_)
-            | Overlay::YoloConfirm(_)
-            | Overlay::Machines(_) => None,
+            Outcome::Chosen { choice, level } => {
+                self.overlay = None;
+                self.chosen(choice, level)
+            }
         }
     }
 
-    /// 选择器选中一项后的动作。模型列表的值是 `provider SEP model SEP 团队项目 SEP 档位`（团队项目是 JSON，可为空）。
-    fn chosen(&mut self, purpose: &Purpose, value: &str) -> Option<Action> {
-        match purpose {
-            Purpose::Model => {
-                let mut parts = value.split(SEP);
-                let provider = parts.next()?.to_owned();
-                let model = parts.next()?.to_owned();
-                let connection = parts
-                    .next()
-                    .filter(|c| !c.is_empty())
-                    .and_then(|c| serde_json::from_str(c).ok())
-                    .map(Box::new);
-                let reasoning = parts.next().filter(|r| !r.is_empty()).map(str::to_owned);
-                Some(Action::ChooseModel(ModelSelection {
-                    provider,
-                    model,
-                    reasoning,
-                    connection,
-                }))
-            }
-            Purpose::Rewind => self.rewind_chosen(value),
-            Purpose::RewindConfirm => self.rewind_confirmed(value),
-            Purpose::Memory => {
-                let file = self.memory_files.get(value.parse::<usize>().ok()?)?;
-                Some(Action::OpenMemory {
-                    path: file.path.clone(),
-                    display: file.display.clone(),
-                })
-            }
-            Purpose::Fork => self.fork_chosen(value),
-            Purpose::Theme => self.set_theme(value),
+    /// 选择器选中一项后的动作；`level` 是带档位的条目（模型）的焦点档位。
+    fn chosen(&mut self, choice: Choice, level: Option<String>) -> Option<Action> {
+        match choice {
+            Choice::Close => None,
+            Choice::Model(selection) => Some(Action::ChooseModel(ModelSelection {
+                reasoning: level,
+                ..selection
+            })),
             // 与带参数的命令走同一条路径（tui-display.md §4.3、§4.4）。
-            Purpose::Permissions => self.mode_command(value),
-            Purpose::Effort => Some(Action::Manage(super::manage::Manage::Effort(
-                value.to_owned(),
-            ))),
-            Purpose::Info => None,
+            Choice::Mode(mode) => self.switch_mode(mode, true),
+            Choice::Effort(level) => Some(Action::Manage(super::manage::Manage::Effort(level))),
+            Choice::Rewind(message) => self.rewind_chosen(&message),
+            Choice::RewindTo { scope, target } => self.rewind_confirmed(scope, target),
+            Choice::RewindBack => {
+                let entries = std::mem::take(&mut self.rewind);
+                self.open_rewind(entries);
+                None
+            }
+            Choice::Memory(file) => Some(Action::OpenMemory {
+                path: file.path,
+                display: file.display,
+            }),
+            Choice::Fork(input) => Some(Action::Fork { input }),
+            Choice::Theme(theme) => Some(Action::Manage(super::manage::Manage::SetTheme(theme))),
         }
     }
 
     fn search_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let ctrl = self.typing.ctrl(&key);
+        let ctrl = keyboard::ctrl(&key);
         let (mut query, _) = self.composer.search.clone()?;
         match key.code {
             // esc / tab 采用；enter 采用并发送；ctrl+c 取消，输入框保持原样。
@@ -372,10 +307,10 @@ impl App {
             KeyCode::Char('c') if ctrl => self.composer.search = None,
             KeyCode::Char('r') if ctrl => self.composer.search_older(),
             KeyCode::Backspace => {
-                query.pop();
+                crate::ui::line_edit::backspace(&mut query);
                 self.composer.search_update(query);
             }
-            KeyCode::Char(c) if self.typing.is_text(&key) => {
+            KeyCode::Char(c) if keyboard::is_text(&key) => {
                 query.push(c);
                 self.composer.search_update(query);
             }

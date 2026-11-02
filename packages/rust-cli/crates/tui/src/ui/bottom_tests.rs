@@ -10,32 +10,13 @@ use rust_cli_kernel_api::session_api::{
 
 use crate::ui::app::App;
 use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
+use crate::ui::test_support::app_in;
 use crate::view::Transcript;
 
 const WIDTH: usize = 80;
 
 fn selection() -> ModelSelection {
-    ModelSelection {
-        provider: "fixture".into(),
-        model: "scripted".into(),
-        reasoning: None,
-        connection: None,
-    }
-}
-
-fn app(lang: Lang) -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        lang,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
+    ModelSelection::new("fixture", "scripted")
 }
 
 /// 按顺序把事件折进视图。
@@ -93,7 +74,7 @@ fn lines(app: &App) -> Vec<String> {
 
 #[test]
 fn the_key_is_shown_under_the_queued_input_while_the_turn_runs() {
-    let mut app = app(Lang::En);
+    let mut app = app_in(Lang::En);
     feed(&mut app, vec![started(), queued("also check the date")]);
     assert_eq!(
         lines(&app),
@@ -109,8 +90,8 @@ fn the_key_is_shown_under_the_queued_input_while_the_turn_runs() {
 #[test]
 fn the_whole_line_is_secondary() {
     for enhanced in [false, true] {
-        let mut app = app(Lang::En);
-        app.keyboard_enhanced = enhanced;
+        let mut app = app_in(Lang::En);
+        app.keys.keyboard_enhanced = enhanced;
         feed(&mut app, vec![started(), queued("also check the date")]);
         let drawn = super::queue(&app, WIDTH);
         let hint = drawn.last().expect("the hint line");
@@ -144,7 +125,7 @@ fn the_whole_line_is_secondary() {
 /// 中文界面：`<键> 立即发送`（与 footer 快捷键面板一致）。
 #[test]
 fn the_chinese_line_says_send_now() {
-    let mut app = app(Lang::Zh);
+    let mut app = app_in(Lang::Zh);
     feed(&mut app, vec![started(), queued("再看看日期")]);
     assert_eq!(
         lines(&app).last().map(String::as_str),
@@ -155,8 +136,8 @@ fn the_chinese_line_says_send_now() {
 /// 终端分辨得出 ctrl+enter（键盘增强）时写 ctrl+enter。
 #[test]
 fn an_enhanced_terminal_shows_ctrl_enter() {
-    let mut app = app(Lang::En);
-    app.keyboard_enhanced = true;
+    let mut app = app_in(Lang::En);
+    app.keys.keyboard_enhanced = true;
     feed(&mut app, vec![started(), queued("also check the date")]);
     assert_eq!(
         lines(&app).last().map(String::as_str),
@@ -173,15 +154,15 @@ fn an_enhanced_terminal_shows_ctrl_enter() {
 /// 空闲时、队列空时、回合结束之后都不显示。
 #[test]
 fn the_key_is_not_shown_without_a_running_turn_or_a_queued_input() {
-    let mut idle = app(Lang::En);
+    let mut idle = app_in(Lang::En);
     feed(&mut idle, vec![queued("also check the date")]);
     assert_eq!(lines(&idle), ["❯ also check the date".to_owned()]);
 
-    let mut running = app(Lang::En);
+    let mut running = app_in(Lang::En);
     feed(&mut running, vec![started()]);
     assert!(lines(&running).is_empty(), "no queue, no hint");
 
-    let mut done = app(Lang::En);
+    let mut done = app_in(Lang::En);
     feed(
         &mut done,
         vec![
@@ -200,7 +181,7 @@ fn the_key_is_not_shown_without_a_running_turn_or_a_queued_input() {
 /// 只读查看子代理时不显示（对照实现在这个视图里整个排队列表都不显示）。
 #[test]
 fn the_key_is_not_shown_while_viewing_a_subagent() {
-    let mut app = app(Lang::En);
+    let mut app = app_in(Lang::En);
     feed(&mut app, vec![started(), queued("also check the date")]);
     app.viewing = Some(crate::ui::agents::Viewing {
         agent: rust_cli_kernel_api::ids::AgentId::new("a1"),

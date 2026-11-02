@@ -250,9 +250,5 @@ pub(crate) async fn sha256(path: &Path) -> io::Result<String> {
         }
         hash.update(&buffer[..read]);
     }
-    Ok(hash
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    Ok(rust_cli_base::hash::hex(&hash.finalize()))
 }

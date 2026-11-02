@@ -16,8 +16,8 @@ fn setup() -> Setup {
         os_version: "x".into(),
         shell: "zsh".into(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     })
     .with_file("/Users/dev/project/src/main.rs", "fn main() {}\n")
     .with_file("/Users/dev/project/src/lib.rs", "pub fn lib() {}\n")

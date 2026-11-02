@@ -3,17 +3,6 @@
 use super::*;
 use rust_cli_kernel_api::permission::ExecutionState;
 
-fn failed(error: &StoreError) -> KernelError {
-    match error {
-        StoreError::NotFound { session } => KernelError::NotFound {
-            session: session.clone(),
-        },
-        other => KernelError::Failed {
-            message: other.to_string(),
-        },
-    }
-}
-
 #[async_trait]
 impl Kernel for LocalKernel {
     async fn create_session(&self, request: CreateSession) -> Result<SessionId, KernelError> {
@@ -31,7 +20,7 @@ impl Kernel for LocalKernel {
     async fn resolve_detached(
         &self,
         interaction: &rust_cli_kernel_api::ids::InteractionId,
-        answer: serde_json::Value,
+        answer: rust_cli_kernel_api::orchestration::Answer,
     ) -> Result<(), KernelError> {
         self.detached.resolve(interaction, answer).await
     }
@@ -59,11 +48,7 @@ impl Kernel for LocalKernel {
             trace: TraceId::new(id.as_str()),
             created_at_ms: self.ports.clock.now_ms(),
         };
-        self.ports
-            .store
-            .create(meta.clone())
-            .await
-            .map_err(|error| failed(&error))?;
+        self.ports.store.create(meta.clone()).await?;
         // 执行状态（修复线 F20）：单值的 `plan` 是“plan 开、default”，另记的 `plan` 打开 plan。
         let execution = ExecutionState::from_parts(request.mode, request.plan);
         let batch = FactBatch {
@@ -77,23 +62,9 @@ impl Kernel for LocalKernel {
             ],
             turn: None,
         };
-        self.ports
-            .store
-            .commit(&id, batch)
-            .await
-            .map_err(|error| failed(&error))?;
+        self.ports.store.commit(&id, batch).await?;
         self.start(
-            SessionState {
-                meta,
-                messages: Vec::new(),
-                earlier: Vec::new(),
-                selection: request.selection,
-                mode: execution,
-                checkpoints: Vec::new(),
-                start,
-                turn: None,
-                last_turn_failed: false,
-            },
+            SessionState::created(meta, request.selection, execution, start),
             Opened::Created,
         );
         Ok(id)
@@ -111,40 +82,24 @@ impl Kernel for LocalKernel {
             table::Claim::Open(open) => return Ok(open),
             table::Claim::Load(loading) => loading,
         };
-        let loaded = self
-            .ports
-            .store
-            .load(session)
-            .await
-            .map_err(|error| failed(&error))?;
+        let loaded = self.ports.store.load(session).await?;
         // Node 群协作会话（`permission.scope = session`）的规则只在会话行里：这个会话的判决用它代替本机项目
         // 规则集（修复线 F2，shell-permissions.md §5）。“总是允许”与改模式由存储按同一作用域落库。条目是这个调用
         // 的 Loading，期间不会有同一个会话的关闭插进来 `release` 它。
-        if let Some(rules) = self
-            .ports
-            .store
-            .session_rules(session)
-            .await
-            .map_err(|error| failed(&error))?
-        {
-            self.gate.scope(session, &rules);
-        }
-        let state = SessionState {
-            meta: loaded.meta,
-            messages: loaded.messages,
-            earlier: loaded.earlier,
-            selection: loaded
-                .model
-                .unwrap_or_else(|| self.defaults.selection.clone()),
-            mode: loaded.mode.map_or_else(
-                || self.defaults.mode.into(),
-                |mode| ExecutionState::from_parts(mode, loaded.plan),
-            ),
-            checkpoints: loaded.checkpoints,
-            start,
-            turn: loaded.turn,
-            last_turn_failed: loaded.last_turn_failed,
-        };
+        let rules = self.ports.store.session_rules(session).await?;
+        // 会话之外按会话保存的状态（判决链的会话规则、“先读后改”记录）在启动 actor 之前恢复（table.rs 的
+        // `SessionScoped`，关闭时在同一处释放）。
+        self.closer
+            .scoped
+            .restored(
+                session,
+                &loaded,
+                rules.as_ref(),
+                self.machine().files().as_ref(),
+            )
+            .await;
+        let state =
+            SessionState::from_loaded(loaded, &self.defaults.selection, self.defaults.mode, start);
         Ok(self.start(state, Opened::Loaded))
     }
 
@@ -156,7 +111,7 @@ impl Kernel for LocalKernel {
             .store
             .list(filter)
             .await
-            .map_err(|error| failed(&error))
+            .map_err(KernelError::from)
     }
 
     /// `/context`（context-usage.md §2）：有会话时按会话 actor 的当前视图（历史、模型、模式），只读。
@@ -185,7 +140,7 @@ impl Kernel for LocalKernel {
         let request = rust_cli_kernel_api::env_files::ListFiles {
             cwd: workspace.root.clone(),
         };
-        self.machine
+        self.machine()
             .search()
             .list_files(workspace, request)
             .await
@@ -214,8 +169,8 @@ impl Kernel for LocalKernel {
         query: rust_cli_kernel_api::manage::PlanFileQuery,
     ) -> Result<rust_cli_kernel_api::manage::PlanFile, KernelError> {
         directory::plan_file(
-            self.machine.info().as_ref(),
-            self.machine.files().as_ref(),
+            self.machine().info().as_ref(),
+            self.machine().files().as_ref(),
             &query,
         )
         .await
@@ -241,28 +196,9 @@ impl Kernel for LocalKernel {
             .await)
     }
 
-    /// `/usage` 的 API 时长：存储的用量表是唯一来源（docs/specs/rust-cli/usage.md §4）。
-    async fn session_metering(
-        &self,
-        session: &SessionId,
-    ) -> Result<rust_cli_kernel_api::metering::SessionMetering, KernelError> {
-        self.ports
-            .store
-            .metering(session)
-            .await
-            .map_err(|error| failed(&error))
-    }
-
-    /// footer 的请求统计（tui-display.md §2.6、usage.md §4.1，修复线 F27）：存储从用量表聚合。
-    async fn request_stats(
-        &self,
-        session: &SessionId,
-    ) -> Result<rust_cli_kernel_api::metering::RequestStats, KernelError> {
-        self.ports
-            .store
-            .request_stats(session)
-            .await
-            .map_err(|error| failed(&error))
+    /// 存储的只读查询与前端记录（审查 K7）：同一个存储适配器，不经会话 actor（这些都不是会话状态）。
+    fn queries(&self) -> Arc<dyn rust_cli_kernel_api::store::StoreQueries> {
+        self.ports.store.clone()
     }
 
     /// 活动统计（usage.md §5）：今天与本地日的偏移取自注入的时钟，聚合在存储。
@@ -280,7 +216,7 @@ impl Kernel for LocalKernel {
             .store
             .activity(query)
             .await
-            .map_err(|error| failed(&error))
+            .map_err(KernelError::from)
     }
 
     /// ← 会话面板：库里的会话合并本进程里打开着的会话的实时状态（tui-panels.md §2.1）。
@@ -314,37 +250,6 @@ impl Kernel for LocalKernel {
         self.snapshot(session).await
     }
 
-    /// 前端记录（缺口 G2）：经存储端口原样落库，不经会话 actor（记录不是会话状态）。
-    async fn put_session_record(
-        &self,
-        session: &SessionId,
-        record: rust_cli_kernel_api::store::FrontendRecord,
-    ) -> Result<(), KernelError> {
-        self.ports
-            .store
-            .put_record(session, &record)
-            .await
-            .map_err(|error| match error {
-                StoreError::Unsupported { what } => KernelError::Unsupported { what },
-                other => failed(&other),
-            })
-    }
-
-    async fn session_records(
-        &self,
-        session: &SessionId,
-        kind: &str,
-    ) -> Result<Vec<rust_cli_kernel_api::store::FrontendRecord>, KernelError> {
-        self.ports
-            .store
-            .records(session, kind)
-            .await
-            .map_err(|error| match error {
-                StoreError::Unsupported { what } => KernelError::Unsupported { what },
-                other => failed(&other),
-            })
-    }
-
     /// `/hooks`：hooks 引擎当前快照里的配置（tui-display.md §3.5）。
     async fn hooks(&self) -> Vec<rust_cli_kernel_api::manage::HookEntry> {
         self.hooks.entries()
@@ -358,7 +263,8 @@ impl Kernel for LocalKernel {
         let request = rust_cli_kernel_api::env_git::GitDiffRequest {
             cwd: workspace.root.clone(),
         };
-        self.local
+        // `/diff` 看会话主 env 上的仓库（deployment.md §10）。
+        self.machine()
             .git()
             .git_diff(workspace, request)
             .await
@@ -373,10 +279,9 @@ impl Kernel for LocalKernel {
         file: rust_cli_kernel_api::manage::ExportFile,
     ) -> Result<String, KernelError> {
         export::write(
-            self.machine.info().as_ref(),
-            self.machine.files().as_ref(),
-            self.ports.ids.as_ref(),
-            &self.generation,
+            self.machine().info().as_ref(),
+            self.machine().files().as_ref(),
+            &self.operations,
             file,
         )
         .await

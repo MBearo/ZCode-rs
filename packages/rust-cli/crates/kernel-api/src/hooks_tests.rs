@@ -30,23 +30,23 @@ fn event_names_round_trip_all_33() {
 #[test]
 fn hook_event_round_trips_and_old_payloads_get_defaults() {
     let event = HookEvent {
-        name: HookEventName::Stop,
-        session: SessionId::new("sess_1"),
-        workspace: workspace(),
-        payload: json!({"stop_hook_active": false}),
         context: HookContext {
             mode: Some(PermissionMode::AcceptEdits),
             agent: Some(AgentId::new("agent_1")),
             agent_type: Some("Explore".to_owned()),
             cwd: Some(EnvPath::new("/w/sub")),
             run: Some(RunId::new("run_1")),
-            selection: Some(crate::model::ModelSelection {
-                provider: "anthropic".to_owned(),
-                model: rust_cli_base::models::GLM_5_3.to_owned(),
-                reasoning: None,
-                connection: None,
-            }),
+            selection: Some(crate::model::ModelSelection::new(
+                "anthropic".to_owned(),
+                rust_cli_base::models::GLM_5_3.to_owned(),
+            )),
         },
+        ..HookEvent::new(
+            HookEventName::Stop,
+            SessionId::new("sess_1"),
+            workspace(),
+            json!({"stop_hook_active": false}),
+        )
     };
     let text = serde_json::to_string(&event).unwrap();
     assert_eq!(serde_json::from_str::<HookEvent>(&text).unwrap(), event);
@@ -127,8 +127,14 @@ fn absorbed_defaults_to_prompts_before_notices() {
         items,
         vec![
             Absorbed::Prompt(Steered::plain("s1".to_owned())),
-            Absorbed::Notice("n1".to_owned()),
-            Absorbed::Notice("n2".to_owned()),
+            Absorbed::Notice(AbsorbedNotice {
+                text: "n1".to_owned(),
+                id: None,
+            }),
+            Absorbed::Notice(AbsorbedNotice {
+                text: "n2".to_owned(),
+                id: None,
+            }),
         ]
     );
 }

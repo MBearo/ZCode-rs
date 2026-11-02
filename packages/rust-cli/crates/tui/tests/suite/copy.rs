@@ -1,16 +1,15 @@
 //! 修复线 F25（docs/specs/rust-cli/tui-select.md）：模型请求失败的错误行完整显示；鼠标拖选在对话区与全屏视图里
 //! 选择并在松开时复制（OSC 52 与入口的剪贴板服务），提示文字固定。
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use futures_util::FutureExt;
-use futures_util::future::BoxFuture;
 use ratatui::style::Color;
 use rust_cli_kernel_api::model::ModelError;
 use rust_cli_kernel_api::testing::text_response;
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
-use rust_cli_tui::{Clipboard, CopyRoute, ImageBytes};
+use rust_cli_tui::CopyRoute;
+use rust_cli_tui::{ColorLevel, Palette};
 
+use super::stub_services::FakeClipboard;
 use super::support::{GatedModel, Setup, row_of, squash, with_ui};
 
 /// 用户报告里那条 Bedrock 的 400（请求 ID 换成示例值）。
@@ -30,29 +29,6 @@ fn wide() -> Setup {
     }
 }
 
-/// 剪贴板替身：记下写进来的文字，按给定的途径回答。
-#[derive(Default)]
-struct FakeClipboard {
-    route: Option<CopyRoute>,
-    texts: Mutex<Vec<String>>,
-}
-
-impl Clipboard for FakeClipboard {
-    fn image(&self) -> BoxFuture<'static, Result<Option<ImageBytes>, String>> {
-        async { Ok(None) }.boxed()
-    }
-
-    fn image_file(&self, _path: String) -> BoxFuture<'static, Result<Option<ImageBytes>, String>> {
-        async { Ok(None) }.boxed()
-    }
-
-    fn copy_text(&self, text: String) -> BoxFuture<'static, CopyRoute> {
-        self.texts.lock().unwrap().push(text);
-        let route = self.route.unwrap_or(CopyRoute::Native);
-        async move { route }.boxed()
-    }
-}
-
 /// 第 `row` 行里 `needle` 所在的显示列。
 fn column_of(screen: &str, row: u16, needle: &str) -> u16 {
     let line = screen.lines().nth(usize::from(row)).unwrap();
@@ -61,7 +37,7 @@ fn column_of(screen: &str, row: u16, needle: &str) -> u16 {
 }
 
 fn with_clipboard(clipboard: &Arc<FakeClipboard>, mut setup: Setup) -> Setup {
-    setup.services.clipboard = Some(clipboard.clone());
+    setup.services.clipboard = clipboard.clone();
     setup
 }
 

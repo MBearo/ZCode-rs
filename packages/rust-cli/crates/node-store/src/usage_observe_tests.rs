@@ -26,19 +26,16 @@ fn sid() -> SessionId {
 fn model_call(message: &str) -> Fact {
     Fact::ModelCalled {
         call: ModelCall {
-            message: MessageId::new(message),
-            source: QuerySource::MainThread,
-            selection: selection(),
-            started_at_ms: 2_000,
             first_token_at_ms: Some(2_100),
-            first_content_at_ms: None,
-            completed_at_ms: 2_500,
-            status: CallStatus::Completed,
             stop_reason: Some(StopReason::EndTurn),
-            tool_calls: 0,
-            usage: None,
-            retries: 0,
-            error: None,
+            ..ModelCall::new(
+                MessageId::new(message),
+                QuerySource::MainThread,
+                selection(),
+                2_000,
+                2_500,
+                CallStatus::Completed,
+            )
         },
     }
 }

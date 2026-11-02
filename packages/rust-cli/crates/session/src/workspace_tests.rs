@@ -1,23 +1,17 @@
 //! 工作目录的 owner 是会话 actor（docs/specs/rust-cli/tools-more.md §11.4）：工具改了目录后，同一回合里
 //! 后续的工具调用立即在新目录，执行环境的 shell cwd 一并设好；执行环境拒绝时目录不变。
 
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures_util::stream::BoxStream;
-use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, ReadFile,
-    StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
-};
-use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
+use rust_cli_kernel_api::env::{EnvError, EnvPath, WorkspaceRef};
+use rust_cli_kernel_api::ids::SessionId;
+use rust_cli_kernel_api::machine::{MachineEnv, Shell};
 use rust_cli_kernel_api::message::{ContentBlock, Message, ToolResultContent};
 use rust_cli_kernel_api::session_api::SessionHandle;
 use rust_cli_kernel_api::testing::{
-    MemoryEnvironment, ScriptedModel, text_response, tool_use_response,
+    MemoryEnvironment, ScriptedModel, text_response, tool_use_response, unsupported_machine,
 };
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext,
@@ -25,7 +19,7 @@ use rust_cli_kernel_api::tool::{
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::test_support::{Setup, env, finished, submit, until};
+use crate::test_support::{GatedModel, Setup, env, finished, submit, until};
 
 /// 内存执行环境，另外记下 shell cwd；`refuse` 时拒绝设置。
 struct CwdEnv {
@@ -34,58 +28,14 @@ struct CwdEnv {
     refuse: bool,
 }
 
-#[async_trait]
-impl EnvInfo for CwdEnv {
-    async fn facts(&self, workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        self.inner.facts(workspace).await
-    }
-}
-
-#[async_trait]
-impl Files for CwdEnv {
-    async fn read_file(
-        &self,
-        workspace: &WorkspaceRef,
-        request: ReadFile,
-    ) -> Result<FileContent, EnvError> {
-        self.inner.read_file(workspace, request).await
-    }
-
-    async fn write_file(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: WriteFile,
-    ) -> Result<WriteReceipt, EnvError> {
-        self.inner.write_file(workspace, context, request).await
-    }
-}
-
-#[async_trait]
-impl Commands for CwdEnv {
-    async fn start_command(
-        &self,
-        workspace: &WorkspaceRef,
-        context: OperationContext,
-        request: StartCommand,
-    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        self.inner.start_command(workspace, context, request).await
-    }
-
-    fn watch_command(
-        &self,
-        operation: OperationId,
-        cursor: u64,
-    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        self.inner.watch_command(operation, cursor)
-    }
-
-    async fn cancel(&self, operation: OperationId) -> Result<(), EnvError> {
-        self.inner.cancel(operation).await
-    }
-
-    async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
-        self.inner.close_session(session, forget).await
+impl CwdEnv {
+    /// 环境事实、文件与命令是内存执行环境的，shell 是自己的；其余端口返回 `Unsupported`。
+    fn machine(self: Arc<Self>) -> MachineEnv {
+        unsupported_machine()
+            .with_info(self.inner.clone())
+            .with_files(self.inner.clone())
+            .with_commands(self.inner.clone())
+            .with_shell(self)
     }
 }
 
@@ -97,20 +47,10 @@ impl Shell for CwdEnv {
                 what: "set_shell_cwd".to_owned(),
             });
         }
-        self.cwd
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(cwd.as_str().to_owned());
+        self.cwd.lock_unpoisoned().push(cwd.as_str().to_owned());
         Ok(())
     }
 }
-
-impl Search for CwdEnv {}
-impl Background for CwdEnv {}
-impl Checkpoints for CwdEnv {}
-impl Pdf for CwdEnv {}
-impl Git for CwdEnv {}
-impl Fetch for CwdEnv {}
 
 /// `Switch` 请求改目录；`Where` 报告自己的工具上下文里的目录。
 struct DirTool(&'static str);
@@ -137,8 +77,8 @@ impl Tool for DirTool {
     ) -> Result<ToolOutput, ToolError> {
         let text = if self.0 == "Switch" {
             match context
-                .interactions
-                .set_workspace(&context.session, EnvPath::new("/work/.zcode/worktrees/a"))
+                .session_ops
+                .set_workspace(EnvPath::new("/work/.zcode/worktrees/a"))
                 .await
             {
                 Ok(()) => "switched".to_owned(),
@@ -167,7 +107,7 @@ async fn run(refuse: bool) -> (Vec<String>, Vec<String>, String) {
         refuse,
     });
     let mut setup = Setup::new(model);
-    setup.set_env(cwd_env.clone());
+    setup.set_machine(cwd_env.clone().machine());
     setup.tools = vec![Arc::new(DirTool("Switch")), Arc::new(DirTool("Where"))];
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
@@ -189,11 +129,7 @@ async fn run(refuse: bool) -> (Vec<String>, Vec<String>, String) {
             _ => None,
         })
         .collect();
-    let cwd = cwd_env
-        .cwd
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
+    let cwd = cwd_env.cwd.lock_unpoisoned().clone();
     (results, cwd, view.meta.workspace.root.as_str().to_owned())
 }
 
@@ -214,87 +150,6 @@ async fn a_refused_shell_cwd_keeps_the_old_workspace() {
     assert_eq!(root, "/work");
 }
 
-/// 放行之前一直不结束的模型（让回合停在进行中）。
-struct Held(Arc<tokio::sync::Notify>);
-
-impl rust_cli_kernel_api::model::ModelPort for Held {
-    fn stream(
-        &self,
-        _request: rust_cli_kernel_api::model::ModelRequest,
-        _cancel: tokio_util::sync::CancellationToken,
-    ) -> BoxStream<
-        'static,
-        Result<rust_cli_kernel_api::model::ModelEvent, rust_cli_kernel_api::model::ModelError>,
-    > {
-        use futures_util::StreamExt;
-        let gate = self.0.clone();
-        futures_util::stream::once(async move { gate.notified().await })
-            .filter_map(|()| async { None })
-            .chain(futures_util::stream::iter(text_response(&["ok"])))
-            .boxed()
-    }
-}
-
-/// `/cd`（tui-manage.md §7.1）：空闲时换目录并提交说明；进行中的回合里拒绝。
-#[tokio::test]
-async fn set_workspace_moves_an_idle_session_and_commits_the_note() {
-    use rust_cli_kernel_api::message::UserOrigin;
-    use rust_cli_kernel_api::session_api::{Ack, Command, KernelEvent};
-
-    use crate::test_support::envelope;
-
-    let gate = Arc::new(tokio::sync::Notify::new());
-    let cwd_env = Arc::new(CwdEnv {
-        inner: env(),
-        cwd: Mutex::default(),
-        refuse: false,
-    });
-    let mut setup = Setup::new(Arc::new(Held(gate.clone())));
-    setup.set_env(cwd_env.clone());
-    let built = setup.build().await;
-    let mut events = built.session.subscribe(Some(0));
-    let set = |id: &str| {
-        envelope(
-            id,
-            Command::SetWorkspace {
-                root: EnvPath::new("/work/other"),
-                note: Some("<system-reminder>\nmoved\n</system-reminder>".to_owned()),
-            },
-        )
-    };
-    // 回合进行中：拒绝，目录不变。
-    built.session.send(submit("c1", "go")).await;
-    until(&mut events, |event| {
-        matches!(event, KernelEvent::TurnStarted { .. })
-    })
-    .await;
-    let Ack::Rejected { reason } = built.session.send(set("c2")).await else {
-        panic!("a running turn must refuse the move");
-    };
-    assert!(reason.starts_with("A turn is in progress"), "{reason}");
-    gate.notify_one();
-    until(&mut events, finished).await;
-    assert!(matches!(
-        built.session.send(set("c3")).await,
-        Ack::Accepted { .. }
-    ));
-    let view = built.session.view().await.unwrap();
-    assert_eq!(view.meta.workspace.root.as_str(), "/work/other");
-    let Some(Message::User(note)) = view.messages.last() else {
-        panic!("no note");
-    };
-    assert_eq!(
-        note.origin,
-        UserOrigin::Meta {
-            source: "rust-cli/cd".to_owned()
-        }
-    );
-    assert_eq!(
-        *cwd_env.cwd.lock().unwrap_or_else(PoisonError::into_inner),
-        ["/work/other"]
-    );
-}
-
 /// 复现（R1-3）：以前工具改了工作目录（EnterWorktree / ExitWorktree）不发事件，前端只能自存一份目录，只有 `/cd`
 /// 才更新它——之后的 `/diff`、`@` 补全、`/export`、`/permissions` 用旧目录。现在 actor 改目录时发
 /// `WorkspaceChanged`，前端只从事件与快照取。
@@ -312,7 +167,7 @@ async fn a_workspace_change_is_announced_to_the_front_end() {
         refuse: false,
     });
     let mut setup = Setup::new(model);
-    setup.set_env(cwd_env);
+    setup.set_machine(cwd_env.machine());
     setup.tools = vec![Arc::new(DirTool("Switch"))];
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
@@ -361,8 +216,8 @@ async fn change_directory_is_judged_by_the_actor() {
         cwd: Mutex::default(),
         refuse: false,
     });
-    let mut setup = Setup::new(Arc::new(Held(gate.clone())));
-    setup.set_env(cwd_env.clone());
+    let mut setup = Setup::new(Arc::new(GatedModel::new(gate.clone())));
+    setup.set_machine(cwd_env.clone().machine());
     setup.directory_rules = Arc::new(OneRule);
     let built = setup.build().await;
     let mut events = built.session.subscribe(Some(0));
@@ -375,7 +230,9 @@ async fn change_directory_is_judged_by_the_actor() {
         )
     };
     let outcome = |ack: Ack| match ack {
-        Ack::Accepted { result } => serde_json::from_value::<DirectoryOutcome>(result).unwrap(),
+        Ack::Accepted {
+            result: rust_cli_kernel_api::session_api::CommandResult::Directory(outcome),
+        } => outcome,
         other => panic!("{other:?}"),
     };
     assert_eq!(
@@ -424,10 +281,7 @@ async fn change_directory_is_judged_by_the_actor() {
         text.ends_with("\n\nrules for /work/other after 2 messages"),
         "{text}"
     );
-    assert_eq!(
-        *cwd_env.cwd.lock().unwrap_or_else(PoisonError::into_inner),
-        ["/work/other"]
-    );
+    assert_eq!(*cwd_env.cwd.lock_unpoisoned(), ["/work/other"]);
 }
 
 /// 工作线 F57：`/cd` 的“已经在这里”用 kernel-api `env_path` 的键判断（规范化；Windows 上不分大小写），与没有会话时
@@ -442,20 +296,27 @@ async fn the_same_directory_is_judged_by_its_path_key() {
 
     let unchanged = |root: &'static str, target: &'static str| async move {
         let mut setup = Setup::new(Arc::new(ScriptedModel::new(Vec::new())));
-        setup.set_env(Arc::new(CwdEnv {
-            inner: env(),
-            cwd: Mutex::default(),
-            refuse: false,
-        }));
+        setup.set_machine(
+            Arc::new(CwdEnv {
+                inner: env(),
+                cwd: Mutex::default(),
+                refuse: false,
+            })
+            .machine(),
+        );
         setup.root = root;
         let built = setup.build().await;
         let command = Command::ChangeDirectory {
             root: EnvPath::new(target),
         };
-        let Ack::Accepted { result } = built.session.send(envelope("c1", command)).await else {
-            panic!("refused");
+        let ack = built.session.send(envelope("c1", command)).await;
+        let Ack::Accepted {
+            result: rust_cli_kernel_api::session_api::CommandResult::Directory(outcome),
+        } = ack
+        else {
+            panic!("refused: {ack:?}");
         };
-        serde_json::from_value::<DirectoryOutcome>(result).unwrap() == DirectoryOutcome::Unchanged
+        outcome == DirectoryOutcome::Unchanged
     };
     assert!(unchanged(r"C:\Work", r"c:\work").await);
     assert!(unchanged(r"C:\Work", r"C:\Work\").await);
@@ -472,7 +333,7 @@ async fn delivering_moves_the_foreground_only_while_an_input_waits() {
     use rust_cli_kernel_api::env::BackgroundReason;
     use rust_cli_kernel_api::session_api::{Command, Delivery, KernelEvent};
 
-    use crate::test_support::{GatedModel, envelope};
+    use crate::test_support::envelope;
 
     let gate = Arc::new(tokio::sync::Notify::new());
     let mut setup = Setup::new(Arc::new(GatedModel::new(gate.clone())));

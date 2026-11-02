@@ -20,6 +20,8 @@ rusqlite.workspace = true
 rust-cli-base.workspace = true
 rust-cli-fs.workspace = true
 rust-cli-kernel-api.workspace = true
+# Node 记录格式的纯函数（F128，审查 X5）：仓储与事务在这里，记录的形状与读回在 node-records。
+rust-cli-node-records.workspace = true
 rust-cli-paths.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -27,5 +29,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# 共用的测试时钟（kernel-api 的 testing，F126）。
+rust-cli-kernel-api = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 tokio.workspace = true

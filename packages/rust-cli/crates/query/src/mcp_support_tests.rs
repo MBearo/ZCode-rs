@@ -1,41 +1,18 @@
 //! 测试替身：MCP 连接与带 MCP 状态的注册表（ext.md §3.8、query.md §1.3，修复线 F36）。名字以 `_tests.rs` 结尾：
 //! 测试文件可以用 `Instant`（README §4）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rust_cli_kernel_api::clock::Clock;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::manage::McpServerState;
 use rust_cli_kernel_api::mcp_state::{McpConnections, McpServerView, McpView};
 use rust_cli_kernel_api::orchestration::{ToolRegistry, ToolSnapshot};
 use rust_cli_kernel_api::tool::Tool;
 use tokio::sync::watch;
-
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// 跟着 tokio 时间走的时钟（暂停的测试时间里也准）。
-pub(crate) struct TokioClock(tokio::time::Instant);
-
-impl TokioClock {
-    pub(crate) fn new() -> Arc<Self> {
-        Arc::new(Self(tokio::time::Instant::now()))
-    }
-}
-
-impl Clock for TokioClock {
-    fn now_ms(&self) -> u64 {
-        u64::try_from(self.0.elapsed().as_millis()).unwrap_or(u64::MAX)
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
 
 pub(crate) fn server(name: &str, state: McpServerState) -> McpServerView {
     McpServerView {
@@ -96,7 +73,7 @@ impl McpConnections for FakeConnections {
     }
 
     fn declare_wait_tool(&self, session: &SessionId) {
-        lock(&self.declared).push(session.clone());
+        self.declared.lock_unpoisoned().push(session.clone());
     }
 
     fn tool_wait_ms(&self) -> u64 {
@@ -124,7 +101,7 @@ impl McpRegistry {
 
     /// 服务器连上：工具出现、视图变成 Connected（与 ext 一样同时发布）。
     pub(crate) fn connect(&self, name: &str, tools: Vec<Arc<dyn Tool>>) {
-        lock(&self.late).extend(tools);
+        self.late.lock_unpoisoned().extend(tools);
         let mut view = self.mcp.view();
         for server in &mut view.servers {
             if server.name == name {
@@ -135,21 +112,23 @@ impl McpRegistry {
     }
 }
 
-impl ToolRegistry for McpRegistry {
+impl rust_cli_kernel_api::testing::RegistryOverride for McpRegistry {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
         let mut tools = self.base.clone();
-        tools.extend(lock(&self.late).iter().cloned());
+        tools.extend(self.late.lock_unpoisoned().iter().cloned());
         tools
     }
 
     fn find(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools().into_iter().find(|tool| tool.name() == name)
+        ToolRegistry::tools(self)
+            .into_iter()
+            .find(|tool| tool.name() == name)
     }
 
     fn snapshot(&self, _session: &SessionId) -> ToolSnapshot {
         self.snapshots.fetch_add(1, Ordering::SeqCst);
         ToolSnapshot {
-            tools: self.tools(),
+            tools: ToolRegistry::tools(self),
             mcp: Some(self.mcp.view()),
         }
     }

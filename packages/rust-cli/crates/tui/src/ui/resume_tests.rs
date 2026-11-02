@@ -1,12 +1,9 @@
 //! `/resume` 页的按键（F29，tui-manage.md §10.4–§10.6）：直接打字搜索、焦点到头停住、工具栏的焦点与切换、预览与
 //! 全屏对话的请求、改名、删除确认（数字只移到删除）、当前会话的限制、别的目录先选目录、启动形态的 ctrl+c。
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::testing::selection;
+use crossterm::event::KeyCode;
 
 use super::*;
-use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
+use crate::ui::test_support::{app, ctrl, key};
 
 fn row(id: &str, root: &str, title: &str) -> SessionRow {
     SessionRow {
@@ -23,33 +20,11 @@ fn row(id: &str, root: &str, title: &str) -> SessionRow {
     }
 }
 
-fn app() -> App {
-    App::new(
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Lang::En,
-        Transcript::new(
-            selection(),
-            PermissionMode::Default,
-            crate::view::test_workspace(),
-        ),
-        Some("/Users/dev".into()),
-        "0.1.0".into(),
-    )
-}
-
 fn with_rows(app: &mut App, rows: Vec<SessionRow>) {
     app.open_resume_page(false, 0);
     if let Some(Overlay::Resume(page)) = app.overlay.as_mut() {
         page.rows = Some(rows);
     }
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
-fn ctrl(c: char) -> KeyEvent {
-    KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
 }
 
 fn page(app: &mut App) -> &mut ResumePage {
@@ -152,14 +127,14 @@ fn previews_and_transcripts_are_requested_once() {
         Some(Action::Projects(Request::Transcript("a".into())))
     );
     assert_eq!(
-        page(&mut app).transcript,
-        Some(TranscriptState::Loading("a".into()))
+        page(&mut app).modal,
+        Some(Modal::Transcript(TranscriptState::Loading("a".into())))
     );
     // 读取中只认 esc：取消后迟到的快照丢弃。
     app.resume_key(key(KeyCode::Esc));
-    assert_eq!(page(&mut app).transcript, None);
+    assert_eq!(page(&mut app).modal, None);
     app.resume_snapshot("a", true, Err("late".into()), 0);
-    assert_eq!(page(&mut app).transcript, None);
+    assert_eq!(page(&mut app).modal, None);
     assert_eq!(page(&mut app).error, None);
 }
 
@@ -170,12 +145,8 @@ fn delete_needs_confirmation_and_the_current_session_is_refused() {
     current.current = true;
     with_rows(&mut app, vec![row("a", HERE, "Old"), current]);
     app.resume_key(ctrl('d'));
-    assert_eq!(
-        page(&mut app)
-            .confirm
-            .as_ref()
-            .map(|c| (c.name.as_str(), c.focus)),
-        Some(("Old", 0))
+    assert!(
+        matches!(&page(&mut app).modal, Some(Modal::Confirm(c)) if c.name == "Old" && c.focus == 0)
     );
     // 数字 2 只移到删除（删除要明确确认），enter 才删。
     assert_eq!(app.resume_key(key(KeyCode::Char('2'))), None);
@@ -186,10 +157,10 @@ fn delete_needs_confirmation_and_the_current_session_is_refused() {
     // 取消项上 enter：什么都不做。
     app.resume_key(ctrl('d'));
     assert_eq!(app.resume_key(key(KeyCode::Enter)), None);
-    assert!(page(&mut app).confirm.is_none());
+    assert_eq!(page(&mut app).modal, None);
     app.resume_key(key(KeyCode::Down));
     app.resume_key(ctrl('d'));
-    assert!(page(&mut app).confirm.is_none());
+    assert_eq!(page(&mut app).modal, None);
     assert_eq!(
         page(&mut app).error.as_deref(),
         Some("Use /clear to leave the current session before deleting it.")
@@ -206,7 +177,13 @@ fn rename_submits_the_trimmed_name() {
     let mut app = app();
     with_rows(&mut app, vec![row("a", HERE, "Old")]);
     app.resume_key(ctrl('r'));
-    assert_eq!(page(&mut app).rename, Some(("a".into(), "Old".into())));
+    assert_eq!(
+        page(&mut app).modal,
+        Some(Modal::Rename {
+            id: "a".into(),
+            input: "Old".into()
+        })
+    );
     for _ in 0..3 {
         app.resume_key(key(KeyCode::Backspace));
     }
@@ -236,7 +213,7 @@ fn another_directory_asks_first_and_the_current_session_is_already_viewed() {
         vec![row("far", "/Users/dev/other", "Far"), current],
     );
     assert_eq!(app.resume_key(key(KeyCode::Enter)), None);
-    assert!(page(&mut app).cwd.is_some());
+    assert!(matches!(page(&mut app).modal, Some(Modal::Cwd(_))));
     // 选 2（当前目录）：打开后换到当前目录，不做信任检查。
     app.resume_key(key(KeyCode::Char('2')));
     assert_eq!(
@@ -313,4 +290,32 @@ fn ctrl_c_quits_only_at_startup() {
     assert!(app.overlay.is_none());
     app.open_resume_page(true, 0);
     assert_eq!(app.resume_key(ctrl('c')), Some(Action::Quit));
+}
+
+/// 架构整理 U7（用户决定 Q8）：删除确认、目录选择与全屏对话盖住搜索行时，粘贴与按键一样不进被盖住的查询。修前粘贴照样
+/// 进了查询（列表在确认框下面跟着过滤）。
+#[test]
+fn a_paste_under_a_dialog_of_the_page_does_not_reach_the_query() {
+    let mut app = app();
+    with_rows(
+        &mut app,
+        vec![row("a", HERE, "Old"), row("b", "/Users/dev/other", "Far")],
+    );
+    app.resume_key(ctrl('d'));
+    app.on_paste("needle");
+    assert_eq!(page(&mut app).query, "");
+    app.resume_key(key(KeyCode::Esc));
+    app.resume_key(ctrl('t'));
+    app.on_paste("needle");
+    assert_eq!(page(&mut app).query, "");
+    app.resume_key(key(KeyCode::Esc));
+    app.resume_key(key(KeyCode::Down));
+    app.resume_key(key(KeyCode::Enter));
+    app.on_paste("needle");
+    assert_eq!(page(&mut app).query, "");
+    // 没有盖住时照旧进查询。
+    app.resume_key(ctrl('c'));
+    with_rows(&mut app, vec![row("a", HERE, "Old")]);
+    app.on_paste("needle");
+    assert_eq!(page(&mut app).query, "needle");
 }

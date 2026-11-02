@@ -6,15 +6,14 @@
 
 use std::time::Duration;
 
-use futures_util::StreamExt;
 use rust_cli_kernel_api::clock::Ids;
 use rust_cli_kernel_api::hooks::StopVerdict;
-use rust_cli_kernel_api::ids::{AgentId, RunId, SessionId};
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{
-    ApiContent, ApiMessage, ApiRole, BlockDelta, CacheControl, ModelEvent, ModelPort, ModelRequest,
-    ModelSelection, OutputFormat, QuerySource, RequestOptions, SystemBlock,
+    ApiContent, ApiMessage, ApiRole, CacheControl, ModelPort, ModelRequest, ModelSelection,
+    OutputFormat, SystemBlock,
 };
+use rust_cli_kernel_api::side_request::{Requester, SideReply, SideSource};
 use rust_cli_prompts::texts::{identity, render};
 use rust_cli_prompts::{goal, models};
 use serde_json::Value;
@@ -97,19 +96,12 @@ fn ephemeral() -> Option<CacheControl> {
     })
 }
 
-/// 发请求的一方：hook 所在的会话（工作线 F52：`metadata.user_id` 的 `session_id`，model.md §3.3）、触发它的回合与
-/// 子代理（工作线 F64：每请求头的 `x-query-id`、`x-zcode-session-type`，model.md §2.4）。
-#[derive(Clone, Copy)]
-pub(crate) struct Requester<'a> {
-    pub session: &'a SessionId,
-    pub run: Option<&'a RunId>,
-    pub agent: Option<&'a AgentId>,
-}
-
 /// 评估请求（旁路请求的形状）：身份句与 system 各带断点；对话记录的断点去掉，只有最后一个块带。`configured_output`
-/// 是目录的输出上限（模型端口的能力）：借卡片形状的 GLM 按它（工作线 F121，model.md §11.1）。
+/// 是目录的输出上限（模型端口的能力）：借卡片形状的 GLM 按它（工作线 F121，model.md §11.1）。发请求的一方是 hook 所在的
+/// 会话（工作线 F52：`metadata.user_id` 的 `session_id`，model.md §3.3）、触发它的回合与子代理（工作线 F64：每请求头的
+/// `x-query-id`、`x-zcode-session-type`，model.md §2.4）。
 fn request(
-    (selection, requester): (ModelSelection, Requester<'_>),
+    (selection, requester): (ModelSelection, Requester),
     system: &str,
     mut messages: Vec<ApiMessage>,
     (user, configured_output): (String, Option<u64>),
@@ -137,27 +129,20 @@ fn request(
         text: text.to_owned(),
         cache_control: ephemeral(),
     };
-    ModelRequest {
-        system: vec![block(identity()), block(system)],
-        messages,
-        tools: Vec::new(),
-        tool_choice: None,
-        max_tokens,
-        thinking: None,
-        temperature: None,
-        betas: Vec::new(),
-        source: QuerySource::Side("hook_prompt".to_owned()),
-        options: RequestOptions {
-            // 修 bug（F23）：没有卡片的模型以前也写选择的档位（`card_effort` 的注释）。
-            effort: models::card_effort(&selection.model, selection.reasoning.as_deref()),
-            output_format: serde_json::from_value::<OutputFormat>(goal::stop_format()).ok(),
-            session_id: Some(requester.session.clone()),
-            run: requester.run.cloned(),
-            agent: requester.agent.cloned(),
-            ..RequestOptions::default()
-        },
+    // 修 bug（F23）：没有卡片的模型以前也写选择的档位（`card_effort` 的注释）。
+    let effort = models::card_effort(&selection.model, selection.reasoning.as_deref());
+    let mut request = ModelRequest::side(
         selection,
-    }
+        SideSource::HookPrompt,
+        vec![block(identity()), block(system)],
+        messages,
+        max_tokens,
+        requester,
+    );
+    request.options.effort = effort;
+    request.options.output_format =
+        serde_json::from_value::<OutputFormat>(goal::stop_format()).ok();
+    request
 }
 
 /// 评估模型的回答。
@@ -180,22 +165,10 @@ async fn complete(
     request: ModelRequest,
     cancel: CancellationToken,
 ) -> Result<String, String> {
-    let mut stream = model.stream(request, cancel);
-    let mut text = String::new();
-    while let Some(event) = stream.next().await {
-        match event.map_err(|error| error.to_string())? {
-            ModelEvent::BlockStart {
-                block: ContentBlock::Text { text: start },
-                ..
-            } => text.push_str(&start),
-            ModelEvent::BlockDelta {
-                delta: BlockDelta::Text(delta),
-                ..
-            } => text.push_str(&delta),
-            _ => {}
-        }
-    }
-    Ok(text)
+    SideReply::collect(model.stream(request, cancel))
+        .await
+        .map(|reply| reply.text())
+        .map_err(|error| error.to_string())
 }
 
 /// 发请求、按评估的 schema 解析（`ok` 必填，`reason` / `impossible` 可缺）。`stop` 时 `impossible` 有效。
@@ -270,7 +243,7 @@ fn blocking(prompt: &str, reason: Option<&str>) -> Blocking {
 pub(crate) struct PromptRun<'a> {
     pub model: Option<&'a dyn ModelPort>,
     /// hook 所在的会话（`HookContext.session`）、触发它的回合与子代理（`HookContext.run` / `agent`）。
-    pub requester: Requester<'a>,
+    pub requester: Requester,
     pub default_model: Option<&'a ModelSelection>,
     pub hook: &'a PromptHook,
     pub input: &'a str,
@@ -326,7 +299,7 @@ pub(crate) async fn run(run: PromptRun<'_>, cancel: CancellationToken) -> HookRe
 pub(crate) struct StopRun<'a> {
     pub model: Option<&'a dyn ModelPort>,
     /// `/goal` 所在的会话、触发它的回合与子代理。
-    pub requester: Requester<'a>,
+    pub requester: Requester,
     pub default_model: Option<&'a ModelSelection>,
     pub ids: &'a dyn Ids,
     pub condition: &'a str,

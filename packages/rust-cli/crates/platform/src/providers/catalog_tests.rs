@@ -88,10 +88,8 @@ fn the_default_selection_follows_the_personal_config() {
     assert_eq!(
         snapshot.default,
         Some(ModelSelection {
-            provider: "personal:gateway".to_owned(),
-            model: "custom-chat".to_owned(),
             reasoning: Some("low".to_owned()),
-            connection: None,
+            ..ModelSelection::new("personal:gateway".to_owned(), "custom-chat".to_owned())
         })
     );
 }
@@ -102,10 +100,8 @@ fn the_default_selection_follows_the_personal_config() {
 fn an_unusable_default_falls_back_to_the_first_model_like_node() {
     let snapshot = fixture_snapshot();
     let first = Some(ModelSelection {
-        provider: ENTITLED.to_owned(),
-        model: models::GLM_5_3_ACCOUNT.to_owned(),
         reasoning: Some("max".to_owned()),
-        connection: None,
+        ..ModelSelection::new(ENTITLED.to_owned(), models::GLM_5_3_ACCOUNT.to_owned())
     });
     let resolve = |configured: Value| default_selection(&snapshot.templates, &configured);
     // 没有档位（登录写的形状、`/effort auto`）：Node 判为不可选。
@@ -134,10 +130,8 @@ fn an_unusable_default_falls_back_to_the_first_model_like_node() {
             json!({"providerId": "personal:gateway", "modelId": models::GLM_5, "options": {"reasoningLevel": "enabled"}})
         ),
         Some(ModelSelection {
-            provider: "personal:gateway".to_owned(),
-            model: models::GLM_5.to_owned(),
             reasoning: Some("enabled".to_owned()),
-            connection: None,
+            ..ModelSelection::new("personal:gateway".to_owned(), models::GLM_5.to_owned())
         })
     );
     // 隐藏的 provider 不可选，也不当目录第一项。
@@ -262,10 +256,5 @@ fn the_configured_model_is_the_raw_default_model_selection() {
 
 /// 不带团队项目的选择（按 provider 与模型找模板）。
 fn sel(provider: &str, model: &str) -> rust_cli_kernel_api::model::ModelSelection {
-    rust_cli_kernel_api::model::ModelSelection {
-        provider: provider.to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    }
+    rust_cli_kernel_api::model::ModelSelection::new(provider.to_owned(), model.to_owned())
 }

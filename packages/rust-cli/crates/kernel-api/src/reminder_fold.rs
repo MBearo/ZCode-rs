@@ -26,7 +26,9 @@ const ATTRIBUTION: [&str; 2] = [
 /// （tools-files.md D6），按工具名推。
 pub fn array_result(tool_name: &str, is_error: bool) -> bool {
     !is_error
-        && (tool_name == "Agent" || tool_name == "SendMessage" || tool_name.starts_with("mcp__"))
+        && (tool_name == crate::tool_names::AGENT
+            || tool_name == crate::tool_names::SEND_MESSAGE
+            || crate::mcp_name::is_mcp(tool_name))
 }
 
 /// 把 `reminder` 并进 `content` 末尾的工具结果；并进了返回 true，调用方不再另起文本块。

@@ -11,6 +11,7 @@ use rust_cli_base::models;
 use rust_cli_kernel_api::model::{
     ModelError, ModelEvent, ModelNotice, ModelPort, ModelStreamItem, QuerySource,
 };
+use rust_cli_kernel_api::side_request::SideSource;
 use rust_cli_model::ProviderModel;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -94,7 +95,7 @@ async fn an_overload_before_any_content_is_resent() {
 async fn a_background_overload_in_the_stream_is_not_resent() {
     let server = Fixture::start(vec![early_error("overloaded_error", "Overloaded"), ok()]).await;
     let model = model_at(server.url(), fast_retry(3)).await;
-    let (shape, _) = shape_of(&model, QuerySource::Side("title".to_owned())).await;
+    let (shape, _) = shape_of(&model, QuerySource::Side(SideSource::SessionTitle)).await;
     assert_eq!(shape, ["error(model overloaded: Overloaded)"]);
     assert_eq!(server.requests().len(), 1);
 }

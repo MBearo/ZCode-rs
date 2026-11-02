@@ -6,12 +6,12 @@
 //! 之后的 `watch_command`（monitor 流出错后续读）经端口接回还在跑的命令。没被接走的随客户端实例一起清掉（§19.7），
 //! 同 MCP 连接表拿着传输的事件流。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rust_cli_exec_wire::envelope::ReplyResult;
 use rust_cli_exec_wire::reply::Reply;
-use rust_cli_exec_wire::request::Request;
 use rust_cli_exec_wire::{Body, envelope::WireError};
 use rust_cli_kernel_api::env_command::EnvOverrides;
 use rust_cli_kernel_api::machine::CommandEvents;
@@ -19,6 +19,7 @@ use rust_cli_kernel_api::machine::CommandEvents;
 use crate::convert_in as input;
 use crate::convert_out as output;
 use crate::server::Inner;
+use crate::target::Start;
 
 /// 还没被接走的流：（客户端实例，operationId）→ 流。
 #[derive(Default)]
@@ -26,20 +27,21 @@ pub(crate) struct Started(Mutex<HashMap<(String, String), CommandEvents>>);
 
 impl Started {
     fn table(&self) -> MutexGuard<'_, HashMap<(String, String), CommandEvents>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_unpoisoned()
     }
 
     /// 同一个客户端实例的第一个 `watch_command(op, 0)` 接走 `start_command` 留下的流；其余的经端口。
-    pub(crate) fn claim(&self, instance: &str, request: &Request) -> Option<CommandEvents> {
-        let Request::WatchCommand {
-            operation,
-            cursor: 0,
-        } = request
-        else {
+    pub(crate) fn claim(
+        &self,
+        instance: &str,
+        operation: &str,
+        cursor: u64,
+    ) -> Option<CommandEvents> {
+        if cursor != 0 {
             return None;
-        };
+        }
         self.table()
-            .remove(&(instance.to_owned(), operation.clone()))
+            .remove(&(instance.to_owned(), operation.to_owned()))
     }
 
     /// 客户端实例被清掉（断开超过期限，§19.7）时一起丢掉。
@@ -50,13 +52,12 @@ impl Started {
 
 /// 线上的 `start_command`：起命令，拿着端口给的流等 `watch_command` 接走。`env` 是这个客户端实例推来的环境变量（F96）。
 pub(crate) async fn start(
-    inner: &Inner,
-    instance: &str,
-    request: Request,
-    body: &Body,
+    inner: Arc<Inner>,
+    instance: String,
+    start: Start,
     env: EnvOverrides,
 ) -> (ReplyResult, Body) {
-    let result = match start_command(inner, instance, request, body, env).await {
+    let result = match start_command(&inner, instance, start, env).await {
         Ok(()) => ReplyResult::Ok(Reply::StartCommand),
         Err(error) => ReplyResult::Err(error),
     };
@@ -65,34 +66,29 @@ pub(crate) async fn start(
 
 async fn start_command(
     inner: &Inner,
-    instance: &str,
-    request: Request,
-    body: &Body,
+    instance: String,
+    start: Start,
     env: EnvOverrides,
 ) -> Result<(), WireError> {
-    let Request::StartCommand {
+    let Start {
         workspace,
         context,
         request,
-    } = request
-    else {
-        return Err(WireError::BadRequest {
-            message: "a request other than start_command reached the command start".to_owned(),
-        });
-    };
+        body,
+    } = start;
     let operation = context.operation.clone();
-    let mut start = input::start_command(*request, body)?;
-    start.env = env;
+    let start = input::start_command(*request, &body)?;
     let events = inner
-        .machine
-        .commands()
-        .start_command(&input::workspace(workspace), input::context(context), start)
+        .launcher
+        .start_command(
+            &input::workspace(workspace),
+            input::context(context),
+            start,
+            &env,
+        )
         .await
         .map_err(output::error)?;
-    inner
-        .started
-        .table()
-        .insert((instance.to_owned(), operation), events);
+    inner.started.table().insert((instance, operation), events);
     Ok(())
 }
 

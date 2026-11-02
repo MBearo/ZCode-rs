@@ -1,6 +1,8 @@
 //! `/export` 的路径解析与写入（tui-manage.md §3.1）。
+use std::sync::Arc;
+
 use rust_cli_kernel_api::env::{EnvFacts, ReadFile, WorkspaceRef};
-use rust_cli_kernel_api::ids::EnvironmentId;
+use rust_cli_kernel_api::ids::{EnvironmentId, Generation};
 use rust_cli_kernel_api::testing::{MemoryEnvironment, SequentialIds};
 
 use super::*;
@@ -33,8 +35,8 @@ async fn the_text_is_written_through_the_environment() {
         os_version: String::new(),
         shell: "zsh".to_owned(),
         is_git_repo: false,
-        additional_directories: Vec::new(),
         home: Some(EnvPath::new("/Users/dev")),
+        uid: None,
     });
     let workspace = WorkspaceRef {
         environment: EnvironmentId::new("local"),
@@ -43,8 +45,7 @@ async fn the_text_is_written_through_the_environment() {
     let path = write(
         &env,
         &env,
-        &SequentialIds::default(),
-        &Generation::new("gen_1"),
+        &Operations::new(Generation::new("gen_1"), Arc::new(SequentialIds::default())),
         ExportFile {
             workspace: workspace.clone(),
             path: "~/exports/chat".to_owned(),

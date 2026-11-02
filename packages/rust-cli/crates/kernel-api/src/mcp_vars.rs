@@ -64,20 +64,20 @@ pub fn expand_transport_vars(
                 .collect(),
             cwd: cwd.as_deref().map(&mut expand),
         },
-        McpTransportConfig::Sse { url, headers } => McpTransportConfig::Sse {
-            url: expand(url),
-            headers: headers
+        McpTransportConfig::Sse { url, headers } => McpTransportConfig::sse(
+            expand(url),
+            headers
                 .iter()
                 .map(|(key, value)| (key.clone(), expand(value)))
                 .collect(),
-        },
-        McpTransportConfig::Http { url, headers } => McpTransportConfig::Http {
-            url: expand(url),
-            headers: headers
+        ),
+        McpTransportConfig::Http { url, headers } => McpTransportConfig::http(
+            expand(url),
+            headers
                 .iter()
                 .map(|(key, value)| (key.clone(), expand(value)))
                 .collect(),
-        },
+        ),
     };
     let mut seen = std::collections::HashSet::new();
     missing.retain(|name| seen.insert(name.clone()));

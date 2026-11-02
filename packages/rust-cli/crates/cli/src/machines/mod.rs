@@ -16,11 +16,7 @@ use anyhow::{Context, Result, anyhow};
 use rust_cli_base::TaskScope;
 use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, ExecClient};
-use rust_cli_exec_wire::dto::core::PathStyle as WirePathStyle;
-use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
-use rust_cli_kernel_api::env_files::PathStyle;
-use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, MachineFacts, RemoteMachine};
-use rust_cli_kernel_api::ids::EnvironmentId;
+use rust_cli_kernel_api::env_registry::{EnvironmentRegistry, RemoteMachine};
 use rust_cli_machines::{MachineEntry, MachineList};
 
 pub(crate) use fleet::{Changed, Fleet, FleetError, Seen};
@@ -63,7 +59,7 @@ pub(crate) struct Start {
     pub connect: Connect,
     pub when: When,
     /// 执行器子进程与 ssh 进程的环境（入口捕获的快照）。
-    pub env: Vec<(String, String)>,
+    pub env: rust_cli_base::secret::EnvSnapshot,
     /// 本机执行器目录（上传用的产物缓存，R2 §19.4）。
     pub executor: rust_cli_paths::ExecutorPaths,
     /// 执行器的 npm 来源（F100，remote-exec.md §26.7）：所有机器共用一个（单飞靠它）；debug 构建没给假注册表时没有。
@@ -74,26 +70,36 @@ pub(crate) struct Start {
     pub mcp_marks: Vec<(String, String)>,
 }
 
+/// 执行器的 npm 来源（F100，remote-exec.md §26.7）：入口只建一个，机器清单里的机器与部署配置的 SSH 主 env 共用（同一个
+/// 版本与平台只下载一次靠它）；debug 构建没给假注册表时没有。
+pub(crate) fn artifact_source(
+    facts: &crate::process::facts::Facts,
+    egress: &Arc<rust_cli_net::Egress>,
+) -> Option<Arc<dyn rust_cli_ssh_connect::ArtifactSource>> {
+    let executor = facts.process.executor_paths();
+    let registry = executor_dist::registry(
+        crate::assemble::options::TestDeclarations::BUILD,
+        facts.hooks.machine_ssh.npm_registry.clone(),
+    );
+    executor_dist::source(registry, egress, &executor)
+}
+
 impl Start {
-    /// 按形态与测试变量选：`surface` 是（TUI，`-p`）；`egress` 给执行器的 npm 来源（F100）。
+    /// `when` 由前端的组装规格给出（F129：以前按（TUI，`-p`）与测试变量在这里定）；`source` 是执行器的 npm 来源
+    /// （[`artifact_source`]）。
     pub(crate) fn new(
         paths: &rust_cli_paths::StoragePaths,
-        (tui, print): (bool, bool),
-        (startup, egress): (&super::Startup, &Arc<rust_cli_net::Egress>),
+        when: When,
+        (facts, source): (
+            &crate::process::facts::Facts,
+            Option<Arc<dyn rust_cli_ssh_connect::ArtifactSource>>,
+        ),
     ) -> Self {
-        let assume = &startup.explicit.assume;
-        let ssh = crate::options::machine_ssh(crate::options::TestDeclarations::BUILD, |name| {
-            startup
-                .env
-                .iter()
-                .find(|(key, _)| key == name)
-                .map(|(_, value)| value.clone())
-        });
-        let executor = crate::ssh_executor::executor_paths(startup);
-        let registry =
-            executor_dist::registry(crate::options::TestDeclarations::BUILD, ssh.npm_registry);
+        let assume = &facts.hooks.assume;
+        let ssh = facts.hooks.machine_ssh.clone();
+        let executor = facts.process.executor_paths();
         Self {
-            source: executor_dist::source(registry, egress, &executor),
+            source,
             list: MachineList::new(&paths.machines()),
             connect: if assume.loopback_machines {
                 Connect::Loopback
@@ -103,14 +109,8 @@ impl Start {
                     artifact: ssh.artifact,
                 }
             },
-            when: if tui {
-                When::Background
-            } else if print && (assume.loopback_machines || assume.ssh_machines) {
-                When::Now
-            } else {
-                When::Never
-            },
-            env: startup.env.to_vec(),
+            when,
+            env: facts.process.env.clone(),
             executor,
             mcp: std::collections::BTreeMap::new(),
             mcp_marks: Vec::new(),
@@ -122,15 +122,14 @@ impl Start {
     pub(crate) fn with_mcp(mut self, config: &rust_cli_ext::ExtConfig) -> Self {
         let all = config.mcp.servers.iter().chain(&config.mcp_disabled);
         self.mcp_marks = all
-            .filter_map(|server| Some((server.name.clone(), server.machine.clone()?)))
+            .filter_map(|server| Some((server.name.clone(), server.machine.remote()?.to_owned())))
             .collect();
         for server in &config.mcp.servers {
-            if let Some(machine) = &server.machine {
-                self.mcp.entry(machine.clone()).or_default().push(
+            if let Some(machine) = server.machine.remote() {
+                self.mcp.entry(machine.to_owned()).or_default().push(
                     rust_cli_kernel_api::mcp::McpConnect {
                         server: server.name.clone(),
                         transport: server.transport.clone(),
-                        env: Default::default(),
                     },
                 );
             }
@@ -140,9 +139,9 @@ impl Start {
 }
 
 impl Machines {
-    pub(crate) fn new(local: Arc<dyn EnvironmentRegistry>) -> Self {
+    pub(crate) fn new(primary: Arc<dyn EnvironmentRegistry>) -> Self {
         Self {
-            registry: Arc::new(MachineRegistry::new(local)),
+            registry: Arc::new(MachineRegistry::new(primary)),
             scope: TaskScope::root("machines", |panic| {
                 tracing::error!(task = panic.task, message = %panic.message, "machine task panicked");
             }),
@@ -154,7 +153,7 @@ impl Machines {
     pub(crate) fn service(&self) -> Option<Arc<dyn rust_cli_tui::machines::Machines>> {
         self.fleet
             .get()
-            .map(|fleet| crate::tui_machines::service(fleet.clone()))
+            .map(|fleet| crate::frontends::tui_machines::service(fleet.clone()))
     }
 
     pub(crate) fn registry(&self) -> Arc<dyn EnvironmentRegistry> {
@@ -215,49 +214,27 @@ impl Machines {
     }
 }
 
-fn path_style(style: WirePathStyle) -> PathStyle {
-    match style {
-        WirePathStyle::Posix => PathStyle::Posix,
-        WirePathStyle::Windows => PathStyle::Windows,
-    }
-}
-
-/// 握手的结果 → 注册表里的一台机器（工作目录没写时是远端的 home）。
+/// 握手的结果 → 注册表里的一台机器（换算在 env-remote，工作目录没写时是远端的 home）。
 pub(super) fn remote_of(entry: &MachineEntry, client: &ExecClient) -> Result<RemoteMachine> {
     let welcome = client
         .welcome()
         .ok_or_else(|| anyhow!("the executor did not finish the handshake"))?;
-    let root = entry
-        .working_directory
-        .clone()
-        .or_else(|| welcome.home.clone())
-        .ok_or_else(|| anyhow!("no working directory and no remote home"))?;
-    Ok(RemoteMachine {
-        name: entry.name.clone(),
-        workspace: WorkspaceRef {
-            environment: EnvironmentId::new(entry.name.as_str()),
-            root: EnvPath::new(root),
-        },
-        facts: MachineFacts {
-            os: welcome.os,
-            arch: welcome.arch,
-            shell: welcome.shell.unwrap_or_default(),
-            home: welcome.home.map(EnvPath::new),
-            path_style: path_style(welcome.path_style),
-        },
-    })
+    rust_cli_env_remote::remote_machine(&entry.name, entry.working_directory.as_deref(), welcome)
+        .ok_or_else(|| anyhow!("no working directory and no remote home"))
 }
 
 /// 放进注册表（已经在里面时不动：重连后仍是同一个客户端）。
 fn attach(registry: &MachineRegistry, entry: &MachineEntry, client: ExecClient) -> Result<()> {
-    if registry.remote(&entry.name).is_some() {
+    // 机器清单（machines crate，不依赖 kernel-api）的名字是字符串：在进注册表的这一处换算成内核的机器名（工作线 F137）。
+    let name = rust_cli_kernel_api::ids::MachineName::new(entry.name.as_str());
+    if registry.remote(&name).is_some() {
         return Ok(());
     }
     let info = remote_of(entry, &client)?;
     let link = client.states();
     // 机器名也交给远端环境：失败时给模型的说明写它（F96，remote-exec.md §23.6）。
     let remote = Arc::new(RemoteEnvironment::new(client).with_name(entry.name.as_str())).machine();
-    registry.connected(remote.named(entry.name.as_str()), info, link);
+    registry.connected(remote.named(name), info, link);
     tracing::info!(event = "machine.connected", machine = %entry.name, "machine connected");
     Ok(())
 }
@@ -267,7 +244,7 @@ fn options(connect: &Connect) -> ClientOptions {
     let instance = format!("{:016x}", rust_cli_base::random::u64());
     let mut options = ClientOptions::new(crate::VERSION, instance);
     if matches!(connect, Connect::Ssh { .. }) {
-        options.reconnect = crate::ssh_executor::RECONNECT;
+        options.reconnect = crate::assemble::ssh_executor::RECONNECT;
     }
     options
 }

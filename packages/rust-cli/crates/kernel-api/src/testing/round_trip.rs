@@ -11,6 +11,7 @@ use futures_util::stream::BoxStream;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::controller_services::Fetch;
 use crate::env::{
     CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
     WorkspaceRef, WriteFile, WriteReceipt,
@@ -23,7 +24,7 @@ use crate::env_git::{GitStatus, GitStatusRequest};
 use crate::env_rewind::{RewindPlan, RewindPrepare, RewindStatus};
 use crate::env_shell::{BackgroundInfo, BackgroundStop, BackgroundTask, ShellNotice, ShellState};
 use crate::ids::{OperationId, SessionId};
-use crate::local_services::{Fetch, Git};
+use crate::machine::Git;
 use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
 
 pub struct RoundTripEnv<E>(pub Arc<E>);

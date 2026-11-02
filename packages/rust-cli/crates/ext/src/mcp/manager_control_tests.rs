@@ -15,14 +15,9 @@ fn config(name: &str) -> McpServer {
     McpServer {
         name: name.to_owned(),
         scope: McpScope::Project,
-        transport: McpTransportConfig::Stdio {
-            command: "node".to_owned(),
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-        },
+        transport: McpTransportConfig::stdio("node".to_owned(), Vec::new()),
         options: Default::default(),
-        machine: None,
+        machine: Default::default(),
     }
 }
 
@@ -65,7 +60,7 @@ async fn reconnect_disable_and_enable_drive_the_connection() {
         fake.clone(),
         scope.spawner(),
         McpSettings::default(),
-        crate::clock_tests::TokioClock::new(),
+        crate::clock_tests::clock(),
     );
     manager.start(workspace(), vec![config("files")]);
     manager.register_disabled(vec![config("off"), config("files")]);

@@ -42,18 +42,23 @@ async fn the_bash_tool_follows_the_monitor_switch() {
     };
     let sentence =
         " Foreground `sleep` is blocked; use Monitor with an until-loop to wait on a condition.";
-    let print = crate::bash::BashTool::new().with_monitor(true);
+    let monitor = crate::BashSettings {
+        monitor: true,
+        ..crate::BashSettings::default()
+    };
+    let print = crate::bash::BashTool::new(monitor);
     assert!(print.description(&prompt).contains(&format!(
         "at that limit it is stopped and you are re-invoked. No `&` needed.{sentence}"
     )));
-    let session = crate::bash::BashTool::new()
-        .with_monitor(true)
-        .with_background_deadline(false);
+    let session = crate::bash::BashTool::new(crate::BashSettings {
+        background_deadline: false,
+        ..monitor
+    });
     assert!(session.description(&prompt).contains(&format!(
         "re-invokes you when it exits. No `&` needed.{sentence}"
     )));
     assert!(
-        !crate::bash::BashTool::new()
+        !crate::bash::BashTool::default()
             .description(&prompt)
             .contains("Foreground `sleep`")
     );
@@ -76,7 +81,7 @@ async fn the_bash_tool_follows_the_monitor_switch() {
         print.validate_input(&background, &context).await,
         Validation::Ok
     );
-    let off = crate::bash::BashTool::new()
+    let off = crate::bash::BashTool::default()
         .validate_input(&json!({"command": "sleep 30"}), &context)
         .await;
     assert_eq!(off, Validation::Ok);

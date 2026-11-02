@@ -38,12 +38,7 @@ fn personal(api_type: &str, base_url: &str, model: &str) -> Value {
 fn catalog_flag(api_type: &str, base_url: &str, model: &str) -> bool {
     let resolved = resolve(&builtin(), &personal(api_type, base_url, model), None);
     let snapshot = snapshot(&resolved, &Default::default());
-    let selection = ModelSelection {
-        provider: "personal:site".to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    let selection = ModelSelection::new("personal:site".to_owned(), model.to_owned());
     let template = snapshot.find(&selection).unwrap();
     // 目录项与端点模板是同一份能力。
     assert_eq!(template.catalog_entry().capabilities, template.capabilities);

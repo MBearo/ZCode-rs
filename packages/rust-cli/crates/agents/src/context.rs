@@ -2,7 +2,8 @@
 //! （context 的子代理分支），system 段换成子代理自己的（docs/specs/rust-cli/agents.md §4.3）。
 //! 以及 agent 清单（`ListingSource`，交给主线程的 `agent_listing_delta`）。
 
-use std::sync::{Arc, PoisonError, RwLock};
+use rust_cli_base::sync::RwLockUnpoisoned;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::env::WorkspaceRef;
@@ -79,16 +80,12 @@ impl AgentCatalog {
 
     /// 换上插件加载得到的 agent 文件（`LocalKernel::start_extensions`）。
     pub fn set_plugins(&self, files: Vec<PluginAgentFile>) {
-        *self.plugins.write().unwrap_or_else(PoisonError::into_inner) = files;
+        *self.plugins.write_unpoisoned() = files;
     }
 
     /// 当前可用的 agent 类型（`/context` 的自定义 agent 也用它，context-usage.md §3）。
     pub async fn definitions(&self, workspace: &WorkspaceRef) -> Vec<AgentDefinition> {
-        let files = self
-            .plugins
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let files = self.plugins.read_unpoisoned().clone();
         let mut layers = vec![
             builtins(),
             plugin::load(self.files.as_ref(), workspace, &files).await,

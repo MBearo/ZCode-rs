@@ -11,22 +11,13 @@ use rust_cli_kernel_api::orchestration::{
 };
 
 use crate::RunScope;
-use crate::recovery::QUIET_SIDE_SOURCES;
+use crate::recovery::quiet;
 
 /// 一次运行内的压缩状态（自动压缩的跟踪与是否试过反应式压缩）。
 #[derive(Debug, Default)]
 pub(crate) struct Compaction {
     tracking: CompactTracking,
     reactive_tried: bool,
-}
-
-/// `compact` 来源与安静的旁路来源不做自动与反应式压缩。
-fn eligible(source: &QuerySource) -> bool {
-    match source {
-        QuerySource::MainThread | QuerySource::Subagent(_) => true,
-        QuerySource::Compact => false,
-        QuerySource::Side(name) => !QUIET_SIDE_SOURCES.contains(&name.as_str()),
-    }
 }
 
 fn request(
@@ -87,7 +78,7 @@ impl Compaction {
         let compactor: &dyn Compactor = scope.parts.compactor.as_ref();
         let mut failure = None;
         // 先用便宜的同步判定把关：每一步都构造压缩请求要复制整个历史（README §8）。
-        if eligible(source) && compactor.should_auto_compact(history, selection) {
+        if !quiet(source) && compactor.should_auto_compact(history, selection) {
             let outcome = compactor
                 .auto_compact(
                     request(scope, history, selection, CompactTrigger::Auto),
@@ -133,7 +124,7 @@ impl Compaction {
         source: &QuerySource,
         error: &str,
     ) -> Result<bool, QueryError> {
-        if self.reactive_tried || !eligible(source) || scope.abort.is_aborted() {
+        if self.reactive_tried || quiet(source) || scope.abort.is_aborted() {
             return Ok(false);
         }
         self.reactive_tried = true;

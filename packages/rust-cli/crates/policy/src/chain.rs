@@ -1,7 +1,7 @@
 //! 判决链（shell-permissions.md §4.1）。
 //!
-//! 内层顺序：整个工具的 deny 规则 → 整个工具的 ask 规则 → 工具自身的检查（Bash、文件工具、WebFetch
-//! 的内置检查在这里）→ 检查拒绝则拒绝 → 命中 ask 规则或 bypass 也问的安全检查（危险删除）的询问 →
+//! 内层顺序：整个工具的 deny 规则 → 整个工具的 ask 规则 → 工具自身的检查（没有意见时按判决主体的内置检查：
+//! shell 命令、文件路径、网址、skill）→ 检查拒绝则拒绝 → 命中 ask 规则或 bypass 也问的安全检查（危险删除）的询问 →
 //! 其余安全检查（敏感文件）在 bypassPermissions / guarded 下放行、否则询问 →
 //! bypassPermissions 放行 → 整个工具的 allow 规则放行 → 没有意见转成询问。
 //! 外层按模式改写询问：dontAsk 拒绝；auto（与开启自动语义的 plan）先走 acceptEdits 快速放行
@@ -9,14 +9,16 @@
 
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::permission::{
-    PermissionDecision, PermissionMode, PermissionRule, RuleBehavior,
+    PermissionDecision, PermissionMode, PermissionRule, PermissionSubject, RuleBehavior,
 };
 use serde_json::Value;
+use url::Url;
 
 use crate::check::{AskKind, Check, Inputs};
 use crate::classifier::{AutoClassifier, ClassifierRequest, ClassifierVerdict};
 use crate::texts;
 use crate::{bash, files, skill};
+use rust_cli_kernel_api::tool_names;
 
 /// 内层的结论。
 #[derive(Debug, Clone, PartialEq)]
@@ -31,24 +33,33 @@ pub enum Inner {
         message: String,
         kind: AskKind,
         suggestions: Vec<PermissionRule>,
+        /// 只批准这一次（guarded 的危险命令，shell-permissions.md §4.6.1）：成为 `PermissionDecision::Ask.once`。
+        once: bool,
     },
 }
 
+/// 网址主体的规则写在这个工具名下（`WebFetch(domain:<host>)`）。
+const WEB_FETCH: &str = tool_names::WEB_FETCH;
+
+/// `domain:` 规则比较的主机名（小写，不带端口与用户信息）：按 WHATWG URL 解析，与 WebFetch 工具取网址、预批准域名同一个
+/// 解析器；解析不了时为空。
+///
+/// 修复（F125）：以前按 `://`、`/`、`@`、`:` 切字符串，`https://example.com\@evil.com/` 的规则按 evil.com 查，工具实际取的
+/// 却是 example.com（反斜杠在 http(s) 里是路径分隔符），example.com 的 deny 规则拦不住；IPv6 只剩 `[`。
+fn rule_host(url: &str) -> String {
+    Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_lowercase))
+        .unwrap_or_default()
+}
+
 /// WebFetch 的 `domain:` 规则。
-fn web_fetch(input: &Value, inputs: &Inputs<'_>) -> Check {
-    let host = input
-        .get("url")
-        .and_then(Value::as_str)
-        .and_then(|url| url.split_once("://").map(|(_, rest)| rest))
-        .map(|rest| rest.split(['/', '?', '#']).next().unwrap_or_default())
-        .map(|authority| authority.rsplit('@').next().unwrap_or_default())
-        .map(|host| host.split(':').next().unwrap_or_default().to_lowercase())
-        .unwrap_or_default();
-    let content = format!("domain:{host}");
+fn web_fetch(url: &str, inputs: &Inputs<'_>) -> Check {
+    let content = format!("domain:{}", rule_host(url));
     let hit = |behavior| {
         inputs
             .rules
-            .contents("WebFetch", behavior)
+            .contents(WEB_FETCH, behavior)
             .iter()
             .any(|(rule, _)| *rule == content)
     };
@@ -57,7 +68,7 @@ fn web_fetch(input: &Value, inputs: &Inputs<'_>) -> Check {
     }
     if hit(RuleBehavior::Ask) {
         return Check::Ask {
-            message: texts::request_message("WebFetch", None),
+            message: texts::request_message(WEB_FETCH, None),
             kind: AskKind::Rule,
             suggestions: Vec::new(),
         };
@@ -66,62 +77,61 @@ fn web_fetch(input: &Value, inputs: &Inputs<'_>) -> Check {
         return Check::Allow;
     }
     // 预批准域名排在三类规则之后（docs/specs/rust-cli/tools-more.md §4）。
-    let url = input.get("url").and_then(Value::as_str).unwrap_or_default();
     if crate::web_preapproved::preapproved(url) {
         return Check::Allow;
     }
     Check::Passthrough {
         reason: None,
         suggestions: vec![PermissionRule {
-            tool: "WebFetch".to_owned(),
+            tool: WEB_FETCH.to_owned(),
             content: Some(content),
         }],
     }
 }
 
-/// 没有自己检查的内置工具，按名字套用对应的内置检查。
-pub fn builtin(tool: &str, input: &Value, inputs: &Inputs<'_>) -> Check {
-    // Monitor 的命令来源照 Bash 判（工作线 F83，tools-more.md §19.4；ws 来源由工具自己的检查给出询问）。
-    if tool == "Bash" || (tool == "Monitor" && input.get("command").is_some()) {
-        let command = input
-            .get("command")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        return bash::check(command, inputs);
-    }
-    if tool == "WebFetch" {
-        return web_fetch(input, inputs);
-    }
-    if tool == skill::TOOL {
-        return skill::check(input, inputs);
-    }
-    if let Some((access, field)) = files::tool_access(tool) {
-        return files::check(access, files::input_path(input, field), inputs);
-    }
-    Check::Passthrough {
-        reason: None,
-        suggestions: Vec::new(),
+/// 工具自己没有意见时的内置检查：按工具声明的判决主体（kernel-api `PermissionSubject`）。没有主体的工具交给通用判决链。
+///
+/// F125（T3）：以前按工具名分派（`Bash`、带 `command` 的 `Monitor`、`WebFetch`、`Skill`、六个文件工具与各自的路径字段）。
+pub fn builtin(subject: Option<&PermissionSubject>, inputs: &Inputs<'_>) -> Check {
+    match subject {
+        Some(PermissionSubject::Shell { command }) => bash::check(command, inputs),
+        Some(PermissionSubject::Path { access, path }) => {
+            files::check(*access, path.as_deref(), inputs)
+        }
+        Some(PermissionSubject::Url { url }) => web_fetch(url, inputs),
+        Some(PermissionSubject::Skill { name }) => skill::check(name, inputs),
+        None => Check::Passthrough {
+            reason: None,
+            suggestions: Vec::new(),
+        },
     }
 }
 
 /// 工具自己的 `check_permissions` 结果换成检查结果；没有意见时用内置检查。
 pub fn own(
-    tool: &str,
+    subject: Option<&PermissionSubject>,
     decision: PermissionDecision,
-    input: &Value,
     inputs: &Inputs<'_>,
 ) -> (Check, Option<Value>) {
     match decision {
-        PermissionDecision::Passthrough => (builtin(tool, input, inputs), None),
-        // Skill 工具放行只有安全字段的 skill，内容 deny 规则仍然优先（ext.md §2.4）。
-        PermissionDecision::Allow { updated_input } if tool == skill::TOOL => {
-            (skill::deny_first(input, inputs), updated_input)
-        }
-        PermissionDecision::Allow { updated_input } => (Check::Allow, updated_input),
+        PermissionDecision::Passthrough => (builtin(subject, inputs), None),
+        PermissionDecision::Allow { updated_input } => match subject {
+            // Skill 工具放行只有安全字段的 skill，内容 deny 规则仍然优先（ext.md §2.4）。
+            Some(PermissionSubject::Skill { name }) => {
+                (skill::deny_first(name, inputs), updated_input)
+            }
+            Some(
+                PermissionSubject::Shell { .. }
+                | PermissionSubject::Path { .. }
+                | PermissionSubject::Url { .. },
+            )
+            | None => (Check::Allow, updated_input),
+        },
         PermissionDecision::Deny { message } => (Check::deny(message), None),
         PermissionDecision::Ask {
             message,
             suggestions,
+            once: _,
         } => (
             Check::Ask {
                 message,
@@ -153,6 +163,9 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
             message: texts::request_message(tool, None),
             kind: AskKind::Rule,
             suggestions: Vec::new(),
+            // 危险命令又命中整个工具的 ask 规则时，这一问同样只批准这一次（工作线 F137 以前 `ask_once` 只看命令，不看是
+            // 哪一条询问；判决逐项不变）。
+            once: inputs.dangerous,
         };
     }
     let (message, reason, kind, suggestions) = match check {
@@ -164,6 +177,7 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
                 message: texts::GUARDED_ASK.to_owned(),
                 kind: AskKind::Immune,
                 suggestions: Vec::new(),
+                once: true,
             };
         }
         Check::Allow => return Inner::Allow { updated_input },
@@ -178,6 +192,7 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
                 message,
                 kind,
                 suggestions,
+                once: false,
             };
         }
         Check::Ask {
@@ -198,6 +213,7 @@ pub fn inner(tool: &str, check: Check, updated_input: Option<Value>, inputs: &In
         message: message.unwrap_or_else(|| texts::request_message(tool, reason.as_ref())),
         kind,
         suggestions,
+        once: false,
     }
 }
 
@@ -242,14 +258,15 @@ pub async fn outer(
         session,
         mode,
     } = *call;
-    let (message, kind, suggestions) = match result {
+    let (message, kind, suggestions, once) = match result {
         Inner::Allow { updated_input } => return PermissionDecision::Allow { updated_input },
         Inner::Deny { message } => return PermissionDecision::Deny { message },
         Inner::Ask {
             message,
             kind,
             suggestions,
-        } => (message, kind, suggestions),
+            once,
+        } => (message, kind, suggestions, once),
     };
     if mode == PermissionMode::DontAsk {
         return PermissionDecision::Deny {
@@ -287,5 +304,10 @@ pub async fn outer(
     PermissionDecision::Ask {
         message,
         suggestions,
+        once,
     }
 }
+
+#[cfg(test)]
+#[path = "chain_tests.rs"]
+mod tests;

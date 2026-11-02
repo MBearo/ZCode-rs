@@ -21,7 +21,7 @@ use crate::model::{
 use crate::orchestration::{InteractionRequest, QueryError};
 use crate::provider::{CatalogModel, ModelCatalog, WireProtocol};
 use crate::session_api::{KernelEvent, SequencedEvent};
-use crate::store::{Fact, FactBatch, LoadedSession, PendingInteraction, SessionKind, SessionMeta};
+use crate::store::{Fact, FactBatch, LoadedSession, SessionKind, SessionMeta};
 use crate::tool::ToolError;
 
 fn round_trip<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(value: &T) {
@@ -107,13 +107,6 @@ fn loaded_sessions_round_trip_with_open_work() {
         model: None,
         mode: None,
         plan: false,
-        pending_interactions: vec![PendingInteraction {
-            interaction: InteractionId::new("ia_1"),
-            request: InteractionRequest::PlanApproval {
-                tool_use: ToolUseId::new("toolu_1"),
-                plan: "p".to_owned(),
-            },
-        }],
         checkpoints: vec![checkpoint()],
         turn: None,
         last_turn_failed: true,
@@ -122,16 +115,14 @@ fn loaded_sessions_round_trip_with_open_work() {
     round_trip(&loaded);
     // 没有这些字段的旧结果也能读，读出来是空清单。
     let mut old = serde_json::to_value(&loaded).unwrap();
-    for key in [
-        "pending_interactions",
-        "checkpoints",
-        "last_turn_failed",
-        "earlier",
-    ] {
+    for key in ["checkpoints", "last_turn_failed", "earlier"] {
         old.as_object_mut().unwrap().remove(key);
     }
+    // 工作线 F130 之前的结果带待回答的交互：多出的键忽略。
+    old.as_object_mut()
+        .unwrap()
+        .insert("pending_interactions".to_owned(), serde_json::json!([]));
     let old: LoadedSession = serde_json::from_value(old).unwrap();
-    assert!(old.pending_interactions.is_empty());
     assert!(old.checkpoints.is_empty());
     assert!(!old.last_turn_failed);
     assert!(old.earlier.is_empty());
@@ -139,16 +130,15 @@ fn loaded_sessions_round_trip_with_open_work() {
 
 #[test]
 fn operation_context_round_trips() {
-    round_trip(&OperationContext {
-        environment: EnvironmentId::new("local"),
-        generation: Generation::new("g1"),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: OperationId::new("op_1"),
-        origin: Origin::Agent {
+    round_trip(&OperationContext::new(
+        EnvironmentId::new("local"),
+        Generation::new("g1"),
+        OperationId::new("op_1"),
+        Origin::Agent {
             session: SessionId::new("sess_1"),
             run: RunId::new("run_1"),
         },
-    });
+    ));
 }
 
 #[test]
@@ -169,8 +159,8 @@ fn context_inputs_round_trip() {
         os_version: "Darwin 24.6.0".to_owned(),
         shell: "zsh".to_owned(),
         is_git_repo: true,
-        additional_directories: vec![EnvPath::new("/extra")],
         home: Some(EnvPath::new("/home/dev")),
+        uid: None,
     });
     round_trip(&Listings {
         deferred_tools: vec![ListingEntry {
@@ -180,12 +170,13 @@ fn context_inputs_round_trip() {
         agents: Vec::new(),
         skills: Vec::new(),
     });
-    // 旧的事实快照没有新增的字段，也能读。
+    // 旧的事实快照没有新增的字段，也能读；以前带的附加目录（现在归会话配置，deployment.md §21）忽略。
     let old: EnvFacts = serde_json::from_value(json!({
-        "cwd": "/w", "platform": "linux", "os_version": "Linux 6", "shell": "bash", "is_git_repo": false
+        "cwd": "/w", "platform": "linux", "os_version": "Linux 6", "shell": "bash", "is_git_repo": false,
+        "additional_directories": ["/extra"]
     }))
     .unwrap();
-    assert!(old.additional_directories.is_empty() && old.home.is_none());
+    assert!(old.home.is_none());
 }
 
 #[test]
@@ -346,10 +337,8 @@ fn provider_and_failover_types_round_trip() {
             connection: None,
         }],
         default: Some(ModelSelection {
-            provider: "p".to_owned(),
-            model: "m".to_owned(),
             reasoning: Some("high".to_owned()),
-            connection: None,
+            ..ModelSelection::new("p".to_owned(), "m".to_owned())
         }),
     });
 }
@@ -386,10 +375,11 @@ fn model_connections_round_trip_and_default_to_absent() {
         project_id: "p-t".to_owned(),
     };
     let selection = ModelSelection {
-        provider: "account:bigmodel-team-coding-plan".to_owned(),
-        model: rust_cli_base::models::GLM_5_3_ACCOUNT.to_owned(),
-        reasoning: None,
         connection: Some(Box::new(id.clone())),
+        ..ModelSelection::new(
+            "account:bigmodel-team-coding-plan".to_owned(),
+            rust_cli_base::models::GLM_5_3_ACCOUNT.to_owned(),
+        )
     };
     round_trip(&selection);
     assert_eq!(
@@ -531,7 +521,7 @@ fn compaction_types_round_trip() {
 
 fn checkpoint() -> crate::store::WorkspaceCheckpoint {
     crate::store::WorkspaceCheckpoint {
-        machine: None,
+        machine: Default::default(),
         id: "checkpoint_1".to_owned(),
         prompt: crate::ids::MessageId::new("msg_u"),
         assistant: crate::ids::MessageId::new("msg_a"),

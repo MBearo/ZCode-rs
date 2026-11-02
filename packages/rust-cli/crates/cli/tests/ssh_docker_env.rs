@@ -24,7 +24,6 @@ use futures_util::StreamExt;
 use rust_cli_env_remote::RemoteEnvironment;
 use rust_cli_exec_client::{ClientOptions, ConnectionState, Reconnect};
 use rust_cli_kernel_api::env::{CommandEvent, EnvPath, StartCommand, WorkspaceRef};
-use rust_cli_kernel_api::env_shell::CwdScope;
 use rust_cli_kernel_api::ids::{EnvironmentId, ShellTaskId};
 use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_machines::{Machine, MachineError, MachineState};
@@ -38,18 +37,12 @@ async fn output(machine: &MachineEnv, operation: &str, text: &str) -> String {
         root: EnvPath::new("/tmp"),
     };
     let start = StartCommand {
-        command: text.to_owned(),
-        cwd: EnvPath::new("/tmp"),
         timeout_ms: Some(30_000),
-        task: ShellTaskId::new(format!("t-{operation}")),
-        shell: Default::default(),
-        cwd_scope: CwdScope::Pinned,
-        background: None,
-        sandbox: None,
-        hook: None,
-        on_timeout: None,
-        socket: None,
-        env: Default::default(),
+        ..StartCommand::new(
+            text.to_owned(),
+            EnvPath::new("/tmp"),
+            ShellTaskId::new(format!("t-{operation}")),
+        )
     };
     let mut events = machine
         .commands()

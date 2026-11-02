@@ -1,20 +1,21 @@
 //! 后台通知的执行环境替身：测试推入终态通知，会话订阅、ack；`shell_state.background` 是推入后
 //! 还没有 ack 的任务（与 env-local 相同：ack 之前都算后台工作）。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::mpsc;
 
-use super::lock;
+use crate::controller_services::Fetch;
 use crate::env::{
     CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use crate::env_shell::{ShellNotice, ShellState};
 use crate::ids::{OperationId, SessionId, ShellTaskId};
-use crate::local_services::{Fetch, Git};
+use crate::machine::Git;
 use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
 
 pub struct NoticeEnvironment {
@@ -45,22 +46,22 @@ impl Default for NoticeEnvironment {
 impl NoticeEnvironment {
     /// 一条后台命令结束：记为未 ack，并送给订阅方。
     pub fn finish(&self, notice: ShellNotice) {
-        lock(&self.pushed).push(notice.clone());
+        self.pushed.lock_unpoisoned().push(notice.clone());
         let _ = self.sender.send(notice);
     }
 
     /// 一条后台命令在跑；第 `checks` 次 `shell_state` 报告它之后立即结束（模拟"刚查完就结束"的时序）。
     pub fn finish_after_checks(&self, notice: ShellNotice, checks: usize) {
-        lock(&self.running).push((notice, checks));
+        self.running.lock_unpoisoned().push((notice, checks));
     }
 
     pub fn acked(&self) -> Vec<u64> {
-        lock(&self.acked).clone()
+        self.acked.lock_unpoisoned().clone()
     }
 
     /// 收到的 `close_session`（会话与 `forget`），按顺序。
     pub fn closed(&self) -> Vec<(SessionId, bool)> {
-        lock(&self.closed).clone()
+        self.closed.lock_unpoisoned().clone()
     }
 }
 
@@ -137,7 +138,9 @@ impl Commands for NoticeEnvironment {
     }
 
     async fn close_session(&self, session: &SessionId, forget: bool) -> Result<(), EnvError> {
-        lock(&self.closed).push((session.clone(), forget));
+        self.closed
+            .lock_unpoisoned()
+            .push((session.clone(), forget));
         Ok(())
     }
 }
@@ -152,11 +155,11 @@ impl Shell for NoticeEnvironment {
         let acked = self.acked();
         let mut finished = Vec::new();
         let background = {
-            let mut running = lock(&self.running);
+            let mut running = self.running.lock_unpoisoned();
             let background = running
                 .iter()
                 .map(|(notice, _)| notice)
-                .chain(lock(&self.pushed).iter())
+                .chain(self.pushed.lock_unpoisoned().iter())
                 .filter(|notice| !acked.contains(&notice.seq))
                 .map(|notice| notice.task.clone())
                 .collect();
@@ -185,7 +188,7 @@ impl Shell for NoticeEnvironment {
         _session: &SessionId,
         _after: u64,
     ) -> BoxStream<'static, Result<ShellNotice, EnvError>> {
-        match lock(&self.receiver).take() {
+        match self.receiver.lock_unpoisoned().take() {
             Some(mut receiver) => stream::poll_fn(move |cx| receiver.poll_recv(cx))
                 .map(Ok)
                 .boxed(),
@@ -194,7 +197,7 @@ impl Shell for NoticeEnvironment {
     }
 
     async fn ack_shell_notice(&self, _session: &SessionId, seq: u64) -> Result<(), EnvError> {
-        lock(&self.acked).push(seq);
+        self.acked.lock_unpoisoned().push(seq);
         Ok(())
     }
 }

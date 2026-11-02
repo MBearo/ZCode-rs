@@ -6,7 +6,7 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use rust_cli_kernel_api::agents::AgentSignal;
 use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::testing::{NoticeEnvironment, shell_notice};
+use rust_cli_kernel_api::testing::{NoticeEnvironment, machine, shell_notice};
 use serde_json::json;
 
 use crate::test_support::{Gates, held_with_env, text};
@@ -17,7 +17,7 @@ const ROOT: &str = "sess_parent";
 async fn a_subagent_command_notice_goes_to_the_subagent_then_to_the_top_level() {
     let gates = Gates::default();
     let env = Arc::new(NoticeEnvironment::default());
-    let harness = held_with_env(&gates, false, env.clone());
+    let harness = held_with_env(&gates, false, machine(env.clone()));
     let signals = harness.agents.signals();
     let mut root = signals.signals(&SessionId::new(ROOT));
     let launched = harness

@@ -4,39 +4,26 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures_util::stream::{self, BoxStream, StreamExt};
 use rust_cli_kernel_api::env::{
-    CommandEvent, EnvError, EnvFacts, FileContent, OperationContext, ReadFile, StartCommand,
-    WorkspaceRef, WriteFile, WriteReceipt,
+    EnvError, FileContent, OperationContext, ReadFile, WorkspaceRef, WriteFile, WriteReceipt,
 };
 use rust_cli_kernel_api::env_files::{
     FileStat, GlobFiles, GlobMatches, GrepOutcome, GrepSearch, StatFile,
 };
-use rust_cli_kernel_api::ids::{OperationId, SessionId};
-use rust_cli_kernel_api::local_services::{Fetch, Git};
-use rust_cli_kernel_api::machine::{
-    Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell,
-};
-use rust_cli_kernel_api::testing::ScriptedInteractions;
+use rust_cli_kernel_api::machine::{Files, Search};
+use rust_cli_kernel_api::testing::{ScriptedInteractions, unsupported_machine};
 use rust_cli_kernel_api::tool::{Tool, ToolError};
 use serde_json::json;
 use tokio::sync::mpsc;
 
 use crate::test_more::Ctx;
 
-/// 遍历永远做不完的执行环境（很大的目录树）。
+/// 遍历永远做不完的文件与搜索端口（很大的目录树）。
 struct Endless;
 
 fn unused() -> EnvError {
     EnvError::Unsupported {
         what: "not used by this test".to_owned(),
-    }
-}
-
-#[async_trait]
-impl EnvInfo for Endless {
-    async fn facts(&self, _workspace: &WorkspaceRef) -> Result<EnvFacts, EnvError> {
-        Err(unused())
     }
 }
 
@@ -87,44 +74,14 @@ impl Search for Endless {
     }
 }
 
-#[async_trait]
-impl Commands for Endless {
-    async fn start_command(
-        &self,
-        _workspace: &WorkspaceRef,
-        _context: OperationContext,
-        _request: StartCommand,
-    ) -> Result<BoxStream<'static, Result<CommandEvent, EnvError>>, EnvError> {
-        Err(unused())
-    }
-
-    fn watch_command(
-        &self,
-        _operation: OperationId,
-        _cursor: u64,
-    ) -> BoxStream<'static, Result<CommandEvent, EnvError>> {
-        stream::iter([Err(unused())]).boxed()
-    }
-
-    async fn cancel(&self, _operation: OperationId) -> Result<(), EnvError> {
-        Err(unused())
-    }
-
-    async fn close_session(&self, _session: &SessionId, _forget: bool) -> Result<(), EnvError> {
-        Ok(())
-    }
-}
-
-impl Shell for Endless {}
-impl Background for Endless {}
-impl Checkpoints for Endless {}
-impl Pdf for Endless {}
-impl Git for Endless {}
-impl Fetch for Endless {}
-
 async fn cancelled(tool: Arc<dyn Tool>, input: serde_json::Value) -> Result<(), ToolError> {
     let mut ctx = Ctx::new(Arc::new(ScriptedInteractions::default()));
-    ctx.set_env(Arc::new(Endless));
+    let endless = Arc::new(Endless);
+    ctx.set_machine(
+        unsupported_machine()
+            .with_files(endless.clone())
+            .with_search(endless),
+    );
     let context = ctx.build();
     let cancel = context.cancel.clone();
     let (progress, _updates) = mpsc::channel(4);

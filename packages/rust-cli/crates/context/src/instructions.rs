@@ -3,8 +3,9 @@
 //! 加载结果按会话缓存（[`Memo`]）：规则文件在会话里缓存，压缩后重读。缓存只是
 //! 读取缓存；“宣布过什么”的唯一来源是历史里已落库的 `instructions`。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use rust_cli_kernel_api::ids::{MessageId, SessionId};
 use rust_cli_kernel_api::message::Message;
@@ -208,7 +209,7 @@ pub(crate) enum Lookup {
 
 impl Memo {
     pub(crate) fn lookup(&self, session: &SessionId, boundary: Option<&MessageId>) -> Lookup {
-        let entries = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let entries = self.0.lock_unpoisoned();
         match entries.get(session) {
             Some(entry) if entry.boundary.as_ref() == boundary => {
                 Lookup::Hit(entry.files.clone(), entry.reason)
@@ -230,18 +231,12 @@ impl Memo {
             files,
             reason,
         };
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(session, entry);
+        self.0.lock_unpoisoned().insert(session, entry);
     }
 
     /// 会话关闭：丢掉它的缓存（再打开时按 `session_start` 重读，同 `/clear` 与 resume）。
     pub(crate) fn forget(&self, session: &SessionId) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(session);
+        self.0.lock_unpoisoned().remove(session);
     }
 }
 

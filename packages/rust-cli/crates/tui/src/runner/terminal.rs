@@ -1,9 +1,10 @@
 //! 真实终端：进入 alternate screen、读 crossterm 的事件流、用 OSC 52 复制（F25 起按 tmux / screen 包一层）；退出、出错都恢复终端。外部编辑器
 //! 运行期间把终端交出去（tui-input.md §4.1）：先丢掉 crossterm 的事件流（它的读线程随之停下，按键留给编辑器），
 //! 再恢复终端；收回时反向进行，事件流在下一次读时重建。
+use rust_cli_base::sync::LockUnpoisoned;
 use std::io::Write;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use anyhow::{Result, bail};
@@ -31,7 +32,7 @@ struct GateState {
 
 impl Gate {
     fn lock(&self) -> std::sync::MutexGuard<'_, GateState> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_unpoisoned()
     }
 
     /// 同步丢掉事件流：之后编辑器启动，crossterm 不会再读走按键。
@@ -120,10 +121,7 @@ impl Screen for Stdout {
 pub async fn run(kernel: Arc<dyn Kernel>, options: Options) -> Result<super::Exit> {
     // 不在终端里（stdin 或 stdout 是管道、文件）时读不到按键、也画不了屏幕：立即失败，不进入界面。Git Bash 的 mintty
     // 同样失败（工作线 F71，tui-input.md §9.6）。
-    let preference = options
-        .services
-        .locale
-        .map(crate::services::UiLocale::as_str);
+    let preference = options.ui.locale.map(crate::services::UiLocale::as_str);
     let lang = crate::ui::i18n::resolve(preference, &options.vars);
     if let Some(refusal) = Console::current().refusal(crate::ui::i18n::strings(lang)) {
         bail!("{refusal}");

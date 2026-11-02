@@ -15,7 +15,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use rust_cli_base::{OwnedTask, units};
-use rust_cli_exec_server::{Begun, CallKey, CallKind, ExecLedger, LedgerError, MemoryLedger};
+use rust_cli_exec_server::{Begun, CallKey, ExecLedger, LedgerError, MemoryLedger};
+use rust_cli_exec_wire::op::OpKind;
 use rust_cli_kernel_api::clock::Clock;
 use tokio::sync::{mpsc, oneshot};
 
@@ -355,9 +356,9 @@ impl ExecLedger for FileLedger {
         &self,
         key: &CallKey,
         fingerprint: &str,
-        kind: CallKind,
+        kind: OpKind,
     ) -> Result<Begun, LedgerError> {
-        if kind != CallKind::Mutation {
+        if kind != OpKind::Mutation {
             return self.memory.begin(key, fingerprint, kind).await;
         }
         let (key, fingerprint) = (key.clone(), fingerprint.to_owned());

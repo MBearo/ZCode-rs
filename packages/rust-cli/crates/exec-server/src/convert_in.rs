@@ -5,11 +5,14 @@ use rust_cli_exec_wire::Body;
 use rust_cli_exec_wire::dto::command as wc;
 use rust_cli_exec_wire::dto::core as w;
 use rust_cli_exec_wire::dto::files as wf;
+use rust_cli_exec_wire::dto::git as wg;
+use rust_cli_exec_wire::dto::mcp as wm;
 use rust_cli_exec_wire::dto::rewind as wr;
 use rust_cli_exec_wire::dto::shell as ws;
 use rust_cli_exec_wire::envelope::WireError;
 use rust_cli_kernel_api::env::{
-    EnvPath, FileVersion, OperationContext, Origin, StartCommand, WorkspaceRef, WritePrecondition,
+    CommandKind, EnvPath, FileVersion, OperationContext, Origin, StartCommand, WorkspaceRef,
+    WritePrecondition,
 };
 use rust_cli_kernel_api::env_files::{GlobFiles, GrepMode, GrepSearch, PutFile, ReadText};
 use rust_cli_kernel_api::env_pdf::RenderPdfPages;
@@ -18,9 +21,11 @@ use rust_cli_kernel_api::env_shell::{
     BackgroundCommand, BackgroundKind, BackgroundTask, CwdScope, FilesystemPolicy, HookIo,
     MonitorSocket, NetworkPolicy, SandboxPolicy, ShellKind, TimeoutBackground,
 };
+use rust_cli_kernel_api::env_worktree::{WorktreeCreate, WorktreeInspect, WorktreeRemove};
 use rust_cli_kernel_api::ids::{
     EnvironmentId, Generation, OperationId, OwnerEpoch, RunId, SessionId, ShellTaskId, ToolUseId,
 };
+use rust_cli_kernel_api::mcp::McpTransportConfig;
 
 pub(crate) fn path(path: String) -> EnvPath {
     EnvPath::new(path)
@@ -144,17 +149,52 @@ fn sandbox(policy: wc::SandboxPolicy) -> SandboxPolicy {
     }
 }
 
+/// 线上的四个可选字段 → 命令的种类（F128，审查 K10）：只有四种组合合法（客户端的 `to_wire` 也只发这四种），别的组合是
+/// `bad_request`。
+fn command_kind(request: &mut wc::StartCommand, body: &Body) -> Result<CommandKind, WireError> {
+    let parts = (
+        request.background.take(),
+        request.hook.take(),
+        request.on_timeout.take(),
+        request.socket.take(),
+    );
+    Ok(match parts {
+        (None, None, on_timeout, None) => CommandKind::Foreground {
+            on_timeout: on_timeout.map(|moved| TimeoutBackground {
+                command: background_command(moved.command),
+                deadline_ms: moved.deadline_ms,
+            }),
+        },
+        (Some(background), None, None, None) => CommandKind::Background {
+            background: background_command(background),
+        },
+        (None, Some(hook), None, None) => CommandKind::Hook {
+            hook: HookIo {
+                stdin: body.text(&hook.stdin)?,
+                env: hook.env,
+            },
+        },
+        (Some(background), None, None, Some(socket)) => CommandKind::Socket {
+            background: background_command(background),
+            socket: MonitorSocket {
+                url: socket.url,
+                protocols: socket.protocols,
+            },
+        },
+        _ => {
+            return Err(WireError::BadRequest {
+                message: "a command is exactly one of foreground, background, hook or socket"
+                    .to_owned(),
+            });
+        }
+    })
+}
+
 pub(crate) fn start_command(
-    request: wc::StartCommand,
+    mut request: wc::StartCommand,
     body: &Body,
 ) -> Result<StartCommand, WireError> {
-    let hook = match request.hook {
-        Some(hook) => Some(HookIo {
-            stdin: body.text(&hook.stdin)?,
-            env: hook.env,
-        }),
-        None => None,
-    };
+    let kind = command_kind(&mut request, body)?;
     Ok(StartCommand {
         command: request.command,
         cwd: path(request.cwd),
@@ -170,18 +210,8 @@ pub(crate) fn start_command(
                 roots: roots.into_iter().map(path).collect(),
             },
         },
-        background: request.background.map(background_command),
         sandbox: request.sandbox.map(sandbox),
-        hook,
-        on_timeout: request.on_timeout.map(|moved| TimeoutBackground {
-            command: background_command(moved.command),
-            deadline_ms: moved.deadline_ms,
-        }),
-        socket: request.socket.map(|socket| MonitorSocket {
-            url: socket.url,
-            protocols: socket.protocols,
-        }),
-        env: Default::default(),
+        kind,
     })
 }
 
@@ -224,3 +254,47 @@ pub(crate) fn operation(operation: String) -> OperationId {
 pub(crate) fn session(session: String) -> SessionId {
     SessionId::new(session)
 }
+
+/// MCP 服务器的配置（原文，`${VAR}` 由执行器的 env-local 展开，§22.7）。
+pub(crate) fn mcp_transport(transport: wm::McpTransport) -> McpTransportConfig {
+    match transport {
+        wm::McpTransport::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        } => McpTransportConfig::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        },
+        wm::McpTransport::Sse { url, headers } => McpTransportConfig::Sse { url, headers },
+        wm::McpTransport::Http { url, headers } => McpTransportConfig::Http { url, headers },
+    }
+}
+
+pub(crate) fn worktree_create(request: wg::WorktreeCreate) -> WorktreeCreate {
+    WorktreeCreate {
+        cwd: path(request.cwd),
+        name: request.name,
+    }
+}
+
+pub(crate) fn worktree_inspect(request: wg::WorktreeInspect) -> WorktreeInspect {
+    WorktreeInspect {
+        path: path(request.path),
+        base: request.base,
+    }
+}
+
+pub(crate) fn worktree_remove(request: wg::WorktreeRemove) -> WorktreeRemove {
+    WorktreeRemove {
+        path: path(request.path),
+        branch: request.branch,
+    }
+}
+
+#[cfg(test)]
+#[path = "convert_in_tests.rs"]
+mod tests;

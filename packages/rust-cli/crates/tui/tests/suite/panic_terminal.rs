@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use futures_util::stream::BoxStream;
 use rust_cli_kernel_api::model::{ModelPort, ModelRequest};
 use rust_cli_kernel_api::testing::text_response;
-use rust_cli_tui::ui::terminal::enter;
+use rust_cli_tui::enter_terminal as enter;
 use tokio_util::sync::CancellationToken;
 
 use super::pty::{Pty, ROLE, interface, is_raw, shows};

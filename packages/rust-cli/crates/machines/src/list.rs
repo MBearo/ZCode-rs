@@ -10,8 +10,9 @@ use rust_cli_paths::StoragePath;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// 本机的名字：不能用作远端机器名。
-const LOCAL: &str = "local";
+/// 主 env 的名字与它以前的名字（kernel-api 的 `PRIMARY_MACHINE` 与 `LEGACY_PRIMARY_MACHINE`，deployment.md §23）：不能用作
+/// 额外机器的名字。
+const RESERVED: [&str; 2] = ["primary", "local"];
 /// 名字的长度上限。
 const MAX_NAME: usize = 32;
 /// 文件格式的版本。
@@ -33,7 +34,7 @@ pub enum MachinesError {
     #[error("{path} is not a valid machine list: {message}")]
     Invalid { path: String, message: String },
     #[error(
-        "invalid machine name {0:?}: use 1-32 letters, digits, '.', '_' or '-', and not \"local\""
+        "invalid machine name {0:?}: use 1-32 letters, digits, '.', '_' or '-', and not \"primary\" or \"local\""
     )]
     Name(String),
     #[error("a machine named {0:?} already exists")]
@@ -86,7 +87,7 @@ struct File {
 pub fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_NAME
-        && name != LOCAL
+        && !RESERVED.contains(&name)
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))

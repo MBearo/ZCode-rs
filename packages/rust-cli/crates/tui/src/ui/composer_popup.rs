@@ -119,11 +119,9 @@ impl Composer {
         let typed = self.area.text().trim_start_matches('/').trim().to_owned();
         // 完整输入了这个命令的别名（`/stats`、`/cost`）：保留别名。按输入的名字区分（`/stats` 开 Stats 标签页，
         // docs/specs/rust-cli/usage.md §5.1）；以前一律换成命令名，`/stats` 打开的是 Usage 标签页。
-        let name = if commands::aliases_of(&name).contains(&typed.as_str()) {
-            typed
-        } else {
-            name
-        };
+        let alias =
+            commands::find(&name).is_some_and(|command| command.aliases.contains(&typed.as_str()));
+        let name = if alias { typed } else { name };
         self.area.set_text(&format!("/{name} "));
         self.popup = None;
         Some(name)

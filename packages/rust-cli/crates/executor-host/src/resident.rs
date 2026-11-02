@@ -3,6 +3,7 @@
 //!
 //! 单实例锁是“有没有常驻进程”的唯一事实：socket 文件可能是上次崩溃留下的，只有拿到锁的进程才删它。
 
+use rust_cli_base::sync::LockUnpoisoned;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -22,7 +23,6 @@ use rust_cli_exec_wire::admin::{
 use rust_cli_exec_wire::frame::{Decoded, Frame, Kind, decode};
 use rust_cli_exec_wire::handshake::PROTOCOL;
 use rust_cli_kernel_api::clock::Clock;
-use rust_cli_kernel_api::machine::MachineEnv;
 use rust_cli_paths::ExecutorPaths;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -44,7 +44,7 @@ pub struct ResidentConfig {
     pub ledger_sweep: Duration,
     /// MCP 服务器的管道（R5，remote-exec.md §22.5）：env-local 的 `LocalMcpTransport`（打开 `${VAR}` 展开），与 Bash
     /// 同一份进程树账本与环境。
-    pub mcp: Arc<dyn rust_cli_kernel_api::mcp::McpTransport>,
+    pub mcp: Arc<rust_cli_env_local::LocalMcpTransport>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -79,9 +79,7 @@ impl Drop for Admission {
 
 impl Gate {
     fn lock(&self) -> std::sync::MutexGuard<'_, GateState> {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.state.lock_unpoisoned()
     }
 
     fn admit(self: &Arc<Self>) -> Option<Admission> {
@@ -187,8 +185,8 @@ impl Resident {
             .await
             .map_err(|e| failed("opening the ledger", &e))?,
         );
-        let machine = MachineEnv::new(env.clone(), config.mcp.clone());
-        let server = ExecServer::start(machine, ledger.clone(), Arc::new(AllowAll), server)
+        let served = crate::LocalLauncher::served(env.clone(), config.mcp.clone());
+        let server = ExecServer::start(served, ledger.clone(), Arc::new(AllowAll), server)
             .await
             .map_err(|e| failed("starting the executor", &e))?;
         // 拿着锁：路径上的旧文件只可能是上次留下的。

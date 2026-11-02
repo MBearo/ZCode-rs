@@ -43,17 +43,11 @@ pub fn observe(
     event: &'static str,
     write: impl FnOnce() -> Result<(), StoreError>,
 ) -> Result<(), StoreError> {
-    ctx.conn
-        .execute_batch("savepoint rust_cli_usage")
-        .storage()?;
+    usage::savepoint(ctx.conn).storage()?;
     let Err(error) = write() else {
-        return ctx.conn.execute_batch("release rust_cli_usage").storage();
+        return usage::release(ctx.conn).storage();
     };
-    if ctx
-        .conn
-        .execute_batch("rollback to rust_cli_usage; release rust_cli_usage")
-        .is_err()
-    {
+    if usage::roll_back(ctx.conn).is_err() {
         return Err(error);
     }
     tracing::warn!(event, session = %ctx.session, reason = %error, "the usage was not stored");
@@ -194,7 +188,7 @@ pub fn model_called(ctx: &Commit<'_>, call: &ModelCall) -> Result<(), StoreError
         span_id: None,
         assistant_message_id: stored.then(|| message.to_owned()),
         parent_user_message_id: turn.user.map(|(id, _)| id),
-        query_source: source,
+        query_source: source.to_owned(),
         provider_id: call.selection.provider.clone(),
         model_id: call.selection.model.clone(),
         variant: call.selection.reasoning.clone().filter(|v| !v.is_empty()),

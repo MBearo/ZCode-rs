@@ -15,10 +15,11 @@ use rust_cli_kernel_api::message::{ImageSource, ToolResultContent};
 use rust_cli_kernel_api::tool::{ToolError, ToolOutput, ToolUseContext, Validation};
 use serde_json::json;
 
-use crate::common::{env_failure, failed, format_bytes, missing_file, stat};
+use crate::common::{env_failure, format_bytes, missing_file, stat};
 use crate::read_support::image_type;
 use crate::web_fetch::SideModel;
 use crate::{base64, texts};
+use rust_cli_kernel_api::tool::failed;
 
 /// 一次最多取这么多页。
 const MAX_PAGES: u64 = 20;
@@ -121,9 +122,10 @@ async fn whole_allowed(context: &ToolUseContext, model: Option<&SideModel>) -> b
         return true;
     };
     let selection = context
-        .interactions
-        .current_selection(&context.session)
+        .session_ops
+        .view()
         .await
+        .and_then(|view| view.selection)
         .unwrap_or_else(|| side.selection.clone());
     side.model
         .capabilities(&selection)

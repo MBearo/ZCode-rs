@@ -1,20 +1,21 @@
 //! next 通道（L18，docs/specs/rust-cli/query.md §5）：插话输入与两种后台通知按到达顺序排在一起。
 //!
 //! 插话、后台命令通知与子代理通知都是优先级 `next`，工具边界按队列顺序取，回合
-//! 结束后也按这个顺序开回合；`Queue` 输入是 `later`，不进通道。通道只在 actor 里经 `&mut` 访问；输入的
-//! 正文仍在 `Actor::queue`（QueueChanged 的唯一来源），通道里只记它的命令 ID。
+//! 结束后也按这个顺序开回合；`Queue` 输入是 `later`，不进通道。通道与排队的输入是 actor 的 `Inbox`（inbox.rs）
+//! 的两个投影：一条输入只存一份。
 //!
 //! 修正（L18）：以前通知只在回合结束后各开一个回合（按缺省优先级 `later`
 //! 理解），排在全部排队输入之后；通知应是 `next`，在下一个工具边界并入。
 
 use rust_cli_kernel_api::agents::AgentNotice;
+use rust_cli_kernel_api::hooks::queued_command;
 use rust_cli_kernel_api::ids::CommandId;
 use rust_cli_kernel_api::machine_notices::MachineNotice;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
-use rust_cli_query::task_notification;
 
 use crate::actor::Actor;
-use crate::notices::NOTICE_SOURCE;
+use crate::inbox::{InputKind, Item, LaneItem, Queued, is_slash};
+use crate::notices::{NOTICE_SOURCE, task_notification};
 use crate::peers::{PEER_SOURCE, PeerItem};
 use crate::turn::TurnInput;
 
@@ -67,7 +68,7 @@ impl Waiting {
         matches!(self, Self::Peer(item) if item.passive())
     }
 
-    fn same(&self, other: &Self) -> bool {
+    pub(crate) fn same(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Shell(a), Self::Shell(b)) => {
                 a.machine == b.machine && a.notice.seq == b.notice.seq
@@ -82,19 +83,6 @@ impl Waiting {
     }
 }
 
-/// 通道里的一项。
-#[derive(Debug, Clone)]
-pub(crate) enum Lane {
-    /// 插话（或 SessionStart 给的首条输入）：正文在 `Actor::queue` 里。
-    Input(CommandId),
-    Notice(Waiting),
-}
-
-/// 斜杠命令：trim 之后以 `/` 开头（与插话的跳过规则相同，query.md §4）。
-fn is_slash(text: &str) -> bool {
-    text.trim().starts_with('/')
-}
-
 /// 消息里的通知全文：开回合的 meta user 消息，或工具边界并入的 `task-notification` attachment。
 fn notice_text(message: &Message) -> Option<&str> {
     match message {
@@ -105,8 +93,8 @@ fn notice_text(message: &Message) -> Option<&str> {
             }
         }
         Message::Attachment(attachment)
-            if attachment.source == "queued_command"
-                && attachment.data["commandMode"] == NOTICE_SOURCE =>
+            if attachment.source == queued_command::SOURCE
+                && attachment.data[queued_command::MODE_KEY] == NOTICE_SOURCE =>
         {
             Some(&attachment.text)
         }
@@ -122,17 +110,14 @@ impl Actor {
             .messages
             .iter()
             .any(|message| notice_text(message) == Some(text.as_str()));
-        let waiting = self
-            .lane
-            .iter()
-            .any(|item| matches!(item, Lane::Notice(queued) if queued.same(&notice)));
+        let waiting = self.inbox.has_notice(&notice);
         if seen || waiting {
             if !waiting {
                 self.ack_notice(&notice).await;
             }
             return false;
         }
-        self.lane.push_back(Lane::Notice(notice));
+        self.inbox.push_notice(notice);
         true
     }
 
@@ -146,19 +131,13 @@ impl Actor {
         }
     }
 
-    /// 工具边界并入的 `task-notification` 已提交：从通道去掉这条通知并 ack。
+    /// 工具边界并入的 `task-notification` 已提交：按交给主循环时给的消息 ID 从通道取走这条通知并 ack（工作线 F130：
+    /// 以前按 attachment 的文字与通知全文相等找回）。
     pub(crate) async fn notice_absorbed(&mut self, message: &Message) {
-        if !matches!(message, Message::Attachment(_)) {
-            return;
-        }
-        let Some(text) = notice_text(message) else {
+        let Message::Attachment(attachment) = message else {
             return;
         };
-        let at = self
-            .lane
-            .iter()
-            .position(|item| matches!(item, Lane::Notice(notice) if notice.text() == text));
-        if let Some(Lane::Notice(notice)) = at.and_then(|at| self.lane.remove(at)) {
+        if let Some(notice) = self.inbox.take_absorbed(&attachment.id) {
             self.ack_notice(&notice).await;
         }
     }
@@ -183,34 +162,11 @@ impl Actor {
             return Vec::new();
         }
         let mut more = Vec::new();
-        loop {
-            let command = match self.lane.front() {
-                Some(Lane::Input(command)) => command.clone(),
-                Some(Lane::Notice(_)) => break,
-                // 通道空了：队列头（通道里的插话都已取走，剩下的是 `Queue` 输入）。
-                None => match self.queue.front() {
-                    Some(input) => input.command.clone(),
-                    None => break,
-                },
-            };
-            let Some(input) = self
-                .queue
-                .iter()
-                .find(|input| input.command == command)
-                .cloned()
-            else {
-                break;
-            };
-            let plain = !self.queued_kinds.contains_key(&command)
-                && !is_slash(&input.text)
-                && !input.text.contains('@');
-            if !plain {
-                break;
-            }
-            self.remove_input(&command);
+        while let Some(queued) = self.inbox.take_batched() {
+            let text = queued.input.text.clone();
             more.push(crate::turn::MorePrompt {
-                screened: self.screened.remove(&command).flatten(),
-                text: input.text,
+                screened: queued.screened(),
+                text,
             });
         }
         if !more.is_empty() {
@@ -219,102 +175,62 @@ impl Actor {
         more
     }
 
-    /// 从队列与通道去掉一条输入。
-    pub(crate) fn remove_input(&mut self, command: &CommandId) {
-        self.queue.retain(|input| input.command != *command);
-        self.lane
-            .retain(|item| !matches!(item, Lane::Input(queued) if queued == command));
-    }
-
     /// 回合结束后的下一项（query.md §5）：通道头是输入就是它；是通知就取走头部连续的通知，合成一个
     /// 回合（通知合并）；通道空时是 `Queue` 输入（优先级 `later`）。定时任务由调用方最后看。
     pub(crate) fn next_turn_input(&mut self) -> Option<TurnInput> {
-        loop {
-            // 只在工具边界并入的项（`-p` 的回执）不开回合：留在通道里，看后面的项。
-            let front = self
-                .lane
-                .iter()
-                .position(|item| !matches!(item, Lane::Notice(notice) if notice.passive()));
-            if let Some(at) = front
-                && at > 0
-            {
-                let skipped: Vec<Lane> = self.lane.drain(..at).collect();
-                let next = self.next_turn_input();
-                for item in skipped.into_iter().rev() {
-                    self.lane.push_front(item);
-                }
-                return next;
+        // 只在工具边界并入的项（`-p` 的回执）不开回合：留在通道里，看后面的项。
+        let passive = self.inbox.take_passive_prefix();
+        let next = self.next_active_input();
+        self.inbox.restore_front(passive);
+        next
+    }
+
+    /// 通道头不是只在工具边界并入的项时的下一项。
+    fn next_active_input(&mut self) -> Option<TurnInput> {
+        match self.inbox.lane_front() {
+            Some(LaneItem::Input(_)) => {
+                let Some(Item::Input(queued)) = self.inbox.pop_lane_front() else {
+                    return None;
+                };
+                self.emit_queue();
+                Some(self.human_turn(queued))
             }
-            if front.is_none() && !self.lane.is_empty() {
-                // 通道里只剩不开回合的项：照常看 `Queue` 输入。
-                let kept: Vec<Lane> = self.lane.drain(..).collect();
-                let next = self.next_turn_input();
-                for item in kept.into_iter().rev() {
-                    self.lane.push_front(item);
-                }
-                return next;
-            }
-            match self.lane.front() {
-                Some(Lane::Input(command)) => {
-                    let command = command.clone();
-                    let input = self
-                        .queue
-                        .iter()
-                        .find(|input| input.command == command)
-                        .cloned();
-                    self.remove_input(&command);
-                    self.emit_queue();
-                    // 通道里的输入总在队列里（两处同时增删）；万一不在就看下一项。
-                    let Some(input) = input else { continue };
-                    let screened = self.screened.remove(&input.command).flatten();
-                    let more = self.take_batch(&input.command, &input.text);
-                    return Some(TurnInput::Human {
-                        screened,
-                        command: input.command,
-                        text: input.text,
-                        more,
-                    });
-                }
-                Some(Lane::Notice(_)) => {
-                    let mut notices = Vec::new();
-                    while let Some(Lane::Notice(notice)) = self.lane.front() {
-                        if notice.passive() {
-                            break;
-                        }
-                        if let Some(Lane::Notice(notice)) = self.lane.pop_front() {
-                            notices.push(notice);
-                        }
+            Some(LaneItem::Notice(_)) => {
+                let mut notices = Vec::new();
+                while let Some(LaneItem::Notice(notice)) = self.inbox.lane_front() {
+                    if notice.waiting.passive() {
+                        break;
                     }
-                    return Some(TurnInput::Notices(notices));
-                }
-                None => {
-                    let next = self.queue.pop_front()?;
-                    self.emit_queue();
-                    match self.queued_kinds.remove(&next.command) {
-                        Some(crate::bash::QueuedKind::Bash(line)) => {
-                            return Some(TurnInput::Bash {
-                                command: next.command,
-                                line,
-                            });
-                        }
-                        Some(crate::bash::QueuedKind::Content(content)) => {
-                            return Some(TurnInput::Content {
-                                command: next.command,
-                                content,
-                            });
-                        }
-                        None => {}
+                    if let Some(Item::Notice(notice)) = self.inbox.pop_lane_front() {
+                        notices.push(notice.waiting);
                     }
-                    let screened = self.screened.remove(&next.command).flatten();
-                    let more = self.take_batch(&next.command, &next.text);
-                    return Some(TurnInput::Human {
-                        screened,
-                        command: next.command,
-                        text: next.text,
-                        more,
-                    });
+                }
+                Some(TurnInput::Notices(notices))
+            }
+            None => {
+                let next = self.inbox.pop_later()?;
+                self.emit_queue();
+                let command = next.input.command.clone();
+                match next.kind {
+                    InputKind::Bash(line) => Some(TurnInput::Bash { command, line }),
+                    InputKind::Content(content) => Some(TurnInput::Content { command, content }),
+                    InputKind::Text => Some(self.human_turn(next)),
                 }
             }
+        }
+    }
+
+    /// 一条文字输入开的回合，连同与它成批的后续输入。
+    fn human_turn(&mut self, queued: Queued) -> TurnInput {
+        let command = queued.input.command.clone();
+        let text = queued.input.text.clone();
+        let screened = queued.screened();
+        let more = self.take_batch(&command, &text);
+        TurnInput::Human {
+            screened,
+            command,
+            text,
+            more,
         }
     }
 }

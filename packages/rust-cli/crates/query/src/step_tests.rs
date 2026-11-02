@@ -12,7 +12,7 @@ use rust_cli_kernel_api::mcp_state::McpView;
 use rust_cli_kernel_api::message::{AttachmentMessage, Message};
 use rust_cli_kernel_api::model::{ModelRequest, ModelSelection, QuerySource, SystemBlock};
 use rust_cli_kernel_api::orchestration::{
-    BuiltContext, ContextBuilder, ContextRequest, OrchestrationError, ToolRegistry,
+    BuiltContext, ContextBuilder, ContextRequest, OrchestrationError,
 };
 use rust_cli_kernel_api::testing::{FakeTool, ScriptedModel, text_response, tool_use_response};
 use rust_cli_kernel_api::tool::Tool;
@@ -39,7 +39,6 @@ impl ContextBuilder for Recording {
                 text: "system".to_owned(),
                 cache_control: None,
             }],
-            user_context: Vec::new(),
             attachments: Vec::new(),
         })
     }
@@ -63,7 +62,7 @@ struct Growing {
     reads: AtomicUsize,
 }
 
-impl ToolRegistry for Growing {
+impl rust_cli_kernel_api::testing::RegistryOverride for Growing {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
         let reads = self.reads.fetch_add(1, Ordering::SeqCst);
         let mut tools = vec![self.base.clone()];
@@ -147,12 +146,7 @@ async fn run_with(
     parts.context = context.clone();
     parts.tools = registry;
     let mut request = request("go");
-    request.selection = ModelSelection {
-        provider: "anthropic".to_owned(),
-        model: model.to_owned(),
-        reasoning: None,
-        connection: None,
-    };
+    request.selection = ModelSelection::new("anthropic".to_owned(), model.to_owned());
     request.source = source;
     let (scope, _) = scope(parts, &request, Abort::new());
     crate::run::run(scope, request).await.unwrap();

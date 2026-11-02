@@ -22,10 +22,10 @@ mod machines;
 mod mcp_support_tests;
 mod mcp_wait;
 mod normalize;
-mod notification;
 mod output_budget;
 mod pairing;
 mod recovery;
+mod request;
 mod respond;
 mod run;
 mod step;
@@ -34,9 +34,6 @@ mod texts;
 
 pub use deferred::step_tool_search;
 pub use limits::{RequestLimits, ThinkingTokens};
-pub use notification::{
-    monitor_envelope, monitor_notice_text, task_envelope, task_notification, task_status,
-};
 
 /// `/context` 的消息估算（docs/specs/rust-cli/context-usage.md §3 i）：与主循环相同的规范化（对话中间的
 /// system 消息按生效配置保留或降级，`configured` 答不出时按模型卡片，model.md §11），不带每轮 effort。
@@ -62,18 +59,16 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
 use rust_cli_kernel_api::clock::Ids;
+use rust_cli_kernel_api::env::Operations;
 use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
-use rust_cli_kernel_api::ids::{AgentId, Generation, RunId, SessionId};
-use rust_cli_kernel_api::local_services::LocalServices;
-use rust_cli_kernel_api::machine::MachineEnv;
+use rust_cli_kernel_api::ids::{AgentId, RunId, SessionId};
 use rust_cli_kernel_api::model::ModelPort;
 use rust_cli_kernel_api::orchestration::{
     Compactor, ContextBuilder, HookRunner, QueryError, QueryRequest, QueryRunner, QueryStop,
-    RunSink, ToolExecutor, ToolRegistry,
+    RunSink, RunView, ToolExecutor, ToolRegistry,
 };
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::plan::PlanModeFlags;
 use rust_cli_kernel_api::store::ArtifactStore;
 
 /// 主循环用到的能力，由 runtime 注入。
@@ -88,16 +83,13 @@ pub struct QueryParts {
     pub ids: Arc<dyn Ids>,
     /// 模型请求与工具调用的计时（docs/specs/rust-cli/usage.md §1）：计时只在这里读时钟。
     pub clock: Arc<dyn rust_cli_kernel_api::clock::Clock>,
-    /// 工具调用执行所在的机器（R0 只有本机；R3 起按调用的 `machine` 换，remote-exec.md §15.8.1）。
-    pub machine: MachineEnv,
-    /// 执行环境的注册表（R3，remote-exec.md §20.5、§20.6）：连上的远端机器决定工具定义里的 `machine` 参数；子代理的
-    /// 缺省机器从这里取。
+    /// 执行环境的注册表（R3，remote-exec.md §20.5、§20.6）：工具调用缺省在它的主 env 上执行（按调用的 `machine` 换，
+    /// §15.8.1），controller 的服务（WebFetch）也从它取；连上的远端机器决定工具定义里的 `machine` 参数；子代理的缺省机器
+    /// 从这里取。工作线 F131：以前另存一份主 env 与 controller 的服务，与注册表给的是同一份。
     pub machines: Arc<dyn EnvironmentRegistry>,
-    /// 只在本机的服务（Git、worktree、WebFetch）。
-    pub local: LocalServices,
     pub artifacts: Arc<dyn ArtifactStore>,
-    /// 执行环境的当前实例（本地是进程 uuid）。
-    pub generation: Generation,
+    /// 操作上下文的工厂：执行环境的当前实例（本地是进程 uuid）与 `ids`（F134：以前另带一个 `generation`）。
+    pub operations: Operations,
     /// 非交互会话（`-p`）：主线程的断流续写只在这时进行。
     pub non_interactive: bool,
     /// 入口按环境变量给的输出上限与 thinking 开关（query.md §1.5，修复线 F42）。
@@ -111,6 +103,8 @@ pub(crate) struct RunScope {
     pub(crate) workspace: WorkspaceRef,
     pub(crate) agent: Option<AgentId>,
     pub(crate) mode: PermissionMode,
+    /// 这次运行的缺省机器（主 env 或子代理派生时的机器；R3，remote-exec.md §20.6）：取自请求，一次运行里不变。
+    pub(crate) default_machine: rust_cli_kernel_api::ids::MachineName,
     pub(crate) abort: Abort,
     pub(crate) sink: Arc<dyn RunSink>,
     pub(crate) parts: QueryParts,
@@ -119,28 +113,35 @@ pub(crate) struct RunScope {
 }
 
 impl RunScope {
-    /// 会话现在的权限模式：会话 actor 是唯一 owner，工具（EnterPlanMode / ExitPlanMode）改过后同一回合
-    /// 立即生效；输出端不持有模式时用请求里的值（docs/specs/rust-cli/tools-more.md §2.3）。
-    pub(crate) async fn current_mode(&self) -> PermissionMode {
-        self.sink.current_mode().await.unwrap_or(self.mode)
+    /// 一次运行的上下文：会话、运行、工作区、子代理、模式与缺省机器取自请求。
+    pub(crate) fn new(
+        request: &QueryRequest,
+        sink: Arc<dyn RunSink>,
+        parts: QueryParts,
+        abort: Abort,
+    ) -> Self {
+        Self {
+            session: request.session.clone(),
+            run: request.run.clone(),
+            workspace: request.workspace.clone(),
+            agent: request.agent.clone(),
+            mode: request.mode,
+            default_machine: request.default_machine.clone(),
+            abort,
+            sink,
+            parts,
+            exhausted: Default::default(),
+        }
     }
 
-    /// 组装上下文用的模式与计划模式的会话标志：一次取回 actor 的同一个快照；输出端不持有时用请求里的
-    /// 模式与默认标志（docs/specs/rust-cli/context.md §13.4）。
-    pub(crate) async fn current_mode_and_plan_flags(&self) -> (PermissionMode, PlanModeFlags) {
+    /// 会话现在的状态：输出端的一次读取（同一时刻的值，工作线 F134）。会话 actor 是唯一 owner，工具改过的模式与工作目录
+    /// 在同一回合里立即生效（docs/specs/rust-cli/tools-more.md §2.3、§11.4）；输出端不持有会话的状态时用请求里的模式与
+    /// 工作区、缺省的计划模式标志，没有主模型与目标（context.md §13.4）。
+    pub(crate) async fn view(&self) -> RunView {
         self.sink
-            .current_mode_and_plan_flags()
+            .view()
             .await
-            .unwrap_or((self.mode, PlanModeFlags::default()))
-    }
-
-    /// 会话现在的工作目录：EnterWorktree / ExitWorktree 改过后同一回合立即生效；输出端不持有时用
-    /// 请求里的值（docs/specs/rust-cli/tools-more.md §11.4）。
-    pub(crate) async fn current_workspace(&self) -> WorkspaceRef {
-        self.sink
-            .current_workspace()
-            .await
-            .unwrap_or_else(|| self.workspace.clone())
+            .unwrap_or_else(|| RunView::new(self.mode, self.workspace.clone()))
     }
 }
 
@@ -166,17 +167,7 @@ impl QueryRunner for QueryLoop {
         sink: Arc<dyn RunSink>,
         abort: Abort,
     ) -> Result<QueryStop, QueryError> {
-        let scope = Arc::new(RunScope {
-            session: request.session.clone(),
-            run: request.run.clone(),
-            workspace: request.workspace.clone(),
-            agent: request.agent.clone(),
-            mode: request.mode,
-            abort,
-            sink,
-            parts: self.parts.clone(),
-            exhausted: Default::default(),
-        });
+        let scope = Arc::new(RunScope::new(&request, sink, self.parts.clone(), abort));
         run::run(scope, request).await
     }
 }

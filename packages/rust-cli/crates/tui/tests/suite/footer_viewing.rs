@@ -3,7 +3,6 @@
 //! TPS、ctx 与 cache，左侧不写 `esc to interrupt`；esc 回到主会话后 footer 与查看前相同。替身模型不在模型卡片里：
 //! 有效窗口 180,000（同 footer_stats.rs）。
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crossterm::event::KeyCode;
@@ -13,27 +12,7 @@ use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
 use rust_cli_kernel_api::testing::text_response;
 use serde_json::json;
 
-use super::support::{GatedModel, Item, Setup, finish, send, with_ui};
-
-/// 测试拨动的内核时钟（请求的开始、首个内容与结束各读一次）。
-#[derive(Default)]
-struct ManualClock(AtomicU64);
-
-impl ManualClock {
-    fn set(&self, ms: u64) {
-        self.0.store(ms, Ordering::SeqCst);
-    }
-}
-
-impl rust_cli_kernel_api::clock::Clock for ManualClock {
-    fn now_ms(&self) -> u64 {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    fn time_zone(&self) -> String {
-        "UTC".to_owned()
-    }
-}
+use super::support::{GatedModel, Item, ManualClock, Setup, finish, send, with_ui};
 
 fn usage(input: u64, read: u64, output: u64) -> Usage {
     Usage {

@@ -13,12 +13,11 @@ use serde_json::Value;
 
 use crate::branch::{Branch, active_messages, earlier_messages};
 use crate::facts::{live_session, unsupported};
+use crate::keys;
 use crate::mode;
-use crate::records;
 use crate::repo::messages;
 use crate::repo::sessions::{self, SessionRow};
-use crate::rust_entries;
-use crate::state::{self, PERMISSION_MODE_ENTRY};
+use crate::state;
 use crate::{LOCAL_ENVIRONMENT, OrStorage};
 
 /// 冷读取的会话；`checkpoints` 留空，由调用方按 [`crate::rewind::Active`] 补出（Node 写的要读产物目录，不在
@@ -54,7 +53,6 @@ pub fn load(
         mode: execution.map(|state| state.mode),
         plan: execution.is_some_and(|state| state.plan),
         meta: meta(&row),
-        pending_interactions: rust_entries::pending_interactions(conn, session.as_str())?,
         checkpoints: Vec::new(),
         turn: turn.clone(),
         // 续写时补 assistant 的判断（session-lifecycle.md §6.3.1）：当前轮的 `turn_usage` 是错误。
@@ -114,12 +112,10 @@ fn meta(row: &SessionRow) -> SessionMeta {
 fn kernel_selection(selection: &Value) -> ModelSelection {
     let text = |value: &Value| value.as_str().unwrap_or("").to_owned();
     ModelSelection {
-        provider: text(&selection["providerId"]),
-        model: text(&selection["modelId"]),
         reasoning: selection["options"]["reasoningLevel"]
             .as_str()
             .map(str::to_owned),
-        connection: None,
+        ..ModelSelection::new(text(&selection["providerId"]), text(&selection["modelId"]))
     }
 }
 
@@ -131,7 +127,8 @@ fn with_connection(
     mut selection: ModelSelection,
 ) -> Result<ModelSelection, StoreError> {
     let Some(data) =
-        state::last_entry(conn, session.as_str(), records::MODEL_CONNECTION_ENTRY).storage()?
+        state::last_entry(conn, session.as_str(), &keys::named(keys::MODEL_CONNECTION))
+            .storage()?
     else {
         return Ok(selection);
     };
@@ -163,7 +160,7 @@ fn execution_state(
     let Some(execution) = state::execution(conn, row).storage()? else {
         return Ok(None);
     };
-    let named = state::last_entry(conn, &row.id, PERMISSION_MODE_ENTRY)
+    let named = state::last_entry(conn, &row.id, &keys::named(keys::PERMISSION_MODE))
         .storage()?
         .and_then(|data| data["mode"].as_str().and_then(mode::from_entry_name));
     Ok(Some(mode::read(&execution, named)))

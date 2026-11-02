@@ -1,2 +1,2 @@
-No remote machines are connected now, including the default machine "{{name}}": tools that run on it fail until it is connected again.
+No machines are connected now besides the primary machine, so the default machine "{{name}}" is not connected either: tools that run on it fail until it is connected again.
 {{lines}}

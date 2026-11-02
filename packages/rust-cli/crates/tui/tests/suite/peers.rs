@@ -1,6 +1,7 @@
 //! 跨会话（docs/specs/rust-cli/cross-session.md §2.6）：扣住的同伴消息的批准框（中英文）、批准后的 `@ 名字 ›` 行与
 //! 回执、拒绝；深浅主题下名字的颜色。端口是测试替身：入站经通道推入，回执记下来；会话 actor 与界面都是真的。
-use std::sync::{Arc, Mutex, PoisonError};
+use rust_cli_base::sync::LockUnpoisoned;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use crossterm::event::KeyCode;
@@ -12,7 +13,7 @@ use rust_cli_kernel_api::peers::{
     PeerRecord, PeerSendError, PeerSignal, PeerStatus, ReceiptStatus, envelope,
 };
 use rust_cli_kernel_api::testing::text_response;
-use rust_cli_tui::ui::palette::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Palette};
 use tokio::sync::mpsc;
 
 use super::support::{GatedModel, Setup, with_ui};
@@ -21,10 +22,6 @@ struct FakePort {
     inbound: Mutex<Option<mpsc::UnboundedReceiver<PeerSignal>>>,
     sender: mpsc::UnboundedSender<PeerSignal>,
     receipts: Mutex<Vec<ReceiptStatus>>,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl FakePort {
@@ -70,12 +67,12 @@ impl PeerMessaging for FakePort {
         Ok(())
     }
     async fn receipt(&self, _to: PeerAddress, _msg_id: String, status: ReceiptStatus) {
-        lock(&self.receipts).push(status);
+        self.receipts.lock_unpoisoned().push(status);
     }
     async fn bind(&self, _session: &SessionId) {}
     async fn unbind(&self, _session: &SessionId) {}
     fn signals(&self, _session: &SessionId) -> BoxStream<'static, PeerSignal> {
-        match lock(&self.inbound).take() {
+        match self.inbound.lock_unpoisoned().take() {
             Some(receiver) => Box::pin(futures_util::stream::unfold(
                 receiver,
                 |mut receiver| async move { receiver.recv().await.map(|signal| (signal, receiver)) },
@@ -172,7 +169,7 @@ async fn a_held_message_asks_for_approval_and_is_delivered() {
     )
     .await;
     assert_eq!(
-        *lock(&port.receipts),
+        *port.receipts.lock_unpoisoned(),
         [ReceiptStatus::Held, ReceiptStatus::Delivered]
     );
     // 投递的消息开了第二个回合：模型看到空闲的写法。
@@ -242,7 +239,7 @@ async fn the_chinese_dialog_denies_with_escape() {
     )
     .await;
     assert_eq!(
-        *lock(&port.receipts),
+        *port.receipts.lock_unpoisoned(),
         [ReceiptStatus::Held, ReceiptStatus::Denied]
     );
 }

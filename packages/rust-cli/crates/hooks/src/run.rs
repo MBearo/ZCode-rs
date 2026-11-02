@@ -6,11 +6,12 @@ use std::sync::Arc;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::env::{OperationContext, Origin, WorkspaceRef};
+use rust_cli_kernel_api::env::{OperationContext, Operations, Origin, WorkspaceRef};
 use rust_cli_kernel_api::hooks::{HookContext, HookEventName, HookHttp};
-use rust_cli_kernel_api::ids::{Generation, OwnerEpoch, SessionId};
+use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::machine::{Commands, Shell};
 use rust_cli_kernel_api::model::{ModelPort, ModelSelection, small_fast_model};
+use rust_cli_kernel_api::side_request::Requester;
 use rust_cli_kernel_api::store::ArtifactStore;
 use tokio_util::sync::CancellationToken;
 
@@ -32,8 +33,8 @@ pub struct HookPorts {
     pub model: Option<Arc<dyn ModelPort>>,
     /// http hook 的出口；没有时 http hook 报非阻塞错误。
     pub http: Option<Arc<dyn HookHttp>>,
-    /// 执行环境的当前实例（命令 hook 的操作上下文）。
-    pub generation: Generation,
+    /// 命令 hook 的操作上下文的工厂（执行环境的当前实例 + `ids`，F134：以前另带一个 `generation`）。
+    pub operations: Operations,
     /// 超过 10000 字符的 hook 输出落在这里（与工具结果同一个存储，hooks.md §4.5）。
     pub artifacts: Arc<dyn ArtifactStore>,
 }
@@ -64,12 +65,9 @@ pub(crate) fn timeout_ms(hook: &HookCommand, default: u64) -> u64 {
 }
 
 fn operation(ports: &HookPorts, batch: &Batch<'_>) -> OperationContext {
-    OperationContext {
-        environment: batch.workspace.environment.clone(),
-        generation: ports.generation.clone(),
-        owner_epoch: OwnerEpoch::LOCAL,
-        operation: ports.ids.operation(),
-        origin: match &batch.context.run {
+    ports.operations.next(
+        batch.workspace.environment.clone(),
+        match &batch.context.run {
             Some(run) => Origin::Agent {
                 session: batch.session.clone(),
                 run: run.clone(),
@@ -78,7 +76,7 @@ fn operation(ports: &HookPorts, batch: &Batch<'_>) -> OperationContext {
                 session: Some(batch.session.clone()),
             },
         },
-    }
+    )
 }
 
 async fn execute(
@@ -122,10 +120,10 @@ async fn execute(
                 .or_else(|| batch.prompt_model.cloned());
             let run = PromptRun {
                 model: ports.model.as_deref(),
-                requester: prompt::Requester {
-                    session: batch.session,
-                    run: batch.context.run.as_ref(),
-                    agent: batch.context.agent.as_ref(),
+                requester: Requester {
+                    session: batch.session.clone(),
+                    run: batch.context.run.clone(),
+                    agent: batch.context.agent.clone(),
                 },
                 default_model: default_model.as_ref(),
                 hook,
