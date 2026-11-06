@@ -4,7 +4,7 @@
     "os": "darwin",
     "cpu": "arm64",
     "target": "aarch64-apple-darwin",
-    "runner": "macos-14"
+    "runner": "macos-26"
   },
   {
     "id": "linux-x64-gnu",
